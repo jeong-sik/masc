@@ -1219,7 +1219,7 @@ let run_turn
                     let state_snapshot_sidecar_path =
                       Filename.concat
                         (Filename.concat session.session_dir "state-snapshots")
-                        (Printf.sprintf "turn-%06d.json" result.turns)
+                        (Printf.sprintf "turn-%06d.json" manifest_keeper_turn_id)
                     in
                     let latest_state_snapshot_sidecar_path =
                       Filename.concat session.session_dir "state-snapshot.latest.json"
@@ -1233,6 +1233,7 @@ let run_turn
                           ("agent_name", `String meta.agent_name);
                           ("trace_id", `String trace_id);
                           ("generation", `Int generation);
+                          ("keeper_turn_id", `Int manifest_keeper_turn_id);
                           ("oas_turn_count", `Int result.turns);
                           ( "state_snapshot",
                             Keeper_memory_policy.keeper_state_snapshot_to_json
@@ -1492,7 +1493,7 @@ let run_turn
                               config
                               meta
                               ~snapshot:state_snapshot
-                              ~turn:result.turns
+                              ~turn:manifest_keeper_turn_id
                               ~reply:response_text
                               ()
                           in
@@ -1506,7 +1507,7 @@ let run_turn
                               Keeper_memory_bank.append_memory_notes_from_tool_results
                                 config
                                 meta
-                                ~turn:result.turns
+                                ~turn:manifest_keeper_turn_id
                                 ~results:tool_results)
                             else 0
                           in
@@ -1542,7 +1543,8 @@ let run_turn
                          ~config
                          ~keeper_name:meta.name
                          ~memory
-                         ~turn:result.turns
+                         ~turn:manifest_keeper_turn_id
+                         ~oas_turn_count:result.turns
                          ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                          ~snapshot:state_snapshot
                          ();
@@ -1628,7 +1630,8 @@ let run_turn
                               ([ "ts_unix", `Float (Time_compat.now ())
                                ; "event", `String "post_turn_eval"
                                ; "keeper_name", `String meta.name
-                               ; "turn", `Int result.turns
+                               ; "turn", `Int manifest_keeper_turn_id
+                               ; "oas_turn_count", `Int result.turns
                                ; "goal_alignment", `Float goal_score
                                ; ( "tools_used_count"
                                  , `Int (List.length actual_keeper_tool_names) )
@@ -1721,16 +1724,13 @@ let run_turn
 	       (match turn_result with
 	        | Ok _ -> ()
 	        | Error err ->
-          let turn =
-            match !receipt_turn_count_ref with
-            | Some turns -> turns
-            | None -> start_turn_count + 1
-          in
+          let oas_turn_count = !receipt_turn_count_ref in
           Keeper_agent_memory_episode.record_failure
             ~config
             ~keeper_name:meta.name
             ~memory
-            ~turn
+            ~turn:manifest_keeper_turn_id
+            ?oas_turn_count
             ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
             ~error_kind:(Memory_oas_bridge.error_kind_of_string (sdk_error_kind err))
             ~error_message:(Agent_sdk.Error.to_string err)

@@ -61,14 +61,16 @@ val store_episode_from_snapshot :
   memory:Agent_sdk.Memory.t ->
   keeper_name:string ->
   turn:int ->
+  ?oas_turn_count:int ->
   trace_id:string ->
   Keeper_memory_policy.keeper_state_snapshot ->
   unit
 (** Captures a successful keeper turn into the OAS memory
     store: serialises the [goal] / [progress] /
     [done_summary] tuple from the snapshot, attaches
-    [keeper_name] / [turn] / [trace_id] metadata, and
-    writes via [Agent_sdk.Memory.store_episode]. *)
+    [keeper_name] / keeper [turn] / [trace_id] metadata, optionally
+    preserves the per-call OAS turn count, and writes via
+    [Agent_sdk.Memory.store_episode]. *)
 
 (** Typed wrapper for failed-turn error-kind labels. JSON/status/metric
     surfaces continue to render the stable string label. *)
@@ -81,6 +83,7 @@ val store_failed_turn_episode :
   memory:Agent_sdk.Memory.t ->
   keeper_name:string ->
   turn:int ->
+  ?oas_turn_count:int ->
   trace_id:string ->
   error_kind:error_kind ->
   error_message:string ->

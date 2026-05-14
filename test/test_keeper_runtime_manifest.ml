@@ -1361,6 +1361,19 @@ let test_successful_provider_turn_links_runtime_artifacts () =
             "state sidecar exists"
             true
             (Sys.file_exists state_path);
+          Alcotest.(check string)
+            "state sidecar uses keeper turn filename"
+            (Printf.sprintf "turn-%06d.json" keeper_turn_id)
+            (Filename.basename state_path);
+          let state_json = Yojson.Safe.from_file state_path in
+          Alcotest.(check int)
+            "state sidecar keeper turn id"
+            keeper_turn_id
+            (json_int_member "keeper_turn_id" state_json);
+          Alcotest.(check int)
+            "state sidecar OAS turn count"
+            result.turn_count
+            (json_int_member "oas_turn_count" state_json);
           Alcotest.(check bool)
             "latest state sidecar exists"
             true
@@ -1698,6 +1711,7 @@ let test_state_sidecar_hydrates_checkpoint_continuity () =
             ("agent_name", `String "runtime-manifest-sidecar-agent");
             ("trace_id", `String trace_id);
             ("generation", `Int 1);
+            ("keeper_turn_id", `Int 8);
             ("oas_turn_count", `Int 1);
             ("state_snapshot", KMP.keeper_state_snapshot_to_json snapshot);
           ]

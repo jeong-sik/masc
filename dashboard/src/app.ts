@@ -41,7 +41,11 @@ import { ConfirmDialogOverlay } from './components/common/confirm-dialog'
 import { startErrorCleanup, stopErrorCleanup } from './components/common/error-notification-state'
 import { DashboardStatusTray } from './components/status-tray'
 import { DashboardFocusModeToggle, dashboardFocusMode } from './components/focus-mode-toggle'
-import { DASHBOARD_NAV_ITEMS, currentSectionForRoute } from './config/navigation'
+import {
+  DASHBOARD_NAV_ITEMS,
+  VISIBLE_DASHBOARD_NAV_ITEMS,
+  currentSectionForRoute,
+} from './config/navigation'
 import { Menu, X } from 'lucide-preact'
 import { useKeyboardShortcutHost } from '../design-system/headless-preact/use-keyboard-shortcut'
 import { globalShortcutManager } from './lib/global-shortcut-manager'
@@ -271,7 +275,7 @@ export function App() {
               </div>
             </div>
 
-            <${DashboardSurfaceTabs} items=${DASHBOARD_NAV_ITEMS} currentTab=${currentTab} />
+            <${DashboardSurfaceTabs} items=${VISIBLE_DASHBOARD_NAV_ITEMS} currentTab=${currentTab} />
           </div>
 
           <div class="flex shrink-0 flex-wrap items-center justify-end gap-2 max-[1080px]:justify-between">

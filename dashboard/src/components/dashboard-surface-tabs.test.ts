@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
 import { axe } from 'jest-axe'
-import { DASHBOARD_NAV_ITEMS } from '../config/navigation'
+import { VISIBLE_DASHBOARD_NAV_ITEMS } from '../config/navigation'
 import { DashboardSurfaceTabs, dashboardSurfaceTabId } from './dashboard-surface-tabs'
 
 const navigate = vi.fn()
@@ -33,7 +33,7 @@ describe('DashboardSurfaceTabs', () => {
 
   it('renders top-level surfaces as an ARIA tablist', () => {
     render(
-      html`<${DashboardSurfaceTabs} items=${DASHBOARD_NAV_ITEMS} currentTab="code" />`,
+      html`<${DashboardSurfaceTabs} items=${VISIBLE_DASHBOARD_NAV_ITEMS} currentTab="code" />`,
       container,
     )
 
@@ -42,12 +42,13 @@ describe('DashboardSurfaceTabs', () => {
 
     const tabs = Array.from(container.querySelectorAll('[role="tab"]'))
     expect(tabs.map(tab => tab.textContent?.trim())).toContain('Code')
-    expect(tabs).toHaveLength(DASHBOARD_NAV_ITEMS.length)
+    expect(tabs.map(tab => tab.textContent?.trim())).not.toContain('MASC Cockpit')
+    expect(tabs).toHaveLength(VISIBLE_DASHBOARD_NAV_ITEMS.length)
   })
 
   it('marks the current surface as the selected tab', () => {
     render(
-      html`<${DashboardSurfaceTabs} items=${DASHBOARD_NAV_ITEMS} currentTab="code" />`,
+      html`<${DashboardSurfaceTabs} items=${VISIBLE_DASHBOARD_NAV_ITEMS} currentTab="code" />`,
       container,
     )
 
@@ -62,7 +63,7 @@ describe('DashboardSurfaceTabs', () => {
 
   it('moves focus and activates the next surface on ArrowRight', () => {
     render(
-      html`<${DashboardSurfaceTabs} items=${DASHBOARD_NAV_ITEMS} currentTab="overview" />`,
+      html`<${DashboardSurfaceTabs} items=${VISIBLE_DASHBOARD_NAV_ITEMS} currentTab="overview" />`,
       container,
     )
 
@@ -77,7 +78,7 @@ describe('DashboardSurfaceTabs', () => {
 
   it('jumps to the last surface on End', () => {
     render(
-      html`<${DashboardSurfaceTabs} items=${DASHBOARD_NAV_ITEMS} currentTab="overview" />`,
+      html`<${DashboardSurfaceTabs} items=${VISIBLE_DASHBOARD_NAV_ITEMS} currentTab="overview" />`,
       container,
     )
 
@@ -92,7 +93,7 @@ describe('DashboardSurfaceTabs', () => {
   it('passes axe with route tabs and the controlled main panel target', async () => {
     render(
       html`
-        <${DashboardSurfaceTabs} items=${DASHBOARD_NAV_ITEMS} currentTab="overview" />
+        <${DashboardSurfaceTabs} items=${VISIBLE_DASHBOARD_NAV_ITEMS} currentTab="overview" />
         <main id="main-content">Overview content</main>
       `,
       container,

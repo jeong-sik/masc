@@ -112,3 +112,43 @@ let is_known_policy_tool_name name =
   match resolve name with
   | Resolved _ | Alias_to _ -> true
   | Unknown _ -> false
+
+(* ── Phase 5: full-probe (no short-circuit) ────────────────────────── *)
+
+(** Return every source that would admit [name], in resolution order.
+    Unlike [resolve] which short-circuits, this checks all 13 sources.
+    Used for source-overlap analysis only. *)
+let all_admitting_sources name =
+  let normalized = Keeper_tool_alias.strip_mcp_masc_prefix name in
+  let sources = ref [] in
+  if Tool_dispatch.is_registered normalized then
+    sources := Dispatch_table :: !sources;
+  if Option.is_some (Tool_name.of_string normalized) then
+    sources := Tool_name_variant :: !sources;
+  if Option.is_some (Keeper_tool_alias.route normalized) then
+    sources := Alias_route :: !sources;
+  if Keeper_tool_alias.is_known_internal normalized then
+    sources := Alias_internal :: !sources;
+  (match Keeper_tool_alias.public_masc_to_internal normalized with
+   | Some _ -> sources := Alias_masc_to_internal :: !sources
+   | None -> ());
+  if List.mem normalized (Keeper_tool_registry.keeper_internal_candidate_tool_names) then
+    sources := Registry_internal_candidate :: !sources;
+  if List.mem normalized (Keeper_tool_registry.effective_core_tools ()) then
+    sources := Registry_core_tools :: !sources;
+  if List.mem normalized Keeper_tool_registry.keeper_admin_dispatched_tools then
+    sources := Registry_admin_dispatched :: !sources;
+  if List.mem normalized (tool_schema_names Tool_shard.all_keeper_tool_schemas) then
+    sources := Shard_schema :: !sources;
+  let surfaces_to_check =
+    [ Tool_catalog_surfaces.Public_mcp
+    ; Tool_catalog_surfaces.Spawned_agent
+    ; Tool_catalog_surfaces.Local_worker
+    ; Tool_catalog_surfaces.Admin
+    ]
+  in
+  List.iter (fun surface ->
+    if Tool_catalog_surfaces.is_on_surface surface normalized then
+      sources := Surface surface :: !sources
+  ) surfaces_to_check;
+  List.rev !sources

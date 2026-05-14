@@ -38,3 +38,8 @@ val string_of_tried_source : tried_source -> string
 
 (** Comma-separated list of source labels. *)
 val string_of_tried : tried_source list -> string
+
+(** Full-probe analysis: return every source that would admit [name].
+    Unlike [resolve] which short-circuits, checks all 13 sources.
+    For source-overlap analysis (Phase 5). *)
+val all_admitting_sources : string -> tried_source list

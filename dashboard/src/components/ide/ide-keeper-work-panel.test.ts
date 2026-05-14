@@ -87,6 +87,39 @@ describe('IdeKeeperWorkPanel', () => {
     fireEvent.click(buttonByText(container, 'Task'))
     expect(window.location.hash).toBe('#workspace?section=planning&view=default&task=task-151')
   })
+
+  it('links the current task to git, telemetry, and keeper context', () => {
+    keepers.value = [keeperFixture()]
+    tasks.value = [taskFixture({
+      goal_id: 'goal-runtime',
+      execution_links: {
+        session_id: 'sess-151',
+        operation_id: 'op-151',
+      },
+    })]
+
+    render(h(IdeKeeperWorkPanel, { keeperName: 'sangsu' }), container)
+
+    const taskLinks = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('.ide-keeper-work-card .ide-keeper-work-links button'),
+    )
+    expect(taskLinks.map(link => link.textContent)).toEqual([
+      'Goal',
+      'Task',
+      'Git',
+      'Telemetry',
+      'Keeper',
+    ])
+    expect(buttonByText(container, 'Git').title).toBe('Git fix/cascade')
+    expect(buttonByText(container, 'Telemetry').title)
+      .toBe('Fleet telemetry event log · session sess-151 · operation op-151 · query op-151')
+
+    fireEvent.click(buttonByText(container, 'Telemetry'))
+    expect(window.location.hash).toContain('#monitoring?section=fleet-health&view=event-log')
+    expect(window.location.hash).toContain('session_id=sess-151')
+    expect(window.location.hash).toContain('operation_id=op-151')
+    expect(window.location.hash).toContain('q=op-151')
+  })
 })
 
 function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {

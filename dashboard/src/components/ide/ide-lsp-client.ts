@@ -78,6 +78,11 @@ export interface SelectedAnnotation {
 
 // ── State Effects ────────────────────────────────────────────────
 
+/** Debounce window for LSP refresh + hover triggers (milliseconds).
+ *  Short enough to feel responsive, long enough to coalesce typing /
+ *  mouse-move bursts. */
+const LSP_DEBOUNCE_MS = 300
+
 const setCodeLenses = StateEffect.define<ReadonlyMap<number, LspCodeLens[]>>()
 const setInlayHints = StateEffect.define<ReadonlyMap<number, LspInlayHint[]>>()
 const setDiagnostics = StateEffect.define<ReadonlyMap<number, LspDiagnostic[]>>()
@@ -738,7 +743,7 @@ const lspViewPlugin = ViewPlugin.fromClass(
 
     private scheduleRefresh(): void {
       if (this.refreshTimer) clearTimeout(this.refreshTimer)
-      this.refreshTimer = setTimeout(() => this.refresh(), 300)
+      this.refreshTimer = setTimeout(() => this.refresh(), LSP_DEBOUNCE_MS)
     }
 
     private async refresh(): Promise<void> {
@@ -768,7 +773,7 @@ const lspViewPlugin = ViewPlugin.fromClass(
       this.hoverClientX = e.clientX
       this.hoverClientY = e.clientY
       if (this.hoverTimer) clearTimeout(this.hoverTimer)
-      this.hoverTimer = setTimeout(() => void this.triggerHover(), 300)
+      this.hoverTimer = setTimeout(() => void this.triggerHover(), LSP_DEBOUNCE_MS)
     }
 
     private onHoverLeave(): void {

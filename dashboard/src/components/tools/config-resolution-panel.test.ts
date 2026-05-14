@@ -89,7 +89,10 @@ describe('ConfigResolutionPanel', () => {
         }}
         runtimeResolution=${{
           status: 'warn',
-          warnings: ['Runtime build commit (deadbee) differs from server repo HEAD (feedbee).'],
+          warnings: [
+            'Runtime build commit (deadbee) differs from server repo HEAD (feedbee).',
+            'Server binary checkout (/tmp/masc-mcp) differs from dashboard workspace/base path (/tmp/workspace / /tmp/workspace).',
+          ],
           base_path: { path: '/tmp/runtime-input', exists: true, source: 'input' },
           workspace_path: { path: '/tmp/workspace', exists: true, source: 'workspace' },
           resolved_base_path: { path: '/tmp/workspace', exists: true, source: 'resolved_base' },
@@ -100,6 +103,7 @@ describe('ConfigResolutionPanel', () => {
           workspace_git_commit: 'cafef00d',
           resolved_base_git_commit: 'cafef00d',
           source_mismatch: true,
+          server_workspace_mismatch: true,
           diagnostics: [
             {
               ts: '2026-03-27T00:00:00Z',
@@ -152,8 +156,10 @@ describe('ConfigResolutionPanel', () => {
     expect(container.textContent).toContain('server repo head')
     expect(container.textContent).toContain('feedbee')
     expect(container.textContent).toContain('source mismatch')
+    expect(container.textContent).toContain('server/workspace mismatch')
     expect(container.textContent).toContain('SIGTERM')
     expect(container.textContent).toContain('Runtime build commit (deadbee) differs from server repo HEAD (feedbee).')
+    expect(container.textContent).toContain('Server binary checkout (/tmp/masc-mcp) differs from dashboard workspace/base path')
     expect(container.textContent).toContain('ollama warm / kv probe')
     expect(container.textContent).toContain('kv likely reused')
     expect(container.textContent).toContain('qwen3.5:35b-a3b-coding-nvfp4')

@@ -627,6 +627,11 @@ export function ConfigResolutionPanel({
                       <${StatusChip} tone="bad">source mismatch<//>
                     `
                   : null}
+                ${runtimeResolution.server_workspace_mismatch
+                  ? html`
+                      <${StatusChip} tone="warn">server/workspace mismatch<//>
+                    `
+                  : null}
               </div>
 
               <div class="mb-4">

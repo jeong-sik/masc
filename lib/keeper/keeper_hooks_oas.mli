@@ -64,6 +64,12 @@ val resolve_after_turn_model :
     metrics when OAS omits [response.model] or returns a selector alias,
     without exposing concrete model identity. *)
 
+val record_response_content_quality_metric :
+  keeper_name:string -> Agent_sdk.Types.api_response -> unit
+(** Count after-turn responses that contain no visible assistant text and no
+    tool progress.  Tool-use responses are progress, even when textual content
+    is empty. *)
+
 val context_max_of_telemetry :
   Agent_sdk.Types.inference_telemetry option -> int
 (** Provider-reported context window max, or [0] when telemetry omits it. *)

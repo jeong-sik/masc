@@ -24,6 +24,8 @@ val token_count : working_context -> int
 val message_count : working_context -> int
 val context_ratio : working_context -> float
 val checkpoint_of_context : working_context -> Agent_sdk.Checkpoint.t
+val resume_checkpoint_of_context :
+  max_checkpoint_messages:int -> working_context -> Agent_sdk.Checkpoint.t
 val oas_context_of_context : working_context -> Agent_sdk.Context.t
 val with_max_tokens : working_context -> int -> working_context
 val system_prompt_of_context : working_context -> string

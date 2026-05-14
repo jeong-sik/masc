@@ -49,8 +49,9 @@ type pre_dispatch_checkpoint_hygiene_result =
        fire, calls [save_checkpoint] to persist the compacted state.
        On save failure the result carries no resume checkpoint, and
        [save_error] surfaces the detail so the caller can block dispatch.
-    5. When no compaction fired, returns the derived checkpoint of
-       the unchanged context. *)
+    5. When no compaction fired, returns a derived resume checkpoint
+       with the same message-count, old-tool-result, per-block, and
+       total-content caps used by checkpoint persistence. *)
 val prepare_resume_checkpoint_for_dispatch
   :  meta:Keeper_types.keeper_meta
   -> now_ts:float

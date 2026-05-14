@@ -11,6 +11,7 @@ module Filename = Stdlib.Filename
 module List = Stdlib.List
 module Array = Stdlib.Array
 module String = Stdlib.String
+module PA = Provider_adapter
 module Char = Stdlib.Char
 module Int = Stdlib.Int
 module Float = Stdlib.Float
@@ -32,7 +33,7 @@ let json_string_option = function
 
 let is_ollama_cloud_profile profile_name =
   String.starts_with ~prefix:"tier.ollama_cloud" profile_name
-  || String.starts_with ~prefix:"ollama_cloud" profile_name
+  || String.starts_with ~prefix:(PA.cn_ollama ^ "_cloud") profile_name
 ;;
 
 let is_ollama_cloud_candidate ~profile_name (c : CC.candidate_info) =
@@ -40,7 +41,7 @@ let is_ollama_cloud_candidate ~profile_name (c : CC.candidate_info) =
   ||
   match c.provider_name with
   | Some provider_name ->
-    String.equal provider_name "ollama"
+    String.equal provider_name PA.cn_ollama
     && (String.ends_with ~suffix:":cloud" c.model_string
         || List.exists
              (fun model -> String.ends_with ~suffix:":cloud" model)
@@ -51,7 +52,7 @@ let is_ollama_cloud_candidate ~profile_name (c : CC.candidate_info) =
 let candidate_to_json ~profile_name (c : CC.candidate_info) : Yojson.Safe.t =
   let provider_name, display_provider_name, runtime_kind =
     if is_ollama_cloud_candidate ~profile_name c
-    then Some "ollama_cloud", Some "Ollama Cloud", Some "direct_api"
+    then Some (PA.cn_ollama ^ "_cloud"), Some "Ollama Cloud", Some "direct_api"
     else c.provider_name, c.display_provider_name, c.runtime_kind
   in
   `Assoc

@@ -1300,7 +1300,7 @@ let explicit_llama_model_id_result () =
   | None ->
     (match nonempty_env "MASC_DEFAULT_PROVIDER", nonempty_env "MASC_DEFAULT_MODEL" with
      | Some provider, Some model_id
-       when String.equal (String.lowercase_ascii provider) "llama" -> Ok model_id
+       when String.equal (String.lowercase_ascii provider) cn_llama -> Ok model_id
      | _ ->
        Error
          "LLAMA_DEFAULT_MODEL is not set; configure LLAMA_DEFAULT_MODEL or \

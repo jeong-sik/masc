@@ -35,8 +35,8 @@
     (~10 internal lets — [contains_casefold],
     [get_origin] / [cors_headers] adapter helpers,
     [keeper_chat_stream_*] sub-renderers + per-event
-    framing, [legacy_models_present] /
-    [has_connector_context] payload guards). *)
+    framing, connector-context and legacy model-argument
+    payload guards). *)
 
 (** {1 Request record} *)
 

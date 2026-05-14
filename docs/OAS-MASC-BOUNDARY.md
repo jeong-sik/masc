@@ -140,7 +140,8 @@ OAS  ──does not know──→ MASC
   dashboard rows, audit rows, and resolution broadcasts keep `selected_model`
   as a compatibility key only and emit `null`. Autoresearch cycle JSON and
   attribution evidence keep `model_used` as a compatibility key only and emit
-  `null`, while legacy persisted strings decode to a neutral runtime label.
+  `null`. Legacy keeper `models` inputs are rejected at TOML/meta parse
+  boundaries rather than decoded into a neutral runtime label.
   Channel Gate turn stats follow the same rule: keeper response parsing keeps
   duration/token counts and collapses the legacy model slot to `runtime`, while
   outbound wire JSON emits `model_used: null`.

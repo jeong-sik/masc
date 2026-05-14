@@ -141,11 +141,6 @@ let parse_keeper_chat_stream_request body_str =
         channel <> "" || channel_user_id <> ""
         || channel_user_name <> "" || channel_room_id <> ""
       in
-      let legacy_models_present =
-        match json |> member "models" with
-        | `Null -> false
-        | _ -> true
-      in
       let timeout_sec =
         match json |> member "timeout_sec" with
         | `Null -> Ok None
@@ -164,23 +159,25 @@ let parse_keeper_chat_stream_request body_str =
       then
         Error
           "channel, channel_user_id, and channel_room_id are required when connector context is supplied"
-      else if legacy_models_present then
-        Error
-          "legacy keeper model args removed for masc_keeper_msg: models. Use cascade_name; concrete provider/model identity is OAS-owned."
       else
-        match timeout_sec with
-        | Ok timeout_sec ->
-            Ok
-              {
-                name;
-                message;
-                timeout_sec;
-                channel;
-                channel_user_id;
-                channel_user_name;
-                channel_room_id;
-              }
+        match
+          Keeper_types.reject_legacy_model_args ~tool_name:"masc_keeper_msg" json
+        with
         | Error err -> Error err
+        | Ok () -> (
+          match timeout_sec with
+          | Ok timeout_sec ->
+              Ok
+                {
+                  name;
+                  message;
+                  timeout_sec;
+                  channel;
+                  channel_user_id;
+                  channel_user_name;
+                  channel_room_id;
+                }
+          | Error err -> Error err )
   with Yojson.Json_error e ->
     Error ("invalid json: " ^ e)
 

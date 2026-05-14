@@ -85,6 +85,29 @@ let test_parse_keeper_chat_stream_request_rejects_partial_connector_context () =
         "channel, channel_user_id, and channel_room_id are required when connector context is supplied"
         err
 
+let test_parse_keeper_chat_stream_request_rejects_legacy_model_args () =
+  let cases =
+    [
+      ( "models",
+        {|{"name":"luna","message":"hello","models":["glm:legacy"]}|} );
+      ( "allowed_models",
+        {|{"name":"luna","message":"hello","allowed_models":["glm:legacy"]}|} );
+      ( "active_model",
+        {|{"name":"luna","message":"hello","active_model":"glm:legacy"}|} );
+    ]
+  in
+  List.iter
+    (fun (field, body) ->
+      match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+      | Ok _ -> fail ("expected legacy field to be rejected: " ^ field)
+      | Error err ->
+          check string ("legacy field rejected: " ^ field)
+            (Printf.sprintf
+               "legacy keeper model args removed for masc_keeper_msg: %s. Use cascade_name; concrete provider/model identity is OAS-owned."
+               field)
+            err)
+    cases
+
 (* ── Filesystem-safe sanitizer ──────────────────────────────────────── *)
 
 let test_filesystem_safe_normal () =
@@ -214,6 +237,8 @@ let () =
             test_parse_keeper_chat_stream_request_accepts_connector_context;
           test_case "stream request rejects partial connector context" `Quick
             test_parse_keeper_chat_stream_request_rejects_partial_connector_context;
+          test_case "stream request rejects legacy model args" `Quick
+            test_parse_keeper_chat_stream_request_rejects_legacy_model_args;
         ] );
       ( "filesystem_safe",
         [

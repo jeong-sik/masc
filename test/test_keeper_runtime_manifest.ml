@@ -2086,6 +2086,25 @@ let test_runtime_manifest_contract_omits_provider_model_fields () =
   check_source_omits "lib/cascade/cascade_runtime.ml" "direct_model_strings";
   check_source_omits "lib/cascade/cascade_config.ml" "let parse_model_strings";
   check_source_omits "lib/cascade/cascade_config.mli" "val parse_model_strings";
+  check_source_omits "lib/keeper/keeper_meta_json_parse.ml" "pk_models";
+  check_source_omits
+    "lib/keeper/keeper_meta_json_parse.mli"
+    "pk_models";
+  check_source_omits
+    "lib/keeper/keeper_runtime.ml"
+    "models_changed";
+  check_source_omits
+    "lib/keeper/keeper_runtime.ml"
+    "models = target_models";
+  check_source_omits
+    "lib/keeper/keeper_turn_up_create.ml"
+    "profile_defaults.models";
+  check_source_omits
+    "lib/keeper/keeper_types_profile.ml"
+    "json_string_list \"models\" keeper_json";
+  check_source_omits
+    "lib/server/server_routes_http_keeper_stream.ml"
+    "legacy_models_present";
   check_source_missing "lib/keeper/keeper_agent_context.ml";
   check_source_missing "lib/keeper/keeper_agent_context.mli";
   check_source_omits

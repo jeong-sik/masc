@@ -65,6 +65,7 @@ let masc_config_spec : tool_spec =
         }
       ]
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
@@ -91,6 +92,7 @@ let masc_code_read_spec : tool_spec =
         }
       ]
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
@@ -107,6 +109,7 @@ let masc_tool_help_spec : tool_spec =
         }
       ]
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
@@ -132,6 +135,7 @@ let masc_dashboard_spec : tool_spec =
         }
       ]
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
@@ -148,6 +152,7 @@ let masc_gc_spec : tool_spec =
         }
       ]
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
@@ -171,6 +176,7 @@ let masc_web_search_spec : tool_spec =
         }
       ]
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
@@ -194,6 +200,7 @@ let masc_web_fetch_spec : tool_spec =
         }
       ]
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
@@ -215,6 +222,7 @@ let masc_tool_admin_snapshot_spec : tool_spec =
         }
       ]
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
@@ -231,6 +239,7 @@ let masc_tool_stats_spec : tool_spec =
         }
       ]
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
@@ -240,6 +249,7 @@ let masc_cleanup_zombies_spec : tool_spec =
       "Remove zombie agents (no heartbeat for 5+ min) and release their file locks."
   ; parameters = []
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
@@ -267,6 +277,7 @@ let masc_webrtc_offer_spec : tool_spec =
         }
       ]
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
@@ -294,6 +305,7 @@ let masc_webrtc_answer_spec : tool_spec =
         }
       ]
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
@@ -342,6 +354,7 @@ let masc_tool_admin_update_spec : tool_spec =
         }
       ]
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
@@ -359,6 +372,7 @@ let masc_pause_spec : tool_spec =
         }
       ]
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
@@ -369,6 +383,7 @@ let masc_resume_spec : tool_spec =
        Broadcasts notification to all agents."
   ; parameters = []
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
@@ -389,6 +404,7 @@ let masc_plan_init_spec : tool_spec =
         }
       ]
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
@@ -411,6 +427,7 @@ let masc_plan_update_spec : tool_spec =
         }
       ]
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
@@ -429,6 +446,7 @@ let masc_plan_get_spec : tool_spec =
         }
       ]
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
@@ -446,6 +464,7 @@ let masc_plan_set_task_spec : tool_spec =
         }
       ]
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
@@ -457,6 +476,7 @@ let masc_plan_get_task_spec : tool_spec =
        masc_plan_set_task. Auto-cleared on masc_leave."
   ; parameters = []
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
@@ -469,6 +489,7 @@ let masc_plan_clear_task_spec : tool_spec =
        on masc_leave."
   ; parameters = []
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
@@ -490,6 +511,7 @@ let masc_note_add_spec : tool_spec =
         }
       ]
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
@@ -513,6 +535,7 @@ let masc_deliver_spec : tool_spec =
         }
       ]
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
@@ -529,6 +552,7 @@ let masc_approval_pending_spec : tool_spec =
        admin-only detail/resolve path."
   ; parameters = []
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
@@ -548,6 +572,7 @@ let masc_approval_get_spec : tool_spec =
         }
       ]
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
@@ -585,6 +610,7 @@ let masc_spawn_spec : tool_spec =
         }
       ]
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
@@ -612,6 +638,7 @@ let masc_start_spec : tool_spec =
         }
       ]
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
@@ -635,6 +662,7 @@ let masc_join_spec : tool_spec =
         }
       ]
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
@@ -653,15 +681,14 @@ let masc_leave_spec : tool_spec =
         }
       ]
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
 let masc_broadcast_spec : tool_spec =
   { name = "masc_broadcast"
   ; description =
-      "Send a message visible to ALL agents via SSE push. Use for: status updates \
-       ('Starting task X'), help requests ('@gemini can you review this?'), \
-       completions. Use @agent_name to ping specific agent."
+      "Send a message visible to ALL agents via SSE push."
   ; parameters =
       [ { p_name = "agent_name"
         ; p_type = T_string { enum = None; default = None }
@@ -675,6 +702,12 @@ let masc_broadcast_spec : tool_spec =
         }
       ]
   ; additional_properties = false
+  ; behavior_contract =
+      [ Precede_with [ "masc_status" ]
+      ; Hint Mention_specific_agent
+      ; Hint Update_status
+      ; Hint Help_request
+      ]
   }
 ;;
 
@@ -698,6 +731,7 @@ let masc_messages_spec : tool_spec =
         }
       ]
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
@@ -711,6 +745,7 @@ let masc_who_spec : tool_spec =
        Use capabilities to find the right agent for @mentions."
   ; parameters = []
   ; additional_properties = false
+  ; behavior_contract = []
   }
 ;;
 
@@ -850,10 +885,37 @@ let emit_required buf params =
     Buffer.add_string buf "]);\n"
 ;;
 
+(* Issue #15257 C축 — typed behavior rules를 description 본문 자연어로 inline.
+   Claude Code BashTool/prompt.ts 패턴과 동일 (행동 규칙은 description에).
+   exhaustive match라 새 variant 추가 시 컴파일러가 prose 표현도 강제. *)
+let format_behavior_rule = function
+  | Precede_with [ t ] ->
+    Printf.sprintf "Call `%s` first to verify state before invoking this tool." t
+  | Precede_with tools ->
+    let names = String.concat ", " (List.map (Printf.sprintf "`%s`") tools) in
+    Printf.sprintf "Call one of %s first to verify state." names
+  | Hint Mention_specific_agent ->
+    "Use `@agent_name` syntax to ping a specific agent."
+  | Hint Update_status ->
+    "Use for status updates (e.g. starting/done/blocker)."
+  | Hint Help_request ->
+    "Use to request help or review from another agent."
+;;
+
+let format_behavior_contract = function
+  | [] -> ""
+  | rules ->
+    let bullets = List.map (Printf.sprintf "- %s") (List.map format_behavior_rule rules) in
+    "\n\nUsage rules:\n" ^ String.concat "\n" bullets
+;;
+
 let emit_tool_schema buf spec =
   Buffer.add_string buf "  {\n";
   buf_addf buf "    name = %S;\n" spec.name;
-  buf_addf buf "    description = %S;\n" spec.description;
+  buf_addf
+    buf
+    "    description = %S;\n"
+    (spec.description ^ format_behavior_contract spec.behavior_contract);
   Buffer.add_string buf "    input_schema = `Assoc [\n";
   Buffer.add_string buf "      (\"type\", `String \"object\");\n";
   (match spec.parameters with

@@ -178,6 +178,53 @@ let test_candidates () =
   check int "primary has 3 candidates" 3
     (List.length primary.Hotpath.candidates)
 
+let test_failover_inference_max_tokens_uses_narrowest_candidate () =
+  let toml =
+    {|
+[providers.claude_code]
+protocol = "anthropic-cli"
+command = "claude"
+
+[models.wide]
+max-context = 200000
+api-name = "wide"
+tools-support = true
+
+[models.narrow]
+max-context = 32768
+api-name = "narrow"
+tools-support = true
+
+[claude_code.wide.tool]
+max-output = 64000
+temperature = 0.2
+
+[claude_code.narrow.recovery]
+max-output = 8192
+temperature = 0.2
+
+[tier.mixed]
+members = ["claude_code.wide.tool", "claude_code.narrow.recovery"]
+strategy = "failover"
+|}
+  in
+  let snapshot = get_snapshot toml in
+  let mixed = find_profile snapshot "tier.mixed" in
+  check (option int) "profile max_tokens follows narrowest failover candidate"
+    (Some 8192)
+    mixed.Hotpath.inference_params.max_tokens;
+  match mixed.Hotpath.candidates with
+  | wide :: narrow :: _ ->
+    check (option int) "wide candidate keeps own cap" (Some 64000)
+      wide.Hotpath.provider_cfg.Llm_provider.Provider_config.max_tokens;
+    check (option int) "narrow candidate keeps own cap" (Some 8192)
+      narrow.Hotpath.provider_cfg.Llm_provider.Provider_config.max_tokens
+  | candidates ->
+    fail
+      (Printf.sprintf
+         "expected at least two candidates, got %d"
+         (List.length candidates))
+
 let test_model_string_format () =
   let snapshot = get_snapshot valid_toml in
   let local = find_profile snapshot "tier.local" in
@@ -379,6 +426,10 @@ let () =
         test_case "candidates" `Quick test_candidates;
         test_case "model_string format" `Quick test_model_string_format;
         test_case "weighted_entries count" `Quick test_weighted_entries_count;
+        test_case
+          "failover inference max_tokens uses narrowest candidate"
+          `Quick
+          test_failover_inference_max_tokens_uses_narrowest_candidate;
         test_case "strategy preserved" `Quick test_strategy_preserved;
         test_case "probes field absent" `Quick test_probes_field_absent;
         test_case "ollama_max_concurrent" `Quick test_ollama_max_concurrent;

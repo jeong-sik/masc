@@ -58,6 +58,16 @@ let make_weighted_entry (cfg : Llm_provider.Provider_config.t) :
 
 (* --- Inference params extraction --- *)
 
+let min_positive_max_tokens (configs : Llm_provider.Provider_config.t list) =
+  configs
+  |> List.filter_map (fun cfg ->
+    match cfg.Llm_provider.Provider_config.max_tokens with
+    | Some n when n > 0 -> Some n
+    | _ -> None)
+  |> function
+  | [] -> None
+  | first :: rest -> Some (List.fold_left min first rest)
+
 let extract_inference_params (configs : Llm_provider.Provider_config.t list) :
     Loader.inference_params =
   match configs with
@@ -66,7 +76,7 @@ let extract_inference_params (configs : Llm_provider.Provider_config.t list) :
       num_ctx = None; thinking_enabled = None; thinking_budget = None }
   | first :: _ ->
     { Loader.temperature = first.Llm_provider.Provider_config.temperature;
-      max_tokens = first.Llm_provider.Provider_config.max_tokens;
+      max_tokens = min_positive_max_tokens configs;
       keep_alive = None;
       num_ctx = None;
       thinking_enabled = first.Llm_provider.Provider_config.enable_thinking;

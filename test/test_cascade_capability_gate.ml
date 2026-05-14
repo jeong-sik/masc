@@ -199,11 +199,9 @@ target = "tier-group.strict_tool_candidates"
         ~provider_ceiling:ceiling resolved
       |> check_ok "capped value accepted" 16384)
 
-let test_resolve_max_tokens_preserves_cascade_config_for_validator () =
+let test_resolve_provider_derived_max_tokens_matches_failover_ceiling () =
   with_temp_cascade_toml
     {|
-keeper_unified_max_tokens = 65536
-
 [providers.claude_code]
 protocol = "anthropic-cli"
 command = "claude"
@@ -213,6 +211,10 @@ is-non-interactive = true
 protocol = "kimi-cli"
 command = "kimi"
 is-non-interactive = true
+
+[providers.ollama]
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
 
 [models.claude-auto]
 api-name = "auto"
@@ -230,10 +232,21 @@ tools-support = true
 [models.kimi-cli-coding.capabilities]
 max-output-tokens = 16384
 
+[models.local-recovery]
+api-name = "local"
+max-context = 32768
+tools-support = true
+
+[models.local-recovery.capabilities]
+max-output-tokens = 8192
+
 [claude_code.claude-auto]
 max-concurrent = 1
 
 [kimi_cli.kimi-cli-coding]
+max-concurrent = 1
+
+[ollama.local-recovery]
 max-concurrent = 1
 
 [claude_code.claude-auto.tool_candidate]
@@ -244,12 +257,20 @@ temperature = 0.2
 max-output = 16384
 temperature = 0.2
 
+[ollama.local-recovery.recovery]
+max-output = 8192
+temperature = 0.2
+
 [tier.strict_tool_candidates]
 members = ["claude_code.claude-auto.tool_candidate", "kimi_cli.kimi-cli-coding.tool_candidate"]
 strategy = "failover"
 
+[tier.local_recovery]
+members = ["ollama.local-recovery.recovery"]
+strategy = "failover"
+
 [tier-group.strict_tool_candidates]
-tiers = ["strict_tool_candidates"]
+tiers = ["strict_tool_candidates", "local_recovery"]
 strategy = "failover"
 
 [routes.keeper_unified]
@@ -257,14 +278,16 @@ target = "tier-group.strict_tool_candidates"
 |}
     (fun () ->
       let ceiling = CR.max_output_tokens_ceiling_of_cascade_name cascade_name in
-      check (option int) "mixed cascade output ceiling" (Some 16384) ceiling;
+      check (option int) "mixed cascade output ceiling" (Some 8192) ceiling;
       let resolved =
-        CI.resolve_max_tokens ~cascade_name ~fallback:(fun () -> 8192)
+        CI.resolve_max_tokens ~cascade_name ~fallback:(fun () -> 65536)
       in
-      check int "cascade config max_tokens is not silently capped" 65536 resolved;
+      check int "provider-derived max_tokens follows narrowest failover ceiling"
+        8192
+        resolved;
       CI.validate_max_tokens_within_ceiling ~cascade_name
         ~provider_ceiling:ceiling resolved
-      |> check_violation "requested_exceeds_provider_ceiling" 65536 16384)
+      |> check_ok "narrowest failover value accepted" 8192)
 
 let () =
   run "cascade_capability_gate" [
@@ -288,8 +311,8 @@ let () =
         `Quick
         test_resolve_max_tokens_caps_automatic_value_to_cascade_ceiling;
       test_case
-        "cascade config max_tokens reaches validator"
+        "provider-derived max_tokens matches failover ceiling"
         `Quick
-        test_resolve_max_tokens_preserves_cascade_config_for_validator;
+        test_resolve_provider_derived_max_tokens_matches_failover_ceiling;
     ];
   ]

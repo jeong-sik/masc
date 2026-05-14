@@ -459,8 +459,17 @@ let local_urls_of_named_selection ~sw ~net selection =
              if base_url = "" then None else Some base_url
            else None)
 
-let local_capacity_for_selections ~sw ~net ?config_path selections =
-  let (_ : string option) = config_path in
+(* [?config_path] was previously exposed but discarded — the downstream
+   [Cascade_catalog_runtime.resolve_named_providers] resolves against the
+   process-global active catalog ([lookup_active_profile]) and has no
+   path-override entry point, so a non-default argument silently routed
+   capacity probes to the wrong catalog. No caller actually passes the
+   override (see grep across lib/ — autoresearch_codegen / dashboard
+   judges all omit it). Removing the parameter eliminates the footgun
+   instead of preserving a misleading shim. If catalog-path override
+   becomes a real requirement, plumb it through [resolve_named_providers]
+   and [lookup_active_profile] under an RFC. *)
+let local_capacity_for_selections ~sw ~net selections =
   let local_urls =
     selections
     |> List.concat_map (fun selection ->

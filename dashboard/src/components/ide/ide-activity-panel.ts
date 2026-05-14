@@ -13,7 +13,7 @@ import {
   type GoalProgress,
 } from '../goals/goal-helpers'
 import { ideConversationThreadSnapshot } from './ide-context-bridge'
-import { globalPresenceSnapshot, PRESENCE_DOT, type KeeperPresenceSnapshot } from './keeper-presence-store'
+import { globalPresenceSnapshot, PRESENCE_DOT, presenceEntries, type KeeperPresenceSnapshot } from './keeper-presence-store'
 import { cursorOverlaySignal, type KeeperCursorOverlay } from './keeper-cursor-overlay'
 import {
   IdeContextLens,
@@ -798,7 +798,7 @@ function ActivityRow(
 ) {
   const hue = keeperHueIndex(item.keeper_id)
   const dot = `var(--color-keeper-${hue}-glow, var(--k-${hue}))`
-  const entry = presence?.entries.find(e => e.keeper_id === item.keeper_id)
+  const entry = presenceEntries(presence).find(e => e.keeper_id === item.keeper_id)
   const statusDot = entry ? PRESENCE_DOT[entry.status] : null
   const cursor = overlay.cursors.get(item.keeper_id)
   // cursor stream normalizes missing line to 0; only render the focus

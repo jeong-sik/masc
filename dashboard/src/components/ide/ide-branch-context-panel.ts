@@ -1,7 +1,12 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { fetchGitGraph, type GitGraphResponse } from '../../api/git-graph'
-import { globalPresenceSnapshot, type KeeperPresenceStatus } from './keeper-presence-store'
+import {
+  globalPresenceSnapshot,
+  presenceEntries,
+  type KeeperPresenceSnapshot,
+  type KeeperPresenceStatus,
+} from './keeper-presence-store'
 import { cursorOverlaySignal } from './keeper-cursor-overlay'
 import {
   openIdeContextRouteLink,
@@ -376,14 +381,14 @@ const LANE_STATUS_DOT: Record<KeeperPresenceStatus, { color: string; label: stri
 
 function LaneRow(
   lane: IdeWorktreeLane,
-  presence: { readonly entries: ReadonlyArray<{ keeper_id: string; status: KeeperPresenceStatus }> } | null,
+  presence: KeeperPresenceSnapshot | null,
   overlay: { readonly cursors: Map<string, { keeper_id: string; file_path: string; line: number }> },
 ) {
   // Lane.id is the worktree path; presence/cursor stores key on keeper_id.
   // Prefer the explicit keeperId mapping when the snapshot supplies it,
   // otherwise fall back to id and accept that the lookup may miss.
   const presenceKey = lane.keeperId ?? lane.id
-  const entry = presence?.entries.find(e => e.keeper_id === presenceKey)
+  const entry = presenceEntries(presence).find(e => e.keeper_id === presenceKey)
   const status = entry?.status
   const cursor = overlay.cursors.get(presenceKey)
   const focusFile = cursor?.file_path ? cursor.file_path.split('/').pop() : null

@@ -11,7 +11,7 @@ import { keepers } from '../../store'
 import type { Keeper } from '../../types'
 import { MemoryGraph } from '../common/memory-graph'
 import { PersistenceStatus, type PersistenceState } from '../common/persistence-status'
-import { globalPresenceSnapshot, PRESENCE_DOT, type KeeperPresenceEntry } from './keeper-presence-store'
+import { globalPresenceSnapshot, PRESENCE_DOT, presenceEntries, type KeeperPresenceEntry } from './keeper-presence-store'
 import { cursorOverlaySignal, type KeeperCursor } from './keeper-cursor-overlay'
 import {
   openIdeContextRouteLink,
@@ -246,7 +246,7 @@ export function IdePersistencePanel({
   const keeper = findKeeper(keeperRows, keeperName)
   const presence = useSignalValue(globalPresenceSnapshot)
   const overlay = useSignalValue(cursorOverlaySignal)
-  const entries: ReadonlyArray<KeeperPresenceEntry> = presence?.entries ?? []
+  const entries: ReadonlyArray<KeeperPresenceEntry> = presenceEntries(presence)
   const entry = keeperName ? entries.find(e => e.keeper_id === keeperName) : null
   const statusDot = entry ? PRESENCE_DOT[entry.status] : null
   const cursor = keeperName ? overlay.cursors.get(keeperName) : undefined

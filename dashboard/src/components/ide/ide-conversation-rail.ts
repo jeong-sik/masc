@@ -27,7 +27,7 @@ import { publishIdeConversationThreads } from './ide-context-bridge'
 import { ideReplayUntilMs, setIdeReplayUntilMs } from './ide-replay-state'
 import { activeIdeFile, focusIdeContextAnchor, normalizeIdeContextFilePath } from './ide-state'
 import { activeKeeperName } from '../../keeper-state'
-import { globalPresenceSnapshot, PRESENCE_DOT, type KeeperPresenceEntry } from './keeper-presence-store'
+import { globalPresenceSnapshot, PRESENCE_DOT, presenceEntries, type KeeperPresenceEntry } from './keeper-presence-store'
 import { cursorOverlaySignal, type KeeperCursorOverlay } from './keeper-cursor-overlay'
 import {
   openIdeContextRouteLink,
@@ -232,7 +232,7 @@ export function IdeConversationRail() {
   )
 
   const presence = globalPresenceSnapshot.value
-  const entries: ReadonlyArray<KeeperPresenceEntry> = presence?.entries ?? []
+  const entries: ReadonlyArray<KeeperPresenceEntry> = presenceEntries(presence)
   const overlay = cursorOverlaySignal.value
 
   return html`

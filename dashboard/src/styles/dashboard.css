@@ -1005,13 +1005,34 @@
 }
 
 .ide-persistence-focus {
+  display: inline-flex;
+  align-items: center;
   max-width: 120px;
   overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--color-accent-fg);
+  cursor: default;
   font-family: var(--font-mono);
   font-size: var(--fs-10);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+button.ide-persistence-focus {
+  cursor: pointer;
+}
+
+button.ide-persistence-focus:hover,
+button.ide-persistence-focus:focus-visible {
+  color: var(--color-fg-primary);
+}
+
+button.ide-persistence-focus:focus-visible {
+  outline: 1px solid var(--color-accent-fg);
+  outline-offset: 2px;
+  border-radius: var(--r-1);
 }
 
 .ide-persistence-links {

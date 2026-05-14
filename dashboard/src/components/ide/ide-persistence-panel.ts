@@ -253,6 +253,10 @@ export function IdePersistencePanel({
   const focusLabel = cursor && cursor.file_path && cursor.line >= 1
     ? `${cursor.file_path.split('/').pop()}:${cursor.line}`
     : null
+  const routeLinks = persistenceRouteLinks(keeperName, cursor)
+  const focusRouteLink = focusLabel
+    ? routeLinks.find(link => link.label === 'Code') ?? null
+    : null
   const [diagram, setDiagram] = useState<KeeperStateDiagramResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -345,7 +349,11 @@ export function IdePersistencePanel({
           </span>
         ` : null}
         ${focusLabel ? html`
-          <span class="ide-persistence-focus" title=${cursor?.file_path}>↗ ${focusLabel}</span>
+          <${PersistenceFocusChip}
+            label=${focusLabel}
+            filePath=${cursor?.file_path}
+            routeLink=${focusRouteLink}
+          />
         ` : null}
         <span style=${{ marginLeft: 'auto' }}>
           <${PersistenceStatus} status=${persistenceState} lastSaved=${lastSaved} />
@@ -361,7 +369,7 @@ export function IdePersistencePanel({
           <div style=${{ display: 'grid', gap: 'var(--sp-2)' }}>
             <${LifecycleMini} state=${lifecycleState} phase=${phase} />
             <${PersistenceRouteLinks}
-              links=${persistenceRouteLinks(keeperName, cursor)}
+              links=${routeLinks}
             />
 
             <div
@@ -421,6 +429,29 @@ export function IdePersistencePanel({
         `
         : html`<div role="status" style=${{ color: 'var(--color-fg-disabled)', fontSize: 'var(--fs-12)' }}>keeper unavailable</div>`}
     </section>
+  `
+}
+
+function PersistenceFocusChip({
+  label,
+  filePath,
+  routeLink,
+}: {
+  readonly label: string
+  readonly filePath: string | undefined
+  readonly routeLink: IdeContextRouteLink | null
+}) {
+  if (!routeLink) {
+    return html`<span class="ide-persistence-focus" title=${filePath}>↗ ${label}</span>`
+  }
+  return html`
+    <button
+      type="button"
+      class="ide-persistence-focus"
+      title=${routeLink.evidence}
+      aria-label=${`Open current persistence focus ${routeLink.evidence}`}
+      onClick=${() => openIdeContextRouteLink(routeLink)}
+    >↗ ${label}</button>
   `
 }
 

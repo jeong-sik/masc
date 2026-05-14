@@ -172,6 +172,25 @@ let run_cmd cmd =
   if exit_code <> 0 then
     failwith (Printf.sprintf "command failed (exit %d): %s" exit_code cmd)
 
+let write_file path content =
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let oc = open_out path in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+    output_string oc content)
+
+let write_keeper_toml ~base_path ~name ~sandbox_profile =
+  let keepers_dir =
+    Filename.concat
+      (Filename.concat (Common.masc_dir_from_base_path ~base_path) "config")
+      "keepers"
+  in
+  write_file
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    (Printf.sprintf
+       "[keeper]\npersona_name = %S\nsandbox_profile = %S\n"
+       name
+       sandbox_profile)
+
 let seed_playground_clone ~base_path ~agent_name ~source_repo =
   let repos_dir =
     Filename.concat base_path
@@ -418,6 +437,78 @@ let test_create_infers_repo_from_task_file_evidence () =
              | None -> fail "expected linked worktree metadata");
             ignore
               (Task_sandbox.cleanup ~config ~agent_name:"router-agent" sb)))
+
+let test_create_resolves_docker_visible_path_to_host_worktree () =
+  let base = make_temp_dir () in
+  let dir = base in
+  ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)));
+  let saved_base = Sys.getenv_opt "MASC_BASE_PATH" in
+  Fun.protect
+    ~finally:(fun () ->
+      (match saved_base with
+       | Some v -> Unix.putenv "MASC_BASE_PATH" v
+       | None -> Unix.putenv "MASC_BASE_PATH" "");
+      ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir))))
+    (fun () ->
+      Eio_main.run (fun env ->
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+        run_cmd (Printf.sprintf "git init -q -b main %s" (Filename.quote dir));
+        let proc_mgr = Eio.Stdenv.process_mgr env in
+        let clock = Eio.Stdenv.clock env in
+        let cwd = Eio.Stdenv.cwd env in
+        Process_eio.init ~cwd_default:cwd ~proc_mgr ~clock;
+
+        Unix.putenv "MASC_BASE_PATH" dir;
+        let config = Coord.default_config dir in
+        let _msg = Coord.init config ~agent_name:None in
+        write_keeper_toml
+          ~base_path:dir
+          ~name:"docker-agent"
+          ~sandbox_profile:"docker";
+        let _join =
+          Coord.join config ~agent_name:"docker-agent" ~capabilities:[ "test" ] ()
+        in
+        let source_repo =
+          setup_named_repo_with_file
+            ~base_path:dir
+            ~repo_name:"masc-mcp"
+            ~file_path:"README.md"
+        in
+        let docker_repos_dir =
+          Filename.concat
+            (Common.masc_dir_from_base_path ~base_path:dir)
+            "playground/docker/docker-agent/repos"
+        in
+        Fs_compat.mkdir_p docker_repos_dir;
+        let docker_clone = Filename.concat docker_repos_dir "masc-mcp" in
+        run_cmd
+          (Printf.sprintf
+             "git clone %s %s"
+             (Filename.quote source_repo)
+             (Filename.quote docker_clone));
+        let task_id = "task-docker-visible" in
+        let expected_worktree =
+          Filename.concat
+            docker_clone
+            (Filename.concat
+               ".worktrees"
+               (Playground_paths.worktree_dir_name "docker-agent" task_id))
+        in
+        match
+          Task_sandbox.create
+            ~config
+            ~task_id
+            ~agent_name:"docker-agent"
+            ~repo_name:"masc-mcp"
+            ()
+        with
+        | Error e -> fail (Printf.sprintf "sandbox create failed: %s" e)
+        | Ok sb ->
+          check string "returns host worktree path" expected_worktree sb.worktree_path;
+          check bool "host worktree exists" true (Sys.file_exists sb.worktree_path);
+          check bool "linked .masc at host worktree" true
+            (Sys.file_exists (Filename.concat sb.worktree_path Common.masc_dirname));
+          ignore (Task_sandbox.cleanup ~config ~agent_name:"docker-agent" sb)))
 
 let test_create_fails_ambiguous_multi_repo_without_evidence () =
   let base = make_temp_dir () in
@@ -699,6 +790,8 @@ let () =
       test_case "full_lifecycle" `Quick test_full_lifecycle;
       test_case "infer_repo_from_task_file_evidence" `Quick
         test_create_infers_repo_from_task_file_evidence;
+      test_case "docker_visible_path_resolves_to_host" `Quick
+        test_create_resolves_docker_visible_path_to_host_worktree;
       test_case "ambiguous_multi_repo_without_evidence" `Quick
         test_create_fails_ambiguous_multi_repo_without_evidence;
       test_case "infer_repo_from_task_repo_mentions" `Quick

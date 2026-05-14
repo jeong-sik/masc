@@ -52,6 +52,7 @@ let rel_worktree_re =
   Re.Pcre.re {|((?:[^ \t\n\r:]+/)?\.worktrees/[^ \t\n\r]+)|} |> Re.compile
 ;;
 let branch_name_re = Re.Pcre.re {|Branch: ([^ \t\n\r]+)|} |> Re.compile
+let repo_name_re = Re.Pcre.re {|Repo: ([^ \t\n\r]+)|} |> Re.compile
 
 (** Extract absolute worktree path from [Coord_worktree.worktree_create_r]
     success message. Tries "Path: <absolute>" first, then falls back to
@@ -73,20 +74,72 @@ let extract_branch_name msg =
   | None -> None
 ;;
 
-(** Symlink [.masc/] from the repo root into the worktree for read-only
+let extract_repo_name msg =
+  match Re.exec_opt repo_name_re msg with
+  | Some g -> Some (Re.Group.get g 1)
+  | None -> None
+;;
+
+let safe_file_exists path =
+  try Sys.file_exists path with
+  | Sys_error _ -> false
+;;
+
+let safe_is_directory path =
+  try Sys.file_exists path && Sys.is_directory path with
+  | Sys_error _ -> false
+;;
+
+let host_worktree_path ~config ~agent_name ~task_id ~repo_name =
+  let repo_root =
+    Filename.concat (Coord_worktree.repos_dir_of_keeper config agent_name) repo_name
+  in
+  Filename.concat
+    repo_root
+    (Filename.concat ".worktrees" (Playground_paths.worktree_dir_name agent_name task_id))
+;;
+
+let resolve_created_worktree_path ~config ~agent_name ~task_id ~response_path ~repo_name =
+  let host_candidate =
+    Option.map
+      (fun repo_name -> host_worktree_path ~config ~agent_name ~task_id ~repo_name)
+      repo_name
+  in
+  match
+    List.filter_map (fun x -> x) [ response_path; host_candidate ]
+    |> List.sort_uniq String.compare
+    |> List.find_opt safe_is_directory
+  with
+  | Some path -> Ok path
+  | None ->
+    Error
+      (Printf.sprintf
+         "worktree created but host path does not exist: response_path=%s host_candidate=%s"
+         (Option.value response_path ~default:"<missing>")
+         (Option.value host_candidate ~default:"<missing>"))
+;;
+
+(** Symlink [.masc/] from the active runtime base into the worktree for read-only
     access to room state. Idempotent: does nothing if link already exists. *)
-let symlink_masc ~repo_root ~worktree_path =
-  let masc_source = Common.masc_dir_from_base_path ~base_path:repo_root in
+let symlink_masc ~base_path ~worktree_path =
+  let masc_source = Common.masc_dir_from_base_path ~base_path in
   let masc_target = Common.masc_dir_from_base_path ~base_path:worktree_path in
-  if Sys.file_exists masc_source && not (Sys.file_exists masc_target)
-  then (
+  if not (safe_is_directory masc_source)
+  then Error (Printf.sprintf "active .masc source is missing: %s" masc_source)
+  else if safe_file_exists masc_target
+  then Ok ()
+  else
     try
       Unix.symlink masc_source masc_target;
       Ok ()
     with
     | Unix.Unix_error (e, _, _) ->
-      Error (Printf.sprintf "symlink .masc failed: %s" (Unix.error_message e)))
-  else Ok ()
+      Error
+        (Printf.sprintf
+           "symlink .masc failed: source=%s target=%s error=%s"
+           masc_source
+           masc_target
+           (Unix.error_message e))
 ;;
 
 let create ~config ~task_id ?(base_branch = "main") ?repo_name ~agent_name () =
@@ -105,26 +158,26 @@ let create ~config ~task_id ?(base_branch = "main") ?repo_name ~agent_name () =
       (Printf.sprintf "worktree creation failed: %s" (Masc_domain.masc_error_to_string e))
   | Ok msg ->
     let base_path = config.base_path in
-    (match extract_worktree_path ~base_path msg with
-     | None ->
-       Error (Printf.sprintf "worktree created but path not found in response: %s" msg)
-     | Some worktree_path ->
+    (match
+       resolve_created_worktree_path
+         ~config
+         ~agent_name
+         ~task_id
+         ~response_path:(extract_worktree_path ~base_path msg)
+         ~repo_name:(extract_repo_name msg)
+     with
+     | Error e -> Error (Printf.sprintf "%s; response=%s" e msg)
+     | Ok worktree_path ->
        let branch_name =
          extract_branch_name msg
          |> Option.value
               ~default:(Playground_paths.worktree_branch_name agent_name task_id)
        in
-       (* Resolve git root for symlink *)
-       let repo_root =
-         match Coord_git.git_root ~base_path with
-         | Some r -> r
-         | None -> base_path
-       in
        (* Symlink .masc/ into the worktree *)
-       (match symlink_masc ~repo_root ~worktree_path with
-        | Error e -> Log.Misc.warn "[task_sandbox] %s" e
-        | Ok () -> ());
-       Ok { task_id; worktree_path; branch_name; created_at = Time_compat.now () })
+       (match symlink_masc ~base_path ~worktree_path with
+        | Error e -> Error e
+        | Ok () ->
+          Ok { task_id; worktree_path; branch_name; created_at = Time_compat.now () }))
 ;;
 
 let changed_files sandbox =

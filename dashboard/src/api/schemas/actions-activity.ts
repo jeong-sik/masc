@@ -97,7 +97,7 @@ function normalizeActivitySubject(
   const type =
     (typeof value.type === 'string' && value.type.trim() !== '' ? value.type.trim() : null)
     ?? (typeof value.kind === 'string' && value.kind.trim() !== '' ? value.kind.trim() : null)
-    ?? 'entity'
+    ?? '(unknown type)'
   return { id, type }
 }
 

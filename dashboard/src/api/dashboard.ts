@@ -953,7 +953,7 @@ function decodeKeeperDecision(raw: unknown): KeeperDecision | null {
   return {
     ts_unix: asNumber(raw.ts_unix) ?? null,
     keeper_name: asString(raw.keeper_name) ?? '',
-    event_type: asString(raw.event_type) ?? 'turn',
+    event_type: asString(raw.event_type) ?? '(unknown event_type)',
     outcome: asNullableString(raw.outcome),
     model_used: null,
     latency_ms: asNumber(raw.latency_ms) ?? null,
@@ -1867,7 +1867,7 @@ export async function fetchDashboardTools(opts?: AbortableRequestOptions): Promi
   const normalizedTools = raw.tool_inventory?.tools?.map(t => ({
     ...t,
     category: t.category ?? 'uncategorized',
-    tier: t.tier ?? 'standard',
+    tier: t.tier ?? '(unknown tier)',
   }))
   return {
     ...raw,
@@ -2081,8 +2081,8 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
   return {
     name: asNullableString(data.name) ?? requestedName,
     active_goal_ids: normalizeStringList(data.active_goal_ids),
-    sandbox_profile: asNullableString(data.sandbox_profile) ?? 'local',
-    network_mode: asNullableString(data.network_mode) ?? 'inherit',
+    sandbox_profile: asNullableString(data.sandbox_profile) ?? '(unknown sandbox_profile)',
+    network_mode: asNullableString(data.network_mode) ?? '(unknown network_mode)',
     sandbox_last_error: asNullableString(data.sandbox_last_error),
     effective_sandbox_image: asNullableString(data.effective_sandbox_image),
     private_workspace_root: asNullableString(data.private_workspace_root),
@@ -2124,7 +2124,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
         ?? '',
     },
     compaction: {
-      profile: asNullableString(compaction.profile) ?? 'balanced',
+      profile: asNullableString(compaction.profile) ?? '(unknown compaction profile)',
       ratio_gate: asLooseNumber(compaction.ratio_gate) ?? 0.85,
       message_gate: asInt(compaction.message_gate) ?? 0,
       token_gate: asInt(compaction.token_gate) ?? 0,

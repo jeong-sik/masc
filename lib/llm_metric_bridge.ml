@@ -8,10 +8,12 @@
     resolves it at call time for every code path that does not
     explicitly thread [~metrics].
 
-    This module constructs the sink.  Each callback relays into
-    [Prometheus.inc_counter] on a named metric.  No other state —
-    the sink is pure forwarding, so there is no need to guard against
-    concurrent fiber access beyond what Prometheus already provides.
+    This module constructs the sink.  Most callbacks relay directly into
+    [Prometheus.inc_counter] on a named metric.  The exception is request
+    latency: OAS [on_request_end] carries [model_id] but not [provider], so
+    the bridge keeps a tiny model→provider cache from adjacent callbacks
+    ([on_http_status], [on_retry], [on_token_usage]) to label latency
+    histograms without changing the OAS API.
 
     @since 0.4.x (telemetry chain: oas#804 + oas#807) *)
 
@@ -42,6 +44,40 @@ let input_tokens_metric = Prometheus.metric_llm_provider_input_tokens
 let output_tokens_metric = Prometheus.metric_llm_provider_output_tokens
 let circuit_state_metric = Prometheus.metric_llm_provider_circuit_state
 
+let unknown_provider_label = "unknown"
+let provider_cache_max_entries = 256
+let provider_by_model : (string, string) Hashtbl.t = Hashtbl.create 32
+let provider_cache_mutex = Stdlib.Mutex.create ()
+
+let nonempty_or_none value =
+  let value = String.trim value in
+  if value = "" then None else Some value
+
+let remember_provider ~model_id ~provider =
+  match nonempty_or_none model_id, nonempty_or_none provider with
+  | Some model_id, Some provider ->
+    Stdlib.Mutex.protect provider_cache_mutex (fun () ->
+      if Hashtbl.length provider_by_model >= provider_cache_max_entries
+         && not (Hashtbl.mem provider_by_model model_id)
+      then Hashtbl.clear provider_by_model;
+      Hashtbl.replace provider_by_model model_id provider)
+  | _ -> ()
+
+let provider_for_latency ?provider ~model_id () =
+  match Option.bind provider nonempty_or_none with
+  | Some provider ->
+    remember_provider ~model_id ~provider;
+    provider
+  | None ->
+    let model_id = String.trim model_id in
+    if model_id = ""
+    then unknown_provider_label
+    else
+      Stdlib.Mutex.protect provider_cache_mutex (fun () ->
+        Option.value
+          ~default:unknown_provider_label
+          (Hashtbl.find_opt provider_by_model model_id))
+
 (** Emit a single HTTP status observation to the Prometheus counter.
 
     Exposed so that per-call metrics sinks (e.g. the cascade-observation
@@ -49,6 +85,7 @@ let circuit_state_metric = Prometheus.metric_llm_provider_circuit_state
     same counter without duplicating the label shape.  This is the
     single source of truth for the label key names. *)
 let emit_http_status ~provider ~model_id ~status =
+  remember_provider ~model_id ~provider;
   Prometheus.inc_counter http_status_metric
     ~labels:
       [
@@ -109,6 +146,7 @@ let emit_error ~model_id ~error =
     ()
 
 let emit_retry ~provider ~model_id ~attempt =
+  remember_provider ~model_id ~provider;
   Prometheus.inc_counter retry_metric
     ~labels:
       [
@@ -119,6 +157,7 @@ let emit_retry ~provider ~model_id ~attempt =
     ()
 
 let emit_token_usage ~provider ~model_id ~input_tokens ~output_tokens =
+  remember_provider ~model_id ~provider;
   if input_tokens > 0 then
     Prometheus.inc_counter input_tokens_metric
       ~labels:[("provider", provider); ("model", model_id)]
@@ -131,6 +170,7 @@ let emit_token_usage ~provider ~model_id ~input_tokens ~output_tokens =
       ()
 
 let emit_circuit_state ~provider ~model_id ~provider_key ~state =
+  remember_provider ~model_id ~provider;
   let value =
     Float.of_int (Llm_provider.Metrics.circuit_state_to_int state)
   in
@@ -175,9 +215,9 @@ let request_latency_seconds ~latency_ms =
   let latency_ms = Stdlib.max 1 latency_ms in
   Float.of_int latency_ms /. 1000.0
 
-let emit_request_latency_clamped ~model_id ~reason =
+let emit_request_latency_clamped ~provider ~model_id ~reason =
   Prometheus.inc_counter request_latency_clamped_metric
-    ~labels:[("model", model_id); ("reason", reason)]
+    ~labels:[("provider", provider); ("model", model_id); ("reason", reason)]
     ()
 
 (** Emit a single latency observation to the Prometheus histogram.
@@ -186,12 +226,16 @@ let emit_request_latency_clamped ~model_id ~reason =
     capture in [Cascade_legacy_runner]) can forward [on_request_end] to the
     same histogram without duplicating the label shape.  This is the
     single source of truth for the label key names. *)
-let emit_request_latency ~model_id ~latency_ms =
+let emit_request_latency ?provider ~model_id ~latency_ms () =
+  let provider = provider_for_latency ?provider ~model_id () in
   if latency_ms <= 0 then
-    emit_request_latency_clamped ~model_id ~reason:"non_positive_latency_ms";
+    emit_request_latency_clamped
+      ~provider
+      ~model_id
+      ~reason:"non_positive_latency_ms";
   let seconds = request_latency_seconds ~latency_ms in
   Prometheus.observe_histogram request_latency_metric
-    ~labels:[("model", model_id)] seconds
+    ~labels:[("provider", provider); ("model", model_id)] seconds
 
 (** Build the OAS Metrics.t sink.
 
@@ -216,7 +260,7 @@ let make_sink () : Llm_provider.Metrics.t =
     on_request_end =
       (fun ~model_id ~latency_ms ->
         match latency_ms with
-        | Some latency_ms -> emit_request_latency ~model_id ~latency_ms
+        | Some latency_ms -> emit_request_latency ~model_id ~latency_ms ()
         | None -> ());
     on_capability_drop =
       (fun ~model_id ~field ->

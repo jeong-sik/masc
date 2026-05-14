@@ -381,7 +381,7 @@ let cascade_metrics_for_candidates ~candidate_count:(_ : int) () =
            per-call metrics object takes precedence. *)
         match latency_ms with
         | Some latency_ms ->
-            Llm_metric_bridge.emit_request_latency ~model_id ~latency_ms
+            Llm_metric_bridge.emit_request_latency ~model_id ~latency_ms ()
         | None -> ())
       ~on_error:(fun ~model_id ~error ->
         ensure_terminal_attempt capture ~model_id ~latency_ms:None

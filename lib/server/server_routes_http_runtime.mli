@@ -117,13 +117,23 @@ val make_health_json :
     [build] / [protocol] (default + listener + supported list) /
     [transport] / [paths] / [uptime] / [sse_clients] /
     [startup] / [subsystems] / [feature_flags] / [gc] /
-    [keeper_fibers] / [keeper_config_parse_error_count] /
-    [keeper_config_parse_errors] / [keeper_config_unknown_key_count] /
-    [keeper_config_unknown_keys] / [keeper_config_schema_status] /
-    [keeper_config_schema_blocking] /
+    [keeper_fibers] / [paused_keepers] /
+    [keeper_config_parse_error_count] / [keeper_config_parse_errors] /
+    [keeper_config_unknown_key_count] / [keeper_config_unknown_keys] /
+    [keeper_config_schema_status] / [keeper_config_schema_blocking] /
     [keeper_config_schema_terminal_reason] /
     [keeper_config_operator_action_required] /
     [lazy_task_boot_guard_fires_total].
+
+    {2 paused_keepers contract}
+
+    [paused_keepers.count] and [paused_keepers.names] are the union of
+    registry-visible paused keepers and durable [.masc/keepers/*.json]
+    metas with [paused = true].  The nested [running_*] and
+    [durable_*] fields keep the two sources inspectable so a keeper
+    that has been auto-paused and removed from the live keepalive set
+    does not disappear from [/health].  [read_error_count] surfaces
+    corrupt durable meta instead of silently reporting a clean zero.
 
     {2 lazy_task_boot_guard_fires_total contract (P2 silent-
     failure fix)}

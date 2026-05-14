@@ -919,6 +919,74 @@ let make_keeper_meta_json ?(name = "sangsu")
   | Ok meta -> Keeper_types.meta_to_json meta |> Yojson.Safe.pretty_to_string
   | Error err -> Alcotest.fail ("meta_of_json failed: " ^ err)
 
+let make_keeper_meta ?(paused = false) ?(name = "sangsu")
+    ?(trace_id = "trace-sangsu-live")
+    ?(updated_at = "2026-03-29T10:36:57Z") () =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [
+          ("name", `String name);
+          ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
+          ("trace_id", `String trace_id);
+          ("goal", `String ("goal-" ^ name));
+          ("cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
+          ("updated_at", `String updated_at);
+          ("last_model_used", `String "llama:auto");
+        ])
+  with
+  | Ok meta ->
+      {
+        meta with
+        paused;
+        auto_resume_after_sec = (if paused then Some 3600.0 else None);
+      }
+  | Error err -> Alcotest.fail ("meta_of_json failed: " ^ err)
+
+let write_keeper_meta_exn config meta =
+  match Keeper_types.write_meta config meta with
+  | Ok () -> ()
+  | Error err -> Alcotest.fail ("keeper meta write failed: " ^ err)
+
+let test_health_json_surfaces_durable_paused_keepers () =
+  with_temp_dir "health-durable-paused-keepers" (fun dir ->
+      let config_root = make_config_root dir in
+      with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+      let previous_state = !Server_auth.server_state in
+      Config_dir_resolver.reset ();
+      Fun.protect
+        ~finally:(fun () ->
+          Server_auth.server_state := previous_state;
+          Config_dir_resolver.reset ())
+        (fun () ->
+          let state = Mcp_server.create_state ~base_path:dir in
+          Server_auth.server_state := Some state;
+          let config = state.Mcp_server.room_config in
+          write_keeper_meta_exn config
+            (make_keeper_meta ~name:"durable-paused" ~trace_id:"trace-paused"
+               ~paused:true ());
+          write_keeper_meta_exn config
+            (make_keeper_meta ~name:"durable-active" ~trace_id:"trace-active"
+               ~paused:false ());
+          let request = Httpun.Request.create `GET "/health" in
+          let json = Server_routes_http_runtime.make_health_json request in
+          let open Yojson.Safe.Util in
+          let paused = json |> member "paused_keepers" in
+          let durable_names =
+            paused |> member "durable_names" |> to_list |> List.map to_string
+          in
+          let names = paused |> member "names" |> to_list |> List.map to_string in
+          Alcotest.(check int) "durable paused count" 1
+            (paused |> member "durable_count" |> to_int);
+          Alcotest.(check (list string)) "durable paused names"
+            [ "durable-paused" ] durable_names;
+          Alcotest.(check bool) "union includes durable paused keeper" true
+            (List.exists (( = ) "durable-paused") names);
+          Alcotest.(check bool) "union excludes active durable keeper" false
+            (List.exists (( = ) "durable-active") names);
+          Alcotest.(check int) "durable read errors" 0
+            (paused |> member "read_error_count" |> to_int)))
+
 let test_migrate_resident_keeper_dirs_promotes_valid_meta () =
   with_temp_dir "startup-legacy-keepers" (fun dir ->
       let state = Mcp_server.create_state ~base_path:dir in
@@ -2452,6 +2520,9 @@ let () =
             test_startup_state_catalog_degraded_survives_lazy_activation;
           Alcotest.test_case "liveness probe is always true" `Quick
             test_startup_state_liveness;
+          Alcotest.test_case
+            "health json surfaces durable paused keepers"
+            `Quick test_health_json_surfaces_durable_paused_keepers;
           Alcotest.test_case "readiness false before init" `Quick
             test_startup_state_readiness_before_init;
           Alcotest.test_case "readiness true after init" `Quick

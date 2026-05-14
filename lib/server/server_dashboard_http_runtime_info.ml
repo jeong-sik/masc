@@ -254,6 +254,26 @@ let path_item_json ~source path =
     ]
 ;;
 
+let normalized_path_opt path =
+  match trim_to_option path with
+  | None -> None
+  | Some path ->
+    let normalized =
+      if Sys.file_exists path
+      then (
+        try Unix.realpath path with
+        | Unix.Unix_error _ -> path)
+      else path
+    in
+    Some normalized
+;;
+
+let same_normalized_path path expected =
+  match normalized_path_opt expected with
+  | Some expected -> String.equal path expected
+  | None -> false
+;;
+
 let shutdown_signal_of_message message =
   if contains_substring ~needle:"Received SIGTERM" message
   then Some "SIGTERM"
@@ -427,12 +447,17 @@ let runtime_resolution_json (config : Coord.config) =
     | Some runtime, None, Some workspace -> not (String.equal runtime workspace)
     | _ -> false
   in
+  let server_workspace_mismatch =
+    match Option.bind server_repo_path normalized_path_opt with
+    | None -> false
+    | Some server_repo_path ->
+      (not (same_normalized_path server_repo_path config.workspace_path))
+      && not (same_normalized_path server_repo_path config.base_path)
+  in
   let diagnostics, signal_count, repair_count, agent_issue_count =
     runtime_diagnostics_json ()
   in
-  let warnings =
-    []
-    |> fun acc ->
+  let add_source_mismatch_warning acc =
     if source_mismatch
     then (
       let runtime = Option.value ~default:"unknown" runtime_commit in
@@ -448,43 +473,66 @@ let runtime_resolution_json (config : Coord.config) =
         source_label
         source_commit
       :: acc)
-    else
-      acc
-      |> fun acc ->
-      if prompt_dir_mismatch
-      then
-        Printf.sprintf
-          "Prompt markdown dir (%s) differs from resolved config root (%s)."
-          prompt_markdown_dir
-          expected_prompt_dir
-        :: acc
-      else
-        acc
-        |> fun acc ->
-        if signal_count > 0
-        then
-          Printf.sprintf
-            "Recent external shutdown signals detected in server logs (%d). Ephemeral \
-             agents will not auto-rejoin after these restarts."
-            signal_count
-          :: acc
-        else
-          acc
-          |> fun acc ->
-          if repair_count > 0
-          then
-            Printf.sprintf "Recent room-state repair events detected (%d)." repair_count
-            :: acc
-          else
-            acc
-            |> fun acc ->
-            if agent_issue_count > 0
-            then
-              Printf.sprintf
-                "Recent agent-state compatibility warnings detected (%d)."
-                agent_issue_count
-              :: acc
-            else acc |> fun acc -> acc |> List.rev
+    else acc
+  in
+  let add_server_workspace_mismatch_warning acc =
+    if server_workspace_mismatch
+    then (
+      let server_repo =
+        server_repo_path |> Option.value ~default:"unknown server repo"
+      in
+      Printf.sprintf
+        "Server binary checkout (%s) differs from dashboard workspace/base path (%s / \
+         %s). This can be intentional; verify the running worktree when dashboard \
+         data looks stale."
+        server_repo
+        config.workspace_path
+        config.base_path
+      :: acc)
+    else acc
+  in
+  let add_prompt_dir_mismatch_warning acc =
+    if prompt_dir_mismatch
+    then
+      Printf.sprintf
+        "Prompt markdown dir (%s) differs from resolved config root (%s)."
+        prompt_markdown_dir
+        expected_prompt_dir
+      :: acc
+    else acc
+  in
+  let add_signal_warning acc =
+    if signal_count > 0
+    then
+      Printf.sprintf
+        "Recent external shutdown signals detected in server logs (%d). Ephemeral \
+         agents will not auto-rejoin after these restarts."
+        signal_count
+      :: acc
+    else acc
+  in
+  let add_repair_warning acc =
+    if repair_count > 0
+    then Printf.sprintf "Recent room-state repair events detected (%d)." repair_count :: acc
+    else acc
+  in
+  let add_agent_issue_warning acc =
+    if agent_issue_count > 0
+    then
+      Printf.sprintf "Recent agent-state compatibility warnings detected (%d)."
+        agent_issue_count
+      :: acc
+    else acc
+  in
+  let warnings =
+    []
+    |> add_source_mismatch_warning
+    |> add_server_workspace_mismatch_warning
+    |> add_prompt_dir_mismatch_warning
+    |> add_signal_warning
+    |> add_repair_warning
+    |> add_agent_issue_warning
+    |> List.rev
   in
   let status = if warnings = [] then "ready" else "warn" in
   `Assoc
@@ -508,6 +556,7 @@ let runtime_resolution_json (config : Coord.config) =
     ; ( "resolved_base_git_commit"
       , Option.fold ~none:`Null ~some:(fun value -> `String value) resolved_base_commit )
     ; "source_mismatch", `Bool source_mismatch
+    ; "server_workspace_mismatch", `Bool server_workspace_mismatch
     ; "diagnostics", diagnostics
     ; ("keeper_runtime", Keeper_runtime_resolved.(current () |> to_yojson))
     ; "build", Build_identity.to_yojson build

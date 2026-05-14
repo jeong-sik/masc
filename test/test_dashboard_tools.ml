@@ -21,6 +21,21 @@ let cleanup_dir dir =
   in
   rm dir
 
+let contains_substring ~needle haystack =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  let rec loop index =
+    if needle_len = 0
+    then true
+    else if index + needle_len > haystack_len
+    then false
+    else if String.equal (String.sub haystack index needle_len) needle
+    then true
+    else loop (index + 1)
+  in
+  loop 0
+;;
+
 let test_dashboard_tools_projection () =
   let dir = test_dir () in
   let runtime_probe_calls = Atomic.make 0 in
@@ -77,6 +92,25 @@ let test_dashboard_tools_projection () =
         (match runtime_resolution |> member "source_mismatch" with
          | `Bool _ -> true
          | _ -> false);
+      let server_workspace_mismatch =
+        match runtime_resolution |> member "server_workspace_mismatch" with
+        | `Bool value -> value
+        | _ -> false
+      in
+      check bool "runtime server_workspace_mismatch surfaced" true
+        (match runtime_resolution |> member "server_workspace_mismatch" with
+         | `Bool _ -> true
+         | _ -> false);
+      if server_workspace_mismatch
+      then
+        check bool "runtime server/workspace warning surfaced" true
+          (runtime_resolution
+           |> member "warnings"
+           |> to_list
+           |> List.exists (function
+             | `String warning ->
+               contains_substring ~needle:"Server binary checkout" warning
+             | _ -> false));
       check bool "runtime diagnostics surfaced as list" true
         (match runtime_resolution |> member "diagnostics" with
          | `List _ -> true

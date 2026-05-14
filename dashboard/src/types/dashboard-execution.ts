@@ -112,6 +112,7 @@ export interface DashboardRuntimeResolution {
   workspace_git_commit: string | null
   resolved_base_git_commit: string | null
   source_mismatch: boolean
+  server_workspace_mismatch: boolean
   diagnostics: DashboardRuntimeDiagnostic[]
   build: ServerBuildIdentity
   keeper_runtime: KeeperRuntimeResolved | null

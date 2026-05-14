@@ -571,6 +571,7 @@ export function normalizeDashboardRuntimeResolution(
     workspace_git_commit: asString(raw.workspace_git_commit) ?? null,
     resolved_base_git_commit: asString(raw.resolved_base_git_commit) ?? null,
     source_mismatch: asBoolean(raw.source_mismatch) ?? false,
+    server_workspace_mismatch: asBoolean(raw.server_workspace_mismatch) ?? false,
     diagnostics: (Array.isArray(raw.diagnostics) ? raw.diagnostics : [])
       .map(normalizeDashboardRuntimeDiagnostic)
       .filter((item): item is DashboardRuntimeDiagnostic => item !== null),

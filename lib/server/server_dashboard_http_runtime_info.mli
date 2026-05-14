@@ -54,8 +54,9 @@
 val runtime_resolution_json : Coord.config -> Yojson.Safe.t
 (** Renders the runtime resolution envelope: build
     identity + workspace / base-path commit shas (via
-    {!git_rev_parse_short}) + base-path resolution
-    inputs.  Reached unqualified through the
+    {!git_rev_parse_short}) + server/workspace path
+    mismatch visibility + base-path resolution inputs.
+    Reached unqualified through the
     [Server_dashboard_http_core] cascade consumer. *)
 
 (** {1 Dashboard HTTP routes} *)

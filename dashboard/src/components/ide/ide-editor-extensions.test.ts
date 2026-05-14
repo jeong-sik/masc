@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest'
+import { fireEvent } from '@testing-library/preact'
+import { describe, it, expect, vi } from 'vitest'
 import { EditorState, type Extension } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import {
@@ -207,26 +208,31 @@ describe('keeperTraceLinesForFile + keeper trace gutter', () => {
       },
     ]
 
-    expect(keeperTraceLinesForFile('runtime.ts', events)).toEqual([
-      {
-        line: 2,
-        events: [
-          {
-            source: 'activity-event',
-            keeperName: 'sangsu',
-            count: 1,
-            tsMs: 5000,
-            surface: 'Goal',
-          },
-          {
-            source: 'anchored-thread',
-            keeperName: 'scholar',
-            count: 1,
-            tsMs: 2000,
-          },
-        ],
-      },
-    ])
+    const traceLines = keeperTraceLinesForFile('runtime.ts', events)
+    expect(traceLines).toHaveLength(1)
+    expect(traceLines[0]?.line).toBe(2)
+    expect(traceLines[0]?.events).toHaveLength(2)
+    expect(traceLines[0]?.events[0]).toMatchObject({
+      id: 'activity-1',
+      source: 'activity-event',
+      keeperName: 'sangsu',
+      count: 1,
+      tsMs: 5000,
+      filePath: 'runtime.ts',
+      line: 2,
+      eventId: 'evt-1',
+      surface: 'Goal',
+    })
+    expect(traceLines[0]?.events[1]).toMatchObject({
+      id: 'thread-1',
+      source: 'anchored-thread',
+      keeperName: 'scholar',
+      count: 1,
+      tsMs: 2000,
+      filePath: 'runtime.ts',
+      line: 2,
+      threadId: 'thread-1',
+    })
   })
 
   it('renders file-scoped trace dots in the trace gutter', () => {
@@ -252,8 +258,58 @@ describe('keeperTraceLinesForFile + keeper trace gutter', () => {
     expect(dots?.[0]?.getAttribute('aria-label')).toBe('thread scholar x2')
     expect(dots?.[1]?.getAttribute('data-source')).toBe('activity-event')
     expect(dots?.[1]?.getAttribute('aria-label')).toBe('activity PR sangsu')
-    expect(gutter?.querySelector('.cm-trace-stack[role="list"]')?.getAttribute('aria-label'))
-      .toContain('Line 2 keeper trace')
+    const stack = gutter?.querySelector<HTMLButtonElement>('button.cm-trace-stack')
+    expect(stack?.getAttribute('aria-label')).toContain('Line 2 keeper trace')
+    expect(stack?.dataset.line).toBe('2')
+
+    view.destroy()
+    container.remove()
+  })
+
+  it('selects the top trace event when a trace gutter stack is clicked', () => {
+    const onSelect = vi.fn()
+    const traceLines = [
+      {
+        line: 2,
+        events: [
+          {
+            id: 'activity-1',
+            source: 'activity-event' as const,
+            keeperName: 'sangsu',
+            count: 1,
+            tsMs: 3000,
+            surface: 'PR',
+            eventId: 'evt-1',
+            goalId: 'goal-1',
+          },
+          {
+            id: 'thread-1',
+            source: 'anchored-thread' as const,
+            keeperName: 'scholar',
+            count: 1,
+            tsMs: 2000,
+            threadId: 'thread-1',
+          },
+        ],
+      },
+    ]
+    const exts = [
+      themeExt(),
+      readOnlyExt(),
+      keeperTraceLineGutterExt({
+        getTraceLines: () => traceLines,
+        onTraceLineSelect: onSelect,
+      }),
+    ]
+    const { view, container } = createTestView(exts, 'one\ntwo\nthree\n')
+
+    pushKeeperTraceLines(view, traceLines)
+
+    const stack = container.querySelector<HTMLButtonElement>('button.cm-trace-stack')
+    expect(stack).not.toBeNull()
+    fireEvent.click(stack!)
+    expect(onSelect).toHaveBeenCalledTimes(1)
+    expect(onSelect).toHaveBeenCalledWith(traceLines[0]!.events[0], 2)
 
     view.destroy()
     container.remove()

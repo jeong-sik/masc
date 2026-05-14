@@ -1193,8 +1193,9 @@ let init () =
     Histogram;
   add
     metric_oas_inference_cost_usd
-    "OAS AgentCompleted cost_usd histogram. Labelled by bounded model_bucket; enables \
-     per-model cost distribution (P50/P99) and total spend tracking."
+    "OAS AgentCompleted cost_usd histogram. Labelled by bounded provider and \
+     model_bucket; enables provider-level spend tracking plus per-model cost \
+     distribution (P50/P99)."
     Histogram;
   add metric_tasks "Total tasks processed" Counter;
   add metric_errors "Total errors" Counter;

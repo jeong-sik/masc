@@ -102,6 +102,64 @@ let quality_from_result ~success ~message ~attempts =
       ("issues", `List [issue]);
     ]
 
+let activity_preview_string value =
+  value
+  |> Safe_ops.sanitize_text_utf8
+  |> Observability_redact.redact_preview
+  |> Safe_ops.sanitize_text_utf8
+
+let activity_plain_string value = Safe_ops.sanitize_text_utf8 value
+
+let activity_tool_called_payload ~tool_name ~success ~duration_ms ~source
+    ?error_detail ?tool_args_preview arguments =
+  let activity_string_field key =
+    match Safe_ops.json_string_opt key arguments with
+    | Some value ->
+        let preview = activity_preview_string value in
+        if String.trim preview <> "" then Some (key, `String preview) else None
+    | None -> None
+  in
+  let activity_int_field key =
+    match Safe_ops.json_int_opt key arguments with
+    | Some value -> Some (key, `Int value)
+    | None -> None
+  in
+  `Assoc
+    ([
+       ("tool_name", `String (activity_plain_string tool_name));
+       ("success", `Bool success);
+       ("duration_ms", `Int duration_ms);
+       ("source", `String (activity_plain_string source));
+       ( "error",
+         match error_detail with
+         | Some e -> `String (activity_plain_string e)
+         | None -> `Null );
+       ( "tool_args_preview",
+         match tool_args_preview with
+         | Some preview -> `String (activity_plain_string preview)
+         | None -> `Null );
+     ]
+     @ List.filter_map activity_string_field
+         [
+           "cmd";
+           "task_id";
+           "repo";
+           "path";
+           "message";
+           "branch";
+           "branch_name";
+           "title";
+           "session_id";
+           "operation_id";
+           "verification_id";
+         ]
+     @ List.filter_map activity_int_field [ "pr_number"; "issue_number" ])
+  |> Safe_ops.sanitize_json_utf8
+
+module For_testing = struct
+  let activity_tool_called_payload = activity_tool_called_payload
+end
+
 let nonempty_string_opt = function
   | Some value ->
       let trimmed = String.trim value in
@@ -866,48 +924,18 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   Tool_registry.record_call_if_known ~source ?assignment_id:called_assignment_id_opt
     ~tool_name:name ~success ~duration_ms ();
 
-  let tool_args_preview =
-    Observability_redact.redact_tool_input ~tool_name:name arguments
-  in
-  let activity_string_field key =
-    match Safe_ops.json_string_opt key arguments with
-    | Some value when String.trim value <> "" ->
-        Some (key, `String (Observability_redact.redact_preview value))
-    | _ -> None
-  in
-  let activity_int_field key =
-    match Safe_ops.json_int_opt key arguments with
-    | Some value -> Some (key, `Int value)
-    | None -> None
-  in
   let activity_payload =
-    `Assoc
-      ([
-         ("tool_name", `String name);
-         ("success", `Bool success);
-         ("duration_ms", `Int duration_ms);
-         ("source", `String (Tool_registry.string_of_source source));
-         ("error", match error_detail with Some e -> `String e | None -> `Null);
-         ( "tool_args_preview",
-           match tool_args_preview with
-           | Some preview -> `String preview
-           | None -> `Null );
-       ]
-       @ List.filter_map activity_string_field
-           [
-             "cmd";
-             "task_id";
-             "repo";
-             "path";
-             "message";
-             "branch";
-             "branch_name";
-             "title";
-             "session_id";
-             "operation_id";
-             "verification_id";
-           ]
-       @ List.filter_map activity_int_field [ "pr_number"; "issue_number" ])
+    let tool_args_preview =
+      Observability_redact.redact_tool_input ~tool_name:name arguments
+    in
+    activity_tool_called_payload
+      ~tool_name:name
+      ~success
+      ~duration_ms
+      ~source:(Tool_registry.string_of_source source)
+      ?error_detail
+      ?tool_args_preview
+      arguments
   in
 
   (* Emit activity graph event for tool call — enables real-time dashboard tracking *)

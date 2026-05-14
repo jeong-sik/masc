@@ -18,47 +18,51 @@ let with_env name value f =
 
 let test_resolve_direct_aliases () =
   let claude = Option.get (Adapter.resolve_direct_adapter "claude") in
-  check string "claude direct canonical" "claude" claude.canonical_name;
+  check string "claude direct canonical" "claude" (Adapter.canonical_name_of_adapter claude);
   let gemini = Option.get (Adapter.resolve_direct_adapter "gemini") in
-  check string "gemini direct canonical" "gemini" gemini.canonical_name;
+  check string "gemini direct canonical" "gemini" (Adapter.canonical_name_of_adapter gemini);
   let kimi = Option.get (Adapter.resolve_direct_adapter "kimi") in
-  check string "kimi direct canonical" "kimi" kimi.canonical_name;
+  check string "kimi direct canonical" "kimi" (Adapter.canonical_name_of_adapter kimi);
   let openrouter = Option.get (Adapter.resolve_direct_adapter "openrouter") in
-  check string "openrouter canonical" "openrouter" openrouter.canonical_name
+  check
+    string
+    "openrouter canonical"
+    "openrouter"
+    (Adapter.canonical_name_of_adapter openrouter)
 ;;
 
 let test_resolve_cli_canonical_names () =
   let claude = Option.get (Adapter.resolve_direct_adapter "claude_code") in
-  check string "claude canonical" "claude_code" claude.canonical_name;
+  check string "claude canonical" "claude_code" (Adapter.canonical_name_of_adapter claude);
   check
     string
     "claude runtime"
     "cli_agent"
-    (Adapter.string_of_runtime_kind claude.runtime_kind);
+    (Adapter.string_of_runtime_kind (Adapter.runtime_kind_of_adapter claude));
   let gemini = Option.get (Adapter.resolve_direct_adapter "gemini_cli") in
-  check string "gemini canonical" "gemini_cli" gemini.canonical_name;
+  check string "gemini canonical" "gemini_cli" (Adapter.canonical_name_of_adapter gemini);
   let kimi = Option.get (Adapter.resolve_direct_adapter "kimi_cli") in
-  check string "kimi canonical" "kimi_cli" kimi.canonical_name;
+  check string "kimi canonical" "kimi_cli" (Adapter.canonical_name_of_adapter kimi);
   let codex = Option.get (Adapter.resolve_direct_adapter "codex_cli") in
-  check string "codex canonical" "codex_cli" codex.canonical_name
+  check string "codex canonical" "codex_cli" (Adapter.canonical_name_of_adapter codex)
 ;;
 
 let test_oas_registry_binding_adds_generic_provider () =
   let groq = Option.get (Adapter.resolve_direct_adapter "groq") in
-  check string "canonical" "groq" groq.canonical_name;
-  check string "cascade prefix" "groq" groq.cascade_prefix;
+  check string "canonical" "groq" (Adapter.canonical_name_of_adapter groq);
+  check string "cascade prefix" "groq" (Adapter.cascade_prefix_of_adapter groq);
   check
     string
     "auth env"
     "api_key:GROQ_API_KEY"
-    (Adapter.string_of_auth_mode groq.auth_mode);
+    (Adapter.auth_kind_for_canonical_name (Adapter.canonical_name_of_adapter groq));
   check
     string
     "runtime kind"
     "direct_api"
-    (Adapter.string_of_runtime_kind groq.runtime_kind);
+    (Adapter.string_of_runtime_kind (Adapter.runtime_kind_of_adapter groq));
   let base_url =
-    match groq.endpoint_url with
+    match Adapter.endpoint_url_of_adapter groq with
     | Some base_url -> base_url
     | None -> fail "expected groq endpoint from OAS registry binding"
   in

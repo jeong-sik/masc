@@ -1322,9 +1322,8 @@ let resolve_named_providers ?sw ?net ?clock ?provider_filter
       e
   | Ok (_snapshot, normalized, profile) ->
       let provider_label (c : Llm_provider.Provider_config.t) =
-        Printf.sprintf "%s:%s"
-          (Llm_provider.Provider_config.string_of_provider_kind c.kind)
-          (String.trim c.model_id)
+        Provider_model_label.of_config
+          { c with model_id = String.trim c.model_id }
       in
       let ordered_entries =
         Cascade_config.order_weighted_entries

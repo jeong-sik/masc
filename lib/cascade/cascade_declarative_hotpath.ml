@@ -40,9 +40,7 @@ type decl_snapshot = {
 
 let provider_config_to_model_string (cfg : Llm_provider.Provider_config.t) :
     string =
-  Printf.sprintf "%s:%s"
-    (Llm_provider.Provider_kind.to_string cfg.Llm_provider.Provider_config.kind)
-    cfg.Llm_provider.Provider_config.model_id
+  Provider_model_label.of_config cfg
 
 (* --- Synthetic weighted_entry reconstruction --- *)
 

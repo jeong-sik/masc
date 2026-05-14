@@ -58,7 +58,7 @@ let row_to_recommendation
       Some
         {
           keeper_profile;
-          model_label = provider ^ ":" ^ model;
+          model_label = Provider_model_label.of_parts provider model;
           composite_score = row.composite_score;
           task_pass_rate = row.task_pass_rate;
           stability_score = row.stability_score;

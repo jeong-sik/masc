@@ -511,7 +511,7 @@ let maybe_rotate_weighted_entries
 
 let expand_provider_auto ?rotation_scope ~spec provider models =
   maybe_rotate_auto_models ?rotation_scope ~spec models
-  |> List.map (fun model -> provider ^ ":" ^ model)
+  |> List.map (Provider_adapter.provider_model_label_or_raw provider)
 
 let expand_auto_model_string ?rotation_scope (s : string) : string list =
   let trimmed = String.trim s in
@@ -903,10 +903,10 @@ let openai_compatible_custom_model json provider_id api_name =
 
 let materialized_member_model_string json provider_id api_name =
   match direct_provider_cascade_prefix provider_id with
-  | Some prefix -> Some (Printf.sprintf "%s:%s" prefix api_name)
+  | Some prefix -> Provider_adapter.provider_model_label prefix api_name
   | None ->
     (match registry_provider_prefix provider_id with
-     | Some prefix -> Some (Printf.sprintf "%s:%s" prefix api_name)
+     | Some prefix -> Provider_adapter.provider_model_label prefix api_name
      | None ->
        let protocol =
          materialized_provider_protocol json provider_id
@@ -915,8 +915,9 @@ let materialized_member_model_string json provider_id api_name =
        match protocol with
        | Some "openai-http" -> openai_compatible_custom_model json provider_id api_name
        | Some protocol ->
-         Provider_adapter.cascade_prefix_of_declarative_protocol protocol
-         |> Option.map (fun prefix -> Printf.sprintf "%s:%s" prefix api_name)
+         Option.bind
+           (Provider_adapter.cascade_prefix_of_declarative_protocol protocol)
+           (fun prefix -> Provider_adapter.provider_model_label prefix api_name)
        | None -> None)
 
 let json_string_list_member key json =
@@ -1085,14 +1086,17 @@ type selection_trace = {
 let display_model_string s =
   match split_provider_model s with
   | Some (provider_name, model_id) ->
-      Printf.sprintf "%s:%s"
-        (Provider_adapter.display_provider_name provider_name)
-        model_id
+    let provider = Provider_adapter.display_provider_name provider_name in
+    Provider_adapter.provider_model_label provider model_id
+    |> Option.value ~default:s
   | None -> s
 
 let runtime_kind_of_provider_name provider_name =
   match Provider_adapter.resolve_direct_adapter provider_name with
-  | Some adapter -> Some (Provider_adapter.string_of_runtime_kind adapter.runtime_kind)
+  | Some adapter ->
+    Some
+      (Provider_adapter.string_of_runtime_kind
+         (Provider_adapter.runtime_kind_of_adapter adapter))
   | None -> None
 
 (** Build a [candidate_info] for a model string given its config weight.

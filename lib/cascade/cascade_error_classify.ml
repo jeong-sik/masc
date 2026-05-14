@@ -770,7 +770,7 @@ let codex_cli_prompt_preflight ~(config : Cascade_runner.config) ~(goal : string
      adapter registry change, not a code change here. *)
   let requires_preflight =
     match Provider_adapter.adapter_of_provider_config config.provider_cfg with
-    | Some adapter -> adapter.tool_policy.argv_prompt_preflight
+    | Some adapter -> Provider_adapter.adapter_argv_prompt_preflight adapter
     | None -> false
   in
   if not requires_preflight then None

@@ -22,6 +22,35 @@ let contains ~needle haystack =
     loop 0)
 ;;
 
+let is_identifier_char = function
+  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '\'' -> true
+  | _ -> false
+;;
+
+let contains_source_token ~needle haystack =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  if needle_len = 0
+  then true
+  else if needle_len > haystack_len
+  then false
+  else (
+    let boundary_before idx = idx = 0 || not (is_identifier_char haystack.[idx - 1]) in
+    let boundary_after idx =
+      idx >= haystack_len || not (is_identifier_char haystack.[idx])
+    in
+    let rec loop idx =
+      if idx + needle_len > haystack_len
+      then false
+      else if String.equal (String.sub haystack idx needle_len) needle
+              && boundary_before idx
+              && boundary_after (idx + needle_len)
+      then true
+      else loop (idx + 1)
+    in
+    loop 0)
+;;
+
 let read_file path =
   let ic = open_in path in
   Fun.protect
@@ -82,8 +111,50 @@ let is_provider_adapter_source = function
   | _ -> false
 ;;
 
+let owns_non_llm_adapter_record = function
+  | "lib/voice/voice_runtime_overlay.ml" -> true
+  | _ -> false
+;;
+
+let adapter_record_fields =
+  [ "canonical_name"
+  ; "runtime_kind"
+  ; "auth_mode"
+  ; "aliases"
+  ; "spawn_key"
+  ; "cascade_prefix"
+  ; "default_voice"
+  ; "endpoint_url"
+  ; "default_model_id"
+  ; "model_policy"
+  ; "tool_policy"
+  ; "telemetry_policy"
+  ]
+;;
+
+let adapter_record_field_violation line =
+  adapter_record_fields
+  |> List.find_map (fun field ->
+    let via_local = "adapter." ^ field in
+    let via_module = ".Provider_adapter." ^ field in
+    if contains_source_token ~needle:via_local line
+       || contains_source_token ~needle:via_module line
+    then Some field
+    else None)
+;;
+
+let manual_provider_model_label_violation line =
+  List.find_opt
+    (fun needle -> contains ~needle line)
+    [ "provider ^ \":\" ^ model"
+    ; "run.provider ^ \":\" ^ run.model"
+    ; "provider_key ^ \":\""
+    ; "prefix ^ model"
+    ]
+;;
+
 let line_violation line =
-  if contains ~needle:".Provider_adapter.cascade_prefix" line
+  if contains_source_token ~needle:".Provider_adapter.cascade_prefix" line
   then Some "direct adapter record field access"
   else if contains ~needle:".cascade_prefix ^" line
   then Some "manual cascade_prefix label concatenation"
@@ -91,7 +162,13 @@ let line_violation line =
     contains ~needle:"Provider_adapter.cascade_prefix_of_adapter" line
     && contains ~needle:"^" line
   then Some "manual label concatenation after prefix helper"
-  else None
+  else (
+    match adapter_record_field_violation line with
+    | Some field -> Some ("external adapter record field access: " ^ field)
+    | None ->
+      (match manual_provider_model_label_violation line with
+       | Some _ -> Some "manual provider:model label construction"
+       | None -> None))
 ;;
 
 let provider_prefix_boundary_has_no_external_leaks () =
@@ -101,7 +178,7 @@ let provider_prefix_boundary_has_no_external_leaks () =
     ocaml_sources_under lib_dir
     |> List.filter_map (fun path ->
       let rel = relative_path ~root path in
-      if is_provider_adapter_source rel
+      if is_provider_adapter_source rel || owns_non_llm_adapter_record rel
       then None
       else (
         read_file path
@@ -127,13 +204,11 @@ let provider_prefix_boundary_has_no_external_leaks () =
 let () =
   Alcotest.run
     "provider_prefix_boundary"
-    [
-      ( "source"
-      , [
-          Alcotest.test_case
+    [ ( "source"
+      , [ Alcotest.test_case
             "external modules use Provider_adapter prefix helpers"
             `Quick
-            provider_prefix_boundary_has_no_external_leaks;
-        ] );
+            provider_prefix_boundary_has_no_external_leaks
+        ] )
     ]
 ;;

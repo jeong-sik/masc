@@ -570,8 +570,10 @@ let canonical_cost_model_id ~(provider : string option) model =
   match provider_key with
   | None -> model
   | Some provider_key ->
-    let prefix = provider_key ^ ":" in
-    if String.starts_with ~prefix model then model else prefix ^ model
+    let prefix = Provider_model_label.prefix provider_key in
+    if String.starts_with ~prefix model
+    then model
+    else Provider_model_label.of_parts provider_key model
 ;;
 
 let parse_cost_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option =

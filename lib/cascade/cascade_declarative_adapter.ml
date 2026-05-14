@@ -570,11 +570,7 @@ let adapt_config (cfg : cascade_config) : adapted_catalog =
             List.find_opt (fun (p : adapted_profile) ->
               List.exists
                 (fun (pc : Llm_provider.Provider_config.t) ->
-                  let model_string =
-                    Printf.sprintf "%s:%s"
-                      (Llm_provider.Provider_kind.to_string pc.Llm_provider.Provider_config.kind)
-                      pc.Llm_provider.Provider_config.model_id
-                  in
+                  let model_string = Provider_adapter.model_label_of_config pc in
                   String.starts_with ~prefix:r.target model_string)
                 p.provider_configs)
             all_profiles

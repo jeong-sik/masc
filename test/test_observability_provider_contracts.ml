@@ -56,19 +56,20 @@ let test_whitespace_trimmed () =
   let a = Adapter.resolve_direct_adapter "  claude  " in
   check bool "whitespace trimmed" true (Option.is_some a);
   check string "canonical" "claude"
-    (Option.get a).Adapter.canonical_name
+    (Adapter.canonical_name_of_adapter (Option.get a))
 
 let test_unknown_returns_none () =
   let a = Adapter.resolve_direct_adapter "nonexistent-provider-xyz" in
   check (option string) "unknown returns None" None
-    (Option.map (fun (x : Adapter.adapter) -> x.canonical_name) a)
+    (Option.map Adapter.canonical_name_of_adapter a)
 
 let test_adapter_well_formed () =
   List.iter (fun (a : Adapter.adapter) ->
-    check bool ("canonical non-empty: " ^ a.canonical_name)
-      true (String.length a.canonical_name > 0);
-    check bool ("has aliases: " ^ a.canonical_name)
-      true (List.length a.aliases > 0))
+    let canonical = Adapter.canonical_name_of_adapter a in
+    check bool ("canonical non-empty: " ^ canonical)
+      true (String.length canonical > 0);
+    check bool ("has aliases: " ^ canonical)
+      true (List.length (Adapter.aliases_of_adapter a) > 0))
     Adapter.direct_adapters
 
 let test_runtime_kind_strings () =
@@ -85,7 +86,8 @@ let test_resolve_canonical_wraps_adapter () =
   List.iter (fun label ->
     let via_fn = Adapter.resolve_direct_canonical_name label in
     let via_adapter =
-      Option.map (fun (a : Adapter.adapter) -> a.canonical_name)
+      Option.map
+        Adapter.canonical_name_of_adapter
         (Adapter.resolve_direct_adapter label)
     in
     check (option string) ("consistent: " ^ label) via_adapter via_fn)

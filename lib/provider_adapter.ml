@@ -265,7 +265,22 @@ let local_cascade_prefix = cn_llama
 
 (** Build a cascade model label for a local model.
     Single entry point — other modules must not concatenate prefix manually. *)
-let make_local_label (model_id : string) : string = local_cascade_prefix ^ ":" ^ model_id
+let provider_model_label provider model =
+  if model = "" then None else Some (Printf.sprintf "%s:%s" provider model)
+;;
+
+let provider_model_label_or_raw provider model =
+  provider_model_label provider model
+  |> Option.value ~default:(Printf.sprintf "%s:%s" provider model)
+;;
+
+let provider_model_label_prefix provider = provider_model_label_or_raw provider ""
+
+let model_label_or_raw ~provider ~model = provider_model_label_or_raw provider model
+
+let make_local_label (model_id : string) : string =
+  model_label_or_raw ~provider:local_cascade_prefix ~model:model_id
+;;
 
 (** SSOT string form of OAS [provider_kind].
     This must stay aligned with [Provider_config.string_of_provider_kind]. *)
@@ -413,13 +428,56 @@ let model_family_of_binding (binding : Runtime_binding.t) =
   | _ -> Generic
 ;;
 
+(* Runtime bindings do not yet expose every provider's auto-model rotation.
+   Keep fallback model IDs here for providers that require a concrete model,
+   while provider identity still comes from OAS. *)
+let gemini_auto_models =
+  [ "gemini-3-flash-preview"
+  ; "gemini-3.1-flash-lite-preview"
+  ; "gemini-3.1-pro-preview"
+  ]
+;;
+
+let codex_cli_auto_models =
+  [ "gpt-5.2"
+  ; "gpt-5.3-codex-spark"
+  ; "gpt-5.3-codex"
+  ; "gpt-5.4-mini"
+  ; "gpt-5.4"
+  ; "gpt-5.5"
+  ]
+;;
+
+let fallback_auto_models_of_binding (binding : Runtime_binding.t) =
+  match model_family_of_binding binding, binding.Runtime_binding.id with
+  | Glm_general, _ -> Llm_provider.Zai_catalog.glm_auto_models ()
+  | Glm_coding, _ -> Llm_provider.Zai_catalog.glm_coding_auto_models ()
+  | Generic, "gemini" | Generic, "gemini_cli" -> gemini_auto_models
+  | Generic, "claude_code" -> [ "auto" ]
+  | Generic, "codex_cli" -> codex_cli_auto_models
+  | Generic, _ | Kimi_api_family, _ -> []
+;;
+
+let fallback_default_model_id_of_binding (binding : Runtime_binding.t) =
+  match model_family_of_binding binding, binding.Runtime_binding.id with
+  | Glm_general, _ | Glm_coding, _ | Generic, "gemini" | Generic, "gemini_cli" ->
+    (match fallback_auto_models_of_binding binding with
+     | first :: _ -> Some first
+     | [] -> None)
+  | Generic, "claude_code" | Generic, "codex_cli" -> Some "auto"
+  | Generic, _ | Kimi_api_family, _ -> None
+;;
+
 let default_model_id_of_binding (binding : Runtime_binding.t) =
   match binding_default_model_id binding with
   | Some _ as value -> value
   | None ->
-    (match runtime_kind_of_binding binding with
-     | Local -> None
-     | Cli_agent | Direct_api -> Some "auto")
+    (match fallback_default_model_id_of_binding binding with
+     | Some _ as value -> value
+     | None ->
+       (match runtime_kind_of_binding binding with
+        | Local -> None
+        | Cli_agent | Direct_api -> Some "auto"))
 ;;
 
 let auto_models_of_binding binding default_model_id =
@@ -428,7 +486,13 @@ let auto_models_of_binding binding default_model_id =
     Some
       (Env_csv_or_default
          { env_var = "MASC_" ^ binding_env_fragment binding ^ "_AUTO_MODELS"
-         ; defaults = [ Option.value default_model_id ~default:"auto" ]
+         ; defaults =
+             (match fallback_auto_models_of_binding binding with
+              | [] ->
+                (match default_model_id with
+                 | Some model_id -> [ model_id ]
+                 | None -> [])
+              | models -> models)
          ; prefer_default_model_env = false
          })
   | Local | Direct_api ->
@@ -766,7 +830,8 @@ let configured_default_model_label_result () =
      | [] -> Error "MASC_DEFAULT_CASCADE is set but empty")
   | None ->
     (match nonempty_env "MASC_DEFAULT_PROVIDER", nonempty_env "MASC_DEFAULT_MODEL" with
-     | Some provider, Some model_id -> Ok (provider ^ ":" ^ model_id)
+     | Some provider, Some model_id ->
+       Ok (model_label_or_raw ~provider ~model:model_id)
      | Some _, None ->
        Error "MASC_DEFAULT_MODEL is required when MASC_DEFAULT_PROVIDER is set"
      | None, Some _ ->
@@ -780,10 +845,6 @@ let configured_verifier_model_label_result () =
   | None -> configured_default_model_label_result ()
 ;;
 
-let provider_model_label provider model =
-  if model = "" then None else Some (Printf.sprintf "%s:%s" provider model)
-;;
-
 (** Derives the default model label for an adapter from its [runtime_kind]
     and [cascade_prefix].  Local adapters require an explicit model ID
     (resolved via env); Cli_agent/Direct_api adapters use
@@ -793,11 +854,12 @@ let default_model_label_for_adapter (adapter : adapter) =
   match adapter.runtime_kind with
   | Local ->
     Result.map
-      (fun model_id -> adapter.cascade_prefix ^ ":" ^ model_id)
+      (fun model_id ->
+         model_label_or_raw ~provider:adapter.cascade_prefix ~model:model_id)
       (explicit_llama_model_id_result ())
   | Cli_agent | Direct_api ->
     (match adapter.default_model_id with
-     | Some _ -> Ok (adapter.cascade_prefix ^ ":auto")
+     | Some _ -> Ok (model_label_or_raw ~provider:adapter.cascade_prefix ~model:"auto")
      | None ->
        Error
          (Printf.sprintf
@@ -985,7 +1047,7 @@ let default_model_override_label_result model_id =
   then Error "default:<model> requires a non-empty model id"
   else (
     match default_model_provider_prefix_result () with
-    | Ok provider -> Ok (provider ^ ":" ^ model_id)
+    | Ok provider -> Ok (model_label_or_raw ~provider ~model:model_id)
     | Error _ as e -> e)
 ;;
 
@@ -1128,7 +1190,7 @@ let provider_health_key_of_config (cfg : Llm_provider.Provider_config.t) =
 ;;
 
 let provider_model_health_key_of_config cfg =
-  Printf.sprintf "%s:%s" (provider_health_key_of_config cfg) cfg.model_id
+  model_label_or_raw ~provider:(provider_health_key_of_config cfg) ~model:cfg.model_id
 ;;
 
 let display_provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
@@ -1136,7 +1198,7 @@ let display_provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
 ;;
 
 let model_label_of_config (cfg : Llm_provider.Provider_config.t) =
-  Printf.sprintf "%s:%s" (display_provider_name_of_config cfg) cfg.model_id
+  model_label_or_raw ~provider:(display_provider_name_of_config cfg) ~model:cfg.model_id
 ;;
 
 let supports_runtime_mcp_http_headers_for_config (cfg : Llm_provider.Provider_config.t) =
@@ -1237,6 +1299,24 @@ let oas_capabilities_of_config (cfg : Llm_provider.Provider_config.t) =
 
 (** Cascade config prefix from adapter record. No match needed. *)
 let cascade_prefix_of_adapter (adapter : adapter) = adapter.cascade_prefix
+
+let canonical_name_of_adapter (adapter : adapter) = adapter.canonical_name
+let aliases_of_adapter (adapter : adapter) = adapter.aliases
+let runtime_kind_of_adapter (adapter : adapter) = adapter.runtime_kind
+let default_model_id_of_adapter (adapter : adapter) = adapter.default_model_id
+let model_policy_of_adapter (adapter : adapter) = adapter.model_policy
+
+let adapter_uses_anthropic_caching (adapter : adapter) =
+  adapter.tool_policy.uses_anthropic_caching
+;;
+
+let adapter_max_turns_per_attempt (adapter : adapter) =
+  adapter.tool_policy.max_turns_per_attempt
+;;
+
+let adapter_argv_prompt_preflight (adapter : adapter) =
+  adapter.tool_policy.argv_prompt_preflight
+;;
 
 let endpoint_url_of_adapter (adapter : adapter) = adapter.endpoint_url
 

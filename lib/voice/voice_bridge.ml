@@ -29,7 +29,7 @@ let write_text path content = Fs_compat.save_file path content
 let read_file path = Fs_compat.load_file path
 
 let resolve_api_key endpoint =
-  let adapter = Voice_runtime_overlay.adapter_for_endpoint endpoint in
+  let voice = Voice_runtime_overlay.adapter_for_endpoint endpoint in
   match Voice_runtime_overlay.endpoint_auth_env_name endpoint with
   | Some env_name ->
     (match Sys.getenv_opt env_name with
@@ -41,14 +41,14 @@ let resolve_api_key endpoint =
          Error
            (Printf.sprintf
               "voice provider %s (endpoint %s) expects %s to be set to a non-empty value"
-              adapter.canonical_name
+              voice.canonical_name
               endpoint.id
               env_name)
      | None ->
        Error
          (Printf.sprintf
             "voice provider %s (endpoint %s) expects %s to be set to a non-empty value"
-            adapter.canonical_name
+            voice.canonical_name
             endpoint.id
             env_name))
   | None -> Ok ""

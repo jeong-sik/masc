@@ -89,7 +89,10 @@ let default_resolution_from_policy
 let default_resolution ?getenv provider_name ~requested_model_id =
   match Provider_adapter.resolve_adapter_by_cascade_prefix provider_name with
   | Some adapter ->
-    default_resolution_from_policy ?getenv adapter.model_policy ~requested_model_id
+    default_resolution_from_policy
+      ?getenv
+      (Provider_adapter.model_policy_of_adapter adapter)
+      ~requested_model_id
   | None -> unresolved_auto requested_model_id
 ;;
 
@@ -203,24 +206,29 @@ let resolve_auto_model
     | Auto -> "auto"
   in
   match Provider_adapter.resolve_adapter_by_cascade_prefix provider_name with
-  | Some { runtime_kind = Provider_adapter.Local; _ } ->
-    (match selector with
-     | Auto ->
-       (match discover () with
-        | Some resolved_model_id ->
-          { requested_model_id = model_id; resolved_model_id; provenance = Discovery }
-        | None -> default_resolution ?getenv provider_name ~requested_model_id:model_id)
-     | Concrete _ -> explicit_resolution model_id model_id)
-  | Some { model_policy = { family = Provider_adapter.Glm_general; _ }; _ } ->
-    resolve_glm_model ?getenv selector
-  | Some { model_policy = { family = Provider_adapter.Glm_coding; _ }; _ } ->
-    resolve_glm_coding_model ?getenv selector
-  | Some { model_policy = { family = Provider_adapter.Kimi_api_family; _ }; _ } ->
-    resolve_kimi_model ?getenv selector
-  | Some _ ->
-    (match selector with
-     | Auto -> default_resolution ?getenv provider_name ~requested_model_id:model_id
-     | Concrete _ -> explicit_resolution model_id model_id)
+  | Some adapter ->
+    (match
+       ( Provider_adapter.runtime_kind_of_adapter adapter
+       , (Provider_adapter.model_policy_of_adapter adapter).family )
+     with
+     | Provider_adapter.Local, _ ->
+       (match selector with
+        | Auto ->
+          (match discover () with
+           | Some resolved_model_id ->
+             { requested_model_id = model_id
+             ; resolved_model_id
+             ; provenance = Discovery
+             }
+           | None -> default_resolution ?getenv provider_name ~requested_model_id:model_id)
+        | Concrete _ -> explicit_resolution model_id model_id)
+     | _, Provider_adapter.Glm_general -> resolve_glm_model ?getenv selector
+     | _, Provider_adapter.Glm_coding -> resolve_glm_coding_model ?getenv selector
+     | _, Provider_adapter.Kimi_api_family -> resolve_kimi_model ?getenv selector
+     | _, Provider_adapter.Generic ->
+       (match selector with
+        | Auto -> default_resolution ?getenv provider_name ~requested_model_id:model_id
+        | Concrete _ -> explicit_resolution model_id model_id))
   | None ->
     (match selector with
      | Auto -> unresolved_auto model_id

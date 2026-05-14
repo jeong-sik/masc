@@ -119,19 +119,7 @@ type telemetry_policy =
   ; runtime_reporting : reporting_policy
   }
 
-type adapter =
-  { canonical_name : string
-  ; runtime_kind : runtime_kind
-  ; auth_mode : auth_mode
-  ; aliases : string list
-  ; spawn_key : string option
-  ; cascade_prefix : string
-  ; endpoint_url : string option
-  ; default_model_id : string option
-  ; model_policy : model_policy
-  ; tool_policy : tool_policy
-  ; telemetry_policy : telemetry_policy
-  }
+type adapter
 
 type gemini_direct_auth =
   | Gemini_vertex_adc of
@@ -333,6 +321,30 @@ val auth_kind_for_canonical_name : string -> string
 (** Cascade prefix from adapter record. *)
 val cascade_prefix_of_adapter : adapter -> string
 
+(** Canonical adapter name. *)
+val canonical_name_of_adapter : adapter -> string
+
+(** Adapter aliases accepted by direct lookup. *)
+val aliases_of_adapter : adapter -> string list
+
+(** Runtime kind from adapter metadata. *)
+val runtime_kind_of_adapter : adapter -> runtime_kind
+
+(** Default model id from adapter metadata. *)
+val default_model_id_of_adapter : adapter -> string option
+
+(** Model-resolution policy from adapter metadata. *)
+val model_policy_of_adapter : adapter -> model_policy
+
+(** Whether this adapter's wire format uses Anthropic-style caching. *)
+val adapter_uses_anthropic_caching : adapter -> bool
+
+(** Provider-internal max turn cap, if any. *)
+val adapter_max_turns_per_attempt : adapter -> int option
+
+(** Whether this adapter needs argv/context-window prompt preflight. *)
+val adapter_argv_prompt_preflight : adapter -> bool
+
 (** Endpoint URL from adapter record. *)
 val endpoint_url_of_adapter : adapter -> string option
 
@@ -490,6 +502,12 @@ val default_cli_agent_name : unit -> string
 
 (** Build "provider:model" label, returns [None] if model is empty. *)
 val provider_model_label : string -> string -> string option
+
+(** Build "provider:model" label while preserving legacy empty-model rendering. *)
+val provider_model_label_or_raw : string -> string -> string
+
+(** Build "provider:" prefix for model-label normalization checks. *)
+val provider_model_label_prefix : string -> string
 
 (** Extract the env var name from an adapter's [auth_mode], if any. *)
 val auth_env_var_of_adapter : adapter -> string option

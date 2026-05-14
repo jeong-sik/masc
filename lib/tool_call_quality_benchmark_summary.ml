@@ -64,7 +64,9 @@ let normalize_string_list items =
   |> List.filter (fun item -> not (String.equal item ""))
   |> dedupe_keep_order
 
-let model_label (run : evidence_run) = run.provider ^ ":" ^ run.model
+let model_label (run : evidence_run) =
+  Provider_model_label.of_parts run.provider run.model
+;;
 
 let normalize_filter_set values =
   let table = Hashtbl.create 8 in

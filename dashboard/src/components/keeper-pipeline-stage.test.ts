@@ -13,12 +13,12 @@ describe('PipelineStageBadge', () => {
     expect(badge!.classList.contains('stage-thinking')).toBe(true)
   })
 
-  it('renders offline for null stage', () => {
+  it('renders unknown for null stage', () => {
     const container = document.createElement('div')
     render(h(PipelineStageBadge, { stage: null }), container)
-    expect(container.textContent).toContain('offline')
+    expect(container.textContent).toContain('unknown')
     const badge = container.querySelector('.pipeline-stage-badge')
-    expect(badge!.classList.contains('stage-offline')).toBe(true)
+    expect(badge!.classList.contains('stage-unknown')).toBe(true)
   })
 
   it('renders raw value for unknown stage', () => {

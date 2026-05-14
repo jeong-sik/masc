@@ -667,6 +667,7 @@ export type PipelineStage =
   | 'paused'
   | 'crashed'
   | 'restarting'
+  | 'unknown'
 
 // Aggregated metrics computed by the backend over a sliding window.
 // Fields mirror dashboard_http_keeper_detail.ml summary output.

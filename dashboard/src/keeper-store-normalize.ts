@@ -508,7 +508,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
       return {
         name,
         runtime_class: 'keeper' as const,
-        pipeline_stage: (asString(row.pipeline_stage) ?? 'idle') as PipelineStage,
+        pipeline_stage: (asString(row.pipeline_stage) ?? 'unknown') as PipelineStage,
         phase: toKeeperPhase(asString(row.phase)),
         paused: asBoolean(row.paused),
         registered:

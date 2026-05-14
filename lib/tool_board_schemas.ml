@@ -471,3 +471,154 @@ let tool_hearth_list : Masc_domain.tool_schema =
   }
 ;;
 
+
+let tool_sub_board_create : Masc_domain.tool_schema =
+  { name = "masc_board_sub_board_create"
+  ; description =
+      "Create a named SubBoard (subreddit-style space) within the MASC board. \
+       Requires a unique slug, name, and description. Owner is auto-filled from \
+       the caller's agent identity. Members restrict posting when access is \
+       members_only."
+  ; input_schema =
+      `Assoc
+        [ "type", `String "object"
+        ; ( "properties"
+          , `Assoc
+              [ ( "slug"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; ( "description"
+                      , `String "URL-safe lowercase identifier (e.g. ops, research). Must be unique." )
+                    ] )
+              ; ( "name"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; "description", `String "Display name of the SubBoard" ]
+                )
+              ; ( "description"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; "description", `String "Short description of the SubBoard's purpose" ]
+                )
+              ; ( "access"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; "enum", `List [ `String "open"; `String "members_only"; `String "owner_only" ]
+                    ; "description", `String "Access policy: open (default), members_only, or owner_only"
+                    ]
+                )
+              ; ( "members"
+                , `Assoc
+                    [ "type", `String "array"
+                    ; "items", `Assoc [ "type", `String "string" ]
+                    ; ( "description"
+                      , `String "Agent names allowed to post when access=members_only. Owner is always included." )
+                    ]
+                )
+              ]
+          )
+        ; "required", `List [ `String "slug"; `String "name"; `String "description" ]
+        ]
+  }
+;;
+
+let tool_sub_board_list : Masc_domain.tool_schema =
+  { name = "masc_board_sub_board_list"
+  ; description =
+      "List all SubBoards with their slug, name, owner, member count, access policy, \
+       and derived post count. Use to discover available board spaces before posting."
+  ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
+  }
+;;
+
+let tool_sub_board_get : Masc_domain.tool_schema =
+  { name = "masc_board_sub_board_get"
+  ; description =
+      "Get a single SubBoard by slug or ID. Returns full metadata including owner, \
+       members, access policy, and post count."
+  ; input_schema =
+      `Assoc
+        [ "type", `String "object"
+        ; ( "properties"
+          , `Assoc
+              [ ( "sub_board_id"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; ( "description"
+                      , `String "SubBoard slug or ID to look up" )
+                    ]
+                )
+              ]
+          )
+        ; "required", `List [ `String "sub_board_id" ]
+        ]
+  }
+;;
+
+let tool_sub_board_update : Masc_domain.tool_schema =
+  { name = "masc_board_sub_board_update"
+  ; description =
+      "Update an existing SubBoard by slug or ID. Only provided fields are changed; \
+       slug and owner remain immutable."
+  ; input_schema =
+      `Assoc
+        [ "type", `String "object"
+        ; ( "properties"
+          , `Assoc
+              [ ( "sub_board_id"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; "description", `String "SubBoard slug or ID to update" ]
+                )
+              ; ( "name"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; "description", `String "New display name" ]
+                )
+              ; ( "description"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; "description", `String "New description" ]
+                )
+              ; ( "access"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; "enum", `List [ `String "open"; `String "members_only"; `String "owner_only" ]
+                    ; "description", `String "New access policy"
+                    ]
+                )
+              ; ( "members"
+                , `Assoc
+                    [ "type", `String "array"
+                    ; "items", `Assoc [ "type", `String "string" ]
+                    ; "description", `String "New member list (owner always included)"
+                    ]
+                )
+              ]
+          )
+        ; "required", `List [ `String "sub_board_id" ]
+        ]
+  }
+;;
+
+let tool_sub_board_delete : Masc_domain.tool_schema =
+  { name = "masc_board_sub_board_delete"
+  ; description =
+      "Delete a SubBoard by slug or ID. Existing posts inside the SubBoard keep \
+       their content but lose their hearth binding (orphan policy)."
+  ; input_schema =
+      `Assoc
+        [ "type", `String "object"
+        ; ( "properties"
+          , `Assoc
+              [ ( "sub_board_id"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; "description", `String "SubBoard slug or ID to delete" ]
+                )
+              ]
+          )
+        ; "required", `List [ `String "sub_board_id" ]
+        ]
+  }
+;;

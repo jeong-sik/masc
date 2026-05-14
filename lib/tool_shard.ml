@@ -1748,6 +1748,8 @@ let shard_board : shard =
       ; "keeper_board_stats"
       ; "keeper_board_search"
       ; "keeper_board_curation_read"
+      ; "keeper_board_sub_board_list"
+      ; "keeper_board_sub_board_get"
       ]
   ; removable = true
   ; description = "MASC Board: post, list, comment"

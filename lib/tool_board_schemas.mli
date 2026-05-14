@@ -14,3 +14,8 @@ val tool_comment_vote : Masc_domain.tool_schema
 val tool_reaction : Masc_domain.tool_schema
 val tool_profile : Masc_domain.tool_schema
 val tool_hearth_list : Masc_domain.tool_schema
+val tool_sub_board_create : Masc_domain.tool_schema
+val tool_sub_board_list : Masc_domain.tool_schema
+val tool_sub_board_get : Masc_domain.tool_schema
+val tool_sub_board_update : Masc_domain.tool_schema
+val tool_sub_board_delete : Masc_domain.tool_schema

@@ -260,6 +260,11 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
     | Board_reaction
     | Board_search
     | Board_stats
+    | Board_sub_board_create
+    | Board_sub_board_delete
+    | Board_sub_board_get
+    | Board_sub_board_list
+    | Board_sub_board_update
     | Board_vote
     | Approval_pending
     | Approval_get

@@ -433,6 +433,8 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Keeper TK.Board_curation_read
   | TN.Keeper TK.Board_search
   | TN.Keeper TK.Board_stats
+  | TN.Keeper TK.Board_sub_board_get
+  | TN.Keeper TK.Board_sub_board_list
   | TN.Keeper TK.Code_read
   | TN.Keeper TK.Context_status
   | TN.Keeper TK.Discovery
@@ -463,6 +465,9 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Keeper TK.Board_curation_submit
   | TN.Keeper TK.Board_delete
   | TN.Keeper TK.Board_post
+  | TN.Keeper TK.Board_sub_board_create
+  | TN.Keeper TK.Board_sub_board_delete
+  | TN.Keeper TK.Board_sub_board_update
   | TN.Keeper TK.Board_vote
   | TN.Keeper TK.Broadcast
   | TN.Keeper TK.Handoff
@@ -533,6 +538,8 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Who
   | TN.Masc TM.Workflow_guide
   | TN.Masc TM.Worktree_list
+  | TN.Masc TM.Board_sub_board_get
+  | TN.Masc TM.Board_sub_board_list
   | TN.Masc TM.Approval_pending
   | TN.Masc TM.Approval_get
   | TN.Masc TM.Webrtc_answer
@@ -558,6 +565,9 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Board_delete
   | TN.Masc TM.Board_post
   | TN.Masc TM.Board_reaction
+  | TN.Masc TM.Board_sub_board_create
+  | TN.Masc TM.Board_sub_board_delete
+  | TN.Masc TM.Board_sub_board_update
   | TN.Masc TM.Board_vote
   | TN.Masc TM.Broadcast
   | TN.Masc TM.Cancel_task
@@ -627,6 +637,11 @@ let tool_group_of_typed_tool_name = function
       | TK.Board_post
       | TK.Board_search
       | TK.Board_stats
+      | TK.Board_sub_board_create
+      | TK.Board_sub_board_delete
+      | TK.Board_sub_board_get
+      | TK.Board_sub_board_list
+      | TK.Board_sub_board_update
       | TK.Board_vote ) ->
       Some Board
   | TN.Keeper (TK.Memory_search | TK.Memory_write | TK.Library_read | TK.Library_search) ->
@@ -686,6 +701,11 @@ let tool_group_of_typed_tool_name = function
       | TM.Board_reaction
       | TM.Board_search
       | TM.Board_stats
+      | TM.Board_sub_board_create
+      | TM.Board_sub_board_delete
+      | TM.Board_sub_board_get
+      | TM.Board_sub_board_list
+      | TM.Board_sub_board_update
       | TM.Board_vote ) ->
       Some Masc_board
   | TN.Masc_keeper _ -> Some Masc_keeper

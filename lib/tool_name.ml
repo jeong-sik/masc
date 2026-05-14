@@ -37,6 +37,11 @@ module Keeper = struct
     | Board_post
     | Board_search
     | Board_stats
+    | Board_sub_board_create
+    | Board_sub_board_delete
+    | Board_sub_board_get
+    | Board_sub_board_list
+    | Board_sub_board_update
     | Board_vote
     | Broadcast
     | Code_read
@@ -92,6 +97,11 @@ module Keeper = struct
     | Board_post -> "keeper_board_post"
     | Board_search -> "keeper_board_search"
     | Board_stats -> "keeper_board_stats"
+    | Board_sub_board_create -> "keeper_board_sub_board_create"
+    | Board_sub_board_delete -> "keeper_board_sub_board_delete"
+    | Board_sub_board_get -> "keeper_board_sub_board_get"
+    | Board_sub_board_list -> "keeper_board_sub_board_list"
+    | Board_sub_board_update -> "keeper_board_sub_board_update"
     | Board_vote -> "keeper_board_vote"
     | Broadcast -> "keeper_broadcast"
     | Code_read -> "keeper_code_read"
@@ -149,6 +159,11 @@ module Keeper = struct
     | "keeper_board_search" -> Some Board_search
     | "keeper_board_stats" -> Some Board_stats
     | "keeper_board_vote" -> Some Board_vote
+    | "keeper_board_sub_board_create" -> Some Board_sub_board_create
+    | "keeper_board_sub_board_delete" -> Some Board_sub_board_delete
+    | "keeper_board_sub_board_get" -> Some Board_sub_board_get
+    | "keeper_board_sub_board_list" -> Some Board_sub_board_list
+    | "keeper_board_sub_board_update" -> Some Board_sub_board_update
     | "keeper_broadcast" -> Some Broadcast
     | "keeper_code_read" -> Some Code_read
     | "keeper_context_status" -> Some Context_status
@@ -205,6 +220,11 @@ module Keeper = struct
     | Board_post
     | Board_search
     | Board_stats
+    | Board_sub_board_create
+    | Board_sub_board_delete
+    | Board_sub_board_get
+    | Board_sub_board_list
+    | Board_sub_board_update
     | Board_vote -> true
     | _ -> false
   ;;
@@ -254,6 +274,11 @@ module Masc = struct
     | Board_reaction
     | Board_search
     | Board_stats
+    | Board_sub_board_create
+    | Board_sub_board_delete
+    | Board_sub_board_get
+    | Board_sub_board_list
+    | Board_sub_board_update
     | Board_vote
     | Broadcast
     | Cancel_task
@@ -357,6 +382,11 @@ module Masc = struct
     | Board_reaction -> "masc_board_reaction"
     | Board_search -> "masc_board_search"
     | Board_stats -> "masc_board_stats"
+    | Board_sub_board_create -> "masc_board_sub_board_create"
+    | Board_sub_board_delete -> "masc_board_sub_board_delete"
+    | Board_sub_board_get -> "masc_board_sub_board_get"
+    | Board_sub_board_list -> "masc_board_sub_board_list"
+    | Board_sub_board_update -> "masc_board_sub_board_update"
     | Board_vote -> "masc_board_vote"
     | Broadcast -> "masc_broadcast"
     | Cancel_task -> "masc_cancel_task"
@@ -469,6 +499,11 @@ module Masc = struct
     | "masc_board_search" -> Some Board_search
     | "masc_board_stats" -> Some Board_stats
     | "masc_board_vote" -> Some Board_vote
+    | "masc_board_sub_board_create" -> Some Board_sub_board_create
+    | "masc_board_sub_board_delete" -> Some Board_sub_board_delete
+    | "masc_board_sub_board_get" -> Some Board_sub_board_get
+    | "masc_board_sub_board_list" -> Some Board_sub_board_list
+    | "masc_board_sub_board_update" -> Some Board_sub_board_update
     | "masc_broadcast" -> Some Broadcast
     | "masc_cancel_task" -> Some Cancel_task
     | "masc_check" -> Some Check
@@ -574,6 +609,11 @@ module Masc = struct
     | Board_reaction
     | Board_search
     | Board_stats
+    | Board_sub_board_create
+    | Board_sub_board_delete
+    | Board_sub_board_get
+    | Board_sub_board_list
+    | Board_sub_board_update
     | Board_vote -> true
     | _ -> false
   ;;

@@ -411,3 +411,53 @@ dune runtest test/test_reward_advice_artifact.ml
 dune runtest test/test_post_verifier.ml
 dune runtest test/test_tool_call_quality_benchmark.ml
 ```
+
+## OAS Descriptor Dispatch (Phase B baseline)
+
+`~/me/planning/claude-plans/wise-nibbling-lerdorf.md` Phase B 의 evidence
+수집 절차. 두 hot path (`make_tool_bundle` @ `lib/keeper/keeper_tools_oas.ml:852`,
+`params_of_json_schema` @ `lib/tool_bridge.ml:176`) 가 keeper turn 예산에서
+차지하는 비중을 측정해 Phase C 진행 여부를 결정한다.
+
+### Histograms
+
+- `masc_oas_params_of_schema_sec` — sum/count, 매 OAS conversion 마다
+  observation 1 회.
+- `masc_oas_make_tool_bundle_sec` — sum/count, 매 keeper turn 1 회.
+
+masc-mcp 의 `Prometheus.observe_histogram` 은 sum + `_count` 만 저장하므로
+*평균(avg = sum/count)* 까지가 in-tree 측정 한계다. p50/p95/p99 quantile 이
+필요하면 외부 Prometheus scraper + `histogram_quantile()` 또는 별도 raw-sample
+경로가 필요하다 (현재 Phase B 범위 밖).
+
+### Smoke run
+
+```bash
+# 1. 워크로드 구동 (운영자 재량). 기본 권장: tool-call-quality --live.
+BENCH_ITERATIONS=50 BENCH_WARMUP_ITERATIONS=1 \
+  ./scripts/harness_tool_call_quality.sh --live --keepers bench-analyst \
+    --models <provider:model>
+
+# 2. /metrics 스크레이프 + CSV 저장.
+./scripts/harness_oas_dispatch.sh scrape --label baseline
+
+# 3. 비교 (e.g. memoization 적용 전후, 또는 hist on/off).
+./scripts/harness_oas_dispatch.sh diff \
+  benchmarks/results/oas-baseline-<base>.csv \
+  benchmarks/results/oas-baseline-<current>.csv
+```
+
+### Histogram-overhead control
+
+`MASC_DISABLE_HOTPATH_HIST=1` 로 서버를 기동하면 두 hot path 의 observation 이
+no-op 으로 빠진다. 동일 워크로드를 hist-on / hist-off 로 두 번 돌려 차이가
+없으면 histogram 자체 비용이 무시 가능 (Phase B 결과의 신뢰도 확인용).
+
+### Decision gate (Phase B → Phase C)
+
+```
+(avg make_tool_bundle + avg params_of_json_schema × tools_per_turn) / avg total_turn >= 0.02
+```
+
+위 식이 참이면 Phase C (`params_of_json_schema` memoization) 진행. 거짓이면
+Phase C/D 미진행 — evidence finding 만 follow-up 으로 남기고 plan 종료.

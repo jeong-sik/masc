@@ -2092,6 +2092,9 @@ let test_runtime_manifest_contract_omits_provider_model_fields () =
   check_source_omits
     "lib/keeper/keeper_types_profile.ml"
     "json_string_list \"models\" keeper_json";
+  check_source_omits
+    "lib/server/server_routes_http_keeper_stream.ml"
+    "legacy_models_present";
   check_source_missing "lib/keeper/keeper_agent_context.ml";
   check_source_missing "lib/keeper/keeper_agent_context.mli";
   check_source_omits

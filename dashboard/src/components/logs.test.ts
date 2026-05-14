@@ -9,12 +9,11 @@ function entry(overrides: Partial<LogEntry>): LogEntry {
     seq: 1,
     ts: '2026-05-14T00:00:00Z',
     level: 'INFO',
-    raw_level: 'INFO',
-    normalized_level: 'INFO',
     source: 'structured',
-    legacy_classified: false,
     module: 'Keeper',
     message: 'ok',
+    keeper_name: null,
+    turn_id: null,
     details: null,
     ...overrides,
   }
@@ -34,7 +33,6 @@ describe('log diagnostics', () => {
       logDiagnosticCause(
         entry({
           level: 'WARN',
-          normalized_level: 'WARN',
           message:
             'keeper_llm_bridge: OAS execution timed out after 300.0s (budget=300s)',
         }),
@@ -45,7 +43,6 @@ describe('log diagnostics', () => {
       logDiagnosticCause(
         entry({
           level: 'ERROR',
-          normalized_level: 'ERROR',
           message:
             'all cascades exhausted: Cascade attempt liveness guard killed runtime lane coding_plan: inter_chunk_idle',
         }),
@@ -58,7 +55,6 @@ describe('log diagnostics', () => {
       logDiagnosticCause(
         entry({
           level: 'INFO',
-          normalized_level: 'INFO',
           message:
             'keeper:analyst after_turn usage telemetry unavailable runtime_lane=runtime reasons=zero_token_usage_reported input=0 output=0 context_max=200000',
         }),
@@ -69,7 +65,6 @@ describe('log diagnostics', () => {
       logDiagnosticCause(
         entry({
           level: 'WARN',
-          normalized_level: 'WARN',
           message:
             'registry: orphan threshold breached name=analyst base_path=/Users/dancer/me drops=5 window=60s',
         }),
@@ -82,7 +77,6 @@ describe('log diagnostics', () => {
       entry({
         seq: 3,
         level: 'ERROR',
-        normalized_level: 'ERROR',
         module: 'Keeper',
         message: 'keeper_llm_bridge timeout',
         details: {
@@ -102,14 +96,12 @@ describe('log diagnostics', () => {
       entry({
         seq: 2,
         level: 'WARN',
-        normalized_level: 'WARN',
         module: 'Task',
         message: 'Ignoring legacy verification directory /tmp/verifications',
       }),
       entry({
         seq: 1,
         level: 'INFO',
-        normalized_level: 'INFO',
         module: 'Keeper',
         message: 'normal',
       }),
@@ -144,10 +136,7 @@ describe('LogViewer Code links', () => {
         seq: 1,
         ts: '2026-05-14T00:00:00Z',
         level: 'INFO',
-        raw_level: 'INFO',
-        normalized_level: 'INFO',
         source: 'structured',
-        legacy_classified: false,
         module: 'keeper_tool',
         message: 'read file',
         details: { file_path: 'lib/runtime.ml', line: 12 },
@@ -169,30 +158,9 @@ describe('LogViewer Code links', () => {
     )
   })
 
-  it('surfaces parser-dropped log rows in the summary', async () => {
-    const fetchLogs = vi.fn().mockResolvedValue({
-      total: 2,
-      dropped_entries: 1,
-      entries: [{
-        seq: 1,
-        ts: '2026-05-14T00:00:00Z',
-        level: 'INFO',
-        raw_level: 'INFO',
-        normalized_level: 'INFO',
-        source: 'structured',
-        legacy_classified: false,
-        module: 'keeper_tool',
-        message: 'visible row',
-        details: null,
-      }],
-    })
-    const { LogViewer } = await loadLogs(fetchLogs)
-    const { container } = render(h(LogViewer, {}))
-
-    await waitFor(() => expect(container.textContent).toContain('visible row'))
-    expect(container.textContent).toContain('dropped rows')
-    expect(container.textContent).toContain('1 dropped')
-  })
+  // RFC-0079 removed the dropped-rows surface. parseLogsResponse now
+  // throws LogsSchemaDriftError instead of silently dropping bad rows,
+  // so there is no "parser dropped N rows" state to render here.
 
   it('does not render Code links for unsafe absolute log file paths', async () => {
     const fetchLogs = vi.fn().mockResolvedValue({
@@ -201,10 +169,7 @@ describe('LogViewer Code links', () => {
         seq: 2,
         ts: '2026-05-14T00:00:00Z',
         level: 'INFO',
-        raw_level: 'INFO',
-        normalized_level: 'INFO',
         source: 'structured',
-        legacy_classified: false,
         module: 'keeper_tool',
         message: 'read file',
         details: { file_path: '/tmp/runtime.ml', line: 12 },
@@ -224,10 +189,7 @@ describe('LogViewer Code links', () => {
         seq: 3,
         ts: '2026-05-14T00:00:00Z',
         level: 'WARN',
-        raw_level: 'WARN',
-        normalized_level: 'WARN',
         source: 'structured',
-        legacy_classified: false,
         module: 'keeper_tool',
         message: 'tool warning',
         details: {

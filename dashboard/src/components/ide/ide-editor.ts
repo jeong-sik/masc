@@ -47,7 +47,7 @@ import {
   type KeeperPresenceSnapshot,
   type KeeperPresenceStatus,
 } from './keeper-presence-store'
-import { openIdeContextRouteLink, type IdeContextRouteLink } from './ide-context-lens'
+import { openIdeContextRouteLink, routeLinksForContext, type IdeContextRouteLink } from './ide-context-lens'
 import { ideContextFocus, normalizeIdeContextFilePath, type IdeContextFocus } from './ide-state'
 import { ideConversationThreadSnapshot } from './ide-context-bridge'
 
@@ -1153,6 +1153,7 @@ function AnnotationPopover({
 
   const top = coords.bottom - shellRect.top + 4
   const left = Math.max(8, coords.left - shellRect.left)
+  const routeLinks = annotationRouteLinks(annotation)
 
   return html`
     <div
@@ -1207,6 +1208,15 @@ function AnnotationPopover({
       <div style=${{ color: 'var(--color-fg-primary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
         ${annotation.content}
       </div>
+      ${routeLinks.length > 0 ? html`
+        <div
+          class="ide-editor-context-route-links"
+          aria-label="Annotation operational links"
+          style=${{ marginTop: 'var(--sp-2)' }}
+        >
+          ${routeLinks.map(link => EditorContextRouteLink(link))}
+        </div>
+      ` : null}
       <div style=${{ display: 'flex', gap: 'var(--sp-2)', marginTop: 'var(--sp-2)', flexWrap: 'wrap' }}>
         ${annotation.keeper_id ? html`
           <span style=${{ color: 'var(--color-fg-muted)', fontSize: '11px' }}>
@@ -1226,4 +1236,17 @@ function AnnotationPopover({
       </div>
     </div>
   `
+}
+
+export function annotationRouteLinks(annotation: SelectedAnnotation): ReadonlyArray<IdeContextRouteLink> {
+  return routeLinksForContext({
+    filePath: annotation.file_path,
+    line: annotation.line_start,
+    surface: annotation.kind,
+    label: annotation.content,
+    sourceId: `annotation-${annotation.id}`,
+    goalId: annotation.goal_id ?? undefined,
+    taskId: annotation.task_id ?? undefined,
+    keeperId: annotation.keeper_id,
+  })
 }

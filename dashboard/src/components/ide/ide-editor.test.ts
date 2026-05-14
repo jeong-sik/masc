@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
-import { currentFileFindMatches, IdeEditor } from './ide-editor'
+import { annotationRouteLinks, currentFileFindMatches, IdeEditor } from './ide-editor'
 import { createCodeDocumentStore } from './code-document-store'
 import { createKeeperLineOwnershipStore } from './keeper-line-ownership-store'
 import { activeIdeFile, focusIdeContextAnchor, ideContextFocus } from './ide-state'
@@ -414,6 +414,46 @@ describe('IdeEditor', () => {
     expect(container.querySelectorAll('.cm-masc-annotation-chip')).toHaveLength(1)
     expect(container.querySelector('.cm-masc-annotation-chip')?.getAttribute('aria-label'))
       .toBe('Line 1 annotation context: Comment · goal goal-1 · task task-1 · keeper sangsu · +1')
+  })
+
+  it('maps annotation detail context into operational route links', () => {
+    const links = annotationRouteLinks({
+      id: 'ann-1',
+      file_path: 'runtime.ts',
+      line_start: 7,
+      line_end: 7,
+      keeper_id: 'sangsu',
+      kind: 'Comment',
+      content: 'Keep this task linked to the active goal',
+      goal_id: 'goal-runtime',
+      task_id: 'task-runtime',
+    })
+
+    expect(links.map(link => link.label)).toEqual(['Code', 'Goal', 'Task', 'Keeper'])
+    expect(links.find(link => link.label === 'Code')).toMatchObject({
+      tab: 'code',
+      params: {
+        section: 'ide-shell',
+        view: 'source',
+        file: 'runtime.ts',
+        line: '7',
+        surface: 'Comment',
+        source_id: 'annotation-ann-1',
+        keeper: 'sangsu',
+      },
+    })
+    expect(links.find(link => link.label === 'Goal')?.params).toMatchObject({
+      section: 'planning',
+      goal: 'goal-runtime',
+    })
+    expect(links.find(link => link.label === 'Task')?.params).toMatchObject({
+      section: 'planning',
+      task: 'task-runtime',
+    })
+    expect(links.find(link => link.label === 'Keeper')?.params).toMatchObject({
+      section: 'agents',
+      keeper: 'sangsu',
+    })
   })
 
   it('shows and highlights the focused context line from the shared IDE signal', async () => {

@@ -85,4 +85,12 @@ export interface OasHealthSummary {
   totalErrors: number
   lastLlmCallTs: number | null
   lastErrorTs: number | null
+  evidenceRefsCount: number
+  artifactRefsCount: number
+  rawTraceRefsCount: number
+  reportRefsCount: number
+  proofRefsCount: number
+  telemetryRefsCount: number
+  runtimeEvidenceRefsCount: number
+  lastEvidenceTs: number | null
 }

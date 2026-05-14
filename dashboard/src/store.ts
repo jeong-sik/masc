@@ -175,6 +175,14 @@ export const oasTotalLlmCalls = signal(0)
 export const oasTotalErrors = signal(0)
 export const oasLastLlmCallTs = signal<number | null>(null)
 export const oasLastErrorTs = signal<number | null>(null)
+export const oasEvidenceRefsCount = signal(0)
+export const oasArtifactRefsCount = signal(0)
+export const oasRawTraceRefsCount = signal(0)
+export const oasReportRefsCount = signal(0)
+export const oasProofRefsCount = signal(0)
+export const oasTelemetryRefsCount = signal(0)
+export const oasRuntimeEvidenceRefsCount = signal(0)
+export const oasLastEvidenceTs = signal<number | null>(null)
 
 export function resetOasRuntimeSignals(): void {
   oasAgentEventsRing.clear()
@@ -189,6 +197,14 @@ export function resetOasRuntimeSignals(): void {
   oasTotalErrors.value = 0
   oasLastLlmCallTs.value = null
   oasLastErrorTs.value = null
+  oasEvidenceRefsCount.value = 0
+  oasArtifactRefsCount.value = 0
+  oasRawTraceRefsCount.value = 0
+  oasReportRefsCount.value = 0
+  oasProofRefsCount.value = 0
+  oasTelemetryRefsCount.value = 0
+  oasRuntimeEvidenceRefsCount.value = 0
+  oasLastEvidenceTs.value = null
 }
 
 export function noteOasReplayWindow(input: {
@@ -283,6 +299,46 @@ export function recordOasError(tsMs: number): void {
   oasLastErrorTs.value = Math.max(oasLastErrorTs.value ?? 0, tsMs)
 }
 
+export function recordOasEvidenceRefs(input: {
+  evidenceRefsCount?: number
+  artifactRefsCount?: number
+  rawTraceRefsCount?: number
+  reportRefsCount?: number
+  proofRefsCount?: number
+  telemetryRefsCount?: number
+  runtimeEvidenceRefsCount?: number
+  tsMs?: number | null
+}): void {
+  const evidenceRefsCount = Math.max(0, Math.floor(input.evidenceRefsCount ?? 0))
+  const artifactRefsCount = Math.max(0, Math.floor(input.artifactRefsCount ?? 0))
+  const rawTraceRefsCount = Math.max(0, Math.floor(input.rawTraceRefsCount ?? 0))
+  const reportRefsCount = Math.max(0, Math.floor(input.reportRefsCount ?? 0))
+  const proofRefsCount = Math.max(0, Math.floor(input.proofRefsCount ?? 0))
+  const telemetryRefsCount = Math.max(0, Math.floor(input.telemetryRefsCount ?? 0))
+  const runtimeEvidenceRefsCount = Math.max(0, Math.floor(input.runtimeEvidenceRefsCount ?? 0))
+  if (
+    evidenceRefsCount
+    + artifactRefsCount
+    + rawTraceRefsCount
+    + reportRefsCount
+    + proofRefsCount
+    + telemetryRefsCount
+    + runtimeEvidenceRefsCount === 0
+  ) {
+    return
+  }
+  oasEvidenceRefsCount.value += evidenceRefsCount
+  oasArtifactRefsCount.value += artifactRefsCount
+  oasRawTraceRefsCount.value += rawTraceRefsCount
+  oasReportRefsCount.value += reportRefsCount
+  oasProofRefsCount.value += proofRefsCount
+  oasTelemetryRefsCount.value += telemetryRefsCount
+  oasRuntimeEvidenceRefsCount.value += runtimeEvidenceRefsCount
+  if (typeof input.tsMs === 'number' && Number.isFinite(input.tsMs)) {
+    oasLastEvidenceTs.value = Math.max(oasLastEvidenceTs.value ?? 0, input.tsMs)
+  }
+}
+
 export function updateOasKeeperSnapshot(snapshot: OasKeeperSnapshot): void {
   const next = new Map<string, OasKeeperSnapshot>(oasKeeperSnapshots.value)
   next.set(snapshot.keeper_name, snapshot)
@@ -317,6 +373,14 @@ export const oasHealthSummary: ReadonlySignal<OasHealthSummary> = computed(() =>
   totalErrors: oasTotalErrors.value,
   lastLlmCallTs: oasLastLlmCallTs.value,
   lastErrorTs: oasLastErrorTs.value,
+  evidenceRefsCount: oasEvidenceRefsCount.value,
+  artifactRefsCount: oasArtifactRefsCount.value,
+  rawTraceRefsCount: oasRawTraceRefsCount.value,
+  reportRefsCount: oasReportRefsCount.value,
+  proofRefsCount: oasProofRefsCount.value,
+  telemetryRefsCount: oasTelemetryRefsCount.value,
+  runtimeEvidenceRefsCount: oasRuntimeEvidenceRefsCount.value,
+  lastEvidenceTs: oasLastEvidenceTs.value,
 }))
 
 // --- Loading flags ---

@@ -7,6 +7,7 @@ import {
   noteOasReplayWindow,
   pushOasAgentEvent,
   recordOasError,
+  recordOasEvidenceRefs,
   recordOasLlmCall,
   resetOasRuntimeSignals,
   updateOasKeeperSnapshot,
@@ -26,8 +27,156 @@ type IngestOptions = {
   origin?: 'live' | 'replay'
 }
 
+type EvidenceRefSets = {
+  evidenceRefs: Set<string>
+  artifactRefs: Set<string>
+  rawTraceRefs: Set<string>
+  reportRefs: Set<string>
+  proofRefs: Set<string>
+  telemetryRefs: Set<string>
+  runtimeEvidenceRefs: Set<string>
+}
+
 const seenOasEventKeys = new Set<string>()
 let replayGeneration = 0
+
+function emptyEvidenceRefSets(): EvidenceRefSets {
+  return {
+    evidenceRefs: new Set(),
+    artifactRefs: new Set(),
+    rawTraceRefs: new Set(),
+    reportRefs: new Set(),
+    proofRefs: new Set(),
+    telemetryRefs: new Set(),
+    runtimeEvidenceRefs: new Set(),
+  }
+}
+
+function addEvidenceRef(target: Set<string>, all: Set<string>, ref: string): void {
+  const text = ref.trim()
+  if (!text) return
+  target.add(text)
+  all.add(text)
+}
+
+function classifyEvidenceString(
+  sets: EvidenceRefSets,
+  key: string,
+  value: string,
+): void {
+  const keyText = key.toLowerCase()
+  const valueText = value.trim()
+  if (!valueText) return
+  const combined = `${keyText} ${valueText.toLowerCase()}`
+  const ref = `${keyText || 'value'}:${valueText}`
+  const artifactKey =
+    keyText === 'artifact_id'
+    || keyText === 'artifact_ref'
+    || keyText === 'artifact_path'
+    || keyText === 'artifact_uri'
+    || keyText === 'artifact'
+  if (artifactKey || combined.includes('artifact://')) {
+    addEvidenceRef(sets.artifactRefs, sets.evidenceRefs, ref)
+  }
+  if (
+    keyText.includes('raw_trace')
+    || combined.includes('raw_trace')
+    || combined.includes('raw-trace')
+  ) {
+    addEvidenceRef(sets.rawTraceRefs, sets.evidenceRefs, ref)
+  }
+  if (
+    keyText === 'report'
+    || keyText === 'report_json'
+    || keyText === 'report_md'
+    || keyText === 'report_path'
+    || keyText === 'report_ref'
+    || keyText === 'report_uri'
+    || combined.includes('report_json')
+    || combined.includes('report_md')
+  ) {
+    addEvidenceRef(sets.reportRefs, sets.evidenceRefs, ref)
+  }
+  if (
+    keyText === 'proof'
+    || keyText === 'proof_json'
+    || keyText === 'proof_md'
+    || keyText === 'proof_path'
+    || keyText === 'proof_ref'
+    || keyText === 'proof_uri'
+    || combined.includes('proof_json')
+    || combined.includes('proof_md')
+  ) {
+    addEvidenceRef(sets.proofRefs, sets.evidenceRefs, ref)
+  }
+  if (
+    keyText === 'telemetry'
+    || keyText === 'telemetry_json'
+    || keyText === 'telemetry_md'
+    || keyText === 'telemetry_path'
+    || keyText === 'telemetry_ref'
+    || keyText === 'telemetry_uri'
+    || combined.includes('runtime-telemetry')
+    || combined.includes('telemetry_json')
+    || combined.includes('telemetry_md')
+  ) {
+    addEvidenceRef(sets.telemetryRefs, sets.evidenceRefs, ref)
+  }
+  if (
+    keyText === 'evidence'
+    || keyText === 'evidence_json'
+    || keyText === 'evidence_bundle'
+    || keyText === 'evidence_file'
+    || keyText === 'evidence_path'
+    || keyText === 'evidence_ref'
+    || combined.includes('runtime-evidence')
+  ) {
+    addEvidenceRef(sets.runtimeEvidenceRefs, sets.evidenceRefs, ref)
+  }
+}
+
+function collectEvidenceRefs(
+  value: unknown,
+  sets: EvidenceRefSets,
+  key = '',
+  depth = 0,
+): void {
+  if (depth > 8) return
+  if (typeof value === 'string') {
+    classifyEvidenceString(sets, key, value)
+    return
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectEvidenceRefs(item, sets, key, depth + 1)
+    }
+    return
+  }
+  if (!isRecord(value)) return
+  const artifactId = asString(value.artifact_id)
+  if (artifactId) {
+    addEvidenceRef(sets.artifactRefs, sets.evidenceRefs, `artifact_id:${artifactId}`)
+  }
+  for (const [childKey, childValue] of Object.entries(value)) {
+    collectEvidenceRefs(childValue, sets, childKey, depth + 1)
+  }
+}
+
+function recordEvidenceRefsForEvent(event: OasRuntimeEnvelope): void {
+  const sets = emptyEvidenceRefSets()
+  collectEvidenceRefs(event, sets)
+  if (sets.evidenceRefs.size === 0) return
+  recordOasEvidenceRefs({
+    evidenceRefsCount: sets.evidenceRefs.size,
+    artifactRefsCount: sets.artifactRefs.size,
+    rawTraceRefsCount: sets.rawTraceRefs.size,
+    reportRefsCount: sets.reportRefs.size,
+    proofRefsCount: sets.proofRefs.size,
+    telemetryRefsCount: sets.telemetryRefs.size,
+    runtimeEvidenceRefsCount: sets.runtimeEvidenceRefs.size,
+    tsMs: eventTimestampMs(event),
+  })
+}
 
 function eventPayload(event: OasRuntimeEnvelope): Record<string, unknown> {
   return isRecord(event.payload) ? event.payload : {}
@@ -172,6 +321,7 @@ function ingestRuntimeProjection(
 ): void {
   const payload = eventPayload(event)
   const agentName = agentNameFromEnvelope(event)
+  recordEvidenceRefsForEvent(event)
   switch (event.type) {
     case 'oas:masc:autonomy:agent_selected':
       pushOasAgentEvent({

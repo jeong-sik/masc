@@ -108,6 +108,8 @@ export interface IdeRunProgressSummary {
   readonly totalEvents: number
   readonly currentFileEvents: number
   readonly linkedEvents: number
+  readonly linkedCoveragePercent: number
+  readonly linkedCoverageLabel: string
   readonly keeperTotalCount: number
   readonly latestAgeLabel: string
   readonly surfaceCounts: ReadonlyArray<IdeRunProgressSurfaceCount>
@@ -476,6 +478,9 @@ export function deriveIdeRunProgressSummary(
       && normalizeIdeContextFilePath(event.context.file_path) === activeFilePath,
     ).length
   const linkedEvents = events.filter(event => event.context !== undefined).length
+  const linkedCoveragePercent = events.length === 0
+    ? 0
+    : Math.round((linkedEvents / events.length) * 100)
   const surfaceCounts: IdeRunProgressSurfaceCount[] = PROGRESS_SURFACES.map(([key, label]) => {
     const matchingEvents = events.filter(event => event.context?.[key])
     return {
@@ -514,6 +519,8 @@ export function deriveIdeRunProgressSummary(
     totalEvents: events.length,
     currentFileEvents,
     linkedEvents,
+    linkedCoveragePercent,
+    linkedCoverageLabel: `${linkedCoveragePercent}%`,
     keeperTotalCount: keeperEntries.length,
     latestAgeLabel: latestAgeLabel(events),
     surfaceCounts,
@@ -528,6 +535,22 @@ function RunProgressStrip({ summary }: { readonly summary: IdeRunProgressSummary
       <div class="ide-run-progress-head">
         <span>RUN PROGRESS</span>
         <span>${summary.linkedEvents}/${summary.totalEvents} linked</span>
+      </div>
+      <div class="ide-run-progress-coverage">
+        <div class="ide-run-progress-coverage-head">
+          <span>CONTEXT COVERAGE</span>
+          <span>${summary.linkedCoverageLabel}</span>
+        </div>
+        <div
+          class="ide-run-progress-coverage-bar"
+          role="progressbar"
+          aria-label=${`Linked context coverage ${summary.linkedEvents} of ${summary.totalEvents} events`}
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow=${summary.linkedCoveragePercent}
+        >
+          <span style=${{ width: summary.linkedCoverageLabel }} />
+        </div>
       </div>
       <div class="ide-run-progress-stats" role="list" aria-label="Run progress stats">
         <span role="listitem"><strong>${summary.totalEvents}</strong> events</span>

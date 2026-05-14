@@ -1605,6 +1605,7 @@ button.ide-persistence-focus:focus-visible {
 }
 
 .ide-run-progress-head > span,
+.ide-run-progress-coverage-head > span,
 .ide-run-progress-stats > span,
 .ide-run-progress-surfaces > span,
 .ide-run-progress-keepers > span {
@@ -1612,6 +1613,37 @@ button.ide-persistence-focus:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ide-run-progress-coverage {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ide-run-progress-coverage-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  color: var(--color-fg-muted);
+  font: var(--type-eyebrow);
+}
+
+.ide-run-progress-coverage-bar {
+  width: 100%;
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--r-0);
+  background: var(--color-bg-muted);
+}
+
+.ide-run-progress-coverage-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--color-accent-fg) 76%, var(--color-status-info));
+  transition: width var(--t-fast) ease;
 }
 
 .ide-run-progress-stats,

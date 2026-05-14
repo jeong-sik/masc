@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
 import { fireEvent } from '@testing-library/preact'
-import { deriveIdeContextLens, IdeContextLens } from './ide-context-lens'
+import { deriveIdeContextLens, IdeContextLens, routeLinksForContext } from './ide-context-lens'
 import type { IdeAnnotation } from '../../api/schemas/ide-annotations'
 import type { UnifiedDiffRow } from '../../api/workspace'
 import type { AnchoredThread } from './anchored-thread-rail-store'
@@ -328,14 +328,50 @@ describe('IdeContextLens', () => {
     )
 
     const links = [...container.querySelectorAll<HTMLButtonElement>('.ide-context-route-link')]
-    expect(links.map(link => link.textContent)).toEqual(['Goal', 'Task', 'Keeper'])
+    expect(links.map(link => link.textContent)).toEqual(['Code', 'Goal', 'Task', 'Keeper'])
 
-    fireEvent.click(links[0]!)
+    fireEvent.click(links.find(link => link.textContent === 'Goal')!)
     expect(activated[0]).toMatchObject({
       id: 'goal:goal-ide',
       tab: 'workspace',
       params: { section: 'planning', goal: 'goal-ide' },
     })
+  })
+
+  it('routes file and line context back into the Code IDE shell', () => {
+    const links = routeLinksForContext({
+      filePath: ' lib\\runtime.ml ',
+      line: 42,
+      surface: 'Task',
+      label: 'Runtime task',
+      sourceId: 'task:runtime',
+      keeperId: 'sangsu',
+    })
+
+    expect(links[0]).toMatchObject({
+      id: 'code:lib/runtime.ml:42',
+      label: 'Code',
+      tab: 'code',
+      params: {
+        section: 'ide-shell',
+        view: 'source',
+        file: 'lib/runtime.ml',
+        line: '42',
+        surface: 'Task',
+        label: 'Runtime task',
+        source_id: 'task:runtime',
+        keeper: 'sangsu',
+      },
+      evidence: 'Code lib/runtime.ml:42',
+    })
+  })
+
+  it('does not build Code routes for unsafe file paths', () => {
+    expect(routeLinksForContext({
+      filePath: '/tmp/runtime.ml',
+      line: 42,
+      goalId: 'goal-ide',
+    }).map(link => link.label)).toEqual(['Goal'])
   })
 
   it('links conversation threads into board, comment, keeper, and line context', () => {
@@ -406,6 +442,7 @@ describe('IdeContextLens', () => {
     })
     expect(model.anchors[0]?.meta).toContain('goal goal-ide')
     expect(model.anchors[0]?.route_links?.map(link => link.label)).toEqual([
+      'Code',
       'Goal',
       'Task',
       'Board',
@@ -419,6 +456,18 @@ describe('IdeContextLens', () => {
     expect(model.anchors[0]?.route_links?.find(link => link.label === 'Comment')).toMatchObject({
       tab: 'workspace',
       params: { section: 'board', post: 'post-1', comment: 'comment-1' },
+    })
+    expect(model.anchors[0]?.route_links?.find(link => link.label === 'Code')).toMatchObject({
+      tab: 'code',
+      params: {
+        section: 'ide-shell',
+        view: 'source',
+        file: 'lib/keeper/keeper_exec_ide.ml',
+        line: '27',
+        surface: 'Comment',
+        source_id: 'event-evt-context',
+        keeper: 'sangsu',
+      },
     })
     expect(model.anchors[0]?.route_links?.find(link => link.label === 'Log')).toMatchObject({
       tab: 'monitoring',

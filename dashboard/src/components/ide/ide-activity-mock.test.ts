@@ -127,6 +127,7 @@ describe('IdeActivityMock', () => {
 
     const activityRouteLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-activity-route-link')]
     expect(activityRouteLinks.map(link => link.textContent)).toEqual([
+      'Code',
       'Goal',
       'Task',
       'Board',
@@ -137,6 +138,8 @@ describe('IdeActivityMock', () => {
       'Telemetry',
       'Keeper',
     ])
+    fireEvent.click(activityRouteLinks.find(link => link.textContent === 'Code')!)
+    expect(window.location.hash).toBe('#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=4&surface=PR&label=telemetry.turn&source_id=evt-1&keeper=sangsu')
     fireEvent.click(activityRouteLinks.find(link => link.textContent === 'Telemetry')!)
     expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&session_id=sess-runtime&operation_id=op-runtime&worker_run_id=wr-runtime&q=turn-1')
 
@@ -153,6 +156,7 @@ describe('IdeActivityMock', () => {
       source_id: 'evt-1',
     })
     expect(ideContextFocus.value?.route_links?.map(link => link.label)).toEqual([
+      'Code',
       'Goal',
       'Task',
       'Board',

@@ -403,7 +403,9 @@ export function normalizeRouteParams(tabId: TabId, params: Record<string, string
     next.section = defaultParamsForTab(tabId).section ?? ''
   }
 
-  delete next.surface
+  if (!(tabId === 'code' && next.section === 'ide-shell')) {
+    delete next.surface
+  }
   delete next.operation
   delete next.run_id
 

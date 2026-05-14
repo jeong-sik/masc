@@ -652,7 +652,7 @@
   align-items: center;
   gap: 3px;
   min-width: 0;
-  max-width: 116px;
+  max-width: 13rem;
   margin-left: auto;
   padding: 1px 5px;
   border: 1px solid var(--color-border-default);
@@ -661,6 +661,25 @@
   color: var(--color-fg-muted);
   font-family: var(--font-mono);
   font-size: var(--fs-9);
+}
+
+.ide-explorer-context-chip button {
+  min-width: 0;
+  max-width: 4rem;
+  padding: 0 3px;
+  overflow: hidden;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--r-0);
+  background: var(--color-bg-elevated);
+  color: var(--color-accent-fg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide-explorer-context-chip button:hover,
+.ide-explorer-context-chip button:focus-visible {
+  border-color: var(--color-accent-fg);
+  color: var(--color-fg-primary);
 }
 
 .ide-explorer-context-chip > span {

@@ -21,7 +21,9 @@ import {
   keeperLineSelectExt,
   contextFocusLineExt,
   focusEditorContextLine,
+  annotationLineChipExt,
   pushOwnership,
+  pushAnnotationLines,
   internalDocumentSync,
   syntaxHighlightExt,
 } from './ide-editor-extensions'
@@ -244,6 +246,7 @@ export function IdeEditor({
               keepers=${keepers}
               onKeeperLineSelect=${onKeeperLineSelect}
               contextFocus=${currentFileFocus}
+              annotations=${annotations}
             />`
       }
     </div>
@@ -552,6 +555,7 @@ function CodeMirrorEditor({
   showBlame,
   keepers,
   onKeeperLineSelect,
+  annotations = [],
   contextFocus,
 }: {
   readonly documentStore: CodeDocumentStore
@@ -570,6 +574,10 @@ function CodeMirrorEditor({
 
   const document = documentStore.document()
   const ownership = ownershipStore.ownership()
+  const currentFileAnnotations = useMemo(
+    () => annotations.filter(annotation => annotation.file_path === document.file_path),
+    [annotations, document.file_path],
+  )
 
   // Mount CM6 instance
   useEffect(() => {
@@ -595,6 +603,7 @@ function CodeMirrorEditor({
           lspExtension({ filePath: mountDocument.file_path }),
           keeperCursorExtension(),
           contextFocusLineExt(),
+          annotationLineChipExt(),
           EditorView.updateListener.of((update) => {
             const sel = getSelectedAnnotation(update.view)
             if (sel !== prevAnnRef.current) {
@@ -655,15 +664,41 @@ function CodeMirrorEditor({
   useEffect(() => {
     const view = editorRef.current
     if (!view || !ready) return
+    pushAnnotationLines(view, currentFileAnnotations.map(annotation => ({
+      id: annotation.id,
+      line: annotation.line_start,
+      kind: annotation.kind,
+      keeperId: annotation.keeper_id,
+      goalId: annotation.goal_id,
+      taskId: annotation.task_id,
+    })))
+  }, [
+    currentFileAnnotations,
+    ready,
+  ])
+
+  useEffect(() => {
+    const view = editorRef.current
+    if (!view || !ready) return
     if (!contextFocus || contextFocus.file_path !== documentStore.document().file_path) {
       focusEditorContextLine(view, undefined)
       return
     }
-    focusEditorContextLine(view, contextFocus.line)
+    focusEditorContextLine(view, contextFocus.line === undefined ? undefined : {
+      line: contextFocus.line,
+      surface: contextFocus.surface,
+      label: contextFocus.label,
+      keeperId: contextFocus.keeper_id,
+      linkCount: contextFocus.route_links?.length,
+    })
   }, [
     contextFocus?.activated_at_ms,
     contextFocus?.file_path,
     contextFocus?.line,
+    contextFocus?.surface,
+    contextFocus?.label,
+    contextFocus?.keeper_id,
+    contextFocus?.route_links,
     document.file_path,
     documentStore,
     ready,

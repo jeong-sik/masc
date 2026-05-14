@@ -96,6 +96,31 @@ describe('IdeExplorer tree row keyboard accessibility', () => {
     expect(keeperOwnedRow?.textContent).toContain('NK')
     expect(keeperOwnedRow?.textContent).toContain('router.ts')
   })
+
+  it('summarizes workspace git changes from file tree diff badges', () => {
+    const store = createFileTreeStore()
+    store.seed(SAMPLE)
+    render(h(IdeExplorer, { fileTreeStore: store }), container)
+
+    const summary = container.querySelector<HTMLElement>('[aria-label="Workspace git changes: 1 changed, +14"]')
+    expect(summary).not.toBeNull()
+    expect(summary?.textContent).toContain('Git changes')
+    expect(summary?.textContent).toContain('1 changed')
+    expect(summary?.textContent).toContain('+14')
+
+    const diffBadge = Array.from(container.querySelectorAll<HTMLElement>('[aria-label="Git diff +14"]'))
+      .find(el => el.textContent === '+14')
+    expect(diffBadge).toBeDefined()
+  })
+
+  it('hides the git changes summary when the workspace tree has no diffs', () => {
+    const store = createFileTreeStore()
+    store.seed(SAMPLE.map(node => ({ ...node, diff: null })))
+    render(h(IdeExplorer, { fileTreeStore: store }), container)
+
+    expect(container.textContent).not.toContain('Git changes')
+  })
+
   it('renders repository source in the explorer header', () => {
     const store = createFileTreeStore()
     store.seed(SAMPLE)

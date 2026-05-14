@@ -3,8 +3,8 @@
  *
  * Mirrors the keeper-state.ts module-level signal pattern. Keeps a
  * flat array of nodes plus an expansion set, derives the visible
- * subset on demand. Seed data is supplied by the consumer (PR-2's
- * mock fixture initially; real keeper artifacts in a follow-up).
+ * subset on demand. Seed data is supplied by the IDE data coordinator
+ * from the workspace tree route.
  *
  * Headless-friendly: the store has zero DOM/render dependencies and
  * its public API is consumable by both Preact (signal.value reads)
@@ -29,9 +29,17 @@ export interface FileTreeNode {
   readonly hueIndex: number | null  // 1..12 (matches RFC 0019 mapping)
 }
 
+export interface FileTreeDiffSummary {
+  readonly changedFiles: number
+  readonly additions: number
+  readonly deletions: number
+  readonly binaryFiles: number
+}
+
 export interface FileTreeStore {
   readonly seed: (nodes: ReadonlyArray<FileTreeNode>) => void
   readonly visibleNodes: () => ReadonlyArray<FileTreeNode>
+  readonly diffSummary: () => FileTreeDiffSummary
   readonly subscribe: (listener: () => void) => () => void
   readonly expand: (path: string) => void
   readonly collapse: (path: string) => void
@@ -45,6 +53,45 @@ export interface FileTreeStore {
 
 function normalizedParent(parent: string | null): string | null {
   return parent === '' ? null : parent
+}
+
+const EMPTY_DIFF_SUMMARY: FileTreeDiffSummary = {
+  changedFiles: 0,
+  additions: 0,
+  deletions: 0,
+  binaryFiles: 0,
+}
+
+export function summarizeFileTreeDiffs(
+  nodes: ReadonlyArray<FileTreeNode>,
+): FileTreeDiffSummary {
+  let changedFiles = 0
+  let additions = 0
+  let deletions = 0
+  let binaryFiles = 0
+
+  for (const node of nodes) {
+    if (node.hasChildren || node.diff === null) continue
+    changedFiles += 1
+    if (node.diff === 'bin') {
+      binaryFiles += 1
+      continue
+    }
+
+    for (const part of node.diff.split(/\s+/)) {
+      if (part.startsWith('+')) additions += parseDiffCount(part)
+      else if (part.startsWith('-')) deletions += parseDiffCount(part)
+    }
+  }
+
+  return changedFiles === 0
+    ? EMPTY_DIFF_SUMMARY
+    : { changedFiles, additions, deletions, binaryFiles }
+}
+
+function parseDiffCount(token: string): number {
+  const parsed = Number.parseInt(token.slice(1), 10)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
 }
 
 export function createFileTreeStore(): FileTreeStore {
@@ -87,6 +134,7 @@ export function createFileTreeStore(): FileTreeStore {
   })
 
   const visibleNodes = (): ReadonlyArray<FileTreeNode> => visibleNodesSignal.value
+  const diffSummary = (): FileTreeDiffSummary => summarizeFileTreeDiffs(allNodes.value)
 
   const subscribe = (listener: () => void): (() => void) => {
     let sawInitialSnapshot = false
@@ -142,6 +190,7 @@ export function createFileTreeStore(): FileTreeStore {
   return {
     seed,
     visibleNodes,
+    diffSummary,
     subscribe,
     expand,
     collapse,

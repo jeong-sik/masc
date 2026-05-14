@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { Search } from 'lucide-preact'
 import { activeKeeperName } from '../../keeper-state'
-import { type FileTreeStore, type FileTreeNode } from './file-tree-store'
+import { type FileTreeStore, type FileTreeNode, type FileTreeDiffSummary } from './file-tree-store'
 import { activeIdeFile, ideContextFocus, type IdeContextFocus } from './ide-state'
 import type { WorkspaceSource } from '../../api/workspace-source'
 import type { Repository } from '../../api/repositories'
@@ -150,6 +150,7 @@ export function IdeExplorer({
     return visible.filter(n => n.label.toLowerCase().includes(needle))
   }, [visible, filter])
   const fileCount = filtered.filter(n => !n.hasChildren).length
+  const diffSummary = useMemo(() => store.diffSummary(), [store, tick])
   const scopeLabel = explorerScopeLabel(source, keeperName, repoList)
 
   // Reverse map: file_path → keepers currently focused on that file
@@ -190,6 +191,7 @@ export function IdeExplorer({
           >${scopeLabel.label}</span></span>
         <span>${fileCount} FILES</span>
       </header>
+      ${diffSummary.changedFiles > 0 ? ExplorerDiffSummary(diffSummary) : null}
       ${repoList.length > 0 || onRepositoryScan ? html`
         <div
           style=${{
@@ -413,9 +415,53 @@ function TreeRow(
           `)}</span>`
         : null}
       ${node.diff !== null
-        ? html`<span style=${{ color: 'var(--color-fg-muted)', font: 'var(--fs-11)' }}>${node.diff}</span>`
+        ? html`<span
+            aria-label=${`Git diff ${node.diff}`}
+            title=${`Git diff ${node.diff}`}
+            style=${{ color: 'var(--color-fg-muted)', font: 'var(--fs-11)' }}
+          >${node.diff}</span>`
         : null}
     </li>
+  `
+}
+
+function ExplorerDiffSummary(summary: FileTreeDiffSummary) {
+  const parts = [
+    `${summary.changedFiles} changed`,
+    summary.additions > 0 ? `+${summary.additions}` : null,
+    summary.deletions > 0 ? `-${summary.deletions}` : null,
+    summary.binaryFiles > 0 ? `${summary.binaryFiles} bin` : null,
+  ].filter((part): part is string => part !== null)
+  return html`
+    <div
+      role="status"
+      aria-label=${`Workspace git changes: ${parts.join(', ')}`}
+      style=${{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 'var(--sp-2)',
+        minHeight: '24px',
+        padding: 'var(--sp-1) var(--sp-2)',
+        color: 'var(--color-fg-secondary)',
+        background: 'var(--color-bg-muted)',
+        border: '1px solid var(--color-border-default)',
+        borderRadius: 'var(--r-1)',
+        font: 'var(--type-eyebrow)',
+        fontVariantNumeric: 'tabular-nums',
+      }}
+    >
+      <span>Git changes</span>
+      <span
+        style=${{
+          display: 'inline-flex',
+          gap: 'var(--sp-2)',
+          color: 'var(--color-fg-primary)',
+        }}
+      >
+        ${parts.map(part => html`<span key=${part}>${part}</span>`)}
+      </span>
+    </div>
   `
 }
 

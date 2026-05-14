@@ -49,8 +49,6 @@ import {
   boardHearthsError,
   subBoardOptions,
   subBoardOptionsLoading,
-  subBoardOptionsError,
-  loadSubBoardOptionsForPost,
   boardExcludeAutomation,
   boardLoading,
   boardLoadingMore,

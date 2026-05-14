@@ -135,6 +135,24 @@ export interface DashboardShellResponse {
   runtime_resolution?: DashboardRuntimeResolution | null
 }
 
+export interface DashboardBootstrapSliceError {
+  error: string
+  slice?: string
+}
+
+export type DashboardBootstrapSlice<T> = T | DashboardBootstrapSliceError
+
+export interface DashboardBootstrapResponse {
+  served_at?: string
+  milestone?: number
+  shell?: DashboardBootstrapSlice<DashboardShellResponse>
+  execution?: DashboardBootstrapSlice<DashboardExecutionResponse>
+  planning?: DashboardBootstrapSlice<DashboardPlanningResponse>
+  namespace_truth?: DashboardBootstrapSlice<DashboardNamespaceTruthResponse>
+  goals?: DashboardBootstrapSlice<DashboardGoalsTreeResponse>
+  goal_loop_status?: DashboardBootstrapSlice<Record<string, unknown>>
+}
+
 export interface DashboardNamespaceTruthAttentionSummary {
   count: number
   bad_count: number

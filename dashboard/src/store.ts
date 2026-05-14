@@ -17,6 +17,8 @@ import type {
   DashboardExecutionWorkerSupportBrief,
   DashboardExecutionContinuityBrief,
   DashboardExecutionResponse,
+  DashboardBootstrapResponse,
+  DashboardBootstrapSliceError,
   DashboardMemoryResponse,
   DashboardPlanningResponse,
   DashboardConfigResolution,
@@ -30,7 +32,7 @@ import type {
   DashboardCoordinationFsmSnapshot,
   DashboardCoordinationFsmViolation,
 } from './types'
-import { fetchDashboardShell } from './api/dashboard-hot'
+import { fetchDashboardBootstrap, fetchDashboardShell } from './api/dashboard-hot'
 import { journal } from './sse'
 import { showToast } from './components/common/toast'
 import {
@@ -49,6 +51,9 @@ import { FetchScheduler } from './lib/fetch-scheduler'
 import { isRecord, asString, asNumber } from './components/common/normalize'
 import { setCanonicalDashboardActor } from './lib/dashboard-session-actor'
 import { timeBoardRequest } from './board-metrics'
+import { namespaceTruth, namespaceTruthError, namespaceTruthInitializing } from './namespace-truth-signals'
+import { normalizeNamespaceTruth } from './namespace-truth-normalizers'
+import { hydrateGoalTreeSnapshot } from './goal-tree-state'
 import {
   normalizeAgent, normalizeTask, normalizeMessage,
   normalizeExecutionQueueItem,
@@ -520,12 +525,58 @@ export function invalidateDashboardCache(): void {
   // Projection endpoints are intentionally fresh-first after the operator-console rewrite.
 }
 
+function bootstrapSliceError(slice: unknown): slice is DashboardBootstrapSliceError {
+  return isRecord(slice) && typeof slice.error === 'string'
+}
+
+async function refreshDashboardFallback(opts?: RefreshOptions): Promise<void> {
+  await Promise.all([refreshShell(opts), refreshExecution(opts)])
+}
+
+function hydrateDashboardBootstrap(data: DashboardBootstrapResponse): void {
+  if (!data.shell || bootstrapSliceError(data.shell)) {
+    throw new Error('dashboard bootstrap shell slice unavailable')
+  }
+  if (!data.execution || bootstrapSliceError(data.execution)) {
+    throw new Error('dashboard bootstrap execution slice unavailable')
+  }
+
+  hydrateShellSnapshot(data.shell, { light: true })
+  hydrateExecutionSnapshot(data.execution)
+
+  if (data.planning && !bootstrapSliceError(data.planning)) {
+    hydratePlanningSnapshot(data.planning)
+  }
+  if (data.namespace_truth && !bootstrapSliceError(data.namespace_truth)) {
+    const normalized = normalizeNamespaceTruth(data.namespace_truth)
+    namespaceTruth.value = normalized
+    namespaceTruthError.value = null
+    namespaceTruthInitializing.value = false
+    serverStatus.value = mergeServerStatus(
+      serverStatus.value,
+      normalized.root.status ?? null,
+    )
+  }
+  if (data.goals && !bootstrapSliceError(data.goals)) {
+    hydrateGoalTreeSnapshot(data.goals)
+  }
+}
+
 export async function refreshDashboard(opts?: RefreshOptions): Promise<void> {
   if (inflightDashboardRefresh) return inflightDashboardRefresh
   dashboardLoading.value = true
   inflightDashboardRefresh = (async () => {
     try {
-      await Promise.all([refreshShell(opts), refreshExecution(opts)])
+      executionLoading.value = true
+      executionError.value = null
+      try {
+        hydrateDashboardBootstrap(await fetchDashboardBootstrap())
+      } catch (bootstrapErr) {
+        console.warn('[Dashboard] bootstrap refresh failed, falling back:', bootstrapErr)
+        await refreshDashboardFallback(opts)
+      } finally {
+        executionLoading.value = false
+      }
     } catch (err) {
       console.warn('[Dashboard] refresh error:', err)
     } finally {

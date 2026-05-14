@@ -113,6 +113,7 @@ export type {
   CascadeValidationStatus,
 } from './dashboard-cascade'
 export { reportToolHostFailure } from './tool-host-failure'
+export { fetchDashboardBootstrap } from './dashboard-hot'
 
 // --- Dashboard projections ---
 

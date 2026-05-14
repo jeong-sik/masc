@@ -35,6 +35,16 @@ val required_tool_lane_unavailable_error :
   materialized_tools:string list ->
   Agent_sdk.Error.sdk_error
 
+type empty_candidate_classification =
+  | Tool_capability_empty
+  | Provider_unavailable
+
+val classify_empty_candidates :
+  require_tool_choice_support:bool ->
+  require_tool_support:bool ->
+  tool_filtered_candidate_count:int ->
+  empty_candidate_classification
+
 val provider_rejections_for_no_tool_error :
   keeper_name:string ->
   ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->

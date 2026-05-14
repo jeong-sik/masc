@@ -258,7 +258,7 @@ let run_named
   let original_candidates =
     Cascade_runtime_candidate.of_provider_configs original_candidate_cfgs
   in
-  let candidate_cfgs =
+  let tool_filtered_candidate_cfgs =
     filter_candidate_providers_for_tool_support
       ~keeper_name
       ?runtime_mcp_policy
@@ -270,7 +270,7 @@ let run_named
       candidate_cfgs
   in
   let candidates =
-    candidate_cfgs
+    tool_filtered_candidate_cfgs
     |> Cascade_runtime_candidate.of_provider_configs
     |> List.filter
          (fun candidate ->
@@ -303,7 +303,14 @@ let run_named
           original_candidates
       in
       let internal_error =
-        if require_tool_choice_support || require_tool_support then
+        match
+          classify_empty_candidates
+            ~require_tool_choice_support
+            ~require_tool_support
+            ~tool_filtered_candidate_count:
+              (List.length tool_filtered_candidate_cfgs)
+        with
+        | Tool_capability_empty ->
           No_tool_capable_provider
             {
               cascade_name = error_cascade_name;
@@ -311,7 +318,7 @@ let run_named
               required_tool_names;
               provider_rejections;
             }
-        else
+        | Provider_unavailable ->
           Cascade_exhausted
             {
               cascade_name = error_cascade_name;
@@ -341,6 +348,9 @@ let run_named
                            (fun tool_name -> `String tool_name)
                            required_tool_names) );
                     ("candidate_count", `Int (List.length original_candidate_cfgs));
+                    ( "tool_filtered_candidate_count",
+                      `Int (List.length tool_filtered_candidate_cfgs) );
+                    ("health_filtered_candidate_count", `Int (List.length candidates));
                     ( "rejected_candidate_count",
                       `Int (List.length provider_rejections) );
                     ( "rejection_reasons",

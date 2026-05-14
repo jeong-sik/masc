@@ -264,6 +264,38 @@ let test_pass_for_healthy () =
   check_disp "healthy" r "pass" "healthy"
 ;;
 
+let test_pass_for_completed_claim_progress () =
+  let r =
+    mk_receipt
+      ~outcome:`Ok
+      ~cascade_outcome:R.Cascade_completed
+      ~tool_contract_result:Contract_needs_execution_progress
+      ~tools_used:[ "keeper_task_claim" ]
+      ~required_tools:[ "keeper_task_claim" ]
+      ~terminal_reason_code:"completed"
+      ()
+  in
+  check_disp "completed claim progress" r "pass" "healthy"
+;;
+
+let test_pause_when_unrelated_tool_used_for_required_progress () =
+  let r =
+    mk_receipt
+      ~outcome:`Ok
+      ~cascade_outcome:R.Cascade_completed
+      ~tool_contract_result:Contract_needs_execution_progress
+      ~tools_used:[ "keeper_task_claim" ]
+      ~required_tools:[ "keeper_task_done" ]
+      ~terminal_reason_code:"completed"
+      ()
+  in
+  check_disp
+    "unrelated tool does not satisfy required progress"
+    r
+    "pause_human"
+    "tool_required_unsatisfied"
+;;
+
 let test_pass_next_for_cascade_fallback () =
   let r =
     mk_receipt
@@ -649,6 +681,14 @@ let () =
             test_alert_for_cascade_exhausted
         ; test_case "unmapped -> unknown" `Quick test_unknown_when_unmapped
         ; test_case "ok+completed -> pass" `Quick test_pass_for_healthy
+        ; test_case
+            "ok+completed claim progress -> pass"
+            `Quick
+            test_pass_for_completed_claim_progress
+        ; test_case
+            "unrelated tool does not satisfy required progress"
+            `Quick
+            test_pause_when_unrelated_tool_used_for_required_progress
         ; test_case
             "fallback -> pass_next_model"
             `Quick

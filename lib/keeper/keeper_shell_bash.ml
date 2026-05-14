@@ -97,6 +97,11 @@ let shell_interpreter_names = [ "bash"; "sh"; "zsh" ]
 
 let command_name text = Filename.basename text
 
+let is_direct_masc_tool_command_name name =
+  String.starts_with ~prefix:"keeper_" name
+  || String.starts_with ~prefix:"masc_" name
+  || String.equal name "extend_turns"
+
 let shell_c_payload words =
   match words with
   | shell :: rest when
@@ -141,6 +146,34 @@ and strip_env_args = function
   | word :: rest when is_env_assignment word.text ->
     strip_env_args rest
   | words -> strip_command_wrappers words
+
+let direct_tool_command_name ~meta cmd =
+  let allowed =
+    Keeper_tool_policy.keeper_universe_tool_names meta
+    |> List.map String.lowercase_ascii
+  in
+  let rec first_command_name cmd =
+    let words = shell_words_with_boundaries cmd in
+    let first_from_words =
+      let rec loop = function
+        | word :: rest when word.starts_command ->
+          (match strip_command_wrappers (word :: rest) with
+           | first :: _ -> Some (command_name first.text)
+           | [] -> None)
+        | _ :: rest -> loop rest
+        | [] -> None
+      in
+      loop words
+    in
+    match shell_c_payload words with
+    | Some payload -> first_command_name payload
+    | None -> first_from_words
+  in
+  match first_command_name cmd with
+  | Some name when is_direct_masc_tool_command_name name ->
+    let normalized = String.lowercase_ascii name in
+    Some (name, List.mem normalized allowed)
+  | _ -> None
 
 let gh_pr_create_sequence = function
   | gh :: pr :: create :: _ ->
@@ -211,6 +244,40 @@ let handle_keeper_bash
          ; "cmd", `String cmd_for_log
          ])
   in
+  let direct_tool_command_block ~tool_policy_visible tool_name =
+    Prometheus.inc_counter
+      Keeper_metrics.metric_keeper_shell_bash_failures
+      ~labels:[("keeper", meta.name); ("site", "tool_invoked_as_shell")]
+      ();
+    Log.Keeper.warn
+      "keeper_bash direct tool command blocked: keeper=%s tool=%s cmd=%s"
+      meta.name tool_name cmd_for_log;
+    Yojson.Safe.to_string
+      (`Assoc
+         [ "ok", `Bool false
+         ; "error", `String "tool_invoked_as_shell_command"
+         ; "tool", `String tool_name
+         ; "cmd", `String cmd_for_log
+         ; "hint",
+           `String
+             (if tool_policy_visible
+              then
+                Printf.sprintf
+                  "%s is a MASC tool, not a shell command. Call the %s \
+                   tool directly with JSON arguments instead of using Bash."
+                  tool_name tool_name
+              else
+                Printf.sprintf
+                  "%s looks like a MASC tool, not a shell command, but it \
+                   is not visible in this keeper's tool policy. Do not run \
+                   it through Bash; pick a visible tool or update the keeper \
+                   tool policy."
+                  tool_name)
+         ; "suggested_tool", `String tool_name
+         ; "tool_policy_visible", `Bool tool_policy_visible
+         ; "retryable", `Bool true
+         ])
+  in
   if cmd = ""
   then error_json "cmd is required. Good: cmd='ls -la lib/'. Bad: cmd=''."
   else if Env_config_keeper.KeeperSandbox.hard_mode ()
@@ -218,10 +285,12 @@ let handle_keeper_bash
   then
     error_json
       "MASC_KEEPER_SANDBOX_HARD_MODE requires sandbox_profile=docker"
-  else if cmd_contains_gh_pr_create cmd
-  then gh_pr_create_block ()
-
-  else begin
+  else (
+    match direct_tool_command_name ~meta cmd with
+    | Some (tool_name, tool_policy_visible) ->
+      direct_tool_command_block ~tool_policy_visible tool_name
+    | None when cmd_contains_gh_pr_create cmd -> gh_pr_create_block ()
+    | None -> begin
     (* Tick 22: dark-launch shadow logger.  Runs
        [Worker_dev_tools.diff_command] side-by-side with the
        live gate and emits a structured line for every non-[Agree]
@@ -951,5 +1020,5 @@ let handle_keeper_bash
                        | None -> run_uncached ())
                     | None -> run_uncached ())
                end))
-  end
+  end)
 ;;

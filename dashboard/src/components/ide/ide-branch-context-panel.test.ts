@@ -97,6 +97,7 @@ describe('buildIdeBranchContextModel', () => {
     expect(model?.repoLabel).toBe('masc-mcp')
     expect(model?.currentBranch).toBe('fix/ide-branch')
     expect(model?.head).toBe('abcdef1234')
+    expect(model?.headRef).toBe('abcdef1234567890')
     expect(model?.status).toBe('dirty')
     expect(model?.branches[0]?.tone).toBe('current')
     expect(model?.lanes[0]?.path).toBe('.worktrees/fix-ide-branch')
@@ -145,6 +146,16 @@ describe('IdeBranchContextPanel', () => {
     expect(container.textContent).toContain('fix/ide-branch')
     expect(container.textContent).toContain('abcdef1234')
     expect(container.querySelector('svg[aria-label="Branch graph for masc-mcp"]')).not.toBeNull()
+
+    const repoLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-branch-repo-row button')]
+    expect(repoLinks.map(link => link.getAttribute('aria-label'))).toEqual([
+      'Open Git fix/ide-branch',
+      'Open Git abcdef1234567890',
+    ])
+    fireEvent.click(repoLinks[0]!)
+    expect(window.location.hash).toBe('#workspace?section=repositories&view=graph&ref=fix%2Fide-branch')
+    fireEvent.click(repoLinks[1]!)
+    expect(window.location.hash).toBe('#workspace?section=repositories&view=graph&ref=abcdef1234567890')
   })
 
   it('matches worktree lanes to keeper presence and cursor state by keeper label', async () => {

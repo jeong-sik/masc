@@ -12,7 +12,8 @@ import {
   keeperTraceState,
   pushTrace,
 } from './keeper-trace-store'
-import { setIdeReplayUntilMs } from './ide-replay-state'
+import { ideReplayUntilMs, setIdeReplayUntilMs } from './ide-replay-state'
+import { ideContextFocus } from './ide-state'
 
 const mountedContainers: HTMLElement[] = []
 
@@ -87,6 +88,7 @@ type KeeperTraceEventForTest = Parameters<typeof pushTrace>[0]
 
 beforeEach(() => {
   clearTraces()
+  ideContextFocus.value = null
 })
 
 afterEach(() => {
@@ -95,6 +97,7 @@ afterEach(() => {
     render(null, container)
   }
   setIdeReplayUntilMs(null)
+  ideContextFocus.value = null
   clearTraces()
 })
 
@@ -232,7 +235,7 @@ describe('OverlayKeeperTrace — bucket render (RFC-0028 §5)', () => {
     render(html`<${OverlayKeeperTrace} active=${true} />`, container)
 
     const bucket = container.querySelector('[role="group"][data-keeper="scholar"][data-line="12"]')
-    const chips = bucket?.querySelectorAll('li[role="img"]')
+    const chips = bucket?.querySelectorAll('.ide-trace-chip')
     expect(chips?.length).toBe(TRACE_CHIP_CAP)
 
     const overflow = bucket?.querySelector('[data-overflow]')
@@ -248,7 +251,7 @@ describe('OverlayKeeperTrace — bucket render (RFC-0028 §5)', () => {
     const container = createContainer()
     render(html`<${OverlayKeeperTrace} active=${true} />`, container)
     const bucket = container.querySelector('[role="group"][data-keeper="scholar"]')
-    const chips = bucket?.querySelectorAll('li[role="img"]')
+    const chips = bucket?.querySelectorAll('.ide-trace-chip')
     expect(chips?.length).toBe(3)
     expect(bucket?.querySelector('[data-overflow]')).toBeNull()
   })
@@ -262,11 +265,11 @@ describe('OverlayKeeperTrace — bucket render (RFC-0028 §5)', () => {
     const container = createContainer()
     render(html`<${OverlayKeeperTrace} active=${true} />`, container)
     const bucket = container.querySelector('[role="group"][data-keeper="scholar"][data-line="no-line"]')
-    const chips = Array.from(bucket?.querySelectorAll('li[role="img"]') ?? [])
+    const chips = Array.from(bucket?.querySelectorAll('.ide-trace-chip') ?? [])
     const sources = chips.map(c => c.getAttribute('data-source'))
     expect(sources).toEqual(expect.arrayContaining(['anchored-thread', 'bdi-snapshot', 'decision-log']))
     const lineBucket = container.querySelector('[role="group"][data-keeper="scholar"][data-line="4"]')
-    expect(lineBucket?.querySelector('li[role="img"]')?.getAttribute('data-source')).toBe('activity-event')
+    expect(lineBucket?.querySelector('.ide-trace-chip')?.getAttribute('data-source')).toBe('activity-event')
   })
 
   it('chip aria-label includes source + line + count', () => {
@@ -275,11 +278,45 @@ describe('OverlayKeeperTrace — bucket render (RFC-0028 §5)', () => {
 
     const container = createContainer()
     render(html`<${OverlayKeeperTrace} active=${true} />`, container)
-    const chip = container.querySelector('li[role="img"]')
+    const chip = container.querySelector('.ide-trace-chip')
     // The single coalesced chip should have count 2.
     expect(chip?.getAttribute('aria-label')).toContain('thread')
     expect(chip?.getAttribute('aria-label')).toContain('L42')
     expect(chip?.getAttribute('aria-label')).toContain('×2')
+  })
+
+  it('clicking a trace chip jumps the shared replay cursor and focuses IDE context', () => {
+    pushActivity('a', 'scholar', 12, 2000, 'runtime.ts', {
+      eventId: 'evt-a',
+      goalId: 'goal-runtime',
+      taskId: 'task-runtime',
+      logId: 'turn-12',
+    })
+
+    const container = createContainer()
+    render(html`<${OverlayKeeperTrace} active=${true} />`, container)
+
+    const chip = container.querySelector<HTMLButtonElement>('.ide-trace-chip[data-event-id="a"]')
+    expect(chip).not.toBeNull()
+    fireEvent.click(chip!)
+
+    expect(ideReplayUntilMs.value).toBe(2000)
+    expect(ideContextFocus.value).toMatchObject({
+      file_path: 'runtime.ts',
+      line: 12,
+      surface: 'Goal',
+      label: 'Goal activity evt-a',
+      source_id: 'trace:a',
+      keeper_id: 'scholar',
+    })
+    expect(ideContextFocus.value?.route_links?.map(link => link.label)).toEqual([
+      'Code',
+      'Goal',
+      'Task',
+      'Log',
+      'Telemetry',
+      'Keeper',
+    ])
   })
 
   it('renders operational route links for enriched activity traces', () => {

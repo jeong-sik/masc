@@ -57,7 +57,7 @@ import {
   type IdeContextFocus,
 } from './ide-state'
 import { ideConversationThreadSnapshot } from './ide-context-bridge'
-import { ideReplayUntilMs } from './ide-replay-state'
+import { ideReplayUntilMs, setIdeReplayUntilMs } from './ide-replay-state'
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -401,6 +401,7 @@ function focusTraceLineContext(
   event: EditorKeeperTraceLineEvent,
   line: number,
 ): void {
+  setIdeReplayUntilMs(event.tsMs)
   const surface = traceLineFocusSurface(event)
   const label = traceLineFocusLabel(event)
   const sourceId = event.id ? `trace:${event.id}` : `trace:${event.source}:${line}:${event.tsMs}`

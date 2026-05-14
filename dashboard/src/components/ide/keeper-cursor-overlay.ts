@@ -42,20 +42,39 @@ export const cursorOverlaySignal = signal<KeeperCursorOverlay>({
 
 // ── Keeper Color Mapping ─────────────────────────────────────────
 
-const KEEPER_COLORS = [
-  { cursor: '#FF6B6B', selection: 'rgba(255, 107, 107, 0.2)', name: 'Red' },
-  { cursor: '#4ECDC4', selection: 'rgba(78, 205, 196, 0.2)', name: 'Teal' },
-  { cursor: '#45B7D1', selection: 'rgba(69, 183, 209, 0.2)', name: 'Blue' },
-  { cursor: '#96CEB4', selection: 'rgba(150, 206, 180, 0.2)', name: 'Green' },
-  { cursor: '#FFEAA7', selection: 'rgba(255, 234, 167, 0.3)', name: 'Yellow' },
-  { cursor: '#DDA0DD', selection: 'rgba(221, 160, 221, 0.2)', name: 'Plum' },
-  { cursor: '#FFA07A', selection: 'rgba(255, 160, 122, 0.2)', name: 'Salmon' },
-  { cursor: '#98FB98', selection: 'rgba(152, 251, 152, 0.2)', name: 'PaleGreen' },
-]
+export interface KeeperCursorColor {
+  readonly slot: number
+  readonly cursor: string
+  readonly selection: string
+  readonly glow: string
+  readonly text: string
+  readonly shadow: string
+}
 
-export function getKeeperColor(keeperId: string, index?: number): { cursor: string; selection: string } {
-  const idx = index ?? (keeperId.charCodeAt(0) + (keeperId.charCodeAt(1) || 0)) % KEEPER_COLORS.length
-  return KEEPER_COLORS[idx] ?? { cursor: KEEPER_COLORS[0]!.cursor, selection: KEEPER_COLORS[0]!.selection }
+const KEEPER_COLOR_SLOT_COUNT = 12
+
+function keeperColorSlot(keeperId: string, index?: number): number {
+  if (Number.isSafeInteger(index) && index! >= 0) return (index! % KEEPER_COLOR_SLOT_COUNT) + 1
+
+  let hash = 2166136261
+  for (let i = 0; i < keeperId.length; i += 1) {
+    hash ^= keeperId.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (Math.abs(hash) % KEEPER_COLOR_SLOT_COUNT) + 1
+}
+
+export function getKeeperColor(keeperId: string, index?: number): KeeperCursorColor {
+  const slot = keeperColorSlot(keeperId, index)
+  const glow = `var(--color-keeper-${slot}-glow)`
+  return {
+    slot,
+    cursor: `var(--color-keeper-${slot})`,
+    selection: `rgb(${glow} / 0.22)`,
+    glow,
+    text: 'var(--color-bg-page)',
+    shadow: `0 0 0 1px rgb(${glow} / 0.32), 0 2px 6px rgb(${glow} / 0.20)`,
+  }
 }
 
 // ── Collision Detection ─────────────────────────────────────────
@@ -132,7 +151,7 @@ export function calculateHeatmap(cursors: Iterable<KeeperCursor>, windowMs = 600
 
 interface KeeperCursorWidgetProps {
   cursor: KeeperCursor
-  color: { cursor: string; selection: string }
+  color: KeeperCursorColor
   onJump?: (keeperId: string, line: number) => void
 }
 
@@ -176,11 +195,11 @@ export function KeeperCursorWidget({ cursor, color, onJump }: KeeperCursorWidget
           gap: '4px',
           padding: '2px 6px',
           background: color.cursor,
-          color: '#fff',
+          color: color.text,
           fontSize: '10px',
           fontWeight: '600',
           borderRadius: '3px',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+          boxShadow: color.shadow,
         }}
       >
         <span>${label}</span>
@@ -248,7 +267,7 @@ export function HeatmapRuler({ heatmap, totalLines }: HeatmapRulerProps) {
             key=${line}
             style=${{
               height: '2px',
-              background: `rgba(255, 107, 107, ${opacity})`,
+              background: `rgb(var(--color-accent-glow) / ${opacity})`,
               marginBottom: '4px',
             }}
             title=${`Line ${line}: ${activity} active keepers`}

@@ -206,7 +206,7 @@ const hoverTooltipTheme = EditorView.theme({
     background: 'var(--color-bg-surface)',
     border: '1px solid var(--color-border-default)',
     borderRadius: '6px',
-    boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+    boxShadow: 'var(--tooltip-shadow)',
     fontFamily: 'var(--font-mono)',
     fontSize: '12px',
     lineHeight: '1.5',

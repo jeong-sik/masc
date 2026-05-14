@@ -1,12 +1,14 @@
 ---- MODULE CascadeCrossFallback ----
 \* Bug Model: cross-cascade fallback per-turn budget.
 \*
-\* Models the cross-cascade promotion path that PR4 introduces in
-\* lib/cascade/cascade_inventory.ml + the cross-cascade resolver in
-\* lib/cascade/cascade_oas_runner.ml:resolve_tool_capable_provider_across_cascades
-\* (relocated from lib/oas_worker_named.ml by RFC-0047 Phase 4 rename to
-\* lib/keeper/keeper_turn_driver.ml; the resolver itself now lives in
-\* cascade_oas_runner.ml).
+\* Models the cross-cascade promotion path around strict provider resolution,
+\* tool-support filtering, and keeper cascade execution:
+\*   lib/cascade/cascade_catalog_runtime.ml:resolve_named_providers_strict_with_secondary_resolver
+\*   lib/cascade/cascade_oas_runner.ml:filter_candidate_providers_for_tool_support
+\*   lib/keeper/keeper_turn_driver.ml:run_named
+\* The old resolve_tool_capable_provider_across_cascades helper was removed
+\* when runtime routing fallbacks were purged; the safety obligation now lives
+\* on the strict provider resolution + secondary-resolver path above.
 \*
 \* The intended behavior: when a primary cascade exhausts in a turn, the
 \* runtime is allowed to promote ONE provider from the fleet inventory as
@@ -20,16 +22,18 @@
 \* provider. We model that as PromoteUnbounded — Promote without
 \* updating the guard counter.
 \*
-\* Verified against (2026-04-28):
-\*   lib/cascade/cascade_inventory.ml  — pure scoring + best_runner_among
-\*   lib/cascade/cascade_inventory.mli — single-result API contract
-\*   lib/oas_worker_named.ml           — score_provider plumbed into the
-\*                                       cross-cascade resolver site
+\* Verified against (2026-05-14):
+\*   lib/cascade/cascade_catalog_runtime.ml
+\*       — strict provider resolution + secondary resolver
+\*   lib/cascade/cascade_oas_runner.ml
+\*       — tool-support filtering with secondary_resolver
+\*   lib/keeper/keeper_turn_driver.ml
+\*       — keeper named-cascade execution entry point
 \*
-\* The spec is intentionally narrow: it does not model the *choice* of
-\* provider (that is exercised by Alcotest unit tests on
-\* best_runner_among) — it only enforces the safety property "at most
-\* one cross-cascade promotion per turn".
+\* The spec is intentionally narrow: it does not model provider ranking or
+\* request execution. Those are covered by cascade runtime/unit tests; this
+\* spec only enforces the safety property "at most one cross-cascade
+\* promotion per turn".
 
 EXTENDS Naturals
 

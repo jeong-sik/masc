@@ -5,6 +5,7 @@ import { fireEvent, waitFor } from '@testing-library/preact'
 import { IdeConversationRail, postsToAnchoredThreads, replayRailItems } from './ide-conversation-rail'
 import { activeIdeFile, ideContextFocus } from './ide-state'
 import { clearTraces, keeperTraceState } from './keeper-trace-store'
+import { ideReplayUntilMs, setIdeReplayUntilMs } from './ide-replay-state'
 
 function stubEmptyConversationFetch(): void {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
@@ -38,6 +39,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
   activeIdeFile.value = 'package.json'
   ideContextFocus.value = null
+  setIdeReplayUntilMs(null)
   clearTraces()
 })
 
@@ -246,6 +248,7 @@ describe('IdeConversationRail', () => {
     slider.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }))
 
     await waitFor(() => {
+      expect(ideReplayUntilMs.value).toBe(Date.UTC(2026, 4, 5, 10, 0, 0))
       expect(container.textContent).toContain('old thread body')
       expect(container.textContent).toContain('1/2 threads')
       expect(container.textContent).toContain('0/1 decisions')

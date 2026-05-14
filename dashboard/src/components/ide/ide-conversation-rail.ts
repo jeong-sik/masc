@@ -24,6 +24,7 @@ import {
   type AuditReplayEvent,
 } from './audit-replay-slider'
 import { publishIdeConversationThreads } from './ide-context-bridge'
+import { ideReplayUntilMs, setIdeReplayUntilMs } from './ide-replay-state'
 import { activeIdeFile, focusIdeContextAnchor, normalizeIdeContextFilePath } from './ide-state'
 import { activeKeeperName } from '../../keeper-state'
 import { globalPresenceSnapshot, PRESENCE_DOT, type KeeperPresenceEntry } from './keeper-presence-store'
@@ -128,7 +129,7 @@ export function IdeConversationRail() {
   const [decisions, setDecisions] = useState<ReadonlyArray<KeeperDecision>>(EMPTY_DECISIONS)
   const [cascadeEvents, setCascadeEvents] = useState<ReadonlyArray<CascadeStrategyTraceEvent>>(EMPTY_CASCADE)
   const [focusedId, setFocusedId] = useState<string | null>(null)
-  const [replayUntilMs, setReplayUntilMs] = useState<number | null>(null)
+  const [replayUntilMs, setReplayUntilMs] = useState<number | null>(ideReplayUntilMs.value)
   const [activeFile, setActiveFile] = useState(activeIdeFile.value)
   const [keeperName, setKeeperName] = useState(activeKeeperName.value)
   const [, forceRender] = useState(0)
@@ -139,6 +140,10 @@ export function IdeConversationRail() {
   }, [])
   useEffect(() => {
     const unsub = cursorOverlaySignal.subscribe(() => forceRender((t: number) => t + 1))
+    return () => unsub()
+  }, [])
+  useEffect(() => {
+    const unsub = ideReplayUntilMs.subscribe(value => setReplayUntilMs(value))
     return () => unsub()
   }, [])
 
@@ -251,7 +256,7 @@ export function IdeConversationRail() {
       <${AuditReplaySlider}
         events=${replayEvents}
         value=${replayUntilMs}
-        onChange=${setReplayUntilMs}
+        onChange=${setIdeReplayUntilMs}
       />
       <ol
         class="ide-rail-list"

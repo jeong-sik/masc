@@ -43,7 +43,7 @@ import { SplitDiffView, UnifiedDiffView } from './ide-diff-view'
 import { KeeperBadge } from '../keeper-badge'
 import { keeperCursorExtension } from './keeper-cursor-cm-extension'
 import { cursorOverlaySignal, getKeeperColor } from './keeper-cursor-overlay'
-import { keeperTraceState, type KeeperTraceEvent } from './keeper-trace-store'
+import { filterTraceEventsByReplay, keeperTraceState, type KeeperTraceEvent } from './keeper-trace-store'
 import {
   globalPresenceSnapshot,
   type KeeperPresenceSnapshot,
@@ -57,6 +57,7 @@ import {
   type IdeContextFocus,
 } from './ide-state'
 import { ideConversationThreadSnapshot } from './ide-context-bridge'
+import { ideReplayUntilMs } from './ide-replay-state'
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -99,6 +100,7 @@ export interface FindMatch {
 }
 
 const EMPTY_ACTIVE_LAYERS: ReadonlySet<string> = new Set()
+const EMPTY_TRACE_EVENTS: ReadonlyArray<KeeperTraceEvent> = []
 
 const VIEW_LABEL: Record<IdeEditorView, string> = {
   source: 'SOURCE',
@@ -155,6 +157,10 @@ export function IdeEditor({
     const unsub = keeperTraceState.subscribe(() => forceRender(tick => tick + 1))
     return () => unsub()
   }, [])
+  useEffect(() => {
+    const unsub = ideReplayUntilMs.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [])
 
   const document = documentStore.document()
   const lines = documentStore.lines()
@@ -167,12 +173,13 @@ export function IdeEditor({
   const activeCursors = keepersWithCursorInFile(overlay.cursors, document.file_path)
   const activeLayerKinds = activeLayersInDisplayOrder(activeLayers)
   const currentDiffRows = diffRows()
+  const replayTraceEvents = filterTraceEventsByReplay(keeperTraceState.value.events, ideReplayUntilMs.value)
   const currentFileSignals = buildCurrentFileSignals({
     filePath: document.file_path,
     annotations,
     diffRows: currentDiffRows,
     activeKeeperCount: activeCursors.length,
-    traceEvents: keeperTraceState.value.events,
+    traceEvents: replayTraceEvents,
   })
   const gridTemplateRows = editorGridRows(activeLayerKinds.length > 0, findOpen)
 
@@ -292,6 +299,7 @@ export function IdeEditor({
               onKeeperLineSelect=${onKeeperLineSelect}
               contextFocus=${currentFileFocus}
               traceActive=${activeLayers.has('keeper-trace')}
+              traceEvents=${replayTraceEvents}
               annotations=${annotations}
             />`
       }
@@ -776,6 +784,7 @@ function CodeMirrorEditor({
   annotations = [],
   contextFocus,
   traceActive = false,
+  traceEvents = EMPTY_TRACE_EVENTS,
 }: {
   readonly documentStore: CodeDocumentStore
   readonly ownershipStore: KeeperLineOwnershipStore
@@ -785,6 +794,7 @@ function CodeMirrorEditor({
   readonly annotations?: ReadonlyArray<IdeAnnotation>
   readonly contextFocus?: IdeContextFocus | null
   readonly traceActive?: boolean
+  readonly traceEvents?: ReadonlyArray<KeeperTraceEvent>
 }) {
   const containerRef = useRef<HTMLElement>(null)
   const editorRef = useRef<EditorView | null>(null)
@@ -798,7 +808,6 @@ function CodeMirrorEditor({
     () => annotations.filter(annotation => annotation.file_path === document.file_path),
     [annotations, document.file_path],
   )
-  const traceEvents = keeperTraceState.value.events
   const traceLines = useMemo(
     () => traceActive ? keeperTraceLinesForFile(document.file_path, traceEvents) : [],
     [document.file_path, traceActive, traceEvents],

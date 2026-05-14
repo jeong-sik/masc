@@ -12,6 +12,7 @@ import {
   keeperTraceState,
   pushTrace,
 } from './keeper-trace-store'
+import { setIdeReplayUntilMs } from './ide-replay-state'
 
 const mountedContainers: HTMLElement[] = []
 
@@ -93,6 +94,7 @@ afterEach(() => {
   for (const container of mountedContainers.splice(0)) {
     render(null, container)
   }
+  setIdeReplayUntilMs(null)
   clearTraces()
 })
 
@@ -174,6 +176,18 @@ describe('OverlayKeeperTrace — render gating', () => {
     const region = container.querySelector('[role="region"][aria-label="Keeper trace overlay"]')
     expect(region).not.toBeNull()
     expect(region?.getAttribute('data-overlay')).toBe('keeper-trace')
+  })
+
+  it('projects buckets through the shared audit replay cursor', () => {
+    pushAnchored('old', 'scholar', 12, 1000, 'old-thread', 'runtime.ts')
+    pushAnchored('future', 'scholar', 99, 3000, 'future-thread', 'runtime.ts')
+    setIdeReplayUntilMs(1500)
+
+    const container = createContainer()
+    render(html`<${OverlayKeeperTrace} active=${true} />`, container)
+
+    expect(container.querySelector('[data-line="12"]')).not.toBeNull()
+    expect(container.querySelector('[data-line="99"]')).toBeNull()
   })
 })
 

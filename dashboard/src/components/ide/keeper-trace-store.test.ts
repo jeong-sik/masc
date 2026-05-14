@@ -3,6 +3,7 @@ import {
   COALESCE_WINDOW_MS,
   RETENTION_MS,
   clearTraces,
+  filterTraceEventsByReplay,
   keeperTraceState,
   pushTrace,
   tracesByKeeper,
@@ -20,6 +21,30 @@ afterEach(() => {
 describe('keeper-trace-store', () => {
   it('starts empty', () => {
     expect(keeperTraceState.value.events).toHaveLength(0)
+  })
+
+  it('filters trace events at the replay cursor', () => {
+    pushTrace({
+      id: 'old',
+      tsMs: 1000,
+      keeperName: 'scholar',
+      source: 'anchored-thread',
+      threadId: 'old-thread',
+      line: 12,
+    })
+    pushTrace({
+      id: 'new',
+      tsMs: 2000,
+      keeperName: 'scholar',
+      source: 'anchored-thread',
+      threadId: 'new-thread',
+      line: 13,
+    })
+
+    expect(filterTraceEventsByReplay(keeperTraceState.value.events, null).map(e => e.id))
+      .toEqual(['old', 'new'])
+    expect(filterTraceEventsByReplay(keeperTraceState.value.events, 1500).map(e => e.id))
+      .toEqual(['old'])
   })
 
   it('appends a single event with count=1', () => {

@@ -10,6 +10,12 @@ import { Checkbox } from './common/checkbox'
 import { createAsyncResource, loaded } from '../lib/async-state'
 import { toolCategory } from './tool-call-shared'
 import { StatusChip } from './common/status-chip'
+import {
+  openIdeContextRouteLink,
+  routeLinksForContext,
+  type IdeContextRouteContext,
+  type IdeContextRouteLink,
+} from './ide/ide-context-lens'
 
 interface LogData {
   entries: LogEntry[]
@@ -78,6 +84,30 @@ type FailureEnvelope = {
   recoverability: string
   operator_action: string | null
   evidence_ref: Record<string, unknown> | null
+}
+
+interface LogCodeLocation {
+  readonly filePath: string
+  readonly line?: number
+}
+
+type LogRouteContextFields = Pick<
+  IdeContextRouteContext,
+  | 'filePath'
+  | 'line'
+  | 'goalId'
+  | 'taskId'
+  | 'boardPostId'
+  | 'commentId'
+  | 'prId'
+  | 'gitRef'
+  | 'logId'
+  | 'sessionId'
+  | 'operationId'
+  | 'workerRunId'
+>
+type MutableLogRouteContext = {
+  -readonly [K in keyof LogRouteContextFields]?: LogRouteContextFields[K]
 }
 
 function normalizedLevel(entry: LogEntry): string {
@@ -156,6 +186,82 @@ function nestedString(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
   return trimmed === '' ? null : trimmed
+}
+
+function positiveLine(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 1) return value
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  return /^[1-9]\d*$/.test(trimmed) ? Number.parseInt(trimmed, 10) : undefined
+}
+
+function idString(value: unknown): string | undefined {
+  const text = nestedString(value)
+  if (text) return text
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
+    ? String(value)
+    : undefined
+}
+
+function codeLocationFromRecord(record: Record<string, unknown> | null): LogCodeLocation | null {
+  if (!record) return null
+  const filePath =
+    nestedString(record.file_path)
+    ?? nestedString(record.path)
+    ?? nestedString(record.file)
+  if (filePath) {
+    return {
+      filePath,
+      line: positiveLine(record.line) ?? positiveLine(record.line_start) ?? positiveLine(record.lineno),
+    }
+  }
+  return null
+}
+
+function mergeLogRouteRecord(
+  context: MutableLogRouteContext,
+  record: Record<string, unknown> | null,
+  overwrite = false,
+): void {
+  if (!record) return
+  const location = codeLocationFromRecord(record)
+  if (location && (overwrite || context.filePath === undefined)) context.filePath = location.filePath
+  if (location?.line !== undefined && (overwrite || context.line === undefined)) context.line = location.line
+
+  const goalId = idString(record.goal_id)
+  if (goalId && (overwrite || context.goalId === undefined)) context.goalId = goalId
+  const taskId = idString(record.task_id)
+  if (taskId && (overwrite || context.taskId === undefined)) context.taskId = taskId
+  const boardPostId = idString(record.board_post_id) ?? idString(record.post_id)
+  if (boardPostId && (overwrite || context.boardPostId === undefined)) context.boardPostId = boardPostId
+  const commentId = idString(record.comment_id) ?? idString(record.reply_id) ?? idString(record.comment_number)
+  if (commentId && (overwrite || context.commentId === undefined)) context.commentId = commentId
+  const prId = idString(record.pr_id) ?? idString(record.pull_request) ?? idString(record.pr_number)
+  if (prId && (overwrite || context.prId === undefined)) context.prId = prId
+  const gitRef = idString(record.git_ref) ?? idString(record.commit) ?? idString(record.branch)
+  if (gitRef && (overwrite || context.gitRef === undefined)) context.gitRef = gitRef
+  const logId = idString(record.log_id)
+  if (logId && (overwrite || context.logId === undefined)) context.logId = logId
+  const sessionId = idString(record.session_id)
+  if (sessionId && (overwrite || context.sessionId === undefined)) context.sessionId = sessionId
+  const operationId = idString(record.operation_id)
+  if (operationId && (overwrite || context.operationId === undefined)) context.operationId = operationId
+  const workerRunId = idString(record.worker_run_id)
+  if (workerRunId && (overwrite || context.workerRunId === undefined)) context.workerRunId = workerRunId
+}
+
+function hasLogRouteContext(context: MutableLogRouteContext): boolean {
+  return context.filePath !== undefined
+    || context.goalId !== undefined
+    || context.taskId !== undefined
+    || context.boardPostId !== undefined
+    || context.commentId !== undefined
+    || context.prId !== undefined
+    || context.gitRef !== undefined
+    || context.logId !== undefined
+    || context.sessionId !== undefined
+    || context.operationId !== undefined
+    || context.workerRunId !== undefined
 }
 
 function failureEnvelope(entry: LogEntry): FailureEnvelope | null {
@@ -266,6 +372,33 @@ export function summarizeLogWindow(entries: LogEntry[]): LogWindowSummary {
   }
 }
 
+export function logRouteLinks(entry: LogEntry): ReadonlyArray<IdeContextRouteLink> {
+  const details = entryDetails(entry)
+  const failureEnvelopeRecord = nestedRecord(details?.failure_envelope)
+  const context: MutableLogRouteContext = {}
+  mergeLogRouteRecord(context, nestedRecord(details?.context))
+  mergeLogRouteRecord(context, nestedRecord(details?.evidence_ref))
+  mergeLogRouteRecord(context, nestedRecord(failureEnvelopeRecord?.evidence_ref))
+  mergeLogRouteRecord(context, nestedRecord(details?.tool_args))
+  mergeLogRouteRecord(context, nestedRecord(details?.input))
+  mergeLogRouteRecord(context, details, true)
+  if (!hasLogRouteContext(context)) return []
+  return routeLinksForContext({
+    ...context,
+    surface: 'Log',
+    label: entry.module || entry.message,
+    sourceId: `log:${entry.seq}`,
+    telemetry: context.logId !== undefined
+      || context.sessionId !== undefined
+      || context.operationId !== undefined
+      || context.workerRunId !== undefined,
+  })
+}
+
+export function logCodeRouteLink(entry: LogEntry): IdeContextRouteLink | null {
+  return logRouteLinks(entry).find(link => link.label === 'Code') ?? null
+}
+
 function renderLogMessage(entry: LogEntry): string {
   const details = entryDetails(entry)
   const message = interpolateStructuredMessage(entry.message, details)
@@ -341,6 +474,13 @@ function renderLogRow(entry: LogEntry) {
   const diagnosticCause = failure?.cause_code ?? logDiagnosticCause(entry)
   const sourceClass = sourceTone(source)
   const renderedMessage = renderLogMessage(entry)
+  const routeLinks = logRouteLinks(entry)
+  const diagnosticChip = failure
+    ? html`<${StatusChip} tone="bad" uppercase=${false}>${failure.cause_code}</${StatusChip}>`
+    : null
+  const fallbackDiagnosticChip = !failure && diagnosticCause
+    ? html`<${StatusChip} tone=${level === 'ERROR' ? 'bad' : 'warn'} uppercase=${false}>${diagnosticCause}</${StatusChip}>`
+    : null
   let backgroundClass = 'bg-[var(--color-bg-surface)]'
   if (level === 'ERROR') {
     backgroundClass = 'bg-[var(--bad-6)]'
@@ -391,11 +531,8 @@ function renderLogRow(entry: LogEntry) {
         ${sessionId
           ? html`<${MetaTag}>session ${sessionId}</${MetaTag}>`
           : null}
-        ${failure
-          ? html`<${StatusChip} tone="bad" uppercase=${false}>${failure.cause_code}</${StatusChip}>`
-          : diagnosticCause
-            ? html`<${StatusChip} tone=${level === 'ERROR' ? 'bad' : 'warn'} uppercase=${false}>${diagnosticCause}</${StatusChip}>`
-            : null}
+        ${diagnosticChip}
+        ${fallbackDiagnosticChip}
         ${failure
           ? html`<${StatusChip} tone="info" uppercase=${false}>${failure.surface}</${StatusChip}>`
           : null}
@@ -404,6 +541,21 @@ function renderLogRow(entry: LogEntry) {
           : null}
         ${failure?.operator_action
           ? html`<${StatusChip} tone="info" uppercase=${false}>next ${failure.operator_action}</${StatusChip}>`
+          : null}
+        ${routeLinks.length > 0
+          ? html`
+            ${routeLinks.map(link => html`
+              <button
+                key=${link.id}
+                type="button"
+                data-testid=${link.label === 'Code' ? 'logs-code-link' : undefined}
+                class="logs-route-link rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs font-semibold text-[var(--color-accent-fg)] hover:border-[var(--color-accent-border)] hover:bg-[var(--color-bg-hover)]"
+                title=${link.evidence}
+                aria-label=${`Open ${link.evidence}`}
+                onClick=${() => openIdeContextRouteLink(link)}
+              >${link.label}</button>
+            `)}
+          `
           : null}
       </div>
       <div

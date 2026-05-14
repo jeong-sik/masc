@@ -694,11 +694,16 @@ let compact_receipt_tool_surface_json receipt =
   | `Assoc _ as surface ->
     let tool_requirement = json_string "tool_requirement" surface in
     let turn_lane =
+      (* Wire values come from [Keeper_agent_tool_surface.tool_requirement_to_yojson]
+         (lib/keeper/keeper_agent_tool_surface.ml): "required", "optional", "none".
+         The earlier "no_tools" literal never fired because [No_tools] serializes
+         to "none" — leaving turn_lane=null on no-tool receipts that omit an
+         explicit turn_lane. *)
       match json_string "turn_lane" surface, tool_requirement with
       | Some value, _ -> Some value
       | None, Some "required" -> Some "tool_required"
       | None, Some "optional" -> Some "tool_optional"
-      | None, Some "no_tools" -> Some "text_only"
+      | None, Some "none" -> Some "text_only"
       | None, _ -> None
     in
     `Assoc

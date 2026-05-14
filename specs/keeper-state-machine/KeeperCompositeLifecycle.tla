@@ -414,6 +414,51 @@ ClearFailing ==
                    turn_tick, kcaf_attempt_phase, kts_surface_ready,
                    kpto_phase>>
 
+\* HandingOff orchestration (Gap-1 audit 2026-05-14).
+\* Until this iteration KCL declared "HandingOff" in PhaseSet but never
+\* transitioned into it, so the joint invariants conditioning on KSM phase
+\* held vacuously for the entire HandingOff cross-section.  Modeling the
+\* entry explicitly is what surfaces the mid-flight gap, and the
+\* NoMidFlightTransitionToHandingOff invariant below pins the contract.
+\*
+\* Modeling note — quiescence preconditions.
+\*   KCL is an OBSERVER, not a controller.  EnterHandingOff models the
+\*   *desired contract*: OCaml must drive the in-flight cascade attempt
+\*   to a terminal state (Eio cancel + termination) before HandingOff is
+\*   observable in the joint state.  Encoding this as a precondition
+\*   makes the contract explicit; the matching bug action
+\*   (BugMidFlightHandoffEntry below) models the contract *violation*,
+\*   so any TLC counter-example coming from the buggy spec is
+\*   attributable to the bypass, not to a benign racing trace of the
+\*   clean spec.  This is the spec-first stance: clean spec encodes
+\*   what OCaml *must* uphold, bug action encodes the silent failure
+\*   when OCaml does *not* uphold it.
+EnterHandingOff ==
+    /\ ksm_phase = "Running"
+    /\ ktc_turn_phase \in {"idle", "finalizing"}
+    /\ kcaf_attempt_phase /= "attempting"
+    /\ kcl_cascade_state \in {"idle", "done", "exhausted"}
+    /\ ksm_phase' = "HandingOff"
+    /\ UNCHANGED <<ktc_turn_phase, kdp_decision, kcl_cascade_state,
+                   kmc_compaction, shared_measurement, measurement_turn,
+                   turn_tick, kcaf_attempt_phase, kts_surface_ready,
+                   kpto_phase>>
+
+\* HandoffCompletes — keeper returns to Running after handoff success.
+\* Mirrors keeper_keepalive.ml::maybe_recover_from_handoff.  Quiescence
+\* preconditions match NoMidFlightTransitionToHandingOff so that the
+\* clean spec stays inside the invariant envelope.
+HandoffCompletes ==
+    /\ ksm_phase = "HandingOff"
+    /\ ktc_turn_phase \in {"idle", "finalizing"}
+    /\ kcaf_attempt_phase \in {"idle", "terminal"}
+    /\ kcl_cascade_state \in {"idle", "done", "exhausted"}
+    /\ ksm_phase' = "Running"
+    /\ UNCHANGED <<ktc_turn_phase, kdp_decision, kcl_cascade_state,
+                   kmc_compaction, shared_measurement, measurement_turn,
+                   turn_tick, kcaf_attempt_phase, kts_surface_ready,
+                   kpto_phase>>
+
 \* Overflowed orchestration (Context overflow detected).
 \* Runtime truth: parent phase moves to Overflowed first. The in-flight turn
 \* and cascade projection remain live until the later compaction retry path
@@ -466,6 +511,8 @@ Next ==
     \/ ClearFailing
     \/ EnterOverflowed
     \/ OverflowedAutoCompact
+    \/ EnterHandingOff
+    \/ HandoffCompletes
 
 Fairness ==
     /\ WF_vars(MeasurementBroadcast)
@@ -480,6 +527,7 @@ Fairness ==
     /\ WF_vars(FinishCompaction)
     /\ WF_vars(ClearFailing)
     /\ WF_vars(OverflowedAutoCompact)
+    /\ WF_vars(HandoffCompletes)
 
 Spec == Init /\ [][Next]_vars /\ Fairness
 
@@ -548,6 +596,27 @@ ToolSurfaceFeedsAttempt ==
 PostTurnConsumesAttempt ==
     (kpto_phase = "active") => (kcaf_attempt_phase /= "attempting")
 
+\* ── Gap-1 invariant (audit 2026-05-14) ───────────────────
+\* This invariant closes the "mid-flight transitional phase"
+\* silent-failure family.  KCL previously declared HandingOff in
+\* PhaseSet but had no action transitioning into it, so any joint
+\* property conditioning on KSM=HandingOff held vacuously.  Adding
+\* EnterHandingOff with quiescence preconditions makes that subspace
+\* reachable, and I8 below pins the cross-FSM contract.  Pairs with
+\* SpecBuggyMidFlightHandoff (BugMidFlightHandoffEntry) which models
+\* the contract bypass — the silent failure path.
+
+\* I8 — NoMidFlightTransitionToHandingOff
+\* If KSM is in HandingOff, the turn cycle must be quiescent: no
+\* attempting cascade, no in-flight cascade attempt (state in trying
+\* or selecting), and the turn phase must not be in an active stage.
+\* The clean spec preserves this by construction (EnterHandingOff
+\* preconditions); the buggy spec violates it via the bypass action.
+NoMidFlightTransitionToHandingOff ==
+    (ksm_phase = "HandingOff") =>
+        (kcaf_attempt_phase /= "attempting" /\
+         kcl_cascade_state \in {"idle", "done", "exhausted"})
+
 SafetyInvariant ==
     /\ TypeOK
     /\ PhaseTurnAlignment
@@ -557,6 +626,7 @@ SafetyInvariant ==
     /\ AttemptFSMRespectsAdmission
     /\ ToolSurfaceFeedsAttempt
     /\ PostTurnConsumesAttempt
+    /\ NoMidFlightTransitionToHandingOff
 
 \* ── Liveness ─────────────────────────────────────────────
 
@@ -646,10 +716,34 @@ BugPostTurnDuringAttempt ==
 NextBuggyAttempt  == Next \/ BugAttemptWithoutSurface
 NextBuggyPostTurn == Next \/ BugPostTurnDuringAttempt
 
+\* Gap-1 bug action (audit 2026-05-14).
+\* BugMidFlightHandoffEntry — bypass of the EnterHandingOff quiescence
+\* preconditions.  An external signal (handoff_active=true from
+\* operator/credential/budget) sets the keeper's phase to HandingOff
+\* *while* a cascade attempt is still in flight; the OCaml runtime
+\* fails to cooperatively cancel the cascade fiber before the phase
+\* change is observable.  Post-state: KSM=HandingOff, cascade in
+\* "trying", KCAF in "attempting" — exactly the joint state the clean
+\* EnterHandingOff forbids.  Violates NoMidFlightTransitionToHandingOff.
+BugMidFlightHandoffEntry ==
+    /\ ksm_phase = "Running"
+    /\ ktc_turn_phase = "executing"
+    /\ kcl_cascade_state = "trying"
+    /\ kcaf_attempt_phase = "attempting"
+    /\ ksm_phase' = "HandingOff"
+    /\ UNCHANGED <<ktc_turn_phase, kdp_decision, kcl_cascade_state,
+                   kmc_compaction, shared_measurement, measurement_turn,
+                   turn_tick, kcaf_attempt_phase, kts_surface_ready,
+                   kpto_phase>>
+
+NextBuggyMidFlightHandoff == Next \/ BugMidFlightHandoffEntry
+
 SpecBuggyCascade  == Init /\ [][NextBuggyCascade]_vars  /\ Fairness
 SpecBuggyCompaction == Init /\ [][NextBuggyCompaction]_vars /\ Fairness
 SpecBuggyAttempt  == Init /\ [][NextBuggyAttempt]_vars  /\ Fairness
 SpecBuggyPostTurn == Init /\ [][NextBuggyPostTurn]_vars /\ Fairness
+SpecBuggyMidFlightHandoff ==
+    Init /\ [][NextBuggyMidFlightHandoff]_vars /\ Fairness
 
 \* ── Boundary comments (reviewer gate) ────────────────────
 \* This spec must NOT introduce any of the following, per:

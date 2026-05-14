@@ -269,6 +269,35 @@ describe('IdeEditor', () => {
       collisions: [],
       active_file: 'runtime.ts',
     }
+    pushTrace({
+      id: 'activity-runtime',
+      tsMs: 3000,
+      keeperName: 'sangsu',
+      source: 'activity-event',
+      eventId: 'evt-1',
+      filePath: 'runtime.ts',
+      line: 1,
+      surface: 'PR',
+    })
+    pushTrace({
+      id: 'thread-runtime',
+      tsMs: 2000,
+      keeperName: 'sangsu',
+      source: 'anchored-thread',
+      threadId: 'thread-1',
+      filePath: 'runtime.ts',
+      line: 2,
+    })
+    pushTrace({
+      id: 'activity-other',
+      tsMs: 4000,
+      keeperName: 'moth',
+      source: 'activity-event',
+      eventId: 'evt-other',
+      filePath: 'other.ts',
+      line: 1,
+      surface: 'Task',
+    })
 
     render(
       h(IdeEditor, {
@@ -300,6 +329,8 @@ describe('IdeEditor', () => {
       'LSP1',
       'Notes1',
       'Threads1',
+      'Trace2',
+      'Ops1',
       'Diff2',
       'Keepers1',
     ])
@@ -308,6 +339,8 @@ describe('IdeEditor', () => {
       '1 current-file diagnostic',
       '1 current-file annotation',
       '1 current-file anchored thread',
+      '2 current-file trace events',
+      '1 current-file operational surface link',
       '2 current-file changed rows',
       '1 keeper active in this file',
     ])

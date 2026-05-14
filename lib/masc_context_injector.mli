@@ -8,6 +8,9 @@
       context_injector (after tool exec)
         → Context.set key value  (via OAS Pipeline Stage 5)
     ]}
+    [Context.set] overwrites by key, so repeated tool calls keep this
+    metadata surface bounded to the keys declared below rather than
+    appending a fresh token-bearing block per call.
 
     The read path (caller must wire):
     {[

@@ -489,6 +489,86 @@ describe('IdeEditor', () => {
     })
   })
 
+  it('focuses operational route context when a keeper trace gutter stack is clicked', async () => {
+    const documentStore = createCodeDocumentStore({
+      file_path: 'runtime.ts',
+      language: 'typescript',
+      content: 'const runtime = 1\nconst task = runtime + 1\n',
+    })
+    const ownershipStore = createKeeperLineOwnershipStore('runtime.ts')
+
+    pushTrace({
+      id: 'activity-runtime',
+      tsMs: 3000,
+      keeperName: 'sangsu',
+      source: 'activity-event',
+      eventId: 'evt-1',
+      filePath: 'runtime.ts',
+      line: 2,
+      surface: 'PR',
+      goalId: 'goal-runtime',
+      taskId: 'task-runtime',
+      boardPostId: 'post-runtime',
+      commentId: 'comment-runtime',
+      prId: '15035',
+      gitRef: 'refs/heads/review-response',
+      logId: 'turn-2',
+      sessionId: 'sess-runtime',
+      operationId: 'op-runtime',
+      workerRunId: 'worker-runtime',
+    })
+
+    render(
+      h(IdeEditor, {
+        documentStore,
+        ownershipStore,
+        diffRows: () => [],
+        activeLayers: new Set(['keeper-trace']),
+      }),
+      container,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('button.cm-trace-stack')).not.toBeNull()
+    })
+    fireEvent.click(container.querySelector<HTMLButtonElement>('button.cm-trace-stack')!)
+
+    expect(ideContextFocus.value).toMatchObject({
+      file_path: 'runtime.ts',
+      line: 2,
+      surface: 'PR',
+      label: 'PR activity evt-1',
+      source_id: 'trace:activity-runtime',
+      keeper_id: 'sangsu',
+    })
+    expect(ideContextFocus.value?.route_links?.map(link => link.label)).toEqual([
+      'Code',
+      'Goal',
+      'Task',
+      'Board',
+      'Comment',
+      'PR',
+      'Git',
+      'Log',
+      'Telemetry',
+      'Keeper',
+    ])
+    expect(ideContextFocus.value?.route_links?.find(link => link.label === 'Telemetry')?.params)
+      .toMatchObject({
+        section: 'fleet-health',
+        view: 'event-log',
+        session_id: 'sess-runtime',
+        operation_id: 'op-runtime',
+        worker_run_id: 'worker-runtime',
+        q: 'turn-2',
+      })
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="ide-context-focus-status"]')?.textContent)
+        .toContain('Focused L2')
+      expect(container.querySelectorAll('.ide-editor-context-route-link')).toHaveLength(10)
+    })
+  })
+
   it('shows and highlights the focused context line from the shared IDE signal', async () => {
     const documentStore = createCodeDocumentStore({
       file_path: 'runtime.ts',

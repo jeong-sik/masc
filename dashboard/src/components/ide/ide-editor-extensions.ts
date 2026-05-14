@@ -119,6 +119,15 @@ export function themeExt(): Extension {
       gap: '2px',
       minWidth: '28px',
       height: '100%',
+      padding: '0',
+      border: '0',
+      background: 'transparent',
+      color: 'inherit',
+      cursor: 'pointer',
+    },
+    '.cm-trace-stack:focus-visible': {
+      outline: '1px solid var(--color-accent-fg)',
+      outlineOffset: '1px',
     },
     '.cm-trace-dot': {
       display: 'inline-block',
@@ -300,16 +309,36 @@ export function pushOwnership(view: EditorView, ownership: ReadonlyMap<number, L
 const TRACE_DOT_CAP = 3
 
 export interface EditorKeeperTraceLineEvent {
+  readonly id?: string
   readonly source: KeeperTraceSource
   readonly keeperName: string
   readonly count: number
   readonly tsMs: number
+  readonly filePath?: string
+  readonly line?: number
+  readonly eventId?: string
+  readonly threadId?: string
   readonly surface?: string
+  readonly goalId?: string
+  readonly taskId?: string
+  readonly boardPostId?: string
+  readonly commentId?: string
+  readonly prId?: string
+  readonly gitRef?: string
+  readonly logId?: string
+  readonly sessionId?: string
+  readonly operationId?: string
+  readonly workerRunId?: string
 }
 
 export interface EditorKeeperTraceLine {
   readonly line: number
   readonly events: ReadonlyArray<EditorKeeperTraceLineEvent>
+}
+
+export interface KeeperTraceLineGutterOptions {
+  readonly getTraceLines?: () => ReadonlyArray<EditorKeeperTraceLine>
+  readonly onTraceLineSelect?: (event: EditorKeeperTraceLineEvent, line: number) => void
 }
 
 const setKeeperTraceLines = StateEffect.define<ReadonlyArray<EditorKeeperTraceLine>>()
@@ -323,13 +352,16 @@ class TraceLineMarker extends GutterMarker {
   }
 
   toDOM(): HTMLElement {
-    const el = document.createElement('span')
-    el.className = 'cm-trace-stack'
     if (this.events.length === 0) {
+      const el = document.createElement('span')
+      el.className = 'cm-trace-stack'
       el.setAttribute('aria-hidden', 'true')
       return el
     }
-    el.setAttribute('role', 'list')
+    const el = document.createElement('button')
+    el.type = 'button'
+    el.className = 'cm-trace-stack'
+    el.dataset.line = String(this.line)
     el.setAttribute('aria-label', traceLineAriaLabel(this.line, this.events))
     el.title = traceLineTitle(this.line, this.events)
     const visible = this.events.slice(0, TRACE_DOT_CAP)
@@ -378,7 +410,8 @@ const keeperTraceLineField = StateField.define<ReadonlyMap<number, TraceLineMark
   },
 })
 
-export function keeperTraceLineGutterExt(): Extension {
+export function keeperTraceLineGutterExt(options: KeeperTraceLineGutterOptions = {}): Extension {
+  const canSelect = options.getTraceLines && options.onTraceLineSelect
   return [
     keeperTraceLineField,
     gutter({
@@ -391,9 +424,44 @@ export function keeperTraceLineGutterExt(): Extension {
         const field = view.state.field(keeperTraceLineField, false)
         return field?.get(line.number) ?? null
       },
+      ...(canSelect
+        ? {
+            domEventHandlers: {
+              click: (view, block, event) => selectTraceLineFromGutterClick(
+                view.state.doc.lineAt(block.from).number,
+                event,
+                options.getTraceLines!,
+                options.onTraceLineSelect!,
+              ),
+            },
+          }
+        : {}),
       initialSpacer: () => TRACE_SPACER,
     }),
   ]
+}
+
+function selectTraceLineFromGutterClick(
+  blockLine: number,
+  event: Event,
+  getTraceLines: () => ReadonlyArray<EditorKeeperTraceLine>,
+  onTraceLineSelect: (event: EditorKeeperTraceLineEvent, line: number) => void,
+): boolean {
+  if (!(event instanceof MouseEvent) || event.button !== 0) return false
+  const target = event.target
+  if (!(target instanceof Element)) return false
+  const stack = target.closest('.cm-trace-stack')
+  if (!(stack instanceof HTMLElement) || stack.getAttribute('aria-hidden') === 'true') return false
+  const lineFromMarker = Number(stack.dataset.line)
+  const line = Number.isSafeInteger(lineFromMarker) && lineFromMarker >= 1
+    ? lineFromMarker
+    : blockLine
+  const traceLine = getTraceLines().find(candidate => candidate.line === line)
+  const topEvent = traceLine?.events[0]
+  if (!topEvent) return false
+  event.stopPropagation()
+  onTraceLineSelect(topEvent, line)
+  return true
 }
 
 export function pushKeeperTraceLines(
@@ -418,11 +486,26 @@ export function keeperTraceLinesForFile(
     if (line === null) continue
     const existing = byLine.get(line) ?? []
     existing.push({
+      id: event.id,
       source: event.source,
       keeperName: event.keeperName,
       count: event.count,
       tsMs: event.tsMs,
+      filePath,
+      line,
+      eventId: event.source === 'activity-event' ? event.eventId : undefined,
+      threadId: event.source === 'anchored-thread' ? event.threadId : undefined,
       surface: traceEventSurface(event),
+      goalId: event.source === 'activity-event' ? event.goalId : undefined,
+      taskId: event.source === 'activity-event' ? event.taskId : undefined,
+      boardPostId: event.source === 'activity-event' ? event.boardPostId : undefined,
+      commentId: event.source === 'activity-event' ? event.commentId : undefined,
+      prId: event.source === 'activity-event' ? event.prId : undefined,
+      gitRef: event.source === 'activity-event' ? event.gitRef : undefined,
+      logId: event.source === 'activity-event' ? event.logId : undefined,
+      sessionId: event.source === 'activity-event' ? event.sessionId : undefined,
+      operationId: event.source === 'activity-event' ? event.operationId : undefined,
+      workerRunId: event.source === 'activity-event' ? event.workerRunId : undefined,
     })
     byLine.set(line, existing)
   }
@@ -509,7 +592,20 @@ function traceLineTitle(line: number, events: ReadonlyArray<EditorKeeperTraceLin
 }
 
 function traceLineKey(events: ReadonlyArray<EditorKeeperTraceLineEvent>): string {
-  return events.map(event => `${event.source}:${event.surface ?? ''}:${event.keeperName}:${event.count}:${event.tsMs}`).join('|')
+  return events
+    .map(event => [
+      event.id ?? '',
+      event.source,
+      event.surface ?? '',
+      event.keeperName,
+      event.count,
+      event.tsMs,
+      event.goalId ?? '',
+      event.taskId ?? '',
+      event.prId ?? '',
+      event.logId ?? '',
+    ].join(':'))
+    .join('|')
 }
 
 export function keeperLineSelectExt(

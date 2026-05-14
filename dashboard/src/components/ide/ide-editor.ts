@@ -29,6 +29,8 @@ import {
   pushAnnotationLines,
   internalDocumentSync,
   syntaxHighlightExt,
+  type EditorKeeperTraceLine,
+  type EditorKeeperTraceLineEvent,
 } from './ide-editor-extensions'
 import {
   lspDiagnosticSnapshot,
@@ -48,7 +50,12 @@ import {
   type KeeperPresenceStatus,
 } from './keeper-presence-store'
 import { openIdeContextRouteLink, routeLinksForContext, type IdeContextRouteLink } from './ide-context-lens'
-import { ideContextFocus, normalizeIdeContextFilePath, type IdeContextFocus } from './ide-state'
+import {
+  focusIdeContextAnchor,
+  ideContextFocus,
+  normalizeIdeContextFilePath,
+  type IdeContextFocus,
+} from './ide-state'
 import { ideConversationThreadSnapshot } from './ide-context-bridge'
 
 // ── Types ─────────────────────────────────────────────────────────
@@ -379,6 +386,63 @@ function traceEventFilePath(event: KeeperTraceEvent): string | null {
   if (event.source === 'anchored-thread') return event.filePath ?? null
   if (event.source === 'activity-event') return event.filePath
   return null
+}
+
+function focusTraceLineContext(
+  filePath: string,
+  event: EditorKeeperTraceLineEvent,
+  line: number,
+): void {
+  const surface = traceLineFocusSurface(event)
+  const label = traceLineFocusLabel(event)
+  const sourceId = event.id ? `trace:${event.id}` : `trace:${event.source}:${line}:${event.tsMs}`
+  focusIdeContextAnchor({
+    file_path: filePath,
+    line,
+    surface,
+    label,
+    source_id: sourceId,
+    keeper_id: event.keeperName,
+    route_links: routeLinksForContext({
+      filePath,
+      line,
+      surface,
+      label,
+      sourceId,
+      goalId: event.goalId,
+      taskId: event.taskId,
+      boardPostId: event.boardPostId ?? event.threadId,
+      commentId: event.commentId,
+      prId: event.prId,
+      gitRef: event.gitRef,
+      logId: event.logId,
+      sessionId: event.sessionId,
+      operationId: event.operationId,
+      workerRunId: event.workerRunId,
+      telemetryQuery: event.logId ?? event.eventId,
+      keeperId: event.keeperName,
+      telemetry: Boolean(event.logId || event.sessionId || event.operationId || event.workerRunId),
+    }),
+  })
+}
+
+function traceLineFocusSurface(event: EditorKeeperTraceLineEvent): string {
+  if (event.source === 'activity-event') return event.surface?.trim() || 'Activity'
+  if (event.source === 'anchored-thread') return 'Thread'
+  if (event.source === 'cascade-hop') return 'Cascade'
+  if (event.source === 'bdi-snapshot') return 'BDI'
+  return 'Decision'
+}
+
+function traceLineFocusLabel(event: EditorKeeperTraceLineEvent): string {
+  if (event.source === 'activity-event') {
+    const surface = traceLineFocusSurface(event)
+    return event.eventId ? `${surface} activity ${event.eventId}` : surface
+  }
+  if (event.source === 'anchored-thread') {
+    return event.threadId ? `thread ${event.threadId}` : 'thread'
+  }
+  return traceLineFocusSurface(event)
 }
 
 function EditorCurrentFileSignals({
@@ -739,6 +803,11 @@ function CodeMirrorEditor({
     () => traceActive ? keeperTraceLinesForFile(document.file_path, traceEvents) : [],
     [document.file_path, traceActive, traceEvents],
   )
+  const traceLinesRef = useRef<ReadonlyArray<EditorKeeperTraceLine>>(traceLines)
+
+  useEffect(() => {
+    traceLinesRef.current = traceLines
+  }, [traceLines])
 
   // Mount CM6 instance
   useEffect(() => {
@@ -776,7 +845,16 @@ function CodeMirrorEditor({
             ? [keeperLineSelectExt(() => ownershipStore.ownership(), onKeeperLineSelect)]
             : []),
           ...(traceActive
-            ? [keeperTraceLineGutterExt()]
+            ? [
+                keeperTraceLineGutterExt({
+                  getTraceLines: () => traceLinesRef.current,
+                  onTraceLineSelect: (event, line) => focusTraceLineContext(
+                    documentStore.document().file_path,
+                    event,
+                    line,
+                  ),
+                }),
+              ]
             : []),
           ...blameExts,
         ],

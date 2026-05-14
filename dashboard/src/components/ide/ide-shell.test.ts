@@ -58,6 +58,7 @@ import { deriveIdeStatusbarModel, IdeShell } from './ide-shell'
 import { navigate, route } from '../../router'
 import { clearTraces, pushTrace } from './keeper-trace-store'
 import { activeIdeFile, ideContextFocus } from './ide-state'
+import { cursorOverlaySignal } from './keeper-cursor-overlay'
 
 function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {
   const button = Array.from(container.querySelectorAll('button'))
@@ -127,6 +128,7 @@ describe('IdeShell', () => {
     route.value = { tab: 'overview', params: {}, postId: null }
     activeIdeFile.value = 'package.json'
     ideContextFocus.value = null
+    cursorOverlaySignal.value = { cursors: new Map(), heatmap: new Map(), collisions: [], active_file: null }
     clearTraces()
   })
 
@@ -354,6 +356,59 @@ describe('IdeShell', () => {
       'Telemetry turn-42',
       'Keeper sangsu',
     ])
+  })
+
+  it('focuses active keeper breadcrumb chips into routeable code and keeper context', async () => {
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source' },
+      postId: null,
+    }
+    activeIdeFile.value = 'lib/runtime.ml'
+    cursorOverlaySignal.value = {
+      cursors: new Map([[
+        'sangsu',
+        {
+          keeper_id: 'sangsu',
+          file_path: 'lib/runtime.ml',
+          line: 42,
+          column: 7,
+          focus_mode: 'editing',
+          last_update: Date.parse('2026-05-06T00:00:00Z'),
+          tool_name: 'ocamllsp',
+          turn: 9,
+        },
+      ]]),
+      heatmap: new Map(),
+      collisions: [],
+      active_file: 'lib/runtime.ml',
+    }
+
+    render(h(IdeShell, {}), container)
+
+    const keeperButton = await waitFor(() => {
+      const button = container.querySelector<HTMLButtonElement>('.ide-breadcrumb-keeper')
+      expect(button?.getAttribute('aria-label')).toBe('Focus sangsu keeper context at line 42')
+      return button!
+    })
+
+    fireEvent.click(keeperButton)
+
+    expect(ideContextFocus.value).toMatchObject({
+      file_path: 'lib/runtime.ml',
+      line: 42,
+      surface: 'Keeper',
+      label: 'ocamllsp',
+      source_id: 'breadcrumb:sangsu:42',
+      keeper_id: 'sangsu',
+    })
+    expect(ideContextFocus.value?.route_links?.map(link => link.label)).toEqual(['Code', 'Keeper'])
+    await waitFor(() => expect(container.querySelector('[data-testid="ide-toolbar-context-focus"]')?.textContent)
+      .toContain('ocamllsp'))
+    const routeGroups = [...container.querySelectorAll<HTMLButtonElement>('.ide-toolbar-context-route-group-action')]
+    expect(routeGroups.map(button => button.textContent)).toEqual(['Code1', 'Runtime1'])
+    fireEvent.click(routeGroups[1]!)
+    expect(window.location.hash).toBe('#monitoring?section=agents&view=keepers&keeper=sangsu')
   })
 
   it('rejects unsafe IDE route file focus params', async () => {

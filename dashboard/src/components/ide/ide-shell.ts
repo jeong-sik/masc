@@ -785,6 +785,7 @@ function IdeBreadcrumb() {
     readonly focusMode: KeeperCursor['focus_mode']
     readonly toolName: string | undefined
     readonly turn: number | undefined
+    readonly line: number
   }> = []
   for (const [keeperId, cursor] of overlay.cursors) {
     if (cursor.file_path === filePath) {
@@ -794,8 +795,28 @@ function IdeBreadcrumb() {
         focusMode: cursor.focus_mode,
         toolName: cursor.tool_name,
         turn: cursor.turn,
+        line: cursor.line,
       })
     }
+  }
+
+  const activateKeeperBreadcrumb = (keeper: (typeof activeOnFile)[number]) => {
+    focusIdeContextAnchor({
+      file_path: filePath,
+      line: keeper.line,
+      surface: 'Keeper',
+      label: keeper.toolName ?? keeper.focusMode,
+      source_id: `breadcrumb:${keeper.keeperId}:${keeper.line}`,
+      keeper_id: keeper.keeperId,
+      route_links: routeLinksForContext({
+        filePath,
+        line: keeper.line,
+        surface: 'Keeper',
+        label: keeper.toolName ?? keeper.focusMode,
+        sourceId: `breadcrumb:${keeper.keeperId}:${keeper.line}`,
+        keeperId: keeper.keeperId,
+      }),
+    })
   }
 
   return html`
@@ -822,10 +843,13 @@ function IdeBreadcrumb() {
         ? html`
           <span class="flex items-center gap-1 ml-auto shrink-0">
             ${activeOnFile.map(k => html`
-              <span
+              <button
                 key=${k.keeperId}
-                class="flex items-center gap-1"
+                type="button"
+                class="ide-breadcrumb-keeper"
                 title=${`${k.keeperId} · ${k.focusMode}${k.toolName ? ` · ${k.toolName}` : ''}${k.turn != null ? ` · turn ${k.turn}` : ''}`}
+                aria-label=${`Focus ${k.keeperId} keeper context at line ${k.line}`}
+                onClick=${() => activateKeeperBreadcrumb(k)}
                 style=${{ color: 'var(--color-fg-muted)' }}
               >
                 <span
@@ -842,7 +866,7 @@ function IdeBreadcrumb() {
                 <span>${k.keeperId}</span>
                 ${k.toolName ? html`<span class="text-[var(--color-fg-disabled)]" style=${{ fontSize: '10px' }}>${k.toolName}</span>` : null}
                 ${k.turn != null ? html`<span style=${{ fontSize: '10px', color: 'var(--color-accent-fg)' }}>T${k.turn}</span>` : null}
-              </span>
+              </button>
             `)}
           </span>
         `

@@ -4,6 +4,7 @@ module R = Masc_mcp.Keeper_registry
 module Keeper_types = Masc_mcp.Keeper_types
 module KSM = Masc_mcp.Keeper_state_machine
 module Audit = Masc_mcp.Keeper_transition_audit
+module Hooks = Masc_mcp.Keeper_lifecycle_hooks
 module Meas = Masc_mcp.Keeper_measurement
 module Pages = Masc_mcp.Server_routes_http_pages
 module Json = Yojson.Safe.Util
@@ -510,6 +511,30 @@ let test_dispatch_event_emits_lifecycle_transition_metric_only_on_phase_change (
   in
   check (float 0.001) "phase-change transition metric incremented"
     (changed_before +. 1.0) changed_after
+
+let test_dispatch_event_runs_phase_transition_hook () =
+  R.clear ();
+  Hooks.reset_for_testing ();
+  let keeper_name = "k4-lifecycle-hook" in
+  let seen = ref [] in
+  Fun.protect
+    ~finally:Hooks.reset_for_testing
+    (fun () ->
+      Hooks.register (fun ~keeper_id event ->
+          match event with
+          | Hooks.Phase_transition { from_phase; to_phase } ->
+            seen := (keeper_id, from_phase, to_phase) :: !seen
+          | Hooks.Tombstone_reaped -> ());
+      ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
+      ignore (R.dispatch_event ~base_path:bp keeper_name KSM.Fiber_started);
+      check int "same-phase event does not run hook" 0 (List.length !seen);
+      ignore (R.dispatch_event ~base_path:bp keeper_name KSM.Operator_pause);
+      match !seen with
+      | [ (seen_keeper, from_phase, to_phase) ] ->
+        check string "keeper" keeper_name seen_keeper;
+        check string "from" "running" (KSM.phase_to_string from_phase);
+        check string "to" "paused" (KSM.phase_to_string to_phase)
+      | _ -> fail "expected exactly one phase transition hook event")
 
 let test_dispatch_event_observes_phase_sse_broadcast_failure () =
   R.clear ();
@@ -1680,6 +1705,8 @@ let () =
             test_dispatch_event_emits_phase_sse;
           eio_test "dispatch event emits lifecycle metric only on phase change"
             test_dispatch_event_emits_lifecycle_transition_metric_only_on_phase_change;
+          eio_test "dispatch event runs phase transition hook"
+            test_dispatch_event_runs_phase_transition_hook;
           eio_test "dispatch event observes phase SSE broadcast failure"
             test_dispatch_event_observes_phase_sse_broadcast_failure;
           eio_test "extended states" test_extended_states;

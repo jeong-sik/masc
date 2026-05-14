@@ -174,6 +174,7 @@ let type_string_of_schema_property prop =
   | _ -> None
 
 let params_of_json_schema schema =
+  let __t0 = Mtime_clock.now () in
   let open Yojson.Safe.Util in
   (* [required] is conceptually a set (membership semantics, no ordering
      or duplicates) — materialise as Hashtbl so the per-property check
@@ -197,24 +198,30 @@ let params_of_json_schema schema =
         tbl
     | _ -> Hashtbl.create 0
   in
-  match schema |> member "properties" with
-  | `Assoc pairs ->
-      List.map
-        (fun (name, prop) ->
-          let param_type =
-            prop
-            |> type_string_of_schema_property
-            |> Option.value ~default:"string"
-            |> param_type_of_string
-          in
-          let description =
-            string_of_json_member "description" prop
-            |> Option.value ~default:""
-          in
-          let required = Hashtbl.mem required_set name in
-          { Agent_sdk.Types.name = name; description; param_type; required })
-        pairs
-  | _ -> []
+  let result =
+    match schema |> member "properties" with
+    | `Assoc pairs ->
+        List.map
+          (fun (name, prop) ->
+            let param_type =
+              prop
+              |> type_string_of_schema_property
+              |> Option.value ~default:"string"
+              |> param_type_of_string
+            in
+            let description =
+              string_of_json_member "description" prop
+              |> Option.value ~default:""
+            in
+            let required = Hashtbl.mem required_set name in
+            { Agent_sdk.Types.name = name; description; param_type; required })
+          pairs
+    | _ -> []
+  in
+  Prometheus.observe_hotpath
+    ~metric:Prometheus.metric_masc_oas_params_of_schema_sec
+    ~start:__t0;
+  result
 
 (** {1 OAS Tool.t Creation}
 

@@ -858,6 +858,9 @@ let make_tool_bundle
       ()
   : tool_bundle
   =
+  (* Phase B baseline (wise-nibbling-lerdorf plan): timestamp before the
+     bundle assembly work begins; observed at function exit. *)
+  let __t0 = Mtime_clock.now () in
   (* PR-3b (#11611 part 1): replace eager [Keeper_turn_sandbox_runtime]
      instances with a factory.  in_playground/cwd are unknown at
      turn-start, so the factory defers
@@ -1030,12 +1033,18 @@ let make_tool_bundle
                     (fun input -> h input))))
       (Keeper_tool_alias.public_names ())
   in
-  { tools = internal_tools @ alias_tools
-  ; cleanup =
-      (fun () ->
-        Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory;
-        Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory_git)
-  }
+  let bundle =
+    { tools = internal_tools @ alias_tools
+    ; cleanup =
+        (fun () ->
+          Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory;
+          Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory_git)
+    }
+  in
+  Prometheus.observe_hotpath
+    ~metric:Prometheus.metric_masc_oas_make_tool_bundle_sec
+    ~start:__t0;
+  bundle
 ;;
 
 let make_tools

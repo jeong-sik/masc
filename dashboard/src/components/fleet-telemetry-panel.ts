@@ -3,6 +3,7 @@ import { useSignal } from '@preact/signals'
 import { useEffect, useMemo, useRef } from 'preact/hooks'
 import { RotateCcw } from 'lucide-preact'
 import { LoadingState } from './common/feedback-state'
+import { hasFleetTelemetryData } from './fleet-telemetry-data-predicate'
 import { Eyebrow } from './common/eyebrow'
 import {
   fetchDashboardExecution,
@@ -717,12 +718,12 @@ export function FleetTelemetryPanel() {
         || telemetrySummary.generated_at
         || new Date().toISOString()
 
-      const hasAnyData =
-        rows.length > 0
-        || (executionTrust?.total ?? 0) > 0
-        || (executionTrust?.entry_count ?? 0) > 0
-        || toolQuality.total > 0
-        || telemetrySummary.total_entries > 0
+      const hasAnyData = hasFleetTelemetryData({
+        rowCount: rows.length,
+        executionTrust,
+        toolQuality,
+        telemetrySummary,
+      })
 
       pushSnapshot(rows)
 

@@ -207,6 +207,12 @@ check_http "gate connectors 200" "$BASE/api/v1/gate/connectors" "200"
 check_json "gate connectors exposes connectors list" "$BASE/api/v1/gate/connectors" "'connectors' in d" '^True$'
 check_http "dashboard tools 200" "$BASE/api/v1/dashboard/tools" "200"
 check_json "dashboard tools exposes inventory" "$BASE/api/v1/dashboard/tools" "'tool_inventory' in d" '^True$'
+check_http "tool quality 200" "$BASE/api/v1/dashboard/tool-quality?window_hours=24" "200"
+check_json "tool quality exposes aggregates" "$BASE/api/v1/dashboard/tool-quality?window_hours=24" "'total' in d and 'by_tool' in d and 'failure_categories' in d" '^True$'
+check_http "tool metrics 200" "$BASE/api/v1/tool-metrics" "200"
+check_json "tool metrics exposes usage" "$BASE/api/v1/tool-metrics" "'total_calls' in d and 'top_20' in d and 'registered_count' in d" '^True$'
+check_http "prompt registry 200" "$BASE/api/v1/prompts" "200"
+check_json "prompt registry exposes prompts" "$BASE/api/v1/prompts" "'prompts' in d" '^True$'
 check_http "autoresearch loops 200" "$BASE/api/v1/autoresearch/loops" "200"
 check_json "autoresearch loops exposes loops" "$BASE/api/v1/autoresearch/loops" "'loops' in d" '^True$'
 check_http "harness health 200" "$BASE/api/v1/dashboard/harness-health" "200"

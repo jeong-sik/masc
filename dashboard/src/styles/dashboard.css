@@ -281,6 +281,22 @@
   color: var(--color-fg-secondary);
 }
 
+.ide-plane-statusbar-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.ide-plane-statusbar-meta .chip {
+  max-width: 11rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ide-plane-connection {
   margin-left: auto;
   color: var(--color-status-ok);
@@ -2183,6 +2199,11 @@
 
   .ide-plane-statusbar {
     flex-wrap: wrap;
+  }
+
+  .ide-plane-statusbar-meta {
+    flex: 1 1 100%;
+    order: 5;
   }
 
   .ide-plane-connection {

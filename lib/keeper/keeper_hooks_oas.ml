@@ -237,6 +237,8 @@ let record_pre_tool_gate_attempt
         ~runtime_contract
         ~action_radius
         ~on_persist_error:(fun exn ->
+          let dashboard_surface_tool_stats = "/api/v1/keepers/:name/tool-stats" in
+          let stale_reason_trajectory_append = "trajectory_append_failed" in
           Telemetry_coverage_gap.record
             ~masc_root:acc.Trajectory.masc_root
             ~source:"trajectory_tool_call"
@@ -244,8 +246,8 @@ let record_pre_tool_gate_attempt
             ~durable_store:
               (Trajectory.trajectory_path acc.Trajectory.masc_root
                  acc.Trajectory.keeper_name trace_id)
-            ~dashboard_surface:"/api/v1/keepers/:name/tool-stats"
-            ~stale_reason:"trajectory_append_failed"
+            ~dashboard_surface:dashboard_surface_tool_stats
+            ~stale_reason:stale_reason_trajectory_append
             ~keeper_name
             ~trace_id
             ~error:(Printexc.to_string exn)

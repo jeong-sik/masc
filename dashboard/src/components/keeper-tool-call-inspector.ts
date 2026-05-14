@@ -16,6 +16,7 @@ import { CopyIdButton } from './common/copy-id-button'
 import { TextInput } from './common/input'
 import { ringFocusClasses } from './common/ring'
 import { coverageGapDisplay, sourceHealthClass, freshnessText } from './common/source-health'
+import { openIdeContextRouteLink, routeLinksForContext, type IdeContextRouteLink } from './ide/ide-context-lens'
 
 // Delegated to lib/format-time (SSOT)
 const formatTimestamp = formatTimeHms
@@ -59,6 +60,59 @@ function tryPrettyJson(s: string): string | null {
   } catch {
     return null
   }
+}
+
+interface ToolCodeLocation {
+  readonly filePath: string
+  readonly line?: number
+}
+
+function stringField(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
+}
+
+function positiveLine(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
+    ? value
+    : undefined
+}
+
+function inputCodeLocation(input: unknown): ToolCodeLocation | null {
+  if (typeof input === 'string') {
+    const parsed = tryPrettyJson(input)
+    if (!parsed) return null
+    try {
+      return inputCodeLocation(JSON.parse(input))
+    } catch {
+      return null
+    }
+  }
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) return null
+  const record = input as Record<string, unknown>
+  const filePath =
+    stringField(record.file_path)
+    ?? stringField(record.path)
+    ?? stringField(record.file)
+  if (filePath) {
+    return {
+      filePath,
+      line: positiveLine(record.line) ?? positiveLine(record.line_start) ?? positiveLine(record.lineno),
+    }
+  }
+  return inputCodeLocation(record.input)
+}
+
+function toolCallCodeRouteLink(entry: ToolCallEntry): IdeContextRouteLink | null {
+  const location = inputCodeLocation(entry.input)
+  if (!location) return null
+  return routeLinksForContext({
+    filePath: location.filePath,
+    line: location.line,
+    surface: 'Tool',
+    label: entry.tool,
+    sourceId: `tool:${entry.keeper}:${entry.ts}:${entry.tool}`,
+    keeperId: entry.keeper,
+  }).find(link => link.label === 'Code') ?? null
 }
 
 // Tool output may be (a) a raw string, (b) a JSON blob we logged as a string,
@@ -119,6 +173,7 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
   const cat = toolCategory(entry.tool)
   const formattedInput = formatInput(entry.input)
   const formattedOutput = formatOutput(entry.output)
+  const codeRouteLink = toolCallCodeRouteLink(entry)
 
   return html`
     <div
@@ -148,6 +203,23 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
         <div class="px-3 pb-3 space-y-2">
           ${entry.model ? html`
             <div class="text-3xs text-[var(--color-fg-muted)]">model: <span class="text-[var(--color-fg-secondary)] font-mono">${entry.model}</span></div>
+          ` : null}
+          ${codeRouteLink ? html`
+            <div class="flex items-center justify-between gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-2">
+              <span class="min-w-0 truncate text-3xs font-mono text-[var(--color-fg-muted)]" title=${codeRouteLink.evidence}>
+                ${codeRouteLink.evidence}
+              </span>
+              <button
+                type="button"
+                data-testid="keeper-tool-code-link"
+                class=${`shrink-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-3xs font-semibold text-[var(--color-accent-fg)] hover:border-[var(--color-accent-border)] hover:bg-[var(--color-bg-hover)] ${ringFocusClasses()}`}
+                title=${codeRouteLink.evidence}
+                aria-label=${`Open ${codeRouteLink.evidence}`}
+                onClick=${() => openIdeContextRouteLink(codeRouteLink)}
+              >
+                Code
+              </button>
+            </div>
           ` : null}
           <${CopyableToolCallBlock}
             title="입력"

@@ -220,8 +220,8 @@ function InterjectButton(action: InterjectActionState, onClick: () => void) {
 }
 
 const PRESENCE_STYLES: Record<KeeperPresenceStatus, { color: string; bg: string; label: string }> = {
-  active: { color: 'var(--color-status-ok)', bg: 'rgba(46, 160, 67, 0.15)', label: 'ACTIVE' },
-  blocked: { color: 'var(--color-status-err)', bg: 'rgba(248, 81, 73, 0.15)', label: 'BLOCKED' },
+  active: { color: 'var(--color-status-ok)', bg: 'rgb(var(--color-status-ok-glow) / 0.15)', label: 'ACTIVE' },
+  blocked: { color: 'var(--color-status-err)', bg: 'rgb(var(--color-status-err-glow) / 0.15)', label: 'BLOCKED' },
   idle: { color: 'var(--color-fg-muted)', bg: 'var(--color-bg-surface)', label: 'IDLE' },
 }
 

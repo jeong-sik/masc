@@ -1294,7 +1294,7 @@ function AnnotationPopover({
         background: 'var(--color-bg-elevated)',
         border: '1px solid var(--color-border-default)',
         borderRadius: 'var(--r-2)',
-        boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+        boxShadow: 'var(--shadow-panel)',
         padding: 'var(--sp-3)',
         fontFamily: 'var(--font-sans)',
         fontSize: '13px',

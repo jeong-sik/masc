@@ -20,6 +20,7 @@ import {
   getKeeperColor,
   type KeeperCursorOverlay,
   type KeeperCursor,
+  type KeeperCursorColor,
 } from './keeper-cursor-overlay'
 
 // ── Types ─────────────────────────────────────────────────────────
@@ -39,7 +40,7 @@ class KeeperCursorLabelWidget extends WidgetType {
     private readonly keeperId: string,
     private readonly toolName: string | undefined,
     private readonly focusMode: string,
-    private readonly color: { cursor: string; selection: string },
+    private readonly color: KeeperCursorColor,
   ) { super() }
 
   toDOM(): HTMLElement {
@@ -52,9 +53,9 @@ class KeeperCursorLabelWidget extends WidgetType {
     container.style.cssText =
       `display:inline-flex;align-items:center;gap:3px;` +
       `padding:1px 5px;margin-left:4px;` +
-      `background:${this.color.cursor};color:#fff;` +
+      `background:${this.color.cursor};color:${this.color.text};` +
       `font-size:10px;font-weight:600;border-radius:3px;` +
-      `box-shadow:0 1px 3px rgba(0,0,0,0.15);` +
+      `box-shadow:${this.color.shadow};` +
       `pointer-events:none;user-select:none;line-height:1.4;`
     container.textContent = label
 
@@ -87,14 +88,18 @@ class CollisionWarningWidget extends WidgetType {
     el.className = 'cm-collision-warning'
 
     const bg =
-      this.riskLevel === 'high' ? 'rgba(248,81,73,0.12)' :
-      this.riskLevel === 'medium' ? 'rgba(210,153,34,0.12)' :
-      'rgba(150,150,150,0.08)'
+      this.riskLevel === 'high' ? 'rgb(var(--color-status-err-glow) / 0.12)' :
+      this.riskLevel === 'medium' ? 'rgb(var(--color-status-warn-glow) / 0.12)' :
+      'rgb(var(--color-accent-glow) / 0.08)'
 
     const border =
-      this.riskLevel === 'high' ? 'rgba(248,81,73,0.4)' :
-      this.riskLevel === 'medium' ? 'rgba(210,153,34,0.4)' :
-      'rgba(150,150,150,0.2)'
+      this.riskLevel === 'high' ? 'rgb(var(--color-status-err-glow) / 0.4)' :
+      this.riskLevel === 'medium' ? 'rgb(var(--color-status-warn-glow) / 0.4)' :
+      'rgb(var(--color-accent-glow) / 0.2)'
+
+    const iconColor = this.riskLevel === 'high'
+      ? 'var(--color-status-err)'
+      : 'var(--color-status-warn)'
 
     el.style.cssText =
       `display:flex;align-items:center;gap:4px;` +
@@ -105,7 +110,7 @@ class CollisionWarningWidget extends WidgetType {
 
     const icon = document.createElement('span')
     icon.textContent = this.riskLevel === 'high' ? '!!' : '!'
-    icon.style.cssText = `font-weight:700;color:${this.riskLevel === 'high' ? '#f85149' : '#d29922'}`
+    icon.style.cssText = `font-weight:700;color:${iconColor}`
     el.appendChild(icon)
 
     const text = document.createElement('span')
@@ -132,7 +137,7 @@ function buildLineHighlight(color: string): Decoration {
   })
 }
 
-function buildCursorLabel(cursor: KeeperCursor, color: { cursor: string; selection: string }): Decoration {
+function buildCursorLabel(cursor: KeeperCursor, color: KeeperCursorColor): Decoration {
   return Decoration.widget({
     widget: new KeeperCursorLabelWidget(
       cursor.keeper_id,

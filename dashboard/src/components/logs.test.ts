@@ -191,4 +191,63 @@ describe('LogViewer Code links', () => {
     await waitFor(() => expect(container.textContent).toContain('read file'))
     expect(container.querySelector('[data-testid="logs-code-link"]')).toBeNull()
   })
+
+  it('links nested log evidence into operational IDE routes', async () => {
+    const fetchLogs = vi.fn().mockResolvedValue({
+      total: 1,
+      entries: [{
+        seq: 3,
+        ts: '2026-05-14T00:00:00Z',
+        level: 'WARN',
+        raw_level: 'WARN',
+        normalized_level: 'WARN',
+        source: 'structured',
+        legacy_classified: false,
+        module: 'keeper_tool',
+        message: 'tool warning',
+        details: {
+          context: {
+            goal_id: 'goal-runtime',
+            task_id: 'task-runtime',
+            board_post_id: 'post-1',
+            comment_id: 'comment-1',
+          },
+          failure_envelope: {
+            evidence_ref: {
+              file_path: 'lib/runtime.ml',
+              line_start: 8,
+              pr_number: 15008,
+              branch: 'feat/runtime',
+              log_id: 'turn-8',
+              session_id: 'sess-nested',
+              operation_id: 'op-nested',
+              worker_run_id: 'wr-nested',
+            },
+          },
+        },
+      }],
+    })
+    const { LogViewer } = await loadLogs(fetchLogs)
+    const { container } = render(h(LogViewer, {}))
+
+    await waitFor(() => expect(container.textContent).toContain('tool warning'))
+    const routeLinks = [...container.querySelectorAll<HTMLButtonElement>('.logs-route-link')]
+    expect(routeLinks.map(link => link.textContent)).toEqual([
+      'Code',
+      'Goal',
+      'Task',
+      'Board',
+      'Comment',
+      'PR',
+      'Git',
+      'Log',
+      'Telemetry',
+    ])
+
+    routeLinks.find(link => link.textContent === 'Code')?.click()
+    expect(window.location.hash).toBe('#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=8&surface=Log&label=keeper_tool&source_id=log%3A3')
+
+    routeLinks.find(link => link.textContent === 'Telemetry')?.click()
+    expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&session_id=sess-nested&operation_id=op-nested&worker_run_id=wr-nested&q=turn-8')
+  })
 })

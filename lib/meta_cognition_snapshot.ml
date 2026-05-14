@@ -430,13 +430,13 @@ let stagnation_score ~active_agents ~active_tasks ~idle_signal_count
     if active_agents > 0 && active_tasks = 0 then 1.0 else 0.0
   in
   let idle_signals_signal =
-    Float.min 1.0 (Float.of_int idle_signal_count /. 8.0)
+    Float.min 1.0 (Float.of_int idle_signal_count /. 4.0)
   in
   let heartbeat_signal =
     Float.min 1.0 (Float.of_int heartbeat_count /. 10.0)
   in
   let blocker_signal =
-    Float.min 1.0 (Float.of_int blocker_count /. 12.0)
+    Float.min 1.0 (Float.of_int blocker_count /. 4.0)
   in
   let active_ratio_signal =
     Float.min 1.0 (Float.of_int active_agents /. 10.0)

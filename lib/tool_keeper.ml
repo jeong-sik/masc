@@ -1560,6 +1560,12 @@ let handle_keeper_clear ctx args : tool_result =
         | Ok (Some (_, meta)) -> Some meta
         | _ -> None
       in
+      let preserve_paused_state =
+        (match entry.phase with
+         | Keeper_state_machine.Paused -> true
+         | _ -> false)
+        || Atomic.get entry.fiber_stop
+      in
       let trace_id =
         match meta_for_trace with
         | Some meta -> Keeper_id.Trace_id.to_string meta.runtime.trace_id
@@ -1658,6 +1664,7 @@ let handle_keeper_clear ctx args : tool_result =
               {
                 meta with
                 continuity_summary = "";
+                paused = meta.paused || preserve_paused_state;
                 updated_at = Keeper_types.now_iso ();
                 runtime =
                   {

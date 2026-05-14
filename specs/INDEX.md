@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-05-13T13:23:10Z (HEAD: ef6b30c7bd)
+Generated: 2026-05-14T01:55:32Z (HEAD: 79cdf290c2)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -17,8 +17,8 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | Manual specs | 95 |
 | TTrace (auto-generated) | 0 |
 | Directories | 18 |
-| Total .cfg files | 197 |
-| Buggy .cfg (bug-model pair) | 100 |
+| Total .cfg files | 198 |
+| Buggy .cfg (bug-model pair) | 101 |
 
 `kind` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (`*TTrace*` or trace marker in header). `cfg`/`buggy` columns count companion `.cfg` files. `invariants/properties` lists names per cfg label (`clean=...`, `buggy=...`). `source hash` is the tracked `.tla` blob fingerprint.
 
@@ -124,7 +124,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | KeeperCascadeRouting.tla | KeeperCascadeRouting | manual | 2 | 1 | clean={inv:TypeOK, inv:KeeperNeverBlockedByCascade, inv:TurnProceedsIfHealthyItemExists, inv:NoGroupCycle, inv:HealthStateConsistent, inv:FallbackCountBounded, inv:SelectedItemInPath} buggy={inv:TypeOK, inv:KeeperNeverBlockedByCascade, inv:TurnProceedsIfHealthyItemExists, inv:NoGroupCycle, inv:HealthStateConsistent, inv:FallbackCountBounded, inv:SelectedItemInPath} | b2bdc9d76d73 |
 | KeeperCircuitBreaker.tla | KeeperCircuitBreaker | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:TripOnlyWithStreak} | 1d4d87f2bb68 |
 | KeeperCompactionLifecycle.tla | KeeperCompactionLifecycle | manual | 2 | 1 | clean={inv:Safety, prop:OverflowEventuallyLeavesOverflow, prop:CompactingEventuallyStops} buggy={inv:CompactingAlignsAll} | d05b75d81e11 |
-| KeeperCompositeLifecycle.tla | KeeperCompositeLifecycle | manual | 5 | 4 | clean={inv:SafetyInvariant, prop:EventualMeasurementResolves, prop:RecoveryEventuallyCompletes, prop:OverflowedEventuallyResolves} buggy-attempt={inv:ToolSurfaceFeedsAttempt} buggy-cascade={inv:NoCascadeBeforeMeasurement} buggy-compaction={inv:CompactionAtomicity, inv:PhaseTurnAlignment} buggy-post-turn={inv:PostTurnConsumesAttempt} | 293a6287f767 |
+| KeeperCompositeLifecycle.tla | KeeperCompositeLifecycle | manual | 6 | 5 | clean={inv:SafetyInvariant, inv:NoMidFlightTransitionToHandingOff, prop:EventualMeasurementResolves, prop:RecoveryEventuallyCompletes, prop:OverflowedEventuallyResolves} buggy-attempt={inv:ToolSurfaceFeedsAttempt} buggy-cascade={inv:NoCascadeBeforeMeasurement} buggy-compaction={inv:CompactionAtomicity, inv:PhaseTurnAlignment} buggy-mid-flight-handoff={inv:NoMidFlightTransitionToHandingOff} buggy-post-turn={inv:PostTurnConsumesAttempt} | b581c5d9272b |
 | KeeperConditionsGovernPhase.tla | KeeperConditionsGovernPhase | manual | 2 | 1 | clean={inv:Safety, prop:HandoffEventuallyAcknowledged} buggy={inv:TypeOK, prop:HandoffEventuallyAcknowledged} | a7ffe94f2ecd |
 | KeeperContextLifecycle.tla | KeeperContextLifecycle | manual | 4 | 2 | clean={inv:TypeOK, inv:ContextIsolation, inv:ResumeIdentity, inv:TurnMonotonicity, inv:CompactionPairIntegrity, inv:CheckpointConsistency, inv:BudgetAfterCompaction, prop:CompactionProgress, prop:EventualTurnCompletion, prop:AllKeepersTerminate} buggy={inv:TypeOK, inv:ContextIsolation, inv:ResumeIdentity, inv:TurnMonotonicity, inv:CompactionPairIntegrity, inv:CheckpointConsistency, inv:BudgetAfterCompaction} ci-buggy={inv:ContextIsolation, inv:ResumeIdentity} ci={inv:TypeOK, inv:ContextIsolation, inv:ResumeIdentity, inv:TurnMonotonicity, inv:CompactionPairIntegrity, inv:CheckpointConsistency, inv:BudgetAfterCompaction} | 1160fd29094d |
 | KeeperCoreTriad.tla | KeeperCoreTriad | manual | 2 | 1 | clean={inv:SafetyInvariant, prop:RunningEventuallyCompletes CapabilityNeverDeadlocks} buggy={inv:SafetyInvariant} | 578800364440 |

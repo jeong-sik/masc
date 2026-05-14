@@ -3,6 +3,7 @@
 
 import { signal, type ReadonlySignal } from '@preact/signals'
 import type { JournalEntry, JournalEventType, SSEEvent } from './types'
+import { SYSTEM_ACTOR_NAME } from './types/core'
 import { formatCost } from './lib/format-number'
 import {
   removeBoardPost,
@@ -100,7 +101,7 @@ function quotePreview(preview: string | undefined): string {
 
 function actorLabel(name: string | undefined): string {
   const normalized = (name ?? '').trim()
-  return normalized || 'system'
+  return normalized || SYSTEM_ACTOR_NAME
 }
 
 function projectedActorLabel(raw: string | undefined, displayName: string | undefined): string {

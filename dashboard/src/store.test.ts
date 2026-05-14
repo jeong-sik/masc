@@ -8,6 +8,14 @@ import {
   oasTotalErrors,
   oasLastLlmCallTs,
   oasLastErrorTs,
+  oasEvidenceRefsCount,
+  oasArtifactRefsCount,
+  oasRawTraceRefsCount,
+  oasReportRefsCount,
+  oasProofRefsCount,
+  oasTelemetryRefsCount,
+  oasRuntimeEvidenceRefsCount,
+  oasLastEvidenceTs,
   oasHealthSummary,
   noteOasReplayWindow,
   resetOasRuntimeSignals,
@@ -15,6 +23,7 @@ import {
   updateOasKeeperSnapshot,
   recordOasLlmCall,
   recordOasError,
+  recordOasEvidenceRefs,
 } from './store'
 import type { OasAgentEvent, OasKeeperSnapshot } from './types/oas'
 
@@ -35,6 +44,7 @@ describe('oasHealthSummary', () => {
     expect(oasHealthSummary.value.replayTruncated).toBe(false)
     expect(oasHealthSummary.value.totalLlmCalls).toBe(4)
     expect(oasHealthSummary.value.totalErrors).toBe(2)
+    expect(oasHealthSummary.value.evidenceRefsCount).toBe(0)
   })
 
   it('tracks replay sample size separately from total matching entries', () => {
@@ -130,10 +140,18 @@ describe('oasHealthSummary', () => {
     expect(s.lastKeeperTick).toBeNull()
     expect(s.lastLlmCallTs).toBeNull()
     expect(s.lastErrorTs).toBeNull()
+    expect(s.evidenceRefsCount).toBe(0)
+    expect(s.artifactRefsCount).toBe(0)
+    expect(s.rawTraceRefsCount).toBe(0)
+    expect(s.reportRefsCount).toBe(0)
+    expect(s.proofRefsCount).toBe(0)
+    expect(s.telemetryRefsCount).toBe(0)
+    expect(s.runtimeEvidenceRefsCount).toBe(0)
+    expect(s.lastEvidenceTs).toBeNull()
   })
 })
 
-describe('recordOasLlmCall / recordOasError', () => {
+describe('recordOasLlmCall / recordOasError / recordOasEvidenceRefs', () => {
   beforeEach(resetOasSignals)
 
   it('increments LLM call counter and pins timestamp', () => {
@@ -156,5 +174,37 @@ describe('recordOasLlmCall / recordOasError', () => {
     recordOasError(2)
     expect(oasTotalLlmCalls.value).toBe(1)
     expect(oasTotalErrors.value).toBe(1)
+  })
+
+  it('tracks OAS evidence reference counters independently', () => {
+    recordOasEvidenceRefs({
+      evidenceRefsCount: 6,
+      artifactRefsCount: 2,
+      rawTraceRefsCount: 1,
+      reportRefsCount: 1,
+      proofRefsCount: 1,
+      telemetryRefsCount: 1,
+      runtimeEvidenceRefsCount: 1,
+      tsMs: 1_700_000_000_000,
+    })
+
+    expect(oasEvidenceRefsCount.value).toBe(6)
+    expect(oasArtifactRefsCount.value).toBe(2)
+    expect(oasRawTraceRefsCount.value).toBe(1)
+    expect(oasReportRefsCount.value).toBe(1)
+    expect(oasProofRefsCount.value).toBe(1)
+    expect(oasTelemetryRefsCount.value).toBe(1)
+    expect(oasRuntimeEvidenceRefsCount.value).toBe(1)
+    expect(oasLastEvidenceTs.value).toBe(1_700_000_000_000)
+    expect(oasHealthSummary.value).toMatchObject({
+      evidenceRefsCount: 6,
+      artifactRefsCount: 2,
+      rawTraceRefsCount: 1,
+      reportRefsCount: 1,
+      proofRefsCount: 1,
+      telemetryRefsCount: 1,
+      runtimeEvidenceRefsCount: 1,
+      lastEvidenceTs: 1_700_000_000_000,
+    })
   })
 })

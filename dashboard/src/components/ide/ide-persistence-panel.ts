@@ -12,7 +12,12 @@ import type { Keeper } from '../../types'
 import { MemoryGraph } from '../common/memory-graph'
 import { PersistenceStatus, type PersistenceState } from '../common/persistence-status'
 import { globalPresenceSnapshot, PRESENCE_DOT, type KeeperPresenceEntry } from './keeper-presence-store'
-import { cursorOverlaySignal } from './keeper-cursor-overlay'
+import { cursorOverlaySignal, type KeeperCursor } from './keeper-cursor-overlay'
+import {
+  openIdeContextRouteLink,
+  routeLinksForContext,
+  type IdeContextRouteLink,
+} from './ide-context-lens'
 import { useSignalValue } from './use-signal-value'
 
 const REFRESH_MS = 30_000
@@ -340,17 +345,7 @@ export function IdePersistencePanel({
           </span>
         ` : null}
         ${focusLabel ? html`
-          <span style=${{
-            fontSize: 'var(--fs-10)',
-            fontFamily: 'var(--font-mono)',
-            color: 'var(--color-accent-fg)',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            maxWidth: '120px',
-          }}
-          title=${cursor?.file_path}
-          >↗ ${focusLabel}</span>
+          <span class="ide-persistence-focus" title=${cursor?.file_path}>↗ ${focusLabel}</span>
         ` : null}
         <span style=${{ marginLeft: 'auto' }}>
           <${PersistenceStatus} status=${persistenceState} lastSaved=${lastSaved} />
@@ -365,6 +360,9 @@ export function IdePersistencePanel({
         ? html`
           <div style=${{ display: 'grid', gap: 'var(--sp-2)' }}>
             <${LifecycleMini} state=${lifecycleState} phase=${phase} />
+            <${PersistenceRouteLinks}
+              links=${persistenceRouteLinks(keeperName, cursor)}
+            />
 
             <div
               style=${{
@@ -423,5 +421,41 @@ export function IdePersistencePanel({
         `
         : html`<div role="status" style=${{ color: 'var(--color-fg-disabled)', fontSize: 'var(--fs-12)' }}>keeper unavailable</div>`}
     </section>
+  `
+}
+
+function persistenceRouteLinks(
+  keeperName: string,
+  cursor: KeeperCursor | undefined,
+): ReadonlyArray<IdeContextRouteLink> {
+  const keeperId = keeperName.trim()
+  return routeLinksForContext({
+    filePath: cursor?.file_path,
+    line: cursor?.line,
+    surface: 'Persistence',
+    label: keeperId ? `${keeperId} current focus` : 'keeper current focus',
+    sourceId: keeperId ? `persistence:${keeperId}` : 'persistence',
+    keeperId,
+  })
+}
+
+function PersistenceRouteLinks({
+  links,
+}: {
+  readonly links: ReadonlyArray<IdeContextRouteLink>
+}) {
+  if (links.length === 0) return null
+  return html`
+    <div class="ide-persistence-links" aria-label="Persistence context links">
+      ${links.map(link => html`
+        <button
+          key=${link.id}
+          type="button"
+          title=${link.evidence}
+          aria-label=${`Open ${link.evidence}`}
+          onClick=${() => openIdeContextRouteLink(link)}
+        >${link.label}</button>
+      `)}
+    </div>
   `
 }

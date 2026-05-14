@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, render, screen, waitFor } from '@testing-library/preact'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
 import { html } from 'htm/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -16,6 +16,7 @@ import {
   lifecycleStateFromKeeperPhase,
   persistenceStateFromKeeperPhase,
 } from './ide-persistence-panel'
+import { cursorOverlaySignal } from './keeper-cursor-overlay'
 
 vi.mock('../../api/keeper', async () => {
   const actual = await vi.importActual<typeof import('../../api/keeper')>('../../api/keeper')
@@ -38,6 +39,13 @@ afterEach(() => {
   vi.clearAllMocks()
   activeKeeperName.value = ''
   keepers.value = []
+  cursorOverlaySignal.value = {
+    cursors: new Map(),
+    heatmap: new Map(),
+    collisions: [],
+    active_file: null,
+  }
+  window.location.hash = ''
 })
 
 describe('ide persistence helpers', () => {
@@ -119,5 +127,50 @@ describe('IdePersistencePanel', () => {
     ))
     expect(screen.getByText('keeper-2')).toBeTruthy()
     expect(screen.getByText('memory bank data unavailable')).toBeTruthy()
+  })
+
+  it('links persistence state back to code focus and keeper runtime context', async () => {
+    activeKeeperName.value = 'sangsu'
+    keepers.value = [{
+      name: 'sangsu',
+      status: 'online',
+      phase: 'Running',
+    }]
+    cursorOverlaySignal.value = {
+      cursors: new Map([[
+        'sangsu',
+        {
+          keeper_id: 'sangsu',
+          file_path: 'lib/runtime.ml',
+          line: 42,
+          column: 1,
+          focus_mode: 'editing',
+          last_update: 100,
+        },
+      ]]),
+      heatmap: new Map(),
+      collisions: [],
+      active_file: 'lib/runtime.ml',
+    }
+    fetchKeeperStateDiagramMock.mockResolvedValue({
+      keeper: 'sangsu',
+      current_phase: 'Running',
+      mermaid: 'graph TD',
+      memory_kind_usage: [],
+    } satisfies KeeperStateDiagramResponse)
+
+    render(html`<${IdePersistencePanel} pollMs=${60_000} />`)
+
+    await waitFor(() => expect(fetchKeeperStateDiagramMock).toHaveBeenCalled())
+    const links = Array.from(screen.getByLabelText('Persistence context links')
+      .querySelectorAll<HTMLButtonElement>('button'))
+    expect(links.map(link => link.textContent)).toEqual(['Code', 'Keeper'])
+    expect(links[0]?.title).toBe('Code lib/runtime.ml:42')
+    expect(links[1]?.title).toBe('Keeper sangsu')
+
+    fireEvent.click(links[0]!)
+    expect(window.location.hash).toBe(
+      '#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=42&surface=Persistence&label=sangsu+current+focus&source_id=persistence%3Asangsu&keeper=sangsu',
+    )
   })
 })

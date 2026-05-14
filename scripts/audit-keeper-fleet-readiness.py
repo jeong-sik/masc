@@ -2055,7 +2055,9 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             require_web_search_evidence=args.require_web_search_evidence,
             require_product_evidence=args.require_product_evidence,
             require_design_evidence=args.require_design_evidence,
-            require_pr_surface_evidence=args.require_pr_surface_evidence,
+            require_pr_surface_evidence=(
+                args.require_pr_surface_evidence or args.require_persistent_work_evidence
+            ),
             require_pr_review_evidence=args.require_pr_review_evidence,
             require_pr_create_evidence=(
                 args.require_pr_create_evidence or args.require_pr_lifecycle_evidence
@@ -2442,7 +2444,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help=(
             "Fail unless each keeper has provider-turn, checkpoint, history, "
-            "and tool-call-log evidence."
+            "tool-call-log, and PR/git/code-surface evidence."
         ),
     )
     parser.add_argument(

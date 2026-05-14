@@ -161,7 +161,9 @@ def append_decision(root: Path, keeper: str, row: dict) -> None:
         handle.write(json.dumps(row) + "\n")
 
 
-def write_persistent_work_evidence(root: Path, keeper: str) -> None:
+def write_persistent_work_evidence(
+    root: Path, keeper: str, *, tool: str = "keeper_bash"
+) -> None:
     trace = f"trace-{keeper}"
     manifest_dir = root / ".masc" / "keepers" / keeper / "runtime-manifests"
     checkpoint_path = root / ".masc" / "keepers" / keeper / "checkpoints" / "turn-1.json"
@@ -187,7 +189,7 @@ def write_persistent_work_evidence(root: Path, keeper: str) -> None:
                 "trace_id": trace,
                 "generation": 1,
                 "keeper_turn_id": 1,
-                "tool": "keeper_bash",
+                "tool": tool,
                 "success": True,
             }
         )
@@ -850,12 +852,32 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertEqual(
             keeper["failures"],
             [
+                "pr_surface_evidence_missing",
                 "provider_turn_evidence_missing",
                 "checkpoint_evidence_missing",
                 "history_evidence_missing",
                 "tool_call_log_evidence_missing",
             ],
         )
+
+    def test_require_persistent_work_evidence_fails_without_code_surface(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ready_keeper(root, "alpha")
+            write_persistent_work_evidence(root, "alpha", tool="keeper_board_get")
+            args = audit_args(root, expected_keepers=1)
+            args.require_persistent_work_evidence = True
+
+            report = audit.build_report(args)
+
+        self.assertFalse(report["ok"])
+        keeper = report["keepers"][0]
+        self.assertTrue(keeper["provider_turn_evidence"])
+        self.assertTrue(keeper["checkpoint_evidence"])
+        self.assertTrue(keeper["history_evidence"])
+        self.assertTrue(keeper["tool_call_log_evidence"])
+        self.assertFalse(keeper["pr_surface_action"])
+        self.assertEqual(keeper["failures"], ["pr_surface_evidence_missing"])
 
     def test_require_persistent_work_evidence_passes_with_manifest_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -873,6 +895,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertTrue(keeper["checkpoint_evidence"])
         self.assertTrue(keeper["history_evidence"])
         self.assertTrue(keeper["tool_call_log_evidence"])
+        self.assertTrue(keeper["pr_surface_action"])
         self.assertEqual(
             keeper["provider_turn_evidence_refs"],
             ["provider_turn:trace=trace-alpha:generation=1:turn=1"],

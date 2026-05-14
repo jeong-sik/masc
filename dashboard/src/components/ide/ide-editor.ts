@@ -41,7 +41,7 @@ import { SplitDiffView, UnifiedDiffView } from './ide-diff-view'
 import { KeeperBadge } from '../keeper-badge'
 import { keeperCursorExtension } from './keeper-cursor-cm-extension'
 import { cursorOverlaySignal, getKeeperColor } from './keeper-cursor-overlay'
-import { keeperTraceState } from './keeper-trace-store'
+import { keeperTraceState, type KeeperTraceEvent } from './keeper-trace-store'
 import {
   globalPresenceSnapshot,
   type KeeperPresenceSnapshot,
@@ -144,6 +144,10 @@ export function IdeEditor({
     const unsub = lspDiagnosticSnapshot.subscribe(() => forceRender(tick => tick + 1))
     return () => unsub()
   }, [])
+  useEffect(() => {
+    const unsub = keeperTraceState.subscribe(() => forceRender(tick => tick + 1))
+    return () => unsub()
+  }, [])
 
   const document = documentStore.document()
   const lines = documentStore.lines()
@@ -161,6 +165,7 @@ export function IdeEditor({
     annotations,
     diffRows: currentDiffRows,
     activeKeeperCount: activeCursors.length,
+    traceEvents: keeperTraceState.value.events,
   })
   const gridTemplateRows = editorGridRows(activeLayerKinds.length > 0, findOpen)
 
@@ -292,11 +297,13 @@ function buildCurrentFileSignals({
   annotations,
   diffRows,
   activeKeeperCount,
+  traceEvents,
 }: {
   readonly filePath: string
   readonly annotations: ReadonlyArray<IdeAnnotation>
   readonly diffRows: ReadonlyArray<UnifiedDiffRow>
   readonly activeKeeperCount: number
+  readonly traceEvents: ReadonlyArray<KeeperTraceEvent>
 }): ReadonlyArray<CurrentFileSignal> {
   const normalizedFile = normalizeIdeContextFilePath(filePath)
   const matchesCurrentFile = (value: string): boolean =>
@@ -312,6 +319,16 @@ function buildCurrentFileSignals({
     ? threadSnapshot.threads.length
     : 0
   const changedRows = diffRows.filter(row => row.kind === 'add' || row.kind === 'delete')
+  const fileTraceEvents = traceEvents.filter(event => {
+    const traceFilePath = traceEventFilePath(event)
+    return traceFilePath !== null && matchesCurrentFile(traceFilePath)
+  })
+  const traceHitCount = fileTraceEvents.reduce((sum, event) => sum + event.count, 0)
+  const operationalTraceCount = fileTraceEvents.reduce((sum, event) => {
+    if (event.source !== 'activity-event') return sum
+    const surface = event.surface.trim().toLowerCase()
+    return surface !== '' && surface !== 'activity' ? sum + event.count : sum
+  }, 0)
   return [
     {
       id: 'lsp',
@@ -332,6 +349,18 @@ function buildCurrentFileSignals({
       title: `${threadCount} current-file anchored thread${threadCount === 1 ? '' : 's'}`,
     },
     {
+      id: 'trace',
+      label: 'Trace',
+      count: traceHitCount,
+      title: `${traceHitCount} current-file trace event${traceHitCount === 1 ? '' : 's'}`,
+    },
+    {
+      id: 'ops',
+      label: 'Ops',
+      count: operationalTraceCount,
+      title: `${operationalTraceCount} current-file operational surface link${operationalTraceCount === 1 ? '' : 's'}`,
+    },
+    {
       id: 'diff',
       label: 'Diff',
       count: changedRows.length,
@@ -344,6 +373,12 @@ function buildCurrentFileSignals({
       title: `${activeKeeperCount} keeper${activeKeeperCount === 1 ? '' : 's'} active in this file`,
     },
   ]
+}
+
+function traceEventFilePath(event: KeeperTraceEvent): string | null {
+  if (event.source === 'anchored-thread') return event.filePath ?? null
+  if (event.source === 'activity-event') return event.filePath
+  return null
 }
 
 function EditorCurrentFileSignals({

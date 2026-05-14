@@ -304,6 +304,7 @@ export interface EditorKeeperTraceLineEvent {
   readonly keeperName: string
   readonly count: number
   readonly tsMs: number
+  readonly surface?: string
 }
 
 export interface EditorKeeperTraceLine {
@@ -421,6 +422,7 @@ export function keeperTraceLinesForFile(
       keeperName: event.keeperName,
       count: event.count,
       tsMs: event.tsMs,
+      surface: traceEventSurface(event),
     })
     byLine.set(line, existing)
   }
@@ -483,9 +485,19 @@ function traceEventLine(event: KeeperTraceEvent): number | null {
   return null
 }
 
+function traceEventSurface(event: KeeperTraceEvent): string | undefined {
+  return event.source === 'activity-event' ? event.surface : undefined
+}
+
 function traceEventLabel(event: EditorKeeperTraceLineEvent): string {
   const count = event.count > 1 ? ` x${event.count}` : ''
-  return `${traceSourceLabel(event.source)} ${event.keeperName}${count}`
+  const rawSurface = event.surface?.trim()
+  const surface = event.source === 'activity-event'
+    && rawSurface
+    && rawSurface.toLowerCase() !== 'activity'
+    ? ` ${rawSurface}`
+    : ''
+  return `${traceSourceLabel(event.source)}${surface} ${event.keeperName}${count}`
 }
 
 function traceLineAriaLabel(line: number, events: ReadonlyArray<EditorKeeperTraceLineEvent>): string {
@@ -497,7 +509,7 @@ function traceLineTitle(line: number, events: ReadonlyArray<EditorKeeperTraceLin
 }
 
 function traceLineKey(events: ReadonlyArray<EditorKeeperTraceLineEvent>): string {
-  return events.map(event => `${event.source}:${event.keeperName}:${event.count}:${event.tsMs}`).join('|')
+  return events.map(event => `${event.source}:${event.surface ?? ''}:${event.keeperName}:${event.count}:${event.tsMs}`).join('|')
 }
 
 export function keeperLineSelectExt(

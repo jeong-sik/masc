@@ -340,6 +340,20 @@ val bare_alias_audit
     boot log line. A non-zero [dead_bares] surfaces a ping-pong
     regression candidate (PR #15112 γ guard). *)
 
+val start_bare_alias_audit_fiber
+  :  sw:Eio.Switch.t
+  -> clock:_ Eio.Time.clock
+  -> base_path:string
+  -> canonical_names_fn:(unit -> string list)
+  -> unit
+(** Fork an Eio fiber that re-runs [bare_alias_audit] every
+    [MASC_AUTH_BARE_ALIAS_AUDIT_INTERVAL_S] seconds (default 60). Each
+    tick refreshes the [masc_auth_bare_alias{state=...}] gauges so
+    mid-run regressions surface within one interval instead of waiting
+    for the next server boot. [canonical_names_fn] is invoked per
+    tick to follow keeper-roster changes. Exceptions inside a tick
+    are logged and absorbed; the loop continues. *)
+
 (** {1 Credential Archive Retention} *)
 
 val prune_archive

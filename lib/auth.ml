@@ -1584,3 +1584,53 @@ let is_auth_enabled config : bool =
   let cfg = load_auth_config config in
   cfg.enabled
 ;;
+
+let bare_alias_audit_interval_default = 60.0
+
+let bare_alias_audit_interval () =
+  match Sys.getenv_opt "MASC_AUTH_BARE_ALIAS_AUDIT_INTERVAL_S" with
+  | Some s ->
+    (match float_of_string_opt s with
+     | Some v when v > 0.0 -> v
+     | _ -> bare_alias_audit_interval_default)
+  | None -> bare_alias_audit_interval_default
+;;
+
+(* Periodic refresh of the bare-alias gauges. Boot-time audit sets
+   the gauge once; this fiber re-runs the audit every
+   [MASC_AUTH_BARE_ALIAS_AUDIT_INTERVAL_S] seconds (default 60) so
+   the surface stays fresh against mid-run regressions -- e.g. an
+   operator-initiated keeper add, a buggy provisioner that writes
+   bare files, or a config reload that broadens the keeper roster.
+   Without this, a regression introduced at runtime would be
+   invisible until the next server restart.
+
+   [canonical_names_fn] is invoked on every tick so a runtime
+   keeper-roster change is reflected in the next sweep without
+   restarting the fiber. *)
+let start_bare_alias_audit_fiber ~sw ~clock ~base_path
+    ~canonical_names_fn =
+  let interval = bare_alias_audit_interval () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Log.Auth.info
+      "bare_alias_audit: periodic fiber started (interval=%.0fs)"
+      interval;
+    let rec loop () =
+      Eio.Time.sleep clock interval;
+      (try
+         let _ : bare_alias_audit_result =
+           bare_alias_audit ~base_path
+             ~canonical_names:(canonical_names_fn ())
+         in
+         ()
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         Log.Auth.warn
+           "bare_alias_audit: periodic tick failed: %s (gauges may be \
+            stale until next tick)"
+           (Printexc.to_string exn));
+      loop ()
+    in
+    loop ())
+;;

@@ -788,8 +788,8 @@ let assemble_cost_event_payload
   let entry = `Assoc ([
     ("agent", `String agent_name);
     ("task_id", Json_util.string_opt_to_json task_id);
-    ("provider", `String "runtime");
-    ("model", `String "runtime");
+    ("provider", `String runtime_lane_label);
+    ("model", `String runtime_lane_label);
     ("input_tokens", `Int safe_input_tokens);
     ("output_tokens", `Int safe_output_tokens);
     ("cost_usd", `Float safe_cost_usd);

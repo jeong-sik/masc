@@ -111,6 +111,43 @@ let respond_high_risk_param_blocked request reqd ~param_key ~risk =
                    param_key risk) );
           ]))
 
+let board_curation_json () =
+  match Board_dispatch.latest_curation_snapshot () with
+  | None -> `Assoc [ ("snapshot", `Null) ]
+  | Some snap -> `Assoc [ ("snapshot", Board_curation.snapshot_to_yojson snap) ]
+
+let board_sub_boards_json () =
+  let sub_boards = Board_dispatch.list_sub_boards () in
+  `Assoc
+    [
+      ( "sub_boards",
+        `List (List.map Board.sub_board_to_yojson sub_boards) );
+    ]
+
+let board_karma_ledger_json req =
+  let agent = query_param req "agent" in
+  let limit = int_query_param req "limit" ~default:500 |> clamp ~min_v:1 ~max_v:5000 in
+  let events = Board_dispatch.get_karma_ledger ?agent ~limit () in
+  let totals =
+    Board_dispatch.get_all_karma ()
+    |> List.sort (fun (_, a) (_, b) -> compare b a)
+  in
+  `Assoc
+    [
+      ("events", `List (List.map Board.karma_event_to_yojson events));
+      ("count", `Int (List.length events));
+      ("scoring_rule", `String "up=+1,down=0");
+      ( "totals",
+        `List
+          (List.map
+             (fun (agent_name, k) ->
+               `Assoc [ ("agent", `String agent_name); ("karma", `Int k) ])
+             totals) );
+    ]
+
+let respond_board_json reqd json =
+  Http.Response.json (Yojson.Safe.to_string json) reqd
+
 let add_routes ~sw ~clock router =
   router
   |> Http.Router.get "/api/v1/activity/events" (fun request reqd ->
@@ -293,13 +330,7 @@ let add_routes ~sw ~clock router =
 
   |> Http.Router.get "/api/v1/board/curation" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
-         let json =
-           match Board_dispatch.latest_curation_snapshot () with
-           | None -> `Assoc [ ("snapshot", `Null) ]
-           | Some snap ->
-             `Assoc [ ("snapshot", Board_curation.snapshot_to_yojson snap) ]
-         in
-         Http.Response.json (Yojson.Safe.to_string json) reqd
+         respond_board_json reqd (board_curation_json ())
        ) request reqd)
 
   |> Http.Router.get "/api/v1/board/flairs" (fun _request reqd ->
@@ -308,11 +339,7 @@ let add_routes ~sw ~clock router =
        Http.Response.json (Yojson.Safe.to_string json) reqd)
 
   |> Http.Router.get "/api/v1/board/sub-boards" (fun _request reqd ->
-       let sub_boards = Board_dispatch.list_sub_boards () in
-       let json = `Assoc [
-         ("sub_boards", `List (List.map Board.sub_board_to_yojson sub_boards));
-       ] in
-       Http.Response.json (Yojson.Safe.to_string json) reqd)
+       respond_board_json reqd (board_sub_boards_json ()))
 
   |> Http.Router.post "/api/v1/board/sub-boards" (fun request reqd ->
        with_tool_auth ~tool_name:"board_sub_board_create"
@@ -447,6 +474,12 @@ let add_routes ~sw ~clock router =
               Http.Response.json
                 (Yojson.Safe.to_string (`Assoc [("error", `String "post_id is required")]))
                 ~status:`Bad_request reqd
+          | Some "curation" ->
+              respond_board_json reqd (board_curation_json ())
+          | Some "sub-boards" ->
+              respond_board_json reqd (board_sub_boards_json ())
+          | Some "karma/ledger" ->
+              respond_board_json reqd (board_karma_ledger_json req)
           | Some post_id ->
               let format =
                 query_param req "format" |> Option.value ~default:"nested"
@@ -606,27 +639,7 @@ let add_routes ~sw ~clock router =
 
   |> Http.Router.get "/api/v1/board/karma/ledger" (fun request reqd ->
        with_public_read (fun _state req reqd ->
-         let agent = query_param req "agent" in
-         let limit =
-           int_query_param req "limit" ~default:500
-           |> clamp ~min_v:1 ~max_v:5000
-         in
-         let events = Board_dispatch.get_karma_ledger ?agent ~limit () in
-         let totals =
-           Board_dispatch.get_all_karma ()
-           |> List.sort (fun (_, a) (_, b) -> compare b a)
-         in
-         let json =
-           `Assoc [
-             ("events", `List (List.map Board.karma_event_to_yojson events));
-             ("count", `Int (List.length events));
-             ("scoring_rule", `String "up=+1,down=0");
-             ("totals", `List (List.map (fun (agent_name, k) ->
-               `Assoc [("agent", `String agent_name); ("karma", `Int k)])
-               totals));
-           ]
-         in
-         Http.Response.json (Yojson.Safe.to_string json) reqd
+         respond_board_json reqd (board_karma_ledger_json req)
        ) request reqd)
 
   (* Mention Inbox API *)

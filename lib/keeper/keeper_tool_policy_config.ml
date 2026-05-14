@@ -219,6 +219,13 @@ let parse_git_clone (doc : Keeper_toml_loader.toml_doc) : git_clone_config =
   { allowed_orgs; denied_repos; default_depth;
     clone_timeout_sec; push_timeout_sec; pr_create_timeout_sec }
 
+let unresolved_tool_message ~label ~name =
+  match Tool_resolution.resolve name with
+  | Tool_resolution.Resolved _ | Tool_resolution.Alias_to _ -> None
+  | Tool_resolution.Unknown { tried; _ } ->
+      Some (Printf.sprintf "%s: tool '%s' unresolved: tried [%s]"
+              label name (Tool_resolution.string_of_tried tried))
+
 let is_known_policy_tool_name = Tool_resolution.is_known_policy_tool_name
 
 (* Shortcut: if the caller's [base_path] already points at a project root
@@ -299,26 +306,28 @@ let load ~base_path : (t, string) result =
             Hashtbl.fold (fun group_name (group : group_source) acc ->
               match group with
               | Static tools ->
-                  List.filter (fun t -> not (is_known_policy_tool_name t)) tools
-                  |> List.rev_map (fun t ->
-                    Printf.sprintf "groups.%s: tool '%s' is not a known policy tool" group_name t)
+                  List.filter_map (fun t ->
+                    unresolved_tool_message ~label:(Printf.sprintf "groups.%s" group_name) ~name:t
+                  ) tools
                   |> List.rev_append acc
               | Shard_ref _ -> acc
             ) groups []
           in
           let unknown_masc_tools =
             Hashtbl.fold (fun group_name tools acc ->
-              List.filter (fun t -> not (is_known_policy_tool_name t)) tools
-              |> List.rev_map (fun t ->
-                Printf.sprintf "masc.%s: tool '%s' is not a known policy tool" group_name t)
+              List.filter_map (fun t ->
+                unresolved_tool_message ~label:(Printf.sprintf "masc.%s" group_name) ~name:t
+              ) tools
               |> List.rev_append acc
             ) masc_groups []
           in
           let unknown_preset_tools =
             Hashtbl.fold (fun preset_name (def : preset_def) acc ->
-              List.filter (fun t -> not (is_known_policy_tool_name t)) def.masc_tools
-              |> List.rev_map (fun t ->
-                Printf.sprintf "presets.%s.masc_tools: tool '%s' is not a known policy tool" preset_name t)
+              List.filter_map (fun t ->
+                unresolved_tool_message
+                  ~label:(Printf.sprintf "presets.%s.masc_tools" preset_name)
+                  ~name:t
+              ) def.masc_tools
               |> List.rev_append acc
             ) presets []
           in

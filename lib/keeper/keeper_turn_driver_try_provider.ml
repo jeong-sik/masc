@@ -109,6 +109,46 @@ let emit_runtime_manifest
     |> append
   | _ -> ()
 
+let sanitize_runtime_mcp_external_tool_choice
+      ~runtime_mcp_external_tools
+      (params : Agent_sdk.Hooks.turn_params)
+  =
+  if not runtime_mcp_external_tools then params
+  else
+    match params.tool_choice with
+    | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) ->
+      { params with tool_choice = Some Agent_sdk.Types.Auto }
+    | Some (Agent_sdk.Types.Auto | Agent_sdk.Types.None_) | None -> params
+
+let sanitize_runtime_mcp_external_tool_decision
+      ~runtime_mcp_external_tools
+      (decision : Agent_sdk.Hooks.hook_decision)
+  =
+  match decision with
+  | Agent_sdk.Hooks.AdjustParams params ->
+    Agent_sdk.Hooks.AdjustParams
+      (sanitize_runtime_mcp_external_tool_choice
+         ~runtime_mcp_external_tools
+         params)
+  | _ -> decision
+
+let wrap_runtime_mcp_external_tool_hooks
+      ~runtime_mcp_external_tools
+      (hooks : Agent_sdk.Hooks.hooks option)
+  =
+  match hooks, runtime_mcp_external_tools with
+  | None, _ | Some _, false -> hooks
+  | Some hooks, true ->
+    let before_turn_params =
+      Option.map
+        (fun hook event ->
+           hook event
+           |> sanitize_runtime_mcp_external_tool_decision
+                ~runtime_mcp_external_tools:true)
+        hooks.before_turn_params
+    in
+    Some { hooks with before_turn_params }
+
 (** Run a single provider attempt within the cascade.
 
     This is the extracted body of the [try_provider] closure that was
@@ -167,6 +207,14 @@ let run_try_provider
       let resolved_lane =
         Keeper_turn_driver_helpers.resolved_tool_lane_label ~effective_tools
           ~runtime_mcp_policy
+      in
+      let runtime_mcp_external_tools =
+        effective_tools = [] && Option.is_some runtime_mcp_policy
+      in
+      let hooks =
+        wrap_runtime_mcp_external_tool_hooks
+          ~runtime_mcp_external_tools
+          ctx.hooks
       in
       emit_runtime_manifest ctx
         ~status:(if missing_required_tool_names = [] then "resolved" else "error")
@@ -233,7 +281,7 @@ let run_try_provider
           ; temperature = ctx.temperature
           ; max_idle_turns = ctx.max_idle_turns
           ; guardrails = ctx.guardrails
-          ; hooks = ctx.hooks
+          ; hooks
           ; context_reducer = ctx.context_reducer
           ; memory = ctx.memory
           ; tool_retry_policy = ctx.tool_retry_policy
@@ -465,3 +513,8 @@ let run_try_provider
        in
        result, checkpoint_after, liveness_success_sample)
 ;;
+
+module For_testing = struct
+  let sanitize_runtime_mcp_external_tool_choice =
+    sanitize_runtime_mcp_external_tool_choice
+end

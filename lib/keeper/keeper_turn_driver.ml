@@ -22,6 +22,11 @@ let provider_attempt_status_of_result = function
   | Error (Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _)) -> "timeout"
   | Error _ -> "error"
 
+let provider_attempt_exception_kind_of_result = function
+  | Error (Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _)) ->
+    Some "outer_oas_timeout"
+  | Ok _ | Error _ -> None
+
 let provider_attempt_status_and_error_of_exception = function
   | Eio.Time.Timeout -> "timeout", "Eio.Time.Timeout"
   | Eio.Cancel.Cancelled inner ->
@@ -752,6 +757,7 @@ let run_named
                 (match result with
                  | Ok _ -> `Null
                  | Error sdk_err -> `String (Agent_sdk.Error.to_string sdk_err))
+              ?exception_kind:(provider_attempt_exception_kind_of_result result)
               attempt_latency_ms;
             result, checkpoint_after, liveness_success_sample, attempt_latency_ms
           | exception exn ->

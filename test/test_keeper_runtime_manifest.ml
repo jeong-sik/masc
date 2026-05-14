@@ -1561,12 +1561,12 @@ let test_provider_attempt_finish_recorded_on_oas_timeout () =
               (match result with
                | Ok _ -> Alcotest.fail "expected OAS bridge timeout"
                | Error err ->
+                 let error_text = Agent_sdk.Error.to_string err in
                  Alcotest.(check bool)
                    "timeout surfaced to keeper turn"
                    true
-                   (contains_substring
-                      (Agent_sdk.Error.to_string err)
-                      "Timeout after"));
+                   (contains_substring error_text "Timeout after"
+                    || contains_substring error_text "Per-provider timeout after"));
               Alcotest.(check bool)
                 "provider request was attempted"
                 true
@@ -1628,7 +1628,9 @@ let test_provider_attempt_finish_recorded_on_oas_timeout () =
                 "provider timeout records timeout error"
                 true
                 (match json_string_member_opt "error" finished_row.M.decision with
-                 | Some error -> contains_substring error "Timeout after"
+                 | Some error ->
+                   contains_substring error "Timeout after"
+                   || contains_substring error "Per-provider timeout after"
                  | None -> false);
               let status, api_json =
                 Masc_mcp.Server_dashboard_http_keeper_api.keeper_runtime_trace_json
@@ -2261,6 +2263,50 @@ let test_runtime_manifest_contract_omits_provider_model_fields () =
       "lib/keeper/keeper_turn_driver_try_provider.ml";
     ]
 
+let test_runtime_mcp_external_lane_demotes_inline_tool_choice () =
+  let module TP = Masc_mcp.Keeper_turn_driver_try_provider.For_testing in
+  let params =
+    { Agent_sdk.Hooks.default_turn_params with
+      tool_choice = Some Agent_sdk.Types.Any
+    }
+  in
+  let sanitized =
+    TP.sanitize_runtime_mcp_external_tool_choice
+      ~runtime_mcp_external_tools:true
+      params
+  in
+  Alcotest.(check bool)
+    "Any is demoted to Auto"
+    true
+    (match sanitized.Agent_sdk.Hooks.tool_choice with
+     | Some Agent_sdk.Types.Auto -> true
+     | _ -> false);
+  let exact_tool =
+    { params with tool_choice = Some (Agent_sdk.Types.Tool "keeper_task_claim") }
+  in
+  let sanitized_exact =
+    TP.sanitize_runtime_mcp_external_tool_choice
+      ~runtime_mcp_external_tools:true
+      exact_tool
+  in
+  Alcotest.(check bool)
+    "exact tool_choice is demoted to Auto"
+    true
+    (match sanitized_exact.Agent_sdk.Hooks.tool_choice with
+     | Some Agent_sdk.Types.Auto -> true
+     | _ -> false);
+  let inline_lane =
+    TP.sanitize_runtime_mcp_external_tool_choice
+      ~runtime_mcp_external_tools:false
+      exact_tool
+  in
+  Alcotest.(check bool)
+    "inline lane keeps exact tool_choice"
+    true
+    (match inline_lane.Agent_sdk.Hooks.tool_choice with
+     | Some (Agent_sdk.Types.Tool "keeper_task_claim") -> true
+     | _ -> false)
+
 let () =
   Alcotest.run "keeper_runtime_manifest"
     [
@@ -2342,5 +2388,9 @@ let () =
             "runtime manifest contract omits provider/model fields"
             `Quick
             test_runtime_manifest_contract_omits_provider_model_fields;
+          Alcotest.test_case
+            "runtime MCP external lane demotes inline tool_choice"
+            `Quick
+            test_runtime_mcp_external_lane_demotes_inline_tool_choice;
         ] );
     ]

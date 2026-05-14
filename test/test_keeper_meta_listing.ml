@@ -144,7 +144,13 @@ let write_corrupt_keeper_meta_exn config ~name =
 
 let write_keeper_meta_exn ?(autoboot_enabled = true)
     ?(social_model = "bdi_speech_v1")
-    ?(last_social_transition_reason = "") config ~name ~trace_id =
+    ?(last_social_transition_reason = "")
+    ?active_goal_ids config ~name ~trace_id =
+  let active_goal_ids =
+    match active_goal_ids with
+    | Some goal_ids -> goal_ids
+    | None -> [ "goal-" ^ name ]
+  in
   let json =
     `Assoc
       [
@@ -155,7 +161,8 @@ let write_keeper_meta_exn ?(autoboot_enabled = true)
         ("social_model", `String social_model);
         ("last_social_transition_reason", `String last_social_transition_reason);
         ("autoboot_enabled", `Bool autoboot_enabled);
-        ("active_goal_ids", `List [ `String ("goal-" ^ name) ]);
+        ( "active_goal_ids",
+          `List (List.map (fun goal_id -> `String goal_id) active_goal_ids) );
       ]
   in
   let meta =
@@ -174,6 +181,30 @@ let register_keeper_offline_exn config ~name =
         (Keeper_registry.register_offline ~base_path:config.base_path name meta)
   | Ok None -> fail ("expected keeper meta for " ^ name)
   | Error e -> fail ("read_meta failed: " ^ e)
+
+let mark_task_done_by_title config ~title ~agent_name =
+  let backlog = Coord.read_backlog config in
+  let seen = ref false in
+  let tasks =
+    List.map
+      (fun (task : Masc_domain.task) ->
+        if String.equal task.title title then (
+          seen := true;
+          {
+            task with
+            task_status =
+              Masc_domain.Done
+                {
+                  assignee = agent_name;
+                  completed_at = Masc_domain.now_iso ();
+                  notes = Some "done";
+                };
+          })
+        else task)
+      backlog.tasks
+  in
+  if not !seen then fail ("expected task to mark done: " ^ title);
+  Coord.write_backlog config { backlog with tasks; version = backlog.version + 1 }
 
 let parse_json_exn body =
   try Yojson.Safe.from_string body
@@ -635,6 +666,92 @@ let test_keeper_persona_audit_reports_dormant_autoboot_disabled_keeper () =
           check int "no issues" 0
             Yojson.Safe.Util.(item |> member "issues" |> to_list |> List.length))
 
+let test_keeper_persona_audit_flags_stale_active_goal_ids () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  with_clean_base_path_env @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Config_dir_resolver.reset ();
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      write_persona_profile_exn config ~name:"analyst";
+      write_keeper_persona_toml_exn config ~name:"analyst"
+        ~persona_name:"analyst";
+      let stale_goal, _ =
+        match Goal_store.upsert_goal config ~title:"Finished scoped goal" () with
+        | Ok payload -> payload
+        | Error msg -> fail msg
+      in
+      let other_goal, _ =
+        match Goal_store.upsert_goal config ~title:"Open global goal" () with
+        | Ok payload -> payload
+        | Error msg -> fail msg
+      in
+      write_keeper_meta_exn config ~name:"analyst" ~trace_id:"trace-analyst"
+        ~active_goal_ids:[ stale_goal.id ];
+      ignore
+        (Coord_task.add_task ~goal_id:stale_goal.id config
+           ~title:"Done scoped task" ~priority:3 ~description:"desc");
+      ignore
+        (Coord_task.add_task ~goal_id:other_goal.id config
+           ~title:"Open global task" ~priority:1 ~description:"desc");
+      mark_task_done_by_title config ~title:"Done scoped task"
+        ~agent_name:"keeper-analyst-agent";
+      let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+      write_minimal_cascade_toml config_root;
+      Unix.putenv "MASC_CONFIG_DIR" config_root;
+      Config_dir_resolver.reset ();
+      (match Keeper_types.read_meta config "analyst" with
+       | Ok (Some meta) ->
+           ignore
+             (Keeper_registry.register ~base_path:config.base_path "analyst"
+                meta)
+       | Ok None -> fail "expected analyst meta"
+       | Error e -> fail ("read_meta failed: " ^ e));
+      let ctx = keeper_ctx env sw config "operator" in
+      let ok, body =
+        match
+          Tool_keeper.dispatch ctx ~name:"masc_keeper_persona_audit"
+            ~args:(`Assoc [ ("name", `String "analyst") ])
+        with
+        | Some result -> result
+        | None -> fail "expected masc_keeper_persona_audit dispatch"
+      in
+      check bool "tool audit ok" true ok;
+      let json = parse_json_exn body in
+      check int "summary stale active goal ids" 1
+        Yojson.Safe.Util.(
+          json |> member "summary" |> member "stale_active_goal_ids" |> to_int);
+      match audit_item_by_name json "analyst" with
+      | None -> fail "expected analyst audit item"
+      | Some item ->
+          let issues =
+            Yojson.Safe.Util.(item |> member "issues") |> string_list_of_json
+          in
+          let scope = Yojson.Safe.Util.(item |> member "active_goal_scope") in
+          check bool "flags stale active goals" true
+            (List.mem "stale_active_goal_ids" issues);
+          check bool "item not ok" false
+            Yojson.Safe.Util.(item |> member "ok" |> to_bool);
+          check int "scoped tasks counted" 1
+            Yojson.Safe.Util.(scope |> member "scoped_task_count" |> to_int);
+          check int "scoped open tasks counted" 0
+            Yojson.Safe.Util.(scope |> member "scoped_open_task_count" |> to_int);
+          check int "scoped terminal tasks counted" 1
+            Yojson.Safe.Util.(
+              scope |> member "scoped_terminal_task_count" |> to_int);
+          check int "global open tasks counted" 1
+            Yojson.Safe.Util.(scope |> member "global_open_task_count" |> to_int);
+          check bool "scope marked stale" true
+            Yojson.Safe.Util.(scope |> member "stale" |> to_bool))
+
 let test_keeper_persona_audit_flags_missing_persona_runtime () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -844,6 +961,8 @@ let () =
           test_case "keeper persona audit reports dormant autoboot-disabled keeper"
             `Quick
             test_keeper_persona_audit_reports_dormant_autoboot_disabled_keeper;
+          test_case "keeper persona audit flags stale active goal ids" `Quick
+            test_keeper_persona_audit_flags_stale_active_goal_ids;
           test_case "keeper persona audit flags missing persona runtime" `Quick
             test_keeper_persona_audit_flags_missing_persona_runtime;
           test_case "keeper persona audit flags runtime meta parse error" `Quick

@@ -42,11 +42,6 @@ let workspace_or_default ?(warn_on_failure = true) ~site ~path ~default f =
       observe_workspace_route_failure ~warn_on_failure ~site ~path exn;
       default
 
-module For_testing = struct
-  let sanitize_log_value = sanitize_log_value
-  let observe_workspace_route_failure = observe_workspace_route_failure
-end
-
 (* Pure classification of the [?keeper=<name>] query param into a
    workspace base directory plus a source tag.
 
@@ -277,13 +272,21 @@ let valid_git_ref s =
 
 (* --- Recursive file tree --- *)
 
-let file_tree_node ~path ~label ~depth ~parent ~has_children =
+let file_tree_node ~diff_by_path ~path ~label ~depth ~parent ~has_children =
+  let diff =
+    match diff_by_path with
+    | Some diff_by_path when not has_children ->
+      (match Hashtbl.find_opt diff_by_path path with
+       | Some badge -> `String badge
+       | None -> `Null)
+    | _ -> `Null
+  in
   `Assoc [ ("path", `String path); ("label", `String label)
          ; ("depth", `Int depth); ("parent", `String parent)
          ; ("hasChildren", `Bool has_children)
-         ; ("diff", `Null); ("keeperId", `Null); ("hueIndex", `Null) ]
+         ; ("diff", diff); ("keeperId", `Null); ("hueIndex", `Null) ]
 
-let rec scan_dir_bounded ~base ~depth ~max_depth ~remaining acc dir =
+let rec scan_dir_bounded ?diff_by_path ~base ~depth ~max_depth ~remaining acc dir =
   if depth > max_depth || remaining <= 0 then (acc, remaining)
   else
     let entries =
@@ -312,13 +315,14 @@ let rec scan_dir_bounded ~base ~depth ~max_depth ~remaining acc dir =
           let rel = rel_under base full in
           let has_children = is_dir && depth < max_depth in
           let parent = if depth = 0 then "" else Filename.dirname rel in
-          let node = file_tree_node
+          let node = file_tree_node ~diff_by_path
               ~path:rel ~label:f ~depth ~parent ~has_children in
           let acc' = node :: acc in
           let remaining' = remaining - 1 in
           let acc'', remaining'' =
             if is_dir && depth < max_depth then
               scan_dir_bounded
+                ?diff_by_path
                 ~base ~depth:(depth + 1) ~max_depth ~remaining:remaining'
                 acc' full
             else (acc', remaining')
@@ -327,8 +331,8 @@ let rec scan_dir_bounded ~base ~depth ~max_depth ~remaining acc dir =
     in
     fold acc remaining entries
 
-let scan_dir ~base ~depth ~max_depth ~max_nodes acc dir =
-  fst (scan_dir_bounded ~base ~depth ~max_depth ~remaining:max_nodes acc dir)
+let scan_dir ?diff_by_path ~base ~depth ~max_depth ~max_nodes acc dir =
+  fst (scan_dir_bounded ?diff_by_path ~base ~depth ~max_depth ~remaining:max_nodes acc dir)
 
 (* --- Git helpers --- *)
 
@@ -363,6 +367,39 @@ let git_run_lines ~cwd args =
     String.split_on_char '\n' out
     |> List.filter (fun l -> l <> "")
 
+let diff_badge_of_numstat ~added ~deleted =
+  match int_of_string_opt added, int_of_string_opt deleted with
+  | Some added, Some deleted ->
+    let parts =
+      (if added > 0 then [Printf.sprintf "+%d" added] else [])
+      @ (if deleted > 0 then [Printf.sprintf "-%d" deleted] else [])
+    in
+    (match parts with
+     | [] -> None
+     | _ -> Some (String.concat " " parts))
+  | _ when String.equal added "-" && String.equal deleted "-" -> Some "bin"
+  | _ -> None
+
+let parse_git_numstat_line line =
+  match String.split_on_char '\t' line with
+  | added :: deleted :: path_parts ->
+    let path = String.concat "\t" path_parts in
+    if path = "" then None
+    else
+      (match diff_badge_of_numstat ~added ~deleted with
+       | Some badge -> Some (path, badge)
+       | None -> None)
+  | _ -> None
+
+let git_diff_badges ~base =
+  let badges = Hashtbl.create 32 in
+  git_run_lines ~cwd:base ["diff"; "--numstat"; "HEAD"; "--"]
+  |> List.iter (fun line ->
+       match parse_git_numstat_line line with
+       | Some (path, badge) -> Hashtbl.replace badges path badge
+       | None -> ());
+  badges
+
 (* Surface git failure to the caller instead of collapsing to []. Lets
    route handlers distinguish "command errored / invalid ref" from
    "command succeeded with no output". *)
@@ -372,6 +409,12 @@ let git_run_lines_or_error ~cwd args =
   | Some out ->
     Ok (String.split_on_char '\n' out
         |> List.filter (fun l -> l <> ""))
+
+module For_testing = struct
+  let sanitize_log_value = sanitize_log_value
+  let observe_workspace_route_failure = observe_workspace_route_failure
+  let parse_git_numstat_line = parse_git_numstat_line
+end
 
 (* --- Blame parsing: collect per-line then group adjacent same-author ranges --- *)
 
@@ -529,7 +572,9 @@ let add_routes router =
            in
            let nodes =
              if not (Sys.file_exists base) then []
-             else scan_dir ~base ~depth:0 ~max_depth:depth ~max_nodes [] base
+             else
+               let diff_by_path = git_diff_badges ~base in
+               scan_dir ~diff_by_path ~base ~depth:0 ~max_depth:depth ~max_nodes [] base
            in
            let json = `List (List.rev nodes) in
            json_response_with_source ~status:`OK ~source request reqd json)

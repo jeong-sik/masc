@@ -24,6 +24,7 @@ const TARGET_FILES = [
   'src/components/mission.ts',
   'src/components/runtime-monitor.ts',
   'src/components/transport-health.ts',
+  'src/dashboard-ws.ts',
   'src/goal-loop-status.ts',
   'src/lib/async-state.ts',
   'src/components/common/normalize.ts',
@@ -39,6 +40,7 @@ const TEST_FILES = [
   'src/components/goal-loop-panel.test.ts',
   'src/components/keeper-tool-call-inspector.test.ts',
   'src/components/transport-health.test.ts',
+  'src/dashboard-ws.test.ts',
   'src/goal-loop-status.test.ts',
   'src/lib/async-state.test.ts',
 ]

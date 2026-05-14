@@ -40,9 +40,11 @@ interface DashboardWsDiscovery {
 interface DashboardWsDiscoveryResult {
   wsUrl: string | null
   retry: boolean
+  fromCache: boolean
 }
 
 const DASHBOARD_WS_PARSE_TIMEOUT_MS = 5_000
+const DASHBOARD_WS_DISCOVERY_CACHE_KEY = 'masc.dashboard.ws.discovery.v1'
 
 let socket: WebSocket | null = null
 let rpcId = 0
@@ -53,6 +55,53 @@ let desiredRouteState: DashboardRouteState | null = null
 let shouldReconnect = true
 let connectGeneration = 0
 const pending = new Map<number, PendingRpc>()
+
+function sessionStorageOrNull(): Storage | null {
+  if (typeof sessionStorage === 'undefined') return null
+  try {
+    return sessionStorage
+  } catch {
+    return null
+  }
+}
+
+function readCachedWsUrl(): string | null {
+  const storage = sessionStorageOrNull()
+  if (!storage) return null
+  try {
+    const raw = storage.getItem(DASHBOARD_WS_DISCOVERY_CACHE_KEY)
+    if (!raw) return null
+    const data = JSON.parse(raw) as { ws_url?: unknown }
+    return typeof data.ws_url === 'string' && data.ws_url.length > 0 ? data.ws_url : null
+  } catch {
+    storage.removeItem(DASHBOARD_WS_DISCOVERY_CACHE_KEY)
+    return null
+  }
+}
+
+function writeCachedWsUrl(wsUrl: string): void {
+  const storage = sessionStorageOrNull()
+  if (!storage) return
+  try {
+    storage.setItem(DASHBOARD_WS_DISCOVERY_CACHE_KEY, JSON.stringify({ ws_url: wsUrl }))
+  } catch {
+    // Ignore quota/private-mode failures; discovery still works without cache.
+  }
+}
+
+function clearCachedWsUrl(): void {
+  const storage = sessionStorageOrNull()
+  if (!storage) return
+  try {
+    storage.removeItem(DASHBOARD_WS_DISCOVERY_CACHE_KEY)
+  } catch {
+    // Storage may be disabled; a failed clear is equivalent to no cache control.
+  }
+}
+
+export function clearDashboardWsDiscoveryCacheForTests(): void {
+  clearCachedWsUrl()
+}
 
 // Phase 2 (PR-4.6): rAF accumulator for inbound WS messages.
 // Instead of processing every WS frame immediately (which can trigger
@@ -283,16 +332,19 @@ function closeSocket(): void {
 }
 
 async function discoverWsUrl(): Promise<DashboardWsDiscoveryResult> {
+  const cachedUrl = readCachedWsUrl()
+  if (cachedUrl) return { wsUrl: cachedUrl, retry: false, fromCache: true }
+
   const response = await fetch('/ws', { credentials: 'same-origin' })
-  if (!response.ok) return { wsUrl: null, retry: true }
+  if (!response.ok) return { wsUrl: null, retry: true, fromCache: false }
   const data = await response.json() as DashboardWsDiscovery
   if (data.enabled !== true) {
-    return { wsUrl: null, retry: false }
+    return { wsUrl: null, retry: false, fromCache: false }
   }
   if (data.listening !== true || typeof data.ws_url !== 'string') {
-    return { wsUrl: null, retry: true }
+    return { wsUrl: null, retry: true, fromCache: false }
   }
-  return { wsUrl: data.ws_url, retry: false }
+  return { wsUrl: data.ws_url, retry: false, fromCache: false }
 }
 
 function sendRpc(method: string, params: JsonObject): Promise<unknown> {
@@ -485,11 +537,13 @@ function handleMessage(data: unknown): void {
 
 function reconnectAfterCurrentSocketFailure(ws: WebSocket, err: unknown): void {
   if (socket !== ws) return
+  const wasReady = dashboardWsReady.value
   batch(() => {
     dashboardWsConnected.value = false
     dashboardWsReady.value = false
     dashboardWsLastError.value = err instanceof Error ? err.message : String(err)
   })
+  if (!wasReady) clearCachedWsUrl()
   lastSubscribeKey = ''
   closeSocket()
   scheduleReconnect()
@@ -539,6 +593,7 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
   }
   const wsUrl = discovery.wsUrl
   if (!wsUrl) {
+    if (generation === connectGeneration) clearCachedWsUrl()
     if (generation === connectGeneration && shouldReconnect && discovery.retry) {
       batch(() => {
         dashboardWsLastError.value = 'dashboard websocket unavailable'
@@ -548,9 +603,20 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
     return
   }
   if (!shouldReconnect || generation !== connectGeneration) return
+  if (!discovery.fromCache) writeCachedWsUrl(wsUrl)
 
   closeSocket()
-  const ws = new WebSocket(wsUrl)
+  let ws: WebSocket
+  try {
+    ws = new WebSocket(wsUrl)
+  } catch (err) {
+    if (discovery.fromCache) clearCachedWsUrl()
+    batch(() => {
+      dashboardWsLastError.value = err instanceof Error ? err.message : String(err)
+    })
+    scheduleReconnect()
+    return
+  }
   socket = ws
   ws.onopen = () => {
     if (socket !== ws) return
@@ -587,12 +653,14 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
   }
   ws.onclose = (event) => {
     if (socket !== ws) return
+    const wasReady = dashboardWsReady.value
     const closeError = new Error(formatCloseEventError(event))
     batch(() => {
       dashboardWsConnected.value = false
       dashboardWsReady.value = false
       dashboardWsLastError.value = closeError.message
     })
+    if (!wasReady) clearCachedWsUrl()
     lastSubscribeKey = ''
     socket = null
     rejectPendingRpcs(closeError)

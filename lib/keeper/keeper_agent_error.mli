@@ -31,6 +31,33 @@ val sdk_error_of_keeper_internal_error
 (** Coarse categorisation of [Agent_sdk.Error.sdk_error] (for dashboards). *)
 val sdk_error_kind : Agent_sdk.Error.sdk_error -> string
 
+(** Layer-aware termination semantics for SDK errors crossing the OAS ->
+    keeper boundary.
+
+    DD-015: adjacent runtimes use "turn" and "timeout" at different
+    layers.  This contract keeps OAS turn-budget stops distinct from
+    keeper wall-clock/provider timeouts before they collapse to receipt
+    outcomes. *)
+type sdk_termination_semantics =
+  | Provider_wall_clock_timeout
+  | Oas_turn_budget_exhausted
+  | Oas_idle_budget_exhausted
+  | Oas_exit_condition_reached
+  | Oas_token_budget_exhausted
+  | Oas_cost_budget_exhausted
+  | Oas_cost_budget_unenforceable
+  | Oas_contract_violation
+  | Oas_tool_retry_exhausted
+  | Oas_guardrail_violation
+  | Oas_tripwire_violation
+  | Sdk_error_failure
+
+val sdk_termination_semantics
+  :  Agent_sdk.Error.sdk_error
+  -> sdk_termination_semantics
+
+val sdk_termination_semantics_to_string : sdk_termination_semantics -> string
+
 (** RFC-0042 PR-2.5: typed bridge variants of the wire accessors.
     Wrap the existing parametrised wire string in
     [Keeper_turn_terminal_code.Sdk_error]. PR-3 swaps

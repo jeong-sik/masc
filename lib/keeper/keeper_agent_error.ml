@@ -55,6 +55,68 @@ let sdk_error_kind = function
   | Agent_sdk.Error.Internal _ -> "internal"
 ;;
 
+type sdk_termination_semantics =
+  | Provider_wall_clock_timeout
+  | Oas_turn_budget_exhausted
+  | Oas_idle_budget_exhausted
+  | Oas_exit_condition_reached
+  | Oas_token_budget_exhausted
+  | Oas_cost_budget_exhausted
+  | Oas_cost_budget_unenforceable
+  | Oas_contract_violation
+  | Oas_tool_retry_exhausted
+  | Oas_guardrail_violation
+  | Oas_tripwire_violation
+  | Sdk_error_failure
+
+let sdk_termination_semantics = function
+  | Agent_sdk.Error.Api (Agent_sdk.Retry.Timeout _) -> Provider_wall_clock_timeout
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded _) ->
+    Oas_turn_budget_exhausted
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.IdleDetected _) ->
+    Oas_idle_budget_exhausted
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.ExitConditionMet _) ->
+    Oas_exit_condition_reached
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.TokenBudgetExceeded _) ->
+    Oas_token_budget_exhausted
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.CostBudgetExceeded _) ->
+    Oas_cost_budget_exhausted
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.CostBudgetUnenforceable _) ->
+    Oas_cost_budget_unenforceable
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.CompletionContractViolation _) ->
+    Oas_contract_violation
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.ToolRetryExhausted _) ->
+    Oas_tool_retry_exhausted
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.GuardrailViolation _) ->
+    Oas_guardrail_violation
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.TripwireViolation _) ->
+    Oas_tripwire_violation
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.UnrecognizedStopReason _) -> Sdk_error_failure
+  | Agent_sdk.Error.Api _ -> Sdk_error_failure
+  | Agent_sdk.Error.Mcp _ -> Sdk_error_failure
+  | Agent_sdk.Error.Config _ -> Sdk_error_failure
+  | Agent_sdk.Error.Serialization _ -> Sdk_error_failure
+  | Agent_sdk.Error.Io _ -> Sdk_error_failure
+  | Agent_sdk.Error.Orchestration _ -> Sdk_error_failure
+  | Agent_sdk.Error.A2a _ -> Sdk_error_failure
+  | Agent_sdk.Error.Internal _ -> Sdk_error_failure
+;;
+
+let sdk_termination_semantics_to_string = function
+  | Provider_wall_clock_timeout -> "provider_wall_clock_timeout"
+  | Oas_turn_budget_exhausted -> "oas_turn_budget_exhausted"
+  | Oas_idle_budget_exhausted -> "oas_idle_budget_exhausted"
+  | Oas_exit_condition_reached -> "oas_exit_condition_reached"
+  | Oas_token_budget_exhausted -> "oas_token_budget_exhausted"
+  | Oas_cost_budget_exhausted -> "oas_cost_budget_exhausted"
+  | Oas_cost_budget_unenforceable -> "oas_cost_budget_unenforceable"
+  | Oas_contract_violation -> "oas_contract_violation"
+  | Oas_tool_retry_exhausted -> "oas_tool_retry_exhausted"
+  | Oas_guardrail_violation -> "oas_guardrail_violation"
+  | Oas_tripwire_violation -> "oas_tripwire_violation"
+  | Sdk_error_failure -> "sdk_error_failure"
+;;
+
 (* Per-variant terminal_reason_code for Agent_sdk.Error.Api.
    Previously every API failure collapsed to "api_error", so 7 keepers
    stuck on different conditions (rate limit, overload, server fault,
@@ -146,27 +208,20 @@ let api_error_terminal_reason_code_typed err =
   Keeper_turn_terminal_code.of_sdk_error_wire (api_error_terminal_reason_code err)
 ;;
 
-let receipt_outcome_kind_of_sdk_error = function
-  | Agent_sdk.Error.Api (Agent_sdk.Retry.Timeout _) -> `Cancelled
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded _) -> `Cancelled
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.IdleDetected _) -> `Cancelled
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.ExitConditionMet _) -> `Cancelled
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.TokenBudgetExceeded _) -> `Error
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.CostBudgetExceeded _) -> `Error
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.CostBudgetUnenforceable _) -> `Error
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.UnrecognizedStopReason _) -> `Error
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.ToolRetryExhausted _) -> `Error
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.CompletionContractViolation _) -> `Error
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.GuardrailViolation _) -> `Error
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.TripwireViolation _) -> `Error
-  | Agent_sdk.Error.Api _ -> `Error
-  | Agent_sdk.Error.Mcp _ -> `Error
-  | Agent_sdk.Error.Config _ -> `Error
-  | Agent_sdk.Error.Serialization _ -> `Error
-  | Agent_sdk.Error.Io _ -> `Error
-  | Agent_sdk.Error.Orchestration _ -> `Error
-  | Agent_sdk.Error.A2a _ -> `Error
-  | Agent_sdk.Error.Internal _ -> `Error
+let receipt_outcome_kind_of_sdk_error err =
+  match sdk_termination_semantics err with
+  | Provider_wall_clock_timeout
+  | Oas_turn_budget_exhausted
+  | Oas_idle_budget_exhausted
+  | Oas_exit_condition_reached -> `Cancelled
+  | Oas_token_budget_exhausted
+  | Oas_cost_budget_exhausted
+  | Oas_cost_budget_unenforceable
+  | Oas_contract_violation
+  | Oas_tool_retry_exhausted
+  | Oas_guardrail_violation
+  | Oas_tripwire_violation
+  | Sdk_error_failure -> `Error
 ;;
 
 let checkpoint_persistence_error ~keeper_name ~detail =

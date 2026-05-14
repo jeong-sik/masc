@@ -128,6 +128,12 @@ code_refs:
   - read-only CLI equivalent: `masc-keeper-feature-proof --base-path <runtime-root>`
 - `GET /api/v1/models/metrics`, `GET /api/v1/dashboard/keeper-costs`
   - runtime cost/latency view
+- `GET /api/v1/providers`
+  - runtime provider inventory
+- `GET /api/v1/cascade/config`, `GET /api/v1/cascade/config/raw`
+  - runtime cascade config inspector read models
+- `GET /api/v1/cascade/client_capacity`, `GET /api/v1/cascade/client_capacity/history`, `GET /api/v1/cascade/slo`
+  - runtime cascade capacity + SLO view
 - `GET /api/v1/cascade/strategy_trace`, `GET /api/v1/cascade/health`
   - runtime inspector view
 - `GET /api/v1/operator/digest`

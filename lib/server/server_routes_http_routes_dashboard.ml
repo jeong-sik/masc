@@ -19,10 +19,12 @@ type cascade_profile_gate = {
 
 let cascade_profile_gate () : cascade_profile_gate =
   let config_path = Cascade_runtime.cascade_config_path () in
-  let keeper_profiles =
+  let keeper_assignable_profiles =
     Keeper_cascade_profile.keeper_catalog_names ?config_path ()
-    |> Dashboard_cascade.public_profile_names
     |> List.sort_uniq String.compare
+  in
+  let keeper_assignable_profile profile =
+    keeper_assignable_profiles = [] || List.mem profile keeper_assignable_profiles
   in
   let fallback_invalid_profiles =
     match config_path with
@@ -34,22 +36,28 @@ let cascade_profile_gate () : cascade_profile_gate =
   match Cascade_catalog_runtime.known_profile_names () with
   | Ok raw_validated_profiles ->
       let validated_profiles =
-        Dashboard_cascade.public_profile_names raw_validated_profiles
+        raw_validated_profiles |> List.sort_uniq String.compare
       in
       let invalid_profiles =
         (Cascade_catalog_runtime.invalid_profile_errors ()
          @ fallback_invalid_profiles)
         |> Dashboard_cascade.invalid_profiles_with_internal_names
       in
+      let keeper_profiles =
+        raw_validated_profiles
+        |> List.filter keeper_assignable_profile
+        |> List.sort_uniq String.compare
+      in
       let candidate_profiles =
         if keeper_profiles = [] then validated_profiles else keeper_profiles
       in
       let known_internal_profiles =
-        match config_path with
-        | None -> raw_validated_profiles
-        | Some path ->
-            Cascade_catalog_validator.discover_profiles_for_diagnostics
-              ~config_path:path
+        (match config_path with
+         | None -> raw_validated_profiles
+         | Some path ->
+             Cascade_catalog_validator.discover_profiles_for_diagnostics
+               ~config_path:path)
+        |> List.sort_uniq String.compare
       in
       let invalid_assignments =
         Dashboard_cascade.invalid_assignments_for_public_profiles
@@ -72,19 +80,28 @@ let cascade_profile_gate () : cascade_profile_gate =
           fallback_invalid_profiles
       in
       let known_internal_profiles =
-        match config_path with
-        | None -> []
-        | Some path ->
-            Cascade_catalog_validator.discover_profiles_for_diagnostics
-              ~config_path:path
+        (match config_path with
+         | None -> []
+         | Some path ->
+             Cascade_catalog_validator.discover_profiles_for_diagnostics
+               ~config_path:path)
+        |> List.sort_uniq String.compare
+      in
+      let keeper_profiles =
+        known_internal_profiles
+        |> List.filter keeper_assignable_profile
+        |> List.sort_uniq String.compare
+      in
+      let candidate_profiles =
+        if keeper_profiles = [] then known_internal_profiles else keeper_profiles
       in
       let invalid_assignments =
         Dashboard_cascade.invalid_assignments_for_public_profiles
-          ~known_internal_profiles ~invalid_profiles keeper_profiles
+          ~known_internal_profiles ~invalid_profiles candidate_profiles
       in
       let invalid_names = List.map fst invalid_assignments in
       let valid_profiles =
-        keeper_profiles
+        candidate_profiles
         |> List.filter (fun profile -> not (List.mem profile invalid_names))
       in
       { valid_profiles; invalid_profiles; invalid_assignments }

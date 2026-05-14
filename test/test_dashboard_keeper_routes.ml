@@ -1211,7 +1211,7 @@ let test_available_cascade_profiles_filter_invalid_catalog_entries () =
   check
     (list string)
     "assignable cascades exclude invalid presets"
-    [ "good" ]
+    [ "tier-group.good"; "tier.good" ]
     (Routes.available_cascade_profiles ());
   let invalid = Routes.invalid_cascade_profiles () in
   check bool "invalid preset is surfaced separately" true
@@ -1251,7 +1251,9 @@ target = "tier-group.primary"
   in
   with_temp_config_root cascade_toml @@ fun config_root ->
   with_config_dir config_root @@ fun () ->
-  check bool "valid tier-group public name remains assignable" true
+  check bool "valid qualified tier-group remains assignable" true
+    (List.mem "tier-group.primary" (Routes.available_cascade_profiles ()));
+  check bool "legacy public alias is not exposed as assignable" false
     (List.mem "primary" (Routes.available_cascade_profiles ()));
   let invalid = Routes.invalid_cascade_profiles () in
   check bool "invalid tier keeps qualified name" true
@@ -1300,17 +1302,35 @@ let test_keeper_cascade_routes_filter_invalid_catalog_entries () =
   require_status "keeper cascades GET returns 200" 200 list_result;
   let profiles = profile_names list_result.body in
   let invalid_profiles = invalid_profile_names list_result.body in
-  check bool "valid profile remains assignable" true (List.mem "good" profiles);
+  check bool "valid profile remains assignable" true
+    (List.mem "tier-group.good" profiles && List.mem "tier.good" profiles);
+  check bool "legacy public alias omitted from assignable list" false
+    (List.mem "good" profiles);
   check bool "invalid profile omitted from assignable list" false
-    (List.mem "broken" profiles);
+    (List.mem "tier.broken" profiles || List.mem "tier-group.broken" profiles);
   check bool "invalid profile is surfaced in payload" true
     (List.mem "tier.broken" invalid_profiles
      || List.mem "tier-group.broken" invalid_profiles);
+  let assign_public_alias_result =
+    run_curl_post
+      ~body:
+        (Printf.sprintf
+           {|{"keeper":"%s","cascade_name":"good"}|}
+           keeper_name)
+      ~token:admin_token
+      ~port
+      ~path:"/api/v1/keeper/cascade"
+      ()
+  in
+  require_status "legacy public alias assignment returns 400" 400
+    assign_public_alias_result;
+  check bool "legacy public alias rejection explains unknown cascade" true
+    (contains_substr "unknown cascade good" assign_public_alias_result.body);
   let assign_invalid_result =
     run_curl_post
       ~body:
         (Printf.sprintf
-           {|{"keeper":"%s","cascade_name":"broken"}|}
+           {|{"keeper":"%s","cascade_name":"tier.broken"}|}
            keeper_name)
       ~token:admin_token
       ~port
@@ -1347,7 +1367,7 @@ let test_keeper_cascade_assignment_updates_dashboard_projection () =
   check string "dashboard starts with seeded meta cascade"
     Masc_mcp.(Keeper_config.default_cascade_name ())
     (keeper_profile_cascade_name before.body keeper_name);
-  let candidate = cascade_profile_first_candidate before.body "primary" in
+  let candidate = cascade_profile_first_candidate before.body "tier-group.primary" in
   check bool "dashboard cascade config keeps candidate model label" true
     (contains_substr "custom:mock@" (candidate_string_field "model" candidate));
   check bool "dashboard cascade config keeps display model label" true
@@ -1359,7 +1379,7 @@ let test_keeper_cascade_assignment_updates_dashboard_projection () =
     run_curl_post
       ~body:
         (Printf.sprintf
-           {|{"keeper":"%s","cascade_name":"alternate"}|}
+           {|{"keeper":"%s","cascade_name":"tier.alternate"}|}
            keeper_name)
       ~token:admin_token
       ~port
@@ -1376,13 +1396,13 @@ let test_keeper_cascade_assignment_updates_dashboard_projection () =
   in
   require_status "cascade config GET after assignment returns 200" 200 after;
   check string "dashboard projection reflects assigned cascade"
-    "alternate"
+    "tier.alternate"
     (keeper_profile_cascade_name after.body keeper_name);
   let keeper_toml_path =
     Filename.concat (Filename.concat config_root "keepers") (keeper_name ^ ".toml")
   in
   check bool "persistent TOML cascade updated" true
-    (contains_substr {|cascade_name = "alternate"|} (read_file keeper_toml_path))
+    (contains_substr {|cascade_name = "tier.alternate"|} (read_file keeper_toml_path))
 ;;
 
 let test_execution_trust_route_surfaces_trust_summary_fields () =

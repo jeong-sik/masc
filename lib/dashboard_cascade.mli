@@ -70,9 +70,10 @@ val invalid_assignments_for_public_profiles :
   invalid_profiles:(string * string list) list ->
   string list ->
   (string * string list) list
-(** Match public keeper-facing profile names against internal invalid-profile
-    diagnostics using runtime profile preference order.  For an unqualified
-    name such as ["primary"], ["tier-group.primary"] is checked before
+(** Match keeper-facing profile names against internal invalid-profile
+    diagnostics using runtime profile preference order. Qualified names such
+    as ["tier.primary"] are checked exactly. For an unqualified legacy name
+    such as ["primary"], ["tier-group.primary"] is checked before
     ["tier.primary"] so a valid preferred tier-group is not rejected because a
     lower-priority tier with the same public name is invalid. *)
 

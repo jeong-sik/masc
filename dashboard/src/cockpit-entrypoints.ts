@@ -101,9 +101,71 @@ export const COCKPIT_MODE_TARGETS: Record<CockpitMode, CockpitRouteTarget> = {
 }
 
 export const COCKPIT_ENTRYPOINTS: CockpitEntrypoint[] = [
-  // Work Plane: Goal / Task / Accountability.
-  { mode: 'work', aliases: ['goal-h', 'goal-horizon'], target: { tab: 'workspace', params: { section: 'planning', view: 'goal-tree' } }, coverage: 'covered' },
-  { mode: 'work', aliases: ['goal-t', 'goal-tree'], target: { tab: 'workspace', params: { section: 'planning', view: 'goal-tree' } }, coverage: 'covered' },
+  {
+    mode: 'work',
+    aliases: ['goal-horizon'],
+    target: { tab: 'workspace', params: { section: 'planning', view: 'goal-tree' } },
+    coverage: 'covered',
+  },
+  {
+    mode: 'work',
+    aliases: ['task-board'],
+    target: { tab: 'workspace', params: { section: 'planning', view: 'default' } },
+    coverage: 'covered',
+  },
+  {
+    mode: 'comms',
+    aliases: ['board-feed'],
+    target: { tab: 'workspace', params: { section: 'board' } },
+    coverage: 'covered',
+  },
+  {
+    mode: 'comms',
+    aliases: ['composer'],
+    target: { tab: 'command', params: { section: 'operations', view: 'ops' } },
+    coverage: 'covered',
+  },
+  {
+    mode: 'observe',
+    aliases: ['cascade'],
+    target: { tab: 'monitoring', params: { section: 'runtime', view: 'cascade' } },
+    coverage: 'covered',
+  },
+  {
+    mode: 'observe',
+    aliases: ['audit'],
+    target: { tab: 'monitoring', params: { section: 'runtime', view: 'audit' } },
+    coverage: 'covered',
+  },
+  {
+    mode: 'observe',
+    aliases: ['safety'],
+    target: { tab: 'command', params: { section: 'operations', view: 'safety' } },
+    coverage: 'covered',
+  },
+  {
+    mode: 'observe',
+    aliases: ['cost'],
+    target: { tab: 'monitoring', params: { section: 'runtime', view: 'cost' } },
+    coverage: 'covered',
+  },
+  {
+    mode: 'cognition',
+    aliases: ['keeper-cognition'],
+    target: { tab: 'monitoring', params: { section: 'cognition', view: 'keeper' } },
+    coverage: 'covered',
+  },
+  {
+    mode: 'ide',
+    aliases: ['source'],
+    target: { tab: 'code', params: { section: 'ide-shell', view: 'source' } },
+    coverage: 'covered',
+  },
+]
+
+export const COCKPIT_LEGACY_ENTRYPOINTS: CockpitEntrypoint[] = [
+  // Work Plane legacy design subtabs.
+  { mode: 'work', aliases: ['goal-h', 'goal-t', 'goal-tree'], target: { tab: 'workspace', params: { section: 'planning', view: 'goal-tree' } }, coverage: 'covered' },
   { mode: 'work', aliases: ['goal-d', 'goal-snapshot', 'goal-snapshot-diff'], target: { tab: 'workspace', params: { section: 'planning', view: 'goal-tree', focus: 'snapshot' } }, coverage: 'backend-blocked' },
   { mode: 'work', aliases: ['task-bl', 'task-backlog'], target: { tab: 'workspace', params: { section: 'planning', view: 'default' } }, coverage: 'covered' },
   { mode: 'work', aliases: ['task-st', 'task-stale'], target: { tab: 'workspace', params: { section: 'planning', view: 'default', focus: 'stale' } }, coverage: 'covered' },
@@ -111,8 +173,8 @@ export const COCKPIT_ENTRYPOINTS: CockpitEntrypoint[] = [
   { mode: 'work', aliases: ['acc-led', 'accountability-ledger'], target: { tab: 'workspace', params: { section: 'planning', focus: 'accountability-ledger' } }, coverage: 'covered' },
   { mode: 'work', aliases: ['acc-mtx', 'accountability-matrix'], target: { tab: 'workspace', params: { section: 'planning', focus: 'accountability-matrix' } }, coverage: 'covered' },
 
-  // Comms Plane: board, message focus, and composer surfaces have production coverage.
-  { mode: 'comms', aliases: ['bd-feed', 'board-feed'], target: { tab: 'workspace', params: { section: 'board' } }, coverage: 'covered' },
+  // Comms Plane legacy design subtabs.
+  { mode: 'comms', aliases: ['bd-feed'], target: { tab: 'workspace', params: { section: 'board' } }, coverage: 'covered' },
   { mode: 'comms', aliases: ['bd-thr', 'board-thread'], target: { tab: 'workspace', params: { section: 'board', focus: 'thread' } }, coverage: 'covered' },
   { mode: 'comms', aliases: ['bd-tog', 'board-direct-automation'], target: { tab: 'workspace', params: { section: 'board', focus: 'automation' } }, coverage: 'covered' },
   { mode: 'comms', aliases: ['ms-rm', 'messages-room'], target: { tab: 'workspace', params: { section: 'board', focus: 'messages-room' } }, coverage: 'covered' },
@@ -122,7 +184,7 @@ export const COCKPIT_ENTRYPOINTS: CockpitEntrypoint[] = [
   { mode: 'comms', aliases: ['cm-mn', 'composer-mention'], target: { tab: 'command', params: { section: 'operations', view: 'ops', focus: 'mention' } }, coverage: 'covered' },
   { mode: 'comms', aliases: ['cm-st', 'composer-state'], target: { tab: 'command', params: { section: 'operations', view: 'ops', focus: 'state' } }, coverage: 'covered' },
 
-  // Observe Plane: split prototype tabs across the consolidated production surfaces.
+  // Observe Plane legacy design subtabs.
   { mode: 'observe', aliases: ['cs-list', 'cascade-list'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'cascade' } }, coverage: 'covered' },
   { mode: 'observe', aliases: ['cs-deep', 'cascade-deep-dive'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'inspector', focus: 'deep-dive' } }, coverage: 'covered' },
   { mode: 'observe', aliases: ['cs-cmp', 'cascade-compare'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'inspector', focus: 'compare' } }, coverage: 'covered' },
@@ -139,7 +201,7 @@ export const COCKPIT_ENTRYPOINTS: CockpitEntrypoint[] = [
   { mode: 'observe', aliases: ['hr-st', 'stress-board'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'stress' } }, coverage: 'covered' },
   { mode: 'observe', aliases: ['hr-mod', 'heuristic-by-module'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'heuristics', focus: 'module' } }, coverage: 'covered' },
 
-  // Cognition Plane: production view tabs show available data and blocked backend gaps.
+  // Cognition Plane legacy design subtabs.
   { mode: 'cognition', aliases: ['ki-bdi', 'keeper-bdi'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'keeper', focus: 'bdi' } }, coverage: 'covered' },
   { mode: 'cognition', aliases: ['ki-acc', 'keeper-tool-access'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'keeper', focus: 'tool-access' } }, coverage: 'covered' },
   { mode: 'cognition', aliases: ['ki-stat', 'keeper-token-stats'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'token-stats' } }, coverage: 'covered' },
@@ -151,8 +213,8 @@ export const COCKPIT_ENTRYPOINTS: CockpitEntrypoint[] = [
   { mode: 'cognition', aliases: ['ar-fnd', 'ar-finding-card'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'autoresearch', focus: 'finding' } }, coverage: 'covered' },
   { mode: 'cognition', aliases: ['ar-flw', 'ar-flow'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'autoresearch', focus: 'flow' } }, coverage: 'covered' },
 
-  // IDE Plane.
-  { mode: 'ide', aliases: ['edit', 'source'], target: { tab: 'code', params: { section: 'ide-shell', view: 'source' } }, coverage: 'covered' },
+  // IDE Plane legacy design subtabs.
+  { mode: 'ide', aliases: ['edit'], target: { tab: 'code', params: { section: 'ide-shell', view: 'source' } }, coverage: 'covered' },
   { mode: 'ide', aliases: ['review', 'pr-thread'], target: { tab: 'code', params: { section: 'ide-shell', view: 'unified', focus: 'review' } }, coverage: 'covered' },
   { mode: 'ide', aliases: ['merge', 'split', 'split-diff'], target: { tab: 'code', params: { section: 'ide-shell', view: 'split-diff' } }, coverage: 'covered' },
   { mode: 'ide', aliases: ['graph', 'git-graph'], target: { tab: 'workspace', params: { section: 'repositories', view: 'graph' } }, coverage: 'covered' },
@@ -161,7 +223,7 @@ export const COCKPIT_ENTRYPOINTS: CockpitEntrypoint[] = [
 
 const ENTRYPOINT_TARGETS = new Map<string, CockpitRouteTarget>()
 
-for (const entrypoint of COCKPIT_ENTRYPOINTS) {
+for (const entrypoint of [...COCKPIT_ENTRYPOINTS, ...COCKPIT_LEGACY_ENTRYPOINTS]) {
   for (const alias of entrypoint.aliases) {
     ENTRYPOINT_TARGETS.set(`${entrypoint.mode}:${normalizeCockpitEntrypoint(alias)}`, entrypoint.target)
   }

@@ -5,6 +5,8 @@
 let json_field name value = Some (name, value)
 let json_string_field name value = json_field name (`String value)
 let json_float_field name value = json_field name (`Float value)
+let surface_keeper_oas_bridge = "keeper_oas_bridge"
+let entity_kind_oas_execution = "oas_execution"
 
 let bridge_failure_envelope
     ?entity_id
@@ -54,8 +56,6 @@ let field_rollback_scope = "rollback_scope"
 let field_external_tool_side_effects_reverted = "external_tool_side_effects_reverted"
 let field_overshoot_sec = "overshoot_sec"
 let rollback_scope_oas_context_only = "oas_context_only"
-let surface_keeper_oas_bridge = "keeper_oas_bridge"
-let entity_kind_oas_execution = "oas_execution"
 let cause_code_eio_clock_unavailable = "eio_clock_unavailable"
 let cause_code_oas_execution_cancelled = "oas_execution_cancelled"
 let cause_code_oas_execution_error = "oas_execution_error"

@@ -10,8 +10,6 @@
    3. Decode failure on missing/ill-typed/unknown fields raises
       [Entry_decode_error] instead of returning a silent fallback. *)
 
-module Log = Masc_log.Log
-
 let entry_of ?(seq = 0) ?(ts = "2026-05-14T00:00:00Z") ?(level = Log.Info)
     ?(source = Log.Structured) ?(module_name = "Test") ?keeper_name ?turn_id
     ?(message = "hello") ?(details = `Null) () : Log.Ring.entry =

@@ -860,6 +860,22 @@ val metric_auth_credential_token_rotated : string
     PR-3b1 starvation. Labels: [keeper_name]. *)
 val metric_config_credential_archived_starvation : string
 
+(** Steady-state count of bare-form keeper alias files per classifier state.
+    Labels: [state] ∈ {alive, dead, no_bare}. Set on every boot by the
+    credential sweep so the value is repeatedly visible on every Prometheus
+    scrape. Non-zero [state=dead] is the ping-pong regression canary for
+    PR #15112 γ guard. *)
+val metric_auth_bare_alias : string
+
+(** Current number of [.archive/<epoch>/] subdirectories after the boot-time
+    retention sweep. Set by [Auth.prune_archive] via the
+    [startup_prune_auth_archive] lazy task. *)
+val metric_auth_archive_epochs : string
+
+(** Total epoch subdirectories removed by [Auth.prune_archive]. Increments
+    by the per-boot prune count. *)
+val metric_auth_archive_pruned_total : string
+
 (** #9786 runtime complement: every [find_credential_by_token]
     lookup that hits N>=2 matches fires this counter.
     Labels: [first_match] = the agent_name that won the

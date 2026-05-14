@@ -1058,6 +1058,29 @@ let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
               keeper_name agent_name
               (Masc_domain.masc_error_to_string err))
     keeper_names keeper_agent_names;
+  (* Post-sweep audit: surface the ping-pong outcome as a positive
+     boot signal. Before the γ fix (PR #15112) every keeper logged
+     a WARN "archived credential ..." line and operators could only
+     detect regressions by counting WARN lines. Now we emit a single
+     structured INFO so the steady-state ("alive_aliases=N dead=0")
+     is visible on every boot; a non-zero [dead_bares] is the canary
+     for ping-pong regression. *)
+  (* [Auth.bare_alias_audit] mirrors the result into the
+     [masc_auth_bare_alias{state=...}] gauges so the boot signal
+     stays surfaced on every Prometheus scrape. The INFO line below
+     is the one-shot boot log mirror; the WARN that follows is the
+     regression canary. *)
+  let audit =
+    Auth.bare_alias_audit ~base_path ~canonical_names:keeper_agent_names
+  in
+  Log.Server.info
+    "startup bare alias audit: alive_aliases=%d dead_bares=%d no_bares=%d"
+    audit.alive_aliases audit.dead_bares audit.no_bares;
+  if audit.dead_bares > 0 then
+    Log.Server.warn
+      "startup bare alias audit: dead_bares=%d (ping-pong regression \
+       candidate; see PR #15112 γ guard)"
+      audit.dead_bares;
   let rotation_outcomes =
     Auth.rotate_shared_tokens_for_agents base_path
       ~agent_names:keeper_agent_names
@@ -1233,6 +1256,42 @@ let startup_prune_keeper_checkpoints (state : Mcp_server.server_state) =
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
      Log.Misc.warn "startup checkpoint prune failed: %s (next boot retries)"
+       (Printexc.to_string exn))
+
+let startup_prune_auth_archive (state : Mcp_server.server_state) =
+  (try
+     let days =
+       Safe_ops.get_env_int_logged
+         "MASC_AUTH_ARCHIVE_RETENTION_DAYS"
+         ~default:30
+     in
+     let min_keep =
+       Safe_ops.get_env_int_logged
+         "MASC_AUTH_ARCHIVE_MIN_KEEP"
+         ~default:20
+     in
+     let kept, pruned =
+       Auth.prune_archive
+         ~base_path:state.room_config.base_path
+         ~retention_days:days
+         ~min_keep
+     in
+     Prometheus.set_gauge Prometheus.metric_auth_archive_epochs
+       (float_of_int kept);
+     if pruned > 0 then (
+       Prometheus.inc_counter Prometheus.metric_auth_archive_pruned_total
+         ~delta:(float_of_int pruned)
+         ();
+       Log.Misc.info
+         "startup auth archive prune: pruned=%d kept=%d (retention=%dd \
+          min_keep=%d)"
+         pruned kept days min_keep)
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+     Log.Misc.warn
+       "startup auth archive prune failed: %s (next boot retries; disk \
+        impact bounded by retention)"
        (Printexc.to_string exn))
 
 let startup_migrate_keeper_histories (state : Mcp_server.server_state) =
@@ -1559,6 +1618,8 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
           ("jsonl_prune", fun () -> startup_prune_jsonl state);
           ( "keeper_checkpoint_prune",
             fun () -> startup_prune_keeper_checkpoints state );
+          ( "auth_archive_prune",
+            fun () -> startup_prune_auth_archive state );
           (* keeper_bootstrap removed: keeper_autoboot subsystem in
              start_keeper_loops handles this in a dedicated fiber,
              avoiding bootstrap contention with dashboard refresh loops. *)

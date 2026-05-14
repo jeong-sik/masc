@@ -1059,33 +1059,172 @@ let archive_credential_file config ~agent_name ~reason =
 
 (* Boot self-heal of bare-form keeper credential files.
 
-   PR-3a (#11146) introduced this as a dual-identity guard, archiving
-   only the case where the bare file's token differed from the
-   canonical's. After PR-3b1 (#11152) starved the runtime caller
-   (lib/tool_coord.ml now asks for the canonical form via
-   Keeper_runtime.canonicalize_if_keeper), every bare-form file is a
-   dead reference at runtime regardless of its shape:
+   Three policies cross this code path:
 
-     - direct credential, different token  -> dual-identity (3a case)
-     - direct credential, same token       -> redundant alias
-     - redirect stub to canonical's UUID   -> unused after starvation
+     PR-3a (#11146)   archive bare when token differs from canonical
+                      (dual-identity guard).
+     PR-3b1 (#11152)  starve runtime callers via canonicalize_if_keeper
+                      in tool_coord.
+     PR-3b2 (#11155)  archive bare unconditionally, on the assumption
+                      that starvation killed every short-form caller.
+     PR-#10440        ensure_credential_alias re-creates a bare-form
+                      redirect stub on every boot so short-form
+                      load_credential callers (auth_doctor, etc.)
+                      resolve directly.
 
-   PR-3b2 generalises the helper to archive any of those without
-   inspecting the token, because none of them can route a request now.
-   The .archive/ destination preserves the file for operator review.
-   Idempotent: once archived, subsequent boots see no bare file and
-   become no-ops. Spec: AuthIdentityFSM.tla I1 IdentityBindsToken. *)
-let archive_bare_for_canonical config ~canonical_name =
+   PR-3b2 and PR-#10440 contradict: the alias writer puts a stub back
+   on every boot and the archiver moves it on every boot, producing a
+   ping-pong that accumulated 331 .archive/<epoch>/ folders in 17 days
+   (measured 2026-05-14). Spec: AuthIdentityFSM.tla I1 IdentityBindsToken.
+
+   This helper resolves the conflict by recognising a legitimate alias
+   as alive: a bare-form file that is a redirect stub pointing to the
+   *same* UUID file as the canonical credential is the PR-#10440 alias
+   and must not be archived. Every other shape stays subject to PR-3b2:
+
+     - direct credential (no redirect)               -> archive
+     - redirect stub to a different UUID             -> archive (orphan)
+     - redirect stub to the same UUID as canonical   -> KEEP (alias)
+     - canonical missing or itself a direct cred     -> archive
+       (alias semantics need both sides to share a UUID-backed cred). *)
+(* Retention sweep for the .archive/<epoch>/ directories produced by
+   [archive_credential_file]. Each epoch dir is flat (one .json per
+   archived agent_name); this helper does not recurse so a stray
+   nested directory would be left in place instead of being deleted
+   wholesale. Returns [(kept, pruned)] for telemetry.
+
+   Selection rule: sort epochs newest-first, always keep the most
+   recent [min_keep], and among the remainder delete those whose
+   epoch is older than [retention_days * 86400] seconds. *)
+let prune_archive ~base_path ~retention_days ~min_keep : int * int =
+  let archive_dir = Filename.concat (auth_dir base_path) ".archive" in
+  if not (Sys.file_exists archive_dir && Sys.is_directory archive_dir)
+  then 0, 0
+  else (
+    let now = Unix.gettimeofday () in
+    let cutoff = now -. (float_of_int retention_days *. 86400.0) in
+    let entries =
+      try Sys.readdir archive_dir |> Array.to_list with
+      | Sys_error _ -> []
+    in
+    let epoch_entries =
+      List.filter_map
+        (fun name ->
+           match int_of_string_opt name with
+           | Some epoch -> Some (epoch, Filename.concat archive_dir name)
+           | None -> None)
+        entries
+      |> List.sort (fun (a, _) (b, _) -> compare b a)
+    in
+    let total = List.length epoch_entries in
+    let prune_count = ref 0 in
+    List.iteri
+      (fun i (epoch, path) ->
+         if i >= min_keep && float_of_int epoch < cutoff
+         then (
+           let inner =
+             try Sys.readdir path |> Array.to_list with
+             | Sys_error _ -> []
+           in
+           List.iter
+             (fun name ->
+                let file = Filename.concat path name in
+                try Sys.remove file with
+                | Sys_error _ -> ())
+             inner;
+           (try Fs_compat.rmdir path with
+            | Sys_error _ -> ());
+           if not (Sys.file_exists path) then incr prune_count))
+      epoch_entries;
+    total - !prune_count, !prune_count)
+;;
+
+type bare_alias_state =
+  | Bare_absent
+  | Bare_alive_alias
+  | Bare_dead
+
+(* Inspect the bare-form file at [agents/<bare>.json] without mutating
+   it. Pure read; safe to call from audit paths.
+   - [Bare_absent]      no file at the bare path.
+   - [Bare_alive_alias] redirect stub aimed at the *same* UUID file
+                         as the canonical credential (= PR-#10440
+                         alias, must survive).
+   - [Bare_dead]        any other shape: direct credential, redirect
+                         to a different UUID, redirect with canonical
+                         missing or not stub-shaped. *)
+let classify_bare_for_canonical config ~canonical_name =
   match bare_keeper_name_from_canonical canonical_name with
-  | None -> ()
+  | None -> Bare_absent
   | Some bare_name ->
     let bare_file = credential_file config bare_name in
-    if file_exists bare_file
-    then
-      archive_credential_file
-        config
-        ~agent_name:bare_name
-        ~reason:"bare-form keeper credential is dead after PR-3b1 starvation"
+    if not (file_exists bare_file)
+    then Bare_absent
+    else (
+      let canonical_file = credential_file config canonical_name in
+      match
+        load_redirect_target config bare_file,
+        load_redirect_target config canonical_file
+      with
+      | Some bare_target, Some canonical_target
+        when String.equal
+               (Filename.basename bare_target)
+               (Filename.basename canonical_target) -> Bare_alive_alias
+      | _ -> Bare_dead)
+;;
+
+let archive_bare_for_canonical config ~canonical_name =
+  match classify_bare_for_canonical config ~canonical_name with
+  | Bare_absent | Bare_alive_alias -> ()
+  | Bare_dead ->
+    (match bare_keeper_name_from_canonical canonical_name with
+     | None -> ()
+     | Some bare_name ->
+       archive_credential_file
+         config
+         ~agent_name:bare_name
+         ~reason:"bare-form keeper credential is dead after PR-3b1 starvation")
+;;
+
+type bare_alias_audit_result =
+  { alive_aliases : int
+  ; dead_bares : int
+  ; no_bares : int
+  }
+
+let empty_bare_alias_audit_result =
+  { alive_aliases = 0; dead_bares = 0; no_bares = 0 }
+
+let bare_alias_audit ~base_path ~canonical_names =
+  let result =
+    List.fold_left
+      (fun acc canonical_name ->
+         match classify_bare_for_canonical base_path ~canonical_name with
+         | Bare_absent ->
+           { acc with no_bares = acc.no_bares + 1 }
+         | Bare_alive_alias ->
+           { acc with alive_aliases = acc.alive_aliases + 1 }
+         | Bare_dead ->
+           { acc with dead_bares = acc.dead_bares + 1 })
+      empty_bare_alias_audit_result
+      canonical_names
+  in
+  (* Observability sink: gauges idempotently mirror the current
+     classifier state so every Prometheus scrape (post-call) reports
+     the same value, not just the boot-time INFO line. *)
+  Prometheus.set_gauge
+    Prometheus.metric_auth_bare_alias
+    ~labels:[ "state", "alive" ]
+    (float_of_int result.alive_aliases);
+  Prometheus.set_gauge
+    Prometheus.metric_auth_bare_alias
+    ~labels:[ "state", "dead" ]
+    (float_of_int result.dead_bares);
+  Prometheus.set_gauge
+    Prometheus.metric_auth_bare_alias
+    ~labels:[ "state", "no_bare" ]
+    (float_of_int result.no_bares);
+  result
 ;;
 
 let ensure_keeper_credential config ~agent_name
@@ -1444,4 +1583,54 @@ let disable_auth config =
 let is_auth_enabled config : bool =
   let cfg = load_auth_config config in
   cfg.enabled
+;;
+
+let bare_alias_audit_interval_default = 60.0
+
+let bare_alias_audit_interval () =
+  match Sys.getenv_opt "MASC_AUTH_BARE_ALIAS_AUDIT_INTERVAL_S" with
+  | Some s ->
+    (match float_of_string_opt s with
+     | Some v when v > 0.0 -> v
+     | _ -> bare_alias_audit_interval_default)
+  | None -> bare_alias_audit_interval_default
+;;
+
+(* Periodic refresh of the bare-alias gauges. Boot-time audit sets
+   the gauge once; this fiber re-runs the audit every
+   [MASC_AUTH_BARE_ALIAS_AUDIT_INTERVAL_S] seconds (default 60) so
+   the surface stays fresh against mid-run regressions -- e.g. an
+   operator-initiated keeper add, a buggy provisioner that writes
+   bare files, or a config reload that broadens the keeper roster.
+   Without this, a regression introduced at runtime would be
+   invisible until the next server restart.
+
+   [canonical_names_fn] is invoked on every tick so a runtime
+   keeper-roster change is reflected in the next sweep without
+   restarting the fiber. *)
+let start_bare_alias_audit_fiber ~sw ~clock ~base_path
+    ~canonical_names_fn =
+  let interval = bare_alias_audit_interval () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Log.Auth.info
+      "bare_alias_audit: periodic fiber started (interval=%.0fs)"
+      interval;
+    let rec loop () =
+      Eio.Time.sleep clock interval;
+      (try
+         let _ : bare_alias_audit_result =
+           bare_alias_audit ~base_path
+             ~canonical_names:(canonical_names_fn ())
+         in
+         ()
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         Log.Auth.warn
+           "bare_alias_audit: periodic tick failed: %s (gauges may be \
+            stale until next tick)"
+           (Printexc.to_string exn));
+      loop ()
+    in
+    loop ())
 ;;

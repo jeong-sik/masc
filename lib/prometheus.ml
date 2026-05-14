@@ -986,6 +986,30 @@ let metric_config_credential_archived_starvation =
   "masc_config_credential_archived_starvation_total"
 ;;
 
+(* Post-fix observability for PR #15112 (γ guard against PR-#10440 ↔
+   PR-3b2 ping-pong). Each is set by [sync_bootable_keeper_credentials]
+   after the boot sweep so the value is repeatedly visible on every
+   Prometheus scrape, not only as a one-shot boot log line.
+
+   Labels: [state] ∈ {alive, dead, no_bare}.
+   - [alive] count of bare-form files that are PR-#10440 redirect
+     stubs aimed at the canonical credential's UUID (steady-state
+     after γ).
+   - [dead]  ping-pong regression canary; non-zero means the γ
+     classifier let through a bare file that would have been
+     archived under PR-3b2, OR a future code change has reintroduced
+     unconditional archive behavior.
+   - [no_bare] canonical names with no bare-form file at all. *)
+let metric_auth_bare_alias = "masc_auth_bare_alias"
+
+(* Disk inventory + churn for the .archive/<epoch>/ directory.
+   [metric_auth_archive_epochs] is the count of epoch subdirs left
+   after the retention sweep. [metric_auth_archive_pruned_total]
+   increments by the number of epochs removed by [Auth.prune_archive]
+   on each boot. *)
+let metric_auth_archive_epochs = "masc_auth_archive_epochs"
+let metric_auth_archive_pruned_total = "masc_auth_archive_pruned_total"
+
 (* #9786 runtime complement: every [find_credential_by_token]
    lookup that hits N>=2 matches fires this counter.  The
    boot-time audit ({!metric_auth_credential_token_duplicate})
@@ -2420,6 +2444,22 @@ let init () =
     metric_config_credential_archived_starvation
     "Total bare-form keeper credential files archived because they are dead after PR-3b1 \
      starvation. Labels: keeper_name."
+    Counter;
+  add
+    metric_auth_bare_alias
+    "Steady-state count of bare-form keeper alias files per classifier state. \
+     Labels: state=alive|dead|no_bare. Non-zero state=dead is the ping-pong \
+     regression canary for PR #15112 γ guard; alert on it."
+    Gauge;
+  add
+    metric_auth_archive_epochs
+    "Current number of .archive/<epoch>/ subdirectories after the retention \
+     sweep. Tracks disk inventory growth of archived credentials."
+    Gauge;
+  add
+    metric_auth_archive_pruned_total
+    "Total .archive/<epoch>/ subdirectories removed by the boot-time retention \
+     sweep. Increments by the per-boot prune count."
     Counter;
   add
     metric_telemetry_coverage_gap

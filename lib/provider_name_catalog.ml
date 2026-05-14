@@ -52,24 +52,23 @@ let headers_with_auth_for_provider_kind
     | Gemini_cli | Kimi_cli | Codex_cli -> [])
 ;;
 
+let normalize_bucket_label value =
+  let trimmed = String.trim value |> String.lowercase_ascii in
+  if trimmed = "" then None else Some trimmed
+;;
+
+let label_prefix value =
+  match String.index_opt value ':' with
+  | None -> None
+  | Some 0 -> None
+  | Some idx -> Some (String.sub value 0 idx)
+;;
+
 let inference_model_bucket ~provider ~model =
-  let has needle =
-    String_util.contains_substring_ci provider needle
-    || String_util.contains_substring_ci model needle
-  in
-  if has cn_kimi
-  then cn_kimi
-  else if has cn_claude || has "anthropic"
-  then "anthropic"
-  else if has "openai" || has "gpt" || has "codex"
-  then "openai"
-  else if has "gemini" || has "google"
-  then "gemini"
-  else if has "glm" || has "zai"
-  then "glm"
-  else if has "qwen"
-  then "qwen"
-  else if has "llama"
-  then "llama"
-  else "other"
+  match normalize_bucket_label provider with
+  | Some label -> label
+  | None ->
+    (match Option.bind (label_prefix model) normalize_bucket_label with
+     | Some label -> label
+     | None -> "unknown")
 ;;

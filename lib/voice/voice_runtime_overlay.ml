@@ -146,16 +146,7 @@ let endpoint_supports_http_tts endpoint =
   adapter_for_endpoint endpoint |> transport_supports_http_tts
 ;;
 
-let default_agent_voices () =
-  [ "llama", "Laura"
-  ; "claude", "Sarah"
-  ; "codex", "George"
-  ; "gemini", "Roger"
-  ; "claude-api", "Sarah"
-  ; "codex-api", "George"
-  ; "gemini-api", "Roger"
-  ]
-;;
+let default_agent_voices () = []
 
 let trim_opt = function
   | Some raw ->

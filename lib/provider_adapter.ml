@@ -672,7 +672,7 @@ let telemetry_policy_of_binding (binding : Provider_runtime_overlay.binding) =
 
 let spawn_key_of_binding (binding : Provider_runtime_overlay.binding) =
   match Provider_runtime_overlay.command binding with
-  | Some ("claude" | "codex" | "gemini" | "llama" as command) -> Some command
+  | Some command when String.trim command <> "" -> Some (String.trim command)
   | Some _ | None -> None
 ;;
 

@@ -39,15 +39,8 @@ let test_voice_auth_env_resolution () =
 let test_default_agent_voices_preserve_runtime_defaults () =
   check
     (list (pair string string))
-    "agent voice defaults"
-    [ "llama", "Laura"
-    ; "claude", "Sarah"
-    ; "codex", "George"
-    ; "gemini", "Roger"
-    ; "claude-api", "Sarah"
-    ; "codex-api", "George"
-    ; "gemini-api", "Roger"
-    ]
+    "agent voice defaults are config-owned"
+    []
     (Voice.default_agent_voices ())
 ;;
 
@@ -156,7 +149,7 @@ let () =
       , [ test_case "resolve voice aliases" `Quick test_resolve_voice_aliases
         ; test_case "voice auth env resolution" `Quick test_voice_auth_env_resolution
         ; test_case
-            "default agent voices preserve runtime defaults"
+            "default agent voices are config-owned"
             `Quick
             test_default_agent_voices_preserve_runtime_defaults
         ] )

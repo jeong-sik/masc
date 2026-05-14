@@ -579,13 +579,14 @@ let masc_approval_get_spec : tool_spec =
 let masc_spawn_spec : tool_spec =
   { name = "masc_spawn"
   ; description =
-      "Spawn an agent process (claude, gemini, codex, or llama) to execute a task. \
-       Use when you need another agent to work in parallel on a subtask. For llama, \
+      "Spawn a configured agent process to execute a task. Use when you need \
+       another agent to work in parallel on a subtask. For local model runtimes, \
        provide model explicitly. Pair with masc_add_task to create the task first."
   ; parameters =
       [ { p_name = "agent_name"
         ; p_type = T_string { enum = None; default = None }
-        ; p_description = "Agent to spawn: 'claude', 'gemini', 'codex', or custom command"
+        ; p_description =
+            "Configured agent key or custom command known to the spawn registry"
         ; p_required = true
         }
       ; { p_name = "model"
@@ -651,7 +652,7 @@ let masc_join_spec : tool_spec =
   ; parameters =
       [ { p_name = "agent_name"
         ; p_type = T_string { enum = None; default = None }
-        ; p_description = "Your identity: 'claude', 'gemini', or 'codex'"
+        ; p_description = "Your stable MASC identity or generated agent nickname"
         ; p_required = true
         }
       ; { p_name = "capabilities"

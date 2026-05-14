@@ -550,6 +550,28 @@ let test_provider_of_model_label_uses_typed_boundaries () =
     (Adapter.provider_of_model_label "private-provider:model-x")
 ;;
 
+let test_inference_bucket_uses_declared_labels_only () =
+  check
+    string
+    "provider label wins"
+    "openai"
+    (Masc_mcp.Provider_name_catalog.inference_model_bucket
+       ~provider:"openai"
+       ~model:"private:model-x");
+  check
+    string
+    "explicit model prefix used when provider missing"
+    "private-provider"
+    (Masc_mcp.Provider_name_catalog.inference_model_bucket
+       ~provider:""
+       ~model:"private-provider:model-x");
+  check
+    string
+    "bare model id is not vendor-guessed"
+    "unknown"
+    (Masc_mcp.Provider_name_catalog.inference_model_bucket ~provider:"" ~model:"gpt-5.4")
+;;
+
 let provider_cfg label =
   match Masc_mcp.Cascade_config.parse_model_string label with
   | Some cfg -> cfg
@@ -1032,6 +1054,10 @@ let () =
             "provider model label uses typed boundaries"
             `Quick
             test_provider_of_model_label_uses_typed_boundaries
+        ; test_case
+            "inference bucket uses declared labels only"
+            `Quick
+            test_inference_bucket_uses_declared_labels_only
         ; test_case
             "runtime candidate uses internal health keys"
             `Quick

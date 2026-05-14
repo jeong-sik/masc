@@ -14,15 +14,20 @@
        a subprocess that doesn't read them, and the turn would
        silently degrade.
 
-    2. CLI providers always advertise runtime MCP.  All CLI kinds
+    2. CLI providers advertise the runtime MCP lane according to the
+       adapter/tool-delivery contract.  CLI kinds
        (Claude Code, Gemini CLI, Kimi CLI, Codex CLI) use runtime MCP
        for tool invocation, not inline function-calling.
-       [normalize_cli_caps_when] forces this contract regardless of
-       OAS-level defaults.
+       [normalize_cli_caps_when] preserves this contract after OAS
+       capability lookup.
 
     The CLI list is exhaustively typed via [match] so adding a
     new CLI variant fails compilation here, not at runtime when
     the cascade picks it up.
+
+    OAS owns provider/model capability truth through
+    [Agent_sdk.Provider_runtime_binding]; this test pins MASC's local
+    projection into inline/runtime tool-delivery flags.
 
     Cross-reference:
     - [lib/provider_tool_support.ml] — [oas_capabilities_of_config]
@@ -37,11 +42,9 @@ module PTS = Provider_tool_support
 
 (* ── Fixtures ──────────────────────────────────────────────── *)
 
-(** Build a minimal Provider_config; capability lookup does not
-    consult any of the optional fields, so the dummy values are
-    fine for a pure matrix check.  [model_id] is intentionally a
-    name that's not in the [Capabilities.for_model_id] table so
-    the CLI normalize path is exercised on its own. *)
+(** Build a minimal Provider_config.  [model_id] is intentionally absent
+    from OAS's model capability table so the matrix checks provider/catalog
+    capability projection rather than a model-specific override. *)
 let make_cfg ~kind =
   PC.make
     ~kind
@@ -103,7 +106,8 @@ let test_cli_no_inline_tools () =
     cli_kinds
 
 let expected_cli_runtime_mcp = function
-  | PC.Claude_code | PC.Gemini_cli | PC.Kimi_cli | PC.Codex_cli -> true
+  | PC.Claude_code | PC.Kimi_cli | PC.Codex_cli -> true
+  | PC.Gemini_cli -> false
   | PC.Anthropic | PC.Kimi | PC.OpenAI_compat | PC.Ollama | PC.Gemini | PC.Glm
   | PC.DashScope ->
       false
@@ -121,11 +125,9 @@ let test_cli_runtime_mcp_lane () =
         expected caps.supports_runtime_tool_events)
     cli_kinds
 
-(** Total function check: [capabilities_of_config] returns for
-    every kind, regardless of model_id.  Catches a regression
-    where adding a kind to [Provider_kind.t] but not to
-    [oas_capabilities_of_config]'s base_caps match would make
-    the function partial. *)
+(** Total function check: [capabilities_of_config] returns for every kind,
+    regardless of model_id.  Provider-kind coverage belongs to OAS; this keeps
+    MASC's projection total over the currently exposed provider set. *)
 let test_capabilities_of_config_total () =
   List.iter
     (fun kind ->
@@ -133,6 +135,49 @@ let test_capabilities_of_config_total () =
       ())
     (cli_kinds @ api_kinds);
   Alcotest.(check bool) "all 11 provider kinds resolve" true true
+
+let with_provider_catalog json f =
+  match Llm_provider.Provider_catalog.of_json (Yojson.Safe.from_string json) with
+  | Error msg -> Alcotest.fail msg
+  | Ok catalog ->
+      Llm_provider.Provider_catalog.set_global catalog;
+      Fun.protect ~finally:Llm_provider.Provider_catalog.clear_global f
+
+let catalog_disables_inline_tools_json =
+  {|
+{
+  "schema_version": 1,
+  "providers": [
+    {
+      "id": "masc-catalog-local",
+      "kind": "openai_compat",
+      "transport": "http",
+      "base_url": "http://127.0.0.1:8123",
+      "request_path": "/v1/chat/completions",
+      "auth": {"type": "none"},
+      "capabilities_base": "openai_chat",
+      "capabilities": {"supports_tools": false, "supports_tool_choice": false},
+      "non_interactive": true,
+      "interactive_required": false,
+      "daemon_safe": true
+    }
+  ]
+}
+|}
+
+let test_catalog_capabilities_drive_masc_projection () =
+  with_provider_catalog catalog_disables_inline_tools_json (fun () ->
+      let cfg =
+        PC.make ~kind:PC.OpenAI_compat ~model_id:"unlisted-catalog-model"
+          ~base_url:"http://127.0.0.1:8123" ~request_path:"/v1/chat/completions" ()
+      in
+      let caps = PTS.capabilities_of_config cfg in
+      Alcotest.(check bool)
+        "catalog disables inline tools"
+        false caps.supports_inline_tools;
+      Alcotest.(check bool)
+        "catalog disables inline tool choice"
+        false caps.supports_inline_tool_choice)
 
 let () =
   Alcotest.run "provider_capability_matrix"
@@ -149,7 +194,13 @@ let () =
         [
           Alcotest.test_case "CLI providers reject inline tools"
             `Quick test_cli_no_inline_tools;
-          Alcotest.test_case "CLI providers expose runtime MCP lane"
+          Alcotest.test_case "CLI providers follow adapter runtime MCP lane"
             `Quick test_cli_runtime_mcp_lane;
+        ] );
+      ( "catalog",
+        [
+          Alcotest.test_case
+            "catalog capabilities drive MASC projection"
+            `Quick test_catalog_capabilities_drive_masc_projection;
         ] );
     ]

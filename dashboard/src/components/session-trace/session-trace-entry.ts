@@ -11,6 +11,7 @@ import { truncate } from '../../lib/truncate'
 import { formatCost } from '../../lib/format-number'
 import { toolCategory, durationColor, formatDuration, formatArgs as sharedFormatArgs } from '../tool-call-shared'
 import { SectionHeader } from '../common/section-header'
+import { openIdeContextRouteLink, routeLinksForContext, type IdeContextRouteLink } from '../ide/ide-context-lens'
 import type { UnifiedTraceEvent, TraceEventKind } from './session-trace-state'
 
 // ── Constants ──────────────────────────────────────────
@@ -143,6 +144,56 @@ function formatArgs(args: Record<string, unknown> | string): string {
   return sharedFormatArgs(args)
 }
 
+interface TraceCodeLocation {
+  readonly filePath: string
+  readonly line?: number
+}
+
+function stringField(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
+}
+
+function positiveLine(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
+    ? value
+    : undefined
+}
+
+function recordCodeLocation(value: Record<string, unknown>): TraceCodeLocation | null {
+  const filePath =
+    stringField(value.file_path)
+    ?? stringField(value.path)
+    ?? stringField(value.file)
+  if (filePath) {
+    return {
+      filePath,
+      line: positiveLine(value.line) ?? positiveLine(value.line_start) ?? positiveLine(value.lineno),
+    }
+  }
+
+  const input = value.input
+  if (input && typeof input === 'object' && !Array.isArray(input)) {
+    return recordCodeLocation(input as Record<string, unknown>)
+  }
+  return null
+}
+
+function toolCallCodeRouteLink(event: UnifiedTraceEvent): IdeContextRouteLink | null {
+  if (!event.toolArgs) return null
+  const parsedArgs = parseJsonLikeData(event.toolArgs)
+  if (!parsedArgs || typeof parsedArgs !== 'object' || Array.isArray(parsedArgs)) return null
+  const location = recordCodeLocation(parsedArgs as Record<string, unknown>)
+  if (!location) return null
+  return routeLinksForContext({
+    filePath: location.filePath,
+    line: location.line,
+    surface: 'Tool',
+    label: event.toolName ?? 'tool call',
+    sourceId: event.id,
+    keeperId: event.agentName,
+  }).find(link => link.label === 'Code') ?? null
+}
+
 // ── Task event helpers ─────────────────────────────────
 
 function taskIcon(type: string): string {
@@ -271,9 +322,27 @@ function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
   const gateRejected = event.gate?.status === 'reject'
   const resultText = event.error ?? event.toolResult ?? null
   const hint = resultText ? detectContentHint(resultText) : 'plain'
+  const codeRouteLink = toolCallCodeRouteLink(event)
 
   return html`
     <div class="mt-2 space-y-2">
+      ${codeRouteLink ? html`
+        <div class="flex items-center justify-between gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-2">
+          <span class="min-w-0 truncate text-3xs font-mono text-[var(--color-fg-muted)]" title=${codeRouteLink.evidence}>
+            ${codeRouteLink.evidence}
+          </span>
+          <button
+            type="button"
+            data-testid="session-trace-code-link"
+            class="shrink-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-3xs font-semibold text-[var(--color-accent-fg)] hover:border-[var(--color-accent-border)] hover:bg-[var(--color-bg-hover)]"
+            title=${codeRouteLink.evidence}
+            aria-label=${`Open ${codeRouteLink.evidence}`}
+            onClick=${() => openIdeContextRouteLink(codeRouteLink)}
+          >
+            Code
+          </button>
+        </div>
+      ` : null}
       ${event.toolArgs ? html`
         <div>
           <${SectionHeader} size="xs" class="mb-1">인자</${SectionHeader}>

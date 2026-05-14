@@ -224,22 +224,22 @@ let has_recovery_evidence candidate =
       && info.success_rate > 0.0)
 
 let provider_attempt_timeout_constraints candidate =
-  Provider_adapter.timeout_bounds_of_kind candidate.provider_cfg.kind
+  Provider_runtime_overlay.timeout_bounds_of_kind candidate.provider_cfg.kind
 
 let apply_provider_attempt_timeout_constraints constraints timeout_s =
   let timeout_s =
-    match constraints.Provider_adapter.min_timeout_s with
+    match constraints.Provider_runtime_overlay.min_timeout_s with
     | Some min_s -> Float.max timeout_s min_s
     | None -> timeout_s
   in
-  match constraints.Provider_adapter.max_timeout_s with
+  match constraints.Provider_runtime_overlay.max_timeout_s with
   | Some max_s -> Float.min timeout_s max_s
   | None -> timeout_s
 
 let provider_default_attempt_timeout_s constraints =
   match
-    ( constraints.Provider_adapter.min_timeout_s
-    , constraints.Provider_adapter.max_timeout_s )
+    ( constraints.Provider_runtime_overlay.min_timeout_s
+    , constraints.Provider_runtime_overlay.max_timeout_s )
   with
   | Some min_s, Some max_s -> Some (Float.min max_s min_s)
   | Some min_s, None -> Some min_s
@@ -254,8 +254,8 @@ let effective_attempt_timeout_s ~is_last ~configured_timeout_s candidate =
         apply_provider_attempt_timeout_constraints constraints configured
       in
       if is_last
-         && Option.is_none constraints.Provider_adapter.min_timeout_s
-         && Option.is_none constraints.Provider_adapter.max_timeout_s
+         && Option.is_none constraints.Provider_runtime_overlay.min_timeout_s
+         && Option.is_none constraints.Provider_runtime_overlay.max_timeout_s
       then None
       else Some bounded
   | None -> provider_default_attempt_timeout_s constraints

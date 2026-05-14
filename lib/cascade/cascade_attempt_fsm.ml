@@ -23,6 +23,18 @@ let retry_message_looks_like_not_found (message : string) : bool =
   || String_util.contains_substring_ci message "status code: 404"
   || String_util.contains_substring_ci message "404 page not found"
 
+let label_provider = "provider"
+let label_kind = "kind"
+let label_cascade_name = "cascade_name"
+let label_capacity_scope = "capacity_scope"
+let label_cascade = "cascade"
+let label_source = "source"
+let fallback_class_hard_quota = "hard_quota"
+let fallback_class_max_turns = "max_turns"
+let fallback_class_resumable_cli_session = "resumable_cli_session"
+let provider_label_max_execution_time = "max_execution_time"
+
+
 let retry_message_looks_like_model_access_denied (message : string) : bool =
   String_util.contains_substring_ci message "permission to access"
   || String_util.contains_substring_ci message "not have access to"
@@ -544,10 +556,10 @@ let emit_provider_error_metric ~cascade_name ~provider error =
   Prometheus.inc_counter provider_error_total_metric
     ~labels:
       [
-        ("kind", Provider_error.to_error_kind error);
-        ("provider", public_runtime_provider_label);
-        ("cascade_name", cascade_name);
-        ("capacity_scope", provider_error_capacity_scope_label error);
+        (label_kind, Provider_error.to_error_kind error);
+        (label_provider, public_runtime_provider_label);
+        (label_cascade_name, cascade_name);
+        (label_capacity_scope, provider_error_capacity_scope_label error);
       ]
     ()
 
@@ -579,7 +591,7 @@ let timeout_source_label (err : Agent_sdk.Error.sdk_error) : string =
     | Agent_sdk.Error.A2a _
     | Agent_sdk.Error.Internal _ -> false
   in
-  if is_max_execution_time then "max_execution_time" else "provider"
+  if is_max_execution_time then provider_label_max_execution_time else label_provider
 
 let emit_oas_run_timeout_metric ~cascade_name ~provider:_ err =
   match err with
@@ -588,9 +600,9 @@ let emit_oas_run_timeout_metric ~cascade_name ~provider:_ err =
       Prometheus.inc_counter Keeper_metrics.metric_keeper_oas_run_timeout
         ~labels:
           [
-            ("cascade", cascade_name);
-            ("provider", public_runtime_provider_label);
-            ("source", timeout_source_label err);
+            (label_cascade, cascade_name);
+            (label_provider, public_runtime_provider_label);
+            (label_source, timeout_source_label err);
           ]
         ()
   | _ -> ()
@@ -684,8 +696,8 @@ let sdk_error_is_max_turns_exceeded (err : Agent_sdk.Error.sdk_error) : bool =
 
 let sdk_error_cascade_fallback_class (err : Agent_sdk.Error.sdk_error) :
     string option =
-  if sdk_error_is_hard_quota err then Some "hard_quota"
-  else if sdk_error_is_max_turns_exceeded err then Some "max_turns"
+  if sdk_error_is_hard_quota err then Some fallback_class_hard_quota
+  else if sdk_error_is_max_turns_exceeded err then Some fallback_class_max_turns
   else if sdk_error_is_resumable_cli_session err then
-    Some "resumable_cli_session"
+    Some fallback_class_resumable_cli_session
   else None

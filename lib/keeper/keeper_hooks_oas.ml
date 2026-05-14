@@ -22,6 +22,95 @@
 let keeper_denied_tools =
   Tool_catalog.tools_for_surface Tool_catalog.Keeper_denied
 
+let label_keeper = "keeper"
+let label_callback = "callback"
+let label_tool = "tool"
+let label_source = "source"
+let label_alias = "alias"
+let label_surface = "surface"
+let label_shape = "shape"
+let label_model = "model"
+let label_provider = "provider"
+let label_provider_kind = "provider_kind"
+let label_status = "status"
+let label_site = "site"
+let label_reason = "reason"
+let label_outcome = "outcome"
+let label_severity = "severity"
+let label_decision = "decision"
+let label_stop_reason = "stop_reason"
+let label_keeper_name = "keeper_name"
+let label_channel = "channel"
+let key_agent = "agent"
+let key_task_id = "task_id"
+let key_input_tokens = "input_tokens"
+let key_output_tokens = "output_tokens"
+let key_cost_usd = "cost_usd"
+let key_cost_status = "cost_status"
+let key_cost_status_reason = "cost_status_reason"
+let key_cost_usd_source = "cost_usd_source"
+let key_usage_missing = "usage_missing"
+let key_timestamp = "timestamp"
+let key_raw_input_tokens = "raw_input_tokens"
+let key_raw_output_tokens = "raw_output_tokens"
+let key_raw_cost_usd = "raw_cost_usd"
+let key_reasoning_tokens = "reasoning_tokens"
+let key_cache_n = "cache_n"
+let key_prompt_per_second = "prompt_per_second"
+let key_provider_tokens_per_second = "provider_tokens_per_second"
+let key_hw_decode_tokens_per_second = "hw_decode_tokens_per_second"
+let key_peak_memory_gb = "peak_memory_gb"
+let key_request_latency_ms = "request_latency_ms"
+let key_tokens_per_second = "tokens_per_second"
+let key_status = "status"
+let key_reason = "reason"
+let key_provider = "provider"
+let key_model = "model"
+let key_source = "source"
+let key_pr_review_action = "pr_review_action"
+let key_pr_review_action_success = "pr_review_action_success"
+let key_pr_work_action = "pr_work_action"
+let key_pr_work_action_source = "pr_work_action_source"
+let key_pr_work_action_success = "pr_work_action_success"
+let key_type = "type"
+let key_turn = "turn"
+let key_model_used = "model_used"
+let key_has_state_block = "has_state_block"
+let key_tool_calls_made = "tool_calls_made"
+let key_total_turns = "total_turns"
+let key_scope = "scope"
+let key_slots = "slots"
+let key_slot_count = "slot_count"
+let key_active_slot_count = "active_slot_count"
+let key_inactive_slot_count = "inactive_slot_count"
+let key_deny_list_count = "deny_list_count"
+let key_max_cost_usd = "max_cost_usd"
+let key_ts = "ts"
+let key_ts_unix = "ts_unix"
+let key_name = "name"
+let key_generation = "generation"
+let key_active = "active"
+let key_via = "via"
+let key_route_via = "route_via"
+let key_metric_event = "metric_event"
+let key_agent_name = "agent_name"
+let key_tool_name = "tool_name"
+let key_tool_call_count = "tool_call_count"
+let key_tools_used = "tools_used"
+let key_duration_ms = "duration_ms"
+let key_channel = "channel"
+let key_error = "error"
+let callback_label_after_turn_sse_broadcast = "after_turn_sse_broadcast"
+let callback_label_post_tool_log_write = "post_tool_log_write"
+let callback_label_on_tool_executed = "on_tool_executed"
+let callback_label_on_error = "on_error"
+let callback_label_on_tool_error = "on_tool_error"
+let callback_label_pr_review_action_metrics_append = "pr_review_action_metrics_append"
+let callback_label_pr_work_action_metrics_append = "pr_work_action_metrics_append"
+let outcome_ok = "ok"
+let outcome_error = "error"
+
+
 (* [escape_field], [render_inline_skip_reason], [broadcast_tool_skipped],
    and [extract_command_from_input] now live in [Keeper_guards]. They
    are used only by the decomposed pre_tool_use guard chain, so keeping
@@ -185,7 +274,7 @@ let record_pre_tool_gate_attempt
        let callback_label_gate_tool_call_log = "gate_tool_call_log" in
        Prometheus.inc_counter
          Keeper_metrics.metric_keeper_lifecycle_callback_failures
-         ~labels:[("keeper", keeper_name); ("callback", callback_label_gate_tool_call_log)]
+         ~labels:[(label_keeper, keeper_name); (label_callback, callback_label_gate_tool_call_log)]
          ();
        Log.Keeper.warn
          "keeper:%s pre_tool_use gate tool_call log failed tool=%s err=%s"
@@ -269,7 +358,7 @@ let tool_use_failure_metric = Keeper_metrics.metric_keeper_tool_use_failure
 
 let record_tool_use_failure ~keeper_name ~tool_name =
   Prometheus.inc_counter tool_use_failure_metric
-    ~labels:[ ("keeper", keeper_name); ("tool", tool_name) ] ()
+    ~labels:[ (label_keeper, keeper_name); (label_tool, tool_name) ] ()
 
 (* #10083 originally patched empty [response.model] leaks by recovering a
    canonical model id inside MASC.  The ownership boundary has since moved:
@@ -329,7 +418,7 @@ let resolve_after_turn_model ~keeper_name
       else source_unknown_sentinel
     in
     Prometheus.inc_counter empty_response_model_metric
-      ~labels:[ ("keeper", keeper_name); ("source", source) ] ();
+      ~labels:[ (label_keeper, keeper_name); (label_source, source) ] ();
     Log.Keeper.warn
       "keeper:%s after_turn response.model empty -> runtime_lane source=%s"
       keeper_name source;
@@ -340,9 +429,9 @@ let resolve_after_turn_model ~keeper_name
       Prometheus.inc_counter alias_response_model_metric
         ~labels:
           [
-            ("keeper", keeper_name);
-            ("alias", runtime_lane_label);
-            ("source", source_telemetry_canonical);
+            (label_keeper, keeper_name);
+            (label_alias, runtime_lane_label);
+            (label_source, source_telemetry_canonical);
           ]
         ();
       Log.Keeper.warn
@@ -390,9 +479,9 @@ let record_response_content_quality_metric ~keeper_name
     Prometheus.inc_counter empty_response_content_metric
       ~labels:
         [
-          ("keeper", keeper_name);
-          ("stop_reason", stop_reason_metric_label response.stop_reason);
-          ("shape", response_content_empty_shape response.content);
+          (label_keeper, keeper_name);
+          (label_stop_reason, stop_reason_metric_label response.stop_reason);
+          (label_shape, response_content_empty_shape response.content);
         ]
       ()
 
@@ -462,9 +551,9 @@ let record_usage_anomaly_metrics ~keeper_name ~model usage_trust =
            Keeper_metrics.metric_keeper_usage_anomalies
 	           ~labels:
 	             [
-	               ("keeper_name", keeper_name);
-	               ("model", runtime_lane_label);
-	               ("reason", reason);
+	               (label_keeper_name, keeper_name);
+	               (label_model, runtime_lane_label);
+	               (label_reason, reason);
 	             ]
            ())
       reasons
@@ -548,7 +637,7 @@ let tool_execution_summary ~tool_name ~model ~success ~duration_ms :
     tool_execution_summary =
   { tool_name
   ; provider = runtime_lane_of_model model
-  ; outcome = if success then "ok" else "error"
+  ; outcome = if success then outcome_ok else outcome_error
   ; duration_ms = max 0.0 duration_ms
   }
 
@@ -559,7 +648,7 @@ let record_keeper_tool_duration_metric
   Prometheus.observe_histogram
     Keeper_metrics.metric_keeper_tool_call_duration
     ~labels:
-      [ "keeper", keeper_name
+      [label_keeper, keeper_name
       ; "provider", summary.provider
       ; "tool", summary.tool_name
       ; "outcome", summary.outcome
@@ -695,7 +784,7 @@ let classify_cost_usd_source ~usage_missing ~usage_trusted ~runtime_unmetered
 let record_cost_emit_source source =
   if not (String.equal source cost_source_computed) then
     Prometheus.inc_counter cost_emit_source_metric
-      ~labels:[ ("source", source) ]
+      ~labels:[ (label_source, source) ]
       ()
 
 (** Append a cost event to .masc/costs.jsonl for per-task cost attribution.
@@ -785,9 +874,9 @@ let assemble_cost_event_payload
     if usage_missing || usage_trusted then []
     else
       [
-        ("raw_input_tokens", `Int input_tokens);
-        ("raw_output_tokens", `Int output_tokens);
-        ("raw_cost_usd", `Float cost_usd);
+        (key_raw_input_tokens, `Int input_tokens);
+        (key_raw_output_tokens, `Int output_tokens);
+        (key_raw_cost_usd, `Float cost_usd);
       ]
   in
   let telemetry_fields = match telemetry with
@@ -819,20 +908,20 @@ let assemble_cost_event_payload
   in
   let source_auto_trajectory = "auto_trajectory" in
   let entry = `Assoc ([
-    ("agent", `String agent_name);
+    (key_agent, `String agent_name);
     ("task_id", Json_util.string_opt_to_json task_id);
-    ("provider", `String runtime_lane_label);
-    ("model", `String runtime_lane_label);
-    ("input_tokens", `Int safe_input_tokens);
-    ("output_tokens", `Int safe_output_tokens);
-    ("cost_usd", `Float safe_cost_usd);
-    ("cost_status", `String cost_status_label);
-    ("cost_status_reason", `String cost_status_reason_label);
+    (key_provider, `String runtime_lane_label);
+    (key_model, `String runtime_lane_label);
+    (key_input_tokens, `Int safe_input_tokens);
+    (key_output_tokens, `Int safe_output_tokens);
+    (key_cost_usd, `Float safe_cost_usd);
+    (key_cost_status, `String cost_status_label);
+    (key_cost_status_reason, `String cost_status_reason_label);
     (* #10318: self-describing reason for [cost_usd]'s value. *)
-    ("cost_usd_source", `String cost_usd_source);
-    ("usage_missing", `Bool usage_missing);
-    ("timestamp", `String (Masc_domain.now_iso ()));
-    ("source", `String source_auto_trajectory);
+    (key_cost_usd_source, `String cost_usd_source);
+    (key_usage_missing, `Bool usage_missing);
+    (key_timestamp, `String (Masc_domain.now_iso ()));
+    (key_source, `String source_auto_trajectory);
   ]
   @ Keeper_usage_trust.json_fields usage_trust
   @ raw_usage_fields
@@ -914,9 +1003,9 @@ let emit_cost_event
     Prometheus.metric_cost_ledger_status
     ~labels:
       [
-        ("provider", assembled.provider);
-        ("status", assembled.cost_status_label);
-        ("reason", assembled.cost_status_reason_label);
+        (label_provider, assembled.provider);
+        (label_status, assembled.cost_status_label);
+        (label_reason, assembled.cost_status_reason_label);
       ]
     ();
   record_cost_emit_source assembled.cost_usd_source;
@@ -926,7 +1015,7 @@ let emit_cost_event
       | exn ->
         Prometheus.inc_counter
           Keeper_metrics.metric_keeper_metric_emit_dropped
-          ~labels:[("keeper", agent_name); ("site", Metric_emit_dropped_site.(to_label Cost_event_write))]
+          ~labels:[(label_keeper, agent_name); (label_site, Metric_emit_dropped_site.(to_label Cost_event_write))]
           ();
         Log.Keeper.error "emit_cost_event: failed to write %s: %s"
           (Dated_jsonl.base_dir store) (Printexc.to_string exn))
@@ -1101,7 +1190,7 @@ let observe_output_parse_failure ~surface ~output_bytes =
   Safe_ops.protect ~default:() (fun () ->
       Prometheus.inc_counter
         Keeper_metrics.metric_keeper_oas_hook_output_parse_failures
-        ~labels:[ ("surface", surface) ] ());
+        ~labels:[ (label_surface, surface) ] ());
   Safe_ops.protect ~default:() (fun () ->
       Log.Keeper.warn
         "keeper_hooks_oas output JSON parse failed: surface=%s output_bytes=%d"
@@ -1764,7 +1853,7 @@ let append_pr_review_action_metric
       let route_fields =
         match event.route_via with
         | None -> []
-        | Some via -> [("via", `String via); ("route_via", `String via)]
+        | Some via -> [(key_via, `String via); (key_route_via, `String via)]
       in
       let identity_fields =
         []
@@ -1781,23 +1870,23 @@ let append_pr_review_action_metric
       let snapshot =
         `Assoc
           ([
-             ("ts", `String (Masc_domain.iso8601_of_unix_seconds now));
-             ("ts_unix", `Float now);
-             ("channel", `String "tool_event");
-             ("metric_event", `String "keeper_pr_review_action");
-             ("name", `String meta.name);
-             ("agent_name", `String meta.agent_name);
+             (key_ts, `String (Masc_domain.iso8601_of_unix_seconds now));
+             (key_ts_unix, `Float now);
+             (key_channel, `String "tool_event");
+             (key_metric_event, `String "keeper_pr_review_action");
+             (key_name, `String meta.name);
+             (key_agent_name, `String meta.agent_name);
              ( "trace_id",
                `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) );
-             ("generation", `Int generation);
-             ("tool_name", `String tool_name);
-             ("pr_review_action", `String event.action);
-             ("pr_review_action_success", `Bool event.success);
-             ("tool_call_count", `Int 0);
-             ("tools_used", `List []);
+             (key_generation, `Int generation);
+             (key_tool_name, `String tool_name);
+             (key_pr_review_action, `String event.action);
+             (key_pr_review_action_success, `Bool event.success);
+             (key_tool_call_count, `Int 0);
+             (key_tools_used, `List []);
              ("pr_number", Json_util.int_opt_to_json event.pr_number);
              ("comment_id", Json_util.int_opt_to_json event.comment_id);
-             ("duration_ms", `Float duration_ms);
+             (key_duration_ms, `Float duration_ms);
            ]
            @ route_fields
            @ identity_fields)
@@ -1840,33 +1929,33 @@ let append_pr_work_action_metrics
            let route_fields =
              match event.route_via with
              | None -> []
-             | Some via -> [("via", `String via); ("route_via", `String via)]
+             | Some via -> [(key_via, `String via); (key_route_via, `String via)]
            in
            let snapshot =
              `Assoc
                ([
-                  ("ts", `String (Masc_domain.iso8601_of_unix_seconds now));
-                  ("ts_unix", `Float now);
-                  ("channel", `String "tool_event");
-                  ("metric_event", `String "keeper_pr_work_action");
-                  ("name", `String meta.name);
-                  ("agent_name", `String meta.agent_name);
+                  (key_ts, `String (Masc_domain.iso8601_of_unix_seconds now));
+                  (key_ts_unix, `Float now);
+                  (key_channel, `String "tool_event");
+                  (key_metric_event, `String "keeper_pr_work_action");
+                  (key_name, `String meta.name);
+                  (key_agent_name, `String meta.agent_name);
                   ( "trace_id",
                     `String
                       (Keeper_id.Trace_id.to_string meta.runtime.trace_id) );
-                  ("generation", `Int generation);
-                  ("tool_name", `String tool_name);
-                  ("pr_work_action", `String event.work_action);
-                  ("pr_work_action_source", `String event.work_source);
-                  ("pr_work_action_success", `Bool event.success);
+                  (key_generation, `Int generation);
+                  (key_tool_name, `String tool_name);
+                  (key_pr_work_action, `String event.work_action);
+                  (key_pr_work_action_source, `String event.work_source);
+                  (key_pr_work_action_success, `Bool event.success);
                   ( "pr_work_ref",
                     Json_util.string_opt_to_json event.work_ref );
                   ("pr_url", Json_util.string_opt_to_json event.pr_url);
                   ( "pr_work_command",
                     Json_util.string_opt_to_json event.command );
-                  ("tool_call_count", `Int 0);
-                  ("tools_used", `List []);
-                  ("duration_ms", `Float duration_ms);
+                  (key_tool_call_count, `Int 0);
+                  (key_tools_used, `List []);
+                  (key_duration_ms, `Float duration_ms);
                 ]
                 @ route_fields)
            in
@@ -2112,18 +2201,18 @@ let make_hooks
            Sse.broadcast
              (`Assoc
                [
-                 ("type", `String sse_turn_complete);
-                 ("name", `String meta.name);
-                 ("generation", `Int generation);
-                 ("turn", `Int turn);
-                 ("model_used", `Null);
-                 ("input_tokens", `Int input_tok);
-                 ("output_tokens", `Int output_tok);
-                 ("has_state_block", `Bool has_state_block);
-                 ("cost_usd", `Float turn_cost_usd);
-                 ("tool_calls_made", `Int !tool_call_count_ref);
-                 ("total_turns", `Int meta.runtime.usage.total_turns);
-                 ("ts_unix", `Float (Unix.gettimeofday ()));
+                 (key_type, `String sse_turn_complete);
+                 (key_name, `String meta.name);
+                 (key_generation, `Int generation);
+                 (key_turn, `Int turn);
+                 (key_model_used, `Null);
+                 (key_input_tokens, `Int input_tok);
+                 (key_output_tokens, `Int output_tok);
+                 (key_has_state_block, `Bool has_state_block);
+                 (key_cost_usd, `Float turn_cost_usd);
+                 (key_tool_calls_made, `Int !tool_call_count_ref);
+                 (key_total_turns, `Int meta.runtime.usage.total_turns);
+                 (key_ts_unix, `Float (Unix.gettimeofday ()));
                ])
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
@@ -2139,7 +2228,7 @@ let make_hooks
                 at the producer site. *)
              Prometheus.inc_counter
                Keeper_metrics.metric_keeper_lifecycle_callback_failures
-               ~labels:[("keeper", meta.name); ("callback", "after_turn_sse_broadcast")]
+               ~labels:[(label_keeper, meta.name); (label_callback, callback_label_after_turn_sse_broadcast)]
                ();
              Log.Keeper.warn
                "keeper:%s turn=%d sse_turn_complete broadcast failed: %s"
@@ -2237,7 +2326,7 @@ let make_hooks
                 identical to "no tool calls in this turn." *)
              Prometheus.inc_counter
                Keeper_metrics.metric_keeper_lifecycle_callback_failures
-               ~labels:[("keeper", (!meta_ref).name); ("callback", "post_tool_log_write")]
+               ~labels:[(label_keeper, (!meta_ref).name); (label_callback, callback_label_post_tool_log_write)]
                ();
              Log.Keeper.warn
                "keeper:%s tool=%s log_call write failed: %s"
@@ -2260,8 +2349,8 @@ let make_hooks
                Keeper_metrics.metric_keeper_lifecycle_callback_failures
                ~labels:
                  [
-                   ("keeper", (!meta_ref).name);
-                   ("callback", "pr_review_action_metrics_append");
+                   (label_keeper, (!meta_ref).name);
+                   (label_callback, callback_label_pr_review_action_metrics_append);
                  ]
                ();
              Log.Keeper.warn
@@ -2285,8 +2374,8 @@ let make_hooks
                Keeper_metrics.metric_keeper_lifecycle_callback_failures
                ~labels:
                  [
-                   ("keeper", (!meta_ref).name);
-                   ("callback", "pr_work_action_metrics_append");
+                   (label_keeper, (!meta_ref).name);
+                   (label_callback, callback_label_pr_work_action_metrics_append);
                  ]
                ();
              Log.Keeper.warn
@@ -2368,7 +2457,7 @@ let make_hooks
             | exn ->
               Prometheus.inc_counter
                 Keeper_metrics.metric_keeper_lifecycle_callback_failures
-                ~labels:[("keeper", (!meta_ref).name); ("callback", "on_tool_executed")]
+                ~labels:[(label_keeper, (!meta_ref).name); (label_callback, callback_label_on_tool_executed)]
                 ();
               Log.Keeper.error "keeper:%s on_tool_executed callback failed for %s: %s"
                 (!meta_ref).name tool_name (Printexc.to_string exn));
@@ -2389,8 +2478,8 @@ let make_hooks
         Prometheus.inc_counter Keeper_metrics.metric_keeper_oas_on_stop
           ~labels:
             [
-              ("keeper", (!meta_ref).name);
-              ("stop_reason", stop_reason_to_label reason);
+              (label_keeper, (!meta_ref).name);
+              (label_stop_reason, stop_reason_to_label reason);
             ]
           ();
         Agent_sdk.Hooks.Continue
@@ -2412,9 +2501,9 @@ let make_hooks
           Keeper_metrics.metric_keeper_oas_on_idle_escalated
           ~labels:
             [
-              ("keeper", (!meta_ref).name);
-              ("severity", idle_severity_to_label severity);
-              ("decision", idle_decision_to_label decision);
+              (label_keeper, (!meta_ref).name);
+              (label_severity, idle_severity_to_label severity);
+              (label_decision, idle_decision_to_label decision);
             ]
           ();
         decision
@@ -2424,7 +2513,7 @@ let make_hooks
       | Agent_sdk.Hooks.OnError { detail; context = err_ctx } ->
         Prometheus.inc_counter
           Keeper_metrics.metric_keeper_lifecycle_callback_failures
-          ~labels:[("keeper", (!meta_ref).name); ("callback", "on_error")]
+          ~labels:[(label_keeper, (!meta_ref).name); (label_callback, callback_label_on_error)]
           ();
         Log.Keeper.error "keeper:%s on_error: %s (context: %s)"
           (!meta_ref).name detail err_ctx;
@@ -2435,7 +2524,7 @@ let make_hooks
       | Agent_sdk.Hooks.OnToolError { tool_name; error } ->
         Prometheus.inc_counter
           Keeper_metrics.metric_keeper_lifecycle_callback_failures
-          ~labels:[("keeper", (!meta_ref).name); ("callback", "on_tool_error")]
+          ~labels:[(label_keeper, (!meta_ref).name); (label_callback, callback_label_on_tool_error)]
           ();
         Log.Keeper.error "keeper:%s tool_error: %s — %s"
           (!meta_ref).name tool_name error;
@@ -2485,12 +2574,12 @@ let hook_slot_json ?(features = []) ?(gates = []) ?(effects = [])
   in
   `Assoc
     ([
-       ("active", `Bool active);
-       ("source", `String source);
+       (key_active, `Bool active);
+       (key_source, `String source);
      ]
      @ (match reason with
        | None -> []
-       | Some value -> [ ("reason", `String value) ])
+       | Some value -> [ (key_reason, `String value) ])
      @ list_field "features" features
      @ list_field "gates" gates
      @ list_field "effects" effects)
@@ -2650,19 +2739,19 @@ let hook_introspection_json
     List.map (fun (name, _active, json) -> (name, json)) slot_entries
   in
   `Assoc [
-    ("scope", `String "keeper_runtime_composite");
-    ("slots", `Assoc slot_assoc);
+    (key_scope, `String "keeper_runtime_composite");
+    (key_slots, `Assoc slot_assoc);
     ("slot_names", slot_names);
-    ("slot_count", `Int total_count);
-    ("active_slot_count", `Int active_count);
-    ("inactive_slot_count", `Int inactive_count);
+    (key_slot_count, `Int total_count);
+    (key_active_slot_count, `Int active_count);
+    (key_inactive_slot_count, `Int inactive_count);
     ("deny_list", denied_json);
-    ("deny_list_count", `Int (List.length keeper_denied_tools));
+    (key_deny_list_count, `Int (List.length keeper_denied_tools));
     ("destructive_check_tools", destructive_json);
     ("cost_budget",
       match max_cost_usd with
       | Some v ->
-        `Assoc [("max_cost_usd", `Float v); ("active", `Bool true)]
+        `Assoc [(key_max_cost_usd, `Float v); (key_active, `Bool true)]
       | None ->
-        `Assoc [("active", `Bool false)]);
+        `Assoc [(key_active, `Bool false)]);
   ]

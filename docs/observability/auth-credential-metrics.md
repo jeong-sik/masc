@@ -201,7 +201,10 @@ watch -n 5 'curl -fsS -H "Authorization: Bearer $MASC_MCP_TOKEN" \
 ```
 
 Steady state: `dead=0`, `dead_archive=0`, `audit_ticks_total` climbs by
-~5 every 5-second tick (matches the 60s fiber default — 1 tick / 60s).
+about `+1` per minute (the fiber default cadence is `1 tick / 60s`). On
+the `watch -n 5` loop above, most refreshes will show no change and the
+counter will tick up once roughly every 12th refresh — that is normal
+heartbeat, not a fiber stall.
 
 ### Why not the in-app dashboard
 

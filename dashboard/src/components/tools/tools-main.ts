@@ -72,7 +72,7 @@ export function Tools() {
                 등록됨 ${usage.registered_count} (모든 MCP 서버 합산) · 사용된 ${usage.distinct_tools_called} · 미사용 ${usage.never_called_count}
               </div>
               <div class="text-3xs text-[var(--color-fg-muted)] mb-2">
-                <span class="font-mono">${usage.source ?? 'tool_usage'}</span>
+                <span class="font-mono">${usage.source ?? '(unknown source)'}</span>
                 <span class="mx-1">·</span>
                 <span class="font-mono ${sourceHealthClass(usage.health)}">${usage.health ?? 'unknown'}</span>
                 <span class="mx-1">·</span>

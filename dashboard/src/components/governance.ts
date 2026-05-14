@@ -269,7 +269,7 @@ function JudgmentsSection() {
             <div class="text-text-muted/90 leading-relaxed">${j.summary ?? ''}</div>
             ${j.recommended_action ? html`
               <div class="mt-2 flex items-center gap-1.5 text-2xs">
-                <span class="rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--accent-8)] px-1.5 py-0.5 font-medium text-accent-fg">${j.recommended_action.action_kind ?? 'action'}</span>
+                <span class="rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--accent-8)] px-1.5 py-0.5 font-medium text-accent-fg">${j.recommended_action.action_kind ?? '(unknown action_kind)'}</span>
                 ${j.recommended_action.resolved_tool ? html`<span class="text-text-dim font-mono">${j.recommended_action.resolved_tool}</span>` : null}
                 ${j.recommended_action.reason ? html`<span class="text-text-muted/80 truncate max-w-[250px]">${j.recommended_action.reason}</span>` : null}
               </div>

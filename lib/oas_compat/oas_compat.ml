@@ -249,6 +249,12 @@ module Metrics = struct
       =
     ()
 
+  let default_streaming_first_chunk ~provider:_ ~model_id:_ ~ttfrc_ms:_ = ()
+
+  let default_streaming_chunk ~provider:_ ~model_id:_ ~chunk_index:_
+      ~inter_chunk_ms:_ =
+    ()
+
   let make ?(on_cache_hit = default_model_hook)
       ?(on_cache_miss = default_model_hook)
       ?(on_request_start = default_model_hook)
@@ -256,7 +262,9 @@ module Metrics = struct
       ?(on_http_status = default_http_status)
       ?(on_circuit_state = default_circuit_state)
       ?(on_capability_drop = default_capability_drop)
-      ?(on_retry = default_retry) ?(on_token_usage = default_token_usage) ()
+      ?(on_retry = default_retry) ?(on_token_usage = default_token_usage)
+      ?(on_streaming_first_chunk = default_streaming_first_chunk)
+      ?(on_streaming_chunk = default_streaming_chunk) ()
       : Llm_provider.Metrics.t =
     {
       on_cache_hit;
@@ -269,5 +277,7 @@ module Metrics = struct
       on_capability_drop;
       on_retry;
       on_token_usage;
+      on_streaming_first_chunk;
+      on_streaming_chunk;
     }
 end

@@ -60,6 +60,10 @@ val emit_token_usage :
   input_tokens:int ->
   output_tokens:int ->
   unit
+val emit_streaming_first_chunk :
+  provider:string -> model_id:string -> ttfrc_ms:float -> unit
+val emit_streaming_chunk :
+  provider:string -> model_id:string -> chunk_index:int -> inter_chunk_ms:float -> unit
 
 (** Canonical metric name for the §7.3.2 unified fallback counter. *)
 val fallback_triggered_metric : string

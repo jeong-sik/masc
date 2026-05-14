@@ -193,30 +193,58 @@ def parse_navigation_contract() -> list[dict[str, object]]:
 def parse_readiness_source() -> list[dict[str, object]]:
     readiness_text = (repo_root / "lib/dashboard/dashboard_surface_readiness.ml").read_text()
     entries_block = extract_balanced_block(readiness_text, "let all_entries =", "[", "]")
+    entry_objects = split_top_level_objects(entries_block)
+    if not entry_objects:
+        entry_objects = [
+            "entry" + chunk
+            for chunk in re.split(r"\n\s*;\s*entry", entries_block)
+            if "~id:" in chunk
+        ]
+
+    def entry_string(field: str, obj: str, *, label: str) -> str:
+        literal_pattern = rf'{field} = "([^"]+)"'
+        call_pattern = rf'~{field}:"([^"]+)"'
+        match = re.search(literal_pattern, obj, re.S) or re.search(call_pattern, obj, re.S)
+        if not match:
+            fail(f"parse error: missing {label}")
+        return match.group(1)
+
+    def entry_bool(field: str, obj: str, *, label: str) -> bool:
+        literal_pattern = rf"{field} = (true|false)"
+        call_pattern = rf"~{field}:(true|false)"
+        match = re.search(literal_pattern, obj, re.S) or re.search(call_pattern, obj, re.S)
+        if not match:
+            fail(f"parse error: missing {label}")
+        return match.group(1) == "true"
+
+    def entry_route_hash(obj: str) -> str | None:
+        return (
+            extract_optional_string(r'route_hash = Some "([^"]+)"', obj)
+            or extract_optional_string(r'~route_hash:"([^"]+)"', obj)
+        )
+
     contract: list[dict[str, object]] = []
-    for obj in split_top_level_objects(entries_block):
+    for obj in entry_objects:
         contract.append(
             {
-                "id": extract_string(r'id = "([^"]+)"', obj, label="readiness id"),
-                "label": extract_string(r'label = "([^"]+)"', obj, label="readiness label"),
-                "route_hash": extract_optional_string(r'route_hash = Some "([^"]+)"', obj),
-                "exposure_status": extract_string(
-                    r'exposure_status = "([^"]+)"',
+                "id": entry_string("id", obj, label="readiness id"),
+                "label": entry_string("label", obj, label="readiness label"),
+                "route_hash": entry_route_hash(obj),
+                "exposure_status": entry_string(
+                    "exposure_status",
                     obj,
                     label="readiness exposure_status",
                 ),
-                "hidden_from_nav": extract_string(
-                    r"hidden_from_nav = (true|false)",
+                "hidden_from_nav": entry_bool(
+                    "hidden_from_nav",
                     obj,
                     label="readiness hidden_from_nav",
-                )
-                == "true",
-                "meets_main_gate": extract_string(
-                    r"meets_main_gate = (true|false)",
+                ),
+                "meets_main_gate": entry_bool(
+                    "meets_main_gate",
                     obj,
                     label="readiness meets_main_gate",
-                )
-                == "true",
+                ),
             }
         )
     return contract

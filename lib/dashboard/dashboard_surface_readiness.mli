@@ -25,5 +25,5 @@ val json : ?surface_id:string -> unit -> Yojson.Safe.t
 
     The envelope shape is:
     [{ "generated_at": ISO-8601 timestamp,
-       "proof_bar": "fixture+live_spotcheck",
+       "proof_bar": "live:<n>/<total> logs:<n>/<total> metrics:<n>/<total>",
        "surfaces": [...] }]. *)

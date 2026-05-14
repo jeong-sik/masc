@@ -164,8 +164,8 @@ code_refs:
   - lab autoresearch loops
 - `GET /api/v1/dashboard/harness-health`
   - lab harness health
-- `GET /api/v1/ide/presence`
-  - code IDE live collaboration presence
+- `GET /api/v1/ide/annotations`, `GET /api/v1/ide/regions`, `GET /api/v1/ide/presence`
+  - code IDE annotations, source regions, and live collaboration presence
 - `GET /api/v1/dashboard/logs`
   - log viewer
 - `GET /api/v1/dashboard/surface-readiness`

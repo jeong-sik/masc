@@ -12,6 +12,8 @@ function beaconInput(overrides: Partial<Parameters<typeof computeBeaconView>[0]>
     eventCount60s: 5,
     lastPongAt: 0,
     lastPongLatencyMs: null,
+    sseFallbackActive: false,
+    sseFallbackReason: null,
     now: NOW,
     ...overrides,
   }
@@ -33,6 +35,18 @@ describe('computeBeaconView', () => {
     }))
     expect(view.state).toBe('red')
     expect(view.label).toContain('disconnected')
+  })
+
+  it('returns yellow SSE fallback when wsOnly but fallback is active', () => {
+    const view = computeBeaconView(beaconInput({
+      connected: false,
+      ready: false,
+      sseFallbackActive: true,
+      sseFallbackReason: 'dashboard websocket rpc timed out: dashboard/ping',
+    }))
+    expect(view.state).toBe('yellow')
+    expect(view.label).toBe('Client SSE fallback')
+    expect(view.title).toContain('dashboard/ping')
   })
 
   it('returns red when wsOnly, socket connected but handshake not ready', () => {

@@ -19,6 +19,7 @@ import { cancelPendingSSERefreshes, registerMissionRefresh, setupSSEReaction, st
 import { refreshShell } from './store'
 import { connectDashboardWS, disconnectDashboardWS, subscribeDashboardRoute } from './dashboard-ws'
 import { dashboardWsOnlyEnabled } from './dashboard-ws-cutover'
+import { startDashboardSseFallback } from './dashboard-transport-fallback'
 import { ensureDevToken } from './api/dev-token'
 import { fetchDashboardConfig, parseContextThresholds } from './api/dashboard'
 import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN, CONTEXT_RATIO_COMPACTING } from './config/constants'
@@ -122,6 +123,7 @@ export function App() {
     // the WS external-subscriber path, so turning SSE off is safe when
     // operators have validated the WS channel in their environment.
     const wsOnly = dashboardWsOnlyEnabled()
+    const stopSseFallback = startDashboardSseFallback({ wsOnly })
 
     // Initialize hash router and compatible deep links
     initRouter()
@@ -201,6 +203,7 @@ export function App() {
 
     return () => {
       cancelled = true
+      stopSseFallback()
       disconnectDashboardWS()
       if (!wsOnly) {
         disconnectSSE()

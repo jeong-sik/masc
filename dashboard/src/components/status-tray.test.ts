@@ -59,6 +59,34 @@ describe('summarizeStatusTray', () => {
     expect(summary.items.transport.detail).toContain('socket closed')
   })
 
+  it('marks WS-only transport as degraded but live when SSE fallback is carrying events', () => {
+    const summary = summarizeStatusTray({
+      wsOnly: true,
+      sseConnected: true,
+      wsConnected: false,
+      wsReady: false,
+      wsLastEventAt: 0,
+      wsEventCount60s: 0,
+      wsLastPongAt: 0,
+      wsLastPongLatencyMs: null,
+      wsSseFallbackActive: true,
+      wsSseFallbackReason: 'dashboard websocket rpc timed out: dashboard/ping',
+      wsLastError: 'dashboard websocket rpc timed out: dashboard/ping',
+      reconnectCount: 0,
+      lastDisconnectedAt: 0,
+      keepers: [],
+      staleKeeperNames: new Set(),
+      tasks: [],
+      journalEntries: [],
+      unacknowledgedErrors: 0,
+      now: NOW,
+    })
+
+    expect(summary.items.transport.tone).toBe('warn')
+    expect(summary.items.transport.value).toBe('SSE fallback')
+    expect(summary.items.transport.detail).toContain('dashboard/ping')
+  })
+
   it('rolls stale keeper, verification, and error counts into tray items', () => {
     const summary = summarizeStatusTray({
       wsOnly: false,

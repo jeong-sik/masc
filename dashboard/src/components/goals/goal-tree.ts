@@ -44,6 +44,7 @@ import {
   phaseFilterLabel,
   TaskProgressBar,
 } from './goal-helpers'
+import { trustHasPendingFirstEvidence } from './trust-summary-evidence'
 
 type GoalDetailTab = 'summary' | 'tasks' | 'evidence'
 
@@ -925,6 +926,7 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
     || Boolean(providerSelectedModel)
     || Boolean(executionCascadeOutcome)
     || Boolean(sandboxRoot)
+    || trustHasPendingFirstEvidence(trust?.approval_state ?? null)
 
   return html`
     <div class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-3">

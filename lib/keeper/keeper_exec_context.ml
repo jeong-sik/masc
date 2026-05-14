@@ -162,10 +162,15 @@ let apply_post_turn_lifecycle_with_resilience_handles =
 let recover_latest_checkpoint_for_overflow_retry =
   Keeper_post_turn.recover_latest_checkpoint_for_overflow_retry
 
-let dispatch_keeper_phase_event ~(config : Coord.config) ~keeper_name event =
+let dispatch_keeper_phase_event
+    ~(config : Coord.config)
+    ?(origin = Keeper_registry.Generic_dispatch)
+    ~keeper_name
+    event =
   match
     Keeper_registry.dispatch_event
       ~base_path:config.base_path
+      ~origin
       keeper_name
       event
   with
@@ -223,11 +228,15 @@ let record_compaction_outcome ~keeper_name ~before_tokens ~after_tokens =
       saved_tokens before_tokens after_tokens keeper_name
 
 let dispatch_compaction_completed
-    ~(config : Coord.config) ~keeper_name ~before_tokens ~after_tokens =
+    ~(config : Coord.config)
+    ~origin
+    ~keeper_name
+    ~before_tokens
+    ~after_tokens =
   record_compaction_outcome ~keeper_name ~before_tokens ~after_tokens;
   Prometheus.inc_counter Keeper_metrics.metric_keeper_fsm_edge_transitions
     ~labels:[("edge", "kmc_to_ksm_compact_completed")] ();
-  dispatch_keeper_phase_event ~config ~keeper_name
+  dispatch_keeper_phase_event ~config ~origin ~keeper_name
     (Keeper_state_machine.Compaction_completed
        { before_tokens; after_tokens })
 
@@ -237,11 +246,17 @@ let dispatch_post_turn_lifecycle_events
     (lifecycle : post_turn_lifecycle) =
   if lifecycle.compaction.attempted then
     if lifecycle.compaction.applied then
-      dispatch_compaction_completed ~config ~keeper_name
+      dispatch_compaction_completed
+        ~config
+        ~origin:Keeper_registry.Post_turn_lifecycle
+        ~keeper_name
         ~before_tokens:lifecycle.compaction.before_tokens
         ~after_tokens:lifecycle.compaction.after_tokens
     else
-      dispatch_keeper_phase_event ~config ~keeper_name
+      dispatch_keeper_phase_event
+        ~config
+        ~origin:Keeper_registry.Post_turn_lifecycle
+        ~keeper_name
         (Keeper_state_machine.Compaction_failed
            {
              reason =
@@ -252,7 +267,10 @@ let dispatch_post_turn_lifecycle_events
            });
   match lifecycle.handoff_attempted, lifecycle.handoff_json with
   | true, Some _json ->
-      dispatch_keeper_phase_event ~config ~keeper_name
+      dispatch_keeper_phase_event
+        ~config
+        ~origin:Keeper_registry.Post_turn_lifecycle
+        ~keeper_name
         (Keeper_state_machine.Handoff_completed
            {
              generation = lifecycle.updated_meta.runtime.generation;
@@ -261,7 +279,10 @@ let dispatch_post_turn_lifecycle_events
                  lifecycle.updated_meta.runtime.trace_id;
            })
   | true, None ->
-      dispatch_keeper_phase_event ~config ~keeper_name
+      dispatch_keeper_phase_event
+        ~config
+        ~origin:Keeper_registry.Post_turn_lifecycle
+        ~keeper_name
         (Keeper_state_machine.Handoff_failed
            {
              reason =

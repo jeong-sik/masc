@@ -1481,6 +1481,7 @@ let handle_keeper_compact ctx args : tool_result =
         let max_tokens = resolve_primary_max_context (Some meta) in
         Keeper_exec_context.dispatch_keeper_phase_event
           ~config:ctx.config ~keeper_name:name
+          ~origin:Keeper_registry.Operator_compact
           Keeper_state_machine.Compaction_started;
         match
           Keeper_exec_context.recover_latest_checkpoint_for_overflow_retry
@@ -1489,6 +1490,7 @@ let handle_keeper_compact ctx args : tool_result =
         | Some recovery ->
           Keeper_exec_context.dispatch_compaction_completed
             ~config:ctx.config ~keeper_name:name
+            ~origin:Keeper_registry.Operator_compact
             ~before_tokens:recovery.compaction.before_tokens
             ~after_tokens:recovery.compaction.after_tokens;
           invalidate_status_cache name;
@@ -1515,6 +1517,7 @@ let handle_keeper_compact ctx args : tool_result =
              signal. *)
           Keeper_exec_context.dispatch_keeper_phase_event
             ~config:ctx.config ~keeper_name:name
+            ~origin:Keeper_registry.Operator_compact
             (Keeper_state_machine.Compaction_failed {
                reason = "no_valid_checkpoint";
             });

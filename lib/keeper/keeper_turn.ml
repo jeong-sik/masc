@@ -518,11 +518,13 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                   ~on_compaction_started:(fun () ->
                     Keeper_exec_context.dispatch_keeper_phase_event
                       ~config:ctx.config
+                      ~origin:Keeper_registry.Post_turn_lifecycle
                       ~keeper_name:meta.name
                       Keeper_state_machine.Compaction_started)
                   ~on_handoff_started:(fun () ->
                     Keeper_exec_context.dispatch_keeper_phase_event
                       ~config:ctx.config
+                      ~origin:Keeper_registry.Post_turn_lifecycle
                       ~keeper_name:meta.name
                       Keeper_state_machine.Handoff_started)
                   ~meta

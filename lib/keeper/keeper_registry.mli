@@ -897,18 +897,33 @@ val restore_tool_usage : base_path:string -> string -> unit
 
 (** {1 RFC-0002 Event Dispatch} *)
 
+(** Dispatch origin for paired post-turn lifecycle events.
+
+    [Compaction_started]/[Compaction_completed]/[Compaction_failed] and
+    [Handoff_started]/[Handoff_completed]/[Handoff_failed] are same-turn
+    lifecycle pairs. The registry rejects them from [Generic_dispatch] so
+    keepalive/guard/manual callers cannot emit half of a pair outside the
+    owner path. *)
+type lifecycle_event_origin =
+  | Generic_dispatch
+  | Post_turn_lifecycle
+  | Operator_compact
+
 (** Dispatch a typed event through the state machine.
     Updates conditions, derives new phase, syncs legacy state.
     Returns the transition result or an error for invalid transitions.
     Prefer this over [set_state] for new code. *)
 val dispatch_event :
-  base_path:string -> string -> Keeper_state_machine.event ->
+  base_path:string ->
+  ?origin:lifecycle_event_origin ->
+  string -> Keeper_state_machine.event ->
   (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
 
 (** Like [dispatch_event], but preserves richer audit metadata when the event
     causes a phase transition. *)
 val dispatch_event_with_audit :
   base_path:string ->
+  ?origin:lifecycle_event_origin ->
   ?snapshot:Keeper_measurement.measurement_snapshot ->
   ?events_fired:Keeper_state_machine.event list ->
   ?selected_event:Keeper_state_machine.event ->
@@ -919,18 +934,23 @@ val dispatch_event_with_audit :
     [Error] so silent-failure call sites do not lose the signal.
     Same return type — callers that need the result can still match. *)
 val dispatch_event_and_log :
-  base_path:string -> string -> Keeper_state_machine.event ->
+  base_path:string ->
+  ?origin:lifecycle_event_origin ->
+  string -> Keeper_state_machine.event ->
   (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
 
 (** [dispatch_event_unit] wraps [dispatch_event_and_log] and logs a warning
     on [Error] instead of returning the result. Replaces [ignore (...)] call sites
     that previously swallowed transition errors silently. *)
 val dispatch_event_unit :
-  base_path:string -> string -> Keeper_state_machine.event -> unit
+  base_path:string ->
+  ?origin:lifecycle_event_origin ->
+  string -> Keeper_state_machine.event -> unit
 (** Like [dispatch_event_with_audit], but logs and emits a Prometheus
     counter on [Error]. *)
 val dispatch_event_with_audit_and_log :
   base_path:string ->
+  ?origin:lifecycle_event_origin ->
   ?snapshot:Keeper_measurement.measurement_snapshot ->
   ?events_fired:Keeper_state_machine.event list ->
   ?selected_event:Keeper_state_machine.event ->

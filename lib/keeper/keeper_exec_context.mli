@@ -233,6 +233,7 @@ val apply_post_turn_lifecycle_with_resilience_handles
 
 val dispatch_keeper_phase_event
   :  config:Coord.config
+  -> ?origin:Keeper_registry.lifecycle_event_origin
   -> keeper_name:string
   -> Keeper_state_machine.event
   -> unit
@@ -269,6 +270,7 @@ val record_compaction_outcome
     funnel through this helper to keep observability coherent. *)
 val dispatch_compaction_completed
   :  config:Coord.config
+  -> origin:Keeper_registry.lifecycle_event_origin
   -> keeper_name:string
   -> before_tokens:int
   -> after_tokens:int

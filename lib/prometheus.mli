@@ -971,6 +971,10 @@ val metric_ws_parse_cache_misses : string
 val metric_ws_bytes_cache_hits : string
 val metric_ws_bytes_cache_misses : string
 
+(** Histogram of dashboard/hello JSON-RPC processing latency in seconds.
+    Labels: [outcome = success | error]. *)
+val metric_ws_dashboard_hello_latency_seconds : string
+
 (** Dashboard execution render phase latency histogram. Labels:
     [phase] = total | snapshot | operations | enrich | enrich_per_keeper
             | data_load | assemble.

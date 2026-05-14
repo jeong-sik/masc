@@ -151,6 +151,14 @@ let inc_ws_bytes_cache_miss () =
   Prometheus.inc_counter Prometheus.metric_ws_bytes_cache_misses ()
 ;;
 
+let observe_ws_dashboard_hello_latency ~success seconds =
+  let outcome = if success then "success" else "error" in
+  Prometheus.observe_histogram
+    Prometheus.metric_ws_dashboard_hello_latency_seconds
+    ~labels:[ "outcome", outcome ]
+    (max 0.0 seconds)
+;;
+
 let observe_ws_client_buffered_bytes n =
   let bytes = float_of_int (max 0 n) in
   Prometheus.observe_histogram Prometheus.metric_ws_client_buffered_bytes bytes;
@@ -459,6 +467,8 @@ type ws_delivery_metric_names =
   ; throttled_deliveries : string
   ; client_buffered_bytes : string
   ; client_buffered_bytes_count : string
+  ; hello_latency : string
+  ; hello_latency_count : string
   }
 
 let ws_delivery_metric_names =
@@ -470,6 +480,8 @@ let ws_delivery_metric_names =
   ; throttled_deliveries = "masc_ws_throttled_deliveries_total"
   ; client_buffered_bytes = "masc_ws_client_buffered_bytes"
   ; client_buffered_bytes_count = "masc_ws_client_buffered_bytes_count"
+  ; hello_latency = Prometheus.metric_ws_dashboard_hello_latency_seconds
+  ; hello_latency_count = Prometheus.metric_ws_dashboard_hello_latency_seconds ^ "_count"
   }
 ;;
 
@@ -657,6 +669,13 @@ let transport_health_json ~config =
                   , `Int
                       (int_of_float
                          (v ws_delivery_metrics.client_buffered_bytes_count ())) )
+                ; ( "hello_latency_sum_seconds"
+                  , `Float (Prometheus.metric_total ws_delivery_metrics.hello_latency) )
+                ; ( "hello_latency_count"
+                  , `Int
+                      (int_of_float
+                         (Prometheus.metric_total ws_delivery_metrics.hello_latency_count))
+                  )
                 ] )
           ] )
     ; ( "webrtc"

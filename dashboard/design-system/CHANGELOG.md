@@ -61,7 +61,7 @@ Stage: legacy alias cleanup + KeeperBadge migration completion + token codificat
 
 - **IDE INTERJECT store substrate**
   - `src/components/ide/interject-store.ts` adds typed active-keeper/message state for the INTERJECT rail and explicit availability reasons for Send/Approve/Pause/Drain actions.
-  - `src/components/ide/ide-interject-mock.ts` now consumes the store and `keeper-actions.ts` dispatch boundary instead of rendering a disabled placeholder form.
+  - `src/components/ide/ide-interject.ts` now consumes the store and `keeper-actions.ts` dispatch boundary instead of rendering a disabled placeholder form.
 
 - **IDE code document store substrate**
   - `src/components/ide/code-document-store.ts` adds a typed read-only source document store with file/language metadata, CRLF normalization, line lookup, and bounded line parsing.

@@ -24,7 +24,7 @@
 `dashboard/src/components/ide/`에 30+ 파일이 wire-up 되어 있고 IDE plane 의 client-side 는 80%+ 완성 상태다. `ide-shell.ts` 가 root container, `IDE_LAYERS` 가 정의됨, `keeper-presence-store` 의 `workspace_label` 필드 contract 도 있다. 그러나:
 
 1. **server-side gap**: IDE plane 이 필요로 하는 데이터(worktree status, keeper shell ring buffer)를 노출하는 핸들러가 0건. `rg "worktree" lib/dashboard/` 가 0 hit.
-2. **mock fragments**: mockup 이 추가한 4 영역 중 일부는 still mock — `ide-activity-mock.ts`, `ide-conversation-rail-mock.ts`, `ide-interject-mock.ts`.
+2. **mock fragments**: mockup 이 추가한 4 영역 중 일부는 still mock — `ide-activity-mock.ts`, `ide-conversation-rail.ts`, `ide-interject.ts`.
 3. **producer wire-up gap**: RFC-0019/0020/0021 의 store contract 는 정의됐지만 producer-side handler / SSE 가 미작성.
 
 본 RFC 는 이 gap 을 5 sub-RFC (DS 0023–0026 + repo 0033) 로 분할하고, 각 sub-RFC 가 production PR sequence 로 어떻게 매핑되는지 우산으로 묶는다.

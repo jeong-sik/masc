@@ -8,7 +8,7 @@ import { pushTrace } from './keeper-trace-store'
  * new ones and return the updated set.
  *
  * Why a pure function (not a stateful subscription):
- *   - The owning component (`IdeConversationRailMock`) already has the
+ *   - The owning component (`IdeConversationRail`) already has the
  *     fetched `posts` array as a useState value. A pure mapper called
  *     from a `useEffect([posts])` is sufficient and trivially testable.
  *   - Avoids storing per-component state inside the trace store, which

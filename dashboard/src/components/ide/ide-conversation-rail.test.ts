@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
-import { IdeConversationRailMock, postsToAnchoredThreads, replayRailItems } from './ide-conversation-rail-mock'
+import { IdeConversationRail, postsToAnchoredThreads, replayRailItems } from './ide-conversation-rail'
 import { activeIdeFile, ideContextFocus } from './ide-state'
 import { clearTraces, keeperTraceState } from './keeper-trace-store'
 
@@ -41,10 +41,10 @@ afterEach(() => {
   clearTraces()
 })
 
-describe('IdeConversationRailMock', () => {
+describe('IdeConversationRail', () => {
   it('renders the conversation rail with empty state when no API data', () => {
     const container = document.createElement('div')
-    render(h(IdeConversationRailMock, {}), container)
+    render(h(IdeConversationRail, {}), container)
 
     const region = container.querySelector('[role="region"]')
     expect(region?.getAttribute('aria-label')).toBe('REACTION THREAD')
@@ -234,7 +234,7 @@ describe('IdeConversationRailMock', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const container = document.createElement('div')
-    render(h(IdeConversationRailMock, {}), container)
+    render(h(IdeConversationRail, {}), container)
 
     await waitFor(() => {
       expect(container.textContent).toContain('new thread body')
@@ -281,7 +281,7 @@ describe('IdeConversationRailMock', () => {
     }))
 
     const container = document.createElement('div')
-    render(h(IdeConversationRailMock, {}), container)
+    render(h(IdeConversationRail, {}), container)
 
     await waitFor(() => {
       expect(container.textContent).toContain('question fn:run about this line')

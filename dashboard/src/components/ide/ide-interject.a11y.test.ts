@@ -3,9 +3,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
 import { axe } from 'jest-axe'
-import { IdeInterjectMock } from './ide-interject-mock'
+import { IdeInterject } from './ide-interject'
 
-describe('IdeInterjectMock a11y', () => {
+describe('IdeInterject a11y', () => {
   let container: HTMLElement
 
   beforeEach(() => {
@@ -19,7 +19,7 @@ describe('IdeInterjectMock a11y', () => {
   })
 
   it('renders the interject input and action rail accessibly', async () => {
-    render(html`<${IdeInterjectMock} />`, container)
+    render(html`<${IdeInterject} />`, container)
     expect(await axe(container)).toHaveNoViolations()
   })
 })

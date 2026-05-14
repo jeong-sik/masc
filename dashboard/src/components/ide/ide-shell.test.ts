@@ -42,8 +42,8 @@ vi.mock('../../api/repositories', () => ({
   }])),
 }))
 
-vi.mock('./ide-conversation-rail-mock', () => ({
-  IdeConversationRailMock: () => null,
+vi.mock('./ide-conversation-rail', () => ({
+  IdeConversationRail: () => null,
 }))
 
 import { IdeShell } from './ide-shell'

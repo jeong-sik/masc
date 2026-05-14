@@ -1,12 +1,18 @@
 import { html } from 'htm/preact'
-import { useEffect, useMemo } from 'preact/hooks'
+import { useEffect, useMemo, useState } from 'preact/hooks'
 import { PanelRightClose, PanelRightOpen } from 'lucide-preact'
 import {
   createLayeredOverlay,
   type OverlayLayer,
 } from '../../../design-system/headless-core/layered-overlay'
 import { useLayeredOverlay } from '../../../design-system/headless-preact/use-layered-overlay'
+import { navigate } from '../../router'
 import { CommandBar, type CommandBarAction } from '../common/command-bar'
+import {
+  ideContextFocus,
+  type IdeContextFocus,
+  type IdeContextFocusRouteLink,
+} from './ide-state'
 
 // Phase 1 PR-3: IDE editor toolbar — view tabs + LAYERS toggle.
 // View tabs (SOURCE / SPLIT DIFF / UNIFIED / BLAME) are local UI state
@@ -70,10 +76,16 @@ export function IdeToolbar({
     return next
   }, [])
   const { active, isActive } = useLayeredOverlay(controller)
+  const [contextFocus, setContextFocus] = useState(ideContextFocus.value)
 
   useEffect(() => {
     controller.setActive(activeLayers)
   }, [controller, activeLayers])
+
+  useEffect(() => {
+    const unsub = ideContextFocus.subscribe(focus => setContextFocus(focus))
+    return () => unsub()
+  }, [])
 
   const handleLayerToggle = (kind: string) => {
     controller.toggle(kind)
@@ -117,6 +129,7 @@ export function IdeToolbar({
           handler: onFindOpen,
         }]
       : []),
+    ...contextCommandActions(contextFocus),
   ]
 
   return html`
@@ -150,13 +163,16 @@ export function IdeToolbar({
           >${tab.label}</button>
         `)}
       </div>
-      <${CommandBar}
-        actions=${commandActions}
-        placeholder="Run IDE command..."
-        testId="ide-command-bar"
-        className="min-w-0"
-        inputClassName="h-7 w-full rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 font-mono text-2xs text-[var(--color-fg-primary)] outline-none transition-colors placeholder:text-[var(--color-fg-disabled)] focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)]"
-      />
+      <div class="ide-toolbar-command-cluster">
+        <${CommandBar}
+          actions=${commandActions}
+          placeholder="Run IDE command..."
+          testId="ide-command-bar"
+          className="min-w-0"
+          inputClassName="h-7 w-full rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 font-mono text-2xs text-[var(--color-fg-primary)] outline-none transition-colors placeholder:text-[var(--color-fg-disabled)] focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)]"
+        />
+        <${ToolbarContextFocus} focus=${contextFocus} />
+      </div>
       ${onRailsToggle ? html`
         <button
           type="button"
@@ -222,4 +238,69 @@ export function IdeToolbar({
       </div>
     </div>
   `
+}
+
+function contextCommandActions(focus: IdeContextFocus | null): CommandBarAction[] {
+  if (!focus?.route_links || focus.route_links.length === 0) return []
+  return focus.route_links.map(link => ({
+    id: `context-${link.id}`,
+    title: `Open context: ${link.label}`,
+    keywords: [
+      'context focus route link',
+      focus.surface,
+      focus.label,
+      focus.keeper_id ?? '',
+      link.evidence,
+    ].join(' '),
+    handler: () => openToolbarContextRouteLink(link),
+  }))
+}
+
+function ToolbarContextFocus({
+  focus,
+}: {
+  readonly focus: IdeContextFocus | null
+}) {
+  if (!focus) return null
+  const lineLabel = focus.line !== undefined ? `L${focus.line}` : null
+  const routeLinks = focus.route_links ?? []
+  return html`
+    <div
+      class="ide-toolbar-context-focus"
+      data-testid="ide-toolbar-context-focus"
+      aria-label=${toolbarContextAriaLabel(focus)}
+      title=${`${focus.file_path}${focus.line !== undefined ? `:${focus.line}` : ''}`}
+    >
+      <span>${focus.surface}</span>
+      ${lineLabel ? html`<span>${lineLabel}</span>` : null}
+      <strong>${focus.label}</strong>
+      ${focus.keeper_id ? html`<span>keeper ${focus.keeper_id}</span>` : null}
+      ${routeLinks.length > 0 ? html`
+        <div class="ide-toolbar-context-links" aria-label="Current context route links">
+          ${routeLinks.map(link => html`
+            <button
+              key=${link.id}
+              type="button"
+              title=${link.evidence}
+              aria-label=${`Open ${link.evidence}`}
+              onClick=${() => openToolbarContextRouteLink(link)}
+            >${link.label}</button>
+          `)}
+        </div>
+      ` : null}
+    </div>
+  `
+}
+
+function openToolbarContextRouteLink(link: IdeContextFocusRouteLink): void {
+  navigate(link.tab, link.params)
+}
+
+function toolbarContextAriaLabel(focus: IdeContextFocus): string {
+  const line = focus.line !== undefined ? ` line ${focus.line}` : ''
+  const keeper = focus.keeper_id ? `, keeper ${focus.keeper_id}` : ''
+  const links = focus.route_links?.length
+    ? `, ${focus.route_links.length} route links`
+    : ''
+  return `Current IDE context: ${focus.surface}${line}, ${focus.label}${keeper}${links}`
 }

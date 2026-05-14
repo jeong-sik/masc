@@ -426,7 +426,7 @@ let record_usage_anomaly_metrics ~keeper_name ~model usage_trust =
 	           ~labels:
 	             [
 	               ("keeper_name", keeper_name);
-	               ("model", "runtime");
+	               ("model", runtime_lane_label);
 	               ("reason", reason);
 	             ]
            ())
@@ -535,11 +535,11 @@ let record_llm_tok_s_metrics
       t.prompt_per_second, t.predicted_per_second
     | _ -> None, None
   in
-  let provider_kind_label = "runtime" in
+  let provider_kind_label = runtime_lane_label in
   let _ = model in
-  let provider = "runtime" in
+  let provider = runtime_lane_label in
   let labels =
-    [ "model", "runtime"
+    [ "model", runtime_lane_label
     ; "provider", provider
     ; "provider_kind", provider_kind_label
     ]
@@ -564,7 +564,7 @@ let record_llm_inference_latency_metric
     ~(telemetry : Agent_sdk.Types.inference_telemetry option)
   : unit =
   let _ = model in
-  let labels = [("model", "runtime")] in
+  let labels = [("model", runtime_lane_label)] in
   Prometheus.inc_counter Prometheus.metric_after_turn_hook ~labels ();
   match telemetry with
   | Some t ->

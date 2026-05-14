@@ -20,13 +20,14 @@ export type CascadeInspectorFocus = 'deep-dive' | 'compare'
 type CascadeInspectorChip = 'trace' | CascadeInspectorFocus
 
 const CASCADE_INSPECTOR_FOCUSES: CascadeInspectorFocus[] = ['deep-dive', 'compare']
+const DEFAULT_CASCADE_CHIP: CascadeInspectorChip = 'trace'
 
 export function isCascadeInspectorFocus(v: string | undefined): v is CascadeInspectorFocus {
   return !!v && (CASCADE_INSPECTOR_FOCUSES as string[]).includes(v)
 }
 
 export function cascadeInspectorRouteParams(focus: CascadeInspectorChip): Record<string, string> {
-  return focus === 'trace'
+  return focus === DEFAULT_CASCADE_CHIP
     ? { section: 'runtime', view: 'inspector' }
     : { section: 'runtime', view: 'inspector', focus }
 }
@@ -144,12 +145,12 @@ function CascadeFocusRail({
   focus: CascadeInspectorFocus | null
   traceCount: number
 }) {
-  const active: CascadeInspectorChip = focus ?? 'trace'
+  const active: CascadeInspectorChip = focus ?? DEFAULT_CASCADE_CHIP
   return html`
     <div class="flex flex-col gap-2" aria-label="Cascade inspector focus" data-testid="cascade-focus-rail">
       <${FilterChips}
         chips=${[
-          { key: 'trace', label: 'Trace', count: traceCount, title: 'strategy trace와 runtime health' },
+          { key: DEFAULT_CASCADE_CHIP, label: 'Trace', count: traceCount, title: 'strategy trace와 runtime health' },
           { key: 'deep-dive', label: 'Deep dive', count: traceCount, title: 'latest cascade decision detail' },
           { key: 'compare', label: 'Compare', count: traceCount, title: 'ordered vs filtered/exhausted decisions' },
         ]}

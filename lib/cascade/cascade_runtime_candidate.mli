@@ -26,6 +26,12 @@ val local_runtime_label : string -> string
 val labels_require_runtime_mcp_header_sync : string list -> bool
 val unknown_runtime_label : string
 
+val provider_prefix_of_label : string -> string option
+val provider_prefix_of_label_result : string -> (string, string) result
+val provider_model_parts_result : string -> (string * string, string) result
+val model_id_of_label_result : string -> (string, string) result
+val canonical_provider_of_label : string -> string option
+
 val provider_label_of_runtime_label :
   ?provider_kind:Llm_provider.Provider_config.provider_kind -> string -> string
 

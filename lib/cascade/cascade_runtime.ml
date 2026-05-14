@@ -11,11 +11,7 @@ let default_registry = Llm_provider.Provider_registry.default ()
 module Runtime_binding = Agent_sdk.Provider_runtime_binding
 
 let provider_name_of_label (label : string) : string option =
-  match String.index_opt label ':' with
-  | None -> None
-  | Some idx ->
-      if idx = 0 then None
-      else Some (String.sub label 0 idx |> String.trim |> String.lowercase_ascii)
+  Cascade_model_label.provider_prefix_of_label label
 
 let trim_nonempty value =
   let trimmed = String.trim value in
@@ -319,11 +315,9 @@ let clamp_context_for_pure_local_labels ~(labels : string list) ~(max_context : 
   else max_context
 
 let model_id_of_label label =
-  match String.index_opt label ':' with
-  | None -> ""
-  | Some idx ->
-      if idx >= String.length label - 1 then ""
-      else String.sub label (idx + 1) (String.length label - idx - 1) |> String.trim
+  match Cascade_model_label.model_id_of_label_result label with
+  | Ok model_id -> model_id
+  | Error _ -> ""
 
 let resolve_primary_model_id (labels : string list) : string =
   let rec find = function

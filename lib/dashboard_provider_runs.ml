@@ -504,16 +504,14 @@ let is_label_runnable (label : string) : bool =
   match Cascade_config.parse_model_string label with
   | None -> false
   | Some _cfg ->
-      (* Extract provider prefix and check the OAS runtime binding. *)
-      match String.index_opt label ':' with
-      | None -> false
-      | Some idx -> (
-          let prefix = String.sub label 0 idx |> String.trim in
-          match find_runtime_binding_by_candidates [ prefix ] with
-          | None -> false
-          | Some binding ->
-              let detail = auth_detail_of_binding binding in
-              detail.available && detail.supports_run)
+    (match Cascade_model_label.provider_prefix_of_label_result label with
+     | Error _ -> false
+     | Ok prefix -> (
+       match find_runtime_binding_by_candidates [ prefix ] with
+       | None -> false
+       | Some binding ->
+         let detail = auth_detail_of_binding binding in
+         detail.available && detail.supports_run))
 
 let run_system_prompt provider =
   Printf.sprintf

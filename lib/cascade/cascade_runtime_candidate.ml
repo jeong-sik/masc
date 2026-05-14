@@ -97,12 +97,10 @@ let provider_label_of_provider_kind kind =
   | Some binding -> binding.Runtime_binding.id
   | None -> provider_name
 
-let provider_prefix_of_label label =
-  let normalized = String.trim label in
-  match String.index_opt normalized ':' with
-  | Some idx when idx > 0 ->
-      Some (String.sub normalized 0 idx |> String.trim |> String.lowercase_ascii)
-  | _ -> None
+let provider_prefix_of_label = Cascade_model_label.provider_prefix_of_label
+let provider_prefix_of_label_result = Cascade_model_label.provider_prefix_of_label_result
+let provider_model_parts_result = Cascade_model_label.provider_model_parts_result
+let model_id_of_label_result = Cascade_model_label.model_id_of_label_result
 
 let provider_label_of_explicit_prefix prefix =
   match runtime_binding_of_label prefix with
@@ -246,13 +244,11 @@ let is_structurally_unmetered_runtime_provider provider =
   | None -> false
 
 let canonical_provider_of_label label =
-  match String.index_opt label ':' with
-  | Some idx when idx > 0 ->
-      String.sub label 0 idx
-      |> String.trim
-      |> runtime_binding_of_label
-      |> Option.map (fun binding -> binding.Runtime_binding.id)
-  | _ -> runtime_binding_of_label label |> Option.map (fun binding -> binding.Runtime_binding.id)
+  match provider_prefix_of_label label with
+  | Some prefix ->
+    runtime_binding_of_label prefix |> Option.map (fun binding -> binding.Runtime_binding.id)
+  | None ->
+    runtime_binding_of_label label |> Option.map (fun binding -> binding.Runtime_binding.id)
 
 let runtime_label_for_active_id ~configured_labels ~active =
   let active = String.trim active in

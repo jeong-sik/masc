@@ -227,6 +227,25 @@ let test_default_model_provider_prefix_result () =
       | Error msg -> fail msg))
 ;;
 
+let test_runtime_model_label_parts_result () =
+  (match Candidate.provider_model_parts_result " GLM-CODING:glm-5.1 " with
+   | Ok (provider, model_id) ->
+     check string "provider normalized" "glm-coding" provider;
+     check string "model id preserved" "glm-5.1" model_id
+   | Error msg -> fail msg);
+  (match Candidate.model_id_of_label_result "kimi:kimi-k2.5" with
+   | Ok model_id -> check string "model id" "kimi-k2.5" model_id
+   | Error msg -> fail msg);
+  (match Candidate.provider_model_parts_result "glm-coding:" with
+   | Ok _ -> fail "empty model id should fail closed"
+   | Error _ -> ());
+  check
+    (option string)
+    "canonical runtime from provider:model label"
+    (Some "glm-coding")
+    (Candidate.canonical_provider_of_label "glm-coding:glm-5.1")
+;;
+
 let test_default_model_override_label_result () =
   with_env "MASC_DEFAULT_PROVIDER" (Some "gemini") (fun () ->
     with_env "MASC_DEFAULT_MODEL" (Some "gemini-3.1-pro-preview") (fun () ->
@@ -872,6 +891,10 @@ let () =
             "default provider prefix"
             `Quick
             test_default_model_provider_prefix_result
+        ; test_case
+            "runtime model label parts"
+            `Quick
+            test_runtime_model_label_parts_result
         ; test_case
             "default override label"
             `Quick

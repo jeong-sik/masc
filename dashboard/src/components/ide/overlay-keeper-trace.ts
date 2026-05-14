@@ -1,10 +1,12 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import {
+  filterTraceEventsByReplay,
   KeeperTraceEvent,
   KeeperTraceSource,
   keeperTraceState,
 } from './keeper-trace-store'
+import { ideReplayUntilMs } from './ide-replay-state'
 import {
   openIdeContextRouteLink,
   routeLinksForContext,
@@ -133,6 +135,12 @@ function useTraceEvents(): ReadonlyArray<KeeperTraceEvent> {
   return snapshot.events
 }
 
+function useReplayUntilMs(): number | null {
+  const [untilMs, setUntilMs] = useState(ideReplayUntilMs.value)
+  useEffect(() => ideReplayUntilMs.subscribe(value => setUntilMs(value)), [])
+  return untilMs
+}
+
 const OVERLAY_CONTAINER_STYLE = {
   display: 'grid',
   gap: 'var(--sp-1)',
@@ -196,11 +204,13 @@ function formatTooltip(event: KeeperTraceEvent): string {
 
 export function OverlayKeeperTrace({ active, keeperFilter }: OverlayKeeperTraceProps) {
   const events = useTraceEvents()
+  const replayUntilMs = useReplayUntilMs()
   if (!active) return null
 
+  const replayFiltered = filterTraceEventsByReplay(events, replayUntilMs)
   const filtered = keeperFilter
-    ? events.filter(e => e.keeperName === keeperFilter)
-    : events
+    ? replayFiltered.filter(e => e.keeperName === keeperFilter)
+    : replayFiltered
   if (filtered.length === 0) return null
 
   const buckets = bucketTraceEvents(filtered)

@@ -171,6 +171,14 @@ export function tracesBySource(source: KeeperTraceSource): ReadonlyArray<KeeperT
   return keeperTraceState.value.events.filter(e => e.source === source)
 }
 
+export function filterTraceEventsByReplay<T extends { readonly tsMs: number }>(
+  events: ReadonlyArray<T>,
+  untilMs: number | null,
+): ReadonlyArray<T> {
+  if (untilMs === null || !Number.isFinite(untilMs)) return events
+  return events.filter(event => Number.isFinite(event.tsMs) && event.tsMs <= untilMs)
+}
+
 function replaceAt(
   arr: ReadonlyArray<KeeperTraceEvent>,
   idx: number,

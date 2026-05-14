@@ -10,6 +10,7 @@ import { ideConversationThreadSnapshot } from './ide-context-bridge'
 import { lspDiagnosticSnapshot } from './ide-lsp-client'
 import { cursorOverlaySignal } from './keeper-cursor-overlay'
 import { clearTraces, pushTrace } from './keeper-trace-store'
+import { setIdeReplayUntilMs } from './ide-replay-state'
 
 describe('IdeEditor', () => {
   let container: HTMLDivElement
@@ -18,12 +19,14 @@ describe('IdeEditor', () => {
     container = document.createElement('div')
     activeIdeFile.value = 'package.json'
     ideContextFocus.value = null
+    setIdeReplayUntilMs(null)
     clearTraces()
   })
 
   afterEach(() => {
     render(null, container)
     ideContextFocus.value = null
+    setIdeReplayUntilMs(null)
     clearTraces()
     lspDiagnosticSnapshot.value = new Map()
     ideConversationThreadSnapshot.value = { filePath: '', threads: [] }
@@ -215,6 +218,50 @@ describe('IdeEditor', () => {
       expect(container.querySelector('.cm-trace-dot')?.getAttribute('aria-label'))
         .toBe('thread scholar')
     })
+    expect(container.querySelectorAll('.cm-trace-dot')).toHaveLength(1)
+  })
+
+  it('filters keeper trace gutter dots through the shared replay cursor', async () => {
+    const documentStore = createCodeDocumentStore({
+      file_path: 'runtime.ts',
+      language: 'typescript',
+      content: 'const oldTrace = 1\nconst replayTrace = oldTrace + 1\n',
+    })
+    const ownershipStore = createKeeperLineOwnershipStore('runtime.ts')
+    pushTrace({
+      id: 'thread-old',
+      tsMs: 1000,
+      keeperName: 'scholar',
+      source: 'anchored-thread',
+      threadId: 'thread-old',
+      filePath: 'runtime.ts',
+      line: 2,
+    })
+    pushTrace({
+      id: 'thread-future',
+      tsMs: 3000,
+      keeperName: 'moth',
+      source: 'anchored-thread',
+      threadId: 'thread-future',
+      filePath: 'runtime.ts',
+      line: 1,
+    })
+    setIdeReplayUntilMs(1500)
+
+    render(
+      h(IdeEditor, {
+        documentStore,
+        ownershipStore,
+        diffRows: () => [],
+        activeLayers: new Set(['keeper-trace']),
+      }),
+      container,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('button.cm-trace-stack[data-line="2"]')).not.toBeNull()
+    })
+    expect(container.querySelector('button.cm-trace-stack[data-line="1"]')).toBeNull()
     expect(container.querySelectorAll('.cm-trace-dot')).toHaveLength(1)
   })
 

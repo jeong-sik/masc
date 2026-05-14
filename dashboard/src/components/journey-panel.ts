@@ -1,474 +1,180 @@
 import { html } from 'htm/preact'
-import { useSignal } from '@preact/signals'
+import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
 
-import { missionSnapshot } from '../mission-store'
-import { journal } from '../sse'
 import {
-  executionContinuityBriefs,
-  executionQueue,
-  executionSessionBriefs,
-  executionWorkerSupportBriefs,
-  keepers,
-  tasks,
-} from '../store'
-import type {
-  DashboardExecutionContinuityBrief,
-  DashboardExecutionQueueItem,
-  DashboardExecutionSessionBrief,
-  DashboardExecutionWorkerSupportBrief,
-  JournalEntry,
-  Keeper,
-  Task,
-} from '../types'
-import { formatPct, formatTokens } from '../lib/format-number'
-import { trimText, truncate } from '../lib/truncate'
+  fetchKeeperToolCalls,
+  fetchKeeperTrajectory,
+  type ToolCallsResponse,
+  type TrajectoryResponse,
+} from '../api/dashboard'
+import {
+  fetchKeeperRuntimeTrace,
+  type KeeperRuntimeTraceResponse,
+} from '../api/keeper'
+import { formatCost } from '../lib/format-number'
+import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
+import { keepers } from '../store'
+import type { Keeper } from '../types'
+import { ActionButton } from './common/button'
 import { Card } from './common/card'
-import { Drawer } from './common/drawer'
-import { EmptyState } from './common/empty-state'
-import { TextInput } from './common/input'
-import { RouteLink } from './common/route-link'
+import { EmptyState, ErrorState, LoadingState } from './common/feedback-state'
+import { Select } from './common/select'
 import { StatusChip, keeperStateTone } from './common/status-chip'
-import { Table, type TableColumn } from './common/table'
 import { TimeAgo } from './common/time-ago'
-import { formatTimeAgoEn } from '../lib/format-time'
-import { keeperActivityDisplay } from '../lib/keeper-runtime-display'
+import {
+  buildJourneyWaterfall,
+  selectDefaultJourneyKeeper,
+  type JourneyWaterfallEntry,
+  type JourneyWaterfallModel,
+  type JourneyWaterfallRuntimeEvidence,
+  type JourneyWaterfallTurn,
+} from './journey-waterfall-state'
+import {
+  durationColor,
+  formatArgs,
+  formatDuration,
+  normalizeToolName,
+  toolCategory,
+} from './tool-call-shared'
 
-type JourneyMissionSession = {
-  session_id: string
-  goal: string
-  member_names: string[]
-  communication_summary?: string | null
-  last_event_at?: string | null
-  last_event_summary?: string | null
-  operation_badges?: Array<{ operation_id: string }>
-  keeper_refs?: Array<{ name: string; agent_name?: string | null }>
+interface WaterfallLoadResult {
+  model: JourneyWaterfallModel
+  sourceErrors: string[]
+  fetchedAtMs: number
 }
 
-type JourneyLifeEntry = {
-  id: string
-  source: 'journal' | 'session' | 'handoff'
-  text: string
-  timestamp: string | number | null
-}
+type SettledSource<T> =
+  | { ok: true; data: T }
+  | { ok: false; label: string; error: string }
 
-interface JourneyRecord {
-  key: string
-  kind: 'task' | 'keeper'
-  title: string
-  subtitle: string | null
-  task: Task | null
-  keeper: Keeper | null
-  continuity: DashboardExecutionContinuityBrief | null
-  worker: DashboardExecutionWorkerSupportBrief | null
-  executionSession: DashboardExecutionSessionBrief | null
-  missionSession: JourneyMissionSession | null
-  sessionId: string | null
-  operationId: string | null
-  workerRunId: string | null
-  life: JourneyLifeEntry[]
-}
-
-interface JourneyBuildInput {
-  tasks: Task[]
-  keepers: Keeper[]
-  executionSessions: DashboardExecutionSessionBrief[]
-  continuityBriefs: DashboardExecutionContinuityBrief[]
-  workerBriefs: DashboardExecutionWorkerSupportBrief[]
-  missionSessions: JourneyMissionSession[]
-  journalEntries: JournalEntry[]
-}
-
-const ACTIVE_TASK_STATUSES = new Set(['todo', 'claimed', 'in_progress', 'awaiting_verification'])
-
-function taskStatusRank(status?: string | null): number {
-  switch (status) {
-    case 'in_progress': return 0
-    case 'claimed': return 1
-    case 'awaiting_verification': return 2
-    case 'todo': return 3
-    case 'done': return 4
-    case 'cancelled': return 5
-    default: return 6
-  }
-}
-
-function parseTimestamp(value?: string | number | null): number {
-  if (typeof value === 'number') {
-    return value < 1_000_000_000_000 ? value * 1000 : value
-  }
-  if (!value) return 0
-  const parsed = Date.parse(value)
-  return Number.isNaN(parsed) ? 0 : parsed
-}
-
-function priorityRank(priority?: number): number {
-  if (typeof priority !== 'number' || !Number.isFinite(priority)) return 999
-  return priority
-}
-
-function normalizeText(value?: string | null): string | null {
-  const normalized = (value ?? '').trim()
-  return normalized === '' ? null : normalized
-}
-
-function formatAgeSeconds(seconds?: number | null): string {
-  if (seconds == null || !Number.isFinite(seconds)) return 'not recorded'
-  if (seconds < 60) return `${Math.round(seconds)}s ago`
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`
-  if (seconds < 86_400) return `${Math.round(seconds / 3600)}h ago`
-  return `${Math.round(seconds / 86_400)}d ago`
-}
-
-function formatJourneyTimestamp(value: string | number): string {
-  const ms = typeof value === 'number'
-    ? (value < 1_000_000_000_000 ? value * 1000 : value)
-    : new Date(value).getTime()
-  if (!Number.isFinite(ms)) return 'unknown'
-  return formatTimeAgoEn(new Date(ms).toISOString())
-}
-
-function taskStatusLabel(status: string): string {
-  switch (status) {
-    case 'awaiting_verification':
-      return 'verification pending'
-    case 'in_progress':
-      return 'in progress'
-    case 'claimed':
-      return 'claimed'
-    case 'todo':
-      return 'todo'
-    case 'done':
-      return 'done'
-    case 'cancelled':
-      return 'cancelled'
-    default:
-      return status.replace(/_/g, ' ')
-  }
-}
-
-function pipelineTone(stage?: string | null): string {
-  switch (stage) {
-    case 'thinking':
-    case 'tool_use':
-    case 'scheduled_autonomous':
-      return 'info'
-    case 'compacting':
-    case 'handoff':
-    case 'draining':
-      return 'warn'
-    case 'failing':
-    case 'crashed':
-      return 'bad'
-    case 'paused':
-      return 'paused'
-    case 'offline':
-    case 'restarting':
-      return 'neutral'
-    default:
-      return 'neutral'
-  }
-}
-
-function shouldShowStandaloneKeeper(keeper: Keeper): boolean {
-  const status = (keeper.status ?? '').trim().toLowerCase()
-  const activity = keeperActivityDisplay(keeper, keeper.agent?.last_seen)
-  if (keeper.keepalive_running === true) return true
-  if (activity.source !== 'none') return true
-  if (keeper.pipeline_stage && keeper.pipeline_stage !== 'offline') return true
-  return !['offline', 'inactive', 'stopped', 'dead'].includes(status)
-}
-
-function findKeeperForTask(task: Task, keeperList: Keeper[]): Keeper | null {
-  const assignee = normalizeText(task.assignee)
-  if (!assignee) return null
-  return keeperList.find((keeper) =>
-    keeper.name === assignee || keeper.agent_name === assignee,
-  ) ?? null
-}
-
-function findContinuityForActor(
-  actorName: string | null,
-  keeper: Keeper | null,
-  briefs: DashboardExecutionContinuityBrief[],
-): DashboardExecutionContinuityBrief | null {
-  if (!actorName && !keeper) return null
-  return briefs.find((brief) => {
-    if (keeper && (brief.name === keeper.name || brief.agent_name === keeper.agent_name)) return true
-    return actorName != null && (brief.name === actorName || brief.agent_name === actorName)
-  }) ?? null
-}
-
-function findWorkerForActor(
-  actorName: string | null,
-  keeper: Keeper | null,
-  briefs: DashboardExecutionWorkerSupportBrief[],
-): DashboardExecutionWorkerSupportBrief | null {
-  if (!actorName && !keeper) return null
-  return briefs.find((brief) => {
-    if (keeper && brief.name === keeper.name) return true
-    return actorName != null && (brief.name === actorName || brief.agent_name === actorName)
-  }) ?? null
-}
-
-function findMissionSessionForContext(
-  task: Task | null,
-  actorName: string | null,
-  keeper: Keeper | null,
-  missionSessions: JourneyMissionSession[],
-): JourneyMissionSession | null {
-  const taskSessionId = normalizeText(task?.execution_links?.session_id)
-  if (taskSessionId) {
-    return missionSessions.find((session) => session.session_id === taskSessionId) ?? null
-  }
-  return missionSessions.find((session) => {
-    if (actorName && session.member_names.includes(actorName)) return true
-    return session.keeper_refs?.some((ref) => {
-      if (keeper && ref.name === keeper.name) return true
-      return actorName != null && ref.agent_name === actorName
-    }) ?? false
-  }) ?? null
-}
-
-function collectLifeEntries(
-  task: Task | null,
-  actorName: string | null,
-  keeper: Keeper | null,
-  sessionId: string | null,
-  operationId: string | null,
-  missionSession: JourneyMissionSession | null,
-  journalEntries: JournalEntry[],
-): JourneyLifeEntry[] {
-  const related = journalEntries
-    .filter((entry) => {
-      if (sessionId && entry.sessionId === sessionId) return true
-      if (operationId && entry.operationId === operationId) return true
-      if (actorName && entry.agent === actorName) return true
-      if (keeper && entry.agent === keeper.name) return true
-      if (task && entry.text.includes(task.id)) return true
-      return false
-    })
-    .map((entry) => ({
-      id: `journal:${entry.timestamp}:${entry.agent}:${entry.text}`,
-      source: 'journal' as const,
-      text: trimText(entry.narrativeText ?? entry.text, 120) ?? entry.text,
-      timestamp: entry.timestamp,
-    }))
-
-  const derived: JourneyLifeEntry[] = []
-  const handoffText = trimText(task?.handoff_context?.summary, 120)
-  if (handoffText) {
-    derived.push({
-      id: `handoff:${task?.id ?? 'keeper'}`,
-      source: 'handoff',
-      text: handoffText,
-      timestamp: task?.handoff_context?.updated_at ?? task?.updated_at ?? null,
-    })
-  }
-  const sessionSummary = trimText(
-    missionSession?.last_event_summary ?? missionSession?.communication_summary,
-    120,
-  )
-  if (sessionSummary) {
-    derived.push({
-      id: `session:${missionSession?.session_id ?? 'unknown'}`,
-      source: 'session',
-      text: sessionSummary,
-      timestamp: missionSession?.last_event_at ?? null,
-    })
-  }
-
-  const merged = [...related, ...derived]
-    .filter((entry, index, all) =>
-      all.findIndex((candidate) => candidate.source === entry.source && candidate.text === entry.text) === index,
-    )
-    .sort((left, right) => parseTimestamp(right.timestamp) - parseTimestamp(left.timestamp))
-
-  return merged.slice(0, 3)
-}
-
-function buildJourneyRecords(input: JourneyBuildInput): JourneyRecord[] {
-  const activeTasks = input.tasks
-    .filter((task) => ACTIVE_TASK_STATUSES.has(task.status ?? 'todo'))
-    .slice()
-    .sort((left, right) => {
-      const statusDelta = taskStatusRank(left.status) - taskStatusRank(right.status)
-      if (statusDelta !== 0) return statusDelta
-      const priorityDelta = priorityRank(left.priority) - priorityRank(right.priority)
-      if (priorityDelta !== 0) return priorityDelta
-      return parseTimestamp(right.updated_at ?? right.created_at ?? null)
-        - parseTimestamp(left.updated_at ?? left.created_at ?? null)
-    })
-
-  const taskRecords = activeTasks.map((task): JourneyRecord => {
-    const keeper = findKeeperForTask(task, input.keepers)
-    const actorName = normalizeText(task.assignee)
-    const continuity = findContinuityForActor(actorName, keeper, input.continuityBriefs)
-    const worker = findWorkerForActor(actorName, keeper, input.workerBriefs)
-    const missionSession = findMissionSessionForContext(task, actorName, keeper, input.missionSessions)
-    const sessionId =
-      normalizeText(task.execution_links?.session_id)
-      ?? normalizeText(task.contract?.links?.session_id)
-      ?? normalizeText(worker?.related_session_id)
-      ?? normalizeText(continuity?.related_session_id)
-      ?? normalizeText(missionSession?.session_id)
-      ?? null
-    const executionSession = sessionId
-      ? input.executionSessions.find((session) => session.session_id === sessionId) ?? null
-      : null
-    const life = collectLifeEntries(
-      task,
-      actorName,
-      keeper,
-      sessionId,
-      normalizeText(task.execution_links?.operation_id)
-        ?? normalizeText(task.contract?.links?.operation_id)
-        ?? normalizeText(worker?.related_operation_id)
-        ?? normalizeText(executionSession?.linked_operation_id)
-        ?? normalizeText(missionSession?.operation_badges?.[0]?.operation_id)
-        ?? null,
-      missionSession,
-      input.journalEntries,
-    )
-    const workerRunId = life.find((entry) => entry.source === 'journal')
-      ? input.journalEntries.find((entry) => {
-          if (sessionId && entry.sessionId === sessionId && entry.workerRunId) return true
-          if (actorName && entry.agent === actorName && entry.workerRunId) return true
-          return false
-        })?.workerRunId ?? null
-      : null
-
+async function settleSource<T>(
+  label: string,
+  promise: Promise<T>,
+): Promise<SettledSource<T>> {
+  try {
+    return { ok: true, data: await promise }
+  } catch (err) {
     return {
-      key: `task:${task.id}`,
-      kind: 'task',
-      title: task.title,
-      subtitle:
-        trimText(task.description, 120)
-        ?? trimText(missionSession?.goal, 120)
-        ?? trimText(task.handoff_context?.summary, 120)
-        ?? null,
-      task,
-      keeper,
-      continuity,
-      worker,
-      executionSession,
-      missionSession,
-      sessionId,
-      operationId:
-        normalizeText(task.execution_links?.operation_id)
-        ?? normalizeText(task.contract?.links?.operation_id)
-        ?? normalizeText(worker?.related_operation_id)
-        ?? normalizeText(executionSession?.linked_operation_id)
-        ?? normalizeText(missionSession?.operation_badges?.[0]?.operation_id)
-        ?? null,
-      workerRunId: normalizeText(workerRunId),
-      life,
+      ok: false,
+      label,
+      error: err instanceof Error ? err.message : String(err),
     }
-  })
+  }
+}
 
-  const usedKeeperNames = new Set(
-    taskRecords.flatMap((record) => {
-      if (!record.keeper) return []
-      return [record.keeper.name, record.keeper.agent_name].filter((value): value is string => Boolean(value))
+async function fetchWaterfallSources(
+  keeperName: string,
+  signal: AbortSignal,
+): Promise<WaterfallLoadResult> {
+  const [trajectory, toolCalls, runtimeTrace] = await Promise.all([
+    settleSource<TrajectoryResponse>(
+      'trajectory',
+      fetchKeeperTrajectory(keeperName, 200, true, true),
+    ),
+    settleSource<ToolCallsResponse>(
+      'tool-calls',
+      fetchKeeperToolCalls(keeperName, 200, { signal }),
+    ),
+    settleSource<KeeperRuntimeTraceResponse>(
+      'runtime-trace',
+      fetchKeeperRuntimeTrace(keeperName, { limit: 200, signal }),
+    ),
+  ])
+
+  const sourceErrors = [trajectory, toolCalls, runtimeTrace]
+    .filter((result): result is Extract<SettledSource<unknown>, { ok: false }> => !result.ok)
+    .map(result => `${result.label}: ${result.error}`)
+
+  const hasAnySource = trajectory.ok || toolCalls.ok || runtimeTrace.ok
+  if (!hasAnySource) {
+    throw new Error(sourceErrors.join(' | ') || 'waterfall sources unavailable')
+  }
+
+  return {
+    model: buildJourneyWaterfall({
+      keeper: keeperName,
+      trajectory: trajectory.ok ? trajectory.data : null,
+      toolCalls: toolCalls.ok ? toolCalls.data : null,
+      runtimeTrace: runtimeTrace.ok ? runtimeTrace.data : null,
     }),
-  )
+    sourceErrors,
+    fetchedAtMs: Date.now(),
+  }
+}
 
-  const standaloneKeepers = input.keepers
-    .filter((keeper) => !usedKeeperNames.has(keeper.name) && !usedKeeperNames.has(keeper.agent_name ?? ''))
-    .filter(shouldShowStandaloneKeeper)
+function keeperOptions(rows: Keeper[]): Array<{ value: string; label: string }> {
+  return rows
+    .filter(row => row.name.trim() !== '')
     .slice()
-    .sort((left, right) => {
-      const leftAge = keeperActivityDisplay(left, left.agent?.last_seen).ageSeconds ?? Number.POSITIVE_INFINITY
-      const rightAge = keeperActivityDisplay(right, right.agent?.last_seen).ageSeconds ?? Number.POSITIVE_INFINITY
-      return leftAge - rightAge
-    })
-
-  const keeperRecords = standaloneKeepers.map((keeper): JourneyRecord => {
-    const actorName = normalizeText(keeper.agent_name) ?? keeper.name
-    const continuity = findContinuityForActor(actorName, keeper, input.continuityBriefs)
-    const worker = findWorkerForActor(actorName, keeper, input.workerBriefs)
-    const missionSession = findMissionSessionForContext(null, actorName, keeper, input.missionSessions)
-    const sessionId =
-      normalizeText(worker?.related_session_id)
-      ?? normalizeText(continuity?.related_session_id)
-      ?? normalizeText(missionSession?.session_id)
-      ?? null
-    const executionSession = sessionId
-      ? input.executionSessions.find((session) => session.session_id === sessionId) ?? null
-      : null
-    const operationId =
-      normalizeText(worker?.related_operation_id)
-      ?? normalizeText(executionSession?.linked_operation_id)
-      ?? normalizeText(missionSession?.operation_badges?.[0]?.operation_id)
-      ?? null
-    const life = collectLifeEntries(
-      null,
-      actorName,
-      keeper,
-      sessionId,
-      operationId,
-      missionSession,
-      input.journalEntries,
-    )
-
-    return {
-      key: `keeper:${keeper.name}`,
-      kind: 'keeper',
-      title: keeper.name,
-      subtitle:
-        trimText(continuity?.continuity_summary, 120)
-        ?? trimText(continuity?.skill_route_summary, 120)
-        ?? trimText(worker?.note, 120)
-        ?? null,
-      task: null,
-      keeper,
-      continuity,
-      worker,
-      executionSession,
-      missionSession,
-      sessionId,
-      operationId,
-      workerRunId:
-        input.journalEntries.find((entry) =>
-          ((sessionId && entry.sessionId === sessionId) || entry.agent === keeper.name) && entry.workerRunId,
-        )?.workerRunId ?? null,
-      life,
-    }
-  })
-
-  return [...taskRecords, ...keeperRecords]
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map(row => ({
+      value: row.name,
+      label: row.agent_name && row.agent_name !== row.name
+        ? `${row.name} (${row.agent_name})`
+        : row.name,
+    }))
 }
 
-function filterJourneyRecords(
-  records: readonly JourneyRecord[],
-  query: string,
-): readonly JourneyRecord[] {
-  const needle = query.trim().toLowerCase()
-  if (needle === '') return records
-  return records.filter((record) => {
-    const haystack = [
-      record.title,
-      record.subtitle,
-      record.task?.id,
-      record.task?.assignee,
-      record.task?.status,
-      record.keeper?.name,
-      record.keeper?.agent_name,
-      record.keeper?.cascade_name,
-      record.continuity?.skill_reason,
-      record.worker?.focus,
-      record.sessionId,
-      record.operationId,
-      record.workerRunId,
-      ...record.life.map((entry) => entry.text),
-    ]
-      .filter((value): value is string => typeof value === 'string' && value.trim() !== '')
-      .map((value) => value.toLowerCase())
-
-    return haystack.some((value) => value.includes(needle))
-  })
+function keeperByName(rows: readonly Keeper[], name: string | null): Keeper | null {
+  if (!name) return null
+  return rows.find(row => row.name === name) ?? null
 }
 
-function MetricChip({
+function formatTimestamp(ms: number | null): string {
+  if (ms == null || !Number.isFinite(ms)) return 'not recorded'
+  return new Date(ms).toISOString()
+}
+
+function formatMaybeDuration(ms: number | null): string {
+  return typeof ms === 'number' && Number.isFinite(ms) && ms > 0
+    ? formatDuration(ms)
+    : 'not recorded'
+}
+
+function runtimeTone(evidence: JourneyWaterfallRuntimeEvidence | null): string {
+  const health = evidence?.health.toLowerCase() ?? ''
+  if (health === 'ok' || health === 'healthy') return 'ok'
+  if (health === 'stale' || health === 'partial' || health === 'warning') return 'warn'
+  if (health === 'missing' || health === 'error' || health.includes('gap')) return 'bad'
+  return evidence ? 'neutral' : 'muted'
+}
+
+function statusTone(entry: JourneyWaterfallEntry): string {
+  switch (entry.status) {
+    case 'success':
+      return 'ok'
+    case 'failure':
+      return 'bad'
+    case 'gate_rejected':
+      return 'warn'
+    case 'unknown':
+    default:
+      return 'neutral'
+  }
+}
+
+function turnTone(turn: JourneyWaterfallTurn): string {
+  if (turn.failureCount > 0) return 'bad'
+  if (turn.gateRejectedCount > 0) return 'warn'
+  if (turn.toolCallCount > 0) return 'ok'
+  return 'neutral'
+}
+
+function sourceLabel(entry: JourneyWaterfallEntry): string {
+  switch (entry.source) {
+    case 'trajectory+tool_call_log':
+      return 'trajectory + I/O'
+    case 'tool_call_log':
+      return 'tool log'
+    case 'trajectory':
+      return 'trajectory'
+    case 'unknown':
+    default:
+      return 'unknown'
+  }
+}
+
+function MetricCell({
   label,
   value,
   tone = 'neutral',
@@ -479,527 +185,350 @@ function MetricChip({
 }) {
   return html`
     <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
-      <div class="text-3xs uppercase tracking-3 text-[var(--color-fg-disabled)]">${label}</div>
-      <div class="mt-1 flex items-center gap-2 text-sm font-semibold text-[var(--color-fg-secondary)]">
+      <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">${label}</div>
+      <div class="mt-1">
         <${StatusChip} tone=${tone} uppercase=${false}>${value}<//>
       </div>
     </div>
   `
 }
 
-function JourneyTile({
-  label,
-  class: cx,
-  children,
-}: {
-  label: string
-  class?: string
-  children: preact.ComponentChildren
-}) {
+function SourceWarning({ errors }: { errors: string[] }) {
+  if (errors.length === 0) return null
   return html`
-    <section class="rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 flex flex-col gap-3 min-h-[132px] ${cx ?? ''}" aria-label=${label}>
-      <div class="font-mono text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">${label}</div>
-      <div class="flex flex-col gap-2 text-sm text-[var(--color-fg-primary)]">
-        ${children}
+    <div class="rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-xs text-[var(--color-status-warn)]">
+      ${errors.map(error => html`<div class="break-all font-mono">${error}</div>`)}
+    </div>
+  `
+}
+
+function RuntimeEvidenceStrip({
+  evidence,
+}: {
+  evidence: JourneyWaterfallRuntimeEvidence | null
+}) {
+  if (!evidence) {
+    return html`
+      <div class="text-2xs text-[var(--color-fg-muted)]">
+        Runtime trace not recorded for this turn.
+      </div>
+    `
+  }
+
+  const provider = evidence.providerTerminalExceptionKind
+    ? `${evidence.providerTerminalStatus ?? 'unknown'} / ${evidence.providerTerminalExceptionKind}`
+    : evidence.providerTerminalStatus ?? 'unknown'
+
+  return html`
+    <div class="flex flex-wrap gap-1.5 text-3xs">
+      <${StatusChip} tone=${runtimeTone(evidence)} uppercase=${false}>runtime ${evidence.health}<//>
+      <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 py-0.5 font-mono text-[var(--color-fg-muted)]">
+        OAS turns ${evidence.maxOasTurnCount ?? 'not recorded'}
+      </span>
+      <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 py-0.5 font-mono text-[var(--color-fg-muted)]">
+        provider ${provider}
+      </span>
+      <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 py-0.5 font-mono text-[var(--color-fg-muted)]">
+        attempts ${evidence.providerAttemptStartedCount}/${evidence.providerAttemptFinishedCount}
+      </span>
+      <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 py-0.5 font-mono text-[var(--color-fg-muted)]">
+        ctx ${evidence.contextCompactedCount}/${evidence.contextCompactStartedCount}
+      </span>
+      <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 py-0.5 font-mono text-[var(--color-fg-muted)]">
+        mem ${evidence.memoryInjectedCount}/${evidence.memoryFlushedCount}
+      </span>
+    </div>
+  `
+}
+
+function WaterfallEntryRow({
+  entry,
+  maxDurationMs,
+}: {
+  entry: JourneyWaterfallEntry
+  maxDurationMs: number
+}) {
+  const isTool = entry.kind === 'tool_call'
+  const style = toolCategory(entry.toolName ?? entry.summary)
+  const widthPct = entry.durationMs && maxDurationMs > 0
+    ? Math.max(8, Math.min(100, Math.round((entry.durationMs / maxDurationMs) * 100)))
+    : 8
+  const status = entry.status === 'gate_rejected'
+    ? 'gate rejected'
+    : entry.status
+  const resultPreview = entry.error ?? entry.toolResult ?? entry.thinkingContent ?? ''
+
+  return html`
+    <div class="grid gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2" data-testid="journey-waterfall-entry">
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="inline-flex h-5 min-w-5 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] px-1 font-mono text-3xs ${isTool ? style.color : 'text-[var(--color-info-fg)]'}">
+          ${isTool ? style.icon : 'TH'}
+        </span>
+        <span class="min-w-0 flex-1 truncate text-sm font-medium text-[var(--color-fg-secondary)]">
+          ${isTool ? normalizeToolName(entry.toolName ?? entry.summary) : 'thinking'}
+        </span>
+        <${StatusChip} tone=${statusTone(entry)} uppercase=${false}>${status}<//>
+        <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-muted)]">
+          ${sourceLabel(entry)}
+        </span>
+        ${entry.round != null
+          ? html`<span class="font-mono text-3xs text-[var(--color-fg-disabled)]">round ${entry.round}</span>`
+          : null}
+      </div>
+
+      ${isTool
+        ? html`
+            <div class="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2">
+              <div class="h-2 overflow-hidden rounded-[var(--r-0)] bg-[var(--color-bg-hover)]">
+                <div
+                  class="h-full rounded-[var(--r-0)] bg-[var(--color-accent-fg)]"
+                  style="width: ${widthPct}%"
+                  aria-hidden="true"
+                />
+              </div>
+              <span class="font-mono text-3xs ${entry.durationMs != null ? durationColor(entry.durationMs) : 'text-[var(--color-fg-disabled)]'}">
+                ${formatMaybeDuration(entry.durationMs)}
+              </span>
+              <span class="font-mono text-3xs text-[var(--color-fg-muted)]">${formatCost(entry.costUsd, '$0')}</span>
+            </div>
+            ${entry.toolArgs
+              ? html`<div class="truncate font-mono text-3xs text-[var(--color-fg-muted)]">${formatArgs(entry.toolArgs)}</div>`
+              : null}
+          `
+        : html`
+            <div class="text-xs leading-relaxed text-[var(--color-fg-muted)]">
+              ${entry.thinkingRedacted ? 'Thinking content redacted.' : entry.thinkingContent ?? 'No thinking text recorded.'}
+            </div>
+          `}
+
+      ${entry.gateReason
+        ? html`<div class="text-xs text-[var(--color-status-warn)]">gate: ${entry.gateReason}</div>`
+        : null}
+
+      ${resultPreview && isTool
+        ? html`
+            <details class="text-xs text-[var(--color-fg-muted)]">
+              <summary class="cursor-pointer text-2xs text-[var(--color-fg-disabled)]">details</summary>
+              <pre class="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] p-2 font-mono text-3xs">${resultPreview}</pre>
+            </details>
+          `
+        : null}
+    </div>
+  `
+}
+
+function WaterfallTurnRow({
+  turn,
+  maxDurationMs,
+}: {
+  turn: JourneyWaterfallTurn
+  maxDurationMs: number
+}) {
+  const tone = turnTone(turn)
+
+  return html`
+    <section class="grid gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-3" data-testid="journey-waterfall-turn">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <h3 class="m-0 text-base font-semibold tracking-normal text-[var(--color-fg-secondary)]">${turn.label}</h3>
+            <${StatusChip} tone=${tone} uppercase=${false}>${turn.entries.length} events<//>
+          </div>
+          <div class="mt-1 flex flex-wrap gap-2 text-3xs text-[var(--color-fg-muted)]">
+            <span><${TimeAgo} timestamp=${formatTimestamp(turn.startTs)} /></span>
+            <span>span ${formatMaybeDuration(turn.endTs - turn.startTs)}</span>
+            <span>tools ${turn.toolCallCount}</span>
+            <span>thinking ${turn.thinkingCount}</span>
+            <span>failures ${turn.failureCount}</span>
+            <span>gate ${turn.gateRejectedCount}</span>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-1.5 text-3xs">
+          <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 py-0.5 font-mono text-[var(--color-fg-muted)]">
+            tool time ${formatMaybeDuration(turn.totalDurationMs)}
+          </span>
+          <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 py-0.5 font-mono text-[var(--color-fg-muted)]">
+            cost ${formatCost(turn.totalCostUsd, '$0')}
+          </span>
+        </div>
+      </div>
+
+      <${RuntimeEvidenceStrip} evidence=${turn.runtimeEvidence} />
+
+      <div class="grid gap-2">
+        ${turn.entries.map(entry => html`
+          <${WaterfallEntryRow}
+            key=${entry.id}
+            entry=${entry}
+            maxDurationMs=${maxDurationMs}
+          />
+        `)}
       </div>
     </section>
   `
 }
 
-function TileHint({ text }: { text: string }) {
-  return html`<div class="text-xs leading-relaxed text-[var(--color-fg-muted)]">${text}</div>`
-}
-
-function executionQueueTone(severity?: string | null): string {
-  if (severity === 'bad') return 'bad'
-  if (severity === 'warn') return 'warn'
-  if (severity === 'ok') return 'ok'
-  return 'neutral'
-}
-
-function ExecutionQueuePanel({ items }: { items: DashboardExecutionQueueItem[] }) {
-  if (items.length === 0) return null
-  return html`
-    <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-2)] p-3">
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <div class="font-mono text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Execution Queue</div>
-        <${StatusChip} tone=${items.some(item => item.severity === 'bad') ? 'bad' : 'warn'} uppercase=${false}>${items.length}<//>
-      </div>
-      <div class="mt-3 grid gap-2 md:grid-cols-2">
-        ${items.slice(0, 6).map(item => html`
-          <div key=${item.id} class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2">
-            <div class="flex items-center justify-between gap-2">
-              <div class="min-w-0 truncate font-mono text-2xs text-[var(--color-fg-secondary)]">${item.target_id}</div>
-              <${StatusChip} tone=${executionQueueTone(item.severity)} uppercase=${false}>${item.kind}<//>
-            </div>
-            <div class="mt-1 text-xs leading-relaxed text-[var(--color-fg-primary)]">${trimText(item.summary, 120) ?? item.summary}</div>
-            ${item.terminal_reason_code || item.next_human_action
-              ? html`
-                <div class="mt-1 flex flex-wrap gap-1">
-                  ${item.terminal_reason_code
-                    ? html`<span class="rounded bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-mono text-[var(--color-status-warn)]">${item.terminal_reason_code}</span>`
-                    : null}
-                  ${item.next_human_action
-                    ? html`<span class="rounded bg-[var(--white-8)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-muted)]">${item.next_human_action}</span>`
-                    : null}
-                </div>
-              `
-              : null}
-          </div>
-        `)}
-      </div>
-    </div>
-  `
-}
-
-function JourneyCard({ record }: { record: JourneyRecord }) {
-  const task = record.task
-  const keeper = record.keeper
-  const completionItems = task?.contract?.completion_contract ?? task?.gate?.completion_contract ?? []
-  const requiredEvidence = task?.contract?.required_evidence ?? []
-  const unmetItems = task?.gate?.unmet_completion_contract ?? []
-  const lifeEntries = record.life.slice(0, 2)
-  const searchKeeperName = keeper?.name ?? task?.assignee ?? null
-  const contextSummary = keeper?.context_tokens != null && keeper?.context_max != null
-    ? `${formatTokens(keeper.context_tokens)} / ${formatTokens(keeper.context_max)}`
-    : null
-  const keeperActivity = keeper ? keeperActivityDisplay(keeper, keeper.agent?.last_seen) : null
-  const showExtended = useSignal(false)
-
-  return html`
-    <${Card} class="flex flex-col gap-4">
-      <div class="flex flex-wrap items-start justify-between gap-4">
-        <div class="min-w-0 flex-1">
-          <div class="flex flex-wrap items-center gap-2">
-            <h3 class="m-0 text-base font-semibold tracking-normal text-[var(--color-fg-secondary)]">${record.title}</h3>
-            ${task?.status
-              ? html`<${StatusChip} tone=${task.status === 'done' ? 'ok' : task.status === 'awaiting_verification' ? 'select' : 'neutral'}>
-                  ${taskStatusLabel(task.status)}
-                <//>`
-              : keeper?.status
-                ? html`<${StatusChip} tone=${keeperStateTone(keeper.status)}>${keeper.status}<//>`
-                : null}
-            <${StatusChip} tone=${record.kind === 'task' ? 'info' : 'neutral'}>
-              ${record.kind === 'task' ? 'task journey' : 'keeper journey'}
-            <//>
-          </div>
-          ${record.subtitle
-            ? html`<div class="mt-1 text-sm leading-relaxed text-[var(--color-fg-muted)]">${record.subtitle}</div>`
-            : null}
-        </div>
-
-        <div class="flex flex-wrap items-center gap-2">
-          <${RouteLink}
-            tab="workspace"
-            params=${{ section: 'planning' }}
-            class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-1.5 text-xs text-[var(--color-fg-primary)] hover:bg-[var(--color-bg-elevated)]"
-          >
-            View task
-          <//>
-          ${record.sessionId || record.operationId
-            ? html`
-                <${RouteLink}
-                  tab="monitoring"
-                  params=${{
-                    section: 'fleet-health',
-                    view: 'event-log',
-                    ...(record.sessionId ? { session_id: record.sessionId } : {}),
-                    ...(record.operationId ? { operation_id: record.operationId } : {}),
-                  }}
-                  class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--select-20)] bg-[var(--select-10)] px-3 py-1.5 text-xs text-[var(--color-accent-fg)] hover:bg-[var(--select-20)]"
-                >
-                  Execution log
-                <//>
-              `
-            : null}
-          ${searchKeeperName
-            ? html`
-                <${RouteLink}
-                  tab="monitoring"
-                  params=${{ section: 'agents', agent: searchKeeperName }}
-                  class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--ok-20)] bg-[var(--ok-10)] px-3 py-1.5 text-xs text-[var(--color-status-ok)] hover:bg-[var(--ok-20)]"
-                >
-                  View keeper
-                <//>
-              `
-            : null}
-        </div>
-      </div>
-
-      <div class="flex flex-col gap-4">
-        <div class="grid gap-3 md:grid-cols-2">
-          <${JourneyTile} label="Task">
-            ${task
-              ? html`
-                  <div class="font-mono text-xs text-[var(--color-fg-secondary)]">${task.id}</div>
-                  ${task.assignee
-                    ? html`<div>Owner: <strong class="text-[var(--color-fg-secondary)]">${task.assignee}</strong></div>`
-                    : html`<${TileHint} text="No assignee yet." />`}
-                  ${task.updated_at
-                    ? html`<div class="text-xs text-[var(--color-fg-muted)]">Updated <${TimeAgo} timestamp=${task.updated_at} /></div>`
-                    : null}
-                `
-              : html`<${TileHint} text="Tracking keeper continuity without a linked task." />`}
-          <//>
-
-          <${JourneyTile} label="Run">
-            ${record.sessionId
-              ? html`<div><span class="text-[var(--color-fg-disabled)]">session</span><div class="mt-1 font-mono text-xs text-[var(--color-fg-secondary)]">${truncate(record.sessionId, 24)}</div></div>`
-              : html`<${TileHint} text="No session_id linked yet." />`}
-            ${record.operationId
-              ? html`<div><span class="text-[var(--color-fg-disabled)]">operation</span><div class="mt-1 font-mono text-xs text-[var(--color-fg-secondary)]">${truncate(record.operationId, 24)}</div></div>`
-              : null}
-            ${record.workerRunId
-              ? html`<div><span class="text-[var(--color-fg-disabled)]">worker run</span><div class="mt-1 font-mono text-xs text-[var(--color-fg-secondary)]">${truncate(record.workerRunId, 24)}</div></div>`
-              : null}
-            ${trimText(record.executionSession?.goal ?? record.missionSession?.goal, 90)
-              ? html`<div class="text-xs leading-relaxed text-[var(--color-fg-muted)]">${trimText(record.executionSession?.goal ?? record.missionSession?.goal, 90)}</div>`
-              : null}
-          <//>
-
-          <${JourneyTile} label="Contract" class="md:col-span-2">
-            ${task
-              ? html`
-                  <div class="flex flex-wrap items-center gap-2">
-                    <${StatusChip} tone=${task.contract?.strict ? 'info' : 'neutral'}>
-                      ${task.contract?.strict ? 'strict' : 'advisory'}
-                    <//>
-                    ${task.status === 'awaiting_verification'
-                      ? html`<${StatusChip} tone="select">verification pending<//>`
-                      : null}
-                  </div>
-                  <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                    <${MetricChip} label="completion" value=${completionItems.length} />
-                    <${MetricChip} label="unmet" value=${unmetItems.length} tone=${unmetItems.length > 0 ? 'bad' : 'ok'} />
-                    <${MetricChip} label="evidence" value=${requiredEvidence.length} />
-                  </div>
-                  ${unmetItems.length > 0
-                    ? html`<div class="text-xs leading-relaxed text-[var(--color-status-warn)]">${unmetItems.slice(0, 2).join(' · ')}</div>`
-                    : null}
-                `
-              : keeper?.runtime_blocker_class === 'completion_contract_violation'
-                ? html`<div class="text-xs leading-relaxed text-[var(--bad-light)]">Latest runtime blocker is a completion contract violation.</div>`
-                : html`<${TileHint} text="No contract gate is linked to this task." />`}
-          <//>
-
-          <${JourneyTile} label="Keeper" class="md:col-span-2">
-            ${keeper
-              ? html`
-                  <div class="flex flex-wrap items-center gap-2">
-                    <div class="font-semibold text-[var(--color-fg-secondary)]">${keeper.name}</div>
-                    ${keeper.phase ? html`<${StatusChip} tone=${keeperStateTone(keeper.phase)}>${keeper.phase}<//>` : null}
-                    <${StatusChip} tone=${keeperStateTone(keeper.status)}>${keeper.status}<//>
-                  </div>
-                  <div class="flex flex-wrap gap-3 text-xs text-[var(--color-fg-muted)]">
-                    <span>ctx ${formatPct(keeper.context_ratio)}</span>
-                    ${contextSummary ? html`<span>${contextSummary}</span>` : null}
-                    ${keeperActivity?.ageSeconds != null ? html`<span>${keeperActivity.label} ${formatAgeSeconds(keeperActivity.ageSeconds)}</span>` : null}
-                  </div>
-                  ${trimText(record.continuity?.continuity_summary ?? record.continuity?.note, 100)
-                    ? html`<div class="text-xs leading-relaxed text-[var(--color-fg-muted)]">${trimText(record.continuity?.continuity_summary ?? record.continuity?.note, 100)}</div>`
-                    : null}
-                `
-              : html`<${TileHint} text="No keeper is linked to this task." />`}
-          <//>
-        </div>
-
-        <div class="flex items-center gap-3 border-t border-[var(--color-border-default)] pt-3">
-          <button
-            class="inline-flex items-center rounded-[var(--r-1)] px-3 py-1.5 text-xs font-medium text-[var(--color-fg-muted)] transition hover:text-[var(--color-fg-primary)] hover:bg-[var(--color-bg-elevated)]"
-            aria-expanded=${showExtended.value ? 'true' : 'false'}
-            onClick=${() => { showExtended.value = !showExtended.value }}
-          >
-            ${showExtended.value ? 'Hide' : 'Show'} details
-          </button>
-          <div class="text-2xs text-[var(--color-fg-disabled)]">
-            thinking, memory, turn, lifecycle, cascade
-          </div>
-        </div>
-
-        ${showExtended.value
-          ? html`
-              <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                <${JourneyTile} label="Thinking">
-                  ${keeper?.pipeline_stage
-                    ? html`<${StatusChip} tone=${pipelineTone(keeper.pipeline_stage)}>${keeper.pipeline_stage}<//>`
-                    : html`<${TileHint} text="No thinking stage has been reported." />`}
-                  ${keeper?.skill_primary
-                    ? html`<div><span class="text-[var(--color-fg-disabled)]">skill</span><div class="mt-1 font-semibold text-[var(--color-fg-secondary)]">${keeper.skill_primary}</div></div>`
-                    : null}
-                  ${trimText(keeper?.skill_reason ?? keeper?.recent_input_preview ?? record.worker?.focus, 100)
-                    ? html`<div class="text-xs leading-relaxed text-[var(--color-fg-muted)]">${trimText(keeper?.skill_reason ?? keeper?.recent_input_preview ?? record.worker?.focus, 100)}</div>`
-                    : null}
-                <//>
-
-                <${JourneyTile} label="Memory">
-                  ${trimText(keeper?.memory_recent_note, 100)
-                    ? html`<div class="text-xs leading-relaxed text-[var(--color-fg-primary)]">${trimText(keeper?.memory_recent_note, 100)}</div>`
-                    : html`<${TileHint} text="No recent memory note." />`}
-                  ${keeper?.metrics_window
-                    ? html`
-                        <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                          <${MetricChip} label="pass" value=${formatPct(keeper.metrics_window.memory_pass_rate)} tone="ok" />
-                          <${MetricChip} label="checks" value=${keeper.metrics_window.memory_checks ?? 0} />
-                          <${MetricChip} label="compact" value=${keeper.compaction_count ?? keeper.metrics_window.memory_compaction_events ?? 0} tone="warn" />
-                        </div>
-                      `
-                    : null}
-                <//>
-
-                <${JourneyTile} label="Turn">
-                  ${keeper
-                    ? html`
-                        <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                          <${MetricChip} label="turns" value=${keeper.turn_count ?? keeper.total_turns ?? 0} />
-                          <${MetricChip} label="last" value=${formatAgeSeconds(keeper.last_turn_ago_s)} tone="info" />
-                          <${MetricChip} label="auto" value=${keeper.autonomous_turn_count ?? 0} />
-                        </div>
-                        ${keeper.runtime_blocker_summary
-                          ? html`<div class="text-xs leading-relaxed text-[var(--color-status-warn)]">${trimText(keeper.runtime_blocker_summary, 100)}</div>`
-                          : null}
-                      `
-                    : html`<${TileHint} text="No linked keeper turn data." />`}
-                <//>
-
-                <${JourneyTile} label="Life" class="lg:col-span-2">
-                  ${lifeEntries.length > 0
-                    ? html`
-                        ${lifeEntries.map((entry) => html`
-                          <div key=${entry.id} class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2">
-                            <div class="flex items-center justify-between gap-2">
-                              <${StatusChip} tone=${entry.source === 'journal' ? 'info' : entry.source === 'handoff' ? 'warn' : 'neutral'} uppercase=${false}>
-                                ${entry.source}
-                              <//>
-                              ${entry.timestamp ? html`<span class="text-2xs text-[var(--color-fg-disabled)]">${formatJourneyTimestamp(entry.timestamp)}</span>` : null}
-                            </div>
-                            <div class="mt-2 text-xs leading-relaxed text-[var(--color-fg-primary)]">${entry.text}</div>
-                          </div>
-                        `)}
-                      `
-                    : html`<${TileHint} text="No recent life signal is linked to this context." />`}
-                <//>
-
-                <${JourneyTile} label="Cascade">
-                  ${keeper
-                    ? html`
-                        <div class="flex flex-wrap items-center gap-2">
-                          ${keeper.cascade_name ? html`<${StatusChip} tone="info">${keeper.cascade_name}<//>` : null}
-                        </div>
-                        <div class="text-xs text-[var(--color-fg-muted)]">
-                          runtime identity redacted
-                        </div>
-                        ${keeper.metrics_window?.fallback_rate != null
-                          ? html`<div class="text-xs text-[var(--color-fg-muted)]">fallback ${formatPct(keeper.metrics_window.fallback_rate)}</div>`
-                          : null}
-                      `
-                    : html`<${TileHint} text="Cascade selection is only exposed by keeper runtime." />`}
-                <//>
-              </div>
-            `
-          : null}
-      </div>
-    <//>
-  `
-}
-
-function JourneyTable({
-  records,
-  selectedKey,
-  onSelect,
+function WaterfallBody({
+  result,
+  loading,
+  onRefresh,
 }: {
-  records: readonly JourneyRecord[]
-  selectedKey: string | null
-  onSelect: (key: string | null) => void
+  result: WaterfallLoadResult | null
+  loading: boolean
+  onRefresh: () => void
 }) {
-  const columns: TableColumn<JourneyRecord>[] = [
-    {
-      key: 'task',
-      header: 'Task',
-      sortable: false,
-      width: 'min-w-[240px]',
-      render: (record) => html`
-        <div class="flex flex-col gap-1">
-          <span class="font-medium text-[var(--color-fg-primary)]">${record.title}</span>
-          ${record.subtitle ? html`<span class="text-2xs text-[var(--color-fg-muted)] truncate">${record.subtitle}</span>` : null}
-        </div>
-      `,
-    },
-    {
-      key: 'keeper',
-      header: 'Keeper',
-      sortable: false,
-      width: 'min-w-[140px]',
-      render: (record) => {
-        const name = record.keeper?.name ?? '-'
-        return html`<span class="font-mono text-2xs text-[var(--color-fg-secondary)]">${name}</span>`
-      },
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      sortable: false,
-      width: 'min-w-[120px]',
-      render: (record) => {
-        if (record.task?.status) {
-          return html`<${StatusChip} tone=${record.task.status === 'done' ? 'ok' : record.task.status === 'awaiting_verification' ? 'select' : 'neutral'}>
-            ${taskStatusLabel(record.task.status)}
-          <//>`
-        }
-        if (record.keeper?.status) {
-          return html`<${StatusChip} tone=${keeperStateTone(record.keeper.status)}>${record.keeper.status}<//>`
-        }
-        return html`<span class="text-2xs text-[var(--color-fg-muted)]">-</span>`
-      },
-    },
-    {
-      key: 'activity',
-      header: 'Last activity',
-      sortable: false,
-      width: 'min-w-[120px]',
-      render: (record) => {
-        const age = record.keeper
-          ? keeperActivityDisplay(record.keeper, record.keeper.agent?.last_seen).ageSeconds
-          : null
-        if (age != null) {
-          return html`<span class="text-2xs text-[var(--color-fg-muted)]">${formatAgeSeconds(age)}</span>`
-        }
-        if (record.task?.updated_at) {
-          return html`<${TimeAgo} timestamp=${record.task.updated_at} />`
-        }
-        return html`<span class="text-2xs text-[var(--color-fg-muted)]">-</span>`
-      },
-    },
-    {
-      key: 'blocked',
-      header: 'Blocked',
-      sortable: false,
-      width: 'min-w-[100px]',
-      render: (record) => {
-        const blocked = record.keeper?.runtime_blocker_class != null
-          || (record.task?.gate?.done?.status === 'blocked')
-        return blocked
-          ? html`<${StatusChip} tone="bad">blocked<//>`
-          : html`<span class="text-2xs text-[var(--color-fg-muted)]">-</span>`
-      },
-    },
-  ]
-
-  if (records.length === 0) {
-    return html`<${EmptyState} message="No journeys match the current filters." compact />`
+  if (loading && !result) {
+    return html`<${LoadingState}>Loading keeper waterfall...<//>`
+  }
+  if (!result) {
+    return html`<${EmptyState} message="No keeper waterfall data loaded." compact />`
   }
 
-  return html`
-    <div class="overflow-x-auto rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)]">
-      <${Table}
-        columns=${columns}
-        rows=${records}
-        getRowId=${(row: JourneyRecord) => row.key}
-        selectedIds=${selectedKey ? [selectedKey] : []}
-        onSelect=${(ids: string[]) => onSelect(ids[0] ?? null)}
-        aria-label="Journey records"
-      />
-    </div>
-  `
-}
+  const model = result.model
+  const summary = model.summary
+  const maxDurationMs = Math.max(1, ...model.turns.flatMap(turn =>
+    turn.entries.map(entry => entry.durationMs ?? 0),
+  ))
 
-function JourneyDetailDrawer({
-  record,
-  onClose,
-}: {
-  record: JourneyRecord | null
-  onClose: () => void
-}) {
-  if (!record) return null
   return html`
-    <${Drawer}
-      open=${true}
-      onClose=${onClose}
-      title=${record.title}
-      position="right"
-      class="w-96 max-w-[calc(100vw-1rem)]"
-    >
-      <${JourneyCard} record=${record} />
-    <//>
+    <div class="flex flex-col gap-4">
+      <${SourceWarning} errors=${result.sourceErrors} />
+
+      <div class="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <${MetricCell} label="turns" value=${summary.totalTurns} tone="info" />
+        <${MetricCell} label="events" value=${summary.totalEntries} />
+        <${MetricCell} label="tools" value=${summary.toolCallCount} tone="ok" />
+        <${MetricCell} label="failures" value=${summary.failureCount} tone=${summary.failureCount > 0 ? 'bad' : 'ok'} />
+        <${MetricCell} label="tool time" value=${formatMaybeDuration(summary.totalDurationMs)} />
+        <${MetricCell} label="cost" value=${formatCost(summary.totalCostUsd, '$0')} />
+      </div>
+
+      <div class="flex flex-wrap items-center justify-between gap-2 text-3xs text-[var(--color-fg-muted)]">
+        <div>
+          ${summary.timelineStartTs != null && summary.timelineEndTs != null
+            ? html`
+                <span>${new Date(summary.timelineStartTs).toLocaleString()}</span>
+                <span class="mx-1">-></span>
+                <span>${new Date(summary.timelineEndTs).toLocaleString()}</span>
+              `
+            : html`<span>timeline not recorded</span>`}
+        </div>
+        <div class="flex items-center gap-2">
+          <span>fetched <${TimeAgo} timestamp=${new Date(result.fetchedAtMs).toISOString()} /></span>
+          <${ActionButton} variant="ghost" size="sm" onClick=${onRefresh} disabled=${loading}>
+            ${loading ? 'Refreshing...' : 'Refresh'}
+          <//>
+        </div>
+      </div>
+
+      ${model.turns.length === 0
+        ? html`<${EmptyState} message="No trajectory or tool-call rows are recorded for this keeper." compact />`
+        : html`
+            <div class="flex flex-col gap-3" aria-label="Keeper turn waterfall">
+              ${model.turns.map(turn => html`
+                <${WaterfallTurnRow}
+                  key=${turn.key}
+                  turn=${turn}
+                  maxDurationMs=${maxDurationMs}
+                />
+              `)}
+            </div>
+          `}
+    </div>
   `
 }
 
 export function JourneyPanel() {
-  const query = useSignal('')
-  const selectedKey = useSignal<string | null>(null)
-  const missionSessions = Array.isArray(missionSnapshot.value?.sessions)
-    ? missionSnapshot.value.sessions as JourneyMissionSession[]
-    : []
-  const records = buildJourneyRecords({
-    tasks: tasks.value,
-    keepers: keepers.value,
-    executionSessions: executionSessionBriefs.value,
-    continuityBriefs: executionContinuityBriefs.value,
-    workerBriefs: executionWorkerSupportBriefs.value,
-    missionSessions,
-    journalEntries: journal.value,
-  })
-  // Standalone keeper records are delegated to the agents section.
-  const taskRecords = records.filter((record) => record.kind === 'task')
-  const priorityItems = executionQueue.value.filter((item) => item.kind === 'keeper' || item.severity === 'bad')
-  const visible = filterJourneyRecords(taskRecords, query.value)
-  const blockedCount = visible.filter((record) =>
-    record.keeper?.runtime_blocker_class != null || (record.task?.gate?.done?.status === 'blocked'),
-  ).length
-  const thinkingCount = visible.filter((record) => record.keeper?.pipeline_stage === 'thinking').length
+  const keeperRows = keepers.value
+  const options = useMemo(() => keeperOptions(keeperRows), [keeperRows])
+  const [selectedKeeper, setSelectedKeeper] = useState<string | null>(() =>
+    selectDefaultJourneyKeeper(keeperRows),
+  )
+  const resource = useManagedAsyncResource<WaterfallLoadResult>(null)
+  const selected = keeperByName(keeperRows, selectedKeeper)
 
-  const selectedRecord = selectedKey.value
-    ? visible.find((r) => r.key === selectedKey.value) ?? null
-    : null
+  useEffect(() => {
+    const next = selectDefaultJourneyKeeper(keeperRows, selectedKeeper)
+    if (next !== selectedKeeper) setSelectedKeeper(next)
+  }, [keeperRows, selectedKeeper])
+
+  const refresh = useCallback(() => {
+    if (!selectedKeeper) {
+      resource.reset(null)
+      return
+    }
+    void resource.load((signal) => fetchWaterfallSources(selectedKeeper, signal))
+  }, [resource, selectedKeeper])
+
+  useEffect(() => {
+    refresh()
+    return () => {
+      resource.cancel()
+    }
+  }, [refresh, resource])
+
+  const state = resource.state.value
 
   return html`
     <div class="flex flex-col gap-4">
       <${Card} class="flex flex-col gap-4">
-        <div class="flex flex-col gap-2">
-          <div class="flex flex-wrap items-center gap-2">
-            <h2 class="m-0 text-lg font-semibold tracking-normal text-[var(--color-fg-secondary)]">Active Journeys</h2>
-            <${StatusChip} tone="info">beta<//>
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div class="min-w-0">
+            <div class="flex flex-wrap items-center gap-2">
+              <h2 class="m-0 text-lg font-semibold tracking-normal text-[var(--color-fg-secondary)]">Keeper Turn Waterfall</h2>
+              <${StatusChip} tone="neutral" uppercase=${false}>hidden diagnostic<//>
+            </div>
+            <div class="mt-1 text-sm leading-relaxed text-[var(--color-fg-muted)]">
+              Per-keeper turn flow from trajectory, tool-call I/O, and runtime trace evidence.
+            </div>
           </div>
-          <div class="text-sm leading-relaxed text-[var(--color-fg-muted)]">
-            Task-centered work linked across keeper, session, and contract context.
-          </div>
+          ${selected
+            ? html`
+                <div class="flex flex-wrap items-center gap-2 text-2xs">
+                  <${StatusChip} tone=${keeperStateTone(selected.status)} uppercase=${false}>${selected.status}<//>
+                  ${selected.pipeline_stage
+                    ? html`<${StatusChip} tone="info" uppercase=${false}>${selected.pipeline_stage}<//>`
+                    : null}
+                  <span class="font-mono text-[var(--color-fg-muted)]">turns ${selected.turn_count ?? selected.total_turns ?? 'not recorded'}</span>
+                </div>
+              `
+            : null}
         </div>
 
-        <div class="grid gap-3 md:grid-cols-4">
-          <${MetricChip} label="journeys" value=${visible.length} tone="info" />
-          <${MetricChip} label="blocked" value=${blockedCount} tone=${blockedCount > 0 ? 'bad' : 'ok'} />
-          <${MetricChip} label="thinking" value=${thinkingCount} tone="warn" />
-          <${MetricChip} label="in queue" value=${priorityItems.length} tone=${priorityItems.some(i => i.severity === 'bad') ? 'bad' : 'warn'} />
-        </div>
-
-        <${ExecutionQueuePanel} items=${priorityItems} />
-
-        <div class="flex flex-wrap items-center gap-3">
-          <${TextInput}
-            type="search"
-            value=${query.value}
-            placeholder="Search task / keeper / session / operation / life"
-            ariaLabel="Search journeys"
-            class="max-w-[460px]"
-            onInput=${(event: Event) => {
-              query.value = (event.target as HTMLInputElement).value
-            }}
-          />
-          <div class="text-xs text-[var(--color-fg-muted)]">
-            ${query.value.trim() !== '' ? `${visible.length} / ${taskRecords.length} shown` : `${taskRecords.length} flows`}
-          </div>
-        </div>
+        ${options.length === 0
+          ? html`<${EmptyState} message="No keepers are available in the execution projection." compact />`
+          : html`
+              <div class="grid gap-3 md:grid-cols-[minmax(16rem,24rem)_auto] md:items-center">
+                <${Select}
+                  value=${selectedKeeper ?? ''}
+                  options=${options}
+                  ariaLabel="Select keeper for journey waterfall"
+                  testId="journey-keeper-select"
+                  onInput=${(value: string) => setSelectedKeeper(value)}
+                />
+                <${ActionButton} variant="ghost" size="md" onClick=${refresh} disabled=${state.loading || !selectedKeeper}>
+                  ${state.loading ? 'Refreshing...' : 'Refresh'}
+                <//>
+              </div>
+            `}
       <//>
 
-      <${JourneyTable}
-        records=${visible}
-        selectedKey=${selectedKey.value}
-        onSelect=${(key: string | null) => { selectedKey.value = key }}
-      />
-
-      <${JourneyDetailDrawer}
-        record=${selectedRecord}
-        onClose=${() => { selectedKey.value = null }}
-      />
+      ${state.error
+        ? html`
+            <div class="flex flex-col gap-3">
+              <${ErrorState} message=${state.error} />
+              <div>
+                <${ActionButton} variant="ghost" size="sm" onClick=${refresh} disabled=${state.loading || !selectedKeeper}>Retry<//>
+              </div>
+            </div>
+          `
+        : html`
+            <${WaterfallBody}
+              result=${state.data}
+              loading=${state.loading}
+              onRefresh=${refresh}
+            />
+          `}
     </div>
   `
 }

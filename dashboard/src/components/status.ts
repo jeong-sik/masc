@@ -6,7 +6,6 @@ import { html } from 'htm/preact'
 import { lazy, Suspense } from 'preact/compat'
 import { route } from '../router'
 import { LoadingState } from './common/feedback-state'
-import { JourneyPanel } from './journey-panel'
 
 export type StatusSection =
   | 'observatory' | 'journey' | 'agents' | 'runtime' | 'goal-loop' | 'fleet-health'
@@ -29,6 +28,9 @@ const LazyObservatory = lazy(async () => ({
 }))
 const LazyCognitionPlane = lazy(async () => ({
   default: (await import('./cognition-plane')).CognitionPlane,
+}))
+const LazyJourneyPanel = lazy(async () => ({
+  default: (await import('./journey-panel')).JourneyPanel,
 }))
 
 function sectionFallback(label: string) {
@@ -59,7 +61,7 @@ function renderSection(section: StatusSection) {
     case 'observatory':
       return html`<${LazyObservatory} />`
     case 'journey':
-      return html`<${JourneyPanel} />`
+      return html`<${LazyJourneyPanel} />`
     case 'runtime':
       return html`<${LazyRuntimePanel} />`
     case 'goal-loop':

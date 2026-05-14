@@ -149,8 +149,9 @@ let pre_tool_gate_error (event : Keeper_guards.gate_decision_event) =
   Printf.sprintf "%s:%s: %s"
     decision event.reason_code event.reason_text
 
+let min_duration_ms = 0.0
 let trajectory_duration_ms duration_ms =
-  if (not (Float.is_finite duration_ms)) || Float.compare duration_ms 0.0 <= 0
+  if (not (Float.is_finite duration_ms)) || Float.compare duration_ms min_duration_ms <= 0
   then 0
   else max 1 (int_of_float (Float.round duration_ms))
 
@@ -181,9 +182,10 @@ let record_pre_tool_gate_attempt
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
+       let callback_label_gate_tool_call_log = "gate_tool_call_log" in
        Prometheus.inc_counter
          Keeper_metrics.metric_keeper_lifecycle_callback_failures
-         ~labels:[("keeper", keeper_name); ("callback", "gate_tool_call_log")]
+         ~labels:[("keeper", keeper_name); ("callback", callback_label_gate_tool_call_log)]
          ();
        Log.Keeper.warn
          "keeper:%s pre_tool_use gate tool_call log failed tool=%s err=%s"

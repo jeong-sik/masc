@@ -757,6 +757,46 @@ let test_recent_outcome_count_success_separate () =
          ~outcome:H.Outcome_soft_rate_limited
          ~window_s:60.0)
 
+let test_restore_providers_reinstates_active_cooldown () =
+  let t = H.create () in
+  let until = Unix.gettimeofday () +. 60.0 in
+  let restored =
+    H.restore_providers
+      t
+      [ { restore_provider_key = "restored-provider"
+        ; restore_consecutive_failures = 4
+        ; restore_cooldown_until = Some until
+        ; restore_last_failure_at = Some (until -. 10.0)
+        ; restore_top_fingerprints = [ "timeout|abc12345", 2 ]
+        }
+      ]
+  in
+  check int "one provider restored" 1 restored;
+  check bool "restored cooldown blocks provider" true
+    (H.is_in_cooldown t ~provider_key:"restored-provider");
+  match H.provider_info t ~provider_key:"restored-provider" with
+  | None -> fail "expected restored provider_info"
+  | Some info ->
+    check int "consecutive failures restored" 4 info.consecutive_failures;
+    check (list (pair string int)) "fingerprints restored"
+      [ "timeout|abc12345", 2 ]
+      info.top_fingerprints
+
+let test_restore_providers_ignores_blank_provider_key () =
+  let t = H.create () in
+  let restored =
+    H.restore_providers
+      t
+      [ { restore_provider_key = " "
+        ; restore_consecutive_failures = 3
+        ; restore_cooldown_until = Some (Unix.gettimeofday () +. 60.0)
+        ; restore_last_failure_at = None
+        ; restore_top_fingerprints = []
+        }
+      ]
+  in
+  check int "blank key ignored" 0 restored
+
 let () =
   run "cascade_health_tracker" [
     "record", [
@@ -892,5 +932,11 @@ let () =
         test_recent_outcome_count_filters_by_outcome;
       test_case "success counts independently" `Quick
         test_recent_outcome_count_success_separate;
+    ];
+    "restore", [
+      test_case "reinstates active cooldown" `Quick
+        test_restore_providers_reinstates_active_cooldown;
+      test_case "ignores blank provider key" `Quick
+        test_restore_providers_ignores_blank_provider_key;
     ];
   ]

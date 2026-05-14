@@ -104,6 +104,24 @@ val error_kind_to_string : error_kind -> string
 (** Create a new empty tracker. *)
 val create : unit -> t
 
+(** Durable provider state that can be restored after process restart.
+
+    This intentionally excludes rolling-window events and latency/cost rings:
+    those are short-lived routing signals. Cooldown, failure count, and error
+    fingerprints are enough to prevent a restart from immediately retrying a
+    provider that was just circuit-broken. *)
+type provider_restore = {
+  restore_provider_key : string;
+  restore_consecutive_failures : int;
+  restore_cooldown_until : float option;
+  restore_last_failure_at : float option;
+  restore_top_fingerprints : (string * int) list;
+}
+
+(** Restore durable provider state into a tracker.
+    Returns the number of non-empty provider rows applied. *)
+val restore_providers : t -> provider_restore list -> int
+
 (** Record a successful provider call. Clears cooldown and resets
     consecutive failure counter.
 

@@ -335,6 +335,14 @@ type error_kind = Error_kind of string
 let error_kind_of_string value = Error_kind value
 let error_kind_to_string (Error_kind value) = value
 
+type provider_restore = {
+  restore_provider_key : string;
+  restore_consecutive_failures : int;
+  restore_cooldown_until : float option;
+  restore_last_failure_at : float option;
+  restore_top_fingerprints : (string * int) list;
+}
+
 (* ── Constructor ──────────────────────────────── *)
 
 let create () : t = {
@@ -390,6 +398,40 @@ let get_or_create_state t key =
     } in
     Hashtbl.replace t.providers key s;
     s
+
+let finite_positive = function
+  | Some value when Float.is_finite value && value > 0.0 -> Some value
+  | _ -> None
+
+let restore_providers t providers =
+  with_lock t (fun () ->
+    let now = Unix.gettimeofday () in
+    List.fold_left
+      (fun restored row ->
+        let provider_key = String.trim row.restore_provider_key in
+        if String.equal provider_key ""
+        then restored
+        else (
+          let state = get_or_create_state t provider_key in
+          state.consecutive_failures <- max 0 row.restore_consecutive_failures;
+          state.cooldown_until
+          <- (match finite_positive row.restore_cooldown_until with
+              | Some ts when ts > now -> ts
+              | _ -> 0.0);
+          state.last_failure_at
+          <- (match finite_positive row.restore_last_failure_at with
+              | Some ts -> ts
+              | None -> 0.0);
+          Hashtbl.reset state.fingerprint_counts;
+          List.iter
+            (fun (fp, count) ->
+              let fp = String.trim fp in
+              if (not (String.equal fp "")) && count > 0
+              then Hashtbl.replace state.fingerprint_counts fp count)
+            row.restore_top_fingerprints;
+          restored + 1))
+      0
+      providers)
 
 (* Append [latency_ms] to the per-provider ring buffer.  Allocates the
    array lazily on first valid sample so providers that never report

@@ -2118,14 +2118,6 @@ let make_hooks
             ~keeper_name:(!meta_ref).name ()
         in
         let result_bytes = if original_bytes > 0 then original_bytes else out_len in
-        let handler_logged =
-          Keeper_tool_call_log.consume_handler_logged
-            ~keeper_name:(!meta_ref).name
-            ~tool_name
-            ~output_text
-            ~success:(outcome = "ok")
-            ()
-        in
         let ( lane
             , tool_choice
             , thinking_enabled
@@ -2143,33 +2135,32 @@ let make_hooks
           Keeper_tool_call_log.get_turn_context
             ~keeper_name:(!meta_ref).name ()
         in
-        if not handler_logged then
-          (try
-             Keeper_tool_call_log.log_call
-               ~keeper_name:(!meta_ref).name
-               ~tool_name ~input ~output_text
-               ~success:(outcome = "ok") ~duration_ms
-               ~model:(current_keeper_model !meta_ref)
-               ?lane ?tool_choice ?thinking_enabled ?thinking_budget
-               ?prompt_fingerprint
-               ?trace_id ?session_id ?turn ?keeper_turn_id ?task_id ?goal_ids
-               ?sandbox_profile ?network_mode ?approval_mode
-               ~result_bytes ?truncated_to ()
-           with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | exn ->
-               (* P2 silent-failure fix (same pattern as the broadcast site
-                  above at line ~1098): tool-call audit log write failures
-                  were dropped without trace.  Loss of these rows leaves
-                  downstream replay / debugging tools with gaps that look
-                  identical to "no tool calls in this turn." *)
-               Prometheus.inc_counter
-                 Keeper_metrics.metric_keeper_lifecycle_callback_failures
-                 ~labels:[("keeper", (!meta_ref).name); ("callback", "post_tool_log_write")]
-                 ();
-               Log.Keeper.warn
-                 "keeper:%s tool=%s log_call write failed: %s"
-                 (!meta_ref).name tool_name (Printexc.to_string exn));
+        (try
+           Keeper_tool_call_log.log_call
+             ~keeper_name:(!meta_ref).name
+             ~tool_name ~input ~output_text
+             ~success:(outcome = "ok") ~duration_ms
+             ~model:(current_keeper_model !meta_ref)
+             ?lane ?tool_choice ?thinking_enabled ?thinking_budget
+             ?prompt_fingerprint
+             ?trace_id ?session_id ?turn ?keeper_turn_id ?task_id ?goal_ids
+             ?sandbox_profile ?network_mode ?approval_mode
+             ~result_bytes ?truncated_to ()
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+             (* P2 silent-failure fix (same pattern as the broadcast site
+                above at line ~1098): tool-call audit log write failures
+                were dropped without trace.  Loss of these rows leaves
+                downstream replay / debugging tools with gaps that look
+                identical to "no tool calls in this turn." *)
+             Prometheus.inc_counter
+               Keeper_metrics.metric_keeper_lifecycle_callback_failures
+               ~labels:[("keeper", (!meta_ref).name); ("callback", "post_tool_log_write")]
+               ();
+             Log.Keeper.warn
+               "keeper:%s tool=%s log_call write failed: %s"
+               (!meta_ref).name tool_name (Printexc.to_string exn));
         (try
            append_pr_review_action_metric
              ~config

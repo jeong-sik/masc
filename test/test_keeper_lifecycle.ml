@@ -1379,6 +1379,24 @@ let oversized_user_message ?(prompt = "긴 텍스트도 저장되면 안 돼") (
       metadata = [];
   }
 
+let checkpoint_counted_content_chars messages =
+  List.fold_left
+    (fun total (msg : Agent_sdk.Types.message) ->
+      List.fold_left
+        (fun total block ->
+          match block with
+          | Agent_sdk.Types.Text text -> total + String.length text
+          | Agent_sdk.Types.ToolResult { content; _ } ->
+              total + String.length content
+          | Agent_sdk.Types.Thinking { content; _ } ->
+              total + String.length content
+          | Agent_sdk.Types.RedactedThinking text -> total + String.length text
+          | _ -> total)
+        total
+        msg.content)
+    0
+    messages
+
 let summarized_contaminated_text =
   "[Summary of 2 earlier messages]\n\
    [User] ## Current World State\n\n\
@@ -1559,6 +1577,54 @@ let test_save_oas_checkpoint_caps_oversized_text () =
             (contains_substring text "[capped]");
           check bool "text was compacted" true
             (String.length text < String.length oversized_checkpoint_text))
+
+let test_save_oas_checkpoint_caps_total_content () =
+  let base_dir = temp_dir "keeper_lifecycle_save_total_cap" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let session =
+        KEC.create_session ~session_id:"trace-save-total-cap" ~base_dir
+      in
+      let large_text =
+        String.make (KCC.default_max_checkpoint_content_chars_total / 8) 'q'
+      in
+      let messages =
+        List.init 40 (fun i ->
+            Agent_sdk.Types.user_msg
+              (Printf.sprintf "bulk-checkpoint-%02d %s" i large_text))
+      in
+      let ctx =
+        KEC.create ~system_prompt:"keeper lifecycle" ~max_tokens:64_000
+        |> fun ctx -> KEC.append_many ctx messages
+        |> KEC.sync_oas_context
+      in
+      match
+        KEC.save_oas_checkpoint
+          ~max_checkpoint_messages:120
+          ~session
+          ~agent_name:"keeper-lifecycle"
+          ~model:"glm:glm-5.1"
+          ~ctx
+          ~generation:1
+      with
+      | Error e ->
+          Alcotest.fail
+            (Printf.sprintf "save_oas_checkpoint failed: %s" e)
+      | Ok checkpoint ->
+          check bool "global content cap enforced" true
+            (checkpoint_counted_content_chars checkpoint.messages
+             <= KCC.default_max_checkpoint_content_chars_total);
+          check bool "older messages dropped at total cap" true
+            (List.length checkpoint.messages < List.length messages);
+          let newest =
+            checkpoint.messages
+            |> List.rev
+            |> List.hd
+            |> Agent_sdk.Types.text_of_message
+          in
+          check bool "newest message retained" true
+            (contains_substring newest "bulk-checkpoint-39"))
 
 let test_sanitize_checkpoint_message_caps_oversized_tool_result () =
   let oversized =
@@ -2706,6 +2772,8 @@ let () =
             test_save_oas_checkpoint_strips_ephemeral_world_state;
           test_case "save caps oversized text" `Quick
             test_save_oas_checkpoint_caps_oversized_text;
+          test_case "save caps total checkpoint content" `Quick
+            test_save_oas_checkpoint_caps_total_content;
           test_case "save caps oversized tool result" `Quick
             test_sanitize_checkpoint_message_caps_oversized_tool_result;
           test_case "save caps aggregate tool result budget" `Quick

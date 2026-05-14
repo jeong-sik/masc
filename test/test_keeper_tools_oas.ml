@@ -277,7 +277,7 @@ let test_tool_side_effect_failures_are_observed () =
             ()))
 ;;
 
-let test_handler_persists_tool_call_io_without_post_hook () =
+let test_handler_does_not_write_tool_call_io_without_post_hook () =
   let meta = make_test_meta ~name:"test-keeper-direct-tool-io" () in
   let ctx_snapshot = make_test_ctx () in
   let dir = Filename.temp_file "test_keeper_tools_direct_io_" "" in
@@ -306,22 +306,11 @@ let test_handler_persists_tool_call_io_without_post_hook () =
         | Error { Agent_sdk.Types.message; _ } ->
           fail ("keeper_time_now should succeed: " ^ message));
        let entries = Keeper_tool_call_log.read_recent ~keeper_name:meta.name ~n:10 () in
-       check int "handler wrote one tool_call row" 1 (List.length entries);
-       let row = List.hd entries in
-       check
-         string
-         "tool"
-         "keeper_time_now"
-         Yojson.Safe.Util.(row |> member "tool" |> to_string);
-       check
-         string
-         "trace id"
-         "trace-direct-tool-io"
-         Yojson.Safe.Util.(row |> member "trace_id" |> to_string))
+       check int "handler does not write tool_call rows directly" 0 (List.length entries))
 ;;
 
-let test_post_hook_does_not_duplicate_handler_logged_io () =
-  let meta = make_test_meta ~name:"test-keeper-direct-tool-dedupe" () in
+let test_post_hook_is_single_tool_call_log_writer () =
+  let meta = make_test_meta ~name:"test-keeper-direct-tool-hook-writer" () in
   let meta_ref = ref meta in
   let ctx_snapshot = make_test_ctx () in
   let dir = Filename.temp_file "test_keeper_tools_direct_dedupe_" "" in
@@ -338,6 +327,11 @@ let test_post_hook_does_not_duplicate_handler_logged_io () =
        let config = Coord.default_config dir in
        Keeper_tool_call_log.reset_for_testing ();
        Keeper_tool_call_log.init ~base_path:dir ();
+       Keeper_tool_call_log.set_turn_context
+         ~keeper_name:meta.name
+         ~trace_id:"trace-hook-tool-io"
+         ~turn:1
+         ();
        let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
        let tool = find_tool "keeper_time_now" tools in
        let output_text =
@@ -365,9 +359,20 @@ let test_post_hook_does_not_duplicate_handler_logged_io () =
                ; result_bytes = String.length output_text
                ; duration_ms = 2.0
                ; schedule = dummy_schedule
-               }));
+           }));
        let entries = Keeper_tool_call_log.read_recent ~keeper_name:meta.name ~n:10 () in
-       check int "post hook did not duplicate handler row" 1 (List.length entries))
+       check int "post hook wrote one tool_call row" 1 (List.length entries);
+       let row = List.hd entries in
+       check
+         string
+         "tool"
+         "keeper_time_now"
+         Yojson.Safe.Util.(row |> member "tool" |> to_string);
+       check
+         string
+         "trace id"
+         "trace-hook-tool-io"
+         Yojson.Safe.Util.(row |> member "trace_id" |> to_string))
 ;;
 
 let test_oas_wrapper_records_keeper_internal_tool_call () =
@@ -1225,13 +1230,13 @@ let () =
             `Quick
             test_tool_side_effect_failures_are_observed
         ; test_case
-            "handler persists tool-call I/O without post hook"
+            "handler does not write tool-call I/O without post hook"
             `Quick
-            test_handler_persists_tool_call_io_without_post_hook
+            test_handler_does_not_write_tool_call_io_without_post_hook
         ; test_case
-            "post hook skips handler-logged tool-call I/O"
+            "post hook is the single tool-call I/O writer"
             `Quick
-            test_post_hook_does_not_duplicate_handler_logged_io
+            test_post_hook_is_single_tool_call_log_writer
         ; test_case
             "wrapper records keeper-internal calls"
             `Quick

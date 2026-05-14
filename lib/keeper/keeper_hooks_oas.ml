@@ -80,12 +80,18 @@ let current_keeper_model meta =
   let _ = meta in
   runtime_lane_label
 
+let stop_reason_label_end_turn = "end_turn"
+let stop_reason_label_tool_use = "tool_use"
+let stop_reason_label_max_tokens = "max_tokens"
+let stop_reason_label_stop_sequence = "stop_sequence"
+let stop_reason_label_unknown = "unknown"
+
 let stop_reason_to_label = function
-  | Agent_sdk.Types.EndTurn -> "end_turn"
-  | Agent_sdk.Types.StopToolUse -> "tool_use"
-  | Agent_sdk.Types.MaxTokens -> "max_tokens"
-  | Agent_sdk.Types.StopSequence -> "stop_sequence"
-  | Agent_sdk.Types.Unknown _ -> "unknown"
+  | Agent_sdk.Types.EndTurn -> stop_reason_label_end_turn
+  | Agent_sdk.Types.StopToolUse -> stop_reason_label_tool_use
+  | Agent_sdk.Types.MaxTokens -> stop_reason_label_max_tokens
+  | Agent_sdk.Types.StopSequence -> stop_reason_label_stop_sequence
+  | Agent_sdk.Types.Unknown _ -> stop_reason_label_unknown
 
 let idle_severity_to_label = function
   | Agent_sdk.Hooks.Idle_severity.Nudge -> "nudge"

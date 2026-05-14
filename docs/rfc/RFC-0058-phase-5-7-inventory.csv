@@ -1,0 +1,216 @@
+file,line,products,leak_class,line_text
+lib/codex_mcp_config_doctor.ml,32,codex,header_or_env_literal,"let expected_x_masc_agent = ""codex-mcp-client"""
+lib/codex_mcp_config_doctor.ml,33,codex,binding_name,"let codex_config_path_env_key = ""MASC_CODEX_CONFIG_PATH"""
+lib/codex_mcp_config_doctor.ml,38,codex,needs_review,"  stage ""codex_oauth_login"" Stage_skip"
+lib/codex_mcp_config_doctor.ml,39,codex,user_msg_string,"    ""`codex mcp login` is not part of the MASC bearer-token path"""
+lib/codex_mcp_config_doctor.ml,110,codex,symbol_reference,  match Sys.getenv_opt codex_config_path_env_key |> Env_config_core.trim_opt with
+lib/codex_mcp_config_doctor.ml,114,codex,path_template,"        (fun home -> Filename.concat home "".codex/config.toml"")"
+lib/codex_mcp_config_doctor.ml,122,codex,symbol_reference,"          stage ""codex_config_file"" Stage_pass"
+lib/codex_mcp_config_doctor.ml,124,codex,symbol_reference,"          stage ""codex_config_parse"" Stage_fail parse_error;"
+lib/codex_mcp_config_doctor.ml,125,codex,needs_review,"          stage ""codex_server_config"" Stage_skip"
+lib/codex_mcp_config_doctor.ml,126,codex,user_msg_string,"            ""skipped because Codex config did not parse as TOML"";"
+lib/codex_mcp_config_doctor.ml,127,codex,symbol_reference,"          stage ""codex_auth_model"" Stage_skip"
+lib/codex_mcp_config_doctor.ml,128,codex,user_msg_string,"            ""skipped because Codex config did not parse as TOML"";"
+lib/codex_mcp_config_doctor.ml,129,codex,needs_review,"          stage ""codex_http_headers"" Stage_skip"
+lib/codex_mcp_config_doctor.ml,130,codex,user_msg_string,"            ""skipped because Codex config did not parse as TOML"";"
+lib/codex_mcp_config_doctor.ml,131,codex,needs_review,"          stage ""codex_agent_header"" Stage_skip"
+lib/codex_mcp_config_doctor.ml,132,codex,user_msg_string,"            ""skipped because Codex config did not parse as TOML"";"
+lib/codex_mcp_config_doctor.ml,187,codex,symbol_reference,"        stage ""codex_config_file"" Stage_pass"
+lib/codex_mcp_config_doctor.ml,191,codex,symbol_reference,"        stage ""codex_config_parse"" Stage_pass ""TOML parsed"""
+lib/codex_mcp_config_doctor.ml,195,codex,needs_review,"          stage ""codex_server_config"" Stage_pass"
+lib/codex_mcp_config_doctor.ml,198,codex,needs_review,"          stage ""codex_server_config"" Stage_fail"
+lib/codex_mcp_config_doctor.ml,206,codex,symbol_reference,"            stage ""codex_auth_model"" Stage_skip"
+lib/codex_mcp_config_doctor.ml,210,codex,symbol_reference,"            stage ""codex_auth_model"" Stage_pass"
+lib/codex_mcp_config_doctor.ml,214,codex,symbol_reference,"            stage ""codex_auth_model"" Stage_fail"
+lib/codex_mcp_config_doctor.ml,217,codex,symbol_reference,"            stage ""codex_auth_model"" Stage_fail"
+lib/codex_mcp_config_doctor.ml,222,codex,symbol_reference,"            stage ""codex_auth_model"" Stage_fail"
+lib/codex_mcp_config_doctor.ml,225,codex,symbol_reference,"            stage ""codex_auth_model"" Stage_fail"
+lib/codex_mcp_config_doctor.ml,231,codex,needs_review,"            stage ""codex_http_headers"" Stage_skip"
+lib/codex_mcp_config_doctor.ml,234,codex,needs_review,"            stage ""codex_http_headers"" Stage_pass"
+lib/codex_mcp_config_doctor.ml,237,codex,needs_review,"            stage ""codex_http_headers"" Stage_fail"
+lib/codex_mcp_config_doctor.ml,240,codex,needs_review,"            stage ""codex_http_headers"" Stage_fail"
+lib/codex_mcp_config_doctor.ml,246,codex,needs_review,"            stage ""codex_agent_header"" Stage_skip"
+lib/codex_mcp_config_doctor.ml,249,codex,needs_review,"            stage ""codex_agent_header"" Stage_pass"
+lib/codex_mcp_config_doctor.ml,250,codex,header_or_env_literal,"              ""X-MASC-Agent identifies codex-mcp-client"""
+lib/codex_mcp_config_doctor.ml,252,codex,needs_review,"            stage ""codex_agent_header"" Stage_warn"
+lib/codex_mcp_config_doctor.ml,253,codex,header_or_env_literal,"              ""X-MASC-Agent is present but not codex-mcp-client"""
+lib/codex_mcp_config_doctor.ml,255,codex,needs_review,"            stage ""codex_agent_header"" Stage_warn"
+lib/codex_mcp_config_doctor.ml,256,codex,header_or_env_literal,"              ""missing X-MASC-Agent=codex-mcp-client header"""
+lib/codex_mcp_config_doctor.ml,288,codex,symbol_reference,"        stage ""codex_config_file"" Stage_fail"
+lib/codex_mcp_config_doctor.ml,289,codex,user_msg_string,"          (Printf.sprintf ""Codex config file does not exist: %s"" config_path);"
+lib/codex_mcp_config_doctor.ml,290,codex,symbol_reference,"        stage ""codex_config_parse"" Stage_skip"
+lib/codex_mcp_config_doctor.ml,291,codex,user_msg_string,"          ""skipped because Codex config file is missing"";"
+lib/codex_mcp_config_doctor.ml,292,codex,needs_review,"        stage ""codex_server_config"" Stage_skip"
+lib/codex_mcp_config_doctor.ml,293,codex,user_msg_string,"          ""skipped because Codex config file is missing"";"
+lib/codex_mcp_config_doctor.ml,294,codex,symbol_reference,"        stage ""codex_auth_model"" Stage_skip"
+lib/codex_mcp_config_doctor.ml,295,codex,user_msg_string,"          ""skipped because Codex config file is missing"";"
+lib/codex_mcp_config_doctor.ml,296,codex,needs_review,"        stage ""codex_http_headers"" Stage_skip"
+lib/codex_mcp_config_doctor.ml,297,codex,user_msg_string,"          ""skipped because Codex config file is missing"";"
+lib/codex_mcp_config_doctor.ml,298,codex,needs_review,"        stage ""codex_agent_header"" Stage_skip"
+lib/codex_mcp_config_doctor.ml,299,codex,user_msg_string,"          ""skipped because Codex config file is missing"";"
+lib/codex_mcp_config_doctor.ml,310,codex,symbol_reference,"            stage ""codex_config_file"" Stage_fail"
+lib/codex_mcp_config_doctor.ml,313,codex,symbol_reference,"            stage ""codex_config_parse"" Stage_skip"
+lib/codex_mcp_config_doctor.ml,314,codex,user_msg_string,"              ""skipped because Codex config file could not be read"";"
+lib/codex_mcp_config_doctor.ml,315,codex,needs_review,"            stage ""codex_server_config"" Stage_skip"
+lib/codex_mcp_config_doctor.ml,316,codex,user_msg_string,"              ""skipped because Codex config file could not be read"";"
+lib/codex_mcp_config_doctor.ml,317,codex,symbol_reference,"            stage ""codex_auth_model"" Stage_skip"
+lib/codex_mcp_config_doctor.ml,318,codex,user_msg_string,"              ""skipped because Codex config file could not be read"";"
+lib/codex_mcp_config_doctor.ml,319,codex,needs_review,"            stage ""codex_http_headers"" Stage_skip"
+lib/codex_mcp_config_doctor.ml,320,codex,user_msg_string,"              ""skipped because Codex config file could not be read"";"
+lib/codex_mcp_config_doctor.ml,321,codex,needs_review,"            stage ""codex_agent_header"" Stage_skip"
+lib/codex_mcp_config_doctor.ml,322,codex,user_msg_string,"              ""skipped because Codex config file could not be read"";"
+lib/codex_mcp_config_doctor.ml,331,codex,symbol_reference,"          stage ""codex_config_file"" Stage_fail"
+lib/codex_mcp_config_doctor.ml,332,codex,header_or_env_literal,"            ""HOME and MASC_CODEX_CONFIG_PATH are unset"";"
+lib/codex_mcp_config_doctor.ml,333,codex,symbol_reference,"          stage ""codex_config_parse"" Stage_skip"
+lib/codex_mcp_config_doctor.ml,334,codex,user_msg_string,"            ""skipped because Codex config path is unknown"";"
+lib/codex_mcp_config_doctor.ml,335,codex,needs_review,"          stage ""codex_server_config"" Stage_skip"
+lib/codex_mcp_config_doctor.ml,336,codex,user_msg_string,"            ""skipped because Codex config path is unknown"";"
+lib/codex_mcp_config_doctor.ml,337,codex,symbol_reference,"          stage ""codex_auth_model"" Stage_skip"
+lib/codex_mcp_config_doctor.ml,338,codex,user_msg_string,"            ""skipped because Codex config path is unknown"";"
+lib/codex_mcp_config_doctor.ml,339,codex,needs_review,"          stage ""codex_http_headers"" Stage_skip"
+lib/codex_mcp_config_doctor.ml,340,codex,user_msg_string,"            ""skipped because Codex config path is unknown"";"
+lib/codex_mcp_config_doctor.ml,341,codex,needs_review,"          stage ""codex_agent_header"" Stage_skip"
+lib/codex_mcp_config_doctor.ml,342,codex,user_msg_string,"            ""skipped because Codex config path is unknown"";"
+lib/codex_mcp_config_doctor.ml,391,codex,user_msg_string,"               (Printf.sprintf ""Codex MCP pipeline %s: %s"" stage.name"
+lib/codex_mcp_config_doctor.ml,407,codex,symbol_reference,"    (if has_stage ""codex_config_file"" then"
+lib/codex_mcp_config_doctor.ml,409,codex,header_or_env_literal,"         ""Set MASC_CODEX_CONFIG_PATH or HOME so doctor auth can inspect the Codex MCP config file."""
+lib/codex_mcp_config_doctor.ml,412,codex,needs_review,"    (if has_stage ""codex_server_config"" then"
+lib/codex_mcp_config_doctor.ml,414,codex,user_msg_string,"         ""Create a [mcp_servers.masc] entry in Codex config; MASC does not use `codex mcp login` OAuth."""
+lib/codex_mcp_config_doctor.ml,417,codex,symbol_reference,"    (if has_stage ""codex_auth_model"" then"
+lib/codex_mcp_config_doctor.ml,422,codex,needs_review,"    (if has_stage ""codex_http_headers"" then"
+lib/codex_mcp_config_doctor.ml,427,codex,needs_review,"    (if has_stage ""codex_agent_header"" then"
+lib/codex_mcp_config_doctor.ml,429,codex,header_or_env_literal,"         ""Set [mcp_servers.masc].http_headers.X-MASC-Agent=\""codex-mcp-client\"" for config/runtime attribution."""
+lib/codex_mcp_config_doctor.mli,1,codex,docstring,(** Codex_mcp_config_doctor — diagnose the Codex MCP client config.
+lib/codex_mcp_config_doctor.mli,3,codex,path_template,    Reads [<HOME>/.codex/config.toml] (or whatever
+lib/codex_mcp_config_doctor.mli,4,codex,header_or_env_literal,    [MASC_CODEX_CONFIG_PATH] points at) and produces a {!type-t}
+lib/codex_mcp_config_doctor.mli,16,codex,symbol_reference,    [codex_config_path_env_key]) are hidden — callers consume the
+lib/codex_mcp_config_doctor.mli,52,codex,docstring,(** Build a report from the resolved Codex config path. When neither
+lib/codex_mcp_config_doctor.mli,53,codex,header_or_env_literal,"    [HOME] nor [MASC_CODEX_CONFIG_PATH] is set, every dependent stage"
+lib/codex_mcp_config_doctor.mli,60,codex,needs_review,    [Codex MCP pipeline <stage>: <detail>] for stages whose status
+lib/auth_doctor.ml,17,codex,binding_name,type codex_mcp = {
+lib/auth_doctor.ml,28,codex,module_reference,  config : Codex_mcp_config_doctor.t;
+lib/auth_doctor.ml,70,codex,symbol_reference,  codex_mcp : codex_mcp;
+lib/auth_doctor.ml,87,codex,binding_name,"let codex_mcp_token_env_var = ""MASC_MCP_TOKEN"""
+lib/auth_doctor.ml,89,codex,binding_name,let codex_mcp_login_note =
+lib/auth_doctor.ml,90,codex,user_msg_string,"  ""`codex mcp login` is OAuth-only; masc-mcp uses bearer token auth."""
+lib/auth_doctor.ml,101,codex,string_literal,"      client_name = ""codex"";"
+lib/auth_doctor.ml,102,codex,header_or_env_literal,"      agent_name = ""codex-mcp-client"";"
+lib/auth_doctor.ml,103,codex,symbol_reference,      token_env_var = codex_mcp_token_env_var;
+lib/auth_doctor.ml,111,gemini,string_literal,"      client_name = ""gemini"";"
+lib/auth_doctor.ml,112,gemini,string_literal,"      agent_name = ""gemini"";"
+lib/auth_doctor.ml,113,gemini,header_or_env_literal,"      token_env_var = ""MASC_GEMINI_MCP_TOKEN"";"
+lib/auth_doctor.ml,178,codex,string_literal,"    Some ""codex"";"
+lib/auth_doctor.ml,179,codex,header_or_env_literal,"    Some ""codex-mcp-client"";"
+lib/auth_doctor.ml,259,codex,binding_name,let codex_mcp_report ~base_path =
+lib/auth_doctor.ml,260,codex,module_reference,  let config = Codex_mcp_config_doctor.analyze_default () in
+lib/auth_doctor.ml,262,codex,symbol_reference,    Sys.getenv_opt codex_mcp_token_env_var |> Env_config_core.trim_opt
+lib/auth_doctor.ml,268,codex,symbol_reference,        token_env_var = codex_mcp_token_env_var;
+lib/auth_doctor.ml,275,codex,symbol_reference,        login_note = codex_mcp_login_note;
+lib/auth_doctor.ml,284,codex,symbol_reference,            token_env_var = codex_mcp_token_env_var;
+lib/auth_doctor.ml,292,codex,symbol_reference,            login_note = codex_mcp_login_note;
+lib/auth_doctor.ml,299,codex,symbol_reference,            token_env_var = codex_mcp_token_env_var;
+lib/auth_doctor.ml,306,codex,symbol_reference,            login_note = codex_mcp_login_note;
+lib/auth_doctor.ml,419,codex,binding_name,  let codex_mcp = codex_mcp_report ~base_path in
+lib/auth_doctor.ml,433,codex,binding_name,"  let codex = Auth.load_credential base_path ""codex"" in"
+lib/auth_doctor.ml,434,codex,binding_name,  let codex_mcp_client =
+lib/auth_doctor.ml,435,codex,header_or_env_literal,"    Auth.load_credential base_path ""codex-mcp-client"""
+lib/auth_doctor.ml,470,codex,needs_review,      (match codex with
+lib/auth_doctor.ml,474,codex,string_literal,"                ""codex is role=%s, so requests authenticated as codex cannot satisfy %s."""
+lib/auth_doctor.ml,478,codex,symbol_reference,      (match codex_mcp_client with
+lib/auth_doctor.ml,482,codex,header_or_env_literal,"                ""codex-mcp-client is role=%s, so dashboard save flows using that bearer will fail on admin-only routes such as POST /api/v1/"
+lib/auth_doctor.ml,491,codex,symbol_reference,         match codex_mcp.token_status with
+lib/auth_doctor.ml,494,codex,user_msg_string,"               ""Codex MCP bearer env var MASC_MCP_TOKEN is unset; Codex should use bearer_token_env_var, not `codex mcp login`."""
+lib/auth_doctor.ml,497,codex,user_msg_string,"               ""Codex MCP bearer env var MASC_MCP_TOKEN is set, but it does not resolve to a live credential in this base path."""
+lib/auth_doctor.ml,507,codex,module_reference,         @ Codex_mcp_config_doctor.warnings codex_mcp.config)
+lib/auth_doctor.ml,527,codex,symbol_reference,          && (match codex_mcp_client with
+lib/auth_doctor.ml,531,codex,header_or_env_literal,"           ""Use dashboard-dev or another admin bearer for POST /api/v1/cascade/config/raw; the codex-mcp-client worker bearer cannot satisfy"
+lib/auth_doctor.ml,547,codex,symbol_reference,"          && not (String.equal codex_mcp.token_status ""live"") then"
+lib/auth_doctor.ml,549,codex,header_or_env_literal,"           ""For Codex MCP, run `masc-mcp login --agent codex-mcp-client --role worker --shell` and export MASC_MCP_TOKEN; do not run `codex "
+lib/auth_doctor.ml,552,codex,user_msg_string,"      Some ""For Codex MCP pipeline drift, inspect the codex_mcp.config.stages section from `masc-mcp doctor auth --json`."";"
+lib/auth_doctor.ml,559,codex,module_reference,         @ Codex_mcp_config_doctor.next_actions codex_mcp.config)
+lib/auth_doctor.ml,594,codex,symbol_reference,    codex_mcp;
+lib/auth_doctor.ml,614,codex,binding_name,let codex_mcp_to_yojson codex_mcp =
+lib/auth_doctor.ml,617,codex,symbol_reference,"      (""server_name"", `String codex_mcp.server_name);"
+lib/auth_doctor.ml,618,codex,symbol_reference,"      (""auth_model"", `String codex_mcp.auth_model);"
+lib/auth_doctor.ml,619,codex,symbol_reference,"      (""token_env_var"", `String codex_mcp.token_env_var);"
+lib/auth_doctor.ml,620,codex,symbol_reference,"      (""token_env_configured"", `Bool codex_mcp.token_env_configured);"
+lib/auth_doctor.ml,621,codex,symbol_reference,"      (""token_status"", `String codex_mcp.token_status);"
+lib/auth_doctor.ml,622,codex,symbol_reference,"      (option_field ""token_agent"" codex_mcp.token_agent);"
+lib/auth_doctor.ml,623,codex,symbol_reference,"      (option_field ""token_role"" codex_mcp.token_role);"
+lib/auth_doctor.ml,625,codex,symbol_reference,        match codex_mcp.token_can_read_state with
+lib/auth_doctor.ml,628,codex,symbol_reference,"      (""login_supported"", `Bool codex_mcp.login_supported);"
+lib/auth_doctor.ml,629,codex,symbol_reference,"      (""login_note"", `String codex_mcp.login_note);"
+lib/auth_doctor.ml,630,codex,module_reference,"      (""config"", Codex_mcp_config_doctor.to_yojson codex_mcp.config);"
+lib/auth_doctor.ml,693,codex,symbol_reference,"      (""codex_mcp"", codex_mcp_to_yojson report.codex_mcp);"
+lib/auth_doctor.ml,773,codex,symbol_reference,"  add_line ""codex_mcp:"";"
+lib/auth_doctor.ml,775,codex,symbol_reference,"    (Printf.sprintf ""- server_name: %s"" report.codex_mcp.server_name);"
+lib/auth_doctor.ml,777,codex,symbol_reference,"    (Printf.sprintf ""- auth_model: %s"" report.codex_mcp.auth_model);"
+lib/auth_doctor.ml,780,codex,symbol_reference,       report.codex_mcp.token_env_var);
+lib/auth_doctor.ml,783,codex,symbol_reference,       (yes_no report.codex_mcp.token_env_configured));
+lib/auth_doctor.ml,786,codex,symbol_reference,       report.codex_mcp.token_status);
+lib/auth_doctor.ml,789,codex,symbol_reference,       (option_value report.codex_mcp.token_agent));
+lib/auth_doctor.ml,792,codex,symbol_reference,       (option_value report.codex_mcp.token_role));
+lib/auth_doctor.ml,795,codex,symbol_reference,       (match report.codex_mcp.token_can_read_state with
+lib/auth_doctor.ml,800,codex,symbol_reference,       (yes_no report.codex_mcp.login_supported));
+lib/auth_doctor.ml,801,codex,symbol_reference,"  add_line (Printf.sprintf ""- login_note: %s"" report.codex_mcp.login_note);"
+lib/auth_doctor.ml,805,codex,symbol_reference,       (option_value report.codex_mcp.config.config_path));
+lib/auth_doctor.ml,808,codex,symbol_reference,       (yes_no report.codex_mcp.config.file_present));
+lib/auth_doctor.ml,811,codex,symbol_reference,       (match report.codex_mcp.config.server_names with
+lib/auth_doctor.ml,816,codex,module_reference,    (fun (stage : Codex_mcp_config_doctor.stage) ->
+lib/auth_doctor.ml,819,codex,module_reference,           (Codex_mcp_config_doctor.stage_status_to_string stage.status)
+lib/auth_doctor.ml,821,codex,symbol_reference,    report.codex_mcp.config.stages;
+lib/auth_doctor.mli,9,codex,symbol_reference,"    \[admin_token_env_state] enum, [codex_mcp_token_env_var] /"
+lib/auth_doctor.mli,10,codex,symbol_reference,"    [codex_mcp_login_note] pinned literals,"
+lib/auth_doctor.mli,17,codex,symbol_reference,"    [codex_mcp_report], MCP client identity checks, plus the per-record yojson encoders"
+lib/auth_doctor.mli,18,codex,symbol_reference,"    ([watched_agent_to_yojson], [codex_mcp_to_yojson])."
+lib/auth_doctor.mli,47,codex,binding_name,type codex_mcp = {
+lib/auth_doctor.mli,58,codex,module_reference,  config : Codex_mcp_config_doctor.t;
+lib/auth_doctor.mli,60,codex,docstring,(** Codex MCP wiring snapshot.  [login_note] documents that
+lib/auth_doctor.mli,61,codex,needs_review,    [codex mcp login] is OAuth-only while masc-mcp uses bearer
+lib/auth_doctor.mli,79,codex|gemini,docstring,(** Per-client MCP identity readiness for local Codex/Claude/Gemini
+lib/auth_doctor.mli,109,codex,symbol_reference,  codex_mcp : codex_mcp;
+lib/auth_doctor.mli,135,codex,module_reference,    + Codex MCP config via {!Codex_mcp_config_doctor}.
+lib/auth_doctor.mli,136,codex|gemini,needs_review,"    + Local MCP client identities for Codex, Claude, and Gemini."
+lib/server/server_runtime_bootstrap.ml,26,gemini,needs_review,"  let policy_path = ""/tmp/gemini_headless_admin_policy.json"" in"
+lib/server/server_runtime_bootstrap.ml,30,gemini,needs_review,"  Unix.putenv ""OAS_GEMINI_ADMIN_POLICY"" policy_path"
+lib/server/server_runtime_bootstrap.ml,679,codex,binding_name,"let sync_codex_mcp_config_env_key = ""MASC_SYNC_CODEX_MCP_CONFIG"""
+lib/server/server_runtime_bootstrap.ml,680,codex,binding_name,"let codex_config_path_env_key = ""MASC_CODEX_CONFIG_PATH"""
+lib/server/server_runtime_bootstrap.ml,682,codex,binding_name,type codex_mcp_config_sync_status =
+lib/server/server_runtime_bootstrap.ml,683,codex,needs_review,  | Codex_mcp_config_updated
+lib/server/server_runtime_bootstrap.ml,684,codex,needs_review,  | Codex_mcp_config_unchanged
+lib/server/server_runtime_bootstrap.ml,685,codex,needs_review,  | Codex_mcp_config_server_missing
+lib/server/server_runtime_bootstrap.ml,686,codex,needs_review,  | Codex_mcp_config_header_missing
+lib/server/server_runtime_bootstrap.ml,760,codex,binding_name,let codex_mcp_headers_line indent =
+lib/server/server_runtime_bootstrap.ml,762,codex,header_or_env_literal,"    ""%shttp_headers = { \""Accept\"" = \""application/json, text/event-stream\"", \""X-MASC-Agent\"" = \""codex-mcp-client\"" }"""
+lib/server/server_runtime_bootstrap.ml,765,codex,binding_name,let codex_mcp_bearer_env_line indent =
+lib/server/server_runtime_bootstrap.ml,768,codex,binding_name,let sync_codex_mcp_auth_header_content content =
+lib/server/server_runtime_bootstrap.ml,777,codex,symbol_reference,"        (codex_mcp_headers_line """" :: acc, true, true)"
+lib/server/server_runtime_bootstrap.ml,783,codex,symbol_reference,"        (codex_mcp_bearer_env_line """" :: acc, true, true)"
+lib/server/server_runtime_bootstrap.ml,800,codex,needs_review,            Codex_mcp_config_server_missing
+lib/server/server_runtime_bootstrap.ml,802,codex,needs_review,            Codex_mcp_config_header_missing
+lib/server/server_runtime_bootstrap.ml,804,codex,needs_review,            Codex_mcp_config_updated
+lib/server/server_runtime_bootstrap.ml,806,codex,needs_review,            Codex_mcp_config_unchanged
+lib/server/server_runtime_bootstrap.ml,842,codex,symbol_reference,            let next = codex_mcp_headers_line (leading_indent line) in
+lib/server/server_runtime_bootstrap.ml,848,codex,symbol_reference,            let next = codex_mcp_bearer_env_line (leading_indent line) in
+lib/server/server_runtime_bootstrap.ml,869,codex,binding_name,let codex_config_path_opt () =
+lib/server/server_runtime_bootstrap.ml,870,codex,symbol_reference,  match Sys.getenv_opt codex_config_path_env_key |> Env_config_core.trim_opt with
+lib/server/server_runtime_bootstrap.ml,874,codex,path_template,"        (fun home -> Filename.concat home "".codex/config.toml"")"
+lib/server/server_runtime_bootstrap.ml,877,codex,binding_name,let sync_codex_mcp_config ~agent_name =
+lib/server/server_runtime_bootstrap.ml,880,codex,needs_review,      (Env_config_core.get_bool ~default:false sync_codex_mcp_config_env_key)
+lib/server/server_runtime_bootstrap.ml,884,codex,symbol_reference,    match codex_config_path_opt () with
+lib/server/server_runtime_bootstrap.ml,887,codex,user_msg_string,"          ""startup skipped Codex MCP config sync: HOME is not set"""
+lib/server/server_runtime_bootstrap.ml,891,codex,user_msg_string,"            ""startup skipped Codex MCP config sync: %s does not exist"""
+lib/server/server_runtime_bootstrap.ml,896,codex,needs_review,"            let updated, status = sync_codex_mcp_auth_header_content content in"
+lib/server/server_runtime_bootstrap.ml,898,codex,needs_review,             | Codex_mcp_config_updated ->
+lib/server/server_runtime_bootstrap.ml,901,codex,user_msg_string,"                   ""startup synced Codex MCP bearer-token env config for %s in %s"""
+lib/server/server_runtime_bootstrap.ml,903,codex,needs_review,             | Codex_mcp_config_unchanged ->
+lib/server/server_runtime_bootstrap.ml,905,codex,user_msg_string,"                   ""startup Codex MCP bearer-token env config already current for %s"""
+lib/server/server_runtime_bootstrap.ml,907,codex,needs_review,             | Codex_mcp_config_server_missing ->
+lib/server/server_runtime_bootstrap.ml,909,codex,user_msg_string,"                   ""startup skipped Codex MCP config sync: [mcp_servers.masc] missing in %s"""
+lib/server/server_runtime_bootstrap.ml,911,codex,needs_review,             | Codex_mcp_config_header_missing ->
+lib/server/server_runtime_bootstrap.ml,913,codex,user_msg_string,"                   ""startup skipped Codex MCP config sync: masc http_headers missing in %s"""
+lib/server/server_runtime_bootstrap.ml,919,codex,user_msg_string,"                ""startup failed Codex MCP config sync for %s: %s"""
+lib/server/server_runtime_bootstrap.ml,1002,codex,header_or_env_literal,"  if String.equal agent_name ""codex-mcp-client"" then"
+lib/server/server_runtime_bootstrap.ml,1003,codex,needs_review,    sync_codex_mcp_config ~agent_name
+lib/server/server_runtime_bootstrap.ml,1007,codex,header_or_env_literal,"    (""codex-mcp-client"", Masc_domain.Worker);"
+lib/server/server_runtime_bootstrap.ml,1009,gemini,string_literal,"    (""gemini"", Masc_domain.Worker);"

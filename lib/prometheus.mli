@@ -871,6 +871,19 @@ val metric_auth_archive_epochs : string
     by the per-boot prune count. *)
 val metric_auth_archive_pruned_total : string
 
+(** Flow counter for [Auth.archive_bare_for_canonical] dispatch outcomes.
+    Labels: [outcome] ∈ {alive_skip, dead_archive, absent}. Surfaces per-call
+    archive frequency that the snapshot {!metric_auth_bare_alias} gauge
+    cannot show. A non-zero [dead_archive] rate after PR #15112 indicates a
+    γ classifier regression. *)
+val metric_auth_bare_alias_outcome_total : string
+
+(** Heartbeat counter for [Auth.start_bare_alias_audit_fiber]. Increments on
+    every successful tick. [rate([5m]) < 0.01] indicates the fiber stalled,
+    distinguishable from binary-version-absent (which would zero out all
+    other auth metrics at once via the absent() check). *)
+val metric_auth_bare_alias_audit_ticks_total : string
+
 (** #9786 runtime complement: every [find_credential_by_token]
     lookup that hits N>=2 matches fires this counter.
     Labels: [first_match] = the agent_name that won the

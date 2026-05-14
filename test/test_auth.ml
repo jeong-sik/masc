@@ -967,6 +967,107 @@ let test_prune_archive_honors_min_keep () =
       check int "all aged kept (under min_keep)" 3 kept;
       check int "nothing pruned" 0 pruned)
 
+(* Audit-derived HOLE A close: each archive_bare_for_canonical dispatch
+   branch increments masc_auth_bare_alias_outcome_total with the matching
+   outcome label. Without this counter the boot snapshot gauge cannot show
+   per-call archive frequency, only end-state. *)
+let test_archive_bare_outcome_counter_increments_per_branch () =
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      ignore
+        (Auth.enable_auth dir ~require_token:true
+           ~agent_name:"bootstrap-admin");
+      let read outcome =
+        Masc_mcp.Prometheus.metric_value_or_zero
+          Masc_mcp.Prometheus.metric_auth_bare_alias_outcome_total
+          ~labels:[("outcome", outcome)]
+          ()
+      in
+      let ensure name =
+        match Auth.ensure_keeper_credential dir ~agent_name:name with
+        | Ok _ -> ()
+        | Error e -> fail (Masc_domain.masc_error_to_string e)
+      in
+      (* absent branch — first boot of a clean keeper *)
+      let absent_before = read "absent" in
+      ensure "keeper-gamma-agent";
+      check (float 0.0001) "absent += 1"
+        (absent_before +. 1.0) (read "absent");
+      (* alive_skip branch — alias written, then re-boot *)
+      ensure "keeper-alpha-agent";
+      (match
+         Auth.ensure_credential_alias dir
+           ~canonical_name:"keeper-alpha-agent" ~alias_name:"alpha"
+       with
+       | Ok () -> ()
+       | Error e -> fail (Masc_domain.masc_error_to_string e));
+      let alive_before = read "alive_skip" in
+      ensure "keeper-alpha-agent";
+      check (float 0.0001) "alive_skip += 1"
+        (alive_before +. 1.0) (read "alive_skip");
+      (* dead_archive branch — bare stub aimed at stale UUID *)
+      ensure "keeper-beta-agent";
+      Auth.save_private_text_file
+        (Auth.credential_file dir "beta")
+        {|{ "redirect_to": "stale-uuid.json" }|};
+      let dead_before = read "dead_archive" in
+      ensure "keeper-beta-agent";
+      check (float 0.0001) "dead_archive += 1"
+        (dead_before +. 1.0) (read "dead_archive"))
+
+(* Audit-derived HOLE B close: the periodic audit fiber increments
+   masc_auth_bare_alias_audit_ticks_total once per tick. Injecting a 50ms
+   interval lets us prove the heartbeat exists without a 60s wait. *)
+let test_bare_alias_audit_fiber_emits_heartbeat () =
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv "MASC_AUTH_BARE_ALIAS_AUDIT_INTERVAL_S" "";
+      cleanup_test_room dir)
+    (fun () ->
+      Unix.putenv "MASC_AUTH_BARE_ALIAS_AUDIT_INTERVAL_S" "0.05";
+      ignore
+        (Auth.enable_auth dir ~require_token:true
+           ~agent_name:"bootstrap-admin");
+      (match
+         Auth.ensure_keeper_credential dir
+           ~agent_name:"keeper-heartbeat-agent"
+       with
+       | Ok _ -> ()
+       | Error e -> fail (Masc_domain.masc_error_to_string e));
+      let read () =
+        Masc_mcp.Prometheus.metric_value_or_zero
+          Masc_mcp.Prometheus.metric_auth_bare_alias_audit_ticks_total
+          ()
+      in
+      let baseline = read () in
+      Eio_main.run (fun env ->
+        let clock = Eio.Stdenv.clock env in
+        match
+          Eio.Time.with_timeout clock 0.3 (fun () ->
+            Eio.Switch.run (fun sw ->
+              Auth.start_bare_alias_audit_fiber
+                ~sw
+                ~clock
+                ~base_path:dir
+                ~canonical_names_fn:(fun () ->
+                  ["keeper-heartbeat-agent"]);
+              (* sleep longer than the outer timeout so the timeout
+                 cancels the switch (and thus the periodic fiber). *)
+              Eio.Time.sleep clock 1.0;
+              Ok ())
+          )
+        with
+        | Ok () -> ()
+        | Error `Timeout -> ());
+      let observed = read () -. baseline in
+      check bool
+        (Printf.sprintf "fiber emitted >= 3 ticks (observed=%.0f)" observed)
+        true
+        (observed >= 3.0))
+
 let test_ensure_keeper_credential_reuses_persisted_raw_token_when_env_mismatched () =
   let dir = setup_test_room () in
   Fun.protect
@@ -1355,6 +1456,10 @@ let () =
         test_prune_archive_retains_recent_and_drops_old;
       test_case "prune_archive honors min_keep" `Quick
         test_prune_archive_honors_min_keep;
+      test_case "archive_bare outcome counter per branch" `Quick
+        test_archive_bare_outcome_counter_increments_per_branch;
+      test_case "bare_alias_audit fiber emits heartbeat" `Quick
+        test_bare_alias_audit_fiber_emits_heartbeat;
     ];
     "permissions", [
       test_case "worker permissions" `Quick test_worker_permissions;

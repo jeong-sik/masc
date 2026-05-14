@@ -383,7 +383,7 @@ function traceRouteContext(event: KeeperTraceEvent): IdeContextRouteContext {
   if (event.source === 'decision-log') {
     return {
       surface: 'Decision',
-      label: event.semanticOutcome ?? 'decision',
+      label: event.semanticOutcome ?? '(unknown outcome)',
       sourceId: `trace:${event.id}`,
       keeperId: event.keeperName,
       telemetryQuery: event.decisionId,

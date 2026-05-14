@@ -121,6 +121,102 @@ let test_timeout_log_carries_failure_envelope () =
         | Ok value -> Alcotest.failf "unexpected success: %s" value)))
 ;;
 
+let test_parent_timeout_cancel_logs_info () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      Masc_eio_env.reset_for_test ();
+      Fun.protect ~finally:Masc_eio_env.reset_for_test (fun () ->
+        Masc_eio_env.init ~sw ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env) ();
+        let cancelled =
+          try
+            ignore
+              (Keeper_llm_bridge.run_with_timeout_and_fallback
+                 ~cancel_classification:Keeper_llm_bridge.Routine_parent_cancel
+                 ~timeout_s:1.0
+                 (fun () -> raise (Eio.Cancel.Cancelled Eio.Time.Timeout)));
+            false
+          with
+          | Eio.Cancel.Cancelled _ -> true
+        in
+        Alcotest.(check bool) "cancel re-raised" true cancelled;
+        match latest_keeper_log_matching "bucket=fast inner=Eio__Time.Timeout" with
+        | None -> Alcotest.fail "missing parent timeout cancel log"
+        | Some entry ->
+          let open Yojson.Safe.Util in
+          Alcotest.(check string)
+            "routine parent timeout cancel is info"
+            "INFO"
+            (Log.level_to_string entry.Log.Ring.level);
+          Alcotest.(check string)
+            "log class"
+            "routine_parent_cancel"
+            (entry.Log.Ring.details |> member "log_class" |> to_string))))
+;;
+
+let test_default_parent_timeout_cancel_stays_warn () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      Masc_eio_env.reset_for_test ();
+      Fun.protect ~finally:Masc_eio_env.reset_for_test (fun () ->
+        Masc_eio_env.init ~sw ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env) ();
+        let cancelled =
+          try
+            ignore
+              (Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s:1.0
+                 (fun () -> raise (Eio.Cancel.Cancelled Eio.Time.Timeout)));
+            false
+          with
+          | Eio.Cancel.Cancelled _ -> true
+        in
+        Alcotest.(check bool) "cancel re-raised" true cancelled;
+        match latest_keeper_log_matching "bucket=fast inner=Eio__Time.Timeout" with
+        | None -> Alcotest.fail "missing default timeout cancel log"
+        | Some entry ->
+          let open Yojson.Safe.Util in
+          Alcotest.(check string)
+            "default parent timeout cancel stays warn"
+            "WARN"
+            (Log.level_to_string entry.Log.Ring.level);
+          Alcotest.(check string)
+            "log class"
+            "warn_cancel"
+            (entry.Log.Ring.details |> member "log_class" |> to_string);
+          Alcotest.(check string)
+            "cancel classification"
+            "unknown_cancel"
+            (entry.Log.Ring.details |> member "cancel_classification" |> to_string))))
+;;
+
+let test_unknown_cancel_stays_warn () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      Masc_eio_env.reset_for_test ();
+      Fun.protect ~finally:Masc_eio_env.reset_for_test (fun () ->
+        Masc_eio_env.init ~sw ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env) ();
+        let cancelled =
+          try
+            ignore
+              (Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s:1.0
+                 (fun () -> raise (Eio.Cancel.Cancelled (Failure "operator-stop-test"))));
+            false
+          with
+          | Eio.Cancel.Cancelled _ -> true
+        in
+        Alcotest.(check bool) "cancel re-raised" true cancelled;
+        match latest_keeper_log_matching "inner=Failure(operator-stop-test)" with
+        | None -> Alcotest.fail "missing unknown cancel log"
+        | Some entry ->
+          let open Yojson.Safe.Util in
+          Alcotest.(check string)
+            "unknown cancel stays warn"
+            "WARN"
+            (Log.level_to_string entry.Log.Ring.level);
+          Alcotest.(check string)
+            "log class"
+            "warn_cancel"
+            (entry.Log.Ring.details |> member "log_class" |> to_string))))
+;;
+
 let test_hitl_headroom_exceeds_default_approval_wait () =
   let floor =
     Keeper_approval_queue.default_noncritical_approval_timeout_s +. 30.0
@@ -152,6 +248,18 @@ let () =
             "timeout log carries failure envelope"
             `Quick
             test_timeout_log_carries_failure_envelope
+        ; Alcotest.test_case
+            "parent timeout cancel logs info"
+            `Quick
+            test_parent_timeout_cancel_logs_info
+        ; Alcotest.test_case
+            "default timeout cancel stays warn"
+            `Quick
+            test_default_parent_timeout_cancel_stays_warn
+        ; Alcotest.test_case
+            "unknown cancel stays warn"
+            `Quick
+            test_unknown_cancel_stays_warn
         ; Alcotest.test_case
             "HITL approval headroom"
             `Quick

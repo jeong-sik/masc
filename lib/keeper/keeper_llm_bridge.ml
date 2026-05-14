@@ -41,6 +41,7 @@ let key_wall_sec = "wall_sec"
 let key_overshoot_sec = "overshoot_sec"
 let key_bucket = "bucket"
 let key_inner_exception = "inner_exception"
+let key_cancel_classification = "cancel_classification"
 let key_rollback_scope = "rollback_scope"
 let key_external_tool_side_effects_reverted = "external_tool_side_effects_reverted"
 let key_error = "error"
@@ -51,6 +52,8 @@ let field_timeout_enforced = "timeout_enforced"
 let field_wall_sec = "wall_sec"
 let field_bucket = "bucket"
 let field_inner_exception = "inner_exception"
+let field_log_class = "log_class"
+let field_cancel_classification = "cancel_classification"
 let field_error = "error"
 let field_rollback_scope = "rollback_scope"
 let field_external_tool_side_effects_reverted = "external_tool_side_effects_reverted"
@@ -97,7 +100,42 @@ let with_hitl_approval_headroom timeout_s =
     (Keeper_approval_queue.default_noncritical_approval_timeout_s +. 30.0)
 ;;
 
-let run_with_timeout_and_fallback ~timeout_s fn =
+let cancel_bucket_of_wall wall =
+  if wall < 60.0
+  then bucket_fast
+  else if wall < 300.0
+  then bucket_short_tail
+  else if wall < 600.0
+  then bucket_mid_tail
+  else if wall < 1800.0
+  then bucket_long_mid
+  else bucket_long_tail
+;;
+
+type cancel_classification =
+  | Unknown_cancel
+  | Routine_parent_cancel
+
+let string_of_cancel_classification = function
+  | Unknown_cancel -> "unknown_cancel"
+  | Routine_parent_cancel -> "routine_parent_cancel"
+;;
+
+let cancel_log_level = function
+  | Routine_parent_cancel -> Log.Info
+  | Unknown_cancel -> Log.Warn
+;;
+
+let log_class_of_cancel_classification = function
+  | Routine_parent_cancel -> "routine_parent_cancel"
+  | Unknown_cancel -> "warn_cancel"
+;;
+
+let run_with_timeout_and_fallback
+    ?(cancel_classification = Unknown_cancel)
+    ~timeout_s
+    fn
+  =
   let fail_without_clock ~site =
     let message =
       Printf.sprintf
@@ -240,25 +278,22 @@ let run_with_timeout_and_fallback ~timeout_s fn =
           Categorize wall duration into a discrete bucket and surface the
           inner cancel exception so operators can split short_tail / mid_tail
           / long_tail in PromQL and the inner reason ([Eio.Cancel.Cancel_hook]
-          payload, parent-fiber Cancelled, etc.) appears in the log. *)
+          payload, parent-fiber Cancelled, etc.) appears in the log. Severity
+          comes from the caller's explicit [cancel_classification], not the
+          internal exception name or wall-clock bucket. *)
        let bt = Printexc.get_raw_backtrace () in
        let wall = elapsed () in
-       let bucket =
-         if wall < 60.0
-         then bucket_fast
-         else if wall < 300.0
-         then bucket_short_tail
-         else if wall < 600.0
-         then bucket_mid_tail
-         else if wall < 1800.0
-         then bucket_long_mid
-         else bucket_long_tail
-       in
+       let bucket = cancel_bucket_of_wall wall in
        let inner_str =
          match inner_exn with
          | Failure msg -> "Failure(" ^ msg ^ ")"
          | _ -> Printexc.to_string inner_exn
        in
+       let log_level = cancel_log_level cancel_classification in
+       let cancel_classification_label =
+         string_of_cancel_classification cancel_classification
+       in
+       let log_class = log_class_of_cancel_classification cancel_classification in
        Prometheus.inc_counter
          Keeper_metrics.metric_keeper_llm_bridge_failures
          ~labels:[label_site, site_cancelled ]
@@ -284,19 +319,22 @@ let run_with_timeout_and_fallback ~timeout_s fn =
                  (key_wall_sec, `Float wall);
                  (key_bucket, `String bucket);
                  (key_inner_exception, `String inner_str);
+                 (key_cancel_classification, `String cancel_classification_label);
                  (key_rollback_scope, `String rollback_scope_oas_context_only);
                  (key_external_tool_side_effects_reverted, `Bool false);
                ])
            ()
        in
-       Log.Keeper.emit Log.Warn
+       Log.Keeper.emit log_level
          ~details:
            (bridge_details
               [
                 json_string_field field_event "keeper_oas_bridge_cancelled";
+                json_string_field field_log_class log_class;
                 json_float_field field_wall_sec wall;
                 json_string_field field_bucket bucket;
                 json_string_field field_inner_exception inner_str;
+                json_string_field field_cancel_classification cancel_classification_label;
                 json_string_field field_rollback_scope rollback_scope_oas_context_only;
                 json_field field_external_tool_side_effects_reverted (`Bool false);
               ]

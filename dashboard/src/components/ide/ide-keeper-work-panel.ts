@@ -14,7 +14,11 @@ import {
   canonicalKeeperName,
   keeperIdentityKeys,
 } from '../common/keeper-identity'
-import { openIdeContextRouteLink, routeLinksForContext } from './ide-context-lens'
+import {
+  openIdeContextRouteLink,
+  routeLinksForContext,
+  type IdeContextRouteLink,
+} from './ide-context-lens'
 import { cursorOverlaySignal, getKeeperColor, type KeeperCursor } from './keeper-cursor-overlay'
 
 interface IdeKeeperWorkPanelProps {
@@ -97,6 +101,7 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
               ${currentTask.worktree
                 ? html`<span title=${currentTask.worktree.path}>${currentTask.worktree.branch} · ${currentTask.worktree.repo_name}</span>`
                 : null}
+              ${TaskRouteLinks(currentTask, summary.currentGoalId, summary.displayName)}
             </div>
           `
           : summary.currentTaskId
@@ -108,6 +113,7 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
                 </div>
                 <strong>keeper runtime current task</strong>
                 <span>task row not present in execution projection</span>
+                ${RuntimeTaskRouteLinks(summary.currentTaskId, summary.currentGoalId, summary.displayName)}
               </div>
             `
           : html`<div class="ide-keeper-work-empty">no active keeper task in dashboard state</div>`}
@@ -171,12 +177,41 @@ function GoalProgressCard(
 }
 
 function GoalRouteLinks(goalId: string, taskId: string | null) {
-  const links = routeLinksForContext({
+  return KeeperWorkRouteLinks(routeLinksForContext({
     goalId,
     taskId: taskId ?? undefined,
-  })
+  }), 'Keeper work planning links')
+}
+
+function TaskRouteLinks(task: Task, fallbackGoalId: string | null, keeperId: string) {
+  const execution = taskExecutionRouteContext(task)
+  return KeeperWorkRouteLinks(routeLinksForContext({
+    goalId: task.goal_id ?? fallbackGoalId ?? undefined,
+    taskId: task.id,
+    gitRef: task.worktree?.branch,
+    sessionId: execution.sessionId ?? undefined,
+    operationId: execution.operationId ?? undefined,
+    telemetryQuery: execution.telemetryQuery ?? undefined,
+    telemetry: execution.hasTelemetry,
+    keeperId,
+  }), 'Keeper task operational links')
+}
+
+function RuntimeTaskRouteLinks(taskId: string, goalId: string | null, keeperId: string) {
+  return KeeperWorkRouteLinks(routeLinksForContext({
+    goalId: goalId ?? undefined,
+    taskId,
+    keeperId,
+  }), 'Keeper runtime task links')
+}
+
+function KeeperWorkRouteLinks(
+  links: ReadonlyArray<IdeContextRouteLink>,
+  label: string,
+) {
+  if (links.length === 0) return null
   return html`
-    <div class="ide-keeper-work-links" aria-label="Keeper work planning links">
+    <div class="ide-keeper-work-links" aria-label=${label}>
       ${links.map(link => html`
         <button
           key=${link.id}
@@ -187,6 +222,32 @@ function GoalRouteLinks(goalId: string, taskId: string | null) {
       `)}
     </div>
   `
+}
+
+function taskExecutionRouteContext(task: Task): {
+  readonly sessionId: string | null
+  readonly operationId: string | null
+  readonly telemetryQuery: string | null
+  readonly hasTelemetry: boolean
+} {
+  const sessionId = firstNonEmpty(
+    task.execution_links?.session_id,
+    task.contract?.links?.session_id,
+  )
+  const operationId = firstNonEmpty(
+    task.execution_links?.operation_id,
+    task.contract?.links?.operation_id,
+  )
+  const autoresearchLoopId = firstNonEmpty(
+    task.execution_links?.autoresearch_loop_id,
+    task.contract?.links?.autoresearch_loop_id,
+  )
+  return {
+    sessionId,
+    operationId,
+    telemetryQuery: firstNonEmpty(operationId, sessionId, autoresearchLoopId),
+    hasTelemetry: Boolean(sessionId || operationId || autoresearchLoopId),
+  }
 }
 
 function WorkMetric(label: string, value: string) {

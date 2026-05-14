@@ -1,6 +1,7 @@
 open Alcotest
 module Adapter = Masc_mcp.Provider_adapter
 module Candidate = Masc_mcp.Cascade_runtime_candidate
+module Config = Masc_mcp.Cascade_config
 module Health = Masc_mcp.Cascade_health_tracker
 
 let with_env name value f =
@@ -114,21 +115,21 @@ let test_headers_with_auth_for_provider_kind_keeps_wire_contract () =
     ; "anthropic-version", "2023-06-01"
     ; "Content-Type", "application/json"
     ]
-    (Adapter.headers_with_auth_for_provider_kind
+    (Config.headers_with_auth
        ~kind:Llm_provider.Provider_config.Kimi
        ~api_key:"secret");
   check
     (list (pair string string))
     "bearer header"
     [ "Authorization", "Bearer secret"; "Content-Type", "application/json" ]
-    (Adapter.headers_with_auth_for_provider_kind
+    (Config.headers_with_auth
        ~kind:Llm_provider.Provider_config.OpenAI_compat
        ~api_key:"secret");
   check
     (list (pair string string))
     "blank key omits auth"
     [ "Content-Type", "application/json" ]
-    (Adapter.headers_with_auth_for_provider_kind
+    (Config.headers_with_auth
        ~kind:Llm_provider.Provider_config.Glm
        ~api_key:"")
 ;;

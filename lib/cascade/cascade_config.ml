@@ -35,7 +35,7 @@ let resolve_api_key_env = Cascade_config_loader.resolve_api_key_env
 let default_registry = Llm_provider.Provider_registry.default ()
 
 let headers_with_auth ~(kind : Llm_provider.Provider_config.provider_kind) ~api_key =
-  Provider_adapter.headers_with_auth_for_provider_kind ~kind ~api_key
+  Provider_name_catalog.headers_with_auth_for_provider_kind ~kind ~api_key
 
 let trim_trailing_slash path =
   if String.length path > 1 && String.ends_with ~suffix:"/" path then
@@ -140,7 +140,7 @@ let env_url_or ~env ~default =
   | Some url -> url
   | None -> default
 
-let kimi_provider_name = Provider_adapter.cn_kimi
+let kimi_provider_name = Provider_name_catalog.cn_kimi
 let moonshot_base_url_env = "KIMI_BASE_URL"
 let moonshot_api_key_env = "KIMI_API_KEY_SB"
 let moonshot_default_base_url = "https://api.moonshot.ai/v1"

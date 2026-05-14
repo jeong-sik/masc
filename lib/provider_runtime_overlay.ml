@@ -1,7 +1,6 @@
 (** Projection helpers for OAS runtime provider bindings. *)
 
 module Binding = Agent_sdk.Provider_runtime_binding
-module PConfig = Llm_provider.Provider_config
 
 type binding = Binding.t
 
@@ -90,19 +89,7 @@ let has_label binding expected =
 ;;
 
 let is_local_binding binding =
-  match binding.Binding.kind with
-  | PConfig.Ollama -> auth_is_no_auth binding && base_url_is_loopback binding
-  | PConfig.OpenAI_compat ->
-    auth_is_no_auth binding && (base_url_is_loopback binding || has_label binding "llama")
-  | PConfig.Anthropic
-  | PConfig.Kimi
-  | PConfig.Glm
-  | PConfig.DashScope
-  | PConfig.Gemini
-  | PConfig.Claude_code
-  | PConfig.Codex_cli
-  | PConfig.Gemini_cli
-  | PConfig.Kimi_cli -> false
+  auth_is_no_auth binding && (base_url_is_loopback binding || has_label binding "llama")
 ;;
 
 let runtime_kind binding =

@@ -11,14 +11,18 @@ lib/provider_adapter.ml
 lib/provider_adapter.mli
 lib/local_mcp_clients.ml
 lib/local_mcp_clients.mli
+# Private MASC overlay used while shrinking Provider_adapter exports.
+lib/provider_name_catalog.ml
+lib/provider_name_catalog.mli
 lib/cascade/cascade_model_resolve.ml
 lib/cascade/cascade_model_resolve.mli
 lib/exec/bin.ml
 lib/exec/bin.mli
 
-# This detector necessarily contains the terms it searches for.
+# Detector implementation and its monitored-term catalog.
 scripts/lint/no-provider-name-hardcoding.sh
 scripts/lint/no-provider-name-hardcoding.allowlist
+scripts/lint/no-provider-name-hardcoding.terms
 
 # Visual token registries generated from the dashboard design system.
 dashboard/src/styles/tokens.css

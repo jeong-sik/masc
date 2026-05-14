@@ -8,6 +8,7 @@ set -euo pipefail
 
 ROOT="${PROVIDER_NAME_HARDCODING_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 ALLOWLIST="${PROVIDER_NAME_HARDCODING_ALLOWLIST:-${ROOT}/scripts/lint/no-provider-name-hardcoding.allowlist}"
+TERMS_FILE="${PROVIDER_NAME_HARDCODING_TERMS:-${ROOT}/scripts/lint/no-provider-name-hardcoding.terms}"
 MODE="${1:---report}"
 
 if [[ "${MODE}" == "--self-test" ]]; then
@@ -16,10 +17,12 @@ if [[ "${MODE}" == "--self-test" ]]; then
   mkdir -p "${self_root}/lib" "${self_root}/scripts/lint"
   printf 'let leaked = "codex"\n' >"${self_root}/lib/leak.ml"
   : >"${self_root}/scripts/lint/no-provider-name-hardcoding.allowlist"
+  printf 'codex\n' >"${self_root}/scripts/lint/no-provider-name-hardcoding.terms"
 
   set +e
   PROVIDER_NAME_HARDCODING_ROOT="${self_root}" \
     PROVIDER_NAME_HARDCODING_ALLOWLIST="${self_root}/scripts/lint/no-provider-name-hardcoding.allowlist" \
+    PROVIDER_NAME_HARDCODING_TERMS="${self_root}/scripts/lint/no-provider-name-hardcoding.terms" \
     bash "$0" --fail >"${self_root}/out" 2>&1
   status="$?"
   set -e
@@ -49,7 +52,38 @@ ROOTS=(
   "${ROOT}/sidecars"
 )
 
-PATTERN='(^|[^[:alnum:]_])(codex|gemini|claude|kimi|glm)([^[:alnum:]_]|$)'
+if [[ ! -f "${TERMS_FILE}" ]]; then
+  echo "provider-name-hardcoding: missing terms catalog: ${TERMS_FILE}" >&2
+  exit 2
+fi
+
+TERMS=()
+while IFS= read -r term; do
+  TERMS+=("${term}")
+done < <(
+  sed -E 's/#.*//; s/^[[:space:]]+//; s/[[:space:]]+$//; /^$/d' \
+    "${TERMS_FILE}" | sort -u
+)
+
+if [[ "${#TERMS[@]}" -eq 0 ]]; then
+  echo "provider-name-hardcoding: empty terms catalog: ${TERMS_FILE}" >&2
+  exit 2
+fi
+
+TERMS_ALT=""
+for term in "${TERMS[@]}"; do
+  if [[ ! "${term}" =~ ^[[:alnum:]_-]+$ ]]; then
+    echo "provider-name-hardcoding: unsupported detector term '${term}' in ${TERMS_FILE}" >&2
+    exit 2
+  fi
+  if [[ -z "${TERMS_ALT}" ]]; then
+    TERMS_ALT="${term}"
+  else
+    TERMS_ALT="${TERMS_ALT}|${term}"
+  fi
+done
+
+PATTERN="(^|[^[:alnum:]_])(${TERMS_ALT})([^[:alnum:]_]|$)"
 
 ALLOW_TMP="$(mktemp -t no-provider-name-hc.XXXXXX)"
 REPORT_TMP="$(mktemp -t no-provider-name-hc-report.XXXXXX)"

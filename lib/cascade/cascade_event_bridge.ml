@@ -45,7 +45,7 @@ let payload_int_opt key = function
 ;;
 
 let inference_model_bucket ~provider ~model =
-  Provider_adapter.inference_model_bucket ~provider ~model
+  Provider_name_catalog.inference_model_bucket ~provider ~model
 ;;
 
 let inference_provider_bucket ~provider ~model =

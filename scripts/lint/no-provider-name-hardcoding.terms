@@ -1,0 +1,7 @@
+# Detector data catalog for provider/client literals that should not spread
+# outside approved catalog surfaces. One lowercase term per line.
+codex
+gemini
+claude
+kimi
+glm

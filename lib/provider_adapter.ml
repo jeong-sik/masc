@@ -257,21 +257,6 @@ let kimi_coding_api_url () =
   env_url_or ~env:"KIMI_CODING_BASE_URL" ~default:kimi_coding_base_url
 ;;
 
-let kimi_cli_auth_env_keys = kimi_api_key_envs
-let kimi_cli_runtime_api_key_env = "KIMI_API_KEY"
-let kimi_cli_base_url () = env_url_or ~env:"KIMI_BASE_URL" ~default:kimi_coding_base_url
-let kimi_cli_config_provider_name = "masc-" ^ cn_kimi
-let kimi_cli_config_provider_type = cn_kimi
-let kimi_cli_executable = cn_kimi
-let kimi_cli_process_name = cn_kimi
-let kimi_cli_default_model = "kimi-for-coding"
-let kimi_cli_response_id_fallback = cn_kimi ^ "-print"
-let kimi_cli_exit_code_prefix = cn_kimi ^ " exited with code "
-
-let kimi_cli_resumable_session_detail =
-  "kimi_cli reported a resumable CLI session. Resumable session available via -r."
-;;
-
 (* SSOT cascade prefix for local llama-server instances.
     All cascade label construction for local models must use this constant.
     Format: [local_cascade_prefix ^ ":" ^ model_id] → e.g. "llama:qwen3.5" *)
@@ -285,22 +270,6 @@ let make_local_label (model_id : string) : string = local_cascade_prefix ^ ":" ^
     This must stay aligned with [Provider_config.string_of_provider_kind]. *)
 let string_of_provider_kind : Llm_provider.Provider_config.provider_kind -> string =
   Llm_provider.Provider_config.string_of_provider_kind
-;;
-
-let headers_with_auth_for_provider_kind
-      ~(kind : Llm_provider.Provider_config.provider_kind)
-      ~api_key
-  =
-  let base = [ "Content-Type", "application/json" ] in
-  if api_key = ""
-  then base
-  else (
-    match kind with
-    | Anthropic | Kimi ->
-      ("x-api-key", api_key) :: ("anthropic-version", "2023-06-01") :: base
-    | OpenAI_compat | Ollama | Gemini | Glm | Claude_code | DashScope ->
-      ("Authorization", "Bearer " ^ api_key) :: base
-    | Gemini_cli | Kimi_cli | Codex_cli -> [])
 ;;
 
 (** Map OAS [provider_kind] to the MASC adapter canonical name when adapter
@@ -925,81 +894,6 @@ let default_local_fallback_label () =
 ;;
 
 let resolve_direct_adapter label = find_direct_adapter_by_alias label
-
-let contains_substring_ci haystack needle =
-  let haystack = String.lowercase_ascii haystack in
-  let needle = String.lowercase_ascii needle in
-  let h_len = String.length haystack in
-  let n_len = String.length needle in
-  if n_len = 0
-  then true
-  else if n_len > h_len
-  then false
-  else (
-    let rec loop idx =
-      idx + n_len <= h_len
-      &&
-      (String.equal (String.sub haystack idx n_len) needle || loop (idx + 1))
-    in
-    loop 0)
-;;
-
-let metric_bucket_of_adapter (adapter : adapter) =
-  let canonical = normalize_label adapter.canonical_name in
-  if canonical = cn_kimi || canonical = cn_kimi_api || canonical = cn_kimi_coding
-  then "kimi"
-  else if canonical = cn_claude || canonical = cn_claude_api
-  then "anthropic"
-  else if canonical = cn_codex || canonical = cn_codex_api
-  then "openai"
-  else if canonical = cn_gemini || canonical = cn_gemini_api
-  then "gemini"
-  else if canonical = cn_glm || canonical = cn_glm_coding_plan
-  then "glm"
-  else if canonical = cn_llama || canonical = cn_ollama
-  then "llama"
-  else "other"
-;;
-
-let metric_bucket_by_registry_label label =
-  let label = String.trim label in
-  if label = ""
-  then None
-  else
-    match resolve_adapter_by_cascade_prefix label with
-    | Some adapter -> Some (metric_bucket_of_adapter adapter)
-    | None ->
-      (match resolve_direct_adapter label with
-       | Some adapter -> Some (metric_bucket_of_adapter adapter)
-       | None -> None)
-;;
-
-let inference_model_bucket ~provider ~model =
-  match metric_bucket_by_registry_label provider with
-  | Some bucket -> bucket
-  | None ->
-    (match metric_bucket_by_registry_label model with
-     | Some bucket -> bucket
-     | None ->
-       let has needle =
-         contains_substring_ci provider needle || contains_substring_ci model needle
-       in
-       if has cn_kimi
-       then "kimi"
-       else if has cn_claude || has "anthropic"
-       then "anthropic"
-       else if has "openai" || has "gpt" || has cn_codex
-       then "openai"
-       else if has cn_gemini || has "google"
-       then "gemini"
-       else if has "glm" || has "zai"
-       then "glm"
-       else if has "qwen"
-       then "qwen"
-       else if has cn_llama
-       then "llama"
-       else "other")
-;;
 
 let resolve_direct_canonical_name label =
   Option.map

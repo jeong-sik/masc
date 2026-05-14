@@ -66,7 +66,7 @@ scripts/lint/no-provider-name-hardcoding.sh --summary
 scripts/lint/no-provider-name-hardcoding.sh --fail
 ```
 
-The detector scans runtime code paths, skips tests and binary assets, strips OCaml block comments, skips comment-only lines in other scanned files, and subtracts `scripts/lint/no-provider-name-hardcoding.allowlist`. The `Provider/client name hardcoding` job in `.github/workflows/fundamental-check.yml` runs `--self-test` and `--fail`, so new off-catalog provider/client literals block the Fundamental Check workflow instead of relying on manual local invocation.
+The detector reads the monitored provider/client terms from `scripts/lint/no-provider-name-hardcoding.terms`, scans runtime code paths, skips tests and binary assets, strips OCaml block comments, skips comment-only lines in other scanned files, and subtracts `scripts/lint/no-provider-name-hardcoding.allowlist`. The `Provider/client name hardcoding` job in `.github/workflows/fundamental-check.yml` runs `--self-test` and `--fail`, so new off-catalog provider/client literals block the Fundamental Check workflow instead of relying on manual local invocation.
 
 Current checkpoint after catalog migration and allowlist classification:
 
@@ -87,7 +87,7 @@ Material runtime-policy migrations completed in this slice:
 
 - local MCP client names now flow through `Local_mcp_clients`.
 - Kimi CLI transport metadata flows through `Provider_adapter`.
-- inference/metric provider bucketing flows through `Provider_adapter.inference_model_bucket`.
+- inference/metric provider bucketing flows through `Provider_adapter` adapter metadata and `Provider_adapter.inference_model_bucket`.
 - cascade auth-header policy is owned by `Provider_adapter.headers_with_auth_for_provider_kind`.
 - autoresearch dashboard no longer sends a provider-pinned client default; blank means the server default model path is used.
 
@@ -122,6 +122,6 @@ Material runtime-policy migrations completed in this slice:
 
 - `scripts/lint/no-provider-name-hardcoding.sh --fail` exits 0.
 - `.github/workflows/fundamental-check.yml` runs `scripts/lint/no-provider-name-hardcoding.sh --self-test` and `--fail`.
-- `scripts/lint/no-provider-name-hardcoding.allowlist` contains only catalog, compatibility, generated, operator, or fixture paths with explicit category reasons.
+- `scripts/lint/no-provider-name-hardcoding.terms` contains the monitored provider/client terms, and `scripts/lint/no-provider-name-hardcoding.allowlist` contains only catalog, compatibility, generated, operator, or fixture paths with explicit category reasons.
 - `rg -n -i '\b(codex|gemini|claude|kimi|glm)\b' lib bin dashboard/src scripts sidecars` has no unexplained runtime-policy hits outside the detector report.
 - Focused OCaml/TS checks for touched modules pass.

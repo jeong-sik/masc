@@ -77,25 +77,6 @@ let test_runtime_kind_strings () =
   check string "direct_api" "direct_api"
     (Adapter.string_of_runtime_kind Adapter.Direct_api)
 
-let test_inference_model_bucket_uses_provider_catalog () =
-  let cases =
-    [ "anthropic", "", "anthropic"
-    ; "claude_code", "", "anthropic"
-    ; "openai", "", "openai"
-    ; "gemini_cli", "", "gemini"
-    ; "glm-coding", "", "glm"
-    ; "", "qwen3:8b", "qwen"
-    ]
-  in
-  List.iter
-    (fun (provider, model, expected) ->
-       check
-         string
-         (Printf.sprintf "bucket %s/%s" provider model)
-         expected
-         (Adapter.inference_model_bucket ~provider ~model))
-    cases
-
 (* ── Section 2: OAS model resolve contracts ── *)
 
 let test_resolve_canonical_wraps_adapter () =
@@ -354,8 +335,6 @@ let () =
           test_case "unknown returns none" `Quick test_unknown_returns_none;
           test_case "adapter well formed" `Quick test_adapter_well_formed;
           test_case "runtime kind strings" `Quick test_runtime_kind_strings;
-          test_case "inference model bucket uses provider catalog" `Quick
-            test_inference_model_bucket_uses_provider_catalog;
           test_case "dashboard snapshots include cli and api" `Quick
             test_dashboard_provider_snapshots_include_cli_and_api;
         ] );

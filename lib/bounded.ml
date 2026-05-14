@@ -213,7 +213,7 @@ let hard_quota_error_indicators = [
 let message_looks_like_hard_quota_error msg =
   let contains needle = String_util.contains_substring_ci msg needle in
   List.exists contains hard_quota_error_indicators
-  || (contains (Provider_adapter.cn_claude ^ " exited with code 1")
+  || (contains Provider_name_catalog.claude_cli_exit_code_1
       && contains "\"api_error_status\":429"
       && contains "you've hit your limit")
 

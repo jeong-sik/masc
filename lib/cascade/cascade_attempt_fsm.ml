@@ -164,7 +164,7 @@ let openai_compat_not_found_hint_marker =
 
 let is_moonshot_provider (provider_cfg : Llm_provider.Provider_config.t) =
   String_util.contains_substring_ci provider_cfg.base_url "moonshot.ai"
-  || String.starts_with ~prefix:Provider_adapter.cn_kimi provider_cfg.model_id
+  || String.starts_with ~prefix:Provider_name_catalog.cn_kimi provider_cfg.model_id
 
 let cascade_name_to_string = Cascade_error_classify.cascade_name_to_string
 
@@ -177,7 +177,7 @@ let resolve_kimi_api_key_env_name ~cascade_name =
       | Some value when String.trim value <> "" -> Some value
       | _ -> None
     in
-    match find_non_empty Provider_adapter.cn_kimi with
+    match find_non_empty Provider_name_catalog.cn_kimi with
     | Some env_name -> env_name
     | None ->
       (match find_non_empty "*" with
@@ -206,7 +206,7 @@ let enrich_sdk_error ~cascade_name
     when is_moonshot_provider provider_cfg ->
     let env_name =
       match resolve_kimi_api_key_env_name ~cascade_name with
-      | "" -> Printf.sprintf "configured %s API key env" Provider_adapter.cn_kimi
+      | "" -> Provider_name_catalog.configured_kimi_api_key_env_hint
       | value -> value
     in
     let detail =
@@ -317,7 +317,7 @@ let message_looks_like_cli_wrapped_hard_quota (message : string) : bool =
   in
   List.exists contains cli_wrapped_hard_quota_indicators
   ||
-  (contains (Provider_adapter.cn_claude ^ " exited with code 1")
+  (contains Provider_name_catalog.claude_cli_exit_code_1
    && contains "\"api_error_status\":429"
    && contains "you've hit your limit")
 

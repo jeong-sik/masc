@@ -584,27 +584,9 @@ let resolve_direct_canonical_name label =
     (resolve_direct_adapter label)
 ;;
 
-(** Resolve spawn_key for an agent label.
-    Returns the key to look up in Spawn.spawn_config_of_key. *)
-let resolve_spawn_key label =
-  match resolve_direct_adapter label with
-  | Some adapter -> adapter.spawn_key
-  | None -> None
-;;
-
 (** Check if a name is a known direct adapter label or alias.
     This includes adapters that do not have a CLI spawn_key (e.g. glm, openrouter). *)
 let is_known_provider name = resolve_direct_adapter name <> None
-
-(** Check if a name is a CLI-spawnable agent (has a spawn_key).
-    For a broader "known provider" predicate, use {!is_known_provider}. *)
-let is_spawnable_agent name = resolve_spawn_key name <> None
-
-let spawnable_canonical_names () =
-  direct_adapters
-  |> List.filter_map (fun a ->
-    if a.spawn_key <> None then Some a.canonical_name else None)
-;;
 
 let normalize_base_url value =
   let trimmed = String.trim value in
@@ -662,16 +644,6 @@ let auth_kind_for_canonical_name name =
   match resolve_direct_adapter name with
   | Some adapter -> string_of_auth_mode adapter.auth_mode
   | None -> "unknown"
-;;
-
-let bare_ollama_migration_message () =
-  "Bare `ollama` without a model requires OLLAMA_DEFAULT_MODEL env var. Use \
-   `ollama:<model>` for explicit selection."
-;;
-
-let is_bare_ollama_label label =
-  let normalized = normalize_label label in
-  String.equal normalized cn_ollama && Env_config_runtime.Ollama.default_model = ""
 ;;
 
 let explicit_llama_model_id_result () =

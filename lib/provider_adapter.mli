@@ -211,17 +211,8 @@ val resolve_adapter_by_cascade_prefix : string -> adapter option
 (** Resolve the canonical name for a provider label. *)
 val resolve_direct_canonical_name : string -> string option
 
-(** Resolve spawn_key for an agent label. *)
-val resolve_spawn_key : string -> string option
-
 (** Check if a name is a known direct adapter label or alias. *)
 val is_known_provider : string -> bool
-
-(** Check if a name is a CLI-spawnable agent (has a spawn_key). *)
-val is_spawnable_agent : string -> bool
-
-(** Return canonical names of all spawnable adapters. *)
-val spawnable_canonical_names : unit -> string list
 
 (** Resolve the declared default model id for a cascade prefix. *)
 val default_model_id_for_cascade_prefix
@@ -316,11 +307,6 @@ val default_model_override_label_result : string -> (string, string) result
 
 val explicit_llama_model_id_result : unit -> (string, string) result
 val explicit_llama_model_label_result : unit -> (string, string) result
-
-(** {1 Ollama} *)
-
-val bare_ollama_migration_message : unit -> string
-val is_bare_ollama_label : string -> bool
 
 (** {1 Auth} *)
 

@@ -98,7 +98,7 @@ let agent_type_of_mention = Mention.agent_type_of_mention
 
 let is_spawnable mention =
   let base = agent_type_of_mention mention in
-  Option.is_some (Spawn.get_config base)
+  Spawn_runtime_overlay.is_spawnable_agent base
 
 (* --- CLI spawn (Spawn mode) --- *)
 
@@ -126,9 +126,11 @@ let cli_argv_of_agent_type (agent_type : string) : string list =
   | None -> [agent_type]
 
 let run_cli_agent ~agent_type ~prompt =
-  match Spawn.get_config agent_type with
-  | None -> debug_log (Printf.sprintf "SPAWN_SKIP not spawnable: %s" agent_type)
-  | Some _ ->
+  if Spawn_runtime_overlay.is_bare_ollama_label agent_type then
+    debug_log (Spawn_runtime_overlay.bare_ollama_migration_message ())
+  else if not (Spawn_runtime_overlay.is_spawnable_agent agent_type) then
+    debug_log (Printf.sprintf "SPAWN_SKIP not spawnable: %s" agent_type)
+  else
     let base = cli_argv_of_agent_type agent_type in
     let argv = base in
     let raw_source = String.concat " " (List.map Filename.quote argv) in

@@ -616,6 +616,7 @@
         test_process_eio_detached
         test_provider_adapter
         test_voice_runtime_overlay
+        test_spawn_runtime_overlay
         test_worker_container_coverage
         test_resilience
         test_common
@@ -836,6 +837,7 @@
         test_process_eio_detached
         test_provider_adapter
         test_voice_runtime_overlay
+        test_spawn_runtime_overlay
         test_worker_container_coverage
         test_resilience
         test_common

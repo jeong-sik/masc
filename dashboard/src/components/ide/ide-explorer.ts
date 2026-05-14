@@ -9,6 +9,7 @@ import type { Repository } from '../../api/repositories'
 import { showToast } from '../common/toast'
 import { KeeperBadge } from '../keeper-badge'
 import { cursorOverlaySignal, getKeeperColor } from './keeper-cursor-overlay'
+import { openIdeContextRouteLink } from './ide-context-lens'
 
 interface IdeExplorerProps {
   readonly fileTreeStore: FileTreeStore
@@ -33,6 +34,8 @@ interface ExplorerScopeLabel {
   readonly label: string
   readonly tone: ExplorerScopeTone
 }
+
+const EXPLORER_CONTEXT_LINK_LIMIT = 3
 
 function repositoryLabel(
   repositories: ReadonlyArray<Repository>,
@@ -418,7 +421,15 @@ function TreeRow(
 
 function ExplorerContextChip(focus: IdeContextFocus) {
   const line = focus.line !== undefined ? `L${focus.line}` : null
-  const linkCount = focus.route_links?.length ?? 0
+  const routeLinks = focus.route_links ?? []
+  const visibleLinks = routeLinks.slice(0, EXPLORER_CONTEXT_LINK_LIMIT)
+  const overflowCount = Math.max(0, routeLinks.length - visibleLinks.length)
+  const stopRouteClick = (event: MouseEvent): void => {
+    event.stopPropagation()
+  }
+  const stopRouteKeyDown = (event: KeyboardEvent): void => {
+    event.stopPropagation()
+  }
   return html`
     <span
       class="ide-explorer-context-chip"
@@ -427,7 +438,20 @@ function ExplorerContextChip(focus: IdeContextFocus) {
     >
       <span>${focus.surface}</span>
       ${line ? html`<span>${line}</span>` : null}
-      ${linkCount > 0 ? html`<span>${linkCount} links</span>` : null}
+      ${visibleLinks.map(link => html`
+        <button
+          key=${link.id}
+          type="button"
+          title=${link.evidence}
+          aria-label=${`Open ${link.evidence}`}
+          onClick=${(event: MouseEvent) => {
+            stopRouteClick(event)
+            openIdeContextRouteLink(link)
+          }}
+          onKeyDown=${stopRouteKeyDown}
+        >${link.label}</button>
+      `)}
+      ${overflowCount > 0 ? html`<span aria-label=${`${overflowCount} more context links`}>+${overflowCount}</span>` : null}
     </span>
   `
 }

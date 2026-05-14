@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { h, render } from 'preact'
+import { fireEvent } from '@testing-library/preact'
 import { explorerScopeLabel, IdeExplorer } from './ide-explorer'
 import { createFileTreeStore, type FileTreeNode } from './file-tree-store'
 import type { Repository } from '../../api/repositories'
@@ -58,6 +59,7 @@ describe('IdeExplorer tree row keyboard accessibility', () => {
 
   afterEach(() => {
     render(null, container)
+    window.location.hash = ''
     activeIdeFile.value = 'package.json'
     ideContextFocus.value = null
   })
@@ -124,7 +126,7 @@ describe('IdeExplorer tree row keyboard accessibility', () => {
     expect(scroller?.contains(container.querySelector('input[type="search"]'))).toBe(false)
   })
 
-  it('marks the file row carrying the current IDE context focus', () => {
+  it('marks the file row carrying the current IDE context focus with route buttons', () => {
     const store = createFileTreeStore()
     store.seed(SAMPLE)
     ideContextFocus.value = {
@@ -161,8 +163,17 @@ describe('IdeExplorer tree row keyboard accessibility', () => {
 
     expect(chip?.textContent).toContain('Task')
     expect(chip?.textContent).toContain('L42')
-    expect(chip?.textContent).toContain('2 links')
+    const routeButtons = [...focusedRow!.querySelectorAll<HTMLButtonElement>('.ide-explorer-context-chip button')]
+    expect(routeButtons.map(button => button.textContent)).toEqual(['Task', 'Telemetry'])
+    expect(routeButtons.map(button => button.getAttribute('aria-label'))).toEqual([
+      'Open Task task-runtime',
+      'Open Fleet telemetry event log · query turn-9',
+    ])
     expect(chip?.getAttribute('aria-label'))
       .toBe('Focused Task line 42: task task-runtime, 2 route links')
+
+    fireEvent.click(routeButtons[1]!)
+    expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&q=turn-9')
+    expect(activeIdeFile.value).toBe('package.json')
   })
 })

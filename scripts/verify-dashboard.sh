@@ -117,6 +117,20 @@ check_http "health 200" "$BASE/health" "200"
 check_json "version looks semver-ish" "$BASE/health" "d.get('version', '')" '^[0-9]+\.[0-9]+'
 check_http "dashboard shell 200" "$BASE/api/v1/dashboard/shell" "200"
 check_json "shell exposes auth contract" "$BASE/api/v1/dashboard/shell" "'auth' in d" '^True$'
+check_http "dashboard bootstrap 200" "$BASE/api/v1/dashboard/bootstrap" "200"
+check_json "dashboard bootstrap exposes shell/execution/planning" "$BASE/api/v1/dashboard/bootstrap" "'shell' in d and 'execution' in d and 'planning' in d" '^True$'
+check_http "dashboard config 200" "$BASE/api/v1/dashboard/config" "200"
+check_json "dashboard config exposes runtime categories" "$BASE/api/v1/dashboard/config" "'server' in d and 'categories' in d" '^True$'
+check_http "project snapshot 200" "$BASE/api/v1/dashboard/project-snapshot" "200"
+check_json "project snapshot exposes execution/readiness" "$BASE/api/v1/dashboard/project-snapshot" "'execution' in d and 'readiness' in d" '^True$'
+check_http "dashboard execution 200" "$BASE/api/v1/dashboard/execution" "200"
+check_json "dashboard execution exposes queue and agents" "$BASE/api/v1/dashboard/execution" "'status' in d and 'agents' in d and 'execution_queue' in d" '^True$'
+check_http "dashboard execution trust 200" "$BASE/api/v1/dashboard/execution-trust" "200"
+check_json "dashboard execution trust exposes provenance" "$BASE/api/v1/dashboard/execution-trust" "'dashboard_surface' in d and 'keepers' in d and 'coverage_gaps' in d" '^True$'
+check_http "dashboard mission 200" "$BASE/api/v1/dashboard/mission" "200"
+check_json "dashboard mission exposes summary and keepers" "$BASE/api/v1/dashboard/mission" "'summary' in d and 'keeper_briefs' in d" '^True$'
+check_http "dashboard mission briefing 200" "$BASE/api/v1/dashboard/mission/briefing" "200"
+check_json "dashboard mission briefing exposes provenance" "$BASE/api/v1/dashboard/mission/briefing" "'provenance' in d and 'criteria' in d" '^True$'
 check_http "surface-readiness 200" "$BASE/api/v1/dashboard/surface-readiness" "200"
 check_json \
   "surface-readiness has canonical surface count" \
@@ -147,12 +161,20 @@ check_http "goal-loop status 200" "$BASE/api/v1/dashboard/goal-loop/status" "200
 check_json "goal-loop status exposes phases" "$BASE/api/v1/dashboard/goal-loop/status" "'overall_status' in d and 'phases' in d" '^True$'
 check_http "activity graph 200" "$BASE/api/v1/activity/graph" "200"
 check_json "activity graph has nodes" "$BASE/api/v1/activity/graph" "len(d.get('nodes', [])) >= 0" '^True$'
+check_http "activity events 200" "$BASE/api/v1/activity/events?limit=1" "200"
+check_json "activity events exposes replay window" "$BASE/api/v1/activity/events?limit=1" "'events' in d and 'latest_seq' in d" '^True$'
+check_http "activity swimlane 200" "$BASE/api/v1/activity/swimlane" "200"
+check_json "activity swimlane exposes spans" "$BASE/api/v1/activity/swimlane" "'spans' in d and 'agents' in d" '^True$'
 check_http "telemetry summary 200" "$BASE/api/v1/dashboard/telemetry/summary" "200"
 check_json "telemetry summary has sources" "$BASE/api/v1/dashboard/telemetry/summary" "'sources' in d" '^True$'
 check_http "cascade health 200" "$BASE/api/v1/cascade/health" "200"
 check_json "cascade health exposes providers" "$BASE/api/v1/cascade/health" "'providers' in d" '^True$'
 check_http "cascade strategy trace 200" "$BASE/api/v1/cascade/strategy_trace?limit=1" "200"
 check_json "cascade strategy trace exposes events" "$BASE/api/v1/cascade/strategy_trace?limit=1" "'events' in d" '^True$'
+check_http "cascade audit runs 200" "$BASE/api/v1/cascade/audit_runs?limit=1" "200"
+check_json "cascade audit runs exposes runs" "$BASE/api/v1/cascade/audit_runs?limit=1" "'audit_runs' in d and 'total_runs' in d" '^True$'
+check_http "keeper cascades 200" "$BASE/api/v1/keeper/cascades" "200"
+check_json "keeper cascades exposes profiles" "$BASE/api/v1/keeper/cascades" "'profiles' in d and 'invalid_profiles' in d" '^True$'
 check_http "runtime providers 200" "$BASE/api/v1/providers" "200"
 check_json "runtime providers exposes inventory" "$BASE/api/v1/providers" "'summary' in d and 'providers' in d" '^True$'
 check_http "cascade config 200" "$BASE/api/v1/cascade/config" "200"
@@ -175,16 +197,28 @@ check_http "transport health 200" "$BASE/api/v1/dashboard/transport-health" "200
 check_json "transport health has summary" "$BASE/api/v1/dashboard/transport-health" "'summary' in d" '^True$'
 check_http "attribution summary 200" "$BASE/api/v1/attribution/summary" "200"
 check_json "attribution summary has gates" "$BASE/api/v1/attribution/summary" "'gates' in d" '^True$'
+check_http "attribution recent 200" "$BASE/api/v1/attribution/recent?limit=1" "200"
+check_json "attribution recent exposes events" "$BASE/api/v1/attribution/recent?limit=1" "'events' in d and 'count' in d" '^True$'
 check_http "safe autonomy 200" "$BASE/api/v1/dashboard/safe-autonomy" "200"
 check_json "safe autonomy exposes scorecard" "$BASE/api/v1/dashboard/safe-autonomy" "'summary' in d and 'domains' in d and 'per_keeper' in d" '^True$'
 check_http "keeper feature proof 200" "$BASE/api/v1/dashboard/keeper-feature-proof?window_hours=24" "200"
 check_json "keeper feature proof exposes features" "$BASE/api/v1/dashboard/keeper-feature-proof?window_hours=24" "'summary' in d and 'features' in d and 'evidence_refs' in d" '^True$'
+check_http "feature health 200" "$BASE/api/v1/dashboard/feature-health" "200"
+check_json "feature health exposes overview" "$BASE/api/v1/dashboard/feature-health" "'overview' in d and 'features_by_category' in d" '^True$'
+check_http "dashboard perf 200" "$BASE/api/v1/dashboard/perf" "200"
+check_json "dashboard perf exposes benchmark status" "$BASE/api/v1/dashboard/perf" "'status' in d and 'benchmarks' in d" '^True$'
+check_http "cost latency 200" "$BASE/api/v1/dashboard/cost-latency?window=60" "200"
+check_json "cost latency exposes cost and latency" "$BASE/api/v1/dashboard/cost-latency?window=60" "'total_cost_usd' in d and 'latencyBuckets' in d" '^True$'
 
 echo "[4/7] Operations + Workspace"
 check_http "operator digest 200" "$BASE/api/v1/operator/digest" "200"
 check_json "operator digest has health block" "$BASE/api/v1/operator/digest" "'health' in d" '^True$'
+check_http "operator snapshot 200" "$BASE/api/v1/operator" "200"
+check_json "operator snapshot exposes actions" "$BASE/api/v1/operator" "'available_actions' in d and 'keepers' in d" '^True$'
 check_http "board 200" "$BASE/api/v1/dashboard/board" "200"
 check_json "board exposes posts" "$BASE/api/v1/dashboard/board" "'posts' in d" '^True$'
+check_http "board API 200" "$BASE/api/v1/board?limit=1" "200"
+check_json "board API exposes posts" "$BASE/api/v1/board?limit=1" "'posts' in d and 'count' in d" '^True$'
 check_http "board hearths 200" "$BASE/api/v1/board/hearths" "200"
 check_json "board hearths exposes list" "$BASE/api/v1/board/hearths" "'hearths' in d" '^True$'
 check_http "board curation 200" "$BASE/api/v1/board/curation" "200"
@@ -195,12 +229,20 @@ check_http "sub-boards 200" "$BASE/api/v1/board/sub-boards" "200"
 check_json "sub-boards exposes list" "$BASE/api/v1/board/sub-boards" "'sub_boards' in d" '^True$'
 check_http "planning 200" "$BASE/api/v1/dashboard/planning" "200"
 check_json "planning exposes rollup" "$BASE/api/v1/dashboard/planning" "'rollup' in d" '^True$'
+check_http "goals tree 200" "$BASE/api/v1/dashboard/goals" "200"
+check_json "goals tree exposes summary" "$BASE/api/v1/dashboard/goals" "'summary' in d and 'tree' in d" '^True$'
 check_http "git graph 200" "$BASE/api/v1/git/graph?n=20" "200"
 check_json "git graph exposes stats and nodes" "$BASE/api/v1/git/graph?n=20" "'stats' in d and 'nodes' in d" '^True$'
+check_http "git diff 200" "$BASE/api/v1/git/diff?path=README.md" "200"
+check_json "git diff exposes unified diff state" "$BASE/api/v1/git/diff?path=README.md" "'has_changes' in d and 'unified' in d" '^True$'
 check_http "repositories 200" "$BASE/api/v1/repositories" "200"
 check_json "repositories exposes list" "$BASE/api/v1/repositories" "'repositories' in d and 'total' in d" '^True$'
+check_http "keeper repos 200" "$BASE/api/v1/keeper-repos" "200"
+check_json "keeper repos exposes mappings" "$BASE/api/v1/keeper-repos" "'mappings' in d and 'total' in d" '^True$'
 check_http "workspace tree 200" "$BASE/api/v1/workspace/tree?depth=1" "200"
 check_json "workspace tree exposes nodes array" "$BASE/api/v1/workspace/tree?depth=1" "len(d) >= 0" '^True$'
+check_http "workspace file 200" "$BASE/api/v1/workspace/file?path=README.md" "200"
+check_json "workspace file exposes content" "$BASE/api/v1/workspace/file?path=README.md" "d.get('ok') == True and 'content' in d" '^True$'
 check_http "verification requests 200" "$BASE/api/v1/verification/requests" "200"
 check_json "verification requests exposes list" "$BASE/api/v1/verification/requests" "'requests' in d" '^True$'
 check_http "verification summary 200" "$BASE/api/v1/verification/summary" "200"
@@ -211,6 +253,8 @@ check_http "verification tlc results 200" "$BASE/api/v1/verification/tlc-results
 check_json "verification tlc results exposes entries" "$BASE/api/v1/verification/tlc-results" "'entries' in d and 'count' in d" '^True$'
 
 echo "[5/7] Connectors + Lab"
+check_http "gate status 200" "$BASE/api/v1/gate/status" "200"
+check_json "gate status exposes channel bindings" "$BASE/api/v1/gate/status" "'channels' in d and 'bindings' in d" '^True$'
 check_http "gate connectors 200" "$BASE/api/v1/gate/connectors" "200"
 check_json "gate connectors exposes connectors list" "$BASE/api/v1/gate/connectors" "'connectors' in d" '^True$'
 check_http "dashboard tools 200" "$BASE/api/v1/dashboard/tools" "200"
@@ -221,12 +265,18 @@ check_http "tool metrics 200" "$BASE/api/v1/tool-metrics" "200"
 check_json "tool metrics exposes usage" "$BASE/api/v1/tool-metrics" "'total_calls' in d and 'top_20' in d and 'registered_count' in d" '^True$'
 check_http "prompt registry 200" "$BASE/api/v1/prompts" "200"
 check_json "prompt registry exposes prompts" "$BASE/api/v1/prompts" "'prompts' in d" '^True$'
+check_http "excuse pattern config 200" "$BASE/api/v1/dashboard/config/excuse-patterns" "200"
+check_json "excuse pattern config exposes list" "$BASE/api/v1/dashboard/config/excuse-patterns" "len(d) >= 0" '^True$'
 check_http "autoresearch loops 200" "$BASE/api/v1/autoresearch/loops" "200"
 check_json "autoresearch loops exposes loops" "$BASE/api/v1/autoresearch/loops" "'loops' in d" '^True$'
 check_http "harness health 200" "$BASE/api/v1/dashboard/harness-health" "200"
 check_json "harness health exposes overview" "$BASE/api/v1/dashboard/harness-health" "'overview' in d" '^True$'
 
 echo "[6/7] Code + Logs"
+check_http "audit ledger 200" "$BASE/api/v1/audit?limit=1" "200"
+check_json "audit ledger exposes entries" "$BASE/api/v1/audit?limit=1" "'entries' in d and 'count' in d" '^True$'
+check_http "dashboard doctor 200" "$BASE/api/v1/dashboard/doctor" "200"
+check_json "dashboard doctor exposes doctor summary" "$BASE/api/v1/dashboard/doctor" "'summary' in d and 'doctors' in d" '^True$'
 check_http "IDE presence 200" "$BASE/api/v1/ide/presence" "200"
 check_json "IDE presence exposes connected state" "$BASE/api/v1/ide/presence" "d.get('data', {}).get('connected')" '^True$'
 check_http "IDE annotations 200" "$BASE/api/v1/ide/annotations" "200"

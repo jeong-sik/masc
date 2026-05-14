@@ -10,7 +10,7 @@ import { ideConversationThreadSnapshot } from './ide-context-bridge'
 import { lspDiagnosticSnapshot } from './ide-lsp-client'
 import { cursorOverlaySignal } from './keeper-cursor-overlay'
 import { clearTraces, pushTrace } from './keeper-trace-store'
-import { setIdeReplayUntilMs } from './ide-replay-state'
+import { ideReplayUntilMs, setIdeReplayUntilMs } from './ide-replay-state'
 
 describe('IdeEditor', () => {
   let container: HTMLDivElement
@@ -580,6 +580,7 @@ describe('IdeEditor', () => {
     })
     fireEvent.click(container.querySelector<HTMLButtonElement>('button.cm-trace-stack')!)
 
+    expect(ideReplayUntilMs.value).toBe(3000)
     expect(ideContextFocus.value).toMatchObject({
       file_path: 'runtime.ts',
       line: 2,

@@ -6,13 +6,14 @@ import {
   KeeperTraceSource,
   keeperTraceState,
 } from './keeper-trace-store'
-import { ideReplayUntilMs } from './ide-replay-state'
+import { ideReplayUntilMs, setIdeReplayUntilMs } from './ide-replay-state'
 import {
   openIdeContextRouteLink,
   routeLinksForContext,
   type IdeContextRouteContext,
   type IdeContextRouteLink,
 } from './ide-context-lens'
+import { focusIdeContextAnchor } from './ide-state'
 
 /**
  * RFC-0028 PR-β: keeper-trace gutter chip overlay.
@@ -151,14 +152,20 @@ const STACK_STYLE = {
   display: 'inline-flex',
   alignItems: 'center',
   gap: '2px',
+  listStyle: 'none',
+  margin: 0,
+  padding: 0,
 } as const
 
 const CHIP_STYLE = {
   display: 'inline-block',
   width: '8px',
   height: '8px',
+  padding: 0,
   borderRadius: '50%',
   border: '1px solid var(--color-bg-surface)',
+  appearance: 'none',
+  cursor: 'pointer',
 } as const
 
 const OVERFLOW_STYLE = {
@@ -254,13 +261,23 @@ function BucketRow({ bucket }: { readonly bucket: TraceBucket }) {
       <ul role="list" aria-label=${`${bucket.keeperName} trace events`} style=${STACK_STYLE}>
         ${visible.map(event => html`
           <li
-            role="img"
+            role="listitem"
             data-source=${event.source}
             data-count=${event.count}
-            aria-label=${formatTooltip(event)}
-            title=${formatTooltip(event)}
-            style=${{ ...CHIP_STYLE, background: SOURCE_COLORS[event.source] }}
-          />
+            style=${{ display: 'inline-flex' }}
+          >
+            <button
+              type="button"
+              class="ide-trace-chip"
+              data-source=${event.source}
+              data-count=${event.count}
+              data-event-id=${event.id}
+              aria-label=${`${formatTooltip(event)}; jump replay to event`}
+              title=${formatTooltip(event)}
+              onClick=${() => selectTraceEvent(event)}
+              style=${{ ...CHIP_STYLE, background: SOURCE_COLORS[event.source] }}
+            />
+          </li>
         `)}
       </ul>
       ${overflow > 0
@@ -285,6 +302,21 @@ function BucketRow({ bucket }: { readonly bucket: TraceBucket }) {
       ` : null}
     </div>
   `
+}
+
+function selectTraceEvent(event: KeeperTraceEvent): void {
+  setIdeReplayUntilMs(event.tsMs)
+  const context = traceRouteContext(event)
+  if (!context.filePath) return
+  focusIdeContextAnchor({
+    file_path: context.filePath,
+    line: context.line,
+    surface: context.surface ?? SOURCE_LABELS[event.source],
+    label: context.label ?? formatTooltip(event),
+    source_id: context.sourceId ?? `trace:${event.id}`,
+    keeper_id: context.keeperId,
+    route_links: routeLinksForContext(context),
+  })
 }
 
 function traceRouteLinks(events: ReadonlyArray<KeeperTraceEvent>): ReadonlyArray<IdeContextRouteLink> {

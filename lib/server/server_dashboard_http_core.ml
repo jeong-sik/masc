@@ -399,6 +399,7 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
            ~interval_s:_operator_refresh_interval_s)
         with
         timeout_s = _operator_refresh_interval_s *. 0.8
+      ; on_error = Some (mark_cached_surface_error _operator_snapshot_cache)
       ; warm_delay_s = 120.0
       }
     ~compute
@@ -459,6 +460,7 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
            ~interval_s:_operator_refresh_interval_s)
         with
         timeout_s = _operator_refresh_interval_s *. 0.8
+      ; on_error = Some (mark_cached_surface_error _operator_digest_cache)
       ; warm_delay_s = 150.0
       }
     ~compute
@@ -736,6 +738,7 @@ let start_mission_refresh_loop ~state ~sw ~clock =
     ~config:
       { (Proactive_refresh.default_config ~label:"mission" ~interval_s:120.0) with
         timeout_s = mission_refresh_timeout_s
+      ; on_error = Some (mark_cached_surface_error _mission_cache)
       ; warm_delay_s = 90.0
       }
     ~compute

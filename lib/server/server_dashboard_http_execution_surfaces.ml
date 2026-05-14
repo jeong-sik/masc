@@ -431,6 +431,7 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
     ~config:
       { (Proactive_refresh.default_config ~label:"execution" ~interval_s:60.0) with
         timeout_s = execution_refresh_timeout_s
+      ; on_error = Some (mark_cached_surface_error _execution_cache)
       ; warm_delay_s = 0.0
       }
     ~compute
@@ -463,6 +464,7 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
     ~config:
       { (Proactive_refresh.default_config ~label:"transport_health" ~interval_s) with
         timeout_s
+      ; on_error = Some (mark_cached_surface_error _transport_health_cache)
       ; warm_delay_s = 0.0
       }
     ~compute

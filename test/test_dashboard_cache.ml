@@ -15,6 +15,20 @@ let check_json msg expected actual =
 let timeout_kind json =
   Yojson.Safe.Util.(member "timeout_kind" json |> to_string)
 
+let test_proactive_refresh_timeout_message_names_phase () =
+  let msg =
+    Proactive_refresh.For_testing.timeout_failure_message
+      ~label:"operator_snapshot"
+      ~phase:"refresh"
+      ~timeout_s:24.0
+      ~elapsed_s:33.2
+  in
+  Alcotest.(check string)
+    "typed proactive refresh timeout"
+    "refresh_timeout label=operator_snapshot phase=refresh timeout_s=24.0 \
+     elapsed_s=33.2"
+    msg
+
 (* -- 1. Nested get_or_compute must not deadlock ----------------------------- *)
 
 let test_nested_no_deadlock () =
@@ -517,6 +531,8 @@ let () =
         ] );
       ( "timeout",
         [
+          test_case "proactive refresh timeout names phase" `Quick
+            test_proactive_refresh_timeout_message_names_phase;
           test_case "stale preserved on timeout" `Quick
             (fun () ->
                Eio.Switch.run @@ fun sw ->

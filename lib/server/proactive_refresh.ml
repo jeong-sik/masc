@@ -41,6 +41,22 @@ let should_reraise_cancel exn =
   | Eio.Cancel.Cancelled _ -> not (is_internal_race_cancel exn)
   | _ -> false
 
+let timeout_failure_message ~label ~phase ~timeout_s ~elapsed_s =
+  Printf.sprintf
+    "refresh_timeout label=%s phase=%s timeout_s=%.1f elapsed_s=%.1f"
+    label
+    phase
+    timeout_s
+    elapsed_s
+
+let timeout_exception ~config ~phase ~elapsed_s =
+  Failure
+    (timeout_failure_message
+       ~label:config.label
+       ~phase
+       ~timeout_s:config.timeout_s
+       ~elapsed_s)
+
 let log_refresh_failure ~config ~consecutive_failures ~current_interval ~dt exn =
   incr consecutive_failures;
   if !consecutive_failures >= config.failure_threshold then
@@ -85,9 +101,11 @@ let start ~sw ~clock ~config:raw_config ~compute ~on_result =
          Log.Dashboard.info "%s warm cache done (%.1fs)" config.label
            (Time_compat.now () -. t0)
        | Error `Timeout ->
-         notify_error config (Failure "timeout");
-         Log.Dashboard.warn "%s warm cache skipped (%.1fs timeout)" config.label
-           (Time_compat.now () -. t0)
+         let dt = Time_compat.now () -. t0 in
+         let timeout_exn = timeout_exception ~config ~phase:"warm_cache" ~elapsed_s:dt in
+         notify_error config timeout_exn;
+         Log.Dashboard.warn "%s warm cache skipped (%.1fs timeout=%.1fs): %s"
+           config.label dt config.timeout_s (Printexc.to_string timeout_exn)
      with
      | exn ->
        if should_reraise_cancel exn then
@@ -146,7 +164,7 @@ let start ~sw ~clock ~config:raw_config ~compute ~on_result =
            Log.Dashboard.debug "%s refreshed (%.1fs)" config.label dt
          | Error `Timeout ->
              let dt = Time_compat.now () -. t0 in
-             let timeout_exn = Failure "timeout" in
+             let timeout_exn = timeout_exception ~config ~phase:"refresh" ~elapsed_s:dt in
              notify_error config timeout_exn;
              log_refresh_failure ~config ~consecutive_failures ~current_interval
                ~dt timeout_exn
@@ -159,3 +177,7 @@ let start ~sw ~clock ~config:raw_config ~compute ~on_result =
       loop ()
     in
     loop ())
+
+module For_testing = struct
+  let timeout_failure_message = timeout_failure_message
+end

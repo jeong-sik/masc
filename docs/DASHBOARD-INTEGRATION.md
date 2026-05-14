@@ -156,6 +156,8 @@ code_refs:
   - TLA+ spec index and TLC result panels
 - `GET /api/v1/dashboard/tools`
   - lab tools inventory
+- `GET /api/v1/dashboard/tool-quality`, `GET /api/v1/tool-metrics`, `GET /api/v1/prompts`
+  - lab tool quality aggregates, unified usage metrics, and prompt registry read model
 - `GET /api/v1/autoresearch/loops`
   - lab autoresearch loops
 - `GET /api/v1/dashboard/harness-health`

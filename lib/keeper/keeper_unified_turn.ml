@@ -2847,10 +2847,17 @@ let run_keeper_cycle
                              ]
                            ())
                       reasons;
-                    Log.Keeper.warn
-                      "%s: keeper usage telemetry untrusted runtime_lane=%s \
-                       reasons=%s input=%d output=%d context_max=%d"
+                    let warns_operator =
+                      Keeper_usage_trust.warns_operator usage_trust
+                    in
+                    let log_usage =
+                      if warns_operator then Log.Keeper.warn else Log.Keeper.info
+                    in
+                    log_usage
+                      "%s: keeper usage telemetry %s runtime_lane=%s reasons=%s \
+                       input=%d output=%d context_max=%d"
                       updated_meta.name
+                      (if warns_operator then "untrusted" else "unavailable")
                       runtime_lane_label
                       (String.concat "," reasons)
                       result.usage.input_tokens

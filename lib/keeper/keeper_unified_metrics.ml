@@ -277,11 +277,17 @@ let record_usage_trust ~keeper_name ~(trust : usage_trust) =
         Prometheus.inc_counter usage_anomaly_reason_metric
           ~labels:[ ("keeper", keeper_name); ("reason", reason) ] ())
       reasons;
-    Log.Keeper.warn
-      "#9959 usage_anomaly keeper=%s reasons=[%s] — upstream fix \
-       tracked in jeong-sik/oas#1181; cost accounting is suppressed \
+    let warns_operator = Keeper_usage_trust.warns_operator trust in
+    let log_usage =
+      if warns_operator then Log.Keeper.warn else Log.Keeper.info
+    in
+    log_usage
+      "#9959 usage_anomaly keeper=%s reasons=[%s] severity=%s — upstream \
+       fix tracked in jeong-sik/oas#1181; cost accounting is suppressed \
        to 0.0 for this turn by [usage_trust_is_trusted] gate."
-      keeper_name (String.concat "," reasons)
+      keeper_name
+      (String.concat "," reasons)
+      (if warns_operator then "warn" else "info")
   | Usage_missing | Usage_trusted -> ()
 
 let record_keeper_total_cost_usd ~keeper_name ~total_cost_usd =

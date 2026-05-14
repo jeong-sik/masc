@@ -24,6 +24,11 @@ let reasons = function
   | Usage_untrusted reasons -> reasons
   | Usage_missing | Usage_trusted -> []
 
+let warns_operator = function
+  | Usage_untrusted [ "zero_token_usage_reported" ] -> false
+  | Usage_missing | Usage_trusted -> false
+  | Usage_untrusted _ -> true
+
 let json_fields trust =
   [
     ("usage_trust", `String (to_string trust));

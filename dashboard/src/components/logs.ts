@@ -203,6 +203,11 @@ function classifyMessageCause(message: string): string | null {
   }
   if (lower.includes('semaphore wait')) return 'queue_wait_timeout'
   if (lower.includes('legacy verification directory')) return 'legacy_verification_dir'
+  if (lower.includes('zero_token_usage_reported')) return 'usage_zero_tokens'
+  if (lower.includes('usage telemetry untrusted')) return 'usage_telemetry_untrusted'
+  if (lower.includes('usage telemetry unavailable')) return 'usage_telemetry_unavailable'
+  if (lower.includes('orphan threshold breached')) return 'registry_orphan_threshold'
+  if (lower.includes('entry not found, update dropped')) return 'registry_orphan_update'
   if (lower.includes('archived credential')) return 'credential_archive'
   if (lower.includes('retired pg runtime env')) return 'retired_pg_env'
   if (lower.includes('rate limited') || lower.includes('temporarily limiting requests')) {

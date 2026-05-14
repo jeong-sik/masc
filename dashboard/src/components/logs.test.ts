@@ -43,6 +43,30 @@ describe('log diagnostics', () => {
     ).toBe('inter_chunk_idle')
   })
 
+  it('classifies keeper telemetry and registry noise causes', () => {
+    expect(
+      logDiagnosticCause(
+        entry({
+          level: 'INFO',
+          normalized_level: 'INFO',
+          message:
+            'keeper:analyst after_turn usage telemetry unavailable runtime_lane=runtime reasons=zero_token_usage_reported input=0 output=0 context_max=200000',
+        }),
+      ),
+    ).toBe('usage_zero_tokens')
+
+    expect(
+      logDiagnosticCause(
+        entry({
+          level: 'WARN',
+          normalized_level: 'WARN',
+          message:
+            'registry: orphan threshold breached name=analyst base_path=/Users/dancer/me drops=5 window=60s',
+        }),
+      ),
+    ).toBe('registry_orphan_threshold')
+  })
+
   it('prefers failure envelope cause codes and summarizes the current window', () => {
     const entries = [
       entry({

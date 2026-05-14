@@ -366,6 +366,11 @@ let record_usage_anomaly_metrics ~keeper_name ~model usage_trust =
            ())
       reasons
 
+let usage_untrusted_warns_operator = function
+  | Keeper_usage_trust.Usage_untrusted ["zero_token_usage_reported"] -> false
+  | Keeper_usage_trust.Usage_missing | Keeper_usage_trust.Usage_trusted -> false
+  | Keeper_usage_trust.Usage_untrusted _ -> true
+
 type cost_status =
   | Cost_reported
   | Cost_known_free
@@ -1883,16 +1888,26 @@ let make_hooks
             | Some _ | None -> 0.0
         in
         let total_tok = input_tok + output_tok in
-        if (not usage_missing) && not usage_trusted then
-          Log.Keeper.warn
-            "keeper:%s after_turn usage telemetry untrusted runtime_lane=%s reasons=%s input=%d output=%d context_max=%d"
-            meta.name runtime_lane_label
-            (String.concat ","
-               (match Keeper_usage_trust.reasons usage_trust with
-                | [] -> [Keeper_usage_trust.to_string usage_trust]
-                | reasons -> reasons))
-            raw_input_tok raw_output_tok
-            (context_max_of_telemetry response.telemetry);
+        if (not usage_missing) && not usage_trusted then (
+          let reasons =
+            match Keeper_usage_trust.reasons usage_trust with
+            | [] -> [Keeper_usage_trust.to_string usage_trust]
+            | reasons -> reasons
+          in
+          if usage_untrusted_warns_operator usage_trust then
+            Log.Keeper.warn
+              "keeper:%s after_turn usage telemetry untrusted runtime_lane=%s reasons=%s input=%d output=%d context_max=%d"
+              meta.name runtime_lane_label
+              (String.concat "," reasons)
+              raw_input_tok raw_output_tok
+              (context_max_of_telemetry response.telemetry)
+          else
+            Log.Keeper.info
+              "keeper:%s after_turn usage telemetry unavailable runtime_lane=%s reasons=%s input=%d output=%d context_max=%d"
+              meta.name runtime_lane_label
+              (String.concat "," reasons)
+              raw_input_tok raw_output_tok
+              (context_max_of_telemetry response.telemetry));
         (* Cache-token tracking uses OAS-reported counters only. *)
         (match response.usage with
          | Some u when usage_trusted ->

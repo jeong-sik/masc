@@ -1103,9 +1103,10 @@ let put_entry key entry =
      window" without a wall-clock heuristic at every caller.
    - Bump [metric_keeper_registry_update_dropped] every drop.
    - Edge-trigger: when count crosses [orphan_drop_threshold] inside
-     [orphan_drop_window_sec], escalate the log to ERROR and bump
+     [orphan_drop_window_sec], emit one WARN and bump
      [metric_keeper_registry_orphan_threshold_breached] exactly once
-     per breach window.
+     per breach window.  Individual drops stay DEBUG; the metric is the
+     durable signal and the threshold log is the operator attention point.
    - Reset state on the successful Some-entry path (orphan resolved)
      and after the window expires.
 
@@ -1180,7 +1181,7 @@ let update_entry ~base_path name f =
           Keeper_metrics.metric_keeper_registry_orphan_threshold_breached
           ~labels:[ "name", name ]
           ();
-        Log.Keeper.error
+        Log.Keeper.warn
           "registry: orphan threshold breached name=%s base_path=%s drops=%d \
            window=%.0fs — turn fiber may be racing post-deregistration; check \
            masc_keeper_status and watchdog"
@@ -1189,7 +1190,7 @@ let update_entry ~base_path name f =
           count
           orphan_drop_window_sec)
       else
-        Log.Keeper.warn
+        Log.Keeper.debug
           "registry: update_entry name=%s base_path=%s: entry not found, update dropped \
            (count=%d)"
           name

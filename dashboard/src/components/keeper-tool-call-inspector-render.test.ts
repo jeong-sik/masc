@@ -84,6 +84,87 @@ describe('KeeperToolCallInspector render', () => {
     expect(outputCopy?.getAttribute('title')).toBe('도구 호출 출력 복사')
   })
 
+  it('links safe tool-call file inputs back to the Code IDE route', async () => {
+    const fetchKeeperToolCalls = vi.fn().mockResolvedValue({
+      keeper: 'analyst',
+      count: 1,
+      source: 'tool_call_io',
+      health: 'ok',
+      entries: [
+        {
+          ts: 1_777_100_000,
+          keeper: 'analyst',
+          tool: 'keeper_fs_read',
+          input: { file_path: 'lib/runtime.ml', line: 12 },
+          output: 'file contents',
+          success: true,
+          duration_ms: 42,
+        },
+      ],
+    })
+
+    const { KeeperToolCallInspector } = await loadInspector(fetchKeeperToolCalls)
+    await act(async () => {
+      render(html`<${KeeperToolCallInspector} keeperName="analyst" />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    const rowToggle = container.querySelector('button[aria-expanded="false"]') as HTMLButtonElement | null
+    await act(async () => {
+      rowToggle?.click()
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    const codeLink = container.querySelector('[data-testid="keeper-tool-code-link"]') as HTMLButtonElement | null
+    expect(codeLink).not.toBeNull()
+    expect(codeLink?.textContent).toBe('Code')
+    expect(codeLink?.getAttribute('title')).toBe('Code lib/runtime.ml:12')
+
+    await act(async () => {
+      codeLink?.click()
+      await Promise.resolve()
+    })
+    expect(window.location.hash).toBe('#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=12&surface=Tool&label=keeper_fs_read&source_id=tool%3Aanalyst%3A1777100000%3Akeeper_fs_read&keeper=analyst')
+  })
+
+  it('does not render Code links for unsafe absolute tool-call file inputs', async () => {
+    const fetchKeeperToolCalls = vi.fn().mockResolvedValue({
+      keeper: 'analyst',
+      count: 1,
+      source: 'tool_call_io',
+      health: 'ok',
+      entries: [
+        {
+          ts: 1_777_100_000,
+          keeper: 'analyst',
+          tool: 'keeper_fs_read',
+          input: { file_path: '/tmp/runtime.ml', line: 12 },
+          output: 'file contents',
+          success: true,
+          duration_ms: 42,
+        },
+      ],
+    })
+
+    const { KeeperToolCallInspector } = await loadInspector(fetchKeeperToolCalls)
+    await act(async () => {
+      render(html`<${KeeperToolCallInspector} keeperName="analyst" />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    const rowToggle = container.querySelector('button[aria-expanded="false"]') as HTMLButtonElement | null
+    await act(async () => {
+      rowToggle?.click()
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(container.querySelector('[data-testid="keeper-tool-code-link"]')).toBeNull()
+  })
+
   it('surfaces coverage gap provenance when tool-call IO is stale', async () => {
     const fetchKeeperToolCalls = vi.fn().mockResolvedValue({
       keeper: 'analyst',

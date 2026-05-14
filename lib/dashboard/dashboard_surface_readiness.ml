@@ -233,8 +233,7 @@ let all_entries =
       ~meets_main_gate:false
       ~rationale:"Hidden keeper cognition and memory drill-down."
       ~route_hash:"#monitoring?section=cognition"
-      ~live_spotcheck:"/api/v1/dashboard/shell"
-      ~tool_name:"masc_operator_snapshot"
+      ~live_spotcheck:"/api/v1/dashboard/memory-subsystems"
       ()
   ; entry
       ~id:"command.operations"

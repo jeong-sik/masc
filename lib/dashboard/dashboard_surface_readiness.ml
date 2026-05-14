@@ -352,7 +352,7 @@ let all_entries =
       ~meets_main_gate:true
       ~rationale:"Keeper collaboration IDE shell."
       ~route_hash:"#code?section=ide-shell"
-      ~live_spotcheck:"/api/v1/dashboard/shell"
+      ~live_spotcheck:"/api/v1/ide/presence"
       ()
   ; entry
       ~id:"logs"

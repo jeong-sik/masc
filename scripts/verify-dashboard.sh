@@ -176,7 +176,9 @@ check_json "autoresearch loops exposes loops" "$BASE/api/v1/autoresearch/loops" 
 check_http "harness health 200" "$BASE/api/v1/dashboard/harness-health" "200"
 check_json "harness health exposes overview" "$BASE/api/v1/dashboard/harness-health" "'overview' in d" '^True$'
 
-echo "[6/7] Logs"
+echo "[6/7] Code + Logs"
+check_http "IDE presence 200" "$BASE/api/v1/ide/presence" "200"
+check_json "IDE presence exposes connected state" "$BASE/api/v1/ide/presence" "d.get('data', {}).get('connected')" '^True$'
 check_http "dashboard logs 200" "$BASE/api/v1/dashboard/logs?limit=3" "200"
 check_json "dashboard logs exposes entries" "$BASE/api/v1/dashboard/logs?limit=3" "'entries' in d" '^True$'
 

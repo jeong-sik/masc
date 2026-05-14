@@ -55,7 +55,7 @@ let make_usage ?cost ?(cache_creation = 0) ?(cache_read = 0) ~input ~output ()
   }
 ;;
 
-let make_telemetry ?timings ?(request_latency_ms = 0) ()
+let make_telemetry ?timings ?(request_latency_ms = 0) ?ttfrc_ms ?prefill_ms ()
   : Agent_sdk.Types.inference_telemetry
   =
   { system_fingerprint = None
@@ -69,8 +69,8 @@ let make_telemetry ?timings ?(request_latency_ms = 0) ()
   ; canonical_model_id = None
   ; effective_context_window = None
   ; provider_internal_action_count = None
-  ; ttfrc_ms = None
-  ; prefill_ms = None
+  ; ttfrc_ms
+  ; prefill_ms
   }
 ;;
 
@@ -469,6 +469,39 @@ let test_sample_of_response_derives_wall_throughput () =
     (sample.throughput_tokens_per_s = Some 200.0)
 ;;
 
+let test_sample_of_response_prefers_ttfrc_for_ttfb () =
+  let usage = make_usage ~input:100 ~output:50 () in
+  let timings : Agent_sdk.Types.inference_timings =
+    { prompt_n = Some 100
+    ; prompt_ms = Some 510.0
+    ; prompt_per_second = Some 196.0
+    ; predicted_n = Some 50
+    ; predicted_ms = Some 100.0
+    ; predicted_per_second = Some 500.0
+    ; cache_n = None
+    }
+  in
+  let telemetry =
+    make_telemetry ~timings ~request_latency_ms:750 ~ttfrc_ms:42.0 ()
+  in
+  let response = make_response ~usage ~telemetry ~model:"kimi-for-coding" () in
+  let sample =
+    DOB.sample_of_response
+      ~provider_id:"kimi_cli"
+      ~model_id:"kimi-for-coding"
+      ~status:DOB.Success
+      response
+  in
+  Alcotest.(check (float 1e-9))
+    "ttfrc drives first response latency"
+    42.0
+    sample.ttfb_ms;
+  Alcotest.(check (float 1e-9))
+    "request latency still drives total duration"
+    750.0
+    sample.total_duration_ms
+;;
+
 let test_sample_of_response_derives_duration_from_timing_components () =
   let usage = make_usage ~input:100 ~output:88 () in
   let timings : Agent_sdk.Types.inference_timings =
@@ -499,6 +532,43 @@ let test_sample_of_response_derives_duration_from_timing_components () =
   | Some throughput ->
     Alcotest.(check (float 1e-9))
       "wall throughput uses derived decode time"
+      100.0
+      throughput
+  | None -> Alcotest.fail "expected derived throughput"
+;;
+
+let test_sample_of_response_uses_ttfrc_for_duration_fallback () =
+  let usage = make_usage ~input:100 ~output:88 () in
+  let timings : Agent_sdk.Types.inference_timings =
+    { prompt_n = None
+    ; prompt_ms = Some 120.0
+    ; prompt_per_second = None
+    ; predicted_n = None
+    ; predicted_ms = Some 880.0
+    ; predicted_per_second = None
+    ; cache_n = None
+    }
+  in
+  let telemetry =
+    make_telemetry ~timings ~request_latency_ms:0 ~ttfrc_ms:450.0 ()
+  in
+  let response = make_response ~usage ~telemetry ~model:"ollama:qwen" () in
+  let sample =
+    DOB.sample_of_response
+      ~provider_id:"ollama"
+      ~model_id:"ollama:qwen"
+      ~status:DOB.Success
+      response
+  in
+  Alcotest.(check (float 1e-9))
+    "duration falls back to ttfrc+decode timings"
+    1330.0
+    sample.total_duration_ms;
+  Alcotest.(check (float 1e-9)) "ttfb uses ttfrc" 450.0 sample.ttfb_ms;
+  match sample.throughput_tokens_per_s with
+  | Some throughput ->
+    Alcotest.(check (float 1e-9))
+      "wall throughput uses decode duration after ttfrc"
       100.0
       throughput
   | None -> Alcotest.fail "expected derived throughput"
@@ -685,9 +755,17 @@ let () =
             `Quick
             test_sample_of_response_derives_wall_throughput
         ; Alcotest.test_case
+            "ttfrc drives ttfb"
+            `Quick
+            test_sample_of_response_prefers_ttfrc_for_ttfb
+        ; Alcotest.test_case
             "timing components avoid zero duration"
             `Quick
             test_sample_of_response_derives_duration_from_timing_components
+        ; Alcotest.test_case
+            "ttfrc duration fallback"
+            `Quick
+            test_sample_of_response_uses_ttfrc_for_duration_fallback
         ; Alcotest.test_case
             "missing usage records unknown sample"
             `Quick

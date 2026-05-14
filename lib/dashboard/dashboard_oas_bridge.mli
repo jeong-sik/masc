@@ -95,10 +95,15 @@ val sample_of_response :
     twelve-signal bridge sample.
 
     - [usage] fields become token, cost, and cache-hit signals.
+    - [response.telemetry.ttfrc_ms] is preferred for TTFB when OAS reports
+      wall-clock time-to-first-response-chunk. Otherwise positive
+      [prefill_ms] / [prompt_ms] timing is used as the compatibility
+      fallback.
     - [response.telemetry.request_latency_ms] is used as duration when the
-      caller does not provide [total_duration_ms]. If that aggregate
-      latency is missing/zero, positive [prompt_ms] + [predicted_ms]
-      timing components are used as a non-zero duration instead.
+      caller does not provide [total_duration_ms]. If that aggregate latency
+      is missing/zero, positive [ttfrc_ms] + [predicted_ms] timing components
+      are used as a non-zero duration instead, falling back to
+      [prefill_ms] / [prompt_ms] plus decode timing when [ttfrc_ms] is absent.
     - native decode throughput is preferred when OAS telemetry exposes it;
       otherwise wall-clock throughput is derived from output tokens and
       duration.

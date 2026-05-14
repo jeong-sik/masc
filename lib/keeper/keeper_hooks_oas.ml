@@ -449,23 +449,39 @@ type cost_status =
   | Cost_runtime_unknown
   | Cost_oas_cost_unreported
 
+let cost_label_reported = "reported"
+let cost_label_known_free = "known_free"
+let cost_label_no_tokens = "no_tokens"
+let cost_label_usage_missing = "usage_missing"
+let cost_label_usage_untrusted = "usage_untrusted"
+let cost_label_runtime_unknown = "runtime_unknown"
+let cost_label_oas_cost_unreported = "oas_cost_unreported"
+
+let cost_reason_reported = "oas_reported_cost"
+let cost_reason_known_free = "known_structurally_unmetered_or_zero_price"
+let cost_reason_no_tokens = "no_billable_tokens"
+let cost_reason_usage_missing = "usage_missing"
+let cost_reason_usage_untrusted = "usage_untrusted"
+let cost_reason_runtime_unknown = "runtime_unknown"
+let cost_reason_oas_cost_unreported = "oas_cost_unreported"
+
 let cost_status_to_string = function
-  | Cost_reported -> "reported"
-  | Cost_known_free -> "known_free"
-  | Cost_no_tokens -> "no_tokens"
-  | Cost_usage_missing -> "usage_missing"
-  | Cost_usage_untrusted -> "usage_untrusted"
-  | Cost_runtime_unknown -> "runtime_unknown"
-  | Cost_oas_cost_unreported -> "oas_cost_unreported"
+  | Cost_reported -> cost_label_reported
+  | Cost_known_free -> cost_label_known_free
+  | Cost_no_tokens -> cost_label_no_tokens
+  | Cost_usage_missing -> cost_label_usage_missing
+  | Cost_usage_untrusted -> cost_label_usage_untrusted
+  | Cost_runtime_unknown -> cost_label_runtime_unknown
+  | Cost_oas_cost_unreported -> cost_label_oas_cost_unreported
 
 let cost_status_reason = function
-  | Cost_reported -> "oas_reported_cost"
-  | Cost_known_free -> "known_structurally_unmetered_or_zero_price"
-  | Cost_no_tokens -> "no_billable_tokens"
-  | Cost_usage_missing -> "usage_missing"
-  | Cost_usage_untrusted -> "usage_untrusted"
-  | Cost_runtime_unknown -> "runtime_unknown"
-  | Cost_oas_cost_unreported -> "oas_cost_unreported"
+  | Cost_reported -> cost_reason_reported
+  | Cost_known_free -> cost_reason_known_free
+  | Cost_no_tokens -> cost_reason_no_tokens
+  | Cost_usage_missing -> cost_reason_usage_missing
+  | Cost_usage_untrusted -> cost_reason_usage_untrusted
+  | Cost_runtime_unknown -> cost_reason_runtime_unknown
+  | Cost_oas_cost_unreported -> cost_reason_oas_cost_unreported
 
 let cost_status_for_event
     ~(runtime_unknown : bool)
@@ -638,14 +654,14 @@ let () =
 
 let classify_cost_usd_source ~usage_missing ~usage_trusted ~runtime_unmetered
     ~cost_usd =
-  if usage_missing then "missing_usage"
-  else if not usage_trusted then "untrusted_usage"
-  else if runtime_unmetered then "unmetered_provider"
-  else if cost_usd > 0.0 then "computed"
-  else "oas_cost_unreported"
+  if usage_missing then cost_label_usage_missing
+  else if not usage_trusted then cost_label_usage_untrusted
+  else if runtime_unmetered then cost_reason_known_free
+  else if cost_usd > 0.0 then cost_label_reported
+  else cost_label_oas_cost_unreported
 
 let record_cost_emit_source source =
-  if not (String.equal source "computed") then
+  if not (String.equal source cost_status_computed) then
     Prometheus.inc_counter cost_emit_source_metric
       ~labels:[ ("source", source) ]
       ()

@@ -21,8 +21,11 @@ import { pushTrace } from './keeper-trace-store'
  *   tsMs       ← Date.parse(post.created_at_iso) (NaN-guarded)
  *   keeperName ← post.author_identity
  *   threadId   ← post.id (BoardPost is the thread itself for now)
- *   line       ← null (BoardPost carries no line anchor; consumers fall
- *                back to the keeper-level no-line bucket per RFC §5)
+ *   filePath   ← post.filePath when the caller has already resolved a safe
+ *                board-thread file anchor; otherwise null
+ *   line       ← post.line when the caller has already resolved a safe
+ *                board-thread file anchor; otherwise null so consumers fall
+ *                back to the keeper-level no-line bucket per RFC §5
  *
  * NaN-guard rationale: a malformed `created_at_iso` would otherwise
  * propagate `NaN` into the store and break binary-search insertion. We
@@ -33,6 +36,8 @@ export interface AnchoredThreadProducerInput {
   readonly id: string
   readonly created_at_iso: string
   readonly author_identity: string
+  readonly filePath?: string | null
+  readonly line?: number | null
 }
 
 /**
@@ -56,9 +61,16 @@ export function bridgePostsToTrace(
       keeperName: post.author_identity,
       source: 'anchored-thread',
       threadId: post.id,
-      line: null,
+      filePath: post.filePath ?? null,
+      line: lineFromPost(post),
     })
     next.add(post.id)
   }
   return next
+}
+
+function lineFromPost(post: AnchoredThreadProducerInput): number | null {
+  return typeof post.line === 'number' && Number.isSafeInteger(post.line) && post.line >= 1
+    ? post.line
+    : null
 }

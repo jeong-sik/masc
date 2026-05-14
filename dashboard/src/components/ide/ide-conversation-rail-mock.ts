@@ -189,7 +189,7 @@ export function IdeConversationRailMock() {
   // re-render with the same posts is a no-op.
   const knownPostIds = useRef<ReadonlySet<string>>(new Set())
   useEffect(() => {
-    knownPostIds.current = bridgePostsToTrace(posts, knownPostIds.current)
+    knownPostIds.current = bridgePostsToTrace(posts.map(postToTraceInput), knownPostIds.current)
   }, [posts])
 
   // RFC-0028 PR-δ-2 cascade-hop producer: each cascade strategy_trace
@@ -331,6 +331,17 @@ function postToAnchoredThread(post: BoardPost): AnchoredThread | null {
     created_ms: createdMs,
     resolved: false,
     reply_count: Number.isSafeInteger(post.comment_count) ? Math.max(0, post.comment_count) : 0,
+  }
+}
+
+function postToTraceInput(post: BoardPost) {
+  const anchor = postToAnchoredThread(post)?.anchor ?? null
+  return {
+    id: post.id,
+    created_at_iso: post.created_at_iso,
+    author_identity: post.author_identity,
+    filePath: anchor?.file_path ?? null,
+    line: anchor?.line_start ?? null,
   }
 }
 

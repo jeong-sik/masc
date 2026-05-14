@@ -19,10 +19,13 @@ import {
   lineNumberExt,
   blameExtensions,
   keeperLineSelectExt,
+  keeperTraceLineGutterExt,
+  keeperTraceLinesForFile,
   contextFocusLineExt,
   focusEditorContextLine,
   annotationLineChipExt,
   pushOwnership,
+  pushKeeperTraceLines,
   pushAnnotationLines,
   internalDocumentSync,
   syntaxHighlightExt,
@@ -32,6 +35,7 @@ import { SplitDiffView, UnifiedDiffView } from './ide-diff-view'
 import { KeeperBadge } from '../keeper-badge'
 import { keeperCursorExtension } from './keeper-cursor-cm-extension'
 import { cursorOverlaySignal, getKeeperColor } from './keeper-cursor-overlay'
+import { keeperTraceState } from './keeper-trace-store'
 import {
   globalPresenceSnapshot,
   type KeeperPresenceSnapshot,
@@ -246,6 +250,7 @@ export function IdeEditor({
               keepers=${keepers}
               onKeeperLineSelect=${onKeeperLineSelect}
               contextFocus=${currentFileFocus}
+              traceActive=${activeLayers.has('keeper-trace')}
               annotations=${annotations}
             />`
       }
@@ -557,6 +562,7 @@ function CodeMirrorEditor({
   onKeeperLineSelect,
   annotations = [],
   contextFocus,
+  traceActive = false,
 }: {
   readonly documentStore: CodeDocumentStore
   readonly ownershipStore: KeeperLineOwnershipStore
@@ -565,6 +571,7 @@ function CodeMirrorEditor({
   readonly onKeeperLineSelect?: (keeperId: string, line: number) => void
   readonly annotations?: ReadonlyArray<IdeAnnotation>
   readonly contextFocus?: IdeContextFocus | null
+  readonly traceActive?: boolean
 }) {
   const containerRef = useRef<HTMLElement>(null)
   const editorRef = useRef<EditorView | null>(null)
@@ -577,6 +584,11 @@ function CodeMirrorEditor({
   const currentFileAnnotations = useMemo(
     () => annotations.filter(annotation => annotation.file_path === document.file_path),
     [annotations, document.file_path],
+  )
+  const traceEvents = keeperTraceState.value.events
+  const traceLines = useMemo(
+    () => traceActive ? keeperTraceLinesForFile(document.file_path, traceEvents) : [],
+    [document.file_path, traceActive, traceEvents],
   )
 
   // Mount CM6 instance
@@ -614,6 +626,9 @@ function CodeMirrorEditor({
           ...(onKeeperLineSelect
             ? [keeperLineSelectExt(() => ownershipStore.ownership(), onKeeperLineSelect)]
             : []),
+          ...(traceActive
+            ? [keeperTraceLineGutterExt()]
+            : []),
           ...blameExts,
         ],
       })
@@ -627,6 +642,9 @@ function CodeMirrorEditor({
       if (showBlame && ownership.size > 0) {
         pushOwnership(view, ownership)
       }
+      if (traceActive && traceLines.length > 0) {
+        pushKeeperTraceLines(view, traceLines)
+      }
       setReady(true)
     }
 
@@ -638,7 +656,7 @@ function CodeMirrorEditor({
       editorRef.current = null
       setReady(false)
     }
-  }, [document.file_path, documentStore, ownershipStore, onKeeperLineSelect, showBlame])
+  }, [document.file_path, documentStore, ownershipStore, onKeeperLineSelect, showBlame, traceActive])
 
   // Push document updates. The first file response can arrive before
   // the CM6 instance is ready or before this component subscribes, so
@@ -660,6 +678,12 @@ function CodeMirrorEditor({
     if (!view || !ready || !showBlame) return
     pushOwnership(view, ownership)
   }, [ownership, ready, showBlame])
+
+  useEffect(() => {
+    const view = editorRef.current
+    if (!view || !ready || !traceActive) return
+    pushKeeperTraceLines(view, traceLines)
+  }, [ready, traceActive, traceLines])
 
   useEffect(() => {
     const view = editorRef.current
@@ -714,6 +738,11 @@ function CodeMirrorEditor({
     const unsub = ownershipStore.subscribe(() => forceRender(n => n + 1))
     return () => unsub()
   }, [ownershipStore])
+  useEffect(() => {
+    if (!traceActive) return
+    const unsub = keeperTraceState.subscribe(() => forceRender(n => n + 1))
+    return () => unsub()
+  }, [traceActive])
 
   return html`
     <div class="ide-codemirror-shell" data-view=${showBlame ? 'blame' : 'source'}>

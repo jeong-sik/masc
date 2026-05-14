@@ -49,6 +49,7 @@ export type KeeperTraceEvent =
   | (KeeperTraceBase & {
       readonly source: 'anchored-thread'
       readonly threadId: string
+      readonly filePath?: string | null
       readonly line: number | null
     })
   | (KeeperTraceBase & {
@@ -86,25 +87,26 @@ export const keeperTraceState = signal<KeeperTraceState>(INITIAL_STATE)
  * a fresh entry with `count: 1`.
  *
  * Coalescing rule (RFC-0028 §4):
- *   if the existing entry with the largest tsMs has the same `source` AND the
- *   same `keeperName` AND `(input.tsMs - existing.tsMs) <= COALESCE_WINDOW_MS`,
+ *   if the existing entry with the largest tsMs has the same trace bucket
+ *   (source + keeperName, and for anchored threads also filePath + line)
+ *   AND `(input.tsMs - existing.tsMs) <= COALESCE_WINDOW_MS`,
  *   then replace it in-array with `{ ...existing, count: existing.count + 1, tsMs: input.tsMs }`.
  *   Otherwise insert at the binary-search position and prune retention.
  *
  * Out-of-order tsMs (a producer with stale clock) is supported — the entry
  * is inserted at the correct ascending position. Coalescing only matches the
- * latest entry by tsMs of the same (source, keeperName) tuple.
+ * latest entry by tsMs of the same trace bucket.
  */
 export function pushTrace(input: KeeperTraceEventInput): void {
   const prev = keeperTraceState.value.events
   const incoming: KeeperTraceEvent = { ...input, count: 1 } as KeeperTraceEvent
 
-  // Find latest entry of same (source, keeperName) — needed for coalescing.
+  // Find latest entry of the same trace bucket — needed for coalescing.
   // Walk backwards because retention prune keeps the array bounded.
   let coalesceIdx = -1
   for (let i = prev.length - 1; i >= 0; i -= 1) {
     const candidate = prev[i]!
-    if (candidate.source === incoming.source && candidate.keeperName === incoming.keeperName) {
+    if (sameTraceBucket(candidate, incoming)) {
       coalesceIdx = i
       break
     }
@@ -188,4 +190,13 @@ function insertSorted(
   const next = arr.slice()
   next.splice(lo, 0, incoming)
   return next
+}
+
+function sameTraceBucket(left: KeeperTraceEvent, right: KeeperTraceEvent): boolean {
+  if (left.source !== right.source || left.keeperName !== right.keeperName) return false
+  if (left.source === 'anchored-thread' && right.source === 'anchored-thread') {
+    return (left.filePath ?? null) === (right.filePath ?? null)
+      && left.line === right.line
+  }
+  return true
 }

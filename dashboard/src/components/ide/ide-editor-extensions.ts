@@ -8,6 +8,7 @@ import {
   type StreamParser,
 } from '@codemirror/language'
 import type { LineOwnership } from './keeper-line-ownership-store'
+import type { KeeperTraceEvent, KeeperTraceSource } from './keeper-trace-store'
 import { kSigil } from '../keeper-badge'
 
 // ── Read-only lock ────────────────────────────────────────────────
@@ -101,6 +102,36 @@ export function themeExt(): Extension {
       overflow: 'hidden',
       textOverflow: 'ellipsis',
       whiteSpace: 'nowrap',
+    },
+    '.cm-trace-gutter': {
+      minWidth: '34px',
+      borderRight: '1px solid var(--color-border-default)',
+      background: 'var(--color-bg-page)',
+    },
+    '.cm-trace-gutter .cm-gutterElement': {
+      padding: '0 var(--sp-1)',
+      textAlign: 'left',
+    },
+    '.cm-trace-stack': {
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'flex-start',
+      gap: '2px',
+      minWidth: '28px',
+      height: '100%',
+    },
+    '.cm-trace-dot': {
+      display: 'inline-block',
+      width: '6px',
+      height: '6px',
+      borderRadius: '999px',
+      background: 'var(--cm-trace-color)',
+      boxShadow: '0 0 0 1px var(--color-bg-page)',
+    },
+    '.cm-trace-overflow': {
+      color: 'var(--color-fg-muted)',
+      fontSize: 'var(--fs-9)',
+      lineHeight: '1',
     },
     '&.cm-focused': {
       outline: 'none',
@@ -261,6 +292,187 @@ function blameGutterExt(): Extension {
 
 export function pushOwnership(view: EditorView, ownership: ReadonlyMap<number, LineOwnership>): void {
   view.dispatch({ effects: [setOwnership.of(ownership)] })
+}
+
+// ── Keeper trace gutter ───────────────────────────────────────────
+// File-scoped line trace dots for the `keeper-trace` layer.
+
+const TRACE_DOT_CAP = 3
+
+export interface EditorKeeperTraceLineEvent {
+  readonly source: KeeperTraceSource
+  readonly keeperName: string
+  readonly count: number
+  readonly tsMs: number
+}
+
+export interface EditorKeeperTraceLine {
+  readonly line: number
+  readonly events: ReadonlyArray<EditorKeeperTraceLineEvent>
+}
+
+const setKeeperTraceLines = StateEffect.define<ReadonlyArray<EditorKeeperTraceLine>>()
+
+class TraceLineMarker extends GutterMarker {
+  constructor(
+    private readonly line: number,
+    private readonly events: ReadonlyArray<EditorKeeperTraceLineEvent>,
+  ) {
+    super()
+  }
+
+  toDOM(): HTMLElement {
+    const el = document.createElement('span')
+    el.className = 'cm-trace-stack'
+    if (this.events.length === 0) {
+      el.setAttribute('aria-hidden', 'true')
+      return el
+    }
+    el.setAttribute('role', 'list')
+    el.setAttribute('aria-label', traceLineAriaLabel(this.line, this.events))
+    el.title = traceLineTitle(this.line, this.events)
+    const visible = this.events.slice(0, TRACE_DOT_CAP)
+    for (const event of visible) {
+      const dot = document.createElement('span')
+      dot.className = 'cm-trace-dot'
+      dot.setAttribute('role', 'img')
+      dot.setAttribute('aria-label', traceEventLabel(event))
+      dot.setAttribute('data-source', event.source)
+      dot.style.setProperty('--cm-trace-color', traceSourceColor(event.source))
+      el.append(dot)
+    }
+    const overflow = this.events.length - visible.length
+    if (overflow > 0) {
+      const more = document.createElement('span')
+      more.className = 'cm-trace-overflow'
+      more.textContent = `+${overflow}`
+      more.setAttribute('aria-label', `${overflow} more trace events`)
+      el.append(more)
+    }
+    return el
+  }
+
+  eq(other: TraceLineMarker): boolean {
+    return this.line === other.line && traceLineKey(this.events) === traceLineKey(other.events)
+  }
+}
+
+const TRACE_SPACER = new TraceLineMarker(0, [])
+
+const keeperTraceLineField = StateField.define<ReadonlyMap<number, TraceLineMarker>>({
+  create() {
+    return new Map()
+  },
+  update(markers, tr) {
+    for (const effect of tr.effects) {
+      if (!effect.is(setKeeperTraceLines)) continue
+      const next = new Map<number, TraceLineMarker>()
+      for (const traceLine of effect.value) {
+        if (traceLine.line < 1 || traceLine.line > tr.state.doc.lines || traceLine.events.length === 0) continue
+        next.set(traceLine.line, new TraceLineMarker(traceLine.line, traceLine.events))
+      }
+      return next
+    }
+    return markers
+  },
+})
+
+export function keeperTraceLineGutterExt(): Extension {
+  return [
+    keeperTraceLineField,
+    gutter({
+      class: 'cm-trace-gutter',
+      lineMarkerChange(update: ViewUpdate) {
+        return update.startState.field(keeperTraceLineField, false) !== update.state.field(keeperTraceLineField, false)
+      },
+      lineMarker(view, block) {
+        const line = view.state.doc.lineAt(block.from)
+        const field = view.state.field(keeperTraceLineField, false)
+        return field?.get(line.number) ?? null
+      },
+      initialSpacer: () => TRACE_SPACER,
+    }),
+  ]
+}
+
+export function pushKeeperTraceLines(
+  view: EditorView,
+  traceLines: ReadonlyArray<EditorKeeperTraceLine>,
+): void {
+  view.dispatch({ effects: [setKeeperTraceLines.of(traceLines)] })
+}
+
+export function keeperTraceLinesForFile(
+  filePath: string,
+  events: ReadonlyArray<KeeperTraceEvent>,
+): ReadonlyArray<EditorKeeperTraceLine> {
+  const normalizedFilePath = filePath.trim()
+  if (!normalizedFilePath) return []
+
+  const byLine = new Map<number, EditorKeeperTraceLineEvent[]>()
+  for (const event of events) {
+    if (event.source !== 'anchored-thread') continue
+    if (event.filePath !== normalizedFilePath) continue
+    if (event.line === null || !Number.isSafeInteger(event.line) || event.line < 1) continue
+    const existing = byLine.get(event.line) ?? []
+    existing.push({
+      source: event.source,
+      keeperName: event.keeperName,
+      count: event.count,
+      tsMs: event.tsMs,
+    })
+    byLine.set(event.line, existing)
+  }
+
+  return [...byLine.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([line, eventsForLine]) => ({
+      line,
+      events: eventsForLine.sort((left, right) => right.tsMs - left.tsMs),
+    }))
+}
+
+function traceSourceColor(source: KeeperTraceSource): string {
+  switch (source) {
+    case 'anchored-thread':
+      return 'var(--color-status-info)'
+    case 'cascade-hop':
+      return 'var(--color-accent-fg)'
+    case 'bdi-snapshot':
+      return 'var(--color-status-ok)'
+    case 'decision-log':
+      return 'var(--color-status-warn)'
+  }
+}
+
+function traceSourceLabel(source: KeeperTraceSource): string {
+  switch (source) {
+    case 'anchored-thread':
+      return 'thread'
+    case 'cascade-hop':
+      return 'cascade'
+    case 'bdi-snapshot':
+      return 'BDI'
+    case 'decision-log':
+      return 'decision'
+  }
+}
+
+function traceEventLabel(event: EditorKeeperTraceLineEvent): string {
+  const count = event.count > 1 ? ` x${event.count}` : ''
+  return `${traceSourceLabel(event.source)} ${event.keeperName}${count}`
+}
+
+function traceLineAriaLabel(line: number, events: ReadonlyArray<EditorKeeperTraceLineEvent>): string {
+  return `Line ${line} keeper trace: ${events.map(traceEventLabel).join(', ')}`
+}
+
+function traceLineTitle(line: number, events: ReadonlyArray<EditorKeeperTraceLineEvent>): string {
+  return [`L${line}`, ...events.map(traceEventLabel)].join('\n')
+}
+
+function traceLineKey(events: ReadonlyArray<EditorKeeperTraceLineEvent>): string {
+  return events.map(event => `${event.source}:${event.keeperName}:${event.count}:${event.tsMs}`).join('|')
 }
 
 export function keeperLineSelectExt(

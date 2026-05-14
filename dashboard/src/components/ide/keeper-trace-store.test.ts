@@ -128,6 +128,39 @@ describe('keeper-trace-store', () => {
     expect(keeperTraceState.value.events.map(e => e.keeperName)).toEqual(['scholar', 'moth'])
   })
 
+  it('does NOT coalesce anchored-thread events for different file lines within the window', () => {
+    pushTrace({
+      id: 'a-1',
+      tsMs: 1000,
+      keeperName: 'scholar',
+      source: 'anchored-thread',
+      threadId: 'th-1',
+      filePath: 'runtime.ts',
+      line: 12,
+    })
+    pushTrace({
+      id: 'a-2',
+      tsMs: 1010,
+      keeperName: 'scholar',
+      source: 'anchored-thread',
+      threadId: 'th-2',
+      filePath: 'worker.ts',
+      line: 12,
+    })
+    pushTrace({
+      id: 'a-3',
+      tsMs: 1020,
+      keeperName: 'scholar',
+      source: 'anchored-thread',
+      threadId: 'th-3',
+      filePath: 'runtime.ts',
+      line: 20,
+    })
+
+    expect(keeperTraceState.value.events.map(e => e.id)).toEqual(['a-1', 'a-2', 'a-3'])
+    expect(keeperTraceState.value.events.map(e => e.count)).toEqual([1, 1, 1])
+  })
+
   it('inserts out-of-order events into ascending tsMs position', () => {
     pushTrace({
       id: 'a-1',

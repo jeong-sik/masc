@@ -1,14 +1,44 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
 import { IdeConversationRailMock, postsToAnchoredThreads, replayRailItems } from './ide-conversation-rail-mock'
 import { activeIdeFile, ideContextFocus } from './ide-state'
+import { clearTraces, keeperTraceState } from './keeper-trace-store'
+
+function stubEmptyConversationFetch(): void {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.startsWith('/api/v1/board')) {
+      return new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    if (url.startsWith('/api/v1/dashboard/keeper-decisions')) {
+      return new Response(JSON.stringify({ events: [], limit: 200, generated_at: null }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    if (url.startsWith('/api/v1/cascade/strategy_trace')) {
+      return new Response(JSON.stringify({ updated_at: null, total_events: 0, events: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    return new Response('{}', { status: 404 })
+  }))
+}
+
+beforeEach(() => {
+  stubEmptyConversationFetch()
+})
 
 afterEach(() => {
   vi.unstubAllGlobals()
   activeIdeFile.value = 'package.json'
   ideContextFocus.value = null
+  clearTraces()
 })
 
 describe('IdeConversationRailMock', () => {
@@ -255,6 +285,14 @@ describe('IdeConversationRailMock', () => {
 
     await waitFor(() => {
       expect(container.textContent).toContain('question fn:run about this line')
+    })
+    await waitFor(() => {
+      const trace = keeperTraceState.value.events.find(event => event.id === 'thread-line')
+      expect(trace).toMatchObject({
+        source: 'anchored-thread',
+        filePath: 'lib/runtime.ml',
+        line: 42,
+      })
     })
 
     const card = container.querySelector<HTMLButtonElement>('.ide-conversation-card')

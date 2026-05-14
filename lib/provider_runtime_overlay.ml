@@ -46,6 +46,25 @@ let find_unique_by_kind kind =
 let endpoint_url (binding : binding) = trim_nonempty binding.Binding.base_url
 let default_model_id (binding : binding) = Option.bind binding.Binding.default_model trim_nonempty
 
+let supported_models (binding : binding) =
+  match binding.Binding.capabilities.supported_models with
+  | Some models -> models |> List.filter_map trim_nonempty |> Json_util.dedupe_keep_order
+  | None -> []
+;;
+
+let available (binding : binding) = binding.Binding.available
+
+let auth_kind (binding : binding) =
+  match binding.Binding.auth with
+  | Binding.No_auth -> "none"
+  | Binding.Api_key_env env -> "api_key:" ^ env
+  | Binding.Cli_cached_login -> "cli_cached_login"
+  | Binding.Oauth_cached_login -> "oauth_cached_login"
+  | Binding.Setup_token_env env -> "setup_token:" ^ env
+  | Binding.File path -> "file:" ^ path
+  | Binding.Exec command -> "exec:" ^ command
+;;
+
 let auth_env_keys (binding : binding) =
   let auth_env =
     match binding.Binding.auth with
@@ -126,6 +145,7 @@ let usage_missing_by_design (binding : binding) =
   not binding.Binding.capabilities.emits_usage_tokens
 ;;
 
+let resolve_model ?requested_model binding = Binding.resolve_model binding ~requested_model
 let provider_config ?model binding = Binding.to_provider_config ?model binding
 
 type timeout_bounds =

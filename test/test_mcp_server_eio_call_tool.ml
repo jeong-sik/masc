@@ -93,6 +93,23 @@ let extract_json_from_text text =
   with Not_found ->
     failf "expected JSON payload in text: %s" text
 
+let rec check_json_strings_valid_utf8 label = function
+  | `String value ->
+      check bool (label ^ " string is valid UTF-8") true
+        (String.is_valid_utf_8 value)
+  | `Assoc fields ->
+      List.iter
+        (fun (key, value) -> check_json_strings_valid_utf8 (label ^ "." ^ key) value)
+        fields
+  | `List values ->
+      List.iteri
+        (fun idx value ->
+           check_json_strings_valid_utf8
+             (Printf.sprintf "%s[%d]" label idx)
+             value)
+        values
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Tuple _ | `Variant _ -> ()
+
 let test_timeout_quality_is_error () =
   let quality =
     Masc_mcp.Mcp_server_eio_call_tool.quality_from_result
@@ -124,6 +141,29 @@ let test_success_quality_has_no_issues () =
   in
   check bool "passed" true (quality |> U.member "passed" |> U.to_bool);
   check int "issue count" 0 (quality |> U.member "issues" |> U.to_list |> List.length)
+
+let test_activity_payload_sanitizes_invalid_utf8 () =
+  let payload =
+    Masc_mcp.Mcp_server_eio_call_tool.For_testing.activity_tool_called_payload
+      ~tool_name:"keeper_bash"
+      ~success:false
+      ~duration_ms:42
+      ~source:"keeper_internal"
+      ~error_detail:"bad\xfferror"
+      ~tool_args_preview:"preview\xfe"
+      (`Assoc
+        [
+          ("cmd", `String "printf '\xff'");
+          ("message", `String "message\xfd");
+          ("title", `String "title\xfc");
+          ("pr_number", `Int 15310);
+        ])
+  in
+  check_json_strings_valid_utf8 "activity_payload" payload;
+  check string "tool name preserved" "keeper_bash"
+    (payload |> U.member "tool_name" |> U.to_string);
+  check int "numeric field preserved" 15310
+    (payload |> U.member "pr_number" |> U.to_int)
 
 let test_contains_casefold_keeps_semantics () =
   let contains = Masc_mcp.Mcp_server_eio_call_tool.contains_casefold in
@@ -490,6 +530,8 @@ let () =
           test_case "timeout is error" `Quick test_timeout_quality_is_error;
           test_case "generic failure is error" `Quick test_generic_failure_quality_is_error;
           test_case "success has no issues" `Quick test_success_quality_has_no_issues;
+          test_case "activity payload sanitizes invalid UTF-8" `Quick
+            test_activity_payload_sanitizes_invalid_utf8;
           test_case "contains casefold keeps semantics" `Quick
             test_contains_casefold_keeps_semantics;
           test_case "transition has no fixed timeout" `Quick test_transition_has_no_fixed_timeout;

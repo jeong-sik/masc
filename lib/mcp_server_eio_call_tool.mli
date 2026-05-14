@@ -1,8 +1,9 @@
 (** Mcp_server_eio_call_tool — [tools/call] handler with
     timeout, read-only retry, runtime-MCP keeper tracing.
 
-    The .ml is 959 lines.  External callers reach exactly
-    six symbols — {!handle_call_tool_eio} (the dispatcher
+    The .ml is intentionally kept behind this interface.  External
+    runtime callers reach six operational symbols — {!handle_call_tool_eio}
+    (the dispatcher
     entry point invoked from
     {!Mcp_server_eio_protocol.handle_request}),
     {!contains_casefold} (re-used by the protocol layer
@@ -11,6 +12,9 @@
     {!record_runtime_mcp_keeper_tool_trace},
     {!runtime_mcp_keeper_log_context_of_entry},
     {!tool_timeout_sec_opt}).
+
+    The {!For_testing} module exposes narrow pure helpers for regression
+    tests only.
 
     Internal helpers stay private at this boundary
     ([log_mcp_exn], [int_of_env_default],
@@ -58,6 +62,18 @@ val quality_from_result :
     On failure classifies [message] (timeout / cancellation
     / generic) and emits a single issue entry with
     [severity], [code], [message], [attempts]. *)
+
+module For_testing : sig
+  val activity_tool_called_payload :
+    tool_name:string ->
+    success:bool ->
+    duration_ms:int ->
+    source:string ->
+    ?error_detail:string ->
+    ?tool_args_preview:string ->
+    Yojson.Safe.t ->
+    Yojson.Safe.t
+end
 
 (** {1 Per-tool timeout} *)
 

@@ -81,10 +81,15 @@ type local_capacity = {
 val local_capacity_for_selections :
   sw:Eio.Switch.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  ?config_path:string ->
   string list ->
   local_capacity
 (** Query local endpoint capacity for named cascade selections.
 
     Selections are resolved through the TOML catalog into typed provider
-    candidates. Direct model-string parsing is intentionally not a fallback. *)
+    candidates. Direct model-string parsing is intentionally not a fallback.
+
+    Resolution always uses the process-global active catalog (via
+    [Cascade_catalog_runtime.resolve_named_providers] →
+    [lookup_active_profile]); path-scoped override is not supported here.
+    A previous [?config_path] argument was silently discarded — removed
+    to avoid the footgun of an override that pretended to apply. *)

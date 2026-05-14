@@ -62,6 +62,12 @@ interface ApiActivityResponse {
   readonly latest_seq?: number
 }
 
+interface ActivityFetchResult {
+  readonly events: ReadonlyArray<RunActivityEvent>
+  readonly roomId: string
+  readonly ok: boolean
+}
+
 const EMPTY_ACTIVITY: ReadonlyArray<RunActivityEvent> = []
 const EMPTY_ANNOTATIONS: ReadonlyArray<IdeAnnotation> = []
 const EMPTY_DIFF_ROWS: ReadonlyArray<UnifiedDiffRow> = []
@@ -106,6 +112,7 @@ export interface IdeActivityMockProps {
   readonly activeFile?: string
   readonly annotations?: ReadonlyArray<IdeAnnotation>
   readonly diffRows?: ReadonlyArray<UnifiedDiffRow>
+  readonly pollMs?: number
   readonly children?: unknown
 }
 
@@ -146,20 +153,20 @@ function mapApiEvent(event: ApiActivityEvent, roomId: string): RunActivityEvent 
   }
 }
 
-async function fetchActivityEvents(): Promise<{ events: ReadonlyArray<RunActivityEvent>; roomId: string }> {
+async function fetchActivityEvents(): Promise<ActivityFetchResult> {
   try {
     const res = await fetch('/api/v1/activity/events?limit=50')
-    if (!res.ok) return { events: EMPTY_ACTIVITY, roomId: DEFAULT_ROOM_ID }
+    if (!res.ok) return { events: EMPTY_ACTIVITY, roomId: DEFAULT_ROOM_ID, ok: false }
     const data: ApiActivityResponse = await res.json()
     const rawEvents = data.events
     if (!Array.isArray(rawEvents) || rawEvents.length === 0) {
-      return { events: EMPTY_ACTIVITY, roomId: DEFAULT_ROOM_ID }
+      return { events: EMPTY_ACTIVITY, roomId: DEFAULT_ROOM_ID, ok: true }
     }
     const roomId = rawEvents[0].room_id || DEFAULT_ROOM_ID
     const mapped = rawEvents.map(e => mapApiEvent(e, roomId))
-    return { events: mapped, roomId }
+    return { events: mapped, roomId, ok: true }
   } catch {
-    return { events: EMPTY_ACTIVITY, roomId: DEFAULT_ROOM_ID }
+    return { events: EMPTY_ACTIVITY, roomId: DEFAULT_ROOM_ID, ok: false }
   }
 }
 
@@ -285,11 +292,17 @@ function positiveInteger(value: unknown): number | undefined {
     : undefined
 }
 
+function normalizedPollMs(value: number | undefined): number | null {
+  if (value === undefined || value <= 0 || !Number.isFinite(value)) return null
+  return Math.floor(value)
+}
+
 export function IdeActivityMock(props: IdeActivityMockProps = {}) {
   const {
     activeFile = '',
     annotations = EMPTY_ANNOTATIONS,
     diffRows = EMPTY_DIFF_ROWS,
+    pollMs = 0,
   } = props
   const store = useMemo(() => {
     const store = createRunActivityStore(DEFAULT_ROOM_ID)
@@ -297,16 +310,26 @@ export function IdeActivityMock(props: IdeActivityMockProps = {}) {
     return store
   }, [])
   const [, forceRender] = useState(0)
+  const refreshMs = normalizedPollMs(pollMs)
 
   useEffect(() => {
     let cancelled = false
-    fetchActivityEvents().then(({ events, roomId }) => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const load = async () => {
+      const { events, roomId, ok } = await fetchActivityEvents()
       if (cancelled) return
-      store.reset(roomId)
-      store.seed(events)
-    })
-    return () => { cancelled = true }
-  }, [store])
+      if (ok) {
+        store.reset(roomId)
+        store.seed(events)
+      }
+      if (refreshMs !== null) timer = setTimeout(load, refreshMs)
+    }
+    void load()
+    return () => {
+      cancelled = true
+      if (timer !== null) clearTimeout(timer)
+    }
+  }, [store, refreshMs])
 
   useEffect(() => {
     const unsub = store.subscribe(() => forceRender(tick => tick + 1))

@@ -33,6 +33,7 @@ type IdeFocus = 'review'
 
 const IDE_LAYER_KINDS = new Set(IDE_LAYERS.map(layer => layer.kind))
 const IDE_LAYER_LABELS = new Map(IDE_LAYERS.map(layer => [layer.kind, layer.label]))
+const IDE_ACTIVITY_POLL_MS = 10_000
 export const REVIEW_FOCUS_LAYERS = ['keeper-trace', 'approve', 'notes'] as const
 const REVIEW_FOCUS_LAYER_PARAM = REVIEW_FOCUS_LAYERS.join(',')
 const EMPTY_LAYER_PARAM = 'none'
@@ -330,6 +331,7 @@ export function IdeShell() {
                 activeFile=${activeFilePath}
                 annotations=${annotations}
                 diffRows=${diffRows}
+                pollMs=${IDE_ACTIVITY_POLL_MS}
               />
             </div>
           `}

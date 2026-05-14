@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
 import { act } from 'preact/test-utils'
+import { fireEvent } from '@testing-library/preact'
 import { activeKeeperName } from '../../keeper-state'
-import { IdeInterjectMock } from './ide-interject-mock'
+import { IdeInterjectMock, interjectContextRouteLinks } from './ide-interject-mock'
+import { cursorOverlaySignal } from './keeper-cursor-overlay'
 
 describe('IdeInterjectMock', () => {
   beforeEach(() => {
@@ -12,6 +14,40 @@ describe('IdeInterjectMock', () => {
 
   afterEach(() => {
     activeKeeperName.value = ''
+    cursorOverlaySignal.value = {
+      cursors: new Map(),
+      heatmap: new Map(),
+      collisions: [],
+      active_file: null,
+    }
+    window.location.hash = ''
+  })
+
+  it('builds code and keeper context routes for the active interject target', () => {
+    const links = interjectContextRouteLinks('sangsu', {
+      keeper_id: 'sangsu',
+      file_path: 'lib/runtime.ml',
+      line: 42,
+      column: 2,
+      focus_mode: 'reviewing',
+      last_update: Date.now(),
+      tool_name: 'ocamllsp',
+    })
+
+    expect(links.map(link => link.label)).toEqual(['Code', 'Keeper'])
+    expect(links.find(link => link.label === 'Code')).toMatchObject({
+      params: {
+        section: 'ide-shell',
+        view: 'source',
+        file: 'lib/runtime.ml',
+        line: '42',
+        surface: 'Interject',
+        label: 'ocamllsp',
+        source_id: 'interject:sangsu',
+        keeper: 'sangsu',
+      },
+      evidence: 'Code lib/runtime.ml:42',
+    })
   })
 
   it('renders the interject store backed active keeper controls', async () => {
@@ -29,7 +65,10 @@ describe('IdeInterjectMock', () => {
     expect(input?.readOnly).toBe(false)
     expect(input?.getAttribute('aria-label')).toBe('Interject input')
 
-    const buttons = [...container.querySelectorAll('button')]
+    const contextButtons = [...container.querySelectorAll('.ide-interject-context-links button')]
+    expect(contextButtons.map(button => button.textContent)).toEqual(['Keeper'])
+
+    const buttons = [...container.querySelectorAll<HTMLButtonElement>('.ide-interject-actions button')]
     expect(buttons.map(button => button.textContent)).toEqual(['Send', 'Approve', 'Pause', 'Drain'])
     expect(buttons[0]?.disabled).toBe(true)
     expect(buttons[1]?.disabled).toBe(true)
@@ -43,7 +82,7 @@ describe('IdeInterjectMock', () => {
     })
 
     const input = container.querySelector('input') as HTMLInputElement
-    const send = container.querySelector('button') as HTMLButtonElement
+    const send = container.querySelector('.ide-interject-actions button') as HTMLButtonElement
     expect(send.disabled).toBe(true)
 
     await act(async () => {
@@ -63,7 +102,7 @@ describe('IdeInterjectMock', () => {
 
     expect(container.textContent).toContain('tech_glutton')
     const input = container.querySelector('input') as HTMLInputElement
-    const send = container.querySelector('button') as HTMLButtonElement
+    const send = container.querySelector('.ide-interject-actions button') as HTMLButtonElement
 
     await act(async () => {
       input.value = 'inspect the current IDE context'
@@ -91,5 +130,33 @@ describe('IdeInterjectMock', () => {
 
     expect(container.textContent).toContain('keeper-beta')
     expect((container.querySelector('input') as HTMLInputElement).value).toBe('keep this draft')
+  })
+
+  it('renders cursor context links and routes back to the IDE code surface', async () => {
+    cursorOverlaySignal.value = {
+      cursors: new Map([['sangsu', {
+        keeper_id: 'sangsu',
+        file_path: 'lib/runtime.ml',
+        line: 42,
+        column: 2,
+        focus_mode: 'reviewing',
+        last_update: Date.now(),
+        tool_name: 'ocamllsp',
+      }]]),
+      heatmap: new Map(),
+      collisions: [],
+      active_file: 'lib/runtime.ml',
+    }
+
+    const container = document.createElement('div')
+    await act(async () => {
+      render(h(IdeInterjectMock, { keeperName: 'sangsu' }), container)
+    })
+
+    const contextButtons = [...container.querySelectorAll<HTMLButtonElement>('.ide-interject-context-links button')]
+    expect(contextButtons.map(button => button.textContent)).toEqual(['Code', 'Keeper'])
+
+    fireEvent.click(contextButtons.find(button => button.textContent === 'Code')!)
+    expect(window.location.hash).toBe('#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=42&surface=Interject&label=ocamllsp&source_id=interject%3Asangsu&keeper=sangsu')
   })
 })

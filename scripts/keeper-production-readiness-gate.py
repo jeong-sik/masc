@@ -162,21 +162,108 @@ def linked_artifact_ok(
     return False
 
 
-def receipt_tools_used(base_path: Path, rows: list[dict[str, Any]]) -> int:
+def first_row_value(rows: list[dict[str, Any]], key: str) -> Any:
+    for row in rows:
+        value = row.get(key)
+        if value is not None and value != "":
+            return value
+    return None
+
+
+def same_optional_value(expected: Any, actual: Any) -> bool:
+    if expected is None or expected == "":
+        return True
+    if actual is None or actual == "":
+        return True
+    return str(expected) == str(actual)
+
+
+def matching_receipt_rows(
+    base_path: Path, rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    keeper = first_row_value(rows, "keeper_name")
+    trace = first_row_value(rows, "trace_id")
+    generation = first_row_value(rows, "generation")
+    keeper_turn = first_row_value(rows, "keeper_turn_id")
+    oas_turn_counts = {
+        row.get("oas_turn_count")
+        for row in event_rows(rows, "receipt_appended")
+        if isinstance(row.get("oas_turn_count"), int)
+    }
+    matched: list[dict[str, Any]] = []
+    seen_paths: set[Path] = set()
     for row in reversed(event_rows(rows, "receipt_appended")):
         links = row.get("links")
         if not isinstance(links, dict):
             continue
         path = path_from_link(base_path, links.get("receipt_path"))
-        if path is None or not path.is_file():
+        if path is None or not path.is_file() or path in seen_paths:
             continue
-        count = 0
+        seen_paths.add(path)
         for receipt_row in iter_jsonl(path):
-            tools = receipt_row.get("tools_used")
-            if isinstance(tools, list):
-                count += len(tools)
-        return count
-    return 0
+            if keeper is not None and receipt_row.get("keeper_name") != keeper:
+                continue
+            if trace is not None and receipt_row.get("trace_id") != trace:
+                continue
+            if not same_optional_value(generation, receipt_row.get("generation")):
+                continue
+            receipt_turn = receipt_row.get("turn_count")
+            if oas_turn_counts:
+                if receipt_turn not in oas_turn_counts:
+                    continue
+            elif isinstance(receipt_turn, int) and isinstance(keeper_turn, int):
+                if receipt_turn != keeper_turn:
+                    continue
+            elif receipt_turn is not None:
+                continue
+            matched.append(receipt_row)
+    return matched
+
+
+def receipt_tools_used(base_path: Path, rows: list[dict[str, Any]]) -> int:
+    count = 0
+    for receipt_row in matching_receipt_rows(base_path, rows):
+        tools = receipt_row.get("tools_used")
+        if isinstance(tools, list):
+            count += len(tools)
+    return count
+
+
+def matching_tool_log_rows(
+    base_path: Path, rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    keeper = first_row_value(rows, "keeper_name")
+    trace = first_row_value(rows, "trace_id")
+    generation = first_row_value(rows, "generation")
+    keeper_turn = first_row_value(rows, "keeper_turn_id")
+    matched: list[dict[str, Any]] = []
+    seen_paths: set[Path] = set()
+    for row in reversed(event_rows(rows, "turn_finished")):
+        links = row.get("links")
+        if not isinstance(links, dict):
+            continue
+        path = path_from_link(base_path, links.get("tool_call_log_path"))
+        if path is None or not path.is_file() or path in seen_paths:
+            continue
+        seen_paths.add(path)
+        for tool_row in iter_jsonl(path):
+            row_keeper = tool_row.get("keeper_name", tool_row.get("keeper"))
+            if keeper is not None and row_keeper != keeper:
+                continue
+            if trace is not None and tool_row.get("trace_id") != trace:
+                continue
+            if not same_optional_value(generation, tool_row.get("generation")):
+                continue
+            tool_keeper_turn = tool_row.get("keeper_turn_id")
+            if isinstance(keeper_turn, int):
+                if tool_keeper_turn != keeper_turn:
+                    continue
+            matched.append(tool_row)
+    return matched
+
+
+def tool_log_ok(base_path: Path, rows: list[dict[str, Any]]) -> bool:
+    return bool(matching_tool_log_rows(base_path, rows))
 
 
 def timestamps_for_rows(rows: list[dict[str, Any]]) -> list[float | None]:
@@ -296,7 +383,8 @@ def evaluate(
                 metrics.parseable_timestamp_rows += 1
             keeper = str(row.get("keeper_name") or manifest.parent.parent.name)
             trace = str(row.get("trace_id") or manifest.stem)
-            generation = str(row.get("generation") or "")
+            generation_value = row.get("generation")
+            generation = str(generation_value) if generation_value is not None else ""
             turn = row.get("keeper_turn_id")
             if not isinstance(turn, int):
                 continue
@@ -355,7 +443,7 @@ def evaluate(
         if provider and finished_count < started_count:
             metrics.dangling_provider_attempts += started_count - finished_count
 
-        if linked_artifact_ok(base_path, rows, "receipt_appended", "receipt_path"):
+        if matching_receipt_rows(base_path, rows):
             metrics.receipt_ok_turns += 1
         else:
             metrics.missing_artifacts += 1
@@ -378,9 +466,7 @@ def evaluate(
         if tools_used > 0:
             metrics.tool_used_turns += 1
             keeper_metric.tool_used_turns += 1
-            if linked_artifact_ok(
-                base_path, rows, "turn_finished", "tool_call_log_path"
-            ):
+            if tool_log_ok(base_path, rows):
                 metrics.tool_log_ok_turns += 1
             else:
                 metrics.missing_artifacts += 1
@@ -524,6 +610,13 @@ def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
             handle.write(json.dumps(row, sort_keys=True) + "\n")
 
 
+def append_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, sort_keys=True) + "\n")
+
+
 def fixture_ts(turn: int, offset: int) -> str:
     return f"2026-05-13T00:{turn:02d}:{offset:02d}Z"
 
@@ -553,12 +646,15 @@ def write_fixture_turn(
         ],
     )
     if tools:
-        write_jsonl(
+        append_jsonl(
             tool_log_path,
             [
                 {
                     "keeper": keeper,
                     "trace_id": trace,
+                    "generation": 1,
+                    "turn": turn,
+                    "keeper_turn_id": turn,
                     "tool": "keeper_tool_search",
                     "success": True,
                 }
@@ -571,7 +667,7 @@ def write_fixture_turn(
         "trace_id": trace,
         "generation": 1,
         "keeper_turn_id": turn,
-        "oas_turn_count": 1,
+        "oas_turn_count": turn,
         "cascade_name": "fixture",
         "status": "ok",
         "decision": {},

@@ -32,6 +32,37 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let rec mkdir_p path =
+  if path = "" || path = "." || path = "/" then ()
+  else if Sys.file_exists path then ()
+  else begin
+    mkdir_p (Filename.dirname path);
+    Unix.mkdir path 0o755
+  end
+
+let write_file path content =
+  Out_channel.with_open_bin path (fun oc -> output_string oc content)
+
+let restore_env name = function
+  | Some value -> Unix.putenv name value
+  | None -> Unix.putenv name ""
+
+let with_config_dir f =
+  let dir = temp_dir () in
+  let config_dir = Filename.concat dir "config" in
+  mkdir_p (Filename.concat config_dir "keepers");
+  mkdir_p (Filename.concat config_dir "personas");
+  let original = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Fun.protect
+    ~finally:(fun () ->
+      restore_env "MASC_CONFIG_DIR" original;
+      Masc_mcp.Config_dir_resolver.reset ();
+      cleanup_dir dir)
+    (fun () ->
+      Unix.putenv "MASC_CONFIG_DIR" config_dir;
+      Masc_mcp.Config_dir_resolver.reset ();
+      f config_dir)
+
 let contains_substring haystack needle =
   let haystack_len = String.length haystack in
   let needle_len = String.length needle in
@@ -208,6 +239,27 @@ let make_meta name =
   match KT.meta_of_json json with
   | Ok meta -> meta
   | Error err -> fail ("make_meta: " ^ err)
+
+let test_persona_drift_check_uses_toml_persona_name () =
+  with_config_dir @@ fun config_dir ->
+  let keepers_dir = Filename.concat config_dir "keepers" in
+  let executor_persona_dir =
+    Filename.concat (Filename.concat config_dir "personas") "executor"
+  in
+  mkdir_p executor_persona_dir;
+  write_file
+    (Filename.concat executor_persona_dir "profile.json")
+    {|{"name":"Executor","role":"execution"}|};
+  write_file
+    (Filename.concat keepers_dir "glm-coding-plan.toml")
+    {|
+[keeper]
+name = "glm-coding-plan"
+persona_name = "executor"
+goal = "plan coding work"
+|};
+  check string "drift check honors TOML persona_name" "executor"
+    (Sup.persona_name_for_drift_check (make_meta "glm-coding-plan"))
 
 let registered_entries names =
   Reg.clear ();
@@ -1555,6 +1607,10 @@ let () =
       test_case "under limit" `Quick test_keep_last_n_under_limit;
       test_case "at limit" `Quick test_keep_last_n_at_limit;
       test_case "over limit drops oldest" `Quick test_keep_last_n_over_limit;
+    ];
+    "persona_drift", [
+      test_case "drift check honors TOML persona_name" `Quick
+        test_persona_drift_check_uses_toml_persona_name;
     ];
     "fiber_health", [
       test_case "unknown for unregistered" `Quick test_fiber_health_unknown;

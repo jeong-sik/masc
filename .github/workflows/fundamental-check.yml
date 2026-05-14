@@ -28,6 +28,16 @@ jobs:
       - name: Run lint
         run: bash scripts/lint/no-roadmap-stale-hardcoding.sh
 
+  provider-adapter-removal-ratchet:
+    name: Provider adapter removal ratchet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get install -y -qq ripgrep
+      - name: Run lint
+        run: bash scripts/lint/provider-adapter-removal-ratchet.sh
+
   no-fabricated-telemetry:
     name: Math.random in components
     runs-on: ubuntu-latest

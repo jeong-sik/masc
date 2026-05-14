@@ -83,4 +83,4 @@ export const HEATMAP_COLORS = [
 // --- Autoresearch form defaults ---
 export const AUTORESEARCH_DEFAULT_MAX_CYCLES = 100
 export const AUTORESEARCH_DEFAULT_CYCLE_TIMEOUT_S = 300
-export const AUTORESEARCH_DEFAULT_MODEL = 'glm'
+export const AUTORESEARCH_DEFAULT_MODEL = ''

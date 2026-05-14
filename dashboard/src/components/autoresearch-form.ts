@@ -186,7 +186,7 @@ export function StartAutoresearchForm() {
               <${Eyebrow}>모델</${Eyebrow}>
               <${TextInput}
                 value=${formModelModel.value}
-                placeholder="glm"
+                placeholder="기본: 서버 모델"
                 onInput=${inputHandler(formModelModel)}
               />
             </${LabelCol}>

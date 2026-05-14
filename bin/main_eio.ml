@@ -511,7 +511,7 @@ let login_agent =
   let doc = "Agent identity bound to the minted bearer token" in
   Arg.(
     value
-    & opt string "codex-local-admin"
+    & opt string (Masc_mcp.Local_mcp_clients.generated_config_client.client_name ^ "-local-admin")
     & info ["agent"] ~docv:"AGENT" ~doc)
 
 let login_shell =
@@ -1559,8 +1559,11 @@ let login_cmd_exit base_path host port agent role as_json as_shell =
 
 let login_cmd =
   let doc =
-    "Mint a local bearer token, persist its raw token file, and print \
-     dashboard/Codex MCP auth exports"
+    Printf.sprintf
+      "Mint a local bearer token, persist its raw token file, and print dashboard/%s MCP \
+       auth exports"
+      (String.capitalize_ascii
+         Masc_mcp.Local_mcp_clients.generated_config_client.client_name)
   in
   let info = Cmd.info "login" ~doc in
   Cmd.v info

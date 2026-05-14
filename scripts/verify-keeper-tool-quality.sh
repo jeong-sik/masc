@@ -102,8 +102,8 @@ if [ "$KEEPERS_WITH_TOOLS" -eq 0 ]; then
   echo "❌ CRITICAL: No keepers have made successful tool calls"
   echo ""
   echo "Recommended actions:"
-  echo "1. Verify cascade configuration prioritizes GLM over local models"
-  echo "2. Check GLM API key: echo \$MASC_GLM_API_KEY"
+  echo "1. Verify cascade configuration prioritizes the intended cloud fallback over local models"
+  echo "2. Check that the selected cloud model API key is exported"
   echo "3. Restart MASC: ./start-masc-mcp.sh --http"
   echo "4. Monitor for 24 hours and re-run this script"
   exit 1

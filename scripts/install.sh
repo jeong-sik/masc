@@ -177,7 +177,7 @@ Next:
   ${c_dim}# in another shell, sanity check${c_off}
   curl http://127.0.0.1:8935/health
 
-  ${c_dim}# wire up your MCP client (Claude / Codex / Gemini)${c_off}
+  ${c_dim}# wire up your MCP client${c_off}
   See: https://github.com/$REPO#mcp-client-setup
 
 EOF

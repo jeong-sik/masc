@@ -643,15 +643,11 @@ let provider_label (provider_cfg : Llm_provider.Provider_config.t) =
 let kimi_cli_auth_value (provider_cfg : Llm_provider.Provider_config.t) =
   match trim_nonempty (Some provider_cfg.api_key) with
   | Some key -> Some key
-  | None ->
-    first_nonempty_env
-      (Provider_adapter.auth_env_keys_of_provider_kind Llm_provider.Provider_config.Kimi)
+  | None -> first_nonempty_env Provider_adapter.kimi_cli_auth_env_keys
 ;;
 
 let kimi_cli_base_url () =
-  match Sys.getenv_opt "KIMI_BASE_URL" |> trim_nonempty with
-  | Some url -> url
-  | None -> "https://api.kimi.com/coding/v1"
+  Provider_adapter.kimi_cli_base_url ()
 ;;
 
 let kimi_cli_config_json_for_provider (provider_cfg : Llm_provider.Provider_config.t)
@@ -659,7 +655,7 @@ let kimi_cli_config_json_for_provider (provider_cfg : Llm_provider.Provider_conf
   =
   match kimi_cli_model_for_provider provider_cfg, kimi_cli_auth_value provider_cfg with
   | Some model_name, Some _ ->
-    let provider_name = "masc-kimi" in
+    let provider_name = Provider_adapter.kimi_cli_config_provider_name in
     let max_context_size = Cascade_config.resolve_kimi_max_context model_name in
     let config_json =
       `Assoc
@@ -668,7 +664,7 @@ let kimi_cli_config_json_for_provider (provider_cfg : Llm_provider.Provider_conf
           , `Assoc
               [ ( provider_name
                 , `Assoc
-                    [ "type", `String "kimi"
+                    [ "type", `String Provider_adapter.kimi_cli_config_provider_type
                     ; "base_url", `String (kimi_cli_base_url ())
                     ; "api_key", `String ""
                     ] )
@@ -690,7 +686,7 @@ let kimi_cli_config_json_for_provider (provider_cfg : Llm_provider.Provider_conf
 
 let kimi_cli_extra_env (provider_cfg : Llm_provider.Provider_config.t) =
   match kimi_cli_auth_value provider_cfg with
-  | Some key -> [ "KIMI_API_KEY", key ]
+  | Some key -> [ Provider_adapter.kimi_cli_runtime_api_key_env, key ]
   | None -> []
 ;;
 
@@ -876,8 +872,8 @@ module Kimi_cli_transport_local = struct
     }
 
   let default_config =
-    { kimi_path = "kimi"
-    ; model = Some "kimi-for-coding"
+    { kimi_path = Provider_adapter.kimi_cli_executable
+    ; model = Some Provider_adapter.kimi_cli_default_model
     ; cwd = None
     ; config_json = None
     ; mcp_config_json = []
@@ -986,7 +982,10 @@ module Kimi_cli_transport_local = struct
       match fn |> member "arguments" |> to_string_option |> json_of_argument_string with
       | Ok args -> Ok (Some (Agent_sdk.Types.ToolUse { id; name; input = args }))
       | Error msg ->
-        Error (Printf.sprintf "invalid kimi tool arguments JSON for tool %S: %s" name msg)
+        Error
+          (Printf.sprintf
+             "invalid %s tool arguments JSON for tool %S: %s"
+             Provider_adapter.kimi_cli_process_name name msg)
     with
     | Type_error _ -> Ok None
   ;;
@@ -1060,7 +1059,8 @@ module Kimi_cli_transport_local = struct
       with
       | Yojson.Json_error _ | Type_error _ -> None
     in
-    List.find_map find_id lines |> Option.value ~default:"kimi-print"
+    List.find_map find_id lines
+    |> Option.value ~default:Provider_adapter.kimi_cli_response_id_fallback
   ;;
 
   let response_model_of_lines ~model_id lines =
@@ -1094,7 +1094,12 @@ module Kimi_cli_transport_local = struct
     | Ok [] ->
       Error
         (Llm_provider.Http_client.NetworkError
-           { message = "no messages parsed from kimi output"; kind = Unknown })
+           { message =
+               Printf.sprintf
+                 "no messages parsed from %s output"
+                 Provider_adapter.kimi_cli_process_name
+           ; kind = Unknown
+           })
     | Ok content ->
       Ok
         { Agent_sdk.Types.id = response_id_of_lines lines
@@ -1160,7 +1165,7 @@ module Kimi_cli_transport_local = struct
   let starts_with text prefix = String.starts_with ~prefix text
 
   let resumable_session_detail =
-    "kimi_cli reported a resumable CLI session. Resumable session available via -r."
+    Provider_adapter.kimi_cli_resumable_session_detail
   ;;
 
   let resume_hint_marker = "to resume this session:"
@@ -1179,11 +1184,14 @@ module Kimi_cli_transport_local = struct
 
   let on_stderr_line line =
     if should_log_stderr_line line
-    then Llm_provider.Cli_common_subprocess.default_on_stderr_line ~name:"kimi" line
+    then
+      Llm_provider.Cli_common_subprocess.default_on_stderr_line
+        ~name:Provider_adapter.kimi_cli_process_name
+        line
   ;;
 
   let exit_code_of_message message =
-    let prefix = "kimi exited with code " in
+    let prefix = Provider_adapter.kimi_cli_exit_code_prefix in
     if not (starts_with message prefix)
     then None
     else (
@@ -1220,7 +1228,7 @@ module Kimi_cli_transport_local = struct
   ;;
 
   let exit_payload_of_message message =
-    let prefix = "kimi exited with code " in
+    let prefix = Provider_adapter.kimi_cli_exit_code_prefix in
     if not (starts_with message prefix)
     then None
     else (
@@ -1268,11 +1276,12 @@ module Kimi_cli_transport_local = struct
         | Some code -> Some code
         | None -> exit_code_marker_of_text trimmed
       with
-      | Some code ->
-        Printf.sprintf
-          "kimi_cli reported a resumable CLI session (exit %d). Resumable session \
-           available via -r."
-          code
+          | Some code ->
+            Printf.sprintf
+              "%s reported a resumable CLI session (exit %d). Resumable session available \
+               via -r."
+              Provider_adapter.kimi_cli_process_name
+              code
       | None -> resumable_session_detail)
     else String.trim text
   ;;
@@ -1363,7 +1372,7 @@ module Kimi_cli_transport_local = struct
           let prompt = sanitize_for_kimi prompt in
           let model_id =
             Option.value
-              ~default:"kimi-for-coding"
+              ~default:Provider_adapter.kimi_cli_default_model
               (cli_model_override ~config ~req_config:req.config)
           in
           let mcp_config_json =
@@ -1390,7 +1399,7 @@ module Kimi_cli_transport_local = struct
                 ~mgr
                 ?clock:clock_opt
                 ?stdout_idle_timeout_s
-                ~name:"kimi"
+                ~name:Provider_adapter.kimi_cli_process_name
                 ~cwd:config.cwd
                 ~extra_env:config.extra_env
                 ~on_stderr_line
@@ -1432,7 +1441,7 @@ module Kimi_cli_transport_local = struct
           let prompt = sanitize_for_kimi prompt in
           let model_id =
             Option.value
-              ~default:"kimi-for-coding"
+              ~default:Provider_adapter.kimi_cli_default_model
               (cli_model_override ~config ~req_config:req.config)
           in
           let mcp_config_json =
@@ -1449,7 +1458,10 @@ module Kimi_cli_transport_local = struct
               started := true;
               on_event
                 (Agent_sdk.Types.MessageStart
-                   { id = "kimi-print"; model = model_id; usage = None }))
+                   { id = Provider_adapter.kimi_cli_response_id_fallback
+                   ; model = model_id
+                   ; usage = None
+                   }))
           in
           let on_line line =
             match !parse_error with
@@ -1482,7 +1494,7 @@ module Kimi_cli_transport_local = struct
                  ~mgr
                  ?clock:clock_opt
                  ?stdout_idle_timeout_s
-                 ~name:"kimi"
+                 ~name:Provider_adapter.kimi_cli_process_name
                  ~cwd:config.cwd
                  ~extra_env:config.extra_env
                  ~on_stderr_line

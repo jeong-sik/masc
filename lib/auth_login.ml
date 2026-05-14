@@ -21,19 +21,20 @@ type t = {
   codex_login_supported : bool;
 }
 
-let codex_server_name = "masc"
+let generated_config_client = Local_mcp_clients.generated_config_client
 
-let codex_token_env_var = "MASC_MCP_TOKEN"
+let generated_config_json_key = generated_config_client.client_name ^ "_mcp"
 
-let mcp_token_env_var_for_agent = function
-  | "claude" -> "MASC_CLAUDE_MCP_TOKEN"
-  | "gemini" -> "MASC_GEMINI_MCP_TOKEN"
-  | "codex" | "codex-mcp-client" -> codex_token_env_var
-  | _ -> codex_token_env_var
+let generated_config_cli_login_command =
+  Printf.sprintf "`%s mcp login`" generated_config_client.client_name
 
-let is_local_mcp_client_agent = function
-  | "claude" | "gemini" | "codex" | "codex-mcp-client" -> true
-  | _ -> false
+let codex_server_name = Local_mcp_clients.generated_config_server_name
+
+let codex_token_env_var = generated_config_client.token_env_var
+
+let mcp_token_env_var_for_agent = Local_mcp_clients.token_env_var_for_agent
+
+let is_local_mcp_client_agent = Local_mcp_clients.is_agent_name
 
 let rng_initialized = Atomic.make false
 
@@ -126,7 +127,8 @@ let mint ~base_path ~host ~port ~agent_name ~role () =
               mcp_token_env_var = mcp_token_env_var_for_agent cred.agent_name;
               codex_server_name;
               codex_token_env_var;
-              codex_login_supported = false;
+              codex_login_supported =
+                Local_mcp_clients.generated_config_login_supported;
             })
 
 let to_yojson report =
@@ -149,7 +151,7 @@ let to_yojson report =
             ("auth_model", `String "bearer_token_env");
             ("token_env_var", `String report.mcp_token_env_var);
           ] );
-      ( "codex_mcp",
+      ( generated_config_json_key,
         `Assoc
           [
             ("server_name", `String report.codex_server_name);
@@ -157,8 +159,7 @@ let to_yojson report =
             ("token_env_var", `String report.codex_token_env_var);
             ("login_supported", `Bool report.codex_login_supported);
             ( "login_note",
-              `String
-                "`codex mcp login` is OAuth-only; masc-mcp uses bearer token auth." );
+              `String Local_mcp_clients.generated_config_login_note );
           ] );
     ]
 
@@ -199,10 +200,12 @@ let render_text report =
       Printf.sprintf "- token_env_var: %s" report.mcp_token_env_var;
       "- auth_model: bearer_token_env";
       "";
-      "codex_mcp:";
+      generated_config_json_key ^ ":";
       Printf.sprintf "- server_name: %s" report.codex_server_name;
       Printf.sprintf "- token_env_var: %s" report.codex_token_env_var;
       "- auth_model: bearer_token_env";
       "- login_supported: no";
-      "- note: `codex mcp login` is OAuth-only; use the exported bearer token instead.";
+      Printf.sprintf
+        "- note: %s is OAuth-only; use the exported bearer token instead."
+        generated_config_cli_login_command;
     ]

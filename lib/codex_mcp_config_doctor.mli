@@ -1,9 +1,8 @@
-(** Codex_mcp_config_doctor — diagnose the Codex MCP client config.
+(** Diagnose the generated local MCP client config.
 
-    Reads [<HOME>/.codex/config.toml] (or whatever
-    [MASC_CODEX_CONFIG_PATH] points at) and produces a {!type-t}
-    report consumed by [Auth_doctor] and the dashboard. The report
-    splits into a flat record of resolved values plus a list of
+    Reads the client config path advertised by [Local_mcp_clients] and
+    produces a {!type-t} report consumed by [Auth_doctor] and the
+    dashboard. The report splits into a flat record of resolved values plus a list of
     {!stage}s with [pass] / [warn] / [fail] / [skip] verdicts.
 
     Internal parsing helpers ([table_fields_opt], [assoc_opt],
@@ -13,7 +12,7 @@
     [stage_to_yojson], [option_field] / [option_bool_field], and the
     expected-value constants [expected_server_name],
     [expected_token_env_var], [expected_x_masc_agent],
-    [codex_config_path_env_key]) are hidden — callers consume the
+    [config_path_env_key]) are hidden — callers consume the
     typed report and the {!analyze_default} / {!to_yojson} /
     {!warnings} / {!next_actions} accessors only. *)
 
@@ -49,15 +48,15 @@ type t = {
 val stage_status_to_string : stage_status -> string
 
 val analyze_default : unit -> t
-(** Build a report from the resolved Codex config path. When neither
-    [HOME] nor [MASC_CODEX_CONFIG_PATH] is set, every dependent stage
+(** Build a report from the resolved client config path. When neither
+    [HOME] nor the configured path env var is set, every dependent stage
     short-circuits to {!Stage_skip}. *)
 
 val to_yojson : t -> Yojson.Safe.t
 
 val warnings : t -> string list
 (** Human-readable lines of the form
-    [Codex MCP pipeline <stage>: <detail>] for stages whose status
+    [<client> MCP pipeline <stage>: <detail>] for stages whose status
     is {!Stage_fail} or {!Stage_warn}. *)
 
 val next_actions : t -> string list

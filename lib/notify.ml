@@ -184,9 +184,9 @@ let escape_applescript s =
 let agent_emoji_table : (string, string) Hashtbl.t =
   let t = Hashtbl.create 8 in
   List.iter (fun (k, v) -> Hashtbl.replace t k v)
-    [ ("claude", "🟣");
-      ("gemini", "🔵");
-      ("codex",  "🟢");
+    [ (Provider_adapter.cn_claude, "🟣");
+      (Provider_adapter.cn_gemini, "🔵");
+      (Provider_adapter.cn_codex, "🟢");
       ("llama",  "🦙");
       ("system", "⚙️") ];
   t

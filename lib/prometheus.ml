@@ -1130,11 +1130,12 @@ let init () =
   add metric_llm_inference_duration "LLM inference request duration in seconds" Histogram;
   add
     metric_llm_prompt_tok_per_sec
-    "LLM prefill (prompt_eval) throughput in tokens/second from \
-     inference_telemetry.timings.prompt_per_second. Per-turn observation labelled by \
-     model and provider_kind. Silent for providers that do not emit timings \
-     (Anthropic/Gemini); use masc_after_turn_telemetry_missing_total to detect that."
-    Histogram;
+     "LLM prefill (prompt_eval) throughput in tokens/second from \
+      inference_telemetry.timings.prompt_per_second. Per-turn observation labelled by \
+      model and provider_kind. Silent for providers that do not emit timings \
+      (per adapter telemetry policy); use masc_after_turn_telemetry_missing_total to \
+      detect that."
+     Histogram;
   add
     metric_llm_decode_tok_per_sec
     "LLM decode (predicted) throughput in tokens/second from \

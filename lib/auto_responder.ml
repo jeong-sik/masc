@@ -102,6 +102,8 @@ let is_spawnable mention =
 
 (* --- CLI spawn (Spawn mode) --- *)
 
+let example_assigned_nickname = Local_mcp_clients.gemini_agent_name ^ "-rare-beaver"
+
 let build_response_prompt ~from_agent ~content ~mention =
   Printf.sprintf {|You received a mention in the MASC room from %s.
 
@@ -109,14 +111,14 @@ Message: "%s"
 
 Quick response protocol:
 1. Call mcp__masc__masc_join(agent_name="%s")
-   → Read the response to get your assigned nickname (e.g., "gemini-rare-beaver")
+   → Read the response to get your assigned nickname (e.g., "%s")
 2. Call mcp__masc__masc_broadcast using YOUR ASSIGNED NICKNAME from step 1:
    mcp__masc__masc_broadcast(agent_name="<your-assigned-nickname>", message="[your concise response]")
    IMPORTANT: Do NOT use "%s" - use the full nickname from the join response!
 3. Call mcp__masc__masc_leave()
 
 Respond in 1-2 sentences. Be helpful and concise.|}
-    from_agent content mention mention
+    from_agent content mention example_assigned_nickname mention
 
 let cli_argv_of_agent_type (agent_type : string) : string list =
   match Spawn.get_config agent_type with

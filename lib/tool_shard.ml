@@ -882,7 +882,7 @@ let coding_keeper_bridge_tools : Masc_domain.tool_schema list =
         "Fetch incremental output from a background shell task spawned via keeper_bash \
          with run_in_background=true. Non-blocking: returns whatever stdout/stderr bytes \
          are currently buffered beyond the given offsets. Poll repeatedly until \
-         closed=true. Mirrors claude-code BashOutput semantics."
+         closed=true. Mirrors the external shell-output polling contract."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -923,7 +923,7 @@ let coding_keeper_bridge_tools : Masc_domain.tool_schema list =
         "Terminate a background shell task. Sends [signal] (default SIGTERM) to the \
          task's process group, waits up to grace_sec seconds, and escalates to SIGKILL \
          if any member survives. Idempotent — safe to call on already-exited tasks. \
-         Mirrors claude-code KillShell semantics."
+         Mirrors the external shell termination contract."
     ; input_schema =
         `Assoc
           [ "type", `String "object"

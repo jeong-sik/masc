@@ -57,8 +57,12 @@ type spawn_result = {
 (** MASC MCP tools available for spawned agents *)
 let masc_mcp_tools = Agent_tool_surfaces.spawned_agent_prefixed_tools
 
+let lifecycle_example_agent_name = Local_mcp_clients.gemini_agent_name
+
 (** MASC Lifecycle Protocol - auto-appended to spawned agent prompts *)
-let masc_lifecycle_suffix = {|
+let masc_lifecycle_suffix =
+  Printf.sprintf
+    {|
 
 ---
 [MASC LIFECYCLE PROTOCOL - Auto-injected]
@@ -73,18 +77,23 @@ You are running as a MASC-managed agent. Follow these lifecycle rules:
 
 Example lifecycle:
 ```
-mcp__masc__masc_join(agent_name="gemini", capabilities=["typescript","react"])
+mcp__masc__masc_join(agent_name="%s", capabilities=["typescript","react"])
 ... work ...
-mcp__masc__masc_heartbeat(agent_name="gemini")  // every 2 min
+mcp__masc__masc_heartbeat(agent_name="%s")  // every 2 min
 ... more work ...
 mcp__masc__masc_handover_create(...)  // when a successor needs your state
-mcp__masc__masc_transition(agent_name="gemini", task_id="task-XXX", action="done")
-mcp__masc__masc_leave(agent_name="gemini")
+mcp__masc__masc_transition(agent_name="%s", task_id="task-XXX", action="done")
+mcp__masc__masc_leave(agent_name="%s")
 ```
 
 IMPORTANT: If you cannot finish in one pass, hand off explicitly before leaving.
 ---
 |}
+    lifecycle_example_agent_name
+    lifecycle_example_agent_name
+    lifecycle_example_agent_name
+    lifecycle_example_agent_name
+;;
 
 (** Default parser: no structured output, pass through raw text. *)
 let parse_raw_output raw =
@@ -163,10 +172,10 @@ let parse_gemini_output raw =
 let spawn_config_of_key key =
   let open Env_config.Spawn in
   match key with
-  | "claude" ->
+  | k when String.equal k Provider_adapter.cn_claude ->
       Some {
-        agent_name = "claude";
-        command = "claude --output-format json -p";
+        agent_name = Provider_adapter.cn_claude;
+        command = Provider_adapter.cn_claude ^ " --output-format json -p";
         timeout_seconds;
         working_dir = None;
         mcp_tools = masc_mcp_tools;
@@ -175,10 +184,10 @@ let spawn_config_of_key key =
         mcp_mode = Mcp_joined "--allowedTools";
         prompt_mode = Prompt_stdin;
       }
-  | "gemini" ->
+  | k when String.equal k Provider_adapter.cn_gemini ->
       Some {
-        agent_name = "gemini";
-        command = "gemini --output-format json";
+        agent_name = Provider_adapter.cn_gemini;
+        command = Provider_adapter.cn_gemini ^ " --output-format json";
         timeout_seconds;
         working_dir = None;
         mcp_tools = masc_mcp_tools;
@@ -187,10 +196,10 @@ let spawn_config_of_key key =
         mcp_mode = Mcp_spread "--allowed-tools";
         prompt_mode = Prompt_flag "-p";
       }
-  | "codex" ->
+  | k when String.equal k Provider_adapter.cn_codex ->
       Some {
-        agent_name = "codex";
-        command = "codex exec";
+        agent_name = Provider_adapter.cn_codex;
+        command = Provider_adapter.cn_codex ^ " exec";
         timeout_seconds;
         working_dir = None;
         mcp_tools = masc_mcp_tools;

@@ -84,35 +84,26 @@ let status_to_string = function
   | Warn -> "warn"
   | Error -> "error"
 
-let codex_mcp_token_env_var = "MASC_MCP_TOKEN"
+let generated_config_client = Local_mcp_clients.generated_config_client
 
-let codex_mcp_login_note =
-  "`codex mcp login` is OAuth-only; masc-mcp uses bearer token auth."
+let generated_config_server_name = Local_mcp_clients.generated_config_server_name
 
-type mcp_client_spec = {
-  client_name : string;
-  agent_name : string;
-  token_env_var : string;
-}
+let generated_config_token_env_var = generated_config_client.token_env_var
 
-let mcp_client_specs =
-  [
-    {
-      client_name = "codex";
-      agent_name = "codex-mcp-client";
-      token_env_var = codex_mcp_token_env_var;
-    };
-    {
-      client_name = "claude";
-      agent_name = "claude";
-      token_env_var = "MASC_CLAUDE_MCP_TOKEN";
-    };
-    {
-      client_name = "gemini";
-      agent_name = "gemini";
-      token_env_var = "MASC_GEMINI_MCP_TOKEN";
-    };
-  ]
+let generated_config_login_supported =
+  Local_mcp_clients.generated_config_login_supported
+
+let generated_config_login_note = Local_mcp_clients.generated_config_login_note
+
+let generated_config_client_display_name =
+  String.capitalize_ascii generated_config_client.client_name
+
+let generated_config_mcp_label = generated_config_client_display_name ^ " MCP"
+
+let generated_config_json_key = generated_config_client.client_name ^ "_mcp"
+
+let generated_config_cli_login_command =
+  Printf.sprintf "`%s mcp login`" generated_config_client.client_name
 
 let canonicalize_path path =
   try Unix.realpath path with
@@ -172,18 +163,6 @@ let watched_agent_of_credential ~auth_dir agent_name credential_opt =
         expires_at = None;
         raw_token_file_present;
       }
-
-let watched_agent_names ~initial_admin admin_token_env_agent =
-  [
-    Some "codex";
-    Some "codex-mcp-client";
-    Some "dashboard-dev";
-    Some "admin";
-    initial_admin;
-    admin_token_env_agent;
-  ]
-  |> List.filter_map Fun.id
-  |> dedupe_keep_order
 
 let admin_token_env_state ~base_path =
   match Env_config_core.admin_token_opt () with
@@ -259,56 +238,56 @@ let admin_bearer_sources ~base_path ~auth_dir ~dashboard_dev_token_available
 let codex_mcp_report ~base_path =
   let config = Codex_mcp_config_doctor.analyze_default () in
   match
-    Sys.getenv_opt codex_mcp_token_env_var |> Env_config_core.trim_opt
+    Sys.getenv_opt generated_config_token_env_var |> Env_config_core.trim_opt
   with
   | None ->
       {
-        server_name = "masc";
+        server_name = generated_config_server_name;
         auth_model = "bearer_token_env";
-        token_env_var = codex_mcp_token_env_var;
+        token_env_var = generated_config_token_env_var;
         token_env_configured = false;
         token_status = "unset";
         token_agent = None;
         token_role = None;
         token_can_read_state = None;
-        login_supported = false;
-        login_note = codex_mcp_login_note;
+        login_supported = generated_config_login_supported;
+        login_note = generated_config_login_note;
         config;
       }
   | Some raw_token -> (
       match Auth.find_credential_by_token base_path ~token:raw_token with
       | Ok cred ->
           {
-            server_name = "masc";
+            server_name = generated_config_server_name;
             auth_model = "bearer_token_env";
-            token_env_var = codex_mcp_token_env_var;
+            token_env_var = generated_config_token_env_var;
             token_env_configured = true;
             token_status = "live";
             token_agent = Some cred.agent_name;
             token_role = Some (agent_role_to_string cred.role);
             token_can_read_state =
               Some (has_permission cred.role CanReadState);
-            login_supported = false;
-            login_note = codex_mcp_login_note;
+            login_supported = generated_config_login_supported;
+            login_note = generated_config_login_note;
             config;
           }
       | Error _ ->
           {
-            server_name = "masc";
+            server_name = generated_config_server_name;
             auth_model = "bearer_token_env";
-            token_env_var = codex_mcp_token_env_var;
+            token_env_var = generated_config_token_env_var;
             token_env_configured = true;
             token_status = "invalid_or_expired";
             token_agent = None;
             token_role = None;
             token_can_read_state = None;
-            login_supported = false;
-            login_note = codex_mcp_login_note;
+            login_supported = generated_config_login_supported;
+            login_note = generated_config_login_note;
             config;
           })
 
 let mcp_client_report ~base_path ~auth_dir
-    ({ client_name; agent_name; token_env_var } : mcp_client_spec) =
+    ({ client_name; agent_name; token_env_var } : Local_mcp_clients.spec) =
   let token_file_path = raw_token_file_path ~auth_dir agent_name in
   let credential_opt = Auth.load_credential base_path agent_name in
   let raw_token_file_present = file_exists token_file_path in
@@ -418,21 +397,23 @@ let analyze ~base_path_input ~default_base_path () =
   in
   let codex_mcp = codex_mcp_report ~base_path in
   let mcp_clients =
-    List.map (mcp_client_report ~base_path ~auth_dir) mcp_client_specs
+    List.map (mcp_client_report ~base_path ~auth_dir) Local_mcp_clients.specs
   in
   let token_bound_admin_http_ready =
     auth_cfg.enabled && auth_cfg.require_token && admin_bearer_sources <> []
   in
   let watched_agents =
-    watched_agent_names ~initial_admin admin_token_env_agent
+    Local_mcp_clients.watched_agent_names ~initial_admin ~admin_token_env_agent
     |> List.map (fun agent_name ->
            watched_agent_of_credential ~auth_dir agent_name
              (Auth.load_credential base_path agent_name))
   in
   let admin_permission = show_permission CanAdmin in
-  let codex = Auth.load_credential base_path "codex" in
-  let codex_mcp_client =
-    Auth.load_credential base_path "codex-mcp-client"
+  let config_client_credential =
+    Auth.load_credential base_path generated_config_client.client_name
+  in
+  let config_client_agent_credential =
+    Auth.load_credential base_path generated_config_client.agent_name
   in
   let warnings =
     [
@@ -467,20 +448,22 @@ let analyze ~base_path_input ~default_base_path () =
            "No usable admin bearer source was detected for token-bound admin HTTP mutation routes."
        else
          None);
-      (match codex with
+      (match config_client_credential with
        | Some cred when not (has_permission cred.role CanAdmin) ->
            Some
              (Printf.sprintf
-                "codex is role=%s, so requests authenticated as codex cannot satisfy %s."
+                "%s is role=%s, so requests authenticated as %s cannot satisfy %s."
+                generated_config_client.client_name
                 (agent_role_to_string cred.role)
+                generated_config_client.client_name
                 admin_permission)
        | _ -> None);
-      (match codex_mcp_client with
+      (match config_client_agent_credential with
        | Some cred when not (has_permission cred.role CanAdmin) ->
            Some
              (Printf.sprintf
-                "codex-mcp-client is role=%s, so dashboard save flows using that bearer will fail on admin-only routes such as POST /api/v1/cascade/config/raw."
-                (agent_role_to_string cred.role))
+                "%s is role=%s, so dashboard save flows using that bearer will fail on admin-only routes such as POST /api/v1/cascade/config/raw."
+                generated_config_client.agent_name (agent_role_to_string cred.role))
        | _ -> None);
       (if not dashboard_dev_token_available then
          Some
@@ -491,10 +474,16 @@ let analyze ~base_path_input ~default_base_path () =
          match codex_mcp.token_status with
          | "unset" ->
              Some
-               "Codex MCP bearer env var MASC_MCP_TOKEN is unset; Codex should use bearer_token_env_var, not `codex mcp login`."
+               (Printf.sprintf
+                  "%s bearer env var %s is unset; %s should use bearer_token_env_var, not %s."
+                  generated_config_mcp_label generated_config_token_env_var
+                  generated_config_client_display_name
+                  generated_config_cli_login_command)
          | "invalid_or_expired" ->
              Some
-               "Codex MCP bearer env var MASC_MCP_TOKEN is set, but it does not resolve to a live credential in this base path."
+               (Printf.sprintf
+                  "%s bearer env var %s is set, but it does not resolve to a live credential in this base path."
+                  generated_config_mcp_label generated_config_token_env_var)
          | "live" -> None
          | _ -> None
        else
@@ -524,11 +513,13 @@ let analyze ~base_path_input ~default_base_path () =
        else
          None);
       (if auth_cfg.enabled && auth_cfg.require_token
-          && (match codex_mcp_client with
+          && (match config_client_agent_credential with
               | Some cred -> not (has_permission cred.role CanAdmin)
               | None -> false) then
          Some
-           "Use dashboard-dev or another admin bearer for POST /api/v1/cascade/config/raw; the codex-mcp-client worker bearer cannot satisfy CanAdmin."
+           (Printf.sprintf
+              "Use dashboard-dev or another admin bearer for POST /api/v1/cascade/config/raw; the %s worker bearer cannot satisfy CanAdmin."
+              generated_config_client.agent_name)
        else
          None);
       (if auth_cfg.enabled && auth_cfg.require_token
@@ -546,10 +537,17 @@ let analyze ~base_path_input ~default_base_path () =
       (if auth_cfg.enabled && auth_cfg.require_token
           && not (String.equal codex_mcp.token_status "live") then
          Some
-           "For Codex MCP, run `masc-mcp login --agent codex-mcp-client --role worker --shell` and export MASC_MCP_TOKEN; do not run `codex mcp login masc`."
+           (Printf.sprintf
+              "For %s, run `masc-mcp login --agent %s --role worker --shell` and export %s; do not run `%s mcp login %s`."
+              generated_config_mcp_label generated_config_client.agent_name
+              generated_config_token_env_var generated_config_client.client_name
+              generated_config_server_name)
        else
          None);
-      Some "For Codex MCP pipeline drift, inspect the codex_mcp.config.stages section from `masc-mcp doctor auth --json`.";
+      Some
+        (Printf.sprintf
+           "For %s pipeline drift, inspect the %s.config.stages section from `masc-mcp doctor auth --json`."
+           generated_config_mcp_label generated_config_json_key);
       Some "Rerun `masc-mcp doctor auth` after editing auth files or rotating tokens.";
     ]
     |> List.filter_map Fun.id
@@ -690,7 +688,7 @@ let to_yojson (report : t) =
              report.role_counts) );
       ( "watched_agents",
         `List (List.map watched_agent_to_yojson report.watched_agents) );
-      ("codex_mcp", codex_mcp_to_yojson report.codex_mcp);
+      (generated_config_json_key, codex_mcp_to_yojson report.codex_mcp);
       ( "mcp_clients",
         `List (List.map mcp_client_to_yojson report.mcp_clients) );
       ("warnings", `List (List.map (fun value -> `String value) report.warnings));
@@ -770,7 +768,7 @@ let render_text (report : t) =
            (option_value agent.expires_at)))
     report.watched_agents;
   add_line "";
-  add_line "codex_mcp:";
+  add_line (generated_config_json_key ^ ":");
   add_line
     (Printf.sprintf "- server_name: %s" report.codex_mcp.server_name);
   add_line

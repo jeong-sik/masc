@@ -380,6 +380,23 @@ let attempt_secondary_swap
               (filter_rejection_reason_label secondary_reason));
        Either.Right (primary, primary_reason))
 
+let runtime_mcp_capable_provider_labels =
+  [ Provider_adapter.string_of_provider_kind Llm_provider.Provider_config.Claude_code
+  ; Provider_adapter.string_of_provider_kind Llm_provider.Provider_config.Kimi_cli
+  ; Provider_adapter.string_of_provider_kind Llm_provider.Provider_config.Anthropic
+  ; Provider_adapter.cn_glm
+  ; Provider_adapter.cn_openrouter
+  ]
+  |> String.concat ", "
+;;
+
+let request_scoped_runtime_mcp_rejected_provider_labels =
+  [ Provider_adapter.string_of_provider_kind Llm_provider.Provider_config.Gemini_cli
+  ; Provider_adapter.string_of_provider_kind Llm_provider.Provider_config.Codex_cli
+  ]
+  |> String.concat " and "
+;;
+
 let filter_candidate_providers_for_tool_support
       ~(keeper_name : string)
       ?runtime_mcp_policy
@@ -458,14 +475,15 @@ let filter_candidate_providers_for_tool_support
           "[#11060/#11356] cascade %s: provider-normalized tool-use gate removed all \
            providers (rejections=[%s]) — operator action: add a runtime-MCP-capable \
            fallback provider to this cascade in cascade.toml. Verified-capable \
-           providers: claude_code, kimi_cli, anthropic, glm, openrouter (any non-cli \
-           direct API). Note: gemini_cli and codex_cli reject request-scoped runtime MCP \
-           HTTP headers (gemini-cli upstream lacks --mcp-config flag; codex_cli strips \
-           most per-request headers) — they cannot satisfy this gate. Alternatively \
+           providers: %s (any non-cli direct API). Note: %s reject request-scoped \
+           runtime MCP HTTP headers (their upstream transports lack or strip the \
+           needed per-request MCP config/headers) — they cannot satisfy this gate. Alternatively \
            detach the keeper from this cascade. Subsequent identical-signature \
            rejections demoted to DEBUG for the next %.0fs"
           label
           signature
+          runtime_mcp_capable_provider_labels
+          request_scoped_runtime_mcp_rejected_provider_labels
           cascade_empty_warn_restate_sec
       else
         Log.Misc.debug

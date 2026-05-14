@@ -1,0 +1,55 @@
+# Path allowlist for scripts/lint/no-provider-name-hardcoding.sh.
+#
+# Entries are path prefixes relative to the repo root. Keep this list limited
+# to code-level catalogs, generated token artifacts, operator-facing scripts,
+# code generators, or intentionally provider-specific fixtures. Every new entry
+# should explain why the literal belongs there instead of in Provider_adapter /
+# Local_mcp_clients / cascade.toml / OAS provider metadata.
+
+# Runtime/provider catalogs.
+lib/provider_adapter.ml
+lib/provider_adapter.mli
+lib/local_mcp_clients.ml
+lib/local_mcp_clients.mli
+lib/cascade/cascade_model_resolve.ml
+lib/cascade/cascade_model_resolve.mli
+lib/exec/bin.ml
+lib/exec/bin.mli
+
+# This detector necessarily contains the terms it searches for.
+scripts/lint/no-provider-name-hardcoding.sh
+scripts/lint/no-provider-name-hardcoding.allowlist
+
+# Visual token registries generated from the dashboard design system.
+dashboard/src/styles/tokens.css
+dashboard/src/styles/tokens.generated.css
+dashboard/src/styles/tokens.generated.ts
+dashboard_bonsai/src/tokens.ml
+
+# Public config/API names that must remain source-compatible.
+lib/config/env_config_runtime.ml
+lib/config/env_config_runtime.mli
+
+# Schema/protocol catalogs and generated descriptor sources.
+lib/cascade_decl/cascade_declarative_parser.ml
+bin/gen_tool_descriptors.ml
+bin/gen_shell_ir_walkers.ml
+
+# Provider/service-specific operator dashboard labels.
+lib/credits_dashboard.ml
+
+# Provider/client-specific operator setup, checks, and fixture scripts.
+scripts/init-codex-mcp-config.sh
+scripts/check-doc-truth.sh
+scripts/ci/check-agent-draft-policy.sh
+scripts/viewer-local-e2e-check.sh
+scripts/generate_oil_paintings.py
+scripts/setup_dashboard_mission_fixture.sh
+scripts/goal_loop_completion_audit.py
+scripts/exec_corpus_report.py
+scripts/ocaml-structure-ratchet.sh
+scripts/harness/workload
+
+# Lint scripts that intentionally contain the stale patterns they detect.
+scripts/lint/no-roadmap-stale-hardcoding.sh
+scripts/lint/exhaustive-guard.sh

@@ -125,19 +125,22 @@ let response_format_of_provider provider =
   (* The seed harness only knows the OpenAI-compatible chat-completions
      tool-call envelope; unsupported providers must add an explicit extractor
      instead of silently reusing this parser. *)
-  match canonical with
-  | "codex-api"
-  | "glm-api"
-  | "glm-coding-plan"
-  | "kimi-api"
-  | "openrouter"
-  | "ollama"
-  | "llama" ->
-      Ok Openai_chat_completions
-  | _ ->
-      errorf
-        "snapshot provider '%s' (canonical '%s') is not supported by replay harness yet"
-        provider canonical
+  let openai_chat_completion_providers =
+    [ Provider_adapter.cn_codex_api
+    ; Provider_adapter.cn_glm
+    ; Provider_adapter.cn_glm_coding_plan
+    ; Provider_adapter.cn_kimi_api
+    ; Provider_adapter.cn_openrouter
+    ; Provider_adapter.cn_ollama
+    ; Provider_adapter.cn_llama
+    ]
+  in
+  if List.mem canonical openai_chat_completion_providers then
+    Ok Openai_chat_completions
+  else
+    errorf
+      "snapshot provider '%s' (canonical '%s') is not supported by replay harness yet"
+      provider canonical
 
 let extract_openai_tool_calls response =
   let* fields = assoc "response" response in

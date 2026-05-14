@@ -106,6 +106,33 @@ let test_provider_kind_string_uses_oas_ssot () =
     (Adapter.string_of_provider_kind Llm_provider.Provider_config.Claude_code)
 ;;
 
+let test_headers_with_auth_for_provider_kind_keeps_wire_contract () =
+  check
+    (list (pair string string))
+    "anthropic-style key header"
+    [ "x-api-key", "secret"
+    ; "anthropic-version", "2023-06-01"
+    ; "Content-Type", "application/json"
+    ]
+    (Adapter.headers_with_auth_for_provider_kind
+       ~kind:Llm_provider.Provider_config.Kimi
+       ~api_key:"secret");
+  check
+    (list (pair string string))
+    "bearer header"
+    [ "Authorization", "Bearer secret"; "Content-Type", "application/json" ]
+    (Adapter.headers_with_auth_for_provider_kind
+       ~kind:Llm_provider.Provider_config.OpenAI_compat
+       ~api_key:"secret");
+  check
+    (list (pair string string))
+    "blank key omits auth"
+    [ "Content-Type", "application/json" ]
+    (Adapter.headers_with_auth_for_provider_kind
+       ~kind:Llm_provider.Provider_config.Glm
+       ~api_key:"")
+;;
+
 let test_cascade_prefix_of_provider_kind_keeps_adapter_mapping () =
   check
     string
@@ -942,6 +969,10 @@ let () =
             "provider kind string uses oas ssot"
             `Quick
             test_provider_kind_string_uses_oas_ssot
+        ; test_case
+            "headers with auth keep wire contract"
+            `Quick
+            test_headers_with_auth_for_provider_kind_keeps_wire_contract
         ; test_case
             "cascade prefix keeps adapter mapping"
             `Quick

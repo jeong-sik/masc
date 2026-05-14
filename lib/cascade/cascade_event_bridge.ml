@@ -45,25 +45,7 @@ let payload_int_opt key = function
 ;;
 
 let inference_model_bucket ~provider ~model =
-  let has needle =
-    String_util.contains_substring_ci provider needle
-    || String_util.contains_substring_ci model needle
-  in
-  if has "kimi"
-  then "kimi"
-  else if has "claude" || has "anthropic"
-  then "anthropic"
-  else if has "openai" || has "gpt" || has "codex"
-  then "openai"
-  else if has "gemini" || has "google"
-  then "gemini"
-  else if has "glm" || has "zai"
-  then "glm"
-  else if has "qwen"
-  then "qwen"
-  else if has "llama"
-  then "llama"
-  else "other"
+  Provider_adapter.inference_model_bucket ~provider ~model
 ;;
 
 let inference_provider_bucket ~provider ~model =

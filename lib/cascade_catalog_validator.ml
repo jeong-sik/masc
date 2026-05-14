@@ -281,20 +281,35 @@ let codex_with_bound_actor_only_issue ~profile model_specs =
       kinds
   in
   if has_bridging_required_kind && not has_bound_actor_tolerant_fallback then
+    let kind_label kind = Provider_adapter.string_of_provider_kind kind in
+    let codex_cli_label = kind_label Llm_provider.Provider_config.Codex_cli in
+    let tolerant_fallback_labels =
+      [ kind_label Llm_provider.Provider_config.Claude_code
+      ; kind_label Llm_provider.Provider_config.Gemini_cli
+      ; kind_label Llm_provider.Provider_config.Kimi_cli
+      ; kind_label Llm_provider.Provider_config.Ollama
+      ; Provider_adapter.cn_glm
+      ]
+      |> String.concat "|"
+    in
     Some
       {
         profile = Some profile;
         severity = Catalog_warn;
         message =
           Printf.sprintf
-            "Cascade preset %s carries codex_cli with no \
+            "Cascade preset %s carries %s with no \
              bound-actor-tolerant fallback \
-             (claude_code|gemini_cli|kimi_cli|ollama|glm). codex_cli \
+             (%s). %s \
              cannot route keeper-bound runtime MCP tools (masc_*, \
              decision.*); every keeper-bound dispatch on this preset \
              will be rejected at oas_worker_named.ml. Add at least \
-             one tolerant provider or remove codex_cli."
-            profile;
+             one tolerant provider or remove %s."
+            profile
+            codex_cli_label
+            tolerant_fallback_labels
+            codex_cli_label
+            codex_cli_label;
       }
   else None
 

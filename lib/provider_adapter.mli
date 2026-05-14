@@ -188,6 +188,25 @@ val normalize_label : string -> string
     ambiguous providers such as [glm] vs [glm-coding]. *)
 val display_provider_name : string -> string
 
+(** Bounded metric bucket for provider/model labels.  This centralizes the
+    remaining substring fallback for legacy event payloads; callers should not
+    hand-roll provider-name substring classifiers. *)
+val inference_model_bucket : provider:string -> model:string -> string
+
+(** Kimi CLI transport metadata.  Transport code consumes these helpers instead
+    of embedding provider string literals directly. *)
+val kimi_cli_auth_env_keys : string list
+val kimi_cli_runtime_api_key_env : string
+val kimi_cli_base_url : unit -> string
+val kimi_cli_config_provider_name : string
+val kimi_cli_config_provider_type : string
+val kimi_cli_executable : string
+val kimi_cli_process_name : string
+val kimi_cli_default_model : string
+val kimi_cli_response_id_fallback : string
+val kimi_cli_exit_code_prefix : string
+val kimi_cli_resumable_session_detail : string
+
 (** SSOT cascade prefix for local models. *)
 val local_cascade_prefix : string
 
@@ -197,6 +216,14 @@ val make_local_label : string -> string
 
 (** SSOT string form of OAS [Provider_config.provider_kind]. *)
 val string_of_provider_kind : Llm_provider.Provider_config.provider_kind -> string
+
+(** Build standard auth headers for a provider kind.
+    Provider-specific header families live at this adapter boundary so cascade
+    config code does not need provider-name matches. *)
+val headers_with_auth_for_provider_kind
+  :  kind:Llm_provider.Provider_config.provider_kind
+  -> api_key:string
+  -> (string * string) list
 
 (** Resolve required auth env keys for a provider kind. *)
 val auth_env_keys_of_provider_kind

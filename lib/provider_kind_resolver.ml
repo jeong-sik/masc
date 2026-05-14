@@ -29,7 +29,7 @@ let split_provider_model (s : string) : (string * string) option =
 
 let resolve_builtin_provider provider_name model_id =
   match provider_name with
-  | "kimi" ->
+  | name when String.equal name Provider_adapter.cn_kimi ->
     Some
       (Registered
          {

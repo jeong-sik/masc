@@ -27,16 +27,31 @@ type t = {
   stages : stage list;
 }
 
-let expected_server_name = "masc"
-let expected_token_env_var = "MASC_MCP_TOKEN"
-let expected_x_masc_agent = "codex-mcp-client"
-let codex_config_path_env_key = "MASC_CODEX_CONFIG_PATH"
+let config_client = Local_mcp_clients.generated_config_client
+let expected_server_name = Local_mcp_clients.generated_config_server_name
+let expected_token_env_var = config_client.token_env_var
+let expected_x_masc_agent = config_client.agent_name
+let config_path_env_key = Local_mcp_clients.generated_config_path_env_key
+let client_name = config_client.client_name
+let client_display_name = String.capitalize_ascii client_name
+let client_mcp_label = client_display_name ^ " MCP"
+let cli_login_command = Printf.sprintf "`%s mcp login`" client_name
+let stage_name suffix = client_name ^ "_" ^ suffix
+let stage_config_file = stage_name "config_file"
+let stage_config_parse = stage_name "config_parse"
+let stage_server_config = stage_name "server_config"
+let stage_auth_model = stage_name "auth_model"
+let stage_http_headers = stage_name "http_headers"
+let stage_agent_header = stage_name "agent_header"
+let stage_oauth_login = stage_name "oauth_login"
 
 let stage name status detail = { name; status; detail }
 
 let oauth_login_stage () =
-  stage "codex_oauth_login" Stage_skip
-    "`codex mcp login` is not part of the MASC bearer-token path"
+  stage stage_oauth_login Stage_skip
+    (Printf.sprintf
+       "%s is not part of the MASC bearer-token path"
+       cli_login_command)
 
 let stage_status_to_string = function
   | Stage_pass -> "pass"
@@ -107,11 +122,12 @@ let server_names_detail names =
   | _ -> String.concat ", " names
 
 let config_path_opt () =
-  match Sys.getenv_opt codex_config_path_env_key |> Env_config_core.trim_opt with
+  match Sys.getenv_opt config_path_env_key |> Env_config_core.trim_opt with
   | Some path -> Some path
   | None ->
       Option.map
-        (fun home -> Filename.concat home ".codex/config.toml")
+        (fun home ->
+           Filename.concat home Local_mcp_clients.generated_config_relative_path)
         (Env_config_core.home_dir_opt ())
 
 let analyze_content ~config_path content =
@@ -119,17 +135,25 @@ let analyze_content ~config_path content =
   | Error parse_error ->
       empty ~config_path ~file_present:true ~parse_error
         [
-          stage "codex_config_file" Stage_pass
+          stage stage_config_file Stage_pass
             (Printf.sprintf "read %s" config_path);
-          stage "codex_config_parse" Stage_fail parse_error;
-          stage "codex_server_config" Stage_skip
-            "skipped because Codex config did not parse as TOML";
-          stage "codex_auth_model" Stage_skip
-            "skipped because Codex config did not parse as TOML";
-          stage "codex_http_headers" Stage_skip
-            "skipped because Codex config did not parse as TOML";
-          stage "codex_agent_header" Stage_skip
-            "skipped because Codex config did not parse as TOML";
+          stage stage_config_parse Stage_fail parse_error;
+          stage stage_server_config Stage_skip
+            (Printf.sprintf
+               "skipped because %s config did not parse as TOML"
+               client_display_name);
+          stage stage_auth_model Stage_skip
+            (Printf.sprintf
+               "skipped because %s config did not parse as TOML"
+               client_display_name);
+          stage stage_http_headers Stage_skip
+            (Printf.sprintf
+               "skipped because %s config did not parse as TOML"
+               client_display_name);
+          stage stage_agent_header Stage_skip
+            (Printf.sprintf
+               "skipped because %s config did not parse as TOML"
+               client_display_name);
           oauth_login_stage ();
         ]
   | Ok toml ->
@@ -184,76 +208,90 @@ let analyze_content ~config_path content =
         Option.map (String.equal expected_x_masc_agent) x_masc_agent
       in
       let config_stage =
-        stage "codex_config_file" Stage_pass
+        stage stage_config_file Stage_pass
           (Printf.sprintf "read %s" config_path)
       in
       let parse_stage =
-        stage "codex_config_parse" Stage_pass "TOML parsed"
+        stage stage_config_parse Stage_pass "TOML parsed"
       in
       let server_stage =
         if server_present then
-          stage "codex_server_config" Stage_pass
-            "[mcp_servers.masc] is present"
+          stage stage_server_config Stage_pass
+            (Printf.sprintf "[mcp_servers.%s] is present" expected_server_name)
         else
-          stage "codex_server_config" Stage_fail
+          stage stage_server_config Stage_fail
             (Printf.sprintf
-               "[mcp_servers.masc] is missing; configured server names: %s"
-               (server_names_detail server_names))
+               "[mcp_servers.%s] is missing; configured server names: %s"
+               expected_server_name (server_names_detail server_names))
       in
       let auth_stage =
         match server_present, bearer_token_env_var, authorization_header_present with
         | false, _, _ ->
-            stage "codex_auth_model" Stage_skip
-              "skipped because [mcp_servers.masc] is missing"
+            stage stage_auth_model Stage_skip
+              (Printf.sprintf
+                 "skipped because [mcp_servers.%s] is missing"
+                 expected_server_name)
         | true, Some env_var, Some false
           when String.equal env_var expected_token_env_var ->
-            stage "codex_auth_model" Stage_pass
-              "uses bearer_token_env_var=MASC_MCP_TOKEN and no hardcoded Authorization header"
+            stage stage_auth_model Stage_pass
+              (Printf.sprintf
+                 "uses bearer_token_env_var=%s and no hardcoded Authorization header"
+                 expected_token_env_var)
         | true, Some env_var, Some true
           when String.equal env_var expected_token_env_var ->
-            stage "codex_auth_model" Stage_fail
+            stage stage_auth_model Stage_fail
               "bearer_token_env_var is correct, but http_headers still contains Authorization"
         | true, Some env_var, _ ->
-            stage "codex_auth_model" Stage_fail
+            stage stage_auth_model Stage_fail
               (Printf.sprintf
                  "expected bearer_token_env_var=%s, found %s"
                  expected_token_env_var env_var)
         | true, None, Some true ->
-            stage "codex_auth_model" Stage_fail
+            stage stage_auth_model Stage_fail
               "missing bearer_token_env_var and http_headers contains Authorization"
         | true, None, _ ->
-            stage "codex_auth_model" Stage_fail
-              "missing bearer_token_env_var=MASC_MCP_TOKEN"
+            stage stage_auth_model Stage_fail
+              (Printf.sprintf
+                 "missing bearer_token_env_var=%s"
+                 expected_token_env_var)
       in
       let headers_stage =
         match server_present, accept_header_ok with
         | false, _ ->
-            stage "codex_http_headers" Stage_skip
-              "skipped because [mcp_servers.masc] is missing"
+            stage stage_http_headers Stage_skip
+              (Printf.sprintf
+                 "skipped because [mcp_servers.%s] is missing"
+                 expected_server_name)
         | true, Some true ->
-            stage "codex_http_headers" Stage_pass
+            stage stage_http_headers Stage_pass
               "Accept covers application/json and text/event-stream"
         | true, Some false ->
-            stage "codex_http_headers" Stage_fail
+            stage stage_http_headers Stage_fail
               "Accept must include application/json and text/event-stream"
         | true, None ->
-            stage "codex_http_headers" Stage_fail
+            stage stage_http_headers Stage_fail
               "missing http_headers.Accept for Streamable HTTP MCP"
       in
       let agent_stage =
         match server_present, x_masc_agent_ok with
         | false, _ ->
-            stage "codex_agent_header" Stage_skip
-              "skipped because [mcp_servers.masc] is missing"
+            stage stage_agent_header Stage_skip
+              (Printf.sprintf
+                 "skipped because [mcp_servers.%s] is missing"
+                 expected_server_name)
         | true, Some true ->
-            stage "codex_agent_header" Stage_pass
-              "X-MASC-Agent identifies codex-mcp-client"
+            stage stage_agent_header Stage_pass
+              (Printf.sprintf "X-MASC-Agent identifies %s" expected_x_masc_agent)
         | true, Some false ->
-            stage "codex_agent_header" Stage_warn
-              "X-MASC-Agent is present but not codex-mcp-client"
+            stage stage_agent_header Stage_warn
+              (Printf.sprintf
+                 "X-MASC-Agent is present but not %s"
+                 expected_x_masc_agent)
         | true, None ->
-            stage "codex_agent_header" Stage_warn
-              "missing X-MASC-Agent=codex-mcp-client header"
+            stage stage_agent_header Stage_warn
+              (Printf.sprintf
+                 "missing X-MASC-Agent=%s header"
+                 expected_x_masc_agent)
       in
       {
         config_path = Some config_path;
@@ -285,18 +323,30 @@ let analyze_path config_path =
   if not (Sys.file_exists config_path) then
     empty ~config_path
       [
-        stage "codex_config_file" Stage_fail
-          (Printf.sprintf "Codex config file does not exist: %s" config_path);
-        stage "codex_config_parse" Stage_skip
-          "skipped because Codex config file is missing";
-        stage "codex_server_config" Stage_skip
-          "skipped because Codex config file is missing";
-        stage "codex_auth_model" Stage_skip
-          "skipped because Codex config file is missing";
-        stage "codex_http_headers" Stage_skip
-          "skipped because Codex config file is missing";
-        stage "codex_agent_header" Stage_skip
-          "skipped because Codex config file is missing";
+        stage stage_config_file Stage_fail
+          (Printf.sprintf
+             "%s config file does not exist: %s"
+             client_display_name config_path);
+        stage stage_config_parse Stage_skip
+          (Printf.sprintf
+             "skipped because %s config file is missing"
+             client_display_name);
+        stage stage_server_config Stage_skip
+          (Printf.sprintf
+             "skipped because %s config file is missing"
+             client_display_name);
+        stage stage_auth_model Stage_skip
+          (Printf.sprintf
+             "skipped because %s config file is missing"
+             client_display_name);
+        stage stage_http_headers Stage_skip
+          (Printf.sprintf
+             "skipped because %s config file is missing"
+             client_display_name);
+        stage stage_agent_header Stage_skip
+          (Printf.sprintf
+             "skipped because %s config file is missing"
+             client_display_name);
         oauth_login_stage ();
       ]
   else
@@ -307,19 +357,29 @@ let analyze_path config_path =
         empty ~config_path ~file_present:true
           ~parse_error:(Printexc.to_string exn)
           [
-            stage "codex_config_file" Stage_fail
+            stage stage_config_file Stage_fail
               (Printf.sprintf "failed to read %s: %s" config_path
                  (Printexc.to_string exn));
-            stage "codex_config_parse" Stage_skip
-              "skipped because Codex config file could not be read";
-            stage "codex_server_config" Stage_skip
-              "skipped because Codex config file could not be read";
-            stage "codex_auth_model" Stage_skip
-              "skipped because Codex config file could not be read";
-            stage "codex_http_headers" Stage_skip
-              "skipped because Codex config file could not be read";
-            stage "codex_agent_header" Stage_skip
-              "skipped because Codex config file could not be read";
+            stage stage_config_parse Stage_skip
+              (Printf.sprintf
+                 "skipped because %s config file could not be read"
+                 client_display_name);
+            stage stage_server_config Stage_skip
+              (Printf.sprintf
+                 "skipped because %s config file could not be read"
+                 client_display_name);
+            stage stage_auth_model Stage_skip
+              (Printf.sprintf
+                 "skipped because %s config file could not be read"
+                 client_display_name);
+            stage stage_http_headers Stage_skip
+              (Printf.sprintf
+                 "skipped because %s config file could not be read"
+                 client_display_name);
+            stage stage_agent_header Stage_skip
+              (Printf.sprintf
+                 "skipped because %s config file could not be read"
+                 client_display_name);
             oauth_login_stage ();
           ]
 
@@ -328,18 +388,30 @@ let analyze_default () =
   | None ->
       empty
         [
-          stage "codex_config_file" Stage_fail
-            "HOME and MASC_CODEX_CONFIG_PATH are unset";
-          stage "codex_config_parse" Stage_skip
-            "skipped because Codex config path is unknown";
-          stage "codex_server_config" Stage_skip
-            "skipped because Codex config path is unknown";
-          stage "codex_auth_model" Stage_skip
-            "skipped because Codex config path is unknown";
-          stage "codex_http_headers" Stage_skip
-            "skipped because Codex config path is unknown";
-          stage "codex_agent_header" Stage_skip
-            "skipped because Codex config path is unknown";
+          stage stage_config_file Stage_fail
+            (Printf.sprintf
+               "HOME and %s are unset"
+               config_path_env_key);
+          stage stage_config_parse Stage_skip
+            (Printf.sprintf
+               "skipped because %s config path is unknown"
+               client_display_name);
+          stage stage_server_config Stage_skip
+            (Printf.sprintf
+               "skipped because %s config path is unknown"
+               client_display_name);
+          stage stage_auth_model Stage_skip
+            (Printf.sprintf
+               "skipped because %s config path is unknown"
+               client_display_name);
+          stage stage_http_headers Stage_skip
+            (Printf.sprintf
+               "skipped because %s config path is unknown"
+               client_display_name);
+          stage stage_agent_header Stage_skip
+            (Printf.sprintf
+               "skipped because %s config path is unknown"
+               client_display_name);
           oauth_login_stage ();
         ]
   | Some path -> analyze_path path
@@ -388,8 +460,9 @@ let warnings report =
          match stage.status with
          | Stage_fail | Stage_warn ->
              Some
-               (Printf.sprintf "Codex MCP pipeline %s: %s" stage.name
-                  stage.detail)
+               (Printf.sprintf
+                  "%s pipeline %s: %s"
+                  client_mcp_label stage.name stage.detail)
          | Stage_pass | Stage_skip -> None)
 
 let next_actions report =
@@ -404,29 +477,39 @@ let next_actions report =
       report.stages
   in
   [
-    (if has_stage "codex_config_file" then
+    (if has_stage stage_config_file then
        Some
-         "Set MASC_CODEX_CONFIG_PATH or HOME so doctor auth can inspect the Codex MCP config file."
+         (Printf.sprintf
+            "Set %s or HOME so doctor auth can inspect the %s config file."
+            config_path_env_key client_mcp_label)
      else
        None);
-    (if has_stage "codex_server_config" then
+    (if has_stage stage_server_config then
        Some
-         "Create a [mcp_servers.masc] entry in Codex config; MASC does not use `codex mcp login` OAuth."
+         (Printf.sprintf
+            "Create a [mcp_servers.%s] entry in %s config; MASC does not use %s OAuth."
+            expected_server_name client_display_name cli_login_command)
      else
        None);
-    (if has_stage "codex_auth_model" then
+    (if has_stage stage_auth_model then
        Some
-         "Set [mcp_servers.masc].bearer_token_env_var=\"MASC_MCP_TOKEN\" and remove hardcoded Authorization from http_headers."
+         (Printf.sprintf
+            "Set [mcp_servers.%s].bearer_token_env_var=\"%s\" and remove hardcoded Authorization from http_headers."
+            expected_server_name expected_token_env_var)
      else
        None);
-    (if has_stage "codex_http_headers" then
+    (if has_stage stage_http_headers then
        Some
-         "Set [mcp_servers.masc].http_headers.Accept to include application/json and text/event-stream."
+         (Printf.sprintf
+            "Set [mcp_servers.%s].http_headers.Accept to include application/json and text/event-stream."
+            expected_server_name)
      else
        None);
-    (if has_stage "codex_agent_header" then
+    (if has_stage stage_agent_header then
        Some
-         "Set [mcp_servers.masc].http_headers.X-MASC-Agent=\"codex-mcp-client\" for config/runtime attribution."
+         (Printf.sprintf
+            "Set [mcp_servers.%s].http_headers.X-MASC-Agent=\"%s\" for config/runtime attribution."
+            expected_server_name expected_x_masc_agent)
      else
        None);
   ]

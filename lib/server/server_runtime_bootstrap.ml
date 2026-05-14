@@ -676,8 +676,19 @@ let sync_internal_keeper_token_env (state : Mcp_server.server_state) =
   Log.Server.info
     "startup internal keeper MCP token synced via MASC_INTERNAL_MCP_TOKEN"
 
-let sync_codex_mcp_config_env_key = "MASC_SYNC_CODEX_MCP_CONFIG"
-let codex_config_path_env_key = "MASC_CODEX_CONFIG_PATH"
+let generated_config_client = Local_mcp_clients.generated_config_client
+let generated_config_server_name = Local_mcp_clients.generated_config_server_name
+let generated_config_label =
+  String.capitalize_ascii generated_config_client.client_name ^ " MCP"
+
+let generated_config_section =
+  Printf.sprintf "[mcp_servers.%s]" generated_config_server_name
+
+let sync_codex_mcp_config_env_key =
+  Local_mcp_clients.generated_config_sync_env_key
+
+let codex_config_path_env_key =
+  Local_mcp_clients.generated_config_path_env_key
 
 type codex_mcp_config_sync_status =
   | Codex_mcp_config_updated
@@ -759,11 +770,13 @@ let is_authorization_header_binding trimmed =
 
 let codex_mcp_headers_line indent =
   Printf.sprintf
-    "%shttp_headers = { \"Accept\" = \"application/json, text/event-stream\", \"X-MASC-Agent\" = \"codex-mcp-client\" }"
-    indent
+    "%shttp_headers = { \"Accept\" = \"application/json, text/event-stream\", \"X-MASC-Agent\" = \"%s\" }"
+    indent generated_config_client.agent_name
 
 let codex_mcp_bearer_env_line indent =
-  Printf.sprintf "%sbearer_token_env_var = \"MASC_MCP_TOKEN\"" indent
+  Printf.sprintf
+    "%sbearer_token_env_var = \"%s\""
+    indent generated_config_client.token_env_var
 
 let sync_codex_mcp_auth_header_content content =
   let lines, has_trailing_newline =
@@ -812,9 +825,7 @@ let sync_codex_mcp_auth_header_content content =
         (rendered, status)
     | line :: rest ->
         let trimmed = String.trim line in
-        let entering_masc_section =
-          String.equal trimmed "[mcp_servers.masc]"
-        in
+        let entering_masc_section = String.equal trimmed generated_config_section in
         let leaving_masc_section =
           in_masc_section
           && is_toml_section_header trimmed
@@ -871,7 +882,8 @@ let codex_config_path_opt () =
   | Some path -> Some path
   | None ->
       Option.map
-        (fun home -> Filename.concat home ".codex/config.toml")
+        (fun home ->
+           Filename.concat home Local_mcp_clients.generated_config_relative_path)
         (Env_config_core.home_dir_opt ())
 
 let sync_codex_mcp_config ~agent_name =
@@ -884,12 +896,13 @@ let sync_codex_mcp_config ~agent_name =
     match codex_config_path_opt () with
     | None ->
         Log.Server.info
-          "startup skipped Codex MCP config sync: HOME is not set"
+          "startup skipped %s config sync: HOME is not set"
+          generated_config_label
     | Some config_path ->
         if not (Sys.file_exists config_path) then
           Log.Server.info
-            "startup skipped Codex MCP config sync: %s does not exist"
-            config_path
+            "startup skipped %s config sync: %s does not exist"
+            generated_config_label config_path
         else
           try
             let content = Fs_compat.load_file config_path in
@@ -898,26 +911,26 @@ let sync_codex_mcp_config ~agent_name =
              | Codex_mcp_config_updated ->
                  Auth.save_private_text_file config_path updated;
                  Log.Server.warn
-                   "startup synced Codex MCP bearer-token env config for %s in %s"
-                   agent_name config_path
+                   "startup synced %s bearer-token env config for %s in %s"
+                   generated_config_label agent_name config_path
              | Codex_mcp_config_unchanged ->
                  Log.Server.info
-                   "startup Codex MCP bearer-token env config already current for %s"
-                   agent_name
+                   "startup %s bearer-token env config already current for %s"
+                   generated_config_label agent_name
              | Codex_mcp_config_server_missing ->
                  Log.Server.info
-                   "startup skipped Codex MCP config sync: [mcp_servers.masc] missing in %s"
-                   config_path
+                   "startup skipped %s config sync: %s missing in %s"
+                   generated_config_label generated_config_section config_path
              | Codex_mcp_config_header_missing ->
                  Log.Server.info
-                   "startup skipped Codex MCP config sync: masc http_headers missing in %s"
-                   config_path)
+                   "startup skipped %s config sync: %s http_headers missing in %s"
+                   generated_config_label generated_config_server_name config_path)
           with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
               Log.Server.error
-                "startup failed Codex MCP config sync for %s: %s"
-                agent_name (Printexc.to_string exn)
+                "startup failed %s config sync for %s: %s"
+                generated_config_label agent_name (Printexc.to_string exn)
 
 let sync_client_token_file ~base_path ~agent_name ~role =
   let token_file =
@@ -999,15 +1012,11 @@ let sync_client_token_file ~base_path ~agent_name ~role =
                normalize_existing raw_token cred
            | _ -> create_and_persist ~reason:"repaired"))
    | None -> create_and_persist ~reason:"created");
-  if String.equal agent_name "codex-mcp-client" then
+  if String.equal agent_name generated_config_client.agent_name then
     sync_codex_mcp_config ~agent_name
 
 let sync_mcp_client_token_files ~base_path =
-  [
-    ("codex-mcp-client", Masc_domain.Worker);
-    ("claude", Masc_domain.Worker);
-    ("gemini", Masc_domain.Worker);
-  ]
+  Local_mcp_clients.worker_agent_credentials
   |> List.iter (fun (agent_name, role) ->
          sync_client_token_file ~base_path ~agent_name ~role)
 

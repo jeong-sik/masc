@@ -131,6 +131,10 @@ module Ring : sig
   val entry_to_json : entry -> Yojson.Safe.t
   val entry_of_json : Yojson.Safe.t -> entry
   val to_json : entry list -> Yojson.Safe.t
+  val summary_json : unit -> Yojson.Safe.t
+  (** Cheap operator summary for [/health].  It exposes ring counters,
+      latest metadata, and file-sink state without raw log message text or
+      [details] payloads. *)
 
   val init_file_sink : string -> unit
   (** Initialize file-based log persistence. Loads previous entries from disk

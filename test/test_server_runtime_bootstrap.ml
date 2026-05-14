@@ -987,6 +987,33 @@ let test_health_json_surfaces_durable_paused_keepers () =
           Alcotest.(check int) "durable read errors" 0
             (paused |> member "read_error_count" |> to_int)))
 
+let test_health_json_surfaces_log_ring_summary () =
+  Log.set_level Log.Info;
+  Log.emit Log.Warn ~module_name:"HealthTest"
+    "health-log-ring-summary-marker";
+  let request = Httpun.Request.create `GET "/health" in
+  let json = Server_routes_http_runtime.make_health_json request in
+  let open Yojson.Safe.Util in
+  let logs = json |> member "logs" in
+  let latest = logs |> member "latest" in
+  Alcotest.(check string) "log ring active" "active"
+    (logs |> member "status" |> to_string);
+  Alcotest.(check bool) "total entries positive" true
+    (logs |> member "total_entries" |> to_int > 0);
+  Alcotest.(check bool) "retained entries positive" true
+    (logs |> member "retained_entries" |> to_int > 0);
+  Alcotest.(check bool) "recent window positive" true
+    (logs |> member "recent_window" |> to_int > 0);
+  Alcotest.(check string) "latest level" "WARN"
+    (latest |> member "level" |> to_string);
+  Alcotest.(check string) "latest module" "HealthTest"
+    (latest |> member "module" |> to_string);
+  Alcotest.(check bool) "latest excludes message text" true
+    (latest |> member "message" = `Null);
+  Alcotest.(check bool) "latest excludes details payload" true
+    (latest |> member "details" = `Null);
+  ignore (logs |> member "file_sink" |> member "enabled" |> to_bool)
+
 let test_migrate_resident_keeper_dirs_promotes_valid_meta () =
   with_temp_dir "startup-legacy-keepers" (fun dir ->
       let state = Mcp_server.create_state ~base_path:dir in
@@ -2523,6 +2550,8 @@ let () =
           Alcotest.test_case
             "health json surfaces durable paused keepers"
             `Quick test_health_json_surfaces_durable_paused_keepers;
+          Alcotest.test_case "health json surfaces log ring summary" `Quick
+            test_health_json_surfaces_log_ring_summary;
           Alcotest.test_case "readiness false before init" `Quick
             test_startup_state_readiness_before_init;
           Alcotest.test_case "readiness true after init" `Quick

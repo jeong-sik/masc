@@ -142,14 +142,18 @@ code_refs:
   - connectors descriptor + live state
 - `GET /api/v1/dashboard/board`
   - workspace board
+- `GET /api/v1/board/hearths`, `GET /api/v1/board/curation`, `GET /api/v1/board/karma/ledger`
+  - workspace board filters, curation, and karma ledger
 - `GET /api/v1/board/sub-boards`
   - workspace named board spaces
 - `GET /api/v1/dashboard/planning`
   - planning + goal tree
 - `GET /api/v1/git/graph`
   - workspace repository graph view
-- `GET /api/v1/verification/requests`
-  - workspace verification table
+- `GET /api/v1/verification/requests`, `GET /api/v1/verification/summary`
+  - workspace verification table and status rollup
+- `GET /api/v1/verification/specs`, `GET /api/v1/verification/tlc-results`
+  - TLA+ spec index and TLC result panels
 - `GET /api/v1/dashboard/tools`
   - lab tools inventory
 - `GET /api/v1/autoresearch/loops`

@@ -181,6 +181,12 @@ check_http "operator digest 200" "$BASE/api/v1/operator/digest" "200"
 check_json "operator digest has health block" "$BASE/api/v1/operator/digest" "'health' in d" '^True$'
 check_http "board 200" "$BASE/api/v1/dashboard/board" "200"
 check_json "board exposes posts" "$BASE/api/v1/dashboard/board" "'posts' in d" '^True$'
+check_http "board hearths 200" "$BASE/api/v1/board/hearths" "200"
+check_json "board hearths exposes list" "$BASE/api/v1/board/hearths" "'hearths' in d" '^True$'
+check_http "board curation 200" "$BASE/api/v1/board/curation" "200"
+check_json "board curation exposes snapshot slot" "$BASE/api/v1/board/curation" "'snapshot' in d" '^True$'
+check_http "board karma ledger 200" "$BASE/api/v1/board/karma/ledger?limit=1" "200"
+check_json "board karma ledger exposes events and totals" "$BASE/api/v1/board/karma/ledger?limit=1" "'events' in d and 'totals' in d" '^True$'
 check_http "sub-boards 200" "$BASE/api/v1/board/sub-boards" "200"
 check_json "sub-boards exposes list" "$BASE/api/v1/board/sub-boards" "'sub_boards' in d" '^True$'
 check_http "planning 200" "$BASE/api/v1/dashboard/planning" "200"
@@ -191,6 +197,10 @@ check_http "verification requests 200" "$BASE/api/v1/verification/requests" "200
 check_json "verification requests exposes list" "$BASE/api/v1/verification/requests" "'requests' in d" '^True$'
 check_http "verification summary 200" "$BASE/api/v1/verification/summary" "200"
 check_json "verification summary exposes status buckets" "$BASE/api/v1/verification/summary" "'by_status' in d" '^True$'
+check_http "verification specs 200" "$BASE/api/v1/verification/specs" "200"
+check_json "verification specs exposes index" "$BASE/api/v1/verification/specs" "'entries' in d and 'count' in d" '^True$'
+check_http "verification tlc results 200" "$BASE/api/v1/verification/tlc-results" "200"
+check_json "verification tlc results exposes entries" "$BASE/api/v1/verification/tlc-results" "'entries' in d and 'count' in d" '^True$'
 
 echo "[5/7] Connectors + Lab"
 check_http "gate connectors 200" "$BASE/api/v1/gate/connectors" "200"

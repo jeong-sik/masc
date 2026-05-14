@@ -39,6 +39,7 @@ export interface IdeBranchContextModel {
   readonly repoRoot: string
   readonly currentBranch: string
   readonly head: string
+  readonly headRef: string | null
   readonly status: 'clean' | 'dirty' | 'conflict'
   readonly stats: {
     readonly branchCount: number
@@ -140,6 +141,7 @@ export function buildIdeBranchContextModel(
     repoRoot: repo.root,
     currentBranch,
     head: shortSha(repo.head),
+    headRef: repo.head,
     status,
     stats: {
       branchCount: repo.branch_count,
@@ -276,11 +278,7 @@ export function IdeBranchContextPanel({
       </header>
 
       ${model ? html`
-        <div class="ide-branch-repo-row">
-          <span class="ide-branch-repo">${model.repoLabel}</span>
-          <span class="ide-branch-current">${model.currentBranch}</span>
-          <span class="ide-branch-head">${model.head}</span>
-        </div>
+        <${BranchRepoRow} model=${model} />
         <${MiniBranchGraph} model=${model} />
         <div class="ide-branch-stat-row" aria-label=${branchSummary}>
           <span>${model.stats.branchCount} br</span>
@@ -310,6 +308,63 @@ export function IdeBranchContextPanel({
         </div>
       `}
     </section>
+  `
+}
+
+function BranchRepoRow({ model }: { readonly model: IdeBranchContextModel }) {
+  const branchLink = branchRepoGitLink(
+    model.currentBranch && model.currentBranch !== 'detached' ? model.currentBranch : null,
+    `${model.repoLabel} current branch`,
+  )
+  const headLink = branchRepoGitLink(
+    model.headRef ?? (model.head !== 'unknown' ? model.head : null),
+    `${model.repoLabel} HEAD`,
+  )
+  return html`
+    <div class="ide-branch-repo-row">
+      <span class="ide-branch-repo">${model.repoLabel}</span>
+      <${BranchRepoRouteChip}
+        className="ide-branch-current"
+        label=${model.currentBranch}
+        routeLink=${branchLink}
+      />
+      <${BranchRepoRouteChip}
+        className="ide-branch-head"
+        label=${model.head}
+        routeLink=${headLink}
+      />
+    </div>
+  `
+}
+
+function branchRepoGitLink(ref: string | null, label: string): IdeContextRouteLink | null {
+  if (!ref) return null
+  return routeLinksForContext({
+    surface: 'Git',
+    label,
+    sourceId: `branch-context:${ref}`,
+    gitRef: ref,
+  }).find(link => link.label === 'Git') ?? null
+}
+
+function BranchRepoRouteChip({
+  className,
+  label,
+  routeLink,
+}: {
+  readonly className: string
+  readonly label: string
+  readonly routeLink: IdeContextRouteLink | null
+}) {
+  if (!routeLink) return html`<span class=${className}>${label}</span>`
+  return html`
+    <button
+      type="button"
+      class=${`${className} ide-branch-repo-route`}
+      title=${routeLink.evidence}
+      aria-label=${`Open ${routeLink.evidence}`}
+      onClick=${() => openIdeContextRouteLink(routeLink)}
+    >${label}</button>
   `
 }
 

@@ -218,8 +218,8 @@ let params_of_json_schema schema =
           pairs
     | _ -> []
   in
-  Prometheus.observe_hotpath
-    ~metric:Prometheus.metric_masc_oas_params_of_schema_sec
+  Prometheus_hotpath.observe
+    ~metric:Prometheus_hotpath.metric_oas_params_of_schema_sec
     ~start:__t0;
   result
 

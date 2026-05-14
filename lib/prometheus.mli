@@ -577,29 +577,6 @@ val metric_oas_context_overflow_ratio : string
     Labels: [agent_name, trigger]. *)
 val metric_oas_context_compaction_total : string
 
-(** Histogram: elapsed seconds per [Tool_bridge.params_of_json_schema]
-    call.  Phase B baseline of
-    [~/me/planning/claude-plans/wise-nibbling-lerdorf.md] — measures the
-    OAS dispatch hot path before deciding whether memoization is justified.
-    Observation gated by [MASC_DISABLE_HOTPATH_HIST]. *)
-val metric_masc_oas_params_of_schema_sec : string
-
-(** Histogram: elapsed seconds per [Keeper_tools_oas.make_tool_bundle]
-    call.  Fires once per keeper turn.  Phase B baseline. *)
-val metric_masc_oas_make_tool_bundle_sec : string
-
-(** Phase B baseline opt-out: read once at module load from
-    [MASC_DISABLE_HOTPATH_HIST] (truthy = "1"/"true"/"yes"/"on", case-
-    insensitive).  Operators set this for control runs to quantify
-    histogram observation overhead vs the underlying hot path. *)
-val hotpath_hist_disabled : bool Lazy.t
-
-(** Observe a hot-path histogram from a pre-call [Mtime] timestamp.
-    No-op when [hotpath_hist_disabled].  Internal exceptions are
-    swallowed so metric-emit failures never bubble into the observed
-    hot path; cancellation is re-raised. *)
-val observe_hotpath : metric:string -> start:Mtime.t -> unit
-
 (** #12797 Total cascade label-ranking skips triggered by recent server-error
     (5xx) score decay for a provider.  Labels: [provider_key]. *)
 val metric_cascade_server_error_skip_total : string

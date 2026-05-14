@@ -14,6 +14,7 @@ open Alcotest
 module Backend = Backend
 module Backend_mutex_metrics = Masc_mcp.Backend_mutex_metrics
 module Prometheus = Masc_mcp.Prometheus
+module Prometheus_hotpath = Masc_mcp.Prometheus_hotpath
 
 (* ============================================================
    type_to_string Tests
@@ -582,6 +583,25 @@ let test_goal_attainment_metrics_registered () =
        ("# TYPE " ^ Prometheus.metric_goal_attainment_measured ^ " gauge"))
 ;;
 
+let test_oas_hotpath_metrics_registered () =
+  Prometheus_hotpath.register ();
+  let text = Prometheus.to_prometheus_text () in
+  check
+    bool
+    "has params_of_schema hotpath TYPE"
+    true
+    (text_has_literal
+       text
+       ("# TYPE " ^ Prometheus_hotpath.metric_oas_params_of_schema_sec ^ " summary"));
+  check
+    bool
+    "has make_tool_bundle hotpath TYPE"
+    true
+    (text_has_literal
+       text
+       ("# TYPE " ^ Prometheus_hotpath.metric_oas_make_tool_bundle_sec ^ " summary"))
+;;
+
 let test_histogram_exported_as_summary () =
   let name = "test_hist_export_fmt" in
   Prometheus.register_histogram ~name ~help:"export format test" ();
@@ -895,6 +915,10 @@ let () =
             "goal attainment metrics registered"
             `Quick
             test_goal_attainment_metrics_registered
+        ; test_case
+            "OAS hotpath metrics registered"
+            `Quick
+            test_oas_hotpath_metrics_registered
         ; test_case
             "histogram exported as summary with _sum/_count"
             `Quick

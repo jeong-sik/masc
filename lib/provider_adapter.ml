@@ -62,6 +62,22 @@ type voice_transport =
   | Voice_elevenlabs_direct
   | Voice_mcp
 
+type cascade_prefix =
+  | Llama
+  | Ollama
+  | Claude_code
+  | Codex_cli
+  | Gemini_cli
+  | Kimi_cli
+  | Claude
+  | Openai
+  | Gemini
+  | Kimi
+  | Kimi_coding
+  | Glm
+  | Glm_coding
+  | Openrouter
+
 type adapter =
   { canonical_name : string
   ; runtime_kind : runtime_kind
@@ -69,12 +85,12 @@ type adapter =
   ; aliases : string list
   ; spawn_key : string option
     (** Key for CLI spawn lookup in Spawn.spawn_config_of_key. None = not spawnable via CLI. *)
-  ; cascade_prefix : string
-    (** MASC cascade model prefix (e.g. "claude", "openai").
-                                       CONTRACT: Must match the prefix used by the local
-                                       [Cascade_config] parser and Provider_registry-compatible
-                                       model labels. This is the primary naming boundary between
-                                       MASC routing and OAS provider configs. *)
+  ; cascade_prefix : cascade_prefix
+    (** MASC cascade model prefix.
+
+        CONTRACT: the closed variant is the naming boundary between MASC
+        routing and OAS provider configs. Convert with
+        [cascade_prefix_to_string] only at wire/config edges. *)
   ; default_voice : string option
     (** Default TTS voice name. None = no voice assignment. *)
   ; endpoint_url : string option (** Base URL for the provider API. *)
@@ -137,6 +153,42 @@ let string_of_voice_transport = function
 ;;
 
 let normalize_label label = String.trim label |> String.lowercase_ascii
+
+let cascade_prefix_to_string = function
+  | Llama -> "llama"
+  | Ollama -> "ollama"
+  | Claude_code -> "claude_code"
+  | Codex_cli -> "codex_cli"
+  | Gemini_cli -> "gemini_cli"
+  | Kimi_cli -> "kimi_cli"
+  | Claude -> "claude"
+  | Openai -> "openai"
+  | Gemini -> "gemini"
+  | Kimi -> "kimi"
+  | Kimi_coding -> "kimi_coding"
+  | Glm -> "glm"
+  | Glm_coding -> "glm-coding"
+  | Openrouter -> "openrouter"
+;;
+
+let cascade_prefix_of_string raw =
+  match normalize_label raw with
+  | "llama" -> Some Llama
+  | "ollama" -> Some Ollama
+  | "claude_code" -> Some Claude_code
+  | "codex_cli" -> Some Codex_cli
+  | "gemini_cli" -> Some Gemini_cli
+  | "kimi_cli" -> Some Kimi_cli
+  | "claude" -> Some Claude
+  | "openai" -> Some Openai
+  | "gemini" -> Some Gemini
+  | "kimi" -> Some Kimi
+  | "kimi_coding" -> Some Kimi_coding
+  | "glm" -> Some Glm
+  | "glm-coding" -> Some Glm_coding
+  | "openrouter" -> Some Openrouter
+  | _ -> None
+;;
 
 let env_value_opt ?(getenv = Sys.getenv_opt) name =
   match getenv name with
@@ -292,7 +344,7 @@ let kimi_coding_api_url () =
 (* SSOT cascade prefix for local llama-server instances.
     All cascade label construction for local models must use this constant.
     Format: [local_cascade_prefix ^ ":" ^ model_id] → e.g. "llama:qwen3.5" *)
-let local_cascade_prefix = cn_llama
+let local_cascade_prefix = cascade_prefix_to_string Llama
 
 (** Build a cascade model label for a local model.
     Single entry point — other modules must not concatenate prefix manually. *)
@@ -335,7 +387,7 @@ let direct_adapters =
     ; auth_mode = No_auth
     ; aliases = [ cn_llama; "llama.cpp"; "llamacpp" ]
     ; spawn_key = Some "llama"
-    ; cascade_prefix = "llama"
+    ; cascade_prefix = Llama
     ; default_voice = Some "Laura"
     ; endpoint_url = Some Env_config_runtime.Llama.server_url
     ; default_model_id =
@@ -356,7 +408,7 @@ let direct_adapters =
     ; auth_mode = No_auth
     ; aliases = [ cn_ollama; "ollama-local" ]
     ; spawn_key = None
-    ; cascade_prefix = "ollama"
+    ; cascade_prefix = Ollama
     ; default_voice = None
     ; endpoint_url = Some Env_config_runtime.Ollama.server_url
     ; default_model_id =
@@ -377,7 +429,7 @@ let direct_adapters =
     ; auth_mode = Cli_cached_login
     ; aliases = [ cn_claude; "claude-code"; "claude_code" ]
     ; spawn_key = Some "claude"
-    ; cascade_prefix = "claude_code"
+    ; cascade_prefix = Claude_code
     ; default_voice = Some "Sarah"
     ; endpoint_url = None
     ; default_model_id = Some "auto"
@@ -406,7 +458,7 @@ let direct_adapters =
     ; auth_mode = Cli_cached_login
     ; aliases = [ cn_codex; "codex-cli"; "codex_cli" ]
     ; spawn_key = Some "codex"
-    ; cascade_prefix = "codex_cli"
+    ; cascade_prefix = Codex_cli
     ; default_voice = Some "George"
     ; endpoint_url = None
     ; default_model_id = Some "auto"
@@ -437,7 +489,7 @@ let direct_adapters =
     ; auth_mode = Cli_cached_login
     ; aliases = [ cn_gemini; "gemini-cli"; "gemini_cli" ]
     ; spawn_key = Some "gemini"
-    ; cascade_prefix = "gemini_cli"
+    ; cascade_prefix = Gemini_cli
     ; default_voice = Some "Roger"
     ; endpoint_url = None
     ; default_model_id = Some "auto"
@@ -477,7 +529,7 @@ let direct_adapters =
     ; auth_mode = Cli_cached_login
     ; aliases = [ cn_kimi; "kimi-cli"; "kimi_cli" ]
     ; spawn_key = None
-    ; cascade_prefix = "kimi_cli"
+    ; cascade_prefix = Kimi_cli
     ; default_voice = None
     ; endpoint_url = None
     ; default_model_id = Some "auto"
@@ -502,7 +554,7 @@ let direct_adapters =
     ; auth_mode = Api_key "ANTHROPIC_API_KEY"
     ; aliases = [ cn_claude_api; "anthropic" ]
     ; spawn_key = None
-    ; cascade_prefix = "claude"
+    ; cascade_prefix = Claude
     ; default_voice = Some "Sarah"
     ; endpoint_url = Some (anthropic_api_url ())
     ; default_model_id = Some "auto"
@@ -521,7 +573,7 @@ let direct_adapters =
     ; auth_mode = Api_key "OPENAI_API_KEY"
     ; aliases = [ cn_codex_api; "openai" ]
     ; spawn_key = None
-    ; cascade_prefix = "openai"
+    ; cascade_prefix = Openai
     ; default_voice = Some "George"
     ; endpoint_url = Some (openai_api_url ())
     ; default_model_id = Some "auto"
@@ -544,7 +596,7 @@ let direct_adapters =
           }
     ; aliases = [ cn_gemini_api; "google" ]
     ; spawn_key = None
-    ; cascade_prefix = "gemini"
+    ; cascade_prefix = Gemini
     ; default_voice = Some "Roger"
     ; endpoint_url = None
     ; (* Resolved dynamically for Gemini *)
@@ -564,7 +616,7 @@ let direct_adapters =
     ; auth_mode = Api_key "KIMI_API_KEY_SB"
     ; aliases = [ cn_kimi_api; "moonshot" ]
     ; spawn_key = None
-    ; cascade_prefix = "kimi"
+    ; cascade_prefix = Kimi
     ; default_voice = None
     ; endpoint_url = Some (kimi_api_url ())
     ; default_model_id = Some "auto"
@@ -583,7 +635,7 @@ let direct_adapters =
     ; auth_mode = Api_key "KIMI_CODING_API_KEY"
     ; aliases = [ cn_kimi_coding; "kimi_coding" ]
     ; spawn_key = None
-    ; cascade_prefix = "kimi_coding"
+    ; cascade_prefix = Kimi_coding
     ; default_voice = None
     ; endpoint_url = Some (kimi_coding_api_url ())
     ; default_model_id = Some "auto"
@@ -602,7 +654,7 @@ let direct_adapters =
     ; auth_mode = Api_key "ZAI_API_KEY"
     ; aliases = [ cn_glm; "glm"; "glm_cloud"; "zai" ]
     ; spawn_key = None
-    ; cascade_prefix = "glm"
+    ; cascade_prefix = Glm
     ; default_voice = None
     ; endpoint_url = Some (glm_api_url ())
     ; default_model_id = Some "auto"
@@ -621,7 +673,7 @@ let direct_adapters =
     ; auth_mode = Api_key "ZAI_API_KEY"
     ; aliases = [ cn_glm_coding_plan; "glm-coding" ]
     ; spawn_key = None
-    ; cascade_prefix = "glm-coding"
+    ; cascade_prefix = Glm_coding
     ; default_voice = None
     ; endpoint_url = Some (glm_coding_api_url ())
     ; default_model_id = Some "auto"
@@ -640,7 +692,7 @@ let direct_adapters =
     ; auth_mode = Api_key "OPENROUTER_API_KEY"
     ; aliases = [ cn_openrouter ]
     ; spawn_key = None
-    ; cascade_prefix = "openrouter"
+    ; cascade_prefix = Openrouter
     ; default_voice = None
     ; endpoint_url = Some (openrouter_api_url ())
     ; default_model_id = None
@@ -666,10 +718,10 @@ let find_direct_adapter_by_alias label =
 ;;
 
 let resolve_adapter_by_cascade_prefix label =
-  let normalized = normalize_label label in
-  List.find_opt
-    (fun (adapter : adapter) -> normalize_label adapter.cascade_prefix = normalized)
-    direct_adapters
+  match cascade_prefix_of_string label with
+  | Some prefix ->
+    List.find_opt (fun (adapter : adapter) -> adapter.cascade_prefix = prefix) direct_adapters
+  | None -> None
 ;;
 
 let resolve_model_policy_default ?getenv (policy : model_policy) =
@@ -1351,11 +1403,11 @@ let default_model_label_for_adapter (adapter : adapter) =
   match adapter.runtime_kind with
   | Local ->
     Result.map
-      (fun model_id -> adapter.cascade_prefix ^ ":" ^ model_id)
+      (fun model_id -> cascade_prefix_to_string adapter.cascade_prefix ^ ":" ^ model_id)
       (explicit_llama_model_id_result ())
   | Cli_agent | Direct_api ->
     (match adapter.default_model_id with
-     | Some _ -> Ok (adapter.cascade_prefix ^ ":auto")
+     | Some _ -> Ok (cascade_prefix_to_string adapter.cascade_prefix ^ ":auto")
      | None ->
        Error
          (Printf.sprintf
@@ -1464,14 +1516,14 @@ let provider_label_of_provider_kind (kind : Llm_provider.Provider_config.provide
   =
   let cn = adapter_canonical_name_of_provider_kind kind in
   match resolve_direct_adapter cn with
-  | Some adapter -> adapter.cascade_prefix
+  | Some adapter -> cascade_prefix_to_string adapter.cascade_prefix
   | None -> cn
 ;;
 
 let provider_label_of_explicit_prefix (prefix : string) : string option =
   let normalized = normalize_label prefix in
   match resolve_adapter_by_cascade_prefix normalized with
-  | Some adapter -> Some adapter.cascade_prefix
+  | Some adapter -> Some (cascade_prefix_to_string adapter.cascade_prefix)
   | None -> if String.equal normalized cn_custom then Some cn_custom else None
 ;;
 
@@ -1595,7 +1647,7 @@ let openai_compat_adapter_by_endpoint (cfg : Llm_provider.Provider_config.t) =
 
 let provider_label_from_registry (cfg : Llm_provider.Provider_config.t) =
   match openai_compat_adapter_by_endpoint cfg with
-  | Some adapter -> adapter.cascade_prefix
+  | Some adapter -> cascade_prefix_to_string adapter.cascade_prefix
   | None -> Llm_provider.Provider_registry.provider_name_of_config cfg
 ;;
 
@@ -1676,7 +1728,7 @@ let adapter_of_provider_kind (kind : Llm_provider.Provider_config.provider_kind)
 
 let provider_label_of_config (cfg : Llm_provider.Provider_config.t) =
   match adapter_of_provider_config cfg with
-  | Some adapter -> adapter.cascade_prefix
+  | Some adapter -> cascade_prefix_to_string adapter.cascade_prefix
   | None -> provider_label_from_registry cfg
 ;;
 
@@ -1829,7 +1881,9 @@ type auth_detail =
   }
 
 (** Cascade config prefix from adapter record. No match needed. *)
-let cascade_prefix_of_adapter (adapter : adapter) = adapter.cascade_prefix
+let cascade_prefix_of_adapter (adapter : adapter) =
+  cascade_prefix_to_string adapter.cascade_prefix
+;;
 
 let endpoint_url_of_adapter (adapter : adapter) = adapter.endpoint_url
 
@@ -1850,7 +1904,7 @@ let cascade_prefix_of_provider_kind (kind : Llm_provider.Provider_config.provide
   =
   let cn = adapter_canonical_name_of_provider_kind kind in
   match resolve_direct_adapter cn with
-  | Some a -> a.cascade_prefix
+  | Some a -> cascade_prefix_to_string a.cascade_prefix
   | None -> cn
 ;;
 

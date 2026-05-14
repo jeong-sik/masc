@@ -143,7 +143,7 @@ let runtime_label_for_active_id ~configured_labels ~active =
                     | Some value when String.trim value <> "" -> value
                     | _ -> "auto"
                   in
-                  adapter.cascade_prefix ^ ":" ^ runtime_id)
+                  Provider_adapter.cascade_prefix_of_adapter adapter ^ ":" ^ runtime_id)
          | None -> active)
 
 let runtime_health_key_of_label label =

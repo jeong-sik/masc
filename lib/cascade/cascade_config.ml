@@ -886,7 +886,7 @@ let materialized_provider_endpoint json provider_id =
 
 let direct_provider_cascade_prefix provider_id =
   match Provider_adapter.resolve_adapter_by_cascade_prefix provider_id with
-  | Some adapter -> Some adapter.Provider_adapter.cascade_prefix
+  | Some adapter -> Some (Provider_adapter.cascade_prefix_of_adapter adapter)
   | None ->
     Provider_adapter.resolve_adapter_by_cascade_prefix
       (normalize_decl_provider_id provider_id)

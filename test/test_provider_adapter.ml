@@ -94,6 +94,44 @@ let test_cascade_prefix_of_provider_kind_keeps_adapter_mapping () =
     (Adapter.cascade_prefix_of_provider_kind Llm_provider.Provider_config.Codex_cli)
 ;;
 
+let test_cascade_prefix_variants_round_trip () =
+  let labels =
+    [ "llama"
+    ; "ollama"
+    ; "claude_code"
+    ; "codex_cli"
+    ; "gemini_cli"
+    ; "kimi_cli"
+    ; "claude"
+    ; "openai"
+    ; "gemini"
+    ; "kimi"
+    ; "kimi_coding"
+    ; "glm"
+    ; "glm-coding"
+    ; "openrouter"
+    ]
+  in
+  List.iter
+    (fun label ->
+       match Adapter.cascade_prefix_of_string label with
+       | Some prefix ->
+         check string ("round trip " ^ label) label (Adapter.cascade_prefix_to_string prefix)
+       | None -> fail ("expected typed cascade prefix for " ^ label))
+    labels;
+  check
+    bool
+    "unknown prefix rejected"
+    true
+    (Option.is_none (Adapter.cascade_prefix_of_string "private-provider"));
+  let glm_coding = Option.get (Adapter.resolve_adapter_by_cascade_prefix "glm-coding") in
+  check
+    string
+    "adapter exposes string boundary"
+    "glm-coding"
+    (Adapter.cascade_prefix_of_adapter glm_coding)
+;;
+
 let test_declarative_protocol_resolves_via_adapter_boundary () =
   let check_protocol protocol expected =
     check
@@ -1025,6 +1063,10 @@ let () =
             "cascade prefix keeps adapter mapping"
             `Quick
             test_cascade_prefix_of_provider_kind_keeps_adapter_mapping
+        ; test_case
+            "cascade prefix variants round trip"
+            `Quick
+            test_cascade_prefix_variants_round_trip
         ; test_case
             "declarative protocol resolves via adapter boundary"
             `Quick

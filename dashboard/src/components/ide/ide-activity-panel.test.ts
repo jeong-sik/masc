@@ -318,6 +318,7 @@ describe('IdeActivityPanel', () => {
 
   it('keeps the last activity snapshot when a refresh fails', async () => {
     vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-05T10:00:00Z'))
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({
         events: [{
@@ -345,6 +346,9 @@ describe('IdeActivityPanel', () => {
     await vi.waitFor(() => {
       expect(container.textContent).toContain('turn-stable')
     })
+    expect(container.querySelector('.ide-activity-refresh-status')?.textContent).toBe('live')
+
+    vi.setSystemTime(new Date('2026-05-05T10:00:10Z'))
     await vi.advanceTimersByTimeAsync(1_000)
     await vi.waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(2)
@@ -352,8 +356,21 @@ describe('IdeActivityPanel', () => {
 
     expect(container.textContent).toContain('turn-stable')
     expect(container.textContent).toContain('1 events · 1 keepers')
+    expect(container.querySelector('.ide-activity-refresh-status')?.textContent).toBe('stale 1 failed')
 
     render(null, container)
+  })
+
+  it('surfaces offline refresh state when the activity API is unavailable before any snapshot', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('unavailable', { status: 503 })))
+
+    const container = document.createElement('div')
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml' }), container)
+
+    await waitFor(() => {
+      expect(container.querySelector('.ide-activity-refresh-status')?.textContent).toBe('offline 1 failed')
+    })
+    expect(container.textContent).toContain('no recent activity')
   })
 
   it('renders active run goal progress from activity goal and task links', async () => {

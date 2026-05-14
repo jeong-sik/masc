@@ -68,10 +68,25 @@ interface ActivityFetchResult {
   readonly ok: boolean
 }
 
+type ActivityRefreshTone = 'loading' | 'live' | 'stale' | 'offline'
+
+interface ActivityRefreshState {
+  readonly tone: ActivityRefreshTone
+  readonly lastOkMs: number | null
+  readonly lastAttemptMs: number | null
+  readonly failedCount: number
+}
+
 const EMPTY_ACTIVITY: ReadonlyArray<RunActivityEvent> = []
 const EMPTY_ANNOTATIONS: ReadonlyArray<IdeAnnotation> = []
 const EMPTY_DIFF_ROWS: ReadonlyArray<UnifiedDiffRow> = []
 const EMPTY_DIAGNOSTICS: ReadonlyArray<LspDiagnosticAnchor> = []
+const INITIAL_REFRESH_STATE: ActivityRefreshState = {
+  tone: 'loading',
+  lastOkMs: null,
+  lastAttemptMs: null,
+  failedCount: 0,
+}
 const PROGRESS_SURFACES = [
   ['goal_id', 'Goal'],
   ['task_id', 'Task'],
@@ -310,17 +325,37 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
     return store
   }, [])
   const [, forceRender] = useState(0)
+  const [refreshState, setRefreshState] = useState<ActivityRefreshState>(INITIAL_REFRESH_STATE)
   const refreshMs = normalizedPollMs(pollMs)
 
   useEffect(() => {
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | null = null
     const load = async () => {
+      const attemptMs = Date.now()
+      setRefreshState(prev => ({
+        ...prev,
+        lastAttemptMs: attemptMs,
+        tone: prev.lastOkMs === null && prev.failedCount === 0 ? 'loading' : prev.tone,
+      }))
       const { events, roomId, ok } = await fetchActivityEvents()
       if (cancelled) return
       if (ok) {
         store.reset(roomId)
         store.seed(events)
+        setRefreshState({
+          tone: 'live',
+          lastOkMs: Date.now(),
+          lastAttemptMs: attemptMs,
+          failedCount: 0,
+        })
+      } else {
+        setRefreshState(prev => ({
+          tone: prev.lastOkMs === null ? 'offline' : 'stale',
+          lastOkMs: prev.lastOkMs,
+          lastAttemptMs: attemptMs,
+          failedCount: prev.failedCount + 1,
+        }))
       }
       if (refreshMs !== null) timer = setTimeout(load, refreshMs)
     }
@@ -374,7 +409,18 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
         class="ide-rail-head"
       >
         <span>EVENT TIMELINE</span>
-        <span>${events.length} events · ${keepers.length} keepers</span>
+        <span class="ide-activity-head-meta">
+          <span>${events.length} events · ${keepers.length} keepers</span>
+          <span
+            class="ide-activity-refresh-status"
+            data-state=${refreshState.tone}
+            role="status"
+            aria-label=${`Activity refresh ${activityRefreshLabel(refreshState, refreshMs)}`}
+            title=${activityRefreshTitle(refreshState, refreshMs)}
+          >
+            ${activityRefreshLabel(refreshState, refreshMs)}
+          </span>
+        </span>
       </div>
       <${RunProgressStrip} summary=${progress} />
       <${IdeContextLens}
@@ -585,6 +631,21 @@ function latestAgeLabel(events: ReadonlyArray<RunActivityEvent>): string {
   if (minutes < 60) return `${minutes}m ago`
   const hours = Math.floor(minutes / 60)
   return `${hours}h ago`
+}
+
+function activityRefreshLabel(state: ActivityRefreshState, refreshMs: number | null): string {
+  if (state.tone === 'loading') return 'syncing'
+  if (state.tone === 'live') return refreshMs === null ? 'loaded' : 'live'
+  const failures = state.failedCount === 1 ? '1 failed' : `${state.failedCount} failed`
+  return state.tone === 'offline' ? `offline ${failures}` : `stale ${failures}`
+}
+
+function activityRefreshTitle(state: ActivityRefreshState, refreshMs: number | null): string {
+  const parts = [`Activity refresh ${activityRefreshLabel(state, refreshMs)}`]
+  if (state.lastOkMs !== null) parts.push(`last update ${formatActivityTime(state.lastOkMs)}`)
+  if (state.lastAttemptMs !== null) parts.push(`last attempt ${formatActivityTime(state.lastAttemptMs)}`)
+  if (refreshMs !== null) parts.push(`poll ${Math.max(1, Math.round(refreshMs / 1000))}s`)
+  return parts.join(' | ')
 }
 
 function ActivityRow(

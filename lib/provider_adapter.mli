@@ -1,8 +1,11 @@
 (** Provider_adapter — provider registry, auth resolution, voice bridge,
     and cascade label construction.
 
-    Single source of truth for all LLM and voice provider adapters.
-    Adding a new provider = adding one entry to [direct_adapters].
+    MASC owns local runtime policy, voice routing, and cascade labels.
+    OAS owns provider identity and transport defaults through
+    [Agent_sdk.Provider_runtime_binding]. Adding a new plain provider
+    should normally happen in OAS; MASC only needs an explicit adapter
+    entry for local policy overrides.
 
     @since v2.100.0 *)
 

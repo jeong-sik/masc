@@ -327,10 +327,13 @@ let adapter_canonical_name_of_provider_kind
   | Codex_cli -> cn_codex
 ;;
 
-(** Single source of truth for all provider/runtime adapters.
+(** MASC-local policy overlay for provider/runtime adapters.
     Simple names ([claude], [codex], [gemini]) are CLI runtimes.
-    Direct API adapters use explicit [*-api] canonical names. *)
-let direct_adapters =
+    Direct API adapters use explicit [*-api] canonical names.
+
+    Generic OAS provider bindings are appended below; this list remains only
+    for MASC-specific policy that OAS should not own. *)
+let legacy_direct_adapters =
   [ { canonical_name = cn_llama
     ; runtime_kind = Local
     ; auth_mode = No_auth
@@ -656,6 +659,126 @@ let direct_adapters =
     ; telemetry_policy = telemetry_reported
     }
   ]
+;;
+
+let adapter_binding_candidates (adapter : adapter) =
+  adapter.canonical_name :: adapter.cascade_prefix :: adapter.aliases
+  |> List.filter_map (fun label ->
+    let trimmed = String.trim label in
+    if trimmed = "" then None else Some trimmed)
+  |> Json_util.dedupe_keep_order
+;;
+
+let adapter_labels (adapter : adapter) =
+  adapter_binding_candidates adapter |> List.map normalize_label
+;;
+
+let overlay_adapter_from_binding
+      (adapter : adapter)
+      (binding : Provider_runtime_overlay.binding)
+  =
+  let binding_default_model = Provider_runtime_overlay.default_model_id binding in
+  let binding_endpoint = Provider_runtime_overlay.endpoint_url binding in
+  { adapter with
+    aliases =
+      Json_util.dedupe_keep_order
+        (adapter.aliases @ Provider_runtime_overlay.labels binding)
+  ; endpoint_url =
+      (match adapter.endpoint_url, binding_endpoint with
+       | Some _ as value, _ -> value
+       | None, value -> value)
+  ; default_model_id =
+      (match adapter.default_model_id, binding_default_model with
+       | Some _ as value, _ -> value
+       | None, value -> value)
+  }
+;;
+
+let runtime_kind_of_binding (binding : Provider_runtime_overlay.binding) =
+  match Provider_runtime_overlay.runtime_kind binding with
+  | `Local -> Local
+  | `Cli_agent -> Cli_agent
+  | `Direct_api -> Direct_api
+;;
+
+let auth_mode_of_binding (binding : Provider_runtime_overlay.binding) =
+  match Provider_runtime_overlay.primary_api_key_env binding with
+  | Some env_name -> Api_key env_name
+  | None ->
+    (match Provider_runtime_overlay.runtime_kind binding with
+     | `Cli_agent -> Cli_cached_login
+     | `Local | `Direct_api -> No_auth)
+;;
+
+let tool_policy_of_binding (binding : Provider_runtime_overlay.binding) =
+  { no_tool_http_headers with
+    supports_runtime_mcp_http_headers =
+      Provider_runtime_overlay.supports_runtime_mcp_http_headers binding
+  ; uses_anthropic_caching = Provider_runtime_overlay.uses_prompt_caching binding
+  }
+;;
+
+let telemetry_policy_of_binding (binding : Provider_runtime_overlay.binding) =
+  if Provider_runtime_overlay.usage_missing_by_design binding
+  then telemetry_usage_missing
+  else telemetry_reported
+;;
+
+let spawn_key_of_binding (binding : Provider_runtime_overlay.binding) =
+  match Provider_runtime_overlay.command binding with
+  | Some ("claude" | "codex" | "gemini" | "llama" as command) -> Some command
+  | Some _ | None -> None
+;;
+
+let generic_adapter_of_binding (binding : Provider_runtime_overlay.binding) =
+  let default_model_id = Provider_runtime_overlay.default_model_id binding in
+  { canonical_name = Provider_runtime_overlay.id binding
+  ; runtime_kind = runtime_kind_of_binding binding
+  ; auth_mode = auth_mode_of_binding binding
+  ; aliases = Provider_runtime_overlay.labels binding
+  ; spawn_key = spawn_key_of_binding binding
+  ; cascade_prefix = Provider_runtime_overlay.id binding
+  ; default_voice = None
+  ; endpoint_url = Provider_runtime_overlay.endpoint_url binding
+  ; default_model_id
+  ; model_policy =
+      { default_model_env = None
+      ; default_model_fallback = default_model_id
+      ; auto_models = No_auto_models
+      ; expand_auto = false
+      ; family = Generic
+      }
+  ; tool_policy = tool_policy_of_binding binding
+  ; telemetry_policy = telemetry_policy_of_binding binding
+  }
+;;
+
+let binding_matches_adapter_labels labels (binding : Provider_runtime_overlay.binding) =
+  Provider_runtime_overlay.labels binding
+  |> List.exists (fun label -> List.mem (normalize_label label) labels)
+;;
+
+let direct_adapters =
+  let legacy_with_oas_labels =
+    List.map
+      (fun adapter ->
+         match
+           Provider_runtime_overlay.find_by_candidates
+             (adapter_binding_candidates adapter)
+         with
+         | Some binding -> overlay_adapter_from_binding adapter binding
+         | None -> adapter)
+      legacy_direct_adapters
+  in
+  let legacy_labels =
+    legacy_with_oas_labels |> List.concat_map adapter_labels |> Json_util.dedupe_keep_order
+  in
+  let oas_extra_adapters =
+    Provider_runtime_overlay.all ()
+    |> List.filter (fun binding -> not (binding_matches_adapter_labels legacy_labels binding))
+    |> List.map generic_adapter_of_binding
+  in
+  legacy_with_oas_labels @ oas_extra_adapters
 ;;
 
 let find_direct_adapter_by_alias label =

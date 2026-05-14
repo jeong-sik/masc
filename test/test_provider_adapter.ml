@@ -43,6 +43,36 @@ let test_resolve_cli_canonical_names () =
   check string "codex canonical" "codex" codex.canonical_name
 ;;
 
+let test_oas_registry_binding_adds_generic_provider () =
+  let groq = Option.get (Adapter.resolve_direct_adapter "groq") in
+  check string "canonical" "groq" groq.canonical_name;
+  check string "cascade prefix" "groq" groq.cascade_prefix;
+  check
+    string
+    "auth env"
+    "api_key:GROQ_API_KEY"
+    (Adapter.string_of_auth_mode groq.auth_mode);
+  check
+    string
+    "runtime kind"
+    "direct_api"
+    (Adapter.string_of_runtime_kind groq.runtime_kind);
+  let base_url =
+    match groq.endpoint_url with
+    | Some base_url -> base_url
+    | None -> fail "expected groq endpoint from OAS registry binding"
+  in
+  let cfg =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"llama-3.3-70b-versatile"
+      ~base_url
+      ~request_path:"/chat/completions"
+      ()
+  in
+  check string "provider label" "groq" (Adapter.provider_label_of_config cfg)
+;;
+
 let test_kimi_direct_auth_accepts_primary_and_fallback_envs () =
   with_env "KIMI_API_KEY_SB" None (fun () ->
     with_env "KIMI_API_KEY" (Some "kimi-key") (fun () ->
@@ -1020,6 +1050,10 @@ let () =
     [ ( "registry"
       , [ test_case "resolve direct aliases" `Quick test_resolve_direct_aliases
         ; test_case "resolve cli canonicals" `Quick test_resolve_cli_canonical_names
+        ; test_case
+            "oas registry binding adds generic provider"
+            `Quick
+            test_oas_registry_binding_adds_generic_provider
         ; test_case
             "kimi direct auth accepts fallback envs"
             `Quick

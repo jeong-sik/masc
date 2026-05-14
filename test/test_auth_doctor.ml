@@ -374,6 +374,9 @@ let test_reports_codex_config_pipeline_stages () =
   check bool "json exposes config stages" true
     (contains_substring ~needle:"\"stages\""
        (Auth_doctor.to_yojson report |> Yojson.Safe.to_string));
+  check bool "json keeps codex_mcp compatibility key" true
+    (contains_substring ~needle:"\"codex_mcp\""
+       (Auth_doctor.to_yojson report |> Yojson.Safe.to_string));
   check_codex_config_stage_names config
 
 let test_reports_stable_codex_config_stages_when_file_missing () =

@@ -100,7 +100,8 @@ let generated_config_client_display_name =
 
 let generated_config_mcp_label = generated_config_client_display_name ^ " MCP"
 
-let generated_config_json_key = generated_config_client.client_name ^ "_mcp"
+(* Public doctor JSON key kept stable for runbooks and jq consumers. *)
+let generated_config_json_key = "codex_mcp"
 
 let generated_config_cli_login_command =
   Printf.sprintf "`%s mcp login`" generated_config_client.client_name

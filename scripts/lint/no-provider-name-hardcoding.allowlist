@@ -1,10 +1,10 @@
 # Path allowlist for scripts/lint/no-provider-name-hardcoding.sh.
 #
-# Entries are path prefixes relative to the repo root. Keep this list limited
-# to code-level catalogs, generated token artifacts, operator-facing scripts,
-# code generators, or intentionally provider-specific fixtures. Every new entry
-# should explain why the literal belongs there instead of in Provider_adapter /
-# Local_mcp_clients / cascade.toml / OAS provider metadata.
+# Entries are exact file paths relative to the repo root. Keep this list
+# limited to code-level catalogs, generated token artifacts, operator-facing
+# scripts, code generators, or intentionally provider-specific fixtures. Every
+# new entry should explain why the literal belongs there instead of in
+# Provider_adapter / Local_mcp_clients / cascade.toml / OAS provider metadata.
 
 # Runtime/provider catalogs.
 lib/provider_adapter.ml
@@ -48,7 +48,11 @@ scripts/setup_dashboard_mission_fixture.sh
 scripts/goal_loop_completion_audit.py
 scripts/exec_corpus_report.py
 scripts/ocaml-structure-ratchet.sh
-scripts/harness/workload
+scripts/harness/workload/keeper_campaign.sh
+scripts/harness/workload/keeper_continuity_validation.sh
+scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh
+scripts/harness/workload/keeper_product_design_board_reprobe.sh
+scripts/harness/workload/keeper_social_experiment.sh
 
 # Lint scripts that intentionally contain the stale patterns they detect.
 scripts/lint/no-roadmap-stale-hardcoding.sh

@@ -24,7 +24,8 @@ PATTERN='\b(codex|gemini|claude|kimi|glm)\b'
 
 ALLOW_TMP="$(mktemp -t no-provider-name-hc.XXXXXX)"
 REPORT_TMP="$(mktemp -t no-provider-name-hc-report.XXXXXX)"
-trap 'rm -f "${ALLOW_TMP}" "${REPORT_TMP}"' EXIT
+EXCEPTION_TMP="$(mktemp -t no-provider-name-hc-exceptions.XXXXXX)"
+trap 'rm -f "${ALLOW_TMP}" "${REPORT_TMP}" "${EXCEPTION_TMP}"' EXIT
 
 if [[ -f "${ALLOWLIST}" ]]; then
   sed -E 's/#.*//; s/^[[:space:]]+//; s/[[:space:]]+$//; /^$/d' \
@@ -36,7 +37,7 @@ is_allowed_path() {
   local allowed
   while IFS= read -r allowed; do
     [[ -z "${allowed}" ]] && continue
-    if [[ "${rel}" == "${allowed}" || "${rel}" == "${allowed}/"* ]]; then
+    if [[ "${rel}" == "${allowed}" ]]; then
       return 0
     fi
   done <"${ALLOW_TMP}"
@@ -81,7 +82,8 @@ for root in "${ROOTS[@]}"; do
         ;;
     esac
 
-    if grep -q 'provider-name-hardcoding-ok:' <<<"${content}"; then
+    if grep -Eq 'provider-name-hardcoding-ok:[[:space:]]+[^[:space:]]' <<<"${content}"; then
+      printf '%s:%s:%s\n' "${rel}" "${line_no}" "${content}" >>"${EXCEPTION_TMP}"
       continue
     fi
     printf '%s:%s:%s\n' "${rel}" "${line_no}" "${content}" >>"${REPORT_TMP}"
@@ -109,11 +111,13 @@ for root in "${ROOTS[@]}"; do
 done
 
 count="$(wc -l <"${REPORT_TMP}" | tr -d '[:space:]')"
+exception_count="$(wc -l <"${EXCEPTION_TMP}" | tr -d '[:space:]')"
 
 if [[ "${MODE}" == "--summary" ]]; then
   awk -F: '{ c[$1]++ } END { for (file in c) print c[file], file }' \
     "${REPORT_TMP}" | sort -nr
   echo "provider-name-hardcoding: ${count} off-catalog match(es)"
+  echo "provider-name-hardcoding: ${exception_count} inline exception(s)"
   exit 0
 fi
 
@@ -130,4 +134,7 @@ if [[ "${count}" -gt 0 ]]; then
 fi
 
 echo "provider-name-hardcoding: clean"
+if [[ "${exception_count}" -gt 0 ]]; then
+  echo "provider-name-hardcoding: ${exception_count} inline exception(s)"
+fi
 exit 0

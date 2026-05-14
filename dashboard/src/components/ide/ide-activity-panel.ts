@@ -62,10 +62,31 @@ interface ApiActivityResponse {
   readonly latest_seq?: number
 }
 
+interface ActivityFetchResult {
+  readonly events: ReadonlyArray<RunActivityEvent>
+  readonly roomId: string
+  readonly ok: boolean
+}
+
+type ActivityRefreshTone = 'loading' | 'live' | 'stale' | 'offline'
+
+interface ActivityRefreshState {
+  readonly tone: ActivityRefreshTone
+  readonly lastOkMs: number | null
+  readonly lastAttemptMs: number | null
+  readonly failedCount: number
+}
+
 const EMPTY_ACTIVITY: ReadonlyArray<RunActivityEvent> = []
 const EMPTY_ANNOTATIONS: ReadonlyArray<IdeAnnotation> = []
 const EMPTY_DIFF_ROWS: ReadonlyArray<UnifiedDiffRow> = []
 const EMPTY_DIAGNOSTICS: ReadonlyArray<LspDiagnosticAnchor> = []
+const INITIAL_REFRESH_STATE: ActivityRefreshState = {
+  tone: 'loading',
+  lastOkMs: null,
+  lastAttemptMs: null,
+  failedCount: 0,
+}
 const PROGRESS_SURFACES = [
   ['goal_id', 'Goal'],
   ['task_id', 'Task'],
@@ -102,10 +123,11 @@ export interface IdeRunProgressGoal {
   readonly progressLabel: string
 }
 
-export interface IdeActivityMockProps {
+export interface IdeActivityPanelProps {
   readonly activeFile?: string
   readonly annotations?: ReadonlyArray<IdeAnnotation>
   readonly diffRows?: ReadonlyArray<UnifiedDiffRow>
+  readonly pollMs?: number
   readonly children?: unknown
 }
 
@@ -146,20 +168,20 @@ function mapApiEvent(event: ApiActivityEvent, roomId: string): RunActivityEvent 
   }
 }
 
-async function fetchActivityEvents(): Promise<{ events: ReadonlyArray<RunActivityEvent>; roomId: string }> {
+async function fetchActivityEvents(): Promise<ActivityFetchResult> {
   try {
     const res = await fetch('/api/v1/activity/events?limit=50')
-    if (!res.ok) return { events: EMPTY_ACTIVITY, roomId: DEFAULT_ROOM_ID }
+    if (!res.ok) return { events: EMPTY_ACTIVITY, roomId: DEFAULT_ROOM_ID, ok: false }
     const data: ApiActivityResponse = await res.json()
     const rawEvents = data.events
     if (!Array.isArray(rawEvents) || rawEvents.length === 0) {
-      return { events: EMPTY_ACTIVITY, roomId: DEFAULT_ROOM_ID }
+      return { events: EMPTY_ACTIVITY, roomId: DEFAULT_ROOM_ID, ok: true }
     }
     const roomId = rawEvents[0].room_id || DEFAULT_ROOM_ID
     const mapped = rawEvents.map(e => mapApiEvent(e, roomId))
-    return { events: mapped, roomId }
+    return { events: mapped, roomId, ok: true }
   } catch {
-    return { events: EMPTY_ACTIVITY, roomId: DEFAULT_ROOM_ID }
+    return { events: EMPTY_ACTIVITY, roomId: DEFAULT_ROOM_ID, ok: false }
   }
 }
 
@@ -285,11 +307,17 @@ function positiveInteger(value: unknown): number | undefined {
     : undefined
 }
 
-export function IdeActivityMock(props: IdeActivityMockProps = {}) {
+function normalizedPollMs(value: number | undefined): number | null {
+  if (value === undefined || value <= 0 || !Number.isFinite(value)) return null
+  return Math.floor(value)
+}
+
+export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
   const {
     activeFile = '',
     annotations = EMPTY_ANNOTATIONS,
     diffRows = EMPTY_DIFF_ROWS,
+    pollMs = 0,
   } = props
   const store = useMemo(() => {
     const store = createRunActivityStore(DEFAULT_ROOM_ID)
@@ -297,16 +325,46 @@ export function IdeActivityMock(props: IdeActivityMockProps = {}) {
     return store
   }, [])
   const [, forceRender] = useState(0)
+  const [refreshState, setRefreshState] = useState<ActivityRefreshState>(INITIAL_REFRESH_STATE)
+  const refreshMs = normalizedPollMs(pollMs)
 
   useEffect(() => {
     let cancelled = false
-    fetchActivityEvents().then(({ events, roomId }) => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const load = async () => {
+      const attemptMs = Date.now()
+      setRefreshState(prev => ({
+        ...prev,
+        lastAttemptMs: attemptMs,
+        tone: prev.lastOkMs === null && prev.failedCount === 0 ? 'loading' : prev.tone,
+      }))
+      const { events, roomId, ok } = await fetchActivityEvents()
       if (cancelled) return
-      store.reset(roomId)
-      store.seed(events)
-    })
-    return () => { cancelled = true }
-  }, [store])
+      if (ok) {
+        store.reset(roomId)
+        store.seed(events)
+        setRefreshState({
+          tone: 'live',
+          lastOkMs: Date.now(),
+          lastAttemptMs: attemptMs,
+          failedCount: 0,
+        })
+      } else {
+        setRefreshState(prev => ({
+          tone: prev.lastOkMs === null ? 'offline' : 'stale',
+          lastOkMs: prev.lastOkMs,
+          lastAttemptMs: attemptMs,
+          failedCount: prev.failedCount + 1,
+        }))
+      }
+      if (refreshMs !== null) timer = setTimeout(load, refreshMs)
+    }
+    void load()
+    return () => {
+      cancelled = true
+      if (timer !== null) clearTimeout(timer)
+    }
+  }, [store, refreshMs])
 
   useEffect(() => {
     const unsub = store.subscribe(() => forceRender(tick => tick + 1))
@@ -351,7 +409,18 @@ export function IdeActivityMock(props: IdeActivityMockProps = {}) {
         class="ide-rail-head"
       >
         <span>EVENT TIMELINE</span>
-        <span>${events.length} events · ${keepers.length} keepers</span>
+        <span class="ide-activity-head-meta">
+          <span>${events.length} events · ${keepers.length} keepers</span>
+          <span
+            class="ide-activity-refresh-status"
+            data-state=${refreshState.tone}
+            role="status"
+            aria-label=${`Activity refresh ${activityRefreshLabel(refreshState, refreshMs)}`}
+            title=${activityRefreshTitle(refreshState, refreshMs)}
+          >
+            ${activityRefreshLabel(refreshState, refreshMs)}
+          </span>
+        </span>
       </div>
       <${RunProgressStrip} summary=${progress} />
       <${IdeContextLens}
@@ -562,6 +631,21 @@ function latestAgeLabel(events: ReadonlyArray<RunActivityEvent>): string {
   if (minutes < 60) return `${minutes}m ago`
   const hours = Math.floor(minutes / 60)
   return `${hours}h ago`
+}
+
+function activityRefreshLabel(state: ActivityRefreshState, refreshMs: number | null): string {
+  if (state.tone === 'loading') return 'syncing'
+  if (state.tone === 'live') return refreshMs === null ? 'loaded' : 'live'
+  const failures = state.failedCount === 1 ? '1 failed' : `${state.failedCount} failed`
+  return state.tone === 'offline' ? `offline ${failures}` : `stale ${failures}`
+}
+
+function activityRefreshTitle(state: ActivityRefreshState, refreshMs: number | null): string {
+  const parts = [`Activity refresh ${activityRefreshLabel(state, refreshMs)}`]
+  if (state.lastOkMs !== null) parts.push(`last update ${formatActivityTime(state.lastOkMs)}`)
+  if (state.lastAttemptMs !== null) parts.push(`last attempt ${formatActivityTime(state.lastAttemptMs)}`)
+  if (refreshMs !== null) parts.push(`poll ${Math.max(1, Math.round(refreshMs / 1000))}s`)
+  return parts.join(' | ')
 }
 
 function ActivityRow(

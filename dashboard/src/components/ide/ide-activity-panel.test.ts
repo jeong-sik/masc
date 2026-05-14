@@ -1,13 +1,35 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h } from 'preact'
-import { render } from 'preact'
+import { render as preactRender } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
-import { deriveIdeRunProgressSummary, IdeActivityMock } from './ide-activity-mock'
+import { deriveIdeRunProgressSummary, IdeActivityPanel } from './ide-activity-panel'
 import { activeIdeFile, ideContextFocus } from './ide-state'
 import { lspDiagnosticSnapshot } from './ide-lsp-client'
 import { goals, tasks } from '../../store'
 
+const renderedContainers = new Set<Parameters<typeof preactRender>[1]>()
+
+const render = (...args: Parameters<typeof preactRender>): ReturnType<typeof preactRender> => {
+  renderedContainers.add(args[1])
+  return preactRender(...args)
+}
+
+function stubEmptyActivityFetch(): void {
+  vi.stubGlobal('fetch', vi.fn(async () =>
+    new Response(JSON.stringify({ events: [] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  ))
+}
+
+beforeEach(() => {
+  stubEmptyActivityFetch()
+})
+
 afterEach(() => {
+  for (const container of renderedContainers) preactRender(null, container)
+  renderedContainers.clear()
   vi.useRealTimers()
   vi.unstubAllGlobals()
   ideContextFocus.value = null
@@ -18,10 +40,10 @@ afterEach(() => {
   window.location.hash = ''
 })
 
-describe('IdeActivityMock', () => {
+describe('IdeActivityPanel', () => {
   it('renders the activity pane with empty state when no API data', () => {
     const container = document.createElement('div')
-    render(h(IdeActivityMock, {}), container)
+    render(h(IdeActivityPanel, {}), container)
 
     const region = container.querySelector('[role="region"]')
     expect(region?.getAttribute('aria-label')).toBe('EVENT TIMELINE')
@@ -34,7 +56,7 @@ describe('IdeActivityMock', () => {
 
   it('renders file context from annotation and diff props', () => {
     const container = document.createElement('div')
-    render(h(IdeActivityMock, {
+    render(h(IdeActivityPanel, {
       activeFile: 'lib/runtime.ml',
       annotations: [{
         id: 'ann-1',
@@ -72,7 +94,7 @@ describe('IdeActivityMock', () => {
     ]])
     const container = document.createElement('div')
 
-    render(h(IdeActivityMock, { activeFile: 'lib/runtime.ml' }), container)
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml' }), container)
 
     expect(container.textContent).toContain('Type mismatch in keeper progress projection')
     expect(container.textContent).toContain('1 line anchors')
@@ -111,7 +133,7 @@ describe('IdeActivityMock', () => {
     ))
 
     const container = document.createElement('div')
-    render(h(IdeActivityMock, { activeFile: 'lib/runtime.ml' }), container)
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml' }), container)
 
     await waitFor(() => {
       expect(container.textContent).toContain('goal goal-runtime')
@@ -206,7 +228,7 @@ describe('IdeActivityMock', () => {
     ))
 
     const container = document.createElement('div')
-    render(h(IdeActivityMock, { activeFile: 'lib/runtime.ml' }), container)
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml' }), container)
 
     await waitFor(() => {
       expect(container.textContent).toContain('goal goal-runtime')
@@ -233,6 +255,122 @@ describe('IdeActivityMock', () => {
 
     fireEvent.click(activityRouteLinks.find(link => link.textContent === 'Telemetry')!)
     expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&session_id=sess-nested&operation_id=op-nested&worker_run_id=wr-nested&q=turn-8')
+  })
+
+  it('refreshes activity events when polling is enabled', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        events: [{
+          seq: 1,
+          ts_ms: 100,
+          ts_iso: '2026-05-05T10:00:00Z',
+          room_id: 'run-default',
+          kind: 'telemetry.turn',
+          actor: { kind: 'keeper', id: 'sangsu' },
+          subject: { kind: 'log', id: 'turn-1' },
+          payload: {
+            file_path: 'lib/runtime.ml',
+            line: 4,
+            log_id: 'turn-1',
+          },
+          tags: [],
+        }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        events: [{
+          seq: 2,
+          ts_ms: 200,
+          ts_iso: '2026-05-05T10:00:10Z',
+          room_id: 'run-default',
+          kind: 'telemetry.turn',
+          actor: { kind: 'keeper', id: 'analyst' },
+          subject: { kind: 'log', id: 'turn-2' },
+          payload: {
+            file_path: 'lib/runtime.ml',
+            line: 8,
+            goal_id: 'goal-refresh',
+            log_id: 'turn-2',
+          },
+          tags: [],
+        }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const container = document.createElement('div')
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml', pollMs: 1_000 }), container)
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('turn-1')
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('goal goal-refresh')
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(container.textContent).toContain('turn-2')
+    expect(container.textContent).not.toContain('turn-1')
+
+    render(null, container)
+  })
+
+  it('keeps the last activity snapshot when a refresh fails', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-05T10:00:00Z'))
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        events: [{
+          seq: 1,
+          ts_ms: 100,
+          ts_iso: '2026-05-05T10:00:00Z',
+          room_id: 'run-default',
+          kind: 'telemetry.turn',
+          actor: { kind: 'keeper', id: 'sangsu' },
+          subject: { kind: 'log', id: 'turn-stable' },
+          payload: {
+            file_path: 'lib/runtime.ml',
+            line: 4,
+            log_id: 'turn-stable',
+          },
+          tags: [],
+        }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response('unavailable', { status: 503 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const container = document.createElement('div')
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml', pollMs: 1_000 }), container)
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('turn-stable')
+    })
+    expect(container.querySelector('.ide-activity-refresh-status')?.textContent).toBe('live')
+
+    vi.setSystemTime(new Date('2026-05-05T10:00:10Z'))
+    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+    })
+
+    expect(container.textContent).toContain('turn-stable')
+    expect(container.textContent).toContain('1 events · 1 keepers')
+    expect(container.querySelector('.ide-activity-refresh-status')?.textContent).toBe('stale 1 failed')
+
+    render(null, container)
+  })
+
+  it('surfaces offline refresh state when the activity API is unavailable before any snapshot', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('unavailable', { status: 503 })))
+
+    const container = document.createElement('div')
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml' }), container)
+
+    await waitFor(() => {
+      expect(container.querySelector('.ide-activity-refresh-status')?.textContent).toBe('offline 1 failed')
+    })
+    expect(container.textContent).toContain('no recent activity')
   })
 
   it('renders active run goal progress from activity goal and task links', async () => {
@@ -273,7 +411,7 @@ describe('IdeActivityMock', () => {
     ))
 
     const container = document.createElement('div')
-    render(h(IdeActivityMock, { activeFile: 'lib/runtime.ml' }), container)
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml' }), container)
 
     await waitFor(() => {
       expect(container.textContent).toContain('GOAL TRACK')
@@ -316,7 +454,7 @@ describe('IdeActivityMock', () => {
     ))
 
     const container = document.createElement('div')
-    render(h(IdeActivityMock, { activeFile: 'lib/runtime.ml' }), container)
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml' }), container)
 
     await waitFor(() => {
       const surfaces = [...container.querySelectorAll('.ide-run-progress-surfaces > span')]
@@ -346,7 +484,7 @@ describe('IdeActivityMock', () => {
     ))
 
     const container = document.createElement('div')
-    render(h(IdeActivityMock, { activeFile: 'lib/runtime.ml' }), container)
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml' }), container)
 
     await waitFor(() => {
       expect(container.textContent).toContain('telemetry.turn')
@@ -426,7 +564,7 @@ describe('IdeActivityMock', () => {
     ))
 
     const container = document.createElement('div')
-    render(h(IdeActivityMock, { activeFile: 'lib/runtime.ml' }), container)
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml' }), container)
 
     await waitFor(() => {
       expect(container.textContent).toContain('4 events')

@@ -161,31 +161,46 @@ let record_with_time ~now (s : sample) =
 
 let record (s : sample) = record_with_time ~now:(Unix.gettimeofday ()) s
 
+let positive_ms = function
+  | Some ms when ms > 0.0 && Float.is_finite ms -> Some ms
+  | _ -> None
+
+let ttfb_from_telemetry (telemetry : Agent_sdk.Types.inference_telemetry) =
+  match positive_ms telemetry.ttfrc_ms with
+  | Some _ as value -> value
+  | None -> (
+      match positive_ms telemetry.prefill_ms with
+      | Some _ as value -> value
+      | None -> (
+          match telemetry.timings with
+          | Some { prompt_ms; _ } -> positive_ms prompt_ms
+          | None -> None))
+
 let duration_from_response ?total_duration_ms
     (response : Agent_sdk.Types.api_response) =
-  let positive = function Some ms when ms > 0.0 -> Some ms | _ -> None in
-  let duration_from_timings = function
-    | Some (timings : Agent_sdk.Types.inference_timings) -> (
-        match (positive timings.prompt_ms, positive timings.predicted_ms) with
-        | Some prompt_ms, Some predicted_ms -> prompt_ms +. predicted_ms
-        | Some prompt_ms, None -> prompt_ms
-        | None, Some predicted_ms -> predicted_ms
-        | None, None -> 0.0)
-    | None -> 0.0
+  let duration_from_telemetry (telemetry : Agent_sdk.Types.inference_telemetry) =
+    let decode_ms =
+      match telemetry.timings with
+      | Some { predicted_ms; _ } -> positive_ms predicted_ms
+      | None -> None
+    in
+    match ttfb_from_telemetry telemetry, decode_ms with
+    | Some ttfb_ms, Some decode_ms -> ttfb_ms +. decode_ms
+    | Some ttfb_ms, None -> ttfb_ms
+    | None, Some decode_ms -> decode_ms
+    | None, None -> 0.0
   in
   match total_duration_ms, response.telemetry with
   | Some ms, _ when ms > 0.0 -> ms
-  | _, Some telemetry -> duration_from_timings telemetry.timings
-      |> fun timings_ms ->
-      (match telemetry.request_latency_ms with
-       | Some ms when ms > 0 -> Float.of_int ms
-       | _ -> timings_ms)
+  | _, Some telemetry -> (
+      match telemetry.request_latency_ms with
+      | Some ms when ms > 0 -> Float.of_int ms
+      | _ -> duration_from_telemetry telemetry)
   | _ -> 0.0
 
 let ttfb_from_response (response : Agent_sdk.Types.api_response) =
   match response.telemetry with
-  | Some { timings = Some { prompt_ms = Some ms; _ }; _ } when ms > 0.0 ->
-      ms
+  | Some telemetry -> Option.value ~default:0.0 (ttfb_from_telemetry telemetry)
   | _ -> 0.0
 
 let cache_hit_from_response ~(usage : Agent_sdk.Types.api_usage option)

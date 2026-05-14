@@ -54,7 +54,7 @@ fi
 
 # --- Pin SHAs (bump these when upstream changes are needed) ---
 readonly WEBRTC_SHA="1b7993605b293f45169369d488f970ba15132a9f"
-readonly GRPC_DIRECT_SHA="840b6cd6fe822d3577aa26147e7dc71ca25abecc"
+readonly GRPC_DIRECT_SHA="d7269ebebf9e4688486cc6591c66e794607e7b0f"
 readonly NEO4J_BOLT_SHA="a1ca30c1247db5c58934e99306fe330419f7b21a"
 
 include_bisect=false

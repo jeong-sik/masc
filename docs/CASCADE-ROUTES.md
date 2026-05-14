@@ -149,22 +149,27 @@ direct provider 를 권장.
 운영자 머신에 GLM Coding plan + Claude/Kimi/Gemini CLI + Ollama Cloud + Ollama
 로컬이 있다는 가정의 reference. 실제 토폴로지는 비용/quota/속도 선택에 따라 다르다.
 
+**경고**: 멤버 우선순위는 *실측*으로 결정한다. 아래 reference 는 한 운영자
+(M3 Max 128GB + Ollama keep-alive 10m + GLM Coding plan + Ollama Cloud + Gemini
+CLI OAuth) 의 2026-05-14 측정 결과 기반. 다른 머신/quota 조합에서는 순서가 바뀐다.
+
 ```toml
 # ── Fast lane: short verdict / scoring / ack ─────────────────
-# 1차: deepseek-v4-flash:cloud  — HTTP API direct (no spawn cost),
-#                                  Ollama Cloud quota 내, 1M ctx.
-# 2차: gemini_cli (gemini-cli-auto) — OAuth personal quota 무료,
-#                                      subprocess spawn cost (~100-500ms)
-#                                      때문에 fallback 위치.
-# 3차: glm-5-1 일반 채널 — z.ai general (coding 아님, quota 분리 효과).
-# 4차: ollama 로컬 — 네트워크 0, 마지막 안전망.
+# 실측 latency (prompt = "reply OK only", max-tokens = 10, 3-run median):
+#   ollama-local gemma4:31b-it-q4_K_M : warm 1.7 s / cold 11 s (keep-alive=10m)
+#   deepseek-v4-flash:cloud (HTTP)    : 7-11 s  (thinking-support=true)
+#   gemini_cli noninteractive         : 9-12 s  (subprocess spawn + JSON parse)
+#
+# 1차: ollama 로컬 — M3 Max + Q4 quantization, warm cache 활용.
+# 2차: deepseek-v4-flash:cloud — local daemon down 시 fallback. thinking 켜져
+#                                 있어 "flash" 명칭에도 latency 7s+.
+# 3차: gemini_cli — OAuth quota 무료지만 spawn cost 9-12s. 마지막 안전망.
 # 모든 멤버는 2KB cap alias 로 ceiling 정렬됨.
 [tier.fast_judge_primary]
 members = [
+  "ollama.ollama-local-default.fast_judge",
   "ollama_cloud.ollama-cloud-deepseek-v4-flash.fast_judge",
   "gemini_cli.gemini-cli-auto.fast_judge",
-  "glm.glm-5-1.fast_judge",
-  "ollama.ollama-local-default.fast_judge",
 ]
 strategy = "failover"
 keeper-assignable = false   # system-only; keeper 가 직접 잡지 못하게
@@ -235,6 +240,9 @@ routes 는 §2 분류대로 매핑. 19 개 모두 명시 (누락 = silent fallba
 | sweep 을 production fallback 에 끼움 | benchmark 가 본 작업 자원 점유. | 별도 `tier-group.provider_benchmark`. |
 | system-only tier 에 `keeper-assignable` 누락 | keeper 가 자기 cascade 를 fast_judge 로 잘못 설정. | system-only 는 `keeper-assignable = false`. |
 | RFC 번호 동시 claim 충돌 | 작업자 split 시 같은 번호 두 PR (#14396 vs #14394 선례). | 새 RFC 직전 `git fetch origin main && ls docs/rfc/`. |
+| endpoint quota / auth 미검증 멤버 등록 | fast_judge_primary 1차가 production 호출 시 "Insufficient balance" / 401 로 매번 fail → 2차로 silent fallback. RFC-0038 substitution 사고와 동형. | alias 추가 전 `curl <endpoint>/chat/completions` probe 의무 (§6.7 참조). |
+| "flash" 명칭 모델을 fast lane 1차로 가정 | thinking-support=true 모델은 verdict 호출에도 reasoning chain 돌아 7s+. | `models.X.thinking-support` 확인. fast lane 멤버는 thinking 꺼진 모델 또는 `reasoning_effort:"none"` 강제 가능한 endpoint 만. |
+| CLI spawn provider 를 fast lane 1차로 | subprocess fork + JSON parse 사이클이 매 호출 9-12s. fast lane SLA 위반. | HTTP-direct provider 우선, CLI 는 fallback. (§3.4) |
 
 ---
 
@@ -248,12 +256,25 @@ cascade.toml 편집 후 push 전:
 4. **fast lane tier 에 200K-context 모델이 끼지 않았는가** — Claude Sonnet / Kimi 200K 는 fast 가 아니다.
 5. **`keeper-assignable` 명시했는가** — system-only 는 false, 기본은 true.
 6. **provider credentials env 변수가 실제로 export 됐는가** — `echo $ZAI_API_KEY` 같은 식.
-7. **검증**:
+7. **새 멤버 추가 시 endpoint probe** — env var 가 있어도 quota / auth 가
+   살아 있는지 확인. 예:
+   ```bash
+   curl -sS -m 10 -H "Authorization: Bearer $ZAI_API_KEY" \
+        -H "Content-Type: application/json" \
+        -X POST https://api.z.ai/api/paas/v4/chat/completions \
+        -d '{"model":"glm-5.1","messages":[{"role":"user","content":"hi"}],"max_tokens":10}'
+   ```
+   응답이 `"Insufficient balance"` / `"Invalid Authentication"` 이면
+   `tier.fast_judge_primary` 같은 hot path 멤버에 넣지 않는다.
+   evidence record 형태로 cascade.toml 주석에 측정 시각 + 응답 요약 남길 것.
+8. **latency 실측** — fast/deep lane 멤버는 hot prompt 로 3-run 측정해
+   median 으로 우선순위 결정. "flash" 명칭 / "fast" 가정 금지 — 측정값만 신뢰.
+9. **검증**:
    ```bash
    scripts/dune-local.sh build test/test_cascade_config_validity.exe
    scripts/dune-local.sh build test/test_cascade_declarative_parser.exe
    ```
-8. **새 logical_use 를 추가했다면**: `lib/cascade/cascade_routes.ml` 의
+10. **새 logical_use 를 추가했다면**: `lib/cascade/cascade_routes.ml` 의
    - `logical_use` variant (closed sum — 컴파일러 강제)
    - `spec_for_use` exhaustive match (컴파일러 강제)
    - `all_logical_uses` list (manual append, 컴파일러 강제 안 됨)

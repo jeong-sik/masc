@@ -11,9 +11,7 @@ type capabilities =
     tool-delivery projection after OAS has resolved provider/model
     capabilities. *)
 let is_cli_agent_provider (provider_cfg : Llm_provider.Provider_config.t) =
-  match Provider_adapter.adapter_of_provider_config provider_cfg with
-  | Some adapter -> adapter.runtime_kind = Provider_adapter.Cli_agent
-  | None -> false
+  Llm_provider.Provider_config.is_subprocess_cli provider_cfg.kind
 ;;
 
 (** [normalize_cli_caps_when ~is_cli caps] overrides CLI runtime caps when
@@ -36,7 +34,9 @@ let normalize_cli_caps_when ~is_cli (caps : Llm_provider.Capabilities.capabiliti
     capability truth stays in OAS. *)
 let oas_capabilities_of_config (provider_cfg : Llm_provider.Provider_config.t) =
   let is_cli = is_cli_agent_provider provider_cfg in
-  let caps = Provider_adapter.oas_capabilities_of_config provider_cfg in
+  let caps =
+    Agent_sdk.Provider_runtime_binding.capabilities_for_provider_config provider_cfg
+  in
   if is_cli
   then
     let runtime_mcp_lane =

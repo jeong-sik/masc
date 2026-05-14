@@ -36,6 +36,21 @@ let invalid_utf8_byte_count s =
   in
   loop 0 0
 
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop i =
+    i + needle_len <= haystack_len
+    && (String.equal (String.sub haystack i needle_len) needle || loop (i + 1))
+  in
+  needle_len = 0 || loop 0
+
+let read_file path =
+  let ic = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> really_input_string ic (in_channel_length ic))
+
 let with_env key value f =
   let old = Sys.getenv_opt key in
   Unix.putenv key value;
@@ -270,6 +285,18 @@ let test_dashboard_shell_http_json_prefers_last_good_while_prewarming () =
         (json |> member "status" |> member "project" |> to_string);
       check int "last-good counts reused" 7
         (json |> member "counts" |> member "agents" |> to_int))
+
+let test_operator_snapshot_default_route_hydrates_first_success () =
+  let source = read_file "lib/server/server_dashboard_http_core.ml" in
+  check bool "operator snapshot uses first-success cache helper" true
+    (contains_substring source "cached_surface_or_first_success_json"
+     && contains_substring source "_operator_snapshot_cache"
+     && contains_substring source
+          "dashboard_cache_key config \"operator_snapshot\" \"default-summary\"");
+  check bool "operator snapshot no longer serves raw initializing cache" true
+    (not
+       (contains_substring source
+          "then cached_surface_json _operator_snapshot_cache"))
 
 let test_dashboard_shell_timeout_fallback_reports_timing_context () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -535,6 +562,8 @@ let () =
             test_dashboard_shell_http_json_uses_bootstrap_payload_while_prewarming;
           test_case "shell reuses last good payload while prewarming" `Quick
             test_dashboard_shell_http_json_prefers_last_good_while_prewarming;
+          test_case "operator snapshot hydrates on first default request" `Quick
+            test_operator_snapshot_default_route_hydrates_first_success;
           test_case "shell timeout fallback reports timing context" `Quick
             test_dashboard_shell_timeout_fallback_reports_timing_context;
           test_case "planning payload includes coordination FSM" `Quick

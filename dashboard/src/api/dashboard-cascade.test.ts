@@ -87,14 +87,14 @@ describe('dashboard cascade split', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await updateKeeperCascade('sojin', 'primary')
+    const result = await updateKeeperCascade('sojin', 'tier.ollama_cloud_primary')
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keeper/cascade')
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: 'POST' })
     expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({
       keeper: 'sojin',
-      cascade_name: 'primary',
+      cascade_name: 'tier.ollama_cloud_primary',
     }))
     expect(result.ok).toBe(true)
   })

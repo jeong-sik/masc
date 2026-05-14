@@ -48,26 +48,50 @@ Symptoms this produces:
 ## 2. Current architecture (audit)
 
 ```
-                    ┌── Tool_name.t variant (lib/tool_name.ml)              ── 397 cases, closed sum type
+                    ┌── S2. Tool_name.t (lib/tool_name.ml)                   ── 397 closed variant cases
+                    │         Keeper sub-module (~48) + Masc sub-module (~100+)
                     │
-keeper preset       │── Tool_dispatch table (lib/…)                          ── runtime dispatch
-in tool_policy.toml │── Keeper_tool_alias (route / is_known_internal /        ── public→internal mapping
-       │            │     public_masc_to_internal / strip_mcp_masc_prefix)
-       │            │── Keeper_tool_registry (3 list APIs)                    ── "core" / "admin" / "internal candidate"
-       ▼            │── Tool_shard.all_keeper_tool_schemas                    ── per-shard schema list
+                    │── S1. Tool_dispatch table (lib/tool_dispatch.ml)       ── Hashtbl (string, handler)
+                    │         NOTE: empty at policy-load time; populated later
+                    │         during server init. Tools known only to dispatch
+                    │         will always produce a warn on boot.
+                    │
+                    │── S3-5. Keeper_tool_alias (lib/keeper/keeper_tool_alias.ml)
+                    │         route (7 entries) / is_known_internal /
+                    │         public_masc_to_internal / strip_mcp_masc_prefix
+                    │
+keeper preset       │── S6-8. Keeper_tool_registry (lib/keeper/keeper_tool_registry.ml)
+in tool_policy.toml │         3 list APIs derived from tool_catalog_surfaces
+       │            │         + hardcoded core_always list
+       │            │
+       ▼            │── S9. Tool_shard.all_keeper_tool_schemas               ── per-shard name extraction
    is_known_policy_tool_name ──────────────────┐
                     │                          │
                     │                          ▼
-                    │     ┌─ Tool_catalog_surfaces.is_on_surface              ── 4 enum surfaces
-                    │     │      • Public_mcp
-                    │     │      • Spawned_agent
-                    │     │      • Local_worker
-                    │     │      • Admin
+                    │     ┌─ S10-13. Tool_catalog_surfaces.is_on_surface     ── 8 surface variants total:
+                    │     │      Public_mcp                                   ── only 4 checked at policy boundary;
+                    │     │      Spawned_agent                                ── Session_min / Keeper_internal /
+                    │     │      Local_worker                                 ── Keeper_denied / System_internal
+                    │     │      Admin                                        ── are NOT checked here
                     │     └──────────────────────────────────────────────
                     │
                     ▼
         15-fold OR → "known" / "unknown" boolean
 ```
+
+Split-brain: policy validation and runtime routing use **separate code paths**:
+
+```
+  Policy load (boot-time):
+    is_known_policy_tool_name   ── 15 sources OR ──→ bool
+    called at keeper_tool_policy_config.ml:319,328,336
+
+  Runtime tool dispatch (call-time):
+    keeper_tool_disclosure.ml   ── strip → masc_to_internal → route → is_known_internal
+                                 ──→ Mcp_mapped | Route_hit | Already_internal | Miss
+```
+
+The two paths share some sources (`Keeper_tool_alias.*`) but diverge elsewhere. A tool that `Miss`-es at disclosure can still be `true` at policy validation (via a different source), and vice versa. This is the structural cause of the 540-warn / dispatch-ok split-brain.
 
 There is no single point of truth for *"this tool name resolves to that handler"*. Each source admits a name on its own terms; the union covers reality only because each adds *something*. Removing any one source today would fail unknown for a chunk of policy entries.
 
@@ -81,11 +105,23 @@ Collapse the 15-fold OR into **typed conversion at the policy load boundary**:
 
 ```ocaml
 (* lib/keeper/tool_resolution.ml — new *)
+type tried_source =
+  | Dispatch_table                           (* S1 *)
+  | Tool_name_variant                        (* S2 *)
+  | Alias_route                              (* S3 *)
+  | Alias_internal                           (* S4 *)
+  | Alias_masc_to_internal                   (* S5 *)
+  | Registry_internal_candidate              (* S6 *)
+  | Registry_core_tools                      (* S7 *)
+  | Registry_admin_dispatched                (* S8 *)
+  | Shard_schema                             (* S9 *)
+  | Surface of Tool_catalog_surfaces.surface (* S10-13 *)
+
 type resolution =
-  | Resolved of { canonical : Tool_name.t ; surface : Tool_catalog_surfaces.t }
-  | Alias_to of { from : string ; canonical : Tool_name.t }
+  | Resolved of { canonical : string ; via : tried_source ;
+                  surface : Tool_catalog_surfaces.surface option }
+  | Alias_to of { from : string ; canonical : string ; via : tried_source }
   | Unknown of { name : string ; tried : tried_source list }
-and tried_source = …  (* typed reason, not free string *)
 
 val resolve : string -> resolution
 (* Parse, don't validate. *)

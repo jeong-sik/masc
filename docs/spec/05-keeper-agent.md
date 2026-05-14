@@ -332,7 +332,7 @@ Profile별 종류당 보존 상한:
 
 ### 6.5 OAS Memory Bridge
 
-`run_turn`에서 `Memory_oas_bridge.create_memory`로 institution / procedures / memory bank / episodes 계층을 seed한다. 턴 후 영속화는 분리된다: memory bank는 `append_memory_notes_from_reply`, episode는 `store_episode_from_snapshot` + `flush_incremental`, hebbian은 별도의 task lifecycle에서 기록된다.
+`run_turn`은 `Memory_oas_bridge.create_memory`로 filesystem-first JSONL `long_term_backend`가 연결된 OAS `Memory.t`를 만든다. Institution / procedural / world memory는 imperative seed가 아니라 `load_*_text` hook-first prompt injection으로 읽고, 턴 후에는 memory bank가 `append_memory_notes_from_reply`, episode/procedure가 `store_episode_from_snapshot` + `flush_incremental`, hebbian이 별도 task lifecycle에서 기록된다.
 
 ---
 
@@ -575,7 +575,7 @@ Keeper turn에서 어떤 "skill" 경로를 사용할지 결정:
 
 ### 15.6 OAS Memory Bridge 부분 통합
 
-MASC 자체 memory 4개(memory_stream, institution, procedural, context_manager)가 OAS Memory.t(3-tier: Scratchpad/Working/Long_term)와 별도로 운영된다. `long_term_backend` callback 연결이 미완.
+MASC memory bank / institution / procedural memory는 아직 MASC가 소유하지만, OAS `Memory.t` 5-tier와의 경계는 `memory_oas_bridge.ml`에 있다. `long_term_backend` callback은 filesystem JSONL로 연결됐고, 남은 경계 이슈는 keeper context/checkpoint nativeization과 raw marker leakage다.
 
 ---
 

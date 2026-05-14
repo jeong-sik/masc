@@ -406,8 +406,8 @@ type recall_config = {
 | Scratchpad | OAS 내부 관리 | bridge 불필요 |
 | Working | OAS 내부 관리 | bridge 불필요 |
 | Long_term | JSONL/filesystem (`Memory_jsonl`) | `make_backend` |
-| Episodic | `Institution_eio` JSONL episodes | `seed_episodes` / `flush_episodes` |
-| Procedural | `Procedural_memory` | `seed_procedures_as_oas` / `flush_procedures` |
+| Episodic | `Institution_eio` JSONL episodes | `load_episodes_text` / `flush_episodes` |
+| Procedural | `Procedural_memory` | `load_procedures_text` / `flush_procedures` |
 
 ### 9.2 Storage Backends
 
@@ -422,14 +422,18 @@ type recall_config = {
 ### 9.3 Lifecycle
 
 ```
-create_memory_full
+create_memory
   1. make_backend (JSONL/filesystem)
-  2. seed_episodes (Institution JSONL -> OAS Episodic, 기본 50개)
-  3. seed_procedures_as_oas (crystallized procedures -> OAS Procedural, 기본 20개)
-  4. seed_institution (institution.json -> OAS Long_term, 선택)
+  2. Agent_sdk.Memory.create ~long_term:backend
+
+Prompt injection:
+  1. load_episodes_text (Institution JSONL -> prompt context)
+  2. load_procedures_text (crystallized procedures -> prompt context)
+  3. load_world_text (OAS long_term world keys -> prompt context)
+  4. load_institution_text (institution.json -> welcome/context text)
 
 Agent.run 완료 후:
-  flush_all
+  flush_incremental
     1. flush_episodes (OAS -> Institution JSONL, 중복 ID 제거)
     2. flush_procedures (OAS -> Procedural_memory, 변경된 count만)
 ```
@@ -483,7 +487,7 @@ type synapse = {
 1. **Compaction은 원자적이다**: memory bank 재작성은 .tmp 파일에 쓰고 rename한다. 실패 시 원본 불변.
 2. **Dedup은 정규화 기반이다**: `normalize_memory_text_key`가 공백/구두점 제거 + lowercase 후 비교한다.
 3. **kind가 우선순위를 결정한다**: 동일 kind + text는 항상 동일한 priority를 받는다. `signal_bonus`가 키워드 기반 보정을 추가한다.
-4. **OAS bridge는 비파괴적이다**: flush 시 기존 데이터를 제거하지 않고 append 또는 update-in-place만 한다.
+4. **OAS bridge는 비파괴적이다**: load는 prompt context만 만들고, flush 시 기존 데이터를 제거하지 않고 append 또는 update-in-place만 한다.
 5. **Context compaction은 기본적으로 결정론적이다**: Memory-bank progress consolidation만 opt-in LLM summarizer를 제공하며, off/fail/no-direct-provider 상태는 deterministic fallback을 사용한다.
 6. **OAS bridge storage follows current bootstrap truth**: filesystem/JSONL is the active runtime storage lane; PostgreSQL is not used as the primary or fallback backend.
 7. **Procedural crystallization은 비가역적이다**: 일단 결정화되면 evidence가 줄어도 상태가 변하지 않는다.

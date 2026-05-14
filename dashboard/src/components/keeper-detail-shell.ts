@@ -57,7 +57,7 @@ function KeeperCascadeSelector({ keeper }: { keeper: Keeper }) {
     }
   }, [])
 
-  const fallbackCascade = keeper.cascade_name || 'default'
+  const fallbackCascade = keeper.cascade_name || '(no cascade)'
   const currentCascade = draftCascade?.keeperName === keeper.name && draftCascade.from === fallbackCascade
     ? draftCascade.cascade
     : fallbackCascade

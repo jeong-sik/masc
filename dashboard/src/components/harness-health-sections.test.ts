@@ -355,12 +355,12 @@ describe('verdictSummary', () => {
     expect(verdictSummary('reject:  too long  ')).toBe('too long')
   })
 
-  it('returns reject for empty reason', () => {
-    expect(verdictSummary('reject:')).toBe('reject')
+  it('returns explicit placeholder for empty reason', () => {
+    expect(verdictSummary('reject:')).toBe('(no reject reason)')
   })
 
-  it('returns reject for whitespace-only reason', () => {
-    expect(verdictSummary('reject:   ')).toBe('reject')
+  it('returns explicit placeholder for whitespace-only reason', () => {
+    expect(verdictSummary('reject:   ')).toBe('(no reject reason)')
   })
 })
 

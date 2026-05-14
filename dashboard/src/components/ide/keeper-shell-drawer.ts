@@ -300,7 +300,7 @@ export function KeeperShellDrawer({ keeperName }: KeeperShellDrawerProps) {
       </div>
       <${Terminal}
         lines=${terminalLines}
-        prompt=${status === 'streaming' ? `${keeper || 'keeper'}:$ ` : ''}
+        prompt=${status === 'streaming' ? `${keeper || '(no keeper)'}:$ ` : ''}
         testId="keeper-shell-terminal"
         ariaLabel="Keeper shell terminal"
         emptyText="waiting for keeper shell output"

@@ -37,8 +37,8 @@ function mentionsLabel(targets: readonly string[]): string {
 
 export function KeeperToolAccessSummary({ config }: { config: KeeperConfig }) {
   const cascade = config.execution.selected_cascade_name || '—'
-  const sandbox = config.sandbox_profile ?? 'local'
-  const network = config.network_mode ?? 'inherit'
+  const sandbox = config.sandbox_profile ?? '(unknown sandbox_profile)'
+  const network = config.network_mode ?? '(unknown network_mode)'
   const handoff = `${config.handoff.auto ? 'on' : 'off'} · threshold ${config.handoff.threshold}`
   const idle = `${config.proactive.idle_sec}s${config.proactive.enabled ? '' : ' (disabled)'}`
   const mentions = mentionsLabel(config.coordination.mention_targets)

@@ -336,7 +336,7 @@ function postToAnchoredThread(post: BoardPost): AnchoredThread | null {
   return {
     id: post.id,
     kind: boardKindFromPost(post),
-    author_keeper_id: post.author_identity || 'keeper',
+    author_keeper_id: post.author_identity || '(unknown author)',
     anchor,
     body: post.body || post.title || 'board thread',
     created_ms: createdMs,
@@ -571,7 +571,7 @@ function DecisionCard(
   overlay: KeeperCursorOverlay,
 ) {
   const decision = item.decision
-  const keeper = decision.keeper_name || 'keeper'
+  const keeper = decision.keeper_name || '(unknown keeper)'
   const hue = keeperHueIndex(keeper)
   const color = `var(--color-keeper-${hue}-glow, var(--k-${hue}))`
   const summary = [
@@ -663,12 +663,12 @@ function decisionRouteLinks(
   summary: string,
 ): ReadonlyArray<IdeContextRouteLink> {
   const decision = item.decision
-  const keeper = decision.keeper_name || 'keeper'
+  const keeper = decision.keeper_name || '(unknown keeper)'
   return routeLinksForContext({
     filePath,
     line,
     surface: 'Decision',
-    label: summary || decision.event_type || 'decision event',
+    label: summary || decision.event_type || '(unknown decision event)',
     sourceId: `decision-${keeper}-${item.timestamp_ms}-${decision.event_type}`,
     keeperId: keeper,
     telemetry: true,
@@ -679,7 +679,7 @@ function decisionRouteLinks(
 function decisionTelemetryQuery(decision: KeeperDecision, timestampMs: number): string {
   return compactRouteQuery([
     'decision',
-    `keeper:${decision.keeper_name || 'keeper'}`,
+    `keeper:${decision.keeper_name || '(unknown keeper)'}`,
     decision.event_type ? `event:${decision.event_type}` : null,
     decision.outcome ? `outcome:${decision.outcome}` : null,
     decision.tool ? `tool:${decision.tool}` : null,

@@ -140,7 +140,7 @@ function mergeLogEntries(
 }
 
 function sourceLabel(source: string): string {
-  return SOURCE_LABELS[source] ?? (source || 'structured')
+  return SOURCE_LABELS[source] ?? (source || '(unknown source)')
 }
 
 function entryDetails(entry: LogEntry): Record<string, unknown> | null {
@@ -439,7 +439,7 @@ async function loadLogs(mode: LoadMode = 'reset') {
 
 function renderLogRow(entry: LogEntry) {
   const level = normalizedLevel(entry)
-  const source = entry.source || 'structured'
+  const source = entry.source || '(unknown source)'
   const details = entryDetails(entry)
   const clientName = detailLabel(details, 'client_name')
   const toolName = detailLabel(details, 'tool_name') ?? detailLabel(details, 'tool')

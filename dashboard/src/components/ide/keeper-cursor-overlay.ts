@@ -333,7 +333,7 @@ export function connectKeeperCursorStream(
           file_path: filePath,
           line: entry.line || 0,
           column: entry.column || 0,
-          focus_mode: entry.focus_mode || 'reading',
+          focus_mode: entry.focus_mode || '(unknown focus_mode)',
           last_update: entry.last_seen_ms,
           tool_name: entry.tool_name,
           turn: entry.turn,

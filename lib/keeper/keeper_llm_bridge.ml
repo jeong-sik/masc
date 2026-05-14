@@ -45,6 +45,13 @@ let bridge_details fields envelope =
     timeout.
     Cancellation (server shutdown / parent fiber cancel) re-raises so the caller
     exits immediately instead of retrying. *)
+
+let with_hitl_approval_headroom timeout_s =
+  Float.max
+    timeout_s
+    (Keeper_approval_queue.default_noncritical_approval_timeout_s +. 30.0)
+;;
+
 let run_with_timeout_and_fallback ~timeout_s fn =
   let fail_without_clock ~site =
     let message =

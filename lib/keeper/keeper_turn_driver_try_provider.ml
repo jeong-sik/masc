@@ -295,6 +295,9 @@ let run_try_provider
             ~mode:liveness_mode
             ~budget:resolved_budget.budget
             ~cascade_label:ctx.cascade_name
+            ~external_wait:(fun () ->
+              Keeper_approval_queue.has_pending_for_keeper
+                ~keeper_name:ctx.keeper_name)
             ~candidate_key
             ~started_at:(Time_compat.now ())
             ()

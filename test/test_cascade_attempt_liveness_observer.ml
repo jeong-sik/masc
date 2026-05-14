@@ -266,6 +266,49 @@ let test_tick_fiber_stops_without_terminal_event () =
   Alcotest.(check bool)
     "pending tick fiber stopped before bootstrap tick" true true
 
+let test_external_wait_heartbeat_prevents_idle_kill () =
+  Eio_main.run (fun env ->
+      let clock = Eio.Stdenv.clock env in
+      let waiting = ref true in
+      let budget =
+        { L.ttft_max = 10.0; inter_chunk_max = 0.05; attempt_wall_max = 10.0 }
+      in
+      Eio.Time.with_timeout_exn clock 1.5 (fun () ->
+          Eio.Switch.run (fun sw ->
+              let obs =
+                Obs.create
+                  ~mode:Cfg.Enforce
+                  ~budget
+                  ~cascade_label:"external_wait_cascade"
+                  ~external_wait:(fun () -> !waiting)
+                  ~started_at:(Time_compat.now ())
+                  ()
+              in
+              Obs.start_tick_fiber obs ~sw ~clock;
+              let wrapped = Obs.wrap_on_event obs None in
+              (match wrapped with
+               | Some f ->
+                 f
+                   (Agent_sdk.Types.ContentBlockStart
+                      { index = 0
+                      ; content_type = "tool_use"
+                      ; tool_id = Some "tool-1"
+                      ; tool_name = Some "keeper_task_create"
+                      })
+               | None -> Alcotest.fail "Enforce wrapper missing");
+              Eio.Time.sleep clock 0.65;
+              waiting := false;
+              Obs.stop_tick_fiber obs;
+              match Obs.current_state_for_test obs with
+              | L.Streaming _ -> ()
+              | L.Failed failure ->
+                Alcotest.failf
+                  "external HITL wait was misclassified as %s"
+                  (L.failure_kind_label failure)
+              | L.Awaiting _ -> Alcotest.fail "expected Streaming state"
+              | L.Success -> Alcotest.fail "unexpected Success state")));
+  Alcotest.(check bool) "external wait did not kill attempt" true true
+
 let () =
   Alcotest.run "cascade_attempt_liveness_observer"
     [
@@ -303,5 +346,9 @@ let () =
             "tick fiber stops without terminal stream event"
             `Quick
             test_tick_fiber_stops_without_terminal_event;
+          Alcotest.test_case
+            "external wait heartbeats prevent idle kill"
+            `Quick
+            test_external_wait_heartbeat_prevents_idle_kill;
         ] );
     ]

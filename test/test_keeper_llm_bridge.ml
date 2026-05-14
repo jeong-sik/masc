@@ -121,6 +121,20 @@ let test_timeout_log_carries_failure_envelope () =
         | Ok value -> Alcotest.failf "unexpected success: %s" value)))
 ;;
 
+let test_hitl_headroom_exceeds_default_approval_wait () =
+  let floor =
+    Keeper_approval_queue.default_noncritical_approval_timeout_s +. 30.0
+  in
+  Alcotest.(check (float 0.001))
+    "short bridge timeout is raised above HITL wait"
+    floor
+    (Keeper_llm_bridge.with_hitl_approval_headroom 292.0);
+  Alcotest.(check (float 0.001))
+    "long bridge timeout is preserved"
+    900.0
+    (Keeper_llm_bridge.with_hitl_approval_headroom 900.0)
+;;
+
 let () =
   Alcotest.run
     "keeper_llm_bridge"
@@ -138,6 +152,10 @@ let () =
             "timeout log carries failure envelope"
             `Quick
             test_timeout_log_carries_failure_envelope
+        ; Alcotest.test_case
+            "HITL approval headroom"
+            `Quick
+            test_hitl_headroom_exceeds_default_approval_wait
         ] )
     ]
 ;;

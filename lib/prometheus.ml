@@ -14,29 +14,7 @@
 (** {1 Metric Types} *)
 type label = string * string
 
-let add_key_segment buf s =
-  Buffer.add_string buf (string_of_int (String.length s));
-  Buffer.add_char buf ':';
-  Buffer.add_string buf s
-;;
-
-let labels_key (labels : label list) =
-  let buf = Buffer.create 32 in
-  List.iter
-    (fun (k, v) ->
-       add_key_segment buf k;
-       add_key_segment buf v)
-    labels;
-  Buffer.contents buf
-;;
-
-let metric_key name labels =
-  let encoded_labels = labels_key labels in
-  let buf = Buffer.create (String.length name + String.length encoded_labels + 16) in
-  add_key_segment buf name;
-  Buffer.add_string buf encoded_labels;
-  Buffer.contents buf
-;;
+let metric_key = Prometheus_key.metric_key
 
 type metric_type =
   | Counter
@@ -3087,42 +3065,16 @@ let init () =
 let start_time = Time_compat.now ()
 let update_uptime () = set_gauge metric_uptime_seconds (Time_compat.now () -. start_time)
 
-let fd_warn_threshold =
-  Env_config_core.get_int ~default:3000 "MASC_FD_WARN_THRESHOLD" |> max 1
-;;
-
+let fd_warn_threshold = Prometheus_process.fd_warn_threshold
 let () = set_gauge metric_fd_warn_threshold (float_of_int fd_warn_threshold)
-let fd_warned_once = Atomic.make false
 
 (** Returns 0 on non-Unix hosts where [/dev/fd] is unavailable. *)
-let approximate_open_fd_count () =
-  let candidates = [ "/dev/fd"; "/proc/self/fd" ] in
-  let rec first_readable = function
-    | [] -> None
-    | path :: rest ->
-      (try Some (path, Sys.readdir path) with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | Sys_error _ -> first_readable rest)
-  in
-  match first_readable candidates with
-  | None -> 0
-  | Some (_path, entries) -> max 0 (Array.length entries - 1)
-;;
+let approximate_open_fd_count = Prometheus_process.approximate_open_fd_count
 
 let update_fd_gauges () =
-  let count = approximate_open_fd_count () in
-  set_gauge metric_open_fds (float_of_int count);
-  if count >= fd_warn_threshold && not (Atomic.get fd_warned_once)
-  then (
-    Atomic.set fd_warned_once true;
-    Printf.eprintf
-      "[WARN] [Server] process open fd count %d has reached warn threshold %d — likely \
-       socket/file leak, investigate before accept() starts failing with EMFILE.\n\
-       %!"
-      count
-      fd_warn_threshold)
-  else if count < fd_warn_threshold / 2
-  then Atomic.set fd_warned_once false
+  Prometheus_process.update_fd_gauges
+    ~set_gauge:(fun name value -> set_gauge name value)
+    ~metric_open_fds
 ;;
 
 let set_tool_schema_stats ~count ~approx_tokens =
@@ -3138,14 +3090,7 @@ let type_to_string = function
   | Histogram -> "histogram"
 ;;
 
-let labels_to_string = function
-  | [] -> ""
-  | labels ->
-    let pairs =
-      List.map (fun (k, v) -> Printf.sprintf "%s=\"%s\"" k (String.escaped v)) labels
-    in
-    "{" ^ String.concat "," pairs ^ "}"
-;;
+let labels_to_string = Prometheus_format.labels_to_string
 
 let to_prometheus_text () =
   update_uptime ();

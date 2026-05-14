@@ -20,6 +20,11 @@ import { routeLinksForContext } from './ide-context-lens'
 import { navigate, route } from '../../router'
 import { activeKeeperName } from '../../keeper-state'
 import { keepers } from '../../store'
+import { connected } from '../../sse'
+import { dashboardWsOnlyEnabled } from '../../dashboard-ws-cutover'
+import { dashboardWsConnected, dashboardWsSseFallbackActive } from '../../dashboard-ws-state'
+import type { Repository } from '../../api/repositories'
+import type { WorkspaceSource } from '../../api/workspace-source'
 import {
   parseActive,
   serializeActive,
@@ -32,6 +37,7 @@ export { activeIdeFile }
 type ViewTab = IdeEditorView
 type IdeFocus = 'review'
 type IdeStatusbarChipTone = 'brass' | 'ghost' | 'info' | 'ok'
+type IdeConnectionTone = 'ok' | 'warn'
 
 export interface IdeStatusbarChip {
   readonly id: string
@@ -44,6 +50,7 @@ export interface IdeStatusbarModel {
   readonly workspaceLabel: string
   readonly chips: ReadonlyArray<IdeStatusbarChip>
   readonly connectionLabel: string
+  readonly connectionTone: IdeConnectionTone
 }
 
 const IDE_LAYER_KINDS = new Set(IDE_LAYERS.map(layer => layer.kind))
@@ -78,6 +85,10 @@ interface IdeStatusbarInput {
   readonly railsCollapsed: boolean
   readonly reviewFocusActive: boolean
   readonly routeParams: Record<string, string>
+  readonly repositories?: ReadonlyArray<Repository>
+  readonly activeRepositoryId?: string | null
+  readonly workspaceSource?: WorkspaceSource
+  readonly dashboardConnected?: boolean
 }
 
 function viewFromRoute(raw: string | null | undefined): ViewTab {
@@ -151,6 +162,65 @@ function shortStatusbarPath(path: string): string {
   return `${parts.at(-2)}/${parts.at(-1)}`
 }
 
+function compactStatusbarPath(path: string): string | undefined {
+  const normalized = path.trim().replace(/\\/g, '/')
+  if (!normalized) return undefined
+  const parts = normalized.split('/').filter(Boolean)
+  if (parts.length === 0) return undefined
+  if (parts.length === 1) return parts[0]
+  return `${parts.at(-2)}/${parts.at(-1)}`
+}
+
+function statusbarRepositoryLabel(repository: Repository | undefined): string | undefined {
+  const name = repository?.name?.trim()
+  if (name) return name
+  return compactStatusbarPath(repository?.local_path ?? '') ?? repository?.id?.trim()
+}
+
+function activeStatusbarRepository(
+  repositories: ReadonlyArray<Repository> | undefined,
+  activeRepositoryId: string | null | undefined,
+): Repository | undefined {
+  if (!repositories || repositories.length === 0) return undefined
+  return repositories.find(repository => activeRepositoryId && repository.id === activeRepositoryId)
+    ?? repositories[0]
+}
+
+function statusbarWorkspaceLabel(
+  repositories: ReadonlyArray<Repository> | undefined,
+  activeRepositoryId: string | null | undefined,
+  workspaceSource: WorkspaceSource | undefined,
+): string {
+  const repositoryForId = (repoId: string): string =>
+    statusbarRepositoryLabel(repositories?.find(repository => repository.id === repoId))
+    ?? repoId
+
+  switch (workspaceSource?.kind) {
+    case 'repository':
+      return repositoryForId(workspaceSource.repoId)
+    case 'repository_missing':
+      return `${repositoryForId(workspaceSource.repoId)} fallback`
+    case 'repository_unknown':
+      return `${workspaceSource.repoId} unknown`
+    case 'playground':
+      return `@${workspaceSource.keeper}`
+    case 'playground_missing':
+      return `@${workspaceSource.keeper} fallback`
+    case 'keeper_unknown':
+      return `@${workspaceSource.keeper} unknown`
+    case 'project':
+    case undefined:
+      return statusbarRepositoryLabel(activeStatusbarRepository(repositories, activeRepositoryId)) ?? 'workspace'
+  }
+}
+
+function dashboardRuntimeConnected(): boolean {
+  if (dashboardWsOnlyEnabled()) {
+    return dashboardWsConnected.value || dashboardWsSseFallbackActive.value
+  }
+  return connected.value
+}
+
 function statusbarLayerLabel(activeLayers: ReadonlySet<string>): string | null {
   if (activeLayers.size === 0) return null
   const labels = STATUSBAR_LAYER_PRIORITY
@@ -195,6 +265,10 @@ export function deriveIdeStatusbarModel({
   railsCollapsed,
   reviewFocusActive,
   routeParams,
+  repositories,
+  activeRepositoryId,
+  workspaceSource,
+  dashboardConnected = false,
 }: IdeStatusbarInput): IdeStatusbarModel {
   const chips: IdeStatusbarChip[] = []
   const viewLabel = STATUSBAR_VIEW_LABELS[activeView]
@@ -250,9 +324,10 @@ export function deriveIdeStatusbarModel({
   addStatusbarChip(chips, 'keeper', keeper ? `Keeper ${keeper}` : undefined, 'ok', 'Focused keeper')
 
   return {
-    workspaceLabel: 'LIVE WORKSPACE',
+    workspaceLabel: statusbarWorkspaceLabel(repositories, activeRepositoryId, workspaceSource),
     chips,
-    connectionLabel: 'mcp · connected',
+    connectionLabel: dashboardConnected ? 'runtime · live' : 'runtime · reconnecting',
+    connectionTone: dashboardConnected ? 'ok' : 'warn',
   }
 }
 
@@ -298,6 +373,18 @@ export function IdeShell() {
   const diffRows = useSubscribedSnapshot(
     coordinator.diffRows,
     coordinator.subscribeDiffRows,
+  )
+  const repositories = useSubscribedValue(
+    coordinator.repositories,
+    coordinator.subscribeRepositories,
+  )
+  const activeRepositoryId = useSubscribedValue(
+    coordinator.activeRepositoryId,
+    coordinator.subscribeActiveRepositoryId,
+  )
+  const workspaceSource = useSubscribedValue(
+    coordinator.workspaceSource,
+    coordinator.subscribeWorkspaceSource,
   )
   const [activeFilePath, setActiveFilePath] = useState(activeIdeFile.value)
 
@@ -401,6 +488,10 @@ export function IdeShell() {
     railsCollapsed,
     reviewFocusActive,
     routeParams: route.value.params,
+    repositories,
+    activeRepositoryId,
+    workspaceSource,
+    dashboardConnected: dashboardRuntimeConnected(),
   })
 
   useEffect(() => {
@@ -474,6 +565,7 @@ export function IdeShell() {
         <span
           class="chip sm is-brass"
           style=${{ flexShrink: 0 }}
+          data-testid="ide-statusbar-workspace"
         >${statusbar.workspaceLabel}</span>
         <div
           class="ide-plane-statusbar-meta"
@@ -489,7 +581,10 @@ export function IdeShell() {
           `)}
         </div>
         <${IdePresenceStrip} />
-        <span class="ide-plane-connection">● ${statusbar.connectionLabel}</span>
+        <span
+          class="ide-plane-connection"
+          data-state=${statusbar.connectionTone}
+        >● ${statusbar.connectionLabel}</span>
       </header>
       <${IdeToolbar}
         activeView=${activeView}
@@ -542,21 +637,26 @@ export function IdeShell() {
           : html`
             <div
               class="ide-plane-conversation"
-              style=${{
-                display: 'grid',
-                gridTemplateRows: 'auto auto auto auto 1fr',
-                minHeight: 0,
-                overflow: 'auto',
-              }}
+              data-testid="ide-right-rail"
             >
-              <${IdeBranchContextPanel}
-                activeRepositoryId=${coordinator.activeRepositoryId}
-                subscribeActiveRepositoryId=${coordinator.subscribeActiveRepositoryId}
-              />
-              <${IdeKeeperWorkPanel} keeperName=${terminalKeeper} />
-              <${IdePersistencePanel} keeperName=${terminalKeeper} />
-              <${InspectorKeeperBDI} traceActive=${activeLayers.has('keeper-trace')} />
-              <${IdeConversationRail} />
+              <div
+                class="ide-plane-context-stack"
+                data-testid="ide-right-context-stack"
+              >
+                <${IdeBranchContextPanel}
+                  activeRepositoryId=${coordinator.activeRepositoryId}
+                  subscribeActiveRepositoryId=${coordinator.subscribeActiveRepositoryId}
+                />
+                <${IdeKeeperWorkPanel} keeperName=${terminalKeeper} />
+                <${IdePersistencePanel} keeperName=${terminalKeeper} />
+                <${InspectorKeeperBDI} traceActive=${activeLayers.has('keeper-trace')} />
+              </div>
+              <div
+                class="ide-plane-primary-rail"
+                data-testid="ide-primary-conversation-rail"
+              >
+                <${IdeConversationRail} />
+              </div>
             </div>
           `}
         ${railsCollapsed
@@ -599,6 +699,22 @@ function useSubscribedSnapshot<T>(
       }
       current = next
       setValue(previous => previous === next ? previous : next)
+    })
+  }, [read, subscribe])
+
+  return value
+}
+
+function useSubscribedValue<T>(
+  read: () => T,
+  subscribe: (listener: () => void) => () => void,
+): T {
+  const [value, setValue] = useState<T>(() => read())
+
+  useEffect(() => {
+    setValue(read())
+    return subscribe(() => {
+      setValue(read())
     })
   }, [read, subscribe])
 

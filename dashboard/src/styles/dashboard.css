@@ -299,8 +299,15 @@
 
 .ide-plane-connection {
   margin-left: auto;
-  color: var(--color-status-ok);
   white-space: nowrap;
+}
+
+.ide-plane-connection[data-state="ok"] {
+  color: var(--color-status-ok);
+}
+
+.ide-plane-connection[data-state="warn"] {
+  color: var(--color-status-warn);
 }
 
 .ide-toolbar {
@@ -572,11 +579,14 @@
   min-height: 0;
   min-width: 0;
   overflow: hidden;
+  isolation: isolate;
 }
 
 .ide-plane-tree {
   grid-column: 1;
   grid-row: 1 / span 2;
+  position: relative;
+  z-index: var(--z-base);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -692,6 +702,8 @@
 .ide-plane-editor {
   grid-column: 2;
   grid-row: 1 / span 2;
+  position: relative;
+  z-index: var(--z-base);
   display: grid;
   grid-template-rows: minmax(0, 1fr);
   min-width: 0;
@@ -703,18 +715,51 @@
 .ide-plane-conversation {
   grid-column: 3;
   grid-row: 1;
+  position: relative;
+  z-index: var(--z-base);
+  display: grid;
+  grid-template-rows: minmax(0, 42%) minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  isolation: isolate;
 }
 
 .ide-plane-activity {
   grid-column: 3;
   grid-row: 2;
+  position: relative;
+  z-index: var(--z-base);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
   border-top: 1px solid var(--color-border-divider);
+  isolation: isolate;
+}
+
+.ide-plane-context-stack,
+.ide-plane-primary-rail {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ide-plane-context-stack {
+  display: grid;
+  grid-auto-rows: max-content;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-bottom: 1px solid var(--color-border-divider);
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-default) transparent;
+}
+
+.ide-plane-primary-rail {
+  display: grid;
+}
+
+.ide-plane-primary-rail > .ide-rail-panel {
+  min-height: 0;
 }
 
 .ide-plane-shell[data-rails-collapsed="true"] .ide-plane-grid {
@@ -1205,7 +1250,7 @@
 .ide-rail-head {
   position: sticky;
   top: 0;
-  z-index: var(--z-sticky);
+  z-index: var(--z-base);
   display: flex;
   justify-content: space-between;
   gap: var(--sp-3);
@@ -2195,7 +2240,7 @@
 
   .ide-plane-conversation {
     max-height: none;
-    overflow: visible;
+    overflow: hidden;
   }
 
   .ide-plane-editor {

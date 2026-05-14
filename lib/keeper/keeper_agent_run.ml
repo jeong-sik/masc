@@ -581,7 +581,7 @@ let run_turn
            "keeper %s (cascade=%s): cli-backed providers selected but \
             effective claude_mcp_config is None; MCP tool catalog will not \
             be visible to the subprocess (token missing, flag disabled, or \
-            auto-construction failed)"
+           auto-construction failed)"
            meta.name
            cascade_name_string;
        let cli_transport_overrides =

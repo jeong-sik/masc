@@ -8,9 +8,12 @@ let parse_ok json_str =
 ;;
 
 let parse_err json_str =
-  match Dashboard_nav_event.parse_event_json (Yojson.Safe.from_string json_str) with
-  | Ok _ -> fail "expected Error, got Ok"
-  | Error msg -> msg
+  match Yojson.Safe.from_string json_str with
+  | exception Yojson.Json_error msg -> msg
+  | json ->
+    (match Dashboard_nav_event.parse_event_json json with
+     | Ok _ -> fail "expected Error, got Ok"
+     | Error msg -> msg)
 ;;
 
 let test_parse_minimal_surface_only () =
@@ -52,6 +55,15 @@ let test_reject_unknown_surface () =
 
 let test_reject_unknown_section () =
   let msg = parse_err {|{"surface":"monitoring","section":"ferris-wheel"}|} in
+  check
+    bool
+    "mentions section"
+    true
+    (Astring.String.is_infix ~affix:"unknown section" msg)
+;;
+
+let test_reject_retired_memory_subsystems_target () =
+  let msg = parse_err {|{"surface":"monitoring","section":"memory-subsystems"}|} in
   check
     bool
     "mentions section"
@@ -161,6 +173,10 @@ let () =
         ; test_case "redirected_from accepted" `Quick test_parse_redirected
         ; test_case "rejects unknown surface" `Quick test_reject_unknown_surface
         ; test_case "rejects unknown section" `Quick test_reject_unknown_section
+        ; test_case
+            "rejects retired memory-subsystems target"
+            `Quick
+            test_reject_retired_memory_subsystems_target
         ; test_case
             "rejects redirected_from unknown surface"
             `Quick

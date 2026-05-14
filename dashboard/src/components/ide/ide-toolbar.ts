@@ -60,6 +60,33 @@ interface IdeToolbarProps {
   readonly onFindOpen?: () => void
 }
 
+export type ToolbarContextRouteGroupId = 'code' | 'planning' | 'board' | 'repo' | 'runtime' | 'other'
+
+export interface ToolbarContextRouteGroup {
+  readonly id: ToolbarContextRouteGroupId
+  readonly label: string
+  readonly count: number
+  readonly evidence: string
+}
+
+const TOOLBAR_ROUTE_GROUP_ORDER: ReadonlyArray<ToolbarContextRouteGroupId> = [
+  'code',
+  'planning',
+  'board',
+  'repo',
+  'runtime',
+  'other',
+]
+
+const TOOLBAR_ROUTE_GROUP_LABELS: Readonly<Record<ToolbarContextRouteGroupId, string>> = {
+  code: 'Code',
+  planning: 'Plan',
+  board: 'Board',
+  repo: 'Repo',
+  runtime: 'Runtime',
+  other: 'Other',
+}
+
 export function IdeToolbar({
   activeView,
   activeLayers,
@@ -244,7 +271,7 @@ function contextCommandActions(focus: IdeContextFocus | null): CommandBarAction[
   if (!focus?.route_links || focus.route_links.length === 0) return []
   return focus.route_links.map(link => ({
     id: `context-${link.id}`,
-    title: `Open context: ${link.label}`,
+    title: `Open context: ${link.label} · ${toolbarContextLinkEvidence(link)}`,
     keywords: [
       'context focus route link',
       focus.surface,
@@ -264,6 +291,7 @@ function ToolbarContextFocus({
   if (!focus) return null
   const lineLabel = focus.line !== undefined ? `L${focus.line}` : null
   const routeLinks = focus.route_links ?? []
+  const routeGroups = deriveToolbarContextRouteGroups(focus)
   return html`
     <div
       class="ide-toolbar-context-focus"
@@ -275,6 +303,20 @@ function ToolbarContextFocus({
       ${lineLabel ? html`<span>${lineLabel}</span>` : null}
       <strong>${focus.label}</strong>
       ${focus.keeper_id ? html`<span>keeper ${focus.keeper_id}</span>` : null}
+      ${routeGroups.length > 0 ? html`
+        <div class="ide-toolbar-context-route-groups" aria-label="Current context surface groups">
+          ${routeGroups.map(group => html`
+            <span
+              key=${group.id}
+              title=${group.evidence}
+              aria-label=${`${group.label}: ${group.count} route ${group.count === 1 ? 'link' : 'links'}`}
+            >
+              <span>${group.label}</span>
+              <span>${group.count}</span>
+            </span>
+          `)}
+        </div>
+      ` : null}
       ${routeLinks.length > 0 ? html`
         <div class="ide-toolbar-context-links" aria-label="Current context route links">
           ${routeLinks.map(link => html`
@@ -284,7 +326,10 @@ function ToolbarContextFocus({
               title=${link.evidence}
               aria-label=${`Open ${link.evidence}`}
               onClick=${() => openToolbarContextRouteLink(link)}
-            >${link.label}</button>
+            >
+              <span class="ide-toolbar-context-link-label">${link.label}</span>
+              <span class="ide-toolbar-context-link-evidence">${toolbarContextLinkEvidence(link)}</span>
+            </button>
           `)}
         </div>
       ` : null}
@@ -303,4 +348,48 @@ function toolbarContextAriaLabel(focus: IdeContextFocus): string {
     ? `, ${focus.route_links.length} route links`
     : ''
   return `Current IDE context: ${focus.surface}${line}, ${focus.label}${keeper}${links}`
+}
+
+export function deriveToolbarContextRouteGroups(
+  focus: IdeContextFocus | null,
+): ReadonlyArray<ToolbarContextRouteGroup> {
+  const links = focus?.route_links ?? []
+  const grouped = new Map<ToolbarContextRouteGroupId, IdeContextFocusRouteLink[]>()
+  for (const link of links) {
+    const groupId = toolbarContextRouteGroupId(link)
+    const current = grouped.get(groupId)
+    if (current) current.push(link)
+    else grouped.set(groupId, [link])
+  }
+  return TOOLBAR_ROUTE_GROUP_ORDER.flatMap(groupId => {
+    const groupLinks = grouped.get(groupId)
+    if (!groupLinks || groupLinks.length === 0) return []
+    return [{
+      id: groupId,
+      label: TOOLBAR_ROUTE_GROUP_LABELS[groupId],
+      count: groupLinks.length,
+      evidence: groupLinks.map(link => link.evidence).join(' / '),
+    }]
+  })
+}
+
+function toolbarContextRouteGroupId(link: IdeContextFocusRouteLink): ToolbarContextRouteGroupId {
+  const section = link.params.section?.toLowerCase()
+  const label = link.label.toLowerCase()
+  if (link.tab === 'code' || label === 'code') return 'code'
+  if (section === 'planning' || label === 'goal' || label === 'task') return 'planning'
+  if (section === 'board' || label === 'board' || label === 'comment') return 'board'
+  if (section === 'repositories' || label === 'pr' || label === 'git') return 'repo'
+  if (link.tab === 'monitoring' || label === 'log' || label === 'telemetry' || label === 'keeper') {
+    return 'runtime'
+  }
+  return 'other'
+}
+
+function toolbarContextLinkEvidence(link: IdeContextFocusRouteLink): string {
+  const evidence = link.evidence.trim()
+  const labelPrefix = `${link.label} `
+  if (evidence.startsWith(labelPrefix)) return evidence.slice(labelPrefix.length)
+  const scoped = evidence.split(' · ').slice(1).join(' · ')
+  return scoped || evidence
 }

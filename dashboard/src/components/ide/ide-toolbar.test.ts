@@ -2,7 +2,7 @@ import { fireEvent } from '@testing-library/preact'
 import { h } from 'preact'
 import { render } from 'preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { IdeToolbar } from './ide-toolbar'
+import { deriveToolbarContextRouteGroups, IdeToolbar } from './ide-toolbar'
 import { ideContextFocus } from './ide-state'
 
 let container: HTMLDivElement | null = null
@@ -26,11 +26,30 @@ describe('IdeToolbar', () => {
       activated_at_ms: Date.now(),
       route_links: [
         {
+          id: 'code:lib/runtime.ml:42',
+          label: 'Code',
+          tab: 'code',
+          params: {
+            section: 'ide-shell',
+            view: 'source',
+            file: 'lib/runtime.ml',
+            line: '42',
+          },
+          evidence: 'Code lib/runtime.ml:42',
+        },
+        {
           id: 'task:task-runtime',
           label: 'Task',
           tab: 'workspace',
           params: { section: 'planning', view: 'default', task: 'task-runtime' },
           evidence: 'Task task-runtime',
+        },
+        {
+          id: 'pr:15035',
+          label: 'PR',
+          tab: 'workspace',
+          params: { section: 'repositories', view: 'graph', pr: '15035' },
+          evidence: 'PR 15035',
         },
         {
           id: 'telemetry:turn-9',
@@ -52,16 +71,35 @@ describe('IdeToolbar', () => {
 
     const focus = container.querySelector('[data-testid="ide-toolbar-context-focus"]')
     expect(focus?.getAttribute('aria-label'))
-      .toBe('Current IDE context: Task line 42, task task-runtime, keeper sangsu, 2 route links')
+      .toBe('Current IDE context: Task line 42, task task-runtime, keeper sangsu, 4 route links')
     expect(focus?.textContent).toContain('Task')
     expect(focus?.textContent).toContain('L42')
     expect(focus?.textContent).toContain('task task-runtime')
     expect(focus?.textContent).toContain('keeper sangsu')
 
-    const routeLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-toolbar-context-links button')]
-    expect(routeLinks.map(link => link.textContent)).toEqual(['Task', 'Telemetry'])
+    const routeGroups = [...container.querySelectorAll<HTMLSpanElement>('.ide-toolbar-context-route-groups > span')]
+    expect(routeGroups.map(group => group.getAttribute('aria-label'))).toEqual([
+      'Code: 1 route link',
+      'Plan: 1 route link',
+      'Repo: 1 route link',
+      'Runtime: 1 route link',
+    ])
 
-    fireEvent.click(routeLinks.find(link => link.textContent === 'Telemetry')!)
+    const routeLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-toolbar-context-links button')]
+    expect(routeLinks.map(link => link.getAttribute('aria-label'))).toEqual([
+      'Open Code lib/runtime.ml:42',
+      'Open Task task-runtime',
+      'Open PR 15035',
+      'Open Fleet telemetry event log · query turn-9',
+    ])
+    expect(routeLinks[0]?.querySelector('.ide-toolbar-context-link-evidence')?.textContent)
+      .toBe('lib/runtime.ml:42')
+    expect(routeLinks[1]?.querySelector('.ide-toolbar-context-link-evidence')?.textContent)
+      .toBe('task-runtime')
+    expect(routeLinks[3]?.querySelector('.ide-toolbar-context-link-evidence')?.textContent)
+      .toBe('query turn-9')
+
+    fireEvent.click(routeLinks.find(link => link.getAttribute('aria-label')?.includes('telemetry'))!)
     expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&q=turn-9')
   })
 
@@ -95,7 +133,54 @@ describe('IdeToolbar', () => {
     fireEvent.input(input, { target: { value: 'goal-runtime' } })
 
     const command = [...container.querySelectorAll('[role="option"]')]
-      .find(option => option.textContent === 'Open context: Goal')
+      .find(option => option.textContent === 'Open context: Goal · goal-runtime')
     expect(command).toBeTruthy()
+  })
+
+  it('groups focused context links by operational surface', () => {
+    const groups = deriveToolbarContextRouteGroups({
+      file_path: 'lib/runtime.ml',
+      surface: 'Comment',
+      label: 'runtime note',
+      source_id: 'event-1',
+      activated_at_ms: Date.now(),
+      route_links: [
+        {
+          id: 'comment:comment-1',
+          label: 'Comment',
+          tab: 'workspace',
+          params: { section: 'board', comment: 'comment-1' },
+          evidence: 'Comment comment-1',
+        },
+        {
+          id: 'goal:goal-runtime',
+          label: 'Goal',
+          tab: 'workspace',
+          params: { section: 'planning', goal: 'goal-runtime' },
+          evidence: 'Goal goal-runtime',
+        },
+        {
+          id: 'log:turn-9',
+          label: 'Log',
+          tab: 'monitoring',
+          params: { section: 'runtime', view: 'audit', log_id: 'turn-9' },
+          evidence: 'Log turn-9',
+        },
+        {
+          id: 'git:abc123',
+          label: 'Git',
+          tab: 'workspace',
+          params: { section: 'repositories', view: 'graph', ref: 'abc123' },
+          evidence: 'Git abc123',
+        },
+      ],
+    })
+
+    expect(groups).toEqual([
+      { id: 'planning', label: 'Plan', count: 1, evidence: 'Goal goal-runtime' },
+      { id: 'board', label: 'Board', count: 1, evidence: 'Comment comment-1' },
+      { id: 'repo', label: 'Repo', count: 1, evidence: 'Git abc123' },
+      { id: 'runtime', label: 'Runtime', count: 1, evidence: 'Log turn-9' },
+    ])
   })
 })

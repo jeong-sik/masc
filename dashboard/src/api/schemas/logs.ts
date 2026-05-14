@@ -5,7 +5,9 @@
 // defaults that match the prior hand-rolled decoder (`decodeLogEntry`).
 // Individual entries that fail validation are dropped from the array
 // (not thrown) to preserve the original lenient-per-entry behavior —
-// one corrupt log row should never blank the entire logs panel.
+// one corrupt log row should never blank the entire logs panel. The
+// computed `dropped_entries` field keeps that leniency visible to
+// operators instead of silently shrinking the log window.
 //
 // The outer response shape is strict: if the top-level `entries` field
 // is missing or the payload is not an object, the parser throws
@@ -65,6 +67,7 @@ const LogsResponseSchema = object({
 export interface LogsResponse {
   total: number
   entries: LogEntry[]
+  dropped_entries: number
 }
 
 export class LogsSchemaDriftError extends Error {
@@ -93,5 +96,9 @@ export function parseLogsResponse(data: unknown): LogsResponse {
     const parsed = safeParse(LogEntrySchema, raw, { abortEarly: true })
     if (parsed.success) entries.push(parsed.output)
   }
-  return { total: outer.output.total, entries }
+  return {
+    total: outer.output.total,
+    entries,
+    dropped_entries: Math.max(0, rawEntries.length - entries.length),
+  }
 }

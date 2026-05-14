@@ -169,6 +169,31 @@ describe('LogViewer Code links', () => {
     )
   })
 
+  it('surfaces parser-dropped log rows in the summary', async () => {
+    const fetchLogs = vi.fn().mockResolvedValue({
+      total: 2,
+      dropped_entries: 1,
+      entries: [{
+        seq: 1,
+        ts: '2026-05-14T00:00:00Z',
+        level: 'INFO',
+        raw_level: 'INFO',
+        normalized_level: 'INFO',
+        source: 'structured',
+        legacy_classified: false,
+        module: 'keeper_tool',
+        message: 'visible row',
+        details: null,
+      }],
+    })
+    const { LogViewer } = await loadLogs(fetchLogs)
+    const { container } = render(h(LogViewer, {}))
+
+    await waitFor(() => expect(container.textContent).toContain('visible row'))
+    expect(container.textContent).toContain('dropped rows')
+    expect(container.textContent).toContain('1 dropped')
+  })
+
   it('does not render Code links for unsafe absolute log file paths', async () => {
     const fetchLogs = vi.fn().mockResolvedValue({
       total: 1,

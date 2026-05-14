@@ -801,6 +801,7 @@ let metric_llm_provider_errors_by_reason = "masc_llm_provider_errors_by_reason_t
 let metric_llm_provider_retries = "masc_llm_provider_retries_total"
 let metric_llm_provider_input_tokens = "masc_llm_provider_input_tokens_total"
 let metric_llm_provider_output_tokens = "masc_llm_provider_output_tokens_total"
+let metric_llm_provider_circuit_state = "masc_llm_provider_circuit_state"
 let metric_fallback_triggered = "masc_fallback_triggered_total"
 
 (* Domain-specific counters not yet constant-ised. *)
@@ -1545,6 +1546,11 @@ let init () =
     metric_llm_provider_output_tokens
     "Total OAS LLM output tokens, labeled by provider and model"
     Counter;
+  add
+    metric_llm_provider_circuit_state
+    "Current OAS cascade circuit state, labeled by provider, model, and provider_key. \
+     Gauge values: 0=closed, 1=open, 2=half-open"
+    Gauge;
   add
     metric_fallback_triggered
     "Total fallback events across the LLM cascade pipeline, labeled by kind \

@@ -148,6 +148,12 @@ module Metrics : sig
     ?on_request_end:(model_id:string -> latency_ms:int option -> unit) ->
     ?on_error:(model_id:string -> error:string -> unit) ->
     ?on_http_status:(provider:string -> model_id:string -> status:int -> unit) ->
+    ?on_circuit_state:
+      (provider:string ->
+       model_id:string ->
+       provider_key:string ->
+       state:Llm_provider.Metrics.circuit_state ->
+       unit) ->
     ?on_capability_drop:(model_id:string -> field:string -> unit) ->
     ?on_retry:(provider:string -> model_id:string -> attempt:int -> unit) ->
     ?on_token_usage:

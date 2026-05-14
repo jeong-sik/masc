@@ -8,8 +8,13 @@ import {
   type InterjectActionState,
   type InterjectDispatchRequest,
 } from './interject-store'
+import {
+  openIdeContextRouteLink,
+  routeLinksForContext,
+  type IdeContextRouteLink,
+} from './ide-context-lens'
 import { globalPresenceSnapshot, type KeeperPresenceStatus } from './keeper-presence-store'
-import { cursorOverlaySignal, getKeeperColor } from './keeper-cursor-overlay'
+import { cursorOverlaySignal, getKeeperColor, type KeeperCursor } from './keeper-cursor-overlay'
 
 // The input and button states flow through the same store/dispatch boundary
 // that live active-keeper wiring uses. Send remains disabled until a concrete
@@ -79,6 +84,7 @@ export const IdeInterjectMock: FunctionComponent<IdeInterjectMockProps> = ({ kee
   const cursor = keeperId
     ? resolveCursor(keeperId, overlay.cursors)
     : null
+  const contextLinks = interjectContextRouteLinks(keeperId, cursor)
 
   return html`
     <div
@@ -112,6 +118,7 @@ export const IdeInterjectMock: FunctionComponent<IdeInterjectMockProps> = ({ kee
           ${presenceEntry ? KeeperPresencePill(presenceEntry.status) : null}
         </div>
         ${cursor ? CursorLocation(cursor) : null}
+        <${InterjectContextLinks} links=${contextLinks} />
       </div>
       <input
         class="ide-interject-input"
@@ -147,6 +154,43 @@ export const IdeInterjectMock: FunctionComponent<IdeInterjectMockProps> = ({ kee
             }}
           >${snapshot.error}</span>`
         : null}
+    </div>
+  `
+}
+
+export function interjectContextRouteLinks(
+  keeperId: string,
+  cursor: KeeperCursor | null,
+): ReadonlyArray<IdeContextRouteLink> {
+  const keeper = keeperId.trim()
+  if (!keeper) return []
+  return routeLinksForContext({
+    filePath: cursor?.file_path,
+    line: cursor?.line,
+    surface: 'Interject',
+    label: cursor?.tool_name ?? cursor?.focus_mode ?? 'active keeper',
+    sourceId: `interject:${keeper}`,
+    keeperId: keeper,
+  })
+}
+
+function InterjectContextLinks({
+  links,
+}: {
+  readonly links: ReadonlyArray<IdeContextRouteLink>
+}) {
+  if (links.length === 0) return null
+  return html`
+    <div class="ide-interject-context-links" aria-label="Interject context links">
+      ${links.map(link => html`
+        <button
+          key=${link.id}
+          type="button"
+          title=${link.evidence}
+          aria-label=${`Open ${link.evidence}`}
+          onClick=${() => openIdeContextRouteLink(link)}
+        >${link.label}</button>
+      `)}
     </div>
   `
 }
@@ -261,8 +305,8 @@ function CursorLocation(cursor: {
 
 function resolveCursor(
   keeperId: string,
-  cursors: Map<string, { keeper_id: string; file_path: string; line: number; focus_mode: string; tool_name?: string }>,
-) {
+  cursors: Map<string, KeeperCursor>,
+): KeeperCursor | null {
   const target = keeperId.toLowerCase().trim()
   for (const [id, cursor] of cursors) {
     if (id.toLowerCase() === target) return cursor

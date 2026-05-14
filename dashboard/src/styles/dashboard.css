@@ -1028,6 +1028,41 @@
   overflow-wrap: anywhere;
 }
 
+.ide-interject-context-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ide-interject-context-links button {
+  min-width: 0;
+  max-width: 76px;
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--r-1);
+  background: var(--color-bg-page);
+  color: var(--color-fg-muted);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide-interject-context-links button:hover,
+.ide-interject-context-links button:focus-visible {
+  border-color: var(--color-border-strong);
+  color: var(--color-accent-fg);
+}
+
+.ide-interject-context-links button:focus-visible {
+  outline: 1px solid var(--color-accent-fg);
+  outline-offset: 1px;
+}
+
 .ide-activity-list {
   gap: var(--sp-1);
 }

@@ -7,8 +7,9 @@ import {
   type KeeperPresenceEntry,
   type KeeperPresenceSnapshot,
 } from './keeper-presence-store'
-import { cursorOverlaySignal } from './keeper-cursor-overlay'
-import { activeIdeFile } from './ide-state'
+import { cursorOverlaySignal, type KeeperCursor } from './keeper-cursor-overlay'
+import { focusIdeContextAnchor, type IdeContextFocus } from './ide-state'
+import { routeLinksForContext } from './ide-context-lens'
 
 const FALLBACK_PRESENCE: KeeperPresenceSnapshot = {
   runtime_id: 'local',
@@ -245,10 +246,48 @@ interface PresenceChipProps {
   readonly worktrees: ReadonlyArray<WorktreeEntry>
 }
 
+interface PresenceContextAnchorInput {
+  readonly entry: KeeperPresenceEntry
+  readonly worktree: WorktreeEntry | null
+  readonly cursor: KeeperCursor | undefined
+}
+
+export function presenceContextAnchor({
+  entry,
+  worktree,
+  cursor,
+}: PresenceContextAnchorInput): Omit<IdeContextFocus, 'activated_at_ms'> | null {
+  if (!cursor?.file_path) return null
+  const prId = worktree?.pr_number != null ? String(worktree.pr_number) : undefined
+  const label = `${entry.keeper_id}@${entry.workspace_label}`
+  const sourceId = `presence:${entry.keeper_id}`
+  return {
+    file_path: cursor.file_path,
+    line: cursor.line,
+    surface: 'Keeper',
+    label,
+    source_id: sourceId,
+    keeper_id: entry.keeper_id,
+    route_links: routeLinksForContext({
+      filePath: cursor.file_path,
+      line: cursor.line,
+      surface: 'Keeper',
+      label,
+      sourceId,
+      prId,
+      gitRef: worktree?.branch,
+      telemetry: true,
+      telemetryQuery: entry.keeper_id,
+      keeperId: entry.keeper_id,
+    }),
+  }
+}
+
 function PresenceChip({ entry, worktrees }: PresenceChipProps) {
   const isActive = entry.status === 'active'
   const cursor = cursorOverlaySignal.value.cursors.get(entry.keeper_id)
   const wt = worktrees.find(w => w.branch.startsWith(entry.keeper_id + '/'))
+  const contextAnchor = presenceContextAnchor({ entry, worktree: wt ?? null, cursor })
 
   const focusLabel = cursor?.file_path
     ? `${cursor.file_path.split('/').pop()}:${cursor.line}`
@@ -258,9 +297,9 @@ function PresenceChip({ entry, worktrees }: PresenceChipProps) {
     ? prLabel(wt.pr_number, wt.pr_state)
     : null
 
-  const canNavigate = cursor?.file_path != null
+  const canNavigate = contextAnchor !== null
   const navigate = (): void => {
-    if (cursor?.file_path) activeIdeFile.value = cursor.file_path
+    if (contextAnchor) focusIdeContextAnchor(contextAnchor)
   }
   const onKeyDown = canNavigate
     ? (e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate() } }
@@ -307,7 +346,7 @@ function PresenceChip({ entry, worktrees }: PresenceChipProps) {
           padding: '0 3px',
           borderRadius: 'var(--r-0)',
           background: wt?.pr_state === 'open' ? 'var(--color-status-ok)' : 'var(--color-bg-muted)',
-          color: wt?.pr_state === 'open' ? '#fff' : 'var(--color-fg-muted)',
+          color: wt?.pr_state === 'open' ? 'var(--color-bg-page)' : 'var(--color-fg-muted)',
         }}>${prBadge}</span>
       ` : null}
       <span

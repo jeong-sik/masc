@@ -320,9 +320,11 @@ let resolve_after_turn_model ~keeper_name
   let raw_model = String.trim response.model in
   if String.equal raw_model "" then begin
     let source =
+      let source_telemetry_resolved = "telemetry_resolved" in
+      let source_unknown_sentinel = "unknown_sentinel" in
       if telemetry_has_canonical_model_id response.telemetry then
-        "telemetry_resolved"
-      else "unknown_sentinel"
+        source_telemetry_resolved
+      else source_unknown_sentinel
     in
     Prometheus.inc_counter empty_response_model_metric
       ~labels:[ ("keeper", keeper_name); ("source", source) ] ();
@@ -335,9 +337,10 @@ let resolve_after_turn_model ~keeper_name
       Prometheus.inc_counter alias_response_model_metric
         ~labels:
           [
+            let source_telemetry_canonical = "telemetry_canonical" in
             ("keeper", keeper_name);
             ("alias", runtime_lane_label);
-            ("source", "telemetry_canonical");
+            ("source", source_telemetry_canonical);
           ]
         ();
       Log.Keeper.warn

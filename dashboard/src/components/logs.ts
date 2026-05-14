@@ -20,7 +20,6 @@ import {
 interface LogData {
   entries: LogEntry[]
   total: number
-  dropped_entries: number
 }
 
 export interface LogCauseCount {
@@ -112,7 +111,10 @@ type MutableLogRouteContext = {
 }
 
 function normalizedLevel(entry: LogEntry): string {
-  return (entry.normalized_level || entry.level || 'INFO').toUpperCase()
+  // RFC-0079: backend now emits a typed level via Log.Ring.entry_to_json.
+  // The schema rejects rows without `level`, so the read-side fallback
+  // chain (`normalized_level || level || 'INFO'`) is gone.
+  return entry.level.toUpperCase()
 }
 
 function sortLogEntries(entries: LogEntry[]): LogEntry[] {
@@ -435,7 +437,6 @@ async function loadLogs(mode: LoadMode = 'reset') {
       return {
         entries,
         total: resp.total,
-        dropped_entries: resp.dropped_entries ?? 0,
       }
     })
   }
@@ -459,8 +460,6 @@ async function loadLogs(mode: LoadMode = 'reset') {
     logResource.state.value = loaded({
       entries: nextEntries,
       total: resp.total,
-      dropped_entries: (s.status === 'loaded' ? s.data.dropped_entries : 0)
-        + (resp.dropped_entries ?? 0),
     })
   } catch {
     if (requestId !== latestRequestId) return
@@ -470,7 +469,6 @@ async function loadLogs(mode: LoadMode = 'reset') {
 
 function renderLogRow(entry: LogEntry) {
   const level = normalizedLevel(entry)
-  const rawLevelChanged = entry.raw_level && entry.raw_level !== level
   const source = entry.source || 'structured'
   const details = entryDetails(entry)
   const clientName = detailLabel(details, 'client_name')
@@ -514,12 +512,6 @@ function renderLogRow(entry: LogEntry) {
       </div>
       <div class="flex flex-wrap items-start gap-1">
         <${StatusChip} tone=${sourceClass}>${sourceLabel(source)}</${StatusChip}>
-        ${entry.legacy_classified
-          ? html`<${MetaTag}>classified</${MetaTag}>`
-          : null}
-        ${rawLevelChanged
-          ? html`<${MetaTag}>${entry.raw_level}</${MetaTag}>`
-          : null}
         ${clientName
           ? html`<${StatusChip} tone="border-[var(--color-accent-soft)] text-[var(--color-accent-fg)]" uppercase=${false}>${clientName}</${StatusChip}>`
           : null}
@@ -593,15 +585,12 @@ function renderSummaryChip(label: string, value: string | number, tone = 'neutra
   `
 }
 
-function renderLogSummary(summary: LogWindowSummary, droppedEntries: number) {
+function renderLogSummary(summary: LogWindowSummary) {
   return html`
     <div class="mx-3 mt-3 flex flex-wrap items-center gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2 text-2xs">
       ${renderSummaryChip('ERROR', summary.errors, summary.errors > 0 ? 'bad' : 'neutral')}
       ${renderSummaryChip('WARN', summary.warnings, summary.warnings > 0 ? 'warn' : 'neutral')}
       ${renderSummaryChip('failure envelope', summary.failureEnvelopes, summary.failureEnvelopes > 0 ? 'info' : 'neutral')}
-      ${droppedEntries > 0
-        ? renderSummaryChip('dropped rows', droppedEntries, 'warn')
-        : null}
       ${summary.topModules.map(item => renderSummaryChip(`module ${item.module}`, item.count))}
       ${summary.topCauses.map(item => renderSummaryChip(`cause ${item.cause}`, item.count, 'info'))}
     </div>
@@ -655,7 +644,6 @@ export function LogViewer() {
   const logData = s.status === 'loaded' ? s.data : undefined
   const logEntries = logData?.entries ?? []
   const logTotal = logData?.total ?? 0
-  const droppedEntries = logData?.dropped_entries ?? 0
   const logLoading = s.status === 'loading'
   const logError = s.status === 'error' ? s.message : null
   const summary = summarizeLogWindow(logEntries)
@@ -714,7 +702,6 @@ export function LogViewer() {
           <div class="logs-actions flex flex-wrap gap-3 items-center text-2xs text-[color:var(--color-fg-muted)]">
             <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1 tabular-nums">
               ${logEntries.length.toLocaleString()} / ${logTotal.toLocaleString()}
-              ${droppedEntries > 0 ? ` · ${droppedEntries.toLocaleString()} dropped` : ''}
             </span>
             <label class="logs-auto-label flex items-center gap-1.5 cursor-pointer">
               <${Checkbox}
@@ -744,7 +731,7 @@ export function LogViewer() {
           <div class="mx-4 mt-4 rounded-[var(--r-1)] border border-solid border-[var(--err-border)] bg-[var(--brick-soft)] px-4 py-3 text-xs text-[var(--err-fg)]">${logError}</div>
         ` : null}
 
-        ${renderLogSummary(summary, droppedEntries)}
+        ${renderLogSummary(summary)}
 
         <div class="px-3 pt-3">
           <div class="grid grid-cols-[11rem_5rem_10rem_8rem_minmax(0,1fr)] gap-3 px-3 py-2 text-left text-3xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)]">

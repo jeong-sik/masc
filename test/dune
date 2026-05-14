@@ -29,6 +29,7 @@
         test_keeper_turn_terminal_code_byte_compat
         test_keeper_sdk_error_typed_bridge
         test_read_drop_reason
+        test_log_ring_encoder
         test_keeper_turn_disposition
         test_keeper_turn_terminal_disposition_field
         test_attempt_state

@@ -401,6 +401,9 @@ let cascade_metrics_for_candidates ~candidate_count:(_ : int) () =
            Delegating to [Llm_metric_bridge.emit_http_status] keeps
            the label shape a single source of truth. *)
         Llm_metric_bridge.emit_http_status ~provider ~model_id ~status)
+      ~on_circuit_state:(fun ~provider ~model_id ~provider_key ~state ->
+        Llm_metric_bridge.emit_circuit_state ~provider ~model_id ~provider_key
+          ~state)
       ~on_retry:(fun ~provider ~model_id ~attempt ->
         Llm_metric_bridge.emit_retry ~provider ~model_id ~attempt)
       ~on_token_usage:(fun ~provider ~model_id ~input_tokens ~output_tokens ->

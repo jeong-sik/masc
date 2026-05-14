@@ -44,6 +44,12 @@ val emit_cache_miss : model_id:string -> unit
 val emit_request_start : model_id:string -> unit
 val emit_error : model_id:string -> error:string -> unit
 val emit_retry : provider:string -> model_id:string -> attempt:int -> unit
+val emit_circuit_state :
+  provider:string ->
+  model_id:string ->
+  provider_key:string ->
+  state:Llm_provider.Metrics.circuit_state ->
+  unit
 val emit_token_usage :
   provider:string ->
   model_id:string ->

@@ -44,6 +44,10 @@ let test_metric_names_stable () =
     "masc_llm_provider_output_tokens_total"
     Prom.metric_llm_provider_output_tokens;
   Alcotest.(check string)
+    "circuit state metric"
+    "masc_llm_provider_circuit_state"
+    Prom.metric_llm_provider_circuit_state;
+  Alcotest.(check string)
     "request latency clamped metric"
     "masc_llm_provider_request_latency_clamped_total"
     Prom.metric_llm_provider_request_latency_clamped
@@ -56,6 +60,10 @@ let test_sink_records_oas_callbacks () =
   let provider_model_labels = [ ("provider", provider); ("model", model_id) ] in
   let retry_labels =
     [ ("provider", provider); ("model", model_id); ("attempt", "2") ]
+  in
+  let provider_key = "bridge-test-provider-key" in
+  let circuit_labels =
+    [ ("provider", provider); ("model", model_id); ("provider_key", provider_key) ]
   in
   let before_hit = metric Prom.metric_llm_provider_cache_hits ~labels:model_labels in
   let before_miss = metric Prom.metric_llm_provider_cache_misses ~labels:model_labels in
@@ -76,11 +84,16 @@ let test_sink_records_oas_callbacks () =
   let before_output =
     metric Prom.metric_llm_provider_output_tokens ~labels:provider_model_labels
   in
+  let before_circuit_state =
+    metric Prom.metric_llm_provider_circuit_state ~labels:circuit_labels
+  in
   sink.on_cache_hit ~model_id;
   sink.on_cache_miss ~model_id;
   sink.on_request_start ~model_id;
   sink.on_error ~model_id ~error:"ignored-freeform-error";
   sink.on_retry ~provider ~model_id ~attempt:2;
+  sink.on_circuit_state ~provider ~model_id ~provider_key
+    ~state:Llm_provider.Metrics.Circuit_open;
   sink.on_token_usage
     ~provider ~model_id ~input_tokens:17 ~output_tokens:23;
   check_metric_delta "cache hit +1"
@@ -106,7 +119,10 @@ let test_sink_records_oas_callbacks () =
     ~labels:provider_model_labels ~before:before_input ~delta:17.0;
   check_metric_delta "output tokens +23"
     Prom.metric_llm_provider_output_tokens
-    ~labels:provider_model_labels ~before:before_output ~delta:23.0
+    ~labels:provider_model_labels ~before:before_output ~delta:23.0;
+  check_metric_delta "circuit state open"
+    Prom.metric_llm_provider_circuit_state
+    ~labels:circuit_labels ~before:before_circuit_state ~delta:1.0
 
 let test_request_latency_clamps_zero_ms () =
   let model_id =

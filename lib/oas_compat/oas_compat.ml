@@ -244,6 +244,9 @@ module Metrics = struct
   let default_request_end ~model_id:_ ~latency_ms:_ = ()
   let default_error ~model_id:_ ~error:_ = ()
   let default_http_status ~provider:_ ~model_id:_ ~status:_ = ()
+  let default_circuit_state ~provider:_ ~model_id:_ ~provider_key:_ ~state:_ =
+    ()
+
   let default_capability_drop ~model_id:_ ~field:_ = ()
   let default_retry ~provider:_ ~model_id:_ ~attempt:_ = ()
 
@@ -256,6 +259,7 @@ module Metrics = struct
       ?(on_request_start = default_model_hook)
       ?(on_request_end = default_request_end) ?(on_error = default_error)
       ?(on_http_status = default_http_status)
+      ?(on_circuit_state = default_circuit_state)
       ?(on_capability_drop = default_capability_drop)
       ?(on_retry = default_retry) ?(on_token_usage = default_token_usage) ()
       : Llm_provider.Metrics.t =
@@ -266,6 +270,7 @@ module Metrics = struct
       on_request_end;
       on_error;
       on_http_status;
+      on_circuit_state;
       on_capability_drop;
       on_retry;
       on_token_usage;

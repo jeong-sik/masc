@@ -40,6 +40,7 @@ let error_by_reason_metric = Prometheus.metric_llm_provider_errors_by_reason
 let retry_metric = Prometheus.metric_llm_provider_retries
 let input_tokens_metric = Prometheus.metric_llm_provider_input_tokens
 let output_tokens_metric = Prometheus.metric_llm_provider_output_tokens
+let circuit_state_metric = Prometheus.metric_llm_provider_circuit_state
 
 (** Emit a single HTTP status observation to the Prometheus counter.
 
@@ -129,6 +130,19 @@ let emit_token_usage ~provider ~model_id ~input_tokens ~output_tokens =
       ~delta:(Float.of_int output_tokens)
       ()
 
+let emit_circuit_state ~provider ~model_id ~provider_key ~state =
+  let value =
+    Float.of_int (Llm_provider.Metrics.circuit_state_to_int state)
+  in
+  Prometheus.set_gauge circuit_state_metric
+    ~labels:
+      [
+        ("provider", provider);
+        ("model", model_id);
+        ("provider_key", provider_key);
+      ]
+    value
+
 (** Canonical metric name for the unified fallback counter (§7.3.2 Zero
     Silent Failure). This is the single numerator across all fallback
     classes for the dashboard panel. *)
@@ -189,6 +203,7 @@ let emit_request_latency ~model_id ~latency_ms =
     - [on_request_end]   → masc_llm_provider_request_latency_seconds
     - [on_error]        → masc_llm_provider_errors_total
     - [on_retry]        → masc_llm_provider_retries_total
+    - [on_circuit_state] → masc_llm_provider_circuit_state
     - [on_token_usage]  → masc_llm_provider_{input,output}_tokens_total *)
 let make_sink () : Llm_provider.Metrics.t =
   {
@@ -208,6 +223,7 @@ let make_sink () : Llm_provider.Metrics.t =
         emit_capability_drop ~model_id ~field);
     on_error = (fun ~model_id ~error -> emit_error ~model_id ~error);
     on_retry = emit_retry;
+    on_circuit_state = emit_circuit_state;
     on_token_usage = emit_token_usage;
   }
 

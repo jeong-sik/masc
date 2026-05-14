@@ -153,6 +153,10 @@ check_http "cascade health 200" "$BASE/api/v1/cascade/health" "200"
 check_json "cascade health exposes providers" "$BASE/api/v1/cascade/health" "'providers' in d" '^True$'
 check_http "cascade strategy trace 200" "$BASE/api/v1/cascade/strategy_trace?limit=1" "200"
 check_json "cascade strategy trace exposes events" "$BASE/api/v1/cascade/strategy_trace?limit=1" "'events' in d" '^True$'
+check_http "model metrics 200" "$BASE/api/v1/models/metrics?window=30&bucket_min=5" "200"
+check_json "model metrics exposes model list" "$BASE/api/v1/models/metrics?window=30&bucket_min=5" "'models' in d" '^True$'
+check_http "keeper costs 200" "$BASE/api/v1/dashboard/keeper-costs?window=60" "200"
+check_json "keeper costs exposes keepers" "$BASE/api/v1/dashboard/keeper-costs?window=60" "'keepers' in d" '^True$'
 check_http "memory subsystems 200" "$BASE/api/v1/dashboard/memory-subsystems" "200"
 check_json "memory subsystems has hebbian block" "$BASE/api/v1/dashboard/memory-subsystems" "'hebbian' in d" '^True$'
 check_http "transport health 200" "$BASE/api/v1/dashboard/transport-health" "200"

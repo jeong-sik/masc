@@ -235,6 +235,7 @@ val publish_lifecycle :
   ?error:string ->
   ?session_id:string ->
   ?status:string ->
+  ?attrs:(string * Yojson.Safe.t) list ->
   unit ->
   unit
 val enrich_idle_detail :

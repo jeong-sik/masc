@@ -3,7 +3,8 @@
     Keeps side-effecting run helpers separate from the main build/resume/run
     orchestration in {!Cascade_runner}. *)
 
-let publish_lifecycle _bus ~name ~event ~detail ?error ?session_id ?status () =
+let publish_lifecycle _bus ~name ~event ~detail ?error ?session_id ?status
+    ?(attrs = []) () =
   match Masc_event_bus.get () with
   | None -> ()
   | Some mb ->
@@ -23,7 +24,8 @@ let publish_lifecycle _bus ~name ~event ~detail ?error ?session_id ?status () =
                    ]
                    @ optional_string_field "error" error
                    @ optional_string_field "session_id" session_id
-                   @ optional_string_field "status" status) )))
+                   @ optional_string_field "status" status
+                   @ attrs) )))
 
 let persist_checkpoint ~dir ~session_id (ckpt : Agent_sdk.Checkpoint.t)
     : (unit, string) result =

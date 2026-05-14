@@ -269,6 +269,32 @@ let transport_for_provider ~sw ~net ~provider_cfg ?runtime_mcp_policy
 let publish_lifecycle =
   Keeper_oas_checkpoint.publish_lifecycle
 
+let provider_lifecycle_attrs (config : config) =
+  let provider_cfg = config.provider_cfg in
+  let provider_kind =
+    Llm_provider.Provider_config.string_of_provider_kind provider_cfg.kind
+  in
+  let nonempty_string key value =
+    let value = String.trim value in
+    if value = "" then [] else [ (key, `String value) ]
+  in
+  let endpoint =
+    match String.trim provider_cfg.base_url, String.trim provider_cfg.request_path with
+    | "", _ -> []
+    | base_url, "" -> [ ("endpoint", `String base_url) ]
+    | base_url, request_path -> [ ("endpoint", `String (base_url ^ request_path)) ]
+  in
+  [
+    ("provider_kind", `String provider_kind);
+    ("model_id", `String config.model_id);
+    ("provider_model_id", `String provider_cfg.model_id);
+    ("max_tokens", `Int config.max_tokens);
+    ("max_turns", `Int config.max_turns);
+  ]
+  @ nonempty_string "base_url" provider_cfg.base_url
+  @ nonempty_string "request_path" provider_cfg.request_path
+  @ endpoint
+
 (* ================================================================ *)
 (* Internal: checkpoint persistence                                  *)
 (* ================================================================ *)
@@ -440,6 +466,7 @@ let run
       config.name (Masc_grpc_transport.to_string t));
   Option.iter (fun bus ->
     publish_lifecycle bus ~name:config.name ~event:"build" ~detail:goal
+      ~attrs:(provider_lifecycle_attrs config)
       ()
   ) config.event_bus;
   let agent_result = match oas_checkpoint with
@@ -461,6 +488,7 @@ let run
         ~error:(Agent_sdk.Error.to_string e)
         ~status:"build_error"
         ~session_id
+        ~attrs:(provider_lifecycle_attrs config)
         ()
     ) config.event_bus;
     Error e
@@ -518,6 +546,7 @@ let run
         ?error
         ~session_id
         ~status
+        ~attrs:(provider_lifecycle_attrs config)
         ()
     ) config.event_bus;
     let turns = (Agent_sdk.Agent.state agent).turn_count in

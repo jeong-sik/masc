@@ -129,6 +129,14 @@ let test_oas_worker_failed_lifecycle_includes_error () =
     ~error:"tool call rejected"
     ~session_id:"session-1"
     ~status:"failed"
+    ~attrs:
+      [
+        ("provider_kind", `String "openai_compat");
+        ("model_id", `String "deepseek-v4-pro:cloud");
+        ("base_url", `String "https://ollama.com/v1");
+        ("request_path", `String "/chat/completions");
+        ("endpoint", `String "https://ollama.com/v1/chat/completions");
+      ]
     ();
   let events = Event_bus.drain sub in
   Alcotest.(check int) "one event" 1 (List.length events);
@@ -142,7 +150,14 @@ let test_oas_worker_failed_lifecycle_includes_error () =
       Alcotest.(check string) "session_id" "session-1"
         (payload |> member "session_id" |> to_string);
       Alcotest.(check string) "status" "failed"
-        (payload |> member "status" |> to_string)
+        (payload |> member "status" |> to_string);
+      Alcotest.(check string) "provider_kind" "openai_compat"
+        (payload |> member "provider_kind" |> to_string);
+      Alcotest.(check string) "model_id" "deepseek-v4-pro:cloud"
+        (payload |> member "model_id" |> to_string);
+      Alcotest.(check string) "endpoint"
+        "https://ollama.com/v1/chat/completions"
+        (payload |> member "endpoint" |> to_string)
   | _ -> Alcotest.fail "expected Custom masc.oas_worker.failed event"
 
 let test_event_bus_task_transition () =
@@ -1059,17 +1074,17 @@ let test_inference_telemetry_aggregates_without_sse_relay () =
          "InferenceTelemetry must remain None — catch-all fallback \
           must not absorb the high-frequency suppression case");
   Alcotest.(check (float 0.0001))
-    "prompt token histogram sum"
-    (before_prompt_tokens +. 10.0)
+    "prompt token histogram sum unchanged"
+    before_prompt_tokens
     (Prometheus.metric_value_or_zero token_metric ~labels:prompt_labels ());
   Alcotest.(check (float 0.0001))
-    "prompt token histogram count"
-    (before_prompt_count +. 1.0)
+    "prompt token histogram count unchanged"
+    before_prompt_count
     (Prometheus.metric_value_or_zero (token_metric ^ "_count")
        ~labels:prompt_labels ());
   Alcotest.(check (float 0.0001))
-    "completion token histogram sum"
-    (before_completion_tokens +. 9000.0)
+    "completion token histogram sum unchanged"
+    before_completion_tokens
     (Prometheus.metric_value_or_zero token_metric ~labels:completion_labels ());
   Alcotest.(check (float 0.0001))
     "prompt throughput histogram sum"

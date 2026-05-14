@@ -13,7 +13,7 @@ import {
   routeLinksForContext,
   type IdeContextRouteLink,
 } from './ide-context-lens'
-import { globalPresenceSnapshot, type KeeperPresenceStatus } from './keeper-presence-store'
+import { globalPresenceSnapshot, presenceEntries, type KeeperPresenceStatus } from './keeper-presence-store'
 import { cursorOverlaySignal, getKeeperColor, type KeeperCursor } from './keeper-cursor-overlay'
 
 // The input and button states flow through the same store/dispatch boundary
@@ -79,7 +79,7 @@ export const IdeInterject: FunctionComponent<IdeInterjectProps> = ({ keeperName 
   // matches the (cased) interject keeper id.
   const keeperIdNorm = keeperId.trim().toLowerCase()
   const presenceEntry = keeperIdNorm
-    ? presence?.entries.find(e => e.keeper_id.trim().toLowerCase() === keeperIdNorm) ?? null
+    ? presenceEntries(presence).find(e => e.keeper_id.trim().toLowerCase() === keeperIdNorm) ?? null
     : null
   const cursor = keeperId
     ? resolveCursor(keeperId, overlay.cursors)

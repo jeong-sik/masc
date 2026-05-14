@@ -46,6 +46,7 @@ import { cursorOverlaySignal, getKeeperColor } from './keeper-cursor-overlay'
 import { filterTraceEventsByReplay, keeperTraceState, type KeeperTraceEvent } from './keeper-trace-store'
 import {
   globalPresenceSnapshot,
+  presenceEntries,
   type KeeperPresenceSnapshot,
   type KeeperPresenceStatus,
 } from './keeper-presence-store'
@@ -1198,7 +1199,7 @@ function EditorKeeperCursorChip(
   key: string,
 ) {
   const color = getKeeperColor(ac.keeper_id)
-  const status: KeeperPresenceStatus | undefined = presence?.entries.find(
+  const status: KeeperPresenceStatus | undefined = presenceEntries(presence).find(
     e => e.keeper_id === ac.keeper_id,
   )?.status
   const isActive = status === 'active'

@@ -617,7 +617,6 @@ describe('IdeShell', () => {
 
     expect(container.textContent).toContain('BRANCH GRAPH')
     await waitFor(() => expect(container.textContent).toContain('masc-mcp'))
-    expect(container.textContent).toContain('main')
   })
 
   it('keeps the right diagnostics bounded above the primary conversation rail', () => {

@@ -5,7 +5,7 @@ import {
   KeeperBdiSnapshot,
   normalizeKeeperBdiSnapshot,
 } from './inspector-keeper-bdi'
-import { globalPresenceSnapshot, PRESENCE_DOT, type KeeperPresenceEntry, type KeeperPresenceSnapshot } from './keeper-presence-store'
+import { globalPresenceSnapshot, PRESENCE_DOT, presenceEntries, type KeeperPresenceEntry, type KeeperPresenceSnapshot } from './keeper-presence-store'
 import { cursorOverlaySignal, type KeeperCursorOverlay } from './keeper-cursor-overlay'
 import { useSignalValue } from './use-signal-value'
 import { activeIdeFile } from './ide-state'
@@ -253,7 +253,7 @@ function KeeperPanel({ entry, slot, compact, focused, dropIdx, presence, overlay
   const lastTool = snapshot?.last_tool_call ?? null
   const dragHandlers = buildDragHandlers(entry.keeperName, dropIdx)
   const cursor = overlay.cursors.get(entry.keeperName)
-  const pEntries: ReadonlyArray<KeeperPresenceEntry> = presence?.entries ?? []
+  const pEntries: ReadonlyArray<KeeperPresenceEntry> = presenceEntries(presence)
   const pEntry = pEntries.find(e => e.keeper_id === entry.keeperName)
   const statusDot = pEntry ? PRESENCE_DOT[pEntry.status] : null
   const focusLabel = cursor && cursor.file_path && cursor.line >= 1
@@ -381,7 +381,7 @@ function KeeperChip({ entry, slot, dropIdx, presence, overlay, onFocus, onUnpin 
   const tokens = slot.snapshot?.recent_token_spend?.[0]?.total_tokens ?? null
   const dragHandlers = buildDragHandlers(entry.keeperName, dropIdx)
   const cursor = overlay.cursors.get(entry.keeperName)
-  const pEntries: ReadonlyArray<KeeperPresenceEntry> = presence?.entries ?? []
+  const pEntries: ReadonlyArray<KeeperPresenceEntry> = presenceEntries(presence)
   const pEntry = pEntries.find(e => e.keeper_id === entry.keeperName)
   const statusDot = pEntry ? PRESENCE_DOT[pEntry.status] : null
   const focusLabel = cursor && cursor.file_path && cursor.line >= 1

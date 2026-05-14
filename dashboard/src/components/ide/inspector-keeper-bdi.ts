@@ -5,7 +5,7 @@ import { activeKeeperName } from '../../keeper-state'
 import { bridgeBdiSnapshotsToTrace } from './bdi-snapshot-trace-bridge'
 import { asBoolean, asNumber, asString, isRecord, toIsoTimestamp } from '../common/normalize'
 import { clearPins, headPinnedKeeper, pinKeeper } from './multi-keeper-pin-store'
-import { globalPresenceSnapshot, PRESENCE_DOT, type KeeperPresenceEntry } from './keeper-presence-store'
+import { globalPresenceSnapshot, PRESENCE_DOT, presenceEntries, type KeeperPresenceEntry } from './keeper-presence-store'
 import { cursorOverlaySignal } from './keeper-cursor-overlay'
 // Imported from `./ide-state` rather than `./ide-shell` to avoid the
 // circular dependency `ide-shell -> inspector-keeper-bdi -> ide-shell`
@@ -262,7 +262,7 @@ export function InspectorKeeperBDI({
   const tokenRows = snapshot?.recent_token_spend ?? []
   const lastTool = snapshot?.last_tool_call ?? null
   const presence = globalPresenceSnapshot.value
-  const entries: ReadonlyArray<KeeperPresenceEntry> = presence?.entries ?? []
+  const entries: ReadonlyArray<KeeperPresenceEntry> = presenceEntries(presence)
   const entry = keeperName ? entries.find(e => e.keeper_id === keeperName) : null
   const statusDot = entry ? PRESENCE_DOT[entry.status] : null
 

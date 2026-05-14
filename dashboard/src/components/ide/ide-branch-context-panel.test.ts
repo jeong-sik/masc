@@ -8,12 +8,12 @@ import {
   buildIdeBranchContextModel,
   IdeBranchContextPanel,
 } from './ide-branch-context-panel'
-import { globalPresenceSnapshot } from './keeper-presence-store'
+import { globalPresenceSnapshot, LOADING_SNAPSHOT } from './keeper-presence-store'
 import { cursorOverlaySignal } from './keeper-cursor-overlay'
 
 afterEach(() => {
   window.location.hash = ''
-  globalPresenceSnapshot.value = null
+  globalPresenceSnapshot.value = LOADING_SNAPSHOT
   cursorOverlaySignal.value = {
     cursors: new Map(),
     heatmap: new Map(),
@@ -160,14 +160,13 @@ describe('IdeBranchContextPanel', () => {
 
   it('matches worktree lanes to keeper presence and cursor state by keeper label', async () => {
     globalPresenceSnapshot.value = {
+      kind: 'live',
       runtime_id: 'runtime',
       branch: 'fix/ide-branch',
       supervisor: 'local',
-      connected: true,
       entries: [{
         keeper_id: 'sangsu',
         workspace_label: 'masc-mcp',
-        branch: 'fix/ide-branch',
         role: 'coder',
         status: 'active',
         last_seen_ms: 100,

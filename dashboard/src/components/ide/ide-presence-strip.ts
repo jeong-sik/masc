@@ -3,21 +3,15 @@ import { useEffect, useMemo, useState } from 'preact/hooks'
 import { KeeperBadge } from '../keeper-badge'
 import {
   createKeeperPresenceStore,
+  disconnectedSnapshot,
   globalPresenceSnapshot,
+  LOADING_SNAPSHOT,
   type KeeperPresenceEntry,
   type KeeperPresenceSnapshot,
 } from './keeper-presence-store'
 import { cursorOverlaySignal, type KeeperCursor } from './keeper-cursor-overlay'
 import { focusIdeContextAnchor, type IdeContextFocus } from './ide-state'
 import { routeLinksForContext } from './ide-context-lens'
-
-const FALLBACK_PRESENCE: KeeperPresenceSnapshot = {
-  runtime_id: 'local',
-  branch: 'main',
-  supervisor: 'local',
-  connected: false,
-  entries: [],
-}
 
 interface ApiAgent {
   readonly name: string
@@ -74,16 +68,19 @@ function agentsToPresence(
   status: ApiStatus,
   worktrees: ReadonlyArray<WorktreeEntry>,
 ): KeeperPresenceSnapshot {
+  if (status.cluster === undefined || status.cluster.trim() === '') {
+    return disconnectedSnapshot('runtime_unknown')
+  }
+  if (agents.length === 0) {
+    return disconnectedSnapshot('no_agents')
+  }
   const now = Date.now()
   return {
-    runtime_id: status.cluster ?? 'local',
-    branch: status.project ?? 'main',
-    supervisor: 'local',
-    connected: agents.length > 0,
+    kind: 'live',
+    runtime_id: status.cluster,
     entries: agents.map((agent, idx) => ({
       keeper_id: agent.name,
       workspace_label: workspaceLabelForAgent(agent.name, worktrees),
-      branch: status.project ?? 'main',
       role: 'agent',
       status: mapAgentStatus(agent.status),
       last_seen_ms: now - idx * 1000,
@@ -144,11 +141,6 @@ interface PresenceData {
   readonly worktrees: ReadonlyArray<WorktreeEntry>
 }
 
-const FALLBACK_DATA: PresenceData = {
-  snapshot: FALLBACK_PRESENCE,
-  worktrees: [],
-}
-
 async function fetchPresence(): Promise<PresenceData> {
   try {
     const [agentsRes, statusRes, worktrees] = await Promise.all([
@@ -156,20 +148,46 @@ async function fetchPresence(): Promise<PresenceData> {
       fetch('/api/v1/status'),
       fetchWorktreeEntries(),
     ])
-    if (!agentsRes.ok || !statusRes.ok) return { snapshot: FALLBACK_PRESENCE, worktrees }
+    if (!agentsRes.ok || !statusRes.ok) {
+      return { snapshot: disconnectedSnapshot('api_unavailable'), worktrees }
+    }
     const agentsData = await agentsRes.json()
     const statusData = await statusRes.json()
     const agents: ApiAgent[] = Array.isArray(agentsData.agents) ? agentsData.agents : []
-    if (agents.length === 0) return { snapshot: FALLBACK_PRESENCE, worktrees }
     const snapshot = agentsToPresence(agents, statusData as ApiStatus, worktrees)
     return { snapshot, worktrees }
   } catch {
-    return FALLBACK_DATA
+    return { snapshot: disconnectedSnapshot('fetch_failed'), worktrees: [] }
   }
 }
 
+function presenceHeader(snap: KeeperPresenceSnapshot) {
+  if (snap.kind === 'loading') {
+    return html`
+      <span style=${{ color: 'var(--color-fg-disabled)' }} aria-label="presence loading">○</span>
+      <span style=${{ fontStyle: 'italic' }}>loading…</span>
+    `
+  }
+  if (snap.kind === 'disconnected') {
+    return html`
+      <span style=${{ color: 'var(--color-status-err)' }} aria-label=${`presence disconnected: ${snap.reason}`}>○</span>
+      <span style=${{ fontStyle: 'italic' }}>disconnected (${snap.reason})</span>
+    `
+  }
+  const segments = [snap.runtime_id]
+  if (snap.branch !== undefined) segments.push(snap.branch)
+  if (snap.supervisor !== undefined) segments.push(snap.supervisor)
+  return html`
+    <span style=${{ color: 'var(--color-status-ok)' }} aria-label="presence live">●</span>
+    ${segments.map((seg, idx) => html`
+      ${idx > 0 ? html`<span>/</span>` : null}
+      <span>${seg}</span>
+    `)}
+  `
+}
+
 export function IdePresenceStrip() {
-  const presenceStore = useMemo(() => createKeeperPresenceStore(FALLBACK_PRESENCE), [])
+  const presenceStore = useMemo(() => createKeeperPresenceStore(LOADING_SNAPSHOT), [])
   const [, forceRender] = useState(0)
   const [worktrees, setWorktrees] = useState<ReadonlyArray<WorktreeEntry>>([])
 
@@ -186,8 +204,7 @@ export function IdePresenceStrip() {
 
   useEffect(() => {
     const unsub = globalPresenceSnapshot.subscribe(() => {
-      const snap = globalPresenceSnapshot.value
-      if (snap !== null) presenceStore.seed(snap)
+      presenceStore.seed(globalPresenceSnapshot.value)
     })
     return unsub
   }, [presenceStore])
@@ -217,12 +234,7 @@ export function IdePresenceStrip() {
         color: 'var(--color-fg-muted)',
       }}
     >
-      <span style=${{ color: current.connected ? 'var(--color-status-ok)' : 'var(--color-fg-disabled)' }}>●</span>
-      <span>${current.runtime_id}</span>
-      <span>/</span>
-      <span>${current.branch}</span>
-      <span>/</span>
-      <span>${current.supervisor}</span>
+      ${presenceHeader(current)}
       <ul
         style=${{
           display: 'inline-flex',

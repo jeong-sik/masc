@@ -194,6 +194,74 @@ describe('IdeEditor', () => {
       .toContain('1 note')
   })
 
+  it('renders loaded annotations as compact context chips on code lines', async () => {
+    const documentStore = createCodeDocumentStore({
+      file_path: 'runtime.ts',
+      language: 'typescript',
+      content: 'const runtime = 1\nconst other = 2\n',
+    })
+    const ownershipStore = createKeeperLineOwnershipStore('runtime.ts')
+
+    render(
+      h(IdeEditor, {
+        documentStore,
+        ownershipStore,
+        diffRows: () => [],
+        annotations: [
+          {
+            id: 'ann-1',
+            file_path: 'runtime.ts',
+            line_start: 1,
+            line_end: 1,
+            keeper_id: 'sangsu',
+            kind: 'Comment',
+            content: 'Keep this task linked to the line',
+            goal_id: 'goal-1',
+            task_id: 'task-1',
+            created_at_ms: 1,
+            updated_at_ms: 1,
+          },
+          {
+            id: 'ann-2',
+            file_path: 'runtime.ts',
+            line_start: 1,
+            line_end: 1,
+            keeper_id: 'reviewer',
+            kind: 'Question',
+            content: 'Is this still the active goal?',
+            goal_id: null,
+            task_id: null,
+            created_at_ms: 2,
+            updated_at_ms: 2,
+          },
+          {
+            id: 'ann-other-file',
+            file_path: 'other.ts',
+            line_start: 1,
+            line_end: 1,
+            keeper_id: 'other',
+            kind: 'Comment',
+            content: 'Not this file',
+            goal_id: null,
+            task_id: null,
+            created_at_ms: 3,
+            updated_at_ms: 3,
+          },
+        ],
+      }),
+      container,
+    )
+
+    await waitFor(() => {
+      const chip = container.querySelector('.cm-masc-annotation-chip')
+      expect(chip?.textContent)
+        .toBe('Comment · goal goal-1 · task task-1 · keeper sangsu · +1')
+    })
+    expect(container.querySelectorAll('.cm-masc-annotation-chip')).toHaveLength(1)
+    expect(container.querySelector('.cm-masc-annotation-chip')?.getAttribute('aria-label'))
+      .toBe('Line 1 annotation context: Comment · goal goal-1 · task task-1 · keeper sangsu · +1')
+  })
+
   it('shows and highlights the focused context line from the shared IDE signal', async () => {
     const documentStore = createCodeDocumentStore({
       file_path: 'runtime.ts',

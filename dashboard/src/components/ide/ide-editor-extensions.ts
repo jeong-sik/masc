@@ -1,5 +1,5 @@
 import { Decoration, EditorView, GutterMarker, WidgetType, gutter, lineNumbers, type DecorationSet, type ViewUpdate } from '@codemirror/view'
-import { Annotation, EditorState, Extension, StateField, StateEffect } from '@codemirror/state'
+import { Annotation, EditorState, Extension, RangeSetBuilder, StateField, StateEffect, type Text } from '@codemirror/state'
 import {
   defaultHighlightStyle,
   StreamLanguage,
@@ -125,6 +125,26 @@ export function themeExt(): Extension {
       borderRadius: 'var(--r-0)',
       background: 'var(--color-bg-elevated)',
       color: 'var(--color-accent-fg)',
+      fontFamily: 'var(--font-mono)',
+      fontSize: 'var(--fs-10)',
+      lineHeight: '1.4',
+      verticalAlign: 'baseline',
+      whiteSpace: 'nowrap',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      pointerEvents: 'none',
+      userSelect: 'none',
+    },
+    '.cm-masc-annotation-chip': {
+      display: 'inline-flex',
+      alignItems: 'center',
+      maxWidth: '34ch',
+      marginLeft: 'var(--sp-2)',
+      padding: '0 var(--sp-2)',
+      border: '1px solid var(--color-border-default)',
+      borderRadius: 'var(--r-0)',
+      background: 'var(--color-bg-surface)',
+      color: 'var(--color-fg-muted)',
       fontFamily: 'var(--font-mono)',
       fontSize: 'var(--fs-10)',
       lineHeight: '1.4',
@@ -360,6 +380,132 @@ function contextFocusChipParts(focus: EditorContextFocusLine): ReadonlyArray<str
 function contextFocusChipAriaLabel(focus: EditorContextFocusLine): string {
   const parts = contextFocusChipParts(focus)
   return `Focused context on line ${focus.line}: ${parts.join(', ')}`
+}
+
+// ── Annotation line chips ─────────────────────────────────────────
+
+export interface EditorAnnotationLine {
+  readonly id: string
+  readonly line: number
+  readonly kind: string
+  readonly keeperId: string
+  readonly goalId?: string | null
+  readonly taskId?: string | null
+}
+
+const setAnnotationLines = StateEffect.define<ReadonlyArray<EditorAnnotationLine>>()
+
+class AnnotationLineChip extends WidgetType {
+  constructor(private readonly annotations: ReadonlyArray<EditorAnnotationLine>) {
+    super()
+  }
+
+  toDOM(): HTMLElement {
+    const el = document.createElement('span')
+    el.className = 'cm-masc-annotation-chip'
+    const text = annotationLineChipText(this.annotations)
+    el.textContent = text
+    el.title = annotationLineChipTitle(this.annotations)
+    el.setAttribute('aria-label', annotationLineChipAriaLabel(this.annotations))
+    return el
+  }
+
+  eq(other: AnnotationLineChip): boolean {
+    return annotationLineKey(this.annotations) === annotationLineKey(other.annotations)
+  }
+}
+
+const annotationLineField = StateField.define<DecorationSet>({
+  create() {
+    return Decoration.none
+  },
+  update(value, tr) {
+    const mapped = value.map(tr.changes)
+    for (const effect of tr.effects) {
+      if (!effect.is(setAnnotationLines)) continue
+      return buildAnnotationLineDecorations(tr.state.doc, effect.value)
+    }
+    return mapped
+  },
+  provide: field => EditorView.decorations.from(field),
+})
+
+export function annotationLineChipExt(): Extension {
+  return annotationLineField
+}
+
+export function pushAnnotationLines(
+  view: EditorView,
+  annotations: ReadonlyArray<EditorAnnotationLine>,
+): void {
+  view.dispatch({ effects: [setAnnotationLines.of(annotations)] })
+}
+
+function buildAnnotationLineDecorations(
+  doc: Text,
+  annotations: ReadonlyArray<EditorAnnotationLine>,
+): DecorationSet {
+  const byLine = new Map<number, EditorAnnotationLine[]>()
+  for (const annotation of annotations) {
+    if (annotation.line < 1 || annotation.line > doc.lines) continue
+    const existing = byLine.get(annotation.line) ?? []
+    existing.push(annotation)
+    byLine.set(annotation.line, existing)
+  }
+  const builder = new RangeSetBuilder<Decoration>()
+  const sortedLines = [...byLine.entries()].sort(([left], [right]) => left - right)
+  for (const [lineNumber, lineAnnotations] of sortedLines) {
+    const line = doc.line(lineNumber)
+    builder.add(
+      line.to,
+      line.to,
+      Decoration.widget({
+        widget: new AnnotationLineChip(lineAnnotations.sort(annotationLineSort)),
+        side: 2,
+      }),
+    )
+  }
+  return builder.finish()
+}
+
+function annotationLineSort(left: EditorAnnotationLine, right: EditorAnnotationLine): number {
+  return left.kind.localeCompare(right.kind)
+    || left.keeperId.localeCompare(right.keeperId)
+    || left.id.localeCompare(right.id)
+}
+
+function annotationLineChipText(annotations: ReadonlyArray<EditorAnnotationLine>): string {
+  const first = annotations[0]
+  if (!first) return 'Annotation'
+  const parts = [
+    first.kind,
+    first.goalId ? `goal ${first.goalId}` : null,
+    first.taskId ? `task ${first.taskId}` : null,
+    `keeper ${first.keeperId}`,
+    annotations.length > 1 ? `+${annotations.length - 1}` : null,
+  ].filter((part): part is string => part !== null)
+  return parts.join(' · ')
+}
+
+function annotationLineChipTitle(annotations: ReadonlyArray<EditorAnnotationLine>): string {
+  return annotations.map(annotation => [
+    annotation.kind,
+    annotation.goalId ? `goal ${annotation.goalId}` : null,
+    annotation.taskId ? `task ${annotation.taskId}` : null,
+    `keeper ${annotation.keeperId}`,
+  ].filter((part): part is string => part !== null).join(' · ')).join('\n')
+}
+
+function annotationLineChipAriaLabel(annotations: ReadonlyArray<EditorAnnotationLine>): string {
+  const first = annotations[0]
+  const line = first?.line ?? 0
+  return `Line ${line} annotation context: ${annotationLineChipText(annotations)}`
+}
+
+function annotationLineKey(annotations: ReadonlyArray<EditorAnnotationLine>): string {
+  return annotations.map(annotation =>
+    `${annotation.id}:${annotation.line}:${annotation.kind}:${annotation.keeperId}:${annotation.goalId ?? ''}:${annotation.taskId ?? ''}`,
+  ).join('|')
 }
 
 // ── Language support (dynamic import) ─────────────────────────────

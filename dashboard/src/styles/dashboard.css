@@ -986,6 +986,51 @@
   gap: var(--sp-1);
 }
 
+.ide-activity-head-meta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.ide-activity-head-meta > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide-activity-refresh-status {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  min-height: 17px;
+  padding: 0 5px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--r-1);
+  background: var(--color-bg-muted);
+  color: var(--color-fg-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  font-weight: 600;
+}
+
+.ide-activity-refresh-status[data-state="live"] {
+  border-color: color-mix(in srgb, var(--color-status-ok) 38%, var(--color-border-default));
+  color: var(--color-status-ok);
+}
+
+.ide-activity-refresh-status[data-state="stale"] {
+  border-color: color-mix(in srgb, var(--color-status-warn) 44%, var(--color-border-default));
+  color: var(--color-status-warn);
+}
+
+.ide-activity-refresh-status[data-state="offline"] {
+  border-color: color-mix(in srgb, var(--color-status-err) 44%, var(--color-border-default));
+  color: var(--color-status-err);
+}
+
 .ide-run-progress {
   display: grid;
   gap: var(--sp-2);

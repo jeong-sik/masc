@@ -272,11 +272,11 @@ planner / implementer / supervisor 를 다른 도구로 분리할 때:
 읽기 위주 UI. 쓰기 정식 경로는 MCP 도구.
 
 - Monitoring: `http://127.0.0.1:<PORT>/dashboard#monitoring?section=journey`
-- Fleet Health: `…#monitoring?section=fleet-health`
-- Ops: `…#command?section=operations`
-- Connectors: `…#connectors?section=connector-status`
-- Workspace: `…#workspace?section=verification`
-- Lab: `…#lab?section=tools`
+- Fleet Health: `dashboard#monitoring?section=fleet-health`
+- Ops: `dashboard#command?section=operations`
+- Connectors: `dashboard#connectors?section=connector-status`
+- Workspace: `dashboard#workspace?section=verification`
+- Lab: `dashboard#lab?section=tools`
 
 대시보드 빌드:
 

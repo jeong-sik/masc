@@ -5,7 +5,7 @@ import { createIdeDataCoordinator } from './ide-data-coordinator'
 import { IdeExplorer } from './ide-explorer'
 import { IdeEditor, type IdeEditorView } from './ide-editor'
 import { IdeConversationRailMock } from './ide-conversation-rail-mock'
-import { IdeActivityMock } from './ide-activity-mock'
+import { IdeActivityPanel } from './ide-activity-panel'
 import { IdeKeeperWorkPanel } from './ide-keeper-work-panel'
 import { IdeInterjectMock } from './ide-interject-mock'
 import { KeeperShellDrawer } from './keeper-shell-drawer'
@@ -33,6 +33,7 @@ type IdeFocus = 'review'
 
 const IDE_LAYER_KINDS = new Set(IDE_LAYERS.map(layer => layer.kind))
 const IDE_LAYER_LABELS = new Map(IDE_LAYERS.map(layer => [layer.kind, layer.label]))
+const IDE_ACTIVITY_POLL_MS = 10_000
 export const REVIEW_FOCUS_LAYERS = ['keeper-trace', 'approve', 'notes'] as const
 const REVIEW_FOCUS_LAYER_PARAM = REVIEW_FOCUS_LAYERS.join(',')
 const EMPTY_LAYER_PARAM = 'none'
@@ -326,10 +327,11 @@ export function IdeShell() {
           ? null
           : html`
             <div class="ide-plane-activity" style=${{ minHeight: 0 }}>
-              <${IdeActivityMock}
+              <${IdeActivityPanel}
                 activeFile=${activeFilePath}
                 annotations=${annotations}
                 diffRows=${diffRows}
+                pollMs=${IDE_ACTIVITY_POLL_MS}
               />
             </div>
           `}

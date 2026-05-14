@@ -659,31 +659,70 @@ let persona_name_for_drift_check (meta : keeper_meta) =
   | Error _ -> meta.name
 ;;
 
-let persona_path_for_drift_check ~base_path persona_name =
+let persona_profile_path_for_drift_check ~base_path persona_name =
   match Config_dir_resolver.personas_dir_opt () with
-  | Some dir -> Filename.concat dir persona_name
+  | Some dir ->
+    Filename.concat (Filename.concat dir persona_name) "profile.json"
   | None ->
     Filename.concat
-      (Filename.concat (Common.masc_dir_from_base_path ~base_path) "personas")
-      persona_name
+      (Filename.concat
+         (Filename.concat (Common.masc_dir_from_base_path ~base_path) "personas")
+         persona_name)
+      "profile.json"
+;;
+
+type persona_drift_log_level =
+  | Persona_drift_warn
+  | Persona_drift_error
+
+let keeper_defaults_have_inline_identity
+    (defaults : Keeper_types_profile.keeper_profile_defaults)
+  =
+  Option.is_some defaults.goal
+  || Option.is_some defaults.short_goal
+  || Option.is_some defaults.mid_goal
+  || Option.is_some defaults.long_goal
+  || Option.is_some defaults.will
+  || Option.is_some defaults.needs
+  || Option.is_some defaults.desires
+  || Option.is_some defaults.instructions
+  || defaults.mention_targets <> []
+;;
+
+let persona_drift_log_level_for_missing_profile (meta : keeper_meta) =
+  match Keeper_types_profile.load_keeper_profile_defaults_result meta.name with
+  | Ok defaults when keeper_defaults_have_inline_identity defaults ->
+    Persona_drift_warn
+  | Ok _ | Error _ -> Persona_drift_error
 ;;
 
 let log_persona_drift_if_missing ~base_path (meta : keeper_meta) =
   let persona_name = persona_name_for_drift_check meta in
-  let searched = persona_path_for_drift_check ~base_path persona_name in
+  let searched = persona_profile_path_for_drift_check ~base_path persona_name in
   if Sys.file_exists searched then ()
   else (
     Prometheus.inc_counter
       Keeper_metrics.metric_keeper_persona_drift_missing
       ~labels:[ "keeper", meta.name ]
       ();
-    Log.Keeper.error
-      "[#10993][persona_drift] keeper=%s resolved=%s persona file missing at %s — \
-       runtime falls through to logging-only RFC P3-a path; operator action: create \
-       persona file or remove keeper from registry"
-      meta.name
-      persona_name
-      searched)
+    let msg =
+      Printf.sprintf
+        "[#10993][persona_drift] keeper=%s resolved=%s persona profile missing at %s"
+        meta.name
+        persona_name
+        searched
+    in
+    match persona_drift_log_level_for_missing_profile meta with
+    | Persona_drift_warn ->
+      Log.Keeper.warn
+        "%s — using keeper TOML metadata; operator action: add persona profile if \
+         persona assets are required"
+        msg
+    | Persona_drift_error ->
+      Log.Keeper.error
+        "%s — runtime falls through to logging-only RFC P3-a path; operator action: \
+         create persona profile or remove keeper from registry"
+        msg)
 ;;
 
 let supervise_keepalive ~proactive_warmup_sec (ctx : _ context) (meta : keeper_meta) =

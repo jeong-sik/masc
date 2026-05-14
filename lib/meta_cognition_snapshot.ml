@@ -10,6 +10,8 @@ module StringMap = Map.Make (String)
 
 open Meta_cognition_types
 
+let rule_id_tension_tool_blockage = "tension:masc_tool_blockage"
+
 (* ================================================================ *)
 (* Data loading                                                     *)
 (* ================================================================ *)
@@ -262,7 +264,7 @@ let tension_json ~limit governance_cases (rule : tension_rule) sources =
     let recurrence_count = List.length matching in
     let needs_operator =
       List.exists Meta_cognition_rules.operator_need_support matching
-      || String.equal rule.id "tension:masc_tool_blockage"
+      || String.equal rule.id rule_id_tension_tool_blockage
     in
     let severity =
       if recurrence_count >= 6 || List.length affected_agents >= 4 then

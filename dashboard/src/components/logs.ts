@@ -67,8 +67,8 @@ const LEVEL_COLORS: Record<string, string> = {
 
 const SOURCE_LABELS: Record<string, string> = {
   structured: 'structured',
-  legacy_stderr: 'legacy stderr',
-  legacy_traceln: 'legacy traceln',
+  legacy_stderr: 'stderr',
+  legacy_traceln: 'trace line',
   client_tool_host: 'client tool-host',
   sse: 'sse',
 }
@@ -296,43 +296,13 @@ function failureEnvelope(entry: LogEntry): FailureEnvelope | null {
   }
 }
 
-function classifyMessageCause(message: string): string | null {
-  const lower = message.toLowerCase()
-  if (lower.includes('oas_timeout_budget') || lower.includes('oas execution timed out')) {
-    return 'oas_timeout_budget'
-  }
-  if (lower.includes('inter_chunk_idle')) return 'inter_chunk_idle'
-  if (lower.includes('no_first_token')) return 'no_first_token'
-  if (lower.includes('cascade_exhausted') || lower.includes('all cascades exhausted')) {
-    return 'cascade_exhausted'
-  }
-  if (lower.includes('stale watchdog')) return 'stale_watchdog'
-  if (lower.includes('required tool contract') || lower.includes('tool_required_unsatisfied')) {
-    return 'tool_required_unsatisfied'
-  }
-  if (lower.includes('semaphore wait')) return 'queue_wait_timeout'
-  if (lower.includes('legacy verification directory')) return 'legacy_verification_dir'
-  if (lower.includes('zero_token_usage_reported')) return 'usage_zero_tokens'
-  if (lower.includes('usage telemetry untrusted')) return 'usage_telemetry_untrusted'
-  if (lower.includes('usage telemetry unavailable')) return 'usage_telemetry_unavailable'
-  if (lower.includes('orphan threshold breached')) return 'registry_orphan_threshold'
-  if (lower.includes('entry not found, update dropped')) return 'registry_orphan_update'
-  if (lower.includes('archived credential')) return 'credential_archive'
-  if (lower.includes('retired pg runtime env')) return 'retired_pg_env'
-  if (lower.includes('rate limited') || lower.includes('temporarily limiting requests')) {
-    return 'provider_rate_limit'
-  }
-  if (lower.includes('invalid request')) return 'provider_invalid_request'
-  return null
-}
-
 export function logDiagnosticCause(entry: LogEntry): string | null {
   const failure = failureEnvelope(entry)
   if (failure) return failure.cause_code
   const details = entryDetails(entry)
   const event = detailLabel(details, 'event')
   if (event) return event
-  return classifyMessageCause(entry.message)
+  return null
 }
 
 function topCounts(map: Map<string, number>, limit = 3): LogCauseCount[] {

@@ -5,6 +5,7 @@
 // Backend dashboard timeout is 30s; frontend must wait slightly longer.
 export const DEFAULT_GET_TIMEOUT_MS = 35_000
 export const DEFAULT_POST_TIMEOUT_MS = 30_000
+export const KEEPER_LIFECYCLE_TIMEOUT_MS = 12_000
 export const DEFAULT_MCP_TIMEOUT_MS = 60_000
 export const NAMESPACE_TRUTH_GET_TIMEOUT_MS = 30_000
 export const KEEPER_MESSAGE_TIMEOUT_MS = 90_000

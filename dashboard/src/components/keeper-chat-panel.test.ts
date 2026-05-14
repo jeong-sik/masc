@@ -13,9 +13,9 @@ describe('isKeeperTextContentEvent', () => {
     expect(isKeeperTextContentEvent(event)).toBe(true)
   })
 
-  it('keeps legacy text delta compatibility', () => {
+  it('rejects retired text delta events', () => {
     const event: KeeperChatStreamEvent = { type: 'TEXT_DELTA', delta: 'hi' }
-    expect(isKeeperTextContentEvent(event)).toBe(true)
+    expect(isKeeperTextContentEvent(event)).toBe(false)
   })
 
   it('rejects non-text stream events', () => {

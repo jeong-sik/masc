@@ -45,35 +45,11 @@ export function defaultJournalSeverity(eventType: JournalEventType | undefined):
   }
 }
 
-function legacyJournalSeverityFromText(text: string | undefined): JournalSeverity {
-  const normalized = (text ?? '').trim().toLowerCase()
-  if (!normalized) return 'unknown'
-  if (
-    normalized.startsWith('[error]')
-    || normalized.startsWith('[fatal]')
-    || /\b(failed|failure|fatal|exception|timed out|timeout|crash(?:ed)?)\b/.test(normalized)
-  ) {
-    return 'error'
-  }
-  if (
-    normalized.startsWith('[warn]')
-    || normalized.startsWith('[warning]')
-    || /\b(warn(?:ing)?|degraded|retry(?:ing)?)\b/.test(normalized)
-  ) {
-    return 'warn'
-  }
-  return 'unknown'
-}
-
 export function journalSeverity(entry: JournalEntry): JournalSeverity {
   const explicit = normalizeJournalSeverity(entry.severity)
   if (explicit !== 'unknown') return explicit
 
-  const fallback = defaultJournalSeverity(entry.eventType)
-  if (fallback === 'error' || fallback === 'warn') return fallback
-
-  const legacy = legacyJournalSeverityFromText(entry.text)
-  return legacy === 'unknown' ? fallback : legacy
+  return defaultJournalSeverity(entry.eventType)
 }
 
 export function isErrorJournalEntry(entry: JournalEntry): boolean {

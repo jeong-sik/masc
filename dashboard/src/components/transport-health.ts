@@ -533,7 +533,7 @@ export function TransportHealthPanel() {
                 <${MetricRow} label="옵저버 스트림" value=${data.streamable_http.observer_stream} />
                 <${MetricRow} label="프레즌스 스트림" value=${data.streamable_http.presence_stream} />
                 <${MetricRow} label="오퍼레이터 표면" value=${data.streamable_http.operator_endpoint} />
-                <${MetricRow} label="레거시" value=${data.streamable_http.legacy_sse_endpoint} sub=${'deprecated'} />
+                <${MetricRow} label="SSE compatibility" value=${data.streamable_http.legacy_sse_endpoint} sub=${'deprecated'} />
               </div>
             <//>
 

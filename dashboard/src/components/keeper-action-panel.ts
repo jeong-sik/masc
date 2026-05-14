@@ -33,9 +33,12 @@ import type { Keeper } from '../types'
 
 // ── Shared helpers ────────────────────────────────────────────────────────
 
-async function afterAction(): Promise<void> {
+function afterAction(): void {
   invalidateDashboardCache()
-  await refreshDashboard({ force: true })
+  void refreshDashboard({ force: true }).catch(err => {
+    const message = err instanceof Error ? err.message : 'dashboard refresh failed'
+    showToast(message, 'warning')
+  })
 }
 
 type KeeperActionKey = 'pause' | 'resume' | 'wakeup' | 'boot' | 'shutdown'
@@ -64,7 +67,7 @@ async function runKeeperAction(
     }
     if (res.ok) {
       showToast(`${name} ${labels[action]}됨`, 'success')
-      await afterAction()
+      afterAction()
     } else {
       showToast(res.error ?? `${labels[action]} 실패`, 'error')
     }

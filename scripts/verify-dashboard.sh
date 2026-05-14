@@ -193,6 +193,10 @@ check_http "planning 200" "$BASE/api/v1/dashboard/planning" "200"
 check_json "planning exposes rollup" "$BASE/api/v1/dashboard/planning" "'rollup' in d" '^True$'
 check_http "git graph 200" "$BASE/api/v1/git/graph?n=20" "200"
 check_json "git graph exposes stats and nodes" "$BASE/api/v1/git/graph?n=20" "'stats' in d and 'nodes' in d" '^True$'
+check_http "repositories 200" "$BASE/api/v1/repositories" "200"
+check_json "repositories exposes list" "$BASE/api/v1/repositories" "'repositories' in d and 'total' in d" '^True$'
+check_http "workspace tree 200" "$BASE/api/v1/workspace/tree?depth=1" "200"
+check_json "workspace tree exposes nodes array" "$BASE/api/v1/workspace/tree?depth=1" "len(d) >= 0" '^True$'
 check_http "verification requests 200" "$BASE/api/v1/verification/requests" "200"
 check_json "verification requests exposes list" "$BASE/api/v1/verification/requests" "'requests' in d" '^True$'
 check_http "verification summary 200" "$BASE/api/v1/verification/summary" "200"

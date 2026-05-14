@@ -150,6 +150,8 @@ code_refs:
   - planning + goal tree
 - `GET /api/v1/git/graph`
   - workspace repository graph view
+- `GET /api/v1/repositories`, `GET /api/v1/workspace/tree`
+  - workspace repository registry and source tree browser read models
 - `GET /api/v1/verification/requests`, `GET /api/v1/verification/summary`
   - workspace verification table and status rollup
 - `GET /api/v1/verification/specs`, `GET /api/v1/verification/tlc-results`

@@ -280,7 +280,8 @@ let make_health_json ?(listener = "http/1.1") request =
        but ops still need a quick count without scraping /metrics. List names
        so an operator can correlate with the cause encoded in their
        last_blocker_class. *)
-    ("paused_keepers", paused_keepers_health_json ());
+    let key_paused_keepers = "paused_keepers" in
+    (key_paused_keepers, paused_keepers_health_json ());
     ("keeper_config_parse_error_count",
      `Int keeper_config_parse_error_count);
     ( "keeper_config_parse_errors",

@@ -156,7 +156,7 @@ let run_with_timeout_and_fallback ~timeout_s fn =
                ])
            ()
        in
-       Log.Keeper.emit Log.Warn
+       Log.Keeper.emit Log.Info
          ~details:
            (bridge_details
               [

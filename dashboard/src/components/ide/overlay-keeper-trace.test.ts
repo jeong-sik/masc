@@ -163,6 +163,22 @@ describe('OverlayKeeperTrace — bucket render (RFC-0028 §5)', () => {
     expect(lineLabels.some(t => t.includes('L30'))).toBe(true)
   })
 
+  it('renders sibling rows when same (keeper, line) buckets differ only by filePath', () => {
+    // Regression for PR #15162 P2: bucket key now includes filePath but the
+    // rendered row key did not, so Preact reconciliation could reuse one
+    // bucket's DOM for a sibling whose keeperName + line matched but whose
+    // filePath differed. The render must produce two distinct rows.
+    pushAnchored('a', 'scholar', 12, 1000, 'th-a', 'runtime.ts')
+    pushAnchored('b', 'scholar', 12, 1100, 'th-b', 'worker.ts')
+
+    const container = createContainer()
+    render(html`<${OverlayKeeperTrace} active=${true} />`, container)
+    const buckets = container.querySelectorAll('[role="group"][data-keeper="scholar"][data-line="12"]')
+    expect(buckets.length).toBe(2)
+    const filePaths = Array.from(buckets).map(b => b.getAttribute('data-file')).sort()
+    expect(filePaths).toEqual(['runtime.ts', 'worker.ts'])
+  })
+
   it('caps visible chips to TRACE_CHIP_CAP and renders +N overflow', () => {
     // Push 5 events, all anchored at scholar L12 within retention.
     // None coalesce because each tsMs is > COALESCE_WINDOW_MS apart.

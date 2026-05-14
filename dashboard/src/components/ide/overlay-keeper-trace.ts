@@ -175,7 +175,10 @@ export function OverlayKeeperTrace({ active, keeperFilter }: OverlayKeeperTraceP
       style=${OVERLAY_CONTAINER_STYLE}
     >
       ${buckets.map(bucket => html`
-        <${BucketRow} key=${`${bucket.keeperName}@${bucket.line ?? 'no-line'}`} bucket=${bucket} />
+        <${BucketRow}
+          key=${`${bucket.keeperName}@${bucket.filePath ?? 'no-file'}@${bucket.line ?? 'no-line'}`}
+          bucket=${bucket}
+        />
       `)}
     </div>
   `

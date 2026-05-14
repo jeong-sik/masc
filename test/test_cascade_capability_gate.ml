@@ -7,6 +7,7 @@ open Alcotest
 
 module CI = Masc_mcp.Cascade_inference
 module CE = Masc_mcp.Cascade_error_classify
+module CR = Masc_mcp.Cascade_runtime
 
 let cascade_name = Masc_mcp.Keeper_cascade_profile.Runtime_name "keeper_unified"
 
@@ -72,6 +73,67 @@ let test_sdk_error_round_trip_preserves_structured_violation () =
        check string "reason round trip" "requested_exceeds_provider_ceiling" reason
      | _ -> fail "expected structured violation round trip")
 
+let write_file path body =
+  let oc = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc body)
+
+let with_temp_cascade_toml body f =
+  let dir = Filename.temp_file "cascade-capability-gate-" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  let config_path = Filename.concat dir "cascade.toml" in
+  write_file config_path body;
+  let saved_config_dir = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  let restore_env () =
+    match saved_config_dir with
+    | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
+    | None -> Unix.putenv "MASC_CONFIG_DIR" ""
+  in
+  Unix.putenv "MASC_CONFIG_DIR" dir;
+  Masc_mcp.Config_dir_resolver.reset ();
+  Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ();
+  Fun.protect
+    ~finally:(fun () ->
+      restore_env ();
+      Masc_mcp.Config_dir_resolver.reset ();
+      Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ();
+      Sys.remove config_path;
+      Unix.rmdir dir)
+    f
+
+let test_cascade_output_cap_not_context_window () =
+  with_temp_cascade_toml
+    {|
+[providers.remote]
+protocol = "openai-http"
+endpoint = "https://example.test/v1"
+
+[models.long]
+api-name = "remote-long"
+max-context = 200000
+tools-support = true
+
+[models.long.capabilities]
+max-output-tokens = 8192
+
+[remote.long]
+max-concurrent = 1
+
+[tier.primary]
+members = ["remote.long"]
+
+[routes.keeper_unified]
+target = "tier.primary"
+|}
+    (fun () ->
+      let ceiling = CR.max_output_tokens_ceiling_of_cascade_name cascade_name in
+      check (option int) "output ceiling" (Some 8192) ceiling;
+      CI.validate_max_tokens_within_ceiling ~cascade_name
+        ~provider_ceiling:ceiling 65536
+      |> check_violation "requested_exceeds_provider_ceiling" 65536 8192)
+
 let () =
   run "cascade_capability_gate" [
     "max_tokens_ceiling_validation", [
@@ -85,5 +147,9 @@ let () =
         "structured error round trip"
         `Quick
         test_sdk_error_round_trip_preserves_structured_violation;
+      test_case
+        "cascade output cap, not context window, gates max_tokens"
+        `Quick
+        test_cascade_output_cap_not_context_window;
     ];
   ]

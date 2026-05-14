@@ -180,11 +180,14 @@ let run_turn
   in
   let temperature = ctx.temperature in
   let max_tokens = ctx.max_tokens in
+  let max_output_ceiling =
+    Cascade_runtime.max_output_tokens_ceiling_of_cascade_name cascade_name
+  in
   let pre_dispatch_max_tokens_error =
     match
       Cascade_inference.validate_max_tokens_within_ceiling
         ~cascade_name
-        ~provider_ceiling:(Some max_context)
+        ~provider_ceiling:max_output_ceiling
         max_tokens
     with
     | Ok _ -> None

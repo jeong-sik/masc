@@ -596,10 +596,14 @@ let run_keeper_cycle
                     ~cascade_name
                     ~fallback:Keeper_config.keeper_unified_max_tokens
                 in
+                let max_output_ceiling =
+                  Cascade_runtime.max_output_tokens_ceiling_of_cascade_name
+                    cascade_name
+                in
                 (match
                    Cascade_inference.validate_max_tokens_within_ceiling
                      ~cascade_name
-                     ~provider_ceiling:(Some max_context)
+                     ~provider_ceiling:max_output_ceiling
                      raw_max_tokens
                  with
                  | Error err ->

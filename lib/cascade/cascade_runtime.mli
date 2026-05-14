@@ -36,6 +36,8 @@ val models_of_cascade_name_result :
   Keeper_cascade_profile.runtime_name -> (string list, string) result
 val models_of_cascade_name :
   Keeper_cascade_profile.runtime_name -> string list
+val max_output_tokens_ceiling_of_cascade_name :
+  Keeper_cascade_profile.runtime_name -> int option
 val resolve_named_providers_result :
   ?provider_filter:string list ->
   ?require_tool_choice_support:bool ->

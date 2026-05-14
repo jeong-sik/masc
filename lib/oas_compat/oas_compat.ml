@@ -85,6 +85,7 @@ module Http_client = struct
      needs updating.  Downstream cascade code uses [retryable_error]
      variants, not raw strings. *)
 
+  let needle_http_body_parse_error = "can't find closing"
   let max_scan_bytes = 512
 
   (* Case-insensitive substring check — O(n*m) but the haystack scan is
@@ -137,7 +138,7 @@ module Http_client = struct
       JSON parse failure (M04).
       Ollama fails with "can't find closing '}'" on large bodies (~175 KB+). *)
   let is_http_body_parse_error body =
-    contains_ci_scan_limited ~haystack:body ~needle:"can't find closing"
+    contains_ci_scan_limited ~haystack:body ~needle:needle_http_body_parse_error
 
   let classify (err : Llm_provider.Http_client.http_error) :
       cascade_failure_class =

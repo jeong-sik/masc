@@ -1,8 +1,10 @@
 # RFC-0036: oas Cognitive Mapping (companion to RFC-0035)
 
-- **Status**: Draft
+- **Status**: Active
 - **Author**: Claude (autonomous, /loop iteration 5)
 - **Created**: 2026-05-07
+- **Activated**: 2026-05-14 (cite-able foundation for downstream OAS-touching RFCs; manifest table at §"Problem" is the working contract)
+- **Implementation state**: manifest accepted as the working host ↔ oas pairing; PR-A1 / PR-A2 / PR-B (Extensions A and B) **not yet implemented** — those proposals retain their `not started` status in §"Implementation plan (this RFC stack)" and ship under separate PRs when scheduled. Activation here does **not** imply Extensions are merged.
 - **Companion to**: RFC-0035 (Cognitive IDE Master Plan Integration)
 - **Repos affected**: `jeong-sik/oas` (agent_sdk) and the masc-mcp ↔ oas
   contract surface

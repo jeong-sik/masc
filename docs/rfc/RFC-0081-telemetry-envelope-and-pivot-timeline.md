@@ -60,7 +60,9 @@ Mixing the two would break the SDK Independence Gate that `oas` enforces on Read
 
 ### 4.1 Envelope context propagation (receive side)
 
-A fiber-local binding is installed at keeper turn start in `lib/keeper/keeper_agent_run.ml` (currently line 205-217 where the turn begins):
+The oas-events relay (`lib/cascade/cascade_event_bridge.ml:1082` `start_impl`) runs in a *background fiber* subscribed to the OAS event bus via `Agent_sdk_metrics_bridge.subscribe`. It cannot read fiber-local context from keeper turn fibers because `Eio.Fiber.with_binding` propagates only down the same fiber stack. Stamping therefore uses an *explicit shared map* for the write-time primary path plus the §4.2 run-index for the read-time fallback path. Both paths share the same `Keeper_context.t` shape.
+
+**Write-time primary** — `lib/keeper/keeper_context.ml` (new) maintains a shared in-memory map keyed on the OAS-side `oas_run_id`:
 
 ```ocaml
 module Keeper_context = struct
@@ -70,35 +72,48 @@ module Keeper_context = struct
     ; agent_name : string option
     ; task_id : string option
     ; goal_id : string option
-    ; oas_run_id : string option
+    ; registered_at : float  (* for the periodic cleanup sweep *)
     }
 
-  let current_key : t Eio.Fiber.key = Eio.Fiber.create_key ()
-end
+  let runtime : (string, t) Hashtbl.t = Hashtbl.create 64
+  let runtime_mu = Eio.Mutex.create ()
 
-let with_turn_context ~ctx fn =
-  Eio.Fiber.with_binding Keeper_context.current_key ctx fn
+  let register ~oas_run_id ctx =
+    Eio_guard.with_mutex runtime_mu (fun () ->
+      Hashtbl.replace runtime oas_run_id ctx)
+
+  let unregister ~oas_run_id =
+    Eio_guard.with_mutex runtime_mu (fun () ->
+      Hashtbl.remove runtime oas_run_id)
+
+  let lookup ~oas_run_id : t option =
+    Eio_guard.with_mutex runtime_mu (fun () ->
+      Hashtbl.find_opt runtime oas_run_id)
+end
 ```
 
-The oas-events relay in `lib/cascade/cascade_event_bridge.ml` reads the binding and stamps the envelope at the point each `Custom("telemetry_event", json)` payload is composed for the `.masc/oas-events/` JSONL write:
+The Hashtbl + `Eio.Mutex` follows the existing `telemetry_eio.ml:119-120` `telemetry_store_cache` pattern. `keeper_agent_run.ml` calls `Keeper_context.register` at turn start (just after `runtime_manifest_context` is constructed) and `Keeper_context.unregister` at turn end (paired in the same scope; an outer `Fun.protect`-style finalizer guarantees unregister on exception). A periodic cleanup fiber drops entries older than 1h to bound growth if `unregister` never runs (e.g., abrupt termination).
+
+The relay reads `Keeper_context.lookup ~oas_run_id` for each `Custom("telemetry_event", json)` payload and stamps the envelope before writing to `.masc/oas-events/`:
 
 ```ocaml
-let stamp_envelope ~base_envelope =
-  match Eio.Fiber.get Keeper_context.current_key with
-  | None -> base_envelope
+let stamp_envelope ~oas_run_id ~base_envelope =
+  match Keeper_context.lookup ~oas_run_id with
+  | None -> base_envelope  (* unmapped; the read-time fallback fills it *)
   | Some ctx ->
       { base_envelope with
         keeper_name   = Some ctx.keeper_name
       ; keeper_turn_id = Some ctx.keeper_turn_id
       ; agent_name    = base_envelope.agent_name |> coalesce ctx.agent_name
       ; task_id       = base_envelope.task_id    |> coalesce ctx.task_id
-      ; goal_id       = base_envelope.goal_id    |> coalesce ctx.goal_id
-      ; oas_run_id    = base_envelope.oas_run_id |> coalesce ctx.oas_run_id }
+      ; goal_id       = base_envelope.goal_id    |> coalesce ctx.goal_id }
 ```
 
-`coalesce` prefers the existing value if present (some payloads carry their own `agent_name`); the binding fills only the missing fields.
+`coalesce` prefers an existing payload value (some payloads carry their own `agent_name`); the lookup fills only missing fields.
 
-`lib/keeper/keeper_telemetry_consumer.ml` keeps its current "deliberately do not deserialize" stance for the payload body — only the envelope is stamped via the binding side. The consumer code itself does not change.
+**Read-time fallback** (§4.3) — if write-time stamping missed (relay raced turn `register`, server restart between turn end and stream finalize, etc.) the jsonl row keeps null fields. The pivot API then joins on the run-index (§4.2) at read time using `oas_run_id` as the key, returning a stamped record to the consumer. Both paths share the same envelope shape so consumers see identical results regardless of which path filled them.
+
+`lib/keeper/keeper_telemetry_consumer.ml` keeps its current "deliberately do not deserialize" stance for the payload body — the envelope stamp happens at the relay write site, not in the consumer.
 
 ### 4.2 Run-index reverse map
 
@@ -217,23 +232,31 @@ Each PR remains Draft until its gate passes. PR body cites this RFC by number an
 
 ## 8. Risks & alternatives
 
-### 8.1 Risk — fiber-local binding leakage into sibling fibers
+### 8.1 Risk — write-time stamp misses (relay races register)
 
-`Eio.Fiber.with_binding` is lexically scoped; sibling fibers spawned *outside* the scope inherit `None`. Risk is *inherited binding into background fibers spawned inside the turn scope* (e.g., a long-lived sampler that outlives the turn). Mitigation: §6 Gate 1 #1 tolerates 10% null records; sampler fibers must explicitly clear context via `Eio.Fiber.with_binding ... None` if they outlive turn semantics. Test for this in Phase 1.
+If the relay processes an OAS event after a turn was published but before `Keeper_context.register` is visible under the mutex, or if a publish from a fiber that did not register (sub-fiber spawned ad-hoc) emits an event, the relay's `lookup` returns `None` and writes a null-stamped row. Mitigation: §4.3 read-time fallback joins the row to the run-index on read. §6 Gate 1 accepts up to 10% null at write time as long as the run-index covers them. Phase 1 instrumentation: a prometheus counter `masc_oas_event_envelope_stamp_total{result=hit|miss}` is incremented per relay event so operators see the hit rate.
 
-### 8.2 Risk — run-index growth
+### 8.2 Risk — Keeper_context map growth from missed unregister
 
-One line per keeper turn. Estimated at ~10 KB/day per active keeper, ~MB/month per fleet of 16 keepers. Negligible at masc-mcp scale; revisit if keeper count grows 10×.
+Abrupt termination (server crash, switch fail before the finalizer runs) can leave `Keeper_context.runtime` entries that never `unregister`. Mitigation: keys are unique per turn (`oas_run_id`), so duplicates never accrete; a periodic cleanup fiber drops entries older than 1h (well above the longest expected keeper turn). The cleanup fiber runs every 10 minutes and follows the §RFC-0063 cooperative-scheduling contract (sleep between iterations).
 
-### 8.3 Alternative — global mutable registry for keeper context
+### 8.3 Risk — run-index growth
 
-Rejected. Global mutable state is the exact dict/map global registry CLAUDE.md §AI 코드 생성 안티패턴 §3 (boundary violation) calls out. Fiber-local binding is the OCaml/Eio idiom for request-scoped context.
+One line per keeper turn. ~10 KB/day per active keeper, ~MB/month per fleet of 16 keepers. Negligible at masc-mcp scale; revisit if keeper count grows 10×.
 
-### 8.4 Alternative — derive turn from `oas_run_id` at read time without an index
+### 8.4 Alternative — fiber-local binding only
+
+Rejected after grep: the oas-events relay is a *background fiber* (`cascade_event_bridge.ml:1082` `Eio.Fiber.fork ~sw` inside `start_impl`) subscribed to the OAS bus. `Eio.Fiber.with_binding` propagates only down the same fiber stack, so the relay never sees a binding installed in a keeper turn fiber. Fiber-local idiom does not fit this topology; an explicit shared map is required.
+
+### 8.5 Alternative — read-time join only (no write-time stamping)
+
+Rejected as the *only* path. Read-time join is the durable fallback for write-time misses, but if the write side carries no envelope at all then every consumer (CLI tail, ad-hoc jq, log shippers) must run the join themselves. Stamping at write keeps the durable jsonl record self-describing for the common case.
+
+### 8.6 Alternative — derive turn from `oas_run_id` at read time without an index
 
 Rejected on cost. Every read query would have to scan `keeper_runtime_manifest` files across the date range to resolve `oas_run_id → keeper_turn_id`. Index lookup is O(1) per record; scan is O(records × turns). Index is the structural fix.
 
-### 8.5 Alternative — push aggregation to dashboard read layer
+### 8.7 Alternative — push aggregation to dashboard read layer
 
 Rejected. The current dashboard `useEffect`-free pattern relies on `useQuery` over typed API responses. Pushing grouping into the frontend forces every consumer (CLI, future scripts, ad-hoc queries) to re-implement the grouping logic. Backend grouping is the SSOT.
 

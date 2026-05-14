@@ -514,6 +514,11 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
     | Tool_name.Keeper.Board_post
     | Tool_name.Keeper.Board_search
     | Tool_name.Keeper.Board_stats
+    | Tool_name.Keeper.Board_sub_board_create
+    | Tool_name.Keeper.Board_sub_board_delete
+    | Tool_name.Keeper.Board_sub_board_get
+    | Tool_name.Keeper.Board_sub_board_list
+    | Tool_name.Keeper.Board_sub_board_update
     | Tool_name.Keeper.Board_vote -> "board"
     | Tool_name.Keeper.Voice_agent
     | Tool_name.Keeper.Voice_listen

@@ -268,6 +268,46 @@ describe('IdeContextLens', () => {
       line: 22,
       meta: 'warning / ocamllsp / code type',
     })
+    expect(model.anchors[0]?.route_links?.map(link => link.label)).toEqual(['Code', 'Telemetry'])
+    expect(model.anchors[0]?.route_links?.find(link => link.label === 'Code')).toMatchObject({
+      tab: 'code',
+      params: {
+        section: 'ide-shell',
+        view: 'source',
+        file: 'lib/keeper/keeper_exec_ide.ml',
+        line: '22',
+        surface: 'LSP',
+        label: 'This expression has type string but an int wa...',
+        source_id: 'diagnostic-22-ocamllsp-type-0',
+      },
+    })
+    expect(model.anchors[0]?.route_links?.find(link => link.label === 'Telemetry')).toMatchObject({
+      tab: 'monitoring',
+      params: {
+        section: 'fleet-health',
+        view: 'event-log',
+        q: 'ocamllsp type',
+      },
+      evidence: 'Fleet telemetry event log · query ocamllsp type',
+    })
+  })
+
+  it('keeps diagnostic telemetry routes quiet without source metadata', () => {
+    const model = deriveIdeContextLens({
+      filePath: 'lib/keeper/keeper_exec_ide.ml',
+      annotations: [],
+      diagnostics: [{
+        file_path: 'lib/keeper/keeper_exec_ide.ml',
+        line: 22,
+        severity: 1,
+        message: 'Missing semicolon.',
+      }],
+      diffRows: [],
+      events: [],
+      overlay: { ...overlay, cursors: new Map() },
+    })
+
+    expect(model.anchors[0]?.route_links?.map(link => link.label)).toEqual(['Code'])
   })
 
   it('omits invalid annotation lines from anchors and focus state', () => {

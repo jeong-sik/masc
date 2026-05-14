@@ -494,17 +494,30 @@ function buildAnchors(
   const anchors: IdeContextAnchor[] = []
 
   for (const [index, diagnostic] of diagnostics.slice(0, 2).entries()) {
+    const line = positiveLine(diagnostic.line)
+    const label = truncate(diagnostic.message || 'diagnostic', 48)
+    const sourceId = `diagnostic-${diagnostic.line}-${diagnostic.source ?? 'lsp'}-${diagnostic.code ?? 'message'}-${index}`
+    const telemetryQuery = diagnosticTelemetryQuery(diagnostic)
     anchors.push({
-      id: `diagnostic-${diagnostic.line}-${diagnostic.source ?? 'lsp'}-${diagnostic.code ?? 'message'}-${index}`,
+      id: sourceId,
       file_path: diagnostic.file_path,
       surface: 'LSP',
-      label: truncate(diagnostic.message || 'diagnostic', 48),
+      label,
       meta: compactMeta([
         diagnosticSeverityLabel(diagnostic.severity),
         diagnostic.source ?? null,
         diagnostic.code !== undefined ? `code ${diagnostic.code}` : null,
       ]),
-      line: positiveLine(diagnostic.line),
+      line,
+      route_links: routeLinksForContext({
+        filePath: diagnostic.file_path,
+        line,
+        surface: 'LSP',
+        label,
+        sourceId,
+        telemetry: telemetryQuery !== undefined,
+        telemetryQuery,
+      }),
     })
   }
 
@@ -725,6 +738,16 @@ function diagnosticSeverityLabel(severity: number | undefined): string {
   if (severity === 3) return 'info'
   if (severity === 4) return 'hint'
   return 'diagnostic'
+}
+
+function diagnosticTelemetryQuery(diagnostic: IdeContextDiagnostic): string | undefined {
+  const parts = [
+    diagnostic.source,
+    diagnostic.code === undefined ? undefined : String(diagnostic.code),
+  ]
+    .map(part => part?.trim())
+    .filter((part): part is string => Boolean(part))
+  return parts.length > 0 ? parts.join(' ') : undefined
 }
 
 function eventContextMeta(event: RunActivityEvent): string {

@@ -437,6 +437,36 @@ let test_exec_cache_none_no_caching () =
          | `Bool true -> false
          | _ -> true))
 
+let test_exec_cache_skips_write_commands () =
+  with_exec_fixture "keeper_exec_cache_write_skip"
+    (fun ~config ~meta ~ctx_work ->
+      let cache = Masc_exec.Exec_cache.create () in
+      let run cmd =
+        KET.execute_keeper_tool_call
+          ~config ~meta ~ctx_work ~exec_cache:(Some cache)
+          ~name:"keeper_bash"
+          ~input:(`Assoc [ ("cmd", `String cmd) ])
+          ()
+        |> Yojson.Safe.from_string
+      in
+      let touch_first = run "touch write_cache_probe" in
+      let touch_second = run "touch write_cache_probe" in
+      let redirect_first = run "echo redirected > redirected_cache_probe" in
+      let redirect_second = run "echo redirected > redirected_cache_probe" in
+      let assert_not_cached label json =
+        check bool label true
+          (match Yojson.Safe.Util.member "cached" json with
+           | `Bool true -> false
+           | _ -> true)
+      in
+      assert_not_cached "touch first not cached" touch_first;
+      assert_not_cached "touch second not cached" touch_second;
+      assert_not_cached "redirect first not cached" redirect_first;
+      assert_not_cached "redirect second not cached" redirect_second;
+      let hits, misses = Masc_exec.Exec_cache.stats cache in
+      check int "write cache hits" 0 hits;
+      check int "write cache misses" 0 misses)
+
 let test_exec_cache_stats_json () =
   let cache = Masc_exec.Exec_cache.create () in
   let json = Masc_exec.Exec_cache.to_json cache in
@@ -504,6 +534,8 @@ let () =
     ("exec_cache", [
       test_case "miss then hit" `Quick test_exec_cache_miss_then_hit;
       test_case "no cache when None" `Quick test_exec_cache_none_no_caching;
+      test_case "skips write commands" `Quick
+        test_exec_cache_skips_write_commands;
       test_case "stats json" `Quick test_exec_cache_stats_json;
     ]);
   ]

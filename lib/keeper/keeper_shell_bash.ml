@@ -390,10 +390,11 @@ let handle_keeper_bash
              ]))
       | Ok _ | Error _ -> cached_result_json entry
     in
+    let command_cacheable () =
+      Masc_exec.Risk_classifier.(is_cacheable (classify cmd))
+    in
     let with_raw_json_exec_cache run =
-      let cacheable =
-        Masc_exec.Risk_classifier.(is_cacheable (classify cmd))
-      in
+      let cacheable = command_cacheable () in
       if not cacheable then run ()
       else
         match exec_cache with
@@ -819,7 +820,7 @@ let handle_keeper_bash
                  with
                  | None ->
                    (* P21: exec cache for foreground path *)
-                   (match exec_cache with
+                   (match (if command_cacheable () then exec_cache else None) with
                     | Some cache ->
                       (match Masc_exec.Exec_cache.lookup cache cmd with
                        | Some entry ->
@@ -937,8 +938,16 @@ let handle_keeper_bash
                           elapsed_duration_ms
                             ~start_time:t0_bg ~end_time:(Unix.gettimeofday ())
                         in
-                        (* P21: store in exec cache if not a timeout *)
-                        if not (Keeper_shell_shared.process_status_is_timeout r.status) then
+                        (* P21: store in exec cache if not a timeout.  Only
+                           cache commands classified as read-only; write,
+                           network, and destructive commands must execute
+                           every time. *)
+                        if
+                          command_cacheable ()
+                          && not
+                               (Keeper_shell_shared.process_status_is_timeout
+                                  r.status)
+                        then
                           (match exec_cache with
                            | Some cache ->
                              let exit_code = match r.status with
@@ -1013,7 +1022,7 @@ let handle_keeper_bash
                           (Bg_task.Invalid_cwd msg) ->
                         error_json (Printf.sprintf "invalid cwd: %s" msg))
                    in
-                   (match exec_cache with
+                   (match (if command_cacheable () then exec_cache else None) with
                     | Some cache ->
                       (match Masc_exec.Exec_cache.lookup cache cmd with
                        | Some entry -> cached_result_json entry

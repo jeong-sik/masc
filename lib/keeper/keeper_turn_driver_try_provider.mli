@@ -70,3 +70,10 @@ val run_try_provider :
   (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result
   * Agent_sdk.Checkpoint.t option
   * (string * Cascade_attempt_liveness_config.success_sample) option
+
+module For_testing : sig
+  val sanitize_runtime_mcp_external_tool_choice :
+    runtime_mcp_external_tools:bool ->
+    Agent_sdk.Hooks.turn_params ->
+    Agent_sdk.Hooks.turn_params
+end

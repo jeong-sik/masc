@@ -101,4 +101,30 @@ describe('DashboardSurfaceTabs', () => {
 
     expect(await axe(container)).toHaveNoViolations()
   })
+
+  it('keeps the tablist keyboard-reachable when current surface is hidden', () => {
+    // Regression for #15120: VISIBLE_DASHBOARD_NAV_ITEMS hides the cockpit
+    // surface, so when currentTab="cockpit" no item matches and the
+    // previous active-only tabIndex branch left every tab at tabIndex=-1.
+    // The roving-tabindex contract requires exactly one tabIndex=0; fall
+    // back to the first visible item so Tab navigation can still reach
+    // the tablist. aria-selected stays "false" — we must not lie about
+    // selection when nothing in [items] is actually current.
+    render(
+      html`<${DashboardSurfaceTabs} items=${VISIBLE_DASHBOARD_NAV_ITEMS} currentTab="cockpit" />`,
+      container,
+    )
+
+    const tabs = Array.from(container.querySelectorAll<HTMLElement>('[role="tab"]'))
+    expect(tabs.length).toBeGreaterThan(0)
+
+    const tabbable = tabs.filter(tab => tab.tabIndex === 0)
+    expect(tabbable).toHaveLength(1)
+    expect(tabbable[0]).toBe(tabs[0])
+
+    for (const tab of tabs) {
+      expect(tab.getAttribute('aria-selected')).toBe('false')
+      expect(tab.hasAttribute('aria-current')).toBe(false)
+    }
+  })
 })

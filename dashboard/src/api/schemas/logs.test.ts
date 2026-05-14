@@ -26,6 +26,7 @@ describe('parseLogsResponse', () => {
     const out = parseLogsResponse({ total: 0, entries: [] })
     expect(out.total).toBe(0)
     expect(out.entries).toHaveLength(0)
+    expect(out.dropped_entries).toBe(0)
   })
 
   it('parses a populated response', () => {
@@ -49,6 +50,7 @@ describe('parseLogsResponse', () => {
     })
     expect(out.entries).toHaveLength(1)
     expect(out.entries[0]!.seq).toBe(42)
+    expect(out.dropped_entries).toBe(1)
   })
 
   it('chains raw_level and normalized_level to level when omitted', () => {
@@ -91,6 +93,7 @@ describe('parseLogsResponse', () => {
   it('tolerates a non-array entries field by returning an empty list', () => {
     const out = parseLogsResponse({ total: 0, entries: null })
     expect(out.entries).toHaveLength(0)
+    expect(out.dropped_entries).toBe(0)
   })
 
   it('throws on non-object payload', () => {

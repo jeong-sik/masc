@@ -20,6 +20,7 @@ import {
 interface LogData {
   entries: LogEntry[]
   total: number
+  dropped_entries: number
 }
 
 export interface LogCauseCount {
@@ -431,7 +432,11 @@ async function loadLogs(mode: LoadMode = 'reset') {
       })
       const entries = sortLogEntries(resp.entries).slice(0, Math.max(1, logLimit.value))
       latestSeq.value = latestLogSeq(entries)
-      return { entries, total: resp.total }
+      return {
+        entries,
+        total: resp.total,
+        dropped_entries: resp.dropped_entries ?? 0,
+      }
     })
   }
 
@@ -451,7 +456,12 @@ async function loadLogs(mode: LoadMode = 'reset') {
     const nextEntries = mergeLogEntries(currentEntries, incoming, logLimit.value)
 
     latestSeq.value = latestLogSeq(nextEntries)
-    logResource.state.value = loaded({ entries: nextEntries, total: resp.total })
+    logResource.state.value = loaded({
+      entries: nextEntries,
+      total: resp.total,
+      dropped_entries: (s.status === 'loaded' ? s.data.dropped_entries : 0)
+        + (resp.dropped_entries ?? 0),
+    })
   } catch {
     if (requestId !== latestRequestId) return
     // Delta failures don't overwrite loaded state — keep existing data visible
@@ -583,12 +593,15 @@ function renderSummaryChip(label: string, value: string | number, tone = 'neutra
   `
 }
 
-function renderLogSummary(summary: LogWindowSummary) {
+function renderLogSummary(summary: LogWindowSummary, droppedEntries: number) {
   return html`
     <div class="mx-3 mt-3 flex flex-wrap items-center gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2 text-2xs">
       ${renderSummaryChip('ERROR', summary.errors, summary.errors > 0 ? 'bad' : 'neutral')}
       ${renderSummaryChip('WARN', summary.warnings, summary.warnings > 0 ? 'warn' : 'neutral')}
       ${renderSummaryChip('failure envelope', summary.failureEnvelopes, summary.failureEnvelopes > 0 ? 'info' : 'neutral')}
+      ${droppedEntries > 0
+        ? renderSummaryChip('dropped rows', droppedEntries, 'warn')
+        : null}
       ${summary.topModules.map(item => renderSummaryChip(`module ${item.module}`, item.count))}
       ${summary.topCauses.map(item => renderSummaryChip(`cause ${item.cause}`, item.count, 'info'))}
     </div>
@@ -642,6 +655,7 @@ export function LogViewer() {
   const logData = s.status === 'loaded' ? s.data : undefined
   const logEntries = logData?.entries ?? []
   const logTotal = logData?.total ?? 0
+  const droppedEntries = logData?.dropped_entries ?? 0
   const logLoading = s.status === 'loading'
   const logError = s.status === 'error' ? s.message : null
   const summary = summarizeLogWindow(logEntries)
@@ -698,7 +712,10 @@ export function LogViewer() {
           </div>
 
           <div class="logs-actions flex flex-wrap gap-3 items-center text-2xs text-[color:var(--color-fg-muted)]">
-            <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1 tabular-nums">${logEntries.length.toLocaleString()} / ${logTotal.toLocaleString()}</span>
+            <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1 tabular-nums">
+              ${logEntries.length.toLocaleString()} / ${logTotal.toLocaleString()}
+              ${droppedEntries > 0 ? ` · ${droppedEntries.toLocaleString()} dropped` : ''}
+            </span>
             <label class="logs-auto-label flex items-center gap-1.5 cursor-pointer">
               <${Checkbox}
                 name="log-auto-refresh"
@@ -727,7 +744,7 @@ export function LogViewer() {
           <div class="mx-4 mt-4 rounded-[var(--r-1)] border border-solid border-[var(--err-border)] bg-[var(--brick-soft)] px-4 py-3 text-xs text-[var(--err-fg)]">${logError}</div>
         ` : null}
 
-        ${renderLogSummary(summary)}
+        ${renderLogSummary(summary, droppedEntries)}
 
         <div class="px-3 pt-3">
           <div class="grid grid-cols-[11rem_5rem_10rem_8rem_minmax(0,1fr)] gap-3 px-3 py-2 text-left text-3xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)]">

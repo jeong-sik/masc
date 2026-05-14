@@ -121,6 +121,42 @@ let prepare_args ?schema ~name args =
   normalize_blank_optional_enum_args ?schema args
 ;;
 
+let schema_has_properties = function
+  | `Assoc fields ->
+    (match List.assoc_opt "properties" fields with
+     | Some (`Assoc (_ :: _)) -> true
+     | _ -> false)
+  | _ -> false
+;;
+
+let emit_validation_telemetry ~tool ~result ~reason =
+  Prometheus.inc_counter
+    Prometheus.metric_tool_input_validation
+    ~labels:[ "tool", tool; "result", result; "reason", reason ]
+    ();
+  Otel_spans.add_event
+    ~name:"tool.param.validation"
+    ~attrs:
+      [ "tool.name", `String tool
+      ; "tool.param.validation.result", `String result
+      ; "tool.param.validation.reason", `String reason
+      ]
+    ()
+;;
+
+let pass_reason ~schema ~args ~prepared_args =
+  match schema with
+  | None -> "missing_schema"
+  | Some schema when not (schema_has_properties schema) -> "empty_schema"
+  | Some _ when not (Yojson.Safe.equal prepared_args args) -> "normalized"
+  | Some _ -> "valid"
+;;
+
+let pass_result = function
+  | "missing_schema" | "empty_schema" -> "bypass"
+  | _ -> "pass"
+;;
+
 let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
   let lookup name =
     let schema =
@@ -139,13 +175,22 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
   let prepared_args = prepare_args ?schema ~name args in
   match hook ~name ~args:prepared_args with
   | Agent_sdk.Tool_middleware.Pass when not (Yojson.Safe.equal prepared_args args) ->
+    let reason = pass_reason ~schema ~args ~prepared_args in
+    let result = pass_result reason in
+    emit_validation_telemetry ~tool:name ~result ~reason;
     Log.debug "tool_input_validation normalized args for %s" name;
     Proceed prepared_args
-  | Agent_sdk.Tool_middleware.Pass -> Pass
+  | Agent_sdk.Tool_middleware.Pass ->
+    let reason = pass_reason ~schema ~args ~prepared_args in
+    let result = pass_result reason in
+    emit_validation_telemetry ~tool:name ~result ~reason;
+    Pass
   | Agent_sdk.Tool_middleware.Proceed coerced ->
+    emit_validation_telemetry ~tool:name ~result:"pass" ~reason:"coerced";
     Log.debug "tool_input_validation coerced args for %s" name;
     Proceed coerced
   | Agent_sdk.Tool_middleware.Reject { message; _ } ->
+    emit_validation_telemetry ~tool:name ~result:"fail" ~reason:"invalid_args";
     Log.info "tool_input_validation rejected %s: %s" name message;
     Reject
       { Tool_result.success = false

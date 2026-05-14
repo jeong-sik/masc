@@ -784,6 +784,7 @@ let metric_provider_prefix_cache_read_tokens =
 
 let metric_tool_call = "masc_tool_call_total"
 let metric_tool_call_duration = "masc_tool_call_duration_seconds"
+let metric_tool_input_validation = "masc_tool_input_validation_total"
 let metric_llm_provider_http_status = "masc_llm_provider_http_status_total"
 let metric_llm_provider_request_latency = "masc_llm_provider_request_latency_seconds"
 let metric_llm_provider_request_latency_clamped = "masc_llm_provider_request_latency_clamped_total"
@@ -1483,6 +1484,10 @@ let init () =
   add
     metric_tool_call
     "Total keeper tool calls labeled by provider, tool, and outcome"
+    Counter;
+  add
+    metric_tool_input_validation
+    "Total tool input validation outcomes labeled by tool, result, and reason"
     Counter;
   (* PR-0.2.C: pre-register cold/warm phase rows so /metrics shows a
      zero-value baseline before the first observation. The phase label

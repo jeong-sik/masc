@@ -62,3 +62,14 @@ let try_construct_for_keeper ~base_path ~agent_name =
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | _ -> None
+
+let effective_for_keeper ~base_path ~agent_name ~(configured : string option) =
+  match configured with
+  | Some _ as cfg -> cfg
+  | None -> try_construct_for_keeper ~base_path ~agent_name
+
+let missing_catalog_warning_required_for_effective
+      ~requires_runtime_mcp_header_sync
+      ~(effective_claude_mcp_config : string option)
+  =
+  requires_runtime_mcp_header_sync && Option.is_none effective_claude_mcp_config

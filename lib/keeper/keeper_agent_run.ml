@@ -549,44 +549,41 @@ let run_turn
            (Keeper_runtime_resolved.stream_idle_timeout_for_total_timeout
               ~total_timeout_s:timeout_s)
        in
-       (* Observability for issue #10049: providers that declare runtime MCP
-       HTTP header support need claude_mcp_config to reach the masc-mcp
-       HTTP MCP endpoint; otherwise the MCP tool catalog is invisible to
-       the subprocess and the model will correctly report that no shell
-       tools are bound. *)
-       if keeper_oas_context.claude_mcp_config = None
-       then (
-         let configured_model_labels =
-           Keeper_model_labels.configured_model_labels_of_meta meta
-         in
-         let uses_cli_missing_sync =
-           Cascade_runtime_candidate.labels_require_runtime_mcp_header_sync
-             configured_model_labels
-         in
-         if uses_cli_missing_sync
-         then
-           Log.Keeper.warn
-             "keeper %s (cascade=%s): cli-backed providers selected but \
-              claude_mcp_config is None; MCP tool catalog will not be visible to the \
-              subprocess (see issue #10049 for fix plan)"
-             meta.name
-             cascade_name_string);
+       let claude_mcp_config =
+         (* #10049 Option C: auto-construct from the keeper bearer token +
+            server host/port when env is unset. Gated behind
+            MASC_AUTO_CONSTRUCT_CLAUDE_MCP (default true). The existing
+            explicit-env path still wins, and operators can opt out by setting
+            the flag false. *)
+         Keeper_cli_mcp_config.effective_for_keeper
+           ~base_path:config.base_path
+           ~agent_name:meta.agent_name
+           ~configured:keeper_oas_context.claude_mcp_config
+       in
+       (* Observability for issue #10049: warn only when the effective config
+          is still missing after the auto-construction fallback. Otherwise the
+          log incorrectly says the subprocess cannot see MCP even though the
+          transport override is about to provide the generated config. *)
+       let configured_model_labels =
+         Keeper_model_labels.configured_model_labels_of_meta meta
+       in
+       let requires_runtime_mcp_header_sync =
+         Cascade_runtime_candidate.labels_require_runtime_mcp_header_sync
+           configured_model_labels
+       in
+       if
+         Keeper_cli_mcp_config.missing_catalog_warning_required_for_effective
+           ~requires_runtime_mcp_header_sync
+           ~effective_claude_mcp_config:claude_mcp_config
+       then
+         Log.Keeper.warn
+           "keeper %s (cascade=%s): cli-backed providers selected but \
+            effective claude_mcp_config is None; MCP tool catalog will not \
+            be visible to the subprocess (token missing, flag disabled, or \
+            auto-construction failed)"
+           meta.name
+           cascade_name_string;
        let cli_transport_overrides =
-         let claude_mcp_config =
-           match keeper_oas_context.claude_mcp_config with
-           | Some _ as cfg -> cfg
-           | None ->
-             (* #10049 Option C: auto-construct from the keeper bearer
-               token + server host/port when env is unset. Gated
-               behind MASC_AUTO_CONSTRUCT_CLAUDE_MCP (default true). The
-               existing explicit-env path still wins, and operators can opt
-               out by setting the flag false. Returns [None] when the flag
-               is off or the token file is missing — the Log.Keeper.warn
-               above (iter 10052) still fires for visibility. *)
-             Keeper_cli_mcp_config.try_construct_for_keeper
-               ~base_path:config.base_path
-               ~agent_name:meta.agent_name
-         in
          let cli_subprocess_idle_sec =
            Some (Keeper_runtime_resolved.cli_subprocess_idle_sec ())
          in

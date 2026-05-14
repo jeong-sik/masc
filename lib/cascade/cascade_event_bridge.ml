@@ -45,25 +45,21 @@ let payload_int_opt key = function
 ;;
 
 let inference_model_bucket ~provider ~model =
-  let has needle =
-    String_util.contains_substring_ci provider needle
-    || String_util.contains_substring_ci model needle
+  let normalize value =
+    let trimmed = String.trim value |> String.lowercase_ascii in
+    if trimmed = "" then None else Some trimmed
   in
-  if has "kimi"
-  then "kimi"
-  else if has "claude" || has "anthropic"
-  then "anthropic"
-  else if has "openai" || has "gpt" || has "codex"
-  then "openai"
-  else if has "gemini" || has "google"
-  then "gemini"
-  else if has "glm" || has "zai"
-  then "glm"
-  else if has "qwen"
-  then "qwen"
-  else if has "llama"
-  then "llama"
-  else "other"
+  let label_prefix value =
+    match String.index_opt value ':' with
+    | Some idx when idx > 0 -> Some (String.sub value 0 idx)
+    | _ -> None
+  in
+  match normalize provider with
+  | Some label -> label
+  | None ->
+    (match Option.bind (label_prefix model) normalize with
+     | Some label -> label
+     | None -> "unknown")
 ;;
 
 let inference_provider_bucket ~provider ~model =
@@ -1087,6 +1083,8 @@ module For_testing = struct
   let should_drain_subscription pending =
     should_drain_subscription (List.map to_pending pending)
   ;;
+
+  let inference_model_bucket = inference_model_bucket
 end
 
 let start_impl ~interval_s ~sw ~clock ~(config : Coord.config) ~bus =

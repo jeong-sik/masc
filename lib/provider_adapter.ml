@@ -361,13 +361,36 @@ let model_family_of_binding (binding : Runtime_binding.t) =
   | _ -> Generic
 ;;
 
+(* Runtime bindings do not yet expose every provider's auto-model rotation.
+   Keep fallback model IDs here so "provider:auto" never leaks to transports
+   that require a concrete model, while provider identity still comes from OAS. *)
+let gemini_cli_auto_models =
+  [ "gemini-3-flash-preview"
+  ; "gemini-3.1-flash-lite-preview"
+  ; "gemini-3.1-pro-preview"
+  ]
+;;
+
+let fallback_auto_models_of_binding (binding : Runtime_binding.t) =
+  match model_family_of_binding binding, binding.Runtime_binding.id with
+  | Glm_general, _ -> Llm_provider.Zai_catalog.glm_auto_models ()
+  | Glm_coding, _ -> Llm_provider.Zai_catalog.glm_coding_auto_models ()
+  | Generic, "gemini" | Generic, "gemini_cli" -> gemini_cli_auto_models
+  | Generic, "claude_code" -> [ "auto" ]
+  | Generic, "codex_cli" -> []
+  | Generic, _ | Kimi_api_family, _ -> []
+;;
+
 let default_model_id_of_binding (binding : Runtime_binding.t) =
   match binding_default_model_id binding with
   | Some _ as value -> value
   | None ->
-    (match runtime_kind_of_binding binding with
-     | Local -> None
-     | Cli_agent | Direct_api -> Some "auto")
+    (match fallback_auto_models_of_binding binding with
+     | first :: _ -> Some first
+     | [] ->
+       (match runtime_kind_of_binding binding with
+        | Local -> None
+        | Cli_agent | Direct_api -> Some "auto"))
 ;;
 
 let auto_models_of_binding binding default_model_id =
@@ -376,7 +399,16 @@ let auto_models_of_binding binding default_model_id =
     Some
       (Env_csv_or_default
          { env_var = "MASC_" ^ binding_env_fragment binding ^ "_AUTO_MODELS"
-         ; defaults = [ Option.value default_model_id ~default:"auto" ]
+         ; defaults =
+             (if String.equal binding.Runtime_binding.id "codex_cli"
+              then []
+              else (
+                match fallback_auto_models_of_binding binding with
+                | [] ->
+                  (match default_model_id with
+                   | Some model_id -> [ model_id ]
+                   | None -> [])
+                | models -> models))
          ; prefer_default_model_env = false
          })
   | Local | Direct_api ->
@@ -427,8 +459,10 @@ let telemetry_policy_of_binding (binding : Runtime_binding.t) =
 
 let spawn_key_of_binding (binding : Runtime_binding.t) =
   match binding.Runtime_binding.command with
-  | Some ("claude" | "codex" | "gemini" | "llama" as command) -> Some command
-  | Some _ | None -> None
+  | Some command ->
+    let trimmed = String.trim command in
+    if trimmed = "" then None else Some trimmed
+  | None -> None
 ;;
 
 let generic_adapter_of_binding (binding : Runtime_binding.t) =

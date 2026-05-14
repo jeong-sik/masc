@@ -586,8 +586,8 @@ let test_result_to_string_success () =
     cost_usd = None;
   } in
   let str = Spawn.result_to_string result in
-  check bool "has checkmark" true
-    (try let _ = Str.search_forward (Str.regexp "✅") str 0 in true
+  check bool "has completed status" true
+    (try let _ = Str.search_forward (Str.regexp "Agent completed") str 0 in true
      with Not_found -> false)
 
 let test_result_to_string_failure () =
@@ -603,8 +603,8 @@ let test_result_to_string_failure () =
     cost_usd = None;
   } in
   let str = Spawn.result_to_string result in
-  check bool "has x" true
-    (try let _ = Str.search_forward (Str.regexp "❌") str 0 in true
+  check bool "has failed status" true
+    (try let _ = Str.search_forward (Str.regexp "Agent failed") str 0 in true
      with Not_found -> false)
 
 let test_result_to_string_has_elapsed () =

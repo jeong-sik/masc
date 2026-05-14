@@ -579,18 +579,18 @@ let masc_approval_get_spec : tool_spec =
 let masc_spawn_spec : tool_spec =
   { name = "masc_spawn"
   ; description =
-      "Spawn an agent process (claude, gemini, codex, or llama) to execute a task. \
-       Use when you need another agent to work in parallel on a subtask. For llama, \
-       provide model explicitly. Pair with masc_add_task to create the task first."
+      "Spawn a configured agent process to execute a task. Use when you need another \
+       agent to work in parallel on a subtask. Pair with masc_add_task to create the \
+       task first."
   ; parameters =
       [ { p_name = "agent_name"
         ; p_type = T_string { enum = None; default = None }
-        ; p_description = "Agent to spawn: 'claude', 'gemini', 'codex', or custom command"
+        ; p_description = "Registered agent id or configured spawn command"
         ; p_required = true
         }
       ; { p_name = "model"
         ; p_type = T_string { enum = None; default = None }
-        ; p_description = "Explicit model id. Required when agent_name='llama'."
+        ; p_description = "Explicit model id when the selected agent requires one"
         ; p_required = false
         }
       ; { p_name = "prompt"
@@ -651,7 +651,7 @@ let masc_join_spec : tool_spec =
   ; parameters =
       [ { p_name = "agent_name"
         ; p_type = T_string { enum = None; default = None }
-        ; p_description = "Your identity: 'claude', 'gemini', or 'codex'"
+        ; p_description = "Your agent identity"
         ; p_required = true
         }
       ; { p_name = "capabilities"
@@ -672,7 +672,7 @@ let masc_leave_spec : tool_spec =
       "Leave the active MASC project and mark yourself as offline. Call when: (1) \
        session ends, (2) switching projects, (3) work complete. Side effects: releases \
        all your locks, sets presence to offline. Other agents will see you've left via \
-       SSE. Example: masc_leave({agent_name: 'claude-xyz'})"
+       SSE. Example: masc_leave({agent_name: 'agent-xyz'})"
   ; parameters =
       [ { p_name = "agent_name"
         ; p_type = T_string { enum = None; default = None }

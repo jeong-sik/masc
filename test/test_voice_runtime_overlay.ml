@@ -36,18 +36,11 @@ let test_voice_auth_env_resolution () =
     (Voice.auth_env_name ~endpoint_api_key_env:"VOICE_PROXY_KEY" openai_compat)
 ;;
 
-let test_default_agent_voices_preserve_runtime_defaults () =
+let test_default_agent_voices_do_not_pin_provider_defaults () =
   check
     (list (pair string string))
     "agent voice defaults"
-    [ "llama", "Laura"
-    ; "claude", "Sarah"
-    ; "codex", "George"
-    ; "gemini", "Roger"
-    ; "claude-api", "Sarah"
-    ; "codex-api", "George"
-    ; "gemini-api", "Roger"
-    ]
+    []
     (Voice.default_agent_voices ())
 ;;
 
@@ -156,9 +149,9 @@ let () =
       , [ test_case "resolve voice aliases" `Quick test_resolve_voice_aliases
         ; test_case "voice auth env resolution" `Quick test_voice_auth_env_resolution
         ; test_case
-            "default agent voices preserve runtime defaults"
+            "default agent voices do not pin provider defaults"
             `Quick
-            test_default_agent_voices_preserve_runtime_defaults
+            test_default_agent_voices_do_not_pin_provider_defaults
         ] )
     ; ( "stt"
       , [ test_case

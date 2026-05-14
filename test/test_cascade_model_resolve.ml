@@ -123,14 +123,8 @@ let test_codex_and_claude_cli_auto_models_env_override () =
   with_clean_env (fun () ->
     check
       (list string)
-      "codex default keeps Codex-supported models only"
-      [ "gpt-5.2"
-      ; "gpt-5.3-codex-spark"
-      ; "gpt-5.3-codex"
-      ; "gpt-5.4-mini"
-      ; "gpt-5.4"
-      ; "gpt-5.5"
-      ]
+      "codex default is operator-supplied"
+      []
       (auto_models_for "codex_cli");
     check
       (list string)
@@ -177,12 +171,7 @@ let test_expand_auto_models_includes_cli_auto_specs () =
       [ "gemini_cli:gemini-3-flash-preview"
       ; "gemini_cli:gemini-3.1-flash-lite-preview"
       ; "gemini_cli:gemini-3.1-pro-preview"
-      ; "codex_cli:gpt-5.2"
-      ; "codex_cli:gpt-5.3-codex-spark"
-      ; "codex_cli:gpt-5.3-codex"
-      ; "codex_cli:gpt-5.4-mini"
-      ; "codex_cli:gpt-5.4"
-      ; "codex_cli:gpt-5.5"
+      ; "codex_cli:auto"
       ; "claude_code:auto"
       ; "kimi_cli:kimi-for-coding"
       ]
@@ -278,6 +267,7 @@ let test_expand_model_strings_for_execution_rotation_scope_rotates () =
 
 let test_order_weighted_entries_rotation_scope_rotates_generically () =
   with_clean_env (fun () ->
+    Unix.putenv "MASC_CODEX_CLI_AUTO_MODELS" "codex-a,codex-b";
     State.clear_all ();
     let entry model =
       { Masc_mcp.Cascade_config_loader.model
@@ -302,14 +292,14 @@ let test_order_weighted_entries_rotation_scope_rotates_generically () =
     check
       string
       "weighted first call keeps default head"
-      "codex_cli:gpt-5.2"
+      "codex_cli:codex-a"
       (List.hd first);
     check
       string
       "weighted second call advances head"
-      "codex_cli:gpt-5.3-codex-spark"
+      "codex_cli:codex-b"
       (List.hd second);
-    check string "weighted rotation is scoped" "codex_cli:gpt-5.2" (List.hd other_scope))
+    check string "weighted rotation is scoped" "codex_cli:codex-a" (List.hd other_scope))
 ;;
 
 let test_order_weighted_entries_rotation_scope_rotates_top_level_providers () =
@@ -350,7 +340,7 @@ let test_order_weighted_entries_rotation_scope_rotates_top_level_providers () =
     check
       string
       "second call rotates to codex provider"
-      "codex_cli:gpt-5.3-codex-spark"
+      "codex_cli:auto"
       (List.hd second);
     check
       string

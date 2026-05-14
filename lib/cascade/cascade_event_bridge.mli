@@ -55,6 +55,8 @@ module For_testing : sig
 
   val should_drain_subscription : pending_relay list -> bool
 
+  val inference_model_bucket : provider:string -> model:string -> string
+
   val deliver_pending_with :
     append_json:(Yojson.Safe.t -> unit) ->
     broadcast_json:(Yojson.Safe.t -> unit) ->

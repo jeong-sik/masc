@@ -1,5 +1,6 @@
 open Alcotest
 module Adapter = Masc_mcp.Provider_adapter
+module Bridge = Masc_mcp.Cascade_event_bridge.For_testing
 module Candidate = Masc_mcp.Cascade_runtime_candidate
 module Health = Masc_mcp.Cascade_health_tracker
 
@@ -71,6 +72,27 @@ let test_oas_registry_binding_adds_generic_provider () =
       ()
   in
   check string "provider label" "groq" (Adapter.provider_label_of_config cfg)
+;;
+
+let test_inference_bucket_uses_declared_provider_label () =
+  check
+    string
+    "declared provider wins"
+    "openrouter"
+    (Bridge.inference_model_bucket ~provider:"openrouter" ~model:"gpt-5.3-codex")
+;;
+
+let test_inference_bucket_does_not_guess_bare_model_vendor () =
+  check
+    string
+    "bare model is unknown"
+    "unknown"
+    (Bridge.inference_model_bucket ~provider:"" ~model:"gpt-5.3-codex");
+  check
+    string
+    "provider-prefixed model"
+    "openai"
+    (Bridge.inference_model_bucket ~provider:"" ~model:"openai:gpt-5")
 ;;
 
 let test_kimi_direct_auth_uses_oas_env () =
@@ -842,6 +864,14 @@ let () =
             "oas registry binding adds generic provider"
             `Quick
             test_oas_registry_binding_adds_generic_provider
+        ; test_case
+            "inference bucket uses declared provider label"
+            `Quick
+            test_inference_bucket_uses_declared_provider_label
+        ; test_case
+            "inference bucket does not guess bare model vendor"
+            `Quick
+            test_inference_bucket_does_not_guess_bare_model_vendor
         ; test_case
             "kimi direct auth uses OAS env"
             `Quick

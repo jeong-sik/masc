@@ -23,6 +23,12 @@
 # in PR #14559 thread. Next raise must come with a decomposition plan, not
 # another absorption.
 #
+# 2026-05-14 cap raised 3300 -> 3350 after PR #15282 added OAS dispatch
+# hot-path baseline histograms and pushed lib/prometheus.ml to 3,344 lines on
+# main. This is a minimal unblock, not a new normal: RFC-0043
+# (metric ownership distribution) is the decomposition plan, and the next
+# Prometheus growth should execute that split instead of raising this cap again.
+#
 # Modes:
 #   bash godfile-size-regression.sh                 # absolute-cap only
 #   BASE=origin/main bash godfile-size-regression.sh   # adds new-file 600 cap
@@ -35,7 +41,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BASE="${BASE:-}"
-ABSOLUTE_CAP="${ABSOLUTE_CAP:-3300}"
+ABSOLUTE_CAP="${ABSOLUTE_CAP:-3350}"
 NEW_FILE_CAP="${NEW_FILE_CAP:-600}"
 
 cd "${ROOT}"

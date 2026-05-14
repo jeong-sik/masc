@@ -24,7 +24,7 @@ type prompt_flag =
 (** Spawn configuration for an agent *)
 type spawn_config = {
   agent_name: string;
-  command: string;       (* e.g., "claude -p", "gemini", "codex" *)
+  command: string;
   timeout_seconds: int;
   working_dir: string option;
   mcp_tools: string list;  (* MCP tools to allow, e.g., ["mcp__masc__masc_status"] *)
@@ -73,13 +73,13 @@ You are running as a MASC-managed agent. Follow these lifecycle rules:
 
 Example lifecycle:
 ```
-mcp__masc__masc_join(agent_name="gemini", capabilities=["typescript","react"])
+mcp__masc__masc_join(agent_name="agent-1", capabilities=["typescript","react"])
 ... work ...
-mcp__masc__masc_heartbeat(agent_name="gemini")  // every 2 min
+mcp__masc__masc_heartbeat(agent_name="agent-1")  // every 2 min
 ... more work ...
 mcp__masc__masc_handover_create(...)  // when a successor needs your state
-mcp__masc__masc_transition(agent_name="gemini", task_id="task-XXX", action="done")
-mcp__masc__masc_leave(agent_name="gemini")
+mcp__masc__masc_transition(agent_name="agent-1", task_id="task-XXX", action="done")
+mcp__masc__masc_leave(agent_name="agent-1")
 ```
 
 IMPORTANT: If you cannot finish in one pass, hand off explicitly before leaving.
@@ -213,13 +213,30 @@ let spawn_config_of_key key =
       }
   | _ -> None
 
+let generic_command_config ~agent_name ~command =
+  let timeout_seconds = Env_config.Spawn.timeout_seconds in
+  Some
+    { agent_name
+    ; command
+    ; timeout_seconds
+    ; working_dir = None
+    ; mcp_tools = masc_mcp_tools
+    ; parse_output = parse_raw_output
+    ; stdin_prompt = true
+    ; mcp_mode = Mcp_none
+    ; prompt_mode = Prompt_stdin
+    }
+
 (** Get spawn config for agent.
     Resolves all aliases via Provider_adapter registry (SSOT).
     spawn_alias_map removed — aliases are now in Provider_adapter.direct_adapters. *)
 let get_config agent_name =
   let normalized = String.lowercase_ascii (String.trim agent_name) in
   match Provider_adapter.resolve_spawn_key normalized with
-  | Some key -> spawn_config_of_key key
+  | Some key ->
+    (match spawn_config_of_key key with
+     | Some _ as config -> config
+     | None -> generic_command_config ~agent_name:normalized ~command:key)
   | None -> spawn_config_of_key normalized
 
 (** Build MCP flags from config's [mcp_mode] field.

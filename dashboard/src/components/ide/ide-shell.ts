@@ -4,10 +4,10 @@ import { activeIdeFile, focusIdeContextAnchor } from './ide-state'
 import { createIdeDataCoordinator } from './ide-data-coordinator'
 import { IdeExplorer } from './ide-explorer'
 import { IdeEditor, type IdeEditorView } from './ide-editor'
-import { IdeConversationRailMock } from './ide-conversation-rail-mock'
+import { IdeConversationRail } from './ide-conversation-rail'
 import { IdeActivityPanel } from './ide-activity-panel'
 import { IdeKeeperWorkPanel } from './ide-keeper-work-panel'
-import { IdeInterjectMock } from './ide-interject-mock'
+import { IdeInterject } from './ide-interject'
 import { KeeperShellDrawer } from './keeper-shell-drawer'
 import { IdePresenceStrip } from './ide-presence-strip'
 import { IDE_LAYERS, IdeToolbar } from './ide-toolbar'
@@ -320,7 +320,7 @@ export function IdeShell() {
               <${IdeKeeperWorkPanel} keeperName=${terminalKeeper} />
               <${IdePersistencePanel} keeperName=${terminalKeeper} />
               <${InspectorKeeperBDI} traceActive=${activeLayers.has('keeper-trace')} />
-              <${IdeConversationRailMock} />
+              <${IdeConversationRail} />
             </div>
           `}
         ${railsCollapsed
@@ -339,7 +339,7 @@ export function IdeShell() {
       ${terminalOpen
         ? html`<${KeeperShellDrawer} keeperName=${terminalKeeper} />`
         : null}
-      <${IdeInterjectMock} keeperName=${terminalKeeper} />
+      <${IdeInterject} keeperName=${terminalKeeper} />
     </section>
   `
 }

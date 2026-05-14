@@ -4,10 +4,10 @@ import { render } from 'preact'
 import { act } from 'preact/test-utils'
 import { fireEvent } from '@testing-library/preact'
 import { activeKeeperName } from '../../keeper-state'
-import { IdeInterjectMock, interjectContextRouteLinks } from './ide-interject-mock'
+import { IdeInterject, interjectContextRouteLinks } from './ide-interject'
 import { cursorOverlaySignal } from './keeper-cursor-overlay'
 
-describe('IdeInterjectMock', () => {
+describe('IdeInterject', () => {
   beforeEach(() => {
     activeKeeperName.value = 'nick0cave'
   })
@@ -53,7 +53,7 @@ describe('IdeInterjectMock', () => {
   it('renders the interject store backed active keeper controls', async () => {
     const container = document.createElement('div')
     await act(async () => {
-      render(h(IdeInterjectMock, {}), container)
+      render(h(IdeInterject, {}), container)
     })
 
     const region = container.querySelector('[role="region"]')
@@ -78,7 +78,7 @@ describe('IdeInterjectMock', () => {
   it('enables Send after text is entered', async () => {
     const container = document.createElement('div')
     await act(async () => {
-      render(h(IdeInterjectMock, {}), container)
+      render(h(IdeInterject, {}), container)
     })
 
     const input = container.querySelector('input') as HTMLInputElement
@@ -97,7 +97,7 @@ describe('IdeInterjectMock', () => {
     activeKeeperName.value = ''
     const container = document.createElement('div')
     await act(async () => {
-      render(h(IdeInterjectMock, { keeperName: 'tech_glutton' }), container)
+      render(h(IdeInterject, { keeperName: 'tech_glutton' }), container)
     })
 
     expect(container.textContent).toContain('tech_glutton')
@@ -115,7 +115,7 @@ describe('IdeInterjectMock', () => {
   it('preserves typed message when the route keeper changes', async () => {
     const container = document.createElement('div')
     await act(async () => {
-      render(h(IdeInterjectMock, { keeperName: 'keeper-alpha' }), container)
+      render(h(IdeInterject, { keeperName: 'keeper-alpha' }), container)
     })
 
     const input = container.querySelector('input') as HTMLInputElement
@@ -125,7 +125,7 @@ describe('IdeInterjectMock', () => {
     })
 
     await act(async () => {
-      render(h(IdeInterjectMock, { keeperName: 'keeper-beta' }), container)
+      render(h(IdeInterject, { keeperName: 'keeper-beta' }), container)
     })
 
     expect(container.textContent).toContain('keeper-beta')
@@ -150,7 +150,7 @@ describe('IdeInterjectMock', () => {
 
     const container = document.createElement('div')
     await act(async () => {
-      render(h(IdeInterjectMock, { keeperName: 'sangsu' }), container)
+      render(h(IdeInterject, { keeperName: 'sangsu' }), container)
     })
 
     const contextButtons = [...container.querySelectorAll<HTMLButtonElement>('.ide-interject-context-links button')]

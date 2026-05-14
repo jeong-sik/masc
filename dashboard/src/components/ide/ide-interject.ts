@@ -28,7 +28,7 @@ async function dispatchInterject(request: InterjectDispatchRequest): Promise<voi
   })
 }
 
-interface IdeInterjectMockProps {
+interface IdeInterjectProps {
   readonly keeperName?: string | null
 }
 
@@ -37,7 +37,7 @@ function resolveActiveKeeper(keeperName?: string | null): string {
   return routeKeeper || activeKeeperName.value
 }
 
-export const IdeInterjectMock: FunctionComponent<IdeInterjectMockProps> = ({ keeperName = null }) => {
+export const IdeInterject: FunctionComponent<IdeInterjectProps> = ({ keeperName = null }) => {
   const [interjectStore] = useState(() =>
     createInterjectStore({
       initialActiveKeeper: resolveActiveKeeper(keeperName),

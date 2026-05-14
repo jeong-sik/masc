@@ -122,7 +122,7 @@ function boardKindFromPost(post: BoardPost): ThreadKind {
   return 'note'
 }
 
-export function IdeConversationRailMock() {
+export function IdeConversationRail() {
   const threadStore = useMemo(() => createAnchoredThreadRailStore(activeIdeFile.value), [])
   const [posts, setPosts] = useState<ReadonlyArray<BoardPost>>(EMPTY_POSTS)
   const [decisions, setDecisions] = useState<ReadonlyArray<KeeperDecision>>(EMPTY_DECISIONS)

@@ -3,9 +3,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
 import { axe } from 'jest-axe'
-import { IdeConversationRailMock } from './ide-conversation-rail-mock'
+import { IdeConversationRail } from './ide-conversation-rail'
 
-describe('IdeConversationRailMock a11y', () => {
+describe('IdeConversationRail a11y', () => {
   let container: HTMLElement
 
   beforeEach(() => {
@@ -19,7 +19,7 @@ describe('IdeConversationRailMock a11y', () => {
   })
 
   it('renders the anchored thread rail mock accessibly', async () => {
-    render(html`<${IdeConversationRailMock} />`, container)
+    render(html`<${IdeConversationRail} />`, container)
     expect(await axe(container)).toHaveNoViolations()
   })
 })

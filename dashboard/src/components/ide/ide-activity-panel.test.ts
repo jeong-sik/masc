@@ -150,6 +150,22 @@ describe('IdeActivityPanel', () => {
       .map(node => node.textContent)
     expect(surfaces).toEqual(['Goal1', 'Task1', 'Board1', 'Comment1', 'PR1', 'Git1', 'Log1', 'Telemetry1'])
 
+    const surfaceLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-run-progress-surface-link')]
+    expect(surfaceLinks.map(link => link.textContent)).toEqual([
+      'Goal1',
+      'Task1',
+      'Board1',
+      'Comment1',
+      'PR1',
+      'Git1',
+      'Log1',
+      'Telemetry1',
+    ])
+    fireEvent.click(surfaceLinks.find(link => link.textContent === 'PR1')!)
+    expect(window.location.hash).toBe('#workspace?section=repositories&view=graph&pr=15000')
+    fireEvent.click(surfaceLinks.find(link => link.textContent === 'Telemetry1')!)
+    expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&session_id=sess-runtime&operation_id=op-runtime&worker_run_id=wr-runtime&q=turn-1')
+
     const activityRouteLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-activity-route-link')]
     expect(activityRouteLinks.map(link => link.textContent)).toEqual([
       'Code',
@@ -686,10 +702,62 @@ describe('IdeActivityPanel', () => {
       ['Log', 1],
       ['Telemetry', 3],
     ])
+    expect(summary.surfaceCounts.find(surface => surface.label === 'PR')?.routeLink).toMatchObject({
+      label: 'PR',
+      params: { section: 'repositories', view: 'graph', pr: '15000' },
+    })
+    expect(summary.surfaceCounts.find(surface => surface.label === 'Telemetry')?.routeLink).toMatchObject({
+      label: 'Telemetry',
+      params: { section: 'fleet-health', view: 'event-log', q: 'turn-1' },
+    })
     expect(summary.keeperCounts).toEqual([
       { keeper_id: 'sangsu', count: 2 },
       { keeper_id: 'analyst', count: 1 },
     ])
+  })
+
+  it('routes run progress surface chips to the latest matching event context', () => {
+    const summary = deriveIdeRunProgressSummary([
+      {
+        id: 'evt-old',
+        run_id: 'run-default',
+        keeper_id: 'analyst',
+        verb: 'noted' as const,
+        target: 'pr',
+        timestamp_ms: 100,
+        context: {
+          pr_id: '14999',
+          log_id: 'turn-old',
+        },
+      },
+      {
+        id: 'evt-latest',
+        run_id: 'run-default',
+        keeper_id: 'sangsu',
+        verb: 'noted' as const,
+        target: 'pr',
+        timestamp_ms: 200,
+        context: {
+          pr_id: '15000',
+          log_id: 'turn-latest',
+          session_id: 'sess-latest',
+        },
+      },
+    ], 'lib/runtime.ml')
+
+    expect(summary.surfaceCounts.find(surface => surface.label === 'PR')?.routeLink).toMatchObject({
+      label: 'PR',
+      params: { section: 'repositories', view: 'graph', pr: '15000' },
+    })
+    expect(summary.surfaceCounts.find(surface => surface.label === 'Telemetry')?.routeLink).toMatchObject({
+      label: 'Telemetry',
+      params: {
+        section: 'fleet-health',
+        view: 'event-log',
+        session_id: 'sess-latest',
+        q: 'turn-latest',
+      },
+    })
   })
 
   it('keeps the run progress keeper total separate from the top keeper list', () => {

@@ -599,11 +599,15 @@ let make_telemetry
   }
 ;;
 
-let make_response ?(stop_reason = Agent_sdk.Types.EndTurn) ?telemetry () =
+let make_response
+    ?(stop_reason = Agent_sdk.Types.EndTurn)
+    ?(content = [])
+    ?telemetry
+    () =
   { Agent_sdk.Types.id = "response-test"
   ; model = "test-model"
   ; stop_reason
-  ; content = []
+  ; content
   ; usage = None
   ; telemetry
   }
@@ -816,6 +820,69 @@ let test_record_llm_inference_latency_metric_none_counts_missing () =
   in
   check (float 0.0001) "missing counter +1" 1.0 (missing_after -. missing_before);
   check (float 0.0001) "latency histogram unchanged" 0.0 (count_after -. count_before)
+;;
+
+let empty_content_labels ~keeper ~stop_reason ~shape =
+  [ "keeper", keeper; "stop_reason", stop_reason; "shape", shape ]
+;;
+
+let empty_content_counter ~keeper ~stop_reason ~shape =
+  Masc_mcp.Prometheus.metric_value_or_zero
+    Masc_mcp.Prometheus.metric_after_turn_response_content_empty
+    ~labels:(empty_content_labels ~keeper ~stop_reason ~shape)
+    ()
+;;
+
+let test_record_response_content_quality_metric_empty_end_turn_counts () =
+  let keeper = "response-content-empty-keeper" in
+  let before =
+    empty_content_counter ~keeper ~stop_reason:"end_turn" ~shape:"empty"
+  in
+  Hooks.record_response_content_quality_metric
+    ~keeper_name:keeper
+    (make_response ());
+  let after =
+    empty_content_counter ~keeper ~stop_reason:"end_turn" ~shape:"empty"
+  in
+  check (float 0.0001) "empty end_turn counter +1" 1.0 (after -. before)
+;;
+
+let test_record_response_content_quality_metric_blank_text_counts () =
+  let keeper = "response-content-blank-text-keeper" in
+  let before =
+    empty_content_counter ~keeper ~stop_reason:"max_tokens" ~shape:"blank_text"
+  in
+  Hooks.record_response_content_quality_metric
+    ~keeper_name:keeper
+    (make_response
+       ~stop_reason:Agent_sdk.Types.MaxTokens
+       ~content:[ Agent_sdk.Types.Text " \n\t " ]
+       ());
+  let after =
+    empty_content_counter ~keeper ~stop_reason:"max_tokens" ~shape:"blank_text"
+  in
+  check (float 0.0001) "blank text counter +1" 1.0 (after -. before)
+;;
+
+let test_record_response_content_quality_metric_tool_use_is_progress () =
+  let keeper = "response-content-tool-use-keeper" in
+  let before =
+    empty_content_counter ~keeper ~stop_reason:"tool_use" ~shape:"blank_text"
+  in
+  Hooks.record_response_content_quality_metric
+    ~keeper_name:keeper
+    (make_response
+       ~stop_reason:Agent_sdk.Types.StopToolUse
+       ~content:
+         [
+           Agent_sdk.Types.ToolUse
+             { id = "toolu-test"; name = "keeper_bash"; input = `Assoc [] };
+         ]
+       ());
+  let after =
+    empty_content_counter ~keeper ~stop_reason:"tool_use" ~shape:"blank_text"
+  in
+  check (float 0.0001) "tool use is not empty content" 0.0 (after -. before)
 ;;
 
 let slot json name = json |> member "slots" |> member name
@@ -1515,6 +1582,20 @@ let () =
             "missing telemetry increments missing counter"
             `Quick
             test_record_llm_inference_latency_metric_none_counts_missing
+        ] )
+    ; ( "response_content_quality"
+      , [ test_case
+            "empty end_turn response content counts"
+            `Quick
+            test_record_response_content_quality_metric_empty_end_turn_counts
+        ; test_case
+            "blank text response content counts"
+            `Quick
+            test_record_response_content_quality_metric_blank_text_counts
+        ; test_case
+            "tool-use-only response is progress"
+            `Quick
+            test_record_response_content_quality_metric_tool_use_is_progress
         ] )
     ; ( "hook_introspection"
       , [ test_case

@@ -162,6 +162,14 @@ describe('IdePersistencePanel', () => {
     render(html`<${IdePersistencePanel} pollMs=${60_000} />`)
 
     await waitFor(() => expect(fetchKeeperStateDiagramMock).toHaveBeenCalled())
+    const focusChip = screen.getByRole('button', {
+      name: 'Open current persistence focus Code lib/runtime.ml:42',
+    })
+    fireEvent.click(focusChip)
+    expect(window.location.hash).toBe(
+      '#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=42&surface=Persistence&label=sangsu+current+focus&source_id=persistence%3Asangsu&keeper=sangsu',
+    )
+
     const links = Array.from(screen.getByLabelText('Persistence context links')
       .querySelectorAll<HTMLButtonElement>('button'))
     expect(links.map(link => link.textContent)).toEqual(['Code', 'Keeper'])

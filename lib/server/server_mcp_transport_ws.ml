@@ -423,6 +423,21 @@ let dashboard_unsubscribe ~session_id ?slices () =
         Ok (`Assoc [ ("session", dashboard_session_result session) ])
       end
 
+let dashboard_ping ~session_id () =
+  match find_session session_id with
+  | None -> Error "WebSocket session not found"
+  | Some session ->
+      if not session.dashboard_authenticated then
+        Error "dashboard/ping requires dashboard/hello first"
+      else
+        Ok
+          (`Assoc
+            [
+              ("ok", `Bool true);
+              ("session_id", `String session.id);
+              ("seq", `Int session.dashboard_seq);
+            ])
+
 let dashboard_ack ~session_id ~seq ?buffered_amount () =
   match find_session session_id with
   | None -> Error "WebSocket session not found"

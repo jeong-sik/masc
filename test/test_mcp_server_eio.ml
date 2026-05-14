@@ -2946,6 +2946,61 @@ let test_handle_request_resources_subscribe_requires_session () =
    | _ -> Alcotest.fail "response not an object");
   cleanup_dir base_path
 
+let test_handle_request_dashboard_ping_requires_session () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 242);
+          ("method", `String "dashboard/ping");
+          ("params", `Assoc []);
+        ])
+  in
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  Alcotest.(check bool) "ping requires ws session" true
+    (contains_substring
+       (Yojson.Safe.to_string response)
+       "dashboard/ping requires a WebSocket session");
+  cleanup_dir base_path
+
+let test_handle_request_dashboard_ping_reports_unknown_ws_session () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 243);
+          ("method", `String "dashboard/ping");
+          ("params", `Assoc []);
+        ])
+  in
+  let response =
+    Mcp_eio.handle_request
+      ~clock
+      ~sw
+      ~mcp_session_id:"missing-dashboard-ws-session"
+      state
+      request
+  in
+  Alcotest.(check bool) "unknown ws session reported" true
+    (contains_substring
+       (Yojson.Safe.to_string response)
+       "WebSocket session not found");
+  cleanup_dir base_path
+
 let test_handle_request_resources_subscribe_roundtrip () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -3161,6 +3216,10 @@ let eio_tests = [
     test_handle_request_resources_templates_rejects_invalid_cursor;
   "handle resources/subscribe requires session", `Quick,
     test_handle_request_resources_subscribe_requires_session;
+  "handle dashboard/ping requires session", `Quick,
+    test_handle_request_dashboard_ping_requires_session;
+  "handle dashboard/ping reports unknown ws session", `Quick,
+    test_handle_request_dashboard_ping_reports_unknown_ws_session;
   "handle resources/subscribe roundtrip", `Quick,
     test_handle_request_resources_subscribe_roundtrip;
   "execute masc_tool_help", `Quick, test_execute_tool_help_tool;

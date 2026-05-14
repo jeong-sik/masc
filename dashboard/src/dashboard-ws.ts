@@ -4,6 +4,7 @@ import { hydrateDashboardSlice, routeServerPushEvent } from './sse-store'
 import { batch } from '@preact/signals'
 import { parseWebSocketSseFrames as parseWebSocketSseFramesImpl } from './dashboard-ws-parse'
 import {
+  DASHBOARD_WS_HEARTBEAT_INTERVAL_MS,
   DASHBOARD_WS_RPC_TIMEOUT_MS,
   RECONNECT_JITTER_MS,
   RECONNECT_MAX_MS,
@@ -49,6 +50,8 @@ const DASHBOARD_WS_DISCOVERY_CACHE_KEY = 'masc.dashboard.ws.discovery.v1'
 let socket: WebSocket | null = null
 let rpcId = 0
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+let heartbeatInFlight = false
 let reconnectAttempts = 0
 let lastSubscribeKey = ''
 let desiredRouteState: DashboardRouteState | null = null
@@ -289,6 +292,14 @@ function clearReconnectTimer(): void {
   }
 }
 
+function clearHeartbeatTimer(): void {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer)
+    heartbeatTimer = null
+  }
+  heartbeatInFlight = false
+}
+
 function rejectPendingRpcs(err: Error): void {
   for (const { reject, timeout } of pending.values()) {
     clearTimeout(timeout)
@@ -327,7 +338,26 @@ function scheduleReconnect(): void {
   }, delay)
 }
 
+function startHeartbeat(ws: WebSocket): void {
+  clearHeartbeatTimer()
+  heartbeatTimer = setInterval(() => {
+    if (socket !== ws || ws.readyState !== WebSocket.OPEN || heartbeatInFlight) {
+      return
+    }
+    heartbeatInFlight = true
+    void sendRpc('dashboard/ping', {})
+      .then(() => {
+        if (socket === ws) heartbeatInFlight = false
+      })
+      .catch(err => {
+        heartbeatInFlight = false
+        reconnectAfterCurrentSocketFailure(ws, err)
+      })
+  }, DASHBOARD_WS_HEARTBEAT_INTERVAL_MS)
+}
+
 function closeSocket(): void {
+  clearHeartbeatTimer()
   if (socket) {
     socket.onopen = null
     socket.onclose = null
@@ -654,7 +684,12 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
         })
         if (desiredRouteState) {
           void subscribeDashboardRoute(desiredRouteState)
+            .then(() => {
+              if (socket === ws) startHeartbeat(ws)
+            })
             .catch(err => reconnectAfterCurrentSocketFailure(ws, err))
+        } else {
+          startHeartbeat(ws)
         }
       })
       .catch(err => reconnectAfterCurrentSocketFailure(ws, err))
@@ -673,6 +708,7 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
     if (socket !== ws) return
     const wasReady = dashboardWsReady.value
     const closeError = new Error(formatCloseEventError(event))
+    clearHeartbeatTimer()
     batch(() => {
       dashboardWsConnected.value = false
       dashboardWsReady.value = false

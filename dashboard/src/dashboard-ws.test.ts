@@ -16,7 +16,10 @@ import {
   parseWebSocketSseFrames,
   subscribeDashboardRoute,
 } from './dashboard-ws'
-import { DASHBOARD_WS_RPC_TIMEOUT_MS } from './config/constants'
+import {
+  DASHBOARD_WS_HEARTBEAT_INTERVAL_MS,
+  DASHBOARD_WS_RPC_TIMEOUT_MS,
+} from './config/constants'
 import {
   dashboardWsConnected,
   dashboardWsLastError,
@@ -140,6 +143,24 @@ function parseRpc(socket: MockWebSocket, index: number): JsonRpcRequest {
 async function flushPromises(): Promise<void> {
   await Promise.resolve()
   await Promise.resolve()
+}
+
+async function connectReadyDashboard(): Promise<MockWebSocket> {
+  await connectDashboardWS({ tab: 'overview', params: {} })
+  const socket = mockSockets[0]!
+  socket.open()
+  const hello = parseRpc(socket, 0)
+  socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+  await flushPromises()
+
+  const subscribe = parseRpc(socket, 1)
+  socket.receive({
+    jsonrpc: '2.0',
+    id: subscribe.id,
+    result: { snapshot: { seq: 1, slices: {} } },
+  })
+  await flushPromises()
+  return socket
 }
 
 beforeEach(() => {
@@ -420,6 +441,57 @@ describe('dashboard websocket route subscriptions', () => {
     expect(dashboardWsLastError.value).toBe(
       'dashboard websocket rpc timed out: dashboard/subscribe',
     )
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await flushPromises()
+
+    expect(mockSockets).toHaveLength(2)
+    expect(mockSockets[1]!.readyState).toBe(MockWebSocket.CONNECTING)
+  })
+
+  it('sends dashboard heartbeat pings after a route subscription is ready', async () => {
+    vi.useFakeTimers()
+    installWebSocketMocks()
+
+    const socket = await connectReadyDashboard()
+    expect(dashboardWsReady.value).toBe(true)
+    expect(socket.sent).toHaveLength(2)
+
+    await vi.advanceTimersByTimeAsync(DASHBOARD_WS_HEARTBEAT_INTERVAL_MS)
+    await flushPromises()
+
+    const ping = parseRpc(socket, 2)
+    expect(ping.method).toBe('dashboard/ping')
+    expect(ping.params).toEqual({})
+
+    socket.receive({ jsonrpc: '2.0', id: ping.id, result: { ok: true } })
+    await flushPromises()
+
+    expect(dashboardWsConnected.value).toBe(true)
+    expect(dashboardWsReady.value).toBe(true)
+    expect(dashboardWsLastError.value).toBe(null)
+  })
+
+  it('reconnects when a dashboard heartbeat ping never responds', async () => {
+    vi.useFakeTimers()
+    installWebSocketMocks()
+
+    const socket = await connectReadyDashboard()
+    expect(dashboardWsReady.value).toBe(true)
+
+    await vi.advanceTimersByTimeAsync(DASHBOARD_WS_HEARTBEAT_INTERVAL_MS)
+    await flushPromises()
+
+    const ping = parseRpc(socket, 2)
+    expect(ping.method).toBe('dashboard/ping')
+
+    await vi.advanceTimersByTimeAsync(DASHBOARD_WS_RPC_TIMEOUT_MS)
+    await flushPromises()
+
+    expect(socket.readyState).toBe(MockWebSocket.CLOSED)
+    expect(dashboardWsConnected.value).toBe(false)
+    expect(dashboardWsReady.value).toBe(false)
+    expect(dashboardWsLastError.value).toBe('dashboard websocket rpc timed out: dashboard/ping')
 
     await vi.advanceTimersByTimeAsync(1_000)
     await flushPromises()

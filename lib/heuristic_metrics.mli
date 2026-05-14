@@ -92,7 +92,9 @@ val recent_coverage : int -> coverage_report
 (** Read recent events and summarize their coverage. *)
 
 val coverage_report_to_json : coverage_report -> Yojson.Safe.t
-(** Serialize a coverage report for diagnostics. *)
+(** Serialize a coverage report for diagnostics.  The dashboard envelope
+    includes [dashboard_surface], [source], and [retention] so operators can
+    tie the visible coverage aggregate back to its JSONL store. *)
 
 val event_to_json : event -> Yojson.Safe.t
 (** Serialize an event for external consumption (dashboard, tests). *)
@@ -105,4 +107,5 @@ val dashboard_issue_events : Yojson.Safe.t list -> Yojson.Safe.t list
 
 val dashboard_feed_json : limit:int -> Yojson.Safe.t list -> Yojson.Safe.t
 (** Build the dashboard response carrying both the existing [events] array
-    and the O5 compatibility [heuristics] array. *)
+    and the O5 compatibility [heuristics] array.  The envelope includes
+    [dashboard_surface], [source], and [retention]. *)

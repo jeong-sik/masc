@@ -219,6 +219,14 @@ check_http "dashboard perf 200" "$BASE/api/v1/dashboard/perf" "200"
 check_json "dashboard perf exposes benchmark status" "$BASE/api/v1/dashboard/perf" "'status' in d and 'benchmarks' in d" '^True$'
 check_http "cost latency 200" "$BASE/api/v1/dashboard/cost-latency?window=60" "200"
 check_json "cost latency exposes cost and latency" "$BASE/api/v1/dashboard/cost-latency?window=60" "'total_cost_usd' in d and 'latencyBuckets' in d" '^True$'
+check_http "keeper decisions 200" "$BASE/api/v1/dashboard/keeper-decisions?limit=1" "200"
+check_json "keeper decisions exposes provenance" "$BASE/api/v1/dashboard/keeper-decisions?limit=1" "'events' in d and d.get('dashboard_surface') == '/api/v1/dashboard/keeper-decisions' and d.get('source') == 'keeper_decision_log' and 'retention' in d" '^True$'
+check_http "dashboard heuristics 200" "$BASE/api/v1/dashboard/heuristics?limit=1" "200"
+check_json "dashboard heuristics exposes provenance" "$BASE/api/v1/dashboard/heuristics?limit=1" "'events' in d and d.get('dashboard_surface') == '/api/v1/dashboard/heuristics' and d.get('source') == 'heuristic_metrics' and 'retention' in d" '^True$'
+check_http "heuristic coverage 200" "$BASE/api/v1/dashboard/heuristics/coverage?limit=1" "200"
+check_json "heuristic coverage exposes provenance" "$BASE/api/v1/dashboard/heuristics/coverage?limit=1" "'sites' in d and d.get('dashboard_surface') == '/api/v1/dashboard/heuristics/coverage' and d.get('source') == 'heuristic_metrics' and 'retention' in d" '^True$'
+check_http "dashboard stress 200" "$BASE/api/v1/dashboard/stress?limit=1" "200"
+check_json "dashboard stress exposes provenance" "$BASE/api/v1/dashboard/stress?limit=1" "'agent_stress' in d and d.get('dashboard_surface') == '/api/v1/dashboard/stress' and d.get('source') == 'agent_stress' and 'retention' in d" '^True$'
 
 echo "[4/7] Operations + Workspace"
 check_http "operator digest 200" "$BASE/api/v1/operator/digest" "200"

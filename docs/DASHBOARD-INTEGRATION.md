@@ -132,6 +132,8 @@ code_refs:
   - read-only CLI equivalent: `masc-keeper-feature-proof --base-path <runtime-root>`
 - `GET /api/v1/models/metrics`, `GET /api/v1/dashboard/keeper-costs`
   - runtime cost/latency view
+- `GET /api/v1/dashboard/keeper-decisions`, `GET /api/v1/dashboard/heuristics`, `GET /api/v1/dashboard/heuristics/coverage`, `GET /api/v1/dashboard/stress`
+  - runtime decision, heuristic, and stress feeds; payloads expose `dashboard_surface`, `source`, and `retention` so the Cost/Runtime subviews can distinguish visible read-model state from the backing JSONL logs
 - `GET /api/v1/providers`
   - runtime provider inventory
 - `GET /api/v1/cascade/config`, `GET /api/v1/cascade/config/raw`

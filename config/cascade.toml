@@ -55,19 +55,6 @@ key = "GEMINI_API_KEY"
 [providers.gemini_cli.capabilities]
 tolerates-bound-actor-fallback = true
 
-[providers.kimi_cli]
-display-name = "Moonshot Kimi CLI"
-protocol = "kimi-cli"
-command = "kimi"
-is-non-interactive = true
-
-[providers.kimi_cli.credentials]
-type = "env"
-key = "MOONSHOT_API_KEY"
-
-[providers.kimi_cli.capabilities]
-supports-runtime-mcp-http-headers = true
-tolerates-bound-actor-fallback = true
 
 [providers.glm-coding]
 display-name = "Zhipu GLM Coding"
@@ -91,6 +78,15 @@ endpoint = "http://127.0.0.1:11434"
 # Local Ollama is a viable bound-actor fallback target in catalogs
 # that include Codex CLI — its HTTP surface accepts per-keeper auth
 # headers natively. All other capability flags default to false.
+
+[providers.openai_compat]
+display-name = "OpenAI-Compatible Cloud"
+protocol = "openai-http"
+endpoint = "https://ollama.com/v1"
+
+[providers.openai_compat.credentials]
+type = "env"
+key = "OLLAMA_CLOUD_API_KEY"
 tolerates-bound-actor-fallback = true
 
 # ── Layer 2: Models ────────────────────────────────────────────
@@ -111,22 +107,6 @@ supports-image-input = true
 supports-native-streaming = true
 supports-caching = true
 supports-response-format-json = true
-
-[models.kimi-coding]
-api-name = "kimi-for-coding"
-max-context = 128000
-tools-support = true
-streaming = true
-
-# Capabilities mirror OAS kimi_capabilities. Only max-output-tokens
-# is overridden from defaults here; other capability fields
-# (supports_parallel_tool_calls, supports_multimodal_input,
-# supports_streaming, supports_prompt_caching) inherit default
-# values from cascade_model_capabilities. M2 cutover preserves this
-# asymmetry — if kimi production actually streams natively this is
-# an OAS bug to rectify upstream, not here.
-[models.kimi-coding.capabilities]
-max-output-tokens = 32768
 
 [models.gemini-flash]
 api-name = "gemini-3-flash-preview"
@@ -585,10 +565,6 @@ supports-native-streaming = true
 is-default = true
 max-concurrent = 1
 
-[kimi_cli.kimi-coding]
-is-default = true
-max-concurrent = 1
-
 
 [gemini_cli.gemini-flash]
 is-default = true
@@ -606,6 +582,18 @@ max-concurrent = 2
 is-default = false
 max-concurrent = 2
 
+[openai_compat.deepseek-v4-pro]
+is-default = true
+max-concurrent = 4
+
+[openai_compat.deepseek-v4-flash]
+is-default = false
+max-concurrent = 4
+
+[openai_compat.qwen3-5]
+is-default = false
+max-concurrent = 4
+
 # ── Layer 4: Aliases (per-use overrides) ───────────────────────
 #
 # Aliases give logical names to (provider, model) pairs with
@@ -622,8 +610,15 @@ temperature = 0.1
 [codex_cli.codex-spark.for-keeper-turn]
 max-output = 32768
 
-[kimi_cli.kimi-coding.for-keeper-turn]
+[openai_compat.deepseek-v4-pro.for-keeper-turn]
 max-output = 32768
+
+[openai_compat.deepseek-v4-flash.for-keeper-turn]
+max-output = 32768
+
+[openai_compat.qwen3-5.for-keeper-turn]
+max-output = 32768
+
 
 # ── Layer 5: Tiers ─────────────────────────────────────────────
 
@@ -631,14 +626,16 @@ max-output = 32768
 # Canonical keeper/workflow tier.
 members = [
   "codex_cli.codex-spark.for-keeper-turn",
-  "kimi_cli.kimi-coding.for-keeper-turn",
+  "glm-coding.glm-flashx",
+  "openai_compat.deepseek-v4-pro.for-keeper-turn",
+  "openai_compat.deepseek-v4-flash.for-keeper-turn",
 ]
 strategy = "failover"
 
 [tier.keeper_diverse]
 # Fallback tier for contract violation retry. Different model
 # composition from primary to break correlated failure.
-members = ["gemini_cli.gemini-flash", "codex_cli.codex-spark"]
+members = ["gemini_cli.gemini-flash", "codex_cli.codex-spark", "openai_compat.qwen3-5.for-keeper-turn"]
 strategy = "failover"
 
 [tier.scoring]
@@ -653,7 +650,7 @@ strategy = "failover"
 [tier.governance]
 # System-only baseline for governance / judge calls.
 keeper-assignable = false
-members = ["kimi_cli.kimi-coding.for-keeper-turn"]
+members = ["glm-coding.glm-flashx", "openai_compat.deepseek-v4-flash.for-keeper-turn"]
 strategy = "failover"
 
 [tier.tier_small]
@@ -664,14 +661,14 @@ strategy = "failover"
 
 [tier.tier_medium]
 # 9B-class cloud-coding models for moderate tasks.
-members = ["glm-coding.glm-flashx"]
+members = ["glm-coding.glm-flashx", "openai_compat.deepseek-v4-flash.for-keeper-turn"]
 strategy = "failover"
 
 [tier.__safe_lane]
 # System-only baseline tier (RFC-0027 PR-4). Last-resort fallback
 # target that satisfies every capability profile. Not keeper-assignable.
 keeper-assignable = false
-members = ["kimi_cli.kimi-coding.for-keeper-turn"]
+members = ["glm-coding.glm-flashx", "openai_compat.deepseek-v4-flash.for-keeper-turn"]
 strategy = "failover"
 
 [tier.local_recovery]

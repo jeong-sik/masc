@@ -23,7 +23,10 @@ export async function runSocialSweep(): Promise<void> {
 
 export async function refreshAfterRuntimeAction(): Promise<void> {
   invalidateDashboardCache()
-  await refreshDashboard({ force: true })
+  void refreshDashboard({ force: true }).catch(err => {
+    const message = err instanceof Error ? err.message : '대시보드 새로고침 실패'
+    showToast(message, 'warning')
+  })
 }
 
 export function keeperNeedsDiagnosticAttention(keeper: Keeper): boolean {

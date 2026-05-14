@@ -36,7 +36,7 @@ describe('applyKeeperStreamEvent', () => {
     expect(entry?.streamState).toBe('streaming')
   })
 
-  it('appends legacy TEXT_DELTA events', () => {
+  it('ignores retired TEXT_DELTA events', () => {
     assistantEntry()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TEXT_DELTA',
@@ -44,7 +44,7 @@ describe('applyKeeperStreamEvent', () => {
     })).toBeNull()
 
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
-    expect(entry?.text).toBe('안녕')
+    expect(entry?.text).toBe('')
   })
 
   it('ignores empty delta text events', () => {

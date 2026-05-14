@@ -29,15 +29,10 @@ describe('journal severity helpers', () => {
     expect(journalSeverity(makeEntry({ eventType: 'broadcast', severity: 'error' }))).toBe('error')
   })
 
-  it('falls back to conservative legacy text classification when severity is missing', () => {
-    expect(journalSeverity(makeEntry({ eventType: 'broadcast', text: '[ERROR] gRPC server failed: bind' }))).toBe('error')
-    expect(journalSeverity(makeEntry({ eventType: 'broadcast', text: '[WARN] retrying stream reconnect' }))).toBe('warn')
+  it('does not infer severity by parsing journal text', () => {
+    expect(journalSeverity(makeEntry({ eventType: 'broadcast', text: '[ERROR] gRPC server failed: bind' }))).toBe('info')
+    expect(journalSeverity(makeEntry({ eventType: 'broadcast', text: '[WARN] retrying stream reconnect' }))).toBe('info')
     expect(journalSeverity(makeEntry({ eventType: 'broadcast', text: 'error budget update' }))).toBe('info')
-  })
-
-  it('handles case-insensitive legacy markers and empty text safely', () => {
-    expect(journalSeverity(makeEntry({ eventType: 'broadcast', text: '[error] timeout waiting for stream' }))).toBe('error')
-    expect(journalSeverity(makeEntry({ eventType: 'broadcast', text: 'Retrying stream reconnect' }))).toBe('warn')
     expect(journalSeverity(makeEntry({ eventType: 'broadcast', text: '' }))).toBe('info')
   })
 })

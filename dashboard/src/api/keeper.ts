@@ -13,6 +13,7 @@ import {
   fetchWithTimeout,
   DEFAULT_GET_TIMEOUT_MS,
   DEFAULT_POST_TIMEOUT_MS,
+  KEEPER_LIFECYCLE_TIMEOUT_MS,
 } from './core'
 import {
   parseKeeperCompositeSnapshot,
@@ -304,7 +305,7 @@ async function safeKeeperLifecycle(
       method: 'POST',
       headers: jsonHeaders(),
       ...init,
-    }, DEFAULT_POST_TIMEOUT_MS)
+    }, KEEPER_LIFECYCLE_TIMEOUT_MS)
     const payload = await safeJsonResponse<KeeperLifecycleResponse>(resp, fallbackError)
     if (resp.ok) return payload
 

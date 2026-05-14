@@ -28,7 +28,7 @@ async function loadLogs(fetchLogs: ReturnType<typeof vi.fn>) {
 }
 
 describe('log diagnostics', () => {
-  it('classifies timeout and cascade messages without structured envelopes', () => {
+  it('does not infer diagnostic causes from raw message text', () => {
     expect(
       logDiagnosticCause(
         entry({
@@ -37,7 +37,7 @@ describe('log diagnostics', () => {
             'keeper_llm_bridge: OAS execution timed out after 300.0s (budget=300s)',
         }),
       ),
-    ).toBe('oas_timeout_budget')
+    ).toBeNull()
 
     expect(
       logDiagnosticCause(
@@ -47,10 +47,10 @@ describe('log diagnostics', () => {
             'all cascades exhausted: Cascade attempt liveness guard killed runtime lane coding_plan: inter_chunk_idle',
         }),
       ),
-    ).toBe('inter_chunk_idle')
+    ).toBeNull()
   })
 
-  it('classifies keeper telemetry and registry noise causes', () => {
+  it('requires structured details for keeper telemetry and registry causes', () => {
     expect(
       logDiagnosticCause(
         entry({
@@ -59,7 +59,7 @@ describe('log diagnostics', () => {
             'keeper:analyst after_turn usage telemetry unavailable runtime_lane=runtime reasons=zero_token_usage_reported input=0 output=0 context_max=200000',
         }),
       ),
-    ).toBe('usage_zero_tokens')
+    ).toBeNull()
 
     expect(
       logDiagnosticCause(
@@ -67,6 +67,18 @@ describe('log diagnostics', () => {
           level: 'WARN',
           message:
             'registry: orphan threshold breached name=analyst base_path=/Users/dancer/me drops=5 window=60s',
+        }),
+      ),
+    ).toBeNull()
+  })
+
+  it('uses structured event details as diagnostic causes', () => {
+    expect(
+      logDiagnosticCause(
+        entry({
+          level: 'WARN',
+          message: 'registry warning',
+          details: { event: 'registry_orphan_threshold' },
         }),
       ),
     ).toBe('registry_orphan_threshold')
@@ -97,7 +109,7 @@ describe('log diagnostics', () => {
         seq: 2,
         level: 'WARN',
         module: 'Task',
-        message: 'Ignoring legacy verification directory /tmp/verifications',
+        message: 'unstructured watchdog warning',
       }),
       entry({
         seq: 1,
@@ -112,10 +124,7 @@ describe('log diagnostics', () => {
     expect(summary.warnings).toBe(1)
     expect(summary.failureEnvelopes).toBe(1)
     expect(summary.topCauses).toContainEqual({ cause: 'oas_timeout_budget', count: 1 })
-    expect(summary.topCauses).toContainEqual({
-      cause: 'legacy_verification_dir',
-      count: 1,
-    })
+    expect(summary.topCauses).toHaveLength(1)
     expect(summary.topModules[0]).toEqual({ module: 'Keeper', count: 2 })
   })
 })

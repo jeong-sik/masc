@@ -23,7 +23,7 @@ describe('computeBeaconView', () => {
       wsOnly: false,
     }))
     expect(view.state).toBe('gray')
-    expect(view.label).toBe('WS+SSE (legacy)')
+    expect(view.label).toBe('Client WS+SSE parallel')
   })
 
   it('returns red when wsOnly and the socket is not connected', () => {
@@ -78,6 +78,7 @@ describe('computeBeaconView', () => {
     }))
     expect(view.state).toBe('green')
     expect(view.label).toContain('12 events / 60s')
+    expect(view.title).toContain('Client WS mode')
   })
 
   it('uses computed silentMs in the title for diagnostic display', () => {

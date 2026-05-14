@@ -55,10 +55,6 @@ export function applyKeeperStreamEvent(
       applyTextDelta(event.delta)
       return null
     }
-    case 'TEXT_DELTA': {
-      applyTextDelta(event.delta)
-      return null
-    }
     case 'TEXT_MESSAGE_END':
       setAssistantStreamState(keeperName, assistantEntryId, 'finalizing', 'streaming')
       return null

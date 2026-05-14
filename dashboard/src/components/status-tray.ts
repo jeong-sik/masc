@@ -189,9 +189,11 @@ export function summarizeStatusTray(input: StatusTrayInput): StatusTraySummary {
       transport = {
         key: 'transport',
         tone: 'err',
-        label: 'WS',
+        label: 'Client',
         value: 'closed',
-        detail: input.wsLastError ? clip(input.wsLastError) : 'WS-only channel is not ready',
+        detail: input.wsLastError
+          ? clip(input.wsLastError)
+          : 'client WS channel is not ready; server transport truth is in Transport Health',
       }
     } else {
       const silentMs = input.wsLastEventAt === 0
@@ -208,14 +210,14 @@ export function summarizeStatusTray(input: StatusTrayInput): StatusTraySummary {
       transport = {
         key: 'transport',
         tone: silent && !heartbeatFresh ? 'warn' : 'ok',
-        label: 'WS',
+        label: 'Client',
         value: silent
           ? heartbeatFresh ? pongLatency : 'silent'
           : `${input.wsEventCount60s}/60s`,
         detail: silent
           ? heartbeatFresh
-            ? `WS-only channel is idle; heartbeat pong ${Math.floor(pongAgeMs / 1000)}s ago`
-            : 'WS-only channel is open but no recent event or heartbeat pong has arrived'
+            ? `client WS channel is idle; heartbeat pong ${Math.floor(pongAgeMs / 1000)}s ago`
+            : 'client WS channel is open but no recent event or heartbeat pong has arrived'
           : `last event ${Math.floor(silentMs / 1000)}s ago`,
       }
     }
@@ -223,10 +225,12 @@ export function summarizeStatusTray(input: StatusTrayInput): StatusTraySummary {
     transport = {
       key: 'transport',
       tone: input.sseConnected ? 'ok' : 'err',
-      label: 'SSE',
+      label: 'Client',
       value: input.sseConnected ? 'live' : 'offline',
       detail: input.sseConnected
-        ? input.wsConnected ? 'SSE is live with WS shadow channel connected' : 'SSE is live'
+        ? input.wsConnected
+          ? 'client SSE is live with WS mirror connected'
+          : 'client SSE is live'
         : formatDisconnectedDetail(input),
     }
   }

@@ -68,7 +68,7 @@ export function isKeeperTextContentEvent(
   event: KeeperChatStreamEvent,
 ): event is KeeperChatStreamEvent & { delta: string } {
   return (
-    (event.type === 'TEXT_MESSAGE_CONTENT' || event.type === 'TEXT_DELTA')
+    event.type === 'TEXT_MESSAGE_CONTENT'
     && typeof event.delta === 'string'
     && event.delta.length > 0
   )

@@ -33,7 +33,7 @@ function task(id: string, status: Task['status']): Task {
 }
 
 describe('summarizeStatusTray', () => {
-  it('marks WS-only transport red when the socket is not ready', () => {
+  it('marks the client transport red when the socket is not ready', () => {
     const summary = summarizeStatusTray({
       wsOnly: true,
       sseConnected: false,
@@ -139,7 +139,7 @@ describe('summarizeStatusTray', () => {
     expect(summary.items.attention.value).toBe('1')
   })
 
-  it('keeps WS-only transport green when route events are idle but heartbeat is fresh', () => {
+  it('keeps the client transport green when route events are idle but heartbeat is fresh', () => {
     const summary = summarizeStatusTray({
       wsOnly: true,
       sseConnected: false,

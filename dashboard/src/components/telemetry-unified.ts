@@ -20,7 +20,7 @@ import {
 import { replaceRoute, route } from '../router'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { TELEMETRY_SOURCE_META, telemetrySourceMeta } from '../config/telemetry-sources'
-import { formatElapsedCompact, formatTimeAgo } from '../lib/format-time'
+import { formatElapsedCompact } from '../lib/format-time'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { isAbortError } from '../lib/async-state'
 import { Btn } from './btn'
@@ -29,6 +29,7 @@ import { CopyIdButton } from './common/copy-id-button'
 import { ringFocusClasses } from './common/ring'
 import { StatTile } from './common/stat-tile'
 import { coverageGapDisplay } from './common/source-health'
+import { TimeAgo } from './common/time-ago'
 
 interface StoreSnapshot {
   keepers: number
@@ -134,10 +135,6 @@ function formatTs(ts: number): string {
     month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit',
   })
-}
-
-function timeAgoSafe(ts: number): string {
-  return ts === 0 ? '' : formatTimeAgo(ts)
 }
 
 function normalizeText(value: unknown): string | null {
@@ -693,8 +690,10 @@ function EntryRow({ entry, routeFocused = false }: { entry: TelemetryEntry; rout
           aria-expanded=${expanded.value}
         >
           <span class="font-mono font-bold ${meta.color} w-4 text-center flex-shrink-0">${meta.icon}</span>
-          <span class="font-mono text-[var(--color-fg-muted)] w-28 flex-shrink-0" title=${formatTs(ts)}>
-            ${timeAgoSafe(ts)}
+          <span class="w-56 flex-shrink-0">
+            ${ts === 0
+              ? html`<span class="font-mono text-[var(--color-fg-muted)]">-</span>`
+              : html`<${TimeAgo} timestamp=${ts} mode="both" class="font-mono text-[var(--color-fg-muted)]"/>`}
           </span>
           ${success != null ? html`
             <span class="flex-shrink-0 w-4 ${success ? 'text-[var(--color-status-ok)]' : 'text-[var(--bad-light)]'}">
@@ -772,8 +771,10 @@ function GroupRow({ item, routeFocused = false }: { item: Extract<TelemetryDispl
           onClick=${() => { expanded.value = !expanded.value }}
         >
           <span class="font-mono font-bold ${meta.color} w-4 text-center flex-shrink-0">${meta.icon}</span>
-          <span class="font-mono text-[var(--color-fg-muted)] w-28 flex-shrink-0" title=${`${formatTs(item.oldestTs)} → ${formatTs(item.latestTs)}`}>
-            ${timeAgoSafe(item.latestTs)}
+          <span class="w-56 flex-shrink-0" title=${`${formatTs(item.oldestTs)} → ${formatTs(item.latestTs)}`}>
+            ${item.latestTs === 0
+              ? html`<span class="font-mono text-[var(--color-fg-muted)]">-</span>`
+              : html`<${TimeAgo} timestamp=${item.latestTs} mode="both" class="font-mono text-[var(--color-fg-muted)]"/>`}
           </span>
           <span class="flex-shrink-0 w-4 text-[var(--color-fg-disabled)]">~</span>
           <span class="font-mono text-[var(--color-fg-primary)] truncate flex-1" title=${`${meta.label} · ${item.label} · ${item.count} events`}>
@@ -811,7 +812,11 @@ function GroupRow({ item, routeFocused = false }: { item: Extract<TelemetryDispl
             return html`
               <div class="flex items-center gap-2 rounded-[var(--r-1)] bg-[var(--black-20)] px-2 py-1.5 text-3xs" key=${`${item.key}:${index}`}>
                 <span class="font-mono font-bold ${entryMeta.color} w-4 text-center flex-shrink-0">${entryMeta.icon}</span>
-                <span class="font-mono text-[var(--color-fg-disabled)] w-24 flex-shrink-0" title=${formatTs(ts)}>${timeAgoSafe(ts)}</span>
+                <span class="w-48 flex-shrink-0">
+                  ${ts === 0
+                    ? html`<span class="font-mono text-[var(--color-fg-disabled)]">-</span>`
+                    : html`<${TimeAgo} timestamp=${ts} mode="both" class="font-mono text-[var(--color-fg-disabled)]"/>`}
+                </span>
                 <span class="font-mono text-[var(--color-fg-primary)] truncate flex-1" title=${entryPreview(entry)}>${entryPreview(entry)}</span>
               </div>
             `

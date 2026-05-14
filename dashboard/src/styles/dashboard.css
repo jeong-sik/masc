@@ -1749,11 +1749,48 @@
   color: var(--color-accent-fg);
 }
 
+.ide-context-surface[data-actionable="true"] {
+  padding: 0;
+}
+
 .ide-context-surface > span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ide-context-surface-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-1);
+  width: 100%;
+  min-width: 0;
+  min-height: 20px;
+  padding: 2px 6px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ide-context-surface-action > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide-context-surface-action:hover,
+.ide-context-surface-action:focus-visible {
+  color: var(--color-fg-primary);
+}
+
+.ide-context-surface-action:focus-visible {
+  outline: 1px solid var(--color-accent-fg);
+  outline-offset: 1px;
 }
 
 .ide-context-anchor-list {

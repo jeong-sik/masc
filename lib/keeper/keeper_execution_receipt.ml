@@ -513,11 +513,28 @@ let operator_disposition (receipt : t)
     | Some _ | None -> false
   then Disp_pause_human, Reason_internal_error
   else if
+    let canonical_names names =
+      names
+      |> List.map Keeper_tool_disclosure.canonical_tool_name
+      |> Keeper_types.dedupe_keep_order
+    in
+    let used_tool_names =
+      canonical_names
+        (receipt.canonical_tools @ receipt.observed_tools @ receipt.tools_used)
+    in
+    let required_tool_names = canonical_names receipt.tool_surface.required_tools in
+    let required_tools_satisfied =
+      required_tool_names <> []
+      && receipt.tool_surface.missing_required_tools = []
+      && List.for_all
+           (fun required -> List.mem required used_tool_names)
+           required_tool_names
+    in
     let ok_followup_progress =
       receipt.outcome = `Ok
       && receipt.cascade_outcome = Cascade_completed
       && receipt.tool_contract_result = Contract_needs_execution_progress
-      && receipt.tools_used <> []
+      && required_tools_satisfied
     in
     receipt.tool_surface.tool_requirement = Required
     && (List.mem

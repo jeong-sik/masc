@@ -120,6 +120,16 @@ module Http_client = struct
        InvalidConfig errors (#9850). *)
     if contains_ci_scan_limited ~haystack:reason ~needle:"does not support" then
       Some Model_unsupported
+    (* MASC worker-layer wrapping of the [required_tool_lane_unavailable]
+       InvalidConfig {field = "tool_support"} emitted by
+       Keeper_turn_driver_helpers.required_tool_lane_unavailable_error.
+       Semantically identical to the [does not support] case: this
+       provider's materialized tool set lacks the required lane, but
+       another provider may have it — the cascade must advance. *)
+    else if
+      contains_ci_scan_limited ~haystack:reason ~needle:"required_tool_lane_unavailable"
+    then
+      Some Model_unsupported
     (* kimi_cli permanent auth/config/model rejection (#9932). *)
     else if contains_ci_scan_limited ~haystack:reason ~needle:"rejected the request" then
       Some Request_rejected

@@ -274,6 +274,24 @@ let test_classify_accept_rejected_startup_crash () =
          "expected Startup_crash, got %s"
          (retryable_error_to_string other))
 
+let test_classify_accept_rejected_required_tool_lane_unavailable () =
+  (* Regression for #15091: the [required_tool_lane_unavailable_error]
+     wrapper emits an [InvalidConfig {field = "tool_support"; detail}]
+     whose detail begins with [required_tool_lane_unavailable: ...].
+     Without a matching marker the cascade stayed terminal; with the
+     marker it must route to [Model_unsupported] so the next provider
+     in the cascade gets a chance. *)
+  let reason =
+    "required_tool_lane_unavailable: lane=text_only \
+     missing_required_tools=[edit] materialized_tools=[read,bash]"
+  in
+  match Oas_compat.Http_client.classify_accept_rejected reason with
+  | Some Oas_compat.Http_client.Model_unsupported -> ()
+  | other ->
+    Alcotest.failf
+      "expected Model_unsupported for required_tool_lane_unavailable, got %s"
+      (retryable_error_to_string other)
+
 let test_classify_accept_rejected_unknown_returns_none () =
   let reason = "output_schema violation: value is not a string" in
   (match Oas_compat.Http_client.classify_accept_rejected reason with
@@ -359,6 +377,8 @@ let () =
             `Quick test_classify_accept_rejected_request_rejected;
           Alcotest.test_case "startup crash → Startup_crash"
             `Quick test_classify_accept_rejected_startup_crash;
+          Alcotest.test_case "required_tool_lane_unavailable → Model_unsupported"
+            `Quick test_classify_accept_rejected_required_tool_lane_unavailable;
           Alcotest.test_case "unrecognised reason → None"
             `Quick test_classify_accept_rejected_unknown_returns_none;
         ] );

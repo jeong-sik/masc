@@ -404,7 +404,7 @@ describe('FleetTelemetryPanel', () => {
     await flushUi()
 
     expect(container.textContent).toContain('부분 텔레메트리')
-    expect(container.textContent).toContain('keepers are blocked in the admission queue')
+    expect(container.textContent).toContain('keepers are blocked in the keeper admission FIFO')
     expect(container.textContent).toContain('Admission queue wait timeout after 45.0s.')
   }, 30_000)
 

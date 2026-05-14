@@ -247,7 +247,7 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
     return '자율 턴이 실행 슬롯을 기다리다 타임아웃되었습니다.'
   }
   if (blockerClass === 'admission_queue_wait_timeout') {
-    return 'OAS admission queue 대기 시간이 초과되었습니다.'
+    return 'Keeper admission FIFO 대기 시간이 초과되었습니다.'
   }
   if (blockerClass === 'turn_timeout_after_queue_wait') {
     return '대기 후 실행된 턴이 전체 제한 시간을 초과했습니다.'

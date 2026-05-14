@@ -634,7 +634,7 @@ export function buildRuntimeWarnings(rows: FleetRow[]): string[] {
   const admissionBlocked = rows.filter(row => row.runtime_blocker_class === 'admission_queue_wait_timeout')
   if (admissionBlocked.length > 0) {
     warnings.push(
-      `${admissionBlocked.length} keepers are blocked in the admission queue; tool telemetry can look stale because turns never reached tool execution.`,
+      `${admissionBlocked.length} keepers are blocked in the keeper admission FIFO; tool telemetry can look stale because turns never reached tool execution.`,
     )
   }
 

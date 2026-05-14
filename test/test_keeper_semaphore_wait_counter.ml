@@ -9,6 +9,10 @@
    is pinned independently of the surrounding Eio + semaphore
    plumbing. *)
 
+module KHL = Masc_mcp.Keeper_heartbeat_loop
+module KTS = Masc_mcp.Keeper_turn_slot
+module KT = Masc_mcp.Keeper_types
+
 let counter_for ~keeper ~channel =
   Masc_mcp.Prometheus.metric_value_or_zero
     Masc_mcp.Keeper_metrics.metric_keeper_semaphore_wait_timeout
@@ -46,6 +50,29 @@ let make_meta name =
   with
   | Ok meta -> meta
   | Error err -> Alcotest.fail ("make_meta failed: " ^ err)
+
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    if needle_len = 0 then true
+    else if idx + needle_len > haystack_len then false
+    else if String.sub haystack idx needle_len = needle then true
+    else loop (idx + 1)
+  in
+  loop 0
+
+let make_timeout ?queue_ahead ?(holders = []) phase :
+    KTS.semaphore_wait_timeout =
+  { KTS.timeout_wait_sec = 180.0;
+    timeout_phase = phase;
+    timeout_autonomous_available = 6;
+    timeout_reactive_available = 4;
+    timeout_turn_available = 12;
+    timeout_queue_depth = 9;
+    timeout_queue_ahead = queue_ahead;
+    timeout_holders = holders;
+  }
 
 let test_metric_name_stable () =
   Alcotest.(check string)
@@ -205,6 +232,53 @@ let test_wait_observation_reason_labels () =
        ~channel:Masc_mcp.Keeper_world_observation.Scheduled_autonomous
        ())
 
+let test_queue_head_timeout_diagnostic_names_fifo_blocker () =
+  let timeout = make_timeout ~queue_ahead:3 KTS.Autonomous_queue_head in
+  let blocker_class = KHL.semaphore_wait_timeout_blocker_class timeout in
+  Alcotest.(check string)
+    "queue head maps to admission queue blocker"
+    "admission_queue_wait_timeout"
+    (KT.blocker_class_to_string blocker_class);
+  let persisted, log_diagnostic =
+    KHL.semaphore_wait_timeout_diagnostics ~cascade_name:"queue-cascade" timeout
+  in
+  Alcotest.(check bool)
+    "persisted detail names fifo blocker"
+    true
+    (contains_substring persisted "queue_blocker=autonomous_fifo");
+  Alcotest.(check bool)
+    "persisted detail records queue ahead"
+    true
+    (contains_substring persisted "queue_ahead=3");
+  Alcotest.(check bool)
+    "log diagnostic names queue head"
+    true
+    (contains_substring log_diagnostic
+       "queue_head=[blocker=autonomous_fifo ahead=3 depth=9]");
+  Alcotest.(check bool)
+    "queue head diagnostic does not claim missing holders"
+    false
+    (contains_substring log_diagnostic "holders=[none]")
+
+let test_autonomous_slot_timeout_keeps_holder_diagnostic () =
+  let timeout =
+    make_timeout
+      ~holders:[ ("slot-holder-a", 181.4); ("slot-holder-b", 12.0) ]
+      KTS.Autonomous_slot
+  in
+  let blocker_class = KHL.semaphore_wait_timeout_blocker_class timeout in
+  Alcotest.(check string)
+    "slot timeout maps to autonomous slot blocker"
+    "autonomous_slot_wait_timeout"
+    (KT.blocker_class_to_string blocker_class);
+  let _persisted, log_diagnostic =
+    KHL.semaphore_wait_timeout_diagnostics ~cascade_name:"slot-cascade" timeout
+  in
+  Alcotest.(check bool)
+    "slot diagnostic still names holders"
+    true
+    (contains_substring log_diagnostic "holders=[slot-holder-a/181s")
+
 let test_wait_observation_updates_registry_skip_stamp () =
   let base_path =
     Filename.concat (Filename.get_temp_dir_name ())
@@ -303,6 +377,12 @@ let () =
     "watchdog_observation", [
       Alcotest.test_case "reason labels are stable" `Quick
         test_wait_observation_reason_labels;
+      Alcotest.test_case
+        "queue-head timeout names fifo blocker, not empty holders" `Quick
+        test_queue_head_timeout_diagnostic_names_fifo_blocker;
+      Alcotest.test_case
+        "slot timeout keeps holder diagnostic" `Quick
+        test_autonomous_slot_timeout_keeps_holder_diagnostic;
       Alcotest.test_case "registry skip stamp is updated" `Quick
         test_wait_observation_updates_registry_skip_stamp;
       Alcotest.test_case "oas timeout labels are stable" `Quick

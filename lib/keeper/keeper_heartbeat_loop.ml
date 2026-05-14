@@ -582,6 +582,74 @@ let run_keeper_cycle_with_slot
     updated
 ;;
 
+let semaphore_wait_timeout_blocker_class
+      (timeout : Keeper_turn_slot.semaphore_wait_timeout)
+  =
+  match timeout.timeout_phase with
+  | Keeper_turn_slot.Autonomous_queue_head -> Keeper_types.Admission_queue_wait_timeout
+  | Keeper_turn_slot.Autonomous_slot -> Keeper_types.Autonomous_slot_wait_timeout
+  | Keeper_turn_slot.Reactive_slot | Keeper_turn_slot.Turn_slot ->
+    Keeper_types.Turn_timeout_after_queue_wait
+;;
+
+let semaphore_wait_timeout_diagnostics
+      ~cascade_name
+      (timeout : Keeper_turn_slot.semaphore_wait_timeout)
+  =
+  let phase_label =
+    Keeper_turn_slot.semaphore_wait_phase_to_string timeout.timeout_phase
+  in
+  let queue_ahead_text =
+    match timeout.timeout_phase, timeout.timeout_queue_ahead with
+    | Keeper_turn_slot.Autonomous_queue_head, Some ahead ->
+      Printf.sprintf " queue_blocker=autonomous_fifo queue_ahead=%d" ahead
+    | Keeper_turn_slot.Autonomous_queue_head, None ->
+      " queue_blocker=autonomous_fifo queue_ahead=unknown"
+    | _, Some ahead -> Printf.sprintf " queue_ahead=%d" ahead
+    | _, None -> ""
+  in
+  let persisted_blocker =
+    Printf.sprintf
+      "skipped: semaphore wait > %.0fs phase=%s (cascade=%s%s queue_depth=%d \
+       autonomous_available=%d reactive_available=%d turn_available=%d)"
+      timeout.timeout_wait_sec
+      phase_label
+      cascade_name
+      queue_ahead_text
+      timeout.timeout_queue_depth
+      timeout.timeout_autonomous_available
+      timeout.timeout_reactive_available
+      timeout.timeout_turn_available
+  in
+  let log_diagnostic =
+    match timeout.timeout_phase with
+    | Keeper_turn_slot.Autonomous_queue_head ->
+      let ahead_text =
+        match timeout.timeout_queue_ahead with
+        | Some ahead -> string_of_int ahead
+        | None -> "unknown"
+      in
+      Printf.sprintf
+        "%s queue_head=[blocker=autonomous_fifo ahead=%s depth=%d]"
+        persisted_blocker
+        ahead_text
+        timeout.timeout_queue_depth
+    | Keeper_turn_slot.Autonomous_slot
+    | Keeper_turn_slot.Reactive_slot
+    | Keeper_turn_slot.Turn_slot ->
+      let holder_text =
+        match timeout.timeout_holders with
+        | [] -> "none"
+        | holders ->
+          holders
+          |> List.map (fun (name, age) -> Printf.sprintf "%s/%.0fs" name age)
+          |> String.concat ", "
+      in
+      Printf.sprintf "%s holders=[%s]" persisted_blocker holder_text
+  in
+  persisted_blocker, log_diagnostic
+;;
+
 (** Handle semaphore wait timeout for legacy path. *)
 let handle_semaphore_wait_timeout
       ~ctx
@@ -599,40 +667,12 @@ let handle_semaphore_wait_timeout
     ~phase_label
     ~kind:Semaphore_wait_timeout
     ();
-  let queue_ahead_text =
-    match timeout.timeout_queue_ahead with
-    | None -> ""
-    | Some ahead -> Printf.sprintf " queue_ahead=%d" ahead
+  let persisted_blocker, log_diagnostic =
+    semaphore_wait_timeout_diagnostics
+      ~cascade_name:(cascade_name_of_meta meta_after_triage)
+      timeout
   in
-  let holder_text =
-    match timeout.timeout_holders with
-    | [] -> "none"
-    | holders ->
-      holders
-      |> List.map (fun (name, age) -> Printf.sprintf "%s/%.0fs" name age)
-      |> String.concat ", "
-  in
-  let persisted_blocker =
-    Printf.sprintf
-      "skipped: semaphore wait > %.0fs phase=%s (cascade=%s%s queue_depth=%d \
-       autonomous_available=%d reactive_available=%d turn_available=%d)"
-      timeout.timeout_wait_sec
-      phase_label
-      (cascade_name_of_meta meta_after_triage)
-      queue_ahead_text
-      timeout.timeout_queue_depth
-      timeout.timeout_autonomous_available
-      timeout.timeout_reactive_available
-      timeout.timeout_turn_available
-  in
-  let log_diagnostic = Printf.sprintf "%s holders=[%s]" persisted_blocker holder_text in
-  let blocker_class =
-    match timeout.timeout_phase with
-    | Keeper_turn_slot.Autonomous_queue_head | Keeper_turn_slot.Autonomous_slot ->
-      Keeper_types.Autonomous_slot_wait_timeout
-    | Keeper_turn_slot.Reactive_slot | Keeper_turn_slot.Turn_slot ->
-      Keeper_types.Turn_timeout_after_queue_wait
-  in
+  let blocker_class = semaphore_wait_timeout_blocker_class timeout in
   Log.Keeper.warn "%s: skipping turn (%s)" meta_after_triage.name log_diagnostic;
   Prometheus.inc_counter
     Keeper_metrics.metric_keeper_semaphore_wait_timeout

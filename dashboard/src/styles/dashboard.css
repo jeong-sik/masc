@@ -1578,6 +1578,42 @@
   flex: 1 1 58px;
 }
 
+.ide-run-progress-keepers > span[data-actionable="true"] {
+  padding: 0;
+}
+
+.ide-run-progress-keeper-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  min-height: 20px;
+  padding: 2px 6px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ide-run-progress-keeper-link > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide-run-progress-keeper-link:hover,
+.ide-run-progress-keeper-link:focus-visible {
+  color: var(--color-fg-primary);
+}
+
+.ide-run-progress-keeper-link:focus-visible {
+  outline: 1px solid var(--color-accent-fg);
+  outline-offset: 1px;
+}
+
 .ide-run-progress-goal {
   display: grid;
   gap: var(--sp-1);

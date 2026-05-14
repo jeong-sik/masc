@@ -111,12 +111,18 @@ export interface IdeRunProgressSummary {
   readonly keeperTotalCount: number
   readonly latestAgeLabel: string
   readonly surfaceCounts: ReadonlyArray<IdeRunProgressSurfaceCount>
-  readonly keeperCounts: ReadonlyArray<{ readonly keeper_id: string; readonly count: number }>
+  readonly keeperCounts: ReadonlyArray<IdeRunProgressKeeperCount>
   readonly activeGoal: IdeRunProgressGoal | null
 }
 
 export interface IdeRunProgressSurfaceCount {
   readonly label: string
+  readonly count: number
+  readonly routeLink: IdeContextRouteLink | null
+}
+
+export interface IdeRunProgressKeeperCount {
+  readonly keeper_id: string
   readonly count: number
   readonly routeLink: IdeContextRouteLink | null
 }
@@ -483,14 +489,27 @@ export function deriveIdeRunProgressSummary(
     count: events.length,
     routeLink: latestSurfaceRouteLink('Telemetry', events),
   })
-  const keeperEntries = [...events.reduce((acc, event) => {
-    acc.set(event.keeper_id, (acc.get(event.keeper_id) ?? 0) + 1)
-    return acc
-  }, new Map<string, number>())]
-    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+  const keeperStats = new Map<string, { count: number; latestEvent: RunActivityEvent }>()
+  for (const event of events) {
+    const current = keeperStats.get(event.keeper_id)
+    if (!current) {
+      keeperStats.set(event.keeper_id, { count: 1, latestEvent: event })
+      continue
+    }
+    keeperStats.set(event.keeper_id, {
+      count: current.count + 1,
+      latestEvent: isLaterRunActivityEvent(event, current.latestEvent) ? event : current.latestEvent,
+    })
+  }
+  const keeperEntries = [...keeperStats.entries()]
+    .sort((left, right) => right[1].count - left[1].count || left[0].localeCompare(right[0]))
   const keeperCounts = keeperEntries
     .slice(0, 3)
-    .map(([keeper_id, count]) => ({ keeper_id, count }))
+    .map(([keeper_id, stat]) => ({
+      keeper_id,
+      count: stat.count,
+      routeLink: keeperProgressRouteLink(stat.latestEvent),
+    }))
   return {
     totalEvents: events.length,
     currentFileEvents,
@@ -523,14 +542,37 @@ function RunProgressStrip({ summary }: { readonly summary: IdeRunProgressSummary
       <div class="ide-run-progress-keepers" aria-label="Top active keepers">
         ${summary.keeperCounts.length === 0
           ? html`<span>no keeper activity</span>`
-          : summary.keeperCounts.map(entry => html`
-            <span title=${`${entry.keeper_id}: ${entry.count} events`}>
-              <${KeeperBadge} id=${entry.keeper_id} variant="sigil" size="sm" />
-              <span>${entry.count}</span>
-            </span>
-          `)}
+          : summary.keeperCounts.map(entry => RunProgressKeeperChip(entry))}
       </div>
     </section>
+  `
+}
+
+function RunProgressKeeperChip(entry: IdeRunProgressKeeperCount) {
+  const routeLink = entry.routeLink
+  return html`
+    <span
+      title=${`${entry.keeper_id}: ${entry.count} events`}
+      data-actionable=${routeLink ? 'true' : 'false'}
+    >
+      ${routeLink
+        ? html`
+          <button
+            type="button"
+            class="ide-run-progress-keeper-link"
+            title=${routeLink.evidence}
+            aria-label=${`Open ${routeLink.evidence}`}
+            onClick=${() => openIdeContextRouteLink(routeLink)}
+          >
+            <${KeeperBadge} id=${entry.keeper_id} variant="sigil" size="sm" />
+            <span>${entry.count}</span>
+          </button>
+        `
+        : html`
+          <${KeeperBadge} id=${entry.keeper_id} variant="sigil" size="sm" />
+          <span>${entry.count}</span>
+        `}
+    </span>
   `
 }
 
@@ -678,14 +720,32 @@ function latestSurfaceRouteLink(
   label: string,
   events: ReadonlyArray<RunActivityEvent>,
 ): IdeContextRouteLink | null {
-  const latestEvents = [...events].sort((left, right) =>
-    right.timestamp_ms - left.timestamp_ms || right.id.localeCompare(left.id),
-  )
-  for (const event of latestEvents) {
-    const routeLink = activityRouteLinks(event).find(link => link.label === label)
-    if (routeLink) return routeLink
+  const latestEvent = latestRunActivityEvent(events)
+  if (!latestEvent) return null
+  return activityRouteLinks(latestEvent).find(link => link.label === label) ?? null
+}
+
+function keeperProgressRouteLink(event: RunActivityEvent): IdeContextRouteLink | null {
+  const links = activityRouteLinks(event)
+  return links.find(link => link.label === 'Keeper')
+    ?? links.find(link => link.label === 'Telemetry')
+    ?? links[0]
+    ?? null
+}
+
+function latestRunActivityEvent(events: ReadonlyArray<RunActivityEvent>): RunActivityEvent | null {
+  let latest: RunActivityEvent | null = null
+  for (const event of events) {
+    if (latest === null || isLaterRunActivityEvent(event, latest)) {
+      latest = event
+    }
   }
-  return null
+  return latest
+}
+
+function isLaterRunActivityEvent(candidate: RunActivityEvent, current: RunActivityEvent): boolean {
+  return candidate.timestamp_ms > current.timestamp_ms
+    || (candidate.timestamp_ms === current.timestamp_ms && candidate.id > current.id)
 }
 
 function activityRouteLinks(item: RunActivityEvent): ReadonlyArray<IdeContextRouteLink> {

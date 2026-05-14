@@ -166,6 +166,11 @@ describe('IdeActivityPanel', () => {
     fireEvent.click(surfaceLinks.find(link => link.textContent === 'Telemetry1')!)
     expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&session_id=sess-runtime&operation_id=op-runtime&worker_run_id=wr-runtime&q=turn-1')
 
+    const keeperLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-run-progress-keeper-link')]
+    expect(keeperLinks.map(link => link.getAttribute('aria-label'))).toEqual(['Open Keeper sangsu'])
+    fireEvent.click(keeperLinks[0]!)
+    expect(window.location.hash).toBe('#monitoring?section=agents&view=keepers&keeper=sangsu')
+
     const activityRouteLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-activity-route-link')]
     expect(activityRouteLinks.map(link => link.textContent)).toEqual([
       'Code',
@@ -710,9 +715,24 @@ describe('IdeActivityPanel', () => {
       label: 'Telemetry',
       params: { section: 'fleet-health', view: 'event-log', q: 'turn-1' },
     })
-    expect(summary.keeperCounts).toEqual([
-      { keeper_id: 'sangsu', count: 2 },
-      { keeper_id: 'analyst', count: 1 },
+    expect(summary.keeperCounts.map(entry => ({
+      keeper_id: entry.keeper_id,
+      count: entry.count,
+      routeLink: entry.routeLink && {
+        label: entry.routeLink.label,
+        params: entry.routeLink.params,
+      },
+    }))).toEqual([
+      {
+        keeper_id: 'sangsu',
+        count: 2,
+        routeLink: { label: 'Keeper', params: { section: 'agents', view: 'keepers', keeper: 'sangsu' } },
+      },
+      {
+        keeper_id: 'analyst',
+        count: 1,
+        routeLink: { label: 'Keeper', params: { section: 'agents', view: 'keepers', keeper: 'analyst' } },
+      },
     ])
   })
 
@@ -775,5 +795,6 @@ describe('IdeActivityPanel', () => {
     expect(summary.keeperTotalCount).toBe(4)
     expect(summary.keeperCounts).toHaveLength(3)
     expect(summary.keeperCounts.map(entry => entry.keeper_id)).toEqual(['alpha', 'bravo', 'charlie'])
+    expect(summary.keeperCounts.map(entry => entry.routeLink?.label)).toEqual(['Keeper', 'Keeper', 'Keeper'])
   })
 })

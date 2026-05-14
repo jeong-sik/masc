@@ -982,14 +982,17 @@ let sort_entries_by_requested_at entries =
 
 (* ── Submit & await ───────────────────────────────────────── *)
 
+let default_noncritical_approval_timeout_s = 600.0
+
 (** Submit a tool call for approval and suspend the calling fiber.
     Returns the operator's decision when the promise is resolved.
     Called from the OAS approval_callback (inside agent fiber).
 
-    [timeout_s] defaults to 600s for non-[Critical] approvals. This is
-    intentionally longer than the 30s wrapper used by A2 for generic
-    [Eio.Promise.await] sites: a HITL approval is bounded by an
-    operator's response time, not by an SLA on autonomous progress.
+    [timeout_s] defaults to {!default_noncritical_approval_timeout_s}
+    for non-[Critical] approvals. This is intentionally longer than the
+    30s wrapper used by A2 for generic [Eio.Promise.await] sites: a HITL
+    approval is bounded by an operator's response time, not by an SLA on
+    autonomous progress.
     [Critical] approvals are exempt, matching [expire_stale]'s
     operator-must-decide policy. Drop the default only after measuring
     the operator-response distribution — premature shortening turns
@@ -1009,7 +1012,7 @@ let submit_and_await
       ?disposition
       ?disposition_reason
       ?clock
-      ?(timeout_s = 600.0)
+      ?(timeout_s = default_noncritical_approval_timeout_s)
       ()
   : Agent_sdk.Hooks.approval_decision
   =

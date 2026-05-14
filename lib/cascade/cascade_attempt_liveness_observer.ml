@@ -13,6 +13,7 @@ type t = {
   budget : L.budget;
   cascade_label : string;
   candidate_key : string option;
+  external_wait : (unit -> bool) option;
   started_at : float;
   first_chunk_at : float option ref;
   last_chunk_at : float option ref;
@@ -30,13 +31,14 @@ let mode (t : t) : Cfg.mode = t.mode
 
 let public_runtime_provider_label = "runtime"
 
-let create ~mode ~budget ~cascade_label ?candidate_key ~started_at () =
+let create ~mode ~budget ~cascade_label ?external_wait ?candidate_key ~started_at () =
   let stop_tick_p, stop_tick_r = Eio.Promise.create () in
   {
     mode;
     budget;
     cascade_label;
     candidate_key;
+    external_wait;
     started_at;
     first_chunk_at = ref None;
     last_chunk_at = ref None;
@@ -202,6 +204,20 @@ let step_with_event (t : t) (evt : Agent_sdk.Types.sse_event) : unit =
         if L.is_terminal new_state then stop_tick_fiber t;
         react_to_output t output
 
+let external_wait_active (t : t) : bool =
+  match t.external_wait with
+  | None -> false
+  | Some f ->
+    (try f () with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+       Log.Misc.warn
+         "cascade_attempt_liveness: external_wait predicate raised \
+          (cascade=%s provider=runtime): %s"
+         t.cascade_label
+         (Printexc.to_string exn);
+       false)
+
 let wrap_on_event (t : t)
     (original : (Agent_sdk.Types.sse_event -> unit) option)
     : (Agent_sdk.Types.sse_event -> unit) option =
@@ -271,9 +287,17 @@ let start_tick_fiber (t : t) ~(sw : Eio.Switch.t)
                 if L.is_terminal !(t.state) then ()
                 else begin
                   let now = now_seconds () in
+                  let event =
+                    if external_wait_active t
+                    then L.Chunk (L.Stream_chunk.Heartbeat, now)
+                    else L.Tick now
+                  in
+                  (match event with
+                   | L.Chunk (_, at) -> observe_chunk_clock t ~at
+                   | L.Tick _ | L.Provider_wire_error _ -> ());
                   let new_state, output =
                     L.step ~recorder:(prometheus_recorder t)
-                      t.budget !(t.state) (L.Tick now)
+                      t.budget !(t.state) event
                   in
                   t.state := new_state;
                   (try react_to_output t output

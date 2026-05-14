@@ -660,7 +660,12 @@ let run_turn
             | Some err -> Error err
             | None ->
               (match
-                 Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s (fun () ->
+                 let bridge_timeout_s =
+                   Keeper_llm_bridge.with_hitl_approval_headroom timeout_s
+                 in
+                 Keeper_llm_bridge.run_with_timeout_and_fallback
+                   ~timeout_s:bridge_timeout_s
+                   (fun () ->
                    Keeper_turn_driver.run_named
                      ~cascade_name:cascade_name_string
                      ~keeper_name:meta.name

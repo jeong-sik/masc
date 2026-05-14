@@ -49,6 +49,7 @@ val create :
   mode:Cascade_attempt_liveness_config.mode ->
   budget:Cascade_attempt_liveness.budget ->
   cascade_label:string ->
+  ?external_wait:(unit -> bool) ->
   ?candidate_key:string ->
   started_at:float ->
   unit ->
@@ -59,6 +60,11 @@ val create :
     used only for internal budget history and any successful timing sample
     exposed by {!success_sample_for_candidate}. It is not emitted as a public
     Prometheus label; public observer metrics use a neutral runtime lane.
+
+    [external_wait], when supplied, returns true while the attempt is blocked
+    on a non-provider wait such as MASC HITL approval. During that window the
+    tick fiber feeds liveness heartbeats instead of idle ticks, so operator
+    latency is not classified as provider stream idleness.
 
     [started_at] is the monotonic wall-clock the caller already captured for
     the attempt start.

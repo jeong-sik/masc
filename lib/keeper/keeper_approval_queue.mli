@@ -177,6 +177,12 @@ end
 
 (** {1 Submit & await} *)
 
+val default_noncritical_approval_timeout_s : float
+(** Default operator wait used by [submit_and_await] for non-critical
+    approvals. OAS/cascade bridge deadlines that wrap keeper execution must
+    not be shorter than this, otherwise a valid HITL wait is misclassified as
+    provider idleness. *)
+
 (** Submit a tool call for approval and suspend the calling fiber.
     Returns the operator's decision when the promise is resolved.
     Called from the OAS approval_callback (inside the agent fiber). *)

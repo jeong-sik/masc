@@ -51,6 +51,7 @@ let sdk_error_to_cascade_outcome (err : Agent_sdk.Error.sdk_error)
   | Some (Cascade_error_classify.Admission_queue_rejected _)
   | Some (Cascade_error_classify.Turn_timeout _)
   | Some (Cascade_error_classify.Oas_timeout_budget _)
+  | Some (Cascade_error_classify.Max_tokens_ceiling_violation _)
   | Some (Cascade_error_classify.Ambiguous_post_commit _)
   | None -> (
   match err with
@@ -658,6 +659,7 @@ let sdk_error_is_max_turns_exceeded (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Cascade_error_classify.Admission_queue_rejected _)
   | Some (Cascade_error_classify.Turn_timeout _)
   | Some (Cascade_error_classify.Oas_timeout_budget _)
+  | Some (Cascade_error_classify.Max_tokens_ceiling_violation _)
   | Some (Cascade_error_classify.Ambiguous_post_commit _) ->
       false
   | None -> (

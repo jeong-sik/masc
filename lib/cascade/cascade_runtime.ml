@@ -241,10 +241,9 @@ let clamp_context_for_pure_local_labels ~(labels : string list) ~(max_context : 
   then begin
     let clamped = min max_context Env_config.ContextCompact.small_local_floor in
     (* Iter 49: tick a counter when the clamp actually reduces the
-       window (max_context > floor).  Same shape as iter 46
-       max_tokens_clamped — the policy stays (local providers
-       have tiny context windows) but the rate is observable so
-       operators can spot cascade.toml settings being silently
+       window (max_context > floor).  Same family as DD-020
+       max_tokens_ceiling_violation: local context clamps remain
+       observable so operators can spot cascade.toml settings being
        clipped on local-only cascades. *)
     if clamped < max_context then
       Cascade_metrics.on_local_context_clamped ();

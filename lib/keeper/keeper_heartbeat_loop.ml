@@ -418,6 +418,7 @@ let is_oas_timeout_budget_error (err : Agent_sdk.Error.sdk_error) =
       | Keeper_turn_driver.Admission_queue_timeout _
       | Keeper_turn_driver.Admission_queue_rejected _
       | Keeper_turn_driver.Turn_timeout _
+      | Keeper_turn_driver.Max_tokens_ceiling_violation _
       | Keeper_turn_driver.Ambiguous_post_commit _ )
   | None ->
     false

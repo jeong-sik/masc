@@ -180,6 +180,23 @@ let run_turn
   in
   let temperature = ctx.temperature in
   let max_tokens = ctx.max_tokens in
+  let pre_dispatch_max_tokens_error =
+    match
+      Cascade_inference.validate_max_tokens_within_ceiling
+        ~cascade_name
+        ~provider_ceiling:(Some max_context)
+        max_tokens
+    with
+    | Ok _ -> None
+    | Error internal_error ->
+      let detail =
+        Option.value
+          ~default:(Cascade_error_classify.kind_of_masc_internal_error internal_error)
+          (Cascade_error_classify.summary_of_masc_internal_error internal_error)
+      in
+      Log.Keeper.error "%s: %s" meta.name detail;
+      Some (Cascade_error_classify.sdk_error_of_masc_internal_error internal_error)
+  in
   let context_injector = ctx.context_injector in
   let shared_context = ctx.shared_context in
   let session_dir = ctx.session_dir in
@@ -633,7 +650,10 @@ let run_turn
          match pre_dispatch_checkpoint_error with
          | Some err -> Error err
          | None ->
-           (match !initial_tool_surface_blocker_ref with
+           (match pre_dispatch_max_tokens_error with
+            | Some err -> Error err
+            | None ->
+             (match !initial_tool_surface_blocker_ref with
             | Some err -> Error err
             | None ->
               (match
@@ -719,7 +739,7 @@ let run_turn
                      ?event_bus
                      ?per_provider_timeout_s
                      ())
-               with
+             with
                | Error e -> Error e
                | Ok result ->
                  let post_turn_t0 = Time_compat.now () in
@@ -1674,7 +1694,7 @@ let run_turn
                           ()
                       with
                       | Error e -> Error (Agent_sdk.Error.Internal e)
-                      | Ok response_text -> finalize_response_text response_text))))
+                      | Ok response_text -> finalize_response_text response_text)))))
 	       in
 	       (match turn_result with
 	        | Ok _ -> ()

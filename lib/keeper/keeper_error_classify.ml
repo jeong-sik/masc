@@ -170,6 +170,7 @@ let is_auto_recoverable_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error
   | Some (Keeper_turn_driver.Admission_queue_timeout _)
   | Some (Keeper_turn_driver.Turn_timeout _)
   | Some (Keeper_turn_driver.Oas_timeout_budget _)
+  | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _)
   | None ->
       false
@@ -184,6 +185,7 @@ let is_resumable_cli_session_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Admission_queue_rejected _)
   | Some (Keeper_turn_driver.Turn_timeout _)
   | Some (Keeper_turn_driver.Oas_timeout_budget _)
+  | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _)
   | None ->
       false
@@ -312,6 +314,7 @@ let degraded_retry_after_recoverable_error
     | Some (Keeper_turn_driver.No_tool_capable_provider _)
     | Some (Keeper_turn_driver.Accept_rejected _)
     | Some (Keeper_turn_driver.Admission_queue_rejected _)
+    | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
     | Some (Keeper_turn_driver.Ambiguous_post_commit _)
     | None ->
         None
@@ -358,6 +361,7 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
     | Some (Keeper_turn_driver.No_tool_capable_provider _)
     | Some (Keeper_turn_driver.Accept_rejected _)
     | Some (Keeper_turn_driver.Admission_queue_rejected _)
+    | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
     | Some (Keeper_turn_driver.Ambiguous_post_commit _) ->
         None
     | None ->
@@ -586,7 +590,8 @@ let is_ambiguous_side_effect_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Admission_queue_rejected _)
   | Some (Keeper_turn_driver.Admission_queue_timeout _)
   | Some (Keeper_turn_driver.Turn_timeout _)
-  | Some (Keeper_turn_driver.Oas_timeout_budget _) -> false
+  | Some (Keeper_turn_driver.Oas_timeout_budget _)
+  | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _) -> false
 
 let reclassify_error_after_side_effect
     ~(tool_names : string list)
@@ -750,6 +755,7 @@ let is_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Admission_queue_rejected _)
   | Some (Keeper_turn_driver.Oas_timeout_budget _)
   | Some (Keeper_turn_driver.Turn_timeout _)
+  | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _) -> false
   | None -> false
 

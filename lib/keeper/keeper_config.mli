@@ -63,6 +63,7 @@ val approval_queue_stale_max_wait_sec : float
 val default_room_signal_prompt_enabled : bool
 val default_goal_horizon_max_chars : int
 val default_drift_max_clauses : int
+val legacy_provider_filter_name : string
 
 (** Maximum bytes of personality text included in the rendered keeper prompt.
     Drives [normalize_self_model_text] when called from prompt rendering.

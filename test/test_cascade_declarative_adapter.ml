@@ -695,29 +695,9 @@ api-name = "claude-haiku-4-5-20251001"
 members = ["claude_code.haiku"]
 strategy = "failover"
 
-[tier.capacity-t]
-members = ["claude_code.haiku"]
-strategy = "capacity_aware"
-
-[tier.weighted-t]
-members = ["claude_code.haiku"]
-strategy = "weighted_random"
-
-[tier.circuit-t]
-members = ["claude_code.haiku"]
-strategy = "circuit_breaker_cycling"
-
 [tier.priority-t]
 members = ["claude_code.haiku"]
 strategy = "priority_tier"
-
-[tier.sticky-t]
-members = ["claude_code.haiku"]
-strategy = "sticky"
-
-[tier.round-robin-t]
-members = ["claude_code.haiku"]
-strategy = "round_robin"
 |}
   in
   let catalog = adapt_toml toml in
@@ -739,121 +719,7 @@ strategy = "round_robin"
       profile.strategy.Cascade_strategy.kind
   in
   check_kind "tier.failover-t" Cascade_strategy.Failover;
-  check_kind "tier.capacity-t" Cascade_strategy.Capacity_aware;
-  check_kind "tier.weighted-t" Cascade_strategy.Weighted_random;
-  check_kind "tier.circuit-t" Cascade_strategy.Circuit_breaker_cycling;
-  check_kind "tier.priority-t" Cascade_strategy.Priority_tier;
-  check_kind "tier.sticky-t" Cascade_strategy.Sticky;
-  check_kind "tier.round-robin-t" Cascade_strategy.Round_robin
-;;
-
-(* --- Cycle policy passthrough --- *)
-
-let test_cycle_policy () =
-  let toml =
-    {|
-[providers.claude_code]
-protocol = "anthropic-cli"
-command = "claude"
-
-[models.haiku]
-max-context = 200000
-api-name = "claude-haiku-4-5-20251001"
-
-[claude_code.haiku]
-
-[tier.cycling-t]
-members = ["claude_code.haiku"]
-strategy = "circuit_breaker_cycling"
-max-cycles = 5
-backoff-base-ms = 1000
-backoff-cap-ms = 30000
-|}
-  in
-  let catalog = adapt_toml toml in
-  no_errors catalog.errors;
-  let profile =
-    List.find (fun (p : adapted_profile) -> p.name = "tier.cycling-t") catalog.profiles
-  in
-  let cp = profile.strategy.Cascade_strategy.cycle in
-  check int "max_cycles" 5 cp.Cascade_strategy.max_cycles;
-  check int "backoff_base_ms" 1000 cp.Cascade_strategy.backoff_base_ms;
-  check int "backoff_cap_ms" 30000 cp.Cascade_strategy.backoff_cap_ms
-;;
-
-(* --- Scoring params passthrough --- *)
-
-let test_scoring_params () =
-  let toml =
-    {|
-[providers.claude_code]
-protocol = "anthropic-cli"
-command = "claude"
-
-[models.haiku]
-max-context = 200000
-api-name = "claude-haiku-4-5-20251001"
-
-[claude_code.haiku]
-
-[tier.scored-t]
-members = ["claude_code.haiku"]
-strategy = "weighted_random"
-latency-baseline-ms = 300.0
-rate-limit-recency-window-s = 120.0
-rate-limit-decay-base = 0.7
-rate-limit-skip-after = 5
-server-error-recency-window-s = 240.0
-server-error-decay-base = 0.4
-server-error-skip-after = 8
-|}
-  in
-  let catalog = adapt_toml toml in
-  no_errors catalog.errors;
-  let profile =
-    List.find (fun (p : adapted_profile) -> p.name = "tier.scored-t") catalog.profiles
-  in
-  let sp = profile.strategy.Cascade_strategy.scoring in
-  check
-    (Alcotest.float 0.001)
-    "latency_baseline_ms"
-    300.0
-    sp.Cascade_strategy.latency_baseline_ms;
-  check
-    (Alcotest.float 0.001)
-    "rate_limit_decay_base"
-    0.7
-    sp.Cascade_strategy.rate_limit_decay_base;
-  check int "rate_limit_skip_after" 5 sp.Cascade_strategy.rate_limit_skip_after
-;;
-
-(* --- Sticky TTL --- *)
-
-let test_sticky_ttl () =
-  let toml =
-    {|
-[providers.claude_code]
-protocol = "anthropic-cli"
-command = "claude"
-
-[models.haiku]
-max-context = 200000
-api-name = "claude-haiku-4-5-20251001"
-
-[claude_code.haiku]
-
-[tier.sticky-t]
-members = ["claude_code.haiku"]
-strategy = "sticky"
-sticky-ttl-ms = 600000
-|}
-  in
-  let catalog = adapt_toml toml in
-  no_errors catalog.errors;
-  let profile =
-    List.find (fun (p : adapted_profile) -> p.name = "tier.sticky-t") catalog.profiles
-  in
-  check int "sticky_ttl_ms" 600000 profile.strategy.Cascade_strategy.sticky_ttl_ms
+  check_kind "tier.priority-t" Cascade_strategy.Priority_tier
 ;;
 
 (* --- Multiple errors accumulated --- *)
@@ -1030,11 +896,7 @@ let () =
         ; test_case "duplicate routes" `Quick test_duplicate_routes
         ] )
     ; ( "strategy"
-      , [ test_case "all 7 variants" `Quick test_strategy_mapping
-        ; test_case "cycle policy" `Quick test_cycle_policy
-        ; test_case "scoring params" `Quick test_scoring_params
-        ; test_case "sticky ttl" `Quick test_sticky_ttl
-        ] )
+      , [ test_case "supported variants" `Quick test_strategy_mapping ] )
     ; "edge_cases", [ test_case "empty tier-group" `Quick test_empty_tier_group ]
     ]
 ;;

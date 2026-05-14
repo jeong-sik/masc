@@ -131,6 +131,7 @@ let default_room_signal_prompt_enabled = false
 let default_goal_horizon_max_chars = 480
 let default_drift_max_clauses = 6
 let prompt_render_max_bytes = 320
+let legacy_provider_filter_name = "allowed_providers"
 
 let keeper_room_signal_prompt_enabled_override () =
   bool_of_env_opt "MASC_KEEPER_ROOM_SIGNAL_PROMPT_ENABLED"
@@ -141,7 +142,7 @@ let removed_keeper_input_key_names =
     "models";
     "allowed_models";
     "active_model";
-    Keeper_types.legacy_provider_filter_name;
+    legacy_provider_filter_name;
     "presence_keepalive";
     "presence_keepalive_sec";
     "trigger_mode";

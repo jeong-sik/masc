@@ -336,10 +336,10 @@ let resolve_after_turn_model ~keeper_name
     runtime_lane_label
   end else begin
     if is_runtime_selector_alias raw_model then (
+      let source_telemetry_canonical = "telemetry_canonical" in
       Prometheus.inc_counter alias_response_model_metric
         ~labels:
           [
-            let source_telemetry_canonical = "telemetry_canonical" in
             ("keeper", keeper_name);
             ("alias", runtime_lane_label);
             ("source", source_telemetry_canonical);
@@ -768,7 +768,7 @@ let assemble_cost_event_payload
       ~output_tokens
       ~cost_usd
   in
-  let default_safe_cost_usd = 0.0
+  let default_safe_cost_usd = 0.0 in
   let safe_cost_usd =
     match cost_status with
     | Cost_reported -> cost_usd
@@ -817,6 +817,7 @@ let assemble_cost_event_payload
     classify_cost_usd_source ~usage_missing ~usage_trusted
       ~runtime_unmetered ~cost_usd
   in
+  let source_auto_trajectory = "auto_trajectory" in
   let entry = `Assoc ([
     ("agent", `String agent_name);
     ("task_id", Json_util.string_opt_to_json task_id);
@@ -831,7 +832,6 @@ let assemble_cost_event_payload
     ("cost_usd_source", `String cost_usd_source);
     ("usage_missing", `Bool usage_missing);
     ("timestamp", `String (Masc_domain.now_iso ()));
-    let source_auto_trajectory = "auto_trajectory" in
     ("source", `String source_auto_trajectory);
   ]
   @ Keeper_usage_trust.json_fields usage_trust

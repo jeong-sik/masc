@@ -257,11 +257,19 @@ val all_kinds : kind list
 (** All [kind] constructors in declaration order.  Adding a new
     constructor forces compile errors in [kind_to_string] (which
     powers [valid_kind_strings] used by the [parse_kind] error
-    message), so the operator-visible "expected one of" list stays
-    in sync automatically.  Issue #8603. *)
+    message), so the internal "expected one of" list stays in sync
+    automatically.  Issue #8603. *)
 
 val valid_kind_strings : string list
 (** Wire-format names for {!all_kinds}, derived via {!kind_to_string}. *)
+
+val config_kind_strings : string list
+(** Strategy names accepted from operator cascade configuration.
+
+    Only [failover] and [priority_tier] are currently supported at the
+    config boundary.  The other constructors remain available for internal
+    tests and historical strategy code, but must not be accepted from
+    [cascade.toml] until the runtime has an active seed/profile using them. *)
 
 val parse_kind : string -> (kind, string) result
 (** [parse_kind s] returns [Ok kind] for known names, [Error msg] for
@@ -269,6 +277,11 @@ val parse_kind : string -> (kind, string) result
     so it stays in sync with the variant.  Callers should warn-and-fallback
     to [Failover] rather than raise, to keep keeper startup resilient to
     config typos. *)
+
+val parse_config_kind : string -> (kind, string) result
+(** [parse_config_kind s] is the stricter parser for operator-provided
+    cascade configuration.  It rejects strategy constructors that still
+    exist in code but are not supported by the shipped cascade config. *)
 
 (** {1 Strategy value} *)
 

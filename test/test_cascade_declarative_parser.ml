@@ -506,15 +506,10 @@ let test_api_format_of_protocol () =
   check bool "unknown" true (api_format_of_protocol "unknown" |> Result.is_error)
 ;;
 
-let test_all_strategies_parse () =
+let test_supported_config_strategies_parse () =
   let strategies =
     [ "failover", Failover
-    ; "capacity_aware", Capacity_aware
-    ; "weighted_random", Weighted_random
-    ; "circuit_breaker_cycling", Circuit_breaker_cycling
     ; "priority_tier", Priority_tier
-    ; "sticky", Sticky
-    ; "round_robin", Round_robin
     ]
   in
   List.iter
@@ -549,6 +544,42 @@ strategy = "%s"
     strategies
 ;;
 
+let test_retired_config_strategies_rejected () =
+  let retired =
+    [
+      "capacity_aware";
+      "weighted_random";
+      "circuit_breaker_cycling";
+      "sticky";
+      "round_robin";
+    ]
+  in
+  List.iter
+    (fun name ->
+       let toml =
+         Printf.sprintf
+           {|
+[providers.p]
+protocol = "anthropic-cli"
+command = "c"
+
+[models.m]
+max-context = 4096
+
+[p.m]
+
+[tier.t]
+members = ["p.m"]
+strategy = "%s"
+|}
+           name
+       in
+       match parse_string toml with
+       | Ok _ -> failwith ("expected retired strategy rejection: " ^ name)
+       | Error errs -> has_error_at "tier.t.strategy" errs)
+    retired
+;;
+
 (* --- Strategy-specific field tests --- *)
 
 let test_cycle_policy () =
@@ -565,7 +596,7 @@ max-context = 4096
 
 [tier.t]
 members = ["p.m"]
-strategy = "circuit_breaker_cycling"
+strategy = "failover"
 max-cycles = 3
 backoff-base-ms = 500
 backoff-cap-ms = 10000
@@ -620,7 +651,7 @@ max-context = 4096
 
 [tier.t]
 members = ["p.m"]
-strategy = "circuit_breaker_cycling"
+strategy = "failover"
 max-cycles = 3
 backoff-base-ms = 500
 |}
@@ -645,7 +676,7 @@ max-context = 4096
 
 [tier.t]
 members = ["p.m"]
-strategy = "sticky"
+strategy = "failover"
 sticky-ttl-ms = 600000
 |}
   in
@@ -669,7 +700,7 @@ max-context = 4096
 
 [tier.t]
 members = ["p.m"]
-strategy = "sticky"
+strategy = "failover"
 |}
   in
   let cfg = ok_config (parse_string toml) in
@@ -692,7 +723,7 @@ max-context = 4096
 
 [tier.t]
 members = ["p.m"]
-strategy = "weighted_random"
+strategy = "failover"
 latency-baseline-ms = 200.0
 rate-limit-recency-window-s = 60.0
 rate-limit-decay-base = 0.5
@@ -732,7 +763,7 @@ max-context = 4096
 
 [tier.t]
 members = ["p.m"]
-strategy = "weighted_random"
+strategy = "failover"
 latency-baseline-ms = 200.0
 rate-limit-recency-window-s = 60.0
 |}
@@ -1489,7 +1520,11 @@ let () =
         ; test_case "api_format_of_protocol" `Quick test_api_format_of_protocol
         ] )
     ; ( "strategies"
-      , [ test_case "all 7 strategies parse" `Quick test_all_strategies_parse ] )
+      , [ test_case "supported strategies parse" `Quick
+            test_supported_config_strategies_parse
+        ; test_case "retired strategies rejected" `Quick
+            test_retired_config_strategies_rejected
+        ] )
     ; ( "cycle_policy"
       , [ test_case "parses all-or-nothing" `Quick test_cycle_policy
         ; test_case "absent yields None" `Quick test_cycle_policy_absent

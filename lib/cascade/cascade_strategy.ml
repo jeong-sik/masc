@@ -368,6 +368,8 @@ let all_kinds = [
 
 let valid_kind_strings = List.map kind_to_string all_kinds
 
+let config_kind_strings = [ "failover"; "priority_tier" ]
+
 let parse_kind = function
   | "failover" -> Ok Failover
   | "capacity_aware" -> Ok Capacity_aware
@@ -380,6 +382,22 @@ let parse_kind = function
     Error (Printf.sprintf
              "unknown cascade strategy %S (expected one of: %s)"
              other (String.concat ", " valid_kind_strings))
+
+let parse_config_kind raw =
+  match parse_kind raw with
+  | Error _ ->
+    Error
+      (Printf.sprintf
+         "unsupported cascade config strategy %S (expected one of: %s)"
+         raw (String.concat ", " config_kind_strings))
+  | Ok ((Failover | Priority_tier) as kind) -> Ok kind
+  | Ok kind ->
+    Error
+      (Printf.sprintf
+         "unsupported cascade config strategy %S (expected one of: %s); \
+          %s is retained for internal strategy tests only"
+         raw (String.concat ", " config_kind_strings)
+         (kind_to_string kind))
 
 let default_sticky_ttl_ms = 300_000
 

@@ -584,6 +584,31 @@ let test_bash_git_creds_uses_oneshot_with_turn_runtime () =
   Alcotest.(check bool) "one-shot run mounted GH identity bundle" true
     (contains_substring log (root_gh_dir ^ ":/tmp/keeper-creds/.config/gh:ro"))
 
+let test_bash_git_c_option_missing_dir_blocks_before_docker () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+      ~args:
+        (`Assoc
+          [
+            ( "cmd",
+              `String
+                "git -C repos/masc-mcp/.worktrees/missing status" );
+            ("cwd", `String playground);
+          ])
+      ()
+  in
+  Alcotest.(check bool) "typed cwd error" true
+    (response_mentions raw "error" "cwd_not_directory");
+  Alcotest.(check bool) "docker was not invoked" false
+    (Sys.file_exists log_path)
+
 let test_bash_git_push_requires_write_preset_before_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
@@ -1215,6 +1240,9 @@ let () =
           Alcotest.test_case
             "docker keeper bash git creds bypass warm turn runtime"
             `Quick test_bash_git_creds_uses_oneshot_with_turn_runtime;
+          Alcotest.test_case
+            "docker keeper git -C missing dir blocks before docker"
+            `Quick test_bash_git_c_option_missing_dir_blocks_before_docker;
           Alcotest.test_case
             "docker keeper git push requires write preset"
             `Quick test_bash_git_push_requires_write_preset_before_docker;

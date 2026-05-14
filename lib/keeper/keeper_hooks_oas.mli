@@ -74,6 +74,22 @@ val context_max_of_telemetry :
   Agent_sdk.Types.inference_telemetry option -> int
 (** Provider-reported context window max, or [0] when telemetry omits it. *)
 
+type thinking_log_summary =
+  { thinking_present : bool
+  ; thinking_blocks : int
+  ; thinking_chars : int
+  ; redacted_thinking_blocks : int
+  ; thinking_kind : string
+  }
+(** Redacted metadata for provider thinking blocks.  [thinking_chars] counts
+    only non-redacted [Thinking.content] bytes; raw content is never included
+    in this summary. *)
+
+val summarize_thinking_blocks :
+  Agent_sdk.Types.content_block list -> thinking_log_summary
+(** Summarize thinking block presence for logs/metrics without exposing raw
+    thinking content. *)
+
 val redact_inference_telemetry_json : Yojson.Safe.t -> Yojson.Safe.t
 (** Redact provider/model identity fields from OAS inference telemetry while
     preserving non-identifying runtime counters and timings. *)

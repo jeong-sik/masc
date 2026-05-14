@@ -388,7 +388,7 @@ raw `opam exec -- dune ...` 은 의도적인 CI-parity 점검 때만. 평소 개
 | [docs/CASCADE-TOML.md](docs/CASCADE-TOML.md) | cascade.toml 작성 매뉴얼 |
 | [docs/CASCADE-COOKBOOK.md](docs/CASCADE-COOKBOOK.md) | 복붙용 로컬 / 개인 예시 |
 | [docs/OAS-MASC-BOUNDARY.md](docs/OAS-MASC-BOUNDARY.md) | OAS / MASC 소유 경계 |
-| [docs/KEEPER-USER-MANUAL.md](docs/KEEPER-USER-MANUAL.md) | keeper 라이프사이클 / 트러블슈팅 |
+| [docs/KEEPER-USER-MANUAL.md](docs/KEEPER-USER-MANUAL.md) | keeper 라이프사이클, sandbox profile, Docker one-shot/managed 실행, 트러블슈팅 |
 | [docs/SUPERVISOR-MODE.md](docs/SUPERVISOR-MODE.md) | supervisor / operator 워크플로 |
 | [docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) | dashboard auth, `doctor auth` |
 | [docs/ENV-CONTRACT.md](docs/ENV-CONTRACT.md) | 환경변수 boot 계약 |

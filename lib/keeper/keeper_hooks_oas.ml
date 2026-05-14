@@ -378,6 +378,40 @@ let context_max_of_telemetry
   | Some { effective_context_window = Some n; _ } when n > 0 -> n
   | _ -> 0
 
+type thinking_log_summary =
+  { thinking_present : bool
+  ; thinking_blocks : int
+  ; thinking_chars : int
+  ; redacted_thinking_blocks : int
+  ; thinking_kind : string
+  }
+
+let summarize_thinking_blocks content =
+  let thinking_blocks = ref 0 in
+  let thinking_chars = ref 0 in
+  let redacted_thinking_blocks = ref 0 in
+  List.iter
+    (function
+      | Agent_sdk.Types.Thinking { content; _ } ->
+          incr thinking_blocks;
+          thinking_chars := !thinking_chars + String.length content
+      | Agent_sdk.Types.RedactedThinking _ -> incr redacted_thinking_blocks
+      | _ -> ())
+    content;
+  let thinking_kind =
+    match !thinking_blocks > 0, !redacted_thinking_blocks > 0 with
+    | false, false -> "none"
+    | true, false -> "thinking"
+    | false, true -> "redacted"
+    | true, true -> "mixed"
+  in
+  { thinking_present = !thinking_blocks > 0 || !redacted_thinking_blocks > 0
+  ; thinking_blocks = !thinking_blocks
+  ; thinking_chars = !thinking_chars
+  ; redacted_thinking_blocks = !redacted_thinking_blocks
+  ; thinking_kind
+  }
+
 let classify_usage_trust ?usage ~model ~telemetry () =
   let _ = model in
   let usage_reported, usage =
@@ -2004,10 +2038,16 @@ let make_hooks
         let wall_tok_s = fmt_tok_s wall_tok_s_opt in
         let prompt_tok_s = fmt_tok_s prompt_tok_s_opt in
         let decode_tok_s = fmt_tok_s decode_tok_s_opt in
+        let thinking = summarize_thinking_blocks response.content in
         Log.Keeper.info
-          "keeper:%s turn=%d total_turns=%d runtime_lane=%s tokens=%d wall_tok_s=%s prompt_tok_s=%s decode_tok_s=%s latency_ms=%d"
+          "keeper:%s turn=%d total_turns=%d runtime_lane=%s tokens=%d wall_tok_s=%s prompt_tok_s=%s decode_tok_s=%s latency_ms=%d thinking_present=%b thinking_blocks=%d thinking_chars=%d redacted_thinking_blocks=%d thinking_kind=%s"
           meta.name turn meta.runtime.usage.total_turns model total_tok
-          wall_tok_s prompt_tok_s decode_tok_s latency_ms;
+          wall_tok_s prompt_tok_s decode_tok_s latency_ms
+          thinking.thinking_present
+          thinking.thinking_blocks
+          thinking.thinking_chars
+          thinking.redacted_thinking_blocks
+          thinking.thinking_kind;
         (* Emit per-turn cost event for task attribution.
            cost_usd from OAS Pricing.annotate_response_cost (oas#393 resolved). *)
         (match trajectory_acc with

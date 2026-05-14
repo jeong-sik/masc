@@ -153,8 +153,12 @@ let take n values =
 ;;
 
 let truncate ?(limit = 160) value =
-  let value = String.trim value in
-  if String.length value <= limit then value else String.sub value 0 limit ^ "..."
+  let value = Safe_ops.sanitize_text_utf8 value |> String.trim in
+  if String.length value <= limit
+  then value
+  else
+    String_util.utf8_safe ~max_bytes:(limit + 3) ~suffix:"..." value
+    |> String_util.to_string
 ;;
 
 let single_unique = function

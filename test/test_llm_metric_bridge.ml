@@ -128,7 +128,8 @@ let test_request_latency_clamps_zero_ms () =
   let model_id =
     Printf.sprintf "bridge-latency-zero-%d" (Unix.getpid ())
   in
-  let labels = [ ("model", model_id) ] in
+  let provider = "bridge-latency-provider" in
+  let labels = [ ("provider", provider); ("model", model_id) ] in
   let before_sum =
     metric Prom.metric_llm_provider_request_latency ~labels
   in
@@ -136,13 +137,13 @@ let test_request_latency_clamps_zero_ms () =
     metric (Prom.metric_llm_provider_request_latency ^ "_count") ~labels
   in
   let clamped_labels =
-    [ ("model", model_id); ("reason", "non_positive_latency_ms") ]
+    [ ("provider", provider); ("model", model_id); ("reason", "non_positive_latency_ms") ]
   in
   let before_clamped =
     metric Prom.metric_llm_provider_request_latency_clamped
       ~labels:clamped_labels
   in
-  Bridge.emit_request_latency ~model_id ~latency_ms:0;
+  Bridge.emit_request_latency ~provider ~model_id ~latency_ms:0 ();
   check_metric_delta "latency sum floors to 1ms"
     Prom.metric_llm_provider_request_latency
     ~labels ~before:before_sum ~delta:0.001;
@@ -157,16 +158,34 @@ let test_request_latency_positive_ms_does_not_clamp () =
   let model_id =
     Printf.sprintf "bridge-latency-positive-%d" (Unix.getpid ())
   in
+  let provider = "bridge-positive-provider" in
   let labels =
-    [ ("model", model_id); ("reason", "non_positive_latency_ms") ]
+    [ ("provider", provider); ("model", model_id); ("reason", "non_positive_latency_ms") ]
   in
   let before =
     metric Prom.metric_llm_provider_request_latency_clamped ~labels
   in
-  Bridge.emit_request_latency ~model_id ~latency_ms:42;
+  Bridge.emit_request_latency ~provider ~model_id ~latency_ms:42 ();
   check_metric_delta "positive latency avoids clamp counter"
     Prom.metric_llm_provider_request_latency_clamped
     ~labels ~before ~delta:0.0
+
+let test_request_latency_uses_provider_seen_from_status () =
+  let model_id =
+    Printf.sprintf "bridge-latency-status-provider-%d" (Unix.getpid ())
+  in
+  let provider = "bridge-status-provider" in
+  let labels = [ ("provider", provider); ("model", model_id) ] in
+  let before =
+    metric (Prom.metric_llm_provider_request_latency ^ "_count") ~labels
+  in
+  Bridge.emit_http_status ~provider ~model_id ~status:200;
+  Bridge.emit_request_latency ~model_id ~latency_ms:125 ();
+  check_metric_delta "latency uses provider cached by status"
+    (Prom.metric_llm_provider_request_latency ^ "_count")
+    ~labels
+    ~before
+    ~delta:1.0
 
 let test_error_reason_labels_are_bounded () =
   let model_id =
@@ -205,6 +224,8 @@ let () =
             test_request_latency_clamps_zero_ms;
           Alcotest.test_case "positive request latency does not clamp" `Quick
             test_request_latency_positive_ms_does_not_clamp;
+          Alcotest.test_case "request latency uses provider seen from status" `Quick
+            test_request_latency_uses_provider_seen_from_status;
           Alcotest.test_case "error reason labels are bounded" `Quick
             test_error_reason_labels_are_bounded;
         ] );

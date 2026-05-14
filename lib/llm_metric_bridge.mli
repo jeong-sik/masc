@@ -25,13 +25,17 @@ val emit_http_status :
     below 1ms are recorded as 1ms so fast calls still produce a non-zero
     histogram sum; non-positive inputs also increment
     [masc_llm_provider_request_latency_clamped_total] so sentinel or missing
-    durations remain visible.
+    durations remain visible.  [?provider] is optional because the OAS
+    [on_request_end] callback currently carries only [model_id]; when omitted,
+    the bridge uses the provider most recently observed for that model from
+    adjacent OAS callbacks such as [on_http_status].
 
     Called by both the global sink built in {!make_sink} and any
     per-call OAS [Metrics.t] literal that wants to forward
     [on_request_end] (e.g. cascade observation captures).  Single
     source of truth for the label shape. *)
-val emit_request_latency : model_id:string -> latency_ms:int -> unit
+val emit_request_latency :
+  ?provider:string -> model_id:string -> latency_ms:int -> unit -> unit
 
 (** Emit a capability drop observation to the Prometheus counter. *)
 val emit_capability_drop : model_id:string -> field:string -> unit

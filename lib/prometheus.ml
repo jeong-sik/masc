@@ -1557,7 +1557,7 @@ let init () =
   add
     metric_llm_provider_request_latency_clamped
     "Total OAS LLM request latency observations clamped before histogram emission, \
-     labeled by model and reason"
+     labeled by provider, model, and reason"
     Counter;
   add
     metric_llm_provider_retries
@@ -2287,7 +2287,7 @@ let init () =
     ~help:
       "Per-HTTP-request LLM latency from OAS on_request_end callback. Independent from \
        masc_llm_inference_duration_seconds (turn-scope) — this fires per provider HTTP \
-       call regardless of keeper hook health."
+       call regardless of keeper hook health. Labels: provider, model."
     ();
   (* Process-level resource gauges.  Sampled on every /metrics scrape via
      [update_fd_gauges] so a monotonic ramp (fd leak) is visible in the

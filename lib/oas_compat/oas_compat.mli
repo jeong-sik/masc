@@ -162,6 +162,14 @@ module Metrics : sig
        input_tokens:int ->
        output_tokens:int ->
        unit) ->
+    ?on_streaming_first_chunk:
+      (provider:string -> model_id:string -> ttfrc_ms:float -> unit) ->
+    ?on_streaming_chunk:
+      (provider:string ->
+       model_id:string ->
+       chunk_index:int ->
+       inter_chunk_ms:float ->
+       unit) ->
     unit ->
     Llm_provider.Metrics.t
   (** Construct a [Llm_provider.Metrics.t] value.

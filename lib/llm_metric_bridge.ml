@@ -43,6 +43,10 @@ let retry_metric = Prometheus.metric_llm_provider_retries
 let input_tokens_metric = Prometheus.metric_llm_provider_input_tokens
 let output_tokens_metric = Prometheus.metric_llm_provider_output_tokens
 let circuit_state_metric = Prometheus.metric_llm_provider_circuit_state
+let streaming_first_chunk_metric =
+  Prometheus.metric_llm_provider_streaming_first_chunk
+let streaming_inter_chunk_metric =
+  Prometheus.metric_llm_provider_streaming_inter_chunk
 
 let unknown_provider_label = "unknown"
 let provider_cache_max_entries = 256
@@ -169,6 +173,22 @@ let emit_token_usage ~provider ~model_id ~input_tokens ~output_tokens =
       ~delta:(Float.of_int output_tokens)
       ()
 
+let seconds_of_ms value_ms =
+  let value_ms = if value_ms <= 0.0 then 0.0 else value_ms in
+  value_ms /. 1000.0
+
+let emit_streaming_first_chunk ~provider ~model_id ~ttfrc_ms =
+  remember_provider ~model_id ~provider;
+  Prometheus.observe_histogram streaming_first_chunk_metric
+    ~labels:[("provider", provider); ("model", model_id)]
+    (seconds_of_ms ttfrc_ms)
+
+let emit_streaming_chunk ~provider ~model_id ~chunk_index:_ ~inter_chunk_ms =
+  remember_provider ~model_id ~provider;
+  Prometheus.observe_histogram streaming_inter_chunk_metric
+    ~labels:[("provider", provider); ("model", model_id)]
+    (seconds_of_ms inter_chunk_ms)
+
 let emit_circuit_state ~provider ~model_id ~provider_key ~state =
   remember_provider ~model_id ~provider;
   let value =
@@ -248,7 +268,9 @@ let emit_request_latency ?provider ~model_id ~latency_ms () =
     - [on_error]        → masc_llm_provider_errors_total
     - [on_retry]        → masc_llm_provider_retries_total
     - [on_circuit_state] → masc_llm_provider_circuit_state
-    - [on_token_usage]  → masc_llm_provider_{input,output}_tokens_total *)
+    - [on_token_usage]  → masc_llm_provider_{input,output}_tokens_total
+    - [on_streaming_first_chunk] → masc_llm_provider_streaming_first_chunk_seconds
+    - [on_streaming_chunk] → masc_llm_provider_streaming_inter_chunk_seconds *)
 let make_sink () : Llm_provider.Metrics.t =
   {
     on_cache_hit = emit_cache_hit;
@@ -269,6 +291,8 @@ let make_sink () : Llm_provider.Metrics.t =
     on_retry = emit_retry;
     on_circuit_state = emit_circuit_state;
     on_token_usage = emit_token_usage;
+    on_streaming_first_chunk = emit_streaming_first_chunk;
+    on_streaming_chunk = emit_streaming_chunk;
   }
 
 (** Install the sink as the process-wide default.  Idempotent — calling

@@ -50,7 +50,15 @@ let test_metric_names_stable () =
   Alcotest.(check string)
     "request latency clamped metric"
     "masc_llm_provider_request_latency_clamped_total"
-    Prom.metric_llm_provider_request_latency_clamped
+    Prom.metric_llm_provider_request_latency_clamped;
+  Alcotest.(check string)
+    "streaming first chunk metric"
+    "masc_llm_provider_streaming_first_chunk_seconds"
+    Prom.metric_llm_provider_streaming_first_chunk;
+  Alcotest.(check string)
+    "streaming inter chunk metric"
+    "masc_llm_provider_streaming_inter_chunk_seconds"
+    Prom.metric_llm_provider_streaming_inter_chunk
 
 let test_sink_records_oas_callbacks () =
   let sink : Llm_provider.Metrics.t = Bridge.make_sink () in
@@ -87,6 +95,16 @@ let test_sink_records_oas_callbacks () =
   let before_circuit_state =
     metric Prom.metric_llm_provider_circuit_state ~labels:circuit_labels
   in
+  let before_stream_first =
+    metric
+      (Prom.metric_llm_provider_streaming_first_chunk ^ "_count")
+      ~labels:provider_model_labels
+  in
+  let before_stream_inter =
+    metric
+      (Prom.metric_llm_provider_streaming_inter_chunk ^ "_count")
+      ~labels:provider_model_labels
+  in
   sink.on_cache_hit ~model_id;
   sink.on_cache_miss ~model_id;
   sink.on_request_start ~model_id;
@@ -96,6 +114,8 @@ let test_sink_records_oas_callbacks () =
     ~state:Llm_provider.Metrics.Circuit_open;
   sink.on_token_usage
     ~provider ~model_id ~input_tokens:17 ~output_tokens:23;
+  sink.on_streaming_first_chunk ~provider ~model_id ~ttfrc_ms:25.0;
+  sink.on_streaming_chunk ~provider ~model_id ~chunk_index:1 ~inter_chunk_ms:7.5;
   check_metric_delta "cache hit +1"
     Prom.metric_llm_provider_cache_hits
     ~labels:model_labels ~before:before_hit ~delta:1.0;
@@ -122,7 +142,13 @@ let test_sink_records_oas_callbacks () =
     ~labels:provider_model_labels ~before:before_output ~delta:23.0;
   check_metric_delta "circuit state open"
     Prom.metric_llm_provider_circuit_state
-    ~labels:circuit_labels ~before:before_circuit_state ~delta:1.0
+    ~labels:circuit_labels ~before:before_circuit_state ~delta:1.0;
+  check_metric_delta "streaming first chunk count +1"
+    (Prom.metric_llm_provider_streaming_first_chunk ^ "_count")
+    ~labels:provider_model_labels ~before:before_stream_first ~delta:1.0;
+  check_metric_delta "streaming inter chunk count +1"
+    (Prom.metric_llm_provider_streaming_inter_chunk ^ "_count")
+    ~labels:provider_model_labels ~before:before_stream_inter ~delta:1.0
 
 let test_request_latency_clamps_zero_ms () =
   let model_id =

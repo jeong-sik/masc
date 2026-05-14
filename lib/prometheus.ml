@@ -795,6 +795,14 @@ let metric_llm_provider_request_latency_clamped =
   "masc_llm_provider_request_latency_clamped_total"
 ;;
 
+let metric_llm_provider_streaming_first_chunk =
+  "masc_llm_provider_streaming_first_chunk_seconds"
+;;
+
+let metric_llm_provider_streaming_inter_chunk =
+  "masc_llm_provider_streaming_inter_chunk_seconds"
+;;
+
 let metric_llm_provider_capability_drops = "masc_llm_provider_capability_drops_total"
 let metric_llm_provider_cache_hits = "masc_llm_provider_cache_hits_total"
 let metric_llm_provider_cache_misses = "masc_llm_provider_cache_misses_total"
@@ -2289,6 +2297,18 @@ let init () =
       "Per-HTTP-request LLM latency from OAS on_request_end callback. Independent from \
        masc_llm_inference_duration_seconds (turn-scope) — this fires per provider HTTP \
        call regardless of keeper hook health. Labels: provider, model."
+    ();
+  register_histogram
+    ~name:metric_llm_provider_streaming_first_chunk
+    ~help:
+      "Time from streaming provider request start to first parsed response chunk from \
+       OAS on_streaming_first_chunk callback. Labels: provider, model."
+    ();
+  register_histogram
+    ~name:metric_llm_provider_streaming_inter_chunk
+    ~help:
+      "Inter-chunk gap during provider streaming from OAS on_streaming_chunk callback. \
+       Labels: provider, model."
     ();
   (* Process-level resource gauges.  Sampled on every /metrics scrape via
      [update_fd_gauges] so a monotonic ramp (fd leak) is visible in the

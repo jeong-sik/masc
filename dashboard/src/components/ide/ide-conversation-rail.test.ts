@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
-import { IdeConversationRail, postsToAnchoredThreads, replayRailItems } from './ide-conversation-rail'
+import {
+  conversationContextSummary,
+  IdeConversationRail,
+  postsToAnchoredThreads,
+  replayRailItems,
+} from './ide-conversation-rail'
 import { activeIdeFile, ideContextFocus } from './ide-state'
 import { clearTraces, keeperTraceState } from './keeper-trace-store'
 import { ideReplayUntilMs, setIdeReplayUntilMs } from './ide-replay-state'
@@ -343,6 +348,9 @@ describe('IdeConversationRail', () => {
 
     const decisionCard = container.querySelector<HTMLElement>('[data-replay-source="decision"]')
     expect(decisionCard).not.toBeNull()
+    expect(decisionCard?.querySelector('.ide-conversation-context-badge')?.textContent).toBe('CTX 3')
+    expect(decisionCard?.querySelector('.ide-conversation-context-badge')?.getAttribute('title'))
+      .toBe('Linked context: Code, Telemetry, Keeper')
     const decisionLinks = [...decisionCard!.querySelectorAll<HTMLButtonElement>('.ide-conversation-route-link')]
     expect(decisionLinks.map(link => link.textContent)).toEqual(['Code', 'Telemetry', 'Keeper'])
 
@@ -361,6 +369,9 @@ describe('IdeConversationRail', () => {
 
     const cascadeCard = container.querySelector<HTMLElement>('[data-replay-source="cascade"]')
     expect(cascadeCard).not.toBeNull()
+    expect(cascadeCard?.querySelector('.ide-conversation-context-badge')?.textContent).toBe('CTX 1')
+    expect(cascadeCard?.querySelector('.ide-conversation-context-badge')?.getAttribute('title'))
+      .toBe('Linked context: Telemetry')
     const cascadeLinks = [...cascadeCard!.querySelectorAll<HTMLButtonElement>('.ide-conversation-route-link')]
     expect(cascadeLinks.map(link => link.textContent)).toEqual(['Telemetry'])
 
@@ -454,6 +465,11 @@ describe('IdeConversationRail', () => {
       expect(container.textContent).toContain('comment:comment-1')
     })
 
+    const badge = container.querySelector('.ide-conversation-context-badge')
+    expect(badge?.textContent).toBe('CTX 10')
+    expect(badge?.getAttribute('title'))
+      .toBe('Linked context: Code, Goal, Task, Board, Comment, PR, Git, Log, Telemetry, Keeper')
+
     const links = [...container.querySelectorAll<HTMLButtonElement>('.ide-conversation-route-link')]
     expect(links.map(link => link.textContent)).toEqual([
       'Code',
@@ -482,6 +498,18 @@ describe('IdeConversationRail', () => {
     expect(window.location.hash).toBe('#monitoring?section=agents&view=keepers&keeper=scholar')
 
     render(null, container)
+  })
+
+  it('summarizes conversation route link coverage for card chrome', () => {
+    expect(conversationContextSummary([
+      { id: 'code:a', label: 'Code', tab: 'code', params: {}, evidence: 'Code a' },
+      { id: 'task:t-1', label: 'Task', tab: 'workspace', params: {}, evidence: 'Task t-1' },
+    ])).toEqual({
+      label: 'CTX 2',
+      title: 'Linked context: Code, Task',
+    })
+
+    expect(conversationContextSummary([])).toBeNull()
   })
 })
 

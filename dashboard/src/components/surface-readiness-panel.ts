@@ -26,7 +26,7 @@ export interface SurfaceReadinessEntry {
   exposure_status: string
   hidden_from_nav: boolean
   meets_main_gate: boolean
-  proof_bar: string
+  verification_ref_bar: string
   rationale: string
   route_hash: string | null
   verification_refs: SurfaceVerificationRef[]
@@ -34,7 +34,7 @@ export interface SurfaceReadinessEntry {
 
 export interface SurfaceReadinessData {
   generated_at: string
-  proof_bar: string
+  verification_ref_bar: string
   surfaces: SurfaceReadinessEntry[]
 }
 
@@ -75,7 +75,7 @@ function normalizeSurface(value: unknown): SurfaceReadinessEntry {
     exposure_status: asString(item.exposure_status, 'unknown'),
     hidden_from_nav: asBoolean(item.hidden_from_nav, false),
     meets_main_gate: asBoolean(item.meets_main_gate, false),
-    proof_bar: asString(item.proof_bar, ''),
+    verification_ref_bar: asString(item.verification_ref_bar, ''),
     rationale: asString(item.rationale, ''),
     route_hash: asString(item.route_hash) ?? null,
     verification_refs: asRecordArray(item.verification_refs).map(normalizeRef),
@@ -86,7 +86,7 @@ export function normalizeSurfaceReadinessPayload(raw: unknown): SurfaceReadiness
   const data = isRecord(raw) ? raw : {}
   return {
     generated_at: asString(data.generated_at, ''),
-    proof_bar: asString(data.proof_bar, ''),
+    verification_ref_bar: asString(data.verification_ref_bar, ''),
     surfaces: asRecordArray(data.surfaces).map(normalizeSurface),
   }
 }
@@ -95,13 +95,13 @@ function hasRef(surface: SurfaceReadinessEntry, label: string): boolean {
   return surface.verification_refs.some(ref => ref.label === label && ref.value.trim() !== '')
 }
 
-export function missingSurfaceProofRefs(surface: SurfaceReadinessEntry): string[] {
+export function missingSurfaceVerificationRefs(surface: SurfaceReadinessEntry): string[] {
   return ['live_spotcheck', 'logs', 'metrics'].filter(label => !hasRef(surface, label))
 }
 
 function isSurfaceGap(surface: SurfaceReadinessEntry): boolean {
   const mainGateGap = surface.exposure_status === 'main' && !surface.meets_main_gate
-  return mainGateGap || missingSurfaceProofRefs(surface).length > 0
+  return mainGateGap || missingSurfaceVerificationRefs(surface).length > 0
 }
 
 export function summarizeSurfaceReadiness(surfaces: SurfaceReadinessEntry[]): SurfaceReadinessSummary {
@@ -161,7 +161,7 @@ function SurfaceRefList({ refs }: { refs: SurfaceVerificationRef[] }) {
 }
 
 function SurfaceCard({ surface }: { surface: SurfaceReadinessEntry }) {
-  const missingRefs = missingSurfaceProofRefs(surface)
+  const missingRefs = missingSurfaceVerificationRefs(surface)
   return html`
     <article class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
       <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
@@ -179,7 +179,7 @@ function SurfaceCard({ surface }: { surface: SurfaceReadinessEntry }) {
           <div class="mt-1 flex flex-wrap items-center gap-1.5 text-3xs text-[var(--color-fg-muted)]">
             <code>${surface.id}</code>
             ${surface.route_hash ? html`<span>${surface.route_hash}</span>` : null}
-            ${surface.proof_bar ? html`<span>${surface.proof_bar}</span>` : null}
+            ${surface.verification_ref_bar ? html`<span>${surface.verification_ref_bar}</span>` : null}
           </div>
           ${surface.rationale
             ? html`<div class="mt-2 text-2xs leading-relaxed text-[var(--color-fg-secondary)]">${surface.rationale}</div>`
@@ -224,7 +224,7 @@ function SurfaceReadinessBody({ data }: { data: SurfaceReadinessData }) {
               { variant: 'stacked', label: 'diagnostic', value: summary.diagnostic },
               { variant: 'stacked', label: 'hidden', value: summary.hidden },
               { variant: 'stacked', label: 'gaps', value: summary.gaps },
-              { variant: 'stacked', label: 'proof', value: data.proof_bar || 'n/a' },
+              { variant: 'stacked', label: 'refs', value: data.verification_ref_bar || 'n/a' },
               { variant: 'stacked', label: 'filter', value: activeFilter.value },
             ] satisfies KpiStripIslandData['cells']}
           />

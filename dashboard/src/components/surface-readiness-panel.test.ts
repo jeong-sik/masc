@@ -6,7 +6,7 @@ import type { SurfaceReadinessData, SurfaceReadinessEntry } from './surface-read
 
 const payload: SurfaceReadinessData = {
   generated_at: '2026-05-14T00:00:00Z',
-  proof_bar: 'live:3/3 logs:2/3 metrics:3/3',
+  verification_ref_bar: 'live:3/3 logs:2/3 metrics:3/3',
   surfaces: [
     {
       id: 'command.operations',
@@ -14,7 +14,7 @@ const payload: SurfaceReadinessData = {
       exposure_status: 'main',
       hidden_from_nav: false,
       meets_main_gate: true,
-      proof_bar: 'fixture+live_spotcheck+logs+metrics+tool',
+      verification_ref_bar: 'fixture+live_spotcheck+logs+metrics+tool',
       rationale: 'Canonical command surface.',
       route_hash: '#command?section=operations',
       verification_refs: [
@@ -30,7 +30,7 @@ const payload: SurfaceReadinessData = {
       exposure_status: 'lab',
       hidden_from_nav: false,
       meets_main_gate: false,
-      proof_bar: 'live_spotcheck+logs+metrics',
+      verification_ref_bar: 'live_spotcheck+logs+metrics',
       rationale: 'Lab safety harness surface.',
       route_hash: '#lab?section=harness',
       verification_refs: [
@@ -45,7 +45,7 @@ const payload: SurfaceReadinessData = {
       exposure_status: 'main',
       hidden_from_nav: false,
       meets_main_gate: true,
-      proof_bar: 'live_spotcheck+metrics',
+      verification_ref_bar: 'live_spotcheck+metrics',
       rationale: 'Intentionally missing logs for regression coverage.',
       route_hash: '#workspace?section=gap',
       verification_refs: [
@@ -112,7 +112,7 @@ describe('SurfaceReadinessPanel', () => {
     expect(container.textContent).toContain('missing logs')
   })
 
-  it('filters gap surfaces by missing proof refs', async () => {
+  it('filters gap surfaces by missing verification refs', async () => {
     const { module } = await loadPanel()
     const { filterSurfaceReadiness } = module
 

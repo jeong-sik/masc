@@ -56,17 +56,18 @@ let nonempty = function
   | Some value -> String.trim value <> ""
   | None -> false
 
-let proof_label label value acc = if nonempty value then label :: acc else acc
+let verification_ref_label label value acc =
+  if nonempty value then label :: acc else acc
 
-let proof_bar_for_refs (refs : verification_refs) =
+let verification_ref_bar_for_refs (refs : verification_refs) =
   let labels =
     []
-    |> proof_label "fixture" refs.fixture_harness
-    |> proof_label "live_spotcheck" refs.live_spotcheck
-    |> proof_label "logs" refs.logs_ref
-    |> proof_label "metrics" refs.metrics_ref
-    |> proof_label "proof" refs.proof_ref
-    |> proof_label "tool" refs.tool_name
+    |> verification_ref_label "fixture" refs.fixture_harness
+    |> verification_ref_label "live_spotcheck" refs.live_spotcheck
+    |> verification_ref_label "logs" refs.logs_ref
+    |> verification_ref_label "metrics" refs.metrics_ref
+    |> verification_ref_label "proof" refs.proof_ref
+    |> verification_ref_label "tool" refs.tool_name
     |> List.rev
   in
   match labels with
@@ -81,7 +82,7 @@ let entry_json (entry : surface_entry) =
       ("exposure_status", `String entry.exposure_status);
       ("hidden_from_nav", `Bool entry.hidden_from_nav);
       ("meets_main_gate", `Bool entry.meets_main_gate);
-      ("proof_bar", `String (proof_bar_for_refs entry.refs));
+      ("verification_ref_bar", `String (verification_ref_bar_for_refs entry.refs));
       ("rationale", `String entry.rationale);
       ("route_hash", Json_util.string_opt_to_json entry.route_hash);
       ("verification_refs", `List (refs_json entry.refs));
@@ -369,17 +370,23 @@ let all_entries =
 let find_entry surface_id =
   List.find_opt (fun (entry : surface_entry) -> String.equal entry.id surface_id) all_entries
 
-let proof_coverage_count selector entries =
+let verification_ref_coverage_count selector entries =
   List.fold_left (fun count entry -> if selector entry.refs then count + 1 else count) 0 entries
 
-let proof_bar_for_entries entries =
+let verification_ref_bar_for_entries entries =
   let total = List.length entries in
   if total = 0
   then "surfaces:0"
   else
-    let live = proof_coverage_count (fun refs -> nonempty refs.live_spotcheck) entries in
-    let logs = proof_coverage_count (fun refs -> nonempty refs.logs_ref) entries in
-    let metrics = proof_coverage_count (fun refs -> nonempty refs.metrics_ref) entries in
+    let live =
+      verification_ref_coverage_count (fun refs -> nonempty refs.live_spotcheck) entries
+    in
+    let logs =
+      verification_ref_coverage_count (fun refs -> nonempty refs.logs_ref) entries
+    in
+    let metrics =
+      verification_ref_coverage_count (fun refs -> nonempty refs.metrics_ref) entries
+    in
     Printf.sprintf "live:%d/%d logs:%d/%d metrics:%d/%d" live total logs total metrics total
 
 let json ?surface_id () =
@@ -392,6 +399,6 @@ let json ?surface_id () =
   `Assoc
     [
       ("generated_at", `String (Masc_domain.now_iso ()));
-      ("proof_bar", `String (proof_bar_for_entries surfaces));
+      ("verification_ref_bar", `String (verification_ref_bar_for_entries surfaces));
       ("surfaces", `List (List.map entry_json surfaces));
     ]

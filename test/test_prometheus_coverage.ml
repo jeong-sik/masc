@@ -443,6 +443,7 @@ let test_review_blocker_metrics_registered () =
   check_registered Prometheus.metric_telemetry_coverage_gap;
   check_registered Prometheus.metric_telemetry_unified_source_read_failures;
   check_registered Prometheus.metric_tool_assignment_telemetry_failures;
+  check_registered Prometheus.metric_tool_input_validation;
   check_registered Masc_mcp.Keeper_metrics.metric_keeper_oas_hook_output_parse_failures;
   check_registered Prometheus.metric_inference_queue_rejected;
   check_registered Prometheus.metric_telemetry_observe_failures;

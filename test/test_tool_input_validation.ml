@@ -380,6 +380,197 @@ let assoc_string key json =
   | `String value -> value
   | _ -> failwith ("expected string field: " ^ key)
 
+let validation_labels ~tool ~result ~reason =
+  [ "tool", tool; "result", result; "reason", reason ]
+
+let validation_metric_value ~tool ~result ~reason =
+  Prometheus.metric_value_or_zero
+    Prometheus.metric_tool_input_validation
+    ~labels:(validation_labels ~tool ~result ~reason)
+    ()
+
+let check_validation_metric_increment ~tool ~result ~reason f =
+  let before = validation_metric_value ~tool ~result ~reason in
+  f ();
+  let after = validation_metric_value ~tool ~result ~reason in
+  Alcotest.(check (float 0.0001))
+    (Printf.sprintf "metric %s/%s/%s increments" tool result reason)
+    (before +. 1.0)
+    after
+
+let attr_string key attrs =
+  match List.assoc_opt key attrs with
+  | Some (`String value) -> Some value
+  | _ -> None
+
+let test_validation_telemetry_records_pass_fail_and_bypass () =
+  let valid_tool = "__tool_input_validation_metric_valid" in
+  let valid_schema = make_schema [ "count", "integer" ] in
+  check_validation_metric_increment
+    ~tool:valid_tool
+    ~result:"pass"
+    ~reason:"valid"
+    (fun () ->
+       match
+         Tool_input_validation.validate_args
+           ~schema:valid_schema
+           ~name:valid_tool
+           ~args:(`Assoc [ "count", `Int 42 ])
+           ()
+       with
+       | Ok _ -> ()
+       | Error result ->
+         Alcotest.fail
+           (Printf.sprintf
+              "expected valid input, got %s"
+              (Yojson.Safe.to_string result.Tool_result.data)));
+  let coerced_tool = "__tool_input_validation_metric_coerced" in
+  check_validation_metric_increment
+    ~tool:coerced_tool
+    ~result:"pass"
+    ~reason:"coerced"
+    (fun () ->
+       match
+         Tool_input_validation.validate_args
+           ~schema:valid_schema
+           ~name:coerced_tool
+           ~args:(`Assoc [ "count", `String "42" ])
+           ()
+       with
+       | Ok coerced ->
+         (match Yojson.Safe.Util.member "count" coerced with
+          | `Int 42 -> ()
+          | _ -> Alcotest.fail "expected coerced integer")
+       | Error result ->
+         Alcotest.fail
+           (Printf.sprintf
+              "expected coerced input, got %s"
+              (Yojson.Safe.to_string result.Tool_result.data)));
+  let fail_tool = "__tool_input_validation_metric_fail" in
+  check_validation_metric_increment
+    ~tool:fail_tool
+    ~result:"fail"
+    ~reason:"invalid_args"
+    (fun () ->
+       match
+         Tool_input_validation.validate_args
+           ~schema:valid_schema
+           ~name:fail_tool
+           ~args:(`Assoc [ "count", `String "not-an-int" ])
+           ()
+       with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "expected invalid args failure");
+  let missing_tool = "__tool_input_validation_metric_missing_schema" in
+  check_validation_metric_increment
+    ~tool:missing_tool
+    ~result:"bypass"
+    ~reason:"missing_schema"
+    (fun () ->
+       match
+         Tool_input_validation.validate_args
+           ~name:missing_tool
+           ~args:(`Assoc [ "count", `String "not-validated" ])
+           ()
+       with
+       | Ok _ -> ()
+       | Error result ->
+         Alcotest.fail
+           (Printf.sprintf
+              "expected missing schema bypass, got %s"
+              (Yojson.Safe.to_string result.Tool_result.data)));
+  let empty_tool = "__tool_input_validation_metric_empty_schema" in
+  check_validation_metric_increment
+    ~tool:empty_tool
+    ~result:"bypass"
+    ~reason:"empty_schema"
+    (fun () ->
+       match
+         Tool_input_validation.validate_args
+           ~schema:(`Assoc [])
+           ~name:empty_tool
+           ~args:(`Assoc [ "anything", `String "goes" ])
+           ()
+       with
+       | Ok _ -> ()
+       | Error result ->
+         Alcotest.fail
+           (Printf.sprintf
+              "expected empty schema bypass, got %s"
+              (Yojson.Safe.to_string result.Tool_result.data)))
+
+let test_validation_telemetry_records_normalized_transition () =
+  check_validation_metric_increment
+    ~tool:"masc_transition"
+    ~result:"pass"
+    ~reason:"normalized"
+    (fun () ->
+       match
+         Tool_input_validation.validate_args
+           ~schema:masc_transition_schema
+           ~name:"masc_transition"
+           ~args:
+             (`Assoc
+                [
+                  "agent_name", `String "codex-local-admin";
+                  "task_id", `String "task-239";
+                  "to", `String "claimed";
+                  "note", `String "PR #8308 Draft";
+                ])
+           ()
+       with
+       | Ok forwarded ->
+         Alcotest.(check string)
+           "to normalized to action"
+           "claimed"
+           (assoc_string "action" forwarded);
+         Alcotest.(check string)
+           "note normalized to notes"
+           "PR #8308 Draft"
+           (assoc_string "notes" forwarded)
+       | Error result ->
+         Alcotest.fail
+           (Printf.sprintf
+              "expected normalized transition, got %s"
+              (Yojson.Safe.to_string result.Tool_result.data)))
+
+let test_validation_telemetry_emits_otel_event () =
+  let tool = "__tool_input_validation_otel_event" in
+  let schema = make_schema ~required:[ "path" ] [ "path", "string" ] in
+  let events = ref [] in
+  Otel_spans.with_test_event_emitter
+    ~enabled:true
+    ~emit_event:(fun ~name ~attrs -> events := (name, attrs) :: !events)
+    (fun () ->
+       match
+         Tool_input_validation.validate_args
+           ~schema
+           ~name:tool
+           ~args:(`Assoc [])
+           ()
+       with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "expected validation failure");
+  match !events with
+  | [ event_name, attrs ] ->
+    Alcotest.(check string)
+      "event name"
+      "tool.param.validation"
+      event_name;
+    Alcotest.(check (option string))
+      "tool attr"
+      (Some tool)
+      (attr_string "tool.name" attrs);
+    Alcotest.(check (option string))
+      "validation result attr"
+      (Some "fail")
+      (attr_string "tool.param.validation.result" attrs);
+    Alcotest.(check (option string))
+      "validation reason attr"
+      (Some "invalid_args")
+      (attr_string "tool.param.validation.reason" attrs)
+  | _ -> Alcotest.fail "expected exactly one validation event"
+
 let test_registered_hook_transition_compat_to_and_note () =
   let args =
     `Assoc
@@ -549,6 +740,14 @@ let () =
       Alcotest.test_case "empty schema passes" `Quick test_empty_schema_passes;
       Alcotest.test_case "schema union type does not raise" `Quick
         test_schema_union_type_does_not_raise;
+    ]);
+    ("telemetry", [
+      Alcotest.test_case "records pass, fail, and bypass counters" `Quick
+        test_validation_telemetry_records_pass_fail_and_bypass;
+      Alcotest.test_case "records normalized transition counter" `Quick
+        test_validation_telemetry_records_normalized_transition;
+      Alcotest.test_case "emits OTel validation event" `Quick
+        test_validation_telemetry_emits_otel_event;
     ]);
     ("registered_hook", [
       Alcotest.test_case "coercion flows through registered hook" `Quick

@@ -360,7 +360,7 @@ export function IdeContextLens({
   onRouteLinkActivate,
 }: IdeContextLensProps) {
   const model = deriveIdeContextLens({ filePath, annotations, diffRows, events, threads, diagnostics, overlay })
-  const fileLabel = filePath.split('/').pop() || filePath || 'workspace'
+  const fileLabel = filePath.split('/').pop() || filePath || '(no file)'
   const activateAnchor = onAnchorActivate ?? activateIdeContextAnchor
   const activateRouteLink = onRouteLinkActivate ?? openIdeContextRouteLink
 
@@ -646,7 +646,7 @@ function buildAnchors(
 
   for (const [index, diagnostic] of diagnostics.slice(0, 2).entries()) {
     const line = positiveLine(diagnostic.line)
-    const label = truncate(diagnostic.message || 'diagnostic', 48)
+    const label = truncate(diagnostic.message || '(no message)', 48)
     const sourceId = `diagnostic-${diagnostic.line}-${diagnostic.source ?? 'lsp'}-${diagnostic.code ?? 'message'}-${index}`
     const telemetryQuery = diagnosticTelemetryQuery(diagnostic)
     anchors.push({
@@ -677,7 +677,7 @@ function buildAnchors(
       id: `annotation-${annotation.id}`,
       file_path: annotation.file_path,
       surface: annotation.kind,
-      label: truncate(annotation.content || 'annotation', 48),
+      label: truncate(annotation.content || '(no content)', 48),
       meta: compactMeta([
         annotation.goal_id ? `goal ${annotation.goal_id}` : null,
         annotation.task_id ? `task ${annotation.task_id}` : null,
@@ -689,7 +689,7 @@ function buildAnchors(
         filePath: annotation.file_path,
         line: positiveLine(annotation.line_start),
         surface: annotation.kind,
-        label: truncate(annotation.content || 'annotation', 48),
+        label: truncate(annotation.content || '(no content)', 48),
         sourceId: `annotation-${annotation.id}`,
         goalId: annotation.goal_id ?? undefined,
         taskId: annotation.task_id ?? undefined,

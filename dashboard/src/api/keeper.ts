@@ -1046,7 +1046,7 @@ function parseRuntimeLensClaimScopeAxis(raw: unknown): KeeperRuntimeLensClaimSco
   const obj = isRecord(raw) ? raw : {}
   return {
     present: obj.present === true,
-    source: stringField(obj, 'source') || 'keeper_task_claim_tool_call',
+    source: stringField(obj, 'source') || '(unknown source)',
     status: stringField(obj, 'status') || 'not_observed',
     result: nullableStringField(obj, 'result'),
     mode: nullableStringField(obj, 'mode'),
@@ -1147,7 +1147,7 @@ function parseRuntimeLensGap(raw: unknown): KeeperRuntimeLensGap {
   const obj = isRecord(raw) ? raw : {}
   return {
     code: stringField(obj, 'code') || 'unknown_gap',
-    severity: stringField(obj, 'severity') || 'warn',
+    severity: stringField(obj, 'severity') || '(unknown severity)',
     lane: stringField(obj, 'lane') || 'unknown',
     detail: nullableStringField(obj, 'detail'),
   }

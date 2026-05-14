@@ -528,13 +528,13 @@ function handleEvent(event: SSEEvent): void {
     case 'keeper_guardrail':
       addTypedJournalEntry(
         event.name ?? agent,
-        `Guardrail: ${event.reason ?? 'stopped'}`,
+        `Guardrail: ${event.reason ?? '(unknown reason)'}`,
         'keepers',
         'keeper_guardrail',
         {
-          severity: event.severity ?? 'error',
+          severity: event.severity ?? '(unknown severity)',
           source: event.source,
-          narrativeText: `${actorLabel(event.name ?? agent)}가 guardrail에 의해 중단되었습니다: ${event.reason ?? 'stopped'}`,
+          narrativeText: `${actorLabel(event.name ?? agent)}가 guardrail에 의해 중단되었습니다: ${event.reason ?? '(unknown reason)'}`,
         },
       )
       break
@@ -902,7 +902,7 @@ function handleEvent(event: SSEEvent): void {
       const auditKind = (event.audit_kind ?? (p.kind as string)) ?? type
       const auditTarget = event.audit_target ?? (p.target as string | undefined)
       const auditSummary = (event.audit_summary ?? (p.summary as string)) ?? auditKind
-      const auditSeverity = (event.audit_severity ?? (p.severity as string)) ?? 'info'
+      const auditSeverity = (event.audit_severity ?? (p.severity as string)) ?? '(unknown severity)'
       appendAuditEntry({
         id: auditId,
         ts: auditTs,

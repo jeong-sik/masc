@@ -171,7 +171,7 @@ export function verdictTone(verdict: string): string {
 
 export function verdictSummary(verdict: string): string {
   if (!verdict.startsWith('reject:')) return verdict
-  return verdict.slice('reject:'.length).trim() || 'reject'
+  return verdict.slice('reject:'.length).trim() || '(no reject reason)'
 }
 
 export function heroTitle(data: HarnessHealthData): string {
@@ -385,7 +385,7 @@ export function RecentVerdictsList({ items }: { items: HarnessVerdictItem[] }) {
               <div>
                 <${ItemTitle}>${item.task_title || item.task_id}</${ItemTitle}>
                 <div class="mt-1 text-xs text-[var(--color-fg-muted)]">
-                  ${item.agent_name || 'agent'} · ${item.gate || 'gate'} · ${item.evaluator_cascade || 'cascade'} · ${formatTimestamp(item.timestamp)}
+                  ${item.agent_name || '(unknown agent)'} · ${item.gate || '(unknown gate)'} · ${item.evaluator_cascade || '(unknown cascade)'} · ${formatTimestamp(item.timestamp)}
                 </div>
               </div>
               <${StatusDot} size="md" class=${verdictTone(item.verdict)} />

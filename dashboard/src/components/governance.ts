@@ -70,7 +70,7 @@ function degradedReasonLabel(reason?: string | null): string {
     case 'backoff':
       return 'backoff'
     default:
-      return reason?.trim() || 'degraded'
+      return reason?.trim() || '(unknown reason)'
   }
 }
 

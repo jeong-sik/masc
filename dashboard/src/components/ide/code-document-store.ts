@@ -2,7 +2,7 @@ import { signal } from '@preact/signals'
 import { fetchIdeRegions, type IdeCodeRegion } from '../../api/ide'
 
 export interface CodeDocumentSource {
-  readonly file_path: string
+  readonly file_path: string | null
   readonly language: string
   readonly content: string
 }
@@ -29,7 +29,7 @@ export interface CodeDocumentStore {
 }
 
 const EMPTY_DOCUMENT: CodeDocumentSnapshot = {
-  file_path: '(no file)',
+  file_path: null,
   language: 'text',
   content: '',
   lines: [],

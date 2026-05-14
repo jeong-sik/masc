@@ -13,7 +13,7 @@
 import { signal } from '@preact/signals'
 import type { TabId } from '../../types'
 
-export const activeIdeFile = signal<string>('package.json')
+export const activeIdeFile = signal<string | null>(null)
 
 export interface IdeContextFocusRouteLink {
   readonly id: string

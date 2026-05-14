@@ -8,6 +8,8 @@ import {
   dashboardWsEventCount60s,
   dashboardWsLastError,
   dashboardWsLastEventAt,
+  dashboardWsLastPongAt,
+  dashboardWsLastPongLatencyMs,
   dashboardWsReady,
 } from '../dashboard-ws-state'
 import { route } from '../router'
@@ -22,6 +24,10 @@ import {
   lastDisconnectedAt,
   reconnectCount,
 } from '../sse'
+import {
+  DASHBOARD_WS_HEARTBEAT_INTERVAL_MS,
+  DASHBOARD_WS_RPC_TIMEOUT_MS,
+} from '../config/constants'
 import { journalSeverity } from '../journal-entry'
 import { TimeAgo } from './common/time-ago'
 import { RouteLink } from './common/route-link'
@@ -29,6 +35,8 @@ import { ringFocusClasses } from './common/ring'
 import { unacknowledgedCount } from './common/error-notification-state'
 
 export const STATUS_TRAY_SILENT_MS = 30_000
+export const STATUS_TRAY_HEARTBEAT_FRESH_MS =
+  DASHBOARD_WS_HEARTBEAT_INTERVAL_MS + DASHBOARD_WS_RPC_TIMEOUT_MS + 1_000
 
 export type StatusTrayKey = 'transport' | 'fleet' | 'activity' | 'attention'
 export type StatusTrayTone = 'ok' | 'warn' | 'err' | 'muted'
@@ -62,6 +70,8 @@ export interface StatusTrayInput {
   wsReady: boolean
   wsLastEventAt: number
   wsEventCount60s: number
+  wsLastPongAt: number
+  wsLastPongLatencyMs: number | null
   wsLastError: string | null
   reconnectCount: number
   lastDisconnectedAt: number
@@ -188,13 +198,24 @@ export function summarizeStatusTray(input: StatusTrayInput): StatusTraySummary {
         ? Number.POSITIVE_INFINITY
         : input.now - input.wsLastEventAt
       const silent = input.wsLastEventAt === 0 || silentMs > STATUS_TRAY_SILENT_MS
+      const pongAgeMs = input.wsLastPongAt === 0
+        ? Number.POSITIVE_INFINITY
+        : input.now - input.wsLastPongAt
+      const heartbeatFresh = pongAgeMs <= STATUS_TRAY_HEARTBEAT_FRESH_MS
+      const pongLatency = input.wsLastPongLatencyMs == null
+        ? 'pong'
+        : `${input.wsLastPongLatencyMs}ms`
       transport = {
         key: 'transport',
-        tone: silent ? 'warn' : 'ok',
+        tone: silent && !heartbeatFresh ? 'warn' : 'ok',
         label: 'WS',
-        value: silent ? 'silent' : `${input.wsEventCount60s}/60s`,
+        value: silent
+          ? heartbeatFresh ? pongLatency : 'silent'
+          : `${input.wsEventCount60s}/60s`,
         detail: silent
-          ? 'WS-only channel is open but no recent event has arrived'
+          ? heartbeatFresh
+            ? `WS-only channel is idle; heartbeat pong ${Math.floor(pongAgeMs / 1000)}s ago`
+            : 'WS-only channel is open but no recent event or heartbeat pong has arrived'
           : `last event ${Math.floor(silentMs / 1000)}s ago`,
       }
     }
@@ -429,6 +450,8 @@ export function DashboardStatusTray({ sideRailCollapsed = false }: DashboardStat
     wsReady: dashboardWsReady.value,
     wsLastEventAt: dashboardWsLastEventAt.value,
     wsEventCount60s: dashboardWsEventCount60s.value,
+    wsLastPongAt: dashboardWsLastPongAt.value,
+    wsLastPongLatencyMs: dashboardWsLastPongLatencyMs.value,
     wsLastError: dashboardWsLastError.value,
     reconnectCount: reconnectCount.value,
     lastDisconnectedAt: lastDisconnectedAt.value,

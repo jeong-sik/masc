@@ -50,7 +50,6 @@ code_refs:
   - `#monitoring?section=agents`
   - `#monitoring?section=runtime`
   - `#monitoring?section=fleet-health`
-  - `#monitoring?section=memory-subsystems` (hidden diagnostic)
 - `command`
   - `#command?section=operations`
   - sub-view는 `view=ops|governance|safety|inspector|connectors` 로 분기한다.

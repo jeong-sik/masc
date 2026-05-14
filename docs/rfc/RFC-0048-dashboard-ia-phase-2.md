@@ -24,7 +24,7 @@ treating *symptoms* (explainer copy, dead routes) without touching the
 |---|---|---|---|
 | cockpit | (no sections) | — | single-pane |
 | overview | (no sections) | — | single-pane |
-| **monitoring** | journey, agents, cognition, runtime, goal-loop, fleet-health (**6**) | observatory, memory-subsystems (**2**) | Phase 1 absorbed telemetry/fleet/tool-quality/governance into `fleet-health` |
+| **monitoring** | journey, agents, cognition, runtime, goal-loop, fleet-health (**6**) | observatory (**1**) | Phase 1 absorbed telemetry/fleet/tool-quality/governance into `fleet-health` |
 | command | operations | — | single-section surface |
 | connectors | connector-status | — | single-section surface |
 | workspace | board, sub-boards, planning, repositories, verification (**5**) | — | |

@@ -2241,43 +2241,60 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
           (Printf.sprintf {|{"ok":false,"error":"%s"}|} (String.escaped msg))
           reqd
     | Ok args ->
-    match Tool_keeper.dispatch keeper_ctx ~name:tool_name ~args with
-    | Some (true, body) when String.equal action "boot" || String.equal action "clear" ->
-        if String.equal action "boot"
-        then (
-          resume_booted_keeper_if_needed ();
-          refresh_keeper_execution_surfaces ~config ~name "started")
-        else (
-          (match Keeper_registry.get_phase ~base_path:config.base_path name with
-           | Some Keeper_state_machine.Paused -> persist_keeper_paused_state true
-           | Some _ | None -> ());
-          invalidate_keeper_execution_surfaces ~config ());
-        Http.Response.json ~compress:true ~request:req
-          (Printf.sprintf {|{"ok":true,"action":"%s","name":"%s","detail":%s}|}
-             (String.escaped action)
-             (String.escaped name)
-             body)
-          reqd
-    | Some (true, _body) ->
-        (match action with
-         | "shutdown" ->
-             persist_keeper_paused_state true;
-             refresh_keeper_execution_surfaces ~config ~name "stopped"
-         | _ -> invalidate_keeper_execution_surfaces ~config ());
-        Http.Response.json ~compress:true ~request:req
-          (Printf.sprintf {|{"ok":true,"action":"%s","name":"%s"}|}
-             (String.escaped action)
-             (String.escaped name))
-          reqd
-    | Some (false, body) ->
-        Http.Response.json ~status:`Bad_request ~request:req
-          (Yojson.Safe.to_string
-             (`Assoc [("ok", `Bool false); ("error", `String body)]))
-          reqd
-    | None ->
-        Http.Response.json ~status:`Internal_server_error ~request:req
-          {|{"ok":false,"error":"dispatch returned None"}|}
-          reqd
+        let started_at = Eio.Time.now clock in
+        let duration_ms () =
+          (Eio.Time.now clock -. started_at) *. 1000.0 |> int_of_float
+        in
+        let log_lifecycle_result outcome =
+          Log.Server.info
+            "keeper lifecycle %s name=%s actor=%s outcome=%s duration_ms=%d"
+            action name agent_name outcome (duration_ms ())
+        in
+        Log.Server.info "keeper lifecycle %s name=%s actor=%s started"
+          action name agent_name;
+        (match Tool_keeper.dispatch keeper_ctx ~name:tool_name ~args with
+         | Some (true, body)
+           when String.equal action "boot" || String.equal action "clear" ->
+             if String.equal action "boot"
+             then (
+               resume_booted_keeper_if_needed ();
+               refresh_keeper_execution_surfaces ~config ~name "started")
+             else (
+               (match Keeper_registry.get_phase ~base_path:config.base_path name with
+                | Some Keeper_state_machine.Paused -> persist_keeper_paused_state true
+                | Some _ | None -> ());
+               invalidate_keeper_execution_surfaces ~config ());
+             log_lifecycle_result "ok";
+             Http.Response.json ~compress:true ~request:req
+               (Printf.sprintf
+                  {|{"ok":true,"action":"%s","name":"%s","detail":%s}|}
+                  (String.escaped action)
+                  (String.escaped name)
+                  body)
+               reqd
+         | Some (true, _body) ->
+             (match action with
+              | "shutdown" ->
+                  persist_keeper_paused_state true;
+                  refresh_keeper_execution_surfaces ~config ~name "stopped"
+              | _ -> invalidate_keeper_execution_surfaces ~config ());
+             log_lifecycle_result "ok";
+             Http.Response.json ~compress:true ~request:req
+               (Printf.sprintf {|{"ok":true,"action":"%s","name":"%s"}|}
+                  (String.escaped action)
+                  (String.escaped name))
+               reqd
+         | Some (false, body) ->
+             log_lifecycle_result "rejected";
+             Http.Response.json ~status:`Bad_request ~request:req
+               (Yojson.Safe.to_string
+                  (`Assoc [("ok", `Bool false); ("error", `String body)]))
+               reqd
+         | None ->
+             log_lifecycle_result "dispatch_none";
+             Http.Response.json ~status:`Internal_server_error ~request:req
+               {|{"ok":false,"error":"dispatch returned None"}|}
+               reqd)
 
 (** POST /api/v1/keepers/:name/directive — pause / resume / wakeup.
 

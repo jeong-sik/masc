@@ -21,8 +21,7 @@ let valid_surfaces =
 ;;
 
 (* Mirror of dashboard/src/config/navigation.ts:DASHBOARD_SECTION_ITEMS.
-   Includes hidden sections (observatory, memory-subsystems) because they
-   remain reachable via redirects and continue to fire telemetry. *)
+   Includes hidden sections that remain reachable and continue to fire telemetry. *)
 let valid_sections =
   [ ( "monitoring"
     , [ "journey"
@@ -32,7 +31,6 @@ let valid_sections =
       ; "runtime"
       ; "goal-loop"
       ; "fleet-health"
-      ; "memory-subsystems"
       ] )
   ; "command", [ "operations" ]
   ; "connectors", [ "connector-status" ]

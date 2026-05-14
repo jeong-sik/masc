@@ -6,7 +6,14 @@ import {
   normalizeKeeperConversationDetails,
 } from '../keeper-message'
 import type { KeeperConversationDetails } from '../types'
-import { currentDashboardActor, jsonHeaders, runOperatorAction, fetchWithTimeout, DEFAULT_GET_TIMEOUT_MS } from './core'
+import {
+  currentDashboardActor,
+  jsonHeaders,
+  runOperatorAction,
+  fetchWithTimeout,
+  DEFAULT_GET_TIMEOUT_MS,
+  DEFAULT_POST_TIMEOUT_MS,
+} from './core'
 import {
   parseKeeperCompositeSnapshot,
   parseFleetCompositeSnapshot,
@@ -293,11 +300,11 @@ async function safeKeeperLifecycle(
   init?: RequestInit,
 ): Promise<KeeperLifecycleResponse> {
   try {
-    const resp = await fetch(url, {
+    const resp = await fetchWithTimeout(url, {
       method: 'POST',
       headers: jsonHeaders(),
       ...init,
-    })
+    }, DEFAULT_POST_TIMEOUT_MS)
     const payload = await safeJsonResponse<KeeperLifecycleResponse>(resp, fallbackError)
     if (resp.ok) return payload
 
@@ -324,11 +331,11 @@ async function safeKeeperPostWithBody(
   fallbackError: string,
 ): Promise<KeeperLifecycleResponse> {
   try {
-    const resp = await fetch(url, {
+    const resp = await fetchWithTimeout(url, {
       method: 'POST',
       headers: jsonHeaders(),
       body: JSON.stringify(body),
-    })
+    }, DEFAULT_POST_TIMEOUT_MS)
     const payload = await safeJsonResponse<KeeperLifecycleResponse>(resp, fallbackError)
     if (resp.ok) return payload
 

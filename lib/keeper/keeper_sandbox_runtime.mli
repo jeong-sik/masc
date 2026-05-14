@@ -178,15 +178,18 @@ val maybe_cleanup_stale_containers
   -> unit
   -> cleanup_result option
 
-(** Global keeper sandbox preflight used by [doctor], keeper startup,
-    and diagnostics. Returns [None] when
+(** Global keeper sandbox preflight used by [doctor] and diagnostics.
+    Returns [None] when
     [MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false]. *)
 val docker_preflight : timeout_sec:float -> unit -> docker_preflight option
 
 val docker_preflight_to_yojson : docker_preflight -> Yojson.Safe.t
 val docker_preflight_failure_message : docker_preflight -> string
 
-(** Fail-fast keeper-up preflight for [sandbox_profile=docker]. *)
+(** Fail-fast keeper-up preflight for [sandbox_profile=docker].
+    This stays on the lightweight request path: it checks runtime
+    hardening and image presence, while the full required-command
+    inventory remains in [docker_preflight] for doctor/status surfaces. *)
 val ensure_keeper_startup_preflight
   :  timeout_sec:float
   -> sandbox_profile:Keeper_types.sandbox_profile

@@ -18,6 +18,8 @@ import {
   dashboardWsLastSeq,
   dashboardWsReady,
   noteDashboardWsEvent,
+  noteDashboardWsPing,
+  noteDashboardWsPong,
 } from './dashboard-ws-state'
 
 type JsonObject = Record<string, unknown>
@@ -345,9 +347,13 @@ function startHeartbeat(ws: WebSocket): void {
       return
     }
     heartbeatInFlight = true
+    const sentAt = noteDashboardWsPing()
     void sendRpc('dashboard/ping', {})
       .then(() => {
-        if (socket === ws) heartbeatInFlight = false
+        if (socket === ws) {
+          noteDashboardWsPong(sentAt)
+          heartbeatInFlight = false
+        }
       })
       .catch(err => {
         heartbeatInFlight = false

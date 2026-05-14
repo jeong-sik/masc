@@ -1,0 +1,55 @@
+name: RFC Number Collision Check
+
+on:
+  pull_request:
+    paths:
+      - 'docs/rfc/RFC-*.md'
+      - 'docs/rfc/.next-number'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  check-numbering:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Gather PR body (for RFC-EXTEND opt-in)
+        id: pr_body
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BODY=$(gh pr view "${{ github.event.pull_request.number }}" --json body --jq .body || echo "")
+          # Pass body through GITHUB_OUTPUT using a heredoc-style delimiter
+          {
+            echo "body<<RFC_BODY_EOF"
+            printf '%s\n' "${BODY}"
+            echo "RFC_BODY_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run collision check
+        env:
+          PR_BODY: ${{ steps.pr_body.outputs.body }}
+        run: |
+          python scripts/rfc_enforcer.py \
+            --check-numbering \
+            --base-ref "origin/${{ github.base_ref }}" \
+            --head-ref "HEAD"
+
+      - name: Comment on PR if collision detected
+        if: failure() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr comment "${{ github.event.pull_request.number }}" \
+            --body "RFC number collision detected. Allocate a fresh number via \`bash scripts/rfc-allocate-next.sh\` and rebase. For multi-phase additions, add \`RFC-EXTEND: NNNN\` to the PR body or \`extends: \"NNNN\"\` to the RFC frontmatter. See RFC-0078 (\`docs/rfc/RFC-0078-rfc-number-reservation-ledger.md\`)."

@@ -133,23 +133,38 @@ temperature = 0.2
 - alias 가 한 곳에서만 raw 와 동일하게 쓰이면 만들지 않는다. 의미를 표현할
   때만 추가.
 
+### 3.4 spawn provider 의 한계
+
+CLI spawn 형 provider (`protocol = "*-cli"`, e.g. `gemini_cli`, `codex_cli`,
+`claude_code`) 는 alias 의 `max-output` 이 운영자 의도 표현일 뿐
+**실제 강제력은 CLI 가 그 flag 를 인지하는지에 의존**한다. 추가로 subprocess
+fork + JSON parse 사이클이 매 호출마다 ~100-500ms overhead 를 발생시키므로
+fast lane 1차로는 부적합한 경우가 많다. fallback 멤버로 두고 1차는 HTTP
+direct provider 를 권장.
+
 ---
 
 ## 4. 권장 토폴로지 (live cascade reference)
 
-운영자 머신에 GLM Coding plan + Claude/Kimi CLI + Ollama 로컬 + Gemini API 가
-있다는 가정의 reference. 실제 토폴로지는 비용/quota/속도 선택에 따라 다르다.
+운영자 머신에 GLM Coding plan + Claude/Kimi/Gemini CLI + Ollama Cloud + Ollama
+로컬이 있다는 가정의 reference. 실제 토폴로지는 비용/quota/속도 선택에 따라 다르다.
 
 ```toml
 # ── Fast lane: short verdict / scoring / ack ─────────────────
-# 1차: gemini-flash (latency 낮고 1M ctx),
-# 2차: glm-5-1 일반 채널 (coding 아님, max-output 16K),
-# 3차: ollama 로컬 (네트워크 0, 마지막 안전망).
+# 1차: deepseek-v4-flash:cloud  — HTTP API direct (no spawn cost),
+#                                  Ollama Cloud quota 내, 1M ctx.
+# 2차: gemini_cli (gemini-cli-auto) — OAuth personal quota 무료,
+#                                      subprocess spawn cost (~100-500ms)
+#                                      때문에 fallback 위치.
+# 3차: glm-5-1 일반 채널 — z.ai general (coding 아님, quota 분리 효과).
+# 4차: ollama 로컬 — 네트워크 0, 마지막 안전망.
+# 모든 멤버는 2KB cap alias 로 ceiling 정렬됨.
 [tier.fast_judge_primary]
 members = [
-  "gemini.gemini-api-flash.fast_judge",
-  "glm.glm-5-1",
-  "ollama.ollama-local-default.recovery",
+  "ollama_cloud.ollama-cloud-deepseek-v4-flash.fast_judge",
+  "gemini_cli.gemini-cli-auto.fast_judge",
+  "glm.glm-5-1.fast_judge",
+  "ollama.ollama-local-default.fast_judge",
 ]
 strategy = "failover"
 keeper-assignable = false   # system-only; keeper 가 직접 잡지 못하게

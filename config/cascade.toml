@@ -104,7 +104,7 @@ key = "ZAI_API_KEY"
 [providers.ollama]
 display-name = "Ollama Local"
 protocol = "ollama-http"
-endpoint = "http://localhost:11434"
+endpoint = "http://127.0.0.1:11434"
 
 [providers.ollama.capabilities]
 # Local Ollama is a viable bound-actor fallback target in catalogs

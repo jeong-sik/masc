@@ -4,6 +4,7 @@
 open Alcotest
 
 module Audit = Masc_mcp.Keeper_transition_audit
+module KTF = Masc_mcp.Keeper_turn_fsm
 module KSM = Masc_mcp.Keeper_state_machine
 module P = Masc_mcp.Prometheus
 
@@ -81,6 +82,15 @@ let with_invalid_default_store f =
       with_env "MASC_KEEPER_TRANSITION_LOG" "" (fun () ->
           with_env "MASC_BASE_PATH" base_file (fun () ->
               with_env "MASC_BASE_PATH_INPUT" base_file f)))
+
+let read_jsonl path =
+  let ic = open_in path in
+  let rec loop acc =
+    match input_line ic with
+    | line -> loop (Yojson.Safe.from_string line :: acc)
+    | exception End_of_file -> List.rev acc
+  in
+  Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () -> loop [])
 
 (* ── Helpers to exercise the JSON round-trip via store ─────────── *)
 
@@ -187,6 +197,8 @@ let test_compact_retry_exhausted_signal_is_alerting () =
     (signal |> member "next_human_action" |> to_string)
 
 let test_runtime_trust_timeline_carries_transition_operator_signal () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   Audit.For_testing.reset_state ();
   let base_dir = temp_dir () in
   Fun.protect
@@ -211,6 +223,37 @@ let test_runtime_trust_timeline_carries_transition_operator_signal () =
             (event |> member "next_human_action" |> to_string);
           check string "transition severity" "warn"
             (event |> member "severity" |> to_string)))
+
+let test_turn_fsm_emit_transition_appends_wal_row () =
+  Audit.For_testing.reset_state ();
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Audit.For_testing.reset_state ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let sink = Filename.concat base_dir "transition-audit.jsonl" in
+      with_env "MASC_KEEPER_TRANSITION_LOG" sink (fun () ->
+          KTF.emit_transition
+            ~keeper_name:"turn-fsm-wal-keeper"
+            ~turn_id:42
+            ~prev:KTF.Streaming
+            KTF.Completing;
+          match read_jsonl sink with
+          | [ json ] ->
+            let open Yojson.Safe.Util in
+            check string "keeper" "turn-fsm-wal-keeper"
+              (json |> member "keeper" |> to_string);
+            let row = json |> member "turn_fsm_transition" in
+            check int "turn_id" 42 (row |> member "turn_id" |> to_int);
+            check string "prev_state" "streaming"
+              (row |> member "prev_state" |> to_string);
+            check string "new_state" "completing"
+              (row |> member "new_state" |> to_string);
+            check string "action" "StreamComplete"
+              (row |> member "action" |> to_string)
+          | rows ->
+            failf "expected one turn_fsm_transition row, got %d" (List.length rows)))
 
 let test_default_transition_append_failure_is_observed_and_ring_retained () =
   Audit.For_testing.reset_state ();
@@ -303,6 +346,32 @@ let test_completed_turn_sink_failure_is_observed_and_ring_retained () =
             (List.length
                (Audit.recent_completed_turns ~keeper_name ~limit:5))))
 
+let test_turn_fsm_sink_failure_is_observed () =
+  Audit.For_testing.reset_state ();
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Audit.For_testing.reset_state ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let missing_parent = Filename.concat base_dir "missing-parent" in
+      let sink = Filename.concat missing_parent "transition-audit.jsonl" in
+      with_env "MASC_KEEPER_TRANSITION_LOG" sink (fun () ->
+          let before = transition_audit_failure_count "sink_turn_fsm_append" in
+          Audit.record_turn_fsm_transition
+            ~keeper_name:"turn-fsm-sink-failure"
+            { turn_fsm_turn_id = 1
+            ; turn_fsm_prev_state = "Streaming"
+            ; turn_fsm_new_state = "Completing"
+            ; turn_fsm_action = "StreamComplete"
+            ; turn_fsm_stop_signaled_before = None
+            ; turn_fsm_stop_signaled_after = None
+            ; turn_fsm_wall_clock_at = 1.0
+            };
+          let after = transition_audit_failure_count "sink_turn_fsm_append" in
+          check (float 0.0001) "turn fsm sink append failure counted"
+            (before +. 1.0) after))
+
 let test_append_failure_observer_reraises_cancelled () =
   let raised = ref false in
   (try
@@ -333,6 +402,8 @@ let () =
             test_compact_retry_exhausted_signal_is_alerting;
           test_case "runtime trust timeline carries signal" `Quick
             test_runtime_trust_timeline_carries_transition_operator_signal;
+          test_case "turn FSM emit appends WAL row" `Quick
+            test_turn_fsm_emit_transition_appends_wal_row;
         ] );
       ( "append_failures",
         [
@@ -344,6 +415,8 @@ let () =
             test_sink_append_failure_is_observed_and_ring_retained;
           test_case "completed sink append failure observed and ring retained" `Quick
             test_completed_turn_sink_failure_is_observed_and_ring_retained;
+          test_case "turn FSM sink failure observed" `Quick
+            test_turn_fsm_sink_failure_is_observed;
           test_case "observer re-raises cancellation" `Quick
             test_append_failure_observer_reraises_cancelled;
         ] );

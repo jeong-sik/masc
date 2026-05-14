@@ -229,6 +229,16 @@ type completed_turn_record =
   ; outcome : completed_turn_outcome
   }
 
+type turn_fsm_transition_record =
+  { turn_fsm_turn_id : int
+  ; turn_fsm_prev_state : string
+  ; turn_fsm_new_state : string
+  ; turn_fsm_action : string
+  ; turn_fsm_stop_signaled_before : bool option
+  ; turn_fsm_stop_signaled_after : bool option
+  ; turn_fsm_wall_clock_at : float
+  }
+
 let completed_turn_outcome_to_json = function
   | Turn_substantive -> `String "substantive"
   | Turn_failed -> `String "failed"
@@ -248,6 +258,19 @@ let completed_turn_to_json (r : completed_turn_record) : Yojson.Safe.t =
     ; "started_at", `Float r.started_at
     ; "ended_at", `Float r.ended_at
     ; "outcome", completed_turn_outcome_to_json r.outcome
+    ]
+;;
+
+let turn_fsm_transition_to_json (r : turn_fsm_transition_record) : Yojson.Safe.t =
+  `Assoc
+    [ "turn_id", `Int r.turn_fsm_turn_id
+    ; "prev_state", `String r.turn_fsm_prev_state
+    ; "new_state", `String r.turn_fsm_new_state
+    ; "action", `String r.turn_fsm_action
+    ; ( "stop_signaled_before"
+      , Json_util.bool_opt_to_json r.turn_fsm_stop_signaled_before )
+    ; "stop_signaled_after", Json_util.bool_opt_to_json r.turn_fsm_stop_signaled_after
+    ; "wall_clock_at", `Float r.turn_fsm_wall_clock_at
     ]
 ;;
 
@@ -426,6 +449,23 @@ let append_completed_turn_to_default_store ~keeper_name (rec_ : completed_turn_r
      | exn -> observe_append_failure ~site:"default_completed_append" exn)
 ;;
 
+let append_turn_fsm_transition_to_default_store
+      ~keeper_name
+      (rec_ : turn_fsm_transition_record)
+  =
+  match get_default_store () with
+  | None -> ()
+  | Some store ->
+    let json =
+      `Assoc
+        [ "keeper", `String keeper_name
+        ; "turn_fsm_transition", turn_fsm_transition_to_json rec_
+        ]
+    in
+    (try Dated_jsonl.append store json with
+     | exn -> observe_append_failure ~site:"default_turn_fsm_append" exn)
+;;
+
 let record_transition ~keeper_name (rec_ : transition_record) =
   let ring = get_or_create_ring keeper_name in
   ring.buf.(ring.pos) <- Some rec_;
@@ -495,6 +535,26 @@ let record_completed_turn ~keeper_name (rec_ : completed_turn_record) =
          (fun () -> output_string oc (line ^ "\n"))
      with
      | exn -> observe_append_failure ~site:"sink_completed_append" exn)
+;;
+
+let record_turn_fsm_transition ~keeper_name (rec_ : turn_fsm_transition_record) =
+  match sink_path () with
+  | None -> append_turn_fsm_transition_to_default_store ~keeper_name rec_
+  | Some path ->
+    (try
+       let line =
+         Yojson.Safe.to_string
+           (`Assoc
+               [ "keeper", `String keeper_name
+               ; "turn_fsm_transition", turn_fsm_transition_to_json rec_
+               ])
+       in
+       let oc = open_out_gen [ Open_wronly; Open_append; Open_creat ] 0o644 path in
+       Eio_guard.protect
+         ~finally:(fun () -> close_out_noerr oc)
+         (fun () -> output_string oc (line ^ "\n"))
+     with
+     | exn -> observe_append_failure ~site:"sink_turn_fsm_append" exn)
 ;;
 
 let recent_completed_turns_from_store ~keeper_name ~limit =

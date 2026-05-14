@@ -169,12 +169,12 @@ val emit_transition :
 (** Emit a structured FSM transition log line.
 
     Step 4b kicks off the call-site adoption stack: this is an
-    observe-only secondary emit alongside the existing receipt
-    path.  The runtime branch shape is unchanged; the line
-    surfaces in [bin/masc-trace] via the [turn_id] correlator
-    wired in Step 0a (#11154 / #11156 / #11159) so an operator
-    can see the state the runtime *intended* without parsing
-    the receipt JSON.
+    observe-only secondary emit alongside the existing receipt path.  The
+    runtime branch shape is unchanged; the transition is both logged and
+    appended to [Keeper_transition_audit] as a turn-FSM WAL row via the
+    [turn_id] correlator wired in Step 0a (#11154 / #11156 / #11159), so an
+    operator can see the state the runtime *intended* without waiting for the
+    final receipt JSON.
 
     The line format is
     [\[fsm:transition\] <prev> -> <state> action=<action> stop_before=.. stop_after=..];

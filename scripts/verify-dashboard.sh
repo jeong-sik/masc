@@ -225,6 +225,10 @@ check_json "harness health exposes overview" "$BASE/api/v1/dashboard/harness-hea
 echo "[6/7] Code + Logs"
 check_http "IDE presence 200" "$BASE/api/v1/ide/presence" "200"
 check_json "IDE presence exposes connected state" "$BASE/api/v1/ide/presence" "d.get('data', {}).get('connected')" '^True$'
+check_http "IDE annotations 200" "$BASE/api/v1/ide/annotations" "200"
+check_json "IDE annotations exposes data envelope" "$BASE/api/v1/ide/annotations" "d.get('ok') == True and 'data' in d" '^True$'
+check_http "IDE regions 200" "$BASE/api/v1/ide/regions" "200"
+check_json "IDE regions exposes data envelope" "$BASE/api/v1/ide/regions" "d.get('ok') == True and 'data' in d" '^True$'
 check_http "dashboard logs 200" "$BASE/api/v1/dashboard/logs?limit=3" "200"
 check_json "dashboard logs exposes entries" "$BASE/api/v1/dashboard/logs?limit=3" "'entries' in d" '^True$'
 

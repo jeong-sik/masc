@@ -603,7 +603,7 @@ describe('buildRuntimeWarnings', () => {
     const rows = [makeRow({ runtime_blocker_class: 'admission_queue_wait_timeout' })]
     const warnings = buildRuntimeWarnings(rows)
     expect(warnings.length).toBe(1)
-    expect(warnings[0]).toContain('admission queue')
+    expect(warnings[0]).toContain('keeper admission FIFO')
   })
 
   it('warns about slot blockage', () => {

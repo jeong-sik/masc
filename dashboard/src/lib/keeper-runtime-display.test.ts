@@ -203,6 +203,15 @@ describe('keeperRuntimeBlockerHint', () => {
     ).toBe('액션 가능한 신호에 필요한 keeper 도구 호출이 충족되지 않았습니다.')
   })
 
+  it('explains admission queue waits as keeper FIFO waits, not OAS waits', () => {
+    expect(
+      keeperRuntimeBlockerHint(makeKeeper({
+        runtime_blocker_class: 'admission_queue_wait_timeout',
+        runtime_blocker_summary: 'admission_queue_wait_timeout',
+      })),
+    ).toBe('Keeper admission FIFO 대기 시간이 초과되었습니다.')
+  })
+
   const registryBlockerHintCases: Array<[KeeperRuntimeBlockerClass, string]> = [
     [
       'stale_termination_storm',

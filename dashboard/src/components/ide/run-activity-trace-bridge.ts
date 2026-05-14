@@ -33,6 +33,16 @@ export function bridgeRunActivityEventsToTrace(
       filePath,
       line,
       surface: activityTraceSurface(event),
+      goalId: event.context?.goal_id,
+      taskId: event.context?.task_id,
+      boardPostId: event.context?.board_post_id,
+      commentId: event.context?.comment_id,
+      prId: event.context?.pr_id,
+      gitRef: event.context?.git_ref,
+      logId: event.context?.log_id,
+      sessionId: event.context?.session_id,
+      operationId: event.context?.operation_id,
+      workerRunId: event.context?.worker_run_id,
     })
     next.add(key)
   }

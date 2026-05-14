@@ -74,6 +74,16 @@ export type KeeperTraceEvent =
       readonly filePath: string
       readonly line: number
       readonly surface: string
+      readonly goalId?: string
+      readonly taskId?: string
+      readonly boardPostId?: string
+      readonly commentId?: string
+      readonly prId?: string
+      readonly gitRef?: string
+      readonly logId?: string
+      readonly sessionId?: string
+      readonly operationId?: string
+      readonly workerRunId?: string
     })
 
 export type KeeperTraceEventInput =

@@ -25,7 +25,14 @@ describe('bridgeRunActivityEventsToTrace', () => {
           line: 7,
           goal_id: 'goal-runtime',
           task_id: 'task-runtime',
+          board_post_id: 'post-runtime',
+          comment_id: 'comment-runtime',
+          pr_id: '15035',
+          git_ref: 'main',
           log_id: 'turn-7',
+          session_id: 'sess-runtime',
+          operation_id: 'op-runtime',
+          worker_run_id: 'wr-runtime',
         },
       }),
     ], new Set())
@@ -40,7 +47,17 @@ describe('bridgeRunActivityEventsToTrace', () => {
       eventId: 'evt-1',
       filePath: 'lib/runtime.ml',
       line: 7,
-      surface: 'Goal',
+      surface: 'PR',
+      goalId: 'goal-runtime',
+      taskId: 'task-runtime',
+      boardPostId: 'post-runtime',
+      commentId: 'comment-runtime',
+      prId: '15035',
+      gitRef: 'main',
+      logId: 'turn-7',
+      sessionId: 'sess-runtime',
+      operationId: 'op-runtime',
+      workerRunId: 'wr-runtime',
     }])
   })
 

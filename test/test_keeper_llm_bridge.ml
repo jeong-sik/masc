@@ -130,7 +130,9 @@ let test_parent_timeout_cancel_logs_info () =
         let cancelled =
           try
             ignore
-              (Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s:1.0
+              (Keeper_llm_bridge.run_with_timeout_and_fallback
+                 ~cancel_classification:Keeper_llm_bridge.Routine_parent_cancel
+                 ~timeout_s:1.0
                  (fun () -> raise (Eio.Cancel.Cancelled Eio.Time.Timeout)));
             false
           with
@@ -144,11 +146,45 @@ let test_parent_timeout_cancel_logs_info () =
           Alcotest.(check string)
             "routine parent timeout cancel is info"
             "INFO"
-            entry.Log.Ring.normalized_level;
+            (Log.level_to_string entry.Log.Ring.level);
           Alcotest.(check string)
             "log class"
             "routine_parent_cancel"
             (entry.Log.Ring.details |> member "log_class" |> to_string))))
+;;
+
+let test_default_parent_timeout_cancel_stays_warn () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      Masc_eio_env.reset_for_test ();
+      Fun.protect ~finally:Masc_eio_env.reset_for_test (fun () ->
+        Masc_eio_env.init ~sw ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env) ();
+        let cancelled =
+          try
+            ignore
+              (Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s:1.0
+                 (fun () -> raise (Eio.Cancel.Cancelled Eio.Time.Timeout)));
+            false
+          with
+          | Eio.Cancel.Cancelled _ -> true
+        in
+        Alcotest.(check bool) "cancel re-raised" true cancelled;
+        match latest_keeper_log_matching "bucket=fast inner=Eio__Time.Timeout" with
+        | None -> Alcotest.fail "missing default timeout cancel log"
+        | Some entry ->
+          let open Yojson.Safe.Util in
+          Alcotest.(check string)
+            "default parent timeout cancel stays warn"
+            "WARN"
+            (Log.level_to_string entry.Log.Ring.level);
+          Alcotest.(check string)
+            "log class"
+            "warn_cancel"
+            (entry.Log.Ring.details |> member "log_class" |> to_string);
+          Alcotest.(check string)
+            "cancel classification"
+            "unknown_cancel"
+            (entry.Log.Ring.details |> member "cancel_classification" |> to_string))))
 ;;
 
 let test_unknown_cancel_stays_warn () =
@@ -174,7 +210,7 @@ let test_unknown_cancel_stays_warn () =
           Alcotest.(check string)
             "unknown cancel stays warn"
             "WARN"
-            entry.Log.Ring.normalized_level;
+            (Log.level_to_string entry.Log.Ring.level);
           Alcotest.(check string)
             "log class"
             "warn_cancel"
@@ -216,6 +252,10 @@ let () =
             "parent timeout cancel logs info"
             `Quick
             test_parent_timeout_cancel_logs_info
+        ; Alcotest.test_case
+            "default timeout cancel stays warn"
+            `Quick
+            test_default_parent_timeout_cancel_stays_warn
         ; Alcotest.test_case
             "unknown cancel stays warn"
             `Quick

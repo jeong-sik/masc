@@ -14,6 +14,8 @@ import {
   dashboardWsLastPongAt,
   dashboardWsLastPongLatencyMs,
   dashboardWsReady,
+  dashboardWsSseFallbackActive,
+  dashboardWsSseFallbackReason,
 } from '../dashboard-ws-state'
 import {
   DASHBOARD_WS_HEARTBEAT_INTERVAL_MS,
@@ -47,6 +49,8 @@ export function computeBeaconView(args: {
   eventCount60s: number
   lastPongAt: number
   lastPongLatencyMs: number | null
+  sseFallbackActive: boolean
+  sseFallbackReason: string | null
   now: number
 }): BeaconView {
   if (!args.wsOnly) {
@@ -57,6 +61,15 @@ export function computeBeaconView(args: {
     }
   }
   if (!args.connected || !args.ready) {
+    if (args.sseFallbackActive) {
+      return {
+        state: 'yellow',
+        label: 'Client SSE fallback',
+        title: args.sseFallbackReason
+          ? `Client WS is degraded; SSE fallback is carrying events. Reason: ${args.sseFallbackReason}`
+          : 'Client WS is degraded; SSE fallback is carrying events.',
+      }
+    }
     return {
       state: 'red',
       label: 'Client WS · disconnected',
@@ -109,6 +122,8 @@ const beaconView = computed<BeaconView>(() => computeBeaconView({
   eventCount60s: dashboardWsEventCount60s.value,
   lastPongAt: dashboardWsLastPongAt.value,
   lastPongLatencyMs: dashboardWsLastPongLatencyMs.value,
+  sseFallbackActive: dashboardWsSseFallbackActive.value,
+  sseFallbackReason: dashboardWsSseFallbackReason.value,
   now: Date.now(),
 }))
 

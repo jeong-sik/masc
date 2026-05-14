@@ -52,10 +52,26 @@ status chip.  States:
 
 | Color | Label | Meaning | Action |
 |-------|-------|---------|--------|
-| Gray | `WS+SSE (legacy)` | Cutover not active in this build | None — this is the safety-net default |
-| Green | `WS-only · open · N events / 60s` | Cutover active, socket open, events arriving | None — the transport is healthy |
-| Yellow | `WS-only · silent` | Cutover active, socket open, but no event for >30s | Verify the workload is genuinely idle.  If you expect events and the gray-mode beacon would have shown them, consider rolling back |
-| Red | `WS-only · disconnected` | Cutover active, but the socket is closed | Wait for auto-reconnect.  If the socket stays closed, roll back |
+| Gray | `Client WS+SSE parallel` | Cutover not active in this build or manually rolled back | Safe but duplicate delivery is expected |
+| Green | `Client WS · open · N events / 60s` / `Client WS · heartbeat · Nms` | Cutover active, socket open, events or heartbeat pongs arriving | None — the transport is healthy |
+| Yellow | `Client WS · silent` | Cutover active, socket open, but no event or fresh heartbeat pong | Verify the workload is genuinely idle. If you expect events and fallback/parallel mode would show them, inspect WS fan-out |
+| Red | `Client WS · disconnected` | Cutover active, but the socket is closed and no fallback is active yet | Wait for auto-reconnect; fallback should engage after the WS layer reports a failure reason |
+| Yellow | `Client SSE fallback` | WS-only build detected a WS close/error/RPC timeout and opened the `/mcp` EventSource safety net | Treat as degraded-but-live; inspect the beacon title / status tray reason, then fix the WS path |
+
+## Automatic SSE fallback
+
+WS-only is the steady-state cutover mode, but the browser no longer lets
+a failed WS channel pause live dashboard events.  When the client sees a
+WS close, connection error, or `dashboard/hello` / `dashboard/ping` /
+`dashboard/subscribe` RPC timeout, it opens the `/mcp` EventSource as a
+runtime safety net while the WS reconnect loop continues.  Once the WS
+channel is connected and ready again, the fallback EventSource is closed
+so steady-state duplicate delivery stays off.
+
+The status tray reports this state as `SSE fallback` and includes the WS
+failure reason.  This is intentionally not a full rollback: it preserves
+operator visibility during WS degradation without changing the tracked
+`VITE_DASHBOARD_WS_ONLY=true` default.
 
 ## Rollback
 

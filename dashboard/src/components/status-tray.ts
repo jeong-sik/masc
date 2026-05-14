@@ -11,6 +11,8 @@ import {
   dashboardWsLastPongAt,
   dashboardWsLastPongLatencyMs,
   dashboardWsReady,
+  dashboardWsSseFallbackActive,
+  dashboardWsSseFallbackReason,
 } from '../dashboard-ws-state'
 import { route } from '../router'
 import {
@@ -72,6 +74,8 @@ export interface StatusTrayInput {
   wsEventCount60s: number
   wsLastPongAt: number
   wsLastPongLatencyMs: number | null
+  wsSseFallbackActive?: boolean
+  wsSseFallbackReason?: string | null
   wsLastError: string | null
   reconnectCount: number
   lastDisconnectedAt: number
@@ -186,14 +190,26 @@ export function summarizeStatusTray(input: StatusTrayInput): StatusTraySummary {
   let transport: StatusTrayItem
   if (input.wsOnly) {
     if (!input.wsConnected || !input.wsReady) {
-      transport = {
-        key: 'transport',
-        tone: 'err',
-        label: 'Client',
-        value: 'closed',
-        detail: input.wsLastError
-          ? clip(input.wsLastError)
-          : 'client WS channel is not ready; server transport truth is in Transport Health',
+      if (input.wsSseFallbackActive && input.sseConnected) {
+        transport = {
+          key: 'transport',
+          tone: 'warn',
+          label: 'Client',
+          value: 'SSE fallback',
+          detail: input.wsSseFallbackReason
+            ? `client WS degraded; ${clip(input.wsSseFallbackReason)}`
+            : 'client WS degraded; SSE fallback is live',
+        }
+      } else {
+        transport = {
+          key: 'transport',
+          tone: 'err',
+          label: 'Client',
+          value: 'closed',
+          detail: input.wsLastError
+            ? clip(input.wsLastError)
+            : 'client WS channel is not ready; server transport truth is in Transport Health',
+        }
       }
     } else {
       const silentMs = input.wsLastEventAt === 0
@@ -456,6 +472,8 @@ export function DashboardStatusTray({ sideRailCollapsed = false }: DashboardStat
     wsEventCount60s: dashboardWsEventCount60s.value,
     wsLastPongAt: dashboardWsLastPongAt.value,
     wsLastPongLatencyMs: dashboardWsLastPongLatencyMs.value,
+    wsSseFallbackActive: dashboardWsSseFallbackActive.value,
+    wsSseFallbackReason: dashboardWsSseFallbackReason.value,
     wsLastError: dashboardWsLastError.value,
     reconnectCount: reconnectCount.value,
     lastDisconnectedAt: lastDisconnectedAt.value,

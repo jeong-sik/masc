@@ -7,6 +7,8 @@ export const dashboardWsLastSeq = signal(0)
 export const dashboardWsLastPingAt = signal(0)
 export const dashboardWsLastPongAt = signal(0)
 export const dashboardWsLastPongLatencyMs = signal<number | null>(null)
+export const dashboardWsSseFallbackActive = signal(false)
+export const dashboardWsSseFallbackReason = signal<string | null>(null)
 
 // Cutover beacon signals.  The transport beacon (operator-facing UI)
 // reads these to show whether events are actually flowing through the WS
@@ -52,4 +54,6 @@ export function _resetDashboardWsCounterForTests(): void {
   dashboardWsLastPingAt.value = 0
   dashboardWsLastPongAt.value = 0
   dashboardWsLastPongLatencyMs.value = null
+  dashboardWsSseFallbackActive.value = false
+  dashboardWsSseFallbackReason.value = null
 }

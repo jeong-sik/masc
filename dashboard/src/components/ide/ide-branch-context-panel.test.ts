@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
 import { act } from 'preact/test-utils'
@@ -8,6 +8,18 @@ import {
   buildIdeBranchContextModel,
   IdeBranchContextPanel,
 } from './ide-branch-context-panel'
+import { globalPresenceSnapshot } from './keeper-presence-store'
+import { cursorOverlaySignal } from './keeper-cursor-overlay'
+
+afterEach(() => {
+  globalPresenceSnapshot.value = null
+  cursorOverlaySignal.value = {
+    cursors: new Map(),
+    heatmap: new Map(),
+    collisions: [],
+    active_file: null,
+  }
+})
 
 function makeGraph(overrides: Partial<GitGraphResponse> = {}): GitGraphResponse {
   return {
@@ -87,6 +99,7 @@ describe('buildIdeBranchContextModel', () => {
     expect(model?.status).toBe('dirty')
     expect(model?.branches[0]?.tone).toBe('current')
     expect(model?.lanes[0]?.path).toBe('.worktrees/fix-ide-branch')
+    expect(model?.lanes[0]?.keeperId).toBe('sangsu')
   })
 
   it('prefers conflict status over dirty status', () => {
@@ -131,6 +144,54 @@ describe('IdeBranchContextPanel', () => {
     expect(container.textContent).toContain('fix/ide-branch')
     expect(container.textContent).toContain('abcdef1234')
     expect(container.querySelector('svg[aria-label="Branch graph for masc-mcp"]')).not.toBeNull()
+  })
+
+  it('matches worktree lanes to keeper presence and cursor state by keeper label', async () => {
+    globalPresenceSnapshot.value = {
+      runtime_id: 'runtime',
+      branch: 'fix/ide-branch',
+      supervisor: 'local',
+      connected: true,
+      entries: [{
+        keeper_id: 'sangsu',
+        workspace_label: 'masc-mcp',
+        branch: 'fix/ide-branch',
+        role: 'coder',
+        status: 'active',
+        last_seen_ms: 100,
+      }],
+    }
+    cursorOverlaySignal.value = {
+      cursors: new Map([[
+        'sangsu',
+        {
+          keeper_id: 'sangsu',
+          file_path: 'lib/runtime.ml',
+          line: 42,
+          column: 1,
+          focus_mode: 'editing',
+          last_update: 100,
+        },
+      ]]),
+      heatmap: new Map(),
+      collisions: [],
+      active_file: 'lib/runtime.ml',
+    }
+    const fetchGraph = vi.fn().mockResolvedValue(makeGraph())
+    const container = document.createElement('div')
+
+    render(
+      h(IdeBranchContextPanel, {
+        activeRepositoryId: () => 'masc',
+        fetchGraph,
+        refreshMs: null,
+      }),
+      container,
+    )
+
+    await waitFor(() => expect(container.textContent).toContain('runtime.ml:42'))
+    const status = container.querySelector('[role="status"][aria-label="Keeper sangsu: ACTIVE"]')
+    expect(status).not.toBeNull()
   })
 
   it('waits for an active repository before fetching branch graph data', async () => {

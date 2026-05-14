@@ -121,6 +121,7 @@ export function buildIdeBranchContextModel(
       branch: agent.branch ?? 'detached',
       path: compactPath(agent.worktree_path),
       color: agent.color,
+      keeperId: keeperIdForAgentLane(agent),
     }))
     .slice(0, 4)
 
@@ -146,6 +147,11 @@ export function buildIdeBranchContextModel(
     lanes,
     warnings: graph.warnings,
   }
+}
+
+function keeperIdForAgentLane(agent: GitGraphResponse['agents'][number]): string {
+  const label = agent.label.trim()
+  return label || agent.id
 }
 
 function stateLabel(state: PanelState, model: IdeBranchContextModel | null): string {
@@ -357,7 +363,7 @@ function LaneRow(
       ${dotStyle ? html`
         <span
           role="status"
-          aria-label=${`Keeper ${lane.id}: ${dotStyle.label}`}
+          aria-label=${`Keeper ${presenceKey}: ${dotStyle.label}`}
           style=${{
             fontSize: 'var(--fs-9)',
             fontWeight: 600,

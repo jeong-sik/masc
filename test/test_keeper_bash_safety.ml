@@ -874,6 +874,51 @@ let test_bash_missing_cmd_field () =
   | None ->
       Alcotest.fail ("expected error json for missing cmd field, got: " ^ raw)
 
+let test_bash_blocks_direct_masc_tool_command () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_docker_meta "direct-tool-command" in
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:(`Assoc [ ("cmd", `String "keeper_tasks_list") ]) ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check (option string))
+    "error"
+    (Some "tool_invoked_as_shell_command")
+    (Json.member "error" json |> Json.to_string_option);
+  Alcotest.(check (option string))
+    "suggested tool"
+    (Some "keeper_tasks_list")
+    (Json.member "suggested_tool" json |> Json.to_string_option);
+  Alcotest.(check bool)
+    "hint says direct tool call"
+    true
+    (String_util.contains_substring
+       (Json.member "hint" json |> Json.to_string)
+       "keeper_tasks_list tool");
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:(`Assoc [ ("cmd", `String "keeper_missing_from_policy") ]) ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check (option string))
+    "tool-like command error"
+    (Some "tool_invoked_as_shell_command")
+    (Json.member "error" json |> Json.to_string_option);
+  Alcotest.(check bool)
+    "non-visible tool-like command still blocked"
+    false
+    (Json.member "tool_policy_visible" json |> Json.to_bool)
+
 let test_shell_missing_op_field () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
@@ -993,6 +1038,8 @@ let () =
     ]);
     ("negative_path", [
       Alcotest.test_case "missing cmd field" `Quick test_bash_missing_cmd_field;
+      Alcotest.test_case "direct MASC tool command blocked" `Quick
+        test_bash_blocks_direct_masc_tool_command;
       Alcotest.test_case "missing op field" `Quick test_shell_missing_op_field;
       Alcotest.test_case "unsupported op" `Quick test_shell_unsupported_op;
     ]);

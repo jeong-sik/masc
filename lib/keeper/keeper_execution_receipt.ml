@@ -513,6 +513,12 @@ let operator_disposition (receipt : t)
     | Some _ | None -> false
   then Disp_pause_human, Reason_internal_error
   else if
+    let ok_followup_progress =
+      receipt.outcome = `Ok
+      && receipt.cascade_outcome = Cascade_completed
+      && receipt.tool_contract_result = Contract_needs_execution_progress
+      && receipt.tools_used <> []
+    in
     receipt.tool_surface.tool_requirement = Required
     && (List.mem
           receipt.tool_contract_result
@@ -526,6 +532,7 @@ let operator_disposition (receipt : t)
           ; Contract_no_tool_capable_provider
           ]
         || receipt.tools_used = [])
+    && not ok_followup_progress
   then Disp_pause_human, Reason_tool_required_unsatisfied
   else if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_cascade
   then Disp_fail_open_next_cascade, Reason_degraded_retry

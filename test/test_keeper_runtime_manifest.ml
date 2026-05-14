@@ -1997,6 +1997,30 @@ let test_required_tool_lane_unavailable_is_tool_support_config_error () =
       "expected tool_support InvalidConfig, got %s"
       (Agent_sdk.Error.to_string err)
 
+let test_empty_candidate_classification_separates_tool_filter_from_availability () =
+  let module FT = Masc_mcp.Keeper_turn_driver_helpers in
+  let check label expected actual =
+    Alcotest.(check bool) label true (actual = expected)
+  in
+  check "required tools and no tool-capable candidates"
+    FT.Tool_capability_empty
+    (FT.classify_empty_candidates
+       ~require_tool_choice_support:true
+       ~require_tool_support:true
+       ~tool_filtered_candidate_count:0);
+  check "required tools but candidates were only unavailable"
+    FT.Provider_unavailable
+    (FT.classify_empty_candidates
+       ~require_tool_choice_support:true
+       ~require_tool_support:true
+       ~tool_filtered_candidate_count:2);
+  check "optional tools and no providers"
+    FT.Provider_unavailable
+    (FT.classify_empty_candidates
+       ~require_tool_choice_support:false
+       ~require_tool_support:false
+       ~tool_filtered_candidate_count:0)
+
 let test_keeper_cascade_engine_boundary () =
   let module E = Masc_mcp.Keeper_cascade_engine in
   let engine = E.keeper_managed in
@@ -2306,6 +2330,10 @@ let () =
           Alcotest.test_case
             "required tool lane mismatch is cascade-recoverable"
             `Quick test_required_tool_lane_unavailable_is_tool_support_config_error;
+          Alcotest.test_case
+            "empty candidate classification keeps availability separate"
+            `Quick
+            test_empty_candidate_classification_separates_tool_filter_from_availability;
           Alcotest.test_case "keeper cascade engine boundary is typed"
             `Quick test_keeper_cascade_engine_boundary;
           Alcotest.test_case "keeper hot path avoids OAS Complete_cascade"

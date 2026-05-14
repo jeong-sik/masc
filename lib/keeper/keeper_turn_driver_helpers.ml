@@ -87,6 +87,18 @@ let required_tool_lane_unavailable_error ~lane ~missing_required_tools
              (String.concat ", " materialized_tools);
        })
 
+type empty_candidate_classification =
+  | Tool_capability_empty
+  | Provider_unavailable
+
+let classify_empty_candidates ~require_tool_choice_support ~require_tool_support
+    ~tool_filtered_candidate_count =
+  if
+    (require_tool_choice_support || require_tool_support)
+    && tool_filtered_candidate_count = 0
+  then Tool_capability_empty
+  else Provider_unavailable
+
 let provider_rejections_for_no_tool_error
     ~keeper_name ?runtime_mcp_policy ~tools
     ~require_tool_choice_support ~require_tool_support candidates =

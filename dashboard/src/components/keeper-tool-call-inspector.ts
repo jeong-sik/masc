@@ -16,7 +16,12 @@ import { CopyIdButton } from './common/copy-id-button'
 import { TextInput } from './common/input'
 import { ringFocusClasses } from './common/ring'
 import { coverageGapDisplay, sourceHealthClass, freshnessText } from './common/source-health'
-import { openIdeContextRouteLink, routeLinksForContext, type IdeContextRouteLink } from './ide/ide-context-lens'
+import {
+  openIdeContextRouteLink,
+  routeLinksForContext,
+  type IdeContextRouteContext,
+  type IdeContextRouteLink,
+} from './ide/ide-context-lens'
 
 // Delegated to lib/format-time (SSOT)
 const formatTimestamp = formatTimeHms
@@ -62,9 +67,23 @@ function tryPrettyJson(s: string): string | null {
   }
 }
 
-interface ToolCodeLocation {
-  readonly filePath: string
-  readonly line?: number
+type ToolRouteContextFields = Pick<
+  IdeContextRouteContext,
+  | 'filePath'
+  | 'line'
+  | 'goalId'
+  | 'taskId'
+  | 'boardPostId'
+  | 'commentId'
+  | 'prId'
+  | 'gitRef'
+  | 'logId'
+  | 'sessionId'
+  | 'operationId'
+  | 'workerRunId'
+>
+type MutableToolRouteContext = {
+  -readonly [K in keyof ToolRouteContextFields]?: ToolRouteContextFields[K]
 }
 
 function stringField(value: unknown): string | null {
@@ -72,47 +91,130 @@ function stringField(value: unknown): string | null {
 }
 
 function positiveLine(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 1) return value
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  return /^[1-9]\d*$/.test(trimmed) ? Number.parseInt(trimmed, 10) : undefined
+}
+
+function idString(value: unknown): string | undefined {
+  const text = stringField(value)
+  if (text) return text
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
-    ? value
+    ? String(value)
     : undefined
 }
 
-function inputCodeLocation(input: unknown): ToolCodeLocation | null {
-  if (typeof input === 'string') {
-    const parsed = tryPrettyJson(input)
-    if (!parsed) return null
-    try {
-      return inputCodeLocation(JSON.parse(input))
-    } catch {
-      return null
-    }
+function nestedRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function parseInputRecord(input: string): Record<string, unknown> | null {
+  try {
+    return nestedRecord(JSON.parse(input))
+  } catch {
+    return null
   }
-  if (typeof input !== 'object' || input === null || Array.isArray(input)) return null
-  const record = input as Record<string, unknown>
+}
+
+function codeLocationFromRecord(record: Record<string, unknown> | null): Pick<ToolRouteContextFields, 'filePath' | 'line'> | null {
+  if (!record) return null
   const filePath =
     stringField(record.file_path)
     ?? stringField(record.path)
     ?? stringField(record.file)
-  if (filePath) {
-    return {
-      filePath,
-      line: positiveLine(record.line) ?? positiveLine(record.line_start) ?? positiveLine(record.lineno),
-    }
+  if (!filePath) return null
+  return {
+    filePath,
+    line: positiveLine(record.line) ?? positiveLine(record.line_start) ?? positiveLine(record.lineno),
   }
-  return inputCodeLocation(record.input)
 }
 
-function toolCallCodeRouteLink(entry: ToolCallEntry): IdeContextRouteLink | null {
-  const location = inputCodeLocation(entry.input)
-  if (!location) return null
-  return routeLinksForContext({
-    filePath: location.filePath,
-    line: location.line,
+function mergeToolRouteRecord(
+  context: MutableToolRouteContext,
+  record: Record<string, unknown> | null,
+  overwrite = false,
+): void {
+  if (!record) return
+  const location = codeLocationFromRecord(record)
+  if (location?.filePath && (overwrite || context.filePath === undefined)) context.filePath = location.filePath
+  if (location?.line !== undefined && (overwrite || context.line === undefined)) context.line = location.line
+
+  const goalId = idString(record.goal_id)
+  if (goalId && (overwrite || context.goalId === undefined)) context.goalId = goalId
+  const taskId = idString(record.task_id)
+  if (taskId && (overwrite || context.taskId === undefined)) context.taskId = taskId
+  const boardPostId = idString(record.board_post_id) ?? idString(record.post_id)
+  if (boardPostId && (overwrite || context.boardPostId === undefined)) context.boardPostId = boardPostId
+  const commentId = idString(record.comment_id) ?? idString(record.reply_id) ?? idString(record.comment_number)
+  if (commentId && (overwrite || context.commentId === undefined)) context.commentId = commentId
+  const prId = idString(record.pr_id) ?? idString(record.pull_request) ?? idString(record.pr_number)
+  if (prId && (overwrite || context.prId === undefined)) context.prId = prId
+  const gitRef = idString(record.git_ref) ?? idString(record.commit) ?? idString(record.branch)
+  if (gitRef && (overwrite || context.gitRef === undefined)) context.gitRef = gitRef
+  const logId = idString(record.log_id)
+  if (logId && (overwrite || context.logId === undefined)) context.logId = logId
+  const sessionId = idString(record.session_id)
+  if (sessionId && (overwrite || context.sessionId === undefined)) context.sessionId = sessionId
+  const operationId = idString(record.operation_id)
+  if (operationId && (overwrite || context.operationId === undefined)) context.operationId = operationId
+  const workerRunId = idString(record.worker_run_id)
+  if (workerRunId && (overwrite || context.workerRunId === undefined)) context.workerRunId = workerRunId
+}
+
+function mergeToolInputContext(
+  context: MutableToolRouteContext,
+  input: unknown,
+  depth = 0,
+): void {
+  if (depth > 4) return
+  if (typeof input === 'string') {
+    mergeToolInputContext(context, parseInputRecord(input), depth + 1)
+    return
+  }
+  const record = nestedRecord(input)
+  if (!record) return
+  const failureEnvelope = nestedRecord(record.failure_envelope)
+  mergeToolRouteRecord(context, nestedRecord(record.context))
+  mergeToolRouteRecord(context, nestedRecord(record.evidence_ref))
+  mergeToolRouteRecord(context, nestedRecord(failureEnvelope?.evidence_ref))
+  mergeToolRouteRecord(context, nestedRecord(record.tool_args))
+  mergeToolInputContext(context, record.input, depth + 1)
+  mergeToolRouteRecord(context, record, true)
+}
+
+function hasToolRouteContext(context: MutableToolRouteContext): boolean {
+  return context.filePath !== undefined
+    || context.goalId !== undefined
+    || context.taskId !== undefined
+    || context.boardPostId !== undefined
+    || context.commentId !== undefined
+    || context.prId !== undefined
+    || context.gitRef !== undefined
+    || context.logId !== undefined
+    || context.sessionId !== undefined
+    || context.operationId !== undefined
+    || context.workerRunId !== undefined
+}
+
+function toolCallRouteLinks(entry: ToolCallEntry): ReadonlyArray<IdeContextRouteLink> {
+  const context: MutableToolRouteContext = {}
+  mergeToolInputContext(context, entry.input)
+  if (!hasToolRouteContext(context)) return []
+  const links = routeLinksForContext({
+    ...context,
     surface: 'Tool',
     label: entry.tool,
     sourceId: `tool:${entry.keeper}:${entry.ts}:${entry.tool}`,
     keeperId: entry.keeper,
-  }).find(link => link.label === 'Code') ?? null
+    telemetry: context.logId !== undefined
+      || context.sessionId !== undefined
+      || context.operationId !== undefined
+      || context.workerRunId !== undefined,
+  })
+  return links.some(link => link.label !== 'Keeper') ? links : []
 }
 
 // Tool output may be (a) a raw string, (b) a JSON blob we logged as a string,
@@ -173,7 +275,7 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
   const cat = toolCategory(entry.tool)
   const formattedInput = formatInput(entry.input)
   const formattedOutput = formatOutput(entry.output)
-  const codeRouteLink = toolCallCodeRouteLink(entry)
+  const routeLinks = toolCallRouteLinks(entry)
 
   return html`
     <div
@@ -204,21 +306,26 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
           ${entry.model ? html`
             <div class="text-3xs text-[var(--color-fg-muted)]">model: <span class="text-[var(--color-fg-secondary)] font-mono">${entry.model}</span></div>
           ` : null}
-          ${codeRouteLink ? html`
+          ${routeLinks.length > 0 ? html`
             <div class="flex items-center justify-between gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-2">
-              <span class="min-w-0 truncate text-3xs font-mono text-[var(--color-fg-muted)]" title=${codeRouteLink.evidence}>
-                ${codeRouteLink.evidence}
+              <span class="min-w-0 truncate text-3xs font-mono text-[var(--color-fg-muted)]" title=${routeLinks.map(link => link.evidence).join(' · ')}>
+                ${routeLinks.map(link => link.evidence).join(' · ')}
               </span>
-              <button
-                type="button"
-                data-testid="keeper-tool-code-link"
-                class=${`shrink-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-3xs font-semibold text-[var(--color-accent-fg)] hover:border-[var(--color-accent-border)] hover:bg-[var(--color-bg-hover)] ${ringFocusClasses()}`}
-                title=${codeRouteLink.evidence}
-                aria-label=${`Open ${codeRouteLink.evidence}`}
-                onClick=${() => openIdeContextRouteLink(codeRouteLink)}
-              >
-                Code
-              </button>
+              <div class="flex shrink-0 flex-wrap justify-end gap-1">
+                ${routeLinks.map(link => html`
+                  <button
+                    key=${link.id}
+                    type="button"
+                    data-testid=${link.label === 'Code' ? 'keeper-tool-code-link' : undefined}
+                    class=${`keeper-tool-route-link rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-3xs font-semibold text-[var(--color-accent-fg)] hover:border-[var(--color-accent-border)] hover:bg-[var(--color-bg-hover)] ${ringFocusClasses()}`}
+                    title=${link.evidence}
+                    aria-label=${`Open ${link.evidence}`}
+                    onClick=${() => openIdeContextRouteLink(link)}
+                  >
+                    ${link.label}
+                  </button>
+                `)}
+              </div>
             </div>
           ` : null}
           <${CopyableToolCallBlock}

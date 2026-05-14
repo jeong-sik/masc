@@ -129,6 +129,85 @@ describe('KeeperToolCallInspector render', () => {
     expect(window.location.hash).toBe('#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=12&surface=Tool&label=keeper_fs_read&source_id=tool%3Aanalyst%3A1777100000%3Akeeper_fs_read&keeper=analyst')
   })
 
+  it('routes nested tool-call evidence to operational IDE surfaces', async () => {
+    const fetchKeeperToolCalls = vi.fn().mockResolvedValue({
+      keeper: 'analyst',
+      count: 1,
+      source: 'tool_call_io',
+      health: 'ok',
+      entries: [
+        {
+          ts: 1_777_100_000,
+          keeper: 'analyst',
+          tool: 'keeper_apply_patch',
+          input: {
+            context: {
+              goal_id: 'goal-runtime',
+              task_id: 'task-runtime',
+              board_post_id: 'post-1',
+              comment_id: 'comment-1',
+            },
+            failure_envelope: {
+              evidence_ref: {
+                file_path: 'lib/runtime.ml',
+                line_start: '8',
+                pr_number: 15125,
+                branch: 'fix/runtime',
+                log_id: 'turn-8',
+                session_id: 'sess-nested',
+                operation_id: 'op-nested',
+                worker_run_id: 'wr-nested',
+              },
+            },
+          },
+          output: 'patched',
+          success: true,
+          duration_ms: 42,
+        },
+      ],
+    })
+
+    const { KeeperToolCallInspector } = await loadInspector(fetchKeeperToolCalls)
+    await act(async () => {
+      render(html`<${KeeperToolCallInspector} keeperName="analyst" />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    const rowToggle = container.querySelector('button[aria-expanded="false"]') as HTMLButtonElement | null
+    await act(async () => {
+      rowToggle?.click()
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    const routeLinks = [...container.querySelectorAll<HTMLButtonElement>('.keeper-tool-route-link')]
+    expect(routeLinks.map(link => link.textContent?.trim())).toEqual([
+      'Code',
+      'Goal',
+      'Task',
+      'Board',
+      'Comment',
+      'PR',
+      'Git',
+      'Log',
+      'Telemetry',
+      'Keeper',
+    ])
+
+    await act(async () => {
+      routeLinks.find(link => link.textContent?.trim() === 'Code')?.click()
+      await Promise.resolve()
+    })
+    expect(window.location.hash).toBe('#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=8&surface=Tool&label=keeper_apply_patch&source_id=tool%3Aanalyst%3A1777100000%3Akeeper_apply_patch&keeper=analyst')
+
+    await act(async () => {
+      routeLinks.find(link => link.textContent?.trim() === 'Telemetry')?.click()
+      await Promise.resolve()
+    })
+    expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&session_id=sess-nested&operation_id=op-nested&worker_run_id=wr-nested&q=turn-8')
+  })
+
   it('does not render Code links for unsafe absolute tool-call file inputs', async () => {
     const fetchKeeperToolCalls = vi.fn().mockResolvedValue({
       keeper: 'analyst',

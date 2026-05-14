@@ -36,5 +36,17 @@ val with_span :
   ((unit -> string option) -> 'a) ->
   'a
 
+(** [add_event ~name ~attrs ()] appends an event to the active OTel span.
+    No-op when OTel is disabled or when no ambient span exists. *)
+val add_event :
+  name:string -> ?attrs:Opentelemetry.key_value list -> unit -> unit
+
+(** Temporarily override event emission for focused tests. *)
+val with_test_event_emitter :
+  enabled:bool ->
+  emit_event:(name:string -> attrs:Opentelemetry.key_value list -> unit) ->
+  (unit -> 'a) ->
+  'a
+
 (** [current_trace_id ()] returns the active OTel trace ID as hex, or [None]. *)
 val current_trace_id : unit -> string option

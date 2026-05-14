@@ -1,4 +1,5 @@
 module Bridge = Masc_mcp.Llm_metric_bridge
+module Otel_spans = Masc_mcp.Otel_spans
 module Prom = Masc_mcp.Prometheus
 
 let metric name ~labels =
@@ -172,6 +173,70 @@ let test_streaming_metrics_ignore_invalid_ms () =
     (Prom.metric_llm_provider_streaming_inter_chunk ^ "_count")
     ~labels ~before:inter_before ~delta:0.0
 
+let assoc_string key attrs =
+  match List.assoc_opt key attrs with
+  | Some (`String value) -> value
+  | Some _ -> Alcotest.failf "expected string attr %s" key
+  | None -> Alcotest.failf "missing attr %s" key
+
+let assoc_float key attrs =
+  match List.assoc_opt key attrs with
+  | Some (`Float value) -> value
+  | Some _ -> Alcotest.failf "expected float attr %s" key
+  | None -> Alcotest.failf "missing attr %s" key
+
+let assoc_int key attrs =
+  match List.assoc_opt key attrs with
+  | Some (`Int value) -> value
+  | Some _ -> Alcotest.failf "expected int attr %s" key
+  | None -> Alcotest.failf "missing attr %s" key
+
+let test_streaming_callbacks_emit_otel_events () =
+  let events = ref [] in
+  let provider = "bridge-otel-provider" in
+  let model_id = Printf.sprintf "bridge-otel-model-%d" (Unix.getpid ()) in
+  Otel_spans.with_test_event_emitter ~enabled:true
+    ~emit_event:(fun ~name ~attrs -> events := (name, attrs) :: !events)
+    (fun () ->
+       Bridge.emit_streaming_first_chunk ~provider ~model_id ~ttfrc_ms:25.0;
+       Bridge.emit_streaming_chunk
+         ~provider ~model_id ~chunk_index:3 ~inter_chunk_ms:7.5);
+  match List.rev !events with
+  | [ first_name, first_attrs; chunk_name, chunk_attrs ] ->
+    Alcotest.(check string) "first chunk event" "ttfrc.received" first_name;
+    Alcotest.(check string) "chunk event" "streaming.chunk" chunk_name;
+    Alcotest.(check string)
+      "first provider"
+      provider
+      (assoc_string "gen_ai.provider.name" first_attrs);
+    Alcotest.(check string)
+      "first model"
+      model_id
+      (assoc_string "gen_ai.request.model" first_attrs);
+    Alcotest.(check (float 0.0001))
+      "ttfrc ms"
+      25.0
+      (assoc_float "masc.gen_ai.streaming.ttfrc_ms" first_attrs);
+    Alcotest.(check int)
+      "chunk index"
+      3
+      (assoc_int "masc.gen_ai.streaming.chunk_index" chunk_attrs);
+    Alcotest.(check string)
+      "chunk provider"
+      provider
+      (assoc_string "gen_ai.provider.name" chunk_attrs);
+    Alcotest.(check string)
+      "chunk model"
+      model_id
+      (assoc_string "gen_ai.request.model" chunk_attrs);
+    Alcotest.(check (float 0.0001))
+      "inter chunk ms"
+      7.5
+      (assoc_float "masc.gen_ai.streaming.inter_chunk_ms" chunk_attrs)
+  | other ->
+    Alcotest.failf "expected two OTel streaming events, got %d"
+      (List.length other)
+
 let test_request_latency_clamps_zero_ms () =
   let model_id =
     Printf.sprintf "bridge-latency-zero-%d" (Unix.getpid ())
@@ -270,6 +335,8 @@ let () =
             test_sink_records_oas_callbacks;
           Alcotest.test_case "streaming metrics ignore invalid ms" `Quick
             test_streaming_metrics_ignore_invalid_ms;
+          Alcotest.test_case "streaming callbacks emit OTel events" `Quick
+            test_streaming_callbacks_emit_otel_events;
           Alcotest.test_case "request latency floors zero ms" `Quick
             test_request_latency_clamps_zero_ms;
           Alcotest.test_case "positive request latency does not clamp" `Quick

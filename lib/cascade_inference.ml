@@ -91,9 +91,8 @@ let resolve_temperature
   | None -> fallback ()
 
 (** Cap an automatically-derived max_tokens value to the narrowest output
-    ceiling in the resolved cascade. Explicit caller-provided overrides do not
-    pass through [resolve_max_tokens]; those stay hard rejected by the
-    pre-dispatch validator. *)
+    ceiling in the resolved cascade. Explicit caller-provided overrides and
+    cascade.toml values stay hard rejected by the pre-dispatch validator. *)
 let cap_auto_resolved_max_tokens ~cascade_name ~source max_tokens =
   match Cascade_runtime.max_output_tokens_ceiling_of_cascade_name cascade_name with
   | Some ceiling when ceiling > 0 && max_tokens > ceiling ->
@@ -105,19 +104,17 @@ let cap_auto_resolved_max_tokens ~cascade_name ~source max_tokens =
     ceiling
   | _ -> max_tokens
 
-(** Resolve a max_tokens value: cascade config -> fallback. *)
+(** Resolve a max_tokens value: cascade config -> capped fallback. *)
 let resolve_max_tokens
     ~(cascade_name : Keeper_cascade_profile.runtime_name)
     ~(fallback : unit -> int) : int =
   let cascade_name_string =
     Keeper_cascade_profile.runtime_name_to_string cascade_name
   in
-  let max_tokens, source =
-    match (for_cascade ~name:cascade_name_string).max_tokens with
-    | Some t -> t, "cascade_config"
-    | None -> fallback (), "fallback"
-  in
-  cap_auto_resolved_max_tokens ~cascade_name ~source max_tokens
+  match (for_cascade ~name:cascade_name_string).max_tokens with
+  | Some t -> t
+  | None ->
+    cap_auto_resolved_max_tokens ~cascade_name ~source:"fallback" (fallback ())
 
 (** Validate max_tokens against provider ceilings before dispatch. *)
 let validate_max_tokens_within_ceiling

@@ -199,6 +199,73 @@ target = "tier-group.strict_tool_candidates"
         ~provider_ceiling:ceiling resolved
       |> check_ok "capped value accepted" 16384)
 
+let test_resolve_max_tokens_preserves_cascade_config_for_validator () =
+  with_temp_cascade_toml
+    {|
+keeper_unified_max_tokens = 65536
+
+[providers.claude_code]
+protocol = "anthropic-cli"
+command = "claude"
+is-non-interactive = true
+
+[providers.kimi_cli]
+protocol = "kimi-cli"
+command = "kimi"
+is-non-interactive = true
+
+[models.claude-auto]
+api-name = "auto"
+max-context = 200000
+tools-support = true
+
+[models.claude-auto.capabilities]
+max-output-tokens = 64000
+
+[models.kimi-cli-coding]
+api-name = "kimi-for-coding"
+max-context = 128000
+tools-support = true
+
+[models.kimi-cli-coding.capabilities]
+max-output-tokens = 16384
+
+[claude_code.claude-auto]
+max-concurrent = 1
+
+[kimi_cli.kimi-cli-coding]
+max-concurrent = 1
+
+[claude_code.claude-auto.tool_candidate]
+max-output = 64000
+temperature = 0.2
+
+[kimi_cli.kimi-cli-coding.tool_candidate]
+max-output = 16384
+temperature = 0.2
+
+[tier.strict_tool_candidates]
+members = ["claude_code.claude-auto.tool_candidate", "kimi_cli.kimi-cli-coding.tool_candidate"]
+strategy = "failover"
+
+[tier-group.strict_tool_candidates]
+tiers = ["strict_tool_candidates"]
+strategy = "failover"
+
+[routes.keeper_unified]
+target = "tier-group.strict_tool_candidates"
+|}
+    (fun () ->
+      let ceiling = CR.max_output_tokens_ceiling_of_cascade_name cascade_name in
+      check (option int) "mixed cascade output ceiling" (Some 16384) ceiling;
+      let resolved =
+        CI.resolve_max_tokens ~cascade_name ~fallback:(fun () -> 8192)
+      in
+      check int "cascade config max_tokens is not silently capped" 65536 resolved;
+      CI.validate_max_tokens_within_ceiling ~cascade_name
+        ~provider_ceiling:ceiling resolved
+      |> check_violation "requested_exceeds_provider_ceiling" 65536 16384)
+
 let () =
   run "cascade_capability_gate" [
     "max_tokens_ceiling_validation", [
@@ -220,5 +287,9 @@ let () =
         "automatic max_tokens respects mixed failover ceiling"
         `Quick
         test_resolve_max_tokens_caps_automatic_value_to_cascade_ceiling;
+      test_case
+        "cascade config max_tokens reaches validator"
+        `Quick
+        test_resolve_max_tokens_preserves_cascade_config_for_validator;
     ];
   ]

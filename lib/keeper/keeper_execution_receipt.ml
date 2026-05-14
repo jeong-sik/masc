@@ -872,7 +872,7 @@ let emit_operator_broadcast config (receipt : t) ~disposition ~reason =
       ~payload
       ()
   in
-  Log.Keeper.error
+  Log.Keeper.warn
     "%s: operator_broadcast_required emitted disposition=%s reason=%s seq=%d"
     receipt.keeper_name
     (operator_disposition_kind_to_string disposition)
@@ -1024,7 +1024,7 @@ let emit_stale_keeper_broadcast
     Keeper_metrics.metric_keeper_execution_receipt_failures
     ~labels:[ "keeper", keeper_name; "site", Execution_receipt_failure_site.(to_label Stale_broadcast) ]
     ();
-  Log.Keeper.error
+  Log.Keeper.warn
     "%s: stale_keeper_broadcast emitted last_turn=%.0fs ago cascade=%s seq=%d"
     keeper_name
     stale_seconds

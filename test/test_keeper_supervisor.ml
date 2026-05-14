@@ -261,6 +261,54 @@ goal = "plan coding work"
   check string "drift check honors TOML persona_name" "executor"
     (Sup.persona_name_for_drift_check (make_meta "glm-coding-plan"))
 
+let test_persona_drift_path_points_to_profile_json () =
+  with_config_dir @@ fun config_dir ->
+  let expected =
+    Filename.concat
+      (Filename.concat (Filename.concat config_dir "personas") "executor")
+      "profile.json"
+  in
+  check
+    string
+    "profile path"
+    expected
+    (Sup.persona_profile_path_for_drift_check
+       ~base_path:(Filename.dirname (Filename.dirname config_dir))
+       "executor")
+
+let test_missing_persona_with_inline_toml_is_warn () =
+  with_config_dir @@ fun config_dir ->
+  let keepers_dir = Filename.concat config_dir "keepers" in
+  write_file
+    (Filename.concat keepers_dir "inline-only.toml")
+    {|
+[keeper]
+name = "inline-only"
+persona_name = "missing-profile"
+goal = "inline keeper metadata is enough to run"
+|};
+  check
+    bool
+    "inline TOML missing profile is warn"
+    true
+    (match Sup.persona_drift_log_level_for_missing_profile
+             (make_meta "inline-only")
+     with
+     | Sup.Persona_drift_warn -> true
+     | Sup.Persona_drift_error -> false)
+
+let test_missing_persona_without_profile_or_toml_is_error () =
+  with_config_dir @@ fun _config_dir ->
+  check
+    bool
+    "missing profile without TOML is error"
+    true
+    (match Sup.persona_drift_log_level_for_missing_profile
+             (make_meta "missing-everywhere")
+     with
+     | Sup.Persona_drift_error -> true
+     | Sup.Persona_drift_warn -> false)
+
 let registered_entries names =
   Reg.clear ();
   List.map
@@ -1611,6 +1659,12 @@ let () =
     "persona_drift", [
       test_case "drift check honors TOML persona_name" `Quick
         test_persona_drift_check_uses_toml_persona_name;
+      test_case "drift path points to profile.json" `Quick
+        test_persona_drift_path_points_to_profile_json;
+      test_case "missing persona with inline TOML is WARN" `Quick
+        test_missing_persona_with_inline_toml_is_warn;
+      test_case "missing persona without TOML is ERROR" `Quick
+        test_missing_persona_without_profile_or_toml_is_error;
     ];
     "fiber_health", [
       test_case "unknown for unregistered" `Quick test_fiber_health_unknown;

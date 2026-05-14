@@ -68,6 +68,34 @@ describe('SessionTraceEntry', () => {
     expect(resultText).toContain('"ok":true')
   })
 
+  it('links safe tool-call file args back to the Code IDE route', () => {
+    const { container } = render(h(SessionTraceEntry, {
+      event: sampleToolCallEvent({
+        agentName: 'sangsu',
+        toolArgs: { file_path: 'lib/runtime.ml', line: 12 },
+      }),
+    }))
+
+    fireEvent.click(container.querySelector('summary') as HTMLElement)
+    const codeLink = screen.getByTestId('session-trace-code-link')
+    expect(codeLink.textContent).toBe('Code')
+    expect(codeLink.getAttribute('title')).toBe('Code lib/runtime.ml:12')
+
+    fireEvent.click(codeLink)
+    expect(window.location.hash).toBe('#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=12&surface=Tool&label=demo_tool&source_id=trace-1&keeper=sangsu')
+  })
+
+  it('does not render Code links for unsafe absolute tool-call file args', () => {
+    const { container } = render(h(SessionTraceEntry, {
+      event: sampleToolCallEvent({
+        toolArgs: { file_path: '/tmp/runtime.ml', line: 12 },
+      }),
+    }))
+
+    fireEvent.click(container.querySelector('summary') as HTMLElement)
+    expect(screen.queryByTestId('session-trace-code-link')).toBeNull()
+  })
+
   it('labels error payloads as Error when expanded', () => {
     const { container } = render(h(SessionTraceEntry, {
       event: sampleToolCallEvent({ toolResult: null, error: 'plain error' }),

@@ -3,6 +3,7 @@ import { h, render } from 'preact'
 import { explorerScopeLabel, IdeExplorer } from './ide-explorer'
 import { createFileTreeStore, type FileTreeNode } from './file-tree-store'
 import type { Repository } from '../../api/repositories'
+import { activeIdeFile, ideContextFocus } from './ide-state'
 
 const SAMPLE: ReadonlyArray<FileTreeNode> = [
   { path: 'runtime', label: 'runtime', depth: 0, parent: null, hasChildren: true, diff: null, keeperId: null, hueIndex: null },
@@ -57,6 +58,8 @@ describe('IdeExplorer tree row keyboard accessibility', () => {
 
   afterEach(() => {
     render(null, container)
+    activeIdeFile.value = 'package.json'
+    ideContextFocus.value = null
   })
 
   it('makes every treeitem keyboard-focusable, not just directories', () => {
@@ -119,5 +122,47 @@ describe('IdeExplorer tree row keyboard accessibility', () => {
     expect(scroller?.contains(tree)).toBe(true)
     expect(scroller?.contains(container.querySelector('header'))).toBe(false)
     expect(scroller?.contains(container.querySelector('input[type="search"]'))).toBe(false)
+  })
+
+  it('marks the file row carrying the current IDE context focus', () => {
+    const store = createFileTreeStore()
+    store.seed(SAMPLE)
+    ideContextFocus.value = {
+      file_path: 'runtime/router.ts',
+      line: 42,
+      surface: 'Task',
+      label: 'task task-runtime',
+      source_id: 'event-1',
+      activated_at_ms: Date.now(),
+      route_links: [
+        {
+          id: 'task:task-runtime',
+          label: 'Task',
+          tab: 'workspace',
+          params: { section: 'planning', view: 'default', task: 'task-runtime' },
+          evidence: 'Task task-runtime',
+        },
+        {
+          id: 'telemetry:turn-9',
+          label: 'Telemetry',
+          tab: 'monitoring',
+          params: { section: 'fleet-health', view: 'event-log', q: 'turn-9' },
+          evidence: 'Fleet telemetry event log · query turn-9',
+        },
+      ],
+    }
+
+    render(h(IdeExplorer, { fileTreeStore: store }), container)
+
+    const focusedRow = Array.from(
+      container.querySelectorAll<HTMLElement>('[role="treeitem"]'),
+    ).find(el => el.textContent?.includes('router.ts'))
+    const chip = focusedRow?.querySelector('.ide-explorer-context-chip')
+
+    expect(chip?.textContent).toContain('Task')
+    expect(chip?.textContent).toContain('L42')
+    expect(chip?.textContent).toContain('2 links')
+    expect(chip?.getAttribute('aria-label'))
+      .toBe('Focused Task line 42: task task-runtime, 2 route links')
   })
 })

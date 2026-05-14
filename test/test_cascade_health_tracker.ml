@@ -768,6 +768,9 @@ let test_restore_providers_reinstates_active_cooldown () =
         ; restore_cooldown_until = Some until
         ; restore_last_failure_at = Some (until -. 10.0)
         ; restore_top_fingerprints = [ "timeout|abc12345", 2 ]
+        ; restore_latency_ms = None
+        ; restore_confidence = None
+        ; restore_cost_usd = None
         }
       ]
   in
@@ -792,6 +795,9 @@ let test_restore_providers_ignores_blank_provider_key () =
         ; restore_cooldown_until = Some (Unix.gettimeofday () +. 60.0)
         ; restore_last_failure_at = None
         ; restore_top_fingerprints = []
+        ; restore_latency_ms = None
+        ; restore_confidence = None
+        ; restore_cost_usd = None
         }
       ]
   in

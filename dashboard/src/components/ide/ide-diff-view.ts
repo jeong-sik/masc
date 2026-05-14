@@ -69,9 +69,11 @@ export function UnifiedDiffView(
               overflow: 'auto',
             }}
           >
-            ${rows.map(row => html`
+            ${rows.map(row => {
+              const focused = diffRowMatchesFocus(row, diffFocus)
+              return html`
               <li
-                data-context-focus=${diffRowMatchesFocus(row, diffFocus) ? 'true' : 'false'}
+                data-context-focus=${focused ? 'true' : 'false'}
                 style=${{
                   display: 'grid',
                   gridTemplateColumns: '32px 40px 40px minmax(0, 1fr)',
@@ -80,6 +82,7 @@ export function UnifiedDiffView(
                   padding: '0 var(--sp-3)',
                   background: diffBackground(row.kind),
                   color: row.kind === 'delete' ? 'var(--color-status-danger, var(--color-fg-secondary))' : 'var(--color-fg-secondary)',
+                  ...diffFocusRailStyle(focused),
                 }}
               >
                 <span style=${{ color: diffMarkerColor(row.kind), textAlign: 'center' }}>${diffMarker(row.kind)}</span>
@@ -87,7 +90,7 @@ export function UnifiedDiffView(
                 <span style=${{ color: 'var(--color-fg-disabled)', fontSize: 'var(--fs-11)', textAlign: 'right' }}>${row.newLine ?? ''}</span>
                 <span style=${{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', minWidth: 0 }}>${row.text}</span>
               </li>
-            `)}
+            `})}
           </ol>
         `}
     </div>
@@ -245,18 +248,21 @@ export function SplitDiffView(
       <div style=${{ overflow: 'auto' }}>
         ${splitRows.length === 0
           ? DiffEmptyState('No split diff rows for the selected file.')
-          : splitRows.map(row => html`
+          : splitRows.map(row => {
+            const focused = splitDiffRowMatchesFocus(row, diffFocus)
+            return html`
             <div
-              data-context-focus=${splitDiffRowMatchesFocus(row, diffFocus) ? 'true' : 'false'}
+              data-context-focus=${focused ? 'true' : 'false'}
               style=${{
                 display: 'grid',
                 gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
+                ...diffFocusRailStyle(focused),
               }}
             >
               <${SplitDiffCellView} cell=${row.before} />
               <${SplitDiffCellView} cell=${row.after} framed=${true} />
             </div>
-          `)}
+          `})}
       </div>
     </div>
   `
@@ -345,6 +351,16 @@ function diffMarkerColor(kind: string): string {
   if (kind === 'add') return 'var(--color-status-ok, var(--ok))'
   if (kind === 'delete') return 'var(--color-status-danger, var(--danger))'
   return 'var(--color-fg-disabled)'
+}
+
+function diffFocusRailStyle(focused: boolean): Record<string, string> {
+  return focused
+    ? {
+        boxShadow: 'inset 3px 0 0 var(--color-accent-fg)',
+        outline: '1px solid color-mix(in srgb, var(--color-accent-fg) 36%, transparent)',
+        outlineOffset: '-1px',
+      }
+    : {}
 }
 
 // ── Summary helpers ───────────────────────────────────────────────

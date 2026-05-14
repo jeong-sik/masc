@@ -95,7 +95,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     icon: 'monitoring',
     description: 'Fleet storylines and runtime telemetry',
     defaultTab: 'monitoring',
-    defaultParams: { section: 'journey' },
+    defaultParams: { section: 'runtime' },
     tabs: ['monitoring'],
   },
   {
@@ -169,15 +169,40 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
   cockpit: [],
   monitoring: [
     {
+      id: 'runtime',
+      label: 'Live Runtime',
+      description: 'Live cascade routing and provider health.',
+      params: { section: 'runtime' },
+    },
+    {
+      id: 'agents',
+      label: 'Agent Observatory',
+      description: 'Live roster with fleet state capsules.',
+      params: { section: 'agents' },
+    },
+    {
+      id: 'goal-loop',
+      label: 'Goal Navigator',
+      description: 'Active goals with blockers and next actions.',
+      params: { section: 'goal-loop' },
+    },
+    {
+      id: 'fleet-health',
+      label: 'System Telemetry',
+      description: 'System signals for tools and governance.',
+      params: { section: 'fleet-health' },
+    },
+    {
       id: 'journey',
       label: 'Journey Map',
-      description: 'Unified execution flow across lifecycle stages.',
+      description: 'Legacy execution-flow drill-down.',
       params: { section: 'journey' },
+      hidden: true,
     },
     {
       id: 'observatory',
       label: 'Observatory',
-      description: 'Live collaboration and investigative timelines remain drill-down surfaces.',
+      description: 'Live collaboration and investigative timelines.',
       params: { section: 'observatory' },
       // RFC-MASC-006 Phase 2a: kept as a hidden diagnostic surface, not yet promoted to main nav.
       // Reachable via legacy redirects (monitoring:activity, monitoring:live) and direct URL.
@@ -185,34 +210,11 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       hidden: true,
     },
     {
-      id: 'agents',
-      label: 'Agent Directory',
-      description: 'Live runtime-backed roster and process state.',
-      params: { section: 'agents' },
-    },
-    {
       id: 'cognition',
       label: 'Cognition',
-      description: 'Keeper cognition and resource state.',
+      description: 'Keeper cognition drill-down.',
       params: { section: 'cognition' },
-    },
-    {
-      id: 'runtime',
-      label: 'Cascade',
-      description: 'Provider routing health and cost.',
-      params: { section: 'runtime' },
-    },
-    {
-      id: 'goal-loop',
-      label: 'GOAL LOOP',
-      description: 'Runtime progress through the goal loop.',
-      params: { section: 'goal-loop' },
-    },
-    {
-      id: 'fleet-health',
-      label: 'Fleet Telemetry',
-      description: 'Fleet-wide signal aggregation and comparison.',
-      params: { section: 'fleet-health' },
+      hidden: true,
     },
   ],
   command: [

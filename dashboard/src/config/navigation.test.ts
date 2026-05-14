@@ -99,19 +99,16 @@ describe('connectors navigation (Phase 7, post-2026-04-30 merge)', () => {
 })
 
 describe('monitoring navigation labels', () => {
-  it('uses design-system chrome labels for consolidated monitoring sections', () => {
+  it('uses the four-section Monitor IA labels', () => {
     const sections = visibleSectionItemsForTab('monitoring')
     const labelFor = (id: string) => sections.find(item => item.id === id)?.label
 
-    expect(labelFor('journey')).toBe('Journey Map')
-    expect(labelFor('fleet-health')).toBe('Fleet Telemetry')
-    // "Cascade" and "Agent Directory" replaced the duplicated
-    // runtime labels (one section renamed to cascade, the other to
-    // agent directory) so monitoring no longer has two sidebar items
-    // whose labels collide on the same word.
-    expect(labelFor('runtime')).toBe('Cascade')
-    expect(labelFor('agents')).toBe('Agent Directory')
-    expect(labelFor('cognition')).toBe('Cognition')
+    expect(labelFor('runtime')).toBe('Live Runtime')
+    expect(labelFor('agents')).toBe('Agent Observatory')
+    expect(labelFor('goal-loop')).toBe('Goal Navigator')
+    expect(labelFor('fleet-health')).toBe('System Telemetry')
+    expect(labelFor('journey')).toBeUndefined()
+    expect(labelFor('cognition')).toBeUndefined()
   })
 
   it('keeps monitoring descriptions concise instead of comma-heavy domain lists', () => {
@@ -119,12 +116,10 @@ describe('monitoring navigation labels', () => {
     const descriptions = Object.fromEntries(sections.map(item => [item.id, item.description]))
 
     expect(descriptions).toMatchObject({
-      journey: 'Unified execution flow across lifecycle stages.',
-      agents: 'Live runtime-backed roster and process state.',
-      cognition: 'Keeper cognition and resource state.',
-      runtime: 'Provider routing health and cost.',
-      'goal-loop': 'Runtime progress through the goal loop.',
-      'fleet-health': 'Fleet-wide signal aggregation and comparison.',
+      runtime: 'Live cascade routing and provider health.',
+      agents: 'Live roster with fleet state capsules.',
+      'goal-loop': 'Active goals with blockers and next actions.',
+      'fleet-health': 'System signals for tools and governance.',
     })
 
     for (const item of sections) {
@@ -145,13 +140,14 @@ describe('monitoring navigation labels', () => {
     const sections = visibleSectionItemsForTab('monitoring')
     const ids = sections.map(item => item.id)
 
-    expect(ids).toEqual(['journey', 'agents', 'cognition', 'runtime', 'goal-loop', 'fleet-health'])
-    expect(ids).toContain('journey')
-    expect(ids).toContain('cognition')
+    expect(defaultParamsForTab('monitoring')).toEqual({ section: 'runtime' })
+    expect(ids).toEqual(['runtime', 'agents', 'goal-loop', 'fleet-health'])
     expect(ids).toContain('fleet-health')
     expect(ids).toContain('runtime')
     expect(ids).toContain('agents')
     expect(ids).toContain('goal-loop')
+    expect(ids).not.toContain('journey')
+    expect(ids).not.toContain('cognition')
     // Legacy sections removed in Phase 1
     expect(ids).not.toContain('live')
     expect(ids).not.toContain('observatory')
@@ -170,19 +166,17 @@ describe('monitoring navigation labels', () => {
 
   it('puts the operator story first before drill-down status surfaces', () => {
     const sections = visibleSectionItemsForTab('monitoring')
-    expect(sections[0]?.id).toBe('journey')
+    expect(sections[0]?.id).toBe('runtime')
     expect(sections[1]?.id).toBe('agents')
-    expect(sections[2]?.id).toBe('cognition')
-    expect(sections[3]?.id).toBe('runtime')
-    expect(sections[4]?.id).toBe('goal-loop')
-    expect(sections[5]?.id).toBe('fleet-health')
+    expect(sections[2]?.id).toBe('goal-loop')
+    expect(sections[3]?.id).toBe('fleet-health')
   })
 
   it('keeps diagnostic monitoring routes available but hidden from the sidebar', () => {
     const sections = sectionItemsForTab('monitoring')
     const hiddenIds = sections.filter(item => item.hidden).map(item => item.id)
 
-    expect(hiddenIds).toEqual(['observatory'])
+    expect(hiddenIds).toEqual(['journey', 'observatory', 'cognition'])
   })
 
   it('monitoring sidebar labels are unique (no overloaded term like "런타임")', () => {

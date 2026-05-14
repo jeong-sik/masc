@@ -383,14 +383,7 @@ let legacy_direct_adapters =
         ; auto_models =
             Env_csv_or_default
               { env_var = "MASC_CODEX_CLI_AUTO_MODELS"
-              ; defaults =
-                  [ "gpt-5.2"
-                  ; "gpt-5.3-codex-spark"
-                  ; "gpt-5.3-codex"
-                  ; "gpt-5.4-mini"
-                  ; "gpt-5.4"
-                  ; "gpt-5.5"
-                  ]
+              ; defaults = [ "auto" ]
               ; prefer_default_model_env = false
               }
         ; expand_auto = true

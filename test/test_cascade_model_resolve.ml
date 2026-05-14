@@ -123,14 +123,8 @@ let test_codex_and_claude_cli_auto_models_env_override () =
   with_clean_env (fun () ->
     check
       (list string)
-      "codex default keeps Codex-supported models only"
-      [ "gpt-5.2"
-      ; "gpt-5.3-codex-spark"
-      ; "gpt-5.3-codex"
-      ; "gpt-5.4-mini"
-      ; "gpt-5.4"
-      ; "gpt-5.5"
-      ]
+      "codex default delegates to CLI"
+      [ "auto" ]
       (auto_models_for "codex_cli");
     check
       (list string)
@@ -177,12 +171,7 @@ let test_expand_auto_models_includes_cli_auto_specs () =
       [ "gemini_cli:gemini-3-flash-preview"
       ; "gemini_cli:gemini-3.1-flash-lite-preview"
       ; "gemini_cli:gemini-3.1-pro-preview"
-      ; "codex_cli:gpt-5.2"
-      ; "codex_cli:gpt-5.3-codex-spark"
-      ; "codex_cli:gpt-5.3-codex"
-      ; "codex_cli:gpt-5.4-mini"
-      ; "codex_cli:gpt-5.4"
-      ; "codex_cli:gpt-5.5"
+      ; "codex_cli:auto"
       ; "claude_code:auto"
       ; "kimi_cli:kimi-for-coding"
       ]
@@ -288,28 +277,32 @@ let test_order_weighted_entries_rotation_scope_rotates_generically () =
       }
     in
     let first =
-      C.order_weighted_entries ~rotation_scope:"primary" [ entry "codex_cli:auto" ]
+      C.order_weighted_entries ~rotation_scope:"primary" [ entry "gemini_cli:auto" ]
       |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) -> e.model)
     in
     let second =
-      C.order_weighted_entries ~rotation_scope:"primary" [ entry "codex_cli:auto" ]
+      C.order_weighted_entries ~rotation_scope:"primary" [ entry "gemini_cli:auto" ]
       |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) -> e.model)
     in
     let other_scope =
-      C.order_weighted_entries ~rotation_scope:"scoring" [ entry "codex_cli:auto" ]
+      C.order_weighted_entries ~rotation_scope:"scoring" [ entry "gemini_cli:auto" ]
       |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) -> e.model)
     in
     check
       string
       "weighted first call keeps default head"
-      "codex_cli:gpt-5.2"
+      "gemini_cli:gemini-3-flash-preview"
       (List.hd first);
     check
       string
       "weighted second call advances head"
-      "codex_cli:gpt-5.3-codex-spark"
+      "gemini_cli:gemini-3.1-flash-lite-preview"
       (List.hd second);
-    check string "weighted rotation is scoped" "codex_cli:gpt-5.2" (List.hd other_scope))
+    check
+      string
+      "weighted rotation is scoped"
+      "gemini_cli:gemini-3-flash-preview"
+      (List.hd other_scope))
 ;;
 
 let test_order_weighted_entries_rotation_scope_rotates_top_level_providers () =
@@ -350,7 +343,7 @@ let test_order_weighted_entries_rotation_scope_rotates_top_level_providers () =
     check
       string
       "second call rotates to codex provider"
-      "codex_cli:gpt-5.3-codex-spark"
+      "codex_cli:auto"
       (List.hd second);
     check
       string

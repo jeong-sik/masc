@@ -1614,6 +1614,16 @@ def manifest_value_matches(expected: Any, actual: Any) -> bool:
     return str(expected) == str(actual)
 
 
+def tool_log_identity_value(row: dict[str, Any], key: str) -> Any:
+    value = row.get(key)
+    if value is not None and value != "":
+        return value
+    contract = dict_field(row, "runtime_contract")
+    if contract is None:
+        return None
+    return contract.get(key)
+
+
 def turn_ref(trace: str, generation: str, turn: str) -> str:
     parts = [f"trace={trace}"]
     if generation:
@@ -1659,9 +1669,13 @@ def tool_call_log_has_matching_row(
             row_ids = trace_session_ids_from_row(row)
             if not trace or trace not in row_ids:
                 continue
-            if not manifest_value_matches(generation, row.get("generation")):
+            if not manifest_value_matches(
+                generation, tool_log_identity_value(row, "generation")
+            ):
                 continue
-            if not manifest_value_matches(turn, row.get("keeper_turn_id")):
+            if not manifest_value_matches(
+                turn, tool_log_identity_value(row, "keeper_turn_id")
+            ):
                 continue
             return True
     except ValueError:

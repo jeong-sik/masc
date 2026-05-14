@@ -237,6 +237,8 @@ let test_turn_context_fields_stored () =
     Alcotest.(check (option string)) "session_id field"
       (Some "trace-k")
       (Safe_ops.json_string_opt "session_id" entry);
+    Alcotest.(check int) "generation field" 3
+      (Safe_ops.json_int ~default:0 "generation" entry);
     Alcotest.(check int) "turn field" 7
       (Safe_ops.json_int ~default:0 "turn" entry);
     Alcotest.(check int) "keeper_turn_id field" 7

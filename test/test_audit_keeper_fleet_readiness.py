@@ -162,7 +162,11 @@ def append_decision(root: Path, keeper: str, row: dict) -> None:
 
 
 def write_persistent_work_evidence(
-    root: Path, keeper: str, *, tool: str = "keeper_bash"
+    root: Path,
+    keeper: str,
+    *,
+    tool: str = "keeper_bash",
+    top_level_generation: bool = True,
 ) -> None:
     trace = f"trace-{keeper}"
     manifest_dir = root / ".masc" / "keepers" / keeper / "runtime-manifests"
@@ -182,18 +186,23 @@ def write_persistent_work_evidence(
         json.dumps({"role": "assistant", "content": "persisted"}) + "\n",
         encoding="utf-8",
     )
+    tool_row = {
+        "keeper": keeper,
+        "trace_id": trace,
+        "keeper_turn_id": 1,
+        "tool": tool,
+        "success": True,
+        "runtime_contract": {
+            "keeper_name": keeper,
+            "trace_id": trace,
+            "generation": 1,
+            "keeper_turn_id": 1,
+        },
+    }
+    if top_level_generation:
+        tool_row["generation"] = 1
     tool_log_path.write_text(
-        json.dumps(
-            {
-                "keeper": keeper,
-                "trace_id": trace,
-                "generation": 1,
-                "keeper_turn_id": 1,
-                "tool": tool,
-                "success": True,
-            }
-        )
-        + "\n",
+        json.dumps(tool_row) + "\n",
         encoding="utf-8",
     )
     rows = [
@@ -909,6 +918,25 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertFalse(keeper["tool_call_log_evidence"])
         self.assertTrue(keeper["pr_surface_action"])
         self.assertEqual(keeper["failures"], ["tool_call_log_evidence_missing"])
+
+    def test_require_persistent_work_evidence_accepts_runtime_contract_generation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ready_keeper(root, "alpha")
+            write_persistent_work_evidence(
+                root,
+                "alpha",
+                top_level_generation=False,
+            )
+            args = audit_args(root, expected_keepers=1)
+            args.require_persistent_work_evidence = True
+
+            report = audit.build_report(args)
+
+        self.assertTrue(report["ok"])
+        keeper = report["keepers"][0]
+        self.assertTrue(keeper["tool_call_log_evidence"])
+        self.assertEqual(len(keeper["tool_call_log_evidence_refs"]), 1)
 
     def test_require_persistent_work_evidence_passes_with_manifest_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:

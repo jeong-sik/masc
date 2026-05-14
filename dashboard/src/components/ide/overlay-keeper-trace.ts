@@ -51,6 +51,7 @@ const SOURCE_LABELS: Record<KeeperTraceSource, string> = {
 
 interface TraceBucket {
   readonly keeperName: string
+  readonly filePath: string | null
   readonly line: number | null
   readonly events: ReadonlyArray<KeeperTraceEvent>
 }
@@ -65,7 +66,8 @@ export function bucketTraceEvents(
   const map = new Map<string, KeeperTraceEvent[]>()
   for (const event of events) {
     const lineKey = lineOf(event) ?? 'no-line'
-    const key = `${event.keeperName}@${lineKey}`
+    const fileKey = filePathOf(event) ?? 'no-file'
+    const key = `${event.keeperName}@${fileKey}@${lineKey}`
     let group = map.get(key)
     if (!group) {
       group = []
@@ -79,6 +81,7 @@ export function bucketTraceEvents(
     const head = group[0]!
     buckets.push({
       keeperName: head.keeperName,
+      filePath: filePathOf(head),
       line: lineOf(head),
       events: group,
     })
@@ -90,6 +93,10 @@ export function bucketTraceEvents(
 
 function lineOf(event: KeeperTraceEvent): number | null {
   return event.source === 'anchored-thread' ? event.line : null
+}
+
+function filePathOf(event: KeeperTraceEvent): string | null {
+  return event.source === 'anchored-thread' ? event.filePath ?? null : null
 }
 
 interface OverlayKeeperTraceProps {
@@ -183,6 +190,7 @@ function BucketRow({ bucket }: { readonly bucket: TraceBucket }) {
     <div
       role="group"
       data-keeper=${bucket.keeperName}
+      data-file=${bucket.filePath ?? 'no-file'}
       data-line=${bucket.line ?? 'no-line'}
       style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-1)' }}
     >

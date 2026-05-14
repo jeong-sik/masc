@@ -9,10 +9,14 @@ import {
   lineNumberExt,
   syntaxHighlightExt,
   blameExtensions,
+  keeperTraceLineGutterExt,
+  keeperTraceLinesForFile,
   pushOwnership,
+  pushKeeperTraceLines,
   setOwnership,
 } from './ide-editor-extensions'
 import type { LineOwnership } from './keeper-line-ownership-store'
+import type { KeeperTraceEvent } from './keeper-trace-store'
 
 function createTestView(extensions: Extension[], doc = 'hello\nworld\n') {
   const container = document.createElement('div')
@@ -155,5 +159,80 @@ describe('pushOwnership + setOwnership effect', () => {
     expect((effect as any).is(setOwnership)).toBe(true)
     expect((effect as any).value).toBe(ownership)
     expect((effect as any).value.get(1)?.keeper_id).toBe('gamma')
+  })
+})
+
+describe('keeperTraceLinesForFile + keeper trace gutter', () => {
+  it('keeps only line-anchored trace events for the current file', () => {
+    const events: KeeperTraceEvent[] = [
+      {
+        id: 'thread-1',
+        tsMs: 2000,
+        keeperName: 'scholar',
+        count: 1,
+        source: 'anchored-thread',
+        threadId: 'thread-1',
+        filePath: 'runtime.ts',
+        line: 2,
+      },
+      {
+        id: 'thread-other',
+        tsMs: 3000,
+        keeperName: 'moth',
+        count: 1,
+        source: 'anchored-thread',
+        threadId: 'thread-other',
+        filePath: 'other.ts',
+        line: 2,
+      },
+      {
+        id: 'thread-unscoped',
+        tsMs: 4000,
+        keeperName: 'luna',
+        count: 1,
+        source: 'anchored-thread',
+        threadId: 'thread-unscoped',
+        line: 3,
+      },
+    ]
+
+    expect(keeperTraceLinesForFile('runtime.ts', events)).toEqual([
+      {
+        line: 2,
+        events: [{
+          source: 'anchored-thread',
+          keeperName: 'scholar',
+          count: 1,
+          tsMs: 2000,
+        }],
+      },
+    ])
+  })
+
+  it('renders file-scoped trace dots in the trace gutter', () => {
+    const exts = [themeExt(), readOnlyExt(), keeperTraceLineGutterExt()]
+    const { view, container } = createTestView(exts, 'one\ntwo\nthree\n')
+
+    pushKeeperTraceLines(view, [
+      {
+        line: 2,
+        events: [
+          { source: 'anchored-thread', keeperName: 'scholar', count: 2, tsMs: 2000 },
+          { source: 'anchored-thread', keeperName: 'moth', count: 1, tsMs: 1000 },
+        ],
+      },
+    ])
+
+    const gutter = container.querySelector('.cm-trace-gutter')
+    expect(gutter).not.toBeNull()
+    const dots = gutter?.querySelectorAll('.cm-trace-dot')
+    expect(dots?.length).toBe(2)
+    expect(dots?.[0]?.getAttribute('data-source')).toBe('anchored-thread')
+    expect(dots?.[0]?.getAttribute('aria-label')).toBe('thread scholar x2')
+    expect(gutter?.querySelector('.cm-trace-stack[role="list"]')?.getAttribute('aria-label'))
+      .toContain('Line 2 keeper trace')
+
+    view.destroy()
+    container.remove()
   })
 })

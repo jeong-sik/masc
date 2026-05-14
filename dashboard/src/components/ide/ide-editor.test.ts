@@ -6,6 +6,7 @@ import { currentFileFindMatches, IdeEditor } from './ide-editor'
 import { createCodeDocumentStore } from './code-document-store'
 import { createKeeperLineOwnershipStore } from './keeper-line-ownership-store'
 import { activeIdeFile, focusIdeContextAnchor, ideContextFocus } from './ide-state'
+import { clearTraces, pushTrace } from './keeper-trace-store'
 
 describe('IdeEditor', () => {
   let container: HTMLDivElement
@@ -14,11 +15,13 @@ describe('IdeEditor', () => {
     container = document.createElement('div')
     activeIdeFile.value = 'package.json'
     ideContextFocus.value = null
+    clearTraces()
   })
 
   afterEach(() => {
     render(null, container)
     ideContextFocus.value = null
+    clearTraces()
     window.location.hash = ''
   })
 
@@ -157,6 +160,51 @@ describe('IdeEditor', () => {
     expect(container.textContent).toContain('2 layers')
     expect(container.querySelector('[aria-label="Active IDE overlays"]')?.textContent)
       .toContain('Trace')
+  })
+
+  it('renders keeper trace line dots only for the active file when the trace layer is on', async () => {
+    const documentStore = createCodeDocumentStore({
+      file_path: 'runtime.ts',
+      language: 'typescript',
+      content: 'const runtime = 1\nconst task = runtime + 1\n',
+    })
+    const ownershipStore = createKeeperLineOwnershipStore('runtime.ts')
+
+    pushTrace({
+      id: 'thread-runtime',
+      tsMs: 2000,
+      keeperName: 'scholar',
+      source: 'anchored-thread',
+      threadId: 'thread-runtime',
+      filePath: 'runtime.ts',
+      line: 2,
+    })
+    pushTrace({
+      id: 'thread-other',
+      tsMs: 3000,
+      keeperName: 'moth',
+      source: 'anchored-thread',
+      threadId: 'thread-other',
+      filePath: 'other.ts',
+      line: 1,
+    })
+
+    render(
+      h(IdeEditor, {
+        documentStore,
+        ownershipStore,
+        diffRows: () => [],
+        activeLayers: new Set(['keeper-trace']),
+      }),
+      container,
+    )
+
+    await waitFor(() => {
+      expect(container.querySelector('.cm-trace-gutter')).not.toBeNull()
+      expect(container.querySelector('.cm-trace-dot')?.getAttribute('aria-label'))
+        .toBe('thread scholar')
+    })
+    expect(container.querySelectorAll('.cm-trace-dot')).toHaveLength(1)
   })
 
   it('counts loaded annotations in the notes overlay summary', () => {

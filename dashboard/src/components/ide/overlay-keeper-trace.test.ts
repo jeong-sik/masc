@@ -20,13 +20,21 @@ function createContainer(): HTMLElement {
   return container
 }
 
-function pushAnchored(id: string, keeperName: string, line: number | null, tsMs: number, threadId = 'th'): void {
+function pushAnchored(
+  id: string,
+  keeperName: string,
+  line: number | null,
+  tsMs: number,
+  threadId = 'th',
+  filePath: string | null = null,
+): void {
   pushTrace({
     id,
     tsMs,
     keeperName,
     source: 'anchored-thread',
     threadId,
+    filePath,
     line,
   })
 }
@@ -73,6 +81,15 @@ describe('bucketTraceEvents — RFC-0028 §5 grouping', () => {
     const buckets = bucketTraceEvents(keeperTraceState.value.events)
     const keys = buckets.map(b => `${b.keeperName}@${b.line}`).sort()
     expect(keys).toEqual(['moth@12', 'scholar@12', 'scholar@99'])
+  })
+
+  it('keeps same-line trace buckets separate when file paths differ', () => {
+    pushAnchored('a', 'scholar', 12, 1000, 'th-a', 'runtime.ts')
+    pushAnchored('b', 'scholar', 12, 1100, 'th-b', 'worker.ts')
+
+    const buckets = bucketTraceEvents(keeperTraceState.value.events)
+    expect(buckets.map(b => `${b.keeperName}@${b.filePath}@${b.line}`).sort())
+      .toEqual(['scholar@runtime.ts@12', 'scholar@worker.ts@12'])
   })
 
   it('non-anchored sources fall into the keeper-level no-line bucket', () => {

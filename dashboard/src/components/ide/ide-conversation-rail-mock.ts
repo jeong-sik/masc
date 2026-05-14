@@ -340,6 +340,7 @@ function postToTraceInput(post: BoardPost) {
     id: post.id,
     created_at_iso: post.created_at_iso,
     author_identity: post.author_identity,
+    filePath: anchor?.file_path ?? null,
     line: anchor?.line_start ?? null,
   }
 }

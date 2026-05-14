@@ -13,8 +13,9 @@ function post(
   ts_iso: string,
   keeper: string,
   line?: number | null,
+  filePath?: string | null,
 ): AnchoredThreadProducerInput {
-  return { id, created_at_iso: ts_iso, author_identity: keeper, line }
+  return { id, created_at_iso: ts_iso, author_identity: keeper, line, filePath }
 }
 
 beforeEach(() => {
@@ -82,9 +83,9 @@ describe('bridgePostsToTrace — RFC-0028 PR-δ anchored-thread producer', () =>
     expect(ids).toEqual(['p1'])
   })
 
-  it('maps fields correctly: id, tsMs, keeperName, threadId, source, and line', () => {
+  it('maps fields correctly: id, tsMs, keeperName, threadId, source, filePath, and line', () => {
     bridgePostsToTrace(
-      [post('p1', '2026-05-06T01:00:00Z', 'scholar', 42)],
+      [post('p1', '2026-05-06T01:00:00Z', 'scholar', 42, 'lib/runtime.ml')],
       new Set(),
     )
     const event = keeperTraceState.value.events[0]!
@@ -94,6 +95,7 @@ describe('bridgePostsToTrace — RFC-0028 PR-δ anchored-thread producer', () =>
     expect(event.source).toBe('anchored-thread')
     if (event.source === 'anchored-thread') {
       expect(event.threadId).toBe('p1')
+      expect(event.filePath).toBe('lib/runtime.ml')
       expect(event.line).toBe(42)
     }
   })

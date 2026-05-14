@@ -290,6 +290,7 @@ describe('IdeConversationRailMock', () => {
       const trace = keeperTraceState.value.events.find(event => event.id === 'thread-line')
       expect(trace).toMatchObject({
         source: 'anchored-thread',
+        filePath: 'lib/runtime.ml',
         line: 42,
       })
     })

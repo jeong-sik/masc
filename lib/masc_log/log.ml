@@ -534,6 +534,69 @@ module Ring = struct
       ("total", `Int (Atomic.get total));
       ("entries", `List (List.map entry_to_json entries));
     ]
+
+  let latest_metadata_json = function
+    | None -> `Null
+    | Some e ->
+        `Assoc
+          [
+            ("seq", `Int e.seq);
+            ("ts", `String e.ts);
+            ("level", `String (level_to_string e.level));
+            ("source", `String (source_to_string e.source));
+            ("module", `String e.module_name);
+            ( "keeper_name",
+              (match e.keeper_name with
+              | Some name -> `String name
+              | None -> `Null) );
+            ( "turn_id",
+              (match e.turn_id with
+              | Some turn_id -> `Int turn_id
+              | None -> `Null) );
+          ]
+
+  let summary_json () =
+    let total_entries = Atomic.get total in
+    let retained_entries = min total_entries capacity in
+    let recent_window = recent ~limit:200 () in
+    let recent_errors =
+      List.fold_left
+        (fun count e -> if e.level = Error then count + 1 else count)
+        0 recent_window
+    in
+    let recent_warnings =
+      List.fold_left
+        (fun count e -> if e.level = Warn then count + 1 else count)
+        0 recent_window
+    in
+    let file_sink_dir =
+      if String.equal !file_base_dir "" then `Null else `String !file_base_dir
+    in
+    let latest =
+      match recent_window with
+      | latest :: _ -> Some latest
+      | [] -> None
+    in
+    `Assoc
+      [
+        ("status", `String (if total_entries = 0 then "empty" else "active"));
+        ("capacity", `Int capacity);
+        ("total_entries", `Int total_entries);
+        ("retained_entries", `Int retained_entries);
+        ("recent_window", `Int (List.length recent_window));
+        ("recent_errors", `Int recent_errors);
+        ("recent_warnings", `Int recent_warnings);
+        ("latest", latest_metadata_json latest);
+        ( "file_sink",
+          `Assoc
+            [
+              ("enabled", `Bool (!file_channel <> None));
+              ("dir", file_sink_dir);
+              ( "current_date",
+                if String.equal !file_current_date "" then `Null
+                else `String !file_current_date );
+            ] );
+      ]
 end
 
 (** Log a message at given level with optional context *)

@@ -261,6 +261,11 @@ let make_health_json ?(listener = "http/1.1") request =
     ("sse_clients", `Int (Sse.client_count ()));
     ("startup", Server_startup_state.to_yojson ());
     ("subsystems", Subsystem_health.to_yojson ());
+    (* Server log visibility belongs on the first health probe too.  Keep the
+       payload cheap and redacted: only ring counters, latest metadata, and
+       file-sink state are exposed here; full log rows stay behind the
+       dashboard logs API. *)
+    ("logs", Log.Ring.summary_json ());
     ("feature_flags", let features = Dashboard_feature_health.get_all_features () in
       Dashboard_feature_health.overview_json features);
     (* Keep /health cheap under live keeper load. [Gc.stat] can force a

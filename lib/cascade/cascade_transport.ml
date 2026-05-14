@@ -101,6 +101,9 @@ let record_codex_cli_omission_for_agent
       ~(tools : string list)
   : unit
   =
+  let provider_label =
+    Provider_adapter.cascade_prefix_of_provider_kind Llm_provider.Provider_config.Codex_cli
+  in
   match tools with
   | [] -> ()
   | _ ->
@@ -108,7 +111,7 @@ let record_codex_cli_omission_for_agent
       (fun tool ->
          Prometheus.inc_counter
            Prometheus.metric_provider_mcp_tool_omission
-           ~labels:[ "provider", "codex_cli"; "tool", tool ]
+           ~labels:[ "provider", provider_label; "tool", tool ]
            ())
       tools;
     let tool_fingerprint = codex_cli_omission_fingerprint tools in
@@ -120,9 +123,10 @@ let record_codex_cli_omission_for_agent
         "codex_cli omitting keeper-bound runtime MCP tool(s) that require request-scoped \
          auth headers: %s (no per-keeper bearer-token lane available for %s; subsequent \
          omissions of this same set are counted in \
-         masc_provider_mcp_tool_omission_total{provider=\"codex_cli\"} and not re-logged)"
+         masc_provider_mcp_tool_omission_total{provider=\"%s\"} and not re-logged)"
         (String.concat ", " (List.sort String.compare tools))
         agent_name_key
+        provider_label
 ;;
 
 let record_codex_cli_omission ~(tools : string list) : unit =

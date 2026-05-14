@@ -138,12 +138,14 @@ let runtime_label_for_active_id ~configured_labels ~active =
              (match List.find_opt matches_provider configured_labels with
               | Some label -> label
               | None ->
-                  let runtime_id =
-                    match adapter.default_model_id with
-                    | Some value when String.trim value <> "" -> value
-                    | _ -> "auto"
-                  in
-                  adapter.cascade_prefix ^ ":" ^ runtime_id)
+                let runtime_id =
+                  match adapter.default_model_id with
+                  | Some value when String.trim value <> "" -> value
+                  | _ -> "auto"
+                in
+                let prefix = Provider_adapter.cascade_prefix_of_adapter adapter in
+                Provider_adapter.provider_model_label prefix runtime_id
+                |> Option.value ~default:active)
          | None -> active)
 
 let runtime_health_key_of_label label =

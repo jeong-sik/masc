@@ -50,11 +50,11 @@ let err (e : adapter_error) : adapter_error list = [ e ]
 
 let resolve_provider_prefix (provider_id : string) : string option =
   match Provider_adapter.resolve_adapter_by_cascade_prefix provider_id with
-  | Some adapter -> Some adapter.Provider_adapter.cascade_prefix
+  | Some adapter -> Some (Provider_adapter.cascade_prefix_of_adapter adapter)
   | None ->
     let normalized = normalize_id provider_id in
     match Provider_adapter.resolve_adapter_by_cascade_prefix normalized with
-    | Some adapter -> Some adapter.Provider_adapter.cascade_prefix
+    | Some adapter -> Some (Provider_adapter.cascade_prefix_of_adapter adapter)
     | None -> None
 
 let find_provider (cfg : cascade_config) (provider_id : string) :

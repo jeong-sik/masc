@@ -93,6 +93,12 @@ let default_resolution ?getenv provider_name ~requested_model_id =
   | None -> unresolved_auto requested_model_id
 ;;
 
+let cascade_prefix_of_canonical_provider canonical_name =
+  Provider_adapter.resolve_direct_adapter canonical_name
+  |> Option.map Provider_adapter.cascade_prefix_of_adapter
+  |> Option.value ~default:canonical_name
+;;
+
 (** Default GLM auto-cascade order: quality-first, then speed.
     glm-5.1 = best quality (reasoning), glm-5-turbo = fast tool calling,
     glm-4.7 = stable general, glm-4.7-flashx = fastest/cheapest.
@@ -107,7 +113,12 @@ let resolve_glm_model ?getenv selector =
     | Concrete s -> s
     | Auto -> "auto"
   in
-  let default_model = default_resolution ?getenv "glm" ~requested_model_id:model_id in
+  let default_model =
+    default_resolution
+      ?getenv
+      (cascade_prefix_of_canonical_provider Provider_adapter.cn_glm)
+      ~requested_model_id:model_id
+  in
   let resolved_model_id =
     Llm_provider.Zai_catalog.resolve_glm_alias
       ~default_model:default_model.resolved_model_id
@@ -128,7 +139,10 @@ let resolve_glm_coding_model ?getenv selector =
     | Auto -> "auto"
   in
   let default_model =
-    default_resolution ?getenv "glm-coding" ~requested_model_id:model_id
+    default_resolution
+      ?getenv
+      (cascade_prefix_of_canonical_provider Provider_adapter.cn_glm_coding_plan)
+      ~requested_model_id:model_id
   in
   let resolved_model_id =
     Llm_provider.Zai_catalog.resolve_glm_coding_alias

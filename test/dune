@@ -1371,3 +1371,8 @@
  (name test_tool_descriptors_gen)
  (modules test_tool_descriptors_gen)
  (libraries masc_test_deps))
+
+(test
+ (name test_provider_prefix_boundary)
+ (modules test_provider_prefix_boundary)
+ (libraries alcotest))

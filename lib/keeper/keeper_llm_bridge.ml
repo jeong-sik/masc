@@ -17,8 +17,8 @@ let bridge_failure_envelope
     ()
   : Failure_envelope.t =
   {
-    surface = "keeper_oas_bridge";
-    entity_kind = "oas_execution";
+    surface = surface_keeper_oas_bridge;
+    entity_kind = entity_kind_oas_execution;
     entity_id;
     cause_code;
     severity;
@@ -28,6 +28,51 @@ let bridge_failure_envelope
     evidence_ref;
   }
 ;;
+
+let label_site = "site"
+let label_channel = "channel"
+let label_bucket = "bucket"
+let key_site = "site"
+let key_timeout_sec = "timeout_sec"
+let key_timeout_enforced = "timeout_enforced"
+let key_wall_sec = "wall_sec"
+let key_overshoot_sec = "overshoot_sec"
+let key_bucket = "bucket"
+let key_inner_exception = "inner_exception"
+let key_rollback_scope = "rollback_scope"
+let key_external_tool_side_effects_reverted = "external_tool_side_effects_reverted"
+let key_error = "error"
+let field_event = "event"
+let field_site = "site"
+let field_timeout_sec = "timeout_sec"
+let field_timeout_enforced = "timeout_enforced"
+let field_wall_sec = "wall_sec"
+let field_bucket = "bucket"
+let field_inner_exception = "inner_exception"
+let field_error = "error"
+let field_rollback_scope = "rollback_scope"
+let field_external_tool_side_effects_reverted = "external_tool_side_effects_reverted"
+let field_overshoot_sec = "overshoot_sec"
+let rollback_scope_oas_context_only = "oas_context_only"
+let surface_keeper_oas_bridge = "keeper_oas_bridge"
+let entity_kind_oas_execution = "oas_execution"
+let cause_code_eio_clock_unavailable = "eio_clock_unavailable"
+let cause_code_oas_execution_cancelled = "oas_execution_cancelled"
+let cause_code_oas_execution_error = "oas_execution_error"
+let operator_action_check_masc_eio_env = "check_masc_eio_env"
+let operator_action_inspect_oas_bridge_error = "inspect_oas_bridge_error"
+let site_no_clock = "no_clock"
+let site_timeout = "timeout"
+let cause_code_oas_timeout_budget = "oas_timeout_budget"
+let site_cancelled = "cancelled"
+let site_execution_error = "execution_error"
+let channel_oas_bridge = "oas_bridge"
+let bucket_fast = "fast"
+let bucket_short_tail = "short_tail"
+let bucket_mid_tail = "mid_tail"
+let bucket_long_mid = "long_mid"
+let bucket_long_tail = "long_tail"
+
 
 let bridge_details fields envelope =
   let fields = List.filter_map Fun.id fields in
@@ -63,21 +108,21 @@ let run_with_timeout_and_fallback ~timeout_s fn =
     in
     Prometheus.inc_counter
       Keeper_metrics.metric_keeper_llm_bridge_failures
-      ~labels:[ "site", "no_clock" ]
+      ~labels:[label_site, site_no_clock ]
       ();
     let envelope =
       bridge_failure_envelope
-        ~cause_code:"eio_clock_unavailable"
+        ~cause_code:cause_code_eio_clock_unavailable
         ~severity:Failure_envelope.Critical
         ~summary:message
         ~recoverability:Failure_envelope.Operator_action_required
-        ~operator_action:"check_masc_eio_env"
+        ~operator_action:operator_action_check_masc_eio_env
         ~evidence_ref:
           (`Assoc
             [
-              ("site", `String site);
-              ("timeout_sec", `Float timeout_s);
-              ("timeout_enforced", `Bool false);
+              (key_site, `String site);
+              (key_timeout_sec, `Float timeout_s);
+              (key_timeout_enforced, `Bool false);
             ])
         ()
     in
@@ -85,10 +130,10 @@ let run_with_timeout_and_fallback ~timeout_s fn =
       ~details:
         (bridge_details
            [
-             json_string_field "event" "keeper_oas_bridge_no_clock";
-             json_string_field "site" site;
-             json_float_field "timeout_sec" timeout_s;
-             json_field "timeout_enforced" (`Bool false);
+             json_string_field field_event "keeper_oas_bridge_no_clock";
+             json_string_field field_site site;
+             json_float_field field_timeout_sec timeout_s;
+             json_field field_timeout_enforced (`Bool false);
            ]
            envelope)
       message;
@@ -136,7 +181,7 @@ let run_with_timeout_and_fallback ~timeout_s fn =
        let _ : bool = Timeout_policy.overshoot_warn ~deadline ~actual_wall_s:wall () in
        Prometheus.inc_counter
          Keeper_metrics.metric_keeper_llm_bridge_failures
-         ~labels:[ "site", "timeout" ]
+         ~labels:[label_site, site_timeout ]
          ();
        let message =
          Printf.sprintf
@@ -147,7 +192,7 @@ let run_with_timeout_and_fallback ~timeout_s fn =
        in
        let envelope =
          bridge_failure_envelope
-           ~cause_code:"oas_timeout_budget"
+           ~cause_code:cause_code_oas_timeout_budget
            ~severity:Failure_envelope.Bad
            ~summary:"OAS execution exceeded its keeper bridge timeout budget"
            ~recoverability:Failure_envelope.Operator_action_required
@@ -155,11 +200,11 @@ let run_with_timeout_and_fallback ~timeout_s fn =
            ~evidence_ref:
              (`Assoc
                [
-                 ("timeout_sec", `Float timeout_s);
-                 ("wall_sec", `Float wall);
-                 ("overshoot_sec", `Float (Float.max 0.0 (wall -. timeout_s)));
-                 ("rollback_scope", `String "oas_context_only");
-                 ("external_tool_side_effects_reverted", `Bool false);
+                 (key_timeout_sec, `Float timeout_s);
+                 (key_wall_sec, `Float wall);
+                 (key_overshoot_sec, `Float (Float.max 0.0 (wall -. timeout_s)));
+                 (key_rollback_scope, `String rollback_scope_oas_context_only);
+                 (key_external_tool_side_effects_reverted, `Bool false);
                ])
            ()
        in
@@ -167,12 +212,12 @@ let run_with_timeout_and_fallback ~timeout_s fn =
          ~details:
            (bridge_details
               [
-                json_string_field "event" "keeper_oas_bridge_timeout";
-                json_float_field "timeout_sec" timeout_s;
-                json_float_field "wall_sec" wall;
-                json_float_field "overshoot_sec" (Float.max 0.0 (wall -. timeout_s));
-                json_string_field "rollback_scope" "oas_context_only";
-                json_field "external_tool_side_effects_reverted" (`Bool false);
+                json_string_field field_event "keeper_oas_bridge_timeout";
+                json_float_field field_timeout_sec timeout_s;
+                json_float_field field_wall_sec wall;
+                json_float_field field_overshoot_sec (Float.max 0.0 (wall -. timeout_s));
+                json_string_field field_rollback_scope rollback_scope_oas_context_only;
+                json_field field_external_tool_side_effects_reverted (`Bool false);
               ]
               envelope)
          message;
@@ -200,14 +245,14 @@ let run_with_timeout_and_fallback ~timeout_s fn =
        let wall = elapsed () in
        let bucket =
          if wall < 60.0
-         then "fast"
+         then bucket_fast
          else if wall < 300.0
-         then "short_tail"
+         then bucket_short_tail
          else if wall < 600.0
-         then "mid_tail"
+         then bucket_mid_tail
          else if wall < 1800.0
-         then "long_mid"
-         else "long_tail"
+         then bucket_long_mid
+         else bucket_long_tail
        in
        let inner_str =
          match inner_exn with
@@ -216,7 +261,7 @@ let run_with_timeout_and_fallback ~timeout_s fn =
        in
        Prometheus.inc_counter
          Keeper_metrics.metric_keeper_llm_bridge_failures
-         ~labels:[ "site", "cancelled" ]
+         ~labels:[label_site, site_cancelled ]
          ();
        let message =
          Printf.sprintf
@@ -229,18 +274,18 @@ let run_with_timeout_and_fallback ~timeout_s fn =
        in
        let envelope =
          bridge_failure_envelope
-           ~cause_code:"oas_execution_cancelled"
+           ~cause_code:cause_code_oas_execution_cancelled
            ~severity:Failure_envelope.Warn
            ~summary:"OAS execution was cancelled by parent fiber or shutdown"
            ~recoverability:Failure_envelope.Retryable
            ~evidence_ref:
              (`Assoc
                [
-                 ("wall_sec", `Float wall);
-                 ("bucket", `String bucket);
-                 ("inner_exception", `String inner_str);
-                 ("rollback_scope", `String "oas_context_only");
-                 ("external_tool_side_effects_reverted", `Bool false);
+                 (key_wall_sec, `Float wall);
+                 (key_bucket, `String bucket);
+                 (key_inner_exception, `String inner_str);
+                 (key_rollback_scope, `String rollback_scope_oas_context_only);
+                 (key_external_tool_side_effects_reverted, `Bool false);
                ])
            ()
        in
@@ -248,18 +293,18 @@ let run_with_timeout_and_fallback ~timeout_s fn =
          ~details:
            (bridge_details
               [
-                json_string_field "event" "keeper_oas_bridge_cancelled";
-                json_float_field "wall_sec" wall;
-                json_string_field "bucket" bucket;
-                json_string_field "inner_exception" inner_str;
-                json_string_field "rollback_scope" "oas_context_only";
-                json_field "external_tool_side_effects_reverted" (`Bool false);
+                json_string_field field_event "keeper_oas_bridge_cancelled";
+                json_float_field field_wall_sec wall;
+                json_string_field field_bucket bucket;
+                json_string_field field_inner_exception inner_str;
+                json_string_field field_rollback_scope rollback_scope_oas_context_only;
+                json_field field_external_tool_side_effects_reverted (`Bool false);
               ]
               envelope)
          message;
        Prometheus.inc_counter
          Keeper_metrics.metric_keeper_oas_cancel
-         ~labels:[ "bucket", bucket ]
+         ~labels:[label_bucket, bucket ]
          ();
        Printexc.raise_with_backtrace exn bt
      | exn ->
@@ -267,11 +312,11 @@ let run_with_timeout_and_fallback ~timeout_s fn =
        let bt = Printexc.get_backtrace () in
        Prometheus.inc_counter
          Keeper_metrics.metric_keeper_oas_execution_errors
-         ~labels:[ "channel", "oas_bridge" ]
+         ~labels:[label_channel, channel_oas_bridge ]
          ();
        Prometheus.inc_counter
          Keeper_metrics.metric_keeper_llm_bridge_failures
-         ~labels:[ "site", "execution_error" ]
+         ~labels:[label_site, site_execution_error ]
          ();
        let error = Printexc.to_string exn in
        let message =
@@ -279,20 +324,20 @@ let run_with_timeout_and_fallback ~timeout_s fn =
        in
        let envelope =
          bridge_failure_envelope
-           ~cause_code:"oas_execution_error"
+           ~cause_code:cause_code_oas_execution_error
            ~severity:Failure_envelope.Bad
            ~summary:"OAS execution raised an unexpected exception"
            ~recoverability:Failure_envelope.Operator_action_required
-           ~operator_action:"inspect_oas_bridge_error"
-           ~evidence_ref:(`Assoc [ ("error", `String error) ])
+           ~operator_action:operator_action_inspect_oas_bridge_error
+           ~evidence_ref:(`Assoc [ (key_error, `String error) ])
            ()
        in
        Log.Keeper.emit Log.Error
          ~details:
            (bridge_details
               [
-                json_string_field "event" "keeper_oas_bridge_execution_error";
-                json_string_field "error" error;
+                json_string_field field_event "keeper_oas_bridge_execution_error";
+                json_string_field field_error error;
               ]
               envelope)
          message;

@@ -554,7 +554,14 @@ let resolve_keeper_shell_read_path
         else
           Filename.concat cwd raw_path
     in
-    resolve_with_autocorrect resolved_raw_path
+    let resolver_path =
+      if raw_path = "" || Filename.is_relative raw_path then
+        Option.value ~default:resolved_raw_path
+          (project_relative_host_path ~config resolved_raw_path)
+      else
+        resolved_raw_path
+    in
+    resolve_with_autocorrect resolver_path
 
 (* Docker/sandbox infrastructure delegated to Keeper_shell_docker.
    Aliases retained for backward compatibility with callers that

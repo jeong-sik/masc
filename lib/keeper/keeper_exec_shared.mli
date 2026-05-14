@@ -74,6 +74,8 @@ val keeper_default_read_root
   -> meta:Keeper_types.keeper_meta
   -> string
 
+val project_relative_host_path : config:Coord.config -> string -> string option
+
 val safe_file_exists : string -> bool
 val safe_is_dir : string -> bool
 

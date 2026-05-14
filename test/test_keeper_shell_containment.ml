@@ -222,15 +222,16 @@ let blocked_by_symmetric_sandbox raw =
      [Keeper_sandbox_containment.check_read_target] AFTER the resolver
      allowed the host path through.
    - PR-3b (2026-04-28+): the resolver itself rejects out-of-sandbox
-     reads with [path_outside_sandbox], so the symmetric check is not
-     reached for the canonical "outside playground" case.  Both labels
-     observably mean "Docker keeper read blocked by playground
-     boundary".  Use this looser predicate for Docker-keeper tests so
-     the semantic stays "is it blocked" instead of pinning to the
-     1st-stage label.  Legacy [blocked_by_symmetric_sandbox] stays
-     strict so [test_legacy_keeper_unaffected] continues to assert
-     "this code path didn't fire" rather than the broader "blocked or
-     not". *)
+     reads with [path_outside_sandbox].
+   - PR-3b follow-ups reject caller absolute paths even earlier with
+     [path_outside_project_root].
+
+   All three labels observably mean "Docker keeper read blocked by
+   playground boundary".  Use this looser predicate for Docker-keeper
+   tests so the semantic stays "is it blocked" instead of pinning to the
+   1st-stage label.  Legacy [blocked_by_symmetric_sandbox] stays strict so
+   [test_legacy_keeper_unaffected] continues to assert "this code path
+   didn't fire" rather than the broader "blocked or not". *)
 let blocked_by_sandbox_boundary raw =
   match parse_field raw "error" with
   | None -> false
@@ -241,6 +242,7 @@ let blocked_by_sandbox_boundary raw =
       in
       starts_with "symmetric_sandbox_blocked" err
       || starts_with "path_outside_sandbox" err
+      || starts_with "path_outside_project_root" err
 
 let test_legacy_keeper_unaffected () =
   setup ~keeper_name:"alice" ~sandbox:Keeper_types.Local
@@ -353,13 +355,43 @@ let test_docker_keeper_allows_inside_playground () =
   ignore (Fs_compat.save_file_atomic demo "hello inside playground");
   let raw =
     Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
-      ~args:(`Assoc [ ("op", `String "cat"); ("path", `String demo) ])
+      ~args:(`Assoc [ ("op", `String "cat"); ("path", `String "demo.txt") ])
   in
   (* Goal: containment did not block. Whether `cat` succeeds depends on
      /bin/cat availability; we only assert the symmetric_sandbox guard
      is silent. *)
   Alcotest.(check bool) "playground-internal cat not blocked" false
     (blocked_by_sandbox_boundary raw)
+
+let test_docker_relative_repos_path_resolves_inside_playground () =
+  setup ~keeper_name:"glm-coding" ~sandbox:Keeper_types.Docker
+  @@ fun ~base:_ ~config ~meta ~playground ->
+  let repos = Filename.concat playground "repos" in
+  ensure_dir repos;
+  let args = `Assoc [ ("op", `String "ls"); ("path", `String "repos") ] in
+  match Keeper_shell_shared.resolve_keeper_shell_read_path ~config ~meta ~args with
+  | Ok path ->
+    Alcotest.(check string)
+      "bare repos maps to playground repos"
+      (normalize_realpath repos)
+      (normalize_realpath path)
+  | Error e ->
+    Alcotest.fail ("bare repos should stay inside playground: " ^ e)
+
+let test_docker_relative_repos_cwd_resolves_inside_playground () =
+  setup ~keeper_name:"glm-coding" ~sandbox:Keeper_types.Docker
+  @@ fun ~base:_ ~config ~meta ~playground ->
+  let repo = Filename.concat playground "repos/masc-mcp" in
+  ensure_dir repo;
+  let args = `Assoc [ ("cwd", `String "repos/masc-mcp") ] in
+  match Keeper_shell_shared.resolve_keeper_shell_read_cwd ~config ~meta ~args with
+  | Ok cwd ->
+    Alcotest.(check string)
+      "relative repos cwd maps to playground repo"
+      (normalize_realpath repo)
+      (normalize_realpath cwd)
+  | Error e ->
+    Alcotest.fail ("relative repos cwd should stay inside playground: " ^ e)
 
 let test_docker_container_cwd_maps_to_host_worktree () =
   setup ~keeper_name:"executor" ~sandbox:Keeper_types.Docker
@@ -545,6 +577,10 @@ let () =
             test_docker_keeper_blocks_find_outside;
           Alcotest.test_case "docker keeper allows inside playground"
             `Quick test_docker_keeper_allows_inside_playground;
+          Alcotest.test_case "docker relative repos path resolves inside playground"
+            `Quick test_docker_relative_repos_path_resolves_inside_playground;
+          Alcotest.test_case "docker relative repos cwd resolves inside playground"
+            `Quick test_docker_relative_repos_cwd_resolves_inside_playground;
           Alcotest.test_case "docker container cwd maps to host worktree"
             `Quick test_docker_container_cwd_maps_to_host_worktree;
           Alcotest.test_case "docker container file path maps to host worktree"

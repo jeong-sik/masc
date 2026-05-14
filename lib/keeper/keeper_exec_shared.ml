@@ -189,6 +189,15 @@ let keeper_sandbox_repo_names ~(config : Coord.config) ~(meta : keeper_meta) =
       safe_is_dir candidate && safe_file_exists (Filename.concat candidate ".git"))
 ;;
 
+let keeper_playground_relative_root ~(meta : keeper_meta) =
+  Keeper_sandbox.allowed_root_rel_of_meta ~meta
+  |> Keeper_alerting_path.strip_trailing_slashes
+;;
+
+let keeper_playground_relative_path ~(meta : keeper_meta) rel =
+  Filename.concat (keeper_playground_relative_root ~meta) rel
+;;
+
 let relative_path_targets_allowed_root ~(meta : keeper_meta) (raw : string) =
   let boundary prefix =
     let prefix = Keeper_alerting_path.strip_trailing_slashes prefix in
@@ -273,16 +282,12 @@ let rewrite_single_repo_relative_path
     match keeper_sandbox_repo_names ~config ~meta with
     | repo_names when List.mem first_segment repo_names ->
       let sandbox_relative = Filename.concat "repos" raw in
-      let rewritten =
-        Filename.concat (keeper_playground_root ~config ~meta) sandbox_relative
-      in
+      let rewritten = keeper_playground_relative_path ~meta sandbox_relative in
       Log.Keeper.debug "playground_relative: explicit repo rewrite %S → %S" raw rewritten;
       Ok (Some rewritten)
     | [ repo_name ] ->
       let sandbox_relative = Filename.concat ("repos/" ^ repo_name) raw in
-      let rewritten =
-        Filename.concat (keeper_playground_root ~config ~meta) sandbox_relative
-      in
+      let rewritten = keeper_playground_relative_path ~meta sandbox_relative in
       Log.Keeper.debug "playground_relative: single-repo rewrite %S → %S" raw rewritten;
       Ok (Some rewritten)
     | [] -> Ok None
@@ -324,6 +329,20 @@ let host_path_of_own_container_path
     else None)
 ;;
 
+let project_relative_host_path ~(config : Coord.config) (path : string) =
+  let root =
+    Keeper_alerting_path.project_root_of_config config
+    |> Keeper_alerting_path.normalize_path_for_check_stripped
+  in
+  let path_norm = Keeper_alerting_path.normalize_path_for_check_stripped path in
+  if String.equal path_norm root then Some "."
+  else if String.starts_with ~prefix:(root ^ "/") path_norm then
+    Some
+      (String.sub path_norm (String.length root + 1)
+         (String.length path_norm - String.length root - 1))
+  else None
+;;
+
 (* Bare filenames and canonical sandbox lanes default to the keeper sandbox,
    but rooted-looking relative paths (for example
    "workspace/..." or "lib/...") keep project-root/boundary semantics.
@@ -341,15 +360,20 @@ let playground_relative_unless_allowed_root
   : (string, string) result
   =
   let trimmed = String.trim raw in
-  let trimmed =
+  let mapped_from_container, trimmed =
     match host_path_of_own_container_path ~config ~meta trimmed with
     | Some host_path ->
       Log.Keeper.debug
         "playground_relative: mapped container path %S → %S"
         trimmed
         host_path;
-      host_path
-    | None -> trimmed
+      true, host_path
+    | None -> false, trimmed
+  in
+  let trimmed =
+    if mapped_from_container
+    then Option.value ~default:trimmed (project_relative_host_path ~config trimmed)
+    else trimmed
   in
   let trimmed =
     match strip_keeper_playground_prefix ~meta trimmed with
@@ -395,8 +419,7 @@ let playground_relative_unless_allowed_root
       || relative_path_targets_allowed_root ~meta trimmed
     then Ok trimmed
     else (
-      let pg = keeper_playground_root ~config ~meta in
-      Ok (Filename.concat pg trimmed))
+      Ok (keeper_playground_relative_path ~meta trimmed))
 ;;
 
 let resolve_keeper_path

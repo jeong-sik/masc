@@ -1,9 +1,11 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { fireEvent } from '@testing-library/preact'
 import { render } from 'preact'
 import type { UnifiedDiffRow } from '../../api/workspace'
 import {
   buildSplitDiff,
+  diffContextFocusForRows,
   formatDiffLineRange,
   formatDiffSummaryAria,
   SplitDiffView,
@@ -112,6 +114,29 @@ describe('summarizeDiffRows', () => {
     expect(formatDiffLineRange(summary.oldRange)).toBe('n/a')
     expect(formatDiffLineRange(summary.newRange)).toBe('n/a')
   })
+
+  it('matches current context focus against old or new diff lines', () => {
+    const rows = [
+      row('delete', 4, null, 'old'),
+      row('add', null, 5, 'new'),
+    ]
+    expect(diffContextFocusForRows(rows, {
+      file_path: 'lib/runtime.ml',
+      line: 5,
+      surface: 'Task',
+      label: 'task task-runtime',
+      source_id: 'event-1',
+      activated_at_ms: Date.now(),
+    })?.line).toBe(5)
+    expect(diffContextFocusForRows(rows, {
+      file_path: 'lib/runtime.ml',
+      line: 9,
+      surface: 'Task',
+      label: 'task task-runtime',
+      source_id: 'event-1',
+      activated_at_ms: Date.now(),
+    })).toBeNull()
+  })
 })
 
 describe('formatDiffSummaryAria', () => {
@@ -138,6 +163,7 @@ describe('diff preview chrome', () => {
   afterEach(() => {
     render(null, container)
     document.body.removeChild(container)
+    window.location.hash = ''
   })
 
   it('renders unified summary chips before diff rows', () => {
@@ -152,6 +178,49 @@ describe('diff preview chrome', () => {
     expect(container.querySelector('[data-status-chip-tone="bad"]')?.textContent).toBe('-1')
     expect(container.querySelector('[data-status-chip-tone="info"]')?.textContent).toBe('old 4-5 -> new 4-5')
     expect(container.querySelector('[aria-label="Unified diff rows"]')?.textContent).toContain('new value')
+  })
+
+  it('renders focused diff context and routes through its links', () => {
+    render(UnifiedDiffView([
+      row('delete', 4, null, 'old value'),
+      row('add', null, 4, 'new value'),
+      row('context', 5, 5, 'same value'),
+    ], {
+      file_path: 'lib/runtime.ml',
+      line: 4,
+      surface: 'Task',
+      label: 'task task-runtime',
+      source_id: 'event-1',
+      activated_at_ms: Date.now(),
+      route_links: [
+        {
+          id: 'task:task-runtime',
+          label: 'Task',
+          tab: 'workspace',
+          params: { section: 'planning', view: 'default', task: 'task-runtime' },
+          evidence: 'Task task-runtime',
+        },
+        {
+          id: 'telemetry:turn-9',
+          label: 'Telemetry',
+          tab: 'monitoring',
+          params: { section: 'fleet-health', view: 'event-log', q: 'turn-9' },
+          evidence: 'Fleet telemetry event log · query turn-9',
+        },
+      ],
+    }), container)
+
+    const focus = container.querySelector('[data-testid="ide-diff-context-focus"]')
+    expect(focus?.getAttribute('aria-label'))
+      .toBe('Diff context: Task line 4, task task-runtime, 2 route links')
+    expect(focus?.textContent).toContain('Task')
+    expect(focus?.textContent).toContain('L4')
+    expect(container.querySelectorAll('[data-context-focus="true"]')).toHaveLength(2)
+
+    const telemetry = [...container.querySelectorAll<HTMLButtonElement>('.ide-diff-context-links button')]
+      .find(button => button.textContent === 'Telemetry')
+    fireEvent.click(telemetry!)
+    expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&q=turn-9')
   })
 
   it('renders split empty state instead of a blank pane', () => {

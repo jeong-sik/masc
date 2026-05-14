@@ -236,9 +236,9 @@ export function IdeEditor({
           />`
         : null}
       ${activeView === 'split-diff'
-        ? SplitDiffView(currentDiffRows)
+        ? SplitDiffView(currentDiffRows, currentFileFocus)
         : activeView === 'unified'
-          ? UnifiedDiffView(currentDiffRows)
+          ? UnifiedDiffView(currentDiffRows, currentFileFocus)
           : html`<${CodeMirrorEditor}
               documentStore=${documentStore}
               ownershipStore=${ownershipStore}

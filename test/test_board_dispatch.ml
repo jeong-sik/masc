@@ -1018,6 +1018,58 @@ let test_sub_board_owner_only_post_policy () =
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok _ -> ())
 
+let test_sub_board_update () =
+  let id =
+    match Board_dispatch.create_sub_board ~slug:"update-target" ~name:"Before"
+             ~description:"old desc" ~owner:"agent-owner" ~access:Board.Open () with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok sb -> Board.Sub_board_id.to_string sb.Board.id
+  in
+  (match Board_dispatch.update_sub_board ~sub_board_id:id ~name:"After"
+           ~description:"new desc" ~access:Board.Members_only ~members:["agent-a"] () with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok sb ->
+       Alcotest.(check string) "updated name" "After" sb.Board.name;
+       Alcotest.(check string) "updated description" "new desc" sb.description;
+       Alcotest.(check bool) "updated access" true (sb.access = Board.Members_only);
+       let members = List.map Board.Agent_id.to_string sb.members in
+       Alcotest.(check (list string)) "updated members include owner" ["agent-owner"; "agent-a"] members);
+  (* lookup still works after update *)
+  (match Board_dispatch.get_sub_board ~sub_board_id:id with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok sb ->
+       Alcotest.(check string) "persisted name" "After" sb.Board.name)
+
+let test_sub_board_delete_clears_orphan_hearth () =
+  let sb_id =
+    match Board_dispatch.create_sub_board ~slug:"orphan-hearth" ~name:"Orphan"
+             ~description:"" ~owner:"agent-owner" () with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok sb -> Board.Sub_board_id.to_string sb.Board.id
+  in
+  let post_result =
+    Board_dispatch.create_post ~author:"agent-owner" ~content:"post in orphan"
+      ~title:"Orphan post" ~hearth:"orphan-hearth" ~post_kind:Board.Human_post ()
+  in
+  let post_id =
+    match post_result with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok post -> Board.Post_id.to_string post.id
+  in
+  (match Board_dispatch.get_post ~post_id with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok post ->
+       Alcotest.(check (option string)) "post has hearth before delete"
+         (Some "orphan-hearth") post.Board.hearth);
+  (match Board_dispatch.delete_sub_board ~sub_board_id:sb_id with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok () -> ());
+  (match Board_dispatch.get_post ~post_id with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok post ->
+       Alcotest.(check (option string)) "post hearth cleared after sub-board delete"
+         None post.Board.hearth)
+
 let test_sub_board_post_count_projection () =
   ignore
     (Board_dispatch.create_sub_board ~slug:"counted" ~name:"Counted"
@@ -1134,5 +1186,7 @@ let () =
       Alcotest.test_case "members-only post policy" `Quick (with_eio test_sub_board_members_only_post_policy);
       Alcotest.test_case "owner-only post policy" `Quick (with_eio test_sub_board_owner_only_post_policy);
       Alcotest.test_case "derived post count" `Quick (with_eio test_sub_board_post_count_projection);
+      Alcotest.test_case "update" `Quick (with_eio test_sub_board_update);
+      Alcotest.test_case "delete clears orphan hearth" `Quick (with_eio test_sub_board_delete_clears_orphan_hearth);
     ];
   ]

@@ -69,6 +69,24 @@ val record_semaphore_wait_observation :
   unit ->
   unit
 
+type cascade_backpressure_decision =
+  | Cascade_admitted
+  | Cascade_backpressured of {
+      cascade_name : string;
+      reason : string;
+    }
+
+val cascade_backpressure_decision :
+  should_run_turn:bool ->
+  cascade_name:string ->
+  cascade_status:Keeper_health_probe.health_status ->
+  cascade_backpressure_decision
+
+val cascade_backpressure_observation_reasons : reason:string -> string list
+
+val record_cascade_backpressure_observation :
+  base_path:string -> keeper_name:string -> reason:string -> unit
+
 val semaphore_wait_timeout_blocker_class :
   Keeper_turn_slot.semaphore_wait_timeout -> blocker_class
 

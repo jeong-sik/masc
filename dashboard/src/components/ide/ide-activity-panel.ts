@@ -19,6 +19,7 @@ import {
   IdeContextLens,
   openIdeContextRouteLink,
   routeLinksForContext,
+  type IdeContextRouteContext,
   type IdeContextRouteLink,
 } from './ide-context-lens'
 import {
@@ -109,9 +110,15 @@ export interface IdeRunProgressSummary {
   readonly linkedEvents: number
   readonly keeperTotalCount: number
   readonly latestAgeLabel: string
-  readonly surfaceCounts: ReadonlyArray<{ readonly label: string; readonly count: number }>
+  readonly surfaceCounts: ReadonlyArray<IdeRunProgressSurfaceCount>
   readonly keeperCounts: ReadonlyArray<{ readonly keeper_id: string; readonly count: number }>
   readonly activeGoal: IdeRunProgressGoal | null
+}
+
+export interface IdeRunProgressSurfaceCount {
+  readonly label: string
+  readonly count: number
+  readonly routeLink: IdeContextRouteLink | null
 }
 
 export interface IdeRunProgressGoal {
@@ -463,11 +470,19 @@ export function deriveIdeRunProgressSummary(
       && normalizeIdeContextFilePath(event.context.file_path) === activeFilePath,
     ).length
   const linkedEvents = events.filter(event => event.context !== undefined).length
-  const surfaceCounts: Array<{ readonly label: string; readonly count: number }> = PROGRESS_SURFACES.map(([key, label]) => ({
-    label,
-    count: events.filter(event => event.context?.[key]).length,
-  }))
-  surfaceCounts.push({ label: 'Telemetry', count: events.length })
+  const surfaceCounts: IdeRunProgressSurfaceCount[] = PROGRESS_SURFACES.map(([key, label]) => {
+    const matchingEvents = events.filter(event => event.context?.[key])
+    return {
+      label,
+      count: matchingEvents.length,
+      routeLink: latestSurfaceRouteLink(label, matchingEvents),
+    }
+  })
+  surfaceCounts.push({
+    label: 'Telemetry',
+    count: events.length,
+    routeLink: latestSurfaceRouteLink('Telemetry', events),
+  })
   const keeperEntries = [...events.reduce((acc, event) => {
     acc.set(event.keeper_id, (acc.get(event.keeper_id) ?? 0) + 1)
     return acc
@@ -503,12 +518,7 @@ function RunProgressStrip({ summary }: { readonly summary: IdeRunProgressSummary
       </div>
       ${summary.activeGoal ? RunProgressGoalTrack(summary.activeGoal) : null}
       <div class="ide-run-progress-surfaces" role="list" aria-label="Linked operational surfaces">
-        ${summary.surfaceCounts.map(surface => html`
-          <span role="listitem" data-active=${surface.count > 0 ? 'true' : 'false'}>
-            <span>${surface.label}</span>
-            <span>${surface.count}</span>
-          </span>
-        `)}
+        ${summary.surfaceCounts.map(surface => RunProgressSurfaceChip(surface))}
       </div>
       <div class="ide-run-progress-keepers" aria-label="Top active keepers">
         ${summary.keeperCounts.length === 0
@@ -521,6 +531,31 @@ function RunProgressStrip({ summary }: { readonly summary: IdeRunProgressSummary
           `)}
       </div>
     </section>
+  `
+}
+
+function RunProgressSurfaceChip(surface: IdeRunProgressSurfaceCount) {
+  const routeLink = surface.routeLink
+  return html`
+    <span role="listitem" data-active=${surface.count > 0 ? 'true' : 'false'}>
+      ${routeLink
+        ? html`
+          <button
+            type="button"
+            class="ide-run-progress-surface-link"
+            title=${routeLink.evidence}
+            aria-label=${`Open ${routeLink.evidence}`}
+            onClick=${() => openIdeContextRouteLink(routeLink)}
+          >
+            <span>${surface.label}</span>
+            <span>${surface.count}</span>
+          </button>
+        `
+        : html`
+          <span>${surface.label}</span>
+          <span>${surface.count}</span>
+        `}
+    </span>
   `
 }
 
@@ -639,6 +674,48 @@ function latestAgeLabel(events: ReadonlyArray<RunActivityEvent>): string {
   return `${hours}h ago`
 }
 
+function latestSurfaceRouteLink(
+  label: string,
+  events: ReadonlyArray<RunActivityEvent>,
+): IdeContextRouteLink | null {
+  const latestEvents = [...events].sort((left, right) =>
+    right.timestamp_ms - left.timestamp_ms || right.id.localeCompare(left.id),
+  )
+  for (const event of latestEvents) {
+    const routeLink = activityRouteLinks(event).find(link => link.label === label)
+    if (routeLink) return routeLink
+  }
+  return null
+}
+
+function activityRouteLinks(item: RunActivityEvent): ReadonlyArray<IdeContextRouteLink> {
+  return routeLinksForContext(activityRouteContext(item))
+}
+
+function activityRouteContext(item: RunActivityEvent): IdeContextRouteContext {
+  const eventContextFile = item.context?.file_path
+  const eventFocusFile = eventContextFile === undefined ? null : normalizeIdeContextFilePath(eventContextFile)
+  return {
+    filePath: eventFocusFile ?? undefined,
+    line: normalizeIdeContextLine(item.context?.line),
+    surface: activityContextSurface(item),
+    label: item.detail ?? `${item.verb} ${item.target}`,
+    sourceId: item.id,
+    goalId: item.context?.goal_id,
+    taskId: item.context?.task_id,
+    boardPostId: item.context?.board_post_id,
+    commentId: item.context?.comment_id,
+    prId: item.context?.pr_id,
+    gitRef: item.context?.git_ref,
+    logId: item.context?.log_id,
+    sessionId: item.context?.session_id,
+    operationId: item.context?.operation_id,
+    workerRunId: item.context?.worker_run_id,
+    keeperId: item.keeper_id,
+    telemetry: true,
+  }
+}
+
 function activityRefreshLabel(state: ActivityRefreshState, refreshMs: number | null): string {
   if (state.tone === 'loading') return 'syncing'
   if (state.tone === 'live') return refreshMs === null ? 'loaded' : 'live'
@@ -673,25 +750,7 @@ function ActivityRow(
   const eventFocusFile = eventContextFile === undefined ? null : normalizeIdeContextFilePath(eventContextFile)
   const eventFocusLine = normalizeIdeContextLine(item.context?.line)
   const hasEventContextFocus = eventFocusFile !== null
-  const routeLinks = routeLinksForContext({
-    filePath: eventFocusFile ?? undefined,
-    line: eventFocusLine,
-    surface: activityContextSurface(item),
-    label: item.detail ?? `${item.verb} ${item.target}`,
-    sourceId: item.id,
-    goalId: item.context?.goal_id,
-    taskId: item.context?.task_id,
-    boardPostId: item.context?.board_post_id,
-    commentId: item.context?.comment_id,
-    prId: item.context?.pr_id,
-    gitRef: item.context?.git_ref,
-    logId: item.context?.log_id,
-    sessionId: item.context?.session_id,
-    operationId: item.context?.operation_id,
-    workerRunId: item.context?.worker_run_id,
-    keeperId: item.keeper_id,
-    telemetry: true,
-  })
+  const routeLinks = activityRouteLinks(item)
 
   return html`
     <li

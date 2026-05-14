@@ -1473,6 +1473,38 @@
   color: var(--color-accent-fg);
 }
 
+.ide-run-progress-surface-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ide-run-progress-surface-link > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ide-run-progress-surface-link:hover,
+.ide-run-progress-surface-link:focus-visible {
+  color: var(--color-fg-primary);
+}
+
+.ide-run-progress-surface-link:focus-visible {
+  outline: 1px solid var(--color-accent-fg);
+  outline-offset: 1px;
+}
+
 .ide-run-progress-keepers > span {
   flex: 1 1 58px;
 }

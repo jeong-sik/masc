@@ -23,7 +23,7 @@ let clear_retired_pg_envs () =
 let force_jsonl_fallback_env () =
   Unix.putenv Env_config_core.storage_type_env_key "filesystem";
   clear_retired_pg_envs ();
-  let policy_path = "/tmp/gemini_headless_admin_policy.json" in
+  let policy_path = "/tmp/oas_headless_admin_policy.json" in
   let oc = open_out policy_path in
   output_string oc "{\"rules\":[{\"name\":\"no_ask_user\",\"effect\":\"deny\",\"condition\":{\"fact\":\"tool\",\"operator\":\"equal\",\"value\":\"ask_user\"}}]}";
   close_out oc;
@@ -676,20 +676,11 @@ let sync_internal_keeper_token_env (state : Mcp_server.server_state) =
   Log.Server.info
     "startup internal keeper MCP token synced via MASC_INTERNAL_MCP_TOKEN"
 
-let codex_mcp_client_spec, codex_mcp_config_sync =
-  Local_mcp_client_catalog.primary_config_sync_client ()
-
-let sync_codex_mcp_config_env_key =
-  codex_mcp_config_sync.enabled_env_var
-
-let codex_config_path_env_key =
-  codex_mcp_config_sync.config_path_env_var
-
-type codex_mcp_config_sync_status =
-  | Codex_mcp_config_updated
-  | Codex_mcp_config_unchanged
-  | Codex_mcp_config_server_missing
-  | Codex_mcp_config_header_missing
+type mcp_client_config_sync_status =
+  | Mcp_client_config_updated
+  | Mcp_client_config_unchanged
+  | Mcp_client_config_server_missing
+  | Mcp_client_config_header_missing
 
 let split_lines_with_trailing_newline content =
   let has_trailing_newline =
@@ -763,16 +754,17 @@ let is_authorization_header_binding trimmed =
     | ' ' | '\t' | '=' -> true
     | _ -> false
 
-let codex_mcp_headers_line indent =
+let mcp_client_headers_line ~(spec : Local_mcp_client_catalog.spec) indent =
   Printf.sprintf
     "%shttp_headers = { \"Accept\" = \"application/json, text/event-stream\", \"X-MASC-Agent\" = \"%s\" }"
-    indent codex_mcp_client_spec.agent_name
+    indent spec.agent_name
 
-let codex_mcp_bearer_env_line indent =
+let mcp_client_bearer_env_line ~(spec : Local_mcp_client_catalog.spec) indent =
   Printf.sprintf "%sbearer_token_env_var = \"%s\"" indent
-    codex_mcp_client_spec.token_env_var
+    spec.token_env_var
 
-let sync_codex_mcp_auth_header_content content =
+let sync_mcp_client_auth_header_content_with_spec
+    ~(spec : Local_mcp_client_catalog.spec) content =
   let lines, has_trailing_newline =
     split_lines_with_trailing_newline content
   in
@@ -781,13 +773,13 @@ let sync_codex_mcp_auth_header_content content =
       if seen_header then
         (acc, seen_header, changed)
       else
-        (codex_mcp_headers_line "" :: acc, true, true)
+        (mcp_client_headers_line ~spec "" :: acc, true, true)
     in
     let acc, seen_bearer_env, changed =
       if seen_bearer_env then
         (acc, seen_bearer_env, changed)
       else
-        (codex_mcp_bearer_env_line "" :: acc, true, true)
+        (mcp_client_bearer_env_line ~spec "" :: acc, true, true)
     in
     (acc, seen_header, seen_bearer_env, changed)
   in
@@ -804,13 +796,13 @@ let sync_codex_mcp_auth_header_content content =
         in
         let status =
           if not seen_masc_section then
-            Codex_mcp_config_server_missing
+            Mcp_client_config_server_missing
           else if not seen_header then
-            Codex_mcp_config_header_missing
+            Mcp_client_config_header_missing
           else if changed then
-            Codex_mcp_config_updated
+            Mcp_client_config_updated
           else
-            Codex_mcp_config_unchanged
+            Mcp_client_config_unchanged
         in
         let rendered = String.concat "\n" (List.rev acc) in
         let rendered =
@@ -846,13 +838,13 @@ let sync_codex_mcp_auth_header_content content =
         in
         let line, seen_header, seen_bearer_env, changed =
           if in_masc_section && is_http_headers_binding trimmed then
-            let next = codex_mcp_headers_line (leading_indent line) in
+            let next = mcp_client_headers_line ~spec (leading_indent line) in
             ( next,
               true,
               seen_bearer_env,
               changed || not (String.equal next line) )
           else if in_masc_section && is_bearer_token_env_var_binding trimmed then
-            let next = codex_mcp_bearer_env_line (leading_indent line) in
+            let next = mcp_client_bearer_env_line ~spec (leading_indent line) in
             ( next,
               seen_header,
               true,
@@ -873,60 +865,69 @@ let sync_codex_mcp_auth_header_content content =
   loop ~in_masc_section:false ~seen_masc_section:false ~seen_header:false
     ~seen_bearer_env:false ~changed:false [] lines
 
-let codex_config_path_opt () =
-  match Sys.getenv_opt codex_config_path_env_key |> Env_config_core.trim_opt with
+let sync_mcp_client_auth_header_content content =
+  let spec, _sync = Local_mcp_client_catalog.primary_config_sync_client () in
+  sync_mcp_client_auth_header_content_with_spec ~spec content
+
+let mcp_client_config_path_opt (sync : Local_mcp_client_catalog.config_sync) =
+  match Sys.getenv_opt sync.config_path_env_var |> Env_config_core.trim_opt with
   | Some path -> Some path
   | None ->
       Option.map
         (fun home ->
-          List.fold_left Filename.concat home
-            codex_mcp_config_sync.default_config_path_segments)
+          List.fold_left Filename.concat home sync.default_config_path_segments)
         (Env_config_core.home_dir_opt ())
 
-let sync_codex_mcp_config ~agent_name =
+let sync_mcp_client_config
+    ~(spec : Local_mcp_client_catalog.spec)
+    ~(config_sync : Local_mcp_client_catalog.config_sync)
+    ~agent_name =
   if
     not
-      (Env_config_core.get_bool ~default:false sync_codex_mcp_config_env_key)
+      (Env_config_core.get_bool ~default:false config_sync.enabled_env_var)
   then
     ()
   else
-    match codex_config_path_opt () with
+    match mcp_client_config_path_opt config_sync with
     | None ->
         Log.Server.info
-          "startup skipped Codex MCP config sync: HOME is not set"
+          "startup skipped MCP client config sync for %s: HOME is not set"
+          spec.client_name
     | Some config_path ->
         if not (Sys.file_exists config_path) then
           Log.Server.info
-            "startup skipped Codex MCP config sync: %s does not exist"
-            config_path
+            "startup skipped MCP client config sync for %s: %s does not exist"
+            spec.client_name config_path
         else
           try
             let content = Fs_compat.load_file config_path in
-            let updated, status = sync_codex_mcp_auth_header_content content in
+            let updated, status =
+              sync_mcp_client_auth_header_content_with_spec ~spec content
+            in
             (match status with
-             | Codex_mcp_config_updated ->
+             | Mcp_client_config_updated ->
                  Auth.save_private_text_file config_path updated;
                  Log.Server.warn
-                   "startup synced Codex MCP bearer-token env config for %s in %s"
-                   agent_name config_path
-             | Codex_mcp_config_unchanged ->
+                   "startup synced MCP client bearer-token env config for %s in %s"
+                   spec.client_name config_path
+             | Mcp_client_config_unchanged ->
                  Log.Server.info
-                   "startup Codex MCP bearer-token env config already current for %s"
-                   agent_name
-             | Codex_mcp_config_server_missing ->
+                   "startup MCP client bearer-token env config already current for %s"
+                   spec.client_name
+             | Mcp_client_config_server_missing ->
                  Log.Server.info
-                   "startup skipped Codex MCP config sync: [mcp_servers.masc] missing in %s"
-                   config_path
-             | Codex_mcp_config_header_missing ->
+                   "startup skipped MCP client config sync for %s: [mcp_servers.%s] missing in %s"
+                   spec.client_name spec.server_name config_path
+             | Mcp_client_config_header_missing ->
                  Log.Server.info
-                   "startup skipped Codex MCP config sync: masc http_headers missing in %s"
-                   config_path)
+                   "startup skipped MCP client config sync for %s: %s http_headers missing in %s"
+                   spec.client_name spec.server_name config_path)
           with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
               Log.Server.error
-                "startup failed Codex MCP config sync for %s: %s"
-                agent_name (Printexc.to_string exn)
+                "startup failed MCP client config sync for %s: %s"
+                spec.client_name (Printexc.to_string exn)
 
 let sync_client_token_file ~base_path ~agent_name ~role =
   let token_file =
@@ -1008,12 +1009,12 @@ let sync_client_token_file ~base_path ~agent_name ~role =
                normalize_existing raw_token cred
            | _ -> create_and_persist ~reason:"repaired"))
    | None -> create_and_persist ~reason:"created");
-  if Option.is_some (Local_mcp_client_catalog.config_sync_for_agent agent_name)
-  then
-    sync_codex_mcp_config ~agent_name
+  match Local_mcp_client_catalog.config_sync_for_agent agent_name with
+  | Some (spec, config_sync) -> sync_mcp_client_config ~spec ~config_sync ~agent_name
+  | None -> ()
 
 let sync_mcp_client_token_files ~base_path =
-  Local_mcp_client_catalog.all
+  Local_mcp_client_catalog.all ()
   |> List.iter (fun (spec : Local_mcp_client_catalog.spec) ->
          sync_client_token_file ~base_path ~agent_name:spec.agent_name
            ~role:Masc_domain.Worker)

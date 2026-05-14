@@ -7,7 +7,7 @@
  (wrapped true)
  ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on.
  (flags (:standard -w +4))
- (libraries masc_process masc_core masc_config eio unix yojson re))
+ (libraries masc_process masc_core masc_config eio unix yojson re otoml))
 
 ; RFC-0054 PR-3 — auto-generate parallel-verification walkers for
 ; Shell_ir_typed. The generator's spec lives in

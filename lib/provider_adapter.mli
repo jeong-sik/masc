@@ -123,7 +123,6 @@ type adapter =
   ; runtime_kind : runtime_kind
   ; auth_mode : auth_mode
   ; aliases : string list
-  ; spawn_key : string option
   ; cascade_prefix : string
   ; endpoint_url : string option
   ; default_model_id : string option
@@ -222,13 +221,13 @@ val telemetry_bucket_of_provider_label : string -> string option
     provider-prefixed model label. *)
 val telemetry_bucket_of_model_id : string -> string option
 
-(** Resolve spawn_key for an agent label. *)
-val resolve_spawn_key : string -> string option
+(** Resolve the configured spawn executable for an agent label. *)
+val resolve_spawn_executable : string -> string option
 
 (** Check if a name is a known direct adapter label or alias. *)
 val is_known_provider : string -> bool
 
-(** Check if a name is a CLI-spawnable agent (has a spawn_key). *)
+(** Check if a name is a configured CLI-spawnable agent. *)
 val is_spawnable_agent : string -> bool
 
 (** Return canonical names of all spawnable adapters. *)

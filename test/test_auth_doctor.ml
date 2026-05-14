@@ -62,25 +62,25 @@ let contains_substring ~needle s =
 let list_contains_substring ~needle values =
   List.exists (contains_substring ~needle) values
 
-let expected_codex_config_stage_names =
+let expected_mcp_client_config_stage_names =
   [
-    "codex_config_file";
-    "codex_config_parse";
-    "codex_server_config";
-    "codex_auth_model";
-    "codex_http_headers";
-    "codex_agent_header";
-    "codex_oauth_login";
+    "mcp_client_config_file";
+    "mcp_client_config_parse";
+    "mcp_client_server_config";
+    "mcp_client_auth_model";
+    "mcp_client_http_headers";
+    "mcp_client_agent_header";
+    "mcp_client_login";
   ]
 
-let check_codex_config_stage_names (config : Codex_mcp_config_doctor.t) =
+let check_mcp_client_config_stage_names (config : Mcp_client_config_doctor.t) =
   let names =
     List.map
-      (fun (stage : Codex_mcp_config_doctor.stage) -> stage.name)
+      (fun (stage : Mcp_client_config_doctor.stage) -> stage.name)
       config.stages
   in
-  check (list string) "stable codex config stage names"
-    expected_codex_config_stage_names names
+  check (list string) "stable MCP client config stage names"
+    expected_mcp_client_config_stage_names names
 
 let save_credential_or_fail base_path ~agent_name ~role ~raw_token =
   match
@@ -225,7 +225,7 @@ let test_ignores_stale_admin_raw_token_file () =
        ~needle:"No usable admin bearer source was detected"
        report.warnings)
 
-let test_reports_codex_mcp_bearer_env () =
+let test_reports_mcp_config_sync_bearer_env () =
   with_temp_dir "auth-doctor-codex-mcp" @@ fun base_path ->
   let auth_cfg =
     Masc_domain.
@@ -253,20 +253,20 @@ let test_reports_codex_mcp_bearer_env () =
       ~default_base_path:base_path ()
   in
   check string "codex server name" "masc"
-    report.codex_mcp.server_name;
+    report.mcp_config_sync.server_name;
   check string "codex auth model" "bearer_token_env"
-    report.codex_mcp.auth_model;
+    report.mcp_config_sync.auth_model;
   check string "codex token status" "live"
-    report.codex_mcp.token_status;
+    report.mcp_config_sync.token_status;
   check (option string) "codex token agent"
     (Some "codex-mcp-client")
-    report.codex_mcp.token_agent;
+    report.mcp_config_sync.token_agent;
   check (option string) "codex token role" (Some "worker")
-    report.codex_mcp.token_role;
+    report.mcp_config_sync.token_role;
   check (option bool) "codex can read state" (Some true)
-    report.codex_mcp.token_can_read_state;
+    report.mcp_config_sync.token_can_read_state;
   check bool "codex login unsupported" false
-    report.codex_mcp.login_supported;
+    report.mcp_config_sync.login_supported;
   check bool "doctor text names bearer env" true
     (contains_substring ~needle:"token_env_var: MASC_MCP_TOKEN"
        (Auth_doctor.render_text report));
@@ -354,7 +354,7 @@ let test_reports_codex_config_pipeline_stages () =
     Auth_doctor.analyze ~base_path_input:base_path
       ~default_base_path:base_path ()
   in
-  let config = report.codex_mcp.config in
+  let config = report.mcp_config_sync.config in
   check bool "codex config file present" true config.file_present;
   check bool "masc server present" true config.server_present;
   check (option string) "bearer env var"
@@ -369,12 +369,12 @@ let test_reports_codex_config_pipeline_stages () =
   check (option bool) "agent header ok" (Some true)
     config.x_masc_agent_ok;
   check bool "no codex config pipeline warning" false
-    (list_contains_substring ~needle:"Codex MCP pipeline"
+    (list_contains_substring ~needle:"MCP client config pipeline"
        report.warnings);
   check bool "json exposes config stages" true
     (contains_substring ~needle:"\"stages\""
        (Auth_doctor.to_yojson report |> Yojson.Safe.to_string));
-  check_codex_config_stage_names config
+  check_mcp_client_config_stage_names config
 
 let test_reports_stable_codex_config_stages_when_file_missing () =
   with_temp_dir "auth-doctor-codex-config-missing" @@ fun base_path ->
@@ -388,18 +388,18 @@ let test_reports_stable_codex_config_stages_when_file_missing () =
     Auth_doctor.analyze ~base_path_input:base_path
       ~default_base_path:base_path ()
   in
-  let config = report.codex_mcp.config in
+  let config = report.mcp_config_sync.config in
   check bool "codex config file missing" false config.file_present;
-  check_codex_config_stage_names config;
+  check_mcp_client_config_stage_names config;
   check bool "oauth login remains classified as skip" true
     (List.exists
-       (fun (stage : Codex_mcp_config_doctor.stage) ->
-         String.equal stage.name "codex_oauth_login"
+       (fun (stage : Mcp_client_config_doctor.stage) ->
+         String.equal stage.name "mcp_client_login"
          && match stage.status with
-            | Codex_mcp_config_doctor.Stage_skip -> true
-            | Codex_mcp_config_doctor.Stage_pass
-            | Codex_mcp_config_doctor.Stage_warn
-            | Codex_mcp_config_doctor.Stage_fail ->
+            | Mcp_client_config_doctor.Stage_skip -> true
+            | Mcp_client_config_doctor.Stage_pass
+            | Mcp_client_config_doctor.Stage_warn
+            | Mcp_client_config_doctor.Stage_fail ->
                 false)
        config.stages);
   check bool "suggests config path repair" true
@@ -425,9 +425,9 @@ bearer_token_env_var = "MASC_MCP_TOKEN"
       ~default_base_path:base_path ()
   in
   check bool "masc server missing" false
-    report.codex_mcp.config.server_present;
+    report.mcp_config_sync.config.server_present;
   check bool "captures wrong server name" true
-    (List.mem "mago" report.codex_mcp.config.server_names);
+    (List.mem "mago" report.mcp_config_sync.config.server_names);
   check bool "warns with wrong server name detail" true
     (list_contains_substring
        ~needle:"configured server names: mago"
@@ -456,7 +456,7 @@ bearer_token_env_var = "MASC_MCP_TOKEN"
       ~default_base_path:base_path ()
   in
   check (option bool) "authorization header detected" (Some true)
-    report.codex_mcp.config.authorization_header_present;
+    report.mcp_config_sync.config.authorization_header_present;
   check bool "warns about hardcoded authorization" true
     (list_contains_substring
        ~needle:"http_headers still contains Authorization"
@@ -475,18 +475,18 @@ let () =
             test_errors_when_no_admin_bearer_source_exists;
           test_case "ignores stale admin raw token file" `Quick
             test_ignores_stale_admin_raw_token_file;
-          test_case "reports Codex MCP bearer env" `Quick
-            test_reports_codex_mcp_bearer_env;
+          test_case "reports MCP client config bearer env" `Quick
+            test_reports_mcp_config_sync_bearer_env;
           test_case "reports Claude and Gemini MCP client identities" `Quick
             test_reports_claude_and_gemini_mcp_client_identities;
-          test_case "reports Codex MCP config pipeline stages" `Quick
+          test_case "reports MCP client config config pipeline stages" `Quick
             test_reports_codex_config_pipeline_stages;
-          test_case "reports stable Codex MCP config stages when file missing"
+          test_case "reports stable MCP client config config stages when file missing"
             `Quick
             test_reports_stable_codex_config_stages_when_file_missing;
-          test_case "warns when Codex MCP config uses wrong server name" `Quick
+          test_case "warns when MCP client config config uses wrong server name" `Quick
             test_warns_when_codex_config_uses_wrong_server_name;
-          test_case "warns when Codex MCP config uses hardcoded auth" `Quick
+          test_case "warns when MCP client config config uses hardcoded auth" `Quick
             test_warns_when_codex_config_uses_hardcoded_authorization;
         ] );
     ]

@@ -14,7 +14,7 @@ type watched_agent = {
   raw_token_file_present : bool;
 }
 
-type codex_mcp = {
+type mcp_config_sync = {
   server_name : string;
   auth_model : string;
   token_env_var : string;
@@ -25,7 +25,7 @@ type codex_mcp = {
   token_can_read_state : bool option;
   login_supported : bool;
   login_note : string;
-  config : Codex_mcp_config_doctor.t;
+  config : Mcp_client_config_doctor.t;
 }
 
 type mcp_client = {
@@ -67,7 +67,7 @@ type t = {
   credential_count : int;
   role_counts : (string * int) list;
   watched_agents : watched_agent list;
-  codex_mcp : codex_mcp;
+  mcp_config_sync : mcp_config_sync;
   mcp_clients : mcp_client list;
   warnings : string list;
   next_actions : string list;
@@ -84,14 +84,8 @@ let status_to_string = function
   | Warn -> "warn"
   | Error -> "error"
 
-let codex_mcp_spec, _codex_mcp_config_sync =
-  Local_mcp_client_catalog.primary_config_sync_client ()
-
-let codex_mcp_login_note =
-  Option.value ~default:"masc-mcp uses bearer token auth."
-    codex_mcp_spec.login_note
-
-let mcp_client_specs = Local_mcp_client_catalog.all
+let mcp_config_sync_login_note (spec : Local_mcp_client_catalog.spec) =
+  Option.value ~default:"masc-mcp uses bearer token auth." spec.login_note
 
 let canonicalize_path path =
   try Unix.realpath path with
@@ -229,54 +223,56 @@ let admin_bearer_sources ~base_path ~auth_dir ~dashboard_dev_token_available
   env_sources @ dashboard_sources @ token_file_sources
   |> dedupe_keep_order
 
-let codex_mcp_report ~base_path =
-  let config = Codex_mcp_config_doctor.analyze_default () in
-  match
-    Sys.getenv_opt codex_mcp_spec.token_env_var |> Env_config_core.trim_opt
-  with
+let mcp_config_sync_report
+    ~base_path
+    ~(spec : Local_mcp_client_catalog.spec)
+    ~(config_sync : Local_mcp_client_catalog.config_sync)
+  =
+  let config = Mcp_client_config_doctor.analyze_default ~spec ~config_sync () in
+  match Sys.getenv_opt spec.token_env_var |> Env_config_core.trim_opt with
   | None ->
       {
-        server_name = codex_mcp_spec.server_name;
+        server_name = spec.server_name;
         auth_model = "bearer_token_env";
-        token_env_var = codex_mcp_spec.token_env_var;
+        token_env_var = spec.token_env_var;
         token_env_configured = false;
         token_status = "unset";
         token_agent = None;
         token_role = None;
         token_can_read_state = None;
-        login_supported = codex_mcp_spec.login_supported;
-        login_note = codex_mcp_login_note;
+        login_supported = spec.login_supported;
+        login_note = mcp_config_sync_login_note spec;
         config;
       }
   | Some raw_token -> (
       match Auth.find_credential_by_token base_path ~token:raw_token with
       | Ok cred ->
           {
-            server_name = codex_mcp_spec.server_name;
+            server_name = spec.server_name;
             auth_model = "bearer_token_env";
-            token_env_var = codex_mcp_spec.token_env_var;
+            token_env_var = spec.token_env_var;
             token_env_configured = true;
             token_status = "live";
             token_agent = Some cred.agent_name;
             token_role = Some (agent_role_to_string cred.role);
             token_can_read_state =
               Some (has_permission cred.role CanReadState);
-            login_supported = codex_mcp_spec.login_supported;
-            login_note = codex_mcp_login_note;
+            login_supported = spec.login_supported;
+            login_note = mcp_config_sync_login_note spec;
             config;
           }
       | Error _ ->
           {
-            server_name = codex_mcp_spec.server_name;
+            server_name = spec.server_name;
             auth_model = "bearer_token_env";
-            token_env_var = codex_mcp_spec.token_env_var;
+            token_env_var = spec.token_env_var;
             token_env_configured = true;
             token_status = "invalid_or_expired";
             token_agent = None;
             token_role = None;
             token_can_read_state = None;
-            login_supported = codex_mcp_spec.login_supported;
-            login_note = codex_mcp_login_note;
+            login_supported = spec.login_supported;
+            login_note = mcp_config_sync_login_note spec;
             config;
           })
 
@@ -390,7 +386,13 @@ let analyze ~base_path_input ~default_base_path () =
     admin_bearer_sources ~base_path ~auth_dir
       ~dashboard_dev_token_available ~admin_token_env_state credentials
   in
-  let codex_mcp = codex_mcp_report ~base_path in
+  let config_sync_client, config_sync =
+    Local_mcp_client_catalog.primary_config_sync_client ()
+  in
+  let mcp_config_sync =
+    mcp_config_sync_report ~base_path ~spec:config_sync_client ~config_sync
+  in
+  let mcp_client_specs = Local_mcp_client_catalog.all () in
   let mcp_clients =
     List.map (mcp_client_report ~base_path ~auth_dir) mcp_client_specs
   in
@@ -404,7 +406,6 @@ let analyze ~base_path_input ~default_base_path () =
              (Auth.load_credential base_path agent_name))
   in
   let admin_permission = show_permission CanAdmin in
-  let config_sync_client = codex_mcp_spec in
   let admin_warning_agents =
     config_sync_client.agent_name :: config_sync_client.legacy_agent_names
   in
@@ -458,7 +459,7 @@ let analyze ~base_path_input ~default_base_path () =
        else
          None);
       (if auth_cfg.enabled && auth_cfg.require_token then
-         match codex_mcp.token_status with
+         match mcp_config_sync.token_status with
          | "unset" ->
              Some
                (Printf.sprintf
@@ -483,7 +484,7 @@ let analyze ~base_path_input ~default_base_path () =
          values
          @ List.filter_map admin_warning_for_agent admin_warning_agents
          @ List.filter_map mcp_client_warning mcp_clients
-         @ Codex_mcp_config_doctor.warnings codex_mcp.config)
+         @ Mcp_client_config_doctor.warnings mcp_config_sync.config)
     |> dedupe_keep_order
   in
   let next_actions =
@@ -525,7 +526,7 @@ let analyze ~base_path_input ~default_base_path () =
        else
          None);
       (if auth_cfg.enabled && auth_cfg.require_token
-          && not (String.equal codex_mcp.token_status "live") then
+          && not (String.equal mcp_config_sync.token_status "live") then
          Some
            (Printf.sprintf
               "For %s MCP, run `masc-mcp login --agent %s --role worker --shell` and export %s; do not run `%s mcp login %s`."
@@ -536,7 +537,7 @@ let analyze ~base_path_input ~default_base_path () =
          None);
       Some
         (Printf.sprintf
-           "For %s MCP pipeline drift, inspect the codex_mcp.config.stages section from `masc-mcp doctor auth --json`."
+           "For %s MCP pipeline drift, inspect the mcp_config_sync.config.stages section from `masc-mcp doctor auth --json`."
            (String.capitalize_ascii config_sync_client.client_name));
       Some "Rerun `masc-mcp doctor auth` after editing auth files or rotating tokens.";
     ]
@@ -544,7 +545,8 @@ let analyze ~base_path_input ~default_base_path () =
     |> (fun values ->
          values
          @ List.filter_map mcp_client_next_action mcp_clients
-         @ Codex_mcp_config_doctor.next_actions codex_mcp.config)
+         @ Mcp_client_config_doctor.next_actions ~spec:config_sync_client
+             ~config_sync mcp_config_sync.config)
     |> dedupe_keep_order
   in
   let status =
@@ -579,7 +581,7 @@ let analyze ~base_path_input ~default_base_path () =
     credential_count = List.length credentials;
     role_counts = role_counts_of_credentials credentials;
     watched_agents;
-    codex_mcp;
+    mcp_config_sync;
     mcp_clients;
     warnings;
     next_actions;
@@ -599,23 +601,23 @@ let watched_agent_to_yojson (agent : watched_agent) =
       ("raw_token_file_present", `Bool agent.raw_token_file_present);
     ]
 
-let codex_mcp_to_yojson codex_mcp =
+let mcp_config_sync_to_yojson mcp_config_sync =
   `Assoc
     [
-      ("server_name", `String codex_mcp.server_name);
-      ("auth_model", `String codex_mcp.auth_model);
-      ("token_env_var", `String codex_mcp.token_env_var);
-      ("token_env_configured", `Bool codex_mcp.token_env_configured);
-      ("token_status", `String codex_mcp.token_status);
-      (option_field "token_agent" codex_mcp.token_agent);
-      (option_field "token_role" codex_mcp.token_role);
+      ("server_name", `String mcp_config_sync.server_name);
+      ("auth_model", `String mcp_config_sync.auth_model);
+      ("token_env_var", `String mcp_config_sync.token_env_var);
+      ("token_env_configured", `Bool mcp_config_sync.token_env_configured);
+      ("token_status", `String mcp_config_sync.token_status);
+      (option_field "token_agent" mcp_config_sync.token_agent);
+      (option_field "token_role" mcp_config_sync.token_role);
       ( "token_can_read_state",
-        match codex_mcp.token_can_read_state with
+        match mcp_config_sync.token_can_read_state with
         | Some value -> `Bool value
         | None -> `Null );
-      ("login_supported", `Bool codex_mcp.login_supported);
-      ("login_note", `String codex_mcp.login_note);
-      ("config", Codex_mcp_config_doctor.to_yojson codex_mcp.config);
+      ("login_supported", `Bool mcp_config_sync.login_supported);
+      ("login_note", `String mcp_config_sync.login_note);
+      ("config", Mcp_client_config_doctor.to_yojson mcp_config_sync.config);
     ]
 
 let mcp_client_to_yojson (client : mcp_client) =
@@ -678,7 +680,7 @@ let to_yojson (report : t) =
              report.role_counts) );
       ( "watched_agents",
         `List (List.map watched_agent_to_yojson report.watched_agents) );
-      ("codex_mcp", codex_mcp_to_yojson report.codex_mcp);
+      ("mcp_config_sync", mcp_config_sync_to_yojson report.mcp_config_sync);
       ( "mcp_clients",
         `List (List.map mcp_client_to_yojson report.mcp_clients) );
       ("warnings", `List (List.map (fun value -> `String value) report.warnings));
@@ -758,55 +760,55 @@ let render_text (report : t) =
            (option_value agent.expires_at)))
     report.watched_agents;
   add_line "";
-  add_line "codex_mcp:";
+  add_line "mcp_config_sync:";
   add_line
-    (Printf.sprintf "- server_name: %s" report.codex_mcp.server_name);
+    (Printf.sprintf "- server_name: %s" report.mcp_config_sync.server_name);
   add_line
-    (Printf.sprintf "- auth_model: %s" report.codex_mcp.auth_model);
+    (Printf.sprintf "- auth_model: %s" report.mcp_config_sync.auth_model);
   add_line
     (Printf.sprintf "- token_env_var: %s"
-       report.codex_mcp.token_env_var);
+       report.mcp_config_sync.token_env_var);
   add_line
     (Printf.sprintf "- token_env_configured: %s"
-       (yes_no report.codex_mcp.token_env_configured));
+       (yes_no report.mcp_config_sync.token_env_configured));
   add_line
     (Printf.sprintf "- token_status: %s"
-       report.codex_mcp.token_status);
+       report.mcp_config_sync.token_status);
   add_line
     (Printf.sprintf "- token_agent: %s"
-       (option_value report.codex_mcp.token_agent));
+       (option_value report.mcp_config_sync.token_agent));
   add_line
     (Printf.sprintf "- token_role: %s"
-       (option_value report.codex_mcp.token_role));
+       (option_value report.mcp_config_sync.token_role));
   add_line
     (Printf.sprintf "- token_can_read_state: %s"
-       (match report.codex_mcp.token_can_read_state with
+       (match report.mcp_config_sync.token_can_read_state with
         | Some value -> yes_no value
         | None -> "(n/a)"));
   add_line
     (Printf.sprintf "- login_supported: %s"
-       (yes_no report.codex_mcp.login_supported));
-  add_line (Printf.sprintf "- login_note: %s" report.codex_mcp.login_note);
+       (yes_no report.mcp_config_sync.login_supported));
+  add_line (Printf.sprintf "- login_note: %s" report.mcp_config_sync.login_note);
   add_line "- config:";
   add_line
     (Printf.sprintf "  path: %s"
-       (option_value report.codex_mcp.config.config_path));
+       (option_value report.mcp_config_sync.config.config_path));
   add_line
     (Printf.sprintf "  file_present: %s"
-       (yes_no report.codex_mcp.config.file_present));
+       (yes_no report.mcp_config_sync.config.file_present));
   add_line
     (Printf.sprintf "  server_names: %s"
-       (match report.codex_mcp.config.server_names with
+       (match report.mcp_config_sync.config.server_names with
         | [] -> "(none)"
         | names -> String.concat ", " names));
   add_line "  stages:";
   List.iter
-    (fun (stage : Codex_mcp_config_doctor.stage) ->
+    (fun (stage : Mcp_client_config_doctor.stage) ->
       add_line
         (Printf.sprintf "  - %s: %s - %s" stage.name
-           (Codex_mcp_config_doctor.stage_status_to_string stage.status)
+           (Mcp_client_config_doctor.stage_status_to_string stage.status)
            stage.detail))
-    report.codex_mcp.config.stages;
+    report.mcp_config_sync.config.stages;
   add_line "";
   add_line "mcp_clients:";
   List.iter

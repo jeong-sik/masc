@@ -1728,7 +1728,7 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
           Alcotest.(check bool) "canonical tool present" true
             (List.mem "masc_status" tool_names)))
 
-let test_main_eio_self_heals_codex_mcp_token_file () =
+let test_main_eio_self_heals_mcp_config_sync_token_file () =
   with_temp_dir "startup-codex-token-selfheal" (fun dir ->
       let exe = find_main_eio_exe () in
       let port = find_free_port () in
@@ -1844,7 +1844,7 @@ let test_main_eio_self_heals_codex_mcp_token_file () =
                     agent_name (Masc_domain.masc_error_to_string err))
             [ "claude"; "gemini" ]))
 
-let test_codex_mcp_config_sync_updates_only_masc_section () =
+let test_mcp_client_config_sync_updates_only_masc_section () =
   let content =
     {|[mcp_servers.other]
 http_headers = { Authorization = "Bearer keep-other" }
@@ -1874,13 +1874,13 @@ http_headers = { Authorization = "Bearer nested-should-stay" }
 |}
   in
   let updated, status =
-    Server_runtime_bootstrap.sync_codex_mcp_auth_header_content content
+    Server_runtime_bootstrap.sync_mcp_client_auth_header_content content
   in
   Alcotest.(check string) "masc section updated" expected updated;
   Alcotest.(check bool) "reported updated" true
-    (status = Server_runtime_bootstrap.Codex_mcp_config_updated)
+    (status = Server_runtime_bootstrap.Mcp_client_config_updated)
 
-let test_codex_mcp_config_sync_missing_header_is_inserted () =
+let test_mcp_client_config_sync_missing_header_is_inserted () =
   let content =
     {|[mcp_servers.masc]
 url = "http://127.0.0.1:8935/mcp"
@@ -1894,14 +1894,14 @@ bearer_token_env_var = "MASC_MCP_TOKEN"
 |}
   in
   let updated, status =
-    Server_runtime_bootstrap.sync_codex_mcp_auth_header_content
+    Server_runtime_bootstrap.sync_mcp_client_auth_header_content
       content
   in
   Alcotest.(check string) "missing config inserted" expected updated;
   Alcotest.(check bool) "reported updated" true
-    (status = Server_runtime_bootstrap.Codex_mcp_config_updated)
+    (status = Server_runtime_bootstrap.Mcp_client_config_updated)
 
-let test_codex_mcp_config_sync_strips_standalone_authorization_in_masc_section
+let test_mcp_client_config_sync_strips_standalone_authorization_in_masc_section
     () =
   let content =
     {|[mcp_servers.other]
@@ -1931,14 +1931,14 @@ Authorization = "Bearer nested-keep"
 |}
   in
   let updated, status =
-    Server_runtime_bootstrap.sync_codex_mcp_auth_header_content content
+    Server_runtime_bootstrap.sync_mcp_client_auth_header_content content
   in
   Alcotest.(check string) "standalone authorization stripped from masc" expected
     updated;
   Alcotest.(check bool) "reported updated" true
-    (status = Server_runtime_bootstrap.Codex_mcp_config_updated)
+    (status = Server_runtime_bootstrap.Mcp_client_config_updated)
 
-let test_codex_mcp_config_sync_strips_standalone_authorization_when_no_bearer_env
+let test_mcp_client_config_sync_strips_standalone_authorization_when_no_bearer_env
     () =
   let content =
     {|[mcp_servers.masc]
@@ -1956,12 +1956,12 @@ bearer_token_env_var = "MASC_MCP_TOKEN"
   (* Authorization is stripped; http_headers and bearer_token_env_var are
      inserted because they are absent. *)
   let updated, status =
-    Server_runtime_bootstrap.sync_codex_mcp_auth_header_content content
+    Server_runtime_bootstrap.sync_mcp_client_auth_header_content content
   in
   Alcotest.(check string) "authorization stripped, canonical bindings inserted"
     expected updated;
   Alcotest.(check bool) "reported updated" true
-    (status = Server_runtime_bootstrap.Codex_mcp_config_updated)
+    (status = Server_runtime_bootstrap.Mcp_client_config_updated)
 
 let test_sync_bootable_keeper_credentials_mints_keeper_alias_token () =
   with_temp_dir "startup-keeper-credential-sync" (fun dir ->
@@ -2589,21 +2589,21 @@ let () =
             `Slow test_main_eio_fresh_bootstrap_and_mcp_handshake;
           Alcotest.test_case
             "main_eio self-heals codex mcp token file"
-            `Slow test_main_eio_self_heals_codex_mcp_token_file;
+            `Slow test_main_eio_self_heals_mcp_config_sync_token_file;
           Alcotest.test_case
             "codex mcp config sync updates only masc section"
-            `Quick test_codex_mcp_config_sync_updates_only_masc_section;
+            `Quick test_mcp_client_config_sync_updates_only_masc_section;
           Alcotest.test_case
             "codex mcp config sync inserts missing bearer env config"
-            `Quick test_codex_mcp_config_sync_missing_header_is_inserted;
+            `Quick test_mcp_client_config_sync_missing_header_is_inserted;
           Alcotest.test_case
             "codex mcp config sync strips standalone Authorization from masc section"
             `Quick
-            test_codex_mcp_config_sync_strips_standalone_authorization_in_masc_section;
+            test_mcp_client_config_sync_strips_standalone_authorization_in_masc_section;
           Alcotest.test_case
             "codex mcp config sync strips standalone Authorization when no bearer env"
             `Quick
-            test_codex_mcp_config_sync_strips_standalone_authorization_when_no_bearer_env;
+            test_mcp_client_config_sync_strips_standalone_authorization_when_no_bearer_env;
           Alcotest.test_case
             "startup sync mints bootable keeper credentials"
             `Quick test_sync_bootable_keeper_credentials_mints_keeper_alias_token;

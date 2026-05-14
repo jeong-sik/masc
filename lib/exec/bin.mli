@@ -95,9 +95,6 @@ type known =
   | Ffplay
   | Mpg123
   | Open
-  | Claude
-  | Gemini
-  | Codex
   | Sudo
   | Su
   | Chmod

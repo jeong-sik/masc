@@ -13,8 +13,8 @@
     [watched_agent_names], [admin_token_env_state],
     [admin_token_env_fields], [role_counts_of_credentials],
     [live_admin_token_file_source], [admin_bearer_sources],
-    [codex_mcp_report], MCP client identity checks, plus the per-record yojson encoders
-    ([watched_agent_to_yojson], [codex_mcp_to_yojson]).
+    [mcp_config_sync_report], MCP client identity checks, plus the per-record yojson encoders
+    ([watched_agent_to_yojson], [mcp_config_sync_to_yojson]).
     All consumed only inside {!analyze} / {!to_yojson} /
     {!render_text}. *)
 
@@ -43,7 +43,7 @@ type watched_agent = {
 (** Per-agent credential snapshot.  Aggregated under
     {!t.watched_agents}. *)
 
-type codex_mcp = {
+type mcp_config_sync = {
   server_name : string;
   auth_model : string;
   token_env_var : string;
@@ -54,9 +54,9 @@ type codex_mcp = {
   token_can_read_state : bool option;
   login_supported : bool;
   login_note : string;
-  config : Codex_mcp_config_doctor.t;
+  config : Mcp_client_config_doctor.t;
 }
-(** MCP wiring snapshot for the compatibility [codex_mcp] report block.
+(** MCP wiring snapshot for the compatibility [mcp_config_sync] report block.
     Values are catalog-backed; [login_note] remains operator-visible. *)
 
 type mcp_client = {
@@ -104,7 +104,7 @@ type t = {
   credential_count : int;
   role_counts : (string * int) list;
   watched_agents : watched_agent list;
-  codex_mcp : codex_mcp;
+  mcp_config_sync : mcp_config_sync;
   mcp_clients : mcp_client list;
   warnings : string list;
   next_actions : string list;
@@ -130,7 +130,7 @@ val analyze :
     + Each registered agent credential -> {!watched_agent} row.
     + Admin-token env-var status + admin-bearer source
       enumeration ([admin_bearer_sources]).
-    + MCP config via {!Codex_mcp_config_doctor}'s compatibility report.
+    + MCP config via {!Mcp_client_config_doctor}'s compatibility report.
     + Local MCP client identities from {!Local_mcp_client_catalog}.
 
     Side-effecting (file reads); pure with respect to the

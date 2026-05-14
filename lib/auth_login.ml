@@ -16,14 +16,11 @@ type t = {
   dashboard_url : string;
   mcp_url : string;
   mcp_token_env_var : string;
-  codex_server_name : string;
-  codex_token_env_var : string;
-  codex_login_supported : bool;
+  mcp_server_name : string;
+  mcp_config_sync_token_env_var : string;
+  mcp_config_sync_login_supported : bool;
+  mcp_config_sync_login_note : string;
 }
-
-let codex_server_name = "masc"
-
-let codex_token_env_var = Local_mcp_client_catalog.default_token_env_var
 
 let mcp_token_env_var_for_agent =
   Local_mcp_client_catalog.token_env_var_for_agent
@@ -107,6 +104,9 @@ let mint ~base_path ~host ~port ~agent_name ~role () =
               host port agent_param token_param
           in
           let mcp_url = Printf.sprintf "http://%s:%d/mcp" host port in
+          let config_sync_spec, _config_sync =
+            Local_mcp_client_catalog.primary_config_sync_client ()
+          in
           Ok
             {
               base_path;
@@ -119,9 +119,13 @@ let mint ~base_path ~host ~port ~agent_name ~role () =
               dashboard_url;
               mcp_url;
               mcp_token_env_var = mcp_token_env_var_for_agent cred.agent_name;
-              codex_server_name = Local_mcp_client_catalog.default_server_name;
-              codex_token_env_var;
-              codex_login_supported = false;
+              mcp_server_name = config_sync_spec.server_name;
+              mcp_config_sync_token_env_var = config_sync_spec.token_env_var;
+              mcp_config_sync_login_supported = config_sync_spec.login_supported;
+              mcp_config_sync_login_note =
+                Option.value
+                  ~default:"masc-mcp uses bearer token auth."
+                  config_sync_spec.login_note;
             })
 
 let to_yojson report =
@@ -139,21 +143,19 @@ let to_yojson report =
       ( "mcp_client",
         `Assoc
           [
-            ("server_name", `String report.codex_server_name);
+            ("server_name", `String report.mcp_server_name);
             ("agent_name", `String report.agent_name);
             ("auth_model", `String "bearer_token_env");
             ("token_env_var", `String report.mcp_token_env_var);
           ] );
-      ( "codex_mcp",
+      ( "mcp_config_sync",
         `Assoc
           [
-            ("server_name", `String report.codex_server_name);
+            ("server_name", `String report.mcp_server_name);
             ("auth_model", `String "bearer_token_env");
-            ("token_env_var", `String report.codex_token_env_var);
-            ("login_supported", `Bool report.codex_login_supported);
-            ( "login_note",
-              `String
-                "`codex mcp login` is OAuth-only; masc-mcp uses bearer token auth." );
+            ("token_env_var", `String report.mcp_config_sync_token_env_var);
+            ("login_supported", `Bool report.mcp_config_sync_login_supported);
+            ("login_note", `String report.mcp_config_sync_login_note);
           ] );
     ]
 
@@ -189,15 +191,17 @@ let render_text report =
       render_shell report;
       "";
       "mcp_client:";
-      Printf.sprintf "- server_name: %s" report.codex_server_name;
+      Printf.sprintf "- server_name: %s" report.mcp_server_name;
       Printf.sprintf "- agent_name: %s" report.agent_name;
       Printf.sprintf "- token_env_var: %s" report.mcp_token_env_var;
       "- auth_model: bearer_token_env";
       "";
-      "codex_mcp:";
-      Printf.sprintf "- server_name: %s" report.codex_server_name;
-      Printf.sprintf "- token_env_var: %s" report.codex_token_env_var;
+      "mcp_config_sync:";
+      Printf.sprintf "- server_name: %s" report.mcp_server_name;
+      Printf.sprintf "- token_env_var: %s" report.mcp_config_sync_token_env_var;
       "- auth_model: bearer_token_env";
-      "- login_supported: no";
-      "- note: `codex mcp login` is OAuth-only; use the exported bearer token instead.";
+      Printf.sprintf
+        "- login_supported: %s"
+        (if report.mcp_config_sync_login_supported then "yes" else "no");
+      Printf.sprintf "- note: %s" report.mcp_config_sync_login_note;
     ]

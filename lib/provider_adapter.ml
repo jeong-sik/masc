@@ -724,26 +724,28 @@ let telemetry_bucket_of_model_id model_id =
     | None -> telemetry_bucket_of_model_prefix model_id
 ;;
 
-(** Resolve spawn_key for an agent label.
-    Returns the key to look up in Spawn.spawn_config_of_key. *)
-let resolve_spawn_key label =
-  match resolve_direct_adapter label with
-  | Some adapter -> adapter.spawn_key
+(** Resolve the configured spawn executable for an agent label. *)
+let resolve_spawn_executable label =
+  match Local_mcp_client_catalog.find_spawn label with
+  | Some (_spec, spawn) ->
+    String.split_on_char ' ' (String.trim spawn.command)
+    |> List.find_opt (fun part -> not (String.equal part ""))
+    |> Option.map Filename.basename
   | None -> None
 ;;
 
 (** Check if a name is a known direct adapter label or alias.
-    This includes adapters that do not have a CLI spawn_key (e.g. glm, openrouter). *)
+    This includes adapters that do not have a CLI spawn declaration. *)
 let is_known_provider name = resolve_direct_adapter name <> None
 
-(** Check if a name is a CLI-spawnable agent (has a spawn_key).
+(** Check if a name is a configured CLI-spawnable agent.
     For a broader "known provider" predicate, use {!is_known_provider}. *)
-let is_spawnable_agent name = resolve_spawn_key name <> None
+let is_spawnable_agent name = resolve_spawn_executable name <> None
 
 let spawnable_canonical_names () =
   direct_adapters
-  |> List.filter_map (fun a ->
-    if a.spawn_key <> None then Some a.canonical_name else None)
+  |> List.filter_map (fun (a : adapter) ->
+    if is_spawnable_agent a.canonical_name then Some a.canonical_name else None)
 ;;
 
 let normalize_base_url value =
@@ -788,7 +790,7 @@ let provider_auth_available label =
     (match adapter.auth_mode with
      | No_auth -> true
      | Cli_cached_login ->
-       (match adapter.spawn_key with
+       (match resolve_spawn_executable adapter.canonical_name with
         | Some cmd -> Llm_provider.Provider_registry.command_in_path cmd
         | None -> false)
      | Api_key env_name -> env_present env_name
@@ -891,7 +893,7 @@ let auto_label_for_adapter (adapter : adapter) =
     match adapter.auth_mode with
     | No_auth -> true
     | Cli_cached_login ->
-      (match adapter.spawn_key with
+      (match resolve_spawn_executable adapter.canonical_name with
        | Some cmd -> Llm_provider.Provider_registry.command_in_path cmd
        | None -> false)
     | Api_key env_name -> env_present env_name

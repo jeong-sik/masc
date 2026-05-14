@@ -71,24 +71,23 @@ val sync_bootable_keeper_credentials : Mcp_server.server_state -> unit
 
 (** {2 MCP Client Auth Config Sync} *)
 
-type codex_mcp_config_sync_status =
-  | Codex_mcp_config_updated
-  | Codex_mcp_config_unchanged
-  | Codex_mcp_config_server_missing
-  | Codex_mcp_config_header_missing
+type mcp_client_config_sync_status =
+  | Mcp_client_config_updated
+  | Mcp_client_config_unchanged
+  | Mcp_client_config_server_missing
+  | Mcp_client_config_header_missing
 
-val sync_codex_mcp_auth_header_content :
-  string -> string * codex_mcp_config_sync_status
-(** [sync_codex_mcp_auth_header_content content] rewrites the TOML
+val sync_mcp_client_auth_header_content :
+  string -> string * mcp_client_config_sync_status
+(** [sync_mcp_client_auth_header_content content] rewrites the TOML
     content of the cataloged config-sync MCP client to produce the
-    canonical [[mcp_servers.masc]] shape.  The function name is kept
-    for compatibility with existing tests and scripts.
+    canonical [[mcp_servers.<server-name>]] shape.
 
     - Replaces any [http_headers = \{ ... \}] binding with the
       canonical Accept + X-MASC-Agent form (removing any hardcoded
       [Authorization] header inside that table).
     - Replaces any [bearer_token_env_var = ...] binding with
-      [bearer_token_env_var = "MASC_MCP_TOKEN"].
+      the cataloged bearer-token env var.
     - Drops bare [Authorization = ...] bindings directly in the
       [[mcp_servers.masc]] section — literal auth headers conflict
       with [bearer_token_env_var] and would persist raw tokens in

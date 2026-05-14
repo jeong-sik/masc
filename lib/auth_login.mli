@@ -42,9 +42,10 @@ type t = {
   dashboard_url : string;
   mcp_url : string;
   mcp_token_env_var : string;
-  codex_server_name : string;
-  codex_token_env_var : string;
-  codex_login_supported : bool;
+  mcp_server_name : string;
+  mcp_config_sync_token_env_var : string;
+  mcp_config_sync_login_supported : bool;
+  mcp_config_sync_login_note : string;
 }
 (** Concrete record because the test suite ({!test_auth_login}) and
     the CLI ({!Bin.Main_eio}) read individual fields
@@ -57,12 +58,10 @@ type t = {
       both URL-encoded.
     - [mcp_token_env_var] is the client-specific bearer env var from
       {!Local_mcp_client_catalog}.
-    - [codex_server_name] and [codex_token_env_var] are compatibility
-      fields for older callers that still read the [codex_mcp] block;
-      their values come from {!Local_mcp_client_catalog}.
-    - [codex_login_supported] is currently always [false] —
-      {!render_text} explains the OAuth-only `codex mcp login` and
-      directs operators to the bearer-token export instead. *)
+    - [mcp_server_name], [mcp_config_sync_token_env_var],
+      [mcp_config_sync_login_supported], and
+      [mcp_config_sync_login_note] come from the cascade.toml-backed
+      {!Local_mcp_client_catalog}. *)
 
 (** {1 Mint entry point} *)
 
@@ -108,14 +107,11 @@ val to_yojson : t -> Yojson.Safe.t
     object with fields [status: "ok"] / [base_path] / [auth_config_path]
     / [auth_change] / [agent_name] / [role] / [bearer_token] /
     [raw_token_file] / [dashboard_url] / [mcp_url] / [mcp_client] /
-    [codex_mcp].
+    [mcp_config_sync].
 
-    The [codex_mcp] sub-object pins five fields: [server_name],
+    The [mcp_config_sync] sub-object pins five fields: [server_name],
     [auth_model: "bearer_token_env"], [token_env_var],
-    [login_supported], and a [login_note] explaining the OAuth-only
-    `codex mcp login`.  The literal note string is part of the
-    operator-visible contract — runbooks reference it by exact
-    wording. *)
+    [login_supported], and [login_note]. *)
 
 val render_shell : t -> string
 (** [render_shell report] returns four newline-separated [export]
@@ -123,7 +119,7 @@ val render_shell : t -> string
 
     - [MASC_OPERATOR_AGENT]
     - [MASC_OPERATOR_TOKEN]
-    - [<mcp_token_env_var>] (client-specific for Claude/Gemini/Codex)
+    - [<mcp_token_env_var>] (client-specific for the MCP client)
     - [MASC_DASHBOARD_URL]
 
     All values are POSIX-quoted (single-quoted with embedded
@@ -136,7 +132,7 @@ val render_text : t -> string
     auth_config_path / auth_change / agent_name / role /
     raw_token_file / dashboard_url / mcp_url, then the shell
     [exports:] block (from {!render_shell}), then [mcp_client:] and
-    [codex_mcp:] blocks describing the bearer-token-env auth model.
+    [mcp_config_sync:] blocks describing the bearer-token-env auth model.
 
     The bearer token itself is intentionally NOT included as a
     standalone line in the text output — it appears only inside

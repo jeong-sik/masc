@@ -11,6 +11,24 @@
 # ── Layer 1: Providers ──────────────────────────────────────────
 
 
+[providers.claude_code.mcp_client_config]
+client-name = "claude"
+agent-name = "claude"
+token-env-var = "MASC_CLAUDE_MCP_TOKEN"
+server-name = "masc"
+login-supported = false
+
+[providers.claude_code.spawn]
+agent-name = "claude"
+aliases = ["claude-code", "claude_code"]
+command = "claude --output-format json -p"
+output-parser = "result-usage-json"
+stdin-prompt = true
+mcp-tool-surface = "spawned-agent"
+mcp-mode = "joined"
+mcp-flag = "--allowedTools"
+prompt-mode = "stdin"
+
 [providers.codex_cli]
 display-name = "OpenAI Codex CLI"
 protocol = "openai-cli"
@@ -28,6 +46,30 @@ key = "OPENAI_API_KEY"
 requires-per-keeper-bridging-for-bound-actor-tools = true
 identity-runtime-mcp-header-keys = ["authorization", "x-masc-agent-name", "x-masc-keeper-name"]
 argv-prompt-preflight = true
+
+[providers.codex_cli.mcp_client_config]
+client-name = "codex"
+agent-name = "codex-mcp-client"
+token-env-var = "MASC_MCP_TOKEN"
+server-name = "masc"
+login-supported = false
+login-note = "`codex mcp login` is OAuth-only; masc-mcp uses bearer token auth."
+legacy-agent-names = ["codex"]
+
+[providers.codex_cli.mcp_client_config.config-sync]
+enabled-env-var = "MASC_SYNC_CODEX_MCP_CONFIG"
+config-path-env-var = "MASC_CODEX_CONFIG_PATH"
+default-config-path-segments = [".codex", "config.toml"]
+
+[providers.codex_cli.spawn]
+agent-name = "codex"
+aliases = ["codex-cli", "codex_cli"]
+command = "codex exec"
+output-parser = "raw"
+stdin-prompt = true
+mcp-tool-surface = "none"
+mcp-mode = "none"
+prompt-mode = "stdin"
 
 [providers.gemini_cli]
 display-name = "Google Gemini CLI"
@@ -55,6 +97,39 @@ key = "GEMINI_API_KEY"
 [providers.gemini_cli.capabilities]
 tolerates-bound-actor-fallback = true
 
+[providers.gemini_cli.mcp_client_config]
+client-name = "gemini"
+agent-name = "gemini"
+token-env-var = "MASC_GEMINI_MCP_TOKEN"
+server-name = "masc"
+login-supported = false
+
+[providers.gemini_cli.spawn]
+agent-name = "gemini"
+aliases = ["gemini-cli", "gemini_cli"]
+command = "gemini --output-format json"
+output-parser = "response-usage-json"
+stdin-prompt = false
+mcp-tool-surface = "spawned-agent"
+mcp-mode = "spread"
+mcp-server-name = "masc"
+mcp-flag = "--allowed-tools"
+prompt-mode = "flag"
+prompt-flag = "-p"
+
+[providers.kimi_cli]
+display-name = "Moonshot Kimi CLI"
+protocol = "kimi-cli"
+command = "kimi"
+is-non-interactive = true
+
+[providers.kimi_cli.credentials]
+type = "env"
+key = "MOONSHOT_API_KEY"
+
+[providers.kimi_cli.capabilities]
+supports-runtime-mcp-http-headers = true
+tolerates-bound-actor-fallback = true
 
 [providers.glm-coding]
 display-name = "Zhipu GLM Coding"
@@ -73,6 +148,15 @@ key = "ZAI_API_KEY"
 display-name = "Ollama Local"
 protocol = "ollama-http"
 endpoint = "http://127.0.0.1:11434"
+
+[providers.ollama.spawn]
+agent-name = "llama"
+command = "llama:explicit-model-required"
+output-parser = "raw"
+stdin-prompt = true
+mcp-tool-surface = "none"
+mcp-mode = "none"
+prompt-mode = "stdin"
 
 [providers.ollama.capabilities]
 # Local Ollama is a viable bound-actor fallback target in catalogs

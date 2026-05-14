@@ -1,8 +1,8 @@
 (** Spawn — Agent subprocess management.
 
-    Manages CLI tool invocation for MASC agents including Claude, Gemini,
-    and Codex. Handles prompt construction, MCP tool flag assembly,
-    output parsing, and token tracking.
+    Manages configured CLI tool invocation for MASC agents. Handles
+    prompt construction, MCP tool flag assembly, output parsing, and
+    token tracking.
 
     @since 0.1.0 *)
 
@@ -19,7 +19,7 @@ type parsed_output = {
 
 type mcp_flag =
   | Mcp_joined of string
-  | Mcp_spread of string
+  | Mcp_spread of string * string
   | Mcp_none
 
 type prompt_flag =
@@ -59,8 +59,8 @@ val get_config : string -> spawn_config option
 (** {1 Output Parsing} *)
 
 val parse_raw_output : string -> parsed_output
-val parse_claude_output : string -> parsed_output
-val parse_gemini_output : string -> parsed_output
+val parse_result_usage_json_output : string -> parsed_output
+val parse_response_usage_json_output : string -> parsed_output
 
 (** {1 CLI Argument Builders} *)
 

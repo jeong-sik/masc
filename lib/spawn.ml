@@ -13,7 +13,8 @@ type parsed_output = {
 (** How MCP tool list is passed on the CLI. *)
 type mcp_flag =
   | Mcp_joined of string    (** Single flag with comma-joined tools: --flag t1,t2 *)
-  | Mcp_spread of string    (** Server name + spread tools: --server masc --flag t1 t2 *)
+  | Mcp_spread of string * string
+      (** Server name + spread tools: --server <name> --flag t1 t2 *)
   | Mcp_none                (** No MCP flags emitted *)
 
 (** How the prompt is passed to the CLI. *)
@@ -24,7 +25,7 @@ type prompt_flag =
 (** Spawn configuration for an agent *)
 type spawn_config = {
   agent_name: string;
-  command: string;       (* e.g., "claude -p", "gemini", "codex" *)
+  command: string;
   timeout_seconds: int;
   working_dir: string option;
   mcp_tools: string list;  (* MCP tools to allow, e.g., ["mcp__masc__masc_status"] *)
@@ -73,13 +74,13 @@ You are running as a MASC-managed agent. Follow these lifecycle rules:
 
 Example lifecycle:
 ```
-mcp__masc__masc_join(agent_name="gemini", capabilities=["typescript","react"])
+mcp__masc__masc_join(agent_name="agent-1", capabilities=["typescript","react"])
 ... work ...
-mcp__masc__masc_heartbeat(agent_name="gemini")  // every 2 min
+mcp__masc__masc_heartbeat(agent_name="agent-1")  // every 2 min
 ... more work ...
 mcp__masc__masc_handover_create(...)  // when a successor needs your state
-mcp__masc__masc_transition(agent_name="gemini", task_id="task-XXX", action="done")
-mcp__masc__masc_leave(agent_name="gemini")
+mcp__masc__masc_transition(agent_name="agent-1", task_id="task-XXX", action="done")
+mcp__masc__masc_leave(agent_name="agent-1")
 ```
 
 IMPORTANT: If you cannot finish in one pass, hand off explicitly before leaving.
@@ -91,8 +92,8 @@ let parse_raw_output raw =
   { text = raw; input_tokens = None; output_tokens = None;
     cache_creation_tokens = None; cache_read_tokens = None; cost_usd = None }
 
-(** Parse Claude CLI JSON output (--output-format json). *)
-let parse_claude_output raw =
+(** Parse JSON output with [result] plus token usage fields. *)
+let parse_result_usage_json_output raw =
   try
     let json = Yojson.Safe.from_string raw in
     let usage = Safe_ops.json_member_opt "usage" json |> Option.value ~default:(`Assoc []) in
@@ -105,9 +106,8 @@ let parse_claude_output raw =
   with Yojson.Json_error _ ->
     parse_raw_output raw
 
-(** Parse Gemini CLI JSON output (--output-format json).
-    Supports both Gemini API usageMetadata and Gemini CLI JSON stats. *)
-let parse_gemini_output raw =
+(** Parse JSON output with [response] plus usageMetadata or stats fields. *)
+let parse_response_usage_json_output raw =
   try
     let json = Yojson.Safe.from_string raw in
     let response_text =
@@ -157,70 +157,46 @@ let parse_gemini_output raw =
   with Yojson.Json_error _ ->
     parse_raw_output raw
 
-(** Build a spawn config from a canonical spawn key.
-    SSOT for agent names and aliases is [Provider_adapter.direct_adapters];
-    this function only maps resolved keys to their CLI invocation shape. *)
-let spawn_config_of_key key =
-  let open Env_config.Spawn in
-  match key with
-  | "claude" ->
-      Some {
-        agent_name = "claude";
-        command = "claude --output-format json -p";
-        timeout_seconds;
-        working_dir = None;
-        mcp_tools = masc_mcp_tools;
-        parse_output = parse_claude_output;
-        stdin_prompt = true;
-        mcp_mode = Mcp_joined "--allowedTools";
-        prompt_mode = Prompt_stdin;
-      }
-  | "gemini" ->
-      Some {
-        agent_name = "gemini";
-        command = "gemini --output-format json";
-        timeout_seconds;
-        working_dir = None;
-        mcp_tools = masc_mcp_tools;
-        parse_output = parse_gemini_output;
-        stdin_prompt = false;
-        mcp_mode = Mcp_spread "--allowed-tools";
-        prompt_mode = Prompt_flag "-p";
-      }
-  | "codex" ->
-      Some {
-        agent_name = "codex";
-        command = "codex exec";
-        timeout_seconds;
-        working_dir = None;
-        mcp_tools = masc_mcp_tools;
-        parse_output = parse_raw_output;
-        stdin_prompt = true;
-        mcp_mode = Mcp_none;
-        prompt_mode = Prompt_stdin;
-      }
-  | "llama" ->
-      Some {
-        agent_name = "llama";
-        command = Provider_adapter.make_local_label "explicit-model-required";
-        timeout_seconds;
-        working_dir = None;
-        mcp_tools = masc_mcp_tools;
-        parse_output = parse_raw_output;
-        stdin_prompt = true;
-        mcp_mode = Mcp_none;
-        prompt_mode = Prompt_stdin;
-      }
-  | _ -> None
+let mcp_mode_of_catalog = function
+  | Local_mcp_client_catalog.Spawn_mcp_joined flag -> Mcp_joined flag
+  | Spawn_mcp_spread { server_name; flag } ->
+    Mcp_spread (server_name, flag)
+  | Spawn_mcp_none -> Mcp_none
 
-(** Get spawn config for agent.
-    Resolves all aliases via Provider_adapter registry (SSOT).
-    spawn_alias_map removed — aliases are now in Provider_adapter.direct_adapters. *)
+let prompt_mode_of_catalog = function
+  | Local_mcp_client_catalog.Spawn_prompt_flag flag -> Prompt_flag flag
+  | Spawn_prompt_stdin -> Prompt_stdin
+
+let parser_of_catalog = function
+  | Local_mcp_client_catalog.Spawn_parse_raw -> parse_raw_output
+  | Spawn_parse_result_usage_json -> parse_result_usage_json_output
+  | Spawn_parse_response_usage_json -> parse_response_usage_json_output
+
+let tools_of_surface = function
+  | Local_mcp_client_catalog.Spawned_agent_tools -> masc_mcp_tools
+  | No_spawn_tools -> []
+
+(** Get spawn config for a configured agent.
+    Names, aliases, command shape, MCP flags, prompt mode, and output
+    parser are read from cascade.toml. *)
 let get_config agent_name =
-  let normalized = String.lowercase_ascii (String.trim agent_name) in
-  match Provider_adapter.resolve_spawn_key normalized with
-  | Some key -> spawn_config_of_key key
-  | None -> spawn_config_of_key normalized
+  match Local_mcp_client_catalog.find_spawn agent_name with
+  | None -> None
+  | Some (_spec, spawn) ->
+    Some
+      { agent_name = spawn.agent_name
+      ; command = spawn.command
+      ; timeout_seconds =
+          Option.value
+            spawn.timeout_seconds
+            ~default:Env_config.Spawn.timeout_seconds
+      ; working_dir = spawn.working_dir
+      ; mcp_tools = tools_of_surface spawn.tool_surface
+      ; parse_output = parser_of_catalog spawn.output_parser
+      ; stdin_prompt = spawn.stdin_prompt
+      ; mcp_mode = mcp_mode_of_catalog spawn.mcp_mode
+      ; prompt_mode = prompt_mode_of_catalog spawn.prompt_mode
+      }
 
 (** Build MCP flags from config's [mcp_mode] field.
     No agent-name matching — dispatch is config-driven. *)
@@ -230,8 +206,8 @@ let build_mcp_args_from_config (config : spawn_config) tools =
     match config.mcp_mode with
     | Mcp_joined flag ->
       [flag; String.concat "," tools]
-    | Mcp_spread flag ->
-      ["--allowed-mcp-server-names"; "masc"; flag] @ tools
+  | Mcp_spread (server_name, flag) ->
+      ["--allowed-mcp-server-names"; server_name; flag] @ tools
     | Mcp_none -> []
 
 (** Build prompt flags from config's [prompt_mode] field. *)

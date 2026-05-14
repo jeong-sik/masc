@@ -76,9 +76,6 @@ type known =
   | Ffplay
   | Mpg123
   | Open
-  | Claude
-  | Gemini
-  | Codex
   (* Privileged *)
   | Sudo
   | Su
@@ -143,9 +140,6 @@ let name_of_known : known -> string = function
   | Ffplay -> "ffplay"
   | Mpg123 -> "mpg123"
   | Open -> "open"
-  | Claude -> "claude"
-  | Gemini -> "gemini"
-  | Codex -> "codex"
   | Sudo -> "sudo"
   | Su -> "su"
   | Chmod -> "chmod"
@@ -209,10 +203,7 @@ let risk_of_known : known -> risk_class = function
   | Rec
   | Ffplay
   | Mpg123
-  | Open
-  | Claude
-  | Gemini
-  | Codex -> `Audited
+  | Open -> `Audited
   | Sudo | Su | Chmod | Chown | Rm | Dd | Mkfs -> `Privileged
 ;;
 
@@ -270,10 +261,7 @@ let kind_of_known : known -> kind = function
   | Rec
   | Ffplay
   | Mpg123
-  | Open
-  | Claude
-  | Gemini
-  | Codex -> `Other_audited
+  | Open -> `Other_audited
   | Sudo | Su | Chmod | Chown | Rm | Dd | Mkfs -> `Privileged_bin
 ;;
 
@@ -285,6 +273,98 @@ type t =
   }
 
 type unknown = [ `Unknown of string ]
+
+let table_opt = function
+  | value -> (
+    try Some (Otoml.get_table value) with
+    | _ -> None)
+;;
+
+let find_table_opt key fields = Option.bind (List.assoc_opt key fields) table_opt
+
+let string_opt key fields =
+  match List.assoc_opt key fields with
+  | Some value ->
+    (try
+       let value = String.trim (Otoml.get_string value) in
+       if String.equal value "" then None else Some value
+     with
+     | _ -> None)
+  | None -> None
+;;
+
+let existing_file_opt path =
+  try if Sys.file_exists path then Some path else None with
+  | Sys_error _ -> None
+;;
+
+let load_file path =
+  let ic = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> really_input_string ic (in_channel_length ic))
+;;
+
+let cascade_path_opt () =
+  [ Sys.getenv_opt "MASC_CONFIG_DIR"
+    |> Option.map (fun dir -> Filename.concat dir "cascade.toml")
+  ; Sys.getenv_opt "DUNE_SOURCEROOT"
+    |> Option.map (fun root -> Filename.concat root "config/cascade.toml")
+  ; Some (Filename.concat (Sys.getcwd ()) "config/cascade.toml")
+  ]
+  |> List.filter_map Fun.id
+  |> List.find_map existing_file_opt
+;;
+
+let executable_name command =
+  String.split_on_char ' ' (String.trim command)
+  |> List.find_opt (fun part -> not (String.equal part ""))
+  |> Option.map Filename.basename
+;;
+
+let configured_audited_executables_uncached () =
+  match cascade_path_opt () with
+  | None -> []
+  | Some path ->
+    (try
+       match Otoml.Parser.from_string_result (load_file path) with
+       | Error _ -> []
+       | Ok toml ->
+         let root_fields = table_opt toml |> Option.value ~default:[] in
+         (match find_table_opt "providers" root_fields with
+          | None -> []
+          | Some providers ->
+            providers
+            |> List.filter_map (fun (_provider_id, provider_value) ->
+              match table_opt provider_value with
+              | None -> None
+              | Some provider_fields ->
+                Option.bind
+                  (find_table_opt "spawn" provider_fields)
+                  (fun spawn_fields ->
+                     Option.bind (string_opt "command" spawn_fields) executable_name)))
+     with
+     | Sys_error _ -> [])
+;;
+
+let configured_audited_executables_cache = ref None
+let configured_audited_executables_mutex = Mutex.create ()
+
+let configured_audited_executables () =
+  match !configured_audited_executables_cache with
+  | Some values -> values
+  | None ->
+    Mutex.lock configured_audited_executables_mutex;
+    Fun.protect
+      ~finally:(fun () -> Mutex.unlock configured_audited_executables_mutex)
+      (fun () ->
+         match !configured_audited_executables_cache with
+         | Some values -> values
+         | None ->
+           let values = configured_audited_executables_uncached () in
+           configured_audited_executables_cache := Some values;
+           values)
+;;
 
 (** Reverse lookup: string name → [known] variant.
 
@@ -346,9 +426,6 @@ let known_of_string : string -> known option = function
   | "ffplay" -> Some Ffplay
   | "mpg123" -> Some Mpg123
   | "open" -> Some Open
-  | "claude" -> Some Claude
-  | "gemini" -> Some Gemini
-  | "codex" -> Some Codex
   | "sudo" -> Some Sudo
   | "su" -> Some Su
   | "chmod" -> Some Chmod
@@ -368,8 +445,11 @@ let of_string raw =
     | Some k ->
       Ok { name; risk = risk_of_known k; kind = kind_of_known k; known = Some k }
     | None ->
-      (* Unknown binary -> Privileged per RFC v5 fail-closed rule. *)
-      Ok { name; risk = `Privileged; kind = `Privileged_bin; known = None })
+      if List.exists (String.equal name) (configured_audited_executables ())
+      then Ok { name; risk = `Audited; kind = `Other_audited; known = None }
+      else
+        (* Unknown binary -> Privileged per RFC v5 fail-closed rule. *)
+        Ok { name; risk = `Privileged; kind = `Privileged_bin; known = None })
 ;;
 
 let risk_class t = t.risk

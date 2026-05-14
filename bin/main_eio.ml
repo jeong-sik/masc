@@ -556,7 +556,7 @@ let login_agent =
   let doc = "Agent identity bound to the minted bearer token" in
   Arg.(
     value
-    & opt string "codex-local-admin"
+    & opt string "local-admin"
     & info ["agent"] ~docv:"AGENT" ~doc)
 
 let login_shell =
@@ -1605,7 +1605,7 @@ let login_cmd_exit base_path host port agent role as_json as_shell =
 let login_cmd =
   let doc =
     "Mint a local bearer token, persist its raw token file, and print \
-     dashboard/Codex MCP auth exports"
+     dashboard and MCP client auth exports"
   in
   let info = Cmd.info "login" ~doc in
   Cmd.v info

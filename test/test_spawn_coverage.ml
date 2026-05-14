@@ -18,14 +18,14 @@ module Spawn = Masc_mcp.Spawn
 let test_spawn_config_creation () =
   let cfg : Spawn.spawn_config = {
     agent_name = "test-agent";
-    command = "claude -p";
+    command = "agent-cli -p";
     timeout_seconds = 60;
     working_dir = Some "/tmp";
     mcp_tools = ["tool1"; "tool2"]; parse_output = Spawn.parse_raw_output; stdin_prompt = true;
     mcp_mode = Spawn.Mcp_none; prompt_mode = Spawn.Prompt_stdin;
   } in
   check string "agent_name" "test-agent" cfg.agent_name;
-  check string "command" "claude -p" cfg.command;
+  check string "command" "agent-cli -p" cfg.command;
   check int "timeout" 60 cfg.timeout_seconds;
   check bool "stdin_prompt" true cfg.stdin_prompt;
   check string "parse_output" "hello" (cfg.parse_output "hello").text
@@ -299,12 +299,12 @@ let test_build_mcp_args_empty () =
   check (list string) "empty flags" [] flags
 
 let test_build_mcp_args_claude () =
-  (* "claude" resolves via spawn_key to "claude" — MCP flags are passed *)
+  (* Configured joined-MCP clients pass MCP tools as one joined flag. *)
   let flags = Spawn.build_mcp_args "claude" ["tool1"; "tool2"] in
   check (list string) "claude allowed tools" ["--allowedTools"; "tool1,tool2"] flags
 
 let test_build_mcp_args_gemini () =
-  (* "gemini" resolves via spawn_key to "gemini" — MCP flags are passed *)
+  (* Configured spread-MCP clients pass MCP tools as separate args. *)
   let flags = Spawn.build_mcp_args "gemini" ["tool1"] in
   check (list string) "gemini allowed tools"
     ["--allowed-mcp-server-names"; "masc"; "--allowed-tools"; "tool1"] flags
@@ -327,7 +327,7 @@ let test_build_mcp_args_unknown () =
   check (list string) "unknown empty" [] flags
 
 let test_build_prompt_args_gemini () =
-  (* "gemini" resolves via spawn_key to "gemini" — prompt args passed *)
+  (* Configured flag-prompt clients pass prompt args through the configured flag. *)
   let flags = Spawn.build_prompt_args "gemini" "hello" in
   check (list string) "gemini prompt args" ["-p"; "hello"] flags
 
@@ -336,27 +336,27 @@ let test_build_prompt_args_other () =
   check (list string) "other prompt args" [] flags
 
 (* ============================================================
-   parse_claude_output Tests
+   parse_result_usage_json_output Tests
    ============================================================ *)
 
-let test_parse_claude_output_valid () =
+let test_parse_result_usage_json_output_valid () =
   let json_str = {|{"usage":{"input_tokens":100,"output_tokens":50},"total_cost_usd":0.01,"result":"done"}|} in
-  let p = Spawn.parse_claude_output json_str in
+  let p = Spawn.parse_result_usage_json_output json_str in
   check string "result text" "done" p.text;
   check (option int) "input tokens" (Some 100) p.input_tokens;
   check (option int) "output tokens" (Some 50) p.output_tokens;
   check (option int) "cache creation" None p.cache_creation_tokens;
   check (option int) "cache read" None p.cache_read_tokens
 
-let test_parse_claude_output_with_cache () =
+let test_parse_result_usage_json_output_with_cache () =
   let json_str = {|{"usage":{"input_tokens":100,"output_tokens":50,"cache_creation_input_tokens":20,"cache_read_input_tokens":30},"total_cost_usd":0.02,"result":"ok"}|} in
-  let p = Spawn.parse_claude_output json_str in
+  let p = Spawn.parse_result_usage_json_output json_str in
   check (option int) "cache creation" (Some 20) p.cache_creation_tokens;
   check (option int) "cache read" (Some 30) p.cache_read_tokens
 
-let test_parse_claude_output_invalid () =
+let test_parse_result_usage_json_output_invalid () =
   let json_str = "not valid json" in
-  let p = Spawn.parse_claude_output json_str in
+  let p = Spawn.parse_result_usage_json_output json_str in
   check string "returns raw" "not valid json" p.text;
   check (option int) "no input" None p.input_tokens;
   check (option int) "no output" None p.output_tokens;
@@ -364,66 +364,66 @@ let test_parse_claude_output_invalid () =
   check (option int) "no cache r" None p.cache_read_tokens;
   check bool "no cost" true (p.cost_usd = None)
 
-let test_parse_claude_output_missing_fields () =
+let test_parse_result_usage_json_output_missing_fields () =
   let json_str = {|{"usage":{}}|} in
-  let p = Spawn.parse_claude_output json_str in
+  let p = Spawn.parse_result_usage_json_output json_str in
   check (option int) "no input" None p.input_tokens;
   check (option int) "no output" None p.output_tokens
 
 (* ============================================================
-   parse_gemini_output Tests
+   parse_response_usage_json_output Tests
    ============================================================ *)
 
-let test_parse_gemini_output_response_text () =
-  let json = {|{"response":"hello from gemini","session_id":"sess-1","stats":{"models":{}}}|} in
-  let p = Spawn.parse_gemini_output json in
-  check string "response text" "hello from gemini" p.text
+let test_parse_response_usage_json_output_response_text () =
+  let json = {|{"response":"hello from agent","session_id":"sess-1","stats":{"models":{}}}|} in
+  let p = Spawn.parse_response_usage_json_output json in
+  check string "response text" "hello from agent" p.text
 
-let test_parse_gemini_output_success () =
+let test_parse_response_usage_json_output_success () =
   let json = {|{"usageMetadata": {"promptTokenCount": 50, "candidatesTokenCount": 100}}|} in
-  let p = Spawn.parse_gemini_output json in
+  let p = Spawn.parse_response_usage_json_output json in
   check (option int) "input" (Some 50) p.input_tokens;
   check (option int) "output" (Some 100) p.output_tokens;
   check (option int) "cached" None p.cache_read_tokens
 
-let test_parse_gemini_output_with_cache () =
+let test_parse_response_usage_json_output_with_cache () =
   let json = {|{"usageMetadata": {"promptTokenCount": 100, "candidatesTokenCount": 50, "cachedContentTokenCount": 80}}|} in
-  let p = Spawn.parse_gemini_output json in
+  let p = Spawn.parse_response_usage_json_output json in
   check (option int) "input" (Some 100) p.input_tokens;
   check (option int) "output" (Some 50) p.output_tokens;
   check (option int) "cached" (Some 80) p.cache_read_tokens;
   (* cost_usd now requires explicit total_cost_usd in JSON; no hardcoded pricing *)
   check bool "no cost without total_cost_usd" true (p.cost_usd = None)
 
-let test_parse_gemini_output_cli_json () =
+let test_parse_response_usage_json_output_cli_json () =
   let json = {|
     {
       "response":"hello",
       "stats":{
         "models":{
-          "gemini-3.1-flash-lite-preview":{"tokens":{"input":1001,"prompt":1001,"candidates":50,"cached":0}},
-          "gemini-3-flash-preview":{"tokens":{"input":14768,"prompt":14768,"candidates":35,"cached":0}}
+          "model-a":{"tokens":{"input":1001,"prompt":1001,"candidates":50,"cached":0}},
+          "model-b":{"tokens":{"input":14768,"prompt":14768,"candidates":35,"cached":0}}
         }
       }
     }
   |} in
-  let p = Spawn.parse_gemini_output json in
+  let p = Spawn.parse_response_usage_json_output json in
   check (option int) "input" (Some 15769) p.input_tokens;
   check (option int) "output" (Some 85) p.output_tokens;
   check (option int) "cached" None p.cache_read_tokens;
   (* cost_usd now requires explicit total_cost_usd in JSON; no hardcoded pricing *)
   check bool "no cost without total_cost_usd" true (p.cost_usd = None)
 
-let test_parse_gemini_output_with_cost () =
+let test_parse_response_usage_json_output_with_cost () =
   let json = {|{"usageMetadata": {"promptTokenCount": 200, "candidatesTokenCount": 80}, "total_cost_usd": 0.0042}|} in
-  let p = Spawn.parse_gemini_output json in
+  let p = Spawn.parse_response_usage_json_output json in
   check (option int) "input" (Some 200) p.input_tokens;
   check (option int) "output" (Some 80) p.output_tokens;
   check bool "has cost" true (Option.is_some p.cost_usd);
   check (option (float 0.0001)) "cost value" (Some 0.0042) p.cost_usd
 
-let test_parse_gemini_output_invalid () =
-  let p = Spawn.parse_gemini_output "invalid" in
+let test_parse_response_usage_json_output_invalid () =
+  let p = Spawn.parse_response_usage_json_output "invalid" in
   check (option int) "input None" None p.input_tokens;
   check (option int) "output None" None p.output_tokens;
   check (option int) "cached None" None p.cache_read_tokens;
@@ -586,8 +586,8 @@ let test_result_to_string_success () =
     cost_usd = None;
   } in
   let str = Spawn.result_to_string result in
-  check bool "has checkmark" true
-    (try let _ = Str.search_forward (Str.regexp "✅") str 0 in true
+  check bool "has completed label" true
+    (try let _ = Str.search_forward (Str.regexp_string "completed") str 0 in true
      with Not_found -> false)
 
 let test_result_to_string_failure () =
@@ -603,8 +603,8 @@ let test_result_to_string_failure () =
     cost_usd = None;
   } in
   let str = Spawn.result_to_string result in
-  check bool "has x" true
-    (try let _ = Str.search_forward (Str.regexp "❌") str 0 in true
+  check bool "has failed label" true
+    (try let _ = Str.search_forward (Str.regexp_string "failed") str 0 in true
      with Not_found -> false)
 
 let test_result_to_string_has_elapsed () =
@@ -723,19 +723,19 @@ let () =
       test_case "llama" `Quick test_build_mcp_args_llama;
       test_case "unknown" `Quick test_build_mcp_args_unknown;
     ];
-    "parse_claude_output", [
-      test_case "valid" `Quick test_parse_claude_output_valid;
-      test_case "with cache" `Quick test_parse_claude_output_with_cache;
-      test_case "invalid" `Quick test_parse_claude_output_invalid;
-      test_case "missing fields" `Quick test_parse_claude_output_missing_fields;
+    "parse_result_usage_json_output", [
+      test_case "valid" `Quick test_parse_result_usage_json_output_valid;
+      test_case "with cache" `Quick test_parse_result_usage_json_output_with_cache;
+      test_case "invalid" `Quick test_parse_result_usage_json_output_invalid;
+      test_case "missing fields" `Quick test_parse_result_usage_json_output_missing_fields;
     ];
-    "parse_gemini_output", [
-      test_case "response text extraction" `Quick test_parse_gemini_output_response_text;
-      test_case "success" `Quick test_parse_gemini_output_success;
-      test_case "with cache" `Quick test_parse_gemini_output_with_cache;
-      test_case "cli json stats" `Quick test_parse_gemini_output_cli_json;
-      test_case "with explicit cost" `Quick test_parse_gemini_output_with_cost;
-      test_case "invalid" `Quick test_parse_gemini_output_invalid;
+    "parse_response_usage_json_output", [
+      test_case "response text extraction" `Quick test_parse_response_usage_json_output_response_text;
+      test_case "success" `Quick test_parse_response_usage_json_output_success;
+      test_case "with cache" `Quick test_parse_response_usage_json_output_with_cache;
+      test_case "cli json stats" `Quick test_parse_response_usage_json_output_cli_json;
+      test_case "with explicit cost" `Quick test_parse_response_usage_json_output_with_cost;
+      test_case "invalid" `Quick test_parse_response_usage_json_output_invalid;
     ];
     "int_opt_to_json", [
       test_case "some" `Quick test_int_opt_to_json_some;

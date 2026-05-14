@@ -152,6 +152,67 @@ done
 # = 250 internal archive_bare_for_canonical invocations).
 ```
 
+## Operator view (without Grafana)
+
+Operators who don't want to spin up Grafana can read the same surface
+directly off the `/metrics` endpoint. The four credential-domain metrics
+filter down to a self-contained block in the scrape output.
+
+### One-shot
+
+```bash
+TOKEN="$MASC_MCP_TOKEN"   # bearer token; see ~/.zshenv / keychain
+PORT="${MASC_MCP_PORT:-8935}"
+curl -fsS -H "Authorization: Bearer $TOKEN" \
+  "http://127.0.0.1:$PORT/metrics" \
+  | grep -E '^masc_auth_(bare_alias|archive)'
+```
+
+Expected steady-state output (post-PR #15112 + #15143):
+
+```
+masc_auth_bare_alias{state="alive"} 18
+masc_auth_bare_alias{state="dead"} 0
+masc_auth_bare_alias{state="no_bare"} 0
+masc_auth_archive_epochs 21
+masc_auth_archive_pruned_total 310
+masc_auth_bare_alias_outcome_total{outcome="alive_skip"} 18
+masc_auth_bare_alias_outcome_total{outcome="dead_archive"} 0
+masc_auth_bare_alias_outcome_total{outcome="absent"} 0
+masc_auth_bare_alias_audit_ticks_total 123
+```
+
+Regression signature — any of:
+
+- `bare_alias{state="dead"} > 0`
+- `bare_alias_outcome_total{outcome="dead_archive"}` climbing between scrapes
+- `bare_alias_audit_ticks_total` flat between scrapes
+
+### Repeated polling (terminal dashboard)
+
+`watch` formats the surface as a single refreshing pane — the simplest
+"dashboard" without any UI layer:
+
+```bash
+watch -n 5 'curl -fsS -H "Authorization: Bearer $MASC_MCP_TOKEN" \
+  "http://127.0.0.1:${MASC_MCP_PORT:-8935}/metrics" \
+  | grep -E "^masc_auth_(bare_alias|archive)" \
+  | column -t'
+```
+
+Steady state: `dead=0`, `dead_archive=0`, `audit_ticks_total` climbs by
+~5 every 5-second tick (matches the 60s fiber default — 1 tick / 60s).
+
+### Why not the in-app dashboard
+
+`dashboard/src/` does not consume `/metrics`. Cascade, keeper turn FSM,
+and all other Prometheus domains share the same gap — none surface in
+the in-app dashboard. Adding only auth-credential there would be an
+N-of-M patch (CLAUDE.md software-development §workaround #3). The
+correct unblock is a separate RFC for in-app metric viz across all
+domains; this section gives operators the same data via the terminal
+in the meantime.
+
 ## History
 
 - PR-#10440 (2026 earlier) introduced `Auth.ensure_credential_alias` to fix `auth_doctor` and other short-form `load_credential` callers (8/14 keepers failing).

@@ -1,4 +1,4 @@
-import type { TelemetrySourceSummary, ToolQualityResponse } from '../api/dashboard'
+import type { DashboardExecutionTrustResponse, TelemetrySourceSummary, ToolQualityResponse } from '../api/dashboard'
 import type { DashboardNamespaceTruthResponse } from '../types'
 import { telemetrySourceLabel } from '../config/telemetry-sources'
 import type { Keeper } from '../types'
@@ -60,6 +60,7 @@ export interface FleetTelemetryState {
   error: string | null
   warnings: string[]
   rows: FleetRow[]
+  execution_trust: DashboardExecutionTrustResponse | null
   tool_quality: ToolQualityResponse
   telemetry_sources: TelemetrySourceSummary[]
   total_telemetry_entries: number
@@ -84,6 +85,7 @@ export function emptyState(): FleetTelemetryState {
     error: null,
     warnings: [],
     rows: [],
+    execution_trust: null,
     tool_quality: EMPTY_TOOL_QUALITY,
     telemetry_sources: [],
     total_telemetry_entries: 0,

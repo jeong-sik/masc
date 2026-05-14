@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   fetchDashboardShell,
+  fetchDashboardExecutionTrust,
   fetchDashboardGovernance,
   fetchDashboardGoalDetail,
   fetchDashboardGoalsTree,
@@ -88,6 +89,58 @@ describe('fetchDashboardShell', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/shell?light=true')
+  })
+})
+
+describe('fetchDashboardExecutionTrust', () => {
+  it('requests the dedicated execution trust surface and preserves coverage gaps', async () => {
+    const rawResponse = {
+      generated_at: '2026-05-14T00:00:00Z',
+      source: 'execution_receipt',
+      producer: 'keeper_agent_run.execution_receipt',
+      durable_store: '.masc/keepers/*/execution-receipts',
+      dashboard_surface: '/api/v1/dashboard/execution-trust',
+      freshness_slo_s: 900,
+      entry_count: 0,
+      total: 0,
+      keepers: [],
+      health: 'coverage_gap',
+      stale_reason: 'execution_receipt_append_failed',
+      coverage_gap_count: 1,
+      coverage_gaps: [
+        {
+          schema: 'masc.telemetry_coverage_gap.v1',
+          source: 'execution_receipt',
+          producer: 'keeper_agent_run.execution_receipt',
+          durable_store: '.masc/keepers/*/execution-receipts',
+          dashboard_surface: '/api/v1/dashboard/execution-trust',
+          stale_reason: 'execution_receipt_append_failed',
+          keeper_name: 'sangsu',
+          trace_id: 'trace-exec-gap',
+        },
+      ],
+    }
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchDashboardExecutionTrust()
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/execution-trust')
+    expect(result.coverage_gap_count).toBe(1)
+    expect(result.coverage_gaps?.[0]).toMatchObject({
+      producer: 'keeper_agent_run.execution_receipt',
+      durable_store: '.masc/keepers/*/execution-receipts',
+      dashboard_surface: '/api/v1/dashboard/execution-trust',
+      stale_reason: 'execution_receipt_append_failed',
+      keeper_name: 'sangsu',
+      trace_id: 'trace-exec-gap',
+    })
   })
 })
 

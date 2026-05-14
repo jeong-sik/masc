@@ -6,9 +6,11 @@ import { LoadingState } from './common/feedback-state'
 import { Eyebrow } from './common/eyebrow'
 import {
   fetchDashboardExecution,
+  fetchDashboardExecutionTrust,
   fetchDashboardNamespaceTruth,
   fetchTelemetrySummary,
   fetchToolQuality,
+  type DashboardExecutionTrustResponse,
   type TelemetrySourceSummary,
   type ToolQualityResponse,
 } from '../api/dashboard'
@@ -23,6 +25,7 @@ import { isAbortError } from '../lib/async-state'
 import { requestConfirm } from './common/confirm-dialog'
 import { Sparkline } from './common/sparkline'
 import { TextInput } from './common/input'
+import { coverageGapDisplay, freshnessText, sourceHealthClass } from './common/source-health'
 import { pushSnapshot, getTrend, type MetricKey, type TrendDirection } from './fleet-trend-store'
 import type { DashboardAttentionEvent, DashboardReadinessPillar } from '../types'
 import {
@@ -558,6 +561,56 @@ function TelemetrySourcesPanel({ sources }: { sources: TelemetrySourceSummary[] 
   `
 }
 
+function ExecutionTrustSourcePanel({ trust }: { trust: DashboardExecutionTrustResponse | null }) {
+  if (!trust) {
+    return html`<div class="text-2xs text-[var(--color-fg-disabled)]">Execution trust source 요약 사용 불가.</div>`
+  }
+
+  const coverageGap = coverageGapDisplay(trust)
+  const provenanceRows = [
+    trust.producer ? ['producer', trust.producer] : null,
+    trust.durable_store ? ['store', trust.durable_store] : null,
+    trust.dashboard_surface ? ['surface', trust.dashboard_surface] : null,
+  ].filter((row): row is [string, string] => row !== null)
+
+  return html`
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <div class="text-2xs font-medium text-[var(--text)]">Execution Trust</div>
+          <div class="mt-1 text-3xs text-[var(--color-fg-disabled)]">
+            <span class="font-mono">${trust.source ?? 'execution_receipt'}</span>
+            <span class="mx-1" aria-hidden="true">·</span>
+            <span class="font-mono ${sourceHealthClass(trust.health)}">${trust.health ?? 'unknown'}</span>
+            <span class="mx-1" aria-hidden="true">·</span>
+            <span>${freshnessText(trust)}</span>
+          </div>
+        </div>
+        <div class="text-right">
+          <div class="font-mono text-sm text-[var(--text)]">${(trust.entry_count ?? 0).toLocaleString()}</div>
+          <div class="text-3xs text-[var(--color-fg-disabled)]">${trust.total.toLocaleString()} keepers</div>
+        </div>
+      </div>
+      ${provenanceRows.length > 0 ? html`
+        <div class="mt-2 grid gap-1 text-3xs text-[var(--color-fg-disabled)]">
+          ${provenanceRows.map(([label, value]) => html`
+            <div class="flex min-w-0 gap-1">
+              <span class="shrink-0">${label}:</span>
+              <span class="min-w-0 break-all font-mono">${value}</span>
+            </div>
+          `)}
+        </div>
+      ` : null}
+      ${coverageGap ? html`
+        <div class="mt-2 grid gap-0.5 text-3xs text-[var(--color-status-warn)]">
+          <span>${coverageGap.summary}</span>
+          ${coverageGap.details.map(detail => html`<span class="font-mono break-all">${detail}</span>`)}
+        </div>
+      ` : null}
+    </div>
+  `
+}
+
 function FailureCategoryPanel({ toolQuality }: { toolQuality: ToolQualityResponse }) {
   if (toolQuality.failure_categories.length === 0) {
     return html`<div class="text-2xs text-[var(--color-fg-disabled)]">최근 실패 카테고리 없음.</div>`
@@ -603,8 +656,9 @@ export function FleetTelemetryPanel() {
     }
 
     try {
-      const [executionResult, toolQualityResult, telemetrySummaryResult, namespaceTruthResult] = await Promise.allSettled([
+      const [executionResult, executionTrustResult, toolQualityResult, telemetrySummaryResult, namespaceTruthResult] = await Promise.allSettled([
         fetchDashboardExecution({ signal: controller.signal }),
+        fetchDashboardExecutionTrust({ signal: controller.signal }),
         fetchToolQuality({ n: 5000, windowHours: 24, signal: controller.signal }),
         fetchTelemetrySummary({ signal: controller.signal }),
         fetchDashboardNamespaceTruth({ signal: controller.signal }),
@@ -620,6 +674,14 @@ export function FleetTelemetryPanel() {
           : []
       if (executionResult.status === 'rejected' && !isAbortError(executionResult.reason)) {
         warnings.push(`실행 스냅샷 사용 불가: ${errorMessage(executionResult.reason)}`)
+      }
+
+      const executionTrust =
+        executionTrustResult.status === 'fulfilled'
+          ? executionTrustResult.value
+          : null
+      if (executionTrustResult.status === 'rejected' && !isAbortError(executionTrustResult.reason)) {
+        warnings.push(`Execution trust 사용 불가: ${errorMessage(executionTrustResult.reason)}`)
       }
 
       const toolQuality =
@@ -651,11 +713,14 @@ export function FleetTelemetryPanel() {
       warnings.push(...buildRuntimeWarnings(rows))
       const updatedAt =
         (executionResult.status === 'fulfilled' ? executionResult.value.generated_at : null)
+        || executionTrust?.generated_at
         || telemetrySummary.generated_at
         || new Date().toISOString()
 
       const hasAnyData =
         rows.length > 0
+        || (executionTrust?.total ?? 0) > 0
+        || (executionTrust?.entry_count ?? 0) > 0
         || toolQuality.total > 0
         || telemetrySummary.total_entries > 0
 
@@ -666,6 +731,7 @@ export function FleetTelemetryPanel() {
         error: hasAnyData ? null : '함대 텔레메트리 데이터가 없습니다.',
         warnings,
         rows,
+        execution_trust: executionTrust,
         tool_quality: toolQuality,
         telemetry_sources: telemetrySummary.sources,
         total_telemetry_entries: telemetrySummary.total_entries,
@@ -804,6 +870,11 @@ export function FleetTelemetryPanel() {
       <div>
         <${Eyebrow} tone="disabled" class="mb-1">함대 통제실</${Eyebrow}>
         <${ControlRoomPanel} state=${value} />
+      </div>
+
+      <div>
+        <${Eyebrow} tone="disabled" class="mb-1">Execution Trust Source</${Eyebrow}>
+        <${ExecutionTrustSourcePanel} trust=${value.execution_trust} />
       </div>
 
       <div>

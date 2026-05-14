@@ -239,19 +239,7 @@ export type ToolQualityHourlyPoint = {
   success_rate: number
 }
 
-export type ToolQualityResponse = {
-  source?: string
-  producer?: string
-  durable_store?: string
-  dashboard_surface?: string
-  freshness_slo_s?: number
-  latest_ts_unix?: number | null
-  latest_ts_iso?: string | null
-  latest_age_s?: number | null
-  health?: string
-  stale_reason?: string | null
-  entry_count?: number
-  exists?: boolean
+export type ToolQualityResponse = TelemetryFreshnessMetadata & {
   generated_at?: string
   sampling_mode?: 'recent_n' | 'window_hours' | string
   sample_limit?: number | null
@@ -2376,9 +2364,45 @@ export type TelemetryFreshnessMetadata = {
   stale_reason?: string | null
   entry_count?: number
   exists?: boolean
+  coverage_gaps?: TelemetryCoverageGap[]
+  coverage_gap_count?: number
+}
+
+export type TelemetryCoverageGap = {
+  schema?: string
+  ts?: number
+  ts_iso?: string | null
+  source?: string
+  producer?: string
+  durable_store?: string
+  dashboard_surface?: string
+  stale_reason?: string
+  keeper_name?: string | null
+  trace_id?: string | null
+  error?: string | null
+}
+
+function decodeTelemetryCoverageGap(raw: unknown): TelemetryCoverageGap | null {
+  if (!isRecord(raw)) return null
+  return {
+    schema: asString(raw.schema),
+    ts: asNumber(raw.ts),
+    ts_iso: asNullableString(raw.ts_iso),
+    source: asString(raw.source),
+    producer: asString(raw.producer),
+    durable_store: asString(raw.durable_store),
+    dashboard_surface: asString(raw.dashboard_surface),
+    stale_reason: asString(raw.stale_reason),
+    keeper_name: asNullableString(raw.keeper_name),
+    trace_id: asNullableString(raw.trace_id),
+    error: asNullableString(raw.error),
+  }
 }
 
 function decodeTelemetryFreshnessMetadata(raw: Record<string, unknown>): TelemetryFreshnessMetadata {
+  const coverageGaps = asRecordArray(raw.coverage_gaps)
+    .map(decodeTelemetryCoverageGap)
+    .filter((gap): gap is TelemetryCoverageGap => gap !== null)
   return {
     source: asString(raw.source),
     producer: asString(raw.producer),
@@ -2392,6 +2416,8 @@ function decodeTelemetryFreshnessMetadata(raw: Record<string, unknown>): Telemet
     stale_reason: asNullableString(raw.stale_reason),
     entry_count: asNumber(raw.entry_count),
     exists: asBoolean(raw.exists),
+    coverage_gaps: coverageGaps,
+    coverage_gap_count: asNumber(raw.coverage_gap_count, coverageGaps.length),
   }
 }
 
@@ -2606,22 +2632,12 @@ export type TelemetryResponse = {
   entries: TelemetryEntry[]
 }
 
-export type TelemetrySourceSummary = {
+export type TelemetrySourceSummary = TelemetryFreshnessMetadata & {
   source: string
   path?: string
-  exists?: boolean
   entry_count: number
   keepers?: Array<{ name: string; path: string }>
   keeper_count?: number
-  freshness_slo_s?: number | null
-  producer?: string
-  durable_store?: string
-  dashboard_surface?: string
-  latest_ts_unix?: number | null
-  latest_ts_iso?: string | null
-  latest_age_s?: number | null
-  health?: string
-  stale_reason?: string | null
 }
 
 export type TelemetrySummaryResponse = {
@@ -2681,6 +2697,7 @@ function decodeTelemetrySourceSummary(raw: unknown): TelemetrySourceSummary | nu
   const source = asString(raw.source)
   if (!source) return null
   return {
+    ...decodeTelemetryFreshnessMetadata(raw),
     source,
     path: asString(raw.path),
     exists: asBoolean(raw.exists),
@@ -2693,15 +2710,6 @@ function decodeTelemetrySourceSummary(raw: unknown): TelemetrySourceSummary | nu
       })
       .filter((keeper): keeper is { name: string; path: string } => keeper !== null),
     keeper_count: asNumber(raw.keeper_count),
-    freshness_slo_s: asNumber(raw.freshness_slo_s),
-    producer: asString(raw.producer),
-    durable_store: asString(raw.durable_store),
-    dashboard_surface: asString(raw.dashboard_surface),
-    latest_ts_unix: asNumber(raw.latest_ts_unix),
-    latest_ts_iso: asString(raw.latest_ts_iso),
-    latest_age_s: asNumber(raw.latest_age_s),
-    health: asString(raw.health),
-    stale_reason: asNullableString(raw.stale_reason),
   }
 }
 

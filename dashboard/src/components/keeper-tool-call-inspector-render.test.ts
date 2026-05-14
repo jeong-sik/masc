@@ -83,4 +83,41 @@ describe('KeeperToolCallInspector render', () => {
     expect(inputCopy?.getAttribute('title')).toBe('도구 호출 입력 복사')
     expect(outputCopy?.getAttribute('title')).toBe('도구 호출 출력 복사')
   })
+
+  it('surfaces coverage gap provenance when tool-call IO is stale', async () => {
+    const fetchKeeperToolCalls = vi.fn().mockResolvedValue({
+      keeper: 'analyst',
+      count: 0,
+      source: 'tool_call_io',
+      health: 'coverage_gap',
+      stale_reason: 'tool_call_io_append_failed',
+      coverage_gap_count: 1,
+      coverage_gaps: [
+        {
+          source: 'tool_call_io',
+          producer: 'keeper_tool_call_log.append',
+          durable_store: '.masc/tool_calls',
+          dashboard_surface: '/api/v1/keepers/:name/tool-calls',
+          stale_reason: 'tool_call_io_append_failed',
+          trace_id: 'trace-tool-call-gap',
+          error: 'append denied',
+        },
+      ],
+      entries: [],
+    })
+
+    const { KeeperToolCallInspector } = await loadInspector(fetchKeeperToolCalls)
+    await act(async () => {
+      render(html`<${KeeperToolCallInspector} keeperName="analyst" />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(container.textContent).toContain('coverage gaps 1: tool_call_io_append_failed')
+    expect(container.textContent).toContain('producer keeper_tool_call_log.append')
+    expect(container.textContent).toContain('store .masc/tool_calls')
+    expect(container.textContent).toContain('surface /api/v1/keepers/:name/tool-calls')
+    expect(container.textContent).toContain('trace trace-tool-call-gap')
+    expect(container.textContent).toContain('error append denied')
+  })
 })

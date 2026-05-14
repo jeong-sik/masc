@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { html } from 'htm/preact'
+import { render } from 'preact'
+import { act } from 'preact/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { filterToolStats } from './keeper-tool-telemetry'
 import type { ToolStat } from '../api/dashboard'
 
@@ -90,5 +93,80 @@ describe('filterToolStats', () => {
     const empty: readonly ToolStat[] = []
     expect(filterToolStats(empty, 'masc')).toEqual([])
     expect(filterToolStats(empty, '')).toBe(empty)
+  })
+})
+
+async function flushUi(): Promise<void> {
+  await act(async () => {
+    for (let i = 0; i < 4; i += 1) {
+      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(0)
+    }
+  })
+}
+
+async function loadTelemetry(fetchKeeperToolStats: ReturnType<typeof vi.fn>) {
+  vi.resetModules()
+  vi.doMock('../api/dashboard', () => ({
+    fetchKeeperToolStats,
+  }))
+  return import('./keeper-tool-telemetry')
+}
+
+describe('KeeperToolTelemetry render', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+    vi.clearAllMocks()
+    vi.resetModules()
+    vi.doUnmock('../api/dashboard')
+    vi.useRealTimers()
+  })
+
+  it('surfaces trajectory coverage gap provenance', async () => {
+    const fetchKeeperToolStats = vi.fn().mockResolvedValue({
+      keeper: 'analyst',
+      window_hours: 24,
+      total_entries: 0,
+      source: 'trajectory_tool_call',
+      health: 'coverage_gap',
+      stale_reason: 'trajectory_append_failed',
+      coverage_gap_count: 1,
+      coverage_gaps: [
+        {
+          source: 'trajectory_tool_call',
+          producer: 'keeper_hooks_oas.post_tool_use',
+          durable_store: '.masc/keepers/analyst/trajectories',
+          dashboard_surface: '/api/v1/keepers/:name/tool-stats',
+          stale_reason: 'trajectory_append_failed',
+          trace_id: 'trace-tool-stats-gap',
+          error: 'append denied',
+        },
+      ],
+      tools: [],
+      timeline: [],
+    })
+
+    const { KeeperToolTelemetry } = await loadTelemetry(fetchKeeperToolStats)
+    await act(async () => {
+      render(html`<${KeeperToolTelemetry} keeperName="analyst" />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(container.textContent).toContain('coverage gaps 1: trajectory_append_failed')
+    expect(container.textContent).toContain('producer keeper_hooks_oas.post_tool_use')
+    expect(container.textContent).toContain('store .masc/keepers/analyst/trajectories')
+    expect(container.textContent).toContain('surface /api/v1/keepers/:name/tool-stats')
+    expect(container.textContent).toContain('trace trace-tool-stats-gap')
+    expect(container.textContent).toContain('error append denied')
   })
 })

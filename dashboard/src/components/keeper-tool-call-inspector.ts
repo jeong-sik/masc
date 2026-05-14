@@ -15,12 +15,13 @@ import { parseToolBlobMarker } from '../lib/tool-blob-marker'
 import { CopyIdButton } from './common/copy-id-button'
 import { TextInput } from './common/input'
 import { ringFocusClasses } from './common/ring'
-import { sourceHealthClass, freshnessText } from './common/source-health'
+import { coverageGapDisplay, sourceHealthClass, freshnessText } from './common/source-health'
 
 // Delegated to lib/format-time (SSOT)
 const formatTimestamp = formatTimeHms
 
 function FreshnessLine({ data }: { data: TelemetryFreshnessMetadata }) {
+  const gap = coverageGapDisplay(data)
   return html`
     <div class="text-3xs text-[var(--color-fg-disabled)]">
       <span class="font-mono">${data.source ?? 'tool_call_io'}</span>
@@ -31,6 +32,12 @@ function FreshnessLine({ data }: { data: TelemetryFreshnessMetadata }) {
       ${typeof data.entry_count === 'number' ? html`
         <span class="mx-1" aria-hidden="true">·</span>
         <span>${data.entry_count.toLocaleString()} rows</span>
+      ` : null}
+      ${gap ? html`
+        <div class="mt-1 font-mono text-[var(--color-status-warn)]">${gap.summary}</div>
+        ${gap.details.length > 0 ? html`
+          <div class="mt-0.5 break-all font-mono text-[var(--color-fg-muted)]">${gap.details.join(' · ')}</div>
+        ` : null}
       ` : null}
     </div>
   `

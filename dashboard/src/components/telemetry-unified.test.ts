@@ -228,6 +228,52 @@ describe('TelemetryUnified', () => {
     expect(container.textContent).toContain('5 public')
   })
 
+  it('renders telemetry summary coverage gap provenance', async () => {
+    const fetchTelemetry = vi.fn().mockResolvedValue(baseTelemetry)
+    const fetchTelemetrySummary = vi.fn().mockResolvedValue({
+      ...baseSummary,
+      sources: [
+        {
+          ...baseSummary.sources[0],
+          health: 'coverage_gap',
+          stale_reason: 'append_failed',
+          coverage_gap_count: 1,
+          coverage_gaps: [
+            {
+              schema: 'masc.telemetry_coverage_gap.v1',
+              source: 'tool_metric',
+              producer: 'telemetry_eio',
+              durable_store: '.masc/telemetry',
+              dashboard_surface: '/api/v1/dashboard/telemetry/summary',
+              stale_reason: 'append_failed',
+              trace_id: 'trace-summary-gap',
+              error: 'disk full',
+            },
+          ],
+        },
+      ],
+    })
+    const { TelemetryUnified } = await loadPanel(fetchTelemetry, fetchTelemetrySummary)
+
+    await act(async () => {
+      render(html`<${TelemetryUnified} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(container.textContent).toContain('coverage gaps 1: append_failed')
+    expect(container.textContent).toContain('gap producer')
+    expect(container.textContent).toContain('telemetry_eio')
+    expect(container.textContent).toContain('gap store')
+    expect(container.textContent).toContain('.masc/telemetry')
+    expect(container.textContent).toContain('gap surface')
+    expect(container.textContent).toContain('/api/v1/dashboard/telemetry/summary')
+    expect(container.textContent).toContain('gap trace')
+    expect(container.textContent).toContain('trace-summary-gap')
+    expect(container.textContent).toContain('gap error')
+    expect(container.textContent).toContain('disk full')
+  })
+
   it('hydrates telemetry scope and entry focus from route params', async () => {
     window.location.hash = '#monitoring?section=fleet-health&view=event-log&session_id=sess-route&operation_id=op-route&worker_run_id=wr-route&q=turn-9'
     const fetchTelemetry = vi.fn().mockResolvedValue({

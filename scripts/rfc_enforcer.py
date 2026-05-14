@@ -1,29 +1,39 @@
 #!/usr/bin/env python3
-"""RFC §1 Enforcer — ensure caller-context completeness in RFC drafts.
+"""RFC §1 Enforcer and number-collision guard.
 
-Checks RFC markdown files for §1 section completeness rules:
+§1 mode (default): ensure caller-context completeness in RFC drafts.
   R1: No <!-- TODO --> comments in §1
   R2: At least 3 file:line citations
   R3: At least 1 code block
   R4: No sub-agent placeholder text
   R5: .tmp/rfc-NNNN-caller-context.md companion file exists
 
+--check-numbering mode (RFC-0078): block RFC number collisions.
+  Reads PR-added RFC-NNNN-*.md files (added since base ref) and rejects
+  any NNNN that already has a different file on the base ref. Multi-phase
+  additions opt in via PR body line ``RFC-EXTEND: NNNN`` (env PR_BODY) or
+  RFC frontmatter ``extends: "NNNN"``.
+
 Usage:
     python scripts/rfc_enforcer.py --check docs/rfc/
     python scripts/rfc_enforcer.py --check docs/rfc/ --strict
+    python scripts/rfc_enforcer.py --check-numbering \
+        --base-ref origin/main --head-ref HEAD
 
 Exit codes:
-    0 — all RFCs pass
+    0 — all checks pass
     1 — one or more violations found
     2 — runtime error
 """
 
 import argparse
+import os
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Set, Tuple
 
 
 @dataclass(frozen=True)
@@ -164,13 +174,133 @@ def check_all_rfcs(rfc_dir: Path, check_tmp_file: bool = True) -> Tuple[List[Vio
     return all_violations, files_checked, files_passed
 
 
+_RFC_FILENAME_RE = re.compile(r"^RFC-(\d{4})-[a-zA-Z0-9._-]+\.md$")
+_RFC_EXTEND_RE = re.compile(r"^RFC-EXTEND:\s*(\d{4})\s*$", re.MULTILINE)
+_FRONTMATTER_EXTENDS_RE = re.compile(
+    r'^extends:\s*\[?\s*"?(\d{4})"?\s*\]?\s*$', re.MULTILINE
+)
+
+
+def _git(*args: str) -> str:
+    """Run git and return stdout (stripped). Raises on non-zero."""
+    result = subprocess.run(
+        ["git", *args], check=True, capture_output=True, text=True
+    )
+    return result.stdout.strip()
+
+
+def _added_rfc_files(base_ref: str, head_ref: str) -> List[str]:
+    """Return paths of RFC-*.md files added on head vs base."""
+    out = _git(
+        "diff",
+        "--name-only",
+        "--diff-filter=A",
+        f"{base_ref}...{head_ref}",
+        "--",
+        "docs/rfc/",
+    )
+    return [
+        line
+        for line in out.splitlines()
+        if _RFC_FILENAME_RE.match(Path(line).name)
+    ]
+
+
+def _base_rfc_files_for_number(base_ref: str, number: str) -> List[str]:
+    """Return paths of RFC-NNNN-*.md files present on base_ref."""
+    out = _git("ls-tree", "--name-only", base_ref, "docs/rfc/")
+    return [
+        line
+        for line in out.splitlines()
+        if _RFC_FILENAME_RE.match(Path(line).name)
+        and Path(line).name.startswith(f"RFC-{number}-")
+    ]
+
+
+def _extends_optin_numbers(pr_body: str, added_files: List[str]) -> Set[str]:
+    """Collect numbers that this PR is explicitly extending.
+
+    Two opt-in sources:
+      - PR body line ``RFC-EXTEND: NNNN``
+      - Frontmatter ``extends: "NNNN"`` in any of the added RFC files
+    """
+    numbers: Set[str] = set()
+    for match in _RFC_EXTEND_RE.finditer(pr_body or ""):
+        numbers.add(match.group(1))
+    for path in added_files:
+        try:
+            content = Path(path).read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for match in _FRONTMATTER_EXTENDS_RE.finditer(content):
+            numbers.add(match.group(1))
+    return numbers
+
+
+def check_numbering(base_ref: str, head_ref: str, pr_body: str) -> List[Violation]:
+    """Return collision violations for RFC numbers added in this PR."""
+    violations: List[Violation] = []
+    try:
+        added = _added_rfc_files(base_ref, head_ref)
+    except subprocess.CalledProcessError as exc:
+        msg = exc.stderr.strip() or str(exc)
+        return [Violation(Path("git"), 0, "GIT_ERROR", msg)]
+
+    optin = _extends_optin_numbers(pr_body, added)
+
+    for path in added:
+        name = Path(path).name
+        m = _RFC_FILENAME_RE.match(name)
+        if m is None:
+            continue
+        number = m.group(1)
+        try:
+            existing = _base_rfc_files_for_number(base_ref, number)
+        except subprocess.CalledProcessError:
+            existing = []
+        if not existing:
+            continue
+        if number in optin:
+            continue
+        existing_str = ", ".join(sorted(existing))
+        violations.append(
+            Violation(
+                Path(path),
+                0,
+                "RFC_NUMBER_COLLISION",
+                (
+                    f"RFC-{number} already exists on {base_ref}: {existing_str}. "
+                    "Allocate next via scripts/rfc-allocate-next.sh, or opt in "
+                    f"to multi-phase via PR body 'RFC-EXTEND: {number}' or "
+                    f'frontmatter \'extends: "{number}"\'.'
+                ),
+            )
+        )
+
+    return violations
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="RFC §1 Enforcer")
+    parser = argparse.ArgumentParser(description="RFC §1 Enforcer + number guard")
     parser.add_argument(
         "--check",
         type=Path,
-        required=True,
-        help="Directory containing RFC files to check",
+        help="Directory containing RFC files to check (§1 mode)",
+    )
+    parser.add_argument(
+        "--check-numbering",
+        action="store_true",
+        help="Check for RFC number collisions between PR additions and base ref",
+    )
+    parser.add_argument(
+        "--base-ref",
+        default="origin/main",
+        help="Base git ref for --check-numbering (default: origin/main)",
+    )
+    parser.add_argument(
+        "--head-ref",
+        default="HEAD",
+        help="Head git ref for --check-numbering (default: HEAD)",
     )
     parser.add_argument(
         "--files",
@@ -194,6 +324,22 @@ def main() -> int:
         help="Ignore NO_SECTION1 violations (grandfathering pre-0052 RFCs)",
     )
     args = parser.parse_args()
+
+    # --check-numbering mode runs independently of --check.
+    if args.check_numbering:
+        pr_body = os.environ.get("PR_BODY", "")
+        violations = check_numbering(args.base_ref, args.head_ref, pr_body)
+        if violations:
+            print(f"Found {len(violations)} RFC numbering violation(s):\n")
+            for v in violations:
+                print(v.format())
+            print()
+            return 1
+        print("RFC numbering: no collisions detected.")
+        return 0
+
+    if args.check is None:
+        parser.error("--check is required unless --check-numbering is used")
 
     # Determine which files to check
     if args.files:

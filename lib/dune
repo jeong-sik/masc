@@ -19,6 +19,9 @@
  post_turn_wirein_failure_site
  atomic_orphan_size_class
  silent_dashboard_actor_outcome
+ prometheus_format
+ prometheus_key
+ prometheus_process
  dashboard_http_keeper_metrics
  dashboard_http_keeper_detail
  dashboard_http_tool_quality

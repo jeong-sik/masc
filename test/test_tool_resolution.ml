@@ -153,6 +153,41 @@ let test_matrix_report () =
   ) results;
   Printf.printf "  Summary: A=%d D=%d C=%d total=%d\n" a_count d_count c_count (List.length policy_tool_names)
 
+(* ── Phase 5: full-probe overlap analysis ── *)
+
+let test_full_probe_overlap () =
+  (* Each tool must admit from >= 1 source via all_admitting_sources *)
+  let per_tool =
+    List.map (fun name ->
+      let sources = TR.all_admitting_sources name in
+      (name, sources, List.length sources)
+    ) policy_tool_names
+  in
+  let single_source =
+    List.filter_map (fun (name, sources, count) ->
+      if count = 1 then Some (name, List.hd sources) else None
+    ) per_tool
+  in
+  let zero_source =
+    List.filter (fun (_, _, count) -> count = 0) per_tool
+  in
+  (* No tool should have 0 sources *)
+  check int "zero-source tools should be 0" 0 (List.length zero_source);
+  (* Report overlap distribution *)
+  let multi_count = List.length policy_tool_names - List.length single_source in
+  Printf.printf "  Full-probe: %d multi-source, %d single-source, %d zero-source\n"
+    multi_count (List.length single_source) (List.length zero_source);
+  List.iter (fun (name, sources, count) ->
+    Printf.printf "  %-40s %2d sources: %s\n" name count (TR.string_of_tried sources)
+  ) per_tool;
+  (* Phase 5 gate: tools with only 1 source are fragile *)
+  if single_source <> [] then begin
+    Printf.printf "  Single-source (fragile) tools:\n";
+    List.iter (fun (name, src) ->
+      Printf.printf "    %-40s only via %s\n" name (TR.string_of_tried_source src)
+    ) single_source
+  end
+
 (* ── Suite ── *)
 
 let () =
@@ -173,5 +208,6 @@ let () =
     ; "matrix", [
         test_case "all policy tools resolve" `Quick test_all_policy_tools_resolve;
         test_case "matrix report: 0 dead entries" `Quick test_matrix_report;
+        test_case "full-probe overlap analysis" `Quick test_full_probe_overlap;
       ]
     ]

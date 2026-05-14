@@ -3,7 +3,8 @@ rfc: RFC-0082
 title: Keeper `last_blocker` auto-clear + cascade recovery escalation
 author: jeong-sik (with Claude Opus 4.7)
 created: 2026-05-14
-status: Draft
+corrected: 2026-05-15
+status: Draft (corrected — see §12)
 supersedes: —
 related:
   - RFC-0038 §4 problem 3 (operator_disposition ↔ paused desync — noted but unresolved)
@@ -12,11 +13,13 @@ related:
   - RFC-0026 (Work-Conserving Keeper Admission — admission layer retired, no replacement)
 ---
 
+> **READ §12 FIRST.** 2026-05-15 fleet measurement falsifies the "no clear path" premise this RFC was built on. Phase 1 (auto-clear hook) is re-scoped pending stale-recovery investigation. §1.2 Axis C and §6 Tier 1 are factually amended.
+
 # RFC-0082: Keeper `last_blocker` auto-clear + cascade recovery escalation
 
 ## §0 Summary
 
-When a keeper's cascade exhausts (`cascade_exhausted` terminal reason), the supervisor stamps `keeper_meta.runtime.last_blocker = { klass: { name = "cascade_exhausted"; reason = "no_providers_available" }; detail = ... }`. There is **no code path** that clears this latch when providers later become available. The dashboard reads `last_blocker` for the "일시정지 / 런타임 차단" UI affordance, perpetuating the *appearance* of a paused keeper even when `paused = false`. Combined with the absence of a runtime endpoint behind the dashboard's *OVERRIDE* buttons and the append-only `last_proactive_preview` field, the keeper is *structurally unable to self-recover*.
+When a keeper's cascade exhausts (`cascade_exhausted` terminal reason), the supervisor stamps `keeper_meta.runtime.last_blocker = { klass: { name = "cascade_exhausted"; reason = "no_providers_available" }; detail = ... }`. **Six code paths** in `lib/keeper/` already assign `last_blocker = None` on normal turn-success paths (see §1.2 Axis C, corrected). They clear the latch on the *expected-path keepers* but **fail to fire on keepers exiting via `stale_*` diagnoses** (`stale_turn_timeout`, `stale_fleet_batch`), because those keepers never reach the success-path branches that hold the clears. The dashboard reads `last_blocker` for the "일시정지 / 런타임 차단" UI affordance, perpetuating the *appearance* of a paused keeper even when `paused = false`. Combined with the absence of a runtime endpoint behind the dashboard's *OVERRIDE* buttons and the append-only `last_proactive_preview` field, *some* keepers — those whose last turn died by stale diagnosis — are structurally unable to self-recover.
 
 This RFC proposes:
 
@@ -94,7 +97,15 @@ The decision-grade block is **`last_blocker`**, not `paused`. The stamp path:
 2. `lib/keeper/keeper_execution_receipt.ml:475` derives `operator_disposition = "alert_exhausted"` by `String.equal`.
 3. `lib/keeper/keeper_supervisor.ml:1485` stamps `keeper_meta.runtime.last_blocker` with `klass = Stale_fleet_batch` (when ≥6 keepers fleet-wide) or `klass = Cascade_exhausted` (single keeper).
 4. Dashboard renders `last_blocker` as "일시정지 / 런타임 차단 / stale_fleet_batch(distinct_count=6)".
-5. **No code path clears `last_blocker`** even on next successful cascade attempt. `rg -n "last_blocker = None\|reset_last_blocker\|clear_blocker" lib/keeper/` confirms.
+5. *(Corrected 2026-05-15)* Six code paths in `lib/keeper/` assign `last_blocker = None`:
+   - `keeper_turn_up_create.ml:579` (turn creation)
+   - `keeper_turn_up_update.ml:281` (turn update)
+   - `keeper_unified_metrics.ml:1392` (metrics path)
+   - `keeper_supervisor.ml:801` (supervisor — first path)
+   - `keeper_supervisor.ml:2071` (supervisor — auto_resume cleanup)
+   - `keeper_supervisor.ml:2279` (supervisor — secondary cleanup)
+
+   The 2026-05-15 fleet measurement (server uptime 1 min → 5 min) shows `dict→null` transitions on 12/18 keepers within ~5 min, confirming these paths *do* fire on healthy turn cycles. The remaining 5 latched keepers (`glm-coding`, `imseonghan`, `janitor`, `qa-king`, `sangsu`) all carry `klass = stale_turn_timeout` or `stale_fleet_batch` — their last turn exited via stale diagnosis, which does *not* route through any of the six clear sites. The *real* defect is "stale-exit keepers skip the clear path", not "no clear path exists".
 
 `auto_resume` (`lib/keeper/keeper_supervisor.ml:2026-2069`) is gated on `meta.paused = true`, which is *separate state*. Since `paused = false`, `auto_resume` is not even attempted — but the *appearance* of stuck persists because the dashboard surfaces `last_blocker`.
 
@@ -120,7 +131,10 @@ In a fleet of 18 keepers, 6 became stuck (`distinct_count=6` in `stale_fleet_bat
 
 ## §3 Design
 
-### §3.1 `last_blocker` typed lifecycle
+### §3.1 `last_blocker` typed lifecycle *(RE-SCOPED pending §12 stale-recovery investigation)*
+
+> Adding a seventh clear site is workaround-rejection-bar pattern #3 (N-of-M) as long as the six existing clear sites are the *correct* place to fire and merely fail to be reached by stale-exit paths. The typed-lifecycle module below is still the right *target shape* — it deduplicates six scattered assignments into one — but it should be introduced *after* the stale-exit flow is traced and either (a) routed through one of the existing clear sites, or (b) shown to require a structurally new clear site that the lifecycle module then owns.
+
 
 ```ocaml
 (* lib/keeper/keeper_blocker_lifecycle.ml — new *)
@@ -213,14 +227,16 @@ Each phase ≤ 600 LOC, independently revertable, build-green-at-every-PR.
 
 | Phase | Files | Diff target | Risk | Rollback |
 |---|---|---|---|---|
-| **0** (this PR) | `docs/rfc/RFC-0082-*.md`, `tla+/KeeperLastBlockerLatch.tla` + `.cfg`s | docs+spec only | none | revert PR |
-| **1** | `lib/keeper/keeper_blocker_lifecycle.ml{,i}` + caller in `lib/cascade/cascade_runner.ml` (one site) | ~200 LOC | low | env flag `MASC_KEEPER_BLOCKER_AUTOCLEAR=0` |
-| **2** | Supervisor diagnostic probe: `lib/keeper/keeper_supervisor.ml` + new `keeper_diagnostic_probe.ml` | ~350 LOC | medium (new scheduler edge) | env flag + canary |
-| **3** | Admin endpoint: `lib/server/server_admin_keeper_api.ml` + dashboard wiring | ~250 LOC | low | revert PR |
-| **4** | `last_proactive_preview` unconditional update + dashboard "최근 활동" fallback | ~150 LOC | low | env flag |
-| **5** | RFC-0042 `cascade_exhausted` typed closure: `keeper_execution_receipt.ml` + `keeper_turn_driver.ml` | ~200 LOC | medium (wire format coordination) | revert PR |
+| **0** (this PR — merged 2026-05-14 as #15316) | `docs/rfc/RFC-0082-*.md`, `tla+/KeeperLastBlockerLatch.tla` + `.cfg`s | docs+spec only | none | revert PR |
+| **0.5** *(NEW, this corrective PR)* | this RFC §1.2 / §6 / §12 corrections, no code | docs only | none | revert PR |
+| **1** *(BLOCKED on Phase 0.6 below)* | ~~`lib/keeper/keeper_blocker_lifecycle.ml{,i}` + caller~~ | TBD | TBD | TBD |
+| **0.6** *(NEW, prerequisite to Phase 1)* | Trace stale-exit code path — `lib/keeper/keeper_stale_watchdog.ml`, `keeper_heartbeat_loop.ml`, supervisor stale-detection branches. Output: which existing clear site (if any) the stale-exit recovery turn lands on. Investigation memo, no code change. | docs only | none | n/a |
+| **2** *(deferred)* | Supervisor diagnostic probe | ~350 LOC | medium (new scheduler edge) | env flag + canary |
+| **3** *(deferred)* | Admin endpoint + dashboard wiring | ~250 LOC | low | revert PR |
+| **4** *(deferred)* | `last_proactive_preview` unconditional update | ~150 LOC | low | env flag |
+| **5** *(deferred)* | RFC-0042 `cascade_exhausted` typed closure | ~200 LOC | medium (wire format coordination) | revert PR |
 
-Phase 1 lands first because it is the load-bearing change (one keeper attempting recovery should *succeed*). Phases 2-4 build on Phase 1. Phase 5 is the cleanup.
+Phase 1 was originally framed as the load-bearing change. The 2026-05-15 measurement (§12) showed *most* keepers already self-clear within minutes — Phase 1 would have added a seventh clear site without diagnosing *why* the six existing sites miss the 5 stuck keepers. Phase 0.6 (stale-exit trace) is now the prerequisite: its output decides whether Phase 1 introduces a new clear site or wires one of the six existing sites into the stale-recovery path.
 
 ## §5 TLA+ verification (Bug Model)
 
@@ -253,9 +269,15 @@ Phase 1 lands first because it is the load-bearing change (one keeper attempting
 
 ## §6 Tier 1 immediate unblock (out of band — operator action)
 
-This RFC is the *root-fix*. To unstick masc-improver *today* (before Phase 1 ships) the operator has three options:
+> *Corrected 2026-05-15*: option 1 below (now demoted) is heavier than it needs to be. Option 0, validated on masc-improver on 2026-05-14, is the smallest safe recovery. Option 3's "*once Phase 1 ships*" qualifier was wrong — see §12.
 
-1. **Server stop + JSON edit + restart**:
+0. **`masc_keeper_down` + `masc_keeper_up`** (validated 2026-05-14 on masc-improver):
+   ```
+   masc_keeper_down  name=<keeper>
+   masc_keeper_up    name=<keeper>
+   ```
+   Both pass governance (unlike `masc_keeper_reset` which is `risk_level=critical`). Result: `last_blocker = null`, `paused = false`, `trace_id` preserved. Server keeps running. *This is the recommended Tier 1 recovery.*
+1. **Server stop + JSON edit + restart** *(legacy — only if `masc_keeper_*` is unavailable)*:
    ```bash
    # Identify masc-mcp main_eio process
    lsof -nP -i :8935 | rg LISTEN
@@ -268,8 +290,9 @@ This RFC is the *root-fix*. To unstick masc-improver *today* (before Phase 1 shi
    mv ~/me/.masc/keepers/masc-improver.json.tmp ~/me/.masc/keepers/masc-improver.json
    # Restart server (operator-specific command)
    ```
+   Direct JSON edits while the server is running race with `main_eio` meta writes — only safe with server stopped.
 2. **Wait for Phase 3 (admin endpoint)** and use the dashboard *OVERRIDE* button.
-3. **Cascade-side fix**: ensure `claude_code.claude-auto.tool_candidate` and `kimi_cli.kimi-cli-coding.tool_candidate` are healthy (CLI binaries installed, credentials valid). Then a successful turn will clear `last_blocker` automatically *once Phase 1 ships*. Until then, even a healthy cascade leaves the latch.
+3. **Cascade-side fix**: ensure cascade `tier-group` member providers (e.g. `claude_code.claude-auto.tool_candidate`, `kimi_cli.kimi-cli-coding.tool_candidate`) are healthy (CLI binaries installed, credentials valid). If a *normal-path* turn then completes, one of the six existing clear sites (§1.2 Axis C #5) will fire. *Stale-exit* keepers still need the stale-recovery flow that Phase 0.6 must trace before Phase 1 lands.
 
 ## §7 Risks
 
@@ -307,4 +330,61 @@ This RFC is the *root-fix*. To unstick masc-improver *today* (before Phase 1 shi
 - `MEMORY.md` `project_masc_mcp_fleet_idle_quartet` — 4-axis configured-but-idle pattern; this RFC addresses a 2-axis tight variant (latch + dead UI)
 - CLAUDE.md §"워크어라운드 거부 기준" — telemetry-as-fix (#1) and N-of-M (#3) self-checks applied at each phase
 
-🤖 Generated with [Claude Code](https://claude.com/claude-code) during 3-axis root-cause investigation
+## §12 Correction (2026-05-15) — falsifying measurements
+
+This RFC was merged 2026-05-14 (#15316) with a *fleet-wide auto-clear gap* as the load-bearing premise. A re-measurement 2026-05-15 on the same fleet falsifies that premise. Honest record:
+
+### §12.1 What was actually true at 2026-05-14
+
+- One keeper observed: `masc-improver`. `last_blocker.klass = cascade_exhausted`. Persisted ≥ 21h. Empirical N = 1.
+- §1.2 Axis C #5 generalisation ("no code path clears `last_blocker`") was based on a `rg -n` invocation whose output was misread. The *clear* paths exist; they were filtered out by the grep's exact-string pattern.
+
+### §12.2 What the 2026-05-15 measurement showed
+
+Server restarted on RFC-0082's merge commit (`90e02e0ee0`). Fleet measurements:
+
+| Server uptime | `last_blocker = dict` count | `last_blocker = null` count |
+|---|---|---|
+| ~1 min | 17 (apparent — see §12.4 below) | 1 |
+| ~5 min | 5 (real) | 13 |
+
+12 keepers self-cleared between t+1min and t+5min, with no operator action. The six clear sites in §1.2 Axis C #5 *do* fire on normal turn-success paths.
+
+### §12.3 Which keepers stayed stuck and why
+
+Of the 5 remaining latched keepers (`glm-coding`, `imseonghan`, `janitor`, `qa-king`, `sangsu`):
+
+- 1 carries `klass = stale_turn_timeout` (`active=625s` > `threshold=600s`)
+- 4 carry `klass = stale_fleet_batch` (mostly with `root_cause=stale_turn_timeout` and active times 2132–2167 s)
+
+All 5 share: `set_at = None` (no timestamp on the latch dict — legacy shape), `paused = false` (so dispatch is not gated), and `last_proactive_reason` in {`text_response`, `tools=[...]`, `require_tool_use` error} — *they are running turns*. Their *running* turns do not pass through any of the six clear sites. This is the real defect.
+
+### §12.4 Measurement caveat — initial 17/1 was inflated
+
+The first dump script bucketed `last_blocker` values incorrectly:
+
+- One keeper (`velvet-hammer`) had `last_blocker = None` but was mis-classified as `dict` (fallback label in the dump's `else` branch).
+- Five `dict` values had a `klass` field whose value was a *string* (not a sub-dict), and the script fell through to a `"dict"` fallback label that hid the structural shape.
+
+After fixing the script, the t+5min reality was 5 latched, not 17.
+
+### §12.5 Consequences for the RFC
+
+- **§0 Summary**: amended in-line — "no code path clears" → "six code paths clear, but stale-exit keepers skip them."
+- **§1.2 Axis C #5**: amended in-line with the six call sites and the t+5min observation.
+- **§3.1 typed lifecycle**: marked *RE-SCOPED*. Adding a seventh `last_blocker = None` site without diagnosing why the existing six miss the stale-exit path would be CLAUDE.md §"워크어라운드 거부 기준" #3 (N-of-M). The lifecycle module is still the right target shape — it consolidates six scattered assignments — but it is *gated on §0.6*.
+- **§4 phasing**: Phase 0.6 inserted (stale-exit code-path trace, docs only). Phase 1 BLOCKED on Phase 0.6 output.
+- **§6 Tier 1**: option 0 (`masc_keeper_down` + `masc_keeper_up`) promoted to first recommendation, validated empirically on masc-improver 2026-05-14.
+- **§10 migration completion criteria**: criterion "`rg -n "last_blocker = .*None|reset_last_blocker|clear_blocker" lib/keeper/` returns the new lifecycle calls" stands — but is now *additionally* qualified: the lifecycle module must replace the six existing assignments (consolidation), not just add a seventh.
+
+### §12.6 Lessons (for future RFCs)
+
+1. N = 1 is not a fleet claim. The original RFC generalised one stuck keeper to a fleet-wide structural defect without measuring the fleet. The first measurement after merge would have falsified the premise.
+2. `rg -n "<pattern>" lib/`  output should be enumerated, not summarised. The grep that "confirmed no clear path" was not actually empty — `last_blocker = None` (with spaces, with `=`, not `:=`) returns six lines.
+3. Time matters. A fleet measurement at server uptime t+1min is *transient state*, not *steady state*. Transient latches at restart are not the same defect as persistent latches under steady state.
+
+### §12.7 Memory entry
+
+A feedback memory `memory/feedback_rfc_premise_falsified_by_first_measurement.md` is added in the same correction PR, recording the pattern: *first measurement after merge can falsify the RFC; merge does not validate the premise.*
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code) — original 2026-05-14, corrected 2026-05-15

@@ -1,4 +1,4 @@
-import { currentDashboardActor, get, post, withRetries, defaultBoardVoter } from './core'
+import { currentDashboardActor, get, post, del, put, withRetries, defaultBoardVoter } from './core'
 import { isRecord, asNullableString, asString, asNumber, asInt, asStringList } from '../components/common/normalize'
 import { timeBoardRequest } from '../board-metrics'
 import type {
@@ -901,4 +901,23 @@ export function createSubBoard(
   const normalizedMembers = members.map(member => member.trim()).filter(Boolean)
   if (normalizedMembers.length > 0) body.members = normalizedMembers
   return post('/api/v1/board/sub-boards', body)
+}
+
+export function deleteSubBoard(subBoardId: string): Promise<unknown> {
+  return del(`/api/v1/board/sub-boards/${encodeURIComponent(subBoardId)}`)
+}
+
+export function updateSubBoard(
+  subBoardId: string,
+  updates: { name?: string; description?: string; access?: SubBoardAccess; members?: string[] },
+): Promise<unknown> {
+  const body: Record<string, string | string[]> = {}
+  if (updates.name !== undefined) body.name = updates.name
+  if (updates.description !== undefined) body.description = updates.description
+  if (updates.access !== undefined) body.access = updates.access
+  if (updates.members !== undefined) {
+    const normalizedMembers = updates.members.map(m => m.trim()).filter(Boolean)
+    if (normalizedMembers.length > 0) body.members = normalizedMembers
+  }
+  return put(`/api/v1/board/sub-boards/${encodeURIComponent(subBoardId)}`, body)
 }

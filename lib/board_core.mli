@@ -352,3 +352,16 @@ val list_sub_boards : store -> sub_board list
 (** Removes a sub-board by ID or slug under the state lock, then persists the
     rewritten snapshot outside the state lock. *)
 val delete_sub_board : store -> sub_board_id:string -> (unit, board_error) Result.t
+
+(** Updates an existing sub-board by ID or slug.
+    Only provided fields are changed; owner and slug are immutable.
+    Persists the rewritten snapshot outside the state lock. *)
+val update_sub_board
+  :  store
+  -> sub_board_id:string
+  -> ?name:string
+  -> ?description:string
+  -> ?members:string list
+  -> ?access:sub_board_access
+  -> unit
+  -> (sub_board, board_error) Result.t

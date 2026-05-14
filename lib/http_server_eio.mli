@@ -276,6 +276,14 @@ module Router : sig
 
   val prefix_post : string -> request_handler -> t -> t
 
+  (** [prefix_delete prefix handler routes] matches any DELETE whose
+      path starts with [prefix]. *)
+  val prefix_delete : string -> request_handler -> t -> t
+
+  (** [prefix_put prefix handler routes] matches any PUT whose
+      path starts with [prefix]. *)
+  val prefix_put : string -> request_handler -> t -> t
+
   (** [resolve routes request] returns [`Matched route] when
       either an exact path+method match exists OR (no exact
       match) the longest prefix match exists.  Returns

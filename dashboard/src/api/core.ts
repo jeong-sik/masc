@@ -653,6 +653,44 @@ export async function patch<T>(
   return parseJsonResponse<T>('PATCH', path, res)
 }
 
+export async function del<T>(
+  path: string,
+  extraHeaders?: Record<string, string>,
+  timeoutMs = DEFAULT_POST_TIMEOUT_MS,
+): Promise<T> {
+  const res = await fetchWithTimeout(path, {
+    method: 'DELETE',
+    headers: {
+      ...jsonHeaders(),
+      ...(extraHeaders ?? {}),
+    },
+  }, timeoutMs)
+  if (!res.ok) {
+    throw await apiRequestErrorFromResponse('DELETE', path, res)
+  }
+  return parseJsonResponse<T>('DELETE', path, res)
+}
+
+export async function put<T>(
+  path: string,
+  body: unknown,
+  extraHeaders?: Record<string, string>,
+  timeoutMs = DEFAULT_POST_TIMEOUT_MS,
+): Promise<T> {
+  const res = await fetchWithTimeout(path, {
+    method: 'PUT',
+    headers: {
+      ...jsonHeaders(),
+      ...(extraHeaders ?? {}),
+    },
+    body: JSON.stringify(body),
+  }, timeoutMs)
+  if (!res.ok) {
+    throw await apiRequestErrorFromResponse('PUT', path, res)
+  }
+  return parseJsonResponse<T>('PUT', path, res)
+}
+
 // --- Operator ---
 
 const OPERATOR_ACTION_TIMEOUT_MS: Record<string, number> = {

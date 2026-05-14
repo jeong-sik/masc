@@ -378,6 +378,67 @@ let add_routes ~sw ~clock router =
                       (`Assoc [("error", `String (Tool_board.board_error_to_string e))]))
                    reqd)))
 
+  |> Http.Router.prefix_delete "/api/v1/board/sub-boards/" (fun request reqd ->
+       with_tool_auth ~tool_name:"board_sub_board_delete"
+         (fun _state _req reqd ->
+         let path = Http.Request.path request in
+         (match extract_path_param ~prefix:"/api/v1/board/sub-boards/" path with
+          | None ->
+              Http.Response.json ~status:`Bad_request
+                (Yojson.Safe.to_string
+                   (`Assoc [("error", `String "sub_board_id is required")]))
+                reqd
+          | Some sub_board_id ->
+              (match Board_dispatch.delete_sub_board ~sub_board_id with
+               | Ok () ->
+                   Http.Response.json
+                     (Yojson.Safe.to_string (`Assoc [("deleted", `Bool true)])) reqd
+               | Error e ->
+                   Http.Response.json ~status:`Not_found
+                     (Yojson.Safe.to_string
+                        (`Assoc [("error", `String (Tool_board.board_error_to_string e))]))
+                     reqd)))
+         request reqd)
+
+  |> Http.Router.prefix_put "/api/v1/board/sub-boards/" (fun request reqd ->
+       with_tool_auth ~tool_name:"board_sub_board_update"
+         (fun _state _req reqd ->
+         Http.Request.read_body_async reqd (fun body ->
+           try
+             let args = Yojson.Safe.from_string body in
+             let name = Safe_ops.json_string_opt "name" args in
+             let description = Safe_ops.json_string_opt "description" args in
+             let members = Safe_ops.json_string_list "members" args in
+             let members_arg = if members = [] then None else Some members in
+             let access =
+               match Safe_ops.json_string_opt "access" args with
+               | Some s -> Board.sub_board_access_of_string_opt s
+               | None -> None
+             in
+             let path = Http.Request.path request in
+             (match extract_path_param ~prefix:"/api/v1/board/sub-boards/" path with
+              | None ->
+                  Http.Response.json ~status:`Bad_request
+                    (Yojson.Safe.to_string
+                       (`Assoc [("error", `String "sub_board_id is required")]))
+                    reqd
+              | Some sub_board_id ->
+                  (match Board_dispatch.update_sub_board ~sub_board_id ?name ?description ?members:members_arg ?access () with
+                   | Ok sb ->
+                       Http.Response.json
+                         (Yojson.Safe.to_string (Board.sub_board_to_yojson sb)) reqd
+                   | Error e ->
+                       Http.Response.json ~status:`Bad_request
+                         (Yojson.Safe.to_string
+                            (`Assoc [("error", `String (Tool_board.board_error_to_string e))]))
+                         reqd))
+           with Yojson.Json_error msg ->
+             Http.Response.json ~status:`Bad_request
+               (Yojson.Safe.to_string
+                  (`Assoc [("error", `String ("invalid JSON: " ^ msg))]))
+               reqd))
+         request reqd)
+
   |> Http.Router.prefix_get "/api/v1/board/" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let path = Http.Request.path request in

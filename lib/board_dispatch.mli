@@ -327,3 +327,12 @@ val list_sub_boards : unit -> Board.sub_board list
 val delete_sub_board :
   sub_board_id:string ->
   (unit, Board.board_error) Result.t
+
+val update_sub_board :
+  sub_board_id:string ->
+  ?name:string ->
+  ?description:string ->
+  ?members:string list ->
+  ?access:Board.sub_board_access ->
+  unit ->
+  (Board.sub_board, Board.board_error) Result.t

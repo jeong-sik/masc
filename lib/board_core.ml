@@ -1408,6 +1408,56 @@ let create_sub_board
           | Error _ as e -> e)))
 ;;
 
+
+let update_sub_board
+      store
+      ~sub_board_id
+      ?name
+      ?description
+      ?members
+      ?access
+      ()
+  : (sub_board, board_error) Result.t
+  =
+  let result =
+    with_lock store (fun () ->
+      let sb_opt =
+        match Hashtbl.find_opt store.sub_boards sub_board_id with
+        | Some sb -> Some sb
+        | None ->
+          (match Hashtbl.find_opt store.sub_boards_by_slug sub_board_id with
+           | Some id -> Hashtbl.find_opt store.sub_boards id
+           | None -> None)
+      in
+      match sb_opt with
+      | None ->
+        Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id))
+      | Some sb ->
+        let members =
+          match members with
+          | None -> sb.members
+          | Some raw ->
+            (match parse_sub_board_members ~owner:sb.owner raw with
+             | Ok m -> m
+             | Error _ -> sb.members)
+        in
+        let updated =
+          { sb with
+            name = Option.value ~default:sb.name (Option.map String.trim name)
+          ; description = Option.value ~default:sb.description (Option.map String.trim description)
+          ; members
+          ; access = Option.value ~default:sb.access access
+          }
+        in
+        Hashtbl.replace store.sub_boards (Sub_board_id.to_string sb.id) updated;
+        Ok updated)
+  in
+  (match result with
+   | Ok _ -> rewrite_sub_boards store
+   | Error _ -> ());
+  result
+;;
+
 let get_sub_board store ~sub_board_id : (sub_board, board_error) Result.t =
   with_lock store (fun () ->
     match Hashtbl.find_opt store.sub_boards sub_board_id with
@@ -1439,18 +1489,35 @@ let delete_sub_board store ~sub_board_id : (unit, board_error) Result.t =
   with_persist_lock store (fun () ->
     let snapshot =
       with_lock store (fun () ->
-        match Hashtbl.find_opt store.sub_boards sub_board_id with
+        let resolved_opt =
+          match Hashtbl.find_opt store.sub_boards sub_board_id with
+          | Some sb -> Some (sub_board_id, sb.slug)
+          | None ->
+            (match Hashtbl.find_opt store.sub_boards_by_slug sub_board_id with
+             | None -> None
+             | Some id ->
+               (match Hashtbl.find_opt store.sub_boards id with
+                | Some sb -> Some (id, sb.slug)
+                | None -> None))
+        in
+        match resolved_opt with
         | None ->
-          (match Hashtbl.find_opt store.sub_boards_by_slug sub_board_id with
-           | None ->
-             Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id))
-           | Some id ->
-             Hashtbl.remove store.sub_boards id;
-             Hashtbl.remove store.sub_boards_by_slug sub_board_id;
-             Ok (sub_boards_jsonl_unlocked store))
-        | Some sb ->
-          Hashtbl.remove store.sub_boards sub_board_id;
-          Hashtbl.remove store.sub_boards_by_slug sb.slug;
+          Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id))
+        | Some (id, slug) ->
+          Hashtbl.remove store.sub_boards id;
+          Hashtbl.remove store.sub_boards_by_slug slug;
+          (* Orphan policy: clear hearth on posts that belonged to this sub-board *)
+          Hashtbl.iter
+            (fun _ (post : post) ->
+               match post.hearth with
+               | Some h when String.equal h slug ->
+                 let updated = { post with hearth = None } in
+                 Hashtbl.replace store.posts (Post_id.to_string post.id) updated;
+                 store.dirty_posts <- true;
+                 Hashtbl.replace store.dirty_post_ids (Post_id.to_string post.id) ()
+               | _ -> ())
+            store.posts;
+          invalidate_post_caches store;
           Ok (sub_boards_jsonl_unlocked store))
     in
     match snapshot with

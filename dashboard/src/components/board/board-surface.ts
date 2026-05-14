@@ -9,6 +9,7 @@ import { requestConfirm } from '../common/confirm-dialog'
 import { EmptyState } from '../common/empty-state'
 import { LoadingState } from '../common/feedback-state'
 import { TextInput } from '../common/input'
+import { Select } from '../common/select'
 import { Checkbox } from '../common/checkbox'
 import { RichComposer } from '../common/rich-composer'
 import { RichContent } from '../common/rich-content'
@@ -46,6 +47,10 @@ import {
   boardHearths,
   boardHearthsLoading,
   boardHearthsError,
+  subBoardOptions,
+  subBoardOptionsLoading,
+  subBoardOptionsError,
+  loadSubBoardOptionsForPost,
   boardExcludeAutomation,
   boardLoading,
   boardLoadingMore,
@@ -267,13 +272,13 @@ function NewPostForm() {
         helpText="예: ts 코드펜스, 일반 URL 링크 카드, 단독 이미지 URL 자동 인라인"
         previewLimit=${2}
       />
-      <${TextInput}
-        name="board_post_hearth"
-        ariaLabel="새 글 hearth"
-        autoComplete="off"
-        placeholder="hearth (예: ops, research)"
+      <${Select}
         value=${newPostHearth.value}
-        onInput=${(e: Event) => { newPostHearth.value = (e.target as HTMLInputElement).value }}
+        options=${subBoardOptions.value.map(sb => ({ value: sb.slug, label: sb.name }))}
+        placeholder="Sub-board (hearth) 선택"
+        disabled=${newPostSubmitting.value || subBoardOptionsLoading.value}
+        ariaLabel="새 글 Sub-board"
+        onInput=${(value: string) => { newPostHearth.value = value }}
       />
       <div class="flex gap-2 justify-end">
         <button type="button"

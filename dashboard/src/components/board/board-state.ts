@@ -22,6 +22,7 @@ import {
   votePost,
   voteComment,
   fetchBoardHearths,
+  fetchSubBoards,
   fetchBoardPost,
   commentPost,
   createPost,
@@ -72,6 +73,11 @@ export const detailPostId = signal<string | null>(null)
 export const boardHearths = signal<BoardHearth[]>([])
 export const boardHearthsLoading = signal(false)
 export const boardHearthsError = signal(false)
+
+// SubBoard options for post creation dropdown
+export const subBoardOptions = signal<Array<{ slug: string; name: string }>>([])
+export const subBoardOptionsLoading = signal(false)
+export const subBoardOptionsError = signal(false)
 let boardHearthsRequestId = 0
 
 // ── Signals: comments ──────────────────────────────────────────────
@@ -103,6 +109,20 @@ export const categoryVisibleLimits = signal<Record<string, number>>({
 export const deletingPostId = signal<string | null>(null)
 export const selectedPostIds = signal<Set<string>>(new Set())
 export const bulkDeleting = signal(false)
+
+export async function loadSubBoardOptionsForPost(): Promise<void> {
+  subBoardOptionsLoading.value = true
+  subBoardOptionsError.value = false
+  try {
+    const boards = await fetchSubBoards()
+    subBoardOptions.value = boards.map(b => ({ slug: b.slug, name: b.name || b.slug }))
+  } catch (err) {
+    console.warn('[Board] failed to load sub-board options:', err)
+    subBoardOptionsError.value = true
+  } finally {
+    subBoardOptionsLoading.value = false
+  }
+}
 
 export async function refreshBoardHearths(): Promise<void> {
   const requestId = ++boardHearthsRequestId

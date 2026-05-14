@@ -28,7 +28,7 @@ export function PipelineStageBadge({
 }: {
   stage?: PipelineStage | null
 }) {
-  const current = stage ?? 'offline'
+  const current = stage ?? 'unknown'
   const label =
     STAGES.find((s) => s.key === current)?.label ?? current
 

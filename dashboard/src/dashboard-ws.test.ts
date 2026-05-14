@@ -8,6 +8,7 @@ const sseStoreMocks = vi.hoisted(() => ({
 vi.mock('./sse-store', () => sseStoreMocks)
 
 import {
+  clearDashboardWsDiscoveryCacheForTests,
   connectDashboardWS,
   dashboardSlicesForRoute,
   disconnectDashboardWS,
@@ -156,6 +157,7 @@ beforeEach(() => {
 
 afterEach(() => {
   disconnectDashboardWS()
+  clearDashboardWsDiscoveryCacheForTests()
   MockParseWorker.holdResponses = false
   dashboardWsConnected.value = false
   dashboardWsLastError.value = null
@@ -280,11 +282,65 @@ describe('dashboard websocket route subscriptions', () => {
     await connectDashboardWS({ tab: 'overview', params: {} })
     expect(mockSockets).toHaveLength(0)
 
-    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.advanceTimersByTimeAsync(60_000)
     await flushPromises()
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(mockSockets).toHaveLength(1)
+  })
+
+  it('reuses cached websocket discovery across reconnects after a ready socket closes', async () => {
+    vi.useFakeTimers()
+    installWebSocketMocks()
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const firstSocket = mockSockets[0]!
+    firstSocket.open()
+    const hello = parseRpc(firstSocket, 0)
+    firstSocket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    await flushPromises()
+
+    const subscribe = parseRpc(firstSocket, 1)
+    firstSocket.receive({
+      jsonrpc: '2.0',
+      id: subscribe.id,
+      result: { snapshot: { seq: 1, slices: {} } },
+    })
+    await flushPromises()
+    expect(dashboardWsReady.value).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    firstSocket.close({ code: 1001, reason: 'server restart', wasClean: true })
+    await vi.advanceTimersByTimeAsync(60_000)
+    await flushPromises()
+
+    expect(mockSockets).toHaveLength(2)
+    expect(mockSockets[1]!.url).toBe('ws://127.0.0.1:8937/')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('invalidates cached discovery when the cached socket closes before it is ready', async () => {
+    vi.useFakeTimers()
+    mockSockets.length = 0
+    vi.stubGlobal('WebSocket', MockWebSocket)
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(wsDiscoveryResponse('ws://127.0.0.1:8937/stale'))
+      .mockResolvedValueOnce(wsDiscoveryResponse('ws://127.0.0.1:8937/fresh'))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const staleSocket = mockSockets[0]!
+    expect(staleSocket.url).toBe('ws://127.0.0.1:8937/stale')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    staleSocket.close({ code: 1006, reason: 'connect failed', wasClean: false })
+    await vi.advanceTimersByTimeAsync(60_000)
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(mockSockets).toHaveLength(2)
+    expect(mockSockets[1]!.url).toBe('ws://127.0.0.1:8937/fresh')
   })
 
   it('subscribes the latest route captured while hello is still in flight', async () => {

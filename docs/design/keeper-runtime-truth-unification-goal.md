@@ -449,7 +449,9 @@ Boundary follow-up:
   inferring concrete provider/model identities. Older unified-turn token,
   cache, context-window, latency-bucket, and usage-anomaly metric labels also
   emit the neutral runtime lane instead of concrete `model_used` /
-  `resolved_model_id` values.
+  `resolved_model_id` values. Legacy keeper `models` inputs are now rejected
+  or ignored at parse/reconcile boundaries; runtime label selection must flow
+  through the named TOML cascade.
 - Residual work remains: pricing/telemetry labels, auth/display helpers,
   runtime-MCP quirks, local-default labels, dashboard debug fixtures, and
   broader cascade config/catalog/transport surfaces still know concrete

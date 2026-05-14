@@ -268,6 +268,44 @@ let test_emit_sanitizes_invalid_utf8_before_persisting () =
       check int "read path did not repair activity graph row" 0
         stats.repaired_reads)
 
+let test_read_self_heals_historic_invalid_utf8_event_file () =
+  with_config (fun config ->
+      Safe_ops.reset_persistence_utf8_repair_stats_for_tests ();
+      let root = Filename.concat (Coord_utils.masc_dir config) "activity-events" in
+      let month_dir = Filename.concat root "2000-01" in
+      Unix.mkdir root 0o755;
+      Unix.mkdir month_dir 0o755;
+      let event_path = Filename.concat month_dir "01.jsonl" in
+      let raw_line =
+        "{\"seq\":1,\"ts_ms\":1,\"ts_iso\":\"2000-01-01T00:00:00Z\",\
+         \"room_id\":\"default\",\"kind\":\"message.broadcast\",\
+         \"payload\":{\"content\":\"bad\xffpayload\"},\"tags\":[]}\n"
+      in
+      Fs_compat.save_file event_path raw_line;
+      check bool "fixture starts invalid" false
+        (String.is_valid_utf_8 (Fs_compat.load_file event_path));
+      let events = Activity_graph.list_events config ~after_seq:0 ~limit:10 () in
+      let event =
+        match events with
+        | [ event ] -> event
+        | events ->
+            fail
+              (Printf.sprintf "expected one event, got %d"
+                 (List.length events))
+      in
+      let open Yojson.Safe.Util in
+      let replacement = "\xEF\xBF\xBD" in
+      check string "payload repaired on read" ("bad" ^ replacement ^ "payload")
+        (event.payload |> member "content" |> to_string);
+      let stats_after_first = Safe_ops.persistence_utf8_repair_stats () in
+      check int "file repair counted once" 1 stats_after_first.repaired_reads;
+      check bool "backing file rewritten valid" true
+        (String.is_valid_utf_8 (Fs_compat.load_file event_path));
+      ignore (Activity_graph.list_events config ~after_seq:0 ~limit:10 ());
+      let stats_after_second = Safe_ops.persistence_utf8_repair_stats () in
+      check int "second read does not repair again" 1
+        stats_after_second.repaired_reads)
+
 let test_filtered_client_receives_matching_events () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -524,6 +562,8 @@ let () =
             test_events_json_ignores_invalid_derived_pr_number;
           test_case "emit sanitizes invalid utf8 before persisting" `Quick
             test_emit_sanitizes_invalid_utf8_before_persisting;
+          test_case "read self-heals historic invalid utf8 event file" `Quick
+            test_read_self_heals_historic_invalid_utf8_event_file;
           test_case "filtered client receives matching events" `Quick
             test_filtered_client_receives_matching_events;
           test_case "graph summary builds nodes and edges" `Quick

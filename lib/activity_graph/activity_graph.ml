@@ -162,11 +162,49 @@ let collect_event_files config =
              None)
     |> List.flatten
 
+let repair_event_file_utf8_once config path =
+  let content = Fs_compat.load_file path in
+  if String.is_valid_utf_8 content then
+    content
+  else
+    Coord_utils.with_file_lock config (lock_path config) (fun () ->
+        let latest = Fs_compat.load_file path in
+        if String.is_valid_utf_8 latest then
+          latest
+        else
+          let repair =
+            Safe_ops.repair_utf8_text_with_stats ~surface:"activity_graph"
+              ~path:("event_file:" ^ path)
+              latest
+          in
+          if not repair.changed then
+            latest
+          else begin
+            (if String.equal path (day_path config) then
+               Log.Misc.warn
+                 "[activity_graph] UTF-8 repaired current event file in memory path=%s \
+                  invalid_bytes=%d action=read_only_current_day"
+                 path repair.invalid_bytes
+             else
+               match Fs_compat.save_file_atomic path repair.text with
+               | Ok () ->
+                   Log.Misc.warn
+                     "[activity_graph] UTF-8 repaired persisted event file path=%s \
+                      invalid_bytes=%d action=rewrite_once"
+                     path repair.invalid_bytes
+               | Error msg ->
+                   Log.Misc.warn
+                     "[activity_graph] UTF-8 repaired event file in memory path=%s \
+                      invalid_bytes=%d action=rewrite_failed error=%s"
+                     path repair.invalid_bytes msg);
+            repair.text
+          end)
+
 let read_all_events config =
   collect_event_files config
   |> List.fold_left
        (fun acc path ->
-         let content = Fs_compat.load_file path in
+         let content = repair_event_file_utf8_once config path in
          let lines = String.split_on_char '\n' content in
          let rows =
            List.filter_map (fun line ->

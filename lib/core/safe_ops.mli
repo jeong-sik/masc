@@ -32,6 +32,19 @@ type utf8_repair_stats =
   ; path_samples : string list
   }
 
+type utf8_repair_result =
+  { text : string
+  ; invalid_bytes : int
+  ; changed : bool
+  }
+(** Result of repairing malformed UTF-8 text. *)
+
+val repair_utf8_text_with_stats :
+  ?surface:string -> ?path:string -> string -> utf8_repair_result
+(** Replace malformed UTF-8 byte sequences with U+FFFD, record an
+    observable persistence repair when [changed = true], and return the
+    repair metadata needed by callers that can self-heal the backing file. *)
+
 val repair_utf8_text :
   ?surface:string -> ?path:string -> string -> string
 (** Replace malformed UTF-8 byte sequences with U+FFFD and record an

@@ -49,7 +49,7 @@ ROOTS=(
   "${ROOT}/sidecars"
 )
 
-PATTERN='\b(codex|gemini|claude|kimi|glm)\b'
+PATTERN='(^|[^[:alnum:]_])(codex|gemini|claude|kimi|glm)([^[:alnum:]_]|$)'
 
 ALLOW_TMP="$(mktemp -t no-provider-name-hc.XXXXXX)"
 REPORT_TMP="$(mktemp -t no-provider-name-hc-report.XXXXXX)"
@@ -80,16 +80,68 @@ scan_file() {
     *.ml | *.mli)
       # Strip OCaml block comments while preserving line numbers, so the
       # report stays focused on code/string literals rather than doc prose.
-      perl -0pe 's{\(\*.*?\*\)}{ my $s=$&; $s =~ s/[^\n]/ /g; $s }gse' \
-        "${file}" \
-        | rg --no-heading --line-number --color=never -i "${PATTERN}" - \
-          2>/dev/null || true
+      if command -v rg >/dev/null 2>&1; then
+        perl -0pe 's{\(\*.*?\*\)}{ my $s=$&; $s =~ s/[^\n]/ /g; $s }gse' \
+          "${file}" \
+          | rg --no-heading --line-number --color=never -i "${PATTERN}" - \
+            2>/dev/null || true
+      else
+        perl -0pe 's{\(\*.*?\*\)}{ my $s=$&; $s =~ s/[^\n]/ /g; $s }gse' \
+          "${file}" \
+          | grep -Eni "${PATTERN}" - 2>/dev/null || true
+      fi
       ;;
     *)
-      rg --no-heading --line-number --color=never -i "${PATTERN}" "${file}" \
-        2>/dev/null || true
+      if command -v rg >/dev/null 2>&1; then
+        rg --no-heading --line-number --color=never -i "${PATTERN}" "${file}" \
+          2>/dev/null || true
+      else
+        grep -Eni "${PATTERN}" "${file}" 2>/dev/null || true
+      fi
       ;;
   esac
+}
+
+list_files() {
+  local root="$1"
+  if command -v rg >/dev/null 2>&1; then
+    rg --files "${root}" \
+      --glob '!**/*.md' \
+      --glob '!**/*.json' \
+      --glob '!**/*.lock' \
+      --glob '!**/*.png' \
+      --glob '!**/*.jpg' \
+      --glob '!**/*.jpeg' \
+      --glob '!**/*.gif' \
+      --glob '!**/*.webp' \
+      --glob '!**/*.ico' \
+      --glob '!**/*.woff' \
+      --glob '!**/*.woff2' \
+      --glob '!**/*.ttf' \
+      --glob '!**/*.test.*' \
+      --glob '!**/test/**' \
+      --glob '!**/tests/**' \
+      --glob '!**/node_modules/**' \
+      --glob '!**/_build/**'
+  else
+    find "${root}" \
+      \( -path '*/node_modules/*' -o -path '*/_build/*' -o -path '*/test/*' -o -path '*/tests/*' \) -prune \
+      -o -type f \
+      ! -name '*.md' \
+      ! -name '*.json' \
+      ! -name '*.lock' \
+      ! -name '*.png' \
+      ! -name '*.jpg' \
+      ! -name '*.jpeg' \
+      ! -name '*.gif' \
+      ! -name '*.webp' \
+      ! -name '*.ico' \
+      ! -name '*.woff' \
+      ! -name '*.woff2' \
+      ! -name '*.ttf' \
+      ! -name '*.test.*' \
+      -print
+  fi
 }
 
 for root in "${ROOTS[@]}"; do
@@ -117,26 +169,7 @@ for root in "${ROOTS[@]}"; do
     fi
     printf '%s:%s:%s\n' "${rel}" "${line_no}" "${content}" >>"${REPORT_TMP}"
     done < <(scan_file "${file}")
-  done < <(
-    rg --files "${root}" \
-      --glob '!**/*.md' \
-      --glob '!**/*.json' \
-      --glob '!**/*.lock' \
-      --glob '!**/*.png' \
-      --glob '!**/*.jpg' \
-      --glob '!**/*.jpeg' \
-      --glob '!**/*.gif' \
-      --glob '!**/*.webp' \
-      --glob '!**/*.ico' \
-      --glob '!**/*.woff' \
-      --glob '!**/*.woff2' \
-      --glob '!**/*.ttf' \
-      --glob '!**/*.test.*' \
-      --glob '!**/test/**' \
-      --glob '!**/tests/**' \
-      --glob '!**/node_modules/**' \
-      --glob '!**/_build/**'
-  )
+  done < <(list_files "${root}")
 done
 
 count="$(wc -l <"${REPORT_TMP}" | tr -d '[:space:]')"

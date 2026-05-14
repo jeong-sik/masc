@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { keeperHueIndex } from '../../../design-system/headless-core/keeper-line-ownership'
 import type { IdeAnnotation } from '../../api/schemas/ide-annotations'
 import type { UnifiedDiffRow } from '../../api/workspace'
@@ -36,6 +36,7 @@ import {
   type RunActivityEvent,
   type RunActivityVerb,
 } from './run-activity-store'
+import { bridgeRunActivityEventsToTrace } from './run-activity-trace-bridge'
 
 const FALLBACK_VERB_MAP: Readonly<Record<string, RunActivityVerb>> = {
   approved: 'approved',
@@ -326,6 +327,7 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
   }, [])
   const [, forceRender] = useState(0)
   const [refreshState, setRefreshState] = useState<ActivityRefreshState>(INITIAL_REFRESH_STATE)
+  const emittedTraceIds = useRef<ReadonlySet<string>>(new Set())
   const refreshMs = normalizedPollMs(pollMs)
 
   useEffect(() => {
@@ -398,6 +400,10 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
     ? EMPTY_DIAGNOSTICS
     : lspDiagnosticSnapshot.value.get(activeFilePath) ?? EMPTY_DIAGNOSTICS
   const progress = deriveIdeRunProgressSummary(events, activeFile, goals.value, tasks.value)
+
+  useEffect(() => {
+    emittedTraceIds.current = bridgeRunActivityEventsToTrace(events, emittedTraceIds.current)
+  }, [events])
 
   return html`
     <div

@@ -5,6 +5,7 @@ import { fireEvent, waitFor } from '@testing-library/preact'
 import { deriveIdeRunProgressSummary, IdeActivityPanel } from './ide-activity-panel'
 import { activeIdeFile, ideContextFocus } from './ide-state'
 import { lspDiagnosticSnapshot } from './ide-lsp-client'
+import { clearTraces, keeperTraceState } from './keeper-trace-store'
 import { goals, tasks } from '../../store'
 
 const renderedContainers = new Set<Parameters<typeof preactRender>[1]>()
@@ -25,6 +26,7 @@ function stubEmptyActivityFetch(): void {
 
 beforeEach(() => {
   stubEmptyActivityFetch()
+  clearTraces()
 })
 
 afterEach(() => {
@@ -38,6 +40,7 @@ afterEach(() => {
   goals.value = []
   tasks.value = []
   window.location.hash = ''
+  clearTraces()
 })
 
 describe('IdeActivityPanel', () => {
@@ -189,6 +192,15 @@ describe('IdeActivityPanel', () => {
       'Telemetry',
       'Keeper',
     ])
+    expect(keeperTraceState.value.events).toEqual([expect.objectContaining({
+      id: 'activity:run-default:evt-1',
+      keeperName: 'sangsu',
+      source: 'activity-event',
+      eventId: 'evt-1',
+      filePath: 'lib/runtime.ml',
+      line: 4,
+      surface: 'PR',
+    })])
   })
 
   it('maps nested activity context and evidence refs into IDE route links', async () => {

@@ -194,17 +194,36 @@ describe('keeperTraceLinesForFile + keeper trace gutter', () => {
         threadId: 'thread-unscoped',
         line: 3,
       },
+      {
+        id: 'activity-1',
+        tsMs: 5000,
+        keeperName: 'sangsu',
+        count: 1,
+        source: 'activity-event',
+        eventId: 'evt-1',
+        filePath: 'runtime.ts',
+        line: 2,
+        surface: 'Goal',
+      },
     ]
 
     expect(keeperTraceLinesForFile('runtime.ts', events)).toEqual([
       {
         line: 2,
-        events: [{
-          source: 'anchored-thread',
-          keeperName: 'scholar',
-          count: 1,
-          tsMs: 2000,
-        }],
+        events: [
+          {
+            source: 'activity-event',
+            keeperName: 'sangsu',
+            count: 1,
+            tsMs: 5000,
+          },
+          {
+            source: 'anchored-thread',
+            keeperName: 'scholar',
+            count: 1,
+            tsMs: 2000,
+          },
+        ],
       },
     ])
   })
@@ -218,6 +237,7 @@ describe('keeperTraceLinesForFile + keeper trace gutter', () => {
         line: 2,
         events: [
           { source: 'anchored-thread', keeperName: 'scholar', count: 2, tsMs: 2000 },
+          { source: 'activity-event', keeperName: 'sangsu', count: 1, tsMs: 1500 },
           { source: 'anchored-thread', keeperName: 'moth', count: 1, tsMs: 1000 },
         ],
       },
@@ -226,9 +246,11 @@ describe('keeperTraceLinesForFile + keeper trace gutter', () => {
     const gutter = container.querySelector('.cm-trace-gutter')
     expect(gutter).not.toBeNull()
     const dots = gutter?.querySelectorAll('.cm-trace-dot')
-    expect(dots?.length).toBe(2)
+    expect(dots?.length).toBe(3)
     expect(dots?.[0]?.getAttribute('data-source')).toBe('anchored-thread')
     expect(dots?.[0]?.getAttribute('aria-label')).toBe('thread scholar x2')
+    expect(dots?.[1]?.getAttribute('data-source')).toBe('activity-event')
+    expect(dots?.[1]?.getAttribute('aria-label')).toBe('activity sangsu')
     expect(gutter?.querySelector('.cm-trace-stack[role="list"]')?.getAttribute('aria-label'))
       .toContain('Line 2 keeper trace')
 

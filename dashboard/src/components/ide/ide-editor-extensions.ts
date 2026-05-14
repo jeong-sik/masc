@@ -411,17 +411,18 @@ export function keeperTraceLinesForFile(
 
   const byLine = new Map<number, EditorKeeperTraceLineEvent[]>()
   for (const event of events) {
-    if (event.source !== 'anchored-thread') continue
-    if (event.filePath !== normalizedFilePath) continue
-    if (event.line === null || !Number.isSafeInteger(event.line) || event.line < 1) continue
-    const existing = byLine.get(event.line) ?? []
+    const filePath = traceEventFilePath(event)
+    const line = traceEventLine(event)
+    if (filePath !== normalizedFilePath) continue
+    if (line === null) continue
+    const existing = byLine.get(line) ?? []
     existing.push({
       source: event.source,
       keeperName: event.keeperName,
       count: event.count,
       tsMs: event.tsMs,
     })
-    byLine.set(event.line, existing)
+    byLine.set(line, existing)
   }
 
   return [...byLine.entries()]
@@ -436,6 +437,8 @@ function traceSourceColor(source: KeeperTraceSource): string {
   switch (source) {
     case 'anchored-thread':
       return 'var(--color-status-info)'
+    case 'activity-event':
+      return 'var(--color-status-info)'
     case 'cascade-hop':
       return 'var(--color-accent-fg)'
     case 'bdi-snapshot':
@@ -449,6 +452,8 @@ function traceSourceLabel(source: KeeperTraceSource): string {
   switch (source) {
     case 'anchored-thread':
       return 'thread'
+    case 'activity-event':
+      return 'activity'
     case 'cascade-hop':
       return 'cascade'
     case 'bdi-snapshot':
@@ -456,6 +461,26 @@ function traceSourceLabel(source: KeeperTraceSource): string {
     case 'decision-log':
       return 'decision'
   }
+}
+
+function traceEventFilePath(event: KeeperTraceEvent): string | null {
+  if (event.source === 'anchored-thread') return event.filePath ?? null
+  if (event.source === 'activity-event') return event.filePath
+  return null
+}
+
+function traceEventLine(event: KeeperTraceEvent): number | null {
+  if (event.source === 'anchored-thread') {
+    return event.line !== null && Number.isSafeInteger(event.line) && event.line >= 1
+      ? event.line
+      : null
+  }
+  if (event.source === 'activity-event') {
+    return Number.isSafeInteger(event.line) && event.line >= 1
+      ? event.line
+      : null
+  }
+  return null
 }
 
 function traceEventLabel(event: EditorKeeperTraceLineEvent): string {

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
 import { act } from 'preact/test-utils'
-import { waitFor } from '@testing-library/preact'
+import { fireEvent, waitFor } from '@testing-library/preact'
 import type { GitGraphResponse } from '../../api/git-graph'
 import {
   buildIdeBranchContextModel,
@@ -12,6 +12,7 @@ import { globalPresenceSnapshot } from './keeper-presence-store'
 import { cursorOverlaySignal } from './keeper-cursor-overlay'
 
 afterEach(() => {
+  window.location.hash = ''
   globalPresenceSnapshot.value = null
   cursorOverlaySignal.value = {
     cursors: new Map(),
@@ -192,6 +193,20 @@ describe('IdeBranchContextPanel', () => {
     await waitFor(() => expect(container.textContent).toContain('runtime.ml:42'))
     const status = container.querySelector('[role="status"][aria-label="Keeper sangsu: ACTIVE"]')
     expect(status).not.toBeNull()
+
+    const links = [...container.querySelectorAll<HTMLButtonElement>('.ide-branch-lane-links button')]
+    expect(links.map(link => link.textContent)).toEqual(['Code', 'Git', 'Keeper'])
+
+    fireEvent.click(links[0]!)
+    expect(window.location.hash).toBe(
+      '#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=42&surface=Git&label=sangsu+fix%2Fide-branch&source_id=branch-lane%3Alane-1&keeper=sangsu',
+    )
+
+    fireEvent.click(links[1]!)
+    expect(window.location.hash).toBe('#workspace?section=repositories&view=graph&ref=fix%2Fide-branch')
+
+    fireEvent.click(links[2]!)
+    expect(window.location.hash).toBe('#monitoring?section=agents&view=keepers&keeper=sangsu')
   })
 
   it('waits for an active repository before fetching branch graph data', async () => {

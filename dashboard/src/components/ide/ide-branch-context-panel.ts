@@ -3,6 +3,11 @@ import { useEffect, useMemo, useState } from 'preact/hooks'
 import { fetchGitGraph, type GitGraphResponse } from '../../api/git-graph'
 import { globalPresenceSnapshot, type KeeperPresenceStatus } from './keeper-presence-store'
 import { cursorOverlaySignal } from './keeper-cursor-overlay'
+import {
+  openIdeContextRouteLink,
+  routeLinksForContext,
+  type IdeContextRouteLink,
+} from './ide-context-lens'
 
 type BranchTone = 'current' | 'dirty' | 'conflict' | 'stale'
 type PanelState = 'loading' | 'ready' | 'empty' | 'error'
@@ -328,9 +333,10 @@ function LaneRow(
   const cursor = overlay.cursors.get(presenceKey)
   const focusFile = cursor?.file_path ? cursor.file_path.split('/').pop() : null
   const dotStyle = status ? LANE_STATUS_DOT[status] : null
+  const routeLinks = laneRouteLinks(lane, presenceKey, cursor)
 
   return html`
-    <li key=${lane.id} style=${{ display: 'grid', gridTemplateColumns: '6px 1fr auto', alignItems: 'center', gap: 'var(--sp-1)', padding: '2px 0' }}>
+    <li key=${lane.id} style=${{ display: 'grid', gridTemplateColumns: '6px minmax(0, 1fr) auto auto', alignItems: 'center', gap: 'var(--sp-1)', padding: '2px 0' }}>
       <span
         aria-hidden="true"
         style=${{
@@ -360,6 +366,11 @@ function LaneRow(
           >${focusFile}:${cursor?.line}</span>
         ` : null}
       </div>
+      ${routeLinks.length > 0 ? html`
+        <div class="ide-branch-lane-links" aria-label=${`${lane.label} operational links`}>
+          ${routeLinks.map(link => BranchLaneRouteLink(link))}
+        </div>
+      ` : null}
       ${dotStyle ? html`
         <span
           role="status"
@@ -374,5 +385,36 @@ function LaneRow(
         >${dotStyle.label}</span>
       ` : null}
     </li>
+  `
+}
+
+function laneRouteLinks(
+  lane: IdeWorktreeLane,
+  keeperId: string,
+  cursor: { readonly file_path: string; readonly line: number } | undefined,
+): ReadonlyArray<IdeContextRouteLink> {
+  const branch = lane.branch.trim()
+  return routeLinksForContext({
+    filePath: cursor?.file_path,
+    line: cursor?.line,
+    surface: 'Git',
+    label: `${lane.label} ${branch}`,
+    sourceId: `branch-lane:${lane.id}`,
+    gitRef: branch && branch !== 'detached' ? branch : undefined,
+    keeperId,
+  })
+}
+
+function BranchLaneRouteLink(link: IdeContextRouteLink) {
+  return html`
+    <button
+      key=${link.id}
+      type="button"
+      title=${link.evidence}
+      aria-label=${`Open ${link.evidence}`}
+      onClick=${() => openIdeContextRouteLink(link)}
+    >
+      ${link.label}
+    </button>
   `
 }

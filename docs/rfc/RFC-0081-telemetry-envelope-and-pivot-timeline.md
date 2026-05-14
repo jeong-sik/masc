@@ -156,7 +156,7 @@ Mount points:
 
 ### 5.1 Additive surface
 
-- New routes, new file family `.masc/run-index/`, new envelope fields: all additive. Existing consumers that ignore unknown fields continue to work.
+- New routes, manifest field extension (`turn_started_at`, `turn_ended_at`, `correlation_id_first`), new envelope fields: all additive. No new file family — §4.2 retracted the parallel `.masc/run-index/` design in favor of manifest-only indexing. Existing consumers that ignore unknown fields continue to work.
 
 ### 5.2 Coupling to RFC-OAS-019
 
@@ -185,7 +185,7 @@ If RFC-0081 ships and RFC-OAS-019 stalls, masc-mcp does *not* take on receive-si
 
 ### Gate 2 — Pivot API (Phase 2 backend)
 
-1. `curl localhost:8935/api/v1/keeper/<name>/timeline?since=1h | jq '.groups | length' > 0`.
+1. `curl localhost:8935/api/v1/keeper/<name>/timeline?since=1h | jq -e '.groups | length > 0'`.
 2. `curl localhost:8935/api/v1/goal/<id>/timeline | jq '.groups[0].events[0].kind'` returns a known event kind.
 3. Time-overlap join: a synthetic `keeper_runtime_manifest` row with a known `[turn_started_at, turn_ended_at]` window plus 5 `.masc/oas-events/` rows whose `ts_unix` fall inside the window produce a `groups` array of length 1 with 5 events under the expected `keeper_turn_id`.
 4. Unscoped bucket: a `.masc/oas-events/` row outside any turn window is returned under the `"unscoped"` sentinel group, not silently dropped.

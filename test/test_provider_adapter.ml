@@ -46,7 +46,7 @@ let test_resolve_cli_canonical_names () =
 let test_oas_registry_binding_adds_generic_provider () =
   let groq = Option.get (Adapter.resolve_direct_adapter "groq") in
   check string "canonical" "groq" groq.canonical_name;
-  check string "cascade prefix" "groq" groq.cascade_prefix;
+  check string "cascade prefix" "groq" (Adapter.cascade_prefix_of_adapter groq);
   check
     string
     "auth env"
@@ -104,6 +104,28 @@ let test_provider_kind_string_uses_oas_ssot () =
     "claude_code ssot"
     "claude_code"
     (Adapter.string_of_provider_kind Llm_provider.Provider_config.Claude_code)
+;;
+
+let test_cascade_prefix_is_typed_boundary () =
+  check
+    string
+    "typed known prefix"
+    "openrouter"
+    (Adapter.string_of_cascade_prefix Adapter.Openrouter);
+  check
+    (option string)
+    "dashed GLM coding prefix normalizes to canonical"
+    (Some "glm-coding")
+    (Option.map
+       Adapter.string_of_cascade_prefix
+       (Adapter.cascade_prefix_of_string "glm_coding"));
+  check
+    (option string)
+    "external catalog prefix is explicit"
+    (Some "new-vendor")
+    (Option.map
+       Adapter.string_of_cascade_prefix
+       (Adapter.cascade_prefix_of_string "new-vendor"))
 ;;
 
 let test_cascade_prefix_of_provider_kind_keeps_adapter_mapping () =
@@ -886,6 +908,8 @@ let () =
             "provider kind string uses oas ssot"
             `Quick
             test_provider_kind_string_uses_oas_ssot
+        ; test_case "cascade prefix is typed boundary" `Quick
+            test_cascade_prefix_is_typed_boundary
         ; test_case
             "cascade prefix keeps adapter mapping"
             `Quick

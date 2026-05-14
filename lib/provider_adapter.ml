@@ -57,6 +57,31 @@ type telemetry_policy =
   ; runtime_reporting : reporting_policy
   }
 
+type cascade_prefix =
+  | Llama
+  | Ollama
+  | Ollama_cloud
+  | Claude_code
+  | Cc
+  | Codex_cli
+  | Gemini_cli
+  | Kimi_cli
+  | Claude
+  | Openai
+  | Gemini
+  | Kimi
+  | Kimi_coding
+  | Glm
+  | Glm_coding_prefix
+  | Openrouter
+  | Groq
+  | Deepseek
+  | Dashscope
+  | Alibaba
+  | Siliconflow
+  | Custom
+  | External_prefix of string
+
 type adapter =
   { canonical_name : string
   ; runtime_kind : runtime_kind
@@ -64,7 +89,7 @@ type adapter =
   ; aliases : string list
   ; spawn_key : string option
     (** Key for CLI spawn lookup in Spawn.spawn_config_of_key. None = not spawnable via CLI. *)
-  ; cascade_prefix : string
+  ; cascade_prefix : cascade_prefix
     (** MASC cascade model prefix (e.g. "claude", "openai").
                                        CONTRACT: Must match the prefix used by the local
                                        [Cascade_config] parser and Provider_registry-compatible
@@ -200,6 +225,67 @@ let cn_openrouter = "openrouter"
 let auth_header_authorization = "Authorization"
 let kimi_api_key_envs = [ "KIMI_API_KEY_SB"; "KIMI_API_KEY" ]
 let kimi_coding_key_envs = [ "KIMI_CODING_API_KEY"; "KIMI_API_KEY_SB" ]
+
+let string_of_cascade_prefix = function
+  | Llama -> cn_llama
+  | Ollama -> cn_ollama
+  | Ollama_cloud -> "ollama_cloud"
+  | Claude_code -> cn_claude
+  | Cc -> "cc"
+  | Codex_cli -> cn_codex
+  | Gemini_cli -> cn_gemini
+  | Kimi_cli -> cn_kimi
+  | Claude -> cn_claude_api
+  | Openai -> cn_codex_api
+  | Gemini -> cn_gemini_api
+  | Kimi -> cn_kimi_api
+  | Kimi_coding -> cn_kimi_coding
+  | Glm -> cn_glm
+  | Glm_coding_prefix -> cn_glm_coding_plan
+  | Openrouter -> cn_openrouter
+  | Groq -> "groq"
+  | Deepseek -> "deepseek"
+  | Dashscope -> "dashscope"
+  | Alibaba -> "alibaba"
+  | Siliconflow -> "siliconflow"
+  | Custom -> "custom"
+  | External_prefix prefix -> prefix
+;;
+
+let cascade_prefix_of_string raw =
+  let normalized = normalize_label raw in
+  match normalized with
+  | "" -> None
+  | "llama" -> Some Llama
+  | "ollama" -> Some Ollama
+  | "ollama_cloud" | "ollama-cloud" -> Some Ollama_cloud
+  | "claude_code" -> Some Claude_code
+  | "cc" -> Some Cc
+  | "codex_cli" -> Some Codex_cli
+  | "gemini_cli" -> Some Gemini_cli
+  | "kimi_cli" -> Some Kimi_cli
+  | "claude" -> Some Claude
+  | "openai" -> Some Openai
+  | "gemini" -> Some Gemini
+  | "kimi" -> Some Kimi
+  | "kimi-coding" | "kimi_coding" -> Some Kimi_coding
+  | "glm" -> Some Glm
+  | "glm-coding" | "glm_coding" -> Some Glm_coding_prefix
+  | "openrouter" -> Some Openrouter
+  | "groq" -> Some Groq
+  | "deepseek" -> Some Deepseek
+  | "dashscope" -> Some Dashscope
+  | "alibaba" -> Some Alibaba
+  | "siliconflow" -> Some Siliconflow
+  | "custom" -> Some Custom
+  | other -> Some (External_prefix other)
+;;
+
+let cascade_prefix_of_binding_id id =
+  match cascade_prefix_of_string id with
+  | Some prefix -> prefix
+  | None -> External_prefix (normalize_label id)
+;;
 
 let display_provider_name label =
   match normalize_label label with
@@ -491,7 +577,7 @@ let generic_adapter_of_binding (binding : Runtime_binding.t) =
   ; auth_mode = auth_mode_of_binding binding
   ; aliases = binding_labels binding
   ; spawn_key = spawn_key_of_binding binding
-  ; cascade_prefix = binding.Runtime_binding.id
+  ; cascade_prefix = cascade_prefix_of_binding_id binding.Runtime_binding.id
   ; endpoint_url = binding_endpoint_url binding
   ; default_model_id
   ; model_policy =
@@ -522,7 +608,8 @@ let find_direct_adapter_by_alias label =
 let resolve_adapter_by_cascade_prefix label =
   let normalized = normalize_label label in
   List.find_opt
-    (fun (adapter : adapter) -> normalize_label adapter.cascade_prefix = normalized)
+    (fun (adapter : adapter) ->
+       normalize_label (string_of_cascade_prefix adapter.cascade_prefix) = normalized)
     direct_adapters
 ;;
 
@@ -793,11 +880,11 @@ let default_model_label_for_adapter (adapter : adapter) =
   match adapter.runtime_kind with
   | Local ->
     Result.map
-      (fun model_id -> adapter.cascade_prefix ^ ":" ^ model_id)
+      (fun model_id -> string_of_cascade_prefix adapter.cascade_prefix ^ ":" ^ model_id)
       (explicit_llama_model_id_result ())
   | Cli_agent | Direct_api ->
     (match adapter.default_model_id with
-     | Some _ -> Ok (adapter.cascade_prefix ^ ":auto")
+     | Some _ -> Ok (string_of_cascade_prefix adapter.cascade_prefix ^ ":auto")
      | None ->
        Error
          (Printf.sprintf
@@ -906,14 +993,14 @@ let provider_label_of_provider_kind (kind : Llm_provider.Provider_config.provide
   =
   let cn = adapter_canonical_name_of_provider_kind kind in
   match resolve_direct_adapter cn with
-  | Some adapter -> adapter.cascade_prefix
+  | Some adapter -> string_of_cascade_prefix adapter.cascade_prefix
   | None -> cn
 ;;
 
 let provider_label_of_explicit_prefix (prefix : string) : string option =
   let normalized = normalize_label prefix in
   match resolve_adapter_by_cascade_prefix normalized with
-  | Some adapter -> Some adapter.cascade_prefix
+  | Some adapter -> Some (string_of_cascade_prefix adapter.cascade_prefix)
   | None -> if String.equal normalized cn_custom then Some cn_custom else None
 ;;
 
@@ -1043,7 +1130,7 @@ let openai_compat_adapter_by_endpoint (cfg : Llm_provider.Provider_config.t) =
 
 let provider_label_from_registry (cfg : Llm_provider.Provider_config.t) =
   match openai_compat_adapter_by_endpoint cfg with
-  | Some adapter -> adapter.cascade_prefix
+  | Some adapter -> string_of_cascade_prefix adapter.cascade_prefix
   | None -> Llm_provider.Provider_registry.provider_name_of_config cfg
 ;;
 
@@ -1112,7 +1199,7 @@ let adapter_of_provider_kind (kind : Llm_provider.Provider_config.provider_kind)
 
 let provider_label_of_config (cfg : Llm_provider.Provider_config.t) =
   match adapter_of_provider_config cfg with
-  | Some adapter -> adapter.cascade_prefix
+  | Some adapter -> string_of_cascade_prefix adapter.cascade_prefix
   | None -> provider_label_from_registry cfg
 ;;
 
@@ -1236,7 +1323,9 @@ let oas_capabilities_of_config (cfg : Llm_provider.Provider_config.t) =
 ;;
 
 (** Cascade config prefix from adapter record. No match needed. *)
-let cascade_prefix_of_adapter (adapter : adapter) = adapter.cascade_prefix
+let cascade_prefix_of_adapter (adapter : adapter) =
+  string_of_cascade_prefix adapter.cascade_prefix
+;;
 
 let endpoint_url_of_adapter (adapter : adapter) = adapter.endpoint_url
 
@@ -1257,7 +1346,7 @@ let cascade_prefix_of_provider_kind (kind : Llm_provider.Provider_config.provide
   =
   let cn = adapter_canonical_name_of_provider_kind kind in
   match resolve_direct_adapter cn with
-  | Some a -> a.cascade_prefix
+  | Some a -> string_of_cascade_prefix a.cascade_prefix
   | None -> cn
 ;;
 

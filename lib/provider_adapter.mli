@@ -119,13 +119,38 @@ type telemetry_policy =
   ; runtime_reporting : reporting_policy
   }
 
+type cascade_prefix =
+  | Llama
+  | Ollama
+  | Ollama_cloud
+  | Claude_code
+  | Cc
+  | Codex_cli
+  | Gemini_cli
+  | Kimi_cli
+  | Claude
+  | Openai
+  | Gemini
+  | Kimi
+  | Kimi_coding
+  | Glm
+  | Glm_coding_prefix
+  | Openrouter
+  | Groq
+  | Deepseek
+  | Dashscope
+  | Alibaba
+  | Siliconflow
+  | Custom
+  | External_prefix of string
+
 type adapter =
   { canonical_name : string
   ; runtime_kind : runtime_kind
   ; auth_mode : auth_mode
   ; aliases : string list
   ; spawn_key : string option
-  ; cascade_prefix : string
+  ; cascade_prefix : cascade_prefix
   ; endpoint_url : string option
   ; default_model_id : string option
   ; model_policy : model_policy
@@ -163,6 +188,8 @@ val cn_custom : string
 
 val string_of_runtime_kind : runtime_kind -> string
 val string_of_auth_mode : auth_mode -> string
+val string_of_cascade_prefix : cascade_prefix -> string
+val cascade_prefix_of_string : string -> cascade_prefix option
 
 (** {1 Adapter Registry} *)
 

@@ -137,6 +137,21 @@ const SURFACE_ORDER: ReadonlyArray<IdeContextSurfaceId> = [
 ]
 const MAX_CONTEXT_ANCHORS = 6
 const MAX_CONTEXT_ROUTE_LINKS = 10
+const CONTEXT_ANCHOR_BUCKET_ORDER = [
+  'lsp',
+  'pr',
+  'git',
+  'task',
+  'board',
+  'log',
+  'goal',
+  'comment',
+  'telemetry',
+  'line',
+  'keeper',
+  'other',
+] as const
+type ContextAnchorBucket = (typeof CONTEXT_ANCHOR_BUCKET_ORDER)[number]
 
 export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLensModel {
   const filePath = normalizeIdeContextFilePath(input.filePath)
@@ -223,11 +238,72 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
   return {
     linkedCount: surfaces.filter(surface => surface.status === 'linked').length,
     surfaces,
-    anchors: anchors.slice(0, MAX_CONTEXT_ANCHORS),
+    anchors: selectVisibleContextAnchors(anchors, MAX_CONTEXT_ANCHORS),
     anchorTotalCount: anchors.length,
     changedLineCount,
     activeLineCount: activeLines.size,
   }
+}
+
+function selectVisibleContextAnchors(
+  anchors: ReadonlyArray<IdeContextAnchor>,
+  limit: number,
+): ReadonlyArray<IdeContextAnchor> {
+  if (anchors.length <= limit) return anchors
+  const selected: IdeContextAnchor[] = []
+  const selectedIds = new Set<string>()
+  const add = (anchor: IdeContextAnchor): boolean => {
+    if (selectedIds.has(anchor.id)) return false
+    selected.push(anchor)
+    selectedIds.add(anchor.id)
+    return selected.length >= limit
+  }
+
+  for (const bucket of CONTEXT_ANCHOR_BUCKET_ORDER) {
+    const anchor = anchors.find(candidate =>
+      !selectedIds.has(candidate.id)
+      && contextAnchorBuckets(candidate).has(bucket),
+    )
+    if (anchor && add(anchor)) return selected
+  }
+  for (const anchor of anchors) {
+    if (add(anchor)) return selected
+  }
+  return selected
+}
+
+function contextAnchorBuckets(anchor: IdeContextAnchor): ReadonlySet<ContextAnchorBucket> {
+  const buckets = new Set<ContextAnchorBucket>()
+  for (const link of anchor.route_links ?? []) {
+    const label = link.label.trim().toLowerCase()
+    if (label === 'goal') buckets.add('goal')
+    else if (label === 'task') buckets.add('task')
+    else if (label === 'board') buckets.add('board')
+    else if (label === 'comment') buckets.add('comment')
+    else if (label === 'pr') buckets.add('pr')
+    else if (label === 'git') buckets.add('git')
+    else if (label === 'log') buckets.add('log')
+    else if (label === 'telemetry') buckets.add('telemetry')
+    else if (label === 'keeper') buckets.add('keeper')
+  }
+
+  const surface = anchor.surface.trim().toLowerCase()
+  if (surface === 'lsp') buckets.add('lsp')
+  else if (surface === 'line') buckets.add('line')
+  else if (surface === 'goal') buckets.add('goal')
+  else if (surface === 'task') buckets.add('task')
+  else if (surface === 'board') buckets.add('board')
+  else if (surface === 'git') buckets.add('git')
+  else if (surface === 'pr') buckets.add('pr')
+  else if (surface === 'log') buckets.add('log')
+  else if (surface === 'telemetry') buckets.add('telemetry')
+  else if (surface === 'comment' || surface === 'question' || surface === 'note' || surface === 'suggest') {
+    buckets.add('comment')
+  }
+
+  if (anchor.keeper_id) buckets.add('keeper')
+  if (buckets.size === 0) buckets.add('other')
+  return buckets
 }
 
 export function IdeContextLens({

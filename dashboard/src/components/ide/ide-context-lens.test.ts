@@ -215,6 +215,88 @@ describe('IdeContextLens', () => {
     expect(container.textContent).toContain('6/10 anchors')
   })
 
+  it('keeps operational PR, Git, and planning anchors visible when the current file is busy', () => {
+    const extraAnnotations = [
+      annotation,
+      { ...annotation, id: 'ann-2', line_start: 15, content: 'Second task note' },
+      { ...annotation, id: 'ann-3', line_start: 16, content: 'Third task note' },
+    ]
+    const busyOverlay: KeeperCursorOverlay = {
+      ...overlay,
+      cursors: new Map([
+        ...overlay.cursors,
+        ['analyst', {
+          keeper_id: 'analyst',
+          file_path: 'lib/keeper/keeper_exec_ide.ml',
+          line: 17,
+          column: 2,
+          focus_mode: 'reviewing',
+          last_update: 101,
+          tool_name: 'review',
+          turn: 8,
+        }],
+      ]),
+    }
+
+    const model = deriveIdeContextLens({
+      filePath: 'lib/keeper/keeper_exec_ide.ml',
+      annotations: extraAnnotations,
+      diagnostics: [
+        {
+          file_path: 'lib/keeper/keeper_exec_ide.ml',
+          line: 21,
+          severity: 1,
+          source: 'ocamllsp',
+          code: 'type',
+          message: 'First diagnostic',
+        },
+        {
+          file_path: 'lib/keeper/keeper_exec_ide.ml',
+          line: 22,
+          severity: 2,
+          source: 'ocamllsp',
+          message: 'Second diagnostic',
+        },
+      ],
+      diffRows,
+      events: [{
+        id: 'evt-rich',
+        run_id: 'run-default',
+        keeper_id: 'sangsu',
+        verb: 'noted',
+        target: 'PR #15000',
+        timestamp_ms: 400,
+        context: {
+          file_path: 'lib/keeper/keeper_exec_ide.ml',
+          line: 27,
+          goal_id: 'goal-ide',
+          task_id: 'task-42',
+          pr_id: '15000',
+          board_post_id: 'post-1',
+          comment_id: 'comment-1',
+          git_ref: 'abc123',
+          log_id: 'turn-9',
+        },
+      }],
+      threads: [thread],
+      overlay: busyOverlay,
+    })
+
+    expect(model.anchorTotalCount).toBeGreaterThan(6)
+    expect(model.anchors).toHaveLength(6)
+    expect(model.anchors.map(anchor => anchor.id)).toEqual([
+      'diagnostic-21-ocamllsp-type-0',
+      'event-evt-rich',
+      'git-diff-summary',
+      'annotation-ann-1',
+      'thread-thread-1',
+      'annotation-ann-2',
+    ])
+    expect(model.anchors[1]?.route_links?.map(link => link.label)).toContain('PR')
+    expect(model.anchors[2]?.surface).toBe('Git')
+    expect(model.anchors[3]?.route_links?.map(link => link.label)).toEqual(['Code', 'Goal', 'Task', 'Keeper'])
+  })
+
   it('publishes focused file and line when an anchor is clicked', () => {
     const container = document.createElement('div')
     ideContextFocus.value = null

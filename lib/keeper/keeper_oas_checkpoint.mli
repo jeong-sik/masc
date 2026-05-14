@@ -18,6 +18,7 @@ val publish_lifecycle :
   ?error:string ->
   ?session_id:string ->
   ?status:string ->
+  ?attrs:(string * Yojson.Safe.t) list ->
   unit ->
   unit
 (** Publish a [Custom "masc.oas_worker.<event>"] event on the
@@ -31,7 +32,9 @@ val publish_lifecycle :
     Optional [error] / [session_id] / [status] fields are
     included in the payload only when [Some] and non-empty
     after trim — empty strings are dropped to keep the JSON
-    payload skinny for downstream SSE consumers. *)
+    payload skinny for downstream SSE consumers. [attrs] carries
+    non-sensitive structured runtime metadata such as provider
+    kind, model, and endpoint path. *)
 
 val persist_checkpoint :
   dir:string ->

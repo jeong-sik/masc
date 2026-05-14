@@ -462,6 +462,98 @@ let run_named
       ?per_provider_timeout_s
       candidate
   in
+  let positive_finite_float = function
+    | value when Float.is_finite value && value > 0.0 -> Some value
+    | _ -> None
+  in
+  let health_error_kind label =
+    Cascade_health_tracker.error_kind_of_string label
+  in
+  let health_keys candidate =
+    Cascade_runtime_candidate.health_keys candidate
+    |> List.sort_uniq String.compare
+  in
+  let cost_usd_of_response (response : Agent_sdk.Types.api_response) =
+    match response.usage with
+    | Some usage -> usage.cost_usd
+    | None -> None
+  in
+  let record_candidate_success candidate ~latency_ms
+      (result : Cascade_runner.run_result) =
+    let latency_ms = positive_finite_float latency_ms in
+    let cost_usd = cost_usd_of_response result.response in
+    List.iter
+      (fun provider_key ->
+         Cascade_health_tracker.record_success
+           Cascade_health_tracker.global
+           ~provider_key
+           ?latency_ms
+           ?cost_usd
+           ())
+      (health_keys candidate)
+  in
+  let record_candidate_rejected candidate ~reason =
+    let error_kind = health_error_kind "accept_rejected" in
+    List.iter
+      (fun provider_key ->
+         Cascade_health_tracker.record_rejected
+           Cascade_health_tracker.global
+           ~provider_key
+           ~error_kind
+           ~error_reason:reason
+           ())
+      (health_keys candidate)
+  in
+  let record_candidate_error candidate (sdk_err : Agent_sdk.Error.sdk_error) =
+    let error_reason = Agent_sdk.Error.to_string sdk_err in
+    let error_kind =
+      sdk_error_cascade_fallback_class sdk_err
+      |> Option.value ~default:"provider_error"
+      |> health_error_kind
+    in
+    let provider_key = Cascade_runtime_candidate.health_key candidate in
+    let model_key = Cascade_runtime_candidate.model_health_key candidate in
+    if sdk_error_is_hard_quota sdk_err then
+      Cascade_health_tracker.record_hard_quota
+        Cascade_health_tracker.global
+        ~provider_key
+        ~error_kind
+        ~error_reason
+        ()
+    else if sdk_error_is_model_access_denied sdk_err then
+      Cascade_health_tracker.record_terminal_failure
+        Cascade_health_tracker.global
+        ~provider_key:model_key
+        ~error_kind
+        ~error_reason
+        ()
+    else if sdk_error_is_resumable_cli_session sdk_err
+            || sdk_error_is_terminal_provider_runtime_failure sdk_err
+    then
+      Cascade_health_tracker.record_terminal_failure
+        Cascade_health_tracker.global
+        ~provider_key
+        ~error_kind
+        ~error_reason
+        ()
+    else
+      match sdk_error_soft_rate_limited sdk_err with
+      | Some retry_after_s ->
+        Cascade_health_tracker.record_soft_rate_limited
+          Cascade_health_tracker.global
+          ~provider_key
+          ?retry_after_s
+          ~error_kind
+          ~error_reason
+          ()
+      | None ->
+        Cascade_health_tracker.record_failure
+          Cascade_health_tracker.global
+          ~provider_key
+          ~error_kind
+          ~error_reason
+          ()
+  in
   let rec try_cascade
       ?(on_success = fun ~provider_key:_ -> ())
       ?resume_checkpoint ?per_provider_timeout_s remaining last_err =
@@ -698,8 +790,7 @@ let run_named
       (match result with
       | Ok result when accept result.response ->
         record_accepted_liveness_sample ();
-        record_candidate_health_success candidate ~latency_ms:attempt_latency_ms;
-        let _ = attempt_latency_ms in
+        record_candidate_success candidate ~latency_ms:attempt_latency_ms result;
         (* FSM: Call_ok → Accept *)
         let observation =
           Cascade_legacy_runner.cascade_observation_with_metrics
@@ -723,15 +814,15 @@ let run_named
            [record_rejected] behaves like a failure for cooldown /
            weight but keeps the [Rejected] tag so the dashboard can
            distinguish it from hard errors. *)
-        let () = () in
         (* FSM: Accept_rejected → decide *)
         let reason = "response rejected by accept" in
+        record_candidate_rejected candidate ~reason;
         let outcome = Cascade_fsm.Accept_rejected
           { response = result.response; reason } in
         (match Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last outcome with
-         | Cascade_fsm.Accept_on_exhaustion { response; _ } ->
+           | Cascade_fsm.Accept_on_exhaustion { response; _ } ->
            record_accepted_liveness_sample ();
-           record_candidate_health_success candidate ~latency_ms:attempt_latency_ms;
+           record_candidate_success candidate ~latency_ms:attempt_latency_ms result;
            let observation =
              Cascade_legacy_runner.cascade_observation_with_metrics
                ~cascade_name:error_cascade_name
@@ -788,7 +879,7 @@ let run_named
            Cascade_metrics.on_cascade_invariant_violation ();
            Log.Misc.warn "cascade %s: unexpected Accept in Accept_rejected branch (runtime=%s)" cascade_name runtime_candidate_label;
            record_accepted_liveness_sample ();
-           record_candidate_health_success candidate ~latency_ms:attempt_latency_ms;
+           record_candidate_success candidate ~latency_ms:attempt_latency_ms result;
            let observation =
              Cascade_legacy_runner.cascade_observation_with_metrics
                ~cascade_name:error_cascade_name
@@ -824,6 +915,10 @@ let run_named
             ~provider:runtime_candidate_label sdk_err
         in
         let _ = err_str in
+        let cascade_outcome = sdk_error_to_cascade_outcome sdk_err in
+        Option.iter
+          (fun _ -> record_candidate_error candidate sdk_err)
+          cascade_outcome;
         (* FSM: Call_err → decide.
            Hard-quota fast-path: a hard quota is permanent for this turn —
            every remaining tier in this declared cascade will hit the same
@@ -834,7 +929,7 @@ let run_named
            above (line ~1760) keeps this provider deselected for future
            turns; the fast-path only short-circuits the within-turn
            retry. *)
-        (match sdk_error_to_cascade_outcome sdk_err with
+        (match cascade_outcome with
          | Some outcome ->
            let decision =
              if sdk_error_is_hard_quota sdk_err then
@@ -973,7 +1068,7 @@ let run_named
   let _ = sw, net in
   let adapter = Cascade_runtime_candidate.strategy_adapter in
   let signal_ctx : Cascade_strategy.signal_ctx = {
-    health = Cascade_health_tracker.create ();
+    health = Cascade_health_tracker.global;
     capacity = (fun _ -> None);
     now = Unix.gettimeofday ();
     rand_int = Random.int;

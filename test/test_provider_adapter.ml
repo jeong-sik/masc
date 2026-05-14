@@ -1,5 +1,7 @@
 open Alcotest
 module Adapter = Masc_mcp.Provider_adapter
+module Candidate = Masc_mcp.Cascade_runtime_candidate
+module Health = Masc_mcp.Cascade_health_tracker
 
 let with_env name value f =
   let previous = Sys.getenv_opt name in
@@ -610,6 +612,68 @@ let test_provider_of_model_label_uses_typed_boundaries () =
     (Adapter.provider_of_model_label "private-provider:model-x")
 ;;
 
+let provider_cfg label =
+  match Masc_mcp.Cascade_config.parse_model_string label with
+  | Some cfg -> cfg
+  | None -> fail ("expected model label to parse: " ^ label)
+;;
+
+let test_runtime_candidate_uses_internal_health_keys () =
+  let cfg =
+    provider_cfg "custom:candidate-health@http://127.0.0.1:15123"
+  in
+  let candidate = Candidate.of_provider_config cfg in
+  check
+    string
+    "provider health key is internal"
+    (Adapter.provider_health_key_of_config cfg)
+    (Candidate.health_key candidate);
+  check
+    string
+    "model health key is internal"
+    (Adapter.provider_model_health_key_of_config cfg)
+    (Candidate.model_health_key candidate);
+  check
+    (list string)
+    "runtime labels resolve to internal provider health keys"
+    [ Adapter.provider_health_key_of_config cfg ]
+    (Candidate.runtime_health_keys_of_labels
+       [ "custom:candidate-health@http://127.0.0.1:15123" ])
+;;
+
+let test_runtime_candidate_cooldown_reads_global_health () =
+  let cfg =
+    provider_cfg "custom:cooldown-health@http://127.0.0.1:15124"
+  in
+  let candidate = Candidate.of_provider_config cfg in
+  let model_key = Adapter.provider_model_health_key_of_config cfg in
+  for _ = 1 to Health.cooldown_threshold do
+    Health.record_failure Health.global ~provider_key:model_key ()
+  done;
+  match Candidate.first_health_cooldown candidate with
+  | Some (blocked_key, _msg) ->
+    check string "model-level cooldown is observed" model_key blocked_key
+  | None -> fail "expected candidate to observe global model-level cooldown"
+;;
+
+let test_runtime_candidate_recovery_evidence_reads_global_health () =
+  let cfg =
+    provider_cfg "custom:recovery-health@http://127.0.0.1:15125"
+  in
+  let candidate = Candidate.of_provider_config cfg in
+  let provider_key = Adapter.provider_health_key_of_config cfg in
+  Health.record_success
+    Health.global
+    ~provider_key
+    ~latency_ms:42.0
+    ();
+  check
+    bool
+    "global success is recovery evidence"
+    true
+    (Candidate.has_recovery_evidence candidate)
+;;
+
 let test_unmetered_provider_uses_declared_telemetry_policy () =
   check
     bool
@@ -1015,6 +1079,18 @@ let () =
             "provider model label uses typed boundaries"
             `Quick
             test_provider_of_model_label_uses_typed_boundaries
+        ; test_case
+            "runtime candidate uses internal health keys"
+            `Quick
+            test_runtime_candidate_uses_internal_health_keys
+        ; test_case
+            "runtime candidate observes global cooldown"
+            `Quick
+            test_runtime_candidate_cooldown_reads_global_health
+        ; test_case
+            "runtime candidate observes recovery evidence"
+            `Quick
+            test_runtime_candidate_recovery_evidence_reads_global_health
         ; test_case
             "unmetered provider uses telemetry policy"
             `Quick

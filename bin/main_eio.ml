@@ -40,6 +40,7 @@ module Types = Masc_domain
 module Tempo = Masc_mcp.Tempo
 module Auth = Masc_mcp.Auth
 module Board = Masc_mcp.Board
+module Board_curation = Masc_mcp.Board_curation
 module Board_dispatch = Masc_mcp.Board_dispatch
 module Task_dispatch = Masc_mcp.Task_dispatch
 module Http_negotiation = Mcp_transport_protocol.Http_negotiation
@@ -314,6 +315,50 @@ let dispatch_route ~routes ~request ~path reqd =
           `Assoc [("name", `String name); ("count", `Int count)]
         ) hearths));
       ] in
+      Http.Response.json (Yojson.Safe.to_string json) reqd
+  | `GET, "/api/v1/board/curation" ->
+      let json =
+        match Board_dispatch.latest_curation_snapshot () with
+        | None -> `Assoc [ ("snapshot", `Null) ]
+        | Some snap ->
+            `Assoc [ ("snapshot", Board_curation.snapshot_to_yojson snap) ]
+      in
+      Http.Response.json (Yojson.Safe.to_string json) reqd
+  | `GET, "/api/v1/board/sub-boards" ->
+      let sub_boards = Board_dispatch.list_sub_boards () in
+      let json =
+        `Assoc
+          [
+            ( "sub_boards",
+              `List (List.map Board.sub_board_to_yojson sub_boards) );
+          ]
+      in
+      Http.Response.json (Yojson.Safe.to_string json) reqd
+  | `GET, "/api/v1/board/karma/ledger" ->
+      let agent = query_param request "agent" in
+      let limit =
+        int_query_param request "limit" ~default:500 |> clamp ~min_v:1 ~max_v:5000
+      in
+      let events = Board_dispatch.get_karma_ledger ?agent ~limit () in
+      let totals =
+        Board_dispatch.get_all_karma ()
+        |> List.sort (fun (_, a) (_, b) -> compare b a)
+      in
+      let json =
+        `Assoc
+          [
+            ("events", `List (List.map Board.karma_event_to_yojson events));
+            ("count", `Int (List.length events));
+            ("scoring_rule", `String "up=+1,down=0");
+            ( "totals",
+              `List
+                (List.map
+                   (fun (agent_name, k) ->
+                     `Assoc
+                       [ ("agent", `String agent_name); ("karma", `Int k) ])
+                   totals) );
+          ]
+      in
       Http.Response.json (Yojson.Safe.to_string json) reqd
   | `POST, "/api/v1/board/reactions" ->
       Http.Request.read_body_async reqd (fun body ->

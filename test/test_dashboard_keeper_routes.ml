@@ -941,6 +941,40 @@ let require_status label expected result =
          result.body)
 ;;
 
+let json_has_field field body =
+  match Yojson.Safe.from_string body with
+  | `Assoc fields -> List.mem_assoc field fields
+  | _ -> false
+;;
+
+let require_board_read_model label field result =
+  require_status (label ^ " returns 200") 200 result;
+  check
+    bool
+    (label ^ " does not fall through to board post lookup")
+    false
+    (contains_substr "Post_not_found" result.body
+     || contains_substr "Invalid post_id" result.body);
+  check bool (label ^ " exposes " ^ field) true (json_has_field field result.body)
+;;
+
+let test_board_read_model_routes_do_not_fall_through_to_post_lookup () =
+  with_seeded_server
+  @@ fun ~port ~config:_ ~admin_token:_ ~keeper_name:_ ->
+  require_board_read_model
+    "board curation"
+    "snapshot"
+    (run_curl_get ~port ~path:"/api/v1/board/curation" ());
+  require_board_read_model
+    "sub-boards"
+    "sub_boards"
+    (run_curl_get ~port ~path:"/api/v1/board/sub-boards" ());
+  require_board_read_model
+    "karma ledger"
+    "events"
+    (run_curl_get ~port ~path:"/api/v1/board/karma/ledger?limit=1" ())
+;;
+
 let test_keeper_lifecycle_routes_do_not_fall_through_to_generic_404 () =
   with_seeded_server
   @@ fun ~port ~config ~admin_token ~keeper_name ->
@@ -1904,6 +1938,10 @@ let () =
             "lifecycle POST routes do not fall through to generic 404"
             `Slow
             test_keeper_lifecycle_routes_do_not_fall_through_to_generic_404
+        ; test_case
+            "board read models do not fall through to post lookup"
+            `Slow
+            test_board_read_model_routes_do_not_fall_through_to_post_lookup
         ; test_case
             "directive resume updates paused meta"
             `Slow

@@ -57,19 +57,12 @@ const ENTRIES_PER_PLANE: ReadonlyMap<CockpitPlane, CockpitEntrypoint[]> = (() =>
 })()
 
 const COCKPIT_COVERED_ROUTES = COCKPIT_ENTRYPOINTS.filter(entry => entry.coverage === 'covered').length
-const COCKPIT_BLOCKED_ROUTES = COCKPIT_ENTRYPOINTS.filter(entry => entry.coverage === 'backend-blocked').length
 
 // tie-break: strict `>` keeps the initial accumulator, so PLANE_ORDER[0] (first listed plane) wins on equal counts.
 const PLANE_WITH_MOST_ENTRIES = PLANE_ORDER.reduce((top, plane) => {
   const count = ENTRIES_PER_PLANE.get(plane)?.length ?? 0
   const topCount = ENTRIES_PER_PLANE.get(top)?.length ?? 0
   return count > topCount ? plane : top
-}, PLANE_ORDER[0])
-
-const PLANE_WITH_MOST_GAPS = PLANE_ORDER.reduce((top, plane) => {
-  const gaps = (ENTRIES_PER_PLANE.get(plane) ?? []).filter(entry => entry.coverage === 'backend-blocked').length
-  const topGaps = (ENTRIES_PER_PLANE.get(top) ?? []).filter(entry => entry.coverage === 'backend-blocked').length
-  return gaps > topGaps ? plane : top
 }, PLANE_ORDER[0])
 
 const COCKPIT_DISCLOSURE_ITEMS: CognitiveDisclosureItem[] = [
@@ -80,9 +73,7 @@ const COCKPIT_DISCLOSURE_ITEMS: CognitiveDisclosureItem[] = [
     metric: `${COCKPIT_ENTRYPOINTS.length} routes`,
     defaultOpen: true,
     detail: html`
-      <span class="font-mono text-3xs text-ok">${COCKPIT_COVERED_ROUTES} covered</span>
-      <span class="mx-2 text-[var(--color-fg-disabled)]">/</span>
-      <span class="font-mono text-3xs text-[var(--color-fg-muted)]">${COCKPIT_BLOCKED_ROUTES} backend-blocked</span>
+      <span class="font-mono text-3xs text-ok">${COCKPIT_COVERED_ROUTES} route-backed</span>
     `,
   },
   {
@@ -94,10 +85,8 @@ const COCKPIT_DISCLOSURE_ITEMS: CognitiveDisclosureItem[] = [
   {
     level: 'project',
     title: 'Route gaps',
-    summary: COCKPIT_BLOCKED_ROUTES > 0
-      ? `${COCKPIT_BLOCKED_ROUTES} backend-blocked in ${PLANE_META[PLANE_WITH_MOST_GAPS].label}`
-      : 'No backend-blocked routes',
-    metric: `${COCKPIT_BLOCKED_ROUTES} gaps`,
+    summary: 'No blocked route entries',
+    metric: '0 gaps',
   },
 ]
 
@@ -135,19 +124,13 @@ function routeCaption(entrypoint: CockpitEntrypoint): string {
   ].filter(Boolean).join(' / ')
 }
 
-function coverageClass(coverage: CockpitEntrypoint['coverage']): string {
-  switch (coverage) {
-    case 'covered':
-      return 'border-ok/30 bg-ok/10 text-ok'
-    case 'backend-blocked':
-      return 'border-[var(--color-border-strong)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]'
-  }
+function coverageClass(): string {
+  return 'border-ok/30 bg-ok/10 text-ok'
 }
 
 function PlaneSection({ plane, entries }: { plane: CockpitPlane; entries: CockpitEntrypoint[] }) {
   const meta = PLANE_META[plane]
   const covered = entries.filter(entry => entry.coverage === 'covered').length
-  const blocked = entries.filter(entry => entry.coverage === 'backend-blocked').length
 
   return html`
     <section
@@ -167,9 +150,6 @@ function PlaneSection({ plane, entries }: { plane: CockpitPlane; entries: Cockpi
         </div>
         <div class="flex shrink-0 flex-wrap justify-end gap-1.5 font-mono text-3xs">
           <span class="rounded-[var(--r-0)] border border-ok/30 bg-ok/10 px-1.5 py-0.5 text-ok">${covered} covered</span>
-          ${blocked > 0
-            ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-1.5 py-0.5 text-[var(--color-fg-muted)]">${blocked} blocked</span>`
-            : null}
         </div>
       </div>
 
@@ -194,7 +174,7 @@ function PlaneSection({ plane, entries }: { plane: CockpitPlane; entries: Cockpi
               </span>
               <${ArrowUpRight} class="mt-0.5 shrink-0 text-[var(--color-fg-muted)] transition-colors group-hover:text-[var(--color-fg-primary)]" size=${14} aria-hidden="true" />
             </span>
-            <span class=${`rounded-[var(--r-0)] border px-1.5 py-0.5 font-mono text-3xs ${coverageClass(entrypoint.coverage)}`}>
+            <span class=${`rounded-[var(--r-0)] border px-1.5 py-0.5 font-mono text-3xs ${coverageClass()}`}>
               ${entrypoint.coverage}
             </span>
           <//>

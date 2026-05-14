@@ -24,7 +24,7 @@ export interface CockpitEntrypoint {
   mode: CockpitMode
   aliases: string[]
   target: CockpitRouteTarget
-  coverage: 'covered' | 'backend-blocked'
+  coverage: 'covered'
 }
 
 export interface CognitiveModeState {
@@ -104,7 +104,6 @@ export const COCKPIT_ENTRYPOINTS: CockpitEntrypoint[] = [
   // Work Plane: Goal / Task / Accountability.
   { mode: 'work', aliases: ['goal-h', 'goal-horizon'], target: { tab: 'workspace', params: { section: 'planning', view: 'goal-tree' } }, coverage: 'covered' },
   { mode: 'work', aliases: ['goal-t', 'goal-tree'], target: { tab: 'workspace', params: { section: 'planning', view: 'goal-tree' } }, coverage: 'covered' },
-  { mode: 'work', aliases: ['goal-d', 'goal-snapshot', 'goal-snapshot-diff'], target: { tab: 'workspace', params: { section: 'planning', view: 'goal-tree', focus: 'snapshot' } }, coverage: 'backend-blocked' },
   { mode: 'work', aliases: ['task-bl', 'task-backlog'], target: { tab: 'workspace', params: { section: 'planning', view: 'default' } }, coverage: 'covered' },
   { mode: 'work', aliases: ['task-st', 'task-stale'], target: { tab: 'workspace', params: { section: 'planning', view: 'default', focus: 'stale' } }, coverage: 'covered' },
   { mode: 'work', aliases: ['task-w', 'task-wall'], target: { tab: 'workspace', params: { section: 'planning', view: 'default' } }, coverage: 'covered' },
@@ -139,7 +138,7 @@ export const COCKPIT_ENTRYPOINTS: CockpitEntrypoint[] = [
   { mode: 'observe', aliases: ['hr-st', 'stress-board'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'stress' } }, coverage: 'covered' },
   { mode: 'observe', aliases: ['hr-mod', 'heuristic-by-module'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'heuristics', focus: 'module' } }, coverage: 'covered' },
 
-  // Cognition Plane: production view tabs show available data and blocked backend gaps.
+  // Cognition Plane: production view tabs show available data.
   { mode: 'cognition', aliases: ['ki-bdi', 'keeper-bdi'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'keeper', focus: 'bdi' } }, coverage: 'covered' },
   { mode: 'cognition', aliases: ['ki-acc', 'keeper-tool-access'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'keeper', focus: 'tool-access' } }, coverage: 'covered' },
   { mode: 'cognition', aliases: ['ki-stat', 'keeper-token-stats'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'token-stats' } }, coverage: 'covered' },

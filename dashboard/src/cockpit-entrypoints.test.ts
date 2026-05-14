@@ -202,6 +202,9 @@ describe('cockpit entrypoint registry', () => {
       entrypoint.aliases.map(alias => [alias, entrypoint] as const),
     ))
 
+    expect(COCKPIT_ENTRYPOINTS.every(entrypoint => entrypoint.coverage === 'covered')).toBe(true)
+    expect(byAlias.has('goal-d')).toBe(false)
+    expect(byAlias.has('goal-snapshot')).toBe(false)
     expect(byAlias.get('task-st')?.coverage).toBe('covered')
     expect(byAlias.get('acc-led')?.coverage).toBe('covered')
     expect(byAlias.get('acc-mtx')?.coverage).toBe('covered')

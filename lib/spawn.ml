@@ -57,6 +57,55 @@ type spawn_result = {
 (** MASC MCP tools available for spawned agents *)
 let masc_mcp_tools = Agent_tool_surfaces.spawned_agent_prefixed_tools
 
+module Runtime_binding = Agent_sdk.Provider_runtime_binding
+
+let local_runtime_label model_id =
+  match Runtime_binding.find "llama" with
+  | Some binding -> binding.Runtime_binding.id ^ ":" ^ model_id
+  | None -> "llama:" ^ model_id
+
+let nonempty_env name =
+  match Sys.getenv_opt name with
+  | Some raw ->
+    let trimmed = String.trim raw in
+    if String.equal trimmed "" then None else Some trimmed
+  | None -> None
+
+let explicit_llama_model_id_result () =
+  match nonempty_env "LLAMA_DEFAULT_MODEL" with
+  | Some model_id -> Ok model_id
+  | None ->
+    (match nonempty_env "MASC_DEFAULT_PROVIDER", nonempty_env "MASC_DEFAULT_MODEL" with
+     | Some provider, Some model_id
+       when String.equal (String.lowercase_ascii provider) "llama" -> Ok model_id
+     | _ ->
+       Error
+         "LLAMA_DEFAULT_MODEL is not set; configure LLAMA_DEFAULT_MODEL or \
+          MASC_DEFAULT_PROVIDER=llama with MASC_DEFAULT_MODEL")
+
+let resolve_spawn_key label =
+  let normalized = String.lowercase_ascii (String.trim label) in
+  let underscore = String.map (function '-' -> '_' | c -> c) normalized in
+  let dashed = String.map (function '_' -> '-' | c -> c) normalized in
+  let candidates = Json_util.dedupe_keep_order [ normalized; underscore; dashed ] in
+  List.find_map
+    (fun candidate ->
+       match Runtime_binding.find candidate with
+       | Some binding ->
+         (match binding.Runtime_binding.command with
+          | Some ("claude" | "codex" | "gemini" | "llama" as command) -> Some command
+          | Some _ | None -> None)
+       | None -> None)
+    candidates
+
+let bare_ollama_migration_message () =
+  "Bare `ollama` without a model requires OLLAMA_DEFAULT_MODEL env var. Use \
+   `ollama:<model>` for explicit selection."
+
+let is_bare_ollama_label label =
+  String.equal (String.trim label |> String.lowercase_ascii) "ollama"
+  && String.equal (String.trim Env_config_runtime.Ollama.default_model) ""
+
 (** MASC Lifecycle Protocol - auto-appended to spawned agent prompts *)
 let masc_lifecycle_suffix = {|
 
@@ -158,8 +207,8 @@ let parse_gemini_output raw =
     parse_raw_output raw
 
 (** Build a spawn config from a canonical spawn key.
-    SSOT for agent names and aliases is [Provider_adapter.direct_adapters];
-    this function only maps resolved keys to their CLI invocation shape. *)
+    Provider aliases are resolved before this function; this function only
+    maps resolved keys to their CLI invocation shape. *)
 let spawn_config_of_key key =
   let open Env_config.Spawn in
   match key with
@@ -202,7 +251,7 @@ let spawn_config_of_key key =
   | "llama" ->
       Some {
         agent_name = "llama";
-        command = Provider_adapter.make_local_label "explicit-model-required";
+        command = local_runtime_label "explicit-model-required";
         timeout_seconds;
         working_dir = None;
         mcp_tools = masc_mcp_tools;
@@ -214,13 +263,23 @@ let spawn_config_of_key key =
   | _ -> None
 
 (** Get spawn config for agent.
-    Resolves all aliases via Provider_adapter registry (SSOT).
-    spawn_alias_map removed — aliases are now in Provider_adapter.direct_adapters. *)
+    Resolves all aliases via the runtime provider catalog. *)
 let get_config agent_name =
   let normalized = String.lowercase_ascii (String.trim agent_name) in
-  match Provider_adapter.resolve_spawn_key normalized with
+  match resolve_spawn_key normalized with
   | Some key -> spawn_config_of_key key
   | None -> spawn_config_of_key normalized
+
+let spawnable_agent_names () =
+  let static_keys = [ "claude"; "gemini"; "codex"; "llama" ] in
+  let binding_keys =
+    Runtime_binding.all ()
+    |> List.filter_map (fun binding ->
+      match binding.Runtime_binding.command with
+      | Some ("claude" | "codex" | "gemini" | "llama" as command) -> Some command
+      | Some _ | None -> None)
+  in
+  Json_util.dedupe_keep_order (static_keys @ binding_keys)
 
 (** Build MCP flags from config's [mcp_mode] field.
     No agent-name matching — dispatch is config-driven. *)
@@ -275,9 +334,9 @@ let fallback_spawn_failure_output ~exit_code =
     exit_code
 
 let add_default_model_arg agent_name argv =
-  match Provider_adapter.resolve_direct_adapter agent_name with
-  | Some adapter when adapter.canonical_name = "llama" -> (
-      match Provider_adapter.explicit_llama_model_id_result () with
+  match resolve_spawn_key agent_name with
+  | Some "llama" -> (
+      match explicit_llama_model_id_result () with
       | Ok model_id -> argv @ [ model_id ]
       | Error _ -> argv)
   | _ -> argv
@@ -286,10 +345,10 @@ let add_default_model_arg agent_name argv =
 let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
   let start_time = Time_compat.now () in
   let normalized_agent = String.lowercase_ascii (String.trim agent_name) in
-  if Provider_adapter.is_bare_ollama_label normalized_agent then
+  if is_bare_ollama_label normalized_agent then
     {
       success = false;
-      output = Provider_adapter.bare_ollama_migration_message ();
+      output = bare_ollama_migration_message ();
       exit_code = 2;
       elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
       input_tokens = None;

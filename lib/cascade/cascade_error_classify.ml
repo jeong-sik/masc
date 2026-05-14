@@ -762,16 +762,15 @@ let codex_cli_prompt_bytes_to_token_limit ~prompt_bytes ~prompt_tokens =
 
 let codex_cli_prompt_preflight ~(config : Cascade_runner.config) ~(goal : string)
     : codex_cli_prompt_preflight option =
-  (* RFC-0058 §2.4 — dispatch by adapter capability flag
-     ([tool_policy.argv_prompt_preflight]), never by provider variant.
+  (* RFC-0058 §2.4 — dispatch by runtime capability projection,
+     never by provider variant.
      argv/context-window preflight currently applies only to the
      [codex exec] subprocess transport (single-argv-vector prompt).
      Adding a new vendor that needs the same preflight is now a TOML/
      adapter registry change, not a code change here. *)
   let requires_preflight =
-    match Provider_adapter.adapter_of_provider_config config.provider_cfg with
-    | Some adapter -> adapter.tool_policy.argv_prompt_preflight
-    | None -> false
+    Provider_tool_support.requires_per_keeper_bridging_for_bound_actor_tools
+      config.provider_cfg
   in
   if not requires_preflight then None
   else

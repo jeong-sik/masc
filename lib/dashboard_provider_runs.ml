@@ -83,8 +83,10 @@ let binding_labels (binding : Runtime_binding.t) =
   let id = binding.Runtime_binding.id in
   let dashed_id = String.map (function '_' -> '-' | c -> c) id in
   let local_aliases =
-    if String.equal id Provider_adapter.cn_llama then [ "llama.cpp"; "llamacpp" ]
-    else []
+    match Runtime_binding.find "llama" with
+    | Some local when String.equal id local.Runtime_binding.id ->
+      [ "llama.cpp"; "llamacpp" ]
+    | Some _ | None -> []
   in
   id :: dashed_id :: binding.Runtime_binding.aliases @ local_aliases
   |> List.filter_map trim_nonempty

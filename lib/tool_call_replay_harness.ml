@@ -118,8 +118,8 @@ let load_snapshots_from_jsonl path =
 
 let response_format_of_provider provider =
   let canonical =
-    match Provider_adapter.resolve_direct_canonical_name provider with
-    | Some name -> name
+    match Agent_sdk.Provider_runtime_binding.find provider with
+    | Some binding -> binding.Agent_sdk.Provider_runtime_binding.id
     | None -> String.lowercase_ascii (String.trim provider)
   in
   (* The seed harness only knows the OpenAI-compatible chat-completions
@@ -127,9 +127,13 @@ let response_format_of_provider provider =
      instead of silently reusing this parser. *)
   match canonical with
   | "codex-api"
+  | "openai"
   | "glm-api"
+  | "glm"
   | "glm-coding-plan"
+  | "glm-coding"
   | "kimi-api"
+  | "kimi"
   | "openrouter"
   | "ollama"
   | "llama" ->

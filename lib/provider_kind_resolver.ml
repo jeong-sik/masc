@@ -86,9 +86,7 @@ let kind_of_spec (spec : string) :
   | Unknown _ -> None
 
 let uses_anthropic_caching_for_kind kind =
-  match Provider_adapter.adapter_of_provider_kind kind with
-  | Some adapter -> adapter.tool_policy.uses_anthropic_caching
-  | None -> false
+  Provider_tool_support.uses_anthropic_caching_for_kind kind
 
 let uses_anthropic_caching_for_spec spec =
   kind_of_spec spec |> Option.map uses_anthropic_caching_for_kind

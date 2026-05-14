@@ -8,6 +8,17 @@
 let fallback_context_window = 128_000
 
 let default_registry = Llm_provider.Provider_registry.default ()
+module Runtime_binding = Agent_sdk.Provider_runtime_binding
+module PConfig = Llm_provider.Provider_config
+
+let nonempty_env name =
+  match Sys.getenv_opt name with
+  | Some raw ->
+    let trimmed = String.trim raw in
+    if String.equal trimmed "" then None else Some trimmed
+  | None -> None
+
+let env_present name = Option.is_some (nonempty_env name)
 
 let provider_name_of_label (label : string) : string option =
   match String.index_opt label ':' with
@@ -15,6 +26,147 @@ let provider_name_of_label (label : string) : string option =
   | Some idx ->
       if idx = 0 then None
       else Some (String.sub label 0 idx |> String.trim |> String.lowercase_ascii)
+
+let binding_endpoint_url (binding : Runtime_binding.t) =
+  let trimmed = String.trim binding.Runtime_binding.base_url in
+  if String.equal trimmed "" then None else Some trimmed
+
+let binding_base_url_is_loopback binding =
+  match binding_endpoint_url binding with
+  | None -> false
+  | Some base_url ->
+    Uri.of_string base_url |> Uri.host |> Masc_network_defaults.is_loopback_host_opt
+
+let binding_auth_is_no_auth (binding : Runtime_binding.t) =
+  match binding.Runtime_binding.auth with
+  | Runtime_binding.No_auth -> true
+  | Runtime_binding.Api_key_env _
+  | Runtime_binding.Cli_cached_login
+  | Runtime_binding.Oauth_cached_login
+  | Runtime_binding.Setup_token_env _
+  | Runtime_binding.File _
+  | Runtime_binding.Exec _ -> false
+
+let binding_is_local (binding : Runtime_binding.t) =
+  match binding.Runtime_binding.kind with
+  | PConfig.Ollama -> binding_auth_is_no_auth binding && binding_base_url_is_loopback binding
+  | PConfig.OpenAI_compat ->
+    binding_auth_is_no_auth binding
+    && (binding_base_url_is_loopback binding
+        || String.equal binding.Runtime_binding.id "llama")
+  | PConfig.Anthropic
+  | PConfig.Kimi
+  | PConfig.Glm
+  | PConfig.DashScope
+  | PConfig.Gemini
+  | PConfig.Claude_code
+  | PConfig.Codex_cli
+  | PConfig.Gemini_cli
+  | PConfig.Kimi_cli -> false
+
+let local_binding () =
+  match Runtime_binding.find "llama" with
+  | Some binding when binding_is_local binding -> Some binding
+  | Some _ | None -> Runtime_binding.all () |> List.find_opt binding_is_local
+
+let local_runtime_label model_id =
+  let provider =
+    match local_binding () with
+    | Some binding -> binding.Runtime_binding.id
+    | None -> "llama"
+  in
+  provider ^ ":" ^ model_id
+
+let default_local_runtime_label () =
+  match local_binding () with
+  | Some binding -> binding.Runtime_binding.id ^ ":auto"
+  | None -> "auto"
+
+let is_local_provider_name provider_name =
+  provider_name
+  |> Runtime_binding.find
+  |> Option.map binding_is_local
+  |> Option.value ~default:false
+
+let binding_default_model_id (binding : Runtime_binding.t) =
+  match binding.Runtime_binding.default_model with
+  | Some raw when String.trim raw <> "" -> Some (String.trim raw)
+  | Some _ | None ->
+    (match binding.Runtime_binding.transport with
+     | Runtime_binding.Cli -> Some "auto"
+     | Runtime_binding.Http | Runtime_binding.Managed | Runtime_binding.Custom_openai_compat ->
+       if binding_is_local binding then None else Some "auto")
+
+let explicit_llama_model_id_result () =
+  match nonempty_env "LLAMA_DEFAULT_MODEL" with
+  | Some model_id -> Ok model_id
+  | None ->
+    (match nonempty_env "MASC_DEFAULT_PROVIDER", nonempty_env "MASC_DEFAULT_MODEL" with
+     | Some provider, Some model_id
+       when String.equal (String.lowercase_ascii provider) "llama" -> Ok model_id
+     | _ ->
+       Error
+         "LLAMA_DEFAULT_MODEL is not set; configure LLAMA_DEFAULT_MODEL or \
+          MASC_DEFAULT_PROVIDER=llama with MASC_DEFAULT_MODEL")
+
+let explicit_llama_model_label_result () =
+  Result.map local_runtime_label (explicit_llama_model_id_result ())
+
+let configured_default_model_label_result () =
+  match Env_config.Model_defaults.default_cascade_opt () with
+  | Some raw ->
+    let labels =
+      raw
+      |> String.split_on_char ','
+      |> List.filter_map (fun item ->
+        let trimmed = String.trim item in
+        if String.equal trimmed "" then None else Some trimmed)
+    in
+    (match labels with
+     | first :: _ -> Ok first
+     | [] -> Error "MASC_DEFAULT_CASCADE is set but empty")
+  | None ->
+    (match nonempty_env "MASC_DEFAULT_PROVIDER", nonempty_env "MASC_DEFAULT_MODEL" with
+     | Some provider, Some model_id -> Ok (provider ^ ":" ^ model_id)
+     | Some _, None ->
+       Error "MASC_DEFAULT_MODEL is required when MASC_DEFAULT_PROVIDER is set"
+     | None, Some _ ->
+       Error "MASC_DEFAULT_PROVIDER is required when MASC_DEFAULT_MODEL is set"
+     | None, None -> Error "No explicit default model configured")
+
+let binding_available_for_default (binding : Runtime_binding.t) =
+  match binding.Runtime_binding.auth with
+  | Runtime_binding.No_auth -> true
+  | Runtime_binding.Cli_cached_login | Runtime_binding.Oauth_cached_login ->
+    (match binding.Runtime_binding.command with
+     | Some command -> Llm_provider.Provider_registry.command_in_path command
+     | None -> false)
+  | Runtime_binding.Api_key_env env
+  | Runtime_binding.Setup_token_env env -> env_present env
+  | Runtime_binding.File path -> Sys.file_exists path
+  | Runtime_binding.Exec _ -> false
+
+let auto_label_for_binding (binding : Runtime_binding.t) =
+  if String.equal binding.Runtime_binding.id "openrouter"
+     || not (binding_available_for_default binding)
+  then None
+  else
+    match binding_default_model_id binding with
+    | Some _ -> Some (binding.Runtime_binding.id ^ ":auto")
+    | None -> None
+
+let preferred_execution_model_labels () =
+  Json_util.dedupe_keep_order
+    ([ (match configured_default_model_label_result () with
+        | Ok label -> Some label
+        | Error _ -> None)
+     ; (match explicit_llama_model_label_result () with
+        | Ok label -> Some label
+        | Error _ -> None)
+     ]
+     |> List.filter_map Fun.id
+     |> fun explicit ->
+     explicit @ List.filter_map auto_label_for_binding (Runtime_binding.all ()))
 
 let is_local_only_cascade name =
   let lc = name |> Keeper_cascade_profile.canonicalize |> String.lowercase_ascii in
@@ -30,7 +182,7 @@ let is_local_only_cascade name =
 
 let is_local_label label =
   match provider_name_of_label label with
-  | Some pname -> Provider_adapter.is_local_provider pname
+  | Some pname -> is_local_provider_name pname
   | None -> false
 
 let is_typed_declarative_label_provider = function
@@ -44,17 +196,17 @@ let default_model_strings ~cascade_name =
     cascade_name |> cascade_name_to_string |> Keeper_cascade_profile.canonicalize
   in
   let all_labels =
-    match Provider_adapter.explicit_llama_model_label_result () with
+    match explicit_llama_model_label_result () with
     | Ok label -> [ label ]
     | Error _ -> (
-        match Provider_adapter.preferred_execution_model_labels () with
+        match preferred_execution_model_labels () with
         | [] ->
           (* Neither explicit llama label nor any preferred execution
              label is configured.  Iter 25: surface so dashboards can
              alert on missing execution-lane config. *)
           Cascade_metrics.on_default_label_fallback
             ~cascade:cascade_name ~reason:"no_execution_labels";
-          [ Provider_adapter.default_local_fallback_label () ]
+          [ default_local_runtime_label () ]
         | labels -> labels)
   in
   if is_local_only_cascade cascade_name then
@@ -65,7 +217,7 @@ let default_model_strings ~cascade_name =
          only remote providers.  Iter 25 counter. *)
       Cascade_metrics.on_default_label_fallback
         ~cascade:cascade_name ~reason:"local_cascade_no_local";
-      [ Provider_adapter.default_local_fallback_label () ]
+      [ default_local_runtime_label () ]
     | local -> local
   else
     all_labels
@@ -74,7 +226,7 @@ let labels_require_local_discovery (labels : string list) : bool =
   List.exists
     (fun label ->
       match provider_name_of_label label with
-      | Some pname -> Provider_adapter.requires_discovery pname
+      | Some pname -> is_local_provider_name pname
       | None -> false)
     labels
 
@@ -231,7 +383,7 @@ let labels_are_pure_local (labels : string list) : bool =
   List.for_all
     (fun label ->
       match provider_name_of_label label with
-      | Some pname -> Provider_adapter.is_local_provider pname
+      | Some pname -> is_local_provider_name pname
       | None -> false)
     labels
 
@@ -284,16 +436,16 @@ let default_local_model_label_and_id () : string * string =
             if entry.is_available () then Some (label, model_id_of_label label)
             else None)
   in
-  match Provider_adapter.configured_default_model_label_result () with
+  match configured_default_model_label_result () with
   | Ok label -> (
       match try_label label with
       | Some pair -> pair
       | None -> (
-          match List.find_map try_label (Provider_adapter.preferred_execution_model_labels ()) with
+          match List.find_map try_label (preferred_execution_model_labels ()) with
           | Some pair -> pair
           | None -> fallback))
   | Error _ -> (
-      match List.find_map try_label (Provider_adapter.preferred_execution_model_labels ()) with
+      match List.find_map try_label (preferred_execution_model_labels ()) with
       | Some pair -> pair
       | None -> fallback)
 
@@ -306,7 +458,7 @@ let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
           match provider_name_of_label label with
           | None -> true
           | Some pname ->
-              if Provider_adapter.is_local_provider pname
+              if is_local_provider_name pname
                  || is_typed_declarative_label_provider pname
               then true
               else
@@ -323,7 +475,7 @@ let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
             match provider_name_of_label label with
             | None -> None
             | Some pname ->
-                if Provider_adapter.is_local_provider pname
+                if is_local_provider_name pname
                    || is_typed_declarative_label_provider pname
                 then None
                 else

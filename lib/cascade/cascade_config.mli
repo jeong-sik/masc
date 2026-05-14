@@ -16,7 +16,7 @@
 (** {1 Model Alias Resolution} *)
 
 (** Resolve a GLM model alias to the concrete API model ID.
-    - ["auto"] → env var [ZAI_DEFAULT_MODEL] or ["glm-5.1"]
+    - ["auto"] → OAS runtime binding default, OAS ZAI catalog default, or unresolved ["auto"]
     - ["flash"] → ["glm-4.7-flashx"]
     - ["turbo"] → ["glm-5-turbo"]
     - ["vision"] → ["glm-4.6v"]
@@ -183,9 +183,10 @@ val parse_model_string_result :
 
 (** Expand provider:auto specs that map to multiple models.
     ["glm:auto"] expands to ["glm:glm-5.1"; "glm:glm-5-turbo"; ...].
-    CLI specs such as ["gemini_cli:auto"], ["codex_cli:auto"], and
-    ["claude_code:auto"] expand through their provider-specific
-    auto-model lists. Other specs pass through unchanged. *)
+    CLI specs expand only through OAS binding defaults/supported-models or
+    [MASC_<PROVIDER>_AUTO_MODELS]; otherwise they remain ["provider:auto"]
+    so OAS transport-level defaults stay authoritative. Other specs pass
+    through unchanged. *)
 val expand_auto_models : string list -> string list
 
 val expand_weighted_auto_entries :
@@ -534,9 +535,8 @@ val resolve_ollama_max_concurrent :
   int option
 (** Per-cascade override for the HTTP-probe-capable provider's
     client-capacity registration default.  The caller in
-    {!Keeper_turn_driver} consults
-    {!Provider_adapter.is_http_probe_capable_kind} and registers
-    matching cfgs through {!Cascade_client_capacity.register}.
+    {!Keeper_turn_driver} consults runtime candidate capability projection
+    and registers matching cfgs through {!Cascade_client_capacity.register}.
     [None] means "use the literal default of 1". *)
 
 val resolve_cli_max_concurrent :

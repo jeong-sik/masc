@@ -790,14 +790,19 @@ let provider_model_label provider model =
     "[cascade_prefix]:auto" when
     a default model is configured. *)
 let default_model_label_for_adapter (adapter : adapter) =
+  let model_label model_id =
+    match provider_model_label adapter.cascade_prefix model_id with
+    | Some label -> label
+    | None -> adapter.cascade_prefix
+  in
   match adapter.runtime_kind with
   | Local ->
     Result.map
-      (fun model_id -> adapter.cascade_prefix ^ ":" ^ model_id)
+      model_label
       (explicit_llama_model_id_result ())
   | Cli_agent | Direct_api ->
     (match adapter.default_model_id with
-     | Some _ -> Ok (adapter.cascade_prefix ^ ":auto")
+     | Some _ -> Ok (model_label "auto")
      | None ->
        Error
          (Printf.sprintf

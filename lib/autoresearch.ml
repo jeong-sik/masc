@@ -137,12 +137,24 @@ let generate_code_change = Autoresearch_codegen.generate_code_change
 (* Loop State Management                                             *)
 (* ================================================================ *)
 
+let provider_prefix_of_model_label label =
+  match String.index_opt label ':' with
+  | Some idx when idx > 0 -> String.sub label 0 idx |> String.trim
+  | Some _ | None -> ""
+
+let default_model_provider_prefix () =
+  match Cascade_oas_runner.default_model_strings ~cascade_name:"autoresearch" with
+  | label :: _ ->
+    let prefix = provider_prefix_of_model_label label in
+    if String.equal prefix "" then "auto" else prefix
+  | [] -> "auto"
+
 let create_state ~goal ~metric_fn ?model_model ?author ~target_file ?target_score
     ~cycle_timeout_s ~max_cycles ?patience ?build_verify_fn
     ?(lower_is_better = false) ~workdir () =
   let model_model = match model_model with
     | Some m -> m
-    | None -> Provider_adapter.default_model_provider_prefix_result () |> Result.value ~default:"auto"
+    | None -> default_model_provider_prefix ()
   in
   let now = Time_compat.now () in
   let patience = match patience with

@@ -449,9 +449,8 @@ let on_sticky_expiry ~cascade =
     ()
 
 (* [Cascade_runtime.default_model_strings] has two arms that fall
-   back to [Provider_adapter.default_local_fallback_label] when the
-   normal cascade.toml-derived label resolution can't produce
-   anything usable:
+   back to the local runtime fallback label when the normal
+   cascade.toml-derived label resolution can't produce anything usable:
 
      no_execution_labels        — neither
                                   [explicit_llama_model_label_result]

@@ -11,6 +11,9 @@
 
 open Cascade_declarative_types
 
+module Binding = Agent_sdk.Provider_runtime_binding
+module PConfig = Llm_provider.Provider_config
+
 type adapter_error =
   | Provider_not_found of string
   | Model_not_found of string
@@ -48,14 +51,33 @@ let err (e : adapter_error) : adapter_error list = [ e ]
 
 (* --- Provider resolution --- *)
 
+let normalize_binding_lookup_key s =
+  normalize_id s |> String.map (fun c -> if c = '_' then '-' else c)
+
 let resolve_provider_prefix (provider_id : string) : string option =
-  match Provider_adapter.resolve_adapter_by_cascade_prefix provider_id with
-  | Some adapter -> Some (Provider_adapter.cascade_prefix_of_adapter adapter)
+  match Binding.find provider_id with
+  | Some binding -> Some binding.Binding.id
   | None ->
     let normalized = normalize_id provider_id in
-    match Provider_adapter.resolve_adapter_by_cascade_prefix normalized with
-    | Some adapter -> Some (Provider_adapter.cascade_prefix_of_adapter adapter)
-    | None -> None
+    (match Binding.find normalized with
+     | Some binding -> Some binding.Binding.id
+     | None ->
+       let dashed = normalize_binding_lookup_key provider_id in
+       Option.map (fun (binding : Binding.t) -> binding.Binding.id) (Binding.find dashed))
+
+let provider_label_of_config (cfg : PConfig.t) =
+  match Binding.binding_for_provider_config cfg with
+  | Some binding -> binding.Binding.id
+  | None -> Llm_provider.Provider_registry.provider_name_of_config cfg
+
+let provider_health_key_of_config (cfg : PConfig.t) =
+  match cfg.PConfig.kind with
+  | PConfig.OpenAI_compat when PConfig.is_local cfg ->
+    let base_url = String.trim cfg.PConfig.base_url in
+    if String.equal base_url ""
+    then provider_label_of_config cfg
+    else Printf.sprintf "%s:%s@%s" (provider_label_of_config cfg) cfg.PConfig.model_id base_url
+  | _ -> provider_label_of_config cfg
 
 let find_provider (cfg : cascade_config) (provider_id : string) :
     cascade_provider option =
@@ -441,7 +463,7 @@ let build_profile_from_tier_group (cfg : cascade_config)
   let provider_configs = List.concat resolved_configs_by_tier in
   let tier_member_keys =
     List.map
-      (List.map Provider_adapter.provider_health_key_of_config)
+      (List.map provider_health_key_of_config)
       resolved_configs_by_tier
   in
   let strategy = build_tier_group_strategy tg tier_member_keys in

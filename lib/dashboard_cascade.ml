@@ -11,7 +11,6 @@ module Filename = Stdlib.Filename
 module List = Stdlib.List
 module Array = Stdlib.Array
 module String = Stdlib.String
-module PA = Provider_adapter
 module Char = Stdlib.Char
 module Int = Stdlib.Int
 module Float = Stdlib.Float
@@ -20,6 +19,7 @@ module Float = Stdlib.Float
 
 module CC = Cascade_config
 module Health = Cascade_health_tracker
+module Runtime_binding = Agent_sdk.Provider_runtime_binding
 module StringSet = Set.Make (String)
 
 (* ── Shared helpers ─────────────────────────────────── *)
@@ -31,17 +31,24 @@ let json_string_option = function
   | None -> `Null
 ;;
 
+let ollama_runtime_id () =
+  match Runtime_binding.find "ollama" with
+  | Some binding -> binding.Runtime_binding.id
+  | None -> "ollama"
+
 let is_ollama_cloud_profile profile_name =
+  let ollama_id = ollama_runtime_id () in
   String.starts_with ~prefix:"tier.ollama_cloud" profile_name
-  || String.starts_with ~prefix:(PA.cn_ollama ^ "_cloud") profile_name
+  || String.starts_with ~prefix:(ollama_id ^ "_cloud") profile_name
 ;;
 
 let is_ollama_cloud_candidate ~profile_name (c : CC.candidate_info) =
+  let ollama_id = ollama_runtime_id () in
   is_ollama_cloud_profile profile_name
   ||
   match c.provider_name with
   | Some provider_name ->
-    String.equal provider_name PA.cn_ollama
+    String.equal provider_name ollama_id
     && (String.ends_with ~suffix:":cloud" c.model_string
         || List.exists
              (fun model -> String.ends_with ~suffix:":cloud" model)
@@ -50,9 +57,10 @@ let is_ollama_cloud_candidate ~profile_name (c : CC.candidate_info) =
 ;;
 
 let candidate_to_json ~profile_name (c : CC.candidate_info) : Yojson.Safe.t =
+  let ollama_id = ollama_runtime_id () in
   let provider_name, display_provider_name, runtime_kind =
     if is_ollama_cloud_candidate ~profile_name c
-    then Some (PA.cn_ollama ^ "_cloud"), Some "Ollama Cloud", Some "direct_api"
+    then Some (ollama_id ^ "_cloud"), Some "Ollama Cloud", Some "direct_api"
     else c.provider_name, c.display_provider_name, c.runtime_kind
   in
   `Assoc

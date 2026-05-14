@@ -1,3 +1,6 @@
+module Binding = Agent_sdk.Provider_runtime_binding
+module PConfig = Llm_provider.Provider_config
+
 type capabilities =
   { supports_inline_tools : bool
   ; supports_inline_tool_choice : bool
@@ -5,6 +8,13 @@ type capabilities =
   ; supports_runtime_tool_events : bool
   ; supports_runtime_mcp_http_headers : bool
   }
+
+let trim_nonempty value =
+  let trimmed = String.trim value in
+  if String.equal trimmed "" then None else Some trimmed
+;;
+
+let normalize_label value = value |> String.trim |> String.lowercase_ascii
 
 (** Whether the resolved provider adapter is a CLI runtime (Claude Code,
     Codex CLI, Gemini CLI, Kimi CLI).  MASC uses this only for local
@@ -29,6 +39,140 @@ let normalize_cli_caps_when ~is_cli (caps : Llm_provider.Capabilities.capabiliti
   else caps
 ;;
 
+let binding_supports_runtime_mcp_http_headers (binding : Binding.t) =
+  let caps = binding.Binding.capabilities in
+  let runtime_mcp_caps =
+    caps.supports_runtime_mcp_tools || caps.supports_runtime_tool_events
+  in
+  match binding.Binding.kind with
+  | PConfig.Codex_cli | PConfig.Gemini_cli -> false
+  | _ ->
+    runtime_mcp_caps
+    || (binding.Binding.transport = Binding.Cli && caps.supports_tools)
+;;
+
+let binding_endpoint_url (binding : Binding.t) = trim_nonempty binding.Binding.base_url
+
+let binding_auth_is_no_auth (binding : Binding.t) =
+  match binding.Binding.auth with
+  | Binding.No_auth -> true
+  | Binding.Api_key_env _
+  | Binding.Cli_cached_login
+  | Binding.Oauth_cached_login
+  | Binding.Setup_token_env _
+  | Binding.File _
+  | Binding.Exec _ -> false
+;;
+
+let binding_labels (binding : Binding.t) =
+  binding.Binding.id :: binding.Binding.aliases
+  |> List.filter_map trim_nonempty
+  |> List.map normalize_label
+;;
+
+let binding_has_label binding expected =
+  let expected = normalize_label expected in
+  List.exists (String.equal expected) (binding_labels binding)
+;;
+
+let binding_base_url_is_loopback binding =
+  match binding_endpoint_url binding with
+  | None -> false
+  | Some base_url -> Uri.of_string base_url |> Uri.host |> Masc_network_defaults.is_loopback_host_opt
+;;
+
+let binding_is_local binding =
+  match binding.Binding.kind with
+  | PConfig.Ollama -> binding_auth_is_no_auth binding && binding_base_url_is_loopback binding
+  | PConfig.OpenAI_compat ->
+    binding_auth_is_no_auth binding
+    && (binding_base_url_is_loopback binding || binding_has_label binding "llama")
+  | PConfig.Anthropic
+  | PConfig.Kimi
+  | PConfig.Glm
+  | PConfig.DashScope
+  | PConfig.Gemini
+  | PConfig.Claude_code
+  | PConfig.Codex_cli
+  | PConfig.Gemini_cli
+  | PConfig.Kimi_cli -> false
+;;
+
+let binding_is_direct_api binding =
+  match binding.Binding.transport with
+  | Binding.Cli -> false
+  | Binding.Http | Binding.Managed | Binding.Custom_openai_compat ->
+    not (binding_is_local binding)
+;;
+
+let binding_uses_anthropic_caching (binding : Binding.t) =
+  binding.Binding.capabilities.supports_prompt_caching
+  || binding.Binding.capabilities.supports_caching
+;;
+
+let binding_requires_per_keeper_bridging (binding : Binding.t) =
+  match binding.Binding.command, binding.Binding.kind with
+  | Some "codex", _ | _, PConfig.Codex_cli -> true
+  | _ -> false
+;;
+
+let binding_tolerates_bound_actor_fallback binding =
+  (not (binding_requires_per_keeper_bridging binding))
+  &&
+  (binding_supports_runtime_mcp_http_headers binding
+   || not (binding_is_direct_api binding))
+;;
+
+let binding_for_config provider_cfg =
+  Binding.binding_for_provider_config provider_cfg
+;;
+
+let binding_for_kind kind =
+  match List.filter (fun (binding : Binding.t) -> binding.Binding.kind = kind) (Binding.all ()) with
+  | [ binding ] -> Some binding
+  | [] | _ :: _ :: _ -> None
+;;
+
+let supports_runtime_mcp_http_headers (provider_cfg : Llm_provider.Provider_config.t) =
+  match binding_for_config provider_cfg with
+  | Some binding -> binding_supports_runtime_mcp_http_headers binding
+  | None -> false
+;;
+
+let requires_per_keeper_bridging_for_bound_actor_tools
+      (provider_cfg : Llm_provider.Provider_config.t)
+  =
+  match binding_for_config provider_cfg with
+  | Some binding -> binding_requires_per_keeper_bridging binding
+  | None -> provider_cfg.kind = PConfig.Codex_cli
+;;
+
+let requires_per_keeper_bridging_for_bound_actor_tools_for_kind kind =
+  match binding_for_kind kind with
+  | Some binding -> binding_requires_per_keeper_bridging binding
+  | None -> kind = PConfig.Codex_cli
+;;
+
+let tolerates_bound_actor_fallback_for_kind kind =
+  match binding_for_kind kind with
+  | Some binding -> binding_tolerates_bound_actor_fallback binding
+  | None -> false
+;;
+
+let uses_anthropic_caching_for_kind kind =
+  match binding_for_kind kind with
+  | Some binding -> binding_uses_anthropic_caching binding
+  | None -> false
+;;
+
+let auth_env_keys_for_kind (kind : PConfig.provider_kind) =
+  match kind with
+  | PConfig.OpenAI_compat -> [ "OPENAI_API_KEY" ]
+  | PConfig.Kimi -> [ "KIMI_API_KEY_SB"; "KIMI_API_KEY" ]
+  | PConfig.Gemini -> [ "GOOGLE_CLOUD_PROJECT"; "GOOGLE_CLOUD_LOCATION" ]
+  | _ -> Option.to_list (PConfig.default_api_key_env kind)
+;;
+
 (** Resolve OAS-level capabilities for a provider config, then apply only
     MASC's tool-delivery projection for CLI runtimes.  Provider/model/catalog
     capability truth stays in OAS. *)
@@ -40,19 +184,14 @@ let oas_capabilities_of_config (provider_cfg : Llm_provider.Provider_config.t) =
   if is_cli
   then
     let runtime_mcp_lane =
-      Provider_adapter.supports_runtime_mcp_http_headers_for_config provider_cfg
-      || Provider_adapter.requires_per_keeper_bridging_for_bound_actor_tools_for_config
-           provider_cfg
+      supports_runtime_mcp_http_headers provider_cfg
+      || requires_per_keeper_bridging_for_bound_actor_tools provider_cfg
     in
     { (normalize_cli_caps_when ~is_cli caps) with
       supports_runtime_mcp_tools = runtime_mcp_lane
     ; supports_runtime_tool_events = runtime_mcp_lane
     }
   else caps
-;;
-
-let supports_runtime_mcp_http_headers (provider_cfg : Llm_provider.Provider_config.t) =
-  Provider_adapter.supports_runtime_mcp_http_headers_for_config provider_cfg
 ;;
 
 let capabilities_of_config (provider_cfg : Llm_provider.Provider_config.t) =
@@ -88,15 +227,20 @@ let provider_supports_runtime_mcp_http_header
       (provider_cfg : Llm_provider.Provider_config.t)
       key
   =
-  (* General HTTP-header support OR the adapter identity-header carve-out.
+  (* General HTTP-header support OR the Codex identity-header carve-out.
      The identity carve-out covers `x-masc-*` routing labels and other
-     non-secret headers declared per adapter (see Provider_adapter).
+     non-secret headers declared by the MASC local runtime policy.
      [Authorization] is NOT carried here: it is handled separately by
      [provider_supports_bridged_authorization_header] below, which requires
      both adapter-level per-keeper bridging and the x-masc-agent-name /
-     x-masc-keeper-name identity headers to be present on the same request.
-     The carve-out set lives on the adapter row, not in this consumer module. *)
-  Provider_adapter.accepts_runtime_mcp_http_header_for_config provider_cfg key
+     x-masc-keeper-name identity headers to be present on the same request. *)
+  supports_runtime_mcp_http_headers provider_cfg
+  ||
+  (requires_per_keeper_bridging_for_bound_actor_tools provider_cfg
+   &&
+   match String.lowercase_ascii (String.trim key) with
+   | "authorization" | "x-masc-agent-name" | "x-masc-keeper-name" -> true
+   | _ -> false)
 ;;
 
 let header_key_present headers key =
@@ -109,9 +253,7 @@ let header_key_present headers key =
 
 let provider_supports_bridged_authorization_header provider_cfg headers key =
   String.equal "authorization" (String.lowercase_ascii (String.trim key))
-  && Provider_adapter
-     .requires_per_keeper_bridging_for_bound_actor_tools_for_config
-       provider_cfg
+  && requires_per_keeper_bridging_for_bound_actor_tools provider_cfg
   && header_key_present headers "x-masc-agent-name"
   && header_key_present headers "x-masc-keeper-name"
 ;;

@@ -16,7 +16,7 @@ let string_of_resolution_provenance = function
   | Model_resolve.Explicit_input -> "explicit_input"
   | Model_resolve.Alias alias -> "alias:" ^ alias
   | Model_resolve.Env_default var -> "env_default:" ^ var
-  | Model_resolve.Hardcoded_default -> "hardcoded_default"
+  | Model_resolve.Catalog_default -> "catalog_default"
   | Model_resolve.Discovery -> "discovery"
   | Model_resolve.Unresolved_auto -> "unresolved_auto"
 
@@ -201,7 +201,7 @@ let test_cascade_model_resolve_alias_provenance () =
   check resolution_provenance "alias provenance"
     (Model_resolve.Alias "flash") resolved.provenance
 
-let test_cascade_model_resolve_hardcoded_default_provenance () =
+let test_cascade_model_resolve_missing_default_provenance () =
   let resolved =
     Model_resolve.resolve_auto_model ~getenv:(fun _ -> None) "openai"
       (Model_resolve.model_selector_of_string "auto")
@@ -212,17 +212,17 @@ let test_cascade_model_resolve_hardcoded_default_provenance () =
 
 let test_cascade_model_resolve_env_default_provenance () =
   let getenv = function
-    | "GEMINI_DEFAULT_MODEL" -> Some "gemini-3-flash-preview"
+    | "MASC_GEMINI_DEFAULT_MODEL" -> Some "gemini-from-operator"
     | _ -> None
   in
   let resolved =
     Model_resolve.resolve_auto_model ~getenv "gemini"
       (Model_resolve.model_selector_of_string "auto")
   in
-  check string "gemini env default" "gemini-3-flash-preview"
+  check string "gemini env default" "gemini-from-operator"
     resolved.resolved_model_id;
   check resolution_provenance "env provenance"
-    (Model_resolve.Env_default "GEMINI_DEFAULT_MODEL")
+    (Model_resolve.Env_default "MASC_GEMINI_DEFAULT_MODEL")
     resolved.provenance
 
 let test_cascade_model_resolve_discovery_provenance () =
@@ -244,7 +244,7 @@ let test_cascade_model_resolve_unresolved_auto_provenance () =
   check string "openrouter unresolved auto stays auto" "auto"
     resolved.resolved_model_id;
   check resolution_provenance "generic OAS binding provenance"
-    Model_resolve.Hardcoded_default resolved.provenance
+    Model_resolve.Unresolved_auto resolved.provenance
 
 (* ── Section 3: Dashboard schema contracts ── *)
 
@@ -359,8 +359,8 @@ let () =
             test_labels_require_local_discovery;
           test_case "cascade alias provenance" `Quick
             test_cascade_model_resolve_alias_provenance;
-          test_case "cascade hardcoded default provenance" `Quick
-            test_cascade_model_resolve_hardcoded_default_provenance;
+          test_case "cascade missing default provenance" `Quick
+            test_cascade_model_resolve_missing_default_provenance;
           test_case "cascade env default provenance" `Quick
             test_cascade_model_resolve_env_default_provenance;
           test_case "cascade discovery provenance" `Quick

@@ -1,26 +1,24 @@
 (** Unit tests for Cascade_model_resolve.resolve_auto_model_id.
 
     Focus: "auto" → concrete model ID translation for cloud providers.
-    2026-04-20 regression guard — `gemini_cli:auto` used to fall
-    through to the wildcard tail and reach OAS as the literal string
-    "auto". OAS transport_gemini_cli.build_args then omits --model,
-    letting the Gemini CLI choose its own default (gemini-3.1-pro-preview)
-    whose quota 429'd the fleet. *)
+    Provider/model truth comes from OAS runtime bindings; MASC may project
+    OAS-supported model lists, but must not own provider-specific model
+    defaults. *)
 
 open Alcotest
 module R = Masc_mcp.Cascade_model_resolve
 module C = Masc_mcp.Cascade_config
 module State = Masc_mcp.Cascade_state
 module H = Masc_mcp.Cascade_health_tracker
-module PA = Masc_mcp.Provider_adapter
 
-(* RFC-0058 Phase 5.3a — the per-provider thin wrappers
-   ([gemini_cli_auto_models], etc.) were deleted because they were unused
-   in production. Tests now exercise the generic
-   [Provider_adapter.auto_models_for_cascade_prefix] entry point directly;
-   the provider id is the test's pin, not a production literal. *)
 let auto_models_for pid =
-  PA.auto_models_for_cascade_prefix pid |> Option.value ~default:[]
+  let prefix = pid ^ ":" in
+  let prefix_len = String.length prefix in
+  C.expand_auto_models [ prefix ^ "auto" ]
+  |> List.filter_map (fun spec ->
+    if String.starts_with ~prefix spec
+    then Some (String.sub spec prefix_len (String.length spec - prefix_len))
+    else None)
 ;;
 
 let unset_env k =
@@ -33,11 +31,11 @@ let with_clean_env f =
     unset_env
     [ "ZAI_CODING_DEFAULT_MODEL"
     ; "ZAI_CODING_AUTO_MODELS"
-    ; "GEMINI_DEFAULT_MODEL"
-    ; "ANTHROPIC_DEFAULT_MODEL"
-    ; "OPENAI_DEFAULT_MODEL"
-    ; "OPENROUTER_DEFAULT_MODEL"
-    ; "OLLAMA_DEFAULT_MODEL"
+    ; "MASC_GEMINI_DEFAULT_MODEL"
+    ; "MASC_GEMINI_CLI_DEFAULT_MODEL"
+    ; "MASC_ANTHROPIC_DEFAULT_MODEL"
+    ; "MASC_OPENROUTER_DEFAULT_MODEL"
+    ; "MASC_OLLAMA_DEFAULT_MODEL"
     ; "MASC_GEMINI_CLI_AUTO_MODELS"
     ; "MASC_CODEX_CLI_AUTO_MODELS"
     ; "MASC_CLAUDE_CODE_AUTO_MODELS"
@@ -46,19 +44,19 @@ let with_clean_env f =
   f ()
 ;;
 
-let test_gemini_auto_maps_to_flash_preview () =
+let test_gemini_auto_stays_delegated_without_oas_default () =
   with_clean_env (fun () ->
     let resolved = R.resolve_auto_model_id "gemini" "auto" in
-    check string "gemini:auto → gemini-3-flash-preview" "gemini-3-flash-preview" resolved)
+    check string "gemini:auto stays delegated without OAS default" "auto" resolved)
 ;;
 
-let test_gemini_cli_auto_maps_to_flash_preview () =
+let test_gemini_cli_auto_stays_delegated_without_oas_default () =
   with_clean_env (fun () ->
     let resolved = R.resolve_auto_model_id "gemini_cli" "auto" in
     check
       string
-      "gemini_cli:auto → gemini-3-flash-preview"
-      "gemini-3-flash-preview"
+      "gemini_cli:auto stays delegated to OAS CLI transport"
+      "auto"
       resolved)
 ;;
 
@@ -69,15 +67,17 @@ let test_gemini_cli_explicit_model_passthrough () =
 ;;
 
 let test_gemini_env_override () =
-  Unix.putenv "GEMINI_DEFAULT_MODEL" "gemini-3-flash-preview";
+  Unix.putenv "MASC_GEMINI_DEFAULT_MODEL" "gemini-from-operator";
+  Unix.putenv "MASC_GEMINI_CLI_DEFAULT_MODEL" "gemini-cli-from-operator";
   let resolved_gemini = R.resolve_auto_model_id "gemini" "auto" in
   let resolved_cli = R.resolve_auto_model_id "gemini_cli" "auto" in
-  Unix.putenv "GEMINI_DEFAULT_MODEL" "";
-  check string "gemini respects env override" "gemini-3-flash-preview" resolved_gemini;
+  Unix.putenv "MASC_GEMINI_DEFAULT_MODEL" "";
+  Unix.putenv "MASC_GEMINI_CLI_DEFAULT_MODEL" "";
+  check string "gemini respects env override" "gemini-from-operator" resolved_gemini;
   check
     string
-    "gemini_cli respects same env override"
-    "gemini-3-flash-preview"
+    "gemini_cli respects binding-scoped env override"
+    "gemini-cli-from-operator"
     resolved_cli
 ;;
 
@@ -100,11 +100,8 @@ let test_gemini_cli_auto_models_default_rotation_order () =
   with_clean_env (fun () ->
     check
       (list string)
-      "gemini_cli:auto expands to quota-aware rotation"
-      [ "gemini-3-flash-preview"
-      ; "gemini-3.1-flash-lite-preview"
-      ; "gemini-3.1-pro-preview"
-      ]
+      "gemini_cli:auto delegates when OAS exposes no model list"
+      [ "auto" ]
       (auto_models_for "gemini_cli"))
 ;;
 
@@ -123,14 +120,8 @@ let test_codex_and_claude_cli_auto_models_env_override () =
   with_clean_env (fun () ->
     check
       (list string)
-      "codex default keeps Codex-supported models only"
-      [ "gpt-5.2"
-      ; "gpt-5.3-codex-spark"
-      ; "gpt-5.3-codex"
-      ; "gpt-5.4-mini"
-      ; "gpt-5.4"
-      ; "gpt-5.5"
-      ]
+      "codex default delegates to CLI"
+      [ "auto" ]
       (auto_models_for "codex_cli");
     check
       (list string)
@@ -174,15 +165,8 @@ let test_expand_auto_models_includes_cli_auto_specs () =
     check
       (list string)
       "CLI auto specs expand in-place"
-      [ "gemini_cli:gemini-3-flash-preview"
-      ; "gemini_cli:gemini-3.1-flash-lite-preview"
-      ; "gemini_cli:gemini-3.1-pro-preview"
-      ; "codex_cli:gpt-5.2"
-      ; "codex_cli:gpt-5.3-codex-spark"
-      ; "codex_cli:gpt-5.3-codex"
-      ; "codex_cli:gpt-5.4-mini"
-      ; "codex_cli:gpt-5.4"
-      ; "codex_cli:gpt-5.5"
+      [ "gemini_cli:auto"
+      ; "codex_cli:auto"
       ; "claude_code:auto"
       ; "kimi_cli:kimi-for-coding"
       ]
@@ -204,17 +188,17 @@ let test_expand_model_strings_for_execution_dedupe_stable_repeated_inputs () =
     (* Pure repeated literals: dedupe must keep first occurrence and
        preserve insertion order. *)
     let items =
-      [ "codex_cli:gpt-5.2"
+      [ "codex_cli:auto"
       ; "kimi_cli:kimi-for-coding"
-      ; "codex_cli:gpt-5.2"
+      ; "codex_cli:auto"
       ; "kimi_cli:kimi-for-coding"
-      ; "codex_cli:gpt-5.2"
+      ; "codex_cli:auto"
       ]
     in
     check
       (list string)
       "first occurrence wins, order preserved"
-      [ "codex_cli:gpt-5.2"; "kimi_cli:kimi-for-coding" ]
+      [ "codex_cli:auto"; "kimi_cli:kimi-for-coding" ]
       (C.expand_model_strings_for_execution items))
 ;;
 
@@ -224,21 +208,20 @@ let test_expand_model_strings_for_execution_dedupe_explicit_and_auto () =
        explicit one (declared first) wins; the auto-expansion's
        contribution of the same name is dropped, but its other entries
        remain in expansion order. *)
-    let items = [ "codex_cli:gpt-5.2"; "codex_cli:auto" ] in
+    let items = [ "kimi_cli:kimi-for-coding"; "kimi_cli:auto" ] in
     let expanded = C.expand_model_strings_for_execution items in
     (* (a) head is the explicit declaration *)
     check
       string
       "explicit first occurrence retained at head"
-      "codex_cli:gpt-5.2"
+      "kimi_cli:kimi-for-coding"
       (List.hd expanded);
     (* (b) duplicate of the explicit name does not reappear *)
     let occurrences =
-      List.filter (String.equal "codex_cli:gpt-5.2") expanded |> List.length
+      List.filter (String.equal "kimi_cli:kimi-for-coding") expanded |> List.length
     in
     check int "no duplicate of explicit name" 1 occurrences;
-    (* (c) auto-expansion of other entries still present (sanity) *)
-    check bool "auto-expanded siblings present" true (List.length expanded > 1))
+    check int "deduped explicit and auto pair" 1 (List.length expanded))
 ;;
 
 let test_expand_model_strings_for_execution_rotation_scope_rotates () =
@@ -247,32 +230,32 @@ let test_expand_model_strings_for_execution_rotation_scope_rotates () =
     let first =
       C.expand_model_strings_for_execution
         ~rotation_scope:"primary"
-        [ "gemini_cli:auto" ]
+        [ "glm-coding:auto" ]
     in
     let second =
       C.expand_model_strings_for_execution
         ~rotation_scope:"primary"
-        [ "gemini_cli:auto" ]
+        [ "glm-coding:auto" ]
     in
     let other_scope =
       C.expand_model_strings_for_execution
         ~rotation_scope:"scoring"
-        [ "gemini_cli:auto" ]
+        [ "glm-coding:auto" ]
     in
     check
       string
       "first scoped call starts at default head"
-      "gemini_cli:gemini-3-flash-preview"
+      "glm-coding:glm-5.1"
       (List.hd first);
     check
       string
       "second scoped call advances head"
-      "gemini_cli:gemini-3.1-flash-lite-preview"
+      "glm-coding:glm-5"
       (List.hd second);
     check
       string
       "different scope has its own cursor"
-      "gemini_cli:gemini-3-flash-preview"
+      "glm-coding:glm-5.1"
       (List.hd other_scope))
 ;;
 
@@ -288,28 +271,28 @@ let test_order_weighted_entries_rotation_scope_rotates_generically () =
       }
     in
     let first =
-      C.order_weighted_entries ~rotation_scope:"primary" [ entry "codex_cli:auto" ]
+      C.order_weighted_entries ~rotation_scope:"primary" [ entry "glm-coding:auto" ]
       |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) -> e.model)
     in
     let second =
-      C.order_weighted_entries ~rotation_scope:"primary" [ entry "codex_cli:auto" ]
+      C.order_weighted_entries ~rotation_scope:"primary" [ entry "glm-coding:auto" ]
       |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) -> e.model)
     in
     let other_scope =
-      C.order_weighted_entries ~rotation_scope:"scoring" [ entry "codex_cli:auto" ]
+      C.order_weighted_entries ~rotation_scope:"scoring" [ entry "glm-coding:auto" ]
       |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) -> e.model)
     in
     check
       string
       "weighted first call keeps default head"
-      "codex_cli:gpt-5.2"
+      "glm-coding:glm-5.1"
       (List.hd first);
     check
       string
       "weighted second call advances head"
-      "codex_cli:gpt-5.3-codex-spark"
+      "glm-coding:glm-5"
       (List.hd second);
-    check string "weighted rotation is scoped" "codex_cli:gpt-5.2" (List.hd other_scope))
+    check string "weighted rotation is scoped" "glm-coding:glm-5.1" (List.hd other_scope))
 ;;
 
 let test_order_weighted_entries_rotation_scope_rotates_top_level_providers () =
@@ -350,12 +333,12 @@ let test_order_weighted_entries_rotation_scope_rotates_top_level_providers () =
     check
       string
       "second call rotates to codex provider"
-      "codex_cli:gpt-5.3-codex-spark"
+      "codex_cli:auto"
       (List.hd second);
     check
       string
       "third call rotates to gemini provider"
-      "gemini_cli:gemini-3.1-pro-preview"
+      "gemini_cli:auto"
       (List.hd third);
     check
       string
@@ -399,16 +382,22 @@ let () =
             "glm-coding:auto model list"
             `Quick
             test_glm_coding_auto_models_default_order
-        ; test_case "gemini:auto" `Quick test_gemini_auto_maps_to_flash_preview
+        ; test_case
+            "gemini:auto delegates without OAS default"
+            `Quick
+            test_gemini_auto_stays_delegated_without_oas_default
         ; test_case
             "gemini_cli:auto (regression 2026-04-20)"
             `Quick
-            test_gemini_cli_auto_maps_to_flash_preview
+            test_gemini_cli_auto_stays_delegated_without_oas_default
         ; test_case
             "gemini_cli explicit"
             `Quick
             test_gemini_cli_explicit_model_passthrough
-        ; test_case "GEMINI_DEFAULT_MODEL env override" `Quick test_gemini_env_override
+        ; test_case
+            "binding-scoped default model env override"
+            `Quick
+            test_gemini_env_override
         ; test_case
             "gemini_cli:auto model list"
             `Quick

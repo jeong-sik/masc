@@ -178,8 +178,8 @@ let escape_applescript s =
   Buffer.contents buf
 
 (** Agent emoji mapping for visual distinction.
-    Agent names come from spawn_key in Provider_adapter.direct_adapters.
-    Use {!register_agent_emoji} at startup to add provider-specific entries
+    Agent names come from the spawn provider catalog. Use
+    {!register_agent_emoji} at startup to add provider-specific entries
     without modifying this file. *)
 let agent_emoji_table : (string, string) Hashtbl.t =
   let t = Hashtbl.create 8 in

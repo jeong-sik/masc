@@ -742,6 +742,9 @@ let run_named
             let attempt_latency_ms =
               (Unix.gettimeofday () -. attempt_started_at) *. 1000.0
             in
+            let exception_kind =
+              provider_attempt_exception_kind_of_result result
+            in
             emit_provider_attempt_finished_once
               ~status:(provider_attempt_status_of_result result)
               ?oas_turn_count:
@@ -757,7 +760,7 @@ let run_named
                 (match result with
                  | Ok _ -> `Null
                  | Error sdk_err -> `String (Agent_sdk.Error.to_string sdk_err))
-              ?exception_kind:(provider_attempt_exception_kind_of_result result)
+              ?exception_kind
               attempt_latency_ms;
             result, checkpoint_after, liveness_success_sample, attempt_latency_ms
           | exception exn ->

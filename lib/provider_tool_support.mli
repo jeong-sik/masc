@@ -18,7 +18,7 @@
     Distinct from {!Llm_provider.Capabilities.capabilities}: this
     record collapses [supports_tools && supports_tool_choice] into a
     single [supports_inline_tool_choice] and adds runtime-MCP HTTP
-    headers as a first-class field (queried via Provider_adapter). *)
+    headers as a first-class MASC runtime-policy field. *)
 type capabilities =
   { supports_inline_tools : bool
   ; supports_inline_tool_choice : bool
@@ -33,9 +33,8 @@ type capabilities =
     {!Llm_provider.Capabilities.capabilities} plus MASC's local
     tool-delivery projection.  Resolution order:
 
-    + Provider/model/catalog capability truth via
-      {!Provider_adapter.oas_capabilities_of_config}, which delegates to
-      OAS [Provider_runtime_binding].
+    + Provider/model/catalog capability truth via OAS
+      [Provider_runtime_binding].
     + CLI-agent normalisation: adapters with
       [runtime_kind = Cli_agent] (Claude Code / Codex CLI / Gemini CLI /
       Kimi CLI) force [supports_tools = false],
@@ -53,8 +52,8 @@ val oas_capabilities_of_config
        caps.supports_tools && caps.supports_tool_choice]
     - [supports_runtime_mcp_tools] / [supports_runtime_tool_events]:
       passthrough.
-    - [supports_runtime_mcp_http_headers]: queried via
-      [Provider_adapter.supports_runtime_mcp_http_headers_for_config]. *)
+    - [supports_runtime_mcp_http_headers]: MASC's local HTTP-header
+      carrier policy over the OAS runtime binding. *)
 val capabilities_of_config : Llm_provider.Provider_config.t -> capabilities
 
 (** [provider_supports_inline_tools cfg] is shorthand for
@@ -66,6 +65,37 @@ val provider_supports_inline_tools : Llm_provider.Provider_config.t -> bool
     hold.  HTTP-header support is {b not} required at this level —
     that gate is enforced by {!provider_supports_runtime_mcp_policy}. *)
 val provider_supports_runtime_mcp_lane : Llm_provider.Provider_config.t -> bool
+
+(** [requires_per_keeper_bridging_for_bound_actor_tools cfg] is true
+    when runtime-MCP bound-actor tools need a per-keeper bearer bridge
+    instead of request-scoped HTTP headers. *)
+val requires_per_keeper_bridging_for_bound_actor_tools
+  :  Llm_provider.Provider_config.t
+  -> bool
+
+(** Kind-only variant for callers that have not materialized a provider
+    config yet. Ambiguous registry kinds resolve conservatively. *)
+val requires_per_keeper_bridging_for_bound_actor_tools_for_kind
+  :  Llm_provider.Provider_config.provider_kind
+  -> bool
+
+(** True when a provider kind can serve as a fallback for keeper-bound
+    runtime-MCP tools without losing the bound-actor surface. *)
+val tolerates_bound_actor_fallback_for_kind
+  :  Llm_provider.Provider_config.provider_kind
+  -> bool
+
+(** True when the OAS binding for [kind] advertises prompt/cache support
+    compatible with Anthropic-style caching policy. *)
+val uses_anthropic_caching_for_kind
+  :  Llm_provider.Provider_config.provider_kind
+  -> bool
+
+(** Provider auth env fallbacks for local runtime launch paths that only
+    have a provider kind. *)
+val auth_env_keys_for_kind
+  :  Llm_provider.Provider_config.provider_kind
+  -> string list
 
 (** [runtime_mcp_policy_requires_http_headers policy] is true iff
     [policy.servers] contains at least one
@@ -80,8 +110,7 @@ val runtime_mcp_policy_requires_http_headers
     is true iff [policy] contains an HTTP header that [cfg] cannot
     carry.  This is stricter than
     {!runtime_mcp_policy_requires_http_headers}: it consults the
-    adapter's identity-header carve-out via
-    {!Provider_adapter.accepts_runtime_mcp_http_header_for_config}.
+    MASC-local identity-header carve-out.
 
     Example: [codex_cli] declares
     [supports_runtime_mcp_http_headers = false] (no general header

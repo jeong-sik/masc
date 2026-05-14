@@ -19,11 +19,11 @@ val glm_coding_auto_models : unit -> string list
 
     The per-provider [gemini_cli_auto_models], [codex_cli_auto_models],
     [claude_code_auto_models], and [kimi_cli_auto_models] thin wrappers
-    have been deleted. They were unused in production — every routing
-    call went through {!Provider_adapter.auto_models_for_cascade_prefix}
-    directly. Hardcoded provider names were a §2.4 "code knows provider
-    names" violation. Callers that need a specific provider's auto list
-    use the generic API; per-provider env-override behaviour
+    have been deleted. They were unused in production; routing now uses
+    the generic runtime provider auto-list path directly. Hardcoded
+    provider names were a §2.4 "code knows provider names" violation.
+    Callers that need a specific provider's auto list use the generic
+    API; per-provider env-override behaviour
     ([MASC_<PROVIDER>_AUTO_MODELS]) remains intact and is now exercised
     against the generic path in [test/test_cascade_model_resolve.ml]. *)
 
@@ -37,7 +37,7 @@ type model_resolution_provenance =
   | Explicit_input
   | Alias of string
   | Env_default of string
-  | Hardcoded_default
+  | Catalog_default
   | Discovery
   | Unresolved_auto
 
@@ -58,7 +58,7 @@ val resolve_glm_coding_model
   -> model_resolution
 
 (** Resolve a GLM model alias to the concrete API model ID.
-    - ["auto"] -> env var [ZAI_DEFAULT_MODEL] or ["glm-5.1"]
+    - ["auto"] -> OAS runtime binding default, OAS ZAI catalog default, or unresolved ["auto"]
     - ["flash"] -> ["glm-4.7-flashx"]
     - ["turbo"] -> ["glm-5-turbo"]
     - ["vision"] -> ["glm-4.6v"]

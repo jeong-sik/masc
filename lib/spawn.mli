@@ -55,6 +55,7 @@ type spawn_result = {
 val masc_mcp_tools : string list
 val masc_lifecycle_suffix : string
 val get_config : string -> spawn_config option
+val spawnable_agent_names : unit -> string list
 
 (** {1 Output Parsing} *)
 
@@ -96,4 +97,5 @@ val result_to_string : spawn_result -> string
 val output_for_status :
   status:Unix.process_status -> stdout:string -> stderr:string -> string
 val fallback_spawn_failure_output : exit_code:int -> string
+val is_bare_ollama_label : string -> bool
 val add_default_model_arg : string -> string list -> string list

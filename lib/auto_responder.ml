@@ -98,7 +98,7 @@ let agent_type_of_mention = Mention.agent_type_of_mention
 
 let is_spawnable mention =
   let base = agent_type_of_mention mention in
-  Provider_adapter.resolve_spawn_key base <> None
+  Spawn.get_config base <> None
 
 (* --- CLI spawn (Spawn mode) --- *)
 
@@ -125,9 +125,17 @@ let cli_argv_of_agent_type (agent_type : string) : string list =
     |> List.filter (fun s -> s <> "")
   | None -> [agent_type]
 
+let bare_ollama_migration_message () =
+  "Bare `ollama` without a model requires OLLAMA_DEFAULT_MODEL env var. Use \
+   `ollama:<model>` for explicit selection."
+
+let is_bare_ollama_label label =
+  String.equal (String.trim label |> String.lowercase_ascii) "ollama"
+  && String.equal (String.trim Env_config_runtime.Ollama.default_model) ""
+
 let run_cli_agent ~agent_type ~prompt =
-  if Provider_adapter.is_bare_ollama_label agent_type then
-    debug_log (Provider_adapter.bare_ollama_migration_message ())
+  if is_bare_ollama_label agent_type then
+    debug_log (bare_ollama_migration_message ())
   else
     let base = cli_argv_of_agent_type agent_type in
     let argv = base in

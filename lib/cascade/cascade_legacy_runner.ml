@@ -148,18 +148,47 @@ let find_cascade_eviction_candidate counters =
 (* Provider label helpers                                            *)
 (* ================================================================ *)
 
+let normalize_base_url value =
+  let trimmed = String.trim value in
+  if String.length trimmed > 1 && String.ends_with ~suffix:"/" trimmed
+  then String.sub trimmed 0 (String.length trimmed - 1)
+  else trimmed
+
+let same_base_url left right =
+  String.equal (normalize_base_url left) (normalize_base_url right)
+
+let kimi_api_base_url () =
+  match Sys.getenv_opt "KIMI_BASE_URL" with
+  | Some raw when String.trim raw <> "" -> raw
+  | Some _ | None -> "https://api.moonshot.ai/v1"
+
 (** Map provider_kind to cascade-label prefix (e.g. "claude", "gemini").
     Delegates to the current OAS registry helper so endpoint-distinct
     providers such as [glm], [glm-coding], and [openrouter] track the
     pinned agent_sdk behavior exactly. *)
 let provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
-  Provider_adapter.provider_label_of_config cfg
+  if
+    cfg.kind = Llm_provider.Provider_config.OpenAI_compat
+    && same_base_url (kimi_api_base_url ()) cfg.base_url
+  then "kimi"
+  else
+    match Agent_sdk.Provider_runtime_binding.binding_for_provider_config cfg with
+    | Some binding -> binding.Agent_sdk.Provider_runtime_binding.id
+    | None -> Llm_provider.Provider_registry.provider_name_of_config cfg
+
+let display_provider_name label =
+  match String.trim label |> String.lowercase_ascii with
+  | "glm" | "glm-api" -> "glm"
+  | "glm-coding" | "glm-coding-plan" -> "glm-coding"
+  | "kimi-api" -> "kimi"
+  | "kimi-coding" | "kimi_coding" -> "kimi-coding"
+  | _ -> String.trim label
 
 let display_provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
-  Provider_adapter.display_provider_name_of_config cfg
+  display_provider_name (provider_name_of_config cfg)
 
 let model_label_of_config (cfg : Llm_provider.Provider_config.t) =
-  Provider_adapter.model_label_of_config cfg
+  Printf.sprintf "%s:%s" (display_provider_name_of_config cfg) cfg.model_id
 
 let strip_latest_suffix s =
   let trimmed = String.trim s in

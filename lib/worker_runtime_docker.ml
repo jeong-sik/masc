@@ -106,9 +106,57 @@ let rewrite_spec_for_container (spec : Worker_execution_spec.t) =
   { spec with model_label = rewrite_model_label_for_container spec.model_label }
 ;;
 
+module Runtime_binding = Agent_sdk.Provider_runtime_binding
+module PConfig = Llm_provider.Provider_config
+
+let gemini_api_key_env = "GEMINI_API_KEY"
+
+let nonempty_env_key value =
+  let trimmed = String.trim value in
+  if String.equal trimmed "" then None else Some trimmed
+;;
+
+let binding_auth_env_keys (binding : Runtime_binding.t) =
+  let auth_env =
+    match binding.Runtime_binding.auth with
+    | Runtime_binding.Api_key_env env | Runtime_binding.Setup_token_env env -> [ env ]
+    | Runtime_binding.No_auth
+    | Runtime_binding.Cli_cached_login
+    | Runtime_binding.Oauth_cached_login
+    | Runtime_binding.File _
+    | Runtime_binding.Exec _ -> []
+  in
+  binding.Runtime_binding.api_key_env
+  :: (auth_env @ Provider_tool_support.auth_env_keys_for_kind binding.Runtime_binding.kind)
+  |> List.filter_map nonempty_env_key
+;;
+
+let all_runtime_auth_env_keys () =
+  Runtime_binding.all ()
+  |> List.concat_map binding_auth_env_keys
+  |> List.sort_uniq String.compare
+;;
+
+let docker_auth_env_keys_of_provider_config (cfg : PConfig.t) =
+  match cfg.PConfig.kind with
+  | PConfig.OpenAI_compat ->
+    let uri = Uri.of_string cfg.PConfig.base_url in
+    if Masc_network_defaults.is_loopback_host_opt (Uri.host uri)
+    then []
+    else Provider_tool_support.auth_env_keys_for_kind cfg.PConfig.kind
+  | PConfig.Gemini -> [ gemini_api_key_env ]
+  | _ -> Provider_tool_support.auth_env_keys_for_kind cfg.PConfig.kind
+;;
+
+let provider_label_of_config (cfg : PConfig.t) =
+  match Runtime_binding.binding_for_provider_config cfg with
+  | Some binding -> binding.Runtime_binding.id
+  | None -> PConfig.string_of_provider_kind cfg.PConfig.kind
+;;
+
 let allowlisted_env_pairs () =
   let keys =
-    Provider_adapter.all_auth_env_keys ()
+    all_runtime_auth_env_keys ()
     @ [ "GOOGLE_CLOUD_PROJECT"
       ; "GOOGLE_CLOUD_LOCATION"
       ; Env_config_core.storage_type_env_key
@@ -221,7 +269,7 @@ let auth_requirements_of_model_label model_label =
   match Cascade_config.parse_model_string model_label with
   | None -> Ok []
   | Some cfg ->
-    let keys = Provider_adapter.docker_auth_env_keys_of_provider_config cfg in
+    let keys = docker_auth_env_keys_of_provider_config cfg in
     let missing =
       List.filter
         (fun key ->
@@ -233,10 +281,7 @@ let auth_requirements_of_model_label model_label =
     if missing = []
     then Ok keys
     else (
-      let kind_name =
-        Provider_adapter.cascade_prefix_of_provider_kind
-          cfg.Llm_provider.Provider_config.kind
-      in
+      let kind_name = provider_label_of_config cfg in
       Error
         (Printf.sprintf
            "%s Docker workers require %s"

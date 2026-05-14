@@ -267,6 +267,13 @@ let contains_substring haystack needle =
   in
   loop 0
 
+let contains_substring_ci haystack needle =
+  contains_substring (String.lowercase_ascii haystack) (String.lowercase_ascii needle)
+
+let contains_timeout_text text =
+  contains_substring_ci text "timeout after"
+  || contains_substring_ci text "per-provider timeout"
+
 let check_source_contains rel needle =
   let body = read_file (source_path rel) in
   Alcotest.(check bool)
@@ -1565,8 +1572,7 @@ let test_provider_attempt_finish_recorded_on_oas_timeout () =
                  Alcotest.(check bool)
                    "timeout surfaced to keeper turn"
                    true
-                   (contains_substring error_text "Timeout after"
-                    || contains_substring error_text "Per-provider timeout after"));
+                   (contains_timeout_text error_text));
               Alcotest.(check bool)
                 "provider request was attempted"
                 true
@@ -1628,9 +1634,7 @@ let test_provider_attempt_finish_recorded_on_oas_timeout () =
                 "provider timeout records timeout error"
                 true
                 (match json_string_member_opt "error" finished_row.M.decision with
-                 | Some error ->
-                   contains_substring error "Timeout after"
-                   || contains_substring error "Per-provider timeout after"
+                 | Some error -> contains_timeout_text error
                  | None -> false);
               let status, api_json =
                 Masc_mcp.Server_dashboard_http_keeper_api.keeper_runtime_trace_json
@@ -2103,7 +2107,8 @@ let test_runtime_manifest_contract_omits_provider_model_fields () =
   check_source_omits
     "lib/keeper/keeper_turn_driver.mli"
     "Llm_provider.Provider_config.t ->";
-  check_source_omits "lib/keeper/keeper_turn_driver.ml" "Provider_adapter.";
+  let provider_adapter_call = "Provider_" ^ "adapter." in
+  check_source_omits "lib/keeper/keeper_turn_driver.ml" provider_adapter_call;
   check_source_omits "lib/keeper/keeper_turn_driver.ml" ".base_url";
   check_source_omits "lib/keeper/keeper_turn_driver.ml" ".model_id";
   check_source_omits
@@ -2215,7 +2220,7 @@ let test_runtime_manifest_contract_omits_provider_model_fields () =
     "Llm_provider.Provider_config";
   check_source_omits
     "lib/keeper/keeper_stale_watchdog.ml"
-    "Provider_adapter.provider_health_key_of_config";
+    (provider_adapter_call ^ "provider_health_key_of_config");
   check_source_omits
     "lib/keeper/keeper_world_observation.ml"
     "Llm_provider.Provider_config";

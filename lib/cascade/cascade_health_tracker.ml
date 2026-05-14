@@ -112,9 +112,8 @@ let cooldown_sec =
     respectively to prevent zero-value misconfiguration from disabling
     cooldown entirely.
 
-    Provider classification uses {!Provider_adapter.is_local_provider},
-    the same primitive cascade_runtime already consumes — no new
-    classifier introduced. *)
+    Provider classification uses the OAS runtime binding for the health-key
+    prefix, matching cascade runtime candidate projection. *)
 let local_cooldown_threshold =
   Int.max 1
     (read_int_setting
@@ -129,8 +128,54 @@ let local_cooldown_sec =
        ~default:10.0
        ())
 
+module Runtime_binding = Agent_sdk.Provider_runtime_binding
+module PConfig = Llm_provider.Provider_config
+
+let binding_endpoint_url (binding : Runtime_binding.t) =
+  let trimmed = String.trim binding.Runtime_binding.base_url in
+  if String.equal trimmed "" then None else Some trimmed
+
+let binding_base_url_is_loopback binding =
+  match binding_endpoint_url binding with
+  | None -> false
+  | Some base_url ->
+    Uri.of_string base_url |> Uri.host |> Masc_network_defaults.is_loopback_host_opt
+
+let binding_auth_is_no_auth (binding : Runtime_binding.t) =
+  match binding.Runtime_binding.auth with
+  | Runtime_binding.No_auth -> true
+  | Runtime_binding.Api_key_env _
+  | Runtime_binding.Cli_cached_login
+  | Runtime_binding.Oauth_cached_login
+  | Runtime_binding.Setup_token_env _
+  | Runtime_binding.File _
+  | Runtime_binding.Exec _ -> false
+
+let binding_is_local (binding : Runtime_binding.t) =
+  match binding.Runtime_binding.kind with
+  | PConfig.Ollama -> binding_auth_is_no_auth binding && binding_base_url_is_loopback binding
+  | PConfig.OpenAI_compat ->
+    binding_auth_is_no_auth binding
+    && (binding_base_url_is_loopback binding
+        || String.equal binding.Runtime_binding.id "llama")
+  | PConfig.Anthropic
+  | PConfig.Kimi
+  | PConfig.Glm
+  | PConfig.DashScope
+  | PConfig.Gemini
+  | PConfig.Claude_code
+  | PConfig.Codex_cli
+  | PConfig.Gemini_cli
+  | PConfig.Kimi_cli -> false
+
+let is_local_provider_key provider_key =
+  provider_key
+  |> Runtime_binding.find
+  |> Option.map binding_is_local
+  |> Option.value ~default:false
+
 let cooldown_config_for ~provider_key =
-  if Provider_adapter.is_local_provider provider_key then
+  if is_local_provider_key provider_key then
     (local_cooldown_threshold, local_cooldown_sec)
   else
     (cooldown_threshold, cooldown_sec)

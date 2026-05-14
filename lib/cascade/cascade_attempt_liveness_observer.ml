@@ -32,26 +32,21 @@ let mode (t : t) : Cfg.mode = t.mode
 
 let public_runtime_provider_label = "runtime"
 let public_other_provider_label = "other"
+module Runtime_binding = Agent_sdk.Provider_runtime_binding
 
 let public_provider_label_of_raw raw =
   let raw = String.trim raw in
   if raw = "" || String.equal raw public_runtime_provider_label
   then public_runtime_provider_label
   else
-    match Provider_adapter.provider_of_model_label raw with
-    | "unknown" ->
-      let prefix =
-        match String.index_opt raw ':' with
-        | Some idx when idx > 0 -> String.sub raw 0 idx
-        | _ -> raw
-      in
-      (match Provider_adapter.resolve_direct_canonical_name prefix with
-       | Some canonical ->
-         (match Provider_adapter.provider_of_model_label (canonical ^ ":runtime") with
-          | "unknown" -> public_other_provider_label
-          | provider -> provider)
-       | None -> public_other_provider_label)
-    | provider -> provider
+    let prefix =
+      match String.index_opt raw ':' with
+      | Some idx when idx > 0 -> String.sub raw 0 idx
+      | Some _ | None -> raw
+    in
+    match Runtime_binding.find prefix with
+    | Some binding -> binding.Runtime_binding.id
+    | None -> public_other_provider_label
 
 let create
       ~mode

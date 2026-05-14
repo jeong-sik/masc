@@ -33,6 +33,119 @@ let resolve_api_key_env = Cascade_config_loader.resolve_api_key_env
 (* ── Provider registry (SSOT: Provider_registry) ─────── *)
 
 let default_registry = Llm_provider.Provider_registry.default ()
+module Runtime_binding = Agent_sdk.Provider_runtime_binding
+module PConfig = Llm_provider.Provider_config
+
+let normalize_runtime_provider_label value =
+  String.trim value
+  |> String.lowercase_ascii
+  |> String.map (fun c -> if c = '_' then '-' else c)
+
+let runtime_binding_for_provider_label provider_id =
+  match Runtime_binding.find provider_id with
+  | Some _ as binding -> binding
+  | None -> Runtime_binding.find (normalize_runtime_provider_label provider_id)
+
+let runtime_binding_id provider_id =
+  Option.map (fun (binding : Runtime_binding.t) -> binding.Runtime_binding.id)
+    (runtime_binding_for_provider_label provider_id)
+
+let provider_name_matches_runtime_binding ~provider_name ~label =
+  match runtime_binding_id label with
+  | Some binding_id -> String.equal provider_name binding_id
+  | None ->
+    String.equal
+      (String.trim provider_name |> String.lowercase_ascii)
+      (normalize_runtime_provider_label label)
+
+let binding_endpoint_url (binding : Runtime_binding.t) =
+  let trimmed = String.trim binding.Runtime_binding.base_url in
+  if String.equal trimmed "" then None else Some trimmed
+
+let binding_base_url_is_loopback binding =
+  match binding_endpoint_url binding with
+  | None -> false
+  | Some base_url ->
+    Uri.of_string base_url |> Uri.host |> Masc_network_defaults.is_loopback_host_opt
+
+let binding_auth_is_no_auth (binding : Runtime_binding.t) =
+  match binding.Runtime_binding.auth with
+  | Runtime_binding.No_auth -> true
+  | Runtime_binding.Api_key_env _
+  | Runtime_binding.Cli_cached_login
+  | Runtime_binding.Oauth_cached_login
+  | Runtime_binding.Setup_token_env _
+  | Runtime_binding.File _
+  | Runtime_binding.Exec _ -> false
+
+let binding_is_local (binding : Runtime_binding.t) =
+  match binding.Runtime_binding.kind with
+  | PConfig.Ollama -> binding_auth_is_no_auth binding && binding_base_url_is_loopback binding
+  | PConfig.OpenAI_compat ->
+    binding_auth_is_no_auth binding
+    && (binding_base_url_is_loopback binding
+        || String.equal binding.Runtime_binding.id "llama")
+  | PConfig.Anthropic
+  | PConfig.Kimi
+  | PConfig.Glm
+  | PConfig.DashScope
+  | PConfig.Gemini
+  | PConfig.Claude_code
+  | PConfig.Codex_cli
+  | PConfig.Gemini_cli
+  | PConfig.Kimi_cli -> false
+
+let runtime_kind_of_binding (binding : Runtime_binding.t) =
+  match binding.Runtime_binding.transport with
+  | Runtime_binding.Cli -> "cli_agent"
+  | Runtime_binding.Http | Runtime_binding.Managed | Runtime_binding.Custom_openai_compat ->
+    if binding_is_local binding then "local" else "direct_api"
+
+let provider_label_of_config (cfg : PConfig.t) =
+  match Runtime_binding.binding_for_provider_config cfg with
+  | Some binding -> binding.Runtime_binding.id
+  | None -> Llm_provider.Provider_registry.provider_name_of_config cfg
+
+let provider_health_key_of_config (cfg : PConfig.t) =
+  match cfg.PConfig.kind with
+  | PConfig.OpenAI_compat when PConfig.is_local cfg ->
+    let base_url = String.trim cfg.PConfig.base_url in
+    if String.equal base_url ""
+    then provider_label_of_config cfg
+    else Printf.sprintf "%s:%s@%s" (provider_label_of_config cfg) cfg.PConfig.model_id base_url
+  | _ -> provider_label_of_config cfg
+
+let display_provider_name label =
+  match String.trim label |> String.lowercase_ascii with
+  | "glm" | "glm-api" -> "glm"
+  | "glm-coding" | "glm-coding-plan" -> "glm-coding"
+  | "kimi-api" -> "kimi"
+  | "kimi-coding" | "kimi_coding" -> "kimi-coding"
+  | _ -> String.trim label
+
+let cascade_prefix_of_provider_kind kind =
+  match
+    Runtime_binding.all ()
+    |> List.filter (fun (binding : Runtime_binding.t) -> binding.Runtime_binding.kind = kind)
+  with
+  | [ binding ] -> binding.Runtime_binding.id
+  | [] | _ :: _ :: _ ->
+    PConfig.make ~kind ~model_id:"auto" ~base_url:"" ()
+    |> Llm_provider.Provider_registry.provider_name_of_config
+
+let provider_kind_of_declarative_protocol raw =
+  match String.trim raw |> String.lowercase_ascii with
+  | "anthropic-cli" -> Some PConfig.Claude_code
+  | "anthropic-http" -> Some PConfig.Anthropic
+  | "openai-cli" -> Some PConfig.Codex_cli
+  | "openai-http" -> Some PConfig.OpenAI_compat
+  | "google-cli" -> Some PConfig.Gemini_cli
+  | "kimi-cli" -> Some PConfig.Kimi_cli
+  | "ollama-http" -> Some PConfig.Ollama
+  | _ -> None
+
+let cascade_prefix_of_declarative_protocol raw =
+  provider_kind_of_declarative_protocol raw |> Option.map cascade_prefix_of_provider_kind
 
 (* Build headers list with Authorization when api_key is present.
    Anthropic/Kimi use x-api-key; OpenAI-compat (including GLM) uses Bearer. *)
@@ -266,12 +379,12 @@ let make_registry_config ~temperature ~max_tokens ?system_prompt
      inject provider-specific discovery so routing stays isolated by
      endpoint (e.g. ollama:auto must not pick up llama-server models). *)
   let discover =
-    if String.equal provider_name Provider_adapter.cn_ollama then
+    if provider_name_matches_runtime_binding ~provider_name ~label:"ollama" then
       Some
         (fun () ->
           Llm_provider.Discovery.first_discovered_model_id_for_url
             defaults.base_url)
-    else if String.equal provider_name Provider_adapter.cn_llama then
+    else if provider_name_matches_runtime_binding ~provider_name ~label:"llama" then
       Some Llm_provider.Discovery.first_discovered_model_id
     else None
   in
@@ -281,7 +394,7 @@ let make_registry_config ~temperature ~max_tokens ?system_prompt
   in
   let resolved_model_id = model_resolution.resolved_model_id in
   let base_url =
-    if String.equal provider_name Provider_adapter.cn_llama then
+    if provider_name_matches_runtime_binding ~provider_name ~label:"llama" then
       (* Route to the endpoint that has this model; round-robin fallback *)
       match Llm_provider.Discovery.endpoint_for_model resolved_model_id with
       | Some url -> url
@@ -465,11 +578,11 @@ let parse_weighted_entry_with_drop_metric
     None
 
 (** Expand provider:auto specs that map to multiple models.
-    "glm:auto" expands to ["glm:glm-5.1"; "glm:glm-5-turbo"; ...].
-    CLI-backed transports expand too, so a single [gemini_cli:auto] can
-    cascade through concrete CLI model overrides instead of delegating to
-    the CLI's interactive/default model picker. Other specs pass through
-    as-is. *)
+    OAS-owned catalog helpers may project a model list for providers that
+    expose one. CLI transports expand only when OAS exposes a binding default
+    or supported-model list, or when the operator sets
+    [MASC_<PROVIDER>_AUTO_MODELS]; otherwise ["provider:auto"] stays intact
+    and the OAS transport chooses its own default. *)
 let rotate_list_by offset items =
   if offset <= 0 then items
   else
@@ -513,12 +626,63 @@ let expand_provider_auto ?rotation_scope ~spec provider models =
   maybe_rotate_auto_models ?rotation_scope ~spec models
   |> List.map (fun model -> provider ^ ":" ^ model)
 
+let csv_items raw =
+  raw
+  |> String.split_on_char ','
+  |> List.filter_map (fun item ->
+    let trimmed = String.trim item in
+    if String.equal trimmed "" then None else Some trimmed)
+
+let binding_env_fragment (binding : Runtime_binding.t) =
+  binding.Runtime_binding.id
+  |> String.map (function
+       | 'a' .. 'z' as c -> Char.uppercase_ascii c
+       | 'A' .. 'Z' | '0' .. '9' as c -> c
+       | _ -> '_')
+
+let binding_default_model_id (binding : Runtime_binding.t) =
+  match binding.Runtime_binding.default_model with
+  | Some raw when String.trim raw <> "" -> Some (String.trim raw)
+  | Some _ | None ->
+    (match binding.Runtime_binding.capabilities.supported_models with
+     | Some models ->
+       models
+       |> List.find_map (fun model ->
+         let trimmed = String.trim model in
+         if String.equal trimmed "" then None else Some trimmed)
+     | None -> None)
+
+let cli_auto_models_for_binding binding =
+  let defaults =
+    match binding_default_model_id binding with
+    | Some model -> [ model ]
+    | None -> [ "auto" ]
+  in
+  let env_var = "MASC_" ^ binding_env_fragment binding ^ "_AUTO_MODELS" in
+  match nonempty_env env_var with
+  | Some raw ->
+    (match csv_items raw with
+     | [] -> Some defaults
+     | items -> Some items)
+  | None -> Some defaults
+
+let auto_models_for_runtime_provider_prefix provider_name =
+  match runtime_binding_for_provider_label provider_name with
+  | Some binding ->
+    (match binding.Runtime_binding.transport, binding.Runtime_binding.kind,
+           binding.Runtime_binding.id with
+     | Runtime_binding.Cli, _, _ -> cli_auto_models_for_binding binding
+     | _, PConfig.Glm, "glm-coding" -> Some (Llm_provider.Zai_catalog.glm_coding_auto_models ())
+     | _, PConfig.Glm, _ -> Some (Llm_provider.Zai_catalog.glm_auto_models ())
+     | _ -> None)
+  | None -> None
+
 let expand_auto_model_string ?rotation_scope (s : string) : string list =
   let trimmed = String.trim s in
   match split_provider_model trimmed with
   | Some (provider_name, model_id)
     when String_util.equals_ci model_id "auto" -> (
-      match Provider_adapter.auto_models_for_cascade_prefix provider_name with
+      match auto_models_for_runtime_provider_prefix provider_name with
       | Some models when models <> [] ->
           expand_provider_auto ?rotation_scope ~spec:trimmed provider_name models
       | _ -> [ trimmed ])
@@ -794,7 +958,7 @@ let weighted_shuffle
     ["claude_code:auto"] and ["gemini_cli:auto"] remain independent. *)
 let provider_key_of_model_string s =
   match parse_model_string s with
-  | Some cfg -> Provider_adapter.provider_health_key_of_config cfg
+  | Some cfg -> provider_health_key_of_config cfg
   | None -> (
       match String.split_on_char ':' s with
       | provider :: _rest when String.trim provider <> "" -> String.trim provider
@@ -879,12 +1043,12 @@ let materialized_provider_endpoint json provider_id =
   | None -> None
 
 let direct_provider_cascade_prefix provider_id =
-  match Provider_adapter.resolve_adapter_by_cascade_prefix provider_id with
-  | Some adapter -> Some (Provider_adapter.cascade_prefix_of_adapter adapter)
-  | None ->
-    Provider_adapter.resolve_adapter_by_cascade_prefix
-      (normalize_decl_provider_id provider_id)
-    |> Option.map Provider_adapter.cascade_prefix_of_adapter
+  match runtime_binding_for_provider_label provider_id with
+  | Some binding -> Some binding.Runtime_binding.id
+  | None -> (
+    match runtime_binding_for_provider_label (normalize_decl_provider_id provider_id) with
+    | Some binding -> Some binding.Runtime_binding.id
+    | None -> None)
 
 let registry_provider_prefix provider_id =
   match Llm_provider.Provider_registry.find default_registry provider_id with
@@ -915,7 +1079,7 @@ let materialized_member_model_string json provider_id api_name =
        match protocol with
        | Some "openai-http" -> openai_compatible_custom_model json provider_id api_name
        | Some protocol ->
-         Provider_adapter.cascade_prefix_of_declarative_protocol protocol
+         cascade_prefix_of_declarative_protocol protocol
          |> Option.map (fun prefix -> Printf.sprintf "%s:%s" prefix api_name)
        | None -> None)
 
@@ -1086,13 +1250,13 @@ let display_model_string s =
   match split_provider_model s with
   | Some (provider_name, model_id) ->
       Printf.sprintf "%s:%s"
-        (Provider_adapter.display_provider_name provider_name)
+        (display_provider_name provider_name)
         model_id
   | None -> s
 
 let runtime_kind_of_provider_name provider_name =
-  match Provider_adapter.resolve_direct_adapter provider_name with
-  | Some adapter -> Some (Provider_adapter.string_of_runtime_kind adapter.runtime_kind)
+  match runtime_binding_for_provider_label provider_name with
+  | Some binding -> Some (runtime_kind_of_binding binding)
   | None -> None
 
 (** Build a [candidate_info] for a model string given its config weight.
@@ -1145,7 +1309,7 @@ let candidate_info_of_weighted (e : Cascade_config_loader.weighted_entry) =
   let provider_name, display_provider_name, runtime_kind =
     match split_provider_model e.model with
     | Some (provider_name, _model_id) ->
-        let display_name = Provider_adapter.display_provider_name provider_name in
+        let display_name = display_provider_name provider_name in
         (Some provider_name, Some display_name,
          runtime_kind_of_provider_name provider_name)
     | None -> (None, None, None)

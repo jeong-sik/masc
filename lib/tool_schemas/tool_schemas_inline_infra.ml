@@ -19,15 +19,15 @@ let mcp_session_action_enum_strings =
    Keeper_tool_policy.is_keeper_mcp_context_required) that read
    Tool_schemas_inline.schemas continue to see all inline_infra
    tools. *)
-let _codegen_inline_infra_names =
+let codegen_inline_infra_names =
   [ "masc_approval_pending"; "masc_approval_get"; "masc_spawn" ]
 
-let _inline_infra_from_codegen =
+let inline_infra_from_codegen =
   List.filter
-    (fun (s : tool_schema) -> List.mem s.name _codegen_inline_infra_names)
+    (fun (s : tool_schema) -> List.mem s.name codegen_inline_infra_names)
     Tool_schemas_misc.schemas
 
-let schemas : tool_schema list = _inline_infra_from_codegen @ [
+let schemas : tool_schema list = inline_infra_from_codegen @ [
   (* masc_mcp_session *)
   {
     name = "masc_mcp_session";

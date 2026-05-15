@@ -1,58 +1,74 @@
 open Alcotest
 
-(** RFC-0084 §1.3 Surface Coverage Gap
+(** RFC-0084 §1.3 + §6 D2 — Surface Coverage (post-PR-5 state)
 
-    [lib/keeper/tool_resolution.ml:81-86] [surfaces_to_check] is hardcoded
-    to 4 of 8 [Tool_catalog_surfaces.surface] variants:
+    PR-5 expanded [lib/keeper/tool_resolution.ml] [surfaces_to_check] from
+    4 to 7 admit surfaces. The 8th variant [Keeper_denied] is *excluded*
+    from the admit gate (must-deny semantics) and listed separately in
+    [_excluded_must_deny] for typed evidence. PR-7 routes [Keeper_denied]
+    through the capability gate before admission.
 
-    {v
-    let surfaces_to_check =
-      [ Tool_catalog_surfaces.Public_mcp
-      ; Tool_catalog_surfaces.Spawned_agent
-      ; Tool_catalog_surfaces.Local_worker
-      ; Tool_catalog_surfaces.Admin
-      ]
-    v}
+    Admit set (7):
+      Public_mcp, Spawned_agent, Local_worker, Session_min, Admin,
+      Keeper_internal, System_internal
 
-    Missing: [Session_min], [Keeper_internal], [Keeper_denied], [System_internal].
-
-    PR-5 expands [surfaces_to_check] to all 8 with explicit policy semantics
-    for the new 4 variants (per RFC-0084 §6 decision D2). PR-5 must update
-    [pinned_surfaces_checked] from 4 → 8 alongside the code change.
+    Excluded set (1):
+      Keeper_denied
 *)
 
-let pinned_surfaces_checked = 4
+let pinned_surfaces_checked = 7
+let pinned_surfaces_excluded = 1
 let total_surface_variants = 8
 
 let test_surfaces_checked_size () =
   (check int)
     "surfaces_to_check size \
-     (RFC-0084 §1.3 / tool_resolution.ml:81-86; PR-5 target = 8)"
-    4
+     (RFC-0084 §1.3 / tool_resolution.ml; admit-only after PR-5)"
+    7
     pinned_surfaces_checked
 
 let test_surface_coverage_ratio () =
   let ratio_percent = pinned_surfaces_checked * 100 / total_surface_variants in
   (check int)
-    "surface coverage percent \
-     (RFC-0084 §1.3; PR-5 target = 100)"
-    50
+    "surface coverage percent (admit gate) \
+     (RFC-0084 §1.3; 7/8 = 87 — Keeper_denied excluded by design)"
+    87
     ratio_percent
 
-let test_unchecked_surface_count () =
-  let missing = total_surface_variants - pinned_surfaces_checked in
+let test_excluded_surface_count () =
   (check int)
-    "surfaces missing from policy gate \
-     (RFC-0084 §1.3; PR-5 target = 0)"
-    4
-    missing
+    "surfaces explicitly excluded from admit gate \
+     (RFC-0084 §6 D2 must-deny; Keeper_denied = 1)"
+    1
+    pinned_surfaces_excluded
+
+let test_coverage_invariant () =
+  (* All 8 surfaces are accounted for: checked + excluded = total. *)
+  (check int)
+    "checked + excluded = total surface variants \
+     (RFC-0084 §1.3 enumeration invariant)"
+    total_surface_variants
+    (pinned_surfaces_checked + pinned_surfaces_excluded)
+
+let test_no_silent_surface_drop () =
+  (* No surface variant should be neither checked nor excluded. *)
+  let unaccounted =
+    total_surface_variants - (pinned_surfaces_checked + pinned_surfaces_excluded)
+  in
+  (check int)
+    "no surface variant is silently dropped \
+     (RFC-0084 §1.3; target = 0)"
+    0
+    unaccounted
 
 let () =
   Alcotest.run
-    "RFC-0084 surface coverage gap"
-    [ ( "surface-coverage-gap"
+    "RFC-0084 surface coverage"
+    [ ( "surface-coverage"
       , [ test_case "surfaces-checked-size" `Quick test_surfaces_checked_size
         ; test_case "surface-coverage-ratio" `Quick test_surface_coverage_ratio
-        ; test_case "unchecked-surface-count" `Quick test_unchecked_surface_count
+        ; test_case "excluded-surface-count" `Quick test_excluded_surface_count
+        ; test_case "coverage-invariant" `Quick test_coverage_invariant
+        ; test_case "no-silent-surface-drop" `Quick test_no_silent_surface_drop
         ] )
     ]

@@ -184,6 +184,22 @@ let memory_env_int_logged name ~default =
              name raw default;
            default)
 
+let memory_env_bool_logged name ~default =
+  match memory_env_opt name with
+  | None -> default
+  | Some raw ->
+      match String.lowercase_ascii raw with
+      | "1" | "true" | "yes" | "on" | "enabled" -> true
+      | "0" | "false" | "no" | "off" | "disabled" -> false
+      | _ ->
+          Log.Keeper.warn
+            "invalid %s=%S; using default %b"
+            name raw default;
+          default
+
+let memory_llm_summary_enabled () =
+  memory_env_bool_logged "MASC_KEEPER_MEMORY_LLM_SUMMARY" ~default:false
+
 let consensus_pattern_key () =
   match memory_env_opt "MASC_KEEPER_MEMORY_CONSENSUS_PATTERN" with
   | None -> ""
@@ -318,6 +334,9 @@ type keeper_memory_row_raw = {
   ts_unix: float;
 }
 
+type memory_consolidation_summarizer =
+  trace_id:string -> texts:string list -> string option
+
 let parse_memory_bank_row (line : string) : keeper_memory_row_raw option =
   try
     let j = Yojson.Safe.from_string line in
@@ -348,11 +367,46 @@ let parse_memory_bank_row (line : string) : keeper_memory_row_raw option =
 let row_trace_id (row : keeper_memory_row_raw) : string =
   Safe_ops.json_string ~default:"" "trace_id" row.json
 
+let deterministic_progress_consolidation_summary ~count texts =
+  Printf.sprintf "[consolidated:%d] %s"
+    count
+    (String.concat "; " (take 5 texts))
+
+let sanitize_consolidation_summary text =
+  text
+  |> Keeper_text_processing.strip_state_blocks_text
+  |> String.trim
+  |> String_util.utf8_safe ~max_bytes:(max_memory_text_length ()) ~suffix:"..."
+  |> String_util.to_string
+
+let progress_consolidation_summary ?summarizer ~trace_id ~count texts =
+  let fallback = deterministic_progress_consolidation_summary ~count texts in
+  match summarizer with
+  | Some summarize when memory_llm_summary_enabled () ->
+      let summarized =
+        try summarize ~trace_id ~texts with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+            Log.Keeper.warn
+              "memory consolidation summarizer failed for trace_id=%s: %s; using deterministic fallback"
+              trace_id
+              (Printexc.to_string exn);
+            None
+      in
+      (match summarized with
+      | Some candidate ->
+          let summary = sanitize_consolidation_summary candidate in
+          if summary <> "" && is_meaningful_memory_text summary then
+            Printf.sprintf "[consolidated:%d][llm] %s" count summary
+          else fallback
+      | None -> fallback)
+  | _ -> fallback
+
 (** Consolidate memory notes before compaction.
     1. Merge progress notes from same trace_id (3+ → single summary).
     2. Promote recurring texts across trace_ids to long_term (priority 95).
     Returns a new row list with consolidated entries appended. *)
-let consolidate_memory_notes (rows : keeper_memory_row_raw list)
+let consolidate_memory_notes ?summarizer (rows : keeper_memory_row_raw list)
     : keeper_memory_row_raw list * int =
   let now = Unix.gettimeofday () in
   let consolidated = ref [] in
@@ -383,9 +437,9 @@ let consolidate_memory_notes (rows : keeper_memory_row_raw list)
           0 group
       in
       let summary_text =
-        Printf.sprintf "[consolidated:%d] %s"
-          (List.length group)
-          (String.concat "; " (take 5 texts))
+        progress_consolidation_summary ?summarizer ~trace_id:tid
+          ~count:(List.length group)
+          texts
       in
       let summary_json = `Assoc [
         ("ts", `String (now_iso ()));
@@ -608,6 +662,7 @@ let evicted_generated_rows ~generated ~retained =
        | _ -> true)
 
 let compact_memory_bank_if_needed
+    ?summarizer
     (config : Coord.config)
     (meta : keeper_meta) : memory_bank_compaction =
   let target_notes = memory_compaction_target_notes () in
@@ -665,7 +720,7 @@ let compact_memory_bank_if_needed
           else
             (* Consolidation: merge progress clusters and promote recurring notes *)
             let (consolidated_parsed, consolidated_count) =
-              consolidate_memory_notes parsed
+              consolidate_memory_notes ?summarizer parsed
             in
             let generated_consolidated =
               drop_memory_rows before_notes consolidated_parsed

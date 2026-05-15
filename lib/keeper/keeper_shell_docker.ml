@@ -376,6 +376,49 @@ let cmd_targets_gh cmd =
     List.exists (fun tok -> tok = "gh") tokens)
 ;;
 
+let strip_simple_shell_quotes token =
+  let len = String.length token in
+  if
+    len >= 2
+    && ((token.[0] = '\'' && token.[len - 1] = '\'')
+        || (token.[0] = '"' && token.[len - 1] = '"'))
+  then String.sub token 1 (len - 2)
+  else token
+;;
+
+let bare_worktrees_path token =
+  let token = strip_simple_shell_quotes token in
+  String.equal token ".worktrees"
+  || String.equal token "./.worktrees"
+  || String.starts_with ~prefix:".worktrees/" token
+  || String.starts_with ~prefix:"./.worktrees/" token
+;;
+
+let git_c_path cmd =
+  let tokens =
+    String.split_on_char ' ' (String.trim cmd)
+    |> List.filter (fun s -> s <> "")
+    |> List.map strip_simple_shell_quotes
+  in
+  let rec scan_git_args = function
+    | "-C" :: path :: _ -> Some path
+    | "--" :: _ -> None
+    | option :: _ when String.starts_with ~prefix:"-C" option ->
+      let path =
+        String.sub option 2 (String.length option - 2) |> String.trim
+      in
+      if path = "" then None else Some path
+    | _ :: rest -> scan_git_args rest
+    | [] -> None
+  in
+  let rec scan = function
+    | "git" :: rest -> scan_git_args rest
+    | _ :: rest -> scan rest
+    | [] -> None
+  in
+  scan tokens
+;;
+
 let resolve_sandbox_root_git_cwd ~(config : Coord.config) ~(meta : keeper_meta) ~cwd ~cmd =
   let host_root =
     keeper_playground_root ~config ~meta
@@ -407,7 +450,11 @@ let resolve_sandbox_root_git_cwd ~(config : Coord.config) ~(meta : keeper_meta) 
   then cwd, None
   else if cwd_normalized = host_root && cmd_targets_git_or_gh cmd
   then (
-    match repos_in_playground () with
+    let explicit_git_c_path = git_c_path cmd in
+    match explicit_git_c_path with
+    | Some path when not (bare_worktrees_path path) -> cwd, None
+    | _ -> (
+      match repos_in_playground () with
     | [ single_repo ] ->
       Filename.concat (Filename.concat host_root "repos") single_repo, None
     | [] ->
@@ -441,7 +488,7 @@ let resolve_sandbox_root_git_cwd ~(config : Coord.config) ~(meta : keeper_meta) 
              host_root
              cmd_preview
              example_repo
-             (String.concat ", " many)) ))
+             (String.concat ", " many)) )))
   else cwd, None
 ;;
 
@@ -681,6 +728,12 @@ let run_docker_shell_command_with_status
            "sandbox_profile=docker blocks nested container runtimes and host socket \
             references")
     else
+      let cwd, multi_repo_blocker =
+        resolve_sandbox_root_git_cwd ~config ~meta ~cwd ~cmd
+      in
+      match multi_repo_blocker with
+      | Some msg -> sandbox_error msg
+      | None ->
       match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd with
       | Error err -> sandbox_error err
       | Ok () ->
@@ -705,13 +758,7 @@ let run_docker_shell_command_with_status
          - single-repo → 자동 chdir (silent)
          - multi-repo → explicit error로 LLM이 정확한 경로 학습
          - 0 repo → explicit error로 clone/cwd 복구 액션 학습 *)
-        let cwd, multi_repo_blocker =
-          resolve_sandbox_root_git_cwd ~config ~meta ~cwd ~cmd
-        in
-        (match multi_repo_blocker with
-         | Some msg -> sandbox_error msg
-         | None ->
-           (* #10855: surface gh syntax misuse before docker exec so the LLM
+        (* #10855: surface gh syntax misuse before docker exec so the LLM
          sees a corrected-form hint in the same turn rather than gh's raw
          "unknown flag: --repo" error after the round-trip. *)
            (match detect_gh_repo_flag_with_api_misuse cmd with
@@ -891,7 +938,7 @@ let run_docker_shell_command_with_status
                             meta.name);
                         Ok { status; output; image; network_label }
                       with
-                      | Failure err -> sandbox_error err))))))
+                      | Failure err -> sandbox_error err)))))
 ;;
 
 let run_docker_with_git_bash
@@ -929,15 +976,15 @@ let run_docker_with_git_bash
     match check_egress ~config ~meta ~cmd with
     | Some blocked_json -> blocked_json
     | None ->
-      (match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd with
-       | Error err -> sandbox_error_json err
-       | Ok () ->
-         let cwd, sandbox_root_git_blocker =
-           resolve_sandbox_root_git_cwd ~config ~meta ~cwd ~cmd
-         in
-         match sandbox_root_git_blocker with
-         | Some message -> sandbox_error_json message
-         | None ->
+      let cwd, sandbox_root_git_blocker =
+        resolve_sandbox_root_git_cwd ~config ~meta ~cwd ~cmd
+      in
+      (match sandbox_root_git_blocker with
+       | Some message -> sandbox_error_json message
+       | None ->
+         (match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd with
+          | Error err -> sandbox_error_json err
+          | Ok () ->
            let _ = turn_sandbox_runtime in
            (match
               run_docker_shell_command_with_status
@@ -971,7 +1018,7 @@ let run_docker_with_git_bash
                      @ gh_exit_class_field
                          ~cmd
                          ~status:result.status
-                         ~output:result.output)))))
+                         ~output:result.output))))))
 ;;
 
 let run_docker_hardened_bash
@@ -999,15 +1046,15 @@ let run_docker_hardened_bash
     sandbox_error_json
       "sandbox_profile=docker blocks nested container runtimes and host socket references"
   else (
-    match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd with
-    | Error err -> sandbox_error_json err
-    | Ok () ->
-      let cwd, sandbox_root_git_blocker =
-        resolve_sandbox_root_git_cwd ~config ~meta ~cwd ~cmd
-      in
-      (match sandbox_root_git_blocker with
-       | Some message -> sandbox_error_json message
-       | None ->
+    let cwd, sandbox_root_git_blocker =
+      resolve_sandbox_root_git_cwd ~config ~meta ~cwd ~cmd
+    in
+    match sandbox_root_git_blocker with
+    | Some message -> sandbox_error_json message
+    | None ->
+      (match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd with
+       | Error err -> sandbox_error_json err
+       | Ok () ->
       (match turn_sandbox_runtime, network_mode with
        | Some runtime, Network_none ->
          (match

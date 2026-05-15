@@ -1627,3 +1627,11 @@
  (name test_pr_i_2c_otel_hook_typed)
  (modules test_pr_i_2c_otel_hook_typed)
  (libraries alcotest))
+
+; RFC-0084 PR-I-2.d — Tool_output_validation transformer migration.
+; Pins the move from register_post_hook (observer+mutator) to the
+; dedicated set_result_transformer surface.
+(test
+ (name test_pr_i_2d_output_validation_transformer)
+ (modules test_pr_i_2d_output_validation_transformer)
+ (libraries masc_test_deps))

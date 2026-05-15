@@ -8,7 +8,7 @@ open Alcotest
 
     The other 4 sites enumerated in PR-12 mli §1.5 live in lower-level
     sub-libraries ([masc_config], [masc_coord], [fs_compat]) which
-    cannot call [Masc_mcp.Host_config] without inverting the dune
+    cannot call [Host_config] without inverting the dune
     dependency graph; their migration is deferred to a separate RFC
     (Host_config extraction to a shared lower-level library).  The 6th
     site ([cdal/adversarial_eval]) is a *file-classification*
@@ -94,11 +94,11 @@ let test_is_test_mode_round_trips () =
   (check bool)
     "Host_config.is_test_mode Test = true"
     true
-    (Masc_mcp.Host_config.is_test_mode Masc_mcp.Host_config.Test);
+    (Host_config.is_test_mode Host_config.Test);
   (check bool)
     "Host_config.is_test_mode Production = false"
     false
-    (Masc_mcp.Host_config.is_test_mode Masc_mcp.Host_config.Production)
+    (Host_config.is_test_mode Host_config.Production)
 ;;
 
 let () =

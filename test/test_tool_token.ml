@@ -100,7 +100,7 @@ let test_dispatch_with_token () =
   match Tool_dispatch.mint_token ~name:tool with
   | Error e -> fail e
   | Ok token ->
-    match Tool_dispatch.dispatch ~token ~args:`Null with
+    match Tool_dispatch.guarded_dispatch ~token ~args:`Null () with
     | Some tr ->
       let ok = tr.success in
       let msg = Tool_result.message tr in

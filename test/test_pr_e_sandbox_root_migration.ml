@@ -53,7 +53,7 @@ let test_no_home_me_literal_in_worker_dev_tools () =
 ;;
 
 let test_sandbox_workspace_root_contract () =
-  let d = Masc_mcp.Host_config.host () in
+  let d = Host_config.host () in
   let acceptable_roots =
     match Sys.getenv_opt "HOME" with
     | Some home -> [ Filename.concat home "me" ]

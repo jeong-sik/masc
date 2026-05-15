@@ -107,7 +107,7 @@ let test_dispatch_structured () =
     | Ok t -> t
     | Error e -> Alcotest.fail e
   in
-  match Tool_dispatch.dispatch_structured ~token ~args:`Null with
+  match Tool_dispatch.guarded_dispatch ~token ~args:`Null () with
   | Some r ->
     Alcotest.(check bool) "success" true r.success;
     Alcotest.(check string) "tool_name" "__test_tool" r.tool_name;

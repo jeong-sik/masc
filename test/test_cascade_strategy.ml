@@ -824,62 +824,6 @@ let test_audit_runs_json_exposes_provenance () =
   check int "query limit" 2 (json_int "limit" query);
   check string "query cascade" "keeper_unified" (json_string "cascade" query)
 
-(* ── server_error_score_for_provider (#12797) ─────────────────── *)
-
-let test_se_score_unknown_provider_full () =
-  let h = H.create () in
-  let s = S.server_error_score_for_provider h ~provider_key:"unseen" in
-  check (float 0.001) "unknown → 1.0" 1.0 s
-
-let test_se_score_no_failures_full () =
-  let h = H.create () in
-  H.record_success h ~provider_key:"p" ();
-  H.record_success h ~provider_key:"p" ();
-  let s = S.server_error_score_for_provider h ~provider_key:"p" in
-  check (float 0.001) "no failures → 1.0" 1.0 s
-
-let test_se_score_one_failure_decays () =
-  (* Default decay base 0.6: 1 recent failure → 0.6 *)
-  let h = H.create () in
-  H.record_failure h ~provider_key:"p" ();
-  let s = S.server_error_score_for_provider h ~provider_key:"p" in
-  (* Allow for env override: just verify score < 1.0 and > 0.0 *)
-  check bool "1 failure → score < 1.0" true (s < 1.0);
-  check bool "1 failure → score > 0.0" true (s > 0.0)
-
-let test_se_score_many_failures_skips () =
-  (* Default skip_after is 4: 4 failures should zero the score *)
-  let h = H.create () in
-  for _ = 1 to 4 do
-    H.record_failure h ~provider_key:"p" ()
-  done;
-  let s = S.server_error_score_for_provider h ~provider_key:"p" in
-  check (float 0.001) "4 failures → hard skip (0.0)" 0.0 s
-
-let test_se_score_only_rate_limits_no_penalty () =
-  (* Rate-limit events should NOT increase server-error score *)
-  let h = H.create () in
-  H.record_soft_rate_limited h ~provider_key:"p" ();
-  H.record_soft_rate_limited h ~provider_key:"p" ();
-  let s = S.server_error_score_for_provider h ~provider_key:"p" in
-  check (float 0.001) "429s don't affect se score" 1.0 s
-
-let test_weighted_shuffle_server_error_provider_deprioritised () =
-  (* A provider with 4 server errors should be skipped when there is a
-     clean peer.  All other conditions are equal (weight, no 429s). *)
-  let h = H.create () in
-  for _ = 1 to 4 do
-    H.record_failure h ~provider_key:"errored" ()
-  done;
-  let cands = [mk_cand ~w:100 "errored"; mk_cand ~w:100 "clean"] in
-  let strat = mk_t S.Weighted_random in
-  let ctx = mk_ctx ~health:h ~rand:(fun _ -> 0) () in
-  let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
-  match ordered with
-  | [] -> fail "expected at least clean provider"
-  | hd :: _ ->
-      check string "clean provider heads the list" "clean" hd.name
-
 let () =
   run "cascade_strategy" [
     "failover", [

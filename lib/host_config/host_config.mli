@@ -74,6 +74,13 @@ type t =
         (** Resolved [MASC_DATA_DIR].  [None] when unset. *)
   ; personas_dir : string option
         (** Resolved [MASC_PERSONAS_DIR].  [None] when unset. *)
+  ; home : string option
+        (** Operator [$HOME] directory, trimmed.  [None] when unset or
+            empty.  RFC-0085 PR-10 replaces
+            [Env_config_core.home_dir_opt]. *)
+  ; assets_dir : string option
+        (** Resolved [MASC_ASSETS_DIR].  [None] when unset or empty.
+            RFC-0085 PR-10 replaces [Env_config_core.assets_dir_opt]. *)
   }
 [@@deriving show, eq]
 

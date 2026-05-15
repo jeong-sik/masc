@@ -72,7 +72,7 @@ let mcp_protocol_version_default =
 let default_base_path = Server_mcp_transport_http.default_base_path
 
 let implicit_base_path_resolution_source () =
-  match Env_config.home_dir_opt () with
+  match (Host_config.from_env ()).home with
   | Some home ->
       let normalized_home =
         Env_config.normalize_masc_base_path_input home

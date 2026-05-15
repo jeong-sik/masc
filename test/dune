@@ -1704,3 +1704,11 @@
  (name test_rfc_0085_pr8_config_dir_resolver_host_config)
  (modules test_rfc_0085_pr8_config_dir_resolver_host_config)
  (libraries alcotest ast_grep))
+
+; RFC-0085 PR-10 — home + assets_dir env readers absorbed into
+; Host_config.t; Env_config_core.assets_dir_opt fully removed,
+; home_dir_opt demoted to file-private.
+(test
+ (name test_rfc_0085_pr10_home_assets_purge)
+ (modules test_rfc_0085_pr10_home_assets_purge)
+ (libraries alcotest ast_grep masc_mcp.host_config))

@@ -2,9 +2,9 @@
   {
     "question_id": "integrated-benchmark-phases",
     "claims": [
-      "integrated_default_phases_are_control_and_search",
+      "integrated_default_phase_is_control",
       "local64_phase_is_retired_from_integrated_wrapper",
-      "search_phase_uses_cp_search_fabric"
+      "search_phase_removed_from_integrated_wrapper"
     ],
     "cited_paths": [
       "docs/INTEGRATED-BENCHMARK-RUNBOOK.md",

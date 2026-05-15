@@ -4,7 +4,7 @@
 |---|---|
 | Status | Draft |
 | Depends-on | RFC-0058 Phase 5.6 (closed 2026-05-11), RFC-0058 §2.4 |
-| Related | RFC-0072 (provider_adapter sublib extraction — separate host-side split) |
+| Related | Provider adapter removal record + OAS/MASC boundary |
 | Scope | OCaml doctor/bootstrap modules — remove single-product knowledge |
 
 ## 1. Problem
@@ -29,10 +29,10 @@ chooses a provider by variant"; they are **code that knows how a
 specific tool's configuration file is shaped**. The closed-variant
 sweep does not reach them.
 
-But the architectural invariant from RFC-0072 §2 still applies:
-*"Provider and Model are opaque alias. No vendor name is 1st-class."*
-A doctor module whose **filename** is a product name is the loudest
-possible violation.
+The provider-identity invariant from `docs/PROVIDER-ADAPTER-REMOVAL-PLAN.md`
+and `docs/OAS-MASC-BOUNDARY.md` still applies: provider and model identity are
+OAS-owned runtime facts, not MASC-owned product constants. A doctor module whose
+**filename** is a product name is the loudest possible violation.
 
 ### 1.1 Why this is not a workaround
 
@@ -197,7 +197,8 @@ For each Phase 5.7.N PR:
    Phase 5.7.3 design time.
 
 3. **Naming**: `mcp_client_config_doctor` vs `external_mcp_config_doctor`
-   vs `peer_mcp_config_doctor`. RFC-0072 §2 prefers abstract terms.
+   vs `peer_mcp_config_doctor`. The provider adapter removal record prefers
+   abstract terms.
    `mcp_client_config` is the term that already exists in MCP spec
    prose; this RFC adopts it. Revisit at Phase 5.7.2 implementation
    time if a clearer term emerges.

@@ -18,7 +18,7 @@ body:
       label: Product area
       options:
         - Repo coordination
-        - Team session delivery
+        - Supervised delivery
         - Dashboard and read models
         - Operator and intervention
         - Transport, auth, and health

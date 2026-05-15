@@ -639,41 +639,66 @@ let create_post
     else (
       let board_result =
         with_lock store (fun () ->
-          match validate_sub_board_post_policy_unlocked store ~author_id ~hearth with
-          | Error e -> Error e
-          | Ok () ->
-            (* Check capacity *)
-            if !(store.post_count) >= Limits.max_posts
-            then
-              Error
-                (Capacity_exceeded
-                   { current = !(store.post_count); max = Limits.max_posts })
-            else (
-              let now = Time_compat.now () in
-              let post =
-                { id = Post_id.generate ()
-                ; author = author_id
-                ; title = normalized_title
-                ; body = normalized_body
-                ; content = normalized_body
-                ; post_kind = normalized_kind
-                ; meta_json = normalized_meta
-                ; visibility
-                ; created_at = now
-                ; updated_at = now
-                ; (* Initially same as created_at *)
-                  expires_at
-                ; votes_up = 0
-                ; votes_down = 0
-                ; reply_count = 0
-                ; hearth
-                ; thread_id
-                }
-              in
-              Hashtbl.add store.posts (Post_id.to_string post.id) post;
-              Stdlib.incr store.post_count;
-              invalidate_post_caches store;
-              Ok post))
+          (* Content dedup: reject identical (author, body) within a short
+             window.  Keeper turns sometimes emit the same board post N times
+             (observed 6x at 0s gap).  The dedup key is author + normalized
+             body; matching returns the existing post as Ok without SSE
+             emission (board_dispatch handles that on Ok). *)
+          let author_str = Agent_id.to_string author_id in
+          let dedup_key = author_str ^ "\x00" ^ normalized_body in
+          let dedup_match =
+            Hashtbl.fold
+              (fun _ (p : post) acc ->
+                 let p_key =
+                   Agent_id.to_string p.author ^ "\x00" ^ p.body
+                 in
+                 if String.equal p_key dedup_key then Some p else acc)
+              store.posts None
+          in
+          match dedup_match with
+          | Some existing ->
+            Log.BoardLog.info
+              "dedup: skipping duplicate post author=%s body_len=%d \
+               existing_id=%s"
+              author_str (String.length normalized_body)
+              (Post_id.to_string existing.id);
+            Ok existing
+          | None ->
+            (match validate_sub_board_post_policy_unlocked store
+                     ~author_id ~hearth
+             with
+            | Error e -> Error e
+            | Ok () ->
+              if !(store.post_count) >= Limits.max_posts
+              then
+                Error
+                  (Capacity_exceeded
+                     { current = !(store.post_count); max = Limits.max_posts })
+              else
+                let now = Time_compat.now () in
+                let post =
+                  { id = Post_id.generate ()
+                  ; author = author_id
+                  ; title = normalized_title
+                  ; body = normalized_body
+                  ; content = normalized_body
+                  ; post_kind = normalized_kind
+                  ; meta_json = normalized_meta
+                  ; visibility
+                  ; created_at = now
+                  ; updated_at = now
+                  ; expires_at
+                  ; votes_up = 0
+                  ; votes_down = 0
+                  ; reply_count = 0
+                  ; hearth
+                  ; thread_id
+                  }
+                in
+                Hashtbl.add store.posts (Post_id.to_string post.id) post;
+                Stdlib.incr store.post_count;
+                invalidate_post_caches store;
+                Ok post))
       in
       (* Agent Economy: earn credits for board post.  Moved OUTSIDE
      [with_lock] because [Agent_economy.earn] does its own disk I/O

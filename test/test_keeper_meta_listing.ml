@@ -458,6 +458,115 @@ let test_keeper_up_uses_toml_autoboot_default () =
       | Ok None -> fail "keeper meta missing after keeper_up"
       | Error e -> fail ("read_meta failed: " ^ e))
 
+let test_keeper_up_update_resyncs_declarative_profile_defaults () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  with_clean_base_path_env @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "toml-update-defaults" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Config_dir_resolver.reset ();
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+      let keepers_dir = Filename.concat config_root "keepers" in
+      Fs_compat.mkdir_p keepers_dir;
+      Fs_compat.save_file
+        (Filename.concat keepers_dir (keeper_name ^ ".toml"))
+        {|[keeper]
+goal = "fresh goal"
+short_goal = "fresh short"
+mid_goal = "fresh mid"
+long_goal = "fresh long"
+instructions = "fresh instructions"
+sandbox_profile = "local"
+autoboot_enabled = false
+proactive_enabled = true
+proactive_idle_sec = 120
+proactive_cooldown_sec = 240
+
+[keeper.tool_access]
+kind = "preset"
+preset = "coding"
+also_allow = ["masc_tasks", "masc_transition"]
+|};
+      write_minimal_cascade_toml config_root;
+      Unix.putenv "MASC_CONFIG_DIR" config_root;
+      Config_dir_resolver.reset ();
+      let stale_meta =
+        match
+          Masc_test_deps.meta_of_json_fixture
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("agent_name", `String ("keeper-" ^ keeper_name ^ "-agent"));
+                ("trace_id", `String "trace-toml-update-defaults");
+                ("goal", `String "stale goal");
+                ("short_goal", `String "stale short");
+                ("mid_goal", `String "stale mid");
+                ("long_goal", `String "stale long");
+                ("instructions", `String "stale instructions");
+                ("autoboot_enabled", `Bool true);
+                ( "tool_access",
+                  `Assoc
+                    [
+                      ("kind", `String "preset");
+                      ("preset", `String "research");
+                      ("also_allow", `List []);
+                    ] );
+              ])
+        with
+        | Ok meta -> meta
+        | Error e -> fail ("meta_of_json failed: " ^ e)
+      in
+      (match Keeper_types.write_meta ~force:true config stale_meta with
+       | Ok () -> ()
+       | Error e -> fail ("write_meta failed: " ^ e));
+      let ctx = keeper_ctx env sw config "operator" in
+      let ok, _body =
+        match
+          Tool_keeper.dispatch ctx ~name:"masc_keeper_up"
+            ~args:(`Assoc [ ("name", `String keeper_name) ])
+        with
+        | Some result -> result
+        | None -> fail "expected masc_keeper_up dispatch"
+      in
+      check bool "keeper_up update ok" true ok;
+      match Keeper_types.read_meta config keeper_name with
+      | Ok (Some meta) ->
+          check string "goal resynced" "fresh goal" meta.goal;
+          check string "short_goal resynced" "fresh short" meta.short_goal;
+          check string "mid_goal resynced" "fresh mid" meta.mid_goal;
+          check string "long_goal resynced" "fresh long" meta.long_goal;
+          check string "instructions resynced" "fresh instructions"
+            meta.instructions;
+          check bool "autoboot_enabled resynced" false
+            meta.autoboot_enabled;
+          check bool "proactive enabled resynced" true meta.proactive.enabled;
+          check int "proactive idle resynced" 120 meta.proactive.idle_sec;
+          check int "proactive cooldown resynced" 240
+            meta.proactive.cooldown_sec;
+          check
+            (option string)
+            "tool preset resynced"
+            (Some "coding")
+            (Keeper_types.tool_access_preset meta.tool_access
+             |> Option.map Keeper_types.tool_preset_to_string);
+          check
+            (list string)
+            "tool allowlist resynced"
+            [ "masc_tasks"; "masc_transition" ]
+            (Keeper_types.tool_access_also_allowlist meta.tool_access)
+      | Ok None -> fail "keeper meta missing after keeper_up update"
+      | Error e -> fail ("read_meta failed: " ^ e))
+
 let test_keeper_list_normalizes_unknown_social_model () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -948,6 +1057,8 @@ let () =
             test_autoboot_policy_resync_from_declarative_toml;
           test_case "keeper_up uses TOML autoboot default" `Quick
             test_keeper_up_uses_toml_autoboot_default;
+          test_case "keeper_up update resyncs declarative profile defaults"
+            `Quick test_keeper_up_update_resyncs_declarative_profile_defaults;
           test_case "tool keeper list normalizes unknown social model" `Quick
             test_keeper_list_normalizes_unknown_social_model;
           test_case "tool keeper list preserves known social model" `Quick

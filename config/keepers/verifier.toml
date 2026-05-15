@@ -1,0 +1,21 @@
+[keeper]
+base = "base.toml"
+persona_name = "verifier"
+autoboot_enabled = true
+proactive_enabled = true
+proactive_idle_sec = 120
+proactive_cooldown_sec = 240
+work_discovery_sources = ["awaiting_verification_tasks"]
+github_identity = "reviewer-keepers-nonoperator-0506b"
+git_identity_mode = "github_identity"
+
+[keeper.tool_access]
+kind = "preset"
+preset = "coding"
+also_allow = [
+  "masc_tasks",
+  "masc_transition",
+  "masc_task_history",
+  "masc_plan_get",
+  "masc_plan_get_task",
+]

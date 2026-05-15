@@ -18,7 +18,7 @@ code as **bare string literals** scattered across modules:
 
 | Identifier kind | SSOT location | Example drift sites | Drift count (`rg "<name>"` lib) |
 |-----------------|---------------|---------------------|---------------------------------|
-| Provider name (e.g. "ollama") | `Provider_adapter.cn_ollama` | `keeper_status_detail.ml:199`, `cascade_config.ml:277`, `server_routes_http_routes_cascade.ml:16` | 20+ across 14 files |
+| Provider name (e.g. "ollama") | legacy `Provider_adapter` provider-name constant | `keeper_status_detail.ml:199`, `cascade_config.ml:277`, `server_routes_http_routes_cascade.ml:16` | 20+ across 14 files |
 | Cascade name (e.g. "primary") | `Keeper_cascade_profile.t` variant | `cascade_routes.ml:65-94`, `cascade_config_loader.ml`, `cascade_routes.mli` | 5 files |
 | Model id (e.g. "qwen3-coder:30b") | `cascade.toml` (data) | scattered string equality checks across cascade resolvers, telemetry tags |  highly variable |
 
@@ -27,7 +27,7 @@ provider catalogs, cascade configurations, and external model registries
 that change independently of the source code. Embedding them as string
 literals creates three problems:
 
-1. **Drift risk**: SSOT exists (`cn_ollama`) but is bypassed by 14
+1. **Drift risk**: a provider-name SSOT exists but is bypassed by 14
    files that re-write `"ollama"` directly. A rename of the canonical
    name (e.g. `"ollama"` → `"ollama-local"`) breaks the unmigrated
    sites silently — unit tests pass, runtime fails.
@@ -102,13 +102,13 @@ The repository has many places that compare strings. We migrate **call
 sites only**, not data structures, in three phases:
 
 **Phase A — Provider_id (this RFC, surgical PR)**:
-- Replace `String.equal x "ollama"` with `String.equal x Provider_adapter.cn_ollama` (or eventually `Provider_id.equal x Provider_id.ollama`).
+- Replace `String.equal x "ollama"` with a single provider-name boundary (or eventually `Provider_id.equal x Provider_id.ollama`).
 - This is the minimum drift fix — even without the full opaque type, just routing through SSOT eliminates the literal duplication. **Companion PR #14111 ships exactly this.**
 
 **Phase B — Phantom-typed wrappers**:
 - Introduce `Provider_id.t = private string`.
-- `Provider_adapter.cn_ollama : string` becomes `Provider_id.ollama : Provider_id.t`.
-- All call sites that imported `cn_ollama` get an automatic compile error and must update — desirable, this is how we find the migration surface.
+- legacy provider-name constants become `Provider_id.ollama : Provider_id.t`.
+- All call sites that imported legacy constants get an automatic compile error and must update — desirable, this is how we find the migration surface.
 - Estimate: ~80-150 LOC of mechanical updates spread across ~15 files.
 
 **Phase C — Cascade_id and Model_id**:

@@ -139,35 +139,22 @@ let telemetry_usage_missing_runtime_reported =
   { usage_reporting = Missing_by_design; runtime_reporting = Reported }
 ;;
 
-(* ── Canonical adapter names (single definition point) ──────── *)
-
-let cn_llama = "llama"
-let cn_ollama = "ollama"
-let cn_unknown_provider = "unknown_provider"
-let cn_claude = "claude_code"
-let cn_codex = "codex_cli"
-let cn_gemini = "gemini_cli"
-let cn_kimi = "kimi_cli"
-let cn_claude_api = "claude"
-let cn_codex_api = "openai"
-let cn_gemini_api = "gemini"
-let cn_kimi_api = "kimi"
-let cn_glm = "glm"
-let cn_glm_coding_plan = "glm-coding"
-let cn_openrouter = "openrouter"
+module Runtime_binding = Agent_sdk.Provider_runtime_binding
 
 let display_provider_name label =
-  match normalize_label label with
-  | "glm" | "glm-api" -> cn_glm
-  | "glm-coding" | "glm-coding-plan" -> cn_glm_coding_plan
-  | "kimi-api" -> cn_kimi_api
-  | _ -> String.trim label
+  match Runtime_binding.find label with
+  | Some binding -> binding.Runtime_binding.id
+  | None -> String.trim label
 ;;
 
 (* SSOT cascade prefix for local llama-server instances.
     All cascade label construction for local models must use this constant.
     Format: [local_cascade_prefix ^ ":" ^ model_id] → e.g. "llama:qwen3.5" *)
-let local_cascade_prefix = cn_llama
+let local_cascade_prefix =
+  match Runtime_binding.find "llama" with
+  | Some binding -> binding.Runtime_binding.id
+  | None -> "llama"
+;;
 
 (** Build a cascade model label for a local model.
     Single entry point — other modules must not concatenate prefix manually. *)
@@ -179,13 +166,11 @@ let string_of_provider_kind : Llm_provider.Provider_config.provider_kind -> stri
   Llm_provider.Provider_config.string_of_provider_kind
 ;;
 
-module Runtime_binding = Agent_sdk.Provider_runtime_binding
-
 let binding_labels (binding : Runtime_binding.t) =
   let id = binding.Runtime_binding.id in
   let dashed_id = String.map (function '_' -> '-' | c -> c) id in
   let local_aliases =
-    if String.equal id cn_llama then [ "llama.cpp"; "llamacpp" ] else []
+    if String.equal id local_cascade_prefix then [ "llama.cpp"; "llamacpp" ] else []
   in
   id :: dashed_id :: binding.Runtime_binding.aliases @ local_aliases
   |> List.filter_map trim_nonempty
@@ -375,7 +360,7 @@ let resolve_adapter_by_cascade_prefix label =
     endpoints (e.g. "custom:model@url").  It is not in [direct_adapters]
     because it has no fixed config; it is always considered available and
     requires no API key. *)
-let cn_custom = "custom"
+let is_custom_provider_prefix normalized = String.equal normalized "custom"
 
 (** Returns true if the provider name represents a local runtime that
     uses runtime discovery (e.g. the live /props probe for per-slot
@@ -396,7 +381,7 @@ let requires_discovery pname =
     [runtime_kind = Local] adapters and the special "custom" prefix. *)
 let is_local_provider pname =
   let normalized = normalize_label pname in
-  normalized = cn_custom || requires_discovery pname
+  is_custom_provider_prefix normalized || requires_discovery pname
 ;;
 
 (** [is_http_probe_capable_kind kind] is [true] when the provider
@@ -528,7 +513,7 @@ let provider_label_of_explicit_prefix (prefix : string) : string option =
   let normalized = normalize_label prefix in
   match resolve_adapter_by_cascade_prefix normalized with
   | Some adapter -> Some adapter.cascade_prefix
-  | None -> if String.equal normalized cn_custom then Some cn_custom else None
+  | None -> if is_custom_provider_prefix normalized then Some normalized else None
 ;;
 
 (** Classify a model label to a provider name for telemetry grouping.

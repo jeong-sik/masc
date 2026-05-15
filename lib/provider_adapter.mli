@@ -115,24 +115,6 @@ type gemini_direct_auth =
   | Gemini_api_key
   | Gemini_auth_missing of string
 
-(** {1 Canonical Provider Names} *)
-
-val cn_llama : string
-val cn_ollama : string
-val cn_unknown_provider : string
-val cn_claude : string
-val cn_codex : string
-val cn_gemini : string
-val cn_kimi : string
-val cn_claude_api : string
-val cn_codex_api : string
-val cn_gemini_api : string
-val cn_kimi_api : string
-val cn_glm : string
-val cn_glm_coding_plan : string
-val cn_openrouter : string
-val cn_custom : string
-
 (** {1 String Converters} *)
 
 val string_of_runtime_kind : runtime_kind -> string

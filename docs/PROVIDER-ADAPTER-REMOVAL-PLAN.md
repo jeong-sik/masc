@@ -208,7 +208,7 @@ Use these gates per phase:
 ```bash
 scripts/lint/provider-adapter-removal-ratchet.sh
 rg -l 'Provider_adapter\.' lib test bin
-rg -n 'let cn_|direct_adapters|canonical_name = cn_|default_model_fallback|defaults = \[' lib/provider_adapter.ml
+rg -n 'direct_adapters|default_model_fallback|defaults = \[' lib/provider_adapter.ml
 scripts/lint/no-provider-name-hardcoding.sh --fail
 git diff --check
 ```

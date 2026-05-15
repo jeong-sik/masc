@@ -263,8 +263,11 @@ let test_make_local_label () =
     "make_local_label preserves model id"
     "llama:some-model"
     (Adapter.make_local_label "some-model");
-  (* Verify make_local_label uses the same prefix as the llama adapter *)
-  check string "prefix matches cn_llama" Adapter.local_cascade_prefix Adapter.cn_llama
+  check
+    string
+    "make_local_label uses local_cascade_prefix"
+    (Adapter.local_cascade_prefix ^ ":qwen3.5")
+    (Adapter.make_local_label "qwen3.5")
 ;;
 
 let test_runtime_mcp_header_support_uses_declared_policy () =

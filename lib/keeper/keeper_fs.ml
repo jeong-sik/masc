@@ -38,9 +38,9 @@ let ensure_dir (path : string) : string =
             Log.Keeper.warn "keeper_fs: ensure_dir cancelled path=%s" path;
             Error (exn, Printexc.get_raw_backtrace ())
         | exn ->
-            Keeper_fd_pressure.note_if_fd_exhaustion
+            Keeper_fd_pressure.note_exception
               ~site:"keeper_fs.ensure_dir"
-              (Printexc.to_string exn);
+              exn;
             Prometheus.inc_counter
               Keeper_metrics.metric_keeper_fs_failures
               ~labels:[("path", path); ("site", Keeper_fs_failure_site.(to_label Ensure_dir_failed))]
@@ -93,9 +93,9 @@ let save_atomic (path : string) (content : string) : (unit, string) result =
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
       let msg = Printexc.to_string exn in
-      Keeper_fd_pressure.note_if_fd_exhaustion
+      Keeper_fd_pressure.note_exception
         ~site:"keeper_fs.save_atomic"
-        msg;
+        exn;
       Prometheus.inc_counter
         Keeper_metrics.metric_keeper_fs_failures
         ~labels:[("path", path); ("site", Keeper_fs_failure_site.(to_label Save_atomic_raised))]

@@ -1725,13 +1725,21 @@ let test_dashboard_executor_pool_contracts () =
        "Eio.Executor_pool.submit_exn");
   check bool "mission refresh loop uses dashboard compute helper" true
     (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
-       "run_dashboard_compute ~mode:Offloaded_readonly ?net ?mono_clock ~sw");
+       "let start_mission_refresh_loop"
+     && file_contains_pattern "lib/server/server_dashboard_http_core.ml"
+          "Dashboard_mission.json ~config ~sw ~clock ~proc_mgr ()");
   check bool "mission actor path uses dashboard compute helper" true
     (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
-       "run_dashboard_compute ~mode ?net ?mono_clock ~sw ~clock");
+       "let dashboard_mission_http_json"
+     && file_contains_pattern "lib/server/server_dashboard_http_core.ml"
+          "let compute ?actor () ="
+     && file_contains_pattern "lib/server/server_dashboard_http_core.ml"
+          "run_dashboard_compute");
   check bool "execution refresh loop uses dashboard compute helper" true
     (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
-       "run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ~net");
+       "let start_execution_refresh_loop"
+     && file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
+          "Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ()");
   check bool "server state captures mono_clock for threaded readonly compute" true
     (file_contains_pattern "lib/mcp_server.ml"
        "mono_clock: Eio.Time.Mono.ty Eio.Resource.t option");
@@ -1746,10 +1754,15 @@ let test_dashboard_executor_pool_contracts () =
        "Eio_context.get_mono_clock ()");
   check bool "execution parameterized path uses dashboard compute helper" true
     (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
-       "run_dashboard_compute ~mode:Offloaded_readonly ?net ?mono_clock ~sw");
-  check bool "server bootstrap wires executor pool into dashboard" true
+       "let compute ?actor ?fixture ~light () ="
+     && file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
+          "Dashboard_execution.json");
+  check bool "server bootstrap installs shared domain pool" true
     (file_contains_pattern "lib/server/server_runtime_bootstrap.ml"
-       "Server_dashboard_http.set_executor_pool exec_pool")
+       "Domain_pool_ref.set domain_pool");
+  check bool "server bootstrap wires domain pool executor into dashboard" true
+    (file_contains_pattern "lib/server/server_runtime_bootstrap.ml"
+       "Server_dashboard_http.set_executor_pool (Domain_pool.executor_pool domain_pool)")
 
 (* pg schema init contracts removed: init_pg_schemas_sequential was deleted in #3218 *)
 

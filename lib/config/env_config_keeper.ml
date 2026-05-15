@@ -138,11 +138,11 @@ end
 
 module KeeperSupervisor = struct
   (** Route per-keeper supervise fork through the shared
-      [Eio.Executor_pool] (RFC-0059 PR-7-pilot) instead of staying on
-      the main domain's Eio scheduler. Default OFF — opt-in. When ON,
-      [Executor_pool_ref.get ()] must return [Some pool] (set at boot
-      by [server_runtime_bootstrap]); if [None] the supervisor falls
-      back to [Eio.Fiber.fork ~sw:ctx.sw] silently. *)
+      [Domain_pool] (RFC-0059 PR-7-pilot) instead of staying on the
+      main domain's Eio scheduler. Default OFF — opt-in. When ON,
+      [Domain_pool_ref.get ()] must return [Some pool] (set at boot by
+      [server_runtime_bootstrap]); if [None] the supervisor falls back
+      to [Eio.Fiber.fork ~sw:ctx.sw] silently. *)
   let domain_pool_enabled =
     Feature_flag_registry.get_bool "MASC_KEEPER_DOMAIN_POOL_ENABLED"
   ;;

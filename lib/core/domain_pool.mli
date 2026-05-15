@@ -19,10 +19,8 @@
     (keeper actor migration) and PR-8 (repo sync async) consume it for
     parallel actor dispatch and parallel git command execution.
 
-    [Executor_pool_ref] (global atomic holder + inline fallback) is
-    orthogonal: it serves dashboard compute that must work in tests
-    where no pool exists.  [Domain_pool] is for code paths that hold
-    an explicit pool handle. *)
+    [Domain_pool_ref] installs the process-wide instance for runtime
+    call sites that need a shared pool with inline fallback. *)
 
 type t
 (** Opaque pool handle.  Carries the underlying [Eio.Executor_pool.t]

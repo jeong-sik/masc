@@ -258,23 +258,12 @@ let launch_supervised_fiber
     in
     Keeper_registry.enqueue_event ~base_path meta.name bootstrap_signal;
     (* RFC-0059 PR-7-pilot: when [MASC_KEEPER_DOMAIN_POOL_ENABLED] is set
-       AND the shared [Executor_pool_ref] has a pool, route the per-keeper
-       fork body through the pool so the heavy heartbeat loop runs on a
-       worker Domain instead of contending for the main Domain's Eio
-       scheduler with HTTP/SSE handlers and every other keeper.
-
-       Default OFF: opt-in only. When ON the body still owns its own
-       state via [Keeper_registry] (file-backed, cross-domain safe);
-       the outer [Eio.Fiber.fork] on [ctx.sw] preserves the existing
-       structured-concurrency contract — exceptions from the worker
-       propagate via [submit_exn] back to the awaiting main-domain
-       fiber and on to [ctx.sw].
-
-       Cross-domain switch / fiber-local-state safety inside
-       [run_heartbeat_loop] is the open architectural question this
-       pilot exists to validate; see RFC-0059 §10 risks. *)
+       and the shared typed [Domain_pool] has been installed, route the
+       per-keeper heartbeat body through [Domain_pool.submit_io].  This keeps
+       the main Domain focused on HTTP/SSE/Eio scheduling while centralising
+       the worker weight policy in [Domain_pool]. *)
     let domain_pool_flag = Env_config.KeeperSupervisor.domain_pool_enabled in
-    let pool_for_keeper = if domain_pool_flag then Executor_pool_ref.get () else None in
+    let pool_for_keeper = if domain_pool_flag then Domain_pool_ref.get () else None in
     let bump_fork_outcome outcome =
       (* Label order mirrors the other [keeper_supervisor.ml] inc_counter
          call sites ([keeper] first, then the discriminator).  Prometheus
@@ -286,32 +275,30 @@ let launch_supervised_fiber
         ~labels:[ "keeper", meta.name; "outcome", outcome ]
         ()
     in
-    (* IO-bound weight: 0.05 mirrors [Domain_pool.weight_io] (the
-       canonical IO weight from [lib/core/domain_pool.ml:9]).  The
-       supervisor talks to [Eio.Executor_pool.t] directly via
-       [Executor_pool_ref] (no [Domain_pool.t] wrapper available here),
-       so the constant is re-named locally with a reference comment
-       rather than going through [Domain_pool.submit_io].  Drift between
-       these two values would silently change keeper concurrency under
-       the pool. *)
-    let keeper_io_weight = 0.05 in
     let fork_body body =
       match pool_for_keeper with
       | Some pool ->
         bump_fork_outcome "pool";
         Eio.Fiber.fork ~sw:ctx.sw (fun () ->
-          try Eio.Executor_pool.submit_exn pool ~weight:keeper_io_weight body with
-          | Eio.Cancel.Cancelled _ as e -> raise e
-          | exn ->
-            (* Match the dashboard offload pattern in
-               [server_dashboard_http_runtime_support]: if the pool
-               itself fails (rather than the body raising on
-               cancellation), warn-log and fall back inline so a
-               misconfigured pool does not bring down the supervisor
-               by surfacing the exception to [ctx.sw].  We emit a
-               second counter increment with [outcome=submit_failed]
-               so dashboards can see the failure ratio without losing
-               the original "pool" launch attempt. *)
+          let run_body_as_result () =
+            try Ok (body ()) with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn -> Error (exn, Printexc.get_raw_backtrace ())
+          in
+          match
+            try Ok (Domain_pool.submit_io pool run_body_as_result) with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn -> Error exn
+          with
+          | Ok (Ok ()) -> ()
+          | Ok (Error (exn, bt)) ->
+            bump_fork_outcome "body_failed";
+            Log.Keeper.warn
+              "keeper supervise pool body failed: keeper=%s err=%s"
+              meta.name
+              (Printexc.to_string exn);
+            Printexc.raise_with_backtrace exn bt
+          | Error exn ->
             bump_fork_outcome "submit_failed";
             Log.Keeper.warn
               "keeper supervise pool submit failed, running inline: keeper=%s err=%s"

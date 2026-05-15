@@ -8,6 +8,7 @@ open Alcotest
     down when the switch finishes — every test is isolated. *)
 
 module D = Domain_pool
+module R = Domain_pool_ref
 
 (* ── recommended_domain_count ──────────────────────────── *)
 
@@ -150,6 +151,30 @@ let test_executor_pool_accessor () =
       in
       check string "executor_pool exposes underlying pool" "via_raw" result))
 
+(* ── process-wide reference ────────────────────────────── *)
+
+let test_ref_runs_inline_when_absent () =
+  R.clear_for_tests ();
+  let main_domain = (Domain.self () :> int) in
+  let observed = R.submit_cpu_or_inline (fun () -> (Domain.self () :> int)) in
+  check int "absent pool runs inline" main_domain observed
+
+let test_ref_submits_to_shared_pool () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      R.clear_for_tests ();
+      let dm = Eio.Stdenv.domain_mgr env in
+      let pool = D.create ~sw ~domain_count:1 dm in
+      R.set pool;
+      check (option int) "domain count exposed" (Some 1) (R.domain_count_opt ());
+      let main_domain = (Domain.self () :> int) in
+      let worker_domain =
+        R.submit_cpu_or_inline (fun () -> (Domain.self () :> int))
+      in
+      check bool "ref submit runs off main domain" true
+        (worker_domain <> main_domain);
+      R.clear_for_tests ()))
+
 (* ── Suite ──────────────────────────────────────────────── *)
 
 let () =
@@ -183,5 +208,9 @@ let () =
     ];
     "escape_hatch", [
       test_case "executor_pool accessor" `Quick test_executor_pool_accessor;
+    ];
+    "ref", [
+      test_case "inline when absent" `Quick test_ref_runs_inline_when_absent;
+      test_case "submits to shared pool" `Quick test_ref_submits_to_shared_pool;
     ];
   ]

@@ -1622,11 +1622,21 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       in
       Server_bootstrap_http.print_startup_banner ~config ~resolved_base ~base_path
         ~masc_dir ~path_diagnostics;
-      (* Create Executor_pool for CPU-heavy dashboard compute.
-         Runs in separate OS domains, bypassing fiber contention. *)
-      let exec_pool = Eio.Executor_pool.create ~sw ~domain_count:2 domain_mgr in
-      Server_dashboard_http.set_executor_pool exec_pool;
-      Log.Server.info "Executor_pool created (2 domains) for dashboard";
+      (* Create the shared Domain_pool for dashboard compute and optional
+         keeper offload.  The raw Executor_pool reference remains available
+         for existing dashboard call sites, but new runtime call sites should
+         go through Domain_pool_ref to preserve IO/CPU weight policy. *)
+      let domain_pool =
+        Domain_pool.create
+          ~sw
+          ?domain_count:(Env_config.Executor.domain_count_override ())
+          domain_mgr
+      in
+      Domain_pool_ref.set domain_pool;
+      Server_dashboard_http.set_executor_pool (Domain_pool.executor_pool domain_pool);
+      Log.Server.info
+        "Domain_pool created (%d domains) for dashboard/keeper compute"
+        (Domain_pool.domain_count domain_pool);
       (* Start auxiliary transports before optional warmups and keeper loops.
          Otherwise HTTP can report ready while gRPC/WS startup is still stuck
          behind heavier startup work. *)

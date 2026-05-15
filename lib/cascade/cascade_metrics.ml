@@ -376,23 +376,17 @@ let on_provider_cooldown ~provider ~reason =
     ~labels:[ ("provider", provider); ("reason", reason) ]
     ()
 
-(* Two [Cascade_strategy] ordering branches have a "starvation guard"
+(* [Cascade_strategy.Priority_tier] has a "starvation guard"
    fail-OPEN: when every candidate reports capacity=0 the function
    falls through with the pre-filter candidate list so at least one
    call is attempted (and the upstream real error — rate limit,
    auth — surfaces) instead of silently exhausting the cascade.
 
-   - Circuit_breaker_cycling — [order_candidates] line 608-609
-   - Priority_tier           — [priority_tier_order] line 542-543
-
-   The third ordering strategy ([weighted_shuffle]) deliberately
-   fails closed and is NOT covered by this counter.
-
    A non-zero rate signals capacity probes have been judging the
    cascade exhausted; pair with iter-8 probe metrics and iter-20
    provider_cooldown to attribute the cause.
 
-   Cardinality: cascades (~10) x strategies (2) = ~20 series. *)
+   Cardinality: cascades (~10) x strategies (1) = ~10 series. *)
 let metric_strategy_starvation_guard = "masc_cascade_strategy_starvation_guard_total"
 
 let on_strategy_starvation_guard ~cascade ~strategy =
@@ -400,57 +394,10 @@ let on_strategy_starvation_guard ~cascade ~strategy =
     ~labels:[ ("cascade", cascade); ("strategy", strategy) ]
     ()
 
-(* [Cascade_strategy.sticky_order] looks up a per-(keeper, cascade)
-   sticky pin via [Cascade_state.lookup_sticky] and three outcomes
-   are possible:
-     - None        : no pin (first lookup, or TTL expired) — normal
-     - Some + hit  : pin still in candidate list — normal stick
-     - Some + miss : pin no longer in candidate list — DRIFT
-                     (e.g. operator removed the provider from
-                     cascade.toml, or a registry reload dropped it)
-
-   The drift arm silently falls back to plain Failover, breaking
-   the operator-expressed intent to stick to one provider, with
-   only a code comment as evidence.  Counter only ticks on drift
-   (not on the normal hit/miss-no-pin paths) so a non-zero rate
-   directly maps to "sticky intent broken N times".
-
-   Cardinality: cascades (~10) = ~10 series. *)
-let metric_sticky_drift = "masc_cascade_sticky_drift_total"
-
-let on_sticky_drift ~cascade =
-  Prometheus.inc_counter metric_sticky_drift
-    ~labels:[ ("cascade", cascade) ]
-    ()
-
-(* [Cascade_state.lookup_sticky] returns None in two distinct cases
-   that were previously indistinguishable to callers:
-     - No entry recorded yet (first lookup for this keeper+cascade)
-     - Entry recorded but TTL expired (now >= entry.expires_at)
-
-   Only the second is interesting to operators — it's the explicit
-   signal that the configured TTL is too short for the actual
-   keeper request cadence, breaking the sticky-intent before the
-   next turn lands.  iter 23 covers [sticky_drift] (pin invalidated
-   by candidate-list change); this counter covers the orthogonal
-   case (pin invalidated by TTL).  Both surfaces matter for TTL
-   tuning: too-short TTL inflates [sticky_expiry], too-long TTL
-   inflates [sticky_drift].
-
-   The no-pin case is NOT counted (normal first lookup, no operator
-   signal).
-
-   Cardinality: cascades (~10) = ~10 series. *)
-let metric_sticky_expiry = "masc_cascade_sticky_expiry_total"
-
-let on_sticky_expiry ~cascade =
-  Prometheus.inc_counter metric_sticky_expiry
-    ~labels:[ ("cascade", cascade) ]
-    ()
-
-(* [Cascade_runtime.default_model_strings] has two arms that fall back to the
-   local runtime fallback label when the normal cascade.toml-derived label
-   resolution can't produce anything usable:
+(* [Cascade_runtime.default_model_strings] has two arms that fall
+   back to the provider-adapter default-local fallback label when the
+   normal cascade.toml-derived label resolution can't produce
+   anything usable:
 
      no_execution_labels        — neither
                                   [explicit_llama_model_label_result]
@@ -463,8 +410,8 @@ let on_sticky_expiry ~cascade =
                                   traffic at a cascade with only
                                   remote providers.
 
-   Both arms silently substitute a single hardcoded
-   [default_local_fallback_label].  Until iter 25 the only way to
+   Both arms silently substitute a single hardcoded default-local
+   fallback label.  Until iter 25 the only way to
    notice was to inspect resolved Provider_config lists at the
    dashboard.  Counter ticks here lift the silent fallback to a
    per-cascade rate operators can alert on.
@@ -1059,8 +1006,6 @@ let all_cascade_counters : (string * string) list = [
      existing [keeper_provider_block_duration_sec] histogram \
      (duration distribution, this is entry rate by cause).";
   metric_strategy_starvation_guard, metric_strategy_starvation_guard;
-  metric_sticky_drift, metric_sticky_drift;
-  metric_sticky_expiry, metric_sticky_expiry;
   metric_default_label_fallback, metric_default_label_fallback;
   metric_max_context_fallback,
     "Total context-window resolutions falling back to \

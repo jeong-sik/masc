@@ -35,7 +35,7 @@ count_field_string_signatures() {
   local field="$1"
   ( set +o pipefail
     cd "$REPO_ROOT"
-    rg -c -e "[?]?${field}[[:space:]]*:[[:space:]]*string" \
+    rg -c -e "(^|[^[:alnum:]_?])\\??${field}[[:space:]]*:[[:space:]]*string" \
       --glob "*.ml" --glob "*.mli" lib test 2>/dev/null \
       | awk -F: '{sum+=$NF} END {print sum+0}'
   )

@@ -4,7 +4,7 @@ last_verified: 2026-04-17
 code_refs:
   - lib/keeper/keeper_state_machine.ml
   - lib/keeper/keeper_config.ml
-  - lib/keeper/heartbeat_smart.ml
+  - lib/keeper/keeper_heartbeat_smart.ml
 ---
 
 # Adaptive Heartbeat Production Runbook

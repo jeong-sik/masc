@@ -118,11 +118,35 @@ let register_post_hook (hook : post_hook) =
 let register_typed_post_hook (hook : post_hook_typed) =
   with_dispatch_rw (fun () -> typed_post_hooks := !typed_post_hooks @ [hook])
 
+(** RFC-0084 PR-I-2.d — Result transformer surface.
+
+    Carries the [Tool_result.t -> Tool_result.t] *transformation*
+    responsibility that the legacy [post_hook] surface used to mix
+    with observation.  Today there is exactly one transformer in
+    tree ([Tool_output_validation.post_hook] which caps oversized
+    payloads); the single-ref shape reflects that.  Future PRs may
+    grow this into a list if more transformers appear, but PR-I-3
+    can already remove the legacy [post_hook] surface knowing
+    transformation is no longer threaded through it. *)
+type result_transformer = Tool_result.t -> Tool_result.t
+
+let result_transformer_ref : result_transformer option ref = ref None
+
+let set_result_transformer (t : result_transformer) =
+  with_dispatch_rw (fun () -> result_transformer_ref := Some t)
+
+let apply_result_transformer (r : Tool_result.t) : Tool_result.t =
+  match !result_transformer_ref with
+  | None -> r
+  | Some t -> t r
+;;
+
 let clear_hooks () =
   with_dispatch_rw (fun () ->
     pre_hooks := [];
     post_hooks := [];
-    typed_post_hooks := [])
+    typed_post_hooks := [];
+    result_transformer_ref := None)
 
 (** Run pre-hooks in order, threading coerced args through the chain.
     First [Reject] wins (short-circuit). [Proceed] replaces args for
@@ -172,7 +196,13 @@ let dispatch ~(token : Tool_token.t) ~args : Tool_result.t option =
         Some (Tool_result.of_exn ~tool_name:name ~start_time exn)
     in
     (match result with
-     | Some tr -> Some (run_post_hooks tr)
+     | Some tr ->
+       (* RFC-0084 PR-I-2.d — apply the registered result transformer
+          (e.g. Tool_output_validation cap) before legacy post-hooks
+          run.  Post-hooks see the transformed result, which matches
+          the pre-PR-I order: cap-then-observe. *)
+       let tr = apply_result_transformer tr in
+       Some (run_post_hooks tr)
      | None -> None)
   | None -> None
 

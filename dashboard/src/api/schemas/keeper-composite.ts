@@ -132,6 +132,8 @@ const KeeperCompositeExecutionSchema = object({
   model_used: nullable(string()),
   stop_reason: nullable(string()),
   tool_contract_result: nullable(string()),
+  unexpected_tools: optional(array(string())),
+  unexpected_tool_count: optional(number()),
   duration_ms: nullable(number()),
   error: nullable(
     object({
@@ -162,6 +164,8 @@ const KeeperCompositeExecutionSchema = object({
       tool_surface_fallback_used: optional(nullable(boolean())),
       missing_required_tools: array(string()),
       required_tools: array(string()),
+      unexpected_tools: optional(array(string())),
+      unexpected_tool_count: optional(number()),
     }),
   ),
   claim_scope: optional(unknown()),

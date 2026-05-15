@@ -121,9 +121,10 @@ val degraded_retry_after_recoverable_error :
 (** Returns the next untried cascade in the same-turn recovery group for a
     whole-cascade failure. [rotation_cascades], when provided, is the
     runtime/catalog-owned candidate order and is used as-is; otherwise the
-    legacy base/default/local_recovery group is used. Required-tool turns keep
-    the tool requirement and leave concrete provider filtering to the cascade
-    resolver.
+    legacy base/tool_required group is used for required-tool turns and the
+    base/default/local_recovery group is used for optional/text turns.
+    Required-tool turns keep the tool requirement and leave concrete provider
+    filtering to the cascade resolver.
 
     [fallback_hint], when provided, is prepended to the candidate list so
     that single-provider profiles can declare an immediate escalation

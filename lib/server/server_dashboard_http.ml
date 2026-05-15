@@ -773,6 +773,7 @@ let compact_receipt_tool_surface_json receipt =
   match surface with
   | `Assoc _ as surface ->
     let tool_requirement = json_string "tool_requirement" surface in
+    let unexpected_tools = Json_util.get_string_list receipt "unexpected_tools" in
     let turn_lane =
       (* Wire values come from [Keeper_agent_tool_surface.tool_requirement_to_yojson]
          (lib/keeper/keeper_agent_tool_surface.ml): "required", "optional", "none".
@@ -804,6 +805,8 @@ let compact_receipt_tool_surface_json receipt =
       ; ( "required_tools"
         , Json_util.json_string_list (Json_util.get_string_list surface "required_tools")
         )
+      ; "unexpected_tools", Json_util.json_string_list unexpected_tools
+      ; "unexpected_tool_count", `Int (List.length unexpected_tools)
       ]
   | _ -> `Null
 ;;
@@ -1022,6 +1025,10 @@ let composite_execution_receipt_json ~(config : Coord.config) ~keeper_name =
       ; "stop_reason", Json_util.string_opt_to_json (json_string "stop_reason" receipt)
       ; ( "tool_contract_result"
         , Json_util.string_opt_to_json (json_string "tool_contract_result" receipt) )
+      ; ( "unexpected_tools"
+        , Json_util.json_string_list (Json_util.get_string_list receipt "unexpected_tools") )
+      ; ( "unexpected_tool_count"
+        , `Int (List.length (Json_util.get_string_list receipt "unexpected_tools")) )
       ; ( "duration_ms"
         , Json_util.float_opt_to_json (json_float "duration_ms" action_radius) )
       ; "error", compact_receipt_error_json receipt

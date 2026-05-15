@@ -1452,8 +1452,10 @@ function decodeGoalKeeperTrustExecutionSummary(raw: unknown): GoalKeeperTrustExe
     missing_required_tools: asStringArray(raw.missing_required_tools),
     requested_tools: asStringArray(raw.requested_tools),
     tools_used: asStringArray(raw.tools_used),
+    unexpected_tools: asStringArray(raw.unexpected_tools),
     requested_tool_count: asInt(raw.requested_tool_count) ?? null,
     tools_used_count: asInt(raw.tools_used_count) ?? null,
+    unexpected_tool_count: asInt(raw.unexpected_tool_count) ?? null,
     provider_attempt_count: asInt(raw.provider_attempt_count) ?? null,
     provider_fallback_applied:
       typeof raw.provider_fallback_applied === 'boolean'

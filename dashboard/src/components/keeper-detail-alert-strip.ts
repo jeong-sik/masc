@@ -53,6 +53,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const requiredTools = executionSummary?.required_tools ?? []
   const missingRequiredTools = executionSummary?.missing_required_tools ?? []
   const usedTools = executionSummary?.tools_used ?? []
+  const unexpectedTools = executionSummary?.unexpected_tools ?? []
   const providerAttempts = executionSummary?.provider_attempt_count
   const providerFallback = executionSummary?.provider_fallback_applied
   const cascadeOutcome = executionSummary?.cascade_outcome?.trim() || null
@@ -111,6 +112,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
     Boolean(runtimeProofStatus)
     || requiredTools.length > 0
     || usedTools.length > 0
+    || unexpectedTools.length > 0
     || missingRequiredTools.length > 0
     || Boolean(trustSummary)
     || Boolean(latestTerminalCode)
@@ -282,6 +284,9 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           : null}
         ${usedTools.length > 0
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">사용 도구</strong> · ${usedTools.join(', ')}</span>`
+          : null}
+        ${unexpectedTools.length > 0
+          ? html`<span class="text-[var(--color-status-err)]"><strong>외부 도구</strong> · ${unexpectedTools.join(', ')}</span>`
           : null}
         ${missingRequiredTools.length > 0
           ? html`<span class="text-[var(--color-status-err)]"><strong>누락</strong> · ${missingRequiredTools.join(', ')}</span>`

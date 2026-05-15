@@ -794,6 +794,9 @@ let test_execution_trust_surfaces_latest_receipt () =
               [ "WebSearch" ]
               (trust_row |> member "trust" |> member "unexpected_tools"
              |> to_list |> List.map to_string);
+            check int "execution trust row preserves unexpected tool count" 1
+              (trust_row |> member "trust" |> member "unexpected_tool_count"
+             |> to_int);
             let execution_json =
               Lib.Dashboard_execution.json
                 ~config
@@ -819,7 +822,14 @@ let test_execution_trust_surfaces_latest_receipt () =
             check string "execution row exposes cascade outcome"
               "passed_to_next_model"
               (execution_row |> member "trust" |> member "execution_summary"
-             |> member "cascade_outcome" |> to_string))))
+             |> member "cascade_outcome" |> to_string);
+            check (list string) "execution row exposes unexpected tools"
+              [ "WebSearch" ]
+              (execution_row |> member "trust" |> member "execution_summary"
+             |> member "unexpected_tools" |> to_list |> List.map to_string);
+            check int "execution row exposes unexpected tool count" 1
+              (execution_row |> member "trust" |> member "execution_summary"
+             |> member "unexpected_tool_count" |> to_int))))
 
 let test_dashboard_execution_queue_surfaces_keeper_runtime_trust () =
   let dir = test_dir () in

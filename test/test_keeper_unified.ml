@@ -34,6 +34,11 @@ let phase_recovery_cascade_name () =
     Masc_mcp.Keeper_cascade_profile.Phase_recovery
 ;;
 
+let tool_required_cascade_name () =
+  Masc_mcp.Keeper_cascade_profile.cascade_name_for_use
+    Masc_mcp.Keeper_cascade_profile.Tool_required
+;;
+
 let safe_lane_cascade_name = Masc_mcp.Cascade_capability_profile.safe_lane_cascade_name
 
 let has_prompt_root path =
@@ -6307,7 +6312,7 @@ let test_next_fail_open_cascade_for_turn_suppresses_exhausted_rotation_group () 
   check bool "exhausted rotation group suppressed" true (Option.is_none degraded_retry)
 ;;
 
-let test_next_fail_open_cascade_for_required_tool_uses_default_not_strict () =
+let test_next_fail_open_cascade_for_required_tool_uses_tool_required_route () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
       ~base_cascade:"scoring"
@@ -6317,8 +6322,8 @@ let test_next_fail_open_cascade_for_required_tool_uses_default_not_strict () =
       (wrapped_claude_limit_error ())
   in
   expect_degraded_retry
-    "required tool degraded retry skips strict injection"
-    (KC.default_cascade_name ())
+    "required tool degraded retry uses configured tool-required route"
+    (tool_required_cascade_name ())
     "hard_quota"
     degraded_retry
 ;;
@@ -6419,10 +6424,28 @@ let test_next_fail_open_cascade_for_required_tool_rejects_local_recovery_only_ca
       (required_tool_contract_violation_error ())
   in
   expect_degraded_retry
-    "required catalog default-backed recovery"
-    (KC.default_cascade_name ())
+    "required catalog tool-required-backed recovery"
+    (tool_required_cascade_name ())
     "required_tool_contract_violation"
     degraded_retry
+;;
+
+let test_next_fail_open_cascade_for_required_tool_does_not_fall_through_to_manual_catalog
+      ()
+  =
+  let degraded_retry =
+    UT.next_fail_open_cascade_for_turn
+      ~rotation_cascades:[ "cli_manual" ]
+      ~base_cascade:"strict_exec"
+      ~effective_cascade:"strict_exec"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
+      ~attempted_cascades:[ "strict_exec"; tool_required_cascade_name () ]
+      (required_tool_contract_violation_error ())
+  in
+  check bool
+    "required rotation stays within tool-required route and explicit fallback"
+    true
+    (Option.is_none degraded_retry)
 ;;
 
 let test_degraded_rotation_after_recoverable_error_filters_required_catalog_directly () =
@@ -12210,9 +12233,9 @@ let () =
             `Quick
             test_next_fail_open_cascade_for_turn_suppresses_exhausted_rotation_group
         ; test_case
-            "required-tool rotation uses default without strict injection"
+            "required-tool rotation uses tool-required route"
             `Quick
-            test_next_fail_open_cascade_for_required_tool_uses_default_not_strict
+            test_next_fail_open_cascade_for_required_tool_uses_tool_required_route
         ; test_case
             "required tool turns rotate without dropping requirement"
             `Quick
@@ -12237,6 +12260,10 @@ let () =
             "required-tool local-recovery-only catalog exhausts"
             `Quick
             test_next_fail_open_cascade_for_required_tool_rejects_local_recovery_only_catalog
+        ; test_case
+            "required-tool rotation does not fall through to manual catalog"
+            `Quick
+            test_next_fail_open_cascade_for_required_tool_does_not_fall_through_to_manual_catalog
         ; test_case
             "classifier filters required-tool catalog rotation"
             `Quick

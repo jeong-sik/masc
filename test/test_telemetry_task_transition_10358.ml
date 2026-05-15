@@ -20,11 +20,7 @@ let with_env name value_opt f =
 let with_isolated_runtime_env f =
   with_env "MASC_BASE_PATH" None (fun () ->
     with_env "MASC_BASE_PATH_INPUT" None (fun () ->
-      with_env "MASC_STORAGE_TYPE" None (fun () ->
-        with_env "MASC_POSTGRES_URL" None (fun () ->
-          with_env "DATABASE_URL" None (fun () ->
-            with_env "SUPABASE_DB_URL" None (fun () ->
-              with_env "SB_PG_URL" None f))))))
+      with_env "MASC_STORAGE_TYPE" None f))
 
 let make_ctx base_path =
   let config = Coord.default_config base_path in

@@ -520,17 +520,9 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
     [
       ("MASC_BASE_PATH", Sys.getenv_opt "MASC_BASE_PATH");
       ("MASC_STORAGE_TYPE", Sys.getenv_opt "MASC_STORAGE_TYPE");
-      ("MASC_POSTGRES_URL", Sys.getenv_opt "MASC_POSTGRES_URL");
-      ("DATABASE_URL", Sys.getenv_opt "DATABASE_URL");
-      ("SUPABASE_DB_URL", Sys.getenv_opt "SUPABASE_DB_URL");
-      ("SB_PG_URL", Sys.getenv_opt "SB_PG_URL");
     ]
   in
   Unix.putenv "MASC_STORAGE_TYPE" "filesystem";
-  Unix.putenv "MASC_POSTGRES_URL" "";
-  Unix.putenv "DATABASE_URL" "";
-  Unix.putenv "SUPABASE_DB_URL" "";
-  Unix.putenv "SB_PG_URL" "";
   let base_path = Generic.temp_dir "keeper-tool-matrix-" in
   Unix.putenv "MASC_BASE_PATH" base_path;
   let result =

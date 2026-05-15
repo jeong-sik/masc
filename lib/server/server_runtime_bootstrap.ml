@@ -5,24 +5,8 @@ open Server_routes_http
 module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
 
-let retired_pg_env_keys =
-  [ "MASC_POSTGRES_URL"; "DATABASE_URL"; "SUPABASE_DB_URL"; "SB_PG_URL" ]
-
-let clear_retired_pg_envs () =
-  List.iter
-    (fun key ->
-      match Sys.getenv_opt key |> Env_config_core.trim_opt with
-      | Some _ ->
-          Log.Server.info
-            "Clearing retired PG runtime env %s; filesystem-only bootstrap is enforced."
-            key;
-          Unix.putenv key ""
-      | None -> Unix.putenv key "")
-    retired_pg_env_keys
-
 let force_jsonl_fallback_env () =
-  Unix.putenv Env_config_core.storage_type_env_key "filesystem";
-  clear_retired_pg_envs ()
+  Unix.putenv Env_config_core.storage_type_env_key "filesystem"
 
 let requested_backend_mode () =
   Env_config_core.storage_type ()

@@ -837,10 +837,6 @@ let with_seeded_server ?(env_overrides = []) f =
          ; "GRAPHQL_API_KEY", ""
          ; "GRAPHQL_URL", "http://127.0.0.1:9/graphql"
          ; "MASC_BASE_PATH", base_path
-         ; "MASC_POSTGRES_URL", ""
-         ; "DATABASE_URL", ""
-         ; "SUPABASE_DB_URL", ""
-         ; "SB_PG_URL", ""
          ; "MASC_BOARD_BACKEND", "jsonl"
          ]
          @ env_overrides)

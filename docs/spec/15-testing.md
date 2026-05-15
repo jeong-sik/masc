@@ -41,10 +41,6 @@ MASC MCP의 검증 전략을 정의한다. 테스트는 3개 계층(Hermetic Req
 
 ```
 MASC_STORAGE_TYPE=filesystem     (파일시스템 백엔드 강제)
-MASC_POSTGRES_URL=""             (PG 자동 감지 차단)
-DATABASE_URL=""                  (PG cascade 차단)
-SUPABASE_DB_URL=""               (Supabase 차단)
-SB_PG_URL=""                     (SB PostgreSQL 차단)
 GRAPHQL_API_KEY=""               (GraphQL API 비활성화)
 ZAI_API_KEY=""                   (ZAI API 비활성화)
 ```
@@ -304,7 +300,7 @@ bisect-ppx-report html --coverage-path _coverage
 
 ## 9. 불변식
 
-- **INV-T1**: Hermetic Required 계층의 모든 테스트는 `MASC_POSTGRES_URL=""`, `GRAPHQL_API_KEY=""` 상태에서 통과해야 한다.
+- **INV-T1**: Hermetic Required 계층의 모든 테스트는 외부 GraphQL/ZAI credentials 없이 통과해야 한다.
 - **INV-T2**: Env-gated 테스트는 필수 환경변수 부재 시 skip 또는 not run으로 처리한다. 실패가 아니다.
 - **INV-T3**: `eval_gate`의 각 검사 레이어는 독립적이다. 한 레이어의 통과가 다른 레이어의 실패를 가릴 수 없다 (Swiss Cheese).
 - **INV-T4**: `trajectory.tool_call_entry`의 `gate_decision`이 `Reject`이면 `result`는 반드시 `None`이다.

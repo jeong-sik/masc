@@ -160,7 +160,7 @@ server_runtime_bootstrap.force_jsonl_fallback_env
 
 ### 4.3 PostgreSQL Backend Status
 
-PostgreSQL Board backend는 runtime contract가 아니다. `MASC_POSTGRES_URL`은 Board backend를 선택하지 않고, bootstrap은 filesystem storage를 유지한다.
+PostgreSQL Board backend는 runtime contract가 아니다. Bootstrap은 filesystem storage를 유지한다.
 
 ---
 

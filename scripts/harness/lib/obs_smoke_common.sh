@@ -102,10 +102,6 @@ obs_start_server() {
     MASC_GRPC_ENABLED="0" \
     MASC_WEBSOCKET_ENABLED="0" \
     MASC_WEBRTC_ENABLED="0" \
-    MASC_POSTGRES_URL="" \
-    DATABASE_URL="" \
-    SUPABASE_DB_URL="" \
-    SB_PG_URL="" \
     GRAPHQL_API_KEY="" \
     GRAPHQL_URL="http://127.0.0.1:9/graphql" \
     MASC_BOARD_BACKEND="jsonl" \

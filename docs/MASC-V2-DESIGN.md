@@ -65,7 +65,6 @@ Machine A:
 | `MASC_BASE_PATH` | Base path (determines `.masc/` location) |
 | `MASC_CLUSTER_NAME` | Cluster name override |
 | `MASC_STORAGE_TYPE` | Active value: `filesystem`; non-filesystem requests fall back to filesystem during bootstrap |
-| `MASC_POSTGRES_URL` | Retired runtime backend env; ignored by current bootstrap |
 
 **Use Cases**:
 - **Filesystem Mode**: Claude Code + terminal Gemini/Codex on the same machine. This is the only supported runtime storage lane.

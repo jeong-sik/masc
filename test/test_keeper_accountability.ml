@@ -54,19 +54,8 @@ let with_room ?(agent_name = "keeper-sangsu-agent") f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = temp_dir () in
-  let saved_pg = Sys.getenv_opt "MASC_POSTGRES_URL" in
-  let saved_sb = Sys.getenv_opt "SB_PG_URL" in
-  Unix.putenv "MASC_POSTGRES_URL" "";
-  Unix.putenv "SB_PG_URL" "";
   Fun.protect
-    ~finally:(fun () ->
-      (match saved_pg with
-       | Some value -> Unix.putenv "MASC_POSTGRES_URL" value
-       | None -> Unix.putenv "MASC_POSTGRES_URL" "");
-      (match saved_sb with
-       | Some value -> Unix.putenv "SB_PG_URL" value
-       | None -> Unix.putenv "SB_PG_URL" "");
-      cleanup_dir dir)
+    ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       let config = Coord.default_config dir in
       ignore (Coord.init config ~agent_name:(Some agent_name));

@@ -629,12 +629,6 @@ let test_storage_truth_guard_contracts () =
   check bool "storage inventory names filesystem as only active backend" true
     (file_contains_pattern "docs/BOOT-ENV-STATE-INVENTORY.md"
        "Only `filesystem` is active");
-  check bool "storage inventory marks PG envs retired" true
-    (file_contains_pattern "docs/BOOT-ENV-STATE-INVENTORY.md"
-       "Retired PostgreSQL backend envs");
-  check bool "env contract keeps PG envs ignored" true
-    (file_contains_pattern "docs/ENV-CONTRACT.md"
-       "retired/ignored: `MASC_POSTGRES_URL`, `MASC_PG_POOL_SIZE`");
   check bool "v2 design forbids distributed storage targets" true
     (file_contains_pattern "docs/MASC-V2-DESIGN.md"
        "Redis/PostgreSQL storage modes are not operator targets");
@@ -647,9 +641,6 @@ let test_storage_truth_guard_contracts () =
   check bool "board spec no longer advertises dual backend operation" true
     (file_not_contains_pattern "docs/spec/11-board.md"
        "JSONL 파일 또는 PostgreSQL 두 가지 백엔드");
-  check bool "board spec no longer documents env-based PG selection" true
-    (file_not_contains_pattern "docs/spec/11-board.md"
-       "MASC_POSTGRES_URL 존재");
   check bool "board spec no longer depends on Board_pg" true
     (file_not_contains_pattern "docs/spec/11-board.md" "Board_pg");
   check bool "board spec forbids JSONL to PostgreSQL migration" true

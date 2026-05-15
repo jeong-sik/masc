@@ -142,23 +142,8 @@ let with_room f =
   in
   (try Unix.mkdir dir 0o755 with
    | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-  (* Save and unset PG env vars to force filesystem backend *)
-  let saved_pg = Sys.getenv_opt "MASC_POSTGRES_URL" in
-  let saved_sb = Sys.getenv_opt "SB_PG_URL" in
-  Unix.putenv "MASC_POSTGRES_URL" "";
-  Unix.putenv "SB_PG_URL" "";
   Fun.protect
     ~finally:(fun () ->
-      (match saved_pg with
-       | Some v -> Unix.putenv "MASC_POSTGRES_URL" v
-       | None ->
-         (try Unix.putenv "MASC_POSTGRES_URL" "" with
-          | _ -> ()));
-      (match saved_sb with
-       | Some v -> Unix.putenv "SB_PG_URL" v
-       | None ->
-         (try Unix.putenv "SB_PG_URL" "" with
-          | _ -> ()));
       try
         let rec rm path =
           if Sys.is_directory path

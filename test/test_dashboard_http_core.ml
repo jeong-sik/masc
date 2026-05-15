@@ -113,10 +113,6 @@ let with_test_env f =
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       with_env "MASC_STORAGE_TYPE" "filesystem" @@ fun () ->
-      with_env "MASC_POSTGRES_URL" "" @@ fun () ->
-      with_env "DATABASE_URL" "" @@ fun () ->
-      with_env "SUPABASE_DB_URL" "" @@ fun () ->
-      with_env "SB_PG_URL" "" @@ fun () ->
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Coord_utils.default_config dir in

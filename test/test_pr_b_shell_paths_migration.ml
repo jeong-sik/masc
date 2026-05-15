@@ -96,10 +96,10 @@ let test_no_zsh_literals_in_consumer_files () =
 let test_bash_binding_invoked_exactly_once () =
   let occurrences =
     count_across_files ~files:bash_consumer_files
-      ~needle:"Host_config.host ()"
+      ~needle:"(Host_config.host ()).host_bash"
   in
   (check int)
-    "Host_config.host invoked exactly once across \
+    "Host_config.host_bash binding invoked exactly once across \
      bash consumer files"
     pinned_bash_binding_count occurrences
 ;;

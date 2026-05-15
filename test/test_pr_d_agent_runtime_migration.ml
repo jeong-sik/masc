@@ -90,9 +90,10 @@ let test_agent_runtime_root_binding_count () =
 
 let test_agent_runtime_root_field_value () =
   let d = Host_config.host () in
+  let expected = Filename.get_temp_dir_name () in
   (check string)
     "Host_config.host ().agent_runtime_root follows host temp dir"
-    (Filename.get_temp_dir_name ())
+    expected
     d.agent_runtime_root
 ;;
 

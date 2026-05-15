@@ -156,6 +156,23 @@ let order_candidates t ~adapter ~ctx ~cycle cands =
   | Priority_tier ->
     priority_tier_order adapter ctx ~tiers:t.tiers ~cycle cands
 
+let latency_score_of_p50_ms = function
+  | ms when (not (Float.is_finite ms)) || ms <= 0.0 -> 1.0
+  | ms when ms <= 1000.0 -> 1.0
+  | ms when ms <= 3000.0 -> 0.8
+  | ms when ms <= 5000.0 -> 0.6
+  | ms when ms <= 15000.0 -> 0.4
+  | ms when ms <= 30000.0 -> 0.2
+  | _ -> 0.1
+
+let latency_score_for_provider health ~provider_key =
+  match Cascade_health_tracker.provider_info health ~provider_key with
+  | None -> 1.0
+  | Some info ->
+    (match info.Cascade_health_tracker.p50_latency_ms with
+     | None -> 1.0
+     | Some p50 -> latency_score_of_p50_ms p50)
+
 (* ── Stateful hooks ─────────────────────────────────────────────── *)
 
 let record_choice _t ~ctx:_ ~provider_key:_ = ()

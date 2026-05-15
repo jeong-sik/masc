@@ -170,6 +170,16 @@ val order_candidates :
     This function is pure and must not perform IO.  [cycle] is
     0-indexed (first cycle = 0). *)
 
+val latency_score_for_provider :
+  Cascade_health_tracker.t -> provider_key:string -> float
+(** [latency_score_for_provider health ~provider_key] maps a provider's
+    recent p50 latency hint to a routing score in [0.0, 1.0].
+
+    Unknown providers and providers without latency samples score [1.0],
+    preserving optimistic fail-open behaviour. Slow persisted latency
+    hints score lower so trust snapshots can restore routing penalties
+    after process restart. *)
+
 (** {1 Completion hook} *)
 
 val record_choice :

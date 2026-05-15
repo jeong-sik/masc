@@ -1,7 +1,7 @@
 (** Repo_synthesis_benchmark — Score answers against gold-standard
     repo synthesis questions.
 
-    Compares two answer sets ([baseline] vs [swarm]) on a shared
+    Compares two answer sets ([baseline] vs [oas]) on a shared
     question list.  Each question carries [required_claims] and
     [gold_paths]; each answer reports [claims] and [cited_paths];
     scoring computes per-question evidence_precision +
@@ -67,7 +67,7 @@ type question_score = {
 
 type score_summary = {
   answer_set_label : string;
-      (** Caller-supplied label (typically ["baseline"] / ["swarm"]). *)
+      (** Caller-supplied label (typically ["baseline"] / ["oas"]). *)
   question_count : int;
   answered_count : int;
   evidence_precision : float;
@@ -76,7 +76,7 @@ type score_summary = {
   avg_latency_ms : float;
   composite_score : float;
       (** Folded score.  Drift in the composite formula changes
-          baseline-vs-swarm comparison verdicts — pinned at
+          baseline-vs-oas comparison verdicts — pinned at
           contract seam. *)
   per_question : question_score list;
 }
@@ -121,5 +121,5 @@ val score_answers :
 val score_summary_to_yojson : score_summary -> Yojson.Safe.t
 (** [score_summary_to_yojson summary] renders the summary as a
     JSON object suitable for benchmark report inclusion.  Used
-    by callers to embed baseline / swarm comparison snapshots
-    alongside a [swarm_beats_baseline] flag. *)
+    by callers to embed baseline / oas comparison snapshots
+    alongside an [oas_beats_baseline] flag. *)

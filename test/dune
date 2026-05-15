@@ -1495,3 +1495,15 @@
  (name test_disclosure_strategy_config)
  (modules test_disclosure_strategy_config)
  (libraries masc_test_deps))
+
+; RFC-0084 PR-14 — Telemetry completeness audit (sprint closeout).
+; Aggregates cumulative invariants across PR-1~13: 4-tuple emission
+; propagation (3 entries × 5 wrap sites), surface coverage (7+1=8),
+; typed boundary cardinality (Tool_capability=5, Dispatch_outcome=5),
+; sprint exit-criteria count (10), and workaround-rejection signatures
+; (0 violations). Requires masc_test_deps because it asserts cardinality
+; of Masc_mcp.Tool_capability.all_kinds + Dispatch_outcome.all_arms.
+(test
+ (name test_telemetry_completeness)
+ (modules test_telemetry_completeness)
+ (libraries masc_test_deps))

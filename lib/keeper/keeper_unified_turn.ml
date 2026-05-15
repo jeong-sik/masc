@@ -465,6 +465,49 @@ let run_keeper_cycle
         ~prev:Keeper_turn_fsm.Phase_gating
         Keeper_turn_fsm.Done;
       Ok meta
+    | None ->
+      let terminal_reason_code = "registry_phase_missing" in
+      let error_message =
+        Printf.sprintf
+          "%s: keeper registry phase lookup returned None before dispatch"
+          meta.name
+      in
+      append_manifest ~site:"phase_gate_decided"
+        ~status:"error"
+        ~decision:
+          (`Assoc
+            [
+              ("phase", `Null);
+              ("reason", `String terminal_reason_code);
+              ("executable", `Bool false);
+            ])
+        Keeper_runtime_manifest.Phase_gate_decided;
+      Log.Keeper.error
+        ~keeper_name:meta.name
+        ~turn_id:keeper_turn_id
+        "%s"
+        error_message;
+      record_pre_dispatch_terminal_observation
+        ~config
+        ~meta
+        ~generation
+        ~cascade_name:
+          (Keeper_execution_receipt.cascade_name_of_string (cascade_name_of_meta meta))
+        ~outcome:`Error
+        ~terminal_reason_code
+        ~activity_kind:"keeper.turn_blocked"
+        ~trajectory_outcome:(Trajectory.Failed terminal_reason_code)
+        ~error_kind:(Keeper_execution_receipt.error_kind_of_string terminal_reason_code)
+        ~error_message
+        ~keeper_turn_id
+        ();
+      Keeper_turn_fsm.emit_transition
+        ~keeper_name:meta.name
+        ~turn_id:keeper_turn_id
+        ~prev:Keeper_turn_fsm.Phase_gating
+        (Keeper_turn_fsm.Failed
+           (Keeper_turn_fsm.Failure_runtime_error terminal_reason_code));
+      Error (Agent_sdk.Error.Internal error_message)
     | phase_opt ->
       (* State-aware cascade routing (TLA+ KeeperCoreTriad.SelectCascade).
          At this point [phase] is executable; blocked phases returned above. *)
@@ -477,7 +520,7 @@ let run_keeper_cycle
                 `String
                   (match phase_opt with
                    | Some phase -> Keeper_state_machine.phase_to_string phase
-                   | None -> "missing_default_failing") );
+                   | None -> "missing_registry_phase_unreachable") );
               ("reason", `String "executable_phase");
               ("executable", `Bool true);
             ])
@@ -502,11 +545,9 @@ let run_keeper_cycle
           match phase_opt with
           | Some p -> p
           | None ->
-            Log.Keeper.warn
-              ~keeper_name:meta.name
-              ~turn_id:keeper_turn_id
-              "%s: registry phase lookup returned None, defaulting to Failing"
-              meta.name;
+            (* The [None] branch above fails closed before cascade routing.
+               Keep this fallback only to preserve exhaustiveness if the
+               match shape changes. *)
             Keeper_state_machine.Failing
         in
         let routing =

@@ -638,6 +638,67 @@ let test_pre_dispatch_terminal_observation_emits_manifest_rows () =
             first.M.decision |> member "terminal_reason_code" |> to_string)
       | [] -> Alcotest.fail "expected manifest rows")
 
+let test_pre_dispatch_terminal_observation_invalidates_keeper_status_cache () =
+  with_eio
+  @@ fun ~sw ~net:_ ~clock ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_status_detail.invalidate_status_cache_all ();
+      cleanup_dir base_dir)
+    (fun () ->
+      Masc_mcp.Keeper_status_detail.invalidate_status_cache_all ();
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "operator"));
+      let meta = make_meta ~name:"pre-dispatch-status-cache" () in
+      (match Masc_mcp.Keeper_types.write_meta config meta with
+       | Ok () -> ()
+       | Error err -> Alcotest.fail ("meta write failed: " ^ err));
+      let ctx : _ Masc_mcp.Keeper_types.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock;
+          proc_mgr = None;
+          net = None;
+        }
+      in
+      let args =
+        `Assoc
+          [
+            ("name", `String meta.name);
+            ("fast", `Bool true);
+            ("include_context", `Bool false);
+            ("include_metrics_overview", `Bool false);
+            ("include_memory_bank", `Bool false);
+            ("include_history_tail", `Bool false);
+          ]
+      in
+      let ok, _body = Masc_mcp.Keeper_status_detail.handle_keeper_status ctx args in
+      Alcotest.(check bool) "initial status ok" true ok;
+      Masc_mcp.Keeper_turn_helpers.record_pre_dispatch_terminal_observation
+        ~config
+        ~meta
+        ~generation:meta.runtime.generation
+        ~cascade_name:
+          (Masc_mcp.Keeper_execution_receipt.cascade_name_of_string "default")
+        ~outcome:`Skipped
+        ~terminal_reason_code:"phase_not_executable"
+        ~activity_kind:"keeper.turn_skipped"
+        ~trajectory_outcome:(Trajectory.Gated "phase_not_executable")
+        ~keeper_turn_id:(meta.runtime.usage.total_turns + 1)
+        ();
+      let ok, body = Masc_mcp.Keeper_status_detail.handle_keeper_status ctx args in
+      Alcotest.(check bool) "status after receipt ok" true ok;
+      let json = Yojson.Safe.from_string body in
+      Alcotest.(check string)
+        "status cache sees latest terminal reason"
+        "phase_not_executable"
+        Yojson.Safe.Util.(
+          json |> member "runtime_trust" |> member "latest_terminal_reason"
+          |> member "code" |> to_string))
+
 let test_runtime_trace_api_links_manifest_and_receipt_rows () =
   let base_dir = temp_dir () in
   Fun.protect
@@ -2346,6 +2407,10 @@ let () =
             test_append_to_path_preserves_order;
           Alcotest.test_case "pre-dispatch emits manifest rows" `Quick
             test_pre_dispatch_terminal_observation_emits_manifest_rows;
+          Alcotest.test_case
+            "pre-dispatch receipt invalidates keeper status cache"
+            `Quick
+            test_pre_dispatch_terminal_observation_invalidates_keeper_status_cache;
           Alcotest.test_case
             "runtime trace API links manifest and receipt rows"
             `Quick test_runtime_trace_api_links_manifest_and_receipt_rows;

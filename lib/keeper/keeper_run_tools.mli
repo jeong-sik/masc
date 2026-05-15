@@ -60,6 +60,15 @@ val partition_tool_search_hits
   -> max_results:int
   -> tool_search_hit_partition
 
+val truncate_tool_surface_names
+  :  max_tools:int
+  -> essential_names:string list
+  -> string list
+  -> string list
+(** Keep essential tools at the front while truncating an already ordered
+    visible tool surface. Essential names are removed from the tail before the
+    budget slice so required/affordance tools cannot be double-counted. *)
+
 (** Agent setup produced by Step 7.
 
     Hook mutations flow through {!acc}, receipt refs are kept for

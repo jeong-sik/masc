@@ -29,6 +29,41 @@ type context = {
 
 (* Handlers *)
 
+let keeper_pause_status_json ctx =
+  let names = Keeper_types.keeper_names ctx.config in
+  let read_errors = ref [] in
+  let paused_by_meta = ref [] in
+  let paused_by_phase = ref [] in
+  List.iter
+    (fun name ->
+      (match Keeper_types.read_meta ctx.config name with
+       | Ok (Some meta) when meta.paused -> paused_by_meta := meta.name :: !paused_by_meta
+       | Ok _ -> ()
+       | Error err -> read_errors := (name, err) :: !read_errors);
+      match Keeper_registry.get_phase ~base_path:ctx.config.base_path name with
+      | Some Keeper_state_machine.Paused -> paused_by_phase := name :: !paused_by_phase
+      | _ -> ())
+    names;
+  let meta_paused_names = List.rev !paused_by_meta in
+  let phase_paused_names = List.rev !paused_by_phase in
+  let paused_names =
+    Keeper_types.dedupe_keep_order (meta_paused_names @ phase_paused_names)
+  in
+  `Assoc
+    [
+      ("paused", `Bool (paused_names <> []));
+      ("paused_count", `Int (List.length paused_names));
+      ("paused_names", `List (List.map (fun name -> `String name) paused_names));
+      ("meta_paused_count", `Int (List.length meta_paused_names));
+      ("phase_paused_count", `Int (List.length phase_paused_names));
+      ( "read_errors",
+        `List
+          (List.rev_map
+             (fun (name, error) ->
+               `Assoc [ ("name", `String name); ("error", `String error) ])
+             !read_errors) );
+    ]
+
 let handle_pause ~tool_name ~start_time ctx args =
   let reason = get_string args "reason" "Manual pause" in
   Coord.pause ctx.config ~by:ctx.agent_name ~reason;
@@ -43,6 +78,28 @@ let handle_resume ~tool_name ~start_time ctx _args =
         "Default project scope is not paused"
 
 let handle_pause_status ~tool_name ~start_time ctx _args =
+  let keeper_pause =
+    if not (Coord.is_initialized ctx.config)
+    then
+      `Assoc
+        [
+          ("paused", `Null);
+          ("paused_count", `Null);
+          ("paused_names", `List []);
+          ("meta_paused_count", `Null);
+          ("phase_paused_count", `Null);
+          ("read_errors", `List []);
+        ]
+    else keeper_pause_status_json ctx
+  in
+  let keeper_paused =
+    match keeper_pause with
+    | `Assoc fields -> (
+      match List.assoc_opt "paused" fields with
+      | Some (`Bool value) -> value
+      | _ -> false)
+    | _ -> false
+  in
   let pause_state =
     if not (Coord.is_initialized ctx.config) then `Initializing
     else
@@ -64,6 +121,9 @@ let handle_pause_status ~tool_name ~start_time ctx _args =
             ("paused_by", Json_util.string_opt_to_json by);
             ("pause_reason", Json_util.string_opt_to_json reason);
             ("paused_at", Json_util.string_opt_to_json at);
+            ("pause_scope", `String "coord_room");
+            ("any_pause_active", `Bool true);
+            ("keeper_pause", keeper_pause);
             ("message", `String "Server is paused");
           ]
     | `Running ->
@@ -76,7 +136,14 @@ let handle_pause_status ~tool_name ~start_time ctx _args =
             ("paused_by", `Null);
             ("pause_reason", `Null);
             ("paused_at", `Null);
-            ("message", `String "Server is running (not paused)");
+            ("pause_scope", `String "coord_room");
+            ("any_pause_active", `Bool keeper_paused);
+            ("keeper_pause", keeper_pause);
+            ( "message",
+              `String
+                (if keeper_paused
+                 then "Server is running, but one or more keepers are paused"
+                 else "Server is running (not paused)") );
           ]
     | `Initializing ->
         `Assoc
@@ -88,6 +155,9 @@ let handle_pause_status ~tool_name ~start_time ctx _args =
             ("paused_by", `Null);
             ("pause_reason", `Null);
             ("paused_at", `Null);
+            ("pause_scope", `String "coord_room");
+            ("any_pause_active", `Null);
+            ("keeper_pause", keeper_pause);
             ( "message",
               `String
                 "Server is initializing; pause state is not available yet" );

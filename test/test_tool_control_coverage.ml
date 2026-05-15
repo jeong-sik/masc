@@ -8,6 +8,25 @@ let parse_json s =
   try Yojson.Safe.from_string s
   with Yojson.Json_error err -> failwith ("invalid json: " ^ err)
 
+let seed_keeper_meta (ctx : Tool_control.context) name ~paused =
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [
+            ("name", `String name);
+            ("agent_name", `String (Keeper_types.keeper_agent_name name));
+            ("trace_id", `String ("trace-" ^ name));
+            ("goal", `String "pause status fixture");
+          ])
+    with
+    | Ok meta -> { meta with paused }
+    | Error err -> failwith ("meta fixture failed: " ^ err)
+  in
+  match Keeper_types.write_meta ctx.config meta with
+  | Ok () -> ()
+  | Error err -> failwith ("meta write failed: " ^ err)
+
 let with_env name value_opt f =
   let original = Sys.getenv_opt name in
   let restore () =
@@ -113,6 +132,27 @@ let () =
           let json = parse_json result.legacy_message in
           assert (Yojson.Safe.Util.member "paused" json = `Bool false);
           assert (Yojson.Safe.Util.member "status" json = `String "running")
+      | None -> failwith "dispatch returned None")
+
+let () =
+  test "dispatch_pause_status_surfaces_keeper_pause_when_room_running" (fun () ->
+      with_ctx @@ fun ctx ->
+      seed_keeper_meta ctx "paused-keeper" ~paused:true;
+      match Tool_control.dispatch ctx ~name:"masc_pause_status" ~args:(`Assoc []) with
+      | Some result ->
+          assert result.success;
+          let json = parse_json result.legacy_message in
+          let open Yojson.Safe.Util in
+          let keeper_pause = json |> member "keeper_pause" in
+          assert (json |> member "status" = `String "running");
+          assert (json |> member "paused" = `Bool false);
+          assert (json |> member "any_pause_active" = `Bool true);
+          assert (keeper_pause |> member "paused" = `Bool true);
+          assert (keeper_pause |> member "paused_count" = `Int 1);
+          assert
+            (keeper_pause |> member "paused_names" |> to_list
+             |> List.map to_string
+             = [ "paused-keeper" ])
       | None -> failwith "dispatch returned None")
 
 let () =

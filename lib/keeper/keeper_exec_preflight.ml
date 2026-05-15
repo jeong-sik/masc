@@ -116,9 +116,13 @@ let handle_keeper_preflight_check
       Some "set autoboot_enabled=true before expecting autonomous keepalive or PR fan-out"
     | Some reason -> Some ("activation blocked: " ^ reason)
   in
+  let activation_check_value =
+    match activation_blocker with
+    | None -> "ok"
+    | Some reason -> reason
+  in
   let () =
-    add_check "autonomous_activation" activation_ok
-      (Option.value activation_blocker ~default:"ok")
+    add_check "autonomous_activation" activation_ok activation_check_value
   in
   (* Check 7: sandbox clone target *)
   let repo_name_arg =

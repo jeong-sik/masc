@@ -1549,3 +1549,13 @@
  (name test_pr_j_legacy_dispatch_v2_removed)
  (modules test_pr_j_legacy_dispatch_v2_removed)
  (libraries alcotest))
+
+; RFC-0084 host-config-cleanup-A — credential root migration.
+; Pins literal "/tmp/keeper-creds" count at 0 in
+; lib/keeper/host_config_provider.ml and verifies
+; Host_config.legacy_macos_default is invoked.  Cross-checks that
+; Host_config_provider.cred_root equals the typed surface field.
+(test
+ (name test_pr_a_cred_root_migration)
+ (modules test_pr_a_cred_root_migration)
+ (libraries masc_test_deps))

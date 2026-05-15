@@ -491,6 +491,8 @@ autoboot_enabled = false
 proactive_enabled = true
 proactive_idle_sec = 120
 proactive_cooldown_sec = 240
+work_discovery_sources = ["awaiting_verification_tasks"]
+per_provider_timeout = 120.0
 
 [keeper.tool_access]
 kind = "preset"
@@ -563,7 +565,17 @@ also_allow = ["masc_tasks", "masc_transition"]
             (list string)
             "tool allowlist resynced"
             [ "masc_tasks"; "masc_transition" ]
-            (Keeper_types.tool_access_also_allowlist meta.tool_access)
+            (Keeper_types.tool_access_also_allowlist meta.tool_access);
+          check
+            (option (list string))
+            "work discovery sources resynced"
+            (Some [ "awaiting_verification_tasks" ])
+            meta.work_discovery_sources;
+          check
+            (option (float 0.0001))
+            "per provider timeout resynced"
+            (Some 120.0)
+            meta.per_provider_timeout_s
       | Ok None -> fail "keeper meta missing after keeper_up update"
       | Error e -> fail ("read_meta failed: " ^ e))
 

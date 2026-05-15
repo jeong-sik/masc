@@ -94,12 +94,12 @@ let with_temp_cascade_toml body f =
     | None -> Unix.putenv "MASC_CONFIG_DIR" ""
   in
   Unix.putenv "MASC_CONFIG_DIR" dir;
-  Masc_mcp.Config_dir_resolver.reset ();
+  Config_dir_resolver.reset ();
   Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ();
   Fun.protect
     ~finally:(fun () ->
       restore_env ();
-      Masc_mcp.Config_dir_resolver.reset ();
+      Config_dir_resolver.reset ();
       Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ();
       Sys.remove config_path;
       Unix.rmdir dir)

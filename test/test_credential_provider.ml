@@ -78,13 +78,13 @@ let with_config_dir_env config_dir f =
   let key = "MASC_CONFIG_DIR" in
   let old = Sys.getenv_opt key in
   Unix.putenv key config_dir;
-  Masc_mcp.Config_dir_resolver.reset ();
+  Config_dir_resolver.reset ();
   Fun.protect
     ~finally:(fun () ->
       (match old with
        | Some value -> Unix.putenv key value
        | None -> Unix.putenv key "");
-      Masc_mcp.Config_dir_resolver.reset ())
+      Config_dir_resolver.reset ())
     f
 
 let write_keeper_identity_toml ~base_path ~keeper_name ~github_identity =

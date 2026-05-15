@@ -193,7 +193,7 @@ let with_tool_policy_config f =
   let project_root = Masc_test_deps.find_project_root () in
   let config_dir = Filename.concat project_root "config" in
   let reset () =
-    Masc_mcp.Config_dir_resolver.reset ();
+    Config_dir_resolver.reset ();
     Tool_code_write.reset_policy_config_cache ();
     Masc_mcp.Keeper_tool_policy.reset_policy_config_for_test ()
   in
@@ -212,10 +212,10 @@ let with_config_dir config_dir f =
       (match prior with
        | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
        | None -> Unix.putenv "MASC_CONFIG_DIR" "");
-      Masc_mcp.Config_dir_resolver.reset ())
+      Config_dir_resolver.reset ())
     (fun () ->
       Unix.putenv "MASC_CONFIG_DIR" config_dir;
-      Masc_mcp.Config_dir_resolver.reset ();
+      Config_dir_resolver.reset ();
       f ())
 
 let with_keeper_identity_toml ~config ~keeper_name ~github_identity
@@ -955,7 +955,7 @@ let test_git_creds_skips_missing_ssh_auth_sock () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
-  Masc_mcp.Config_dir_resolver.reset ();
+  Config_dir_resolver.reset ();
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   let missing_sock =
     Filename.concat config.Coord.base_path "missing-agent.sock"

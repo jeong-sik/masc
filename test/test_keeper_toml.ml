@@ -823,10 +823,10 @@ let with_personas_dir f =
   Fun.protect
     ~finally:(fun () ->
       restore_env "MASC_PERSONAS_DIR" original;
-      Masc_mcp.Config_dir_resolver.reset ())
+      Config_dir_resolver.reset ())
     (fun () ->
       Unix.putenv "MASC_PERSONAS_DIR" personas_dir;
-      Masc_mcp.Config_dir_resolver.reset ();
+      Config_dir_resolver.reset ();
       f personas_dir)
 
 let with_config_dir f =
@@ -835,10 +835,10 @@ let with_config_dir f =
   Fun.protect
     ~finally:(fun () ->
       restore_env "MASC_CONFIG_DIR" original;
-      Masc_mcp.Config_dir_resolver.reset ())
+      Config_dir_resolver.reset ())
     (fun () ->
       Unix.putenv "MASC_CONFIG_DIR" config_dir;
-      Masc_mcp.Config_dir_resolver.reset ();
+      Config_dir_resolver.reset ();
       f config_dir)
 
 let test_profile_rejects_legacy_allowed_providers () =

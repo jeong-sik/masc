@@ -242,7 +242,7 @@ let seed_persona_dir base_path agent_name =
   in
   mkdir_p (Filename.concat personas_dir agent_name);
   Unix.putenv "MASC_PERSONAS_DIR" personas_dir;
-  Masc_mcp.Config_dir_resolver.reset ()
+  Config_dir_resolver.reset ()
 
 let run_cmd_exn argv =
   let cmd = String.concat " " (List.map Filename.quote argv) in
@@ -1062,7 +1062,7 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
             | Some raw -> Unix.putenv name raw
             | None -> Unix.putenv name "")
           saved_env;
-        Masc_mcp.Config_dir_resolver.reset ();
+        Config_dir_resolver.reset ();
         match saved_home with
         | Some home -> Unix.putenv "HOME" home
         | None -> Unix.putenv "HOME" "")

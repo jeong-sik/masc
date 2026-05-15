@@ -27,11 +27,11 @@ let with_worktree_config_root f =
     ~finally:(fun () ->
       restore_env "MASC_CONFIG_DIR" prev_config_dir;
       restore_env "MASC_BASE_PATH" prev_base_path;
-      Masc_mcp.Config_dir_resolver.reset ())
+      Config_dir_resolver.reset ())
     (fun () ->
       Unix.putenv "MASC_CONFIG_DIR" config_dir;
       Unix.putenv "MASC_BASE_PATH" "";
-      Masc_mcp.Config_dir_resolver.reset ();
+      Config_dir_resolver.reset ();
       f ())
 
 let labels_for_turn meta =

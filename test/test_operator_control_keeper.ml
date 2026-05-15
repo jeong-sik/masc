@@ -292,7 +292,7 @@ let test_keeper_sandbox_status_exposes_local_summary () =
     ~finally:(fun () ->
       Keeper_keepalive.stop_keepalive keeper_name;
       Keeper_registry.clear ();
-      Masc_mcp.Config_dir_resolver.reset ();
+      Config_dir_resolver.reset ();
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
@@ -690,7 +690,7 @@ let test_keeper_sandbox_status_fleet_includes_configured_keeper () =
          autoboot_enabled = false\n";
       with_env "MASC_CONFIG_DIR" (Filename.concat (Coord.masc_root_dir config) "config")
       @@ fun () ->
-      Masc_mcp.Config_dir_resolver.reset ();
+      Config_dir_resolver.reset ();
       let keeper_ctx : _ Tool_keeper.context =
         {
           config;
@@ -2710,7 +2710,7 @@ let test_keeper_config_exposes_live_runtime_and_sources () =
       (match original_config_dir with
       | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
       | None -> Unix.putenv "MASC_CONFIG_DIR" "");
-      Masc_mcp.Config_dir_resolver.reset ();
+      Config_dir_resolver.reset ();
       Keeper_keepalive.stop_keepalive "config-provenance";
       Keeper_registry.clear ();
       Keeper_runtime.reset_test_state base_dir;
@@ -2720,7 +2720,7 @@ let test_keeper_config_exposes_live_runtime_and_sources () =
       Unix.chdir base_dir;
       let config_dir = Filename.concat base_dir "config" in
       Unix.putenv "MASC_CONFIG_DIR" config_dir;
-      Masc_mcp.Config_dir_resolver.reset ();
+      Config_dir_resolver.reset ();
       let keepers_dir = Filename.concat config_dir "keepers" in
       Fs_compat.mkdir_p keepers_dir;
       Fs_compat.save_file

@@ -50,3 +50,19 @@ val is_keeper_checkpoints_get_path : string -> bool
 
 val is_keeper_runtime_trace_get_path : string -> bool
 (** [true] for [GET /api/v1/keepers/<name>/runtime-trace] paths. *)
+
+(** {1 Trajectory preview helpers} *)
+
+val trim_to_opt : string -> string option
+(** Trim and return [None] if empty. *)
+
+val truncate_text : max_chars:int -> string -> string
+(** Truncate [text] to [max_chars] (UTF-8 safe). *)
+
+val latest_preview_of_messages :
+  Agent_sdk.Types.message list -> string option
+(** Latest assistant-text preview suitable for the dashboard list view. *)
+
+val continuity_summary_of_messages :
+  Agent_sdk.Types.message list -> string option
+(** Latest [STATE]-derived continuity summary in the message history. *)

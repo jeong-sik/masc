@@ -78,3 +78,32 @@ let is_keeper_checkpoints_get_path req_path =
 
 let is_keeper_runtime_trace_get_path req_path =
   keeper_path_ends_with req_path keeper_suffix_runtime_trace
+
+let trim_to_opt (value : string) =
+  let trimmed = String.trim value in
+  if trimmed = "" then None else Some trimmed
+
+let truncate_text ~max_chars text =
+  let len = String.length text in
+  if len <= max_chars then text
+  else if max_chars <= 1 then String.sub text 0 (max 0 max_chars)
+  else
+    String_util.utf8_safe ~max_bytes:max_chars ~suffix:"…" text
+    |> String_util.to_string
+
+let latest_preview_of_messages (messages : Agent_sdk.Types.message list) =
+  messages
+  |> List.rev
+  |> List.find_map (fun (message : Agent_sdk.Types.message) ->
+       if message.role = Agent_sdk.Types.System then None
+       else
+         Agent_sdk.Types.text_of_message message
+         |> trim_to_opt
+         |> Option.map (truncate_text ~max_chars:180))
+
+let continuity_summary_of_messages (messages : Agent_sdk.Types.message list) =
+  match Keeper_memory_policy.latest_state_snapshot_from_messages messages with
+  | Some snapshot ->
+      Keeper_memory_policy.keeper_state_snapshot_to_summary_text snapshot
+      |> trim_to_opt
+  | None -> None

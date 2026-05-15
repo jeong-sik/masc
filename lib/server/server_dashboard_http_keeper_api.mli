@@ -77,21 +77,10 @@ val handle_keeper_tools_post :
     2026-05-16). Re-exported via include below. *)
 include module type of Server_dashboard_http_keeper_api_types
 
-(** {1 Trajectory preview helpers} *)
-
-val trim_to_opt : string -> string option
-(** Trim and return [None] if empty. *)
-
-val truncate_text : max_chars:int -> string -> string
-(** Truncate [text] to [max_chars] (UTF-8 safe). *)
-
-val latest_preview_of_messages :
-  Agent_sdk.Types.message list -> string option
-(** Latest assistant-text preview suitable for the dashboard list view. *)
-
-val continuity_summary_of_messages :
-  Agent_sdk.Types.message list -> string option
-(** Latest [STATE]-derived continuity summary in the message history. *)
+(** Trajectory preview helpers (trim_to_opt / truncate_text /
+    latest_preview_of_messages / continuity_summary_of_messages)
+    moved to Server_dashboard_http_keeper_api_types — re-exported via
+    [include module type of] above. *)
 
 (** {1 Checkpoint inventory} *)
 

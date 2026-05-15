@@ -12,7 +12,7 @@
    layer* rather than the queue itself. *)
 
 module HS = Masc_mcp.Heartbeat_smart
-module Q = Masc_mcp.Keeper_event_queue
+module Q = Keeper_event_queue
 
 (* Mirror of the decision branch that lives in
    keeper_heartbeat_loop.ml run_smart_heartbeat_gate. Re-stating it

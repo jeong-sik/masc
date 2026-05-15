@@ -151,7 +151,8 @@
   keeper_turn_lifecycle
   keeper_msg_async
   keeper_event_bus
-  keeper_event_queue
+  ;; keeper_event_queue: promoted to lib/keeper_event_queue/ sub-library
+  ;; (RFC-0056 Phase 1I) — listed in (libraries) below.
   keeper_relevance_check
   masc_event_bus
   ;; worker_container sub-modules
@@ -313,6 +314,12 @@
    ;; family (6) + reward_advice_artifact + post_verifier to break the
    ;; Reward_advice_artifact ↔ Tool_call_quality_benchmark_types cycle.
    masc_mcp.tool_call_quality_benchmark
+   ;; RFC-0056 Phase 1I — Keeper_event_queue (first lib/keeper/ leaf)
+   ;; extracted to lib/keeper_event_queue/. 91+87 LoC, deps: stdlib +
+   ;; Unix only. Pure data structure (urgency variants + FIFO + dedup)
+   ;; backed by specs/keeper-state-machine/KeeperEventQueue.tla.
+   ;; Referenced by keeper_supervisor + keeper_registry godfiles.
+   masc_mcp.keeper_event_queue
    ;; RFC-0058 Phase 1 — Declarative cascade TOML config. Separate sub-library
    ;; to avoid type name collisions (transport, provider, binding, tier, strategy)
    ;; with identically-named types in the main library.

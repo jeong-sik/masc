@@ -108,6 +108,26 @@ let partition_tool_search_hits ~core ~core_always ~allowed ~retrieved ~max_resul
   }
 ;;
 
+let truncate_tool_surface_names ~max_tools ~essential_names all_allowed =
+  if List.length all_allowed <= max_tools
+  then all_allowed
+  else (
+    let essential_names = Keeper_types.dedupe_keep_order essential_names in
+    let essential =
+      all_allowed
+      |> List.filter (fun name -> List.mem name essential_names)
+      |> Keeper_types.dedupe_keep_order
+    in
+    let non_essential =
+      List.filter (fun name -> not (List.mem name essential_names)) all_allowed
+    in
+    let budget = max 0 (max_tools - List.length essential) in
+    essential
+    @ (non_essential
+       |> List.filteri (fun i _ -> i < budget)
+       |> Keeper_types.dedupe_keep_order))
+;;
+
 (** Agent setup produced by Step 7.
 
     Hook mutations flow through {!acc}, receipt refs are kept for
@@ -1004,16 +1024,7 @@ let prepare_agent_setup
           Keeper_types.dedupe_keep_order
             (visible_always_include_tools @ required_turn_essential_tool_names)
         in
-        let essential =
-          List.filter (fun name -> List.mem name essential_names) all_allowed
-        in
-        let non_essential =
-          List.filter
-            (fun name -> not (List.mem name visible_always_include_tools))
-            all_allowed
-        in
-        let budget = max_tools - List.length essential in
-        essential @ List.filteri (fun i _ -> i < budget) non_essential)
+        truncate_tool_surface_names ~max_tools ~essential_names all_allowed)
       else all_allowed
     in
     let allowed_canonical_tool_names =

@@ -51,6 +51,46 @@ let read_file path =
     ~finally:(fun () -> close_in_noerr ic)
     (fun () -> really_input_string ic (in_channel_length ic))
 
+let with_cached_surface_success
+      (surface : Lib.Server_dashboard_http_cache.cached_surface)
+      json
+      f
+  =
+  let saved =
+    ( surface.json
+    , surface.last_success_at
+    , surface.last_success_unix
+    , surface.last_attempt_at
+    , surface.last_attempt_unix
+    , surface.last_error
+    , surface.last_error_at
+    , surface.last_error_unix )
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      let ( json
+          , last_success_at
+          , last_success_unix
+          , last_attempt_at
+          , last_attempt_unix
+          , last_error
+          , last_error_at
+          , last_error_unix )
+        =
+        saved
+      in
+      surface.json <- json;
+      surface.last_success_at <- last_success_at;
+      surface.last_success_unix <- last_success_unix;
+      surface.last_attempt_at <- last_attempt_at;
+      surface.last_attempt_unix <- last_attempt_unix;
+      surface.last_error <- last_error;
+      surface.last_error_at <- last_error_at;
+      surface.last_error_unix <- last_error_unix)
+    (fun () ->
+      Lib.Server_dashboard_http_cache.mark_cached_surface_success surface json;
+      f ())
+
 let with_env key value f =
   let old = Sys.getenv_opt key in
   Unix.putenv key value;
@@ -297,6 +337,92 @@ let test_operator_snapshot_default_route_hydrates_first_success () =
     (not
        (contains_substring source
           "then cached_surface_json _operator_snapshot_cache"))
+
+let test_operator_snapshot_default_route_exposes_provenance () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let state =
+    Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:config.base_path ()
+  in
+  let seed =
+    `Assoc
+      [ "available_actions", `List []
+      ; "keepers", `List []
+      ; "generated_at", `String "2026-05-15T00:00:00Z"
+      ]
+  in
+  with_cached_surface_success
+    Lib.Server_dashboard_http_core._operator_snapshot_cache
+    seed
+  @@ fun () ->
+  let json =
+    Lib.Server_dashboard_http_core.operator_snapshot_http_json
+      ~state
+      ~sw
+      ~clock:(Eio.Stdenv.clock env)
+      (request "/api/v1/operator")
+  in
+  let open Yojson.Safe.Util in
+  check string "surface" "/api/v1/operator"
+    (json |> member "dashboard_surface" |> to_string);
+  check string "source" "operator_snapshot_read_model"
+    (json |> member "source" |> to_string);
+  check string "generated_at_iso" "2026-05-15T00:00:00Z"
+    (json |> member "generated_at_iso" |> to_string);
+  check string "retention scope" "operator_snapshot"
+    (json |> member "retention" |> member "scope" |> to_string);
+  check string "retention store" "process_cache"
+    (json |> member "retention" |> member "store_kind" |> to_string);
+  check string "query effective actor" "dashboard"
+    (json |> member "query" |> member "effective_actor" |> to_string);
+  check bool "query default summary" true
+    (json |> member "query" |> member "default_summary_request" |> to_bool);
+  check bool "query includes keepers" true
+    (json |> member "query" |> member "include_keepers" |> to_bool);
+  check string "cache state" "fresh"
+    (json |> member "cache" |> member "cache_state" |> to_string);
+  check bool "cache key surfaced" true
+    (String.length (json |> member "cache" |> member "request_cache_key" |> to_string)
+     > 0)
+
+let test_operator_digest_default_route_exposes_provenance () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let state =
+    Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:config.base_path ()
+  in
+  let seed =
+    `Assoc
+      [ "health", `String "ok"
+      ; "generated_at", `String "2026-05-15T00:00:01Z"
+      ]
+  in
+  with_cached_surface_success Lib.Server_dashboard_http_core._operator_digest_cache seed
+  @@ fun () ->
+  match
+    Lib.Server_dashboard_http_core.operator_digest_http_json
+      ~state
+      ~sw
+      ~clock:(Eio.Stdenv.clock env)
+      (request "/api/v1/operator/digest")
+  with
+  | Error _ -> Alcotest.fail "operator digest default route returned error"
+  | Ok json ->
+    let open Yojson.Safe.Util in
+    check string "surface" "/api/v1/operator/digest"
+      (json |> member "dashboard_surface" |> to_string);
+    check string "source" "operator_digest_read_model"
+      (json |> member "source" |> to_string);
+    check string "generated_at_iso" "2026-05-15T00:00:01Z"
+      (json |> member "generated_at_iso" |> to_string);
+    check string "retention scope" "operator_digest"
+      (json |> member "retention" |> member "scope" |> to_string);
+    check string "retention store" "process_cache"
+      (json |> member "retention" |> member "store_kind" |> to_string);
+    check string "query effective target" "root"
+      (json |> member "query" |> member "effective_target_type" |> to_string);
+    check bool "query default namespace" true
+      (json |> member "query" |> member "default_namespace_request" |> to_bool);
+    check string "cache state" "fresh"
+      (json |> member "cache" |> member "cache_state" |> to_string)
 
 let test_dashboard_shell_timeout_fallback_reports_timing_context () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -616,6 +742,10 @@ let () =
             test_dashboard_shell_http_json_prefers_last_good_while_prewarming;
           test_case "operator snapshot hydrates on first default request" `Quick
             test_operator_snapshot_default_route_hydrates_first_success;
+          test_case "operator snapshot default route exposes provenance" `Quick
+            test_operator_snapshot_default_route_exposes_provenance;
+          test_case "operator digest default route exposes provenance" `Quick
+            test_operator_digest_default_route_exposes_provenance;
           test_case "shell timeout fallback reports timing context" `Quick
             test_dashboard_shell_timeout_fallback_reports_timing_context;
           test_case "planning payload includes coordination FSM" `Quick

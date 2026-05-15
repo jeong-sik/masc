@@ -245,9 +245,9 @@ check_json "dashboard stress exposes provenance" "$BASE/api/v1/dashboard/stress?
 
 echo "[4/7] Operations + Workspace"
 check_http "operator digest 200" "$BASE/api/v1/operator/digest" "200"
-check_json "operator digest has health block" "$BASE/api/v1/operator/digest" "'health' in d" '^True$'
+check_json "operator digest exposes provenance" "$BASE/api/v1/operator/digest" "'health' in d and d.get('dashboard_surface') == '/api/v1/operator/digest' and d.get('source') == 'operator_digest_read_model' and d.get('retention', {}).get('scope') == 'operator_digest' and d.get('query', {}).get('effective_target_type') == 'root' and d.get('cache', {}).get('cache_state') in ('fresh', 'stale', 'initializing', 'request_swr_or_inline_compute')" '^True$'
 check_http "operator snapshot 200" "$BASE/api/v1/operator" "200"
-check_json "operator snapshot exposes actions" "$BASE/api/v1/operator" "'available_actions' in d and 'keepers' in d" '^True$'
+check_json "operator snapshot exposes provenance" "$BASE/api/v1/operator" "'available_actions' in d and 'keepers' in d and d.get('dashboard_surface') == '/api/v1/operator' and d.get('source') == 'operator_snapshot_read_model' and d.get('retention', {}).get('scope') == 'operator_snapshot' and d.get('query', {}).get('default_summary_request') is True and d.get('cache', {}).get('cache_state') in ('fresh', 'stale', 'initializing', 'request_swr_or_inline_compute')" '^True$'
 check_http "board 200" "$BASE/api/v1/dashboard/board" "200"
 check_json "board exposes posts" "$BASE/api/v1/dashboard/board" "'posts' in d" '^True$'
 check_http "board API 200" "$BASE/api/v1/board?limit=1" "200"

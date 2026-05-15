@@ -334,6 +334,204 @@ let operator_snapshot_extra () =
   [ "readonly_pool", Coord_utils.domain_local_pg_backend_diagnostics_json () ]
 ;;
 
+let json_string_opt = function
+  | Some value -> `String value
+  | None -> `Null
+;;
+
+let json_bool_opt = function
+  | Some value -> `Bool value
+  | None -> `Null
+;;
+
+let json_assoc_field_opt key = function
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
+;;
+
+let json_assoc_string_opt key json =
+  match json_assoc_field_opt key json with
+  | Some (`String value) -> Some value
+  | _ -> None
+;;
+
+let projection_diagnostics_fields json =
+  match json_assoc_field_opt "projection_diagnostics" json with
+  | Some (`Assoc fields) -> fields
+  | _ -> []
+;;
+
+let projection_diagnostics_field json key =
+  List.assoc_opt key (projection_diagnostics_fields json)
+;;
+
+let operator_generated_at_iso json =
+  match projection_diagnostics_field json "generated_at" with
+  | Some (`String value) -> value
+  | _ ->
+    (match json_assoc_string_opt "generated_at" json with
+     | Some value -> value
+     | None -> Masc_domain.now_iso ())
+;;
+
+let operator_cache_json ?cache_key ~scope json =
+  let diagnostic_field key =
+    match projection_diagnostics_field json key with
+    | Some value -> value
+    | None -> `Null
+  in
+  let cache_state =
+    match projection_diagnostics_field json "cache_state" with
+    | Some (`String value) -> value
+    | _ -> "request_swr_or_inline_compute"
+  in
+  `Assoc
+    [ "scope", `String scope
+    ; "cache_state", `String cache_state
+    ; "projection_surface", diagnostic_field "surface"
+    ; "last_success_at", diagnostic_field "last_success_at"
+    ; "last_attempt_at", diagnostic_field "last_attempt_at"
+    ; "last_error_at", diagnostic_field "last_error_at"
+    ; "stale_reason", diagnostic_field "stale_reason"
+    ; "stale_age_ms", diagnostic_field "stale_age_ms"
+    ; "request_cache_key", json_string_opt cache_key
+    ; "request_cache_ttl_s", `Float 5.0
+    ; "request_timeout_s", `Float dashboard_request_timeout_s
+    ; "background_refresh_interval_s", `Float _operator_refresh_interval_s
+    ; "policy", `String "cached_surface plus HTTP stale-while-revalidate"
+    ]
+;;
+
+let operator_retention_json ~(config : Coord.config) ~scope ~producer =
+  `Assoc
+    [ "scope", `String scope
+    ; "coordination_root", `String config.base_path
+    ; "workspace_path", `String config.workspace_path
+    ; "producer", `String producer
+    ; "store_kind", `String "process_cache"
+    ; "cache_surface", `String "Server_dashboard_http_core.cached_surface"
+    ; "http_swr_ttl_s", `Float 5.0
+    ; "background_refresh_interval_s", `Float _operator_refresh_interval_s
+    ; "request_timeout_s", `Float dashboard_request_timeout_s
+    ; ( "cache_policy"
+      , `String
+          "default route uses proactive cached_surface; parameterized route uses HTTP stale-while-revalidate"
+      )
+    ]
+;;
+
+let operator_snapshot_query_json ~actor ~view ~include_messages ~include_keepers
+    ~lightweight_summary ~default_summary_request =
+  let effective_view =
+    match view with
+    | Some value -> value
+    | None -> if default_summary_request then "summary" else "full"
+  in
+  `Assoc
+    [ "actor", json_string_opt actor
+    ; "view", json_string_opt view
+    ; "effective_actor", `String (Option.value ~default:"dashboard" actor)
+    ; "effective_view", `String effective_view
+    ; "include_messages", `Bool include_messages
+    ; "include_keepers", `Bool include_keepers
+    ; "lightweight_summary", `Bool lightweight_summary
+    ; "default_summary_request", `Bool default_summary_request
+    ]
+;;
+
+let operator_digest_query_json ~actor ~target_type ~target_id ~include_workers
+    ~effective_target_type ~default_namespace_request =
+  `Assoc
+    [ "actor", json_string_opt actor
+    ; "target_type", json_string_opt target_type
+    ; "target_id", json_string_opt target_id
+    ; "effective_target_type", `String effective_target_type
+    ; "include_workers", json_bool_opt include_workers
+    ; "default_namespace_request", `Bool default_namespace_request
+    ]
+;;
+
+let with_operator_surface_metadata
+    ~config
+    ?cache_key
+    ~dashboard_surface
+    ~source
+    ~scope
+    ~producer
+    ~query
+    json =
+  match json with
+  | `Assoc fields ->
+    let generated_at = operator_generated_at_iso json in
+    let metadata =
+      [ "dashboard_surface", `String dashboard_surface
+      ; "source", `String source
+      ; "generated_at_iso", `String generated_at
+      ; "retention", operator_retention_json ~config ~scope ~producer
+      ; "query", query
+      ; "cache", operator_cache_json ?cache_key ~scope json
+      ]
+    in
+    let metadata_keys =
+      [ "dashboard_surface"
+      ; "source"
+      ; "generated_at_iso"
+      ; "retention"
+      ; "query"
+      ; "cache"
+      ]
+    in
+    let fields =
+      List.filter (fun (key, _) -> not (List.mem key metadata_keys)) fields
+    in
+    `Assoc (metadata @ fields)
+  | other -> other
+;;
+
+let with_operator_snapshot_metadata ~config ?cache_key ~query json =
+  with_operator_surface_metadata
+    ~config
+    ?cache_key
+    ~dashboard_surface:"/api/v1/operator"
+    ~source:"operator_snapshot_read_model"
+    ~scope:"operator_snapshot"
+    ~producer:"Operator_control.snapshot_json"
+    ~query
+    json
+;;
+
+let with_operator_digest_metadata ~config ?cache_key ~query json =
+  with_operator_surface_metadata
+    ~config
+    ?cache_key
+    ~dashboard_surface:"/api/v1/operator/digest"
+    ~source:"operator_digest_read_model"
+    ~scope:"operator_digest"
+    ~producer:"Operator_control.digest_json"
+    ~query
+    json
+;;
+
+let operator_snapshot_default_query () =
+  operator_snapshot_query_json
+    ~actor:None
+    ~view:None
+    ~include_messages:true
+    ~include_keepers:true
+    ~lightweight_summary:true
+    ~default_summary_request:true
+;;
+
+let operator_digest_default_query () =
+  operator_digest_query_json
+    ~actor:None
+    ~target_type:None
+    ~target_id:None
+    ~include_workers:None
+    ~effective_target_type:"root"
+    ~default_namespace_request:true
+;;
+
 let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
   let config = state.Mcp_server.room_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
@@ -405,7 +603,11 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
     ~compute
     ~on_result:(fun json ->
       mark_cached_surface_success _operator_snapshot_cache json;
-      !_operator_snapshot_broadcast_ref json)
+      !_operator_snapshot_broadcast_ref
+        (cached_surface_json _operator_snapshot_cache
+         |> with_operator_snapshot_metadata
+              ~config
+              ~query:(operator_snapshot_default_query ())))
 ;;
 
 let start_operator_digest_refresh_loop ~state ~sw ~clock =
@@ -466,7 +668,11 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
     ~compute
     ~on_result:(fun json ->
       mark_cached_surface_success _operator_digest_cache json;
-      !_operator_digest_broadcast_ref json)
+      !_operator_digest_broadcast_ref
+        (cached_surface_json _operator_digest_cache
+         |> with_operator_digest_metadata
+              ~config
+              ~query:(operator_digest_default_query ())))
 ;;
 
 let operator_snapshot_http_json ~state ~sw ~clock request =
@@ -519,15 +725,22 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
          ~started_at
          ~extra:(operator_snapshot_extra ())
   in
+  let default_cache_key =
+    dashboard_cache_key config "operator_snapshot" "default-summary"
+  in
   if default_summary_request
   then
     cached_surface_or_first_success_json
       _operator_snapshot_cache
-      ~cache_key:(dashboard_cache_key config "operator_snapshot" "default-summary")
+      ~cache_key:default_cache_key
       ~ttl:5.0
       ~clock
       ~timeout_sec:dashboard_request_timeout_s
       compute_default_summary
+    |> with_operator_snapshot_metadata
+         ~config
+         ~cache_key:default_cache_key
+         ~query:(operator_snapshot_default_query ())
   else (
     let started_at = Unix.gettimeofday () in
     let include_messages =
@@ -544,6 +757,24 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
       match view with
       | Some raw -> String.equal (String.lowercase_ascii (String.trim raw)) "summary"
       | None -> false
+    in
+    let cache_key =
+      Printf.sprintf
+        "operator_snapshot:param:%s|%s|%b|%b|%b"
+        (Option.value ~default:"" actor)
+        (Option.value ~default:"" view)
+        include_messages
+        include_keepers
+        lightweight_summary
+    in
+    let query =
+      operator_snapshot_query_json
+        ~actor
+        ~view
+        ~include_messages
+        ~include_keepers
+        ~lightweight_summary
+        ~default_summary_request
     in
     let mode = if lightweight_summary then Inline_shared else Offloaded_readonly in
     let compute () =
@@ -588,8 +819,8 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
         `Assoc
           [ "error", `String "timeout"
           ; "message", `String "Operator snapshot timed out after 30s"
-          ; "generated_at", `String (Masc_domain.now_iso ())
-          ]
+         ; "generated_at", `String (Masc_domain.now_iso ())
+         ]
     in
     (* Tier-A perf: parameterized [/api/v1/dashboard/operator/snapshot]
        requests previously bypassed the cache entirely — every keeper
@@ -600,27 +831,20 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
        polling (Bond-Web 3s default) hits the cache; mutations
        continue to invalidate via the existing
        [Coord_hooks.on_task_mutation_fn] path. *)
-    let cache_key =
-      Printf.sprintf
-        "operator_snapshot:param:%s|%s|%b|%b|%b"
-        (Option.value ~default:"" actor)
-        (Option.value ~default:"" view)
-        include_messages
-        include_keepers
-        lightweight_summary
-    in
     Dashboard_cache.get_or_compute_with_timeout
       cache_key
       ~ttl:5.0
       ~clock
       ~timeout_sec:dashboard_request_timeout_s
-      compute)
+      compute
+    |> with_operator_snapshot_metadata ~config ~cache_key ~query)
 ;;
 
 let operator_digest_http_json ~state ~sw ~clock request =
+  let config = state.Mcp_server.room_config in
   let net, mono_clock = state_dashboard_runtime_caps state in
   let actor =
-    dashboard_actor_for_request ~base_path:state.Mcp_server.room_config.base_path request
+    dashboard_actor_for_request ~base_path:config.base_path request
   in
   let target_type = query_param request "target_type" in
   let target_id = query_param request "target_id" in
@@ -636,17 +860,41 @@ let operator_digest_http_json ~state ~sw ~clock request =
     | Some "root" | Some "namespace" | Some "room" -> true
     | Some _ -> false
   in
+  let effective_target_type = Option.value ~default:"root" target_type in
   let default_namespace_request =
     actor = None
     && target_id = None
     && include_workers = None
     && namespace_target_type target_type
   in
+  let query =
+    operator_digest_query_json
+      ~actor
+      ~target_type
+      ~target_id
+      ~include_workers
+      ~effective_target_type
+      ~default_namespace_request
+  in
   if default_namespace_request
-  then Ok (cached_surface_json _operator_digest_cache)
+  then
+    Ok
+      (cached_surface_json _operator_digest_cache
+       |> with_operator_digest_metadata ~config ~query)
   else (
     let started_at = Unix.gettimeofday () in
-    let effective_target_type = Option.value ~default:"root" target_type in
+    let cache_key =
+      Printf.sprintf
+        "operator_digest:param:%s|%s|%s|%s|%s"
+        (Option.value ~default:"" actor)
+        effective_target_type
+        (Option.value ~default:"" target_id)
+        (match include_workers with
+         | None -> ""
+         | Some true -> "1"
+         | Some false -> "0")
+        ""
+    in
     let compute () =
       match
         Eio.Time.with_timeout clock dashboard_request_timeout_s (fun () ->
@@ -657,7 +905,7 @@ let operator_digest_http_json ~state ~sw ~clock request =
                ?mono_clock
                ~sw
                ~clock
-               ~config:state.Mcp_server.room_config
+               ~config
                (fun ~config ~sw ->
                   let ctx : _ Operator_control.context =
                     { config
@@ -701,25 +949,14 @@ let operator_digest_http_json ~state ~sw ~clock request =
     in
     (* See [operator_snapshot_http_json] above for the parameterized-cache
        rationale.  Same 5s SWR window applies to operator/digest views. *)
-    let cache_key =
-      Printf.sprintf
-        "operator_digest:param:%s|%s|%s|%s|%s"
-        (Option.value ~default:"" actor)
-        effective_target_type
-        (Option.value ~default:"" target_id)
-        (match include_workers with
-         | None -> ""
-         | Some true -> "1"
-         | Some false -> "0")
-        ""
-    in
     Ok
       (Dashboard_cache.get_or_compute_with_timeout
          cache_key
          ~ttl:5.0
          ~clock
          ~timeout_sec:dashboard_request_timeout_s
-         compute))
+         compute
+       |> with_operator_digest_metadata ~config ~cache_key ~query))
 ;;
 
 (* --- Mission proactive refresh ----------------------------------------

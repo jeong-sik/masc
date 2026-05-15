@@ -352,62 +352,32 @@ type checkpoint_load_error =
       surfaced during a load. (#8605 family) *)
   | Sdk_other_error of string
 
-(* Checkpoint-load failures classify as [Not_found] only when the
-   underlying SDK error is genuinely "this file does not exist on first
-   boot" — any other I/O problem should stay [Io_error] so we keep the
-   detail in the error log.
+(* RFC-0089 G4 (#15514-sibling): [Not_found] classification was previously
+   string-matched against [FileOpFailed.detail] across four prefixes
+   ("no_such_file", "no such file", "unix_error (enoent", "eio.io fs
+   not_found") + a substring fallback. This was a string classifier
+   workaround (CLAUDE.md §워크어라운드 #2): [Agent_sdk.Error] is already a
+   closed sum type, but [FileOpFailed.detail] flattens the underlying
+   filesystem exception via [Printexc.to_string], throwing away typed
+   provenance.
 
-   The matching surface is fragile because [Agent_sdk] serializes
-   filesystem failures via [Printexc.to_string] inside
-   [FileOpFailed.detail] (see oas/lib/fs_result.ml), so we pattern-match
-   on the rendered strings of every exception constructor the OAS
-   wrapper produces:
+   Root fix: lift ENOENT detection to the OS boundary *before* invoking
+   the SDK. [Agent_sdk.Checkpoint_store.exists : t -> string -> bool] gives
+   us a typed presence check, so the cold-start "file absent" case is now
+   first-class [bool] and never reaches [classify_sdk_error]. Any SDK error
+   that *does* surface from [load] is, by construction, a real I/O /
+   serialization / SDK fault and routes to [Io_error] / [Store_error] /
+   [Parse_error] / [Sdk_other_error] without inspecting strings.
 
-   - [Eio.Io (Fs Not_found _)] → "Eio.Io Fs Not_found Unix_error ..."
-   - [Unix.Unix_error (ENOENT, _, _)] → "Unix_error(ENOENT, ...)"
-   - [Sys_error "..."] → "No such file or directory: ..."
-   - legacy masc-mcp path that stored just "no_such_file" as detail
-
-   The [has_substring] fallback catches the canonical ENOENT phrase
-   anywhere in the rendered string so that wrapper layers that prepend
-   context (e.g. [sprintf "load %s: %s" path ...]) still classify
-   correctly. *)
-let is_not_found_detail (detail : string) : bool =
-  let d = String.lowercase_ascii detail in
-  (* Local to keep [Keeper_checkpoint_store] surface free of a generic
-     string helper — this module has no .mli so every top-level [let]
-     is exported. *)
-  let has_substring haystack needle =
-    let hl = String.length haystack and nl = String.length needle in
-    if nl = 0 then true
-    else if nl > hl then false
-    else
-      let rec loop i =
-        if i + nl > hl then false
-        else if String.sub haystack i nl = needle then true
-        else loop (i + 1)
-      in
-      loop 0
-  in
-  String.starts_with ~prefix:"no_such_file" d  (* legacy masc-mcp path *)
-  || String.starts_with ~prefix:"no such file" d
-  || String.starts_with ~prefix:"unix_error (enoent" d  (* POSIX *)
-  || String.starts_with ~prefix:"eio.io fs not_found" d  (* Eio.Io (Fs Not_found _) *)
-  || has_substring d "no such file or directory"
-
-(* #8605 family: exhaustive on Agent_sdk.Error.sdk_error top-level
-   variants. The previous wildcard collapsed Api / Agent / Mcp / Config
-   / Orchestration / A2a / Internal errors into Io_error, hiding
-   non-IO failures from the dashboard. The wildcards on Io _ and
-   Serialization _ remain narrow (one level deep) so future inner
-   variants land in the semantically correct category, but a future
-   top-level sdk_error variant becomes a build error and forces a
-   deliberate routing decision. *)
+   #8605 family: exhaustive on [Agent_sdk.Error.sdk_error] top-level
+   variants. The wildcards on Io _ and Serialization _ remain narrow (one
+   level deep) so a future inner variant lands in the semantically correct
+   category, and a future top-level sdk_error variant becomes a build
+   error forcing a deliberate routing decision. *)
 let classify_sdk_error (e : Agent_sdk.Error.sdk_error) : checkpoint_load_error =
   match e with
   | Io (FileOpFailed r) ->
-      if is_not_found_detail r.detail then Not_found
-      else Io_error (sprintf "file %s failed on %s: %s" r.op r.path r.detail)
+      Io_error (sprintf "file %s failed on %s: %s" r.op r.path r.detail)
   | Io (ValidationFailed r) -> Store_error r.detail
   | Serialization (JsonParseError r) -> Parse_error r.detail
   | Serialization (VersionMismatch r) ->
@@ -596,10 +566,19 @@ let load_oas ~(session_dir : string) ~(session_id : string) :
   | Some fs when Eio_guard.is_ready () ->
       let dir = Eio.Path.(fs / session_dir) in
       (match Agent_sdk.Checkpoint_store.create dir with
-       | Ok store -> (
-           match Agent_sdk.Checkpoint_store.load store session_id with
-           | Ok ckpt -> Ok ckpt
-           | Error e -> Error (classify_sdk_error e))
+       | Ok store ->
+           (* RFC-0089 G4: typed ENOENT classification at the OS boundary.
+              [exists] returns a [bool] so a missing checkpoint never has to
+              be inferred from a stringified exception detail. The SDK-side
+              [load] is only reached when the file is present, so any error
+              returned is a genuine I/O / parse / SDK failure (not cold-start
+              absence). *)
+           if not (Agent_sdk.Checkpoint_store.exists store session_id) then
+             Error Not_found
+           else (
+             match Agent_sdk.Checkpoint_store.load store session_id with
+             | Ok ckpt -> Ok ckpt
+             | Error e -> Error (classify_sdk_error e))
        | Error e -> Error (Store_error (Agent_sdk.Error.to_string e)))
   | Some _ | None ->
       fallback ()

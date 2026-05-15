@@ -53,8 +53,8 @@ let core_always_tools =
       keeper_tasks_audit (admin), keeper_board_delete (admin #4309),
       keeper_board_cleanup (admin).
     - keeper_tools_list moved from core_always to discoverable.
-    - keeper_bash stays visible because it is the write-side git path
-      after removing legacy PR wrappers.
+    - Bash is the visible write-side git path; keeper_bash may remain only
+      as a hidden exact-name dispatch entry for stale context.
     - 26 → 20 tools.  9B tool selection accuracy improves with fewer
       choices (vLLM Semantic Router research: k=3-5 optimal for 7-9B).
 
@@ -91,10 +91,10 @@ let core_discovery_tools =
         ; (* Discovery fallback for meta/admin tools *)
           Keeper Tools_list
         ]
-  @ [ (* RFC-0064 Phase 2: Public aliases replace internal names in
-         the LLM-facing discovery surface. Dual-registration cleanup
-         means internal names (keeper_bash, keeper_fs_read, etc.)
-         are no longer registered as OAS tools. *)
+    @ [ (* RFC-0064 Phase 2: Public aliases replace internal names in
+         the LLM-facing discovery surface. Keeper_tools_oas may still
+         register hidden exact-name dispatch entries for internal names
+         so stale context does not fail at execution lookup. *)
       "Bash"
     ; "Edit"
     ; "Grep"

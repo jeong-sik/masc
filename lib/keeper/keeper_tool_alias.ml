@@ -9,9 +9,11 @@
     - LLM native tools: Bash, Read, Edit, Write, Grep, WebSearch, WebFetch
     - MCP tools: masc_* (handled separately via Tool_catalog_surfaces)
 
-    Internal [keeper_*] names are implementation details of the routing layer,
-    not a public surface. A tool call for a name we don't handle is a routing
-    miss — captured by result-based telemetry, not by upfront classification.
+    Some internal [keeper_*] names are implementation details of the routing
+    layer, while broader structured tools such as [keeper_shell] may remain
+    visible next to narrow public aliases. A tool call for a name we don't
+    handle is a routing miss — captured by result-based telemetry, not by
+    upfront classification.
 
     @since 2.187.0 — RFC-0064 two-surface model *)
 
@@ -125,6 +127,26 @@ let public_name_for_internal internal_name =
     | None -> false)
 ;;
 
+let public_alias_hides_internal = function
+  | "Grep" ->
+    (* Grep is a narrow convenience alias for [keeper_shell op=rg].
+       keeper_shell itself is still the structured shell/GitHub surface
+       (op=gh, op=git_clone, git_status, ...), so hiding it removes
+       legitimate runtime affordances. *)
+    false
+  | _ -> true
+;;
+
+let internal_hidden_by_public_alias internal_name =
+  public_names ()
+  |> List.exists (fun public ->
+    public_alias_hides_internal public
+    &&
+    match route public with
+    | Some r -> String.equal r.internal_name internal_name
+    | None -> false)
+;;
+
 (* ── MCP surface routing (separate concern) ──────────────────────── *)
 
 let public_masc_to_internal_tbl =
@@ -170,6 +192,10 @@ let bash_public_schema =
         "string"
         "The shell command to execute. Single command only. No chaining (&&, ||, ;), \
          pipes (|), or redirects (>, >>). Example: 'dune build', 'rg pattern lib/'."
+    ; property
+        "cwd"
+        "string"
+        "Optional sandbox-relative working directory, for example 'repos/masc-mcp'."
     ; property
         "description"
         "string"

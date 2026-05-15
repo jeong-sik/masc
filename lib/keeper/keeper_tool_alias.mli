@@ -9,9 +9,11 @@
     - LLM native tools (Bash, Read, Edit, Write, Grep, WebSearch, WebFetch)
     - MCP tools (masc_*, handled via Tool_catalog_surfaces)
 
-    Internal [keeper_*] names are implementation details of the routing
-    layer, not a public surface. A tool call for a name not in the routing
-    table is a routing miss — outcome-based telemetry captures this.
+    Some internal [keeper_*] names are implementation details of the
+    routing layer, while broader structured tools such as [keeper_shell]
+    may remain visible next to narrow public aliases. A tool call for a
+    name not in the routing table is a routing miss — outcome-based
+    telemetry captures this.
 
     @since 2.187.0 — RFC-0064 two-surface model *)
 
@@ -43,6 +45,13 @@ val public_names : unit -> string list
     The result follows [public_names] order, so ambiguous internals such
     as [keeper_fs_edit] pick a stable primary public surface. *)
 val public_name_for_internal : string -> string option
+
+(** [internal_hidden_by_public_alias internal_name] is [true] when the
+    public alias is a complete LLM-facing replacement for the internal
+    tool and the internal name should be withheld from visible tool
+    disclosure. Narrow aliases such as [Grep] do not hide their broader
+    internal tool ([keeper_shell]). *)
+val internal_hidden_by_public_alias : string -> bool
 
 (** {1 Result-based telemetry} *)
 

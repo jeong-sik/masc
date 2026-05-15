@@ -79,6 +79,7 @@ let schemas : tool_schema list =
       name = "masc_goal_list";
       description =
         "List shared planning goals from the Goal Store, optionally filtered by horizon, explicit phase, or legacy status. \
+For a single known goal, pass goal_id to this same tool instead of inventing a separate get/read verb. \
 Use when a PM/planner agent needs current long/mid/short goals before creating tasks or reviews. \
 The dashboard Goal Tree reads the same store. Linked tasks prefer structured task.goal_id; title tags like [goal:<id>] remain a legacy fallback. \
 The response includes each goal's explicit lifecycle phase and verification policy.";
@@ -92,6 +93,14 @@ The response includes each goal's explicit lifecycle phase and verification poli
                   ("horizon", enum_schema ~description:"Optional horizon filter" goal_horizon_enum);
                   ("phase", enum_schema ~description:"Optional explicit Goal FSM phase filter" goal_phase_enum);
                   ("status", enum_schema ~description:"Optional legacy status filter" goal_status_enum);
+                  ( "goal_id",
+                    `Assoc
+                      [
+                        ("type", `String "string");
+                        ( "description",
+                          `String
+                            "Optional exact goal id filter. Use this for single-goal reads; no separate masc_goal_get tool exists." );
+                      ] );
                 ] );
             ("additionalProperties", `Bool false);
           ];

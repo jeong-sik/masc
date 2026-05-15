@@ -129,7 +129,7 @@ let fallback_prose key =
        `keeper_task_claim` first; `keeper_shell op=gh` derives repo context \
        from the active task worktree/current_task_id. Then inspect with \
        `keeper_shell op=gh`; if code change is needed, `masc_worktree_create` \
-       -> edit -> `keeper_bash` for `git add` / `git commit` / `git push` -> \
+       -> edit -> `Bash` for `git add` / `git commit` / `git push` -> \
        `keeper_pr_create` with `draft=true` -> \
        `keeper_task_submit_for_verification` with notes and `pr_url`."
   else if String.equal key Keeper_prompt_names.tool_workflow_gh_no_pr
@@ -137,7 +137,7 @@ let fallback_prose key =
     Some
       "GitHub/code workflow: if you do not already hold a task, call \
        `keeper_task_claim` first; inspect with `keeper_shell op=gh`; if code \
-       change is needed, `masc_worktree_create` -> edit -> `keeper_bash` for \
+       change is needed, `masc_worktree_create` -> edit -> `Bash` for \
        `git add` / `git commit` / `git push`. Do not create PRs through \
        `keeper_shell op=gh`; submit verification notes with the pushed branch \
        and request a dedicated draft-PR tool."
@@ -188,6 +188,16 @@ let load_prose key =
 ;;
 
 let allowed_lookup allowed_tool_names =
+  let public_aliases =
+    Keeper_tool_alias.public_names ()
+    |> List.filter (fun public ->
+      match Keeper_tool_alias.route public with
+      | Some route -> List.mem route.internal_name allowed_tool_names
+      | None -> false)
+  in
+  let allowed_tool_names =
+    Keeper_types.dedupe_keep_order (allowed_tool_names @ public_aliases)
+  in
   let tbl = Hashtbl.create (List.length allowed_tool_names) in
   List.iter (fun name -> Hashtbl.replace tbl name ()) allowed_tool_names;
   tbl
@@ -221,7 +231,7 @@ let has allowed_tool_names name = List.mem name allowed_tool_names
 let render_gh_workflow ~allowed_tool_names =
   let has_shell = has allowed_tool_names "keeper_shell" in
   let has_worktree = has allowed_tool_names "masc_worktree_create" in
-  let has_bash = has allowed_tool_names "keeper_bash" in
+  let has_bash = has allowed_tool_names "Bash" || has allowed_tool_names "keeper_bash" in
   let has_verify = has allowed_tool_names "keeper_task_submit_for_verification" in
   let has_pr_create = has allowed_tool_names "keeper_pr_create" in
   match has_shell, has_worktree, has_bash, has_verify, has_pr_create with

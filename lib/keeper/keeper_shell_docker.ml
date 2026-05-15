@@ -376,6 +376,96 @@ let cmd_targets_gh cmd =
     List.exists (fun tok -> tok = "gh") tokens)
 ;;
 
+let explicit_sandbox_repo_in_cmd cmd =
+  let repo_re source =
+    Re.Pcre.re source |> Re.compile
+  in
+  let first_capture re =
+    match Re.exec_opt re cmd with
+    | Some groups -> Some (Re.Group.get groups 1)
+    | None -> None
+  in
+  let git_c_re =
+    repo_re {|(?:^|[\s;&|]+)git\s+-C\s+['"]?(?:\./)?repos/([A-Za-z0-9._-]+)(?:/[^'"\s;&|]*)?['"]?(?:$|[\s;&|])|}
+  in
+  let cd_re =
+    repo_re {|(?:^|[\s;&|]+)cd\s+['"]?(?:\./)?repos/([A-Za-z0-9._-]+)(?:/[^'"\s;&|]*)?['"]?(?:$|[\s;&|])|}
+  in
+  match first_capture git_c_re with
+  | Some _ as hit -> hit
+  | None -> first_capture cd_re
+;;
+
+let sandbox_repo_path ~host_root repo =
+  Filename.concat (Filename.concat host_root "repos") repo
+;;
+
+let sandbox_repo_exists ~host_root repo =
+  let repo_path = sandbox_repo_path ~host_root repo in
+  try Sys.is_directory repo_path && Sys.file_exists (Filename.concat repo_path ".git")
+  with
+  | Sys_error _ -> false
+;;
+
+let current_sandbox_repo_for_cwd ~(config : Coord.config) ~(meta : keeper_meta) ~cwd =
+  let host_root =
+    keeper_playground_root ~config ~meta
+    |> Keeper_alerting_path.normalize_path_for_check
+    |> Keeper_alerting_path.strip_trailing_slashes
+  in
+  let cwd_normalized =
+    Keeper_alerting_path.normalize_path_for_check cwd
+    |> Keeper_alerting_path.strip_trailing_slashes
+  in
+  let repos_prefix = Filename.concat host_root "repos" ^ "/" in
+  if not (String.starts_with ~prefix:repos_prefix cwd_normalized)
+  then None
+  else
+    let suffix =
+      String.sub cwd_normalized (String.length repos_prefix)
+        (String.length cwd_normalized - String.length repos_prefix)
+    in
+    match String.split_on_char '/' suffix with
+    | repo :: _ when repo <> "" -> Some repo
+    | _ -> None
+;;
+
+let normalize_redundant_repo_cwd_command
+      ~(config : Coord.config)
+      ~(meta : keeper_meta)
+      ~cwd
+      cmd
+  =
+  match current_sandbox_repo_for_cwd ~config ~meta ~cwd with
+  | None -> cmd, false
+  | Some repo ->
+    let repo_rel = "repos/" ^ repo in
+    let replacements =
+      [ "git -C " ^ repo_rel, "git -C ."
+      ; "git -C ./" ^ repo_rel, "git -C ."
+      ; "git -C '" ^ repo_rel ^ "'", "git -C ."
+      ; "git -C \""
+        ^ repo_rel
+        ^ "\"", "git -C ."
+      ; "cd " ^ repo_rel ^ " && ", ""
+      ; "cd ./" ^ repo_rel ^ " && ", ""
+      ; "cd '" ^ repo_rel ^ "' && ", ""
+      ; "cd \"" ^ repo_rel ^ "\" && ", ""
+      ; "&& cd " ^ repo_rel ^ " && ", "&& "
+      ; "&& cd ./" ^ repo_rel ^ " && ", "&& "
+      ; "&& cd '" ^ repo_rel ^ "' && ", "&& "
+      ; "&& cd \"" ^ repo_rel ^ "\" && ", "&& "
+      ]
+    in
+    let corrected =
+      List.fold_left
+        (fun acc (needle, by) -> String_util.replace_substring ~needle ~by acc)
+        cmd
+        replacements
+    in
+    corrected, not (String.equal corrected cmd)
+;;
+
 let resolve_sandbox_root_git_cwd ~(config : Coord.config) ~(meta : keeper_meta) ~cwd ~cmd =
   let host_root =
     keeper_playground_root ~config ~meta
@@ -407,6 +497,18 @@ let resolve_sandbox_root_git_cwd ~(config : Coord.config) ~(meta : keeper_meta) 
   then cwd, None
   else if cwd_normalized = host_root && cmd_targets_git_or_gh cmd
   then (
+    match explicit_sandbox_repo_in_cmd cmd with
+    | Some repo when sandbox_repo_exists ~host_root repo -> cwd, None
+    | Some repo ->
+      ( cwd
+      , Some
+          (Printf.sprintf
+             "sandbox root cannot run git/gh: command references repos/%s, \
+              but that sandbox git clone does not exist under %s/repos/. \
+              First clone it with keeper_shell op=git_clone path=\"repos/%s\", \
+              or set cwd to an existing sandbox repo/worktree."
+             repo host_root repo) )
+    | None ->
     match repos_in_playground () with
     | [ single_repo ] ->
       Filename.concat (Filename.concat host_root "repos") single_repo, None
@@ -436,7 +538,7 @@ let resolve_sandbox_root_git_cwd ~(config : Coord.config) ~(meta : keeper_meta) 
           (Printf.sprintf
              "sandbox root cannot run git/gh: mount point %s is not a git repository and \
               multiple sandbox repos exist. Set cwd explicitly before retrying. Example \
-              next call: keeper_bash { \"cmd\": %S, \"cwd\": \"repos/%s\" }. Available \
+              next call: Bash { \"command\": %S, \"cwd\": \"repos/%s\" }. Available \
               repos: %s. Do not retry the same cmd from sandbox root."
              host_root
              cmd_preview

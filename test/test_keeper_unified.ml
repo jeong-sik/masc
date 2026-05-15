@@ -2308,9 +2308,9 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
     (contains_substring prompt "default coding workspace");
   check
     bool
-    "git path documented via keeper_bash"
+    "git path documented via Bash"
     true
-    (contains_substring prompt "keeper_bash cmd='git status'");
+    (contains_substring prompt "Bash command='git status'");
   check
     bool
     "draft pr tool documented"
@@ -2961,7 +2961,7 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
     bool
     "social guidance omits bash outside preset"
     false
-    (contains_substring social_guidance "`keeper_bash` { cmd:");
+    (contains_substring social_guidance "`Bash` { command:");
   check
     bool
     "social guidance omits worktree outside preset"
@@ -2971,7 +2971,7 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
     bool
     "coding guidance includes bash schema"
     true
-    (contains_substring coding_guidance "`keeper_bash` { cmd:");
+    (contains_substring coding_guidance "`Bash` { command:");
   check
     bool
     "coding guidance includes web search schema"

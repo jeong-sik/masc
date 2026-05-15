@@ -951,6 +951,69 @@ let test_sandbox_root_git_cwd_multi_repo_blocks_before_exec () =
     Alcotest.(check bool) "lists beta too" true
       (contains_substring msg "alpha, beta")
 
+let test_sandbox_root_git_cwd_explicit_repo_path_allows_root () =
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let repos = Filename.concat playground "repos" in
+  let repo_a = Filename.concat repos "alpha" in
+  let repo_b = Filename.concat repos "masc-mcp" in
+  ensure_dir repo_a;
+  ensure_dir repo_b;
+  run_ok ~cwd:repo_a "git init -q";
+  run_ok ~cwd:repo_b "git init -q";
+  let cwd, error =
+    Keeper_shell_docker.resolve_sandbox_root_git_cwd ~config ~meta
+      ~cwd:playground ~cmd:"git -C repos/masc-mcp status --short"
+  in
+  Alcotest.(check (option string)) "no error" None error;
+  Alcotest.(check string) "cwd remains sandbox root for explicit -C" playground cwd
+
+let test_sandbox_root_git_cwd_explicit_cd_allows_root () =
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let repos = Filename.concat playground "repos" in
+  let repo_a = Filename.concat repos "alpha" in
+  let repo_b = Filename.concat repos "masc-mcp" in
+  ensure_dir repo_a;
+  ensure_dir repo_b;
+  run_ok ~cwd:repo_a "git init -q";
+  run_ok ~cwd:repo_b "git init -q";
+  let cwd, error =
+    Keeper_shell_docker.resolve_sandbox_root_git_cwd ~config ~meta
+      ~cwd:playground ~cmd:"cd repos/masc-mcp && gh pr list"
+  in
+  Alcotest.(check (option string)) "no error" None error;
+  Alcotest.(check string) "cwd remains sandbox root for explicit cd" playground cwd
+
+let test_normalize_redundant_repo_cwd_git_dash_c () =
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  ensure_dir repo;
+  run_ok ~cwd:repo "git init -q";
+  let corrected, was_corrected =
+    Keeper_shell_docker.normalize_redundant_repo_cwd_command
+      ~config ~meta ~cwd:repo "git -C repos/masc-mcp status --short"
+  in
+  Alcotest.(check bool) "corrected" true was_corrected;
+  Alcotest.(check string) "drops doubled repo path"
+    "git -C . status --short" corrected
+
+let test_normalize_redundant_repo_cwd_cd_prefix () =
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  ensure_dir repo;
+  run_ok ~cwd:repo "git init -q";
+  let corrected, was_corrected =
+    Keeper_shell_docker.normalize_redundant_repo_cwd_command
+      ~config ~meta ~cwd:repo
+      "eval $(opam env) && cd repos/masc-mcp && dune build"
+  in
+  Alcotest.(check bool) "corrected" true was_corrected;
+  Alcotest.(check string) "drops doubled cd path"
+    "eval $(opam env) && dune build" corrected
+
 let test_git_creds_skips_missing_ssh_auth_sock () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
@@ -1317,5 +1380,17 @@ let () =
           Alcotest.test_case
             "sandbox-root git with multiple repos gives cwd correction"
             `Quick test_sandbox_root_git_cwd_multi_repo_blocks_before_exec;
+          Alcotest.test_case
+            "sandbox-root git honors explicit repos path"
+            `Quick test_sandbox_root_git_cwd_explicit_repo_path_allows_root;
+          Alcotest.test_case
+            "sandbox-root gh honors explicit cd repos path"
+            `Quick test_sandbox_root_git_cwd_explicit_cd_allows_root;
+          Alcotest.test_case
+            "repo cwd normalizes doubled git -C repos path"
+            `Quick test_normalize_redundant_repo_cwd_git_dash_c;
+          Alcotest.test_case
+            "repo cwd normalizes doubled cd repos prefix"
+            `Quick test_normalize_redundant_repo_cwd_cd_prefix;
         ] );
     ]

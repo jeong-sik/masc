@@ -610,6 +610,14 @@ let () =
       Alcotest.test_case "allows git commit" `Quick (fun () ->
         Alcotest.(check bool) "git commit" false
           (Worker_dev_tools.is_destructive_bash_operation "git commit -m 'fix'"));
+      Alcotest.test_case "allows read-only command substitution" `Quick (fun () ->
+        Alcotest.(check bool) "echo date" false
+          (Worker_dev_tools.is_destructive_bash_operation
+             "echo \"Testing bash execution at $(date -Iseconds)\""));
+      Alcotest.test_case "allows opam env command substitution" `Quick (fun () ->
+        Alcotest.(check bool) "eval opam env" false
+          (Worker_dev_tools.is_destructive_bash_operation
+             "eval $(opam env) && cd repos/masc-mcp && dune build"));
     ];
     "gh_pr_merge_target", [
       Alcotest.test_case "extracts numeric pr id" `Quick (fun () ->
@@ -898,16 +906,35 @@ let () =
             Alcotest.(check bool) "names brace" true
               (contains_substring msg "Brace expansion")
           | Ok () -> Alcotest.fail "brace with path must be blocked");
-      Alcotest.test_case "backslash path names masc_code_search is_regex"
+      Alcotest.test_case "regex quoting outside path is allowed"
         `Quick (fun () ->
           match Worker_dev_tools.validate_command_paths
                   ~workdir:"/tmp" "grep '\\.ml$' repos/" with
+          | Ok () -> ()
           | Error msg ->
-            Alcotest.(check bool) "names escape" true
-              (contains_substring msg "Backslash escaping");
-            Alcotest.(check bool) "points at is_regex" true
-              (contains_substring msg "is_regex")
-          | Ok () -> Alcotest.fail "backslash with path must be blocked");
+            Alcotest.fail ("regex argument unexpectedly rejected: " ^ msg));
+      Alcotest.test_case "quoted sed range with path is allowed" `Quick
+        (fun () ->
+          match
+            Worker_dev_tools.validate_command_paths
+              ~workdir:"/tmp"
+              "sed -n '44,72p' repos/masc-mcp/lib/keeper/foo.ml"
+          with
+          | Ok () -> ()
+          | Error msg ->
+            Alcotest.fail ("sed range unexpectedly rejected: " ^ msg));
+      Alcotest.test_case "quoted path still names quoting redirect" `Quick
+        (fun () ->
+          match
+            Worker_dev_tools.validate_command_paths
+              ~workdir:"/tmp" "cat 'repos/masc-mcp/lib/foo.ml'"
+          with
+          | Error msg ->
+            Alcotest.(check bool) "names quote" true
+              (contains_substring msg "Quoting");
+            Alcotest.(check bool) "names token" true
+              (contains_substring msg "Offending path token")
+          | Ok () -> Alcotest.fail "quoted path must be blocked");
       Alcotest.test_case "plain path with no rewrite syntax is allowed"
         `Quick (fun () ->
           match Worker_dev_tools.validate_command_paths

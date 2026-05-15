@@ -582,40 +582,44 @@ let path_rewrite_redirect_hint cmd =
   | msgs -> " " ^ String.concat " " msgs
 ;;
 
+let path_rewrite_syntax_error token =
+  "Path syntax blocked: shell quoting, globbing, brace expansion, and backslash \
+   escapes are not allowed for path-bearing keeper commands. Use plain unquoted \
+   paths and explicit cwd. Offending path token: "
+  ^ token
+  ^ "."
+  ^ path_rewrite_redirect_hint token
+;;
+
 let validate_command_paths ?workdir cmd =
   match workdir with
   | None -> Ok ()
   | Some _ ->
-    if String.contains cmd '/' && has_path_rewrite_syntax cmd
-    then
-      Error
-        ("Path syntax blocked: shell quoting, globbing, brace expansion, and backslash \
-          escapes are not allowed for path-bearing keeper commands. Use plain unquoted \
-          paths and explicit cwd."
-         ^ path_rewrite_redirect_hint cmd)
-    else (
       let validate_path_value ~requires_existing_dir token =
-        if not (validate_path ?workdir token)
+        if has_path_rewrite_syntax token
+        then Error (path_rewrite_syntax_error token)
+        else
+          let path_token = strip_wrapping_quotes token in
+          if not (validate_path ?workdir path_token)
         then
           Error
             (Printf.sprintf
                "Path blocked: %s (outside allowed directories for this keeper \
                 command)"
-               token)
-        else if requires_existing_dir && not (path_is_existing_dir ?workdir token)
+               path_token)
+        else if requires_existing_dir && not (path_is_existing_dir ?workdir path_token)
         then
           Error
             (Printf.sprintf
                "cwd_not_directory: %s (directory does not exist under cwd; create \
                 or repair the sandbox repo/worktree first)"
-               token)
+               path_token)
         else Ok ()
       in
       let rec loop expect_existing_dir = function
         | [] -> Ok ()
         | token :: rest ->
-          let token = strip_wrapping_quotes token in
-          if token = ""
+          if strip_wrapping_quotes token = ""
           then loop expect_existing_dir rest
           else if expect_existing_dir
           then
@@ -640,7 +644,7 @@ let validate_command_paths ?workdir cmd =
                | Error _ as err -> err)
             | None -> loop false rest)
       in
-      cmd |> split_shell_tokens |> loop false)
+      cmd |> split_shell_tokens |> loop false
 ;;
 
 (** Check if a command performs write/mutating operations.
@@ -774,8 +778,11 @@ let is_git_branch_switch cmd =
 ;;
 
 (** Detect truly destructive commands that must be blocked even for
-    Coding/Full preset keepers. Delegates to [Eval_gate.detect_destructive]
-    for the full 19-pattern check as a fallback. *)
+    Coding/Full preset keepers.  This intentionally matches only the
+    canonical destructive pattern catalogue.  [Eval_gate.detect_destructive]
+    also reports generic evasion indicators such as [$(...)] and [eval],
+    which are useful for governance risk review but too broad for the
+    unconditional keeper_bash destructive block. *)
 let is_destructive_bash_operation cmd =
   let parts =
     String.split_on_char ' ' (String.trim cmd) |> List.filter (fun s -> s <> "")
@@ -794,7 +801,7 @@ let is_destructive_bash_operation cmd =
       ; "refs/heads/master"
       ]
     || List.exists
-         (fun suffix -> String.ends_with ~suffix target)
+     (fun suffix -> String.ends_with ~suffix target)
          [ ":main"
          ; ":master"
          ; ":origin/main"
@@ -802,6 +809,24 @@ let is_destructive_bash_operation cmd =
          ; ":refs/heads/main"
          ; ":refs/heads/master"
          ]
+  in
+  let matches_canonical_destructive_pattern () =
+    let cmd_lower =
+      Eval_gate.normalize_command cmd |> String.lowercase_ascii
+    in
+    List.exists
+      (fun (pattern, _desc) ->
+         let pat_lower = String.lowercase_ascii pattern in
+         let pat_len = String.length pat_lower in
+         let rec find_at i =
+           if i + pat_len > String.length cmd_lower
+           then false
+           else if String.sub cmd_lower i pat_len = pat_lower
+           then true
+           else find_at (i + 1)
+         in
+         find_at 0)
+      Eval_gate.destructive_patterns
   in
   match parts with
   | "git" :: "push" :: rest ->
@@ -827,10 +852,7 @@ let is_destructive_bash_operation cmd =
       List.exists (fun arg -> arg = "--force" || has_short_flag 'f' arg) option_args
     in
     has_recursive && has_force
-  | _ ->
-    (match Eval_gate.detect_destructive cmd with
-     | Some _ -> true
-     | None -> false)
+  | _ -> matches_canonical_destructive_pattern ()
 ;;
 
 let redact_url_credentials token =

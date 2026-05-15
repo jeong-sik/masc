@@ -53,13 +53,13 @@ fatal: not a git repository (or any parent up to mount point /home/keeper/playgr
 Stopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).
 ```
 
-Always change directory first, or use `git -C` to scope a single command:
+Always set the tool `cwd`, or use `git -C` to scope a single command:
 
-- `cd repos/<REPO_NAME> && git status`
+- `Bash { command: "git status", cwd: "repos/<REPO_NAME>" }`
 - `git -C repos/<REPO_NAME> log --oneline -5`
-- `cd repos/<REPO_NAME>/.worktrees/{your-name}-<task_id> && git diff`
+- `Bash { command: "git diff", cwd: "repos/<REPO_NAME>/.worktrees/{your-name}-<task_id>" }`
 
-When invoking `keeper_bash`, supply `cwd: "repos/<REPO_NAME>"` (or the
+When invoking `Bash`, supply `cwd: "repos/<REPO_NAME>"` (or the
 worktree path) instead of relying on the sandbox-root default cwd.  This
 is the most common cause of `sandbox docker exec failed` events in the
 fleet log (#10424: 9x increase from 2 to 56 events/day across 04-24..26).

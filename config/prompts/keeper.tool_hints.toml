@@ -39,14 +39,19 @@ call = "`keeper_broadcast` { message: \"<note>\" }"
 description = "share broadly in the namespace"
 
 [[hints]]
-name = "keeper_fs_read"
-call = "`keeper_fs_read` { path: \"<path>\" }"
+name = "Read"
+call = "`Read` { path: \"<path>\" }"
 description = "read a file before editing or reporting"
 
 [[hints]]
-name = "keeper_fs_edit"
-call = "`keeper_fs_edit` { path: \"<path>\", mode: \"patch\", old_string: \"...\", new_string: \"...\" }"
+name = "Edit"
+call = "`Edit` { path: \"<path>\", old_string: \"...\", new_string: \"...\" }"
 description = "edit files inside the keeper workspace"
+
+[[hints]]
+name = "Write"
+call = "`Write` { path: \"<path>\", content: \"...\" }"
+description = "create or replace files inside the keeper workspace"
 
 [[hints]]
 name = "keeper_shell"
@@ -54,8 +59,8 @@ call = "`keeper_shell` { op: \"gh\", cmd: \"pr list --state open\" }"
 description = "inspect GitHub after a task/worktree is bound"
 
 [[hints]]
-name = "keeper_bash"
-call = "`keeper_bash` { cmd: \"<single shell command>\" }"
+name = "Bash"
+call = "`Bash` { command: \"<single shell command>\" }"
 description = "run one shell command in the keeper workspace"
 
 [[hints]]

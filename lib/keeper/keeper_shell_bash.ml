@@ -336,6 +336,26 @@ let handle_keeper_bash
     match Keeper_shell_shared.resolve_keeper_shell_write_cwd ~config ~meta ~args with
     | Error e -> error_json e
     | Ok cwd ->
+    let cmd, cmd_for_log =
+      let corrected, was_corrected =
+        Keeper_shell_docker.normalize_redundant_repo_cwd_command
+          ~config ~meta ~cwd cmd
+      in
+      if was_corrected then
+        Log.Keeper.info
+          "keeper_bash normalized redundant sandbox repo cwd: keeper=%s cwd=%s \
+           before=%s after=%s"
+          meta.name cwd cmd_for_log
+          (corrected
+           |> Worker_dev_tools.sanitize_command_for_log
+           |> Worker_dev_tools.truncate_for_log);
+      let corrected_for_log =
+        corrected
+        |> Worker_dev_tools.sanitize_command_for_log
+        |> Worker_dev_tools.truncate_for_log
+      in
+      corrected, corrected_for_log
+    in
     let env_snap =
       try Some (Exec_core.snapshot_env ~cwd)
       with
@@ -563,7 +583,7 @@ let handle_keeper_bash
              "This command modifies state (git push/commit, make deploy, etc.). \
               A write-enabled preset (Coding/Delivery/Full) is required."
            ~alternatives:
-             [ "Read-only alternatives: use keeper_bash for git log, git diff, git status."
+             [ "Read-only alternatives: use Bash for git log, git diff, git status."
              ; "If you need write access, ask the operator to assign a Coding/Delivery/Full preset."
              ]
            ~retryability:Exec_core.Operator_required
@@ -606,7 +626,7 @@ let handle_keeper_bash
                  "Clone into your sandbox: keeper_shell op=git_clone, then cd to %srepos/REPO/."
                  sandbox_root
              ; "Create a worktree inside your sandbox with masc_worktree_create."
-             ; "Use keeper_bash with a cwd pointing to your sandbox worktree."
+             ; "Use Bash with a cwd pointing to your sandbox worktree."
              ]
            ~retryability:Exec_core.Operator_required
            ~diag:
@@ -682,10 +702,10 @@ let handle_keeper_bash
           match reason with
           | Worker_dev_tools.Command_not_allowed name
             when String_util.equals_ci name "gh" ->
-            "`gh` is not allowed via keeper_bash. Use keeper_shell with \
+            "`gh` is not allowed via Bash. Use keeper_shell with \
              op=\"gh\" (e.g. keeper_shell op=gh cmd=\"pr list --state open\")."
           | Chain_or_redirect | Pipes_not_allowed | Unsafe_redirect ->
-            "Use separate tool calls instead of chaining. Call keeper_bash once per command."
+            "Use separate tool calls instead of chaining. Call Bash once per command."
           | Injection | Process_substitution ->
             "Avoid shell metacharacters. Use keeper_shell with a specific op (rg, find, ls) instead."
           | Command_not_allowed _ ->
@@ -701,7 +721,7 @@ let handle_keeper_bash
             ; "Example: keeper_shell op=gh cmd=\"pr list --state open\"."
             ]
           | Chain_or_redirect | Pipes_not_allowed | Unsafe_redirect ->
-            [ "Break the pipeline into separate keeper_bash calls."
+            [ "Break the pipeline into separate Bash calls."
             ; "Save intermediate output to a file, then process it in the next call."
             ]
           | Injection | Process_substitution ->
@@ -714,7 +734,7 @@ let handle_keeper_bash
             ]
           | Empty_command ->
             [ "Provide a non-empty command string."
-            ; "Example: keeper_bash cmd='ls -la lib/'."
+            ; "Example: Bash command='ls -la lib/'."
             ]
         in
         Yojson.Safe.to_string

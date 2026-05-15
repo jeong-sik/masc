@@ -142,6 +142,21 @@ let parse_optional_goal_phase args field =
          ~received:(Yojson.Safe.to_string json))
 ;;
 
+let parse_optional_string args field =
+  match Yojson.Safe.Util.member field args with
+  | `Null -> Ok None
+  | `String raw ->
+    let value = String.trim raw in
+    if String.equal value "" then Ok None else Ok (Some value)
+  | json ->
+    Error
+      (make_type_field_error
+         ~field
+         ~constraint_violated:Type_string
+         ~expected:"string"
+         ~received:(Yojson.Safe.to_string json))
+;;
+
 let goal_upsert_lifecycle_error ~tool_name ~start_time field =
   error_result_typed
     ~tool_name
@@ -476,12 +491,22 @@ let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.t
   match
     ( parse_optional_horizon args "horizon"
     , parse_optional_goal_status args "status"
-    , parse_optional_goal_phase args "phase" )
+    , parse_optional_goal_phase args "phase"
+    , parse_optional_string args "goal_id" )
   with
-  | Error err, _, _ | _, Error err, _ | _, _, Error err ->
+  | Error err, _, _, _
+  | _, Error err, _, _
+  | _, _, Error err, _
+  | _, _, _, Error err ->
     validation_error_result ~tool_name ~start_time [ err ]
-  | Ok horizon, Ok status, Ok phase ->
-    let goals = Goal_store.list_goals ctx.config ?horizon ?status ?phase () in
+  | Ok horizon, Ok status, Ok phase, Ok goal_id ->
+    let goals =
+      Goal_store.list_goals ctx.config ?horizon ?status ?phase ()
+      |> List.filter (fun (goal : Goal_store.goal) ->
+        match goal_id with
+        | None -> true
+        | Some id -> String.equal goal.id id)
+    in
     let rollup = Goal_store.compute_rollup goals in
     ok_result
       ~tool_name

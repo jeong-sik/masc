@@ -212,6 +212,36 @@ let test_goal_list_filters_by_phase () =
   | _ -> fail "expected one filtered goal"
 ;;
 
+let test_goal_list_filters_by_goal_id () =
+  with_room
+  @@ fun config ->
+  let alpha, _ =
+    match Goal_store.upsert_goal config ~title:"Alpha goal" ~horizon:Goal_store.Short ()
+    with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  (match Goal_store.upsert_goal config ~title:"Beta goal" ~horizon:Goal_store.Long () with
+   | Ok _ -> ()
+   | Error msg -> fail msg);
+  let listed =
+    Tool_coord.dispatch
+      (coord_ctx config)
+      ~name:"masc_goal_list"
+      ~args:(`Assoc [ "goal_id", `String alpha.id ])
+  in
+  let listed_json =
+    match listed with
+    | Some result -> parse_json_result result
+    | None -> fail "masc_goal_list not handled"
+  in
+  let goals = Yojson.Safe.Util.member "goals" listed_json |> Yojson.Safe.Util.to_list in
+  check int "one listed goal by id" 1 (List.length goals);
+  match goals with
+  | [ goal_json ] -> check string "goal_id filter honored" alpha.id (get_string_field goal_json "id")
+  | _ -> fail "expected one goal_id-filtered goal"
+;;
+
 let test_goal_list_ignores_blank_optional_filters () =
   with_room
   @@ fun config ->
@@ -222,7 +252,13 @@ let test_goal_list_ignores_blank_optional_filters () =
     Tool_coord.dispatch
       (coord_ctx config)
       ~name:"masc_goal_list"
-      ~args:(`Assoc [ "horizon", `String ""; "phase", `String ""; "status", `String "" ])
+      ~args:
+        (`Assoc
+            [ "horizon", `String ""
+            ; "phase", `String ""
+            ; "status", `String ""
+            ; "goal_id", `String ""
+            ])
   in
   let listed_json =
     match listed with
@@ -921,6 +957,7 @@ let () =
     [ ( "tool_coord"
       , [ test_case "upsert and list" `Quick test_goal_upsert_and_list
         ; test_case "list filters by phase" `Quick test_goal_list_filters_by_phase
+        ; test_case "list filters by goal_id" `Quick test_goal_list_filters_by_goal_id
         ; test_case
             "list ignores blank optional filters"
             `Quick

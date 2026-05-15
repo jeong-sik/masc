@@ -888,16 +888,18 @@ let make_tool_bundle
      execute_keeper_tool_call uses can_execute for the execution gate. *)
   let universe_names = Keeper_exec_tools.keeper_universe_tool_names meta in
   let tool_defs = Keeper_exec_tools.keeper_universe_model_tools meta in
-  (* RFC-0064 Phase 2 (Copilot review #14662 threads 5/6): aliased internal
-     names (e.g. keeper_bash backing public alias Bash) must NOT appear on
-     the LLM-visible surface alongside their public alias.  Mirrors the
-     pattern already established in [keeper_run_tools.ml] PRs #14574/#14596. *)
+  (* RFC-0064 Phase 2 (Copilot review #14662 threads 5/6): internal names
+     whose public aliases are full replacements (e.g. keeper_bash -> Bash)
+     must NOT appear on the LLM-visible surface alongside their public alias.
+     Narrow aliases (Grep -> keeper_shell op=rg) keep their broader internal
+     tool visible. Mirrors [keeper_run_tools.ml]. *)
   let aliased_internal_names =
     List.filter_map
       (fun public ->
          match Keeper_tool_alias.route public with
-         | Some r -> Some r.internal_name
-         | None -> None)
+         | Some r when Keeper_tool_alias.internal_hidden_by_public_alias r.internal_name ->
+           Some r.internal_name
+         | Some _ | None -> None)
       (Keeper_tool_alias.public_names ())
   in
   let alias_public_names_in_surface =
@@ -914,8 +916,8 @@ let make_tool_bundle
   in
   (* Record tool assignment telemetry for causal tracing.
      assignment_id links Assigned → Called → Completed events.
-     [tool_list] matches the actual LLM-visible surface (internal names
-     minus aliased counterparts, plus public alias names), so downstream
+     [tool_list] matches the actual LLM-visible surface (full-replaced
+     internal names removed, public alias names added), so downstream
      Assigned/Called/Completed pairing has no missing entries. *)
   let (_assignment_id : Tool_assignment_telemetry.assignment_id) =
     let lookup = Keeper_tool_policy.tool_access_lookup_of_meta meta in
@@ -936,37 +938,49 @@ let make_tool_bundle
       ()
   in
   let failure_counts = create_failure_counts () in
-  (* Pass A: internal tools that have no public alias.  Aliased internals
-     are registered only via Pass B under their public name so the LLM
-     surface holds at most one entry per logical tool. *)
+  let unique_aliased_internal_names =
+    Keeper_types.dedupe_keep_order aliased_internal_names
+  in
+  let schema_by_name name =
+    List.find_opt
+      (fun (td : Masc_domain.tool_schema) -> String.equal td.name name)
+      tool_defs
+  in
+  let make_internal_tool td =
+    let h =
+      make_keeper_tool_handler
+        ~name:td.Masc_domain.name
+        ~input_schema:td.input_schema
+        ~config
+        ~meta
+        ~ctx_snapshot
+        ?turn_sandbox_factory
+        ?turn_sandbox_factory_git
+        ~exec_cache
+        ?search_fn
+        ?on_tool_called
+        ~failure_counts
+        ()
+    in
+    Tool_bridge.oas_tool_of_masc
+      ~name:td.name
+      ~description:td.description
+      ~input_schema:td.input_schema
+      (fun input -> h input)
+  in
+  (* Pass A: internal tools with no full-replacement public alias. Narrow
+     alias internals such as [keeper_shell] stay visible here because Grep
+     only covers op=rg. Full-replaced internals are withheld from the
+     LLM-visible surface, then Pass C registers hidden exact-name dispatch
+     entries so old context or prompt remnants still execute instead of
+     failing at OAS lookup. *)
   let internal_tools =
     List.filter_map
       (fun (td : Masc_domain.tool_schema) ->
          if
            List.mem td.name universe_names
-           && not (List.mem td.name aliased_internal_names)
-         then (
-           let h =
-             make_keeper_tool_handler
-               ~name:td.name
-               ~input_schema:td.input_schema
-               ~config
-               ~meta
-               ~ctx_snapshot
-               ?turn_sandbox_factory
-               ?turn_sandbox_factory_git
-               ~exec_cache
-               ?search_fn
-               ?on_tool_called
-               ~failure_counts
-               ()
-           in
-           Some
-             (Tool_bridge.oas_tool_of_masc
-                ~name:td.name
-                ~description:td.description
-                ~input_schema:td.input_schema
-                (fun input -> h input)))
+           && not (List.mem td.name unique_aliased_internal_names)
+         then Some (make_internal_tool td)
          else None)
       tool_defs
   in
@@ -987,9 +1001,7 @@ let make_tool_bundle
            then None
            else (
              match
-               List.find_opt
-                 (fun (td : Masc_domain.tool_schema) -> String.equal td.name internal)
-                 tool_defs
+               schema_by_name internal
              with
              | None -> None
              | Some internal_def ->
@@ -1028,13 +1040,26 @@ let make_tool_bundle
                Some
                  (Tool_bridge.oas_tool_of_masc
                     ~name:public
-                    ~description
-                    ~input_schema
-                    (fun input -> h input))))
+                   ~description
+                   ~input_schema
+                   (fun input -> h input))))
       (Keeper_tool_alias.public_names ())
   in
+  (* Pass C: hidden internal aliases.  These entries are present in
+     [Agent.tools] for execution lookup but absent from the guardrail
+     allowlist computed by [Keeper_run_tools], so they are not disclosed to
+     providers.  They are exact internal-name compatibility entries: public
+     alias payload translation belongs to Pass B only. *)
+  let hidden_internal_alias_tools =
+    List.filter_map
+      (fun internal ->
+         if not (List.mem internal universe_names)
+         then None
+         else Option.map make_internal_tool (schema_by_name internal))
+      unique_aliased_internal_names
+  in
   let bundle =
-    { tools = internal_tools @ alias_tools
+    { tools = internal_tools @ alias_tools @ hidden_internal_alias_tools
     ; cleanup =
         (fun () ->
           Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory;

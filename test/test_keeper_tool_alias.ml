@@ -59,6 +59,21 @@ let test_internal_names_resolve_to_preferred_public_alias () =
     (Alias.public_name_for_internal "keeper_board_post")
 ;;
 
+let test_only_full_replacement_aliases_hide_internal_names () =
+  Alcotest.(check bool)
+    "keeper_bash hidden by Bash"
+    true
+    (Alias.internal_hidden_by_public_alias "keeper_bash");
+  Alcotest.(check bool)
+    "keeper_fs_read hidden by Read"
+    true
+    (Alias.internal_hidden_by_public_alias "keeper_fs_read");
+  Alcotest.(check bool)
+    "keeper_shell remains visible because Grep is narrow"
+    false
+    (Alias.internal_hidden_by_public_alias "keeper_shell")
+;;
+
 let test_unknown_returns_none () =
   Alcotest.(check (option string)) "Skill has no cognate" None (route_internal "Skill");
   Alcotest.(check (option string))
@@ -381,6 +396,10 @@ let test_bash_schema_uses_command_field () =
     "Bash schema does not expose 'cmd' directly"
     true
     (Option.is_none (yojson_field "cmd" props));
+  Alcotest.(check bool)
+    "Bash schema exposes sandbox cwd"
+    true
+    (Option.is_some (yojson_field "cwd" props));
   let required =
     match yojson_field "required" schema with
     | Some (`List items) ->
@@ -717,6 +736,10 @@ let () =
             "internal names resolve to preferred public alias"
             `Quick
             test_internal_names_resolve_to_preferred_public_alias
+        ; Alcotest.test_case
+            "only full replacement aliases hide internal names"
+            `Quick
+            test_only_full_replacement_aliases_hide_internal_names
         ; Alcotest.test_case "unknown returns None" `Quick test_unknown_returns_none
         ; Alcotest.test_case "route round-trip" `Quick test_route_round_trip
         ; Alcotest.test_case

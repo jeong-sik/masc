@@ -151,6 +151,59 @@ let test_tool_count_matches_allowed () =
             tool_names))
 ;;
 
+let test_aliased_internal_tools_remain_executable_hidden_entries () =
+  let meta = make_test_meta ~preset:Keeper_types.Coding () in
+  let ctx_snapshot = make_test_ctx () in
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "test_keeper_tools_alias_shadow_%d" (Random.int 100000))
+  in
+  (try Unix.mkdir dir 0o755 with
+   | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Fun.protect
+    ~finally:(fun () ->
+      try
+        Sys.readdir dir |> Array.iter (fun f -> Sys.remove (Filename.concat dir f));
+        Unix.rmdir dir
+      with
+      | _ -> ())
+    (fun () ->
+       Eio_main.run
+       @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       let config = Coord.default_config dir in
+       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
+       let tool_names = List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) tools in
+       let count name =
+         List.fold_left
+           (fun acc tool_name -> if String.equal tool_name name then acc + 1 else acc)
+           0
+           tool_names
+       in
+       List.iter
+         (fun name ->
+            check
+              int
+              (Printf.sprintf "%s registered once" name)
+              1
+              (count name))
+         [ "Bash"
+         ; "keeper_bash"
+         ; "Grep"
+         ; "keeper_shell"
+         ; "Read"
+         ; "keeper_fs_read"
+         ; "Edit"
+         ; "Write"
+         ; "keeper_fs_edit"
+         ; "WebFetch"
+         ; "masc_web_fetch"
+         ; "WebSearch"
+         ; "masc_web_search"
+         ])
+;;
+
 let find_tool name tools =
   List.find (fun (tool : Tool.t) -> String.equal tool.schema.name name) tools
 ;;
@@ -1198,6 +1251,10 @@ let () =
       , [ test_case "returns nonempty" `Quick test_make_tools_returns_nonempty
         ; test_case "valid schemas" `Quick test_tools_have_valid_schemas
         ; test_case "count matches allowed" `Quick test_tool_count_matches_allowed
+        ; test_case
+            "aliased internals remain executable hidden entries"
+            `Quick
+            test_aliased_internal_tools_remain_executable_hidden_entries
         ; test_case
             "error json becomes tool error"
             `Quick

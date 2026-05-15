@@ -269,6 +269,12 @@ let prepare_agent_setup
       ()
   in
   let keeper_tools = keeper_tool_bundle.tools in
+  let keeper_visible_tools =
+    List.filter
+      (fun (tool : Agent_sdk.Tool.t) ->
+         not (Keeper_tool_alias.internal_hidden_by_public_alias tool.schema.name))
+      keeper_tools
+  in
   let extend_turns_tool = Keeper_extend_turns.make ~agent_ref ~max_turns () in
   let tools = extend_turns_tool :: keeper_tools in
   let tool_usage_before =
@@ -281,7 +287,7 @@ let prepare_agent_setup
       top_k = Keeper_config.keeper_tool_search_top_k ()
     }
   in
-  let tool_entries = List.map tool_index_entry_of_tool keeper_tools in
+  let tool_entries = List.map tool_index_entry_of_tool keeper_visible_tools in
   let search_index = Agent_sdk.Tool_index.build ~config:tool_index_config tool_entries in
   let load_preset_selection_context () =
     let preset_names = Keeper_tool_policy.keeper_preset_universe_tool_names meta in
@@ -290,7 +296,7 @@ let prepare_agent_setup
     let preset_tools =
       List.filter
         (fun (t : Agent_sdk.Tool.t) -> Hashtbl.mem preset_set t.schema.name)
-        keeper_tools
+        keeper_visible_tools
     in
     let progressive_tool_index_config =
       { Agent_sdk.Tool_index.default_config with
@@ -303,15 +309,15 @@ let prepare_agent_setup
     )
   in
   let oas_description_map =
-    let tbl = Hashtbl.create (List.length keeper_tools) in
+    let tbl = Hashtbl.create (List.length keeper_visible_tools) in
     List.iter
       (fun (t : Agent_sdk.Tool.t) ->
          Hashtbl.replace tbl t.schema.name t.schema.description)
-      keeper_tools;
+      keeper_visible_tools;
     tbl
   in
   let oas_input_schema_map =
-    let tbl = Hashtbl.create (List.length keeper_tools) in
+    let tbl = Hashtbl.create (List.length keeper_visible_tools) in
     List.iter
       (fun (t : Agent_sdk.Tool.t) ->
          let param_type_str (pt : Agent_sdk.Types.param_type) =
@@ -346,7 +352,7 @@ let prepare_agent_setup
              ]
          in
          Hashtbl.replace tbl t.schema.name schema)
-      keeper_tools;
+      keeper_visible_tools;
     tbl
   in
   (local_search_fn_ref
@@ -469,13 +475,15 @@ let prepare_agent_setup
       (List.length tool_entries);
   let always_include_tools = Keeper_exec_tools.core_always_tools in
   let all_tool_names =
-    "extend_turns" :: List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) keeper_tools
+    "extend_turns"
+    :: List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) keeper_visible_tools
   in
   let universe_set = Keeper_tool_policy.tool_name_set all_tool_names in
   let allowed_exec_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  (* RFC-0064 Phase 2: Remove aliased internal names from the LLM-visible
-     policy surface. Public aliases are the LLM-visible names; internal
-     counterparts are implementation details.
+  (* RFC-0064 Phase 2: Remove internal names from the LLM-visible policy
+     surface only when the public alias fully replaces that internal tool.
+     Narrow aliases such as [Grep] do not hide [keeper_shell], whose broader
+     structured ops remain a real runtime affordance.
 
      Order matters: compute [aliased_public_names] against the UNFILTERED
      internal allowlist, because tool_policy.toml / presets still express
@@ -487,8 +495,9 @@ let prepare_agent_setup
     List.filter_map
       (fun public ->
          match Keeper_tool_alias.route public with
-         | Some r -> Some r.internal_name
-         | None -> None)
+         | Some r when Keeper_tool_alias.internal_hidden_by_public_alias r.internal_name ->
+           Some r.internal_name
+         | Some _ | None -> None)
       (Keeper_tool_alias.public_names ())
   in
   (* Only include a public alias name when its routed internal target is

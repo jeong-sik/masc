@@ -78,6 +78,17 @@ val ensure_keeper_sandbox_runtime :
 val cmd_targets_git_or_gh : string -> bool
 val cmd_targets_gh : string -> bool
 
+val normalize_redundant_repo_cwd_command :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  cwd:string ->
+  string ->
+  string * bool
+(** When [cwd] already points at [repos/<repo>], normalize common doubled
+    commands such as [git -C repos/<repo>] and
+    [cd repos/<repo> && ...] so Docker does not attempt
+    [repos/<repo>/repos/<repo>]. *)
+
 (** Resolve raw [keeper_bash] git/gh commands launched from the sandbox
     mount root. The mount root is not a git repository: a single cloned
     repo is auto-selected, zero repos or multiple repos return a

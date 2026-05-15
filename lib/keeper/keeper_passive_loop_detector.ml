@@ -200,7 +200,7 @@ let nudge_message_text ~streak ~progress_class =
        ^^ " consecutive actionable turns without satisfying the required"
        ^^ " keeper-tool contract (%s). This turn MUST emit a real keeper"
        ^^ " tool call that advances the active goal/task, such as"
-       ^^ " keeper_shell, keeper_fs_read, keeper_board_post,"
+       ^^ " keeper_shell, Read, keeper_board_post,"
        ^^ " keeper_board_comment, keeper_task_claim, or keeper_task_done."
        ^^ " If no action is actually possible, call keeper_stay_silent only"
        ^^ " with a typed no-work proof instead of returning plain text or"

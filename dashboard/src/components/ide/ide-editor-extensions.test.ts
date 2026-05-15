@@ -11,6 +11,7 @@ import {
   syntaxHighlightExt,
   blameExtensions,
   keeperTraceLineGutterExt,
+  keeperTraceLineChipExt,
   keeperTraceLinesForFile,
   pushOwnership,
   pushKeeperTraceLines,
@@ -310,6 +311,61 @@ describe('keeperTraceLinesForFile + keeper trace gutter', () => {
     fireEvent.click(stack!)
     expect(onSelect).toHaveBeenCalledTimes(1)
     expect(onSelect).toHaveBeenCalledWith(traceLines[0]!.events[0], 2)
+
+    view.destroy()
+    container.remove()
+  })
+
+  it('renders inline trace context chips with operational route metadata', () => {
+    const exts = [
+      themeExt(),
+      readOnlyExt(),
+      keeperTraceLineGutterExt(),
+      keeperTraceLineChipExt(),
+    ]
+    const { view, container } = createTestView(exts, 'one\ntwo\nthree\n')
+
+    pushKeeperTraceLines(view, [
+      {
+        line: 2,
+        events: [
+          {
+            id: 'activity-1',
+            source: 'activity-event',
+            keeperName: 'sangsu',
+            count: 1,
+            tsMs: 3000,
+            surface: 'PR',
+            eventId: 'evt-1',
+            goalId: 'goal-runtime',
+            taskId: 'task-runtime',
+            boardPostId: 'post-runtime',
+            commentId: 'comment-runtime',
+            prId: '15035',
+            gitRef: 'refs/heads/review-response',
+            logId: 'turn-2',
+            sessionId: 'sess-runtime',
+            operationId: 'op-runtime',
+            workerRunId: 'worker-runtime',
+          },
+          {
+            id: 'thread-1',
+            source: 'anchored-thread',
+            keeperName: 'scholar',
+            count: 1,
+            tsMs: 2000,
+            threadId: 'thread-1',
+          },
+        ],
+      },
+    ])
+
+    const expectedText = 'Trace · PR · event evt-1 · goal goal-runtime · task task-runtime · board post-runtime · comment comment-runtime · pr #15035 · git review-response · log turn-2 · session sess-runtime · op op-runtime · run worker-runtime · keeper sangsu · +1'
+    const chip = container.querySelector('.cm-masc-trace-chip')
+    expect(chip?.textContent).toBe(expectedText)
+    expect(chip?.getAttribute('aria-label')).toBe(`Line 2 keeper trace context: ${expectedText}`)
+    expect((chip as HTMLElement).style.getPropertyValue('--cm-trace-chip-color'))
+      .toBe('var(--color-status-info)')
 
     view.destroy()
     container.remove()

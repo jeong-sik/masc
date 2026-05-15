@@ -20,6 +20,7 @@ import {
   blameExtensions,
   keeperLineSelectExt,
   keeperTraceLineGutterExt,
+  keeperTraceLineChipExt,
   keeperTraceLinesForFile,
   contextFocusLineExt,
   focusEditorContextLine,
@@ -892,6 +893,7 @@ function CodeMirrorEditor({
                     focusTraceLineContext(current, event, line)
                   },
                 }),
+                keeperTraceLineChipExt(),
               ]
             : []),
           ...blameExts,

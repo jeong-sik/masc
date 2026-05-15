@@ -69,7 +69,7 @@ export interface SurfProps {
   role?: 'alert' | 'status'
   /** Override the default 12px padding. Some callers want a tighter
    *  inline strip (auth banner) or a roomier card body (chat error). */
-  padding?: 'tight' | 'default' | 'loose'
+  padding?: SurfPadding
   /** Drop the rounded-[var(--r-1)] corner — used when Surf sits inside a parent
    *  that already provides the radius (e.g. inside a Card). */
   flat?: boolean
@@ -120,7 +120,11 @@ const KIND_STYLE: Record<SurfKind, KindStyle> = {
   },
 }
 
-const PADDING_BY_VARIANT = {
+export type SurfPadding = 'tight' | 'default' | 'loose'
+
+const DEFAULT_SURF_PADDING: SurfPadding = 'default'
+
+const PADDING_BY_VARIANT: Record<SurfPadding, string> = {
   tight: '8px 12px',
   default: '12px 16px',
   loose: '16px 20px',
@@ -128,7 +132,7 @@ const PADDING_BY_VARIANT = {
 
 export function Surf(props: SurfProps): VNode {
   const ks = KIND_STYLE[props.kind]
-  const padding = PADDING_BY_VARIANT[props.padding ?? 'default']
+  const padding = PADDING_BY_VARIANT[props.padding ?? DEFAULT_SURF_PADDING]
 
   const surfStyle = {
     background: ks.background,

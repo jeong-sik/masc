@@ -9,6 +9,8 @@
 
 export type KpiStripVariant = 'standard' | 'compact' | 'stacked'
 
+export const DEFAULT_KPI_STRIP_VARIANT: KpiStripVariant = 'standard'
+
 const COLS_BY_VARIANT: Record<KpiStripVariant, number> = {
   standard: 6,
   compact: 6,
@@ -23,12 +25,14 @@ export function resolveStripCols(
   override: number | undefined,
 ): number {
   if (typeof override === 'number' && override > 0) return override
-  return COLS_BY_VARIANT[variant ?? 'standard']
+  return COLS_BY_VARIANT[variant ?? DEFAULT_KPI_STRIP_VARIANT]
 }
 
 // ── Cell ──
 
 export type KpiCellVariant = 'standard' | 'compact' | 'stacked'
+
+export const DEFAULT_KPI_CELL_VARIANT: KpiCellVariant = 'standard'
 
 /** Status tone — drives the value color. `undefined` = neutral primary. */
 export type KpiCellKind = 'ok' | 'warn' | 'err'

@@ -381,6 +381,20 @@ const LANE_STATUS_DOT: Record<KeeperPresenceStatus, { color: string; label: stri
   idle: { color: 'var(--color-fg-muted)', label: 'IDLE' },
 }
 
+const LANE_CONTEXT_BADGE_STYLE = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  height: '17px',
+  padding: '0 5px',
+  border: '1px solid var(--color-border-muted)',
+  borderRadius: 'var(--r-1)',
+  background: 'var(--color-bg-subtle)',
+  color: 'var(--color-fg-muted)',
+  fontFamily: 'var(--font-mono)',
+  fontSize: 'var(--fs-9)',
+  whiteSpace: 'nowrap',
+} as const
+
 function LaneRow(
   lane: IdeWorktreeLane,
   presence: KeeperPresenceSnapshot | null,
@@ -396,6 +410,7 @@ function LaneRow(
   const focusFile = cursor?.file_path ? cursor.file_path.split('/').pop() : null
   const dotStyle = status ? LANE_STATUS_DOT[status] : null
   const routeLinks = laneRouteLinks(lane, presenceKey, cursor)
+  const routeLabels = routeLinkLabels(routeLinks)
 
   return html`
     <li key=${lane.id} style=${{ display: 'grid', gridTemplateColumns: '6px minmax(0, 1fr) auto auto', alignItems: 'center', gap: 'var(--sp-1)', padding: '2px 0' }}>
@@ -430,6 +445,15 @@ function LaneRow(
       </div>
       ${routeLinks.length > 0 ? html`
         <div class="ide-branch-lane-links" aria-label=${`${lane.label} operational links`}>
+          <span
+            class="ide-branch-lane-context-badge"
+            data-context-route-count=${routeLinks.length}
+            title=${`Linked context: ${routeLabels}`}
+            aria-label=${`${lane.label} lane has ${routeLinks.length} linked context routes: ${routeLabels}`}
+            style=${LANE_CONTEXT_BADGE_STYLE}
+          >
+            CTX ${routeLinks.length}
+          </span>
           ${routeLinks.map(link => BranchLaneRouteLink(link))}
         </div>
       ` : null}
@@ -465,6 +489,10 @@ function laneRouteLinks(
     gitRef: branch && branch !== DETACHED_HEAD_BRANCH ? branch : undefined,
     keeperId,
   })
+}
+
+function routeLinkLabels(routeLinks: ReadonlyArray<IdeContextRouteLink>): string {
+  return routeLinks.map(link => link.label).join(', ')
 }
 
 function BranchLaneRouteLink(link: IdeContextRouteLink) {

@@ -1,6 +1,12 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
-import { activeIdeFile, focusIdeContextAnchor } from './ide-state'
+import {
+  activeIdeFile,
+  focusIdeContextAnchor,
+  ideContextFocus,
+  type IdeContextFocus,
+  type IdeContextFocusRouteLink,
+} from './ide-state'
 import { createIdeDataCoordinator } from './ide-data-coordinator'
 import { IdeExplorer } from './ide-explorer'
 import { IdeEditor, type IdeEditorView } from './ide-editor'
@@ -80,6 +86,7 @@ interface IdeStatusbarInput {
   readonly activeView: ViewTab
   readonly activeLayers: ReadonlySet<string>
   readonly activeFilePath: string | null
+  readonly contextFocus?: IdeContextFocus | null
   readonly findOpen: boolean
   readonly terminalOpen: boolean
   readonly railsCollapsed: boolean
@@ -244,6 +251,35 @@ function statusbarTelemetryLabel(params: Record<string, string>): string | undef
   return first ? `Telemetry ${first}` : undefined
 }
 
+function focusRouteLinkByLabel(
+  focus: IdeContextFocus | null | undefined,
+  ...labels: ReadonlyArray<string>
+): IdeContextFocusRouteLink | undefined {
+  const accepted = new Set(labels.map(label => label.toLowerCase()))
+  return focus?.route_links?.find(link => accepted.has(link.label.trim().toLowerCase()))
+}
+
+function focusRouteParam(
+  focus: IdeContextFocus | null | undefined,
+  labels: ReadonlyArray<string>,
+  ...keys: ReadonlyArray<string>
+): string | undefined {
+  const link = focusRouteLinkByLabel(focus, ...labels)
+  if (!link) return undefined
+  return routeParam(link.params, ...keys)
+}
+
+function statusbarTelemetryLabelFromFocus(focus: IdeContextFocus | null | undefined): string | undefined {
+  const telemetry = focusRouteLinkByLabel(focus, 'Telemetry')
+  if (!telemetry) return undefined
+  const session = routeParam(telemetry.params, 'session_id')
+  const operation = routeParam(telemetry.params, 'operation_id', 'op')
+  const worker = routeParam(telemetry.params, 'worker_run_id', 'worker')
+  const query = routeParam(telemetry.params, 'telemetry_q', 'q') ?? routeParam(telemetry.params, 'log_id', 'log')
+  const first = session ?? operation ?? worker ?? query
+  return first ? `Telemetry ${first}` : undefined
+}
+
 function addStatusbarChip(
   chips: IdeStatusbarChip[],
   id: string,
@@ -260,6 +296,7 @@ export function deriveIdeStatusbarModel({
   activeView,
   activeLayers,
   activeFilePath,
+  contextFocus = null,
   findOpen,
   terminalOpen,
   railsCollapsed,
@@ -288,11 +325,12 @@ export function deriveIdeStatusbarModel({
   if (railsCollapsed) addStatusbarChip(chips, 'rails', 'rails hidden', 'ghost', 'IDE side rails hidden')
 
   const routeLine = routeFocusLine(routeParams)
-  const routeSurface = routeParams.surface?.trim()
-  const routeLabel = routeParams.label?.trim()
+  const contextLine = contextFocus?.line ?? routeLine
+  const routeSurface = contextFocus?.surface?.trim() || routeParams.surface?.trim()
+  const routeLabel = contextFocus?.label?.trim() || routeParams.label?.trim()
   const routeFocusParts = [
     routeSurface,
-    routeLine ? `L${routeLine}` : undefined,
+    contextLine ? `L${contextLine}` : undefined,
     routeLabel,
   ].filter((part): part is string => Boolean(part?.trim()))
   addStatusbarChip(
@@ -304,14 +342,24 @@ export function deriveIdeStatusbarModel({
   )
 
   const goal = routeParam(routeParams, 'goal_id', 'goal')
+    ?? focusRouteParam(contextFocus, ['Goal'], 'goal')
   const task = routeParam(routeParams, 'task_id', 'task')
+    ?? focusRouteParam(contextFocus, ['Task'], 'task')
   const board = routeParam(routeParams, 'board_post_id', 'post')
+    ?? focusRouteParam(contextFocus, ['Board'], 'post')
   const comment = routeParam(routeParams, 'comment_id', 'comment')
+    ?? focusRouteParam(contextFocus, ['Comment'], 'comment')
   const pr = routeParam(routeParams, 'pr_id', 'pr')
+    ?? focusRouteParam(contextFocus, ['PR'], 'pr')
   const git = routeParam(routeParams, 'git_ref', 'ref')
+    ?? focusRouteParam(contextFocus, ['Git'], 'ref')
   const log = routeParam(routeParams, 'log_id', 'log')
+    ?? focusRouteParam(contextFocus, ['Log'], 'log_id')
   const telemetry = statusbarTelemetryLabel(routeParams)
+    ?? statusbarTelemetryLabelFromFocus(contextFocus)
   const keeper = routeParam(routeParams, 'keeper')
+    ?? focusRouteParam(contextFocus, ['Keeper'], 'keeper')
+    ?? contextFocus?.keeper_id
 
   addStatusbarChip(chips, 'goal', goal ? `Goal ${goal}` : undefined, 'brass', 'Focused goal')
   addStatusbarChip(chips, 'task', task ? `Task ${task}` : undefined, 'brass', 'Focused task')
@@ -390,6 +438,12 @@ export function IdeShell() {
 
   useEffect(() => {
     const unsubscribe = activeIdeFile.subscribe(setActiveFilePath)
+    return () => unsubscribe()
+  }, [])
+
+  const [contextFocus, setContextFocus] = useState(ideContextFocus.value)
+  useEffect(() => {
+    const unsubscribe = ideContextFocus.subscribe(setContextFocus)
     return () => unsubscribe()
   }, [])
 
@@ -483,6 +537,7 @@ export function IdeShell() {
     activeView,
     activeLayers,
     activeFilePath,
+    contextFocus,
     findOpen,
     terminalOpen,
     railsCollapsed,

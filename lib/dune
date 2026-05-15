@@ -301,6 +301,11 @@
    ;; agent_sdk + fs_compat + time_compat + masc_log. OAS Memory
    ;; long_term_backend over JSONL files.
    masc_mcp.memory_jsonl
+   ;; RFC-0056 Phase 1G — Chronicle_event leaf module extracted to
+   ;; lib/chronicle_event/. 460+170 LoC, deps: stdlib + Yojson only.
+   ;; Chronicle wire format (Actor / Target / Content / Event records
+   ;; + to_yojson / of_yojson serializers).
+   masc_mcp.chronicle_event
    ;; RFC-0058 Phase 1 — Declarative cascade TOML config. Separate sub-library
    ;; to avoid type name collisions (transport, provider, binding, tier, strategy)
    ;; with identically-named types in the main library.

@@ -555,15 +555,8 @@ let board_tools : Masc_domain.tool_schema list =
   ]
 ;;
 
-let select_named_schemas (names : string list) (schemas : Masc_domain.tool_schema list)
-  : Masc_domain.tool_schema list
-  =
-  names
-  |> List.filter_map (fun name ->
-    List.find_opt
-      (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name)
-      schemas)
-;;
+(* select_named_schemas moved to Tool_shard_types
+   (intra-library file split, 2026-05-16). *)
 
 let filesystem_tools : Masc_domain.tool_schema list =
   [ { name = "keeper_fs_read"
@@ -1829,16 +1822,8 @@ let agent_shards_mutex = Stdlib.Mutex.create ()
 (** Default shards for a new keeper.
     Autoresearch is intentionally opt-in through the explicit shard or
     a preset/tool policy group. *)
-let default_shard_names : string list =
-  [ "base"
-  ; "board"
-  ; "filesystem"
-  ; "shell"
-  ; "library"
-  ; "taskboard"
-  ; "coding"
-  ]
-;;
+(* default_shard_names moved to Tool_shard_types
+   (intra-library file split, 2026-05-16). *)
 
 let get_agent_shards (agent_name : string) : string list =
   Stdlib.Mutex.protect agent_shards_mutex (fun () ->
@@ -2047,22 +2032,9 @@ let execute (tool_name : string) (arguments : Yojson.Safe.t) : bool * Yojson.Saf
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let tool_spec_read_only = [ "masc_tool_list" ]
-let tool_spec_destructive = [ "masc_tool_grant"; "masc_tool_revoke" ]
-
-let tool_required_permission = function
-  | "masc_tool_list" -> Some Masc_domain.CanReadState
-  | "masc_tool_grant" | "masc_tool_revoke" -> Some Masc_domain.CanAdmin
-  | _ -> None
-;;
-
-let tool_effect_domain name =
-  match Tool_name.of_string name with
-  | Some (Tool_name.Masc Tool_name.Masc.Tool_list) -> Some Tool_catalog.Read_only
-  | Some (Tool_name.Masc (Tool_name.Masc.Tool_grant | Tool_name.Masc.Tool_revoke)) ->
-    Some Tool_catalog.Masc_coordination
-  | _ -> None
-;;
+(* tool_spec_read_only / tool_spec_destructive / tool_required_permission /
+   tool_effect_domain moved to Tool_shard_types (intra-library file split,
+   2026-05-16). *)
 
 let () =
   List.iter

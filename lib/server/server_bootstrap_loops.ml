@@ -964,11 +964,18 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   Tool_output_validation.install ();
   (* Tool metrics JSONL persistence: flush buffered records to disk periodically.
      The shared post-hook is the canonical write path for persisted tool
-     metrics so keeper-internal calls are counted exactly once. *)
-  Tool_dispatch.register_post_hook (fun result ->
-    Tool_metrics.record result;
-    Tool_metrics_persist.enqueue result;
-    result);
+     metrics so keeper-internal calls are counted exactly once.
+
+     RFC-0084 PR-I-2.e — migrate to typed post-hook surface.
+     Behaviour-preserving: record + enqueue fire only on
+     (Handled, Some r), matching the legacy hook semantics (legacy
+     register_post_hook fired only when dispatch returned Some _). *)
+  Tool_dispatch.register_typed_post_hook (fun outcome result ->
+    match outcome, result with
+    | Dispatch_outcome.Handled, Some r ->
+      Tool_metrics.record r;
+      Tool_metrics_persist.enqueue r
+    | _ -> ());
   Tool_metrics_persist.start_flush_fiber ~sw ~clock ~base_path:state.room_config.base_path;
   (* Cascade trust JSONL snapshot fiber (Phase 0b observability).  Polls
      [Cascade_health_tracker.global] every minute and appends one JSON

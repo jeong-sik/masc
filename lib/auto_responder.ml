@@ -27,11 +27,12 @@ let is_enabled () = get_mode () <> Disabled
 let activity_log_file () =
   match Env_config.base_path_opt () with
   | Some root -> Filename.concat (Common.masc_dir_from_base_path ~base_path:root) (Filename.concat "logs" "auto-responder.log")
-  | None -> "/tmp/auto-responder.log"
+  | None -> Filename.concat (Host_config.host ()).log_dir "auto-responder.log"
 
 let debug_log msg =
   let line = Printf.sprintf "[%f] %s\n" (Time_compat.now ()) msg in
-  try Fs_compat.append_file "/tmp/auto_debug.log" line
+  let path = Filename.concat (Host_config.host ()).log_dir "auto_debug.log" in
+  try Fs_compat.append_file path line
   with Sys_error _ | Unix.Unix_error _ -> ()
 
 let activity_log ~mode ~from_agent ~mention ~status ~detail =

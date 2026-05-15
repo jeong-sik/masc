@@ -93,7 +93,6 @@ type system_actor =
   | Keeper_alert_bot
   | Keeper_system
   | Operator
-  | Team_session
 
 type author_kind =
   | Human_author
@@ -125,8 +124,8 @@ val legacy_migrate_post_kind :
     (first match wins):
 
     + System author (one of \["ecosystem"; "keeper";
-      "keeper-alert-bot"; "keeper-system"; "operator";
-      "team-session"\]) -> [System_post].
+      "keeper-alert-bot"; "keeper-system"; "operator"\]) ->
+      [System_post].
     + [meta_json.source = "keeper_board_post"] -> [Automation_post].
     + Internal visibility + [expires_at > 0.0] + non-empty hearth
       starting with ["mdal"] or containing ["harness"] ->

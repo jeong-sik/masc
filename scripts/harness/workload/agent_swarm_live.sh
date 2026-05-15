@@ -23,10 +23,9 @@ usage() {
   cat <<'EOF'
 Usage: scripts/harness_agent_swarm_live.sh [options]
 
-Compatibility entrypoint for the retired managed-swarm proof lane.
+Keeper fleet production-readiness gate against persisted runtime truth.
 
-The old team-session/swarm substrate is retired. This entrypoint now runs the
-keeper fleet production-readiness gate against persisted runtime truth:
+This entrypoint scans the persisted keeper runtime evidence:
 runtime manifests, receipts, checkpoints, provider attempt closure, memory
 injection, and tool-call logs. It is read-only and does not start keepers.
 
@@ -231,9 +230,9 @@ cat >"$SUMMARY_MD" <<EOF
 
 ## Contract
 
-This compatibility entrypoint replaces the retired team-session swarm proof with
-read-only keeper runtime evidence. A passing run proves that persisted keeper
-runtime manifests have complete receipt, checkpoint, provider-closure,
+This gate inspects read-only keeper runtime evidence. A passing run proves that
+persisted keeper runtime manifests have complete receipt, checkpoint,
+provider-closure,
 memory-injection, and tool-log chains for the configured 18+ keeper fleet.
 EOF
 

@@ -101,7 +101,6 @@ type system_actor =
   | Keeper_alert_bot
   | Keeper_system
   | Operator
-  | Team_session
 
 type author_kind =
   | Human_author
@@ -114,7 +113,6 @@ let system_actor_of_string = function
   | "keeper-alert-bot" -> Some Keeper_alert_bot
   | "keeper-system" -> Some Keeper_system
   | "operator" -> Some Operator
-  | "team-session" -> Some Team_session
   | _ -> None
 
 let automation_label_of_string author =

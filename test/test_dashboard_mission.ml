@@ -73,7 +73,7 @@ let write_pending_confirm config _session_id =
 
 let seed_room config session_id =
   ignore (Lib.Coord.init config ~agent_name:(Some "fixture-root"));
-  ignore (Lib.Coord.join config ~agent_name:"team-session-local64-smoke"
+  ignore (Lib.Coord.join config ~agent_name:"mission-local64-smoke"
             ~capabilities:[ "operator"; "fixture"; "local64" ] ());
   ignore (Lib.Coord.join config ~agent_name:"llama-local-alpha"
             ~capabilities:[ "worker"; "local64"; "manager" ] ());
@@ -84,7 +84,7 @@ let seed_room config session_id =
   ignore (Lib.Coord.join config ~agent_name:"llama-local-delta"
             ~capabilities:[ "worker"; "local64"; "observer" ] ());
   ignore
-    (Lib.Coord.broadcast config ~from_agent:"team-session-local64-smoke"
+    (Lib.Coord.broadcast config ~from_agent:"mission-local64-smoke"
        ~content:"@llama-local-alpha recover failed worker coverage");
   ignore
     (Lib.Coord.broadcast config ~from_agent:"llama-local-alpha"

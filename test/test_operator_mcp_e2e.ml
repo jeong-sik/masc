@@ -364,17 +364,17 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
   in
   let planner_nickname =
     Masc_mcp.Coord.join config ~agent_name:"planner"
-      ~capabilities:[ "planner"; "team-session" ] ()
+      ~capabilities:[ "planner" ] ()
     |> extract_nickname_from_join_result
   in
   let implementer_a_nickname =
     Masc_mcp.Coord.join config ~agent_name:"implementer-a"
-      ~capabilities:[ "backend"; "team-session" ] ()
+      ~capabilities:[ "backend" ] ()
     |> extract_nickname_from_join_result
   in
   let implementer_b_nickname =
     Masc_mcp.Coord.join config ~agent_name:"implementer-b"
-      ~capabilities:[ "docs"; "tests"; "team-session" ] ()
+      ~capabilities:[ "docs"; "tests" ] ()
     |> extract_nickname_from_join_result
   in
   Mirage_crypto_rng_unix.use_default ();

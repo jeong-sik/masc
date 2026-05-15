@@ -25,7 +25,7 @@
     ([persisted_summary_json], [resolve_loop_id],
     [prepare_start_params], [register_loop],
     [prepare_managed_target_file], [setup_running_loop],
-    [status_json], [build_swarm_goal], [parse_operation_id],
+    [status_json], [parse_operation_id],
     [check_concurrency_limit], the [handle_status] /
     [handle_stop] / [handle_inject] /
     [handle_record_finding] / [handle_search_findings]

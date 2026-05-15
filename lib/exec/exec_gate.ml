@@ -54,7 +54,6 @@ let rollout_config : Approval_config.t =
         (`System_worker_runtime_docker, internal_observer_overlay);
         (`System_spawn, internal_observer_overlay);
         (`System_auto_responder, internal_observer_overlay);
-        (`Swarm_goal_loop, internal_observer_overlay);
         (`Coord_identity, internal_observer_overlay);
         (`Tool_local_runtime, internal_observer_overlay);
         (`Tool_local_runtime_bench, internal_observer_overlay);

@@ -70,5 +70,3 @@ let record_operator_judgment config ~surface ~target_type ~target_id ~summary
        ~fresh_until:(iso_of_unix (now_unix +. fresh_for_sec))
        ~fresh_until_unix:(now_unix +. fresh_for_sec)
        ~keeper_name:"operator-judge" ())
-
-(* setup_swarm_run_env removed (CP purge: Command_plane_v2 deleted) *)

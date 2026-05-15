@@ -73,9 +73,10 @@ let test_keeper_denied_parity () =
 (* {1 Structural Invariants — hold regardless of migration phase} *)
 
 let test_session_min_and_local_worker_share_core () =
-  (* Session_min (worker container fallback) and Local_worker (team-session
-     bridge) serve different purposes and are NOT in a subset relationship.
-     Instead we verify they share the expected coordination core. *)
+  (* Session_min (worker container fallback) and Local_worker (mission
+     execution bridge) serve different purposes and are NOT in a subset
+     relationship.  Instead we verify they share the expected coordination
+     core. *)
   let min_set = set_of (Tool_catalog.tools_for_surface Tool_catalog.Session_min) in
   let worker_set = set_of (Tool_catalog.tools_for_surface Tool_catalog.Local_worker) in
   let shared = SS.inter min_set worker_set in

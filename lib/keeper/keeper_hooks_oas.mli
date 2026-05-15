@@ -102,20 +102,10 @@ val record_usage_anomaly_metrics :
     [Keeper_hooks_oas.cost_status] etc. unchanged. *)
 include module type of Keeper_hooks_oas_types
 
-(** {1 Tool execution summary} *)
+(** {1 Tool execution summary}
 
-type tool_execution_summary = {
-  tool_name : string;
-  provider : string;
-  outcome : string;
-  duration_ms : float;
-}
-(** Per-tool-call record persisted in the keeper's trajectory. *)
-
-val tool_execution_summary :
-  tool_name:string ->
-  model:string -> success:bool -> duration_ms:float -> tool_execution_summary
-(** Build a [tool_execution_summary] from raw turn fields. *)
+    tool_execution_summary type + builder live in Keeper_hooks_oas_types
+    (intra-library file split, 2026-05-16). Re-exported via include. *)
 
 val record_keeper_tool_duration_metric :
   keeper_name:string -> tool_execution_summary -> unit

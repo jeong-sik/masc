@@ -420,10 +420,6 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
         ("GRAPHQL_API_KEY", "");
         ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
         ("MASC_HOST", host);
-        ("MASC_POSTGRES_URL", "");
-        ("DATABASE_URL", "");
-        ("SUPABASE_DB_URL", "");
-        ("SB_PG_URL", "");
         ("MASC_CONFIG_DIR", config_dir);
         ("MASC_PERSONAS_DIR", personas_dir);
         ("MASC_BOARD_BACKEND", "jsonl");

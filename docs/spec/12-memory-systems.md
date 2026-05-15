@@ -416,7 +416,7 @@ type recall_config = {
 - Append-only, latest entry wins on read
 - Tombstone: `{"key":"...","value":null,"ts":...}` -- 삭제 표시
 - 50MB 파일 크기 경고, 1MB 단일 값 경고 + 잘라내기
-- Current server bootstrap forces `MASC_STORAGE_TYPE=filesystem`; `MASC_POSTGRES_URL` does not select a memory backend.
+- Current server bootstrap forces `MASC_STORAGE_TYPE=filesystem`; memory runtime state does not select a PostgreSQL backend.
 - PostgreSQL memory backend is not part of the runtime contract.
 
 ### 9.3 Lifecycle

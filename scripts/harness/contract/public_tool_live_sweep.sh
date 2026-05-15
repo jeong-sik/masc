@@ -80,7 +80,7 @@ extract_token() {
 }
 
 manifest_json="$(
-  env -u DUNE_RPC MASC_STORAGE_TYPE=filesystem MASC_POSTGRES_URL= DATABASE_URL= SUPABASE_DB_URL= SB_PG_URL= \
+  env -u DUNE_RPC MASC_STORAGE_TYPE=filesystem \
     opam exec -- dune exec --root "$ROOT_DIR" bin/public_tool_manifest.exe \
     | awk 'BEGIN { printing = 0 } /^\{/ { printing = 1 } printing { print }'
 )"

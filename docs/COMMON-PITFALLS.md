@@ -263,9 +263,6 @@ Test는 production config와 격리되어야 한다.
 ```lisp
 (env
   (MASC_STORAGE_TYPE filesystem)
-  (MASC_POSTGRES_URL "")
-  (DATABASE_URL "")
-  (SUPABASE_DB_URL "")
   (GRAPHQL_API_KEY "")
   (ZAI_API_KEY ""))
 ```

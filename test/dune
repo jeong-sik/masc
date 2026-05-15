@@ -1483,3 +1483,15 @@
  (name test_host_config_resolution)
  (modules test_host_config_resolution)
  (libraries masc_test_deps))
+
+; RFC-0084 PR-13 — Keeper_disclosure_strategy typed sum invariants.
+; Pins 3-arm cardinality (Full | Hybrid | Minimal_index), default = Full,
+; of_toml strict parsing (hybrid requires non-empty full_names, unknown
+; rejected as Error), is_full semantics, and prefix-cache stability
+; (Hybrid.full_names sorted per RFC-OAS-013 §2.4). Requires
+; masc_test_deps because it accesses Masc_mcp.Keeper_disclosure_strategy.*
+; directly.
+(test
+ (name test_disclosure_strategy_config)
+ (modules test_disclosure_strategy_config)
+ (libraries masc_test_deps))

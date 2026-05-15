@@ -3,7 +3,7 @@ open Alcotest
 module KBC = Masc_mcp.Keeper_benchmark_canary
 module KML = Masc_mcp.Keeper_model_labels
 module KT = Masc_mcp.Keeper_types
-module TQB = Masc_mcp.Tool_call_quality_benchmark
+module TQB = Tool_call_quality_benchmark
 
 let with_env name value_opt f =
   let previous =

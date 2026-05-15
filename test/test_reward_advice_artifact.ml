@@ -10,13 +10,13 @@
     - of_yojson rejects unknown verdict strings (fail-closed)
     - Post_verifier.to_reward_advice convenience wrapper *)
 
-module RAA = Masc_mcp.Reward_advice_artifact
-module Pv  = Masc_mcp.Post_verifier
+module RAA = Reward_advice_artifact
+module Pv  = Post_verifier
 
 let float_eps = 0.001
 
 let make_case_score ?(case_id = "case-001") ?(provider = "test") ?(model = "m1")
-    ?(keeper_profile = "default") composite_score : Masc_mcp.Tool_call_quality_benchmark_types.case_score =
+    ?(keeper_profile = "default") composite_score : Tool_call_quality_benchmark_types.case_score =
   let cs = composite_score in
   {
     case_id;

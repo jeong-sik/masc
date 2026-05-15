@@ -310,6 +310,55 @@ let tool_progress_class_to_string = function
 let canonical_tool_name = canonical_name
 let canonical_tool_name_observed = canonical_name_observed
 
+let public_aliases_for_internal_name internal_name =
+  Keeper_tool_alias.public_names ()
+  |> List.filter (fun public ->
+    match Keeper_tool_alias.route public with
+    | Some route -> String.equal route.internal_name internal_name
+    | None -> false)
+;;
+
+let public_alias_guidance_for_internal_call
+      ~(visible_tool_names : string list)
+      (tool_name : string)
+  : string option
+  =
+  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix tool_name in
+  match Keeper_tool_alias.route stripped with
+  | Some _ -> None
+  | None ->
+    let canonical = canonical_tool_name stripped in
+    (match public_aliases_for_internal_name canonical with
+     | [] -> None
+     | aliases ->
+       let visible_aliases =
+         List.filter (fun alias -> List.mem alias visible_tool_names) aliases
+       in
+       let alias_words =
+         match visible_aliases with
+         | [] -> aliases
+         | _ -> visible_aliases
+       in
+       let alias_text = String.concat " or " alias_words in
+       let correction =
+         match visible_aliases with
+         | _ :: _ -> Printf.sprintf "Use %s instead." alias_text
+         | [] ->
+           Printf.sprintf
+             "No public alias for it is visible in this turn; do not invent \
+              internal tool names. Wait for a visible tool or report the blocker. \
+              Public alias%s: %s."
+             (if List.length aliases = 1 then "" else "es")
+             alias_text
+       in
+       Some
+         (Printf.sprintf
+            "%s is an internal keeper implementation tool name, not a \
+             model-facing tool. %s"
+            stripped
+            correction))
+;;
+
 let claim_context_tool_names : string list =
   Tool_name.[ Masc Claim_next; Masc Claim_task; Keeper Task_claim ]
   |> List.map Tool_name.to_string

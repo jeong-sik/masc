@@ -135,6 +135,11 @@ val canonical_tool_name : string -> string
     [canonical_tool_name] to avoid double-counting. *)
 val canonical_tool_name_observed : string -> string
 
+(** Return a model-facing correction when a tool call uses a keeper-internal
+    implementation name whose public alias is the supported LLM surface. *)
+val public_alias_guidance_for_internal_call
+  :  visible_tool_names:string list -> string -> string option
+
 (** Canonical names of claim-context tools (Task_claim, Claim_next,
     Claim_task). *)
 val claim_context_tool_names : string list

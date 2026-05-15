@@ -15,7 +15,7 @@ let dashboard_namespace_truth_http_json ~state ~sw:_ ~clock _request =
   (* Fast-path: if the proactive execution refresh hasn't produced a result
      yet, return "initializing" immediately instead of blocking for 15-20s
      on cold-start on-demand compute. The frontend retries every 3s via
-     scheduleWarmRetry; the proactive refresh loop populates _execution_cache
+     scheduleWarmRetry; the proactive refresh loop populates execution_cache
      in background. *)
   let warm_escape_s =
     float_of_env_default "MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S"

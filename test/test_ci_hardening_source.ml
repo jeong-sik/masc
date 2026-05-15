@@ -1446,7 +1446,7 @@ let test_keeper_pr_audit_contracts () =
 let test_dashboard_warm_hydration_contracts () =
   check bool "execution default route hydrates cache on first success" true
     (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
-       "cached_surface_or_first_success_json _execution_cache");
+       "cached_surface_or_first_success_json\n      execution_cache");
   check bool "mission default route serves cached surface immediately" true
     (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
        "cached_surface_or_first_success_json mission_cache");

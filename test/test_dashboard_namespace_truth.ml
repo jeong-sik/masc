@@ -93,7 +93,7 @@ let request target =
     returns a minimal {"status":"initializing"} JSON without namespace/execution/command data. *)
 let warm_execution_cache () =
   Lib.Server_dashboard_http_cache.mark_cached_surface_success
-    Lib.Server_dashboard_http._execution_cache
+    Lib.Server_dashboard_http.execution_cache
     (`Assoc [("status", `String "ok")])
 
 let warm_meta_cognition_summary (config : Lib.Coord.config) =
@@ -108,7 +108,7 @@ let warm_meta_cognition_summary (config : Lib.Coord.config) =
     (Printf.sprintf "shell:coord=%s:" config.base_path)
 
 let expire_execution_warmup () =
-  let surface = Lib.Server_dashboard_http._execution_cache in
+  let surface = Lib.Server_dashboard_http.execution_cache in
   Lib.Server_dashboard_http_cache.invalidate_cached_surface surface;
   let stale_attempt_ts = Unix.gettimeofday () -. 120.0 in
   surface.last_attempt_unix <- Some stale_attempt_ts;
@@ -576,9 +576,9 @@ let test_last_good_shell_fallback_preserves_counts () =
 let test_namespace_truth_snapshot_hash_ignores_generated_at () =
   Fun.protect
     ~finally:(fun () ->
-      Lib.Server_dashboard_http._last_namespace_truth_snapshot_hash := None)
+      Lib.Server_dashboard_http.last_namespace_truth_snapshot_hash := None)
     (fun () ->
-      Lib.Server_dashboard_http._last_namespace_truth_snapshot_hash := None;
+      Lib.Server_dashboard_http.last_namespace_truth_snapshot_hash := None;
       Eio_main.run @@ fun _env ->
       let snapshot ~generated_at ~active_sessions =
         `Assoc

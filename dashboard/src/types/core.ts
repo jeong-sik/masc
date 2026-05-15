@@ -588,6 +588,11 @@ export interface KeeperDiagnostic {
 
 export type KeeperConversationRole = 'user' | 'assistant' | 'system' | 'tool' | 'other'
 
+/** Canonical actor name for system-originated entries (backend convention).
+ *  Used when an actor field is null/missing and the entry came from a
+ *  system source rather than a real user/agent. */
+export const SYSTEM_ACTOR_NAME = 'system' as const
+
 export type KeeperConversationSource =
   | 'direct_user'
   | 'direct_assistant'

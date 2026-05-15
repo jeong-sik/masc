@@ -24,13 +24,14 @@ import type {
   OperatorNamespaceSnapshot,
   PendingConfirmation,
 } from './types'
+import { SYSTEM_ACTOR_NAME } from './types/core'
 
 function normalizeMessage(raw: unknown): Message | null {
   if (!isRecord(raw)) return null
   return {
     id: asString(raw.id),
     seq: asNumber(raw.seq),
-    from: asString(raw.from) ?? asString(raw.from_agent) ?? 'system',
+    from: asString(raw.from) ?? asString(raw.from_agent) ?? SYSTEM_ACTOR_NAME,
     content: asString(raw.content) ?? '',
     timestamp: asString(raw.timestamp) ?? new Date().toISOString(),
     type: asString(raw.type),

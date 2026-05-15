@@ -21,6 +21,7 @@ import { AgentAvatar } from './agent-avatar'
 import { missionSnapshot } from '../../mission-store'
 import { agents, tasks, keepers, messages, boardPosts } from '../../store'
 import type { Agent, Task, Keeper, Message, BoardPost } from '../../types/core'
+import { SYSTEM_ACTOR_NAME } from '../../types/core'
 import type {
   DashboardMissionResponse,
   DashboardMissionSessionCard,
@@ -197,7 +198,7 @@ export function deriveFleetTickerEvents({
     pushTickerEvent(events, {
       id: `message:${message.id ?? message.seq ?? message.timestamp}`,
       timestamp: message.timestamp,
-      actor: message.from ?? 'system',
+      actor: message.from ?? SYSTEM_ACTOR_NAME,
       label: message.type ?? '(unknown type)',
       text: message.content,
       kind: 'message',

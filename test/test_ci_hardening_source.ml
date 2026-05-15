@@ -1082,12 +1082,12 @@ let test_keeper_sandbox_credential_volume_contracts () =
   check bool "keeper sandbox declares credential projection volume" true
     (file_contains_pattern "Dockerfile.keeper-sandbox"
        {|VOLUME ["/tmp/keeper-creds"]|});
-  check bool "host config provider exposes the same in-container root" true
-    (file_contains_pattern "lib/keeper/host_config_provider.mli"
+  check bool "keeper host config provider exposes the same in-container root" true
+    (file_contains_pattern "lib/keeper/keeper_host_config_provider.mli"
        {|[/tmp/keeper-creds]|});
-  check bool "host config provider implementation uses the volume root" true
-    (file_contains_pattern "lib/keeper/host_config_provider.ml"
-       {|let cred_root = "/tmp/keeper-creds"|})
+  check bool "keeper host config provider uses the typed volume root" true
+    (file_contains_pattern "lib/keeper/keeper_host_config_provider.ml"
+       {|let cred_root = (Host_config.host ()).cred_root|})
 
 let test_keeper_docker_multikeeper_isolation_contracts () =
   check bool "multi-keeper docker smoke script exists" true

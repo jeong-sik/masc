@@ -3,7 +3,7 @@
     Manages credential materialisation for keepers that use [gh auth
     login --with-token] inside the container (Option B in RFC-0008), as
     opposed to the host-mounted config dir approach (Option A in
-    {!Host_config_provider}).
+    {!Keeper_host_config_provider}).
 
     The F-1 gate ([provider_gate]) rejects credentials whose token
     SHA-256 matches the operator's ambient token — this prevents the

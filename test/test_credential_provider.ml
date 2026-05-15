@@ -1,5 +1,5 @@
 (** Pin {!Keeper_credential_provider} type surface and
-    {!Host_config_provider} pure helpers.
+    {!Keeper_host_config_provider} pure helpers.
 
     Integration coverage of [resolve] (which goes through
     [Keeper_gh_env.keeper_binding] + filesystem) is left to the
@@ -12,7 +12,7 @@
     1. [Keeper_credential_provider.pp_error] formats every variant.  Mostly
        a regression guard: if a future PR adds a fifth error case
        and forgets [pp_error], the [exhaustive] assertion catches it.
-    2. [Host_config_provider.For_testing.compose_ro_mounts_result]
+    2. [Keeper_host_config_provider.For_testing.compose_ro_mounts_result]
        fails closed when the selected GH config mount is empty/missing.
        [mount_if_present] stays a pure optional-mount helper for
        sibling gitconfig/ssh paths.
@@ -27,7 +27,7 @@
 open Alcotest
 
 module CP = Masc_mcp.Keeper_credential_provider
-module HCP = Masc_mcp.Host_config_provider
+module HCP = Masc_mcp.Keeper_host_config_provider
 module KGE = Masc_mcp.Keeper_gh_env
 open Repo_manager_types
 

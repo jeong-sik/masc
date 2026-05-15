@@ -6,7 +6,7 @@
     {!Keeper_shell_docker} no longer reaches into multiple SSOTs
     inline.  Concrete implementations:
 
-    - {!Host_config_provider}: selected root/keeper host bundle
+    - {!Keeper_host_config_provider}: selected root/keeper host bundle
       mounted RO.
 
     Lifecycle (in caller order):

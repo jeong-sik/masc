@@ -9,7 +9,8 @@ cd "$(git rev-parse --show-toplevel)"
 
 ALLOWLIST=(
   # SSOT definition — canonical helpers themselves.
-  "lib/tool_args.ml"
+  # Moved to lib/tool_types/ in RFC-0086 PR-2H (PR #15531).
+  "lib/tool_types/tool_args.ml"
 
   # T27 alias backstop (sibling-include cascade for tool_local_runtime_*.ml).
   "lib/tool_local_runtime_core.ml"

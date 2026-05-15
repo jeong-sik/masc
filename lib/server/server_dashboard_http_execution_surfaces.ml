@@ -170,6 +170,178 @@ let _transport_health_cache =
         ])
 ;;
 
+let json_string_opt = function
+  | Some value -> `String value
+  | None -> `Null
+;;
+
+let cached_surface_assoc_field_opt key = function
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
+;;
+
+let cached_surface_projection_fields json =
+  match cached_surface_assoc_field_opt "projection_diagnostics" json with
+  | Some (`Assoc fields) -> fields
+  | _ -> []
+;;
+
+let cached_surface_projection_field json key =
+  List.assoc_opt key (cached_surface_projection_fields json)
+;;
+
+let cached_surface_generated_at_iso json =
+  match cached_surface_projection_field json "generated_at" with
+  | Some (`String value) -> value
+  | _ ->
+    (match cached_surface_assoc_field_opt "generated_at" json with
+     | Some (`String value) -> value
+     | _ -> Masc_domain.now_iso ())
+;;
+
+let cached_surface_cache_json
+      ?cache_key
+      ~scope
+      ~ttl_s
+      ~timeout_s
+      ~background_refresh_interval_s
+      json
+  =
+  let diagnostic_field key =
+    match cached_surface_projection_field json key with
+    | Some value -> value
+    | None -> `Null
+  in
+  let cache_state =
+    match cached_surface_projection_field json "cache_state" with
+    | Some (`String value) -> value
+    | _ -> "request_swr_or_inline_compute"
+  in
+  `Assoc
+    [ "scope", `String scope
+    ; "cache_state", `String cache_state
+    ; "projection_surface", diagnostic_field "surface"
+    ; "last_success_at", diagnostic_field "last_success_at"
+    ; "last_attempt_at", diagnostic_field "last_attempt_at"
+    ; "last_error_at", diagnostic_field "last_error_at"
+    ; "stale_reason", diagnostic_field "stale_reason"
+    ; "stale_age_ms", diagnostic_field "stale_age_ms"
+    ; "request_cache_key", json_string_opt cache_key
+    ; "request_cache_ttl_s", `Float ttl_s
+    ; "request_timeout_s", `Float timeout_s
+    ; "background_refresh_interval_s", `Float background_refresh_interval_s
+    ; "policy", `String "cached_surface plus HTTP stale-while-revalidate"
+    ]
+;;
+
+let with_cached_dashboard_surface_metadata
+      ~(config : Coord_utils.config)
+      ?cache_key
+      ~dashboard_surface
+      ~source
+      ~scope
+      ~producer
+      ~store_kind
+      ~ttl_s
+      ~timeout_s
+      ~background_refresh_interval_s
+      ~query
+      json
+  =
+  match json with
+  | `Assoc fields ->
+    let metadata_keys =
+      [ "dashboard_surface"
+      ; "source"
+      ; "generated_at_iso"
+      ; "retention"
+      ; "query"
+      ; "cache"
+      ]
+    in
+    let metadata =
+      [ "dashboard_surface", `String dashboard_surface
+      ; "source", `String source
+      ; "generated_at_iso", `String (cached_surface_generated_at_iso json)
+      ; ( "retention"
+        , `Assoc
+            [ "scope", `String scope
+            ; "coordination_root", `String config.base_path
+            ; "workspace_path", `String config.workspace_path
+            ; "producer", `String producer
+            ; "store_kind", `String store_kind
+            ; "cache_surface", `String "Server_dashboard_http_execution_surfaces.cached_surface"
+            ; "http_swr_ttl_s", `Float ttl_s
+            ; "background_refresh_interval_s", `Float background_refresh_interval_s
+            ; "request_timeout_s", `Float timeout_s
+            ; ( "cache_policy"
+              , `String
+                  "default route uses proactive cached_surface; parameterized route uses HTTP stale-while-revalidate"
+              )
+            ] )
+      ; ( "query", query )
+      ; ( "cache"
+        , cached_surface_cache_json
+            ?cache_key
+            ~scope
+            ~ttl_s
+            ~timeout_s
+            ~background_refresh_interval_s
+            json )
+      ]
+    in
+    let fields =
+      List.filter (fun (key, _) -> not (List.mem key metadata_keys)) fields
+    in
+    `Assoc (metadata @ fields)
+  | other -> other
+;;
+
+let execution_query_json ~actor ~fixture ~full_mode ~light ~default_light_request =
+  `Assoc
+    [ "actor", json_string_opt actor
+    ; "fixture", json_string_opt fixture
+    ; "full", `Bool full_mode
+    ; "light", `Bool light
+    ; "default_light_request", `Bool default_light_request
+    ]
+;;
+
+let with_execution_metadata ~config ?cache_key ~query json =
+  with_cached_dashboard_surface_metadata
+    ~config
+    ?cache_key
+    ~dashboard_surface:"/api/v1/dashboard/execution"
+    ~source:"dashboard_execution_read_model"
+    ~scope:"dashboard_execution"
+    ~producer:"Dashboard_execution.json"
+    ~store_kind:"process_cache"
+    ~ttl_s:120.0
+    ~timeout_s:Env_config_runtime.Dashboard.execution_timeout_sec
+    ~background_refresh_interval_s:60.0
+    ~query
+    json
+;;
+
+let transport_health_query_json () =
+  `Assoc [ "default_snapshot_request", `Bool true ]
+;;
+
+let with_transport_health_metadata ~config ~timeout_s json =
+  with_cached_dashboard_surface_metadata
+    ~config
+    ~dashboard_surface:"/api/v1/dashboard/transport-health"
+    ~source:"transport_health_read_model"
+    ~scope:"dashboard_transport_health"
+    ~producer:"Transport_metrics.transport_health_json"
+    ~store_kind:"process_cache"
+    ~ttl_s:30.0
+    ~timeout_s
+    ~background_refresh_interval_s:30.0
+    ~query:(transport_health_query_json ())
+    json
+;;
+
 let dashboard_execution_snapshot_json () = cached_surface_json _execution_cache
 
 let dashboard_transport_health_snapshot_json () =
@@ -437,7 +609,18 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
     ~compute
     ~on_result:(fun json ->
       mark_cached_surface_success _execution_cache json;
-      broadcast_cached_surface ~event_type:"execution_snapshot" json;
+      broadcast_cached_surface
+        ~event_type:"execution_snapshot"
+        (cached_surface_json _execution_cache
+         |> with_execution_metadata
+              ~config:room_config
+              ~query:
+                (execution_query_json
+                   ~actor:None
+                   ~fixture:None
+                   ~full_mode:false
+                   ~light:true
+                   ~default_light_request:true));
       !_broadcast_namespace_truth_ref state)
 ;;
 
@@ -470,18 +653,32 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
     ~compute
     ~on_result:(fun json ->
       mark_cached_surface_success _transport_health_cache json;
-      broadcast_cached_surface ~event_type:"transport_health_snapshot" json)
+      broadcast_cached_surface
+        ~event_type:"transport_health_snapshot"
+        (cached_surface_json _transport_health_cache
+         |> with_transport_health_metadata
+              ~config:state.Mcp_server.room_config
+              ~timeout_s))
 ;;
 
 let dashboard_execution_http_json ~state ~sw ~clock request =
+  let config = state.Mcp_server.room_config in
   let net = state.Mcp_server.net in
   let mono_clock = state.Mcp_server.mono_clock in
   let fixture = query_param request "fixture" in
   let actor =
-    execution_actor_for_request ~base_path:state.Mcp_server.room_config.base_path request
+    execution_actor_for_request ~base_path:config.base_path request
   in
   let full_mode = bool_query_param request "full" ~default:false in
   let light = not full_mode in
+  let query =
+    execution_query_json
+      ~actor
+      ~fixture
+      ~full_mode
+      ~light
+      ~default_light_request:(fixture = None && actor = None && not full_mode)
+  in
   let compute ?actor ?fixture ~light () =
     let started_at = Unix.gettimeofday () in
     run_dashboard_compute
@@ -490,7 +687,7 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
       ?mono_clock
       ~sw
       ~clock
-      ~config:state.Mcp_server.room_config
+      ~config
       (fun ~config ~sw ->
          Dashboard_execution.json
            ?actor
@@ -521,6 +718,10 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
       ~clock
       ~timeout_sec:Env_config_runtime.Dashboard.execution_timeout_sec
       (compute ~light:true)
+    |> with_execution_metadata
+         ~config
+         ~cache_key:"execution:default:light"
+         ~query
   | _ ->
     (* Parameterized requests (fixture/actor/full): on-demand with SWR cache.
          These are rare (test fixtures, actor-specific views, full mode). *)
@@ -537,6 +738,7 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
       ~clock
       ~timeout_sec:Env_config_runtime.Dashboard.execution_timeout_sec
       (compute ?actor ?fixture ~light)
+    |> with_execution_metadata ~config ~cache_key ~query
 ;;
 
 let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
@@ -573,9 +775,19 @@ let transport_health_cache_diagnostics () =
   | _ -> []
 ;;
 
-let dashboard_transport_health_http_json ~state:_ =
+let dashboard_transport_health_http_json ~state =
+  let timeout_s =
+    float_of_env_default
+      "MASC_DASHBOARD_TRANSPORT_HEALTH_TIMEOUT_S"
+      ~default:8.0
+      ~min_v:3.0
+      ~max_v:30.0
+  in
   let json = cached_surface_json _transport_health_cache in
   extend_projection_diagnostics
     json
     (("source", `String "cached_surface") :: transport_health_cache_diagnostics ())
+  |> with_transport_health_metadata
+       ~config:state.Mcp_server.room_config
+       ~timeout_s
 ;;

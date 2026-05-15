@@ -222,6 +222,49 @@ describe('keeper-trace-store', () => {
     expect(keeperTraceState.value.events.map(e => e.count)).toEqual([1, 1, 1])
   })
 
+  it('does NOT coalesce record events with different optional trace contexts', () => {
+    pushTrace({
+      id: 'decision-1',
+      tsMs: 1000,
+      keeperName: 'scholar',
+      source: 'decision-log',
+      decisionId: 'd-1',
+      semanticOutcome: 'success',
+      filePath: 'runtime.ts',
+      line: 12,
+      goalId: 'goal-runtime',
+    })
+    pushTrace({
+      id: 'decision-2',
+      tsMs: 1010,
+      keeperName: 'scholar',
+      source: 'decision-log',
+      decisionId: 'd-2',
+      semanticOutcome: 'success',
+      filePath: 'runtime.ts',
+      line: 13,
+      goalId: 'goal-runtime',
+    })
+    pushTrace({
+      id: 'decision-3',
+      tsMs: 1020,
+      keeperName: 'scholar',
+      source: 'decision-log',
+      decisionId: 'd-3',
+      semanticOutcome: 'success',
+      filePath: 'runtime.ts',
+      line: 12,
+      goalId: 'goal-other',
+    })
+
+    expect(keeperTraceState.value.events.map(e => e.id)).toEqual([
+      'decision-1',
+      'decision-2',
+      'decision-3',
+    ])
+    expect(keeperTraceState.value.events.map(e => e.count)).toEqual([1, 1, 1])
+  })
+
   it('inserts out-of-order events into ascending tsMs position', () => {
     pushTrace({
       id: 'a-1',

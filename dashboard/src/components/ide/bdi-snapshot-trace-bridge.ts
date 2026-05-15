@@ -1,4 +1,8 @@
 import { pushTrace } from './keeper-trace-store'
+import {
+  normalizeTraceProducerContext,
+  type KeeperTraceProducerContextInput,
+} from './keeper-trace-context'
 
 /**
  * RFC-0028 PR-δ producer: bdi-snapshot → keeper-trace bridge.
@@ -53,6 +57,7 @@ export interface BdiSnapshotProducerInput {
   readonly keeper: string
   readonly generated_at: string | null
   readonly intention: string | null
+  readonly context?: KeeperTraceProducerContextInput | null
 }
 
 function dedupKey(snapshot: BdiSnapshotProducerInput): string {
@@ -83,6 +88,7 @@ export function bridgeBdiSnapshotsToTrace(
       keeperName: snapshot.keeper,
       source: 'bdi-snapshot',
       intention: snapshot.intention,
+      ...normalizeTraceProducerContext(snapshot.context),
     })
     next.add(key)
   }

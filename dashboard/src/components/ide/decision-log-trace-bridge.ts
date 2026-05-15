@@ -1,4 +1,8 @@
 import { pushTrace } from './keeper-trace-store'
+import {
+  normalizeTraceProducerContext,
+  type KeeperTraceProducerContextInput,
+} from './keeper-trace-context'
 
 /**
  * RFC-0028 PR-δ producer: decision-log → keeper-trace bridge.
@@ -57,6 +61,7 @@ export interface DecisionLogProducerInput {
   readonly keeper_name: string
   readonly event_type: string
   readonly outcome: string | null
+  readonly context?: KeeperTraceProducerContextInput | null
 }
 
 function unixishToMs(ts: number | null): number {
@@ -92,6 +97,7 @@ export function bridgeDecisionsToTrace(
       source: 'decision-log',
       decisionId: key,
       semanticOutcome: decision.outcome,
+      ...normalizeTraceProducerContext(decision.context),
     })
     next.add(key)
   }

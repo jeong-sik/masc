@@ -47,6 +47,21 @@ interface KeeperTraceBase {
   readonly source: KeeperTraceSource
 }
 
+export interface KeeperTraceContextFields {
+  readonly filePath?: string
+  readonly line?: number
+  readonly goalId?: string
+  readonly taskId?: string
+  readonly boardPostId?: string
+  readonly commentId?: string
+  readonly prId?: string
+  readonly gitRef?: string
+  readonly logId?: string
+  readonly sessionId?: string
+  readonly operationId?: string
+  readonly workerRunId?: string
+}
+
 export type KeeperTraceEvent =
   | (KeeperTraceBase & {
       readonly source: 'anchored-thread'
@@ -54,16 +69,16 @@ export type KeeperTraceEvent =
       readonly filePath?: string | null
       readonly line: number | null
     })
-  | (KeeperTraceBase & {
+  | (KeeperTraceBase & KeeperTraceContextFields & {
       readonly source: 'cascade-hop'
       readonly hopId: string
       readonly provider: string
     })
-  | (KeeperTraceBase & {
+  | (KeeperTraceBase & KeeperTraceContextFields & {
       readonly source: 'bdi-snapshot'
       readonly intention: string | null
     })
-  | (KeeperTraceBase & {
+  | (KeeperTraceBase & KeeperTraceContextFields & {
       readonly source: 'decision-log'
       readonly decisionId: string
       readonly semanticOutcome: string | null
@@ -229,5 +244,39 @@ function sameTraceBucket(left: KeeperTraceEvent, right: KeeperTraceEvent): boole
   if (left.source === 'activity-event' && right.source === 'activity-event') {
     return left.filePath === right.filePath && left.line === right.line
   }
+  if (hasTraceContext(left) || hasTraceContext(right)) {
+    return traceContextKey(left) === traceContextKey(right)
+  }
   return true
+}
+
+function hasTraceContext(event: KeeperTraceEvent): boolean {
+  return event.source === 'cascade-hop'
+    || event.source === 'bdi-snapshot'
+    || event.source === 'decision-log'
+    ? traceContextKey(event) !== ''
+    : false
+}
+
+function traceContextKey(event: KeeperTraceEvent): string {
+  if (
+    event.source !== 'cascade-hop'
+    && event.source !== 'bdi-snapshot'
+    && event.source !== 'decision-log'
+  ) return ''
+
+  return [
+    event.filePath ?? '',
+    event.line ?? '',
+    event.goalId ?? '',
+    event.taskId ?? '',
+    event.boardPostId ?? '',
+    event.commentId ?? '',
+    event.prId ?? '',
+    event.gitRef ?? '',
+    event.logId ?? '',
+    event.sessionId ?? '',
+    event.operationId ?? '',
+    event.workerRunId ?? '',
+  ].join('\u001f')
 }

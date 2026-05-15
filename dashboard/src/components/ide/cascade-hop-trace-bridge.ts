@@ -1,4 +1,8 @@
 import { pushTrace } from './keeper-trace-store'
+import {
+  normalizeTraceProducerContext,
+  type KeeperTraceProducerContextInput,
+} from './keeper-trace-context'
 
 /**
  * RFC-0028 PR-δ producer: cascade-hop → keeper-trace bridge.
@@ -52,6 +56,7 @@ export interface CascadeHopProducerInput {
   readonly cascade_name: string
   readonly strategy: string
   readonly cycle: number
+  readonly context?: KeeperTraceProducerContextInput | null
 }
 
 function unixishToMs(ts: number): number {
@@ -86,6 +91,7 @@ export function bridgeCascadeEventsToTrace(
       source: 'cascade-hop',
       hopId: `${event.cascade_name}-${event.cycle}`,
       provider: event.strategy,
+      ...normalizeTraceProducerContext(event.context),
     })
     next.add(key)
   }

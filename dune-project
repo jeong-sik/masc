@@ -72,7 +72,9 @@
   (digestif (>= 1.1))
   (ocaml-protoc-plugin (>= 4.0))
   (pbrt (and (>= 3.0) (< 4.0)))
-  (pbrt_services (and (>= 3.0) (< 4.0)))
+  ; [pbrt_services] removed: no caller in lib/ bin/ test/ since
+  ; continuous-loop iter #11 audit (2026-05-15).  Re-add if gRPC
+  ; service support resumes.
   (h2 (>= 0.13))
   (h2-eio (>= 0.13))
   (alcotest (and :with-test (>= 1.6)))

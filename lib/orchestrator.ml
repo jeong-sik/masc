@@ -187,27 +187,80 @@ let make_zero_zombie_consumer ~sw ~room_config
       (* Run GC in background fiber to avoid blocking Pulse consumers.
          Heartbeat and other consumers proceed without waiting for
          cleanup_zombies I/O. See RFC #3646 M5 / #3626. *)
+      (* Typed outcome for stale-claim release. Carries a structured
+         [reason] so the catch-all wildcard and untyped [Printexc.to_string]
+         warn cannot hide error classification.  benign := matches
+         {!Coord_resilience.ZeroZombie.is_benign_error} (transient FS race
+         or MASC-not-initialized at startup), in which case operators
+         expect no log noise.
+
+         Kept local to the consumer body — release_stale_claims itself
+         still raises and is wrapped here, because lifting Result into
+         the public signature would force every test-suite caller
+         (test_room.ml:909-964) to be rewritten.  Follow-up RFC =
+         Liveness Recovery Supervisor that consumes typed failures here
+         and escalates to operators (see project_keeper-reaction-chain-break). *)
+      let module Stale_claim_outcome = struct
+        type t =
+          | Released of (string * string) list
+          | Empty
+          | Failed of { benign : bool; reason : string }
+      end in
+      let release_stale_claims_typed () : Stale_claim_outcome.t =
+        let ttl = Env_config_runtime.Claim.ttl_seconds in
+        match
+          Coord_task_schedule.release_stale_claims room_config ~ttl_seconds:ttl
+        with
+        | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+        | exception exn ->
+          Stale_claim_outcome.Failed
+            { benign = Coord_resilience.ZeroZombie.is_benign_error exn
+            ; reason = Printexc.to_string exn
+            }
+        | [] -> Stale_claim_outcome.Empty
+        | released -> Stale_claim_outcome.Released released
+      in
       Eio.Fiber.fork ~sw (fun () ->
         try
           let zombie_result = Coord.cleanup_zombies room_config in
+          (* Explicit variant match — no catch-all.  Adding a new
+             [cleanup_zombie_result] constructor must surface as a
+             compile error here, not a silent debug. *)
           (match zombie_result with
-           | Coord.Cleaned { count; names; _ } when count > 0 ->
+           | Coord.Cleaned { count = 0; _ } ->
+               Log.Orchestrator.debug "[zombie] no zombies to clean"
+           | Coord.Cleaned { count; names; _ } ->
                let status =
                  Printf.sprintf "Cleaned up %d zombie agent(s): %s"
                    count (String.concat ", " names)
                in
                Log.Orchestrator.info "[zombie] %s" status
-           | _ -> ());
-          let ttl = Env_config_runtime.Claim.ttl_seconds in
-          (try
-            let released = Coord_task_schedule.release_stale_claims room_config ~ttl_seconds:ttl in
-            if released <> [] then
-              Log.Orchestrator.info "[stale-claims] released %d stale task(s): %s"
-                (List.length released)
-                (String.concat ", " (List.map (fun (tid, agent) ->
-                  Printf.sprintf "%s(%s)" tid agent) released))
-          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-            Log.Orchestrator.warn "[stale-claims] error: %s" (Printexc.to_string exn))
+           | Coord.No_zombies ->
+               Log.Orchestrator.debug "[zombie] no zombies to clean"
+           | Coord.No_agents_dir ->
+               (* Misconfiguration signal: room has no agents/ directory.
+                  Distinct from No_zombies — operators should know GC
+                  ran against a missing target. *)
+               Log.Orchestrator.warn
+                 "[zombie] skipped: agents directory missing for room");
+          (match release_stale_claims_typed () with
+           | Stale_claim_outcome.Empty ->
+               Log.Orchestrator.debug "[stale-claims] no stale claims to release"
+           | Stale_claim_outcome.Released released ->
+               Log.Orchestrator.info "[stale-claims] released %d stale task(s): %s"
+                 (List.length released)
+                 (String.concat ", " (List.map (fun (tid, agent) ->
+                   Printf.sprintf "%s(%s)" tid agent) released))
+           | Stale_claim_outcome.Failed { benign = true; reason } ->
+               (* Same policy as zombie-loop benign-error filter:
+                  startup FS races / MASC-not-initialized should not
+                  page operators. *)
+               Log.Orchestrator.debug "[stale-claims] benign: %s" reason
+           | Stale_claim_outcome.Failed { benign = false; reason } ->
+               (* Real failure — not silent.  Promoted from .warn to
+                  .error so it surfaces past the default WARN→DEBUG
+                  demote of repeated lines. *)
+               Log.Orchestrator.error "[stale-claims] non-benign failure: %s" reason)
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           if not (Coord_resilience.ZeroZombie.is_benign_error exn) then
             Log.Orchestrator.warn "[zombie] error: %s" (Printexc.to_string exn));

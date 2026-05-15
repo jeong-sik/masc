@@ -36,16 +36,20 @@ let legacy_coreutils_macos =
 ;;
 
 let legacy_macos_default () =
-  { cred_root = "/tmp/keeper-creds"
+  let tmpdir = Filename.get_temp_dir_name () in
+  { cred_root =
+      (match Sys.getenv_opt "MASC_CRED_ROOT" with
+       | Some p -> p
+       | None -> Filename.concat tmpdir "keeper-creds")
   ; host_bash = "/bin/bash"
   ; host_zsh = "/bin/zsh"
   ; host_sh = "/bin/sh"
   ; coreutils = legacy_coreutils_macos
-  ; agent_runtime_root = "/tmp"
+  ; agent_runtime_root = tmpdir
   ; sandbox_workspace_root =
       (match Sys.getenv_opt "HOME" with
        | Some home -> Filename.concat home "me"
-       | None -> "/tmp/masc-fleet")
+       | None -> Filename.concat tmpdir "masc-fleet")
   ; test_mode =
       (let exec = Filename.basename Sys.executable_name in
        if String.length exec >= 5 && String.sub exec 0 5 = "test_"

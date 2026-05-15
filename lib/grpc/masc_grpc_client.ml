@@ -23,6 +23,7 @@ let create_from_env ~sw ~env =
     match Env_config.Transport.grpc_target_opt () with
     | Some t -> t
     | None ->
+      (* Fallback: local gRPC only.  Set MASC_GRPC_TARGET for remote hosts. *)
       let port = Masc_grpc_server.configured_port () in
       Printf.sprintf "http://127.0.0.1:%d" port
   in

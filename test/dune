@@ -1384,3 +1384,24 @@
  (name test_provider_prefix_boundary)
  (modules test_provider_prefix_boundary)
  (libraries alcotest))
+
+; RFC-0084 §6.1 — pinned-fail tests for keeper→tool dispatch unification.
+; PR-1 establishes 3 evidence tests for the current telemetry/surface/prehook
+; gaps in lib/tool_dispatch.ml and lib/keeper/tool_resolution.ml. PR-5/7/9
+; update each pinned constant alongside the code fix in the same PR so that
+; drift between code state and pinned evidence is caught by single-PR diff.
+; Constants-only (no Masc_mcp lib dependency) — keeps tests fast and isolated.
+(test
+ (name test_dispatch_telemetry_gap)
+ (modules test_dispatch_telemetry_gap)
+ (libraries alcotest))
+
+(test
+ (name test_surface_coverage_gap)
+ (modules test_surface_coverage_gap)
+ (libraries alcotest))
+
+(test
+ (name test_keeper_prehook_gap)
+ (modules test_keeper_prehook_gap)
+ (libraries alcotest))

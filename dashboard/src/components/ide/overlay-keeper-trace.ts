@@ -182,6 +182,20 @@ const ROUTE_LINKS_STYLE = {
   gap: '3px',
 } as const
 
+const CONTEXT_BADGE_STYLE = {
+  minWidth: '34px',
+  height: '17px',
+  padding: '0 5px',
+  border: '1px solid var(--color-border-muted)',
+  borderRadius: 'var(--r-1)',
+  background: 'var(--color-bg-subtle)',
+  color: 'var(--color-fg-muted)',
+  fontFamily: 'var(--font-mono)',
+  fontSize: 'var(--fs-9)',
+  lineHeight: '15px',
+  whiteSpace: 'nowrap',
+} as const
+
 const ROUTE_LINK_BUTTON_STYLE = {
   minWidth: 0,
   maxWidth: '58px',
@@ -245,6 +259,7 @@ function BucketRow({ bucket }: { readonly bucket: TraceBucket }) {
   const overflow = bucket.events.length - visible.length
   const lineLabel = bucket.line !== null ? `L${bucket.line}` : '—'
   const routeLinks = traceRouteLinks(bucket.events)
+  const routeSummary = traceRouteSummary(routeLinks)
 
   return html`
     <div
@@ -284,6 +299,15 @@ function BucketRow({ bucket }: { readonly bucket: TraceBucket }) {
         ? html`<span aria-label=${`${overflow} more`} data-overflow=${overflow} style=${OVERFLOW_STYLE}>+${overflow}</span>`
         : null}
       ${routeLinks.length > 0 ? html`
+        <span
+          class="ide-trace-context-badge"
+          data-context-route-count=${routeLinks.length}
+          title=${routeSummary}
+          aria-label=${`${bucket.keeperName} trace has ${routeLinks.length} linked context routes: ${routeLinkLabels(routeLinks)}`}
+          style=${CONTEXT_BADGE_STYLE}
+        >
+          CTX ${routeLinks.length}
+        </span>
         <div class="ide-trace-route-links" aria-label=${`${bucket.keeperName} trace route links`} style=${ROUTE_LINKS_STYLE}>
           ${routeLinks.map(link => html`
             <button
@@ -302,6 +326,14 @@ function BucketRow({ bucket }: { readonly bucket: TraceBucket }) {
       ` : null}
     </div>
   `
+}
+
+function routeLinkLabels(routeLinks: ReadonlyArray<IdeContextRouteLink>): string {
+  return routeLinks.map(link => link.label).join(', ')
+}
+
+function traceRouteSummary(routeLinks: ReadonlyArray<IdeContextRouteLink>): string {
+  return `Linked context: ${routeLinkLabels(routeLinks)}`
 }
 
 function selectTraceEvent(event: KeeperTraceEvent): void {

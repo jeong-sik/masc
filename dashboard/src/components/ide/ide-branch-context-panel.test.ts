@@ -206,6 +206,12 @@ describe('IdeBranchContextPanel', () => {
 
     const links = [...container.querySelectorAll<HTMLButtonElement>('.ide-branch-lane-links button')]
     expect(links.map(link => link.textContent)).toEqual(['Code', 'Git', 'Keeper'])
+    const badge = container.querySelector<HTMLElement>('.ide-branch-lane-context-badge')
+    expect(badge?.textContent?.trim()).toBe('CTX 3')
+    expect(badge?.getAttribute('data-context-route-count')).toBe('3')
+    expect(badge?.getAttribute('title')).toBe('Linked context: Code, Git, Keeper')
+    expect(badge?.getAttribute('aria-label'))
+      .toBe('sangsu lane has 3 linked context routes: Code, Git, Keeper')
 
     fireEvent.click(links[0]!)
     expect(window.location.hash).toBe(

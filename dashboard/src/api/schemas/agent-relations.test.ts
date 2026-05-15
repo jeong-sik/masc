@@ -37,6 +37,24 @@ describe('parseAgentRelationsResponse', () => {
     expect(out.relations[0]!.participants).toHaveLength(2)
   })
 
+  it('preserves dashboard feed provenance metadata', () => {
+    const out = parseAgentRelationsResponse(
+      validResponse({
+        dashboard_surface: '/api/v1/agent-relations',
+        source: 'second_brain_graphql',
+        generated_at_iso: '2026-04-17T04:00:01Z',
+        retention: {
+          scope: 'external_graphql_query',
+          durable_store: 'Second Brain GraphQL',
+        },
+      }),
+    )
+    expect(out.dashboard_surface).toBe('/api/v1/agent-relations')
+    expect(out.source).toBe('second_brain_graphql')
+    expect(out.retention?.durable_store).toBe('Second Brain GraphQL')
+    expect(out.generated_at_iso).toBe('2026-04-17T04:00:01Z')
+  })
+
   it('accepts empty collections', () => {
     const out = parseAgentRelationsResponse({
       agent_name: 'new-agent',

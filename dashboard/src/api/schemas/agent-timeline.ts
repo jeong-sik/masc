@@ -40,7 +40,13 @@ const AgentTimelineSummarySchema = object({
   total_events: number(),
 })
 
+const DashboardFeedRetentionSchema = record(string(), unknown())
+
 const AgentTimelineResponseSchema = object({
+  dashboard_surface: optional(string()),
+  source: optional(string()),
+  retention: optional(DashboardFeedRetentionSchema),
+  generated_at_iso: optional(string()),
   agent: string(),
   period: AgentTimelinePeriodSchema,
   events: array(AgentTimelineEventSchema),

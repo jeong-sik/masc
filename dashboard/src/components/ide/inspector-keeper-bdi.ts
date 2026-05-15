@@ -230,6 +230,13 @@ export function BdiRouteLinks({
   if (links.length === 0) return null
   return html`
     <div class="ide-bdi-route-links" aria-label=${ariaLabel}>
+      <span
+        class="ide-bdi-route-count"
+        title=${`${links.length} linked BDI context routes`}
+        aria-label=${`${links.length} linked BDI context routes`}
+      >
+        CTX ${links.length}
+      </span>
       ${links.map(link => html`
         <button
           key=${link.id}

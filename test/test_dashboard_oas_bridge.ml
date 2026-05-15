@@ -240,6 +240,25 @@ let test_recent_json_provider_filter_is_runtime_alias () =
   DOB.record (make_sample ~provider:"anthropic" ());
   DOB.record (make_sample ~provider:"ollama" ~model:"qwen3" ());
   let json = DOB.recent_json ~provider:"ollama" ~limit:5 () in
+  Alcotest.(check bool)
+    "generated_at present"
+    true
+    (json |> Json.member "generated_at" |> Json.to_string |> String.length > 0);
+  Alcotest.(check string)
+    "dashboard surface"
+    "/api/v1/dashboard/oas/telemetry/recent"
+    (json |> Json.member "dashboard_surface" |> Json.to_string);
+  Alcotest.(check string)
+    "source"
+    "oas_runtime_bridge"
+    (json |> Json.member "source" |> Json.to_string);
+  Alcotest.(check string)
+    "durable replay surface"
+    "/api/v1/dashboard/telemetry?source=oas_event"
+    (json
+     |> Json.member "retention"
+     |> Json.member "durable_replay_surface"
+     |> Json.to_string);
   Alcotest.(check string)
     "provider redacted"
     "runtime"
@@ -262,6 +281,14 @@ let test_summary_json_contains_aggregate () =
   DOB.record (make_sample ~cache:true ~status:DOB.Success ());
   DOB.record (make_sample ~cache:false ~status:DOB.Timeout ());
   let json = DOB.summary_json ~provider:"anthropic" ~limit:10 () in
+  Alcotest.(check string)
+    "dashboard surface"
+    "/api/v1/dashboard/oas/telemetry/summary"
+    (json |> Json.member "dashboard_surface" |> Json.to_string);
+  Alcotest.(check int)
+    "retention cap"
+    200
+    (json |> Json.member "retention" |> Json.member "per_provider_cap" |> Json.to_int);
   let summary = json |> Json.member "summary" in
   Alcotest.(check int)
     "sample_count"

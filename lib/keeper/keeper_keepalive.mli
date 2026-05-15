@@ -169,6 +169,16 @@ val smart_heartbeat_cycle_continues : Heartbeat_smart.decision -> bool
 val cycle_continues_after_wake :
   Heartbeat_smart.decision -> Keeper_keepalive_signal.sleep_outcome -> bool
 
+val visible_consumer_count : unit -> int
+
+val visibility_gate_decision :
+  visible_consumers:int ->
+  has_pending_signal:bool ->
+  now:float ->
+  last_heartbeat_cycle_ts:float ->
+  Heartbeat_smart.decision ->
+  Heartbeat_smart.decision
+
 val status_tick_usage_json : unit -> Yojson.Safe.t
 (** Usage payload for heartbeat/status metrics rows.  Status ticks are not
     LLM calls, so all per-turn token counters are explicit zeroes while

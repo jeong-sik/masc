@@ -439,6 +439,30 @@ let test_jsonl_backend_uses_explicit_base_dir () =
   Alcotest.(check bool) "writes under explicit base_dir" true (Sys.file_exists expected_path);
   cleanup_tmp_dir dir
 
+let test_create_memory_with_backend_uses_same_backend () =
+  let dir = setup_tmp_dir () in
+  let base_dir = Filename.concat dir ".masc-room-b" in
+  let sid = Printf.sprintf "test-bundle-%d" (int_of_float (Unix.gettimeofday () *. 1000.0)) in
+  let bundle =
+    Memory_oas_bridge.create_memory_with_backend
+      ~base_dir
+      ~agent_name:"test-jsonl"
+      ~session_id:sid
+      ()
+  in
+  ignore
+    (Agent_sdk.Memory.store
+       bundle.created_memory
+       ~tier:Agent_sdk.Memory.Long_term
+       "world:bundle"
+       (`String "ok"));
+  (match
+     bundle.created_memory_long_term_backend.retrieve ~key:"world:bundle"
+   with
+   | Some (`String value) -> Alcotest.(check string) "stored via same backend" "ok" value
+   | _ -> Alcotest.fail "expected memory store to use returned backend");
+  cleanup_tmp_dir dir
+
 let test_flush_episodes_appends_only_new_records () =
   let dir = setup_tmp_dir () in
   let existing =
@@ -613,6 +637,8 @@ let () =
       Alcotest.test_case "query returns empty" `Quick test_jsonl_backend_query;
       Alcotest.test_case "uses explicit base_dir" `Quick
         test_jsonl_backend_uses_explicit_base_dir;
+      Alcotest.test_case "create_memory_with_backend uses same backend" `Quick
+        test_create_memory_with_backend_uses_same_backend;
       Alcotest.test_case "flush_episodes appends only new" `Quick
         test_flush_episodes_appends_only_new_records;
       Alcotest.test_case "successful keeper turn preserves OAS turn count" `Quick

@@ -68,6 +68,36 @@ type timeline_event = {
   detail : Yojson.Safe.t;
 }
 
+let dashboard_surface = "/api/v1/agent-timeline"
+let dashboard_source = "agent_timeline_read_model"
+
+let dashboard_retention_json =
+  `Assoc
+    [
+      ("scope", `String "multi_source_tail");
+      ( "durable_store",
+        `String
+          ".masc/agents/*.json + .masc/tasks/*.json + \
+           .masc/messages/*.json + \
+           .masc/activity-events/YYYY-MM/YYYY-MM-DD.jsonl" );
+      ( "durable_stores",
+        `List
+          [
+            `String ".masc/agents/*.json";
+            `String ".masc/tasks/*.json";
+            `String ".masc/messages/*.json";
+            `String ".masc/activity-events/YYYY-MM/YYYY-MM-DD.jsonl";
+          ] );
+      ( "activity_event_kinds",
+        `List
+          [
+            `String "tool.called";
+            `String "keeper.contract_verdict";
+            `String "keeper.friction";
+            `String "keeper.turn_completed";
+          ] );
+    ]
+
 let event_to_json (e : timeline_event) : Yojson.Safe.t =
   `Assoc
     [
@@ -537,6 +567,10 @@ let build_timeline (config : Coord.config) ~agent_name ~since_hours ~limit
   let now_iso = Masc_domain.now_iso () in
   `Assoc
     [
+      ("dashboard_surface", `String dashboard_surface);
+      ("source", `String dashboard_source);
+      ("retention", dashboard_retention_json);
+      ("generated_at_iso", `String now_iso);
       ("agent", `String agent_name);
       ( "period",
         `Assoc [ ("from", `String since_iso); ("to", `String now_iso) ] );

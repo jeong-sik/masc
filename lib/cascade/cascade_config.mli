@@ -16,7 +16,7 @@
 (** {1 Model Alias Resolution} *)
 
 (** Resolve a GLM model alias to the concrete API model ID.
-    - ["auto"] → env var [ZAI_DEFAULT_MODEL] or ["glm-5.1"]
+    - ["auto"] → env var [ZAI_DEFAULT_MODEL] or the OAS ZAI catalog head
     - ["flash"] → ["glm-4.7-flashx"]
     - ["turbo"] → ["glm-5-turbo"]
     - ["vision"] → ["glm-4.6v"]

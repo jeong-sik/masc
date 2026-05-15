@@ -1,9 +1,10 @@
 ---
 status: reference
-last_verified: 2026-04-17
+last_verified: 2026-05-15
 code_refs:
   - lib/verifier_oas.ml
   - lib/memory_oas_bridge.ml
+  - lib/keeper/keeper_agent_error.ml
   - lib/worker_oas.ml
 ---
 
@@ -193,7 +194,31 @@ Hardcoded fallback (cascade.toml 없을 때):
 이 fallback은 runtime failsafe다. 저장소에 커밋되는 `config/cascade.toml`
 기본값과 동일시하지 않는다.
 
-### 4.6 MASC Tool Bridge
+### 4.6 Termination Semantics
+
+OAS와 MASC는 "turn"과 "timeout"을 같은 layer에서 쓰지 않는다. OAS
+`Agent.run`의 `MaxTurnsExceeded`는 OAS SDK turn budget이고, keeper
+wall-clock timeout이나 provider timeout과 동일한 개념이 아니다.
+
+`lib/keeper/keeper_agent_error.ml`의 `sdk_termination_semantics`가 OAS
+error를 keeper receipt로 접기 전 layer-aware 의미를 먼저 고정한다:
+
+| OAS / SDK signal | MASC semantic | Receipt outcome |
+|------------------|---------------|-----------------|
+| `Retry.Timeout` | `provider_wall_clock_timeout` | `cancelled` |
+| `MaxTurnsExceeded` | `oas_turn_budget_exhausted` | `cancelled` |
+| `IdleDetected` | `oas_idle_budget_exhausted` | `cancelled` |
+| `ExitConditionMet` | `oas_exit_condition_reached` | `cancelled` |
+| `TokenBudgetExceeded` | `oas_token_budget_exhausted` | `error` |
+| `CostBudgetExceeded` | `oas_cost_budget_exhausted` | `error` |
+| other SDK/API failure | `sdk_error_failure` or specific OAS failure semantic | `error` |
+
+Invariant: new OAS terminal variants must first be assigned a stable
+`sdk_termination_semantics` value, then mapped to keeper receipt outcome.
+Tests in `test/test_keeper_terminal_reason.ml` pin the semantic layer and the
+collapsed receipt outcome separately.
+
+### 4.7 MASC Tool Bridge
 
 `run_with_masc_tools`와 `run_named_with_masc_tools`가 MASC 도구 스키마를 OAS `Tool.t`로 변환한다.
 

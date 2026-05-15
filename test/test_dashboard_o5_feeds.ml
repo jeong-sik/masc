@@ -21,6 +21,18 @@ let test_heuristics_feed_exposes_o5_shape () =
   in
   let feed = Heuristic_metrics.dashboard_feed_json ~limit:50 [ event ] in
   let item = first_list_item "heuristics" feed in
+  Alcotest.(check string)
+    "heuristics dashboard surface"
+    "/api/v1/dashboard/heuristics"
+    (feed |> U.member "dashboard_surface" |> U.to_string);
+  Alcotest.(check string)
+    "heuristics source"
+    "heuristic_metrics"
+    (feed |> U.member "source" |> U.to_string);
+  Alcotest.(check string)
+    "heuristics durable store"
+    ".masc/heuristic_metrics.jsonl"
+    (feed |> U.member "retention" |> U.member "durable_store" |> U.to_string);
   Alcotest.(check int) "raw event count" 1 (feed |> U.member "count" |> U.to_int);
   Alcotest.(check string)
     "rule id"
@@ -28,6 +40,36 @@ let test_heuristics_feed_exposes_o5_shape () =
     (item |> U.member "rule_id" |> U.to_string);
   Alcotest.(check string) "action" "triggered" (item |> U.member "action" |> U.to_string);
   Alcotest.(check int) "cooldown" 0 (item |> U.member "cooldown_remaining_ms" |> U.to_int)
+;;
+
+let test_heuristics_coverage_exposes_source_metadata () =
+  let report =
+    { Heuristic_metrics.total_events = 2
+    ; sites =
+        [ { Heuristic_metrics.module_name = "keeper"
+          ; site = "guard"
+          ; count = 2
+          ; triggered_count = 1
+          }
+        ]
+    ; decision_shape_count = 1
+    ; mixed_outcome_sites = 1
+    ; unique_decision_tuples = 1
+    }
+  in
+  let json = Heuristic_metrics.coverage_report_to_json report in
+  Alcotest.(check string)
+    "coverage dashboard surface"
+    "/api/v1/dashboard/heuristics/coverage"
+    (json |> U.member "dashboard_surface" |> U.to_string);
+  Alcotest.(check string)
+    "coverage source"
+    "heuristic_metrics"
+    (json |> U.member "source" |> U.to_string);
+  Alcotest.(check int)
+    "coverage total"
+    2
+    (json |> U.member "total_events" |> U.to_int)
 ;;
 
 let test_agent_stress_feed_exposes_board_rows () =
@@ -57,6 +99,15 @@ let test_agent_stress_feed_exposes_board_rows () =
   in
   let feed = Agent_stress.dashboard_feed_json ~limit:25 ~agents [ event ] in
   let row = first_list_item "agent_stress" feed in
+  Alcotest.(check string)
+    "stress dashboard surface"
+    "/api/v1/dashboard/stress"
+    (feed |> U.member "dashboard_surface" |> U.to_string);
+  Alcotest.(check string) "stress source" "agent_stress" (feed |> U.member "source" |> U.to_string);
+  Alcotest.(check string)
+    "stress durable store"
+    ".masc/agent_stress.jsonl"
+    (feed |> U.member "retention" |> U.member "durable_store" |> U.to_string);
   Alcotest.(check int) "raw event count" 1 (feed |> U.member "count" |> U.to_int);
   Alcotest.(check string) "agent" "sangsu" (row |> U.member "agent" |> U.to_string);
   Alcotest.(check (float 0.001))
@@ -82,6 +133,10 @@ let () =
             "heuristics response carries issue-shape array"
             `Quick
             test_heuristics_feed_exposes_o5_shape
+        ; Alcotest.test_case
+            "heuristics coverage carries source metadata"
+            `Quick
+            test_heuristics_coverage_exposes_source_metadata
         ; Alcotest.test_case
             "stress response carries agent board rows"
             `Quick

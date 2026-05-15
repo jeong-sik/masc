@@ -167,6 +167,25 @@ let test_dashboard_namespace_truth_empty_room () =
         check int "namespace counts expose total runtimes"
           0
           (json |> member "root" |> member "counts" |> member "total_runtimes" |> to_int);
+        check string "canonical dashboard surface"
+          "/api/v1/dashboard/namespace-truth"
+          (json |> member "dashboard_surface" |> to_string);
+        check string "read model source"
+          "namespace_truth_read_model"
+          (json |> member "source" |> to_string);
+        check string "retention scope"
+          "dashboard_namespace_truth"
+          (json |> member "retention" |> member "scope" |> to_string);
+        check bool "generated_at_iso present"
+          true
+          (match json |> member "generated_at_iso" with
+          | `String value -> String.length value > 0
+          | _ -> false);
+        check bool "room-truth alias advertised"
+          true
+          (json |> member "dashboard_aliases" |> to_list
+          |> List.map to_string
+          |> List.mem "/api/v1/dashboard/room-truth");
         check bool "readiness status exposed"
           true
           (String.length (json |> member "readiness" |> member "status" |> to_string) > 0);
@@ -565,6 +584,7 @@ let test_namespace_truth_snapshot_hash_ignores_generated_at () =
         `Assoc
           [
             ("generated_at", `String generated_at);
+            ("generated_at_iso", `String generated_at);
             ( "namespace",
               `Assoc [ ("status", `String "ready"); ("counts", `Assoc [("agents", `Int 1)]) ]
             );

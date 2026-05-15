@@ -464,7 +464,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
       in
       let trace_id = "trace-test-" ^ keeper_name in
       let trajectory_entries =
-        Masc_mcp.Trajectory.read_entries
+        Trajectory.read_entries
           ~masc_root
           ~keeper_name
           ~trace_id
@@ -472,14 +472,14 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
       check int "trajectory row count" 1 (List.length trajectory_entries);
       let trajectory_entry = List.hd trajectory_entries in
       check string "trajectory tool" "keeper_bash"
-        trajectory_entry.Masc_mcp.Trajectory.tool_name;
+        trajectory_entry.Trajectory.tool_name;
       check int "trajectory turn" 1
-        trajectory_entry.Masc_mcp.Trajectory.turn;
+        trajectory_entry.Trajectory.turn;
       check int "trajectory round" 1
-        trajectory_entry.Masc_mcp.Trajectory.round;
+        trajectory_entry.Trajectory.round;
       let trajectory_json =
         let path =
-          Masc_mcp.Trajectory.trajectory_path masc_root keeper_name trace_id
+          Trajectory.trajectory_path masc_root keeper_name trace_id
         in
         let ic = open_in path in
         let content =

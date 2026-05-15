@@ -163,7 +163,7 @@ let test_codex_and_claude_cli_auto_models_env_override () =
     check (list string) "claude operator rotation" [ "sonnet"; "opus" ] claude)
 ;;
 
-let test_kimi_cli_auto_model_policy () =
+let test_kimi_cli_auto_model_declared_default () =
   with_clean_env (fun () ->
     let declared_default =
       match auto_models_for "kimi_cli" with
@@ -453,7 +453,10 @@ let () =
             "codex/claude cli auto env list override"
             `Quick
             test_codex_and_claude_cli_auto_models_env_override
-        ; test_case "kimi_cli:auto policy" `Quick test_kimi_cli_auto_model_policy
+        ; test_case
+            "kimi_cli:auto declared default"
+            `Quick
+            test_kimi_cli_auto_model_declared_default
         ; test_case
             "expand_auto_models covers CLI auto"
             `Quick

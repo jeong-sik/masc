@@ -66,6 +66,12 @@ val resolve_glm_model_id : string -> string
 
 val resolve_glm_coding_model_id : string -> string
 
+(** Resolve provider:auto expansion for any registered cascade provider. *)
+val auto_models_for_cascade_prefix
+  :  ?getenv:(string -> string option)
+  -> string
+  -> string list option
+
 (** Resolve "auto" and aliases to concrete model IDs for any provider.
     Cloud providers resolve aliases; local providers (llama, ollama) resolve
     "auto" via {!Llm_provider.Discovery.first_discovered_model_id}. *)

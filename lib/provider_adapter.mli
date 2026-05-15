@@ -27,34 +27,10 @@ type auth_mode =
       ; location_env : string
       }
 
-type model_family =
-  | Generic
-  | Glm_general
-  | Glm_coding
-  | Kimi_api_family
-
-type auto_models_source =
-  | No_auto_models
-  | Env_csv_or_default of
-      { env_var : string
-      ; defaults : string list
-      ; prefer_default_model_env : bool
-      }
-  | Zai_general_auto_models
-  | Zai_coding_auto_models
-
 type reporting_policy =
   | Reported
   | Missing_by_design
   | Unknown
-
-type model_policy =
-  { default_model_env : string option
-  ; default_model_fallback : string option
-  ; auto_models : auto_models_source
-  ; expand_auto : bool
-  ; family : model_family
-  }
 
 type tool_policy =
   { supports_runtime_mcp_http_headers : bool
@@ -127,8 +103,6 @@ type adapter =
   ; spawn_key : string option
   ; cascade_prefix : string
   ; endpoint_url : string option
-  ; default_model_id : string option
-  ; model_policy : model_policy
   ; tool_policy : tool_policy
   ; telemetry_policy : telemetry_policy
   }
@@ -223,18 +197,6 @@ val is_spawnable_agent : string -> bool
 (** Return canonical names of all spawnable adapters. *)
 val spawnable_canonical_names : unit -> string list
 
-(** Resolve the declared default model id for a cascade prefix. *)
-val default_model_id_for_cascade_prefix
-  :  ?getenv:(string -> string option)
-  -> string
-  -> string option
-
-(** Resolve declared auto-model expansion for a cascade prefix. *)
-val auto_models_for_cascade_prefix
-  :  ?getenv:(string -> string option)
-  -> string
-  -> string list option
-
 (** Returns true if the provider uses runtime discovery (e.g. live /props probe). *)
 val requires_discovery : string -> bool
 
@@ -254,29 +216,7 @@ val is_local_provider : string -> bool
 val is_http_probe_capable_kind :
   Llm_provider.Provider_config.provider_kind -> bool
 
-(** {1 Model Label Resolution} *)
-
-(** Default fallback label for local runtime when no preferred models exist. *)
-val default_local_fallback_label : unit -> string
-
-(** Preferred execution model labels in priority order. *)
-val preferred_execution_model_labels : unit -> string list
-
-(** Preferred verifier model labels in priority order. *)
-val preferred_verifier_model_labels : unit -> string list
-
-(** Configured default model label (first from MASC_DEFAULT_CASCADE or
-    MASC_DEFAULT_PROVIDER/MASC_DEFAULT_MODEL). *)
-val configured_default_model_label_result : unit -> (string, string) result
-
-(** Configured verifier model label (MASC_DEFAULT_VERIFIER_MODEL fallback to default). *)
-val configured_verifier_model_label_result : unit -> (string, string) result
-
-(** Default model label(s) result. *)
-val default_model_labels_result : unit -> (string list, string) result
-
-(** First default model label. *)
-val default_model_label_result : unit -> (string, string) result
+(** {1 Model Label Classification} *)
 
 (** Extract provider prefix from a "provider:model" label. *)
 val provider_prefix_of_label_result : string -> (string, string) result
@@ -305,22 +245,6 @@ val supports_runtime_mcp_http_headers_for_model_label
     Used by metrics coverage gating so text-only turns against CLI-class
     providers that strip usage do not count as coverage gaps. *)
 val is_structurally_unmetered_provider : string -> bool
-
-(** Provider prefix of the default model label. *)
-val default_model_provider_prefix_result : unit -> (string, string) result
-
-(** Override the model portion of the default model label. *)
-val default_model_override_label_result : string -> (string, string) result
-
-(** {1 Llama Model Resolution} *)
-
-val explicit_llama_model_id_result : unit -> (string, string) result
-val explicit_llama_model_label_result : unit -> (string, string) result
-
-(** {1 Ollama} *)
-
-val bare_ollama_migration_message : unit -> string
-val is_bare_ollama_label : string -> bool
 
 (** {1 Auth} *)
 

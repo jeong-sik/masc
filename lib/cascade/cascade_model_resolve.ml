@@ -64,33 +64,38 @@ let unresolved_auto requested_model_id =
   }
 ;;
 
-let default_resolution_from_policy
-      ?getenv
-      (policy : Provider_runtime_projection.model_policy)
-      ~requested_model_id
-  =
-  match policy.default_model_env with
-  | Some env_var ->
-    (match env_value_opt ?getenv env_var with
-     | Some resolved_model_id ->
-       { requested_model_id; resolved_model_id; provenance = Env_default env_var }
-     | None ->
-       (match policy.default_model_fallback with
-        | Some resolved_model_id ->
-          { requested_model_id; resolved_model_id; provenance = Hardcoded_default }
-        | None -> unresolved_auto requested_model_id))
-  | None ->
-    (match policy.default_model_fallback with
-     | Some resolved_model_id ->
-       { requested_model_id; resolved_model_id; provenance = Hardcoded_default }
-     | None -> unresolved_auto requested_model_id)
+let hardcoded_default requested_model_id resolved_model_id =
+  { requested_model_id; resolved_model_id; provenance = Hardcoded_default }
 ;;
 
-let default_resolution ?getenv provider_name ~requested_model_id =
-  match Provider_runtime_projection.model_policy_for_cascade_prefix provider_name with
-  | Some policy ->
-    default_resolution_from_policy ?getenv policy ~requested_model_id
-  | None -> unresolved_auto requested_model_id
+let default_resolution ?getenv ?fallback_model provider_name ~requested_model_id =
+  let fallback () =
+    match fallback_model with
+    | Some resolved_model_id -> hardcoded_default requested_model_id resolved_model_id
+    | None -> unresolved_auto requested_model_id
+  in
+  match
+    Provider_runtime_projection.default_model_candidate_for_cascade_prefix
+      ?getenv
+      provider_name
+  with
+  | Some
+      { source = Provider_runtime_projection.Env_var env_var
+      ; model_id = resolved_model_id
+      } ->
+    { requested_model_id; resolved_model_id; provenance = Env_default env_var }
+  | Some
+      { source = Provider_runtime_projection.Binding_default
+      ; model_id = resolved_model_id
+      }
+    when (String.equal (String.lowercase_ascii (String.trim resolved_model_id)) "auto"
+          && Option.is_some fallback_model) -> fallback ()
+  | Some
+      { source = Provider_runtime_projection.Binding_default
+      ; model_id = resolved_model_id
+      } ->
+    hardcoded_default requested_model_id resolved_model_id
+  | None -> fallback ()
 ;;
 
 let cascade_prefix_of_canonical_provider canonical_name =
@@ -106,6 +111,13 @@ let glm_auto_models = Llm_provider.Zai_catalog.glm_auto_models
 
 let glm_coding_auto_models = Llm_provider.Zai_catalog.glm_coding_auto_models
 
+let first_model models =
+  models
+  |> List.find_map (fun model ->
+    let trimmed = String.trim model in
+    if String.equal trimmed "" then None else Some trimmed)
+;;
+
 let resolve_glm_model ?getenv selector =
   let model_id =
     match selector with
@@ -115,6 +127,7 @@ let resolve_glm_model ?getenv selector =
   let default_model =
     default_resolution
       ?getenv
+      ?fallback_model:(first_model (glm_auto_models ()))
       (cascade_prefix_of_canonical_provider "glm")
       ~requested_model_id:model_id
   in
@@ -140,6 +153,7 @@ let resolve_glm_coding_model ?getenv selector =
   let default_model =
     default_resolution
       ?getenv
+      ?fallback_model:(first_model (glm_coding_auto_models ()))
       (cascade_prefix_of_canonical_provider "glm-coding")
       ~requested_model_id:model_id
   in
@@ -176,6 +190,50 @@ let resolve_glm_coding_model_id model_id =
   (resolve_glm_coding_model (model_selector_of_string model_id)).resolved_model_id
 ;;
 
+let env_fragment value =
+  value
+  |> String.map (function
+    | 'a' .. 'z' as c -> Char.uppercase_ascii c
+    | 'A' .. 'Z' | '0' .. '9' as c -> c
+    | _ -> '_')
+;;
+
+let csv_items raw =
+  raw
+  |> String.split_on_char ','
+  |> List.map String.trim
+  |> List.filter (fun value -> not (String.equal value ""))
+;;
+
+let default_auto_models_for_profile (profile : Provider_runtime_projection.provider_profile)
+  =
+  match profile.kind with
+  | Llm_provider.Provider_config.Glm
+    when Llm_provider.Zai_catalog.is_coding_base_url profile.base_url ->
+    Some (glm_coding_auto_models ())
+  | Llm_provider.Provider_config.Glm -> Some (glm_auto_models ())
+  | _ ->
+    (match profile.supported_models, profile.runtime_kind with
+     | _ :: _ as models, _ -> Some models
+     | [], Provider_runtime_projection.Cli_agent -> Some [ "auto" ]
+     | [], (Provider_runtime_projection.Local | Provider_runtime_projection.Direct_api) ->
+       None)
+;;
+
+let auto_models_for_cascade_prefix ?getenv provider_name =
+  match Provider_runtime_projection.provider_profile_for_cascade_prefix provider_name with
+  | None -> None
+  | Some profile ->
+    let defaults = default_auto_models_for_profile profile in
+    let env_var = "MASC_" ^ env_fragment profile.id ^ "_AUTO_MODELS" in
+    (match env_value_opt ?getenv env_var with
+     | Some raw ->
+       (match csv_items raw with
+        | [] -> defaults
+        | items -> Some items)
+     | None -> defaults)
+;;
+
 (** Resolve "auto" and aliases to concrete model IDs.
     Cloud APIs generally require concrete model names, and local
     providers (llama, ollama) also cannot accept the literal "auto" model ID.
@@ -204,11 +262,12 @@ let resolve_auto_model
           { requested_model_id = model_id; resolved_model_id; provenance = Discovery }
         | None -> default_resolution ?getenv provider_name ~requested_model_id:model_id)
      | Concrete _ -> explicit_resolution model_id model_id)
-  | Some { model_policy = { family = Provider_runtime_projection.Glm_general; _ }; _ } ->
-    resolve_glm_model ?getenv selector
-  | Some { model_policy = { family = Provider_runtime_projection.Glm_coding; _ }; _ } ->
+  | Some
+      { kind = Llm_provider.Provider_config.Glm; base_url; _ }
+    when Llm_provider.Zai_catalog.is_coding_base_url base_url ->
     resolve_glm_coding_model ?getenv selector
-  | Some { model_policy = { family = Provider_runtime_projection.Kimi_api_family; _ }; _ } ->
+  | Some { kind = Llm_provider.Provider_config.Glm; _ } -> resolve_glm_model ?getenv selector
+  | Some { kind = Llm_provider.Provider_config.Kimi; _ } ->
     resolve_kimi_model ?getenv selector
   | Some _ ->
     (match selector with

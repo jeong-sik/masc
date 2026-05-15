@@ -13,34 +13,10 @@ type auth_mode =
       ; location_env : string
       }
 
-type model_family =
-  | Generic
-  | Glm_general
-  | Glm_coding
-  | Kimi_api_family
-
-type auto_models_source =
-  | No_auto_models
-  | Env_csv_or_default of
-      { env_var : string
-      ; defaults : string list
-      ; prefer_default_model_env : bool
-      }
-  | Zai_general_auto_models
-  | Zai_coding_auto_models
-
 type reporting_policy =
   | Reported
   | Missing_by_design
   | Unknown
-
-type model_policy =
-  { default_model_env : string option
-  ; default_model_fallback : string option
-  ; auto_models : auto_models_source
-  ; expand_auto : bool
-  ; family : model_family
-  }
 
 type tool_policy =
   { supports_runtime_mcp_http_headers : bool
@@ -71,8 +47,6 @@ type adapter =
                                        model labels. This is the primary naming boundary between
                                        MASC routing and OAS provider configs. *)
   ; endpoint_url : string option (** Base URL for the provider API. *)
-  ; default_model_id : string option (** Default model ID for the provider. *)
-  ; model_policy : model_policy
   ; tool_policy : tool_policy
   ; telemetry_policy : telemetry_policy
   }
@@ -108,21 +82,6 @@ let normalize_label label = String.trim label |> String.lowercase_ascii
 let trim_nonempty value =
   let trimmed = String.trim value in
   if trimmed = "" then None else Some trimmed
-;;
-
-let env_value_opt ?(getenv = Sys.getenv_opt) name =
-  match getenv name with
-  | Some raw ->
-    let trimmed = String.trim raw in
-    if trimmed = "" then None else Some trimmed
-  | None -> None
-;;
-
-let csv_items raw =
-  raw
-  |> String.split_on_char ','
-  |> List.map String.trim
-  |> List.filter (fun s -> s <> "")
 ;;
 
 let no_tool_http_headers =
@@ -252,15 +211,6 @@ let binding_endpoint_url (binding : Runtime_binding.t) =
   trim_nonempty binding.Runtime_binding.base_url
 ;;
 
-let binding_default_model_id (binding : Runtime_binding.t) =
-  match Option.bind binding.Runtime_binding.default_model trim_nonempty with
-  | Some _ as value -> value
-  | None ->
-    (match binding.Runtime_binding.capabilities.supported_models with
-     | Some (model :: _) -> trim_nonempty model
-     | Some [] | None -> None)
-;;
-
 let binding_auth_env_keys (binding : Runtime_binding.t) =
   let auth_env =
     match binding.Runtime_binding.auth with
@@ -344,61 +294,6 @@ let adapter_canonical_name_of_provider_kind
   provider_name_of_kind
 ;;
 
-let binding_env_fragment (binding : Runtime_binding.t) =
-  binding.Runtime_binding.id
-  |> String.map (function
-    | 'a' .. 'z' as c -> Char.uppercase_ascii c
-    | 'A' .. 'Z' | '0' .. '9' as c -> c
-    | _ -> '_')
-;;
-
-let model_family_of_binding (binding : Runtime_binding.t) =
-  match binding.Runtime_binding.kind, binding.Runtime_binding.id with
-  | Llm_provider.Provider_config.Glm, "glm-coding" -> Glm_coding
-  | Llm_provider.Provider_config.Glm, _ -> Glm_general
-  | Llm_provider.Provider_config.Kimi, _ -> Kimi_api_family
-  | _ -> Generic
-;;
-
-let first_catalog_model models =
-  models |> List.find_map trim_nonempty
-;;
-
-let catalog_default_model_id_of_binding (binding : Runtime_binding.t) =
-  match model_family_of_binding binding with
-  | Glm_general -> first_catalog_model (Llm_provider.Zai_catalog.glm_auto_models ())
-  | Glm_coding -> first_catalog_model (Llm_provider.Zai_catalog.glm_coding_auto_models ())
-  | Generic | Kimi_api_family -> None
-;;
-
-let default_model_id_of_binding (binding : Runtime_binding.t) =
-  match binding_default_model_id binding with
-  | Some _ as value -> value
-  | None ->
-    (match catalog_default_model_id_of_binding binding with
-     | Some _ as value -> value
-     | None ->
-       (match runtime_kind_of_binding binding with
-        | Local -> None
-        | Cli_agent | Direct_api -> Some "auto"))
-;;
-
-let auto_models_of_binding binding default_model_id =
-  match runtime_kind_of_binding binding with
-  | Cli_agent ->
-    Some
-      (Env_csv_or_default
-         { env_var = "MASC_" ^ binding_env_fragment binding ^ "_AUTO_MODELS"
-         ; defaults = [ Option.value default_model_id ~default:"auto" ]
-         ; prefer_default_model_env = false
-         })
-  | Local | Direct_api ->
-    (match model_family_of_binding binding with
-     | Glm_general -> Some Zai_general_auto_models
-     | Glm_coding -> Some Zai_coding_auto_models
-     | Generic | Kimi_api_family -> None)
-;;
-
 let auth_mode_of_binding (binding : Runtime_binding.t) =
   match binding_primary_api_key_env binding with
   | Some env_name -> Api_key env_name
@@ -445,8 +340,6 @@ let spawn_key_of_binding (binding : Runtime_binding.t) =
 ;;
 
 let generic_adapter_of_binding (binding : Runtime_binding.t) =
-  let default_model_id = default_model_id_of_binding binding in
-  let auto_models = auto_models_of_binding binding default_model_id in
   { canonical_name = binding.Runtime_binding.id
   ; runtime_kind = runtime_kind_of_binding binding
   ; auth_mode = auth_mode_of_binding binding
@@ -454,15 +347,6 @@ let generic_adapter_of_binding (binding : Runtime_binding.t) =
   ; spawn_key = spawn_key_of_binding binding
   ; cascade_prefix = binding.Runtime_binding.id
   ; endpoint_url = binding_endpoint_url binding
-  ; default_model_id
-  ; model_policy =
-      { default_model_env =
-          Some (binding_env_fragment binding ^ "_DEFAULT_MODEL")
-      ; default_model_fallback = default_model_id
-      ; auto_models = Option.value auto_models ~default:No_auto_models
-      ; expand_auto = Option.is_some auto_models
-      ; family = model_family_of_binding binding
-      }
   ; tool_policy = tool_policy_of_binding binding
   ; telemetry_policy = telemetry_policy_of_binding binding
   }
@@ -485,50 +369,6 @@ let resolve_adapter_by_cascade_prefix label =
   List.find_opt
     (fun (adapter : adapter) -> normalize_label adapter.cascade_prefix = normalized)
     direct_adapters
-;;
-
-let resolve_model_policy_default ?getenv (policy : model_policy) =
-  match policy.default_model_env with
-  | Some env_name ->
-    (match env_value_opt ?getenv env_name with
-     | Some _ as value -> value
-     | None -> policy.default_model_fallback)
-  | None -> policy.default_model_fallback
-;;
-
-let resolve_auto_models ?getenv (policy : model_policy) =
-  match policy.auto_models with
-  | No_auto_models -> None
-  | Zai_general_auto_models -> Some (Llm_provider.Zai_catalog.glm_auto_models ())
-  | Zai_coding_auto_models -> Some (Llm_provider.Zai_catalog.glm_coding_auto_models ())
-  | Env_csv_or_default { env_var; defaults; prefer_default_model_env } ->
-    (match env_value_opt ?getenv env_var with
-     | Some raw ->
-       (match csv_items raw with
-        | [] -> Some defaults
-        | items -> Some items)
-     | None when prefer_default_model_env ->
-       (match policy.default_model_env with
-        | Some default_env ->
-          (match env_value_opt ?getenv default_env with
-           | Some model_id -> Some [ model_id ]
-           | None -> Some defaults)
-        | None -> Some defaults)
-     | None -> Some defaults)
-;;
-
-let default_model_id_for_cascade_prefix ?getenv provider_name =
-  match resolve_adapter_by_cascade_prefix provider_name with
-  | Some adapter -> resolve_model_policy_default ?getenv adapter.model_policy
-  | None -> None
-;;
-
-let auto_models_for_cascade_prefix ?getenv provider_name =
-  match resolve_adapter_by_cascade_prefix provider_name with
-  | Some adapter when adapter.model_policy.expand_auto ->
-    resolve_auto_models ?getenv adapter.model_policy
-  | Some _ -> None
-  | None -> None
 ;;
 
 (** The "custom" provider prefix represents user-provided self-hosted
@@ -576,19 +416,6 @@ let is_http_probe_capable_kind (kind : Llm_provider.Provider_config.provider_kin
   | Gemini | Gemini_cli | Kimi | Kimi_cli -> false
 ;;
 
-(** Default fallback label for local runtime when no other preferred
-    model labels are configured.  Uses "provider:auto" for the first
-    [Local] adapter found. *)
-let default_local_fallback_label () =
-  match
-    List.find_opt
-      (fun (adapter : adapter) -> adapter.runtime_kind = Local)
-      direct_adapters
-  with
-  | Some adapter -> adapter.canonical_name ^ ":auto"
-  | None -> "auto"
-;;
-
 let resolve_direct_adapter label = find_direct_adapter_by_alias label
 
 let resolve_direct_canonical_name label =
@@ -627,13 +454,6 @@ let normalize_base_url value =
 ;;
 
 let default_cli_agent_name () = Env_config_runtime.Cli.default_agent
-
-let split_csv_nonempty raw =
-  raw
-  |> String.split_on_char ','
-  |> List.map String.trim
-  |> List.filter (fun s -> s <> "")
-;;
 
 let nonempty_env name =
   match Sys.getenv_opt name with
@@ -677,169 +497,12 @@ let auth_kind_for_canonical_name name =
   | None -> "unknown"
 ;;
 
-let bare_ollama_migration_message () =
-  "Bare `ollama` without a model requires OLLAMA_DEFAULT_MODEL env var. Use \
-   `ollama:<model>` for explicit selection."
-;;
-
-let is_bare_ollama_label label =
-  let normalized = normalize_label label in
-  String.equal normalized cn_ollama && Env_config_runtime.Ollama.default_model = ""
-;;
-
-let explicit_llama_model_id_result () =
-  match nonempty_env "LLAMA_DEFAULT_MODEL" with
-  | Some model_id -> Ok model_id
-  | None ->
-    (match nonempty_env "MASC_DEFAULT_PROVIDER", nonempty_env "MASC_DEFAULT_MODEL" with
-     | Some provider, Some model_id
-       when String.equal (String.lowercase_ascii provider) cn_llama -> Ok model_id
-     | _ ->
-       Error
-         "LLAMA_DEFAULT_MODEL is not set; configure LLAMA_DEFAULT_MODEL or \
-          MASC_DEFAULT_PROVIDER=llama with MASC_DEFAULT_MODEL")
-;;
-
-let explicit_llama_model_label_result () =
-  Result.map make_local_label (explicit_llama_model_id_result ())
-;;
-
 let gemini_direct_available () =
   env_present google_cloud_project_env || env_present gemini_api_key_env
 ;;
 
-let configured_default_model_label_result () =
-  match Env_config.Model_defaults.default_cascade_opt () with
-  | Some raw ->
-    let labels = split_csv_nonempty raw in
-    (match labels with
-     | first :: _ -> Ok first
-     | [] -> Error "MASC_DEFAULT_CASCADE is set but empty")
-  | None ->
-    (match nonempty_env "MASC_DEFAULT_PROVIDER", nonempty_env "MASC_DEFAULT_MODEL" with
-     | Some provider, Some model_id -> Ok (provider ^ ":" ^ model_id)
-     | Some _, None ->
-       Error "MASC_DEFAULT_MODEL is required when MASC_DEFAULT_PROVIDER is set"
-     | None, Some _ ->
-       Error "MASC_DEFAULT_PROVIDER is required when MASC_DEFAULT_MODEL is set"
-     | None, None -> Error "No explicit default model configured")
-;;
-
-let configured_verifier_model_label_result () =
-  match nonempty_env "MASC_DEFAULT_VERIFIER_MODEL" with
-  | Some label -> Ok label
-  | None -> configured_default_model_label_result ()
-;;
-
 let provider_model_label provider model =
   if model = "" then None else Some (Printf.sprintf "%s:%s" provider model)
-;;
-
-(** Derives the default model label for an adapter from its [runtime_kind]
-    and [cascade_prefix].  Local adapters require an explicit model ID
-    (resolved via env); Cli_agent/Direct_api adapters use
-    "[cascade_prefix]:auto" when
-    a default model is configured. *)
-let default_model_label_for_adapter (adapter : adapter) =
-  match adapter.runtime_kind with
-  | Local ->
-    Result.map
-      (fun model_id -> adapter.cascade_prefix ^ ":" ^ model_id)
-      (explicit_llama_model_id_result ())
-  | Cli_agent | Direct_api ->
-    (match adapter.default_model_id with
-     | Some _ -> Ok (adapter.cascade_prefix ^ ":auto")
-     | None ->
-       Error
-         (Printf.sprintf
-            "Provider '%s' requires explicit runtime_model"
-            adapter.canonical_name))
-;;
-
-(** Build the "provider:auto" label for each adapter that has auth
-    credentials present.  Used by preferred_*_model_labels to avoid
-    hardcoding vendor env var names. *)
-let auto_label_for_adapter (adapter : adapter) =
-  let is_available =
-    match adapter.auth_mode with
-    | No_auth -> true
-    | Cli_cached_login ->
-      (match adapter.spawn_key with
-       | Some cmd -> Llm_provider.Provider_registry.command_in_path cmd
-       | None -> false)
-    | Api_key env_name -> env_present env_name
-    | Vertex_adc { project_env; _ } -> env_present project_env
-  in
-  if not is_available
-  then None
-  else (
-    match default_model_label_for_adapter adapter with
-    | Ok label -> Some label
-    | Error msg ->
-      Log.Misc.warn "[ProviderAdapter] default_model_label_for_adapter failed: %s" msg;
-      None)
-;;
-
-(** Cloud adapters that participate in auto-detection (excludes llama
-    which requires explicit model config, and openrouter which requires
-    explicit runtime_model). *)
-let auto_detect_adapters =
-  List.filter
-    (fun (adapter : adapter) ->
-       adapter.runtime_kind = Direct_api && adapter.canonical_name <> cn_openrouter)
-    direct_adapters
-;;
-
-let preferred_execution_model_labels () =
-  let explicit =
-    [ (match configured_default_model_label_result () with
-       | Ok label -> Some label
-       | Error _ -> None)
-    ; (match explicit_llama_model_label_result () with
-       | Ok label -> Some label
-       | Error _ -> None)
-      (* No hardcoded provider preference here.  Model order is determined
-         by MASC cascade.toml via [Cascade_config], not by this adapter module.
-         The auto_detect list below only serves as a last-resort fallback when
-         no cascade source is available. *)
-    ]
-  in
-  Json_util.dedupe_keep_order
-    (List.filter_map Fun.id explicit
-     @ List.filter_map auto_label_for_adapter auto_detect_adapters)
-;;
-
-let preferred_verifier_model_labels () =
-  let explicit =
-    [ (match configured_verifier_model_label_result () with
-       | Ok label -> Some label
-       | Error _ -> None)
-    ; (match explicit_llama_model_label_result () with
-       | Ok label -> Some label
-       | Error _ -> None)
-    ]
-  in
-  Json_util.dedupe_keep_order
-    (List.filter_map Fun.id explicit
-     @ List.filter_map auto_label_for_adapter auto_detect_adapters)
-;;
-
-let default_model_labels_result () =
-  let labels = preferred_execution_model_labels () in
-  if labels = []
-  then
-    Error
-      "No default model configured; set LLAMA_DEFAULT_MODEL, MASC_DEFAULT_CASCADE, \
-       MASC_DEFAULT_PROVIDER/MASC_DEFAULT_MODEL, or a supported cloud provider \
-       credential"
-  else Ok labels
-;;
-
-let default_model_label_result () =
-  match default_model_labels_result () with
-  | Ok (first :: _) -> Ok first
-  | Ok [] -> Error "No default model configured"
-  | Error _ as e -> e
 ;;
 
 let provider_prefix_of_label_result label =
@@ -849,7 +512,7 @@ let provider_prefix_of_label_result label =
     Ok (String.sub normalized 0 idx |> String.trim |> String.lowercase_ascii)
   | _ ->
     Error
-      (Printf.sprintf "Default model label must be provider:model, got: %s" normalized)
+      (Printf.sprintf "Model label must be provider:model, got: %s" normalized)
 ;;
 
 let provider_label_of_provider_kind (kind : Llm_provider.Provider_config.provider_kind)
@@ -922,22 +585,6 @@ let is_structurally_unmetered_provider (provider : string) : bool =
   match adapter with
   | Some { telemetry_policy = { usage_reporting = Missing_by_design; _ }; _ } -> true
   | Some _ | None -> false
-;;
-
-let default_model_provider_prefix_result () =
-  match default_model_label_result () with
-  | Ok label -> provider_prefix_of_label_result label
-  | Error _ as e -> e
-;;
-
-let default_model_override_label_result model_id =
-  let model_id = String.trim model_id in
-  if model_id = ""
-  then Error "default:<model> requires a non-empty model id"
-  else (
-    match default_model_provider_prefix_result () with
-    | Ok provider -> Ok (provider ^ ":" ^ model_id)
-    | Error _ as e -> e)
 ;;
 
 let vertex_location () =

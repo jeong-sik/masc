@@ -12,37 +12,23 @@ type runtime_kind =
   | Cli_agent
   | Direct_api
 
-type model_family =
-  | Generic
-  | Glm_general
-  | Glm_coding
-  | Kimi_api_family
+type default_model_source =
+  | Env_var of string
+  | Binding_default
 
-type auto_models_source =
-  | No_auto_models
-  | Env_csv_or_default of
-      { env_var : string
-      ; defaults : string list
-      ; prefer_default_model_env : bool
-      }
-  | Zai_general_auto_models
-  | Zai_coding_auto_models
-
-type model_policy =
-  { default_model_env : string option
-  ; default_model_fallback : string option
-  ; auto_models : auto_models_source
-  ; expand_auto : bool
-  ; family : model_family
+type default_model_candidate =
+  { model_id : string
+  ; source : default_model_source
   }
 
 type provider_profile =
   { id : string
   ; aliases : string list
+  ; kind : Runtime_binding.provider_kind
+  ; base_url : string
   ; runtime_kind : runtime_kind
   ; cascade_prefix : string
-  ; default_model_id : string option
-  ; model_policy : model_policy
+  ; supported_models : string list
   ; spawn_key : string option
   }
 
@@ -59,13 +45,6 @@ let env_value_opt ?(getenv = Sys.getenv_opt) name =
     let trimmed = String.trim raw in
     if String.equal trimmed "" then None else Some trimmed
   | None -> None
-;;
-
-let csv_items raw =
-  raw
-  |> String.split_on_char ','
-  |> List.map String.trim
-  |> List.filter (fun item -> not (String.equal item ""))
 ;;
 
 let binding_endpoint_url (binding : Runtime_binding.t) =
@@ -127,49 +106,19 @@ let binding_env_fragment (binding : Runtime_binding.t) =
     | _ -> '_')
 ;;
 
-let model_family_of_binding (binding : Runtime_binding.t) =
-  match binding.Runtime_binding.kind, binding.Runtime_binding.id with
-  | Llm_provider.Provider_config.Glm, "glm-coding" -> Glm_coding
-  | Llm_provider.Provider_config.Glm, _ -> Glm_general
-  | Llm_provider.Provider_config.Kimi, _ -> Kimi_api_family
-  | _ -> Generic
-;;
-
-let first_catalog_model models = models |> List.find_map trim_nonempty
-
-let catalog_default_model_id_of_binding (binding : Runtime_binding.t) =
-  match model_family_of_binding binding with
-  | Glm_general -> first_catalog_model (Llm_provider.Zai_catalog.glm_auto_models ())
-  | Glm_coding -> first_catalog_model (Llm_provider.Zai_catalog.glm_coding_auto_models ())
-  | Generic | Kimi_api_family -> None
-;;
-
 let default_model_id_of_binding (binding : Runtime_binding.t) =
   match binding_default_model_id binding with
   | Some _ as value -> value
   | None ->
-    (match catalog_default_model_id_of_binding binding with
-     | Some _ as value -> value
-     | None ->
-       (match runtime_kind_of_binding binding with
-        | Local -> None
-        | Cli_agent | Direct_api -> Some "auto"))
+    (match runtime_kind_of_binding binding with
+     | Local -> None
+     | Cli_agent | Direct_api -> Some "auto")
 ;;
 
-let auto_models_of_binding binding default_model_id =
-  match runtime_kind_of_binding binding with
-  | Cli_agent ->
-    Some
-      (Env_csv_or_default
-         { env_var = "MASC_" ^ binding_env_fragment binding ^ "_AUTO_MODELS"
-         ; defaults = [ Option.value default_model_id ~default:"auto" ]
-         ; prefer_default_model_env = false
-         })
-  | Local | Direct_api ->
-    (match model_family_of_binding binding with
-     | Glm_general -> Some Zai_general_auto_models
-     | Glm_coding -> Some Zai_coding_auto_models
-     | Generic | Kimi_api_family -> None)
+let supported_models_of_binding (binding : Runtime_binding.t) =
+  match binding.Runtime_binding.capabilities.supported_models with
+  | Some models -> List.filter_map trim_nonempty models
+  | None -> []
 ;;
 
 let spawn_command_keys = [ "claude"; "codex"; "gemini"; "llama" ]
@@ -181,20 +130,13 @@ let spawn_key_of_binding (binding : Runtime_binding.t) =
 ;;
 
 let profile_of_binding (binding : Runtime_binding.t) =
-  let default_model_id = default_model_id_of_binding binding in
-  let auto_models = auto_models_of_binding binding default_model_id in
   { id = binding.Runtime_binding.id
   ; aliases = binding_labels binding
+  ; kind = binding.Runtime_binding.kind
+  ; base_url = binding.Runtime_binding.base_url
   ; runtime_kind = runtime_kind_of_binding binding
   ; cascade_prefix = binding.Runtime_binding.id
-  ; default_model_id
-  ; model_policy =
-      { default_model_env = Some (binding_env_fragment binding ^ "_DEFAULT_MODEL")
-      ; default_model_fallback = default_model_id
-      ; auto_models = Option.value auto_models ~default:No_auto_models
-      ; expand_auto = Option.is_some auto_models
-      ; family = model_family_of_binding binding
-      }
+  ; supported_models = supported_models_of_binding binding
   ; spawn_key = spawn_key_of_binding binding
   }
 ;;
@@ -222,52 +164,22 @@ let cascade_prefix_of_provider_label label =
   find_profile_by_alias label |> Option.map (fun profile -> profile.cascade_prefix)
 ;;
 
-let model_policy_for_cascade_prefix provider_name =
-  find_profile_by_cascade_prefix provider_name |> Option.map (fun p -> p.model_policy)
-;;
-
 let provider_profile_for_cascade_prefix = find_profile_by_cascade_prefix
 
-let resolve_model_policy_default ?getenv (policy : model_policy) =
-  match policy.default_model_env with
-  | Some env_name ->
-    (match env_value_opt ?getenv env_name with
-     | Some _ as value -> value
-     | None -> policy.default_model_fallback)
-  | None -> policy.default_model_fallback
+let default_model_candidate_of_binding ?getenv (binding : Runtime_binding.t) =
+  let env_var = binding_env_fragment binding ^ "_DEFAULT_MODEL" in
+  match env_value_opt ?getenv env_var with
+  | Some model_id -> Some { model_id; source = Env_var env_var }
+  | None ->
+    Option.map
+      (fun model_id -> { model_id; source = Binding_default })
+      (default_model_id_of_binding binding)
 ;;
 
-let resolve_auto_models ?getenv (policy : model_policy) =
-  match policy.auto_models with
-  | No_auto_models -> None
-  | Zai_general_auto_models -> Some (Llm_provider.Zai_catalog.glm_auto_models ())
-  | Zai_coding_auto_models -> Some (Llm_provider.Zai_catalog.glm_coding_auto_models ())
-  | Env_csv_or_default { env_var; defaults; prefer_default_model_env } ->
-    (match env_value_opt ?getenv env_var with
-     | Some raw ->
-       (match csv_items raw with
-        | [] -> Some defaults
-        | items -> Some items)
-     | None when prefer_default_model_env ->
-       (match policy.default_model_env with
-        | Some default_env ->
-          (match env_value_opt ?getenv default_env with
-           | Some model_id -> Some [ model_id ]
-           | None -> Some defaults)
-        | None -> Some defaults)
-     | None -> Some defaults)
-;;
-
-let default_model_id_for_cascade_prefix ?getenv provider_name =
-  match model_policy_for_cascade_prefix provider_name with
-  | Some policy -> resolve_model_policy_default ?getenv policy
+let default_model_candidate_for_cascade_prefix ?getenv provider_name =
+  match Runtime_binding.find provider_name with
+  | Some binding -> default_model_candidate_of_binding ?getenv binding
   | None -> None
-;;
-
-let auto_models_for_cascade_prefix ?getenv provider_name =
-  match model_policy_for_cascade_prefix provider_name with
-  | Some policy when policy.expand_auto -> resolve_auto_models ?getenv policy
-  | Some _ | None -> None
 ;;
 
 let split_csv_nonempty raw =
@@ -357,7 +269,7 @@ let default_model_label_for_binding (binding : Runtime_binding.t) =
       (fun model_id -> profile.cascade_prefix ^ ":" ^ model_id)
       (explicit_local_model_id_result ())
   | Cli_agent | Direct_api ->
-    (match profile.default_model_id with
+    (match default_model_candidate_of_binding binding with
      | Some _ -> Ok (profile.cascade_prefix ^ ":auto")
      | None ->
        Error

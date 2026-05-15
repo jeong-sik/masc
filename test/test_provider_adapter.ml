@@ -212,31 +212,6 @@ let test_default_cli_agent_name () =
   check string "default cli agent" "auto" (Adapter.default_cli_agent_name ())
 ;;
 
-let test_default_local_model_label () =
-  with_env "MASC_DEFAULT_PROVIDER" (Some "test-provider") (fun () ->
-    with_env "MASC_DEFAULT_MODEL" (Some "test-model") (fun () ->
-      match Adapter.default_model_label_result () with
-      | Ok label -> check string "default local label" "test-provider:test-model" label
-      | Error msg -> fail msg))
-;;
-
-let test_default_model_provider_prefix_result () =
-  with_env "MASC_DEFAULT_PROVIDER" (Some "test-provider") (fun () ->
-    with_env "MASC_DEFAULT_MODEL" (Some "test-model") (fun () ->
-      match Adapter.default_model_provider_prefix_result () with
-      | Ok prefix -> check string "default provider prefix" "test-provider" prefix
-      | Error msg -> fail msg))
-;;
-
-let test_default_model_override_label_result () =
-  with_env "MASC_DEFAULT_PROVIDER" (Some "gemini") (fun () ->
-    with_env "MASC_DEFAULT_MODEL" (Some "gemini-3.1-pro-preview") (fun () ->
-      match Adapter.default_model_override_label_result "gemini-3-flash-preview" with
-      | Ok label ->
-        check string "override keeps provider" "gemini:gemini-3-flash-preview" label
-      | Error msg -> fail msg))
-;;
-
 let test_requires_discovery_llama () =
   check bool "llama requires discovery" true (Adapter.requires_discovery "llama");
   check bool "llamacpp requires discovery" true (Adapter.requires_discovery "llamacpp");
@@ -290,35 +265,6 @@ let test_make_local_label () =
     (Adapter.make_local_label "some-model");
   (* Verify make_local_label uses the same prefix as the llama adapter *)
   check string "prefix matches cn_llama" Adapter.local_cascade_prefix Adapter.cn_llama
-;;
-
-let test_default_local_fallback_label () =
-  let label = Adapter.default_local_fallback_label () in
-  check bool "fallback label contains colon" true (String.contains label ':');
-  check
-    bool
-    "fallback label ends with :auto"
-    true
-    (let suffix = ":auto" in
-     let slen = String.length label in
-     let plen = String.length suffix in
-     slen >= plen && String.sub label (slen - plen) plen = suffix)
-;;
-
-let test_auto_models_use_declared_policy () =
-  with_env "MASC_KIMI_CLI_AUTO_MODELS" None (fun () ->
-    check
-      (option (list string))
-      "kimi cli declared default"
-      (Some [ "kimi-for-coding" ])
-      (Adapter.auto_models_for_cascade_prefix "kimi_cli");
-    with_env "MASC_GEMINI_CLI_AUTO_MODELS" (Some "gemini-3-flash-preview") (fun () ->
-      with_env "GEMINI_DEFAULT_MODEL" None (fun () ->
-        check
-          (option (list string))
-          "gemini cli uses generic OAS binding auto-model env"
-          (Some [ "gemini-3-flash-preview" ])
-          (Adapter.auto_models_for_cascade_prefix "gemini_cli"))))
 ;;
 
 let test_runtime_mcp_header_support_uses_declared_policy () =
@@ -868,19 +814,6 @@ let () =
         ; test_case "gemini missing auth" `Quick test_gemini_direct_auth_missing
         ; test_case "vertex base url" `Quick test_vertex_base_url
         ; test_case "default cli agent" `Quick test_default_cli_agent_name
-        ; test_case "default local model label" `Quick test_default_local_model_label
-        ; test_case
-            "default provider prefix"
-            `Quick
-            test_default_model_provider_prefix_result
-        ; test_case
-            "default override label"
-            `Quick
-            test_default_model_override_label_result
-        ; test_case
-            "declared auto model policy"
-            `Quick
-            test_auto_models_use_declared_policy
         ; test_case
             "declared runtime MCP header policy"
             `Quick
@@ -949,10 +882,6 @@ let () =
         ; test_case "is_local_provider custom" `Quick test_is_local_provider_custom
         ; test_case "is_local_provider cloud" `Quick test_is_local_provider_cloud
         ; test_case "make_local_label" `Quick test_make_local_label
-        ; test_case
-            "default_local_fallback_label"
-            `Quick
-            test_default_local_fallback_label
         ] )
     ; ( "apply_wire_overlay"
       , [ test_case

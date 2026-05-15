@@ -1635,3 +1635,12 @@
  (name test_pr_i_2d_output_validation_transformer)
  (modules test_pr_i_2d_output_validation_transformer)
  (libraries masc_test_deps))
+
+; RFC-0084 PR-I-2.e — server_bootstrap_loops typed post-hook
+; migration.  Last of 5 observer migrations.  Also pins the sum
+; across all 5 known register_post_hook sites at 0 to lock in
+; PR-I-3 readiness.
+(test
+ (name test_pr_i_2e_bootstrap_loops_typed)
+ (modules test_pr_i_2e_bootstrap_loops_typed)
+ (libraries alcotest))

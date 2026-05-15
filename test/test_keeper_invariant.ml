@@ -1,6 +1,6 @@
 open Alcotest
 
-module Inv = Masc_mcp.Keeper_invariant
+module Inv = Keeper_invariant
 
 let require_ok label = function
   | Ok () -> ()

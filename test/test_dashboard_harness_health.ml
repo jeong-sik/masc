@@ -147,7 +147,7 @@ let test_runtime_signals_are_persisted () =
        ~strategies:[ "PruneToolOutputs"; "SummarizeOld" ]
        ~context_window:200_000 ~is_local_model:false
        ~trigger:
-         (Masc_mcp.Compaction_trigger.Ratio_threshold
+         (Compaction_trigger.Ratio_threshold
             { ratio = 0.91; threshold = 0.85 }));
   record_handoff_metric config ~next_generation:1
     ~prev_trace_id:"trace-keeper-a"
@@ -179,7 +179,7 @@ let test_runtime_window_empty_reason () =
        ~message_count:88 ~token_count:32000 ~strategies:[ "PruneToolOutputs" ]
        ~context_window:200_000 ~is_local_model:false
        ~trigger:
-         (Masc_mcp.Compaction_trigger.Ratio_threshold
+         (Compaction_trigger.Ratio_threshold
             { ratio = 0.91; threshold = 0.85 }));
   record_handoff_metric config ~next_generation:1
     ~prev_trace_id:"trace-keeper-a"
@@ -204,7 +204,7 @@ let test_runtime_since_only_window_empty_reason () =
        ~message_count:88 ~token_count:32000 ~strategies:[ "PruneToolOutputs" ]
        ~context_window:200_000 ~is_local_model:false
        ~trigger:
-         (Masc_mcp.Compaction_trigger.Ratio_threshold
+         (Compaction_trigger.Ratio_threshold
             { ratio = 0.91; threshold = 0.85 }));
   record_handoff_metric config ~next_generation:1
     ~prev_trace_id:"trace-keeper-a"
@@ -229,7 +229,7 @@ let test_runtime_until_only_window_empty_reason () =
        ~message_count:88 ~token_count:32000 ~strategies:[ "PruneToolOutputs" ]
        ~context_window:200_000 ~is_local_model:false
        ~trigger:
-         (Masc_mcp.Compaction_trigger.Ratio_threshold
+         (Compaction_trigger.Ratio_threshold
             { ratio = 0.91; threshold = 0.85 }));
   record_handoff_metric config ~next_generation:1
     ~prev_trace_id:"trace-keeper-a"
@@ -256,7 +256,7 @@ let test_runtime_stale_status () =
        ~token_count:32000 ~strategies:[ "PruneToolOutputs" ]
        ~context_window:200_000 ~is_local_model:false
        ~trigger:
-         (Masc_mcp.Compaction_trigger.Ratio_threshold
+         (Compaction_trigger.Ratio_threshold
             { ratio = 0.91; threshold = 0.85 }));
   record_handoff_metric ~timestamp:stale_timestamp config ~next_generation:1
     ~prev_trace_id:"trace-keeper-a"
@@ -366,11 +366,19 @@ let test_outcomes_rollup_counts_gate_rejected_from_completed_turns () =
   Reg.set_turn_decision_stage
     ~base_path:config.base_path keeper_name Reg.Decision_active_tool_policy_selected;
   Reg.set_turn_cascade_state
+    ~base_path:config.base_path keeper_name (Reg.Packed Reg.Cascade_selecting);
+  Reg.set_turn_cascade_state
+    ~base_path:config.base_path keeper_name (Reg.Packed Reg.Cascade_trying);
+  Reg.set_turn_cascade_state
     ~base_path:config.base_path keeper_name (Reg.Packed Reg.Cascade_done);
   Reg.mark_turn_finished ~base_path:config.base_path keeper_name;
   Reg.mark_turn_started ~base_path:config.base_path keeper_name;
   Reg.set_turn_decision_stage
     ~base_path:config.base_path keeper_name Reg.Decision_active_tool_policy_selected;
+  Reg.set_turn_cascade_state
+    ~base_path:config.base_path keeper_name (Reg.Packed Reg.Cascade_selecting);
+  Reg.set_turn_cascade_state
+    ~base_path:config.base_path keeper_name (Reg.Packed Reg.Cascade_trying);
   Reg.set_turn_cascade_state
     ~base_path:config.base_path keeper_name (Reg.Packed Reg.Cascade_exhausted);
   Reg.mark_turn_finished ~base_path:config.base_path keeper_name;

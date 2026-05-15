@@ -63,6 +63,17 @@ type t =
   ; policy_dir : string
         (** Directory for runtime policy files.  Default [<tmp>] from
             [host ()]. *)
+  ; base_path : string option
+        (** Resolved [MASC_BASE_PATH] (or default fallback).  When [None],
+            the caller treats it as "no operator-provided base path".
+            RFC-0085 PR-6: surfaces the env-var processing that today
+            lives in [Env_config_core.base_path_raw_opt]. *)
+  ; config_dir : string option
+        (** Resolved [MASC_CONFIG_DIR].  [None] when unset. *)
+  ; data_dir : string option
+        (** Resolved [MASC_DATA_DIR].  [None] when unset. *)
+  ; personas_dir : string option
+        (** Resolved [MASC_PERSONAS_DIR].  [None] when unset. *)
   }
 [@@deriving show, eq]
 
@@ -75,8 +86,21 @@ val resolve : ?base_path:string -> unit -> (t, string) result
 (** [host ()] returns the canonical default [t].  Used by 60+ keeper /
     dispatch / shell call-sites.  Tmp-directory roots are resolved via
     [Filename.get_temp_dir_name ()] (honours [TMPDIR]).  Binary paths
-    fall back to the [coreutils_defaults] record. *)
+    fall back to the [coreutils_defaults] record.
+
+    The four [_dir]/[base_path]/etc env-var-derived fields are populated
+    from [Sys.getenv_opt] at call time; [host ()] reflects the *current*
+    process environment, not a snapshot from boot. *)
 val host : unit -> t
+
+(** [from_env ()] is an alias for [host ()] emphasising that the four
+    [base_path]/[config_dir]/[data_dir]/[personas_dir] fields are
+    populated by reading the corresponding [MASC_*] environment
+    variables.  RFC-0085 PR-6 introduces this surface so callers (today
+    in [Config_dir_resolver]) can route env-derived path decisions
+    through [Host_config] instead of importing [Env_config_core]
+    primitives. *)
+val from_env : unit -> t
 
 (** [is_test_mode token] returns [true] for [Test], [false] for
     [Production]. *)

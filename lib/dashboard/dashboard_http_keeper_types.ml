@@ -149,3 +149,66 @@ let source_health_fields ~now ~exists ~entry_count ~latest_ts ?coverage_gap () =
     ( "stale_reason",
       if stale_reason = "" then `Null else `String stale_reason );
   ]
+
+let nonempty_string_opt value =
+  let trimmed = String.trim value in
+  if trimmed = "" then None else Some trimmed
+
+let parse_json_line_opt line =
+  try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None
+
+let metric_ts json =
+  Safe_ops.json_float ~default:0.0 "ts_unix" json
+
+let sort_by_latest_ts jsons =
+  List.sort
+    (fun left right -> Float.compare (metric_ts right) (metric_ts left))
+    jsons
+
+let string_member_nonempty key json =
+  Option.bind (Safe_ops.json_string_opt key json) nonempty_string_opt
+
+let int_member_fallback key json =
+  let usage = Yojson.Safe.Util.member "usage" json in
+  match Safe_ops.json_int_opt key usage with
+  | Some value -> Some value
+  | None -> Safe_ops.json_int_opt key json
+
+let rec take_list n xs =
+  if n <= 0 then []
+  else
+    match xs with
+    | [] -> []
+    | x :: rest -> x :: take_list (n - 1) rest
+
+let percentile_sorted_float (sorted : float array) (p : float) : float =
+  let n = Array.length sorted in
+  if n = 0 then 0.0
+  else
+    let rank = p /. 100.0 *. Float.of_int (n - 1) in
+    let lo = int_of_float (floor rank) in
+    let hi = min (lo + 1) (n - 1) in
+    let frac = rank -. Float.of_int lo in
+    sorted.(lo) *. (1.0 -. frac) +. sorted.(hi) *. frac
+
+let keeper_cost_metric_row_is_event (json : Yojson.Safe.t) : bool =
+  let field_equals key expected =
+    Safe_ops.json_string_opt key json
+    |> Option.map (fun value ->
+         String.equal
+           (String.lowercase_ascii (String.trim value))
+           expected)
+    |> Option.value ~default:false
+  in
+  not
+    (field_equals "channel" "heartbeat"
+     || field_equals "work_kind" "status_tick"
+     || field_equals "snapshot_source" "keeper_context_status")
+
+let memory_kind_for_log (kind : string) : string =
+  match String.lowercase_ascii (String.trim kind) with
+  | "progress" -> "episode"
+  | "goal" | "next" | "decision" -> "plan"
+  | _ -> "fact"
+
+let keeper_decisions_dashboard_surface = "/api/v1/dashboard/keeper-decisions"

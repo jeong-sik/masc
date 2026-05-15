@@ -133,20 +133,8 @@ val credential_recovery_before_restart_for_test :
 
 (** {1 Alive-but-stuck detector (#12838)} *)
 
-val detect_alive_but_stuck :
-  now:float ->
-  stall_multiplier:int ->
-  stall_floor_sec:float ->
-  Keeper_registry.registry_entry ->
-  float option
-(** Pure detection: returns [Some elapsed_sec] when a non-Dead, non-paused
-    keeper has gone longer than
-    [max(stall_floor_sec, stall_multiplier * proactive.cooldown_sec)]
-    without a proactive turn while autonomous turns kept advancing.
-    Reference timestamp is the newer of [proactive_rt.last_ts] and
-    [entry.started_at] if proactive has fired, else [entry.started_at]
-    (covers the never-started case).  Returns [None] otherwise.  Exposed
-    for tests. *)
+(** detect_alive_but_stuck moved to Keeper_supervisor_types (intra-library
+    file split, 2026-05-16). Re-exported via include above. *)
 
 val alive_but_stuck_scan : 'a context -> unit
 (** Scan all keepers in [Keeper_registry].  For each keeper detected as

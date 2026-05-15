@@ -314,6 +314,26 @@ function telemetryTurnActor(entry: TelemetryEntry): string | null {
     ?? normalizeText(entry.agent)
 }
 
+function telemetryRunScope(entry: TelemetryEntry): string | null {
+  const payload = telemetryPayloadRecord(entry)
+  const session =
+    normalizeText(entry.session_id)
+    ?? normalizeText(recordField(payload, 'session_id'))
+    ?? normalizeText(recordField(entry.runtime_contract, 'session_id'))
+  if (session) return `S:${session}`
+  const operation =
+    normalizeText(entry.operation_id)
+    ?? normalizeText(recordField(payload, 'operation_id'))
+    ?? normalizeText(recordField(entry.runtime_contract, 'operation_id'))
+  if (operation) return `OP:${operation}`
+  const workerRun =
+    normalizeText(entry.worker_run_id)
+    ?? normalizeText(recordField(payload, 'worker_run_id'))
+    ?? normalizeText(recordField(entry.runtime_contract, 'worker_run_id'))
+  if (workerRun) return `WR:${workerRun}`
+  return null
+}
+
 function entryTurnGroupingDescriptor(entry: TelemetryEntry): {
   key: string
   category: TelemetryCondensedCategory
@@ -322,8 +342,10 @@ function entryTurnGroupingDescriptor(entry: TelemetryEntry): {
   const turn = telemetryTurn(entry)
   const actor = telemetryTurnActor(entry)
   if (turn == null || !actor) return null
+  const runScope = telemetryRunScope(entry)
+  const scopedKey = runScope ? `turn:${runScope}:${actor}:${turn}` : `turn:${actor}:${turn}`
   return {
-    key: `turn:${actor}:${turn}`,
+    key: scopedKey,
     category: 'turn',
     label: `${actor} · turn ${turn}`,
   }

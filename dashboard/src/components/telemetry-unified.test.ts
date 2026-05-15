@@ -713,6 +713,69 @@ describe('TelemetryUnified', () => {
     expect(cloudMatches[0]).toMatchObject({ kind: 'entry' })
   })
 
+  it('keeps turn groups separated by run scope (session_id / operation_id / worker_run_id)', async () => {
+    const { buildTelemetryDisplayItems } = await loadPanel(
+      vi.fn().mockResolvedValue(baseTelemetry),
+      vi.fn().mockResolvedValue(baseSummary),
+    )
+
+    // Two different sessions reusing the same agent_name + turn number.
+    // Without run-scope in the grouping key these collapse into one row;
+    // with run-scope they MUST stay in two distinct groups.
+    const items = buildTelemetryDisplayItems([
+      {
+        source: 'oas_event',
+        ts_unix: 1_775_710_000,
+        event_type: 'turn_ready',
+        agent_name: 'keeper-alpha-agent',
+        turn: 1,
+        session_id: 'sess-foo',
+      },
+      {
+        source: 'oas_event',
+        ts_unix: 1_775_709_999,
+        event_type: 'telemetry_event',
+        session_id: 'sess-foo',
+        payload: [
+          'Context_window_usage',
+          { agent_name: 'keeper-alpha-agent', turn: 1, estimated_tokens: 100 },
+        ],
+      },
+      {
+        source: 'oas_event',
+        ts_unix: 1_775_709_998,
+        event_type: 'turn_ready',
+        agent_name: 'keeper-alpha-agent',
+        turn: 1,
+        session_id: 'sess-bar',
+      },
+      {
+        source: 'oas_event',
+        ts_unix: 1_775_709_997,
+        event_type: 'telemetry_event',
+        session_id: 'sess-bar',
+        payload: [
+          'Context_window_usage',
+          { agent_name: 'keeper-alpha-agent', turn: 1, estimated_tokens: 200 },
+        ],
+      },
+    ])
+
+    const turnGroups = items.filter(
+      (item): item is Extract<typeof item, { kind: 'group' }> =>
+        item.kind === 'group' && item.category === 'turn',
+    )
+    expect(turnGroups).toHaveLength(2)
+    expect(turnGroups[0]).toMatchObject({
+      label: 'keeper-alpha-agent · turn 1',
+      count: 2,
+    })
+    expect(turnGroups[1]).toMatchObject({
+      label: 'keeper-alpha-agent · turn 1',
+      count: 2,
+    })
+  })
+
   it('surfaces cloud Ollama provider details in OAS telemetry previews and search', async () => {
     const { buildTelemetryDisplayItems, filterTelemetryDisplayItems } = await loadPanel(
       vi.fn().mockResolvedValue(baseTelemetry),

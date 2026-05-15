@@ -307,6 +307,12 @@
    ;; Chronicle wire format (Actor / Target / Content / Event records
    ;; + to_yojson / of_yojson serializers).
    masc_mcp.chronicle_event
+   ;; RFC-0056 Phase 1H — Tool_call_quality_benchmark + scoring closure
+   ;; extracted to lib/tool_call_quality_benchmark/. 8 modules, ~2065 LoC,
+   ;; deps: stdlib + Yojson + masc_core + time_compat. Bundles benchmark
+   ;; family (6) + reward_advice_artifact + post_verifier to break the
+   ;; Reward_advice_artifact ↔ Tool_call_quality_benchmark_types cycle.
+   masc_mcp.tool_call_quality_benchmark
    ;; RFC-0058 Phase 1 — Declarative cascade TOML config. Separate sub-library
    ;; to avoid type name collisions (transport, provider, binding, tier, strategy)
    ;; with identically-named types in the main library.

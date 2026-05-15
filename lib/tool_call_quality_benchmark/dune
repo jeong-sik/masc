@@ -1,0 +1,45 @@
+; RFC-0056 Phase 1H — extract the Tool_call_quality_benchmark quality
+; scoring domain (8 modules) from flat masc_mcp namespace. Stacked on
+; Phase 1G (chronicle_event).
+;
+; Initial intent was to extract only the 6 `tool_call_quality_benchmark_*`
+; modules, but a cross-cycle was detected: `benchmark_scoring` calls
+; `Reward_advice_artifact`, which in turn references
+; `Tool_call_quality_benchmark_types` (and `Post_verifier`, which calls
+; `Reward_advice_artifact` back). Bundling the full closure breaks the
+; cycle inside the sub-library.
+;
+; Bundled modules:
+;   - tool_call_quality_benchmark (entry, 33 LoC)
+;   - tool_call_quality_benchmark_types (156 LoC)
+;   - tool_call_quality_benchmark_summary (347 LoC)
+;   - tool_call_quality_benchmark_scoring (293 LoC)
+;   - tool_call_quality_benchmark_render (187 LoC)
+;   - tool_call_quality_benchmark_loader (240 LoC)
+;   - reward_advice_artifact (215 LoC; mutual dep with benchmark_types)
+;   - post_verifier (293 LoC; uses Reward_advice_artifact)
+;
+; ~2065 LoC + 6 .mli files (~660 LoC interfaces).
+; External deps: stdlib + Yojson + masc_core (Safe_ops) + time_compat.
+; Closed graph after bundle (verified via rg word-boundary scan).
+;
+; Fan-in outside the bundle: keeper_benchmark_canary, thompson_sampling,
+; heuristic_metrics, tool_task (all bare callers via re-export);
+; 1 wrapped-pattern test caller (test_reward_advice_artifact.ml).
+;
+; (include_subdirs no) opts out of parent's (include_subdirs unqualified).
+; (wrapped false) keeps bare identifiers (`Tool_call_quality_benchmark`,
+; `Reward_advice_artifact`, `Post_verifier`, ...).
+(include_subdirs no)
+
+(library
+ (name masc_mcp_tool_call_quality_benchmark)
+ (public_name masc_mcp.tool_call_quality_benchmark)
+ (wrapped false)
+ ;; Drop -w +4 (fragile-match) because we are *moving* pre-existing
+ ;; modules whose match patterns predate that flag. Tightening lint
+ ;; here is out of scope for this RFC-0056 G2 mechanical extraction.
+ (libraries
+  yojson
+  masc_core
+  time_compat))

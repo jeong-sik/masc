@@ -59,6 +59,8 @@
    (re_export masc_mcp.memory_jsonl)
    ;; RFC-0056 Phase 1G — Chronicle_event leaf module sub-library.
    (re_export masc_mcp.chronicle_event)
+   ;; RFC-0056 Phase 1H — Tool_call_quality_benchmark family sub-library.
+   (re_export masc_mcp.tool_call_quality_benchmark)
    ;; RFC-0058 Phase 1 — Declarative cascade TOML parser sub-library.
    (re_export masc_mcp.cascade_decl)
    (re_export masc_mcp.ag_ui)

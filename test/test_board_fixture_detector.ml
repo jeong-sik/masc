@@ -7,30 +7,57 @@
    time instead of letting the ledger silently reinforce it.
 
    Invariants under test:
-   1. [is_fixture_voter_target] flags [hot-voter-*],
-      [synthetic-voter-*], [:test-voter-*] patterns.
+   1. [classify_voter_target] returns [Fixture_voter Hot_voter] /
+      [Fixture_voter Synthetic_voter] / [Fixture_voter Test_voter]
+      for the respective prefixes (RFC-0089 §4-3 G2 typed variant).
    2. Real keeper names (keeper-*, agent-*, anyang-keepers) are
-      NOT flagged — zero false positives on known production
-      voter shapes.
+      classified as [Production_voter] — zero false positives on
+      known production voter shapes.
    3. [quarantine_enabled] reads MASC_BOARD_VOTE_QUARANTINE:
       "1" / "true" (case-insensitive) → true, anything else →
       false. Empty / unset → false (warn-only default). *)
 
 module BV = Masc_mcp.Board_votes
 
+let is_fixture = function
+  | BV.Fixture_voter _ -> true
+  | BV.Production_voter -> false
+
 let test_hot_voter_flagged () =
   Alcotest.(check bool) "hot-voter-067 flagged" true
-    (BV.is_fixture_voter_target "post:p-abc:hot-voter-067");
+    (is_fixture (BV.classify_voter_target "post:p-abc:hot-voter-067"));
   Alcotest.(check bool) "hot-voter-001 flagged" true
-    (BV.is_fixture_voter_target "post:xyz:hot-voter-001")
+    (is_fixture (BV.classify_voter_target "post:xyz:hot-voter-001"));
+  (* Typed variant carries the prefix family — pin the discriminator. *)
+  let kind_eq a b = match a, b with
+    | BV.Fixture_voter BV.Hot_voter, BV.Fixture_voter BV.Hot_voter -> true
+    | _ -> false
+  in
+  Alcotest.(check bool) "hot-voter discriminated as Hot_voter" true
+    (kind_eq (BV.classify_voter_target "post:p-abc:hot-voter-067")
+       (BV.Fixture_voter BV.Hot_voter))
 
 let test_synthetic_voter_flagged () =
   Alcotest.(check bool) "synthetic-voter- flagged" true
-    (BV.is_fixture_voter_target "post:p-xyz:synthetic-voter-12")
+    (is_fixture (BV.classify_voter_target "post:p-xyz:synthetic-voter-12"));
+  let kind_eq a b = match a, b with
+    | BV.Fixture_voter BV.Synthetic_voter, BV.Fixture_voter BV.Synthetic_voter -> true
+    | _ -> false
+  in
+  Alcotest.(check bool) "synthetic-voter discriminated" true
+    (kind_eq (BV.classify_voter_target "post:p-xyz:synthetic-voter-12")
+       (BV.Fixture_voter BV.Synthetic_voter))
 
 let test_test_voter_flagged () =
   Alcotest.(check bool) ":test-voter- flagged" true
-    (BV.is_fixture_voter_target "post:p-xyz:test-voter-01")
+    (is_fixture (BV.classify_voter_target "post:p-xyz:test-voter-01"));
+  let kind_eq a b = match a, b with
+    | BV.Fixture_voter BV.Test_voter, BV.Fixture_voter BV.Test_voter -> true
+    | _ -> false
+  in
+  Alcotest.(check bool) "test-voter discriminated" true
+    (kind_eq (BV.classify_voter_target "post:p-xyz:test-voter-01")
+       (BV.Fixture_voter BV.Test_voter))
 
 let test_real_keeper_names_not_flagged () =
   let cases = [
@@ -48,7 +75,7 @@ let test_real_keeper_names_not_flagged () =
   ] in
   List.iter (fun s ->
     Alcotest.(check (pair string bool)) s (s, false)
-      (s, BV.is_fixture_voter_target s))
+      (s, is_fixture (BV.classify_voter_target s)))
     cases
 
 let test_quarantine_default_off () =
@@ -68,9 +95,9 @@ let test_quarantine_on_values () =
 
 let test_empty_target_not_flagged () =
   Alcotest.(check bool) "empty string safe" false
-    (BV.is_fixture_voter_target "");
+    (is_fixture (BV.classify_voter_target ""));
   Alcotest.(check bool) "partial keyword safe" false
-    (BV.is_fixture_voter_target "hot")
+    (is_fixture (BV.classify_voter_target "hot"))
 
 let () =
   Alcotest.run "board_fixture_detector"

@@ -11,10 +11,16 @@
     [include Board_types], so consumers using
     [include Board_core_classify] (notably {!Board_core}) inherit
     every {!Board_types} surface entry.  Internal helpers
-    ([contains_substring], [legacy_author_looks_automation],
-    [legacy_system_board_author], 5 yojson [meta_*] / [judgment_*]
+    ([contains_substring], 5 yojson [meta_*] / [judgment_*]
     helpers) stay private.  {!take} is exposed because {!Board_core}
-    uses it via include. *)
+    uses it via include.
+
+    {b RFC-0089 §4-3 G2:} legacy [String.starts_with] / [List.mem]
+    author classifiers ([legacy_author_looks_automation] /
+    [legacy_system_board_author]) are removed.  Author classification
+    now flows through the typed {!author_kind} variant exposed below;
+    boundary parse via {!classify_author} happens once and callers
+    pattern-match on the variant. *)
 
 include module type of struct
   include Board_types
@@ -70,6 +76,39 @@ val post_kind_of_string : string -> post_kind option
 (** [post_kind_of_string s] accepts ["direct"] {b and} ["human"]
     (both -> [Human_post]) for backward compat; returns [None] for
     unrecognised inputs. *)
+
+(** {1 Author classification (RFC-0089 §4-3 G2)} *)
+
+type automation_label =
+  | Auto_prefixed       (** Author starts with ["auto-"]. *)
+  | Qa_prefixed         (** Author starts with ["qa-"]. *)
+  | Researcher_named    (** Author contains ["researcher"]. *)
+  | Harness_named       (** Author contains ["harness"]. *)
+  | Smoke_named         (** Author contains ["smoke"]. *)
+  | Probe_named         (** Author contains ["probe"]. *)
+
+type system_actor =
+  | Ecosystem
+  | Keeper
+  | Keeper_alert_bot
+  | Keeper_system
+  | Operator
+  | Team_session
+
+type author_kind =
+  | Human_author
+  | Automation_author of automation_label
+  | System_author of system_actor
+
+val classify_author : string -> author_kind
+(** [classify_author author] derives the typed {!author_kind} from a
+    lowercased author string.  Resolution order matches the legacy
+    bool-OR chain (system list -> "auto-" / "qa-" prefix -> researcher
+    / harness / smoke / probe substring -> [Human_author] fallback).
+
+    Caller MUST pre-lowercase the author (callers historically called
+    [String.lowercase_ascii] before the legacy helpers; that contract
+    is preserved). *)
 
 (** {1 Legacy migration} *)
 

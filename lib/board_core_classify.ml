@@ -76,18 +76,81 @@ let take n lst =
   in
   go n [] lst
 
-let legacy_author_looks_automation author =
-  String.starts_with ~prefix:"auto-" author
-  || String.starts_with ~prefix:"qa-" author
-  || contains_substring author "researcher"
-  || contains_substring author "harness"
-  || contains_substring author "smoke"
-  || contains_substring author "probe"
+(** RFC-0089 §4-3 G2 — typed [author_kind] variant replaces the
+    legacy [String.starts_with ~prefix:"auto-" / "qa-"] +
+    substring(researcher/harness/smoke/probe) +
+    [List.mem ["ecosystem"; "keeper"; ...]] string classifiers.
 
-let legacy_system_board_author author =
-  List.mem author
-    [ "ecosystem"; "keeper"; "keeper-alert-bot"; "keeper-system"; "operator";
-      "team-session" ]
+    Author strings still cross the *write boundary* as raw [string]
+    (the persisted [post.author] field), so classification happens
+    once at the read boundary via [classify_author].  Internal callers
+    pattern-match on [author_kind] — adding a new automation label or
+    system actor fails compilation at every match site. *)
+
+type automation_label =
+  | Auto_prefixed       (** "auto-" prefix *)
+  | Qa_prefixed         (** "qa-" prefix *)
+  | Researcher_named    (** contains "researcher" *)
+  | Harness_named       (** contains "harness" *)
+  | Smoke_named         (** contains "smoke" *)
+  | Probe_named         (** contains "probe" *)
+
+type system_actor =
+  | Ecosystem
+  | Keeper
+  | Keeper_alert_bot
+  | Keeper_system
+  | Operator
+  | Team_session
+
+type author_kind =
+  | Human_author
+  | Automation_author of automation_label
+  | System_author of system_actor
+
+let system_actor_of_string = function
+  | "ecosystem" -> Some Ecosystem
+  | "keeper" -> Some Keeper
+  | "keeper-alert-bot" -> Some Keeper_alert_bot
+  | "keeper-system" -> Some Keeper_system
+  | "operator" -> Some Operator
+  | "team-session" -> Some Team_session
+  | _ -> None
+
+let automation_label_of_string author =
+  (* Priority order matches the pre-typed boolean OR chain: prefix
+     matches first, then substring scan in declaration order.  First
+     match wins so callers reproduce the legacy semantics exactly. *)
+  if String.starts_with ~prefix:"auto-" author then Some Auto_prefixed
+  else if String.starts_with ~prefix:"qa-" author then Some Qa_prefixed
+  else if contains_substring author "researcher" then Some Researcher_named
+  else if contains_substring author "harness" then Some Harness_named
+  else if contains_substring author "smoke" then Some Smoke_named
+  else if contains_substring author "probe" then Some Probe_named
+  else None
+
+(** [classify_author author] — single boundary parser.  Caller MUST
+    pass a lowercased author string (callers were already doing
+    [String.lowercase_ascii author] before the legacy bool helpers). *)
+let classify_author (author : string) : author_kind =
+  match system_actor_of_string author with
+  | Some actor -> System_author actor
+  | None ->
+      (match automation_label_of_string author with
+       | Some label -> Automation_author label
+       | None -> Human_author)
+
+(** Render the legacy author classification as a stable string token
+    for the Prometheus [author] label.  Kept narrow — *not* a parser
+    inverse (no [_of_string]); the typed variant flows in only one
+    direction (boundary parse -> internal use -> string for log). *)
+let automation_label_token = function
+  | Auto_prefixed -> "auto-prefix"
+  | Qa_prefixed -> "qa-prefix"
+  | Researcher_named -> "researcher"
+  | Harness_named -> "harness"
+  | Smoke_named -> "smoke"
+  | Probe_named -> "probe"
 
 let meta_source = function
   | Some (`Assoc fields) -> (
@@ -144,31 +207,42 @@ let legacy_migrate_post_kind ~meta_json ~author ~visibility ~expires_at ~hearth 
     | Some value -> String.lowercase_ascii (String.trim value)
     | None -> ""
   in
-  if legacy_system_board_author author then
-    System_post
-  else if (match meta_source meta_json with Some "keeper_board_post" -> true | _ -> false) then
-    Automation_post
-  else if (=) visibility Internal && Stdlib.Float.compare expires_at 0.0 > 0 && not (String.equal hearth "")
-          && (String.starts_with ~prefix:"mdal" hearth
-              || contains_substring hearth "harness")
-  then
-    Automation_post
-  else if legacy_author_looks_automation author then begin
-    (* #9919 audit follow-up: the prior [Heuristic_metrics.record]
-       at this site was degenerate — [raw=1.0, threshold=0.5,
-       triggered=true] encoded no decision information, only a
-       count of how often the author-heuristic fallback promoted a
-       post to [Automation_post].  Replace with a proper Prometheus
-       counter labelled by [author] so operators can see which
-       legacy authors still drive the migration path, and so
-       [Heuristic_metrics_diagnostics] stops flagging this site as
-       instrumentation theatre. *)
-    Prometheus.inc_counter legacy_migrate_post_kind_metric
-      ~labels:[ ("author", author) ] ();
-    Automation_post
-  end
-  else
-    Human_post
+  let meta_is_keeper_board_post =
+    match meta_source meta_json with
+    | Some "keeper_board_post" -> true
+    | Some _ | None -> false
+  in
+  let hearth_promotes_to_automation =
+    (* Hearth domain (RFC-0089 G3/G4 scope-out): hearth prefix +
+       substring classification stays as raw [String.starts_with] /
+       [contains_substring] until that domain's PR.  Localised here
+       so the author-kind site is purely typed. *)
+    (=) visibility Internal
+    && Stdlib.Float.compare expires_at 0.0 > 0
+    && not (String.equal hearth "")
+    && (String.starts_with ~prefix:"mdal" hearth
+        || contains_substring hearth "harness")
+  in
+  match classify_author author with
+  | System_author _ -> System_post
+  | Automation_author _ when meta_is_keeper_board_post -> Automation_post
+  | Human_author when meta_is_keeper_board_post -> Automation_post
+  | Automation_author _ when hearth_promotes_to_automation -> Automation_post
+  | Human_author when hearth_promotes_to_automation -> Automation_post
+  | Automation_author label ->
+      (* #9919 audit follow-up: a proper Prometheus counter labelled by
+         [author] so operators can see which legacy authors still drive
+         the migration path.  The typed [automation_label] flows through
+         [automation_label_token] to keep label cardinality bounded (6
+         values) alongside the per-author label.  Both labels emitted so
+         existing dashboards (keyed on raw [author]) keep working while
+         operators gain a bounded breakdown. *)
+      Prometheus.inc_counter legacy_migrate_post_kind_metric
+        ~labels:[ ("author", author);
+                  ("automation_label", automation_label_token label) ]
+        ();
+      Automation_post
+  | Human_author -> Human_post
 
 let classify_post_kind (p : post) = p.post_kind
 
@@ -194,10 +268,12 @@ let post_classification_reason (p : post) =
           "Dashboard board post classified as automation for a joined agent author."
       | Automation_post, Some source ->
           Printf.sprintf "Automation provenance source: %s." source
-      | Automation_post, None when legacy_author_looks_automation author_lc ->
-          "Legacy automation classification from author naming heuristic."
       | Automation_post, None ->
-          "Automation post preserved by board post_kind contract."
+          (match classify_author author_lc with
+           | Automation_author _ ->
+               "Legacy automation classification from author naming heuristic."
+           | Human_author | System_author _ ->
+               "Automation post preserved by board post_kind contract.")
       | System_post, _ ->
           "System post reserved for platform or operator authored messages."
 

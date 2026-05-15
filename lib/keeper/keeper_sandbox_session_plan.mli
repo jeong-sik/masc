@@ -13,7 +13,7 @@
 
     Determinism contract: same request inputs ⇒ identical {!t}. No
     wall-clock, no PID read, no Random, no daemon I/O — those are the
-    *edge* ({!Sandbox_session_executor} / {!Docker_client.S.run_detached},
+    *edge* ({!Keeper_sandbox_session_executor} / {!Keeper_docker_client.S.run_detached},
     which spawns the container, writes {!identity_files}, resolves the
     seccomp choice, and appends the spawn-time [owner_pid] /
     [started_at] labels). [of_request] does read
@@ -66,7 +66,7 @@ type plan_error =
 (** {1 Plan} *)
 
 (** Abstract session-execution plan. Opaque outside
-    {!Sandbox_session_executor}; accessors below expose what the edge
+    {!Keeper_sandbox_session_executor}; accessors below expose what the edge
     needs to assemble the [docker run -d] argv. *)
 type t
 

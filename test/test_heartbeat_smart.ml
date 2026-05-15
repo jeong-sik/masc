@@ -1,13 +1,13 @@
 module Types = Masc_domain
 
-(** Unit tests for [Heartbeat_smart].
+(** Unit tests for [Keeper_heartbeat_smart].
 
     Pure functions: [make_config] clamping, [effective_interval] idle
     multiplier, [should_emit] decision matrix across (busy_skip,
     agent_status, idle vs interval, max_silence safety net). *)
 
 open Masc_mcp
-module HS = Heartbeat_smart
+module HS = Keeper_heartbeat_smart
 
 let check_float label expected actual =
   Alcotest.(check (float 0.001)) label expected actual
@@ -152,7 +152,7 @@ let test_default_config_intervals_in_bounds () =
 (* ── runner ──────────────────────────────────────────────────────────── *)
 
 let () =
-  Alcotest.run "Heartbeat_smart"
+  Alcotest.run "Keeper_heartbeat_smart"
     [
       ( "make_config_clamps",
         [

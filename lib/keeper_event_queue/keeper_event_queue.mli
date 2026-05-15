@@ -17,7 +17,7 @@
     the queue and forces [Emit] when it is non-empty (pinning
     [QueueNeverStarvedBySkip] — the queue is read before any [Skip]
     takes effect, though that read currently lives in the gate rather
-    than inside [Heartbeat_smart.should_emit] itself). *)
+    than inside [Keeper_heartbeat_smart.should_emit] itself). *)
 
 type urgency =
   | Immediate  (** operator commands and other latency-critical signals *)

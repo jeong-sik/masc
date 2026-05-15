@@ -512,9 +512,9 @@ let test_tear_down_idempotent () =
   HCP.tear_down b ~container_id:None;
   ()
 
-(* --- 5. F-1 security gate tests (In_container_login_provider) --- *)
+(* --- 5. F-1 security gate tests (Keeper_in_container_login_provider) --- *)
 
-module ICLP = Masc_mcp.In_container_login_provider
+module ICLP = Masc_mcp.Keeper_in_container_login_provider
 
 let test_f1_gate_matching_tokens_rejected () =
   match

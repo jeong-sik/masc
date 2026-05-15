@@ -2,7 +2,7 @@
 
 type t =
   { max_attempts : int
-  ; retryable_errors : Docker_client.sandbox_error list
+  ; retryable_errors : Keeper_docker_client.sandbox_error list
   }
 
 let make ~max_attempts ~retryable_errors =
@@ -18,19 +18,19 @@ let make ~max_attempts ~retryable_errors =
 let default_for_sandbox =
   { max_attempts = 3
   ; retryable_errors =
-      [ Docker_client.Daemon_unreachable; Docker_client.Image_pull_failed ]
+      [ Keeper_docker_client.Daemon_unreachable; Keeper_docker_client.Image_pull_failed ]
   }
 ;;
 
 let max_attempts t = t.max_attempts
 
 (* Exhaustive match against the closed sum — every variant explicitly
-   classified. Adding a new variant to [Docker_client.sandbox_error]
+   classified. Adding a new variant to [Keeper_docker_client.sandbox_error]
    forces this match to compile-error until the new arm is classified
    as retryable or not. *)
 let sandbox_error_equal
-      (a : Docker_client.sandbox_error)
-      (b : Docker_client.sandbox_error)
+      (a : Keeper_docker_client.sandbox_error)
+      (b : Keeper_docker_client.sandbox_error)
   =
   match a, b with
   | Daemon_unreachable, Daemon_unreachable -> true

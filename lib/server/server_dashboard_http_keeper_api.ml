@@ -2154,7 +2154,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
             (if paused then "pause" else "resume");
           Prometheus.inc_counter
             Keeper_metrics.metric_keeper_paused_state_persist_errors
-            ~labels:[("phase", Paused_state_persist_phase.(to_label Boot_resume_persist));
+            ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Boot_resume_persist));
                      ("reason", "meta_missing")]
             ()
       | Error err ->
@@ -2165,7 +2165,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
             err;
           Prometheus.inc_counter
             Keeper_metrics.metric_keeper_paused_state_persist_errors
-            ~labels:[("phase", Paused_state_persist_phase.(to_label Boot_resume_persist));
+            ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Boot_resume_persist));
                      ("reason", "read_meta_error")]
             ()
     in
@@ -2192,7 +2192,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
             name;
           Prometheus.inc_counter
             Keeper_metrics.metric_keeper_paused_state_persist_errors
-            ~labels:[("phase", Paused_state_persist_phase.(to_label Boot_resume_check));
+            ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Boot_resume_check));
                      ("reason", "meta_missing")]
             ()
       | Error err ->
@@ -2202,7 +2202,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
             err;
           Prometheus.inc_counter
             Keeper_metrics.metric_keeper_paused_state_persist_errors
-            ~labels:[("phase", Paused_state_persist_phase.(to_label Boot_resume_check));
+            ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Boot_resume_check));
                      ("reason", "read_meta_error")]
             ()
     in
@@ -2413,7 +2413,7 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
                err;
              Prometheus.inc_counter
                Keeper_metrics.metric_keeper_paused_state_persist_errors
-               ~labels:[("phase", Paused_state_persist_phase.(to_label Directive));
+               ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Directive));
                         ("reason", "read_meta_error")]
                ();
              Http.Response.json ~status:`Internal_server_error ~request:req
@@ -2430,7 +2430,7 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
                name;
              Prometheus.inc_counter
                Keeper_metrics.metric_keeper_paused_state_persist_errors
-               ~labels:[("phase", Paused_state_persist_phase.(to_label Directive));
+               ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Directive));
                         ("reason", "meta_missing")]
                ();
              Http.Response.json ~status:`Not_found ~request:req

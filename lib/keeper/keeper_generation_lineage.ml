@@ -246,7 +246,7 @@ let record_handoff_artifacts
        | exn ->
            Prometheus.inc_counter
              Keeper_metrics.metric_keeper_generation_lineage_failures
-             ~labels:[("keeper", child.name); ("site", Generation_lineage_failure_site.(to_label Index_append))]
+             ~labels:[("keeper", child.name); ("site", Keeper_generation_lineage_failure_site.(to_label Index_append))]
              ();
            Log.Keeper.warn
              "keeper:%s failed to append generation index %s: %s"
@@ -254,7 +254,7 @@ let record_handoff_artifacts
   | Error err ->
       Prometheus.inc_counter
         Keeper_metrics.metric_keeper_generation_lineage_failures
-        ~labels:[("keeper", child.name); ("site", Generation_lineage_failure_site.(to_label Manifest_save))]
+        ~labels:[("keeper", child.name); ("site", Keeper_generation_lineage_failure_site.(to_label Manifest_save))]
         ();
       Log.Keeper.warn
         "keeper:%s failed to save generation manifest %s: %s"

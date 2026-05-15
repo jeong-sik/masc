@@ -6,18 +6,18 @@
  plan_action_outcome
  prometheus_text
  error_event_type
- alert_persist_kind
- metrics_sse_failure_kind
- paused_state_persist_phase
- bookkeeping_failure_kind
- checkpoint_failure_operation
- profile_load_failure_site
- turn_cleanup_failure_site
- cascade_sync_failure_site
- event_bus_drain_site
- turn_metrics_snapshot_failure_site
- metric_emit_dropped_site
- post_turn_wirein_failure_site
+ keeper_alert_persist_kind
+ keeper_metrics_sse_failure_kind
+ keeper_paused_state_persist_phase
+ keeper_bookkeeping_failure_kind
+ keeper_checkpoint_failure_operation
+ keeper_profile_load_failure_site
+ keeper_turn_cleanup_failure_site
+ keeper_cascade_sync_failure_site
+ keeper_event_bus_drain_site
+ keeper_turn_metrics_snapshot_failure_site
+ keeper_metric_emit_dropped_site
+ keeper_post_turn_wirein_failure_site
  atomic_orphan_size_class
  silent_dashboard_actor_outcome
  prometheus_format
@@ -97,7 +97,7 @@
    keeper_gh_env
    keeper_credential_provider
    host_config_provider
-   in_container_login_provider
+   keeper_in_container_login_provider
    keeper_gh_shared
    keeper_tool_github_pr
    keeper_tool_pr_review

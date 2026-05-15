@@ -217,6 +217,7 @@
  (libraries
    mcp_protocol
    mcp_protocol.eio
+   masc_mcp.tool_types
    yojson
    otoml
    base64

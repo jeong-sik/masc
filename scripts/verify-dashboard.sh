@@ -191,9 +191,9 @@ check_json "oas telemetry summary exposes provenance" "$BASE/api/v1/dashboard/oa
 check_http "cascade health 200" "$BASE/api/v1/cascade/health" "200"
 check_json "cascade health exposes providers" "$BASE/api/v1/cascade/health" "'providers' in d" '^True$'
 check_http "cascade strategy trace 200" "$BASE/api/v1/cascade/strategy_trace?limit=1" "200"
-check_json "cascade strategy trace exposes events" "$BASE/api/v1/cascade/strategy_trace?limit=1" "'events' in d" '^True$'
+check_json "cascade strategy trace exposes provenance" "$BASE/api/v1/cascade/strategy_trace?limit=1" "'events' in d and d.get('dashboard_surface') == '/api/v1/cascade/strategy_trace' and d.get('source') == 'cascade_strategy_trace_ring' and d.get('retention', {}).get('scope') == 'cascade_strategy_trace' and d.get('query', {}).get('limit') == 1" '^True$'
 check_http "cascade audit runs 200" "$BASE/api/v1/cascade/audit_runs?limit=1" "200"
-check_json "cascade audit runs exposes runs" "$BASE/api/v1/cascade/audit_runs?limit=1" "'audit_runs' in d and 'total_runs' in d" '^True$'
+check_json "cascade audit runs exposes provenance" "$BASE/api/v1/cascade/audit_runs?limit=1" "'audit_runs' in d and 'total_runs' in d and d.get('dashboard_surface') == '/api/v1/cascade/audit_runs' and d.get('source') == 'cascade_audit_jsonl' and d.get('retention', {}).get('scope') == 'cascade_audit_runs' and d.get('query', {}).get('limit') == 1" '^True$'
 check_http "keeper cascades 200" "$BASE/api/v1/keeper/cascades" "200"
 check_json "keeper cascades exposes profiles" "$BASE/api/v1/keeper/cascades" "'profiles' in d and 'invalid_profiles' in d" '^True$'
 check_http "runtime providers 200" "$BASE/api/v1/providers" "200"
@@ -203,9 +203,9 @@ check_json "cascade config exposes profiles" "$BASE/api/v1/cascade/config" "'val
 check_http "cascade raw config 200" "$BASE/api/v1/cascade/config/raw" "200"
 check_json "cascade raw config exposes source" "$BASE/api/v1/cascade/config/raw" "'source_text' in d and 'source_editable' in d" '^True$'
 check_http "cascade client capacity 200" "$BASE/api/v1/cascade/client_capacity" "200"
-check_json "cascade client capacity exposes entries" "$BASE/api/v1/cascade/client_capacity" "'entries' in d" '^True$'
+check_json "cascade client capacity exposes provenance" "$BASE/api/v1/cascade/client_capacity" "'entries' in d and d.get('dashboard_surface') == '/api/v1/cascade/client_capacity' and d.get('source') == 'cascade_client_capacity_registry' and d.get('retention', {}).get('scope') == 'cascade_client_capacity'" '^True$'
 check_http "cascade capacity history 200" "$BASE/api/v1/cascade/client_capacity/history?limit=1" "200"
-check_json "cascade capacity history exposes events" "$BASE/api/v1/cascade/client_capacity/history?limit=1" "'events' in d" '^True$'
+check_json "cascade capacity history exposes provenance" "$BASE/api/v1/cascade/client_capacity/history?limit=1" "'events' in d and d.get('dashboard_surface') == '/api/v1/cascade/client_capacity/history' and d.get('source') == 'cascade_client_capacity_history_ring' and d.get('retention', {}).get('scope') == 'cascade_client_capacity_history' and d.get('query', {}).get('limit') == 1" '^True$'
 check_http "cascade slo 200" "$BASE/api/v1/cascade/slo" "200"
 check_json "cascade slo exposes status" "$BASE/api/v1/cascade/slo" "'status' in d and 'current' in d" '^True$'
 check_http "model metrics 200" "$BASE/api/v1/models/metrics?window=30&bucket_min=5" "200"

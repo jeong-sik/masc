@@ -304,6 +304,10 @@ val declared_provider_schemes_of_config : ?config_path:string -> unit -> string 
     {[
       {
         "updated_at": "2026-04-16T22:30:00Z",
+        "generated_at_iso": "2026-04-16T22:30:00Z",
+        "dashboard_surface": "/api/v1/cascade/client_capacity",
+        "source": "cascade_client_capacity_registry",
+        "retention": { ... },
         "entries": [
           { "key": "cli:claude_code",
             "kind": "cli",
@@ -341,6 +345,11 @@ val client_capacity_json : unit -> Yojson.Safe.t
     {[
       {
         "updated_at": "2026-04-16T22:31:00Z",
+        "generated_at_iso": "2026-04-16T22:31:00Z",
+        "dashboard_surface": "/api/v1/cascade/client_capacity/history",
+        "source": "cascade_client_capacity_history_ring",
+        "retention": { ... },
+        "query": { "limit": 100, "kind": "cli", "since_ts": null },
         "total_events": 3,
         "events": [
           { "ts": 1713280000.5,
@@ -381,6 +390,11 @@ val client_capacity_history_json
     {[
       {
         "updated_at": "ISO-8601",
+        "generated_at_iso": "ISO-8601",
+        "dashboard_surface": "/api/v1/cascade/strategy_trace",
+        "source": "cascade_strategy_trace_ring",
+        "retention": { ... },
+        "query": { "limit": 100, "cascade": null },
         "total_events": <int>,
         "events": [
           { "ts": <unix seconds>,
@@ -411,6 +425,11 @@ val strategy_trace_json : ?limit:int -> ?cascade:string -> unit -> Yojson.Safe.t
     {[
       {
         "updated_at": "ISO-8601",
+        "generated_at_iso": "ISO-8601",
+        "dashboard_surface": "/api/v1/cascade/audit_runs",
+        "source": "cascade_audit_jsonl",
+        "retention": { ... },
+        "query": { "limit": 100, "cascade": null },
         "total_runs": <int>,
         "audit_runs": [
           { "id": "cascade-audit-...",
@@ -441,7 +460,8 @@ val strategy_trace_json : ?limit:int -> ?cascade:string -> unit -> Yojson.Safe.t
     @param cascade  filter by projected [cascade]; omit to include every
                     cascade. *)
 val audit_runs_json
-  :  base_path:string
+  :  ?dashboard_surface:string
+  -> base_path:string
   -> ?limit:int
   -> ?cascade:string
   -> unit

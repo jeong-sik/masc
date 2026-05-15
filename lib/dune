@@ -340,6 +340,14 @@
    ;; to avoid type name collisions (transport, provider, binding, tier, strategy)
    ;; with identically-named types in the main library.
    masc_mcp.cascade_decl
+   ;; RFC-0086 Phase 2.B prereq — Cascade_ref (lib/cascade/, 260+115 LoC)
+   ;; extracted to lib/cascade_ref/. Deps: yojson only (stdlib + Yojson.Safe).
+   ;; Unblocks one of 6 cycle modules identified in plan §8.14 iter-2.
+   ;; Intentional cycle breaker for Cascade_strategy -> Keeper_cascade_profile
+   ;; -> Cascade_catalog_runtime -> Cascade_config -> Cascade_strategy chain
+   ;; (cascade_ref.mli:49-52). Sub-lib boundary makes the cycle-break
+   ;; dune-enforced.
+   masc_mcp.cascade_ref
    masc_mcp.oas_compat
 
    uri

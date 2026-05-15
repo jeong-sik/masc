@@ -1023,6 +1023,35 @@ let () = test "transition_claim_blocks_required_tools_even_with_force" (fun () -
   assert (Planning_eio.get_current_task ctx.config = None)
 )
 
+let () = test "transition_submit_for_verification_requires_evidence_ref" (fun () ->
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    let ctx = make_test_ctx () in
+    let add_result =
+      Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+        (`Assoc [ ("title", `String "Needs real verification evidence") ])
+    in
+    if not add_result.Tool_result.success then failwith add_result.Tool_result.legacy_message;
+    let claim_result =
+      Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+        (`Assoc [ ("task_id", `String "task-001"); ("action", `String "claim") ])
+    in
+    if not claim_result.Tool_result.success then failwith claim_result.Tool_result.legacy_message;
+    let submit_result =
+      Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+        (`Assoc
+          [
+            ("task_id", `String "task-001");
+            ("action", `String "submit_for_verification");
+            ("notes", `String "Implementation complete.");
+          ])
+    in
+    assert (not submit_result.Tool_result.success);
+    assert
+      (str_contains submit_result.Tool_result.legacy_message
+         "requires verification evidence");
+    assert_task_claimed_by ctx ctx.agent_name)
+)
+
 let () = test "transition_submit_for_verification_rejects_todo_pr_evidence" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "codex-mcp-client" in
@@ -1085,7 +1114,7 @@ let () = test "transition_submit_pr_evidence_accepts_todo_pr_evidence_without_re
     assert (Planning_eio.get_current_task ctx.config = None))
 )
 
-let () = test "transition_submit_pr_evidence_accepts_todo_pr_evidence_with_stale_do_not_reclaim_reason" (fun () ->
+let () = test "transition_claim_clears_stale_do_not_reclaim_reason" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "codex-mcp-client" in
     let result =
@@ -1107,27 +1136,9 @@ let () = test "transition_submit_pr_evidence_accepts_todo_pr_evidence_with_stale
             ("action", `String "claim");
           ])
     in
-    assert (not claim_result.Tool_result.success);
-    assert (str_contains claim_result.Tool_result.legacy_message "blocked from re-claim");
-    assert_task_todo ctx;
-    let submit_result =
-      Tool_task.handle_transition
-        ~agent_tool_names:[ "masc_status"; "masc_transition" ]
-        ~tool_name:"test_tool" ~start_time:0.0
-        ctx
-        (`Assoc
-          [
-            ("task_id", `String "task-001");
-            ("action", `String "submit_pr_evidence");
-            ("pr_url", `String "https://github.com/jeong-sik/masc-mcp/pull/13185");
-            ( "notes",
-              `String
-                "A stale do_not_reclaim_reason blocks claim, but merged PR evidence can still enter verification." );
-          ])
-    in
-    if not submit_result.Tool_result.success then failwith submit_result.Tool_result.legacy_message;
-    assert_task_awaiting_verification_by ctx "codex-mcp-client";
-    assert (Planning_eio.get_current_task ctx.config = None))
+    if not claim_result.Tool_result.success then failwith claim_result.Tool_result.legacy_message;
+    assert_task_claimed_by ctx "codex-mcp-client";
+    assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 )
 
 let () = test "dispatch_claim_task_uses_server_surface_not_payload_surface" (fun () ->

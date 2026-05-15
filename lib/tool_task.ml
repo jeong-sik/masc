@@ -269,6 +269,45 @@ let completion_rejection_message ?(allow_force = false) reason =
        Revise your completion notes to describe actual work, then retry.\n\
        %s" reason completion_notes_example
 
+let contains_substring_ci text needle =
+  let text = String.lowercase_ascii text in
+  let needle = String.lowercase_ascii needle in
+  let text_len = String.length text in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    if needle_len = 0 then true
+    else if idx + needle_len > text_len then false
+    else if String.equal (String.sub text idx needle_len) needle then true
+    else loop (idx + 1)
+  in
+  loop 0
+
+let notes_have_verification_artifact_ref notes =
+  let notes = String.trim notes in
+  let has_github_pull =
+    contains_substring_ci notes "github.com/"
+    && contains_substring_ci notes "/pull/"
+  in
+  let has_pr_shorthand =
+    contains_substring_ci notes "#"
+    && (contains_substring_ci notes "pr "
+        || contains_substring_ci notes "pr:"
+        || contains_substring_ci notes "pull request")
+  in
+  let has_explicit_artifact =
+    [ "artifact:"; "artifact://"; "file:"; "path:"; "commit:"; "branch:" ]
+    |> List.exists (contains_substring_ci notes)
+  in
+  has_github_pull || has_pr_shorthand || has_explicit_artifact
+
+let verification_submission_evidence_error ~notes =
+  if notes_have_verification_artifact_ref notes then None
+  else
+    Some
+      "submit_for_verification requires verification evidence: include pr_url \
+       for the draft PR, a PR # reference, or an explicit \
+       artifact/file/path/commit/branch reference in notes."
+
 let parse_task_contract args =
   match args |> member "contract" with
   | `Null -> Ok None
@@ -827,6 +866,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
   match Masc_domain.task_action_of_string_lenient action_raw with
   | Error msg -> Tool_result.error ~tool_name ~start_time msg
   | Ok action ->
+  let requested_action = action in
   let action_s = Masc_domain.task_action_to_string action in
   let notes = get_string args "notes" "" in
   let reason = get_string args "reason" "" in
@@ -938,6 +978,19 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
       | None -> action
     else action
   in
+  let submit_evidence_error =
+    match requested_action with
+    | Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence ->
+      verification_submission_evidence_error ~notes
+    | Masc_domain.Claim
+    | Masc_domain.Start
+    | Masc_domain.Done_action
+    | Masc_domain.Cancel
+    | Masc_domain.Release
+    | Masc_domain.Approve_verification
+    | Masc_domain.Reject_verification ->
+      None
+  in
   let default_time = Time_compat.now () -. 60.0 in
   let (started_at_actual, collaborators_from_task) = match task_opt with
     | Some t -> (match t.task_status with
@@ -1012,23 +1065,27 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
       None
   in
   let rec try_transition attempt =
-    let ev = if attempt = 0 then expected_version else None in
-    let agent_tool_names =
-      match agent_tool_names with
-      | Some _ -> agent_tool_names
-      | None -> keeper_agent_tool_names ctx
-    in
-    let r = Coord.transition_task_r ctx.config ~agent_name:ctx.agent_name
-              ~task_id ~action ?expected_version:ev ~notes ~reason
-              ?handoff_context ?agent_tool_names ?prepare_verification_request
-              ?prepare_verification_verdict () in
-    if is_version_mismatch r && attempt < max_cas_retries then begin
-      Log.Task.info "CAS version mismatch on %s (attempt %d/%d), retrying in %.0fms"
-        task_id (attempt + 1) max_cas_retries (cas_retry_delay_s *. 1000.0);
-      Time_compat.sleep cas_retry_delay_s;
-      try_transition (attempt + 1)
-    end else
-      r
+    match submit_evidence_error with
+    | Some reason ->
+      Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState reason))
+    | None ->
+      let ev = if attempt = 0 then expected_version else None in
+      let agent_tool_names =
+        match agent_tool_names with
+        | Some _ -> agent_tool_names
+        | None -> keeper_agent_tool_names ctx
+      in
+      let r = Coord.transition_task_r ctx.config ~agent_name:ctx.agent_name
+                ~task_id ~action ?expected_version:ev ~notes ~reason
+                ?handoff_context ?agent_tool_names ?prepare_verification_request
+                ?prepare_verification_verdict () in
+      if is_version_mismatch r && attempt < max_cas_retries then begin
+        Log.Task.info "CAS version mismatch on %s (attempt %d/%d), retrying in %.0fms"
+          task_id (attempt + 1) max_cas_retries (cas_retry_delay_s *. 1000.0);
+        Time_compat.sleep cas_retry_delay_s;
+        try_transition (attempt + 1)
+      end else
+        r
   in
   (* Capture verification_id from AwaitingVerification state BEFORE transition.
      approve/reject transitions change state, destroying the verification_id.

@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
+  agentsToPresence,
   parseWorktreeSSE,
   presenceContextAnchor,
   presenceContextSummary,
   prLabel,
   workspaceLabelForAgent,
+  type ApiAgent,
+  type ApiStatus,
   type WorktreeEntry,
 } from './ide-presence-strip'
 
@@ -91,6 +94,58 @@ describe('parseWorktreeSSE', () => {
     // Verify that the parsed entries carry enough information to derive workspace labels
     const label = workspaceLabelForAgent('nick0cave', entries)
     expect(label).toBe('wt-run-47')
+  })
+})
+
+describe('agentsToPresence', () => {
+  const sampleAgent: ApiAgent = {
+    name: 'nick0cave',
+    status: 'idle',
+    current_task: null,
+    model: null,
+  }
+
+  it('returns disconnected snapshot when cluster is undefined', () => {
+    const status: ApiStatus = { cluster: undefined }
+    const snap = agentsToPresence([sampleAgent], status, [])
+    expect(snap.kind).toBe('disconnected')
+  })
+
+  // Regression: prior code only checked `status.cluster === undefined`, so a
+  // JSON payload with `cluster: null` (the wire form of OCaml's [None]) hit
+  // `null.trim()` and crashed the entire CODE / IDE-shell surface render.
+  it('returns disconnected snapshot when cluster is null', () => {
+    const status: ApiStatus = { cluster: null }
+    const snap = agentsToPresence([sampleAgent], status, [])
+    expect(snap.kind).toBe('disconnected')
+    if (snap.kind === 'disconnected') {
+      expect(snap.reason).toBe('runtime_unknown')
+    }
+  })
+
+  it('returns disconnected snapshot when cluster is whitespace only', () => {
+    const status: ApiStatus = { cluster: '   ' }
+    const snap = agentsToPresence([sampleAgent], status, [])
+    expect(snap.kind).toBe('disconnected')
+  })
+
+  it('returns disconnected snapshot when cluster is set but no agents present', () => {
+    const status: ApiStatus = { cluster: 'masc-local' }
+    const snap = agentsToPresence([], status, [])
+    expect(snap.kind).toBe('disconnected')
+    if (snap.kind === 'disconnected') {
+      expect(snap.reason).toBe('no_agents')
+    }
+  })
+
+  it('returns live snapshot with trimmed cluster id when both cluster and agents present', () => {
+    const status: ApiStatus = { cluster: '  masc-local  ' }
+    const snap = agentsToPresence([sampleAgent], status, [])
+    expect(snap.kind).toBe('live')
+    if (snap.kind === 'live') {
+      expect(snap.runtime_id).toBe('masc-local')
+      expect(snap.entries).toHaveLength(1)
+    }
   })
 })
 

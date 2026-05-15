@@ -17,13 +17,17 @@ cd "$(git rev-parse --show-toplevel)"
 
 exit_code=0
 
+print_first_lines() {
+  awk -v limit="${1:?line limit required}" 'NR <= limit'
+}
+
 # 1. try/ignore on unit-returning calls (exceptions swallowed silently)
 #    Exclude comments and test files where deliberate mocking is expected.
 echo "=== Scan: try/ignore anti-pattern ==="
 matches=$(rg -n 'try\s+ignore\s*\(' lib/ --type ml -g '!test/' || true)
 if [ -n "$matches" ]; then
   echo "FAIL: try/ignore wrapping found (exceptions silently swallowed):"
-  echo "$matches" | head -20
+  printf '%s\n' "$matches" | print_first_lines 20
   exit_code=1
 else
   echo "PASS"
@@ -37,7 +41,7 @@ matches=$(rg -B1 -n '\|\s*_\s*->\s*\(\)' lib/ --type ml -g '!test/' || true)
 filtered=$(echo "$matches" | rg -v 'Log\.|traceln|log_' || true)
 if [ -n "$filtered" ]; then
   echo "WARN: wildcard -> () branches without visible logging:"
-  echo "$filtered" | head -20
+  printf '%s\n' "$filtered" | print_first_lines 20
   # Treat as warning for now; escalate to FAIL after codebase cleanup.
 fi
 
@@ -60,7 +64,7 @@ echo "=== Scan: naked Option.get ==="
 matches=$(rg -n 'Option\.get\b' lib/ --type ml -g '!test/' || true)
 if [ -n "$matches" ]; then
   echo "WARN: Option.get found (prefer Option.value or pattern match):"
-  echo "$matches" | head -20
+  printf '%s\n' "$matches" | print_first_lines 20
 fi
 
 if [ "$exit_code" -eq 0 ]; then

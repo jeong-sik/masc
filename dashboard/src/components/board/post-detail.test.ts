@@ -78,6 +78,12 @@ vi.mock('./board-state', () => ({
   kindLabel: (kind: string) => (kind === 'direct' ? '직접' : kind),
   visibilityLabel: () => '',
   visibilityBadgeColor: () => '',
+  postVisibilityAuditLabel: (post: any) => {
+    const visibility = post.visibility === 'internal' ? '내부' : '공개'
+    const score = post.vote_blind ? '점수 투표 후 공개' : `점수 ${post.votes ?? 0}`
+    const updated = post.updated_at !== post.created_at ? '최근 갱신됨' : '원본 작성 시각 기준'
+    return `표시 중 · ${visibility} · 댓글 ${post.comment_count ?? 0}개 · ${score} · ${updated}`
+  },
   boardPostKind: () => 'direct',
   votePost: vi.fn(),
   voteComment: vi.fn().mockResolvedValue(undefined),
@@ -603,6 +609,31 @@ describe('PostDetail', () => {
     render(h(PostDetail, { post }))
 
     expect(screen.getByLabelText('게시글 점수 투표 후 공개')).toHaveTextContent('투표 후 공개')
+  })
+
+  it('renders board visibility audit details on post detail', () => {
+    const post = {
+      id: 'post-1',
+      author: 'sleepers',
+      title: 'Post',
+      body: 'Body',
+      content: 'Body',
+      created_at: '2026-04-02T00:00:00Z',
+      updated_at: '2026-04-02T01:00:00Z',
+      votes: null,
+      vote_balance: null,
+      vote_blind: true,
+      comment_count: 5,
+      visibility: 'internal',
+      post_kind: 'direct',
+      comments: [],
+    } as any
+
+    render(h(PostDetail, { post }))
+
+    const audit = screen.getByLabelText(/게시글 표시 감사:/)
+    expect(audit).toHaveTextContent('표시 감사: 표시 중 · 내부 · 댓글 5개 · 점수 투표 후 공개 · 최근 갱신됨')
+    expect(audit).toHaveTextContent('목록 정렬/필터에 따라 위치가 바뀔 수 있습니다.')
   })
 
   it('renders and clears the board comment route focus receipt', () => {

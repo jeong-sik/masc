@@ -314,6 +314,33 @@ describe('BoardSurface Component', () => {
     expect(screen.getByLabelText('점수 투표 후 공개')).toHaveTextContent('투표 후 공개')
   })
 
+  it('renders board visibility audit details on post cards', () => {
+    boardPosts.value = [
+      makePost({
+        id: 'post-audit',
+        title: 'Audit visible',
+        body: 'content',
+        author: 'ani1999',
+        votes: null,
+        vote_balance: null,
+        vote_blind: true,
+        comment_count: 13,
+        created_at: '2026-04-17T00:00:00Z',
+        updated_at: '2026-04-17T01:00:00Z',
+      }),
+    ]
+
+    render(h(BoardSurface, null))
+
+    const audit = screen.getByLabelText(/게시글 표시 감사:/)
+    expect(audit).toHaveTextContent('표시 중')
+    expect(audit).toHaveTextContent('내부')
+    expect(audit).toHaveTextContent('댓글 13개')
+    expect(audit).toHaveTextContent('점수 투표 후 공개')
+    expect(audit).toHaveTextContent('최근 갱신됨')
+    expect(audit).toHaveTextContent('정렬 최신순')
+  })
+
   it('renders contributor quality badges on post cards', () => {
     boardPosts.value = [
       makePost({

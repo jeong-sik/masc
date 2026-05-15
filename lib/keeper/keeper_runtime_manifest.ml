@@ -373,7 +373,9 @@ let execution_receipt_path_for_today config ~keeper_name =
 
 let base_dir config ~keeper_name =
   Filename.concat
-    (Filename.concat (Keeper_types_support.keeper_dir_ config) keeper_name)
+    (Filename.concat
+       (Filename.concat (Coord.masc_root_dir config) "keepers")
+       keeper_name)
     "runtime-manifests"
 
 let path_for_trace config ~keeper_name ~trace_id =

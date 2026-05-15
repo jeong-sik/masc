@@ -568,6 +568,32 @@ let append_manifest_or_fail config manifest =
   | Ok () -> ()
   | Error msg -> Alcotest.fail ("manifest append failed: " ^ msg)
 
+let test_append_best_effort_stays_best_effort_when_manifest_dir_unavailable () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.save_file (Filename.concat base_dir ".masc") "not-a-directory";
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let manifest =
+        M.make ~ts:"2026-05-16T00:00:00Z"
+          ~keeper_name:"runtime-manifest-fd-pressure"
+          ~trace_id:"trace-runtime-manifest-fd-pressure"
+          ~event:M.Turn_started ()
+      in
+      let path =
+        M.path_for_trace config ~keeper_name:manifest.M.keeper_name
+          ~trace_id:manifest.M.trace_id
+      in
+      Alcotest.(check bool)
+        "path construction does not create keeper dirs"
+        true
+        (contains_substring path "runtime-manifest-fd-pressure");
+      (match M.append config manifest with
+       | Ok () -> Alcotest.fail "append unexpectedly succeeded"
+       | Error _ -> ());
+      M.append_best_effort ~site:"fd-pressure-test" config manifest)
+
 let make_tool name : Agent_sdk.Tool.t =
   Agent_sdk.Tool.create ~name ~description:("test tool " ^ name)
     ~parameters:[] (fun _input -> Ok { content = "ok" })
@@ -2443,6 +2469,10 @@ let () =
         [
           Alcotest.test_case "append preserves order" `Quick
             test_append_to_path_preserves_order;
+          Alcotest.test_case
+            "append best-effort survives unavailable manifest dir"
+            `Quick
+            test_append_best_effort_stays_best_effort_when_manifest_dir_unavailable;
           Alcotest.test_case "pre-dispatch emits manifest rows" `Quick
             test_pre_dispatch_terminal_observation_emits_manifest_rows;
           Alcotest.test_case

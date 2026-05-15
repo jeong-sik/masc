@@ -86,9 +86,10 @@ Clone-then-worktree (one turn is fine when the task is clear):
 
 PR workflow (Coding/Delivery/Full preset required):
 0. `keeper_preflight_check repo=<owner/repo>` — if `ok=false` or
-   `autonomous_activation.ok=false`, do not start PR work. Report the blocker
-   from `checks` / `autonomous_activation.hint` instead of treating a coding
-   preset as active-fleet readiness.
+   `cascade_resilience.ok=false` or `autonomous_activation.ok=false`, do not
+   start PR work. Report the blocker from `checks` /
+   `cascade_resilience.hint` / `autonomous_activation.hint` instead of treating
+   a coding preset as active-fleet readiness.
 1. `masc_worktree_create task_id=<id>` — opens isolated branch
    - If the task says MASC, keeper, runtime, `MASC_*`, or RFC work but does not
      spell out the clone directory, call it with `repo_name="masc-mcp"`.

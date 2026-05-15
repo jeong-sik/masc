@@ -325,7 +325,15 @@ let test_preflight_structured_block_is_execution_success () =
         (payload_kind result.payload_shape);
       let json = Yojson.Safe.from_string result.raw_output in
       check bool "preflight raw ok=false preserved" false
-        Yojson.Safe.Util.(member "ok" json |> to_bool))
+        Yojson.Safe.Util.(member "ok" json |> to_bool);
+      let cascade =
+        Yojson.Safe.Util.(member "cascade_resilience" json)
+      in
+      ignore Yojson.Safe.Util.(member "ok" cascade |> to_bool);
+      check bool "cascade name exposed" true
+        (String.length
+           Yojson.Safe.Util.(member "cascade" cascade |> to_string)
+         > 0))
 
 let test_preflight_reports_autoboot_disabled_activation_blocker () =
   with_exec_fixture "keeper_exec_tools_preflight_autoboot_disabled"

@@ -9,6 +9,9 @@ let json_string_opt = function
   | Some value -> `String value
   | None -> `Null
 
+let json_string_list values =
+  `List (List.map (fun value -> `String value) values)
+
 let handle_keeper_preflight_check
       ~(config : Coord.config)
       ~(meta : keeper_meta)
@@ -80,7 +83,62 @@ let handle_keeper_preflight_check
     | None -> "custom"
   in
   let () = add_check "preset" preset_ok preset_name in
-  (* Check 5: accountability risk *)
+  (* Check 5: cascade resilience for autonomous work *)
+  let cascade_name =
+    cascade_name_of_meta meta
+    |> Keeper_cascade_profile.normalize_keeper_runtime_declared_name
+    |> String.trim
+  in
+  let cascade_models, cascade_error =
+    match
+      Cascade_runtime.models_of_cascade_name_result
+        (Keeper_cascade_profile.runtime_name_of_string cascade_name)
+    with
+    | Ok models -> models, None
+    | Error err -> [], Some err
+  in
+  let cascade_fallback =
+    Keeper_cascade_profile.fallback_cascade_for cascade_name
+  in
+  let cascade_pure_local =
+    match cascade_models with
+    | [] -> false
+    | models -> Cascade_runtime.labels_are_pure_local models
+  in
+  let cascade_blocker =
+    match cascade_error with
+    | Some _ -> Some "cascade_resolution_error"
+    | None when cascade_models = [] -> Some "cascade_no_candidates"
+    | None
+      when cascade_pure_local
+           && List.length cascade_models <= 1
+           && Option.is_none cascade_fallback ->
+      Some "pure_local_single_provider_no_fallback"
+    | None -> None
+  in
+  let cascade_resilience_ok = Option.is_none cascade_blocker in
+  let cascade_check_value =
+    match cascade_blocker with
+    | None -> "ok"
+    | Some blocker -> blocker
+  in
+  let cascade_hint =
+    match cascade_blocker with
+    | Some "cascade_resolution_error" ->
+      Some "fix active cascade.toml resolution before autonomous PR fan-out"
+    | Some "cascade_no_candidates" ->
+      Some "configure at least one executable provider for the keeper cascade"
+    | Some "pure_local_single_provider_no_fallback" ->
+      Some
+        "add a non-local fallback cascade or avoid autonomous PR fan-out while \
+         local-only guard is active"
+    | Some blocker -> Some ("cascade resilience blocked: " ^ blocker)
+    | None -> None
+  in
+  let () =
+    add_check "cascade_resilience" cascade_resilience_ok cascade_check_value
+  in
+  (* Check 6: accountability risk *)
   let accountability_summary =
     Keeper_accountability.accountability_summary_json config ~keeper_name:meta.name
       ~agent_name:meta.agent_name
@@ -100,7 +158,7 @@ let handle_keeper_preflight_check
     add_check "accountability_risk" (not accountability_risk)
       (if accountability_risk then "RISK_HIGH" else "ok")
   in
-  (* Check 6: autonomous activation *)
+  (* Check 7: autonomous activation *)
   let activation_blocker =
     if meta.paused then Some "paused"
     else if not meta.autoboot_enabled then Some "autoboot_disabled"
@@ -124,7 +182,7 @@ let handle_keeper_preflight_check
   let () =
     add_check "autonomous_activation" activation_ok activation_check_value
   in
-  (* Check 7: sandbox clone target *)
+  (* Check 8: sandbox clone target *)
   let repo_name_arg =
     Safe_ops.json_string ~default:"" "repo_name" args |> String.trim
   in
@@ -162,6 +220,18 @@ let handle_keeper_preflight_check
         ; "identity", `Assoc [ "name", `String author; "email", `String email ]
         ; "preset", `String preset_name
         ; "preset_sufficient", `Bool preset_ok
+        ; "cascade_resilience"
+        , `Assoc
+            [ "ok", `Bool cascade_resilience_ok
+            ; "cascade", `String cascade_name
+            ; "model_labels", json_string_list cascade_models
+            ; "model_label_count", `Int (List.length cascade_models)
+            ; "pure_local", `Bool cascade_pure_local
+            ; "fallback_cascade", json_string_opt cascade_fallback
+            ; "blocker", json_string_opt cascade_blocker
+            ; "error", json_string_opt cascade_error
+            ; "hint", json_string_opt cascade_hint
+            ]
         ; "accountability_risk", `Bool accountability_risk
         ; "risk_band", `String risk_band
         ; "routing_hint", `String routing_hint

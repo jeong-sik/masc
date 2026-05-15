@@ -153,7 +153,7 @@ let ingest_tool_call ~base_dir ~keeper_id ~turn json =
                 | Some (`String patch_text) -> extract_regions_from_diff ~keeper_id ~file_path:fp ~turn ~diff_text:patch_text
                 | _ -> [])
         in
-        let store_dir = Filename.concat base_dir ".masc-ide" in
+        let store_dir = Ide_paths.store_path ~base_dir in
         if not (Sys.file_exists store_dir && Sys.is_directory store_dir) then
           Unix.mkdir store_dir 0o755;
         let store = Dated_jsonl.create ~base_dir:store_dir () in

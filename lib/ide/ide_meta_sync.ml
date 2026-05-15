@@ -74,7 +74,7 @@ let flush_regions (config : config) (state : sync_state) : sync_state =
   match state.pending_regions with
   | [] -> state
   | pending ->
-    let store_dir = Filename.concat config.base_path ".masc-ide" in
+    let store_dir = Ide_paths.store_path ~base_dir:config.base_path in
     let store = Dated_jsonl.create ~base_dir:store_dir () in
     List.iter
       (fun (region : code_region) -> Dated_jsonl.append store (region_to_json region))

@@ -5,7 +5,7 @@
 
 open Ide_annotation_types
 
-let store_path ~base_dir = Filename.concat base_dir ".masc-ide"
+let store_path ~base_dir = Ide_paths.store_path ~base_dir
 
 let annotations_file ~base_dir =
   Filename.concat (store_path ~base_dir) "annotations.jsonl"

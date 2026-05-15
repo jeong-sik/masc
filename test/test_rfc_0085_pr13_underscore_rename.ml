@@ -16,77 +16,72 @@ open Alcotest
        - tool_coord._status_cache
     All renamed (drop _ prefix), callers in same file updated.
 
-    AST verification: no underscore-prefixed string literals of the
-    affected identifiers remain. *)
+    Original test scanned [count_string_literals], which examines only
+    [Pconst_string] nodes — identifiers are NOT string literals, so the
+    test would pass even if [_xxx] identifiers were reintroduced.
+    This revision uses [count_value_bindings ~name], which inspects
+    [Ppat_var] nodes (actual identifier bindings). *)
 
-let walk_dirs dirs =
-  let rec collect acc = function
-    | [] -> acc
-    | dir :: rest ->
-      let entries = try Sys.readdir dir with Sys_error _ -> [||] in
-      let next, files =
-        Array.fold_left
-          (fun (sub, files) name ->
-            let p = Filename.concat dir name in
-            if try Sys.is_directory p with Sys_error _ -> false
-            then p :: sub, files
-            else if Filename.check_suffix p ".ml"
-            then sub, p :: files
-            else sub, files)
-          ([], [])
-          entries
-      in
-      collect (List.rev_append files acc) (List.rev_append next rest)
-  in
-  collect [] dirs
+let dead_identifiers =
+  [ "lib/governance_pipeline_risk.ml", "_tool_names_of_input" ]
 ;;
 
-let test_dead_function_removed () =
-  (* AST: governance_pipeline_risk should have 0 references to
-     _tool_names_of_input identifier in any string. *)
-  let n =
-    Ast_grep.count_string_literals
-      ~module_path:"lib/governance_pipeline_risk.ml"
-      ~needle:"_tool_names_of_input"
-  in
-  check int "no _tool_names_of_input string literal" 0 n
+let renamed_identifiers =
+  [ "lib/config_dir_resolver.ml", "_cached_resolution", "cached_resolution"
+  ; "lib/tool_code_write.ml", "_policy_config_cache", "policy_config_cache"
+  ; "lib/tool_keeper.ml", "_keeper_list_cache", "keeper_list_cache"
+  ; "lib/tool_board.ml", "_board_list_cache", "board_list_cache"
+  ; ( "lib/context_compact_oas.ml"
+    , "_legacy_memory_summary_prefix"
+    , "legacy_memory_summary_prefix" )
+  ; "lib/context_compact_oas.ml", "_legacy_goal_prefix", "legacy_goal_prefix"
+  ; ( "lib/governance_pipeline_risk.ml"
+    , "_destructive_pattern_strings"
+    , "destructive_pattern_strings" )
+  ; "lib/tool_coord.ml", "_status_cache", "status_cache"
+  ]
 ;;
 
-let test_no_underscore_active_cache_remains () =
-  (* Spot-check a representative file from each rename. *)
-  let pairs =
-    [ "lib/config_dir_resolver.ml", "_cached_resolution"
-    ; "lib/tool_code_write.ml", "_policy_config_cache"
-    ; "lib/tool_keeper.ml", "_keeper_list_cache"
-    ; "lib/tool_board.ml", "_board_list_cache"
-    ; "lib/context_compact_oas.ml", "_legacy_memory_summary_prefix"
-    ; "lib/governance_pipeline_risk.ml", "_destructive_pattern_strings"
-    ; "lib/tool_coord.ml", "_status_cache"
-    ]
-  in
+let test_dead_identifiers_gone () =
   List.iter
     (fun (path, name) ->
-      let n = Ast_grep.count_string_literals ~module_path:path ~needle:name in
-      let msg = Printf.sprintf "no %s string in %s" name path in
+      let n = Ast_grep.count_value_bindings ~module_path:path ~name in
+      let msg = Printf.sprintf "%s should be deleted in %s" name path in
       check int msg 0 n)
-    pairs
+    dead_identifiers
+;;
+
+let test_renamed_old_names_gone () =
+  List.iter
+    (fun (path, old_name, _new_name) ->
+      let n = Ast_grep.count_value_bindings ~module_path:path ~name:old_name in
+      let msg =
+        Printf.sprintf "old name %s should be removed in %s" old_name path
+      in
+      check int msg 0 n)
+    renamed_identifiers
+;;
+
+let test_renamed_new_names_present () =
+  List.iter
+    (fun (path, _old_name, new_name) ->
+      let n = Ast_grep.count_value_bindings ~module_path:path ~name:new_name in
+      let msg =
+        Printf.sprintf "new name %s should be defined in %s" new_name path
+      in
+      if n < 1 then failf "%s — count=%d" msg n)
+    renamed_identifiers
 ;;
 
 let () =
-  ignore walk_dirs;
   run
     "rfc-0085-pr-13-underscore-rename"
     [ ( "dead removal"
-      , [ test_case
-            "_tool_names_of_input deleted"
-            `Quick
-            test_dead_function_removed
+      , [ test_case "dead _tool_names_of_input gone" `Quick test_dead_identifiers_gone
         ] )
     ; ( "active rename"
-      , [ test_case
-            "no underscore-prefix string literal"
-            `Quick
-            test_no_underscore_active_cache_remains
+      , [ test_case "old underscore names gone" `Quick test_renamed_old_names_gone
+        ; test_case "new names present" `Quick test_renamed_new_names_present
         ] )
     ]
 ;;

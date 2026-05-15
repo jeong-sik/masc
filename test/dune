@@ -1705,6 +1705,43 @@
  (modules test_rfc_0085_pr8_config_dir_resolver_host_config)
  (libraries alcotest ast_grep))
 
+; RFC-0085 PR-7 — Retroactive AST test for retired_pg_env_keys +
+; clear_retired_pg_envs deletion (#15468 user-identified legacy;
+; shipped without a regression test; restored by #15495).
+(test
+ (name test_rfc_0085_pr7_retired_pg_envs_purge)
+ (modules test_rfc_0085_pr7_retired_pg_envs_purge)
+ (libraries alcotest ast_grep))
+
+; RFC-0085 PR-18 — Retroactive AST test for execution_surfaces +
+; namespace_truth rename (#15486 shipped without a regression test;
+; restored by #15495).
+(test
+ (name test_rfc_0085_pr18_execution_surfaces_rename)
+ (modules test_rfc_0085_pr18_execution_surfaces_rename)
+ (libraries alcotest ast_grep))
+
+; RFC-0085 PR-17 — Retroactive AST test for 4 dead deletion + 2 rename
+; (#15485 shipped without a regression test; restored by #15495).
+(test
+ (name test_rfc_0085_pr17_dead_purge_and_rename)
+ (modules test_rfc_0085_pr17_dead_purge_and_rename)
+ (libraries alcotest ast_grep))
+
+; RFC-0085 PR-16 — Retroactive AST test for dashboard_http_core rename
+; (#15484 shipped without a regression test; restored by #15495).
+(test
+ (name test_rfc_0085_pr16_dashboard_http_core_rename)
+ (modules test_rfc_0085_pr16_dashboard_http_core_rename)
+ (libraries alcotest ast_grep))
+
+; RFC-0085 PR-15 — Retroactive AST test for tool_schemas_inline rename
+; (#15483 shipped without a regression test; restored by #15495).
+(test
+ (name test_rfc_0085_pr15_tool_schemas_inline_rename)
+ (modules test_rfc_0085_pr15_tool_schemas_inline_rename)
+ (libraries alcotest ast_grep))
+
 ; RFC-0085 PR-14 — dispatch / dispatch_structured / guarded_dispatch
 ; 3-step chain inlined; guarded_dispatch is the only dispatch entry.
 (test

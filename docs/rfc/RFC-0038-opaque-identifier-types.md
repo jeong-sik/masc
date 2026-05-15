@@ -5,7 +5,7 @@
 - **Created**: 2026-05-07
 - **Related**: RFC-0024 (ollama cascade integration), RFC-0027 (capability-typed cascade), RFC-0032 (env knob unification), RFC-0037 (local-first enablement boundary)
 - **Files referenced**:
-  `lib/provider_adapter.ml:152-167` (cn_* SSOT constants),
+  `lib/provider_adapter.ml:152-167` (legacy provider-name constants),
   `lib/cascade/cascade_config.ml:277` (provider name match),
   `lib/keeper/keeper_status_detail.ml:199` (provider name match),
   `lib/keeper/keeper_cascade_profile.ml:14-22` (cascade variant SSOT),
@@ -89,7 +89,7 @@ val gemini : t
 val kimi : t
 val glm : t
 val custom : t
-(* ... one per Provider_adapter.cn_* constant *)
+(* ... one per legacy provider-name constant *)
 ```
 
 Identical pattern for `Cascade_id` (canonical names from
@@ -159,14 +159,14 @@ type-safety without forcing exhaustiveness.
 
 | Phase | Scope | LOC | Status |
 |-------|-------|-----|--------|
-| A | route through `Provider_adapter.cn_*` SSOT (no new module) | ~30 | DONE — companion PR #14111 |
+| A | route through the legacy provider-name SSOT (no new module) | ~30 | DONE — companion PR #14111 |
 | B | introduce `Provider_id.t = private string`, migrate call sites | ~150 | OPEN — needs separate sign-off |
 | C | `Cascade_id.t`, `Model_id.t` + migration | ~300 | DEFERRED — needs review of Phase B outcome |
 
 Phase A ships immediately to remove the most acute drift. Phase B is
 the actual type-safety win and requires a separate review because it
-introduces a new module convention and breaks every consumer of
-`cn_*` (fixable by mechanical rename).
+introduces a new module convention and breaks every consumer of the
+legacy provider-name constants (fixable by mechanical rename).
 
 ## 6. Validation
 
@@ -186,7 +186,7 @@ introduces a new module convention and breaks every consumer of
 - **Risk**: `private string` aliases interact awkwardly with JSON
   serialization libraries that demand concrete types. **Mitigation**:
   `to_string` is exposed; serialization sites call it explicitly.
-- **Tradeoff**: Phase A alone (`cn_*` routing) is a 30 LOC win that
+- **Tradeoff**: Phase A alone (provider-name SSOT routing) is a 30 LOC win that
   delivers most of the drift safety. Phase B is the type-safety win
   and is a much bigger refactor. We can ship A and stop, depending on
   Phase B review.

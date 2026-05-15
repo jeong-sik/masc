@@ -1,9 +1,9 @@
 ---
 status: draft
-last_verified: 2026-05-14
+last_verified: 2026-05-15
 code_refs:
-  - lib/provider_adapter.ml
-  - lib/provider_adapter.mli
+  - lib/provider_runtime_projection.ml
+  - lib/provider_tool_support.ml
   - scripts/lint/provider-adapter-removal-ratchet.sh
   - docs/OAS-MASC-BOUNDARY.md
   - docs/rfc/RFC-0058-declarative-cascade-config.md
@@ -12,8 +12,9 @@ code_refs:
 
 # Provider Adapter Removal Plan
 
-This plan starts the removal of the MASC-owned `Provider_adapter` implementation.
-It is intentionally a removal plan, not another centralization pass.
+This plan tracks removal of the MASC-owned `Provider_adapter` implementation.
+As of 2026-05-15, the compiled `Provider_adapter` module is deleted. It is
+intentionally a removal plan, not another centralization pass.
 
 ## Objective
 
@@ -38,21 +39,20 @@ The target state is:
 
 ## Current Inventory
 
-Verified on 2026-05-14:
+Verified on 2026-05-15:
 
 | Surface | Current state | Removal meaning |
 |---|---:|---|
-| `lib/provider_adapter.ml` | 1,998 lines | owns compiled provider registry and helpers |
-| `lib/provider_adapter.mli` | 615 lines | exports provider identity/capability surface |
-| External `Provider_adapter.` callers | 44 files | callers still depend on MASC-owned provider truth |
-| Public canonical provider names | 15 `cn_*` values | provider ids are compiled into MASC |
-| Adapter registry | `direct_adapters : adapter list` | aliases, prefixes, defaults, auth, capabilities are compiled into MASC |
+| `lib/provider_adapter.ml` | absent | compiled provider registry deleted |
+| `lib/provider_adapter.mli` | absent | public provider identity/capability surface deleted |
+| External `Provider_adapter.` callers | 0 files in `lib/` and `bin/` | production callers no longer depend on this boundary |
+| Public canonical provider names | 0 exports | provider ids are no longer compiled through this module |
+| Adapter registry | absent | aliases, prefixes, defaults, auth, capabilities moved to OAS/runtime projection surfaces |
 | Runbook | `docs/PROVIDER-ADAPTER-RUNBOOK.md` | describes current compatibility state, not the target SSOT |
 
-The current `.mli` mixes these responsibilities:
+The deleted `.mli` mixed these responsibilities:
 
 - common types and string converters
-- canonical provider names
 - direct adapter registry
 - label/model parsing
 - provider-kind bridging
@@ -117,7 +117,7 @@ Goal: stop making `Provider_adapter` larger.
   explicit allowlist.
 - Keep `scripts/lint/no-provider-name-hardcoding.sh --fail`, but treat its
   `Provider_adapter` allowlist as temporary debt, not a safe harbor.
-- Add a test that `lib/provider_adapter.mli` export count cannot grow.
+- Keep the ratchet pinned at zero `lib/provider_adapter.mli` exports.
 - Wire `scripts/lint/provider-adapter-removal-ratchet.sh` into Fundamental
   Check so the freeze runs on every PR.
 
@@ -171,7 +171,7 @@ Exit criteria:
 
 Goal: remove the internal implementation.
 
-- Delete canonical `cn_*` values from MASC.
+- Delete legacy canonical provider-name values from MASC.
 - Delete `direct_adapters`.
 - Delete provider/model default lists from MASC.
 - Delete provider-kind reverse lookup helpers from MASC.
@@ -208,7 +208,8 @@ Use these gates per phase:
 ```bash
 scripts/lint/provider-adapter-removal-ratchet.sh
 rg -l 'Provider_adapter\.' lib test bin
-rg -n 'direct_adapters|default_model_fallback|defaults = \[' lib/provider_adapter.ml
+test ! -e lib/provider_adapter.ml
+test ! -e lib/provider_adapter.mli
 scripts/lint/no-provider-name-hardcoding.sh --fail
 git diff --check
 ```
@@ -217,7 +218,7 @@ For code phases, use focused build targets rather than full `dune build`:
 
 ```bash
 scripts/dune-local.sh build lib/masc_mcp.a
-scripts/dune-local.sh build test/test_provider_adapter.exe
+scripts/dune-local.sh build test/test_observability_provider_contracts.exe
 scripts/dune-local.sh build test/test_provider_prefix_boundary.exe
 ```
 

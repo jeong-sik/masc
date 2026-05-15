@@ -2,8 +2,8 @@
 
     OAS owns provider identity through [Agent_sdk.Provider_runtime_binding].
     This module only projects those bindings into MASC's local label and
-    fallback conventions, so cascade/spawn callers do not depend on the legacy
-    [Provider_adapter] boundary. *)
+    fallback conventions, so cascade/spawn callers do not depend on a MASC-owned
+    provider adapter boundary. *)
 
 module Runtime_binding = Agent_sdk.Provider_runtime_binding
 

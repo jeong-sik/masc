@@ -1,8 +1,8 @@
 (** Voice runtime overlay.
 
     Voice TTS/STT/session endpoint rules are local MASC runtime concerns. They
-    intentionally live outside [Provider_adapter], whose remaining boundary is
-    LLM provider routing and capability projection. *)
+    intentionally live outside the removed provider-adapter boundary; voice is
+    separate from LLM provider routing and capability projection. *)
 
 type transport =
   | Openai_compat

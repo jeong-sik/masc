@@ -5,6 +5,7 @@ import {
   createPost,
   fetchBoard,
   fetchBoardCuration,
+  fetchBoardFlairs,
   fetchBoardHearths,
   fetchBoardKarmaLedger,
   fetchBoardPost,
@@ -611,6 +612,30 @@ describe('fetchBoardHearths', () => {
       { name: 'research', count: 0 },
     ])
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/board/hearths', expect.any(Object))
+  })
+})
+
+describe('fetchBoardFlairs', () => {
+  it('normalizes the board flair catalog from the server', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        flairs: [
+          { name: 'insight', emoji: '💡', label: 'Insight' },
+          { name: '  ', emoji: 'x', label: 'Ignored' },
+          { name: 'meta' },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchBoardFlairs()).resolves.toEqual([
+      { name: 'insight', emoji: '💡', label: 'Insight' },
+      { name: 'meta', emoji: '', label: 'meta' },
+    ])
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/board/flairs', expect.any(Object))
   })
 })
 

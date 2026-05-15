@@ -15,9 +15,11 @@
        silently degrade.
 
     2. CLI providers advertise the runtime MCP lane according to the
-       adapter/tool-delivery contract.  CLI kinds
-       (Claude Code, Gemini CLI, Kimi CLI, Codex CLI) use runtime MCP
-       for tool invocation, not inline function-calling.
+       cascade.toml/OAS tool-delivery contract. Claude Code and Kimi CLI
+       can carry request-scoped MCP HTTP headers, Codex CLI can use the
+       per-keeper bridge declared in cascade.toml, and Gemini CLI remains
+       disabled for runtime MCP until its upstream request-scoped MCP
+       path is implemented.
        [normalize_cli_caps_when] preserves this contract after OAS
        capability lookup.
 
@@ -26,8 +28,9 @@
     the cascade picks it up.
 
     OAS owns provider/model capability truth through
-    [Agent_sdk.Provider_runtime_binding]; this test pins MASC's local
-    projection into inline/runtime tool-delivery flags.
+    [Agent_sdk.Provider_runtime_binding] plus cascade.toml provider
+    capabilities; this test pins MASC's local projection into
+    inline/runtime tool-delivery flags.
 
     Cross-reference:
     - [lib/provider_tool_support.ml] — [oas_capabilities_of_config]
@@ -106,7 +109,8 @@ let test_cli_no_inline_tools () =
     cli_kinds
 
 let expected_cli_runtime_mcp = function
-  | PC.Claude_code | PC.Gemini_cli | PC.Kimi_cli | PC.Codex_cli -> true
+  | PC.Claude_code | PC.Kimi_cli | PC.Codex_cli -> true
+  | PC.Gemini_cli -> false
   | PC.Anthropic | PC.Kimi | PC.OpenAI_compat | PC.Ollama | PC.Gemini | PC.Glm
   | PC.DashScope ->
       false
@@ -193,7 +197,7 @@ let () =
         [
           Alcotest.test_case "CLI providers reject inline tools"
             `Quick test_cli_no_inline_tools;
-          Alcotest.test_case "CLI providers follow adapter runtime MCP lane"
+          Alcotest.test_case "CLI providers follow runtime MCP policy lane"
             `Quick test_cli_runtime_mcp_lane;
         ] );
       ( "catalog",

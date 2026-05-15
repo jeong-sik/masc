@@ -2,13 +2,17 @@
     namespace-truth snapshot composition + focus / queue
     extraction for the dashboard HTTP facade.
 
-    External surface (2 entries) — every dotted caller
+    External surface (3 entries) — every dotted caller
     reaches one of these and nothing else:
     - {!compose_namespace_truth_snapshot} consumed by
       {!Server_dashboard_http_namespace_truth} (also
       reached via the
       [module Namespace_truth_support = ...] alias inside
       that module).
+    - {!compose_namespace_truth_initializing} consumed by
+      {!Server_dashboard_http_namespace_truth} for the cold-start
+      fast path so even the minimal warming response keeps canonical
+      surface/source/retention metadata.
     - {!dashboard_namespace_truth_focus_json} consumed by
       {!Server_dashboard_http} as a one-line
       pass-through (no cascade-include re-export — the
@@ -56,3 +60,10 @@ val compose_namespace_truth_snapshot :
     (TTL'd 10 s, stale-served up to 30 s).  Used by
     {!Server_dashboard_http_namespace_truth} as the
     SSOT producer for the [namespace_truth] HTTP route. *)
+
+val compose_namespace_truth_initializing :
+  config:Coord.config -> message:string -> Yojson.Safe.t
+(** Composes the namespace-truth cold-start response with the same
+    top-level [dashboard_surface], [dashboard_aliases], [source],
+    [retention], and [generated_at_iso] metadata used by the warm
+    read-model. *)

@@ -171,7 +171,18 @@ export function interjectContextRouteLinks(
     label: cursor?.tool_name ?? cursor?.focus_mode ?? 'active keeper',
     sourceId: `interject:${keeper}`,
     keeperId: keeper,
+    telemetry: true,
+    telemetryQuery: interjectTelemetryQuery(keeper, cursor),
   })
+}
+
+function interjectTelemetryQuery(keeperId: string, cursor: KeeperCursor | null): string {
+  return [
+    'interject',
+    `keeper:${keeperId}`,
+    cursor?.focus_mode ? `mode:${cursor.focus_mode}` : null,
+    cursor?.tool_name ? `tool:${cursor.tool_name}` : null,
+  ].filter((value): value is string => value !== null).join(' ')
 }
 
 function InterjectContextLinks({
@@ -182,6 +193,13 @@ function InterjectContextLinks({
   if (links.length === 0) return null
   return html`
     <div class="ide-interject-context-links" aria-label="Interject context links">
+      <span
+        class="ide-interject-context-count"
+        title=${`${links.length} linked interject context routes`}
+        aria-label=${`${links.length} linked interject context routes`}
+      >
+        CTX ${links.length}
+      </span>
       ${links.map(link => html`
         <button
           key=${link.id}

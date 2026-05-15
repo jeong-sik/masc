@@ -209,11 +209,15 @@ val summary_to_yojson : summary -> Yojson.Safe.t
 
 val recent_json : ?provider:string -> ?limit:int -> unit -> Yojson.Safe.t
 (** Dashboard payload for
-    [GET /api/v1/dashboard/oas/telemetry/recent?provider=P&limit=N]. *)
+    [GET /api/v1/dashboard/oas/telemetry/recent?provider=P&limit=N].
+    The envelope includes [dashboard_surface], [source], and [retention] so
+    operators can distinguish this in-process runtime-lane cache from the
+    durable [oas_event] replay surface. *)
 
 val summary_json : ?provider:string -> ?limit:int -> unit -> Yojson.Safe.t
 (** Dashboard payload for
-    [GET /api/v1/dashboard/oas/telemetry/summary?provider=P&limit=N]. *)
+    [GET /api/v1/dashboard/oas/telemetry/summary?provider=P&limit=N].
+    The envelope carries the same provenance metadata as {!recent_json}. *)
 
 val clear : ?provider:string -> unit -> unit
 (** [clear ?provider ()] drops samples and provider-error counts. With

@@ -260,7 +260,8 @@ let test_get_config_unknown () =
   | Some _ -> fail "expected None"
 
 let test_spawn_bare_ollama_rejected () =
-  if Masc_mcp.Provider_adapter.is_bare_ollama_label "ollama" then (
+  if Option.value ~default:"" (Sys.getenv_opt "OLLAMA_DEFAULT_MODEL") |> String.trim = ""
+  then (
     let result = Spawn.spawn ~agent_name:"ollama" ~prompt:"test" () in
     check bool "spawn rejected" false result.Spawn.success;
     check int "exit code" 2 result.Spawn.exit_code;
@@ -586,8 +587,8 @@ let test_result_to_string_success () =
     cost_usd = None;
   } in
   let str = Spawn.result_to_string result in
-  check bool "has checkmark" true
-    (try let _ = Str.search_forward (Str.regexp "✅") str 0 in true
+  check bool "has completed prefix" true
+    (try let _ = Str.search_forward (Str.regexp_string "Agent completed") str 0 in true
      with Not_found -> false)
 
 let test_result_to_string_failure () =
@@ -603,8 +604,8 @@ let test_result_to_string_failure () =
     cost_usd = None;
   } in
   let str = Spawn.result_to_string result in
-  check bool "has x" true
-    (try let _ = Str.search_forward (Str.regexp "❌") str 0 in true
+  check bool "has failed prefix" true
+    (try let _ = Str.search_forward (Str.regexp_string "Agent failed") str 0 in true
      with Not_found -> false)
 
 let test_result_to_string_has_elapsed () =

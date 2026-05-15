@@ -159,9 +159,7 @@ let capacity_key_of_config (cfg : Llm_provider.Provider_config.t) =
     | None -> ""
 
 let http_probe_url_of_config (cfg : Llm_provider.Provider_config.t) =
-  if Provider_adapter.is_http_probe_capable_kind cfg.kind && cfg.base_url <> ""
-  then Some cfg.base_url
-  else None
+  Cascade_http_probe_url.of_provider_config cfg
 
 let of_provider_config provider_cfg =
   let health_key = provider_health_key_of_config provider_cfg in

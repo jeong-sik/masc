@@ -6,7 +6,191 @@ type capabilities =
   ; supports_runtime_mcp_http_headers : bool
   }
 
-(** Whether the resolved provider adapter is a CLI runtime (Claude Code,
+type tool_policy =
+  { supports_runtime_mcp_http_headers : bool
+  ; requires_per_keeper_bridging_for_bound_actor_tools : bool
+  ; identity_runtime_mcp_header_keys : string list
+  ; tolerates_bound_actor_fallback : bool
+  }
+
+module Decl = Cascade_declarative_types
+module Parser = Cascade_declarative_parser
+module Runtime_binding = Agent_sdk.Provider_runtime_binding
+
+let default_tool_policy =
+  { supports_runtime_mcp_http_headers = false
+  ; requires_per_keeper_bridging_for_bound_actor_tools = false
+  ; identity_runtime_mcp_header_keys = []
+  ; tolerates_bound_actor_fallback = false
+  }
+;;
+
+let normalize_label label = String.trim label |> String.lowercase_ascii
+
+let normalize_provider_id_variant label ~map_char =
+  normalize_label label |> String.map map_char
+;;
+
+let provider_id_candidates label =
+  let raw = normalize_label label in
+  [ raw
+  ; normalize_provider_id_variant label ~map_char:(fun c ->
+      if c = '-' then '_' else c)
+  ; normalize_provider_id_variant label ~map_char:(fun c ->
+      if c = '_' then '-' else c)
+  ]
+  |> List.filter (fun value -> not (String.equal value ""))
+  |> List.sort_uniq String.compare
+;;
+
+let provider_id_candidates_of_config (provider_cfg : Llm_provider.Provider_config.t) =
+  let from_binding =
+    Runtime_binding.binding_for_provider_config provider_cfg
+    |> Option.map (fun binding -> binding.Runtime_binding.id)
+    |> Option.to_list
+  in
+  let from_registry =
+    [ Llm_provider.Provider_registry.provider_name_of_config provider_cfg ]
+  in
+  from_binding @ from_registry
+  |> List.concat_map provider_id_candidates
+  |> List.sort_uniq String.compare
+;;
+
+let provider_id_candidates_of_kind kind =
+  let provider_cfg =
+    Llm_provider.Provider_config.make ~kind ~model_id:"auto" ~base_url:"" ()
+  in
+  provider_id_candidates_of_config provider_cfg
+;;
+
+let rec repo_seed_cascade_path_from dir =
+  let candidate =
+    Filename.concat (Filename.concat dir "config") Config_dir_resolver.cascade_toml_filename
+  in
+  if Sys.file_exists candidate
+  then Some candidate
+  else (
+    let parent = Filename.dirname dir in
+    if String.equal parent dir then None else repo_seed_cascade_path_from parent)
+;;
+
+let repo_seed_cascade_path () = repo_seed_cascade_path_from (Sys.getcwd ())
+
+let cascade_policy_path () =
+  match Config_dir_resolver.cascade_path_opt () with
+  | Some path -> Some path
+  | None -> repo_seed_cascade_path ()
+;;
+
+type cached_cascade =
+  { path : string
+  ; mtime : float
+  ; parsed : Decl.cascade_config option
+  }
+
+let cascade_cache : cached_cascade option ref = ref None
+
+let file_mtime path =
+  try Some (Unix.stat path).Unix.st_mtime with
+  | Unix.Unix_error _ -> None
+;;
+
+let parse_cascade_policy path =
+  match Parser.parse_file path with
+  | Ok cfg -> Some cfg
+  | Error _ -> None
+;;
+
+let cascade_policy_config () =
+  match cascade_policy_path () with
+  | None -> None
+  | Some path ->
+    (match file_mtime path with
+     | None -> None
+     | Some mtime ->
+       (match !cascade_cache with
+        | Some cached
+          when String.equal cached.path path && Float.equal cached.mtime mtime ->
+          cached.parsed
+        | _ ->
+          let parsed = parse_cascade_policy path in
+          cascade_cache := Some { path; mtime; parsed };
+          parsed))
+;;
+
+let tool_policy_of_decl_capabilities
+      (caps : Decl.cascade_capabilities option)
+  =
+  match caps with
+  | None -> default_tool_policy
+  | Some c ->
+    { supports_runtime_mcp_http_headers = c.supports_runtime_mcp_http_headers
+    ; requires_per_keeper_bridging_for_bound_actor_tools =
+        c.requires_per_keeper_bridging_for_bound_actor_tools
+    ; identity_runtime_mcp_header_keys = c.identity_runtime_mcp_header_keys
+    ; tolerates_bound_actor_fallback = c.tolerates_bound_actor_fallback
+    }
+;;
+
+let declarative_tool_policy_for_provider_ids provider_ids =
+  match cascade_policy_config () with
+  | None -> None
+  | Some cfg ->
+    provider_ids
+    |> List.find_map (fun provider_id ->
+      match Decl.provider_of_id cfg provider_id with
+      | None -> None
+      | Some provider ->
+        Some (tool_policy_of_decl_capabilities provider.Decl.capabilities))
+;;
+
+let binding_supports_runtime_mcp_http_headers (binding : Runtime_binding.t) =
+  match binding.Runtime_binding.transport with
+  | Runtime_binding.Cli -> binding.Runtime_binding.capabilities.supports_tools
+  | Runtime_binding.Http
+  | Runtime_binding.Managed
+  | Runtime_binding.Custom_openai_compat -> false
+;;
+
+let fallback_tool_policy_for_config (provider_cfg : Llm_provider.Provider_config.t) =
+  match Runtime_binding.binding_for_provider_config provider_cfg with
+  | None -> default_tool_policy
+  | Some binding ->
+    let supports_headers = binding_supports_runtime_mcp_http_headers binding in
+    { default_tool_policy with
+      supports_runtime_mcp_http_headers = supports_headers
+    ; tolerates_bound_actor_fallback =
+        supports_headers
+        ||
+        (match binding.Runtime_binding.transport with
+         | Runtime_binding.Cli -> true
+         | Runtime_binding.Http
+         | Runtime_binding.Managed
+         | Runtime_binding.Custom_openai_compat -> false)
+    }
+;;
+
+let tool_policy_for_config provider_cfg =
+  match declarative_tool_policy_for_provider_ids (provider_id_candidates_of_config provider_cfg) with
+  | Some policy -> policy
+  | None -> fallback_tool_policy_for_config provider_cfg
+;;
+
+let fallback_tool_policy_for_kind kind =
+  let provider_cfg =
+    Llm_provider.Provider_config.make ~kind ~model_id:"auto" ~base_url:"" ()
+  in
+  fallback_tool_policy_for_config provider_cfg
+;;
+
+let tool_policy_for_kind kind =
+  match declarative_tool_policy_for_provider_ids (provider_id_candidates_of_kind kind) with
+  | Some policy -> policy
+  | None -> fallback_tool_policy_for_kind kind
+;;
+
+(** Whether the resolved provider config is a CLI runtime (Claude Code,
     Codex CLI, Gemini CLI, Kimi CLI).  MASC uses this only for local
     tool-delivery projection after OAS has resolved provider/model
     capabilities. *)
@@ -16,12 +200,13 @@ let is_cli_agent_provider (provider_cfg : Llm_provider.Provider_config.t) =
 
 (** [normalize_cli_caps_when ~is_cli caps] overrides CLI runtime caps when
     [is_cli] is [true]. Decoupled from [is_cli_agent_provider] so callers
-    that have already resolved the adapter (e.g. [oas_capabilities_of_config]
-    below) can avoid re-resolving for the same provider.
+    that have already resolved the provider config (e.g.
+    [oas_capabilities_of_config] below) can avoid re-resolving for the same
+    provider.
 
     Override semantics: CLI providers (Claude Code, Codex CLI, Gemini CLI,
     Kimi CLI) do not expose inline function-calling to this gate. Runtime MCP
-    support remains adapter/OAS-owned because not every CLI can consume
+    support remains cascade.toml/OAS-owned because not every CLI can consume
     request-scoped MCP policy; Gemini CLI is the known false case. *)
 let normalize_cli_caps_when ~is_cli (caps : Llm_provider.Capabilities.capabilities) =
   if is_cli
@@ -39,10 +224,10 @@ let oas_capabilities_of_config (provider_cfg : Llm_provider.Provider_config.t) =
   in
   if is_cli
   then
+    let tool_policy = tool_policy_for_config provider_cfg in
     let runtime_mcp_lane =
-      Provider_adapter.supports_runtime_mcp_http_headers_for_config provider_cfg
-      || Provider_adapter.requires_per_keeper_bridging_for_bound_actor_tools_for_config
-           provider_cfg
+      tool_policy.supports_runtime_mcp_http_headers
+      || tool_policy.requires_per_keeper_bridging_for_bound_actor_tools
     in
     { (normalize_cli_caps_when ~is_cli caps) with
       supports_runtime_mcp_tools = runtime_mcp_lane
@@ -52,7 +237,7 @@ let oas_capabilities_of_config (provider_cfg : Llm_provider.Provider_config.t) =
 ;;
 
 let supports_runtime_mcp_http_headers (provider_cfg : Llm_provider.Provider_config.t) =
-  Provider_adapter.supports_runtime_mcp_http_headers_for_config provider_cfg
+  (tool_policy_for_config provider_cfg).supports_runtime_mcp_http_headers
 ;;
 
 let capabilities_of_config (provider_cfg : Llm_provider.Provider_config.t) =
@@ -77,16 +262,16 @@ let provider_supports_runtime_mcp_lane (provider_cfg : Llm_provider.Provider_con
 let provider_requires_per_keeper_bridging_for_bound_actor_tools
       (provider_cfg : Llm_provider.Provider_config.t)
   =
-  Provider_adapter.requires_per_keeper_bridging_for_bound_actor_tools_for_config
-    provider_cfg
+  (tool_policy_for_config provider_cfg)
+    .requires_per_keeper_bridging_for_bound_actor_tools
 ;;
 
 let provider_kind_requires_per_keeper_bridging_for_bound_actor_tools kind =
-  Provider_adapter.requires_per_keeper_bridging_for_bound_actor_tools_for_kind kind
+  (tool_policy_for_kind kind).requires_per_keeper_bridging_for_bound_actor_tools
 ;;
 
 let provider_kind_tolerates_bound_actor_fallback kind =
-  Provider_adapter.tolerates_bound_actor_fallback_for_kind kind
+  (tool_policy_for_kind kind).tolerates_bound_actor_fallback
 ;;
 
 let runtime_mcp_policy_requires_http_headers
@@ -103,15 +288,23 @@ let provider_supports_runtime_mcp_http_header
       (provider_cfg : Llm_provider.Provider_config.t)
       key
   =
-  (* General HTTP-header support OR the adapter identity-header carve-out.
+  (* General HTTP-header support OR the declarative identity-header carve-out.
      The identity carve-out covers `x-masc-*` routing labels and other
-     non-secret headers declared per adapter (see Provider_adapter).
+     non-secret headers declared on the provider capability row.
      [Authorization] is NOT carried here: it is handled separately by
      [provider_supports_bridged_authorization_header] below, which requires
-     both adapter-level per-keeper bridging and the x-masc-agent-name /
+     both provider-level per-keeper bridging and the x-masc-agent-name /
      x-masc-keeper-name identity headers to be present on the same request.
-     The carve-out set lives on the adapter row, not in this consumer module. *)
-  Provider_adapter.accepts_runtime_mcp_http_header_for_config provider_cfg key
+     The carve-out set lives on the declarative provider capability row, not
+     in this consumer module. *)
+  let tool_policy = tool_policy_for_config provider_cfg in
+  if tool_policy.supports_runtime_mcp_http_headers
+  then true
+  else (
+    let wanted = normalize_label key in
+    List.exists
+      (fun candidate -> String.equal wanted (normalize_label candidate))
+      tool_policy.identity_runtime_mcp_header_keys)
 ;;
 
 let header_key_present headers key =
@@ -124,9 +317,7 @@ let header_key_present headers key =
 
 let provider_supports_bridged_authorization_header provider_cfg headers key =
   String.equal "authorization" (String.lowercase_ascii (String.trim key))
-  && Provider_adapter
-     .requires_per_keeper_bridging_for_bound_actor_tools_for_config
-       provider_cfg
+  && provider_requires_per_keeper_bridging_for_bound_actor_tools provider_cfg
   && header_key_present headers "x-masc-agent-name"
   && header_key_present headers "x-masc-keeper-name"
 ;;

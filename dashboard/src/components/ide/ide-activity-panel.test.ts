@@ -174,6 +174,7 @@ describe('IdeActivityPanel', () => {
     expect(window.location.hash).toBe('#monitoring?section=agents&view=keepers&keeper=sangsu')
 
     const activityRouteLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-activity-route-link')]
+    expect(container.querySelector('.ide-activity-route-count')?.textContent).toBe('CTX 10')
     expect(activityRouteLinks.map(link => link.textContent)).toEqual([
       'Code',
       'Goal',
@@ -318,6 +319,7 @@ describe('IdeActivityPanel', () => {
     })
 
     const activityRouteLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-activity-route-link')]
+    expect(container.querySelector('.ide-activity-route-count')?.textContent).toBe('CTX 10')
     expect(activityRouteLinks.map(link => link.textContent)).toEqual([
       'Code',
       'Goal',
@@ -571,6 +573,7 @@ describe('IdeActivityPanel', () => {
       expect(container.textContent).toContain('telemetry.turn')
     })
     expect(container.querySelector('.ide-activity-context-jump')).toBeNull()
+    expect(container.querySelector('.ide-activity-route-count')?.textContent).toBe('CTX 3')
     expect([...container.querySelectorAll<HTMLButtonElement>('.ide-activity-route-link')]
       .map(link => link.textContent)).toEqual(['Log', 'Telemetry', 'Keeper'])
     fireEvent.click(container.querySelectorAll<HTMLButtonElement>('.ide-activity-route-link')[1]!)

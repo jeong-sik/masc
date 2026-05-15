@@ -22,11 +22,13 @@ import {
   votePost,
   voteComment,
   fetchBoardHearths,
+  fetchBoardFlairs,
   fetchSubBoards,
   fetchBoardPost,
   commentPost,
   createPost,
   type BoardHearth,
+  type BoardFlair,
 } from '../../api'
 import { deleteBoardPost } from '../../api/actions'
 import type { BoardComment, BoardPost, BoardSortMode } from '../../types'
@@ -73,6 +75,9 @@ export const detailPostId = signal<string | null>(null)
 export const boardHearths = signal<BoardHearth[]>([])
 export const boardHearthsLoading = signal(false)
 export const boardHearthsError = signal(false)
+export const boardFlairs = signal<BoardFlair[]>([])
+export const boardFlairsLoading = signal(false)
+export const boardFlairsError = signal(false)
 
 // SubBoard options for post creation dropdown
 export const subBoardOptions = signal<Array<{ slug: string; name: string }>>([])
@@ -90,6 +95,7 @@ export const showNewPostForm = signal(false)
 export const newPostTitle = signal('')
 export const newPostContent = signal('')
 export const newPostHearth = signal('')
+export const newPostFlair = signal('')
 export const newPostSubmitting = signal(false)
 
 // ── Pagination ─────────────────────────────────────────────────────
@@ -141,6 +147,20 @@ export async function refreshBoardHearths(): Promise<void> {
     if (requestId === boardHearthsRequestId) {
       boardHearthsLoading.value = false
     }
+  }
+}
+
+export async function refreshBoardFlairs(): Promise<void> {
+  boardFlairsLoading.value = true
+  try {
+    boardFlairs.value = await fetchBoardFlairs()
+    boardFlairsError.value = false
+  } catch (err) {
+    console.warn('[Board] failed to load flair options:', err)
+    boardFlairsError.value = true
+    showToast('Flair 목록을 불러오지 못했습니다', 'error')
+  } finally {
+    boardFlairsLoading.value = false
   }
 }
 
@@ -396,13 +416,18 @@ export async function submitNewPost() {
   const title = newPostTitle.value.trim()
   const content = newPostContent.value.trim()
   const hearth = newPostHearth.value.trim()
+  const flair = newPostFlair.value.trim()
   if (!title || !content) return
   newPostSubmitting.value = true
   try {
-    await createPost(title, content, commentAuthor.value, { hearth: hearth || undefined })
+    const contentWithFlair = flair
+      ? `[flair:${flair}]\n${content.replace(/^\[flair:[a-z]+\]\s*/i, '')}`
+      : content
+    await createPost(title, contentWithFlair, commentAuthor.value, { hearth: hearth || undefined })
     newPostTitle.value = ''
     newPostContent.value = ''
     newPostHearth.value = ''
+    newPostFlair.value = ''
     showNewPostForm.value = false
     showToast('글을 등록했습니다', 'success')
     refreshBoard()

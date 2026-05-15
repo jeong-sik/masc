@@ -365,6 +365,50 @@ let namespace_truth_command_summary_json command_summary_json =
       ("provenance", `String "truth");
     ]
 
+let namespace_truth_dashboard_surface = "/api/v1/dashboard/namespace-truth"
+let namespace_truth_source = "namespace_truth_read_model"
+
+let namespace_truth_aliases =
+  [
+    "/api/v1/dashboard/project-snapshot";
+    "/api/v1/dashboard/room-truth";
+  ]
+
+let namespace_truth_aliases_json () =
+  `List (List.map (fun alias -> `String alias) namespace_truth_aliases)
+
+let namespace_truth_retention_json ~(config : Coord.config) =
+  `Assoc
+    [
+      ("scope", `String "dashboard_namespace_truth");
+      ("coordination_root", `String config.base_path);
+      ("workspace_path", `String config.workspace_path);
+      ("shell_input", `String "/api/v1/dashboard/shell");
+      ("execution_input", `String "/api/v1/dashboard/execution");
+      ("command_input", `String "command_summary_json");
+      ( "cache_policy",
+        `String "proactive_execution_cache_last_good_shell_fallback" );
+    ]
+
+let namespace_truth_metadata_fields ~(config : Coord.config) ~generated_at =
+  [
+    ("dashboard_surface", `String namespace_truth_dashboard_surface);
+    ("dashboard_aliases", namespace_truth_aliases_json ());
+    ("source", `String namespace_truth_source);
+    ("retention", namespace_truth_retention_json ~config);
+    ("generated_at_iso", `String generated_at);
+  ]
+
+let compose_namespace_truth_initializing ~(config : Coord.config) ~message =
+  let generated_at = Masc_domain.now_iso () in
+  `Assoc
+    (namespace_truth_metadata_fields ~config ~generated_at
+     @ [
+         ("status", `String "initializing");
+         ("generated_at", `String generated_at);
+         ("message", `String message);
+       ])
+
 module String_set = Set.Make (String)
 
 let json_bool_field key json ~default =
@@ -793,6 +837,7 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
 
 let compose_namespace_truth_snapshot ~(config : Coord.config) ~initialized ~shell_json
     ~execution_json ~command_summary_json =
+  let generated_at = Masc_domain.now_iso () in
   let meta_cognition_summary = json_assoc_field "meta_cognition" shell_json in
   let meta_summary_input, meta_interpretation =
     match Meta_cognition.parse_summary meta_cognition_summary with
@@ -841,8 +886,9 @@ let compose_namespace_truth_snapshot ~(config : Coord.config) ~initialized ~shel
       ]
   in
   `Assoc
-      [
-        ("generated_at", `String (Masc_domain.now_iso ()));
+    (namespace_truth_metadata_fields ~config ~generated_at
+     @ [
+         ("generated_at", `String generated_at);
         ("root", namespace_block);
         ( "execution",
         `Assoc
@@ -878,4 +924,4 @@ let compose_namespace_truth_snapshot ~(config : Coord.config) ~initialized ~shel
       ("readiness", readiness_json);
       ("attention_events", attention_events_json);
       ("focus", focus_json);
-    ]
+    ])

@@ -41,6 +41,24 @@ describe('parseAgentTimelineResponse', () => {
     expect(out.summary.tool_calls).toBe(7)
   })
 
+  it('preserves dashboard feed provenance metadata', () => {
+    const out = parseAgentTimelineResponse(
+      validResponse({
+        dashboard_surface: '/api/v1/agent-timeline',
+        source: 'agent_timeline_read_model',
+        generated_at_iso: '2026-04-17T04:00:01Z',
+        retention: {
+          scope: 'multi_source_tail',
+          durable_store: '.masc/activity-events/YYYY-MM/YYYY-MM-DD.jsonl',
+        },
+      }),
+    )
+    expect(out.dashboard_surface).toBe('/api/v1/agent-timeline')
+    expect(out.source).toBe('agent_timeline_read_model')
+    expect(out.retention?.durable_store).toBe('.masc/activity-events/YYYY-MM/YYYY-MM-DD.jsonl')
+    expect(out.generated_at_iso).toBe('2026-04-17T04:00:01Z')
+  })
+
   it('accepts a response with no events', () => {
     const out = parseAgentTimelineResponse(
       validResponse({

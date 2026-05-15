@@ -97,6 +97,7 @@ let () =
     (Filename.concat base_path "config/cascade.toml")
     (Filename.concat test_config_dir "cascade.toml");
   Unix.putenv "MASC_BASE_PATH" test_base_path;
+  Unix.putenv "MASC_BASE_PATH_INPUT" test_base_path;
   Unix.putenv "MASC_CONFIG_DIR" test_config_dir;
   Config_dir_resolver.reset ();
   let prompts_dir = Filename.concat base_path "config/prompts" in
@@ -206,6 +207,12 @@ let with_env name value f =
     f
 ;;
 
+let set_test_base_path base_dir =
+  Unix.putenv "MASC_BASE_PATH" base_dir;
+  Unix.putenv "MASC_BASE_PATH_INPUT" base_dir;
+  Config_dir_resolver.reset ()
+;;
+
 let prepare_test_config_root base_dir =
   let config_dir = Filename.concat (Filename.concat base_dir ".masc") "config" in
   Keeper_types.mkdir_p config_dir;
@@ -218,6 +225,8 @@ let prepare_test_config_root base_dir =
 let with_test_runtime_roots base_dir f =
   let config_dir = prepare_test_config_root base_dir in
   with_env "MASC_BASE_PATH" base_dir
+  @@ fun () ->
+  with_env "MASC_BASE_PATH_INPUT" base_dir
   @@ fun () ->
   with_env "MASC_CONFIG_DIR" config_dir
   @@ fun () ->
@@ -343,7 +352,7 @@ let test_observe_uses_precollected_board_events () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       Unix.putenv "MASC_BASE_PATH" base_dir;
+       set_test_base_path base_dir;
        Masc_mcp.Board.reset_global_for_test ();
        Masc_mcp.Board_dispatch.reset_for_test ();
        Masc_mcp.Board_dispatch.init_jsonl ();
@@ -392,7 +401,7 @@ let test_board_signal_stimulus_becomes_pending_board_event () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       Unix.putenv "MASC_BASE_PATH" base_dir;
+       set_test_base_path base_dir;
        Masc_mcp.Board.reset_global_for_test ();
        Masc_mcp.Board_dispatch.reset_for_test ();
        Masc_mcp.Board_dispatch.init_jsonl ();
@@ -459,7 +468,7 @@ let test_legacy_board_comment_stimulus_becomes_pending_board_event () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       Unix.putenv "MASC_BASE_PATH" base_dir;
+       set_test_base_path base_dir;
        Masc_mcp.Board.reset_global_for_test ();
        Masc_mcp.Board_dispatch.reset_for_test ();
        Masc_mcp.Board_dispatch.init_jsonl ();
@@ -751,7 +760,7 @@ let test_collect_board_events_keeps_non_mentions_as_followup_signal () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       Unix.putenv "MASC_BASE_PATH" base_dir;
+       set_test_base_path base_dir;
        Masc_mcp.Board.reset_global_for_test ();
        Masc_mcp.Board_dispatch.reset_for_test ();
        Masc_mcp.Board_dispatch.init_jsonl ();
@@ -790,7 +799,7 @@ let test_collect_board_events_keeps_non_mentions_for_room_signal_keepers () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       Unix.putenv "MASC_BASE_PATH" base_dir;
+       set_test_base_path base_dir;
        Masc_mcp.Board.reset_global_for_test ();
        Masc_mcp.Board_dispatch.reset_for_test ();
        Masc_mcp.Board_dispatch.init_jsonl ();
@@ -826,7 +835,7 @@ let test_collect_board_events_keeps_external_replies_after_self_comment () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       Unix.putenv "MASC_BASE_PATH" base_dir;
+       set_test_base_path base_dir;
        Masc_mcp.Board.reset_global_for_test ();
        Masc_mcp.Board_dispatch.reset_for_test ();
        Masc_mcp.Board_dispatch.init_jsonl ();
@@ -893,7 +902,7 @@ let test_collect_board_events_treats_generated_alias_as_self_comment () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       Unix.putenv "MASC_BASE_PATH" base_dir;
+       set_test_base_path base_dir;
        Masc_mcp.Board.reset_global_for_test ();
        Masc_mcp.Board_dispatch.reset_for_test ();
        Masc_mcp.Board_dispatch.init_jsonl ();
@@ -958,7 +967,7 @@ let test_observe_ignores_scope_messages_without_room_signal_opt_in () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       Unix.putenv "MASC_BASE_PATH" base_dir;
+       set_test_base_path base_dir;
        let config = Masc_mcp.Coord.default_config base_dir in
        ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
        ignore
@@ -982,7 +991,7 @@ let test_observe_collects_scope_messages_for_room_signal_keepers () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       Unix.putenv "MASC_BASE_PATH" base_dir;
+       set_test_base_path base_dir;
        let config = Masc_mcp.Coord.default_config base_dir in
        ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
        ignore
@@ -1010,7 +1019,7 @@ let test_observe_damps_keeper_scope_chatter_but_keeps_direct_mentions () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       Unix.putenv "MASC_BASE_PATH" base_dir;
+       set_test_base_path base_dir;
        let config = Masc_mcp.Coord.default_config base_dir in
        ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
        ignore
@@ -1053,7 +1062,7 @@ let test_observe_skips_stale_terminal_task_mentions () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       Unix.putenv "MASC_BASE_PATH" base_dir;
+       set_test_base_path base_dir;
        let config = Masc_mcp.Coord.default_config base_dir in
        ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
        ignore
@@ -5293,16 +5302,20 @@ let test_run_keeper_cycle_skips_non_executable_phase () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   let old_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
+  let old_base_path_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
   Fun.protect
     ~finally:(fun () ->
       (match old_base_path with
        | Some value -> Unix.putenv "MASC_BASE_PATH" value
        | None -> Unix.putenv "MASC_BASE_PATH" "");
+      (match old_base_path_input with
+       | Some value -> Unix.putenv "MASC_BASE_PATH_INPUT" value
+       | None -> Unix.putenv "MASC_BASE_PATH_INPUT" "");
       KR.clear ();
       cleanup_dir base_dir)
     (fun () ->
        KR.clear ();
-       Unix.putenv "MASC_BASE_PATH" base_dir;
+       set_test_base_path base_dir;
        let meta = make_meta "phase-gated-keeper" in
        let config = Masc_mcp.Coord.default_config base_dir in
        ignore (KR.register ~base_path:base_dir meta.name meta);
@@ -5437,16 +5450,20 @@ let test_run_keeper_cycle_fails_closed_when_registry_phase_missing () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   let old_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
+  let old_base_path_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
   Fun.protect
     ~finally:(fun () ->
       (match old_base_path with
        | Some value -> Unix.putenv "MASC_BASE_PATH" value
        | None -> Unix.putenv "MASC_BASE_PATH" "");
+      (match old_base_path_input with
+       | Some value -> Unix.putenv "MASC_BASE_PATH_INPUT" value
+       | None -> Unix.putenv "MASC_BASE_PATH_INPUT" "");
       KR.clear ();
       cleanup_dir base_dir)
     (fun () ->
        KR.clear ();
-       Unix.putenv "MASC_BASE_PATH" base_dir;
+       set_test_base_path base_dir;
        let meta = make_meta "missing-registry-phase-keeper" in
        let config = Masc_mcp.Coord.default_config base_dir in
        ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
@@ -9729,7 +9746,7 @@ let test_social_model_routes_blocker_to_board_post () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       Unix.putenv "MASC_BASE_PATH" base_dir;
+       set_test_base_path base_dir;
        Masc_mcp.Board.reset_global_for_test ();
        Masc_mcp.Board_dispatch.reset_for_test ();
        Masc_mcp.Board_dispatch.init_jsonl ();

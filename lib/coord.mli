@@ -27,10 +27,16 @@ val init : config -> agent_name:string option -> string
 
 module For_testing : sig
   val warn_telemetry_drop :
-    event_family:string -> event_kind:string -> exn -> unit
+    event:Coord_telemetry_drop_event.t -> exn -> unit
   (** Emit the same observable drop marker used when audit/telemetry hooks
       cannot run. Exposed so tests do not depend on backend-specific
-      [Effect.Unhandled] behavior. *)
+      [Effect.Unhandled] behavior.
+
+      RFC-0088 §4 Option A (2026-05-15): the previous
+      [~event_family:string -> ~event_kind:string] surface was replaced
+      by the typed {!Coord_telemetry_drop_event.t} sum. The Prometheus
+      label wire format is unchanged ([family_to_wire] / [kind_to_wire]
+      are byte-for-byte compatible with the prior free-string values). *)
 end
 
 (** {1 FSM drift observability (#9795)} *)

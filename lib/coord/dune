@@ -9,6 +9,7 @@
   coord_bootstrap
   coord_broadcast
   coord_hooks
+  coord_telemetry_drop_event
   coord_identity
   coord_task_id
   coord_utils_backend_setup

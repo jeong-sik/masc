@@ -71,9 +71,20 @@ let merge_detail_fields fields details =
    the caller's control flow), but we now emit a Warn log line and
    bump [masc_coord_telemetry_drop_total{event_family,event_kind}] so
    operators can see in Grafana / log aggregation when production
-   paths are dispatching lifecycle outside an Eio fiber. *)
-let warn_telemetry_drop ~event_family ~event_kind exn =
+   paths are dispatching lifecycle outside an Eio fiber.
+
+   RFC-0088 §4 Option A (2026-05-15): [event_family] / [event_kind]
+   were previously two free strings. They are now derived from a closed
+   sum [Coord_telemetry_drop_event.t] mirroring the [Read_drop_reason.t]
+   pattern of RFC-0044. The counter itself is retained — per RFC-0088
+   §4.1 the "event itself is the telemetry payload" and the caller is a
+   fire-and-forget lifecycle hook with no [Result.t] chain to propagate
+   to. But the label cardinality is now compiler-bounded so a new emit
+   site cannot silently widen it. *)
+let warn_telemetry_drop ~(event : Coord_telemetry_drop_event.t) exn =
   let exn_str = Printexc.to_string exn in
+  let event_family = Coord_telemetry_drop_event.family_to_wire event in
+  let event_kind = Coord_telemetry_drop_event.kind_to_wire event in
   let details =
     `Assoc
       [ "event_family", `String event_family
@@ -101,7 +112,7 @@ let warn_telemetry_drop ~event_family ~event_kind exn =
   Telemetry_observe.observe_silent ~kind:"coord_telemetry_drop_metric" (fun () ->
     Prometheus.inc_counter
       Prometheus.metric_coord_telemetry_drop
-      ~labels:[ "event_family", event_family; "event_kind", event_kind ]
+      ~labels:(Coord_telemetry_drop_event.to_prometheus_labels event)
       ())
 ;;
 
@@ -191,7 +202,13 @@ let observe_agent_lifecycle
         Telemetry_eio.track_agent_joined config ~agent_id ())
   with
   | Stdlib.Effect.Unhandled _ as exn ->
-    warn_telemetry_drop ~event_family:"agent_lifecycle" ~event_kind exn
+    let lifecycle_kind : Coord_telemetry_drop_event.lifecycle_kind =
+      match event with
+      | Coord_hooks.Lifecycle_join -> Lifecycle_join
+      | Coord_hooks.Lifecycle_rejoin -> Lifecycle_rejoin
+      | Coord_hooks.Lifecycle_leave -> Lifecycle_leave
+    in
+    warn_telemetry_drop ~event:(Agent_lifecycle lifecycle_kind) exn
 ;;
 
 (* #8605 family: replaced four parallel string switches on [transition]
@@ -256,7 +273,7 @@ let observe_task_transition_event
        | Masc_domain.Reject_verification -> ())
    with
    | Stdlib.Effect.Unhandled _ as exn ->
-     warn_telemetry_drop ~event_family:"task_transition" ~event_kind:transition_s exn);
+     warn_telemetry_drop ~event:(Task_transition transition) exn);
   try
     Keeper_accountability.record_task_transition
       config
@@ -266,7 +283,7 @@ let observe_task_transition_event
       ~details
   with
   | Stdlib.Effect.Unhandled _ as exn ->
-    warn_telemetry_drop ~event_family:"accountability" ~event_kind:transition_s exn
+    warn_telemetry_drop ~event:(Accountability transition) exn
 ;;
 
 (* force_release_task — zombie cleanup needs task management logic *)

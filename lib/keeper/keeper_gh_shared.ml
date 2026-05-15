@@ -2,7 +2,7 @@
 let with_keeper_gh_env = Keeper_gh_env.with_env
 
 (* RFC-0084 host-config-cleanup-B — zsh binary path migration. *)
-let host_zsh = (Host_config.legacy_macos_default ()).host_zsh
+let host_zsh = (Host_config.host ()).host_zsh
 
 (* ================================================================ *)
 (* GH entity cache (inlined from former keeper_gh_cache.ml).         *)

@@ -5,18 +5,18 @@ open Alcotest
     PR-C migrates the 6 absolute binary path literals in
     [lib/keeper/keeper_shell_ops.ml] (pwd / ls / cat / head / tail / wc)
     to the typed [Host_config.coreutils] record field.  The single
-    [let coreutils = (Host_config.legacy_macos_default ()).coreutils]
+    [let coreutils = (Host_config.host ()).coreutils]
     binding at module-init time is the only [Host_config] call.
 
     Behaviour is byte-identical today; the migration establishes a
     single source of truth so a future PR can flip
-    [Host_config.legacy_macos_default] to PATH-resolved binaries
+    [Host_config.host] to PATH-resolved binaries
     for Alpine / BusyBox / Talos portability.
 
     Pins:
     - 0 occurrences of any of the 6 absolute literals in
       [keeper_shell_ops.ml] (regression guard)
-    - [Host_config.legacy_macos_default] is invoked exactly once
+    - [Host_config.host] is invoked exactly once
       from the module (positive assertion + no per-call-site
       regression)
     - Byte-identical equality between the bound [coreutils] field
@@ -68,16 +68,16 @@ let test_single_host_config_invocation () =
   let content = read_file "lib/keeper/keeper_shell_ops.ml" in
   let occurrences =
     count_substring ~haystack:content
-      ~needle:"Host_config.legacy_macos_default"
+      ~needle:"Host_config.host"
   in
   (check int)
-    "Host_config.legacy_macos_default must be invoked exactly once \
+    "Host_config.host must be invoked exactly once \
      from lib/keeper/keeper_shell_ops.ml after PR-C"
     pinned_host_config_invocations occurrences
 ;;
 
 let test_coreutils_field_byte_identical () =
-  let typed = (Masc_mcp.Host_config.legacy_macos_default ()).coreutils in
+  let typed = (Masc_mcp.Host_config.host ()).coreutils in
   (* Sample one field; all six come from the same record so a single
      equality is sufficient to detect drift. *)
   let module H = Masc_mcp.Host_config in

@@ -2,12 +2,12 @@
 
 (* RFC-0084 host-config-cleanup-A — credential root migration.
    Was: ad-hoc literal string for the credential root.  Now delegates
-   to the typed [Host_config.legacy_macos_default] surface so the
+   to the typed [Host_config.host] surface so the
    constant has a single source of truth.  Behaviour is byte-identical
    today (the field's value matches the previous literal at PR-1
-   author time); a future PR can flip [legacy_macos_default] to a
+   author time); a future PR can flip [host] to a
    [resolve ~base_path]-relative value without touching this module. *)
-let cred_root = (Host_config.legacy_macos_default ()).cred_root
+let cred_root = (Host_config.host ()).cred_root
 let explicit_ssh_key_container_path =
   Filename.concat (Filename.concat cred_root ".ssh") "id_credential"
 

@@ -6,7 +6,7 @@ open Keeper_types
 open Keeper_exec_shared
 
 (* RFC-0084 host-config-cleanup-B — zsh binary path migration. *)
-let host_zsh = (Host_config.legacy_macos_default ()).host_zsh
+let host_zsh = (Host_config.host ()).host_zsh
 
 (* Issue #8480: Variant SSOT for PR review event. Adding a new
    constructor forces compilation in [pr_review_event_to_string],

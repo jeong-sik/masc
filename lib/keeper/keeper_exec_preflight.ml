@@ -1,7 +1,7 @@
 open Keeper_types
 
 (* RFC-0084 host-config-cleanup-B — zsh binary path migration. *)
-let host_zsh = (Host_config.legacy_macos_default ()).host_zsh
+let host_zsh = (Host_config.host ()).host_zsh
 
 let json_string_field name json = Json_util.get_string json name
 

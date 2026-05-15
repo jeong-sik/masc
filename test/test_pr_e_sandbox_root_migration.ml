@@ -4,7 +4,7 @@ open Alcotest
 
     PR-E migrates [lib/worker_dev_tools.ml:85] from the ad-hoc
     [Filename.concat home "me"] literal to
-    [Host_config.legacy_macos_default ()].sandbox_workspace_root,
+    [Host_config.host ()].sandbox_workspace_root,
     closing the first of the 11 host-hardcode call-sites that PR-12
     surfaced as typed-but-dormant.
 
@@ -53,7 +53,7 @@ let test_no_home_me_literal_in_worker_dev_tools () =
 ;;
 
 let test_sandbox_workspace_root_contract () =
-  let d = Masc_mcp.Host_config.legacy_macos_default () in
+  let d = Masc_mcp.Host_config.host () in
   let acceptable_roots =
     match Sys.getenv_opt "HOME" with
     | Some home -> [ Filename.concat home "me" ]
@@ -63,7 +63,7 @@ let test_sandbox_workspace_root_contract () =
   let matched = List.exists (String.equal actual) acceptable_roots in
   (check bool)
     (Printf.sprintf
-       "Host_config.legacy_macos_default ().sandbox_workspace_root = %S must \
+       "Host_config.host ().sandbox_workspace_root = %S must \
         be one of [%s]"
        actual
        (String.concat "; " acceptable_roots))
@@ -74,10 +74,10 @@ let test_host_config_call_in_worker_dev_tools () =
   let path = "lib/worker_dev_tools.ml" in
   let occurrences =
     count_literal_occurrences ~path
-      ~literal:"Host_config.legacy_macos_default"
+      ~literal:"Host_config.host"
   in
   (check bool)
-    "Host_config.legacy_macos_default must be called from \
+    "Host_config.host must be called from \
      lib/worker_dev_tools.ml after PR-E"
     true (occurrences >= 1)
 ;;

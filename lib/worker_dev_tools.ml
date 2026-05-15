@@ -75,7 +75,7 @@ let is_within_dir ~dir path = path = dir || String.starts_with ~prefix:(dir ^ "/
     [home/me] literal join with the typed
     [Host_config.sandbox_workspace_root] field introduced by PR-12.
     Behaviour change: when [HOME] is unset, the previous code rejected
-    the fallback subtree entirely; now [Host_config.legacy_macos_default]
+    the fallback subtree entirely; now [Host_config.host]
     surfaces a documented fallback ([/tmp/masc-fleet]) which is allowed.
     This aligns the Fleet worker with the same SSOT that other keeper
     sandbox surfaces will migrate to in later cleanup PRs. *)
@@ -87,7 +87,7 @@ let validate_path ?workdir path =
     is_within_dir ~dir:(resolve_path "/tmp") resolved
     || is_within_dir ~dir:resolved_wd resolved
   | None ->
-    let cfg = Host_config.legacy_macos_default () in
+    let cfg = Host_config.host () in
     is_within_dir ~dir:(resolve_path "/tmp") resolved
     || is_within_dir ~dir:(resolve_path (Sys.getcwd ())) resolved
     || is_within_dir ~dir:(resolve_path cfg.sandbox_workspace_root) resolved

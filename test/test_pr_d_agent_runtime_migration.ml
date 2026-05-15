@@ -80,18 +80,18 @@ let test_no_tmp_agent_literals_in_consumers () =
 let test_agent_runtime_root_binding_count () =
   let occurrences =
     count_across_files ~files:consumer_files
-      ~needle:"Host_config.legacy_macos_default"
+      ~needle:"Host_config.host"
   in
   (check int)
-    "Host_config.legacy_macos_default invoked exactly once per \
+    "Host_config.host invoked exactly once per \
      consumer module (2 modules)"
     pinned_agent_runtime_root_binding_count occurrences
 ;;
 
 let test_agent_runtime_root_field_value () =
-  let d = Masc_mcp.Host_config.legacy_macos_default () in
+  let d = Masc_mcp.Host_config.host () in
   (check string)
-    "Host_config.legacy_macos_default ().agent_runtime_root = /tmp today"
+    "Host_config.host ().agent_runtime_root = /tmp today"
     "/tmp" d.agent_runtime_root
 ;;
 

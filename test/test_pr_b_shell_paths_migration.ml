@@ -22,7 +22,7 @@ open Alcotest
     the dependency local.
 
     Behaviour byte-identical today; a future PR can flip
-    [Host_config.legacy_macos_default] to PATH-resolved binaries
+    [Host_config.host] to PATH-resolved binaries
     for NixOS / Alpine portability without touching this PR's call
     sites.
 
@@ -96,10 +96,10 @@ let test_no_zsh_literals_in_consumer_files () =
 let test_bash_binding_invoked_exactly_once () =
   let occurrences =
     count_across_files ~files:bash_consumer_files
-      ~needle:"Host_config.legacy_macos_default"
+      ~needle:"Host_config.host"
   in
   (check int)
-    "Host_config.legacy_macos_default invoked exactly once across \
+    "Host_config.host invoked exactly once across \
      bash consumer files"
     pinned_bash_binding_count occurrences
 ;;
@@ -107,21 +107,21 @@ let test_bash_binding_invoked_exactly_once () =
 let test_zsh_binding_invoked_per_module () =
   let occurrences =
     count_across_files ~files:zsh_consumer_files
-      ~needle:"Host_config.legacy_macos_default"
+      ~needle:"Host_config.host"
   in
   (check int)
-    "Host_config.legacy_macos_default invoked once per zsh consumer \
+    "Host_config.host invoked once per zsh consumer \
      module (3 modules)"
     pinned_zsh_binding_count occurrences
 ;;
 
 let test_host_config_field_values () =
-  let d = Masc_mcp.Host_config.legacy_macos_default () in
+  let d = Masc_mcp.Host_config.host () in
   (check string)
-    "Host_config.legacy_macos_default ().host_bash = /bin/bash today"
+    "Host_config.host ().host_bash = /bin/bash today"
     "/bin/bash" d.host_bash;
   (check string)
-    "Host_config.legacy_macos_default ().host_zsh = /bin/zsh today"
+    "Host_config.host ().host_zsh = /bin/zsh today"
     "/bin/zsh" d.host_zsh
 ;;
 

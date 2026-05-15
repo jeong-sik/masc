@@ -133,6 +133,7 @@
   keeper_agent_result
   keeper_agent_error
   keeper_agent_memory_episode
+  cascade_wire_overlay
   cascade_agent_context
   keeper_oas_checkpoint
   keeper_cascade_engine

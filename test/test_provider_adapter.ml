@@ -2,6 +2,7 @@ open Alcotest
 module Adapter = Masc_mcp.Provider_adapter
 module Candidate = Masc_mcp.Cascade_runtime_candidate
 module Health = Masc_mcp.Cascade_health_tracker
+module Wire_overlay = Masc_mcp.Cascade_wire_overlay
 
 let with_env name value f =
   let previous = Sys.getenv_opt name in
@@ -606,12 +607,12 @@ let test_unmetered_provider_uses_declared_telemetry_policy () =
     (Adapter.is_structurally_unmetered_provider "unknown")
 ;;
 
-(* RFC-0058 Phase 5.6 boundary helper: apply_wire_overlay.
+(* RFC-0058 Phase 5.6 boundary helper: Cascade_wire_overlay.apply.
 
    These tests seal the invariant that the keeper layer no longer
    needs to pattern-match on [provider_cfg.kind] and the SDK's
    [provider] variant: every shape gets routed by this single helper
-   inside [Provider_adapter]. *)
+   outside [Provider_adapter]. *)
 
 let agent_sdk_local_cfg ~base_url ~model_id ~api_key_env =
   { Agent_sdk.Provider.provider = Agent_sdk.Provider.Local { base_url }
@@ -640,7 +641,7 @@ let test_apply_wire_overlay_rewraps_openai_compat_local_custom_path () =
       ~model_id:"qwen3.6:35b-a3b-mlx-bf16"
       ~api_key_env:""
   in
-  let result = Adapter.apply_wire_overlay ~provider_cfg:cfg sdk_cfg in
+  let result = Wire_overlay.apply ~provider_cfg:cfg sdk_cfg in
   match result.provider with
   | Agent_sdk.Provider.OpenAICompat { base_url; auth_header; path; static_token } ->
     check string "base_url preserved" "http://127.0.0.1:11434" base_url;
@@ -669,7 +670,7 @@ let test_apply_wire_overlay_keeps_local_when_path_is_default () =
       ~model_id:"qwen3.6:35b-a3b-mlx-bf16"
       ~api_key_env:""
   in
-  let result = Adapter.apply_wire_overlay ~provider_cfg:cfg sdk_cfg in
+  let result = Wire_overlay.apply ~provider_cfg:cfg sdk_cfg in
   match result.provider with
   | Agent_sdk.Provider.Local { base_url } ->
     check string "default path leaves Local untouched" "http://127.0.0.1:11434" base_url
@@ -687,7 +688,7 @@ let test_apply_wire_overlay_passthrough_for_anthropic () =
   let sdk_cfg =
     agent_sdk_anthropic_cfg ~model_id:"claude-sonnet-4-5" ~api_key_env:"ANTHROPIC_API_KEY"
   in
-  let result = Adapter.apply_wire_overlay ~provider_cfg:cfg sdk_cfg in
+  let result = Wire_overlay.apply ~provider_cfg:cfg sdk_cfg in
   match result.provider with
   | Agent_sdk.Provider.Anthropic -> ()
   | _ -> fail "non-OpenAI_compat kind must pass through"
@@ -709,7 +710,7 @@ let test_apply_wire_overlay_omits_auth_header_when_key_blank () =
       ~model_id:"local-model"
       ~api_key_env:""
   in
-  let result = Adapter.apply_wire_overlay ~provider_cfg:cfg sdk_cfg in
+  let result = Wire_overlay.apply ~provider_cfg:cfg sdk_cfg in
   match result.provider with
   | Agent_sdk.Provider.OpenAICompat { auth_header; static_token; _ } ->
     check (option string) "auth_header None when key blank" None auth_header;

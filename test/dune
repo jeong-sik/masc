@@ -1561,7 +1561,7 @@
 ; Pins literal "/tmp/keeper-creds" count at 0 in
 ; lib/keeper/host_config_provider.ml and verifies
 ; Host_config.host is invoked.  Cross-checks that
-; Host_config_provider.cred_root equals the typed surface field.
+; Keeper_host_config_provider.cred_root equals the typed surface field.
 (test
  (name test_pr_a_cred_root_migration)
  (modules test_pr_a_cred_root_migration)

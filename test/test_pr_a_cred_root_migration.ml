@@ -2,7 +2,7 @@ open Alcotest
 
 (** RFC-0084 host-config-cleanup-A — credential root migration.
 
-    PR-A delegates [Host_config_provider.cred_root] to
+    PR-A delegates [Keeper_host_config_provider.cred_root] to
     [Host_config.host ().cred_root] instead of the
     ad-hoc literal ["/tmp/keeper-creds"], establishing a single
     source of truth for the constant.
@@ -59,13 +59,13 @@ let test_host_config_called_in_provider () =
 ;;
 
 let test_cred_root_byte_identical_to_typed_surface () =
-  (* Today's behaviour is preserved: [Host_config_provider.cred_root]
+  (* Today's behaviour is preserved: [Keeper_host_config_provider.cred_root]
      and [Host_config.host ().cred_root] must hold
      the same string at module-init time. *)
   let typed = (Host_config.host ()).cred_root in
-  let provider = Masc_mcp.Host_config_provider.cred_root in
+  let provider = Masc_mcp.Keeper_host_config_provider.cred_root in
   (check string)
-    "Host_config_provider.cred_root must equal \
+    "Keeper_host_config_provider.cred_root must equal \
      Host_config.host ().cred_root"
     typed provider
 ;;

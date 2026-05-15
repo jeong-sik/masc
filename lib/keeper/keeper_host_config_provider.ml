@@ -1,4 +1,4 @@
-(** See {!Host_config_provider} interface. *)
+(** See {!Keeper_host_config_provider} interface. *)
 
 (* RFC-0084 host-config-cleanup-A — credential root migration.
    Was: ad-hoc literal string for the credential root.  Now delegates

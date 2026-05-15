@@ -363,6 +363,13 @@ let degraded_retry_slot_phase_budget_sec =
 let degraded_retry_slot_phase_available ~(time_spent_in_turn_s : float) : bool =
   Float.max 0.0 time_spent_in_turn_s < degraded_retry_slot_phase_budget_sec
 
+let cascade_reason_is_structural_attempt_timeout
+    (reason : Keeper_types.cascade_exhaustion_reason) : bool =
+  match reason with
+  | Keeper_types.Other_detail detail ->
+      String_util.contains_substring_ci detail "max_execution_time_s"
+  | _ -> false
+
 let degraded_retry_bypasses_slot_phase_guard
     (err : Agent_sdk.Error.sdk_error) : bool =
   (* Enumerate every [masc_internal_error] variant plus [None] so the
@@ -372,6 +379,9 @@ let degraded_retry_bypasses_slot_phase_guard
      for a guard that decides whether to bypass slot-phase admission. *)
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some (Keeper_turn_driver.Oas_timeout_budget _) -> true
+  | Some (Keeper_turn_driver.Cascade_exhausted { reason; _ })
+    when cascade_reason_is_structural_attempt_timeout reason ->
+      true
   | Some
       ( Keeper_turn_driver.Cascade_exhausted _
       | Keeper_turn_driver.Resumable_cli_session _

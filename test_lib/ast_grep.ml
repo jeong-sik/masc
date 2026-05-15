@@ -51,6 +51,58 @@ let count_calls ~module_path ~callee =
     !count
 ;;
 
+(* Count value-binding patterns ([let name = ...] or [let rec name = ...])
+   whose identifier equals [name] exactly.  Catches the *identifier* —
+   the axis [count_string_literals] cannot see, because identifiers are
+   [Ppat_var] / [Pexp_ident] nodes, not [Pconst_string].
+
+   Use this for rename-regression tests: if a sweep dropped a
+   misleading [_xxx] underscore prefix, [count_value_bindings ~name:"_xxx"]
+   must return 0 across the affected files. *)
+let count_value_bindings ~module_path ~name =
+  match parse_implementation module_path with
+  | Error _ -> 0
+  | Ok structure ->
+    let count = ref 0 in
+    let iter =
+      { Ast_iterator.default_iterator with
+        pat =
+          (fun self p ->
+            (match p.ppat_desc with
+             | Ppat_var { txt; _ } when txt = name -> incr count
+             | _ -> ());
+            Ast_iterator.default_iterator.pat self p)
+      }
+    in
+    iter.structure iter structure;
+    !count
+;;
+
+(* Count value bindings whose identifier starts with [prefix].
+   Useful for prefix-purge regressions (e.g., [_tool_spec_*]). *)
+let count_value_bindings_with_prefix ~module_path ~prefix =
+  match parse_implementation module_path with
+  | Error _ -> 0
+  | Ok structure ->
+    let count = ref 0 in
+    let plen = String.length prefix in
+    let starts_with s =
+      String.length s >= plen && String.sub s 0 plen = prefix
+    in
+    let iter =
+      { Ast_iterator.default_iterator with
+        pat =
+          (fun self p ->
+            (match p.ppat_desc with
+             | Ppat_var { txt; _ } when starts_with txt -> incr count
+             | _ -> ());
+            Ast_iterator.default_iterator.pat self p)
+      }
+    in
+    iter.structure iter structure;
+    !count
+;;
+
 (* Count string literals whose value contains [needle] as a substring.
    Excludes comments and docstrings — those are not Pconst_string
    nodes in the Parsetree. *)

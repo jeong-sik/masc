@@ -56,10 +56,10 @@ let handle_start ~tool_name ~start_time (ctx : context) : tool_result option =
     end else begin
       let expanded =
         if String.length path >= 2 && Char.equal path.[0] '~' && Char.equal path.[1] '/' then
-          let home = match Sys.getenv_opt "HOME" with Some h -> h | None -> "/tmp" in
+          let home = match Sys.getenv_opt "HOME" with Some h -> h | None -> Filename.get_temp_dir_name () in
           Filename.concat home (String.sub path 2 (String.length path - 2))
         else if String.length path = 1 && Char.equal path.[0] '~' then
-          (match Sys.getenv_opt "HOME" with Some h -> h | None -> "/tmp")
+          (match Sys.getenv_opt "HOME" with Some h -> h | None -> Filename.get_temp_dir_name ())
         else if Filename.is_relative path then
           Filename.concat (Sys.getcwd ()) path
         else

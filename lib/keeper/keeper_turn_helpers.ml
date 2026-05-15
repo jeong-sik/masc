@@ -350,6 +350,8 @@ let record_pre_dispatch_terminal_observation
       false
   in
   if receipt_append_ok then
+    Keeper_status_detail.invalidate_status_cache_for meta.name;
+  if receipt_append_ok then
     append_manifest
       ~site:"pre_dispatch_receipt_appended"
       Keeper_runtime_manifest.Receipt_appended;

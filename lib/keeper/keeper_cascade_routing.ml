@@ -2,6 +2,10 @@
 
     Maps keeper phase to an effective cascade profile name.
     Pure function — mirrors TLA+ KeeperCoreTriad.SelectCascade action.
+    The live keeper-turn hot path phase-gates non-executable phases before
+    provider dispatch; those branches are retained for diagnostics/spec parity
+    and must not imply that a new provider turn will run while paused,
+    draining, overflowed, compacting, or handing off.
 
     @since Core Triad (State x Decision x Cascade) *)
 
@@ -22,13 +26,13 @@ let select_cascade ~(base_cascade : string) ~(phase : Keeper_state_machine.phase
           reason = "failing phase: cheap local recovery" }
     | Compacting | HandingOff ->
         { effective_cascade = Keeper_config.local_only_cascade_name;
-          reason = "buffer operation: local model sufficient" }
+          reason = "buffer operation: diagnostic route; hot path blocks new turns" }
     | Overflowed ->
         { effective_cascade = base_cascade;
           reason = "overflowed phase: turn blocked upstream pending compaction" }
     | Draining | Paused ->
         { effective_cascade = base_cascade;
-          reason = "winding down: complete in-progress work" }
+          reason = "non-executable phase: turn blocked upstream" }
     | Offline | Stopped | Dead | Zombie | Crashed | Restarting ->
         { effective_cascade = base_cascade;
           reason = "non-turn phase (blocked upstream)" }

@@ -23,6 +23,12 @@ module Float = Stdlib.Float
 
 open Tool_inline_dispatch_types
 
+(* RFC-0084 host-config-cleanup-D — agent runtime root migration.
+   Resolves the host runtime root once at module-init from the typed
+   [Host_config.agent_runtime_root] field; the 2 cross-process
+   agent-identity scratch files below reference the bound name. *)
+let agent_runtime_root = (Host_config.legacy_macos_default ()).agent_runtime_root
+
 (** Argument extraction helpers bound to ctx.arguments. *)
 let arg_get_string ctx key default =
   Safe_ops.json_string ~default key ctx.arguments
@@ -184,7 +190,7 @@ let handle_join ~tool_name ~start_time (ctx : context) : tool_result option =
     if Option.is_none mcp_session_id then begin
       Log.Misc.warn "[sid=%s] [deprecated] writing agent name to /tmp file for TERM session — migrate to Agent_identity" sid;
       let term_session_id = Option.value ~default:"default" (Sys.getenv_opt "TERM_SESSION_ID") in
-      let agent_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
+      let agent_file = Filename.concat agent_runtime_root (Printf.sprintf ".masc_agent_%s" term_session_id) in
       (try
         Fs_compat.save_file agent_file nickname
       with
@@ -264,7 +270,7 @@ let handle_leave ~tool_name ~start_time (ctx : context) : tool_result option =
   Session.unregister registry ~agent_name;
   if Option.is_none mcp_session_id then begin
     let session_id = Option.value ~default:"default" (Sys.getenv_opt "TERM_SESSION_ID") in
-    let agent_file = Printf.sprintf "/tmp/.masc_agent_%s" session_id in
+    let agent_file = Filename.concat agent_runtime_root (Printf.sprintf ".masc_agent_%s" session_id) in
     Safe_ops.remove_file_logged ~context:"masc_leave" agent_file
   end;
   Some (Tool_result.ok ~tool_name ~start_time result)

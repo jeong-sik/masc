@@ -8,6 +8,14 @@
 let log_mcp_exn = Mcp_server_eio_helpers.log_mcp_exn
 let wait_for_message_eio = Mcp_server_eio_helpers.wait_for_message_eio
 
+(* RFC-0084 host-config-cleanup-D — agent runtime root migration.
+   Resolves the host runtime root once at module-init from the typed
+   [Host_config.agent_runtime_root] field; the 5 cross-process
+   agent-identity scratch files below reference the bound name so a
+   future PR can flip the typed surface to a base-path-relative
+   layout without touching this module's call sites. *)
+let agent_runtime_root = (Host_config.legacy_macos_default ()).agent_runtime_root
+
 (* #10699 Family A — "Join required" surfaces 28 / 24h events for
    masc_transition + masc_claim_next while the underlying keeper had
    joined under its canonical name at boot via
@@ -188,7 +196,7 @@ let execute_tool_eio
     match mcp_session_id with
     | None -> None
     | Some sid ->
-      let file = Printf.sprintf "/tmp/.masc_agent_mcp_%s" sid in
+      let file = Filename.concat agent_runtime_root (Printf.sprintf ".masc_agent_mcp_%s" sid) in
       (try
          let name = Fs_compat.load_file file |> String.trim in
          if name = ""
@@ -207,7 +215,7 @@ let execute_tool_eio
     match mcp_session_id with
     | None -> ()
     | Some sid ->
-      let file = Printf.sprintf "/tmp/.masc_agent_mcp_%s" sid in
+      let file = Filename.concat agent_runtime_root (Printf.sprintf ".masc_agent_mcp_%s" sid) in
       (try Fs_compat.save_file file agent_name with
        | Sys_error msg -> Log.Misc.warn "write_mcp_session_agent: %s" msg
        | Eio.Io _ as exn ->
@@ -250,7 +258,7 @@ let execute_tool_eio
                let term_session_id =
                  Option.value ~default:"" (Sys.getenv_opt "TERM_SESSION_ID")
                in
-               let term_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
+               let term_file = Filename.concat agent_runtime_root (Printf.sprintf ".masc_agent_%s" term_session_id) in
                match
                  Safe_ops.protect ~default:None (fun () ->
                    let name = Fs_compat.load_file term_file |> String.trim in
@@ -328,7 +336,7 @@ let execute_tool_eio
       match Sys.getenv_opt "TERM_SESSION_ID" with
       | None -> None
       | Some sid ->
-        let file = Printf.sprintf "/tmp/.masc_agent_%s" sid in
+        let file = Filename.concat agent_runtime_root (Printf.sprintf ".masc_agent_%s" sid) in
         (try
            let name = Fs_compat.load_file file |> String.trim in
            if name = "" then None else Some name
@@ -567,7 +575,7 @@ let execute_tool_eio
            match Sys.getenv_opt "TERM_SESSION_ID" with
            | None -> ()
            | Some sid ->
-             let file = Printf.sprintf "/tmp/.masc_agent_%s" sid in
+             let file = Filename.concat agent_runtime_root (Printf.sprintf ".masc_agent_%s" sid) in
              (try Fs_compat.save_file file nickname with
               | Eio.Cancel.Cancelled _ as e -> raise e
               | e ->

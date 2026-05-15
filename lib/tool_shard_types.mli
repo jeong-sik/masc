@@ -68,3 +68,6 @@ val base_tools : Masc_domain.tool_schema list
 
 val board_tools : Masc_domain.tool_schema list
 (** Pure: keeper_board tool schemas. *)
+
+val filesystem_tools : Masc_domain.tool_schema list
+(** Pure: keeper_fs tool schemas. *)

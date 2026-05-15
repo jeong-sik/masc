@@ -95,6 +95,7 @@ describe('IdeToolbar', () => {
     ])
 
     const routeLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-toolbar-context-links button')]
+    expect(container.querySelector('.ide-toolbar-context-route-count')?.textContent).toBe('CTX 4')
     expect(routeLinks.map(link => link.getAttribute('aria-label'))).toEqual([
       'Open Code lib/runtime.ml:42',
       'Open Task task-runtime',

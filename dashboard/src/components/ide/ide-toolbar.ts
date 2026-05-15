@@ -328,6 +328,13 @@ function ToolbarContextFocus({
       ` : null}
       ${routeLinks.length > 0 ? html`
         <div class="ide-toolbar-context-links" aria-label="Current context route links">
+          <span
+            class="ide-toolbar-context-route-count"
+            title=${`${routeLinks.length} current context route links`}
+            aria-label=${`${routeLinks.length} current context route links`}
+          >
+            CTX ${routeLinks.length}
+          </span>
           ${routeLinks.map(link => html`
             <button
               key=${link.id}

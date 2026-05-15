@@ -132,26 +132,9 @@ let runtime_lane_of_model (_model : string) : string = runtime_lane_label
 (* Inference telemetry redaction moved to Keeper_hooks_oas_types
    (intra-library file split, 2026-05-16). *)
 
-let usage_has_tokens (usage : Agent_sdk.Types.api_usage) =
-  usage.input_tokens > 0
-  || usage.output_tokens > 0
-  || usage.cache_creation_input_tokens > 0
-  || usage.cache_read_input_tokens > 0
-
-let is_keeper_board_write_tool_name tool_name =
-  match Tool_name.Keeper.of_string tool_name with
-  | Some tool -> Tool_name.Keeper.is_board_write tool
-  | None -> false
-
-let current_keeper_model meta =
-  let _ = meta in
-  runtime_lane_label
-
-let stop_reason_label_end_turn = "end_turn"
-let stop_reason_label_tool_use = "tool_use"
-let stop_reason_label_max_tokens = "max_tokens"
-let stop_reason_label_stop_sequence = "stop_sequence"
-let stop_reason_label_unknown = "unknown"
+(* usage_has_tokens / is_keeper_board_write_tool_name / current_keeper_model
+   / stop_reason_label_* moved to Keeper_hooks_oas_types (intra-library
+   file split, 2026-05-16). *)
 
 let stop_reason_to_label = function
   | Agent_sdk.Types.EndTurn -> stop_reason_label_end_turn
@@ -353,14 +336,7 @@ let alias_response_model_metric =
 let empty_response_content_metric =
   Prometheus.metric_after_turn_response_content_empty
 
-let zero_usage : Agent_sdk.Types.api_usage =
-  {
-    input_tokens = 0;
-    output_tokens = 0;
-    cache_creation_input_tokens = 0;
-    cache_read_input_tokens = 0;
-    cost_usd = None;
-  }
+(* zero_usage moved to Keeper_hooks_oas_types (intra-library file split). *)
 
 let telemetry_has_canonical_model_id
     (telemetry : Agent_sdk.Types.inference_telemetry option) =

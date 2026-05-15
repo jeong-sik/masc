@@ -38,6 +38,7 @@ type cascade_failure_class =
   | Accept_rejected_capability_mismatch
   | Accept_rejected_terminal
   | Cli_transport_required
+  | Tls_error
   | Network_error
   | Provider_terminal
   | Provider_capacity_exhausted

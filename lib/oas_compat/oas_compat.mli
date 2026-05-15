@@ -30,6 +30,7 @@ module Http_client : sig
     | Accept_rejected_capability_mismatch
     | Accept_rejected_terminal
     | Cli_transport_required
+    | Tls_error
     | Network_error
     | Provider_terminal
         (** Provider-level terminal condition that should stop cascading. *)

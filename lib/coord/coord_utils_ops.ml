@@ -402,7 +402,25 @@ let agent_json_needs_repair = function
       | _ -> false)
   | _ -> false
 
+let is_fd_pressure_text detail =
+  let detail = String.lowercase_ascii detail in
+  List.exists
+    (fun needle -> String_util.contains_substring detail needle)
+    [ "too many open files"
+    ; "emfile"
+    ; "enfile"
+    ; "file descriptor"
+    ; "os error 24"
+    ; "execve: too many open files"
+    ]
+;;
+
 let read_agent_with_repair config path =
+  (match read_json_result config path with
+   | Error msg when is_fd_pressure_text msg ->
+     Error ("fd_pressure_io: " ^ msg)
+   | Ok _
+   | Error _ ->
   let json = read_json config path in
   match Masc_domain.agent_of_yojson json with
   | Ok agent as ok ->
@@ -412,7 +430,7 @@ let read_agent_with_repair config path =
           path;
         write_json config path (Masc_domain.agent_to_yojson agent));
       ok
-  | Error _ as error -> error
+  | Error _ as error -> error)
 
 (* ============================================ *)
 (* File locking                                 *)

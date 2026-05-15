@@ -101,6 +101,32 @@ let test_http_429_cascades () =
     true
     (Oas_compat.Http_client.should_cascade err)
 
+let test_tls_error_does_not_cascade () =
+  let err =
+    Http_client.NetworkError
+      { kind = Tls_error; message = "TLS failure: invalid certificate chain" }
+  in
+  Alcotest.(check bool)
+    "TLS errors are route/config terminal and must not fan out to another provider"
+    false
+    (Oas_compat.Http_client.should_cascade err);
+  match Oas_compat.Http_client.classify err with
+  | Tls_error -> ()
+  | _ -> Alcotest.fail "TLS NetworkError must classify as Tls_error"
+
+let test_local_resource_error_does_not_cascade () =
+  let err =
+    Http_client.NetworkError
+      { kind = Local_resource_exhaustion; message = "Too many open files in system" }
+  in
+  Alcotest.(check bool)
+    "local resource exhaustion must not cascade"
+    false
+    (Oas_compat.Http_client.should_cascade err);
+  match Oas_compat.Http_client.classify err with
+  | Local_resource_exhaustion -> ()
+  | _ -> Alcotest.fail "local resource exhaustion must keep its typed class"
+
 (* --- ProviderTerminal: pin classify, should_cascade, and the new
        error_message helper. The variant arrived in agent_sdk without
        a sweep, so [warn-error +8] flipped 5 [partial-match] warnings
@@ -347,6 +373,13 @@ let () =
       ( "Baseline: HTTP errors unaffected",
         [
           Alcotest.test_case "HTTP 429 cascades" `Quick test_http_429_cascades;
+        ] );
+      ( "Network terminal errors do not cascade",
+        [
+          Alcotest.test_case "TLS error does not cascade"
+            `Quick test_tls_error_does_not_cascade;
+          Alcotest.test_case "local resource error does not cascade"
+            `Quick test_local_resource_error_does_not_cascade;
         ] );
       ( "ProviderTerminal — agent-level terminal does not cascade",
         [

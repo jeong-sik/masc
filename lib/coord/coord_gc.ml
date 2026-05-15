@@ -51,7 +51,13 @@ let cleanup_zombies
   (* agents_dir under .masc/ *)
   let agents_path = agents_dir config in
   let scan_paths =
-    if Sys.file_exists agents_path then [ agents_path ] else []
+    try if Sys.file_exists agents_path then [ agents_path ] else [] with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn when is_fd_pressure_text (Printexc.to_string exn) ->
+      Log.Gc.warn
+        "cleanup_zombies: skipping scan while agent directory is unreadable due to FD pressure: %s"
+        (Printexc.to_string exn);
+      []
   in
   if scan_paths = [] then
     No_agents_dir
@@ -59,7 +65,20 @@ let cleanup_zombies
     (* Phase 1: Detect zombie agents (no side effects) *)
     let zombie_entries = ref [] in (* (name, path) list *)
     List.iter (fun agents_path ->
-      Sys.readdir agents_path |> Array.iter (fun name ->
+      let names =
+        try Some (Sys.readdir agents_path) with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn when is_fd_pressure_text (Printexc.to_string exn) ->
+          Log.Gc.warn
+            "cleanup_zombies: skipping directory %s while FD pressure is active: %s"
+            agents_path
+            (Printexc.to_string exn);
+          None
+      in
+      match names with
+      | None -> ()
+      | Some names ->
+      names |> Array.iter (fun name ->
         Coord_query.safe_yield ();
         if Filename.check_suffix name ".json" then begin
           let path = Filename.concat agents_path name in
@@ -74,6 +93,10 @@ let cleanup_zombies
                    agent.last_seen ->
               zombie_entries := (agent.name, path) :: !zombie_entries
           | Ok _ -> () (* not a zombie, skip *)
+          | Error err when is_fd_pressure_text err ->
+              Log.Gc.warn
+                "cleanup_zombies: skipping quarantine for %s because read failed under FD pressure: %s"
+                name err
           | Error err ->
               (* #7947: previously deleted the file outright, losing
                  current_task/meta with no postmortem trail.  Quarantine

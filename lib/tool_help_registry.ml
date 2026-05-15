@@ -66,25 +66,63 @@ let first_sentence text =
 let truncate ~max_len text =
   String_util.utf8_safe ~max_bytes:((max 0 (max_len - 1)) + 3) ~suffix:"…" text |> String_util.to_string
 
+(* RFC-0089 §4-1 G1: tool family typed classifier.
+
+   Replaces 7-prefix [String.starts_with] cascade (the previous
+   shape of [help_doc_refs]) with a closed sum.  Adding a new
+   family requires extending [tool_family] AND every [match] —
+   the compiler refuses partial coverage, so a silent
+   classifier-drift like RFC-0089 §1 documents is impossible
+   here.
+
+   Boundary discipline (RFC-0089 §2 non-goals): the only string
+   classifier is [classify_tool_family] — the boundary parser
+   from tool name (an externally-defined identifier) to a typed
+   family.  After this point every consumer uses the variant
+   directly; no caller re-classifies by string. *)
+type tool_family =
+  | Operation
+  | Dispatch
+  | Unit
+  | Policy
+  | Observe
+  | Detachment
+  | Keeper
+
+let tool_family_prefix = function
+  | Operation -> "masc_operation_"
+  | Dispatch -> "masc_dispatch_"
+  | Unit -> "masc_unit_"
+  | Policy -> "masc_policy_"
+  | Observe -> "masc_observe_"
+  | Detachment -> "masc_detachment_"
+  | Keeper -> "masc_keeper_"
+
+let all_tool_families =
+  [ Operation; Dispatch; Unit; Policy; Observe; Detachment; Keeper ]
+
+(* The single boundary parser.  Internal callers receive
+   [tool_family option] and dispatch via exhaustive [match];
+   no other site in this module compares a tool-name prefix. *)
+let classify_tool_family name =
+  List.find_opt
+    (fun family -> String.starts_with ~prefix:(tool_family_prefix family) name)
+    all_tool_families
+
 let help_doc_refs name =
-  if
-    String.starts_with ~prefix:"masc_operation_" name
-    || String.starts_with ~prefix:"masc_dispatch_" name
-    || String.starts_with ~prefix:"masc_unit_" name
-    || String.starts_with ~prefix:"masc_policy_" name
-    || String.starts_with ~prefix:"masc_observe_" name
-    || String.starts_with ~prefix:"masc_detachment_" name
-  then
-    [
-      "docs/COMMAND-PLANE-RUNBOOK.md";
-      "docs/BENCHMARK-RUNBOOK.md";
-    ]
-  else if
-    String.starts_with ~prefix:"masc_keeper_" name
-  then
-    [ "docs/SUPERVISOR-MODE.md" ]
-  else
-    []
+  match classify_tool_family name with
+  | Some Operation
+  | Some Dispatch
+  | Some Unit
+  | Some Policy
+  | Some Observe
+  | Some Detachment ->
+      [
+        "docs/COMMAND-PLANE-RUNBOOK.md";
+        "docs/BENCHMARK-RUNBOOK.md";
+      ]
+  | Some Keeper -> [ "docs/SUPERVISOR-MODE.md" ]
+  | None -> []
 
 let help_prompt_hints name =
   if String.equal name "masc_tool_help" then

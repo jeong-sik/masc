@@ -1344,7 +1344,7 @@ let test_sdk_error_to_cascade_outcome_cascades_resumable_cli_session () =
      To resume this session: kimi -r 5de0f199-6bd7-4509-bfa6-3308e0ebd97f"
   in
   let detail =
-    Cascade_runner.Kimi_cli_transport_local.resumable_session_detail_of_text raw_message
+    Cascade_transport.Kimi_cli_transport_local.resumable_session_detail_of_text raw_message
   in
   let sdk_error =
     Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest { message = detail })
@@ -2516,7 +2516,7 @@ let test_classify_masc_internal_error_roundtrip () =
     Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Keeper_turn_driver.Resumable_cli_session
          { cascade_name = internal_cascade_name "kimi_cli_keeper"
-         ; detail = Cascade_runner.Kimi_cli_transport_local.resumable_session_detail
+         ; detail = Cascade_transport.Kimi_cli_transport_local.resumable_session_detail
          ; exit_code = Some 75
          })
   in
@@ -2528,7 +2528,7 @@ let test_classify_masc_internal_error_roundtrip () =
       (internal_cascade_name_to_string cascade_name);
     Alcotest.(check string)
       "resumable detail redacted"
-      Cascade_runner.Kimi_cli_transport_local.resumable_session_detail
+      Cascade_transport.Kimi_cli_transport_local.resumable_session_detail
       detail;
     Alcotest.(check bool)
       "resumable detail hides raw resume hint"
@@ -3756,7 +3756,7 @@ let test_kimi_mcp_config_json_of_policy_filters_to_allowed_servers () =
     ; disable_builtin_tools = true
     }
   in
-  match Cascade_runner.kimi_mcp_config_json_of_policy policy with
+  match Cascade_transport.kimi_mcp_config_json_of_policy policy with
   | None -> Alcotest.fail "expected kimi runtime MCP config JSON"
   | Some raw_json ->
     let open Yojson.Safe.Util in
@@ -4028,7 +4028,7 @@ let test_kimi_cli_runtime_mcp_jsons_include_request_policy () =
     ; disable_builtin_tools = true
     }
   in
-  let merged = Cascade_runner.kimi_cli_runtime_mcp_jsons ~base:[] (Some policy) in
+  let merged = Cascade_transport.kimi_cli_runtime_mcp_jsons ~base:[] (Some policy) in
   Alcotest.(check int)
     "request policy contributes one kimi mcp config"
     1
@@ -4053,11 +4053,11 @@ let test_kimi_cli_build_args_include_runtime_mcp_config () =
     }
   in
   let mcp_config_json =
-    Cascade_runner.kimi_cli_runtime_mcp_jsons ~base:[] (Some policy)
+    Cascade_transport.kimi_cli_runtime_mcp_jsons ~base:[] (Some policy)
   in
   let argv =
-    Cascade_runner.Kimi_cli_transport_local.build_args
-      ~config:Cascade_runner.Kimi_cli_transport_local.default_config
+    Cascade_transport.Kimi_cli_transport_local.build_args
+      ~config:Cascade_transport.Kimi_cli_transport_local.default_config
       ~req_config:(make_kimi_cli_provider_cfg ())
       ~mcp_config_json
       ~prompt:"hello"
@@ -4072,8 +4072,8 @@ let test_kimi_cli_build_args_include_runtime_mcp_config () =
 let test_kimi_cli_build_args_uses_stdin_for_large_prompt () =
   let long_prompt = String.make (20 * 1024) 'x' in
   let argv =
-    Cascade_runner.Kimi_cli_transport_local.build_args
-      ~config:Cascade_runner.Kimi_cli_transport_local.default_config
+    Cascade_transport.Kimi_cli_transport_local.build_args
+      ~config:Cascade_transport.Kimi_cli_transport_local.default_config
       ~req_config:(make_kimi_cli_provider_cfg ())
       ~mcp_config_json:[]
       ~prompt:long_prompt
@@ -4088,8 +4088,8 @@ let test_kimi_cli_build_args_uses_stdin_for_large_prompt () =
 let test_kimi_cli_build_args_uses_stdin_for_non_ascii_prompt () =
   let prompt = "한글 prompt" in
   let argv =
-    Cascade_runner.Kimi_cli_transport_local.build_args
-      ~config:Cascade_runner.Kimi_cli_transport_local.default_config
+    Cascade_transport.Kimi_cli_transport_local.build_args
+      ~config:Cascade_transport.Kimi_cli_transport_local.default_config
       ~req_config:(make_kimi_cli_provider_cfg ())
       ~mcp_config_json:[]
       ~prompt
@@ -4104,8 +4104,8 @@ let test_kimi_cli_build_args_uses_stdin_for_non_ascii_prompt () =
 let test_kimi_cli_build_args_sanitizes_broken_utf8_prompt () =
   let prompt = "prefix\x80suffix" in
   let argv =
-    Cascade_runner.Kimi_cli_transport_local.build_args
-      ~config:Cascade_runner.Kimi_cli_transport_local.default_config
+    Cascade_transport.Kimi_cli_transport_local.build_args
+      ~config:Cascade_transport.Kimi_cli_transport_local.default_config
       ~req_config:(make_kimi_cli_provider_cfg ())
       ~mcp_config_json:[]
       ~prompt
@@ -4165,7 +4165,7 @@ let test_cli_model_for_provider_config_uses_runtime_default_on_auto () =
   Alcotest.(check (option string))
     "auto uses runtime binding default"
     (runtime_binding_default_model_exn provider_cfg)
-    (Cascade_runner.cli_model_for_provider_config provider_cfg)
+    (Cascade_transport.cli_model_for_provider_config provider_cfg)
 ;;
 
 let test_cli_model_for_provider_config_keeps_explicit_model () =
@@ -4179,7 +4179,7 @@ let test_cli_model_for_provider_config_keeps_explicit_model () =
   Alcotest.(check (option string))
     "explicit model preserved"
     (Some "kimi-k2.5")
-    (Cascade_runner.cli_model_for_provider_config provider_cfg)
+    (Cascade_transport.cli_model_for_provider_config provider_cfg)
 ;;
 
 let test_kimi_cli_config_uses_oas_context_ssot () =
@@ -4192,7 +4192,7 @@ let test_kimi_cli_config_uses_oas_context_ssot () =
       ~api_key:"test-key"
       ()
   in
-  match Cascade_runner.kimi_cli_config_json_for_provider provider_cfg with
+  match Cascade_transport.kimi_cli_config_json_for_provider provider_cfg with
   | None -> Alcotest.fail "expected kimi_cli config json"
   | Some raw ->
     let json = _parse_json raw in
@@ -4235,7 +4235,7 @@ let test_kimi_cli_rejects_invalid_tool_argument_json () =
   close_out oc;
   Unix.chmod fake_kimi_path 0o755;
   let config =
-    { Cascade_runner.Kimi_cli_transport_local.default_config with
+    { Cascade_transport.Kimi_cli_transport_local.default_config with
       kimi_path = fake_kimi_path
     }
   in
@@ -4255,7 +4255,7 @@ let test_kimi_cli_rejects_invalid_tool_argument_json () =
   Eio.Switch.run
   @@ fun sw ->
   let transport =
-    Cascade_runner.Kimi_cli_transport_local.create
+    Cascade_transport.Kimi_cli_transport_local.create
       ~sw
       ~mgr:(require_test_proc_mgr ())
       ~config
@@ -4305,7 +4305,7 @@ let test_kimi_cli_treats_whitespace_tool_arguments_as_empty_json () =
     fake_kimi_path
     ("#!/bin/sh\ncat <<'JSON'\n" ^ whitespace_tool_line ^ "\nJSON\n");
   let config =
-    { Cascade_runner.Kimi_cli_transport_local.default_config with
+    { Cascade_transport.Kimi_cli_transport_local.default_config with
       kimi_path = fake_kimi_path
     }
   in
@@ -4325,7 +4325,7 @@ let test_kimi_cli_treats_whitespace_tool_arguments_as_empty_json () =
   Eio.Switch.run
   @@ fun sw ->
   let transport =
-    Cascade_runner.Kimi_cli_transport_local.create
+    Cascade_transport.Kimi_cli_transport_local.create
       ~sw
       ~mgr:(require_test_proc_mgr ())
       ~config
@@ -4381,7 +4381,7 @@ let test_kimi_cli_stream_rejects_invalid_tool_argument_json () =
        ]
      ^ "\n");
   let config =
-    { Cascade_runner.Kimi_cli_transport_local.default_config with
+    { Cascade_transport.Kimi_cli_transport_local.default_config with
       kimi_path = fake_kimi_path
     }
   in
@@ -4401,7 +4401,7 @@ let test_kimi_cli_stream_rejects_invalid_tool_argument_json () =
   Eio.Switch.run
   @@ fun sw ->
   let transport =
-    Cascade_runner.Kimi_cli_transport_local.create
+    Cascade_transport.Kimi_cli_transport_local.create
       ~sw
       ~mgr:(require_test_proc_mgr ())
       ~config
@@ -4439,7 +4439,7 @@ let test_kimi_cli_stream_rejects_invalid_tool_argument_json () =
 ;;
 
 let test_kimi_cli_should_log_stderr_line_filters_resume_noise () =
-  let should_log = Cascade_runner.Kimi_cli_transport_local.should_log_stderr_line in
+  let should_log = Cascade_transport.Kimi_cli_transport_local.should_log_stderr_line in
   Alcotest.(check bool) "blank stderr line suppressed" false (should_log "");
   Alcotest.(check bool) "whitespace stderr line suppressed" false (should_log "   ");
   Alcotest.(check bool)
@@ -4467,7 +4467,7 @@ let test_kimi_cli_error_completion_uses_measured_latency () =
     fake_kimi_path
     "#!/bin/sh\nsleep 0.05\nprintf '%s\\n' 'simulated failure' >&2\nexit 7\n";
   let config =
-    { Cascade_runner.Kimi_cli_transport_local.default_config with
+    { Cascade_transport.Kimi_cli_transport_local.default_config with
       kimi_path = fake_kimi_path
     }
   in
@@ -4487,7 +4487,7 @@ let test_kimi_cli_error_completion_uses_measured_latency () =
   Eio.Switch.run
   @@ fun sw ->
   let transport =
-    Cascade_runner.Kimi_cli_transport_local.create
+    Cascade_transport.Kimi_cli_transport_local.create
       ~sw
       ~mgr:(require_test_proc_mgr ())
       ~config
@@ -4510,10 +4510,10 @@ let test_kimi_cli_classify_cli_error_redacts_resumable_session_detail () =
      To resume this session: kimi -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc"
   in
   let canonical_detail =
-    Cascade_runner.Kimi_cli_transport_local.resumable_session_detail_of_text raw_message
+    Cascade_transport.Kimi_cli_transport_local.resumable_session_detail_of_text raw_message
   in
   match
-    Cascade_runner.Kimi_cli_transport_local.classify_cli_error
+    Cascade_transport.Kimi_cli_transport_local.classify_cli_error
       (Error
          (Llm_provider.Http_client.NetworkError
             { message = raw_message; kind = Llm_provider.Http_client.Unknown }))
@@ -4537,20 +4537,20 @@ let test_kimi_cli_classify_cli_error_treats_exit_1_resume_hint_as_resumable () =
      To resume this session: kimi -r 5de0f199-6bd7-4509-bfa6-3308e0ebd97f"
   in
   let canonical_detail =
-    Cascade_runner.Kimi_cli_transport_local.resumable_session_detail_of_text raw_message
+    Cascade_transport.Kimi_cli_transport_local.resumable_session_detail_of_text raw_message
   in
   Alcotest.(check bool)
     "exit 1 resume hint is resumable"
     true
-    (Cascade_runner.Kimi_cli_transport_local.text_looks_like_resumable_session
+    (Cascade_transport.Kimi_cli_transport_local.text_looks_like_resumable_session
        raw_message);
   Alcotest.(check (option int))
     "exit code preserved"
     (Some 1)
-    (Cascade_runner.Kimi_cli_transport_local.resumable_session_exit_code_of_text
+    (Cascade_transport.Kimi_cli_transport_local.resumable_session_exit_code_of_text
        raw_message);
   match
-    Cascade_runner.Kimi_cli_transport_local.classify_cli_error
+    Cascade_transport.Kimi_cli_transport_local.classify_cli_error
       (Error
          (Llm_provider.Http_client.NetworkError
             { message = raw_message; kind = Llm_provider.Http_client.Unknown }))
@@ -4578,7 +4578,7 @@ let test_kimi_cli_resumable_invalid_request_reclassifies_as_structured () =
      To resume this session: kimi -r 5de0f199-6bd7-4509-bfa6-3308e0ebd97f"
   in
   let detail =
-    Cascade_runner.Kimi_cli_transport_local.resumable_session_detail_of_text raw_message
+    Cascade_transport.Kimi_cli_transport_local.resumable_session_detail_of_text raw_message
   in
   let sdk_error =
     Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest { message = detail })
@@ -4612,10 +4612,10 @@ let test_kimi_cli_classify_cli_error_keeps_exit_1_with_error_as_reject () =
   Alcotest.(check bool)
     "exit 1 with real stderr is not resumable"
     false
-    (Cascade_runner.Kimi_cli_transport_local.text_looks_like_resumable_session
+    (Cascade_transport.Kimi_cli_transport_local.text_looks_like_resumable_session
        raw_message);
   match
-    Cascade_runner.Kimi_cli_transport_local.classify_cli_error
+    Cascade_transport.Kimi_cli_transport_local.classify_cli_error
       (Error
          (Llm_provider.Http_client.NetworkError
             { message = raw_message; kind = Llm_provider.Http_client.Unknown }))
@@ -4638,7 +4638,7 @@ let test_kimi_cli_classify_cli_error_labels_process_title_unicode_crash () =
      getproctitle() UnicodeDecodeError: 'utf-8' codec can't decode byte 0xef"
   in
   match
-    Cascade_runner.Kimi_cli_transport_local.classify_cli_error
+    Cascade_transport.Kimi_cli_transport_local.classify_cli_error
       (Error
          (Llm_provider.Http_client.NetworkError
             { message = raw_message; kind = Llm_provider.Http_client.Unknown }))

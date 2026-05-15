@@ -137,15 +137,6 @@ let cli_model_override =
 let provider_caps_of_config =
   Cascade_transport.provider_caps_of_config
 
-let kimi_mcp_config_json_of_policy =
-  Cascade_transport.kimi_mcp_config_json_of_policy
-
-let cli_model_for_provider_config =
-  Cascade_transport.cli_model_for_provider_config
-
-let kimi_cli_config_json_for_provider =
-  Cascade_transport.kimi_cli_config_json_for_provider
-
 let provider_supports_inline_tools =
   Cascade_transport.provider_supports_inline_tools
 
@@ -173,9 +164,6 @@ let codex_cli_can_auth_keeper_bound_runtime_mcp =
 let runtime_mcp_policy_for_provider =
   Cascade_transport.runtime_mcp_policy_for_provider
 
-let kimi_cli_runtime_mcp_jsons =
-  Cascade_transport.kimi_cli_runtime_mcp_jsons
-
 let public_mcp_tools_of_oas_tools =
   Cascade_transport.public_mcp_tools_of_oas_tools
 
@@ -202,8 +190,6 @@ let resolve_tool_lane_for_oas_tools =
 
 let make_per_call_switch_transport =
   Cascade_transport.make_per_call_switch_transport
-
-module Kimi_cli_transport_local = Cascade_transport.Kimi_cli_transport_local
 
 let non_http_transport_of_provider =
   Cascade_transport.non_http_transport_of_provider

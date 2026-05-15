@@ -361,15 +361,15 @@ let exit_code_of_message (message : string) : int option =
               int_of_string_opt raw
 
 let message_looks_like_resumable_cli_session (message : string) : bool =
-  Cascade_runner.Kimi_cli_transport_local.text_looks_like_resumable_session
+  Cascade_transport.Kimi_cli_transport_local.text_looks_like_resumable_session
     message
 
 let resumable_cli_session_detail (message : string) : string =
-  Cascade_runner.Kimi_cli_transport_local.resumable_session_detail_of_text
+  Cascade_transport.Kimi_cli_transport_local.resumable_session_detail_of_text
     message
 
 let resumable_cli_session_exit_code (message : string) : int option =
-  Cascade_runner.Kimi_cli_transport_local.resumable_session_exit_code_of_text
+  Cascade_transport.Kimi_cli_transport_local.resumable_session_exit_code_of_text
     message
 
 let sdk_error_to_resumable_cli_session ~cascade_name

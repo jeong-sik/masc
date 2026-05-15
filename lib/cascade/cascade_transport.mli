@@ -246,8 +246,8 @@ val non_http_transport_of_provider :
   unit ->
   (Llm_provider.Llm_transport.t option, Agent_sdk.Error.sdk_error) result
 
-(** kimi_cli print-mode transport.  Re-exported via [module type of] from
-    {!Cascade_runner.Kimi_cli_transport_local}. *)
+(** kimi_cli print-mode transport.  Owned by the transport layer; runner
+    facades must not re-export this provider-local surface. *)
 module Kimi_cli_transport_local : sig
   type config = {
     kimi_path : string;

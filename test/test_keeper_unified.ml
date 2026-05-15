@@ -6954,7 +6954,7 @@ let test_metrics_failure_response_redacts_resumable_cli_session_detail () =
      To resume this session: kimi -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc"
   in
   let canonical_detail =
-    Masc_mcp.Cascade_runner.Kimi_cli_transport_local.resumable_session_detail
+    Masc_mcp.Cascade_transport.Kimi_cli_transport_local.resumable_session_detail
   in
   let sdk_error =
     Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
@@ -7819,7 +7819,7 @@ let test_auto_recoverable_turn_error_includes_resumable_cli_session_error () =
       (Masc_mcp.Keeper_turn_driver.Resumable_cli_session
          { cascade_name = oas_error_cascade_name "kimi_cli_keeper"
          ; detail =
-             Masc_mcp.Cascade_runner.Kimi_cli_transport_local.resumable_session_detail
+             Masc_mcp.Cascade_transport.Kimi_cli_transport_local.resumable_session_detail
          ; exit_code = Some 75
          })
   in
@@ -7836,7 +7836,7 @@ let test_cascade_exhausted_error_includes_resumable_cli_session_error () =
       (Masc_mcp.Keeper_turn_driver.Resumable_cli_session
          { cascade_name = oas_error_cascade_name "kimi_cli_keeper"
          ; detail =
-             Masc_mcp.Cascade_runner.Kimi_cli_transport_local.resumable_session_detail
+             Masc_mcp.Cascade_transport.Kimi_cli_transport_local.resumable_session_detail
          ; exit_code = Some 75
          })
   in

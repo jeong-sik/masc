@@ -17,6 +17,70 @@ type cascade_profile_gate = {
   invalid_assignments : (string * string list) list;
 }
 
+let option_int_json = function
+  | Some value -> `Int value
+  | None -> `Null
+
+let option_string_json = function
+  | Some value -> `String value
+  | None -> `Null
+
+let dashboard_logs_store_path ~masc_root =
+  Filename.concat
+    (Filename.concat masc_root "logs")
+    (Printf.sprintf "system_log_%s.jsonl"
+       (Log.format_utc_date_of (Unix.gettimeofday ())))
+
+let dashboard_logs_json ~config ~limit ~level_filter ~min_level ~module_filter
+    ~since_seq entries =
+  let masc_root = Coord.masc_root_dir config in
+  let newest = match entries with [] -> None | entry :: _ -> Some entry in
+  let oldest = List.fold_left (fun _ entry -> Some entry) None entries in
+  let entry_seq_json = Option.map (fun (entry : Log.Ring.entry) -> entry.seq) in
+  let entry_ts_json = Option.map (fun (entry : Log.Ring.entry) -> entry.ts) in
+  match Log.Ring.to_json entries with
+  | `Assoc fields ->
+      `Assoc
+        ([
+           ("generated_at_iso", `String (Masc_domain.now_iso ()));
+           ("dashboard_surface", `String "/api/v1/dashboard/logs");
+           ("source", `String "masc_log_ring");
+           ( "retention",
+             `Assoc
+               [
+                 ("scope", `String "dashboard_logs");
+                 ("coordination_root", `String masc_root);
+                 ("buffer", `String "Log.Ring");
+                 ("capacity", `Int Log.Ring.capacity);
+                 ( "durable_store",
+                   `String (dashboard_logs_store_path ~masc_root) );
+                 ("file_pattern", `String "system_log_YYYY-MM-DD.jsonl");
+                 ("keep_days", `Int 7);
+                 ( "cache_policy",
+                   `String
+                     "uncached; reads in-memory ring backed by daily JSONL sink; delta cursor via since_seq"
+                 );
+               ] );
+           ( "query",
+             `Assoc
+               [
+                 ("limit", `Int limit);
+                 ("level", `String level_filter);
+                 ( "applied_level",
+                   `String (Log.level_to_string (Log.level_of_string level_filter))
+                 );
+                 ("min_level", `Int min_level);
+                 ("module", `String module_filter);
+                 ("since_seq", option_int_json since_seq);
+               ] );
+           ("returned", `Int (List.length entries));
+           ("latest_seq", option_int_json (entry_seq_json newest));
+           ("oldest_seq", option_int_json (entry_seq_json oldest));
+           ("latest_ts_iso", option_string_json (entry_ts_json newest));
+         ]
+        @ fields)
+  | json -> json
+
 let cascade_profile_gate () : cascade_profile_gate =
   let config_path = Cascade_runtime.cascade_config_path () in
   let keeper_assignable_profiles =
@@ -474,14 +538,18 @@ let rec add_routes ~sw ~clock router =
        in
        with_tool_auth ~tool_name:"masc_runtime_ollama_probe" handle request reqd)
   |> Http.Router.get "/api/v1/dashboard/logs" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
+       with_public_read (fun state req reqd ->
          let limit =
            Server_utils.int_query_param req "limit" ~default:200
            |> max 1 |> min 3000
          in
-         let min_level = match Server_utils.query_param req "level" with
-           | Some v -> Log.level_to_int (Log.level_of_string v)
-           | None -> 0
+         let level_filter =
+           match Server_utils.query_param req "level" with
+           | Some v -> v
+           | None -> "DEBUG"
+         in
+         let min_level =
+           Log.level_to_int (Log.level_of_string level_filter)
          in
          let since_seq =
            match Server_utils.query_param req "since_seq" with
@@ -497,7 +565,10 @@ let rec add_routes ~sw ~clock router =
          let entries =
            Log.Ring.recent ~limit ~min_level ~module_filter ?since_seq ()
          in
-         let json = Log.Ring.to_json entries in
+         let json =
+           dashboard_logs_json ~config:state.Mcp_server.room_config ~limit
+             ~level_filter ~min_level ~module_filter ~since_seq entries
+         in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
@@ -690,6 +761,14 @@ let rec add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/dashboard/governance/tool-events" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let json = dashboard_governance_tool_events_http_json req in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/proof" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json =
+           dashboard_proof_http_json ~config:state.Mcp_server.room_config req
+         in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)

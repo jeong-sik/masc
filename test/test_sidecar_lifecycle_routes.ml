@@ -544,6 +544,42 @@ let test_status_json_includes_lifecycle_shape () =
       (lifecycle |> member "operator_next_action" |> to_string))
 ;;
 
+let test_status_json_exposes_dashboard_provenance () =
+  with_temp_dir "sidecar-status-provenance" (fun base_path ->
+    let json = Routes.read_status_json ~base_path "discord" in
+    let open Yojson.Safe.Util in
+    check
+      string
+      "dashboard_surface"
+      "/api/v1/sidecar/status"
+      (json |> member "dashboard_surface" |> to_string);
+    check string "source" "sidecar_status_file" (json |> member "source" |> to_string);
+    check
+      string
+      "retention scope"
+      "runtime_sidecar_status"
+      (json |> member "retention" |> member "scope" |> to_string);
+    check
+      bool
+      "generated_at_iso present"
+      true
+      (match json |> member "generated_at_iso" with
+       | `String value -> String.length value > 0
+       | _ -> false);
+    check
+      string
+      "default status path"
+      (Filename.concat base_path ".gate/runtime/discord/status.json")
+      (json |> member "retention" |> member "default_status_path" |> to_string);
+    check
+      bool
+      "lifecycle still present"
+      true
+      (match json |> member "sidecar_lifecycle" with
+       | `Assoc _ -> true
+       | _ -> false))
+;;
+
 (* ---- Config write helpers (PUT /api/v1/sidecar/config). ---- *)
 
 let test_escape_quotes_and_backslash () =
@@ -946,6 +982,10 @@ let () =
             "status JSON includes lifecycle shape"
             `Quick
             test_status_json_includes_lifecycle_shape
+        ; test_case
+            "status JSON exposes dashboard provenance"
+            `Quick
+            test_status_json_exposes_dashboard_provenance
         ] )
     ; ( "config_write_helpers"
       , [ test_case "escape: quotes + backslash" `Quick test_escape_quotes_and_backslash

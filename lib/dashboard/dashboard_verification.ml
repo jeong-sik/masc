@@ -170,8 +170,12 @@ let request_to_json (req : V.verification_request) : Yojson.Safe.t =
     Protected against missing base_path or filesystem errors — failures
     surface as an empty list plus a log line, matching the tolerance
     [Verification.list_requests] already offers on a missing dir. *)
-let load_requests () : V.verification_request list =
-  let base_path = Env_config_core.base_path () in
+let load_requests ?base_path () : V.verification_request list =
+  let base_path =
+    match base_path with
+    | Some value -> value
+    | None -> Env_config_core.base_path ()
+  in
   try V.list_requests base_path
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -206,9 +210,9 @@ let take n lst =
 
 let now_iso () = Masc_domain.now_iso ()
 
-let requests_json ?task_id ?limit () : Yojson.Safe.t =
+let requests_json ?base_path ?task_id ?limit () : Yojson.Safe.t =
   let limit = clamp_limit limit in
-  let all = load_requests () in
+  let all = load_requests ?base_path () in
   let filtered = filter_by_task_id all task_id in
   let sorted = sort_desc filtered in
   let trimmed = take limit sorted in
@@ -257,9 +261,9 @@ let is_rejected (req : V.verification_request) : bool =
 let bucket_of_status (req : V.verification_request) : string =
   req |> status_bucket_of_request |> status_bucket_to_string
 
-let summary_json ?recent () : Yojson.Safe.t =
+let summary_json ?base_path ?recent () : Yojson.Safe.t =
   let recent = clamp_recent recent in
-  let all = load_requests () in
+  let all = load_requests ?base_path () in
   let total = List.length all in
   let pending = ref 0 in
   let approved = ref 0 in

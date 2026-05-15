@@ -157,16 +157,37 @@ check_json_eventually \
   '^True$' \
   60 \
   2
+check_json \
+  "namespace-truth exposes provenance" \
+  "$BASE/api/v1/dashboard/namespace-truth" \
+  "d.get('dashboard_surface') == '/api/v1/dashboard/namespace-truth' and d.get('source') == 'namespace_truth_read_model' and '/api/v1/dashboard/room-truth' in d.get('dashboard_aliases', []) and d.get('retention', {}).get('scope') == 'dashboard_namespace_truth'" \
+  '^True$'
+check_http "room-truth 200" "$BASE/api/v1/dashboard/room-truth" "200"
+check_json \
+  "room-truth exposes namespace alias provenance" \
+  "$BASE/api/v1/dashboard/room-truth" \
+  "d.get('dashboard_surface') == '/api/v1/dashboard/namespace-truth' and d.get('source') == 'namespace_truth_read_model' and '/api/v1/dashboard/room-truth' in d.get('dashboard_aliases', []) and d.get('retention', {}).get('scope') == 'dashboard_namespace_truth'" \
+  '^True$'
 check_http "goal-loop status 200" "$BASE/api/v1/dashboard/goal-loop/status" "200"
 check_json "goal-loop status exposes phases" "$BASE/api/v1/dashboard/goal-loop/status" "'overall_status' in d and 'phases' in d" '^True$'
 check_http "activity graph 200" "$BASE/api/v1/activity/graph" "200"
 check_json "activity graph has nodes" "$BASE/api/v1/activity/graph" "len(d.get('nodes', [])) >= 0" '^True$'
 check_http "activity events 200" "$BASE/api/v1/activity/events?limit=1" "200"
 check_json "activity events exposes replay window" "$BASE/api/v1/activity/events?limit=1" "'events' in d and 'latest_seq' in d" '^True$'
+check_http "agent timeline 200" "$BASE/api/v1/agent-timeline?agent_name=sangsu&limit=1" "200"
+check_json "agent timeline exposes provenance" "$BASE/api/v1/agent-timeline?agent_name=sangsu&limit=1" "'events' in d and d.get('dashboard_surface') == '/api/v1/agent-timeline' and d.get('source') == 'agent_timeline_read_model' and 'retention' in d" '^True$'
+check_http "agent relations 200" "$BASE/api/v1/agent-relations?agent_name=sangsu" "200"
+check_json "agent relations exposes provenance" "$BASE/api/v1/agent-relations?agent_name=sangsu" "'relations' in d and d.get('dashboard_surface') == '/api/v1/agent-relations' and d.get('source') == 'second_brain_graphql' and 'retention' in d" '^True$'
 check_http "activity swimlane 200" "$BASE/api/v1/activity/swimlane" "200"
 check_json "activity swimlane exposes spans" "$BASE/api/v1/activity/swimlane" "'spans' in d and 'agents' in d" '^True$'
 check_http "telemetry summary 200" "$BASE/api/v1/dashboard/telemetry/summary" "200"
 check_json "telemetry summary has sources" "$BASE/api/v1/dashboard/telemetry/summary" "'sources' in d" '^True$'
+check_http "telemetry entries 200" "$BASE/api/v1/dashboard/telemetry?source=oas_event&n=5" "200"
+check_json "telemetry entries exposes replay envelope" "$BASE/api/v1/dashboard/telemetry?source=oas_event&n=5" "'entries' in d and 'total_matching_entries' in d and 'truncated' in d" '^True$'
+check_http "oas telemetry recent 200" "$BASE/api/v1/dashboard/oas/telemetry/recent?limit=5" "200"
+check_json "oas telemetry recent exposes provenance" "$BASE/api/v1/dashboard/oas/telemetry/recent?limit=5" "'samples' in d and 'dashboard_surface' in d and 'retention' in d" '^True$'
+check_http "oas telemetry summary 200" "$BASE/api/v1/dashboard/oas/telemetry/summary?limit=5" "200"
+check_json "oas telemetry summary exposes provenance" "$BASE/api/v1/dashboard/oas/telemetry/summary?limit=5" "'summary' in d and 'dashboard_surface' in d and 'retention' in d" '^True$'
 check_http "cascade health 200" "$BASE/api/v1/cascade/health" "200"
 check_json "cascade health exposes providers" "$BASE/api/v1/cascade/health" "'providers' in d" '^True$'
 check_http "cascade strategy trace 200" "$BASE/api/v1/cascade/strategy_trace?limit=1" "200"
@@ -201,6 +222,10 @@ check_http "attribution recent 200" "$BASE/api/v1/attribution/recent?limit=1" "2
 check_json "attribution recent exposes events" "$BASE/api/v1/attribution/recent?limit=1" "'events' in d and 'count' in d" '^True$'
 check_http "safe autonomy 200" "$BASE/api/v1/dashboard/safe-autonomy" "200"
 check_json "safe autonomy exposes scorecard" "$BASE/api/v1/dashboard/safe-autonomy" "'summary' in d and 'domains' in d and 'per_keeper' in d" '^True$'
+check_http "dashboard governance 200" "$BASE/api/v1/dashboard/governance" "200"
+check_json "dashboard governance exposes judge and queue" "$BASE/api/v1/dashboard/governance" "'summary' in d and 'judge' in d and 'approval_queue' in d" '^True$'
+check_http "dashboard proof 200" "$BASE/api/v1/dashboard/proof" "200"
+check_json "dashboard proof exposes verification and sources" "$BASE/api/v1/dashboard/proof" "'summary' in d and 'verification' in d and 'proof_sources' in d" '^True$'
 check_http "keeper feature proof 200" "$BASE/api/v1/dashboard/keeper-feature-proof?window_hours=24" "200"
 check_json "keeper feature proof exposes features" "$BASE/api/v1/dashboard/keeper-feature-proof?window_hours=24" "'summary' in d and 'features' in d and 'evidence_refs' in d" '^True$'
 check_http "feature health 200" "$BASE/api/v1/dashboard/feature-health" "200"
@@ -209,6 +234,14 @@ check_http "dashboard perf 200" "$BASE/api/v1/dashboard/perf" "200"
 check_json "dashboard perf exposes benchmark status" "$BASE/api/v1/dashboard/perf" "'status' in d and 'benchmarks' in d" '^True$'
 check_http "cost latency 200" "$BASE/api/v1/dashboard/cost-latency?window=60" "200"
 check_json "cost latency exposes cost and latency" "$BASE/api/v1/dashboard/cost-latency?window=60" "'total_cost_usd' in d and 'latencyBuckets' in d" '^True$'
+check_http "keeper decisions 200" "$BASE/api/v1/dashboard/keeper-decisions?limit=1" "200"
+check_json "keeper decisions exposes provenance" "$BASE/api/v1/dashboard/keeper-decisions?limit=1" "'events' in d and d.get('dashboard_surface') == '/api/v1/dashboard/keeper-decisions' and d.get('source') == 'keeper_decision_log' and 'retention' in d" '^True$'
+check_http "dashboard heuristics 200" "$BASE/api/v1/dashboard/heuristics?limit=1" "200"
+check_json "dashboard heuristics exposes provenance" "$BASE/api/v1/dashboard/heuristics?limit=1" "'events' in d and d.get('dashboard_surface') == '/api/v1/dashboard/heuristics' and d.get('source') == 'heuristic_metrics' and 'retention' in d" '^True$'
+check_http "heuristic coverage 200" "$BASE/api/v1/dashboard/heuristics/coverage?limit=1" "200"
+check_json "heuristic coverage exposes provenance" "$BASE/api/v1/dashboard/heuristics/coverage?limit=1" "'sites' in d and d.get('dashboard_surface') == '/api/v1/dashboard/heuristics/coverage' and d.get('source') == 'heuristic_metrics' and 'retention' in d" '^True$'
+check_http "dashboard stress 200" "$BASE/api/v1/dashboard/stress?limit=1" "200"
+check_json "dashboard stress exposes provenance" "$BASE/api/v1/dashboard/stress?limit=1" "'agent_stress' in d and d.get('dashboard_surface') == '/api/v1/dashboard/stress' and d.get('source') == 'agent_stress' and 'retention' in d" '^True$'
 
 echo "[4/7] Operations + Workspace"
 check_http "operator digest 200" "$BASE/api/v1/operator/digest" "200"
@@ -257,6 +290,8 @@ check_http "gate status 200" "$BASE/api/v1/gate/status" "200"
 check_json "gate status exposes channel bindings" "$BASE/api/v1/gate/status" "'channels' in d and 'bindings' in d" '^True$'
 check_http "gate connectors 200" "$BASE/api/v1/gate/connectors" "200"
 check_json "gate connectors exposes connectors list" "$BASE/api/v1/gate/connectors" "'connectors' in d" '^True$'
+check_http "sidecar status 200" "$BASE/api/v1/sidecar/status?name=discord" "200"
+check_json "sidecar status exposes provenance" "$BASE/api/v1/sidecar/status?name=discord" "d.get('dashboard_surface') == '/api/v1/sidecar/status' and d.get('source') == 'sidecar_status_file' and d.get('retention', {}).get('scope') == 'runtime_sidecar_status' and 'sidecar_lifecycle' in d" '^True$'
 check_http "dashboard tools 200" "$BASE/api/v1/dashboard/tools" "200"
 check_json "dashboard tools exposes inventory" "$BASE/api/v1/dashboard/tools" "'tool_inventory' in d" '^True$'
 check_http "tool quality 200" "$BASE/api/v1/dashboard/tool-quality?window_hours=24" "200"
@@ -284,7 +319,7 @@ check_json "IDE annotations exposes data envelope" "$BASE/api/v1/ide/annotations
 check_http "IDE regions 200" "$BASE/api/v1/ide/regions" "200"
 check_json "IDE regions exposes data envelope" "$BASE/api/v1/ide/regions" "d.get('ok') == True and 'data' in d" '^True$'
 check_http "dashboard logs 200" "$BASE/api/v1/dashboard/logs?limit=3" "200"
-check_json "dashboard logs exposes entries" "$BASE/api/v1/dashboard/logs?limit=3" "'entries' in d" '^True$'
+check_json "dashboard logs exposes provenance" "$BASE/api/v1/dashboard/logs?limit=3" "d.get('dashboard_surface') == '/api/v1/dashboard/logs' and d.get('source') == 'masc_log_ring' and d.get('retention', {}).get('scope') == 'dashboard_logs' and 'generated_at_iso' in d and 'entries' in d" '^True$'
 
 echo "[7/7] SPA"
 check_http "dashboard index 200" "$BASE/dashboard" "200"

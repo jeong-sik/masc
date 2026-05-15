@@ -382,6 +382,86 @@ let dashboard_governance_tool_events_http_json request : Yojson.Safe.t =
   Dashboard_governance_metrics.governance_tool_events_json ~window_minutes:window ()
 ;;
 
+let dashboard_proof_http_json ~config request : Yojson.Safe.t =
+  let limit = int_query_param request "limit" ~default:25 |> clamp ~min_v:1 ~max_v:100 in
+  let recent =
+    int_query_param request "recent" ~default:5 |> clamp ~min_v:0 ~max_v:20
+  in
+  let base_path = config.Coord.base_path in
+  let verification_summary =
+    Dashboard_verification.summary_json ~base_path ~recent ()
+  in
+  let verification_requests =
+    Dashboard_verification.requests_json ~base_path ~limit ()
+  in
+  let proof_source ~id ~label ~route =
+    `Assoc [ "id", `String id; "label", `String label; "route", `String route ]
+  in
+  let proof_sources =
+    [
+      proof_source ~id:"verification_summary"
+        ~label:"Verification status buckets"
+        ~route:"/api/v1/verification/summary";
+      proof_source ~id:"verification_requests"
+        ~label:"Verification request evidence"
+        ~route:"/api/v1/verification/requests";
+      proof_source ~id:"tlc_results"
+        ~label:"TLA+ verification logs"
+        ~route:"/api/v1/verification/tlc-results";
+      proof_source ~id:"keeper_feature_proof"
+        ~label:"Keeper autonomy feature proof"
+        ~route:"/api/v1/dashboard/keeper-feature-proof";
+      proof_source ~id:"safe_autonomy"
+        ~label:"Autonomy safety evidence"
+        ~route:"/api/v1/dashboard/safe-autonomy";
+      proof_source ~id:"execution_trust"
+        ~label:"Execution trust provenance"
+        ~route:"/api/v1/dashboard/execution-trust";
+      proof_source ~id:"surface_readiness"
+        ~label:"Dashboard surface readiness refs"
+        ~route:"/api/v1/dashboard/surface-readiness";
+    ]
+  in
+  let by_status =
+    match verification_summary with
+    | `Assoc fields -> (
+        match List.assoc_opt "by_status" fields with
+        | Some (`Assoc status_fields) -> status_fields
+        | _ -> [])
+    | _ -> []
+  in
+  let status_int key =
+    match List.assoc_opt key by_status with
+    | Some (`Int n) -> n
+    | _ -> 0
+  in
+  `Assoc
+    [
+      "generated_at", `String (Masc_domain.now_iso ());
+      ( "summary",
+        `Assoc
+          [
+            "verification_total",
+            (match verification_summary with
+             | `Assoc fields -> (
+                 match List.assoc_opt "total" fields with
+                 | Some (`Int n) -> `Int n
+                 | _ -> `Int 0)
+             | _ -> `Int 0);
+            "verification_pending", `Int (status_int "pending");
+            "verification_rejected", `Int (status_int "rejected");
+            "proof_source_count", `Int (List.length proof_sources);
+          ] );
+      ( "verification",
+        `Assoc
+          [
+            "summary", verification_summary;
+            "requests", verification_requests;
+          ] );
+      "proof_sources", `List proof_sources;
+    ]
+;;
+
 type approval_resolve_http_error =
   | Bad_request of string
   | Gone of Keeper_approval_queue.resolve_error

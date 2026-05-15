@@ -121,6 +121,28 @@ type AbortableRequestOptions = {
   signal?: AbortSignal
 }
 
+export type DashboardFeedRetention = Record<string, unknown> & {
+  scope?: string
+  durable_store?: string
+  durable_replay_surface?: string
+}
+
+export type DashboardFeedMetadata = {
+  generated_at_iso?: string
+  dashboard_surface?: string
+  source?: string
+  retention?: DashboardFeedRetention
+}
+
+function decodeDashboardFeedMetadata(raw: Record<string, unknown>): DashboardFeedMetadata {
+  return {
+    generated_at_iso: asString(raw.generated_at_iso),
+    dashboard_surface: asString(raw.dashboard_surface),
+    source: asString(raw.source),
+    retention: isRecord(raw.retention) ? raw.retention : undefined,
+  }
+}
+
 type DashboardShellRequestOptions = AbortableRequestOptions & {
   light?: boolean
 }
@@ -942,7 +964,7 @@ export interface KeeperDecision {
   match_count: number | null
 }
 
-export interface KeeperDecisionsResponse {
+export interface KeeperDecisionsResponse extends DashboardFeedMetadata {
   events: KeeperDecision[]
   limit: number
   generated_at: number | null
@@ -971,6 +993,7 @@ function decodeKeeperDecision(raw: unknown): KeeperDecision | null {
 function decodeKeeperDecisionsResponse(raw: unknown): KeeperDecisionsResponse | null {
   if (!isRecord(raw)) return null
   return {
+    ...decodeDashboardFeedMetadata(raw),
     events: asRecordArray(raw.events)
       .map(decodeKeeperDecision)
       .filter((d): d is KeeperDecision => d !== null),
@@ -1009,7 +1032,7 @@ export interface HeuristicFiring {
   cooldown_remaining_ms?: number
 }
 
-export interface HeuristicsResponse {
+export interface HeuristicsResponse extends DashboardFeedMetadata {
   limit: number
   count: number
   events: HeuristicEvent[]
@@ -1050,6 +1073,7 @@ function decodeHeuristicFiring(raw: unknown): HeuristicFiring | null {
 function decodeHeuristicsResponse(raw: unknown): HeuristicsResponse | null {
   if (!isRecord(raw)) return null
   return {
+    ...decodeDashboardFeedMetadata(raw),
     limit: asInt(raw.limit) ?? 0,
     count: asInt(raw.count) ?? 0,
     events: asRecordArray(raw.events)
@@ -1088,7 +1112,7 @@ export interface StressEvent {
   timestamp: number
 }
 
-export interface StressResponse {
+export interface StressResponse extends DashboardFeedMetadata {
   limit: number
   count: number
   events: StressEvent[]
@@ -1150,6 +1174,7 @@ function decodeAgentStressRow(raw: unknown): AgentStressRow | null {
 function decodeStressResponse(raw: unknown): StressResponse | null {
   if (!isRecord(raw)) return null
   return {
+    ...decodeDashboardFeedMetadata(raw),
     limit: asInt(raw.limit) ?? 0,
     count: asInt(raw.count) ?? 0,
     events: asRecordArray(raw.events)
@@ -1178,7 +1203,7 @@ export interface CoverageSite {
   triggered_count: number
 }
 
-export interface HeuristicCoverage {
+export interface HeuristicCoverage extends DashboardFeedMetadata {
   total_events: number
   decision_shape_count: number
   mixed_outcome_sites: number
@@ -1200,6 +1225,7 @@ function decodeHeuristicCoverage(raw: unknown): HeuristicCoverage | null {
   if (!isRecord(raw)) return null
   const decisionShapeCount = asInt(raw.decision_shape_count) ?? asInt(raw.unique_decision_tuples) ?? 0
   return {
+    ...decodeDashboardFeedMetadata(raw),
     total_events: asInt(raw.total_events) ?? 0,
     decision_shape_count: decisionShapeCount,
     mixed_outcome_sites: asInt(raw.mixed_outcome_sites) ?? 0,

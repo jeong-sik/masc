@@ -131,13 +131,33 @@ let dashboard_issue_event_to_json (json : Yojson.Safe.t) : Yojson.Safe.t option 
 
 let dashboard_issue_events events = List.filter_map dashboard_issue_event_to_json events
 
+let dashboard_source = "heuristic_metrics"
+let dashboard_surface = "/api/v1/dashboard/heuristics"
+let coverage_dashboard_surface = "/api/v1/dashboard/heuristics/coverage"
+
+let dashboard_retention_json =
+  `Assoc
+    [ "scope", `String "jsonl_tail"
+    ; "durable_store", `String ".masc/heuristic_metrics.jsonl"
+    ]
+;;
+
+let dashboard_metadata_fields ~surface =
+  [ "generated_at_iso", `String (Masc_domain.now_iso ())
+  ; "dashboard_surface", `String surface
+  ; "source", `String dashboard_source
+  ; "retention", dashboard_retention_json
+  ]
+;;
+
 let dashboard_feed_json ~limit events =
   `Assoc
-    [ "limit", `Int limit
+    (dashboard_metadata_fields ~surface:dashboard_surface
+     @ [ "limit", `Int limit
     ; "count", `Int (List.length events)
     ; "events", `List events
     ; "heuristics", `List (dashboard_issue_events events)
-    ]
+       ])
 ;;
 
 (* ================================================================ *)
@@ -442,10 +462,11 @@ let coverage_site_to_json site =
 
 let coverage_report_to_json report =
   `Assoc
-    [ "total_events", `Int report.total_events
+    (dashboard_metadata_fields ~surface:coverage_dashboard_surface
+     @ [ "total_events", `Int report.total_events
     ; "decision_shape_count", `Int report.decision_shape_count
     ; "mixed_outcome_sites", `Int report.mixed_outcome_sites
     ; "unique_decision_tuples", `Int report.unique_decision_tuples
     ; "sites", `List (List.map coverage_site_to_json report.sites)
-    ]
+       ])
 ;;

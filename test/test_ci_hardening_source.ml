@@ -1449,7 +1449,7 @@ let test_dashboard_warm_hydration_contracts () =
        "cached_surface_or_first_success_json _execution_cache");
   check bool "mission default route serves cached surface immediately" true
     (file_contains_pattern "lib/server/server_dashboard_http_core.ml"
-       "cached_surface_or_first_success_json _mission_cache");
+       "cached_surface_or_first_success_json mission_cache");
   check bool "namespace truth advertises initializing while execution warms" true
     (file_contains_pattern "lib/server/server_dashboard_http_namespace_truth.ml"
        {|("status", `String "initializing")|});
@@ -1990,7 +1990,7 @@ let test_namespace_truth_adaptive_timeout_contracts () =
        "let cold_timeout_s");
   check bool "shell_warmed tracking exists" true
     (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
-       "_shell_warmed")
+       "shell_warmed")
 
 let test_http_client_fd_safety_contracts () =
   check bool "masc http client forbids direct Cohttp client construction in docs" true

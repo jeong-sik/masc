@@ -33,17 +33,17 @@ val run_dashboard_compute :
 
 (** Internal cached surfaces for proactive refresh loops.
     Exposed for the facade module [Server_dashboard_http]. *)
-val _operator_snapshot_cache : cached_surface
-val _operator_digest_cache : cached_surface
-val _shell_warmed : bool Atomic.t
-val _shell_warming : bool Atomic.t
-val _last_good_shell : Yojson.Safe.t Atomic.t
+val operator_snapshot_cache : cached_surface
+val operator_digest_cache : cached_surface
+val shell_warmed : bool Atomic.t
+val shell_warming : bool Atomic.t
+val last_good_shell : Yojson.Safe.t Atomic.t
 
 (** Late-bound broadcast callbacks — set by [Server_dashboard_http]
     after [Sse] module is in scope. *)
-val _operator_snapshot_broadcast_ref : (Yojson.Safe.t -> unit) ref
-val _operator_digest_broadcast_ref : (Yojson.Safe.t -> unit) ref
-val _mission_cache : cached_surface
+val operator_snapshot_broadcast_ref : (Yojson.Safe.t -> unit) ref
+val operator_digest_broadcast_ref : (Yojson.Safe.t -> unit) ref
+val mission_cache : cached_surface
 
 (** {1 Dashboard Timeout} *)
 

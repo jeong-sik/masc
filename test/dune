@@ -1711,12 +1711,14 @@
  (name test_rfc_0085_pr14_dispatch_inline)
  (modules test_rfc_0085_pr14_dispatch_inline)
  (libraries alcotest ast_grep))
+
 ; RFC-0085 PR-13 — Underscore-prefix audit: 1 truly-dead deletion +
 ; 8 active rename across 7 modules.
 (test
  (name test_rfc_0085_pr13_underscore_rename)
  (modules test_rfc_0085_pr13_underscore_rename)
  (libraries alcotest ast_grep))
+
 ; RFC-0085 PR-12 — Tool_spec list bindings renamed (drop misleading
 ; _ prefix that signalled "unused" in OCaml but was wrong because the
 ; bindings are actively used by List.mem in the Tool_spec.register loop).
@@ -1724,6 +1726,7 @@
  (name test_rfc_0085_pr12_tool_spec_rename)
  (modules test_rfc_0085_pr12_tool_spec_rename)
  (libraries alcotest ast_grep))
+
 ; RFC-0085 PR-11 — Env_config_core deprecation mechanism removed.
 (test
  (name test_rfc_0085_pr11_deprecation_purge)

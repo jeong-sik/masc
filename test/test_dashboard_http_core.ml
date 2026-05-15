@@ -263,18 +263,18 @@ let test_dashboard_shell_http_json_prefers_preserved_base_path_input () =
 
 let test_dashboard_shell_http_json_uses_bootstrap_payload_while_prewarming () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  let original_warmed = Atomic.get Lib.Server_dashboard_http._shell_warmed in
-  let original_warming = Atomic.get Lib.Server_dashboard_http._shell_warming in
-  let original_last_good = Atomic.get Lib.Server_dashboard_http._last_good_shell in
+  let original_warmed = Atomic.get Lib.Server_dashboard_http.shell_warmed in
+  let original_warming = Atomic.get Lib.Server_dashboard_http.shell_warming in
+  let original_last_good = Atomic.get Lib.Server_dashboard_http.last_good_shell in
   Fun.protect
     ~finally:(fun () ->
-      Atomic.set Lib.Server_dashboard_http._shell_warmed original_warmed;
-      Atomic.set Lib.Server_dashboard_http._shell_warming original_warming;
-      Atomic.set Lib.Server_dashboard_http._last_good_shell original_last_good)
+      Atomic.set Lib.Server_dashboard_http.shell_warmed original_warmed;
+      Atomic.set Lib.Server_dashboard_http.shell_warming original_warming;
+      Atomic.set Lib.Server_dashboard_http.last_good_shell original_last_good)
     (fun () ->
-      Atomic.set Lib.Server_dashboard_http._shell_warmed false;
-      Atomic.set Lib.Server_dashboard_http._shell_warming true;
-      Atomic.set Lib.Server_dashboard_http._last_good_shell (`Assoc []);
+      Atomic.set Lib.Server_dashboard_http.shell_warmed false;
+      Atomic.set Lib.Server_dashboard_http.shell_warming true;
+      Atomic.set Lib.Server_dashboard_http.last_good_shell (`Assoc []);
       let json =
         Lib.Server_dashboard_http_core.dashboard_shell_http_json
           ~request:(request "/api/v1/dashboard/shell")
@@ -291,9 +291,9 @@ let test_dashboard_shell_http_json_uses_bootstrap_payload_while_prewarming () =
 
 let test_dashboard_shell_http_json_prefers_last_good_while_prewarming () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  let original_warmed = Atomic.get Lib.Server_dashboard_http._shell_warmed in
-  let original_warming = Atomic.get Lib.Server_dashboard_http._shell_warming in
-  let original_last_good = Atomic.get Lib.Server_dashboard_http._last_good_shell in
+  let original_warmed = Atomic.get Lib.Server_dashboard_http.shell_warmed in
+  let original_warming = Atomic.get Lib.Server_dashboard_http.shell_warming in
+  let original_last_good = Atomic.get Lib.Server_dashboard_http.last_good_shell in
   let last_good =
     `Assoc
       [
@@ -304,13 +304,13 @@ let test_dashboard_shell_http_json_prefers_last_good_while_prewarming () =
   in
   Fun.protect
     ~finally:(fun () ->
-      Atomic.set Lib.Server_dashboard_http._shell_warmed original_warmed;
-      Atomic.set Lib.Server_dashboard_http._shell_warming original_warming;
-      Atomic.set Lib.Server_dashboard_http._last_good_shell original_last_good)
+      Atomic.set Lib.Server_dashboard_http.shell_warmed original_warmed;
+      Atomic.set Lib.Server_dashboard_http.shell_warming original_warming;
+      Atomic.set Lib.Server_dashboard_http.last_good_shell original_last_good)
     (fun () ->
-      Atomic.set Lib.Server_dashboard_http._shell_warmed false;
-      Atomic.set Lib.Server_dashboard_http._shell_warming true;
-      Atomic.set Lib.Server_dashboard_http._last_good_shell last_good;
+      Atomic.set Lib.Server_dashboard_http.shell_warmed false;
+      Atomic.set Lib.Server_dashboard_http.shell_warming true;
+      Atomic.set Lib.Server_dashboard_http.last_good_shell last_good;
       let json =
         Lib.Server_dashboard_http_core.dashboard_shell_http_json
           ~request:(request "/api/v1/dashboard/shell")
@@ -326,13 +326,13 @@ let test_operator_snapshot_default_route_hydrates_first_success () =
   let source = read_file "lib/server/server_dashboard_http_core.ml" in
   check bool "operator snapshot uses first-success cache helper" true
     (contains_substring source "cached_surface_or_first_success_json"
-     && contains_substring source "_operator_snapshot_cache"
+     && contains_substring source "operator_snapshot_cache"
      && contains_substring source
           "dashboard_cache_key config \"operator_snapshot\" \"default-summary\"");
   check bool "operator snapshot no longer serves raw initializing cache" true
     (not
        (contains_substring source
-          "then cached_surface_json _operator_snapshot_cache"))
+          "then cached_surface_json operator_snapshot_cache"))
 
 let test_operator_snapshot_default_route_exposes_provenance () =
   with_test_env @@ fun ~env ~sw ~config ->
@@ -347,7 +347,7 @@ let test_operator_snapshot_default_route_exposes_provenance () =
       ]
   in
   with_cached_surface_success
-    Lib.Server_dashboard_http_core._operator_snapshot_cache
+    Lib.Server_dashboard_http_core.operator_snapshot_cache
     seed
   @@ fun () ->
   let json =
@@ -391,7 +391,7 @@ let test_operator_digest_default_route_exposes_provenance () =
       ; "generated_at", `String "2026-05-15T00:00:01Z"
       ]
   in
-  with_cached_surface_success Lib.Server_dashboard_http_core._operator_digest_cache seed
+  with_cached_surface_success Lib.Server_dashboard_http_core.operator_digest_cache seed
   @@ fun () ->
   match
     Lib.Server_dashboard_http_core.operator_digest_http_json
@@ -422,20 +422,20 @@ let test_operator_digest_default_route_exposes_provenance () =
 
 let test_dashboard_shell_timeout_fallback_reports_timing_context () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  let original_warmed = Atomic.get Lib.Server_dashboard_http._shell_warmed in
-  let original_warming = Atomic.get Lib.Server_dashboard_http._shell_warming in
-  let original_last_good = Atomic.get Lib.Server_dashboard_http._last_good_shell in
+  let original_warmed = Atomic.get Lib.Server_dashboard_http.shell_warmed in
+  let original_warming = Atomic.get Lib.Server_dashboard_http.shell_warming in
+  let original_last_good = Atomic.get Lib.Server_dashboard_http.last_good_shell in
   Fun.protect
     ~finally:(fun () ->
       Lib.Dashboard_cache.invalidate_all ();
-      Atomic.set Lib.Server_dashboard_http._shell_warmed original_warmed;
-      Atomic.set Lib.Server_dashboard_http._shell_warming original_warming;
-      Atomic.set Lib.Server_dashboard_http._last_good_shell original_last_good)
+      Atomic.set Lib.Server_dashboard_http.shell_warmed original_warmed;
+      Atomic.set Lib.Server_dashboard_http.shell_warming original_warming;
+      Atomic.set Lib.Server_dashboard_http.last_good_shell original_last_good)
     (fun () ->
       Lib.Dashboard_cache.invalidate_all ();
-      Atomic.set Lib.Server_dashboard_http._shell_warmed true;
-      Atomic.set Lib.Server_dashboard_http._shell_warming false;
-      Atomic.set Lib.Server_dashboard_http._last_good_shell (`Assoc []);
+      Atomic.set Lib.Server_dashboard_http.shell_warmed true;
+      Atomic.set Lib.Server_dashboard_http.shell_warming false;
+      Atomic.set Lib.Server_dashboard_http.last_good_shell (`Assoc []);
       let cache_key =
         Lib.Server_dashboard_http_core.dashboard_shell_cache_key config
       in

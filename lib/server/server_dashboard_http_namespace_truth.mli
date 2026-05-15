@@ -58,7 +58,7 @@ val dashboard_namespace_truth_http_json :
     race that discards stale data (#5090).
 
     Graceful degradation: shell falls back to
-    {!Server_dashboard_http_core._last_good_shell} on timeout (61x/day
+    {!Server_dashboard_http_core.last_good_shell} on timeout (61x/day
     zero-out under I/O contention before the fix). *)
 
 val namespace_truth_snapshot_from_caches :
@@ -73,7 +73,7 @@ val namespace_truth_snapshot_from_caches :
     summary and composes via
     {!Server_dashboard_http_namespace_truth_support.compose_namespace_truth_snapshot}.
 
-    Side effect: updates {!Server_dashboard_http_core._last_good_shell}
+    Side effect: updates {!Server_dashboard_http_core.last_good_shell}
     on a fresh shell read. *)
 
 val broadcast_namespace_truth_snapshot :

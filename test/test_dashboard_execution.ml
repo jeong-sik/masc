@@ -404,8 +404,8 @@ let test_dashboard_shell_includes_meta_cognition_summary () =
             ~created_at:1010.0 ();
         ];
       Lib.Dashboard_cache.invalidate_all ();
-      Atomic.set Lib.Server_dashboard_http._shell_warmed false;
-      Atomic.set Lib.Server_dashboard_http._last_good_shell (`Assoc []);
+      Atomic.set Lib.Server_dashboard_http.shell_warmed false;
+      Atomic.set Lib.Server_dashboard_http.last_good_shell (`Assoc []);
       let cold_json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
       let open Yojson.Safe.Util in
       check bool "cold shell defers meta cognition while warming" true

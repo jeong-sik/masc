@@ -13,7 +13,7 @@
     PR-B Slice 1 ships this **verify-only** path.  The two [oauth_method]
     materialisation flows (web device-flow, with-token) are layered on
     top by Slice 2 in [Server_routes_http_routes_credentials].  The trait
-    surface stays minimal so PR-C can wire [Credential_provider.finalize]
+    surface stays minimal so PR-C can wire [Keeper_credential_provider.finalize]
     against it without introducing new public types. *)
 
 open Repo_manager_types

@@ -95,7 +95,7 @@
    keeper_shell_ops
    keeper_exec_shell
    keeper_gh_env
-   credential_provider
+   keeper_credential_provider
    host_config_provider
    in_container_login_provider
    keeper_gh_shared

@@ -20,8 +20,19 @@ val build_agent :
   ?context_injector:Agent_sdk.Hooks.context_injector ->
   ?context:Agent_sdk.Context.t ->
   ?approval:Agent_sdk.Hooks.approval_callback ->
+  ?disclosure_strategy:Keeper_disclosure_strategy.t ->
   unit ->
   (Agent_sdk.Agent.t, string) result
+(** [build_agent] constructs an OAS agent for the given worker meta.
+
+    The optional [disclosure_strategy] parameter (RFC-0084
+    host-config-cleanup-G) activates [Agent_sdk.Builder.with_disclosure_level]
+    and, when the strategy's [demote_on_error] flag is set,
+    [Agent_sdk.Builder.with_disclosure_resolver].  When omitted the
+    SDK's [Full_schema] default applies — preserving today's
+    behaviour for every caller that has not yet adopted the typed
+    surface.  Wiring of TOML-driven strategy values is scoped to
+    follow-up [host-config-cleanup-H] (keeper_meta TOML round-trip). *)
 
 (** {1 Tool Tracking} *)
 

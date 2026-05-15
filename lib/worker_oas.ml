@@ -147,6 +147,7 @@ let build_agent
       ?context
       ?(approval : Agent_sdk.Hooks.approval_callback =
         Approval_callbacks.reject_by_default)
+      ?(disclosure_strategy : Keeper_disclosure_strategy.t option)
       ()
   : (Agent_sdk.Agent.t, string) result
   =
@@ -199,6 +200,27 @@ let build_agent
     match context with
     | Some ctx -> Agent_sdk.Builder.with_context ctx builder
     | None -> builder
+  in
+  (* RFC-0084 host-config-cleanup-G — activate the typed
+     Keeper_disclosure_strategy surface introduced by PR-13 by wiring
+     it into Agent_sdk.Builder.with_disclosure_level (+ optional
+     with_disclosure_resolver for the demote_on_error case).  When
+     [disclosure_strategy] is [None] the SDK default [Full_schema]
+     applies and no builder call is made — preserving today's
+     behaviour for every caller that has not yet adopted the typed
+     surface. *)
+  let builder =
+    match disclosure_strategy with
+    | None -> builder
+    | Some strategy ->
+      let builder =
+        match Keeper_disclosure_strategy.to_oas_disclosure_level strategy with
+        | None -> builder
+        | Some level -> Agent_sdk.Builder.with_disclosure_level level builder
+      in
+      (match Keeper_disclosure_strategy.to_oas_resolver strategy with
+       | None -> builder
+       | Some resolver -> Agent_sdk.Builder.with_disclosure_resolver resolver builder)
   in
   Agent_sdk.Builder.build_safe builder |> Result.map_error Agent_sdk.Error.to_string
 ;;

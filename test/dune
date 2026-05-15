@@ -1529,3 +1529,14 @@
  (name test_pr_f_test_mode_migration)
  (modules test_pr_f_test_mode_migration)
  (libraries masc_test_deps))
+
+; RFC-0084 host-config-cleanup-G — OAS disclosure activation bridges.
+; Pins to_oas_disclosure_level / to_oas_resolver converter contracts
+; (Full -> None, Hybrid -> Some Hybrid, Minimal_index -> Some Minimal,
+; resolver only for Hybrid demote_on_error=true).  Compile-time check
+; that Worker_oas.build_agent accepts ?disclosure_strategy.  Requires
+; masc_test_deps for Masc_mcp.Keeper_disclosure_strategy.*.
+(test
+ (name test_pr_g_disclosure_activation)
+ (modules test_pr_g_disclosure_activation)
+ (libraries masc_test_deps))

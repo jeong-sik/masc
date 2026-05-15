@@ -118,6 +118,20 @@ let test_keeper_task_claim_matches () =
        ~input:(`Assoc [ ("task_id", `String "t-1") ])
        ~risk_level:RL.Medium)
 
+let test_keeper_task_create_matches () =
+  Alcotest.(check bool) "keeper_task_create matches"
+    true
+    (RA.matches ~tool_name:"keeper_task_create"
+       ~input:(`Assoc [ ("title", `String "follow-up") ])
+       ~risk_level:RL.Medium)
+
+let test_keeper_task_create_high_does_not_match () =
+  Alcotest.(check bool) "keeper_task_create High exceeds max_risk"
+    false
+    (RA.matches ~tool_name:"keeper_task_create"
+       ~input:(`Assoc [ ("title", `String "follow-up") ])
+       ~risk_level:RL.High)
+
 let test_keeper_task_done_matches () =
   Alcotest.(check bool) "keeper_task_done matches"
     true
@@ -220,6 +234,16 @@ let test_rule_label_for_cancel_is_none () =
   in
   Alcotest.(check (option string)) "cancel has no label" None label
 
+let test_rule_label_for_task_create () =
+  let label =
+    RA.rule_label ~tool_name:"keeper_task_create"
+      ~input:(`Assoc [ ("title", `String "follow-up") ])
+      ~risk_level:RL.Medium
+  in
+  Alcotest.(check (option string)) "task create has routine label"
+    (Some "keeper_routine.keeper_task_create")
+    label
+
 (* ── rules_summary: stable JSON shape for dashboard ─────────── *)
 
 let test_rules_summary_is_list () =
@@ -297,6 +321,10 @@ let () =
         [
           Alcotest.test_case "keeper_task_claim" `Quick
             test_keeper_task_claim_matches;
+          Alcotest.test_case "keeper_task_create" `Quick
+            test_keeper_task_create_matches;
+          Alcotest.test_case "keeper_task_create high still gated" `Quick
+            test_keeper_task_create_high_does_not_match;
           Alcotest.test_case "keeper_task_done" `Quick
             test_keeper_task_done_matches;
           Alcotest.test_case "keeper_task_submit_for_verification" `Quick
@@ -328,6 +356,8 @@ let () =
             test_rule_label_for_claim;
           Alcotest.test_case "cancel has no label" `Quick
             test_rule_label_for_cancel_is_none;
+          Alcotest.test_case "task create has label" `Quick
+            test_rule_label_for_task_create;
         ] );
       ( "rules_summary",
         [

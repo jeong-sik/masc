@@ -89,6 +89,12 @@ let rules : rule list =
       label = "keeper_routine.keeper_task_claim";
     };
     {
+      tool = "keeper_task_create";
+      max_risk = RL.Medium;
+      allowed_actions = None;
+      label = "keeper_routine.keeper_task_create";
+    };
+    {
       tool = "keeper_task_done";
       max_risk = RL.Medium;
       allowed_actions = None;

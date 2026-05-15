@@ -228,7 +228,17 @@ let params_of_json_schema schema =
     Create OAS [Tool.t] from MASC schema definition + dispatch handler.
     This allows incremental migration: each tool can be converted independently. *)
 
+let oas_descriptor_lookup_name = function
+  | "Bash" -> "keeper_bash"
+  | "Edit" | "Write" -> "keeper_fs_edit"
+  | "Grep" -> "keeper_shell"
+  | "Read" -> "keeper_fs_read"
+  | "WebFetch" -> "masc_web_fetch"
+  | "WebSearch" -> "masc_web_search"
+  | name -> name
+
 let oas_permission_of_masc_tool name =
+  let name = oas_descriptor_lookup_name name in
   let meta = Tool_catalog.metadata name in
   match meta.destructive, meta.readonly with
   | Some true, _ -> Some Agent_sdk.Tool.Destructive
@@ -236,6 +246,19 @@ let oas_permission_of_masc_tool name =
   | _, Some false -> Some Agent_sdk.Tool.Write
   | _ when Tool_dispatch.is_destructive name -> Some Agent_sdk.Tool.Destructive
   | _ when Tool_dispatch.is_read_only name -> Some Agent_sdk.Tool.ReadOnly
+  | _ -> None
+
+let oas_shell_constraints_of_masc_tool name =
+  match String.lowercase_ascii (oas_descriptor_lookup_name name) with
+  | "bash" | "keeper_bash" | "masc_code_shell" ->
+    Some
+      { Agent_sdk.Tool.single_command_only = false
+      ; shell_metacharacters_allowed = false
+      ; chaining_allowed = false
+      ; redirection_allowed = true
+      ; pipes_allowed = true
+      ; workdir_policy = Some Agent_sdk.Tool.Recommended
+      }
   | _ -> None
 
 let oas_descriptor_of_masc_tool name =
@@ -254,7 +277,7 @@ let oas_descriptor_of_masc_tool name =
       mutation_class;
       concurrency_class;
       permission = Some permission;
-      shell = None;
+      shell = oas_shell_constraints_of_masc_tool name;
       notes = [];
       examples = [];
     }

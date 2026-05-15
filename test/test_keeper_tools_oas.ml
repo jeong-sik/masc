@@ -155,6 +155,41 @@ let find_tool name tools =
   List.find (fun (tool : Tool.t) -> String.equal tool.schema.name name) tools
 ;;
 
+let test_bash_alias_carries_shell_descriptor () =
+  let meta = make_test_meta () in
+  let ctx_snapshot = make_test_ctx () in
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "test_keeper_tools_shell_descriptor_%d" (Random.int 100000))
+  in
+  (try Unix.mkdir dir 0o755 with
+   | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Fun.protect
+    ~finally:(fun () ->
+      try
+        Sys.readdir dir |> Array.iter (fun f -> Sys.remove (Filename.concat dir f));
+        Unix.rmdir dir
+      with
+      | _ -> ())
+    (fun () ->
+       Eio_main.run
+       @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       let config = Coord.default_config dir in
+       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
+       let bash = find_tool "Bash" tools in
+       match Tool.descriptor bash with
+       | Some { Tool.shell = Some shell; permission = Some Tool.Destructive; _ } ->
+         check bool "metacharacters disabled" false shell.shell_metacharacters_allowed;
+         check bool "chaining disabled" false shell.chaining_allowed;
+         check bool "pipes allowed" true shell.pipes_allowed;
+         check bool "redirection allowed" true shell.redirection_allowed
+       | Some { Tool.shell = None; _ } -> fail "Bash descriptor must carry shell constraints"
+       | Some _ -> fail "Bash descriptor must preserve destructive permission"
+       | None -> fail "Bash must carry an OAS descriptor")
+;;
+
 let find_read_tool tools = find_tool "Read" tools
 
 let read_repo_dir meta =
@@ -1198,6 +1233,10 @@ let () =
       , [ test_case "returns nonempty" `Quick test_make_tools_returns_nonempty
         ; test_case "valid schemas" `Quick test_tools_have_valid_schemas
         ; test_case "count matches allowed" `Quick test_tool_count_matches_allowed
+        ; test_case
+            "Bash alias carries shell descriptor"
+            `Quick
+            test_bash_alias_carries_shell_descriptor
         ; test_case
             "error json becomes tool error"
             `Quick

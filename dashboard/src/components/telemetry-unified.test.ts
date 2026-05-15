@@ -776,6 +776,50 @@ describe('TelemetryUnified', () => {
     })
   })
 
+  it('does not group on turn=0 sentinel (turn-not-tracked records stay as entries)', async () => {
+    const { buildTelemetryDisplayItems } = await loadPanel(
+      vi.fn().mockResolvedValue(baseTelemetry),
+      vi.fn().mockResolvedValue(baseSummary),
+    )
+
+    // turn=0 is used by keeper telemetry as "turn not tracked" (e.g.,
+    // trajectory tool-call records). These entries must not be collapsed
+    // into a fake `actor · turn 0` group even when they share an actor.
+    const items = buildTelemetryDisplayItems([
+      {
+        source: 'tool_call_io',
+        ts: 1_775_711_000,
+        keeper: 'alpha',
+        tool: 'keeper_tasks_list',
+        turn: 0,
+        runtime_contract: { agent_name: 'keeper-alpha-agent' },
+      },
+      {
+        source: 'tool_call_io',
+        ts: 1_775_710_999,
+        keeper: 'alpha',
+        tool: 'masc_status',
+        turn: 0,
+        runtime_contract: { agent_name: 'keeper-alpha-agent' },
+      },
+      {
+        source: 'oas_event',
+        ts_unix: 1_775_710_998,
+        event_type: 'telemetry_event',
+        payload: [
+          'Context_window_usage',
+          { agent_name: 'keeper-alpha-agent', turn: 0, estimated_tokens: 50 },
+        ],
+      },
+    ])
+
+    const turnGroups = items.filter(
+      (item): item is Extract<typeof item, { kind: 'group' }> =>
+        item.kind === 'group' && item.category === 'turn',
+    )
+    expect(turnGroups).toHaveLength(0)
+  })
+
   it('surfaces cloud Ollama provider details in OAS telemetry previews and search', async () => {
     const { buildTelemetryDisplayItems, filterTelemetryDisplayItems } = await loadPanel(
       vi.fn().mockResolvedValue(baseTelemetry),

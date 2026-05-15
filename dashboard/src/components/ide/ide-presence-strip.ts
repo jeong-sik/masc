@@ -13,16 +13,16 @@ import { cursorOverlaySignal, type KeeperCursor } from './keeper-cursor-overlay'
 import { focusIdeContextAnchor, type IdeContextFocus } from './ide-state'
 import { routeLinksForContext } from './ide-context-lens'
 
-interface ApiAgent {
+export interface ApiAgent {
   readonly name: string
   readonly status: string
   readonly current_task: string | null
   readonly model: string | null
 }
 
-interface ApiStatus {
-  readonly cluster?: string
-  readonly project?: string
+export interface ApiStatus {
+  readonly cluster?: string | null
+  readonly project?: string | null
   readonly paused?: boolean
 }
 
@@ -78,12 +78,17 @@ export function workspaceLabelForAgent(
   return agentName
 }
 
-function agentsToPresence(
+/** @internal — exported only so {@link ./ide-presence-strip.test.ts}
+    can pin the disconnected/live branch behaviour against runtime
+    payloads where [cluster] may arrive as [null] (the JSON wire form
+    of OCaml's [None]) rather than [undefined]. */
+export function agentsToPresence(
   agents: ReadonlyArray<ApiAgent>,
   status: ApiStatus,
   worktrees: ReadonlyArray<WorktreeEntry>,
 ): KeeperPresenceSnapshot {
-  if (status.cluster === undefined || status.cluster.trim() === '') {
+  const cluster = status.cluster?.trim() ?? ''
+  if (cluster === '') {
     return disconnectedSnapshot('runtime_unknown')
   }
   if (agents.length === 0) {
@@ -92,7 +97,7 @@ function agentsToPresence(
   const now = Date.now()
   return {
     kind: 'live',
-    runtime_id: status.cluster,
+    runtime_id: cluster,
     entries: agents.map((agent, idx) => ({
       keeper_id: agent.name,
       workspace_label: workspaceLabelForAgent(agent.name, worktrees),

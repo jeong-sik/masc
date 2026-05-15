@@ -34,7 +34,7 @@ val register : url:string -> max_concurrent:int -> unit
     Typical callers:
     - module init parses [MASC_CLIENT_CAPACITY]
     - [Keeper_turn_driver] registers HTTP-probe-capable candidates
-      gated on [Provider_adapter.is_http_probe_capable_kind] *)
+      gated on provider-kind probe capability *)
 
 val registered_urls : unit -> string list
 (** Snapshot of currently-registered URLs.  Test helper. *)

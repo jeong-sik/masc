@@ -246,11 +246,10 @@ let test_is_spawnable_empty () =
    ============================================================ *)
 
 let test_spawnable_agents_list () =
-  let names = Masc_mcp.Provider_adapter.spawnable_canonical_names () in
-  check bool "list not empty" true (List.length names > 0);
-  check bool "contains claude" true (List.mem "claude" names);
-  check bool "contains gemini" true (List.mem "gemini" names);
-  check bool "does not contain bare ollama" false (List.mem "ollama" names)
+  check bool "contains claude" true (Masc_mcp.Auto_responder.is_spawnable "claude");
+  check bool "contains gemini" true (Masc_mcp.Auto_responder.is_spawnable "gemini");
+  check bool "does not contain bare ollama" false
+    (Masc_mcp.Auto_responder.is_spawnable "ollama")
 
 (* ============================================================
    Test Runners

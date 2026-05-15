@@ -38,6 +38,8 @@ let errorf fmt =
 type response_format =
   | Openai_chat_completions
 
+module Runtime_binding = Agent_sdk.Provider_runtime_binding
+
 let assoc label = function
   | `Assoc fields -> Ok fields
   | _ -> errorf "%s: expected object" label
@@ -118,17 +120,21 @@ let load_snapshots_from_jsonl path =
 
 let response_format_of_provider provider =
   let canonical =
-    match Provider_adapter.resolve_direct_canonical_name provider with
-    | Some name -> name
+    match Runtime_binding.find provider with
+    | Some binding -> binding.Runtime_binding.id
     | None -> String.lowercase_ascii (String.trim provider)
   in
   (* The seed harness only knows the OpenAI-compatible chat-completions
      tool-call envelope; unsupported providers must add an explicit extractor
      instead of silently reusing this parser. *)
   match canonical with
+  | "openai"
   | "codex-api"
+  | "glm"
   | "glm-api"
+  | "glm-coding"
   | "glm-coding-plan"
+  | "kimi"
   | "kimi-api"
   | "openrouter"
   | "ollama"

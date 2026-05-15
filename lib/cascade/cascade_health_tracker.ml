@@ -112,9 +112,8 @@ let cooldown_sec =
     respectively to prevent zero-value misconfiguration from disabling
     cooldown entirely.
 
-    Provider classification uses {!Provider_adapter.is_local_provider},
-    the same primitive cascade_runtime already consumes — no new
-    classifier introduced. *)
+    Provider classification uses OAS runtime bindings plus the local
+    ["custom"] schema prefix, not Provider_adapter catalog rows. *)
 let local_cooldown_threshold =
   Int.max 1
     (read_int_setting
@@ -129,8 +128,33 @@ let local_cooldown_sec =
        ~default:10.0
        ())
 
+let local_runtime_auth = function
+  | Agent_sdk.Provider_runtime_binding.No_auth -> true
+  | Api_key_env _ | Cli_cached_login | Oauth_cached_login | Setup_token_env _
+  | File _ | Exec _ -> false
+;;
+
+let local_runtime_base_url base_url =
+  match Uri.of_string (String.trim base_url) |> Uri.host with
+  | Some host -> Masc_network_defaults.is_loopback_host_opt (Some host)
+  | None -> false
+;;
+
+let runtime_binding_is_local (binding : Agent_sdk.Provider_runtime_binding.t) =
+  local_runtime_auth binding.auth && local_runtime_base_url binding.base_url
+;;
+
+let provider_key_is_local provider_key =
+  let key = String.trim provider_key |> String.lowercase_ascii in
+  String.equal key "custom"
+  ||
+  match Agent_sdk.Provider_runtime_binding.find key with
+  | Some binding -> runtime_binding_is_local binding
+  | None -> false
+;;
+
 let cooldown_config_for ~provider_key =
-  if Provider_adapter.is_local_provider provider_key then
+  if provider_key_is_local provider_key then
     (local_cooldown_threshold, local_cooldown_sec)
   else
     (cooldown_threshold, cooldown_sec)

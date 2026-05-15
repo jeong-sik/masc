@@ -32,7 +32,7 @@ let test_kimi_cli_exit_1_cascades () =
   in
   let err = Http_client.AcceptRejected { reason } in
   Alcotest.(check bool)
-    "kimi_cli exit 1 must cascade — permanent error is Moonshot-specific, \
+    "kimi_cli exit 1 must cascade — permanent error is provider-local, \
      next cascade hop (claude/gpt/ollama) unaffected"
     true
     (Oas_compat.Http_client.should_cascade err)

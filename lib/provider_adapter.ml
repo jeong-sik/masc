@@ -193,69 +193,17 @@ let cn_claude_api = "claude"
 let cn_codex_api = "openai"
 let cn_gemini_api = "gemini"
 let cn_kimi_api = "kimi"
-let cn_kimi_coding = "kimi-coding"
 let cn_glm = "glm"
 let cn_glm_coding_plan = "glm-coding"
 let cn_openrouter = "openrouter"
 let auth_header_authorization = "Authorization"
-let kimi_api_key_envs = [ "KIMI_API_KEY_SB"; "KIMI_API_KEY" ]
-let kimi_coding_key_envs = [ "KIMI_CODING_API_KEY"; "KIMI_API_KEY_SB" ]
 
 let display_provider_name label =
   match normalize_label label with
   | "glm" | "glm-api" -> cn_glm
   | "glm-coding" | "glm-coding-plan" -> cn_glm_coding_plan
   | "kimi-api" -> cn_kimi_api
-  | "kimi-coding" | "kimi_coding" -> cn_kimi_coding
   | _ -> String.trim label
-;;
-
-(** Default API base URLs — overridable via env var for proxying/testing.
-    Where OAS Provider_registry already defines a default, query it rather
-    than duplicating the literal here. *)
-
-let env_url_or ~env ~default =
-  match Sys.getenv_opt env with
-  | Some url ->
-    let trimmed = String.trim url in
-    if trimmed <> "" then trimmed else default
-  | None -> default
-;;
-
-(** Query OAS Provider_registry for a provider's default base_url.
-    Returns empty string if the provider is not known to OAS.
-    This removes duplicated defaults between MASC and OAS. *)
-let registry_default_base_url name =
-  let registry = Llm_provider.Provider_registry.default () in
-  match Llm_provider.Provider_registry.find registry name with
-  | Some entry -> entry.defaults.base_url
-  | None -> ""
-;;
-
-let anthropic_api_url () =
-  env_url_or ~env:"ANTHROPIC_API_URL" ~default:(registry_default_base_url "claude")
-;;
-
-let openai_api_url () = env_url_or ~env:"OPENAI_API_URL" ~default:"https://api.openai.com"
-
-let openrouter_api_url () =
-  env_url_or ~env:"OPENROUTER_API_URL" ~default:(registry_default_base_url "openrouter")
-;;
-
-let glm_api_url () =
-  env_url_or ~env:"ZAI_BASE_URL" ~default:Llm_provider.Zai_catalog.general_base_url
-;;
-
-let glm_coding_api_url () =
-  env_url_or ~env:"ZAI_CODING_BASE_URL" ~default:Llm_provider.Zai_catalog.coding_base_url
-;;
-
-let moonshot_compat_base_url = "https://api.moonshot.ai/v1"
-let kimi_api_url () = env_url_or ~env:"KIMI_BASE_URL" ~default:moonshot_compat_base_url
-let kimi_coding_base_url = "https://api.kimi.com/coding/v1"
-
-let kimi_coding_api_url () =
-  env_url_or ~env:"KIMI_CODING_BASE_URL" ~default:kimi_coding_base_url
 ;;
 
 (* SSOT cascade prefix for local llama-server instances.
@@ -703,12 +651,7 @@ let provider_auth_available label =
        (match adapter.spawn_key with
         | Some cmd -> Llm_provider.Provider_registry.command_in_path cmd
         | None -> false)
-     | Api_key env_name ->
-       env_present env_name
-       || (adapter.canonical_name = cn_kimi_api
-           && List.exists env_present kimi_api_key_envs)
-       || (adapter.canonical_name = cn_kimi_coding
-           && List.exists env_present kimi_coding_key_envs)
+     | Api_key env_name -> env_present env_name
      | Vertex_adc { project_env; _ } -> env_present project_env)
   | None -> false
 ;;
@@ -717,12 +660,7 @@ let provider_auth_available label =
     adapter config, instead of hardcoding vendor env var names. *)
 let auth_kind_for_canonical_name name =
   match resolve_direct_adapter name with
-  | Some adapter ->
-    if adapter.canonical_name = cn_kimi_api
-    then "api_key:KIMI_API_KEY_SB|KIMI_API_KEY"
-    else if adapter.canonical_name = cn_kimi_coding
-    then "api_key:KIMI_CODING_API_KEY|KIMI_API_KEY_SB"
-    else string_of_auth_mode adapter.auth_mode
+  | Some adapter -> string_of_auth_mode adapter.auth_mode
   | None -> "unknown"
 ;;
 
@@ -1036,8 +974,6 @@ let openai_compat_adapter_by_endpoint (cfg : Llm_provider.Provider_config.t) =
         direct_adapters
     with
     | Some _ as adapter -> adapter
-    | None when same_base_url (kimi_api_url ()) cfg.base_url ->
-      resolve_adapter_by_cascade_prefix cn_kimi_api
     | None -> None
 ;;
 
@@ -1261,34 +1197,12 @@ let cascade_prefix_of_provider_kind (kind : Llm_provider.Provider_config.provide
   | None -> cn
 ;;
 
-let provider_kind_of_declarative_protocol raw =
-  match normalize_label raw with
-  | "anthropic-cli" -> Some Llm_provider.Provider_config.Claude_code
-  | "anthropic-http" -> Some Llm_provider.Provider_config.Anthropic
-  | "openai-cli" -> Some Llm_provider.Provider_config.Codex_cli
-  | "openai-http" -> Some Llm_provider.Provider_config.OpenAI_compat
-  | "google-cli" -> Some Llm_provider.Provider_config.Gemini_cli
-  | "kimi-cli" -> Some Llm_provider.Provider_config.Kimi_cli
-  | "ollama-http" -> Some Llm_provider.Provider_config.Ollama
-  | _ -> None
-;;
-
-let cascade_prefix_of_declarative_protocol raw =
-  provider_kind_of_declarative_protocol raw
-  |> Option.map cascade_prefix_of_provider_kind
-;;
-
 let auth_env_keys_of_provider_kind (kind : Llm_provider.Provider_config.provider_kind)
   : string list
   =
-  (* RFC-0058 §2.4: Kimi and Gemini have non-adapter overrides
-     (multi-key fallback list and Vertex env pair respectively);
-     every other kind defers to the adapter's [auth_mode]. The
-     wildcard branch covers all current and future provider_kind
-     variants without enumerating them. *)
+  (* Gemini keeps its Vertex ADC pair for host inventory; every other kind
+     defers to OAS runtime binding/default env metadata. *)
   match kind with
-  | Llm_provider.Provider_config.OpenAI_compat -> [ "OPENAI_API_KEY" ]
-  | Llm_provider.Provider_config.Kimi -> kimi_api_key_envs
   | Llm_provider.Provider_config.Gemini ->
     [ google_cloud_project_env; google_cloud_location_env ]
   | _ ->
@@ -1326,7 +1240,6 @@ let all_auth_env_keys () : string list =
     match adapter.auth_mode with
     | No_auth -> []
     | Cli_cached_login -> []
-    | Api_key _ when adapter.canonical_name = cn_kimi_api -> kimi_api_key_envs
     | Api_key env_name -> [ env_name ]
     | Vertex_adc _ -> [])
   |> List.sort_uniq String.compare

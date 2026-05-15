@@ -59,7 +59,7 @@ module Http_client = struct
         (** Provider subprocess exited with a permanent rejection.
             Originally detected via [contains_ci "rejected the request"]
             (M05).  Canonical case: kimi_cli exit 1 — the auth/config
-            error is Moonshot-specific; other providers are unaffected.
+            error is provider-local; other providers are unaffected.
             See masc-mcp #9932. *)
     | Startup_crash
         (** Provider CLI crashed before processing the request.

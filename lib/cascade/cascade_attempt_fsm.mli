@@ -23,7 +23,7 @@ val enrich_sdk_error :
   provider_cfg:Llm_provider.Provider_config.t ->
   Agent_sdk.Error.sdk_error -> Agent_sdk.Error.sdk_error
 (** Enrich an SDK error with provider-specific diagnostic hints
-    (e.g. Moonshot auth, OpenAI-compat 404). *)
+    (e.g. API-key auth, OpenAI-compat 404). *)
 
 (** {1 CLI-wrapped error pattern classification} *)
 
@@ -126,12 +126,12 @@ val sdk_error_cascade_fallback_class :
     operator-facing [top_level_reason] aggregation on typed causes instead of
     generic SDK/Internal wrapper strings. *)
 
-(** {1 Moonshot / Kimi helpers} *)
+(** {1 Provider auth helpers} *)
 
-val is_moonshot_provider : Llm_provider.Provider_config.t -> bool
+val resolve_provider_api_key_env_name :
+  cascade_name:Cascade_error_classify.cascade_name ->
+  provider_cfg:Llm_provider.Provider_config.t ->
+  string
 
-val resolve_kimi_api_key_env_name :
-  cascade_name:Cascade_error_classify.cascade_name -> string
-
-val moonshot_auth_hint_marker : string
+val provider_auth_hint_marker : string
 val openai_compat_not_found_hint_marker : string

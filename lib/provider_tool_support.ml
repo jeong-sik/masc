@@ -74,6 +74,21 @@ let provider_supports_runtime_mcp_lane (provider_cfg : Llm_provider.Provider_con
   caps.supports_runtime_mcp_tools && caps.supports_runtime_tool_events
 ;;
 
+let provider_requires_per_keeper_bridging_for_bound_actor_tools
+      (provider_cfg : Llm_provider.Provider_config.t)
+  =
+  Provider_adapter.requires_per_keeper_bridging_for_bound_actor_tools_for_config
+    provider_cfg
+;;
+
+let provider_kind_requires_per_keeper_bridging_for_bound_actor_tools kind =
+  Provider_adapter.requires_per_keeper_bridging_for_bound_actor_tools_for_kind kind
+;;
+
+let provider_kind_tolerates_bound_actor_fallback kind =
+  Provider_adapter.tolerates_bound_actor_fallback_for_kind kind
+;;
+
 let runtime_mcp_policy_requires_http_headers
       (policy : Llm_provider.Llm_transport.runtime_mcp_policy)
   =

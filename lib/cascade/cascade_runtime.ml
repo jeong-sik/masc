@@ -8,6 +8,7 @@
 let fallback_context_window = 128_000
 
 let default_registry = Llm_provider.Provider_registry.default ()
+module Runtime_binding = Agent_sdk.Provider_runtime_binding
 
 let provider_name_of_label (label : string) : string option =
   match String.index_opt label ':' with
@@ -15,6 +16,67 @@ let provider_name_of_label (label : string) : string option =
   | Some idx ->
       if idx = 0 then None
       else Some (String.sub label 0 idx |> String.trim |> String.lowercase_ascii)
+
+let trim_nonempty value =
+  let trimmed = String.trim value in
+  if String.equal trimmed "" then None else Some trimmed
+;;
+
+let binding_endpoint_url (binding : Runtime_binding.t) =
+  trim_nonempty binding.Runtime_binding.base_url
+
+let normalize_provider_id provider_id =
+  String.trim provider_id
+  |> String.lowercase_ascii
+  |> String.map (fun c -> if c = '-' then '_' else c)
+
+let runtime_binding_of_label label =
+  match Runtime_binding.find label with
+  | Some _ as found -> found
+  | None -> Runtime_binding.find (normalize_provider_id label)
+
+let binding_base_url_is_loopback binding =
+  match binding_endpoint_url binding with
+  | None -> false
+  | Some base_url ->
+      Uri.of_string base_url |> Uri.host |> Masc_network_defaults.is_loopback_host_opt
+
+let binding_auth_is_no_auth (binding : Runtime_binding.t) =
+  match binding.Runtime_binding.auth with
+  | Runtime_binding.No_auth -> true
+  | Runtime_binding.Api_key_env _
+  | Runtime_binding.Cli_cached_login
+  | Runtime_binding.Oauth_cached_login
+  | Runtime_binding.Setup_token_env _
+  | Runtime_binding.File _
+  | Runtime_binding.Exec _ ->
+      false
+
+let binding_is_local_runtime (binding : Runtime_binding.t) =
+  match binding.Runtime_binding.transport with
+  | Runtime_binding.Cli -> false
+  | Runtime_binding.Http | Runtime_binding.Managed | Runtime_binding.Custom_openai_compat ->
+      binding_auth_is_no_auth binding && binding_base_url_is_loopback binding
+
+let local_runtime_provider_id () =
+  Runtime_binding.all ()
+  |> List.find_opt binding_is_local_runtime
+  |> Option.map (fun binding -> binding.Runtime_binding.id)
+
+let local_model_label model_id =
+  match local_runtime_provider_id () with
+  | Some provider_id -> provider_id ^ ":" ^ model_id
+  | None -> "auto"
+
+let provider_name_requires_local_discovery provider_name =
+  match runtime_binding_of_label provider_name with
+  | Some binding -> binding_is_local_runtime binding
+  | None -> false
+
+let provider_name_is_local_or_custom provider_name =
+  let normalized = String.trim provider_name |> String.lowercase_ascii in
+  String.equal normalized "custom"
+  || provider_name_requires_local_discovery provider_name
 
 let is_local_only_cascade name =
   let lc = name |> Keeper_cascade_profile.canonicalize |> String.lowercase_ascii in
@@ -30,7 +92,7 @@ let is_local_only_cascade name =
 
 let is_local_label label =
   match provider_name_of_label label with
-  | Some pname -> Provider_adapter.is_local_provider pname
+  | Some pname -> provider_name_is_local_or_custom pname
   | None -> false
 
 let is_typed_declarative_label_provider = function
@@ -38,6 +100,11 @@ let is_typed_declarative_label_provider = function
   | _ -> false
 
 let cascade_name_to_string = Keeper_cascade_profile.runtime_name_to_string
+
+let has_execution_model_config () =
+  match Provider_adapter.preferred_execution_model_labels () with
+  | _ :: _ -> true
+  | [] -> false
 
 let default_model_strings ~cascade_name =
   let cascade_name =
@@ -74,7 +141,7 @@ let labels_require_local_discovery (labels : string list) : bool =
   List.exists
     (fun label ->
       match provider_name_of_label label with
-      | Some pname -> Provider_adapter.requires_discovery pname
+      | Some pname -> provider_name_requires_local_discovery pname
       | None -> false)
     labels
 
@@ -231,7 +298,7 @@ let labels_are_pure_local (labels : string list) : bool =
   List.for_all
     (fun label ->
       match provider_name_of_label label with
-      | Some pname -> Provider_adapter.is_local_provider pname
+      | Some pname -> provider_name_is_local_or_custom pname
       | None -> false)
     labels
 
@@ -306,8 +373,7 @@ let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
           match provider_name_of_label label with
           | None -> true
           | Some pname ->
-              if Provider_adapter.is_local_provider pname
-                 || is_typed_declarative_label_provider pname
+              if provider_name_is_local_or_custom pname || is_typed_declarative_label_provider pname
               then true
               else
                 match Llm_provider.Provider_registry.find default_registry pname with
@@ -323,7 +389,7 @@ let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
             match provider_name_of_label label with
             | None -> None
             | Some pname ->
-                if Provider_adapter.is_local_provider pname
+                if provider_name_is_local_or_custom pname
                    || is_typed_declarative_label_provider pname
                 then None
                 else

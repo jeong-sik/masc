@@ -63,12 +63,12 @@ let test_claude_prefix_resolves_to_anthropic () =
   | Custom_url _ -> fail "claude: resolved to Custom_url"
   | Unknown msg -> fail ("claude: resolved to Unknown: " ^ msg)
 
-let test_kimi_prefix_resolves_to_openai_compat () =
+let test_kimi_prefix_resolves_to_kimi () =
   match Resolver.resolve "kimi:kimi-for-coding" with
   | Registered { provider_name; model_id; kind } ->
     check string "provider_name" "kimi" provider_name;
     check string "model_id preserved" "kimi-for-coding" model_id;
-    check kind_testable "kind is OpenAI_compat" Pk.OpenAI_compat kind
+    check kind_testable "kind is Kimi" Pk.Kimi kind
   | Custom_url _ -> fail "kimi: resolved to Custom_url"
   | Unknown msg -> fail ("kimi: resolved to Unknown: " ^ msg)
 
@@ -143,19 +143,14 @@ let test_cascade_parse_custom_v1_base_url_dedupes_request_path () =
     check string "base_url stays unchanged"
       "http://127.0.0.1:18080/v1" cfg.base_url
 
-let test_cascade_parse_kimi_legacy_alias_maps_to_k2_5 () =
+let test_cascade_parse_kimi_uses_oas_registry_defaults () =
   with_env "KIMI_API_KEY" (Some "dummy-key") (fun () ->
       match Cascade.parse_model_string "kimi:kimi-for-coding" with
-      | None -> fail "kimi legacy alias should parse when KIMI_API_KEY is set"
+      | None -> fail "kimi should parse when KIMI_API_KEY is set"
       | Some cfg ->
-        check kind_testable "cfg.kind is OpenAI_compat"
-          Pk.OpenAI_compat cfg.kind;
-        check string "legacy alias normalized to current Kimi model"
-          "kimi-k2.5" cfg.model_id;
-        check string "Moonshot request path"
-          "/chat/completions" cfg.request_path;
-        check string "Moonshot base url"
-          "https://api.moonshot.ai/v1" cfg.base_url)
+        check kind_testable "cfg.kind is Kimi" Pk.Kimi cfg.kind;
+        check string "request path from OAS registry" "/v1/messages" cfg.request_path;
+        check string "base url from OAS registry" "https://api.kimi.com/coding" cfg.base_url)
 
 (* ────────────────────────────────────────────────────────────────── *)
 (* Suite                                                              *)
@@ -169,8 +164,8 @@ let () =
         test_case "openrouter: -> OpenAI_compat; openai: -> Unknown" `Quick
           test_openai_compat_prefix_not_misrouted;
         test_case "claude: -> Anthropic" `Quick test_claude_prefix_resolves_to_anthropic;
-        test_case "kimi: -> OpenAI_compat" `Quick
-          test_kimi_prefix_resolves_to_openai_compat;
+        test_case "kimi: -> Kimi" `Quick
+          test_kimi_prefix_resolves_to_kimi;
         test_case "unknown vendor -> Unknown (no OpenAI_compat fallback)" `Quick
           test_unknown_vendor_returns_unknown;
         test_case "malformed spec -> Unknown" `Quick test_malformed_spec_returns_unknown;
@@ -184,8 +179,8 @@ let () =
           test_cascade_parse_gemini_preserves_kind;
         test_case "custom v1 base_url dedupes request_path" `Quick
           test_cascade_parse_custom_v1_base_url_dedupes_request_path;
-        test_case "parse_model_string maps legacy Kimi alias to kimi-k2.5" `Quick
-          test_cascade_parse_kimi_legacy_alias_maps_to_k2_5;
+        test_case "parse_model_string uses OAS Kimi defaults" `Quick
+          test_cascade_parse_kimi_uses_oas_registry_defaults;
         test_case "parse_model_string(unknown) = None" `Quick
           test_cascade_parse_unknown_returns_none;
       ]

@@ -62,7 +62,7 @@ module Http_client : sig
     | Request_rejected
         (** Provider subprocess exited with a permanent rejection (M05).
             Canonical case: kimi_cli exit 1.  The auth/config error is
-            Moonshot-specific; other providers are unaffected (#9932). *)
+            provider-local; other providers are unaffected (#9932). *)
     | Startup_crash
         (** Provider CLI crashed before processing the request (M05).
             Covers gemini_cli top-level-await / yoga_wasm and kimi_cli
@@ -111,7 +111,7 @@ module Http_client : sig
         [InvalidConfig] errors for [runtime_mcp_auth] and [tool_support]
         (documented at [oas_worker_named.ml:661-678]).
       - [Request_rejected] — kimi_cli exit 1. The auth/config error is
-        Moonshot-specific; another provider can succeed.
+        provider-local; another provider can succeed.
       - [Startup_crash] — gemini_cli top-level await / yoga_wasm or
         kimi_cli process-title UnicodeDecodeError. The CLI source
         explicitly marks this "so the cascade can move on".

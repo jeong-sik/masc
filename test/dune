@@ -1713,6 +1713,14 @@
  (modules test_rfc_0085_pr7_retired_pg_envs_purge)
  (libraries alcotest ast_grep))
 
+; RFC-0086 — keeper namespace bulk promotion invariant.
+; Pins G-A (Phase 2.A wave 1, #15474): every .ml/.mli under
+; lib/keeper/ carries the keeper_ prefix.
+(test
+ (name test_rfc_0086_keeper_namespace_invariant)
+ (modules test_rfc_0086_keeper_namespace_invariant)
+ (libraries alcotest))
+
 ; RFC-0085 PR-18 — Retroactive AST test for execution_surfaces +
 ; namespace_truth rename (#15486 shipped without a regression test;
 ; restored by #15495).

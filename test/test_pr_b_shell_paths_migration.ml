@@ -96,7 +96,7 @@ let test_no_zsh_literals_in_consumer_files () =
 let test_bash_binding_invoked_exactly_once () =
   let occurrences =
     count_across_files ~files:bash_consumer_files
-      ~needle:"Host_config.host"
+      ~needle:"Host_config.host ()"
   in
   (check int)
     "Host_config.host invoked exactly once across \
@@ -107,7 +107,7 @@ let test_bash_binding_invoked_exactly_once () =
 let test_zsh_binding_invoked_per_module () =
   let occurrences =
     count_across_files ~files:zsh_consumer_files
-      ~needle:"Host_config.host"
+      ~needle:"Host_config.host ()"
   in
   (check int)
     "Host_config.host invoked once per zsh consumer \
@@ -116,7 +116,7 @@ let test_zsh_binding_invoked_per_module () =
 ;;
 
 let test_host_config_field_values () =
-  let d = Masc_mcp.Host_config.host () in
+  let d = Host_config.host () in
   (check string)
     "Host_config.host ().host_bash = /bin/bash today"
     "/bin/bash" d.host_bash;

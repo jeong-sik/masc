@@ -6,7 +6,7 @@
     smallest of the four (82 LOC impl, 14 LOC mli) with property
     pins on every exposed helper. *)
 
-module B = Masc_mcp.Briefing_json_helpers
+module B = Briefing_json_helpers
 
 (* Diagnostic helper — prints the actual JSON value when a
    pattern-match fallback fires, instead of bare [assert false].

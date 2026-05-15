@@ -685,7 +685,7 @@ let test_startup_config_resolution_defaults_to_bootstrapped_root () =
       Alcotest.(check string) "returns base-path config root" expected
         resolution.Config_dir_resolver.config_root.path;
       Alcotest.(check (option string)) "env remains effectively unset" None
-        (Env_config_core.config_dir_opt ()))
+        ((Host_config.from_env ()).config_dir))
 
 let test_startup_config_resolution_preserves_explicit_override () =
   with_temp_dir "startup-config-activate-explicit" (fun dir ->

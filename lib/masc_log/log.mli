@@ -115,6 +115,9 @@ module Ring : sig
       JSONL files that were written before the typed encoder.  Every
       other call site lets it propagate. *)
 
+  val capacity : int
+  (** Maximum number of entries retained in the in-memory dashboard ring. *)
+
   val source_of_string : string -> source
   (** Inverse of {!source_to_string}.  Raises {!Entry_decode_error} on
       unknown labels. *)

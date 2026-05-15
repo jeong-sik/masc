@@ -319,7 +319,7 @@ check_json "IDE annotations exposes data envelope" "$BASE/api/v1/ide/annotations
 check_http "IDE regions 200" "$BASE/api/v1/ide/regions" "200"
 check_json "IDE regions exposes data envelope" "$BASE/api/v1/ide/regions" "d.get('ok') == True and 'data' in d" '^True$'
 check_http "dashboard logs 200" "$BASE/api/v1/dashboard/logs?limit=3" "200"
-check_json "dashboard logs exposes entries" "$BASE/api/v1/dashboard/logs?limit=3" "'entries' in d" '^True$'
+check_json "dashboard logs exposes provenance" "$BASE/api/v1/dashboard/logs?limit=3" "d.get('dashboard_surface') == '/api/v1/dashboard/logs' and d.get('source') == 'masc_log_ring' and d.get('retention', {}).get('scope') == 'dashboard_logs' and 'generated_at_iso' in d and 'entries' in d" '^True$'
 
 echo "[7/7] SPA"
 check_http "dashboard index 200" "$BASE/dashboard" "200"

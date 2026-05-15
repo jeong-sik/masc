@@ -17,9 +17,16 @@ val list_checkpoints : session_dir:string -> string list
 (** Number of legacy checkpoints retained after [save] auto-prune. *)
 val max_checkpoints_retained : int
 
-(** Remove all legacy checkpoints beyond the [keep] most recent.
-    Returns the number deleted. *)
-val prune : session_dir:string -> keep:int -> int
+(** Outcome of [prune]: [removed] is the count of files successfully
+    deleted, [failed] is the count whose [Sys.remove] raised (each
+    already logged + counted in
+    [Keeper_metrics.metric_keeper_checkpoint_failures]). Returning
+    both lets callers distinguish "nothing to do" from "every
+    deletion failed" — see bug-hunter audit 2026-05-15. *)
+type prune_outcome = { removed : int; failed : int }
+
+(** Remove all legacy checkpoints beyond the [keep] most recent. *)
+val prune : session_dir:string -> keep:int -> prune_outcome
 
 (** Atomically write [ckpt] to [session_dir/<id>.json]; auto-prunes
     older entries to [max_checkpoints_retained]. Logs and swallows

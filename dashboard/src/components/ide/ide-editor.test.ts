@@ -217,6 +217,8 @@ describe('IdeEditor', () => {
       expect(container.querySelector('.cm-trace-gutter')).not.toBeNull()
       expect(container.querySelector('.cm-trace-dot')?.getAttribute('aria-label'))
         .toBe('thread scholar')
+      expect(container.querySelector('.cm-masc-trace-chip')?.textContent)
+        .toBe('Trace · Thread · thread thread-runtime · keeper scholar')
     })
     expect(container.querySelectorAll('.cm-trace-dot')).toHaveLength(1)
   })

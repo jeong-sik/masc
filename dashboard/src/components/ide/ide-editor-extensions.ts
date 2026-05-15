@@ -195,6 +195,27 @@ export function themeExt(): Extension {
       pointerEvents: 'none',
       userSelect: 'none',
     },
+    '.cm-masc-trace-chip': {
+      display: 'inline-flex',
+      alignItems: 'center',
+      maxWidth: '46ch',
+      marginLeft: 'var(--sp-2)',
+      padding: '0 var(--sp-2)',
+      border: '1px solid var(--color-border-default)',
+      borderRadius: 'var(--r-0)',
+      background: 'var(--color-bg-elevated)',
+      boxShadow: 'inset 2px 0 0 var(--cm-trace-chip-color)',
+      color: 'var(--color-fg-secondary)',
+      fontFamily: 'var(--font-mono)',
+      fontSize: 'var(--fs-10)',
+      lineHeight: '1.4',
+      verticalAlign: 'baseline',
+      whiteSpace: 'nowrap',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      pointerEvents: 'none',
+      userSelect: 'none',
+    },
   })
 }
 
@@ -410,6 +431,43 @@ const keeperTraceLineField = StateField.define<ReadonlyMap<number, TraceLineMark
   },
 })
 
+class TraceLineChip extends WidgetType {
+  constructor(private readonly traceLine: EditorKeeperTraceLine) {
+    super()
+  }
+
+  toDOM(): HTMLElement {
+    const el = document.createElement('span')
+    const first = this.traceLine.events[0]
+    el.className = 'cm-masc-trace-chip'
+    el.textContent = traceLineChipText(this.traceLine)
+    el.title = traceLineChipTitle(this.traceLine)
+    el.setAttribute('aria-label', traceLineChipAriaLabel(this.traceLine))
+    if (first) el.style.setProperty('--cm-trace-chip-color', traceSourceColor(first.source))
+    return el
+  }
+
+  eq(other: TraceLineChip): boolean {
+    return this.traceLine.line === other.traceLine.line
+      && traceLineKey(this.traceLine.events) === traceLineKey(other.traceLine.events)
+  }
+}
+
+const keeperTraceLineChipField = StateField.define<DecorationSet>({
+  create() {
+    return Decoration.none
+  },
+  update(value, tr) {
+    const mapped = value.map(tr.changes)
+    for (const effect of tr.effects) {
+      if (!effect.is(setKeeperTraceLines)) continue
+      return buildTraceLineChipDecorations(tr.state.doc, effect.value)
+    }
+    return mapped
+  },
+  provide: field => EditorView.decorations.from(field),
+})
+
 export function keeperTraceLineGutterExt(options: KeeperTraceLineGutterOptions = {}): Extension {
   const canSelect = options.getTraceLines && options.onTraceLineSelect
   return [
@@ -439,6 +497,10 @@ export function keeperTraceLineGutterExt(options: KeeperTraceLineGutterOptions =
       initialSpacer: () => TRACE_SPACER,
     }),
   ]
+}
+
+export function keeperTraceLineChipExt(): Extension {
+  return keeperTraceLineChipField
 }
 
 function selectTraceLineFromGutterClick(
@@ -518,6 +580,34 @@ export function keeperTraceLinesForFile(
     }))
 }
 
+function buildTraceLineChipDecorations(
+  doc: Text,
+  traceLines: ReadonlyArray<EditorKeeperTraceLine>,
+): DecorationSet {
+  const builder = new RangeSetBuilder<Decoration>()
+  const sorted = [...traceLines]
+    .filter(traceLine =>
+      traceLine.line >= 1
+      && traceLine.line <= doc.lines
+      && traceLine.events.length > 0,
+    )
+    .sort((left, right) => left.line - right.line)
+
+  for (const traceLine of sorted) {
+    const line = doc.line(traceLine.line)
+    builder.add(
+      line.to,
+      line.to,
+      Decoration.widget({
+        widget: new TraceLineChip(traceLine),
+        side: 3,
+      }),
+    )
+  }
+
+  return builder.finish()
+}
+
 function traceSourceColor(source: KeeperTraceSource): string {
   switch (source) {
     case 'anchored-thread':
@@ -583,6 +673,74 @@ function traceEventLabel(event: EditorKeeperTraceLineEvent): string {
   return `${traceSourceLabel(event.source)}${surface} ${event.keeperName}${count}`
 }
 
+function traceLineChipText(traceLine: EditorKeeperTraceLine): string {
+  const first = traceLine.events[0]
+  if (!first) return 'Trace'
+  const parts = [
+    'Trace',
+    traceLineChipSurface(first),
+    ...traceEventContextParts(first),
+    `keeper ${first.keeperName}`,
+    traceLine.events.length > 1 ? `+${traceLine.events.length - 1}` : null,
+  ].filter((part): part is string => part !== null)
+  return parts.join(' · ')
+}
+
+function traceLineChipTitle(traceLine: EditorKeeperTraceLine): string {
+  return traceLine.events
+    .map(event => [
+      traceLineChipSurface(event),
+      traceLineChipLabel(event),
+      ...traceEventContextParts(event),
+      `keeper ${event.keeperName}`,
+    ].filter((part): part is string => part !== null).join(' · '))
+    .join('\n')
+}
+
+function traceLineChipAriaLabel(traceLine: EditorKeeperTraceLine): string {
+  return `Line ${traceLine.line} keeper trace context: ${traceLineChipText(traceLine)}`
+}
+
+function traceLineChipSurface(event: EditorKeeperTraceLineEvent): string {
+  if (event.source === 'activity-event') return event.surface?.trim() || 'Activity'
+  if (event.source === 'anchored-thread') return 'Thread'
+  if (event.source === 'cascade-hop') return 'Cascade'
+  if (event.source === 'bdi-snapshot') return 'BDI'
+  return 'Decision'
+}
+
+function traceLineChipLabel(event: EditorKeeperTraceLineEvent): string {
+  if (event.source === 'activity-event') {
+    const surface = traceLineChipSurface(event)
+    return event.eventId ? `${surface} activity ${event.eventId}` : surface
+  }
+  if (event.source === 'anchored-thread') {
+    return event.threadId ? `thread ${event.threadId}` : 'thread'
+  }
+  return traceLineChipSurface(event)
+}
+
+function traceEventContextParts(event: EditorKeeperTraceLineEvent): ReadonlyArray<string> {
+  return [
+    event.eventId ? `event ${event.eventId}` : null,
+    event.threadId ? `thread ${event.threadId}` : null,
+    event.goalId ? `goal ${event.goalId}` : null,
+    event.taskId ? `task ${event.taskId}` : null,
+    event.boardPostId ? `board ${event.boardPostId}` : null,
+    event.commentId ? `comment ${event.commentId}` : null,
+    event.prId ? `pr #${event.prId}` : null,
+    event.gitRef ? `git ${shortGitRef(event.gitRef)}` : null,
+    event.logId ? `log ${event.logId}` : null,
+    event.sessionId ? `session ${event.sessionId}` : null,
+    event.operationId ? `op ${event.operationId}` : null,
+    event.workerRunId ? `run ${event.workerRunId}` : null,
+  ].filter((part): part is string => part !== null)
+}
+
+function shortGitRef(ref: string): string {
+  return ref.replace(/^refs\/heads\//, '').replace(/^refs\/tags\//, '')
+}
+
 function traceLineAriaLabel(line: number, events: ReadonlyArray<EditorKeeperTraceLineEvent>): string {
   return `Line ${line} keeper trace: ${events.map(traceEventLabel).join(', ')}`
 }
@@ -602,8 +760,14 @@ function traceLineKey(events: ReadonlyArray<EditorKeeperTraceLineEvent>): string
       event.tsMs,
       event.goalId ?? '',
       event.taskId ?? '',
+      event.boardPostId ?? '',
+      event.commentId ?? '',
       event.prId ?? '',
+      event.gitRef ?? '',
       event.logId ?? '',
+      event.sessionId ?? '',
+      event.operationId ?? '',
+      event.workerRunId ?? '',
     ].join(':'))
     .join('|')
 }

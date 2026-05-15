@@ -223,9 +223,15 @@ let json_string_list_field key (fields : (string * Yojson.Safe.t) list) =
 
 let usage_absurd_token_threshold = 1_000_000
 
+(* [usage_reported] is now an [option]: [None] means the row carried no
+   [usage_reported] field at all (older jsonl rows or providers that don't
+   emit it). The pre-existing semantics treated absent and explicit-[false]
+   identically as "missing" — we preserve that with [None | Some false ->
+   "missing"], but make the absent case distinguishable for future tightening
+   without rewriting trust inference. *)
 let infer_usage_trust_from_fields
       fields
-      ~(usage_reported : bool)
+      ~(usage_reported : bool option)
       ~(model : string)
       ~(input_tokens : int option)
       ~(output_tokens : int option)
@@ -235,9 +241,10 @@ let infer_usage_trust_from_fields
   match json_string_field_opt "usage_trust" fields with
   | Some trust -> Some trust, emitted_reasons
   | None ->
-    if not usage_reported
-    then Some "missing", []
-    else (
+    (match usage_reported with
+     | None | Some false -> Some "missing", []
+     | Some true ->
+    (
       let reasons = ref [] in
       let add reason =
         if not (List.mem reason !reasons) then reasons := reason :: !reasons
@@ -257,7 +264,7 @@ let infer_usage_trust_from_fields
        | _ -> ());
       match List.rev !reasons with
       | [] -> Some "trusted", []
-      | reasons -> Some "untrusted", reasons)
+      | reasons -> Some "untrusted", reasons))
 ;;
 
 let usage_trust_untrusted = function
@@ -321,12 +328,56 @@ let private_provider_hint_of_fields (fields : (string * Yojson.Safe.t) list) =
   | None -> read "provider"
 ;;
 
-let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option =
-  let ts = Safe_ops.json_float_opt "ts_unix" json |> Option.value ~default:0.0 in
-  if ts < since_unix
-  then None
-  else (
-    match json with
+(* ── Parse-level failure variants ─────────────────────────────────────────────
+   A typed reason every dropped record carries so silent-default substitutions
+   (1970 timestamps, "unknown" model attributions, "success" outcome on missing
+   field) become compiler-enforced caller decisions.
+
+   [Out_of_window] is not a failure — it is the normal time-filter outcome —
+   but is surfaced as [Error] so the caller pattern-matches every reason and
+   the compiler refuses to silently coalesce it with parse failures. *)
+type parse_error =
+  | Not_assoc                      (* root JSON value not an object *)
+  | Missing_ts_unix                (* ts_unix field absent or non-numeric *)
+  | Out_of_window                  (* ts_unix older than [since_unix] *)
+  | No_telemetry_object            (* decisions.jsonl entry without telemetry { ... } *)
+  | Missing_outcome                (* telemetry.outcome absent on success-branch row *)
+  | Missing_success_model          (* no selected_model / model_used on success turn *)
+  | Missing_error_model_attribution (* no candidate_models / cascade_name on error turn *)
+  | Missing_cost_model             (* costs.jsonl row without "model" field *)
+
+let parse_error_label = function
+  | Not_assoc -> "not_assoc"
+  | Missing_ts_unix -> "missing_ts_unix"
+  | Out_of_window -> "out_of_window"
+  | No_telemetry_object -> "no_telemetry_object"
+  | Missing_outcome -> "missing_outcome"
+  | Missing_success_model -> "missing_success_model"
+  | Missing_error_model_attribution -> "missing_error_model_attribution"
+  | Missing_cost_model -> "missing_cost_model"
+;;
+
+(* [Out_of_window] and [Not_assoc] are routine in mixed jsonl streams; we never
+   warn on those. Everything else is a schema violation worth a single-line
+   warning per occurrence so operators can trace the drop without grep-mining
+   silent defaults. *)
+let parse_error_is_schema_violation = function
+  | Out_of_window | Not_assoc | No_telemetry_object -> false
+  | Missing_ts_unix
+  | Missing_outcome
+  | Missing_success_model
+  | Missing_error_model_attribution
+  | Missing_cost_model -> true
+;;
+
+let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
+  : (raw_entry, parse_error) result
+  =
+  match Safe_ops.json_float_opt "ts_unix" json with
+  | None -> Error Missing_ts_unix
+  | Some ts when ts < since_unix -> Error Out_of_window
+  | Some ts ->
+    (match json with
     | `Assoc fields ->
       (* Read outer record fields available for both success and error turns *)
       let outer_tool_call_count =
@@ -354,20 +405,25 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
          in
          if is_error
          then (
-           (* Error turns: use first candidate model or cascade_name for attribution *)
-           let model =
+           (* Error turns: first candidate model or cascade_name. No silent
+              [__error__] sentinel — refuse the row so caller sees the
+              attribution gap typed. *)
+           let model_result : (string, parse_error) result =
              match List.assoc_opt "candidate_models" tfields with
-             | Some (`List (`String m :: _)) -> m
+             | Some (`List (`String m :: _)) -> Ok m
              | _ ->
                (match List.assoc_opt "cascade_name" tfields with
                 | Some (`String s) ->
                   (* Canonicalize so error attribution buckets match the
                     SSOT profile names instead of drift/ghost values. *)
-                  Keeper_cascade_profile.canonicalize s ^ " (cascade)"
-                | _ -> "__error__")
+                  Ok (Keeper_cascade_profile.canonicalize s ^ " (cascade)")
+                | _ -> Error Missing_error_model_attribution)
            in
+           match model_result with
+           | Error _ as e -> e
+           | Ok model ->
            let provider = provider_opt_of_fields ~model tfields in
-           Some
+           Ok
              { model
              ; ts_unix = ts
              ; outcome = "error"
@@ -398,15 +454,22 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
              ; is_error = true
              })
          else (
-           (* Success turns: full telemetry parsing *)
-           let model =
+           (* Success turns: full telemetry parsing.
+              Model attribution is structural — refusing the row is the
+              only honest behaviour when neither selected_model nor
+              model_used is present (the older "unknown" default collapsed
+              every such row into one bucket and broke cost accounting). *)
+           let model_result : (string, parse_error) result =
              match List.assoc_opt "selected_model" tfields with
-             | Some (`String s) -> s
+             | Some (`String s) -> Ok s
              | _ ->
                (match List.assoc_opt "model_used" tfields with
-                | Some (`String s) -> s
-                | _ -> "unknown")
+                | Some (`String s) -> Ok s
+                | _ -> Error Missing_success_model)
            in
+           match model_result with
+           | Error _ as e -> e
+           | Ok model ->
            let provider = provider_opt_of_fields ~model tfields in
            let tok_per_sec_raw = json_float_field_opt "tokens_per_second" tfields in
            let prompt_tok_per_sec =
@@ -475,7 +538,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
            let usage_trust, usage_anomaly_reasons =
              infer_usage_trust_from_fields
                tfields
-               ~usage_reported:(Option.value ~default:false usage_reported)
+               ~usage_reported
                ~model
                ~input_tokens:input_tokens_raw
                ~output_tokens:output_tokens_raw
@@ -504,11 +567,16 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
                then Some true
                else None
            in
-           Some
+           (* Outcome must be present. Previous code defaulted to "success",
+              which silently classified parse failures as successful turns —
+              CRITICAL for cost/error-rate accounting. *)
+           match json_string_field_opt "outcome" tfields with
+           | None -> Error Missing_outcome
+           | Some outcome ->
+           Ok
              { model
              ; ts_unix = ts
-             ; outcome =
-                 Option.value ~default:"success" (json_string_field_opt "outcome" tfields)
+             ; outcome
              ; stop_reason = json_string_field_opt "stop_reason" tfields
              ; turn_lane = json_string_field_opt "turn_lane" tfields
              ; tok_per_sec
@@ -540,8 +608,8 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option 
                   else json_string_field_opt "coverage_stage" tfields)
              ; is_error = false
              })
-       | _ -> None)
-    | _ -> None)
+       | _ -> Error No_telemetry_object)
+    | _ -> Error Not_assoc)
 ;;
 
 let read_hw_decode_tok_per_sec (fields : (string * Yojson.Safe.t) list) =
@@ -574,7 +642,18 @@ let canonical_cost_model_id ~(provider : string option) model =
     if String.starts_with ~prefix model then model else prefix ^ model
 ;;
 
-let parse_cost_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option =
+(* Three-way decision for the costs.jsonl [usage_missing] field. Previous
+   code compressed [None] (field absent) with [Some false] via [Option.value
+   ~default:false]; absent now contributes a [usage_missing_field_absent]
+   anomaly reason so reconciliation can see the gap. *)
+type usage_missing_decision =
+  | Usage_missing_reported  (* usage_missing = true *)
+  | Usage_present_reported  (* usage_missing = false *)
+  | Usage_missing_field_absent  (* usage_missing field not in row *)
+
+let parse_cost_entry (json : Yojson.Safe.t) ~since_unix
+  : (raw_entry, parse_error) result
+  =
   match json with
   | `Assoc fields ->
     let ts =
@@ -586,18 +665,33 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option =
          | _ -> None)
     in
     (match ts with
-     | Some ts when ts >= since_unix ->
-       let raw_model =
-         json_string_field_opt "model" fields |> Option.value ~default:"unknown"
-       in
+     | None -> Error Missing_ts_unix
+     | Some ts when ts < since_unix -> Error Out_of_window
+     | Some ts ->
+       (* Cost rows without a [model] field cannot be attributed; previous
+          code defaulted to "unknown" which collapsed every such row into a
+          single bucket and broke per-model cost accounting. *)
+       (match json_string_field_opt "model" fields with
+        | None -> Error Missing_cost_model
+        | Some raw_model ->
        let provider = provider_opt_of_fields ~model:raw_model fields in
        let model =
          canonical_cost_model_id
            ~provider:(private_provider_hint_of_fields fields)
            raw_model
        in
+       let usage_missing_decision =
+         match json_bool_field_opt "usage_missing" fields with
+         | Some true -> Usage_missing_reported
+         | Some false -> Usage_present_reported
+         | None -> Usage_missing_field_absent
+       in
        let usage_missing =
-         json_bool_field_opt "usage_missing" fields |> Option.value ~default:false
+         match usage_missing_decision with
+         | Usage_missing_reported -> true
+         (* Field-absent rows preserve the legacy "treat as present" behaviour
+            but are surfaced via [usage_missing_field_absent] anomaly reason. *)
+         | Usage_present_reported | Usage_missing_field_absent -> false
        in
        let usage_reported = not usage_missing in
        let input_tokens_raw =
@@ -611,13 +705,24 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option =
          | Some _ as v -> v
          | None -> json_int_field_opt "cache_read_input_tokens" fields
        in
-       let usage_trust, usage_anomaly_reasons =
+       let usage_trust, base_usage_anomaly_reasons =
          infer_usage_trust_from_fields
            fields
-           ~usage_reported
+           ~usage_reported:(Some usage_reported)
            ~model
            ~input_tokens:input_tokens_raw
            ~output_tokens:output_tokens_raw
+       in
+       (* Surface field-absent rows as an anomaly reason so reconciliation
+          can distinguish them from explicit [usage_missing = false]. *)
+       let usage_anomaly_reasons =
+         match usage_missing_decision with
+         | Usage_missing_field_absent ->
+           if List.mem "usage_missing_field_absent" base_usage_anomaly_reasons
+           then base_usage_anomaly_reasons
+           else base_usage_anomaly_reasons @ [ "usage_missing_field_absent" ]
+         | Usage_missing_reported | Usage_present_reported ->
+           base_usage_anomaly_reasons
        in
        let usage_untrusted = usage_trust_untrusted usage_trust in
        let latency_ms = json_positive_float_field_opt "request_latency_ms" fields in
@@ -653,7 +758,7 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option =
          || peak_memory_gb <> None
          || latency_ms <> None
        in
-       Some
+       Ok
          { model
          ; ts_unix = ts
          ; outcome = "success"
@@ -685,9 +790,8 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix : raw_entry option =
          ; coverage_reason = None
          ; coverage_stage = Some "costs_jsonl"
          ; is_error = false
-         }
-     | _ -> None)
-  | _ -> None
+         }))
+  | _ -> Error Not_assoc
 ;;
 
 (* ── Read decisions.jsonl files ─────────────────────────── *)
@@ -711,10 +815,19 @@ let read_all_decisions ~base_path ~since_unix : raw_entry list =
          try
            Fs_compat.fold_jsonl_lines
              ~init:[]
-             ~f:(fun acc ~line_no:_ json ->
+             ~f:(fun acc ~line_no json ->
                match parse_telemetry_entry json ~since_unix with
-               | Some e -> e :: acc
-               | None -> acc)
+               | Ok e -> e :: acc
+               | Error err ->
+                 if parse_error_is_schema_violation err
+                 then
+                   Log.warn
+                     ~ctx:"model_inference_metrics"
+                     "decisions.jsonl parse drop: %s:%d reason=%s"
+                     path
+                     line_no
+                     (parse_error_label err);
+                 acc)
              path
          with
          | Eio.Cancel.Cancelled _ as exn ->
@@ -732,10 +845,19 @@ let read_cost_entries_legacy ~base_path ~since_unix : raw_entry list =
     try
       Fs_compat.fold_jsonl_lines
         ~init:[]
-        ~f:(fun acc ~line_no:_ json ->
+        ~f:(fun acc ~line_no json ->
           match parse_cost_entry json ~since_unix with
-          | Some e -> e :: acc
-          | None -> acc)
+          | Ok e -> e :: acc
+          | Error err ->
+            if parse_error_is_schema_violation err
+            then
+              Log.warn
+                ~ctx:"model_inference_metrics"
+                "costs.jsonl parse drop: %s:%d reason=%s"
+                path
+                line_no
+                (parse_error_label err);
+            acc)
         path
     with
     | Eio.Cancel.Cancelled _ as exn ->
@@ -756,9 +878,21 @@ let read_cost_entries_dated ~base_path ~since_unix : raw_entry list =
     try
       Dated_jsonl.read_range store ~since ~until
       |> List.filter_map (fun json ->
-        try parse_cost_entry json ~since_unix with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | _ -> None)
+        match
+          try Ok (parse_cost_entry json ~since_unix) with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | _ -> Error ()
+        with
+        | Ok (Ok e) -> Some e
+        | Ok (Error err) ->
+          if parse_error_is_schema_violation err
+          then
+            Log.warn
+              ~ctx:"model_inference_metrics"
+              "costs/dated parse drop: reason=%s"
+              (parse_error_label err);
+          None
+        | Error () -> None)
     with
     | Eio.Cancel.Cancelled _ as exn ->
       let bt = Printexc.get_raw_backtrace () in

@@ -123,6 +123,7 @@ let success_entry ~model ~ts ?(input_tokens=100) ?(output_tokens=50)
     ("tools_used", `List (List.map (fun s -> `String s) tools_used));
     ("telemetry", `Assoc ([
       ("model_used", `String model);
+      ("outcome", `String "success");
       ("tokens_per_second", `Float (Float.of_int output_tokens /. (Float.of_int latency_ms /. 1000.0)));
       ("request_latency_ms", `Int latency_ms);
       ("input_tokens", `Int input_tokens);
@@ -792,6 +793,7 @@ let test_cost_latency_json_preserves_missing_latency_as_null () =
         ("tools_used", `List []);
         ("telemetry", `Assoc [
           ("model_used", `String "unlatenced-model");
+          ("outcome", `String "success");
           ("provider", `String "local");
           ("input_tokens", `Int 100);
           ("output_tokens", `Int 50);
@@ -826,6 +828,7 @@ let success_entry_with_thinking ~model ~ts ~thinking_enabled () =
     ("tools_used", `List []);
     ("telemetry", `Assoc ([
       ("model_used", `String model);
+      ("outcome", `String "success");
       ("tokens_per_second", `Float 10.0);
       ("request_latency_ms", `Int 500);
       ("input_tokens", `Int 100);
@@ -910,6 +913,7 @@ let success_entry_with_cache ~model ~ts ?(input_tokens=100) ~cache_read () =
     ("tools_used", `List []);
     ("telemetry", `Assoc [
       ("model_used", `String model);
+      ("outcome", `String "success");
       ("tokens_per_second", `Float 10.0);
       ("request_latency_ms", `Int 500);
       ("input_tokens", `Int input_tokens);

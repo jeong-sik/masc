@@ -479,11 +479,10 @@ let parse_weighted_entry_with_drop_metric
     None
 
 (** Expand provider:auto specs that map to multiple models.
-    "glm:auto" expands to ["glm:glm-5.1"; "glm:glm-5-turbo"; ...].
-    CLI-backed transports expand too, so a single [gemini_cli:auto] can
-    cascade through concrete CLI model overrides instead of delegating to
-    the CLI's interactive/default model picker. Other specs pass through
-    as-is. *)
+    Direct API providers project their candidate list from OAS runtime
+    bindings. CLI-backed transports can use operator-provided override
+    lists instead of delegating to an interactive/default model picker.
+    Other specs pass through as-is. *)
 let rotate_list_by offset items =
   if offset <= 0 then items
   else

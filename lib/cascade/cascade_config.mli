@@ -172,10 +172,9 @@ val parse_model_string_result :
   string -> (Llm_provider.Provider_config.t, string) result
 
 (** Expand provider:auto specs that map to multiple models.
-    ["glm:auto"] expands to ["glm:glm-5.1"; "glm:glm-5-turbo"; ...].
-    CLI specs such as ["gemini_cli:auto"], ["codex_cli:auto"], and
-    ["claude_code:auto"] expand through their provider-specific
-    auto-model lists. Other specs pass through unchanged. *)
+    Direct API providers project their candidate list from OAS runtime
+    bindings. CLI specs can expand through operator-provided auto-model
+    lists. Other specs pass through unchanged. *)
 val expand_auto_models : string list -> string list
 
 val expand_weighted_auto_entries :
@@ -223,7 +222,7 @@ val resolve_model_strings :
 (** Expand execution-time convenience fallbacks while preserving stable order.
 
     Uses the same provider:auto expansion as {!expand_auto_models}, so
-    CLI and GLM family entries execute in the same concrete order the
+    provider-family entries execute in the same concrete order the
     dashboard shows by default.
 
     When [rotation_scope] is provided, each [provider:auto] entry is

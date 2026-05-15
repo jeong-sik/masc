@@ -4,7 +4,7 @@
     Phase A ({!Cascade_client_capacity}) introduced the process-local
     semaphore.  Phase D ({!Dashboard_cascade.client_capacity_json})
     exposed the *current* snapshot.  Operators still could not answer
-    "how often was the ollama slot full in the last hour?" — this
+    "how often was the HTTP-probe slot full in the last hour?" — this
     module fills that gap by recording every transition and surfacing
     recent events via {!snapshot}.
 

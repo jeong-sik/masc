@@ -310,10 +310,10 @@ let on_provider_filter_widening ~cascade =
 
 (* [expand_weighted_entries] fans a single [provider:auto] entry out
    to N concrete candidates via [Cascade_config.expand_auto_models]
-   ("glm:auto" -> ["glm:glm-5.1"; "glm:glm-5-turbo"; ...]).  The
-   per-cascade fan-out amount was silent: operators saw one line in
-   cascade.toml but the runtime cascading list was N entries, and a
-   change in the registry (new provider added, model deprecated)
+   using the candidate list projected from OAS runtime bindings or
+   operator-provided CLI override lists.  The per-cascade fan-out
+   amount was silent: operators saw one line in cascade.toml but the
+   runtime cascading list was N entries, and a change in the registry
    would silently shift the effective candidate count without any
    dashboard signal.
 

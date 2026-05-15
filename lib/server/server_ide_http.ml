@@ -263,7 +263,7 @@ let add_routes router =
            | Some p when p <> "" -> p
            | _ -> ""
          in
-         let store_dir = Filename.concat base ".masc-ide" in
+         let store_dir = Ide_paths.store_path ~base_dir:base in
          let path = Filename.concat store_dir "regions.jsonl" in
          (* Streaming filter — file_path filter usually drops most lines,
             and regions.jsonl grows append-only. fold_jsonl_lines avoids

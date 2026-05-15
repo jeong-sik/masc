@@ -1596,3 +1596,13 @@
  (name test_pr_d_agent_runtime_migration)
  (modules test_pr_d_agent_runtime_migration)
  (libraries masc_test_deps))
+
+; RFC-0084 PR-I-1 — typed post-hook surface.
+; Pins the [post_hook_typed] / [register_typed_post_hook] /
+; [typed_post_hooks] / [run_typed_post_hooks] entries on
+; Tool_dispatch, and verifies guarded_dispatch calls
+; run_typed_post_hooks for every outcome arm.
+(test
+ (name test_pr_i_1_typed_post_hook_surface)
+ (modules test_pr_i_1_typed_post_hook_surface)
+ (libraries masc_test_deps))

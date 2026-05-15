@@ -53,3 +53,29 @@ val summarize_thinking_blocks :
   Agent_sdk.Types.content_block list -> thinking_log_summary
 (** Summarize thinking block presence for logs/metrics without exposing raw
     thinking content. *)
+
+type pr_review_action_metric_event = {
+  action : string;
+  pr_number : int option;
+  comment_id : int option;
+  success : bool;
+  route_via : string option;
+  credential : Yojson.Safe.t option;
+  identity_attestation : Yojson.Safe.t option;
+}
+(** Parsed PR-review action telemetry derived from keeper tool I/O. *)
+
+type pr_work_action_metric_event = {
+  work_action : string;
+  work_source : string;
+  work_ref : string option;
+  pr_url : string option;
+  command : string option;
+  success : bool;
+  route_via : string option;
+}
+(** Parsed PR create/push/commit/add telemetry derived from keeper tool I/O. *)
+
+val normalize_pr_review_action : string -> string option
+(** Internal: PR-review action label canonicalizer (COMMENT / APPROVE /
+    REQUEST_CHANGES / REPLY). Exposed for keeper_hooks_oas.ml's parsers. *)

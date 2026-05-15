@@ -220,27 +220,8 @@ val recent_tool_streak_count :
   ?within_sec:float -> tool_name:string -> Yojson.Safe.t list -> int
 (** Count consecutive recent calls of [tool_name] in trajectory events. *)
 
-type pr_review_action_metric_event = {
-  action : string;
-  pr_number : int option;
-  comment_id : int option;
-  success : bool;
-  route_via : string option;
-  credential : Yojson.Safe.t option;
-  identity_attestation : Yojson.Safe.t option;
-}
-(** Parsed PR-review action telemetry derived from keeper tool I/O. *)
-
-type pr_work_action_metric_event = {
-  work_action : string;
-  work_source : string;
-  work_ref : string option;
-  pr_url : string option;
-  command : string option;
-  success : bool;
-  route_via : string option;
-}
-(** Parsed PR create/push/commit/add telemetry derived from keeper tool I/O. *)
+(** PR-review / PR-work metric event types live in Keeper_hooks_oas_types
+    (intra-library file split, 2026-05-16). Re-exported via include below. *)
 
 (** {1 Hook factory} *)
 

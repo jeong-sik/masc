@@ -1069,31 +1069,9 @@ let recent_tool_streak_count ?(within_sec = 900.0) ~(tool_name : string)
   in
   loop 0 (List.rev entries)
 
-type pr_review_action_metric_event = {
-  action : string;
-  pr_number : int option;
-  comment_id : int option;
-  success : bool;
-  route_via : string option;
-  credential : Yojson.Safe.t option;
-  identity_attestation : Yojson.Safe.t option;
-}
-
-type pr_work_action_metric_event = {
-  work_action : string;
-  work_source : string;
-  work_ref : string option;
-  pr_url : string option;
-  command : string option;
-  success : bool;
-  route_via : string option;
-}
-
-let normalize_pr_review_action raw =
-  let trimmed = String.trim raw |> String.uppercase_ascii in
-  match trimmed with
-  | "COMMENT" | "APPROVE" | "REQUEST_CHANGES" | "REPLY" -> Some trimmed
-  | _ -> None
+(* pr_review_action_metric_event / pr_work_action_metric_event /
+   normalize_pr_review_action moved to Keeper_hooks_oas_types
+   (intra-library file split, 2026-05-16). *)
 
 let json_int_opt key json = Safe_ops.json_int_opt key json
 

@@ -320,6 +320,10 @@
    ;; backed by specs/keeper-state-machine/KeeperEventQueue.tla.
    ;; Referenced by keeper_supervisor + keeper_registry godfiles.
    masc_mcp.keeper_event_queue
+   ;; RFC-0056 Phase 1J — Keeper_invariant (second lib/keeper/ leaf)
+   ;; extracted to lib/keeper_invariant/. 119+77 LoC, stdlib-only
+   ;; (List/Printf/Set/String/StringSet/Result). Fan-in: 1 lib + 1 test.
+   masc_mcp.keeper_invariant
    ;; RFC-0058 Phase 1 — Declarative cascade TOML config. Separate sub-library
    ;; to avoid type name collisions (transport, provider, binding, tier, strategy)
    ;; with identically-named types in the main library.

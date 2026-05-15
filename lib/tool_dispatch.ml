@@ -144,6 +144,19 @@ let dispatch_structured ~(token : Tool_token.t) ~args : Tool_result.t option =
   | (None, coerced_args) ->
     dispatch ~token ~args:coerced_args
 
+(** RFC-0084 §2.2 — Single dispatch entry with 4-tuple telemetry.
+    Wraps [dispatch] with [Tool_telemetry.with_span]. PR-3 introduces
+    this entry; caller migration occurs in PR-7~9. *)
+let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.t option =
+  let result, _outcome =
+    Tool_telemetry.with_span ~tool_name:token.name (fun _trace_id_thunk ->
+      let r = dispatch ~token ~args in
+      let outcome = match r with Some _ -> "handled" | None -> "no_handler" in
+      r, outcome)
+  in
+  result
+;;
+
 (** Feature flag: use the new dispatch path.
     Default ON since v2.102 — use MASC_DISPATCH_V2=0 to disable. *)
 let v2_enabled = Env_config.Tools.dispatch_v2_enabled

@@ -68,7 +68,17 @@ let resolve_path ?base_dir path =
 let is_within_dir ~dir path = path = dir || String.starts_with ~prefix:(dir ^ "/") path
 
 (** Path allowlist. When workdir is set, restrict to workdir + /tmp only.
-    When unset, allow /tmp, cwd subtree, and ~/me subtree (backward compat). *)
+    When unset, allow /tmp, cwd subtree, and the documented sandbox workspace
+    root from [Host_config.sandbox_workspace_root].
+
+    RFC-0084 §1.5 host-config-cleanup-E — replaces the ad-hoc
+    [home/me] literal join with the typed
+    [Host_config.sandbox_workspace_root] field introduced by PR-12.
+    Behaviour change: when [HOME] is unset, the previous code rejected
+    the fallback subtree entirely; now [Host_config.legacy_macos_default]
+    surfaces a documented fallback ([/tmp/masc-fleet]) which is allowed.
+    This aligns the Fleet worker with the same SSOT that other keeper
+    sandbox surfaces will migrate to in later cleanup PRs. *)
 let validate_path ?workdir path =
   let resolved = resolve_path ?base_dir:workdir path in
   match workdir with
@@ -77,13 +87,10 @@ let validate_path ?workdir path =
     is_within_dir ~dir:(resolve_path "/tmp") resolved
     || is_within_dir ~dir:resolved_wd resolved
   | None ->
+    let cfg = Host_config.legacy_macos_default () in
     is_within_dir ~dir:(resolve_path "/tmp") resolved
     || is_within_dir ~dir:(resolve_path (Sys.getcwd ())) resolved
-    ||
-      (match Sys.getenv_opt "HOME" with
-      | Some home ->
-        is_within_dir ~dir:(resolve_path (Filename.concat home "me")) resolved
-      | None -> false)
+    || is_within_dir ~dir:(resolve_path cfg.sandbox_workspace_root) resolved
 ;;
 
 let tool_error ?(recoverable = false) message : Agent_sdk.Types.tool_result =

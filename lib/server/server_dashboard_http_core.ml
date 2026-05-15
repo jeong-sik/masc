@@ -62,15 +62,15 @@ let dashboard_request_timeout_s = 30.0
 (** Track whether shell cache has been populated at least once.
     Atomic.t for cross-domain visibility: read from executor pool
     worker domains via namespace-truth and warmup helpers. *)
-let _shell_warmed : bool Atomic.t = Atomic.make false
+let shell_warmed : bool Atomic.t = Atomic.make false
 
 (** Track whether the startup shell pre-warm fiber is still building the
     first payload. Cold HTTP requests use this to serve a bootstrap payload
     instead of blocking on the same expensive shell projection. *)
-let _shell_warming : bool Atomic.t = Atomic.make false
+let shell_warming : bool Atomic.t = Atomic.make false
 
 (** Last-known-good shell result for graceful degradation on timeout. *)
-let _last_good_shell : Yojson.Safe.t Atomic.t = Atomic.make (`Assoc [])
+let last_good_shell : Yojson.Safe.t Atomic.t = Atomic.make (`Assoc [])
 
 (** Wrap a dashboard computation with a configurable timeout.
     Returns a partial-response JSON on timeout instead of hanging. *)
@@ -298,15 +298,15 @@ let operator_actor_hint request =
 
 (* Late-bound broadcast refs — set by server_dashboard_http.ml after
    Sse module is in scope.  Same pattern as _broadcast_room_truth_ref. *)
-let _operator_snapshot_broadcast_ref : (Yojson.Safe.t -> unit) ref =
+let operator_snapshot_broadcast_ref : (Yojson.Safe.t -> unit) ref =
   ref (fun (_json : Yojson.Safe.t) -> ())
 ;;
 
-let _operator_digest_broadcast_ref : (Yojson.Safe.t -> unit) ref =
+let operator_digest_broadcast_ref : (Yojson.Safe.t -> unit) ref =
   ref (fun (_json : Yojson.Safe.t) -> ())
 ;;
 
-let _operator_snapshot_cache =
+let operator_snapshot_cache =
   create_cached_surface
     (`Assoc
         [ "status", `String "initializing"
@@ -314,7 +314,7 @@ let _operator_snapshot_cache =
         ])
 ;;
 
-let _operator_digest_cache =
+let operator_digest_cache =
   create_cached_surface
     (`Assoc
         [ "health", `String "initializing"
@@ -322,7 +322,7 @@ let _operator_digest_cache =
         ])
 ;;
 
-let _operator_refresh_interval_s =
+let operator_refresh_interval_s =
   float_of_env_default
     "MASC_OPERATOR_REFRESH_INTERVAL_S"
     ~default:60.0
@@ -397,7 +397,7 @@ let operator_cache_json ?cache_key ~scope json =
     ; "request_cache_key", json_string_opt cache_key
     ; "request_cache_ttl_s", `Float 5.0
     ; "request_timeout_s", `Float dashboard_request_timeout_s
-    ; "background_refresh_interval_s", `Float _operator_refresh_interval_s
+    ; "background_refresh_interval_s", `Float operator_refresh_interval_s
     ; "policy", `String "cached_surface plus HTTP stale-while-revalidate"
     ]
 ;;
@@ -411,7 +411,7 @@ let operator_retention_json ~(config : Coord.config) ~scope ~producer =
     ; "store_kind", `String "process_cache"
     ; "cache_surface", `String "Server_dashboard_http_core.cached_surface"
     ; "http_swr_ttl_s", `Float 5.0
-    ; "background_refresh_interval_s", `Float _operator_refresh_interval_s
+    ; "background_refresh_interval_s", `Float operator_refresh_interval_s
     ; "request_timeout_s", `Float dashboard_request_timeout_s
     ; ( "cache_policy"
       , `String
@@ -537,7 +537,7 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
   let proc_mgr = state.Mcp_server.proc_mgr in
   let net, mono_clock = state_dashboard_runtime_caps state in
   let compute () =
-    mark_cached_surface_attempt _operator_snapshot_cache;
+    mark_cached_surface_attempt operator_snapshot_cache;
     let started_at = Unix.gettimeofday () in
     try
       run_dashboard_compute
@@ -585,7 +585,7 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-      mark_cached_surface_error _operator_snapshot_cache exn;
+      mark_cached_surface_error operator_snapshot_cache exn;
       raise exn
   in
   Proactive_refresh.start
@@ -594,17 +594,17 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
     ~config:
       { (Proactive_refresh.default_config
            ~label:"operator_snapshot"
-           ~interval_s:_operator_refresh_interval_s)
+           ~interval_s:operator_refresh_interval_s)
         with
-        timeout_s = _operator_refresh_interval_s *. 0.8
-      ; on_error = Some (mark_cached_surface_error _operator_snapshot_cache)
+        timeout_s = operator_refresh_interval_s *. 0.8
+      ; on_error = Some (mark_cached_surface_error operator_snapshot_cache)
       ; warm_delay_s = 120.0
       }
     ~compute
     ~on_result:(fun json ->
-      mark_cached_surface_success _operator_snapshot_cache json;
-      !_operator_snapshot_broadcast_ref
-        (cached_surface_json _operator_snapshot_cache
+      mark_cached_surface_success operator_snapshot_cache json;
+      !operator_snapshot_broadcast_ref
+        (cached_surface_json operator_snapshot_cache
          |> with_operator_snapshot_metadata
               ~config
               ~query:(operator_snapshot_default_query ())))
@@ -615,7 +615,7 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
   let proc_mgr = state.Mcp_server.proc_mgr in
   let net, mono_clock = state_dashboard_runtime_caps state in
   let compute () =
-    mark_cached_surface_attempt _operator_digest_cache;
+    mark_cached_surface_attempt operator_digest_cache;
     let started_at = Unix.gettimeofday () in
     try
       run_dashboard_compute
@@ -650,7 +650,7 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-      mark_cached_surface_error _operator_digest_cache exn;
+      mark_cached_surface_error operator_digest_cache exn;
       raise exn
   in
   Proactive_refresh.start
@@ -659,17 +659,17 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
     ~config:
       { (Proactive_refresh.default_config
            ~label:"operator_digest"
-           ~interval_s:_operator_refresh_interval_s)
+           ~interval_s:operator_refresh_interval_s)
         with
-        timeout_s = _operator_refresh_interval_s *. 0.8
-      ; on_error = Some (mark_cached_surface_error _operator_digest_cache)
+        timeout_s = operator_refresh_interval_s *. 0.8
+      ; on_error = Some (mark_cached_surface_error operator_digest_cache)
       ; warm_delay_s = 150.0
       }
     ~compute
     ~on_result:(fun json ->
-      mark_cached_surface_success _operator_digest_cache json;
-      !_operator_digest_broadcast_ref
-        (cached_surface_json _operator_digest_cache
+      mark_cached_surface_success operator_digest_cache json;
+      !operator_digest_broadcast_ref
+        (cached_surface_json operator_digest_cache
          |> with_operator_digest_metadata
               ~config
               ~query:(operator_digest_default_query ())))
@@ -731,7 +731,7 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
   if default_summary_request
   then
     cached_surface_or_first_success_json
-      _operator_snapshot_cache
+      operator_snapshot_cache
       ~cache_key:default_cache_key
       ~ttl:5.0
       ~clock
@@ -879,7 +879,7 @@ let operator_digest_http_json ~state ~sw ~clock request =
   if default_namespace_request
   then
     Ok
-      (cached_surface_json _operator_digest_cache
+      (cached_surface_json operator_digest_cache
        |> with_operator_digest_metadata ~config ~query)
   else (
     let started_at = Unix.gettimeofday () in
@@ -965,7 +965,7 @@ let operator_digest_http_json ~state ~sw ~clock request =
    Actor-parameterized requests fall back to on-demand compute with
    SWR cache. *)
 
-let _mission_cache =
+let mission_cache =
   create_cached_surface
     (`Assoc
         [ "generated_at", `String (Masc_domain.now_iso ())
@@ -987,7 +987,7 @@ let start_mission_refresh_loop ~state ~sw ~clock =
   let net, mono_clock = state_dashboard_runtime_caps state in
   let mission_refresh_timeout_s = 60.0 in
   let compute () =
-    mark_cached_surface_attempt _mission_cache;
+    mark_cached_surface_attempt mission_cache;
     let t0_mission = Unix.gettimeofday () in
     try
       run_dashboard_compute
@@ -1008,7 +1008,7 @@ let start_mission_refresh_loop ~state ~sw ~clock =
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-      mark_cached_surface_error _mission_cache exn;
+      mark_cached_surface_error mission_cache exn;
       raise exn
   in
   Proactive_refresh.start
@@ -1017,11 +1017,11 @@ let start_mission_refresh_loop ~state ~sw ~clock =
     ~config:
       { (Proactive_refresh.default_config ~label:"mission" ~interval_s:120.0) with
         timeout_s = mission_refresh_timeout_s
-      ; on_error = Some (mark_cached_surface_error _mission_cache)
+      ; on_error = Some (mark_cached_surface_error mission_cache)
       ; warm_delay_s = 90.0
       }
     ~compute
-    ~on_result:(mark_cached_surface_success _mission_cache)
+    ~on_result:(mark_cached_surface_success mission_cache)
 ;;
 
 let dashboard_mission_http_json ~state ~sw ~clock request =
@@ -1056,7 +1056,7 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
            bootstrap that success instead of staying "initializing" forever
            when proactive warm-up misses its first build window. *)
       cached_surface_or_first_success_json
-        _mission_cache
+        mission_cache
         ~cache_key:"mission:default"
         ~ttl:120.0
         ~clock
@@ -1438,7 +1438,7 @@ let dashboard_shell_bootstrap_json (config : Coord.config) : Yojson.Safe.t =
 ;;
 
 let dashboard_shell_last_good_opt () =
-  match Atomic.get _last_good_shell with
+  match Atomic.get last_good_shell with
   | `Assoc [] -> None
   | json -> Some json
 ;;
@@ -1925,15 +1925,15 @@ let dashboard_shell_http_json ?clock ?request ?(light = false) (config : Coord.c
   in
   let startup_shell_bootstrap_pending =
     let current = Server_startup_state.(!state) in
-    (not (Atomic.get _shell_warmed))
+    (not (Atomic.get shell_warmed))
     && current.state_ready
     && Server_startup_state.elapsed_since_start () < dashboard_shell_timeout_s +. 10.0
   in
   let apply_startup_prewarm_guard = Option.is_some request in
   let startup_prewarm_pending =
     apply_startup_prewarm_guard
-    && (Atomic.get _shell_warming || startup_shell_bootstrap_pending)
-    && not (Atomic.get _shell_warmed)
+    && (Atomic.get shell_warming || startup_shell_bootstrap_pending)
+    && not (Atomic.get shell_warmed)
   in
   let payload =
     if startup_prewarm_pending

@@ -555,6 +555,7 @@ let rec run_worker_via_oas
       ?gate_config
       ~context_injector
       ~context:shared_context
+      ?disclosure_strategy:meta.disclosure_strategy
       ()
   in
   let* () = Worker_container.save_worker_meta ~base_path ~worker_name meta in
@@ -890,6 +891,7 @@ let orchestrate_workers
           ~raw_trace
           ~heartbeat_callbacks:heartbeat_cbs
           ~gate_config
+          ?disclosure_strategy:meta.disclosure_strategy
           ()
       in
       ignore tool_names_ref;

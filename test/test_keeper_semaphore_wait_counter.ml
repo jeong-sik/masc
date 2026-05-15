@@ -232,6 +232,89 @@ let test_wait_observation_reason_labels () =
        ~channel:Masc_mcp.Keeper_world_observation.Scheduled_autonomous
        ())
 
+let test_cascade_backpressure_decision () =
+  let unhealthy =
+    KHL.cascade_backpressure_decision
+      ~should_run_turn:true
+      ~cascade_name:"primary"
+      ~cascade_status:(Masc_mcp.Keeper_health_probe.Unhealthy "failure_ratio")
+  in
+  (match unhealthy with
+   | KHL.Cascade_backpressured { cascade_name; reason } ->
+     Alcotest.(check string) "cascade name" "primary" cascade_name;
+     Alcotest.(check string) "reason" "failure_ratio" reason
+   | KHL.Cascade_admitted -> Alcotest.fail "unhealthy cascade was admitted");
+  (match
+     KHL.cascade_backpressure_decision
+       ~should_run_turn:true
+       ~cascade_name:"primary"
+       ~cascade_status:Masc_mcp.Keeper_health_probe.Healthy
+   with
+   | KHL.Cascade_admitted -> ()
+   | KHL.Cascade_backpressured _ -> Alcotest.fail "healthy cascade was blocked");
+  (match
+     KHL.cascade_backpressure_decision
+       ~should_run_turn:true
+       ~cascade_name:"primary"
+       ~cascade_status:Masc_mcp.Keeper_health_probe.Unknown
+   with
+   | KHL.Cascade_admitted -> ()
+   | KHL.Cascade_backpressured _ -> Alcotest.fail "unknown cascade was blocked");
+  match
+    KHL.cascade_backpressure_decision
+      ~should_run_turn:false
+      ~cascade_name:"primary"
+      ~cascade_status:(Masc_mcp.Keeper_health_probe.Unhealthy "failure_ratio")
+  with
+  | KHL.Cascade_admitted -> ()
+  | KHL.Cascade_backpressured _ ->
+    Alcotest.fail "already-skipped turn was reclassified"
+
+let test_cascade_backpressure_reason_labels () =
+  Alcotest.(check (list string))
+    "cascade backpressure reasons"
+    [ "cascade_backpressure"; "cascade_unhealthy"; "reason_failure_ratio_" ]
+    (KHL.cascade_backpressure_observation_reasons ~reason:"Failure Ratio!")
+
+let test_cascade_backpressure_updates_registry () =
+  let base_path =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-cascade-backpressure-observation-%d" (Unix.getpid ()))
+  in
+  let keeper = "cascade-backpressure-153xx" in
+  Masc_mcp.Keeper_registry.unregister ~base_path keeper;
+  let meta = make_meta keeper in
+  ignore (Masc_mcp.Keeper_registry.register ~base_path keeper meta);
+  Fun.protect
+    ~finally:(fun () -> Masc_mcp.Keeper_registry.unregister ~base_path keeper)
+    (fun () ->
+       let before =
+         match Masc_mcp.Keeper_registry.get ~base_path keeper with
+         | Some entry -> entry.meta.runtime.usage.last_turn_ts
+         | None -> Alcotest.fail "registered keeper missing before observation"
+       in
+       KHL.record_cascade_backpressure_observation
+         ~base_path
+         ~keeper_name:keeper
+         ~reason:"failure_ratio";
+       match Masc_mcp.Keeper_registry.get ~base_path keeper with
+       | Some
+           { Masc_mcp.Keeper_registry.last_skip_observation = Some (_, reasons)
+           ; meta = updated_meta
+           ; _
+           } ->
+         Alcotest.(check (list string))
+           "backpressure stamped for watchdog routing"
+           [ "cascade_backpressure"; "cascade_unhealthy"; "reason_failure_ratio" ]
+           reasons;
+         Alcotest.(check bool)
+           "last_turn_ts touched"
+           true
+           (updated_meta.runtime.usage.last_turn_ts >= before)
+       | Some _ -> Alcotest.fail "last_skip_observation was not stamped"
+       | None -> Alcotest.fail "registered keeper missing")
+
 let test_queue_head_timeout_diagnostic_names_fifo_blocker () =
   let timeout = make_timeout ~queue_ahead:3 KTS.Autonomous_queue_head in
   let blocker_class = KHL.semaphore_wait_timeout_blocker_class timeout in
@@ -377,6 +460,12 @@ let () =
     "watchdog_observation", [
       Alcotest.test_case "reason labels are stable" `Quick
         test_wait_observation_reason_labels;
+      Alcotest.test_case "cascade backpressure blocks unhealthy" `Quick
+        test_cascade_backpressure_decision;
+      Alcotest.test_case "cascade backpressure labels are stable" `Quick
+        test_cascade_backpressure_reason_labels;
+      Alcotest.test_case "cascade backpressure registry stamp is updated" `Quick
+        test_cascade_backpressure_updates_registry;
       Alcotest.test_case
         "queue-head timeout names fifo blocker, not empty holders" `Quick
         test_queue_head_timeout_diagnostic_names_fifo_blocker;

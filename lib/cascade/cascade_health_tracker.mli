@@ -36,7 +36,7 @@ val hard_quota_cooldown_sec : float
 
 val terminal_failure_cooldown_sec : float
 (** Cooldown duration applied immediately on a terminal structural
-    provider/adapter failure, such as a Kimi CLI resumable-session conflict.
+    provider/adapter failure, such as a provider CLI resumable-session conflict.
     Unlike {!cooldown_sec}, no threshold is required.  Default 3600.0 (1h).
 
     Env: [MASC_CASCADE_TERMINAL_FAILURE_COOLDOWN_SEC] (with deprecated
@@ -106,16 +106,20 @@ val create : unit -> t
 
 (** Durable provider state that can be restored after process restart.
 
-    This intentionally excludes rolling-window events and latency/cost rings:
-    those are short-lived routing signals. Cooldown, failure count, and error
-    fingerprints are enough to prevent a restart from immediately retrying a
-    provider that was just circuit-broken. *)
+    Cooldown, failure count, and error fingerprints prevent a restart from
+    immediately retrying a provider that was just circuit-broken.  The optional
+    routing hints seed the bounded latency/confidence/cost rings from the last
+    persisted snapshot so weighted cascade selection does not restart with a
+    fully cold view of recent provider performance. *)
 type provider_restore = {
   restore_provider_key : string;
   restore_consecutive_failures : int;
   restore_cooldown_until : float option;
   restore_last_failure_at : float option;
   restore_top_fingerprints : (string * int) list;
+  restore_latency_ms : float option;
+  restore_confidence : float option;
+  restore_cost_usd : float option;
 }
 
 (** Restore durable provider state into a tracker.

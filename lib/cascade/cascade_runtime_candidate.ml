@@ -404,4 +404,4 @@ let register_http_probe_capable ~max_concurrent candidate =
       Cascade_http_probe.register_url ~url
 
 let strategy_adapter : t Cascade_strategy.adapter =
-  { health_key; capacity_key; weight = (fun _ -> 1) }
+  { health_key; capacity_key }

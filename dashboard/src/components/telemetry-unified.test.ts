@@ -275,7 +275,7 @@ describe('TelemetryUnified', () => {
   })
 
   it('hydrates telemetry scope and entry focus from route params', async () => {
-    window.location.hash = '#monitoring?section=fleet-health&view=event-log&session_id=sess-route&operation_id=op-route&worker_run_id=wr-route&q=turn-9'
+    window.location.hash = '#monitoring?section=fleet-health&view=event-log&source=oas_event&n=500&session_id=sess-route&operation_id=op-route&worker_run_id=wr-route&q=turn-9'
     const fetchTelemetry = vi.fn().mockResolvedValue({
       ...baseTelemetry,
       count: 2,
@@ -310,14 +310,17 @@ describe('TelemetryUnified', () => {
     await flushUi()
 
     expect(fetchTelemetry).toHaveBeenCalledWith(expect.objectContaining({
+      source: 'oas_event',
       session_id: 'sess-route',
       operation_id: 'op-route',
       worker_run_id: 'wr-route',
-      n: 100,
+      n: 500,
     }))
     expect(container.textContent).toContain('session sess-route')
     expect(container.textContent).toContain('operation op-route')
     expect(container.textContent).toContain('worker_run wr-route')
+    expect(container.textContent).toContain('source OAS 이벤트')
+    expect(container.textContent).toContain('limit 500')
     expect(container.textContent).toContain('focus turn-9')
     expect(container.querySelector('[data-testid="telemetry-route-focus"]')).not.toBeNull()
     expect(container.textContent).toContain('SESSION sess-route')
@@ -325,6 +328,10 @@ describe('TelemetryUnified', () => {
     expect(container.textContent).toContain('WORKER wr-route')
     expect(container.textContent).toContain('QUERY turn-9')
     expect(container.textContent).toContain('1 focused item')
+    const sourceSelect = container.querySelector<HTMLSelectElement>('select[aria-label="텔레메트리 소스 필터"]')
+    expect(sourceSelect?.value).toBe('oas_event')
+    const limitSelect = container.querySelector<HTMLSelectElement>('select[aria-label="표시 개수 제한"]')
+    expect(limitSelect?.value).toBe('500')
     const searchInput = container.querySelector<HTMLInputElement>('input[aria-label="엔트리 텍스트 검색"]')
     expect(searchInput?.value).toBe('turn-9')
     expect(container.textContent).toContain('검색 매치 1건')
@@ -344,6 +351,8 @@ describe('TelemetryUnified', () => {
     expect(window.location.hash).not.toContain('operation_id=')
     expect(window.location.hash).not.toContain('worker_run_id=')
     expect(window.location.hash).not.toContain('q=')
+    expect(window.location.hash).toContain('source=oas_event')
+    expect(window.location.hash).toContain('n=500')
   })
 
   it('renders a telemetry entry raw JSON copy action', async () => {
@@ -449,7 +458,7 @@ describe('TelemetryUnified', () => {
     })
     await flushUi()
 
-    expect(container.textContent).toContain('반복 그룹 1개 · 원본 3건')
+    expect(container.textContent).toContain('접힌 그룹 1개 · 원본 3건')
     expect(container.textContent).toContain('폴링 / 무동작')
     expect(container.textContent).toContain('폴링 / 무동작 · masc_status · 3 events')
     expect(container.textContent).toContain('task_claimed: keeper-alpha')
@@ -635,6 +644,238 @@ describe('TelemetryUnified', () => {
     }
     const receiptMatches = filterTelemetryDisplayItems(items, 'turn_done')
     expect(receiptMatches).toHaveLength(1)
+  })
+
+  it('groups turn-scoped lifecycle, nested telemetry_event, and tool rows', async () => {
+    const { buildTelemetryDisplayItems, filterTelemetryDisplayItems } = await loadPanel(
+      vi.fn().mockResolvedValue(baseTelemetry),
+      vi.fn().mockResolvedValue(baseSummary),
+    )
+
+    const items = buildTelemetryDisplayItems([
+      {
+        source: 'oas_event',
+        ts_unix: 1_775_709_400,
+        event_type: 'turn_ready',
+        agent_name: 'keeper-alpha-agent',
+        turn: 42,
+      },
+      {
+        source: 'oas_event',
+        ts_unix: 1_775_709_399,
+        event_type: 'telemetry_event',
+        payload: [
+          'Context_window_usage',
+          {
+            agent_name: 'keeper-alpha-agent',
+            turn: 42,
+            estimated_tokens: 1234,
+          },
+        ],
+      },
+      {
+        source: 'tool_call_io',
+        ts: 1_775_709_398,
+        keeper: 'alpha',
+        tool: 'keeper_tasks_list',
+        turn: 42,
+        runtime_contract: {
+          agent_name: 'keeper-alpha-agent',
+        },
+      },
+      {
+        source: 'oas_event',
+        ts_unix: 1_775_709_397,
+        event_type: 'telemetry_event',
+        payload: [
+          'Streaming_first_chunk',
+          {
+            provider: 'openai_compat',
+            model: 'deepseek-v4-flash:cloud',
+            ttfrc_ms: 1685,
+          },
+        ],
+      },
+    ])
+
+    expect(items[0]).toMatchObject({
+      kind: 'group',
+      category: 'turn',
+      label: 'keeper-alpha-agent · turn 42',
+      count: 3,
+    })
+    expect(items[1]).toMatchObject({ kind: 'entry' })
+    if (items[1]?.kind === 'entry') {
+      expect(items[1].entry.source).toBe('oas_event')
+      expect(items[1].entry.event_type).toBe('telemetry_event')
+    }
+
+    const contextMatches = filterTelemetryDisplayItems(items, 'Context_window_usage')
+    expect(contextMatches).toHaveLength(1)
+    expect(contextMatches[0]).toMatchObject({
+      kind: 'group',
+      category: 'turn',
+    })
+
+    const cloudMatches = filterTelemetryDisplayItems(items, 'deepseek-v4-flash:cloud')
+    expect(cloudMatches).toHaveLength(1)
+    expect(cloudMatches[0]).toMatchObject({ kind: 'entry' })
+  })
+
+  it('keeps turn groups separated by run scope (session_id / operation_id / worker_run_id)', async () => {
+    const { buildTelemetryDisplayItems } = await loadPanel(
+      vi.fn().mockResolvedValue(baseTelemetry),
+      vi.fn().mockResolvedValue(baseSummary),
+    )
+
+    // Two different sessions reusing the same agent_name + turn number.
+    // Without run-scope in the grouping key these collapse into one row;
+    // with run-scope they MUST stay in two distinct groups.
+    const items = buildTelemetryDisplayItems([
+      {
+        source: 'oas_event',
+        ts_unix: 1_775_710_000,
+        event_type: 'turn_ready',
+        agent_name: 'keeper-alpha-agent',
+        turn: 1,
+        session_id: 'sess-foo',
+      },
+      {
+        source: 'oas_event',
+        ts_unix: 1_775_709_999,
+        event_type: 'telemetry_event',
+        session_id: 'sess-foo',
+        payload: [
+          'Context_window_usage',
+          { agent_name: 'keeper-alpha-agent', turn: 1, estimated_tokens: 100 },
+        ],
+      },
+      {
+        source: 'oas_event',
+        ts_unix: 1_775_709_998,
+        event_type: 'turn_ready',
+        agent_name: 'keeper-alpha-agent',
+        turn: 1,
+        session_id: 'sess-bar',
+      },
+      {
+        source: 'oas_event',
+        ts_unix: 1_775_709_997,
+        event_type: 'telemetry_event',
+        session_id: 'sess-bar',
+        payload: [
+          'Context_window_usage',
+          { agent_name: 'keeper-alpha-agent', turn: 1, estimated_tokens: 200 },
+        ],
+      },
+    ])
+
+    const turnGroups = items.filter(
+      (item): item is Extract<typeof item, { kind: 'group' }> =>
+        item.kind === 'group' && item.category === 'turn',
+    )
+    expect(turnGroups).toHaveLength(2)
+    expect(turnGroups[0]).toMatchObject({
+      label: 'keeper-alpha-agent · turn 1',
+      count: 2,
+    })
+    expect(turnGroups[1]).toMatchObject({
+      label: 'keeper-alpha-agent · turn 1',
+      count: 2,
+    })
+  })
+
+  it('does not group on turn=0 sentinel (turn-not-tracked records stay as entries)', async () => {
+    const { buildTelemetryDisplayItems } = await loadPanel(
+      vi.fn().mockResolvedValue(baseTelemetry),
+      vi.fn().mockResolvedValue(baseSummary),
+    )
+
+    // turn=0 is used by keeper telemetry as "turn not tracked" (e.g.,
+    // trajectory tool-call records). These entries must not be collapsed
+    // into a fake `actor · turn 0` group even when they share an actor.
+    const items = buildTelemetryDisplayItems([
+      {
+        source: 'tool_call_io',
+        ts: 1_775_711_000,
+        keeper: 'alpha',
+        tool: 'keeper_tasks_list',
+        turn: 0,
+        runtime_contract: { agent_name: 'keeper-alpha-agent' },
+      },
+      {
+        source: 'tool_call_io',
+        ts: 1_775_710_999,
+        keeper: 'alpha',
+        tool: 'masc_status',
+        turn: 0,
+        runtime_contract: { agent_name: 'keeper-alpha-agent' },
+      },
+      {
+        source: 'oas_event',
+        ts_unix: 1_775_710_998,
+        event_type: 'telemetry_event',
+        payload: [
+          'Context_window_usage',
+          { agent_name: 'keeper-alpha-agent', turn: 0, estimated_tokens: 50 },
+        ],
+      },
+    ])
+
+    const turnGroups = items.filter(
+      (item): item is Extract<typeof item, { kind: 'group' }> =>
+        item.kind === 'group' && item.category === 'turn',
+    )
+    expect(turnGroups).toHaveLength(0)
+  })
+
+  it('surfaces cloud Ollama provider details in OAS telemetry previews and search', async () => {
+    const { buildTelemetryDisplayItems, filterTelemetryDisplayItems } = await loadPanel(
+      vi.fn().mockResolvedValue(baseTelemetry),
+      vi.fn().mockResolvedValue(baseSummary),
+    )
+
+    const items = buildTelemetryDisplayItems([
+      {
+        source: 'oas_event',
+        ts_unix: 1_775_709_500,
+        event_type: 'masc:oas_worker:build',
+        agent_name: 'oas-tier-group.ollama_cloud_stable',
+        payload: {
+          agent: 'oas-tier-group.ollama_cloud_stable',
+          provider_kind: 'openai_compat',
+          model_id: 'kimi-k2.6:cloud',
+          provider_model_id: 'kimi-k2.6:cloud',
+          base_url: 'https://ollama.com/v1',
+          endpoint: 'https://ollama.com/v1/chat/completions',
+        },
+      },
+      {
+        source: 'oas_event',
+        ts_unix: 1_775_709_499,
+        event_type: 'telemetry_event',
+        payload: [
+          'Streaming_summary',
+          {
+            provider: 'openai_compat',
+            model: 'deepseek-v4-flash:cloud',
+            total_ms: 3450,
+          },
+        ],
+      },
+    ])
+
+    const buildMatches = filterTelemetryDisplayItems(items, 'ollama.com')
+    expect(buildMatches).toHaveLength(1)
+    expect(buildMatches[0]).toMatchObject({ kind: 'entry' })
+
+    const streamingMatches = filterTelemetryDisplayItems(items, 'Streaming_summary')
+    expect(streamingMatches).toHaveLength(1)
+    expect(streamingMatches[0]).toMatchObject({ kind: 'entry' })
+
+    const modelMatches = filterTelemetryDisplayItems(items, 'deepseek-v4-flash:cloud')
+    expect(modelMatches).toHaveLength(1)
+    expect(modelMatches[0]).toMatchObject({ kind: 'entry' })
   })
 
   it('expands grouped rows to reveal the condensed raw entries', async () => {

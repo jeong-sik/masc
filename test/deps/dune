@@ -51,6 +51,8 @@
    (re_export masc_mcp.keeper_skill_routing)
    ;; RFC-0056 Phase 1C — Host_config leaf utility sub-library.
    (re_export masc_mcp.host_config)
+   ;; RFC-0056 Phase 1D — Briefing_compactors leaf utility sub-library.
+   (re_export masc_mcp.briefing_compactors)
    ;; RFC-0058 Phase 1 — Declarative cascade TOML parser sub-library.
    (re_export masc_mcp.cascade_decl)
    (re_export masc_mcp.ag_ui)

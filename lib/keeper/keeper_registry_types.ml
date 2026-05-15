@@ -1085,3 +1085,32 @@ let is_paired_lifecycle_event = function
   | _ -> false
 ;;
 
+let origin_allows_paired_lifecycle_event origin event =
+  match origin, event with
+  | Post_turn_lifecycle, event when is_paired_lifecycle_event event -> true
+  | ( Operator_compact
+    , ( Keeper_state_machine.Compaction_started
+      | Keeper_state_machine.Compaction_completed _
+      | Keeper_state_machine.Compaction_failed _ ) ) -> true
+  | Generic_dispatch, event when is_paired_lifecycle_event event -> false
+  | Operator_compact, event when is_paired_lifecycle_event event -> false
+  | _, _ -> true
+;;
+
+let pending_measurement_after_event now entry event =
+  match event with
+  | Keeper_state_machine.Context_measured { auto_rules; _ } ->
+    Some { tm_captured_at = now; tm_auto_rules = auto_rules }
+  | _ -> entry.pending_turn_measurement
+;;
+
+let compaction_stage_of_event entry event =
+  match event with
+  | Keeper_state_machine.Compaction_started
+  | Keeper_state_machine.Auto_compact_triggered
+  | Keeper_state_machine.Operator_compact_requested -> Packed Compaction_compacting
+  | Keeper_state_machine.Compaction_completed _ -> Packed Compaction_done
+  | Keeper_state_machine.Compaction_failed _ -> Packed Compaction_accumulating
+  | _ -> entry.compaction_stage
+;;
+

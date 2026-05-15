@@ -256,24 +256,50 @@ let with_in_turn_liveness_pulse_for_test ~sw:_sw ~clock ~interval_sec ~tick f =
   let interval_sec = max 0.001 interval_sec in
   Eio.Switch.run (fun pulse_sw ->
     let pulse_stop = Atomic.make false in
-    Eio.Switch.on_release pulse_sw (fun () -> Atomic.set pulse_stop true);
+    let pulse_cancel = ref None in
+    let stop_pulse () =
+      Atomic.set pulse_stop true;
+      match !pulse_cancel with
+      | None -> ()
+      | Some cc ->
+        (try Eio.Cancel.cancel cc (Failure "in_turn_liveness_pulse_stop") with
+         | Eio.Cancel.Cancelled _ -> ()
+         | Invalid_argument _ -> ())
+    in
+    Eio.Switch.on_release pulse_sw stop_pulse;
     Eio.Fiber.fork ~sw:pulse_sw (fun () ->
-      let rec loop () =
-        Eio.Time.sleep clock interval_sec;
-        if not (Atomic.get pulse_stop)
-        then (
-          (try tick () with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | exn ->
-             Log.Keeper.warn "in-turn liveness pulse failed: %s" (Printexc.to_string exn);
-             Prometheus.inc_counter
-               Keeper_metrics.metric_keeper_heartbeat_failures
-               ~labels:[ "keeper", "liveness_pulse"; "phase", "pulse_tick" ]
-               ());
+      try
+        Eio.Cancel.sub (fun cc ->
+          pulse_cancel := Some cc;
+          let rec loop () =
+            if not (Atomic.get pulse_stop)
+            then (
+              Eio.Time.sleep clock interval_sec;
+              if not (Atomic.get pulse_stop)
+              then
+                (try tick () with
+                 | Eio.Cancel.Cancelled _ as e -> raise e
+                 | exn ->
+                   Log.Keeper.warn
+                     "in-turn liveness pulse failed: %s"
+                     (Printexc.to_string exn);
+                   Prometheus.inc_counter
+                     Keeper_metrics.metric_keeper_heartbeat_failures
+                     ~labels:[ "keeper", "liveness_pulse"; "phase", "pulse_tick" ]
+                     ());
+              loop ())
+          in
           loop ())
-      in
-      loop ());
-    f ())
+      with
+      | Eio.Cancel.Cancelled _ -> ());
+    match f () with
+    | result ->
+      stop_pulse ();
+      result
+    | exception exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      stop_pulse ();
+      Printexc.raise_with_backtrace exn backtrace)
 ;;
 
 let emit_in_turn_liveness_pulse ~(ctx : _ context) ~(meta : keeper_meta) =

@@ -48,6 +48,15 @@ val docker_private_workspace_cwd :
   string ->
   string
 
+(** Translate keeper-private in-container absolute paths back to their host
+    playground paths for host-side path validation. Actual Docker execution
+    still receives the original container paths. *)
+val rewrite_docker_command_paths_for_host_validation :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  string ->
+  string
+
 (** Resolve [(sandbox_profile, network_mode)] given the keeper's
     declared profile and whether the cwd is in-playground. Hard
     mode forces the keeper's declared profile; otherwise [Local]

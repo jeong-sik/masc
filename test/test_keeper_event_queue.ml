@@ -1,5 +1,5 @@
 let () =
-  let open Masc_mcp.Keeper_event_queue in
+  let open Keeper_event_queue in
 
   (* --- classify: board_signal --- *)
   let board_payload =

@@ -2058,13 +2058,13 @@ let () =
                   Reg.event_queue_snapshot ~base_path:config.base_path name
                 in
                 check int "one recovery stimulus queued" 1
-                  (Masc_mcp.Keeper_event_queue.length queue);
-                (match Masc_mcp.Keeper_event_queue.dequeue queue with
+                  (Keeper_event_queue.length queue);
+                (match Keeper_event_queue.dequeue queue with
                  | Some (stim, _) ->
                     check string "post id" ("alive-but-stuck:" ^ name)
                       stim.post_id;
-                    (match Masc_mcp.Keeper_event_queue.classify stim with
-                     | Masc_mcp.Keeper_event_queue.Alive_but_stuck_recovery ->
+                    (match Keeper_event_queue.classify stim with
+                     | Keeper_event_queue.Alive_but_stuck_recovery ->
                         ()
                      | _ -> fail "expected recovery stimulus class")
                  | None -> fail "expected queued recovery stimulus");
@@ -2139,7 +2139,7 @@ let () =
                 check int
                   "dedup window holds queue length to 1 across 3 sweeps"
                   1
-                  (Masc_mcp.Keeper_event_queue.length queue);
+                  (Keeper_event_queue.length queue);
                 (* Manual dedup reset → next scan re-queues. *)
                 Sup.alive_but_stuck_reset_for_test ();
                 Sup.alive_but_stuck_scan ctx;
@@ -2149,7 +2149,7 @@ let () =
                 check int
                   "after dedup reset, the next scan re-queues (now 2 total)"
                   2
-                  (Masc_mcp.Keeper_event_queue.length queue2)));
+                  (Keeper_event_queue.length queue2)));
         test_case "never_started + autonomous + old started_at → Some" `Quick
           (fun () ->
             (* Mirrors production case: glm-coding-plan with

@@ -422,9 +422,9 @@ let test_board_signal_stimulus_becomes_pending_board_event () =
            ]
          |> Yojson.Safe.to_string
        in
-       let stimulus : Masc_mcp.Keeper_event_queue.stimulus =
+       let stimulus : Keeper_event_queue.stimulus =
          { post_id
-         ; urgency = Masc_mcp.Keeper_event_queue.Immediate
+         ; urgency = Keeper_event_queue.Immediate
          ; arrived_at = Time_compat.now ()
          ; payload
          }
@@ -489,9 +489,9 @@ let test_legacy_board_comment_stimulus_becomes_pending_board_event () =
            ]
          |> Yojson.Safe.to_string
        in
-       let stimulus : Masc_mcp.Keeper_event_queue.stimulus =
+       let stimulus : Keeper_event_queue.stimulus =
          { post_id
-         ; urgency = Masc_mcp.Keeper_event_queue.Normal
+         ; urgency = Keeper_event_queue.Normal
          ; arrived_at = Time_compat.now ()
          ; payload
          }

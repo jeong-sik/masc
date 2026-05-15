@@ -9,7 +9,7 @@
    Wire-up tests (heartbeat loop integration) live in a follow-up
    patch alongside [Heartbeat_smart] / [Keeper_keepalive] changes. *)
 
-open Masc_mcp.Keeper_event_queue
+open Keeper_event_queue
 
 let make_stim ?(urgency = Normal) ?(arrived_at = 0.0) post_id payload =
   { post_id; urgency; arrived_at; payload }

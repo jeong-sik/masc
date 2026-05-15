@@ -256,24 +256,50 @@ let with_in_turn_liveness_pulse_for_test ~sw:_sw ~clock ~interval_sec ~tick f =
   let interval_sec = max 0.001 interval_sec in
   Eio.Switch.run (fun pulse_sw ->
     let pulse_stop = Atomic.make false in
-    Eio.Switch.on_release pulse_sw (fun () -> Atomic.set pulse_stop true);
+    let pulse_cancel = ref None in
+    let stop_pulse () =
+      Atomic.set pulse_stop true;
+      match !pulse_cancel with
+      | None -> ()
+      | Some cc ->
+        (try Eio.Cancel.cancel cc (Failure "in_turn_liveness_pulse_stop") with
+         | Eio.Cancel.Cancelled _ -> ()
+         | Invalid_argument _ -> ())
+    in
+    Eio.Switch.on_release pulse_sw stop_pulse;
     Eio.Fiber.fork ~sw:pulse_sw (fun () ->
-      let rec loop () =
-        Eio.Time.sleep clock interval_sec;
-        if not (Atomic.get pulse_stop)
-        then (
-          (try tick () with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | exn ->
-             Log.Keeper.warn "in-turn liveness pulse failed: %s" (Printexc.to_string exn);
-             Prometheus.inc_counter
-               Keeper_metrics.metric_keeper_heartbeat_failures
-               ~labels:[ "keeper", "liveness_pulse"; "phase", "pulse_tick" ]
-               ());
+      try
+        Eio.Cancel.sub (fun cc ->
+          pulse_cancel := Some cc;
+          let rec loop () =
+            if not (Atomic.get pulse_stop)
+            then (
+              Eio.Time.sleep clock interval_sec;
+              if not (Atomic.get pulse_stop)
+              then
+                (try tick () with
+                 | Eio.Cancel.Cancelled _ as e -> raise e
+                 | exn ->
+                   Log.Keeper.warn
+                     "in-turn liveness pulse failed: %s"
+                     (Printexc.to_string exn);
+                   Prometheus.inc_counter
+                     Keeper_metrics.metric_keeper_heartbeat_failures
+                     ~labels:[ "keeper", "liveness_pulse"; "phase", "pulse_tick" ]
+                     ());
+              loop ())
+          in
           loop ())
-      in
-      loop ());
-    f ())
+      with
+      | Eio.Cancel.Cancelled _ -> ());
+    match f () with
+    | result ->
+      stop_pulse ();
+      result
+    | exception exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      stop_pulse ();
+      Printexc.raise_with_backtrace exn backtrace)
 ;;
 
 let emit_in_turn_liveness_pulse ~(ctx : _ context) ~(meta : keeper_meta) =
@@ -367,6 +393,50 @@ let record_semaphore_wait_observation
     ~base_path
     keeper_name
     ~reasons:(semaphore_wait_observation_reasons ?phase_label ~kind ~channel ())
+;;
+
+type cascade_backpressure_decision =
+  | Cascade_admitted
+  | Cascade_backpressured of {
+      cascade_name : string;
+      reason : string;
+    }
+
+let skip_reason_component raw =
+  let normalized = String.lowercase_ascii (String.trim raw) in
+  let mapped =
+    String.map
+      (function
+        | ('a' .. 'z' | '0' .. '9' | '_') as c -> c
+        | '-' -> '_'
+        | _ -> '_')
+      normalized
+  in
+  if String.equal mapped "" then "unknown" else mapped
+;;
+
+let cascade_backpressure_observation_reasons ~reason =
+  [ "cascade_backpressure"
+  ; "cascade_unhealthy"
+  ; "reason_" ^ skip_reason_component reason
+  ]
+;;
+
+let cascade_backpressure_decision ~should_run_turn ~cascade_name ~cascade_status =
+  match should_run_turn, cascade_status with
+  | true, Keeper_health_probe.Unhealthy reason ->
+    Cascade_backpressured { cascade_name; reason }
+  | false, _
+  | true, Keeper_health_probe.Unknown
+  | true, Keeper_health_probe.Healthy -> Cascade_admitted
+;;
+
+let record_cascade_backpressure_observation ~base_path ~keeper_name ~reason =
+  Keeper_registry.record_skip_reasons
+    ~base_path
+    keeper_name
+    ~reasons:(cascade_backpressure_observation_reasons ~reason);
+  Keeper_registry.touch_last_turn_ts ~base_path keeper_name
 ;;
 
 let oas_timeout_budget_observation_reasons =
@@ -858,7 +928,21 @@ let run_keepalive_unified_turn
          stuck behind sticky blockers. Failed turns record evidence via
          Keeper_registry; recovery is autonomous (next turn's observation)
          or operator-driven (board/keeper_chat), not blocker-driven. *)
-      let should_run_turn = (not (Atomic.get stop)) && turn_decision.should_run in
+      let requested_should_run_turn =
+        (not (Atomic.get stop)) && turn_decision.should_run
+      in
+      let cascade_name = cascade_name_of_meta meta_after_triage in
+      let cascade_backpressure =
+        cascade_backpressure_decision
+          ~should_run_turn:requested_should_run_turn
+          ~cascade_name
+          ~cascade_status:(Keeper_health_probe.get_cascade_status ~cascade_name)
+      in
+      let should_run_turn =
+        match cascade_backpressure with
+        | Cascade_admitted -> requested_should_run_turn
+        | Cascade_backpressured _ -> false
+      in
       let meta_after_cursor_persist =
         persist_message_cursor_updates
           ~config:ctx.config
@@ -871,6 +955,12 @@ let run_keepalive_unified_turn
       in
       let verdict_strs =
         Keeper_world_observation.verdict_reasons_to_strings turn_decision.verdict
+      in
+      let admission_reason_strs =
+        match cascade_backpressure with
+        | Cascade_admitted -> verdict_strs
+        | Cascade_backpressured { reason; _ } ->
+          cascade_backpressure_observation_reasons ~reason
       in
       let channel_str =
         Keeper_world_observation.channel_to_string turn_decision.channel
@@ -893,7 +983,7 @@ let run_keepalive_unified_turn
                Keeper_heartbeat_snapshot.proactive_skip_reason_metric
                ~labels:[ "keeper", meta_after_triage.name; "reason", reason_str ]
                ())
-          verdict_strs;
+          admission_reason_strs;
         (* #10940 follow-up — Prometheus counters aggregate skip reasons
            across time, but operators need to see *which* reasons were
            live just before a stale-watchdog [idle_stale=true]
@@ -901,10 +991,23 @@ let run_keepalive_unified_turn
            [Keeper_stale_watchdog] surface the most recent reasons in
            the kill warn line, distinguishing deliberate-skip dead
            paths from genuinely stuck fibers. *)
-        Keeper_registry.record_skip_reasons
-          ~base_path:ctx.config.base_path
-          meta_after_triage.name
-          ~reasons:verdict_strs;
+        (match cascade_backpressure with
+         | Cascade_admitted ->
+           Keeper_registry.record_skip_reasons
+             ~base_path:ctx.config.base_path
+             meta_after_triage.name
+             ~reasons:admission_reason_strs
+         | Cascade_backpressured { cascade_name; reason } ->
+           record_cascade_backpressure_observation
+             ~base_path:ctx.config.base_path
+             ~keeper_name:meta_after_triage.name
+             ~reason;
+           Log.Keeper.info
+             "keepalive turn backpressured for %s: cascade=%s reason=%s requested=[%s]"
+             meta_after_triage.name
+             cascade_name
+             reason
+             (String.concat "," verdict_strs));
         let paused_info =
           if meta_after_triage.paused
           then (
@@ -940,7 +1043,7 @@ let run_keepalive_unified_turn
           meta_after_triage.name
           turn_decision.should_run
           channel_str
-          (String.concat "," verdict_strs)
+          (String.concat "," admission_reason_strs)
           obs.idle_seconds
           (Keeper_keepalive_signal.format_since_last_scheduled_autonomous
              turn_decision.since_last_scheduled_autonomous)

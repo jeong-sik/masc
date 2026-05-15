@@ -594,7 +594,7 @@ let test_pre_dispatch_terminal_observation_emits_manifest_rows () =
         ~outcome:`Skipped
         ~terminal_reason_code:"phase_not_executable"
         ~activity_kind:"keeper.turn_skipped"
-        ~trajectory_outcome:(Masc_mcp.Trajectory.Gated "phase_not_executable")
+        ~trajectory_outcome:(Trajectory.Gated "phase_not_executable")
         ~keeper_turn_id
         ();
       let trace_id =
@@ -655,7 +655,7 @@ let test_runtime_trace_api_links_manifest_and_receipt_rows () =
         ~outcome:`Skipped
         ~terminal_reason_code:"phase_not_executable"
         ~activity_kind:"keeper.turn_skipped"
-        ~trajectory_outcome:(Masc_mcp.Trajectory.Gated "phase_not_executable")
+        ~trajectory_outcome:(Trajectory.Gated "phase_not_executable")
         ~keeper_turn_id
         ();
       let trace_id =
@@ -746,7 +746,7 @@ let test_runtime_trace_api_bounds_rows_but_counts_full_manifest () =
         ~outcome:`Skipped
         ~terminal_reason_code:"phase_not_executable"
         ~activity_kind:"keeper.turn_skipped"
-        ~trajectory_outcome:(Masc_mcp.Trajectory.Gated "phase_not_executable")
+        ~trajectory_outcome:(Trajectory.Gated "phase_not_executable")
         ~keeper_turn_id
         ();
       let trace_id =
@@ -2009,19 +2009,37 @@ let test_empty_candidate_classification_separates_tool_filter_from_availability 
     (FT.classify_empty_candidates
        ~require_tool_choice_support:true
        ~require_tool_support:true
+       ~original_candidate_count:2
+       ~tool_filtered_candidate_count:0);
+  check "required tools but no resolved candidates"
+    FT.Provider_unavailable
+    (FT.classify_empty_candidates
+       ~require_tool_choice_support:true
+       ~require_tool_support:true
+       ~original_candidate_count:0
        ~tool_filtered_candidate_count:0);
   check "required tools but candidates were only unavailable"
     FT.Provider_unavailable
     (FT.classify_empty_candidates
        ~require_tool_choice_support:true
        ~require_tool_support:true
+       ~original_candidate_count:2
        ~tool_filtered_candidate_count:2);
   check "optional tools and no providers"
     FT.Provider_unavailable
     (FT.classify_empty_candidates
        ~require_tool_choice_support:false
        ~require_tool_support:false
-       ~tool_filtered_candidate_count:0)
+       ~original_candidate_count:0
+       ~tool_filtered_candidate_count:0);
+  Alcotest.(check string)
+    "tool capability code"
+    "tool_capability_empty"
+    (FT.empty_candidate_classification_code FT.Tool_capability_empty);
+  Alcotest.(check string)
+    "provider unavailable code"
+    "provider_unavailable"
+    (FT.empty_candidate_classification_code FT.Provider_unavailable)
 
 let test_keeper_cascade_engine_boundary () =
   let module E = Masc_mcp.Keeper_cascade_engine in

@@ -12,6 +12,14 @@ export interface IdeAnnotation {
   readonly content: string
   readonly goal_id: string | null
   readonly task_id: string | null
+  readonly board_post_id?: string | null
+  readonly comment_id?: string | null
+  readonly pr_id?: string | null
+  readonly git_ref?: string | null
+  readonly log_id?: string | null
+  readonly session_id?: string | null
+  readonly operation_id?: string | null
+  readonly worker_run_id?: string | null
   readonly created_at_ms: number
   readonly updated_at_ms: number
 }
@@ -54,6 +62,14 @@ export function parseIdeAnnotation(value: unknown): IdeAnnotation | null {
     content: asString(value.content, ''),
     goal_id: asNullableString(value.goal_id),
     task_id: asNullableString(value.task_id),
+    board_post_id: asNullableString(value.board_post_id),
+    comment_id: asNullableString(value.comment_id),
+    pr_id: asNullableString(value.pr_id),
+    git_ref: asNullableString(value.git_ref),
+    log_id: asNullableString(value.log_id),
+    session_id: asNullableString(value.session_id),
+    operation_id: asNullableString(value.operation_id),
+    worker_run_id: asNullableString(value.worker_run_id),
     created_at_ms: asNumber(value.created_at_ms, 0),
     updated_at_ms: asNumber(value.updated_at_ms, 0),
   }

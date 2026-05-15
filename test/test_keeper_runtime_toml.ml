@@ -250,12 +250,13 @@ let test_applies_memory_overrides () =
      compact_trigger_bytes = 234567\n\
      max_length = 2048\n\
      placeholders = \"custom-empty,custom-none\"\n\
-     consensus_pattern = \"CUSTOMBLOCK\"\n"
+     consensus_pattern = \"CUSTOMBLOCK\"\n\
+     llm_summary = true\n"
   in
   let count, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
   in
-  check int "applied 5" 5 count;
+  check int "applied 6" 6 count;
   check (option string) "memory max notes"
     (Some "321")
     (List.assoc_opt "MASC_KEEPER_MEMORY_MAX_NOTES" overrides);
@@ -270,7 +271,10 @@ let test_applies_memory_overrides () =
     (List.assoc_opt "MASC_KEEPER_MEMORY_PLACEHOLDERS" overrides);
   check (option string) "memory consensus pattern"
     (Some "CUSTOMBLOCK")
-    (List.assoc_opt "MASC_KEEPER_MEMORY_CONSENSUS_PATTERN" overrides)
+    (List.assoc_opt "MASC_KEEPER_MEMORY_CONSENSUS_PATTERN" overrides);
+  check (option string) "memory llm summary"
+    (Some "true")
+    (List.assoc_opt "MASC_KEEPER_MEMORY_LLM_SUMMARY" overrides)
 
 let test_memory_bank_reads_boot_override_knobs () =
   let env_names =
@@ -280,6 +284,7 @@ let test_memory_bank_reads_boot_override_knobs () =
       "MASC_KEEPER_MEMORY_MAX_LENGTH";
       "MASC_KEEPER_MEMORY_PLACEHOLDERS";
       "MASC_KEEPER_MEMORY_CONSENSUS_PATTERN";
+      "MASC_KEEPER_MEMORY_LLM_SUMMARY";
     ]
   in
   if List.exists (fun name -> Sys.getenv_opt name <> None) env_names then
@@ -291,6 +296,7 @@ let test_memory_bank_reads_boot_override_knobs () =
   Config_boot_overrides.set "MASC_KEEPER_MEMORY_MAX_LENGTH" "2048";
   Config_boot_overrides.set "MASC_KEEPER_MEMORY_PLACEHOLDERS" "custom-empty";
   Config_boot_overrides.set "MASC_KEEPER_MEMORY_CONSENSUS_PATTERN" "CUSTOMBLOCK";
+  Config_boot_overrides.set "MASC_KEEPER_MEMORY_LLM_SUMMARY" "true";
   check int "target notes from boot override"
     321
     (Keeper_memory_bank.memory_compaction_target_notes ());
@@ -305,7 +311,10 @@ let test_memory_bank_reads_boot_override_knobs () =
     (List.mem "custom-empty" (Keeper_memory_bank.memory_placeholders ()));
   check string "consensus pattern from boot override"
     "CUSTOMBLOCK"
-    (Keeper_memory_bank.consensus_pattern_key ())
+    (Keeper_memory_bank.consensus_pattern_key ());
+  check bool "llm summary flag from boot override"
+    true
+    (Keeper_memory_bank.memory_llm_summary_enabled ())
 
 let test_caller_env_wins_over_toml () =
   let doc = parse_or_fail "[autonomous]\nmax_turns_per_call = 7\n" in

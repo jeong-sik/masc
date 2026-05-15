@@ -123,24 +123,7 @@ val on_strategy_starvation_guard : cascade:string -> strategy:string -> unit
 (** Tick the strategy-starvation-guard counter when
     [Cascade_strategy.order_candidates] falls through with the
     pre-capacity-filter candidate list because every candidate
-    reported capacity=0.  [strategy] must be one of
-    [circuit_breaker_cycling] or [priority_tier] (the only two
-    branches with this fail-open). *)
-
-val on_sticky_drift : cascade:string -> unit
-(** Tick the sticky-drift counter at [Cascade_strategy.sticky_order]
-    when a pinned provider is no longer in the candidate list
-    (cascade.toml reload, provider deprecation, registry shift)
-    and the strategy silently falls back to plain Failover.  Ticks
-    only on the drift case, not on normal hit / miss-no-pin paths. *)
-
-val on_sticky_expiry : cascade:string -> unit
-(** Tick the sticky-expiry counter at [Cascade_state.lookup_sticky]
-    when an entry exists for [(keeper, cascade)] but its TTL has
-    expired ([now >= entry.expires_at]).  Distinct from
-    [on_sticky_drift] (candidate-list invalidation): this signals
-    TTL is too short for the actual keeper request cadence and
-    operators should consider raising it. *)
+    reported capacity=0.  [strategy] must be [priority_tier]. *)
 
 val on_default_label_fallback : cascade:string -> reason:string -> unit
 (** Tick the default-label-fallback counter at

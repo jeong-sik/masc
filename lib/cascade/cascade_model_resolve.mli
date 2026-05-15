@@ -1,30 +1,12 @@
-(** Model ID resolution: aliases and auto-detection for cloud providers.
+(** Model ID resolution through OAS runtime provider bindings.
 
-    Pure functions that map user-facing aliases to concrete API model IDs.
+    Pure functions that map [auto] to runtime binding defaults or local
+    discovery. Provider-specific alias/catalog truth belongs upstream in OAS.
 
     @since 0.92.0 extracted from Cascade_config
 
     @stability Internal
     @since 0.93.1 *)
-
-(** GLM auto-cascade model list: quality-first, then speed.
-    Returns the ordered list of models to try when [glm:auto] is specified.
-    The default order comes from the OAS ZAI catalog and remains configurable
-    via [ZAI_AUTO_MODELS] env var (comma-separated). *)
-val glm_auto_models : unit -> string list
-
-val glm_coding_auto_models : unit -> string list
-
-(** {2 Removed in RFC-0058 Phase 5.3a}
-
-    The per-provider [gemini_cli_auto_models], [codex_cli_auto_models],
-    [claude_code_auto_models], and [kimi_cli_auto_models] thin wrappers
-    have been deleted. They were unused in production; routing goes through
-    the generic auto-model API. Hardcoded provider names were a §2.4 "code
-    knows provider names" violation. Callers that need a specific provider's
-    auto list use the generic API; per-provider env-override behaviour
-    ([MASC_<PROVIDER>_AUTO_MODELS]) remains intact and is now exercised against
-    the generic path in [test/test_cascade_model_resolve.ml]. *)
 
 type model_selector =
   | Concrete of string
@@ -34,9 +16,8 @@ val model_selector_of_string : string -> model_selector
 
 type model_resolution_provenance =
   | Explicit_input
-  | Alias of string
   | Env_default of string
-  | Hardcoded_default
+  | Binding_default
   | Discovery
   | Unresolved_auto
 
@@ -46,35 +27,15 @@ type model_resolution =
   ; provenance : model_resolution_provenance
   }
 
-val resolve_glm_model
-  :  ?getenv:(string -> string option)
-  -> model_selector
-  -> model_resolution
-
-val resolve_glm_coding_model
-  :  ?getenv:(string -> string option)
-  -> model_selector
-  -> model_resolution
-
-(** Resolve a GLM model alias to the concrete API model ID.
-    - ["auto"] -> env var [ZAI_DEFAULT_MODEL] or the OAS ZAI catalog head
-    - ["flash"] -> ["glm-4.7-flashx"]
-    - ["turbo"] -> ["glm-5-turbo"]
-    - ["vision"] -> ["glm-4.6v"]
-    - Concrete IDs pass through unchanged. *)
-val resolve_glm_model_id : string -> string
-
-val resolve_glm_coding_model_id : string -> string
-
 (** Resolve provider:auto expansion for any registered cascade provider. *)
 val auto_models_for_cascade_prefix
   :  ?getenv:(string -> string option)
   -> string
   -> string list option
 
-(** Resolve "auto" and aliases to concrete model IDs for any provider.
-    Cloud providers resolve aliases; local providers (llama, ollama) resolve
-    "auto" via {!Llm_provider.Discovery.first_discovered_model_id}. *)
+(** Resolve ["auto"] for any provider. Local providers resolve ["auto"] via
+    {!Llm_provider.Discovery.first_discovered_model_id}; non-local providers
+    use OAS runtime binding defaults. *)
 val resolve_auto_model
   :  ?getenv:(string -> string option)
   -> ?discover:(unit -> string option)

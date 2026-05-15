@@ -42,12 +42,18 @@
    ;; test_cdal_types / test_labeling / test_adversarial_eval and other
    ;; consumers keep resolving these unprefixed module names.
    (re_export masc_mcp.cdal)
+   ;; RFC-0056 Phase 1A — Trajectory leaf module sub-library.
+   ;; Tests previously wrote `Masc_mcp.Trajectory.X` (wrapped pattern);
+   ;; after this re-export they use bare `Trajectory.X` per the
+   ;; G5 qualifier-removal budget.
+   (re_export masc_mcp.trajectory)
    ;; RFC-0058 Phase 1 — Declarative cascade TOML parser sub-library.
    (re_export masc_mcp.cascade_decl)
    (re_export masc_mcp.ag_ui)
    (re_export masc_mcp.config)
    (re_export masc_mcp.fs_compat)
    (re_export masc_mcp.gate)
+   (re_export masc_mcp.ide)
    (re_export masc_mcp.masc_backend)
    (re_export masc_mcp.masc_compression)
    (re_export masc_mcp.mcp_session)

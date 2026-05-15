@@ -163,6 +163,7 @@
   ;; keeper_memory sub-modules
   keeper_memory_policy
   keeper_memory_bank
+  keeper_memory_llm_summary
   keeper_memory_recall
   keeper_status_bridge
   autoresearch_codegen
@@ -276,6 +277,12 @@
    ;; root-namespace cycles (Proof_artifact_reader, Bounded, Session,
    ;; Attribution, Violation_record) are resolved.
    masc_mcp.cdal
+   ;; RFC-0056 Phase 1A — Trajectory leaf module promoted out of flat
+   ;; masc_mcp namespace. Unblocks Wave A keeper/server godfile extractions
+   ;; (PR-1+) by removing the parent ↔ sub-lib cycle on `Trajectory.X`.
+   ;; (wrapped false) preserves the bare `Trajectory` identifier; only
+   ;; wrapped-pattern callers (Masc_mcp.Trajectory.X in tests) drop prefix.
+   masc_mcp.trajectory
    ;; RFC-0058 Phase 1 — Declarative cascade TOML config. Separate sub-library
    ;; to avoid type name collisions (transport, provider, binding, tier, strategy)
    ;; with identically-named types in the main library.

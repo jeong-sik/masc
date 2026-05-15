@@ -5,7 +5,8 @@
     in-memory compaction on read: deleted annotations are filtered out
     and the file is rewritten when the tombstone ratio exceeds a threshold.
 
-    Thread-safety is provided by {!Dated_jsonl} mutex per [base_dir]. *)
+    Tombstoned rows are compacted back into the same JSONL file when the
+    tombstone ratio exceeds the threshold. *)
 
 open Ide_annotation_types
 
@@ -27,6 +28,14 @@ val create
   -> content:string
   -> ?goal_id:string
   -> ?task_id:string
+  -> ?board_post_id:string
+  -> ?comment_id:string
+  -> ?pr_id:string
+  -> ?git_ref:string
+  -> ?log_id:string
+  -> ?session_id:string
+  -> ?operation_id:string
+  -> ?worker_run_id:string
   -> unit
   -> (annotation, string) result
 

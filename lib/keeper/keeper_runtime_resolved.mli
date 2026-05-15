@@ -54,7 +54,7 @@ val stream_idle_timeout_for_total_timeout : total_timeout_s:float -> float
 
 (** CLI subprocess stdout-idle timeout, read fresh per turn from
     [MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC] and clamped to [10, 600].
-    Default 120 s. Honoured by [Kimi_cli_transport_local]; other CLI
+    Default 120 s. Honoured by [Json_stream_cli_transport_local]; other CLI
     transports require an OAS upstream change to expose
     [stdout_idle_timeout_s]. *)
 val cli_subprocess_idle_sec : unit -> float

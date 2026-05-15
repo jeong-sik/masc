@@ -29,6 +29,14 @@ export interface CreateAnnotationInput {
   readonly content: string
   readonly goal_id?: string
   readonly task_id?: string
+  readonly board_post_id?: string
+  readonly comment_id?: string
+  readonly pr_id?: string
+  readonly git_ref?: string
+  readonly log_id?: string
+  readonly session_id?: string
+  readonly operation_id?: string
+  readonly worker_run_id?: string
 }
 
 function appendFilterParams(

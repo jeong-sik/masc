@@ -41,6 +41,10 @@ let get_or_create_store ~base_path : Dated_jsonl.t =
 (* ── Serialization ──────────────────────────────────── *)
 
 let provider_info_to_json (info : H.provider_info) : Yojson.Safe.t =
+  let opt_float = function
+    | Some v when Float.is_finite v -> `Float v
+    | _ -> `Null
+  in
   let fingerprints =
     `List
       (List.map
@@ -67,6 +71,14 @@ let provider_info_to_json (info : H.provider_info) : Yojson.Safe.t =
     ; ("cooldown_expires_at", cooldown_expires_at)
     ; ("events_in_window", `Int info.events_in_window)
     ; ("rejected_in_window", `Int info.rejected_in_window)
+    ; ("p50_latency_ms", opt_float info.p50_latency_ms)
+    ; ("p95_latency_ms", opt_float info.p95_latency_ms)
+    ; ("latency_samples", `Int info.latency_samples)
+    ; ("avg_confidence", opt_float info.avg_confidence)
+    ; ("confidence_samples", `Int info.confidence_samples)
+    ; ("avg_cost_usd", opt_float info.avg_cost_usd)
+    ; ("cost_samples", `Int info.cost_samples)
+    ; ("health_score", `Float info.health_score)
     ; ("top_fingerprints", fingerprints)
     ; ("last_failure_at", last_failure_at)
     ]
@@ -119,6 +131,9 @@ let restore_provider_of_json json =
         ; restore_cooldown_until
         ; restore_last_failure_at
         ; restore_top_fingerprints
+        ; restore_latency_ms = json |> member "p50_latency_ms" |> float_opt
+        ; restore_confidence = json |> member "avg_confidence" |> float_opt
+        ; restore_cost_usd = json |> member "avg_cost_usd" |> float_opt
         }
   | _ -> None
 

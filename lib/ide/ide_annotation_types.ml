@@ -42,6 +42,14 @@ type annotation =
   ; content : string
   ; goal_id : string option
   ; task_id : string option
+  ; board_post_id : string option
+  ; comment_id : string option
+  ; pr_id : string option
+  ; git_ref : string option
+  ; log_id : string option
+  ; session_id : string option
+  ; operation_id : string option
+  ; worker_run_id : string option
   ; created_at_ms : int64
   ; updated_at_ms : int64
   }
@@ -71,6 +79,11 @@ type annotation_filter =
   ; task_id : string option
   }
 
+let string_opt_to_json = function
+  | None -> `Null
+  | Some s -> `String s
+;;
+
 let annotation_to_json (a : annotation) : Yojson.Safe.t =
   `Assoc
     [ "id", `String a.id
@@ -80,14 +93,16 @@ let annotation_to_json (a : annotation) : Yojson.Safe.t =
     ; "keeper_id", `String a.keeper_id
     ; "kind", `String (annotation_kind_to_string a.kind)
     ; "content", `String a.content
-    ; ( "goal_id"
-      , match a.goal_id with
-        | None -> `Null
-        | Some g -> `String g )
-    ; ( "task_id"
-      , match a.task_id with
-        | None -> `Null
-        | Some t -> `String t )
+    ; "goal_id", string_opt_to_json a.goal_id
+    ; "task_id", string_opt_to_json a.task_id
+    ; "board_post_id", string_opt_to_json a.board_post_id
+    ; "comment_id", string_opt_to_json a.comment_id
+    ; "pr_id", string_opt_to_json a.pr_id
+    ; "git_ref", string_opt_to_json a.git_ref
+    ; "log_id", string_opt_to_json a.log_id
+    ; "session_id", string_opt_to_json a.session_id
+    ; "operation_id", string_opt_to_json a.operation_id
+    ; "worker_run_id", string_opt_to_json a.worker_run_id
     ; "created_at_ms", `Intlit (Int64.to_string a.created_at_ms)
     ; "updated_at_ms", `Intlit (Int64.to_string a.updated_at_ms)
     ]
@@ -138,6 +153,14 @@ let annotation_of_json (json : Yojson.Safe.t) : (annotation, string) result =
       ; content = find_string "content" ""
       ; goal_id = find_opt_string "goal_id"
       ; task_id = find_opt_string "task_id"
+      ; board_post_id = find_opt_string "board_post_id"
+      ; comment_id = find_opt_string "comment_id"
+      ; pr_id = find_opt_string "pr_id"
+      ; git_ref = find_opt_string "git_ref"
+      ; log_id = find_opt_string "log_id"
+      ; session_id = find_opt_string "session_id"
+      ; operation_id = find_opt_string "operation_id"
+      ; worker_run_id = find_opt_string "worker_run_id"
       ; created_at_ms = find_int64 "created_at_ms" 0L
       ; updated_at_ms = find_int64 "updated_at_ms" 0L
       }

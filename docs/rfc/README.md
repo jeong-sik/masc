@@ -121,6 +121,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0079 | Log row typed encoder + silent-drop removal | Draft | 2026-05-14 | typed `Ring.entry` (level/source closed sums), `Entry_decode_error` raise, drops raw_level/normalized_level/legacy_classified/dropped_entries; supersedes #15170 |
 | 0080 | Tool registry SSOT — collapse 15-fold OR membership into typed Tool_name boundary | Draft | 2026-05-14 | 540-warn/boot split-brain (88 distinct tool names); typed `resolve` at policy load boundary |
 | 0081 | OAS Telemetry Envelope Context & Keeper/Goal Pivot Timeline | Draft | (this PR) 2026-05-14 | supersedes closed PR #15128 (RFC-0073) — emission-side carved out to RFC-OAS-019 (oas repo). Related RFC-0046, RFC-0049, RFC-0063 |
+| 0085 | Keeper namespace bulk promotion to sub-library | Draft | (this PR) 2026-05-15 | strategic successor to RFC-0056 leaf-sweep — Phase 2.A rename 38 non-prefix files + Phase 2.B `(wrapped false)` bulk promotion. Related RFC-0056, RFC-0042, RFC-0050 |
 
 ### 다음 번호
 

@@ -492,8 +492,9 @@ end
 (** {1 Tool Surface Configuration} *)
 
 module Tools = struct
-  (** Dispatch v2 feature flag. Default: true (since v2.102). *)
-  let dispatch_v2_enabled = Feature_flag_registry.get_bool "MASC_DISPATCH_V2"
+  (* RFC-0084 host-config-cleanup-J — [dispatch_v2_enabled] removed.
+     The [MASC_DISPATCH_V2] feature flag and the legacy match chain
+     it gated are gone; the Hashtbl dispatch path is the only path. *)
 
   (** Full tool surface override. Default: false.
       Re-readable within the process; callers should still document the

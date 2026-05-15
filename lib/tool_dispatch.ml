@@ -21,8 +21,9 @@ module Float = Stdlib.Float
     module-tag match. Mutable registries remain for direct-handler
     compatibility, schemas, and test/dynamic tools.
 
-    Activated by MASC_DISPATCH_V2=1; the legacy match chain is the
-    default fallback. *)
+    RFC-0084 host-config-cleanup-J removed the [MASC_DISPATCH_V2]
+    feature flag and the legacy match chain it gated.  The Hashtbl
+    dispatch path is now the only code path. *)
 
 (** Unified handler type: every tool call is [name * args -> result option].
     [None] means "this handler does not know this tool" (should not happen
@@ -171,10 +172,6 @@ let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.t option =
   in
   result
 ;;
-
-(** Feature flag: use the new dispatch path.
-    Default ON since v2.102 — use MASC_DISPATCH_V2=0 to disable. *)
-let v2_enabled = Env_config.Tools.dispatch_v2_enabled
 
 (** Number of registered tool names. *)
 let registered_count () = Hashtbl.length registry

@@ -11,23 +11,23 @@ let () =
     Repo_synthesis_benchmark.load_answers_from_file
       (answers_path repo_root "baseline_answers.json")
   in
-  let swarm_answers =
+  let oas_answers =
     Repo_synthesis_benchmark.load_answers_from_file
-      (answers_path repo_root "swarm_answers.json")
+      (answers_path repo_root "oas_answers.json")
   in
   let baseline =
     Repo_synthesis_benchmark.score_answers ~label:"baseline"
       ~questions ~answers:baseline_answers
   in
-  let swarm =
-    Repo_synthesis_benchmark.score_answers ~label:"swarm"
-      ~questions ~answers:swarm_answers
+  let oas =
+    Repo_synthesis_benchmark.score_answers ~label:"oas"
+      ~questions ~answers:oas_answers
   in
   let improved =
-    swarm.composite_score > baseline.composite_score
-    && swarm.claim_coverage > baseline.claim_coverage
-    && swarm.evidence_precision > baseline.evidence_precision
-    && swarm.unsupported_claim_penalty <= baseline.unsupported_claim_penalty
+    oas.composite_score > baseline.composite_score
+    && oas.claim_coverage > baseline.claim_coverage
+    && oas.evidence_precision > baseline.evidence_precision
+    && oas.unsupported_claim_penalty <= baseline.unsupported_claim_penalty
   in
   let summary =
     `Assoc
@@ -35,8 +35,8 @@ let () =
         ("question_set_path", `String (Repo_synthesis_benchmark.default_question_set_path ~repo_root));
         ("question_count", `Int (List.length questions));
         ("baseline", Repo_synthesis_benchmark.score_summary_to_yojson baseline);
-        ("swarm", Repo_synthesis_benchmark.score_summary_to_yojson swarm);
-        ("swarm_beats_baseline", `Bool improved);
+        ("oas", Repo_synthesis_benchmark.score_summary_to_yojson oas);
+        ("oas_beats_baseline", `Bool improved);
       ]
   in
   Yojson.Safe.pretty_to_channel stdout summary;

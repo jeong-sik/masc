@@ -64,9 +64,9 @@ val pp_error : error -> string
 (** Human-readable rendering for log lines. *)
 
 (** Module signature implemented by each concrete provider.  RFC-0008
-    §3 spelled this as [include module type of Credential_provider];
+    §3 spelled this as [include module type of Keeper_credential_provider];
     in OCaml the idiomatic equivalent is a named [module type S] that
-    callers can refer to as [Credential_provider.S]. *)
+    callers can refer to as [Keeper_credential_provider.S]. *)
 module type S = sig
   val resolve :
     config:Coord.config -> identity:string -> (binding, error) result

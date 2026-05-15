@@ -800,11 +800,11 @@ let run_docker_shell_command_with_status
              ~/.config/gh, ~/.ssh, and keychain probes are not part of
              keeper execution. *)
                       match Host_config_provider.resolve ~config ~identity:meta.name with
-                      | Error err -> Error (Credential_provider.pp_error err)
+                      | Error err -> Error (Keeper_credential_provider.pp_error err)
                       | Ok binding ->
                         let mounts =
                           List.concat_map
-                            (fun (m : Credential_provider.ro_mount) ->
+                            (fun (m : Keeper_credential_provider.ro_mount) ->
                                [ "-v"; m.host ^ ":" ^ m.container ^ ":ro" ])
                             binding.ro_mounts
                         in

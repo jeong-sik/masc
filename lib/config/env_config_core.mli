@@ -83,28 +83,13 @@ val existing_dir : string -> bool
 val existing_file : string -> bool
 val home_dir_opt : unit -> string option
 
-(** {1 Deprecation warnings + fallback getters} *)
-
-val deprecation_warned : (string, bool) Hashtbl.t
-(** Internal once-per-key cache for {!warn_deprecated}.  Exposed
-    only because the cascade chain re-exports the prelude verbatim. *)
-
-val warn_deprecated : old_name:string -> new_name:string -> unit
-
-val deprecated_opt :
-  old_name:string -> new_name:string -> string option
-
-val resolve_deprecated :
-  primary:string -> deprecated:string -> string option
-
-val get_float_deprecated :
-  default:float -> primary:string -> deprecated:string -> float
-
-val get_int_deprecated :
-  default:int -> primary:string -> deprecated:string -> int
-
-val get_bool_deprecated :
-  default:bool -> primary:string -> deprecated:string -> bool
+(* RFC-0085 PR-11 — Env var deprecation mechanism removed (7 entries:
+   deprecation_warned, warn_deprecated, deprecated_opt,
+   resolve_deprecated, get_float_deprecated, get_int_deprecated,
+   get_bool_deprecated).  Sole caller (keeper_turn_slot's
+   MASC_KEEPER_AUTOBOT_MAX typo fallback) is gone.  Future env
+   migrations should pick a single name and stick with it; soft
+   fallbacks accumulate via the workaround pattern from RFC-0084. *)
 
 (** {1 HTTP host + port (SSOT for issue 8352)} *)
 

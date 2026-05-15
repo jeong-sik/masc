@@ -46,9 +46,13 @@ type semaphore_wait_timeout =
   ; timeout_holders : (string * float) list
   }
 
-let int_of_env_default_with_deprecated ~primary ~deprecated ~default ~min_v ~max_v =
-  match Env_config_core.resolve_deprecated ~primary ~deprecated with
+(* RFC-0085 PR-11 — Dropped the [~deprecated] fallback; the typo legacy
+   env MASC_KEEPER_AUTOBOT_MAX is no longer recognised. Operators
+   must set MASC_KEEPER_AUTOBOOT_MAX. *)
+let int_of_env_default ~primary ~default ~min_v ~max_v =
+  match Sys.getenv_opt primary with
   | None -> default
+  | Some raw when String.trim raw = "" -> default
   | Some raw ->
     let v = Option.value ~default (int_of_string_opt (String.trim raw)) in
     Keeper_config.clamp_int v ~min_v ~max_v
@@ -62,9 +66,8 @@ let int_of_env_default_with_deprecated ~primary ~deprecated ~default ~min_v ~max
    cap was a typo-defence boilerplate, not an architectural ceiling, and
    forced operator raise-cycles every time the fleet grew. Removed. *)
 let keeper_turn_throttle_limit =
-  int_of_env_default_with_deprecated
+  int_of_env_default
     ~primary:"MASC_KEEPER_AUTOBOOT_MAX"
-    ~deprecated:"MASC_KEEPER_AUTOBOT_MAX"
     ~default:32
     ~min_v:1
     ~max_v:max_int

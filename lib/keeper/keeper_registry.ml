@@ -53,12 +53,6 @@ let decr_running_count_clamped () =
 
     Pattern follows #7011 (executor_pool) and #7013 (runtime_state). *)
 
-let registry_key ~base_path name =
-  if String.contains name '\x1f'
-  then invalid_arg (Printf.sprintf "keeper name contains unit separator: %s" name);
-  base_path ^ "\x1f" ^ name
-;;
-
 let put_entry key entry =
   let rec loop () =
     let current = Atomic.get registry in
@@ -514,15 +508,6 @@ let set_last_correlation_id ~base_path name cid =
   update_entry ~base_path name (fun e -> { e with last_event_bus_correlation = Some cid })
 ;;
 
-let turn_phase_of_cascade_state (s : packed_cascade_state) : packed_turn_phase =
-  match s with
-  | Packed Cascade_idle -> Packed Turn_prompting
-  | Packed Cascade_selecting -> Packed Turn_routing
-  | Packed Cascade_trying -> Packed Turn_executing
-  | Packed Cascade_done -> Packed Turn_finalizing
-  | Packed Cascade_exhausted -> Packed Turn_exhausted
-;;
-
 let broadcast_composite_changed ~name ~ts_unix =
   try
     let json =
@@ -565,25 +550,6 @@ let record_phase_broadcast_failure ~name exn =
     "registry: keeper_phase_changed broadcast failed name=%s err=%s"
     name
     (Printexc.to_string exn)
-;;
-
-let completed_turn_outcome_of_observation (obs : turn_observation)
-  : Keeper_transition_audit.completed_turn_outcome
-  =
-  (* P1 silent-failure fix: the previous wildcard `| _ -> Turn_failed`
-     meant that adding a new variant to either ADT (decision_stage or
-     cascade_state) would silently fall through to Turn_failed without
-     a compile error.  Spelling out every variant lets the OCaml
-     exhaustiveness checker catch missing cases at build time. *)
-  match obs.decision_stage with
-  | Packed Decision_gate_rejected -> Keeper_transition_audit.Turn_gate_rejected
-  | Packed (Decision_undecided | Decision_guard_ok | Decision_tool_policy_selected) ->
-    (match obs.cascade_state with
-     | Packed Cascade_done -> Keeper_transition_audit.Turn_substantive
-     | Packed Cascade_idle
-     | Packed Cascade_selecting
-     | Packed Cascade_trying
-     | Packed Cascade_exhausted -> Keeper_transition_audit.Turn_failed)
 ;;
 
 let update_current_turn e f =

@@ -27,7 +27,7 @@
 open Alcotest
 
 module CP = Masc_mcp.Credential_provider
-module HCP = Masc_mcp.Host_config_provider
+module HCP = Host_config_provider
 module KGE = Masc_mcp.Keeper_gh_env
 open Repo_manager_types
 

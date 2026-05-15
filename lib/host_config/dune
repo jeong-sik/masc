@@ -1,0 +1,20 @@
+; RFC-0056 Phase 1C — extract Host_config leaf module from flat
+; masc_mcp namespace. Stacked on Phase 1B (keeper_skill_routing).
+;
+; Host_config is dependency-leaf: stdlib (Filename, Format, String,
+; Sys, Unix) + Coord (already its own sub-library). Authored under
+; RFC-0084 §1.5 + §3.4 as the typed host configuration record for
+; keeper-tool dispatch portability.
+;
+; (include_subdirs no) opts out of parent's (include_subdirs unqualified).
+; (wrapped false) keeps the top-level identifier `Host_config` unchanged.
+(include_subdirs no)
+
+(library
+ (name masc_mcp_host_config)
+ (public_name masc_mcp.host_config)
+ (wrapped false)
+ (flags (:standard -w +4))
+ (libraries
+  unix
+  masc_mcp.masc_coord))

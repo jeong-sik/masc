@@ -1478,7 +1478,7 @@
 ; legacy_macos_default field values matching the 11 hardcode sites,
 ; is_test_mode typed semantics (Test/Production), resolve ~base_path
 ; relative roots, and hardcode site inventory count (11). Requires
-; masc_test_deps because it accesses Masc_mcp.Host_config.* directly.
+; masc_test_deps because it accesses Host_config.* directly.
 (test
  (name test_host_config_resolution)
  (modules test_host_config_resolution)

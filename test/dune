@@ -1465,3 +1465,13 @@
  (name test_dispatch_outcome_total)
  (modules test_dispatch_outcome_total)
  (libraries masc_test_deps))
+
+; RFC-0084 PR-11 — Legacy dispatch entry surface removal pin.
+; Constants-only: pins external caller count = 0 for both removed mli
+; entries (Tool_dispatch.dispatch and Tool_dispatch.dispatch_structured).
+; PR-14 CI lint script converts these pins into a build-time check
+; (ci/lint-no-direct-dispatch.sh).
+(test
+ (name test_dispatch_legacy_removed)
+ (modules test_dispatch_legacy_removed)
+ (libraries alcotest))

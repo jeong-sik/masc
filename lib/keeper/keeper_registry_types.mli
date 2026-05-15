@@ -635,3 +635,22 @@ val turn_phase_of_cascade_state :
     Pure function, no state access. *)
 val completed_turn_outcome_of_observation :
   turn_observation -> Keeper_transition_audit.completed_turn_outcome
+
+(** Dispatch origin for paired post-turn lifecycle events.
+
+    [Compaction_started]/[Compaction_completed]/[Compaction_failed] and
+    [Handoff_started]/[Handoff_completed]/[Handoff_failed] are same-turn
+    lifecycle pairs. The registry rejects them from [Generic_dispatch] so
+    keepalive/guard/manual callers cannot emit half of a pair outside the
+    owner path. *)
+type lifecycle_event_origin =
+  | Generic_dispatch
+  | Post_turn_lifecycle
+  | Operator_compact
+
+(** Pure converter for diagnostic / log labels. *)
+val lifecycle_event_origin_to_string : lifecycle_event_origin -> string
+
+(** Internal: predicate over [Keeper_state_machine.event] identifying the
+    compaction- and handoff-pair half-events. *)
+val is_paired_lifecycle_event : Keeper_state_machine.event -> bool

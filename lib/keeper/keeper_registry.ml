@@ -1448,27 +1448,6 @@ let restore_tool_usage ~base_path name =
 
 (* ── RFC-0002 Event Dispatch ───────────────────────────── *)
 
-type lifecycle_event_origin =
-  | Generic_dispatch
-  | Post_turn_lifecycle
-  | Operator_compact
-
-let lifecycle_event_origin_to_string = function
-  | Generic_dispatch -> "generic_dispatch"
-  | Post_turn_lifecycle -> "post_turn_lifecycle"
-  | Operator_compact -> "operator_compact"
-;;
-
-let is_paired_lifecycle_event = function
-  | Keeper_state_machine.Compaction_started
-  | Keeper_state_machine.Compaction_completed _
-  | Keeper_state_machine.Compaction_failed _
-  | Keeper_state_machine.Handoff_started
-  | Keeper_state_machine.Handoff_completed _
-  | Keeper_state_machine.Handoff_failed _ -> true
-  | _ -> false
-;;
-
 let origin_allows_paired_lifecycle_event origin event =
   match origin, event with
   | Post_turn_lifecycle, event when is_paired_lifecycle_event event -> true

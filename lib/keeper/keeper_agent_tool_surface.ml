@@ -402,6 +402,9 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
   else if has_turn_affordance Task_audit turn_affordances
           && progress_tool_available "keeper_tasks_audit"
   then Agent_sdk.Types.Tool "keeper_tasks_audit"
+  else if has_turn_affordance Task_verify turn_affordances
+          && progress_tool_available "masc_transition"
+  then Agent_sdk.Types.Any
   else if has_current_task
           && has_turn_affordance Task_verify turn_affordances
           && progress_tool_available "keeper_task_submit_for_verification"
@@ -464,17 +467,22 @@ let preferred_tool_choice_for_required_tool_names
     required_tool_names
     |> List.filter_map (fun name ->
       let canonical = Keeper_tool_disclosure.canonical_tool_name name in
-      if List.mem canonical allowed_tool_names then Some canonical
-      else if List.mem name allowed_tool_names then Some name
+      if List.mem canonical allowed_tool_names then Some (canonical, canonical)
+      else if List.mem name allowed_tool_names then Some (canonical, name)
       else (
         match Keeper_tool_alias.public_name_for_internal canonical with
-        | Some public when List.mem public allowed_tool_names -> Some public
+        | Some public when List.mem public allowed_tool_names ->
+          Some (canonical, public)
         | _ -> None))
     |> Keeper_types.dedupe_keep_order
   in
   match visible_required with
-  | [ name ] when
-      not (Keeper_tool_disclosure.tool_name_can_satisfy_required_contract name) ->
+  | [ canonical, name ]
+    when not
+           (Keeper_tool_disclosure.tool_name_can_satisfy_required_contract
+              canonical
+            || Keeper_tool_disclosure.tool_name_can_satisfy_required_contract name)
+    ->
     (* Passive/read-only tools do not suffer the mutating-tool raw-name
        satisfaction ambiguity described below. When an operator explicitly
        requires one passive tool, exact tool_choice keeps the model from

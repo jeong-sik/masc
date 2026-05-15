@@ -10502,6 +10502,11 @@ let test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool () =
     (gate ~tools:[ "keeper_task_submit_for_verification" ] [ "task_verify" ]);
   check
     bool
+    "task_verify with lifecycle transition tool -> gate fires"
+    true
+    (gate ~tools:[ "masc_transition" ] [ "task_verify" ]);
+  check
+    bool
     "timer-only work_discovery does not hard-gate even with progress tools"
     false
     (gate ~tools:[ "keeper_board_post"; "keeper_task_create" ] [ "work_discovery" ]);
@@ -10851,7 +10856,19 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
    | other ->
      fail
        (Printf.sprintf
-          "expected Auto for idle task verify turn, got %s"
+         "expected Auto for idle task verify turn, got %s"
+          (Agent_sdk.Types.show_tool_choice other)));
+  (match
+     choose
+       ~turn_affordances:[ "task_verify" ]
+       ~allowed_tool_names:[ "keeper_tasks_list"; "masc_transition" ]
+       ()
+   with
+   | Agent_sdk.Types.Any -> ()
+   | other ->
+     fail
+       (Printf.sprintf
+          "expected Any for idle verifier task_verify turn with masc_transition, got %s"
           (Agent_sdk.Types.show_tool_choice other)));
   (match
      choose

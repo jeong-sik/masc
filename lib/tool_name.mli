@@ -204,9 +204,13 @@ module Masc_keeper : sig
     | Down
     | List
     | Msg
+    | Msg_result
     | Persona_audit
     | Repair
     | Reset
+    | Sandbox_start
+    | Sandbox_status
+    | Sandbox_stop
     | Status
     | Up
 

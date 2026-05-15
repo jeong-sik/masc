@@ -191,7 +191,6 @@
   tool_inline_dispatch_comm
   ;; tool_schema_dsl — shared JSON Schema builder (added by #3640)
   tool_schema_dsl
-  tool_catalog_surfaces
   tool_misc_transport
   tool_misc_admin
   enforcement_status
@@ -328,6 +327,10 @@
    ;; extracted to lib/compaction_trigger/. 94+45 LoC, deps: stdlib +
    ;; Yojson + masc_log. Compaction trigger heuristic + JSON serializer.
    masc_mcp.compaction_trigger
+   ;; RFC-0086 Phase 2.B prereq — Tool_catalog_surfaces (lib/ root, 554+103 LoC)
+   ;; extracted to lib/tool_catalog_surfaces/. deps: Agent_sdk + stdlib only.
+   ;; Unblocks one of 6 cycle modules identified in plan §8.14 iter-2.
+   masc_mcp.tool_catalog_surfaces
    ;; RFC-0058 Phase 1 — Declarative cascade TOML config. Separate sub-library
    ;; to avoid type name collisions (transport, provider, binding, tier, strategy)
    ;; with identically-named types in the main library.

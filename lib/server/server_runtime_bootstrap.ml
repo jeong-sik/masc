@@ -1674,10 +1674,10 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
                 [
                   ( "snapshot",
                     Server_dashboard_http.cached_surface_json
-                      Server_dashboard_http._operator_snapshot_cache );
+                      Server_dashboard_http.operator_snapshot_cache );
                   ( "digest",
                     Server_dashboard_http.cached_surface_json
-                      Server_dashboard_http._operator_digest_cache );
+                      Server_dashboard_http.operator_digest_cache );
                 ])
         | "transport" ->
             Some (Server_dashboard_http.dashboard_transport_health_snapshot_json ())
@@ -1822,7 +1822,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       (* Pre-warm shell cache in a separate fiber so it cannot block
          lazy startup tasks or later keeper loop startup
          (#keeper-bootstrap-stuck). *)
-      Atomic.set Server_dashboard_http._shell_warming true;
+      Atomic.set Server_dashboard_http.shell_warming true;
       Eio.Fiber.fork ~sw (fun () ->
         let outer_timeout_sec =
           Env_config_runtime.Dashboard.shell_prewarm_outer_timeout_sec

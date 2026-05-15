@@ -95,7 +95,7 @@ let warm_meta_cognition_summary (config : Lib.Coord.config) =
     (Printf.sprintf "shell:coord=%s:" config.base_path)
 
 let with_execution_cache json f =
-  let surface = Lib.Server_dashboard_http._execution_cache in
+  let surface = Lib.Server_dashboard_http.execution_cache in
   let original_json = surface.json in
   let original_last_success_at = surface.last_success_at in
   let original_last_success_unix = surface.last_success_unix in
@@ -404,8 +404,8 @@ let test_dashboard_shell_includes_meta_cognition_summary () =
             ~created_at:1010.0 ();
         ];
       Lib.Dashboard_cache.invalidate_all ();
-      Atomic.set Lib.Server_dashboard_http._shell_warmed false;
-      Atomic.set Lib.Server_dashboard_http._last_good_shell (`Assoc []);
+      Atomic.set Lib.Server_dashboard_http.shell_warmed false;
+      Atomic.set Lib.Server_dashboard_http.last_good_shell (`Assoc []);
       let cold_json = Lib.Server_dashboard_http.dashboard_shell_http_json config in
       let open Yojson.Safe.Util in
       check bool "cold shell defers meta cognition while warming" true
@@ -937,7 +937,7 @@ let test_patch_keeper_dependent_caches_tolerates_null_agent () =
       ~keeper_name:"sangsu" ~event:"started";
     let open Yojson.Safe.Util in
     let keepers =
-      Lib.Server_dashboard_http._execution_cache.json
+      Lib.Server_dashboard_http.execution_cache.json
       |> member "keepers" |> to_list
     in
     let row = List.hd keepers in

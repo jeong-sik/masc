@@ -10496,7 +10496,7 @@ let test_tools_for_gated_affordance_covers_each_variant () =
   let module Surface = Masc_mcp.Keeper_agent_tool_surface in
   let known_tool_name name =
     Masc_mcp.Tool_name.of_string name <> None
-    || Masc_mcp.Tool_catalog_surfaces.surfaces_for_tool name <> []
+    || Tool_catalog_surfaces.surfaces_for_tool name <> []
   in
   let nonempty label affordance =
     let tools = Surface.tools_for_gated_affordance affordance in

@@ -1,0 +1,14 @@
+; RFC-0086 Phase 2.B prereq — extract tool_catalog_surfaces from flat
+; masc_mcp namespace. lib/keeper/ bulk promotion (PR-2E) was blocked on
+; this module being parent-masc_mcp resident; extracting it unbreaks one
+; of 6 cycle modules identified in plan §8.14 iter-2.
+;
+; Deps: Agent_sdk (external) + stdlib only — clean leaf, matches
+; PR-0c/0d/0e leaf precedent.
+(include_subdirs no)
+
+(library
+ (name masc_mcp_tool_catalog_surfaces)
+ (public_name masc_mcp.tool_catalog_surfaces)
+ (wrapped false)
+ (libraries agent_sdk))

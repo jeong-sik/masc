@@ -11,9 +11,9 @@ open Server_dashboard_http_core
 let shell_prewarm_timeout_s = Env_config_runtime.Dashboard.shell_prewarm_inner_timeout_sec
 
 let warm_shell_cache (state : Mcp_server.server_state) =
-  Atomic.set _shell_warming true;
+  Atomic.set shell_warming true;
   Eio_guard.protect
-    ~finally:(fun () -> Atomic.set _shell_warming false)
+    ~finally:(fun () -> Atomic.set shell_warming false)
     (fun () ->
        let t0 = Time_compat.now () in
        try
@@ -36,8 +36,8 @@ let warm_shell_cache (state : Mcp_server.server_state) =
              "shell cache pre-warm timed out during compute (%.0fs)"
              shell_prewarm_timeout_s
          else (
-           Atomic.set _shell_warmed true;
-           Atomic.set _last_good_shell result;
+           Atomic.set shell_warmed true;
+           Atomic.set last_good_shell result;
            Log.Dashboard.info
              "shell cache pre-warmed (%.1fms)"
              ((Time_compat.now () -. t0) *. 1000.0))
@@ -90,12 +90,12 @@ let execution_actor_for_request ~base_path request =
 
 (* Wire operator broadcast refs now that Sse is in scope. *)
 let () =
-  _operator_snapshot_broadcast_ref
+  operator_snapshot_broadcast_ref
   := broadcast_cached_surface ~event_type:"operator_snapshot"
 ;;
 
 let () =
-  _operator_digest_broadcast_ref := broadcast_cached_surface ~event_type:"operator_digest"
+  operator_digest_broadcast_ref := broadcast_cached_surface ~event_type:"operator_digest"
 ;;
 
 let execution_cache =
@@ -519,7 +519,7 @@ let patchexecution_cache_for_keeper ~keeper_name ~event ~keepalive_running =
 ;;
 
 let patch_operator_snapshot_cache_for_keeper ~keeper_name ~event ~keepalive_running =
-  match _operator_snapshot_cache.json with
+  match operator_snapshot_cache.json with
   | `Assoc fields ->
     (match List.assoc_opt "keepers" fields with
      | Some (`Assoc keeper_fields) ->
@@ -531,7 +531,7 @@ let patch_operator_snapshot_cache_for_keeper ~keeper_name ~event ~keepalive_runn
               (`List (patch_keeper_rows ~keeper_name ~event ~keepalive_running rows))
               keeper_fields
           in
-          _operator_snapshot_cache.json
+          operator_snapshot_cache.json
           <- `Assoc (upsert_assoc_field "keepers" (`Assoc keeper_fields) fields)
         | Some _ -> ()
         | None -> ())

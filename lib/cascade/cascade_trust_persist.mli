@@ -12,8 +12,9 @@
 
     Companion to Phase 0a observability (PR #10292) — fingerprint counter
     in {!Cascade_health_tracker} captures the *what*, this module
-    captures the *over time*.  Phase 1 (in-memory trust_score) consumes
-    these snapshots offline to calibrate reward / decay defaults.
+    captures the *over time*.  Hydration restores durable cooldown/failure
+    state plus the latest bounded routing hints, so cascade selection does
+    not restart with a cold latency/cost view after a process restart.
 
     Best-effort: I/O failures are logged but never propagated.
 
@@ -29,9 +30,9 @@ val snapshot_now : base_path:string -> unit
     Used by the tick fiber and shutdown hook. *)
 
 val hydrate_latest : base_path:string -> int
-(** Restore provider cooldown/failure state from the latest JSONL snapshot.
-    Returns the number of provider rows applied. Best-effort: malformed or
-    missing snapshots return [0]. *)
+(** Restore provider cooldown/failure state and routing hints from the latest
+    JSONL snapshot.  Returns the number of provider rows applied. Best-effort:
+    malformed or missing snapshots return [0]. *)
 
 val start_snapshot_fiber :
   sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> base_path:string -> unit

@@ -274,6 +274,9 @@ let run_named
       ~label:cascade_name
       candidate_cfgs
   in
+  let configured_label_count = List.length configured_labels in
+  let original_candidate_count = List.length original_candidate_cfgs in
+  let tool_filtered_candidate_count = List.length tool_filtered_candidate_cfgs in
   let candidates =
     tool_filtered_candidate_cfgs
     |> Cascade_runtime_candidate.of_provider_configs
@@ -287,15 +290,8 @@ let run_named
                   cascade_name runtime_candidate_label runtime_candidate_label msg;
                 false)
   in
+  let health_filtered_candidate_count = List.length candidates in
   let provider_attempt_provenance = base_provider_attempt_provenance in
-  if candidates = [] then
-    Log.Misc.error
-      "cascade %s: no callable models available in declared cascade — \
-       candidate_count=%d require_tool_choice_support=%b require_tool_support=%b"
-      cascade_name
-      (List.length configured_labels)
-      require_tool_choice_support
-      require_tool_support;
   match candidates with
   | [] ->
       let required_tool_names =
@@ -307,14 +303,39 @@ let run_named
           ~require_tool_choice_support ~require_tool_support
           original_candidates
       in
+      let empty_candidate_classification =
+        classify_empty_candidates
+          ~require_tool_choice_support
+          ~require_tool_support
+          ~original_candidate_count
+          ~tool_filtered_candidate_count
+      in
+      let classification_code =
+        empty_candidate_classification_code empty_candidate_classification
+      in
+      let exhaustion_summary =
+        match empty_candidate_classification with
+        | Tool_capability_empty ->
+          "no tool-capable providers after capability filter"
+        | Provider_unavailable ->
+          "providers unavailable after health/cooldown filter"
+      in
+      Log.Misc.error
+        "cascade %s: %s; classification=%s configured_label_count=%d \
+         original_candidate_count=%d tool_filtered_candidate_count=%d \
+         health_filtered_candidate_count=%d require_tool_choice_support=%b \
+         require_tool_support=%b"
+        cascade_name
+        exhaustion_summary
+        classification_code
+        configured_label_count
+        original_candidate_count
+        tool_filtered_candidate_count
+        health_filtered_candidate_count
+        require_tool_choice_support
+        require_tool_support;
       let internal_error =
-        match
-          classify_empty_candidates
-            ~require_tool_choice_support
-            ~require_tool_support
-            ~tool_filtered_candidate_count:
-              (List.length tool_filtered_candidate_cfgs)
-        with
+        match empty_candidate_classification with
         | Tool_capability_empty ->
           No_tool_capable_provider
             {
@@ -352,10 +373,14 @@ let run_named
                         (List.map
                            (fun tool_name -> `String tool_name)
                            required_tool_names) );
-                    ("candidate_count", `Int (List.length original_candidate_cfgs));
+                    ( "empty_candidate_classification",
+                      `String classification_code );
+                    ("configured_label_count", `Int configured_label_count);
+                    ("candidate_count", `Int original_candidate_count);
                     ( "tool_filtered_candidate_count",
-                      `Int (List.length tool_filtered_candidate_cfgs) );
-                    ("health_filtered_candidate_count", `Int (List.length candidates));
+                      `Int tool_filtered_candidate_count );
+                    ( "health_filtered_candidate_count",
+                      `Int health_filtered_candidate_count );
                     ( "rejected_candidate_count",
                       `Int (List.length provider_rejections) );
                     ( "rejection_reasons",

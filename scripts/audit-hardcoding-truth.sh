@@ -90,10 +90,12 @@ print_matches \
   lib/keeper/keeper_agent_run.ml \
   'tool_required_affordances|String\.starts_with|String\.equal[[:space:]]+[a-zA-Z_]+[[:space:]]+"(keeper|masc)_[^"]+"|List\.mem[[:space:]]+[a-zA-Z_]+[[:space:]]+turn_affordances'
 
-print_matches \
-  "provider adapter still has model-label/provider heuristics" \
-  lib/provider_adapter.ml \
-  'prefix_classification_vocabulary|bare_heuristic|is_kimi_model_id|is_moonshot_base_url|String\.starts_with|List\.mem[[:space:]]+provider[[:space:]]+\['
+if [ -e lib/provider_adapter.ml ] || [ -e lib/provider_adapter.mli ]; then
+  mark_confirmed "legacy Provider_adapter implementation files still exist"
+  ls -1 lib/provider_adapter.ml lib/provider_adapter.mli 2>/dev/null || true
+else
+  echo "PASS: legacy Provider_adapter implementation files are absent."
+fi
 
 section "Anti-Fake Detector"
 anti_fake_output=""

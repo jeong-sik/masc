@@ -1,5 +1,5 @@
-(* #10049: auto-construct Claude Code / Kimi CLI MCP config JSON when
-   OAS_CLAUDE_MCP_CONFIG env is unset. Gated behind
+(* #10049: auto-construct CLI MCP config JSON when OAS_CLAUDE_MCP_CONFIG env is
+   unset. Gated behind
    MASC_AUTO_CONSTRUCT_CLAUDE_MCP (default true since #10059 validation;
    set to "false" to opt out). *)
 

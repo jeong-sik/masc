@@ -92,12 +92,17 @@ type empty_candidate_classification =
   | Provider_unavailable
 
 let classify_empty_candidates ~require_tool_choice_support ~require_tool_support
-    ~tool_filtered_candidate_count =
+    ~original_candidate_count ~tool_filtered_candidate_count =
   if
     (require_tool_choice_support || require_tool_support)
+    && original_candidate_count > 0
     && tool_filtered_candidate_count = 0
   then Tool_capability_empty
   else Provider_unavailable
+
+let empty_candidate_classification_code = function
+  | Tool_capability_empty -> "tool_capability_empty"
+  | Provider_unavailable -> "provider_unavailable"
 
 let provider_rejections_for_no_tool_error
     ~keeper_name ?runtime_mcp_policy ~tools

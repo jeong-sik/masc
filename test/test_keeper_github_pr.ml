@@ -246,6 +246,20 @@ let test_pr_list_argv_uses_repo_state_limit_json () =
     ]
     (K.For_testing.build_pr_list_argv ~repo:"owner/repo" ~state:"open" ~limit:20)
 
+let test_effective_repo_arg_expands_current_project_name () =
+  setup_docker_pr_tool @@ fun ~config ~meta:_ ->
+  match K.For_testing.effective_repo_arg ~config "masc-mcp" with
+  | Ok repo -> check string "expanded repo" "jeong-sik/masc-mcp" repo
+  | Error reason -> Alcotest.fail reason
+
+let test_effective_repo_arg_rejects_ambiguous_bare_repo () =
+  setup_docker_pr_tool @@ fun ~config ~meta:_ ->
+  match K.For_testing.effective_repo_arg ~config "not-this-repo" with
+  | Ok repo -> Alcotest.failf "unexpected repo: %s" repo
+  | Error reason ->
+      check bool "mentions current project slug" true
+        (contains_substring reason "jeong-sik/masc-mcp")
+
 let test_pr_status_argv_accepts_number () =
   let argv =
     K.For_testing.build_pr_status_argv ~repo:"owner/repo" ~pr_number:42
@@ -485,6 +499,10 @@ let () =
         [
           test_case "pr list argv" `Quick
             test_pr_list_argv_uses_repo_state_limit_json;
+          test_case "bare repo expands to current project slug" `Quick
+            test_effective_repo_arg_expands_current_project_name;
+          test_case "ambiguous bare repo rejects before gh" `Quick
+            test_effective_repo_arg_rejects_ambiguous_bare_repo;
           test_case "pr status argv" `Quick
             test_pr_status_argv_accepts_number;
           test_case "pr create argv is draft" `Quick

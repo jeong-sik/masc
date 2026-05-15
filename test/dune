@@ -1704,3 +1704,11 @@
  (name test_rfc_0085_pr8_config_dir_resolver_host_config)
  (modules test_rfc_0085_pr8_config_dir_resolver_host_config)
  (libraries alcotest ast_grep))
+
+; RFC-0085 PR-12 — Tool_spec list bindings renamed (drop misleading
+; _ prefix that signalled "unused" in OCaml but was wrong because the
+; bindings are actively used by List.mem in the Tool_spec.register loop).
+(test
+ (name test_rfc_0085_pr12_tool_spec_rename)
+ (modules test_rfc_0085_pr12_tool_spec_rename)
+ (libraries alcotest ast_grep))

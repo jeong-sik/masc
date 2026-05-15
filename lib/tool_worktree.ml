@@ -142,8 +142,8 @@ let schemas = Tool_schemas_worktree.schemas
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let _tool_spec_read_only = [ "masc_worktree_list" ]
-let _tool_spec_requires_join = [ "masc_worktree_create"; "masc_worktree_remove" ]
+let tool_spec_read_only = [ "masc_worktree_list" ]
+let tool_spec_requires_join = [ "masc_worktree_create"; "masc_worktree_remove" ]
 
 let tool_required_permission = function
   | "masc_worktree_list" -> Some Masc_domain.CanReadState
@@ -161,9 +161,9 @@ let () =
            ~module_tag:Tool_dispatch.Mod_worktree
            ~input_schema:s.input_schema
            ~handler_binding:Tag_dispatch
-           ~is_read_only:(List.mem s.name _tool_spec_read_only)
-           ~is_idempotent:(List.mem s.name _tool_spec_read_only)
-           ~requires_join:(List.mem s.name _tool_spec_requires_join)
+           ~is_read_only:(List.mem s.name tool_spec_read_only)
+           ~is_idempotent:(List.mem s.name tool_spec_read_only)
+           ~requires_join:(List.mem s.name tool_spec_requires_join)
            ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

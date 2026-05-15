@@ -26,6 +26,10 @@ const TOKEN_META_STORAGE_KEY = 'masc_bearer_token_meta'
 
 type StoredTokenSource = 'dev' | 'manual' | 'url'
 
+const STORED_TOKEN_SOURCES = ['dev', 'manual', 'url'] as const
+
+const DEFAULT_STORED_TOKEN_SOURCE: StoredTokenSource = 'manual'
+
 export interface StoredTokenMeta {
   source: StoredTokenSource
   actor?: string | null
@@ -36,7 +40,7 @@ function normalizeStoredTokenMeta(value: unknown): StoredTokenMeta | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
   const record = value as Record<string, unknown>
   const source = typeof record.source === 'string' ? record.source : null
-  if (source !== 'dev' && source !== 'manual' && source !== 'url') return null
+  if (source === null || !(STORED_TOKEN_SOURCES as readonly string[]).includes(source)) return null
   const actor = sanitizeDashboardActorName(
     typeof record.actor === 'string' ? record.actor : null,
   )
@@ -44,7 +48,7 @@ function normalizeStoredTokenMeta(value: unknown): StoredTokenMeta | null {
     typeof record.scope === 'string' && record.scope.trim() !== ''
       ? record.scope.trim()
       : null
-  return { source, actor, scope }
+  return { source: source as StoredTokenSource, actor, scope }
 }
 
 function initTokenFromUrl(): void {
@@ -90,7 +94,7 @@ export function setStoredToken(
     return
   }
   const nextMeta = normalizeStoredTokenMeta({
-    source: meta.source ?? 'manual',
+    source: meta.source ?? DEFAULT_STORED_TOKEN_SOURCE,
     actor: meta.actor ?? null,
     scope: meta.scope ?? null,
   })

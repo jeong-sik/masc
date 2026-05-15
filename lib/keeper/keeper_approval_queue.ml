@@ -288,7 +288,11 @@ let rules_mu = Eio.Mutex.create ()
 let with_rules_lock f = Eio.Mutex.use_rw ~protect:true rules_mu f
 
 let rules_path ?base_path () =
-  let base_path = Option.value ~default:(Env_config_core.base_path ()) base_path in
+  let base_path =
+    match base_path with
+    | Some base_path -> base_path
+    | None -> Env_config_core.base_path ()
+  in
   Filename.concat (Coord_utils.masc_dir_from_base_path ~base_path) "approval-rules.json"
 ;;
 
@@ -519,7 +523,11 @@ let audit_today_path base_dir =
 ;;
 
 let get_audit_store ?base_path () =
-  let base = Option.value ~default:(Env_config_core.base_path ()) base_path in
+  let base =
+    match base_path with
+    | Some base -> base
+    | None -> Env_config_core.base_path ()
+  in
   try
     Eio.Mutex.use_rw ~protect:true audit_stores_mu (fun () ->
       match Hashtbl.find_opt audit_stores base with

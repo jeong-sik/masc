@@ -17,6 +17,9 @@
     - runtime_auto_approval_blocked (cascade_exhausted etc.) still gates
     - shell or git tool names still gate unless an exact routine rule
       matches the tool plus op/action
+    - High-risk code write/edit tools auto-approve only when a keeper has a
+      current task and the target resolves inside that keeper's sandbox
+      repo worktree lane
     - force_* actions still gate (classified as Critical via "force"
       pattern in {!Governance_pipeline_risk.classify_name})
 
@@ -54,6 +57,26 @@ val matches :
 (** A short label describing which rule matched. Returns [None] when
     no rule matches. Useful for audit logs and dashboard observability. *)
 val rule_label :
+  tool_name:string ->
+  input:Yojson.Safe.t ->
+  risk_level:Keeper_approval_queue.risk_level ->
+  string option
+
+(** Narrow High-risk exception for autonomous code edits.
+
+    Returns a routine label only when all of these are true:
+    - [tool_name] is a known code write/edit surface;
+    - [risk_level] is at most [High];
+    - [meta.current_task_id] is set;
+    - the target path resolves through the keeper write-path resolver;
+    - the resolved target is under [repos/.../.worktrees/...], not a root
+      checkout, runtime state file, or arbitrary sandbox file.
+
+    This is intentionally separate from the generic rule table because it is
+    path- and keeper-state-aware. *)
+val sandboxed_code_write_rule_label :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
   tool_name:string ->
   input:Yojson.Safe.t ->
   risk_level:Keeper_approval_queue.risk_level ->

@@ -387,7 +387,20 @@ let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock
          evaluated, so a routine match cannot bypass real safety
          walls — only the pattern-matching overlay. *)
       let routine_label =
-        Keeper_routine_allowlist.rule_label ~tool_name ~input ~risk_level
+        match config, meta with
+        | Some config, Some meta ->
+          (match
+             Keeper_routine_allowlist.sandboxed_code_write_rule_label
+               ~config
+               ~meta
+               ~tool_name
+               ~input
+               ~risk_level
+           with
+           | Some _ as label -> label
+           | None ->
+             Keeper_routine_allowlist.rule_label ~tool_name ~input ~risk_level)
+        | _ -> Keeper_routine_allowlist.rule_label ~tool_name ~input ~risk_level
       in
       let hard_forbidden = auto_approval_hard_forbidden ~risk meta in
       let soft_forbidden =

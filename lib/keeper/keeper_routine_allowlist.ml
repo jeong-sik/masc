@@ -56,7 +56,8 @@ type rule = {
       but listing them here would be a defense-in-depth hole);
     - shell or git tools except exact, op-backed keeper routines such as
       [keeper_shell op=git_clone];
-    - high/critical-risk tools.
+    - broad high/critical-risk tools. The path-aware sandbox worktree code
+      write exception lives below, outside this static table.
     *)
 let rules : rule list =
   [
@@ -173,6 +174,73 @@ let rule_label ~tool_name ~input ~risk_level =
   Option.map
     (fun (rule : rule) -> rule.label)
     (find_rule ~tool_name ~input ~risk_level)
+
+let known_code_write_tool tool_name =
+  match String.lowercase_ascii (String.trim tool_name) with
+  | "write"
+  | "edit"
+  | "keeper_write"
+  | "keeper_fs_edit"
+  | "masc_code_write"
+  | "masc_code_edit" -> true
+  | _ -> false
+
+let first_nonempty_string_field keys = function
+  | `Assoc fields ->
+    List.find_map
+      (fun key ->
+         match List.assoc_opt key fields with
+         | Some (`String value) ->
+           let trimmed = String.trim value in
+           if String.equal trimmed "" then None else Some trimmed
+         | _ -> None)
+      keys
+  | _ -> None
+
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len = 0
+  then true
+  else if needle_len > haystack_len
+  then false
+  else (
+    let last = haystack_len - needle_len in
+    let rec loop i =
+      i <= last
+      && (String.equal (String.sub haystack i needle_len) needle || loop (i + 1))
+    in
+    loop 0)
+
+let path_has_git_dir path =
+  String.equal (Filename.basename path) ".git" || contains_substring path "/.git/"
+
+let sandbox_worktree_code_path path =
+  contains_substring path "/repos/"
+  && contains_substring path "/.worktrees/"
+  && not (path_has_git_dir path)
+
+let sandboxed_code_write_rule_label
+      ~(config : Coord.config)
+      ~(meta : Keeper_types.keeper_meta)
+      ~tool_name
+      ~input
+      ~risk_level
+  =
+  if (not (known_code_write_tool tool_name))
+     || RL.risk_level_to_int risk_level > RL.risk_level_to_int RL.High
+     || Option.is_none meta.current_task_id
+  then None
+  else (
+    match first_nonempty_string_field [ "file_path"; "path"; "target_path" ] input with
+    | None -> None
+    | Some raw_path ->
+      (match Keeper_exec_shared.resolve_keeper_path ~config ~meta ~raw_path with
+       | Error _ -> None
+       | Ok resolved ->
+         if sandbox_worktree_code_path resolved
+         then Some "keeper_routine.sandbox_worktree_code_write"
+         else None))
 
 (* ── Observability ────────────────────────────────────────── *)
 

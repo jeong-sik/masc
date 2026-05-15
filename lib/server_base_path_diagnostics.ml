@@ -150,12 +150,12 @@ let startup_lines (diag : t) =
   in
   List.filter_map (fun line -> line) lines
 
-let _logged_once : bool ref = ref false
+let logged_once : bool ref = ref false
 
 let log_startup_warning (diag : t) =
   match diag.warning with
-  | Some message when not !_logged_once ->
-      _logged_once := true;
+  | Some message when not !logged_once ->
+      logged_once := true;
       Log.Server.warn "%s%s" message
         (if diag.strict_mode_requested then " (strict mode enabled)" else "")
   | Some message ->

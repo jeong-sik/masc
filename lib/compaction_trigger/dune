@@ -1,0 +1,22 @@
+; RFC-0056 Phase 1K — extract Compaction_trigger leaf module from
+; lib/keeper/. Third lib/keeper/ leaf after Phase 1I/1J.
+;
+; 94+45 LoC. Pure dependency-leaf: stdlib + Yojson + masc_log
+; (Log.X sub-module). Encodes compaction trigger heuristic + JSON
+; serializer used by dashboard_harness_health and several keeper modules.
+;
+; Fan-in: 17 (mix of lib + test) + 2 wrapped-pattern test callers.
+;
+; (include_subdirs no) opts out of parent's (include_subdirs unqualified).
+; (wrapped false) keeps the bare identifier `Compaction_trigger`.
+; Wave D RFC will migrate to (wrapped true) + -open Tezos pattern.
+(include_subdirs no)
+
+(library
+ (name masc_mcp_compaction_trigger)
+ (public_name masc_mcp.compaction_trigger)
+ (wrapped false)
+ (flags (:standard -w +4))
+ (libraries
+  yojson
+  masc_log))

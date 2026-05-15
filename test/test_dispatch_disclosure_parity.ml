@@ -1,10 +1,10 @@
 open Alcotest
 
-module TR = Masc_mcp.Tool_resolution
+module TR = Masc_mcp.Keeper_tool_resolution
 
 (** RFC-0084 §1.4, §6.2 — boot policy load vs runtime routing parity.
 
-    PR-6 introduces [Tool_resolution.runtime_decision] as the SSOT entry
+    PR-6 introduces [Keeper_tool_resolution.runtime_decision] as the SSOT entry
     for runtime tool-name routing. [Keeper_tool_disclosure.canonical_tool_name]
     remains as the legacy public wrapper during migration and must preserve
     the same canonical string result.
@@ -18,7 +18,7 @@ module TR = Masc_mcp.Tool_resolution
     edge cases (empty string, all-internal, all-public).
 
     For each name, assert:
-      canonical_string(Tool_resolution.runtime_decision name)
+      canonical_string(Keeper_tool_resolution.runtime_decision name)
         = Keeper_tool_disclosure.canonical_tool_name name
 *)
 

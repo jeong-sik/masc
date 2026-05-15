@@ -37,7 +37,7 @@ code_refs:
 │ Layer 2: Env_config_runtime     (타이머, 캐시, 세션)    │
 │ Layer 3: Env_config_governance  (모델, 추론, Autonomy)   │
 │ Layer 4: Env_config_keeper      (Keeper 부트/알림/감독)  │
-│ Layer 5: Level2/Level4_config   (메트릭, Swarm, 학습)   │
+│ Layer 5: Level2/Level4_config   (메트릭, 학습, RNG)     │
 │ Layer 6: Runtime_params         (런타임 오버라이드)       │
 │ Layer 7: config/cascade.toml    (Cascade 모델 순서)     │
 └────────────────────────────────────────────────────┘
@@ -206,7 +206,7 @@ Keeper 부트스트랩, 메트릭 로테이션, 알림 팬아웃, Supervisor 설
 
 ### 3.5 Level2 / Level4 Config
 
-L2는 메트릭/드리프트/학습 튜닝, L4는 Swarm 행동 파라미터.
+L2는 메트릭/드리프트/학습 튜닝, L4는 공유 numeric wrapper와 RNG helper다.
 
 **Level2** (`lib/level2_config.ml`):
 
@@ -224,17 +224,9 @@ L2는 메트릭/드리프트/학습 튜닝, L4는 Swarm 행동 파라미터.
 
 | 환경변수 | 타입 | 기본값 | 설명 |
 |----------|------|--------|------|
-| `MASC_SWARM_SEED` | int | (시각 기반) | RNG 시드 (재현성) |
-| `MASC_SWARM_INITIAL_FITNESS` | float | 0.5 | 신규 에이전트 초기 fitness |
-| `MASC_SWARM_SELECTION_PRESSURE` | float | 0.3 | 선택 압력 |
-| `MASC_SWARM_MUTATION_RATE` | float | 0.1 | 변이율 |
-| `MASC_SWARM_QUORUM_THRESHOLD` | float | 0.6 | 정족수 임계값 |
-| `MASC_SWARM_MAX_AGENTS` | int | 50 | Swarm 최대 에이전트 |
-| `MASC_FLOCK_SEPARATION` | float | 1.5 | 분리 가중치 |
-| `MASC_FLOCK_ALIGNMENT` | float | 1.0 | 정렬 가중치 |
-| `MASC_FLOCK_COHESION` | float | 1.0 | 응집 가중치 |
-| `MASC_STIG_DEPOSIT` | float | 0.2 | 페로몬 증착율 |
-| `MASC_STIG_THRESHOLD` | float | 0.1 | 페로몬 추종 임계값 |
+| `MASC_RANDOM_SEED` | int | current time in ms | `Level4_config` RNG seed override for reproducible tests/runs |
+
+Removed `MASC_SWARM_*`, `MASC_FLOCK_*`, and `MASC_STIG_*` knobs are not runtime inputs. Do not add them to new configs.
 
 Level4는 `Normalized.t` (0.0-1.0 범위 보장) 추상 타입을 제공한다. `of_float`는 범위 밖 입력에 `None`을 반환하고, `of_float_clamped`는 clamping한다.
 
@@ -311,7 +303,7 @@ type tier = Essential | Standard | Full
 | Tier | 도구 수 | 용도 |
 |------|---------|------|
 | Essential | ~21 | 핵심 워크플로우 (`join`, `add_task`, `broadcast`, `heartbeat`, `worktree_create` 등) |
-| Standard | ~50 | Essential + Board, Team Session, Governance V2, Handover, Spawn |
+| Standard | ~50 | Essential + Board, Governance V2, Handover, Spawn |
 | Full | 전체 | 모든 등록 도구 |
 
 Tier는 mode/category와 독립적으로 적용되는 추가 필터 레이어다.

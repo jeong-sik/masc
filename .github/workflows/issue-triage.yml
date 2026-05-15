@@ -40,7 +40,7 @@ jobs:
 
             const AREA_LABEL_BY_FORM_VALUE = new Map([
               ['Repo coordination', 'area:coordination'],
-              ['Team session delivery', 'area:swarm-execution'],
+              ['Supervised delivery', 'area:supervised-execution'],
               ['Dashboard and read models', 'area:dashboard'],
               ['Operator and intervention', 'area:operator'],
               ['Transport, auth, and health', 'area:transport'],
@@ -61,9 +61,9 @@ jobs:
                 color: '1d76db',
                 description: 'Repo coordination and room/task flows',
               },
-              'area:swarm-execution': {
+              'area:supervised-execution': {
                 color: '0052cc',
-                description: 'Team session delivery and supervised execution',
+                description: 'Keeper-supervised execution and delivery',
               },
               'area:dashboard': {
                 color: '0e8a16',

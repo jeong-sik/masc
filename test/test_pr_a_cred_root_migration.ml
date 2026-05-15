@@ -62,7 +62,7 @@ let test_cred_root_byte_identical_to_typed_surface () =
   (* Today's behaviour is preserved: [Host_config_provider.cred_root]
      and [Host_config.host ().cred_root] must hold
      the same string at module-init time. *)
-  let typed = (Masc_mcp.Host_config.host ()).cred_root in
+  let typed = (Host_config.host ()).cred_root in
   let provider = Masc_mcp.Host_config_provider.cred_root in
   (check string)
     "Host_config_provider.cred_root must equal \

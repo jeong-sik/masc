@@ -736,7 +736,7 @@ let recover_latest_checkpoint_for_overflow_retry
          (Keeper_id.Trace_id.to_string meta.runtime.trace_id) d;
        Prometheus.inc_counter
          Keeper_metrics.metric_keeper_oas_execution_errors
-         ~labels:[("keeper", meta.name); ("phase", Oas_execution_error_phase.(to_label Overflow_retry_oas_load))]
+         ~labels:[("keeper", meta.name); ("phase", Keeper_oas_execution_error_phase.(to_label Overflow_retry_oas_load))]
          ()
    | Error Not_found ->
        Log.Keeper.debug

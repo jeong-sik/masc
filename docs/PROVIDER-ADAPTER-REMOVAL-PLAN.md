@@ -1,5 +1,5 @@
 ---
-status: draft
+status: reference
 last_verified: 2026-05-15
 code_refs:
   - lib/provider_runtime_projection.ml
@@ -7,10 +7,9 @@ code_refs:
   - scripts/lint/provider-adapter-removal-ratchet.sh
   - docs/OAS-MASC-BOUNDARY.md
   - docs/rfc/RFC-0058-declarative-cascade-config.md
-  - docs/rfc/RFC-0072-provider-adapter-sublib-extraction.md
 ---
 
-# Provider Adapter Removal Plan
+# Provider Adapter Removal Record
 
 This plan tracks removal of the MASC-owned `Provider_adapter` implementation.
 As of 2026-05-15, the compiled `Provider_adapter` module is deleted. It is
@@ -48,7 +47,7 @@ Verified on 2026-05-15:
 | External `Provider_adapter.` callers | 0 files in `lib/` and `bin/` | production callers no longer depend on this boundary |
 | Public canonical provider names | 0 exports | provider ids are no longer compiled through this module |
 | Adapter registry | absent | aliases, prefixes, defaults, auth, capabilities moved to OAS/runtime projection surfaces |
-| Runbook | `docs/PROVIDER-ADAPTER-RUNBOOK.md` | describes current compatibility state, not the target SSOT |
+| Runbook | removed | old compatibility matrix deleted; use this record plus `docs/OAS-MASC-BOUNDARY.md` |
 
 The deleted `.mli` mixed these responsibilities:
 
@@ -108,47 +107,28 @@ callers may be added.
 
 ## Migration Phases
 
-### Phase 0 - Freeze The Old Boundary
+Completed phases:
 
-Goal: stop making `Provider_adapter` larger.
+- Freeze guard: `scripts/lint/provider-adapter-removal-ratchet.sh` pins new
+  `Provider_adapter` callers/exports.
+- Runtime ownership: provider/model truth moved out of the compiled MASC
+  adapter boundary; runtime-local projection remains in
+  `lib/provider_runtime_projection.ml` and `lib/provider_tool_support.ml`.
+- Compiled catalog deletion: `lib/provider_adapter.ml` and
+  `lib/provider_adapter.mli` are absent.
+- Historical runbook/RFC cleanup: the old provider-adapter runbook and stale
+  extraction RFC were removed after the compiled module disappeared.
 
-- Mark `docs/PROVIDER-ADAPTER-RUNBOOK.md` as current compatibility, not future SSOT.
-- Add a lint rule that fails new public `Provider_adapter.` callers outside an
-  explicit allowlist.
-- Keep `scripts/lint/no-provider-name-hardcoding.sh --fail`, but treat its
-  `Provider_adapter` allowlist as temporary debt, not a safe harbor.
-- Keep the ratchet pinned at zero `lib/provider_adapter.mli` exports.
-- Wire `scripts/lint/provider-adapter-removal-ratchet.sh` into Fundamental
-  Check so the freeze runs on every PR.
+Remaining work is guard-only unless code reintroduces a MASC-owned provider
+catalog.
 
-Exit criteria:
+### Guard Rails
 
-- new PRs cannot add provider/model literals outside OAS/catalog or an approved
-  MASC-local overlay file
-- new PRs cannot add `Provider_adapter.` callers without touching the removal
-  allowlist and explaining why
-
-### Phase 1 - Move Read-Only Runtime Truth To OAS Inputs
-
-Goal: replace registry reads with OAS-owned catalog/capability reads.
-
-- Replace `direct_adapters` reads with a runtime binding list built from OAS
-  catalog/capability data.
-- Move alias/canonical-name resolution to OAS catalog lookup.
-- Move model default and auto-model expansion to OAS catalog/capability surfaces.
-- Keep only MASC-local overlays for lane naming, spawn, auth display, telemetry
-  redaction, and runtime-MCP behavior.
-
-Exit criteria:
-
-- `direct_adapters` no longer decides provider/model availability
-- adding a provider/model via OAS catalog is visible to MASC without changing
-  `lib/provider_adapter.ml`
-- provider/model labels are opaque at MASC product boundaries
-
-### Phase 2 - Replace Caller Groups
-
-Goal: remove caller dependence by ownership group, not by mechanical rename.
+- new PRs must not add provider/model literals outside OAS/catalog or an
+  approved MASC-local overlay file
+- new PRs must not add `Provider_adapter.` callers without failing the ratchet
+- direct provider/model identity must stay neutralized at MASC product
+  boundaries
 
 | Caller group | Replacement |
 |---|---|
@@ -159,47 +139,6 @@ Goal: remove caller dependence by ownership group, not by mechanical rename.
 | dashboard/provider runs | neutral runtime lane/status projection |
 | voice bridge | separate voice endpoint catalog or local voice overlay |
 | tests | boundary tests that forbid raw provider/model identity at MASC surfaces |
-
-Exit criteria:
-
-- `rg -l 'Provider_adapter\\.' lib test bin` is limited to compat tests and the
-  temporary shim
-- cascade routing tests prove capability/lane routing without vendor literals
-- dashboard tests prove provider/model identity remains neutralized
-
-### Phase 3 - Delete The Compiled Catalog
-
-Goal: remove the internal implementation.
-
-- Delete legacy canonical provider-name values from MASC.
-- Delete `direct_adapters`.
-- Delete provider/model default lists from MASC.
-- Delete provider-kind reverse lookup helpers from MASC.
-- Delete provider auth/capability rules that duplicate OAS registry data.
-- Keep any MASC-local runtime quirks in data-driven local policy with no
-  concrete provider catalog.
-
-Exit criteria:
-
-- `lib/provider_adapter.ml` does not contain provider/model catalog data
-- `lib/provider_adapter.mli` is gone or only re-exports deprecated shim functions
-- no MASC code branches on concrete vendor/model literals for routing
-- no OAS-owned provider/model identity is shown in keeper runtime products
-
-### Phase 4 - Remove The Shim
-
-Goal: no provider adapter module remains.
-
-- Rename remaining compatibility references to the owning modules.
-- Delete `Provider_adapter_compat`.
-- Delete allowlist entries that existed only for `Provider_adapter`.
-- Retire `docs/PROVIDER-ADAPTER-RUNBOOK.md` or convert it to a historical note.
-
-Exit criteria:
-
-- `rg 'Provider_adapter' lib test bin docs scripts` has no live implementation
-  references except historical docs
-- adding a provider/model is an OAS/catalog change only
 
 ## Validation Gates
 
@@ -232,18 +171,8 @@ Add or keep tests that prove:
 
 ## First PR Slice
 
-Start with a docs/test/lint slice, not a broad runtime rewrite:
-
-1. Add this removal plan.
-2. Mark `docs/PROVIDER-ADAPTER-RUNBOOK.md` as compatibility-only.
-3. Add `scripts/lint/provider-adapter-removal-ratchet.callers` for
-   `rg -l 'Provider_adapter\\.' lib test bin`.
-4. Add `scripts/lint/provider-adapter-removal-ratchet.exports` for the current
-   `.mli` export count.
-5. Add `scripts/lint/provider-adapter-removal-ratchet.sh` and wire it to
-   `.github/workflows/fundamental-check.yml`.
-
-This creates a ratchet before moving runtime behavior.
+Completed. Keep this section as historical context only; do not use it as a
+current implementation checklist.
 
 ## Open Questions
 

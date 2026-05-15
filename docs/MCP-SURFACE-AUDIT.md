@@ -22,7 +22,8 @@ As of `2026-04-16`, the supported front door is repo coordination plus keeper/ru
   - `_build/_tests/mode_tool_count/diagnostics.000.output`
 - Public entrypoints:
   - [README.md](../README.md)
-  - [MERGED-ARCHITECTURE-SSOT.md](./MERGED-ARCHITECTURE-SSOT.md)
+  - [SPEC-INDEX.md](./spec/SPEC-INDEX.md)
+  - [01-system-overview.md](./spec/01-system-overview.md)
 - MCP implementation:
   - [mcp_server.ml](../lib/mcp_server.ml)
   - [mcp_server_eio.ml](../lib/mcp_server_eio.ml)
@@ -35,7 +36,7 @@ As of `2026-04-16`, the supported front door is repo coordination plus keeper/ru
 |--------|------:|--------|-------|
 | Raw tool schemas | ~156 | `Config.raw_all_tool_schemas` | Code-verified count (25 modules, 157 before `retired_front_door_schema_names` filter). Intentionally wider than `Tools.all_schemas_extended` (adds Board, Compact, Agent_timeline schemas that depend on Config). |
 | Visible tool schemas | runtime-filtered | `Config.visible_tool_schemas ()` | Default `tools/list` public surface. Filtered by `Tool_catalog.is_visible` (Hidden, Deprecated, Admin-only excluded). Exact count varies by config. |
-| MCP prompts | 3 | `lib/mcp_prompt_surface.ml` | `tool_help`, `team_session_proof`, `command_truth` |
+| MCP prompts | 1 | `lib/mcp_prompt_surface.ml` | `tool_help` |
 | Fixed MCP resources | 21 | `lib/mcp_server.ml` | Status, tasks, messages, events, worktrees, schema, institution, library, tool-help index |
 | MCP resource templates | 7 | `lib/mcp_server.ml` | Message/event ranges, library docs, per-tool help |
 | Internal prompt templates | 18 | `data/prompts/` + `config/prompts/` | Chain/runtime prompt registry plus markdown-managed operator prompts, not MCP-discoverable |
@@ -52,7 +53,7 @@ The key split is intentional:
 | Canonical MCP tools | `tools/list` | `masc_start`, `masc_transition`, `masc_keeper_status`, `decision.create`, `experiment.start`, `trpg.dice.roll` | Default surface for normal clients |
 | Managed agent MCP | `/mcp/managed` | `masc_room_status`, `masc_list_tasks`, `masc_claim_task`, `masc_plan_set_task` | Internal managed-agent surface with SDK aliases such as `masc_set_current_task` plus curated passthrough tools |
 | Compatibility aliases | Deprecated and excluded from default `tools/list` | `masc_claim`, `experiment_start`, `masc_trpg_dice_roll` | Still callable for compatibility; not part of the truthful default inventory |
-| MCP prompts | `prompts/list`, `prompts/get` | `tool_help`, `team_session_proof`, `command_truth` | Explanation/proof layer, not runtime prompt registry |
+| MCP prompts | `prompts/list`, `prompts/get` | `tool_help` | Explanation/help layer, not runtime prompt registry |
 | MCP resources | `resources/list/read` | `masc://status`, `masc://tasks`, `masc://tool-help-index` | Snapshot/read layer |
 | Internal prompt/runtime plane | Not MCP-discoverable | `Prompt_registry`, `data/prompts/*.json`, `config/prompts/*.md` | Used by chains, keepers, dashboard judges, and runtime execution |
 
@@ -176,7 +177,7 @@ flowchart TD
 | What prompts are public MCP prompts? | `prompts/list`, [mcp_prompt_surface.ml](../lib/mcp_prompt_surface.ml) |
 | What prompt templates exist internally? | `data/prompts/`, `config/prompts/`, `Prompt_registry` |
 | What resources exist? | `resources/list`, `resources/templates/list`, [mcp_server.ml](../lib/mcp_server.ml) |
-| What is the canonical architecture? | [MERGED-ARCHITECTURE-SSOT.md](./MERGED-ARCHITECTURE-SSOT.md) |
+| What is the canonical architecture? | [SPEC-INDEX.md](./spec/SPEC-INDEX.md) + [01-system-overview.md](./spec/01-system-overview.md) |
 | What is the historical managed-operation flow? | [COMMAND-PLANE-RUNBOOK.md](./COMMAND-PLANE-RUNBOOK.md) |
 
 ## Design Judgment

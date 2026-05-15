@@ -579,7 +579,7 @@ let operator_disposition (receipt : t)
       Prometheus.inc_counter Keeper_metrics.metric_keeper_receipt_unmapped_disposition ();
       Prometheus.inc_counter
         Keeper_metrics.metric_keeper_execution_receipt_failures
-        ~labels:[ "keeper", receipt.keeper_name; "site", Execution_receipt_failure_site.(to_label Unmapped_disposition) ]
+        ~labels:[ "keeper", receipt.keeper_name; "site", Keeper_execution_receipt_failure_site.(to_label Unmapped_disposition) ]
         ();
       Log.Keeper.warn
         "operator_disposition: unmapped (outcome=%s cascade_outcome=%s \
@@ -920,7 +920,7 @@ let append (config : Coord.config) (receipt : t) =
          own diagnostic that watchdogs/log alerts will pick up. *)
       Prometheus.inc_counter
         Keeper_metrics.metric_keeper_execution_receipt_failures
-        ~labels:[ "keeper", receipt.keeper_name; "site", Execution_receipt_failure_site.(to_label Emit_failed) ]
+        ~labels:[ "keeper", receipt.keeper_name; "site", Keeper_execution_receipt_failure_site.(to_label Emit_failed) ]
         ();
       Log.Keeper.error
         "%s: operator_broadcast_required EMIT FAILED disposition=%s reason=%s exn=%s"
@@ -1046,7 +1046,7 @@ let emit_stale_keeper_broadcast
   in
   Prometheus.inc_counter
     Keeper_metrics.metric_keeper_execution_receipt_failures
-    ~labels:[ "keeper", keeper_name; "site", Execution_receipt_failure_site.(to_label Stale_broadcast) ]
+    ~labels:[ "keeper", keeper_name; "site", Keeper_execution_receipt_failure_site.(to_label Stale_broadcast) ]
     ();
   Log.Keeper.warn
     "%s: stale_keeper_broadcast emitted last_turn=%.0fs ago cascade=%s seq=%d"

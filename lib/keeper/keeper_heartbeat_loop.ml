@@ -1093,7 +1093,7 @@ let run_keepalive_unified_turn
                   (Int64.of_float (audit_wall_clock *. 1000.0)))
              ~keeper_name:meta_after_triage.name
              ~generation:meta_after_triage.runtime.generation
-             ~heartbeat_verdict:Heartbeat_smart.Emit
+             ~heartbeat_verdict:Keeper_heartbeat_smart.Emit
              ~turn_verdict:turn_decision.verdict
              ~wall_clock:audit_wall_clock
              ?tool_diversity_entropy
@@ -1249,19 +1249,19 @@ let dispatch_recurring_keepalive
     otherwise any keeper with [current_task_id=Some _] is blocked
     from ever running a turn (discovered 2026-04-25 — 8/14 keepers
     frozen with claimed tasks). *)
-let smart_heartbeat_cycle_continues (d : Heartbeat_smart.decision) : bool =
+let smart_heartbeat_cycle_continues (d : Keeper_heartbeat_smart.decision) : bool =
   match d with
-  | Heartbeat_smart.Skip_busy | Heartbeat_smart.Emit -> true
-  | Heartbeat_smart.Skip_idle _ -> false
+  | Keeper_heartbeat_smart.Skip_busy | Keeper_heartbeat_smart.Emit -> true
+  | Keeper_heartbeat_smart.Skip_idle _ -> false
 ;;
 
 let cycle_continues_after_wake
-      (d : Heartbeat_smart.decision)
+      (d : Keeper_heartbeat_smart.decision)
       (outcome : Keeper_keepalive_signal.sleep_outcome)
   : bool
   =
   match d, outcome with
-  | Heartbeat_smart.Skip_idle _, Keeper_keepalive_signal.Woken -> true
+  | Keeper_heartbeat_smart.Skip_idle _, Keeper_keepalive_signal.Woken -> true
   | _, _ -> smart_heartbeat_cycle_continues d
 ;;
 
@@ -1276,16 +1276,16 @@ let visibility_gate_decision
       ~(has_pending_signal : bool)
       ~(now : float)
       ~(last_heartbeat_cycle_ts : float)
-      (decision : Heartbeat_smart.decision)
-  : Heartbeat_smart.decision
+      (decision : Keeper_heartbeat_smart.decision)
+  : Keeper_heartbeat_smart.decision
   =
   match decision with
-  | Heartbeat_smart.Emit
+  | Keeper_heartbeat_smart.Emit
     when visible_consumers <= 0
          && (not has_pending_signal)
          && last_heartbeat_cycle_ts > 0.0
          && now -. last_heartbeat_cycle_ts < unobserved_visibility_idle_window_s ->
-    Heartbeat_smart.Skip_idle
+    Keeper_heartbeat_smart.Skip_idle
       (last_heartbeat_cycle_ts +. unobserved_visibility_idle_window_s)
   | _ -> decision
 ;;
@@ -1297,7 +1297,7 @@ let run_smart_heartbeat_gate
       ~(wakeup : bool Atomic.t)
       ~(meta_current : keeper_meta)
       ~(smart_hb_enabled : unit -> bool)
-      ~(smart_hb_config : Heartbeat_smart.config)
+      ~(smart_hb_config : Keeper_heartbeat_smart.config)
       ~(last_successful_heartbeat_ts : float ref)
       ~(last_heartbeat_cycle_ts : float ref)
   : bool
@@ -1306,12 +1306,12 @@ let run_smart_heartbeat_gate
     if smart_hb_enabled ()
     then (
       let agent_status = keeper_agent_status meta_current in
-      Heartbeat_smart.should_emit
+      Keeper_heartbeat_smart.should_emit
         ~config:smart_hb_config
         ~agent_status
         ~last_activity:!last_successful_heartbeat_ts
         ~last_heartbeat:!last_heartbeat_cycle_ts)
-    else Heartbeat_smart.Emit
+    else Keeper_heartbeat_smart.Emit
   in
   (* RFC-0020 Rule 2: the Event Layer queue overrides the Smart Heartbeat
      policy. When the queue holds an unprocessed stimulus, force [Emit]
@@ -1354,7 +1354,7 @@ let run_smart_heartbeat_gate
          else false))
   in
   let smart_hb_decision =
-    if Heartbeat_smart.should_emit_now smart_hb_decision
+    if Keeper_heartbeat_smart.should_emit_now smart_hb_decision
     then smart_hb_decision
     else (
       (* Skip_busy already continues the cycle (no idle sleep), so
@@ -1362,15 +1362,15 @@ let run_smart_heartbeat_gate
          backlog/board I/O.  The durable-signal probe only matters when
          the gate would otherwise sleep on Skip_idle. *)
       match smart_hb_decision with
-      | Heartbeat_smart.Skip_idle _ when Lazy.force pending_signal_present ->
-        Heartbeat_smart.Emit
-      | Heartbeat_smart.Skip_idle _
-      | Heartbeat_smart.Skip_busy
-      | Heartbeat_smart.Emit -> smart_hb_decision)
+      | Keeper_heartbeat_smart.Skip_idle _ when Lazy.force pending_signal_present ->
+        Keeper_heartbeat_smart.Emit
+      | Keeper_heartbeat_smart.Skip_idle _
+      | Keeper_heartbeat_smart.Skip_busy
+      | Keeper_heartbeat_smart.Emit -> smart_hb_decision)
   in
   let smart_hb_decision =
     match smart_hb_decision with
-    | Heartbeat_smart.Emit when smart_hb_enabled () ->
+    | Keeper_heartbeat_smart.Emit when smart_hb_enabled () ->
       let consumers = visible_consumer_count () in
       let now = Time_compat.now () in
       let delay_possible =
@@ -1390,18 +1390,18 @@ let run_smart_heartbeat_gate
         else smart_hb_decision
       in
       (match gated with
-       | Heartbeat_smart.Skip_idle _ ->
+       | Keeper_heartbeat_smart.Skip_idle _ ->
          Prometheus.inc_counter
            Keeper_heartbeat_snapshot.proactive_skip_reason_metric
            ~labels:[ "keeper", meta_current.name; "reason", "no_visible_consumers" ]
            ();
          Log.Keeper.debug
            "smart heartbeat: no visible consumers - delaying idle turn dispatch"
-       | Heartbeat_smart.Emit | Heartbeat_smart.Skip_busy -> ());
+       | Keeper_heartbeat_smart.Emit | Keeper_heartbeat_smart.Skip_busy -> ());
       gated
-    | Heartbeat_smart.Emit
-    | Heartbeat_smart.Skip_busy
-    | Heartbeat_smart.Skip_idle _ -> smart_hb_decision
+    | Keeper_heartbeat_smart.Emit
+    | Keeper_heartbeat_smart.Skip_busy
+    | Keeper_heartbeat_smart.Skip_idle _ -> smart_hb_decision
   in
   (* Run side-effects (idle sleep, cycle-timestamp update) per the
      decision, then delegate the gate answer to [cycle_continues_after_wake]
@@ -1410,7 +1410,7 @@ let run_smart_heartbeat_gate
      pure helpers stay testable without an Eio runtime. *)
   let sleep_outcome =
     match smart_hb_decision with
-    | Heartbeat_smart.Skip_busy ->
+    | Keeper_heartbeat_smart.Skip_busy ->
       Log.Keeper.debug
         "smart heartbeat: busy (task=%s) — cycle continues, broadcast may be debounced"
         (match meta_current.current_task_id with
@@ -1418,7 +1418,7 @@ let run_smart_heartbeat_gate
          | None -> "?");
       last_heartbeat_cycle_ts := Time_compat.now ();
       Keeper_keepalive_signal.Timeout
-    | Heartbeat_smart.Skip_idle next_time ->
+    | Keeper_heartbeat_smart.Skip_idle next_time ->
       let wait = Float.max 1.0 (next_time -. Time_compat.now ()) in
       Log.Keeper.debug "smart heartbeat: skip (idle, next in %.1fs)" wait;
       let jitter = wait *. 0.1 *. Random.float 1.0 in
@@ -1442,7 +1442,7 @@ let run_smart_heartbeat_gate
            ()
        | Keeper_keepalive_signal.Stopped | Keeper_keepalive_signal.Timeout -> ());
       outcome
-    | Heartbeat_smart.Emit ->
+    | Keeper_heartbeat_smart.Emit ->
       last_heartbeat_cycle_ts := Time_compat.now ();
       Keeper_keepalive_signal.Timeout
   in
@@ -1585,11 +1585,11 @@ let run_heartbeat_loop
   let max_silence () =
     Runtime_params.get Governance_registry.keeper_work_as_hb_max_silence_sec
   in
-  (* Phase 2: smart heartbeat — adaptive scheduling via Heartbeat_smart *)
+  (* Phase 2: smart heartbeat — adaptive scheduling via Keeper_heartbeat_smart *)
   let smart_hb_enabled () =
     Runtime_params.get Governance_registry.keeper_smart_hb_enabled
   in
-  let smart_hb_config = Heartbeat_smart.default_config in
+  let smart_hb_config = Keeper_heartbeat_smart.default_config in
   let last_heartbeat_cycle_ts = ref 0.0 in
   (* Persistent OAS Context.t — created once per keeper lifecycle.
      OAS Context.t is a mutable cross-turn state container for values
@@ -1778,7 +1778,7 @@ let run_heartbeat_loop
         let base =
           if smart_hb_enabled ()
           then
-            Heartbeat_smart.effective_interval
+            Keeper_heartbeat_smart.effective_interval
               ~config:smart_hb_config
               ~last_activity:!last_successful_heartbeat_ts
           else float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ())

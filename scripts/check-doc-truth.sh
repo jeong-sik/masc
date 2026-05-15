@@ -109,7 +109,7 @@ require_not_contains README.md 'dashboard#monitoring/sessions'
 require_not_contains README.md 'dashboard#command/intervene'
 
 require_contains docs/PRODUCT-OPERATING-PLAN.md 'Release evidence and local proof'
-require_contains docs/PRODUCT-OPERATING-PLAN.md 'Retired compatibility lanes and research material remain in-tree for history'
+require_contains docs/PRODUCT-OPERATING-PLAN.md 'Retired compatibility lanes and proposal-only research material are deletion targets'
 
 require_contains docs/DASHBOARD-INTEGRATION.md '- `monitoring`'
 require_contains docs/DASHBOARD-INTEGRATION.md '- `connectors`'

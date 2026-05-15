@@ -51,6 +51,11 @@
   masc_eio_context
   masc_process
   masc_mcp.masc_exec
+  ; RFC-0085 PR-9 — coord_utils_backend_setup reads the env-derived
+  ; base_path via Host_config.from_env now that the dep direction is
+  ; reversed (host_config no longer depends on masc_coord; audit
+  ; 2026-05-15 confirmed the masc_coord dep was unused).
+  masc_mcp.host_config
   time_compat
   fs_compat
   yojson

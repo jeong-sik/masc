@@ -1,4 +1,4 @@
-(** RFC-0070 Phase 3b-iv.0 — tests for [Docker_response] typed
+(** RFC-0070 Phase 3b-iv.0 — tests for [Keeper_docker_response] typed
     transforms.
 
     Pins F3 (RFC §1) at the type level: every docker [State] string
@@ -9,14 +9,14 @@
 open Alcotest
 open Masc_mcp
 
-let status_t = testable Docker_response.pp_ps_status Docker_response.equal_ps_status
+let status_t = testable Keeper_docker_response.pp_ps_status Keeper_docker_response.equal_ps_status
 
 let err_pp ppf = function
-  | Docker_response.Unknown_state s -> Format.fprintf ppf "Unknown_state %S" s
+  | Keeper_docker_response.Unknown_state s -> Format.fprintf ppf "Unknown_state %S" s
 
 let err_eq a b =
   match a, b with
-  | Docker_response.Unknown_state x, Docker_response.Unknown_state y ->
+  | Keeper_docker_response.Unknown_state x, Keeper_docker_response.Unknown_state y ->
       String.equal x y
 
 let err_t = testable err_pp err_eq
@@ -24,71 +24,71 @@ let err_t = testable err_pp err_eq
 (* ── Parse known states ───────────────────────────────────────── *)
 
 let test_parse_created () =
-  check (result status_t err_t) "created" (Ok Docker_response.Created)
-    (Docker_response.parse_state "created")
+  check (result status_t err_t) "created" (Ok Keeper_docker_response.Created)
+    (Keeper_docker_response.parse_state "created")
 
 let test_parse_running () =
-  check (result status_t err_t) "running" (Ok Docker_response.Running)
-    (Docker_response.parse_state "running")
+  check (result status_t err_t) "running" (Ok Keeper_docker_response.Running)
+    (Keeper_docker_response.parse_state "running")
 
 let test_parse_paused () =
-  check (result status_t err_t) "paused" (Ok Docker_response.Paused)
-    (Docker_response.parse_state "paused")
+  check (result status_t err_t) "paused" (Ok Keeper_docker_response.Paused)
+    (Keeper_docker_response.parse_state "paused")
 
 let test_parse_restarting () =
-  check (result status_t err_t) "restarting" (Ok Docker_response.Restarting)
-    (Docker_response.parse_state "restarting")
+  check (result status_t err_t) "restarting" (Ok Keeper_docker_response.Restarting)
+    (Keeper_docker_response.parse_state "restarting")
 
 let test_parse_exited () =
   check (result status_t err_t) "exited (state token only — exit code via inspect, Phase 3b-iv.2)"
-    (Ok Docker_response.Exited)
-    (Docker_response.parse_state "exited")
+    (Ok Keeper_docker_response.Exited)
+    (Keeper_docker_response.parse_state "exited")
 
 let test_parse_dead () =
-  check (result status_t err_t) "dead" (Ok Docker_response.Dead)
-    (Docker_response.parse_state "dead")
+  check (result status_t err_t) "dead" (Ok Keeper_docker_response.Dead)
+    (Keeper_docker_response.parse_state "dead")
 
 (* ── Case-insensitive / whitespace-tolerant ───────────────────── *)
 
 let test_parse_uppercase () =
-  check (result status_t err_t) "RUNNING" (Ok Docker_response.Running)
-    (Docker_response.parse_state "RUNNING")
+  check (result status_t err_t) "RUNNING" (Ok Keeper_docker_response.Running)
+    (Keeper_docker_response.parse_state "RUNNING")
 
 let test_parse_mixed_case () =
-  check (result status_t err_t) "Restarting" (Ok Docker_response.Restarting)
-    (Docker_response.parse_state "Restarting")
+  check (result status_t err_t) "Restarting" (Ok Keeper_docker_response.Restarting)
+    (Keeper_docker_response.parse_state "Restarting")
 
 let test_parse_whitespace () =
-  check (result status_t err_t) "  paused  " (Ok Docker_response.Paused)
-    (Docker_response.parse_state "  paused  ")
+  check (result status_t err_t) "  paused  " (Ok Keeper_docker_response.Paused)
+    (Keeper_docker_response.parse_state "  paused  ")
 
 (* ── No permissive default ────────────────────────────────────── *)
 
 let test_unknown_state () =
   check (result status_t err_t) "unknown → Error preserves raw"
-    (Error (Docker_response.Unknown_state "frobnicating"))
-    (Docker_response.parse_state "frobnicating")
+    (Error (Keeper_docker_response.Unknown_state "frobnicating"))
+    (Keeper_docker_response.parse_state "frobnicating")
 
 let test_empty_state () =
   check (result status_t err_t) "empty → Error preserves raw"
-    (Error (Docker_response.Unknown_state ""))
-    (Docker_response.parse_state "")
+    (Error (Keeper_docker_response.Unknown_state ""))
+    (Keeper_docker_response.parse_state "")
 
 (* ── state_to_string canonical form ───────────────────────────── *)
 
 let test_to_string_canonical () =
   check string "Running → running" "running"
-    (Docker_response.state_to_string Docker_response.Running);
+    (Keeper_docker_response.state_to_string Keeper_docker_response.Running);
   check string "Created → created" "created"
-    (Docker_response.state_to_string Docker_response.Created);
+    (Keeper_docker_response.state_to_string Keeper_docker_response.Created);
   check string "Paused → paused" "paused"
-    (Docker_response.state_to_string Docker_response.Paused);
+    (Keeper_docker_response.state_to_string Keeper_docker_response.Paused);
   check string "Restarting → restarting" "restarting"
-    (Docker_response.state_to_string Docker_response.Restarting);
+    (Keeper_docker_response.state_to_string Keeper_docker_response.Restarting);
   check string "Exited → exited" "exited"
-    (Docker_response.state_to_string Docker_response.Exited);
+    (Keeper_docker_response.state_to_string Keeper_docker_response.Exited);
   check string "Dead → dead" "dead"
-    (Docker_response.state_to_string Docker_response.Dead)
+    (Keeper_docker_response.state_to_string Keeper_docker_response.Dead)
 
 (* ── Round-trip: parse ∘ to_string = id (all variants, no per-variant payload) ── *)
 
@@ -96,10 +96,10 @@ let roundtrip_all cases =
   List.iter
     (fun s ->
       check (result status_t err_t) (Printf.sprintf "round-trip %s" s)
-        (Docker_response.parse_state s)
-        (Docker_response.parse_state
-           (Docker_response.state_to_string
-              (match Docker_response.parse_state s with
+        (Keeper_docker_response.parse_state s)
+        (Keeper_docker_response.parse_state
+           (Keeper_docker_response.state_to_string
+              (match Keeper_docker_response.parse_state s with
                | Ok v -> v
                | Error _ -> failwith "fixture"))))
     cases
@@ -110,11 +110,11 @@ let test_roundtrip () =
 (* ── exec_result equality + show ──────────────────────────────── *)
 
 let test_exec_result_structural_equality () =
-  let a = Docker_response.{ exit_code = 0; stdout = "hi"; stderr = "" } in
-  let b = Docker_response.{ exit_code = 0; stdout = "hi"; stderr = "" } in
-  let c = Docker_response.{ exit_code = 1; stdout = "hi"; stderr = "" } in
-  check bool "structural equality (a ≡ b by field)" true (Docker_response.equal_exec_result a b);
-  check bool "exit_code distinguishes" false (Docker_response.equal_exec_result a c)
+  let a = Keeper_docker_response.{ exit_code = 0; stdout = "hi"; stderr = "" } in
+  let b = Keeper_docker_response.{ exit_code = 0; stdout = "hi"; stderr = "" } in
+  let c = Keeper_docker_response.{ exit_code = 1; stdout = "hi"; stderr = "" } in
+  check bool "structural equality (a ≡ b by field)" true (Keeper_docker_response.equal_exec_result a b);
+  check bool "exit_code distinguishes" false (Keeper_docker_response.equal_exec_result a c)
 
 (* ── ps_record structural equality (Phase 3b-iv.1a) ────────────── *)
 
@@ -126,7 +126,7 @@ let sample_name =
     ~suffix:"test"
 
 let sample_ps_record =
-  Docker_response.
+  Keeper_docker_response.
     { id = "abc123"
     ; name = sample_name
     ; status = Running
@@ -136,9 +136,9 @@ let sample_ps_record =
 let test_ps_record_structural_equality () =
   let a = sample_ps_record in
   let b = sample_ps_record in
-  let c = { sample_ps_record with status = Docker_response.Dead } in
-  check bool "ps_record structural equality" true (Docker_response.equal_ps_record a b);
-  check bool "status field distinguishes" false (Docker_response.equal_ps_record a c)
+  let c = { sample_ps_record with status = Keeper_docker_response.Dead } in
+  check bool "ps_record structural equality" true (Keeper_docker_response.equal_ps_record a b);
+  check bool "status field distinguishes" false (Keeper_docker_response.equal_ps_record a c)
 
 let test_ps_record_labels_order () =
   (* Labels are an association list — order matters for structural
@@ -152,10 +152,10 @@ let test_ps_record_labels_order () =
     }
   in
   check bool "label list order matters (no auto-sort)"
-    false (Docker_response.equal_ps_record a b)
+    false (Keeper_docker_response.equal_ps_record a b)
 
 let () =
-  run "Docker_response"
+  run "Keeper_docker_response"
     [
       ( "parse known states",
         [

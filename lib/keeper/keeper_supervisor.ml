@@ -240,7 +240,7 @@ let launch_supervised_fiber
        Keeper_metrics.metric_keeper_supervisor_cleanup_failures
        ~labels:
          [ "keeper", meta.name
-         ; ("site", Supervisor_cleanup_failure_site.(to_label Fiber_start_rejected))
+         ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Fiber_start_rejected))
          ]
        ());
   if restart_launch_noop_enabled_for_test ()
@@ -907,7 +907,7 @@ let restore_reconcile_continue_gate (ctx : _ context) (meta : keeper_meta) =
             ~labels:
               [ "keeper", meta.name
               ; ( "site"
-                , Supervisor_cleanup_failure_site.(to_label Reconcile_gate_rejected) )
+                , Keeper_supervisor_cleanup_failure_site.(to_label Reconcile_gate_rejected) )
               ]
             ())
       ()
@@ -977,7 +977,7 @@ let reconcile_keepalive_keepers (ctx : _ context) =
           Prometheus.inc_counter
             Keeper_metrics.metric_keeper_observation_query_failures
             ~labels:
-              [ ("operation", Observation_query_operation.(to_label Reconcile_read_meta))
+              [ ("operation", Keeper_observation_query_operation.(to_label Reconcile_read_meta))
               ]
             ();
           Log.Keeper.warn "reconcile: read_meta failed for %s: %s" name err);
@@ -1057,7 +1057,7 @@ let cleanup_dead_tombstone (ctx : _ context) (entry : Keeper_registry.registry_e
         Keeper_metrics.metric_keeper_supervisor_cleanup_failures
         ~labels:
           [ "keeper", entry.name
-          ; ("site", Supervisor_cleanup_failure_site.(to_label Dead_tombstone_meta_write))
+          ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Dead_tombstone_meta_write))
           ]
         ())
   | Ok None ->
@@ -1075,7 +1075,7 @@ let cleanup_dead_tombstone (ctx : _ context) (entry : Keeper_registry.registry_e
       Keeper_metrics.metric_keeper_supervisor_cleanup_failures
       ~labels:
         [ "keeper", entry.name
-        ; ("site", Supervisor_cleanup_failure_site.(to_label Dead_tombstone_meta_missing))
+        ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Dead_tombstone_meta_missing))
         ]
       ()
   | Error err ->
@@ -1093,7 +1093,7 @@ let cleanup_dead_tombstone (ctx : _ context) (entry : Keeper_registry.registry_e
       Keeper_metrics.metric_keeper_supervisor_cleanup_failures
       ~labels:
         [ "keeper", entry.name
-        ; ("site", Supervisor_cleanup_failure_site.(to_label Dead_tombstone_meta_error))
+        ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Dead_tombstone_meta_error))
         ]
       ()
 ;;
@@ -1708,7 +1708,7 @@ let sweep_and_recover (ctx : _ context) =
       Keeper_metrics.metric_keeper_supervisor_cleanup_failures
       ~labels:
         [ "keeper", entry.name
-        ; ("site", Supervisor_cleanup_failure_site.(to_label Force_watchdog_crash))
+        ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Force_watchdog_crash))
         ]
       ();
     (* 2026-05-05 fleet-stuck cycle: when a keeper fiber is stuck inside
@@ -2004,7 +2004,7 @@ let sweep_and_recover (ctx : _ context) =
              Keeper_metrics.metric_keeper_supervisor_cleanup_failures
              ~labels:
                [ "keeper", name
-               ; ("site", Supervisor_cleanup_failure_site.(to_label Paused_meta_prune))
+               ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Paused_meta_prune))
                ]
              ())
       | _ -> ());

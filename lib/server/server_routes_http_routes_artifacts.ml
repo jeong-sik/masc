@@ -30,7 +30,7 @@ let is_valid_sha256 (s : string) : bool =
        s
 
 let blob_response ~sha256 =
-  match Env_config_core.base_path_opt () with
+  match (Host_config.from_env ()).base_path with
   | None ->
       ( `Assoc
           [

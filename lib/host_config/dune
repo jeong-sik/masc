@@ -18,4 +18,11 @@
  (preprocess (pps ppx_deriving.show ppx_deriving.eq))
  (libraries
   unix
-  masc_mcp.masc_coord))
+  ; RFC-0085 PR-9 — Host_config absorbs base_path normalisation
+  ; (previously Env_config_core.base_path_opt) so callers get a single
+  ; SSOT for the normalised env-derived base_path.  The masc_coord
+  ; dep was unused (audit 2026-05-15) so it is dropped here, making
+  ; Host_config a true leaf below masc_coord.  Reverse migration of
+  ; coord_utils_backend_setup callers becomes possible because
+  ; masc_coord can now depend on masc_mcp.host_config without cycling.
+  masc_mcp.config))

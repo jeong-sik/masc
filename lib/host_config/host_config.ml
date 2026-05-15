@@ -38,9 +38,12 @@ type t =
   ; run_dir : string
   ; policy_dir : string
   ; base_path : string option
+  ; base_path_raw : string option
   ; config_dir : string option
   ; data_dir : string option
   ; personas_dir : string option
+  ; home : string option
+  ; assets_dir : string option
   }
 [@@deriving show, eq]
 
@@ -79,10 +82,22 @@ let host () =
   ; log_dir = tmp
   ; run_dir = tmp
   ; policy_dir = tmp
-  ; base_path = get_opt "MASC_BASE_PATH"
+  ; base_path =
+      (* RFC-0085 PR-9 — base_path field carries the *normalised* value
+         (previously Env_config_core.base_path_opt).  Empty / missing
+         env returns None; non-empty trimmed values are passed through
+         Env_config_core.normalize_masc_base_path_input. *)
+      get_opt "MASC_BASE_PATH"
+      |> Option.map Env_config_core.normalize_masc_base_path_input
+      |> (function
+        | Some "" -> None
+        | other -> other)
+  ; base_path_raw = get_opt "MASC_BASE_PATH"
   ; config_dir = get_opt "MASC_CONFIG_DIR"
   ; data_dir = get_opt "MASC_DATA_DIR"
   ; personas_dir = get_opt "MASC_PERSONAS_DIR"
+  ; home = get_opt "HOME"
+  ; assets_dir = get_opt "MASC_ASSETS_DIR"
   }
 ;;
 
@@ -176,9 +191,17 @@ let resolve ?base_path () =
     ; log_dir = tmp
     ; run_dir = tmp
     ; policy_dir = tmp
-    ; base_path = get_opt "MASC_BASE_PATH"
+    ; base_path =
+        get_opt "MASC_BASE_PATH"
+        |> Option.map Env_config_core.normalize_masc_base_path_input
+        |> (function
+          | Some "" -> None
+          | other -> other)
+    ; base_path_raw = get_opt "MASC_BASE_PATH"
     ; config_dir = get_opt "MASC_CONFIG_DIR"
     ; data_dir = get_opt "MASC_DATA_DIR"
     ; personas_dir = get_opt "MASC_PERSONAS_DIR"
+    ; home = get_opt "HOME"
+    ; assets_dir = get_opt "MASC_ASSETS_DIR"
     }
 ;;

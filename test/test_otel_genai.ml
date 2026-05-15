@@ -338,8 +338,15 @@ let test_dispatch_hook_emits_tool_span_payload () =
             ; failure_class = None
             }
           in
-          let returned = Lib.Tool_dispatch.run_post_hooks result in
-          check bool "post-hook preserves success" true returned.success);
+          let returned =
+            Lib.Tool_dispatch_emit.finalize
+              ~outcome:Lib.Dispatch_outcome.Handled
+              (Some result)
+          in
+          match returned with
+          | Some returned ->
+              check bool "post-hook preserves success" true returned.success
+          | None -> fail "expected finalized result");
       match !spans with
       | [ (name, attrs) ] ->
           check string "span name" "tool/keeper_shell" name;

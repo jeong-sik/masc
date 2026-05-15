@@ -2272,6 +2272,18 @@ let test_prompt_includes_operational_tool_guidance () =
     (contains_substring sys "keeper_pr_create draft=true");
   check
     bool
+    "warns passive discovery tools do not satisfy active turns"
+    true
+    (contains_substring sys
+       "Passive discovery tools (`keeper_tool_search`, `keeper_board_get`");
+  check
+    bool
+    "pairs passive reads with active tools"
+    true
+    (contains_substring sys
+       "pair the passive read/search with an active tool call");
+  check
+    bool
     "raw gh PR creation not documented"
     false
     (contains_substring sys "open draft PRs after pushing")
@@ -7145,9 +7157,15 @@ let test_prompt_includes_board_activity_section () =
     (contains_substring user "title=\"Need help\"");
   check
     bool
-    "guides direct board get by post id"
+    "guides board get plus comment by post id"
     true
-    (contains_substring sys "Use the listed post_id with keeper_board_get")
+    (contains_substring sys
+       "call keeper_board_get and keeper_board_comment in the same response");
+  check
+    bool
+    "warns board get alone is passive"
+    true
+    (contains_substring sys "keeper_board_get alone is passive")
 ;;
 
 let test_prompt_marks_board_curation_due_for_multi_event_window () =

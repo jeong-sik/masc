@@ -65,3 +65,6 @@ val tool_effect_domain :
 
 val base_tools : Masc_domain.tool_schema list
 (** Pure: base tool schemas (always-on tools every keeper sees). *)
+
+val board_tools : Masc_domain.tool_schema list
+(** Pure: keeper_board tool schemas. *)

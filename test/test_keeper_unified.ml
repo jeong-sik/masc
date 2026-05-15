@@ -11122,6 +11122,45 @@ let test_direct_keeper_msg_timeout_overrides_meta_per_provider_timeout () =
     (KAR.per_provider_timeout_for_turn ~meta ~timeout_s:900.0 ())
 ;;
 
+let test_internal_keeper_loop_timeout_honors_meta_per_provider_timeout () =
+  let meta =
+    { (make_meta "internal-timeout-cap") with per_provider_timeout_s = Some 120.0 }
+  in
+  check
+    (option (float 0.001))
+    "internal keeper-loop attempt timeout honors profile per-provider cap"
+    (Some 120.0)
+    (KAR.per_provider_timeout_for_turn
+       ~meta
+       ~oas_timeout_s:276.0
+       ~oas_timeout_is_explicit:false
+       ~timeout_s:276.0
+       ());
+  let meta_with_stale_high_cap =
+    { (make_meta "internal-timeout-high-cap") with
+      per_provider_timeout_s = Some 900.0
+    }
+  in
+  check
+    (option (float 0.001))
+    "profile per-provider timeout cannot exceed the enclosing attempt budget"
+    (Some 276.0)
+    (KAR.per_provider_timeout_for_turn
+       ~meta:meta_with_stale_high_cap
+       ~oas_timeout_s:276.0
+       ~oas_timeout_is_explicit:false
+       ~timeout_s:276.0
+       ())
+;;
+
+let test_unified_keeper_loop_marks_attempt_timeout_internal () =
+  check bool
+    "unified keeper loop passes computed OAS timeout as an internal attempt budget"
+    true
+    (source_file_contains "lib/keeper/keeper_unified_turn.ml"
+       "~oas_timeout_is_explicit:false")
+;;
+
 let test_try_provider_max_execution_time_uses_attempt_timeout () =
   check bool
     "try-provider helper resolves OAS max execution time from attempt timeout"
@@ -12660,6 +12699,14 @@ let () =
             "direct keeper msg timeout overrides stale per-provider timeout"
             `Quick
             test_direct_keeper_msg_timeout_overrides_meta_per_provider_timeout
+        ; test_case
+            "internal keeper loop honors profile per-provider timeout"
+            `Quick
+            test_internal_keeper_loop_timeout_honors_meta_per_provider_timeout
+        ; test_case
+            "unified keeper loop marks computed timeout internal"
+            `Quick
+            test_unified_keeper_loop_marks_attempt_timeout_internal
         ; test_case
             "provider attempt timeout drives OAS max execution time"
             `Quick

@@ -60,14 +60,15 @@ let task_link_already_recorded ~keeper ~task_id ~trace_id =
 let per_provider_timeout_for_turn
       ~(meta : Keeper_types.keeper_meta)
       ?oas_timeout_s
+      ?(oas_timeout_is_explicit = true)
       ~(timeout_s : float)
       ()
   =
-  match oas_timeout_s with
-  | Some _ as explicit_timeout -> explicit_timeout
-  | None ->
+  match oas_timeout_s, oas_timeout_is_explicit with
+  | Some _ as explicit_timeout, true -> explicit_timeout
+  | _, _ ->
     (match meta.per_provider_timeout_s with
-     | Some _ as configured -> configured
+     | Some configured -> Some (Float.min configured timeout_s)
      | None -> Some timeout_s)
 ;;
 
@@ -123,6 +124,7 @@ let run_turn
       ?temperature
       ?max_tokens
       ?oas_timeout_s
+      ?(oas_timeout_is_explicit = true)
       ?max_cost_usd
       ?on_event
       ?(trajectory_acc : Trajectory.accumulator option)
@@ -528,7 +530,12 @@ let run_turn
              ~estimated_input_tokens
        in
        let per_provider_timeout_s =
-         per_provider_timeout_for_turn ~meta ?oas_timeout_s ~timeout_s ()
+         per_provider_timeout_for_turn
+           ~meta
+           ?oas_timeout_s
+           ~oas_timeout_is_explicit
+           ~timeout_s
+           ()
        in
        (* OAS [stream_idle_timeout_s] bounds inter-line idle on HTTP streams
        (Anthropic/OpenAI/Gemini/GLM/Ollama). The deadline resets after each

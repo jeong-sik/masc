@@ -205,12 +205,15 @@ val adaptive_thinking_budget
 (** Resolve the per-provider OAS timeout for this keeper turn.
 
     Explicit [masc_keeper_msg.timeout_sec] / [oas_timeout_s] wins over
-    persisted keeper [per_provider_timeout_s] because the direct caller is
-    intentionally setting the budget for this run. Without that precedence,
-    a stale 300s keeper profile can silently defeat a one-off 900s reprobe. *)
+    persisted keeper [per_provider_timeout_s] when [oas_timeout_is_explicit]
+    is true because the direct caller is intentionally setting the budget for
+    this run. Unified keeper-loop attempt budgets are internal dispatch
+    envelopes, so those call sites pass [oas_timeout_is_explicit:false] and
+    still honor the keeper profile cap. *)
 val per_provider_timeout_for_turn
   :  meta:Keeper_types.keeper_meta
   -> ?oas_timeout_s:float
+  -> ?oas_timeout_is_explicit:bool
   -> timeout_s:float
   -> unit
   -> float option
@@ -269,6 +272,7 @@ val run_turn
   -> ?temperature:float
   -> ?max_tokens:int
   -> ?oas_timeout_s:float
+  -> ?oas_timeout_is_explicit:bool
   -> ?max_cost_usd:float
   -> ?on_event:(Agent_sdk.Types.sse_event -> unit)
   -> ?trajectory_acc:Trajectory.accumulator

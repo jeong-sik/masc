@@ -14,7 +14,15 @@
     - [/tmp/.masc_agent[_mcp]_<sid>] (7 sites — Tool_inline_dispatch_coord
       + Mcp_server_eio_execute)
     - [Filename.concat home "me"] (worker_dev_tools.ml:85)
-    - [String.starts_with "test_"] (5 test-mode detection sites)
+    - [String.starts_with "test_"] (5 test-mode detection sites — but
+      PR-F audit found only 1 site reaches the typed surface today:
+      [config_dir_resolver.ml:55] in [masc_mcp].  The remaining
+      4 sites live in lower-level sub-libraries
+      ([masc_config.env_config_core], [masc_coord.coord_utils_backend_setup],
+      [fs_compat.fs_compat], plus [cdal/adversarial_eval] which is a
+      *file-classification* sibling pattern unrelated to current-binary
+      test-mode).  Migrating those requires extracting [Host_config]
+      into a lower-level shared library — separate RFC scope.)
 
     PR-12 introduces the typed record + accessors. The 11 hardcode-site
     migrations are scoped to *follow-up cleanup PRs* (one per

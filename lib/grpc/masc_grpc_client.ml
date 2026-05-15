@@ -24,7 +24,7 @@ let create_from_env ~sw ~env =
     | Some t -> t
     | None ->
       let port = Masc_grpc_server.configured_port () in
-      Printf.sprintf "http://127.0.0.1:%d" port
+      Printf.sprintf "http://%s:%d" Masc_network_defaults.masc_http_default_host port
   in
   create ~sw ~env target
 

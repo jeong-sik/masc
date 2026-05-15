@@ -486,7 +486,8 @@ let start
         Transport_metrics.set_grpc_runtime_listening false;
         Transport_metrics.set_grpc_listen_status "bind_failed";
         Log.Server.error
-          "gRPC coordination transport unavailable on 127.0.0.1:%d: port already in use"
+          "gRPC coordination transport unavailable on %s:%d: port already in use"
+          Masc_network_defaults.masc_http_default_host
           port
       | exn ->
         Transport_metrics.set_grpc_runtime_listening false;

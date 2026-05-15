@@ -192,6 +192,34 @@ let test_client_count_exact_unregister_decrement () =
       check int "second unregister restores original count"
         before (Sse.client_count ()))
 
+let test_client_count_by_kind_tracks_session_roles () =
+  let before_observer = Sse.client_count_by_kind Sse.Observer in
+  let before_coordinator = Sse.client_count_by_kind Sse.Coordinator in
+  let observer = "test_kind_observer_" ^ string_of_int (Random.bits ()) in
+  let coordinator = "test_kind_coord_" ^ string_of_int (Random.bits ()) in
+  Fun.protect
+    ~finally:(fun () ->
+      Sse.unregister observer;
+      Sse.unregister coordinator)
+    (fun () ->
+      let (_id1, _, _) = Sse.register ~kind:Sse.Observer observer ~last_event_id:0 in
+      let (_id2, _, _) =
+        Sse.register ~kind:Sse.Coordinator coordinator ~last_event_id:0
+      in
+      check int "observer count increments"
+        (before_observer + 1)
+        (Sse.client_count_by_kind Sse.Observer);
+      check int "coordinator count increments"
+        (before_coordinator + 1)
+        (Sse.client_count_by_kind Sse.Coordinator);
+      Sse.unregister observer;
+      check int "observer count decrements"
+        before_observer
+        (Sse.client_count_by_kind Sse.Observer);
+      check int "coordinator still present"
+        (before_coordinator + 1)
+        (Sse.client_count_by_kind Sse.Coordinator))
+
 let test_unregister_if_current_replacement_count () =
   let before = Sse.client_count () in
   let session_id =
@@ -448,6 +476,8 @@ let () =
       test_case "increments" `Quick test_client_count_increments;
       test_case "unregister decrements exactly" `Quick
         test_client_count_exact_unregister_decrement;
+      test_case "by kind tracks session roles" `Quick
+        test_client_count_by_kind_tracks_session_roles;
     ];
     "event_buffer", [
       test_case "buffer and retrieve" `Quick test_buffer_event_and_retrieve;

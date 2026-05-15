@@ -3,7 +3,7 @@
     @see {!In_container_login_provider} for full documentation.
     @since 2.90.0 *)
 
-include Credential_provider.S
+include Keeper_credential_provider.S
 
 (** {1 F-1 Security Gate} *)
 
@@ -21,7 +21,7 @@ val provider_gate :
   keeper_token:string ->
   operator_token:string ->
   identity:string ->
-  (unit, Credential_provider.error) result
+  (unit, Keeper_credential_provider.error) result
 
 (**/**)
 
@@ -31,7 +31,7 @@ module For_testing : sig
     keeper_token:string ->
     operator_token:string ->
     identity:string ->
-    (unit, Credential_provider.error) result
+    (unit, Keeper_credential_provider.error) result
 
   val ct_hex_equal : string -> string -> bool
 end

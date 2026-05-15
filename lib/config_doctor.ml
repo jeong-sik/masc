@@ -233,7 +233,7 @@ let current_inputs ~base_path_input ~default_base_path () =
     cwd = Sys.getcwd ();
     executable_name = Sys.executable_name;
     base_path_input;
-    env_masc_base_path = Env_config_core.base_path_raw_opt ();
+    env_masc_base_path = (Host_config.from_env ()).base_path_raw;
     env_config_dir = Config_dir_resolver.current_env_config_dir_opt ();
     env_personas_dir = Config_dir_resolver.current_env_personas_dir_opt ();
     resolution_source;

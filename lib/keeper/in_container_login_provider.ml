@@ -7,11 +7,11 @@
 
     The F-1 gate ([provider_gate]) rejects credentials whose token
     SHA-256 matches the operator's ambient token — this prevents the
-    keeper from acting as the operator.  The [Credential_provider.S]
+    keeper from acting as the operator.  The [Keeper_credential_provider.S]
     lifecycle stubs are included as scaffolding for subsequent PRs
     (F-2 hosts.yml rewrite, temp-file management, tear_down cleanup). *)
 
-open Credential_provider
+open Keeper_credential_provider
 
 (** F-1 security gate: reject when the keeper's token hash matches the
     operator's ambient token.  This prevents the keeper subprocess from
@@ -45,7 +45,7 @@ let provider_gate ~keeper_token ~operator_token ~identity =
 let ct_hex_equal a b =
   String.length a = 64 && String.length b = 64 && String.equal a b
 
-(* ── Credential_provider.S stubs ──────────────────────────────────
+(* ── Keeper_credential_provider.S stubs ──────────────────────────────────
    Full implementation in subsequent PRs.  The stubs return errors
    or noops so callers that resolve through this provider get a clear
    signal that the feature is not yet active. *)

@@ -1811,15 +1811,15 @@ let test_merge_keeper_trace_lines_includes_internal_history () =
      ^ "\n");
   let trajectory_lines =
     [
-      Masc_mcp.Trajectory.Tool_call
+      Trajectory.Tool_call
         {
-          Masc_mcp.Trajectory.ts = 1002.0;
+          Trajectory.ts = 1002.0;
           ts_iso = "1970-01-01T00:16:42Z";
           turn = 3;
           round = 1;
           tool_name = "masc_tasks";
           args_json = "{}";
-          gate_decision = Masc_mcp.Trajectory.Pass;
+          gate_decision = Trajectory.Pass;
           result = Some {|{"ok":true}|};
           duration_ms = 12;
           error = None;
@@ -1832,25 +1832,25 @@ let test_merge_keeper_trace_lines_includes_internal_history () =
   in
   check int "merged entry count" 3 (List.length merged);
   (match List.nth merged 0 with
-   | Masc_mcp.Trajectory.Thinking entry ->
+   | Trajectory.Thinking entry ->
      check string "first merged content" "first internal thought" entry.content
-   | Masc_mcp.Trajectory.Tool_call _ ->
+   | Trajectory.Tool_call _ ->
      fail "expected internal history entry first");
   (match List.nth merged 1 with
-   | Masc_mcp.Trajectory.Thinking entry ->
+   | Trajectory.Thinking entry ->
      check string "second merged content" "second internal thought" entry.content
-   | Masc_mcp.Trajectory.Tool_call _ ->
+   | Trajectory.Tool_call _ ->
      fail "expected internal history entry second");
   (match List.nth merged 2 with
-   | Masc_mcp.Trajectory.Tool_call entry ->
+   | Trajectory.Tool_call entry ->
      check string "tool entry remains present" "masc_tasks" entry.tool_name
-   | Masc_mcp.Trajectory.Thinking _ ->
+   | Trajectory.Thinking _ ->
      fail "expected tool entry last");
   let tool_only =
     List.filter
       (function
-        | Masc_mcp.Trajectory.Tool_call _ -> true
-        | Masc_mcp.Trajectory.Thinking _ -> false)
+        | Trajectory.Tool_call _ -> true
+        | Trajectory.Thinking _ -> false)
       merged
   in
   check int "thinking entries can still be filtered out" 1 (List.length tool_only))

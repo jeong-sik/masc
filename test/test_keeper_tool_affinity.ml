@@ -1,7 +1,7 @@
 (** Tests for Keeper_tool_affinity — trajectory-based tool pre-population. *)
 
 module Affinity = Masc_mcp.Keeper_tool_affinity
-module Trajectory = Masc_mcp.Trajectory
+module Trajectory = Trajectory
 module Discovered = Masc_mcp.Keeper_discovered_tools
 
 (* Helper: build a tool_stat record *)

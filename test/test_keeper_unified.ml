@@ -5367,7 +5367,7 @@ let test_run_keeper_cycle_skips_non_executable_phase () =
               Yojson.Safe.Util.(
                 receipt |> member "runtime_contract" |> member "keeper_name" |> to_string));
          let trajectory_path =
-           Masc_mcp.Trajectory.trajectory_path
+           Trajectory.trajectory_path
              (Masc_mcp.Coord.masc_root_dir config)
              meta.name
              (Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id)
@@ -5635,7 +5635,7 @@ let test_pre_tool_gate_records_durable_attempt_telemetry () =
        let masc_root = Masc_mcp.Coord.masc_root_dir config in
        let trace_id = "trace-pre-tool-gate" in
        let acc =
-         Masc_mcp.Trajectory.create_accumulator
+         Trajectory.create_accumulator
            ~masc_root
            ~keeper_name
            ~trace_id
@@ -5694,25 +5694,25 @@ let test_pre_tool_gate_records_durable_attempt_telemetry () =
          "Override"
          (Agent_sdk.Hooks.decision_kind_to_string
             (Agent_sdk.Hooks.classify_decision decision));
-       let entries = Masc_mcp.Trajectory.read_entries ~masc_root ~keeper_name ~trace_id in
+       let entries = Trajectory.read_entries ~masc_root ~keeper_name ~trace_id in
        check int "trajectory entry count" 1 (List.length entries);
        (match entries with
         | [ entry ] ->
           check string "trajectory tool" "keeper_bash" entry.tool_name;
           check int "trajectory turn" 3 entry.turn;
           (match entry.gate_decision with
-           | Masc_mcp.Trajectory.Reject reason ->
+           | Trajectory.Reject reason ->
              check
                bool
                "reject reason names pre-tool guard"
                true
                (contains_substring reason "pre_tool_use_guard")
-           | Masc_mcp.Trajectory.Pass -> fail "expected rejected gate decision");
+           | Trajectory.Pass -> fail "expected rejected gate decision");
           check bool "trajectory error present" true (Option.is_some entry.error)
         | _ -> fail "expected one trajectory entry");
        let raw_trajectory =
          read_jsonl_line
-           (Masc_mcp.Trajectory.trajectory_path masc_root keeper_name trace_id)
+           (Trajectory.trajectory_path masc_root keeper_name trace_id)
        in
        let runtime_contract = Yojson.Safe.Util.member "runtime_contract" raw_trajectory in
        check

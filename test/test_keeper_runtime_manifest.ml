@@ -594,7 +594,7 @@ let test_pre_dispatch_terminal_observation_emits_manifest_rows () =
         ~outcome:`Skipped
         ~terminal_reason_code:"phase_not_executable"
         ~activity_kind:"keeper.turn_skipped"
-        ~trajectory_outcome:(Masc_mcp.Trajectory.Gated "phase_not_executable")
+        ~trajectory_outcome:(Trajectory.Gated "phase_not_executable")
         ~keeper_turn_id
         ();
       let trace_id =
@@ -655,7 +655,7 @@ let test_runtime_trace_api_links_manifest_and_receipt_rows () =
         ~outcome:`Skipped
         ~terminal_reason_code:"phase_not_executable"
         ~activity_kind:"keeper.turn_skipped"
-        ~trajectory_outcome:(Masc_mcp.Trajectory.Gated "phase_not_executable")
+        ~trajectory_outcome:(Trajectory.Gated "phase_not_executable")
         ~keeper_turn_id
         ();
       let trace_id =
@@ -746,7 +746,7 @@ let test_runtime_trace_api_bounds_rows_but_counts_full_manifest () =
         ~outcome:`Skipped
         ~terminal_reason_code:"phase_not_executable"
         ~activity_kind:"keeper.turn_skipped"
-        ~trajectory_outcome:(Masc_mcp.Trajectory.Gated "phase_not_executable")
+        ~trajectory_outcome:(Trajectory.Gated "phase_not_executable")
         ~keeper_turn_id
         ();
       let trace_id =

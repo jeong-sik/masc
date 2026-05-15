@@ -1,0 +1,29 @@
+; RFC-0056 Phase 1A — extract Trajectory leaf module from flat masc_mcp.
+;
+; Trajectory is dependency-leaf in lib/ flat namespace: no references to
+; other lib/ root modules (Keeper.X mentions are Log.Keeper.X submodule
+; access via masc_log; Util.X mentions are Yojson.Safe.Util.Type_error).
+; Promotion to its own sub-library unblocks downstream Wave A extractions
+; (PR-1 server_keeper_api needs Trajectory accessible without parent
+; cycle).
+;
+; (include_subdirs no) opts out of parent's (include_subdirs unqualified).
+; (wrapped false) keeps the top-level identifier `Trajectory` unchanged
+; for ~50 bare callers across lib/ + bin/ + test/. The 26 wrapped-pattern
+; callers (Masc_mcp.Trajectory.X in tests) drop the prefix per RFC-0056
+; PoC §4.1 (G5 budget = qualifier-removal only).
+(include_subdirs no)
+
+(library
+ (name masc_mcp_trajectory)
+ (public_name masc_mcp.trajectory)
+ (wrapped false)
+ (flags (:standard -w +4))
+ (libraries
+  unix
+  eio
+  yojson
+  fs_compat
+  time_compat
+  masc_core
+  masc_log))

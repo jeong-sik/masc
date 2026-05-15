@@ -122,6 +122,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0080 | Tool registry SSOT — collapse 15-fold OR membership into typed Tool_name boundary | Draft | 2026-05-14 | 540-warn/boot split-brain (88 distinct tool names); typed `resolve` at policy load boundary |
 | 0081 | OAS Telemetry Envelope Context & Keeper/Goal Pivot Timeline | Draft | (this PR) 2026-05-14 | supersedes closed PR #15128 (RFC-0073) — emission-side carved out to RFC-OAS-019 (oas repo). Related RFC-0046, RFC-0049, RFC-0063 |
 | 0086 | Keeper namespace bulk promotion to sub-library | Draft | (this PR) 2026-05-15 | strategic successor to RFC-0056 leaf-sweep — Phase 2.A rename 38 non-prefix files + Phase 2.B `(wrapped false)` bulk promotion. Renumbered from 0085 due to collision with parallel host_config workstream. Related RFC-0056, RFC-0042, RFC-0050 |
+| 0087 | Tool Dispatch Path Unification + Legacy Purge | Implemented | (this PR) 2026-05-15 | 18-PR sprint post-RFC-0084: MCP `dispatch_by_tag` / internal_keeper_runtime 두 path가 5 typed observer (Tool_metrics / Tool_usage_log / Otel_dispatch_hook / Tool_output_validation / server_bootstrap_loops) 발화 통일 + 9 production /tmp 리터럴 박멸 + Env_config_core 6 path-related export 폭발 + env-var deprecation 메커니즘 7 entries 폭발 + 60+ underscore-prefix naming bug 박멸 + ~250 LOC dead code 삭제 + `Host_config.t` + `Dispatch_outcome.t` PPX deriving + `test_lib/ast_grep.ml` regression infra. Related RFC-0084, RFC-0056 |
 
 ### 다음 번호
 

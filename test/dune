@@ -1704,3 +1704,10 @@
  (name test_rfc_0085_pr8_config_dir_resolver_host_config)
  (modules test_rfc_0085_pr8_config_dir_resolver_host_config)
  (libraries alcotest ast_grep))
+
+; RFC-0085 PR-13 — Underscore-prefix audit: 1 truly-dead deletion +
+; 8 active rename across 7 modules.
+(test
+ (name test_rfc_0085_pr13_underscore_rename)
+ (modules test_rfc_0085_pr13_underscore_rename)
+ (libraries alcotest ast_grep))

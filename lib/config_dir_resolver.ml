@@ -410,18 +410,18 @@ let resolve_with inputs =
     personas;
   }
 
-let _cached_resolution : resolution option ref = ref None
+let cached_resolution : resolution option ref = ref None
 
 let resolve () =
-  match !_cached_resolution with
+  match !cached_resolution with
   | Some r -> r
   | None ->
       let r = resolve_with (inputs_from_env ()) in
-      _cached_resolution := Some r;
+      cached_resolution := Some r;
       r
 
 let reset () =
-  _cached_resolution := None
+  cached_resolution := None
 
 (* RFC-0058 §9: the on-disk cascade source is [cascade.toml]. *)
 let cascade_path_opt () =

@@ -215,7 +215,7 @@ let rec collect_string_list_values ~keys json =
     that uses command substitution to Critical — which is the bulk of
     real-world keeper bash invocations.  Splitting the severity here lets
     governance treat the two cases differently (Critical vs Medium). *)
-let _destructive_pattern_strings =
+let destructive_pattern_strings =
   lazy (List.map fst Eval_gate.destructive_patterns)
 
 (** Outcome of inspecting a tool input payload for shell-style risk.
@@ -232,7 +232,7 @@ type payload_severity =
     canonical destructive substring — these still warrant a confirmation
     gate but should not collapse to Critical. *)
 let payload_severity input : payload_severity =
-  let dest_pats = Lazy.force _destructive_pattern_strings in
+  let dest_pats = Lazy.force destructive_pattern_strings in
   let strings = collect_all_string_values input in
   let rec loop acc = function
     | [] -> acc
@@ -259,10 +259,9 @@ let has_empty_overwrite_payload input =
   collect_string_values ~keys:empty_overwrite_payload_keys input
   |> List.exists (fun text -> String.trim text = "")
 
-let _tool_names_of_input ~tool_name input =
-  let (_ : string) = tool_name in
-  collect_string_list_values ~keys:[ "tool_names" ] input
-  |> List.sort_uniq String.compare
+(* RFC-0085 PR-13 — Removed unused [_tool_names_of_input]: defined
+   in this module with underscore prefix (OCaml convention for unused)
+   and confirmed 0 callers across lib/ + bin/. *)
 
 let classify_with_contract_risk ~tool_name:_ ~input:_ =
   (* Contract_risk removed *)

@@ -51,10 +51,10 @@ type strategy =
 (* ================================================================ *)
 
 let memory_summary_prefix = "[MEMORY_SUMMARY]"
-let _legacy_memory_summary_prefix = "[MASC_MEMORY_SUMMARY v1]"
+let legacy_memory_summary_prefix = "[MASC_MEMORY_SUMMARY v1]"
 
 let goal_prefix = "[GOAL]"
-let _legacy_goal_prefix = "[MASC_GOAL]"
+let legacy_goal_prefix = "[MASC_GOAL]"
 
 let first_sentence (s : string) =
   let s = String.trim s in
@@ -173,9 +173,9 @@ let score_message ~index ~total (m : Agent_sdk.Types.message) : float =
   let score = w_recency *. recency +. w_role *. role_w +. w_tool *. tool_w in
   let score =
     if String.starts_with ~prefix:memory_summary_prefix msg_text
-       || String.starts_with ~prefix:_legacy_memory_summary_prefix msg_text
+       || String.starts_with ~prefix:legacy_memory_summary_prefix msg_text
        || String.starts_with ~prefix:goal_prefix msg_text
-       || String.starts_with ~prefix:_legacy_goal_prefix msg_text then
+       || String.starts_with ~prefix:legacy_goal_prefix msg_text then
       Float.max score anchor_boost
     else score
   in

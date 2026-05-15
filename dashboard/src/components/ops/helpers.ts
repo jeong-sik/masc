@@ -59,8 +59,6 @@ export function targetTypeLabel(value?: string | null): string {
       return 'Namespace'
     case 'keeper':
       return 'Keeper'
-    case 'swarm_run':
-      return 'Swarm Run'
     default:
       return value?.trim() || 'Target'
   }

@@ -41,7 +41,6 @@ The MASC Dashboard CSS has been refactored from a single 2199-line `global.css` 
 - `agent-monitor.css` - Agent monitoring views
 - `board.css` - Board/posts interface
 - `chat.css` - Chat interface
-- `command-swarm.css` - Command swarm UI
 - `dashboard.css` - Dashboard layouts
 - `governance.css` - Governance interfaces
 - `governance-agent.css` - Agent governance

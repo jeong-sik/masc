@@ -33,7 +33,7 @@ val dashboard_namespace_truth_http_json :
     namespace-truth read model.
 
     Cold-start fast-path: when the proactive
-    {!Server_dashboard_http_execution_surfaces._execution_cache} has
+    {!Server_dashboard_http_execution_surfaces.execution_cache} has
     not produced a successful first cycle and the warm-escape window
     (default 90s = 75s refresh timeout + 15s slack, capped via
     [MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S]) has not elapsed,
@@ -105,9 +105,9 @@ val broadcast_namespace_truth_snapshot :
     {!test/test_dashboard_namespace_truth} which need to reset the
     dedup cache between scenarios. *)
 
-val _last_namespace_truth_snapshot_hash :
+val last_namespace_truth_snapshot_hash :
   Digestif.SHA256.t option ref
-(** [_last_namespace_truth_snapshot_hash] is the dedup state for
+(** [last_namespace_truth_snapshot_hash] is the dedup state for
     {!broadcast_namespace_truth_snapshot}.  Holds the SHA-256 of
     the most recently broadcast snapshot (with [generated_at]
     stripped) or [None] when nothing has been broadcast yet.
@@ -119,5 +119,5 @@ val should_broadcast_namespace_truth_snapshot :
 (** [should_broadcast_namespace_truth_snapshot snapshot] computes
     the SHA-256 of the [generated_at]-stripped form of [snapshot]
     and returns [true] iff it differs from the previously
-    broadcast hash; updates {!_last_namespace_truth_snapshot_hash}
+    broadcast hash; updates {!last_namespace_truth_snapshot_hash}
     as a side effect.  Pinned at the dedup-contract seam. *)

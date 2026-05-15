@@ -23,14 +23,14 @@ let dashboard_namespace_truth_http_json ~state ~sw:_ ~clock _request =
     +. 15.0
   in
   let proactive_first_cycle_pending =
-    not (cached_surface_has_success Execution_surfaces._execution_cache)
+    not (cached_surface_has_success Execution_surfaces.execution_cache)
     &&
-    match Execution_surfaces._execution_cache.last_attempt_unix with
+    match Execution_surfaces.execution_cache.last_attempt_unix with
     | None -> true
     | Some attempt_ts ->
         let elapsed = Time_compat.now () -. attempt_ts in
         elapsed < warm_escape_s
-        && Option.is_none Execution_surfaces._execution_cache.last_error_unix
+        && Option.is_none Execution_surfaces.execution_cache.last_error_unix
   in
   if proactive_first_cycle_pending then
     Namespace_truth_support.compose_namespace_truth_initializing ~config
@@ -58,7 +58,7 @@ let dashboard_namespace_truth_http_json ~state ~sw:_ ~clock _request =
             ~default:15.0 ~min_v:1.0 ~max_v:120.0
         in
         let is_cold =
-          not (cached_surface_has_success Execution_surfaces._execution_cache)
+          not (cached_surface_has_success Execution_surfaces.execution_cache)
         in
         let base_timeout_s = if is_cold then cold_timeout_s else warm_timeout_s in
         let fiber_with_timeout ?(timeout_s = base_timeout_s) label f fallback =
@@ -101,7 +101,7 @@ let dashboard_namespace_truth_http_json ~state ~sw:_ ~clock _request =
           fiber_with_timeout ~timeout_s:shell_timeout_s "shell"
             (fun () -> dashboard_shell_http_json ~clock config)
             shell_fallback;
-        execution_ref := cached_surface_json Execution_surfaces._execution_cache;
+        execution_ref := cached_surface_json Execution_surfaces.execution_cache;
         command_ref := `Assoc [];
         let shell_json = !shell_ref in
         (* Update last-known-good shell on success. *)
@@ -139,7 +139,7 @@ let dashboard_namespace_truth_http_json ~state ~sw:_ ~clock _request =
     produced its first successful result (cold start). *)
 let namespace_truth_snapshot_from_caches (state : Mcp_server.server_state) :
     Yojson.Safe.t option =
-  if not (cached_surface_has_success Server_dashboard_http_execution_surfaces._execution_cache) then
+  if not (cached_surface_has_success Server_dashboard_http_execution_surfaces.execution_cache) then
     None
   else
     let config = state.Mcp_server.room_config in
@@ -154,7 +154,7 @@ let namespace_truth_snapshot_from_caches (state : Mcp_server.server_state) :
       else Atomic.get _last_good_shell
     in
     let execution_json =
-      cached_surface_json Server_dashboard_http_execution_surfaces._execution_cache
+      cached_surface_json Server_dashboard_http_execution_surfaces.execution_cache
     in
     let command_summary_json = `Assoc [] in
     Some
@@ -162,10 +162,10 @@ let namespace_truth_snapshot_from_caches (state : Mcp_server.server_state) :
          ~initialized:(Coord.is_initialized config) ~shell_json ~execution_json
          ~command_summary_json)
 
-let _last_namespace_truth_snapshot_hash : Digestif.SHA256.t option ref =
+let last_namespace_truth_snapshot_hash : Digestif.SHA256.t option ref =
   ref None
 
-let _namespace_truth_snapshot_hash_mu = Eio.Mutex.create ()
+let namespace_truth_snapshot_hash_mu = Eio.Mutex.create ()
 
 let rec normalize_namespace_truth_snapshot_for_hash (json : Yojson.Safe.t) :
     Yojson.Safe.t =
@@ -188,11 +188,11 @@ let should_broadcast_namespace_truth_snapshot (snapshot : Yojson.Safe.t) =
     snapshot |> normalize_namespace_truth_snapshot_for_hash |> Yojson.Safe.to_string
   in
   let hash = Digestif.SHA256.digest_string serialized in
-  Eio.Mutex.use_rw ~protect:true _namespace_truth_snapshot_hash_mu (fun () ->
-      match !_last_namespace_truth_snapshot_hash with
+  Eio.Mutex.use_rw ~protect:true namespace_truth_snapshot_hash_mu (fun () ->
+      match !last_namespace_truth_snapshot_hash with
       | Some prev when Digestif.SHA256.equal prev hash -> false
       | _ ->
-          _last_namespace_truth_snapshot_hash := Some hash;
+          last_namespace_truth_snapshot_hash := Some hash;
           true)
 
 (** Broadcast current namespace-truth snapshot to all Observer SSE sessions.
@@ -236,5 +236,5 @@ let broadcast_namespace_truth_snapshot (state : Mcp_server.server_state) : unit 
       Log.Dashboard.routine "project-snapshot unchanged, skipping SSE broadcast"
 
 let () =
-  Execution_surfaces._broadcast_namespace_truth_ref :=
+  Execution_surfaces.broadcast_namespace_truth_ref :=
     broadcast_namespace_truth_snapshot

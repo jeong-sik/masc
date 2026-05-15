@@ -48,8 +48,8 @@ let warm_shell_cache (state : Mcp_server.server_state) =
 ;;
 
 (* Delta-push: track last broadcast hash per event_type to skip unchanged payloads. *)
-let _last_broadcast_hash : (string, Digestif.SHA256.t) Hashtbl.t = Hashtbl.create 8
-let _broadcast_hash_mu = Eio.Mutex.create ()
+let last_broadcast_hash : (string, Digestif.SHA256.t) Hashtbl.t = Hashtbl.create 8
+let broadcast_hash_mu = Eio.Mutex.create ()
 
 (** Broadcast a single cached surface to all Observer SSE sessions.
     [event_type] becomes the SSE event "type" field.
@@ -59,15 +59,15 @@ let broadcast_cached_surface ~event_type (json : Yojson.Safe.t) : unit =
   let serialized = Yojson.Safe.to_string json in
   let hash = Digestif.SHA256.digest_string serialized in
   let should_broadcast =
-    Eio.Mutex.use_rw ~protect:true _broadcast_hash_mu (fun () ->
+    Eio.Mutex.use_rw ~protect:true broadcast_hash_mu (fun () ->
       let changed =
-        match Hashtbl.find_opt _last_broadcast_hash event_type with
+        match Hashtbl.find_opt last_broadcast_hash event_type with
         | Some prev -> not (Digestif.SHA256.equal prev hash)
         | None -> true
       in
       if changed
       then (
-        Hashtbl.replace _last_broadcast_hash event_type hash;
+        Hashtbl.replace last_broadcast_hash event_type hash;
         true)
       else false)
   in
@@ -98,7 +98,7 @@ let () =
   _operator_digest_broadcast_ref := broadcast_cached_surface ~event_type:"operator_digest"
 ;;
 
-let _execution_cache =
+let execution_cache =
   create_cached_surface
     (`Assoc
         [ "status", `String "initializing"
@@ -145,7 +145,7 @@ let invalidate_execution_cache_with_hooks_for_testing
 
 let invalidate_execution_cache () =
   invalidate_execution_cache_with_hooks_for_testing
-    ~invalidate_execution_surface:(fun () -> invalidate_cached_surface _execution_cache)
+    ~invalidate_execution_surface:(fun () -> invalidate_cached_surface execution_cache)
     ~invalidate_light_cache:(fun () ->
       Dashboard_cache.invalidate "execution:default:light")
     ()
@@ -156,11 +156,11 @@ let invalidate_execution_cache () =
     the "initializing" short-circuit. *)
 let seed_execution_cache_for_test () =
   mark_cached_surface_success
-    _execution_cache
+    execution_cache
     (`Assoc [ "status", `String "seeded_for_test" ])
 ;;
 
-let _transport_health_cache =
+let transport_health_cache =
   create_cached_surface
     (`Assoc
         [ "status", `String "initializing"
@@ -342,10 +342,10 @@ let with_transport_health_metadata ~config ~timeout_s json =
     json
 ;;
 
-let dashboard_execution_snapshot_json () = cached_surface_json _execution_cache
+let dashboard_execution_snapshot_json () = cached_surface_json execution_cache
 
 let dashboard_transport_health_snapshot_json () =
-  cached_surface_json _transport_health_cache
+  cached_surface_json transport_health_cache
 ;;
 
 (* Issue #8396: cache patchers used to recognise only 7 lifecycle event
@@ -502,12 +502,12 @@ let patch_surface_json_for_running_keepers (config : Coord.config) = function
   | other -> other
 ;;
 
-let patch_execution_cache_for_keeper ~keeper_name ~event ~keepalive_running =
-  match _execution_cache.json with
+let patchexecution_cache_for_keeper ~keeper_name ~event ~keepalive_running =
+  match execution_cache.json with
   | `Assoc fields ->
     (match List.assoc_opt "keepers" fields with
      | Some (`List rows) ->
-       _execution_cache.json
+       execution_cache.json
        <- `Assoc
             (upsert_assoc_field
                "keepers"
@@ -544,13 +544,13 @@ let patch_keeper_dependent_caches ~keeper_name ~event =
   match keepalive_running_of_lifecycle_event event with
   | None -> ()
   | Some keepalive_running ->
-    patch_execution_cache_for_keeper ~keeper_name ~event ~keepalive_running;
+    patchexecution_cache_for_keeper ~keeper_name ~event ~keepalive_running;
     patch_operator_snapshot_cache_for_keeper ~keeper_name ~event ~keepalive_running
 ;;
 
 (** Late-bound broadcast hook. Set after [broadcast_namespace_truth_snapshot]
     is defined in [Server_dashboard_http_namespace_truth]. *)
-let _broadcast_namespace_truth_ref : (Mcp_server.server_state -> unit) ref =
+let broadcast_namespace_truth_ref : (Mcp_server.server_state -> unit) ref =
   ref (fun (_state : Mcp_server.server_state) -> ())
 ;;
 
@@ -571,7 +571,7 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
       ~max_v:300.0
   in
   let compute () =
-    mark_cached_surface_attempt _execution_cache;
+    mark_cached_surface_attempt execution_cache;
     let started_at = Unix.gettimeofday () in
     try
       run_dashboard_compute
@@ -594,7 +594,7 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-      mark_cached_surface_error _execution_cache exn;
+      mark_cached_surface_error execution_cache exn;
       raise exn
   in
   Proactive_refresh.start
@@ -603,15 +603,15 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
     ~config:
       { (Proactive_refresh.default_config ~label:"execution" ~interval_s:60.0) with
         timeout_s = execution_refresh_timeout_s
-      ; on_error = Some (mark_cached_surface_error _execution_cache)
+      ; on_error = Some (mark_cached_surface_error execution_cache)
       ; warm_delay_s = 0.0
       }
     ~compute
     ~on_result:(fun json ->
-      mark_cached_surface_success _execution_cache json;
+      mark_cached_surface_success execution_cache json;
       broadcast_cached_surface
         ~event_type:"execution_snapshot"
-        (cached_surface_json _execution_cache
+        (cached_surface_json execution_cache
          |> with_execution_metadata
               ~config:room_config
               ~query:
@@ -621,7 +621,7 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
                    ~full_mode:false
                    ~light:true
                    ~default_light_request:true));
-      !_broadcast_namespace_truth_ref state)
+      !broadcast_namespace_truth_ref state)
 ;;
 
 let start_transport_health_refresh_loop ~state ~sw ~clock =
@@ -633,11 +633,11 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
       ~max_v:30.0
   in
   let compute () =
-    mark_cached_surface_attempt _transport_health_cache;
+    mark_cached_surface_attempt transport_health_cache;
     try Transport_metrics.transport_health_json ~config:state.Mcp_server.room_config with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-      mark_cached_surface_error _transport_health_cache exn;
+      mark_cached_surface_error transport_health_cache exn;
       raise exn
   in
   let interval_s = 30.0 in
@@ -647,15 +647,15 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
     ~config:
       { (Proactive_refresh.default_config ~label:"transport_health" ~interval_s) with
         timeout_s
-      ; on_error = Some (mark_cached_surface_error _transport_health_cache)
+      ; on_error = Some (mark_cached_surface_error transport_health_cache)
       ; warm_delay_s = 0.0
       }
     ~compute
     ~on_result:(fun json ->
-      mark_cached_surface_success _transport_health_cache json;
+      mark_cached_surface_success transport_health_cache json;
       broadcast_cached_surface
         ~event_type:"transport_health_snapshot"
-        (cached_surface_json _transport_health_cache
+        (cached_surface_json transport_health_cache
          |> with_transport_health_metadata
               ~config:state.Mcp_server.room_config
               ~timeout_s))
@@ -712,7 +712,7 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
          serving the empty initializing payload forever when proactive warm-up
          misses its first build window. *)
     cached_surface_or_first_success_json
-      _execution_cache
+      execution_cache
       ~cache_key:"execution:default:light"
       ~ttl:120.0
       ~clock
@@ -767,7 +767,7 @@ let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
 ;;
 
 let transport_health_cache_diagnostics () =
-  match cached_surface_json _transport_health_cache with
+  match cached_surface_json transport_health_cache with
   | `Assoc fields ->
     (match List.assoc_opt "projection_diagnostics" fields with
      | Some (`Assoc diagnostics) -> diagnostics
@@ -783,7 +783,7 @@ let dashboard_transport_health_http_json ~state =
       ~min_v:3.0
       ~max_v:30.0
   in
-  let json = cached_surface_json _transport_health_cache in
+  let json = cached_surface_json transport_health_cache in
   extend_projection_diagnostics
     json
     (("source", `String "cached_surface") :: transport_health_cache_diagnostics ())

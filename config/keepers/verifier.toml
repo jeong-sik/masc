@@ -7,6 +7,7 @@ proactive_idle_sec = 120
 proactive_cooldown_sec = 240
 per_provider_timeout = 120.0
 work_discovery_sources = ["awaiting_verification_tasks"]
+tool_denylist = ["keeper_task_claim", "masc_claim_next", "masc_claim_task"]
 github_identity = "reviewer-keepers-nonoperator-0506b"
 git_identity_mode = "github_identity"
 

@@ -25,7 +25,7 @@ let default_base_path () =
     match (Host_config.from_env ()).base_path with
     | Some _ -> Sys.getcwd ()
     | None -> (
-        match Env_config_core.home_dir_opt () with
+        match (Host_config.from_env ()).home with
         | Some home -> home
         | None -> Sys.getcwd ())
   in

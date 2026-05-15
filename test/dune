@@ -1705,6 +1705,13 @@
  (modules test_rfc_0085_pr8_config_dir_resolver_host_config)
  (libraries alcotest ast_grep))
 
+; RFC-0085 PR-10 — home + assets_dir env readers absorbed into
+; Host_config.t; Env_config_core.assets_dir_opt fully removed,
+; home_dir_opt demoted to file-private.
+(test
+ (name test_rfc_0085_pr10_home_assets_purge)
+ (modules test_rfc_0085_pr10_home_assets_purge)
+ (libraries alcotest ast_grep masc_mcp.host_config))
 ; RFC-0085 PR-9 — Env_config_core.base_path_opt + base_path_raw_opt
 ; public-surface purge; 9 caller migrate to Host_config.from_env;
 ; Host_config.t gains base_path (normalised) + base_path_raw fields.

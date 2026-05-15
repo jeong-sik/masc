@@ -214,7 +214,7 @@ let current_inputs ~base_path_input ~default_base_path () =
           if inherited_env_matches then
             "explicit_env"
           else if String.equal normalized_default normalized_base_path then
-            (match Env_config_core.home_dir_opt () with
+            (match (Host_config.from_env ()).home with
              | Some home ->
                  let normalized_home =
                    Env_config_core.normalize_masc_base_path_input home

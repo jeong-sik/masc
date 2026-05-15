@@ -81,7 +81,11 @@ val normalize_path_lexically : string -> string
 val normalize_masc_base_path_input : string -> string
 val existing_dir : string -> bool
 val existing_file : string -> bool
-val home_dir_opt : unit -> string option
+
+(* RFC-0085 PR-10 — [home_dir_opt] removed from the public surface;
+   callers read from [(Host_config.from_env ()).home] instead.  The
+   function is retained file-private because [base_path] /
+   [sb_path_opt] still call it internally. *)
 
 (** {1 Deprecation warnings + fallback getters} *)
 
@@ -120,7 +124,10 @@ val masc_host : unit -> string
 
 (** {1 Assets / cluster name} *)
 
-val assets_dir_opt : unit -> string option
+(* RFC-0085 PR-10 — [assets_dir_opt] removed completely.  Caller 0
+   after PR-10 migration; readers use
+   [(Host_config.from_env ()).assets_dir]. *)
+
 val cluster_name_opt : unit -> string option
 val cluster_name : unit -> string
 

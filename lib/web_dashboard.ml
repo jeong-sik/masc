@@ -31,7 +31,7 @@ let assets_root () =
       ]
       []
   in
-  match Env_config_core.assets_dir_opt () with
+  match (Host_config.from_env ()).assets_dir with
   | Some d when is_dir d -> d
   | _ ->
       match List.find_opt is_dir candidates with

@@ -850,7 +850,7 @@ let codex_config_path_opt () =
   | None ->
       Option.map
         (fun home -> Filename.concat home ".codex/config.toml")
-        (Env_config_core.home_dir_opt ())
+        ((Host_config.from_env ()).home)
 
 let sync_codex_mcp_config ~agent_name =
   if

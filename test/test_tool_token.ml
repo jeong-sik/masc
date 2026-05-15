@@ -81,7 +81,7 @@ let test_token_name_readable () =
 let test_mint_token_registered () =
   let tool = "__test_token_registered" in
   Tool_dispatch.register ~tool_name:tool
-    ~handler:(fun ~name:_ ~args:_ -> Some (Masc_mcp.Tool_result.quick_ok "ok"));
+    ~handler:(fun ~name:_ ~args:_ -> Some (Tool_result.quick_ok "ok"));
   Tool_dispatch.register_name_tag ~tool_name:tool ~tag:Mod_misc;
   match Tool_dispatch.mint_token ~name:tool with
   | Ok token -> check string "name" tool token.name

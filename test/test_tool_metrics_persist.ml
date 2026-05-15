@@ -2,7 +2,7 @@
 
 module P = Masc_mcp.Tool_metrics_persist
 module M = Masc_mcp.Tool_metrics
-module R = Masc_mcp.Tool_result
+module R = Tool_result
 
 let make_result ~name ~success ~duration_ms =
   { R.success; data = `Null; legacy_message = ""; tool_name = name; duration_ms; failure_class = None }

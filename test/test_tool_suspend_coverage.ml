@@ -10,7 +10,7 @@
 
     @since 2.76.0
 *)
-module Tool_args = Masc_mcp.Tool_args
+module Tool_args = Tool_args
 
 open Alcotest
 

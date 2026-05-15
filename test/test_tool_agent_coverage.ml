@@ -5,8 +5,8 @@
     masc_get_metrics, masc_agent_fitness, masc_collaboration_graph,
     masc_agent_card
 *)
-module Tool_args = Masc_mcp.Tool_args
-module Tool_result = Masc_mcp.Tool_result
+module Tool_args = Tool_args
+module Tool_result = Tool_result
 module Meta_cognition = Masc_mcp.Meta_cognition
 
 module Tool_agent = Masc_mcp.Tool_agent

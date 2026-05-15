@@ -1,7 +1,7 @@
 (** Tests for Tool_dispatch hooks — pre/post hook execution order and semantics *)
 
 module Tool_dispatch = Masc_mcp.Tool_dispatch
-module Tool_result = Masc_mcp.Tool_result
+module Tool_result = Tool_result
 module Tool_token = Masc_mcp.Tool_token
 module Dispatch_outcome = Masc_mcp.Dispatch_outcome
 

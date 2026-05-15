@@ -1,6 +1,6 @@
 (** Tests for Tool_result — structured tool result type *)
 
-module Tool_result = Masc_mcp.Tool_result
+module Tool_result = Tool_result
 module Tool_dispatch = Masc_mcp.Tool_dispatch
 module Time_compat = Time_compat
 

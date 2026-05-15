@@ -25,12 +25,12 @@ open Alcotest
 
 let mk_result ~tool_name ~text =
   let start = Unix.gettimeofday () in
-  Masc_mcp.Tool_result.ok ~tool_name ~start_time:start text
+  Tool_result.ok ~tool_name ~start_time:start text
 ;;
 
 let test_finalize_handled_fires_typed_hook () =
   let seen = ref [] in
-  let hook (outcome : Masc_mcp.Dispatch_outcome.t) (r : Masc_mcp.Tool_result.t option) =
+  let hook (outcome : Masc_mcp.Dispatch_outcome.t) (r : Tool_result.t option) =
     seen := (outcome, Option.is_some r) :: !seen
   in
   Masc_mcp.Tool_dispatch.clear_hooks ();
@@ -46,7 +46,7 @@ let test_finalize_handled_fires_typed_hook () =
 
 let test_finalize_no_handler_fires_typed_hook () =
   let seen = ref [] in
-  let hook (outcome : Masc_mcp.Dispatch_outcome.t) (r : Masc_mcp.Tool_result.t option) =
+  let hook (outcome : Masc_mcp.Dispatch_outcome.t) (r : Tool_result.t option) =
     seen := (outcome, Option.is_some r) :: !seen
   in
   Masc_mcp.Tool_dispatch.clear_hooks ();
@@ -60,7 +60,7 @@ let test_finalize_no_handler_fires_typed_hook () =
 
 let test_finalize_applies_transformer () =
   let called = ref 0 in
-  let transformer (r : Masc_mcp.Tool_result.t) : Masc_mcp.Tool_result.t =
+  let transformer (r : Tool_result.t) : Tool_result.t =
     incr called;
     { r with legacy_message = r.legacy_message ^ "[capped]" }
   in

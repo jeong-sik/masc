@@ -449,7 +449,7 @@ describe('TelemetryUnified', () => {
     })
     await flushUi()
 
-    expect(container.textContent).toContain('반복 그룹 1개 · 원본 3건')
+    expect(container.textContent).toContain('접힌 그룹 1개 · 원본 3건')
     expect(container.textContent).toContain('폴링 / 무동작')
     expect(container.textContent).toContain('폴링 / 무동작 · masc_status · 3 events')
     expect(container.textContent).toContain('task_claimed: keeper-alpha')
@@ -635,6 +635,131 @@ describe('TelemetryUnified', () => {
     }
     const receiptMatches = filterTelemetryDisplayItems(items, 'turn_done')
     expect(receiptMatches).toHaveLength(1)
+  })
+
+  it('groups turn-scoped lifecycle, nested telemetry_event, and tool rows', async () => {
+    const { buildTelemetryDisplayItems, filterTelemetryDisplayItems } = await loadPanel(
+      vi.fn().mockResolvedValue(baseTelemetry),
+      vi.fn().mockResolvedValue(baseSummary),
+    )
+
+    const items = buildTelemetryDisplayItems([
+      {
+        source: 'oas_event',
+        ts_unix: 1_775_709_400,
+        event_type: 'turn_ready',
+        agent_name: 'keeper-alpha-agent',
+        turn: 42,
+      },
+      {
+        source: 'oas_event',
+        ts_unix: 1_775_709_399,
+        event_type: 'telemetry_event',
+        payload: [
+          'Context_window_usage',
+          {
+            agent_name: 'keeper-alpha-agent',
+            turn: 42,
+            estimated_tokens: 1234,
+          },
+        ],
+      },
+      {
+        source: 'tool_call_io',
+        ts: 1_775_709_398,
+        keeper: 'alpha',
+        tool: 'keeper_tasks_list',
+        turn: 42,
+        runtime_contract: {
+          agent_name: 'keeper-alpha-agent',
+        },
+      },
+      {
+        source: 'oas_event',
+        ts_unix: 1_775_709_397,
+        event_type: 'telemetry_event',
+        payload: [
+          'Streaming_first_chunk',
+          {
+            provider: 'openai_compat',
+            model: 'deepseek-v4-flash:cloud',
+            ttfrc_ms: 1685,
+          },
+        ],
+      },
+    ])
+
+    expect(items[0]).toMatchObject({
+      kind: 'group',
+      category: 'turn',
+      label: 'keeper-alpha-agent · turn 42',
+      count: 3,
+    })
+    expect(items[1]).toMatchObject({ kind: 'entry' })
+    if (items[1]?.kind === 'entry') {
+      expect(items[1].entry.source).toBe('oas_event')
+      expect(items[1].entry.event_type).toBe('telemetry_event')
+    }
+
+    const contextMatches = filterTelemetryDisplayItems(items, 'Context_window_usage')
+    expect(contextMatches).toHaveLength(1)
+    expect(contextMatches[0]).toMatchObject({
+      kind: 'group',
+      category: 'turn',
+    })
+
+    const cloudMatches = filterTelemetryDisplayItems(items, 'deepseek-v4-flash:cloud')
+    expect(cloudMatches).toHaveLength(1)
+    expect(cloudMatches[0]).toMatchObject({ kind: 'entry' })
+  })
+
+  it('surfaces cloud Ollama provider details in OAS telemetry previews and search', async () => {
+    const { buildTelemetryDisplayItems, filterTelemetryDisplayItems } = await loadPanel(
+      vi.fn().mockResolvedValue(baseTelemetry),
+      vi.fn().mockResolvedValue(baseSummary),
+    )
+
+    const items = buildTelemetryDisplayItems([
+      {
+        source: 'oas_event',
+        ts_unix: 1_775_709_500,
+        event_type: 'masc:oas_worker:build',
+        agent_name: 'oas-tier-group.ollama_cloud_stable',
+        payload: {
+          agent: 'oas-tier-group.ollama_cloud_stable',
+          provider_kind: 'openai_compat',
+          model_id: 'kimi-k2.6:cloud',
+          provider_model_id: 'kimi-k2.6:cloud',
+          base_url: 'https://ollama.com/v1',
+          endpoint: 'https://ollama.com/v1/chat/completions',
+        },
+      },
+      {
+        source: 'oas_event',
+        ts_unix: 1_775_709_499,
+        event_type: 'telemetry_event',
+        payload: [
+          'Streaming_summary',
+          {
+            provider: 'openai_compat',
+            model: 'deepseek-v4-flash:cloud',
+            total_ms: 3450,
+          },
+        ],
+      },
+    ])
+
+    const buildMatches = filterTelemetryDisplayItems(items, 'ollama.com')
+    expect(buildMatches).toHaveLength(1)
+    expect(buildMatches[0]).toMatchObject({ kind: 'entry' })
+
+    const streamingMatches = filterTelemetryDisplayItems(items, 'Streaming_summary')
+    expect(streamingMatches).toHaveLength(1)
+    expect(streamingMatches[0]).toMatchObject({ kind: 'entry' })
+
+    const modelMatches = filterTelemetryDisplayItems(items, 'deepseek-v4-flash:cloud')
+    expect(modelMatches).toHaveLength(1)
+    expect(modelMatches[0]).toMatchObject({ kind: 'entry' })
   })
 
   it('expands grouped rows to reveal the condensed raw entries', async () => {

@@ -63,7 +63,7 @@ interface TelemetryState {
 
 const sourceMeta = telemetrySourceMeta
 
-type TelemetryCondensedCategory = 'heartbeat' | 'polling'
+type TelemetryCondensedCategory = 'heartbeat' | 'polling' | 'turn'
 
 interface TelemetryRouteFocus {
   readonly sessionId: string | null
@@ -104,6 +104,11 @@ const CONDENSED_CATEGORY_META: Record<TelemetryCondensedCategory, {
   polling: {
     label: '폴링 / 무동작',
     icon: 'P',
+    color: 'text-[var(--color-accent-fg)]',
+  },
+  turn: {
+    label: '턴',
+    icon: 'T',
     color: 'text-[var(--color-accent-fg)]',
   },
 }
@@ -148,6 +153,20 @@ function normalizeStringArray(value: unknown): string[] {
 function recordField(value: unknown, key: string): unknown {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
   return (value as Record<string, unknown>)[key]
+}
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+  return value as Record<string, unknown>
+}
+
+function normalizeNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
 }
 
 function uniqueStrings(values: Array<string | null | undefined>): string[] {
@@ -237,6 +256,79 @@ function canonicalToolName(value: string | null): string | null {
   return normalizeText(value)
 }
 
+function telemetryPayloadRecord(entry: TelemetryEntry): Record<string, unknown> | null {
+  const direct = recordValue(entry.payload)
+  if (direct) return direct
+  if (Array.isArray(entry.payload)) {
+    return recordValue(entry.payload[1])
+  }
+  return null
+}
+
+function telemetryPayloadKind(entry: TelemetryEntry): string | null {
+  if (Array.isArray(entry.payload)) return normalizeText(entry.payload[0])
+  return normalizeText(recordField(entry.payload, 'kind'))
+    ?? normalizeText(recordField(entry.payload, 'event_type'))
+}
+
+function telemetryPayloadProviderParts(entry: TelemetryEntry): string[] {
+  const payload = telemetryPayloadRecord(entry)
+  if (!payload) return []
+  return uniqueStrings([
+    normalizeText(recordField(payload, 'provider_kind')),
+    normalizeText(recordField(payload, 'provider')),
+    normalizeText(recordField(payload, 'model_id')),
+    normalizeText(recordField(payload, 'provider_model_id')),
+    normalizeText(recordField(payload, 'model')),
+    normalizeText(recordField(payload, 'base_url')),
+    normalizeText(recordField(payload, 'endpoint')),
+  ])
+}
+
+function compactTelemetryPayloadSearch(entry: TelemetryEntry): string {
+  const payload = entry.payload
+  if (payload == null) return ''
+  try {
+    return JSON.stringify(payload).slice(0, 4096)
+  } catch {
+    return ''
+  }
+}
+
+function telemetryTurn(entry: TelemetryEntry): number | null {
+  return normalizeNumber(entry.turn)
+    ?? normalizeNumber(recordField(telemetryPayloadRecord(entry), 'turn'))
+    ?? normalizeNumber(recordField(entry.runtime_contract, 'turn'))
+}
+
+function telemetryTurnActor(entry: TelemetryEntry): string | null {
+  const payload = telemetryPayloadRecord(entry)
+  return normalizeText(entry.agent_name)
+    ?? normalizeText(recordField(payload, 'agent_name'))
+    ?? normalizeText(recordField(entry.runtime_contract, 'agent_name'))
+    ?? normalizeText(entry.keeper_name)
+    ?? normalizeText(recordField(entry.runtime_contract, 'keeper_name'))
+    ?? normalizeText(entry.keeper)
+    ?? normalizeText(entry.name)
+    ?? normalizeText(entry.caller)
+    ?? normalizeText(entry.agent)
+}
+
+function entryTurnGroupingDescriptor(entry: TelemetryEntry): {
+  key: string
+  category: TelemetryCondensedCategory
+  label: string
+} | null {
+  const turn = telemetryTurn(entry)
+  const actor = telemetryTurnActor(entry)
+  if (turn == null || !actor) return null
+  return {
+    key: `turn:${actor}:${turn}`,
+    category: 'turn',
+    label: `${actor} · turn ${turn}`,
+  }
+}
+
 /** Per-keeper polling artifacts that fill the 100-entry window with no
  *  per-event signal: keeper_metric/heartbeat snapshots and the matching
  *  oas_event/masc:keeper:{snapshot,lifecycle} relays. We classify them as
@@ -277,6 +369,9 @@ function entryGroupingDescriptor(entry: TelemetryEntry): {
       label: 'fleet heartbeat',
     }
   }
+
+  const turnDescriptor = entryTurnGroupingDescriptor(entry)
+  if (turnDescriptor) return turnDescriptor
 
   const tool = canonicalToolName(telemetryToolName(entry))
   if (!tool || !NOISY_TOOL_NAMES.has(tool)) return null
@@ -345,15 +440,18 @@ function entryPreview(e: TelemetryEntry): string {
     }
     case 'oas_event': {
       const eventType = normalizeText(e.event_type) ?? normalizeText(e.type) ?? '(unknown event_type)'
-      const agentName = normalizeText(e.agent_name)
-      const toolName = normalizeText(e.tool_name)
-      const turn = typeof e.turn === 'number' ? e.turn : null
+      const payloadKind = telemetryPayloadKind(e)
+      const agentName = telemetryTurnActor(e)
+      const toolName = normalizeText(e.tool_name) ?? normalizeText(recordField(telemetryPayloadRecord(e), 'tool_name'))
+      const turn = telemetryTurn(e)
       const taskId = normalizeText(e.task_id)
       const parts = [
+        payloadKind,
         agentName,
         toolName,
         turn != null ? `turn ${turn}` : null,
         taskId,
+        ...telemetryPayloadProviderParts(e),
       ].filter(Boolean)
       return parts.length > 0 ? `${eventType}: ${parts.join(' · ')}` : eventType
     }
@@ -406,7 +504,8 @@ function telemetryEntryHaystack(entry: TelemetryEntry): string {
   const source = typeof entry.source === 'string' ? entry.source : ''
   const preview = entryPreview(entry)
   const badges = telemetryScopeBadges(entry).join(' ')
-  return `${source} ${preview} ${badges}`
+  const payload = entry.source === 'oas_event' ? compactTelemetryPayloadSearch(entry) : ''
+  return `${source} ${preview} ${badges} ${payload}`
 }
 
 function telemetryDisplayItemHaystack(item: TelemetryDisplayItem): string {
@@ -443,22 +542,10 @@ export function buildTelemetryDisplayItems(entries: TelemetryEntry[]): Telemetry
     oldestTs: number
     sourceKeys: Set<TelemetrySource>
     scopeBadges: string[]
-    /** Position in [items] where this group's row will eventually be
-     *  inserted via [flushGroup]. Used by the fleet-heartbeat group so it
-     *  stays at the position of its first entry even when intervening
-     *  rows of other categories have already been pushed past it. */
-    insertIndex: number
   }
 
   let activeGroup: ActiveGroup | null = null
-
-  /** A persistent group for the fleet polling/heartbeat category. Heartbeat
-   *  entries arrive interleaved with real activity, so we accumulate ALL
-   *  of them here regardless of position and only emit the merged row at
-   *  the end. The row is then spliced into [items] at the position of the
-   *  first heartbeat we saw — preserving rough chronology while collapsing
-   *  the noise. */
-  let fleetHeartbeat: ActiveGroup | null = null
+  const persistentGroups = new Map<string, ActiveGroup>()
 
   const renderGroup = (g: ActiveGroup): TelemetryDisplayItem => {
     if (g.entries.length === 1) {
@@ -506,29 +593,43 @@ export function buildTelemetryDisplayItems(entries: TelemetryEntry[]): Telemetry
     ])
   }
 
+  // Heartbeat and turn groups are causal groups, not just adjacent noisy rows.
+  // Build them up front so interleaved rows still collapse at first occurrence.
+  for (const entry of entries) {
+    const descriptor = entryGroupingDescriptor(entry)
+    if (!descriptor || (descriptor.key !== 'heartbeat:fleet' && descriptor.category !== 'turn')) {
+      continue
+    }
+    const ts = entryTimestamp(entry)
+    const existing = persistentGroups.get(descriptor.key)
+    if (existing) {
+      accumulate(existing, entry, ts)
+    } else {
+      persistentGroups.set(descriptor.key, {
+        key: descriptor.key,
+        category: descriptor.category,
+        label: descriptor.label,
+        entries: [entry],
+        latestTs: ts,
+        oldestTs: ts,
+        sourceKeys: new Set([entry.source]),
+        scopeBadges: telemetryScopeBadges(entry),
+      })
+    }
+  }
+
+  const emittedPersistentGroups = new Set<string>()
+
   for (const entry of entries) {
     const descriptor = entryGroupingDescriptor(entry)
     const ts = entryTimestamp(entry)
 
-    // Special path: fleet-wide polling/heartbeat artifacts always merge
-    // into a single group regardless of position. Without this, 14
-    // keepers heartbeating every 60s produce 14 separate single-entry
-    // rows that drown out real activity (#13002).
-    if (descriptor && descriptor.key === 'heartbeat:fleet') {
-      if (!fleetHeartbeat) {
-        fleetHeartbeat = {
-          key: descriptor.key,
-          category: descriptor.category,
-          label: descriptor.label,
-          entries: [entry],
-          latestTs: ts,
-          oldestTs: ts,
-          sourceKeys: new Set([entry.source]),
-          scopeBadges: telemetryScopeBadges(entry),
-          insertIndex: items.length + (activeGroup ? 1 : 0),
-        }
-      } else {
-        accumulate(fleetHeartbeat, entry, ts)
+    if (descriptor && persistentGroups.has(descriptor.key)) {
+      flushGroup()
+      if (!emittedPersistentGroups.has(descriptor.key)) {
+        const group = persistentGroups.get(descriptor.key) as ActiveGroup
+        items.push(renderGroup(group))
+        emittedPersistentGroups.add(descriptor.key)
       }
       continue
     }
@@ -559,16 +660,10 @@ export function buildTelemetryDisplayItems(entries: TelemetryEntry[]): Telemetry
       oldestTs: ts,
       sourceKeys: new Set([entry.source]),
       scopeBadges: telemetryScopeBadges(entry),
-      insertIndex: items.length,
     }
   }
 
   flushGroup()
-
-  if (fleetHeartbeat) {
-    const idx = Math.max(0, Math.min(fleetHeartbeat.insertIndex, items.length))
-    items.splice(idx, 0, renderGroup(fleetHeartbeat))
-  }
 
   return items
 }
@@ -1193,7 +1288,7 @@ export function TelemetryUnified() {
             ? ` · 검색 매치 ${displayItems.length.toLocaleString()}건`
             : ''}
           ${condensed.groups > 0
-            ? ` · 반복 그룹 ${condensed.groups.toLocaleString()}개 · 원본 ${condensed.groupedEntries.toLocaleString()}건`
+            ? ` · 접힌 그룹 ${condensed.groups.toLocaleString()}개 · 원본 ${condensed.groupedEntries.toLocaleString()}건`
             : ''}
         </div>
         ${condensed.groups > 0 ? html`

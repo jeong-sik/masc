@@ -235,7 +235,8 @@ let observe_policy_config_load_error ~base_path ~env_config_dir msg =
     base_path config_dir msg
 
 let get_policy_config_result ~base_path =
-  let env_config_dir = Env_config.config_dir_opt () in
+  (* RFC-0085 PR-8 — route env-derived config_dir read through Host_config. *)
+  let env_config_dir = (Host_config.from_env ()).config_dir in
   match !_policy_config_cache with
   | Some { base_path = cached_base_path; env_config_dir = cached_env; result }
     when String.equal cached_base_path base_path && Option.equal String.equal cached_env env_config_dir ->

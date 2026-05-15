@@ -74,9 +74,11 @@ let allow_inherited_test_base_path () =
   Env_config_core.get_bool ~default:false
     test_base_path_override_env
 
-let initial_env_base_path = Env_config_core.base_path_raw_opt ()
-let initial_env_config_dir = Env_config_core.config_dir_opt ()
-let initial_env_personas_dir = Env_config_core.personas_dir_opt ()
+(* RFC-0085 PR-8 — Route path-derived env reads through Host_config.from_env
+   so the SSOT lives in lib/host_config/ instead of Env_config_core. *)
+let initial_env_base_path = (Host_config.from_env ()).base_path
+let initial_env_config_dir = (Host_config.from_env ()).config_dir
+let initial_env_personas_dir = (Host_config.from_env ()).personas_dir
 let initial_env_home = Sys.getenv_opt "HOME" |> trim_opt
 
 let sanitize_inherited_test_env_opt ~running_under_test_executable ~allow_inherited
@@ -118,7 +120,7 @@ let current_env_config_dir_opt () =
       (running_under_test_executable ())
     ~allow_inherited:(allow_inherited_test_config_paths ())
     ~initial:initial_env_config_dir
-    ~current:(Env_config_core.config_dir_opt ())
+    ~current:((Host_config.from_env ()).config_dir)
 
 let current_env_base_path_opt () =
   sanitize_inherited_test_base_path_opt
@@ -126,7 +128,7 @@ let current_env_base_path_opt () =
       (running_under_test_executable ())
     ~allow_inherited:(allow_inherited_test_base_path ())
     ~initial:initial_env_base_path
-    ~current:(Env_config_core.base_path_raw_opt ())
+    ~current:((Host_config.from_env ()).base_path)
     ~home:initial_env_home
 
 let current_env_personas_dir_opt () =
@@ -135,7 +137,7 @@ let current_env_personas_dir_opt () =
       (running_under_test_executable ())
     ~allow_inherited:(allow_inherited_test_config_paths ())
     ~initial:initial_env_personas_dir
-    ~current:(Env_config_core.personas_dir_opt ())
+    ~current:((Host_config.from_env ()).personas_dir)
 
 let current_env_home_opt () =
   sanitize_inherited_test_env_opt

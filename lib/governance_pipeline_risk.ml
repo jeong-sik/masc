@@ -86,10 +86,9 @@ let combinatorial_risk_escalation ~trifecta_active ~tool_name ~base_risk ~input 
 let risk_overrides : (string * risk_level) list =
   [
     ("masc_a2a_query_skill", Low); (* "skill" contains "kill" substring *)
-    ("masc_goal_upsert", High);
+    ("masc_goal_upsert", Medium);
     ("masc_goal_review", High);
-    ("masc_goal_transition", High);
-    ("masc_goal_verify", High);
+    ("masc_goal_verify", Medium);
     ("masc_keeper_msg", Low);
     ("masc_claim_next", Medium); ("masc_claim_task", Medium);
     ("masc_worktree_create", Medium); (* routine sandbox setup; removal stays Critical *)
@@ -149,6 +148,11 @@ let transition_action input =
            if trimmed = "" then None else Some (String.lowercase_ascii trimmed)
        | _ -> None)
   | _ -> None
+
+let goal_transition_risk input =
+  match transition_action input with
+  | Some ("request_complete" | "pause" | "resume" | "reopen") -> Medium
+  | Some _ | None -> High
 
 let rec collect_string_values ~keys json =
   match json with
@@ -294,7 +298,10 @@ let baseline_risk ~tool_name ~input =
   match classify_with_metadata ~tool_name with
   | Some level -> level
   | None -> (
-      match List.assoc_opt tool_name risk_overrides with
+      if String.equal tool_name "masc_goal_transition"
+      then goal_transition_risk input
+      else
+        match List.assoc_opt tool_name risk_overrides with
       | Some level -> level
       | None ->
           if

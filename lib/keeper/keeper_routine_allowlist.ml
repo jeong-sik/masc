@@ -107,6 +107,30 @@ let rules : rule list =
       label = "keeper_routine.keeper_task_submit_for_verification";
     };
 
+    (* Goal Store routine planning/proof surface. Lifecycle decisions that
+       assert operator authority or drop goals stay High and are not listed
+       here; routine upserts, completion requests, pause/resume/reopen, and
+       verifier votes may proceed through the keeper path. *)
+    {
+      tool = "masc_goal_upsert";
+      max_risk = RL.Medium;
+      allowed_actions = None;
+      label = "keeper_routine.masc_goal_upsert";
+    };
+    {
+      tool = "masc_goal_transition";
+      max_risk = RL.Medium;
+      allowed_actions =
+        Some [ "request_complete"; "pause"; "resume"; "reopen" ];
+      label = "keeper_routine.masc_goal_transition";
+    };
+    {
+      tool = "masc_goal_verify";
+      max_risk = RL.Medium;
+      allowed_actions = None;
+      label = "keeper_routine.masc_goal_verify";
+    };
+
     (* PR-E (Plan v3 Leak 3): keeper_shell op=git_clone is the canonical
        way for a keeper to bring its work tree into the docker sandbox.
        Without this rule the [keeper_shell] tool name itself trips

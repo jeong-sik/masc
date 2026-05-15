@@ -50,6 +50,7 @@ let repository_json (repo : Repo_manager_types.repository) =
       ("name", `String repo.name);
       ("url", `String repo.url);
       ("local_path", `String repo.local_path);
+      ("aliases", `List (List.map (fun s -> `String s) repo.aliases));
       ("default_branch", `String repo.default_branch);
       ("credential_id", `String repo.credential_id);
       ("keepers", `List (List.map (fun s -> `String s) repo.keepers));
@@ -181,6 +182,7 @@ let parse_repository_json body_str =
               get_string_field fields "default_branch"
             in
             let* raw_credential_id = get_string_field fields "credential_id" in
+            let* aliases = get_string_list_field fields "aliases" [] in
             let* keepers = get_string_list_field fields "keepers" [] in
             let* auto_sync = get_bool_field fields "auto_sync" false in
             let* sync_interval = get_int_field fields "sync_interval" 300 in
@@ -192,6 +194,7 @@ let parse_repository_json body_str =
                 local_path =
                   Option.value ~default:(Filename.concat ".masc/repos" id)
                     raw_local_path;
+                aliases;
                 default_branch = Option.value ~default:"main" raw_default_branch;
                 credential_id = Option.value ~default:"default" raw_credential_id;
                 keepers;

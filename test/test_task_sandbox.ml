@@ -609,6 +609,19 @@ let test_create_infers_repo_from_task_repo_mentions () =
         ignore
           (seed_playground_clone ~base_path:dir ~agent_name:"mention-agent"
              ~source_repo:masc_repo);
+        write_file
+          (Filename.concat
+             (Filename.concat
+                (Common.masc_dir_from_base_path ~base_path:dir)
+                "config")
+             "repositories.toml")
+          {|
+[repository.masc]
+name = "masc"
+url = "https://github.com/jeong-sik/masc-mcp"
+local_path = ".masc/repos/masc"
+aliases = ["keeper"]
+|};
         let mention_cases =
           [
             ( "trailing-period",
@@ -617,6 +630,14 @@ let test_create_infers_repo_from_task_repo_mentions () =
             ( "url-path",
               "Check github.com/org/masc-mcp before making changes",
               "" );
+            ( "configured-repo-name-alias",
+              "Document MASC_EXECUTOR_DOMAIN_COUNT runtime knob",
+              "The task mentions MASC runtime configuration but not the clone \
+               directory." );
+            ( "configured-extra-alias",
+              "Verify keeper-domain-pool failure logging",
+              "The task uses the operator's keeper vocabulary without spelling \
+               out masc-mcp." );
           ]
         in
         List.iter

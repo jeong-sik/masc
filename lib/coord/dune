@@ -60,6 +60,7 @@
   time_compat
   fs_compat
   yojson
+  otoml
   unix
   re
   re.str

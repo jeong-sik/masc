@@ -646,6 +646,92 @@ let tokenize_repo_evidence text =
   |> List.map trim_repo_token
   |> List.filter (fun token -> token <> "")
 
+let strip_git_suffix token =
+  if String.ends_with ~suffix:".git" token then
+    String.sub token 0 (String.length token - 4)
+  else
+    token
+
+let normalize_repo_alias token =
+  token |> trim_repo_token |> String.lowercase_ascii |> strip_git_suffix
+
+let repo_token_variants token =
+  let token = normalize_repo_alias token in
+  let basename = Filename.basename token |> normalize_repo_alias in
+  let split_parts =
+    token
+    |> String.split_on_char '/'
+    |> List.concat_map (String.split_on_char '_')
+    |> List.concat_map (String.split_on_char '-')
+    |> List.concat_map (String.split_on_char '.')
+    |> List.map normalize_repo_alias
+  in
+  token :: basename :: split_parts
+  |> List.filter (fun s -> s <> "")
+  |> List.sort_uniq String.compare
+
+let toml_table_opt value =
+  try Some (Otoml.get_table value) with
+  | _ -> None
+
+let toml_string_opt tbl key =
+  match List.assoc_opt key tbl with
+  | None -> None
+  | Some value -> (
+      try Some (Otoml.get_string value) with
+      | _ -> None)
+
+let toml_string_array_or_empty tbl key =
+  match List.assoc_opt key tbl with
+  | None -> []
+  | Some value -> (
+      try Otoml.get_array Otoml.get_string value with
+      | _ -> [])
+
+let repository_config_path config =
+  Filename.concat
+    (Filename.concat
+       (masc_dir_from_base_path ~base_path:config.base_path)
+       "config")
+    "repositories.toml"
+
+let repository_aliases_for_candidate config ~repo_name =
+  let repo_name = normalize_repo_alias repo_name in
+  let path = repository_config_path config in
+  if repo_name = "" || not (safe_file_exists path) then
+    []
+  else
+    try
+      let toml = Otoml.Parser.from_file path in
+      match Otoml.find_opt toml Fun.id [ "repository" ] with
+      | None -> []
+      | Some repositories -> (
+          match toml_table_opt repositories with
+          | None -> []
+          | Some rows ->
+            rows
+            |> List.concat_map (fun (section_name, value) ->
+                   match toml_table_opt value with
+                   | None -> []
+                   | Some tbl ->
+                     let base_aliases =
+                       [ Some section_name
+                       ; toml_string_opt tbl "name"
+                       ; Option.map Filename.basename (toml_string_opt tbl "url")
+                       ; Option.map Filename.basename (toml_string_opt tbl "local_path")
+                       ]
+                       |> List.filter_map Fun.id
+                     in
+                     let aliases =
+                       base_aliases @ toml_string_array_or_empty tbl "aliases"
+                       |> List.concat_map repo_token_variants
+                       |> List.sort_uniq String.compare
+                     in
+                     if List.mem repo_name aliases then aliases else [])
+            |> List.sort_uniq String.compare)
+    with
+    | _ -> []
+
 (* Route to the SSOT helper rather than allocating String.sub on every
    step.  Keeps semantics aligned across modules (empty needle returns
    true). *)
@@ -706,11 +792,26 @@ let repo_candidates_in_dir repos_dir =
     |> List.sort (fun a b -> String.compare a.name b.name)
 
 let repo_name_mentioned ~tokens repo_name =
-  List.exists
-    (fun token ->
-       String.equal token repo_name
-       || String.equal (Filename.basename token) repo_name)
-    tokens
+  let aliases =
+    [ normalize_repo_alias repo_name
+    ; Filename.basename repo_name |> normalize_repo_alias
+    ]
+    |> List.filter (fun s -> s <> "")
+    |> List.sort_uniq String.compare
+  in
+  let token_variants =
+    tokens |> List.concat_map repo_token_variants |> List.sort_uniq String.compare
+  in
+  List.exists (fun alias -> List.mem alias token_variants) aliases
+
+let repo_alias_mentioned ~tokens ~aliases =
+  let aliases =
+    aliases |> List.concat_map repo_token_variants |> List.sort_uniq String.compare
+  in
+  let token_variants =
+    tokens |> List.concat_map repo_token_variants |> List.sort_uniq String.compare
+  in
+  List.exists (fun alias -> List.mem alias token_variants) aliases
 
 let task_by_id config task_id =
   let backlog = Coord_backlog.read_backlog config in
@@ -721,9 +822,15 @@ let max_path_hints = 20
 let mention_score_value = 100
 let file_score_weight = 25
 
-let score_repo_candidate ~(task : task) ~tokens ~path_hints candidate =
+let score_repo_candidate config ~(task : task) ~tokens ~path_hints candidate =
+  let aliases =
+    repository_aliases_for_candidate config ~repo_name:candidate.name
+  in
   let mention_score =
-    if repo_name_mentioned ~tokens candidate.name then mention_score_value
+    if
+      repo_name_mentioned ~tokens candidate.name
+      || repo_alias_mentioned ~tokens ~aliases
+    then mention_score_value
     else 0
   in
   let file_score =
@@ -874,7 +981,7 @@ let infer_task_repo_name config ~agent_name ~task_id =
           let ranked =
             candidates
             |> List.map (fun candidate ->
-                   ( score_repo_candidate ~task ~tokens ~path_hints candidate
+                   ( score_repo_candidate config ~task ~tokens ~path_hints candidate
                    , candidate ))
             |> List.sort (fun (sa, a) (sb, b) ->
                    match compare sb sa with

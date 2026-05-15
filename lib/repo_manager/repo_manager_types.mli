@@ -13,6 +13,7 @@ type repository = {
   name : string;
   url : string;
   local_path : string;
+  aliases : string list [@default []];
   default_branch : string;
   credential_id : string;
   keepers : string list;

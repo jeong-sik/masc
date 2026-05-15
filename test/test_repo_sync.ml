@@ -8,6 +8,7 @@ let sample_repo ?(auto_sync = true) ?(sync_interval = 300) ?(updated_at = Int64.
     name = "repo-" ^ id;
     url = "https://github.com/test/" ^ id;
     local_path = "repos/" ^ id;
+    aliases = [];
     default_branch = "main";
     credential_id = "cred-1";
     keepers = [];

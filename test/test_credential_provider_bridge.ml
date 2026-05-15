@@ -110,6 +110,7 @@ let make_repo ~id ~credential_id : repository =
     name = "repo-" ^ id;
     url = "https://github.com/test/" ^ id;
     local_path = "repos/" ^ id;
+    aliases = [];
     default_branch = "main";
     credential_id;
     keepers = [];

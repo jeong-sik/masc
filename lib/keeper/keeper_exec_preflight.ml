@@ -5,6 +5,10 @@ let host_zsh = (Host_config.host ()).host_zsh
 
 let json_string_field name json = Json_util.get_string json name
 
+let json_string_opt = function
+  | Some value -> `String value
+  | None -> `Null
+
 let handle_keeper_preflight_check
       ~(config : Coord.config)
       ~(meta : keeper_meta)
@@ -96,7 +100,27 @@ let handle_keeper_preflight_check
     add_check "accountability_risk" (not accountability_risk)
       (if accountability_risk then "RISK_HIGH" else "ok")
   in
-  (* Check 6: sandbox clone target *)
+  (* Check 6: autonomous activation *)
+  let activation_blocker =
+    if meta.paused then Some "paused"
+    else if not meta.autoboot_enabled then Some "autoboot_disabled"
+    else None
+  in
+  let activation_ok = Option.is_none activation_blocker in
+  let activation_hint =
+    match activation_blocker with
+    | None -> None
+    | Some "paused" ->
+      Some "resume keeper before expecting autonomous keepalive or PR fan-out"
+    | Some "autoboot_disabled" ->
+      Some "set autoboot_enabled=true before expecting autonomous keepalive or PR fan-out"
+    | Some reason -> Some ("activation blocked: " ^ reason)
+  in
+  let () =
+    add_check "autonomous_activation" activation_ok
+      (Option.value activation_blocker ~default:"ok")
+  in
+  (* Check 7: sandbox clone target *)
   let repo_name_arg =
     Safe_ops.json_string ~default:"" "repo_name" args |> String.trim
   in
@@ -137,6 +161,14 @@ let handle_keeper_preflight_check
         ; "accountability_risk", `Bool accountability_risk
         ; "risk_band", `String risk_band
         ; "routing_hint", `String routing_hint
+        ; "autonomous_activation"
+        , `Assoc
+            [ "ok", `Bool activation_ok
+            ; "autoboot_enabled", `Bool meta.autoboot_enabled
+            ; "paused", `Bool meta.paused
+            ; "blocker", json_string_opt activation_blocker
+            ; "hint", json_string_opt activation_hint
+            ]
         ; "clone_target", `String clone_target
         ; "repo_readiness", repo_readiness
         ; "keeper", `String meta.name

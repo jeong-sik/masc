@@ -327,6 +327,58 @@ let test_preflight_structured_block_is_execution_success () =
       check bool "preflight raw ok=false preserved" false
         Yojson.Safe.Util.(member "ok" json |> to_bool))
 
+let test_preflight_reports_autoboot_disabled_activation_blocker () =
+  with_exec_fixture "keeper_exec_tools_preflight_autoboot_disabled"
+    (fun ~config ~meta ~ctx_work ->
+      let meta = { meta with autoboot_enabled = false; paused = false } in
+      let result =
+        KET.execute_keeper_tool_call_with_outcome
+          ~config ~meta ~ctx_work ~exec_cache:None
+          ~name:"keeper_preflight_check"
+          ~input:(`Assoc [])
+          ()
+      in
+      check string "preflight outcome" "success"
+        (match result.outcome with `Success -> "success" | `Failure -> "failure");
+      let json = Yojson.Safe.from_string result.raw_output in
+      let activation =
+        Yojson.Safe.Util.(member "autonomous_activation" json)
+      in
+      check bool "activation blocks disabled autoboot" false
+        Yojson.Safe.Util.(member "ok" activation |> to_bool);
+      check string "activation blocker" "autoboot_disabled"
+        Yojson.Safe.Util.(member "blocker" activation |> to_string);
+      check bool "autoboot exposed" false
+        Yojson.Safe.Util.(member "autoboot_enabled" activation |> to_bool);
+      check bool "paused exposed" false
+        Yojson.Safe.Util.(member "paused" activation |> to_bool))
+
+let test_preflight_reports_paused_activation_blocker_first () =
+  with_exec_fixture "keeper_exec_tools_preflight_paused"
+    (fun ~config ~meta ~ctx_work ->
+      let meta = { meta with autoboot_enabled = false; paused = true } in
+      let result =
+        KET.execute_keeper_tool_call_with_outcome
+          ~config ~meta ~ctx_work ~exec_cache:None
+          ~name:"keeper_preflight_check"
+          ~input:(`Assoc [])
+          ()
+      in
+      check string "preflight outcome" "success"
+        (match result.outcome with `Success -> "success" | `Failure -> "failure");
+      let json = Yojson.Safe.from_string result.raw_output in
+      let activation =
+        Yojson.Safe.Util.(member "autonomous_activation" json)
+      in
+      check bool "activation blocks paused keeper" false
+        Yojson.Safe.Util.(member "ok" activation |> to_bool);
+      check string "paused wins blocker priority" "paused"
+        Yojson.Safe.Util.(member "blocker" activation |> to_string);
+      check bool "autoboot still exposed" false
+        Yojson.Safe.Util.(member "autoboot_enabled" activation |> to_bool);
+      check bool "paused exposed" true
+        Yojson.Safe.Util.(member "paused" activation |> to_bool))
+
 let registered_dispatch_probe_tool = "test_keeper_registered_dispatch_probe"
 
 let register_registered_dispatch_probe () =
@@ -516,6 +568,10 @@ let () =
         test_execute_with_outcome_bad_query_is_failure;
       test_case "preflight block is execution success" `Quick
         test_preflight_structured_block_is_execution_success;
+      test_case "preflight reports autoboot disabled activation blocker" `Quick
+        test_preflight_reports_autoboot_disabled_activation_blocker;
+      test_case "preflight reports paused activation blocker first" `Quick
+        test_preflight_reports_paused_activation_blocker_first;
       test_case "registered dispatch does not require masc_ prefix" `Quick
         test_registered_tool_dispatch_without_masc_prefix;
     ]);

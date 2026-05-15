@@ -262,6 +262,13 @@ function KeeperWorkRouteLinks(
   if (links.length === 0) return null
   return html`
     <div class="ide-keeper-work-links" aria-label=${label}>
+      <span
+        class="ide-keeper-work-route-count"
+        title=${`${links.length} linked keeper work context routes`}
+        aria-label=${`${links.length} linked keeper work context routes`}
+      >
+        CTX ${links.length}
+      </span>
       ${links.map(link => html`
         <button
           key=${link.id}

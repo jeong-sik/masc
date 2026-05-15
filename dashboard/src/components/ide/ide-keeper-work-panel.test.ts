@@ -81,6 +81,8 @@ describe('IdeKeeperWorkPanel', () => {
     expect(container.textContent).toContain('50%')
     expect(container.textContent).toContain('Goal')
     expect(container.textContent).toContain('Task')
+    expect(container.querySelector('.ide-keeper-work-goal .ide-keeper-work-route-count')?.textContent)
+      .toBe('CTX 2')
 
     fireEvent.click(buttonByText(container, 'Goal'))
     expect(window.location.hash).toBe('#workspace?section=planning&goal=goal-runtime')
@@ -103,6 +105,8 @@ describe('IdeKeeperWorkPanel', () => {
     const taskLinks = Array.from(
       container.querySelectorAll<HTMLButtonElement>('.ide-keeper-work-card .ide-keeper-work-links button'),
     )
+    expect(container.querySelector('.ide-keeper-work-card .ide-keeper-work-route-count')?.textContent)
+      .toBe('CTX 5')
     expect(taskLinks.map(link => link.textContent)).toEqual([
       'Goal',
       'Task',

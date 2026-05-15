@@ -476,6 +476,8 @@ val metric_llm_provider_request_latency : string
 val metric_llm_provider_request_latency_clamped : string
 val metric_llm_provider_streaming_first_chunk : string
 val metric_llm_provider_streaming_inter_chunk : string
+val metric_llm_provider_streaming_first_chunk_invalid : string
+val metric_llm_provider_streaming_inter_chunk_invalid : string
 val metric_llm_provider_capability_drops : string
 val metric_llm_provider_cache_hits : string
 val metric_llm_provider_cache_misses : string

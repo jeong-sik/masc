@@ -746,6 +746,8 @@ let metric_llm_provider_request_latency = "masc_llm_provider_request_latency_sec
 let metric_llm_provider_request_latency_clamped = "masc_llm_provider_request_latency_clamped_total"
 let metric_llm_provider_streaming_first_chunk = "masc_llm_provider_streaming_first_chunk_seconds"
 let metric_llm_provider_streaming_inter_chunk = "masc_llm_provider_streaming_inter_chunk_seconds"
+let metric_llm_provider_streaming_first_chunk_invalid = "masc_llm_provider_streaming_first_chunk_invalid_total"
+let metric_llm_provider_streaming_inter_chunk_invalid = "masc_llm_provider_streaming_inter_chunk_invalid_total"
 let metric_llm_provider_capability_drops = "masc_llm_provider_capability_drops_total"
 let metric_llm_provider_cache_hits = "masc_llm_provider_cache_hits_total"
 let metric_llm_provider_cache_misses = "masc_llm_provider_cache_misses_total"
@@ -2249,6 +2251,18 @@ let init () =
     ~help:"OAS streaming time to first parsed chunk. Labels: provider, model." ();
   register_histogram ~name:metric_llm_provider_streaming_inter_chunk
     ~help:"OAS streaming inter-chunk gap. Labels: provider, model." ();
+  add
+    metric_llm_provider_streaming_first_chunk_invalid
+    "Total OAS streaming first-chunk observations rejected before histogram emission \
+     because the [ttfrc_ms] input was non-finite or non-positive. Labels: provider, \
+     model, reason (not_finite | non_positive)."
+    Counter;
+  add
+    metric_llm_provider_streaming_inter_chunk_invalid
+    "Total OAS streaming inter-chunk observations rejected before histogram emission \
+     because the [inter_chunk_ms] input was non-finite or non-positive. Labels: \
+     provider, model, reason (not_finite | non_positive)."
+    Counter;
   (* Process-level resource gauges.  Sampled on every /metrics scrape via
      [update_fd_gauges] so a monotonic ramp (fd leak) is visible in the
      time series before it crosses the OS limit and crashes the server.

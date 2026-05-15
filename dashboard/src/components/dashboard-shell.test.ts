@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { h, render } from 'preact'
 import { waitFor } from '@testing-library/preact'
-import { DashboardMain } from './dashboard-shell'
+import { DashboardMain, dashboardHealthChips } from './dashboard-shell'
 import { route } from '../router'
 import { connected } from '../sse'
 import { dashboardLoading } from '../store'
@@ -40,8 +40,52 @@ describe('DashboardMain solo mode', () => {
 
     render(h(DashboardMain, {}), container)
 
-    await waitFor(() => expect(document.title).toBe('MASC · Cascade'))
+    await waitFor(() => expect(document.title).toBe('MASC · Live Runtime'))
     expect(container.querySelector('[data-testid="dashboard-widget-solo-bar"]')).not.toBeNull()
     expect(container.querySelector('[aria-label="Active observability filters"]')).not.toBeNull()
+  })
+})
+
+describe('dashboardHealthChips', () => {
+  it('separates source mismatch, paused keepers, and execution errors', () => {
+    const chips = dashboardHealthChips({
+      connected: true,
+      counts: { keepers: 1, configured_keepers: 2 },
+      keepers: [{
+        name: 'keeper-a',
+        status: 'paused',
+        paused: true,
+      } as any],
+      runtimeResolution: {
+        status: 'warn',
+        warnings: [],
+        source_mismatch: true,
+        server_workspace_mismatch: false,
+      } as any,
+      executionError: 'snapshot failed',
+      loading: false,
+    })
+
+    expect(chips.map(chip => chip.key)).toEqual([
+      'source-mismatch',
+      'paused-keepers',
+      'execution-error',
+    ])
+  })
+
+  it('returns a healthy chip when no runtime risk is visible', () => {
+    const chips = dashboardHealthChips({
+      connected: true,
+      counts: { keepers: 2, configured_keepers: 2 },
+      keepers: [],
+      runtimeResolution: null,
+      executionError: null,
+      loading: false,
+    })
+
+    expect(chips).toEqual([expect.objectContaining({
+      key: 'runtime-ok',
+      tone: 'ok',
+    })])
   })
 })

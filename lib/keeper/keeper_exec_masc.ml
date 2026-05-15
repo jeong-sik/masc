@@ -161,7 +161,10 @@ let handle_keeper_masc_tool
        if name = "masc_code_read"
        then handle_keeper_masc_code_read ~config ~meta ~args
        else (
-         match Tool_dispatch.dispatch ~token ~args with
+         (* RFC-0084 §1.1 + §2.2 — keeper turn now routes through
+            guarded_dispatch so pre-hook chain + telemetry 4-tuple
+            emission cover keeper-originated calls. *)
+         match Tool_dispatch.guarded_dispatch ~token ~args () with
          | Some tr ->
            let ok = tr.success in
            let msg = Tool_result.message tr in
@@ -215,7 +218,10 @@ let handle_registered_keeper_tool
     match Tool_dispatch.mint_token ~name with
     | Error _ -> None
     | Ok token ->
-      (match Tool_dispatch.dispatch ~token ~args with
+      (* RFC-0084 §1.1 + §2.2 — keeper turn now routes through
+         guarded_dispatch so pre-hook chain + telemetry 4-tuple emission
+         cover keeper-originated calls. *)
+      (match Tool_dispatch.guarded_dispatch ~token ~args () with
        | None -> None
        | Some tr ->
          let msg = Tool_result.message tr in

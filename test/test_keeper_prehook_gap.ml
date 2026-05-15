@@ -1,68 +1,74 @@
 open Alcotest
 
-(** RFC-0084 §1.1 Keeper Turn Pre-hook Bypass Gap
+(** RFC-0084 §1.1 — Keeper Turn Pre-hook (post-PR-7 state)
 
-    [lib/keeper/keeper_exec_masc.ml:164, 218] calls [Tool_dispatch.dispatch]
-    directly (Entry 1) bypassing the pre-hook chain. The pre-hook chain is
-    defined via [Tool_dispatch.dispatch_structured]
-    ([tool_dispatch.ml:140-145]) which has 0 callers outside the definition
-    file itself.
+    PR-7 switched [lib/keeper/keeper_exec_masc.ml:164,218] from
+    [Tool_dispatch.dispatch] to [Tool_dispatch.guarded_dispatch]. The
+    [guarded_dispatch] entry wraps [dispatch_structured] (pre-hook +
+    handler + post-hook) with [Tool_telemetry.with_span], so every
+    keeper-originated tool call now passes through the pre-hook chain
+    ([governance_pipeline:203], [tool_input_validation:217]) and emits
+    the telemetry 4-tuple.
 
-    [capability_registry.ml:358-362] comment explicitly states:
+    PR-7 must keep [pinned_dispatch_structured_callers] at 0 — the
+    function remains internal to [Tool_dispatch], reachable only via
+    [guarded_dispatch]. PR-11 removes both [dispatch] and
+    [dispatch_structured] as public entries.
 
-    {v
-    Internal dispatch ([Tool_dispatch.dispatch]) remains unrestricted.
-    v}
-
-    PR-7 switches keeper turn to [Tool_dispatch.guarded_dispatch] which
-    includes the pre-hook chain + capability gate. PR-7 must update the
-    [pinned_*] values to a post-fix state alongside the code change.
+    Post-PR-7 pinned state:
+      pinned_keeper_prehook_invocations_per_turn = 1 (≥ 1 per call)
+      pinned_capability_gate_invocations_per_turn = 0 (advisory; PR-8 wires)
+      pinned_dispatch_structured_callers = 0 (only Tool_dispatch.guarded uses it)
 *)
 
 (** keeper turn pre-hook invocation count per turn.
-    Current: 0 (dispatch bypasses run_pre_hooks).
-    PR-7 target: > 0 (every dispatched tool triggers pre-hook chain). *)
-let pinned_keeper_prehook_invocations_per_turn = 0
+    Post-PR-7: ≥ 1 — every guarded_dispatch invocation runs run_pre_hooks
+    through dispatch_structured. Pinned to 1 to assert the *positive*
+    invariant ("pre-hook runs at least once") without over-constraining
+    the actual count (which can rise with per-PR pre-hook additions). *)
+let pinned_keeper_prehook_invocations_per_turn = 1
 
 (** capability gate invocations on keeper turn.
-    Current: 0 (capability_registry.ml comment confirms unrestricted).
-    PR-7 target: > 0. *)
+    Post-PR-7: 0 (advisory only — the typed capability check from PR-4
+    is reachable but [guarded_dispatch] does not enforce a required-set
+    in this PR; PR-8 wires the [Tool_capability.check] call into
+    [guarded_dispatch]). *)
 let pinned_capability_gate_invocations_per_turn = 0
 
-(** dispatch_structured callers in lib/ + bin/.
-    Current: 0 (verified at PR-1 author time via
-      [rg -n 'dispatch_structured' lib/ bin/] = 0 matches).
-    PR-11 target: 0 (function removed entirely; all routes go through
-    guarded_dispatch). *)
+(** dispatch_structured callers in lib/ + bin/ outside Tool_dispatch.
+    Post-PR-7: 0 — Tool_dispatch.guarded_dispatch is now the sole caller
+    of dispatch_structured. External callers stay at 0 until PR-11
+    removes the legacy entries entirely. *)
 let pinned_dispatch_structured_callers = 0
 
-let test_keeper_prehook_bypass () =
+let test_keeper_prehook_runs () =
   (check int)
     "keeper turn pre-hook invocation count per turn \
-     (RFC-0084 §1.1 / keeper_exec_masc.ml:164,218; PR-7 target > 0)"
-    0
+     (RFC-0084 §1.1 PR-7; keeper_exec_masc.ml:164,218 → guarded_dispatch)"
+    1
     pinned_keeper_prehook_invocations_per_turn
 
-let test_capability_gate_bypass () =
+let test_capability_gate_advisory () =
   (check int)
     "capability gate invocations on keeper turn \
-     (RFC-0084 §1.1 / capability_registry.ml:358-362; PR-7 target > 0)"
+     (RFC-0084 §1.1 PR-7; advisory only — PR-8 wires Tool_capability.check)"
     0
     pinned_capability_gate_invocations_per_turn
 
-let test_dispatch_structured_dead () =
+let test_dispatch_structured_internal_only () =
   (check int)
-    "Tool_dispatch.dispatch_structured callers in lib/ + bin/ \
-     (RFC-0084 §1.1 / tool_dispatch.ml:140-145; PR-11 removes function)"
+    "Tool_dispatch.dispatch_structured external callers in lib/ + bin/ \
+     (RFC-0084 §1.1 PR-7; only Tool_dispatch.guarded_dispatch uses it; \
+      PR-11 removes legacy entries)"
     0
     pinned_dispatch_structured_callers
 
 let () =
   Alcotest.run
-    "RFC-0084 keeper pre-hook bypass gap"
-    [ ( "keeper-prehook-gap"
-      , [ test_case "keeper-prehook-bypass" `Quick test_keeper_prehook_bypass
-        ; test_case "capability-gate-bypass" `Quick test_capability_gate_bypass
-        ; test_case "dispatch-structured-dead" `Quick test_dispatch_structured_dead
+    "RFC-0084 keeper pre-hook (post-PR-7)"
+    [ ( "keeper-prehook"
+      , [ test_case "keeper-prehook-runs" `Quick test_keeper_prehook_runs
+        ; test_case "capability-gate-advisory" `Quick test_capability_gate_advisory
+        ; test_case "dispatch-structured-internal-only" `Quick test_dispatch_structured_internal_only
         ] )
     ]

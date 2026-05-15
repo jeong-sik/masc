@@ -144,14 +144,29 @@ let dispatch_structured ~(token : Tool_token.t) ~args : Tool_result.t option =
   | (None, coerced_args) ->
     dispatch ~token ~args:coerced_args
 
-(** RFC-0084 §2.2 — Single dispatch entry with 4-tuple telemetry.
-    Wraps [dispatch] with [Tool_telemetry.with_span]. PR-3 introduces
-    this entry; caller migration occurs in PR-7~9. *)
+(** RFC-0084 §2.2 — Single dispatch entry with 4-tuple telemetry and
+    pre-hook chain coverage. Wraps [dispatch_structured] (pre-hook +
+    handler + post-hook) with [Tool_telemetry.with_span] so every
+    invocation emits the 4-tuple regardless of which arm runs.
+
+    PR-3 introduced the skeleton calling [dispatch] (pre-hook bypass).
+    PR-7 routes through [dispatch_structured] so keeper-originated calls
+    pass through the pre-hook chain ([governance_pipeline:203],
+    [tool_input_validation:217]) — closing the
+    [capability_registry.ml] "Internal dispatch remains unrestricted"
+    gap noted in RFC-0084 §1.1.
+
+    Caller migration this PR: [keeper_exec_masc.ml:164,218]. PR-8 wires
+    the MCP server; PR-9 wires the tag-dispatch fallback. *)
 let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.t option =
   let result, _outcome =
     Tool_telemetry.with_span ~tool_name:token.name (fun _trace_id_thunk ->
-      let r = dispatch ~token ~args in
-      let outcome = match r with Some _ -> "handled" | None -> "no_handler" in
+      let r = dispatch_structured ~token ~args in
+      let outcome =
+        match r with
+        | Some _ -> "handled"
+        | None -> "no_handler"
+      in
       r, outcome)
   in
   result

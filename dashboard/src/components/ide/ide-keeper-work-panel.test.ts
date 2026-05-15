@@ -120,6 +120,55 @@ describe('IdeKeeperWorkPanel', () => {
     expect(window.location.hash).toContain('operation_id=op-151')
     expect(window.location.hash).toContain('q=op-151')
   })
+
+  it('surfaces the rest of the active keeper task queue as routable work', () => {
+    keepers.value = [keeperFixture()]
+    tasks.value = [
+      taskFixture({ goal_id: 'goal-runtime' }),
+      taskFixture({
+        id: 'task-next',
+        title: 'Wire keeper queue context',
+        status: 'in_progress',
+        goal_id: 'goal-next',
+        worktree: {
+          branch: 'feat/keeper-queue',
+          path: '/workspace/.worktrees/keeper-queue',
+          git_root: '/workspace',
+          repo_name: 'masc-mcp',
+        },
+        execution_links: {
+          session_id: 'sess-next',
+        },
+      }),
+      taskFixture({
+        id: 'task-done',
+        title: 'Completed queue item',
+        status: 'done',
+        goal_id: 'goal-next',
+      }),
+    ]
+
+    render(h(IdeKeeperWorkPanel, { keeperName: 'sangsu' }), container)
+
+    const queue = container.querySelector('[aria-label="Keeper active task queue"]')
+    expect(queue?.textContent).toContain('ACTIVE QUEUE')
+    expect(queue?.textContent).toContain('1 queued')
+    expect(queue?.textContent).toContain('task-next')
+    expect(queue?.textContent).toContain('Wire keeper queue context')
+    expect(queue?.textContent).not.toContain('task-done')
+
+    const queueButtons = Array.from(queue?.querySelectorAll('button') ?? [])
+    expect(queueButtons.map(button => button.textContent)).toEqual([
+      'Goal',
+      'Task',
+      'Git',
+      'Telemetry',
+      'Keeper',
+    ])
+
+    fireEvent.click(queueButtons.find(button => button.title === 'Task task-next')!)
+    expect(window.location.hash).toBe('#workspace?section=planning&view=default&task=task-next')
+  })
 })
 
 function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {

@@ -1,0 +1,14 @@
+; RFC-0086 PR-2F — Cascade_ref leaf extraction (PR-2E iter2 prereq 3/6).
+; 375 LoC type-bearing leaf with fan-out 0 (stdlib + yojson only).
+; (wrapped false) keeps bare `Cascade_ref` so all 42 external callers
+; need zero code changes. mli is the intentional cycle-breaker for
+; the Cascade_strategy -> Keeper_cascade_profile -> ... -> Cascade_strategy
+; chain (per cascade_ref.mli:49-52); extraction strengthens that
+; boundary by making it a dune-enforced library border.
+(include_subdirs no)
+
+(library
+ (name masc_mcp_cascade_ref)
+ (public_name masc_mcp.cascade_ref)
+ (wrapped false)
+ (libraries yojson))

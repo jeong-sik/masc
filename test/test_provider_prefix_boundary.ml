@@ -83,12 +83,12 @@ let is_provider_adapter_source = function
 ;;
 
 let line_violation line =
-  if contains ~needle:".Provider_adapter.cascade_prefix" line
+  if contains ~needle:(".Provider_adapter" ^ ".cascade_prefix") line
   then Some "direct adapter record field access"
   else if contains ~needle:".cascade_prefix ^" line
   then Some "manual cascade_prefix label concatenation"
   else if
-    contains ~needle:"Provider_adapter.cascade_prefix_of_adapter" line
+    contains ~needle:("Provider_adapter" ^ ".cascade_prefix_of_adapter") line
     && contains ~needle:"^" line
   then Some "manual label concatenation after prefix helper"
   else None

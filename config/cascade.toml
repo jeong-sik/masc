@@ -47,11 +47,9 @@ key = "GEMINI_API_KEY"
 # their defaults (no runtime MCP HTTP headers, no anthropic caching,
 # no max-turns cap).
 #
-# NOTE (data-only until cutover): this declaration is parsed into the
-# in-memory cascade-decl config, but [Cascade_catalog_validator] still
-# reads [Provider_adapter]'s hardcoded value for this kind. Toggling
-# this line therefore does not move the validator warn surface until
-# the caller cutover lands (see #14659 bridge primitive).
+# This declaration is part of the cascade TOML SSOT. Keep validator and
+# runtime surfaces wired to declarative/provider-runtime capability data;
+# do not add a second provider-specific copy in OCaml.
 [providers.gemini_cli.capabilities]
 tolerates-bound-actor-fallback = true
 

@@ -361,13 +361,27 @@ let model_family_of_binding (binding : Runtime_binding.t) =
   | _ -> Generic
 ;;
 
+let first_catalog_model models =
+  models |> List.find_map trim_nonempty
+;;
+
+let catalog_default_model_id_of_binding (binding : Runtime_binding.t) =
+  match model_family_of_binding binding with
+  | Glm_general -> first_catalog_model (Llm_provider.Zai_catalog.glm_auto_models ())
+  | Glm_coding -> first_catalog_model (Llm_provider.Zai_catalog.glm_coding_auto_models ())
+  | Generic | Kimi_api_family -> None
+;;
+
 let default_model_id_of_binding (binding : Runtime_binding.t) =
   match binding_default_model_id binding with
   | Some _ as value -> value
   | None ->
-    (match runtime_kind_of_binding binding with
-     | Local -> None
-     | Cli_agent | Direct_api -> Some "auto")
+    (match catalog_default_model_id_of_binding binding with
+     | Some _ as value -> value
+     | None ->
+       (match runtime_kind_of_binding binding with
+        | Local -> None
+        | Cli_agent | Direct_api -> Some "auto"))
 ;;
 
 let auto_models_of_binding binding default_model_id =

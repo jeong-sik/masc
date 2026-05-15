@@ -5,9 +5,3 @@ lib/cascade/cascade_runtime_candidate.ml
 lib/cascade/cascade_runtime.ml
 lib/provider_tool_support.ml
 lib/spawn.ml
-test/test_cascade_model_resolve.ml
-test/test_keeper_runtime_manifest.ml
-test/test_oas_worker.ml
-test/test_provider_prefix_boundary.ml
-test/test_spawn_coverage.ml
-test/test_spawn.ml

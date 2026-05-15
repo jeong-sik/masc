@@ -166,12 +166,6 @@ let resolve_kimi_model ?getenv selector =
   let trimmed = String.trim model_id in
   match String.lowercase_ascii trimmed with
   | "auto" -> default_resolution ?getenv "kimi" ~requested_model_id:model_id
-  | "kimi-for-coding" ->
-    let default_model = default_resolution ?getenv "kimi" ~requested_model_id:model_id in
-    { requested_model_id = model_id
-    ; resolved_model_id = default_model.resolved_model_id
-    ; provenance = Alias model_id
-    }
   | _ -> explicit_resolution model_id trimmed
 ;;
 

@@ -53,7 +53,7 @@ type text_cache = {
 let empty_text_cache ~generation =
   { key = None; value = None; expires_at = 0.0; generation }
 
-let _keeper_list_cache = Atomic.make (empty_text_cache ~generation:0)
+let keeper_list_cache = Atomic.make (empty_text_cache ~generation:0)
 
 let cache_ttl_seconds env_var ~default =
   match Sys.getenv_opt env_var with
@@ -70,7 +70,7 @@ let invalidate_text_cache cache_ref =
   Lockfree_atomic.update cache_ref (fun current ->
     empty_text_cache ~generation:(current.generation + 1))
 
-let invalidate_keeper_list_cache () = invalidate_text_cache _keeper_list_cache
+let invalidate_keeper_list_cache () = invalidate_text_cache keeper_list_cache
 
 let rec cached_text_by_key cache_ref ~key ~ttl_s compute =
   let now = Time_compat.now () in
@@ -94,12 +94,12 @@ let rec cached_text_by_key cache_ref ~key ~ttl_s compute =
 
 module For_testing = struct
   let reset_keeper_list_cache () =
-    Atomic.set _keeper_list_cache (empty_text_cache ~generation:0)
+    Atomic.set keeper_list_cache (empty_text_cache ~generation:0)
 
   let invalidate_keeper_list_cache = invalidate_keeper_list_cache
 
   let cached_keeper_list_text ~key ~ttl_s compute =
-    cached_text_by_key _keeper_list_cache ~key ~ttl_s compute
+    cached_text_by_key keeper_list_cache ~key ~ttl_s compute
 end
 
 let annotate_keeper_json ~runtime_class json =
@@ -711,7 +711,7 @@ let handle_keeper_list ctx args : tool_result =
     Printf.sprintf "%s:%d:%b" ctx.config.base_path limit detailed
   in
   let body =
-    cached_text_by_key _keeper_list_cache ~key:cache_key
+    cached_text_by_key keeper_list_cache ~key:cache_key
       ~ttl_s:(keeper_list_cache_ttl_s ()) (fun () ->
         let registry_names =
           Keeper_registry.all ~base_path:ctx.config.base_path ()

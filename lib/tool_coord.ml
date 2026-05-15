@@ -59,7 +59,7 @@ type text_cache =
   }
 
 let make_text_cache () = { key = None; value = None; expires_at = 0.0 }
-let _status_cache = make_text_cache ()
+let status_cache = make_text_cache ()
 
 let cache_ttl_seconds env_var ~default =
   match Sys.getenv_opt env_var with
@@ -72,10 +72,10 @@ let cache_ttl_seconds env_var ~default =
 
 let status_cache_ttl_s () = 2.0
 
-let invalidate_status_cache () =
-  _status_cache.key <- None;
-  _status_cache.value <- None;
-  _status_cache.expires_at <- 0.0
+let invalidatestatus_cache () =
+  status_cache.key <- None;
+  status_cache.value <- None;
+  status_cache.expires_at <- 0.0
 ;;
 
 let cached_text_by_key cache ~key ~ttl_s compute =
@@ -629,7 +629,7 @@ let handle_status ~tool_name ~start_time ctx _args =
     ~tool_name
     ~start_time
     (cached_text_by_key
-       _status_cache
+       status_cache
        ~key:cache_key
        ~ttl_s:(status_cache_ttl_s ())
        (fun () -> status_summary_string ctx))
@@ -644,7 +644,7 @@ let handle_reset ~tool_name ~start_time ctx args =
       ~start_time
       "This will DELETE the entire .masc/ folder!\nCall with confirm=true to proceed."
   else (
-    invalidate_status_cache ();
+    invalidatestatus_cache ();
     Tool_result.ok ~tool_name ~start_time (Coord.reset ctx.config))
 ;;
 

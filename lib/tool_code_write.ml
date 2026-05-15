@@ -217,10 +217,10 @@ type policy_config_cache_entry = {
   result : (Keeper_tool_policy_config.t, string) Result.t;
 }
 
-let _policy_config_cache : policy_config_cache_entry option ref = ref None
+let policy_config_cache : policy_config_cache_entry option ref = ref None
 
 (** Reset internal config cache — for test isolation only. *)
-let reset_policy_config_cache () = _policy_config_cache := None
+let reset_policy_config_cache () = policy_config_cache := None
 
 let observe_policy_config_load_error ~base_path ~env_config_dir msg =
   let config_dir =
@@ -237,7 +237,7 @@ let observe_policy_config_load_error ~base_path ~env_config_dir msg =
 let get_policy_config_result ~base_path =
   (* RFC-0085 PR-8 — route env-derived config_dir read through Host_config. *)
   let env_config_dir = (Host_config.from_env ()).config_dir in
-  match !_policy_config_cache with
+  match !policy_config_cache with
   | Some { base_path = cached_base_path; env_config_dir = cached_env; result }
     when String.equal cached_base_path base_path && Option.equal String.equal cached_env env_config_dir ->
     result
@@ -247,7 +247,7 @@ let get_policy_config_result ~base_path =
      | Ok _ -> ()
      | Error msg ->
          observe_policy_config_load_error ~base_path ~env_config_dir msg);
-    _policy_config_cache := Some { base_path; env_config_dir; result };
+    policy_config_cache := Some { base_path; env_config_dir; result };
     result
 
 let get_policy_config ~base_path =

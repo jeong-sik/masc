@@ -5,6 +5,7 @@ let () = Mirage_crypto_rng_unix.use_default ()
 
 module V = Masc_mcp.Verification
 module P = Masc_mcp.Prometheus
+module VS = Coord_verification_store
 module CU = Coord_utils
 
 let persistence_surface = "verification"
@@ -190,6 +191,29 @@ let test_list_requests_missing_dir_stays_quiet () =
       before
       (persistence_counter Safe_ops.persistence_read_drop_reason_list_dir_error))
 
+let test_verifications_dir_resolves_active_store () =
+  with_temp_dir (fun base_path ->
+    let legacy_dir = legacy_verifications_dir base_path in
+    Fs_compat.mkdir_p legacy_dir;
+    Fs_compat.save_file (Filename.concat legacy_dir "vrf-legacy.json")
+      {|{"id":"vrf-legacy","task_id":"task-legacy"}|};
+    let active_dir = active_verifications_dir base_path in
+    let resolved = VS.verifications_dir base_path in
+    Alcotest.(check string) "resolved active store" active_dir resolved;
+    Alcotest.(check bool) "resolved path is not legacy root" false
+      (String.equal legacy_dir resolved))
+
+let test_request_path_ignores_legacy_root_store () =
+  with_temp_dir (fun base_path ->
+    let req_id = "vrf-shadowed" in
+    let legacy_dir = legacy_verifications_dir base_path in
+    Fs_compat.mkdir_p legacy_dir;
+    Fs_compat.save_file (Filename.concat legacy_dir (req_id ^ ".json"))
+      {|{"id":"vrf-shadowed","task_id":"task-legacy"}|};
+    Alcotest.(check string) "request path uses active store"
+      (Filename.concat (active_verifications_dir base_path) (req_id ^ ".json"))
+      (VS.request_path base_path req_id))
+
 let test_list_requests_skips_bad_entries_with_metric () =
   with_temp_dir (fun base_path ->
     let _ = V.create_request ~base_path ~task_id:"t1"
@@ -204,6 +228,22 @@ let test_list_requests_skips_bad_entries_with_metric () =
     Alcotest.(check (float 0.1)) "broken file increments metric" 1.0
       (persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error
        -. before))
+
+let test_list_requests_ignores_legacy_only_stale_entries () =
+  with_temp_dir (fun base_path ->
+    let legacy_dir = legacy_verifications_dir base_path in
+    Fs_compat.mkdir_p legacy_dir;
+    Fs_compat.save_file (Filename.concat legacy_dir "broken.json") "{not-json";
+    Fs_compat.save_file (Filename.concat legacy_dir "vrf-foreign.json")
+      {|{"id":"vrf-foreign","task_id":"t-foreign","evaluator":"oracle","overall_verdict":"approve"}|};
+    let before =
+      persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error
+    in
+    let reqs = V.list_requests base_path in
+    Alcotest.(check int) "legacy-only store ignored" 0 (List.length reqs);
+    Alcotest.(check (float 0.1)) "legacy-only stale files stay silent"
+      before
+      (persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error))
 
 let test_list_requests_ignores_legacy_root_entries () =
   with_temp_dir (fun base_path ->
@@ -435,8 +475,14 @@ let () =
       Alcotest.test_case "list requests" `Quick test_list_requests;
       Alcotest.test_case "list requests missing dir stays quiet" `Quick
         test_list_requests_missing_dir_stays_quiet;
+      Alcotest.test_case "verifications dir resolves active store" `Quick
+        test_verifications_dir_resolves_active_store;
+      Alcotest.test_case "request path ignores legacy root store" `Quick
+        test_request_path_ignores_legacy_root_store;
       Alcotest.test_case "list requests skips bad entries with metric" `Quick
         test_list_requests_skips_bad_entries_with_metric;
+      Alcotest.test_case "list requests ignores legacy-only stale entries" `Quick
+        test_list_requests_ignores_legacy_only_stale_entries;
       Alcotest.test_case "list requests ignores legacy root entries" `Quick
         test_list_requests_ignores_legacy_root_entries;
       Alcotest.test_case "assign verifier" `Quick test_assign_verifier;

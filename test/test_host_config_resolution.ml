@@ -7,37 +7,37 @@ open Alcotest
     *follow-up cleanup PRs* (one per sub-domain).
 
     Tests pin:
-    - legacy_macos_default field count and values match the 11 sites
+    - host field count and values match the 11 sites
       enumerated in RFC-0084 §1.5
     - is_test_mode round-trips through the typed sum (no
       String.starts_with leak)
     - resolve ~base_path returns base-path-relative runtime roots
 *)
 
-let test_legacy_macos_default_field_values () =
-  let d = Host_config.legacy_macos_default () in
+let test_host_field_values () =
+  let d = Host_config.host () in
   let temp_keeper_creds =
     Filename.concat (Filename.get_temp_dir_name ()) "keeper-creds"
   in
   (check string)
-    "legacy_macos_default.cred_root pins temp keeper-creds \
+    "host.cred_root pins temp keeper-creds \
      (host_config_provider.ml:3)"
     temp_keeper_creds
     d.cred_root;
   (check string)
-    "legacy_macos_default.host_bash pins /bin/bash \
+    "host.host_bash pins /bin/bash \
      (keeper_shell_bash.ml:745, 802)"
     "/bin/bash"
     d.host_bash;
   (check string)
-    "legacy_macos_default.host_zsh pins /bin/zsh \
+    "host.host_zsh pins /bin/zsh \
      (gh-family 5 sites)"
     "/bin/zsh"
     d.host_zsh
 ;;
 
 let test_legacy_coreutils_match_macos () =
-  let d = Host_config.legacy_macos_default () in
+  let d = Host_config.host () in
   (check string) "ls = /bin/ls" "/bin/ls" d.coreutils.ls;
   (check string) "cat = /bin/cat" "/bin/cat" d.coreutils.cat;
   (check string) "pwd = /bin/pwd" "/bin/pwd" d.coreutils.pwd;
@@ -106,7 +106,7 @@ let () =
       , [ test_case
             "legacy-macos-default-field-values"
             `Quick
-            test_legacy_macos_default_field_values
+            test_host_field_values
         ; test_case
             "legacy-coreutils-match-macos"
             `Quick

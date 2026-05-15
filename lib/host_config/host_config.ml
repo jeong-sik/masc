@@ -1,4 +1,14 @@
-(* RFC-0084 §1.5, §3.4 — Typed host configuration.
+(* RFC-0084 §1.5, §3.4 + RFC-0085 PR-1 — Typed host configuration.
+
+   PR-1 of RFC-0085 (this commit):
+   - Renames `legacy_macos_default ()` -> `host ()` (canonical accessor).
+   - Renames inner `legacy_coreutils_macos` -> `coreutils_defaults`.
+   - Adds `log_dir`, `run_dir`, `policy_dir` fields (RFC-0085 PR-2/PR-3
+     absorb the corresponding /tmp/auto-responder.log, /tmp/masc-*.pid,
+     /tmp/gemini_headless_admin_policy.json hardcodes).
+   - Applies [@@deriving show, eq] to all record / variant types,
+     replacing the ~35 lines of manual pp implementations.
+
    See host_config.mli for the contract. *)
 
 type coreutils =
@@ -9,10 +19,12 @@ type coreutils =
   ; tail : string
   ; wc : string
   }
+[@@deriving show, eq]
 
 type test_mode_kind =
   | Test
   | Production
+[@@deriving show, eq]
 
 type t =
   { cred_root : string
@@ -23,9 +35,13 @@ type t =
   ; agent_runtime_root : string
   ; sandbox_workspace_root : string
   ; test_mode : test_mode_kind
+  ; log_dir : string
+  ; run_dir : string
+  ; policy_dir : string
   }
+[@@deriving show, eq]
 
-let legacy_coreutils_macos =
+let coreutils_defaults =
   { ls = "/bin/ls"
   ; cat = "/bin/cat"
   ; pwd = "/bin/pwd"
@@ -35,22 +51,26 @@ let legacy_coreutils_macos =
   }
 ;;
 
-let legacy_macos_default () =
-  { cred_root = Filename.concat (Filename.get_temp_dir_name ()) "keeper-creds"
+let host () =
+  let tmp = Filename.get_temp_dir_name () in
+  { cred_root = Filename.concat tmp "keeper-creds"
   ; host_bash = "/bin/bash"
   ; host_zsh = "/bin/zsh"
   ; host_sh = "/bin/sh"
-  ; coreutils = legacy_coreutils_macos
-  ; agent_runtime_root = Filename.get_temp_dir_name ()
+  ; coreutils = coreutils_defaults
+  ; agent_runtime_root = tmp
   ; sandbox_workspace_root =
       (match Sys.getenv_opt "HOME" with
        | Some home -> Filename.concat home "me"
-       | None -> Filename.concat (Filename.get_temp_dir_name ()) "masc-fleet")
+       | None -> Filename.concat tmp "masc-fleet")
   ; test_mode =
       (let exec = Filename.basename Sys.executable_name in
        if String.length exec >= 5 && String.sub exec 0 5 = "test_"
        then Test
        else Production)
+  ; log_dir = tmp
+  ; run_dir = tmp
+  ; policy_dir = tmp
   }
 ;;
 
@@ -85,7 +105,7 @@ let resolve_sh () =
 ;;
 
 let resolve_coreutils () =
-  let one ~name ~candidates ~fallback = path_lookup ~candidates ~fallback in
+  let one ~name:_ ~candidates ~fallback = path_lookup ~candidates ~fallback in
   { ls = one ~name:"ls" ~candidates:[ "/bin/ls"; "/usr/bin/ls" ] ~fallback:"/bin/ls"
   ; cat =
       one ~name:"cat" ~candidates:[ "/bin/cat"; "/usr/bin/cat" ] ~fallback:"/bin/cat"
@@ -107,7 +127,8 @@ let resolve_coreutils () =
 ;;
 
 let resolve ?base_path () =
-  let base = Option.value base_path ~default:(Filename.get_temp_dir_name ()) in
+  let tmp = Filename.get_temp_dir_name () in
+  let base = Option.value base_path ~default:tmp in
   let agent_runtime_root = Filename.concat base ".masc/runtime/agent" in
   let cred_root = Filename.concat base ".masc/credentials" in
   let sandbox_workspace_root =
@@ -133,39 +154,8 @@ let resolve ?base_path () =
     ; agent_runtime_root
     ; sandbox_workspace_root
     ; test_mode
+    ; log_dir = tmp
+    ; run_dir = tmp
+    ; policy_dir = tmp
     }
-;;
-
-let pp_coreutils fmt c =
-  Format.fprintf
-    fmt
-    "{ ls=%s cat=%s pwd=%s head=%s tail=%s wc=%s }"
-    c.ls
-    c.cat
-    c.pwd
-    c.head
-    c.tail
-    c.wc
-;;
-
-let pp_test_mode fmt = function
-  | Test -> Format.fprintf fmt "Test"
-  | Production -> Format.fprintf fmt "Production"
-;;
-
-let pp fmt t =
-  Format.fprintf
-    fmt
-    "{ cred_root=%s; host_bash=%s; host_zsh=%s; host_sh=%s; coreutils=%a; \
-     agent_runtime_root=%s; sandbox_workspace_root=%s; test_mode=%a }"
-    t.cred_root
-    t.host_bash
-    t.host_zsh
-    t.host_sh
-    pp_coreutils
-    t.coreutils
-    t.agent_runtime_root
-    t.sandbox_workspace_root
-    pp_test_mode
-    t.test_mode
 ;;

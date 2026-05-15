@@ -5,7 +5,7 @@ open Keeper_exec_shared
    Resolves the host bash binary once at module-init from the typed
    [Host_config.host_bash] field; consumer sites reference the bound
    name so a future PR can flip the typed surface to PATH lookup. *)
-let host_bash = (Host_config.legacy_macos_default ()).host_bash
+let host_bash = (Host_config.host ()).host_bash
 
 let elapsed_duration_ms ~start_time ~end_time =
   let elapsed_ms = (end_time -. start_time) *. 1000. in

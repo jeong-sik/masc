@@ -14,7 +14,7 @@ let wait_for_message_eio = Mcp_server_eio_helpers.wait_for_message_eio
    agent-identity scratch files below reference the bound name so a
    future PR can flip the typed surface to a base-path-relative
    layout without touching this module's call sites. *)
-let agent_runtime_root = (Host_config.legacy_macos_default ()).agent_runtime_root
+let agent_runtime_root = (Host_config.host ()).agent_runtime_root
 
 (* #10699 Family A — "Join required" surfaces 28 / 24h events for
    masc_transition + masc_claim_next while the underlying keeper had

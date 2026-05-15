@@ -1482,7 +1482,7 @@
  (libraries alcotest))
 
 ; RFC-0084 PR-12 — Host_config typed record invariants. Pins
-; legacy_macos_default field values matching the 11 hardcode sites,
+; host field values matching the 11 hardcode sites,
 ; is_test_mode typed semantics (Test/Production), resolve ~base_path
 ; relative roots, and hardcode site inventory count (11). Requires
 ; masc_test_deps because it accesses Host_config.* directly.
@@ -1517,10 +1517,10 @@
 
 ; RFC-0084 host-config-cleanup-E — Fleet worker sandbox root migration.
 ; Pins literal `Filename.concat home "me"` count at 0 in
-; lib/worker_dev_tools.ml and asserts Host_config.legacy_macos_default
+; lib/worker_dev_tools.ml and asserts Host_config.host
 ; is invoked there. Cross-checks sandbox_workspace_root contract from
 ; PR-12. Requires masc_test_deps because it accesses
-; Masc_mcp.Host_config.legacy_macos_default.
+; Masc_mcp.Host_config.host.
 (test
  (name test_pr_e_sandbox_root_migration)
  (modules test_pr_e_sandbox_root_migration)
@@ -1560,7 +1560,7 @@
 ; RFC-0084 host-config-cleanup-A — credential root migration.
 ; Pins literal "/tmp/keeper-creds" count at 0 in
 ; lib/keeper/host_config_provider.ml and verifies
-; Host_config.legacy_macos_default is invoked.  Cross-checks that
+; Host_config.host is invoked.  Cross-checks that
 ; Host_config_provider.cred_root equals the typed surface field.
 (test
  (name test_pr_a_cred_root_migration)
@@ -1570,7 +1570,7 @@
 ; RFC-0084 host-config-cleanup-C — coreutils path migration.
 ; Pins 0 occurrences of the 6 absolute coreutils literals in
 ; lib/keeper/keeper_shell_ops.ml and exactly 1
-; Host_config.legacy_macos_default invocation (single binding at
+; Host_config.host invocation (single binding at
 ; module-init time, not per call-site).
 (test
  (name test_pr_c_coreutils_migration)
@@ -1580,7 +1580,7 @@
 ; RFC-0084 host-config-cleanup-B — shell binary path migration.
 ; Pins 0 occurrences of /bin/bash and /bin/zsh literals across
 ; the 4 keeper consumer modules (1 bash + 3 zsh) and verifies one
-; Host_config.legacy_macos_default binding per consumer module.
+; Host_config.host binding per consumer module.
 (test
  (name test_pr_b_shell_paths_migration)
  (modules test_pr_b_shell_paths_migration)
@@ -1598,7 +1598,7 @@
 ; RFC-0084 host-config-cleanup-D — agent runtime root migration.
 ; Pins 0 occurrences of /tmp/.masc_agent[_mcp]_<sid> literals
 ; across mcp_server_eio_execute.ml + tool_inline_dispatch_coord.ml
-; and exactly 1 Host_config.legacy_macos_default binding per module.
+; and exactly 1 Host_config.host binding per module.
 (test
  (name test_pr_d_agent_runtime_migration)
  (modules test_pr_d_agent_runtime_migration)
@@ -1661,3 +1661,12 @@
  (name test_pr_i_3_legacy_post_hook_removed)
  (modules test_pr_i_3_legacy_post_hook_removed)
  (libraries alcotest))
+
+; RFC-0085 PR-1 — host_config legacy_macos_default rename to host,
+; log_dir/run_dir/policy_dir fields added, [@@deriving show, eq]
+; applied to Host_config.t and Dispatch_outcome.t.  Uses AST-based
+; ast_grep helper (compiler-libs.common) for structural verification.
+(test
+ (name test_rfc_0085_pr1_host_config_legacy_purge)
+ (modules test_rfc_0085_pr1_host_config_legacy_purge)
+ (libraries alcotest ast_grep masc_mcp.host_config masc_mcp))

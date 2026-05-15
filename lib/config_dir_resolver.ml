@@ -61,7 +61,7 @@ let existing_file = Env_config_core.existing_file
    dropped.  See [test_pr_f_test_mode_migration]. *)
 let running_under_test_executable () =
   Host_config.is_test_mode
-    (Host_config.legacy_macos_default ()).test_mode
+    (Host_config.host ()).test_mode
 
 let test_config_path_override_env = "MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE"
 let test_base_path_override_env = "MASC_TEST_ALLOW_BASE_PATH_OVERRIDE"

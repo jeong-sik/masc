@@ -5,10 +5,10 @@ open Keeper_exec_shared
    Resolve the 6 absolute binary paths once at module-init time
    from the typed [Host_config.coreutils] field, then reference
    the bound names at each shell-op call-site.  Behaviour byte-
-   identical today; a future PR can flip [legacy_macos_default]
+   identical today; a future PR can flip [host]
    to PATH-resolved binaries for portability without touching
    this module's call sites. *)
-let coreutils = (Host_config.legacy_macos_default ()).coreutils
+let coreutils = (Host_config.host ()).coreutils
 
 let handle_keeper_shell
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)

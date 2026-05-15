@@ -1,0 +1,15 @@
+; RFC-0085 PR-1 — AST-based structural verification helper for
+; regression tests.  Replaces source-grep + count_substring patterns
+; that misfire on docstrings (RFC-0084 PR-E/F/A/I-3 each tripped its
+; own docstring 4 times).
+;
+; Depends only on stdlib + compiler-libs.common (OCaml AST), so it
+; can be linked into any test executable without forcing ppxlib on
+; downstream test crates.
+
+(library
+ (name ast_grep)
+ (public_name masc_mcp.ast_grep)
+ (wrapped false)
+ (libraries
+  compiler-libs.common))

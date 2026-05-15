@@ -7,6 +7,7 @@ type t =
   | Rejected_by_pre_hook of { reason : string }
   | No_handler
   | Handler_error of { exn : string }
+[@@deriving show, eq]
 
 let to_string = function
   | Handled -> "handled"

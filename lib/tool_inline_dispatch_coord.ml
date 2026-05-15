@@ -27,7 +27,7 @@ open Tool_inline_dispatch_types
    Resolves the host runtime root once at module-init from the typed
    [Host_config.agent_runtime_root] field; the 2 cross-process
    agent-identity scratch files below reference the bound name. *)
-let agent_runtime_root = (Host_config.legacy_macos_default ()).agent_runtime_root
+let agent_runtime_root = (Host_config.host ()).agent_runtime_root
 
 (** Argument extraction helpers bound to ctx.arguments. *)
 let arg_get_string ctx key default =

@@ -42,6 +42,7 @@ type t =
       (** Handler raised a non-cancelled exception.  Reported via
           [Tool_result.of_exn] in [Tool_dispatch.dispatch] today; PR-10
           captures the same condition as a typed arm. *)
+[@@deriving show, eq]
 
 (** [to_string t] returns the label used by Prometheus counters /
     [Tool_telemetry.with_span] outcome strings.  Matches the existing

@@ -1,5 +1,5 @@
 ---
-rfc: "0083"
+rfc: "0084"
 title: "Keeper→Tool Dispatch Unification + 100% Trace/Telemetry"
 status: Draft
 created: 2026-05-15
@@ -11,7 +11,7 @@ related: ["0042", "0064", "0070", "0072", "0080", "0081"]
 implementation_prs: []
 ---
 
-# RFC-0083 — Keeper→Tool Dispatch Unification + 100% Trace/Telemetry
+# RFC-0084 — Keeper→Tool Dispatch Unification + 100% Trace/Telemetry
 
 ## §0 Summary
 
@@ -510,7 +510,7 @@ let () = QCheck.Test.check_exn @@ QCheck.Test.make
 4. Production 24h window `is not registered` warn 0
 5. `disclosure_strategy` config 적용 keeper 1+
 6. Grafana dashboard 4-tuple emission tile 100% 유지 24h
-7. RFC-0083, RFC-0080, RFC-OAS-008/009 v2/011/013 모든 `implementation_prs` field 채워짐
+7. RFC-0084, RFC-0080, RFC-OAS-008/009 v2/011/013 모든 `implementation_prs` field 채워짐
 8. B1, B2, B4, B5, B6, B7, B8, B10, B12, B13 close (10/13 bugs)
 9. B3 (Phase 3 source pruning) — 다음 sprint escalate
 10. B11 (oas closeout) — oas repo 별도 track escalate

@@ -1387,7 +1387,7 @@
  (modules test_provider_prefix_boundary)
  (libraries alcotest))
 
-; RFC-0083 §6.1 — pinned-fail tests for keeper→tool dispatch unification.
+; RFC-0084 §6.1 — pinned-fail tests for keeper→tool dispatch unification.
 ; PR-1 establishes 3 evidence tests for the current telemetry/surface/prehook
 ; gaps in lib/tool_dispatch.ml and lib/keeper/tool_resolution.ml. PR-5/7/9
 ; update each pinned constant alongside the code fix in the same PR so that

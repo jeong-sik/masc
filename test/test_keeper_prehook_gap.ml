@@ -1,6 +1,6 @@
 open Alcotest
 
-(** RFC-0083 §1.1 Keeper Turn Pre-hook Bypass Gap
+(** RFC-0084 §1.1 Keeper Turn Pre-hook Bypass Gap
 
     [lib/keeper/keeper_exec_masc.ml:164, 218] calls [Tool_dispatch.dispatch]
     directly (Entry 1) bypassing the pre-hook chain. The pre-hook chain is
@@ -39,27 +39,27 @@ let pinned_dispatch_structured_callers = 0
 let test_keeper_prehook_bypass () =
   (check int)
     "keeper turn pre-hook invocation count per turn \
-     (RFC-0083 §1.1 / keeper_exec_masc.ml:164,218; PR-7 target > 0)"
+     (RFC-0084 §1.1 / keeper_exec_masc.ml:164,218; PR-7 target > 0)"
     0
     pinned_keeper_prehook_invocations_per_turn
 
 let test_capability_gate_bypass () =
   (check int)
     "capability gate invocations on keeper turn \
-     (RFC-0083 §1.1 / capability_registry.ml:358-362; PR-7 target > 0)"
+     (RFC-0084 §1.1 / capability_registry.ml:358-362; PR-7 target > 0)"
     0
     pinned_capability_gate_invocations_per_turn
 
 let test_dispatch_structured_dead () =
   (check int)
     "Tool_dispatch.dispatch_structured callers in lib/ + bin/ \
-     (RFC-0083 §1.1 / tool_dispatch.ml:140-145; PR-11 removes function)"
+     (RFC-0084 §1.1 / tool_dispatch.ml:140-145; PR-11 removes function)"
     0
     pinned_dispatch_structured_callers
 
 let () =
   Alcotest.run
-    "RFC-0083 keeper pre-hook bypass gap"
+    "RFC-0084 keeper pre-hook bypass gap"
     [ ( "keeper-prehook-gap"
       , [ test_case "keeper-prehook-bypass" `Quick test_keeper_prehook_bypass
         ; test_case "capability-gate-bypass" `Quick test_capability_gate_bypass

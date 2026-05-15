@@ -1552,8 +1552,18 @@ let run_turn
                          ();
                        (* Memory bank compaction: dedup + consolidate if over threshold. *)
                        (try
+                          let memory_summarizer =
+                            Keeper_memory_llm_summary.make
+                              ?provider_filter
+                              ~cascade_name:cascade_name_string
+                              ~keeper_name:meta.name
+                              ()
+                          in
                           let compaction =
-                            Keeper_memory_bank.compact_memory_bank_if_needed config meta
+                            Keeper_memory_bank.compact_memory_bank_if_needed
+                              ?summarizer:memory_summarizer
+                              config
+                              meta
                           in
                           if compaction.performed
                           then

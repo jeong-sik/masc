@@ -162,18 +162,14 @@ type strategy_config = {
       @since 0.9.7 *)
 
   sticky_ttl_ms : int option;
-  (** ["{name}_sticky_ttl_ms"]. Used by the [sticky] strategy.
-      Defaults to {!Cascade_strategy.default_sticky_ttl_ms}
-      ([300_000]) when [kind] is [sticky] and this field is absent.
-      Values [<= 0] disable affinity entirely.
-      @since 0.9.7 *)
+  (** ["{name}_sticky_ttl_ms"]. Retired legacy field.  Parsed only so
+      diagnostics can reject stale runtime JSON explicitly. *)
 
-  (* ── Scoring parameter overrides (Weighted_random strategy) ── *)
+  (* ── Retired scoring parameter overrides ── *)
 
   latency_baseline_ms : float option;
-  (** ["{name}_latency_baseline_ms"]. Provider p50 above this value
-      incurs a fractional score penalty.  Falls back to env var
-      [MASC_CASCADE_LATENCY_BASELINE_MS] or default 2000.0 when absent. *)
+  (** ["{name}_latency_baseline_ms"]. Retired legacy field, parsed only
+      for diagnostics. *)
 
   rate_limit_recency_window_s : float option;
   (** ["{name}_rate_limit_recency_window_s"]. Lookback window for

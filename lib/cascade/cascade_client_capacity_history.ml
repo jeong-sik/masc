@@ -9,15 +9,11 @@ type event = {
   active_after : int;
 }
 
-(* ── Classifier (shares {!Masc_network_defaults.is_cli_sentinel_url}
-      and {!Masc_network_defaults.is_ollama_url} with
-      {!Dashboard_cascade.classify_capacity_key}).  Both call sites
-      resolve to the same SSOT predicates; [test_snapshot_kind_filter]
-      below and the existing [Dashboard_cascade] tests still cover the
-      mapping. *)
+(* ── Classifier.  Kept leaf-level to avoid pulling the dashboard or aggregate
+      capacity-probe adapter into this ring buffer module. *)
 let classify_key url =
   if Masc_network_defaults.is_cli_sentinel_url url then "cli"
-  else if Masc_network_defaults.is_ollama_url url then "ollama"
+  else if Cascade_http_probe.is_registered ~url then "http_probe"
   else "other"
 
 (* ── Ring buffer configuration ─────────────────────────────── *)
@@ -149,7 +145,7 @@ let snapshot ?(limit = 100) ?kind ?since_ts () =
   let kind_match =
     match kind with
     | None -> fun _ -> true
-    | Some k when k = "cli" || k = "ollama" || k = "other" ->
+    | Some k when k = "cli" || k = "http_probe" || k = "other" ->
       fun e -> classify_key e.key = k
     | Some _ ->
       (* Unknown kind filter: return nothing rather than silently

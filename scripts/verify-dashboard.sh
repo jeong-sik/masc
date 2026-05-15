@@ -124,7 +124,7 @@ check_json "dashboard config exposes runtime categories" "$BASE/api/v1/dashboard
 check_http "project snapshot 200" "$BASE/api/v1/dashboard/project-snapshot" "200"
 check_json "project snapshot exposes execution/readiness" "$BASE/api/v1/dashboard/project-snapshot" "'execution' in d and 'readiness' in d" '^True$'
 check_http "dashboard execution 200" "$BASE/api/v1/dashboard/execution" "200"
-check_json "dashboard execution exposes queue and agents" "$BASE/api/v1/dashboard/execution" "'status' in d and 'agents' in d and 'execution_queue' in d" '^True$'
+check_json "dashboard execution exposes provenance" "$BASE/api/v1/dashboard/execution" "'status' in d and 'agents' in d and 'execution_queue' in d and d.get('dashboard_surface') == '/api/v1/dashboard/execution' and d.get('source') == 'dashboard_execution_read_model' and d.get('retention', {}).get('scope') == 'dashboard_execution' and d.get('query', {}).get('default_light_request') is True and d.get('cache', {}).get('cache_state') in ('fresh', 'stale', 'initializing', 'request_swr_or_inline_compute')" '^True$'
 check_http "dashboard execution trust 200" "$BASE/api/v1/dashboard/execution-trust" "200"
 check_json "dashboard execution trust exposes provenance" "$BASE/api/v1/dashboard/execution-trust" "'dashboard_surface' in d and 'keepers' in d and 'coverage_gaps' in d" '^True$'
 check_http "dashboard mission 200" "$BASE/api/v1/dashboard/mission" "200"
@@ -215,7 +215,7 @@ check_json "keeper costs exposes keepers" "$BASE/api/v1/dashboard/keeper-costs?w
 check_http "memory subsystems 200" "$BASE/api/v1/dashboard/memory-subsystems" "200"
 check_json "memory subsystems has hebbian block" "$BASE/api/v1/dashboard/memory-subsystems" "'hebbian' in d" '^True$'
 check_http "transport health 200" "$BASE/api/v1/dashboard/transport-health" "200"
-check_json "transport health has summary" "$BASE/api/v1/dashboard/transport-health" "'summary' in d" '^True$'
+check_json "transport health exposes provenance" "$BASE/api/v1/dashboard/transport-health" "'summary' in d and d.get('dashboard_surface') == '/api/v1/dashboard/transport-health' and d.get('source') == 'transport_health_read_model' and d.get('retention', {}).get('scope') == 'dashboard_transport_health' and d.get('query', {}).get('default_snapshot_request') is True and d.get('cache', {}).get('cache_state') in ('fresh', 'stale', 'initializing', 'request_swr_or_inline_compute')" '^True$'
 check_http "attribution summary 200" "$BASE/api/v1/attribution/summary" "200"
 check_json "attribution summary has gates" "$BASE/api/v1/attribution/summary" "'gates' in d" '^True$'
 check_http "attribution recent 200" "$BASE/api/v1/attribution/recent?limit=1" "200"

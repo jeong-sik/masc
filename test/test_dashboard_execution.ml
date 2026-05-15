@@ -67,6 +67,9 @@ let post_json ~id ~author ?(title = "") ?(body = "") ?hearth ?thread_id
   in
   `Assoc fields
 
+let request target =
+  Httpun.Request.create ~headers:(Httpun.Headers.of_list []) `GET target
+
 let comment_json ~id ~post_id ~author ~content ?(created_at = 1000.0) () =
   `Assoc
     [
@@ -935,6 +938,79 @@ let test_patch_keeper_dependent_caches_tolerates_null_agent () =
       true
       (row |> member "keepalive_running" |> to_bool))
 
+let test_execution_default_route_exposes_provenance () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run (fun sw ->
+        let state =
+          Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir ()
+        in
+        let seed =
+          `Assoc
+            [ "status", `Assoc [ "namespace", `String "default" ]
+            ; "agents", `List []
+            ; "execution_queue", `List []
+            ; "generated_at", `String "2026-05-15T01:00:00Z"
+            ]
+        in
+        with_execution_cache seed (fun () ->
+          let json =
+            Lib.Server_dashboard_http.dashboard_execution_http_json
+              ~state
+              ~sw
+              ~clock:(Eio.Stdenv.clock env)
+              (request "/api/v1/dashboard/execution")
+          in
+          let open Yojson.Safe.Util in
+          check string "surface" "/api/v1/dashboard/execution"
+            (json |> member "dashboard_surface" |> to_string);
+          check string "source" "dashboard_execution_read_model"
+            (json |> member "source" |> to_string);
+          check string "generated_at_iso" "2026-05-15T01:00:00Z"
+            (json |> member "generated_at_iso" |> to_string);
+          check string "retention scope" "dashboard_execution"
+            (json |> member "retention" |> member "scope" |> to_string);
+          check string "retention store" "process_cache"
+            (json |> member "retention" |> member "store_kind" |> to_string);
+          check bool "query default" true
+            (json |> member "query" |> member "default_light_request" |> to_bool);
+          check bool "query light" true
+            (json |> member "query" |> member "light" |> to_bool);
+          check string "cache state" "fresh"
+            (json |> member "cache" |> member "cache_state" |> to_string);
+          check string "cache key" "execution:default:light"
+            (json |> member "cache" |> member "request_cache_key" |> to_string))))
+
+let test_transport_health_route_exposes_provenance () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let state =
+        Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir ()
+      in
+      let json =
+        Lib.Server_dashboard_http.dashboard_transport_health_http_json ~state
+      in
+      let open Yojson.Safe.Util in
+      check string "surface" "/api/v1/dashboard/transport-health"
+        (json |> member "dashboard_surface" |> to_string);
+      check string "source" "transport_health_read_model"
+        (json |> member "source" |> to_string);
+      check string "retention scope" "dashboard_transport_health"
+        (json |> member "retention" |> member "scope" |> to_string);
+      check string "retention store" "process_cache"
+        (json |> member "retention" |> member "store_kind" |> to_string);
+      check bool "query default" true
+        (json |> member "query" |> member "default_snapshot_request" |> to_bool);
+      check string "cache scope" "dashboard_transport_health"
+        (json |> member "cache" |> member "scope" |> to_string);
+      check bool "generated surfaced" true
+        (String.length (json |> member "generated_at_iso" |> to_string) > 0))
+
 let callback_metric_value callback =
   Lib.Prometheus.metric_value_or_zero
     Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
@@ -1063,6 +1139,10 @@ let () =
             test_invalidate_execution_cache_counts_failures;
           Alcotest.test_case "lifecycle patch tolerates null agent" `Quick
             test_patch_keeper_dependent_caches_tolerates_null_agent;
+          Alcotest.test_case "execution default route exposes provenance" `Quick
+            test_execution_default_route_exposes_provenance;
+          Alcotest.test_case "transport health route exposes provenance" `Quick
+            test_transport_health_route_exposes_provenance;
           Alcotest.test_case "running keeper patch tolerates null agent" `Quick
             test_patch_surface_json_for_running_keepers_tolerates_null_agent;
           Alcotest.test_case "patch keeper row tolerates null agent shape" `Quick

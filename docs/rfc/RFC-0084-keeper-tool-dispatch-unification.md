@@ -187,7 +187,7 @@ OAS측 `Tool.disclosure_level` Hybrid + `Disclosure_resolver`는 `lib/pipeline/s
 | **#2 String/substring classifier** | `keeper_internal_tools` 32-entry string list (`tool_catalog_surfaces.ml:28-96`) + `Tool_dispatch.registry : (string, handler) Hashtbl.t`. 두 repo 횡단 동일 anti-pattern. |
 | **#2 Prefix-gated** | `String.starts_with ~prefix:"masc_"` (`mcp_server_eio_tool_profile.ml:296`), `String.starts_with ~prefix:"test_"` 5 sites |
 | **Unknown → Permissive Default** | `Option.value ~default:"default" (Sys.getenv_opt "TERM_SESSION_ID")` (`tool_inline_dispatch_coord.ml:186, 266`) → silent identity collision |
-| **#1 Scattered hardcoded default** | `/tmp/.masc_agent[_mcp]_<sid>` 7 sites, `/bin/zsh` 5 sites, `.masc-ide` 4 sites |
+| **#1 Scattered hardcoded default** | ~~`/tmp/.masc_agent[_mcp]_<sid>` 7 sites, `/bin/zsh` 5 sites, `.masc-ide` 4 sites~~ — *모두 closed*: `/tmp/.masc_agent` (§1.5 PR-D), `/bin/zsh` (§1.5 PR-B), `.masc-ide` (#15533). `lib/` 잔존 0건; test 에 migration guard 만 유지. |
 | **Telemetry-as-fix** | Counter without fix는 본 RFC가 자체 안 함 — 4-tuple emission은 typed Outcome이 *fix*된 결과. counter는 alarm이 아닌 invariant check. |
 
 본 RFC §8의 self-check가 이 매핑을 명시적으로 점검.

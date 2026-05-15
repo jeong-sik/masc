@@ -686,7 +686,8 @@ type docker_shell_result =
    only to the run path, not to docker exec against a warm container. *)
 let docker_run_min_timeout_sec = 5.0
 
-let run_docker_shell_command_with_status
+let run_docker_shell_command_with_status_internal
+      ~validate_command_paths
       ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(cwd : string)
@@ -734,7 +735,12 @@ let run_docker_shell_command_with_status
       match multi_repo_blocker with
       | Some msg -> sandbox_error msg
       | None ->
-      match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd with
+      let path_validation =
+        if validate_command_paths
+        then Worker_dev_tools.validate_command_paths ~workdir:cwd cmd
+        else Ok ()
+      in
+      match path_validation with
       | Error err -> sandbox_error err
       | Ok () ->
       let _cleanup =
@@ -939,6 +945,14 @@ let run_docker_shell_command_with_status
                         Ok { status; output; image; network_label }
                       with
                       | Failure err -> sandbox_error err)))))
+;;
+
+let run_docker_shell_command_with_status =
+  run_docker_shell_command_with_status_internal ~validate_command_paths:true
+;;
+
+let run_trusted_docker_shell_command_with_status =
+  run_docker_shell_command_with_status_internal ~validate_command_paths:false
 ;;
 
 let run_docker_with_git_bash

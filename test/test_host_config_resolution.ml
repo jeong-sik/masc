@@ -15,11 +15,14 @@ open Alcotest
 *)
 
 let test_legacy_macos_default_field_values () =
-  let d = Masc_mcp.Host_config.legacy_macos_default () in
+  let d = Host_config.legacy_macos_default () in
+  let temp_keeper_creds =
+    Filename.concat (Filename.get_temp_dir_name ()) "keeper-creds"
+  in
   (check string)
-    "legacy_macos_default.cred_root pins /tmp/keeper-creds \
+    "legacy_macos_default.cred_root pins temp keeper-creds \
      (host_config_provider.ml:3)"
-    "/tmp/keeper-creds"
+    temp_keeper_creds
     d.cred_root;
   (check string)
     "legacy_macos_default.host_bash pins /bin/bash \
@@ -34,7 +37,7 @@ let test_legacy_macos_default_field_values () =
 ;;
 
 let test_legacy_coreutils_match_macos () =
-  let d = Masc_mcp.Host_config.legacy_macos_default () in
+  let d = Host_config.legacy_macos_default () in
   (check string) "ls = /bin/ls" "/bin/ls" d.coreutils.ls;
   (check string) "cat = /bin/cat" "/bin/cat" d.coreutils.cat;
   (check string) "pwd = /bin/pwd" "/bin/pwd" d.coreutils.pwd;
@@ -47,15 +50,15 @@ let test_is_test_mode_typed () =
   (check bool)
     "is_test_mode Test = true (typed replacement for String.starts_with \"test_\")"
     true
-    (Masc_mcp.Host_config.is_test_mode Masc_mcp.Host_config.Test);
+    (Host_config.is_test_mode Host_config.Test);
   (check bool)
     "is_test_mode Production = false"
     false
-    (Masc_mcp.Host_config.is_test_mode Masc_mcp.Host_config.Production)
+    (Host_config.is_test_mode Host_config.Production)
 ;;
 
 let test_resolve_with_base_path () =
-  match Masc_mcp.Host_config.resolve ~base_path:"/tmp/test-masc" () with
+  match Host_config.resolve ~base_path:"/tmp/test-masc" () with
   | Error msg -> failf "resolve failed: %s" msg
   | Ok t ->
     (check bool)
@@ -71,7 +74,7 @@ let test_resolve_with_base_path () =
 ;;
 
 let test_resolve_default_base_path () =
-  match Masc_mcp.Host_config.resolve () with
+  match Host_config.resolve () with
   | Error msg -> failf "resolve (default base) failed: %s" msg
   | Ok _ ->
     (* Default-base resolve must succeed; concrete path content is

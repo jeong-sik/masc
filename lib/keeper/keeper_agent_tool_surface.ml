@@ -242,8 +242,7 @@ let tools_for_gated_affordance = function
       "keeper_board_post"; "keeper_task_create"; "masc_add_task";
       "keeper_tasks_audit"; "keeper_board_cleanup" ]
   | Inspect_worktree_delta ->
-    [ "keeper_shell"; "keeper_bash"; "masc_code_git";
-      "keeper_fs_read" ]
+    [ "keeper_bash"; "masc_code_shell"; "keeper_fs_edit"; "keeper_pr_create" ]
 
 let preferred_tool_names_for_turn_affordances turn_affordances =
   turn_affordances
@@ -324,6 +323,11 @@ let tool_names_for_required_gate_surface
       (Keeper_tool_disclosure.canonical_tool_name name)
       canonical_required_tool_names
   in
+  let is_input_ambiguous_status_tool name =
+    match Tool_name.of_string name with
+    | Some (Tool_name.Masc Tool_name.Masc.Code_git) -> true
+    | _ -> false
+  in
   if not tool_gate_requested then tool_names
   else
     let actionable =
@@ -331,7 +335,8 @@ let tool_names_for_required_gate_surface
       |> List.filter (fun name ->
         is_explicit_required_tool_name name
         || (Keeper_tool_disclosure.tool_name_can_satisfy_required_contract name
-            && not (is_stay_silent name)))
+            && (not (is_stay_silent name))
+            && not (is_input_ambiguous_status_tool name)))
       |> Keeper_types.dedupe_keep_order
     in
     match actionable with

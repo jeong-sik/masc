@@ -9001,6 +9001,44 @@ let test_actionable_tool_contract_allows_execution_tools () =
        ~tool_names:[])
 ;;
 
+let test_discovered_work_classifier_ignores_passive_inspection_tools () =
+  let obs =
+    {
+      KCC.unclaimed_task_count = 0;
+      board_activity_count = 0;
+      has_discovered_work_section = true;
+    }
+  in
+  check
+    bool
+    "fs read alone cannot make discovered work actionable"
+    false
+    (KCC.requires_tool_support_for_allowed_tools
+       ~allowed_tool_names:[ "keeper_fs_read" ]
+       obs);
+  check
+    bool
+    "git status/diff/log surface alone cannot make discovered work actionable"
+    false
+    (KCC.requires_tool_support_for_allowed_tools
+       ~allowed_tool_names:[ "masc_code_git"; "keeper_fs_read" ]
+       obs);
+  check
+    bool
+    "draft PR tool makes discovered work actionable"
+    true
+    (KCC.requires_tool_support_for_allowed_tools
+       ~allowed_tool_names:[ "keeper_pr_create" ]
+       obs);
+  check
+    bool
+    "execution shell makes discovered work actionable"
+    true
+    (KCC.requires_tool_support_for_allowed_tools
+       ~allowed_tool_names:[ "keeper_bash" ]
+       obs)
+;;
+
 let test_stay_silent_requires_typed_no_work_proof_on_actionable_signal () =
   (* keeper_stay_silent has effect_domain=Read_only in tool_catalog but is
      classified as Completion in completion_tool_names, so it can still
@@ -10498,8 +10536,17 @@ let test_required_gate_surface_removes_passive_distractions () =
        ; "keeper_task_claim"
        ; "keeper_stay_silent"
        ; "keeper_board_post"
+       ; "masc_code_git"
        ; "masc_status"
        ]);
+  check
+    (list string)
+    "explicit masc_code_git survives required gate"
+    [ "masc_code_git"; "keeper_board_post" ]
+    (Surface.tool_names_for_required_gate_surface
+       ~tool_gate_requested:true
+       ~required_tool_names:[ "masc_code_git" ]
+       [ "keeper_tasks_list"; "masc_code_git"; "keeper_board_post" ]);
   check
     (list string)
     "optional turn keeps passive tools visible"
@@ -11692,6 +11739,10 @@ let () =
             "actionable signal allows execution tools"
             `Quick
             test_actionable_tool_contract_allows_execution_tools
+        ; test_case
+            "discovered work ignores passive inspection tools"
+            `Quick
+            test_discovered_work_classifier_ignores_passive_inspection_tools
         ; test_case
             "stay_silent needs typed no-work proof on actionable signal"
             `Quick

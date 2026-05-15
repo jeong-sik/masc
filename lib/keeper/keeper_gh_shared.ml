@@ -1,6 +1,9 @@
 (* GH credential isolation — SSOT in Keeper_gh_env. *)
 let with_keeper_gh_env = Keeper_gh_env.with_env
 
+(* RFC-0084 host-config-cleanup-B — zsh binary path migration. *)
+let host_zsh = (Host_config.legacy_macos_default ()).host_zsh
+
 (* ================================================================ *)
 (* GH entity cache (inlined from former keeper_gh_cache.ml).         *)
 (* In-memory cache of valid PR/issue numbers per repo, populated     *)
@@ -214,7 +217,7 @@ let fetch_entity_numbers
       (Filename.quote (jq_filter kind))
   in
   let scoped = Keeper_gh_env.with_env config raw in
-  let argv = [ "/bin/zsh"; "-lc"; Printf.sprintf "%s 2>/dev/null" scoped ] in
+  let argv = [ host_zsh; "-lc"; Printf.sprintf "%s 2>/dev/null" scoped ] in
   match
     Masc_exec.Exec_gate.run_argv_with_status
       ~actor:`Coord_git

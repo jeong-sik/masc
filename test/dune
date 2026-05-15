@@ -1569,3 +1569,12 @@
  (name test_pr_c_coreutils_migration)
  (modules test_pr_c_coreutils_migration)
  (libraries masc_test_deps))
+
+; RFC-0084 host-config-cleanup-B — shell binary path migration.
+; Pins 0 occurrences of /bin/bash and /bin/zsh literals across
+; the 4 keeper consumer modules (1 bash + 3 zsh) and verifies one
+; Host_config.legacy_macos_default binding per consumer module.
+(test
+ (name test_pr_b_shell_paths_migration)
+ (modules test_pr_b_shell_paths_migration)
+ (libraries masc_test_deps))

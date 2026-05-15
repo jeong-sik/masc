@@ -5,6 +5,9 @@
 open Keeper_types
 open Keeper_exec_shared
 
+(* RFC-0084 host-config-cleanup-B — zsh binary path migration. *)
+let host_zsh = (Host_config.legacy_macos_default ()).host_zsh
+
 (* Issue #8480: Variant SSOT for PR review event. Adding a new
    constructor forces compilation in [pr_review_event_to_string],
    [pr_review_event_of_string_opt], and [pr_review_event_to_gh_flag],
@@ -189,7 +192,7 @@ let run_pr_review_shell ~(config : Coord.config) ~(meta : keeper_meta)
     let host_cmd =
       Printf.sprintf "cd %s && %s" (Filename.quote root) cmd
     in
-    let argv = [ "/bin/zsh"; "-lc"; host_cmd ] in
+    let argv = [ host_zsh; "-lc"; host_cmd ] in
     let status, output =
       Masc_exec.Exec_gate.run_argv_with_status
         ~actor:`Keeper_shell

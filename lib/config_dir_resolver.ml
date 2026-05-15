@@ -52,11 +52,16 @@ let trim_opt = Env_config_core.trim_opt
 let existing_dir = Env_config_core.existing_dir
 let existing_file = Env_config_core.existing_file
 
-let running_under_test_executable executable_name =
-  executable_name
-  |> Filename.basename
-  |> String.lowercase_ascii
-  |> String.starts_with ~prefix:"test_"
+(* RFC-0084 host-config-cleanup-F — typed test-mode predicate.
+   Replaces the ad-hoc [test_]-prefix substring classifier with
+   the typed [Host_config.test_mode_kind] surface from
+   PR-12.  The previous helper accepted an arbitrary executable name
+   argument but every caller passed [Sys.executable_name] — the
+   typed surface always reads the current binary so the parameter is
+   dropped.  See [test_pr_f_test_mode_migration]. *)
+let running_under_test_executable () =
+  Host_config.is_test_mode
+    (Host_config.legacy_macos_default ()).test_mode
 
 let test_config_path_override_env = "MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE"
 let test_base_path_override_env = "MASC_TEST_ALLOW_BASE_PATH_OVERRIDE"
@@ -110,7 +115,7 @@ let sanitize_inherited_test_base_path_opt ~running_under_test_executable
 let current_env_config_dir_opt () =
   sanitize_inherited_test_env_opt
     ~running_under_test_executable:
-      (running_under_test_executable Sys.executable_name)
+      (running_under_test_executable ())
     ~allow_inherited:(allow_inherited_test_config_paths ())
     ~initial:initial_env_config_dir
     ~current:(Env_config_core.config_dir_opt ())
@@ -118,7 +123,7 @@ let current_env_config_dir_opt () =
 let current_env_base_path_opt () =
   sanitize_inherited_test_base_path_opt
     ~running_under_test_executable:
-      (running_under_test_executable Sys.executable_name)
+      (running_under_test_executable ())
     ~allow_inherited:(allow_inherited_test_base_path ())
     ~initial:initial_env_base_path
     ~current:(Env_config_core.base_path_raw_opt ())
@@ -127,7 +132,7 @@ let current_env_base_path_opt () =
 let current_env_personas_dir_opt () =
   sanitize_inherited_test_env_opt
     ~running_under_test_executable:
-      (running_under_test_executable Sys.executable_name)
+      (running_under_test_executable ())
     ~allow_inherited:(allow_inherited_test_config_paths ())
     ~initial:initial_env_personas_dir
     ~current:(Env_config_core.personas_dir_opt ())
@@ -135,7 +140,7 @@ let current_env_personas_dir_opt () =
 let current_env_home_opt () =
   sanitize_inherited_test_env_opt
     ~running_under_test_executable:
-      (running_under_test_executable Sys.executable_name)
+      (running_under_test_executable ())
     ~allow_inherited:(allow_inherited_test_config_paths ())
     ~initial:initial_env_home
     ~current:(Sys.getenv_opt "HOME" |> trim_opt)

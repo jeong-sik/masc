@@ -1518,3 +1518,14 @@
  (name test_pr_e_sandbox_root_migration)
  (modules test_pr_e_sandbox_root_migration)
  (libraries masc_test_deps))
+
+; RFC-0084 host-config-cleanup-F — test-mode predicate migration.
+; Pins `String.starts_with ~prefix:"test_"` literal count at 0 in
+; lib/config_dir_resolver.ml, asserts helper signature is unit->bool
+; (no executable_name param), and verifies Host_config.is_test_mode
+; is called from the migrated site. Cross-checks is_test_mode round-trip.
+; Requires masc_test_deps for Masc_mcp.Host_config.is_test_mode.
+(test
+ (name test_pr_f_test_mode_migration)
+ (modules test_pr_f_test_mode_migration)
+ (libraries masc_test_deps))

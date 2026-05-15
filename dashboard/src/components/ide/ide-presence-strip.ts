@@ -38,6 +38,21 @@ export interface WorktreeEntry {
   readonly keeper_attached: boolean
 }
 
+interface PresenceContextSummary {
+  readonly label: string
+  readonly title: string
+}
+
+const CONTEXT_BADGE_STYLE = {
+  fontSize: 'var(--fs-9)',
+  padding: '0 3px',
+  border: '1px solid var(--color-border-default)',
+  borderRadius: 'var(--r-0)',
+  color: 'var(--color-fg-muted)',
+  background: 'var(--color-bg-elevated)',
+  fontFamily: 'var(--font-mono)',
+}
+
 function mapAgentStatus(status: string): KeeperPresenceEntry['status'] {
   if (status === 'active' || status === 'busy') return 'active'
   if (status === 'listening') return 'idle'
@@ -295,11 +310,23 @@ export function presenceContextAnchor({
   }
 }
 
+export function presenceContextSummary(
+  anchor: Omit<IdeContextFocus, 'activated_at_ms'> | null,
+): PresenceContextSummary | null {
+  const labels = anchor?.route_links?.map(link => link.label) ?? []
+  if (labels.length === 0) return null
+  return {
+    label: `CTX ${labels.length}`,
+    title: `Linked context: ${labels.join(', ')}`,
+  }
+}
+
 function PresenceChip({ entry, worktrees }: PresenceChipProps) {
   const isActive = entry.status === 'active'
   const cursor = cursorOverlaySignal.value.cursors.get(entry.keeper_id)
   const wt = worktrees.find(w => w.branch.startsWith(entry.keeper_id + '/'))
   const contextAnchor = presenceContextAnchor({ entry, worktree: wt ?? null, cursor })
+  const contextSummary = presenceContextSummary(contextAnchor)
 
   const focusLabel = cursor?.file_path
     ? `${cursor.file_path.split('/').pop()}:${cursor.line}`
@@ -351,6 +378,9 @@ function PresenceChip({ entry, worktrees }: PresenceChipProps) {
           overflow: 'hidden',
           textOverflow: 'ellipsis',
         }}>${focusLabel}</span>
+      ` : null}
+      ${contextSummary ? html`
+        <span style=${CONTEXT_BADGE_STYLE} title=${contextSummary.title}>${contextSummary.label}</span>
       ` : null}
       ${prBadge ? html`
         <span style=${{

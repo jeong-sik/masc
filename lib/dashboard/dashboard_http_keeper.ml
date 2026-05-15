@@ -1998,6 +1998,16 @@ let keeper_cost_aggregates_json
   ]
 
 let k2_feed_limit limit = max 1 (min 200 limit)
+let keeper_decisions_dashboard_surface = "/api/v1/dashboard/keeper-decisions"
+
+let keeper_decisions_retention_json ~per_keeper_limit ~keeper_count =
+  `Assoc
+    [
+      ("scope", `String "per_keeper_jsonl_tail");
+      ("durable_store", `String ".masc/keepers/:name.decisions.jsonl");
+      ("per_keeper_tail_lines", `Int per_keeper_limit);
+      ("keeper_count", `Int keeper_count);
+    ]
 
 (** Read per-keeper [.decisions.jsonl] files and return a unified,
     time-sorted stream of recent events (turn telemetry, tool_exec,
@@ -2103,9 +2113,16 @@ let keeper_decisions_json
     ) top
   in
   `Assoc [
+    ("dashboard_surface", `String keeper_decisions_dashboard_surface);
+    ("source", `String "keeper_decision_log");
+    ( "retention",
+      keeper_decisions_retention_json
+        ~per_keeper_limit
+        ~keeper_count:(List.length keepers) );
     ("events", `List items);
     ("limit", `Int limit);
     ("generated_at", `Float (Unix.gettimeofday ()));
+    ("generated_at_iso", `String (Masc_domain.now_iso ()));
   ]
 
 let k2_iso8601_of_unix ts_unix =

@@ -11,6 +11,7 @@ let float_of_env_default_with_legacy ~canonical ~legacy ~default ~min_v ~max_v =
   | None -> float_of_env_default legacy ~default ~min_v ~max_v
 
 let dashboard_namespace_truth_http_json ~state ~sw:_ ~clock _request =
+  let config = state.Mcp_server.room_config in
   (* Fast-path: if the proactive execution refresh hasn't produced a result
      yet, return "initializing" immediately instead of blocking for 15-20s
      on cold-start on-demand compute. The frontend retries every 3s via
@@ -32,18 +33,11 @@ let dashboard_namespace_truth_http_json ~state ~sw:_ ~clock _request =
         && Option.is_none Execution_surfaces._execution_cache.last_error_unix
   in
   if proactive_first_cycle_pending then
-    `Assoc
-      [
-        ("status", `String "initializing");
-        ("generated_at", `String (Masc_domain.now_iso ()));
-        ( "message",
-          `String
-            "Execution snapshot is still warming up. The dashboard will retry automatically."
-        );
-      ]
+    Namespace_truth_support.compose_namespace_truth_initializing ~config
+      ~message:
+        "Execution snapshot is still warming up. The dashboard will retry automatically."
   else
     with_dashboard_timeout ~clock (fun () ->
-        let config = state.Mcp_server.room_config in
         let started_at = Unix.gettimeofday () in
         let t0 = Time_compat.now () in
         (* Staged fetch: shell may still need a guarded refresh, while execution
@@ -180,7 +174,10 @@ let rec normalize_namespace_truth_snapshot_for_hash (json : Yojson.Safe.t) :
       `Assoc
         (fields
         |> List.filter_map (fun (key, value) ->
-               if String.equal key "generated_at" then None
+               if
+                 String.equal key "generated_at"
+                 || String.equal key "generated_at_iso"
+               then None
                else Some (key, normalize_namespace_truth_snapshot_for_hash value)))
   | `List values ->
       `List (List.map normalize_namespace_truth_snapshot_for_hash values)

@@ -915,6 +915,61 @@ let () =
           | Ok () -> ()
           | Error msg ->
             Alcotest.fail ("plain path unexpectedly rejected: " ^ msg));
+      Alcotest.test_case "git -C missing worktree is cwd_not_directory"
+        `Quick (fun () ->
+          let workdir = Filename.temp_file "wdt_git_c_" "" in
+          Sys.remove workdir;
+          Unix.mkdir workdir 0o755;
+          Fun.protect
+            ~finally:(fun () -> try Unix.rmdir workdir with _ -> ())
+            (fun () ->
+              match
+                Worker_dev_tools.validate_command_paths
+                  ~workdir
+                  "git -C repos/masc-mcp/.worktrees/missing status"
+              with
+              | Error msg ->
+                Alcotest.(check bool)
+                  "typed cwd error"
+                  true
+                  (contains_substring msg "cwd_not_directory")
+              | Ok () -> Alcotest.fail "missing git -C directory must be blocked"));
+      Alcotest.test_case "git -C existing worktree is allowed" `Quick
+        (fun () ->
+          let workdir = Filename.temp_file "wdt_git_c_ok_" "" in
+          Sys.remove workdir;
+          let target =
+            Filename.concat workdir "repos/masc-mcp/.worktrees/task"
+          in
+          let rec mkdir_p path =
+            if path = "" || path = "." || path = "/" then ()
+            else if Sys.file_exists path then ()
+            else (
+              mkdir_p (Filename.dirname path);
+              Unix.mkdir path 0o755)
+          in
+          mkdir_p target;
+          let rec cleanup path =
+            if Sys.file_exists path then
+              match Unix.lstat path with
+              | { Unix.st_kind = Unix.S_DIR; _ } ->
+                Array.iter
+                  (fun name -> cleanup (Filename.concat path name))
+                  (Sys.readdir path);
+                Unix.rmdir path
+              | _ -> Sys.remove path
+          in
+          Fun.protect
+            ~finally:(fun () -> try cleanup workdir with _ -> ())
+            (fun () ->
+              match
+                Worker_dev_tools.validate_command_paths
+                  ~workdir
+                  "git -C repos/masc-mcp/.worktrees/task status"
+              with
+              | Ok () -> ()
+              | Error msg ->
+                Alcotest.fail ("existing git -C directory rejected: " ^ msg)));
     ];
     "command_blocked_hint_redirects", [
       (* Field evidence (2026-04-17/18): keeper_bash rejected `gh`, `docker`,

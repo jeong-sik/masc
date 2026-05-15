@@ -31,6 +31,22 @@ let trusts_query = {|
   }
 |}
 
+let dashboard_surface = "/api/v1/agent-relations"
+let dashboard_source = "second_brain_graphql"
+
+let dashboard_retention_json =
+  `Assoc
+    [
+      ("scope", `String "external_graphql_query");
+      ("durable_store", `String "Second Brain GraphQL");
+      ( "queries",
+        `List
+          [
+            `String "agentCollaborationNetworkByName";
+            `String "agent.relations";
+          ] );
+    ]
+
 (** Build the JSON response for agent relations.
     Combines collaboration network + trust edges + generic relations. *)
 let json ~agent_name () : Yojson.Safe.t =
@@ -92,6 +108,10 @@ let json ~agent_name () : Yojson.Safe.t =
     | None -> []
   in
   `Assoc [
+    ("dashboard_surface", `String dashboard_surface);
+    ("source", `String dashboard_source);
+    ("retention", dashboard_retention_json);
+    ("generated_at_iso", `String (Masc_domain.now_iso ()));
     ("agent_name", `String agent_name);
     ("collaborators", `List collaborators);
     ("interests", `List interests);

@@ -1070,6 +1070,9 @@ let run_keeper_cycle
                                 Keeper_id.Task_id.to_string
                                 run_meta.current_task_id)
                            (fun () ->
+                              Keeper_registry.mark_turn_provider_attempt_started
+                                ~base_path:config.base_path
+                                meta.name;
                               Keeper_turn_fsm.emit_transition
                                 ~keeper_name:meta.name
                                 ~turn_id:keeper_turn_id

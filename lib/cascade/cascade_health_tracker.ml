@@ -113,7 +113,7 @@ let cooldown_sec =
     cooldown entirely.
 
     Provider classification uses OAS runtime bindings plus the local
-    ["custom"] schema prefix, not Provider_adapter catalog rows. *)
+    ["custom"] schema prefix, not legacy provider-adapter catalog rows. *)
 let local_cooldown_threshold =
   Int.max 1
     (read_int_setting

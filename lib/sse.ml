@@ -960,6 +960,13 @@ let try_pop session_id =
 let client_count () =
   (Atomic.get clients).count
 
+let client_count_by_kind kind =
+  SMap.fold
+    (fun _session_id (client : client) count ->
+       if client.kind = kind then count + 1 else count)
+    (Atomic.get clients).entries
+    0
+
 (** Return list of session_ids for all connected clients.
     Used by transport metrics to report session count by kind. *)
 let all_session_ids () =

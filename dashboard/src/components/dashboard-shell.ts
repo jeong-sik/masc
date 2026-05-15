@@ -3,11 +3,12 @@ import { signal } from '@preact/signals'
 import { lazy, Suspense } from 'preact/compat'
 import { useEffect } from 'preact/hooks'
 import type { RouteState, TabId } from '../types'
+import type { DashboardRuntimeResolution, Keeper } from '../types'
 import { hashForRoute, navigate, route } from '../router'
 import { connected, reconnectCount, lastDisconnectedAt } from '../sse'
 import { dashboardWsOnlyEnabled } from '../dashboard-ws-cutover'
 import { dashboardWsConnected, dashboardWsSseFallbackActive } from '../dashboard-ws-state'
-import { dashboardLoading, serverStatus } from '../store'
+import { dashboardLoading, executionError, keepers, serverStatus, shellCounts, shellRuntimeResolution } from '../store'
 import { missionSnapshot, missionLoading } from '../mission-signals'
 import { namespaceTruthInitializing } from '../namespace-truth-store'
 import { ErrorBoundary } from './common/error-boundary'
@@ -139,6 +140,155 @@ export function ConnectionStatus() {
           class="inline-flex items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 tabular-nums attention-badge"
         >Attention ${attentionCount}<//>
       ` : null}
+    </div>
+  `
+}
+
+type DashboardHealthChipTone = 'ok' | 'warn' | 'bad' | 'muted'
+
+interface DashboardHealthChip {
+  key: string
+  label: string
+  detail: string
+  tone: DashboardHealthChipTone
+}
+
+interface DashboardHealthInput {
+  connected: boolean
+  counts: {
+    keepers: number
+    configured_keepers: number
+  } | null
+  keepers: Keeper[]
+  runtimeResolution: DashboardRuntimeResolution | null
+  executionError: string | null
+  loading: boolean
+}
+
+function keeperLooksPaused(keeper: Keeper): boolean {
+  const phase = String(keeper.phase ?? '').toLowerCase()
+  const stage = String(keeper.pipeline_stage ?? '').toLowerCase()
+  const status = String(keeper.status ?? '').toLowerCase()
+  return keeper.paused === true || phase === 'paused' || stage === 'paused' || status === 'paused'
+}
+
+export function dashboardHealthChips(input: DashboardHealthInput): DashboardHealthChip[] {
+  const chips: DashboardHealthChip[] = []
+  if (!input.connected) {
+    chips.push({
+      key: 'transport-offline',
+      label: 'Transport offline',
+      detail: 'Dashboard stream is disconnected; live state can be stale.',
+      tone: 'bad',
+    })
+  }
+
+  const runtime = input.runtimeResolution
+  if (runtime?.source_mismatch || runtime?.server_workspace_mismatch) {
+    chips.push({
+      key: 'source-mismatch',
+      label: 'Source mismatch',
+      detail: 'Server, workspace, or resolved base path source differs.',
+      tone: 'warn',
+    })
+  } else if (runtime?.status && runtime.status !== 'ready') {
+    chips.push({
+      key: 'runtime-warning',
+      label: 'Runtime warning',
+      detail: runtime.warnings[0] ?? runtime.status,
+      tone: 'warn',
+    })
+  }
+
+  const pausedKeepers = input.keepers.filter(keeperLooksPaused).length
+  if (pausedKeepers > 0) {
+    chips.push({
+      key: 'paused-keepers',
+      label: `Paused keepers ${pausedKeepers}`,
+      detail: 'One or more keeper rows are paused; board/tool activity may look quiet.',
+      tone: 'warn',
+    })
+  }
+
+  const configured = input.counts?.configured_keepers ?? 0
+  const liveKeepers = input.counts?.keepers ?? input.keepers.length
+  if (configured > 0 && liveKeepers === 0) {
+    chips.push({
+      key: 'no-keeper-rows',
+      label: 'No keeper rows',
+      detail: `${configured} keepers are configured but no live keeper rows are visible.`,
+      tone: 'warn',
+    })
+  }
+
+  if (input.executionError) {
+    chips.push({
+      key: 'execution-error',
+      label: 'Execution refresh failed',
+      detail: input.executionError,
+      tone: 'bad',
+    })
+  }
+
+  if (chips.length === 0) {
+    chips.push({
+      key: input.loading ? 'hydrating' : 'runtime-ok',
+      label: input.loading ? 'Hydrating' : 'Runtime UI healthy',
+      detail: input.loading
+        ? 'Dashboard data is still loading.'
+        : 'No transport, source, paused-keeper, or execution-refresh issue is currently visible.',
+      tone: input.loading ? 'muted' : 'ok',
+    })
+  }
+
+  return chips
+}
+
+function healthChipClass(tone: DashboardHealthChipTone): string {
+  switch (tone) {
+    case 'ok':
+      return 'border-[var(--ok-30)] bg-[var(--ok-soft)] text-[var(--color-status-ok)]'
+    case 'warn':
+      return 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--warn-bright)]'
+    case 'bad':
+      return 'border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--color-status-err)]'
+    case 'muted':
+      return 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]'
+  }
+}
+
+export function DashboardHealthStrip() {
+  const wsOnly = dashboardWsOnlyEnabled()
+  const live = wsOnly
+    ? dashboardWsConnected.value || dashboardWsSseFallbackActive.value
+    : connected.value
+  const chips = dashboardHealthChips({
+    connected: live,
+    counts: shellCounts.value,
+    keepers: keepers.value,
+    runtimeResolution: shellRuntimeResolution.value,
+    executionError: executionError.value,
+    loading: dashboardLoading.value || namespaceTruthInitializing.value,
+  })
+
+  return html`
+    <div
+      class="flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-3 py-1.5 text-2xs"
+      role="status"
+      aria-label="Dashboard runtime health"
+      data-testid="dashboard-health-strip"
+    >
+      <span class="font-mono uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Health</span>
+      ${chips.map(chip => html`
+        <span
+          key=${chip.key}
+          class=${`inline-flex min-h-6 items-center rounded-[var(--r-1)] border px-2 py-0.5 font-medium ${healthChipClass(chip.tone)}`}
+          title=${chip.detail}
+          data-testid=${`dashboard-health-chip-${chip.key}`}
+        >
+          ${chip.label}
+        </span>
+      `)}
     </div>
   `
 }

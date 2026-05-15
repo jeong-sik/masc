@@ -11,8 +11,11 @@ import {
   nullable,
   number,
   object,
+  optional,
+  record,
   safeParse,
   string,
+  unknown,
   type BaseIssue,
   type InferOutput,
 } from 'valibot'
@@ -37,7 +40,13 @@ const AgentRelationSchema = object({
   participants: array(AgentRelationParticipantSchema),
 })
 
+const DashboardFeedRetentionSchema = record(string(), unknown())
+
 const AgentRelationsResponseSchema = object({
+  dashboard_surface: optional(string()),
+  source: optional(string()),
+  retention: optional(DashboardFeedRetentionSchema),
+  generated_at_iso: optional(string()),
   agent_name: string(),
   collaborators: array(AgentCollaboratorSchema),
   interests: array(string()),

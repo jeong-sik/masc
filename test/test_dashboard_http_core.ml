@@ -36,6 +36,21 @@ let invalid_utf8_byte_count s =
   in
   loop 0 0
 
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop i =
+    i + needle_len <= haystack_len
+    && (String.equal (String.sub haystack i needle_len) needle || loop (i + 1))
+  in
+  needle_len = 0 || loop 0
+
+let read_file path =
+  let ic = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> really_input_string ic (in_channel_length ic))
+
 let with_env key value f =
   let old = Sys.getenv_opt key in
   Unix.putenv key value;
@@ -271,6 +286,18 @@ let test_dashboard_shell_http_json_prefers_last_good_while_prewarming () =
       check int "last-good counts reused" 7
         (json |> member "counts" |> member "agents" |> to_int))
 
+let test_operator_snapshot_default_route_hydrates_first_success () =
+  let source = read_file "lib/server/server_dashboard_http_core.ml" in
+  check bool "operator snapshot uses first-success cache helper" true
+    (contains_substring source "cached_surface_or_first_success_json"
+     && contains_substring source "_operator_snapshot_cache"
+     && contains_substring source
+          "dashboard_cache_key config \"operator_snapshot\" \"default-summary\"");
+  check bool "operator snapshot no longer serves raw initializing cache" true
+    (not
+       (contains_substring source
+          "then cached_surface_json _operator_snapshot_cache"))
+
 let test_dashboard_shell_timeout_fallback_reports_timing_context () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let original_warmed = Atomic.get Lib.Server_dashboard_http._shell_warmed in
@@ -336,6 +363,58 @@ let test_dashboard_planning_http_json_includes_coordination_fsm () =
     (match coordination |> member "evidence" with
      | `List _ -> true
      | _ -> false)
+
+let test_dashboard_proof_http_json_surfaces_verification_index () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let module V = Lib.Verification in
+  let output =
+    `Assoc
+      [
+        ("evidence_refs", `List [ `String "artifact://proof-route" ]);
+        ("task_title", `String "Proof route fixture");
+      ]
+  in
+  (match
+     V.create_request
+       ~base_path:config.base_path
+       ~task_id:"task-proof-route"
+       ~output
+       ~criteria:[ V.Custom "proof route must expose verification evidence" ]
+       ~worker:"keeper-proof"
+       ()
+   with
+   | Ok _ -> ()
+   | Error message -> fail message);
+  let json =
+    Lib.Server_dashboard_http.dashboard_proof_http_json
+      ~config
+      (request "/api/v1/dashboard/proof?limit=5&recent=2")
+  in
+  let open Yojson.Safe.Util in
+  check int "verification total" 1
+    (json |> member "summary" |> member "verification_total" |> to_int);
+  check int "pending total" 1
+    (json |> member "summary" |> member "verification_pending" |> to_int);
+  check bool "verification requests exposed" true
+    (match json |> member "verification" |> member "requests" |> member "requests" with
+     | `List [ _ ] -> true
+     | _ -> false);
+  check bool "proof sources include execution trust route" true
+    (json
+     |> member "proof_sources"
+     |> to_list
+     |> List.exists (fun source ->
+       String.equal
+         (source |> member "route" |> to_string)
+         "/api/v1/dashboard/execution-trust"))
+
+let test_dashboard_proof_route_registered_in_http_routers () =
+  let http1 = read_file "lib/server/server_routes_http_routes_dashboard.ml" in
+  let h2 = read_file "lib/server/server_h2_gateway.ml" in
+  check bool "HTTP/1 dashboard proof route registered" true
+    (contains_substring http1 "\"/api/v1/dashboard/proof\"");
+  check bool "HTTP/2 dashboard proof route registered" true
+    (contains_substring h2 "\"/api/v1/dashboard/proof\"")
 
 let test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -535,10 +614,16 @@ let () =
             test_dashboard_shell_http_json_uses_bootstrap_payload_while_prewarming;
           test_case "shell reuses last good payload while prewarming" `Quick
             test_dashboard_shell_http_json_prefers_last_good_while_prewarming;
+          test_case "operator snapshot hydrates on first default request" `Quick
+            test_operator_snapshot_default_route_hydrates_first_success;
           test_case "shell timeout fallback reports timing context" `Quick
             test_dashboard_shell_timeout_fallback_reports_timing_context;
           test_case "planning payload includes coordination FSM" `Quick
             test_dashboard_planning_http_json_includes_coordination_fsm;
+          test_case "proof payload exposes verification index" `Quick
+            test_dashboard_proof_http_json_surfaces_verification_index;
+          test_case "proof route registered in HTTP routers" `Quick
+            test_dashboard_proof_route_registered_in_http_routers;
           test_case "planning payload keeps UTF-8 valid after truncation" `Quick
             test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation;
           test_case "credential monitoring surfaces archive counter" `Quick

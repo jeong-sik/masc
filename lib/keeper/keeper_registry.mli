@@ -716,6 +716,15 @@ val set_turn_cascade_state :
     when no turn is active. *)
 val mark_turn_cascade_exhausted : base_path:string -> string -> unit
 
+(** Mark that the live turn has entered a provider attempt.
+
+    This materializes the registry-side projection that corresponds to
+    [Keeper_turn_fsm.Streaming]: [Cascade_idle] advances through
+    [Cascade_selecting] into [Cascade_trying], and [turn_phase] follows to
+    [Turn_executing]. No-op when no turn is active or the cascade is already
+    trying/terminal. *)
+val mark_turn_provider_attempt_started : base_path:string -> string -> unit
+
 (** Update the live turn's phase directly. No-op if idle. *)
 val set_turn_phase :
   base_path:string -> string -> packed_turn_phase -> unit

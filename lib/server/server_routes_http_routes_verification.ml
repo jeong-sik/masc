@@ -45,27 +45,29 @@ let verifier_of_request ~base_path request =
 let add_routes router =
   router
   |> Http.Router.get "/api/v1/verification/requests" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
+       with_public_read (fun state req reqd ->
          let task_id = trimmed_query_param req "task_id" in
          let limit =
            match trimmed_query_param req "limit" with
            | Some s -> int_of_string_opt s
            | None -> None
          in
+         let base_path = state.Mcp_server.room_config.base_path in
          let json =
-           Dashboard_verification.requests_json ?task_id ?limit ()
+           Dashboard_verification.requests_json ~base_path ?task_id ?limit ()
          in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/verification/summary" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
+       with_public_read (fun state req reqd ->
          let recent =
            match trimmed_query_param req "recent" with
            | Some s -> int_of_string_opt s
            | None -> None
          in
-         let json = Dashboard_verification.summary_json ?recent () in
+         let base_path = state.Mcp_server.room_config.base_path in
+         let json = Dashboard_verification.summary_json ~base_path ?recent () in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)

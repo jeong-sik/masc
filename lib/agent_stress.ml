@@ -238,8 +238,21 @@ let board_rows_json ?(agents = []) events =
            String.compare la ra
        | _ -> 0)
 
+let dashboard_source = "agent_stress"
+let dashboard_surface = "/api/v1/dashboard/stress"
+
+let dashboard_retention_json =
+  `Assoc
+    [ ("scope", `String "jsonl_tail")
+    ; ("durable_store", `String ".masc/agent_stress.jsonl")
+    ]
+
 let dashboard_feed_json ~limit ?(agents = []) events =
   `Assoc [
+    ("generated_at_iso", `String (Masc_domain.now_iso ()));
+    ("dashboard_surface", `String dashboard_surface);
+    ("source", `String dashboard_source);
+    ("retention", dashboard_retention_json);
     ("limit", `Int limit);
     ("count", `Int (List.length events));
     ("events", `List events);

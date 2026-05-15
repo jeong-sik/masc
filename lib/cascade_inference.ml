@@ -90,17 +90,43 @@ let resolve_temperature
   | Some t -> t
   | None -> fallback ()
 
+let auto_max_tokens_clamp_seen : (string, unit) Hashtbl.t = Hashtbl.create 16
+let auto_max_tokens_clamp_seen_mutex = Mutex.create ()
+
+let auto_max_tokens_clamp_key ~cascade_name ~source ~max_tokens ~ceiling =
+  Printf.sprintf
+    "%s\x1f%s\x1f%d\x1f%d"
+    (Keeper_cascade_profile.runtime_name_to_string cascade_name)
+    source
+    max_tokens
+    ceiling
+
+let mark_auto_max_tokens_clamp_seen key =
+  Mutex.protect auto_max_tokens_clamp_seen_mutex (fun () ->
+    if Hashtbl.mem auto_max_tokens_clamp_seen key
+    then false
+    else (
+      Hashtbl.replace auto_max_tokens_clamp_seen key ();
+      true))
+
+let should_log_auto_max_tokens_clamp ~cascade_name ~source ~max_tokens ~ceiling =
+  auto_max_tokens_clamp_key ~cascade_name ~source ~max_tokens ~ceiling
+  |> mark_auto_max_tokens_clamp_seen
+
 (** Cap an automatically-derived max_tokens value to the narrowest output
     ceiling in the resolved cascade. Explicit caller-provided overrides and
     cascade.toml values stay hard rejected by the pre-dispatch validator. *)
 let cap_auto_resolved_max_tokens ~cascade_name ~source max_tokens =
   match Cascade_runtime.max_output_tokens_ceiling_of_cascade_name cascade_name with
   | Some ceiling when ceiling > 0 && max_tokens > ceiling ->
-    Log.warn ~ctx:"cascade"
-      "%s: auto-resolved max_tokens=%d from %s exceeds output ceiling=%d; \
-       using ceiling"
-      (Keeper_cascade_profile.runtime_name_to_string cascade_name)
-      max_tokens source ceiling;
+    Cascade_metrics.on_max_tokens_clamped ();
+    if should_log_auto_max_tokens_clamp ~cascade_name ~source ~max_tokens ~ceiling
+    then
+      Log.warn ~ctx:"cascade"
+        "%s: auto-resolved max_tokens=%d from %s exceeds output ceiling=%d; \
+         using ceiling; suppressing repeats for this tuple"
+        (Keeper_cascade_profile.runtime_name_to_string cascade_name)
+        max_tokens source ceiling;
     ceiling
   | _ -> max_tokens
 
@@ -148,3 +174,12 @@ let validate_max_tokens_within_ceiling
         ~reason:"requested_exceeds_provider_ceiling"
         ~provider_ceiling:ceiling
     else Ok max_tokens
+
+module For_testing = struct
+  let reset_auto_max_tokens_clamp_warnings () =
+    Mutex.protect auto_max_tokens_clamp_seen_mutex (fun () ->
+      Hashtbl.clear auto_max_tokens_clamp_seen)
+
+  let should_log_auto_max_tokens_clamp =
+    should_log_auto_max_tokens_clamp
+end

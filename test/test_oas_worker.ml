@@ -2582,11 +2582,18 @@ let make_openai_compat_provider_cfg ?(model_id = "gpt-4.1") () =
     ()
 ;;
 
-let make_glm_provider_cfg
-      ?(base_url = Llm_provider.Zai_catalog.general_base_url)
-      ?(model_id = "glm-5.1")
-      ()
-  =
+let provider_binding_base_url_exn id =
+  match Agent_sdk.Provider_runtime_binding.find id with
+  | Some binding -> binding.Agent_sdk.Provider_runtime_binding.base_url
+  | None -> Alcotest.failf "expected OAS runtime binding %S" id
+;;
+
+let make_glm_provider_cfg ?base_url ?(model_id = "glm-5.1") () =
+  let base_url =
+    match base_url with
+    | Some url -> url
+    | None -> provider_binding_base_url_exn "glm"
+  in
   Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.Glm
     ~model_id
@@ -2634,7 +2641,7 @@ let test_cascade_provider_labels_keep_glm_and_glm_coding_distinct () =
   in
   let glm_coding =
     Masc_mcp.Cascade_legacy_runner.provider_name_of_config
-      (make_glm_provider_cfg ~base_url:Llm_provider.Zai_catalog.coding_base_url ())
+      (make_glm_provider_cfg ~base_url:(provider_binding_base_url_exn "glm-coding") ())
   in
   Alcotest.(check string) "general GLM label" "glm" glm;
   Alcotest.(check string) "coding GLM label" "glm-coding" glm_coding
@@ -4110,15 +4117,58 @@ let test_kimi_cli_build_args_sanitizes_broken_utf8_prompt () =
     (List.mem "-p" argv)
 ;;
 
-let test_kimi_cli_model_for_provider_keeps_transport_default_on_auto () =
-  let provider_cfg = make_kimi_cli_provider_cfg () in
-  Alcotest.(check (option string))
-    "auto uses transport default"
-    Llm_provider.Transport_kimi_cli.default_config.model
-    (Cascade_runner.kimi_cli_model_for_provider provider_cfg)
+let runtime_binding_for_config_exn provider_cfg =
+  match Agent_sdk.Provider_runtime_binding.binding_for_provider_config provider_cfg with
+  | Some binding -> binding
+  | None -> Alcotest.fail "expected OAS runtime binding for provider config"
 ;;
 
-let test_kimi_cli_model_for_provider_keeps_explicit_model () =
+let runtime_binding_default_model_exn provider_cfg =
+  let binding = runtime_binding_for_config_exn provider_cfg in
+  match binding.Agent_sdk.Provider_runtime_binding.default_model with
+  | Some model when String.trim model <> "" -> Some model
+  | _ ->
+    (match binding.Agent_sdk.Provider_runtime_binding.capabilities.supported_models with
+     | Some (model :: _) -> Some model
+     | Some [] | None -> None)
+;;
+
+let direct_runtime_binding_for_cli_provider_exn provider_cfg =
+  let binding = runtime_binding_for_config_exn provider_cfg in
+  let candidates =
+    [ binding.Agent_sdk.Provider_runtime_binding.credential_scope
+    ; binding.Agent_sdk.Provider_runtime_binding.command
+    ]
+    |> List.filter_map (function
+      | Some value when String.trim value <> "" -> Some value
+      | Some _ | None -> None)
+  in
+  match
+    List.find_map
+      (fun label ->
+         match Agent_sdk.Provider_runtime_binding.find label with
+         | Some candidate ->
+           (match candidate.Agent_sdk.Provider_runtime_binding.transport with
+            | Agent_sdk.Provider_runtime_binding.Http
+            | Agent_sdk.Provider_runtime_binding.Managed
+            | Agent_sdk.Provider_runtime_binding.Custom_openai_compat -> Some candidate
+            | Agent_sdk.Provider_runtime_binding.Cli -> None)
+         | None -> None)
+      candidates
+  with
+  | Some binding -> binding
+  | None -> Alcotest.fail "expected direct OAS runtime binding for CLI provider"
+;;
+
+let test_cli_model_for_provider_config_uses_runtime_default_on_auto () =
+  let provider_cfg = make_kimi_cli_provider_cfg () in
+  Alcotest.(check (option string))
+    "auto uses runtime binding default"
+    (runtime_binding_default_model_exn provider_cfg)
+    (Cascade_runner.cli_model_for_provider_config provider_cfg)
+;;
+
+let test_cli_model_for_provider_config_keeps_explicit_model () =
   let provider_cfg =
     Llm_provider.Provider_config.make
       ~kind:Llm_provider.Provider_config.Kimi_cli
@@ -4129,7 +4179,7 @@ let test_kimi_cli_model_for_provider_keeps_explicit_model () =
   Alcotest.(check (option string))
     "explicit model preserved"
     (Some "kimi-k2.5")
-    (Cascade_runner.kimi_cli_model_for_provider provider_cfg)
+    (Cascade_runner.cli_model_for_provider_config provider_cfg)
 ;;
 
 let test_kimi_cli_config_uses_oas_context_ssot () =
@@ -4146,11 +4196,17 @@ let test_kimi_cli_config_uses_oas_context_ssot () =
   | None -> Alcotest.fail "expected kimi_cli config json"
   | Some raw ->
     let json = _parse_json raw in
+    let backing = direct_runtime_binding_for_cli_provider_exn provider_cfg in
+    let provider_name = backing.Agent_sdk.Provider_runtime_binding.id in
     let actual =
       Yojson.Safe.Util.(
         json |> member "models" |> member model_id |> member "max_context_size" |> to_int)
     in
-    let expected = Cascade_config.resolve_kimi_max_context model_id in
+    let expected =
+      Cascade_config.resolve_provider_model_max_context
+        ~provider_name
+        model_id
+    in
     Alcotest.(check int) "max_context_size from OAS capabilities SSOT" expected actual
 ;;
 
@@ -6679,13 +6735,13 @@ let () =
             `Quick
             test_kimi_cli_build_args_sanitizes_broken_utf8_prompt
         ; Alcotest.test_case
-            "kimi auto model keeps transport default"
+            "CLI auto model uses runtime binding default"
             `Quick
-            test_kimi_cli_model_for_provider_keeps_transport_default_on_auto
+            test_cli_model_for_provider_config_uses_runtime_default_on_auto
         ; Alcotest.test_case
-            "kimi explicit model is preserved"
+            "CLI explicit model is preserved"
             `Quick
-            test_kimi_cli_model_for_provider_keeps_explicit_model
+            test_cli_model_for_provider_config_keeps_explicit_model
         ; Alcotest.test_case
             "kimi config max context uses OAS SSOT"
             `Quick

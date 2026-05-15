@@ -109,10 +109,10 @@ val provider_supports_runtime_mcp_lane :
 val kimi_mcp_config_json_of_policy :
   Llm_provider.Llm_transport.runtime_mcp_policy -> string option
 
-(** Resolve the kimi_cli model name for a provider, falling back to
-    [Transport_kimi_cli.default_config.model] when the provider's
-    [model_id] is [auto] or empty. *)
-val kimi_cli_model_for_provider :
+(** Resolve a CLI provider model name from explicit provider config first,
+    then from the OAS runtime binding default/supported-model projection.
+    Returns [None] when the CLI binding does not publish a default. *)
+val cli_model_for_provider_config :
   Llm_provider.Provider_config.t -> string option
 
 (** Render the kimi_cli root config JSON (default_model + providers + models)

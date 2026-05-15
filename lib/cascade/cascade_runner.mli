@@ -170,7 +170,7 @@ val provider_effective_max_turns :
 val kimi_mcp_config_json_of_policy :
   Llm_provider.Llm_transport.runtime_mcp_policy ->
   string option
-val kimi_cli_model_for_provider :
+val cli_model_for_provider_config :
   Llm_provider.Provider_config.t -> string option
 val kimi_cli_config_json_for_provider :
   Llm_provider.Provider_config.t -> string option

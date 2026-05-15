@@ -140,8 +140,8 @@ let provider_caps_of_config =
 let kimi_mcp_config_json_of_policy =
   Cascade_transport.kimi_mcp_config_json_of_policy
 
-let kimi_cli_model_for_provider =
-  Cascade_transport.kimi_cli_model_for_provider
+let cli_model_for_provider_config =
+  Cascade_transport.cli_model_for_provider_config
 
 let kimi_cli_config_json_for_provider =
   Cascade_transport.kimi_cli_config_json_for_provider

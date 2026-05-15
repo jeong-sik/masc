@@ -207,12 +207,6 @@ let kimi_mcp_config_json_of_policy
     Some (Yojson.Safe.to_string config_json)
 ;;
 
-let kimi_cli_model_for_provider (provider_cfg : Llm_provider.Provider_config.t) =
-  match cli_model_override provider_cfg.model_id with
-  | Some explicit -> Some explicit
-  | None -> Llm_provider.Transport_kimi_cli.default_config.model
-;;
-
 let provider_caps_of_config = Provider_tool_support.oas_capabilities_of_config
 let provider_supports_inline_tools = Provider_tool_support.provider_supports_inline_tools
 
@@ -626,29 +620,133 @@ let provider_label (provider_cfg : Llm_provider.Provider_config.t) =
     provider_cfg.model_id
 ;;
 
-let kimi_cli_auth_value (provider_cfg : Llm_provider.Provider_config.t) =
+let provider_config_runtime_binding (provider_cfg : Llm_provider.Provider_config.t) =
+  Agent_sdk.Provider_runtime_binding.binding_for_provider_config provider_cfg
+;;
+
+let runtime_binding_default_model (binding : Agent_sdk.Provider_runtime_binding.t) =
+  match trim_nonempty binding.default_model with
+  | Some model -> Some model
+  | None ->
+    (match binding.capabilities.supported_models with
+     | Some (model :: _) -> trim_nonempty (Some model)
+     | Some [] | None -> None)
+;;
+
+let cli_model_for_provider_config (provider_cfg : Llm_provider.Provider_config.t) =
+  match cli_model_override provider_cfg.model_id with
+  | Some explicit -> Some explicit
+  | None -> Option.bind (provider_config_runtime_binding provider_cfg) runtime_binding_default_model
+;;
+
+let nonempty_opt value =
+  match value with
+  | Some value -> trim_nonempty (Some value)
+  | None -> None
+;;
+
+let direct_binding_candidates_for_cli_binding
+      (binding : Agent_sdk.Provider_runtime_binding.t)
+  =
+  [ binding.credential_scope; binding.command ]
+  |> List.filter_map nonempty_opt
+  |> dedupe_preserve_order
+;;
+
+let binding_is_direct_runtime (binding : Agent_sdk.Provider_runtime_binding.t) =
+  match binding.transport with
+  | Agent_sdk.Provider_runtime_binding.Http
+  | Agent_sdk.Provider_runtime_binding.Managed
+  | Agent_sdk.Provider_runtime_binding.Custom_openai_compat -> true
+  | Agent_sdk.Provider_runtime_binding.Cli -> false
+;;
+
+let direct_binding_for_cli_provider_config provider_cfg =
+  match provider_config_runtime_binding provider_cfg with
+  | None -> None
+  | Some binding ->
+    direct_binding_candidates_for_cli_binding binding
+    |> List.find_map (fun label ->
+      match Agent_sdk.Provider_runtime_binding.find label with
+      | Some direct when binding_is_direct_runtime direct -> Some direct
+      | Some _ | None -> None)
+;;
+
+let auth_env_names_of_binding (binding : Agent_sdk.Provider_runtime_binding.t) =
+  let auth_env =
+    match binding.auth with
+    | Agent_sdk.Provider_runtime_binding.Api_key_env env
+    | Agent_sdk.Provider_runtime_binding.Setup_token_env env -> [ env ]
+    | Agent_sdk.Provider_runtime_binding.No_auth
+    | Agent_sdk.Provider_runtime_binding.Cli_cached_login
+    | Agent_sdk.Provider_runtime_binding.Oauth_cached_login
+    | Agent_sdk.Provider_runtime_binding.File _
+    | Agent_sdk.Provider_runtime_binding.Exec _ -> []
+  in
+  binding.api_key_env :: auth_env
+  |> List.filter_map (fun env -> trim_nonempty (Some env))
+  |> dedupe_preserve_order
+;;
+
+let binding_api_base_url (binding : Agent_sdk.Provider_runtime_binding.t) =
+  let base_url = String.trim binding.base_url in
+  if String.equal base_url ""
+  then None
+  else (
+    let request_path = String.trim binding.request_path in
+    if String.equal request_path ""
+    then Some base_url
+    else (
+      let request_path =
+        if String.starts_with ~prefix:"/" request_path
+        then request_path
+        else "/" ^ request_path
+      in
+      let path_prefix =
+        match String.rindex_opt request_path '/' with
+        | Some 0 | None -> ""
+        | Some idx -> String.sub request_path 0 idx
+      in
+      Some (Env_config_core.strip_trailing_slashes base_url ^ path_prefix)))
+;;
+
+let kimi_cli_auth_value
+      ?(direct_binding = direct_binding_for_cli_provider_config)
+      (provider_cfg : Llm_provider.Provider_config.t)
+  =
   match trim_nonempty (Some provider_cfg.api_key) with
   | Some key -> Some key
   | None ->
-    first_nonempty_env
-      (Llm_provider.Provider_config.default_api_key_env
-         Llm_provider.Provider_config.Kimi
-       |> Option.to_list)
+    (match direct_binding provider_cfg with
+     | Some binding -> first_nonempty_env (auth_env_names_of_binding binding)
+     | None -> None)
 ;;
 
-let kimi_cli_base_url () =
-  match Sys.getenv_opt "KIMI_BASE_URL" |> trim_nonempty with
-  | Some url -> url
-  | None -> "https://api.kimi.com/coding/v1"
+let kimi_cli_backing_runtime
+      ?(direct_binding = direct_binding_for_cli_provider_config)
+      provider_cfg
+  =
+  Option.bind (direct_binding provider_cfg) (fun binding ->
+    match binding_api_base_url binding with
+    | Some api_base_url -> Some (binding, api_base_url)
+    | None -> None)
 ;;
 
 let kimi_cli_config_json_for_provider (provider_cfg : Llm_provider.Provider_config.t)
   : string option
   =
-  match kimi_cli_model_for_provider provider_cfg, kimi_cli_auth_value provider_cfg with
-  | Some model_name, Some _ ->
-    let provider_name = "masc-kimi" in
-    let max_context_size = Cascade_config.resolve_kimi_max_context model_name in
+  match
+    ( cli_model_for_provider_config provider_cfg
+    , kimi_cli_auth_value provider_cfg
+    , kimi_cli_backing_runtime provider_cfg )
+  with
+  | Some model_name, Some _, Some (binding, api_base_url) ->
+    let provider_name = binding.Agent_sdk.Provider_runtime_binding.id in
+    let max_context_size =
+      Cascade_config.resolve_provider_model_max_context
+        ~provider_name
+        model_name
+    in
     let config_json =
       `Assoc
         [ "default_model", `String model_name
@@ -656,8 +754,8 @@ let kimi_cli_config_json_for_provider (provider_cfg : Llm_provider.Provider_conf
           , `Assoc
               [ ( provider_name
                 , `Assoc
-                    [ "type", `String "kimi"
-                    ; "base_url", `String (kimi_cli_base_url ())
+                    [ "type", `String provider_name
+                    ; "base_url", `String api_base_url
                     ; "api_key", `String ""
                     ] )
               ] )
@@ -677,9 +775,12 @@ let kimi_cli_config_json_for_provider (provider_cfg : Llm_provider.Provider_conf
 ;;
 
 let kimi_cli_extra_env (provider_cfg : Llm_provider.Provider_config.t) =
-  match kimi_cli_auth_value provider_cfg with
-  | Some key -> [ "KIMI_API_KEY", key ]
-  | None -> []
+  match direct_binding_for_cli_provider_config provider_cfg, kimi_cli_auth_value provider_cfg with
+  | Some binding, Some key ->
+    (match auth_env_names_of_binding binding with
+     | env_name :: _ -> [ env_name, key ]
+     | [] -> [])
+  | _ -> []
 ;;
 
 let resolve_tool_lane_for_oas_tools
@@ -1676,7 +1777,7 @@ let kimi_cli_transport_ctor
       overrides.cli_subprocess_idle_sec)
   in
   let mcp_config_json = kimi_cli_runtime_mcp_jsons ~base:[] runtime_mcp_policy in
-  let model = kimi_cli_model_for_provider provider_cfg in
+  let model = cli_model_for_provider_config provider_cfg in
   let config_json = kimi_cli_config_json_for_provider provider_cfg in
   let extra_env = kimi_cli_extra_env provider_cfg in
   let config =

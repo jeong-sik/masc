@@ -59,12 +59,8 @@ val snapshot : ?limit:int -> ?kind:string -> ?since_ts:float -> unit -> event li
     @param limit  maximum number of events returned (default 100,
            clamped to the ring's current count).
     @param kind   filter by dashboard classification — one of
-           ["cli"], ["ollama"], ["other"].  Unknown values return
-           [[]]; omitting the argument returns every kind.  The
-           classifier matches {!Dashboard_cascade}'s [classify_capacity_key]
-           (copy-paste rather than a shared helper — both are ~12
-           lines and we did not want the new module to depend on
-           [Dashboard_cascade]).
+           ["cli"], ["http_probe"], ["other"].  Unknown values return
+           [[]]; omitting the argument returns every kind.
     @param since_ts  keep only events with [ts >= since_ts].
            Omitting returns every timestamp.
 
@@ -84,6 +80,5 @@ val capacity : unit -> int
     overflow the ring without hardcoding the default. *)
 
 val classify_key : string -> string
-(** Same classification as {!Dashboard_cascade.classify_capacity_key}.
-    Exposed for tests that want to assert ["cli"]/["ollama"]/["other"]
-    labels without pulling in the dashboard module. *)
+(** Classify a capacity key as ["cli"], ["http_probe"], or ["other"] without
+    pulling in the dashboard projection. *)

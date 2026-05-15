@@ -1,9 +1,7 @@
-(** Unit tests for Cascade_model_resolve.resolve_auto_model_id.
+(** Unit tests for generic cascade model resolution.
 
-    Focus: "auto" handling without reintroducing MASC-side concrete model
-    lists. GLM resolves through the OAS ZAI catalog because the HTTP API needs
-    a concrete model id. CLI providers keep "auto" as the default delegation
-    path unless the operator supplies MASC_<PROVIDER>_AUTO_MODELS. *)
+    These tests install a synthetic OAS provider catalog so MASC verifies the
+    boundary contract without pinning real vendor model catalogs. *)
 
 open Alcotest
 module R = Masc_mcp.Cascade_model_resolve
@@ -11,20 +9,75 @@ module C = Masc_mcp.Cascade_config
 module State = Masc_mcp.Cascade_state
 module H = Masc_mcp.Cascade_health_tracker
 
-(* RFC-0058 Phase 5.3a — the per-provider thin wrappers
-   ([gemini_cli_auto_models], etc.) were deleted because they were unused
-   in production. Tests now exercise the generic
-   [Cascade_config.expand_auto_models] production path; the provider id is the
-   test's pin, not a production literal in the test body. *)
-let auto_models_for pid =
-  let prefix = pid ^ ":" in
-  let prefix_len = String.length prefix in
-  C.expand_auto_models [ prefix ^ "auto" ]
-  |> List.filter_map (fun spec ->
-    if String.length spec >= prefix_len
-       && String.equal (String.sub spec 0 prefix_len) prefix
-    then Some (String.sub spec prefix_len (String.length spec - prefix_len))
-    else None)
+let synthetic_catalog_json =
+  {|
+{
+  "schema_version": 1,
+  "providers": [
+    {
+      "id": "synthetic-api",
+      "aliases": ["synthetic_api"],
+      "kind": "openai_compat",
+      "transport": "http",
+      "base_url": "https://synthetic.example/v1",
+      "request_path": "/chat/completions",
+      "auth": {"type": "api_key_env", "env": "SYNTHETIC_API_KEY"},
+      "default_model": "api-default",
+      "capabilities_base": "openai_chat",
+      "capabilities": {
+        "supported_models": ["api-a", "api-b", "api-c"]
+      },
+      "non_interactive": true,
+      "interactive_required": false,
+      "daemon_safe": true
+    },
+    {
+      "id": "synthetic-cli",
+      "aliases": ["synthetic_cli"],
+      "kind": "codex_cli",
+      "transport": "cli",
+      "command": "synthetic-cli",
+      "auth": {"type": "cli_cached_login"},
+      "capabilities_base": "codex_cli",
+      "non_interactive": true,
+      "interactive_required": false,
+      "daemon_safe": true
+    },
+    {
+      "id": "synthetic-direct",
+      "aliases": ["synthetic_direct"],
+      "kind": "openai_compat",
+      "transport": "http",
+      "base_url": "https://direct.example/v1",
+      "request_path": "/chat/completions",
+      "auth": {"type": "api_key_env", "env": "SYNTHETIC_DIRECT_KEY"},
+      "capabilities_base": "openai_chat",
+      "non_interactive": true,
+      "interactive_required": false,
+      "daemon_safe": true
+    },
+    {
+      "id": "synthetic-local",
+      "aliases": ["synthetic_local"],
+      "kind": "openai_compat",
+      "transport": "http",
+      "base_url": "http://127.0.0.1:8123",
+      "request_path": "/v1/chat/completions",
+      "auth": {"type": "none"},
+      "capabilities_base": "openai_chat",
+      "non_interactive": true,
+      "interactive_required": false,
+      "daemon_safe": true
+    }
+  ]
+}
+|}
+;;
+
+let install_synthetic_catalog () =
+  match Llm_provider.Provider_catalog.of_json (Yojson.Safe.from_string synthetic_catalog_json) with
+  | Error msg -> fail msg
+  | Ok catalog -> Llm_provider.Provider_catalog.set_global catalog
 ;;
 
 let unset_env k =
@@ -35,20 +88,28 @@ let unset_env k =
 let with_clean_env f =
   List.iter
     unset_env
-    [ "ZAI_CODING_DEFAULT_MODEL"
-    ; "ZAI_CODING_AUTO_MODELS"
-    ; "GEMINI_DEFAULT_MODEL"
-    ; "GEMINI_CLI_DEFAULT_MODEL"
-    ; "ANTHROPIC_DEFAULT_MODEL"
-    ; "OPENAI_DEFAULT_MODEL"
-    ; "OPENROUTER_DEFAULT_MODEL"
-    ; "OLLAMA_DEFAULT_MODEL"
-    ; "MASC_GEMINI_CLI_AUTO_MODELS"
-    ; "MASC_CODEX_CLI_AUTO_MODELS"
-    ; "MASC_CLAUDE_CODE_AUTO_MODELS"
-    ; "MASC_KIMI_CLI_AUTO_MODELS"
+    [ "SYNTHETIC_API_DEFAULT_MODEL"
+    ; "SYNTHETIC_CLI_DEFAULT_MODEL"
+    ; "SYNTHETIC_DIRECT_DEFAULT_MODEL"
+    ; "SYNTHETIC_LOCAL_DEFAULT_MODEL"
+    ; "MASC_SYNTHETIC_API_AUTO_MODELS"
+    ; "MASC_SYNTHETIC_CLI_AUTO_MODELS"
+    ; "MASC_SYNTHETIC_DIRECT_AUTO_MODELS"
     ];
   f ()
+;;
+
+let prefixed provider model = provider ^ ":" ^ model
+
+let auto_models_for pid =
+  let prefix = pid ^ ":" in
+  let prefix_len = String.length prefix in
+  C.expand_auto_models [ prefix ^ "auto" ]
+  |> List.filter_map (fun spec ->
+    if String.length spec >= prefix_len
+       && String.equal (String.sub spec 0 prefix_len) prefix
+    then Some (String.sub spec prefix_len (String.length spec - prefix_len))
+    else None)
 ;;
 
 let require_first_model label = function
@@ -61,155 +122,97 @@ let require_second_model label = function
   | _ -> fail (label ^ " produced fewer than two models")
 ;;
 
-let glm_coding_catalog_models () =
-  let models = R.glm_coding_auto_models () in
-  check bool "glm-coding catalog has concrete models" true (models <> []);
-  check bool "glm-coding catalog does not delegate auto" true
-    (not (List.exists (String.equal "auto") models));
-  models
-;;
-
-let prefixed provider model = provider ^ ":" ^ model
-
-let test_gemini_auto_without_env_delegates () =
+let test_api_auto_uses_binding_default () =
   with_clean_env (fun () ->
-    let resolved = R.resolve_auto_model_id "gemini" "auto" in
-    check string "gemini:auto without env stays delegated" "auto" resolved)
+    let resolved = R.resolve_auto_model_id "synthetic-api" "auto" in
+    check string "auto uses binding default" "api-default" resolved)
 ;;
 
-let test_gemini_cli_auto_without_env_delegates () =
-  with_clean_env (fun () ->
-    let resolved = R.resolve_auto_model_id "gemini_cli" "auto" in
-    check string "gemini_cli:auto delegates to CLI default" "auto" resolved)
-;;
-
-let test_gemini_cli_explicit_model_passthrough () =
-  with_clean_env (fun () ->
-    let resolved = R.resolve_auto_model_id "gemini_cli" "explicit-model" in
-    check string "explicit model untouched" "explicit-model" resolved)
-;;
-
-let test_gemini_env_override () =
-  Unix.putenv "GEMINI_DEFAULT_MODEL" "operator-gemini-model";
-  Unix.putenv "GEMINI_CLI_DEFAULT_MODEL" "operator-gemini-cli-model";
-  let resolved_gemini = R.resolve_auto_model_id "gemini" "auto" in
-  let resolved_cli = R.resolve_auto_model_id "gemini_cli" "auto" in
-  Unix.putenv "GEMINI_DEFAULT_MODEL" "";
-  Unix.putenv "GEMINI_CLI_DEFAULT_MODEL" "";
-  check string "gemini respects env override" "operator-gemini-model" resolved_gemini;
+let test_api_env_default_provenance () =
+  let getenv = function
+    | "SYNTHETIC_API_DEFAULT_MODEL" -> Some "operator-model"
+    | _ -> None
+  in
+  let resolved =
+    R.resolve_auto_model
+      ~getenv
+      "synthetic-api"
+      (R.model_selector_of_string "auto")
+  in
+  check string "env default wins" "operator-model" resolved.resolved_model_id;
   check
-    string
-    "gemini_cli respects cli env override"
-    "operator-gemini-cli-model"
-    resolved_cli
+    bool
+    "env provenance"
+    true
+    (resolved.provenance = R.Env_default "SYNTHETIC_API_DEFAULT_MODEL")
 ;;
 
-let test_glm_coding_auto_maps_to_glm_5_1 () =
+let test_cli_auto_delegates_without_catalog_models () =
   with_clean_env (fun () ->
-    let expected = require_first_model "glm-coding catalog" (glm_coding_catalog_models ()) in
-    let resolved = R.resolve_auto_model_id "glm-coding" "auto" in
-    check string "glm-coding:auto resolves to OAS catalog head" expected resolved)
-;;
-
-let test_glm_coding_auto_models_catalog_order () =
-  with_clean_env (fun () ->
-    let models = glm_coding_catalog_models () in
-    check
-      (list string)
-      "generic expansion follows OAS catalog order"
-      models
-      (auto_models_for "glm-coding"))
-;;
-
-let test_gemini_cli_auto_models_default_rotation_order () =
-  with_clean_env (fun () ->
-    check
-      (list string)
-      "gemini_cli:auto default delegates to CLI"
-      [ "auto" ]
-      (auto_models_for "gemini_cli"))
-;;
-
-let test_gemini_cli_auto_models_env_override () =
-  Unix.putenv "MASC_GEMINI_CLI_AUTO_MODELS" "gemini-a, gemini-b,, gemini-c ";
-  let models = auto_models_for "gemini_cli" in
-  Unix.putenv "MASC_GEMINI_CLI_AUTO_MODELS" "";
-  check
-    (list string)
-    "operator override trims blanks"
-    [ "gemini-a"; "gemini-b"; "gemini-c" ]
-    models
-;;
-
-let test_codex_and_claude_cli_auto_models_env_override () =
-  with_clean_env (fun () ->
-    check
-      (list string)
-      "codex default delegates to CLI"
-      [ "auto" ]
-      (auto_models_for "codex_cli");
-    check
-      (list string)
-      "claude default delegates to CLI"
-      [ "auto" ]
-      (auto_models_for "claude_code");
-    Unix.putenv "MASC_CODEX_CLI_AUTO_MODELS" "model-a,model-b";
-    Unix.putenv "MASC_CLAUDE_CODE_AUTO_MODELS" "sonnet,opus";
-    let codex = auto_models_for "codex_cli" in
-    let claude = auto_models_for "claude_code" in
-    Unix.putenv "MASC_CODEX_CLI_AUTO_MODELS" "";
-    Unix.putenv "MASC_CLAUDE_CODE_AUTO_MODELS" "";
-    check (list string) "codex operator rotation" [ "model-a"; "model-b" ] codex;
-    check (list string) "claude operator rotation" [ "sonnet"; "opus" ] claude)
-;;
-
-let test_kimi_cli_auto_model_declared_default () =
-  with_clean_env (fun () ->
-    let declared_default =
-      match auto_models_for "kimi_cli" with
-      | [ model ] -> model
-      | models ->
-        fail
-          (Printf.sprintf
-             "expected one kimi_cli declared default, got: %s"
-             (String.concat "," models))
-    in
     check
       string
-      "kimi_cli:auto resolves to concrete CLI default"
-      declared_default
-      (R.resolve_auto_model_id "kimi_cli" "auto");
+      "cli auto delegates"
+      "auto"
+      (R.resolve_auto_model_id "synthetic-cli" "auto");
     check
       (list string)
-      "kimi_cli:auto expands to declared default"
-      [ declared_default ]
-      (auto_models_for "kimi_cli");
-    Unix.putenv "MASC_KIMI_CLI_AUTO_MODELS" "model-a,model-b";
-    let models = auto_models_for "kimi_cli" in
-    Unix.putenv "MASC_KIMI_CLI_AUTO_MODELS" "";
-    check (list string) "kimi cli operator rotation" [ "model-a"; "model-b" ] models)
+      "cli auto expands to delegation token"
+      [ "auto" ]
+      (auto_models_for "synthetic-cli"))
 ;;
 
-let test_expand_auto_models_includes_cli_auto_specs () =
+let test_explicit_model_passthrough_trims_result () =
   with_clean_env (fun () ->
-    let expanded =
-      C.expand_auto_models
-        [ "gemini_cli:auto"; "codex_cli:auto"; "claude_code:auto"; "kimi_cli:auto" ]
+    let resolved = R.resolve_auto_model_id "synthetic-api" " explicit-model " in
+    check string "explicit model trimmed" "explicit-model" resolved)
+;;
+
+let test_unsupported_provider_auto_is_unresolved () =
+  with_clean_env (fun () ->
+    let resolved =
+      R.resolve_auto_model
+        ~getenv:(fun _ -> None)
+        "unknown-provider"
+        (R.model_selector_of_string "auto")
     in
+    check string "unknown auto remains auto" "auto" resolved.resolved_model_id;
+    check bool "unresolved provenance" true (resolved.provenance = R.Unresolved_auto))
+;;
+
+let test_supported_models_expand_from_binding () =
+  with_clean_env (fun () ->
     check
       (list string)
-      "CLI auto specs expand in-place"
-      [ "gemini_cli:auto"
-      ; "codex_cli:auto"
-      ; "claude_code:auto"
-      ; "kimi_cli:kimi-for-coding"
-      ]
-      expanded)
+      "supported models from OAS binding"
+      [ "api-a"; "api-b"; "api-c" ]
+      (auto_models_for "synthetic-api"))
+;;
+
+let test_auto_models_env_override () =
+  with_clean_env (fun () ->
+    Unix.putenv "MASC_SYNTHETIC_API_AUTO_MODELS" "override-a, override-b,, override-c ";
+    let models = auto_models_for "synthetic-api" in
+    Unix.putenv "MASC_SYNTHETIC_API_AUTO_MODELS" "";
+    check
+      (list string)
+      "operator override trims blanks"
+      [ "override-a"; "override-b"; "override-c" ]
+      models)
+;;
+
+let test_direct_api_without_supported_models_does_not_expand () =
+  with_clean_env (fun () ->
+    check (list string) "no generic direct expansion" [ "auto" ] (auto_models_for "synthetic-direct");
+    check
+      string
+      "runtime default remains delegated"
+      "auto"
+      (R.resolve_auto_model_id "synthetic-direct" "auto"))
 ;;
 
 let test_expand_model_strings_for_execution_matches_auto_expansion () =
   with_clean_env (fun () ->
-    let items = [ "glm-coding:auto"; "gemini_cli:auto" ] in
+    let items = [ "synthetic-api:auto"; "synthetic-cli:auto" ] in
     check
       (list string)
       "execution expansion matches auto expansion"
@@ -219,93 +222,76 @@ let test_expand_model_strings_for_execution_matches_auto_expansion () =
 
 let test_expand_model_strings_for_execution_dedupe_stable_repeated_inputs () =
   with_clean_env (fun () ->
-    (* Pure repeated literals: dedupe must keep first occurrence and
-       preserve insertion order. *)
     let items =
       [ "test-provider:model-a"
-      ; "kimi_cli:kimi-for-coding"
+      ; "synthetic-api:api-a"
       ; "test-provider:model-a"
-      ; "kimi_cli:kimi-for-coding"
+      ; "synthetic-api:api-a"
       ; "test-provider:model-a"
       ]
     in
     check
       (list string)
       "first occurrence wins, order preserved"
-      [ "test-provider:model-a"; "kimi_cli:kimi-for-coding" ]
+      [ "test-provider:model-a"; "synthetic-api:api-a" ]
       (C.expand_model_strings_for_execution items))
 ;;
 
 let test_expand_model_strings_for_execution_dedupe_explicit_and_auto () =
   with_clean_env (fun () ->
-    let first_glm_model =
-      require_first_model "glm-coding catalog" (glm_coding_catalog_models ())
-    in
-    let explicit_glm = prefixed "glm-coding" first_glm_model in
-    (* Explicit model that an auto-expansion would also produce: the
-       explicit one (declared first) wins; the auto-expansion's
-       contribution of the same name is dropped, but its other entries
-       remain in expansion order. *)
-    let items = [ explicit_glm; "glm-coding:auto" ] in
+    let first_model = require_first_model "synthetic-api catalog" (auto_models_for "synthetic-api") in
+    let explicit = prefixed "synthetic-api" first_model in
+    let items = [ explicit; "synthetic-api:auto" ] in
     let expanded = C.expand_model_strings_for_execution items in
-    (* (a) head is the explicit declaration *)
-    check
-      string
-      "explicit first occurrence retained at head"
-      explicit_glm
-      (List.hd expanded);
-    (* (b) duplicate of the explicit name does not reappear *)
-    let occurrences =
-      List.filter (String.equal explicit_glm) expanded |> List.length
-    in
+    check string "explicit first occurrence retained at head" explicit (List.hd expanded);
+    let occurrences = List.filter (String.equal explicit) expanded |> List.length in
     check int "no duplicate of explicit name" 1 occurrences;
-    (* (c) auto-expansion of other entries still present (sanity) *)
     check bool "auto-expanded siblings present" true (List.length expanded > 1))
 ;;
 
 let test_expand_model_strings_for_execution_rotation_scope_rotates () =
   with_clean_env (fun () ->
-    let models = glm_coding_catalog_models () in
-    let first_model = require_first_model "glm-coding catalog" models in
-    let second_model = require_second_model "glm-coding catalog" models in
+    let models = auto_models_for "synthetic-api" in
+    let first_model = require_first_model "synthetic-api catalog" models in
+    let second_model = require_second_model "synthetic-api catalog" models in
     State.clear_all ();
     let first =
       C.expand_model_strings_for_execution
         ~rotation_scope:"primary"
-        [ "glm-coding:auto" ]
+        [ "synthetic-api:auto" ]
     in
     let second =
       C.expand_model_strings_for_execution
         ~rotation_scope:"primary"
-        [ "glm-coding:auto" ]
+        [ "synthetic-api:auto" ]
     in
     let other_scope =
       C.expand_model_strings_for_execution
         ~rotation_scope:"scoring"
-        [ "glm-coding:auto" ]
+        [ "synthetic-api:auto" ]
     in
     check
       string
       "first scoped call starts at default head"
-      (prefixed "glm-coding" first_model)
+      (prefixed "synthetic-api" first_model)
       (List.hd first);
     check
       string
       "second scoped call advances head"
-      (prefixed "glm-coding" second_model)
+      (prefixed "synthetic-api" second_model)
       (List.hd second);
     check
       string
       "different scope has its own cursor"
-      (prefixed "glm-coding" first_model)
+      (prefixed "synthetic-api" first_model)
       (List.hd other_scope))
 ;;
 
 let test_order_weighted_entries_rotation_scope_rotates_generically () =
   with_clean_env (fun () ->
-    let models = glm_coding_catalog_models () in
-    let first_model = require_first_model "glm-coding catalog" models in
-    let second_model = require_second_model "glm-coding catalog" models in
+    let models = auto_models_for "synthetic-api" in
+    let first_model = require_first_model "synthetic-api catalog" models in
+    let second_model = require_second_model "synthetic-api catalog" models in
     State.clear_all ();
     let entry model =
       { Masc_mcp.Cascade_config_loader.model
@@ -316,31 +302,31 @@ let test_order_weighted_entries_rotation_scope_rotates_generically () =
       }
     in
     let first =
-      C.order_weighted_entries ~rotation_scope:"primary" [ entry "glm-coding:auto" ]
+      C.order_weighted_entries ~rotation_scope:"primary" [ entry "synthetic-api:auto" ]
       |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) -> e.model)
     in
     let second =
-      C.order_weighted_entries ~rotation_scope:"primary" [ entry "glm-coding:auto" ]
+      C.order_weighted_entries ~rotation_scope:"primary" [ entry "synthetic-api:auto" ]
       |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) -> e.model)
     in
     let other_scope =
-      C.order_weighted_entries ~rotation_scope:"scoring" [ entry "glm-coding:auto" ]
+      C.order_weighted_entries ~rotation_scope:"scoring" [ entry "synthetic-api:auto" ]
       |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) -> e.model)
     in
     check
       string
       "weighted first call keeps default head"
-      (prefixed "glm-coding" first_model)
+      (prefixed "synthetic-api" first_model)
       (List.hd first);
     check
       string
       "weighted second call advances head"
-      (prefixed "glm-coding" second_model)
+      (prefixed "synthetic-api" second_model)
       (List.hd second);
     check
       string
       "weighted rotation is scoped"
-      (prefixed "glm-coding" first_model)
+      (prefixed "synthetic-api" first_model)
       (List.hd other_scope))
 ;;
 
@@ -356,7 +342,7 @@ let test_order_weighted_entries_rotation_scope_rotates_top_level_providers () =
       }
     in
     let entries =
-      [ entry "claude_code:auto"; entry "codex_cli:auto"; entry "gemini_cli:auto" ]
+      [ entry "provider-a:model"; entry "provider-b:model"; entry "provider-c:model" ]
     in
     let first =
       C.order_weighted_entries ~rotation_scope:"primary" entries
@@ -374,25 +360,13 @@ let test_order_weighted_entries_rotation_scope_rotates_top_level_providers () =
       C.order_weighted_entries ~rotation_scope:"scoring" entries
       |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) -> e.model)
     in
-    check
-      string
-      "first call starts with declared provider"
-      "claude_code:auto"
-      (List.hd first);
-    check
-      string
-      "second call rotates to codex provider"
-      "codex_cli:auto"
-      (List.hd second);
-    check
-      string
-      "third call rotates to gemini provider"
-      "gemini_cli:auto"
-      (List.hd third);
+    check string "first call starts with declared provider" "provider-a:model" (List.hd first);
+    check string "second call rotates to next provider" "provider-b:model" (List.hd second);
+    check string "third call rotates to third provider" "provider-c:model" (List.hd third);
     check
       string
       "different scope restarts top-level provider order"
-      "claude_code:auto"
+      "provider-a:model"
       (List.hd other_scope))
 ;;
 
@@ -415,52 +389,25 @@ let test_order_weighted_entries_cooldown_is_provider_scoped () =
         [ entry "test-provider:model-a"; entry "other-provider:model-a" ]
       |> List.map (fun (e : Masc_mcp.Cascade_config_loader.weighted_entry) -> e.model)
     in
-    check
-      string
-      "cooled provider model is skipped"
-      "other-provider:model-a"
-      (List.hd ordered))
+    check string "cooled provider model is skipped" "other-provider:model-a" (List.hd ordered))
 ;;
 
 let () =
+  install_synthetic_catalog ();
   run
     "Cascade_model_resolve"
-    [ ( "gemini auto"
-      , [ test_case "glm-coding:auto" `Quick test_glm_coding_auto_maps_to_glm_5_1
+    [ ( "generic auto"
+      , [ test_case "api auto binding default" `Quick test_api_auto_uses_binding_default
+        ; test_case "api env default provenance" `Quick test_api_env_default_provenance
+        ; test_case "cli auto delegates by default" `Quick test_cli_auto_delegates_without_catalog_models
+        ; test_case "explicit model passthrough" `Quick test_explicit_model_passthrough_trims_result
+        ; test_case "unknown auto unresolved" `Quick test_unsupported_provider_auto_is_unresolved
+        ; test_case "supported model expansion" `Quick test_supported_models_expand_from_binding
+        ; test_case "auto model env override" `Quick test_auto_models_env_override
         ; test_case
-            "glm-coding:auto model list"
+            "direct api without supported models"
             `Quick
-            test_glm_coding_auto_models_catalog_order
-        ; test_case "gemini:auto" `Quick test_gemini_auto_without_env_delegates
-        ; test_case
-            "gemini_cli:auto delegates by default"
-            `Quick
-            test_gemini_cli_auto_without_env_delegates
-        ; test_case
-            "gemini_cli explicit"
-            `Quick
-            test_gemini_cli_explicit_model_passthrough
-        ; test_case "GEMINI_DEFAULT_MODEL env override" `Quick test_gemini_env_override
-        ; test_case
-            "gemini_cli:auto model list"
-            `Quick
-            test_gemini_cli_auto_models_default_rotation_order
-        ; test_case
-            "gemini_cli:auto env list override"
-            `Quick
-            test_gemini_cli_auto_models_env_override
-        ; test_case
-            "codex/claude cli auto env list override"
-            `Quick
-            test_codex_and_claude_cli_auto_models_env_override
-        ; test_case
-            "kimi_cli:auto declared default"
-            `Quick
-            test_kimi_cli_auto_model_declared_default
-        ; test_case
-            "expand_auto_models covers CLI auto"
-            `Quick
-            test_expand_auto_models_includes_cli_auto_specs
+            test_direct_api_without_supported_models_does_not_expand
         ; test_case
             "execution expansion matches auto expansion"
             `Quick

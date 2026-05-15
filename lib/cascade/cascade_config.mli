@@ -13,20 +13,10 @@
     @stability Internal
     @since 0.93.1 *)
 
-(** {1 Model Alias Resolution} *)
+(** {1 Model Resolution} *)
 
-(** Resolve a GLM model alias to the concrete API model ID.
-    - ["auto"] → env var [ZAI_DEFAULT_MODEL] or the OAS ZAI catalog head
-    - ["flash"] → ["glm-4.7-flashx"]
-    - ["turbo"] → ["glm-5-turbo"]
-    - ["vision"] → ["glm-4.6v"]
-    - Concrete IDs pass through unchanged.
-    @since 0.89.1 *)
-val resolve_glm_model_id : string -> string
-
-(** Resolve "auto" and aliases to concrete model IDs for any provider.
-    Cloud providers resolve aliases; local providers resolve ["auto"]
-    via discovery first and otherwise pass through explicit model IDs.
+(** Resolve ["auto"] for a provider through runtime binding defaults or local
+    discovery. Explicit model IDs pass through unchanged.
     @since 0.89.1 *)
 val resolve_auto_model_id : string -> string -> string
 
@@ -415,11 +405,11 @@ val filter_healthy_strict :
 
 (** {1 Context Window Resolution} *)
 
-(** Resolve the Kimi context window from the OAS capability SSOT.
+(** Resolve a provider/model context window from the OAS capability SSOT.
 
-    This is shared by cascade profile generation and Kimi CLI transport config
-    so those paths do not drift through local "256k" constants. *)
-val resolve_kimi_max_context : string -> int
+    This is shared by cascade profile generation and transport config paths so
+    those paths do not drift through local context-window constants. *)
+val resolve_provider_model_max_context : provider_name:string -> string -> int
 
 (** Effective max context tokens for a provider entry.
 

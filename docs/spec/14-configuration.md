@@ -151,8 +151,8 @@ contains four sections: `tts`, `stt`, `session`, `local_playback`.
 | `MASC_INFERENCE_CACHE_MAX_TEMP` | float | 0.0 | 캐시 허용 최대 온도 |
 | `MASC_INFERENCE_CACHE_L1_MAX_ENTRIES` | int | 512 | L1 인메모리 캐시 상한 |
 | `MASC_SPAWN_CACHE_POLICY` | string | `"safe_only"` | Spawn 캐시 정책 (`off`/`safe_only`) |
-| `ZAI_DEFAULT_MODEL` | string | OAS ZAI catalog head | `glm` provider `auto` 기본 모델. 코드 기본값은 `Llm_provider.Zai_catalog`에서 가져온다. |
-| `ZAI_CODING_DEFAULT_MODEL` | string | OAS ZAI catalog head | `glm-coding` provider `auto` 기본 모델. 코드 기본값은 `Llm_provider.Zai_catalog`에서 가져온다. |
+| `ZAI_DEFAULT_MODEL` | string | OAS runtime binding/catalog default | 설정 시 `glm` provider `auto` 기본 모델로 사용. 미설정이면 OAS runtime binding/catalog default에 위임한다. |
+| `ZAI_CODING_DEFAULT_MODEL` | string | OAS runtime binding/catalog default | 설정 시 `glm-coding` provider `auto` 기본 모델로 사용. 미설정이면 OAS runtime binding/catalog default에 위임한다. |
 | `GEMINI_DEFAULT_MODEL` | string | 없음 | 설정 시 direct `gemini` provider `auto` 기본 모델로 사용. 미설정이면 direct 기본 동작에 위임한다. |
 | `GEMINI_CLI_DEFAULT_MODEL` | string | 없음 | 설정 시 `gemini_cli` provider `auto` 기본 모델로 사용. 미설정이면 Gemini CLI 기본 동작에 위임한다. |
 | `MASC_GEMINI_CLI_AUTO_MODELS` | csv string | `"auto"` | 설정 시 `gemini_cli:auto`를 operator 지정 후보 목록으로 확장. 미설정이면 Gemini CLI 기본 모델에 위임한다. |
@@ -464,11 +464,11 @@ is-default = true
 max-concurrent = 1
 ```
 
-`gemini_cli:auto`, `codex_cli:auto`, `claude_code:auto`는 기본적으로 concrete 후보 목록을 코드에 갖지 않는다. 미설정 기본값은 `auto` 1개이며 각 CLI의 현재 기본 모델 선택에 위임한다. 특정 모델 rotation이 필요하면 `MASC_GEMINI_CLI_AUTO_MODELS`, `MASC_CODEX_CLI_AUTO_MODELS`, `MASC_CLAUDE_CODE_AUTO_MODELS`에 operator가 명시한 CSV를 넣는다. GLM 계열은 HTTP API가 concrete model id를 요구하므로 `Llm_provider.Zai_catalog`의 catalog 순서를 사용한다.
+`gemini_cli:auto`, `codex_cli:auto`, `claude_code:auto`는 기본적으로 concrete 후보 목록을 코드에 갖지 않는다. 미설정 기본값은 `auto` 1개이며 각 CLI의 현재 기본 모델 선택에 위임한다. 특정 모델 rotation이 필요하면 `MASC_GEMINI_CLI_AUTO_MODELS`, `MASC_CODEX_CLI_AUTO_MODELS`, `MASC_CLAUDE_CODE_AUTO_MODELS`에 operator가 명시한 CSV를 넣는다. Direct API provider의 concrete 후보 목록과 기본값은 OAS runtime binding/catalog가 제공하는 값을 projection해서 사용한다. binding이 supported model 목록을 제공하지 않으면 MASC는 `auto`를 임의 concrete model로 확장하지 않는다.
 
-### 7.6 Ollama HTTP Probe (Phase C2, #7619)
+### 7.6 HTTP Probe Capacity (Phase C2, #7619)
 
-ollama provider는 `/api/ps` endpoint를 가진다. MASC는 cycle 시작마다 등록된 URL들을 순차적으로 조회하여 (`Cascade_capacity_probe.refresh_many` → `Cascade_http_probe.refresh_many` 내부에서 `List.iter`) 실제 활성 모델 수를 capacity로 변환한다. 캐시 TTL 2초. 응답 실패 시 silent fail → Phase A client-capacity semaphore로 fallback. 병렬 fan-out이 필요해지면 `Cascade_http_probe.refresh_many`에서 `Eio.Fiber.both` 로 전환.
+등록된 HTTP probe provider는 provider별 probe endpoint를 가진다. MASC는 cycle 시작마다 등록된 URL들을 순차적으로 조회하여 (`Cascade_capacity_probe.refresh_many` → registered probe 내부 `refresh_many`) 실제 활성 모델 수를 capacity로 변환한다. 캐시 TTL 2초. 응답 실패 시 silent fail → Phase A client-capacity semaphore로 fallback. 병렬 fan-out이 필요해지면 probe adapter의 `refresh_many`에서 `Eio.Fiber.both` 로 전환.
 
 capacity 조회 순서: `Cascade_throttle` (llama-server /slots 기반) → `Cascade_capacity_probe` (discovered via registered probes, e.g. `/api/ps`) → `Cascade_client_capacity` (declared semaphore).
 

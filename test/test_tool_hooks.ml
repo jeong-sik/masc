@@ -203,7 +203,8 @@ let test_no_hooks_default () =
   (* No hooks registered *)
   Tool_dispatch.register
     ~tool_name:"__hook_none"
-    ~handler:(fun ~name ~args:_ -> Some (Tool_result.quick_ok ~tool_name:name "plain"));
+    ~handler:(fun ~name ~args:_ ->
+      Some (Tool_result.quick_ok ~tool_name:name "plain"));
   Tool_dispatch.register_name_tag ~tool_name:"__hook_none" ~tag:Mod_misc;
   let token = match Tool_dispatch.mint_token ~name:"__hook_none" with Ok t -> t | Error e -> Alcotest.fail e in
   match Tool_dispatch.guarded_dispatch ~token ~args:`Null () with

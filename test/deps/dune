@@ -61,6 +61,9 @@
    (re_export masc_mcp.chronicle_event)
    ;; RFC-0056 Phase 1H — Tool_call_quality_benchmark family sub-library.
    (re_export masc_mcp.tool_call_quality_benchmark)
+   ;; RFC-0056 Phase 1I — Keeper_event_queue leaf module sub-library
+   ;; (first lib/keeper/ promotion).
+   (re_export masc_mcp.keeper_event_queue)
    ;; RFC-0058 Phase 1 — Declarative cascade TOML parser sub-library.
    (re_export masc_mcp.cascade_decl)
    (re_export masc_mcp.ag_ui)

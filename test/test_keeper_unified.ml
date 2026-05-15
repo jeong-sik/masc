@@ -422,9 +422,9 @@ let test_board_signal_stimulus_becomes_pending_board_event () =
            ]
          |> Yojson.Safe.to_string
        in
-       let stimulus : Masc_mcp.Keeper_event_queue.stimulus =
+       let stimulus : Keeper_event_queue.stimulus =
          { post_id
-         ; urgency = Masc_mcp.Keeper_event_queue.Immediate
+         ; urgency = Keeper_event_queue.Immediate
          ; arrived_at = Time_compat.now ()
          ; payload
          }
@@ -489,9 +489,9 @@ let test_legacy_board_comment_stimulus_becomes_pending_board_event () =
            ]
          |> Yojson.Safe.to_string
        in
-       let stimulus : Masc_mcp.Keeper_event_queue.stimulus =
+       let stimulus : Keeper_event_queue.stimulus =
          { post_id
-         ; urgency = Masc_mcp.Keeper_event_queue.Normal
+         ; urgency = Keeper_event_queue.Normal
          ; arrived_at = Time_compat.now ()
          ; payload
          }
@@ -5389,12 +5389,63 @@ let test_run_keeper_cycle_skips_non_executable_phase () =
            "gated"
            Yojson.Safe.Util.(
              trajectory_summary |> member "outcome" |> member "status" |> to_string);
+	         check
+	           string
+	           "skipped trajectory outcome reason"
+	           "non_executable_phase:paused"
+	           Yojson.Safe.Util.(
+	             trajectory_summary |> member "outcome" |> member "reason" |> to_string))
+;;
+
+let test_run_keeper_cycle_fails_closed_when_registry_phase_missing () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  let old_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
+  Fun.protect
+    ~finally:(fun () ->
+      (match old_base_path with
+       | Some value -> Unix.putenv "MASC_BASE_PATH" value
+       | None -> Unix.putenv "MASC_BASE_PATH" "");
+      KR.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+       KR.clear ();
+       Unix.putenv "MASC_BASE_PATH" base_dir;
+       let meta = make_meta "missing-registry-phase-keeper" in
+       let config = Masc_mcp.Coord.default_config base_dir in
+       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+       match
+         UT.run_keeper_cycle
+           ~config
+           ~meta
+           ~observation:base_observation
+           ~generation:meta.runtime.generation
+           ()
+       with
+       | Ok _ -> Alcotest.fail "expected missing registry phase to fail closed"
+       | Error err ->
          check
-           string
-           "skipped trajectory outcome reason"
-           "non_executable_phase:paused"
-           Yojson.Safe.Util.(
-             trajectory_summary |> member "outcome" |> member "reason" |> to_string))
+           bool
+           "error explains registry phase gap"
+           true
+           (KTH.string_contains_substring
+              ~needle:"registry phase lookup returned None"
+              (Agent_sdk.Error.to_string err));
+         (match Masc_mcp.Keeper_execution_receipt.latest_json config meta.name with
+          | None -> fail "expected registry phase gap execution receipt"
+          | Some receipt ->
+            check
+              string
+              "missing registry receipt terminal reason"
+              "registry_phase_missing"
+              Yojson.Safe.Util.(receipt |> member "terminal_reason_code" |> to_string);
+            check
+              string
+              "missing registry receipt outcome"
+              "receipt_failed"
+              Yojson.Safe.Util.(receipt |> member "outcome" |> to_string)))
 ;;
 
 let test_run_keeper_cycle_livelock_block_returns_error () =
@@ -12115,15 +12166,19 @@ let () =
             `Quick
             test_context_overflow_event_falls_back_without_event_bus_signal
         ] )
-    ; ( "phase_gate"
-      , [ test_case
-            "run_keeper_cycle skips paused keeper"
-            `Quick
-            test_run_keeper_cycle_skips_non_executable_phase
-        ; test_case
-            "run_keeper_cycle errors on livelock block"
-            `Quick
-            test_run_keeper_cycle_livelock_block_returns_error
+	    ; ( "phase_gate"
+	      , [ test_case
+	            "run_keeper_cycle skips paused keeper"
+	            `Quick
+	            test_run_keeper_cycle_skips_non_executable_phase
+	        ; test_case
+	            "run_keeper_cycle fails closed when registry phase is missing"
+	            `Quick
+	            test_run_keeper_cycle_fails_closed_when_registry_phase_missing
+	        ; test_case
+	            "run_keeper_cycle errors on livelock block"
+	            `Quick
+	            test_run_keeper_cycle_livelock_block_returns_error
         ; test_case
             "streaming cancel records supervisor stop"
             `Quick

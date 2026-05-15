@@ -279,6 +279,8 @@ check_http "gate status 200" "$BASE/api/v1/gate/status" "200"
 check_json "gate status exposes channel bindings" "$BASE/api/v1/gate/status" "'channels' in d and 'bindings' in d" '^True$'
 check_http "gate connectors 200" "$BASE/api/v1/gate/connectors" "200"
 check_json "gate connectors exposes connectors list" "$BASE/api/v1/gate/connectors" "'connectors' in d" '^True$'
+check_http "sidecar status 200" "$BASE/api/v1/sidecar/status?name=discord" "200"
+check_json "sidecar status exposes provenance" "$BASE/api/v1/sidecar/status?name=discord" "d.get('dashboard_surface') == '/api/v1/sidecar/status' and d.get('source') == 'sidecar_status_file' and d.get('retention', {}).get('scope') == 'runtime_sidecar_status' and 'sidecar_lifecycle' in d" '^True$'
 check_http "dashboard tools 200" "$BASE/api/v1/dashboard/tools" "200"
 check_json "dashboard tools exposes inventory" "$BASE/api/v1/dashboard/tools" "'tool_inventory' in d" '^True$'
 check_http "tool quality 200" "$BASE/api/v1/dashboard/tool-quality?window_hours=24" "200"

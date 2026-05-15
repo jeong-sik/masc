@@ -729,7 +729,7 @@ let run_actor () =
   loop { counters = StringMap.empty; audit_store = None }
 
 let start_actor_if_needed ~sw =
-  Eio.Fiber.fork ~sw run_actor
+  Eio.Fiber.fork_daemon ~sw run_actor
 
 let record_cascade ?keeper_name ~observation ~cascade_name ~outcome () =
   let now = Time_compat.now () in

@@ -98,7 +98,7 @@ let agent_type_of_mention = Mention.agent_type_of_mention
 
 let is_spawnable mention =
   let base = agent_type_of_mention mention in
-  Provider_adapter.is_spawnable_agent base
+  Option.is_some (Spawn.get_config base)
 
 (* --- CLI spawn (Spawn mode) --- *)
 

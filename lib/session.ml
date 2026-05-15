@@ -269,7 +269,7 @@ let process_msg config state msg =
       !state'
 
 let start_loop registry ~sw =
-  Eio.Fiber.fork ~sw (fun () ->
+  Eio.Fiber.fork_daemon ~sw (fun () ->
     let rec loop state =
       let msg = Eio.Stream.take registry.mailbox in
       let state' = process_msg registry.config state msg in
@@ -521,7 +521,7 @@ module McpSessionStore = struct
         if mem then AgentMap.remove id state else state
 
   let start_loop ~sw =
-    Eio.Fiber.fork ~sw (fun () ->
+    Eio.Fiber.fork_daemon ~sw (fun () ->
       let rec loop state =
         let msg = Eio.Stream.take mailbox in
         loop (process_msg state msg)

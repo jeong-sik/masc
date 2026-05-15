@@ -486,6 +486,17 @@ let tool_policy_of_binding (binding : Runtime_binding.t) =
     }
 ;;
 
+let metadata_tool_policy_for_adapter (adapter : adapter) =
+  adapter.cascade_prefix :: adapter.canonical_name :: adapter.aliases
+  |> List.find_map (fun label ->
+    Cascade_provider_metadata.tool_policy_metadata_of_provider_label label)
+  |> Option.map tool_policy_of_metadata
+;;
+
+let tool_policy_for_adapter adapter =
+  metadata_tool_policy_for_adapter adapter |> Option.value ~default:adapter.tool_policy
+;;
+
 let telemetry_policy_of_binding (binding : Runtime_binding.t) =
   if runtime_kind_of_binding binding = Cli_agent || binding_usage_missing_by_design binding
   then telemetry_usage_missing
@@ -951,7 +962,7 @@ let supports_runtime_mcp_http_headers_for_model_label ?provider_kind model =
        | None -> model)
   in
   match adapter_of_registry_label provider_label with
-  | Some adapter -> adapter.tool_policy.supports_runtime_mcp_http_headers
+  | Some adapter -> (tool_policy_for_adapter adapter).supports_runtime_mcp_http_headers
   | None -> false
 ;;
 
@@ -1139,7 +1150,7 @@ let model_label_of_config (cfg : Llm_provider.Provider_config.t) =
 
 let supports_runtime_mcp_http_headers_for_config (cfg : Llm_provider.Provider_config.t) =
   match adapter_of_provider_config cfg with
-  | Some adapter -> adapter.tool_policy.supports_runtime_mcp_http_headers
+  | Some adapter -> (tool_policy_for_adapter adapter).supports_runtime_mcp_http_headers
   | None -> false
 ;;
 
@@ -1147,7 +1158,8 @@ let requires_per_keeper_bridging_for_bound_actor_tools_for_config
       (cfg : Llm_provider.Provider_config.t)
   =
   match adapter_of_provider_config cfg with
-  | Some adapter -> adapter.tool_policy.requires_per_keeper_bridging_for_bound_actor_tools
+  | Some adapter ->
+    (tool_policy_for_adapter adapter).requires_per_keeper_bridging_for_bound_actor_tools
   | None -> false
 ;;
 
@@ -1197,7 +1209,8 @@ let requires_per_keeper_bridging_for_bound_actor_tools_for_kind
       (kind : Llm_provider.Provider_config.provider_kind)
   =
   match adapter_of_provider_kind kind with
-  | Some adapter -> adapter.tool_policy.requires_per_keeper_bridging_for_bound_actor_tools
+  | Some adapter ->
+    (tool_policy_for_adapter adapter).requires_per_keeper_bridging_for_bound_actor_tools
   | None -> false
 ;;
 
@@ -1205,7 +1218,7 @@ let tolerates_bound_actor_fallback_for_kind
       (kind : Llm_provider.Provider_config.provider_kind)
   =
   match adapter_of_provider_kind kind with
-  | Some adapter -> adapter.tool_policy.tolerates_bound_actor_fallback
+  | Some adapter -> (tool_policy_for_adapter adapter).tolerates_bound_actor_fallback
   | None -> false
 ;;
 
@@ -1220,13 +1233,14 @@ let accepts_runtime_mcp_http_header_for_config
   match adapter_of_provider_config cfg with
   | None -> false
   | Some adapter ->
-    if adapter.tool_policy.supports_runtime_mcp_http_headers
+    let tool_policy = tool_policy_for_adapter adapter in
+    if tool_policy.supports_runtime_mcp_http_headers
     then true
     else (
       let normalized = normalize_header_key key in
       List.exists
         (fun k -> normalize_header_key k = normalized)
-        adapter.tool_policy.identity_runtime_mcp_header_keys)
+        tool_policy.identity_runtime_mcp_header_keys)
 ;;
 
 let oas_capabilities_of_config (cfg : Llm_provider.Provider_config.t) =

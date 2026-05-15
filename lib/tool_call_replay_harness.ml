@@ -119,30 +119,47 @@ let load_snapshots_from_jsonl path =
       parse 0 [] rows
 
 let response_format_of_provider provider =
+  let legacy_snapshot_provider_alias = function
+    | "codex-api" -> "openai"
+    | "glm-api" -> "glm"
+    | "glm-coding-plan" -> "glm-coding"
+    | "kimi-api" -> "kimi"
+    | provider -> provider
+  in
+  let normalized = String.lowercase_ascii (String.trim provider) in
+  let binding =
+    match Runtime_binding.find normalized with
+    | Some _ as binding -> binding
+    | None -> Runtime_binding.find (legacy_snapshot_provider_alias normalized)
+  in
   let canonical =
-    match Runtime_binding.find provider with
+    match binding with
     | Some binding -> binding.Runtime_binding.id
-    | None -> String.lowercase_ascii (String.trim provider)
+    | None -> legacy_snapshot_provider_alias normalized
   in
   (* The seed harness only knows the OpenAI-compatible chat-completions
      tool-call envelope; unsupported providers must add an explicit extractor
      instead of silently reusing this parser. *)
-  let canonical =
-    match canonical with
-    | "codex-api" -> Provider_adapter.cn_codex_api
-    | legacy -> Provider_adapter.display_provider_name legacy
+  let openai_chat_completion_provider =
+    match binding with
+    | Some binding ->
+      (match binding.Runtime_binding.kind with
+       | Llm_provider.Provider_config.OpenAI_compat
+       | Llm_provider.Provider_config.Glm
+       | Llm_provider.Provider_config.Kimi
+       | Llm_provider.Provider_config.Ollama ->
+         true
+       | Llm_provider.Provider_config.Anthropic
+       | Llm_provider.Provider_config.Claude_code
+       | Llm_provider.Provider_config.Codex_cli
+       | Llm_provider.Provider_config.Gemini
+       | Llm_provider.Provider_config.Gemini_cli
+       | Llm_provider.Provider_config.Kimi_cli
+       | Llm_provider.Provider_config.DashScope ->
+         false)
+    | None -> false
   in
-  let openai_chat_completion_providers =
-    [ Provider_adapter.cn_codex_api
-    ; Provider_adapter.cn_glm
-    ; Provider_adapter.cn_glm_coding_plan
-    ; Provider_adapter.cn_kimi_api
-    ; Provider_adapter.cn_openrouter
-    ; Provider_adapter.cn_ollama
-    ; Provider_adapter.cn_llama
-    ]
-  in
-  if List.exists (String.equal canonical) openai_chat_completion_providers then
+  if openai_chat_completion_provider then
     Ok Openai_chat_completions
   else
     errorf

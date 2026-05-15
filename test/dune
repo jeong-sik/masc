@@ -1443,3 +1443,13 @@
  (name test_mcp_telemetry)
  (modules test_mcp_telemetry)
  (libraries alcotest))
+
+; RFC-0084 PR-9 — Tag-dispatch fallback telemetry wrap. Final entry for
+; 4-tuple propagation: brings keeper-turn + MCP + tag-dispatch to 3/3 =
+; 100% per RFC-0084 §2.1 North Star. Constants-only: pins outcome vocab
+; parity with PR-7 + PR-8, cumulative wrap site count (5), and the
+; entries-covered = 3 invariant.
+(test
+ (name test_tag_dispatch_typed)
+ (modules test_tag_dispatch_typed)
+ (libraries alcotest))

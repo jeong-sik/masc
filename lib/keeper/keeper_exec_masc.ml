@@ -180,13 +180,32 @@ let handle_keeper_masc_tool
              match Tool_dispatch.lookup_tag name with
              | Some tag ->
                let keeper_agent = keeper_agent_sender ~meta in
-               (match
-                  !Keeper_exec_shared.tag_dispatch_fn
-                    ~config
-                    ~agent_name:keeper_agent
-                    ~tag
-                    ~name
-                    ~args
+               (* RFC-0084 §1.1 + §2.2 (PR-9) — wrap the tag-dispatch
+                  fallback with Tool_telemetry.with_span so the 3rd
+                  dispatch entry reaches 4-tuple emission parity with
+                  keeper turn (PR-7) and MCP server (PR-8). 4-tuple
+                  propagation now 3/3 = 100% per RFC-0084 §2.1 North Star. *)
+               let tag_dispatch_with_telemetry () =
+                 let result, _outcome =
+                   Tool_telemetry.with_span ~tool_name:name (fun _trace_id_thunk ->
+                     let r =
+                       !Keeper_exec_shared.tag_dispatch_fn
+                         ~config
+                         ~agent_name:keeper_agent
+                         ~tag
+                         ~name
+                         ~args
+                     in
+                     let outcome =
+                       match r with
+                       | Some _ -> "handled"
+                       | None -> "no_handler"
+                     in
+                     r, outcome)
+                 in
+                 result
+               in
+               (match tag_dispatch_with_telemetry ()
                 with
                 | Some tr when tr.Tool_result.success ->
                   tr.Tool_result.legacy_message

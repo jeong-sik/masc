@@ -418,6 +418,7 @@ let test_recall_candidates_with_history_appends () =
 (* --- E2E memory write → recall integration tests (I1) --- *)
 
 module Keeper_memory_bank = Masc_mcp.Keeper_memory_bank
+module Keeper_memory_llm_summary = Masc_mcp.Keeper_memory_llm_summary
 module Coord = Masc_mcp.Coord
 
 (** Create a minimal Coord.config for testing with a temp base_path.
@@ -925,6 +926,123 @@ let check_persistence_read_drop_delta ~surface ~reason ~before ~delta =
     (before +. float_of_int delta)
     (persistence_read_drop_total ~surface ~reason)
 
+let llm_summary_provider ~kind ~model_id =
+  Llm_provider.Provider_config.make ~kind ~model_id ~base_url:"" ()
+
+let test_llm_summary_direct_provider_filter () =
+  check bool "openai compat direct" true
+    (Keeper_memory_llm_summary.is_direct_completion_provider
+       (llm_summary_provider
+          ~kind:Llm_provider.Provider_config.OpenAI_compat
+          ~model_id:"openrouter/model"));
+  check bool "ollama direct" true
+    (Keeper_memory_llm_summary.is_direct_completion_provider
+       (llm_summary_provider
+          ~kind:Llm_provider.Provider_config.Ollama
+          ~model_id:"local-model"));
+  check bool "codex cli excluded" false
+    (Keeper_memory_llm_summary.is_direct_completion_provider
+       (llm_summary_provider
+          ~kind:Llm_provider.Provider_config.Codex_cli
+          ~model_id:"gpt-5.4"));
+  check bool "claude cli excluded" false
+    (Keeper_memory_llm_summary.is_direct_completion_provider
+       (llm_summary_provider
+          ~kind:Llm_provider.Provider_config.Claude_code
+          ~model_id:"opus"))
+
+let test_llm_summary_provider_caps_plain_text_request () =
+  let provider =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"summary-model" ~base_url:"" ~max_tokens:4096
+      ~tool_choice:Agent_sdk.Types.Auto ~disable_parallel_tool_use:false
+      ~response_format:Agent_sdk.Types.JsonMode
+      ~output_schema:(`Assoc [ ("type", `String "object") ])
+      ()
+  in
+  let summary_provider =
+    Keeper_memory_llm_summary.provider_for_summary provider
+  in
+  check (option int) "summary token cap" (Some 512)
+    summary_provider.max_tokens;
+  check (option (float 0.0001)) "deterministic temperature"
+    (Some 0.0) summary_provider.temperature;
+  check bool "tool choice disabled" true
+    (Option.is_none summary_provider.tool_choice);
+  check bool "parallel tools disabled" true
+    summary_provider.disable_parallel_tool_use;
+  check bool "plain text response format" true
+    (summary_provider.response_format = Agent_sdk.Types.Off);
+  check bool "schema disabled" true
+    (Option.is_none summary_provider.output_schema)
+
+let text_from_message (message : Agent_sdk.Types.message) =
+  match message.content with
+  | [ Agent_sdk.Types.Text text ] -> text
+  | _ -> fail "expected single text message"
+
+let test_llm_summary_messages_include_trace_and_notes () =
+  let messages =
+    Keeper_memory_llm_summary.messages_for_summary
+      ~trace_id:"trace-llm-msg"
+      ~texts:
+        [
+          "edited lib/keeper/keeper_memory_bank.ml";
+          "ran scripts/dune-local.sh build test/test_keeper_memory.exe";
+        ]
+  in
+  check int "system + user messages" 2 (List.length messages);
+  let user_text = List.nth messages 1 |> text_from_message in
+  check bool "trace included" true
+    (Astring.String.is_infix ~affix:"trace-llm-msg" user_text);
+  check bool "path included" true
+    (Astring.String.is_infix
+       ~affix:"lib/keeper/keeper_memory_bank.ml" user_text);
+  check bool "command included" true
+    (Astring.String.is_infix
+       ~affix:"scripts/dune-local.sh build test/test_keeper_memory.exe"
+       user_text)
+
+let rec find_upwards ~limit dir rel =
+  let path = Filename.concat dir rel in
+  if Sys.file_exists path then Some path
+  else if limit <= 0 then None
+  else
+    let parent = Filename.dirname dir in
+    if String.equal parent dir then None
+    else find_upwards ~limit:(limit - 1) parent rel
+
+let read_repo_file rel =
+  match find_upwards ~limit:8 (Sys.getcwd ()) rel with
+  | None -> fail ("missing repo file: " ^ rel)
+  | Some path ->
+      let ic = open_in path in
+      Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
+        really_input_string ic (in_channel_length ic))
+
+let test_keeper_agent_run_wires_memory_llm_summarizer () =
+  let source = read_repo_file "lib/keeper/keeper_agent_run.ml" in
+  let summarizer_pos =
+    match Astring.String.find_sub ~sub:"Keeper_memory_llm_summary.make" source with
+    | None -> fail "expected Keeper_memory_llm_summary.make in keeper_agent_run"
+    | Some pos -> pos
+  in
+  let compaction_pos =
+    match
+      Astring.String.find_sub
+        ~sub:"Keeper_memory_bank.compact_memory_bank_if_needed"
+        source
+    with
+    | None -> fail "expected compact_memory_bank_if_needed in keeper_agent_run"
+    | Some pos -> pos
+  in
+  check bool "summarizer constructed before compaction" true
+    (summarizer_pos < compaction_pos);
+  check bool "summarizer passed into compaction" true
+    (Astring.String.is_infix
+       ~affix:"?summarizer:memory_summarizer" source)
+
 let memory_note ?horizon ?source ~kind ~text ~priority ~generation ~turn ~ts_unix () =
   let extra_fields =
     (match horizon with
@@ -1395,6 +1513,80 @@ let memory_bank_test_row ~kind ~trace_id ~text ~priority ~idx =
          ("ts", `String "2026-01-01T00:00:00Z");
        ])
 
+let parse_memory_bank_test_row line =
+  match Keeper_memory_bank.parse_memory_bank_row line with
+  | Some row -> row
+  | None -> fail ("failed to parse seeded memory row: " ^ line)
+
+let progress_memory_rows trace_id =
+  List.init 3 (fun i ->
+    memory_bank_test_row
+      ~kind:"progress"
+      ~trace_id
+      ~text:
+        (Printf.sprintf
+           "progress cluster item %d retains enough semantic detail"
+           i)
+      ~priority:80
+      ~idx:i
+    |> parse_memory_bank_test_row)
+
+let generated_progress_consolidation rows =
+  List.filter
+    (fun (row : Keeper_memory_bank.keeper_memory_row_raw) ->
+      String.equal row.source "progress_consolidation")
+    rows
+
+let test_consolidation_uses_opt_in_summarizer () =
+  with_env "MASC_KEEPER_MEMORY_LLM_SUMMARY" "true" @@ fun () ->
+  let calls = ref [] in
+  let summarizer ~trace_id ~texts =
+    calls := (trace_id, texts) :: !calls;
+    Some "LLM durable summary\n[STATE]\nsecret state\n[/STATE]\nkept tail"
+  in
+  let rows = progress_memory_rows "trace-llm-summary" in
+  let consolidated, count =
+    Keeper_memory_bank.consolidate_memory_notes ~summarizer rows
+  in
+  check int "one progress cluster consolidated" 1 count;
+  check int "summarizer called once" 1 (List.length !calls);
+  (match !calls with
+   | [ (trace_id, texts) ] ->
+       check string "trace_id passed to summarizer"
+         "trace-llm-summary" trace_id;
+       check int "texts passed to summarizer" 3 (List.length texts)
+   | _ -> fail "unexpected summarizer call count");
+  match generated_progress_consolidation consolidated with
+  | [ row ] ->
+      check bool "llm summary marker persisted" true
+        (Astring.String.is_infix ~affix:"[llm]" row.text);
+      check bool "llm summary text persisted" true
+        (Astring.String.is_infix ~affix:"LLM durable summary" row.text);
+      check bool "state block scrubbed from llm summary" false
+        (Astring.String.is_infix ~affix:"secret state" row.text)
+  | _ -> fail "expected one generated progress consolidation row"
+
+let test_consolidation_summarizer_requires_opt_in () =
+  with_env "MASC_KEEPER_MEMORY_LLM_SUMMARY" "off" @@ fun () ->
+  let called = ref false in
+  let summarizer ~trace_id:_ ~texts:_ =
+    called := true;
+    Some "this should not be used"
+  in
+  let rows = progress_memory_rows "trace-disabled-summary" in
+  let consolidated, count =
+    Keeper_memory_bank.consolidate_memory_notes ~summarizer rows
+  in
+  check int "one progress cluster consolidated" 1 count;
+  check bool "summarizer not called while disabled" false !called;
+  match generated_progress_consolidation consolidated with
+  | [ row ] ->
+      check bool "deterministic fallback used" true
+        (Astring.String.is_infix ~affix:"[consolidated:3]" row.text);
+      check bool "llm marker absent while disabled" false
+        (Astring.String.is_infix ~affix:"[llm]" row.text)
+  | _ -> fail "expected one generated progress consolidation row"
+
 let test_compaction_records_consolidation_metrics () =
   with_env "MASC_KEEPER_MEMORY_MAX_NOTES" "40" @@ fun () ->
   with_env "MASC_KEEPER_MEMORY_MAX_LENGTH" "4096" @@ fun () ->
@@ -1687,6 +1879,18 @@ let () =
         [
           test_case "cap enforcement reports dropped_by_kind" `Quick test_cap_dropped_by_kind;
           test_case "total cap reports dropped_by_total_cap" `Quick test_cap_dropped_by_total;
+          test_case "LLM summary filters direct providers" `Quick
+            test_llm_summary_direct_provider_filter;
+          test_case "LLM summary requests plain text" `Quick
+            test_llm_summary_provider_caps_plain_text_request;
+          test_case "LLM summary prompt carries trace and notes" `Quick
+            test_llm_summary_messages_include_trace_and_notes;
+          test_case "keeper turn wires LLM memory summarizer" `Quick
+            test_keeper_agent_run_wires_memory_llm_summarizer;
+          test_case "consolidation uses opt-in summarizer" `Quick
+            test_consolidation_uses_opt_in_summarizer;
+          test_case "consolidation summarizer requires opt-in" `Quick
+            test_consolidation_summarizer_requires_opt_in;
           test_case "compaction records consolidation metrics" `Quick
             test_compaction_records_consolidation_metrics;
           test_case "note pressure triggers compaction under byte trigger" `Quick

@@ -315,6 +315,100 @@ describe('IdeShell', () => {
     ])
   })
 
+  it('derives operational statusbar chips from the active IDE context focus', () => {
+    const model = deriveIdeStatusbarModel({
+      activeView: 'source',
+      activeLayers: new Set<string>(),
+      activeFilePath: 'lib/runtime.ml',
+      contextFocus: {
+        file_path: 'lib/runtime.ml',
+        line: 42,
+        surface: 'Task',
+        label: 'task task-runtime',
+        source_id: 'event-1',
+        keeper_id: 'sangsu',
+        activated_at_ms: Date.now(),
+        route_links: [
+          {
+            id: 'goal:goal-runtime',
+            label: 'Goal',
+            tab: 'workspace',
+            params: { section: 'planning', goal: 'goal-runtime' },
+            evidence: 'Goal goal-runtime',
+          },
+          {
+            id: 'task:task-runtime',
+            label: 'Task',
+            tab: 'workspace',
+            params: { section: 'planning', view: 'default', task: 'task-runtime' },
+            evidence: 'Task task-runtime',
+          },
+          {
+            id: 'pr:15035',
+            label: 'PR',
+            tab: 'workspace',
+            params: { section: 'repositories', view: 'graph', pr: '15035' },
+            evidence: 'PR 15035',
+          },
+          {
+            id: 'git:main',
+            label: 'Git',
+            tab: 'workspace',
+            params: { section: 'repositories', view: 'graph', ref: 'main' },
+            evidence: 'Git main',
+          },
+          {
+            id: 'log:turn-42',
+            label: 'Log',
+            tab: 'monitoring',
+            params: { section: 'runtime', view: 'audit', log_id: 'turn-42' },
+            evidence: 'Log turn-42',
+          },
+          {
+            id: 'telemetry:sess-runtime',
+            label: 'Telemetry',
+            tab: 'monitoring',
+            params: {
+              section: 'fleet-health',
+              view: 'event-log',
+              session_id: 'sess-runtime',
+              operation_id: 'op-runtime',
+              worker_run_id: 'wr-runtime',
+              q: 'turn-42',
+            },
+            evidence: 'Fleet telemetry event log · session sess-runtime · operation op-runtime · worker wr-runtime · query turn-42',
+          },
+          {
+            id: 'keeper:sangsu',
+            label: 'Keeper',
+            tab: 'monitoring',
+            params: { section: 'agents', view: 'keepers', keeper: 'sangsu' },
+            evidence: 'Keeper sangsu',
+          },
+        ],
+      },
+      findOpen: false,
+      terminalOpen: false,
+      railsCollapsed: false,
+      reviewFocusActive: false,
+      routeParams: {},
+      dashboardConnected: true,
+    })
+
+    expect(model.chips.map(chip => chip.label)).toEqual([
+      'SOURCE',
+      'lib/runtime.ml',
+      'Task L42 task task-runtime',
+      'Goal goal-runtime',
+      'Task task-runtime',
+      'PR #15035',
+      'Git main',
+      'Log turn-42',
+      'Telemetry sess-runtime',
+      'Keeper sangsu',
+    ])
+  })
+
   it('renders statusbar operational chips for the focused PR/task/log route', async () => {
     route.value = {
       tab: 'code',
@@ -407,6 +501,17 @@ describe('IdeShell', () => {
       .toContain('ocamllsp'))
     const routeGroups = [...container.querySelectorAll<HTMLButtonElement>('.ide-toolbar-context-route-group-action')]
     expect(routeGroups.map(button => button.textContent)).toEqual(['Code1', 'Runtime1'])
+    await waitFor(() => {
+      const chipLabels = [
+        ...container.querySelectorAll<HTMLElement>('[data-testid^="ide-statusbar-chip-"]'),
+      ].map(chip => chip.textContent)
+      expect(chipLabels).toEqual([
+        'SOURCE',
+        'lib/runtime.ml',
+        'Keeper L42 ocamllsp',
+        'Keeper sangsu',
+      ])
+    })
     fireEvent.click(routeGroups[1]!)
     expect(window.location.hash).toBe('#monitoring?section=agents&view=keepers&keeper=sangsu')
   })

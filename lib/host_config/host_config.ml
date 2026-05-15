@@ -38,6 +38,10 @@ type t =
   ; log_dir : string
   ; run_dir : string
   ; policy_dir : string
+  ; base_path : string option
+  ; config_dir : string option
+  ; data_dir : string option
+  ; personas_dir : string option
   }
 [@@deriving show, eq]
 
@@ -53,6 +57,11 @@ let coreutils_defaults =
 
 let host () =
   let tmp = Filename.get_temp_dir_name () in
+  let get_opt key =
+    match Sys.getenv_opt key with
+    | None -> None
+    | Some s -> if String.trim s = "" then None else Some s
+  in
   { cred_root = Filename.concat tmp "keeper-creds"
   ; host_bash = "/bin/bash"
   ; host_zsh = "/bin/zsh"
@@ -71,8 +80,14 @@ let host () =
   ; log_dir = tmp
   ; run_dir = tmp
   ; policy_dir = tmp
+  ; base_path = get_opt "MASC_BASE_PATH"
+  ; config_dir = get_opt "MASC_CONFIG_DIR"
+  ; data_dir = get_opt "MASC_DATA_DIR"
+  ; personas_dir = get_opt "MASC_PERSONAS_DIR"
   }
 ;;
+
+let from_env = host
 
 let is_test_mode = function
   | Test -> true
@@ -145,6 +160,11 @@ let resolve ?base_path () =
     then Test
     else Production
   in
+  let get_opt key =
+    match Sys.getenv_opt key with
+    | None -> None
+    | Some s -> if String.trim s = "" then None else Some s
+  in
   Ok
     { cred_root
     ; host_bash = resolve_bash ()
@@ -157,5 +177,9 @@ let resolve ?base_path () =
     ; log_dir = tmp
     ; run_dir = tmp
     ; policy_dir = tmp
+    ; base_path = get_opt "MASC_BASE_PATH"
+    ; config_dir = get_opt "MASC_CONFIG_DIR"
+    ; data_dir = get_opt "MASC_DATA_DIR"
+    ; personas_dir = get_opt "MASC_PERSONAS_DIR"
     }
 ;;

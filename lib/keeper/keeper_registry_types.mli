@@ -313,3 +313,120 @@ module Decision_transition : sig
   val to_tag : ('from, 'to_) t -> string
 end
 
+type cascade_state =
+  | Cascade_idle [@tla.idle]
+  | Cascade_selecting [@tla.active]
+  | Cascade_trying [@tla.active]
+  | Cascade_done [@tla.terminal]
+  | Cascade_exhausted [@tla.terminal]
+[@@deriving tla]
+
+(** {1 Cascade state GADT infrastructure (Cycle 21 / Tier B5)} *)
+
+type cascade_idle
+type cascade_selecting
+type cascade_trying
+type cascade_done
+type cascade_exhausted
+
+type 'a cascade_state_witness =
+  | Cascade_idle : cascade_idle cascade_state_witness
+  | Cascade_selecting : cascade_selecting cascade_state_witness
+  | Cascade_trying : cascade_trying cascade_state_witness
+  | Cascade_done : cascade_done cascade_state_witness
+  | Cascade_exhausted : cascade_exhausted cascade_state_witness
+
+type packed_cascade_state =
+  | Packed : 'a cascade_state_witness -> packed_cascade_state
+
+val cascade_state_to_witness : cascade_state -> packed_cascade_state
+val witness_to_cascade_state : packed_cascade_state -> cascade_state
+
+(** Diagnostic label using the constructor name (e.g.
+    ["Cascade_exhausted"]).  Used by the [Cascade_transition_violation]
+    [Printexc] printer to render the rejected pair. *)
+val packed_cascade_state_label : packed_cascade_state -> string
+
+(** RFC-0072 Phase 1: GADT-encoded cascade transitions.
+
+    Enumerates the 13 valid cross-state transitions of the 5-variant
+    [cascade_state] FSM.  The 7 forbidden pairs ([Idle -> Trying/Done/
+    Exhausted], [Selecting -> Done/Exhausted], [Done <-> Exhausted]) have
+    no constructor and are therefore type-unrepresentable.  Idempotent
+    self-loops are not represented (they are mutator-boundary no-ops). *)
+module Cascade_transition : sig
+  type ('from, 'to_) t =
+    | Idle_to_selecting : (cascade_idle, cascade_selecting) t
+    | Selecting_to_idle : (cascade_selecting, cascade_idle) t
+    | Selecting_to_trying : (cascade_selecting, cascade_trying) t
+    | Trying_to_idle : (cascade_trying, cascade_idle) t
+    | Trying_to_selecting : (cascade_trying, cascade_selecting) t
+    | Trying_to_done : (cascade_trying, cascade_done) t
+    | Trying_to_exhausted : (cascade_trying, cascade_exhausted) t
+    | Done_to_idle : (cascade_done, cascade_idle) t
+    | Done_to_selecting : (cascade_done, cascade_selecting) t
+    | Done_to_trying : (cascade_done, cascade_trying) t
+    | Exhausted_to_idle : (cascade_exhausted, cascade_idle) t
+    | Exhausted_to_selecting : (cascade_exhausted, cascade_selecting) t
+    | Exhausted_to_trying : (cascade_exhausted, cascade_trying) t
+
+  type packed = Packed_transition : ('a, 'b) t -> packed
+
+  val to_tag : ('a, 'b) t -> string
+end
+
+(** RFC-0072 Phase 1: typed error for cascade transition spec violations.
+    Each forbidden pair has its own constructor; replaces the prior
+    string-formatted [Invalid_argument] payload at the validator. *)
+type cascade_transition_spec_violation =
+  | Idle_to_trying
+  | Idle_to_done
+  | Idle_to_exhausted
+  | Selecting_to_done
+  | Selecting_to_exhausted
+  | Done_to_exhausted
+  | Exhausted_to_done
+
+val cascade_transition_spec_violation_to_tag
+  :  cascade_transition_spec_violation
+  -> string
+
+(** RFC-0072 Phase 5: raised by [validate_cascade_transition] and
+    [set_turn_cascade_state] on a forbidden cascade transition, carrying
+    the typed [cascade_transition_spec_violation] payload (replaces the
+    prior string-formatted [Invalid_argument]).  [where] is a diagnostic
+    label naming the raising function.  A [Printexc] printer is registered
+    so [Printexc.to_string] reproduces the original message text. *)
+exception
+  Cascade_transition_violation of
+    { where : string
+    ; from : packed_cascade_state
+    ; to_ : packed_cascade_state
+    ; violation : cascade_transition_spec_violation
+    }
+
+(** RFC-0072 Phase 1: resolve a (from, target) packed pair to one of
+    three outcomes: a typed transition value, an idempotent no-op, or a
+    typed spec violation.  Phase 2 will route [set_turn_cascade_state]
+    through this resolver. *)
+type cascade_resolve_outcome =
+  | Resolved_transition of Cascade_transition.packed
+  | Resolved_idempotent
+  | Resolved_violation of cascade_transition_spec_violation
+
+val resolve_cascade_transition
+  :  from:packed_cascade_state
+  -> target:packed_cascade_state
+  -> cascade_resolve_outcome
+
+(** Raises [Cascade_transition_violation] with the typed payload.
+    Previously a private helper inside Keeper_registry; exposed via the
+    intra-library split because [validate_cascade_transition] in
+    Keeper_registry calls it after moving the exception here. *)
+val raise_cascade_transition_violation
+  :  where:string
+  -> from:packed_cascade_state
+  -> to_:packed_cascade_state
+  -> violation:cascade_transition_spec_violation
+  -> 'a
+

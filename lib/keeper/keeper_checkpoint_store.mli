@@ -96,12 +96,13 @@ type checkpoint_load_error =
   | Io_error of string
   | Sdk_other_error of string
 
-(** [true] iff [detail] matches a known "file not found" rendering
-    across Eio.Io, Unix_error, Sys_error, and the legacy masc-mcp
-    [no_such_file] short-form. *)
-val is_not_found_detail : string -> bool
+(** Project an [Agent_sdk.Error.sdk_error] to [checkpoint_load_error].
 
-(** Project an [Agent_sdk.Error.sdk_error] to [checkpoint_load_error]. *)
+    RFC-0089 G4: this no longer classifies [Not_found] from string-matched
+    [FileOpFailed.detail]. Cold-start "checkpoint absent" is detected at
+    the OS boundary via [Agent_sdk.Checkpoint_store.exists] *before* the
+    SDK [load] call, so any [sdk_error] reaching this function is a real
+    I/O / parse / SDK fault and routes accordingly. *)
 val classify_sdk_error :
   Agent_sdk.Error.sdk_error -> checkpoint_load_error
 

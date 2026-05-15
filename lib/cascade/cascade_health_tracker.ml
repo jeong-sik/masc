@@ -365,6 +365,9 @@ type provider_restore = {
   restore_cooldown_until : float option;
   restore_last_failure_at : float option;
   restore_top_fingerprints : (string * int) list;
+  restore_latency_ms : float option;
+  restore_confidence : float option;
+  restore_cost_usd : float option;
 }
 
 (* ── Constructor ──────────────────────────────── *)
@@ -427,6 +430,38 @@ let finite_positive = function
   | Some value when Float.is_finite value && value > 0.0 -> Some value
   | _ -> None
 
+let restore_latency_sample state = function
+  | Some lat_ms when latency_ring_size > 0
+                     && Float.is_finite lat_ms
+                     && lat_ms > 0.0 ->
+    let ring = Array.make latency_ring_size 0.0 in
+    ring.(0) <- lat_ms;
+    state.latency_ring <- Some ring;
+    state.latency_count <- 1;
+    state.latency_cursor <- (if latency_ring_size = 1 then 0 else 1)
+  | _ -> ()
+
+let restore_confidence_sample state = function
+  | Some confidence when confidence_ring_size > 0
+                         && Float.is_finite confidence ->
+    let ring = Array.make confidence_ring_size 0.0 in
+    ring.(0) <- confidence;
+    state.confidence_ring <- Some ring;
+    state.confidence_count <- 1;
+    state.confidence_cursor <- (if confidence_ring_size = 1 then 0 else 1)
+  | _ -> ()
+
+let restore_cost_sample state = function
+  | Some cost_usd when cost_ring_size > 0
+                       && Float.is_finite cost_usd
+                       && cost_usd >= 0.0 ->
+    let ring = Array.make cost_ring_size 0.0 in
+    ring.(0) <- cost_usd;
+    state.cost_ring <- Some ring;
+    state.cost_count <- 1;
+    state.cost_cursor <- (if cost_ring_size = 1 then 0 else 1)
+  | _ -> ()
+
 let restore_providers t providers =
   with_lock t (fun () ->
     let now = Unix.gettimeofday () in
@@ -453,6 +488,9 @@ let restore_providers t providers =
               if (not (String.equal fp "")) && count > 0
               then Hashtbl.replace state.fingerprint_counts fp count)
             row.restore_top_fingerprints;
+          restore_latency_sample state row.restore_latency_ms;
+          restore_confidence_sample state row.restore_confidence;
+          restore_cost_sample state row.restore_cost_usd;
           restored + 1))
       0
       providers)

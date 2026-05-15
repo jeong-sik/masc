@@ -142,6 +142,7 @@
         test_keeper_runtime_toml
         test_keeper_tool_policy_config
         test_tool_resolution
+        test_dispatch_disclosure_parity
         test_coord_worktree_policy_path
         test_claim_post_provision_hook
         test_keeper_toml_config_validation
@@ -380,6 +381,7 @@
           test_keeper_runtime_toml
           test_keeper_tool_policy_config
           test_tool_resolution
+          test_dispatch_disclosure_parity
           test_coord_worktree_policy_path
           test_claim_post_provision_hook
           test_keeper_toml_config_validation

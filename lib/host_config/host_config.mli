@@ -8,9 +8,8 @@
 
     Fields cover the host-bound paths that keeper / dispatch / shell
     layers consume.  PR-1 introduces [log_dir], [run_dir], [policy_dir]
-    so RFC-0085 PR-2 / PR-3 can drop the [/tmp/auto-responder.log],
-    [/tmp/masc-*.pid], [/tmp/gemini_headless_admin_policy.json]
-    hardcodes at the call-sites.
+    so RFC-0085 PR-2 / PR-3 can drop host-local runtime path hardcodes at
+    the call-sites.
 
     All record / variant types derive [show] and [eq] so callers can
     use the auto-generated [pp_t], [show_t], [equal] without writing
@@ -62,9 +61,8 @@ type t =
         (** Directory for runtime state files (PID locks, sockets).
             Default [<tmp>] from [host ()]. *)
   ; policy_dir : string
-        (** Directory for runtime policy files
-            ([gemini_headless_admin_policy.json], ...).  Default [<tmp>]
-            from [host ()]. *)
+        (** Directory for runtime policy files.  Default [<tmp>] from
+            [host ()]. *)
   }
 [@@deriving show, eq]
 

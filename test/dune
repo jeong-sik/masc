@@ -1671,8 +1671,14 @@
  (modules test_rfc_0085_pr1_host_config_legacy_purge)
  (libraries alcotest ast_grep masc_mcp.host_config masc_mcp))
 
-; RFC-0085 PR-3 — server runtime PID lock + policy paths absorbed into
-; Host_config.run_dir / Host_config.policy_dir.
+; RFC-0085 PR-2 — auto_responder log path absorbed into Host_config.log_dir.
+(test
+ (name test_rfc_0085_pr2_auto_responder_log_dir)
+ (modules test_rfc_0085_pr2_auto_responder_log_dir)
+ (libraries alcotest ast_grep))
+
+; RFC-0085 PR-3 — server runtime PID lock absorbed into Host_config.run_dir,
+; and server bootstrap kept free of provider-specific OAS policy wiring.
 (test
  (name test_rfc_0085_pr3_server_runtime_paths)
  (modules test_rfc_0085_pr3_server_runtime_paths)

@@ -4,8 +4,7 @@
    - Renames `legacy_macos_default ()` -> `host ()` (canonical accessor).
    - Renames inner `legacy_coreutils_macos` -> `coreutils_defaults`.
    - Adds `log_dir`, `run_dir`, `policy_dir` fields (RFC-0085 PR-2/PR-3
-     absorb the corresponding /tmp/auto-responder.log, /tmp/masc-*.pid,
-     /tmp/gemini_headless_admin_policy.json hardcodes).
+     absorb the corresponding host-local runtime path hardcodes).
    - Applies [@@deriving show, eq] to all record / variant types,
      replacing the ~35 lines of manual pp implementations.
 

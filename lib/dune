@@ -293,6 +293,10 @@
    ;; masc_mcp.masc_types (Masc_domain). Was previously in
    ;; (private_modules); promotion preserves internal-only access.
    masc_mcp.briefing_compactors
+   ;; RFC-0056 Phase 1E — Dashboard_eval_feed leaf module extracted to
+   ;; lib/dashboard_eval_feed/. 178+59 LoC, deps: stdlib + Yojson +
+   ;; agent_sdk + masc_core (Json_util/Safe_ops).
+   masc_mcp.dashboard_eval_feed
    ;; RFC-0058 Phase 1 — Declarative cascade TOML config. Separate sub-library
    ;; to avoid type name collisions (transport, provider, binding, tier, strategy)
    ;; with identically-named types in the main library.

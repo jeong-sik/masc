@@ -62,3 +62,6 @@ val tool_required_permission :
 val tool_effect_domain :
   string -> Tool_catalog.effect_domain option
 (** Pure: tool-catalog effect-domain classification for a Tool_shard MASC tool. *)
+
+val base_tools : Masc_domain.tool_schema list
+(** Pure: base tool schemas (always-on tools every keeper sees). *)

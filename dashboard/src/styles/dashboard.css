@@ -1510,6 +1510,21 @@ button.ide-persistence-focus:focus-visible {
   min-width: 0;
 }
 
+.ide-bdi-route-count {
+  display: inline-flex;
+  align-items: center;
+  height: 17px;
+  padding: 0 5px;
+  border: 1px solid color-mix(in srgb, var(--color-accent-fg) 38%, var(--color-border-default));
+  border-radius: var(--r-1);
+  background: color-mix(in srgb, var(--color-bg-elevated) 88%, var(--color-accent-fg));
+  color: var(--color-accent-fg);
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  font-weight: var(--fw-semi);
+  white-space: nowrap;
+}
+
 .ide-bdi-route-link {
   min-width: 0;
   max-width: 72px;

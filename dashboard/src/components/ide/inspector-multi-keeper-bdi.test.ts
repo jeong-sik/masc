@@ -721,6 +721,7 @@ describe('InspectorMultiKeeperBDI — file focus label (cursor overlay → IDE j
     expect(ashPanel).not.toBeNull()
     const ashLinks = [...ashPanel!.querySelectorAll<HTMLButtonElement>('.ide-bdi-route-link')]
     expect(ashLinks.map(link => link.textContent)).toEqual(['Code', 'Telemetry', 'Keeper'])
+    expect(ashPanel!.querySelector('.ide-bdi-route-count')?.textContent).toBe('CTX 3')
 
     ashLinks.find(link => link.textContent === 'Code')!.click()
     expect(routeHashParams().get('file')).toBe('src/runtime/ash.ts')
@@ -730,6 +731,7 @@ describe('InspectorMultiKeeperBDI — file focus label (cursor overlay → IDE j
     expect(scholarChip).not.toBeNull()
     const scholarLinks = [...scholarChip!.querySelectorAll<HTMLButtonElement>('.ide-bdi-route-link')]
     expect(scholarLinks.map(link => link.textContent)).toEqual(['Code', 'Telemetry', 'Keeper'])
+    expect(scholarChip!.querySelector('.ide-bdi-route-count')?.textContent).toBe('CTX 3')
 
     scholarLinks.find(link => link.textContent === 'Telemetry')!.click()
     expect(routeHashParams().get('q')).toContain('bdi keeper:scholar')

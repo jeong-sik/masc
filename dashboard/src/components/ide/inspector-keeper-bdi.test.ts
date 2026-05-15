@@ -331,6 +331,9 @@ describe('InspectorKeeperBDI', () => {
 
     const links = [...container.querySelectorAll<HTMLButtonElement>('.ide-bdi-route-link')]
     expect(links.map(link => link.textContent)).toEqual(['Code', 'Telemetry', 'Keeper'])
+    expect(container.querySelector('.ide-bdi-route-count')?.textContent).toBe('CTX 3')
+    expect(container.querySelector('.ide-bdi-route-count')?.getAttribute('title'))
+      .toBe('3 BDI context routes')
 
     links.find(link => link.textContent === 'Code')!.click()
     expect(window.location.hash.startsWith('#code?')).toBe(true)

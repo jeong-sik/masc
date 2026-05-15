@@ -670,6 +670,13 @@ let repo_token_variants token =
   |> List.filter (fun s -> s <> "")
   |> List.sort_uniq String.compare
 
+let repo_exact_alias_variants token =
+  let token = normalize_repo_alias token in
+  let basename = Filename.basename token |> normalize_repo_alias in
+  [ token; basename ]
+  |> List.filter (fun s -> s <> "")
+  |> List.sort_uniq String.compare
+
 let toml_table_opt value =
   try Some (Otoml.get_table value) with
   | _ -> None
@@ -714,17 +721,21 @@ let repository_aliases_for_candidate config ~repo_name =
                    match toml_table_opt value with
                    | None -> []
                    | Some tbl ->
-                     let base_aliases =
+                     let derived_aliases =
                        [ Some section_name
                        ; toml_string_opt tbl "name"
                        ; Option.map Filename.basename (toml_string_opt tbl "url")
                        ; Option.map Filename.basename (toml_string_opt tbl "local_path")
                        ]
                        |> List.filter_map Fun.id
+                       |> List.concat_map repo_exact_alias_variants
+                     in
+                     let configured_aliases =
+                       toml_string_array_or_empty tbl "aliases"
+                       |> List.concat_map repo_token_variants
                      in
                      let aliases =
-                       base_aliases @ toml_string_array_or_empty tbl "aliases"
-                       |> List.concat_map repo_token_variants
+                       derived_aliases @ configured_aliases
                        |> List.sort_uniq String.compare
                      in
                      if List.mem repo_name aliases then aliases else [])

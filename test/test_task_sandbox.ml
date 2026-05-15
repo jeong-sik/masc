@@ -660,7 +660,24 @@ aliases = ["keeper"]
                   (Task_sandbox.cleanup ~config ~agent_name:"mention-agent" sb)
             | Error e ->
                 fail (Printf.sprintf "%s: sandbox create failed: %s" label e))
-          mention_cases))
+          mention_cases;
+        write_tasks config
+          [
+            task ~id:"task-mention-direct-generic"
+              ~title:"Fix direct command routing"
+              ~description:"Generic direct wording is not repo evidence." ();
+          ];
+        match
+          Task_sandbox.create ~config ~task_id:"task-mention-direct-generic"
+            ~agent_name:"mention-agent" ()
+        with
+        | Ok sb ->
+            ignore
+              (Task_sandbox.cleanup ~config ~agent_name:"mention-agent" sb);
+            fail "generic direct token must not pick grpc-direct"
+        | Error e ->
+            check bool "generic direct remains ambiguous" true
+              (contains "ambiguous_task_repo" e)))
 
 let test_with_sandbox_lifecycle () =
   let base = make_temp_dir () in

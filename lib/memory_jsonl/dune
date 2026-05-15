@@ -1,0 +1,25 @@
+; RFC-0056 Phase 1F — extract Memory_jsonl leaf module from flat
+; masc_mcp namespace. Stacked on Phase 1E (dashboard_eval_feed).
+;
+; Memory_jsonl is dependency-leaf: stdlib + Yojson + Eio + Agent_sdk
+; (external) + Fs_compat / Time_compat / masc_log (existing
+; sub-libraries). Implements OAS Memory.long_term_backend over JSONL
+; files. 219+22 LoC, fan-in 1 (lib/memory_oas_bridge.ml) + 1 self.
+;
+; (include_subdirs no) opts out of parent's (include_subdirs unqualified).
+; (wrapped false) keeps the top-level identifier `Memory_jsonl`.
+(include_subdirs no)
+
+(library
+ (name masc_mcp_memory_jsonl)
+ (public_name masc_mcp.memory_jsonl)
+ (wrapped false)
+ (flags (:standard -w +4))
+ (libraries
+  unix
+  eio
+  yojson
+  agent_sdk
+  fs_compat
+  time_compat
+  masc_log))

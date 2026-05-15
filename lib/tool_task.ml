@@ -579,6 +579,44 @@ let handle_claim ?agent_tool_names ~tool_name ~start_time ctx args =
    | Error e -> Log.Task.warn "task claim failed for %s: %s" task_id (Masc_domain.masc_error_to_string e));
   result_to_response ~tool_name ~start_time result
 
+(* Look up the current Goal_store phase for each goal id in the agent's
+   active_goal_ids. Returns a list of "<goal_id>=<phase>" strings, e.g.
+   ["goal-1777967605002-004b=executing"; "goal-other=completed"].
+
+   This is consumed only by [format_no_eligible] below, to give the LLM
+   the *current* goal phase instead of letting it infer "completed goal"
+   from the bare excluded_count. See PR body for the velvet-hammer
+   misdiagnosis that motivated this surface. *)
+let active_goal_phases_for_agent ctx =
+  match Keeper_types.read_meta_resolved ctx.config ctx.agent_name with
+  | Ok (Some (_, meta)) ->
+      List.map
+        (fun goal_id ->
+           match Goal_store.get_goal ctx.config ~goal_id with
+           | Some goal ->
+               Printf.sprintf "%s=%s" goal_id (Goal_phase.to_string goal.phase)
+           | None -> Printf.sprintf "%s=missing" goal_id)
+        meta.active_goal_ids
+  | Ok None | Error _ -> []
+
+let format_no_eligible ctx excluded_count =
+  match active_goal_phases_for_agent ctx with
+  | [] ->
+      Printf.sprintf
+        "No eligible tasks available (blocked/excluded: %d). This agent has no \
+         active_goal_ids — every open task is out of scope. Operator should \
+         set active_goal_ids via masc_keeper_up."
+        excluded_count
+  | phases ->
+      Printf.sprintf
+        "No eligible tasks available (blocked/excluded: %d). active goal \
+         phases: [%s]. NOTE: excluded ≠ completed. If every phase above is \
+         'executing', the cause is goal-scope mismatch — open tasks are \
+         scoped to a goal not in this agent's active_goal_ids — not goal \
+         completion."
+        excluded_count
+        (String.concat ", " phases)
+
 let handle_claim_next ?agent_tool_names ~tool_name ~start_time ctx _args =
   if not (try Coord.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Stdlib.Not_found -> false) then
     Tool_result.error ~tool_name ~start_time (Printf.sprintf "Agent '%s' is not a member of this room" ctx.agent_name)
@@ -599,7 +637,7 @@ let handle_claim_next ?agent_tool_names ~tool_name ~start_time ctx _args =
           ~agent_name:ctx.agent_name ~task_id
     | Coord.Claim_next_no_unclaimed -> "No unclaimed tasks available"
     | Coord.Claim_next_no_eligible { excluded_count; _ } ->
-        Printf.sprintf "No eligible tasks available (blocked/excluded: %d)" excluded_count
+        format_no_eligible ctx excluded_count
     | Coord.Claim_next_error e -> Printf.sprintf "Error: %s" e
   in
   Tool_result.ok ~tool_name ~start_time message

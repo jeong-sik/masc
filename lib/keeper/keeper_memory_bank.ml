@@ -46,22 +46,27 @@ open Keeper_types
 
 include Keeper_memory_policy
 
-let memory_bank_locks_mu = Eio.Mutex.create ()
-let memory_bank_locks : (string, Eio.Mutex.t) Hashtbl.t = Hashtbl.create 64
+let with_stdlib_mutex mutex f =
+  Stdlib.Mutex.lock mutex;
+  Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock mutex) f
+;;
+
+let memory_bank_locks_mu = Stdlib.Mutex.create ()
+let memory_bank_locks : (string, Stdlib.Mutex.t) Hashtbl.t = Hashtbl.create 64
 
 let memory_bank_lock_for path =
-  Eio_guard.with_mutex memory_bank_locks_mu (fun () ->
+  with_stdlib_mutex memory_bank_locks_mu (fun () ->
     match Hashtbl.find_opt memory_bank_locks path with
     | Some mutex -> mutex
     | None ->
-      let mutex = Eio.Mutex.create () in
+      let mutex = Stdlib.Mutex.create () in
       Hashtbl.add memory_bank_locks path mutex;
       mutex)
 ;;
 
 let with_memory_bank_lock path f =
   let mutex = memory_bank_lock_for path in
-  Eio_guard.with_mutex mutex f
+  with_stdlib_mutex mutex f
 ;;
 
 type candidate_selection_result = {

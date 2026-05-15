@@ -53,6 +53,17 @@ module Cache : sig
   val max_entries : int
 end
 
+(** {1 Executor / Domain Pool} *)
+
+module Executor : sig
+  val domain_count_override : unit -> int option
+  (** Optional override for the shared Eio executor domain count.
+
+      Reads [MASC_EXECUTOR_DOMAIN_COUNT].  Unset, non-integer, zero, and
+      negative values return [None], letting {!Domain_pool} choose its
+      recommended count. *)
+end
+
 (** {1 Task claim} *)
 
 module Claim : sig

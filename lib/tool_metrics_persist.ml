@@ -22,7 +22,7 @@ module Float = Stdlib.Float
 
     Design:
     - Each tool call is serialized as a single JSONL line.
-    - Records are buffered in an Eio.Stream and flushed every 5 minutes.
+    - Records are buffered in a bounded best-effort queue and flushed every 5 minutes.
     - On startup, existing day-files are read and replayed into Tool_metrics.
     - All I/O failures are caught and logged (best-effort persistence).
 
@@ -70,18 +70,28 @@ let parse_record (json : Yojson.Safe.t)
 (* ── Write queue ────────────────────────────────────── *)
 
 let write_queue_capacity = 4096
-let write_queue : Yojson.Safe.t Eio.Stream.t = Eio.Stream.create write_queue_capacity
+let write_queue_mu = Mutex.create ()
+let write_queue : Yojson.Safe.t Queue.t = Queue.create ()
 let dropped_full_queue = Atomic.make 0
 
 let store_ref : (string * Dated_jsonl.t) option ref = ref None
 
-let rec drain_queue_without_store dropped =
-  match Eio.Stream.take_nonblocking write_queue with
-  | None -> dropped
-  | Some _ -> drain_queue_without_store (dropped + 1)
+let with_write_queue_lock f =
+  Mutex.lock write_queue_mu;
+  Fun.protect ~finally:(fun () -> Mutex.unlock write_queue_mu) f
+
+let take_queued_record () =
+  with_write_queue_lock (fun () ->
+    if Queue.is_empty write_queue then None else Some (Queue.take write_queue))
+
+let drain_queue_without_store () =
+  with_write_queue_lock (fun () ->
+    let dropped = Queue.length write_queue in
+    Queue.clear write_queue;
+    dropped)
 
 let reset_for_testing () =
-  let dropped = drain_queue_without_store 0 in
+  let dropped = drain_queue_without_store () in
   if dropped > 0 then
     Log.Metrics.warn "tool_metrics_persist: reset dropped %d queued records" dropped;
   Atomic.set dropped_full_queue 0;
@@ -104,21 +114,28 @@ let enqueue (result : Tool_result.t) =
      keeper turn open and amplify the outage. Drop best-effort metrics when
      the bounded queue is full; durable tool-call logs remain the stronger
      evidence surface. *)
-  if Eio.Stream.length write_queue >= write_queue_capacity
-  then (
+  let dropped_for_full_queue =
+    with_write_queue_lock (fun () ->
+      if Queue.length write_queue >= write_queue_capacity
+      then true
+      else (
+        Queue.add json write_queue;
+        false))
+  in
+  if dropped_for_full_queue
+  then
     let dropped = Atomic.fetch_and_add dropped_full_queue 1 + 1 in
     if dropped = 1 || dropped mod 1024 = 0 then
       Log.Metrics.warn
         "tool_metrics_persist: dropped %d record(s) because write queue is full"
-        dropped)
-  else Eio.Stream.add write_queue json
+        dropped
 
 (* ── Flush logic ────────────────────────────────────── *)
 
 let drain_to_store (store : Dated_jsonl.t) : int =
   let count = ref 0 in
   let rec drain () =
-    match Eio.Stream.take_nonblocking write_queue with
+    match take_queued_record () with
     | None -> ()
     | Some json ->
       (try
@@ -137,7 +154,7 @@ let flush_now () =
   | None ->
     (* Store not yet initialized — drain and discard to prevent unbounded growth.
        In practice, restore() initializes store_ref before any enqueue calls. *)
-    let dropped = drain_queue_without_store 0 in
+    let dropped = drain_queue_without_store () in
     if dropped > 0 then
       Log.Metrics.warn "tool_metrics_persist: flush_now called before init, dropped %d records"
         dropped

@@ -60,6 +60,14 @@ let test_fd_pressure_text_classifier () =
   check bool "ignores provider timeout" false
     (FD.is_fd_exhaustion_text "provider stream idle timeout")
 
+let test_fd_pressure_structured_classifier () =
+  check bool "detects structured EMFILE" true
+    (FD.is_fd_exhaustion_exn (Unix.Unix_error (Unix.EMFILE, "open", "/tmp/x")));
+  check bool "detects structured ENFILE" true
+    (FD.is_fd_exhaustion_exn (Unix.Unix_error (Unix.ENFILE, "open", "/tmp/x")));
+  check bool "ignores structured timeout" false
+    (FD.is_fd_exhaustion_exn (Unix.Unix_error (Unix.ETIMEDOUT, "connect", "api")))
+
 let test_fd_pressure_nofile_cap () =
   FD.reset_for_tests ();
   check int "low process nofile degrades 24-keeper boot" 1
@@ -1791,6 +1799,8 @@ let () =
         [
           test_case "fd pressure text classifier" `Quick
             test_fd_pressure_text_classifier;
+          test_case "fd pressure structured classifier" `Quick
+            test_fd_pressure_structured_classifier;
           test_case "fd pressure nofile boot cap" `Quick
             test_fd_pressure_nofile_cap;
           test_case "fd pressure proactive admission" `Quick

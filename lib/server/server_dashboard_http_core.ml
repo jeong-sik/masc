@@ -63,14 +63,17 @@ let dashboard_request_timeout_s = 30.0
     Atomic.t for cross-domain visibility: read from executor pool
     worker domains via namespace-truth and warmup helpers. *)
 let shell_warmed : bool Atomic.t = Atomic.make false
+let _shell_warmed = shell_warmed
 
 (** Track whether the startup shell pre-warm fiber is still building the
     first payload. Cold HTTP requests use this to serve a bootstrap payload
     instead of blocking on the same expensive shell projection. *)
 let shell_warming : bool Atomic.t = Atomic.make false
+let _shell_warming = shell_warming
 
 (** Last-known-good shell result for graceful degradation on timeout. *)
 let last_good_shell : Yojson.Safe.t Atomic.t = Atomic.make (`Assoc [])
+let _last_good_shell = last_good_shell
 
 (** Wrap a dashboard computation with a configurable timeout.
     Returns a partial-response JSON on timeout instead of hanging. *)
@@ -302,9 +305,13 @@ let operator_snapshot_broadcast_ref : (Yojson.Safe.t -> unit) ref =
   ref (fun (_json : Yojson.Safe.t) -> ())
 ;;
 
+let _operator_snapshot_broadcast_ref = operator_snapshot_broadcast_ref
+
 let operator_digest_broadcast_ref : (Yojson.Safe.t -> unit) ref =
   ref (fun (_json : Yojson.Safe.t) -> ())
 ;;
+
+let _operator_digest_broadcast_ref = operator_digest_broadcast_ref
 
 let operator_snapshot_cache =
   create_cached_surface
@@ -314,6 +321,8 @@ let operator_snapshot_cache =
         ])
 ;;
 
+let _operator_snapshot_cache = operator_snapshot_cache
+
 let operator_digest_cache =
   create_cached_surface
     (`Assoc
@@ -321,6 +330,8 @@ let operator_digest_cache =
         ; "generated_at", `String (Masc_domain.now_iso ())
         ])
 ;;
+
+let _operator_digest_cache = operator_digest_cache
 
 let operator_refresh_interval_s =
   float_of_env_default
@@ -980,6 +991,8 @@ let mission_cache =
         ; "internal_signals", `List []
         ])
 ;;
+
+let _mission_cache = mission_cache
 
 let start_mission_refresh_loop ~state ~sw ~clock =
   let room_config = state.Mcp_server.room_config in

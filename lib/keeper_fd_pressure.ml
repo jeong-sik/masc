@@ -71,6 +71,17 @@ let note_if_fd_exhaustion ?site detail =
   if is_fd_exhaustion_text detail then note ?site ~detail ()
 ;;
 
+let is_fd_exhaustion_exn = function
+  | Unix.Unix_error ((Unix.EMFILE | Unix.ENFILE), _, _) -> true
+  | Sys_error msg -> is_fd_exhaustion_text msg
+  | exn -> is_fd_exhaustion_text (Printexc.to_string exn)
+;;
+
+let note_exception ?site exn =
+  if is_fd_exhaustion_exn exn
+  then note ?site ~detail:(Printexc.to_string exn) ()
+;;
+
 let active ?now () =
   let now = Option.value ~default:(Time_compat.now ()) now in
   Atomic.get cooldown_until > now

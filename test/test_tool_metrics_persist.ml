@@ -116,6 +116,27 @@ let test_enqueue_drops_when_queue_full () =
     let restored = P.restore ~base_path in
     Alcotest.(check int) "bounded queue persists only capacity" 4096 restored)
 
+let test_enqueue_multidomain_drop_is_bounded () =
+  with_tmp_dir (fun base_path ->
+    M.clear ();
+    ignore (P.restore ~base_path);
+    let spawn producer =
+      Domain.spawn (fun () ->
+        for i = 1 to 1500 do
+          P.enqueue
+            (make_result
+               ~name:(Printf.sprintf "domain-%d-tool-%04d" producer i)
+               ~success:true
+               ~duration_ms:1.0)
+        done)
+    in
+    let domains = List.init 4 spawn in
+    List.iter Domain.join domains;
+    P.flush_now ();
+    M.clear ();
+    let restored = P.restore ~base_path in
+    Alcotest.(check int) "multi-domain producers persist only capacity" 4096 restored)
+
 let () =
   Alcotest.run "Tool_metrics_persist" [
     "persistence", [
@@ -129,5 +150,7 @@ let () =
         test_reset_clears_cached_store;
       eio_test "enqueue drops instead of blocking when queue is full"
         test_enqueue_drops_when_queue_full;
+      eio_test "enqueue drops safely from multiple domains"
+        test_enqueue_multidomain_drop_is_bounded;
     ];
   ]

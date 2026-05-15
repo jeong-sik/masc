@@ -74,6 +74,20 @@ module Cache = struct
     get_int ~default:1000 "MASC_CACHE_MAX_ENTRIES"
 end
 
+(** {1 Executor / Domain Pool Configuration} *)
+
+module Executor = struct
+  (** Shared executor worker-domain count override.
+      Env: [MASC_EXECUTOR_DOMAIN_COUNT]. Default: unset, use {!Domain_pool}'s
+      host-aware recommendation.
+      @category Concurrency
+      @ops_class operator *)
+  let domain_count_override () =
+    let n = get_int_nonneg ~default:0 "MASC_EXECUTOR_DOMAIN_COUNT" in
+    if n <= 0 then None else Some n
+  ;;
+end
+
 (** {1 Task Claim Configuration} *)
 
 module Claim = struct

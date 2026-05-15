@@ -461,11 +461,13 @@ let metric_keeper_supervisor_last_sweep_unixtime =
 
 (* RFC-0059 PR-7 soak observability.  Each per-keeper supervised launch
    emits at least one increment of this counter, tagged with one of:
-   - "pool"            flag ON + [Executor_pool_ref] returned a pool,
+   - "pool"            flag ON + [Domain_pool_ref] returned a pool,
                        body submitted to a worker Domain.
-   - "inline_no_pool"  flag ON but [Executor_pool_ref] was [None]
+   - "inline_no_pool"  flag ON but [Domain_pool_ref] was [None]
                        (boot-order or misconfig); body ran inline.
    - "inline_disabled" flag OFF (default); body ran inline on [ctx.sw].
+   - "body_failed"     worker body returned [Error _]; exception was logged
+                       and re-raised on the supervisor fiber.
    - "submit_failed"   pool submit raised a non-cancellation exception;
                        body ran inline via the fallback path.
 

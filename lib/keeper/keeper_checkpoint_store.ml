@@ -43,15 +43,26 @@ let max_checkpoints_retained = 3
 (* Prune                                                              *)
 (* ================================================================ *)
 
-let prune ~(session_dir : string) ~(keep : int) : int =
+(** Outcome of a [prune] pass. [removed] counts files successfully
+    deleted; [failed] counts files whose [Sys.remove] raised
+    (already logged + counted in [metric_keeper_checkpoint_failures]).
+    Returning both lets the caller distinguish "nothing to do"
+    ([removed=0; failed=0]) from "every deletion failed"
+    ([removed=0; failed=N]) — the previous [int] return collapsed
+    them and forced the caller to [ignore] both cases. *)
+type prune_outcome = { removed : int; failed : int }
+
+let prune ~(session_dir : string) ~(keep : int) : prune_outcome =
   let files = list_checkpoints ~session_dir in
-  if List.length files <= keep then 0
+  if List.length files <= keep then { removed = 0; failed = 0 }
   else
     let to_remove = List.filteri (fun i _ -> i >= keep) files in
+    let failed = ref 0 in
     List.iter (fun filename ->
       let path = Filename.concat session_dir filename in
       (try Sys.remove path
        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+         incr failed;
          Log.Keeper.warn "checkpoint cleanup failed for %s: %s"
            path (Printexc.to_string exn);
          Prometheus.inc_counter
@@ -59,7 +70,8 @@ let prune ~(session_dir : string) ~(keep : int) : int =
            ~labels:[("keeper", "aggregate"); ("operation", Keeper_checkpoint_failure_operation.(to_label Cleanup))]
            ()))
       to_remove;
-    List.length to_remove
+    let attempted = List.length to_remove in
+    { removed = attempted - !failed; failed = !failed }
 
 (* ================================================================ *)
 (* Save                                                               *)
@@ -85,8 +97,21 @@ let save
   let content = Yojson.Safe.to_string json in
   match Keeper_fs.save_atomic path content with
   | Ok () ->
-    (* Auto-prune old checkpoints after each save *)
-    ignore (prune ~session_dir ~keep:max_checkpoints_retained)
+    (* Auto-prune old checkpoints after each save. Per-file deletion
+       errors are logged + counted in [metric_keeper_checkpoint_failures]
+       inside [prune]; we additionally surface the aggregate count here
+       so that storage-growth incidents have a single Log.warn line in
+       the save audit trail instead of being visible only via metrics.
+       Bug-hunter audit 2026-05-15: the previous [ignore] discarded both
+       the success count and the failure count, leaving prune-storm
+       failures silent at the save call site. *)
+    let { removed = _; failed } =
+      prune ~session_dir ~keep:max_checkpoints_retained
+    in
+    if failed > 0 then
+      Log.Keeper.warn
+        "checkpoint prune partial failure for %s: %d file(s) failed to delete"
+        session_dir failed
   | Error msg ->
     Log.Keeper.warn "save_checkpoint failed for %s: %s" path msg;
     Prometheus.inc_counter

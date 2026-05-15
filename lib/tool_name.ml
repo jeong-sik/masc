@@ -629,9 +629,13 @@ module Masc_keeper = struct
     | Down
     | List
     | Msg
+    | Msg_result
     | Persona_audit
     | Repair
     | Reset
+    | Sandbox_start
+    | Sandbox_status
+    | Sandbox_stop
     | Status
     | Up
 
@@ -642,9 +646,13 @@ module Masc_keeper = struct
     | Down -> "masc_keeper_down"
     | List -> "masc_keeper_list"
     | Msg -> "masc_keeper_msg"
+    | Msg_result -> "masc_keeper_msg_result"
     | Persona_audit -> "masc_keeper_persona_audit"
     | Repair -> "masc_keeper_repair"
     | Reset -> "masc_keeper_reset"
+    | Sandbox_start -> "masc_keeper_sandbox_start"
+    | Sandbox_status -> "masc_keeper_sandbox_status"
+    | Sandbox_stop -> "masc_keeper_sandbox_stop"
     | Status -> "masc_keeper_status"
     | Up -> "masc_keeper_up"
   ;;
@@ -656,9 +664,13 @@ module Masc_keeper = struct
     | "masc_keeper_down" -> Some Down
     | "masc_keeper_list" -> Some List
     | "masc_keeper_msg" -> Some Msg
+    | "masc_keeper_msg_result" -> Some Msg_result
     | "masc_keeper_persona_audit" -> Some Persona_audit
     | "masc_keeper_repair" -> Some Repair
     | "masc_keeper_reset" -> Some Reset
+    | "masc_keeper_sandbox_start" -> Some Sandbox_start
+    | "masc_keeper_sandbox_status" -> Some Sandbox_status
+    | "masc_keeper_sandbox_stop" -> Some Sandbox_stop
     | "masc_keeper_status" -> Some Status
     | "masc_keeper_up" -> Some Up
     | _ -> None

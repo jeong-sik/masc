@@ -1407,3 +1407,12 @@
  (name test_keeper_prehook_gap)
  (modules test_keeper_prehook_gap)
  (libraries alcotest))
+
+; RFC-0083 PR-2 — Tool_name.t exhaustive closure test. Round-trips all
+; Masc_keeper.t variants through to_string/of_string and pins the variant
+; count so future additions surface in the diff. Requires masc_test_deps
+; because it accesses Masc_mcp.Tool_name.* values directly.
+(test
+ (name test_tool_name_exhaustive)
+ (modules test_tool_name_exhaustive)
+ (libraries masc_test_deps))

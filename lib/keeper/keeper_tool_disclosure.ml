@@ -405,7 +405,14 @@ let is_stay_silent_tool_name name =
   | _ -> false
 ;;
 
+let is_keeper_observation_alias name =
+  match Keeper_tool_alias.strip_mcp_masc_prefix name with
+  | "Grep" | "Read" -> true
+  | _ -> false
+;;
+
 let tool_name_can_satisfy_required_contract name =
+  let observation_alias = is_keeper_observation_alias name in
   let name = canonical_tool_name name in
   (* Completion tools (stay_silent, release, done, etc.) intentionally
      satisfy the contract even though their effect_domain is Read_only.
@@ -413,7 +420,9 @@ let tool_name_can_satisfy_required_contract name =
      call keeper_stay_silent alongside status reads trigger false
      contract violations — observed 2026-04-28 when codex-spark
      returned stay_silent + keeper_task_list on an actionable signal. *)
-  if is_completion_tool_name name
+  if observation_alias
+  then false
+  else if is_completion_tool_name name
   then true
   else (
     match Tool_catalog.effect_domain name with
@@ -459,10 +468,14 @@ let required_tool_satisfaction (call : Agent_sdk.Completion_contract.tool_call)
   =
   let tool_name = canonical_tool_name call.name in
   (* Generic Require_tool_use is a tool-presence contract, not proof of
-     execution progress. Keeper-local read/status/discovery tools satisfy the
-     SDK contract so a valid observation turn does not explode into cascade
-     retries; classify_tool_progress still records them as Passive_status. *)
-  if is_completion_tool_name tool_name || is_keeper_observation_tool_name tool_name
+     execution progress. Keeper-local read/status/discovery tools and their
+     LLM-native read/search aliases satisfy the SDK contract so a valid
+     observation turn does not explode into cascade retries;
+     classify_tool_progress still records them as Passive_status. *)
+  if
+    is_completion_tool_name tool_name
+    || is_keeper_observation_tool_name tool_name
+    || is_keeper_observation_alias call.name
   then Ok ()
   else (
     let mutates =
@@ -495,6 +508,9 @@ let required_tool_satisfaction_for_required_names
 ;;
 
 let classify_tool_progress name =
+  if is_keeper_observation_alias name
+  then Passive_status
+  else
   let name = canonical_tool_name name in
   if is_completion_tool_name name
   then Completion

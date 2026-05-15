@@ -151,15 +151,16 @@ contains four sections: `tts`, `stt`, `session`, `local_playback`.
 | `MASC_INFERENCE_CACHE_MAX_TEMP` | float | 0.0 | 캐시 허용 최대 온도 |
 | `MASC_INFERENCE_CACHE_L1_MAX_ENTRIES` | int | 512 | L1 인메모리 캐시 상한 |
 | `MASC_SPAWN_CACHE_POLICY` | string | `"safe_only"` | Spawn 캐시 정책 (`off`/`safe_only`) |
-| `ZAI_DEFAULT_MODEL` | string | `"glm-5.1"` | `glm` provider `auto` 기본 모델 (lib/cascade/cascade_model_resolve.ml:38) |
-| `ZAI_CODING_DEFAULT_MODEL` | string | `"glm-4.7"` | `glm-coding` provider `auto` 기본 모델 (lib/cascade/cascade_model_resolve.ml:43) |
-| `GEMINI_DEFAULT_MODEL` | string | `"gemini-3-flash-preview"` | `gemini` provider `auto` 기본 모델 (lib/cascade/cascade_model_resolve.ml:67) |
-| `MASC_GEMINI_CLI_AUTO_MODELS` | csv string | `"gemini-3-flash-preview,gemini-3.1-flash-lite-preview,gemini-3.1-pro-preview"` | `gemini_cli:auto`를 여러 concrete model 후보로 확장하는 순서. 설정 시 `GEMINI_DEFAULT_MODEL`보다 우선 |
-| `MASC_CODEX_CLI_AUTO_MODELS` | csv string | `"gpt-5.2,gpt-5.3-codex-spark,gpt-5.3-codex,gpt-5.4-mini,gpt-5.4"` | `codex_cli:auto` 확장 순서. 기본은 ChatGPT-backed Codex에서 실제 호출 성공이 확인된 후보만 포함하며, 필요하면 env override로 후보를 직접 재지정 |
-| `MASC_CLAUDE_CODE_AUTO_MODELS` | csv string | `"auto"` | `claude_code:auto` 확장 순서. 기본은 Claude Code의 사용자 기본 모델에 위임 |
-| `KIMI_DEFAULT_MODEL` | string | `"kimi-k2.5"` | `kimi` provider `auto` 기본 모델 (lib/provider_adapter.ml:505) |
-| `ANTHROPIC_DEFAULT_MODEL` | string | `"claude-sonnet-4-6-20250514"` | `claude` provider `auto` 기본 모델 (lib/cascade/cascade_model_resolve.ml:70) |
-| `OPENAI_DEFAULT_MODEL` | string | `"gpt-4.1"` | `openai` provider `auto` 기본 모델 (lib/cascade/cascade_model_resolve.ml:73) |
+| `ZAI_DEFAULT_MODEL` | string | OAS ZAI catalog head | `glm` provider `auto` 기본 모델. 코드 기본값은 `Llm_provider.Zai_catalog`에서 가져온다. |
+| `ZAI_CODING_DEFAULT_MODEL` | string | OAS ZAI catalog head | `glm-coding` provider `auto` 기본 모델. 코드 기본값은 `Llm_provider.Zai_catalog`에서 가져온다. |
+| `GEMINI_DEFAULT_MODEL` | string | 없음 | 설정 시 direct `gemini` provider `auto` 기본 모델로 사용. 미설정이면 direct 기본 동작에 위임한다. |
+| `GEMINI_CLI_DEFAULT_MODEL` | string | 없음 | 설정 시 `gemini_cli` provider `auto` 기본 모델로 사용. 미설정이면 Gemini CLI 기본 동작에 위임한다. |
+| `MASC_GEMINI_CLI_AUTO_MODELS` | csv string | `"auto"` | 설정 시 `gemini_cli:auto`를 operator 지정 후보 목록으로 확장. 미설정이면 Gemini CLI 기본 모델에 위임한다. |
+| `MASC_CODEX_CLI_AUTO_MODELS` | csv string | `"auto"` | 설정 시 `codex_cli:auto`를 operator 지정 후보 목록으로 확장. 미설정이면 Codex CLI 기본 모델에 위임한다. |
+| `MASC_CLAUDE_CODE_AUTO_MODELS` | csv string | `"auto"` | 설정 시 `claude_code:auto`를 operator 지정 후보 목록으로 확장. 미설정이면 Claude Code 기본 모델에 위임한다. |
+| `KIMI_DEFAULT_MODEL` | string | OAS runtime binding/catalog default | 설정 시 `kimi` provider `auto` 기본 모델로 사용. |
+| `ANTHROPIC_DEFAULT_MODEL` | string | OAS runtime binding/catalog default | 설정 시 `claude` provider `auto` 기본 모델로 사용. |
+| `OPENAI_DEFAULT_MODEL` | string | OAS runtime binding/catalog default | 설정 시 `openai` provider `auto` 기본 모델로 사용. |
 | `OLLAMA_DEFAULT_MODEL` | string | `""` | `ollama` provider `auto` 기본 모델 (lib/config/env_config_runtime.ml:181) |
 | `LLAMA_DEFAULT_MODEL` | string | `"explicit-model-required"` | `llama` provider legacy local runtime 기본 모델 (lib/config/env_config_runtime.ml:150) |
 | `OPENROUTER_DEFAULT_MODEL` | string | (없음) | `openrouter` provider `auto` 기본 모델 (lib/cascade/cascade_model_resolve.ml:76) |
@@ -463,9 +464,7 @@ is-default = true
 max-concurrent = 1
 ```
 
-`gemini_cli:auto`, `codex_cli:auto`, `claude_code:auto`는 cascade 파싱 시 concrete 후보 목록으로 확장된다. Gemini CLI는 기본적으로 Flash/Lite 우선, Pro 후순위의 quota-aware 순서를 사용한다. Codex CLI는 기본적으로 `gpt-5.2`에서 시작해 `gpt-5.4`로 올라가는 지원 후보만 사용하며, `gpt-5.3-codex-spark`와 `gpt-5.4-mini` 같은 fast 후보도 로테이션에 포함한다. 2026-04-21 기준 ChatGPT-backed Codex CLI 실호출에서는 `gpt-5.1-codex-mini`, `gpt-5.1-codex-max`, `gpt-5.2-codex`가 모두 400 unsupported를 반환해 기본 목록에서 제외한다. Claude Code는 비용과 조직별 model policy 차이가 커서 기본값을 `auto` 1개로 유지하며, 운영자가 `MASC_CLAUDE_CODE_AUTO_MODELS`를 설정할 때만 여러 후보로 로테이션한다.
-
-Codex 후보 목록은 2026-04-20 로컬 Codex CLI model picker 기준이고, 기본 순서는 5.1→5.4로 재정렬되어 있다. hosted model menu가 바뀌면 `MASC_CODEX_CLI_AUTO_MODELS`로 즉시 override하고, 코드 기본값은 별도 PR로 갱신한다.
+`gemini_cli:auto`, `codex_cli:auto`, `claude_code:auto`는 기본적으로 concrete 후보 목록을 코드에 갖지 않는다. 미설정 기본값은 `auto` 1개이며 각 CLI의 현재 기본 모델 선택에 위임한다. 특정 모델 rotation이 필요하면 `MASC_GEMINI_CLI_AUTO_MODELS`, `MASC_CODEX_CLI_AUTO_MODELS`, `MASC_CLAUDE_CODE_AUTO_MODELS`에 operator가 명시한 CSV를 넣는다. GLM 계열은 HTTP API가 concrete model id를 요구하므로 `Llm_provider.Zai_catalog`의 catalog 순서를 사용한다.
 
 ### 7.6 Ollama HTTP Probe (Phase C2, #7619)
 

@@ -103,12 +103,16 @@ val json_response :
   limit:int ->
   unit ->
   Yojson.Safe.t
-(** Polling-friendly JSON envelope: [events], [count],
-    [after_seq], [next_after_seq], [limit], [room_id]
-    (kept as ["default"] for backward-compat), [kinds],
-    [latest_seq].  [next_after_seq] is the seq of the last
-    returned event so the caller can resume cleanly on the
-    next poll. *)
+(** Polling-friendly JSON envelope: [generated_at_iso],
+    [dashboard_surface], [source], [retention], [query],
+    [events], [count], [total_matching_events], [after_seq],
+    [next_after_seq], [limit], [room_id] (kept as ["default"]
+    for backward-compat), [kinds], [latest_seq], and
+    [latest_matching_seq].  [next_after_seq] is the seq of the
+    last returned event so the caller can resume cleanly on the
+    next poll.  [latest_seq] is the max of the persisted counter
+    and JSONL rows so stale [_seq] files cannot make dashboard
+    cursors move backward. *)
 
 val graph_json :
   Coord_utils.config ->

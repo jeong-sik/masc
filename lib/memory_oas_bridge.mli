@@ -44,6 +44,22 @@ val create_memory :
     {!Time_compat.now}.  Filesystem-first: no PG, no
     network. *)
 
+type created_memory =
+  { created_memory : Agent_sdk.Memory.t
+  ; created_memory_long_term_backend : Agent_sdk.Memory.long_term_backend
+  }
+
+val create_memory_with_backend :
+  agent_name:string ->
+  ?base_dir:string ->
+  ?session_id:string ->
+  unit ->
+  created_memory
+(** Creates an [Agent_sdk.Memory.t] and returns the exact long-term
+    backend installed into it.  Keeper turn hot paths use this when
+    hooks also need to read long-term world memory through the same
+    backend. *)
+
 (** {1 OAS / MASC episode round-trip} *)
 
 val oas_procedure_of_masc :

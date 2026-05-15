@@ -1447,6 +1447,109 @@ let to_json (agg : aggregate) : Yojson.Safe.t =
     ]
 ;;
 
+let pct numerator denominator =
+  if denominator <= 0 then 0.0
+  else Float.of_int numerator *. 100.0 /. Float.of_int denominator
+;;
+
+let float_field ?(suffix = "") = function
+  | None -> "unknown"
+  | Some value -> Printf.sprintf "%.1f%s" value suffix
+;;
+
+let int_field = function
+  | None -> "unknown"
+  | Some value -> string_of_int value
+;;
+
+let prompt_lane_line (index : int) (stats : model_stats) =
+  let lane = public_runtime_lane_label stats.model_id in
+  let error_rate = pct stats.error_count stats.entry_count in
+  let cost =
+    match stats.total_cost_usd with
+    | None -> "unknown"
+    | Some value -> Printf.sprintf "$%.4f" value
+  in
+  Printf.sprintf
+    "- lane %d %s: turns=%d success=%d errors=%d error_rate=%.1f%% \
+     p95_latency_ms=%s avg_tok_per_sec=%s input_tokens=%s output_tokens=%s \
+     cost=%s coverage=%s"
+    index
+    lane
+    stats.entry_count
+    stats.success_count
+    stats.error_count
+    error_rate
+    (float_field stats.p95_latency_ms)
+    (float_field stats.avg_tok_per_sec)
+    (int_field stats.total_input_tokens)
+    (int_field stats.total_output_tokens)
+    cost
+    stats.coverage_status
+;;
+
+let prompt_feedback_guidance (agg : aggregate) =
+  let error_rate = pct agg.total_error_entries agg.total_entries in
+  let p95_values =
+    List.filter_map (fun (stats : model_stats) -> stats.p95_latency_ms) agg.models
+  in
+  let max_p95 =
+    match p95_values with
+    | [] -> None
+    | hd :: tl -> Some (List.fold_left Float.max hd tl)
+  in
+  let has_missing_coverage =
+    List.exists
+      (fun (stats : model_stats) ->
+         stats.usage_missing_count > 0 || stats.telemetry_missing_count > 0)
+      agg.models
+  in
+  let guidance =
+    [
+      ( error_rate >= 25.0
+      , "recent error rate is high; checkpoint before long tool chains and stop \
+         after repeated provider failures instead of looping." );
+      ( Option.value ~default:0.0 max_p95 >= 120_000.0
+      , "recent p95 latency is very high; keep turns smaller and prefer \
+         incremental commits/log evidence." );
+      ( has_missing_coverage
+      , "some turns are missing usage or telemetry; preserve receipts/logs and \
+         avoid treating missing metrics as success." );
+    ]
+    |> List.filter_map (fun (active, text) -> if active then Some text else None)
+  in
+  match guidance with
+  | [] -> "runtime telemetry is healthy enough for normal turn planning."
+  | items -> String.concat " " items
+;;
+
+let render_keeper_prompt_feedback (agg : aggregate) =
+  if agg.total_entries <= 0 then ""
+  else
+    let models =
+      agg.models
+      |> List.sort (fun a b -> Int.compare b.entry_count a.entry_count)
+      |> take 3
+    in
+    let header =
+      Printf.sprintf
+        "Recent model telemetry (last %d minutes): total_turns=%d \
+         error_turns=%d error_rate=%.1f%% observed_lanes=%d"
+        agg.window_minutes
+        agg.total_entries
+        agg.total_error_entries
+        (pct agg.total_error_entries agg.total_entries)
+        (List.length agg.models)
+    in
+    let lane_lines = List.mapi (fun i stats -> prompt_lane_line (i + 1) stats) models in
+    String.concat
+      "\n"
+      (header :: lane_lines
+       @ [ "Guidance: " ^ prompt_feedback_guidance agg
+         ; "Use these redacted runtime-lane labels only as telemetry context; \
+            do not invent concrete provider/model names from them." ])
+;;
+
 (* ── Runtime-lane rollup ────────────────────────────────────
    Legacy provider strings are not reconstructed here.  Public dashboard
    projections keep aggregate throughput/latency evidence while model/provider

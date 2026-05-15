@@ -398,7 +398,11 @@ export function SubBoardSurface() {
       ${loading
         ? html`<${LoadingState}>Loading sub-boards...<//>`
         : boards.length === 0
-          ? html`<${EmptyState} message="No sub-boards yet." compact />`
+          ? html`
+            <div class="rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4">
+              <${EmptyState} message="No sub-boards yet. Create one above when a board category needs owner, member, or access policy. Plain board categories stay as hearth tags until a Sub-board is explicitly created." compact />
+            </div>
+          `
           : html`
             <div class="grid gap-3" data-testid="sub-board-list">
               ${boards.map(board => html`<${SubBoardRow}

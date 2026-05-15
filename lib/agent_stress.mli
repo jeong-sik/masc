@@ -100,4 +100,6 @@ val dashboard_feed_json :
   Yojson.Safe.t list ->
   Yojson.Safe.t
 (** Build the dashboard response carrying both the existing [events] array
-    and the O5 compatibility [agent_stress] board rows. *)
+    and the O5 compatibility [agent_stress] board rows.  The envelope includes
+    [dashboard_surface], [source], and [retention] so operators can tie the
+    board projection back to [.masc/agent_stress.jsonl]. *)

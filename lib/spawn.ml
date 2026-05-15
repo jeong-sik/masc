@@ -158,8 +158,8 @@ let parse_gemini_output raw =
     parse_raw_output raw
 
 (** Build a spawn config from a canonical spawn key.
-    SSOT for agent names and aliases is [Provider_adapter.direct_adapters];
-    this function only maps resolved keys to their CLI invocation shape. *)
+    OAS runtime bindings resolve aliases; this function only maps resolved
+    spawn commands to their CLI invocation shape. *)
 let spawn_config_of_key key =
   let open Env_config.Spawn in
   match key with
@@ -202,7 +202,7 @@ let spawn_config_of_key key =
   | "llama" ->
       Some {
         agent_name = "llama";
-        command = Provider_adapter.make_local_label "explicit-model-required";
+        command = Provider_runtime_projection.local_model_label "explicit-model-required";
         timeout_seconds;
         working_dir = None;
         mcp_tools = masc_mcp_tools;
@@ -214,11 +214,11 @@ let spawn_config_of_key key =
   | _ -> None
 
 (** Get spawn config for agent.
-    Resolves all aliases via Provider_adapter registry (SSOT).
-    spawn_alias_map removed — aliases are now in Provider_adapter.direct_adapters. *)
+    Resolves aliases via OAS runtime bindings before falling back to direct
+    command keys. *)
 let get_config agent_name =
   let normalized = String.lowercase_ascii (String.trim agent_name) in
-  match Provider_adapter.resolve_spawn_key normalized with
+  match Provider_runtime_projection.spawn_key_of_label normalized with
   | Some key -> spawn_config_of_key key
   | None -> spawn_config_of_key normalized
 
@@ -275,21 +275,21 @@ let fallback_spawn_failure_output ~exit_code =
     exit_code
 
 let add_default_model_arg agent_name argv =
-  match Provider_adapter.resolve_direct_adapter agent_name with
-  | Some adapter when adapter.canonical_name = "llama" -> (
-      match Provider_adapter.explicit_llama_model_id_result () with
+  if Provider_runtime_projection.label_is_legacy_local_spawn agent_name
+  then
+    match Provider_runtime_projection.explicit_local_model_id_result () with
       | Ok model_id -> argv @ [ model_id ]
-      | Error _ -> argv)
-  | _ -> argv
+      | Error _ -> argv
+  else argv
 
 (** Spawn an agent with a prompt/task (direct execution, no shell) *)
 let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
   let start_time = Time_compat.now () in
   let normalized_agent = String.lowercase_ascii (String.trim agent_name) in
-  if Provider_adapter.is_bare_ollama_label normalized_agent then
+  if Provider_runtime_projection.is_bare_ollama_label normalized_agent then
     {
       success = false;
-      output = Provider_adapter.bare_ollama_migration_message ();
+      output = Provider_runtime_projection.bare_ollama_migration_message ();
       exit_code = 2;
       elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
       input_tokens = None;

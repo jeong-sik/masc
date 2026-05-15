@@ -44,11 +44,49 @@ export type LogEntry = InferOutput<typeof LogEntrySchema>
 const LogsResponseSchema = object({
   total: number(),
   entries: unknown(),
+  generated_at_iso: optional(string()),
+  dashboard_surface: optional(string()),
+  source: optional(string()),
+  retention: optional(record(string(), unknown())),
+  query: optional(record(string(), unknown())),
+  returned: optional(number()),
+  latest_seq: optional(nullable(number())),
+  oldest_seq: optional(nullable(number())),
+  latest_ts_iso: optional(nullable(string())),
 })
+
+export interface LogsRetention {
+  scope?: string
+  coordination_root?: string
+  buffer?: string
+  capacity?: number
+  durable_store?: string
+  file_pattern?: string
+  keep_days?: number
+  cache_policy?: string
+}
+
+export interface LogsQuery {
+  limit?: number
+  level?: string
+  applied_level?: string
+  min_level?: number
+  module?: string
+  since_seq?: number | null
+}
 
 export interface LogsResponse {
   total: number
   entries: LogEntry[]
+  generated_at_iso?: string
+  dashboard_surface?: string
+  source?: string
+  retention?: LogsRetention
+  query?: LogsQuery
+  returned?: number
+  latest_seq?: number | null
+  oldest_seq?: number | null
+  latest_ts_iso?: string | null
 }
 
 export class LogsSchemaDriftError extends Error {
@@ -83,5 +121,14 @@ export function parseLogsResponse(data: unknown): LogsResponse {
   return {
     total: outer.output.total,
     entries,
+    generated_at_iso: outer.output.generated_at_iso,
+    dashboard_surface: outer.output.dashboard_surface,
+    source: outer.output.source,
+    retention: outer.output.retention as LogsRetention | undefined,
+    query: outer.output.query as LogsQuery | undefined,
+    returned: outer.output.returned,
+    latest_seq: outer.output.latest_seq,
+    oldest_seq: outer.output.oldest_seq,
+    latest_ts_iso: outer.output.latest_ts_iso,
   }
 }

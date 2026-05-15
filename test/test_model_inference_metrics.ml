@@ -72,6 +72,18 @@ let now_unix () = Unix.gettimeofday ()
 let runtime_lane_label_for_test model_key =
   "runtime_lane_" ^ String.sub (Digest.to_hex (Digest.string model_key)) 0 12
 
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len = 0 then true
+  else
+    let rec loop i =
+      if i + needle_len > haystack_len then false
+      else if String.sub haystack i needle_len = needle then true
+      else loop (i + 1)
+    in
+    loop 0
+
 let success_entry ~model ~ts ?(input_tokens=100) ?(output_tokens=50)
     ?(latency_ms=500) ?prompt_per_second ?peak_memory_gb
     ?provider ?provider_kind ?usage_trust ?(usage_anomaly_reasons=[])
@@ -1144,6 +1156,51 @@ let test_provider_rollup_json_shape () =
      | _ -> fail "avg_prompt_tok_per_sec should be Float 180.0")
   | _ -> fail "provider_stats_to_json should return an Assoc"
 
+let test_prompt_feedback_empty_aggregate () =
+  let agg : M.aggregate =
+    { window_minutes = 60
+    ; bucket_minutes = 0
+    ; models = []
+    ; total_entries = 0
+    ; total_error_entries = 0
+    ; latency_buckets = []
+    }
+  in
+  check string "empty aggregate renders empty prompt block" ""
+    (M.render_keeper_prompt_feedback agg)
+
+let test_prompt_feedback_redacts_provider_model_identity () =
+  let raw_model = "openrouter:secret-model" in
+  let lane = runtime_lane_label_for_test raw_model in
+  let stats =
+    { (zero_model_stats raw_model ~provider:(Some "openrouter") ~entry_count:10)
+      with success_count = 7
+         ; error_count = 3
+         ; p95_latency_ms = Some 130_000.0
+         ; avg_tok_per_sec = Some 12.5
+         ; total_input_tokens = Some 1000
+         ; total_output_tokens = Some 250
+         ; usage_missing_count = 1
+         ; telemetry_missing_count = 1
+         ; coverage_status = "partial"
+    }
+  in
+  let agg : M.aggregate =
+    { window_minutes = 120
+    ; bucket_minutes = 0
+    ; models = [ stats ]
+    ; total_entries = 10
+    ; total_error_entries = 3
+    ; latency_buckets = []
+    }
+  in
+  let text = M.render_keeper_prompt_feedback agg in
+  check bool "contains redacted lane label" true (contains_substring text lane);
+  check bool "contains total turns" true (contains_substring text "total_turns=10");
+  check bool "contains error rate" true (contains_substring text "error_rate=30.0%");
+  check bool "does not expose provider" false (contains_substring text "openrouter");
+  check bool "does not expose raw model" false (contains_substring text "secret-model")
+
 (* ── Runner ──────────────────────────────────────── *)
 
 let () =
@@ -1201,5 +1258,11 @@ let () =
         test_provider_rollup_sort_by_entry_count_desc;
       test_case "provider_stats_to_json shape" `Quick
         test_provider_rollup_json_shape;
+    ];
+    "prompt_feedback", [
+      test_case "empty aggregate renders empty" `Quick
+        test_prompt_feedback_empty_aggregate;
+      test_case "redacts provider and model identity" `Quick
+        test_prompt_feedback_redacts_provider_model_identity;
     ];
   ]

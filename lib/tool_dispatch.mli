@@ -97,6 +97,24 @@ val guarded_dispatch
     PR-11 removes [dispatch] and [dispatch_structured] in favour of this
     single path. *)
 
+val guarded_dispatch
+  :  token:Tool_token.t
+  -> args:Yojson.Safe.t
+  -> unit
+  -> Tool_result.t option
+(** RFC-0084 §2.2 — Single dispatch entry with 4-tuple telemetry.
+
+    Wraps [dispatch] with [Tool_telemetry.with_span], so every
+    invocation emits an OTel span, a Prometheus counter increment, and a
+    [trace_id] thunk available to the handler. The audit emission slot is
+    filled by callers based on the returned [Tool_result.t option]; PR-10
+    will unify audit emission via a typed [Dispatch_outcome.t].
+
+    PR-3 introduces this entry. No callers migrate in this PR. Migration
+    plan: PR-7 keeper turn, PR-8 MCP server, PR-9 tag-dispatch fallback.
+    PR-11 removes [dispatch] and [dispatch_structured] in favour of this
+    single path. *)
+
 (** {1 Feature Flag and Introspection} *)
 
 val v2_enabled : bool

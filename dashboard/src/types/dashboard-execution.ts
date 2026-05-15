@@ -226,8 +226,23 @@ export interface DashboardAttentionEvent {
   provenance?: string | null
 }
 
+export interface DashboardNamespaceTruthRetention {
+  scope?: string
+  coordination_root?: string
+  workspace_path?: string
+  shell_input?: string
+  execution_input?: string
+  command_input?: string
+  cache_policy?: string
+}
+
 export interface DashboardNamespaceTruthResponse {
   generated_at?: string
+  generated_at_iso?: string
+  dashboard_surface?: string
+  dashboard_aliases?: string[]
+  source?: string
+  retention?: DashboardNamespaceTruthRetention
   root: {
     status?: ServerStatus | null
     counts?: DashboardShellResponse['counts']

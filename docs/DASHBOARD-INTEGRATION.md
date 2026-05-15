@@ -1,6 +1,6 @@
 ---
 status: reference
-last_verified: 2026-05-01
+last_verified: 2026-05-15
 code_refs:
   - dashboard/src/config/navigation.ts
   - dashboard/src/components/status.ts
@@ -113,8 +113,10 @@ code_refs:
   - goal navigator runtime status
 - `GET /api/v1/activity/graph`
   - observatory investigation graph
-- `GET /api/v1/dashboard/telemetry/summary`
-  - fleet-health summary
+- `GET /api/v1/dashboard/telemetry/summary`, `GET /api/v1/dashboard/telemetry?source=oas_event`
+  - fleet-health summary + durable OAS event replay used by the dashboard OAS runtime monitor
+- `GET /api/v1/dashboard/oas/telemetry/recent`, `GET /api/v1/dashboard/oas/telemetry/summary`
+  - in-process OAS runtime-lane sample cache; payloads expose `dashboard_surface`, `source`, and `retention.durable_replay_surface` so operators can distinguish cache state from durable `oas_event` replay
 - `GET /api/v1/dashboard/memory-subsystems`
   - cognition memory sub-view read model
 - `GET /api/v1/attribution/summary`
@@ -130,6 +132,8 @@ code_refs:
   - read-only CLI equivalent: `masc-keeper-feature-proof --base-path <runtime-root>`
 - `GET /api/v1/models/metrics`, `GET /api/v1/dashboard/keeper-costs`
   - runtime cost/latency view
+- `GET /api/v1/dashboard/keeper-decisions`, `GET /api/v1/dashboard/heuristics`, `GET /api/v1/dashboard/heuristics/coverage`, `GET /api/v1/dashboard/stress`
+  - runtime decision, heuristic, and stress feeds; payloads expose `dashboard_surface`, `source`, and `retention` so the Cost/Runtime subviews can distinguish visible read-model state from the backing JSONL logs
 - `GET /api/v1/providers`
   - runtime provider inventory
 - `GET /api/v1/cascade/config`, `GET /api/v1/cascade/config/raw`
@@ -178,6 +182,7 @@ code_refs:
 - `GET /api/v1/dashboard/execution`
 - `GET /api/v1/dashboard/governance`
 - `GET /api/v1/dashboard/proof`
+  - compatibility proof index over verification requests, TLA result refs, keeper feature proof, safe autonomy, execution trust, and surface readiness routes
 - `GET /api/v1/dashboard/goals`
 - `GET /api/v1/dashboard/config`
 - `GET /api/v1/dashboard/feature-health`

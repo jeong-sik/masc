@@ -19,6 +19,8 @@ import {
   createCodeDocumentStore,
   type CodeDocumentStore,
 } from './code-document-store'
+
+const DEFAULT_LANGUAGE_ID = 'text' as const
 import {
   createKeeperLineOwnershipStore,
   type KeeperLineOwnershipStore,
@@ -102,7 +104,7 @@ export function selectPreferredIdeRepositoryId(
 export function createIdeDataCoordinator(): IdeDataCoordinator {
   const documentStore = createCodeDocumentStore({
     file_path: activeIdeFile.value,
-    language: 'text',
+    language: DEFAULT_LANGUAGE_ID,
     content: '',
   })
   const ownershipStore = createKeeperLineOwnershipStore(activeIdeFile.value)
@@ -182,7 +184,7 @@ export function createIdeDataCoordinator(): IdeDataCoordinator {
       if (response?.ok && response.content) {
         documentStore.load({
           file_path: filePath,
-          language: response.language ?? 'text',
+          language: response.language ?? DEFAULT_LANGUAGE_ID,
           content: response.content,
         })
       }

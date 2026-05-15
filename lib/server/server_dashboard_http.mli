@@ -78,6 +78,9 @@ val dashboard_governance_http_json :
 val dashboard_governance_tool_events_http_json :
   Httpun.Request.t -> Yojson.Safe.t
 
+val dashboard_proof_http_json :
+  config:Coord.config -> Httpun.Request.t -> Yojson.Safe.t
+
 val dashboard_governance_approval_resolve_http_json :
   base_path:string ->
   args:Yojson.Safe.t ->

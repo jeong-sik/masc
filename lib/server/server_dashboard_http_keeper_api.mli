@@ -70,35 +70,12 @@ val handle_keeper_tools_post :
   Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Handle [POST /tools] (tool-grant edits). *)
 
-(** {1 POST route classifier} *)
+(** {1 POST route classifier}
 
-type keeper_post_route_kind =
-  | Keeper_post_tools
-  | Keeper_post_config
-  | Keeper_post_boot
-  | Keeper_post_shutdown
-  | Keeper_post_reset
-  | Keeper_post_clear
-  | Keeper_post_checkpoints
-  | Keeper_post_directive
-  | Keeper_post_unknown
-(** Sub-route kind for a [POST /api/v1/keepers/<name>/...] path. *)
-
-val classify_keeper_post_route : string -> keeper_post_route_kind
-(** Map a request path to its [keeper_post_route_kind]. *)
-
-val keeper_path_ends_with : string -> string -> bool
-(** [keeper_path_ends_with suffix path]: helper used by the classifier. *)
-
-val extract_keeper_name_for_suffix : string -> string -> string
-(** [extract_keeper_name_for_suffix suffix path] returns the keeper name
-    from a path of shape [/api/v1/keepers/<name>/<suffix>]. *)
-
-val is_keeper_checkpoints_get_path : string -> bool
-(** [true] for [GET /api/v1/keepers/<name>/checkpoints] paths. *)
-
-val is_keeper_runtime_trace_get_path : string -> bool
-(** [true] for [GET /api/v1/keepers/<name>/runtime-trace] paths. *)
+    keeper_post_route_kind ADT + classifier + path helpers live in
+    Server_dashboard_http_keeper_api_types (intra-library file split,
+    2026-05-16). Re-exported via include below. *)
+include module type of Server_dashboard_http_keeper_api_types
 
 (** {1 Trajectory preview helpers} *)
 

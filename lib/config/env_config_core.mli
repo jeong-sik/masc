@@ -81,30 +81,19 @@ val normalize_path_lexically : string -> string
 val normalize_masc_base_path_input : string -> string
 val existing_dir : string -> bool
 val existing_file : string -> bool
-val home_dir_opt : unit -> string option
 
-(** {1 Deprecation warnings + fallback getters} *)
+(* RFC-0085 PR-10 — [home_dir_opt] removed from the public surface;
+   callers read from [(Host_config.from_env ()).home] instead.  The
+   function is retained file-private because [base_path] /
+   [sb_path_opt] still call it internally. *)
 
-val deprecation_warned : (string, bool) Hashtbl.t
-(** Internal once-per-key cache for {!warn_deprecated}.  Exposed
-    only because the cascade chain re-exports the prelude verbatim. *)
-
-val warn_deprecated : old_name:string -> new_name:string -> unit
-
-val deprecated_opt :
-  old_name:string -> new_name:string -> string option
-
-val resolve_deprecated :
-  primary:string -> deprecated:string -> string option
-
-val get_float_deprecated :
-  default:float -> primary:string -> deprecated:string -> float
-
-val get_int_deprecated :
-  default:int -> primary:string -> deprecated:string -> int
-
-val get_bool_deprecated :
-  default:bool -> primary:string -> deprecated:string -> bool
+(* RFC-0085 PR-11 — Env var deprecation mechanism removed (7 entries:
+   deprecation_warned, warn_deprecated, deprecated_opt,
+   resolve_deprecated, get_float_deprecated, get_int_deprecated,
+   get_bool_deprecated).  Sole caller (keeper_turn_slot's
+   MASC_KEEPER_AUTOBOT_MAX typo fallback) is gone.  Future env
+   migrations should pick a single name and stick with it; soft
+   fallbacks accumulate via the workaround pattern from RFC-0084. *)
 
 (** {1 HTTP host + port (SSOT for issue 8352)} *)
 
@@ -120,7 +109,10 @@ val masc_host : unit -> string
 
 (** {1 Assets / cluster name} *)
 
-val assets_dir_opt : unit -> string option
+(* RFC-0085 PR-10 — [assets_dir_opt] removed completely.  Caller 0
+   after PR-10 migration; readers use
+   [(Host_config.from_env ()).assets_dir]. *)
+
 val cluster_name_opt : unit -> string option
 val cluster_name : unit -> string
 
@@ -143,8 +135,15 @@ val get_port : default:int -> string -> int
 val base_path_env_key : string
 val base_path_input_env_key : string
 val base_path_source_opt : unit -> (string * string) option
-val base_path_raw_opt : unit -> string option
-val base_path_opt : unit -> string option
+
+(* RFC-0085 PR-9 — [base_path_raw_opt] and [base_path_opt] are no
+   longer part of the public surface.  External callers read the
+   normalised env-derived base_path from
+   [(Host_config.from_env ()).base_path] instead.  The two functions
+   remain file-private inside [env_config_core.ml] because
+   [base_path] / [sb_path_opt] still reach for the raw value
+   internally; a follow-up RFC migrates those too. *)
+
 val running_under_test_executable : unit -> bool
 val test_allow_home_base_path_env : string
 val base_path_prod_guard : string -> string

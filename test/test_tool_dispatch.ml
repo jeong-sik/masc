@@ -34,7 +34,7 @@ let () =
               let tool = "__test_dispatch_single" in
               register_full ~tool_name:tool ~handler:echo_handler;
               let token = match Tool_dispatch.mint_token ~name:tool with Ok t -> t | Error e -> Alcotest.fail e in
-              let result = Tool_dispatch.dispatch ~token ~args:`Null in
+              let result = Tool_dispatch.guarded_dispatch ~token ~args:`Null () in
               check bool "found" true (Option.is_some result);
               let tr = Option.get result in
               let ok = tr.success in
@@ -62,7 +62,7 @@ let () =
           test_case "register_module dispatches each name" `Quick (fun () ->
               let token = match Tool_dispatch.mint_token ~name:"__test_bulk_b" with Ok t -> t | Error e -> Alcotest.fail e in
               let result =
-                Tool_dispatch.dispatch ~token ~args:`Null
+                Tool_dispatch.guarded_dispatch ~token ~args:`Null ()
               in
               let tr = Option.get result in
               let ok = tr.success in
@@ -76,12 +76,12 @@ let () =
               let tool = "__test_dispatch_replace" in
               register_full ~tool_name:tool ~handler:echo_handler;
               let token1 = match Tool_dispatch.mint_token ~name:tool with Ok t -> t | Error e -> Alcotest.fail e in
-              let result1 = Option.get (Tool_dispatch.dispatch ~token:token1 ~args:`Null) in
+              let result1 = Option.get (Tool_dispatch.guarded_dispatch ~token:token1 ~args:`Null ()) in
               let ok1 = result1.success in
               check bool "first ok" true ok1;
               register_full ~tool_name:tool ~handler:fail_handler;
               let token2 = match Tool_dispatch.mint_token ~name:tool with Ok t -> t | Error e -> Alcotest.fail e in
-              let result2 = Option.get (Tool_dispatch.dispatch ~token:token2 ~args:`Null) in
+              let result2 = Option.get (Tool_dispatch.guarded_dispatch ~token:token2 ~args:`Null ()) in
               let ok2 = result2.success in
               let msg2 = Tool_result.message result2 in
               check bool "replaced fail" false ok2;
@@ -207,7 +207,7 @@ let () =
               register_full ~tool_name:tool ~handler:capture_handler;
               let test_args = `Assoc [("key", `String "value")] in
               let token = match Tool_dispatch.mint_token ~name:tool with Ok t -> t | Error e -> Alcotest.fail e in
-              let _ = Tool_dispatch.dispatch ~token ~args:test_args in
+              let _ = Tool_dispatch.guarded_dispatch ~token ~args:test_args () in
               check bool "args match" true (!received_args = test_args));
         ] );
       ( "handler_exception_safety",
@@ -219,7 +219,7 @@ let () =
               in
               register_full ~tool_name:tool ~handler:throwing_handler;
               let token = match Tool_dispatch.mint_token ~name:tool with Ok t -> t | Error e -> Alcotest.fail e in
-              let result = Tool_dispatch.dispatch ~token ~args:`Null in
+              let result = Tool_dispatch.guarded_dispatch ~token ~args:`Null () in
               check bool "still returns Some" true (Option.is_some result);
               let tr = Option.get result in
               let ok = tr.success in

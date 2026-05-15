@@ -20,12 +20,12 @@ type t
     would let a caller queue an action and never execute it, which
     is silent-failure-by-construction.
 
-    [retryable_errors] enumerates exactly the {!Docker_client.sandbox_error}
+    [retryable_errors] enumerates exactly the {!Keeper_docker_client.sandbox_error}
     arms that warrant a retry — *no catch-all*, the caller must
     enumerate every retryable variant. *)
-val make : max_attempts:int -> retryable_errors:Docker_client.sandbox_error list -> t
+val make : max_attempts:int -> retryable_errors:Keeper_docker_client.sandbox_error list -> t
 
-(** [default_for_sandbox] is the canonical policy for Sandbox_executor:
+(** [default_for_sandbox] is the canonical policy for Keeper_sandbox_executor:
     - [max_attempts = 3]
     - [retryable_errors = \[ Daemon_unreachable; Image_pull_failed \]]
 
@@ -41,4 +41,4 @@ val max_attempts : t -> int
 (** [should_retry t err] returns [true] iff [err] is one of [t]'s
     declared retryable variants. Strict — variants not in the list
     return [false]. *)
-val should_retry : t -> Docker_client.sandbox_error -> bool
+val should_retry : t -> Keeper_docker_client.sandbox_error -> bool

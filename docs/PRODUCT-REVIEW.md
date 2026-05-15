@@ -1,6 +1,6 @@
 ---
 status: reference
-last_verified: 2026-04-17
+last_verified: 2026-05-15
 code_refs:
   - lib/keeper/keeper_keepalive.ml
   - lib/keeper/keeper_supervisor.ml
@@ -12,7 +12,7 @@ code_refs:
 ## Summary
 
 - As a repo-coordination OSS product, `masc-mcp` is already useful.
-- As a supervised delivery swarm, it is promising but still an advanced path.
+- As a keeper-supervised delivery system, it is promising but still an advanced path.
 - As a remote or internal-ops product, it is still held back by auth posture, API contract truth, and release hygiene.
 
 The main problem is no longer “there is no product here.” The main problem is that the explanation layers, release truth, and hardening priorities were wider than the front-door promise.
@@ -36,13 +36,13 @@ What still matters:
 - required CI gates must stay truthful
 - docs must keep the front door narrow and clear
 
-### 2. Supervised delivery swarm
+### 2. Keeper-supervised delivery
 
 Current judgment: usable, but advanced
 
 Why:
 
-- Team Session + Supervisor is real
+- Keeper runtime + Supervisor are real
 - operator digest and proof flows exist
 - planner / implementer / supervisor split is already a practical path
 
@@ -92,7 +92,7 @@ These matter after the repo-coordination front door is clean.
 
 - auth hardening for non-local operation
 - REST API contract versioning and error-shape discipline
-- delivery-swarm ergonomics for delegation, verification, and operator diagnosis
+- supervised-delivery ergonomics for delegation, verification, and operator diagnosis
 - bounded keeper continuity contract plus checkpoint/readiness evidence
 - richer config and runtime visibility for operators
 
@@ -117,7 +117,7 @@ See `docs/spec/09-server-transport.md` for remote auth semantics and `docs/LOCAL
 ## Judgment
 
 - **Repo-local multi-agent coordination**: ready to describe and use
-- **Supervised delivery swarm**: real and worth documenting, but not the first promise
+- **Keeper-supervised delivery**: real and worth documenting, but not the first promise
 - **Keeper continuity**: should be described as checkpoint-backed same-trace continuity, not as general memory
 - **Remote or ops-grade product story**: still incomplete and should remain explicit about its gaps
 

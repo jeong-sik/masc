@@ -10,7 +10,7 @@
     [finalize] and [tear_down] are noops here — the RO mount lifetime is
     the docker [run]. *)
 
-include Credential_provider.S
+include Keeper_credential_provider.S
 
 val cred_root : string
 (** [/tmp/keeper-creds] — in-container path under which credentials
@@ -29,10 +29,10 @@ module For_testing : sig
     unit -> (string * string) list
 
   val mount_if_present :
-    host:string -> container:string -> Credential_provider.ro_mount list
+    host:string -> container:string -> Keeper_credential_provider.ro_mount list
 
   val compose_ro_mounts_result :
     ?keeper_name:string ->
     Keeper_gh_env.keeper_binding ->
-    (Credential_provider.ro_mount list, string) result
+    (Keeper_credential_provider.ro_mount list, string) result
 end

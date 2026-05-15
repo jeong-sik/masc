@@ -425,7 +425,7 @@ let upsert_rule
        | Error msg ->
          Prometheus.inc_counter
            Keeper_metrics.metric_keeper_approval_queue_failures
-           ~labels:[ "keeper", keeper_name; "site", Approval_queue_failure_site.(to_label Upsert_rule_save) ]
+           ~labels:[ "keeper", keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Upsert_rule_save) ]
            ();
          Log.Keeper.warn "upsert_rule: save failed: %s" msg);
       candidate, true)
@@ -488,7 +488,7 @@ let find_matching_rule
        | Error msg ->
          Prometheus.inc_counter
            Keeper_metrics.metric_keeper_approval_queue_failures
-           ~labels:[ "keeper", keeper_name; "site", Approval_queue_failure_site.(to_label Matching_rule_save) ]
+           ~labels:[ "keeper", keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Matching_rule_save) ]
            ();
          Log.Keeper.warn "find_matching_rule: save failed: %s" msg);
       Some { rule_id = rule.id; matched_by = "always_rule" })
@@ -538,7 +538,7 @@ let get_audit_store ?base_path () =
   | exn ->
     Prometheus.inc_counter
       Keeper_metrics.metric_keeper_approval_queue_failures
-      ~labels:[ "keeper", "aggregate"; "site", Approval_queue_failure_site.(to_label Audit_store_create) ]
+      ~labels:[ "keeper", "aggregate"; "site", Keeper_approval_queue_failure_site.(to_label Audit_store_create) ]
       ();
     Log.Keeper.warn
       "approval_queue: audit store creation failed: %s"
@@ -888,7 +888,7 @@ let resolve_entry ?base_path (entry : pending_approval) (decision : decision) =
       | exn ->
         Prometheus.inc_counter
           Keeper_metrics.metric_keeper_approval_queue_failures
-          ~labels:[ "keeper", entry.keeper_name; "site", Approval_queue_failure_site.(to_label Resolution_callback) ]
+          ~labels:[ "keeper", entry.keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Resolution_callback) ]
           ();
         Log.Keeper.warn
           "approval_queue: resolution callback failed id=%s err=%s"
@@ -1197,7 +1197,7 @@ let remember_rule_for_entry ?base_path ?created_by (entry : pending_approval) =
     | exn ->
       Prometheus.inc_counter
         Keeper_metrics.metric_keeper_approval_queue_failures
-        ~labels:[ "keeper", entry.keeper_name; "site", Approval_queue_failure_site.(to_label Remember_rule) ]
+        ~labels:[ "keeper", entry.keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Remember_rule) ]
         ();
       Log.Keeper.warn
         "approval_queue: remember rule failed id=%s err=%s"
@@ -1360,7 +1360,7 @@ let expire_stale ~max_wait_s =
        in
        Prometheus.inc_counter
          Keeper_metrics.metric_keeper_approval_queue_failures
-         ~labels:[ "keeper", entry.keeper_name; "site", Approval_queue_failure_site.(to_label Approval_expired) ]
+         ~labels:[ "keeper", entry.keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Approval_expired) ]
          ();
        Log.Keeper.warn
          "HITL_APPROVAL_EXPIRED: id=%s keeper=%s tool=%s"
@@ -1394,7 +1394,7 @@ let expire_stale ~max_wait_s =
           | exn ->
             Prometheus.inc_counter
               Keeper_metrics.metric_keeper_approval_queue_failures
-              ~labels:[ "keeper", entry.keeper_name; "site", Approval_queue_failure_site.(to_label Expire_callback) ]
+              ~labels:[ "keeper", entry.keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Expire_callback) ]
               ();
             Log.Keeper.warn
               "approval_queue: expire callback failed id=%s err=%s"

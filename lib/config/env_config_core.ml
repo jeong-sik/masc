@@ -177,51 +177,17 @@ let existing_file path =
 let home_dir_opt () =
   raw_value_opt "HOME" |> trim_opt
 
-(** Log a deprecation warning when a legacy env var is set.
-    Called once per legacy var at startup/first-read. *)
-let deprecation_warned = Hashtbl.create 8
+(* RFC-0085 PR-11 — Env var deprecation mechanism removed.
 
-let warn_deprecated ~old_name ~new_name =
-  if not (Hashtbl.mem deprecation_warned old_name) then begin
-    Hashtbl.replace deprecation_warned old_name true;
-    Log.Misc.warn "env %s is deprecated; use %s instead. Support will be removed in a future release."
-      old_name new_name
-  end
+   The deprecation_warned Hashtbl + warn_deprecated + deprecated_opt +
+   resolve_deprecated + get_{float,int,bool}_deprecated cluster had a
+   single caller (keeper_turn_slot.int_of_env_default_with_deprecated
+   for the MASC_KEEPER_AUTOBOT_MAX typo legacy).  Per
+   memory/feedback_hardcoding_and_legacy_zero_tolerance.md, legacy env
+   support is deleted at the same time as the mechanism that hosts it;
+   the typo env is no longer recognised and operators using it must
+   migrate to MASC_KEEPER_AUTOBOOT_MAX. *)
 
-let deprecated_opt ~old_name ~new_name =
-  match raw_value_opt old_name |> trim_opt with
-  | Some value ->
-      warn_deprecated ~old_name ~new_name;
-      Some value
-  | None -> None
-
-(** Read [primary] env var first; if unset, fall back to [deprecated] with a
-    one-time deprecation warning.  Returns [None] when neither is set. *)
-let resolve_deprecated ~primary ~deprecated =
-  match raw_value_opt primary |> trim_opt with
-  | Some _ as v -> v
-  | None -> deprecated_opt ~old_name:deprecated ~new_name:primary
-
-(** Typed deprecated-fallback getters.
-    Read [primary] first, then [deprecated] with warning, then [default]. *)
-let get_float_deprecated ~default ~primary ~deprecated =
-  match resolve_deprecated ~primary ~deprecated with
-  | Some s -> Safe_ops.float_of_string_with_default ~default s
-  | None -> default
-
-let get_int_deprecated ~default ~primary ~deprecated =
-  match resolve_deprecated ~primary ~deprecated with
-  | Some s -> Safe_ops.int_of_string_with_default ~default s
-  | None -> default
-
-let get_bool_deprecated ~default ~primary ~deprecated =
-  match resolve_deprecated ~primary ~deprecated with
-  | Some v ->
-      (match String.trim v |> String.lowercase_ascii with
-       | "true" | "1" | "yes" -> true
-       | "false" | "0" | "no" -> false
-       | _ -> default)
-  | None -> default
 
 let default_http_port = Masc_network_defaults.masc_http_default_port_s
 let default_http_port_int = Masc_network_defaults.masc_http_default_port
@@ -255,10 +221,8 @@ let masc_host () =
   | Some host -> host
   | None -> default_host
 
-(** Centralized MASC_ASSETS_DIR reader.
-    Returns None when MASC_ASSETS_DIR is unset or empty. *)
-let assets_dir_opt () =
-  raw_value_opt "MASC_ASSETS_DIR" |> trim_opt
+(* RFC-0085 PR-10 — [assets_dir_opt] removed (caller 0 after migration).
+   Readers use [(Host_config.from_env ()).assets_dir]. *)
 
 let cluster_name_opt () =
   raw_value_opt "MASC_CLUSTER_NAME" |> trim_opt

@@ -53,7 +53,7 @@ type text_cache = {
 let empty_text_cache ~generation =
   { key = None; value = None; expires_at = 0.0; generation }
 
-let _keeper_list_cache = Atomic.make (empty_text_cache ~generation:0)
+let keeper_list_cache = Atomic.make (empty_text_cache ~generation:0)
 
 let cache_ttl_seconds env_var ~default =
   match Sys.getenv_opt env_var with
@@ -70,7 +70,7 @@ let invalidate_text_cache cache_ref =
   Lockfree_atomic.update cache_ref (fun current ->
     empty_text_cache ~generation:(current.generation + 1))
 
-let invalidate_keeper_list_cache () = invalidate_text_cache _keeper_list_cache
+let invalidate_keeper_list_cache () = invalidate_text_cache keeper_list_cache
 
 let rec cached_text_by_key cache_ref ~key ~ttl_s compute =
   let now = Time_compat.now () in
@@ -94,12 +94,12 @@ let rec cached_text_by_key cache_ref ~key ~ttl_s compute =
 
 module For_testing = struct
   let reset_keeper_list_cache () =
-    Atomic.set _keeper_list_cache (empty_text_cache ~generation:0)
+    Atomic.set keeper_list_cache (empty_text_cache ~generation:0)
 
   let invalidate_keeper_list_cache = invalidate_keeper_list_cache
 
   let cached_keeper_list_text ~key ~ttl_s compute =
-    cached_text_by_key _keeper_list_cache ~key ~ttl_s compute
+    cached_text_by_key keeper_list_cache ~key ~ttl_s compute
 end
 
 let annotate_keeper_json ~runtime_class json =
@@ -711,7 +711,7 @@ let handle_keeper_list ctx args : tool_result =
     Printf.sprintf "%s:%d:%b" ctx.config.base_path limit detailed
   in
   let body =
-    cached_text_by_key _keeper_list_cache ~key:cache_key
+    cached_text_by_key keeper_list_cache ~key:cache_key
       ~ttl_s:(keeper_list_cache_ttl_s ()) (fun () ->
         let registry_names =
           Keeper_registry.all ~base_path:ctx.config.base_path ()
@@ -1444,7 +1444,7 @@ let handle_keeper_compact ctx args : tool_result =
     match Keeper_registry.get ~base_path:ctx.config.base_path name with
     | None ->
       Prometheus.inc_counter Keeper_metrics.metric_keeper_operator_compact
-        ~labels:[("keeper", name); ("result", Operator_compact_result.(to_label Not_found))] ();
+        ~labels:[("keeper", name); ("result", Keeper_operator_compact_result.(to_label Not_found))] ();
       (false, error_response_typed ~code:Validation_error
         (Printf.sprintf "keeper %s is not in the registry" name))
     | Some entry ->
@@ -1460,7 +1460,7 @@ let handle_keeper_compact ctx args : tool_result =
     in
     if not allowed then begin
       Prometheus.inc_counter Keeper_metrics.metric_keeper_operator_compact
-        ~labels:[("keeper", name); ("result", Operator_compact_result.(to_label Precondition))] ();
+        ~labels:[("keeper", name); ("result", Keeper_operator_compact_result.(to_label Precondition))] ();
       (false, error_response_typed ~code:Validation_error
         (Printf.sprintf
            "keeper %s is in phase %s; compaction requires Overflowed, Paused, or force=true"
@@ -1495,7 +1495,7 @@ let handle_keeper_compact ctx args : tool_result =
             ~after_tokens:recovery.compaction.after_tokens;
           invalidate_status_cache name;
           Prometheus.inc_counter Keeper_metrics.metric_keeper_operator_compact
-            ~labels:[("keeper", name); ("result", Operator_compact_result.(to_label Ok))] ();
+            ~labels:[("keeper", name); ("result", Keeper_operator_compact_result.(to_label Ok))] ();
           (true,
            Yojson.Safe.to_string
              (`Assoc [
@@ -1522,7 +1522,7 @@ let handle_keeper_compact ctx args : tool_result =
                reason = "no_valid_checkpoint";
             });
           Prometheus.inc_counter Keeper_metrics.metric_keeper_operator_compact
-            ~labels:[("keeper", name); ("result", Operator_compact_result.(to_label No_checkpoint))] ();
+            ~labels:[("keeper", name); ("result", Keeper_operator_compact_result.(to_label No_checkpoint))] ();
           (false,
            Printf.sprintf
              "keeper %s: checkpoint compaction unavailable (no valid checkpoint found)"
@@ -1756,7 +1756,7 @@ let dispatch_stream ~on_text_delta ctx ~name ~args : tool_result option =
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let _tool_spec_read_only =
+let tool_spec_read_only =
   [ "masc_persona_list"; "masc_persona_schema"; "masc_keeper_list";
     "masc_keeper_status"; "masc_keeper_persona_audit";
     "masc_keeper_sandbox_status" ]
@@ -1786,8 +1786,8 @@ let () =
            ~module_tag:Tool_dispatch.Mod_keeper
            ~input_schema:s.input_schema
            ~handler_binding:Tag_dispatch
-           ~is_read_only:(List.mem s.name _tool_spec_read_only)
-           ~is_idempotent:(List.mem s.name _tool_spec_read_only)
+           ~is_read_only:(List.mem s.name tool_spec_read_only)
+           ~is_idempotent:(List.mem s.name tool_spec_read_only)
            ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

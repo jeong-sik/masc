@@ -171,8 +171,8 @@ let dispatch ctx ~name ~args : Tool_result.t option =
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let _tool_spec_read_only = [ "masc_plan_get" ]
-let _tool_spec_requires_join = [ "masc_plan_set_task"; "masc_plan_clear_task" ]
+let tool_spec_read_only = [ "masc_plan_get" ]
+let tool_spec_requires_join = [ "masc_plan_set_task"; "masc_plan_clear_task" ]
 
 let tool_required_permission = function
   | "masc_plan_get" | "masc_plan_get_task" ->
@@ -201,9 +201,9 @@ let () =
              ~module_tag:Tool_dispatch.Mod_plan
              ~input_schema:s.input_schema
              ~handler_binding:Tag_dispatch
-             ~is_read_only:(List.mem s.name _tool_spec_read_only)
-             ~is_idempotent:(List.mem s.name _tool_spec_read_only)
-             ~requires_join:(List.mem s.name _tool_spec_requires_join)
+             ~is_read_only:(List.mem s.name tool_spec_read_only)
+             ~is_idempotent:(List.mem s.name tool_spec_read_only)
+             ~requires_join:(List.mem s.name tool_spec_requires_join)
              ?required_permission:(tool_required_permission s.name)
              ()))
     Tool_schemas_misc.schemas

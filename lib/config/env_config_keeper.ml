@@ -385,7 +385,7 @@ end
 
 module SmartHeartbeat = struct
   (** Master switch for adaptive heartbeat scheduling in the keepalive loop.
-      When true, Heartbeat_smart.should_emit gates presence/snapshot/board/turn
+      When true, Keeper_heartbeat_smart.should_emit gates presence/snapshot/board/turn
       blocks, skipping cycles when the keeper is busy or deeply idle. *)
   let enabled = Feature_flag_registry.get_bool "MASC_KEEPER_SMART_HEARTBEAT"
 end

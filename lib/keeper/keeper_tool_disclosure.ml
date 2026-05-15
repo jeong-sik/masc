@@ -37,7 +37,7 @@ let tool_usage_delta ~(before : (string * int) list) ~(after : (string * int) li
 (* Three input surfaces, packed into an outcome variant so the pure
    canonicalisation and the observation-emitting wrapper share one
    decision tree. *)
-type canonicalisation_outcome = Tool_resolution.runtime_decision_outcome =
+type canonicalisation_outcome = Keeper_tool_resolution.runtime_decision_outcome =
   | Mcp_mapped of
       { stripped : string
       ; internal : string
@@ -46,7 +46,7 @@ type canonicalisation_outcome = Tool_resolution.runtime_decision_outcome =
   | Already_internal of { canonical : string }
   | Miss
 
-let canonicalise_outcome = Tool_resolution.runtime_decision
+let canonicalise_outcome = Keeper_tool_resolution.runtime_decision
 
 (** Pure canonicalisation — no telemetry. Used by set-logic call sites
     (required-tool canonicalisation, surface composition, satisfaction

@@ -46,9 +46,13 @@ type semaphore_wait_timeout =
   ; timeout_holders : (string * float) list
   }
 
-let int_of_env_default_with_deprecated ~primary ~deprecated ~default ~min_v ~max_v =
-  match Env_config_core.resolve_deprecated ~primary ~deprecated with
+(* RFC-0085 PR-11 — Dropped the [~deprecated] fallback; the typo legacy
+   env MASC_KEEPER_AUTOBOT_MAX is no longer recognised. Operators
+   must set MASC_KEEPER_AUTOBOOT_MAX. *)
+let int_of_env_default ~primary ~default ~min_v ~max_v =
+  match Sys.getenv_opt primary with
   | None -> default
+  | Some raw when String.trim raw = "" -> default
   | Some raw ->
     let v = Option.value ~default (int_of_string_opt (String.trim raw)) in
     Keeper_config.clamp_int v ~min_v ~max_v
@@ -62,9 +66,8 @@ let int_of_env_default_with_deprecated ~primary ~deprecated ~default ~min_v ~max
    cap was a typo-defence boilerplate, not an architectural ceiling, and
    forced operator raise-cycles every time the fleet grew. Removed. *)
 let keeper_turn_throttle_limit =
-  int_of_env_default_with_deprecated
+  int_of_env_default
     ~primary:"MASC_KEEPER_AUTOBOOT_MAX"
-    ~deprecated:"MASC_KEEPER_AUTOBOT_MAX"
     ~default:32
     ~min_v:1
     ~max_v:max_int
@@ -646,10 +649,10 @@ let run_after_acquire_flag_hook_for_test ~label ~keeper_name =
   | Some hook -> hook ~label ~keeper_name
 ;;
 
-let observe_bookkeeping_failure ~op ~(kind : Bookkeeping_failure_kind.t) =
+let observe_bookkeeping_failure ~op ~(kind : Keeper_bookkeeping_failure_kind.t) =
   Prometheus.inc_counter
     Keeper_metrics.metric_keeper_turn_slot_bookkeeping_failures
-    ~labels:[ "op", op; "kind", Bookkeeping_failure_kind.to_label kind ]
+    ~labels:[ "op", op; "kind", Keeper_bookkeeping_failure_kind.to_label kind ]
     ()
 ;;
 
@@ -667,10 +670,10 @@ let safe_bookkeeping ~op f =
     (* Bookkeeping (holder table / waiter queue / completion stamp) is
        advisory and self-healing; skipping under fiber cancellation is
        acceptable.  The semaphore release that follows must still run. *)
-    observe_bookkeeping_failure ~op ~kind:Bookkeeping_failure_kind.Cancelled;
+    observe_bookkeeping_failure ~op ~kind:Keeper_bookkeeping_failure_kind.Cancelled;
     Log.Keeper.warn "release_keeper_turn_slot: %s skipped (Cancelled)" op
   | exn ->
-    observe_bookkeeping_failure ~op ~kind:Bookkeeping_failure_kind.Exception;
+    observe_bookkeeping_failure ~op ~kind:Keeper_bookkeeping_failure_kind.Exception;
     Log.Keeper.warn "release_keeper_turn_slot: %s failed: %s" op (Printexc.to_string exn)
 ;;
 
@@ -695,13 +698,13 @@ let release_recorded_holder
     let force_released =
       try consume_force_release ~label ~keeper_name ~acquisition_id with
       | Eio.Cancel.Cancelled _ ->
-        observe_bookkeeping_failure ~op:("drop_holder " ^ label_str) ~kind:Bookkeeping_failure_kind.Cancelled;
+        observe_bookkeeping_failure ~op:("drop_holder " ^ label_str) ~kind:Keeper_bookkeeping_failure_kind.Cancelled;
         Log.Keeper.warn
           "release_keeper_turn_slot: drop_holder %s skipped (Cancelled)"
           label_str;
         false
       | exn ->
-        observe_bookkeeping_failure ~op:("drop_holder " ^ label_str) ~kind:Bookkeeping_failure_kind.Exception;
+        observe_bookkeeping_failure ~op:("drop_holder " ^ label_str) ~kind:Keeper_bookkeeping_failure_kind.Exception;
         Log.Keeper.warn
           "release_keeper_turn_slot: drop_holder %s failed: %s"
           label_str

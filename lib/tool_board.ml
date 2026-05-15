@@ -52,13 +52,13 @@ type board_list_cache =
   ; mutable expires_at : float
   }
 
-let _board_list_cache : board_list_cache = { key = None; value = None; expires_at = 0.0 }
+let board_list_cache : board_list_cache = { key = None; value = None; expires_at = 0.0 }
 let board_list_cache_ttl_s () = 30.0
 
 let invalidate_board_list_cache () =
-  _board_list_cache.key <- None;
-  _board_list_cache.value <- None;
-  _board_list_cache.expires_at <- 0.0
+  board_list_cache.key <- None;
+  board_list_cache.value <- None;
+  board_list_cache.expires_at <- 0.0
 ;;
 
 let cached_board_list ~key ~tool_name ~start_time compute =
@@ -69,19 +69,19 @@ let cached_board_list ~key ~tool_name ~start_time compute =
     then Tool_result.ok ~tool_name ~start_time payload.message
     else Tool_result.error ~tool_name ~start_time payload.message
   in
-  match _board_list_cache.key, _board_list_cache.value with
+  match board_list_cache.key, board_list_cache.value with
   | Some cached_key, Some payload
     when String.equal cached_key key
-         && Stdlib.Float.compare now _board_list_cache.expires_at < 0 ->
+         && Stdlib.Float.compare now board_list_cache.expires_at < 0 ->
     rebuild payload
   | _ ->
     let result : Tool_result.t = compute () in
     let payload =
       { success = result.success; message = Tool_result.message result }
     in
-    _board_list_cache.key <- Some key;
-    _board_list_cache.value <- Some payload;
-    _board_list_cache.expires_at <- now +. ttl_s;
+    board_list_cache.key <- Some key;
+    board_list_cache.value <- Some payload;
+    board_list_cache.expires_at <- now +. ttl_s;
     result
 ;;
 

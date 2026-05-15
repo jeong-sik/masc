@@ -13,7 +13,7 @@ let trim_opt = function
   | None -> None
 
 let resolved_base_path_opt () =
-  match Env_config_core.base_path_opt () with
+  match (Host_config.from_env ()).base_path with
   | Some path -> Some path
   | None -> Coord_utils_backend_setup.find_git_root (Sys.getcwd ())
 

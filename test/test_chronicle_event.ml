@@ -1,7 +1,7 @@
 (** Unit tests for Chronicle_event (RFC-0035 PR-4,
     Master Report Dim02 P1). *)
 
-open Masc_mcp.Chronicle_event
+open Chronicle_event
 
 let test_event_type_roundtrip () =
   let all_event_types =

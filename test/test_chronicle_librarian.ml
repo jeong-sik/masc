@@ -2,7 +2,7 @@
     Master Report Dim02 P1 §2.4). *)
 
 open Masc_mcp.Chronicle_librarian
-module CE = Masc_mcp.Chronicle_event
+module CE = Chronicle_event
 
 let make_event ?(id = "ev-x") ?(event_type = CE.Ev_keeper_step)
     ?(timestamp = 1_000) ?(session_id = "s1") ?(tags = []) ?(summary = "default")

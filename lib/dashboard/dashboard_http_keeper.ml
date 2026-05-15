@@ -358,6 +358,7 @@ let keeper_trust_json ?(include_receipt = false)
       ("tools_used", `List (List.map (fun value -> `String value) tools_used));
       ( "unexpected_tools",
         `List (List.map (fun value -> `String value) unexpected_tools) );
+      ("unexpected_tool_count", `Int (List.length unexpected_tools));
       ("sandbox", sandbox_json);
       ("approval", approval_json);
       ("cascade", cascade_json);

@@ -983,6 +983,11 @@ let execution_summary_json ~meta ~latest_receipt =
     | Some receipt -> json_string_list_member "tools_used" receipt
     | None -> []
   in
+  let unexpected_tools =
+    match latest_receipt with
+    | Some receipt -> json_string_list_member "unexpected_tools" receipt
+    | None -> []
+  in
   let required_tools, missing_required_tools =
     match latest_receipt with
     | Some receipt ->
@@ -1028,8 +1033,10 @@ let execution_summary_json ~meta ~latest_receipt =
       ("missing_required_tools", string_list_json missing_required_tools);
       ("requested_tools", string_list_json requested_tools);
       ("tools_used", string_list_json tools_used);
+      ("unexpected_tools", string_list_json unexpected_tools);
       ("requested_tool_count", `Int (List.length requested_tools));
       ("tools_used_count", `Int (List.length tools_used));
+      ("unexpected_tool_count", `Int (List.length unexpected_tools));
       ( "provider_attempt_count",
         match cascade_attempt_count with
         | Some value -> `Int value

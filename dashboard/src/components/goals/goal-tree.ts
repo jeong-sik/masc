@@ -889,8 +889,10 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
   const missingRequiredTools = compactTrustList(execution?.missing_required_tools)
   const requestedTools = compactTrustList(execution?.requested_tools)
   const toolsUsed = compactTrustList(execution?.tools_used)
+  const unexpectedTools = compactTrustList(execution?.unexpected_tools)
   const requestedToolCount = execution?.requested_tool_count
   const toolsUsedCount = execution?.tools_used_count
+  const unexpectedToolCount = execution?.unexpected_tool_count
   const providerAttempts = execution?.provider_attempt_count
   const providerFallback = execution?.provider_fallback_applied
   const providerSelectedModel = execution?.provider_selected_model?.trim() || null
@@ -919,8 +921,10 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
     || missingRequiredTools.length > 0
     || requestedTools.length > 0
     || toolsUsed.length > 0
+    || unexpectedTools.length > 0
     || typeof requestedToolCount === 'number'
     || typeof toolsUsedCount === 'number'
+    || typeof unexpectedToolCount === 'number'
     || typeof providerAttempts === 'number'
     || providerFallback === true
     || Boolean(providerSelectedModel)
@@ -998,11 +1002,14 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
             ${toolsUsed.length > 0 ? html`
               <span title=${toolsUsed.join(', ')}>사용 ${toolsUsed.join(', ')}</span>
             ` : null}
+            ${unexpectedTools.length > 0 ? html`
+              <span class="text-[var(--color-status-err)]" title=${unexpectedTools.join(', ')}>외부 ${unexpectedTools.join(', ')}</span>
+            ` : null}
             ${requestedTools.length > 0 ? html`
               <span title=${requestedTools.join(', ')}>요청 ${requestedTools.join(', ')}</span>
             ` : null}
-            ${typeof toolsUsedCount === 'number' || typeof requestedToolCount === 'number' ? html`
-              <span>도구 카운트 ${toolsUsedCount ?? '-'}/${requestedToolCount ?? '-'}</span>
+            ${typeof toolsUsedCount === 'number' || typeof requestedToolCount === 'number' || typeof unexpectedToolCount === 'number' ? html`
+              <span>도구 카운트 ${toolsUsedCount ?? '-'}/${requestedToolCount ?? '-'}${typeof unexpectedToolCount === 'number' ? ` · 외부 ${unexpectedToolCount}` : ''}</span>
             ` : null}
             ${typeof providerAttempts === 'number' || providerFallback === true || providerSelectedModel ? html`
               <span>

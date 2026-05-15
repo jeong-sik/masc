@@ -140,6 +140,8 @@ describe('parseKeeperCompositeSnapshot', () => {
         model_used: 'claude_code:auto',
         stop_reason: 'max_turns',
         tool_contract_result: 'violated',
+        unexpected_tools: ['keeper_board_list'],
+        unexpected_tool_count: 1,
         duration_ms: 87736,
         error: {
           kind: 'config',
@@ -165,6 +167,8 @@ describe('parseKeeperCompositeSnapshot', () => {
           tool_surface_fallback_used: false,
           missing_required_tools: ['keeper_task_claim'],
           required_tools: ['keeper_task_claim'],
+          unexpected_tools: ['keeper_board_list'],
+          unexpected_tool_count: 1,
         },
       },
     })
@@ -176,6 +180,10 @@ describe('parseKeeperCompositeSnapshot', () => {
     expect(result.execution?.tool_surface?.tool_surface_class).toBe('runtime_mcp')
     expect(result.execution?.tool_surface?.visible_tool_count).toBe(2)
     expect(result.execution?.tool_surface?.tool_surface_fallback_used).toBe(false)
+    expect(result.execution?.unexpected_tools).toEqual(['keeper_board_list'])
+    expect(result.execution?.unexpected_tool_count).toBe(1)
+    expect(result.execution?.tool_surface?.unexpected_tools).toEqual(['keeper_board_list'])
+    expect(result.execution?.tool_surface?.unexpected_tool_count).toBe(1)
     expect(result.execution?.error?.message_preview).toContain('fallback_cascade')
   })
 

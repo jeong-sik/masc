@@ -456,8 +456,10 @@ export interface KeeperTrustExecutionSummary {
   missing_required_tools?: string[] | null
   requested_tools?: string[] | null
   tools_used?: string[] | null
+  unexpected_tools?: string[] | null
   requested_tool_count?: number | null
   tools_used_count?: number | null
+  unexpected_tool_count?: number | null
   provider_attempt_count?: number | null
   provider_fallback_applied?: boolean | null
   provider_selected_model?: string | null

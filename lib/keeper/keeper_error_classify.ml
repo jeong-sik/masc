@@ -451,6 +451,12 @@ let required_tool_rotation_candidate
            (String.equal normalized Keeper_config.local_recovery_cascade_name))
   && not (Cascade_capability_profile.is_system_cascade_name normalized)
 
+let tool_required_rotation_cascade_name () =
+  try
+    Keeper_cascade_profile.cascade_name_for_use
+      Keeper_cascade_profile.Tool_required
+  with Failure _ -> Keeper_config.tool_use_strict_cascade_name
+
 let legacy_degraded_rotation_candidates
     ~catalog_names
     ~(base_cascade : string)
@@ -459,13 +465,16 @@ let legacy_degraded_rotation_candidates
   let default_cascade =
     normalized_cascade_name ~catalog_names (Keeper_config.default_cascade_name ())
   in
+  let tool_required_cascade =
+    normalized_cascade_name ~catalog_names (tool_required_rotation_cascade_name ())
+  in
   let local_recovery_cascade =
     normalized_cascade_name ~catalog_names
       (Keeper_cascade_profile.cascade_name_for_use
          Keeper_cascade_profile.Phase_recovery)
   in
   match tool_requirement with
-  | Required -> [ normalized_base; default_cascade ]
+  | Required -> [ normalized_base; tool_required_cascade ]
   | Optional | No_tools ->
     [ normalized_base; default_cascade; local_recovery_cascade ]
 

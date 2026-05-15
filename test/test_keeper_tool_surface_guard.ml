@@ -21,6 +21,16 @@ let test_unexpected_tool_names_reports_foreign_surface () =
        ~tool_names:[ "keeper_task_claim"; "Skill"; "Bash"; "Skill"; "Agent" ])
 ;;
 
+let test_unexpected_tool_names_flags_known_tool_outside_selected_surface () =
+  check
+    (list string)
+    "known keeper tool outside selected surface is unexpected"
+    [ "keeper_board_list" ]
+    (KTD.unexpected_tool_names
+       ~allowed_tool_names:[ "keeper_task_claim"; "keeper_board_post" ]
+       ~tool_names:[ "keeper_board_list" ])
+;;
+
 let test_unexpected_tool_names_accepts_public_alias_surface () =
   check
     (list string)
@@ -88,6 +98,17 @@ let test_public_alias_guidance_reports_alias_not_visible () =
     (KTD.public_alias_guidance_for_internal_call
        ~visible_tool_names:[ "keeper_tasks_list" ]
        "keeper_bash")
+;;
+
+let test_final_keeper_tool_names_drops_known_tool_outside_selected_surface () =
+  check
+    (list string)
+    "known keeper tool outside selected surface is not accepted as work"
+    []
+    (KTD.final_keeper_tool_names
+       ~reported_tool_names:[ "mcp__masc__keeper_board_list" ]
+       ~observed_tool_names:[ "keeper_board_list" ]
+       ~allowed_tool_names:[ "keeper_task_claim"; "keeper_board_post" ])
 ;;
 
 (* #8471 partial tolerance: mixed turn (valid + unexpected) must not
@@ -221,6 +242,10 @@ let () =
             `Quick
             test_unexpected_tool_names_reports_foreign_surface
         ; test_case
+            "flags known tool outside selected surface"
+            `Quick
+            test_unexpected_tool_names_flags_known_tool_outside_selected_surface
+        ; test_case
             "accepts public alias surface"
             `Quick
             test_unexpected_tool_names_accepts_public_alias_surface
@@ -244,6 +269,10 @@ let () =
             "internal alias reports when public alias is not visible"
             `Quick
             test_public_alias_guidance_reports_alias_not_visible
+        ; test_case
+            "final names drop known tool outside selected surface"
+            `Quick
+            test_final_keeper_tool_names_drops_known_tool_outside_selected_surface
         ] )
     ; ( "partial_tolerance"
       , [ test_case

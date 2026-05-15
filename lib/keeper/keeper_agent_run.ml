@@ -886,7 +886,7 @@ let run_turn
                  canonical_tool_names_ref := canonical_tool_names;
                  let unexpected_tool_names =
                    Keeper_tool_disclosure.unexpected_tool_names
-                     ~allowed_tool_names:all_tool_names
+                     ~allowed_tool_names:acc.requested_tool_names
                      ~tool_names:canonical_tool_names
                  in
                  unexpected_tool_names_ref := unexpected_tool_names;
@@ -906,11 +906,25 @@ let run_turn
                  if valid_tool_calls_present then acc.keeper_surface_tool_used <- true;
                  if unexpected_tool_names <> [] && not valid_tool_calls_present
                  then (
+                   let requested_preview =
+                     acc.requested_tool_names
+                     |> List.filteri (fun i _ -> i < 8)
+                     |> String.concat ", "
+                   in
+                   let omitted =
+                     List.length acc.requested_tool_names
+                     - min 8 (List.length acc.requested_tool_names)
+                   in
+                   let requested_suffix =
+                     if omitted > 0 then Printf.sprintf " (+%d more)" omitted else ""
+                   in
                    let reason =
                      Printf.sprintf
-                       "keeper turn reported unexpected tool names outside keeper \
-                        surface: %s"
+                       "keeper turn reported tool names outside selected turn surface: \
+                        unexpected=[%s] requested=[%s%s]"
                        (String.concat ", " unexpected_tool_names)
+                       requested_preview
+                       requested_suffix
                    in
                    acc.receipt_tool_contract_result <-
                      Keeper_execution_receipt.Contract_violated;
@@ -955,7 +969,7 @@ let run_turn
                      Keeper_tool_disclosure.final_keeper_tool_names
                        ~reported_tool_names
                        ~observed_tool_names
-                       ~allowed_tool_names:all_tool_names
+                       ~allowed_tool_names:acc.requested_tool_names
                    in
                    actual_keeper_tool_names_ref := actual_keeper_tool_names;
                    let usage = Keeper_exec_context.usage_of_response result.response in

@@ -1489,6 +1489,13 @@ let test_execution_trust_route_surfaces_trust_summary_fields () =
     "mutation_contract_satisfied"
     (row |> member "trust" |> member "execution_summary"
      |> member "mutation_guard_summary" |> to_string);
+  check (list string) "route surfaces unexpected tools"
+    [ "WebSearch" ]
+    (row |> member "trust" |> member "execution_summary"
+     |> member "unexpected_tools" |> to_list |> List.map to_string);
+  check int "route surfaces unexpected tool count" 1
+    (row |> member "trust" |> member "execution_summary"
+     |> member "unexpected_tool_count" |> to_int);
   check bool "route surfaces latest causal event field" true
     (match row |> member "trust" |> member "latest_causal_event" with
      | `Null | `Assoc _ -> true
@@ -1565,6 +1572,15 @@ let test_composite_routes_surface_latest_execution_receipt () =
   check bool "composite exposes tool surface fallback flag" false
     (execution |> member "tool_surface" |> member "tool_surface_fallback_used"
      |> to_bool);
+  check (list string) "composite exposes unexpected tools"
+    [ "WebSearch" ]
+    (execution |> member "unexpected_tools" |> to_list |> List.map to_string);
+  check int "composite exposes unexpected tool count" 1
+    (execution |> member "unexpected_tool_count" |> to_int);
+  check (list string) "composite tool surface exposes unexpected tools"
+    [ "WebSearch" ]
+    (execution |> member "tool_surface" |> member "unexpected_tools" |> to_list
+     |> List.map to_string);
   let fleet = run_curl_get ~port ~path:"/api/v1/keepers/composite" () in
   require_status "fleet composite GET returns 200" 200 fleet;
   let fleet_json = Yojson.Safe.from_string fleet.body in

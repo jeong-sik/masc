@@ -92,6 +92,12 @@ let active_fail_open_rotation_cascades () =
     ~keeper_assignable:(Keeper_cascade_profile.keeper_catalog_names ())
     ()
 
+let tool_required_rotation_cascade_name () =
+  try
+    Keeper_cascade_profile.cascade_name_for_use
+      Keeper_cascade_profile.Tool_required
+  with Failure _ -> Keeper_config.tool_use_strict_cascade_name
+
 let next_fail_open_cascade_for_turn
     ?rotation_cascades
     ~(base_cascade : string)
@@ -104,8 +110,10 @@ let next_fail_open_cascade_for_turn
   in
   let rotation_cascades =
     match tool_requirement, rotation_cascades with
-    | Keeper_agent_tool_surface.Required, Some candidates ->
-      Some (dedupe_keep_order (Keeper_config.default_cascade_name () :: candidates))
+    | Keeper_agent_tool_surface.Required, Some _ ->
+      Some
+        (dedupe_keep_order
+           [ base_cascade; tool_required_rotation_cascade_name () ])
     | _ -> rotation_cascades
   in
   EC.degraded_rotation_after_recoverable_error

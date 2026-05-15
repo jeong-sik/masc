@@ -65,22 +65,40 @@ let meta_state_block (meta_json : Yojson.Safe.t option) =
       | _ -> None)
   | _ -> None
 
+type meta_parse_error = Meta_not_assoc of Yojson.Safe.t
+
 let merge_meta_json ?state_block (meta_json : Yojson.Safe.t option) :
-    Yojson.Safe.t option =
-  let fields =
+    (Yojson.Safe.t option, meta_parse_error) Stdlib.Result.t =
+  (* Parse-don't-validate: a non-[`Assoc] meta payload is a malformed
+     submission, not "meta absent". The pre-2026-05-15 implementation
+     silently coerced [Some (`Int _)] / [Some (`String _)] / etc. to
+     [fields = []], absorbing malformed JSON into an empty meta object.
+     We now surface those payloads as a typed [Meta_not_assoc] error so
+     callers must decide explicitly (reject, log, repair) instead of
+     letting structural drift reach [board_posts.jsonl]. *)
+  let parsed_fields =
     match meta_json with
-    | Some (`Assoc assoc) -> assoc
-    | _ -> []
+    | None -> Stdlib.Result.Ok []
+    | Some (`Assoc assoc) -> Stdlib.Result.Ok assoc
+    | Some other -> Stdlib.Result.Error (Meta_not_assoc other)
   in
-  let fields =
-    match state_block with
-    | Some block when not (String.equal block "") && not (List.mem_assoc "state_block" fields) ->
-        ("state_block", `String block) :: fields
-    | _ -> fields
-  in
-  match fields with
-  | [] -> None
-  | _ -> Some (`Assoc fields)
+  match parsed_fields with
+  | Stdlib.Result.Error _ as err -> err
+  | Stdlib.Result.Ok fields ->
+      let fields =
+        match state_block with
+        | Some block
+          when (not (String.equal block ""))
+               && not (List.mem_assoc "state_block" fields) ->
+            ("state_block", `String block) :: fields
+        | _ -> fields
+      in
+      let result =
+        match fields with
+        | [] -> None
+        | _ -> Some (`Assoc fields)
+      in
+      Stdlib.Result.Ok result
 
 let derive_post_title (body : string) =
   let first_line =
@@ -109,5 +127,8 @@ let normalize_post_payload ~content ?title ?body ~post_kind ?meta_json () =
         else derive_post_title normalized_body
     | None -> derive_post_title normalized_body
   in
-  let merged_meta = merge_meta_json ?state_block:extracted_state meta_json in
-  normalized_title, normalized_body, post_kind, merged_meta
+  match merge_meta_json ?state_block:extracted_state meta_json with
+  | Stdlib.Result.Error _ as err -> err
+  | Stdlib.Result.Ok merged_meta ->
+      Stdlib.Result.Ok
+        (normalized_title, normalized_body, post_kind, merged_meta)

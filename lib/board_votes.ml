@@ -401,28 +401,37 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
                 ~expires_at
                 ~hearth
         in
-        let title, body, post_kind, meta_json =
-          normalize_post_payload ~content ?title:title_opt ?body:body_opt
-            ~post_kind:resolved_kind ?meta_json ()
-        in
-        Some {
-          id;
-          author;
-          title;
-          body;
-          content = body;
-          post_kind;
-          meta_json;
-          visibility;
-          created_at;
-          updated_at;
-          expires_at;
-          votes_up;
-          votes_down;
-          reply_count;
-          hearth;
-          thread_id;
-        }
+        (match
+           normalize_post_payload ~content ?title:title_opt ?body:body_opt
+             ~post_kind:resolved_kind ?meta_json ()
+         with
+         | Error (Board_core_payload.Meta_not_assoc _) ->
+             (* Row-level malformed meta_json: drop the row. The legacy
+                code path silently coerced the same payload to an empty
+                meta object at board_core_payload.ml:73, persisting a
+                "successful" row with the original meta vaporised. We
+                now reject the row outright so callers see the load
+                count drop instead of an invisible data shape change. *)
+             None
+         | Ok (title, body, post_kind, meta_json) ->
+             Some {
+               id;
+               author;
+               title;
+               body;
+               content = body;
+               post_kind;
+               meta_json;
+               visibility;
+               created_at;
+               updated_at;
+               expires_at;
+               votes_up;
+               votes_down;
+               reply_count;
+               hearth;
+               thread_id;
+             })
     | _ -> None)
   | _ -> None
 

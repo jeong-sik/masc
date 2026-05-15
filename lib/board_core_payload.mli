@@ -31,18 +31,33 @@ val meta_state_block : Yojson.Safe.t option -> string option
     a non-empty string [state_block]. Returns [None] for
     [None] / non-object / non-string / empty-after-trim values. *)
 
+type meta_parse_error = Meta_not_assoc of Yojson.Safe.t
+(** Typed parse failure for [merge_meta_json] / [normalize_post_payload].
+
+    [Meta_not_assoc payload] indicates the caller passed a
+    [Some yojson] meta value whose top-level shape is not
+    [`Assoc _] (e.g. a bare [`String _], [`Int _], or [`List _]).
+    Such payloads are malformed for board persistence — the legacy
+    behaviour silently absorbed them as an empty meta object
+    ([fields = []]) at [board_core_payload.ml:73], discarding the
+    original value without any caller-visible signal. *)
+
 val merge_meta_json :
   ?state_block:string ->
   Yojson.Safe.t option ->
-  Yojson.Safe.t option
+  (Yojson.Safe.t option, meta_parse_error) result
 (** Merge a [state_block] string into the JSON meta object.
 
-    When [meta_json] is a JSON object, [state_block] is added as
-    a [string] field iff it is [Some non_empty] and the object
+    When [meta_json] is [None] or [Some (`Assoc _)], returns
+    [Ok merged] where [merged] is the [`Assoc] payload with
+    [state_block] added iff it is [Some non_empty] and the object
     does not already contain a [state_block] entry (existing
     entries are preserved). [None] meta with no state_block
-    returns [None]; otherwise the merged [`Assoc fields] is
-    wrapped in [Some]. *)
+    yields [Ok None]; otherwise [Ok (Some (`Assoc fields))].
+
+    Returns [Error (Meta_not_assoc payload)] when [meta_json] is
+    [Some payload] with [payload] not of shape [`Assoc _]. Callers
+    must decide explicitly whether to reject, log, or repair. *)
 
 val derive_post_title : string -> string
 (** Derive a post title from [body].
@@ -62,7 +77,9 @@ val normalize_post_payload :
   post_kind:Board_types.post_kind ->
   ?meta_json:Yojson.Safe.t ->
   unit ->
-  string * string * Board_types.post_kind * Yojson.Safe.t option
+  ( string * string * Board_types.post_kind * Yojson.Safe.t option,
+    meta_parse_error )
+  result
 (** Normalise a post submission into the canonical
     [(title, body, kind, meta)] tuple persisted to
     [board_posts.jsonl].
@@ -75,4 +92,7 @@ val normalize_post_payload :
     - the body is trimmed;
     - title is the trimmed [?title] when non-empty, else
       {!derive_post_title} of the stripped body;
-    - [post_kind] is passed through unchanged. *)
+    - [post_kind] is passed through unchanged.
+
+    Returns [Error (Meta_not_assoc _)] when [?meta_json] is
+    [Some payload] with [payload] not of shape [`Assoc _]. *)

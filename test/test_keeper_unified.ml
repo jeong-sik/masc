@@ -9119,17 +9119,47 @@ let satisfies_explicit_required_tool ~required_tool_names name input =
        (required_tool_call name input))
 ;;
 
-let test_required_tool_satisfaction_rejects_passive_tools () =
+let test_required_tool_satisfaction_handles_passive_tools () =
   check
     bool
-    "masc_status is passive"
+    "global masc_status remains passive"
     false
     (satisfies_required_tool "masc_status" (`Assoc []));
   check
     bool
-    "keeper_tasks_list is passive"
-    false
+    "keeper_tasks_list satisfies tool-presence contract"
+    true
     (satisfies_required_tool "keeper_tasks_list" (`Assoc []));
+  check
+    bool
+    "keeper_context_status satisfies tool-presence contract"
+    true
+    (satisfies_required_tool "keeper_context_status" (`Assoc []));
+  check
+    bool
+    "keeper_memory_search satisfies tool-presence contract"
+    true
+    (satisfies_required_tool "keeper_memory_search" (`Assoc []));
+  check
+    bool
+    "keeper_tool_search satisfies tool-presence contract"
+    true
+    (satisfies_required_tool "keeper_tool_search" (`Assoc []));
+  check
+    bool
+    "keeper_board_get satisfies tool-presence contract"
+    true
+    (satisfies_required_tool "keeper_board_get" (`Assoc []));
+  check
+    bool
+    "keeper_memory_search remains passive progress"
+    true
+    (KTD.is_passive_status_tool_name "keeper_memory_search");
+  check
+    bool
+    "keeper_memory_search is not execution progress"
+    false
+    (KTD.is_execution_progress_tool_name "keeper_memory_search");
   (* keeper_stay_silent is a Completion tool and intentionally satisfies
      the required-tool contract despite its Read_only effect_domain.
      See keeper_tool_disclosure.ml is_completion_tool_name exemption. *)
@@ -9138,7 +9168,16 @@ let test_required_tool_satisfaction_rejects_passive_tools () =
     "keeper_stay_silent satisfies as completion"
     true
     (satisfies_required_tool "keeper_stay_silent" (`Assoc []));
-  check bool "Read alias is passive" false (satisfies_required_tool "Read" (`Assoc []));
+  check
+    bool
+    "Read alias satisfies tool-presence contract"
+    true
+    (satisfies_required_tool "Read" (`Assoc []));
+  check
+    bool
+    "Read alias remains passive progress"
+    true
+    (KTD.is_passive_status_tool_name "Read");
   check
     bool
     "read-only gh shell is passive"
@@ -11748,9 +11787,9 @@ let () =
             `Quick
             test_stay_silent_requires_typed_no_work_proof_on_actionable_signal
         ; test_case
-            "required tool predicate rejects passive tools"
+            "required tool predicate handles passive tools"
             `Quick
-            test_required_tool_satisfaction_rejects_passive_tools
+            test_required_tool_satisfaction_handles_passive_tools
         ; test_case
             "required tool predicate accepts mutating tools"
             `Quick

@@ -105,11 +105,10 @@ let should_cleanup_dead ~now ~dead_ttl_sec (entry : Keeper_registry.registry_ent
 let is_stale_paused_meta ~now ~paused_ttl_sec (meta : keeper_meta) =
   if not meta.paused
   then false
-  else (
-    let updated_ts =
-      Coord_resilience.Time.parse_iso8601_opt meta.updated_at |> Option.value ~default:0.0
-    in
-    updated_ts > 0.0 && now -. updated_ts >= paused_ttl_sec)
+  else
+    match Coord_resilience.Time.parse_iso8601_opt meta.updated_at with
+    | Some updated_ts -> updated_ts > 0.0 && now -. updated_ts >= paused_ttl_sec
+    | None -> false
 ;;
 
 let paused_meta_requires_reconcile_recovery (meta : keeper_meta) =

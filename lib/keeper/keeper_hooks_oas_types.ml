@@ -62,6 +62,45 @@ let cost_status_for_event
   else if runtime_unknown then Cost_runtime_unknown
   else Cost_oas_cost_unreported
 
+let redacts_inference_telemetry_key key =
+  match String.lowercase_ascii (String.trim key) with
+  | "provider"
+  | "provider_id"
+  | "provider_kind"
+  | "provider_name"
+  | "model"
+  | "model_id"
+  | "canonical_model_id"
+  | "default_model"
+  | "discovered_model"
+  | "system_fingerprint" -> true
+  | _ -> false
+
+let rec redact_inference_telemetry_json = function
+  | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+              if redacts_inference_telemetry_key key then (key, `Null)
+              else (key, redact_inference_telemetry_json value))
+           fields)
+  | `List values -> `List (List.map redact_inference_telemetry_json values)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value ->
+      value
+
+let inference_telemetry_to_runtime_json telemetry =
+  telemetry
+  |> Agent_sdk.Types.inference_telemetry_to_yojson
+  |> redact_inference_telemetry_json
+
+let default_context_max = 0
+
+let context_max_of_telemetry
+    (telemetry : Agent_sdk.Types.inference_telemetry option) =
+  match telemetry with
+  | Some { effective_context_window = Some n; _ } when n > 0 -> n
+  | _ -> default_context_max
+
 type thinking_log_summary =
   { thinking_present : bool
   ; thinking_blocks : int

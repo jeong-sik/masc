@@ -15,6 +15,12 @@
     @since Phase 7 — Eval_gate → OAS hooks migration *)
 
 
+(** Shared type/helper module (intra-library file split, 2026-05-16).
+    Hoisted to the top so the rest of this module can refer to its
+    bindings — see classify_usage_trust which calls
+    [context_max_of_telemetry]. *)
+include Keeper_hooks_oas_types
+
 (** Keeper deny list — derived from Tool_catalog surface SSOT.
     Administrative/destructive operations that should only be invoked
     by operators or through controlled workflows.
@@ -123,36 +129,8 @@ let runtime_lane_label = "runtime"
 
 let runtime_lane_of_model (_model : string) : string = runtime_lane_label
 
-let redacts_inference_telemetry_key key =
-  match String.lowercase_ascii (String.trim key) with
-  | "provider"
-  | "provider_id"
-  | "provider_kind"
-  | "provider_name"
-  | "model"
-  | "model_id"
-  | "canonical_model_id"
-  | "default_model"
-  | "discovered_model"
-  | "system_fingerprint" -> true
-  | _ -> false
-
-let rec redact_inference_telemetry_json = function
-  | `Assoc fields ->
-      `Assoc
-        (List.map
-           (fun (key, value) ->
-              if redacts_inference_telemetry_key key then (key, `Null)
-              else (key, redact_inference_telemetry_json value))
-           fields)
-  | `List values -> `List (List.map redact_inference_telemetry_json values)
-  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value ->
-      value
-
-let inference_telemetry_to_runtime_json telemetry =
-  telemetry
-  |> Agent_sdk.Types.inference_telemetry_to_yojson
-  |> redact_inference_telemetry_json
+(* Inference telemetry redaction moved to Keeper_hooks_oas_types
+   (intra-library file split, 2026-05-16). *)
 
 let usage_has_tokens (usage : Agent_sdk.Types.api_usage) =
   usage.input_tokens > 0
@@ -485,12 +463,8 @@ let record_response_content_quality_metric ~keeper_name
         ]
       ()
 
-let default_context_max = 0
-let context_max_of_telemetry
-    (telemetry : Agent_sdk.Types.inference_telemetry option) =
-  match telemetry with
-  | Some { effective_context_window = Some n; _ } when n > 0 -> n
-  | _ -> default_context_max
+(* default_context_max + context_max_of_telemetry moved to
+   Keeper_hooks_oas_types (intra-library file split, 2026-05-16). *)
 
 let classify_usage_trust ?usage ~model ~telemetry () =
   let _ = model in
@@ -524,9 +498,10 @@ let record_usage_anomaly_metrics ~keeper_name ~model usage_trust =
            ())
       reasons
 
-(** cost_status cluster moved to Keeper_hooks_oas_types
-    (intra-library file split, 2026-05-16). *)
-include Keeper_hooks_oas_types
+(* cost_status / thinking_log_summary / pr_action types + telemetry helpers
+   moved to Keeper_hooks_oas_types (intra-library file split, 2026-05-16).
+   The include is hoisted to the top of this module — see the comment
+   near [keeper_denied_tools]. *)
 
 let cost_source_unmetered_provider = "unmetered_provider"
 let cost_source_computed = "computed"

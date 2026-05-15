@@ -70,21 +70,9 @@ val record_response_content_quality_metric :
     tool progress.  Tool-use responses are progress, even when textual content
     is empty. *)
 
-val context_max_of_telemetry :
-  Agent_sdk.Types.inference_telemetry option -> int
-(** Provider-reported context window max, or [0] when telemetry omits it. *)
-
-(** thinking_log_summary type + summarize_thinking_blocks moved to
-    Keeper_hooks_oas_types (intra-library file split, 2026-05-16). *)
-
-val redact_inference_telemetry_json : Yojson.Safe.t -> Yojson.Safe.t
-(** Redact provider/model identity fields from OAS inference telemetry while
-    preserving non-identifying runtime counters and timings. *)
-
-val inference_telemetry_to_runtime_json :
-  Agent_sdk.Types.inference_telemetry -> Yojson.Safe.t
-(** JSON projection for keeper-facing persistence/API surfaces.  Concrete
-    provider/model identity is collapsed before leaving the OAS boundary. *)
+(** context_max_of_telemetry, redact_inference_telemetry_json,
+    inference_telemetry_to_runtime_json moved to Keeper_hooks_oas_types
+    (intra-library file split, 2026-05-16). Re-exported via include below. *)
 
 (** {1 Usage-trust classification}
 

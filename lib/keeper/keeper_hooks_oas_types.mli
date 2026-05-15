@@ -38,6 +38,19 @@ val cost_label_usage_missing : string
 val cost_label_usage_untrusted : string
 val cost_label_oas_cost_unreported : string
 
+val redact_inference_telemetry_json : Yojson.Safe.t -> Yojson.Safe.t
+(** Redact provider/model identity fields from OAS inference telemetry while
+    preserving non-identifying runtime counters and timings. *)
+
+val inference_telemetry_to_runtime_json :
+  Agent_sdk.Types.inference_telemetry -> Yojson.Safe.t
+(** JSON projection for keeper-facing persistence/API surfaces.  Concrete
+    provider/model identity is collapsed before leaving the OAS boundary. *)
+
+val context_max_of_telemetry :
+  Agent_sdk.Types.inference_telemetry option -> int
+(** Provider-reported context window max, or [0] when telemetry omits it. *)
+
 type thinking_log_summary =
   { thinking_present : bool
   ; thinking_blocks : int

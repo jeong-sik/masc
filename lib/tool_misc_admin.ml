@@ -119,6 +119,10 @@ let tool_inventory_json _ctx ~include_hidden ~include_deprecated =
   in
   Config.raw_all_tool_schemas
   |> List.iter (fun (schema : Masc_domain.tool_schema) ->
+         Tool_catalog_surfaces.surfaces_for_tool schema.name
+         |> List.iter (fun surface ->
+                add_surface schema.name
+                  (Tool_catalog_surfaces.surface_to_string surface));
          if Tool_catalog.is_public_mcp schema.name then
            add_surface schema.name "public_mcp");
   List.iter
@@ -146,6 +150,9 @@ let tool_inventory_json _ctx ~include_hidden ~include_deprecated =
              ([
                 ("name", `String schema.name);
                 ("description", `String help_entry.short_description);
+                ("registered_schema", `Bool true);
+                ( "dispatch_registered",
+                  `Bool (Option.is_some (Tool_dispatch.lookup_tag schema.name)) );
                 ("enabled_in_current_mode", `Bool false);
                 ("direct_call_allowed", `Bool (Tool_catalog.allow_direct_call schema.name));
                 ("required_permission", permission_to_json schema.name);

@@ -27,6 +27,7 @@ let declared_permission_for_tool tool_name =
 
 let legacy_permission_entries : (string * permission) list =
   [ "masc_reset", CanReset
+  ; "masc_start", CanJoin
   ; "masc_join", CanJoin
   ; "masc_leave", CanLeave
   ; "masc_status", CanReadState
@@ -52,6 +53,7 @@ let legacy_permission_entries : (string * permission) list =
   ; "masc_observe_capacity", CanReadState
   ; "masc_observe_traces", CanReadState
   ; "masc_agent_fitness", CanReadState
+  ; "masc_agent_timeline", CanReadState
   ; "masc_dashboard", CanReadState
   ; "masc_check", CanReadState
   ; "masc_coordination_fsm_snapshot", CanReadState
@@ -60,6 +62,12 @@ let legacy_permission_entries : (string * permission) list =
   ; "masc_get_metrics", CanReadState
   ; "masc_plan_get_task", CanReadState
   ; "masc_plan_get", CanReadState
+  ; "masc_plan_init", CanBroadcast
+  ; "masc_plan_update", CanBroadcast
+  ; "masc_plan_set_task", CanBroadcast
+  ; "masc_plan_clear_task", CanBroadcast
+  ; "masc_note_add", CanBroadcast
+  ; "masc_deliver", CanBroadcast
   ; "masc_workflow_guide", CanReadState
   ; "masc_autoresearch_search_findings", CanReadState
   ; "masc_autoresearch_status", CanReadState
@@ -77,6 +85,7 @@ let legacy_permission_entries : (string * permission) list =
   ; "channel_gate", CanBroadcast
   ; "masc_register_capabilities", CanBroadcast
   ; "masc_agent_update", CanBroadcast
+  ; "masc_spawn", CanBroadcast
   ; "masc_operator_action", CanBroadcast
   ; "masc_keeper_up", CanBroadcast
   ; "masc_keeper_down", CanBroadcast
@@ -112,6 +121,8 @@ let legacy_permission_entries : (string * permission) list =
   ; "masc_board_search", CanReadState
   ; "masc_board_profile", CanReadState
   ; "masc_board_stats", CanReadState
+  ; "masc_board_sub_board_list", CanReadState
+  ; "masc_board_sub_board_get", CanReadState
   ; "masc_board_post", CanBroadcast
   ; "masc_board_comment", CanBroadcast
   ; "masc_board_vote", CanBroadcast
@@ -129,6 +140,20 @@ let legacy_permission_entries : (string * permission) list =
   ; "masc_portal_send", CanSendPortal
   ; "masc_worktree_create", CanCreateWorktree
   ; "masc_worktree_remove", CanRemoveWorktree
+  ; "masc_run_get", CanReadState
+  ; "masc_run_list", CanReadState
+  ; "masc_run_init", CanBroadcast
+  ; "masc_run_plan", CanBroadcast
+  ; "masc_run_log", CanBroadcast
+  ; "masc_run_deliverable", CanBroadcast
+  ; "masc_code_search", CanReadState
+  ; "masc_code_symbols", CanReadState
+  ; "masc_code_read", CanReadState
+  ; "masc_code_write", CanBroadcast
+  ; "masc_code_edit", CanBroadcast
+  ; "masc_code_delete", CanBroadcast
+  ; "masc_code_shell", CanBroadcast
+  ; "masc_code_git", CanBroadcast
   ]
 ;;
 

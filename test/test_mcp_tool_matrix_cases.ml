@@ -575,16 +575,6 @@ let ensure_code_file fixture =
       fixture.code_file_path <- Some relative_path;
       relative_path
 
-let ensure_lock fixture =
-  ignore
-    (execute_tool_ok fixture ~name:"masc_lock"
-       ~arguments:
-         (`Assoc
-           [
-             ("agent_name", `String fixture.agent_name);
-             ("file", `String "README.md");
-           ]))
-
 let prepare_for_name fixture name =
   if List.mem name [ "masc_claim_next"; "masc_transition"; "masc_plan_set_task" ] then
     ignore (ensure_task fixture);
@@ -609,8 +599,7 @@ let prepare_for_name fixture name =
     ignore (ensure_library_topic fixture);
   (* masc_handover_* tools pruned from registry; no preparation needed. *)
   let _ = ensure_handover in
-  if name = "masc_unlock" then
-    ensure_lock fixture
+  ()
 
 let required_fields schema =
   match assoc_field "required" schema.Masc_domain.input_schema with

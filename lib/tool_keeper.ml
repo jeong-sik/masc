@@ -1787,6 +1787,7 @@ let () =
            ~handler_binding:Tag_dispatch
            ~is_read_only:(List.mem s.name tool_spec_read_only)
            ~is_idempotent:(List.mem s.name tool_spec_read_only)
+           ~is_destructive:(String.equal s.name "masc_keeper_clear")
            ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

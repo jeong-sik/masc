@@ -196,40 +196,6 @@ measure_avg() {
     "$label" "$((total / iterations))" "$iterations" "$max"
 }
 
-measure_lock_cycle() {
-  local iterations="${1:-5}"
-  local i lock_total lock_max unlock_total unlock_max
-  local lock_args
-
-  lock_total=0
-  lock_max=0
-  unlock_total=0
-  unlock_max=0
-  lock_args="$(jq -cn --arg agent "$MASC_AGENT" '{agent_name:$agent,file:"bench_quick_lock.txt"}')"
-
-  for ((i = 0; i < BENCH_WARMUP_ITERATIONS; i += 1)); do
-    bench_call_tool "masc_lock" "$lock_args" >/dev/null
-    bench_call_tool "masc_unlock" "$lock_args" >/dev/null
-  done
-  for ((i = 0; i < iterations; i += 1)); do
-    bench_call_tool "masc_lock" "$lock_args" >/dev/null
-    lock_total=$((lock_total + BENCH_LAST_MS))
-    if ((BENCH_LAST_MS > lock_max)); then
-      lock_max=$BENCH_LAST_MS
-    fi
-    bench_call_tool "masc_unlock" "$lock_args" >/dev/null
-    unlock_total=$((unlock_total + BENCH_LAST_MS))
-    if ((BENCH_LAST_MS > unlock_max)); then
-      unlock_max=$BENCH_LAST_MS
-    fi
-  done
-
-  printf "%-28s %5dms avg (%d runs, max %dms)\n" \
-    "masc_lock" "$((lock_total / iterations))" "$iterations" "$lock_max"
-  printf "%-28s %5dms avg (%d runs, max %dms)\n" \
-    "masc_unlock" "$((unlock_total / iterations))" "$iterations" "$unlock_max"
-}
-
 echo "=== MASC Quick Benchmark ==="
 echo "URL: $MASC_URL"
 echo "Agent: $MASC_AGENT"
@@ -253,7 +219,6 @@ measure_avg "masc_agents" "masc_agents" '{}' "$BENCH_ITERATIONS"
 measure_avg "masc_tasks" "masc_tasks" '{}' "$BENCH_ITERATIONS"
 measure_avg "masc_messages (5)" "masc_messages" '{"limit":5}' "$BENCH_ITERATIONS"
 measure_avg "masc_broadcast" "masc_broadcast" "$(jq -cn --arg agent "$MASC_AGENT" '{agent_name:$agent,message:"quick-bench",format:"compact"}')" "$BENCH_ITERATIONS"
-measure_lock_cycle "$BENCH_ITERATIONS"
 measure_avg "masc_runtime_verify" "masc_runtime_verify" '{}' "$BENCH_ITERATIONS"
 
 echo ""

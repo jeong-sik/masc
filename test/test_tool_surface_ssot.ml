@@ -29,6 +29,11 @@ let raw_schema_by_name name =
   Config.raw_all_tool_schemas
   |> List.find_opt (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name)
 
+let ensure_runtime_tool_registry_loaded () =
+  ignore
+    (Mcp_server_eio.create_state ~test_mode:true
+       ~base_path:"/tmp/masc-tool-surface-ssot" ())
+
 (* {1 Parity Tests — each compares legacy hardcoded list vs surface SSOT} *)
 
 let test_public_mcp_parity () =
@@ -234,41 +239,93 @@ let test_keeper_internal_tools_have_schemas () =
   Alcotest.(check bool) "all internal tools have schemas" true
     (SS.is_empty missing)
 
-(* {1 SSOT Validation — Phase 4: no orphans, surface constraints} *)
+(* {1 SSOT Validation — active tools must be surfaced and routed} *)
+
+type surface_audit_row =
+  { name : string
+  ; registered_schema : bool
+  ; dispatch_registered : bool
+  ; surfaces : string list
+  ; lifecycle : string
+  ; replacement : string option
+  }
+
+let surface_audit_row_of_schema (schema : Masc_domain.tool_schema) =
+  let meta = Tool_catalog.metadata schema.name in
+  { name = schema.name
+  ; registered_schema = true
+  ; dispatch_registered = Option.is_some (Tool_dispatch.lookup_tag schema.name)
+  ; surfaces =
+      Tool_catalog_surfaces.surfaces_for_tool schema.name
+      |> List.map Tool_catalog_surfaces.surface_to_string
+  ; lifecycle = Tool_catalog.lifecycle_to_string meta.lifecycle
+  ; replacement = meta.replacement
+  }
+
+let format_surface_audit_row row =
+  Printf.sprintf
+    "%s lifecycle=%s registered_schema=%b dispatch_registered=%b surfaces=[%s] replacement=%s"
+    row.name row.lifecycle row.registered_schema row.dispatch_registered
+    (String.concat "," row.surfaces)
+    (Option.value ~default:"" row.replacement)
+
+let schema_surface_audit_rows () =
+  ensure_runtime_tool_registry_loaded ();
+  Config.raw_all_tool_schemas
+  |> List.map surface_audit_row_of_schema
+
+let is_active row = String.equal row.lifecycle "active"
+let has_surface row = row.surfaces <> []
+let has_named_surface name row = List.exists (String.equal name) row.surfaces
+
+let requires_auth_permission row =
+  List.exists
+    (fun surface ->
+      List.mem surface
+        [ "public_mcp"; "spawned_agent_mcp"; "local_worker"; "session_min"; "admin" ])
+    row.surfaces
+  && not (has_named_surface "system_internal" row)
+  && not (has_named_surface "keeper_internal" row)
 
 let test_no_orphaned_tools () =
-  (* Every registered tool schema must belong to at least one surface,
-     except Deprecated tools which are intentionally removed from all surfaces,
-     and known orphans from the tool-registry-pruning batch whose schemas
-     will be cleaned up in a follow-up PR. *)
-  let on_any_surface name =
-    List.exists (fun surface ->
-      Tool_catalog.is_on_surface surface name
-    ) Tool_catalog.all_surfaces
-  in
-  let is_deprecated name =
-    List.exists (fun (n, _) -> String.equal n name) Tool_catalog.deprecated_tool_entries
-  in
-  (* Schemas left behind after surface pruning. Tracked for follow-up removal. *)
-  let known_orphans =
-    [ "masc_note_add"; "masc_register_capabilities";
-      "masc_board_stats"; "masc_board_profile"; "masc_board_hearths";
-      "masc_board_delete"; "masc_keeper_compact";
-      "masc_keeper_clear"; "masc_runtime_verify" ]
-  in
-  let is_known_orphan name = List.mem name known_orphans in
+  (* Every active registered schema must belong to at least one catalog
+     surface. Deprecated tools may be intentionally absent from every
+     surface only when their lifecycle/replacement metadata says so. *)
   let orphaned =
-    Config.raw_all_tool_schemas
-    |> List.filter (fun (schema : Masc_domain.tool_schema) ->
-         not (on_any_surface schema.name)
-         && not (is_deprecated schema.name)
-         && not (is_known_orphan schema.name))
-    |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
+    schema_surface_audit_rows ()
+    |> List.filter (fun row ->
+         row.registered_schema && is_active row && not (has_surface row))
   in
   if orphaned <> [] then
-    Alcotest.failf "Orphaned tools (no surface): {%s}"
-      (String.concat ", " orphaned);
-  Alcotest.(check bool) "zero orphans" true (orphaned = [])
+    Alcotest.failf "Active tools without any surface:\n%s"
+      (String.concat "\n" (List.map format_surface_audit_row orphaned));
+  Alcotest.(check bool) "zero active orphans" true (orphaned = [])
+
+let test_active_surfaced_tools_are_routable_and_permissioned () =
+  let active_surfaced =
+    schema_surface_audit_rows ()
+    |> List.filter (fun row -> is_active row && has_surface row)
+  in
+  let missing_dispatch =
+    active_surfaced
+    |> List.filter (fun row -> not row.dispatch_registered)
+  in
+  let missing_permission =
+    active_surfaced
+    |> List.filter (fun row ->
+         requires_auth_permission row
+         && Option.is_none (Tool_permission_map.permission_for_tool row.name))
+  in
+  if missing_dispatch <> [] then
+    Alcotest.failf "Active surfaced tools without dispatch:\n%s"
+      (String.concat "\n" (List.map format_surface_audit_row missing_dispatch));
+  if missing_permission <> [] then
+    Alcotest.failf "Active surfaced tools without required permission:\n%s"
+      (String.concat "\n" (List.map format_surface_audit_row missing_permission));
+  Alcotest.(check bool) "active surfaced tools are routable" true
+    (missing_dispatch = []);
+  Alcotest.(check bool) "active surfaced tools are permissioned" true
+    (missing_permission = [])
 
 let test_public_mcp_count_cap () =
   (* Public_mcp surface should not exceed 80 tools to control LLM token cost. *)
@@ -422,6 +479,8 @@ let () =
         [
           Alcotest.test_case "no orphaned tools" `Quick
             test_no_orphaned_tools;
+          Alcotest.test_case "active surfaced tools have dispatch + permission" `Quick
+            test_active_surfaced_tools_are_routable_and_permissioned;
           Alcotest.test_case "Public_mcp count cap <= 80" `Quick
             test_public_mcp_count_cap;
           Alcotest.test_case "System_internal not visible" `Quick

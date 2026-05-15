@@ -177,6 +177,13 @@ let tool_spec_requires_join = [ "masc_plan_set_task"; "masc_plan_clear_task" ]
 let tool_required_permission = function
   | "masc_plan_get" | "masc_plan_get_task" ->
       Some Masc_domain.CanReadState
+  | "masc_plan_init"
+  | "masc_plan_update"
+  | "masc_plan_set_task"
+  | "masc_plan_clear_task"
+  | "masc_note_add"
+  | "masc_deliver" ->
+      Some Masc_domain.CanBroadcast
   | _ -> None
 
 let () =

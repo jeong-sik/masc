@@ -1,6 +1,6 @@
 #!/bin/bash
 # MASC Benchmark Framework
-# Usage: ./benchmark.sh [session|read|coordination|runtime|a2a|lock|all] [iterations]
+# Usage: ./benchmark.sh [session|read|coordination|runtime|a2a|all] [iterations]
 
 set -euo pipefail
 
@@ -428,27 +428,6 @@ bench_coordination() {
     "$ITERATIONS" "joined agent write path"
 }
 
-bench_locking() {
-  local lock_args
-  local lock_samples=()
-  local unlock_samples=()
-  local i
-
-  lock_args="$(jq -cn --arg agent "$MASC_AGENT" '{agent_name:$agent,file:"bench_lock.txt"}')"
-  for ((i = 0; i < BENCH_WARMUP_ITERATIONS; i += 1)); do
-    bench_call_tool "masc_lock" "$lock_args" >/dev/null
-    bench_call_tool "masc_unlock" "$lock_args" >/dev/null
-  done
-  for ((i = 0; i < ITERATIONS; i += 1)); do
-    bench_call_tool "masc_lock" "$lock_args" >/dev/null
-    lock_samples+=("$BENCH_LAST_MS")
-    bench_call_tool "masc_unlock" "$lock_args" >/dev/null
-    unlock_samples+=("$BENCH_LAST_MS")
-  done
-  append_row "mcp_lock" "file lock acquire" "${lock_samples[@]}"
-  append_row "mcp_unlock" "file lock release" "${unlock_samples[@]}"
-}
-
 bench_a2a() {
   :
 }
@@ -477,7 +456,6 @@ run_pattern() {
       ensure_session_ready
       bench_read_path
       bench_coordination
-      bench_locking
       bench_a2a
       bench_runtime
       ;;
@@ -500,13 +478,9 @@ run_pattern() {
       ensure_session_ready
       bench_a2a
       ;;
-    lock)
-      ensure_session_ready
-      bench_locking
-      ;;
     *)
       error "Unknown pattern: $PATTERN"
-      echo "Available: session, read, coordination, runtime, a2a, lock, all" >&2
+      echo "Available: session, read, coordination, runtime, a2a, all" >&2
       exit 1
       ;;
   esac

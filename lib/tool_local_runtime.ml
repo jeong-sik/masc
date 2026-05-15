@@ -281,6 +281,8 @@ let schemas : tool_schema list =
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
+let tool_spec_read_only = [ "masc_runtime_verify"; "masc_runtime_ollama_probe" ]
+
 let tool_required_permission = function
   | "masc_runtime_verify" | "masc_runtime_ollama_probe" ->
       Some Masc_domain.CanReadState
@@ -296,6 +298,8 @@ let () =
            ~module_tag:Tool_dispatch.Mod_local_runtime
            ~input_schema:s.input_schema
            ~handler_binding:Tag_dispatch
+           ~is_read_only:(List.mem s.name tool_spec_read_only)
+           ~is_idempotent:(List.mem s.name tool_spec_read_only)
            ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

@@ -153,6 +153,40 @@ let source_durable_store ~masc_root ~base_path = function
       | Some dir -> dir
       | None -> "")
 
+let source_metadata_fields ~base_path ~masc_root source =
+  [
+    ("freshness_slo_s", `Float (source_freshness_slo_s source));
+    ("producer", `String (source_producer source));
+    ( "durable_store",
+      `String (source_durable_store ~masc_root ~base_path source) );
+    ("dashboard_surface", `String (source_dashboard_surface source));
+  ]
+
+let replay_retention_json ~base_path ~masc_root ~sources : Yojson.Safe.t =
+  `Assoc
+    [
+      ("scope", `String "dashboard_telemetry_replay");
+      ("coordination_root", `String masc_root);
+      ("base_path", `String base_path);
+      ( "selected_sources",
+        `List
+          (List.map
+             (fun source -> `String (source_to_string source))
+             sources) );
+      ( "durable_stores",
+        `List
+          (List.map
+             (fun source ->
+               `Assoc
+                 (("source", `String (source_to_string source))
+                 :: source_metadata_fields ~base_path ~masc_root source))
+             sources) );
+      ( "cache_policy",
+        `String
+          "uncached; reads persisted JSONL rows; sorts newest first; n<=0 returns the full filtered window"
+      );
+    ]
+
 type store_dir_state =
   | Store_missing
   | Store_directory
@@ -988,15 +1022,7 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
   in
   let source_json_and_count source =
     let freshness_slo_s = source_freshness_slo_s source in
-    let metadata_fields =
-      [
-        ("freshness_slo_s", `Float freshness_slo_s);
-        ("producer", `String (source_producer source));
-        ( "durable_store",
-          `String (source_durable_store ~masc_root ~base_path source) );
-        ("dashboard_surface", `String (source_dashboard_surface source));
-      ]
-    in
+    let metadata_fields = source_metadata_fields ~base_path ~masc_root source in
     let coverage_gap = latest_coverage_gap_for_source coverage_gaps source in
     let keeper_dir_fields dirs =
       [

@@ -62,3 +62,14 @@ val validate_max_tokens_within_ceiling :
   provider_ceiling:int option ->
   int ->
   (int, Cascade_error_classify.masc_internal_error) result
+
+module For_testing : sig
+  val reset_auto_max_tokens_clamp_warnings : unit -> unit
+
+  val should_log_auto_max_tokens_clamp :
+    cascade_name:Keeper_cascade_profile.runtime_name ->
+    source:string ->
+    max_tokens:int ->
+    ceiling:int ->
+    bool
+end

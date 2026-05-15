@@ -498,6 +498,7 @@ describe('IdeContextLens', () => {
     )
 
     const links = [...container.querySelectorAll<HTMLButtonElement>('.ide-context-route-link')]
+    expect(container.querySelector('.ide-context-route-count')?.textContent).toBe('CTX 4')
     expect(links.map(link => link.textContent)).toEqual(['Code', 'Goal', 'Task', 'Keeper'])
 
     fireEvent.click(links.find(link => link.textContent === 'Goal')!)

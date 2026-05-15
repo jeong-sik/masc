@@ -27,7 +27,7 @@ current_callers() {
   (
     set +o pipefail
     cd "$ROOT"
-    rg -l 'Provider_adapter\.' lib test bin 2>/dev/null | sort -u
+    rg -l 'Provider_adapter\.|=\s*(Masc_mcp\.)?Provider_adapter\b' lib bin 2>/dev/null | sort -u
   )
 }
 

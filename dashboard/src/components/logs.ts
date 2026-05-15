@@ -16,11 +16,9 @@ import {
   type IdeContextRouteContext,
   type IdeContextRouteLink,
 } from './ide/ide-context-lens'
+import type { LogsResponse } from '../api/schemas/logs'
 
-interface LogData {
-  entries: LogEntry[]
-  total: number
-}
+type LogData = LogsResponse
 
 export interface LogCauseCount {
   cause: string
@@ -405,6 +403,7 @@ async function loadLogs(mode: LoadMode = 'reset') {
       const entries = sortLogEntries(resp.entries).slice(0, Math.max(1, logLimit.value))
       latestSeq.value = latestLogSeq(entries)
       return {
+        ...resp,
         entries,
         total: resp.total,
       }
@@ -428,6 +427,7 @@ async function loadLogs(mode: LoadMode = 'reset') {
 
     latestSeq.value = latestLogSeq(nextEntries)
     logResource.state.value = loaded({
+      ...resp,
       entries: nextEntries,
       total: resp.total,
     })
@@ -567,6 +567,37 @@ function renderLogSummary(summary: LogWindowSummary) {
   `
 }
 
+function lastPathSegment(path: string | undefined): string | null {
+  if (!path) return null
+  const normalized = path.replace(/\\/g, '/')
+  return normalized.split('/').filter(Boolean).pop() ?? normalized
+}
+
+function renderLogProvenance(data: LogData | undefined) {
+  if (!data) return null
+  const scope = data.retention?.scope
+  const store = lastPathSegment(data.retention?.durable_store)
+  const latestSeq = typeof data.latest_seq === 'number' ? String(data.latest_seq) : null
+  const generatedAt = data.generated_at_iso?.replace('T', ' ').replace('Z', '')
+
+  if (!data.source && !scope && !store && !latestSeq && !generatedAt) return null
+
+  return html`
+    <div class="flex flex-wrap items-center gap-1.5" data-testid="logs-provenance">
+      ${data.source ? renderSummaryChip('source', data.source, 'info') : null}
+      ${scope ? renderSummaryChip('scope', scope) : null}
+      ${latestSeq ? renderSummaryChip('seq', latestSeq) : null}
+      ${store ? html`
+        <${StatusChip}
+          tone="neutral"
+          uppercase=${false}
+        >store ${store}</${StatusChip}>
+      ` : null}
+      ${generatedAt ? renderSummaryChip('at', generatedAt) : null}
+    </div>
+  `
+}
+
 export function LogViewer() {
   useEffect(() => {
     let pollId: ReturnType<typeof setInterval> | null = null
@@ -670,6 +701,7 @@ export function LogViewer() {
           </div>
 
           <div class="logs-actions flex flex-wrap gap-3 items-center text-2xs text-[color:var(--color-fg-muted)]">
+            ${renderLogProvenance(logData)}
             <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1 tabular-nums">
               ${logEntries.length.toLocaleString()} / ${logTotal.toLocaleString()}
             </span>

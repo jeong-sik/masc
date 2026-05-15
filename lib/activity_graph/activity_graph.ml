@@ -215,15 +215,23 @@ let read_all_events config =
        []
   |> List.sort (fun a b -> Int.compare a.seq b.seq)
 
+let max_event_seq events =
+  List.fold_left (fun acc (value : event) -> max acc value.seq) 0 events
+
 let matches_filters ?(kinds = []) (value : event) =
   kinds = [] || List.mem value.kind kinds
 
-(** Returns [(page, total_matching)] where [total_matching] is the count
-    of all events matching filters before [limit] is applied. *)
-let list_events_with_total config ?(kinds = []) ~after_seq ~limit
+(** Returns [(page, total_matching, latest_store_seq, latest_matching_seq)].
+    [total_matching] and [latest_matching_seq] are computed before [limit].
+    [latest_store_seq] is the max of the persisted sequence counter and the
+    JSONL rows so a stale [_seq] file cannot make dashboard cursors move
+    backward. *)
+let list_events_with_meta config ?(kinds = []) ~after_seq ~limit
     ?since_ms () =
+  let stored = read_all_events config in
+  let latest_store_seq = max (read_current_seq config) (max_event_seq stored) in
   let all =
-    read_all_events config
+    stored
     |> List.filter (fun value ->
            value.seq > after_seq
            && matches_filters ~kinds value
@@ -238,10 +246,22 @@ let list_events_with_total config ?(kinds = []) ~after_seq ~limit
     else
       all |> List.drop (max 0 (total - limit))
   in
+  (page, total, latest_store_seq, max_event_seq all)
+
+(** Returns [(page, total_matching)] where [total_matching] is the count
+    of all events matching filters before [limit] is applied. *)
+let list_events_with_total config ?(kinds = []) ~after_seq ~limit
+    ?since_ms () =
+  let page, total, _latest_store_seq, _latest_matching_seq =
+    list_events_with_meta config ~kinds ~after_seq ~limit ?since_ms ()
+  in
   (page, total)
 
 let list_events config ?(kinds = []) ~after_seq ~limit () =
-  fst (list_events_with_total config ~kinds ~after_seq ~limit ())
+  let page, _total, _latest_store_seq, _latest_matching_seq =
+    list_events_with_meta config ~kinds ~after_seq ~limit ()
+  in
+  page
 
 let window_meta ~limit ~events_shown ~events_store_total
     ?(extra = []) () : Yojson.Safe.t =
@@ -253,6 +273,8 @@ let window_meta ~limit ~events_shown ~events_store_total
   ] @ extra)
 
 let latest_seq config = read_current_seq config
+
+let activity_events_store_path config = root_dir config
 
 (* ================================================================ *)
 (* Event emission                                                   *)
@@ -307,7 +329,9 @@ let emit config ?actor ?subject ?(tags = []) ~kind ~payload () =
 (* ================================================================ *)
 
 let json_response config ?(kinds = []) ~after_seq ~limit () =
-  let events = list_events config ~kinds ~after_seq ~limit () in
+  let events, total_matching, latest_store_seq, latest_matching_seq =
+    list_events_with_meta config ~kinds ~after_seq ~limit ()
+  in
   let next_after_seq =
     match List.rev events with
     | last :: _ -> last.seq
@@ -315,14 +339,38 @@ let json_response config ?(kinds = []) ~after_seq ~limit () =
   in
   `Assoc
     [
+      ("generated_at_iso", `String (Masc_domain.now_iso ()));
+      ("dashboard_surface", `String "/api/v1/activity/events");
+      ("source", `String "activity_graph_jsonl");
+      ( "retention",
+        `Assoc
+          [
+            ("scope", `String "activity_events");
+            ("coordination_root", `String (Coord_utils.masc_dir config));
+            ("durable_store", `String (activity_events_store_path config));
+            ("file_pattern", `String "activity-events/YYYY-MM/DD.jsonl");
+            ("seq_counter", `String (seq_path config));
+            ( "cache_policy",
+              `String
+                "uncached; reads persisted JSONL rows; delta cursor via after_seq" );
+          ] );
+      ( "query",
+        `Assoc
+          [
+            ("after_seq", `Int after_seq);
+            ("limit", `Int limit);
+            ("kinds", `List (List.map (fun value -> `String value) kinds));
+          ] );
       ("events", `List (List.map event_to_yojson events));
       ("count", `Int (List.length events));
+      ("total_matching_events", `Int total_matching);
       ("after_seq", `Int after_seq);
       ("next_after_seq", `Int next_after_seq);
       ("limit", `Int limit);
       ("room_id", `String "default");  (* backward compat *)
       ("kinds", `List (List.map (fun value -> `String value) kinds));
-      ("latest_seq", `Int (latest_seq config));
+      ("latest_seq", `Int latest_store_seq);
+      ("latest_matching_seq", `Int latest_matching_seq);
     ]
 
 (* ================================================================ *)

@@ -748,6 +748,41 @@ let append_assoc key value = function
   | json -> json
 ;;
 
+let prepend_assoc fields = function
+  | `Assoc existing -> `Assoc (fields @ existing)
+  | json -> `Assoc (fields @ [ "payload", json ])
+;;
+
+let sidecar_status_dashboard_surface = "/api/v1/sidecar/status"
+let sidecar_status_source = "sidecar_status_file"
+
+let sidecar_status_retention_json ~base_path ~id ~status_path =
+  `Assoc
+    [ "scope", `String "runtime_sidecar_status"
+    ; "status_path", `String status_path
+    ; "default_status_path"
+      , `String (Filename.concat base_path (Printf.sprintf ".gate/runtime/%s/status.json" id))
+    ; "legacy_status_path", `String (Filename.concat base_path (legacy_status_rel id))
+    ; "lifecycle_desired_path", `String (sidecar_desired_path ~base_path id)
+    ; "lifecycle_attempt_path", `String (sidecar_attempt_path ~base_path id)
+    ; "binding_store_path"
+      , `String (Filename.concat base_path (Printf.sprintf ".gate/runtime/%s/bindings.json" id))
+    ; "binding_audit_store_path"
+      , `String
+          (Filename.concat
+             base_path
+             (Printf.sprintf ".gate/runtime/%s/binding_audit.jsonl" id))
+    ]
+;;
+
+let sidecar_status_metadata_fields ~base_path ~id ~status_path =
+  [ "dashboard_surface", `String sidecar_status_dashboard_surface
+  ; "source", `String sidecar_status_source
+  ; "retention", sidecar_status_retention_json ~base_path ~id ~status_path
+  ; "generated_at_iso", `String (isoish_now ())
+  ]
+;;
+
 (** Clamp the [?lines=N] query param to [1, 1000]. Pure so unit tests
     can pin the upper bound without a request mock. *)
 let clamp_lines = function
@@ -802,7 +837,9 @@ let read_status_json ~base_path id =
     else
       `Assoc [ "ok", `Bool true; "available", `Bool false; "status_path", `String path ]
   in
-  append_assoc "sidecar_lifecycle" (lifecycle_json ~base_path id status) status
+  status
+  |> append_assoc "sidecar_lifecycle" (lifecycle_json ~base_path id status)
+  |> prepend_assoc (sidecar_status_metadata_fields ~base_path ~id ~status_path:path)
 ;;
 
 let handle_status state request reqd =

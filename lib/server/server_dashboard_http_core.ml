@@ -470,9 +470,11 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
 ;;
 
 let operator_snapshot_http_json ~state ~sw ~clock request =
+  let config = state.Mcp_server.room_config in
+  let proc_mgr = state.Mcp_server.proc_mgr in
   let net, mono_clock = state_dashboard_runtime_caps state in
   let actor =
-    dashboard_actor_for_request ~base_path:state.Mcp_server.room_config.base_path request
+    dashboard_actor_for_request ~base_path:config.base_path request
   in
   let view = query_param request "view" in
   let default_summary_request =
@@ -484,8 +486,48 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
     | None -> true
     | Some raw -> String.equal (String.lowercase_ascii (String.trim raw)) "summary"
   in
+  let compute_default_summary () =
+    let started_at = Unix.gettimeofday () in
+    run_dashboard_compute
+      ~mode:Offloaded_readonly
+      ?net
+      ?mono_clock
+      ~sw
+      ~clock
+      ~config
+      (fun ~config ~sw ->
+         let ctx : _ Operator_control.context =
+           { config
+           ; agent_name = "dashboard"
+           ; sw
+           ; clock
+           ; proc_mgr
+           ; net = None
+           ; mcp_session_id = None
+           }
+         in
+         Operator_control.snapshot_json
+           ~actor:"dashboard"
+           ~view:"summary"
+           ~include_messages:true
+           ~include_keepers:true
+           ~include_summary_fields:false
+           ~lightweight_summary:true
+           ctx)
+    |> with_projection_diagnostics
+         ~surface:"operator_snapshot"
+         ~started_at
+         ~extra:(operator_snapshot_extra ())
+  in
   if default_summary_request
-  then cached_surface_json _operator_snapshot_cache
+  then
+    cached_surface_or_first_success_json
+      _operator_snapshot_cache
+      ~cache_key:(dashboard_cache_key config "operator_snapshot" "default-summary")
+      ~ttl:5.0
+      ~clock
+      ~timeout_sec:dashboard_request_timeout_s
+      compute_default_summary
   else (
     let started_at = Unix.gettimeofday () in
     let include_messages =
@@ -514,14 +556,14 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
                ?mono_clock
                ~sw
                ~clock
-               ~config:state.Mcp_server.room_config
+               ~config
                (fun ~config ~sw ->
                   let ctx : _ Operator_control.context =
                     { config
                     ; agent_name = Option.value ~default:"dashboard" actor
                     ; sw
                     ; clock
-                    ; proc_mgr = state.Mcp_server.proc_mgr
+                    ; proc_mgr
                     ; net = state.Mcp_server.net
                     ; mcp_session_id = None
                     }

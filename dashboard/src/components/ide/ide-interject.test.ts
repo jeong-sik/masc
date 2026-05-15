@@ -34,7 +34,7 @@ describe('IdeInterject', () => {
       tool_name: 'ocamllsp',
     })
 
-    expect(links.map(link => link.label)).toEqual(['Code', 'Keeper'])
+    expect(links.map(link => link.label)).toEqual(['Code', 'Telemetry', 'Keeper'])
     expect(links.find(link => link.label === 'Code')).toMatchObject({
       params: {
         section: 'ide-shell',
@@ -47,6 +47,14 @@ describe('IdeInterject', () => {
         keeper: 'sangsu',
       },
       evidence: 'Code lib/runtime.ml:42',
+    })
+    expect(links.find(link => link.label === 'Telemetry')).toMatchObject({
+      params: {
+        section: 'fleet-health',
+        view: 'event-log',
+        q: 'interject keeper:sangsu mode:reviewing tool:ocamllsp',
+      },
+      evidence: 'Fleet telemetry event log · query interject keeper:sangsu mode:reviewing tool:ocamllsp',
     })
   })
 
@@ -66,7 +74,8 @@ describe('IdeInterject', () => {
     expect(input?.getAttribute('aria-label')).toBe('Interject input')
 
     const contextButtons = [...container.querySelectorAll('.ide-interject-context-links button')]
-    expect(contextButtons.map(button => button.textContent)).toEqual(['Keeper'])
+    expect(container.querySelector('.ide-interject-context-count')?.textContent).toBe('CTX 2')
+    expect(contextButtons.map(button => button.textContent)).toEqual(['Telemetry', 'Keeper'])
 
     const buttons = [...container.querySelectorAll<HTMLButtonElement>('.ide-interject-actions button')]
     expect(buttons.map(button => button.textContent)).toEqual(['Send', 'Approve', 'Pause', 'Drain'])
@@ -154,9 +163,17 @@ describe('IdeInterject', () => {
     })
 
     const contextButtons = [...container.querySelectorAll<HTMLButtonElement>('.ide-interject-context-links button')]
-    expect(contextButtons.map(button => button.textContent)).toEqual(['Code', 'Keeper'])
+    expect(container.querySelector('.ide-interject-context-count')?.textContent).toBe('CTX 3')
+    expect(contextButtons.map(button => button.textContent)).toEqual(['Code', 'Telemetry', 'Keeper'])
 
     fireEvent.click(contextButtons.find(button => button.textContent === 'Code')!)
     expect(window.location.hash).toBe('#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=42&surface=Interject&label=ocamllsp&source_id=interject%3Asangsu&keeper=sangsu')
+
+    fireEvent.click(contextButtons.find(button => button.textContent === 'Telemetry')!)
+    expect(routeHashParams().get('q')).toBe('interject keeper:sangsu mode:reviewing tool:ocamllsp')
   })
 })
+
+function routeHashParams(): URLSearchParams {
+  return new URLSearchParams(window.location.hash.split('?')[1] ?? '')
+}

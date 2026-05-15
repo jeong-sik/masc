@@ -180,8 +180,24 @@ export function normalizeNamespaceTruth(raw: unknown): DashboardNamespaceTruthRe
   const commandBlock = isRecord(root.command) ? root.command : {}
   const metaCognitionBlock = isRecord(root.meta_cognition) ? root.meta_cognition : {}
   const operatorBlock = isRecord(root.operator) ? root.operator : {}
+  const retentionBlock = isRecord(root.retention) ? root.retention : null
   return {
     generated_at: asString(root.generated_at),
+    generated_at_iso: asString(root.generated_at_iso),
+    dashboard_surface: asString(root.dashboard_surface),
+    dashboard_aliases: asStringArray(root.dashboard_aliases),
+    source: asString(root.source),
+    retention: retentionBlock
+      ? {
+          scope: asString(retentionBlock.scope),
+          coordination_root: asString(retentionBlock.coordination_root),
+          workspace_path: asString(retentionBlock.workspace_path),
+          shell_input: asString(retentionBlock.shell_input),
+          execution_input: asString(retentionBlock.execution_input),
+          command_input: asString(retentionBlock.command_input),
+          cache_policy: asString(retentionBlock.cache_policy),
+        }
+      : undefined,
     root: {
       status: normalizeServerStatus(namespaceBlock.status),
       counts: isRecord(namespaceBlock.counts)

@@ -9,8 +9,8 @@
 
 (** GLM auto-cascade model list: quality-first, then speed.
     Returns the ordered list of models to try when [glm:auto] is specified.
-    Configurable via [ZAI_AUTO_MODELS] env var (comma-separated).
-    Default: [\["glm-5.1"; "glm-5-turbo"; "glm-4.7"; "glm-4.7-flashx"\]]. *)
+    The default order comes from the OAS ZAI catalog and remains configurable
+    via [ZAI_AUTO_MODELS] env var (comma-separated). *)
 val glm_auto_models : unit -> string list
 
 val glm_coding_auto_models : unit -> string list
@@ -57,7 +57,7 @@ val resolve_glm_coding_model
   -> model_resolution
 
 (** Resolve a GLM model alias to the concrete API model ID.
-    - ["auto"] -> env var [ZAI_DEFAULT_MODEL] or ["glm-5.1"]
+    - ["auto"] -> env var [ZAI_DEFAULT_MODEL] or the OAS ZAI catalog head
     - ["flash"] -> ["glm-4.7-flashx"]
     - ["turbo"] -> ["glm-5-turbo"]
     - ["vision"] -> ["glm-4.6v"]
@@ -65,6 +65,12 @@ val resolve_glm_coding_model
 val resolve_glm_model_id : string -> string
 
 val resolve_glm_coding_model_id : string -> string
+
+(** Resolve provider:auto expansion for any registered cascade provider. *)
+val auto_models_for_cascade_prefix
+  :  ?getenv:(string -> string option)
+  -> string
+  -> string list option
 
 (** Resolve "auto" and aliases to concrete model IDs for any provider.
     Cloud providers resolve aliases; local providers (llama, ollama) resolve

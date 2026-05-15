@@ -499,9 +499,13 @@ let read_context_ratio ~(config : Coord.config) ~(meta : keeper_meta) : float =
 
 (** Read continuity summary from checkpoint messages or meta fallback. *)
 let read_continuity_summary ~(config : Coord.config) ~(meta : keeper_meta) : string =
+  let render_bounded_snapshot snapshot =
+    keeper_state_snapshot_to_summary_text snapshot
+    |> Keeper_memory_policy.cap_continuity_summary_text
+  in
   try
     match Keeper_memory_policy.read_progress_snapshot ~config ~name:meta.name with
-    | Some snapshot -> keeper_state_snapshot_to_summary_text snapshot
+    | Some snapshot -> render_bounded_snapshot snapshot
     | None ->
       let cascade_models = Keeper_model_labels.configured_model_labels_of_meta meta in
       let primary_max_context =
@@ -542,7 +546,7 @@ let read_continuity_summary ~(config : Coord.config) ~(meta : keeper_meta) : str
            | None -> structured_snapshot
          in
          (match snapshot with
-          | Some s -> keeper_state_snapshot_to_summary_text s
+          | Some s -> render_bounded_snapshot s
           | None ->
             continuity_fallback_summary_text
               ~continuity_summary:meta.continuity_summary

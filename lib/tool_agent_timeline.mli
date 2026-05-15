@@ -44,7 +44,10 @@ val build_timeline :
   Yojson.Safe.t
 (** [build_timeline config ~agent_name ~since_hours ~limit
       ~include_tasks ~include_board ~include_tool_calls] returns a
-    JSON object with two keys:
+    JSON object with source metadata plus the timeline payload:
+
+    - [dashboard_surface], [source], [retention], [generated_at_iso]
+      — dashboard provenance for the multi-source read model.
 
     - [events] — the truncated, chronologically-sorted event
       list (most recent [limit] events).

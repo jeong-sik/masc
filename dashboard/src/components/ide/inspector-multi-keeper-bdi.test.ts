@@ -719,6 +719,7 @@ describe('InspectorMultiKeeperBDI — file focus label (cursor overlay → IDE j
 
     const ashPanel = container.querySelector('article[data-keeper="ash"]')
     expect(ashPanel).not.toBeNull()
+    expect(ashPanel!.querySelector('.ide-bdi-route-count')?.textContent).toBe('CTX 3')
     const ashLinks = [...ashPanel!.querySelectorAll<HTMLButtonElement>('.ide-bdi-route-link')]
     expect(ashLinks.map(link => link.textContent)).toEqual(['Code', 'Telemetry', 'Keeper'])
 
@@ -728,6 +729,7 @@ describe('InspectorMultiKeeperBDI — file focus label (cursor overlay → IDE j
 
     const scholarChip = container.querySelector('span[role="listitem"][data-keeper="scholar"]')
     expect(scholarChip).not.toBeNull()
+    expect(scholarChip!.querySelector('.ide-bdi-route-count')?.textContent).toBe('CTX 3')
     const scholarLinks = [...scholarChip!.querySelectorAll<HTMLButtonElement>('.ide-bdi-route-link')]
     expect(scholarLinks.map(link => link.textContent)).toEqual(['Code', 'Telemetry', 'Keeper'])
 

@@ -172,13 +172,23 @@ describe('IdePersistencePanel', () => {
 
     const links = Array.from(screen.getByLabelText('Persistence context links')
       .querySelectorAll<HTMLButtonElement>('button'))
-    expect(links.map(link => link.textContent)).toEqual(['Code', 'Keeper'])
+    expect(links.map(link => link.textContent)).toEqual(['Code', 'Telemetry', 'Keeper'])
     expect(links[0]?.title).toBe('Code lib/runtime.ml:42')
-    expect(links[1]?.title).toBe('Keeper sangsu')
+    expect(links[1]?.title).toBe('Fleet telemetry event log · query sangsu')
+    expect(links[2]?.title).toBe('Keeper sangsu')
+
+    const badge = screen.getByText('CTX 3')
+    expect(badge.getAttribute('data-context-route-count')).toBe('3')
+    expect(badge.getAttribute('title')).toBe('Linked context: Code, Telemetry, Keeper')
+    expect(badge.getAttribute('aria-label'))
+      .toBe('Persistence map has 3 linked context routes: Code, Telemetry, Keeper')
 
     fireEvent.click(links[0]!)
     expect(window.location.hash).toBe(
       '#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=42&surface=Persistence&label=sangsu+current+focus&source_id=persistence%3Asangsu&keeper=sangsu',
     )
+
+    fireEvent.click(links[1]!)
+    expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&q=sangsu')
   })
 })

@@ -33,6 +33,7 @@ import {
   type AuditLedgerResponse,
   type KeeperDecision,
   type KeeperDecisionsResponse,
+  type DashboardFeedMetadata,
 } from '../api/dashboard'
 import { LoadingState, ErrorState } from './common/feedback-state'
 import { StatTile } from './common/stat-tile'
@@ -94,13 +95,13 @@ type KeeperLoadState =
 type HeuristicLoadState =
   | { status: 'idle' }
   | { status: 'loading' }
-  | { status: 'loaded'; data: HeuristicEvent[]; limit: number }
+  | { status: 'loaded'; data: HeuristicEvent[]; limit: number; meta: DashboardFeedMetadata }
   | { status: 'error'; message: string }
 
 type StressLoadState =
   | { status: 'idle' }
   | { status: 'loading' }
-  | { status: 'loaded'; events: StressEvent[]; board: AgentStressRow[]; limit: number }
+  | { status: 'loaded'; events: StressEvent[]; board: AgentStressRow[]; limit: number; meta: DashboardFeedMetadata }
   | { status: 'error'; message: string }
 
 type CoverageLoadState =
@@ -248,7 +249,7 @@ async function loadHeuristics(limit = 100) {
   heuristicState.value = { status: 'loading' }
   try {
     const resp = await fetchHeuristics(limit)
-    heuristicState.value = { status: 'loaded', data: resp.events, limit: resp.limit }
+    heuristicState.value = { status: 'loaded', data: resp.events, limit: resp.limit, meta: resp }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'heuristic metrics 불러오기 실패'
     heuristicState.value = { status: 'error', message }
@@ -259,7 +260,7 @@ async function loadStress(limit = 100) {
   stressState.value = { status: 'loading' }
   try {
     const resp = await fetchStress(limit)
-    stressState.value = { status: 'loaded', events: resp.events, board: resp.agent_stress, limit: resp.limit }
+    stressState.value = { status: 'loaded', events: resp.events, board: resp.agent_stress, limit: resp.limit, meta: resp }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'stress events 불러오기 실패'
     stressState.value = { status: 'error', message }
@@ -620,7 +621,29 @@ function CostLatency({ buckets, p50, p95 }: {
   `
 }
 
-function HeuristicLog({ events, limit }: { events: HeuristicEvent[]; limit: number }) {
+function feedRetentionValue(meta: DashboardFeedMetadata, key: string): string | null {
+  const value = meta.retention?.[key]
+  return typeof value === 'string' && value.trim() ? value : null
+}
+
+function FeedSourceStrip({ meta }: { meta: DashboardFeedMetadata }) {
+  const durableStore = feedRetentionValue(meta, 'durable_store')
+  const durableReplay = feedRetentionValue(meta, 'durable_replay_surface')
+  const items = [
+    meta.source ? `source ${meta.source}` : '',
+    meta.dashboard_surface ? `surface ${meta.dashboard_surface}` : '',
+    durableStore ? `store ${durableStore}` : '',
+    durableReplay ? `replay ${durableReplay}` : '',
+  ].filter(Boolean)
+  if (items.length === 0) return null
+  return html`
+    <div class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2 font-mono text-2xs text-text-muted">
+      ${items.join(' · ')}
+    </div>
+  `
+}
+
+function HeuristicLog({ events, limit, meta }: { events: HeuristicEvent[]; limit: number; meta: DashboardFeedMetadata }) {
   const fmtTime = (ts: number): string => {
     const d = new Date(ts * 1000)
     return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
@@ -630,6 +653,7 @@ function HeuristicLog({ events, limit }: { events: HeuristicEvent[]; limit: numb
 
   return html`
     <section class="flex flex-col gap-2" aria-label=${`Heuristic log · ${events.length} events`}>
+      <${FeedSourceStrip} meta=${meta} />
       <div class="flex items-center justify-between rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
         <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">heuristic log · ${events.length} events · ${triggeredCount} triggered</span>
         <span class="font-mono text-2xs text-text-muted">limit ${limit}</span>
@@ -670,7 +694,7 @@ function HeuristicLog({ events, limit }: { events: HeuristicEvent[]; limit: numb
   `
 }
 
-function StressBoard({ rows, events, limit }: { rows: AgentStressRow[]; events: StressEvent[]; limit: number }) {
+function StressBoard({ rows, events, limit, meta }: { rows: AgentStressRow[]; events: StressEvent[]; limit: number; meta: DashboardFeedMetadata }) {
   const fmtTime = (ts: number): string => {
     const d = new Date(ts * 1000)
     return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
@@ -717,6 +741,7 @@ function StressBoard({ rows, events, limit }: { rows: AgentStressRow[]; events: 
 
   return html`
     <section class="flex flex-col gap-2" aria-label=${`Stress board · ${rows.length} agents · ${events.length} events`}>
+      <${FeedSourceStrip} meta=${meta} />
       <div class="flex items-center justify-between rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
         <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">stress board · ${rows.length} agents · ${events.length} events</span>
         <span class="font-mono text-2xs text-text-muted">limit ${limit}</span>
@@ -791,6 +816,7 @@ function HeuristicByModule({ coverage }: { coverage: HeuristicCoverage }) {
 
   return html`
     <section class="flex flex-col gap-2" aria-label="Heuristic by module">
+      <${FeedSourceStrip} meta=${coverage} />
       <div class="flex items-center justify-between rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
         <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">heuristic by module · ${coverage.total_events} events · ${coverage.decision_shape_count} decision shapes · ${coverage.mixed_outcome_sites} mixed sites</span>
       </div>
@@ -1046,7 +1072,7 @@ function AuditLedgerBoard({ entries, count, focus, logId }: { entries: AuditEntr
   `
 }
 
-function KeeperDecisionsBoard({ events, limit }: { events: KeeperDecision[]; limit: number }) {
+function KeeperDecisionsBoard({ events, limit, meta }: { events: KeeperDecision[]; limit: number; meta: DashboardFeedMetadata }) {
   const fmtTime = (ts: number | null): string => {
     if (ts == null) return '—'
     const d = new Date(ts * 1000)
@@ -1055,6 +1081,7 @@ function KeeperDecisionsBoard({ events, limit }: { events: KeeperDecision[]; lim
 
   return html`
     <section class="flex flex-col gap-4" aria-label="Keeper decisions">
+      <${FeedSourceStrip} meta=${meta} />
       <div class="flex items-center justify-between rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
         <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">keeper decisions · ${events.length} events · limit ${limit}</span>
       </div>
@@ -1316,7 +1343,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
           <h2 class="text-base font-semibold text-text-strong">휴리스틱</h2>
         </header>
         ${heuristicState.value.status === 'loaded'
-          ? html`<${HeuristicLog} events=${heuristicState.value.data} limit=${heuristicState.value.limit} />`
+          ? html`<${HeuristicLog} events=${heuristicState.value.data} limit=${heuristicState.value.limit} meta=${heuristicState.value.meta} />`
           : heuristicState.value.status === 'error'
             ? html`<${ErrorState} message=${heuristicState.value.message} onRetry=${() => void loadHeuristics()} />`
             : html`<${LoadingState} />`}
@@ -1339,7 +1366,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
           <h2 class="text-base font-semibold text-text-strong">스트레스 이벤트</h2>
         </header>
         ${stressState.value.status === 'loaded'
-          ? html`<${StressBoard} rows=${stressState.value.board} events=${stressState.value.events} limit=${stressState.value.limit} />`
+          ? html`<${StressBoard} rows=${stressState.value.board} events=${stressState.value.events} limit=${stressState.value.limit} meta=${stressState.value.meta} />`
           : stressState.value.status === 'error'
             ? html`<${ErrorState} message=${stressState.value.message} onRetry=${() => void loadStress()} />`
             : html`<${LoadingState} />`}
@@ -1386,6 +1413,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
           ? html`<${KeeperDecisionsBoard}
               events=${keeperDecisionsState.value.data.events}
               limit=${keeperDecisionsState.value.data.limit}
+              meta=${keeperDecisionsState.value.data}
             />`
           : keeperDecisionsState.value.status === 'error'
             ? html`<${ErrorState}

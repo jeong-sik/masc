@@ -168,8 +168,18 @@ function KeeperShellContextLinks({
   readonly links: ReadonlyArray<IdeContextRouteLink>
 }) {
   if (links.length === 0) return null
+  const routeLabels = routeLinkLabels(links)
   return html`
     <div class="keeper-shell-context-links" aria-label="Keeper shell operational links">
+      <span
+        class="keeper-shell-context-badge"
+        data-context-route-count=${links.length}
+        title=${`Linked context: ${routeLabels}`}
+        aria-label=${`Keeper shell has ${links.length} linked context routes: ${routeLabels}`}
+        style=${KEEPER_SHELL_CONTEXT_BADGE_STYLE}
+      >
+        CTX ${links.length}
+      </span>
       ${links.map(link => html`
         <button
           key=${link.id}
@@ -181,6 +191,24 @@ function KeeperShellContextLinks({
       `)}
     </div>
   `
+}
+
+const KEEPER_SHELL_CONTEXT_BADGE_STYLE = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  height: '17px',
+  padding: '0 5px',
+  border: '1px solid var(--color-border-muted)',
+  borderRadius: 'var(--r-1)',
+  background: 'var(--color-bg-subtle)',
+  color: 'var(--color-fg-muted)',
+  fontFamily: 'var(--font-mono)',
+  fontSize: 'var(--fs-9)',
+  whiteSpace: 'nowrap',
+} as const
+
+function routeLinkLabels(links: ReadonlyArray<IdeContextRouteLink>): string {
+  return links.map(link => link.label).join(', ')
 }
 
 function KeeperShellSummaryStrip({

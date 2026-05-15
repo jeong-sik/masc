@@ -1,7 +1,7 @@
 (** Voice runtime overlay.
 
     This module owns voice-only runtime resolution so the LLM
-    [Provider_adapter] boundary no longer needs to export TTS/STT/session
+    the removed provider-adapter boundary no longer needs to export TTS/STT/session
     helpers. *)
 
 type transport =

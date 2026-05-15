@@ -448,8 +448,9 @@ Static pre-filtering은 OAS Guardrails가, stateful per-call checks는 Eval_gate
 `memory_oas_bridge.ml`은 MASC 메모리를 OAS `Memory.t` 5-tier에 연결한다. 상세는 12-memory-systems.md 9절 참조.
 
 핵심 API:
-- `create_memory_full`: 5-tier 전체를 seed하는 팩토리
-- `flush_all`: Agent.run 완료 후 episodic + procedural flush
+- `create_memory`: filesystem-first JSONL long_term backend가 연결된 OAS `Memory.t` 생성
+- `load_episodes_text` / `load_procedures_text` / `load_world_text`: hook-first prompt injection용 read path
+- `flush_incremental`: Agent.run 완료 후 episodic + procedural flush
 - `make_backend`: filesystem-first JSONL long_term_backend 선택
 
 ---
@@ -479,7 +480,7 @@ Static pre-filtering은 OAS Guardrails가, stateful per-call checks는 Eval_gate
 | keeper `working_context` wrapper | Open | keeper runtime still wraps OAS context/checkpoint state |
 | keeper checkpoint nativeization | Open | keeper path still serializes MASC-owned context |
 | message marker leakage | Open | `[STATE]`, `[GOAL]`, memory-summary markers still carry domain semantics in raw text |
-| memory bridge hooks/callbacks | Open | seeding/flushing remains imperative in `memory_oas_bridge.ml` |
+| memory bridge hooks/callbacks | Complete for current bridge | imperative seeding was removed; read-side hook-first injection plus post-turn `flush_incremental` is the active contract |
 | team-session bridge fidelity | Open | healthcheck still calls out projection/resource-health gaps |
 
 Checkpoint truth / replay semantics for the first three ledger items are
@@ -515,7 +516,7 @@ Detailed implementation checklist lives in
 |---------|----------------|-------|
 | `oas_worker` / `worker_oas` / `verifier_oas` | Correct | MASC consumes OAS runtime/build/hook contracts without teaching OAS about room/task semantics |
 | `context_compact_oas` | Acceptable but lossy | OAS reducer is authoritative, but MASC marker heuristics still influence scoring |
-| `memory_oas_bridge` | Acceptable but lossy | consumer adapter is correct; lifecycle is still seed/flush driven rather than hook-first |
+| `memory_oas_bridge` | Acceptable | consumer adapter is correct; lifecycle is hook-first read injection plus post-turn flush |
 | keeper context/checkpoint continuity path | Boundary violation | duplicate runtime ownership + raw text continuity markers remain |
 
 ### 12.3 Priority Order

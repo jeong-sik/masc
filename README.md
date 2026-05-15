@@ -406,3 +406,4 @@ raw `opam exec -- dune ...` 은 의도적인 CI-parity 점검 때만. 평소 개
 ## License
 
 MIT. 라이선스가 보증을 의미하지는 않습니다. 윗문단을 다시 읽어주세요.
+# Canary test for draft-PR upload readiness

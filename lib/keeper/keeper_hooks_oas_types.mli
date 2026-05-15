@@ -133,3 +133,20 @@ val stop_reason_label_unknown : string
 val zero_usage : Agent_sdk.Types.api_usage
 (** Internal: zero-token api_usage sentinel used by classify_usage_trust
     when telemetry is missing. *)
+
+val telemetry_has_canonical_model_id :
+  Agent_sdk.Types.inference_telemetry option -> bool
+(** Internal: true when telemetry carries a non-empty canonical_model_id. *)
+
+val is_runtime_selector_alias : string -> bool
+(** Internal: true when the trimmed model leaf equals ["auto"]. *)
+
+val ms_per_second : float
+(** Internal: 1000.0 unit-conversion constant for duration_ms. *)
+
+val cost_source_unmetered_provider : string
+val cost_source_computed : string
+(** Internal: cost-source labels used by classify_cost_usd_source. *)
+
+val oas_reported_cost : Agent_sdk.Types.api_usage -> float
+(** Internal: extract positive cost from usage; clamps None/0/negative to 0.0. *)

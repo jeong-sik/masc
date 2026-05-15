@@ -338,25 +338,8 @@ let empty_response_content_metric =
 
 (* zero_usage moved to Keeper_hooks_oas_types (intra-library file split). *)
 
-let telemetry_has_canonical_model_id
-    (telemetry : Agent_sdk.Types.inference_telemetry option) =
-  match telemetry with
-  | Some { canonical_model_id = Some id; _ } -> String.trim id <> ""
-  | Some _ | None -> false
-
-let is_runtime_selector_alias model =
-  let trimmed = String.trim model |> String.lowercase_ascii in
-  let leaf =
-    match String.rindex_opt trimmed ':' with
-    | None -> trimmed
-    | Some idx when idx >= String.length trimmed - 1 -> ""
-    | Some idx ->
-        String.sub trimmed (idx + 1) (String.length trimmed - idx - 1)
-        |> String.trim
-  in
-  String.equal leaf "auto"
-
-let ms_per_second = 1000.0
+(* telemetry_has_canonical_model_id / is_runtime_selector_alias / ms_per_second
+   moved to Keeper_hooks_oas_types (intra-library file split, 2026-05-16). *)
 
 (* #10083: keep the missing/alias observability, but return the keeper-facing
    runtime lane instead of reconstructing OAS-owned model identity. *)
@@ -479,14 +462,8 @@ let record_usage_anomaly_metrics ~keeper_name ~model usage_trust =
    The include is hoisted to the top of this module — see the comment
    near [keeper_denied_tools]. *)
 
-let cost_source_unmetered_provider = "unmetered_provider"
-let cost_source_computed = "computed"
-
-let oas_reported_cost (usage : Agent_sdk.Types.api_usage) : float =
-  match usage.cost_usd with
-  | Some cost when cost > 0.0 -> cost
-  | Some _ -> 0.0
-  | None -> 0.0
+(* cost_source_unmetered_provider / cost_source_computed / oas_reported_cost
+   moved to Keeper_hooks_oas_types (intra-library file split, 2026-05-16). *)
 
 (* type tool_execution_summary + builder moved to Keeper_hooks_oas_types
    (intra-library file split, 2026-05-16). *)

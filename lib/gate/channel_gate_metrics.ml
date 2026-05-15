@@ -413,41 +413,6 @@ let snapshot () : channel_stats list =
          if by_messages <> 0 then by_messages
          else String.compare a.channel b.channel)
 
-let _binding_snapshot () =
-  Eio_guard.with_mutex_ro mu (fun () ->
-      Hashtbl.fold
-        (fun channel acc rows ->
-          Hashtbl.fold
-            (fun room_id binding binding_rows ->
-              {
-                channel;
-                room_id;
-                keeper = binding.keeper;
-                message_count = binding.msg_count;
-                success_count = binding.success_count;
-                error_count = binding.err_count;
-                duplicate_count = binding.duplicate_count;
-                last_activity_ts = binding.last_ts;
-                last_success_ts = binding.last_success_ts;
-                last_error_ts = binding.last_error_ts;
-                last_error = binding.last_error;
-                last_error_kind = binding.last_error_kind;
-                last_outcome = binding.last_outcome;
-                total_duration_ms = binding.total_dur_ms;
-                timed_count = binding.timed_count;
-                max_duration_ms = binding.max_dur_ms;
-              }
-              :: binding_rows)
-            acc.bindings rows)
-        table [])
-  |> List.sort (fun a b ->
-         let by_activity = Float.compare b.last_activity_ts a.last_activity_ts in
-         if by_activity <> 0 then by_activity
-         else
-           let by_channel = String.compare a.channel b.channel in
-            if by_channel <> 0 then by_channel
-            else String.compare a.room_id b.room_id)
-
 let take_up_to limit rows =
   let rec loop remaining acc items =
     match (remaining, items) with
@@ -509,8 +474,6 @@ let percent numerator denominator =
       (Float.round
          ((float_of_int numerator *. 100.0) /. float_of_int denominator))
 
-let _effective_attempt_count (stats : channel_stats) =
-  max 0 (stats.message_count - stats.duplicate_count)
 
 let effective_attempt_count_counts ~message_count ~duplicate_count =
   max 0 (message_count - duplicate_count)

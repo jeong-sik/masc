@@ -57,7 +57,7 @@ let is_pg_backend config =
 
 (** Shared in-memory pubsub for FileSystem and Memory backends.
     All supported backends now share the same in-memory pubsub. *)
-let _shared_pubsub = Backend_types.Pubsub_mem.create ()
+let shared_pubsub = Backend_types.Pubsub_mem.create ()
 
 (** Adapt Backend get (returns Ok string | Error NotFound) to
     the (string option, error) result shape used by all callers. *)
@@ -145,12 +145,12 @@ let backend_health_check config =
 let backend_publish config ~channel ~message =
   match config.backend with
   | Memory _ | FileSystem _ ->
-      Backend_types.Pubsub_mem.publish (_shared_pubsub) ~channel ~message
+      Backend_types.Pubsub_mem.publish (shared_pubsub) ~channel ~message
 
 let backend_subscribe config ~channel ~callback =
   match config.backend with
   | Memory _ | FileSystem _ ->
-      Backend_types.Pubsub_mem.subscribe (_shared_pubsub) ~channel ~callback
+      Backend_types.Pubsub_mem.subscribe (shared_pubsub) ~channel ~callback
 
 let backend_name config =
   match config.backend with

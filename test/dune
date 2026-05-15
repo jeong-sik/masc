@@ -1606,3 +1606,11 @@
  (name test_pr_i_1_typed_post_hook_surface)
  (modules test_pr_i_1_typed_post_hook_surface)
  (libraries masc_test_deps))
+
+; RFC-0084 PR-I-2.a — Tool_metrics typed post-hook migration.
+; Pins 0 legacy register_post_hook + exactly 1 typed register, and
+; the (Handled, Some _) guard that preserves behaviour-equivalence.
+(test
+ (name test_pr_i_2a_tool_metrics_typed)
+ (modules test_pr_i_2a_tool_metrics_typed)
+ (libraries alcotest))

@@ -307,6 +307,7 @@ let observe_phase_dwell ~keeper_name ~from_label =
         dwell)
 
 let emit_transition ?ctx ~keeper_name ~turn_id ?prev state =
+  let now = Unix.gettimeofday () in
   let prev_label =
     match prev with
     | Some s -> turn_state_label s
@@ -315,7 +316,7 @@ let emit_transition ?ctx ~keeper_name ~turn_id ?prev state =
   (match prev with
    | Some _ -> observe_phase_dwell ~keeper_name ~from_label:prev_label
    | None -> ());
-  Hashtbl.replace last_transition_at keeper_name (Unix.gettimeofday ());
+  Hashtbl.replace last_transition_at keeper_name now;
   let classified =
     match prev with
     | Some from_state ->
@@ -342,6 +343,16 @@ let emit_transition ?ctx ~keeper_name ~turn_id ?prev state =
   Log.Keeper.info ~keeper_name ~turn_id
     "[fsm:transition] %s -> %s action=%s%s" prev_label state_label action_label
     stop_label;
+  Keeper_transition_audit.record_turn_fsm_transition
+    ~keeper_name
+    { turn_fsm_turn_id = turn_id
+    ; turn_fsm_prev_state = prev_label
+    ; turn_fsm_new_state = state_label
+    ; turn_fsm_action = action_label
+    ; turn_fsm_stop_signaled_before = Option.map (fun c -> c.stop_signaled_before) ctx
+    ; turn_fsm_stop_signaled_after = Option.map (fun c -> c.stop_signaled_after) ctx
+    ; turn_fsm_wall_clock_at = now
+    };
   Prometheus.inc_counter Keeper_metrics.metric_keeper_turn_fsm_transitions
     ~labels:
       [ ("from", prev_label);

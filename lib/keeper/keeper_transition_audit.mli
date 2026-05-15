@@ -32,6 +32,23 @@ type completed_turn_record = {
   outcome : completed_turn_outcome;
 }
 
+(** Append-only WAL row for RFC-0072 keeper turn FSM transitions.  This
+    records turn-internal state movement before the final execution receipt
+    exists, so restart forensics do not have to rely on stderr/log scraping. *)
+type turn_fsm_transition_record = {
+  turn_fsm_turn_id : int;
+  turn_fsm_prev_state : string;
+  turn_fsm_new_state : string;
+  turn_fsm_action : string;
+  turn_fsm_stop_signaled_before : bool option;
+  turn_fsm_stop_signaled_after : bool option;
+  turn_fsm_wall_clock_at : float;
+}
+
+(** Serialize a turn FSM transition WAL row. *)
+val turn_fsm_transition_to_json :
+  turn_fsm_transition_record -> Yojson.Safe.t
+
 (** {1 In-memory Ring Buffer} *)
 
 (** Record a transition in the per-keeper ring buffer (last 50). *)
@@ -49,6 +66,11 @@ val recent_transitions_json :
 (** Record a completed keeper turn in the per-keeper ring buffer (last 50). *)
 val record_completed_turn :
   keeper_name:string -> completed_turn_record -> unit
+
+(** Append a turn FSM transition to the same durable audit sink used by
+    lifecycle transitions and completed turns. *)
+val record_turn_fsm_transition :
+  keeper_name:string -> turn_fsm_transition_record -> unit
 
 (** Retrieve recent completed keeper turns for a keeper, newest first. *)
 val recent_completed_turns :

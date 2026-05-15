@@ -2323,6 +2323,16 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
     (contains_substring prompt "keeper_pr_create");
   check
     bool
+    "masc tools are not bash commands"
+    true
+    (contains_substring prompt "MASC tool names as shell commands");
+  check
+    bool
+    "claim alone is not execution progress"
+    true
+    (contains_substring prompt "assignment actions, not execution progress");
+  check
+    bool
     "gh pr create path not documented"
     false
     (contains_substring prompt "keeper_shell op=gh cmd='pr create --draft");

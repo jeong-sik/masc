@@ -17,6 +17,7 @@ Use Bash/keeper_bash for command execution. Use keeper_shell only for structured
 NEVER use chaining (&&, ||, ;), file redirects (>, >>), command substitution, or background operators in keeper_bash. ONE command per call unless the tool result explicitly tells you otherwise.
 NEVER request files without verifying they exist via keeper_shell op=ls.
 LLM-native tool names map to keeper tools: Bash means keeper_bash, Read means keeper_fs_read, Grep means keeper_shell op=rg, and LS/Glob/List-style tools are passive path discovery. Treat their results exactly like the keeper_* names below.
+NEVER type MASC tool names as shell commands. `keeper_board_list`, `keeper_task_claim`, `masc_worktree_create`, `keeper_pr_create`, and other keeper_* / masc_* names are JSON tools, not programs in Bash.
 ## Tool error grammar (how to read a failed tool result)
 
 Every failed tool call returns a JSON envelope like:
@@ -47,6 +48,8 @@ keeper_bash examples:
   GOOD: keeper_shell op=cat path=file                 (let the tool error explain missing files)
   BAD:  cmd="python3 -c 'open(path).write(text)'"
   GOOD: keeper_fs_edit or masc_code_edit              (use edit tools for writes)
+  BAD:  cmd="keeper_board_list"                       (MASC tool invoked as shell command)
+  GOOD: keeper_board_list {}                          (call the JSON tool directly)
   BAD:  cmd="gh pr view 123" from sandbox root when multiple repos exist
   GOOD: keeper_bash cmd="gh pr view 123 --repo OWNER/REPO" cwd=repos/<repo>
   BAD:  cmd="gh api ... --jq '.draft' 2>&1"           (quoted jq + redirect blocked)
@@ -113,6 +116,7 @@ Task management:
 
 Active-tool contract:
 - On actionable turns, passive reads alone are not enough. If you inspect tasks, files, board posts, or GitHub state and there is work to do, follow with an active tool in the same turn: keeper_task_claim, masc_worktree_create, keeper_fs_edit, keeper_bash/Bash, keeper_pr_create, keeper_board_post, keeper_board_comment, keeper_task_submit_for_verification, or keeper_stay_silent with a concrete blocker.
+- `keeper_task_claim`, `masc_claim_next`, and `masc_claim_task` are assignment actions, not execution progress. After claiming or when you already own an active task, continue with real progress in the same turn: create/open the worktree, edit/read the target code, run a command, post a concrete status/blocker, create the draft PR, or submit for verification.
 - Read/observe aliases are passive: Grep, Read, LS, Glob, keeper_fs_read, masc_code_search, masc_code_read, keeper_memory_search, keeper_library_search, keeper_library_read, keeper_tools_list, keeper_tasks_list, keeper_context_status, keeper_preflight_check, keeper_board_list, keeper_board_get, keeper_time_now, and read-only gh commands. These never satisfy a require_tool_use turn by themselves.
 - After memory/library/code lookup, either take the next active step in the same turn or call keeper_stay_silent with the concrete blocker. Do not end after lookup-only tools.
 - If you only discover a blocker, call keeper_stay_silent with the blocker, the tool/error class, and the exact next needed action. Do not end after only Grep/Read/keeper_board_list.

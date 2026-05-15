@@ -106,12 +106,14 @@ export function bucketTraceEvents(
 function lineOf(event: KeeperTraceEvent): number | null {
   if (event.source === 'anchored-thread') return event.line
   if (event.source === 'activity-event') return event.line
+  if (event.source === 'bdi-snapshot') return event.line ?? null
   return null
 }
 
 function filePathOf(event: KeeperTraceEvent): string | null {
   if (event.source === 'anchored-thread') return event.filePath ?? null
   if (event.source === 'activity-event') return event.filePath
+  if (event.source === 'bdi-snapshot') return event.filePath ?? null
   return null
 }
 
@@ -371,6 +373,8 @@ function traceRouteContext(event: KeeperTraceEvent): IdeContextRouteContext {
 
   if (event.source === 'bdi-snapshot') {
     return {
+      filePath: event.filePath ?? undefined,
+      line: event.line ?? undefined,
       surface: 'BDI',
       label: event.intention ?? 'BDI snapshot',
       sourceId: `trace:${event.id}`,

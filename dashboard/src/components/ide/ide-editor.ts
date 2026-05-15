@@ -414,6 +414,7 @@ function buildCurrentFileSignals({
 function traceEventFilePath(event: KeeperTraceEvent): string | null {
   if (event.source === 'anchored-thread') return event.filePath ?? null
   if (event.source === 'activity-event') return event.filePath
+  if (event.source === 'bdi-snapshot') return event.filePath ?? null
   return null
 }
 

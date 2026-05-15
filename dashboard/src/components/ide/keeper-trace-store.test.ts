@@ -222,6 +222,39 @@ describe('keeper-trace-store', () => {
     expect(keeperTraceState.value.events.map(e => e.count)).toEqual([1, 1, 1])
   })
 
+  it('does NOT coalesce bdi snapshots for different file lines within the window', () => {
+    pushTrace({
+      id: 'bdi-1',
+      tsMs: 1000,
+      keeperName: 'scholar',
+      source: 'bdi-snapshot',
+      intention: 'inspect runtime',
+      filePath: 'runtime.ts',
+      line: 12,
+    })
+    pushTrace({
+      id: 'bdi-2',
+      tsMs: 1010,
+      keeperName: 'scholar',
+      source: 'bdi-snapshot',
+      intention: 'inspect worker',
+      filePath: 'worker.ts',
+      line: 12,
+    })
+    pushTrace({
+      id: 'bdi-3',
+      tsMs: 1020,
+      keeperName: 'scholar',
+      source: 'bdi-snapshot',
+      intention: 'inspect later runtime',
+      filePath: 'runtime.ts',
+      line: 20,
+    })
+
+    expect(keeperTraceState.value.events.map(e => e.id)).toEqual(['bdi-1', 'bdi-2', 'bdi-3'])
+    expect(keeperTraceState.value.events.map(e => e.count)).toEqual([1, 1, 1])
+  })
+
   it('inserts out-of-order events into ascending tsMs position', () => {
     pushTrace({
       id: 'a-1',

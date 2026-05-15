@@ -1,4 +1,5 @@
 import { pushTrace } from './keeper-trace-store'
+import { normalizeIdeContextFilePath, normalizeIdeContextLine } from './ide-state'
 
 /**
  * RFC-0028 PR-δ producer: bdi-snapshot → keeper-trace bridge.
@@ -53,6 +54,8 @@ export interface BdiSnapshotProducerInput {
   readonly keeper: string
   readonly generated_at: string | null
   readonly intention: string | null
+  readonly file_path?: string | null
+  readonly line?: number | null
 }
 
 function dedupKey(snapshot: BdiSnapshotProducerInput): string {
@@ -77,12 +80,16 @@ export function bridgeBdiSnapshotsToTrace(
     if (next.has(key)) continue
     const tsMs = Date.parse(snapshot.generated_at)
     if (!Number.isFinite(tsMs)) continue
+    const filePath = snapshot.file_path ? normalizeIdeContextFilePath(snapshot.file_path) : null
+    const line = filePath === null ? null : normalizeIdeContextLine(snapshot.line ?? undefined) ?? null
     pushTrace({
       id: key,
       tsMs,
       keeperName: snapshot.keeper,
       source: 'bdi-snapshot',
       intention: snapshot.intention,
+      filePath,
+      line,
     })
     next.add(key)
   }

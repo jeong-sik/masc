@@ -303,17 +303,6 @@ export function InspectorKeeperBDI({
     }
   }, [keeperName, pollMs])
 
-  // RFC-0028 PR-δ-4 bdi-snapshot producer: each fresh poll result becomes
-  // a keeper-trace event. Dedup key is `bdi:${keeper}:${generated_at}` so
-  // a polling tick that returns the same snapshot does not re-emit; a
-  // server publish of a fresh BDI tick advances `generated_at` and emits
-  // a new event.
-  const knownBdiKeys = useRef<ReadonlySet<string>>(new Set())
-  useEffect(() => {
-    if (snapshot === null) return
-    knownBdiKeys.current = bridgeBdiSnapshotsToTrace([snapshot], knownBdiKeys.current)
-  }, [snapshot])
-
   const cursor = cursorOverlaySignal.value.cursors.get(keeperName)
   // The SSE adapter defaults a missing `line` to 0 (see
   // `keeper-cursor-overlay.ts::connectKeeperCursorStream` —
@@ -324,6 +313,22 @@ export function InspectorKeeperBDI({
   const focusLabel = hasValidFocus
     ? `${cursor!.file_path.split('/').pop()}:${cursor!.line}`
     : null
+
+  // RFC-0028 PR-δ-4 bdi-snapshot producer: each fresh poll result becomes
+  // a keeper-trace event. Dedup key is `bdi:${keeper}:${generated_at}` so
+  // a polling tick that returns the same snapshot does not re-emit; a
+  // server publish of a fresh BDI tick advances `generated_at` and emits
+  // a new event.
+  const knownBdiKeys = useRef<ReadonlySet<string>>(new Set())
+  useEffect(() => {
+    if (snapshot === null) return
+    knownBdiKeys.current = bridgeBdiSnapshotsToTrace([{
+      ...snapshot,
+      file_path: hasValidFocus ? cursor?.file_path : undefined,
+      line: hasValidFocus ? cursor?.line : undefined,
+    }], knownBdiKeys.current)
+  }, [cursor?.file_path, cursor?.line, hasValidFocus, snapshot])
+
   const tokenRows = snapshot?.recent_token_spend ?? []
   const lastTool = snapshot?.last_tool_call ?? null
   const presence = globalPresenceSnapshot.value

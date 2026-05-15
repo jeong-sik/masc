@@ -551,6 +551,7 @@ function traceSourceLabel(source: KeeperTraceSource): string {
 function traceEventFilePath(event: KeeperTraceEvent): string | null {
   if (event.source === 'anchored-thread') return event.filePath ?? null
   if (event.source === 'activity-event') return event.filePath
+  if (event.source === 'bdi-snapshot') return event.filePath ?? null
   return null
 }
 
@@ -562,6 +563,11 @@ function traceEventLine(event: KeeperTraceEvent): number | null {
   }
   if (event.source === 'activity-event') {
     return Number.isSafeInteger(event.line) && event.line >= 1
+      ? event.line
+      : null
+  }
+  if (event.source === 'bdi-snapshot') {
+    return event.line !== null && event.line !== undefined && Number.isSafeInteger(event.line) && event.line >= 1
       ? event.line
       : null
   }

@@ -206,12 +206,22 @@ describe('keeperTraceLinesForFile + keeper trace gutter', () => {
         line: 2,
         surface: 'Goal',
       },
+      {
+        id: 'bdi-1',
+        tsMs: 4500,
+        keeperName: 'scholar',
+        count: 1,
+        source: 'bdi-snapshot',
+        intention: 'inspect focused line',
+        filePath: 'runtime.ts',
+        line: 2,
+      },
     ]
 
     const traceLines = keeperTraceLinesForFile('runtime.ts', events)
     expect(traceLines).toHaveLength(1)
     expect(traceLines[0]?.line).toBe(2)
-    expect(traceLines[0]?.events).toHaveLength(2)
+    expect(traceLines[0]?.events).toHaveLength(3)
     expect(traceLines[0]?.events[0]).toMatchObject({
       id: 'activity-1',
       source: 'activity-event',
@@ -224,6 +234,15 @@ describe('keeperTraceLinesForFile + keeper trace gutter', () => {
       surface: 'Goal',
     })
     expect(traceLines[0]?.events[1]).toMatchObject({
+      id: 'bdi-1',
+      source: 'bdi-snapshot',
+      keeperName: 'scholar',
+      count: 1,
+      tsMs: 4500,
+      filePath: 'runtime.ts',
+      line: 2,
+    })
+    expect(traceLines[0]?.events[2]).toMatchObject({
       id: 'thread-1',
       source: 'anchored-thread',
       keeperName: 'scholar',

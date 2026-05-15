@@ -42,13 +42,22 @@ function pushAnchored(
   })
 }
 
-function pushBdi(id: string, keeperName: string, tsMs: number, intention: string | null = 'inspect'): void {
+function pushBdi(
+  id: string,
+  keeperName: string,
+  tsMs: number,
+  intention: string | null = 'inspect',
+  filePath?: string,
+  line?: number,
+): void {
   pushTrace({
     id,
     tsMs,
     keeperName,
     source: 'bdi-snapshot',
     intention,
+    filePath,
+    line,
   })
 }
 
@@ -135,6 +144,17 @@ describe('bucketTraceEvents — RFC-0028 §5 grouping', () => {
     expect(noLineBucket?.events.map(e => e.source).sort()).toEqual(['bdi-snapshot', 'decision-log'])
     const lineBucket = buckets.find(b => b.filePath === 'runtime.ts' && b.line === 12)
     expect(lineBucket?.events.map(e => e.source).sort()).toEqual(['activity-event', 'anchored-thread'])
+  })
+
+  it('groups cursor-anchored BDI snapshots with the file line bucket', () => {
+    pushBdi('bdi-line', 'scholar', 1000, 'inspect focused line', 'runtime.ts', 12)
+    pushDecision('decision', 'scholar', 1100)
+
+    const buckets = bucketTraceEvents(keeperTraceState.value.events)
+    expect(buckets.map(b => `${b.keeperName}@${b.filePath}@${b.line}`).sort())
+      .toEqual(['scholar@null@null', 'scholar@runtime.ts@12'])
+    const lineBucket = buckets.find(b => b.filePath === 'runtime.ts' && b.line === 12)
+    expect(lineBucket?.events.map(e => e.source)).toEqual(['bdi-snapshot'])
   })
 
   it('sorts events newest-first within each bucket', () => {

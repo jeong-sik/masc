@@ -62,6 +62,8 @@ export type KeeperTraceEvent =
   | (KeeperTraceBase & {
       readonly source: 'bdi-snapshot'
       readonly intention: string | null
+      readonly filePath?: string | null
+      readonly line?: number | null
     })
   | (KeeperTraceBase & {
       readonly source: 'decision-log'
@@ -228,6 +230,10 @@ function sameTraceBucket(left: KeeperTraceEvent, right: KeeperTraceEvent): boole
   }
   if (left.source === 'activity-event' && right.source === 'activity-event') {
     return left.filePath === right.filePath && left.line === right.line
+  }
+  if (left.source === 'bdi-snapshot' && right.source === 'bdi-snapshot') {
+    return (left.filePath ?? null) === (right.filePath ?? null)
+      && (left.line ?? null) === (right.line ?? null)
   }
   return true
 }

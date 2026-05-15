@@ -9,7 +9,7 @@ import {
   pinInspectorKeeper,
 } from './inspector-keeper-bdi'
 import { clearPins } from './multi-keeper-pin-store'
-import { clearTraces, pushTrace } from './keeper-trace-store'
+import { clearTraces, keeperTraceState, pushTrace } from './keeper-trace-store'
 import { cursorOverlaySignal, type KeeperCursor } from './keeper-cursor-overlay'
 import { activeIdeFile, ideContextFocus } from './ide-state'
 
@@ -344,6 +344,31 @@ describe('InspectorKeeperBDI', () => {
 
     links.find(link => link.textContent === 'Keeper')!.click()
     expect(window.location.hash).toBe('#monitoring?section=agents&view=keepers&keeper=scholar')
+
+    render(null, container)
+  })
+
+  it('anchors fresh BDI trace events to the keeper cursor line', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(snapshot)))
+    vi.stubGlobal('fetch', fetchMock)
+    activeKeeperName.value = 'scholar'
+    setCursorFor('scholar', { file_path: 'src/components/ide/inspector-keeper-bdi.ts', line: 42 })
+
+    const container = createContainer()
+    render(html`<${InspectorKeeperBDI} pollMs=${60_000} />`, container)
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/v1/keepers/scholar/bdi-snapshot', expect.any(Object))
+    })
+    await vi.waitFor(() => {
+      expect(keeperTraceState.value.events).toHaveLength(1)
+    })
+
+    const event = keeperTraceState.value.events[0]!
+    expect(event.source).toBe('bdi-snapshot')
+    if (event.source === 'bdi-snapshot') {
+      expect(event.filePath).toBe('src/components/ide/inspector-keeper-bdi.ts')
+      expect(event.line).toBe(42)
+    }
 
     render(null, container)
   })

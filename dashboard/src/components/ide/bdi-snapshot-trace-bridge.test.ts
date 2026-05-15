@@ -122,6 +122,39 @@ describe('bridgeBdiSnapshotsToTrace — RFC-0028 PR-δ bdi-snapshot producer', (
     }
   })
 
+  it('normalizes optional cursor file and line context for line gutter projection', () => {
+    bridgeBdiSnapshotsToTrace(
+      [{
+        ...snap('scholar', '2026-05-06T01:00:00Z', 'inspect focused line'),
+        file_path: ' src\\runtime.ml ',
+        line: 42,
+      }],
+      new Set(),
+    )
+    const event = keeperTraceState.value.events[0]!
+    expect(event.source).toBe('bdi-snapshot')
+    if (event.source === 'bdi-snapshot') {
+      expect(event.filePath).toBe('src/runtime.ml')
+      expect(event.line).toBe(42)
+    }
+  })
+
+  it('drops cursor line context when the cursor file is not usable', () => {
+    bridgeBdiSnapshotsToTrace(
+      [{
+        ...snap('scholar', '2026-05-06T01:00:00Z', 'inspect focused line'),
+        line: 42,
+      }],
+      new Set(),
+    )
+    const event = keeperTraceState.value.events[0]!
+    expect(event.source).toBe('bdi-snapshot')
+    if (event.source === 'bdi-snapshot') {
+      expect(event.filePath).toBeNull()
+      expect(event.line).toBeNull()
+    }
+  })
+
   it('preserves a null intention (keeper between intentions)', () => {
     bridgeBdiSnapshotsToTrace(
       [snap('scholar', '2026-05-06T01:00:00Z', null)],

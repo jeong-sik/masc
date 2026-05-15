@@ -5,16 +5,16 @@
     [include Server_dashboard_http_execution_surfaces];
     [server_dashboard_http_namespace_truth.ml] does
     [module Execution_surfaces = ...] alias and reaches
-    {!_execution_cache} +
-    {!_broadcast_namespace_truth_ref} through it.  Plus
+    {!execution_cache} +
+    {!broadcast_namespace_truth_ref} through it.  Plus
     direct dotted callers and a
     [let module S = ...] inline alias in
     [test/test_types.ml] for the
     lifecycle-event patcher family.
 
     External surface (17 entries):
-    - {b cache cells} ({!_execution_cache},
-      {!_broadcast_namespace_truth_ref}) reached by
+    - {b cache cells} ({!execution_cache},
+      {!broadcast_namespace_truth_ref}) reached by
       [server_dashboard_http_namespace_truth] for
       readiness gating + truth-broadcast wiring.
     - {b shell prewarm} ({!warm_shell_cache}) — called
@@ -53,13 +53,13 @@
     SSE-event row patcher family,
     [running_keeper_names] /
     [patch_surface_json_for_running_keepers],
-    [patch_execution_cache_for_keeper] /
+    [patchexecution_cache_for_keeper] /
     [patch_operator_snapshot_cache_for_keeper],
     [transport_health_cache_diagnostics]). *)
 
 (** {1 Cache cells} *)
 
-val _execution_cache : Server_dashboard_http_cache.cached_surface
+val execution_cache : Server_dashboard_http_cache.cached_surface
 (** Cached execution surface JSON.  Reached by
     [Server_dashboard_http_namespace_truth] (via the
     [Execution_surfaces] alias) for readiness gating —
@@ -67,7 +67,7 @@ val _execution_cache : Server_dashboard_http_cache.cached_surface
     fetch when this cache is still serving a successful
     snapshot. *)
 
-val _broadcast_namespace_truth_ref :
+val broadcast_namespace_truth_ref :
   (Mcp_server.server_state -> unit) ref
 (** Forward reference for the namespace-truth broadcast.
     [Server_dashboard_http_namespace_truth] sets this at

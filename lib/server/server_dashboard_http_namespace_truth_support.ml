@@ -17,15 +17,15 @@ let pending_confirm_summary_empty_json =
       ("confirm_required_actions", `List []);
     ]
 
-let _last_good_pending_confirm_summary : Yojson.Safe.t Atomic.t =
+let last_good_pending_confirm_summary : Yojson.Safe.t Atomic.t =
   Atomic.make pending_confirm_summary_empty_json
 
 let pending_confirm_summary_cached (config : Coord.config) =
   let key = Printf.sprintf "pending_confirm_summary:%s" config.base_path in
-  let fallback = Atomic.get _last_good_pending_confirm_summary in
+  let fallback = Atomic.get last_good_pending_confirm_summary in
   let compute () =
     let json = Operator_control.pending_confirm_summary_json config in
-    Atomic.set _last_good_pending_confirm_summary json;
+    Atomic.set last_good_pending_confirm_summary json;
     json
   in
   if Option.is_some (Eio_context.get_switch_opt ()) then

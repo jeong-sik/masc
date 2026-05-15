@@ -1519,6 +1519,7 @@ let record_restart ~base_path name =
 
 let record_error ~base_path name err =
   Log.Keeper.error "registry: recording error name=%s error=%s" name err;
+  Keeper_fd_pressure.note_if_fd_exhaustion ~site:"keeper_registry.record_error" err;
   update_entry ~base_path name (fun e -> { e with last_error = Some err })
 ;;
 
@@ -2176,7 +2177,13 @@ let set_started_at_for_test ~base_path name started_at =
 
 let spawn_slots_available () =
   let max_keepers = Keeper_runtime_resolved.bootstrap_max_active_keepers () in
-  max_keepers <= 0 || Atomic.get running_count_atomic < max_keepers
+  let running_count = Atomic.get running_count_atomic in
+  (not (Keeper_fd_pressure.active ()))
+  && Keeper_fd_pressure.admit_start
+       ~active_keepers:running_count
+       ~starting_keepers:1
+       ()
+  && (max_keepers <= 0 || running_count < max_keepers)
 ;;
 
 let wakeup ~base_path name =

@@ -11,7 +11,9 @@
 
 val enqueue : Tool_result.t -> unit
 (** [enqueue result] buffers a tool invocation record for eventual disk flush.
-    Safe to call from any fiber. Records are batched and written periodically. *)
+    Safe to call from any fiber. Records are batched and written periodically.
+    If the bounded best-effort queue is full, the record is dropped instead of
+    blocking the tool completion path. *)
 
 val start_flush_fiber : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> base_path:string -> unit
 (** [start_flush_fiber ~sw ~clock ~base_path] spawns a background fiber that

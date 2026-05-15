@@ -8,6 +8,7 @@ module Hooks = Masc_mcp.Keeper_lifecycle_hooks
 module Meas = Masc_mcp.Keeper_measurement
 module Pages = Masc_mcp.Server_routes_http_pages
 module Json = Yojson.Safe.Util
+module FD = Masc_mcp.Keeper_fd_pressure
 
 let bp = "/tmp/test"
 
@@ -51,6 +52,45 @@ let make_meta name =
 let make_stimulus ?(urgency = Keeper_event_queue.Normal)
     ?(arrived_at = 0.0) post_id payload =
   Keeper_event_queue.{ post_id; urgency; arrived_at; payload }
+
+let test_fd_pressure_text_classifier () =
+  check bool "detects EMFILE text" true
+    (FD.is_fd_exhaustion_text
+       "Unix_error (Too many open files in system, \"openat\", path)");
+  check bool "ignores provider timeout" false
+    (FD.is_fd_exhaustion_text "provider stream idle timeout")
+
+let test_fd_pressure_nofile_cap () =
+  FD.reset_for_tests ();
+  check int "low process nofile degrades 24-keeper boot" 1
+    (FD.cap_active_keepers_for_nofile ~soft_limit:(Some 256) 24);
+  check int "safe process nofile leaves 24-keeper boot alone" 24
+    (FD.cap_active_keepers_for_nofile ~soft_limit:(Some 4096) 24);
+  check int "low process nofile also caps unlimited boot config" 1
+    (FD.cap_active_keepers_for_nofile ~soft_limit:(Some 256) 0)
+
+let test_fd_pressure_proactive_admission () =
+  FD.reset_for_tests ();
+  check bool "admits projected fleet within nofile budget" true
+    (FD.admit_start
+       ~soft_limit:(Some 512)
+       ~open_fds:(Some 16)
+       ~active_keepers:2
+       ~starting_keepers:1
+       ());
+  check bool "blocks projected fleet before nofile exhaustion" false
+    (FD.admit_start
+       ~soft_limit:(Some 512)
+       ~open_fds:(Some 460)
+       ~active_keepers:2
+       ~starting_keepers:1
+       ());
+  check bool "blocks turns when already over projected active keeper budget" false
+    (FD.admit_turn
+       ~soft_limit:(Some 512)
+       ~open_fds:(Some 16)
+       ~active_keepers:8
+       ())
 
 let test_bonsai_keepers_summary_uses_scoped_registry () =
   let base_path = temp_base_path "bonsai-summary" in
@@ -1749,6 +1789,12 @@ let () =
     [
       ( "basic",
         [
+          test_case "fd pressure text classifier" `Quick
+            test_fd_pressure_text_classifier;
+          test_case "fd pressure nofile boot cap" `Quick
+            test_fd_pressure_nofile_cap;
+          test_case "fd pressure proactive admission" `Quick
+            test_fd_pressure_proactive_admission;
           eio_test "bonsai summary uses scoped registry"
             test_bonsai_keepers_summary_uses_scoped_registry;
           eio_test "register and get" test_register_and_get;

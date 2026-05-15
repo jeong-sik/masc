@@ -774,6 +774,13 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
 ;;
 
 let stop_keepalive ?base_path name =
+  let eio_context_available () =
+    try
+      Eio.Fiber.yield ();
+      true
+    with
+    | Effect.Unhandled _ -> false
+  in
   let entries =
     Keeper_registry.all ?base_path ()
     |> List.filter (fun (e : Keeper_registry.registry_entry) -> String.equal e.name name)
@@ -801,6 +808,16 @@ let stop_keepalive ?base_path name =
        match entry.phase with
        | Keeper_state_machine.Crashed | Keeper_state_machine.Dead -> ()
        | _ ->
+         let released_slots =
+           if eio_context_available ()
+           then force_release_holder_for ~keeper_name:entry.name
+           else []
+         in
+         if released_slots <> [] then
+           Log.Keeper.warn
+             "%s: manual stop force-released holder slot(s) [%s] before marking stopped"
+             entry.name
+             (String.concat "," (List.map fst released_slots));
          if
            record_keeper_stopped
              entry

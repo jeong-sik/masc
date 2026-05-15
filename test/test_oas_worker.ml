@@ -827,33 +827,33 @@ let test_cascade_observation_json_includes_fallback_fields () =
         Masc_mcp.Keeper_cascade_profile.Runtime_name
           Masc_mcp.(Keeper_config.default_cascade_name ())
     ; strategy = Some "round_robin"
-    ; configured_labels = [ "glm:auto"; "llama:auto" ]
-    ; candidate_models = [ "glm:glm-5.1"; "openai:qwen3.5-35b" ]
-    ; primary_model = Some "glm:glm-5.1"
-    ; selected_model = Some "openai:qwen3.5-35b"
-    ; selected_model_raw = Some "qwen3.5-35b"
+    ; configured_labels = [ "primary:auto"; "secondary:auto" ]
+    ; candidate_models = [ "primary:model-alpha"; "secondary:model-beta" ]
+    ; primary_model = Some "primary:model-alpha"
+    ; selected_model = Some "secondary:model-beta"
+    ; selected_model_raw = Some "model-beta"
     ; selected_index = Some 1
     ; fallback_hops = Some 1
     ; fallback_applied = true
     ; attempts =
         [ { attempt_index = 0
-          ; model_id = "glm-5.1"
-          ; model_label = Some "glm:glm-5.1"
+          ; model_id = "model-alpha"
+          ; model_label = Some "primary:model-alpha"
           ; latency_ms = None
           ; error = Some "HTTP 503"
           }
         ; { attempt_index = 1
-          ; model_id = "qwen3.5-35b"
-          ; model_label = Some "openai:qwen3.5-35b"
+          ; model_id = "model-beta"
+          ; model_label = Some "secondary:model-beta"
           ; latency_ms = Some 212
           ; error = None
           }
         ]
     ; fallback_events =
-        [ { from_model_id = "glm-5.1"
-          ; from_model_label = Some "glm:glm-5.1"
-          ; to_model_id = "qwen3.5-35b"
-          ; to_model_label = Some "openai:qwen3.5-35b"
+        [ { from_model_id = "model-alpha"
+          ; from_model_label = Some "primary:model-alpha"
+          ; to_model_id = "model-beta"
+          ; to_model_label = Some "secondary:model-beta"
           ; reason = "HTTP 503"
           }
         ]
@@ -876,7 +876,7 @@ let test_cascade_observation_json_includes_fallback_fields () =
     Yojson.Safe.Util.(json |> member "fallback_hops" |> to_int);
   Alcotest.(check string)
     "selected model preserved"
-    "openai:qwen3.5-35b"
+    "secondary:model-beta"
     Yojson.Safe.Util.(json |> member "selected_model" |> to_string);
   Alcotest.(check int)
     "attempt count preserved"
@@ -1019,33 +1019,33 @@ let test_cascade_audit_persists_observation () =
        let observation : Masc_mcp.Cascade_legacy_runner.cascade_observation =
          { cascade_name = Masc_mcp.Keeper_cascade_profile.Runtime_name "audit-cascade"
          ; strategy = Some "round_robin"
-         ; configured_labels = [ "glm:auto"; "openai:auto" ]
-         ; candidate_models = [ "glm:glm-5.1"; "openai:qwen3.5-35b" ]
-         ; primary_model = Some "glm:glm-5.1"
-         ; selected_model = Some "openai:qwen3.5-35b"
-         ; selected_model_raw = Some "qwen3.5-35b"
+         ; configured_labels = [ "primary:auto"; "secondary:auto" ]
+         ; candidate_models = [ "primary:model-alpha"; "secondary:model-beta" ]
+         ; primary_model = Some "primary:model-alpha"
+         ; selected_model = Some "secondary:model-beta"
+         ; selected_model_raw = Some "model-beta"
          ; selected_index = Some 1
          ; fallback_hops = Some 1
          ; fallback_applied = true
          ; attempts =
              [ { attempt_index = 0
-               ; model_id = "glm-5.1"
-               ; model_label = Some "glm:glm-5.1"
+               ; model_id = "model-alpha"
+               ; model_label = Some "primary:model-alpha"
                ; latency_ms = Some 120
                ; error = Some "HTTP 503"
                }
              ; { attempt_index = 1
-               ; model_id = "qwen3.5-35b"
-               ; model_label = Some "openai:qwen3.5-35b"
+               ; model_id = "model-beta"
+               ; model_label = Some "secondary:model-beta"
                ; latency_ms = Some 90
                ; error = None
                }
              ]
          ; fallback_events =
-             [ { from_model_id = "glm-5.1"
-               ; from_model_label = Some "glm:glm-5.1"
-               ; to_model_id = "qwen3.5-35b"
-               ; to_model_label = Some "openai:qwen3.5-35b"
+             [ { from_model_id = "model-alpha"
+               ; from_model_label = Some "primary:model-alpha"
+               ; to_model_id = "model-beta"
+               ; to_model_label = Some "secondary:model-beta"
                ; reason = "HTTP 503"
                }
              ]
@@ -1054,7 +1054,7 @@ let test_cascade_audit_persists_observation () =
          }
        in
        Masc_mcp.Cascade_legacy_runner.record_cascade
-         ~keeper_name:"keeper-glm-agent-test"
+         ~keeper_name:"keeper-provider-agent-test"
          ~cascade_name:(internal_cascade_name "audit-cascade")
          ~observation:(Some observation)
          ~outcome:`Failure
@@ -1071,7 +1071,7 @@ let test_cascade_audit_persists_observation () =
            Yojson.Safe.Util.(json |> member "cascade_name" |> to_string);
          Alcotest.(check string)
            "keeper_name persisted (#11081)"
-           "keeper-glm-agent-test"
+           "keeper-provider-agent-test"
            Yojson.Safe.Util.(json |> member "keeper_name" |> to_string);
          Alcotest.(check string)
            "top_level_reason promoted (#11081)"
@@ -1083,7 +1083,7 @@ let test_cascade_audit_persists_observation () =
            Yojson.Safe.Util.(json |> member "outcome" |> to_string);
          Alcotest.(check string)
            "selected model persisted"
-           "openai:qwen3.5-35b"
+           "secondary:model-beta"
            Yojson.Safe.Util.(
              json |> member "observation" |> member "selected_model" |> to_string);
          Alcotest.(check bool)

@@ -518,7 +518,6 @@ let session_json ?actor ~session_id ~config ~sw
       projection.sessions
   in
   let worker_runs_json =
-    (* Team_session_store + Team_session_engine_eio removed *)
     ignore (config, session_id);
     `Null
   in

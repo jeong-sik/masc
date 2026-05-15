@@ -22,7 +22,6 @@ type t =
   | `System_worker_runtime_docker
   | `System_spawn
   | `System_auto_responder
-  | `Swarm_goal_loop
   | `Coord_identity
   | `Tool_local_runtime
   | `Tool_local_runtime_bench

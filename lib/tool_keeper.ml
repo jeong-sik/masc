@@ -689,9 +689,8 @@ let handle_keeper_repair ctx args : tool_result =
                       | None -> fields
                     in
                     let ok, body =
-                      (* Team_session_oas_bridge removed *)
                       ignore (ctx.sw, ctx.clock, ctx.config, fields);
-                      (false, {|{"error":"team session oas bridge removed"}|})
+                      (false, {|{"error":"keeper repair handler not implemented"}|})
                     in
                     invalidate_status_cache meta.name;
                     ( ok,

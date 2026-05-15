@@ -137,9 +137,9 @@ let test_recursive_prefix_get_all () =
   with_eio_env @@ fun backend ->
   let writes =
     [
-      ("team-sessions:ts-1:session.json", "s1");
-      ("team-sessions:ts-1:events.jsonl", "e1");
-      ("team-sessions:ts-2:session.json", "s2");
+      ("mission-sessions:ts-1:session.json", "s1");
+      ("mission-sessions:ts-1:events.jsonl", "e1");
+      ("mission-sessions:ts-2:session.json", "s2");
       ("relay:node-1", "m1");
     ]
   in
@@ -149,11 +149,11 @@ let test_recursive_prefix_get_all () =
       | Ok () -> ()
       | Error _ -> Alcotest.fail "set for recursive prefix test failed")
     writes;
-  match Backend.FileSystem.list_keys backend ~prefix:"team-sessions:" with
+  match Backend.FileSystem.list_keys backend ~prefix:"mission-sessions:" with
   | Ok keys ->
       Alcotest.(check int) "recursive keys" 3 (List.length keys);
       Alcotest.(check bool) "session key present" true
-        (List.mem "team-sessions:ts-2:session.json" keys)
+        (List.mem "mission-sessions:ts-2:session.json" keys)
   | Error _ -> Alcotest.fail "recursive list_keys failed"
 
 (** Test set_if_not_exists *)

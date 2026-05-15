@@ -7,7 +7,6 @@
 
     Sub-modules:
     - Keeper_turn_up: start/reconfigure
-    - Keeper_turn_session: team-session helpers
     - Keeper_turn_setup: ensure_keeper_exists
     - Keeper_turn_lifecycle: shutdown *)
 

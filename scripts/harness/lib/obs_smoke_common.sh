@@ -114,7 +114,7 @@ obs_start_server() {
 # Usage: obs_bootstrap_room <mcp_url> <session_id> <agent_name> [capabilities_json_array]
 obs_bootstrap_room() {
   local mcp_url="$1" session_id="$2" agent_name="$3"
-  local capabilities="${4:-[\"supervisor\",\"operator\",\"team-session\"]}"
+  local capabilities="${4:-[\"supervisor\",\"operator\"]}"
   local init_raw join_raw nickname
 
   init_raw="$(mcp_call_tool 1 "masc_init" "$(jq -cn --arg a "$agent_name" '{agent_name:$a}')" "$session_id" "" "$mcp_url")"

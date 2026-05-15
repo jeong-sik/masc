@@ -638,14 +638,6 @@ let handle_cycle (ctx : Tool_autoresearch_context.t) args =
                          Hashtbl.replace Autoresearch.active_loops id state);
                        Autoresearch.save_state ~base_path:ctx.base_path state;
                        let _config = Coord.default_config ctx.base_path in
-                       (match
-                          Autoresearch.load_execution_link_by_loop
-                            ~base_path:ctx.base_path id
-                        with
-                       | Some _link ->
-                         (* Team_session_store removed — skip event append *)
-                         ()
-                       | None -> ());
                        broadcast_cycle_result state effective_record;
                        `Assoc
                          [

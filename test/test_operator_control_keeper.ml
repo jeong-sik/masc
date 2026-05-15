@@ -3326,7 +3326,7 @@ let test_keeper_msg_auto_execution_session_bridge () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Keeper_keepalive.stop_keepalive "team-session-keeper";
+      Keeper_keepalive.stop_keepalive "mission-control-keeper";
       Keeper_registry.clear ();
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
@@ -3343,14 +3343,14 @@ let test_keeper_msg_auto_execution_session_bridge () =
           net = None;
         }
       in
-      let keeper_name = "team-session-keeper" in
+      let keeper_name = "mission-control-keeper" in
       let ok, _ =
         dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
           ~args:
             (`Assoc
               [
                 ("name", `String keeper_name);
-                ("goal", `String "Start projected team sessions from explicit keeper messages");
+                ("goal", `String "Start projected execution sessions from explicit keeper messages");
                 ("proactive_enabled", `Bool false);
                 ("autoboot_enabled", `Bool false);
               ])
@@ -3397,9 +3397,7 @@ let test_keeper_msg_auto_execution_session_bridge () =
         Alcotest.(check bool) "reused" false
           (first_json |> member "reused" |> to_bool);
         let session_id = first_json |> member "session_id" |> to_string in
-        (* Team_session_store removed — skip session verification *)
         ignore session_id;
-        (* Team session tools removed — skip execution_session_status dispatch test *)
         ignore (config, sw, env, session_id);
         Alcotest.(check bool) "spawn_error surfaced" true
           (first_json |> member "spawn_error" <> `Null);
@@ -3418,15 +3416,14 @@ let test_keeper_msg_auto_execution_session_bridge () =
         in
         Alcotest.(check bool) "keeper status ok" true status_ok;
         let status_json = parse_json_exn status_body in
-        Alcotest.(check string) "status exposes auto team session removal" "removed"
+        Alcotest.(check string) "status exposes auto execution session removal" "removed"
           Yojson.Safe.Util.(status_json |> member "auto_execution_session" |> member "status" |> to_string);
-        Alcotest.(check bool) "status exposes auto team session disabled" false
+        Alcotest.(check bool) "status exposes auto execution session disabled" false
           Yojson.Safe.Util.(status_json |> member "auto_execution_session_enabled" |> to_bool);
-        Alcotest.(check bool) "status omits team session state" true
+        Alcotest.(check bool) "status omits execution session state" true
           Yojson.Safe.Util.(status_json |> member "execution_session_state" = `Null);
-        Alcotest.(check bool) "status omits team session bridge" true
+        Alcotest.(check bool) "status omits execution session bridge" true
           Yojson.Safe.Util.(status_json |> member "execution_session_bridge" = `Null);
-        (* Team_session_store removed — skip event verification *)
         ignore (config, session_id);
         let ok, second_body =
           dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_msg"
@@ -3445,7 +3442,6 @@ let test_keeper_msg_auto_execution_session_bridge () =
           Yojson.Safe.Util.(second_json |> member "created" |> to_bool);
         Alcotest.(check bool) "second reused true" true
           Yojson.Safe.Util.(second_json |> member "reused" |> to_bool);
-        (* Team_session_store removed — skip event count verification *)
         ignore (config, session_id);
         let ok, _ =
           dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_down"
@@ -3459,7 +3455,6 @@ let test_keeper_msg_auto_execution_session_bridge () =
           | Error err -> Alcotest.fail ("meta read after down failed: " ^ err)
         in
         Alcotest.(check bool) "keeper paused on down" true meta_after_down.paused;
-        (* Team_session_engine_eio removed — skip session cleanup *)
         ignore (config, session_id))
 
 let test_operator_keeper_message_rejects_legacy_model_args () =

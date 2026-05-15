@@ -487,7 +487,7 @@ let test_eio_fs_rejects_reserved_atomic_tmp_suffix () =
 
 let test_eio_fs_list_keys_ignores_atomic_tmp_orphans () =
   with_eio_backend_and_dir @@ fun backend tmp_dir ->
-  let nested_dir = Filename.concat (Filename.concat tmp_dir "team-sessions") "ts-1" in
+  let nested_dir = Filename.concat (Filename.concat tmp_dir "mission-sessions") "ts-1" in
   mkdir_p nested_dir;
   write_file (Filename.concat tmp_dir "root.tmp-atomic") "partial";
   write_file (Filename.concat tmp_dir "root") "root";
@@ -497,7 +497,7 @@ let test_eio_fs_list_keys_ignores_atomic_tmp_orphans () =
   | Ok keys ->
       check bool "root key listed" true (List.mem "root" keys);
       check bool "nested key listed" true
-        (List.mem "team-sessions:ts-1:session.json" keys);
+        (List.mem "mission-sessions:ts-1:session.json" keys);
       check bool "atomic temp orphan hidden" false
         (List.exists (String.ends_with ~suffix:".tmp-atomic") keys)
   | Error _ -> fail "list_keys error"

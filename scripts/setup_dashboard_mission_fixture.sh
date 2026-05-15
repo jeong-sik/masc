@@ -30,7 +30,7 @@ const sessionId = process.env.SESSION_ID || 'ts-mission-fixture-001';
 const keeperName = process.env.KEEPER_NAME || 'mission-fixture-keeper';
 
 const fixtureAgents = [
-  { name: 'team-session-local64-smoke', capabilities: ['operator', 'fixture', 'local64'] },
+  { name: 'mission-local64-smoke', capabilities: ['operator', 'fixture', 'local64'] },
   { name: 'llama-local-alpha', capabilities: ['worker', 'local64', 'manager'] },
   { name: 'llama-local-beta', capabilities: ['worker', 'local64', 'metacog'] },
   { name: 'llama-local-gamma', capabilities: ['worker', 'local64', 'executor'] },
@@ -98,7 +98,7 @@ async function seedRoom() {
   });
 
   await mcpCall('masc_broadcast', {
-    agent_name: 'team-session-local64-smoke',
+    agent_name: 'mission-local64-smoke',
     message: '@llama-local-alpha recover failed worker coverage',
     format: 'compact',
   });
@@ -165,13 +165,13 @@ function seedExecutionSession() {
         spawn_role: 'manager',
         spawn_model: 'qwen3.5-35b-a3b-ud-q8-xl',
         worker_class: 'manager',
-        parent_actor: 'team-session-local64-smoke',
+        parent_actor: 'mission-local64-smoke',
         capsule_mode: 'inherit',
         runtime_pool: 'local64',
         lane_id: 'lane-manager',
         controller_level: 'root',
         control_domain: 'execution',
-        supervisor_actor: 'team-session-local64-smoke',
+        supervisor_actor: 'mission-local64-smoke',
         model_tier: '35b',
         task_profile: 'decide',
         risk_level: 'high',
@@ -185,7 +185,7 @@ function seedExecutionSession() {
         spawn_role: 'metacog',
         spawn_model: 'qwen27-balanced',
         worker_class: 'metacog',
-        parent_actor: 'team-session-local64-smoke',
+        parent_actor: 'mission-local64-smoke',
         capsule_mode: 'inherit',
         runtime_pool: 'local64',
         lane_id: 'lane-meta',
@@ -205,7 +205,7 @@ function seedExecutionSession() {
         spawn_role: 'executor',
         spawn_model: 'qwen9-worker',
         worker_class: 'executor',
-        parent_actor: 'team-session-local64-smoke',
+        parent_actor: 'mission-local64-smoke',
         capsule_mode: 'fresh',
         runtime_pool: 'local64',
         lane_id: 'lane-worker',
@@ -250,7 +250,7 @@ function seedExecutionSession() {
       ts_iso: new Date((startedAt + 5) * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z'),
       event_type: 'team_step_spawn',
       detail: {
-        actor: 'team-session-local64-smoke',
+        actor: 'mission-local64-smoke',
         spawn_agent: 'llama',
         runtime_actor: 'llama-local-delta',
         success: false,
@@ -263,7 +263,7 @@ function seedExecutionSession() {
       ts_iso: new Date((startedAt + 8) * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z'),
       event_type: 'team_step_spawn',
       detail: {
-        actor: 'team-session-local64-smoke',
+        actor: 'mission-local64-smoke',
         spawn_agent: 'llama',
         runtime_actor: 'llama-local-epsilon',
         success: false,
@@ -306,7 +306,7 @@ function seedExecutionSession() {
       ts_iso: new Date((startedAt + 42) * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z'),
       event_type: 'local64_smoke_cleanup',
       detail: {
-        actor: 'team-session-local64-smoke',
+        actor: 'mission-local64-smoke',
         result: 'interrupted after fixture spawn failure reproduction',
       },
     },

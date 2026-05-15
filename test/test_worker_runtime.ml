@@ -213,11 +213,7 @@ let test_run_worker_oas_rejects_invalid_explicit_model_label () =
           fail "expected invalid explicit model label to fail before execution"
       | Error err ->
           check bool "mentions rejected label" true
-            (String.contains err 'n' && String.contains err '-');
-          check bool "does not use removed team-session stub" false
-            (Astring.String.is_infix
-               ~affix:"Worker_run_once removed (team session layer)"
-               err))
+            (String.contains err 'n' && String.contains err '-'))
 
 let test_worker_execution_spec_rejects_removed_fields () =
   let json =

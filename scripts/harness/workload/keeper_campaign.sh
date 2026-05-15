@@ -288,7 +288,7 @@ create_keeper() {
     --arg goal "$CAMPAIGN_GOAL" \
     --arg short_goal "Claim the campaign task and start autoresearch on the fixture repo." \
     --arg mid_goal "Reach the target score, then preserve goal/task lineage through pressure." \
-    --arg long_goal "Prove keeper-only goal-reaching continuity without team_session." \
+    --arg long_goal "Prove keeper-only goal-reaching continuity end to end." \
     --arg instructions "모든 응답은 한국어로 짧게 작성하세요. 목표와 current_task를 잃지 말고, 필요한 경우 masc_claim_next, masc_plan_set_task, masc_autoresearch_* 도구를 사용하세요." \
     --argjson models "$models_json_payload" \
     --argjson presence_keepalive_sec "$KEEPER_PRESENCE_KEEPALIVE_SEC" \

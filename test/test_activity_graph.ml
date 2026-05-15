@@ -414,7 +414,7 @@ let test_graph_json_tracks_runtime_activity_kinds () =
   with_config (fun config ->
       ignore
         (Activity_graph.emit config           ~kind:"operation.started"
-           ~actor:(Activity_graph.entity ~kind:"agent" "team-session")
+           ~actor:(Activity_graph.entity ~kind:"agent" "mission-agent")
            ~subject:(Activity_graph.entity ~kind:"operation" "sess-001")
            ~tags:[ "operation"; "operation.started" ]
            ~payload:(`Assoc [ ("session_id", `String "sess-001") ])

@@ -89,3 +89,18 @@ val keeper_pr_review_tools : Masc_domain.tool_schema list
 
 val coding_workspace_tool_names : string list
 (** Pure: tool name allowlist used to assemble coding_workspace_tools. *)
+
+val coding_workspace_tools : Masc_domain.tool_schema list
+(** Pure: subset of worktree + code schemas selected by names. *)
+
+val coding_tools : Masc_domain.tool_schema list
+(** Pure: aggregate of bridge + workspace + preflight + github + pr_review. *)
+
+val voice_tools : Masc_domain.tool_schema list
+(** Pure: keeper_voice tool schemas. *)
+
+val library_tools : Masc_domain.tool_schema list
+(** Pure: keeper_library tool schemas. *)
+
+val taskboard_tools : Masc_domain.tool_schema list
+(** Pure: keeper_task tool schemas. *)

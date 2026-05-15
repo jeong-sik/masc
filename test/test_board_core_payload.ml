@@ -71,8 +71,47 @@ let test_derive_korean_with_json_roundtrip () =
        check bool "roundtrip valid UTF-8" true (is_valid_utf8 t)
    | _ -> fail "unexpected JSON shape")
 
+(* Regression: malformed meta_json must surface as a typed parse error
+   instead of being silently coerced to an empty meta object. Prior to
+   2026-05-15 the catch-all at board_core_payload.ml:73 mapped any
+   non-[`Assoc] payload to [fields = []], hiding structural drift. *)
+
+let test_merge_meta_json_none_is_ok_none () =
+  match BP.merge_meta_json None with
+  | Ok None -> ()
+  | Ok (Some _) -> fail "expected None for absent meta"
+  | Error _ -> fail "absent meta must not be a parse error"
+
+let test_merge_meta_json_assoc_is_ok_some () =
+  let meta = `Assoc [ ("k", `String "v") ] in
+  match BP.merge_meta_json (Some meta) with
+  | Ok (Some (`Assoc [ ("k", `String "v") ])) -> ()
+  | Ok _ -> fail "expected the original Assoc to round-trip"
+  | Error _ -> fail "well-formed Assoc must not error"
+
+let test_merge_meta_json_string_payload_is_error () =
+  let payload = `String "not an object" in
+  match BP.merge_meta_json (Some payload) with
+  | Error (BP.Meta_not_assoc p) when p = payload -> ()
+  | Error (BP.Meta_not_assoc _) -> fail "wrong payload in Meta_not_assoc"
+  | Ok _ ->
+      fail
+        "non-[`Assoc] meta_json must now be Error Meta_not_assoc, not Ok []"
+
+let test_merge_meta_json_int_payload_is_error () =
+  match BP.merge_meta_json (Some (`Int 42)) with
+  | Error (BP.Meta_not_assoc (`Int 42)) -> ()
+  | Error _ -> fail "wrong payload in Meta_not_assoc"
+  | Ok _ -> fail "non-[`Assoc] meta_json must error"
+
+let test_merge_meta_json_list_payload_is_error () =
+  match BP.merge_meta_json (Some (`List [ `Int 1 ])) with
+  | Error (BP.Meta_not_assoc (`List _)) -> ()
+  | Error _ -> fail "wrong payload in Meta_not_assoc"
+  | Ok _ -> fail "non-[`Assoc] meta_json must error"
+
 let () =
-  run "Board_core_payload.derive_post_title"
+  run "Board_core_payload"
     [ ( "regression-7690",
         [ test_case "short title unchanged" `Quick
             test_derive_short_title_returned_as_is;
@@ -83,4 +122,15 @@ let () =
           test_case "long Korean is valid UTF-8" `Quick
             test_derive_long_korean_title_is_valid_utf8;
           test_case "Korean JSON roundtrip" `Quick
-            test_derive_korean_with_json_roundtrip ] ) ]
+            test_derive_korean_with_json_roundtrip ] );
+      ( "meta-not-assoc-typed-parse",
+        [ test_case "None meta -> Ok None" `Quick
+            test_merge_meta_json_none_is_ok_none;
+          test_case "Assoc meta -> Ok Some" `Quick
+            test_merge_meta_json_assoc_is_ok_some;
+          test_case "`String payload -> Error Meta_not_assoc" `Quick
+            test_merge_meta_json_string_payload_is_error;
+          test_case "`Int payload -> Error Meta_not_assoc" `Quick
+            test_merge_meta_json_int_payload_is_error;
+          test_case "`List payload -> Error Meta_not_assoc" `Quick
+            test_merge_meta_json_list_payload_is_error ] ) ]

@@ -610,9 +610,21 @@ let create_post
       let now = Time_compat.now () in
       if ttl = 0 then 0.0 else now +. (Stdlib.Float.of_int ttl *. 3600.0)
     in
-    let normalized_title, normalized_body, normalized_kind, normalized_meta =
+    match
       normalize_post_payload ~content ?title ?body ~post_kind ?meta_json ()
-    in
+    with
+    | Error (Board_core_payload.Meta_not_assoc payload) ->
+        (* Reject malformed meta_json instead of silently dropping it.
+           Pre-fix behaviour at board_core_payload.ml:73 absorbed
+           non-[`Assoc] payloads (`[`String _], [`Int _], …) into an
+           empty meta object, hiding structural drift from callers. *)
+        Error
+          (Validation_error
+             (Printf.sprintf
+                "Malformed meta_json: expected JSON object, got %s"
+                (Yojson.Safe.to_string payload)))
+    | Ok (normalized_title, normalized_body, normalized_kind, normalized_meta)
+      ->
     (* Validate body length *)
     if String.length normalized_body > Limits.max_content_length
     then

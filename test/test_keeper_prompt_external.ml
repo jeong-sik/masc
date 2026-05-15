@@ -50,7 +50,7 @@ let with_repo_root_cwd f =
       let config_dir = Filename.concat root "config" in
       Unix.putenv "MASC_CONFIG_DIR" config_dir;
       Sys.chdir root;
-      Lib.Config_dir_resolver.reset ();
+      Config_dir_resolver.reset ();
       Prompt_registry.clear ();
       Prompt_registry.set_markdown_dir (Filename.concat config_dir "prompts");
       Lib.Prompt_defaults.init ();
@@ -60,7 +60,7 @@ let with_repo_root_cwd f =
           (match prev_config_dir with
            | Some v -> Unix.putenv "MASC_CONFIG_DIR" v
            | None -> Unix.putenv "MASC_CONFIG_DIR" "");
-          Lib.Config_dir_resolver.reset ();
+          Config_dir_resolver.reset ();
           Prompt_registry.clear ())
         f
 

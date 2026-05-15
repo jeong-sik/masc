@@ -101,13 +101,13 @@ let test_worker_runtime_config_prefers_env_override () =
 }|};
   with_env "MASC_CONFIG_DIR" (Some config_dir) @@ fun () ->
   with_env "MASC_WORKER_RUNTIME_BACKEND" None @@ fun () ->
-  Lib.Config_dir_resolver.reset ();
+  Config_dir_resolver.reset ();
   Lib.Worker_runtime_config.reset ();
   check string "file config enables docker backend" "docker"
     (Lib.Worker_execution_backend.to_string
        (Lib.Worker_runtime_config.backend ()));
   with_env "MASC_WORKER_RUNTIME_BACKEND" (Some "local_playground") @@ fun () ->
-  Lib.Config_dir_resolver.reset ();
+  Config_dir_resolver.reset ();
   Lib.Worker_runtime_config.reset ();
   check string "env override forces local backend" "local_playground"
     (Lib.Worker_execution_backend.to_string
@@ -154,7 +154,7 @@ let test_worker_runtime_invalid_config_fails_closed () =
     {|{ "worker_spawn": { "backend": "docker", |};
   with_env "MASC_CONFIG_DIR" (Some config_dir) @@ fun () ->
   with_env "MASC_WORKER_RUNTIME_BACKEND" None @@ fun () ->
-  Lib.Config_dir_resolver.reset ();
+  Config_dir_resolver.reset ();
   Lib.Worker_runtime_config.reset ();
   check string "malformed config resolves to fail-closed docker backend" "docker"
     (Lib.Worker_execution_backend.to_string

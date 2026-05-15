@@ -680,7 +680,10 @@ let run_docker_shell_command_with_status
          else
            "sandbox_profile=docker blocks nested container runtimes and host socket \
             references")
-    else (
+    else
+      match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd with
+      | Error err -> sandbox_error err
+      | Ok () ->
       let _cleanup =
         Keeper_sandbox_runtime.maybe_cleanup_stale_containers
           ~base_path:config.base_path
@@ -888,7 +891,7 @@ let run_docker_shell_command_with_status
                             meta.name);
                         Ok { status; output; image; network_label }
                       with
-                      | Failure err -> sandbox_error err)))))))
+                      | Failure err -> sandbox_error err))))))
 ;;
 
 let run_docker_with_git_bash
@@ -926,44 +929,49 @@ let run_docker_with_git_bash
     match check_egress ~config ~meta ~cmd with
     | Some blocked_json -> blocked_json
     | None ->
-      let cwd, sandbox_root_git_blocker =
-        resolve_sandbox_root_git_cwd ~config ~meta ~cwd ~cmd
-      in
-      (match sandbox_root_git_blocker with
-       | Some message -> sandbox_error_json message
-       | None ->
-         let _ = turn_sandbox_runtime in
-         (match
-            run_docker_shell_command_with_status
-              ~config
-              ~meta
-              ~cwd
-              ~timeout_sec
-              ~cmd
-              ~git_creds_enabled:true
-              ~network_mode:Network_inherit
-          with
-          | Error message -> error_json message
-          | Ok result ->
-            let cwd_response =
-              Keeper_cwd_response.docker
-                ~host_cwd:cwd
-                ~container_cwd:(docker_private_workspace_cwd ~config ~meta cwd)
-            in
-            Yojson.Safe.to_string
-              (`Assoc
-                  ([ "ok", `Bool (result.status = Unix.WEXITED 0)
-                   ; "via", `String "docker"
-                   ; "cwd", Keeper_cwd_response.to_yojson_response cwd_response
-                   ; "sandbox_profile", `String "docker"
-                   ; "git_creds_enabled", `Bool true
-                   ; "network_mode", `String result.network_label
-                   ; "effective_sandbox_image", `String result.image
-                   ; "status", Keeper_alerting_path.process_status_to_json result.status
-                   ; "output", `String result.output
-                   ]
-                   @ gh_exit_class_field ~cmd ~status:result.status ~output:result.output
-                  )))))
+      (match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd with
+       | Error err -> sandbox_error_json err
+       | Ok () ->
+         let cwd, sandbox_root_git_blocker =
+           resolve_sandbox_root_git_cwd ~config ~meta ~cwd ~cmd
+         in
+         match sandbox_root_git_blocker with
+         | Some message -> sandbox_error_json message
+         | None ->
+           let _ = turn_sandbox_runtime in
+           (match
+              run_docker_shell_command_with_status
+                ~config
+                ~meta
+                ~cwd
+                ~timeout_sec
+                ~cmd
+                ~git_creds_enabled:true
+                ~network_mode:Network_inherit
+            with
+            | Error message -> error_json message
+            | Ok result ->
+              let cwd_response =
+                Keeper_cwd_response.docker
+                  ~host_cwd:cwd
+                  ~container_cwd:(docker_private_workspace_cwd ~config ~meta cwd)
+              in
+              Yojson.Safe.to_string
+                (`Assoc
+                    ([ "ok", `Bool (result.status = Unix.WEXITED 0)
+                     ; "via", `String "docker"
+                     ; "cwd", Keeper_cwd_response.to_yojson_response cwd_response
+                     ; "sandbox_profile", `String "docker"
+                     ; "git_creds_enabled", `Bool true
+                     ; "network_mode", `String result.network_label
+                     ; "effective_sandbox_image", `String result.image
+                     ; "status", Keeper_alerting_path.process_status_to_json result.status
+                     ; "output", `String result.output
+                     ]
+                     @ gh_exit_class_field
+                         ~cmd
+                         ~status:result.status
+                         ~output:result.output)))))
 ;;
 
 let run_docker_hardened_bash
@@ -991,12 +999,15 @@ let run_docker_hardened_bash
     sandbox_error_json
       "sandbox_profile=docker blocks nested container runtimes and host socket references"
   else (
-    let cwd, sandbox_root_git_blocker =
-      resolve_sandbox_root_git_cwd ~config ~meta ~cwd ~cmd
-    in
-    match sandbox_root_git_blocker with
-    | Some message -> sandbox_error_json message
-    | None ->
+    match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd with
+    | Error err -> sandbox_error_json err
+    | Ok () ->
+      let cwd, sandbox_root_git_blocker =
+        resolve_sandbox_root_git_cwd ~config ~meta ~cwd ~cmd
+      in
+      (match sandbox_root_git_blocker with
+       | Some message -> sandbox_error_json message
+       | None ->
       (match turn_sandbox_runtime, network_mode with
        | Some runtime, Network_none ->
          (match
@@ -1082,5 +1093,5 @@ let run_docker_hardened_bash
                       @ gh_exit_class_field
                           ~cmd
                           ~status:result.status
-                          ~output:result.output))))))
+                          ~output:result.output)))))))
 ;;

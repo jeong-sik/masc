@@ -346,6 +346,13 @@ describe('OverlayKeeperTrace — bucket render (RFC-0028 §5)', () => {
       'Telemetry',
       'Keeper',
     ])
+    const badge = container.querySelector<HTMLElement>('.ide-trace-context-badge')
+    expect(badge?.textContent?.trim()).toBe('CTX 8')
+    expect(badge?.getAttribute('data-context-route-count')).toBe('8')
+    expect(badge?.getAttribute('title'))
+      .toBe('Linked context: Code, Goal, Task, PR, Git, Log, Telemetry, Keeper')
+    expect(badge?.getAttribute('aria-label'))
+      .toBe('scholar trace has 8 linked context routes: Code, Goal, Task, PR, Git, Log, Telemetry, Keeper')
 
     fireEvent.click(links[0]!)
     expect(window.location.hash).toBe(

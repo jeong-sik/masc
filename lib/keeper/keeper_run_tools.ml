@@ -1722,14 +1722,15 @@ let prepare_agent_setup
     let hooks = Agent_sdk.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
     let base_dir = Coord.masc_root_dir config in
     let memory_session_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-    let memory_backend =
-      Memory_oas_bridge.make_backend
+    let memory_bundle =
+      Memory_oas_bridge.create_memory_with_backend
         ~agent_name
         ~base_dir
         ~session_id:memory_session_id
         ()
     in
-    let memory = Agent_sdk.Memory.create ~long_term:memory_backend () in
+    let memory = memory_bundle.created_memory in
+    let memory_backend = memory_bundle.created_memory_long_term_backend in
     let hooks =
       let mem_hooks =
         Memory_hooks.make

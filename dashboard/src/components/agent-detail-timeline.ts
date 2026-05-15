@@ -8,6 +8,7 @@ import { EmptyState } from './common/empty-state'
 import { TimeAgo } from './common/time-ago'
 import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
+import { DashboardFeedSourceStrip } from './common/dashboard-feed-source-strip'
 import { agentTimeline } from './agent-detail-state'
 import { trimText } from '../lib/truncate'
 import { toolCategory, durationColor, formatDuration, formatArgs } from './tool-call-shared'
@@ -155,6 +156,7 @@ export function AgentTimelineSection() {
           ${summary.active_duration_minutes > 0 ? html`<${SummaryBadge}>${Math.round(summary.active_duration_minutes)}분 활동<//>` : null}
         </div>
       ` : null}
+      <${DashboardFeedSourceStrip} meta=${timeline} className="mb-2" />
       ${events.length === 0
         ? html`<${EmptyState} message="작업 기록이 아직 없습니다" compact />`
         : html`

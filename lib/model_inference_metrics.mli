@@ -162,6 +162,12 @@ val model_stats_to_json : ?model_label:string -> model_stats -> Yojson.Safe.t
     redacted public runtime lane label; [provider] and recent-entry provider
     fields serialize as [null]. *)
 
+val render_keeper_prompt_feedback : aggregate -> string
+(** Render a compact, redacted telemetry block for opt-in keeper prompt
+    feedback. Returns the empty string when the aggregate has no entries.
+    Provider/model identities are represented as stable runtime-lane labels
+    rather than concrete provider or model names. *)
+
 (** Per-provider rollup of {!model_stats} aggregated across every model id
     whose [provider] matches. Feeds {!Dashboard_cascade.health_json}'s
     [providers] array so the UI can render per-provider throughput and

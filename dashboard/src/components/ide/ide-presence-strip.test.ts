@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   parseWorktreeSSE,
   presenceContextAnchor,
+  presenceContextSummary,
   prLabel,
   workspaceLabelForAgent,
   type WorktreeEntry,
@@ -179,5 +180,30 @@ describe('presenceContextAnchor', () => {
       worktree: sampleWorktrees[0]!,
       cursor: undefined,
     })).toBeNull()
+  })
+
+  it('summarizes visible context coverage for keeper presence chips', () => {
+    const anchor = presenceContextAnchor({
+      entry,
+      worktree: sampleWorktrees[0]!,
+      cursor: {
+        keeper_id: 'nick0cave',
+        file_path: 'lib/runtime.ml',
+        line: 42,
+        column: 7,
+        focus_mode: 'editing',
+        last_update: 123,
+        tool_name: 'ocamllsp',
+      },
+    })
+
+    expect(presenceContextSummary(anchor)).toEqual({
+      label: 'CTX 5',
+      title: 'Linked context: Code, PR, Git, Telemetry, Keeper',
+    })
+  })
+
+  it('omits context coverage when no route links are available', () => {
+    expect(presenceContextSummary(null)).toBeNull()
   })
 })

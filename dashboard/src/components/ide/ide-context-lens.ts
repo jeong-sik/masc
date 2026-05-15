@@ -462,6 +462,7 @@ function ContextAnchorRow(
         </button>
         ${anchor.route_links && anchor.route_links.length > 0 ? html`
           <div class="ide-context-route-links" aria-label="Operational links">
+            <${ContextRouteCount} count=${anchor.route_links.length} />
             ${anchor.route_links.map(link => html`
               <button
                 key=${link.id}
@@ -481,6 +482,18 @@ function ContextAnchorRow(
         ? html`<${KeeperBadge} id=${anchor.keeper_id} variant="sigil" size="sm" />`
         : null}
     </li>
+  `
+}
+
+function ContextRouteCount({ count }: { count: number }) {
+  return html`
+    <span
+      class="ide-context-route-count"
+      title=${`${count} linked context routes`}
+      aria-label=${`${count} linked context routes`}
+    >
+      CTX ${count}
+    </span>
   `
 }
 

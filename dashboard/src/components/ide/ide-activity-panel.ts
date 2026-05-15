@@ -898,6 +898,7 @@ function ActivityRow(
         ` : null}
         ${routeLinks.length > 0 ? html`
           <div class="ide-activity-route-links" aria-label="Activity operational links">
+            <${ActivityRouteCount} count=${routeLinks.length} />
             ${routeLinks.map(link => ActivityRouteLink(link))}
           </div>
         ` : null}
@@ -930,6 +931,18 @@ function ActivityRouteLink(link: IdeContextRouteLink) {
     >
       ${link.label}
     </button>
+  `
+}
+
+function ActivityRouteCount({ count }: { count: number }) {
+  return html`
+    <span
+      class="ide-activity-route-count"
+      title=${`${count} linked activity context routes`}
+      aria-label=${`${count} linked activity context routes`}
+    >
+      CTX ${count}
+    </span>
   `
 }
 

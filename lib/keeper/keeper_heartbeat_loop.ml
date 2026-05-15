@@ -1162,6 +1162,31 @@ let cycle_continues_after_wake
   | _, _ -> smart_heartbeat_cycle_continues d
 ;;
 
+let unobserved_visibility_idle_window_s = 900.0
+
+let visible_consumer_count () =
+  Sse.client_count_by_kind Sse.Observer + Sse.external_subscriber_count ()
+;;
+
+let visibility_gate_decision
+      ~(visible_consumers : int)
+      ~(has_pending_signal : bool)
+      ~(now : float)
+      ~(last_heartbeat_cycle_ts : float)
+      (decision : Heartbeat_smart.decision)
+  : Heartbeat_smart.decision
+  =
+  match decision with
+  | Heartbeat_smart.Emit
+    when visible_consumers <= 0
+         && (not has_pending_signal)
+         && last_heartbeat_cycle_ts > 0.0
+         && now -. last_heartbeat_cycle_ts < unobserved_visibility_idle_window_s ->
+    Heartbeat_smart.Skip_idle
+      (last_heartbeat_cycle_ts +. unobserved_visibility_idle_window_s)
+  | _ -> decision
+;;
+
 let run_smart_heartbeat_gate
       ~(config : Coord.config)
       ~(clock : _ Eio.Time.clock)
@@ -1190,47 +1215,90 @@ let run_smart_heartbeat_gate
      regardless of the busy/idle decision so the next cycle consumes the
      stimulus on time. Pinned by KeeperEventQueue.tla
      QueueNeverStarvedBySkip invariant. *)
+  let pending_signal_present =
+    lazy
+      (let queue =
+         Keeper_registry.event_queue_snapshot
+           ~base_path:config.base_path
+           meta_current.name
+       in
+       if not (Keeper_event_queue.is_empty queue)
+       then (
+         Prometheus.inc_counter
+           Keeper_metrics.metric_keeper_event_queue_override
+           ~labels:[ "keeper", meta_current.name; "reason", "event_queue" ]
+           ();
+         true)
+       else (
+         let allowed_tool_names =
+           Keeper_tool_policy.keeper_allowed_tool_names meta_current
+         in
+         if
+           Keeper_world_observation.durable_signal_present
+             ~allowed_tool_names:(Some allowed_tool_names)
+             ~pending_board_events:None
+             ~config
+             ~meta:meta_current
+         then (
+           Prometheus.inc_counter
+             Keeper_metrics.metric_keeper_event_queue_override
+             ~labels:[ "keeper", meta_current.name; "reason", "durable_state" ]
+             ();
+           Log.Keeper.info
+             "smart heartbeat: durable signal present - cycle resumed before stale \
+              watchdog";
+           true)
+         else false))
+  in
   let smart_hb_decision =
     if Heartbeat_smart.should_emit_now smart_hb_decision
     then smart_hb_decision
     else (
-      let queue =
-        Keeper_registry.event_queue_snapshot ~base_path:config.base_path meta_current.name
+      (* Skip_busy already continues the cycle (no idle sleep), so
+         probing the world-observation signal here would be redundant
+         backlog/board I/O.  The durable-signal probe only matters when
+         the gate would otherwise sleep on Skip_idle. *)
+      match smart_hb_decision with
+      | Heartbeat_smart.Skip_idle _ when Lazy.force pending_signal_present ->
+        Heartbeat_smart.Emit
+      | Heartbeat_smart.Skip_idle _
+      | Heartbeat_smart.Skip_busy
+      | Heartbeat_smart.Emit -> smart_hb_decision)
+  in
+  let smart_hb_decision =
+    match smart_hb_decision with
+    | Heartbeat_smart.Emit when smart_hb_enabled () ->
+      let consumers = visible_consumer_count () in
+      let now = Time_compat.now () in
+      let delay_possible =
+        consumers <= 0
+        && !last_heartbeat_cycle_ts > 0.0
+        && now -. !last_heartbeat_cycle_ts < unobserved_visibility_idle_window_s
       in
-      if not (Keeper_event_queue.is_empty queue)
-      then (
-        Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_event_queue_override
-          ~labels:[ "keeper", meta_current.name; "reason", "event_queue" ]
-          ();
-        Heartbeat_smart.Emit)
-      else (
-        (* Skip_busy already continues the cycle (no idle sleep), so
-           probing the world-observation signal here would be redundant
-           backlog/board I/O.  The durable-signal probe only matters when
-           the gate would otherwise sleep on Skip_idle. *)
-        match smart_hb_decision with
-        | Heartbeat_smart.Skip_idle _ ->
-          let allowed_tool_names =
-            Keeper_tool_policy.keeper_allowed_tool_names meta_current
-          in
-          if
-            Keeper_world_observation.durable_signal_present
-              ~allowed_tool_names:(Some allowed_tool_names)
-              ~pending_board_events:None
-              ~config
-              ~meta:meta_current
-          then (
-            Prometheus.inc_counter
-              Keeper_metrics.metric_keeper_event_queue_override
-              ~labels:[ "keeper", meta_current.name; "reason", "durable_state" ]
-              ();
-            Log.Keeper.info
-              "smart heartbeat: durable signal present - cycle resumed before stale \
-               watchdog";
-            Heartbeat_smart.Emit)
-          else smart_hb_decision
-        | Heartbeat_smart.Skip_busy | Heartbeat_smart.Emit -> smart_hb_decision))
+      let gated =
+        if delay_possible
+        then
+          visibility_gate_decision
+            ~visible_consumers:consumers
+            ~has_pending_signal:(Lazy.force pending_signal_present)
+            ~now
+            ~last_heartbeat_cycle_ts:!last_heartbeat_cycle_ts
+            smart_hb_decision
+        else smart_hb_decision
+      in
+      (match gated with
+       | Heartbeat_smart.Skip_idle _ ->
+         Prometheus.inc_counter
+           Keeper_heartbeat_snapshot.proactive_skip_reason_metric
+           ~labels:[ "keeper", meta_current.name; "reason", "no_visible_consumers" ]
+           ();
+         Log.Keeper.debug
+           "smart heartbeat: no visible consumers - delaying idle turn dispatch"
+       | Heartbeat_smart.Emit | Heartbeat_smart.Skip_busy -> ());
+      gated
+    | Heartbeat_smart.Emit
+    | Heartbeat_smart.Skip_busy
+    | Heartbeat_smart.Skip_idle _ -> smart_hb_decision
   in
   (* Run side-effects (idle sleep, cycle-timestamp update) per the
      decision, then delegate the gate answer to [cycle_continues_after_wake]

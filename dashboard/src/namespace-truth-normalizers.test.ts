@@ -9,6 +9,9 @@ describe('normalizeNamespaceTruth', () => {
   it('returns safe defaults for null input', () => {
     const result = normalizeNamespaceTruth(null)
     expect(result.generated_at).toBeUndefined()
+    expect(result.dashboard_surface).toBeUndefined()
+    expect(result.dashboard_aliases).toEqual([])
+    expect(result.retention).toBeUndefined()
     expect(result.root.status).toBeNull()
     expect(result.root.configured_keepers).toBeUndefined()
     expect(result.execution?.summary).toBeNull()
@@ -36,6 +39,34 @@ describe('normalizeNamespaceTruth', () => {
   it('extracts generated_at from root level', () => {
     const result = normalizeNamespaceTruth({ generated_at: '2026-04-17T10:00:00Z' })
     expect(result.generated_at).toBe('2026-04-17T10:00:00Z')
+  })
+
+  it('preserves top-level provenance for canonical and alias routes', () => {
+    const result = normalizeNamespaceTruth({
+      generated_at_iso: '2026-04-17T10:00:00Z',
+      dashboard_surface: '/api/v1/dashboard/namespace-truth',
+      dashboard_aliases: [
+        '/api/v1/dashboard/project-snapshot',
+        '/api/v1/dashboard/room-truth',
+      ],
+      source: 'namespace_truth_read_model',
+      retention: {
+        scope: 'dashboard_namespace_truth',
+        coordination_root: '/Users/dancer/me',
+        workspace_path: '/Users/dancer/me',
+        shell_input: '/api/v1/dashboard/shell',
+        execution_input: '/api/v1/dashboard/execution',
+        command_input: 'command_summary_json',
+        cache_policy: 'proactive_execution_cache_last_good_shell_fallback',
+      },
+    })
+
+    expect(result.generated_at_iso).toBe('2026-04-17T10:00:00Z')
+    expect(result.dashboard_surface).toBe('/api/v1/dashboard/namespace-truth')
+    expect(result.dashboard_aliases).toContain('/api/v1/dashboard/room-truth')
+    expect(result.source).toBe('namespace_truth_read_model')
+    expect(result.retention?.scope).toBe('dashboard_namespace_truth')
+    expect(result.retention?.execution_input).toBe('/api/v1/dashboard/execution')
   })
 
   // ── root block ──

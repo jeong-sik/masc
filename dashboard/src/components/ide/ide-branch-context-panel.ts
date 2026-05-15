@@ -15,6 +15,8 @@ import {
 } from './ide-context-lens'
 
 type BranchTone = 'current' | 'dirty' | 'conflict' | 'stale'
+
+const DETACHED_HEAD_BRANCH = 'detached' as const
 type PanelState = 'loading' | 'ready' | 'empty' | 'error'
 
 export interface IdeBranchChip {
@@ -107,7 +109,7 @@ export function buildIdeBranchContextModel(
 
   if (!repo) return null
 
-  const currentBranch = repo.current_branch ?? 'detached'
+  const currentBranch = repo.current_branch ?? DETACHED_HEAD_BRANCH
   const repoNodes = graph.nodes.filter(node => node.repo_id === repo.id)
   const branches = repoNodes
     .filter(node => node.kind === 'branch')
@@ -129,7 +131,7 @@ export function buildIdeBranchContextModel(
     .map(agent => ({
       id: agent.id,
       label: agent.label,
-      branch: agent.branch ?? 'detached',
+      branch: agent.branch ?? DETACHED_HEAD_BRANCH,
       path: compactPath(agent.worktree_path),
       color: agent.color,
       keeperId: keeperIdForAgentLane(agent),
@@ -318,7 +320,7 @@ export function IdeBranchContextPanel({
 
 function BranchRepoRow({ model }: { readonly model: IdeBranchContextModel }) {
   const branchLink = branchRepoGitLink(
-    model.currentBranch && model.currentBranch !== 'detached' ? model.currentBranch : null,
+    model.currentBranch && model.currentBranch !== DETACHED_HEAD_BRANCH ? model.currentBranch : null,
     `${model.repoLabel} current branch`,
   )
   const headLink = branchRepoGitLink(
@@ -379,6 +381,20 @@ const LANE_STATUS_DOT: Record<KeeperPresenceStatus, { color: string; label: stri
   idle: { color: 'var(--color-fg-muted)', label: 'IDLE' },
 }
 
+const LANE_CONTEXT_BADGE_STYLE = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  height: '17px',
+  padding: '0 5px',
+  border: '1px solid var(--color-border-muted)',
+  borderRadius: 'var(--r-1)',
+  background: 'var(--color-bg-subtle)',
+  color: 'var(--color-fg-muted)',
+  fontFamily: 'var(--font-mono)',
+  fontSize: 'var(--fs-9)',
+  whiteSpace: 'nowrap',
+} as const
+
 function LaneRow(
   lane: IdeWorktreeLane,
   presence: KeeperPresenceSnapshot | null,
@@ -394,6 +410,7 @@ function LaneRow(
   const focusFile = cursor?.file_path ? cursor.file_path.split('/').pop() : null
   const dotStyle = status ? LANE_STATUS_DOT[status] : null
   const routeLinks = laneRouteLinks(lane, presenceKey, cursor)
+  const routeLabels = routeLinkLabels(routeLinks)
 
   return html`
     <li key=${lane.id} style=${{ display: 'grid', gridTemplateColumns: '6px minmax(0, 1fr) auto auto', alignItems: 'center', gap: 'var(--sp-1)', padding: '2px 0' }}>
@@ -428,6 +445,15 @@ function LaneRow(
       </div>
       ${routeLinks.length > 0 ? html`
         <div class="ide-branch-lane-links" aria-label=${`${lane.label} operational links`}>
+          <span
+            class="ide-branch-lane-context-badge"
+            data-context-route-count=${routeLinks.length}
+            title=${`Linked context: ${routeLabels}`}
+            aria-label=${`${lane.label} lane has ${routeLinks.length} linked context routes: ${routeLabels}`}
+            style=${LANE_CONTEXT_BADGE_STYLE}
+          >
+            CTX ${routeLinks.length}
+          </span>
           ${routeLinks.map(link => BranchLaneRouteLink(link))}
         </div>
       ` : null}
@@ -460,9 +486,13 @@ function laneRouteLinks(
     surface: 'Git',
     label: `${lane.label} ${branch}`,
     sourceId: `branch-lane:${lane.id}`,
-    gitRef: branch && branch !== 'detached' ? branch : undefined,
+    gitRef: branch && branch !== DETACHED_HEAD_BRANCH ? branch : undefined,
     keeperId,
   })
+}
+
+function routeLinkLabels(routeLinks: ReadonlyArray<IdeContextRouteLink>): string {
+  return routeLinks.map(link => link.label).join(', ')
 }
 
 function BranchLaneRouteLink(link: IdeContextRouteLink) {

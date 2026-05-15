@@ -72,6 +72,16 @@ let float_opt_to_yojson = function Some value -> `Float value | None -> `Null
 let bool_opt_to_yojson = function Some value -> `Bool value | None -> `Null
 let public_runtime_provider_label = "runtime"
 let public_runtime_model_label = "runtime"
+let source_label = "oas_runtime_bridge"
+let durable_replay_surface = "/api/v1/dashboard/telemetry?source=oas_event"
+
+let retention_json =
+  `Assoc
+    [
+      ("scope", `String "in_process_runtime_lane");
+      ("per_provider_cap", `Int per_provider_cap);
+      ("durable_replay_surface", `String durable_replay_surface);
+    ]
 
 let normalize_sample (s : sample) =
   {
@@ -495,6 +505,10 @@ let recent_json ?provider ?limit () =
   let samples = recent ?provider ?limit () in
   `Assoc
     [
+      ("generated_at", `String (Masc_domain.now_iso ()));
+      ("dashboard_surface", `String "/api/v1/dashboard/oas/telemetry/recent");
+      ("source", `String source_label);
+      ("retention", retention_json);
       ("provider", provider_json provider);
       ( "limit",
         match limit with
@@ -508,6 +522,10 @@ let summary_json ?provider ?limit () =
   let summary = summary ?provider ?limit () in
   `Assoc
     [
+      ("generated_at", `String (Masc_domain.now_iso ()));
+      ("dashboard_surface", `String "/api/v1/dashboard/oas/telemetry/summary");
+      ("source", `String source_label);
+      ("retention", retention_json);
       ("provider", provider_json provider);
       ( "limit",
         match limit with

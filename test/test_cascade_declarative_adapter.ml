@@ -93,7 +93,7 @@ let with_env name value f =
 
 (* --- TOML fixtures ---
 
-   Provider IDs must match [Provider_adapter] cascade_prefix values:
+   Provider IDs must match runtime binding cascade prefix values:
    claude_code, codex_cli, gemini_cli, ollama, glm-coding, etc.
 
    Model api_names must be valid runtime model ids for the declared provider. *)

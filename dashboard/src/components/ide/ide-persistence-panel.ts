@@ -467,8 +467,24 @@ function persistenceRouteLinks(
     label: keeperId ? `${keeperId} current focus` : 'keeper current focus',
     sourceId: keeperId ? `persistence:${keeperId}` : 'persistence',
     keeperId,
+    telemetry: Boolean(keeperId),
+    telemetryQuery: keeperId || undefined,
   })
 }
+
+const PERSISTENCE_CONTEXT_BADGE_STYLE = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  height: '17px',
+  padding: '0 5px',
+  border: '1px solid var(--color-border-muted)',
+  borderRadius: 'var(--r-1)',
+  background: 'var(--color-bg-subtle)',
+  color: 'var(--color-fg-muted)',
+  fontFamily: 'var(--font-mono)',
+  fontSize: 'var(--fs-9)',
+  whiteSpace: 'nowrap',
+} as const
 
 function PersistenceRouteLinks({
   links,
@@ -476,8 +492,18 @@ function PersistenceRouteLinks({
   readonly links: ReadonlyArray<IdeContextRouteLink>
 }) {
   if (links.length === 0) return null
+  const routeLabels = routeLinkLabels(links)
   return html`
     <div class="ide-persistence-links" aria-label="Persistence context links">
+      <span
+        class="ide-persistence-context-badge"
+        data-context-route-count=${links.length}
+        title=${`Linked context: ${routeLabels}`}
+        aria-label=${`Persistence map has ${links.length} linked context routes: ${routeLabels}`}
+        style=${PERSISTENCE_CONTEXT_BADGE_STYLE}
+      >
+        CTX ${links.length}
+      </span>
       ${links.map(link => html`
         <button
           key=${link.id}
@@ -489,4 +515,8 @@ function PersistenceRouteLinks({
       `)}
     </div>
   `
+}
+
+function routeLinkLabels(links: ReadonlyArray<IdeContextRouteLink>): string {
+  return links.map(link => link.label).join(', ')
 }

@@ -229,6 +229,45 @@ let test_events_json_ignores_invalid_derived_pr_number () =
          | `Null -> true
          | _ -> context |> member "pr_id" |> fun value -> value = `Null))
 
+let test_events_json_exposes_provenance_and_non_stale_latest_seq () =
+  with_config (fun config ->
+      let first =
+        Activity_graph.emit config ~kind:"agent.joined"
+          ~actor:(Activity_graph.entity ~kind:"agent" "claude")
+          ~subject:(Activity_graph.entity ~kind:"agent" "claude")
+          ~payload:(`Assoc [ ("agent_name", `String "claude") ])
+          ()
+      in
+      let second =
+        Activity_graph.emit config ~kind:"task.created"
+          ~actor:(Activity_graph.entity ~kind:"agent" "system")
+          ~subject:(Activity_graph.entity ~kind:"task" "task-activity")
+          ~payload:(`Assoc [ ("task_id", `String "task-activity") ])
+          ()
+      in
+      let seq_counter =
+        Filename.concat
+          (Filename.concat (Coord_utils.masc_dir config) "activity-events")
+          "_seq"
+      in
+      Fs_compat.save_file seq_counter (string_of_int first.seq);
+      let json = Activity_graph.json_response config ~after_seq:0 ~limit:10 () in
+      let open Yojson.Safe.Util in
+      check string "surface" "/api/v1/activity/events"
+        (json |> member "dashboard_surface" |> to_string);
+      check string "source" "activity_graph_jsonl"
+        (json |> member "source" |> to_string);
+      check string "retention scope" "activity_events"
+        (json |> member "retention" |> member "scope" |> to_string);
+      check string "query kind list is empty" "[]"
+        (json |> member "query" |> member "kinds" |> Yojson.Safe.to_string);
+      check int "next cursor is newest returned event" second.seq
+        (json |> member "next_after_seq" |> to_int);
+      check int "latest matching seq sees JSONL rows" second.seq
+        (json |> member "latest_matching_seq" |> to_int);
+      check bool "latest seq does not move behind persisted rows" true
+        ((json |> member "latest_seq" |> to_int) >= second.seq))
+
 let test_emit_sanitizes_invalid_utf8_before_persisting () =
   with_config (fun config ->
       Safe_ops.reset_persistence_utf8_repair_stats_for_tests ();
@@ -560,6 +599,8 @@ let () =
             test_events_json_omits_unsafe_ide_context_file_paths;
           test_case "events json ignores invalid derived PR number" `Quick
             test_events_json_ignores_invalid_derived_pr_number;
+          test_case "events json exposes provenance and non-stale latest seq"
+            `Quick test_events_json_exposes_provenance_and_non_stale_latest_seq;
           test_case "emit sanitizes invalid utf8 before persisting" `Quick
             test_emit_sanitizes_invalid_utf8_before_persisting;
           test_case "read self-heals historic invalid utf8 event file" `Quick

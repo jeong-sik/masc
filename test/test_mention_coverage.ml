@@ -228,7 +228,7 @@ let test_is_spawnable_llama () =
   check bool "llama is spawnable" true (Masc_mcp.Auto_responder.is_spawnable "llama")
 
 let test_is_spawnable_glm () =
-  (* glm has spawn_key=None in Provider_adapter — not CLI-spawnable *)
+  (* glm has no CLI spawn key in the runtime binding catalog. *)
   check bool "glm not spawnable" false (Masc_mcp.Auto_responder.is_spawnable "glm")
 
 let test_is_spawnable_unknown () =

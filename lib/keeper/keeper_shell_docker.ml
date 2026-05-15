@@ -775,7 +775,7 @@ let run_docker_shell_command_with_status_internal
         else Ok ()
       in
       match path_validation with
-      | Error err -> sandbox_error err
+      | Error err -> sandbox_error (Printf.sprintf "%s [blocked_cmd=%s]" err cmd)
       | Ok () ->
       let _cleanup =
         Keeper_sandbox_runtime.maybe_cleanup_stale_containers
@@ -1034,7 +1034,7 @@ let run_docker_with_git_bash
            rewrite_docker_command_paths_for_host_validation ~config ~meta cmd
          in
          (match Worker_dev_tools.validate_command_paths ~workdir:cwd validation_cmd with
-          | Error err -> sandbox_error_json err
+          | Error err -> sandbox_error_json (Printf.sprintf "%s [blocked_cmd=%s]" err validation_cmd)
           | Ok () ->
            let _ = turn_sandbox_runtime in
            (match
@@ -1107,7 +1107,7 @@ let run_docker_hardened_bash
         rewrite_docker_command_paths_for_host_validation ~config ~meta cmd
       in
       (match Worker_dev_tools.validate_command_paths ~workdir:cwd validation_cmd with
-       | Error err -> sandbox_error_json err
+       | Error err -> sandbox_error_json (Printf.sprintf "%s [blocked_cmd=%s]" err validation_cmd)
        | Ok () ->
       (match turn_sandbox_runtime, network_mode with
        | Some runtime, Network_none ->

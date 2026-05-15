@@ -142,6 +142,20 @@ val run_docker_shell_command_with_status :
   network_mode:Keeper_types.network_mode ->
   (docker_shell_result, string) result
 
+(** Same as {!run_docker_shell_command_with_status}, but skips freeform
+    command path syntax validation. Use only for commands generated from
+    structured argv by a dedicated MASC tool; keeper-authored Bash must use
+    the default validated entrypoint. *)
+val run_trusted_docker_shell_command_with_status :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  cwd:string ->
+  timeout_sec:float ->
+  cmd:string ->
+  git_creds_enabled:bool ->
+  network_mode:Keeper_types.network_mode ->
+  (docker_shell_result, string) result
+
 (** Run [cmd] inside the Docker sandbox with git credentials
     forwarded (Network_inherit). Returns the JSON envelope to
     surface to the LLM, including [gh_exit_class] when applicable. *)

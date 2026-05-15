@@ -253,7 +253,7 @@ let run_gh_argv ~(config : Coord.config) ~(meta : keeper_meta) ~env ~cwd
     { status; output; via = "brokered" }
   else if meta.sandbox_profile = Docker then
     match
-      Keeper_shell_shared.run_docker_shell_command_with_status
+      Keeper_shell_docker.run_trusted_docker_shell_command_with_status
         ~config ~meta ~cwd ~timeout_sec ~cmd:(quote_argv argv)
         ~git_creds_enabled:true ~network_mode:Network_inherit
     with

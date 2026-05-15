@@ -9,11 +9,38 @@ open Alcotest
 
 module Model_resolve = Masc_mcp.Cascade_model_resolve
 
+let with_provider_catalog json f =
+  match Llm_provider.Provider_catalog.of_json (Yojson.Safe.from_string json) with
+  | Error msg -> fail msg
+  | Ok catalog ->
+    Llm_provider.Provider_catalog.set_global catalog;
+    Fun.protect ~finally:Llm_provider.Provider_catalog.clear_global f
+
+let local_runtime_catalog_json =
+  {|
+{
+  "schema_version": 1,
+  "providers": [
+    {
+      "id": "observability-local",
+      "kind": "openai_compat",
+      "transport": "http",
+      "base_url": "http://127.0.0.1:8124",
+      "request_path": "/v1/chat/completions",
+      "auth": {"type": "none"},
+      "capabilities_base": "openai_chat",
+      "non_interactive": true,
+      "interactive_required": false,
+      "daemon_safe": true
+    }
+  ]
+}
+|}
+
 let string_of_resolution_provenance = function
   | Model_resolve.Explicit_input -> "explicit_input"
-  | Model_resolve.Alias alias -> "alias:" ^ alias
   | Model_resolve.Env_default var -> "env_default:" ^ var
-  | Model_resolve.Hardcoded_default -> "hardcoded_default"
+  | Model_resolve.Binding_default -> "binding_default"
   | Model_resolve.Discovery -> "discovery"
   | Model_resolve.Unresolved_auto -> "unresolved_auto"
 
@@ -126,16 +153,7 @@ let test_labels_require_local_discovery () =
     (Masc_mcp.Cascade_runtime.labels_require_local_discovery
        [ "default"; "glm:auto" ])
 
-let test_cascade_model_resolve_alias_provenance () =
-  let resolved =
-    Model_resolve.resolve_glm_model ~getenv:(fun _ -> None)
-      (Model_resolve.model_selector_of_string "flash")
-  in
-  check string "glm flash alias" "glm-4.7-flashx" resolved.resolved_model_id;
-  check resolution_provenance "alias provenance"
-    (Model_resolve.Alias "flash") resolved.provenance
-
-let test_cascade_model_resolve_hardcoded_default_provenance () =
+let test_cascade_model_resolve_unregistered_default_provenance () =
   let resolved =
     Model_resolve.resolve_auto_model ~getenv:(fun _ -> None) "openai"
       (Model_resolve.model_selector_of_string "auto")
@@ -160,15 +178,16 @@ let test_cascade_model_resolve_env_default_provenance () =
     resolved.provenance
 
 let test_cascade_model_resolve_discovery_provenance () =
-  let resolved =
-    Model_resolve.resolve_auto_model
-      ~getenv:(fun _ -> None)
-      ~discover:(fun () -> Some "qwen3:8b")
-      "ollama" (Model_resolve.model_selector_of_string "auto")
-  in
-  check string "ollama discovery" "qwen3:8b" resolved.resolved_model_id;
-  check resolution_provenance "discovery provenance"
-    Model_resolve.Discovery resolved.provenance
+  with_provider_catalog local_runtime_catalog_json (fun () ->
+    let resolved =
+      Model_resolve.resolve_auto_model
+        ~getenv:(fun _ -> None)
+        ~discover:(fun () -> Some "local-model")
+        "observability-local" (Model_resolve.model_selector_of_string "auto")
+    in
+    check string "local discovery" "local-model" resolved.resolved_model_id;
+    check resolution_provenance "discovery provenance"
+      Model_resolve.Discovery resolved.provenance)
 
 let test_cascade_model_resolve_unresolved_auto_provenance () =
   let resolved =
@@ -178,7 +197,7 @@ let test_cascade_model_resolve_unresolved_auto_provenance () =
   check string "openrouter unresolved auto stays auto" "auto"
     resolved.resolved_model_id;
   check resolution_provenance "generic OAS binding provenance"
-    Model_resolve.Hardcoded_default resolved.provenance
+    Model_resolve.Binding_default resolved.provenance
 
 (* ── Section 2: Dashboard schema contracts ── *)
 
@@ -280,10 +299,8 @@ let () =
             test_effective_discovered_ctx;
           test_case "local discovery label detection" `Quick
             test_labels_require_local_discovery;
-          test_case "cascade alias provenance" `Quick
-            test_cascade_model_resolve_alias_provenance;
-          test_case "cascade hardcoded default provenance" `Quick
-            test_cascade_model_resolve_hardcoded_default_provenance;
+          test_case "cascade unregistered default provenance" `Quick
+            test_cascade_model_resolve_unregistered_default_provenance;
           test_case "cascade env default provenance" `Quick
             test_cascade_model_resolve_env_default_provenance;
           test_case "cascade discovery provenance" `Quick

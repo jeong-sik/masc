@@ -431,7 +431,7 @@ type strategy_config =
   ; cli_max_concurrent : int option
   ; tiers : string list list option
   ; sticky_ttl_ms : int option
-  ; (* ── Scoring parameter overrides (Weighted_random strategy) ── *)
+  ; (* ── Retired scoring parameter overrides (diagnostics only) ── *)
     latency_baseline_ms : float option
     (** Milliseconds.  Provider p50 above this value incurs a fractional
       score penalty.  When [None], falls back to

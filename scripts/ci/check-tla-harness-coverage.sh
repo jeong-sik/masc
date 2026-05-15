@@ -10,7 +10,6 @@ known_unchecked_specs() {
   cat <<'EOF'
 specs/boundary/CascadeKeeperRecovery.tla
 specs/boundary/CascadeStrategy.tla
-specs/boundary/CascadeStrategyStateful.tla
 specs/boundary/KeeperRecoveryOrchestration.tla
 specs/boundary/KeeperTurnScheduler.tla
 specs/checkpoint-trim/CheckpointTrim.tla

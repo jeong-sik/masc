@@ -70,10 +70,10 @@ pass "response schema looks correct"
 
 # ── 4. Categorise entries ─────────────────────────────────────────
 cli_count="$(echo "$snap" | jq '[.entries[] | select(.kind == "cli")] | length')"
-ollama_count="$(echo "$snap" | jq '[.entries[] | select(.kind == "ollama")] | length')"
+http_probe_count="$(echo "$snap" | jq '[.entries[] | select(.kind == "http_probe")] | length')"
 other_count="$(echo "$snap" | jq '[.entries[] | select(.kind == "other")] | length')"
 
-say "by kind: cli=$cli_count ollama=$ollama_count other=$other_count"
+say "by kind: cli=$cli_count http_probe=$http_probe_count other=$other_count"
 
 if [ "$entry_count" -eq 0 ]; then
   say ""
@@ -117,14 +117,14 @@ if [ "$cli_count" -gt 0 ]; then
   echo "$snap" | jq -r '.entries[] | select(.kind == "cli") |
     "  \(.key)  total=\(.total) active=\(.active) available=\(.available)"' >&2
 fi
-if [ "$ollama_count" -gt 0 ]; then
-  echo "$snap" | jq -r '.entries[] | select(.kind == "ollama") |
+if [ "$http_probe_count" -gt 0 ]; then
+  echo "$snap" | jq -r '.entries[] | select(.kind == "http_probe") |
     "  \(.key)  total=\(.total) active=\(.active) available=\(.available)"' >&2
 fi
 
 # ── 8. Cross-check vs /cascade/health: provider keys should overlap ─
-# Strategy's capacity_key for ollama = base_url. For CLI = cli:<kind>.
-# health_tracker keys are provider model_ids (e.g. glm:glm-5.1).
+# Strategy's capacity_key for HTTP-probe providers = registered probe URL.
+# For CLI = cli:<kind>. Health-tracker keys are provider/model labels.
 # These live in DIFFERENT registries so no overlap requirement —
 # we only assert both endpoints respond.
 if ! curl -fsS --max-time "$CURL_TIMEOUT" "$BASE_URL/api/v1/cascade/health" >/dev/null; then

@@ -214,3 +214,32 @@ let zero_usage : Agent_sdk.Types.api_usage =
     cache_read_input_tokens = 0;
     cost_usd = None;
   }
+
+let telemetry_has_canonical_model_id
+    (telemetry : Agent_sdk.Types.inference_telemetry option) =
+  match telemetry with
+  | Some { canonical_model_id = Some id; _ } -> String.trim id <> ""
+  | Some _ | None -> false
+
+let is_runtime_selector_alias model =
+  let trimmed = String.trim model |> String.lowercase_ascii in
+  let leaf =
+    match String.rindex_opt trimmed ':' with
+    | None -> trimmed
+    | Some idx when idx >= String.length trimmed - 1 -> ""
+    | Some idx ->
+        String.sub trimmed (idx + 1) (String.length trimmed - idx - 1)
+        |> String.trim
+  in
+  String.equal leaf "auto"
+
+let ms_per_second = 1000.0
+
+let cost_source_unmetered_provider = "unmetered_provider"
+let cost_source_computed = "computed"
+
+let oas_reported_cost (usage : Agent_sdk.Types.api_usage) : float =
+  match usage.cost_usd with
+  | Some cost when cost > 0.0 -> cost
+  | Some _ -> 0.0
+  | None -> 0.0

@@ -131,6 +131,15 @@ let log_class_of_cancel_classification = function
   | Unknown_cancel -> "warn_cancel"
 ;;
 
+let is_eio_time_timeout = function
+  | Eio.Time.Timeout -> true
+  | _ -> false
+;;
+
+let cancelled_timeout_exceeded ~timeout_s ~wall inner_exn =
+  is_eio_time_timeout inner_exn && Float.compare wall timeout_s >= 0
+;;
+
 let run_with_timeout_and_fallback
     ?(cancel_classification = Unknown_cancel)
     ~timeout_s
@@ -184,87 +193,90 @@ let run_with_timeout_and_fallback
   | Some { Masc_eio_env.clock = Some clock; _ } ->
     let t0 = Eio.Time.now clock in
     let elapsed () = Eio.Time.now clock -. t0 in
+    let timeout_error ~wall =
+      (* #9639/#9662: Eio cancel is cooperative — [with_timeout_exn] fires
+         but the fiber must reach a cancel point (single_read, yield, etc.)
+         to actually interrupt. Surface overshoot as a structured warn so
+         stalls remain observable instead of silently inflating wall time.
+
+         2026-04-27 correction: the original "uncancellable region (native
+         HTTP bulk read, syscall, non-yielding loop)" diagnosis was a
+         guess and has been *falsified* by four raw-TCP reproducers ported
+         to the OAS regression guard (jeong-sik/oas#1210,
+         test/test_eio_cancellability.ml).  Buf_read.line + slow drip and
+         read_sse + fast stream with trivial / sleeping / CPU-bound on_data
+         callbacks all exit Eio.Time.with_timeout_exn within 1-2ms.  The
+         layer producing prod hangs (>=1170s) is *not* yet identified;
+         remaining suspects are caller on_event handlers, post_sync
+         take_all + connection-not-closed, Switch cleanup, or TLS.
+
+         Action: do NOT add yield points to OAS read_sse / Buf_read based
+         on the original guess — that wrong-layer fix was almost shipped.
+         During the next overshoot, run
+         ~/me/scripts/oas-hung-keeper-dump.sh to capture the fiber stack
+         and identify the real layer.  Cross-ref:
+         jeong-sik/me planning/claude-plans/oas-execution-cancellability.md *)
+      let deadline =
+        Timeout_policy.Deadline.make
+          ~layer:Timeout_policy.Layer.Oas_bridge
+          ~origin:"keeper_llm_bridge"
+          ~wall_cap_s:timeout_s
+          ~now:t0
+      in
+      let _ : bool = Timeout_policy.overshoot_warn ~deadline ~actual_wall_s:wall () in
+      Prometheus.inc_counter
+        Keeper_metrics.metric_keeper_llm_bridge_failures
+        ~labels:[label_site, site_timeout ]
+        ();
+      let message =
+        Printf.sprintf
+          "keeper_llm_bridge: OAS execution timed out after %.1fs (budget=%.0fs; OAS \
+           context rollback only; external tool side effects are not reverted)"
+          wall
+          timeout_s
+      in
+      let envelope =
+        bridge_failure_envelope
+          ~cause_code:cause_code_oas_timeout_budget
+          ~severity:Failure_envelope.Bad
+          ~summary:"OAS execution exceeded its keeper bridge timeout budget"
+          ~recoverability:Failure_envelope.Operator_action_required
+          ~operator_action:"inspect_timeout_budget"
+          ~evidence_ref:
+            (`Assoc
+              [
+                (key_timeout_sec, `Float timeout_s);
+                (key_wall_sec, `Float wall);
+                (key_overshoot_sec, `Float (Float.max 0.0 (wall -. timeout_s)));
+                (key_rollback_scope, `String rollback_scope_oas_context_only);
+                (key_external_tool_side_effects_reverted, `Bool false);
+              ])
+          ()
+      in
+      Log.Keeper.emit Log.Info
+        ~details:
+          (bridge_details
+             [
+               json_string_field field_event "keeper_oas_bridge_timeout";
+               json_float_field field_timeout_sec timeout_s;
+               json_float_field field_wall_sec wall;
+               json_float_field field_overshoot_sec (Float.max 0.0 (wall -. timeout_s));
+               json_string_field field_rollback_scope rollback_scope_oas_context_only;
+               json_field field_external_tool_side_effects_reverted (`Bool false);
+             ]
+             envelope)
+        message;
+      Error
+        (Agent_sdk.Error.Api
+           (Timeout
+              { message =
+                  Printf.sprintf "Timeout after %.1fs (budget=%.0fs)" wall timeout_s
+              }))
+    in
     (try Eio.Time.with_timeout_exn clock timeout_s fn with
      | Eio.Time.Timeout ->
        let wall = elapsed () in
-       (* #9639/#9662: Eio cancel is cooperative — [with_timeout_exn] fires
-       but the fiber must reach a cancel point (single_read, yield, etc.)
-       to actually interrupt. Surface overshoot as a structured warn so
-       stalls remain observable instead of silently inflating wall time.
-
-       2026-04-27 correction: the original "uncancellable region (native
-       HTTP bulk read, syscall, non-yielding loop)" diagnosis was a
-       guess and has been *falsified* by four raw-TCP reproducers ported
-       to the OAS regression guard (jeong-sik/oas#1210,
-       test/test_eio_cancellability.ml).  Buf_read.line + slow drip and
-       read_sse + fast stream with trivial / sleeping / CPU-bound on_data
-       callbacks all exit Eio.Time.with_timeout_exn within 1-2ms.  The
-       layer producing prod hangs (>=1170s) is *not* yet identified;
-       remaining suspects are caller on_event handlers, post_sync
-       take_all + connection-not-closed, Switch cleanup, or TLS.
-
-       Action: do NOT add yield points to OAS read_sse / Buf_read based
-       on the original guess — that wrong-layer fix was almost shipped.
-       During the next overshoot, run
-       ~/me/scripts/oas-hung-keeper-dump.sh to capture the fiber stack
-       and identify the real layer.  Cross-ref:
-       jeong-sik/me planning/claude-plans/oas-execution-cancellability.md *)
-       let deadline =
-         Timeout_policy.Deadline.make
-           ~layer:Timeout_policy.Layer.Oas_bridge
-           ~origin:"keeper_llm_bridge"
-           ~wall_cap_s:timeout_s
-           ~now:t0
-       in
-       let _ : bool = Timeout_policy.overshoot_warn ~deadline ~actual_wall_s:wall () in
-       Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_llm_bridge_failures
-         ~labels:[label_site, site_timeout ]
-         ();
-       let message =
-         Printf.sprintf
-           "keeper_llm_bridge: OAS execution timed out after %.1fs (budget=%.0fs; OAS \
-            context rollback only; external tool side effects are not reverted)"
-           wall
-           timeout_s
-       in
-       let envelope =
-         bridge_failure_envelope
-           ~cause_code:cause_code_oas_timeout_budget
-           ~severity:Failure_envelope.Bad
-           ~summary:"OAS execution exceeded its keeper bridge timeout budget"
-           ~recoverability:Failure_envelope.Operator_action_required
-           ~operator_action:"inspect_timeout_budget"
-           ~evidence_ref:
-             (`Assoc
-               [
-                 (key_timeout_sec, `Float timeout_s);
-                 (key_wall_sec, `Float wall);
-                 (key_overshoot_sec, `Float (Float.max 0.0 (wall -. timeout_s)));
-                 (key_rollback_scope, `String rollback_scope_oas_context_only);
-                 (key_external_tool_side_effects_reverted, `Bool false);
-               ])
-           ()
-       in
-       Log.Keeper.emit Log.Info
-         ~details:
-           (bridge_details
-              [
-                json_string_field field_event "keeper_oas_bridge_timeout";
-                json_float_field field_timeout_sec timeout_s;
-                json_float_field field_wall_sec wall;
-                json_float_field field_overshoot_sec (Float.max 0.0 (wall -. timeout_s));
-                json_string_field field_rollback_scope rollback_scope_oas_context_only;
-                json_field field_external_tool_side_effects_reverted (`Bool false);
-              ]
-              envelope)
-         message;
-       Error
-         (Agent_sdk.Error.Api
-            (Timeout
-               { message =
-                   Printf.sprintf "Timeout after %.1fs (budget=%.0fs)" wall timeout_s
-               }))
+       timeout_error ~wall
      | Eio.Cancel.Cancelled inner_exn as exn ->
        (* TLA+: FiberHandlesCancellation -> Rollback context.
           Cancelled means a parent fiber (server shutdown, global stop) requested
@@ -289,62 +301,65 @@ let run_with_timeout_and_fallback
          | Failure msg -> "Failure(" ^ msg ^ ")"
          | _ -> Printexc.to_string inner_exn
        in
-       let log_level = cancel_log_level cancel_classification in
-       let cancel_classification_label =
-         string_of_cancel_classification cancel_classification
-       in
-       let log_class = log_class_of_cancel_classification cancel_classification in
-       Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_llm_bridge_failures
-         ~labels:[label_site, site_cancelled ]
-         ();
-       let message =
-         Printf.sprintf
-           "keeper_llm_bridge: OAS execution cancelled after %.1fs bucket=%s inner=%s \
-            (re-raising; OAS context rollback only; external tool side effects are not \
-            reverted)"
-           wall
-           bucket
-           inner_str
-       in
-       let envelope =
-         bridge_failure_envelope
-           ~cause_code:cause_code_oas_execution_cancelled
-           ~severity:Failure_envelope.Warn
-           ~summary:"OAS execution was cancelled by parent fiber or shutdown"
-           ~recoverability:Failure_envelope.Retryable
-           ~evidence_ref:
-             (`Assoc
-               [
-                 (key_wall_sec, `Float wall);
-                 (key_bucket, `String bucket);
-                 (key_inner_exception, `String inner_str);
-                 (key_cancel_classification, `String cancel_classification_label);
-                 (key_rollback_scope, `String rollback_scope_oas_context_only);
-                 (key_external_tool_side_effects_reverted, `Bool false);
-               ])
-           ()
-       in
-       Log.Keeper.emit log_level
-         ~details:
-           (bridge_details
-              [
-                json_string_field field_event "keeper_oas_bridge_cancelled";
-                json_string_field field_log_class log_class;
-                json_float_field field_wall_sec wall;
-                json_string_field field_bucket bucket;
-                json_string_field field_inner_exception inner_str;
-                json_string_field field_cancel_classification cancel_classification_label;
-                json_string_field field_rollback_scope rollback_scope_oas_context_only;
-                json_field field_external_tool_side_effects_reverted (`Bool false);
-              ]
-              envelope)
-         message;
-       Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_oas_cancel
-         ~labels:[label_bucket, bucket ]
-         ();
-       Printexc.raise_with_backtrace exn bt
+       if cancelled_timeout_exceeded ~timeout_s ~wall inner_exn
+       then timeout_error ~wall
+       else (
+         let log_level = cancel_log_level cancel_classification in
+         let cancel_classification_label =
+           string_of_cancel_classification cancel_classification
+         in
+         let log_class = log_class_of_cancel_classification cancel_classification in
+         Prometheus.inc_counter
+           Keeper_metrics.metric_keeper_llm_bridge_failures
+           ~labels:[label_site, site_cancelled ]
+           ();
+         let message =
+           Printf.sprintf
+             "keeper_llm_bridge: OAS execution cancelled after %.1fs bucket=%s inner=%s \
+              (re-raising; OAS context rollback only; external tool side effects are \
+              not reverted)"
+             wall
+             bucket
+             inner_str
+         in
+         let envelope =
+           bridge_failure_envelope
+             ~cause_code:cause_code_oas_execution_cancelled
+             ~severity:Failure_envelope.Warn
+             ~summary:"OAS execution was cancelled by parent fiber or shutdown"
+             ~recoverability:Failure_envelope.Retryable
+             ~evidence_ref:
+               (`Assoc
+                 [
+                   (key_wall_sec, `Float wall);
+                   (key_bucket, `String bucket);
+                   (key_inner_exception, `String inner_str);
+                   (key_cancel_classification, `String cancel_classification_label);
+                   (key_rollback_scope, `String rollback_scope_oas_context_only);
+                   (key_external_tool_side_effects_reverted, `Bool false);
+                 ])
+             ()
+         in
+         Log.Keeper.emit log_level
+           ~details:
+             (bridge_details
+                [
+                  json_string_field field_event "keeper_oas_bridge_cancelled";
+                  json_string_field field_log_class log_class;
+                  json_float_field field_wall_sec wall;
+                  json_string_field field_bucket bucket;
+                  json_string_field field_inner_exception inner_str;
+                  json_string_field field_cancel_classification cancel_classification_label;
+                  json_string_field field_rollback_scope rollback_scope_oas_context_only;
+                  json_field field_external_tool_side_effects_reverted (`Bool false);
+                ]
+                envelope)
+           message;
+         Prometheus.inc_counter
+           Keeper_metrics.metric_keeper_oas_cancel
+           ~labels:[label_bucket, bucket ]
+           ();
+         Printexc.raise_with_backtrace exn bt)
      | exn ->
        (* TLA+: HandleError -> Rollback context *)
        let bt = Printexc.get_backtrace () in
@@ -381,3 +396,7 @@ let run_with_timeout_and_fallback
          message;
        Error (Agent_sdk.Error.Internal error))
 ;;
+
+module For_testing = struct
+  let cancelled_timeout_exceeded = cancelled_timeout_exceeded
+end

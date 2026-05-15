@@ -231,6 +231,30 @@ let test_hitl_headroom_exceeds_default_approval_wait () =
     (Keeper_llm_bridge.with_hitl_approval_headroom 900.0)
 ;;
 
+let test_timeout_inner_cancel_classification () =
+  Alcotest.(check bool)
+    "timeout cancel after budget is timeout"
+    true
+    (Keeper_llm_bridge.For_testing.cancelled_timeout_exceeded
+       ~timeout_s:600.0
+       ~wall:2133.4
+       Eio.Time.Timeout);
+  Alcotest.(check bool)
+    "timeout cancel before budget remains parent cancel"
+    false
+    (Keeper_llm_bridge.For_testing.cancelled_timeout_exceeded
+       ~timeout_s:600.0
+       ~wall:30.0
+       Eio.Time.Timeout);
+  Alcotest.(check bool)
+    "non-timeout cancel after budget remains parent cancel"
+    false
+    (Keeper_llm_bridge.For_testing.cancelled_timeout_exceeded
+       ~timeout_s:600.0
+       ~wall:2133.4
+       (Failure "shutdown"))
+;;
+
 let () =
   Alcotest.run
     "keeper_llm_bridge"
@@ -264,6 +288,10 @@ let () =
             "HITL approval headroom"
             `Quick
             test_hitl_headroom_exceeds_default_approval_wait
+        ; Alcotest.test_case
+            "timeout inner cancel classification"
+            `Quick
+            test_timeout_inner_cancel_classification
         ] )
     ]
 ;;

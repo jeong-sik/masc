@@ -29,3 +29,7 @@ val run_with_timeout_and_fallback
   -> timeout_s:float
   -> (unit -> ('a, Agent_sdk.Error.sdk_error) result)
   -> ('a, Agent_sdk.Error.sdk_error) result
+
+module For_testing : sig
+  val cancelled_timeout_exceeded : timeout_s:float -> wall:float -> exn -> bool
+end

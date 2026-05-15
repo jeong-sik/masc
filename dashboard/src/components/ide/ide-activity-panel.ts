@@ -89,15 +89,24 @@ const INITIAL_REFRESH_STATE: ActivityRefreshState = {
   lastAttemptMs: null,
   failedCount: 0,
 }
-const PROGRESS_SURFACES = [
-  ['goal_id', 'Goal'],
-  ['task_id', 'Task'],
-  ['board_post_id', 'Board'],
-  ['comment_id', 'Comment'],
-  ['pr_id', 'PR'],
-  ['git_ref', 'Git'],
-  ['log_id', 'Log'],
-] as const
+interface ProgressSurfaceSpec {
+  readonly key: keyof RunActivityContext
+  readonly label: string
+  readonly routeLabel?: string
+}
+
+const PROGRESS_SURFACES: ReadonlyArray<ProgressSurfaceSpec> = [
+  { key: 'goal_id', label: 'Goal' },
+  { key: 'task_id', label: 'Task' },
+  { key: 'board_post_id', label: 'Board' },
+  { key: 'comment_id', label: 'Comment' },
+  { key: 'pr_id', label: 'PR' },
+  { key: 'git_ref', label: 'Git' },
+  { key: 'log_id', label: 'Log' },
+  { key: 'session_id', label: 'Session', routeLabel: 'Telemetry' },
+  { key: 'operation_id', label: 'Operation', routeLabel: 'Telemetry' },
+  { key: 'worker_run_id', label: 'Run', routeLabel: 'Telemetry' },
+]
 
 const DEFAULT_ROOM_ID = 'run-default'
 type MutableRunActivityContext = {
@@ -481,12 +490,12 @@ export function deriveIdeRunProgressSummary(
   const linkedCoveragePercent = events.length === 0
     ? 0
     : Math.round((linkedEvents / events.length) * 100)
-  const surfaceCounts: IdeRunProgressSurfaceCount[] = PROGRESS_SURFACES.map(([key, label]) => {
-    const matchingEvents = events.filter(event => event.context?.[key])
+  const surfaceCounts: IdeRunProgressSurfaceCount[] = PROGRESS_SURFACES.map(surface => {
+    const matchingEvents = events.filter(event => event.context?.[surface.key])
     return {
-      label,
+      label: surface.label,
       count: matchingEvents.length,
-      routeLink: latestSurfaceRouteLink(label, matchingEvents),
+      routeLink: latestSurfaceRouteLink(surface.routeLabel ?? surface.label, matchingEvents),
     }
   })
   surfaceCounts.push({

@@ -150,7 +150,19 @@ describe('IdeActivityPanel', () => {
 
     const surfaces = [...container.querySelectorAll('.ide-run-progress-surfaces > span')]
       .map(node => node.textContent)
-    expect(surfaces).toEqual(['Goal1', 'Task1', 'Board1', 'Comment1', 'PR1', 'Git1', 'Log1', 'Telemetry1'])
+    expect(surfaces).toEqual([
+      'Goal1',
+      'Task1',
+      'Board1',
+      'Comment1',
+      'PR1',
+      'Git1',
+      'Log1',
+      'Session1',
+      'Operation1',
+      'Run1',
+      'Telemetry1',
+    ])
 
     const surfaceLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-run-progress-surface-link')]
     expect(surfaceLinks.map(link => link.textContent)).toEqual([
@@ -161,10 +173,15 @@ describe('IdeActivityPanel', () => {
       'PR1',
       'Git1',
       'Log1',
+      'Session1',
+      'Operation1',
+      'Run1',
       'Telemetry1',
     ])
     fireEvent.click(surfaceLinks.find(link => link.textContent === 'PR1')!)
     expect(window.location.hash).toBe('#workspace?section=repositories&view=graph&pr=15000')
+    fireEvent.click(surfaceLinks.find(link => link.textContent === 'Session1')!)
+    expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&session_id=sess-runtime&operation_id=op-runtime&worker_run_id=wr-runtime&q=turn-1')
     fireEvent.click(surfaceLinks.find(link => link.textContent === 'Telemetry1')!)
     expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&session_id=sess-runtime&operation_id=op-runtime&worker_run_id=wr-runtime&q=turn-1')
 
@@ -542,7 +559,19 @@ describe('IdeActivityPanel', () => {
     await waitFor(() => {
       const surfaces = [...container.querySelectorAll('.ide-run-progress-surfaces > span')]
         .map(node => node.textContent)
-      expect(surfaces).toEqual(['Goal0', 'Task0', 'Board0', 'Comment0', 'PR0', 'Git0', 'Log1', 'Telemetry1'])
+      expect(surfaces).toEqual([
+        'Goal0',
+        'Task0',
+        'Board0',
+        'Comment0',
+        'PR0',
+        'Git0',
+        'Log1',
+        'Session0',
+        'Operation0',
+        'Run0',
+        'Telemetry1',
+      ])
     })
   })
 
@@ -758,6 +787,9 @@ describe('IdeActivityPanel', () => {
       ['PR', 1],
       ['Git', 1],
       ['Log', 1],
+      ['Session', 0],
+      ['Operation', 0],
+      ['Run', 0],
       ['Telemetry', 3],
     ])
     expect(summary.surfaceCounts.find(surface => surface.label === 'PR')?.routeLink).toMatchObject({
@@ -814,6 +846,8 @@ describe('IdeActivityPanel', () => {
           pr_id: '15000',
           log_id: 'turn-latest',
           session_id: 'sess-latest',
+          operation_id: 'op-latest',
+          worker_run_id: 'wr-latest',
         },
       },
     ], 'lib/runtime.ml')
@@ -828,6 +862,19 @@ describe('IdeActivityPanel', () => {
         section: 'fleet-health',
         view: 'event-log',
         session_id: 'sess-latest',
+        operation_id: 'op-latest',
+        worker_run_id: 'wr-latest',
+        q: 'turn-latest',
+      },
+    })
+    expect(summary.surfaceCounts.find(surface => surface.label === 'Session')?.routeLink).toMatchObject({
+      label: 'Telemetry',
+      params: {
+        section: 'fleet-health',
+        view: 'event-log',
+        session_id: 'sess-latest',
+        operation_id: 'op-latest',
+        worker_run_id: 'wr-latest',
         q: 'turn-latest',
       },
     })

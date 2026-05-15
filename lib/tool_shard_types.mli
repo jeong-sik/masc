@@ -104,3 +104,16 @@ val library_tools : Masc_domain.tool_schema list
 
 val taskboard_tools : Masc_domain.tool_schema list
 (** Pure: keeper_task tool schemas. *)
+
+(** Predefined shard records. *)
+
+val shard_base : shard
+val shard_board : shard
+val shard_filesystem : shard
+val shard_shell : shard
+val shard_coding : shard
+val shard_voice : shard
+val shard_library : shard
+val shard_taskboard : shard
+val autoresearch_keeper_tools : Masc_domain.tool_schema list
+val shard_autoresearch : shard

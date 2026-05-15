@@ -1740,3 +1740,105 @@ let taskboard_tools : Masc_domain.tool_schema list =
     }
   ]
 ;;
+let shard_base : shard =
+  { name = "base"
+  ; tools = base_tools
+  ; read_only_tools =
+      [ "keeper_stay_silent"
+      ; "keeper_time_now"
+      ; "keeper_context_status"
+      ; "keeper_memory_search"
+      ; "keeper_tools_list"
+      ]
+  ; removable = false
+  ; description = "Core tools: time, context, memory"
+  }
+;;
+
+let shard_board : shard =
+  { name = "board"
+  ; tools = board_tools
+  ; read_only_tools =
+      [ "keeper_board_get"
+      ; "keeper_board_list"
+      ; "keeper_board_stats"
+      ; "keeper_board_search"
+      ; "keeper_board_curation_read"
+      ; "keeper_board_sub_board_list"
+      ; "keeper_board_sub_board_get"
+      ]
+  ; removable = true
+  ; description = "MASC Board: post, list, comment"
+  }
+;;
+
+let shard_filesystem : shard =
+  { name = "filesystem"
+  ; tools = filesystem_tools
+  ; read_only_tools = [ "keeper_fs_read" ]
+  ; removable = true
+  ; description = "File I/O: read and write"
+  }
+;;
+
+let shard_shell : shard =
+  { name = "shell"
+  ; tools = shell_tools
+  ; read_only_tools = [ "keeper_shell" ]
+  ; removable = true
+  ; description = "Shell ops: pwd, ls, cat, rg, git_status, git_clone"
+  }
+;;
+
+let shard_coding : shard =
+  { name = "coding"
+  ; tools = coding_tools
+  ; read_only_tools = []
+  ; removable = true
+  ; description = "Coding tools: github/shell bridge + worktree/code inspection"
+  }
+;;
+
+let shard_voice : shard =
+  { name = "voice"
+  ; tools = voice_tools
+  ; read_only_tools = [ "keeper_voice_sessions" ]
+  ; removable = true
+  ; description = "Voice bridge speak output"
+  }
+;;
+
+let shard_library : shard =
+  { name = "library"
+  ; tools = library_tools
+  ; read_only_tools = [ "keeper_library_search"; "keeper_library_read" ]
+  ; removable = true
+  ; description = "Knowledge library: search, read documents"
+  }
+;;
+
+let shard_taskboard : shard =
+  { name = "taskboard"
+  ; tools = taskboard_tools
+  ; read_only_tools = [ "keeper_tasks_list"; "keeper_tasks_audit" ]
+  ; removable = true
+  ; description =
+      "Task board management: list, audit, force-release, force-done, broadcast"
+  }
+;;
+
+(** Autoresearch tools available to keepers. *)
+let autoresearch_keeper_tools : Masc_domain.tool_schema list =
+  Tool_autoresearch_schemas.schemas
+;;
+
+let shard_autoresearch : shard =
+  { name = "autoresearch"
+  ; tools = autoresearch_keeper_tools
+  ; read_only_tools = []
+  ; removable = true
+  ; description =
+      "Autonomous experiment loop: start, cycle, status, inject, stop, findings"
+  }
+;;
+

@@ -110,11 +110,10 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
           old.network_mode
   in
   let autoboot_enabled =
-    match p.autoboot_enabled_opt with
-    | Some value -> value
-    | None ->
-        Option.value ~default:old.autoboot_enabled
-          p.profile_defaults.autoboot_enabled
+    match p.autoboot_enabled_opt, p.profile_defaults.autoboot_enabled with
+    | Some value, _ -> value
+    | None, Some value -> value
+    | None, None -> old.autoboot_enabled
   in
   let mention_targets =
     resolve_mention_targets
@@ -145,9 +144,12 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
         match old.tool_access with
         | Preset current ->
             let preset =
-              p.tool_preset_opt
-              |> Option.value
-                   ~default:(Option.value ~default:current.preset profile_tool_preset)
+              match p.tool_preset_opt with
+              | Some preset -> preset
+              | None -> (
+                  match profile_tool_preset with
+                  | Some preset -> preset
+                  | None -> current.preset)
             in
             let also_allow =
               resolve_tool_name_list

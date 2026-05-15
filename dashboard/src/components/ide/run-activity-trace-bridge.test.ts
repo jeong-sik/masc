@@ -47,7 +47,7 @@ describe('bridgeRunActivityEventsToTrace', () => {
       eventId: 'evt-1',
       filePath: 'lib/runtime.ml',
       line: 7,
-      surface: 'PR',
+      surface: 'Comment',
       goalId: 'goal-runtime',
       taskId: 'task-runtime',
       boardPostId: 'post-runtime',

@@ -934,6 +934,7 @@ function ActivityRouteLink(link: IdeContextRouteLink) {
 }
 
 function activityContextSurface(item: RunActivityEvent): string {
+  if (item.context?.comment_id) return 'Comment'
   if (item.context?.pr_id) return 'PR'
   if (item.context?.board_post_id) return 'Board'
   if (item.context?.goal_id) return 'Goal'

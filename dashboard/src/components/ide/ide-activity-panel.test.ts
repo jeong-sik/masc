@@ -187,7 +187,7 @@ describe('IdeActivityPanel', () => {
       'Keeper',
     ])
     fireEvent.click(activityRouteLinks.find(link => link.textContent === 'Code')!)
-    expect(window.location.hash).toBe('#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=4&surface=PR&label=telemetry.turn&source_id=evt-1&keeper=sangsu')
+    expect(window.location.hash).toBe('#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=4&surface=Comment&label=telemetry.turn&source_id=evt-1&keeper=sangsu')
     fireEvent.click(activityRouteLinks.find(link => link.textContent === 'Telemetry')!)
     expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&session_id=sess-runtime&operation_id=op-runtime&worker_run_id=wr-runtime&q=turn-1')
 
@@ -199,7 +199,7 @@ describe('IdeActivityPanel', () => {
     expect(ideContextFocus.value).toMatchObject({
       file_path: 'lib/runtime.ml',
       line: 4,
-      surface: 'PR',
+      surface: 'Comment',
       keeper_id: 'sangsu',
       source_id: 'evt-1',
     })
@@ -222,7 +222,7 @@ describe('IdeActivityPanel', () => {
       eventId: 'evt-1',
       filePath: 'lib/runtime.ml',
       line: 4,
-      surface: 'PR',
+      surface: 'Comment',
     })])
   })
 
@@ -332,7 +332,7 @@ describe('IdeActivityPanel', () => {
     ])
 
     fireEvent.click(activityRouteLinks.find(link => link.textContent === 'Code')!)
-    expect(window.location.hash).toBe('#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=8&surface=PR&label=telemetry.turn&source_id=evt-1&keeper=sangsu')
+    expect(window.location.hash).toBe('#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=8&surface=Comment&label=telemetry.turn&source_id=evt-1&keeper=sangsu')
 
     fireEvent.click(activityRouteLinks.find(link => link.textContent === 'Telemetry')!)
     expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&session_id=sess-nested&operation_id=op-nested&worker_run_id=wr-nested&q=turn-8')

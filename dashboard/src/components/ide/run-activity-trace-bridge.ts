@@ -50,6 +50,7 @@ export function bridgeRunActivityEventsToTrace(
 }
 
 function activityTraceSurface(event: RunActivityEvent): string {
+  if (event.context?.comment_id) return 'Comment'
   if (event.context?.pr_id) return 'PR'
   if (event.context?.board_post_id) return 'Board'
   if (event.context?.goal_id) return 'Goal'

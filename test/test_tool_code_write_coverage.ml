@@ -503,14 +503,17 @@ let fresh_base_path () =
   mkdir_p (Filename.concat dir ".masc/playground/agent-b/repos");
   dir
 
-let test_code_git_status_marks_docker_keeper_route () =
-  let base_path = fresh_base_path () in
-  let config = make_config base_path in
+let write_docker_keeper_config base_path keeper =
   let keeper_dir = Filename.concat base_path ".masc/config/keepers" in
   mkdir_p keeper_dir;
   write_file
-    (Filename.concat keeper_dir "sangsu.toml")
-    "[keeper]\nsandbox_profile = \"docker\"\n";
+    (Filename.concat keeper_dir (keeper ^ ".toml"))
+    "[keeper]\nsandbox_profile = \"docker\"\n"
+
+let test_code_git_status_marks_docker_keeper_route () =
+  let base_path = fresh_base_path () in
+  let config = make_config base_path in
+  write_docker_keeper_config base_path "sangsu";
   let cwd =
     Filename.concat base_path ".masc/playground/docker/sangsu/repos"
   in
@@ -528,6 +531,57 @@ let test_code_git_status_marks_docker_keeper_route () =
     (json_string_field "sandbox_profile" msg);
   check string "brokered via" "brokered" (json_string_field "via" msg);
   check string "brokered route" "brokered" (json_string_field "route_via" msg)
+
+let test_code_shell_missing_docker_cwd_reports_worktree_hint () =
+  let base_path = fresh_base_path () in
+  let config = make_config base_path in
+  write_docker_keeper_config base_path "sangsu";
+  let ctx =
+    { Tool_code_write.config;
+      agent_name = "keeper-sangsu-agent";
+    }
+  in
+  let cwd =
+    "repos/masc-mcp/.worktrees/keeper-sangsu-agent-task-missing"
+  in
+  let args =
+    `Assoc
+      [
+        ("command", `String "ls");
+        ("cwd", `String cwd);
+        ("timeout", `Int 5);
+      ]
+  in
+  let ok, msg = dispatch_exn ctx ~name:"masc_code_shell" ~args in
+  check bool "missing cwd rejected before shell execution" false ok;
+  check bool "error is structured as cwd_not_directory" true
+    (contains "cwd_not_directory" msg);
+  check bool "error points at Docker playground" true
+    (contains ".masc/playground/docker/sangsu" msg);
+  check bool "error suggests worktree creation" true
+    (contains "masc_worktree_create" msg)
+
+let test_code_git_missing_docker_cwd_reports_worktree_hint () =
+  let base_path = fresh_base_path () in
+  let config = make_config base_path in
+  write_docker_keeper_config base_path "sangsu";
+  let ctx =
+    { Tool_code_write.config;
+      agent_name = "keeper-sangsu-agent";
+    }
+  in
+  let cwd =
+    "repos/masc-mcp/.worktrees/keeper-sangsu-agent-task-missing"
+  in
+  let args = `Assoc [ ("action", `String "status"); ("cwd", `String cwd) ] in
+  let ok, msg = dispatch_exn ctx ~name:"masc_code_git" ~args in
+  check bool "missing git cwd rejected before git execution" false ok;
+  check bool "error is structured as cwd_not_directory" true
+    (contains "cwd_not_directory" msg);
+  check bool "error points at Docker playground" true
+    (contains ".masc/playground/docker/sangsu" msg);
+  check bool "error suggests worktree creation" true
+    (contains "masc_worktree_create" msg)
 
 let test_writable_path_allows_own_playground () =
   let base_path = fresh_base_path () in
@@ -708,6 +762,8 @@ let () =
         test_code_git_checkout_dot_blocked_before_cwd_validation;
       test_case "status marks docker keeper route" `Quick
         test_code_git_status_marks_docker_keeper_route;
+      test_case "missing docker cwd reports worktree hint" `Quick
+        test_code_git_missing_docker_cwd_reports_worktree_hint;
     ]);
     ("validate_code_shell_command", [
       test_case "allows pipe with allowlisted segments" `Quick
@@ -718,6 +774,8 @@ let () =
         test_validate_code_shell_command_allows_direct_build;
       test_case "rejects semicolon" `Quick
         test_validate_code_shell_command_rejects_semicolon;
+      test_case "missing docker cwd reports worktree hint" `Quick
+        test_code_shell_missing_docker_cwd_reports_worktree_hint;
     ]);
     ("per_agent_containment_6527_iter6", [
       test_case "writable_path allows own playground" `Quick

@@ -141,6 +141,39 @@ let validate_writable_path ~(agent_name : string) config path =
         agent_playground_prefix
         canonical_path)))
 
+let path_is_directory path =
+  try Sys.is_directory path with
+  | Sys_error _ -> false
+
+let missing_cwd_error_json ctx ~cwd ~resolved_cwd ?command ?action () =
+  let hint =
+    "cwd resolved inside the agent playground but is not an existing directory. \
+     If this is task work, call masc_worktree_create with the task_id first, \
+     then retry with the returned repos/<repo>/.worktrees/<worktree> path. \
+     Docker keepers must use the Docker playground mapping; do not guess a \
+     non-docker .masc/playground/<keeper>/ path."
+  in
+  let fields =
+    [
+      ("error", `String "cwd_not_directory");
+      ("cwd", `String cwd);
+      ("resolved_cwd", `String resolved_cwd);
+      ("agent", `String ctx.agent_name);
+      ("hint", `String hint);
+    ]
+  in
+  let fields =
+    match command with
+    | Some command -> ("command", `String command) :: fields
+    | None -> fields
+  in
+  let fields =
+    match action with
+    | Some action -> ("action", `String action) :: fields
+    | None -> fields
+  in
+  error_response_with (List.rev fields)
+
 (* Issue #8522: Variant SSOT for git action.  Adding a constructor
    forces compilation in [git_action_to_string] AND extends
    [valid_git_action_strings]; the schema enum below derives from
@@ -635,6 +668,10 @@ let handle_code_shell ~tool_name ~start_time ctx args =
         in
         (match cwd_result with
          | Error e -> Tool_result.error ~tool_name ~start_time (Masc_domain.masc_error_to_string e)
+         | Ok (Some dir) when not (path_is_directory dir) ->
+             Tool_result.error ~tool_name ~start_time
+               (missing_cwd_error_json ctx ~cwd ~resolved_cwd:dir
+                  ~command ())
          | Ok cwd_opt ->
              let safe_timeout = Float.of_int (max 5 (min 120 timeout)) in
              let cmd_parts = ["sh"; "-c"; command] in
@@ -776,6 +813,9 @@ let handle_code_git ~tool_name ~start_time ctx args =
       in
       match cwd_result with
       | Error e -> Tool_result.error ~tool_name ~start_time (Masc_domain.masc_error_to_string e)
+      | Ok (Some dir) when not (path_is_directory dir) ->
+        Tool_result.error ~tool_name ~start_time
+          (missing_cwd_error_json ctx ~cwd ~resolved_cwd:dir ~action ())
       | Ok cwd_opt ->
         let dir = match cwd_opt with Some d -> d | None -> "." in
         let cmd = ["sh"; "-c";

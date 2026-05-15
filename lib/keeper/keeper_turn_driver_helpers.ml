@@ -99,6 +99,10 @@ let classify_empty_candidates ~require_tool_choice_support ~require_tool_support
   then Tool_capability_empty
   else Provider_unavailable
 
+let empty_candidate_classification_code = function
+  | Tool_capability_empty -> "tool_capability_empty"
+  | Provider_unavailable -> "provider_unavailable"
+
 let provider_rejections_for_no_tool_error
     ~keeper_name ?runtime_mcp_policy ~tools
     ~require_tool_choice_support ~require_tool_support candidates =

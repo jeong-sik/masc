@@ -2,7 +2,7 @@ open Alcotest
 
 (** RFC-0084 host-config-cleanup-A — credential root migration.
 
-    PR-A delegates [Host_config_provider.cred_root] to
+    PR-A delegates [Keeper_host_config_provider.cred_root] to
     [Host_config.host ().cred_root] instead of the
     ad-hoc literal ["/tmp/keeper-creds"], establishing a single
     source of truth for the constant.
@@ -10,7 +10,7 @@ open Alcotest
     Behaviour is byte-identical today; the migration is structural
     (single literal -> typed surface) so that subsequent PRs can flip
     [Host_config.host] to a [resolve ~base_path]-relative
-    value without touching [host_config_provider.ml]. *)
+    value without touching [keeper_host_config_provider.ml]. *)
 
 let pinned_tmp_keeper_creds_literal = 0
 
@@ -36,36 +36,36 @@ let count_substring ~haystack ~needle =
 ;;
 
 let test_no_tmp_keeper_creds_literal_in_provider () =
-  let content = read_file "lib/keeper/host_config_provider.ml" in
+  let content = read_file "lib/keeper/keeper_host_config_provider.ml" in
   let occurrences =
     count_substring ~haystack:content ~needle:{|"/tmp/keeper-creds"|}
   in
   (check int)
     "literal `\"/tmp/keeper-creds\"` must be 0 in \
-     lib/keeper/host_config_provider.ml after PR-A"
+     lib/keeper/keeper_host_config_provider.ml after PR-A"
     pinned_tmp_keeper_creds_literal occurrences
 ;;
 
 let test_host_config_called_in_provider () =
-  let content = read_file "lib/keeper/host_config_provider.ml" in
+  let content = read_file "lib/keeper/keeper_host_config_provider.ml" in
   let occurrences =
     count_substring ~haystack:content
       ~needle:"Host_config.host"
   in
   (check bool)
     "Host_config.host must be invoked from \
-     lib/keeper/host_config_provider.ml after PR-A"
+     lib/keeper/keeper_host_config_provider.ml after PR-A"
     true (occurrences >= 1)
 ;;
 
 let test_cred_root_byte_identical_to_typed_surface () =
-  (* Today's behaviour is preserved: [Host_config_provider.cred_root]
+  (* Today's behaviour is preserved: [Keeper_host_config_provider.cred_root]
      and [Host_config.host ().cred_root] must hold
      the same string at module-init time. *)
   let typed = (Host_config.host ()).cred_root in
-  let provider = Masc_mcp.Host_config_provider.cred_root in
+  let provider = Masc_mcp.Keeper_host_config_provider.cred_root in
   (check string)
-    "Host_config_provider.cred_root must equal \
+    "Keeper_host_config_provider.cred_root must equal \
      Host_config.host ().cred_root"
     typed provider
 ;;

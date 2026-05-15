@@ -96,7 +96,7 @@
    keeper_exec_shell
    keeper_gh_env
    keeper_credential_provider
-   host_config_provider
+   keeper_host_config_provider
    keeper_in_container_login_provider
    keeper_gh_shared
    keeper_tool_github_pr

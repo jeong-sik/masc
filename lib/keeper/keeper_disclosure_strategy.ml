@@ -54,3 +54,33 @@ let pp fmt = function
       demote_on_error
   | Minimal_index -> Format.fprintf fmt "Minimal_index"
 ;;
+
+(* RFC-0084 host-config-cleanup-G — OAS Builder bridges. *)
+
+let to_oas_disclosure_level = function
+  | Full ->
+    (* SDK default is already Full_schema; no builder call required. *)
+    None
+  | Hybrid { full_names; demote_on_error = _ } ->
+    Some (Agent_sdk.Tool.Hybrid { full_names })
+  | Minimal_index -> Some Agent_sdk.Tool.Minimal_index
+;;
+
+let to_oas_resolver = function
+  | Full | Minimal_index | Hybrid { demote_on_error = false; _ } -> None
+  | Hybrid { demote_on_error = true; _ } ->
+    let resolver (results : Agent_sdk.Types.tool_result list) =
+      (* [Agent_sdk.Types.tool_result] is a [Stdlib.result] of
+         [(tool_output, tool_error)]; pattern-match on the standard
+         constructors directly. *)
+      let has_error =
+        List.exists
+          (function
+            | Stdlib.Error _ -> true
+            | Stdlib.Ok _ -> false)
+          results
+      in
+      if has_error then Some Agent_sdk.Tool.Full_schema else None
+    in
+    Some resolver
+;;

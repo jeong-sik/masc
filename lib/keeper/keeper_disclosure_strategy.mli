@@ -69,3 +69,33 @@ val is_full : t -> bool
 
 (** Pretty-print for diagnostic logging. *)
 val pp : Format.formatter -> t -> unit
+
+(** {2 OAS Builder bridges (RFC-0084 host-config-cleanup-G activation)}
+
+    The two functions below convert a typed [t] into the arguments
+    accepted by [Agent_sdk.Builder.with_disclosure_level] and
+    [Agent_sdk.Builder.with_disclosure_resolver].  They preserve the
+    semantic difference between this module's [Hybrid] (which carries
+    [demote_on_error]) and OAS [Tool.Hybrid] (which does not): the
+    static OAS level is the [full_names] hint, and the [demote_on_error]
+    behaviour is implemented as a per-turn resolver. *)
+
+(** [to_oas_disclosure_level t] returns the static
+    [Agent_sdk.Tool.disclosure_level] to install via
+    [Builder.with_disclosure_level], or [None] when [t = Full] (in
+    which case the SDK's [Full_schema] default already matches and
+    no builder call is needed). *)
+val to_oas_disclosure_level
+  :  t
+  -> Agent_sdk.Tool.disclosure_level option
+
+(** [to_oas_resolver t] returns a per-turn resolver to install via
+    [Builder.with_disclosure_resolver] iff [t] is [Hybrid] with
+    [demote_on_error = true].  The resolver inspects the previous
+    turn's [tool_result] list and returns [Some Full_schema] when
+    any result was an [Error], or [None] (fall through to the static
+    level) otherwise.  Returns [None] for [Full], [Minimal_index],
+    and [Hybrid { demote_on_error = false; _ }]. *)
+val to_oas_resolver
+  :  t
+  -> (Agent_sdk.Types.tool_result list -> Agent_sdk.Tool.disclosure_level option) option

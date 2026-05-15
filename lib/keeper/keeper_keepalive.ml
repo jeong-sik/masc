@@ -681,7 +681,11 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
        behavioral_stats no longer consumed by build_prompt. *)
       dispatch_fiber_started ~base_path:ctx.config.base_path live_meta.name;
       publish_keeper_started ~live_meta;
-      Keeper_stale_watchdog.fork_stale_watchdog ctx live_meta reg;
+      Keeper_stale_watchdog.fork_stale_watchdog
+        ctx
+        live_meta
+        ~startup_warmup_sec:proactive_warmup_sec
+        reg;
       Eio.Fiber.fork ~sw:ctx.sw (fun () ->
         let record_crash failure_reason =
           record_keeper_crashed

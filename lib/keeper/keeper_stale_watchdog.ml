@@ -380,7 +380,13 @@ let latch_stale_fleet_batch_reasons ~config ~distinct_count keeper_names =
 let latch_stale_fleet_batch_reasons_for_test =
   latch_stale_fleet_batch_reasons
 
+let effective_startup_grace_sec ~base_grace_sec ~poll_sec ~startup_warmup_sec =
+  Float.max
+    base_grace_sec
+    (Float.of_int (max 0 startup_warmup_sec) +. Float.max 0.0 poll_sec)
+
 let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
+    ?(startup_warmup_sec = 0)
     (reg : Keeper_registry.registry_entry) =
   let base_path = ctx.config.base_path in
   let stale_threshold_sec () =
@@ -394,6 +400,12 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
   in
   let grace_period_sec () =
     Env_config_keeper.KeeperWatchdog.grace_period_sec
+  in
+  let effective_grace_period_sec () =
+    effective_startup_grace_sec
+      ~base_grace_sec:(grace_period_sec ())
+      ~poll_sec:(watchdog_poll_sec ())
+      ~startup_warmup_sec
   in
   let last_broadcast_ts = ref 0.0 in
   let request_watchdog_stop () =
@@ -415,7 +427,8 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
              when entry.phase = Keeper_state_machine.Running ->
              let last_turn = entry.meta.runtime.usage.last_turn_ts in
              let fiber_age = now -. entry.started_at in
-             let grace_remaining = grace_period_sec () -. fiber_age in
+             let startup_grace = effective_grace_period_sec () in
+             let grace_remaining = startup_grace -. fiber_age in
              (* #10765-followup: separate idle-stale (no turn running) from
                 in-turn-stale (turn running too long).  Production
                 observation (2026-04-26): 9 keepers killed at idle
@@ -441,11 +454,11 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                match entry.current_turn_observation with
                | Some obs ->
                  let elapsed = now -. obs.started_at in
-                 ( false
-                 , elapsed > active_turn_timeout_sec
-                   && fiber_age >= grace_period_sec ()
-                 , elapsed
-                 , false )
+                ( false
+                , elapsed > active_turn_timeout_sec
+                  && fiber_age >= startup_grace
+                , elapsed
+                , false )
                | None -> (
                  match active_slot_holder_age with
                  | Some elapsed ->
@@ -457,7 +470,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                       still owns slots, causing fleet-wide slot starvation. *)
                    ( false
                    , elapsed > active_turn_timeout_sec
-                     && fiber_age >= grace_period_sec ()
+                     && fiber_age >= startup_grace
                    , elapsed
                    , false )
                  | None ->
@@ -467,7 +480,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                  let stale =
                    last_turn > 0.0
                    && now -. last_turn > threshold
-                   && fiber_age >= grace_period_sec ()
+                   && fiber_age >= startup_grace
                    && not skip_observed
                  in
                  (stale, false, 0.0, skip_observed))

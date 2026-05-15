@@ -1,4 +1,4 @@
-(** Tool_resolution — unified resolution behind the 15-fold OR membership check.
+(** Keeper_tool_resolution — unified resolution behind the 15-fold OR membership check.
 
     RFC-0080 Phase 2 shim. Wraps the existing sources behind a single [resolve]
     function that returns a typed [resolution]. Every call site that previously

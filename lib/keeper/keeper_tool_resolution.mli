@@ -1,4 +1,4 @@
-(** Tool_resolution — typed resolution for policy tool name validation.
+(** Keeper_tool_resolution — typed resolution for policy tool name validation.
 
     RFC-0080 Phase 2. Replaces the 15-fold OR boolean check with a typed
     [resolve] function that returns provenance information.

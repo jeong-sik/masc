@@ -142,7 +142,7 @@
         test_keeper_toml
         test_keeper_runtime_toml
         test_keeper_tool_policy_config
-        test_tool_resolution
+        test_keeper_tool_resolution
         test_dispatch_disclosure_parity
         test_coord_worktree_policy_path
         test_claim_post_provision_hook
@@ -382,7 +382,7 @@
           test_keeper_toml
           test_keeper_runtime_toml
           test_keeper_tool_policy_config
-          test_tool_resolution
+          test_keeper_tool_resolution
           test_dispatch_disclosure_parity
           test_coord_worktree_policy_path
           test_claim_post_provision_hook
@@ -1396,7 +1396,7 @@
 
 ; RFC-0084 §6.1 — pinned-fail tests for keeper→tool dispatch unification.
 ; PR-1 establishes 3 evidence tests for the current telemetry/surface/prehook
-; gaps in lib/tool_dispatch.ml and lib/keeper/tool_resolution.ml. PR-5/7/9
+; gaps in lib/tool_dispatch.ml and lib/keeper/keeper_tool_resolution.ml. PR-5/7/9
 ; update each pinned constant alongside the code fix in the same PR so that
 ; drift between code state and pinned evidence is caught by single-PR diff.
 ; Constants-only (no Masc_mcp lib dependency) — keeps tests fast and isolated.

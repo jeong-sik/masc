@@ -1,6 +1,6 @@
 open Alcotest
 
-module TR = Masc_mcp.Tool_resolution
+module TR = Masc_mcp.Keeper_tool_resolution
 
 (* ── resolve returns correct tried_source for each admission path ── *)
 

@@ -23,7 +23,7 @@ open Alcotest
     - Host_config.t: 11 hardcode sites tracked (PR-12)
 
     Boot/runtime parity (RFC-0084 §1.4):
-    - Tool_resolution.runtime_decision SSOT entry (PR-6)
+    - Keeper_tool_resolution.runtime_decision SSOT entry (PR-6)
     - keeper turn + MCP + tag-dispatch all go through guarded_dispatch
 *)
 

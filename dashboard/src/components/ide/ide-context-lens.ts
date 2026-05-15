@@ -23,6 +23,7 @@ export type IdeContextSurfaceId =
   | 'pr'
   | 'comment'
   | 'log'
+  | 'runtime'
   | 'telemetry'
 
 export interface IdeContextSurface {
@@ -122,6 +123,7 @@ const SURFACE_LABELS: Readonly<Record<IdeContextSurfaceId, string>> = {
   pr: 'PR',
   comment: 'Comment',
   log: 'Log',
+  runtime: 'Runtime',
   telemetry: 'Telemetry',
 }
 
@@ -136,6 +138,7 @@ const SURFACE_ORDER: ReadonlyArray<IdeContextSurfaceId> = [
   'pr',
   'comment',
   'log',
+  'runtime',
   'telemetry',
 ]
 const MAX_CONTEXT_ANCHORS = 6
@@ -147,6 +150,7 @@ const CONTEXT_ANCHOR_BUCKET_ORDER = [
   'task',
   'board',
   'log',
+  'runtime',
   'goal',
   'comment',
   'telemetry',
@@ -166,6 +170,7 @@ const SURFACE_ROUTE_LABELS: Readonly<Record<IdeContextSurfaceId, ReadonlyArray<s
   pr: ['PR'],
   comment: ['Comment', 'Board'],
   log: ['Log'],
+  runtime: ['Telemetry'],
   telemetry: ['Telemetry'],
 }
 
@@ -304,7 +309,16 @@ function contextAnchorBuckets(anchor: IdeContextAnchor): ReadonlySet<ContextAnch
     else if (label === 'pr') buckets.add('pr')
     else if (label === 'git') buckets.add('git')
     else if (label === 'log') buckets.add('log')
-    else if (label === 'telemetry') buckets.add('telemetry')
+    else if (label === 'telemetry') {
+      buckets.add('telemetry')
+      if (
+        link.params.session_id !== undefined
+        || link.params.operation_id !== undefined
+        || link.params.worker_run_id !== undefined
+      ) {
+        buckets.add('runtime')
+      }
+    }
     else if (label === 'keeper') buckets.add('keeper')
   }
 
@@ -317,6 +331,7 @@ function contextAnchorBuckets(anchor: IdeContextAnchor): ReadonlySet<ContextAnch
   else if (surface === 'git') buckets.add('git')
   else if (surface === 'pr') buckets.add('pr')
   else if (surface === 'log') buckets.add('log')
+  else if (surface === 'runtime') buckets.add('runtime')
   else if (surface === 'telemetry') buckets.add('telemetry')
   else if (surface === 'comment' || surface === 'question' || surface === 'note' || surface === 'suggest') {
     buckets.add('comment')
@@ -610,6 +625,23 @@ function surfaceCount(
   if (id === 'log') {
     return state.events.length
   }
+  if (id === 'runtime') {
+    return state.events.filter(event =>
+      event.context?.session_id
+      || event.context?.operation_id
+      || event.context?.worker_run_id,
+    ).length
+      + countUnstructuredEventText(
+        state.events,
+        /\b(session|operation|op|worker_run|worker|wr)[:#/\s-]/,
+        event => Boolean(
+          event.context?.session_id
+          || event.context?.operation_id
+          || event.context?.worker_run_id,
+        ),
+        state.eventSearchTextByEvent,
+      )
+  }
   if (id === 'telemetry') return state.events.length
   return 0
 }
@@ -626,6 +658,7 @@ function surfaceEvidence(id: IdeContextSurfaceId, count: number): string {
   if (id === 'pr') return `${count} PR/review signal${plural(count)}`
   if (id === 'comment') return `${count} comment/question anchor${plural(count)}`
   if (id === 'log') return `${count} activity log event${plural(count)}`
+  if (id === 'runtime') return `${count} runtime scope signal${plural(count)}`
   return `${count} telemetry signal${plural(count)}`
 }
 
@@ -866,6 +899,13 @@ function surfaceFromEvent(
   if (event.context?.task_id) return 'Task'
   if (event.context?.git_ref) return 'Git'
   if (event.context?.log_id) return 'Log'
+  if (
+    event.context?.session_id
+    || event.context?.operation_id
+    || event.context?.worker_run_id
+  ) {
+    return 'Runtime'
+  }
   const text = eventSearchTextByEvent
     ? cachedEventSearchText(event, eventSearchTextByEvent)
     : eventSearchText(event)
@@ -875,6 +915,7 @@ function surfaceFromEvent(
   if (/\btask[:#/\s-]/.test(text)) return 'Task'
   if (/\b(git|commit|branch|diff)[:#/\s-]/.test(text)) return 'Git'
   if (/\b(comment|note|question)[:#/\s-]/.test(text)) return 'Comment'
+  if (/\b(session|operation|op|worker_run|worker|wr)[:#/\s-]/.test(text)) return 'Runtime'
   return 'Log'
 }
 

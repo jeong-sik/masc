@@ -2,7 +2,9 @@ type acquire_result =
   | Acquired
   | Already_running of { pid : int }
 
-let pid_lock_path port = Printf.sprintf "/tmp/masc-%d.pid" port
+let pid_lock_path port =
+  Filename.concat (Host_config.host ()).run_dir (Printf.sprintf "masc-%d.pid" port)
+;;
 
 let base_path_lock_path base_path =
   Filename.concat (Filename.concat base_path Common.masc_dirname) "server-owner.pid"

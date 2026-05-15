@@ -1677,6 +1677,13 @@
  (modules test_rfc_0085_pr2_auto_responder_log_dir)
  (libraries alcotest ast_grep))
 
+; RFC-0085 PR-3 — server runtime PID lock absorbed into Host_config.run_dir,
+; and server bootstrap kept free of provider-specific OAS policy wiring.
+(test
+ (name test_rfc_0085_pr3_server_runtime_paths)
+ (modules test_rfc_0085_pr3_server_runtime_paths)
+ (libraries alcotest ast_grep))
+
 ; RFC-0085 PR-6 — Host_config exposes env-derived path fields
 ; (base_path / config_dir / data_dir / personas_dir) + from_env alias.
 (test

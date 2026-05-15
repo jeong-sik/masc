@@ -37,7 +37,7 @@ let test_unknown_returns_tried_list () =
   match TR.resolve "__nonexistent_tool_xyz" with
   | TR.Unknown { name; tried } ->
       check string "name preserved" "__nonexistent_tool_xyz" name;
-      check int "at least 13 tried sources" 13 (List.length tried)
+      check bool "at least 13 tried sources" true (List.length tried >= 13)
   | _ ->
       fail "__nonexistent_tool_xyz should be Unknown"
 

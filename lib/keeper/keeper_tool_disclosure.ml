@@ -37,7 +37,7 @@ let tool_usage_delta ~(before : (string * int) list) ~(after : (string * int) li
 (* Three input surfaces, packed into an outcome variant so the pure
    canonicalisation and the observation-emitting wrapper share one
    decision tree. *)
-type canonicalisation_outcome =
+type canonicalisation_outcome = Tool_resolution.runtime_decision_outcome =
   | Mcp_mapped of
       { stripped : string
       ; internal : string
@@ -46,23 +46,7 @@ type canonicalisation_outcome =
   | Already_internal of { canonical : string }
   | Miss
 
-let canonicalise_outcome name =
-  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix name in
-  match Keeper_tool_alias.public_masc_to_internal stripped with
-  | Some internal -> Mcp_mapped { stripped; internal }
-  | None ->
-    (match Keeper_tool_alias.route stripped with
-     | Some r -> Route_hit { internal = r.internal_name }
-     | None ->
-       (* Check [stripped] (not the raw [name]) so MCP-prefixed internal
-          names like [mcp__masc__keeper_pr_create] are recognised and
-          canonicalised to [keeper_pr_create]. The unstripped form is
-          never in [is_known_internal] for known prefixed transports
-          (PR #14585 review). *)
-       if Keeper_tool_alias.is_known_internal stripped
-       then Already_internal { canonical = stripped }
-       else Miss)
-;;
+let canonicalise_outcome = Tool_resolution.runtime_decision
 
 (** Pure canonicalisation — no telemetry. Used by set-logic call sites
     (required-tool canonicalisation, surface composition, satisfaction

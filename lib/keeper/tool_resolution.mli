@@ -43,3 +43,29 @@ val string_of_tried : tried_source list -> string
     Unlike [resolve] which short-circuits, checks all 13 sources.
     For source-overlap analysis (Phase 5). *)
 val all_admitting_sources : string -> tried_source list
+
+(** RFC-0084 §1.4 — Single-SSOT entry for runtime tool-name routing. *)
+
+type runtime_decision_outcome =
+  | Mcp_mapped of
+      { stripped : string
+      ; internal : string
+      }
+  | Route_hit of { internal : string }
+  | Already_internal of { canonical : string }
+  | Miss
+
+(** [runtime_decision name] returns the pure routing decision for a
+    runtime-reported or model-reported tool name. PR-6 establishes this
+    as the low-dependency SSOT entry; [Keeper_tool_disclosure] delegates
+    to it for parity during migration. PR-7 (keeper turn), PR-8 (MCP
+    server), PR-9 (tag-dispatch) migrate runtime callers to this entry.
+    PR-11 removes the legacy disclosure wrapper.
+
+    Result variants:
+    - [Mcp_mapped { stripped; internal }] — name was an MCP-prefixed
+      public alias resolved to an internal canonical name.
+    - [Route_hit { internal }] — alias-table hit; internal name returned.
+    - [Already_internal { canonical }] — name is already in internal form.
+    - [Miss] — name does not resolve through any disclosure path. *)
+val runtime_decision : string -> runtime_decision_outcome

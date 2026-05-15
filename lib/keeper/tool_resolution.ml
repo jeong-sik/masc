@@ -169,3 +169,37 @@ let all_admitting_sources name =
       sources := Surface surface :: !sources
   ) surfaces_to_check;
   List.rev !sources
+;;
+
+(* ── RFC-0084 §1.4 — Runtime routing SSOT entry ──────────────────────── *)
+
+type runtime_decision_outcome =
+  | Mcp_mapped of
+      { stripped : string
+      ; internal : string
+      }
+  | Route_hit of { internal : string }
+  | Already_internal of { canonical : string }
+  | Miss
+
+(** Single-SSOT entry for runtime tool-name routing.
+
+    PR-6 moves the pure routing decision below [Keeper_tool_disclosure]
+    so runtime callers can converge on one low-dependency entry without
+    creating a module cycle. [Keeper_tool_disclosure] delegates its legacy
+    pure canonicalisation to this function for parity during migration.
+
+    PR-7~9 migrate keeper turn, MCP server, and tag-dispatch callers from
+    [Keeper_tool_disclosure.canonical_tool_name] to this entry. PR-11
+    removes the legacy wrapper in favour of this one. *)
+let runtime_decision name =
+  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix name in
+  match Keeper_tool_alias.public_masc_to_internal stripped with
+  | Some internal -> Mcp_mapped { stripped; internal }
+  | None ->
+    (match Keeper_tool_alias.route stripped with
+     | Some r -> Route_hit { internal = r.internal_name }
+     | None ->
+       if Keeper_tool_alias.is_known_internal stripped
+       then Already_internal { canonical = stripped }
+       else Miss)

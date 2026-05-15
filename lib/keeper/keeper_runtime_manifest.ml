@@ -388,7 +388,11 @@ let append_to_path path manifest =
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> Error (Printexc.to_string exn)
+  | exn ->
+    Keeper_fd_pressure.note_exception
+      ~site:"keeper_runtime_manifest.append_to_path"
+      exn;
+    Error (Printexc.to_string exn)
 
 let append config manifest =
   append_to_path
@@ -400,8 +404,22 @@ let append_best_effort ?(site = "runtime_manifest") config manifest =
   match append config manifest with
   | Ok () -> ()
   | Error msg ->
+      Keeper_fd_pressure.note_if_fd_exhaustion
+        ~site:"keeper_runtime_manifest.append_best_effort"
+        msg;
       let masc_root = Coord.masc_root_dir config in
-      (try
+      let fd_pressure =
+        Keeper_fd_pressure.active () || Keeper_fd_pressure.is_fd_exhaustion_text msg
+      in
+      (if fd_pressure then
+         Log.Keeper.warn
+           "keeper:%s runtime_manifest coverage-gap append skipped during FD pressure \
+            site=%s trace_id=%s event=%s: %s"
+           manifest.keeper_name site manifest.trace_id
+           (event_kind_to_string manifest.event)
+           msg
+       else
+       try
          Telemetry_coverage_gap.record
            ~masc_root
            ~source:"runtime_manifest"

@@ -10,6 +10,7 @@ module Http_client = struct
     | Accept_rejected_capability_mismatch
     | Accept_rejected_terminal
     | Cli_transport_required
+    | Tls_error
     | Network_error
     | Provider_terminal
         (** OAS [ProviderTerminal] — provider has signalled a terminal
@@ -173,11 +174,13 @@ module Http_client = struct
           Provider_terminal
       | Llm_provider.Http_client.ProviderFailure { kind; _ } ->
           classify_provider_failure_kind kind
-      | Llm_provider.Http_client.NetworkError _ -> Network_error
+      | Llm_provider.Http_client.NetworkError { kind; _ } ->
+          if kind = Llm_provider.Http_client.Tls_error then Tls_error else Network_error
 
   let should_cascade (err : Llm_provider.Http_client.http_error) : bool =
     match classify err with
     | Local_resource_exhaustion
+    | Tls_error
     | Terminal_http _
     | Accept_rejected_terminal
     | Provider_terminal ->

@@ -1910,7 +1910,12 @@ let test_wired_manifest_sites () =
           "guard_keeper_hot_path";
         ] );
       ( "lib/keeper/keeper_runtime_manifest.ml",
-        [ "Telemetry_coverage_gap.record"; "runtime_manifest_append_failed" ]
+        [
+          "Telemetry_coverage_gap.record";
+          "runtime_manifest_append_failed";
+          "coverage-gap append skipped during FD pressure";
+          "Keeper_fd_pressure.active";
+        ]
       );
       ( "lib/server/server_dashboard_http_keeper_api.ml",
         [ "keeper_runtime_trace_json"; "/runtime-trace" ] );

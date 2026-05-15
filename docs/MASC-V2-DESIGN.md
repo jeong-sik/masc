@@ -333,20 +333,8 @@ v1 → v2 마이그레이션:
 
 ## Related Documents
 
-### Analysis & Improvement
+### Current References
 
-  - 냉정한 비판자, YCombinator, Chomsky, Darwin, Musk, Neuroscientist, Haskell Master
-  - 평균 점수: 6.4/10
-  - 공통 지적: 학습/진화 메커니즘 부재, 메타포 과잉
-
-- **[RESEARCH-BASED-IMPROVEMENTS.md](./RESEARCH-BASED-IMPROVEMENTS.md)** - 학술 연구 기반 개선안
-  - 11개 논문 인용 (arXiv, ACM, IEEE, Springer, PMC)
-  - P0: Error Propagation Guard, Fitness Selection
-  - P1: Hebbian Learning, Effect System
-  - P2: Terminology Normalization, Telemetry
-
-### Vision Docs
-
-- **[HOLONIC-ARCHITECTURE.md](./HOLONIC-ARCHITECTURE.md)** - coordination layers from agent to institution
-  - conceptual vocabulary for scale discussion
-  - not a proof that higher-order layers are implemented
+- **[PRODUCT-OPERATING-PLAN.md](./PRODUCT-OPERATING-PLAN.md)** - current product promise and cleanup posture
+- **[OAS-MASC-BOUNDARY.md](./OAS-MASC-BOUNDARY.md)** - current OAS/MASC ownership split
+- **[spec/SPEC-INDEX.md](./spec/SPEC-INDEX.md)** - maintained specification index

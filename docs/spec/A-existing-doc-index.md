@@ -47,7 +47,6 @@ code_refs:
 | `docs/VERSIONED-ROADMAP.md` | Maintained Reference | release train and intake policy |
 | `docs/CAPABILITY-REGISTRY-SSOT.md` | Maintained Reference | MCP vs internal capability mapping |
 | `docs/OAS-MASC-BOUNDARY.md` | Maintained Reference | OAS/MASC role split |
-| `docs/PROVIDER-ADAPTER-RUNBOOK.md` | Maintained Reference | provider/runtime/auth guidance |
 | `docs/TRPG-KEEPER-SPECTATOR-QUICKSTART.md` | Maintained Reference | TRPG spectator entry |
 | `docs/TRPG-OPS-MANUAL.md` | Maintained Reference | follow-up ops guide for spectator flow |
 
@@ -62,6 +61,11 @@ code_refs:
 | `docs/DASHBOARD-INTEGRATION.md` | Historical | dashboard integration snapshot |
 | `docs/PRODUCT-REVIEW.md` | Historical | product/security review memo |
 | `docs/MASC-V2-DESIGN.md` | Historical | early v2 concept document |
+| `docs/ADR-001-MITOSIS-VS-COMPACTION.md` | Removed | mitosis runtime removed; continuity docs now point at keeper/OAS checkpoint path |
+| `docs/HOLONIC-ARCHITECTURE.md` | Removed | unvalidated vision vocabulary; no current validation path |
+| `docs/RESEARCH-BASED-IMPROVEMENTS.md` | Removed | proposal-only research notes; no implementation/verification record |
+| `docs/SEARCH-FABRIC-V1.md` | Removed | CP search benchmark target removed with command-plane purge |
+| `docs/PROVIDER-ADAPTER-RUNBOOK.md` | Removed | compiled provider adapter deleted; use `docs/PROVIDER-ADAPTER-REMOVAL-PLAN.md` |
 | `docs/MULTI-ROOM-DESIGN.md` | Removed | deleted 2026-04-17 (historical, no code refs) |
 | `docs/COMMAND-PLANE-RUNBOOK.md` | Historical | retired command-plane contract and migration context |
 
@@ -86,6 +90,7 @@ code_refs:
 | `docs/MERGED-ARCHITECTURE-SSOT.md` | Removed | content merged into `docs/spec/01-system-overview.md`; deleted 2026-04-23 |
 | `docs/OCAML-NORTH-STAR.md` | Removed | duplicate of `docs/NORTH-STAR-OCAML.md`; deleted 2026-04-23 |
 | `docs/architecture-boundary.md` | Removed | superseded by `docs/OAS-MASC-BOUNDARY.md`; deleted 2026-04-23 |
+| `docs/rfc/RFC-0072-provider-adapter-sublib-extraction.md` | Removed | stale duplicate RFC number; provider adapter was deleted instead of extracted |
 | `docs/RELEASE-ROADMAP.md` | Not present | use `docs/VERSIONED-ROADMAP.md` and `docs/archive/RELEASE-ROADMAP-v287.md` |
 
 ## Notes

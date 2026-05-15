@@ -232,5 +232,4 @@ For readers encountering deprecated terms in older documentation:
 ## References
 
 - [MASC V2 Design](./MASC-V2-DESIGN.md) - Architecture overview
-- [Research-Based Improvements](./RESEARCH-BASED-IMPROVEMENTS.md) - Source of normalization decisions
-- [SPEC.md](./SPEC.md) - Full specification
+- [Spec Index](./spec/SPEC-INDEX.md) - Full specification index

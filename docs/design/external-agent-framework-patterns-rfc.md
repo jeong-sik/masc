@@ -142,7 +142,7 @@ Primary landing:
 
 - `docs/COMMAND-PLANE-RUNBOOK.md`
 - `docs/design/contract-driven-agent-loop-rfc.md`
-- `docs/SEARCH-FABRIC-V1.md`
+- `docs/BENCHMARK-RUNBOOK.md`
 
 Implementation anchors:
 
@@ -170,7 +170,7 @@ What to change:
 
 Primary landing:
 
-- `docs/SPEC.md`
+- `docs/spec/SPEC-INDEX.md`
 - `docs/spec/09-server-transport.md`
 
 Implementation anchors:
@@ -239,4 +239,4 @@ Reason:
 - `docs/OAS-MASC-BOUNDARY.md`
 - `docs/PRODUCT-REVIEW.md`
 - `docs/KEEPER-CONTINUITY-VALIDATION.md`
-- `docs/SEARCH-FABRIC-V1.md`
+- `docs/BENCHMARK-RUNBOOK.md`

@@ -13,7 +13,6 @@
 - `../spec/05-keeper-agent.md`
 - `../spec/12-memory-systems.md`
 - `../spec/13-oas-integration.md`
-- `../ADR-001-MITOSIS-VS-COMPACTION.md`
 - `../KEEPER-CONTINUITY-VALIDATION.md`
 - `./keeper-continuity-product-rfc.md`
 - `../KEEPER-CONTINUITY-PRODUCTION-RUNBOOK.md`

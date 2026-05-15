@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 
-DEFAULT_PHASES="control,search"
+DEFAULT_PHASES="control"
 PHASES="${INTEGRATED_BENCH_PHASES:-$DEFAULT_PHASES}"
 OUTPUT_DIR="${INTEGRATED_BENCH_OUTPUT_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/masc-integrated-benchmark.XXXXXX")}"
 FAIL_FAST="${INTEGRATED_BENCH_FAIL_FAST:-false}"
@@ -19,19 +19,12 @@ require_tools() {
     echo "jq is required" >&2
     exit 1
   }
-  command -v rg >/dev/null 2>&1 || {
-    echo "rg is required" >&2
-    exit 1
-  }
 }
 
 phase_script() {
   case "$1" in
     control)
       printf '%s\n' "$ROOT_DIR/scripts/harness_agent_swarm_live.sh"
-      ;;
-    search)
-      printf '%s\n' "$ROOT_DIR/scripts/harness_cp_search_fabric.sh"
       ;;
     *)
       return 1
@@ -138,28 +131,6 @@ for raw_phase in "${REQUESTED_PHASES[@]}"; do
     status="fail"
     FAILED=1
   fi
-
-  case "$phase" in
-    search)
-      search_json="$(
-        awk '
-          /^\{/ { start = NR }
-          { lines[NR] = $0 }
-          END {
-            if (start == 0) {
-              exit 1
-            }
-            for (i = start; i <= NR; i++) {
-              print lines[i]
-            }
-          }
-        ' "$log_path" 2>/dev/null || true
-      )"
-      if [ -n "$search_json" ] && printf '%s' "$search_json" | jq -e . >/dev/null 2>&1; then
-        metrics_json="$(printf '%s' "$search_json" | jq -c .)"
-      fi
-      ;;
-  esac
 
   build_phase_payload \
     "$phase" \

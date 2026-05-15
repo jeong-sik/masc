@@ -294,6 +294,12 @@ type keeper_memory_row_raw = {
 (** Raw row from [memory_bank.jsonl] with both the original JSON and
     parsed columns kept side by side. *)
 
+type memory_consolidation_summarizer =
+  trace_id:string -> texts:string list -> string option
+(** Optional semantic summarizer for progress-cluster consolidation.
+    Returning [None], an empty string, or a non-meaningful memory string
+    falls back to the deterministic summary. *)
+
 val parse_memory_bank_row : string -> keeper_memory_row_raw option
 (** Parse a single JSONL line; [None] when the row is malformed or
     missing required fields. *)
@@ -301,8 +307,14 @@ val parse_memory_bank_row : string -> keeper_memory_row_raw option
 val row_trace_id : keeper_memory_row_raw -> string
 (** Stable identifier used by trace / dedup paths. *)
 
+val memory_llm_summary_enabled : unit -> bool
+(** Whether opt-in LLM-backed memory consolidation is enabled by
+    [MASC_KEEPER_MEMORY_LLM_SUMMARY]. Defaults to [false]. *)
+
 val consolidate_memory_notes :
-  keeper_memory_row_raw list -> keeper_memory_row_raw list * int
+  ?summarizer:memory_consolidation_summarizer ->
+  keeper_memory_row_raw list ->
+  keeper_memory_row_raw list * int
 (** Merge near-duplicate rows and return [(consolidated, dropped_count)]. *)
 
 (** {1 Compaction} *)
@@ -331,6 +343,7 @@ val write_memory_bank_rows :
 (** Atomically replace the bank file with [rows]. *)
 
 val compact_memory_bank_if_needed :
+  ?summarizer:memory_consolidation_summarizer ->
   Coord.config ->
   Keeper_types.keeper_meta -> memory_bank_compaction
 (** Run a compaction pass for the keeper if the file has crossed the

@@ -86,6 +86,7 @@ let key_to_env =
     "memory.max_length",                "MASC_KEEPER_MEMORY_MAX_LENGTH";
     "memory.placeholders",              "MASC_KEEPER_MEMORY_PLACEHOLDERS";
     "memory.consensus_pattern",         "MASC_KEEPER_MEMORY_CONSENSUS_PATTERN";
+    "memory.llm_summary",               "MASC_KEEPER_MEMORY_LLM_SUMMARY";
     (* [alert] *)
     "alert.enabled",                    "MASC_KEEPER_ALERT_ENABLED";
     "alert.min_score",                  "MASC_KEEPER_ALERT_MIN_SCORE";

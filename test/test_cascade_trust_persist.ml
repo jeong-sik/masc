@@ -13,6 +13,7 @@
 open Alcotest
 module H = Masc_mcp.Cascade_health_tracker
 module P = Masc_mcp.Cascade_trust_persist
+module S = Masc_mcp.Cascade_strategy
 
 let kind value = H.error_kind_of_string value
 
@@ -147,14 +148,30 @@ let test_snapshot_provider_record_shape () =
           ; "in_cooldown"
           ; "events_in_window"
           ; "rejected_in_window"
+          ; "p50_latency_ms"
+          ; "p95_latency_ms"
+          ; "latency_samples"
+          ; "avg_confidence"
+          ; "confidence_samples"
+          ; "avg_cost_usd"
+          ; "cost_samples"
+          ; "health_score"
           ; "top_fingerprints"
           ; "last_failure_at"
+          ]
+        in
+        let nullable_fields =
+          [ "last_failure_at"
+          ; "p50_latency_ms"
+          ; "p95_latency_ms"
+          ; "avg_confidence"
+          ; "avg_cost_usd"
           ]
         in
         List.iter
           (fun field ->
             match member field p with
-            | `Null when field = "last_failure_at" -> ()
+            | `Null when List.mem field nullable_fields -> ()
             | `Null -> fail (Printf.sprintf "field %s missing" field)
             | _ -> ())
           required_fields;
@@ -169,6 +186,29 @@ let test_snapshot_provider_record_shape () =
             (String.length fp_str >= String.length "timeout"
              && String.sub fp_str 0 (String.length "timeout") = "timeout")
         | [] -> fail "unreachable")
+
+let test_hydrate_latest_restores_latency_hint_from_snapshot () =
+  with_temp_base (fun dir ->
+    let key = "test_hydrate_latency:" ^ string_of_int (Random.bits ()) in
+    H.record_success H.global ~provider_key:key ~latency_ms:8000.0 ();
+    P.snapshot_now ~base_path:dir;
+    for _ = 1 to 20 do
+      H.record_success H.global ~provider_key:key ~latency_ms:10.0 ()
+    done;
+    let warm_score = S.latency_score_for_provider H.global ~provider_key:key in
+    check bool "fast samples warm latency score" true (warm_score > 0.9);
+    let restored = P.hydrate_latest ~base_path:dir in
+    check bool "hydrate applied at least one row" true (restored > 0);
+    let restored_score =
+      S.latency_score_for_provider H.global ~provider_key:key
+    in
+    check bool "hydrate restores slow p50 routing penalty"
+      true (restored_score < 0.5);
+    match H.provider_info H.global ~provider_key:key with
+    | None -> fail "missing hydrated provider"
+    | Some info ->
+      check (option (float 0.001)) "restored p50 latency"
+        (Some 8000.0) info.p50_latency_ms)
 
 let test_two_snapshots_produce_two_records () =
   with_temp_base (fun dir ->
@@ -228,6 +268,8 @@ let () =
             test_snapshot_includes_recorded_provider
         ; test_case "provider record has expected shape" `Quick
             test_snapshot_provider_record_shape
+        ; test_case "hydrate restores latency hint" `Quick
+            test_hydrate_latest_restores_latency_hint_from_snapshot
         ; test_case "two calls → two records" `Quick
             test_two_snapshots_produce_two_records
         ; test_case "no throw on empty tracker" `Quick

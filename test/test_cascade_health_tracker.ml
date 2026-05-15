@@ -413,14 +413,14 @@ let test_fingerprint_top_sorted_descending () =
 
 let test_terminal_failure_triggers_immediate_cooldown () =
   let t = H.create () in
-  H.record_terminal_failure t ~provider_key:"kimi-for-coding" ();
+  H.record_terminal_failure t ~provider_key:"cli-json-model" ();
   check bool "single terminal_failure event trips cooldown immediately"
-    true (H.is_in_cooldown t ~provider_key:"kimi-for-coding")
+    true (H.is_in_cooldown t ~provider_key:"cli-json-model")
 
 let test_terminal_failure_cooldown_is_long () =
   let t = H.create () in
-  H.record_terminal_failure t ~provider_key:"kimi-for-coding" ();
-  match H.provider_info t ~provider_key:"kimi-for-coding" with
+  H.record_terminal_failure t ~provider_key:"cli-json-model" ();
+  match H.provider_info t ~provider_key:"cli-json-model" with
   | None -> fail "provider_info returned None after record_terminal_failure"
   | Some info ->
     let now = Unix.gettimeofday () in
@@ -434,28 +434,28 @@ let test_terminal_failure_cooldown_is_long () =
 
 let test_terminal_failure_effective_weight_zero () =
   let t = H.create () in
-  H.record_terminal_failure t ~provider_key:"kimi-for-coding" ();
+  H.record_terminal_failure t ~provider_key:"cli-json-model" ();
   check int "effective_weight = 0 during terminal_failure cooldown"
-    0 (H.effective_weight t ~provider_key:"kimi-for-coding" ~config_weight:100)
+    0 (H.effective_weight t ~provider_key:"cli-json-model" ~config_weight:100)
 
 let test_terminal_failure_success_clears_cooldown () =
   let t = H.create () in
-  H.record_terminal_failure t ~provider_key:"kimi-for-coding" ();
-  H.record_success t ~provider_key:"kimi-for-coding" ();
+  H.record_terminal_failure t ~provider_key:"cli-json-model" ();
+  H.record_success t ~provider_key:"cli-json-model" ();
   check bool "success after terminal_failure clears cooldown"
-    false (H.is_in_cooldown t ~provider_key:"kimi-for-coding")
+    false (H.is_in_cooldown t ~provider_key:"cli-json-model")
 
 let test_terminal_failure_preserves_longer_existing_cooldown () =
   let t = H.create () in
-  H.record_terminal_failure t ~provider_key:"kimi-for-coding" ();
+  H.record_terminal_failure t ~provider_key:"cli-json-model" ();
   let expires_after_first =
-    match H.provider_info t ~provider_key:"kimi-for-coding" with
+    match H.provider_info t ~provider_key:"cli-json-model" with
     | Some { cooldown_expires_at = Some x; _ } -> x
     | _ -> fail "no cooldown after first terminal_failure"
   in
-  H.record_terminal_failure t ~provider_key:"kimi-for-coding" ();
+  H.record_terminal_failure t ~provider_key:"cli-json-model" ();
   let expires_after_second =
-    match H.provider_info t ~provider_key:"kimi-for-coding" with
+    match H.provider_info t ~provider_key:"cli-json-model" with
     | Some { cooldown_expires_at = Some x; _ } -> x
     | _ -> fail "no cooldown after second terminal_failure"
   in
@@ -464,10 +464,10 @@ let test_terminal_failure_preserves_longer_existing_cooldown () =
 
 let test_terminal_failure_records_fingerprint () =
   let t = H.create () in
-  H.record_terminal_failure t ~provider_key:"kimi-for-coding"
+  H.record_terminal_failure t ~provider_key:"cli-json-model"
     ~error_kind:(kind "resumable_cli_session")
-    ~error_reason:"kimi exited with code 1: session conflict" ();
-  let info = info_or_fail t ~provider_key:"kimi-for-coding" in
+    ~error_reason:"cli-tool exited with code 1: session conflict" ();
+  let info = info_or_fail t ~provider_key:"cli-json-model" in
   match info.top_fingerprints with
   | [ (fp, count) ] ->
     check bool "terminal failure fingerprint keeps kind"
@@ -768,6 +768,9 @@ let test_restore_providers_reinstates_active_cooldown () =
         ; restore_cooldown_until = Some until
         ; restore_last_failure_at = Some (until -. 10.0)
         ; restore_top_fingerprints = [ "timeout|abc12345", 2 ]
+        ; restore_latency_ms = None
+        ; restore_confidence = None
+        ; restore_cost_usd = None
         }
       ]
   in
@@ -792,6 +795,9 @@ let test_restore_providers_ignores_blank_provider_key () =
         ; restore_cooldown_until = Some (Unix.gettimeofday () +. 60.0)
         ; restore_last_failure_at = None
         ; restore_top_fingerprints = []
+        ; restore_latency_ms = None
+        ; restore_confidence = None
+        ; restore_cost_usd = None
         }
       ]
   in

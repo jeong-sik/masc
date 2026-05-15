@@ -4,13 +4,10 @@
     Thin facade over {!Cascade_agent_context},
     {!Cascade_transport}, and
     {!Keeper_oas_checkpoint}.  External callers reach
-    the entry points via [Cascade_runner.X]; the heavy
-    transport machinery (CLI / MCP wire formats, runtime
-    policy projections) is implemented in
-    {!Cascade_transport} and re-exposed here for
-    backward compatibility — that sub-module has no .mli
-    of its own, so the canonical contract is the one
-    pinned at this boundary.
+    the run/config entry points via [Cascade_runner.X];
+    provider transport internals (CLI / MCP wire formats,
+    runtime policy projections, and transport-local
+    diagnostics) are owned by {!Cascade_transport}.
 
     All model-selection and cascade logic lives in
     {!Cascade_legacy_runner} and {!Keeper_turn_driver}.
@@ -57,10 +54,9 @@ type cli_transport_overrides =
   gemini_yolo : bool option;
   cli_subprocess_idle_sec : float option;
 }
-(** Per-call overrides threaded into the local CLI transports
-    (Claude Code, Gemini CLI, Kimi CLI).
-    [cli_subprocess_idle_sec] is currently honoured only by Kimi CLI;
-    see {!Cascade_transport.cli_transport_overrides}. *)
+(** Per-call overrides threaded into local CLI transports.
+    [cli_subprocess_idle_sec] is honoured by transports that execute their
+    subprocess directly; see {!Cascade_transport.cli_transport_overrides}. *)
 
 (** {1 Config} *)
 
@@ -164,23 +160,6 @@ val provider_label : Llm_provider.Provider_config.t -> string
 val claude_code_max_turns_hard_cap : int
 val provider_effective_max_turns :
   Llm_provider.Provider_config.provider_kind -> int -> int
-
-(** {1 Kimi CLI configuration} *)
-
-val kimi_mcp_config_json_of_policy :
-  Llm_provider.Llm_transport.runtime_mcp_policy ->
-  string option
-val kimi_cli_model_for_provider :
-  Llm_provider.Provider_config.t -> string option
-val kimi_cli_config_json_for_provider :
-  Llm_provider.Provider_config.t -> string option
-val kimi_cli_runtime_mcp_jsons :
-  base:string list ->
-  Llm_provider.Llm_transport.runtime_mcp_policy option ->
-  string list
-
-module Kimi_cli_transport_local :
-  module type of Cascade_transport.Kimi_cli_transport_local
 
 (** {1 Runtime-MCP policy} *)
 

@@ -77,7 +77,7 @@ rule_files:
 
 **CascadeExhaustionBurst** — every hit is a user-visible cascade failure. Inspect `/api/v1/cascade/health` (provider health) + `/api/v1/cascade/config` (candidate list). If all providers are cooling down, the underlying issue is upstream (API key, rate limit, network).
 
-**StrategyFilteredEmptyStorm** — the strategy is rejecting >50% of cycles. Usually means `Capacity_aware` or `Circuit_breaker_cycling` is too restrictive, or cooldowns are saturated. Cross-reference with `OllamaCapacityRejectionSurge` to separate root cause.
+**StrategyFilteredEmptyStorm** — the strategy is rejecting >50% of cycles. Usually means `priority_tier` capacity filtering is too restrictive, or cooldowns are saturated. Cross-reference with `OllamaCapacityRejectionSurge` to separate root cause.
 
 ## Grafana Dashboard
 
@@ -140,7 +140,7 @@ The `kind` label values are not ad-hoc strings — they mirror the `event_kind` 
 type event_kind = Ordered | Filtered_empty | Exhausted
 ```
 
-Phase B TLA+ spec (`specs/boundary/CascadeStrategyStateful.tla`, PR #7632) models the same state machine with `Ordered` / `FilteredEmpty` / `Exhausted` transitions. Any spec change that adds a variant **must** update:
+The boundary spec (`specs/boundary/CascadeStrategy.tla`) models the same state machine with `Ordered` / `FilteredEmpty` / `Exhausted` transitions. Any spec change that adds a variant **must** update:
 
 1. The OCaml `event_kind` type + `kind_to_string` serialiser.
 2. The `.mli` docstring listing kinds.
@@ -152,7 +152,7 @@ This is the spec → code → dashboard → metric consistency contract.
 ## Related PRs
 
 - #7630 — Phase D client capacity history (ring buffer, JSON)
-- #7632 — TLA+ Phase B Sticky/RR spec
+- #7632 — retired Phase B Sticky/RR spec (removed from shipped strategy ADT)
 - #7637 — TLA+ spec index dashboard
 - #7643 — Strategy decision trace (ring buffer, JSON)
 - #7645 — `masc_cascade_capacity_events_total` counter

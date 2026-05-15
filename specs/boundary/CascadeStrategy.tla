@@ -18,8 +18,8 @@
 \*   - The exact backoff value (the policy's monotonicity is
 \*     verified in OCaml unit tests; here we only model the *fact*
 \*     that some non-zero delay happens between cycles).
-\*   - Sticky TTL expiry as a separate event (modelled as: the
-\*     pinned provider is either available or "expired").
+\*   - Retired experimental strategy variants; the active OCaml ADT
+\*     only exposes failover and priority_tier.
 \*
 \* The spec exists so that the safety properties below are not
 \* preserved by accident — i.e. so that buggy variants of the
@@ -49,9 +49,7 @@ OutcomeSet == {"in_progress", "accepted", "exhausted"}
 \* test. The model below abstracts over candidate ordering, but the
 \* exported strategy kind set still must not drift from
 \* lib/cascade/cascade_strategy.ml.
-StrategyKindSet == {"failover", "capacity_aware", "weighted_random",
-                    "circuit_breaker_cycling", "priority_tier",
-                    "sticky", "round_robin"}
+StrategyKindSet == {"failover", "priority_tier"}
 NoneProvider == "_none_"
 ASSUME NoneProvider \notin Candidates
 

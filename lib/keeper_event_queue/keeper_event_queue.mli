@@ -47,7 +47,7 @@ val length : t -> int
 val is_empty : t -> bool
 
 val enqueue : t -> stimulus -> t
-(** [enqueue q s] appends [s] to the back of [q]. Always succeeds. *)
+(** [enqueue q s] appends [s] to the back of [q] in O(1). Always succeeds. *)
 
 val dequeue : t -> (stimulus * t) option
 (** [dequeue q] removes and returns the front of [q], or [None] when

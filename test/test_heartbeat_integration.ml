@@ -469,6 +469,39 @@ let test_stop_keepalive_resolves_running_entry_immediately () =
        fail ("expected stopped promise, got crashed: " ^ reason)
      | None -> fail "expected manual stop to resolve done_p")
 
+let test_stop_keepalive_force_releases_held_slots () =
+  R.clear ();
+  let keeper_name = "manual-stop-held-slot" in
+  let _reg = R.register ~base_path:bp keeper_name (make_meta keeper_name) in
+  let result =
+    Masc_mcp.Keeper_keepalive.with_keeper_turn_slot_for_test
+      ~keeper_name
+      ~channel:Masc_mcp.Keeper_world_observation.Reactive
+      (fun ~semaphore_wait_ms:_ ->
+         let now = Time_compat.now () in
+         check bool "precondition holder present" true
+           (List.mem keeper_name
+              (List.map fst (Masc_mcp.Keeper_keepalive.turn_slot_holders ~now)));
+         Masc_mcp.Keeper_keepalive.stop_keepalive ~base_path:bp keeper_name;
+         let now_after = Time_compat.now () in
+         check bool "turn holder force released on manual stop" false
+           (List.mem keeper_name
+              (List.map fst
+                 (Masc_mcp.Keeper_keepalive.turn_slot_holders ~now:now_after)));
+         check bool "reactive holder force released on manual stop" false
+           (List.mem keeper_name
+              (List.map fst
+                 (Masc_mcp.Keeper_keepalive.reactive_slot_holders ~now:now_after)));
+         match R.get ~base_path:bp keeper_name with
+         | Some entry ->
+           check string "state stopped" "stopped" (KSM.phase_to_string entry.phase)
+         | None -> fail "expected keeper entry after manual stop")
+  in
+  match result with
+  | Ok () -> ()
+  | Error (`Semaphore_wait_timeout _) ->
+    fail "unexpected semaphore timeout while testing manual stop force-release"
+
 let test_stop_keepalive_preserves_existing_crash_outcome () =
   R.clear ();
   let keeper_name = "crashed-before-stop" in
@@ -608,6 +641,8 @@ let () =
         test_direct_start_keepalive_resolves_done_on_stop;
       test_case "manual stop resolves running entry immediately" `Quick
         test_stop_keepalive_resolves_running_entry_immediately;
+      eio_test "manual stop force-releases held turn slots"
+        test_stop_keepalive_force_releases_held_slots;
       test_case "manual stop preserves crashed outcome" `Quick
         test_stop_keepalive_preserves_existing_crash_outcome;
     ];

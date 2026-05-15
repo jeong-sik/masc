@@ -49,6 +49,7 @@ let max_turns_per_call_max = 100
 
 let bootstrap_max_active_keepers_live () =
   get_int ~default:10000 "MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS"
+  |> Keeper_fd_pressure.cap_active_keepers_for_nofile
 
 let reactive_max_turns_per_call_live () =
   max max_turns_per_call_min

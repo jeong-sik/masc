@@ -1103,6 +1103,24 @@ let run_keepalive_unified_turn
           ~keeper_name:meta_after_triage.name);
       if Atomic.get stop
       then meta_after_cursor_persist
+      else if should_run_turn && Keeper_fd_pressure.active ()
+      then (
+        Log.Keeper.debug
+          "%s: skipping turn while fd-pressure circuit breaker is active (remaining=%.0fs)"
+          meta_after_triage.name
+          (Keeper_fd_pressure.remaining_sec ());
+        meta_after_cursor_persist)
+      else if
+        should_run_turn
+        && not
+             (Keeper_fd_pressure.admit_turn
+                ~active_keepers:(Keeper_registry.count_running ())
+                ())
+      then (
+        Log.Keeper.debug
+          "%s: skipping turn because projected FD budget is exhausted before pressure"
+          meta_after_triage.name;
+        meta_after_cursor_persist)
       else if should_run_turn
       then (
         (* Admission wait happens before [mark_turn_started], so the stale

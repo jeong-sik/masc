@@ -370,6 +370,34 @@ let test_load_history_user_messages_ignores_internal_prompt_entries () =
       (List.nth result 1);
     check string "second real" "second real question" (List.nth result 2))
 
+let test_read_file_tail_lines_reads_tail_without_byte_cap () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
+    let path = Filename.concat dir "large-history.jsonl" in
+    let oc = open_out path in
+    for i = 1 to 1000 do
+      output_string oc (Printf.sprintf "line-%04d\n" i)
+    done;
+    close_out oc;
+    let lines =
+      Keeper_memory_recall.read_file_tail_lines path ~max_bytes:0 ~max_lines:3
+    in
+    check (list string) "last three lines"
+      [ "line-0998"; "line-0999"; "line-1000" ]
+      lines)
+
+let test_read_file_tail_lines_drops_partial_byte_cap_line () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
+    let path = Filename.concat dir "capped-history.jsonl" in
+    let oc = open_out path in
+    output_string oc "first\nsecond\nthird\n";
+    close_out oc;
+    let lines =
+      Keeper_memory_recall.read_file_tail_lines path ~max_bytes:8 ~max_lines:3
+    in
+    check (list string) "partial first capped line dropped" [ "third" ] lines)
+
 let test_recall_candidates_with_history_dedup () =
   let dir = test_tmpdir () in
   Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
@@ -1759,6 +1787,10 @@ let () =
             test_load_history_user_messages;
           test_case "load_history_user_messages ignores internal prompt entries" `Quick
             test_load_history_user_messages_ignores_internal_prompt_entries;
+          test_case "read_file_tail_lines reads tail without byte cap" `Quick
+            test_read_file_tail_lines_reads_tail_without_byte_cap;
+          test_case "read_file_tail_lines drops partial byte-cap line" `Quick
+            test_read_file_tail_lines_drops_partial_byte_cap_line;
           test_case "recall_candidates_with_history deduplicates" `Quick
             test_recall_candidates_with_history_dedup;
           test_case "recall_candidates_with_history appends history" `Quick

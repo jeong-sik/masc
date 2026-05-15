@@ -46,6 +46,24 @@ open Keeper_types
 
 include Keeper_memory_policy
 
+let memory_bank_locks_mu = Eio.Mutex.create ()
+let memory_bank_locks : (string, Eio.Mutex.t) Hashtbl.t = Hashtbl.create 64
+
+let memory_bank_lock_for path =
+  Eio_guard.with_mutex memory_bank_locks_mu (fun () ->
+    match Hashtbl.find_opt memory_bank_locks path with
+    | Some mutex -> mutex
+    | None ->
+      let mutex = Eio.Mutex.create () in
+      Hashtbl.add memory_bank_locks path mutex;
+      mutex)
+;;
+
+let with_memory_bank_lock path f =
+  let mutex = memory_bank_lock_for path in
+  Eio_guard.with_mutex mutex f
+;;
+
 type candidate_selection_result = {
   selected: (string * string * int) list;
   dropped_by_kind: (string * int) list;
@@ -361,6 +379,24 @@ let parse_memory_bank_row (line : string) : keeper_memory_row_raw option =
   with Yojson.Json_error _ ->
     None
 
+let parse_memory_bank_content content =
+  let lines =
+    content
+    |> String.split_on_char '\n'
+    |> List.filter (fun s -> String.trim s <> "")
+  in
+  let parsed_rev, invalid =
+    List.fold_left
+      (fun (acc, inv) line ->
+         match parse_memory_bank_row line with
+         | Some row -> row :: acc, inv
+         | None -> acc, inv + 1)
+      ([], 0)
+      lines
+  in
+  List.rev parsed_rev, invalid
+;;
+
 (* ── Memory Consolidation ───────────────────────────────── *)
 
 (** Extract trace_id from a memory row's JSON. *)
@@ -575,7 +611,7 @@ let compaction_priority
   in
   max 1 (min 120 (row.priority + horizon_bonus + source_bonus))
 
-let write_memory_bank_rows
+let write_memory_bank_rows_unlocked
     (path : string)
     (rows : keeper_memory_row_raw list) : (unit, string) result =
   try
@@ -589,6 +625,10 @@ let write_memory_bank_rows
     Fs_compat.save_file_atomic path content
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Error (Printf.sprintf "failed to rewrite memory bank: %s" (Printexc.to_string exn))
+
+let write_memory_bank_rows path rows =
+  with_memory_bank_lock path (fun () -> write_memory_bank_rows_unlocked path rows)
+;;
 
 let drop_memory_rows n rows =
   let rec go remaining rest =
@@ -607,6 +647,46 @@ let consolidation_metric_source source =
 
 let memory_row_identity (row : keeper_memory_row_raw) =
   Yojson.Safe.to_string row.json
+
+let identity_counts rows =
+  let counts : (string, int) Hashtbl.t = Hashtbl.create (max 16 (List.length rows)) in
+  List.iter
+    (fun row ->
+       let id = memory_row_identity row in
+       let cur = Option.value ~default:0 (Hashtbl.find_opt counts id) in
+       Hashtbl.replace counts id (cur + 1))
+    rows;
+  counts
+;;
+
+let consume_identity counts row =
+  let id = memory_row_identity row in
+  match Hashtbl.find_opt counts id with
+  | Some n when n > 1 ->
+    Hashtbl.replace counts id (n - 1);
+    true
+  | Some _ ->
+    Hashtbl.remove counts id;
+    true
+  | None -> false
+;;
+
+let rewrite_memory_bank_preserving_concurrent_appends ~path ~base_rows selected =
+  with_memory_bank_lock path (fun () ->
+    let selected =
+      match Safe_ops.read_file_safe path with
+      | Error _ -> selected
+      | Ok current_content ->
+        let current_rows, _invalid = parse_memory_bank_content current_content in
+        let base_counts = identity_counts base_rows in
+        let concurrent_rows =
+          current_rows
+          |> List.filter (fun row -> not (consume_identity base_counts row))
+        in
+        if concurrent_rows = [] then selected else selected @ concurrent_rows
+    in
+    write_memory_bank_rows_unlocked path selected)
+;;
 
 let count_rows_by_consolidation_source rows =
   rows
@@ -678,207 +758,189 @@ let compact_memory_bank_if_needed
     in
     let trigger_bytes = memory_compaction_trigger_bytes ~target_notes in
     match Safe_ops.read_file_safe path with
-      | Error _ ->
+    | Error _ ->
+      { no_memory_bank_compaction with
+        target_notes;
+        reason = Some "read_failed";
+      }
+    | Ok content ->
+      let parsed, invalid = parse_memory_bank_content content in
+      let before_notes = List.length parsed in
+      if size_bytes < trigger_bytes && before_notes <= target_notes && invalid = 0
+      then
+        { no_memory_bank_compaction with
+          target_notes;
+          before_notes;
+          after_notes = before_notes;
+          reason = Some "under_trigger_bytes";
+        }
+      else if before_notes <= target_notes && invalid = 0 then
+        { no_memory_bank_compaction with
+          target_notes;
+          before_notes;
+          after_notes = before_notes;
+          reason = Some "under_target";
+        }
+      else
+        (* Consolidation: merge progress clusters and promote recurring notes *)
+        let consolidated_parsed, consolidated_count =
+          consolidate_memory_notes ?summarizer parsed
+        in
+        let generated_consolidated =
+          drop_memory_rows before_notes consolidated_parsed
+        in
+        if consolidated_count > 0 then
+          record_memory_consolidation_metrics
+            ~keeper_name:meta.name
+            ~outcome:"generated"
+            generated_consolidated;
+        let current_generation = meta.runtime.generation in
+        let by_recency =
+          List.sort
+            (fun (a : keeper_memory_row_raw) (b : keeper_memory_row_raw) ->
+              let c = compare b.ts_unix a.ts_unix in
+              if c <> 0 then c
+              else
+                compare
+                  (compaction_priority ~current_generation b)
+                  (compaction_priority ~current_generation a))
+            consolidated_parsed
+        in
+        let deduped = dedup_by_key memory_row_key by_recency in
+        let dedup_dropped = max 0 (before_notes - List.length deduped) in
+        if List.length deduped <= target_notes && dedup_dropped = 0 && invalid = 0
+        then
           { no_memory_bank_compaction with
             target_notes;
-            reason = Some "read_failed";
+            before_notes;
+            after_notes = before_notes;
+            reason = Some "already_compact";
           }
-      | Ok content ->
-          let lines =
-            content
-            |> String.split_on_char '\n'
-            |> List.filter (fun s -> String.trim s <> "")
+        else
+          let kind_caps = memory_kind_caps_for_compaction ~target_notes in
+          let kind_used : (string, int) Hashtbl.t = Hashtbl.create 16 in
+          let selected_keys : (string, unit) Hashtbl.t = Hashtbl.create 1024 in
+          let kind_dropped_keys : (string, string) Hashtbl.t = Hashtbl.create 256 in
+          let selected_rev = ref [] in
+          let selected_count = ref 0 in
+          let fallback_kind_cap = max 8 (target_notes / 8) in
+          let yield_meter = Eio_guard.create_yield_meter () in
+          let add_row ~ignore_kind_cap (row : keeper_memory_row_raw) =
+            Eio_guard.yield_step yield_meter;
+            if !selected_count >= target_notes then
+              ()
+            else
+              let key = memory_row_key row in
+              if key = "" || Hashtbl.mem selected_keys key then
+                ()
+              else
+                let used =
+                  Option.value ~default:0 (Hashtbl.find_opt kind_used row.kind)
+                in
+                let cap =
+                  Option.value
+                    ~default:fallback_kind_cap
+                    (Hashtbl.find_opt kind_caps row.kind)
+                in
+                if ignore_kind_cap || used < cap then begin
+                  Hashtbl.remove kind_dropped_keys key;
+                  Hashtbl.add selected_keys key ();
+                  Hashtbl.replace kind_used row.kind (used + 1);
+                  selected_rev := row :: !selected_rev;
+                  incr selected_count
+                end else
+                  Hashtbl.replace kind_dropped_keys key row.kind
           in
-          let (parsed_rev, invalid) =
-            List.fold_left
-              (fun (acc, inv) line ->
-                match parse_memory_bank_row line with
-                | Some row -> (row :: acc, inv)
-                | None -> (acc, inv + 1))
-              ([], 0) lines
+          let recent_floor = max 16 (min 64 (target_notes / 5)) in
+          by_recency
+          |> take recent_floor
+          |> List.iter (fun row -> add_row ~ignore_kind_cap:false row);
+          let by_priority =
+            List.sort
+              (fun (a : keeper_memory_row_raw) (b : keeper_memory_row_raw) ->
+                let c =
+                  compare
+                    (compaction_priority ~current_generation b)
+                    (compaction_priority ~current_generation a)
+                in
+                if c <> 0 then c else compare b.ts_unix a.ts_unix)
+              deduped
           in
-          let parsed = List.rev parsed_rev in
-          let before_notes = List.length parsed in
-          if
-            size_bytes < trigger_bytes
-            && before_notes <= target_notes
-            && invalid = 0
-          then
+          List.iter (fun row -> add_row ~ignore_kind_cap:false row) by_priority;
+          if !selected_count < target_notes then
+            List.iter (fun row -> add_row ~ignore_kind_cap:true row) by_recency;
+          let selected =
+            !selected_rev
+            |> List.rev
+            |> List.sort (fun (a : keeper_memory_row_raw) (b : keeper_memory_row_raw) ->
+              let c = compare a.ts_unix b.ts_unix in
+              if c <> 0 then c else compare a.priority b.priority)
+          in
+          let after_notes = List.length selected in
+          let dropped_notes = max 0 (before_notes - after_notes) in
+          let dropped_by_kind =
+            Hashtbl.to_seq kind_dropped_keys
+            |> Seq.fold_left
+                 (fun acc (_, kind) ->
+                   let cur = Option.value ~default:0 (List.assoc_opt kind acc) in
+                   (kind, cur + 1) :: List.remove_assoc kind acc)
+                 []
+            |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+          in
+          if dropped_notes = 0 && invalid = 0 then
             { no_memory_bank_compaction with
               target_notes;
               before_notes;
-              after_notes = before_notes;
-              reason = Some "under_trigger_bytes";
-            }
-          else if before_notes <= target_notes && invalid = 0 then
-            { no_memory_bank_compaction with
-              target_notes;
-              before_notes;
-              after_notes = before_notes;
-              reason = Some "under_target";
+              after_notes;
+              dedup_dropped;
+              reason = Some "no_reduction";
             }
           else
-            (* Consolidation: merge progress clusters and promote recurring notes *)
-            let (consolidated_parsed, consolidated_count) =
-              consolidate_memory_notes ?summarizer parsed
-            in
-            let generated_consolidated =
-              drop_memory_rows before_notes consolidated_parsed
-            in
-            if consolidated_count > 0 then
+            match
+              rewrite_memory_bank_preserving_concurrent_appends
+                ~path
+                ~base_rows:parsed
+                selected
+            with
+            | Error _ ->
               record_memory_consolidation_metrics
                 ~keeper_name:meta.name
-                ~outcome:"generated"
+                ~outcome:"write_failed"
                 generated_consolidated;
-            let current_generation = meta.runtime.generation in
-            let by_recency =
-              List.sort
-                (fun (a : keeper_memory_row_raw) (b : keeper_memory_row_raw) ->
-                  let c = compare b.ts_unix a.ts_unix in
-                  if c <> 0 then c
-                  else
-                    compare
-                      (compaction_priority ~current_generation b)
-                      (compaction_priority ~current_generation a))
-                consolidated_parsed
-            in
-            let deduped = dedup_by_key memory_row_key by_recency in
-            let dedup_dropped = max 0 (before_notes - List.length deduped) in
-            if List.length deduped <= target_notes && dedup_dropped = 0 && invalid = 0 then
               { no_memory_bank_compaction with
                 target_notes;
                 before_notes;
                 after_notes = before_notes;
-                reason = Some "already_compact";
+                dedup_dropped;
+                invalid_dropped = invalid;
+                reason = Some "write_failed";
               }
-            else
-              let kind_caps =
-                memory_kind_caps_for_compaction ~target_notes
+            | Ok () ->
+              let retained =
+                retained_generated_rows ~generated:generated_consolidated selected
               in
-              let kind_used : (string, int) Hashtbl.t = Hashtbl.create 16 in
-              let selected_keys : (string, unit) Hashtbl.t = Hashtbl.create 1024 in
-              let kind_dropped_keys : (string, string) Hashtbl.t = Hashtbl.create 256 in
-              let selected_rev = ref [] in
-              let selected_count = ref 0 in
-              let fallback_kind_cap = max 8 (target_notes / 8) in
-              let yield_meter = Eio_guard.create_yield_meter () in
-              let add_row ~ignore_kind_cap (row : keeper_memory_row_raw) =
-                Eio_guard.yield_step yield_meter;
-                if !selected_count >= target_notes then
-                  ()
-                else
-                  let key = memory_row_key row in
-                  if key = "" || Hashtbl.mem selected_keys key then
-                    ()
-                  else
-                    let used =
-                      Option.value ~default:0 (Hashtbl.find_opt kind_used row.kind)
-                    in
-                    let cap =
-                      Option.value ~default:fallback_kind_cap
-                        (Hashtbl.find_opt kind_caps row.kind)
-                    in
-                    if ignore_kind_cap || used < cap then begin
-                      Hashtbl.remove kind_dropped_keys key;
-                      Hashtbl.add selected_keys key ();
-                      Hashtbl.replace kind_used row.kind (used + 1);
-                      selected_rev := row :: !selected_rev;
-                      incr selected_count
-                    end else
-                      Hashtbl.replace kind_dropped_keys key row.kind
+              let evicted =
+                evicted_generated_rows ~generated:generated_consolidated ~retained
               in
-              let recent_floor = max 16 (min 64 (target_notes / 5)) in
-              by_recency
-              |> take recent_floor
-              |> List.iter (fun row -> add_row ~ignore_kind_cap:false row);
-              let by_priority =
-                List.sort
-                  (fun (a : keeper_memory_row_raw) (b : keeper_memory_row_raw) ->
-                    let c =
-                      compare
-                        (compaction_priority ~current_generation b)
-                        (compaction_priority ~current_generation a)
-                    in
-                    if c <> 0 then c else compare b.ts_unix a.ts_unix)
-                  deduped
-              in
-              List.iter (fun row -> add_row ~ignore_kind_cap:false row) by_priority;
-              if !selected_count < target_notes then
-                List.iter (fun row -> add_row ~ignore_kind_cap:true row) by_recency;
-              let selected =
-                !selected_rev
-                |> List.rev
-                |> List.sort
-                     (fun (a : keeper_memory_row_raw) (b : keeper_memory_row_raw) ->
-                       let c = compare a.ts_unix b.ts_unix in
-                       if c <> 0 then c else compare a.priority b.priority)
-              in
-              let after_notes = List.length selected in
-              let dropped_notes = max 0 (before_notes - after_notes) in
-              let dropped_by_kind =
-                Hashtbl.to_seq kind_dropped_keys
-                |> Seq.fold_left
-                     (fun acc (_, kind) ->
-                       let cur =
-                         Option.value ~default:0 (List.assoc_opt kind acc)
-                       in
-                       (kind, cur + 1) :: List.remove_assoc kind acc)
-                     []
-                |> List.sort (fun (a, _) (b, _) -> String.compare a b)
-              in
-              if dropped_notes = 0 && invalid = 0 then
-                { no_memory_bank_compaction with
-                  target_notes;
-                  before_notes;
-                  after_notes;
-                  dedup_dropped;
-                  reason = Some "no_reduction";
-                }
-              else
-                match write_memory_bank_rows path selected with
-                | Error _ ->
-                    record_memory_consolidation_metrics
-                      ~keeper_name:meta.name
-                      ~outcome:"write_failed"
-                      generated_consolidated;
-                    { no_memory_bank_compaction with
-                      target_notes;
-                      before_notes;
-                      after_notes = before_notes;
-                      dedup_dropped;
-                      invalid_dropped = invalid;
-                      reason = Some "write_failed";
-                    }
-                | Ok () ->
-                    let retained =
-                      retained_generated_rows
-                        ~generated:generated_consolidated
-                        selected
-                    in
-                    let evicted =
-                      evicted_generated_rows
-                        ~generated:generated_consolidated
-                        ~retained
-                    in
-                    record_memory_consolidation_metrics
-                      ~keeper_name:meta.name
-                      ~outcome:"persisted"
-                      retained;
-                    record_memory_consolidation_metrics
-                      ~keeper_name:meta.name
-                      ~outcome:"evicted"
-                      evicted;
-                    {
-                      performed = true;
-                      reason = Some "compacted";
-                      target_notes;
-                      before_notes;
-                      after_notes;
-                      dropped_notes;
-                      dedup_dropped;
-                      invalid_dropped = invalid;
-                      dropped_by_kind;
-                    }
+              record_memory_consolidation_metrics
+                ~keeper_name:meta.name
+                ~outcome:"persisted"
+                retained;
+              record_memory_consolidation_metrics
+                ~keeper_name:meta.name
+                ~outcome:"evicted"
+                evicted;
+              {
+                performed = true;
+                reason = Some "compacted";
+                target_notes;
+                before_notes;
+                after_notes;
+                dropped_notes;
+                dedup_dropped;
+                invalid_dropped = invalid;
+                dropped_by_kind;
+              }
 
 let append_memory_notes_from_reply
     (config : Coord.config)
@@ -925,30 +987,31 @@ let append_memory_notes_from_reply
     let path = keeper_memory_bank_path config meta.name in
     let kinds_acc = ref [] in
     let seen_kinds : (string, unit) Hashtbl.t = Hashtbl.create 8 in
-    List.iter
-      (fun (kind, text, priority) ->
-        let horizon = memory_horizon_of_kind kind in
-        if not (Hashtbl.mem seen_kinds kind) then begin
-          Hashtbl.add seen_kinds kind ();
-          kinds_acc := kind :: !kinds_acc
-        end;
-        append_jsonl_line path
-          (`Assoc
-            [
-              ("ts", `String (now_iso ()));
-              ("ts_unix", `Float now_ts);
-              ("name", `String meta.name);
-              ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
-              ("generation", `Int meta.runtime.generation);
-              ("turn", `Int turn);
-              ("kind", `String kind);
-              ("horizon", `String horizon);
-              ("source", `String source);
-              ("schema_version", `Int keeper_memory_schema_version);
-              ("priority", `Int priority);
-              ("text", `String text);
-            ]))
-      notes;
+    with_memory_bank_lock path (fun () ->
+      List.iter
+        (fun (kind, text, priority) ->
+           let horizon = memory_horizon_of_kind kind in
+           if not (Hashtbl.mem seen_kinds kind) then begin
+             Hashtbl.add seen_kinds kind ();
+             kinds_acc := kind :: !kinds_acc
+           end;
+           append_jsonl_line path
+             (`Assoc
+               [
+                 ("ts", `String (now_iso ()));
+                 ("ts_unix", `Float now_ts);
+                 ("name", `String meta.name);
+                 ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
+                 ("generation", `Int meta.runtime.generation);
+                 ("turn", `Int turn);
+                 ("kind", `String kind);
+                 ("horizon", `String horizon);
+                 ("source", `String source);
+                 ("schema_version", `Int keeper_memory_schema_version);
+                 ("priority", `Int priority);
+                 ("text", `String text);
+               ]))
+        notes);
     (List.length notes, List.rev !kinds_acc)
 
 let strip_tool_result_reserved_keys (result : Yojson.Safe.t) : Yojson.Safe.t =
@@ -996,50 +1059,46 @@ let append_memory_notes_from_tool_results
   let path = keeper_memory_bank_path config meta.name in
   let seen_artifacts : (string, unit) Hashtbl.t = Hashtbl.create 16 in
   let written = ref 0 in
-  List.iter
-    (fun result ->
-      match
-        ( Multimodal.Tool_emission.extract_kind_from_result result,
-          Multimodal.Tool_emission.extract_id_from_result result )
-      with
-      | Some kind_tag, Some artifact_id
-        when String.trim artifact_id <> ""
-             && not (Hashtbl.mem seen_artifacts artifact_id) ->
-          Hashtbl.add seen_artifacts artifact_id ();
-          let kind = Multimodal.Artifact.kind_tag_to_string kind_tag in
-          let payload_preview = tool_result_payload_preview result in
-          let text =
-            tool_result_memory_text ~kind ~artifact_id ~payload_preview
-          in
-          if is_meaningful_memory_text text then begin
-            append_jsonl_line path
-              (`Assoc
-                [ ("ts", `String (now_iso ()))
-                ; ("ts_unix", `Float now_ts)
-                ; ("name", `String meta.name)
-                ; ( "trace_id",
-                    `String
-                      (Keeper_id.Trace_id.to_string meta.runtime.trace_id) )
-                ; ("generation", `Int meta.runtime.generation)
-                ; ("turn", `Int turn)
-                ; ("kind", `String "long_term")
-                ; ("horizon", `String long_term_horizon)
-                ; ("source", `String "tool_result")
-                ; ("schema_version", `Int keeper_memory_schema_version)
-                ; ( "priority",
-                    `Int
-                      (tuned_priority_for_candidate
-                         ~kind:"long_term" ~text) )
-                ; ("text", `String text)
-                ; ("artifact_id", `String artifact_id)
-                ; ("artifact_kind", `String kind)
-                ; ("payload_preview", `String payload_preview)
-                ; ("metadata", tool_result_metadata result)
-                ]);
-            incr written
-          end
-      | _ -> ())
-    results;
+  with_memory_bank_lock path (fun () ->
+    List.iter
+      (fun result ->
+         match
+           ( Multimodal.Tool_emission.extract_kind_from_result result,
+             Multimodal.Tool_emission.extract_id_from_result result )
+         with
+         | Some kind_tag, Some artifact_id
+           when String.trim artifact_id <> ""
+                && not (Hashtbl.mem seen_artifacts artifact_id) ->
+           Hashtbl.add seen_artifacts artifact_id ();
+           let kind = Multimodal.Artifact.kind_tag_to_string kind_tag in
+           let payload_preview = tool_result_payload_preview result in
+           let text = tool_result_memory_text ~kind ~artifact_id ~payload_preview in
+           if is_meaningful_memory_text text then begin
+             append_jsonl_line path
+               (`Assoc
+                 [ ("ts", `String (now_iso ()))
+                 ; ("ts_unix", `Float now_ts)
+                 ; ("name", `String meta.name)
+                 ; ( "trace_id",
+                     `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) )
+                 ; ("generation", `Int meta.runtime.generation)
+                 ; ("turn", `Int turn)
+                 ; ("kind", `String "long_term")
+                 ; ("horizon", `String long_term_horizon)
+                 ; ("source", `String "tool_result")
+                 ; ("schema_version", `Int keeper_memory_schema_version)
+                 ; ( "priority",
+                     `Int (tuned_priority_for_candidate ~kind:"long_term" ~text) )
+                 ; ("text", `String text)
+                 ; ("artifact_id", `String artifact_id)
+                 ; ("artifact_kind", `String kind)
+                 ; ("payload_preview", `String payload_preview)
+                 ; ("metadata", tool_result_metadata result)
+                 ]);
+             incr written
+           end
+         | _ -> ())
+      results);
   !written
 
 let summarize_memory_bank_lines

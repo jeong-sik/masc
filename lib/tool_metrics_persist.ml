@@ -69,7 +69,9 @@ let parse_record (json : Yojson.Safe.t)
 
 (* ── Write queue ────────────────────────────────────── *)
 
-let write_queue : Yojson.Safe.t Eio.Stream.t = Eio.Stream.create 4096
+let write_queue_capacity = 4096
+let write_queue : Yojson.Safe.t Eio.Stream.t = Eio.Stream.create write_queue_capacity
+let dropped_full_queue = Atomic.make 0
 
 let store_ref : (string * Dated_jsonl.t) option ref = ref None
 
@@ -82,6 +84,7 @@ let reset_for_testing () =
   let dropped = drain_queue_without_store 0 in
   if dropped > 0 then
     Log.Metrics.warn "tool_metrics_persist: reset dropped %d queued records" dropped;
+  Atomic.set dropped_full_queue 0;
   store_ref := None
 
 let get_or_create_store ~base_path : Dated_jsonl.t =
@@ -96,9 +99,19 @@ let get_or_create_store ~base_path : Dated_jsonl.t =
 
 let enqueue (result : Tool_result.t) =
   let json = record_to_json result in
-  (* Bounded stream (4096): blocks briefly if full, providing backpressure.
-     Under normal operation the flush fiber drains well before capacity. *)
-  Eio.Stream.add write_queue json
+  (* This hook runs inline on the tool completion path. If the persistence
+     fiber is wedged behind FD/IO exhaustion, blocking here would hold the
+     keeper turn open and amplify the outage. Drop best-effort metrics when
+     the bounded queue is full; durable tool-call logs remain the stronger
+     evidence surface. *)
+  if Eio.Stream.length write_queue >= write_queue_capacity
+  then (
+    let dropped = Atomic.fetch_and_add dropped_full_queue 1 + 1 in
+    if dropped = 1 || dropped mod 1024 = 0 then
+      Log.Metrics.warn
+        "tool_metrics_persist: dropped %d record(s) because write queue is full"
+        dropped)
+  else Eio.Stream.add write_queue json
 
 (* ── Flush logic ────────────────────────────────────── *)
 

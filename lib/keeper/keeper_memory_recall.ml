@@ -18,30 +18,60 @@ let read_file_tail_lines path ~max_bytes ~max_lines : string list =
   else if not (Fs_compat.file_exists path) then []
   else
     try
-      let full_content = Fs_compat.load_file path in
-      let file_len = String.length full_content in
-      let read_start =
-        if max_bytes <= 0 then 0
-        else max 0 (file_len - max_bytes)
-      in
-      let content = String.sub full_content read_start (file_len - read_start) in
-        let lines =
-          content
-          |> String.split_on_char '\n'
-          |> List.filter (fun s -> String.trim s <> "")
-        in
-        (* When reading from mid-file, first line may be partial — drop it *)
-        let lines =
-          if read_start > 0 then
-            match lines with _ :: rest -> rest | [] -> []
-          else lines
-        in
-        let n = List.length lines in
-        if n <= max_lines then lines
-        else
-          let drop = n - max_lines in
-          List.filteri (fun i _ -> i >= drop) lines
-    with Sys_error _ | End_of_file ->
+      let fd = Unix.openfile path [ Unix.O_RDONLY ] 0 in
+      Fun.protect
+        ~finally:(fun () -> try Unix.close fd with _ -> ())
+        (fun () ->
+          let file_len = (Unix.LargeFile.fstat fd).Unix.LargeFile.st_size in
+          let min_start =
+            if max_bytes <= 0
+            then 0L
+            else Int64.max 0L (Int64.sub file_len (Int64.of_int max_bytes))
+          in
+          let chunk_size = 64 * 1024 in
+          let pos = ref file_len in
+          let chunks = ref [] in
+          let newline_count = ref 0 in
+          let count_newlines s =
+            String.iter (fun ch -> if ch = '\n' then incr newline_count) s
+          in
+          while Int64.compare !pos min_start > 0 && !newline_count <= max_lines do
+            let available = Int64.sub !pos min_start in
+            let read_len =
+              Int64.to_int (Int64.min (Int64.of_int chunk_size) available)
+            in
+            let start = Int64.sub !pos (Int64.of_int read_len) in
+            ignore (Unix.LargeFile.lseek fd start Unix.SEEK_SET);
+            let buf = Bytes.create read_len in
+            let rec read_exact offset remaining =
+              if remaining <= 0 then offset
+              else
+                let n = Unix.read fd buf offset remaining in
+                if n = 0 then offset else read_exact (offset + n) (remaining - n)
+            in
+            let bytes_read = read_exact 0 read_len in
+            let chunk = Bytes.sub_string buf 0 bytes_read in
+            count_newlines chunk;
+            chunks := chunk :: !chunks;
+            pos := start
+          done;
+          let content = String.concat "" !chunks in
+          let lines =
+            content
+            |> String.split_on_char '\n'
+            |> List.filter (fun s -> String.trim s <> "")
+          in
+          let lines =
+            if Int64.compare !pos 0L > 0
+            then (match lines with _ :: rest -> rest | [] -> [])
+            else lines
+          in
+          let n = List.length lines in
+          if n <= max_lines then lines
+          else
+            let drop = n - max_lines in
+            List.filteri (fun i _ -> i >= drop) lines)
+    with Sys_error _ | Unix.Unix_error _ | End_of_file ->
       []
 
 let read_keeper_memory_summary

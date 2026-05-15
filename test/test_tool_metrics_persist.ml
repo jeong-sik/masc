@@ -100,6 +100,22 @@ let test_reset_clears_cached_store () =
     let restored = P.restore ~base_path in
     Alcotest.(check int) "reset drops queued records and cache" 0 restored)
 
+let test_enqueue_drops_when_queue_full () =
+  with_tmp_dir (fun base_path ->
+    M.clear ();
+    ignore (P.restore ~base_path);
+    for i = 1 to 4101 do
+      P.enqueue
+        (make_result
+           ~name:(Printf.sprintf "tool-%04d" i)
+           ~success:true
+           ~duration_ms:1.0)
+    done;
+    P.flush_now ();
+    M.clear ();
+    let restored = P.restore ~base_path in
+    Alcotest.(check int) "bounded queue persists only capacity" 4096 restored)
+
 let () =
   Alcotest.run "Tool_metrics_persist" [
     "persistence", [
@@ -111,5 +127,7 @@ let () =
         test_malformed_lines_skipped;
       eio_test "reset clears cached store"
         test_reset_clears_cached_store;
+      eio_test "enqueue drops instead of blocking when queue is full"
+        test_enqueue_drops_when_queue_full;
     ];
   ]

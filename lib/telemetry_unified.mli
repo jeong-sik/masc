@@ -92,3 +92,12 @@ val summary_json :
     each source: path, entry count, whether the store directory exists,
     and freshness metadata ([latest_ts_unix], [latest_ts_iso],
     [latest_age_s]).  [masc_root] is the cluster-aware .masc directory. *)
+
+val replay_retention_json :
+  base_path:string ->
+  masc_root:string ->
+  sources:source list ->
+  Yojson.Safe.t
+(** [replay_retention_json ~base_path ~masc_root ~sources] returns the
+    provenance block for the dashboard telemetry replay endpoint, including
+    the selected source list and durable stores read for each source. *)

@@ -1084,6 +1084,50 @@ let test_summary_counts_all_entries_beyond_recent_cap () =
     Alcotest.(check int) "counts all rows, not read_recent cap" 10_050 total
   | _ -> Alcotest.fail "expected Assoc"
 
+let test_replay_retention_lists_selected_sources () =
+  let dir = tmpdir "telem_replay_retention" in
+  let root = masc_root dir in
+  let json =
+    Telemetry_unified.replay_retention_json ~base_path:dir ~masc_root:root
+      ~sources:[ Telemetry_unified.Oas_event; Telemetry_unified.Tool_metric ]
+  in
+  match json with
+  | `Assoc fields ->
+    Alcotest.(check string) "scope" "dashboard_telemetry_replay"
+      (json_string_field "scope" json);
+    Alcotest.(check string) "coordination root" root
+      (json_string_field "coordination_root" json);
+    let selected_sources =
+      match List.assoc_opt "selected_sources" fields with
+      | Some (`List values) ->
+        List.map
+          (function `String value -> value | _ -> Alcotest.fail "bad source")
+          values
+      | _ -> Alcotest.fail "expected selected_sources"
+    in
+    Alcotest.(check (list string)) "selected sources"
+      [ "oas_event"; "tool_metric" ]
+      selected_sources;
+    let durable_stores =
+      match List.assoc_opt "durable_stores" fields with
+      | Some (`List values) -> values
+      | _ -> Alcotest.fail "expected durable_stores"
+    in
+    Alcotest.(check int) "durable store count" 2 (List.length durable_stores);
+    let oas_store =
+      List.find
+        (fun value ->
+          String.equal "oas_event" (json_string_field "source" value))
+        durable_stores
+    in
+    Alcotest.(check string) "oas durable store"
+      (Filename.concat root "oas-events")
+      (json_string_field "durable_store" oas_store);
+    Alcotest.(check string) "oas dashboard surface"
+      "/api/v1/dashboard/telemetry"
+      (json_string_field "dashboard_surface" oas_store)
+  | _ -> Alcotest.fail "expected Assoc"
+
 (* ── Cluster-aware path ─────────────────────────── *)
 
 let test_cluster_aware_read () =
@@ -1195,6 +1239,8 @@ let () =
             test_summary_bad_trajectory_root_observed_once;
           Alcotest.test_case "counts all rows beyond recent cap" `Quick
             test_summary_counts_all_entries_beyond_recent_cap;
+          Alcotest.test_case "replay retention selected sources" `Quick
+            test_replay_retention_lists_selected_sources;
         ] );
       ( "cluster",
         [

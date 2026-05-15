@@ -165,7 +165,7 @@ describe('IdeContextLens', () => {
 
     expect(container.querySelector('[data-testid="ide-context-lens"]')).not.toBeNull()
     expect(container.textContent).toContain('CONTEXT LENS')
-    expect(container.textContent).toContain('11/11 linked')
+    expect(container.textContent).toContain('11/12 linked')
     expect(container.textContent).toContain('keeper_exec_ide.ml')
     expect(container.textContent).toContain('4 anchors')
     expect(container.textContent).toContain('goal goal-ide')
@@ -606,6 +606,8 @@ describe('IdeContextLens', () => {
     expect(counts.get('git')).toBeGreaterThan(0)
     expect(counts.get('pr')).toBeGreaterThan(0)
     expect(counts.get('log')).toBe(1)
+    expect(counts.get('runtime')).toBe(1)
+    expect(counts.get('telemetry')).toBe(1)
     expect(model.anchors[0]).toMatchObject({
       surface: 'Comment',
       line: 27,
@@ -656,6 +658,21 @@ describe('IdeContextLens', () => {
       },
       evidence: 'Fleet telemetry event log · session sess-9 · operation op-9 · worker wr-9 · query turn-9',
     })
+    expect(model.surfaces.find(surface => surface.id === 'runtime')).toMatchObject({
+      label: 'Runtime',
+      count: 1,
+      routeLink: expect.objectContaining({
+        label: 'Telemetry',
+        params: {
+          section: 'fleet-health',
+          view: 'event-log',
+          session_id: 'sess-9',
+          operation_id: 'op-9',
+          worker_run_id: 'wr-9',
+          q: 'turn-9',
+        },
+      }),
+    })
     expect(model.anchors[0]?.route_links?.find(link => link.label === 'Keeper')).toMatchObject({
       tab: 'monitoring',
       params: { section: 'agents', view: 'keepers', keeper: 'sangsu' },
@@ -692,6 +709,10 @@ describe('IdeContextLens', () => {
     })
 
     expect(model.activeLineCount).toBe(1)
+    expect(model.surfaces.find(surface => surface.id === 'runtime')).toMatchObject({
+      status: 'linked',
+      count: 1,
+    })
     expect(model.anchors[0]).toMatchObject({
       surface: 'PR',
       line: 27,
@@ -729,6 +750,64 @@ describe('IdeContextLens', () => {
         operation_id: 'op-9',
         worker_run_id: 'wr-9',
         q: 'turn-9',
+      },
+    })
+  })
+
+  it('promotes tagged runtime references into runtime anchors', () => {
+    const model = deriveIdeContextLens({
+      filePath: 'lib/keeper/keeper_exec_ide.ml',
+      annotations: [],
+      diffRows: [],
+      events: [{
+        id: 'evt-tagged-runtime',
+        run_id: 'run-default',
+        keeper_id: 'sangsu',
+        verb: 'noted',
+        target: 'runtime scope',
+        timestamp_ms: 400,
+        detail: 'session:sess-9 op:op-9 wr:wr-9 line:27',
+      }],
+      overlay: { ...overlay, cursors: new Map() },
+    })
+
+    expect(model.surfaces.find(surface => surface.id === 'runtime')).toMatchObject({
+      status: 'linked',
+      count: 1,
+      routeLink: expect.objectContaining({
+        label: 'Telemetry',
+        params: {
+          section: 'fleet-health',
+          view: 'event-log',
+          session_id: 'sess-9',
+          operation_id: 'op-9',
+          worker_run_id: 'wr-9',
+        },
+      }),
+    })
+    expect(model.anchors[0]).toMatchObject({
+      surface: 'Runtime',
+      line: 27,
+      keeper_id: 'sangsu',
+    })
+    expect(model.anchors[0]?.route_links?.find(link => link.label === 'Code')).toMatchObject({
+      tab: 'code',
+      params: {
+        section: 'ide-shell',
+        view: 'source',
+        file: 'lib/keeper/keeper_exec_ide.ml',
+        line: '27',
+        surface: 'Runtime',
+      },
+    })
+    expect(model.anchors[0]?.route_links?.find(link => link.label === 'Telemetry')).toMatchObject({
+      tab: 'monitoring',
+      params: {
+        section: 'fleet-health',
+        view: 'event-log',
+        session_id: 'sess-9',
+        operation_id: 'op-9',
+        worker_run_id: 'wr-9',
       },
     })
   })

@@ -1,5 +1,8 @@
 open Keeper_types
 
+(* RFC-0084 host-config-cleanup-B — zsh binary path migration. *)
+let host_zsh = (Host_config.legacy_macos_default ()).host_zsh
+
 let json_string_field name json = Json_util.get_string json name
 
 let handle_keeper_preflight_check
@@ -24,7 +27,7 @@ let handle_keeper_preflight_check
         ~raw_source:"/bin/zsh -lc gh auth status 2>&1"
         ~summary:"keeper preflight gh auth status"
         ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Preflight ())
-        [ "/bin/zsh"; "-lc"; "gh auth status 2>&1" ]
+        [ host_zsh; "-lc"; "gh auth status 2>&1" ]
     in
     add_check "gh_auth" (st = Unix.WEXITED 0) out
   in
@@ -40,7 +43,7 @@ let handle_keeper_preflight_check
           ~raw_source:(Printf.sprintf "/bin/zsh -lc gh repo view %s --json name,defaultBranchRef 2>&1" (Filename.quote repo))
           ~summary:"keeper preflight gh repo view"
           ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Preflight ())
-          [ "/bin/zsh"; "-lc";
+          [ host_zsh; "-lc";
             Printf.sprintf "gh repo view %s --json name,defaultBranchRef 2>&1"
               (Filename.quote repo) ]
       in

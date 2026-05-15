@@ -1,6 +1,12 @@
 open Keeper_types
 open Keeper_exec_shared
 
+(* RFC-0084 host-config-cleanup-B — bash binary path migration.
+   Resolves the host bash binary once at module-init from the typed
+   [Host_config.host_bash] field; consumer sites reference the bound
+   name so a future PR can flip the typed surface to PATH lookup. *)
+let host_bash = (Host_config.legacy_macos_default ()).host_bash
+
 let elapsed_duration_ms ~start_time ~end_time =
   let elapsed_ms = (end_time -. start_time) *. 1000. in
   match classify_float elapsed_ms with
@@ -742,7 +748,7 @@ let handle_keeper_bash
                   Foreground mode merges via [2>&1] for backward
                   compatibility with the single [output] JSON field. *)
                if run_in_background then begin
-                 let argv = [ "/bin/bash"; "-lc"; cmd ] in
+                 let argv = [ host_bash; "-lc"; cmd ] in
                  match
                    Bg_task.spawn
                      ~base_path:root
@@ -799,7 +805,7 @@ let handle_keeper_bash
                    | _ -> false
                  in
                  let argv_merged =
-                   [ "/bin/bash"; "-lc"; cmd ^ " 2>&1" ]
+                   [ host_bash; "-lc"; cmd ^ " 2>&1" ]
                  in
                  (* Tick 23: AUTO_BG dark-launch observer.  When
                     [MASC_BASH_AUTO_BG_OBSERVE] is set, time the

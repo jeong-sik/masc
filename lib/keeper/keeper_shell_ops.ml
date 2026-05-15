@@ -1,6 +1,15 @@
 open Keeper_types
 open Keeper_exec_shared
 
+(* RFC-0084 host-config-cleanup-C — coreutils path migration.
+   Resolve the 6 absolute binary paths once at module-init time
+   from the typed [Host_config.coreutils] field, then reference
+   the bound names at each shell-op call-site.  Behaviour byte-
+   identical today; a future PR can flip [legacy_macos_default]
+   to PATH-resolved binaries for portability without touching
+   this module's call sites. *)
+let coreutils = (Host_config.legacy_macos_default ()).coreutils
+
 let handle_keeper_shell
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~exec_cache:(_exec_cache : Masc_exec.Exec_cache.t option)
@@ -275,7 +284,7 @@ let handle_keeper_shell
          render_docker_process_result ~cwd ~cmd:"pwd" ~docker_cmd:"pwd"
            ~timeout_sec:Keeper_shell_shared.io_timeout_sec
        else
-         run_in_turn_runtime ~cwd ~cmd:"pwd" ~command_argv:[ "/bin/pwd" ]
+         run_in_turn_runtime ~cwd ~cmd:"pwd" ~command_argv:[ coreutils.pwd ]
            ~map_output:hostify_turn_runtime_output
            ~max_bytes:4096 ~timeout_sec:Keeper_shell_shared.io_timeout_sec ())
   | "git_status" ->
@@ -336,7 +345,7 @@ let handle_keeper_shell
           let st, out =
            Keeper_shell_shared.run_argv_with_status_retry_eintr
              ~timeout_sec:Keeper_shell_shared.io_timeout_sec
-             [ "/bin/ls"; "-la"; target ]
+             [ coreutils.ls; "-la"; target ]
          in
          Yojson.Safe.to_string
            (`Assoc
@@ -384,7 +393,7 @@ let handle_keeper_shell
          let st, out =
            Keeper_shell_shared.run_argv_with_status_retry_eintr
              ~timeout_sec:Keeper_shell_shared.read_timeout_sec
-             [ "/bin/cat"; target ]
+             [ coreutils.cat; target ]
          in
          let body =
            if String.length out > max_bytes then String.sub out 0 max_bytes else out
@@ -658,7 +667,7 @@ let handle_keeper_shell
        else
          let st, out =
            Keeper_shell_shared.run_argv_with_status_retry_eintr ~timeout_sec:Keeper_shell_shared.read_timeout_sec
-             [ "/usr/bin/head"; "-n"; string_of_int n; target ]
+             [ coreutils.head; "-n"; string_of_int n; target ]
          in
          Yojson.Safe.to_string
            (`Assoc
@@ -699,7 +708,7 @@ let handle_keeper_shell
        else
          let st, out =
            Keeper_shell_shared.run_argv_with_status_retry_eintr ~timeout_sec:Keeper_shell_shared.read_timeout_sec
-             [ "/usr/bin/tail"; "-n"; string_of_int n; target ]
+             [ coreutils.tail; "-n"; string_of_int n; target ]
          in
          Yojson.Safe.to_string
            (`Assoc
@@ -743,7 +752,7 @@ let handle_keeper_shell
                  ~output:out
                  ()))
        else
-         render_process_result ~cmd:"wc" [ "/usr/bin/wc"; "-l"; target ])
+         render_process_result ~cmd:"wc" [ coreutils.wc; "-l"; target ])
   | "tree" ->
     (match read_target () with
      | Error e -> path_error e

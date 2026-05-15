@@ -43,6 +43,34 @@ let identity_rng_mutex = Eio.Mutex.create ()
 let with_identity_rng f =
   Eio.Mutex.use_ro identity_rng_mutex (fun () -> f identity_rng)
 
+(** Typed classification of a session_key's display prefix.
+
+    Replaces the previous string-collapsing helpers that mapped
+    zero-length keys to the literal ["unknown"] inside both
+    [from_mcp_params] and [to_display_string]. The collapse made it
+    impossible for callers to distinguish a genuinely empty key from a
+    key whose first eight bytes happened to spell ["unknown"], and it
+    silenced short-key cases that downstream display logic might want
+    to flag.
+
+    Each call site now matches exhaustively on this closed sum, so any
+    future variant (e.g. truncated/hashed prefix) forces an explicit
+    decision at every consumer instead of being silently merged into a
+    catch-all string. *)
+type session_key_prefix =
+  | Empty_session_key
+      (** Original key had zero length — no usable display prefix. *)
+  | Short_session_key of string
+      (** Key shorter than 8 bytes; the entire key is the prefix. *)
+  | Prefix of string
+      (** Exactly the first 8 bytes of a key ≥ 8 bytes long. *)
+
+let classify_session_key_prefix session_key =
+  let len = String.length session_key in
+  if len = 0 then Empty_session_key
+  else if len < 8 then Short_session_key session_key
+  else Prefix (String.sub session_key 0 8)
+
 (** {1 Core Types} *)
 
 (** Connection surface known to core.
@@ -136,15 +164,11 @@ let from_mcp_params params =
     | `String s -> Some s
     | _ -> None
   in
-  let session_key_prefix session_key =
-    let prefix_len = min 8 (String.length session_key) in
-    if prefix_len = 0 then "unknown"
-    else String.sub session_key 0 prefix_len
-  in
   let fallback_agent_name session_key =
-    let prefix = session_key_prefix session_key in
-    let prefix = if String.equal prefix "unknown" then "anon" else prefix in
-    Printf.sprintf "agent-%s" prefix
+    match classify_session_key_prefix session_key with
+    | Empty_session_key -> "agent-anon"
+    | Short_session_key s -> Printf.sprintf "agent-%s" s
+    | Prefix s -> Printf.sprintf "agent-%s" s
   in
   let session_key = match get_opt "_session_key" with
     | Some k ->
@@ -304,10 +328,11 @@ let has_capability identity cap =
 
 (** Get display string for logging *)
 let to_display_string identity =
-  let session_key_prefix session_key =
-    let prefix_len = min 8 (String.length session_key) in
-    if prefix_len = 0 then "unknown"
-    else String.sub session_key 0 prefix_len
+  let prefix_str =
+    match classify_session_key_prefix identity.session_key with
+    | Empty_session_key -> "unknown"
+    | Short_session_key s -> s
+    | Prefix s -> s
   in
   let channel_str = match identity.channel with
     | Some c -> Printf.sprintf " via %s" (string_of_channel c)
@@ -319,7 +344,7 @@ let to_display_string identity =
   in
   Printf.sprintf "%s (%s)%s%s"
     identity.agent_name
-    (session_key_prefix identity.session_key)
+    prefix_str
     channel_str
     room_str
 

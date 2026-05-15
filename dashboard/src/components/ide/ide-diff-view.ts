@@ -172,6 +172,13 @@ function DiffContextFocus({
       <strong>${focus.label}</strong>
       ${links.length > 0 ? html`
         <span class="ide-diff-context-links" aria-label="Diff context route links">
+          <span
+            class="ide-diff-context-count"
+            title=${`${links.length} linked diff context routes`}
+            aria-label=${`${links.length} linked diff context routes`}
+          >
+            CTX ${links.length}
+          </span>
           ${links.map(link => html`
             <button
               key=${link.id}

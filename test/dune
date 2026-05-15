@@ -1696,3 +1696,11 @@
  (name test_rfc_0085_pr4_tool_library_proof_store)
  (modules test_rfc_0085_pr4_tool_library_proof_store)
  (libraries alcotest ast_grep))
+
+; RFC-0085 PR-8 — config_dir_resolver + tool_code_write env-derived
+; path reads routed through Host_config.from_env; Env_config_core
+; config_dir_opt + personas_dir_opt removed.
+(test
+ (name test_rfc_0085_pr8_config_dir_resolver_host_config)
+ (modules test_rfc_0085_pr8_config_dir_resolver_host_config)
+ (libraries alcotest ast_grep))

@@ -461,13 +461,12 @@ let storage_type () =
 let config_dir_env_key = "MASC_CONFIG_DIR"
 let personas_dir_env_key = "MASC_PERSONAS_DIR"
 
-(** Config directory override. *)
-let config_dir_opt () =
-  raw_value_opt config_dir_env_key |> trim_opt
-
-(** Personas directory override. *)
-let personas_dir_opt () =
-  raw_value_opt personas_dir_env_key |> trim_opt
+(* RFC-0085 PR-8 — [config_dir_opt] and [personas_dir_opt] removed.
+   All readers now obtain these path values from
+   [Host_config.from_env ()] (fields [config_dir] / [personas_dir]).
+   The two [_env_key] string constants above remain because docker
+   inheritance lists and snapshot catalogs still need them as
+   identifier strings, not as readers. *)
 
 (** SSOT for the MASC_DATA_DIR env-var name (issue 8352).
     Overrides [<base_path>/data] as the root for CDAL verdicts and other

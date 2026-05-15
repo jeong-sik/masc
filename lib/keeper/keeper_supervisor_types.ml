@@ -82,3 +82,56 @@ let persona_drift_log_level_for_missing_profile (meta : keeper_meta) =
     Persona_drift_warn
   | Ok _ | Error _ -> Persona_drift_error
 ;;
+
+let should_cleanup_dead ~now ~dead_ttl_sec (entry : Keeper_registry.registry_entry) =
+  match entry.phase, entry.dead_since_ts with
+  | Keeper_state_machine.Dead, Some dead_since -> now -. dead_since >= dead_ttl_sec
+  | Keeper_state_machine.Dead, None -> false
+  | ( ( Keeper_state_machine.Offline
+      | Keeper_state_machine.Running
+      | Keeper_state_machine.Failing
+      | Keeper_state_machine.Overflowed
+      | Keeper_state_machine.Compacting
+      | Keeper_state_machine.HandingOff
+      | Keeper_state_machine.Draining
+      | Keeper_state_machine.Paused
+      | Keeper_state_machine.Stopped
+      | Keeper_state_machine.Crashed
+      | Keeper_state_machine.Restarting
+      | Keeper_state_machine.Zombie )
+    , _ ) -> false
+;;
+
+let is_stale_paused_meta ~now ~paused_ttl_sec (meta : keeper_meta) =
+  if not meta.paused
+  then false
+  else (
+    let updated_ts =
+      Coord_resilience.Time.parse_iso8601_opt meta.updated_at |> Option.value ~default:0.0
+    in
+    updated_ts > 0.0 && now -. updated_ts >= paused_ttl_sec)
+;;
+
+let paused_meta_requires_reconcile_recovery (meta : keeper_meta) =
+  meta.paused
+  &&
+  match meta.runtime.last_blocker with
+  | Some info -> blocker_class_continue_gate info.klass
+  | None -> false
+;;
+
+let cohort_key_of_reason = Keeper_registry.failure_reason_cohort_key
+
+let stale_turn_timeout_cohort_key =
+  cohort_key_of_reason
+    (Some
+       (Keeper_registry.Stale_turn_timeout
+          (Keeper_registry.Idle_turn { stall_seconds = 0.0 })))
+;;
+
+let active_supervision_keeper_count entries =
+  List_util.count_if
+    (fun (e : Keeper_registry.registry_entry) ->
+       e.phase = Keeper_state_machine.Running || e.phase = Keeper_state_machine.Crashed)
+    entries
+;;

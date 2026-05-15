@@ -32,45 +32,6 @@ let keep_last_n n item lst =
 include Keeper_supervisor_types
 
 
-let should_cleanup_dead ~now ~dead_ttl_sec (entry : Keeper_registry.registry_entry) =
-  match entry.phase, entry.dead_since_ts with
-  | Keeper_state_machine.Dead, Some dead_since -> now -. dead_since >= dead_ttl_sec
-  (* Dead but no [dead_since_ts] yet — first observation will set it. *)
-  | Keeper_state_machine.Dead, None -> false
-  (* Non-Dead phases never trigger Dead cleanup, regardless of timestamp. *)
-  | ( ( Keeper_state_machine.Offline
-      | Keeper_state_machine.Running
-      | Keeper_state_machine.Failing
-      | Keeper_state_machine.Overflowed
-      | Keeper_state_machine.Compacting
-      | Keeper_state_machine.HandingOff
-      | Keeper_state_machine.Draining
-      | Keeper_state_machine.Paused
-      | Keeper_state_machine.Stopped
-      | Keeper_state_machine.Crashed
-      | Keeper_state_machine.Restarting
-      | Keeper_state_machine.Zombie )
-    , _ ) -> false
-;;
-
-(** Check if a paused keeper meta file on disk is stale enough to remove. *)
-let is_stale_paused_meta ~now ~paused_ttl_sec (meta : keeper_meta) =
-  if not meta.paused
-  then false
-  else (
-    let updated_ts =
-      Coord_resilience.Time.parse_iso8601_opt meta.updated_at |> Option.value ~default:0.0
-    in
-    updated_ts > 0.0 && now -. updated_ts >= paused_ttl_sec)
-;;
-
-let paused_meta_requires_reconcile_recovery (meta : keeper_meta) =
-  meta.paused
-  &&
-  match meta.runtime.last_blocker with
-  | Some info -> blocker_class_continue_gate info.klass
-  | None -> false
-;;
 
 let committed_tools_of_ambiguous_blocker (blocker : string) =
   let trimmed = String.trim blocker in
@@ -1018,14 +979,6 @@ let cleanup_dead_tombstone (ctx : _ context) (entry : Keeper_registry.registry_e
     new variant in keeper_registry forces a same-PR converter update via
     the source module's exhaustive-match check, instead of breaking main
     here on first build (the recurring P0 pattern from #10490 + #10574). *)
-let cohort_key_of_reason = Keeper_registry.failure_reason_cohort_key
-
-let stale_turn_timeout_cohort_key =
-  cohort_key_of_reason
-    (Some
-       (Keeper_registry.Stale_turn_timeout
-          (Keeper_registry.Idle_turn { stall_seconds = 0.0 })))
-;;
 
 (* #10887: persistent self-preservation lock.  Fleet log shows 125
    identical [ratio=1.00, cohort=stale_turn_timeout] events / 2 days
@@ -1076,12 +1029,6 @@ let reset_self_preservation_escape_state_for_test () =
   sp_escape_state.consecutive_suppressions <- 0
 ;;
 
-let active_supervision_keeper_count entries =
-  List_util.count_if
-    (fun (e : Keeper_registry.registry_entry) ->
-       e.phase = Keeper_state_machine.Running || e.phase = Keeper_state_machine.Crashed)
-    entries
-;;
 
 (** Self-preservation gate. Suppresses restarts when a dominant failure
     cohort exceeds ratio threshold AND minimum candidate count.

@@ -48,3 +48,26 @@ val persona_drift_log_level_for_missing_profile :
 (** Classify a missing persona profile.  Keeper TOML with enough inline
     identity remains operational and is WARN; keepers without TOML/persona
     identity are ERROR. *)
+
+val should_cleanup_dead :
+  now:float -> dead_ttl_sec:float -> Keeper_registry.registry_entry -> bool
+(** True when a Dead tombstone has exceeded the configured TTL. *)
+
+val is_stale_paused_meta :
+  now:float -> paused_ttl_sec:float -> keeper_meta -> bool
+(** Check if a paused keeper meta file on disk is stale enough to remove. *)
+
+val paused_meta_requires_reconcile_recovery : keeper_meta -> bool
+(** Internal: predicate identifying paused metas whose last_blocker class
+    requires reconcile-recovery rather than straight resume. *)
+
+val cohort_key_of_reason : Keeper_registry.failure_reason option -> string
+(** Map a structured failure_reason to a cohort key for self-preservation grouping. *)
+
+val stale_turn_timeout_cohort_key : string
+(** Internal: pre-computed cohort key for [Stale_turn_timeout] used by the
+    self-preservation probe escape valve. *)
+
+val active_supervision_keeper_count :
+  Keeper_registry.registry_entry list -> int
+(** Count currently active keepers for self-preservation denominators. *)

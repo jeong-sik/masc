@@ -484,6 +484,13 @@ function ExplorerContextChip(focus: IdeContextFocus) {
     >
       <span>${focus.surface}</span>
       ${line ? html`<span>${line}</span>` : null}
+      ${routeLinks.length > 0 ? html`
+        <span
+          class="ide-explorer-context-count"
+          aria-hidden="true"
+          title=${`${routeLinks.length} context route${routeLinks.length === 1 ? '' : 's'}`}
+        >CTX ${routeLinks.length}</span>
+      ` : null}
       ${visibleLinks.map(link => html`
         <button
           key=${link.id}

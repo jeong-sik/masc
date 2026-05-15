@@ -758,6 +758,16 @@
   white-space: nowrap;
 }
 
+.ide-explorer-context-count {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  border: 1px solid color-mix(in srgb, var(--color-accent-fg) 38%, var(--color-border-default));
+  border-radius: var(--r-0);
+  color: var(--color-accent-fg);
+  background: color-mix(in srgb, var(--color-bg-elevated) 88%, var(--color-accent-fg));
+  font-weight: var(--fw-semi);
+}
+
 .ide-plane-editor {
   grid-column: 2;
   grid-row: 1 / span 2;

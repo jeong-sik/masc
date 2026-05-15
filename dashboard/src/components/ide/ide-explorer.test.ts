@@ -188,6 +188,9 @@ describe('IdeExplorer tree row keyboard accessibility', () => {
 
     expect(chip?.textContent).toContain('Task')
     expect(chip?.textContent).toContain('L42')
+    expect(chip?.textContent).toContain('CTX 2')
+    expect(chip?.querySelector('.ide-explorer-context-count')?.getAttribute('title'))
+      .toBe('2 context routes')
     const routeButtons = [...focusedRow!.querySelectorAll<HTMLButtonElement>('.ide-explorer-context-chip button')]
     expect(routeButtons.map(button => button.textContent)).toEqual(['Task', 'Telemetry'])
     expect(routeButtons.map(button => button.getAttribute('aria-label'))).toEqual([

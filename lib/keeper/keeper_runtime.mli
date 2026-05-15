@@ -41,9 +41,19 @@ type boot_meta_resolution = {
 }
 (** Result of [load_or_materialize_boot_meta]. *)
 
+type autoboot_exclusion = {
+  keeper_name : string;
+  reason : string;
+}
+(** Why a configured keeper is intentionally absent from
+    {!bootable_keeper_names}. *)
+
 val bootable_keeper_names : Coord.config -> string list
 (** Names of every keeper whose [keepers/<name>/keeper.toml] exists and
     looks bootable on disk. *)
+
+val autoboot_excluded_keeper_reasons : Coord.config -> autoboot_exclusion list
+(** Configured keepers skipped by autoboot with operator-facing reason labels. *)
 
 val canonicalize_if_keeper : Coord.config -> string -> string
 (** [canonicalize_if_keeper config name] returns [keeper-<n>-agent]

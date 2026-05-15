@@ -145,6 +145,7 @@ let write_corrupt_keeper_meta_exn config ~name =
 let write_keeper_meta_exn ?(autoboot_enabled = true)
     ?(social_model = "bdi_speech_v1")
     ?(last_social_transition_reason = "")
+    ?(paused = false)
     ?active_goal_ids config ~name ~trace_id =
   let active_goal_ids =
     match active_goal_ids with
@@ -161,6 +162,7 @@ let write_keeper_meta_exn ?(autoboot_enabled = true)
         ("social_model", `String social_model);
         ("last_social_transition_reason", `String last_social_transition_reason);
         ("autoboot_enabled", `Bool autoboot_enabled);
+        ("paused", `Bool paused);
         ( "active_goal_ids",
           `List (List.map (fun goal_id -> `String goal_id) active_goal_ids) );
       ]
@@ -358,6 +360,52 @@ let test_bootable_keeper_names_skip_autoboot_disabled_meta () =
       let names = Keeper_runtime.bootable_keeper_names config in
       check bool "autoboot disabled sangsu excluded from bootable list" false
         (List.mem "sangsu" names))
+
+let test_autoboot_exclusion_reasons_explain_skipped_keepers () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  with_clean_base_path_env @@ fun () ->
+  Eio.Switch.run @@ fun _sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Config_dir_resolver.reset ();
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      write_keeper_toml_exn config ~name:"active";
+      write_keeper_toml_exn config ~name:"disabled";
+      write_keeper_toml_exn config ~name:"paused";
+      let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+      write_minimal_cascade_toml config_root;
+      Unix.putenv "MASC_CONFIG_DIR" config_root;
+      Config_dir_resolver.reset ();
+      write_keeper_meta_exn
+        config
+        ~name:"active"
+        ~trace_id:"trace-active";
+      write_keeper_meta_exn
+        ~autoboot_enabled:false
+        config
+        ~name:"disabled"
+        ~trace_id:"trace-disabled";
+      write_keeper_meta_exn
+        ~paused:true
+        config
+        ~name:"paused"
+        ~trace_id:"trace-paused";
+      let exclusions =
+        Keeper_runtime.autoboot_excluded_keeper_reasons config
+        |> List.map (fun Keeper_runtime.{ keeper_name; reason } ->
+          keeper_name, reason)
+      in
+      check (list (pair string string))
+        "autoboot exclusion reasons"
+        [ "disabled", "autoboot_disabled"; "paused", "paused" ]
+        exclusions)
 
 let test_declarative_autoboot_disabled_skips_boot_without_meta () =
   Eio_main.run @@ fun env ->
@@ -1069,6 +1117,8 @@ let () =
             test_keeper_listing_ignores_sidecar_json_files;
           test_case "bootable list skips autoboot-disabled meta" `Quick
             test_bootable_keeper_names_skip_autoboot_disabled_meta;
+          test_case "autoboot exclusion reasons explain skipped keepers" `Quick
+            test_autoboot_exclusion_reasons_explain_skipped_keepers;
           test_case "declarative autoboot-disabled keeper skips boot without meta"
             `Quick test_declarative_autoboot_disabled_skips_boot_without_meta;
           test_case "autoboot policy resyncs from declarative TOML" `Quick

@@ -28,7 +28,8 @@ fi
 echo ""
 echo "=== Scan: OCaml lifecycle variants ==="
 lifecycle_variants=$(
-  rg '^\s*\|\s+([A-Z][a-zA-Z_0-9]*)' lib/keeper/keeper_types.ml \
+  rg '^\s*\|\s+([A-Z][a-zA-Z_0-9]*)' \
+    lib/keeper/keeper_types.ml lib/keeper/keeper_registry_types.ml \
     --type ml -o -r '$1' 2>/dev/null | sort -u || true
 )
 echo "  Found $(echo "$lifecycle_variants" | grep -c . || true) constructors"

@@ -74,3 +74,6 @@ val filesystem_tools : Masc_domain.tool_schema list
 
 val shell_tools : Masc_domain.tool_schema list
 (** Pure: keeper_shell tool schemas. *)
+
+val coding_keeper_bridge_tools : Masc_domain.tool_schema list
+(** Pure: keeper_bash bridge tool schemas. *)

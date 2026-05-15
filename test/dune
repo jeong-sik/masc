@@ -1507,3 +1507,14 @@
  (name test_telemetry_completeness)
  (modules test_telemetry_completeness)
  (libraries masc_test_deps))
+
+; RFC-0084 host-config-cleanup-E — Fleet worker sandbox root migration.
+; Pins literal `Filename.concat home "me"` count at 0 in
+; lib/worker_dev_tools.ml and asserts Host_config.legacy_macos_default
+; is invoked there. Cross-checks sandbox_workspace_root contract from
+; PR-12. Requires masc_test_deps because it accesses
+; Masc_mcp.Host_config.legacy_macos_default.
+(test
+ (name test_pr_e_sandbox_root_migration)
+ (modules test_pr_e_sandbox_root_migration)
+ (libraries masc_test_deps))

@@ -1,6 +1,6 @@
 open Alcotest
 
-module Eval_feed = Masc_mcp.Dashboard_eval_feed
+module Eval_feed = Dashboard_eval_feed
 
 let test_counter = ref 0
 

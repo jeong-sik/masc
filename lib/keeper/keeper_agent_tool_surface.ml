@@ -388,6 +388,17 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
        turn tool-required and let MASC validate the canonical observed
        tool names after execution. *)
     Agent_sdk.Types.Any
+  else if has_turn_affordance Board_post_or_comment turn_affordances
+          && List.exists
+               progress_tool_available
+               [ "keeper_board_comment"; "keeper_board_post"; "masc_broadcast" ]
+  then Agent_sdk.Types.Any
+  else if has_turn_affordance Reply_in_room turn_affordances
+          && List.exists
+               progress_tool_available
+               [ "keeper_board_comment"; "keeper_board_post"; "masc_keeper_msg";
+                 "masc_broadcast" ]
+  then Agent_sdk.Types.Any
   else if has_turn_affordance Task_audit turn_affordances
           && progress_tool_available "keeper_tasks_audit"
   then Agent_sdk.Types.Tool "keeper_tasks_audit"

@@ -901,7 +901,7 @@ let prepare_agent_setup
     in
     let visible_affordance_tool_names =
       preferred_tool_names_for_turn_affordances turn_affordances
-      |> validate_allow_list ~turn
+      |> filter_visible_policy_surface
       |> Keeper_types.dedupe_keep_order
     in
     let merged =

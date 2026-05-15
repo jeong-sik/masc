@@ -10765,6 +10765,42 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
        (Printf.sprintf
           "expected Any when board cleanup can satisfy curation lane, got %s"
           (Agent_sdk.Types.show_tool_choice other)));
+  (match
+     choose
+       ~turn_affordances:[ "board_post_or_comment" ]
+       ~allowed_tool_names:[ "keeper_board_comment"; "keeper_tasks_list" ]
+       ()
+   with
+   | Agent_sdk.Types.Any -> ()
+   | other ->
+     fail
+       (Printf.sprintf
+          "expected Any for idle board response turn with comment tool, got %s"
+          (Agent_sdk.Types.show_tool_choice other)));
+  (match
+     choose
+       ~turn_affordances:[ "reply_in_room" ]
+       ~allowed_tool_names:[ "masc_keeper_msg"; "keeper_tasks_list" ]
+       ()
+   with
+   | Agent_sdk.Types.Any -> ()
+   | other ->
+     fail
+       (Printf.sprintf
+          "expected Any for idle room reply turn with message tool, got %s"
+          (Agent_sdk.Types.show_tool_choice other)));
+  (match
+     choose
+       ~turn_affordances:[ "board_post_or_comment" ]
+       ~allowed_tool_names:[ "keeper_tasks_list" ]
+       ()
+   with
+   | Agent_sdk.Types.Auto -> ()
+   | other ->
+     fail
+       (Printf.sprintf
+          "expected Auto when board response has no actionable board tool, got %s"
+          (Agent_sdk.Types.show_tool_choice other)));
   (* #10008: when no specific tool is applicable for the current
      affordance, fall back to [Auto] so the model can respond with
      honest refusal text ("no eligible task to claim") instead of

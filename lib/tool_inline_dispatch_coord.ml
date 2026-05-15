@@ -161,10 +161,46 @@ let handle_join ~tool_name ~start_time (ctx : context) : tool_result option =
     let result =
       Coord.join config ~agent_name:resolved_name ~capabilities:caps ()
     in
-    (* GC: reap zombie agents on join. Best-effort. *)
-    (try let _ = Coord.cleanup_zombies config in ()
-     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-       Log.Gc.warn "[sid=%s] join GC failed: %s" sid (Stdlib.Printexc.to_string exn));
+    (* GC: reap zombie agents on join. Best-effort.
+       Typed outcome mirrors sibling [Orchestrator] zombie consumer
+       (PR #15510): each Coord.cleanup_zombie_result constructor and
+       exception class is mapped to a distinct severity, so a future
+       variant addition fails compile rather than slipping through a
+       silent catch-all.  [Eio.Cancel.Cancelled] re-raised unchanged. *)
+    let module Join_gc_outcome = struct
+      type t =
+        | Reaped of { count : int; names : string list }
+        | No_op
+        | Misconfigured
+        | Failed of { benign : bool; reason : string }
+    end in
+    let join_gc_outcome : Join_gc_outcome.t =
+      try
+        match Coord.cleanup_zombies config with
+        | Coord.Cleaned { count = 0; _ } -> Join_gc_outcome.No_op
+        | Coord.Cleaned { count; names; _ } ->
+            Join_gc_outcome.Reaped { count; names }
+        | Coord.No_zombies -> Join_gc_outcome.No_op
+        | Coord.No_agents_dir -> Join_gc_outcome.Misconfigured
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+          Join_gc_outcome.Failed
+            { benign = Coord_resilience.ZeroZombie.is_benign_error exn
+            ; reason = Stdlib.Printexc.to_string exn
+            }
+    in
+    (match join_gc_outcome with
+     | Join_gc_outcome.Reaped { count; names } ->
+         Log.Gc.info "[sid=%s] join GC reaped %d zombie(s): %s"
+           sid count (String.concat ", " names)
+     | Join_gc_outcome.No_op -> ()
+     | Join_gc_outcome.Misconfigured ->
+         Log.Gc.warn "[sid=%s] join GC: agents dir missing (misconfig)" sid
+     | Join_gc_outcome.Failed { benign = true; reason } ->
+         Log.Gc.debug "[sid=%s] join GC benign failure: %s" sid reason
+     | Join_gc_outcome.Failed { benign = false; reason } ->
+         Log.Gc.error "[sid=%s] join GC failed: %s" sid reason);
     (* Extract nickname from join result (format: "  Nickname: xxx\n...") *)
     let nickname =
       try

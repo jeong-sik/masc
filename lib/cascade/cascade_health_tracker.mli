@@ -36,7 +36,7 @@ val hard_quota_cooldown_sec : float
 
 val terminal_failure_cooldown_sec : float
 (** Cooldown duration applied immediately on a terminal structural
-    provider/adapter failure, such as a Kimi CLI resumable-session conflict.
+    provider/adapter failure, such as a provider CLI resumable-session conflict.
     Unlike {!cooldown_sec}, no threshold is required.  Default 3600.0 (1h).
 
     Env: [MASC_CASCADE_TERMINAL_FAILURE_COOLDOWN_SEC] (with deprecated

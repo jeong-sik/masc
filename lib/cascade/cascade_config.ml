@@ -11,7 +11,6 @@
 
 (* Model resolution *)
 let resolve_auto_model = Cascade_model_resolve.resolve_auto_model
-let resolve_glm_model_id = Cascade_model_resolve.resolve_glm_model_id
 let resolve_auto_model_id = Cascade_model_resolve.resolve_auto_model_id
 let parse_custom_model = Cascade_model_resolve.parse_custom_model
 
@@ -246,9 +245,7 @@ let nonempty_env name =
     if trimmed = "" then None else Some trimmed
   | None -> None
 
-let kimi_provider_name = "kimi"
-
-(* #9953: Resolve Kimi max_context from OAS runtime binding truth.
+(* #9953: Resolve provider/model max_context from OAS runtime binding truth.
 
    Resolution order:
    1. Per-model capabilities override ({!Capabilities.for_model_id}
@@ -257,7 +254,7 @@ let kimi_provider_name = "kimi"
    2. Provider-level capability exposed by [Provider_runtime_binding].
    3. Registry entry default (safety net for exotic configs).
 *)
-let resolve_kimi_max_context resolved_model_id =
+let resolve_provider_model_max_context ~provider_name resolved_model_id =
   let open Llm_provider in
   let from_model =
     Option.bind
@@ -269,14 +266,14 @@ let resolve_kimi_max_context resolved_model_id =
   | None ->
     (match
        Option.bind
-         (Agent_sdk.Provider_runtime_binding.find kimi_provider_name)
+         (Agent_sdk.Provider_runtime_binding.find provider_name)
          (fun binding ->
             binding.Agent_sdk.Provider_runtime_binding.capabilities.max_context_tokens)
      with
      | Some n -> n
      | None ->
        (match Provider_registry.find (Provider_registry.default ())
-                kimi_provider_name with
+                provider_name with
         | Some entry -> entry.Provider_registry.max_context
         | None -> 0))
 
@@ -482,11 +479,10 @@ let parse_weighted_entry_with_drop_metric
     None
 
 (** Expand provider:auto specs that map to multiple models.
-    "glm:auto" expands to ["glm:glm-5.1"; "glm:glm-5-turbo"; ...].
-    CLI-backed transports expand too, so a single [gemini_cli:auto] can
-    cascade through concrete CLI model overrides instead of delegating to
-    the CLI's interactive/default model picker. Other specs pass through
-    as-is. *)
+    Direct API providers project their candidate list from OAS runtime
+    bindings. CLI-backed transports can use operator-provided override
+    lists instead of delegating to an interactive/default model picker.
+    Other specs pass through as-is. *)
 let rotate_list_by offset items =
   if offset <= 0 then items
   else

@@ -557,13 +557,10 @@ let test_client_capacity_clamp_max () =
   | Some info ->
     check int "max_concurrent <=0 clamped to 1" 1 info.total
 
-(* The previous [test_ollama_auto_register] /
-   [test_ollama_register_with_override] tests exercised the substring-scan
-   auto-registration path inside [Cascade_client_capacity]. That path is
-   gone now — the caller consults provider-kind HTTP-probe capability and
-   calls [Cascade_client_capacity.register] explicitly, so the test surface
-   for the removed [auto_register_for_candidates] /
-   [auto_register_ollama_with_override] functions is gone with them. *)
+(* The previous HTTP auto-registration tests exercised the substring-scan path
+   inside [Cascade_client_capacity]. That path is gone now: callers consult the
+   registered probe surface and call [Cascade_client_capacity.register]
+   explicitly, so the removed auto-register functions have no test surface. *)
 
 (* ── Phase C3: CLI sentinel auto-registration ──────────────── *)
 
@@ -628,8 +625,8 @@ let test_snapshot_returns_all_entries () =
   check int "snapshot contains both entries" 2 (List.length entries);
   let lookup k = List.assoc_opt k entries in
   (match lookup "http://127.0.0.1:11434" with
-   | Some info -> check int "ollama total" 1 info.total
-   | None -> fail "ollama entry missing");
+   | Some info -> check int "http probe total" 1 info.total
+   | None -> fail "http probe entry missing");
   (match lookup "cli:claude_code" with
    | Some info ->
      check int "cli total" 2 info.total;
@@ -879,9 +876,9 @@ let test_history_snapshot_kind_filter () =
        check string "cli filter matches classify_key"
          "cli" (CH.classify_key e.CH.key))
     cli_events;
-  (* ollama filter → 1 event for :11434 *)
-  let ollama_events = CH.snapshot ~kind:"ollama" () in
-  check int "ollama filter → 1 event" 1 (List.length ollama_events);
+  (* http_probe filter -> 1 event for the registered probe URL. *)
+  let http_probe_events = CH.snapshot ~kind:"http_probe" () in
+  check int "http_probe filter -> 1 event" 1 (List.length http_probe_events);
   (* other filter → 1 event for http://other *)
   let other_events = CH.snapshot ~kind:"other" () in
   check int "other filter → 1 event" 1 (List.length other_events);
@@ -977,14 +974,14 @@ let test_history_prometheus_counter_increments () =
     counter_value_from_text text "acquired" "cli"
     |> Option.value ~default:0.0
   in
-  let ollama_rejected =
-    counter_value_from_text text "rejected_full" "ollama"
+  let http_probe_rejected =
+    counter_value_from_text text "rejected_full" "http_probe"
     |> Option.value ~default:0.0
   in
   check bool "cli/acquired counter advanced by >= 2"
     true (cli_acquired >= before +. 2.0);
-  check bool "ollama/rejected_full counter advanced by >= 1"
-    true (ollama_rejected >= 1.0)
+  check bool "http_probe/rejected_full counter advanced by >= 1"
+    true (http_probe_rejected >= 1.0)
 
 (* ── Strategy decision trace (LT-5) ─────────────────── *)
 

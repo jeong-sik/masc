@@ -1,9 +1,9 @@
-(* #10049: auto-construct Claude Code / Kimi CLI MCP config JSON for
-   keepers whose cascade includes those CLI providers but whose env
+(* #10049: auto-construct CLI MCP config JSON for keepers whose cascade
+   includes CLI providers but whose env
    (OAS_CLAUDE_MCP_CONFIG) is unset.
 
-   Without this fallback, Claude Code / Kimi CLI launches with no
-   [mcpServers] entry and the keeper cannot reach the masc-mcp HTTP
+   Without this fallback, affected CLI providers launch with no [mcpServers]
+   entry and the keeper cannot reach the masc-mcp HTTP
    endpoint; tool calls surface as "keeper_shell not in session's tool
    registry". See #10049 for the full root-cause analysis and the
    codex_cli sibling path in [server_runtime_bootstrap.sync_codex_mcp_config].

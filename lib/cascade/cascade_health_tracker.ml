@@ -182,7 +182,7 @@ let hard_quota_cooldown_sec =
 (** Cooldown duration for provider calls classified as terminal structural
     failures, where retrying the same provider on the next cascade tick is
     expected to reproduce the same failure until operator/runtime state changes.
-    Examples: Kimi CLI reporting a resumable session conflict instead of
+    Example: a provider CLI reporting a resumable session conflict instead of
     accepting a fresh non-interactive invocation.
 
     This is separate from hard-quota so dashboards and future policy can
@@ -294,10 +294,10 @@ let cost_ring_size =
    [cooldown_threshold] does not apply because retry on the next cascade
    tick is pointless when the upstream account is out of credit. *)
 (* [Terminal_failure] represents structural provider/adapter failures that are
-   deterministic for the current runtime state.  A Kimi CLI resumable-session
-   conflict is the motivating case: fallback is correct for the current call,
-   but repeatedly attempting Kimi first on every later call only adds latency
-   and silently degrades cascade diversity. *)
+   deterministic for the current runtime state.  A provider CLI
+   resumable-session conflict is the motivating case: fallback is correct for
+   the current call, but repeatedly attempting the same provider first on every
+   later call only adds latency and silently degrades cascade diversity. *)
 (* [Soft_rate_limited] represents a transient HTTP 429 — provider is healthy
    but momentarily over its rate budget.  Distinct from [Failure] so a single
    event triggers an immediate (short) cooldown without waiting for the

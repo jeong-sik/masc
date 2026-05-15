@@ -10919,6 +10919,19 @@ let test_direct_keeper_msg_timeout_overrides_meta_per_provider_timeout () =
     (KAR.per_provider_timeout_for_turn ~meta ~timeout_s:900.0 ())
 ;;
 
+let test_try_provider_max_execution_time_uses_attempt_timeout () =
+  check bool
+    "try-provider helper resolves OAS max execution time from attempt timeout"
+    true
+    (source_file_contains "lib/keeper/keeper_turn_driver_try_provider.ml"
+       "let max_execution_time_for_attempt ?per_provider_timeout_s ()");
+  check bool
+    "run_try_provider passes attempt timeout to OAS max_execution_time_s"
+    true
+    (source_file_contains "lib/keeper/keeper_turn_driver_try_provider.ml"
+       "max_execution_time_for_attempt ?per_provider_timeout_s ()")
+;;
+
 (* ---------- render_inline_skip_reason tests ---------- *)
 
 let str_contains s sub =
@@ -12436,6 +12449,10 @@ let () =
             "direct keeper msg timeout overrides stale per-provider timeout"
             `Quick
             test_direct_keeper_msg_timeout_overrides_meta_per_provider_timeout
+        ; test_case
+            "provider attempt timeout drives OAS max execution time"
+            `Quick
+            test_try_provider_max_execution_time_uses_attempt_timeout
         ; test_case
             "affordance gate filters by allowed_tool_names"
             `Quick

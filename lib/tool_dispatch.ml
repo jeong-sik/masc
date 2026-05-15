@@ -170,67 +170,39 @@ let run_typed_post_hooks
     (result : Tool_result.t option) : unit =
   List.iter (fun hook -> hook outcome result) !typed_post_hooks
 
-(** O(1) dispatch.  Returns [Some result] when a handler is found,
-    [None] when the tool name is unknown to the registry.
-    Handler exceptions are caught and returned as error results so the
-    caller gets a consistent result shape.
+(** RFC-0084 §2.2 + RFC-0085 PR-14 — Single dispatch entry.
 
-    Post-hooks fire as a side-effect after the handler completes,
-    enabling tool metrics and usage logging for all dispatch paths
-    (keeper, MCP, tag-dispatch). *)
-let dispatch ~(token : Tool_token.t) ~args : Tool_result.t option =
-  let name = token.name in
-  match Hashtbl.find_opt registry name with
-  | Some handler ->
-    let start_time = Time_compat.now () in
-    let result =
-      try handler ~name ~args
-      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-        Some (Tool_result.of_exn ~tool_name:name ~start_time exn)
-    in
-    (* RFC-0085 PR-5 — result transformer + typed post-hooks were
-       fired *inside* this function in RFC-0084.  PR-5 moves both
-       side-effects to [Tool_dispatch_emit.finalize] so MCP
-       [dispatch_by_tag], [dispatch_internal_keeper_runtime_tool], and
-       inline coord (which bypass this private [dispatch]) share the
-       same observer fanout.  Callers of [dispatch] / [guarded_dispatch]
-       must run [Tool_dispatch_emit.finalize] on the return value. *)
-    result
-  | None -> None
+    Inlines what used to be a three-step file-private chain
+    ([dispatch] -> [dispatch_structured] -> [guarded_dispatch]) into
+    one function so the lifecycle reads top-to-bottom:
 
-(** Structured dispatch with hook support.
+      1. [Tool_telemetry.with_span]   (4-tuple emission wrapper)
+      2. pre-hook chain                (reject / coerce-args)
+      3. registry lookup + handler     (handler exception capture)
+      4. result transformer            ([apply_result_transformer])
+      5. typed post-hook fan-out       ([run_typed_post_hooks])
 
-    Execution order: pre-hooks → handler (with post-hooks) → result.
-
-    Pre-hooks may short-circuit with a rejection result or coerce args.
-    Post-hooks are fired inside [dispatch].
-
-    Returns [None] when the tool is unknown to the registry. *)
-let dispatch_structured ~(token : Tool_token.t) ~args : Tool_result.t option =
-  let name = token.name in
-  match run_pre_hooks ~name ~args with
-  | (Some _ as blocked, _) -> blocked
-  | (None, coerced_args) ->
-    dispatch ~token ~args:coerced_args
-
-(** RFC-0084 §2.2 — Single dispatch entry with 4-tuple telemetry and
-    pre-hook chain coverage. Wraps [dispatch_structured] (pre-hook +
-    handler + post-hook) with [Tool_telemetry.with_span] so every
-    invocation emits the 4-tuple regardless of which arm runs.
-
-    PR-3 introduced the skeleton calling [dispatch] (pre-hook bypass).
-    PR-7 routes through [dispatch_structured] so keeper-originated calls
-    pass through the pre-hook chain ([governance_pipeline:203],
-    [tool_input_validation:217]) — closing the
-    [capability_registry.ml] "Internal dispatch remains unrestricted"
-    gap noted in RFC-0084 §1.1.
-
-    Caller migration this PR: [keeper_exec_masc.ml:164,218]. PR-8 wires
-    the MCP server; PR-9 wires the tag-dispatch fallback. *)
+    PR-11 already removed the three-step chain from the public mli.
+    PR-14 finishes the consolidation by removing the file-private
+    indirection — each step had exactly one caller, so the layering
+    was pure overhead. *)
 let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.t option =
   let result, _outcome =
     Tool_telemetry.with_span ~tool_name:token.name (fun _trace_id_thunk ->
-      let r = dispatch_structured ~token ~args in
+      let name = token.name in
+      let r =
+        match run_pre_hooks ~name ~args with
+        | (Some _ as blocked, _) -> blocked
+        | (None, coerced_args) ->
+          (match Hashtbl.find_opt registry name with
+           | Some handler ->
+             let start_time = Time_compat.now () in
+             (try handler ~name ~args:coerced_args
+              with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn -> Some (Tool_result.of_exn ~tool_name:name ~start_time exn))
+           | None -> None)
+      in
       (* RFC-0085 PR-5 — finalisation is done inline here (we cannot
          depend on [Tool_dispatch_emit] without creating a dependency
          cycle).  The logic is byte-identical to

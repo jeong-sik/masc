@@ -67,22 +67,11 @@ val persona_drift_log_level_for_missing_profile :
     identity remains operational and is WARN; keepers without TOML/persona
     identity are ERROR. *)
 
-val supervision_cohort_size : int
-(** Target keeper count per supervisor cohort.  The first 2-level
-    supervision slice groups the 64-keeper fleet as 8 cohorts of 8. *)
-
-type supervision_cohort = {
-  cohort_id : int;
-  keepers : Keeper_registry.registry_entry list;
-}
-(** Deterministic keeper cohort used by the supervisor sweep. *)
-
-val supervision_cohorts :
-  ?cohort_size:int ->
-  Keeper_registry.registry_entry list ->
-  supervision_cohort list
-(** Sort and chunk registry entries into deterministic supervisor cohorts.
-    [cohort_size <= 0] is coerced to 1. *)
+(** supervision_cohort type + foundational helpers live in
+    Keeper_supervisor_types (intra-library file split, 2026-05-16).
+    Re-exported here so existing callers keep using
+    [Keeper_supervisor.supervision_cohort] etc. unchanged. *)
+include module type of Keeper_supervisor_types
 
 val fresh_supervision_cohort_keepers :
   base_path:string ->

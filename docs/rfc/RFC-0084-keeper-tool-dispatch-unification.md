@@ -1,14 +1,40 @@
 ---
 rfc: "0084"
 title: "Keeper→Tool Dispatch Unification + 100% Trace/Telemetry"
-status: Draft
+status: Implementation Complete (sprint closeout PR-14)
 created: 2026-05-15
 updated: 2026-05-15
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0064", "0070", "0072", "0080", "0081"]
-implementation_prs: []
+implementation_prs:
+  - "#15399"  # PR-1 RFC body + 3 pinned-fail tests
+  - "#15400"  # PR-2 Tool_name.t exhaustive (4 Masc_keeper variants)
+  - "#15403"  # PR-3 guarded_dispatch skeleton + Tool_telemetry SSOT
+  - "#15404"  # PR-4 Tool_capability typed sum + Set
+  - "#15406"  # PR-5 Surface 8-variant coverage (7 admit + 1 must-deny)
+  - "#15407"  # PR-6 boot↔runtime routing SSOT (delegation + parity)
+  - "#15410"  # PR-7 keeper turn → guarded_dispatch (HIGH RISK)
+  - "#15411"  # PR-8 MCP server telemetry wrap (parity with PR-7)
+  - "#15412"  # PR-9 tag-dispatch fallback wrap (3/3 100% propagation)
+  - "#15415"  # PR-10 typed Dispatch_outcome.t 5-arm sum
+  - "#15416"  # PR-11 legacy dispatch mli surface removal
+  - "#15417"  # PR-12 Host_config typed portability infrastructure
+  - "#15419"  # PR-13 Keeper_disclosure_strategy typed sum
+  # PR-14 (this closeout PR) will be appended on merge.
+follow_up_prs:
+  # Deferred items per delegation-not-absorption pattern (PR body §"Plan adjustment"):
+  - "host-config-cleanup-A: credential (host_config_provider.ml:3, 4 refs)"
+  - "host-config-cleanup-B: shell (/bin/bash + /bin/zsh, 7 sites)"
+  - "host-config-cleanup-C: coreutils (/bin/ls /usr/bin/head etc., 6 sites)"
+  - "host-config-cleanup-D: agent-runtime (/tmp/.masc_agent_* 7 sites)"
+  - "host-config-cleanup-E: sandbox-root (worker_dev_tools.ml:85)"
+  - "host-config-cleanup-F: test-mode (5 String.starts_with sites)"
+  - "disclosure-activation-G: worker_oas.ml Builder.with_disclosure_level wiring"
+  - "disclosure-activation-H: keeper_meta.ml TOML [disclosure] round-trip"
+  - "post-hook-typed-I: 5 post-hook site signature migration (PR-10 deferred)"
+  - "legacy-flag-cleanup-J: MASC_DISPATCH_V2 env flag removal (PR-11 deferred)"
 ---
 
 # RFC-0084 — Keeper→Tool Dispatch Unification + 100% Trace/Telemetry

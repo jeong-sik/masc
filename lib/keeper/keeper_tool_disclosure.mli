@@ -152,21 +152,23 @@ val is_claim_tool_name : string -> bool
 val is_claim_context_tool_name : string -> bool
 val is_completion_tool_name : string -> bool
 
-(** [true] iff the tool name represents a non-read-only effect
-    (Masc_coordination / Playground_write / Main_worktree_write). *)
+(** [true] iff the tool name represents productive execution progress for a
+    required-action gate. Completion tools are exempted even when read-only;
+    passive keeper observation tools remain [false] here so liveness metrics
+    and surface trimming keep treating them as passive. *)
 val tool_name_can_satisfy_required_contract : string -> bool
 
-(** Validate that an observed tool call actually mutates state —
-    used by the run contract to reject read-only calls under
-    [Require_tool_use]. *)
+(** Validate an observed generic [Require_tool_use] call. This accepts mutating
+    tools, completion tools, and keeper-local observation/discovery tools. The
+    latter still classify as [Passive_status]; accepting them here prevents a
+    valid read/status turn from turning into provider cascade churn. *)
 val required_tool_satisfaction
   :  Agent_sdk.Completion_contract.tool_call
   -> (unit, string) result
 
 (** Variant of [required_tool_satisfaction] for an explicit
-    [required_tools] contract. A read-only tool can satisfy the turn only when
-    the operator/task contract named that exact tool; generic required-tool
-    gates remain mutating-only. *)
+    [required_tools] contract. A non-keeper read-only tool can satisfy the turn
+    only when the operator/task contract named that exact tool. *)
 val required_tool_satisfaction_for_required_names
   :  required_tool_names:string list
   -> Agent_sdk.Completion_contract.tool_call

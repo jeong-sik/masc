@@ -425,13 +425,44 @@ let tool_name_can_satisfy_required_contract name =
     | None -> not (Tool_dispatch.is_read_only name))
 ;;
 
+let is_keeper_observation_tool_name name =
+  let name = canonical_tool_name name in
+  match Tool_name.of_string name with
+  | Some
+      (Keeper
+        ( Board_curation_read
+        | Board_get
+        | Board_list
+        | Board_search
+        | Board_stats
+        | Board_sub_board_get
+        | Board_sub_board_list
+        | Code_read
+        | Context_status
+        | Fs_read
+        | Library_read
+        | Library_search
+        | Memory_search
+        | Pr_list
+        | Pr_review_read
+        | Pr_status
+        | Tasks_audit
+        | Tasks_list
+        | Time_now
+        | Tool_search
+        | Tools_list )) -> Keeper_exec_tools.is_keeper_read_only_tool name
+  | _ -> false
+;;
+
 let required_tool_satisfaction (call : Agent_sdk.Completion_contract.tool_call)
   : (unit, string) result
   =
   let tool_name = canonical_tool_name call.name in
-  (* Completion tools intentionally satisfy the contract.  See
-     tool_name_can_satisfy_required_contract for the same exemption. *)
-  if is_completion_tool_name tool_name
+  (* Generic Require_tool_use is a tool-presence contract, not proof of
+     execution progress. Keeper-local read/status/discovery tools satisfy the
+     SDK contract so a valid observation turn does not explode into cascade
+     retries; classify_tool_progress still records them as Passive_status. *)
+  if is_completion_tool_name tool_name || is_keeper_observation_tool_name tool_name
   then Ok ()
   else (
     let mutates =

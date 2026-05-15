@@ -1,0 +1,20 @@
+; RFC-0056 Phase 1J — extract Keeper_invariant leaf module from
+; lib/keeper/. Second lib/keeper/ leaf after Phase 1I keeper_event_queue.
+;
+; 119+77 LoC. Pure stdlib-only module (List, Printf, Set, String,
+; StringSet, Result). Fan-in: 1 lib (keeper_exec_fs) + 1 test +
+; 1 wrapped-pattern test caller.
+;
+; (include_subdirs no) opts out of parent's (include_subdirs unqualified).
+; (wrapped false) keeps the bare identifier `Keeper_invariant`. NB:
+; Track A audit (2026-05-15) flags `(wrapped false)` as Dune-discouraged
+; pattern — RFC-0056 sub-libs all use it for G5 caller-delta minimization;
+; Wave D RFC to migrate all to (wrapped true) + -open Tezos pattern.
+(include_subdirs no)
+
+(library
+ (name masc_mcp_keeper_invariant)
+ (public_name masc_mcp.keeper_invariant)
+ (wrapped false)
+ (flags (:standard -w +4))
+ (libraries))

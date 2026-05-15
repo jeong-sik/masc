@@ -941,6 +941,36 @@ let client_capacity_entry_to_json ((url, info) : string * Cascade_throttle.capac
     ]
 ;;
 
+let cascade_query_json fields = `Assoc fields
+
+let optional_string_field key = function
+  | None -> key, `Null
+  | Some value -> key, `String value
+;;
+
+let optional_float_field key = function
+  | None -> key, `Null
+  | Some value -> key, `Float value
+;;
+
+let retention_json ?durable_store ?ring_capacity ~scope ~producer ~store_kind
+    ~cache_policy () =
+  let optional_fields =
+    List.filter_map
+      (fun x -> x)
+      [ Option.map (fun path -> "durable_store", `String path) durable_store
+      ; Option.map (fun capacity -> "ring_capacity", `Int capacity) ring_capacity
+      ]
+  in
+  `Assoc
+    ([ "scope", `String scope
+     ; "producer", `String producer
+     ; "store_kind", `String store_kind
+     ; "cache_policy", `String cache_policy
+     ]
+     @ optional_fields)
+;;
+
 let client_capacity_json () =
   let entries = Cascade_client_capacity.snapshot () in
   (* Stable ordering by (kind, key) so the dashboard table doesn't
@@ -956,8 +986,18 @@ let client_capacity_json () =
          | n -> n)
       entries
   in
+  let generated_at = now_iso () in
   `Assoc
-    [ "updated_at", `String (now_iso ())
+    [ "updated_at", `String generated_at
+    ; "generated_at_iso", `String generated_at
+    ; "dashboard_surface", `String "/api/v1/cascade/client_capacity"
+    ; "source", `String "cascade_client_capacity_registry"
+    ; ( "retention"
+      , retention_json
+          ~scope:"cascade_client_capacity"
+          ~producer:"Cascade_client_capacity.register"
+          ~store_kind:"process_registry"
+          ~cache_policy:"uncached; reads the live process-local registry" () )
     ; "entries", `List (List.map client_capacity_entry_to_json sorted)
     ]
 ;;
@@ -981,8 +1021,26 @@ let history_event_to_json (ev : Cascade_client_capacity_history.event) : Yojson.
 
 let client_capacity_history_json ?limit ?kind ?since_ts () =
   let events = Cascade_client_capacity_history.snapshot ?limit ?kind ?since_ts () in
+  let generated_at = now_iso () in
   `Assoc
-    [ "updated_at", `String (now_iso ())
+    [ "updated_at", `String generated_at
+    ; "generated_at_iso", `String generated_at
+    ; "dashboard_surface", `String "/api/v1/cascade/client_capacity/history"
+    ; "source", `String "cascade_client_capacity_history_ring"
+    ; ( "retention"
+      , retention_json
+          ~scope:"cascade_client_capacity_history"
+          ~producer:"Cascade_client_capacity_history.record"
+          ~store_kind:"process_ring_buffer"
+          ~ring_capacity:(Cascade_client_capacity_history.capacity ())
+          ~cache_policy:"uncached; reads the newest entries from the process ring buffer"
+          () )
+    ; ( "query"
+      , cascade_query_json
+          [ "limit", (match limit with None -> `Null | Some n -> `Int n)
+          ; optional_string_field "kind" kind
+          ; optional_float_field "since_ts" since_ts
+          ] )
     ; "total_events", `Int (List.length events)
     ; "events", `List (List.map history_event_to_json events)
     ]
@@ -1015,8 +1073,25 @@ let strategy_trace_event_to_json (ev : Cascade_strategy_trace.event) : Yojson.Sa
 
 let strategy_trace_json ?limit ?cascade () =
   let events = Cascade_strategy_trace.snapshot ?limit ?cascade () in
+  let generated_at = now_iso () in
   `Assoc
-    [ "updated_at", `String (now_iso ())
+    [ "updated_at", `String generated_at
+    ; "generated_at_iso", `String generated_at
+    ; "dashboard_surface", `String "/api/v1/cascade/strategy_trace"
+    ; "source", `String "cascade_strategy_trace_ring"
+    ; ( "retention"
+      , retention_json
+          ~scope:"cascade_strategy_trace"
+          ~producer:"Cascade_strategy_trace.record"
+          ~store_kind:"process_ring_buffer"
+          ~ring_capacity:(Cascade_strategy_trace.capacity ())
+          ~cache_policy:"uncached; reads the newest entries from the process ring buffer"
+          () )
+    ; ( "query"
+      , cascade_query_json
+          [ "limit", (match limit with None -> `Null | Some n -> `Int n)
+          ; optional_string_field "cascade" cascade
+          ] )
     ; "total_events", `Int (List.length events)
     ; "events", `List (List.map strategy_trace_event_to_json events)
     ]
@@ -1208,9 +1283,11 @@ let audit_run_cascade_matches cascade_filter run =
      | None -> false)
 ;;
 
-let audit_runs_json ~base_path ?limit ?cascade () =
+let audit_runs_json ?(dashboard_surface = "/api/v1/cascade/audit_runs") ~base_path ?limit
+    ?cascade () =
   let limit = Option.value ~default:100 limit |> max 1 |> min 1024 in
   let read_limit = if Option.is_some cascade then min 4096 (limit * 4) else limit in
+  let audit_store_dir = audit_store_dir ~base_path in
   let runs =
     Dated_jsonl.read_recent (cascade_audit_store ~base_path) read_limit
     |> List.rev
@@ -1223,8 +1300,25 @@ let audit_runs_json ~base_path ?limit ?cascade () =
     | x :: xs -> x :: take (n - 1) xs
   in
   let runs = take limit runs in
+  let generated_at = now_iso () in
   `Assoc
-    [ "updated_at", `String (now_iso ())
+    [ "updated_at", `String generated_at
+    ; "generated_at_iso", `String generated_at
+    ; "dashboard_surface", `String dashboard_surface
+    ; "source", `String "cascade_audit_jsonl"
+    ; ( "retention"
+      , retention_json
+          ~scope:"cascade_audit_runs"
+          ~producer:"Cascade_legacy_runner.cascade_observation_to_json"
+          ~store_kind:"dated_jsonl"
+          ~durable_store:audit_store_dir
+          ~cache_policy:"uncached; reads recent persisted JSONL rows newest first"
+          () )
+    ; ( "query"
+      , cascade_query_json
+          [ "limit", `Int limit
+          ; optional_string_field "cascade" cascade
+          ] )
     ; "total_runs", `Int (List.length runs)
     ; "audit_runs", `List runs
     ]

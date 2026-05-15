@@ -17,6 +17,8 @@ module ST = Masc_mcp.Cascade_strategy_trace
 module Kcp = Masc_mcp.Keeper_cascade_profile
 module T = Masc_mcp.Cascade_throttle
 module Cascade_state = Masc_mcp.Cascade_state
+module DC = Masc_mcp.Dashboard_cascade
+module Json = Yojson.Safe.Util
 
 (* ── Test fixture ────────────────────────────────────────────── *)
 
@@ -42,6 +44,42 @@ let mk_capacity_info ~total ~active = {
   process_queue_length = 0;
   source = Llm_provider.Provider_throttle.Fallback;
 }
+
+let json_string key json =
+  match Json.member key json with
+  | `String value -> value
+  | value ->
+    failf "expected JSON string field %s, got %s"
+      key (Yojson.Safe.to_string value)
+;;
+
+let json_int key json =
+  match Json.member key json with
+  | `Int value -> value
+  | value ->
+    failf "expected JSON int field %s, got %s" key (Yojson.Safe.to_string value)
+;;
+
+let json_float key json =
+  match Json.member key json with
+  | `Float value -> value
+  | `Int value -> float_of_int value
+  | value ->
+    failf "expected JSON float field %s, got %s"
+      key (Yojson.Safe.to_string value)
+;;
+
+let json_object key json =
+  match Json.member key json with
+  | `Assoc _ as value -> value
+  | value ->
+    failf "expected JSON object field %s, got %s"
+      key (Yojson.Safe.to_string value)
+;;
+
+let check_nonempty_string_field key json =
+  check bool (key ^ " present") true (String.length (json_string key json) > 0)
+;;
 
 (* Capacity stub: caller supplies a closure mapping URL → capacity_info. *)
 let stub_capacity table url =
@@ -326,6 +364,21 @@ let test_snapshot_reflects_active_acquires () =
       check int "active counted" 1 info.process_active;
       check int "available decremented" 1 info.process_available
 
+let test_client_capacity_json_exposes_provenance () =
+  C.unregister_all ();
+  C.register ~url:"cli:codex_cli" ~max_concurrent:2;
+  let json = DC.client_capacity_json () in
+  check string "dashboard surface"
+    "/api/v1/cascade/client_capacity"
+    (json_string "dashboard_surface" json);
+  check string "source" "cascade_client_capacity_registry"
+    (json_string "source" json);
+  check_nonempty_string_field "generated_at_iso" json;
+  let retention = json_object "retention" json in
+  check string "retention scope" "cascade_client_capacity"
+    (json_string "scope" retention);
+  check string "store kind" "process_registry" (json_string "store_kind" retention)
+
 (* ── Phase B: Priority_tier (S5) ───────────────────────────── *)
 
 let test_priority_tier_picks_first_tier () =
@@ -563,6 +616,28 @@ let test_history_prometheus_counter_increments () =
   check bool "http_probe/rejected_full counter advanced by >= 1"
     true (http_probe_rejected >= 1.0)
 
+let test_history_json_exposes_provenance () =
+  CH.clear ();
+  CH.record { ts = 10.0; key = "cli:codex_cli";
+              kind = Acquired; active_after = 1 };
+  let json = DC.client_capacity_history_json ~limit:1 ~kind:"cli" ~since_ts:1.0 () in
+  check string "dashboard surface"
+    "/api/v1/cascade/client_capacity/history"
+    (json_string "dashboard_surface" json);
+  check string "source" "cascade_client_capacity_history_ring"
+    (json_string "source" json);
+  check_nonempty_string_field "generated_at_iso" json;
+  let retention = json_object "retention" json in
+  check string "retention scope" "cascade_client_capacity_history"
+    (json_string "scope" retention);
+  check string "store kind" "process_ring_buffer"
+    (json_string "store_kind" retention);
+  check int "ring capacity" (CH.capacity ()) (json_int "ring_capacity" retention);
+  let query = json_object "query" json in
+  check int "query limit" 1 (json_int "limit" query);
+  check string "query kind" "cli" (json_string "kind" query);
+  check (float 0.0) "query since_ts" 1.0 (json_float "since_ts" query)
+
 (* ── Strategy decision trace (LT-5) ─────────────────── *)
 
 let mk_trace_event ?(ts = 0.0) ?(cascade_name = "primary")
@@ -707,6 +782,104 @@ let test_trace_prometheus_counter_increments () =
   check bool "nick0cave/priority_tier/filtered_empty >= 1"
     true (filtered >= 1.0)
 
+let test_strategy_trace_json_exposes_provenance () =
+  ST.clear ();
+  ST.record
+    (mk_trace_event ~cascade_name:"primary" ~strategy:"failover"
+       ~kind:ST.Ordered ());
+  let json = DC.strategy_trace_json ~limit:1 ~cascade:"primary" () in
+  check string "dashboard surface" "/api/v1/cascade/strategy_trace"
+    (json_string "dashboard_surface" json);
+  check string "source" "cascade_strategy_trace_ring" (json_string "source" json);
+  check_nonempty_string_field "generated_at_iso" json;
+  let retention = json_object "retention" json in
+  check string "retention scope" "cascade_strategy_trace"
+    (json_string "scope" retention);
+  check string "store kind" "process_ring_buffer"
+    (json_string "store_kind" retention);
+  check int "ring capacity" (ST.capacity ()) (json_int "ring_capacity" retention);
+  let query = json_object "query" json in
+  check int "query limit" 1 (json_int "limit" query);
+  check string "query cascade" "primary" (json_string "cascade" query)
+
+let test_audit_runs_json_exposes_provenance () =
+  let base_path =
+    Filename.concat (Filename.get_temp_dir_name ()) "masc-cascade-provenance-test"
+  in
+  let json =
+    DC.audit_runs_json ~base_path ~limit:2 ~cascade:"keeper_unified" ()
+  in
+  check string "dashboard surface" "/api/v1/cascade/audit_runs"
+    (json_string "dashboard_surface" json);
+  check string "source" "cascade_audit_jsonl" (json_string "source" json);
+  check_nonempty_string_field "generated_at_iso" json;
+  let retention = json_object "retention" json in
+  check string "retention scope" "cascade_audit_runs"
+    (json_string "scope" retention);
+  check string "store kind" "dated_jsonl" (json_string "store_kind" retention);
+  check string "durable store"
+    (Filename.concat (Filename.concat base_path ".masc") "cascade_audit")
+    (json_string "durable_store" retention);
+  let query = json_object "query" json in
+  check int "query limit" 2 (json_int "limit" query);
+  check string "query cascade" "keeper_unified" (json_string "cascade" query)
+
+(* ── server_error_score_for_provider (#12797) ─────────────────── *)
+
+let test_se_score_unknown_provider_full () =
+  let h = H.create () in
+  let s = S.server_error_score_for_provider h ~provider_key:"unseen" in
+  check (float 0.001) "unknown → 1.0" 1.0 s
+
+let test_se_score_no_failures_full () =
+  let h = H.create () in
+  H.record_success h ~provider_key:"p" ();
+  H.record_success h ~provider_key:"p" ();
+  let s = S.server_error_score_for_provider h ~provider_key:"p" in
+  check (float 0.001) "no failures → 1.0" 1.0 s
+
+let test_se_score_one_failure_decays () =
+  (* Default decay base 0.6: 1 recent failure → 0.6 *)
+  let h = H.create () in
+  H.record_failure h ~provider_key:"p" ();
+  let s = S.server_error_score_for_provider h ~provider_key:"p" in
+  (* Allow for env override: just verify score < 1.0 and > 0.0 *)
+  check bool "1 failure → score < 1.0" true (s < 1.0);
+  check bool "1 failure → score > 0.0" true (s > 0.0)
+
+let test_se_score_many_failures_skips () =
+  (* Default skip_after is 4: 4 failures should zero the score *)
+  let h = H.create () in
+  for _ = 1 to 4 do
+    H.record_failure h ~provider_key:"p" ()
+  done;
+  let s = S.server_error_score_for_provider h ~provider_key:"p" in
+  check (float 0.001) "4 failures → hard skip (0.0)" 0.0 s
+
+let test_se_score_only_rate_limits_no_penalty () =
+  (* Rate-limit events should NOT increase server-error score *)
+  let h = H.create () in
+  H.record_soft_rate_limited h ~provider_key:"p" ();
+  H.record_soft_rate_limited h ~provider_key:"p" ();
+  let s = S.server_error_score_for_provider h ~provider_key:"p" in
+  check (float 0.001) "429s don't affect se score" 1.0 s
+
+let test_weighted_shuffle_server_error_provider_deprioritised () =
+  (* A provider with 4 server errors should be skipped when there is a
+     clean peer.  All other conditions are equal (weight, no 429s). *)
+  let h = H.create () in
+  for _ = 1 to 4 do
+    H.record_failure h ~provider_key:"errored" ()
+  done;
+  let cands = [mk_cand ~w:100 "errored"; mk_cand ~w:100 "clean"] in
+  let strat = mk_t S.Weighted_random in
+  let ctx = mk_ctx ~health:h ~rand:(fun _ -> 0) () in
+  let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
+  match ordered with
+  | [] -> fail "expected at least clean provider"
+  | hd :: _ ->
+      check string "clean provider heads the list" "clean" hd.name
+
 let () =
   run "cascade_strategy" [
     "failover", [
@@ -751,6 +924,8 @@ let () =
         test_snapshot_returns_all_entries;
       test_case "snapshot reflects active acquires" `Quick
         test_snapshot_reflects_active_acquires;
+      test_case "dashboard JSON exposes provenance" `Quick
+        test_client_capacity_json_exposes_provenance;
     ];
     "priority_tier", [
       test_case "cycle 0 picks first tier" `Quick
@@ -779,6 +954,8 @@ let () =
         test_history_try_acquire_records_events;
       test_case "record bumps Prometheus counter with label" `Quick
         test_history_prometheus_counter_increments;
+      test_case "dashboard JSON exposes provenance" `Quick
+        test_history_json_exposes_provenance;
     ];
     "strategy_trace", [
       test_case "record + snapshot newest-first" `Quick
@@ -793,5 +970,9 @@ let () =
         test_trace_kind_labels;
       test_case "record bumps Prometheus counter with labels" `Quick
         test_trace_prometheus_counter_increments;
+      test_case "dashboard JSON exposes provenance" `Quick
+        test_strategy_trace_json_exposes_provenance;
+      test_case "audit runs JSON exposes provenance" `Quick
+        test_audit_runs_json_exposes_provenance;
     ];
   ]

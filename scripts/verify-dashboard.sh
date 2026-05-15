@@ -163,6 +163,10 @@ check_http "activity graph 200" "$BASE/api/v1/activity/graph" "200"
 check_json "activity graph has nodes" "$BASE/api/v1/activity/graph" "len(d.get('nodes', [])) >= 0" '^True$'
 check_http "activity events 200" "$BASE/api/v1/activity/events?limit=1" "200"
 check_json "activity events exposes replay window" "$BASE/api/v1/activity/events?limit=1" "'events' in d and 'latest_seq' in d" '^True$'
+check_http "agent timeline 200" "$BASE/api/v1/agent-timeline?agent_name=sangsu&limit=1" "200"
+check_json "agent timeline exposes provenance" "$BASE/api/v1/agent-timeline?agent_name=sangsu&limit=1" "'events' in d and d.get('dashboard_surface') == '/api/v1/agent-timeline' and d.get('source') == 'agent_timeline_read_model' and 'retention' in d" '^True$'
+check_http "agent relations 200" "$BASE/api/v1/agent-relations?agent_name=sangsu" "200"
+check_json "agent relations exposes provenance" "$BASE/api/v1/agent-relations?agent_name=sangsu" "'relations' in d and d.get('dashboard_surface') == '/api/v1/agent-relations' and d.get('source') == 'second_brain_graphql' and 'retention' in d" '^True$'
 check_http "activity swimlane 200" "$BASE/api/v1/activity/swimlane" "200"
 check_json "activity swimlane exposes spans" "$BASE/api/v1/activity/swimlane" "'spans' in d and 'agents' in d" '^True$'
 check_http "telemetry summary 200" "$BASE/api/v1/dashboard/telemetry/summary" "200"

@@ -1587,3 +1587,12 @@
  (name test_pr_h_disclosure_meta_wiring)
  (modules test_pr_h_disclosure_meta_wiring)
  (libraries masc_test_deps))
+
+; RFC-0084 host-config-cleanup-D — agent runtime root migration.
+; Pins 0 occurrences of /tmp/.masc_agent[_mcp]_<sid> literals
+; across mcp_server_eio_execute.ml + tool_inline_dispatch_coord.ml
+; and exactly 1 Host_config.legacy_macos_default binding per module.
+(test
+ (name test_pr_d_agent_runtime_migration)
+ (modules test_pr_d_agent_runtime_migration)
+ (libraries masc_test_deps))

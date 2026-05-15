@@ -5933,6 +5933,14 @@ let test_run_keeper_cycle_surfaces_side_effect_failures_source_contract () =
     (source_file_contains
        "lib/tool_keeper.ml"
        "Turn.preflight_keeper_msg ctx resolved_args")
+  ;
+  check
+    bool
+    "manual keeper_msg preflight gates cascade resilience before async submit"
+    true
+    (source_file_contains
+       "lib/keeper/keeper_turn.ml"
+       "Keeper_exec_preflight.cascade_resilience_error_message")
 ;;
 
 let test_sync_keeper_paused_state_surfaces_write_failure_without_mutating_registry () =

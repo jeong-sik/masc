@@ -172,6 +172,12 @@ let preflight_keeper_msg ctx args : (unit, string) result =
       match resolve_turn_cascade_name meta with
       | Error e -> Error e
       | Ok turn_cascade_name ->
+        (match
+           Keeper_exec_preflight.cascade_resilience_error_message
+             (Keeper_exec_preflight.cascade_resilience_of_name turn_cascade_name)
+         with
+         | Some e -> Error e
+         | None ->
         let effective_models =
           if direct_reply then
             Cascade_runtime.models_of_cascade_name
@@ -182,7 +188,7 @@ let preflight_keeper_msg ctx args : (unit, string) result =
         match ensure_api_keys_for_labels effective_models with
         | Error e -> Error ("" ^ e)
         | Ok () ->
-          Keeper_turn_helpers.ensure_local_discovery_ready effective_models)))
+          Keeper_turn_helpers.ensure_local_discovery_ready effective_models))))
 
 (* -- handle_keeper_msg: orchestrator ---------------------------------------- *)
 
@@ -240,6 +246,14 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
         Progress.stop_tracking turn_task_id;
         (false, "" ^ e)
       | Ok turn_cascade_name ->
+      (match
+         Keeper_exec_preflight.cascade_resilience_error_message
+           (Keeper_exec_preflight.cascade_resilience_of_name turn_cascade_name)
+       with
+       | Some e ->
+         Progress.stop_tracking turn_task_id;
+         (false, e)
+       | None ->
       (* start_keepalive is deferred AFTER run_turn completes.
          Starting it here causes the heartbeat fiber to immediately grab LLM
          slots, starving the synchronous run_turn call (Issue #2610). *)
@@ -717,4 +731,4 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               in
               (true, Yojson.Safe.to_string reply_json)
 
-))))))
+)))))))

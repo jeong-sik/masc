@@ -12,6 +12,105 @@ let json_string_opt = function
 let json_string_list values =
   `List (List.map (fun value -> `String value) values)
 
+type cascade_resilience =
+  { ok : bool
+  ; cascade_name : string
+  ; model_labels : string list
+  ; pure_local : bool
+  ; fallback_cascade : string option
+  ; blocker : string option
+  ; error : string option
+  ; hint : string option
+  }
+
+let cascade_resilience_of_name raw_name =
+  let cascade_name =
+    raw_name
+    |> Keeper_cascade_profile.normalize_keeper_runtime_declared_name
+    |> String.trim
+  in
+  let model_labels, error =
+    match
+      Cascade_runtime.models_of_cascade_name_result
+        (Keeper_cascade_profile.runtime_name_of_string cascade_name)
+    with
+    | Ok models -> models, None
+    | Error err -> [], Some err
+  in
+  let fallback_cascade =
+    Keeper_cascade_profile.fallback_cascade_for cascade_name
+  in
+  let pure_local =
+    match model_labels with
+    | [] -> false
+    | models -> Cascade_runtime.labels_are_pure_local models
+  in
+  let blocker =
+    match error with
+    | Some _ -> Some "cascade_resolution_error"
+    | None when model_labels = [] -> Some "cascade_no_candidates"
+    | None
+      when pure_local
+           && List.length model_labels <= 1
+           && Option.is_none fallback_cascade ->
+      Some "pure_local_single_provider_no_fallback"
+    | None -> None
+  in
+  let hint =
+    match blocker with
+    | Some "cascade_resolution_error" ->
+      Some "fix active cascade.toml resolution before autonomous PR fan-out"
+    | Some "cascade_no_candidates" ->
+      Some "configure at least one executable provider for the keeper cascade"
+    | Some "pure_local_single_provider_no_fallback" ->
+      Some
+        "add a non-local fallback cascade or avoid autonomous PR fan-out while \
+         local-only guard is active"
+    | Some blocker -> Some ("cascade resilience blocked: " ^ blocker)
+    | None -> None
+  in
+  { ok = Option.is_none blocker
+  ; cascade_name
+  ; model_labels
+  ; pure_local
+  ; fallback_cascade
+  ; blocker
+  ; error
+  ; hint
+  }
+
+let cascade_resilience_of_meta (meta : keeper_meta) =
+  cascade_resilience_of_name (cascade_name_of_meta meta)
+
+let cascade_resilience_to_json resilience =
+  `Assoc
+    [ "ok", `Bool resilience.ok
+    ; "cascade", `String resilience.cascade_name
+    ; "model_labels", json_string_list resilience.model_labels
+    ; "model_label_count", `Int (List.length resilience.model_labels)
+    ; "pure_local", `Bool resilience.pure_local
+    ; "fallback_cascade", json_string_opt resilience.fallback_cascade
+    ; "blocker", json_string_opt resilience.blocker
+    ; "error", json_string_opt resilience.error
+    ; "hint", json_string_opt resilience.hint
+    ]
+
+let cascade_resilience_error_message resilience =
+  match resilience.blocker with
+  | None -> None
+  | Some blocker ->
+    let hint =
+      match resilience.hint with
+      | Some value -> "; hint=" ^ value
+      | None -> ""
+    in
+    Some
+      (Printf.sprintf
+         "keeper cascade_resilience failed: cascade=%s blocker=%s%s"
+         resilience.cascade_name
+         blocker
+         hint)
+
 let handle_keeper_preflight_check
       ~(config : Coord.config)
       ~(meta : keeper_meta)
@@ -84,59 +183,14 @@ let handle_keeper_preflight_check
   in
   let () = add_check "preset" preset_ok preset_name in
   (* Check 5: cascade resilience for autonomous work *)
-  let cascade_name =
-    cascade_name_of_meta meta
-    |> Keeper_cascade_profile.normalize_keeper_runtime_declared_name
-    |> String.trim
-  in
-  let cascade_models, cascade_error =
-    match
-      Cascade_runtime.models_of_cascade_name_result
-        (Keeper_cascade_profile.runtime_name_of_string cascade_name)
-    with
-    | Ok models -> models, None
-    | Error err -> [], Some err
-  in
-  let cascade_fallback =
-    Keeper_cascade_profile.fallback_cascade_for cascade_name
-  in
-  let cascade_pure_local =
-    match cascade_models with
-    | [] -> false
-    | models -> Cascade_runtime.labels_are_pure_local models
-  in
-  let cascade_blocker =
-    match cascade_error with
-    | Some _ -> Some "cascade_resolution_error"
-    | None when cascade_models = [] -> Some "cascade_no_candidates"
-    | None
-      when cascade_pure_local
-           && List.length cascade_models <= 1
-           && Option.is_none cascade_fallback ->
-      Some "pure_local_single_provider_no_fallback"
-    | None -> None
-  in
-  let cascade_resilience_ok = Option.is_none cascade_blocker in
+  let cascade_resilience = cascade_resilience_of_meta meta in
   let cascade_check_value =
-    match cascade_blocker with
+    match cascade_resilience.blocker with
     | None -> "ok"
     | Some blocker -> blocker
   in
-  let cascade_hint =
-    match cascade_blocker with
-    | Some "cascade_resolution_error" ->
-      Some "fix active cascade.toml resolution before autonomous PR fan-out"
-    | Some "cascade_no_candidates" ->
-      Some "configure at least one executable provider for the keeper cascade"
-    | Some "pure_local_single_provider_no_fallback" ->
-      Some
-        "add a non-local fallback cascade or avoid autonomous PR fan-out while \
-         local-only guard is active"
-    | Some blocker -> Some ("cascade resilience blocked: " ^ blocker)
-    | None -> None
-  in
   let () =
-    add_check "cascade_resilience" cascade_resilience_ok cascade_check_value
+    add_check "cascade_resilience" cascade_resilience.ok cascade_check_value
   in
   (* Check 6: accountability risk *)
   let accountability_summary =
@@ -220,18 +274,7 @@ let handle_keeper_preflight_check
         ; "identity", `Assoc [ "name", `String author; "email", `String email ]
         ; "preset", `String preset_name
         ; "preset_sufficient", `Bool preset_ok
-        ; "cascade_resilience"
-        , `Assoc
-            [ "ok", `Bool cascade_resilience_ok
-            ; "cascade", `String cascade_name
-            ; "model_labels", json_string_list cascade_models
-            ; "model_label_count", `Int (List.length cascade_models)
-            ; "pure_local", `Bool cascade_pure_local
-            ; "fallback_cascade", json_string_opt cascade_fallback
-            ; "blocker", json_string_opt cascade_blocker
-            ; "error", json_string_opt cascade_error
-            ; "hint", json_string_opt cascade_hint
-            ]
+        ; "cascade_resilience", cascade_resilience_to_json cascade_resilience
         ; "accountability_risk", `Bool accountability_risk
         ; "risk_band", `String risk_band
         ; "routing_hint", `String routing_hint

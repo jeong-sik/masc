@@ -874,7 +874,9 @@ let run_named
           Cascade_legacy_runner.cascade_observation_with_metrics
             ~cascade_name:error_cascade_name
             ?strategy:!cascade_strategy_name_ref ~configured_labels
-            ~candidate_count ~selected_model_raw:None
+            ~candidate_count
+            ~selected_model_raw:
+              (Some (Cascade_runtime_candidate.model_health_key candidate))
             ~capture ()
         in
         let result = { result with cascade_observation = Some observation } in
@@ -905,7 +907,9 @@ let run_named
              Cascade_legacy_runner.cascade_observation_with_metrics
                ~cascade_name:error_cascade_name
                ?strategy:!cascade_strategy_name_ref ~configured_labels
-               ~candidate_count ~selected_model_raw:None
+               ~candidate_count
+               ~selected_model_raw:
+                 (Some (Cascade_runtime_candidate.model_health_key candidate))
                ~capture ()
            in
            let result = { result with cascade_observation = Some observation } in

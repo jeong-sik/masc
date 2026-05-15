@@ -174,7 +174,6 @@
   tool_autoresearch_registry
   tool_autoresearch_broadcast
   tool_autoresearch_cycle
-  keeper_skill_routing
   keeper_sandbox
   keeper_sandbox_control
   keeper_alerting_path
@@ -283,6 +282,10 @@
    ;; (wrapped false) preserves the bare `Trajectory` identifier; only
    ;; wrapped-pattern callers (Masc_mcp.Trajectory.X in tests) drop prefix.
    masc_mcp.trajectory
+   ;; RFC-0056 Phase 1B — Keeper_skill_routing leaf utility extracted to
+   ;; lib/keeper_skill_routing/. 215 LoC, only stdlib + masc_core deps.
+   ;; First step in unblocking lib/keeper/ flat-namespace decoupling.
+   masc_mcp.keeper_skill_routing
    ;; RFC-0058 Phase 1 — Declarative cascade TOML config. Separate sub-library
    ;; to avoid type name collisions (transport, provider, binding, tier, strategy)
    ;; with identically-named types in the main library.

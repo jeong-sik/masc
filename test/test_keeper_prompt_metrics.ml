@@ -9,7 +9,7 @@
 open Alcotest
 
 module KAR = Masc_mcp.Keeper_agent_run
-module KSR = Masc_mcp.Keeper_skill_routing
+module KSR = Keeper_skill_routing
 module KP = Masc_mcp.Keeper_prompt
 module KRP = Masc_mcp.Keeper_run_prompt
 module KUP = Masc_mcp.Keeper_unified_prompt

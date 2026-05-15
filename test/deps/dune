@@ -47,6 +47,8 @@
    ;; after this re-export they use bare `Trajectory.X` per the
    ;; G5 qualifier-removal budget.
    (re_export masc_mcp.trajectory)
+   ;; RFC-0056 Phase 1B — Keeper_skill_routing leaf utility sub-library.
+   (re_export masc_mcp.keeper_skill_routing)
    ;; RFC-0058 Phase 1 — Declarative cascade TOML parser sub-library.
    (re_export masc_mcp.cascade_decl)
    (re_export masc_mcp.ag_ui)

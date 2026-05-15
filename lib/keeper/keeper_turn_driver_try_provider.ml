@@ -149,6 +149,14 @@ let wrap_runtime_mcp_external_tool_hooks
     in
     Some { hooks with before_turn_params }
 
+let max_execution_time_for_attempt ?per_provider_timeout_s () =
+  match per_provider_timeout_s with
+  | Some timeout_s -> Some timeout_s
+  | None ->
+    Some
+      (Keeper_runtime_resolved.oas_timeout_for_estimated_input_tokens
+         ~estimated_input_tokens:0)
+
 (** Run a single provider attempt within the cascade.
 
     This is the extracted body of the [try_provider] closure that was
@@ -275,9 +283,7 @@ let run_try_provider
                         Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec
                       ctx.stream_idle_timeout_s))
           ; max_execution_time_s =
-              Some
-                (Keeper_runtime_resolved.oas_timeout_for_estimated_input_tokens
-                   ~estimated_input_tokens:0)
+              max_execution_time_for_attempt ?per_provider_timeout_s ()
           ; temperature = ctx.temperature
           ; max_idle_turns = ctx.max_idle_turns
           ; guardrails = ctx.guardrails

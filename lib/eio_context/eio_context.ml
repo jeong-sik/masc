@@ -61,7 +61,11 @@ let set_switch sw =
   Atomic.set current_sw (Some sw)
 
 let with_test_env ~net ~clock ~mono_clock ~sw f =
-  Eio.Mutex.use_rw ~protect:false with_test_env_lock (fun () ->
+  (* Test bodies may deliberately raise [Alcotest.Skip] or fail assertions.
+     The state is restored in [finally], so use the non-poisoning lock helper:
+     one skipped test must not poison later Eio-context tests in the same
+     executable. *)
+  Eio.Mutex.use_ro with_test_env_lock (fun () ->
     let snapshot = snapshot_state () in
     set_net net;
     set_clock clock;

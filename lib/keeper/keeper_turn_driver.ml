@@ -277,9 +277,11 @@ let run_named
   let configured_label_count = List.length configured_labels in
   let original_candidate_count = List.length original_candidate_cfgs in
   let tool_filtered_candidate_count = List.length tool_filtered_candidate_cfgs in
-  let candidates =
-    tool_filtered_candidate_cfgs
-    |> Cascade_runtime_candidate.of_provider_configs
+  let tool_filtered_candidates =
+    Cascade_runtime_candidate.of_provider_configs tool_filtered_candidate_cfgs
+  in
+  let health_filtered_candidates =
+    tool_filtered_candidates
     |> List.filter
          (fun candidate ->
             match Cascade_runtime_candidate.first_health_cooldown candidate with
@@ -290,7 +292,22 @@ let run_named
                   cascade_name runtime_candidate_label runtime_candidate_label msg;
                 false)
   in
-  let health_filtered_candidate_count = List.length candidates in
+  let health_filtered_candidate_count = List.length health_filtered_candidates in
+  let candidates, health_cooldown_fail_open =
+    fail_open_health_filtered_candidates
+      ~tool_filtered_candidates
+      ~health_filtered_candidates
+  in
+  if health_cooldown_fail_open then
+    Log.Misc.warn
+      "cascade %s: all tool-capable candidates are in health/cooldown; \
+       fail-open to surface provider result instead of no_providers_available \
+       configured_label_count=%d original_candidate_count=%d \
+       tool_filtered_candidate_count=%d"
+      cascade_name
+      configured_label_count
+      original_candidate_count
+      tool_filtered_candidate_count;
   let provider_attempt_provenance = base_provider_attempt_provenance in
   match candidates with
   | [] ->
@@ -675,13 +692,33 @@ let run_named
         terminal_error
     | candidate :: rest ->
       Eio_guard.fair_yield (); (* P0: keep fast-fail cascades scheduler-fair. *)
-      match Cascade_runtime_candidate.first_health_cooldown candidate with
-      | Some (_blocked_health_key, msg) ->
-          Log.Misc.debug
-            "cascade %s: skipping %s (provider_key=%s cooldown: %s)"
-            cascade_name runtime_candidate_label runtime_candidate_label msg;
-          try_cascade ~on_success ?resume_checkpoint ?per_provider_timeout_s rest last_err
-      | None ->
+      let health_cooldown =
+        Cascade_runtime_candidate.first_health_cooldown candidate
+      in
+      let should_skip_health_cooldown =
+        match health_cooldown with
+        | None -> false
+        | Some _ -> not health_cooldown_fail_open
+      in
+      if should_skip_health_cooldown then (
+        match health_cooldown with
+        | Some (_blocked_health_key, msg) ->
+            Log.Misc.debug
+              "cascade %s: skipping %s (provider_key=%s cooldown: %s)"
+              cascade_name runtime_candidate_label runtime_candidate_label msg;
+            try_cascade ~on_success ?resume_checkpoint ?per_provider_timeout_s
+              rest last_err
+        | None ->
+            try_cascade ~on_success ?resume_checkpoint ?per_provider_timeout_s
+              rest last_err)
+      else (
+      (match health_cooldown with
+       | Some (_blocked_health_key, msg) ->
+           Log.Misc.warn
+             "cascade %s: attempting %s despite health/cooldown fail-open \
+              (provider_key=%s cooldown: %s)"
+             cascade_name runtime_candidate_label runtime_candidate_label msg
+       | None -> ());
       let is_last = rest = [] in
       Log.Misc.debug "cascade %s: trying %s (is_last=%b)" cascade_name runtime_candidate_label is_last;
       let pp_timeout =
@@ -1083,7 +1120,7 @@ let run_named
              ~outcome:`Failure ~observation:(Some observation) ();
            Log.Misc.error "cascade %s: non-cascadable error from %s: %s"
              cascade_name runtime_candidate_label (Agent_sdk.Error.to_string sdk_err);
-           Error sdk_err))
+           Error sdk_err)))
   in
   (* Pluggable strategy + cycle/backoff wrapper (since 0.9.6).
 

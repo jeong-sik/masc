@@ -2107,6 +2107,39 @@ let test_empty_candidate_classification_separates_tool_filter_from_availability 
     "provider_unavailable"
     (FT.empty_candidate_classification_code FT.Provider_unavailable)
 
+let test_health_filter_fail_open_preserves_tool_capable_candidates () =
+  let module FT = Masc_mcp.Keeper_turn_driver_helpers in
+  let candidates, fail_open =
+    FT.fail_open_health_filtered_candidates
+      ~tool_filtered_candidates:[ "openai"; "ollama" ]
+      ~health_filtered_candidates:[]
+  in
+  Alcotest.(check (list string))
+    "all-cooldown fallback returns pre-health candidates"
+    [ "openai"; "ollama" ]
+    candidates;
+  Alcotest.(check bool) "all-cooldown fallback marked" true fail_open;
+  let candidates, fail_open =
+    FT.fail_open_health_filtered_candidates
+      ~tool_filtered_candidates:[ "openai"; "ollama" ]
+      ~health_filtered_candidates:[ "ollama" ]
+  in
+  Alcotest.(check (list string))
+    "non-empty health filter stays authoritative"
+    [ "ollama" ]
+    candidates;
+  Alcotest.(check bool) "no fallback when filtered candidates remain" false fail_open;
+  let candidates, fail_open =
+    FT.fail_open_health_filtered_candidates
+      ~tool_filtered_candidates:[]
+      ~health_filtered_candidates:[]
+  in
+  Alcotest.(check (list string))
+    "no providers remains empty"
+    []
+    candidates;
+  Alcotest.(check bool) "no fallback without tool-capable candidates" false fail_open
+
 let test_keeper_cascade_engine_boundary () =
   let module E = Masc_mcp.Keeper_cascade_engine in
   let engine = E.keeper_managed in
@@ -2470,6 +2503,10 @@ let () =
             "empty candidate classification keeps availability separate"
             `Quick
             test_empty_candidate_classification_separates_tool_filter_from_availability;
+          Alcotest.test_case
+            "health filter fail-open preserves tool-capable candidates"
+            `Quick
+            test_health_filter_fail_open_preserves_tool_capable_candidates;
           Alcotest.test_case "keeper cascade engine boundary is typed"
             `Quick test_keeper_cascade_engine_boundary;
           Alcotest.test_case "keeper hot path avoids OAS Complete_cascade"

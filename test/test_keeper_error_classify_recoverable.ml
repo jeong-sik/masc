@@ -149,6 +149,35 @@ let test_catalog_rotation_preserves_order_without_base_injection () =
       (KEC.degraded_retry_reason_to_string retry.fallback_reason)
   | None -> fail "Expected catalog-ordered degraded retry"
 
+let test_required_tool_rotation_uses_explicit_fallback_hint () =
+  let err =
+    Owne.sdk_error_of_masc_internal_error
+      (Owne.Resumable_cli_session
+         {
+           cascade_name = cascade_name "strict_tool_candidates";
+           detail =
+             "CLI JSON-stream transport reported a resumable session (exit 75). \
+              Resumable session available via -r.";
+           exit_code = Some 75;
+         })
+  in
+  match
+    KEC.degraded_rotation_after_recoverable_error
+      ~rotation_cascades:[ "coding_plan"; "strict_tool_candidates" ]
+      ~fallback_hint:"ollama_cloud_stable"
+      ~base_cascade:"coding_plan"
+      ~effective_cascade:"strict_tool_candidates"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
+      ~attempted_cascades:[ "strict_tool_candidates"; "coding_plan" ]
+      err
+  with
+  | Some retry ->
+    check string "explicit fallback hint wins" "ollama_cloud_stable"
+      retry.next_cascade;
+    check string "reason is resumable_cli_session" "resumable_cli_session"
+      (KEC.degraded_retry_reason_to_string retry.fallback_reason)
+  | None -> fail "Required-tool resumable session should use explicit fallback"
+
 (* ---- Status-code-aware rotation tests ----------------------------------- *)
 
 let test_soft_rate_limit_is_recoverable () =
@@ -340,6 +369,8 @@ let () =
         [
           test_case "catalog order is not prefixed by base cascade" `Quick
             test_catalog_rotation_preserves_order_without_base_injection;
+          test_case "required-tool rotation honors explicit fallback hint" `Quick
+            test_required_tool_rotation_uses_explicit_fallback_hint;
           test_case "soft rate-limit rotates to next cascade" `Quick
             test_rotation_finds_next_cascade_for_rate_limit;
           test_case "auth error rotates to next cascade" `Quick

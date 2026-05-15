@@ -2272,6 +2272,18 @@ let test_prompt_includes_operational_tool_guidance () =
     (contains_substring sys "keeper_pr_create draft=true");
   check
     bool
+    "warns passive discovery tools do not satisfy active turns"
+    true
+    (contains_substring sys
+       "Passive discovery tools (`keeper_tool_search`, `keeper_board_get`");
+  check
+    bool
+    "pairs passive reads with active tools"
+    true
+    (contains_substring sys
+       "pair the passive read/search with an active tool call");
+  check
+    bool
     "raw gh PR creation not documented"
     false
     (contains_substring sys "open draft PRs after pushing")
@@ -2321,6 +2333,28 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
     "draft pr tool documented"
     true
     (contains_substring prompt "keeper_pr_create");
+  check
+    bool
+    "masc tools are not bash commands"
+    true
+    (contains_substring prompt "MASC tool names as shell commands");
+  check
+    bool
+    "claim alone is not execution progress"
+    true
+    (contains_substring prompt "assignment actions, not execution progress");
+  check
+    bool
+    "masc_code_git status is documented as passive"
+    true
+    (contains_substring prompt "masc_code_git action=status/diff/log");
+  check
+    bool
+    "structured shell read ops are documented as passive"
+    true
+    (contains_substring prompt
+       "structured `keeper_shell` read ops (`rg`, `ls`, `cat`, `find`, \
+        `git_status`, `git_log`, `git_diff`)");
   check
     bool
     "gh pr create path not documented"
@@ -7135,9 +7169,15 @@ let test_prompt_includes_board_activity_section () =
     (contains_substring user "title=\"Need help\"");
   check
     bool
-    "guides direct board get by post id"
+    "guides board get plus comment by post id"
     true
-    (contains_substring sys "Use the listed post_id with keeper_board_get")
+    (contains_substring sys
+       "call keeper_board_get and keeper_board_comment in the same response");
+  check
+    bool
+    "warns board get alone is passive"
+    true
+    (contains_substring sys "keeper_board_get alone is passive")
 ;;
 
 let test_prompt_marks_board_curation_due_for_multi_event_window () =
@@ -8961,6 +9001,44 @@ let test_actionable_tool_contract_allows_execution_tools () =
        ~tool_names:[])
 ;;
 
+let test_discovered_work_classifier_ignores_passive_inspection_tools () =
+  let obs =
+    {
+      KCC.unclaimed_task_count = 0;
+      board_activity_count = 0;
+      has_discovered_work_section = true;
+    }
+  in
+  check
+    bool
+    "fs read alone cannot make discovered work actionable"
+    false
+    (KCC.requires_tool_support_for_allowed_tools
+       ~allowed_tool_names:[ "keeper_fs_read" ]
+       obs);
+  check
+    bool
+    "git status/diff/log surface alone cannot make discovered work actionable"
+    false
+    (KCC.requires_tool_support_for_allowed_tools
+       ~allowed_tool_names:[ "masc_code_git"; "keeper_fs_read" ]
+       obs);
+  check
+    bool
+    "draft PR tool makes discovered work actionable"
+    true
+    (KCC.requires_tool_support_for_allowed_tools
+       ~allowed_tool_names:[ "keeper_pr_create" ]
+       obs);
+  check
+    bool
+    "execution shell makes discovered work actionable"
+    true
+    (KCC.requires_tool_support_for_allowed_tools
+       ~allowed_tool_names:[ "keeper_bash" ]
+       obs)
+;;
+
 let test_stay_silent_requires_typed_no_work_proof_on_actionable_signal () =
   (* keeper_stay_silent has effect_domain=Read_only in tool_catalog but is
      classified as Completion in completion_tool_names, so it can still
@@ -10458,8 +10536,17 @@ let test_required_gate_surface_removes_passive_distractions () =
        ; "keeper_task_claim"
        ; "keeper_stay_silent"
        ; "keeper_board_post"
+       ; "masc_code_git"
        ; "masc_status"
        ]);
+  check
+    (list string)
+    "explicit masc_code_git survives required gate"
+    [ "masc_code_git"; "keeper_board_post" ]
+    (Surface.tool_names_for_required_gate_surface
+       ~tool_gate_requested:true
+       ~required_tool_names:[ "masc_code_git" ]
+       [ "keeper_tasks_list"; "masc_code_git"; "keeper_board_post" ]);
   check
     (list string)
     "optional turn keeps passive tools visible"
@@ -10538,9 +10625,20 @@ let test_tools_for_gated_affordance_covers_each_variant () =
           [ "board_curation"; "task_claim"; "board_curation" ]));
   check
     (list string)
-    "generic board affordance has no forced specific tool"
-    []
+    "generic board affordance keeps active board tools visible"
+    [ "keeper_board_comment"; "keeper_board_post" ]
     (Surface.preferred_tool_names_for_turn_affordances [ "board_post_or_comment" ]);
+  check
+    (list string)
+    "task claim affordance keeps active claim tools visible"
+    [ "keeper_task_claim"; "masc_claim_next"; "masc_claim_task" ]
+    (Surface.preferred_tool_names_for_turn_affordances [ "task_claim" ]);
+  check
+    bool
+    "preferred board comment can satisfy required gate"
+    true
+    (Masc_mcp.Keeper_tool_disclosure.tool_name_can_satisfy_required_contract
+       "keeper_board_comment");
   check
     bool
     "work discovery includes keeper-native task creation"
@@ -10866,6 +10964,19 @@ let test_direct_keeper_msg_timeout_overrides_meta_per_provider_timeout () =
     "profile per-provider timeout still applies without explicit override"
     (Some 300.0)
     (KAR.per_provider_timeout_for_turn ~meta ~timeout_s:900.0 ())
+;;
+
+let test_try_provider_max_execution_time_uses_attempt_timeout () =
+  check bool
+    "try-provider helper resolves OAS max execution time from attempt timeout"
+    true
+    (source_file_contains "lib/keeper/keeper_turn_driver_try_provider.ml"
+       "let max_execution_time_for_attempt ?per_provider_timeout_s ()");
+  check bool
+    "run_try_provider passes attempt timeout to OAS max_execution_time_s"
+    true
+    (source_file_contains "lib/keeper/keeper_turn_driver_try_provider.ml"
+       "max_execution_time_for_attempt ?per_provider_timeout_s ()")
 ;;
 
 (* ---------- render_inline_skip_reason tests ---------- *)
@@ -11629,6 +11740,10 @@ let () =
             `Quick
             test_actionable_tool_contract_allows_execution_tools
         ; test_case
+            "discovered work ignores passive inspection tools"
+            `Quick
+            test_discovered_work_classifier_ignores_passive_inspection_tools
+        ; test_case
             "stay_silent needs typed no-work proof on actionable signal"
             `Quick
             test_stay_silent_requires_typed_no_work_proof_on_actionable_signal
@@ -12385,6 +12500,10 @@ let () =
             "direct keeper msg timeout overrides stale per-provider timeout"
             `Quick
             test_direct_keeper_msg_timeout_overrides_meta_per_provider_timeout
+        ; test_case
+            "provider attempt timeout drives OAS max execution time"
+            `Quick
+            test_try_provider_max_execution_time_uses_attempt_timeout
         ; test_case
             "affordance gate filters by allowed_tool_names"
             `Quick

@@ -108,9 +108,9 @@ let allowed_worktree_prefixes config =
    "/.worktrees/" segment elsewhere in the tree is not accepted.
 
    Playground writes are gated per-agent (#6527 iter 6): the caller
-   must only be allowed to write inside its own
-   [.masc/playground/<agent_name>/] bundle. This prevents one agent
-   from mutating another agent's playground via the shared
+   must only be allowed to write inside its own backend-scoped playground
+   bundle. This prevents one agent from mutating another agent's playground
+   via the shared
    `masc_code_*` dispatch. Server-wide `.worktrees/` remains allowed
    so legacy server operations that need to touch repo worktrees
    continue to work. *)
@@ -123,7 +123,7 @@ let validate_writable_path ~(agent_name : string) config path =
     let agent_playground_prefix =
       normalize_dir_prefix
         (Filename.concat config.Coord.base_path
-           (Keeper_alerting_path.playground_path_of_keeper agent_name))
+           (Tool_code.agent_playground_rel ~config ~agent_name))
     in
     if List.exists
          (fun prefix -> String.starts_with ~prefix canonical_path)
@@ -140,6 +140,39 @@ let validate_writable_path ~(agent_name : string) config path =
         agent_name
         agent_playground_prefix
         canonical_path)))
+
+let path_is_directory path =
+  try Sys.is_directory path with
+  | Sys_error _ -> false
+
+let missing_cwd_error_json ctx ~cwd ~resolved_cwd ?command ?action () =
+  let hint =
+    "cwd resolved inside the agent playground but is not an existing directory. \
+     If this is task work, call masc_worktree_create with the task_id first, \
+     then retry with the returned repos/<repo>/.worktrees/<worktree> path. \
+     Docker keepers must use the Docker playground mapping; do not guess a \
+     non-docker .masc/playground/<keeper>/ path."
+  in
+  let fields =
+    [
+      ("error", `String "cwd_not_directory");
+      ("cwd", `String cwd);
+      ("resolved_cwd", `String resolved_cwd);
+      ("agent", `String ctx.agent_name);
+      ("hint", `String hint);
+    ]
+  in
+  let fields =
+    match command with
+    | Some command -> ("command", `String command) :: fields
+    | None -> fields
+  in
+  let fields =
+    match action with
+    | Some action -> ("action", `String action) :: fields
+    | None -> fields
+  in
+  error_response_with (List.rev fields)
 
 (* Issue #8522: Variant SSOT for git action.  Adding a constructor
    forces compilation in [git_action_to_string] AND extends
@@ -386,7 +419,7 @@ let validate_clone_url ~base_path url =
           Error (Printf.sprintf "Cannot parse GitHub org/repo from URL: %s" url)
 
 (** Validate cwd for clone: allows .worktrees/ itself (not just subdirs)
-    and THIS agent's own .masc/playground/<agent_name>/repos/ directory.
+    and THIS agent's own backend-scoped playground repos/ directory.
 
     #6527 iter 6 scoped this per-agent so agent A cannot drop a clone
     into agent B's playground/repos/ via masc_code_git action=clone. *)
@@ -402,14 +435,14 @@ let validate_clone_cwd ~(agent_name : string) config cwd =
         (Filename.concat root ".worktrees") in
       let agent_playground_prefix = Tool_code.normalize_path
         (Filename.concat root
-           (Keeper_alerting_path.playground_path_of_keeper agent_name)) in
+           (Tool_code.agent_playground_rel ~config ~agent_name)) in
       let in_worktrees =
         String.equal canonical_path worktree_prefix ||
         String.starts_with ~prefix:(worktree_prefix ^ "/") canonical_path
       in
       let in_agent_playground_repos =
         (* Match <agent_playground_prefix>/repos or subdirs thereof.
-           [playground_path_of_keeper] already ends with "/", and the
+           [Tool_code.agent_playground_rel] already ends with "/", and the
            canonical normalisation strips trailing slashes, so we strip
            the trailing slash before prefix matching. *)
         let prefix_no_slash =
@@ -635,6 +668,10 @@ let handle_code_shell ~tool_name ~start_time ctx args =
         in
         (match cwd_result with
          | Error e -> Tool_result.error ~tool_name ~start_time (Masc_domain.masc_error_to_string e)
+         | Ok (Some dir) when not (path_is_directory dir) ->
+             Tool_result.error ~tool_name ~start_time
+               (missing_cwd_error_json ctx ~cwd ~resolved_cwd:dir
+                  ~command ())
          | Ok cwd_opt ->
              let safe_timeout = Float.of_int (max 5 (min 120 timeout)) in
              let cmd_parts = ["sh"; "-c"; command] in
@@ -776,6 +813,9 @@ let handle_code_git ~tool_name ~start_time ctx args =
       in
       match cwd_result with
       | Error e -> Tool_result.error ~tool_name ~start_time (Masc_domain.masc_error_to_string e)
+      | Ok (Some dir) when not (path_is_directory dir) ->
+        Tool_result.error ~tool_name ~start_time
+          (missing_cwd_error_json ctx ~cwd ~resolved_cwd:dir ~action ())
       | Ok cwd_opt ->
         let dir = match cwd_opt with Some d -> d | None -> "." in
         let cmd = ["sh"; "-c";

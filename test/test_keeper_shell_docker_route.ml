@@ -248,7 +248,12 @@ let ensure_github_identity_bundle ~config github_identity =
          github_identity)
       "gh"
   in
-  ensure_dir gh_dir
+  ensure_dir gh_dir;
+  write_file
+    (Filename.concat gh_dir "hosts.yml")
+    "github.com:\n\
+    \    oauth_token: ghp_fake_test_token_for_docker_route\n\
+    \    user: test-user\n"
 
 let parse_field raw field =
   Yojson.Safe.from_string raw |> Json.member field
@@ -608,6 +613,42 @@ let test_bash_git_c_option_missing_dir_blocks_before_docker () =
     (response_mentions raw "error" "cwd_not_directory");
   Alcotest.(check bool) "docker was not invoked" false
     (Sys.file_exists log_path)
+
+let test_bash_git_c_bare_worktrees_from_root_uses_single_repo () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  ensure_github_identity_bundle ~config
+    Masc_mcp.Keeper_gh_env.root_github_identity;
+  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  let worktree = Filename.concat repo ".worktrees/task-229" in
+  ensure_dir worktree;
+  run_ok ~cwd:repo "git init -q";
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+      ~args:
+        (`Assoc
+          [
+            ("cmd", `String "git -C .worktrees/task-229 status -sb");
+            ("cwd", `String playground);
+          ])
+      ()
+  in
+  Alcotest.(check (option bool)) "git -C bare .worktrees succeeds"
+    (Some true)
+    (parse_bool_field raw "ok");
+  Alcotest.(check bool) "docker was invoked" true (Sys.file_exists log_path);
+  let log = read_file log_path in
+  Alcotest.(check bool) "docker cwd uses the sole repo" true
+    (contains_substring log "repos/masc-mcp")
 
 let test_bash_git_push_requires_write_preset_before_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
@@ -1243,6 +1284,9 @@ let () =
           Alcotest.test_case
             "docker keeper git -C missing dir blocks before docker"
             `Quick test_bash_git_c_option_missing_dir_blocks_before_docker;
+          Alcotest.test_case
+            "docker keeper git -C bare worktree uses sole repo"
+            `Quick test_bash_git_c_bare_worktrees_from_root_uses_single_repo;
           Alcotest.test_case
             "docker keeper git push requires write preset"
             `Quick test_bash_git_push_requires_write_preset_before_docker;

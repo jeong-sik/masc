@@ -61,6 +61,15 @@ val normalize_path : string -> string
     Returns an absolute path when [path] starts with [/],
     otherwise relative. *)
 
+val agent_playground_rel :
+  config:Coord.config ->
+  agent_name:string ->
+  string
+(** [agent_playground_rel ~config ~agent_name] returns the backend-scoped
+    keeper playground root relative to [config.base_path]. Docker keepers
+    resolve under [.masc/playground/docker/<keeper>/]; local keepers resolve
+    under [.masc/playground/<keeper>/]. *)
+
 val normalize_agent_relative_path :
   config:Coord.config ->
   agent_name:string ->

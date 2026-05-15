@@ -307,7 +307,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
   in
   let board_activity_guidance =
     if tool_allowed "keeper_board_get" && tool_allowed "keeper_board_comment" then
-      "- See board activity? Use the listed post_id with keeper_board_get before replying; do not use keeper_board_list to rediscover the target. Then comment with keeper_board_comment on that same post_id.\n"
+      "- See board activity? Use the listed post_id. If the preview is enough, comment directly with keeper_board_comment. If you need the full post, call keeper_board_get and keeper_board_comment in the same response; keeper_board_get alone is passive and fails actionable turns.\n"
     else
       ""
   in

@@ -105,6 +105,56 @@ let outcome_code err =
     (KAE.receipt_outcome_kind_of_sdk_error err)
 ;;
 
+let termination_semantics_code err =
+  KAE.sdk_termination_semantics err |> KAE.sdk_termination_semantics_to_string
+;;
+
+let test_layered_termination_semantics () =
+  check
+    string
+    "provider timeout stays provider layer"
+    "provider_wall_clock_timeout"
+    (termination_semantics_code (mk_api (Agent_sdk.Retry.Timeout { message = "x" })));
+  check
+    string
+    "max_turns stays OAS turn budget"
+    "oas_turn_budget_exhausted"
+    (termination_semantics_code
+       (mk_agent (Agent_sdk.Error.MaxTurnsExceeded { turns = 1; limit = 1 })));
+  check
+    string
+    "idle stays OAS idle budget"
+    "oas_idle_budget_exhausted"
+    (termination_semantics_code
+       (mk_agent (Agent_sdk.Error.IdleDetected { consecutive_idle_turns = 3 })));
+  check
+    string
+    "exit condition stays OAS exit condition"
+    "oas_exit_condition_reached"
+    (termination_semantics_code
+       (mk_agent (Agent_sdk.Error.ExitConditionMet { turn = 5 })));
+  check
+    string
+    "token budget stays OAS token budget"
+    "oas_token_budget_exhausted"
+    (termination_semantics_code
+       (mk_agent
+          (Agent_sdk.Error.TokenBudgetExceeded
+             { kind = "Input"; used = 10; limit = 5 })));
+  check
+    string
+    "cost budget stays OAS cost budget"
+    "oas_cost_budget_exhausted"
+    (termination_semantics_code
+       (mk_agent
+          (Agent_sdk.Error.CostBudgetExceeded { spent_usd = 2.0; limit_usd = 1.0 })));
+  check
+    string
+    "auth is generic SDK failure"
+    "sdk_error_failure"
+    (termination_semantics_code (mk_api (Agent_sdk.Retry.AuthError { message = "x" })))
+;;
+
 let test_timeout_receipt_outcome_is_cancelled () =
   check
     string
@@ -484,6 +534,10 @@ let () =
             "non-timeout receipt outcome -> error"
             `Quick
             test_non_timeout_receipt_outcome_is_error
+        ; test_case
+            "OAS termination semantics preserve layer"
+            `Quick
+            test_layered_termination_semantics
         ; test_case
             "agent max_turns receipt outcome -> cancelled"
             `Quick

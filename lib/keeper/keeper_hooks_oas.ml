@@ -1020,7 +1020,7 @@ let emit_cost_event
       | exn ->
         Prometheus.inc_counter
           Keeper_metrics.metric_keeper_metric_emit_dropped
-          ~labels:[(label_keeper, agent_name); (label_site, Metric_emit_dropped_site.(to_label Cost_event_write))]
+          ~labels:[(label_keeper, agent_name); (label_site, Keeper_metric_emit_dropped_site.(to_label Cost_event_write))]
           ();
         Log.Keeper.error "emit_cost_event: failed to write %s: %s"
           (Dated_jsonl.base_dir store) (Printexc.to_string exn))

@@ -48,7 +48,7 @@ type decision_record = {
   keeper_name : string;
   generation : int;
   snapshot : Keeper_measurement.measurement_snapshot option;
-  heartbeat_verdict : Heartbeat_smart.decision;
+  heartbeat_verdict : Keeper_heartbeat_smart.decision;
   turn_verdict : Keeper_world_observation.turn_verdict;
   wall_clock : float;
   tool_diversity_entropy : float option;
@@ -66,12 +66,12 @@ let make ~cycle_id ~keeper_name ~generation ?snapshot
 (* ================================================================ *)
 
 (* Simplified tags for JSONL audit keys — intentionally differs from
-   Heartbeat_smart.decision_to_string which uses colon-separated format
+   Keeper_heartbeat_smart.decision_to_string which uses colon-separated format
    with timing data ("skip:busy", "skip:idle(next in 3.2s)"). *)
 let heartbeat_verdict_to_string = function
-  | Heartbeat_smart.Emit -> "emit"
-  | Heartbeat_smart.Skip_busy -> "skip_busy"
-  | Heartbeat_smart.Skip_idle _ -> "skip_idle"
+  | Keeper_heartbeat_smart.Emit -> "emit"
+  | Keeper_heartbeat_smart.Skip_busy -> "skip_busy"
+  | Keeper_heartbeat_smart.Skip_idle _ -> "skip_idle"
 
 let to_json (r : decision_record) : Yojson.Safe.t =
   `Assoc [

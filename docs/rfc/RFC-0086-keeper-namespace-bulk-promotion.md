@@ -1,5 +1,5 @@
 ---
-rfc: "0085"
+rfc: "0086"
 title: "Keeper namespace bulk promotion to sub-library"
 status: Draft
 created: 2026-05-15
@@ -11,7 +11,15 @@ related: ["0056", "0042", "0050"]
 implementation_prs: []
 ---
 
-# RFC-0085 — Keeper namespace bulk promotion to sub-library
+# RFC-0086 — Keeper namespace bulk promotion to sub-library
+
+> **Renumber note (2026-05-15)**: originally allocated RFC-0085 via
+> `scripts/rfc-allocate-next.sh`; collided with parallel workstream of
+> the same number (host_config / tool_library / cdal_runtime / MCP
+> dispatch refactor — PR #15458, #15460-15462, #15465-15468 merged
+> without a body file). Renumbered to RFC-0086 to avoid the
+> ambiguity. The other RFC-0085 keeps the number (first claimer of
+> the implementation surface).
 
 > Companion to RFC-0056. RFC-0056 enumerated *incremental* leaf extraction
 > (1A trajectory → 1K compaction_trigger, 11 phases shipped). This RFC

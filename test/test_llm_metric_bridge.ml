@@ -173,6 +173,103 @@ let test_streaming_metrics_ignore_invalid_ms () =
     (Prom.metric_llm_provider_streaming_inter_chunk ^ "_count")
     ~labels ~before:inter_before ~delta:0.0
 
+let test_streaming_invalid_ms_increments_typed_counter () =
+  let model_id =
+    Printf.sprintf "bridge-streaming-typed-%d" (Unix.getpid ())
+  in
+  let provider = "bridge-streaming-typed-provider" in
+  let first_non_positive =
+    [ ("provider", provider); ("model", model_id); ("reason", "non_positive") ]
+  in
+  let inter_not_finite =
+    [ ("provider", provider); ("model", model_id); ("reason", "not_finite") ]
+  in
+  let before_first =
+    metric Prom.metric_llm_provider_streaming_first_chunk_invalid
+      ~labels:first_non_positive
+  in
+  let before_inter =
+    metric Prom.metric_llm_provider_streaming_inter_chunk_invalid
+      ~labels:inter_not_finite
+  in
+  Bridge.emit_streaming_first_chunk ~provider ~model_id ~ttfrc_ms:0.0;
+  Bridge.emit_streaming_chunk
+    ~provider ~model_id ~chunk_index:1 ~inter_chunk_ms:(0.0 /. 0.0);
+  check_metric_delta "streaming first chunk non_positive +1"
+    Prom.metric_llm_provider_streaming_first_chunk_invalid
+    ~labels:first_non_positive ~before:before_first ~delta:1.0;
+  check_metric_delta "streaming inter chunk not_finite +1"
+    Prom.metric_llm_provider_streaming_inter_chunk_invalid
+    ~labels:inter_not_finite ~before:before_inter ~delta:1.0
+
+let test_streaming_invalid_ms_distinguishes_not_finite_from_non_positive () =
+  let model_id =
+    Printf.sprintf "bridge-streaming-distinct-%d" (Unix.getpid ())
+  in
+  let provider = "bridge-streaming-distinct-provider" in
+  let first_not_finite =
+    [ ("provider", provider); ("model", model_id); ("reason", "not_finite") ]
+  in
+  let first_non_positive =
+    [ ("provider", provider); ("model", model_id); ("reason", "non_positive") ]
+  in
+  let before_nf =
+    metric Prom.metric_llm_provider_streaming_first_chunk_invalid
+      ~labels:first_not_finite
+  in
+  let before_np =
+    metric Prom.metric_llm_provider_streaming_first_chunk_invalid
+      ~labels:first_non_positive
+  in
+  Bridge.emit_streaming_first_chunk
+    ~provider ~model_id ~ttfrc_ms:Float.infinity;
+  Bridge.emit_streaming_first_chunk
+    ~provider ~model_id ~ttfrc_ms:(-1.0);
+  check_metric_delta "infinity routes to not_finite reason"
+    Prom.metric_llm_provider_streaming_first_chunk_invalid
+    ~labels:first_not_finite ~before:before_nf ~delta:1.0;
+  check_metric_delta "negative routes to non_positive reason"
+    Prom.metric_llm_provider_streaming_first_chunk_invalid
+    ~labels:first_non_positive ~before:before_np ~delta:1.0
+
+let test_request_latency_cache_miss_clamped_counter () =
+  let model_id =
+    Printf.sprintf "bridge-latency-cache-miss-%d" (Unix.getpid ())
+  in
+  let clamp_labels =
+    [ ("provider", "unknown")
+    ; ("model", model_id)
+    ; ("reason", "provider_unknown_cache_miss")
+    ]
+  in
+  let before =
+    metric Prom.metric_llm_provider_request_latency_clamped
+      ~labels:clamp_labels
+  in
+  (* Caller omits [?provider] and the cache has no entry for this
+     freshly-minted [model_id] — previously silently fell back to the
+     [unknown] label with no operator signal. *)
+  Bridge.emit_request_latency ~model_id ~latency_ms:42 ();
+  check_metric_delta "cache miss provider attribution increments clamp counter"
+    Prom.metric_llm_provider_request_latency_clamped
+    ~labels:clamp_labels ~before ~delta:1.0
+
+let test_request_latency_no_model_id_clamped_counter () =
+  let clamp_labels =
+    [ ("provider", "unknown")
+    ; ("model", "")
+    ; ("reason", "provider_unknown_no_model_id")
+    ]
+  in
+  let before =
+    metric Prom.metric_llm_provider_request_latency_clamped
+      ~labels:clamp_labels
+  in
+  Bridge.emit_request_latency ~model_id:"" ~latency_ms:42 ();
+  check_metric_delta "empty model_id increments distinct clamp reason"
+    Prom.metric_llm_provider_request_latency_clamped
+    ~labels:clamp_labels ~before ~delta:1.0
+
 let assoc_string key attrs =
   match List.assoc_opt key attrs with
   | Some (`String value) -> value
@@ -335,6 +432,19 @@ let () =
             test_sink_records_oas_callbacks;
           Alcotest.test_case "streaming metrics ignore invalid ms" `Quick
             test_streaming_metrics_ignore_invalid_ms;
+          Alcotest.test_case
+            "streaming invalid ms increments typed counter" `Quick
+            test_streaming_invalid_ms_increments_typed_counter;
+          Alcotest.test_case
+            "streaming invalid ms distinguishes not_finite from non_positive"
+            `Quick
+            test_streaming_invalid_ms_distinguishes_not_finite_from_non_positive;
+          Alcotest.test_case
+            "request latency cache miss increments typed clamp reason" `Quick
+            test_request_latency_cache_miss_clamped_counter;
+          Alcotest.test_case
+            "request latency no model_id increments typed clamp reason" `Quick
+            test_request_latency_no_model_id_clamped_counter;
           Alcotest.test_case "streaming callbacks emit OTel events" `Quick
             test_streaming_callbacks_emit_otel_events;
           Alcotest.test_case "request latency floors zero ms" `Quick

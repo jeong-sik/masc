@@ -56,8 +56,6 @@
   (sqlite3 (>= 5.1))
   (mirage-crypto (>= 1.0))
   (mirage-crypto-rng (>= 1.0))
-  (ctypes (>= 0.20))
-  (ctypes-foreign (>= 0.20))
   (integers (>= 0.7))
   (zstd (>= 0.4))
   (httpun (>= 0.2))
@@ -72,7 +70,14 @@
   (digestif (>= 1.1))
   (ocaml-protoc-plugin (>= 4.0))
   (pbrt (and (>= 3.0) (< 4.0)))
-  (pbrt_services (and (>= 3.0) (< 4.0)))
+  ; [ctypes] + [ctypes-foreign] removed: zero callers in lib/ bin/ test/
+  ; since webrtc_bindings.ml was removed (per lib/dune:252 comment).
+  ; Confirmed by `rg '\bctypes\b' lib/ bin/ test/` = empty.  Audited
+  ; continuous-loop iter #17 (2026-05-15).  Re-add if native FFI work
+  ; resumes.
+  ; [pbrt_services] removed: no caller in lib/ bin/ test/ since
+  ; continuous-loop iter #11 audit (2026-05-15).  Re-add if gRPC
+  ; service support resumes.
   (h2 (>= 0.13))
   (h2-eio (>= 0.13))
   (alcotest (and :with-test (>= 1.6)))
@@ -81,8 +86,10 @@
   (bisect_ppx (and :with-test (>= 2.8)))
   (mtime (>= 2.0))
   (uuidm (>= 0.9))
-  ; Neo4j Bolt native driver
-  (neo4j_bolt_eio (>= 0.4))
+  ; [neo4j_bolt_eio] removed: no caller in lib/ bin/ test/ since
+  ; continuous-loop iter #12 audit (2026-05-15).  Same shape as
+  ; pbrt_services (iter #11): declared but never imported.  Re-add
+  ; when Neo4j Bolt support resumes.
   ; OpenTelemetry observability + OTLP exporter
   (opentelemetry (>= 0.13))
   (ambient-context-eio (>= 0.2))

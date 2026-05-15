@@ -33,6 +33,36 @@ let with_repo_arg repo argv =
   let repo = String.trim repo in
   if repo = "" then argv else argv @ [ "-R"; repo ]
 
+let repo_name_of_slug slug =
+  match String.split_on_char '/' slug with
+  | [ _owner; repo ] -> Some repo
+  | _ -> None
+
+let effective_repo_arg ~(config : Coord.config) repo =
+  let repo = String.trim repo in
+  if repo = "" then
+    Ok ""
+  else
+    match Keeper_gh_shared.validate_repo_slug repo with
+    | Ok slug -> Ok slug
+    | Error reason when not (String.contains repo '/') -> (
+        let root = Keeper_alerting_path.project_root_of_config config in
+        match Keeper_gh_shared.repo_slug_of_git_root ~git_root:root with
+        | Some slug when repo_name_of_slug slug = Some repo -> Ok slug
+        | Some slug ->
+            Error
+              (Printf.sprintf
+                 "repo must be owner/repo; got bare repo %S. Current \
+                  project repository is %S."
+                 repo slug)
+        | None ->
+            Error
+              (Printf.sprintf
+                 "repo must be owner/repo; got bare repo %S and current \
+                  project repository could not be inferred."
+                 repo))
+    | Error reason -> Error reason
+
 let opt_flag flag = function
   | None -> []
   | Some value ->
@@ -331,11 +361,14 @@ let handle_keeper_pr_list ~(config : Coord.config) ~(meta : keeper_meta)
     ~(args : Yojson.Safe.t) =
   let repo = Safe_ops.json_string ~default:"" "repo" args in
   let limit = Safe_ops.json_int ~default:20 "limit" args |> clamp_limit in
-  match Safe_ops.json_string ~default:"open" "state" args |> normalize_state with
-  | Error reason -> error_json reason
-  | Ok state ->
-      run_gh ~tool:"keeper_pr_list" ~operation:"pr_list" ~config ~meta
-        ~args ~write:false (build_pr_list_argv ~repo ~state ~limit)
+  match
+    ( effective_repo_arg ~config repo,
+      Safe_ops.json_string ~default:"open" "state" args |> normalize_state )
+  with
+  | Error reason, _ | _, Error reason -> error_json reason
+  | Ok repo, Ok state ->
+      run_gh ~tool:"keeper_pr_list" ~operation:"pr_list" ~config ~meta ~args
+        ~write:false (build_pr_list_argv ~repo ~state ~limit)
 
 let handle_keeper_pr_status ~(config : Coord.config) ~(meta : keeper_meta)
     ~(args : Yojson.Safe.t) =
@@ -344,8 +377,11 @@ let handle_keeper_pr_status ~(config : Coord.config) ~(meta : keeper_meta)
   if pr_number = 0 then
     error_json "pr_number is required. Good: pr_number=123."
   else
-    run_gh ~tool:"keeper_pr_status" ~operation:"pr_status" ~config ~meta
-      ~args ~write:false (build_pr_status_argv ~repo ~pr_number)
+    match effective_repo_arg ~config repo with
+    | Error reason -> error_json reason
+    | Ok repo ->
+        run_gh ~tool:"keeper_pr_status" ~operation:"pr_status" ~config
+          ~meta ~args ~write:false (build_pr_status_argv ~repo ~pr_number)
 
 let handle_keeper_pr_create ~(config : Coord.config) ~(meta : keeper_meta)
     ~(args : Yojson.Safe.t) =
@@ -369,9 +405,12 @@ let handle_keeper_pr_create ~(config : Coord.config) ~(meta : keeper_meta)
           "reason", `String "keeper_pr_create requires research, delivery, coding, or full preset";
         ])
   else
-    run_gh ~tool:"keeper_pr_create" ~operation:"pr_create" ~config ~meta
-      ~args ~write:true ~recover_pr_create:(repo, head)
-      (build_pr_create_argv ~repo ~title ~body ~base ~head)
+    match effective_repo_arg ~config repo with
+    | Error reason -> error_json reason
+    | Ok repo ->
+        run_gh ~tool:"keeper_pr_create" ~operation:"pr_create" ~config
+          ~meta ~args ~write:true ~recover_pr_create:(repo, head)
+          (build_pr_create_argv ~repo ~title ~body ~base ~head)
 
 module For_testing = struct
   let build_pr_list_argv = build_pr_list_argv
@@ -379,6 +418,7 @@ module For_testing = struct
   let build_pr_view_recovery_argv = build_pr_view_recovery_argv
   let build_pr_create_argv = build_pr_create_argv
   let draft_request_allowed = draft_request_allowed
+  let effective_repo_arg = effective_repo_arg
   let pr_create_failure_may_have_created_pr =
     pr_create_failure_may_have_created_pr
   let pr_create_failure_already_exists = pr_create_failure_already_exists

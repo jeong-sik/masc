@@ -20,10 +20,6 @@ module Float = Stdlib.Float
 module CC = Cascade_config
 module Health = Cascade_health_tracker
 module StringSet = Set.Make (String)
-let ollama_provider_name =
-  Llm_provider.Provider_config.string_of_provider_kind
-    Llm_provider.Provider_config.Ollama
-;;
 
 (* ── Shared helpers ─────────────────────────────────── *)
 
@@ -34,36 +30,13 @@ let json_string_option = function
   | None -> `Null
 ;;
 
-let is_ollama_cloud_profile profile_name =
-  String.starts_with ~prefix:"tier.ollama_cloud" profile_name
-  || String.starts_with ~prefix:(ollama_provider_name ^ "_cloud") profile_name
-;;
-
-let is_ollama_cloud_candidate ~profile_name (c : CC.candidate_info) =
-  is_ollama_cloud_profile profile_name
-  ||
-  match c.provider_name with
-  | Some provider_name ->
-    String.equal provider_name ollama_provider_name
-    && (String.ends_with ~suffix:":cloud" c.model_string
-        || List.exists
-             (fun model -> String.ends_with ~suffix:":cloud" model)
-             c.expanded_models)
-  | None -> false
-;;
-
-let candidate_to_json ~profile_name (c : CC.candidate_info) : Yojson.Safe.t =
-  let provider_name, display_provider_name, runtime_kind =
-    if is_ollama_cloud_candidate ~profile_name c
-    then Some (ollama_provider_name ^ "_cloud"), Some "Ollama Cloud", Some "direct_api"
-    else c.provider_name, c.display_provider_name, c.runtime_kind
-  in
+let candidate_to_json (c : CC.candidate_info) : Yojson.Safe.t =
   `Assoc
     [ "model", `String c.model_string
     ; "display_model", `String c.display_model_string
-    ; "provider_name", json_string_option provider_name
-    ; "display_provider_name", json_string_option display_provider_name
-    ; "runtime_kind", json_string_option runtime_kind
+    ; "provider_name", json_string_option c.provider_name
+    ; "display_provider_name", json_string_option c.display_provider_name
+    ; "runtime_kind", json_string_option c.runtime_kind
     ; "expanded_models", `List (List.map (fun value -> `String value) c.expanded_models)
     ; "config_weight", `Int c.config_weight
     ; "effective_weight", `Int c.effective_weight
@@ -216,7 +189,7 @@ let profile_json_of_trace ~keeper_assignable name (trace : CC.selection_trace) =
     [ "name", `String name
     ; "source", `String (source_to_string trace.source)
     ; "keeper_assignable", `Bool keeper_assignable
-    ; "candidates", `List (List.map (candidate_to_json ~profile_name:name) trace.candidates)
+    ; "candidates", `List (List.map candidate_to_json trace.candidates)
     ]
 ;;
 
@@ -944,19 +917,15 @@ let health_json ?(window_minutes = 30) ?(base_path : string option) () =
 
 (* ── Client capacity projection ─────────────────────── *)
 
-(** Classify a capacity registry key for the dashboard.  Both sentinel
-    predicates come from {!Masc_network_defaults}: CLI transports via
-    {!Masc_network_defaults.is_cli_sentinel_url} (matches the [cli:]
-    prefix) and ollama endpoints via
-    {!Masc_network_defaults.is_ollama_url} (matches the well-known
-    port).  Everything else is reported as [other] so operators can
-    spot surprise registrations (e.g. a manually-registered HTTP
-    slot). *)
+(** Classify a capacity registry key for the dashboard. CLI transports keep
+    their sentinel label; HTTP endpoints are labelled by registered probe
+    capability instead of by provider brand or default port. Everything else is
+    [other], so operators can spot surprise registrations. *)
 let classify_capacity_key url =
   if Masc_network_defaults.is_cli_sentinel_url url
   then "cli"
-  else if Masc_network_defaults.is_ollama_url url
-  then "ollama"
+  else if Cascade_capacity_probe.can_probe ~url
+  then "http_probe"
   else "other"
 ;;
 

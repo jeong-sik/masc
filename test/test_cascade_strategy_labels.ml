@@ -51,12 +51,10 @@ let test_cascade_strategy_kind_labels_lowercase () =
         (String.lowercase_ascii s) s)
     Cascade_strategy.all_kinds
 
-let test_cascade_strategy_all_kinds_documented_seven () =
+let test_cascade_strategy_all_kinds_documented_two () =
   Alcotest.(check int)
-    "all_kinds covers the 7 documented strategies (Failover, \
-     Capacity_aware, Weighted_random, Circuit_breaker_cycling, \
-     Priority_tier, Sticky, Round_robin)"
-    7
+    "all_kinds covers the shipped strategies (Failover, Priority_tier)"
+    2
     (List.length Cascade_strategy.all_kinds)
 
 (* ── Cascade_strategy_trace.event_kind ───────────────────────── *)
@@ -99,8 +97,8 @@ let () =
             test_cascade_strategy_kind_labels_unique;
           Alcotest.test_case "labels lowercase" `Quick
             test_cascade_strategy_kind_labels_lowercase;
-          Alcotest.test_case "all_kinds documents seven strategies"
-            `Quick test_cascade_strategy_all_kinds_documented_seven;
+          Alcotest.test_case "all_kinds documents shipped strategies"
+            `Quick test_cascade_strategy_all_kinds_documented_two;
         ] );
       ( "cascade_strategy_trace.event_kind",
         [

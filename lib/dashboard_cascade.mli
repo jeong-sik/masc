@@ -297,7 +297,7 @@ val provider_scheme_of_model_string : string -> string
 val declared_provider_schemes_of_config : ?config_path:string -> unit -> string list
 
 (** JSON snapshot of the {!Cascade_client_capacity} registry —
-    the per-URL/sentinel slot table used for ollama HTTP and CLI
+    the per-URL/sentinel slot table used for registered HTTP probes and CLI
     subprocess throttling.
 
     Shape:
@@ -311,7 +311,7 @@ val declared_provider_schemes_of_config : ?config_path:string -> unit -> string 
             "active": 0,
             "available": 1 },
           { "key": "http://127.0.0.1:11434",
-            "kind": "ollama",
+            "kind": "http_probe",
             "total": 1,
             "active": 1,
             "available": 0 },
@@ -322,8 +322,8 @@ val declared_provider_schemes_of_config : ?config_path:string -> unit -> string 
 
     Entries are sorted by [(kind, key)] for stable rendering.
     The [kind] field is the dashboard's classification:
-    [cli] for [cli:*] sentinels, [ollama] for keys containing
-    [:11434], [other] for any manually-registered slot.
+    [cli] for [cli:*] sentinels, [http_probe] for registered probe URLs,
+    [other] for any manually-registered slot.
 
     @since 0.9.9 *)
 val client_capacity_json : unit -> Yojson.Safe.t
@@ -362,7 +362,7 @@ val client_capacity_json : unit -> Yojson.Safe.t
 
     @param limit   max events returned (default 100).
     @param kind    dashboard classification filter: one of
-           ["cli"], ["ollama"], ["other"].  Unknown filters return
+           ["cli"], ["http_probe"], ["other"].  Unknown filters return
            an empty event list; omitting returns every kind.
     @param since_ts  keep only events with [ts >= since_ts].
 

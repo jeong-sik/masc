@@ -6,20 +6,10 @@
 #
 # Baseline (2026-05-05, HEAD 5806519c0b): the audit at
 # docs/audit/2026-05-05-fundamental-roadmap-reality-check.md found that
-# `lib/cascade/capabilities.ml` was deleted but its model lists migrated
-# into lib/provider_adapter.ml (1,623 lines). The model-name literals
-# below are grandfathered as existing tech debt, NOT endorsed. The
-# cleanup is queued for Sprint 2 (oas backend dispatch separation) /
-# Sprint 3 follow-up of joyful-tumbling-dragon.md and tracked as gap #6.
+# `lib/cascade/capabilities.ml` was deleted but model lists had migrated
+# into the now-removed provider adapter. Keep this allowlist narrow: stale
+# entries for deleted implementation files must be removed instead of
+# grandfathered.
 
 # Documentation example in interface comment (legitimate)
 lib/keeper/keeper_hooks_oas.mli:22
-
-# lib/provider_adapter.ml model list — gap #6, queued for Sprint 2/3
-lib/provider_adapter.ml:382
-lib/provider_adapter.ml:383
-lib/provider_adapter.ml:384
-lib/provider_adapter.ml:385
-lib/provider_adapter.ml:386
-lib/provider_adapter.ml:387
-lib/provider_adapter.ml:407

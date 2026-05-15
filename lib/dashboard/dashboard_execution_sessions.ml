@@ -265,7 +265,7 @@ let build_session_contexts seeds operation_contexts : session_context list =
            handoff_json
              ~surface:"command"
              ~command_surface:
-               (if Option.is_some linked_operation_id then "operations" else "swarm")
+               (if Option.is_some linked_operation_id then "operations" else "agents")
              ?operation_id:linked_operation_id
              ~label:"세션 원인 보기"
              ~target_type:"operation"

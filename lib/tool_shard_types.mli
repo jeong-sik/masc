@@ -83,3 +83,9 @@ val keeper_preflight_tools : Masc_domain.tool_schema list
 
 val keeper_github_pr_tools : Masc_domain.tool_schema list
 (** Pure: GitHub PR workflow tool schemas. *)
+
+val keeper_pr_review_tools : Masc_domain.tool_schema list
+(** Pure: keeper_pr_review tool schemas (read / approve / request changes). *)
+
+val coding_workspace_tool_names : string list
+(** Pure: tool name allowlist used to assemble coding_workspace_tools. *)

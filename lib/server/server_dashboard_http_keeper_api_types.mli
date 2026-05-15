@@ -99,3 +99,24 @@ val manifest_row_matches :
   bool
 (** Pure: true when the runtime-manifest row matches the given keeper_name +
     trace_id (and optionally turn_id). *)
+
+val unique_present_paths : string option list -> string list
+(** Pure: dedupe + trim filtered string list. *)
+
+val provider_attempt_row_json :
+  Keeper_runtime_manifest.t -> Yojson.Safe.t
+(** Pure: provider-attempt manifest row → JSON record. *)
+
+val string_contains_substring : string -> string -> bool
+(** Pure: naive substring presence test. *)
+
+val runtime_trace_keeps_provider_attempt_provenance_key : string -> bool
+(** Pure: allowlist for provider/model-related decision keys in
+    runtime-trace responses. *)
+
+val runtime_trace_redacts_provider_model_key : string -> bool
+(** Pure: redact-by-substring policy for the runtime-trace public surface. *)
+
+val runtime_trace_public_json : Yojson.Safe.t -> Yojson.Safe.t
+(** Pure: recursively redact provider/model identity fields from runtime
+    trace JSON before returning to external dashboards. *)

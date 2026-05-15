@@ -10538,9 +10538,20 @@ let test_tools_for_gated_affordance_covers_each_variant () =
           [ "board_curation"; "task_claim"; "board_curation" ]));
   check
     (list string)
-    "generic board affordance has no forced specific tool"
-    []
+    "generic board affordance keeps active board tools visible"
+    [ "keeper_board_comment"; "keeper_board_post" ]
     (Surface.preferred_tool_names_for_turn_affordances [ "board_post_or_comment" ]);
+  check
+    (list string)
+    "task claim affordance keeps active claim tools visible"
+    [ "keeper_task_claim"; "masc_claim_next"; "masc_claim_task" ]
+    (Surface.preferred_tool_names_for_turn_affordances [ "task_claim" ]);
+  check
+    bool
+    "preferred board comment can satisfy required gate"
+    true
+    (Masc_mcp.Keeper_tool_disclosure.tool_name_can_satisfy_required_contract
+       "keeper_board_comment");
   check
     bool
     "work discovery includes keeper-native task creation"

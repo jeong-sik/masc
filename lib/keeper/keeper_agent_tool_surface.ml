@@ -251,14 +251,25 @@ let preferred_tool_names_for_turn_affordances turn_affordances =
   |> List.concat_map (function
        | Board_curation ->
          [ "keeper_board_curation_submit" ]
-       | Board_post_or_comment
-       | Message_sweep
-       | Reply_in_room
-       | Task_claim
-       | Task_audit
-       | Task_verify
-       | Work_discovery
-       | Inspect_worktree_delta -> [])
+       | Board_post_or_comment ->
+         [ "keeper_board_comment"; "keeper_board_post" ]
+       | Message_sweep ->
+         [ "masc_keeper_msg"; "masc_broadcast" ]
+       | Reply_in_room ->
+         [ "keeper_board_comment"; "keeper_board_post";
+           "masc_keeper_msg"; "masc_broadcast" ]
+       | Task_claim ->
+         [ "keeper_task_claim"; "masc_claim_next"; "masc_claim_task" ]
+       | Task_audit ->
+         [ "keeper_tasks_audit" ]
+       | Task_verify ->
+         [ "keeper_task_submit_for_verification"; "keeper_task_done";
+           "masc_transition" ]
+       | Work_discovery ->
+         [ "keeper_task_claim"; "keeper_task_create"; "masc_add_task";
+           "keeper_board_comment"; "keeper_board_post" ]
+       | Inspect_worktree_delta ->
+         [ "keeper_bash" ])
   |> Keeper_types.dedupe_keep_order
 
 (* Filtered variant of [turn_affordances_require_tool_gate]:  a gated

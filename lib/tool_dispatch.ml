@@ -188,15 +188,14 @@ let dispatch ~(token : Tool_token.t) ~args : Tool_result.t option =
       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         Some (Tool_result.of_exn ~tool_name:name ~start_time exn)
     in
-    (match result with
-     | Some tr ->
-       (* RFC-0084 PR-I-2.d — apply the registered result transformer
-          (e.g. Tool_output_validation cap) inside the dispatch loop.
-          PR-I-3 removed the legacy run_post_hooks call; typed
-          observers fire from guarded_dispatch via
-          [run_typed_post_hooks] for every outcome arm. *)
-       Some (apply_result_transformer tr)
-     | None -> None)
+    (* RFC-0085 PR-5 — result transformer + typed post-hooks were
+       fired *inside* this function in RFC-0084.  PR-5 moves both
+       side-effects to [Tool_dispatch_emit.finalize] so MCP
+       [dispatch_by_tag], [dispatch_internal_keeper_runtime_tool], and
+       inline coord (which bypass this private [dispatch]) share the
+       same observer fanout.  Callers of [dispatch] / [guarded_dispatch]
+       must run [Tool_dispatch_emit.finalize] on the return value. *)
+    result
   | None -> None
 
 (** Structured dispatch with hook support.
@@ -232,25 +231,32 @@ let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.t option =
   let result, _outcome =
     Tool_telemetry.with_span ~tool_name:token.name (fun _trace_id_thunk ->
       let r = dispatch_structured ~token ~args in
-      (* RFC-0084 PR-I-1 — fire typed post-hooks against the typed
-         {!Dispatch_outcome.t}, regardless of which arm ran.  Legacy
-         [post_hooks] continue to fire from inside [dispatch] for the
-         [Handled] arm only (unchanged).  When no typed hook is
-         registered (PR-I-1 ships zero in-tree registrations), this
-         call is a single [List.iter] over an empty ref — observable
-         cost ~0. *)
-      let typed_outcome : Dispatch_outcome.t =
+      (* RFC-0085 PR-5 — finalisation is done inline here (we cannot
+         depend on [Tool_dispatch_emit] without creating a dependency
+         cycle).  The logic is byte-identical to
+         [Tool_dispatch_emit.finalize], and any change must be mirrored
+         in both places.  Future RFC may extract a shared private
+         function once [Tool_dispatch_emit] is restructured.
+
+         Order: transformer first (mutates the Tool_result.t inside the
+         [Handled] arm), then typed observer fan-out. *)
+      let r' =
         match r with
+        | Some tr -> Some (apply_result_transformer tr)
+        | None -> r
+      in
+      let typed_outcome : Dispatch_outcome.t =
+        match r' with
         | Some _ -> Handled
         | None -> No_handler
       in
-      run_typed_post_hooks typed_outcome r;
+      run_typed_post_hooks typed_outcome r';
       let outcome =
-        match r with
+        match r' with
         | Some _ -> "handled"
         | None -> "no_handler"
       in
-      r, outcome)
+      r', outcome)
   in
   result
 ;;

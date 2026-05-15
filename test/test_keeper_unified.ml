@@ -9175,9 +9175,19 @@ let test_required_tool_satisfaction_handles_passive_tools () =
     (satisfies_required_tool "Read" (`Assoc []));
   check
     bool
+    "Grep alias satisfies tool-presence contract"
+    true
+    (satisfies_required_tool "Grep" (`Assoc []));
+  check
+    bool
     "Read alias remains passive progress"
     true
     (KTD.is_passive_status_tool_name "Read");
+  check
+    bool
+    "Grep alias remains passive progress"
+    true
+    (KTD.is_passive_status_tool_name "Grep");
   check
     bool
     "read-only gh shell is passive"

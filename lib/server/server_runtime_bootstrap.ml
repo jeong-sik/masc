@@ -310,7 +310,7 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   let path_diagnostics =
     Server_base_path_diagnostics.detect
       ?input_base_path
-      ?env_masc_base_path:(Env_config_core.base_path_raw_opt ())
+      ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
       ~effective_base_path:state.room_config.base_path
       ~effective_masc_root:(Coord.masc_root_dir state.room_config)
       ()
@@ -323,7 +323,7 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
 let runtime_path_diagnostics ?input_base_path (state : Mcp_server.server_state) =
   Server_base_path_diagnostics.detect
     ?input_base_path
-    ?env_masc_base_path:(Env_config_core.base_path_raw_opt ())
+    ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
     ~effective_base_path:state.room_config.base_path
     ~effective_masc_root:(Coord.masc_root_dir state.room_config)
     ()

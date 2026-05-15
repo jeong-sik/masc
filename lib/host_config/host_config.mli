@@ -64,10 +64,16 @@ type t =
         (** Directory for runtime policy files.  Default [<tmp>] from
             [host ()]. *)
   ; base_path : string option
-        (** Resolved [MASC_BASE_PATH] (or default fallback).  When [None],
-            the caller treats it as "no operator-provided base path".
-            RFC-0085 PR-6: surfaces the env-var processing that today
-            lives in [Env_config_core.base_path_raw_opt]. *)
+        (** Resolved [MASC_BASE_PATH] in *normalised* form (path
+            normalisation applied).  [None] when unset or empty after
+            normalisation.  RFC-0085 PR-9 replaces
+            [Env_config_core.base_path_opt]. *)
+  ; base_path_raw : string option
+        (** [MASC_BASE_PATH] value as read from the environment, with
+            whitespace trimmed but no path normalisation.  Used by
+            routes / dashboard / config_doctor inputs that surface
+            the operator's literal input.  RFC-0085 PR-9 replaces
+            [Env_config_core.base_path_raw_opt]. *)
   ; config_dir : string option
         (** Resolved [MASC_CONFIG_DIR].  [None] when unset. *)
   ; data_dir : string option

@@ -143,8 +143,15 @@ val get_port : default:int -> string -> int
 val base_path_env_key : string
 val base_path_input_env_key : string
 val base_path_source_opt : unit -> (string * string) option
-val base_path_raw_opt : unit -> string option
-val base_path_opt : unit -> string option
+
+(* RFC-0085 PR-9 — [base_path_raw_opt] and [base_path_opt] are no
+   longer part of the public surface.  External callers read the
+   normalised env-derived base_path from
+   [(Host_config.from_env ()).base_path] instead.  The two functions
+   remain file-private inside [env_config_core.ml] because
+   [base_path] / [sb_path_opt] still reach for the raw value
+   internally; a follow-up RFC migrates those too. *)
+
 val running_under_test_executable : unit -> bool
 val test_allow_home_base_path_env : string
 val base_path_prod_guard : string -> string

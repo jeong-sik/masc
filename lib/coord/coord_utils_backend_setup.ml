@@ -111,7 +111,7 @@ let sync_test_base_path_env resolved_path =
   if running_under_test_executable ()
      && not (test_base_path_override_enabled ())
   then
-    match Env_config_core.base_path_opt () with
+    match (Host_config.from_env ()).base_path with
     | Some current when String.equal current resolved_path -> ()
     | _ ->
         Unix.putenv Env_config_core.base_path_env_key resolved_path;
@@ -166,7 +166,7 @@ let resolve_requested_base_path path =
     - otherwise resolve the requested path to its git root *)
 let resolve_masc_base_path path =
   let requested = resolve_requested_base_path path in
-  match Env_config_core.base_path_opt () with
+  match (Host_config.from_env ()).base_path with
   | Some explicit
     when running_under_test_executable ()
          && not (test_base_path_override_enabled ()) ->

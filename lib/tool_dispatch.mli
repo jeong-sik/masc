@@ -50,7 +50,29 @@ type pre_hook = name:string -> args:Yojson.Safe.t -> pre_hook_action
 
 type post_hook = Tool_result.t -> Tool_result.t
 (** Post-hook: receives result after handler completes.
-    Return the (possibly transformed) tool result. *)
+    Return the (possibly transformed) tool result.
+
+    RFC-0084 PR-I-1 keeps this legacy surface; PR-I-2.* migrates the
+    5 in-tree registrations to the typed [post_hook_typed] surface
+    below; PR-I-3 removes this type. *)
+
+type post_hook_typed =
+  Dispatch_outcome.t -> Tool_result.t option -> unit
+(** Typed post-hook (RFC-0084 PR-I-1).
+
+    Receives the typed {!Dispatch_outcome.t} together with the
+    handler-produced {!Tool_result.t} (when the [Handled] arm ran)
+    once dispatch completes — regardless of which arm fired
+    ([Handled] / [Rejected_by_capability] / [Rejected_by_pre_hook] /
+    [No_handler] / [Handler_error]).
+
+    The optional [Tool_result.t] is [Some _] only on the [Handled]
+    arm; other arms receive [None].  Observer-only ([unit] return) —
+    cannot mutate the outcome.
+
+    PR-I-1 introduces the surface with zero in-tree registrations;
+    PR-I-2.* migrates the existing 5 [register_post_hook] call-sites
+    one at a time, each preserving its current observation semantics. *)
 
 val pre_hooks : pre_hook list ref
 (** Mutable list of registered pre-hooks. *)
@@ -58,8 +80,16 @@ val pre_hooks : pre_hook list ref
 val post_hooks : post_hook list ref
 (** Mutable list of registered post-hooks. *)
 
+val typed_post_hooks : post_hook_typed list ref
+(** Mutable list of registered typed post-hooks (RFC-0084 PR-I-1). *)
+
 val register_pre_hook : pre_hook -> unit
 val register_post_hook : post_hook -> unit
+
+val register_typed_post_hook : post_hook_typed -> unit
+(** Register a typed post-hook (RFC-0084 PR-I-1).  See
+    {!post_hook_typed} for the contract. *)
+
 val clear_hooks : unit -> unit
 
 val run_pre_hooks :
@@ -72,6 +102,15 @@ val run_post_hooks : Tool_result.t -> Tool_result.t
 (** Execute registered post-hooks in order, threading the result.
     Used by keeper dispatch to feed metrics/usage hooks for tools
     that bypass [dispatch]. *)
+
+val run_typed_post_hooks :
+  Dispatch_outcome.t -> Tool_result.t option -> unit
+(** Execute registered typed post-hooks against the typed outcome
+    (RFC-0084 PR-I-1).  Invoked from [guarded_dispatch] for every
+    arm with the optional handler {!Tool_result.t} ([Some _] on the
+    [Handled] arm, [None] otherwise).  Fires in addition to the
+    legacy [run_post_hooks] call inside [dispatch] (which still
+    fires only on the [Handled] arm). *)
 
 (* RFC-0084 PR-11 — [val dispatch_structured] removed from the public mli
    surface. PR-7~9 migration verified external callers = 0 (rg in lib/ +

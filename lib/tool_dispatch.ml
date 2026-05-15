@@ -74,11 +74,40 @@ type pre_hook_action =
 type pre_hook = name:string -> args:Yojson.Safe.t -> pre_hook_action
 
 (** Post-hook: receives result after handler completes.
-    Return the (possibly transformed) tool result. *)
+    Return the (possibly transformed) tool result.
+
+    RFC-0084 PR-I-1 keeps this legacy surface as-is and adds the
+    typed [post_hook_typed] surface below in parallel.  PR-I-2.*
+    migrates the 5 in-tree registrations one at a time; PR-I-3
+    removes this type once those land. *)
 type post_hook = Tool_result.t -> Tool_result.t
+
+(** Typed post-hook (RFC-0084 PR-I-1).
+
+    Receives the typed {!Dispatch_outcome.t} together with the
+    handler-produced {!Tool_result.t} (when the [Handled] arm ran)
+    once dispatch completes — regardless of which arm fired
+    ([Handled] / [Rejected_by_capability] / [Rejected_by_pre_hook] /
+    [No_handler] / [Handler_error]).
+
+    The optional [Tool_result.t] is [Some _] only on the [Handled]
+    arm (matching legacy [post_hook] semantics for that arm); other
+    arms receive [None] so observers can pattern-match on the
+    typed outcome first and read [tool_name] / [success] /
+    [duration_ms] from the result only when relevant.
+
+    Returns [unit] because typed hooks are *observers* (metrics,
+    spans, audit log) — they cannot mutate the dispatch outcome.
+    The mutation door from the legacy [post_hook] surface is closed
+    on purpose; it was historically used for result transformation
+    (e.g. redaction) which now belongs in a dedicated layer rather
+    than mid-dispatch.  PR-I-2.* migrations preserve observation
+    semantics. *)
+type post_hook_typed = Dispatch_outcome.t -> Tool_result.t option -> unit
 
 let pre_hooks : pre_hook list ref = ref []
 let post_hooks : post_hook list ref = ref []
+let typed_post_hooks : post_hook_typed list ref = ref []
 
 let register_pre_hook (hook : pre_hook) =
   with_dispatch_rw (fun () -> pre_hooks := !pre_hooks @ [hook])
@@ -86,8 +115,14 @@ let register_pre_hook (hook : pre_hook) =
 let register_post_hook (hook : post_hook) =
   with_dispatch_rw (fun () -> post_hooks := !post_hooks @ [hook])
 
+let register_typed_post_hook (hook : post_hook_typed) =
+  with_dispatch_rw (fun () -> typed_post_hooks := !typed_post_hooks @ [hook])
+
 let clear_hooks () =
-  with_dispatch_rw (fun () -> pre_hooks := []; post_hooks := [])
+  with_dispatch_rw (fun () ->
+    pre_hooks := [];
+    post_hooks := [];
+    typed_post_hooks := [])
 
 (** Run pre-hooks in order, threading coerced args through the chain.
     First [Reject] wins (short-circuit). [Proceed] replaces args for
@@ -106,6 +141,17 @@ let run_pre_hooks ~name ~args =
 (** Run post-hooks in order, threading the result through. *)
 let run_post_hooks result =
   List.fold_left (fun r hook -> hook r) result !post_hooks
+
+(** Run typed post-hooks in order against the typed dispatch outcome.
+    Each hook is invoked for its side-effects; mutation of the
+    outcome is not permitted (see [post_hook_typed] above).
+
+    [result] is [Some r] only on the [Handled] arm; other arms
+    pass [None] so observers can branch on the typed outcome first. *)
+let run_typed_post_hooks
+    (outcome : Dispatch_outcome.t)
+    (result : Tool_result.t option) : unit =
+  List.iter (fun hook -> hook outcome result) !typed_post_hooks
 
 (** O(1) dispatch.  Returns [Some result] when a handler is found,
     [None] when the tool name is unknown to the registry.
@@ -163,6 +209,19 @@ let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.t option =
   let result, _outcome =
     Tool_telemetry.with_span ~tool_name:token.name (fun _trace_id_thunk ->
       let r = dispatch_structured ~token ~args in
+      (* RFC-0084 PR-I-1 — fire typed post-hooks against the typed
+         {!Dispatch_outcome.t}, regardless of which arm ran.  Legacy
+         [post_hooks] continue to fire from inside [dispatch] for the
+         [Handled] arm only (unchanged).  When no typed hook is
+         registered (PR-I-1 ships zero in-tree registrations), this
+         call is a single [List.iter] over an empty ref — observable
+         cost ~0. *)
+      let typed_outcome : Dispatch_outcome.t =
+        match r with
+        | Some _ -> Handled
+        | None -> No_handler
+      in
+      run_typed_post_hooks typed_outcome r;
       let outcome =
         match r with
         | Some _ -> "handled"

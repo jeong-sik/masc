@@ -2345,6 +2345,18 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
     (contains_substring prompt "assignment actions, not execution progress");
   check
     bool
+    "masc_code_git status is documented as passive"
+    true
+    (contains_substring prompt "masc_code_git action=status/diff/log");
+  check
+    bool
+    "structured shell read ops are documented as passive"
+    true
+    (contains_substring prompt
+       "structured `keeper_shell` read ops (`rg`, `ls`, `cat`, `find`, \
+        `git_status`, `git_log`, `git_diff`)");
+  check
+    bool
     "gh pr create path not documented"
     false
     (contains_substring prompt "keeper_shell op=gh cmd='pr create --draft");

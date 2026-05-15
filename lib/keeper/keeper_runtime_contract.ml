@@ -252,7 +252,9 @@ let runtime_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
 let contains_substring haystack needle =
   String_util.contains_substring haystack needle
 
-let json_string_field name json = Json_util.get_string_nonempty json name
+let json_string_field name = function
+  | `Assoc _ as json -> Json_util.get_string_nonempty json name
+  | _ -> None
 
 let first_string_field names json =
   List.find_map (fun name -> json_string_field name json) names

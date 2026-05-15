@@ -27,7 +27,7 @@
     - {b Persistence loaders}: [load_persisted_posts],
       [load_persisted_comments], [load_persisted_votes],
       [recalculate_reply_counts].
-    - {b Quarantine helpers}: [is_fixture_voter_target],
+    - {b Quarantine helpers}: [classify_voter_target],
       [quarantine_enabled].
     - {b Global store}: [global_lazy] ref.
     - {b Flair extractor internals}: [flair_tag_re],
@@ -261,14 +261,27 @@ val post_to_yojson_with_karma :
     pre-computed [score = votes_up - votes_down] so the
     client does not have to derive it. *)
 
-(** {1 Fixture-voter quarantine (#9886)} *)
+(** {1 Fixture-voter quarantine (#9886, RFC-0089 §4-3 G2)} *)
 
-val is_fixture_voter_target : string -> bool
-(** Returns [true] when [target] (a [room:agent] tuple or bare
-    agent name) refers to a fixture / synthetic / test voter.
-    Matches the [hot-voter-] / [synthetic-voter-] /
-    [test-voter-] prefixes that production traffic never uses.
-    Pinned for behaviour-tests under
+type fixture_voter_kind =
+  | Hot_voter           (** ["hot-voter-"] prefix. *)
+  | Synthetic_voter     (** ["synthetic-voter-"] prefix. *)
+  | Test_voter          (** ["test-voter-"] prefix. *)
+
+type voter_kind =
+  | Production_voter
+  | Fixture_voter of fixture_voter_kind
+
+val classify_voter_target : string -> voter_kind
+(** [classify_voter_target target] derives the typed {!voter_kind}
+    from a vote-log target key ([room:agent] tuple or bare agent
+    name).  Extracts the voter segment after the rightmost [':']
+    then dispatches on the [hot-voter-] / [synthetic-voter-] /
+    [test-voter-] prefixes (matching the legacy
+    [is_fixture_voter_target] semantics exactly).
+
+    Returns [Production_voter] for every target that does not
+    match a fixture prefix.  Pinned for behaviour-tests under
     {!test/test_board_fixture_detector}. *)
 
 val quarantine_enabled : unit -> bool

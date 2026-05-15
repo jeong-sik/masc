@@ -553,17 +553,37 @@ let recalculate_reply_counts store =
 
     Env var: [MASC_BOARD_VOTE_QUARANTINE=1] promotes detection from
     warn-and-load to skip-fixture-rows. Defaults to warn-only to
-    avoid surprising live operators.  *)
-let is_fixture_voter_target target =
-  let voter =
-    match String.rindex_opt target ':' with
-    | Some idx when idx + 1 < String.length target ->
-        String.sub target (idx + 1) (String.length target - idx - 1)
-    | _ -> target
-  in
-  String.starts_with ~prefix:"hot-voter-" voter
-  || String.starts_with ~prefix:"synthetic-voter-" voter
-  || String.starts_with ~prefix:"test-voter-" voter
+    avoid surprising live operators.
+
+    RFC-0089 §4-3 G2: voter classification is now typed via
+    {!voter_kind}.  The boundary parser {!classify_voter_target}
+    extracts the voter segment from the persisted target key and
+    derives the variant once; downstream call sites pattern-match
+    instead of re-running [String.starts_with]. *)
+
+type fixture_voter_kind =
+  | Hot_voter           (* "hot-voter-" prefix *)
+  | Synthetic_voter     (* "synthetic-voter-" prefix *)
+  | Test_voter          (* "test-voter-" prefix *)
+
+type voter_kind =
+  | Production_voter
+  | Fixture_voter of fixture_voter_kind
+
+let extract_voter_segment target =
+  match String.rindex_opt target ':' with
+  | Some idx when idx + 1 < String.length target ->
+      String.sub target (idx + 1) (String.length target - idx - 1)
+  | _ -> target
+
+let classify_voter_target (target : string) : voter_kind =
+  let voter = extract_voter_segment target in
+  if String.starts_with ~prefix:"hot-voter-" voter then Fixture_voter Hot_voter
+  else if String.starts_with ~prefix:"synthetic-voter-" voter then
+    Fixture_voter Synthetic_voter
+  else if String.starts_with ~prefix:"test-voter-" voter then
+    Fixture_voter Test_voter
+  else Production_voter
 
 let quarantine_enabled () =
   (* #9886: production ledger observed 112/112 (100%) fixture-pattern
@@ -606,17 +626,17 @@ let load_persisted_votes store =
             | Some t -> t
             | None -> 0.0
           in
-          if is_fixture_voter_target target then begin
-            Stdlib.incr fixture_detected;
-            if quarantine then Stdlib.incr quarantined
-            else begin
-              Hashtbl.replace store.vote_log target (direction, ts);
-              Stdlib.incr loaded
-            end
-          end else begin
-            Hashtbl.replace store.vote_log target (direction, ts);
-            Stdlib.incr loaded
-          end
+          (match classify_voter_target target with
+           | Fixture_voter _ ->
+               Stdlib.incr fixture_detected;
+               if quarantine then Stdlib.incr quarantined
+               else begin
+                 Hashtbl.replace store.vote_log target (direction, ts);
+                 Stdlib.incr loaded
+               end
+           | Production_voter ->
+               Hashtbl.replace store.vote_log target (direction, ts);
+               Stdlib.incr loaded)
         | _ -> ()
       ) lines;
       if !fixture_detected > 0 then begin

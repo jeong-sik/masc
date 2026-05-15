@@ -1646,3 +1646,13 @@
  (name test_pr_i_2e_bootstrap_loops_typed)
  (modules test_pr_i_2e_bootstrap_loops_typed)
  (libraries alcotest))
+
+; RFC-0084 PR-I-3 — legacy post-hook surface removal (final).
+; Pins 0 references to register_post_hook / run_post_hooks across
+; all of lib/, 0 declarations of legacy entries in the mli, and
+; presence of the typed surface entries (register_typed_post_hook,
+; run_typed_post_hooks, set_result_transformer).
+(test
+ (name test_pr_i_3_legacy_post_hook_removed)
+ (modules test_pr_i_3_legacy_post_hook_removed)
+ (libraries alcotest))

@@ -73,14 +73,11 @@ type pre_hook_action =
 (** Pre-hook: receives tool name and args before handler runs. *)
 type pre_hook = name:string -> args:Yojson.Safe.t -> pre_hook_action
 
-(** Post-hook: receives result after handler completes.
-    Return the (possibly transformed) tool result.
-
-    RFC-0084 PR-I-1 keeps this legacy surface as-is and adds the
-    typed [post_hook_typed] surface below in parallel.  PR-I-2.*
-    migrates the 5 in-tree registrations one at a time; PR-I-3
-    removes this type once those land. *)
-type post_hook = Tool_result.t -> Tool_result.t
+(* RFC-0084 PR-I-3 — legacy [type post_hook = Tool_result.t -> Tool_result.t]
+   removed.  All 5 in-tree call-sites migrated by PR-I-2.a..e:
+   tool_metrics / tool_usage_log / otel_dispatch_hook / tool_output_validation
+   / server_bootstrap_loops.  Observation moved to [post_hook_typed]
+   below; transformation moved to [result_transformer] further down. *)
 
 (** Typed post-hook (RFC-0084 PR-I-1).
 
@@ -106,14 +103,10 @@ type post_hook = Tool_result.t -> Tool_result.t
 type post_hook_typed = Dispatch_outcome.t -> Tool_result.t option -> unit
 
 let pre_hooks : pre_hook list ref = ref []
-let post_hooks : post_hook list ref = ref []
 let typed_post_hooks : post_hook_typed list ref = ref []
 
 let register_pre_hook (hook : pre_hook) =
   with_dispatch_rw (fun () -> pre_hooks := !pre_hooks @ [hook])
-
-let register_post_hook (hook : post_hook) =
-  with_dispatch_rw (fun () -> post_hooks := !post_hooks @ [hook])
 
 let register_typed_post_hook (hook : post_hook_typed) =
   with_dispatch_rw (fun () -> typed_post_hooks := !typed_post_hooks @ [hook])
@@ -144,7 +137,6 @@ let apply_result_transformer (r : Tool_result.t) : Tool_result.t =
 let clear_hooks () =
   with_dispatch_rw (fun () ->
     pre_hooks := [];
-    post_hooks := [];
     typed_post_hooks := [];
     result_transformer_ref := None)
 
@@ -162,9 +154,10 @@ let run_pre_hooks ~name ~args =
   in
   go args !pre_hooks
 
-(** Run post-hooks in order, threading the result through. *)
-let run_post_hooks result =
-  List.fold_left (fun r hook -> hook r) result !post_hooks
+(* RFC-0084 PR-I-3 — [run_post_hooks] removed alongside the legacy
+   [post_hook] type and [post_hooks] ref.  Observation flows through
+   [run_typed_post_hooks] below; transformation through
+   [apply_result_transformer]. *)
 
 (** Run typed post-hooks in order against the typed dispatch outcome.
     Each hook is invoked for its side-effects; mutation of the
@@ -198,11 +191,11 @@ let dispatch ~(token : Tool_token.t) ~args : Tool_result.t option =
     (match result with
      | Some tr ->
        (* RFC-0084 PR-I-2.d — apply the registered result transformer
-          (e.g. Tool_output_validation cap) before legacy post-hooks
-          run.  Post-hooks see the transformed result, which matches
-          the pre-PR-I order: cap-then-observe. *)
-       let tr = apply_result_transformer tr in
-       Some (run_post_hooks tr)
+          (e.g. Tool_output_validation cap) inside the dispatch loop.
+          PR-I-3 removed the legacy run_post_hooks call; typed
+          observers fire from guarded_dispatch via
+          [run_typed_post_hooks] for every outcome arm. *)
+       Some (apply_result_transformer tr)
      | None -> None)
   | None -> None
 

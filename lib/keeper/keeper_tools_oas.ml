@@ -467,7 +467,13 @@ let make_keeper_tool_handler
         meta.name
         ~tool_name:name
         ~success:false;
-      ignore (Tool_dispatch.run_post_hooks validation_result);
+      (* RFC-0084 PR-I-3 — run_post_hooks retired.  Validation failure
+         is a Handler_error from the typed-outcome perspective; emit
+         the typed observers directly so metrics / usage_log still
+         see it. *)
+      Tool_dispatch.run_typed_post_hooks
+        (Dispatch_outcome.Handler_error { exn = "validation_failed" })
+        (Some validation_result);
       broadcast_keeper_tool_call_event
         ~keeper_name:meta.name
         ~tool_name:name
@@ -567,7 +573,10 @@ let make_keeper_tool_handler
                    failure_class = Some Tool_result.Runtime_failure
                  }
              in
-             ignore (Tool_dispatch.run_post_hooks tr));
+             (* RFC-0084 PR-I-3 — typed observers replace
+                run_post_hooks. *)
+             Tool_dispatch.run_typed_post_hooks
+               Dispatch_outcome.Handled (Some tr));
             let detail =
               let s = String.trim raw_result in
               String_util.utf8_safe
@@ -636,7 +645,10 @@ let make_keeper_tool_handler
                  ; failure_class = None
                  }
              in
-             ignore (Tool_dispatch.run_post_hooks tr));
+             (* RFC-0084 PR-I-3 — typed observers replace
+                run_post_hooks. *)
+             Tool_dispatch.run_typed_post_hooks
+               Dispatch_outcome.Handled (Some tr));
             let ts = Time_compat.now () in
             broadcast_keeper_tool_call_event
               ~keeper_name:meta.name

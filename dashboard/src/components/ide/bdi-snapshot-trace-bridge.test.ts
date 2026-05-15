@@ -12,8 +12,9 @@ function snap(
   keeper: string,
   generated_at: string | null,
   intention: string | null = 'analyze diff',
+  context: BdiSnapshotProducerInput['context'] = undefined,
 ): BdiSnapshotProducerInput {
-  return { keeper, generated_at, intention }
+  return { keeper, generated_at, intention, context }
 }
 
 beforeEach(() => {
@@ -120,6 +121,42 @@ describe('bridgeBdiSnapshotsToTrace — RFC-0028 PR-δ bdi-snapshot producer', (
     if (event.source === 'bdi-snapshot') {
       expect(event.intention).toBe('verify cascade route')
     }
+  })
+
+  it('maps optional IDE route context into the trace event', () => {
+    bridgeBdiSnapshotsToTrace(
+      [snap('scholar', '2026-05-06T01:00:00Z', 'verify cascade route', {
+        file_path: 'runtime.ts',
+        line: 7,
+        goal_id: 'goal-runtime',
+        task_id: 'task-runtime',
+        board_post_id: 'post-runtime',
+        comment_id: 'comment-runtime',
+        pr_id: '15035',
+        git_ref: 'refs/heads/review-response',
+        log_id: 'turn-7',
+        session_id: 'sess-runtime',
+        operation_id: 'op-runtime',
+        worker_run_id: 'worker-runtime',
+      })],
+      new Set(),
+    )
+
+    const event = keeperTraceState.value.events[0]!
+    expect(event).toMatchObject({
+      filePath: 'runtime.ts',
+      line: 7,
+      goalId: 'goal-runtime',
+      taskId: 'task-runtime',
+      boardPostId: 'post-runtime',
+      commentId: 'comment-runtime',
+      prId: '15035',
+      gitRef: 'refs/heads/review-response',
+      logId: 'turn-7',
+      sessionId: 'sess-runtime',
+      operationId: 'op-runtime',
+      workerRunId: 'worker-runtime',
+    })
   })
 
   it('preserves a null intention (keeper between intentions)', () => {

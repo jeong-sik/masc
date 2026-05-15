@@ -106,12 +106,18 @@ export function bucketTraceEvents(
 function lineOf(event: KeeperTraceEvent): number | null {
   if (event.source === 'anchored-thread') return event.line
   if (event.source === 'activity-event') return event.line
+  if (event.source === 'bdi-snapshot') return event.line ?? null
+  if (event.source === 'decision-log') return event.line ?? null
+  if (event.source === 'cascade-hop') return event.line ?? null
   return null
 }
 
 function filePathOf(event: KeeperTraceEvent): string | null {
   if (event.source === 'anchored-thread') return event.filePath ?? null
   if (event.source === 'activity-event') return event.filePath
+  if (event.source === 'bdi-snapshot') return event.filePath ?? null
+  if (event.source === 'decision-log') return event.filePath ?? null
+  if (event.source === 'cascade-hop') return event.filePath ?? null
   return null
 }
 
@@ -403,31 +409,68 @@ function traceRouteContext(event: KeeperTraceEvent): IdeContextRouteContext {
 
   if (event.source === 'bdi-snapshot') {
     return {
+      filePath: event.filePath,
+      line: event.line,
       surface: 'BDI',
       label: event.intention ?? 'BDI snapshot',
       sourceId: `trace:${event.id}`,
+      goalId: event.goalId,
+      taskId: event.taskId,
+      boardPostId: event.boardPostId,
+      commentId: event.commentId,
+      prId: event.prId,
+      gitRef: event.gitRef,
+      logId: event.logId,
+      sessionId: event.sessionId,
+      operationId: event.operationId,
+      workerRunId: event.workerRunId,
       keeperId: event.keeperName,
-      telemetryQuery: event.id,
+      telemetryQuery: event.logId ?? event.id,
       telemetry: true,
     }
   }
 
   if (event.source === 'decision-log') {
     return {
+      filePath: event.filePath,
+      line: event.line,
       surface: 'Decision',
       label: event.semanticOutcome ?? '(unknown outcome)',
       sourceId: `trace:${event.id}`,
+      goalId: event.goalId,
+      taskId: event.taskId,
+      boardPostId: event.boardPostId,
+      commentId: event.commentId,
+      prId: event.prId,
+      gitRef: event.gitRef,
+      logId: event.logId,
+      sessionId: event.sessionId,
+      operationId: event.operationId,
+      workerRunId: event.workerRunId,
       keeperId: event.keeperName,
-      telemetryQuery: event.decisionId,
+      telemetryQuery: event.logId ?? event.decisionId,
       telemetry: true,
     }
   }
 
   return {
+    filePath: event.filePath,
+    line: event.line,
     surface: 'Cascade',
     label: event.provider,
     sourceId: `trace:${event.id}`,
-    telemetryQuery: event.hopId,
+    goalId: event.goalId,
+    taskId: event.taskId,
+    boardPostId: event.boardPostId,
+    commentId: event.commentId,
+    prId: event.prId,
+    gitRef: event.gitRef,
+    logId: event.logId,
+    sessionId: event.sessionId,
+    operationId: event.operationId,
+    workerRunId: event.workerRunId,
+    keeperId: event.keeperName,
+    telemetryQuery: event.logId ?? event.hopId,
     telemetry: true,
   }
 }

@@ -137,6 +137,44 @@ describe('bucketTraceEvents — RFC-0028 §5 grouping', () => {
     expect(lineBucket?.events.map(e => e.source).sort()).toEqual(['activity-event', 'anchored-thread'])
   })
 
+  it('record traces with optional file context enter file-line buckets', () => {
+    pushTrace({
+      id: 'bdi-context',
+      tsMs: 1000,
+      keeperName: 'scholar',
+      source: 'bdi-snapshot',
+      intention: 'verify route',
+      filePath: 'runtime.ts',
+      line: 12,
+    })
+    pushTrace({
+      id: 'decision-context',
+      tsMs: 1100,
+      keeperName: 'scholar',
+      source: 'decision-log',
+      decisionId: 'decision:scholar:1:tool',
+      semanticOutcome: 'success',
+      filePath: 'runtime.ts',
+      line: 12,
+    })
+    pushTrace({
+      id: 'cascade-context',
+      tsMs: 1200,
+      keeperName: 'mainline',
+      source: 'cascade-hop',
+      hopId: 'mainline-7',
+      provider: 'weighted_score',
+      filePath: 'router.ts',
+      line: 44,
+    })
+
+    const buckets = bucketTraceEvents(keeperTraceState.value.events)
+    const runtimeBucket = buckets.find(b => b.filePath === 'runtime.ts' && b.line === 12)
+    expect(runtimeBucket?.events.map(e => e.source).sort()).toEqual(['bdi-snapshot', 'decision-log'])
+    const cascadeBucket = buckets.find(b => b.filePath === 'router.ts' && b.line === 44)
+    expect(cascadeBucket?.events.map(e => e.source)).toEqual(['cascade-hop'])
+  })
+
   it('sorts events newest-first within each bucket', () => {
     pushAnchored('a', 'scholar', 12, 1000)
     pushAnchored('b', 'scholar', 12, 3000)
@@ -369,6 +407,73 @@ describe('OverlayKeeperTrace — bucket render (RFC-0028 §5)', () => {
 
     fireEvent.click(links[7]!)
     expect(window.location.hash).toBe('#monitoring?section=agents&view=keepers&keeper=scholar')
+  })
+
+  it('renders operational route links for contextual decision traces', () => {
+    pushTrace({
+      id: 'decision-context',
+      tsMs: 2000,
+      keeperName: 'scholar',
+      source: 'decision-log',
+      decisionId: 'decision:scholar:2000:tool_use',
+      semanticOutcome: 'error_retryable',
+      filePath: 'runtime.ts',
+      line: 19,
+      goalId: 'goal-decision',
+      taskId: 'task-decision',
+      boardPostId: 'post-decision',
+      commentId: 'comment-decision',
+      prId: '15035',
+      gitRef: 'refs/heads/decision-route',
+      logId: 'decision-turn-19',
+      sessionId: 'sess-decision',
+      operationId: 'op-decision',
+      workerRunId: 'worker-decision',
+    })
+
+    const container = createContainer()
+    render(html`<${OverlayKeeperTrace} active=${true} />`, container)
+
+    const bucket = container.querySelector('[role="group"][data-keeper="scholar"][data-line="19"]')
+    expect(bucket?.getAttribute('data-file')).toBe('runtime.ts')
+    const links = [...container.querySelectorAll<HTMLButtonElement>('.ide-trace-route-link')]
+    expect(links.map(link => link.textContent)).toEqual([
+      'Code',
+      'Goal',
+      'Task',
+      'Board',
+      'Comment',
+      'PR',
+      'Git',
+      'Log',
+      'Telemetry',
+      'Keeper',
+    ])
+
+    const chip = container.querySelector<HTMLButtonElement>('.ide-trace-chip[data-event-id="decision-context"]')
+    expect(chip).not.toBeNull()
+    fireEvent.click(chip!)
+    expect(ideReplayUntilMs.value).toBe(2000)
+    expect(ideContextFocus.value).toMatchObject({
+      file_path: 'runtime.ts',
+      line: 19,
+      surface: 'Decision',
+      label: 'error_retryable',
+      source_id: 'trace:decision-context',
+      keeper_id: 'scholar',
+    })
+    expect(ideContextFocus.value?.route_links?.map(link => link.label)).toEqual([
+      'Code',
+      'Goal',
+      'Task',
+      'Board',
+      'Comment',
+      'PR',
+      'Git',
+      'Log',
+      'Telemetry',
+      'Keeper',
+    ])
   })
 })
 

@@ -13,8 +13,9 @@ function evt(
   cycle: number,
   ts: number,
   strategy = 'round_robin',
+  context: CascadeHopProducerInput['context'] = undefined,
 ): CascadeHopProducerInput {
-  return { cascade_name, cycle, ts, strategy }
+  return { cascade_name, cycle, ts, strategy, context }
 }
 
 beforeEach(() => {
@@ -115,6 +116,31 @@ describe('bridgeCascadeEventsToTrace — RFC-0028 PR-δ cascade-hop producer', (
       expect(event.hopId).toBe('mainline-7')
       expect(event.provider).toBe('weighted_score')
     }
+  })
+
+  it('maps optional IDE route context into the trace event', () => {
+    bridgeCascadeEventsToTrace(
+      [evt('mainline', 7, 1_715_000_000, 'weighted_score', {
+        file_path: 'router/runtime.ts',
+        line: 42,
+        goal_id: 'goal-cascade',
+        task_id: 'task-cascade',
+        pr_id: '15035',
+        git_ref: 'refs/heads/cascade-route',
+        log_id: 'cascade-turn-42',
+      })],
+      new Set(),
+    )
+    const event = keeperTraceState.value.events[0]!
+    expect(event).toMatchObject({
+      filePath: 'router/runtime.ts',
+      line: 42,
+      goalId: 'goal-cascade',
+      taskId: 'task-cascade',
+      prId: '15035',
+      gitRef: 'refs/heads/cascade-route',
+      logId: 'cascade-turn-42',
+    })
   })
 
   it('is idempotent across repeated calls with the returned set', () => {

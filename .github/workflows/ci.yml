@@ -112,10 +112,21 @@ jobs:
             exit 1
           fi
 
+          # Heavy CI runs whenever the PR is live (OPEN), regardless of draft
+          # status. Earlier we skipped draft PRs to save CI minutes, but the
+          # masc-mcp fast-track pattern (open Draft → mark ready → admin-merge
+          # within seconds) means the build/lint/test surfaces almost never
+          # got a chance to run. Two visible failures from that gap this week:
+          # - masc-mcp #15531 (Tool_args / Tool_result sub-lib extract) merged
+          #   main in a non-building state; recovered by #15540.
+          # - oas #1596 (turn_ready_tool_names signature narrow) — same shape,
+          #   recovered by oas #1599.
+          # Running heavy CI on draft PRs costs minutes but catches both
+          # classes of regression *before* the admin-merge decision instead
+          # of after, when the only remaining lever is fix-forward.
+          # Closed/merged PRs still skip — there is nothing to verify there.
           run_heavy=true
           if [ "$live_state" != "OPEN" ]; then
-            run_heavy=false
-          elif [ "$live_is_draft" = "true" ]; then
             run_heavy=false
           fi
 

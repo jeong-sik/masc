@@ -38,8 +38,6 @@
  dashboard_execution_fixture
  dashboard_execution_sessions
  dashboard_execution_builders
- briefing_json_helpers
- briefing_compactors
  briefing_gaps
  briefing_sections
  dashboard_mission_agents
@@ -290,6 +288,11 @@
    ;; lib/host_config/. RFC-0084 §1.5/§3.4 typed host configuration record;
    ;; deps: stdlib + masc_mcp.coord (already sub-library).
    masc_mcp.host_config
+   ;; RFC-0056 Phase 1D — Briefing_compactors leaf module extracted to
+   ;; lib/briefing_compactors/. 174+21 LoC, deps: stdlib + Yojson +
+   ;; masc_mcp.masc_types (Masc_domain). Was previously in
+   ;; (private_modules); promotion preserves internal-only access.
+   masc_mcp.briefing_compactors
    ;; RFC-0058 Phase 1 — Declarative cascade TOML config. Separate sub-library
    ;; to avoid type name collisions (transport, provider, binding, tier, strategy)
    ;; with identically-named types in the main library.

@@ -1,0 +1,25 @@
+; RFC-0086 PR-2H — Tool_args + Tool_result shared types extraction.
+; Identified as the real cycle blocker behind PR-2E iter2's
+; "Tool_misc_web_fetch" classification (plan §8.16 / §8.20 audit
+; 2026-05-15): the 5-module tool_* cluster has *zero* cycles with
+; keeper_* / Prometheus / Activity_graph; the only blocker is that
+; Tool_args (335+199 LoC) and Tool_result (250+85 LoC) reside in
+; parent masc_mcp, so keeper namespace promotion would create a
+; sub-lib -> parent direction.
+;
+; Extracting these two as a leaf sub-lib unblocks both keeper
+; namespace bulk promotion (PR-2E) and the Tool_misc_web_fetch
+; cluster RFC.
+;
+; Deps: yojson only (Tool_args.mli's Tool_local_runtime_core reference
+; is a single OCamldoc cross-reference comment, not a code dep).
+; (wrapped false) keeps bare `Tool_args` / `Tool_result` so all
+; 1156 external refs (Tool_args 161 bare + 4 wrapped, Tool_result
+; 969 bare + 22 wrapped) need only the 26 wrapped refs sed'd to bare.
+(include_subdirs no)
+
+(library
+ (name masc_mcp_tool_types)
+ (public_name masc_mcp.tool_types)
+ (wrapped false)
+ (libraries yojson masc_log masc_core eio time_compat))

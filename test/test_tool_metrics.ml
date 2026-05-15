@@ -1,7 +1,7 @@
 (** Tests for Tool_metrics — per-tool timing and success/failure metrics *)
 
 module M = Masc_mcp.Tool_metrics
-module R = Masc_mcp.Tool_result
+module R = Tool_result
 
 let setup () = M.clear ()
 

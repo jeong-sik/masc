@@ -3,7 +3,7 @@
 module Gp = Masc_mcp.Governance_pipeline
 module Coord = Masc_mcp.Coord
 module Tool_dispatch = Masc_mcp.Tool_dispatch
-module Tool_result = Masc_mcp.Tool_result
+module Tool_result = Tool_result
 
 let explicit_claim_tool = "masc_claim_next"
 let managed_claim_tool = "masc_claim_task"

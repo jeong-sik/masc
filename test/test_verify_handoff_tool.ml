@@ -43,7 +43,7 @@ let test_verify_handoff_removed_from_registry () =
               ])
       in
       (* Tool was pruned from registry — dispatch should fail. *)
-      check bool "tool dispatch fails after prune" false result.Masc_mcp.Tool_result.success)
+      check bool "tool dispatch fails after prune" false result.Tool_result.success)
 
 let () =
   run "verify_handoff tool"

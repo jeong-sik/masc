@@ -1,6 +1,6 @@
 (** Tool_plan Module Coverage Tests *)
 
-module Tool_args = Masc_mcp.Tool_args
+module Tool_args = Tool_args
 open Alcotest
 
 let () = Random.self_init ()

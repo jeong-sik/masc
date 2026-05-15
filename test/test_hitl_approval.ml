@@ -134,7 +134,7 @@ let execute_approval_get args =
         Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:"approval-get-test"
           state ~name:"masc_approval_get" ~arguments:args
       in
-      (result.Masc_mcp.Tool_result.success, Masc_mcp.Tool_result.message result))
+      (result.Tool_result.success, Tool_result.message result))
 
 let with_test_config f =
   Eio_main.run @@ fun env ->

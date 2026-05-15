@@ -95,6 +95,10 @@
    ;; RFC-0086 PR-2F — Cascade_ref leaf extracted to lib/cascade_ref/.
    ;; Re-export so test code using bare `Cascade_ref.X` resolves.
    (re_export masc_mcp.cascade_ref)
+   ;; RFC-0086 PR-2H — Tool_args + Tool_result shared types extracted to
+   ;; lib/tool_types/. Re-export so test code using bare
+   ;; `Tool_args.X` / `Tool_result.X` resolves.
+   (re_export masc_mcp.tool_types)
    (re_export masc_mcp.masc_tool_blob_store)
    (re_export masc_process)
    (re_export masc_mcp.masc_exec)

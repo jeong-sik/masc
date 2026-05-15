@@ -337,7 +337,7 @@ let register_registered_dispatch_probe () =
     ~tool_name:registered_dispatch_probe_tool
     ~handler:(fun ~name ~args:_ ->
       Some
-        (Masc_mcp.Tool_result.quick_ok ~tool_name:name
+        (Tool_result.quick_ok ~tool_name:name
            (Yojson.Safe.to_string
               (`Assoc
                 [ ("ok", `Bool true)

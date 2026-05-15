@@ -664,7 +664,7 @@ let test_refresh_once_skips_fresh_cached_result () =
         ~masc_tools:[]
         ~dispatch:(fun ~name ~args:_ ->
           {
-            Lib.Tool_result.success = false;
+            Tool_result.success = false;
             data = `String "unused";
             legacy_message = "unused";
             tool_name = name;

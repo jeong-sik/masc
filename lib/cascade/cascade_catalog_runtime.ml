@@ -311,7 +311,7 @@ let profile_probes (profile_candidates : candidate_runtime list) =
   List.map
     (fun candidate ->
       if Llm_provider.Provider_config.is_local candidate.provider_cfg then
-        candidate_probe_error candidate local_probe_unavailable_reason
+        candidate_probe_skipped candidate local_probe_unavailable_reason
       else
         candidate_probe_not_applicable candidate
           cloud_probe_not_applicable_reason)

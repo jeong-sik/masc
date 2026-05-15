@@ -3,8 +3,8 @@
 
     Mechanical turns are dominated by predictable-shape tool dispatch
     (task_claim, board_list, fs_read, shell). Empirically, running these
-    with [think=false] is 2-3x faster than [think=true] on qwen3.5-based
-    Ollama models while producing the same correct tool call.
+    with [think=false] is faster than [think=true] on tool-dispatch-heavy
+    local models while producing the same correct tool call.
 
     Cognitive turns benefit from thinking: plan, critique, retry after
     error, and open-ended user requests.

@@ -100,7 +100,7 @@ let cooldown_sec =
     ~default:30.0
     ()
 
-(** RFC-0037 §4.5: local providers (ollama, llama.cpp, etc.) get a
+(** RFC-0037 §4.5: local providers get a
     more generous failure budget than remote APIs.  Local probes are
     flaky by nature (process startup, model load latency, transient
     /api/ps stalls) but recover within seconds — locking them out for

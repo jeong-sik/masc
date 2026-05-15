@@ -265,12 +265,10 @@ type inference_params =
   { temperature : float option
   ; max_tokens : int option
   ; keep_alive : string option
-    (** Ollama [keep_alive] override: integer seconds ("-1", "3600") or
-      duration string ("5m", "30m"). Honored only when the resolved
-      provider is Ollama. *)
+    (** Provider-native [keep_alive] override: integer seconds ("-1", "3600")
+      or duration string ("5m", "30m") for runtimes that support it. *)
   ; num_ctx : int option
-    (** Ollama [num_ctx] override: per-request KV cache allocation in
-      tokens. Honored only when the resolved provider is Ollama. *)
+    (** Provider-native context-size override for runtimes that support it. *)
   ; thinking_enabled : bool option
   ; thinking_budget : int option
     (** [thinking_budget] is a per-turn thinking token budget seed.
@@ -379,9 +377,9 @@ let resolve_inference_params ~config_path ~name =
 
     The JSON value can be:
     - A string: applies to all providers in the cascade.
-      [{"{name}_api_key_env": "ZAI_API_KEY_SB"}]
+      [{"{name}_api_key_env": "REMOTE_API_KEY"}]
     - An object mapping provider names to env var names:
-      [{"{name}_api_key_env": {"glm": "ZAI_API_KEY_SB", "glm-coding": "ZAI_API_KEY_SB"}}]
+      [{"{name}_api_key_env": {"remote": "REMOTE_API_KEY"}}]
 
     Returns an association list of [(provider_name, env_var_name)].
     The special key ["*"] means "all providers". *)

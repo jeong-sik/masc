@@ -5,7 +5,7 @@
     and an OCaml module enforceable by the type system rather than
     by convention.
 
-    Cycle 10 / Tier I2 of the Kimi keeper FSM review plan. This is the
+    Cycle 10 / Tier I2 of the keeper FSM review plan. This is the
     interface-only landing — concrete instantiation
     (e.g. [Keeper_turn_fsm_spec : TLA_STATE_MACHINE]) is deferred so the
     interface lands additively first. Future cycles can wire existing

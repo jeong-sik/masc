@@ -282,10 +282,8 @@ let () =
    Each keeper runs its watchdog as an independent fiber, so the
    per-keeper [record_stale_termination] above never sees the
    cross-keeper pattern.  Issue evidence: 8 keepers terminated
-   within the same second at 12:54:13Z (analyst, executor,
-   issue_king, janitor, masc-improver, nick0cave, ollama-local,
-   qa-king).  That shape is a *systemic* signal, not 8 independent
-   stuck fibers.  The supervisor will keep restarting each one
+   within the same second at 12:54:13Z.  That shape is a *systemic*
+   signal, not 8 independent stuck fibers.  The supervisor will keep restarting each one
    individually unless an operator notices.
 
    Track recent terminations across all keepers in a small bounded

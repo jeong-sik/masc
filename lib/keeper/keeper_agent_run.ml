@@ -531,15 +531,15 @@ let run_turn
          per_provider_timeout_for_turn ~meta ?oas_timeout_s ~timeout_s ()
        in
        (* OAS [stream_idle_timeout_s] bounds inter-line idle on HTTP streams
-       (Anthropic/OpenAI/Gemini/GLM/Ollama). The deadline resets after each
-       successful line, so this is gap detection, not total run cap.
+       direct HTTP providers. The deadline resets after each successful line,
+       so this is gap detection, not total run cap.
 
        CLI subprocess transports use a separate envelope:
        [cli_subprocess_idle_sec], wired into [cli_transport_overrides]
        below and forwarded to [Cli_common_subprocess.run_stream_lines]
-       via [stdout_idle_timeout_s] (Kimi CLI today; Claude Code / Gemini
-       CLI / Codex CLI need an OAS upstream change to expose the same
-       parameter in their transport configs).
+       via [stdout_idle_timeout_s] for transports that expose the setting.
+       Other CLI SDK transports need an OAS upstream change to expose the same
+       parameter in their configs.
 
        Default 120 s catches real network/stream hangs while preserving
        legitimate reasoning pauses + provider keepalives. If the total

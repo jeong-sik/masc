@@ -7,9 +7,8 @@
     occupancy assessment, prompt-eval / decode timing per probe run,
     think-mode behaviour, etc.
 
-    Probes carry vendor-specific knowledge (e.g. Ollama exposes
-    [/api/ps] + [/api/generate]). Callers must never spell out a
-    vendor name — they go through {!find_owner} or the top-level
+    Probes carry vendor-specific knowledge. Callers must never spell out a
+    vendor name; they go through {!find_owner} or the top-level
     [*_json] functions, which delegate to the first registered probe
     that recognises the URL.
 

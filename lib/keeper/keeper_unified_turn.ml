@@ -1455,11 +1455,8 @@ let run_keeper_cycle
                      choice on the same prompt.  Each rotation eats ~600s of
                      turn budget; in production we observed 4–5 rotations all
                      hitting the same violation before the OAS retry guard
-                     finally aborted the cycle (see fleet logs:
-                     "passive status/read tools" cascade=default →
-                     keeper_unified → kimi_cli_keeper → … →
-                     oas_timeout_budget at 1064s/1200s).  Cap at 1 rotation
-                     so the keeper releases its turn budget promptly.
+                     finally aborted the cycle.  Cap at 1 rotation so the
+                     keeper releases its turn budget promptly.
 
                      The cap fires when attempted_cascades has at least 2
                      entries, meaning at least one rotation has already been

@@ -132,10 +132,10 @@ let test_oas_worker_failed_lifecycle_includes_error () =
     ~attrs:
       [
         ("provider_kind", `String "openai_compat");
-        ("model_id", `String "deepseek-v4-pro:cloud");
-        ("base_url", `String "https://ollama.com/v1");
+        ("model_id", `String "remote-model:cloud");
+        ("base_url", `String "https://provider.example/v1");
         ("request_path", `String "/chat/completions");
-        ("endpoint", `String "https://ollama.com/v1/chat/completions");
+        ("endpoint", `String "https://provider.example/v1/chat/completions");
       ]
     ();
   let events = Event_bus.drain sub in
@@ -153,10 +153,10 @@ let test_oas_worker_failed_lifecycle_includes_error () =
         (payload |> member "status" |> to_string);
       Alcotest.(check string) "provider_kind" "openai_compat"
         (payload |> member "provider_kind" |> to_string);
-      Alcotest.(check string) "model_id" "deepseek-v4-pro:cloud"
+      Alcotest.(check string) "model_id" "remote-model:cloud"
         (payload |> member "model_id" |> to_string);
       Alcotest.(check string) "endpoint"
-        "https://ollama.com/v1/chat/completions"
+        "https://provider.example/v1/chat/completions"
         (payload |> member "endpoint" |> to_string)
   | _ -> Alcotest.fail "expected Custom masc.oas_worker.failed event"
 
@@ -590,7 +590,7 @@ let test_compact_syncs_oas_context () =
 let test_agent_completed_includes_usage () =
   let open Agent_sdk in
   let cost_labels =
-    [ ("provider", "openai"); ("model_bucket", "openai") ]
+    [ ("provider", "remote"); ("model_bucket", "remote") ]
   in
   let cost_metric = Prometheus.metric_oas_inference_cost_usd in
   let before_cost =
@@ -612,7 +612,7 @@ let test_agent_completed_includes_usage () =
   let resp : Llm_provider.Types.api_response =
     {
       id = "msg-test";
-      model = "gpt-5";
+      model = "remote-model";
       stop_reason = EndTurn;
       content = [];
       usage = Some usage;
@@ -655,7 +655,7 @@ let test_agent_completed_includes_usage () =
       Alcotest.(check bool) "success" true (bool_field "success");
       Alcotest.(check string) "result" "ok" (string_field "result");
       Alcotest.(check string) "response_id" "msg-test" (string_field "response_id");
-      Alcotest.(check string) "model" "gpt-5" (string_field "model");
+      Alcotest.(check string) "model" "remote-model" (string_field "model");
       Alcotest.(check string) "stop_reason" "end_turn" (string_field "stop_reason");
       Alcotest.(check bool) "usage_reported" true (bool_field "usage_reported");
       Alcotest.(check int) "input_tokens" 500 (int_field "input_tokens");
@@ -859,7 +859,7 @@ let test_oas_log_bridge_turn_completed_summary () =
       Agent_sdk.Log.I ("turn", 72);
       Agent_sdk.Log.I ("max_turns", 120);
       Agent_sdk.Log.F ("turn_duration_sec", 1.25);
-      Agent_sdk.Log.S ("model", "glm-5-turbo");
+      Agent_sdk.Log.S ("model", "remote-model");
       Agent_sdk.Log.S ("stop", "end_turn");
     ];
   let entries =
@@ -872,7 +872,7 @@ let test_oas_log_bridge_turn_completed_summary () =
       Alcotest.(check bool) "message includes turn" true
         (contains_substring entry.message "turn=72");
       Alcotest.(check bool) "message includes model" true
-        (contains_substring entry.message "model=glm-5-turbo");
+        (contains_substring entry.message "model=remote-model");
       Alcotest.(check bool) "message includes stop" true
         (contains_substring entry.message "stop=end_turn");
       (match entry.details with
@@ -1019,14 +1019,14 @@ let inference_token_labels ~model_bucket ~phase ~token_bucket =
 
 let test_inference_telemetry_aggregates_without_sse_relay () =
   let prompt_labels =
-    inference_token_labels ~model_bucket:"openai" ~phase:"prompt"
+    inference_token_labels ~model_bucket:"remote" ~phase:"prompt"
       ~token_bucket:"1_1k"
   in
   let completion_labels =
-    inference_token_labels ~model_bucket:"openai" ~phase:"completion"
+    inference_token_labels ~model_bucket:"remote" ~phase:"completion"
       ~token_bucket:"over_8k"
   in
-  let rate_labels = [ ("model_bucket", "openai") ] in
+  let rate_labels = [ ("model_bucket", "remote") ] in
   let token_metric = Prometheus.metric_oas_inference_telemetry_tokens in
   let prompt_rate_metric = Prometheus.metric_oas_inference_prompt_tok_per_sec in
   let decode_rate_metric = Prometheus.metric_oas_inference_decode_tok_per_sec in
@@ -1058,8 +1058,8 @@ let test_inference_telemetry_aggregates_without_sse_relay () =
          {
            agent_name = "test-agent";
            turn = 1;
-           provider = "openai";
-           model = "gpt-5";
+           provider = "remote";
+           model = "remote-model";
            prompt_tokens = Some 10;
            completion_tokens = Some 9000;
            prompt_ms = Some 5.0;

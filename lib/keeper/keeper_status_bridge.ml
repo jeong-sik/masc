@@ -200,9 +200,8 @@ let blocker_class_of_string (reason : string) : blocker_class option =
        [blocker_class_of_string] had no matching substring.  Variant
        [Completion_contract_violation] was already defined in
        [Keeper_types.blocker_class] — only the mapping was missing.
-       Affected 4/14 keepers in production (glm-coding-plan, janitor,
-       velvet-hammer, verifier) where dashboard "차단된 키퍼" card and
-       Prometheus blocker-class series were silent on this failure mode. *)
+       Affected multiple production keepers where dashboard "차단된 키퍼" card
+       and Prometheus blocker-class series were silent on this failure mode. *)
     String_util.contains_substring_ci trimmed "completion contract"
   then Some Completion_contract_violation
   else if String_util.contains_substring_ci trimmed "cost budget"

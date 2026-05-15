@@ -46,7 +46,6 @@ val headers_with_auth :
 (** Parse a "provider:model_id" string into a {!Llm_provider.Provider_config.t}.
 
     Supported providers are determined by {!Llm_provider.Provider_registry.default}.
-    Built-in: llama, claude, gemini, glm, openrouter, custom.
 
     Returns [None] when the provider is unknown or the required API key
     env var is not set (provider is unavailable). *)
@@ -338,11 +337,9 @@ type inference_params = {
   temperature: float option;
   max_tokens: int option;
   keep_alive: string option;
-  (** Ollama [keep_alive] override. Honored only when the resolved
-      provider is Ollama. *)
+  (** Provider-native [keep_alive] override for runtimes that support it. *)
   num_ctx: int option;
-  (** Ollama [num_ctx] override. Honored only when the resolved
-      provider is Ollama. *)
+  (** Provider-native context-size override for runtimes that support it. *)
   thinking_enabled: bool option;
   thinking_budget: int option;
   (** [thinking_budget] is a per-turn thinking token budget seed.
@@ -366,9 +363,9 @@ val resolve_inference_params :
 
     Supports two formats:
     - String: applies to all providers.
-      [{"{name}_api_key_env": "ZAI_API_KEY_SB"}]
+      [{"{name}_api_key_env": "REMOTE_API_KEY"}]
     - Object: per-provider mapping.
-      [{"{name}_api_key_env": {"glm": "ZAI_API_KEY_SB", "glm-coding": "ZAI_API_KEY_SB"}}]
+      [{"{name}_api_key_env": {"remote": "REMOTE_API_KEY"}}]
 
     Falls back to ["default_api_key_env"], then empty list (use registry defaults).
 

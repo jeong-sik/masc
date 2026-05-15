@@ -165,7 +165,7 @@ let warn_partial_eio_context_once ~sw_some ~net_some =
   if not (Atomic.exchange local_discovery_warned true) then
     Log.warn ~ctx:"CascadeRuntime"
       "Local discovery skipped: Eio_context partial (sw=%b net=%b). \
-       Local providers (ollama, llama.cpp) will not be auto-discovered. \
+       Local HTTP providers will not be auto-discovered. \
        Ensure Eio_context.set_switch and set_net run before the first \
        cascade attempt that requires local discovery. (RFC-0037 §4.3)"
       sw_some net_some

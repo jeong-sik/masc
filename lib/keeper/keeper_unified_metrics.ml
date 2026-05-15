@@ -114,9 +114,9 @@ let classify_usage_trust ~(usage_reported : bool)
    - [zero]  : context_max = 0 (uninitialised / pre-resolve)
    - [64k]   : (0, 64_000]
    - [128k]  : (64_000, 128_000]
-   - [200k]  : (128_000, 200_000]   — anthropic claude-sonnet-4
-   - [256k]  : (200_000, 262_144]   — kimi / claude haiku 4.5
-   - [1m]    : (262_144, 1_048_576] — claude opus 4.7 / 1M
+   - [200k]  : (128_000, 200_000]
+   - [256k]  : (200_000, 262_144]
+   - [1m]    : (262_144, 1_048_576]
    - [other] : everything else (sanity check / future caps) *)
 let context_max_bucket (n : int) : string =
   if n <= 0 then "zero"
@@ -1051,8 +1051,8 @@ let append_decision_record
                       | Some ti ->
                           (* hw_decode_tokens_per_second: unambiguous alias of
                              provider_tokens_per_second. Both read ti.predicted_per_second
-                             (eval_count / eval_duration from Ollama), which is the true
-                             hardware decode rate — distinct from the wall-clock
+                             (provider eval_count / eval_duration), which is the true
+                             hardware decode rate - distinct from the wall-clock
                              tokens_per_second (output_tokens / latency_ms) below. Dashboards
                              should prefer hw_decode_* name; legacy name kept for backward compat. *)
                           [

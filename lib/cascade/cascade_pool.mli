@@ -9,8 +9,8 @@
 (** {1 Pool Identity} *)
 
 type pool_id =
-  | Tier1        (** High-trust cloud providers: GLM, Kimi, Claude, Gemini, etc. *)
-  | Tier2        (** Local / lower-trust: Ollama, local models *)
+  | Tier1        (** High-trust remote providers. *)
+  | Tier2        (** Local / lower-trust providers. *)
   | Emergency    (** Static fallback: no LLM call, deterministic response *)
 
 val pool_id_to_string : pool_id -> string

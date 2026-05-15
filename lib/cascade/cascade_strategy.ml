@@ -41,8 +41,8 @@ type scoring_params = {
      - p50 < 1 ms clamped at 1 ms in denominator to avoid overflow. *)
   latency_baseline_ms : float;
   (** Milliseconds.  Provider p50 above this value incurs a fractional
-      score penalty.  Default 2000.0 (tuned for cloud LLM tiers:
-      claude/gpt/gemini typical p50 is 1–3 s).  Env var fallback:
+      score penalty.  Default 2000.0 (tuned for cloud LLM tiers where
+      typical p50 is 1–3 s).  Env var fallback:
       [MASC_CASCADE_LATENCY_BASELINE_MS]. *)
 
   (* ── Rate-limit recency scoring ──

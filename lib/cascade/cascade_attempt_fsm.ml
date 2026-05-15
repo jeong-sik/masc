@@ -232,8 +232,8 @@ let enrich_sdk_error ~cascade_name
        not_found pattern.  CLI providers' not_found errors rarely surface
        through this code path (they emit text errors, not the OpenAI-compat
        InvalidRequest shape), so the practical effect is a no-op for CLI
-       agents while still helping HTTP providers (openai-compat, glm, etc.)
-       diagnose endpoint drift.  RFC-0058 §2.4: no closed-variant dispatch. *)
+       agents while still helping direct HTTP providers diagnose endpoint
+       drift.  RFC-0058 §2.4: no closed-variant dispatch. *)
     let detail =
       Printf.sprintf "base_url=%s request_path=%s endpoint=%s"
         provider_cfg.base_url provider_cfg.request_path

@@ -75,11 +75,9 @@ type inference_params = {
   temperature: float option;
   max_tokens: int option;
   keep_alive: string option;
-  (** Ollama [keep_alive] override: integer seconds or duration string.
-      Honored only when the resolved provider is Ollama. *)
+  (** Provider-native [keep_alive] override for runtimes that support it. *)
   num_ctx: int option;
-  (** Ollama [num_ctx] override: per-request KV cache allocation in
-      tokens. Honored only when the resolved provider is Ollama. *)
+  (** Provider-native context-size override for runtimes that support it. *)
   thinking_enabled: bool option;
   thinking_budget: int option;
   (** [thinking_budget] is a per-turn thinking token budget seed.
@@ -147,8 +145,7 @@ type strategy_config = {
   cli_max_concurrent : int option;
   (** ["{name}_cli_max_concurrent"]. When set, overrides the CLI
       auto-registration default ([MASC_CLI_MAX_CONCURRENT] or 1)
-      for every CLI provider (Claude_code / Gemini_cli / Codex_cli)
-      in this cascade's candidate list.  CLI providers share a
+      for every CLI provider in this cascade's candidate list.  CLI providers share a
       single concurrency cap because each CLI binary is typically
       limited to one in-flight subprocess.
       @since 0.9.8 *)
@@ -158,7 +155,7 @@ type strategy_config = {
       inner array is a tier of provider keys (matched against the
       [model] field in [{name}_models]); outer order is tier order
       (tier 0 = highest priority).  Example JSON:
-      [\[\["ollama:qwen3-coder:30b"\], \["gemini_cli:gemini-3-flash-preview"\]\]].
+      [\[\["local:model-a"\], \["remote:model-b"\]\]].
       @since 0.9.7 *)
 
   sticky_ttl_ms : int option;

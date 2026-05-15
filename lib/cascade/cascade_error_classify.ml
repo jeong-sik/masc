@@ -349,11 +349,9 @@ let kind_of_masc_internal_error = function
     Pre-fix [masc_oas_error_total] only carried a [kind] label, so the
     97 [resumable_cli_session] events observed in 10000 logs flattened
     into a single counter even though they were unevenly distributed
-    across 5 cascades (governance_judge=32, kimi_cli_keeper=8,
-    keeper_unified=6, tool_use_strict=5, local_with_kimi_coding_with_glm=1).
-    Operators couldn't tell which cascade was the dominant offender —
-    a critical signal because cascade demotion / model-order edits
-    are per-cascade actions, not global ones.
+    across cascades.  Operators couldn't tell which cascade was the
+    dominant offender — a critical signal because cascade demotion /
+    model-order edits are per-cascade actions, not global ones.
 
     Variants that carry [cascade_name] in their payload return it
     directly.  The five variants that don't ([Accept_rejected],

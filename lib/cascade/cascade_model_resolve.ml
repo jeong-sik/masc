@@ -112,7 +112,7 @@ let auto_models_for_cascade_prefix ?getenv provider_name =
 
 (** Resolve "auto" and aliases to concrete model IDs.
     Cloud APIs generally require concrete model names, and local
-    providers (llama, ollama) also cannot accept the literal "auto" model ID.
+    providers also cannot accept the literal "auto" model ID.
 
     For local providers, "auto" is resolved via {!Llm_provider.Discovery.first_discovered_model_id}
     which returns models from the last endpoint probe. Callers should

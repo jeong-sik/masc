@@ -133,19 +133,20 @@ let display_provider_name provider_name =
   | None -> String.trim provider_name
 ;;
 
-(* Build headers list with Authorization when api_key is present.
-   Anthropic/Kimi use x-api-key; OpenAI-compat (including GLM) uses Bearer. *)
+(* Build headers for a resolved provider API key. Header shape is still keyed by
+   the typed provider kind until OAS exposes a header-scheme field in runtime
+   bindings. *)
 let headers_with_auth ~(kind : Llm_provider.Provider_config.provider_kind) ~api_key =
   let base = [("Content-Type", "application/json")] in
   if api_key = "" then base
-    else match kind with
+  else if Llm_provider.Provider_config.is_subprocess_cli kind then []
+  else
+    match kind with
     | Anthropic | Kimi ->
         ("x-api-key", api_key)
         :: ("anthropic-version", "2023-06-01")
         :: base
-    | OpenAI_compat | Ollama | Gemini | Glm | Claude_code | DashScope ->
-        ("Authorization", "Bearer " ^ api_key) :: base
-    | Gemini_cli | Kimi_cli | Codex_cli -> []
+    | _ -> ("Authorization", "Bearer " ^ api_key) :: base
 
 let trim_trailing_slash path =
   if String.length path > 1 && String.ends_with ~suffix:"/" path then
@@ -219,8 +220,8 @@ let make_custom_config ~temperature ~max_tokens ?system_prompt
     Checks [api_key_env_overrides] first (exact provider name, then
     wildcard ["*"]), then falls back to the provider registry default.
 
-    Empty-string entries are treated as absent so a user-provided
-    [{"glm": ""}] falls through to the wildcard and registry default
+    Empty-string entries are treated as absent so a user-provided empty
+    provider override falls through to the wildcard and registry default
     instead of silently disabling auth. *)
 let resolve_effective_api_key_env
     ~(api_key_env_overrides : (string * string) list)
@@ -295,8 +296,7 @@ let make_registry_config ~temperature ~max_tokens ?system_prompt
   let headers = headers_with_auth ~kind:defaults.kind ~api_key in
   (* Keep runtime model selection on the same resolution path as the
      provenance helpers in [Cascade_model_resolve]. Local providers still
-     inject provider-specific discovery so routing stays isolated by
-     endpoint (e.g. ollama:auto must not pick up llama-server models). *)
+     inject endpoint-specific discovery so routing stays isolated by endpoint. *)
   let discover =
     if provider_name_matches_kind_default provider_name Ollama then
       Some
@@ -1271,10 +1271,9 @@ let provider_filter_rejection_to_string = function
       (String.concat "," filter)
       (String.concat "," available_kinds)
 
-(* Filter providers by kind name (exact, case-insensitive).
-   Valid filter values: "ollama", "glm", "anthropic", "gemini", "openai_compat",
-   "claude_code", "kimi", "kimi_cli", "gemini_cli", "codex_cli".
-   Empty/None filter passes through unchanged. No-match falls back to unfiltered. *)
+(* Filter providers by [Provider_config.string_of_provider_kind] values (exact,
+   case-insensitive). Empty/None filter passes through unchanged. No-match falls
+   back to unfiltered. *)
 let apply_provider_filter ~provider_filter ~label providers =
   match provider_filter with
   | None | Some [] -> providers

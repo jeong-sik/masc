@@ -918,12 +918,11 @@ let run_named
           | None -> sdk_err
         in
         (* Classify deterministic non-transient failures distinctly from
-           ordinary call errors.  Hard quota (e.g. Anthropic multi-day usage
-           limit, ZAI balance 0) and Kimi CLI resumable-session conflicts do
-           not recover within the 60s [cooldown_sec]; apply an immediate long
-           cooldown so weighted_random/failover selection does not waste later
-           cascade turns on a provider that is terminal for the current runtime
-           state. *)
+           ordinary call errors.  Hard quota and CLI resumable-session
+           conflicts do not recover within the 60s [cooldown_sec]; apply an
+           immediate long cooldown so weighted_random/failover selection does
+           not waste later cascade turns on a provider that is terminal for the
+           current runtime state. *)
         let err_str = Agent_sdk.Error.to_string sdk_err in
         record_candidate_health_error candidate sdk_err;
         let (_ : Provider_error.t option) =

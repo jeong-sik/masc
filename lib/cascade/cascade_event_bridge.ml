@@ -44,26 +44,60 @@ let payload_int_opt key = function
   | _ -> None
 ;;
 
-let inference_model_bucket ~provider ~model =
-  let has needle =
-    String_util.contains_substring_ci provider needle
-    || String_util.contains_substring_ci model needle
+let first_component ~separators raw =
+  let first_index =
+    separators
+    |> List.filter_map (fun separator -> String.index_opt raw separator)
+    |> List.sort Int.compare
+    |> List.find_opt (fun index -> index > 0)
   in
-  if has "kimi"
-  then "kimi"
-  else if has "claude" || has "anthropic"
-  then "anthropic"
-  else if has "openai" || has "gpt" || has "codex"
-  then "openai"
-  else if has "gemini" || has "google"
-  then "gemini"
-  else if has "glm" || has "zai"
-  then "glm"
-  else if has "qwen"
-  then "qwen"
-  else if has "llama"
-  then "llama"
-  else "other"
+  match first_index with
+  | Some index -> String.sub raw 0 index
+  | None -> raw
+;;
+
+let normalize_metric_bucket raw =
+  let raw = String.trim raw |> String.lowercase_ascii in
+  let buffer = Buffer.create (String.length raw) in
+  let last_was_sep = ref false in
+  String.iter
+    (fun ch ->
+       let is_alnum =
+         match ch with
+         | 'a' .. 'z' | '0' .. '9' -> true
+         | _ -> false
+       in
+       if is_alnum
+       then (
+         Buffer.add_char buffer ch;
+         last_was_sep := false)
+       else if not !last_was_sep
+       then (
+         Buffer.add_char buffer '_';
+         last_was_sep := true))
+    raw;
+  let normalized = Buffer.contents buffer |> String.trim in
+  let rec trim_edges left right =
+    if left > right
+    then ""
+    else if normalized.[left] = '_'
+    then trim_edges (left + 1) right
+    else if normalized.[right] = '_'
+    then trim_edges left (right - 1)
+    else String.sub normalized left (right - left + 1)
+  in
+  match trim_edges 0 (String.length normalized - 1) with
+  | "" -> "other"
+  | bucket -> bucket
+;;
+
+let inference_model_bucket ~provider ~model =
+  let provider = String.trim provider in
+  if provider <> ""
+  then first_component ~separators:[ ':'; '/' ] provider |> normalize_metric_bucket
+  else
+    first_component ~separators:[ ':'; '/'; '-'; '.' ] model
+    |> normalize_metric_bucket
 ;;
 
 let inference_provider_bucket ~provider ~model =

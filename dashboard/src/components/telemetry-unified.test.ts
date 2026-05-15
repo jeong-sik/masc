@@ -275,7 +275,7 @@ describe('TelemetryUnified', () => {
   })
 
   it('hydrates telemetry scope and entry focus from route params', async () => {
-    window.location.hash = '#monitoring?section=fleet-health&view=event-log&session_id=sess-route&operation_id=op-route&worker_run_id=wr-route&q=turn-9'
+    window.location.hash = '#monitoring?section=fleet-health&view=event-log&source=oas_event&n=500&session_id=sess-route&operation_id=op-route&worker_run_id=wr-route&q=turn-9'
     const fetchTelemetry = vi.fn().mockResolvedValue({
       ...baseTelemetry,
       count: 2,
@@ -310,14 +310,17 @@ describe('TelemetryUnified', () => {
     await flushUi()
 
     expect(fetchTelemetry).toHaveBeenCalledWith(expect.objectContaining({
+      source: 'oas_event',
       session_id: 'sess-route',
       operation_id: 'op-route',
       worker_run_id: 'wr-route',
-      n: 100,
+      n: 500,
     }))
     expect(container.textContent).toContain('session sess-route')
     expect(container.textContent).toContain('operation op-route')
     expect(container.textContent).toContain('worker_run wr-route')
+    expect(container.textContent).toContain('source OAS 이벤트')
+    expect(container.textContent).toContain('limit 500')
     expect(container.textContent).toContain('focus turn-9')
     expect(container.querySelector('[data-testid="telemetry-route-focus"]')).not.toBeNull()
     expect(container.textContent).toContain('SESSION sess-route')
@@ -325,6 +328,10 @@ describe('TelemetryUnified', () => {
     expect(container.textContent).toContain('WORKER wr-route')
     expect(container.textContent).toContain('QUERY turn-9')
     expect(container.textContent).toContain('1 focused item')
+    const sourceSelect = container.querySelector<HTMLSelectElement>('select[aria-label="텔레메트리 소스 필터"]')
+    expect(sourceSelect?.value).toBe('oas_event')
+    const limitSelect = container.querySelector<HTMLSelectElement>('select[aria-label="표시 개수 제한"]')
+    expect(limitSelect?.value).toBe('500')
     const searchInput = container.querySelector<HTMLInputElement>('input[aria-label="엔트리 텍스트 검색"]')
     expect(searchInput?.value).toBe('turn-9')
     expect(container.textContent).toContain('검색 매치 1건')
@@ -344,6 +351,8 @@ describe('TelemetryUnified', () => {
     expect(window.location.hash).not.toContain('operation_id=')
     expect(window.location.hash).not.toContain('worker_run_id=')
     expect(window.location.hash).not.toContain('q=')
+    expect(window.location.hash).toContain('source=oas_event')
+    expect(window.location.hash).toContain('n=500')
   })
 
   it('renders a telemetry entry raw JSON copy action', async () => {

@@ -169,6 +169,16 @@ function normalizeNumber(value: unknown): number | null {
   return null
 }
 
+function telemetrySourceFromRouteParam(value: unknown): TelemetrySource | '' {
+  const source = normalizeText(value)
+  return source && source in TELEMETRY_SOURCE_META ? (source as TelemetrySource) : ''
+}
+
+function telemetryLimitFromRouteParam(value: unknown): number {
+  const parsed = normalizeNumber(value)
+  return parsed != null && [50, 100, 200, 500].includes(parsed) ? parsed : 100
+}
+
 function uniqueStrings(values: Array<string | null | undefined>): string[] {
   const seen = new Set<string>()
   const result: string[] = []
@@ -1020,23 +1030,28 @@ export function TelemetryUnified() {
     loading: true,
     error: null,
   })
-  const sourceFilter = useSignal<TelemetrySource | ''>('')
+  const sourceFilter = useSignal<TelemetrySource | ''>(telemetrySourceFromRouteParam(params.source))
   const keeperFilter = useSignal('')
   const sessionFilter = useSignal(params.session_id ?? '')
   const operationFilter = useSignal(params.operation_id ?? '')
   const workerRunFilter = useSignal(params.worker_run_id ?? '')
-  const limit = useSignal(100)
+  const limit = useSignal(telemetryLimitFromRouteParam(params.n ?? params.limit))
   const entrySearch = useSignal(params.q ?? '')
 
   useEffect(() => {
+    sourceFilter.value = telemetrySourceFromRouteParam(route.value.params.source)
     sessionFilter.value = route.value.params.session_id ?? ''
     operationFilter.value = route.value.params.operation_id ?? ''
     workerRunFilter.value = route.value.params.worker_run_id ?? ''
+    limit.value = telemetryLimitFromRouteParam(route.value.params.n ?? route.value.params.limit)
     entrySearch.value = route.value.params.q ?? ''
   }, [
+    route.value.params.source,
     route.value.params.session_id,
     route.value.params.operation_id,
     route.value.params.worker_run_id,
+    route.value.params.n,
+    route.value.params.limit,
     route.value.params.q,
   ])
 
@@ -1190,6 +1205,8 @@ export function TelemetryUnified() {
           ${sessionFilter.value ? html`<span class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs font-mono text-[var(--color-fg-disabled)]">session ${sessionFilter.value}</span>` : null}
           ${operationFilter.value ? html`<span class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs font-mono text-[var(--color-fg-disabled)]">operation ${operationFilter.value}</span>` : null}
           ${workerRunFilter.value ? html`<span class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs font-mono text-[var(--color-fg-disabled)]">worker_run ${workerRunFilter.value}</span>` : null}
+          ${sourceFilter.value ? html`<span class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs font-mono text-[var(--color-fg-disabled)]">source ${telemetrySourceMeta(sourceFilter.value).label}</span>` : null}
+          ${limit.value !== 100 ? html`<span class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs font-mono text-[var(--color-fg-disabled)]">limit ${limit.value}</span>` : null}
           ${route.value.params.q ? html`<span class="rounded-[var(--r-1)] border border-[var(--color-accent-muted)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs font-mono text-[var(--color-accent-fg)]">focus ${route.value.params.q}</span>` : null}
         </div>
       </div>

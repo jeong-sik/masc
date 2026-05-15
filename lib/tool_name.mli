@@ -31,6 +31,7 @@ module Keeper : sig
     | Discovery
     | Fs_edit
     | Fs_read
+    | Ide_annotate
     | Handoff
     | Library_read
     | Library_search

@@ -1,4 +1,4 @@
-(** Keeper_exec_ide — MCP tool handler for masc_ide_annotate.
+(** Keeper_exec_ide — MCP tool handler for keeper_ide_annotate.
 
     Allows keepers to leave line-bound annotations on code files,
     stored in [.masc-ide/annotations.jsonl] and surfaced by the
@@ -24,6 +24,14 @@ let handle_keeper_ide_annotate
   let content = Safe_ops.json_string ~default:"" "content" args in
   let goal_id = Safe_ops.json_string_opt "goal_id" args in
   let task_id = Safe_ops.json_string_opt "task_id" args in
+  let board_post_id = Safe_ops.json_string_opt "board_post_id" args in
+  let comment_id = Safe_ops.json_string_opt "comment_id" args in
+  let pr_id = Safe_ops.json_string_opt "pr_id" args in
+  let git_ref = Safe_ops.json_string_opt "git_ref" args in
+  let log_id = Safe_ops.json_string_opt "log_id" args in
+  let session_id = Safe_ops.json_string_opt "session_id" args in
+  let operation_id = Safe_ops.json_string_opt "operation_id" args in
+  let worker_run_id = Safe_ops.json_string_opt "worker_run_id" args in
   if String.trim file_path = ""
   then error_json "file_path is required for ide_annotate"
   else if line_start < 1
@@ -49,6 +57,14 @@ let handle_keeper_ide_annotate
         ~content
         ?goal_id
         ?task_id
+        ?board_post_id
+        ?comment_id
+        ?pr_id
+        ?git_ref
+        ?log_id
+        ?session_id
+        ?operation_id
+        ?worker_run_id
         ()
     with
     | Ok annotation ->

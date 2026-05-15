@@ -509,6 +509,70 @@ describe('IdeContextLens', () => {
     })
   })
 
+  it('routes keeper annotations into comment, PR, git, log, and telemetry context', () => {
+    const linkedAnnotation: IdeAnnotation = {
+      ...annotation,
+      id: 'ann-linked-route-context',
+      kind: 'Bookmark',
+      board_post_id: 'post-1',
+      comment_id: 'comment-1',
+      pr_id: '15035',
+      git_ref: 'feat/context-lens',
+      log_id: 'turn-9',
+      session_id: 'sess-9',
+      operation_id: 'op-9',
+      worker_run_id: 'wr-9',
+    }
+    const model = deriveIdeContextLens({
+      filePath: 'lib/keeper/keeper_exec_ide.ml',
+      annotations: [linkedAnnotation],
+      diffRows: [],
+      events: [],
+      overlay: { ...overlay, cursors: new Map() },
+    })
+
+    const counts = new Map(model.surfaces.map(surface => [surface.id, surface.count]))
+    expect(counts.get('board')).toBe(1)
+    expect(counts.get('comment')).toBe(1)
+    expect(counts.get('pr')).toBe(1)
+    expect(counts.get('git')).toBe(1)
+    expect(counts.get('log')).toBe(1)
+    expect(counts.get('telemetry')).toBe(1)
+    expect(model.anchors[0]?.meta).toContain('PR 15035')
+    expect(model.anchors[0]?.meta).toContain('log turn-9')
+    expect(model.anchors[0]?.route_links?.map(link => link.label)).toEqual([
+      'Code',
+      'Goal',
+      'Task',
+      'Board',
+      'Comment',
+      'PR',
+      'Git',
+      'Log',
+      'Telemetry',
+      'Keeper',
+    ])
+    expect(model.surfaces.find(surface => surface.id === 'comment')?.routeLink).toMatchObject({
+      label: 'Comment',
+      params: { section: 'board', post: 'post-1', comment: 'comment-1' },
+    })
+    expect(model.surfaces.find(surface => surface.id === 'pr')?.routeLink).toMatchObject({
+      label: 'PR',
+      params: { section: 'repositories', view: 'graph', pr: '15035' },
+    })
+    expect(model.surfaces.find(surface => surface.id === 'telemetry')?.routeLink).toMatchObject({
+      label: 'Telemetry',
+      params: {
+        section: 'fleet-health',
+        view: 'event-log',
+        session_id: 'sess-9',
+        operation_id: 'op-9',
+        worker_run_id: 'wr-9',
+        q: 'turn-9',
+      },
+    })
+  })
+
   it('routes file and line context back into the Code IDE shell', () => {
     const links = routeLinksForContext({
       filePath: ' lib\\runtime.ml ',

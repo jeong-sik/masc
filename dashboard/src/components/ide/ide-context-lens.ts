@@ -582,6 +582,7 @@ function surfaceCount(
   }
   if (id === 'board') {
     return state.threads.length
+      + state.annotations.filter(annotation => annotation.board_post_id).length
       + state.events.filter(event => event.context?.board_post_id).length
       + countUnstructuredEventText(
         state.events,
@@ -592,6 +593,7 @@ function surfaceCount(
   }
   if (id === 'git') {
     return state.changedLineCount
+      + state.annotations.filter(annotation => annotation.git_ref).length
       + state.events.filter(event => event.context?.git_ref).length
       + countUnstructuredEventText(
         state.events,
@@ -601,7 +603,8 @@ function surfaceCount(
       )
   }
   if (id === 'pr') {
-    return state.events.filter(event => event.context?.pr_id).length
+    return state.annotations.filter(annotation => annotation.pr_id).length
+      + state.events.filter(event => event.context?.pr_id).length
       + countUnstructuredEventText(
         state.events,
         /\b(pr|pull[_\s-]?request|review)[:#/\s-]/,
@@ -611,7 +614,7 @@ function surfaceCount(
   }
   if (id === 'comment') {
     return state.annotations.filter(annotation =>
-      annotation.kind === 'Comment' || annotation.kind === 'Question',
+      annotation.kind === 'Comment' || annotation.kind === 'Question' || annotation.comment_id,
     ).length
       + state.threads.length
       + state.events.filter(event => event.context?.comment_id).length
@@ -623,14 +626,15 @@ function surfaceCount(
       )
   }
   if (id === 'log') {
-    return state.events.length
+    return state.events.length + state.annotations.filter(annotation => annotation.log_id).length
   }
   if (id === 'runtime') {
-    return state.events.filter(event =>
-      event.context?.session_id
-      || event.context?.operation_id
-      || event.context?.worker_run_id,
-    ).length
+    return state.annotations.filter(annotationHasRuntimeScope).length
+      + state.events.filter(event =>
+        event.context?.session_id
+        || event.context?.operation_id
+        || event.context?.worker_run_id,
+      ).length
       + countUnstructuredEventText(
         state.events,
         /\b(session|operation|op|worker_run|worker|wr)[:#/\s-]/,
@@ -642,7 +646,9 @@ function surfaceCount(
         state.eventSearchTextByEvent,
       )
   }
-  if (id === 'telemetry') return state.events.length
+  if (id === 'telemetry') {
+    return state.events.length + state.annotations.filter(annotationHasTelemetry).length
+  }
   return 0
 }
 
@@ -719,26 +725,34 @@ function buildAnchors(
   }
 
   for (const annotation of annotations.slice(0, 3)) {
+    const line = positiveLine(annotation.line_start)
+    const sourceId = `annotation-${annotation.id}`
     anchors.push({
-      id: `annotation-${annotation.id}`,
+      id: sourceId,
       file_path: annotation.file_path,
       surface: annotation.kind,
       label: truncate(annotation.content || '(no content)', 48),
-      meta: compactMeta([
-        annotation.goal_id ? `goal ${annotation.goal_id}` : null,
-        annotation.task_id ? `task ${annotation.task_id}` : null,
-        `keeper ${annotation.keeper_id}`,
-      ]),
-      line: positiveLine(annotation.line_start),
+      meta: annotationContextMeta(annotation),
+      line,
       keeper_id: annotation.keeper_id,
       route_links: routeLinksForContext({
         filePath: annotation.file_path,
-        line: positiveLine(annotation.line_start),
+        line,
         surface: annotation.kind,
         label: truncate(annotation.content || '(no content)', 48),
-        sourceId: `annotation-${annotation.id}`,
+        sourceId,
         goalId: annotation.goal_id ?? undefined,
         taskId: annotation.task_id ?? undefined,
+        boardPostId: annotation.board_post_id ?? undefined,
+        commentId: annotation.comment_id ?? undefined,
+        prId: annotation.pr_id ?? undefined,
+        gitRef: annotation.git_ref ?? undefined,
+        logId: annotation.log_id ?? undefined,
+        sessionId: annotation.session_id ?? undefined,
+        operationId: annotation.operation_id ?? undefined,
+        workerRunId: annotation.worker_run_id ?? undefined,
+        telemetryQuery: annotation.log_id ?? undefined,
+        telemetry: annotationHasTelemetry(annotation),
         keeperId: annotation.keeper_id,
       }),
     })
@@ -1060,6 +1074,39 @@ function eventContextMeta(event: RunActivityEvent, refs: IdeContextTextRouteRefs
   ])
 }
 
+function annotationHasTelemetry(annotation: IdeAnnotation): boolean {
+  return Boolean(
+    annotation.log_id
+    || annotation.session_id
+    || annotation.operation_id
+    || annotation.worker_run_id,
+  )
+}
+
+function annotationHasRuntimeScope(annotation: IdeAnnotation): boolean {
+  return Boolean(
+    annotation.session_id
+    || annotation.operation_id
+    || annotation.worker_run_id,
+  )
+}
+
+function annotationContextMeta(annotation: IdeAnnotation): string {
+  return compactMeta([
+    annotation.goal_id ? `goal ${annotation.goal_id}` : null,
+    annotation.task_id ? `task ${annotation.task_id}` : null,
+    annotation.pr_id ? `PR ${annotation.pr_id}` : null,
+    annotation.board_post_id ? `board ${annotation.board_post_id}` : null,
+    annotation.comment_id ? `comment ${annotation.comment_id}` : null,
+    annotation.git_ref ? `git ${annotation.git_ref}` : null,
+    annotation.log_id ? `log ${annotation.log_id}` : null,
+    annotation.session_id ? `session ${annotation.session_id}` : null,
+    annotation.operation_id ? `operation ${annotation.operation_id}` : null,
+    annotation.worker_run_id ? `worker ${annotation.worker_run_id}` : null,
+    `keeper ${annotation.keeper_id}`,
+  ])
+}
+
 function firstChangedLine(rows: ReadonlyArray<UnifiedDiffRow>): number | undefined {
   const row = rows.find(candidate => candidate.newLine !== null && candidate.newLine >= 1)
   return row?.newLine ?? undefined
@@ -1217,7 +1264,7 @@ export function routeLinksForContext(
   return links.slice(0, MAX_CONTEXT_ROUTE_LINKS)
 }
 
-function cleanId(value: string | undefined): string | null {
+function cleanId(value: string | null | undefined): string | null {
   const trimmed = value?.trim()
   return trimmed ? trimmed : null
 }

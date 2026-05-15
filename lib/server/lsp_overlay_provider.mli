@@ -8,7 +8,7 @@ val codelenses : base_dir:string -> file_path:string -> Yojson.Safe.t list
 (** Generate LSP CodeLens entries for a file from MASC annotations. *)
 
 val inlay_hints : base_dir:string -> file_path:string -> Yojson.Safe.t list
-(** Generate LSP InlayHint entries for annotations with goal/task bindings. *)
+(** Generate LSP InlayHint entries for annotations with route-context bindings. *)
 
 val diagnostics :
   base_dir:string ->

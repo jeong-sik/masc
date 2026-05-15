@@ -1,6 +1,5 @@
 (** IDE annotation storage — CRUD backed by [.masc-ide/annotations.jsonl].
 
-    Uses {!Dated_jsonl} for concurrent-safe append-only writes.
     In-memory compaction rewrites the store when tombstones exceed
     [COMPACT_THRESHOLD]. *)
 
@@ -98,6 +97,14 @@ let create
       ~content
       ?goal_id
       ?task_id
+      ?board_post_id
+      ?comment_id
+      ?pr_id
+      ?git_ref
+      ?log_id
+      ?session_id
+      ?operation_id
+      ?worker_run_id
       ()
   =
   ensure_store ~base_dir;
@@ -119,12 +126,19 @@ let create
       ; content
       ; goal_id
       ; task_id
+      ; board_post_id
+      ; comment_id
+      ; pr_id
+      ; git_ref
+      ; log_id
+      ; session_id
+      ; operation_id
+      ; worker_run_id
       ; created_at_ms = ts
       ; updated_at_ms = ts
       }
     in
-    let store = Dated_jsonl.create ~base_dir:(store_path ~base_dir) () in
-    Dated_jsonl.append store (annotation_to_json annotation);
+    Fs_compat.append_jsonl (annotations_file ~base_dir) (annotation_to_json annotation);
     Ok annotation)
 ;;
 
@@ -178,8 +192,7 @@ let delete ~base_dir ~id ~keeper_id =
   | None -> Error "annotation not found or keeper mismatch"
   | Some _ ->
     let ts = now_ms () in
-    let store = Dated_jsonl.create ~base_dir:(store_path ~base_dir) () in
-    Dated_jsonl.append store (tombstone_json id keeper_id ts);
+    Fs_compat.append_jsonl (annotations_file ~base_dir) (tombstone_json id keeper_id ts);
     (* Streaming count — we only need cardinalities to compute the
        compaction ratio, not the row list itself. *)
     let tombstone_count =

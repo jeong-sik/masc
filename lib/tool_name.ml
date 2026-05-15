@@ -49,6 +49,7 @@ module Keeper = struct
     | Discovery
     | Fs_edit
     | Fs_read
+    | Ide_annotate
     | Handoff
     | Library_read
     | Library_search
@@ -109,6 +110,7 @@ module Keeper = struct
     | Discovery -> "keeper_discovery"
     | Fs_edit -> "keeper_fs_edit"
     | Fs_read -> "keeper_fs_read"
+    | Ide_annotate -> "keeper_ide_annotate"
     | Handoff -> "keeper_handoff"
     | Library_read -> "keeper_library_read"
     | Library_search -> "keeper_library_search"
@@ -170,6 +172,7 @@ module Keeper = struct
     | "keeper_discovery" -> Some Discovery
     | "keeper_fs_edit" -> Some Fs_edit
     | "keeper_fs_read" -> Some Fs_read
+    | "keeper_ide_annotate" -> Some Ide_annotate
     | "keeper_handoff" -> Some Handoff
     | "keeper_library_read" -> Some Library_read
     | "keeper_library_search" -> Some Library_search

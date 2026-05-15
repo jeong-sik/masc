@@ -561,7 +561,10 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
     | Tool_name.Keeper.Bash_kill
     | Tool_name.Keeper.Bash_output
     | Tool_name.Keeper.Shell -> "shell"
-    | Tool_name.Keeper.Fs_edit | Tool_name.Keeper.Fs_read | Tool_name.Keeper.Write -> "fs"
+    | Tool_name.Keeper.Fs_edit
+    | Tool_name.Keeper.Fs_read
+    | Tool_name.Keeper.Ide_annotate
+    | Tool_name.Keeper.Write -> "fs"
     | Tool_name.Keeper.Library_read
     | Tool_name.Keeper.Library_search
     | Tool_name.Keeper.Memory_search

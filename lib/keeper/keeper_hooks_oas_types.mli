@@ -6,6 +6,28 @@
     Re-included by Keeper_hooks_oas so existing callers continue to use
     [Keeper_hooks_oas.cost_status] etc. unchanged. *)
 
+(** Prometheus + JSON label-key string constants used across
+    keeper_hooks_oas.ml call sites. *)
+val label_keeper : string
+val label_callback : string
+val label_tool : string
+val label_source : string
+val label_alias : string
+val label_surface : string
+val label_shape : string
+val label_model : string
+val label_provider : string
+val label_provider_kind : string
+val label_status : string
+val label_site : string
+val label_reason : string
+val label_outcome : string
+val label_severity : string
+val label_decision : string
+val label_stop_reason : string
+val label_keeper_name : string
+val label_channel : string
+
 type cost_status =
   | Cost_reported         (** Cost trusted because OAS reported it. *)
   | Cost_known_free       (** Runtime is structurally unmetered. *)

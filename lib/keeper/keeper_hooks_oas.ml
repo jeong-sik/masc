@@ -28,25 +28,8 @@ include Keeper_hooks_oas_types
 let keeper_denied_tools =
   Tool_catalog.tools_for_surface Tool_catalog.Keeper_denied
 
-let label_keeper = "keeper"
-let label_callback = "callback"
-let label_tool = "tool"
-let label_source = "source"
-let label_alias = "alias"
-let label_surface = "surface"
-let label_shape = "shape"
-let label_model = "model"
-let label_provider = "provider"
-let label_provider_kind = "provider_kind"
-let label_status = "status"
-let label_site = "site"
-let label_reason = "reason"
-let label_outcome = "outcome"
-let label_severity = "severity"
-let label_decision = "decision"
-let label_stop_reason = "stop_reason"
-let label_keeper_name = "keeper_name"
-let label_channel = "channel"
+(* label_* string constants moved to Keeper_hooks_oas_types
+   (intra-library file split, 2026-05-16). *)
 let key_agent = "agent"
 let key_task_id = "task_id"
 let key_input_tokens = "input_tokens"
@@ -113,8 +96,9 @@ let callback_label_on_error = "on_error"
 let callback_label_on_tool_error = "on_tool_error"
 let callback_label_pr_review_action_metrics_append = "pr_review_action_metrics_append"
 let callback_label_pr_work_action_metrics_append = "pr_work_action_metrics_append"
-let outcome_ok = "ok"
-let outcome_error = "error"
+(* outcome_ok / outcome_error already moved to Keeper_hooks_oas_types in
+   step 5; this duplicate block was left behind by accident and is now
+   cleaned up. *)
 
 
 (* [escape_field], [render_inline_skip_reason], [broadcast_tool_skipped],

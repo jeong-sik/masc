@@ -12,6 +12,29 @@ let runtime_lane_label = "runtime"
 
 let runtime_lane_of_model (_model : string) : string = runtime_lane_label
 
+(** Prometheus + JSON label keys used across keeper_hooks_oas.ml call sites.
+    Exposed via mli so the rest of the godfile keeps referencing them through
+    `include Keeper_hooks_oas_types`. *)
+let label_keeper = "keeper"
+let label_callback = "callback"
+let label_tool = "tool"
+let label_source = "source"
+let label_alias = "alias"
+let label_surface = "surface"
+let label_shape = "shape"
+let label_model = "model"
+let label_provider = "provider"
+let label_provider_kind = "provider_kind"
+let label_status = "status"
+let label_site = "site"
+let label_reason = "reason"
+let label_outcome = "outcome"
+let label_severity = "severity"
+let label_decision = "decision"
+let label_stop_reason = "stop_reason"
+let label_keeper_name = "keeper_name"
+let label_channel = "channel"
+
 type cost_status =
   | Cost_reported
   | Cost_known_free

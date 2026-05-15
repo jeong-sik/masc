@@ -77,10 +77,10 @@ let test_single_host_config_invocation () =
 ;;
 
 let test_coreutils_field_byte_identical () =
-  let typed = (Masc_mcp.Host_config.host ()).coreutils in
+  let typed = (Host_config.host ()).coreutils in
   (* Sample one field; all six come from the same record so a single
      equality is sufficient to detect drift. *)
-  let module H = Masc_mcp.Host_config in
+  let module H = Host_config in
   (check string) "coreutils.ls field is /bin/ls today" "/bin/ls" typed.H.ls;
   (check string) "coreutils.pwd field is /bin/pwd today" "/bin/pwd" typed.H.pwd;
   (check string) "coreutils.head field is /usr/bin/head today" "/usr/bin/head"

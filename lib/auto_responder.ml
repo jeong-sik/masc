@@ -25,7 +25,7 @@ let get_mode () =
 let is_enabled () = get_mode () <> Disabled
 
 let activity_log_file () =
-  match Env_config.base_path_opt () with
+  match (Host_config.from_env ()).base_path with
   | Some root -> Filename.concat (Common.masc_dir_from_base_path ~base_path:root) (Filename.concat "logs" "auto-responder.log")
   | None -> Filename.concat (Host_config.host ()).log_dir "auto-responder.log"
 

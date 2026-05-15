@@ -13,7 +13,6 @@
 open Alcotest
 module H = Masc_mcp.Cascade_health_tracker
 module P = Masc_mcp.Cascade_trust_persist
-module S = Masc_mcp.Cascade_strategy
 
 let kind value = H.error_kind_of_string value
 
@@ -195,15 +194,16 @@ let test_hydrate_latest_restores_latency_hint_from_snapshot () =
     for _ = 1 to 20 do
       H.record_success H.global ~provider_key:key ~latency_ms:10.0 ()
     done;
-    let warm_score = S.latency_score_for_provider H.global ~provider_key:key in
-    check bool "fast samples warm latency score" true (warm_score > 0.9);
+    let warm_p50 =
+      match H.provider_info H.global ~provider_key:key with
+      | Some info -> info.p50_latency_ms
+      | None -> None
+    in
+    check (option (float 0.001)) "fast samples warm p50 latency"
+      (Some 10.0)
+      warm_p50;
     let restored = P.hydrate_latest ~base_path:dir in
     check bool "hydrate applied at least one row" true (restored > 0);
-    let restored_score =
-      S.latency_score_for_provider H.global ~provider_key:key
-    in
-    check bool "hydrate restores slow p50 routing penalty"
-      true (restored_score < 0.5);
     match H.provider_info H.global ~provider_key:key with
     | None -> fail "missing hydrated provider"
     | Some info ->

@@ -11,7 +11,7 @@
    in [test/keeper_event_queue/]; here we focus on the *decision
    layer* rather than the queue itself. *)
 
-module HS = Masc_mcp.Heartbeat_smart
+module HS = Masc_mcp.Keeper_heartbeat_smart
 module Q = Keeper_event_queue
 
 (* Mirror of the decision branch that lives in

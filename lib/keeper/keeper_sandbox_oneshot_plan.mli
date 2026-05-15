@@ -14,7 +14,7 @@
     fields ([container_name], [image], [command], [timeout_budget_sec]).
     Mount, ulimit, and network_mode are deferred to Phase 3b-iv where
     they arrive as typed records together with the [Real]
-    [Docker_client] implementation. *)
+    [Keeper_docker_client] implementation. *)
 
 (** {1 Errors} *)
 
@@ -34,7 +34,7 @@ type plan_error =
 (** {1 Plan} *)
 
 (** Abstract sandbox-execution plan. Treat the type as opaque outside
-    {!Sandbox_executor} (Phase 3c) — accessor functions below expose
+    {!Keeper_sandbox_executor} (Phase 3c) — accessor functions below expose
     only what callers need. *)
 type t
 

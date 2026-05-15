@@ -72,7 +72,7 @@ let hydrate_recent ~store ~keep_recent : Agent_sdk.Context_reducer.t =
   { Agent_sdk.Context_reducer.strategy }
 
 let reducer_from_env () =
-  match Env_config_core.base_path_opt () with
+  match (Host_config.from_env ()).base_path with
   | None -> None
   | Some base_path ->
       let store = Tool_blob_store.create ~base_path in

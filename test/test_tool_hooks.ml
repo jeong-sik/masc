@@ -3,6 +3,7 @@
 module Tool_dispatch = Masc_mcp.Tool_dispatch
 module Tool_result = Masc_mcp.Tool_result
 module Tool_token = Masc_mcp.Tool_token
+module Dispatch_outcome = Masc_mcp.Dispatch_outcome
 
 (* Track hook execution order *)
 let call_log : string list ref = ref []
@@ -27,7 +28,7 @@ let test_pre_hook_observes () =
     log_call "pre";
     Tool_dispatch.Pass);
   let token = match Tool_dispatch.mint_token ~name:"__hook_test" with Ok t -> t | Error e -> Alcotest.fail e in
-  let result = Tool_dispatch.dispatch_structured ~token ~args:`Null in
+  let result = Tool_dispatch.guarded_dispatch ~token ~args:`Null () in
   (* Pre-hook ran, then handler *)
   Alcotest.(check (list string)) "execution order"
     ["pre"; "handler"] !call_log;
@@ -50,7 +51,7 @@ let test_pre_hook_short_circuits () =
            duration_ms = 0.0;
            failure_class = None });
   let token = match Tool_dispatch.mint_token ~name:"__hook_blocked" with Ok t -> t | Error e -> Alcotest.fail e in
-  let result = Tool_dispatch.dispatch_structured ~token ~args:`Null in
+  let result = Tool_dispatch.guarded_dispatch ~token ~args:`Null () in
   (* Handler should NOT have been called *)
   Alcotest.(check (list string)) "only pre ran" ["pre_block"] !call_log;
   match result with
@@ -85,12 +86,12 @@ let test_multiple_pre_hooks_first_wins () =
     log_call "pre3";
     Tool_dispatch.Pass);
   let token = match Tool_dispatch.mint_token ~name:"__hook_multi" with Ok t -> t | Error e -> Alcotest.fail e in
-  let _ = Tool_dispatch.dispatch_structured ~token ~args:`Null in
+  let _ = Tool_dispatch.guarded_dispatch ~token ~args:`Null () in
   (* pre1 passes, pre2 blocks, pre3 and handler never called *)
   Alcotest.(check (list string)) "chain stops at blocker"
     ["pre1"; "pre2_block"] !call_log
 
-(* --- Post-hook tests --- *)
+(* --- Typed post-hook / result-transformer tests --- *)
 
 let test_post_hook_observes () =
   setup ();
@@ -100,11 +101,12 @@ let test_post_hook_observes () =
       log_call "handler";
       Some (Tool_result.quick_ok "original"));
   Tool_dispatch.register_name_tag ~tool_name:"__hook_post" ~tag:Mod_misc;
-  Tool_dispatch.register_post_hook (fun r ->
-    log_call "post";
-    r);
+  Tool_dispatch.register_typed_post_hook (fun outcome result ->
+    match outcome, result with
+    | Dispatch_outcome.Handled, Some _ -> log_call "post"
+    | _ -> Alcotest.fail "expected handled typed post-hook");
   let token = match Tool_dispatch.mint_token ~name:"__hook_post" with Ok t -> t | Error e -> Alcotest.fail e in
-  let result = Tool_dispatch.dispatch_structured ~token ~args:`Null in
+  let result = Tool_dispatch.guarded_dispatch ~token ~args:`Null () in
   Alcotest.(check (list string)) "handler then post"
     ["handler"; "post"] !call_log;
   match result with
@@ -118,10 +120,10 @@ let test_post_hook_transforms () =
     ~handler:(fun ~name:_ ~args:_ ->
       Some (Tool_result.quick_ok "original"));
   Tool_dispatch.register_name_tag ~tool_name:"__hook_transform" ~tag:Mod_misc;
-  Tool_dispatch.register_post_hook (fun r ->
+  Tool_dispatch.set_result_transformer (fun r ->
     { r with Tool_result.data = `String "transformed" });
   let token = match Tool_dispatch.mint_token ~name:"__hook_transform" with Ok t -> t | Error e -> Alcotest.fail e in
-  match Tool_dispatch.dispatch_structured ~token ~args:`Null with
+  match Tool_dispatch.guarded_dispatch ~token ~args:`Null () with
   | Some r ->
     (match r.data with
      | `String "transformed" -> ()
@@ -135,19 +137,43 @@ let test_post_hooks_chain () =
     ~handler:(fun ~name:_ ~args:_ ->
       Some (Tool_result.quick_ok "0"));
   Tool_dispatch.register_name_tag ~tool_name:"__hook_chain" ~tag:Mod_misc;
-  Tool_dispatch.register_post_hook (fun r ->
-    log_call "post1";
-    { r with Tool_result.data = `String "1" });
-  Tool_dispatch.register_post_hook (fun r ->
-    log_call "post2";
-    { r with Tool_result.data = `String "2" });
+  Tool_dispatch.register_typed_post_hook (fun outcome result ->
+    match outcome, result with
+    | Dispatch_outcome.Handled, Some _ -> log_call "post1"
+    | _ -> Alcotest.fail "expected handled typed post-hook");
+  Tool_dispatch.register_typed_post_hook (fun outcome result ->
+    match outcome, result with
+    | Dispatch_outcome.Handled, Some _ -> log_call "post2"
+    | _ -> Alcotest.fail "expected handled typed post-hook");
   let token = match Tool_dispatch.mint_token ~name:"__hook_chain" with Ok t -> t | Error e -> Alcotest.fail e in
-  match Tool_dispatch.dispatch_structured ~token ~args:`Null with
+  match Tool_dispatch.guarded_dispatch ~token ~args:`Null () with
   | Some r ->
     Alcotest.(check (list string)) "post order" ["post1"; "post2"] !call_log;
     (match r.data with
+     | `String "0" -> ()
+     | _ -> Alcotest.fail "typed post-hooks must not transform results")
+  | None -> Alcotest.fail "expected Some"
+
+let test_result_transformer_chain_replaces_previous () =
+  setup ();
+  Tool_dispatch.register
+    ~tool_name:"__hook_transform_replace"
+    ~handler:(fun ~name:_ ~args:_ ->
+      Some (Tool_result.quick_ok "0"));
+  Tool_dispatch.register_name_tag ~tool_name:"__hook_transform_replace" ~tag:Mod_misc;
+  Tool_dispatch.set_result_transformer (fun r ->
+    log_call "post1";
+    { r with Tool_result.data = `String "1" });
+  Tool_dispatch.set_result_transformer (fun r ->
+    log_call "post2";
+    { r with Tool_result.data = `String "2" });
+  let token = match Tool_dispatch.mint_token ~name:"__hook_transform_replace" with Ok t -> t | Error e -> Alcotest.fail e in
+  match Tool_dispatch.guarded_dispatch ~token ~args:`Null () with
+  | Some r ->
+    Alcotest.(check (list string)) "latest transformer only" ["post2"] !call_log;
+    (match r.data with
      | `String "2" -> ()
-     | _ -> Alcotest.fail "final post-hook should win")
+     | _ -> Alcotest.fail "latest result transformer should win")
   | None -> Alcotest.fail "expected Some"
 
 (* --- Full lifecycle --- *)
@@ -163,11 +189,12 @@ let test_full_lifecycle () =
   Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
     log_call "pre";
     Tool_dispatch.Pass);
-  Tool_dispatch.register_post_hook (fun r ->
-    log_call "post";
-    r);
+  Tool_dispatch.register_typed_post_hook (fun outcome result ->
+    match outcome, result with
+    | Dispatch_outcome.Handled, Some _ -> log_call "post"
+    | _ -> Alcotest.fail "expected handled typed post-hook");
   let token = match Tool_dispatch.mint_token ~name:"__hook_full" with Ok t -> t | Error e -> Alcotest.fail e in
-  let _ = Tool_dispatch.dispatch_structured ~token ~args:`Null in
+  let _ = Tool_dispatch.guarded_dispatch ~token ~args:`Null () in
   Alcotest.(check (list string)) "pre → handler → post"
     ["pre"; "handler"; "post"] !call_log
 
@@ -176,10 +203,10 @@ let test_no_hooks_default () =
   (* No hooks registered *)
   Tool_dispatch.register
     ~tool_name:"__hook_none"
-    ~handler:(fun ~name:_ ~args:_ -> Some (Tool_result.quick_ok "plain"));
+    ~handler:(fun ~name ~args:_ -> Some (Tool_result.quick_ok ~tool_name:name "plain"));
   Tool_dispatch.register_name_tag ~tool_name:"__hook_none" ~tag:Mod_misc;
   let token = match Tool_dispatch.mint_token ~name:"__hook_none" with Ok t -> t | Error e -> Alcotest.fail e in
-  match Tool_dispatch.dispatch_structured ~token ~args:`Null with
+  match Tool_dispatch.guarded_dispatch ~token ~args:`Null () with
   | Some r ->
     Alcotest.(check bool) "success" true r.success;
     Alcotest.(check string) "tool_name" "__hook_none" r.tool_name
@@ -190,9 +217,8 @@ let test_unknown_tool_skips_hooks () =
   Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
     log_call "pre_should_not_run";
     Tool_dispatch.Pass);
-  Tool_dispatch.register_post_hook (fun r ->
-    log_call "post_should_not_run";
-    r);
+  Tool_dispatch.register_typed_post_hook (fun _outcome _result ->
+    log_call "post_should_not_run");
   match Tool_dispatch.mint_token ~name:"__nonexistent_hook" with
   | Error _ ->
     (* mint_token rejects unregistered tools; no hooks run *)
@@ -210,6 +236,10 @@ let () =
       Alcotest.test_case "observe" `Quick test_post_hook_observes;
       Alcotest.test_case "transform" `Quick test_post_hook_transforms;
       Alcotest.test_case "chain order" `Quick test_post_hooks_chain;
+      Alcotest.test_case
+        "latest transformer wins"
+        `Quick
+        test_result_transformer_chain_replaces_previous;
     ];
     "lifecycle", [
       Alcotest.test_case "pre→handler→post" `Quick test_full_lifecycle;

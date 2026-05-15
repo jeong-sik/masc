@@ -221,10 +221,8 @@ let masc_host () =
   | Some host -> host
   | None -> default_host
 
-(** Centralized MASC_ASSETS_DIR reader.
-    Returns None when MASC_ASSETS_DIR is unset or empty. *)
-let assets_dir_opt () =
-  raw_value_opt "MASC_ASSETS_DIR" |> trim_opt
+(* RFC-0085 PR-10 — [assets_dir_opt] removed (caller 0 after migration).
+   Readers use [(Host_config.from_env ()).assets_dir]. *)
 
 let cluster_name_opt () =
   raw_value_opt "MASC_CLUSTER_NAME" |> trim_opt

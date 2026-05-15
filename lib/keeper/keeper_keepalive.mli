@@ -152,7 +152,7 @@ val drop_autonomous_waiter_for_test : int -> unit
     at time [now].  0.0 = no yield needed.  Exposed for unit testing. *)
 val fairness_delay_sec_at : now:float -> keeper_name:string -> float
 
-(** Pure: whether a [Heartbeat_smart] decision should allow the
+(** Pure: whether a [Keeper_heartbeat_smart] decision should allow the
     keepalive cycle (presence/snapshot/board/turn/recurring) to run.
 
     Contract: [Skip_busy] -> [true] (cycle continues; broadcast may be
@@ -161,13 +161,13 @@ val fairness_delay_sec_at : now:float -> keeper_name:string -> float
     keeper starvation bug where [Skip_busy] was mis-used as a
     cycle-skip signal, blocking any keeper with a claimed task from
     ever running a turn. *)
-val smart_heartbeat_cycle_continues : Heartbeat_smart.decision -> bool
+val smart_heartbeat_cycle_continues : Keeper_heartbeat_smart.decision -> bool
 
 (** Pure: post-sleep refinement. Promotes [Skip_idle] to [true] iff the
     sleep ended with [Woken]. Closes the [MissedWakeup] gap in
     KeeperHeartbeat.tla left open by sibling fix #10078. *)
 val cycle_continues_after_wake :
-  Heartbeat_smart.decision -> Keeper_keepalive_signal.sleep_outcome -> bool
+  Keeper_heartbeat_smart.decision -> Keeper_keepalive_signal.sleep_outcome -> bool
 
 val visible_consumer_count : unit -> int
 
@@ -176,8 +176,8 @@ val visibility_gate_decision :
   has_pending_signal:bool ->
   now:float ->
   last_heartbeat_cycle_ts:float ->
-  Heartbeat_smart.decision ->
-  Heartbeat_smart.decision
+  Keeper_heartbeat_smart.decision ->
+  Keeper_heartbeat_smart.decision
 
 val status_tick_usage_json : unit -> Yojson.Safe.t
 (** Usage payload for heartbeat/status metrics rows.  Status ticks are not

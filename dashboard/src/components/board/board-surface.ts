@@ -47,8 +47,12 @@ import {
   boardHearths,
   boardHearthsLoading,
   boardHearthsError,
+  boardFlairs,
+  boardFlairsLoading,
+  boardFlairsError,
   subBoardOptions,
   subBoardOptionsLoading,
+  subBoardOptionsError,
   boardExcludeAutomation,
   boardLoading,
   boardLoadingMore,
@@ -65,6 +69,7 @@ import {
   newPostTitle,
   newPostContent,
   newPostHearth,
+  newPostFlair,
   newPostSubmitting,
   PAGE_SIZE,
   categoryVisibleLimits,
@@ -90,6 +95,8 @@ import {
   votePost,
   deleteBoardPost,
   refreshBoardHearths,
+  refreshBoardFlairs,
+  loadSubBoardOptionsForPost,
 } from './board-state'
 import type { BoardPost, ContentCategory } from './board-state'
 
@@ -240,6 +247,15 @@ function CategorySection({ group }: { group: { category: ContentCategory; posts:
 
 // ── New post form ──────────────────────────────────────────────────
 function NewPostForm() {
+  useEffect(() => {
+    if (showNewPostForm.value && boardFlairs.value.length === 0 && !boardFlairsLoading.value) {
+      void refreshBoardFlairs()
+    }
+    if (showNewPostForm.value && subBoardOptions.value.length === 0 && !subBoardOptionsLoading.value) {
+      void loadSubBoardOptionsForPost()
+    }
+  }, [showNewPostForm.value])
+
   if (!showNewPostForm.value) {
     return html`
       <button type="button"
@@ -258,6 +274,22 @@ function NewPostForm() {
     && !subBoardSelectOptions.some(option => option.value === activeHearth)
     ? [{ value: activeHearth, label: activeHearth }, ...subBoardSelectOptions]
     : subBoardSelectOptions
+  const categorySelectOptions = [
+    { value: '', label: 'No category' },
+    ...selectedSubBoardOptions,
+  ]
+  const activeFlair = newPostFlair.value.trim()
+  const flairSelectOptions = [
+    { value: '', label: 'No flair' },
+    ...boardFlairs.value.map(flair => ({
+      value: flair.name,
+      label: `${flair.emoji ? `${flair.emoji} ` : ''}${flair.label}`,
+    })),
+  ]
+  const selectedFlairOptions = activeFlair
+    && !flairSelectOptions.some(option => option.value === activeFlair)
+    ? [{ value: activeFlair, label: activeFlair }, ...flairSelectOptions]
+    : flairSelectOptions
 
   return html`
     <div class="p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] grid gap-3">
@@ -277,14 +309,34 @@ function NewPostForm() {
         helpText="예: ts 코드펜스, 일반 URL 링크 카드, 단독 이미지 URL 자동 인라인"
         previewLimit=${2}
       />
-      <${Select}
-        value=${newPostHearth.value}
-        options=${selectedSubBoardOptions}
-        placeholder="Sub-board (hearth) 선택"
-        disabled=${newPostSubmitting.value || subBoardOptionsLoading.value}
-        ariaLabel="새 글 hearth"
-        onInput=${(value: string) => { newPostHearth.value = value }}
-      />
+      <div class="grid gap-3 md:grid-cols-2">
+        <label class="grid gap-1 text-2xs font-medium uppercase text-[var(--color-fg-muted)]">
+          Category
+          <${Select}
+            value=${newPostHearth.value}
+            options=${categorySelectOptions}
+            disabled=${newPostSubmitting.value || subBoardOptionsLoading.value}
+            ariaLabel="새 글 category"
+            onInput=${(value: string) => { newPostHearth.value = value }}
+          />
+        </label>
+        <label class="grid gap-1 text-2xs font-medium uppercase text-[var(--color-fg-muted)]">
+          Flair
+          <${Select}
+            value=${newPostFlair.value}
+            options=${selectedFlairOptions}
+            disabled=${newPostSubmitting.value || boardFlairsLoading.value}
+            ariaLabel="새 글 flair"
+            onInput=${(value: string) => { newPostFlair.value = value }}
+          />
+        </label>
+      </div>
+      ${boardFlairsError.value ? html`
+        <div class="text-2xs text-[var(--color-status-warn)]">Flair 목록을 불러오지 못했습니다. 직접 [flair:name] prefix를 사용할 수 있습니다.</div>
+      ` : null}
+      ${subBoardOptionsError.value ? html`
+        <div class="text-2xs text-[var(--color-status-warn)]">Sub-board 목록을 불러오지 못했습니다. Category 값을 직접 입력하려면 현재 Board 필터를 먼저 선택하세요.</div>
+      ` : null}
       <div class="flex gap-2 justify-end">
         <button type="button"
           class="px-3 py-1.5 rounded-[var(--r-1)] text-sm border border-[var(--color-border-default)] bg-transparent text-[var(--color-fg-muted)] cursor-pointer hover:bg-[var(--color-bg-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
@@ -294,6 +346,7 @@ function NewPostForm() {
             newPostTitle.value = ''
             newPostContent.value = ''
             newPostHearth.value = ''
+            newPostFlair.value = ''
           }}
         >취소</button>
         <button type="button"
@@ -722,6 +775,7 @@ function PostCard({ post }: { post: BoardPost }) {
 
           <!-- Category badges -->
           <span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${categoryBadgeColor(cat)}">${categoryLabel(cat)}</span>
+          ${post.flair ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border bg-[var(--cyan-16)] text-[var(--color-accent-fg)] border-[var(--cyan-16)]">flair:${post.flair}</span>` : null}
           ${qualityPercent !== null ? html`
             <span
               class=${`inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${contributorQualityBadgeClass(post.contributor_quality)}`}
@@ -746,20 +800,18 @@ function PostCard({ post }: { post: BoardPost }) {
             ${isDeleting ? '삭제 중...' : '삭제'}
           <//>
         </div>
-        ${reactionPreview ? html`
-          <div
-            class="mt-2"
-            onClick=${(event: Event) => event.stopPropagation()}
-            onKeyDown=${(event: KeyboardEvent) => event.stopPropagation()}
-          >
-            <${ReactionBar}
-              targetType="post"
-              targetId=${post.id}
-              compact
-              initialSummaries=${post.reactions}
-            />
-          </div>
-        ` : null}
+        <div
+          class=${reactionPreview ? 'mt-2' : 'mt-2 opacity-75 transition-opacity group-hover:opacity-100'}
+          onClick=${(event: Event) => event.stopPropagation()}
+          onKeyDown=${(event: KeyboardEvent) => event.stopPropagation()}
+        >
+          <${ReactionBar}
+            targetType="post"
+            targetId=${post.id}
+            compact
+            initialSummaries=${post.reactions ?? []}
+          />
+        </div>
       </div>
     </article>
   `
@@ -773,6 +825,9 @@ export function BoardSurface() {
   }), [])
   useEffect(() => {
     if (boardHearths.value.length === 0) void refreshBoardHearths()
+  }, [])
+  useEffect(() => {
+    if (boardFlairs.value.length === 0) void refreshBoardFlairs()
   }, [])
   const [contentQuery, setContentQuery] = useState('')
   const rawPosts = boardPosts.value

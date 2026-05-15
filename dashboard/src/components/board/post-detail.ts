@@ -581,10 +581,11 @@ export function PostDetail({ post }: { post: BoardPost }) {
           </div>
 
           <!-- Badges -->
-          ${(post.hearth || post.visibility || post.expires_at || post.classification_reason || qualityPercent !== null || (post.moderation_status && post.moderation_status !== 'none') || (post.report_count ?? 0) > 0)
+          ${(post.flair || post.hearth || post.visibility || post.expires_at || post.classification_reason || qualityPercent !== null || (post.moderation_status && post.moderation_status !== 'none') || (post.report_count ?? 0) > 0)
             ? html`
                 <div class="flex flex-col gap-2">
                   <div class="flex gap-1.5 flex-wrap">
+                    ${post.flair ? html`<span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border bg-[var(--cyan-16)] text-[var(--color-accent-fg)] border-[var(--cyan-16)]">flair:${post.flair}</span>` : null}
                     ${post.hearth ? html`<span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
                     ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
                     <span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${kindBadgeColor(boardPostKind(post))}">${kindLabel(boardPostKind(post))}</span>

@@ -19,6 +19,12 @@ export interface BoardHearth {
   count: number
 }
 
+export interface BoardFlair {
+  name: string
+  emoji: string
+  label: string
+}
+
 function toIsoTimestamp(value: unknown): string | null {
   if (typeof value === 'string' && value.trim()) return value
   if (typeof value !== 'number' || Number.isNaN(value)) return null
@@ -508,6 +514,19 @@ function normalizeBoardHearth(raw: unknown): BoardHearth | null {
   }
 }
 
+function normalizeBoardFlair(raw: unknown): BoardFlair | null {
+  if (!isRecord(raw)) return null
+  const name = asString(raw.name, '').trim()
+  if (!name) return null
+  const emoji = asString(raw.emoji, '').trim()
+  const label = asString(raw.label, '').trim()
+  return {
+    name,
+    emoji,
+    label: label || name,
+  }
+}
+
 function asStrictStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return []
   return value
@@ -711,6 +730,15 @@ export async function fetchBoardHearths(): Promise<BoardHearth[]> {
     const raw = await get<{ hearths?: unknown[] }>('/api/v1/board/hearths')
     return Array.isArray(raw.hearths)
       ? raw.hearths.map(normalizeBoardHearth).filter((row): row is BoardHearth => row !== null)
+      : []
+  })
+}
+
+export async function fetchBoardFlairs(): Promise<BoardFlair[]> {
+  return withRetries('fetchBoardFlairs', async () => {
+    const raw = await get<{ flairs?: unknown[] }>('/api/v1/board/flairs')
+    return Array.isArray(raw.flairs)
+      ? raw.flairs.map(normalizeBoardFlair).filter((row): row is BoardFlair => row !== null)
       : []
   })
 }

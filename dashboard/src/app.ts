@@ -27,6 +27,7 @@ import { setContextThresholds } from './config/context-thresholds'
 import {
   BuildIdentityBadge,
   ConnectionStatus,
+  DashboardHealthStrip,
   DashboardMain,
   ErrorCounterBadge,
   SideRail,
@@ -313,6 +314,7 @@ export function App() {
         <${Suspense} fallback=${null}>
           <${LazyRemoteWarningBanner} />
         <//>
+        <${DashboardHealthStrip} />
       `}
 
       <div class=${compactChromeMode ? 'flex flex-1 overflow-hidden p-0' : 'flex flex-1 gap-2 overflow-hidden p-2 max-[1100px]:flex-col'}>

@@ -90,7 +90,26 @@ val register_typed_post_hook : post_hook_typed -> unit
 (** Register a typed post-hook (RFC-0084 PR-I-1).  See
     {!post_hook_typed} for the contract. *)
 
+(** {2 Result transformer (RFC-0084 PR-I-2.d)} *)
+
+type result_transformer = Tool_result.t -> Tool_result.t
+(** Single-step transformer applied to the handler's
+    {!Tool_result.t} on the [Handled] arm, before legacy post-hooks
+    fire.  Carries the *transformation* responsibility (e.g. output
+    capping) that the legacy [post_hook] surface used to mix with
+    observation. *)
+
+val set_result_transformer : result_transformer -> unit
+(** Install the single result transformer.  Today's only in-tree
+    caller is {!Tool_output_validation.install}; PR-I-2.d wires it
+    through this surface so PR-I-3 can remove [post_hook] without
+    losing the cap. *)
+
+val apply_result_transformer : Tool_result.t -> Tool_result.t
+(** Apply the registered transformer (identity when none registered). *)
+
 val clear_hooks : unit -> unit
+(** Reset pre/post/typed hooks and the result transformer. *)
 
 val run_pre_hooks :
   name:string -> args:Yojson.Safe.t -> Tool_result.t option * Yojson.Safe.t

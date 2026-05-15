@@ -357,6 +357,9 @@ let tool_required_permission = function
 let () =
   List.iter
     (fun (s : Masc_domain.tool_schema) ->
+      let deprecated_register_capabilities =
+        String.equal s.name "masc_register_capabilities"
+      in
       Tool_spec.register
         (Tool_spec.create
            ~name:s.name
@@ -367,6 +370,25 @@ let () =
            ~is_read_only:(List.mem s.name tool_spec_read_only)
            ~is_idempotent:(List.mem s.name tool_spec_read_only)
            ~requires_join:(List.mem s.name tool_spec_requires_join)
+           ~visibility:
+             (if deprecated_register_capabilities
+              then Tool_catalog.Hidden
+              else Tool_catalog.Default)
+           ~lifecycle:
+             (if deprecated_register_capabilities
+              then Tool_catalog.Deprecated
+              else Tool_catalog.Active)
+           ?replacement:
+             (if deprecated_register_capabilities
+              then Some "masc_agent_update"
+              else None)
+           ?reason:
+             (if deprecated_register_capabilities
+              then
+                Some
+                  "Deprecated compatibility alias. Use masc_agent_update with capabilities instead."
+              else None)
+           ~allow_direct_call_when_hidden:deprecated_register_capabilities
            ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

@@ -21,6 +21,34 @@ let cleanup_dir dir =
   in
   rm dir
 
+let with_stubbed_git_probe f =
+  Lib.Server_dashboard_http.clear_git_rev_parse_short_cache_for_tests ();
+  Lib.Server_dashboard_http.set_git_rev_parse_short_probe_hook_for_tests
+    (fun _ -> Some "test");
+  Fun.protect
+    ~finally:(fun () ->
+      Lib.Server_dashboard_http.clear_git_rev_parse_short_probe_hook_for_tests ();
+      Lib.Server_dashboard_http.clear_git_rev_parse_short_cache_for_tests ())
+    f
+
+let seed_git_probe_cache config =
+  let refreshed_at = Unix.gettimeofday () in
+  let seed path =
+    Lib.Server_dashboard_http.seed_git_rev_parse_short_cache_for_tests path
+      (Some "test")
+      ~refreshed_at
+  in
+  seed config.Coord_utils_backend_setup.base_path;
+  seed config.Coord_utils_backend_setup.workspace_path;
+  Option.iter seed (Lib.Build_identity.repo_root ())
+
+let with_dashboard_eio f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  Lib.Cascade_legacy_runner.start_actor_if_needed ~sw;
+  f ()
+
 let contains_substring ~needle haystack =
   let needle_len = String.length needle in
   let haystack_len = String.length haystack in
@@ -42,9 +70,10 @@ let test_dashboard_tools_projection () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+      with_stubbed_git_probe @@ fun () ->
+      with_dashboard_eio @@ fun () ->
       let config = Coord_utils.default_config dir in
+      seed_git_probe_cache config;
       ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
       Lib.Tool_usage_log.init ~base_path:dir ();
       let json = Lib.Server_dashboard_http.dashboard_tools_http_json config in
@@ -168,35 +197,36 @@ let test_dashboard_tools_projection () =
          field was removed alongside the [MASC_DISPATCH_V2] flag. *)
       let _ = usage in
       (* Hidden tools remain auto-filtered outside public_mcp_tools. *)
-      let hidden_tool =
+      let find_tool name =
         inventory_rows
-        |> List.find_opt (fun row ->
-               row |> member "name" |> to_string = "masc_code_search")
+        |> List.find_opt (fun row -> row |> member "name" |> to_string = name)
       in
-      let public_tool =
-        inventory_rows
-        |> List.find_opt (fun row ->
-               row |> member "name" |> to_string = "masc_status")
+      let has_surface surface row =
+        row |> member "surfaces" |> to_list
+        |> List.exists (function
+             | `String value -> String.equal value surface
+             | _ -> false)
       in
-      let spawned_agent_tool =
-        inventory_rows
-        |> List.find_opt (fun row ->
-               row |> member "name" |> to_string = "masc_workflow_guide")
-      in
-      let local_worker_tool =
-        inventory_rows
-        |> List.find_opt (fun row ->
-               row |> member "name" |> to_string = "masc_worktree_create")
-      in
+      let hidden_tool = find_tool "masc_code_search" in
+      let public_tool = find_tool "masc_status" in
+      let spawned_agent_tool = find_tool "masc_workflow_guide" in
+      let local_worker_tool = find_tool "masc_worktree_create" in
+      let deprecated_alias_tool = find_tool "masc_register_capabilities" in
       check bool "includes hidden tool" true (Option.is_some hidden_tool);
       check bool "includes public tool" true (Option.is_some public_tool);
       check bool "includes spawned agent tool" true
         (Option.is_some spawned_agent_tool);
       check bool "includes local worker tool" true
         (Option.is_some local_worker_tool);
+      check bool "includes deprecated alias tool" true
+        (Option.is_some deprecated_alias_tool);
       (match public_tool with
       | None -> ()
       | Some row ->
+          check bool "public tool has registered schema" true
+            (row |> member "registered_schema" |> to_bool);
+          check bool "public tool has dispatch registration" true
+            (row |> member "dispatch_registered" |> to_bool);
           let public_surface_count =
             row |> member "surfaces" |> to_list
             |> List.fold_left
@@ -211,21 +241,35 @@ let test_dashboard_tools_projection () =
       | None -> ()
       | Some row ->
           check bool "spawned agent tool keeps spawned_agent_mcp surface" true
-            (row |> member "surfaces" |> to_list
-             |> List.exists (function
-                  | `String "spawned_agent_mcp" -> true
-                  | _ -> false)));
+            (has_surface "spawned_agent_mcp" row));
       (match local_worker_tool with
       | None -> ()
       | Some row ->
           check bool "local worker tool keeps local_worker surface" true
-            (row |> member "surfaces" |> to_list
-             |> List.exists (function
-                  | `String "local_worker" -> true
-                  | _ -> false)));
+            (has_surface "local_worker" row));
+      (match deprecated_alias_tool with
+      | None -> ()
+      | Some row ->
+          check bool "deprecated alias has registered schema" true
+            (row |> member "registered_schema" |> to_bool);
+          check bool "deprecated alias has dispatch registration" true
+            (row |> member "dispatch_registered" |> to_bool);
+          check string "deprecated alias visibility surfaced" "hidden"
+            (row |> member "visibility" |> to_string);
+          check string "deprecated alias lifecycle surfaced" "deprecated"
+            (row |> member "lifecycle" |> to_string);
+          check string "deprecated alias replacement surfaced"
+            "masc_agent_update"
+            (row |> member "replacement" |> to_string);
+          check bool "deprecated alias not assigned a surface" false
+            (row |> member "surfaces" |> to_list <> []));
       match hidden_tool with
       | None -> ()
       | Some row ->
+          check bool "hidden tool has registered schema" true
+            (row |> member "registered_schema" |> to_bool);
+          check bool "hidden tool has dispatch registration" true
+            (row |> member "dispatch_registered" |> to_bool);
           check string "visibility surfaced" "hidden"
             (row |> member "visibility" |> to_string);
           check string "lifecycle surfaced" "active"
@@ -233,19 +277,17 @@ let test_dashboard_tools_projection () =
           check bool "direct call flag surfaced" true
             (row |> member "direct_call_allowed" |> to_bool);
           check bool "hidden tool not mislabeled public_mcp" false
-            (row |> member "surfaces" |> to_list
-             |> List.exists (function
-                  | `String "public_mcp" -> true
-                  | _ -> false)))
+            (has_surface "public_mcp" row))
 
 let test_dashboard_tools_usage_surfaces_coverage_gap () =
   let dir = test_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      Eio_main.run @@ fun env ->
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      with_stubbed_git_probe @@ fun () ->
+      with_dashboard_eio @@ fun () ->
       let config = Coord_utils.default_config dir in
+      seed_git_probe_cache config;
       ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
       Lib.Tool_usage_log.init ~base_path:dir ();
       let masc_root = Lib.Coord.masc_root_dir config in
@@ -274,8 +316,7 @@ let test_tool_usage_store_failure_records_coverage_gap () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      Eio_main.run @@ fun env ->
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      with_stubbed_git_probe @@ fun () ->
       let masc_root = Filename.concat dir ".masc" in
       Fs_compat.mkdir_p masc_root;
       Fs_compat.save_file (Filename.concat masc_root "tool_usage")
@@ -303,9 +344,10 @@ let test_dashboard_tools_usage_marks_store_path_collision () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      Eio_main.run @@ fun env ->
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      with_stubbed_git_probe @@ fun () ->
+      with_dashboard_eio @@ fun () ->
       let config = Coord_utils.default_config dir in
+      seed_git_probe_cache config;
       ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
       let masc_root = Lib.Coord.masc_root_dir config in
       Fs_compat.mkdir_p masc_root;

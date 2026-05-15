@@ -267,6 +267,10 @@
    agent_sdk
    agent_sdk.base
    agent_sdk.llm_provider
+   ;; RFC-0086 PR-2H moved Tool_args / Tool_result into a wrapped-false
+   ;; leaf sub-library. The parent library still references those modules
+   ;; unqualified, so it must depend on the leaf explicitly.
+   masc_mcp.tool_types
    masc_mcp.cdal_runtime
    ;; RFC-0056 Phase 0 — CDAL Phase 1A evaluator extracted to lib/cdal/
    ;; as its own sub-library. Hosts Cdal_types + Adversarial_eval +

@@ -81,8 +81,8 @@ let json_upsert_meta_string_field name value fields =
     attempts (or persona/system-prompt confusion) visible to
     operators instead of leaving them as silent audit drift.
 
-    Cardinality is bounded: 4 board tools x 2 identity fields ([author],
-    [voter]) = 8 series at most. *)
+    Cardinality is bounded by the small board write surface and identity fields
+    ([author], [voter], [owner], [user_id]). *)
 let board_actor_identity_spoof_metric =
   "masc_board_actor_identity_spoof_total"
 
@@ -91,7 +91,7 @@ let () =
     ~name:board_actor_identity_spoof_metric
     ~help:
       "Total board-tool calls where the caller-supplied identity field \
-       (author / voter) canonicalised to a different keeper than the \
+       (author / voter / owner / user_id) canonicalised to a different keeper than the \
        runtime contract's agent_name. The dispatcher rewrites the field \
        to the trusted ctx value and preserves the caller's claim in \
        [meta.<field>_caller_claim]; this counter surfaces the rewrite \
@@ -237,6 +237,12 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
           arguments
     | "masc_board_vote" | "masc_board_comment_vote" ->
         enforce_caller_identity ~tool:name ~field:"voter" ~agent_name
+          arguments
+    | "masc_board_reaction" ->
+        enforce_caller_identity ~tool:name ~field:"user_id" ~agent_name
+          arguments
+    | "masc_board_sub_board_create" ->
+        enforce_caller_identity ~tool:name ~field:"owner" ~agent_name
           arguments
     | _ -> arguments
   in
@@ -445,7 +451,13 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
   | "masc_board_search" | "masc_board_profile"
   | "masc_board_hearths"
   | "masc_board_curation_read"
-  | "masc_board_curation_submit" ->
+  | "masc_board_curation_submit"
+  | "masc_board_reaction"
+  | "masc_board_sub_board_create"
+  | "masc_board_sub_board_list"
+  | "masc_board_sub_board_get"
+  | "masc_board_sub_board_update"
+  | "masc_board_sub_board_delete" ->
       Some (Tool_board.handle_tool name arguments)
 
   | _ -> None

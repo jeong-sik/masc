@@ -1810,6 +1810,7 @@ let register () =
       ~handler_binding:(Shared handler)
       ~is_read_only:ro
       ~is_idempotent:ro
+      ~is_destructive:(String.equal s.name "masc_board_delete")
       ?required_permission:(tool_required_permission s.name)
       ()
   in

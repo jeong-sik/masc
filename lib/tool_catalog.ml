@@ -230,6 +230,9 @@ let explicit_metadata : (string * metadata) list =
     ("masc_plan_set_task", actor_bound_masc_coordination_tool);
     ( "masc_broadcast",
       { masc_coordination_tool with required_permission = Some Masc_domain.CanBroadcast } );
+    ( "masc_register_capabilities",
+      deprecated ~replacement:"masc_agent_update" ~allow_direct_call_when_hidden:true
+        "Deprecated compatibility alias. Use masc_agent_update with capabilities instead." );
     ( "masc_messages",
       { readonly_tool with required_permission = Some Masc_domain.CanReadState } );
     ( "masc_who",

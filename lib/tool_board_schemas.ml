@@ -111,7 +111,7 @@ let tool_post_create : Masc_domain.tool_schema =
                     ] )
               ] )
           (* No [required] — handler enforces: body|content must be non-empty,
-       and author is auto-injected via Tool_dispatch pre-hook for keepers.
+       and caller-aware dispatch wrappers auto-inject author for keepers/MCP clients.
        Schema-level required=[content,author] rejected callers who used
        {title,body} (keeper prompt default) before the handler could run. *)
         ]

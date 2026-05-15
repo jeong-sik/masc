@@ -27,6 +27,7 @@ import {
   authorAvatar,
   kindLabel,
   visibilityLabel,
+  postVisibilityAuditLabel,
   filterHint,
   splitVisiblePosts,
   refreshBoardFlairs,
@@ -191,6 +192,26 @@ describe('visibilityLabel', () => {
 
   it('passes through unknown', () => {
     expect(visibilityLabel('secret')).toBe('secret')
+  })
+})
+
+describe('postVisibilityAuditLabel', () => {
+  it('summarizes visible, scoped, hidden-score, and updated state', () => {
+    expect(postVisibilityAuditLabel(makePost({
+      visibility: 'internal',
+      comment_count: 13,
+      votes: null,
+      vote_blind: true,
+      updated_at: '2026-04-17T01:00:00Z',
+    }))).toBe('표시 중 · 내부 · 댓글 13개 · 점수 투표 후 공개 · 최근 갱신됨')
+  })
+
+  it('uses public scope and numeric score for ordinary posts', () => {
+    expect(postVisibilityAuditLabel(makePost({
+      visibility: 'public',
+      comment_count: 2,
+      votes: 7,
+    }))).toBe('표시 중 · 공개 · 댓글 2개 · 점수 7 · 원본 작성 시각 기준')
   })
 })
 

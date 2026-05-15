@@ -37,6 +37,7 @@ import {
   kindLabel,
   visibilityLabel,
   visibilityBadgeColor,
+  postVisibilityAuditLabel,
   boardPostKind,
   votePost,
   voteComment,
@@ -547,6 +548,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
   const downvoteActive = post.current_vote === 'down'
   const postVoteLabel = post.vote_blind ? '투표 후 공개' : `${post.votes ?? 0} votes`
   const postVoteAria = post.vote_blind ? '게시글 점수 투표 후 공개' : `게시글 점수 ${post.votes ?? 0}`
+  const auditLabel = postVisibilityAuditLabel(post)
   const focusedCommentId = cleanCommentRouteParam((route.value.params as Record<string, string | undefined>).comment)
 
   return html`
@@ -578,6 +580,14 @@ export function PostDetail({ post }: { post: BoardPost }) {
               aria-label=${postVoteAria}
               title=${postVoteLabel}
             >${postVoteLabel}</span>
+          </div>
+
+          <div
+            class="text-2xs text-[var(--color-fg-muted)] leading-relaxed"
+            aria-label=${`게시글 표시 감사: ${auditLabel}`}
+            title=${auditLabel}
+          >
+            표시 감사: ${auditLabel}. 목록 정렬/필터에 따라 위치가 바뀔 수 있습니다.
           </div>
 
           <!-- Badges -->

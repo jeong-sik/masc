@@ -92,6 +92,8 @@ import {
   authorAvatar,
   visibilityLabel,
   visibilityBadgeColor,
+  postVisibilityAuditLabel,
+  postVisibilityAuditDetails,
   votePost,
   deleteBoardPost,
   refreshBoardHearths,
@@ -655,6 +657,9 @@ function PostCard({ post }: { post: BoardPost }) {
   const downvoteActive = post.current_vote === 'down'
   const voteScoreLabel = post.vote_blind ? '투표 후 공개' : String(post.votes ?? 0)
   const voteScoreAria = post.vote_blind ? '점수 투표 후 공개' : `점수 ${post.votes ?? 0}`
+  const auditLabel = postVisibilityAuditLabel(post)
+  const auditDetails = postVisibilityAuditDetails(post)
+  const sortLabel = SORT_MODES.find(mode => mode.id === boardSortMode.value)?.label ?? boardSortMode.value
   const reactionPreview = post.reactions?.some(summary => summary.count > 0 || summary.reacted || summary.has_reacted)
 
   const handleVote = async (dir: 'up' | 'down', event: Event) => {
@@ -799,6 +804,15 @@ function PostCard({ post }: { post: BoardPost }) {
           >
             ${isDeleting ? '삭제 중...' : '삭제'}
           <//>
+        </div>
+        <div
+          class="mt-2 flex items-center gap-1.5 flex-wrap text-2xs text-[var(--color-fg-muted)]"
+          aria-label=${`게시글 표시 감사: ${auditLabel}; 현재 정렬 ${sortLabel}`}
+          title=${`${auditLabel} · 현재 정렬 ${sortLabel}`}
+        >
+          <span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] border border-[var(--ok-30)] bg-[var(--ok-soft)] text-[var(--color-status-ok)] font-medium">표시 중</span>
+          <span>${auditDetails}</span>
+          <span class="opacity-60">· 정렬 ${sortLabel}</span>
         </div>
         <div
           class=${reactionPreview ? 'mt-2' : 'mt-2 opacity-75 transition-opacity group-hover:opacity-100'}

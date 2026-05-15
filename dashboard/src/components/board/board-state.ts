@@ -342,6 +342,26 @@ export function visibilityLabel(vis: string): string | null {
   }
 }
 
+function visibilityAuditLabel(vis: string | null | undefined): string {
+  if (!vis || vis === 'public') return '공개'
+  return visibilityLabel(vis) ?? vis
+}
+
+export function postVisibilityAuditDetails(post: BoardPost): string {
+  const scoreLabel = post.vote_blind ? '점수 투표 후 공개' : `점수 ${post.votes ?? 0}`
+  const updatedLabel = isUpdated(post) ? '최근 갱신됨' : '원본 작성 시각 기준'
+  return [
+    visibilityAuditLabel(post.visibility),
+    `댓글 ${post.comment_count ?? 0}개`,
+    scoreLabel,
+    updatedLabel,
+  ].join(' · ')
+}
+
+export function postVisibilityAuditLabel(post: BoardPost): string {
+  return `표시 중 · ${postVisibilityAuditDetails(post)}`
+}
+
 export function visibilityBadgeColor(vis: string): string {
   if (vis === 'internal') return 'bg-[var(--color-bg-hover)] text-[var(--purple)] border-[var(--color-border-strong)]'
   return 'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]'

@@ -1676,3 +1676,10 @@
  (name test_rfc_0085_pr2_auto_responder_log_dir)
  (modules test_rfc_0085_pr2_auto_responder_log_dir)
  (libraries alcotest ast_grep))
+
+; RFC-0085 PR-5 — Tool_dispatch_emit.finalize_from_handler is invoked
+; in every MCP path so the five typed observers fire uniformly.
+(test
+ (name test_rfc_0085_pr5_dispatch_emit)
+ (modules test_rfc_0085_pr5_dispatch_emit)
+ (libraries alcotest ast_grep masc_mcp unix))

@@ -53,6 +53,7 @@
    (re_export masc_mcp.config)
    (re_export masc_mcp.fs_compat)
    (re_export masc_mcp.gate)
+   (re_export masc_mcp.ide)
    (re_export masc_mcp.masc_backend)
    (re_export masc_mcp.masc_compression)
    (re_export masc_mcp.mcp_session)

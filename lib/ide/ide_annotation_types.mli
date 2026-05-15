@@ -19,6 +19,14 @@ type annotation =
   ; content : string
   ; goal_id : string option
   ; task_id : string option
+  ; board_post_id : string option
+  ; comment_id : string option
+  ; pr_id : string option
+  ; git_ref : string option
+  ; log_id : string option
+  ; session_id : string option
+  ; operation_id : string option
+  ; worker_run_id : string option
   ; created_at_ms : int64
   ; updated_at_ms : int64
   }

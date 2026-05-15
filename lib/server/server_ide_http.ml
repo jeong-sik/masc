@@ -166,6 +166,14 @@ let add_routes router =
              in
              let goal_id = find_string "goal_id" in
              let task_id = find_string "task_id" in
+             let board_post_id = find_string "board_post_id" in
+             let comment_id = find_string "comment_id" in
+             let pr_id = find_string "pr_id" in
+             let git_ref = find_string "git_ref" in
+             let log_id = find_string "log_id" in
+             let session_id = find_string "session_id" in
+             let operation_id = find_string "operation_id" in
+             let worker_run_id = find_string "worker_run_id" in
              (match
                 Ide_annotations.create
                   ~base_dir:base
@@ -177,6 +185,14 @@ let add_routes router =
                   ~content
                   ?goal_id
                   ?task_id
+                  ?board_post_id
+                  ?comment_id
+                  ?pr_id
+                  ?git_ref
+                  ?log_id
+                  ?session_id
+                  ?operation_id
+                  ?worker_run_id
                   ()
               with
               | Ok annotation ->

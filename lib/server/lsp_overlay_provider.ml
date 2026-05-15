@@ -2,7 +2,7 @@
 
     Converts MASC annotations (comments, decisions, questions, bookmarks)
     into LSP CodeLens entries. Provides diagnostic merging and inlay hints
-    for goal/task bindings. *)
+    for route-context bindings. *)
 
 open Ide_annotation_types
 
@@ -35,6 +35,41 @@ module Cache = struct
 end
 
 (** LSP CodeLens entry as JSON. *)
+let tag_opt label value =
+  match value with
+  | Some raw when String.trim raw <> "" -> [ Printf.sprintf "%s:%s" label raw ]
+  | _ -> []
+;;
+
+let annotation_route_tags (a : annotation) =
+  tag_opt "goal" a.goal_id
+  @ tag_opt "task" a.task_id
+  @ tag_opt "board" a.board_post_id
+  @ tag_opt "comment" a.comment_id
+  @ tag_opt "PR" a.pr_id
+  @ tag_opt "git" a.git_ref
+  @ tag_opt "log" a.log_id
+  @ tag_opt "session" a.session_id
+  @ tag_opt "op" a.operation_id
+  @ tag_opt "worker" a.worker_run_id
+;;
+
+let annotation_context_label (a : annotation) =
+  String.concat " · " (annotation_route_tags a)
+;;
+
+let annotation_context_suffix (a : annotation) =
+  match annotation_context_label a with
+  | "" -> ""
+  | label -> " · " ^ label
+;;
+
+let annotation_message_with_context (a : annotation) =
+  match annotation_context_label a with
+  | "" -> a.content
+  | label -> Printf.sprintf "%s (%s)" a.content label
+;;
+
 let codelens_to_json (a : annotation) : Yojson.Safe.t =
   let range =
     `Assoc [
@@ -43,11 +78,7 @@ let codelens_to_json (a : annotation) : Yojson.Safe.t =
     ]
   in
   let kind_label = annotation_kind_to_string a.kind in
-  let title =
-    match a.goal_id with
-    | Some g -> Printf.sprintf "[%s] %s (%s)" kind_label a.content g
-    | None -> Printf.sprintf "[%s] %s" kind_label a.content
-  in
+  let title = Printf.sprintf "[%s] %s%s" kind_label a.content (annotation_context_suffix a) in
   `Assoc [
     ("range", range);
     ("command", `Assoc [
@@ -57,19 +88,17 @@ let codelens_to_json (a : annotation) : Yojson.Safe.t =
     ]);
   ]
 
-(** LSP InlayHint entry — shows goal/task binding inline. *)
+(** LSP InlayHint entry — shows route-context binding inline. *)
 let inlay_hint_to_json (a : annotation) : Yojson.Safe.t =
   let label =
-    match (a.goal_id, a.task_id) with
-    | Some g, Some t -> Printf.sprintf "goal:%s task:%s" g t
-    | Some g, None -> Printf.sprintf "goal:%s" g
-    | None, Some t -> Printf.sprintf "task:%s" t
-    | None, None -> Printf.sprintf "[%s]" (annotation_kind_to_string a.kind)
+    match annotation_context_label a with
+    | "" -> Printf.sprintf "[%s]" (annotation_kind_to_string a.kind)
+    | label -> label
   in
   `Assoc [
     ("position", `Assoc [("line", `Int (a.line_start - 1)); ("character", `Int 0)]);
     ("label", `String label);
-    ("tooltip", `String a.content);
+    ("tooltip", `String (annotation_message_with_context a));
     ("kind", `Int 2);  (* TypeParameter kind for inline annotations *)
   ]
 
@@ -85,11 +114,11 @@ let codelenses ~base_dir ~file_path : Yojson.Safe.t list =
   ) annotations
 
 (** Generate LSP InlayHint entries for a file.
-    Only annotations with goal_id or task_id bindings produce hints. *)
+    Only annotations with route-context bindings produce hints. *)
 let inlay_hints ~base_dir ~file_path : Yojson.Safe.t list =
   let annotations = Cache.get ~base_dir ~file_path in
   List.filter_map (fun (a : annotation) ->
-    if a.goal_id <> None || a.task_id <> None then
+    if annotation_route_tags a <> [] then
       Some (inlay_hint_to_json a)
     else
       None
@@ -114,7 +143,7 @@ let diagnostics ~base_dir ~file_path ~(lsp_diagnostics : Yojson.Safe.t list) :
           ("range", range);
           ("severity", `Int 3);  (* Information *)
           ("source", `String "masc");
-          ("message", `String a.content);
+          ("message", `String (annotation_message_with_context a));
         ])
     | Decision | Bookmark | Comment -> None
   ) annotations in
@@ -172,15 +201,7 @@ let enrich_hover ~base_dir ~file_path ~line (result : Yojson.Safe.t) =
     let masc_section =
       String.concat "\n" (List.map (fun (a : annotation) ->
         let kind = annotation_kind_to_string a.kind in
-        match (a.goal_id, a.task_id) with
-        | Some g, Some t ->
-          Printf.sprintf "- **[%s]** %s (goal:%s task:%s)" kind a.content g t
-        | Some g, None ->
-          Printf.sprintf "- **[%s]** %s (goal:%s)" kind a.content g
-        | None, Some t ->
-          Printf.sprintf "- **[%s]** %s (task:%s)" kind a.content t
-        | None, None ->
-          Printf.sprintf "- **[%s]** %s" kind a.content
+        Printf.sprintf "- **[%s]** %s" kind (annotation_message_with_context a)
       ) matching)
     in
     let masc_suffix = "\n---\n**MASC Annotations:**\n" ^ masc_section in

@@ -712,6 +712,75 @@ let filesystem_tools : Masc_domain.tool_schema list =
           ; "required", `List [ `String "path"; `String "content" ]
           ]
     }
+  ; { name = "keeper_ide_annotate"
+    ; description =
+        "Attach a keeper-authored annotation to a source file line range. Use this to \
+         leave durable IDE context that links code to goal/task/board/comment/PR/git/log \
+         evidence. file_path, line_start, and content are required; optional route \
+         fields are preserved for dashboard Context Lens links."
+    ; input_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; ( "properties"
+            , `Assoc
+                [ ( "file_path"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; "description", `String "Workspace-relative source file path"
+                      ] )
+                ; ( "line_start"
+                  , `Assoc
+                      [ "type", `String "integer"
+                      ; "minimum", `Int 1
+                      ; "description", `String "First 1-based source line"
+                      ] )
+                ; ( "line_end"
+                  , `Assoc
+                      [ "type", `String "integer"
+                      ; "minimum", `Int 1
+                      ; "description", `String "Last 1-based source line; defaults to line_start"
+                      ] )
+                ; ( "kind"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "enum"
+                        , `List
+                            [ `String "Comment"
+                            ; `String "Decision"
+                            ; `String "Question"
+                            ; `String "Bookmark"
+                            ] )
+                      ; "description", `String "Annotation kind; defaults to Comment"
+                      ] )
+                ; ( "content"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; "description", `String "Short annotation text shown in the IDE"
+                      ] )
+                ; ( "goal_id"
+                  , `Assoc [ "type", `String "string"; "description", `String "Optional Goal route id" ] )
+                ; ( "task_id"
+                  , `Assoc [ "type", `String "string"; "description", `String "Optional Task route id" ] )
+                ; ( "board_post_id"
+                  , `Assoc [ "type", `String "string"; "description", `String "Optional Board post route id" ] )
+                ; ( "comment_id"
+                  , `Assoc [ "type", `String "string"; "description", `String "Optional Board/GitHub comment route id" ] )
+                ; ( "pr_id"
+                  , `Assoc [ "type", `String "string"; "description", `String "Optional PR number or id" ] )
+                ; ( "git_ref"
+                  , `Assoc [ "type", `String "string"; "description", `String "Optional branch, commit, or ref" ] )
+                ; ( "log_id"
+                  , `Assoc [ "type", `String "string"; "description", `String "Optional runtime audit log id" ] )
+                ; ( "session_id"
+                  , `Assoc [ "type", `String "string"; "description", `String "Optional telemetry session id" ] )
+                ; ( "operation_id"
+                  , `Assoc [ "type", `String "string"; "description", `String "Optional telemetry operation id" ] )
+                ; ( "worker_run_id"
+                  , `Assoc [ "type", `String "string"; "description", `String "Optional telemetry worker run id" ] )
+                ] )
+          ; "required", `List [ `String "file_path"; `String "line_start"; `String "content" ]
+          ]
+    }
   ]
 ;;
 

@@ -793,6 +793,11 @@ let log_call
         | Some value -> [ "session_id", `String value ]
         | None -> []
       in
+      let generation_field =
+        match generation with
+        | Some value -> [ "generation", `Int value ]
+        | None -> []
+      in
       let turn_field =
         match turn with
         | Some value -> [ "turn", `Int value ]
@@ -903,6 +908,7 @@ let log_call
            @ prompt_fingerprint_field
            @ trace_id_field
            @ session_id_field
+           @ generation_field
            @ turn_field
            @ keeper_turn_id_field
            @ task_id_field

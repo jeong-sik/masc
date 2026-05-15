@@ -123,7 +123,17 @@ let all_to_json () =
 
 let clear () = with_lock (fun () -> metrics := StringMap.empty)
 
+(* RFC-0084 PR-I-2.a — migrate to typed post-hook surface.
+   Was: legacy [register_post_hook] mutating-signature observer that
+   fired only on the [Handled] arm (when [dispatch] returned [Some
+   tr]).  Now: [register_typed_post_hook] which fires on every
+   {!Dispatch_outcome.t} arm, but [record] is only invoked when
+   [result = Some r] — preserving today's "metrics record per
+   successful dispatch" semantics.  Future PR-I-2.* siblings may
+   add dedicated counters for the non-[Handled] arms; this PR is
+   *behaviour-preserving* migration only. *)
 let install () =
-  Tool_dispatch.register_post_hook (fun result ->
-    record result;
-    result)
+  Tool_dispatch.register_typed_post_hook (fun outcome result ->
+    match outcome, result with
+    | Dispatch_outcome.Handled, Some r -> record r
+    | _ -> ())

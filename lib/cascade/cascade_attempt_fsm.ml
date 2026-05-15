@@ -361,15 +361,15 @@ let exit_code_of_message (message : string) : int option =
               int_of_string_opt raw
 
 let message_looks_like_resumable_cli_session (message : string) : bool =
-  Cascade_transport.Kimi_cli_transport_local.text_looks_like_resumable_session
+  Cascade_transport.Json_stream_cli_transport_local.text_looks_like_resumable_session
     message
 
 let resumable_cli_session_detail (message : string) : string =
-  Cascade_transport.Kimi_cli_transport_local.resumable_session_detail_of_text
+  Cascade_transport.Json_stream_cli_transport_local.resumable_session_detail_of_text
     message
 
 let resumable_cli_session_exit_code (message : string) : int option =
-  Cascade_transport.Kimi_cli_transport_local.resumable_session_exit_code_of_text
+  Cascade_transport.Json_stream_cli_transport_local.resumable_session_exit_code_of_text
     message
 
 let sdk_error_to_resumable_cli_session ~cascade_name
@@ -414,7 +414,8 @@ let sdk_error_is_resumable_cli_session (err : Agent_sdk.Error.sdk_error) : bool 
 
 let message_looks_like_terminal_provider_runtime_failure message =
   let contains needle = String_util.contains_substring_ci message needle in
-  (contains "kimi_cli rejected" && contains "startup crash")
+  (contains "provider cli rejected" && contains "exit 1")
+  || (contains "provider cli startup crash" && contains "unicodedecodeerror")
   || contains "unicodedecodeerror"
   || (contains "jsonrpcmessage"
       && (contains "validationerror" || contains "invalid json"))

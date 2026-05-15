@@ -54,10 +54,9 @@ type cli_transport_overrides =
   gemini_yolo : bool option;
   cli_subprocess_idle_sec : float option;
 }
-(** Per-call overrides threaded into the local CLI transports
-    (Claude Code, Gemini CLI, Kimi CLI).
-    [cli_subprocess_idle_sec] is currently honoured only by Kimi CLI;
-    see {!Cascade_transport.cli_transport_overrides}. *)
+(** Per-call overrides threaded into local CLI transports.
+    [cli_subprocess_idle_sec] is honoured by transports that execute their
+    subprocess directly; see {!Cascade_transport.cli_transport_overrides}. *)
 
 (** {1 Config} *)
 

@@ -673,7 +673,7 @@ let test_runtime_surface_exposes_redacted_resumable_cli_session_blocker () =
   KR.clear ();
   let base = make_meta ~name:"runtime-resumable-cli-session-test" () in
   let reason =
-    Masc_mcp.Cascade_transport.Kimi_cli_transport_local.resumable_session_detail
+    Masc_mcp.Cascade_transport.Json_stream_cli_transport_local.resumable_session_detail
   in
   let meta =
     {
@@ -714,7 +714,7 @@ let test_runtime_surface_exposes_redacted_resumable_cli_session_blocker () =
     reason
     summary;
   check bool "runtime blocker hides raw session command" false
-    (contains_substring summary "kimi -r");
+    (contains_substring summary "cli-tool -r");
   check bool "runtime blocker continue gate stays false"
     false
     (runtime |> member "runtime_blocker_continue_gate" |> to_bool)

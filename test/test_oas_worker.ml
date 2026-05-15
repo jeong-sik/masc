@@ -1340,11 +1340,11 @@ let test_sdk_error_to_cascade_outcome_cascades_runtime_mcp_auth_config () =
 
 let test_sdk_error_to_cascade_outcome_cascades_resumable_cli_session () =
   let raw_message =
-    "kimi exited with code 1: \n\
-     To resume this session: kimi -r 5de0f199-6bd7-4509-bfa6-3308e0ebd97f"
+    "cli-tool exited with code 1: \n\
+     To resume this session: cli-tool -r 5de0f199-6bd7-4509-bfa6-3308e0ebd97f"
   in
   let detail =
-    Cascade_transport.Kimi_cli_transport_local.resumable_session_detail_of_text raw_message
+    Cascade_transport.Json_stream_cli_transport_local.resumable_session_detail_of_text raw_message
   in
   let sdk_error =
     Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest { message = detail })
@@ -1381,8 +1381,8 @@ let test_sdk_error_is_resumable_cli_session_detects_structured_error () =
       (Keeper_turn_driver.Resumable_cli_session
          { cascade_name = internal_cascade_name "governance_judge"
          ; detail =
-             "kimi_cli reported a resumable CLI session (exit 1). Resumable session \
-              available via -r."
+             "CLI JSON-stream transport reported a resumable session (exit 1). \
+              Resumable session available via -r."
          ; exit_code = Some 1
          })
   in
@@ -1396,10 +1396,10 @@ let test_sdk_error_is_resumable_cli_session_detects_structured_error () =
     (Keeper_turn_driver.sdk_error_is_hard_quota err)
 ;;
 
-let test_sdk_error_is_resumable_cli_session_detects_raw_kimi_hint () =
+let test_sdk_error_is_resumable_cli_session_detects_raw_cli_hint () =
   let raw_message =
-    "kimi exited with code 1: \n\
-     To resume this session: kimi -r 5de0f199-6bd7-4509-bfa6-3308e0ebd97f"
+    "cli-tool exited with code 1: \n\
+     To resume this session: cli-tool -r 5de0f199-6bd7-4509-bfa6-3308e0ebd97f"
   in
   let err =
     Agent_sdk.Error.Api
@@ -1407,7 +1407,7 @@ let test_sdk_error_is_resumable_cli_session_detects_raw_kimi_hint () =
          { message = raw_message; kind = Llm_provider.Http_client.Unknown })
   in
   Alcotest.(check bool)
-    "raw Kimi resume hint detected"
+    "raw CLI resume hint detected"
     true
     (Keeper_turn_driver.sdk_error_is_resumable_cli_session err)
 ;;
@@ -1418,8 +1418,8 @@ let test_fallback_class_labels_resumable_cli_session () =
       (Keeper_turn_driver.Resumable_cli_session
          { cascade_name = internal_cascade_name "primary"
          ; detail =
-             "kimi_cli reported a resumable CLI session (exit 1). Resumable session \
-              available via -r."
+             "CLI JSON-stream transport reported a resumable session (exit 1). \
+              Resumable session available via -r."
          ; exit_code = Some 1
          })
   in
@@ -2515,8 +2515,8 @@ let test_classify_masc_internal_error_roundtrip () =
   let resumable_err =
     Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Keeper_turn_driver.Resumable_cli_session
-         { cascade_name = internal_cascade_name "kimi_cli_keeper"
-         ; detail = Cascade_transport.Kimi_cli_transport_local.resumable_session_detail
+         { cascade_name = internal_cascade_name "json_stream_cli_keeper"
+         ; detail = Cascade_transport.Json_stream_cli_transport_local.resumable_session_detail
          ; exit_code = Some 75
          })
   in
@@ -2524,11 +2524,11 @@ let test_classify_masc_internal_error_roundtrip () =
   | Some (Keeper_turn_driver.Resumable_cli_session { cascade_name; detail; exit_code }) ->
     Alcotest.(check string)
       "resumable cascade"
-      "kimi_cli_keeper"
+      "json_stream_cli_keeper"
       (internal_cascade_name_to_string cascade_name);
     Alcotest.(check string)
       "resumable detail redacted"
-      Cascade_transport.Kimi_cli_transport_local.resumable_session_detail
+      Cascade_transport.Json_stream_cli_transport_local.resumable_session_detail
       detail;
     Alcotest.(check bool)
       "resumable detail hides raw resume hint"
@@ -2537,7 +2537,7 @@ let test_classify_masc_internal_error_roundtrip () =
     Alcotest.(check bool)
       "resumable detail hides session token"
       false
-      (contains_substring ~needle:"kimi -r" detail);
+      (contains_substring ~needle:"cli-tool -r" detail);
     Alcotest.(check (option int)) "resumable exit code" (Some 75) exit_code
   | _ -> Alcotest.fail "expected structured resumable CLI session error"
 ;;
@@ -3738,7 +3738,7 @@ let test_classify_filter_rejection_passes_when_provider_supported () =
     (reason = None)
 ;;
 
-let test_kimi_mcp_config_json_of_policy_filters_to_allowed_servers () =
+let test_cli_mcp_config_json_of_policy_filters_to_allowed_servers () =
   let policy =
     { Llm_provider.Llm_transport.empty_runtime_mcp_policy with
       servers =
@@ -3756,8 +3756,8 @@ let test_kimi_mcp_config_json_of_policy_filters_to_allowed_servers () =
     ; disable_builtin_tools = true
     }
   in
-  match Cascade_transport.kimi_mcp_config_json_of_policy policy with
-  | None -> Alcotest.fail "expected kimi runtime MCP config JSON"
+  match Cascade_transport.cli_mcp_config_json_of_policy policy with
+  | None -> Alcotest.fail "expected CLI runtime MCP config JSON"
   | Some raw_json ->
     let open Yojson.Safe.Util in
     let json = Yojson.Safe.from_string raw_json in
@@ -4015,7 +4015,7 @@ let test_runtime_mcp_policy_for_provider_codex_cli_no_agent_strips_all () =
   | None -> Alcotest.fail "expected masc runtime server headers"
 ;;
 
-let test_kimi_cli_runtime_mcp_jsons_include_request_policy () =
+let test_cli_runtime_mcp_jsons_include_request_policy () =
   let policy =
     { Llm_provider.Llm_transport.empty_runtime_mcp_policy with
       servers =
@@ -4028,9 +4028,9 @@ let test_kimi_cli_runtime_mcp_jsons_include_request_policy () =
     ; disable_builtin_tools = true
     }
   in
-  let merged = Cascade_transport.kimi_cli_runtime_mcp_jsons ~base:[] (Some policy) in
+  let merged = Cascade_transport.cli_runtime_mcp_jsons ~base:[] (Some policy) in
   Alcotest.(check int)
-    "request policy contributes one kimi mcp config"
+    "request policy contributes one CLI MCP config"
     1
     (List.length merged);
   Alcotest.(check bool)
@@ -4039,7 +4039,7 @@ let test_kimi_cli_runtime_mcp_jsons_include_request_policy () =
     (List.exists (contains_substring ~needle:"http://127.0.0.1:8947/mcp") merged)
 ;;
 
-let test_kimi_cli_build_args_include_runtime_mcp_config () =
+let test_json_stream_cli_build_args_include_runtime_mcp_config () =
   let policy =
     { Llm_provider.Llm_transport.empty_runtime_mcp_policy with
       servers =
@@ -4053,11 +4053,11 @@ let test_kimi_cli_build_args_include_runtime_mcp_config () =
     }
   in
   let mcp_config_json =
-    Cascade_transport.kimi_cli_runtime_mcp_jsons ~base:[] (Some policy)
+    Cascade_transport.cli_runtime_mcp_jsons ~base:[] (Some policy)
   in
   let argv =
-    Cascade_transport.Kimi_cli_transport_local.build_args
-      ~config:Cascade_transport.Kimi_cli_transport_local.default_config
+    Cascade_transport.Json_stream_cli_transport_local.build_args
+      ~config:Cascade_transport.Json_stream_cli_transport_local.default_config
       ~req_config:(make_kimi_cli_provider_cfg ())
       ~mcp_config_json
       ~prompt:"hello"
@@ -4069,11 +4069,11 @@ let test_kimi_cli_build_args_include_runtime_mcp_config () =
     (List.exists (contains_substring ~needle:"http://127.0.0.1:8947/mcp") argv)
 ;;
 
-let test_kimi_cli_build_args_uses_stdin_for_large_prompt () =
+let test_json_stream_cli_build_args_uses_stdin_for_large_prompt () =
   let long_prompt = String.make (20 * 1024) 'x' in
   let argv =
-    Cascade_transport.Kimi_cli_transport_local.build_args
-      ~config:Cascade_transport.Kimi_cli_transport_local.default_config
+    Cascade_transport.Json_stream_cli_transport_local.build_args
+      ~config:Cascade_transport.Json_stream_cli_transport_local.default_config
       ~req_config:(make_kimi_cli_provider_cfg ())
       ~mcp_config_json:[]
       ~prompt:long_prompt
@@ -4085,11 +4085,11 @@ let test_kimi_cli_build_args_uses_stdin_for_large_prompt () =
   Alcotest.(check bool) "large prompt does not use -p" false (List.mem "-p" argv)
 ;;
 
-let test_kimi_cli_build_args_uses_stdin_for_non_ascii_prompt () =
+let test_json_stream_cli_build_args_uses_stdin_for_non_ascii_prompt () =
   let prompt = "한글 prompt" in
   let argv =
-    Cascade_transport.Kimi_cli_transport_local.build_args
-      ~config:Cascade_transport.Kimi_cli_transport_local.default_config
+    Cascade_transport.Json_stream_cli_transport_local.build_args
+      ~config:Cascade_transport.Json_stream_cli_transport_local.default_config
       ~req_config:(make_kimi_cli_provider_cfg ())
       ~mcp_config_json:[]
       ~prompt
@@ -4101,11 +4101,11 @@ let test_kimi_cli_build_args_uses_stdin_for_non_ascii_prompt () =
   Alcotest.(check bool) "non-ASCII prompt does not use -p" false (List.mem "-p" argv)
 ;;
 
-let test_kimi_cli_build_args_sanitizes_broken_utf8_prompt () =
+let test_json_stream_cli_build_args_sanitizes_broken_utf8_prompt () =
   let prompt = "prefix\x80suffix" in
   let argv =
-    Cascade_transport.Kimi_cli_transport_local.build_args
-      ~config:Cascade_transport.Kimi_cli_transport_local.default_config
+    Cascade_transport.Json_stream_cli_transport_local.build_args
+      ~config:Cascade_transport.Json_stream_cli_transport_local.default_config
       ~req_config:(make_kimi_cli_provider_cfg ())
       ~mcp_config_json:[]
       ~prompt
@@ -4172,18 +4172,18 @@ let test_cli_model_for_provider_config_keeps_explicit_model () =
   let provider_cfg =
     Llm_provider.Provider_config.make
       ~kind:Llm_provider.Provider_config.Kimi_cli
-      ~model_id:"kimi-k2.5"
+      ~model_id:"provider-model-2.5"
       ~base_url:""
       ()
   in
   Alcotest.(check (option string))
     "explicit model preserved"
-    (Some "kimi-k2.5")
+    (Some "provider-model-2.5")
     (Cascade_transport.cli_model_for_provider_config provider_cfg)
 ;;
 
-let test_kimi_cli_config_uses_oas_context_ssot () =
-  let model_id = "kimi-for-coding" in
+let test_json_stream_cli_config_uses_oas_context_ssot () =
+  let model_id = "provider-model" in
   let provider_cfg =
     Llm_provider.Provider_config.make
       ~kind:Llm_provider.Provider_config.Kimi_cli
@@ -4192,8 +4192,8 @@ let test_kimi_cli_config_uses_oas_context_ssot () =
       ~api_key:"test-key"
       ()
   in
-  match Cascade_transport.kimi_cli_config_json_for_provider provider_cfg with
-  | None -> Alcotest.fail "expected kimi_cli config json"
+  match Cascade_transport.cli_runtime_config_json_for_provider provider_cfg with
+  | None -> Alcotest.fail "expected CLI config json"
   | Some raw ->
     let json = _parse_json raw in
     let backing = direct_runtime_binding_for_cli_provider_exn provider_cfg in
@@ -4210,9 +4210,9 @@ let test_kimi_cli_config_uses_oas_context_ssot () =
     Alcotest.(check int) "max_context_size from OAS capabilities SSOT" expected actual
 ;;
 
-let test_kimi_cli_rejects_invalid_tool_argument_json () =
-  let dir = temp_dir "kimi_cli_bad_tool_args" in
-  let fake_kimi_path = Filename.concat dir "fake-kimi" in
+let test_json_stream_cli_rejects_invalid_tool_argument_json () =
+  let dir = temp_dir "json_stream_cli_bad_tool_args" in
+  let fake_cli_path = Filename.concat dir "fake-cli" in
   let invalid_tool_line =
     Yojson.Safe.to_string
       (`Assoc
@@ -4230,13 +4230,13 @@ let test_kimi_cli_rejects_invalid_tool_argument_json () =
                 ] )
           ])
   in
-  let oc = open_out fake_kimi_path in
+  let oc = open_out fake_cli_path in
   output_string oc ("#!/bin/sh\ncat <<'JSON'\n" ^ invalid_tool_line ^ "\nJSON\n");
   close_out oc;
-  Unix.chmod fake_kimi_path 0o755;
+  Unix.chmod fake_cli_path 0o755;
   let config =
-    { Cascade_transport.Kimi_cli_transport_local.default_config with
-      kimi_path = fake_kimi_path
+    { Cascade_transport.Json_stream_cli_transport_local.default_config with
+      cli_path = fake_cli_path
     }
   in
   let req =
@@ -4255,7 +4255,7 @@ let test_kimi_cli_rejects_invalid_tool_argument_json () =
   Eio.Switch.run
   @@ fun sw ->
   let transport =
-    Cascade_transport.Kimi_cli_transport_local.create
+    Cascade_transport.Json_stream_cli_transport_local.create
       ~sw
       ~mgr:(require_test_proc_mgr ())
       ~config
@@ -4272,7 +4272,7 @@ let test_kimi_cli_rejects_invalid_tool_argument_json () =
     Alcotest.(check bool)
       "invalid arguments rejected"
       true
-      (contains_substring ~needle:"invalid kimi tool arguments JSON" message);
+      (contains_substring ~needle:"invalid CLI tool arguments JSON" message);
     Alcotest.(check bool)
       "tool name included"
       true
@@ -4281,9 +4281,9 @@ let test_kimi_cli_rejects_invalid_tool_argument_json () =
   | Ok _ -> Alcotest.fail "expected invalid tool arguments to fail parsing"
 ;;
 
-let test_kimi_cli_treats_whitespace_tool_arguments_as_empty_json () =
-  let dir = temp_dir "kimi_cli_whitespace_tool_args" in
-  let fake_kimi_path = Filename.concat dir "fake-kimi" in
+let test_json_stream_cli_treats_whitespace_tool_arguments_as_empty_json () =
+  let dir = temp_dir "json_stream_cli_whitespace_tool_args" in
+  let fake_cli_path = Filename.concat dir "fake-cli" in
   let whitespace_tool_line =
     Yojson.Safe.to_string
       (`Assoc
@@ -4302,11 +4302,11 @@ let test_kimi_cli_treats_whitespace_tool_arguments_as_empty_json () =
           ])
   in
   write_executable_file
-    fake_kimi_path
+    fake_cli_path
     ("#!/bin/sh\ncat <<'JSON'\n" ^ whitespace_tool_line ^ "\nJSON\n");
   let config =
-    { Cascade_transport.Kimi_cli_transport_local.default_config with
-      kimi_path = fake_kimi_path
+    { Cascade_transport.Json_stream_cli_transport_local.default_config with
+      cli_path = fake_cli_path
     }
   in
   let req =
@@ -4325,7 +4325,7 @@ let test_kimi_cli_treats_whitespace_tool_arguments_as_empty_json () =
   Eio.Switch.run
   @@ fun sw ->
   let transport =
-    Cascade_transport.Kimi_cli_transport_local.create
+    Cascade_transport.Json_stream_cli_transport_local.create
       ~sw
       ~mgr:(require_test_proc_mgr ())
       ~config
@@ -4344,9 +4344,9 @@ let test_kimi_cli_treats_whitespace_tool_arguments_as_empty_json () =
   | Error _ -> Alcotest.fail "expected whitespace arguments to parse as {}"
 ;;
 
-let test_kimi_cli_stream_rejects_invalid_tool_argument_json () =
-  let dir = temp_dir "kimi_cli_stream_bad_tool_args" in
-  let fake_kimi_path = Filename.concat dir "fake-kimi" in
+let test_json_stream_cli_stream_rejects_invalid_tool_argument_json () =
+  let dir = temp_dir "json_stream_cli_stream_bad_tool_args" in
+  let fake_cli_path = Filename.concat dir "fake-cli" in
   let assistant_text text =
     Yojson.Safe.to_string
       (`Assoc [ "role", `String "assistant"; "content", `String text ])
@@ -4369,7 +4369,7 @@ let test_kimi_cli_stream_rejects_invalid_tool_argument_json () =
           ])
   in
   write_executable_file
-    fake_kimi_path
+    fake_cli_path
     (String.concat
        "\n"
        [ "#!/bin/sh"
@@ -4381,8 +4381,8 @@ let test_kimi_cli_stream_rejects_invalid_tool_argument_json () =
        ]
      ^ "\n");
   let config =
-    { Cascade_transport.Kimi_cli_transport_local.default_config with
-      kimi_path = fake_kimi_path
+    { Cascade_transport.Json_stream_cli_transport_local.default_config with
+      cli_path = fake_cli_path
     }
   in
   let req =
@@ -4401,7 +4401,7 @@ let test_kimi_cli_stream_rejects_invalid_tool_argument_json () =
   Eio.Switch.run
   @@ fun sw ->
   let transport =
-    Cascade_transport.Kimi_cli_transport_local.create
+    Cascade_transport.Json_stream_cli_transport_local.create
       ~sw
       ~mgr:(require_test_proc_mgr ())
       ~config
@@ -4429,7 +4429,7 @@ let test_kimi_cli_stream_rejects_invalid_tool_argument_json () =
     Alcotest.(check bool)
       "invalid arguments rejected"
       true
-      (contains_substring ~needle:"invalid kimi tool arguments JSON" message);
+      (contains_substring ~needle:"invalid CLI tool arguments JSON" message);
     Alcotest.(check bool)
       "tool name included"
       true
@@ -4438,37 +4438,37 @@ let test_kimi_cli_stream_rejects_invalid_tool_argument_json () =
   | Ok _ -> Alcotest.fail "expected invalid tool arguments to fail streaming"
 ;;
 
-let test_kimi_cli_should_log_stderr_line_filters_resume_noise () =
-  let should_log = Cascade_transport.Kimi_cli_transport_local.should_log_stderr_line in
+let test_json_stream_cli_should_log_stderr_line_filters_resume_noise () =
+  let should_log = Cascade_transport.Json_stream_cli_transport_local.should_log_stderr_line in
   Alcotest.(check bool) "blank stderr line suppressed" false (should_log "");
   Alcotest.(check bool) "whitespace stderr line suppressed" false (should_log "   ");
   Alcotest.(check bool)
     "resume hint suppressed"
     false
-    (should_log "To resume this session: kimi -r ff37febe");
+    (should_log "To resume this session: cli-tool -r ff37febe");
   Alcotest.(check bool)
     "case-insensitive resume hint suppressed"
     false
-    (should_log "  TO RESUME THIS SESSION: kimi -r ff37febe");
+    (should_log "  TO RESUME THIS SESSION: cli-tool -r ff37febe");
   Alcotest.(check bool)
     "unexpected stderr remains visible"
     true
-    (should_log "fatal: kimi auth missing");
+    (should_log "fatal: CLI auth missing");
   Alcotest.(check bool)
     "other stderr guidance remains visible"
     true
     (should_log "warning: upstream endpoint is slow")
 ;;
 
-let test_kimi_cli_error_completion_uses_measured_latency () =
-  let dir = temp_dir "kimi_cli_error_latency" in
-  let fake_kimi_path = Filename.concat dir "fake-kimi" in
+let test_json_stream_cli_error_completion_uses_measured_latency () =
+  let dir = temp_dir "json_stream_cli_error_latency" in
+  let fake_cli_path = Filename.concat dir "fake-cli" in
   write_executable_file
-    fake_kimi_path
+    fake_cli_path
     "#!/bin/sh\nsleep 0.05\nprintf '%s\\n' 'simulated failure' >&2\nexit 7\n";
   let config =
-    { Cascade_transport.Kimi_cli_transport_local.default_config with
-      kimi_path = fake_kimi_path
+    { Cascade_transport.Json_stream_cli_transport_local.default_config with
+      cli_path = fake_cli_path
     }
   in
   let req =
@@ -4487,7 +4487,7 @@ let test_kimi_cli_error_completion_uses_measured_latency () =
   Eio.Switch.run
   @@ fun sw ->
   let transport =
-    Cascade_transport.Kimi_cli_transport_local.create
+    Cascade_transport.Json_stream_cli_transport_local.create
       ~sw
       ~mgr:(require_test_proc_mgr ())
       ~config
@@ -4501,19 +4501,19 @@ let test_kimi_cli_error_completion_uses_measured_latency () =
      | None -> false);
   match response with
   | Error _ -> ()
-  | Ok _ -> Alcotest.fail "expected fake kimi subprocess to fail"
+  | Ok _ -> Alcotest.fail "expected fake CLI subprocess to fail"
 ;;
 
-let test_kimi_cli_classify_cli_error_redacts_resumable_session_detail () =
+let test_json_stream_cli_classify_cli_error_redacts_resumable_session_detail () =
   let raw_message =
-    "kimi exited with code 75: \n\
-     To resume this session: kimi -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc"
+    "cli-tool exited with code 75: \n\
+     To resume this session: cli-tool -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc"
   in
   let canonical_detail =
-    Cascade_transport.Kimi_cli_transport_local.resumable_session_detail_of_text raw_message
+    Cascade_transport.Json_stream_cli_transport_local.resumable_session_detail_of_text raw_message
   in
   match
-    Cascade_transport.Kimi_cli_transport_local.classify_cli_error
+    Cascade_transport.Json_stream_cli_transport_local.classify_cli_error
       (Error
          (Llm_provider.Http_client.NetworkError
             { message = raw_message; kind = Llm_provider.Http_client.Unknown }))
@@ -4531,26 +4531,26 @@ let test_kimi_cli_classify_cli_error_redacts_resumable_session_detail () =
   | _ -> Alcotest.fail "expected resumable session to map to AcceptRejected"
 ;;
 
-let test_kimi_cli_classify_cli_error_treats_exit_1_resume_hint_as_resumable () =
+let test_json_stream_cli_classify_cli_error_treats_exit_1_resume_hint_as_resumable () =
   let raw_message =
-    "kimi exited with code 1: \n\
-     To resume this session: kimi -r 5de0f199-6bd7-4509-bfa6-3308e0ebd97f"
+    "cli-tool exited with code 1: \n\
+     To resume this session: cli-tool -r 5de0f199-6bd7-4509-bfa6-3308e0ebd97f"
   in
   let canonical_detail =
-    Cascade_transport.Kimi_cli_transport_local.resumable_session_detail_of_text raw_message
+    Cascade_transport.Json_stream_cli_transport_local.resumable_session_detail_of_text raw_message
   in
   Alcotest.(check bool)
     "exit 1 resume hint is resumable"
     true
-    (Cascade_transport.Kimi_cli_transport_local.text_looks_like_resumable_session
+    (Cascade_transport.Json_stream_cli_transport_local.text_looks_like_resumable_session
        raw_message);
   Alcotest.(check (option int))
     "exit code preserved"
     (Some 1)
-    (Cascade_transport.Kimi_cli_transport_local.resumable_session_exit_code_of_text
+    (Cascade_transport.Json_stream_cli_transport_local.resumable_session_exit_code_of_text
        raw_message);
   match
-    Cascade_transport.Kimi_cli_transport_local.classify_cli_error
+    Cascade_transport.Json_stream_cli_transport_local.classify_cli_error
       (Error
          (Llm_provider.Http_client.NetworkError
             { message = raw_message; kind = Llm_provider.Http_client.Unknown }))
@@ -4572,20 +4572,20 @@ let test_kimi_cli_classify_cli_error_treats_exit_1_resume_hint_as_resumable () =
   | _ -> Alcotest.fail "expected exit 1 resume hint to map to resumable session"
 ;;
 
-let test_kimi_cli_resumable_invalid_request_reclassifies_as_structured () =
+let test_json_stream_cli_resumable_invalid_request_reclassifies_as_structured () =
   let raw_message =
-    "kimi exited with code 1: \n\
-     To resume this session: kimi -r 5de0f199-6bd7-4509-bfa6-3308e0ebd97f"
+    "cli-tool exited with code 1: \n\
+     To resume this session: cli-tool -r 5de0f199-6bd7-4509-bfa6-3308e0ebd97f"
   in
   let detail =
-    Cascade_transport.Kimi_cli_transport_local.resumable_session_detail_of_text raw_message
+    Cascade_transport.Json_stream_cli_transport_local.resumable_session_detail_of_text raw_message
   in
   let sdk_error =
     Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest { message = detail })
   in
   match
     Keeper_turn_driver.sdk_error_to_resumable_cli_session
-      ~cascade_name:(internal_cascade_name "kimi_cli_keeper")
+      ~cascade_name:(internal_cascade_name "json_stream_cli_keeper")
       sdk_error
   with
   | Some structured ->
@@ -4595,7 +4595,7 @@ let test_kimi_cli_resumable_invalid_request_reclassifies_as_structured () =
             { cascade_name; detail = structured_detail; exit_code }) ->
        Alcotest.(check string)
          "cascade"
-         "kimi_cli_keeper"
+         "json_stream_cli_keeper"
          (internal_cascade_name_to_string cascade_name);
        Alcotest.(check string) "detail" detail structured_detail;
        Alcotest.(check (option int)) "exit code" (Some 1) exit_code
@@ -4603,19 +4603,19 @@ let test_kimi_cli_resumable_invalid_request_reclassifies_as_structured () =
   | None -> Alcotest.fail "expected InvalidRequest detail to reclassify"
 ;;
 
-let test_kimi_cli_classify_cli_error_keeps_exit_1_with_error_as_reject () =
+let test_json_stream_cli_classify_cli_error_keeps_exit_1_with_error_as_reject () =
   let raw_message =
-    "kimi exited with code 1: \n\
+    "cli-tool exited with code 1: \n\
      Authentication failed\n\
-     To resume this session: kimi -r ff37febe"
+     To resume this session: cli-tool -r ff37febe"
   in
   Alcotest.(check bool)
     "exit 1 with real stderr is not resumable"
     false
-    (Cascade_transport.Kimi_cli_transport_local.text_looks_like_resumable_session
+    (Cascade_transport.Json_stream_cli_transport_local.text_looks_like_resumable_session
        raw_message);
   match
-    Cascade_transport.Kimi_cli_transport_local.classify_cli_error
+    Cascade_transport.Json_stream_cli_transport_local.classify_cli_error
       (Error
          (Llm_provider.Http_client.NetworkError
             { message = raw_message; kind = Llm_provider.Http_client.Unknown }))
@@ -4624,7 +4624,7 @@ let test_kimi_cli_classify_cli_error_keeps_exit_1_with_error_as_reject () =
     Alcotest.(check bool)
       "reject reason preserved"
       true
-      (contains_substring ~needle:"kimi_cli rejected the request (exit 1)" reason);
+      (contains_substring ~needle:"provider CLI rejected the request (exit 1)" reason);
     Alcotest.(check bool)
       "stderr detail preserved"
       true
@@ -4632,13 +4632,13 @@ let test_kimi_cli_classify_cli_error_keeps_exit_1_with_error_as_reject () =
   | _ -> Alcotest.fail "expected exit 1 with real stderr to stay rejected"
 ;;
 
-let test_kimi_cli_classify_cli_error_labels_process_title_unicode_crash () =
+let test_json_stream_cli_classify_cli_error_labels_process_title_unicode_crash () =
   let raw_message =
-    "kimi exited with code 1: Traceback ... setproctitle/__init__.py:57 in <module> \
+    "cli-tool exited with code 1: Traceback ... setproctitle/__init__.py:57 in <module> \
      getproctitle() UnicodeDecodeError: 'utf-8' codec can't decode byte 0xef"
   in
   match
-    Cascade_transport.Kimi_cli_transport_local.classify_cli_error
+    Cascade_transport.Json_stream_cli_transport_local.classify_cli_error
       (Error
          (Llm_provider.Http_client.NetworkError
             { message = raw_message; kind = Llm_provider.Http_client.Unknown }))
@@ -4659,17 +4659,17 @@ let test_kimi_cli_classify_cli_error_labels_process_title_unicode_crash () =
   | _ -> Alcotest.fail "expected setproctitle UnicodeDecodeError to map to AcceptRejected"
 ;;
 
-let test_sdk_error_terminal_provider_runtime_detects_kimi_unicode_crash () =
+let test_sdk_error_terminal_provider_runtime_detects_cli_unicode_crash () =
   let err =
     Agent_sdk.Error.Api
       (Llm_provider.Retry.InvalidRequest
          { message =
-             "kimi_cli rejected the request (exit 1): startup crash: UnicodeDecodeError: \
+             "provider CLI rejected the request (exit 1): startup crash: UnicodeDecodeError: \
               'utf-8' codec can't decode byte 0xef"
          })
   in
   Alcotest.(check bool)
-    "Kimi startup UnicodeDecodeError is terminal provider runtime"
+    "CLI startup UnicodeDecodeError is terminal provider runtime"
     true
     (Keeper_turn_driver.sdk_error_is_terminal_provider_runtime_failure err)
 ;;
@@ -6443,9 +6443,9 @@ let () =
             `Quick
             test_sdk_error_is_resumable_cli_session_detects_structured_error
         ; Alcotest.test_case
-            "sdk_error_is_resumable_cli_session detects raw Kimi hint"
+            "sdk_error_is_resumable_cli_session detects raw CLI hint"
             `Quick
-            test_sdk_error_is_resumable_cli_session_detects_raw_kimi_hint
+            test_sdk_error_is_resumable_cli_session_detects_raw_cli_hint
         ; Alcotest.test_case
             "fallback class labels resumable CLI session"
             `Quick
@@ -6690,9 +6690,9 @@ let () =
             `Quick
             test_classify_filter_rejection_passes_when_provider_supported
         ; Alcotest.test_case
-            "kimi runtime MCP config keeps only allowed servers"
+            "CLI runtime MCP config keeps only allowed servers"
             `Quick
-            test_kimi_mcp_config_json_of_policy_filters_to_allowed_servers
+            test_cli_mcp_config_json_of_policy_filters_to_allowed_servers
         ; Alcotest.test_case
             "runtime MCP policy injects keeper agent header for masc server"
             `Quick
@@ -6715,25 +6715,25 @@ let () =
             `Quick
             test_runtime_mcp_policy_for_provider_codex_cli_no_agent_strips_all
         ; Alcotest.test_case
-            "kimi request runtime MCP config is merged"
+            "CLI request runtime MCP config is merged"
             `Quick
-            test_kimi_cli_runtime_mcp_jsons_include_request_policy
+            test_cli_runtime_mcp_jsons_include_request_policy
         ; Alcotest.test_case
-            "kimi argv includes request runtime MCP config"
+            "CLI argv includes request runtime MCP config"
             `Quick
-            test_kimi_cli_build_args_include_runtime_mcp_config
+            test_json_stream_cli_build_args_include_runtime_mcp_config
         ; Alcotest.test_case
-            "kimi large prompt uses stdin, not argv"
+            "CLI large prompt uses stdin, not argv"
             `Quick
-            test_kimi_cli_build_args_uses_stdin_for_large_prompt
+            test_json_stream_cli_build_args_uses_stdin_for_large_prompt
         ; Alcotest.test_case
-            "kimi non-ASCII prompt uses stdin, not argv"
+            "CLI non-ASCII prompt uses stdin, not argv"
             `Quick
-            test_kimi_cli_build_args_uses_stdin_for_non_ascii_prompt
+            test_json_stream_cli_build_args_uses_stdin_for_non_ascii_prompt
         ; Alcotest.test_case
-            "kimi broken UTF-8 prompt is sanitized off argv"
+            "CLI broken UTF-8 prompt is sanitized off argv"
             `Quick
-            test_kimi_cli_build_args_sanitizes_broken_utf8_prompt
+            test_json_stream_cli_build_args_sanitizes_broken_utf8_prompt
         ; Alcotest.test_case
             "CLI auto model uses runtime binding default"
             `Quick
@@ -6743,53 +6743,53 @@ let () =
             `Quick
             test_cli_model_for_provider_config_keeps_explicit_model
         ; Alcotest.test_case
-            "kimi config max context uses OAS SSOT"
+            "CLI config max context uses OAS SSOT"
             `Quick
-            test_kimi_cli_config_uses_oas_context_ssot
+            test_json_stream_cli_config_uses_oas_context_ssot
         ; Alcotest.test_case
-            "kimi invalid tool argument JSON is rejected"
+            "CLI invalid tool argument JSON is rejected"
             `Quick
-            test_kimi_cli_rejects_invalid_tool_argument_json
+            test_json_stream_cli_rejects_invalid_tool_argument_json
         ; Alcotest.test_case
-            "kimi whitespace tool arguments become empty JSON"
+            "CLI whitespace tool arguments become empty JSON"
             `Quick
-            test_kimi_cli_treats_whitespace_tool_arguments_as_empty_json
+            test_json_stream_cli_treats_whitespace_tool_arguments_as_empty_json
         ; Alcotest.test_case
-            "kimi stream invalid tool argument JSON is rejected"
+            "CLI stream invalid tool argument JSON is rejected"
             `Quick
-            test_kimi_cli_stream_rejects_invalid_tool_argument_json
+            test_json_stream_cli_stream_rejects_invalid_tool_argument_json
         ; Alcotest.test_case
-            "kimi stderr resume noise is filtered"
+            "CLI stderr resume noise is filtered"
             `Quick
-            test_kimi_cli_should_log_stderr_line_filters_resume_noise
+            test_json_stream_cli_should_log_stderr_line_filters_resume_noise
         ; Alcotest.test_case
-            "kimi error completion measures latency"
+            "CLI error completion measures latency"
             `Quick
-            test_kimi_cli_error_completion_uses_measured_latency
+            test_json_stream_cli_error_completion_uses_measured_latency
         ; Alcotest.test_case
-            "kimi exit 75 detail is redacted"
+            "CLI exit 75 detail is redacted"
             `Quick
-            test_kimi_cli_classify_cli_error_redacts_resumable_session_detail
+            test_json_stream_cli_classify_cli_error_redacts_resumable_session_detail
         ; Alcotest.test_case
-            "kimi exit 1 resume hint is resumable"
+            "CLI exit 1 resume hint is resumable"
             `Quick
-            test_kimi_cli_classify_cli_error_treats_exit_1_resume_hint_as_resumable
+            test_json_stream_cli_classify_cli_error_treats_exit_1_resume_hint_as_resumable
         ; Alcotest.test_case
-            "kimi resumable InvalidRequest is structured"
+            "CLI resumable InvalidRequest is structured"
             `Quick
-            test_kimi_cli_resumable_invalid_request_reclassifies_as_structured
+            test_json_stream_cli_resumable_invalid_request_reclassifies_as_structured
         ; Alcotest.test_case
-            "kimi exit 1 with stderr remains rejected"
+            "CLI exit 1 with stderr remains rejected"
             `Quick
-            test_kimi_cli_classify_cli_error_keeps_exit_1_with_error_as_reject
+            test_json_stream_cli_classify_cli_error_keeps_exit_1_with_error_as_reject
         ; Alcotest.test_case
-            "kimi setproctitle unicode crash is startup crash"
+            "CLI setproctitle unicode crash is startup crash"
             `Quick
-            test_kimi_cli_classify_cli_error_labels_process_title_unicode_crash
+            test_json_stream_cli_classify_cli_error_labels_process_title_unicode_crash
         ; Alcotest.test_case
-            "terminal runtime detects Kimi unicode crash"
+            "terminal runtime detects CLI unicode crash"
             `Quick
-            test_sdk_error_terminal_provider_runtime_detects_kimi_unicode_crash
+            test_sdk_error_terminal_provider_runtime_detects_cli_unicode_crash
         ; Alcotest.test_case
             "terminal runtime detects JSON-RPC SSE parse storm"
             `Quick

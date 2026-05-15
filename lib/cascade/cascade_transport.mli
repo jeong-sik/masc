@@ -17,7 +17,7 @@ type cli_transport_overrides = {
   cli_subprocess_idle_sec : float option;
       (** When [Some s], the CLI subprocess is aborted via SIGINT if no
           stdout line arrives within [s] seconds.  Currently honoured
-          only by [Kimi_cli_transport_local], which calls
+          only by [Json_stream_cli_transport_local], which calls
           [Cli_common_subprocess.run_stream_lines] directly.  Other CLI
           transports route through agent_sdk [Transport_*_cli.create]
           configs that do not yet expose [stdout_idle_timeout_s]; an
@@ -103,10 +103,10 @@ val provider_supports_inline_tools : Llm_provider.Provider_config.t -> bool
 val provider_supports_runtime_mcp_lane :
   Llm_provider.Provider_config.t -> bool
 
-(** Render the [mcpServers] config JSON consumed by [kimi_cli], filtering
+(** Render the [mcpServers] config JSON consumed by JSON-stream CLI transports, filtering
     by [policy.allowed_server_names].  Returns [None] when no allowed
     server remains after filtering. *)
-val kimi_mcp_config_json_of_policy :
+val cli_mcp_config_json_of_policy :
   Llm_provider.Llm_transport.runtime_mcp_policy -> string option
 
 (** Resolve a CLI provider model name from explicit provider config first,
@@ -115,10 +115,10 @@ val kimi_mcp_config_json_of_policy :
 val cli_model_for_provider_config :
   Llm_provider.Provider_config.t -> string option
 
-(** Render the kimi_cli root config JSON (default_model + providers + models)
-    for a provider.  Returns [None] when either the model resolution or the
-    auth value resolution fails. *)
-val kimi_cli_config_json_for_provider :
+(** Render root config JSON (default_model + providers + models) for a
+    JSON-stream CLI provider.  Returns [None] when either the model
+    resolution or the auth value resolution fails. *)
+val cli_runtime_config_json_for_provider :
   Llm_provider.Provider_config.t -> string option
 
 (** Drop duplicates from a list while preserving the first-seen order. *)
@@ -175,9 +175,9 @@ val runtime_mcp_policy_for_provider :
   Llm_provider.Llm_transport.runtime_mcp_policy option ->
   Llm_provider.Llm_transport.runtime_mcp_policy option
 
-(** Compose the kimi_cli [--mcp-config] arguments from a [base] list and an
-    optional runtime MCP policy.  Output is deduped, preserving order. *)
-val kimi_cli_runtime_mcp_jsons :
+(** Compose JSON-stream CLI [--mcp-config] arguments from a [base] list and
+    an optional runtime MCP policy.  Output is deduped, preserving order. *)
+val cli_runtime_mcp_jsons :
   base:string list ->
   Llm_provider.Llm_transport.runtime_mcp_policy option ->
   string list
@@ -234,10 +234,9 @@ val make_per_call_switch_transport :
   (sw:Eio.Switch.t -> Llm_provider.Llm_transport.t) ->
   Llm_provider.Llm_transport.t
 
-(** Construct a non-HTTP CLI transport for [provider_cfg] (Claude_code,
-    Gemini_cli, Kimi_cli, Codex_cli).  Returns [Ok None] for HTTP-only
-    providers (Anthropic, OpenAI_compat, Ollama, Gemini, Glm, Kimi,
-    DashScope).  Returns [Error] when the process manager is not initialized. *)
+(** Construct a non-HTTP CLI transport for [provider_cfg].  Returns [Ok None]
+    for HTTP-shaped providers.  Returns [Error] when the process manager is not
+    initialized. *)
 val non_http_transport_of_provider :
   sw:Eio.Switch.t ->
   provider_cfg:Llm_provider.Provider_config.t ->
@@ -246,11 +245,12 @@ val non_http_transport_of_provider :
   unit ->
   (Llm_provider.Llm_transport.t option, Agent_sdk.Error.sdk_error) result
 
-(** kimi_cli print-mode transport.  Owned by the transport layer; runner
-    facades must not re-export this provider-local surface. *)
-module Kimi_cli_transport_local : sig
+(** JSON-stream print-mode CLI transport.  Owned by the transport layer;
+    runner facades must not re-export this protocol-local surface. *)
+module Json_stream_cli_transport_local : sig
   type config = {
-    kimi_path : string;
+    cli_path : string;
+    process_name : string;
     model : string option;
     cwd : string option;
     config_json : string option;
@@ -258,7 +258,7 @@ module Kimi_cli_transport_local : sig
     extra_env : (string * string) list;
     cancel : unit Eio.Promise.t option;
     stdout_idle_timeout_s : float option;
-        (** When [Some s], the kimi subprocess is aborted via SIGINT if no
+        (** When [Some s], the CLI subprocess is aborted via SIGINT if no
             stdout line arrives within [s] seconds.  Forwarded to
             [Llm_provider.Cli_common_subprocess.run_stream_lines] together
             with the process clock obtained from [Process_eio.get_clock].
@@ -268,9 +268,9 @@ module Kimi_cli_transport_local : sig
 
   val default_config : config
 
-  (** Build the kimi_cli argv from a config + per-call request, deciding
+  (** Build the CLI argv from a config + per-call request, deciding
       whether the prompt goes via [-p] or stdin. Non-ASCII or large prompts
-      use stdin to avoid Kimi CLI macOS setproctitle UTF-8 decode crashes. *)
+      use stdin to avoid Python CLI setproctitle UTF-8 decode crashes. *)
   val build_args :
     config:config ->
     req_config:Llm_provider.Provider_config.t ->
@@ -278,15 +278,15 @@ module Kimi_cli_transport_local : sig
     prompt:string ->
     string list
 
-  (** Whether a kimi_cli stderr line should be forwarded to the default
+  (** Whether a CLI stderr line should be forwarded to the default
       stderr logger.  Drops the [resume hint] lines, which are noise. *)
   val should_log_stderr_line : string -> bool
 
-  (** Constant detail string used when [kimi_cli] reports a resumable session
+  (** Constant detail string used when the CLI reports a resumable session
       without an embedded exit code. *)
   val resumable_session_detail : string
 
-  (** Whether [text] looks like a resumable-session report from kimi_cli. *)
+  (** Whether [text] looks like a resumable-session report from the CLI. *)
   val text_looks_like_resumable_session : string -> bool
 
   (** Render the resumable-session detail message for [text].  Includes the
@@ -299,7 +299,7 @@ module Kimi_cli_transport_local : sig
       carries the resume hint. *)
   val resumable_session_exit_code_of_text : string -> int option
 
-  (** Reclassify a [NetworkError] from kimi_cli into [AcceptRejected] when
+  (** Reclassify a [NetworkError] from the CLI into [AcceptRejected] when
       the message indicates a permanent per-provider error
       (auth/config/model), a local CLI startup crash, or a resumable-session
       report.  Other variants pass through. *)
@@ -307,8 +307,8 @@ module Kimi_cli_transport_local : sig
     ('a, Llm_provider.Http_client.http_error) result ->
     ('a, Llm_provider.Http_client.http_error) result
 
-  (** Create a kimi_cli completion transport bound to [sw].  The transport
-      runs [kimi --print --output-format stream-json ...] via [mgr] and
+  (** Create a JSON-stream CLI completion transport bound to [sw].  The transport
+      runs [<cli> --print --output-format stream-json ...] via [mgr] and
       parses JSONL output into OAS response/event blocks. *)
   val create :
     sw:Eio.Switch.t ->

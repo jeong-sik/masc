@@ -6115,8 +6115,8 @@ let test_degraded_retry_after_recoverable_error_uses_local_recovery_for_resumabl
          (Masc_mcp.Keeper_turn_driver.Resumable_cli_session
             { cascade_name = oas_error_cascade_name "kimi_cli_keeper"
             ; detail =
-                "kimi exited with code 75: \n\
-                 To resume this session: kimi -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc"
+                "cli-tool exited with code 75: \n\
+                 To resume this session: cli-tool -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc"
             ; exit_code = Some 75
             }))
   in
@@ -6950,11 +6950,11 @@ let test_metrics_failure_timeout_increments_proactive_backoff () =
 
 let test_metrics_failure_response_redacts_resumable_cli_session_detail () =
   let raw_reason =
-    "kimi exited with code 75: \n\
-     To resume this session: kimi -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc"
+    "cli-tool exited with code 75: \n\
+     To resume this session: cli-tool -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc"
   in
   let canonical_detail =
-    Masc_mcp.Cascade_transport.Kimi_cli_transport_local.resumable_session_detail
+    Masc_mcp.Cascade_transport.Json_stream_cli_transport_local.resumable_session_detail
   in
   let sdk_error =
     Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
@@ -6999,7 +6999,7 @@ let test_metrics_failure_response_redacts_resumable_cli_session_detail () =
     bool
     "raw session token removed from last reason"
     false
-    (contains_substring updated.runtime.proactive_rt.last_reason "kimi -r");
+    (contains_substring updated.runtime.proactive_rt.last_reason "cli-tool -r");
   match updated.runtime.last_blocker with
   | Some { klass = Keeper_types.Cascade_exhausted (Keeper_types.Other_detail detail); _ }
     ->
@@ -7819,7 +7819,7 @@ let test_auto_recoverable_turn_error_includes_resumable_cli_session_error () =
       (Masc_mcp.Keeper_turn_driver.Resumable_cli_session
          { cascade_name = oas_error_cascade_name "kimi_cli_keeper"
          ; detail =
-             Masc_mcp.Cascade_transport.Kimi_cli_transport_local.resumable_session_detail
+             Masc_mcp.Cascade_transport.Json_stream_cli_transport_local.resumable_session_detail
          ; exit_code = Some 75
          })
   in
@@ -7836,7 +7836,7 @@ let test_cascade_exhausted_error_includes_resumable_cli_session_error () =
       (Masc_mcp.Keeper_turn_driver.Resumable_cli_session
          { cascade_name = oas_error_cascade_name "kimi_cli_keeper"
          ; detail =
-             Masc_mcp.Cascade_transport.Kimi_cli_transport_local.resumable_session_detail
+             Masc_mcp.Cascade_transport.Json_stream_cli_transport_local.resumable_session_detail
          ; exit_code = Some 75
          })
   in

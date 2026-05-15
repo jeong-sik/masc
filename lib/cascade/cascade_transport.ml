@@ -14,7 +14,7 @@ type cli_transport_overrides =
   ; cli_subprocess_idle_sec : float option
     (* When [Some s], the CLI subprocess is aborted via SIGINT if no
      stdout line arrives within [s] seconds. Currently honoured only
-     by [Kimi_cli_transport_local], which calls
+     by [Json_stream_cli_transport_local], which calls
      [Cli_common_subprocess.run_stream_lines] directly. The other CLI
      transports (claude_code, gemini_cli, codex_cli) route through
      agent_sdk [Transport_*_cli.create] whose configs do not yet
@@ -164,7 +164,7 @@ let cli_model_override model_id =
 
 let json_of_string_pairs pairs = `Assoc (List.map (fun (k, v) -> k, `String v) pairs)
 
-let json_of_kimi_mcp_server = function
+let json_of_cli_mcp_server = function
   | Llm_provider.Llm_transport.Stdio_server { command; args; env; _ } ->
     `Assoc
       [ "command", `String command
@@ -175,7 +175,7 @@ let json_of_kimi_mcp_server = function
     `Assoc [ "url", `String url; "headers", json_of_string_pairs headers ]
 ;;
 
-let kimi_mcp_config_json_of_policy
+let cli_mcp_config_json_of_policy
       (policy : Llm_provider.Llm_transport.runtime_mcp_policy)
   : string option
   =
@@ -200,7 +200,7 @@ let kimi_mcp_config_json_of_policy
               (List.map
                  (fun server ->
                     ( Llm_provider.Llm_transport.runtime_mcp_server_name server
-                    , json_of_kimi_mcp_server server ))
+                    , json_of_cli_mcp_server server ))
                  servers) )
         ]
     in
@@ -472,13 +472,13 @@ let runtime_mcp_policy_for_provider
   | None, _, _ -> None
 ;;
 
-let kimi_cli_runtime_mcp_jsons
+let cli_runtime_mcp_jsons
       ~(base : string list)
       (policy_opt : Llm_provider.Llm_transport.runtime_mcp_policy option)
   =
   let request_json =
     match policy_opt with
-    | Some policy -> Option.to_list (kimi_mcp_config_json_of_policy policy)
+    | Some policy -> Option.to_list (cli_mcp_config_json_of_policy policy)
     | None -> []
   in
   dedupe_preserve_order (base @ request_json)
@@ -564,9 +564,8 @@ let runtime_mcp_policy_of_tool_names
           let env_token = first_nonempty_env [ "MASC_MCP_TOKEN" ] in
           (* Phase A F1: when MASC_MCP_TOKEN is unset, fall back to the
              per-keeper raw token at <base_path>/.masc/auth/<agent_name>.token.
-             This wires CLI-spawned subprocesses (codex_cli/gemini_cli/kimi_cli)
-             that callback to masc-mcp tools but do not inherit the parent
-             process env. *)
+             This wires CLI-spawned subprocesses that callback to masc-mcp tools
+             but do not inherit the parent process env. *)
           let per_keeper_token =
             match env_token, agent_name with
             | None, Some name ->
@@ -637,6 +636,25 @@ let cli_model_for_provider_config (provider_cfg : Llm_provider.Provider_config.t
   match cli_model_override provider_cfg.model_id with
   | Some explicit -> Some explicit
   | None -> Option.bind (provider_config_runtime_binding provider_cfg) runtime_binding_default_model
+;;
+
+let cli_command_for_provider_config provider_cfg =
+  Option.bind (provider_config_runtime_binding provider_cfg) (fun binding ->
+    trim_nonempty binding.Agent_sdk.Provider_runtime_binding.command)
+;;
+
+let basename_of_command command =
+  command
+  |> String.split_on_char '/'
+  |> List.rev
+  |> List.find_opt (fun segment -> String.trim segment <> "")
+  |> Option.value ~default:command
+;;
+
+let cli_process_name_for_provider_config provider_cfg =
+  cli_command_for_provider_config provider_cfg
+  |> Option.map basename_of_command
+  |> Option.value ~default:"json_stream_cli"
 ;;
 
 let nonempty_opt value =
@@ -710,7 +728,7 @@ let binding_api_base_url (binding : Agent_sdk.Provider_runtime_binding.t) =
       Some (Env_config_core.strip_trailing_slashes base_url ^ path_prefix)))
 ;;
 
-let kimi_cli_auth_value
+let cli_direct_auth_value
       ?(direct_binding = direct_binding_for_cli_provider_config)
       (provider_cfg : Llm_provider.Provider_config.t)
   =
@@ -722,7 +740,7 @@ let kimi_cli_auth_value
      | None -> None)
 ;;
 
-let kimi_cli_backing_runtime
+let cli_backing_runtime
       ?(direct_binding = direct_binding_for_cli_provider_config)
       provider_cfg
   =
@@ -732,13 +750,13 @@ let kimi_cli_backing_runtime
     | None -> None)
 ;;
 
-let kimi_cli_config_json_for_provider (provider_cfg : Llm_provider.Provider_config.t)
+let cli_runtime_config_json_for_provider (provider_cfg : Llm_provider.Provider_config.t)
   : string option
   =
   match
     ( cli_model_for_provider_config provider_cfg
-    , kimi_cli_auth_value provider_cfg
-    , kimi_cli_backing_runtime provider_cfg )
+    , cli_direct_auth_value provider_cfg
+    , cli_backing_runtime provider_cfg )
   with
   | Some model_name, Some _, Some (binding, api_base_url) ->
     let provider_name = binding.Agent_sdk.Provider_runtime_binding.id in
@@ -774,8 +792,8 @@ let kimi_cli_config_json_for_provider (provider_cfg : Llm_provider.Provider_conf
   | _ -> None
 ;;
 
-let kimi_cli_extra_env (provider_cfg : Llm_provider.Provider_config.t) =
-  match direct_binding_for_cli_provider_config provider_cfg, kimi_cli_auth_value provider_cfg with
+let cli_direct_binding_extra_env (provider_cfg : Llm_provider.Provider_config.t) =
+  match direct_binding_for_cli_provider_config provider_cfg, cli_direct_auth_value provider_cfg with
   | Some binding, Some key ->
     (match auth_env_names_of_binding binding with
      | env_name :: _ -> [ env_name, key ]
@@ -952,9 +970,10 @@ let resolve_tool_lane_for_oas_tools
       Error (invalid_runtime_config "tool_support" detail))
 ;;
 
-module Kimi_cli_transport_local = struct
+module Json_stream_cli_transport_local = struct
   type config =
-    { kimi_path : string
+    { cli_path : string
+    ; process_name : string
     ; model : string option
     ; cwd : string option
     ; config_json : string option
@@ -965,8 +984,9 @@ module Kimi_cli_transport_local = struct
     }
 
   let default_config =
-    { kimi_path = "kimi"
-    ; model = Some "kimi-for-coding"
+    { cli_path = "json-stream-cli"
+    ; process_name = "json_stream_cli"
+    ; model = None
     ; cwd = None
     ; config_json = None
     ; mcp_config_json = []
@@ -976,14 +996,14 @@ module Kimi_cli_transport_local = struct
     }
   ;;
 
-  (* Kimi CLI imports [setproctitle] on macOS before processing the
+  (* Some Python CLI launchers import [setproctitle] before processing the
      request. UTF-8 prompts in argv can make setproctitle's import-time
-     [getproctitle()] decode fail before Kimi reads the prompt, so keep
+     [getproctitle()] decode fail before the CLI reads the prompt, so keep
      non-ASCII or large prompts out of argv and stream them via stdin. *)
   let default_prompt_argv_threshold = 16 * 1024
 
   let prompt_argv_threshold () =
-    match Sys.getenv_opt "OAS_KIMI_PROMPT_ARGV_THRESHOLD" with
+    match Sys.getenv_opt "MASC_JSON_STREAM_CLI_PROMPT_ARGV_THRESHOLD" with
     | Some raw ->
       (match int_of_string_opt (String.trim raw) with
        | Some value when value >= 0 -> value
@@ -1004,10 +1024,10 @@ module Kimi_cli_transport_local = struct
     prompt_exceeds_argv_budget prompt || prompt_contains_non_ascii prompt
   ;;
 
-  let sanitize_for_kimi prompt = Inference_utils.sanitize_text_utf8 prompt
+  let sanitize_for_cli_prompt prompt = Inference_utils.sanitize_text_utf8 prompt
 
   let stdin_for_prompt prompt =
-    let prompt = sanitize_for_kimi prompt in
+    let prompt = sanitize_for_cli_prompt prompt in
     if prompt_needs_stdin prompt then Some prompt else None
   ;;
 
@@ -1024,9 +1044,9 @@ module Kimi_cli_transport_local = struct
         ~(mcp_config_json : string list)
         ~prompt
     =
-    let prompt = sanitize_for_kimi prompt in
+    let prompt = sanitize_for_cli_prompt prompt in
     let prompt_via_stdin = prompt_needs_stdin prompt in
-    let args = ref [ config.kimi_path; "--print"; "--output-format"; "stream-json" ] in
+    let args = ref [ config.cli_path; "--print"; "--output-format"; "stream-json" ] in
     let add xs = args := !args @ xs in
     (match config.config_json with
      | Some json -> add [ "--config"; json ]
@@ -1075,7 +1095,8 @@ module Kimi_cli_transport_local = struct
       match fn |> member "arguments" |> to_string_option |> json_of_argument_string with
       | Ok args -> Ok (Some (Agent_sdk.Types.ToolUse { id; name; input = args }))
       | Error msg ->
-        Error (Printf.sprintf "invalid kimi tool arguments JSON for tool %S: %s" name msg)
+        Error
+          (Printf.sprintf "invalid CLI tool arguments JSON for tool %S: %s" name msg)
     with
     | Type_error _ -> Ok None
   ;;
@@ -1149,7 +1170,7 @@ module Kimi_cli_transport_local = struct
       with
       | Yojson.Json_error _ | Type_error _ -> None
     in
-    List.find_map find_id lines |> Option.value ~default:"kimi-print"
+    List.find_map find_id lines |> Option.value ~default:"cli-json-stream"
   ;;
 
   let response_model_of_lines ~model_id lines =
@@ -1183,7 +1204,7 @@ module Kimi_cli_transport_local = struct
     | Ok [] ->
       Error
         (Llm_provider.Http_client.NetworkError
-           { message = "no messages parsed from kimi output"; kind = Unknown })
+           { message = "no messages parsed from CLI JSON-stream output"; kind = Unknown })
     | Ok content ->
       Ok
         { Agent_sdk.Types.id = response_id_of_lines lines
@@ -1249,7 +1270,8 @@ module Kimi_cli_transport_local = struct
   let starts_with text prefix = String.starts_with ~prefix text
 
   let resumable_session_detail =
-    "kimi_cli reported a resumable CLI session. Resumable session available via -r."
+    "CLI JSON-stream transport reported a resumable session. Resumable session \
+     available via -r."
   ;;
 
   let resume_hint_marker = "to resume this session:"
@@ -1266,24 +1288,42 @@ module Kimi_cli_transport_local = struct
     trimmed <> "" && not (is_resume_hint_line trimmed)
   ;;
 
-  let on_stderr_line line =
+  let on_stderr_line ~process_name line =
     if should_log_stderr_line line
-    then Llm_provider.Cli_common_subprocess.default_on_stderr_line ~name:"kimi" line
+    then
+      Llm_provider.Cli_common_subprocess.default_on_stderr_line ~name:process_name line
+  ;;
+
+  let index_of_substring text marker =
+    let marker_len = String.length marker in
+    let text_len = String.length text in
+    let rec loop idx =
+      if marker_len = 0
+      then Some idx
+      else if idx + marker_len > text_len
+      then None
+      else if String.sub text idx marker_len = marker
+      then Some idx
+      else loop (idx + 1)
+    in
+    loop 0
+  ;;
+
+  let exit_code_span_of_message message =
+    let marker = " exited with code " in
+    match index_of_substring message marker with
+    | None -> None
+    | Some marker_start ->
+      let code_start = marker_start + String.length marker in
+      (match String.index_from_opt message code_start ':' with
+       | None -> None
+       | Some colon ->
+         let raw = String.sub message code_start (colon - code_start) |> String.trim in
+         Option.map (fun code -> code, colon) (int_of_string_opt raw))
   ;;
 
   let exit_code_of_message message =
-    let prefix = "kimi exited with code " in
-    if not (starts_with message prefix)
-    then None
-    else (
-      match String.index_from_opt message (String.length prefix) ':' with
-      | None -> None
-      | Some colon ->
-        let raw =
-          String.sub message (String.length prefix) (colon - String.length prefix)
-          |> String.trim
-        in
-        int_of_string_opt raw)
+    Option.map fst (exit_code_span_of_message message)
   ;;
 
   let exit_code_marker_of_text text =
@@ -1309,16 +1349,12 @@ module Kimi_cli_transport_local = struct
   ;;
 
   let exit_payload_of_message message =
-    let prefix = "kimi exited with code " in
-    if not (starts_with message prefix)
-    then None
-    else (
-      match String.index_from_opt message (String.length prefix) ':' with
-      | None -> None
-      | Some colon ->
-        Some
-          (String.sub message (colon + 1) (String.length message - colon - 1)
-           |> String.trim))
+    match exit_code_span_of_message message with
+    | None -> None
+    | Some (_, colon) ->
+      Some
+        (String.sub message (colon + 1) (String.length message - colon - 1)
+         |> String.trim)
   ;;
 
   let payload_has_only_resume_hint payload =
@@ -1359,8 +1395,8 @@ module Kimi_cli_transport_local = struct
       with
       | Some code ->
         Printf.sprintf
-          "kimi_cli reported a resumable CLI session (exit %d). Resumable session \
-           available via -r."
+          "CLI JSON-stream transport reported a resumable session (exit %d). \
+           Resumable session available via -r."
           code
       | None -> resumable_session_detail)
     else String.trim text
@@ -1391,7 +1427,7 @@ module Kimi_cli_transport_local = struct
         Error
           (Llm_provider.Http_client.AcceptRejected
              { reason =
-                 "kimi_cli startup crash while setting process title \
+                 "provider CLI startup crash while setting process title \
                   (UnicodeDecodeError). This is a local CLI/runtime failure, not keeper \
                   auth or sandbox failure; rejecting without retry so the cascade can \
                   move on. "
@@ -1403,7 +1439,7 @@ module Kimi_cli_transport_local = struct
           Error
             (Llm_provider.Http_client.AcceptRejected
                { reason =
-                   "kimi_cli rejected the request (exit 1). "
+                   "provider CLI rejected the request (exit 1). "
                    ^ "This is usually a permanent auth/config/model error rather "
                    ^ "than a transient transport failure. "
                    ^ message
@@ -1422,7 +1458,7 @@ module Kimi_cli_transport_local = struct
     else (
       warned := true;
       Log.Misc.warn
-        "kimi_cli print mode ignores OAS req.tools. Provider-native built-in tools and \
+        "CLI JSON-stream print mode ignores OAS req.tools. Provider-native built-in tools and \
          configured MCP servers remain available; external OAS tool callbacks require a \
          future wire-mode transport.")
   ;;
@@ -1449,14 +1485,14 @@ module Kimi_cli_transport_local = struct
               ~prompt
               ~system_prompt
           in
-          let prompt = sanitize_for_kimi prompt in
+          let prompt = sanitize_for_cli_prompt prompt in
           let model_id =
-            Option.value
-              ~default:"kimi-for-coding"
-              (cli_model_override ~config ~req_config:req.config)
+            match cli_model_override ~config ~req_config:req.config with
+            | Some model -> model
+            | None -> req.config.model_id
           in
           let mcp_config_json =
-            kimi_cli_runtime_mcp_jsons ~base:config.mcp_config_json req.runtime_mcp_policy
+            cli_runtime_mcp_jsons ~base:config.mcp_config_json req.runtime_mcp_policy
           in
           let argv = build_args ~config ~req_config:req.config ~mcp_config_json ~prompt in
           let seen_lines = ref [] in
@@ -1479,10 +1515,10 @@ module Kimi_cli_transport_local = struct
                 ~mgr
                 ?clock:clock_opt
                 ?stdout_idle_timeout_s
-                ~name:"kimi"
+                ~name:config.process_name
                 ~cwd:config.cwd
                 ~extra_env:config.extra_env
-                ~on_stderr_line
+                ~on_stderr_line:(on_stderr_line ~process_name:config.process_name)
                 ?stdin_content:(stdin_for_prompt prompt)
                 ~on_line
                 ?cancel:config.cancel
@@ -1518,14 +1554,14 @@ module Kimi_cli_transport_local = struct
               ~prompt
               ~system_prompt
           in
-          let prompt = sanitize_for_kimi prompt in
+          let prompt = sanitize_for_cli_prompt prompt in
           let model_id =
-            Option.value
-              ~default:"kimi-for-coding"
-              (cli_model_override ~config ~req_config:req.config)
+            match cli_model_override ~config ~req_config:req.config with
+            | Some model -> model
+            | None -> req.config.model_id
           in
           let mcp_config_json =
-            kimi_cli_runtime_mcp_jsons ~base:config.mcp_config_json req.runtime_mcp_policy
+            cli_runtime_mcp_jsons ~base:config.mcp_config_json req.runtime_mcp_policy
           in
           let argv = build_args ~config ~req_config:req.config ~mcp_config_json ~prompt in
           let seen_lines = ref [] in
@@ -1538,7 +1574,7 @@ module Kimi_cli_transport_local = struct
               started := true;
               on_event
                 (Agent_sdk.Types.MessageStart
-                   { id = "kimi-print"; model = model_id; usage = None }))
+                   { id = "cli-json-stream"; model = model_id; usage = None }))
           in
           let on_line line =
             match !parse_error with
@@ -1571,10 +1607,10 @@ module Kimi_cli_transport_local = struct
                  ~mgr
                  ?clock:clock_opt
                  ?stdout_idle_timeout_s
-                 ~name:"kimi"
+                 ~name:config.process_name
                  ~cwd:config.cwd
                  ~extra_env:config.extra_env
-                 ~on_stderr_line
+                 ~on_stderr_line:(on_stderr_line ~process_name:config.process_name)
                  ?stdin_content:(stdin_for_prompt prompt)
                  ~on_line
                  ?cancel:config.cancel
@@ -1766,7 +1802,7 @@ let gemini_cli_transport_ctor
       Llm_provider.Transport_gemini_cli.create ~sw ~mgr ~config))
 ;;
 
-let kimi_cli_transport_ctor
+let json_stream_cli_transport_ctor
       ~(provider_cfg : Llm_provider.Provider_config.t)
       ~runtime_mcp_policy
       ~cli_transport_overrides
@@ -1776,13 +1812,20 @@ let kimi_cli_transport_ctor
     Option.bind cli_transport_overrides (fun overrides ->
       overrides.cli_subprocess_idle_sec)
   in
-  let mcp_config_json = kimi_cli_runtime_mcp_jsons ~base:[] runtime_mcp_policy in
+  let mcp_config_json = cli_runtime_mcp_jsons ~base:[] runtime_mcp_policy in
   let model = cli_model_for_provider_config provider_cfg in
-  let config_json = kimi_cli_config_json_for_provider provider_cfg in
-  let extra_env = kimi_cli_extra_env provider_cfg in
+  let config_json = cli_runtime_config_json_for_provider provider_cfg in
+  let extra_env = cli_direct_binding_extra_env provider_cfg in
+  let cli_path =
+    cli_command_for_provider_config provider_cfg
+    |> Option.value ~default:Json_stream_cli_transport_local.default_config.cli_path
+  in
+  let process_name = cli_process_name_for_provider_config provider_cfg in
   let config =
-    { Kimi_cli_transport_local.default_config with
-      model
+    { Json_stream_cli_transport_local.default_config with
+      cli_path
+    ; process_name
+    ; model
     ; cwd
     ; config_json
     ; mcp_config_json
@@ -1792,7 +1835,7 @@ let kimi_cli_transport_ctor
   in
   with_proc_mgr (fun ~mgr ->
     make_per_call_switch_transport (fun ~sw ->
-      Kimi_cli_transport_local.create ~sw ~mgr ~config))
+      Json_stream_cli_transport_local.create ~sw ~mgr ~config))
 ;;
 
 let codex_cli_transport_ctor
@@ -1819,7 +1862,7 @@ let () =
     ~ctor:gemini_cli_transport_ctor;
   register_non_http_transport
     ~kind:Llm_provider.Provider_config.Kimi_cli
-    ~ctor:kimi_cli_transport_ctor;
+    ~ctor:json_stream_cli_transport_ctor;
   register_non_http_transport
     ~kind:Llm_provider.Provider_config.Codex_cli
     ~ctor:codex_cli_transport_ctor
@@ -1843,9 +1886,8 @@ let non_http_transport_of_provider
     (* Fail-fast for subprocess CLI kinds that have no registered ctor:
        falling through to [Ok None] would route the request to the HTTP
        lane, which cannot serve a CLI provider. HTTP-shaped providers
-       (Anthropic / OpenAI_compat / Ollama / Gemini / Glm / Kimi /
-       DashScope) correctly return [Ok None]; they live behind a
-       different transport selector upstream. *)
+       correctly return [Ok None]; they live behind a different transport
+       selector upstream. *)
     if Llm_provider.Provider_config.is_subprocess_cli provider_cfg.kind
     then
       Error

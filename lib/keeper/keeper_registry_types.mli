@@ -619,3 +619,19 @@ and completed_turn_observation = {
     Returns [false] if another fiber won the resolve race. *)
 val try_resolve_done :
   registry_entry -> [ `Stopped | `Crashed of string ] -> bool
+
+(** Internal: keeper registry key composition (base_path ^ \\x1f ^ name).
+    Exposed via mli so keeper_registry.ml's state functions can use it
+    after the intra-library split; not intended for external callers. *)
+val registry_key : base_path:string -> string -> string
+
+(** Pure mapping from cascade_state witness to its parent turn_phase
+    witness. Used by composite observer derivations. *)
+val turn_phase_of_cascade_state :
+  packed_cascade_state -> packed_turn_phase
+
+(** Classify a live turn_observation into a completed_turn_outcome
+    using exhaustive pattern matching on (decision_stage, cascade_state).
+    Pure function, no state access. *)
+val completed_turn_outcome_of_observation :
+  turn_observation -> Keeper_transition_audit.completed_turn_outcome

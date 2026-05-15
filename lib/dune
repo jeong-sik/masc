@@ -296,6 +296,11 @@
    ;; lib/dashboard_eval_feed/. 178+59 LoC, deps: stdlib + Yojson +
    ;; agent_sdk + masc_core (Json_util/Safe_ops).
    masc_mcp.dashboard_eval_feed
+   ;; RFC-0056 Phase 1F — Memory_jsonl leaf module extracted to
+   ;; lib/memory_jsonl/. 219+22 LoC, deps: stdlib + Yojson + Eio +
+   ;; agent_sdk + fs_compat + time_compat + masc_log. OAS Memory
+   ;; long_term_backend over JSONL files.
+   masc_mcp.memory_jsonl
    ;; RFC-0058 Phase 1 — Declarative cascade TOML config. Separate sub-library
    ;; to avoid type name collisions (transport, provider, binding, tier, strategy)
    ;; with identically-named types in the main library.

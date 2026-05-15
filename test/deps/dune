@@ -55,6 +55,8 @@
    (re_export masc_mcp.briefing_compactors)
    ;; RFC-0056 Phase 1E — Dashboard_eval_feed leaf module sub-library.
    (re_export masc_mcp.dashboard_eval_feed)
+   ;; RFC-0056 Phase 1F — Memory_jsonl leaf module sub-library.
+   (re_export masc_mcp.memory_jsonl)
    ;; RFC-0058 Phase 1 — Declarative cascade TOML parser sub-library.
    (re_export masc_mcp.cascade_decl)
    (re_export masc_mcp.ag_ui)

@@ -251,7 +251,7 @@ let with_temp_config_dir cascade_toml f =
   let cascade_path = Filename.concat config_root "cascade.toml" in
   write_file cascade_path cascade_toml;
   let reset () =
-    Masc_mcp.Config_dir_resolver.reset ();
+    Config_dir_resolver.reset ();
     Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ()
   in
   Fun.protect
@@ -269,13 +269,13 @@ let repo_config_dir () =
 let with_repo_config_dir f =
   let prior = Sys.getenv_opt "MASC_CONFIG_DIR" in
   Unix.putenv "MASC_CONFIG_DIR" (repo_config_dir ());
-  Masc_mcp.Config_dir_resolver.reset ();
+  Config_dir_resolver.reset ();
   Fun.protect
     ~finally:(fun () ->
       (match prior with
        | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
        | None -> Unix.putenv "MASC_CONFIG_DIR" "");
-      Masc_mcp.Config_dir_resolver.reset ())
+      Config_dir_resolver.reset ())
     f
 
 let contains ~needle haystack =
@@ -327,13 +327,13 @@ let test_cascade_name_accepts_tool_lane_without_catalog () =
   in
   let prior = Sys.getenv_opt "MASC_CONFIG_DIR" in
   Unix.putenv "MASC_CONFIG_DIR" missing_dir;
-  Masc_mcp.Config_dir_resolver.reset ();
+  Config_dir_resolver.reset ();
   Fun.protect
     ~finally:(fun () ->
       (match prior with
        | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
        | None -> Unix.putenv "MASC_CONFIG_DIR" "");
-      Masc_mcp.Config_dir_resolver.reset ())
+      Config_dir_resolver.reset ())
     (fun () ->
       let result =
         with_temp_toml

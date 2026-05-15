@@ -74,14 +74,14 @@ target = "tier-group.%s"
 let with_config_dir config_dir f =
   let saved = Sys.getenv_opt "MASC_CONFIG_DIR" in
   Unix.putenv "MASC_CONFIG_DIR" config_dir;
-  Masc_mcp.Config_dir_resolver.reset ();
+  Config_dir_resolver.reset ();
   Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ();
   Fun.protect
     ~finally:(fun () ->
       (match saved with
        | Some v -> Unix.putenv "MASC_CONFIG_DIR" v
        | None -> Unix.putenv "MASC_CONFIG_DIR" "");
-      Masc_mcp.Config_dir_resolver.reset ();
+      Config_dir_resolver.reset ();
       Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ())
     f
 

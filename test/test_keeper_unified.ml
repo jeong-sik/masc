@@ -98,7 +98,7 @@ let () =
     (Filename.concat test_config_dir "cascade.toml");
   Unix.putenv "MASC_BASE_PATH" test_base_path;
   Unix.putenv "MASC_CONFIG_DIR" test_config_dir;
-  Masc_mcp.Config_dir_resolver.reset ();
+  Config_dir_resolver.reset ();
   let prompts_dir = Filename.concat base_path "config/prompts" in
   Prompt_registry.set_markdown_dir prompts_dir;
   ignore (Result.get_ok (Masc_mcp.Keeper_exec_tools.init_policy_config ~base_path));
@@ -221,8 +221,8 @@ let with_test_runtime_roots base_dir f =
   @@ fun () ->
   with_env "MASC_CONFIG_DIR" config_dir
   @@ fun () ->
-  Masc_mcp.Config_dir_resolver.reset ();
-  Fun.protect ~finally:(fun () -> Masc_mcp.Config_dir_resolver.reset ()) f
+  Config_dir_resolver.reset ();
+  Fun.protect ~finally:(fun () -> Config_dir_resolver.reset ()) f
 ;;
 
 (* ---------- World Observation type tests ---------- *)

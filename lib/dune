@@ -331,6 +331,11 @@
    ;; extracted to lib/tool_catalog_surfaces/. deps: Agent_sdk + stdlib only.
    ;; Unblocks one of 6 cycle modules identified in plan §8.14 iter-2.
    masc_mcp.tool_catalog_surfaces
+   ;; RFC-0086 Phase 2.B prereq — Config_dir_resolver (lib/ root, 563+156 LoC)
+   ;; extracted to lib/config_dir_resolver/. deps: masc_core (Common) +
+   ;; masc_mcp.config (Env_config_core) + masc_mcp.host_config + masc_log + yojson.
+   ;; Unblocks one of 6 cycle modules identified in plan §8.14 iter-2.
+   masc_mcp.config_dir_resolver
    ;; RFC-0058 Phase 1 — Declarative cascade TOML config. Separate sub-library
    ;; to avoid type name collisions (transport, provider, binding, tier, strategy)
    ;; with identically-named types in the main library.

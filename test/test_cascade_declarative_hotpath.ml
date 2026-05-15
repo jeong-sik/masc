@@ -62,13 +62,13 @@ let with_temp_cascade_config toml f =
   Unix.mkdir config_dir 0o700;
   write_file (Filename.concat config_dir "cascade.toml") toml;
   let cleanup () =
-    Masc_mcp.Config_dir_resolver.reset ();
+    Config_dir_resolver.reset ();
     Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ();
     (try Sys.remove (Filename.concat config_dir "cascade.toml") with _ -> ());
     (try Unix.rmdir config_dir with _ -> ());
     (try Unix.rmdir root with _ -> ())
   in
-  Masc_mcp.Config_dir_resolver.reset ();
+  Config_dir_resolver.reset ();
   Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ();
   Fun.protect
     ~finally:cleanup

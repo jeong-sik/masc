@@ -1,0 +1,20 @@
+; RFC-0086 Phase 2.B prereq — extract config_dir_resolver from flat
+; masc_mcp namespace. lib/keeper/ bulk promotion (PR-2E) was blocked on
+; this module being parent-masc_mcp resident; extracting it unbreaks one
+; of 6 cycle modules identified in plan §8.14 iter-2.
+;
+; Deps: masc_core (Common) + masc_mcp.config (Env_config_core) +
+;       masc_mcp.host_config (Host_config) + masc_log + yojson + stdlib.
+; All sub-libs — clean leaf.
+(include_subdirs no)
+
+(library
+ (name masc_mcp_config_dir_resolver)
+ (public_name masc_mcp.config_dir_resolver)
+ (wrapped false)
+ (libraries
+  masc_core
+  masc_mcp.config
+  masc_mcp.host_config
+  masc_log
+  yojson))

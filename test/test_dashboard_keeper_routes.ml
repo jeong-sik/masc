@@ -408,10 +408,10 @@ let with_config_dir config_root f =
        (match prev with
         | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
         | None -> Unix.putenv "MASC_CONFIG_DIR" "");
-       Masc_mcp.Config_dir_resolver.reset ())
+       Config_dir_resolver.reset ())
     (fun () ->
        Unix.putenv "MASC_CONFIG_DIR" config_root;
-       Masc_mcp.Config_dir_resolver.reset ();
+       Config_dir_resolver.reset ();
        f ())
 ;;
 

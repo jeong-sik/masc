@@ -56,11 +56,11 @@ let with_config_dir f =
   Fun.protect
     ~finally:(fun () ->
       restore_env "MASC_CONFIG_DIR" original;
-      Masc_mcp.Config_dir_resolver.reset ();
+      Config_dir_resolver.reset ();
       cleanup_dir dir)
     (fun () ->
       Unix.putenv "MASC_CONFIG_DIR" config_dir;
-      Masc_mcp.Config_dir_resolver.reset ();
+      Config_dir_resolver.reset ();
       f config_dir)
 
 let contains_substring haystack needle =

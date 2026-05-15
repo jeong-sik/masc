@@ -59,7 +59,7 @@ let () =
 ]|};
   close_out oc;
   Unix.putenv "MASC_CONFIG_DIR" isolated;
-  Masc_mcp.Config_dir_resolver.reset ()
+  Config_dir_resolver.reset ()
 
 let assert_match ~msg ~text ~expected_pattern =
   match A.find_excuse_pattern text with

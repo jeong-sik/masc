@@ -15,10 +15,10 @@ val max_output_chars : int
     [max_output_chars]; otherwise truncates and appends a marker. *)
 val cap : string -> string
 
-(** Post-hook for [Tool_dispatch.register_post_hook].
+(** Result transformer for [Tool_dispatch.set_result_transformer].
     Applies [cap] to [masc_*] tools that go through the dispatch
     pipeline. *)
 val post_hook : Tool_result.t -> Tool_result.t
 
-(** Install the post-hook into [Tool_dispatch]. Idempotent. *)
+(** Install the result transformer into [Tool_dispatch]. Idempotent. *)
 val install : unit -> unit

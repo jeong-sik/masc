@@ -46,7 +46,7 @@ let () =
               let _ = report |> member "top_20" |> to_list in
               let _ = report |> member "never_called_count" |> to_int in
               let _ = report |> member "tool_distribution" in
-              let _ = report |> member "dispatch_v2_enabled" |> to_bool in
+              (* RFC-0084 host-config-cleanup-J — dispatch_v2_enabled removed *)
               let _ = report |> member "registered_count" |> to_int in
               ());
           test_case "tool_distribution has visibility buckets" `Quick (fun () ->

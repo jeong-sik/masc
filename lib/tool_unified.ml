@@ -117,7 +117,10 @@ let summary_report () : Yojson.Safe.t =
      ) top_20));
     ("never_called_count", `Int (List.length never_called));
     ("tool_distribution", tool_dist);
-    ("dispatch_v2_enabled", `Bool Tool_dispatch.v2_enabled);
+    (* RFC-0084 host-config-cleanup-J — [dispatch_v2_enabled] JSON
+       field removed alongside the [MASC_DISPATCH_V2] flag.  The
+       Hashtbl dispatch path is now the only code path so the field
+       carried no signal. *)
     ("registered_count", `Int (Tool_dispatch.registered_count ()));
     ("cascade_metrics", Cascade_legacy_runner.cascade_metrics_json ());
   ]

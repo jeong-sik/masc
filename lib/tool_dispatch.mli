@@ -115,10 +115,12 @@ val guarded_dispatch
     PR-11 removes [dispatch] and [dispatch_structured] in favour of this
     single path. *)
 
-(** {1 Feature Flag and Introspection} *)
+(** {1 Introspection} *)
 
-val v2_enabled : bool
-(** Feature flag: use the new dispatch path (default ON since v2.102). *)
+(* RFC-0084 host-config-cleanup-J — [val v2_enabled] removed.
+   The [MASC_DISPATCH_V2] feature flag (default ON since v2.102)
+   and the legacy match chain it gated are gone; the Hashtbl
+   dispatch path is the only path. *)
 
 val registered_count : unit -> int
 (** Number of registered tool names. *)

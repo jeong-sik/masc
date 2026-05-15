@@ -164,10 +164,9 @@ let test_dashboard_tools_projection () =
             (runtime_probe_forced |> member "cache_hit" |> to_bool);
           check int "runtime probe computed once" 1
             (Atomic.get runtime_probe_calls));
-      check bool "usage dispatch flag present" true
-        (match usage |> member "dispatch_v2_enabled" with
-         | `Bool _ -> true
-         | _ -> false);
+      (* RFC-0084 host-config-cleanup-J — [dispatch_v2_enabled] JSON
+         field was removed alongside the [MASC_DISPATCH_V2] flag. *)
+      let _ = usage in
       (* Hidden tools remain auto-filtered outside public_mcp_tools. *)
       let hidden_tool =
         inventory_rows

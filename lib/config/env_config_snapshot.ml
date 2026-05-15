@@ -189,7 +189,7 @@ let runtime_entries =
   [
     entry ~default:"(none)" "MASC_CDAL_ENABLED"
       "Contract-driven agent loop proof capture (feature flag)";
-    entry ~default:"true" "MASC_DISPATCH_V2" "Enable V2 dispatch engine";
+    (* RFC-0084 host-config-cleanup-J — MASC_DISPATCH_V2 removed. *)
     entry ~default:"(auto)" Env_config_core.log_level_env_key "Log level override";
     entry ~default:"debug" Env_config_core.log_routine_level_env_key
       "Routine telemetry log level override (debug|info|warn|error|off)";

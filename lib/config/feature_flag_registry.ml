@@ -66,10 +66,8 @@ let all_flags : flag list = [
     lifecycle = Active; since = "2.50.0" };
 
   (* ── Tool Surface ─────────────────────────────────────────── *)
-  { env_name = "MASC_DISPATCH_V2";
-    description = "O(1) Hashtbl dispatch vs legacy sequential match";
-    default = true; category = "tool";
-    lifecycle = Active; since = "2.102.0" };
+  (* RFC-0084 host-config-cleanup-J — MASC_DISPATCH_V2 entry removed.
+     The Hashtbl dispatch path is the only path. *)
 
   { env_name = "MASC_FULL_SURFACE";
     description = "Include hidden/developer tools in tool list";

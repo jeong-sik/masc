@@ -1540,3 +1540,41 @@
  (name test_pr_g_disclosure_activation)
  (modules test_pr_g_disclosure_activation)
  (libraries masc_test_deps))
+
+; RFC-0084 host-config-cleanup-J — legacy MASC_DISPATCH_V2 removal.
+; Pins 0 occurrences of MASC_DISPATCH_V2 / v2_enabled / dispatch_v2_enabled
+; across config/env/dispatch/unified surfaces.  Pure regression guard;
+; no Masc_mcp dependency needed.
+(test
+ (name test_pr_j_legacy_dispatch_v2_removed)
+ (modules test_pr_j_legacy_dispatch_v2_removed)
+ (libraries alcotest))
+
+; RFC-0084 host-config-cleanup-A — credential root migration.
+; Pins literal "/tmp/keeper-creds" count at 0 in
+; lib/keeper/host_config_provider.ml and verifies
+; Host_config.legacy_macos_default is invoked.  Cross-checks that
+; Host_config_provider.cred_root equals the typed surface field.
+(test
+ (name test_pr_a_cred_root_migration)
+ (modules test_pr_a_cred_root_migration)
+ (libraries masc_test_deps))
+
+; RFC-0084 host-config-cleanup-C — coreutils path migration.
+; Pins 0 occurrences of the 6 absolute coreutils literals in
+; lib/keeper/keeper_shell_ops.ml and exactly 1
+; Host_config.legacy_macos_default invocation (single binding at
+; module-init time, not per call-site).
+(test
+ (name test_pr_c_coreutils_migration)
+ (modules test_pr_c_coreutils_migration)
+ (libraries masc_test_deps))
+
+; RFC-0084 host-config-cleanup-B — shell binary path migration.
+; Pins 0 occurrences of /bin/bash and /bin/zsh literals across
+; the 4 keeper consumer modules (1 bash + 3 zsh) and verifies one
+; Host_config.legacy_macos_default binding per consumer module.
+(test
+ (name test_pr_b_shell_paths_migration)
+ (modules test_pr_b_shell_paths_migration)
+ (libraries masc_test_deps))

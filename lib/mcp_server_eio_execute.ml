@@ -1060,9 +1060,29 @@ let execute_tool_eio
             (* Primary dispatch: mint token at I/O boundary, then O(1) tag lookup.
      Tool_token validates the name exists in the tag registry (Parse, Don't
      Validate). If mint fails, the tool is truly unknown. *)
+            (* RFC-0084 §1.1 + §2.2 (PR-8) — MCP server tag/internal-keeper
+               dispatch paths wrap their existing run_pre_hooks + handler
+               chains with Tool_telemetry.with_span so every MCP-originated
+               tool call emits the telemetry 4-tuple (Span / Metric /
+               trace_id; Audit slot via with_system_internal_audit below).
+               This brings MCP-originated calls to behavioural parity with
+               the keeper turn migration in PR-7. *)
+            let dispatch_internal_with_telemetry () =
+              let result, _outcome =
+                Tool_telemetry.with_span ~tool_name:name (fun _trace_id_thunk ->
+                  let r = dispatch_internal_keeper_runtime_tool () in
+                  let outcome =
+                    match r with
+                    | Some _ -> "handled"
+                    | None -> "no_handler"
+                  in
+                  r, outcome)
+              in
+              result
+            in
             match
               if internal_keeper_runtime_tool
-              then dispatch_internal_keeper_runtime_tool ()
+              then dispatch_internal_with_telemetry ()
               else None
             with
             | Some result -> with_system_internal_audit ~agent_name result
@@ -1078,9 +1098,24 @@ let execute_tool_eio
                  (* Token proves the name is registered in at least one registry.
          lookup_tag None after mint is a registry inconsistency (tool in
          handler registry but not tag registry), not a user error. *)
+                 (* RFC-0084 §2.2 (PR-8) — wrap the tag-based dispatch with
+                    Tool_telemetry.with_span for 4-tuple emission. *)
+                 let dispatch_tag_with_telemetry tag =
+                   let result, _outcome =
+                     Tool_telemetry.with_span ~tool_name:name (fun _trace_id_thunk ->
+                       let r = dispatch_by_tag tag in
+                       let outcome =
+                         match r with
+                         | Some _ -> "handled"
+                         | None -> "no_handler"
+                       in
+                       r, outcome)
+                   in
+                   result
+                 in
                  let tag_result =
                    match Tool_dispatch.lookup_tag name with
-                   | Some tag -> dispatch_by_tag tag
+                   | Some tag -> dispatch_tag_with_telemetry tag
                    | None -> None
                  in
                  (match tag_result with

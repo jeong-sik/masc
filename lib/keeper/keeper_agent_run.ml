@@ -180,6 +180,7 @@ let run_turn
       ~generation
       ()
   in
+  let meta = ctx.meta in
   let temperature = ctx.temperature in
   let max_tokens = ctx.max_tokens in
   let max_output_ceiling =

@@ -108,9 +108,9 @@ let allowed_worktree_prefixes config =
    "/.worktrees/" segment elsewhere in the tree is not accepted.
 
    Playground writes are gated per-agent (#6527 iter 6): the caller
-   must only be allowed to write inside its own
-   [.masc/playground/<agent_name>/] bundle. This prevents one agent
-   from mutating another agent's playground via the shared
+   must only be allowed to write inside its own backend-scoped playground
+   bundle. This prevents one agent from mutating another agent's playground
+   via the shared
    `masc_code_*` dispatch. Server-wide `.worktrees/` remains allowed
    so legacy server operations that need to touch repo worktrees
    continue to work. *)
@@ -123,7 +123,7 @@ let validate_writable_path ~(agent_name : string) config path =
     let agent_playground_prefix =
       normalize_dir_prefix
         (Filename.concat config.Coord.base_path
-           (Keeper_alerting_path.playground_path_of_keeper agent_name))
+           (Tool_code.agent_playground_rel ~config ~agent_name))
     in
     if List.exists
          (fun prefix -> String.starts_with ~prefix canonical_path)
@@ -386,7 +386,7 @@ let validate_clone_url ~base_path url =
           Error (Printf.sprintf "Cannot parse GitHub org/repo from URL: %s" url)
 
 (** Validate cwd for clone: allows .worktrees/ itself (not just subdirs)
-    and THIS agent's own .masc/playground/<agent_name>/repos/ directory.
+    and THIS agent's own backend-scoped playground repos/ directory.
 
     #6527 iter 6 scoped this per-agent so agent A cannot drop a clone
     into agent B's playground/repos/ via masc_code_git action=clone. *)
@@ -402,14 +402,14 @@ let validate_clone_cwd ~(agent_name : string) config cwd =
         (Filename.concat root ".worktrees") in
       let agent_playground_prefix = Tool_code.normalize_path
         (Filename.concat root
-           (Keeper_alerting_path.playground_path_of_keeper agent_name)) in
+           (Tool_code.agent_playground_rel ~config ~agent_name)) in
       let in_worktrees =
         String.equal canonical_path worktree_prefix ||
         String.starts_with ~prefix:(worktree_prefix ^ "/") canonical_path
       in
       let in_agent_playground_repos =
         (* Match <agent_playground_prefix>/repos or subdirs thereof.
-           [playground_path_of_keeper] already ends with "/", and the
+           [Tool_code.agent_playground_rel] already ends with "/", and the
            canonical normalisation strips trailing slashes, so we strip
            the trailing slash before prefix matching. *)
         let prefix_no_slash =

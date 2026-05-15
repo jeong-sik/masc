@@ -511,7 +511,9 @@ let test_code_git_status_marks_docker_keeper_route () =
   write_file
     (Filename.concat keeper_dir "sangsu.toml")
     "[keeper]\nsandbox_profile = \"docker\"\n";
-  let cwd = Filename.concat base_path ".masc/playground/sangsu/repos" in
+  let cwd =
+    Filename.concat base_path ".masc/playground/docker/sangsu/repos"
+  in
   mkdir_p cwd;
   ignore (Sys.command (Printf.sprintf "git -C %s init -q" (Filename.quote cwd)));
   let ctx =
@@ -554,6 +556,60 @@ let test_writable_path_maps_relative_repos_prefix () =
           ^ Masc_domain.masc_error_to_string e)
   | Ok resolved ->
     (check string) "repos/ path resolves under own playground repos"
+      expected resolved
+
+let test_writable_path_maps_docker_relative_repos_prefix () =
+  let base_path = fresh_base_path () in
+  let config = make_config base_path in
+  let keeper_dir = Filename.concat base_path ".masc/config/keepers" in
+  mkdir_p keeper_dir;
+  write_file
+    (Filename.concat keeper_dir "sangsu.toml")
+    "[keeper]\nsandbox_profile = \"docker\"\n";
+  let raw = "repos/masc-mcp/.worktrees/keeper-sangsu-agent-task-1" in
+  let expected =
+    Filename.concat base_path
+      ".masc/playground/docker/sangsu/repos/masc-mcp/.worktrees/keeper-sangsu-agent-task-1"
+    |> Masc_mcp.Tool_code.normalize_path
+  in
+  let result =
+    Tool_code_write.validate_writable_path
+      ~agent_name:"keeper-sangsu-agent" config raw
+  in
+  match result with
+  | Error e ->
+    fail ("expected Docker keeper repos/ prefix to map into own playground, got: "
+          ^ Masc_domain.masc_error_to_string e)
+  | Ok resolved ->
+    (check string) "Docker keeper repos/ path resolves under docker playground"
+      expected resolved
+
+let test_writable_path_maps_docker_container_path () =
+  let base_path = fresh_base_path () in
+  let config = make_config base_path in
+  let keeper_dir = Filename.concat base_path ".masc/config/keepers" in
+  mkdir_p keeper_dir;
+  write_file
+    (Filename.concat keeper_dir "sangsu.toml")
+    "[keeper]\nsandbox_profile = \"docker\"\n";
+  let raw =
+    "/home/keeper/playground/sangsu/repos/masc-mcp/.worktrees/keeper-sangsu-agent-task-1"
+  in
+  let expected =
+    Filename.concat base_path
+      ".masc/playground/docker/sangsu/repos/masc-mcp/.worktrees/keeper-sangsu-agent-task-1"
+    |> Masc_mcp.Tool_code.normalize_path
+  in
+  let result =
+    Tool_code_write.validate_writable_path
+      ~agent_name:"keeper-sangsu-agent" config raw
+  in
+  match result with
+  | Error e ->
+    fail ("expected Docker container path to map into own playground, got: "
+          ^ Masc_domain.masc_error_to_string e)
+  | Ok resolved ->
+    (check string) "Docker container path resolves under docker playground"
       expected resolved
 
 let test_writable_path_blocks_cross_agent () =
@@ -668,6 +724,10 @@ let () =
         test_writable_path_allows_own_playground;
       test_case "writable_path maps relative repos prefix" `Quick
         test_writable_path_maps_relative_repos_prefix;
+      test_case "writable_path maps Docker relative repos prefix" `Quick
+        test_writable_path_maps_docker_relative_repos_prefix;
+      test_case "writable_path maps Docker container path" `Quick
+        test_writable_path_maps_docker_container_path;
       test_case "writable_path blocks cross-agent" `Quick
         test_writable_path_blocks_cross_agent;
       test_case "clone_cwd does not reject own repos on containment axis" `Quick

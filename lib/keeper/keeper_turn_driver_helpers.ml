@@ -104,6 +104,14 @@ let empty_candidate_classification_code = function
   | Tool_capability_empty -> "tool_capability_empty"
   | Provider_unavailable -> "provider_unavailable"
 
+let fail_open_health_filtered_candidates
+    ~(tool_filtered_candidates : 'a list)
+    ~(health_filtered_candidates : 'a list)
+  : 'a list * bool =
+  match health_filtered_candidates with
+  | [] when tool_filtered_candidates <> [] -> tool_filtered_candidates, true
+  | _ -> health_filtered_candidates, false
+
 let provider_rejections_for_no_tool_error
     ~keeper_name ?runtime_mcp_policy ~tools
     ~require_tool_choice_support ~require_tool_support candidates =

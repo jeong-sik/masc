@@ -49,6 +49,18 @@ val classify_empty_candidates :
 val empty_candidate_classification_code :
   empty_candidate_classification -> string
 
+val fail_open_health_filtered_candidates :
+  tool_filtered_candidates:'a list ->
+  health_filtered_candidates:'a list ->
+  'a list * bool
+(** [fail_open_health_filtered_candidates ~tool_filtered_candidates
+    ~health_filtered_candidates] preserves health-filtered candidates unless
+    the health/cooldown filter would empty an otherwise tool-capable candidate
+    set. In that all-cooldown case it returns the pre-health-filter candidates
+    plus [true], allowing the cascade to attempt at least one provider and
+    surface the real upstream result instead of stopping at
+    [no_providers_available]. *)
+
 val provider_rejections_for_no_tool_error :
   keeper_name:string ->
   ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->

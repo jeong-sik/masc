@@ -74,10 +74,20 @@ let normalize_path path =
   let joined = String.concat "/" resolved in
   if is_absolute then "/" ^ joined else joined
 
+let agent_playground_rel ~(config : Coord.config) ~(agent_name : string)
+    : string =
+  let sandbox_profile =
+    if Coord_worktree.keeper_uses_docker_sandbox ~config ~agent_name then
+      Keeper_types.Docker
+    else
+      Keeper_types.Local
+  in
+  Keeper_sandbox.host_root_rel_of_profile sandbox_profile agent_name
+
 let normalize_agent_relative_path ~(config : Coord.config) ~(agent_name : string)
     (raw_path : string) : string =
   let trimmed = String.trim raw_path in
-  let own_bundle_rel = Keeper_alerting_path.playground_path_of_keeper agent_name in
+  let own_bundle_rel = agent_playground_rel ~config ~agent_name in
   let trimmed =
     (* Docker containers mount the playground at
        /home/keeper/playground/<keeper-name>/ but the host side validates
@@ -206,7 +216,7 @@ let validate_path config path =
    2. If the canonical path is outside the [.masc/playground/] tree,
       it's the shared codebase (lib/, test/, config/, etc.) — allow.
    3. If the canonical path is inside the playground tree, require it
-      to be under the caller's own bundle (via [playground_path_of_keeper]).
+      to be under the caller's own backend-scoped bundle.
 
    Sibling write fix: iter6 #6610 in tool_code_write.ml. *)
 let validate_read_path ~agent_name config path =
@@ -289,11 +299,10 @@ let validate_read_path ~agent_name config path =
             Ok canonical
           else
             let own_rel_trailing =
-              Keeper_alerting_path.playground_path_of_keeper agent_name
+              agent_playground_rel ~config ~agent_name
             in
-            (* [playground_path_of_keeper] returns a trailing-slash
-               relative path (".masc/playground/<agent>/"). Strip the
-               trailing slash for the prefix comparison. *)
+            (* [agent_playground_rel] returns a trailing-slash relative path.
+               Strip the trailing slash for the prefix comparison. *)
             let own_rel =
               let n = String.length own_rel_trailing in
               if n > 0 && Char.equal own_rel_trailing.[n - 1] '/'

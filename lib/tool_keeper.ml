@@ -1756,7 +1756,7 @@ let dispatch_stream ~on_text_delta ctx ~name ~args : tool_result option =
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let _tool_spec_read_only =
+let tool_spec_read_only =
   [ "masc_persona_list"; "masc_persona_schema"; "masc_keeper_list";
     "masc_keeper_status"; "masc_keeper_persona_audit";
     "masc_keeper_sandbox_status" ]
@@ -1786,8 +1786,8 @@ let () =
            ~module_tag:Tool_dispatch.Mod_keeper
            ~input_schema:s.input_schema
            ~handler_binding:Tag_dispatch
-           ~is_read_only:(List.mem s.name _tool_spec_read_only)
-           ~is_idempotent:(List.mem s.name _tool_spec_read_only)
+           ~is_read_only:(List.mem s.name tool_spec_read_only)
+           ~is_idempotent:(List.mem s.name tool_spec_read_only)
            ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

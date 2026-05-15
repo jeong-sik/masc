@@ -2128,8 +2128,8 @@ let execute (tool_name : string) (arguments : Yojson.Safe.t) : bool * Yojson.Saf
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let _tool_spec_read_only = [ "masc_tool_list" ]
-let _tool_spec_destructive = [ "masc_tool_grant"; "masc_tool_revoke" ]
+let tool_spec_read_only = [ "masc_tool_list" ]
+let tool_spec_destructive = [ "masc_tool_grant"; "masc_tool_revoke" ]
 
 let tool_required_permission = function
   | "masc_tool_list" -> Some Masc_domain.CanReadState
@@ -2155,9 +2155,9 @@ let () =
             ~module_tag:Tool_dispatch.Mod_shard
             ~input_schema:s.input_schema
             ~handler_binding:Tag_dispatch
-            ~is_read_only:(List.mem s.name _tool_spec_read_only)
-            ~is_idempotent:(List.mem s.name _tool_spec_read_only)
-            ~is_destructive:(List.mem s.name _tool_spec_destructive)
+            ~is_read_only:(List.mem s.name tool_spec_read_only)
+            ~is_idempotent:(List.mem s.name tool_spec_read_only)
+            ~is_destructive:(List.mem s.name tool_spec_destructive)
             ?required_permission:(tool_required_permission s.name)
             ?effect_domain:(tool_effect_domain s.name)
             ()))

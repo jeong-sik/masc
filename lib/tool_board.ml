@@ -1702,17 +1702,55 @@ let handle_sub_board_delete ~tool_name ~start_time args =
 (** Tool dispatcher.
     Mutation tools (post, comment, vote, delete, cleanup) invalidate
     the board_list TTL cache so the next read sees fresh data. *)
+(* Boundary that converts a stray [Yojson.Safe.Util.Type_error] from a
+   board-tool handler into a structured [Tool_result.error]. Without this
+   the exception bubbles out to the MCP transport as
+   "Yojson__Safe.Util.Type_error(\"Expected string or null, got array\", _)",
+   which is opaque to keeper LLMs — see analyst's task-213 board post
+   (p-1efba4b2311478dff37fff9fdbfea483) and the sangsu broadcast on
+   2026-05-15T10:51:20Z. With this boundary the LLM gets a typed
+   message that names the offending value and the likely cause, so the
+   next call can correct the offending field without retry-loop noise.
+
+   This is a diagnostic boundary, not a workaround: when the raise
+   originates from a path that should accept a non-string value (e.g.
+   sources entry shape), the offending value in the error gives whoever
+   triages the next regression a direct pointer to the failing field. *)
+let with_yojson_boundary ~tool_name ~start_time handler =
+  try handler () with
+  | Yojson.Safe.Util.Type_error (msg, bad_value) ->
+    let value_repr =
+      let s = Yojson.Safe.to_string bad_value in
+      if String.length s > 120 then String.sub s 0 120 ^ "…" else s
+    in
+    Tool_result.error
+      ~tool_name
+      ~start_time
+      (Printf.sprintf
+         "JSON arg type error: %s. Offending value: %s. Likely cause: an \
+          optional field (sources / judgment / meta / hearth / title / body) \
+          was sent as a non-string JSON type. Send string-typed scalars only."
+         msg
+         value_repr)
+;;
+
 let handle_tool name args =
   let start_time = Time_compat.now () in
   match name with
   | "masc_board_post" ->
-    let result = handle_post_create ~tool_name:name ~start_time args in
+    let result =
+      with_yojson_boundary ~tool_name:name ~start_time (fun () ->
+        handle_post_create ~tool_name:name ~start_time args)
+    in
     invalidate_board_list_cache ();
     result
   | "masc_board_list" -> handle_post_list ~tool_name:name ~start_time args
   | "masc_board_get" -> handle_post_get ~tool_name:name ~start_time args
   | "masc_board_comment" ->
-    let result = handle_comment_add ~tool_name:name ~start_time args in
+    let result =
+      with_yojson_boundary ~tool_name:name ~start_time (fun () ->
+        handle_comment_add ~tool_name:name ~start_time args)
+    in
     invalidate_board_list_cache ();
     result
   | "masc_board_vote" ->

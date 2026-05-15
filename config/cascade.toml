@@ -26,7 +26,7 @@ key = "OPENAI_API_KEY"
 # so keeper-bound actor tools must be bridged via argv (per-keeper auth
 # token routed through bearer_token_env_var) — see masc-mcp#10097.
 requires-per-keeper-bridging-for-bound-actor-tools = true
-identity-runtime-mcp-header-keys = ["authorization", "x-masc-agent-name", "x-masc-keeper-name"]
+identity-runtime-mcp-header-keys = ["x-masc-agent-name", "x-masc-keeper-name"]
 argv-prompt-preflight = true
 
 [providers.gemini_cli]
@@ -47,11 +47,9 @@ key = "GEMINI_API_KEY"
 # their defaults (no runtime MCP HTTP headers, no anthropic caching,
 # no max-turns cap).
 #
-# NOTE (data-only until cutover): this declaration is parsed into the
-# in-memory cascade-decl config, but [Cascade_catalog_validator] still
-# reads [Provider_adapter]'s hardcoded value for this kind. Toggling
-# this line therefore does not move the validator warn surface until
-# the caller cutover lands (see #14659 bridge primitive).
+# This declaration is part of the cascade TOML SSOT. Keep validator and
+# runtime surfaces wired to declarative/provider-runtime capability data;
+# do not add a second provider-specific copy in OCaml.
 [providers.gemini_cli.capabilities]
 tolerates-bound-actor-fallback = true
 
@@ -236,6 +234,22 @@ thinking-support = true
 streaming = true
 
 [models.qwen3.capabilities]
+supports-tool-choice = true
+supports-parallel-tool-calls = true
+supports-extended-thinking = true
+supports-native-streaming = true
+supports-top-k = true
+supports-min-p = true
+
+[models.qwen3-5]
+api-name = "qwen3.5"
+match-prefixes = ["qwen3.5", "qwen3-5"]
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.qwen3-5.capabilities]
 supports-tool-choice = true
 supports-parallel-tool-calls = true
 supports-extended-thinking = true

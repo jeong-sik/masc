@@ -38,6 +38,15 @@ type worker_container_meta = {
   checkpoint_path : string;
   turn_log_path : string;
   last_run_at : float option;
+  (* RFC-0084 host-config-cleanup-H — typed disclosure strategy
+     (PR-13 surface, PR-G OAS bridges).  [None] preserves today's
+     Full_schema behaviour.  A follow-up Worker_meta_json I/O
+     cleanup will add round-trip support so config-driven keepers
+     can opt-in to Hybrid disclosure via TOML/JSON; until then this
+     field is always [None] in deserialized records (no JSON key)
+     and propagates through [Worker_oas.build_agent
+     ?disclosure_strategy] when callers set it explicitly. *)
+  disclosure_strategy : Keeper_disclosure_strategy.t option;
 }
 
 let worker_container_version = 1

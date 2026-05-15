@@ -91,6 +91,13 @@ type worker_container_meta = {
   checkpoint_path : string;
   turn_log_path : string;
   last_run_at : float option;
+  disclosure_strategy : Keeper_disclosure_strategy.t option;
+      (** RFC-0084 host-config-cleanup-H — typed keeper disclosure
+          strategy (PR-13 surface).  [None] preserves today's
+          [Full_schema] behaviour; [Some s] is propagated through
+          [Worker_oas.build_agent ?disclosure_strategy] via the
+          PR-G OAS bridges.  JSON I/O round-trip is a deferred
+          follow-up cleanup. *)
 }
 (** Per-worker metadata persisted alongside the checkpoint
     file.  [version] is {!worker_container_version} at write

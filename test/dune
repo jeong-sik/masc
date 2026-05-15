@@ -1455,3 +1455,13 @@
  (name test_tag_dispatch_typed)
  (modules test_tag_dispatch_typed)
  (libraries alcotest))
+
+; RFC-0084 PR-10 — Typed Dispatch_outcome.t 5-arm invariants. Pins
+; cardinality (5), to_string vocabulary, round-trip preservation,
+; classify_result_option semantics, and string-vocab parity with
+; PR-7/8/9 ("handled" / "no_handler"). Requires masc_test_deps because
+; it accesses Masc_mcp.Dispatch_outcome.* directly.
+(test
+ (name test_dispatch_outcome_total)
+ (modules test_dispatch_outcome_total)
+ (libraries masc_test_deps))

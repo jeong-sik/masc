@@ -286,6 +286,10 @@
    ;; lib/keeper_skill_routing/. 215 LoC, only stdlib + masc_core deps.
    ;; First step in unblocking lib/keeper/ flat-namespace decoupling.
    masc_mcp.keeper_skill_routing
+   ;; RFC-0056 Phase 1C — Host_config leaf module extracted to
+   ;; lib/host_config/. RFC-0084 §1.5/§3.4 typed host configuration record;
+   ;; deps: stdlib + masc_mcp.coord (already sub-library).
+   masc_mcp.host_config
    ;; RFC-0058 Phase 1 — Declarative cascade TOML config. Separate sub-library
    ;; to avoid type name collisions (transport, provider, binding, tier, strategy)
    ;; with identically-named types in the main library.

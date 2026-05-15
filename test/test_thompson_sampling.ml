@@ -220,7 +220,7 @@ let test_stronger_trigger_uses_winner_order () =
 
 (** {1 Quality Signal Tests (Phase 3)} *)
 
-module Pv = Masc_mcp.Post_verifier
+module Pv = Post_verifier
 module Ah = Masc_mcp.Agent_health
 
 let float_eq ?(eps = 0.001) a b = Float.abs (a -. b) < eps

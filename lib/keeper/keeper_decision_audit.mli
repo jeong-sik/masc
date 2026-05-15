@@ -26,7 +26,7 @@ val make :
   keeper_name:string ->
   generation:int ->
   ?snapshot:Keeper_measurement.measurement_snapshot ->
-  heartbeat_verdict:Heartbeat_smart.decision ->
+  heartbeat_verdict:Keeper_heartbeat_smart.decision ->
   turn_verdict:Keeper_world_observation.turn_verdict ->
   wall_clock:float ->
   ?tool_diversity_entropy:float ->

@@ -894,7 +894,7 @@ let post_turn_resilience_handles
     with
     | Error detail ->
         Prometheus.inc_counter Keeper_metrics.metric_keeper_oas_execution_errors
-          ~labels:[("keeper", meta.name); ("phase", Oas_execution_error_phase.(to_label Resilience_audit_store))]
+          ~labels:[("keeper", meta.name); ("phase", Keeper_oas_execution_error_phase.(to_label Resilience_audit_store))]
           ();
         Log.Keeper.error
           "keeper:%s resilience audit store unavailable; execution disabled: %s"
@@ -955,7 +955,7 @@ let enqueue_partial_commit_continue_gate
                meta.name err);
              Prometheus.inc_counter
                Keeper_metrics.metric_keeper_cascade_sync_failures
-               ~labels:[("keeper", meta.name); ("site", Cascade_sync_failure_site.(to_label Resume_sync))]
+               ~labels:[("keeper", meta.name); ("site", Keeper_cascade_sync_failure_site.(to_label Resume_sync))]
                ()
       | Agent_sdk.Hooks.Reject reason ->
         (match sync_keeper_paused_state ~config ~meta:latest_meta ~paused:true with
@@ -972,7 +972,7 @@ let enqueue_partial_commit_continue_gate
                meta.name err reason);
              Prometheus.inc_counter
                Keeper_metrics.metric_keeper_cascade_sync_failures
-               ~labels:[("keeper", meta.name); ("site", Cascade_sync_failure_site.(to_label Pause_sync))]
+               ~labels:[("keeper", meta.name); ("site", Keeper_cascade_sync_failure_site.(to_label Pause_sync))]
                ())
     ()
 

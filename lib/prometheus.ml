@@ -1282,7 +1282,7 @@ let init () =
     Keeper_metrics.metric_keeper_turn_queue_depth
     "Current keeper turn wait queue depth (labels: channel=autonomous_queue)"
     Gauge;
-  (* [kind] is bound by [Bookkeeping_failure_kind.t]; [op] is free-form
+  (* [kind] is bound by [Keeper_bookkeeping_failure_kind.t]; [op] is free-form
      dynamic context (e.g. ["drop_holder <label>"]) needed to
      disambiguate which bookkeeping callback failed. *)
   add
@@ -1398,7 +1398,7 @@ let init () =
      0=no; labels: keeper, tool)"
     Gauge;
   (* Operator-initiated overflow recovery — emitted by tool_keeper.ml.
-     [result] label is bound by [Operator_compact_result.t]; adding a
+     [result] label is bound by [Keeper_operator_compact_result.t]; adding a
      new value requires extending the closed sum and re-running every
      emit site through the compiler. *)
   add
@@ -1768,7 +1768,7 @@ let init () =
     Counter;
   add
     Keeper_metrics.metric_keeper_event_queue_override
-    "RFC-0020 Rule 2 — total times run_smart_heartbeat_gate forced Heartbeat_smart.Emit. \
+    "RFC-0020 Rule 2 — total times run_smart_heartbeat_gate forced Keeper_heartbeat_smart.Emit. \
      The [reason] label disambiguates the two override paths: [event_queue] = the Event \
      Layer queue (Keeper_registry.event_queue_snapshot) held an unprocessed stimulus; \
      [durable_state] = the queue was empty but a durable world-observation signal \

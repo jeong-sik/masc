@@ -1,9 +1,9 @@
-(** RFC-0070 Phase 3b-iv.2.0 — tests for [Docker_client_real] skeleton.
+(** RFC-0070 Phase 3b-iv.2.0 — tests for [Keeper_docker_client_real] skeleton.
 
     Pins the typed-placeholder contract: every function returns
     [Error Cleanup_failed]. Critically, this includes a compile-time
-    witness that [Docker_client_real] satisfies [Docker_client.S],
-    so the [Sandbox_executor.Make] functor accepts both Mock and
+    witness that [Keeper_docker_client_real] satisfies [Keeper_docker_client.S],
+    so the [Keeper_sandbox_executor.Make] functor accepts both Mock and
     Real interchangeably.
 
     Sub-phases 3b-iv.2.{1,2,3,4} replace each placeholder one at a
@@ -14,11 +14,11 @@ open Alcotest
 open Masc_mcp
 
 (* Compile-time witness: Real satisfies S. *)
-let (_ : (module Docker_client.S)) = (module Docker_client_real)
+let (_ : (module Keeper_docker_client.S)) = (module Keeper_docker_client_real)
 
 (* And it composes with the executor functor (along with Mock from
    Phase 3b-iv.1b). *)
-module Real_executor = Sandbox_executor.Make (Docker_client_real)
+module Real_executor = Keeper_sandbox_executor.Make (Keeper_docker_client_real)
 
 let sample_plan () =
   match
@@ -77,14 +77,14 @@ let sample_session_plan () =
    [Error Daemon_unreachable] (daemon / CLI missing). No other
    [sandbox_error] variant is semantically valid for [run]. *)
 let test_run_returns_typed_result () =
-  match Docker_client_real.run (sample_plan ()) with
+  match Keeper_docker_client_real.run (sample_plan ()) with
   | Ok _ -> () (* daemon present *)
-  | Error Docker_client.Daemon_unreachable -> () (* daemon / CLI missing *)
-  | Error Docker_client.Cleanup_failed
-  | Error Docker_client.Image_pull_failed
-  | Error Docker_client.Container_oom
-  | Error Docker_client.Exec_timeout
-  | Error Docker_client.Probe_format_drift ->
+  | Error Keeper_docker_client.Daemon_unreachable -> () (* daemon / CLI missing *)
+  | Error Keeper_docker_client.Cleanup_failed
+  | Error Keeper_docker_client.Image_pull_failed
+  | Error Keeper_docker_client.Container_oom
+  | Error Keeper_docker_client.Exec_timeout
+  | Error Keeper_docker_client.Probe_format_drift ->
     fail "run should only surface Ok exec_result or Error Daemon_unreachable"
 ;;
 
@@ -96,14 +96,14 @@ let test_run_returns_typed_result () =
    (no daemon / CLI missing). Other [sandbox_error] variants are
    semantically out of scope for [exec] and must NOT surface. *)
 let test_exec_returns_typed_result () =
-  match Docker_client_real.exec ~container:(sample_container ()) ~cmd:"echo hi" () with
+  match Keeper_docker_client_real.exec ~container:(sample_container ()) ~cmd:"echo hi" () with
   | Ok _ -> () (* daemon present *)
-  | Error Docker_client.Daemon_unreachable -> () (* daemon / CLI missing *)
-  | Error Docker_client.Cleanup_failed
-  | Error Docker_client.Image_pull_failed
-  | Error Docker_client.Container_oom
-  | Error Docker_client.Exec_timeout
-  | Error Docker_client.Probe_format_drift ->
+  | Error Keeper_docker_client.Daemon_unreachable -> () (* daemon / CLI missing *)
+  | Error Keeper_docker_client.Cleanup_failed
+  | Error Keeper_docker_client.Image_pull_failed
+  | Error Keeper_docker_client.Container_oom
+  | Error Keeper_docker_client.Exec_timeout
+  | Error Keeper_docker_client.Probe_format_drift ->
     fail "exec should only surface Ok exec_result or Error Daemon_unreachable"
 ;;
 
@@ -118,7 +118,7 @@ let test_exec_argv_plain () =
     (list string)
     "no user, no workdir"
     [ "docker"; "exec"; Keeper_container_name.to_string c; "sh"; "-lc"; "ls -la" ]
-    (Docker_client_real.exec_argv ~container:c ~cmd:"ls -la" ())
+    (Keeper_docker_client_real.exec_argv ~container:c ~cmd:"ls -la" ())
 ;;
 
 let test_exec_argv_user_only () =
@@ -135,7 +135,7 @@ let test_exec_argv_user_only () =
     ; "-lc"
     ; "id"
     ]
-    (Docker_client_real.exec_argv ~user:(1000, 1000) ~container:c ~cmd:"id" ())
+    (Keeper_docker_client_real.exec_argv ~user:(1000, 1000) ~container:c ~cmd:"id" ())
 ;;
 
 let test_exec_argv_workdir_only () =
@@ -144,7 +144,7 @@ let test_exec_argv_workdir_only () =
     (list string)
     "workdir only → -w <dir>"
     [ "docker"; "exec"; "-w"; "/work"; Keeper_container_name.to_string c; "sh"; "-lc"; "pwd" ]
-    (Docker_client_real.exec_argv ~workdir:"/work" ~container:c ~cmd:"pwd" ())
+    (Keeper_docker_client_real.exec_argv ~workdir:"/work" ~container:c ~cmd:"pwd" ())
 ;;
 
 let test_exec_argv_user_and_workdir () =
@@ -163,7 +163,7 @@ let test_exec_argv_user_and_workdir () =
     ; "-lc"
     ; "whoami"
     ]
-    (Docker_client_real.exec_argv
+    (Keeper_docker_client_real.exec_argv
        ~user:(1000, 1000)
        ~workdir:"/work"
        ~container:c
@@ -187,13 +187,13 @@ let test_exec_argv_stdin_only_emits_dash_i () =
     ; "-lc"
     ; "cat > /tmp/x"
     ]
-    (Docker_client_real.exec_argv ~stdin:true ~container:c ~cmd:"cat > /tmp/x" ())
+    (Keeper_docker_client_real.exec_argv ~stdin:true ~container:c ~cmd:"cat > /tmp/x" ())
 ;;
 
 let test_exec_argv_stdin_false_omits_dash_i () =
   let c = sample_container () in
   let argv =
-    Docker_client_real.exec_argv ~stdin:false ~container:c ~cmd:"echo hi" ()
+    Keeper_docker_client_real.exec_argv ~stdin:false ~container:c ~cmd:"echo hi" ()
   in
   check bool "stdin=false ⇒ no -i" false (List.mem "-i" argv);
   check
@@ -220,7 +220,7 @@ let test_exec_argv_user_workdir_stdin_full_order () =
     ; "-lc"
     ; "tee /tmp/x"
     ]
-    (Docker_client_real.exec_argv
+    (Keeper_docker_client_real.exec_argv
        ~user:(1000, 1000)
        ~workdir:"/work"
        ~stdin:true
@@ -233,13 +233,13 @@ let test_exec_argv_stdin_default_is_false () =
   (* Omitting [?stdin] altogether is the same as [~stdin:false]: the
      default is "no -i", because most exec calls don't pipe stdin. *)
   let c = sample_container () in
-  let argv = Docker_client_real.exec_argv ~container:c ~cmd:"echo hi" () in
+  let argv = Keeper_docker_client_real.exec_argv ~container:c ~cmd:"echo hi" () in
   check bool "no ?stdin ⇒ no -i" false (List.mem "-i" argv)
 ;;
 
 let test_ps_query_placeholder () =
-  match Docker_client_real.ps_query ~labels:[] with
-  | Error Docker_client.Cleanup_failed -> ()
+  match Keeper_docker_client_real.ps_query ~labels:[] with
+  | Error Keeper_docker_client.Cleanup_failed -> ()
   | _ -> fail "expected Cleanup_failed placeholder"
 ;;
 
@@ -248,14 +248,14 @@ let test_ps_query_placeholder () =
    docker daemon, so we only assert that the *typed* error variants
    are surfaced (no exception leakage, no silent success). *)
 let test_rm_returns_typed_error () =
-  match Docker_client_real.rm (sample_container ()) with
-  | Error Docker_client.Daemon_unreachable | Error Docker_client.Cleanup_failed ->
+  match Keeper_docker_client_real.rm (sample_container ()) with
+  | Error Keeper_docker_client.Daemon_unreachable | Error Keeper_docker_client.Cleanup_failed ->
     () (* env-dependent path *)
   | Ok () -> fail "unexpected Ok — derived container name should not exist on host"
-  | Error Docker_client.Image_pull_failed
-  | Error Docker_client.Container_oom
-  | Error Docker_client.Exec_timeout
-  | Error Docker_client.Probe_format_drift ->
+  | Error Keeper_docker_client.Image_pull_failed
+  | Error Keeper_docker_client.Container_oom
+  | Error Keeper_docker_client.Exec_timeout
+  | Error Keeper_docker_client.Probe_format_drift ->
     fail "rm should only surface Daemon_unreachable or Cleanup_failed"
 ;;
 
@@ -263,16 +263,16 @@ let test_rm_returns_typed_error () =
    [info_security_options]. Deterministic (no daemon): assert array
    handling, lowercasing, non-string drop, and that a format drift
    surfaces as [Probe_format_drift] rather than [Ok []]. *)
-let security_options_result : (string list, Docker_client.sandbox_error) result testable =
+let security_options_result : (string list, Keeper_docker_client.sandbox_error) result testable =
   let pp ppf = function
     | Ok xs -> Format.fprintf ppf "Ok [%s]" (String.concat "; " xs)
     | Error e -> Format.fprintf ppf "Error %s" (match e with
-        | Docker_client.Daemon_unreachable -> "Daemon_unreachable"
-        | Docker_client.Image_pull_failed -> "Image_pull_failed"
-        | Docker_client.Container_oom -> "Container_oom"
-        | Docker_client.Exec_timeout -> "Exec_timeout"
-        | Docker_client.Probe_format_drift -> "Probe_format_drift"
-        | Docker_client.Cleanup_failed -> "Cleanup_failed")
+        | Keeper_docker_client.Daemon_unreachable -> "Daemon_unreachable"
+        | Keeper_docker_client.Image_pull_failed -> "Image_pull_failed"
+        | Keeper_docker_client.Container_oom -> "Container_oom"
+        | Keeper_docker_client.Exec_timeout -> "Exec_timeout"
+        | Keeper_docker_client.Probe_format_drift -> "Probe_format_drift"
+        | Keeper_docker_client.Cleanup_failed -> "Cleanup_failed")
   in
   testable pp ( = )
 ;;
@@ -282,7 +282,7 @@ let test_parse_security_options_array () =
     security_options_result
     "array of strings, preserved order"
     (Ok [ "name=seccomp,profile=builtin"; "name=cgroupns" ])
-    (Docker_client_real.parse_security_options
+    (Keeper_docker_client_real.parse_security_options
        {|["name=seccomp,profile=builtin","name=cgroupns"]|})
 ;;
 
@@ -291,7 +291,7 @@ let test_parse_security_options_lowercases () =
     security_options_result
     "items lowercased"
     (Ok [ "name=apparmor" ])
-    (Docker_client_real.parse_security_options {|["name=AppArmor"]|})
+    (Keeper_docker_client_real.parse_security_options {|["name=AppArmor"]|})
 ;;
 
 let test_parse_security_options_null () =
@@ -299,7 +299,7 @@ let test_parse_security_options_null () =
     security_options_result
     "null → Ok []"
     (Ok [])
-    (Docker_client_real.parse_security_options "null")
+    (Keeper_docker_client_real.parse_security_options "null")
 ;;
 
 let test_parse_security_options_empty_array () =
@@ -307,7 +307,7 @@ let test_parse_security_options_empty_array () =
     security_options_result
     "[] → Ok []"
     (Ok [])
-    (Docker_client_real.parse_security_options "[]")
+    (Keeper_docker_client_real.parse_security_options "[]")
 ;;
 
 let test_parse_security_options_drops_non_strings () =
@@ -315,37 +315,37 @@ let test_parse_security_options_drops_non_strings () =
     security_options_result
     "non-string elements dropped"
     (Ok [ "name=seccomp" ])
-    (Docker_client_real.parse_security_options {|["name=seccomp", 1, true, null]|})
+    (Keeper_docker_client_real.parse_security_options {|["name=seccomp", 1, true, null]|})
 ;;
 
 let test_parse_security_options_bad_json () =
   check
     security_options_result
     "malformed JSON → Probe_format_drift (not silent Ok [])"
-    (Error Docker_client.Probe_format_drift)
-    (Docker_client_real.parse_security_options "not valid json {")
+    (Error Keeper_docker_client.Probe_format_drift)
+    (Keeper_docker_client_real.parse_security_options "not valid json {")
 ;;
 
 let test_parse_security_options_object () =
   check
     security_options_result
     "JSON object (not array/null) → Probe_format_drift"
-    (Error Docker_client.Probe_format_drift)
-    (Docker_client_real.parse_security_options {|{"x":1}|})
+    (Error Keeper_docker_client.Probe_format_drift)
+    (Keeper_docker_client_real.parse_security_options {|{"x":1}|})
 ;;
 
 (* The edge call: env may or may not have a docker daemon, so only
    the typed contract is asserted. *)
 let test_info_security_options_returns_typed () =
-  match Docker_client_real.info_security_options () with
+  match Keeper_docker_client_real.info_security_options () with
   | Ok _ -> () (* daemon present *)
-  | Error Docker_client.Daemon_unreachable -> () (* no daemon / CLI missing *)
-  | Error Docker_client.Probe_format_drift ->
+  | Error Keeper_docker_client.Daemon_unreachable -> () (* no daemon / CLI missing *)
+  | Error Keeper_docker_client.Probe_format_drift ->
     () (* daemon present but unexpected SecurityOptions payload *)
-  | Error Docker_client.Cleanup_failed
-  | Error Docker_client.Image_pull_failed
-  | Error Docker_client.Container_oom
-  | Error Docker_client.Exec_timeout ->
+  | Error Keeper_docker_client.Cleanup_failed
+  | Error Keeper_docker_client.Image_pull_failed
+  | Error Keeper_docker_client.Container_oom
+  | Error Keeper_docker_client.Exec_timeout ->
     fail
       "info_security_options should only surface Ok | Daemon_unreachable | \
        Probe_format_drift"
@@ -358,14 +358,14 @@ let test_info_security_options_returns_typed () =
    means [Ok] is unlikely on a clean host but not impossible, so it is
    accepted. The forbidden variants would indicate a mapping bug. *)
 let test_image_present_returns_typed () =
-  match Docker_client_real.image_present ~image:"definitely-not-a-real-image:0xnope" with
+  match Keeper_docker_client_real.image_present ~image:"definitely-not-a-real-image:0xnope" with
   | Ok () -> () (* extremely unlikely, but a real local image with this name is legal *)
-  | Error Docker_client.Image_pull_failed -> () (* not present locally / daemon down *)
-  | Error Docker_client.Daemon_unreachable -> () (* docker CLI missing *)
-  | Error Docker_client.Cleanup_failed
-  | Error Docker_client.Container_oom
-  | Error Docker_client.Exec_timeout
-  | Error Docker_client.Probe_format_drift ->
+  | Error Keeper_docker_client.Image_pull_failed -> () (* not present locally / daemon down *)
+  | Error Keeper_docker_client.Daemon_unreachable -> () (* docker CLI missing *)
+  | Error Keeper_docker_client.Cleanup_failed
+  | Error Keeper_docker_client.Container_oom
+  | Error Keeper_docker_client.Exec_timeout
+  | Error Keeper_docker_client.Probe_format_drift ->
     fail "image_present should only surface Ok | Image_pull_failed | Daemon_unreachable"
 ;;
 
@@ -387,7 +387,7 @@ let rec ends_with suffix lst =
 let test_run_detached_argv_shape () =
   let plan = sample_session_plan () in
   let argv =
-    Docker_client_real.run_detached_argv
+    Keeper_docker_client_real.run_detached_argv
       plan
       ~seccomp_args:[ "--security-opt"; "seccomp=/tmp/test-profile.json" ]
       ~owner_pid:424242
@@ -430,14 +430,14 @@ let test_run_detached_returns_typed () =
      exist or is not writable on a CI box → Daemon_unreachable. With a
      daemon + writable host_root the spawn could succeed → Ok name. Only
      the typed contract is asserted. *)
-  match Docker_client_real.run_detached (sample_session_plan ()) with
+  match Keeper_docker_client_real.run_detached (sample_session_plan ()) with
   | Ok _ -> () (* daemon present + identity files written + spawn ok *)
-  | Error Docker_client.Daemon_unreachable -> () (* identity-write failure / no daemon / spawn failure *)
-  | Error Docker_client.Image_pull_failed
-  | Error Docker_client.Container_oom
-  | Error Docker_client.Exec_timeout
-  | Error Docker_client.Probe_format_drift
-  | Error Docker_client.Cleanup_failed ->
+  | Error Keeper_docker_client.Daemon_unreachable -> () (* identity-write failure / no daemon / spawn failure *)
+  | Error Keeper_docker_client.Image_pull_failed
+  | Error Keeper_docker_client.Container_oom
+  | Error Keeper_docker_client.Exec_timeout
+  | Error Keeper_docker_client.Probe_format_drift
+  | Error Keeper_docker_client.Cleanup_failed ->
     fail "run_detached should only surface Ok <name> | Daemon_unreachable"
 ;;
 
@@ -448,12 +448,12 @@ let test_run_detached_returns_typed () =
 let test_executor_with_real_returns_typed_result () =
   match Real_executor.execute_plan (sample_plan ()) with
   | Ok _ -> ()
-  | Error Docker_client.Daemon_unreachable -> ()
-  | Error Docker_client.Cleanup_failed
-  | Error Docker_client.Image_pull_failed
-  | Error Docker_client.Container_oom
-  | Error Docker_client.Exec_timeout
-  | Error Docker_client.Probe_format_drift ->
+  | Error Keeper_docker_client.Daemon_unreachable -> ()
+  | Error Keeper_docker_client.Cleanup_failed
+  | Error Keeper_docker_client.Image_pull_failed
+  | Error Keeper_docker_client.Container_oom
+  | Error Keeper_docker_client.Exec_timeout
+  | Error Keeper_docker_client.Probe_format_drift ->
     fail "executor with Real should only surface Ok or Daemon_unreachable"
 ;;
 
@@ -466,14 +466,14 @@ let test_is_eintr_127_true_on_127_with_marker () =
     bool
     "WEXITED 127 + \"interrupted system call\" ⇒ retry"
     true
-    (Docker_client_real.is_eintr_127
+    (Keeper_docker_client_real.is_eintr_127
        (Unix.WEXITED 127)
        "docker: fork/exec /usr/bin/docker: interrupted system call");
   check
     bool
     "marker is case-insensitive"
     true
-    (Docker_client_real.is_eintr_127 (Unix.WEXITED 127) "Interrupted System Call")
+    (Keeper_docker_client_real.is_eintr_127 (Unix.WEXITED 127) "Interrupted System Call")
 ;;
 
 let test_is_eintr_127_false_on_127_without_marker () =
@@ -481,7 +481,7 @@ let test_is_eintr_127_false_on_127_without_marker () =
     bool
     "WEXITED 127 without the marker (genuine missing CLI) ⇒ no retry"
     false
-    (Docker_client_real.is_eintr_127
+    (Keeper_docker_client_real.is_eintr_127
        (Unix.WEXITED 127)
        "docker: command not found")
 ;;
@@ -493,12 +493,12 @@ let test_is_eintr_127_false_on_other_exit_codes () =
     bool
     "WEXITED 125 + marker ⇒ no retry (only 127 is the EINTR sentinel)"
     false
-    (Docker_client_real.is_eintr_127 (Unix.WEXITED 125) "interrupted system call");
+    (Keeper_docker_client_real.is_eintr_127 (Unix.WEXITED 125) "interrupted system call");
   check
     bool
     "WEXITED 0 ⇒ no retry"
     false
-    (Docker_client_real.is_eintr_127 (Unix.WEXITED 0) "interrupted system call")
+    (Keeper_docker_client_real.is_eintr_127 (Unix.WEXITED 0) "interrupted system call")
 ;;
 
 let test_is_eintr_127_false_on_signal () =
@@ -506,7 +506,7 @@ let test_is_eintr_127_false_on_signal () =
     bool
     "WSIGNALED ⇒ no retry"
     false
-    (Docker_client_real.is_eintr_127 (Unix.WSIGNALED 9) "interrupted system call")
+    (Keeper_docker_client_real.is_eintr_127 (Unix.WSIGNALED 9) "interrupted system call")
 ;;
 
 let test_exec_gate_blocked_detects_126_sentinel () =
@@ -514,7 +514,7 @@ let test_exec_gate_blocked_detects_126_sentinel () =
     bool
     "blocked"
     true
-    (Docker_client_real.is_exec_gate_blocked
+    (Keeper_docker_client_real.is_exec_gate_blocked
        (Unix.WEXITED 126)
        "exec_gate_blocked: policy denied")
 ;;
@@ -524,7 +524,7 @@ let test_exec_gate_blocked_rejects_plain_126 () =
     bool
     "plain 126"
     false
-    (Docker_client_real.is_exec_gate_blocked (Unix.WEXITED 126) "permission denied")
+    (Keeper_docker_client_real.is_exec_gate_blocked (Unix.WEXITED 126) "permission denied")
 ;;
 
 let test_docker_real_timeout_budgets_are_separated () =
@@ -552,27 +552,27 @@ let test_docker_real_timeout_budgets_are_separated () =
         (float 0.001)
         "exec keeps shell budget"
         60.0
-        (Docker_client_real.session_exec_timeout_sec ());
+        (Keeper_docker_client_real.session_exec_timeout_sec ());
       check
         (float 0.001)
         "probe keeps sandbox budget"
         10.0
-        (Docker_client_real.docker_probe_timeout_sec ());
+        (Keeper_docker_client_real.docker_probe_timeout_sec ());
       check
         (float 0.001)
         "start keeps turn-up budget"
         15.0
-        (Docker_client_real.session_start_timeout_sec ());
+        (Keeper_docker_client_real.session_start_timeout_sec ());
       check
         (float 0.001)
         "preflight keeps short turn-sandbox budget"
         2.0
-        (Docker_client_real.session_preflight_timeout_sec ()))
+        (Keeper_docker_client_real.session_preflight_timeout_sec ()))
 ;;
 
 let () =
   run
-    "Docker_client_real (Phase 3b-iv.2.3)"
+    "Keeper_docker_client_real (Phase 3b-iv.2.3)"
     [ ( "S placeholder"
       , [ test_case
             "run → Ok exec_result | Error Daemon_unreachable"
@@ -646,7 +646,7 @@ let () =
         ] )
     ; ( "Functor composition"
       , [ test_case
-            "Sandbox_executor.Make (Real) instantiates + forwards placeholder"
+            "Keeper_sandbox_executor.Make (Real) instantiates + forwards placeholder"
             `Quick
             test_executor_with_real_returns_typed_result
         ] )

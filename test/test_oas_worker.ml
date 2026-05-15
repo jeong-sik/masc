@@ -1934,6 +1934,7 @@ let make_worker_meta ?(effective_model = "local-qwen") ()
   ; checkpoint_path = "/tmp/checkpoint.json"
   ; turn_log_path = "/tmp/turns.jsonl"
   ; last_run_at = None
+  ; disclosure_strategy = None
   }
 ;;
 

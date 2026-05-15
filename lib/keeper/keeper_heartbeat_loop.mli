@@ -128,13 +128,13 @@ val dispatch_recurring_keepalive :
   now_ts:float ->
   int
 
-(** Pure: whether a [Heartbeat_smart] decision should allow the keepalive
+(** Pure: whether a [Keeper_heartbeat_smart] decision should allow the keepalive
     cycle (presence/snapshot/board/turn/recurring) to run.
 
     Contract: [Skip_busy] -> [true] (cycle continues).
     [Skip_idle] -> [false] (keeper idle, back off).
     [Emit] -> [true]. *)
-val smart_heartbeat_cycle_continues : Heartbeat_smart.decision -> bool
+val smart_heartbeat_cycle_continues : Keeper_heartbeat_smart.decision -> bool
 
 (** Pure: post-sleep refinement of [smart_heartbeat_cycle_continues] that
     closes the [MissedWakeup] gap in [KeeperHeartbeat.tla].
@@ -153,7 +153,7 @@ val smart_heartbeat_cycle_continues : Heartbeat_smart.decision -> bool
     [Emit]; for [Skip_idle], promotes to [true] iff the sleep ended
     with [Woken] (not [Timeout] / [Stopped]). *)
 val cycle_continues_after_wake :
-  Heartbeat_smart.decision -> Keeper_keepalive_signal.sleep_outcome -> bool
+  Keeper_heartbeat_smart.decision -> Keeper_keepalive_signal.sleep_outcome -> bool
 
 val visible_consumer_count : unit -> int
 
@@ -162,8 +162,8 @@ val visibility_gate_decision :
   has_pending_signal:bool ->
   now:float ->
   last_heartbeat_cycle_ts:float ->
-  Heartbeat_smart.decision ->
-  Heartbeat_smart.decision
+  Keeper_heartbeat_smart.decision ->
+  Keeper_heartbeat_smart.decision
 
 val run_smart_heartbeat_gate :
   config:Coord.config ->
@@ -172,7 +172,7 @@ val run_smart_heartbeat_gate :
   wakeup:bool Atomic.t ->
   meta_current:keeper_meta ->
   smart_hb_enabled:(unit -> bool) ->
-  smart_hb_config:Heartbeat_smart.config ->
+  smart_hb_config:Keeper_heartbeat_smart.config ->
   last_successful_heartbeat_ts:float ref ->
   last_heartbeat_cycle_ts:float ref ->
   bool

@@ -431,7 +431,7 @@ let runtime_resolution_json (config : Coord.config) =
   let workspace_commit = git_rev_parse_short config.workspace_path in
   let resolved_base_commit = git_rev_parse_short config.base_path in
   let base_path_input =
-    Env_config_core.base_path_raw_opt () |> Option.value ~default:config.workspace_path
+    (Host_config.from_env ()).base_path_raw |> Option.value ~default:config.workspace_path
   in
   let prompt_markdown_dir =
     Prompt_registry.get_markdown_dir () |> Option.value ~default:""

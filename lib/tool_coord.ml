@@ -803,12 +803,12 @@ let schemas = Tool_schemas_coord.schemas
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let _tool_spec_read_only =
+let tool_spec_read_only =
   [ "masc_status"; "masc_goal_list"; "masc_coordination_fsm_snapshot" ]
 ;;
 
-let _tool_spec_system_internal = [ "masc_reset" ]
-let _tool_spec_requires_join = [ "masc_heartbeat" ]
+let tool_spec_system_internal = [ "masc_reset" ]
+let tool_spec_requires_join = [ "masc_heartbeat" ]
 
 let tool_required_permission = function
   | "masc_status"
@@ -826,7 +826,7 @@ let tool_required_permission = function
 let () =
   List.iter
     (fun (s : Masc_domain.tool_schema) ->
-       let is_system = List.mem s.name _tool_spec_system_internal in
+       let is_system = List.mem s.name tool_spec_system_internal in
        Tool_spec.register
          (Tool_spec.create
             ~name:s.name
@@ -834,9 +834,9 @@ let () =
             ~module_tag:Tool_dispatch.Mod_room
             ~input_schema:s.input_schema
             ~handler_binding:Tag_dispatch
-            ~requires_join:(List.mem s.name _tool_spec_requires_join)
-            ~is_read_only:(List.mem s.name _tool_spec_read_only)
-            ~is_idempotent:(List.mem s.name _tool_spec_read_only)
+            ~requires_join:(List.mem s.name tool_spec_requires_join)
+            ~is_read_only:(List.mem s.name tool_spec_read_only)
+            ~is_idempotent:(List.mem s.name tool_spec_read_only)
             ~visibility:(if is_system then Tool_catalog.Hidden else Tool_catalog.Default)
             ~allow_direct_call_when_hidden:is_system
             ?required_permission:(tool_required_permission s.name)

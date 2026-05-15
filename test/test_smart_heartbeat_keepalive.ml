@@ -2,7 +2,7 @@ module Types = Masc_domain
 
 (** Tests for smart heartbeat integration in keeper_keepalive.
 
-    Verifies that the Heartbeat_smart module decisions correctly map
+    Verifies that the Keeper_heartbeat_smart module decisions correctly map
     to Masc_domain.agent_status based on keeper_meta fields (current_task_id,
     paused), and that the env-config feature flag controls activation.
 
@@ -10,7 +10,7 @@ module Types = Masc_domain
     loop integration tests (which require Eio fibers + Coord I/O). *)
 
 open Alcotest
-module HS = Masc_mcp.Heartbeat_smart
+module HS = Masc_mcp.Keeper_heartbeat_smart
 
 (* ── agent_status derivation from keeper_meta fields ─── *)
 
@@ -42,7 +42,7 @@ let test_status_inactive_when_paused_no_task () =
   check string "inactive when paused, no task" (Masc_domain.show_agent_status Masc_domain.Inactive)
     (Masc_domain.show_agent_status status)
 
-(* ── Heartbeat_smart decision tests with keeper-derived statuses ─── *)
+(* ── Keeper_heartbeat_smart decision tests with keeper-derived statuses ─── *)
 
 let test_skip_busy_with_task () =
   let config = HS.default_config in

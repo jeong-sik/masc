@@ -13,11 +13,11 @@ last_verified: 2026-04-23
 >
 > 이 문서는 purge 기간 동안 historical reference로만 남겨집니다.
 
-`masc-mcp`의 usage SSOT.
+Historical Command Plane usage note.
 
 이 문서는 `어떤 MCP tool을 어떤 순서로 써야 하는가`를 정리한다. 기본 delivery 경로는 namespace/task hygiene와 supervisor-driven supervised execution이고, managed operation은 benchmark/compatibility용 보조 경로다.
 
-merged 기준 전체 구조 요약은 [MERGED-ARCHITECTURE-SSOT.md](./MERGED-ARCHITECTURE-SSOT.md)를 본다.
+merged 기준 전체 구조 요약은 [spec/SPEC-INDEX.md](./spec/SPEC-INDEX.md)와 [spec/01-system-overview.md](./spec/01-system-overview.md)를 본다.
 
 ## 개념 맵
 
@@ -28,7 +28,7 @@ merged 기준 전체 구조 요약은 [MERGED-ARCHITECTURE-SSOT.md](./MERGED-ARC
 - `operation`
   - managed-operation compatibility lane의 관리 단위. default delivery path는 아니다.
 - `session`
-  - historical supervised implementation execution unit. current codebase treats this as removed and uses command-plane operations/detachments instead.
+  - historical supervised implementation execution unit. current coordination truth is board posts + keeper FSM, not CP session/detachment state.
 - `detachment`
   - scheduler가 materialize한 실행 단위. liveness, runtime binding, heartbeat를 여기서 본다.
 - `policy decision`
@@ -113,7 +113,7 @@ transport truth를 빠르게 분리하고 싶으면 먼저 `./benchmarks/quick-b
 
 - `masc_operation_start` 기본 workload는 `coding_task`다.
 - `generic`은 deprecated alias로 받아들이되 내부에서는 `coding_task`로 정규화한다.
-- search strategy 기본값은 `best_first_v1`이고, `legacy`는 explicit opt-out이다.
+- Command Plane search strategy and `best_first_v1` benchmark harnesses are removed.
 - `coding_task` stage는 `decompose -> inspect -> implement -> verify -> review`를 canonical graph로 본다.
 
 1. `masc_unit_define`
@@ -251,7 +251,7 @@ Content-Type: application/json
 1. `masc_operator_snapshot`
 2. `masc_operator_digest`
    - namespace/session 상태를 operator-friendly하게 요약한다.
-   - command-plane search/microarch signal은 여기서 먼저 읽고, 더 자세한 정보가 필요할 때만 full command-plane surface로 내려간다.
+   - current operator context는 board posts, keeper FSM, and dashboard read models에서 읽는다.
 3. `masc_operator_action`
 4. `masc_operator_confirm`
 5. ~`masc_team_session_events` (removed)~

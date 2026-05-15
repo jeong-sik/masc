@@ -1,0 +1,87 @@
+(** RFC-0070 Phase 3b-iv.1b — Mock {!Keeper_docker_client.S}.
+
+    Test-fixture implementation: pre-registered FIFO queues of expected
+    [(input, response)] pairs. Calls without a matching injection
+    return [Error Daemon_unreachable] (typed, never a silent
+    exception). Resetting the queues between tests is the caller's
+    responsibility via {!reset}.
+
+    Reference: docs/rfc/RFC-0070-keeper-sandbox-pure-edge-separation.md §3.2
+
+    Determinism contract: same injection sequence + same call sequence
+    ⇒ identical [response] sequence. No clock, no Random, no I/O. The
+    only mutable state is the per-method injection queue, which is
+    explicitly reset by tests. *)
+
+(** {1 The Mock client} *)
+
+include Keeper_docker_client.S
+
+(** {1 Injection API} *)
+
+(** [inject_run plan response] enqueues [response] to be returned when
+    {!run} is called with a plan that equals [plan] (via
+    [Keeper_sandbox_oneshot_plan.equal]).
+
+    Strict FIFO: only the *front* of the queue is consulted. If the
+    incoming plan does not equal the front, the queue is NOT scanned
+    further — the call returns [Error Daemon_unreachable] and the
+    queue is left intact. This guarantees test-failure on
+    out-of-order or unexpected calls instead of papering them over. *)
+val inject_run
+  :  Keeper_sandbox_oneshot_plan.t
+  -> (Keeper_docker_response.exec_result, Keeper_docker_client.sandbox_error) result
+  -> unit
+
+val inject_exec
+  :  container:Keeper_container_name.t
+  -> cmd:string
+  -> (Keeper_docker_response.exec_result, Keeper_docker_client.sandbox_error) result
+  -> unit
+
+val inject_ps_query
+  :  labels:(string * string) list
+  -> (Keeper_docker_response.ps_record list, Keeper_docker_client.sandbox_error) result
+  -> unit
+
+val inject_rm
+  :  Keeper_container_name.t
+  -> (unit, Keeper_docker_client.sandbox_error) result
+  -> unit
+
+(** [inject_info_security_options response] enqueues [response] to be
+    returned by the next {!info_security_options} call (no input key —
+    it takes [unit]). Strict FIFO, fail-closed: an empty queue returns
+    [Error Daemon_unreachable]. *)
+val inject_info_security_options
+  :  (string list, Keeper_docker_client.sandbox_error) result
+  -> unit
+
+(** [inject_image_present ~image response] enqueues [response] to be
+    returned when {!image_present} is called with that [image] string
+    (exact match). Strict FIFO, fail-closed on mismatch. *)
+val inject_image_present
+  :  image:string
+  -> (unit, Keeper_docker_client.sandbox_error) result
+  -> unit
+
+(** [inject_run_detached response] enqueues [response] to override the
+    next {!run_detached} call. Unlike the other queues, an *empty*
+    [run_detached] queue is not a fail-closed error — it yields the
+    deterministic [Ok plan.container_name]. Use this only to inject an
+    [Error] (or a non-default [Ok]) for a failure / variation test. *)
+val inject_run_detached
+  :  (Keeper_container_name.t, Keeper_docker_client.sandbox_error) result
+  -> unit
+
+(** {1 Fixture lifecycle} *)
+
+(** [reset ()] empties every injection queue. Call between tests so
+    leftover injections from one test do not influence another. *)
+val reset : unit -> unit
+
+(** [pending_calls ()] returns the total number of *unconsumed*
+    injections across all queues. Tests should assert this equals
+    [0] at the end to verify they did not register more expectations
+    than they exercised. *)
+val pending_calls : unit -> int

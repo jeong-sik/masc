@@ -264,7 +264,7 @@ let test_missing_base_path_without_config_fails_closed () =
       (option string)
       "blank override trims to None"
       None
-      (Env_config.config_dir_opt ());
+      ((Host_config.from_env ()).config_dir);
     match Tool_code_write.validate_clone_url ~base_path:"/nonexistent"
       "https://github.com/evil-corp/repo.git" with
   | Error _ -> ()
@@ -311,7 +311,7 @@ let test_explicit_config_dir_override_still_validates () =
       (option string)
       "explicit override survives trimming"
       (Some config_dir)
-      (Env_config.config_dir_opt ());
+      ((Host_config.from_env ()).config_dir);
     match Tool_code_write.validate_clone_url ~base_path:"/nonexistent"
       "https://github.com/evil-corp/repo.git" with
     | Error _ -> ()

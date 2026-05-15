@@ -605,7 +605,7 @@ let dispatch (ctx : context) ~name ~args : Tool_result.t option =
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let _tool_spec_system_internal =
+let tool_spec_system_internal =
   [ "masc_autoresearch_search_findings"; "masc_autoresearch_status" ]
 
 let tool_required_permission = function
@@ -622,7 +622,7 @@ let tool_required_permission = function
 let () =
   List.iter
     (fun (s : Masc_domain.tool_schema) ->
-      let is_system = List.mem s.name _tool_spec_system_internal in
+      let is_system = List.mem s.name tool_spec_system_internal in
       Tool_spec.register
         (Tool_spec.create
            ~name:s.name

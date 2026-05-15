@@ -220,13 +220,13 @@ let parse_git_clone (doc : Keeper_toml_loader.toml_doc) : git_clone_config =
     clone_timeout_sec; push_timeout_sec; pr_create_timeout_sec }
 
 let unresolved_tool_message ~label ~name =
-  match Tool_resolution.resolve name with
-  | Tool_resolution.Resolved _ | Tool_resolution.Alias_to _ -> None
-  | Tool_resolution.Unknown { tried; _ } ->
+  match Keeper_tool_resolution.resolve name with
+  | Keeper_tool_resolution.Resolved _ | Keeper_tool_resolution.Alias_to _ -> None
+  | Keeper_tool_resolution.Unknown { tried; _ } ->
       Some (Printf.sprintf "%s: tool '%s' unresolved: tried [%s]"
-              label name (Tool_resolution.string_of_tried tried))
+              label name (Keeper_tool_resolution.string_of_tried tried))
 
-let is_known_policy_tool_name = Tool_resolution.is_known_policy_tool_name
+let is_known_policy_tool_name = Keeper_tool_resolution.is_known_policy_tool_name
 
 (* Shortcut: if the caller's [base_path] already points at a project root
    that has [base_path/config/tool_policy.toml], prefer that directly.

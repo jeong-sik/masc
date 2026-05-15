@@ -80,7 +80,7 @@ let test_no_tmp_agent_literals_in_consumers () =
 let test_agent_runtime_root_binding_count () =
   let occurrences =
     count_across_files ~files:consumer_files
-      ~needle:"Host_config.host"
+      ~needle:"Host_config.host ()"
   in
   (check int)
     "Host_config.host invoked exactly once per \
@@ -89,10 +89,11 @@ let test_agent_runtime_root_binding_count () =
 ;;
 
 let test_agent_runtime_root_field_value () =
-  let d = Masc_mcp.Host_config.host () in
+  let d = Host_config.host () in
   (check string)
-    "Host_config.host ().agent_runtime_root = /tmp today"
-    "/tmp" d.agent_runtime_root
+    "Host_config.host ().agent_runtime_root follows host temp dir"
+    (Filename.get_temp_dir_name ())
+    d.agent_runtime_root
 ;;
 
 let () =

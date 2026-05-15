@@ -22,7 +22,7 @@ let test_default_retries_daemon_unreachable () =
     true
     (Keeper_backoff_policy.should_retry
        Keeper_backoff_policy.default_for_sandbox
-       Docker_client.Daemon_unreachable)
+       Keeper_docker_client.Daemon_unreachable)
 ;;
 
 let test_default_retries_image_pull_failed () =
@@ -32,7 +32,7 @@ let test_default_retries_image_pull_failed () =
     true
     (Keeper_backoff_policy.should_retry
        Keeper_backoff_policy.default_for_sandbox
-       Docker_client.Image_pull_failed)
+       Keeper_docker_client.Image_pull_failed)
 ;;
 
 let test_default_does_not_retry_oom () =
@@ -42,7 +42,7 @@ let test_default_does_not_retry_oom () =
     false
     (Keeper_backoff_policy.should_retry
        Keeper_backoff_policy.default_for_sandbox
-       Docker_client.Container_oom)
+       Keeper_docker_client.Container_oom)
 ;;
 
 let test_default_does_not_retry_exec_timeout () =
@@ -52,7 +52,7 @@ let test_default_does_not_retry_exec_timeout () =
     false
     (Keeper_backoff_policy.should_retry
        Keeper_backoff_policy.default_for_sandbox
-       Docker_client.Exec_timeout)
+       Keeper_docker_client.Exec_timeout)
 ;;
 
 let test_default_does_not_retry_format_drift () =
@@ -62,7 +62,7 @@ let test_default_does_not_retry_format_drift () =
     false
     (Keeper_backoff_policy.should_retry
        Keeper_backoff_policy.default_for_sandbox
-       Docker_client.Probe_format_drift)
+       Keeper_docker_client.Probe_format_drift)
 ;;
 
 let test_default_does_not_retry_cleanup_failed () =
@@ -72,26 +72,26 @@ let test_default_does_not_retry_cleanup_failed () =
     false
     (Keeper_backoff_policy.should_retry
        Keeper_backoff_policy.default_for_sandbox
-       Docker_client.Cleanup_failed)
+       Keeper_docker_client.Cleanup_failed)
 ;;
 
 let test_custom_policy () =
   let p =
     Keeper_backoff_policy.make
       ~max_attempts:5
-      ~retryable_errors:[ Docker_client.Container_oom ]
+      ~retryable_errors:[ Keeper_docker_client.Container_oom ]
   in
   check int "custom max_attempts" 5 (Keeper_backoff_policy.max_attempts p);
   check
     bool
     "custom retryable: oom"
     true
-    (Keeper_backoff_policy.should_retry p Docker_client.Container_oom);
+    (Keeper_backoff_policy.should_retry p Keeper_docker_client.Container_oom);
   check
     bool
     "non-listed: daemon_unreachable"
     false
-    (Keeper_backoff_policy.should_retry p Docker_client.Daemon_unreachable)
+    (Keeper_backoff_policy.should_retry p Keeper_docker_client.Daemon_unreachable)
 ;;
 
 let test_disable_retry () =
@@ -101,7 +101,7 @@ let test_disable_retry () =
     bool
     "empty retryable list rejects every variant"
     false
-    (Keeper_backoff_policy.should_retry p Docker_client.Daemon_unreachable)
+    (Keeper_backoff_policy.should_retry p Keeper_docker_client.Daemon_unreachable)
 ;;
 
 (* ── Precondition enforcement (Copilot review T20/T21) ──────── *)

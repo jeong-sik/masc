@@ -7,7 +7,7 @@
      EmitMatchesEvidence        -> test_dequeue_only_consumes_enqueued
 
    Wire-up tests (heartbeat loop integration) live in a follow-up
-   patch alongside [Heartbeat_smart] / [Keeper_keepalive] changes. *)
+   patch alongside [Keeper_heartbeat_smart] / [Keeper_keepalive] changes. *)
 
 open Keeper_event_queue
 

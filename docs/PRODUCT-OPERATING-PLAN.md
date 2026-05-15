@@ -12,7 +12,7 @@ code_refs:
 > Current package version: v0.19.17
 > Latest changelog entry: v0.19.17 (2026-05-11)
 > Latest published GitHub release: v0.19.3 (2026-05-02)
-> Updated: 2026-05-12
+> Updated: 2026-05-15
 > Release line: pre-1.0 (`0.y.z`); legacy `v2.*` tags are frozen history
 
 Execution companion for capsule-only coordination hardening:
@@ -32,7 +32,7 @@ Promise stack:
 2. Keeper runtime and supervised delivery
 3. Dashboard and operator visibility
 
-The front-door promise is level 1. Levels 2-3 are supported surfaces. Retired compatibility lanes and research material remain in-tree for history, not as product promise.
+The front-door promise is level 1. Levels 2-3 are supported surfaces. Retired compatibility lanes and proposal-only research material are deletion targets, not product promises.
 
 ## Capability Posture
 
@@ -49,7 +49,7 @@ The front-door promise is level 1. Levels 2-3 are supported surfaces. Retired co
 | Config introspection | Working but split | Supporting | `masc_config`, `/api/v1/dashboard/config`, open issues `#3364`, `#3365`, `#3363` | read contract is duplicated and not yet centralized enough to promise as SSOT | centralize config and expose one canonical read-only snapshot |
 | Release evidence and local proof | Working | Front door | `docs/RELEASE-EVIDENCE.md`, `scripts/release-evidence.sh`, release workflow artifact | deployment-specific proof is still env-gated | keep release/main evidence bundle attached to artifacts |
 | Release and doc truth | Working | Front door | doc truth lane + version truth + OAS pin doc sync | release/doc changes previously bypassed runtime gates | keep build/lint/health tied to release/doc/version changes |
-| Research and legacy surfaces | Historical only | Not part of product promise | archived docs, implementation appendix | merged surface area is wider than product promise | keep out of front-door docs and remove unused residue when references disappear |
+| Research and legacy residue | Cleanup target | Not part of product promise | implementation appendix, deletion ledger | merged surface area is wider than product promise | remove unused residue and keep remaining history explicitly marked |
 
 Status legend:
 
@@ -76,7 +76,7 @@ Canonical label set:
 | Group | Labels |
 |------|--------|
 | Type | `type:bug`, `type:friction`, `type:feature`, `type:architecture`, `type:docs` |
-| Area | `area:coordination`, `area:swarm-execution`, `area:dashboard`, `area:operator`, `area:transport`, `area:config`, `area:ci`, `area:docs`, `area:experimental` |
+| Area | `area:coordination`, `area:supervised-execution`, `area:dashboard`, `area:operator`, `area:transport`, `area:config`, `area:ci`, `area:docs`, `area:experimental` |
 | Target | `target:now`, `target:next`, `target:later` |
 | Gates | `release-blocker`, `product-gap` |
 | Root cause | `root-cause:SSOT`, `root-cause:TEL`, `root-cause:BND`, `root-cause:SIL`, `root-cause:VAR`, `root-cause:STR`, `root-cause:DET` |
@@ -118,7 +118,7 @@ Every PR should include:
 Each PR should link at least one issue and state which promise it affects:
 
 - `repo coordination`
-- `delivery swarm`
+- `supervised delivery`
 - `ops visibility`
 - `none/internal`
 
@@ -166,7 +166,7 @@ Implement now:
 Research next:
 
 - non-local auth defaults and REST contract versioning
-- delivery-swarm readiness and verifier budget reliability
+- supervised-delivery readiness and verifier budget reliability
 - bounded keeper continuity contract beyond same-trace proof
 - read-only diagnosis bundles for operator workflows
 

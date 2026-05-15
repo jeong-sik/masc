@@ -957,6 +957,6 @@ dir-local 실행에서 shared keeper 상태가 보이지 않는 것은 정상이
 | [GLOSSARY.md](./GLOSSARY.md) | 용어 정의 |
 | [QUICK-START.md](./QUICK-START.md) | repo coordination 시작 경로 |
 | [COMMAND-PLANE-RUNBOOK.md](./COMMAND-PLANE-RUNBOOK.md) | historical compatibility lane |
-| [MERGED-ARCHITECTURE-SSOT.md](./MERGED-ARCHITECTURE-SSOT.md) | 아키텍처 SSOT |
+| [SPEC-INDEX.md](./spec/SPEC-INDEX.md) + [01-system-overview.md](./spec/01-system-overview.md) | 아키텍처 SSOT |
 | [LEGENDARY-BASH-RUNBOOK.md](./LEGENDARY-BASH-RUNBOOK.md) | `keeper_bash` flag matrix + dark-launch observer 절차 |
 | [ENV-CONTRACT.md](./ENV-CONTRACT.md) | 환경변수 reload class + Legendary Bash §4 |

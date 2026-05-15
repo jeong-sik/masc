@@ -1444,7 +1444,7 @@ let handle_keeper_compact ctx args : tool_result =
     match Keeper_registry.get ~base_path:ctx.config.base_path name with
     | None ->
       Prometheus.inc_counter Keeper_metrics.metric_keeper_operator_compact
-        ~labels:[("keeper", name); ("result", Operator_compact_result.(to_label Not_found))] ();
+        ~labels:[("keeper", name); ("result", Keeper_operator_compact_result.(to_label Not_found))] ();
       (false, error_response_typed ~code:Validation_error
         (Printf.sprintf "keeper %s is not in the registry" name))
     | Some entry ->
@@ -1460,7 +1460,7 @@ let handle_keeper_compact ctx args : tool_result =
     in
     if not allowed then begin
       Prometheus.inc_counter Keeper_metrics.metric_keeper_operator_compact
-        ~labels:[("keeper", name); ("result", Operator_compact_result.(to_label Precondition))] ();
+        ~labels:[("keeper", name); ("result", Keeper_operator_compact_result.(to_label Precondition))] ();
       (false, error_response_typed ~code:Validation_error
         (Printf.sprintf
            "keeper %s is in phase %s; compaction requires Overflowed, Paused, or force=true"
@@ -1495,7 +1495,7 @@ let handle_keeper_compact ctx args : tool_result =
             ~after_tokens:recovery.compaction.after_tokens;
           invalidate_status_cache name;
           Prometheus.inc_counter Keeper_metrics.metric_keeper_operator_compact
-            ~labels:[("keeper", name); ("result", Operator_compact_result.(to_label Ok))] ();
+            ~labels:[("keeper", name); ("result", Keeper_operator_compact_result.(to_label Ok))] ();
           (true,
            Yojson.Safe.to_string
              (`Assoc [
@@ -1522,7 +1522,7 @@ let handle_keeper_compact ctx args : tool_result =
                reason = "no_valid_checkpoint";
             });
           Prometheus.inc_counter Keeper_metrics.metric_keeper_operator_compact
-            ~labels:[("keeper", name); ("result", Operator_compact_result.(to_label No_checkpoint))] ();
+            ~labels:[("keeper", name); ("result", Keeper_operator_compact_result.(to_label No_checkpoint))] ();
           (false,
            Printf.sprintf
              "keeper %s: checkpoint compaction unavailable (no valid checkpoint found)"
@@ -1756,7 +1756,7 @@ let dispatch_stream ~on_text_delta ctx ~name ~args : tool_result option =
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let _tool_spec_read_only =
+let tool_spec_read_only =
   [ "masc_persona_list"; "masc_persona_schema"; "masc_keeper_list";
     "masc_keeper_status"; "masc_keeper_persona_audit";
     "masc_keeper_sandbox_status" ]
@@ -1786,8 +1786,8 @@ let () =
            ~module_tag:Tool_dispatch.Mod_keeper
            ~input_schema:s.input_schema
            ~handler_binding:Tag_dispatch
-           ~is_read_only:(List.mem s.name _tool_spec_read_only)
-           ~is_idempotent:(List.mem s.name _tool_spec_read_only)
+           ~is_read_only:(List.mem s.name tool_spec_read_only)
+           ~is_idempotent:(List.mem s.name tool_spec_read_only)
            ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

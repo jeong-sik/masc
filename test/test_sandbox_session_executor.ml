@@ -1,6 +1,6 @@
-(** RFC-0070 Phase 3e (f) — tests for [Sandbox_session_executor.Make].
+(** RFC-0070 Phase 3e (f) — tests for [Keeper_sandbox_session_executor.Make].
 
-    Drives [Sandbox_session_executor.Make(Docker_client_mock)] through
+    Drives [Keeper_sandbox_session_executor.Make(Keeper_docker_client_mock)] through
     the start → exec → cleanup lifecycle:
     - [start] returns a handle whose [container_name] is the plan's;
       a [run_detached] error injection surfaces typed from [start];
@@ -14,9 +14,9 @@
 open Alcotest
 open Masc_mcp
 
-module Session = Sandbox_session_executor.Make (Docker_client_mock)
+module Session = Keeper_sandbox_session_executor.Make (Keeper_docker_client_mock)
 
-let setup () = Docker_client_mock.reset ()
+let setup () = Keeper_docker_client_mock.reset ()
 
 let sample_plan ?(turn_id = 7) ?(meta_name = "alice") () =
   match
@@ -38,7 +38,7 @@ let sample_plan ?(turn_id = 7) ?(meta_name = "alice") () =
   | Error _ -> failwith "test fixture: of_request unexpectedly failed"
 ;;
 
-let exec_ok = Docker_response.{ exit_code = 0; stdout = "out"; stderr = "" }
+let exec_ok = Keeper_docker_response.{ exit_code = 0; stdout = "out"; stderr = "" }
 
 let start_or_fail plan =
   match Session.start plan with Ok h -> h | Error _ -> failwith "test: start failed"
@@ -58,16 +58,16 @@ let test_start_default_wraps_plan_name () =
       (Keeper_container_name.equal
          (Session.container_name handle)
          (Keeper_sandbox_session_plan.container_name plan));
-    check int "no Mock queue touched" 0 (Docker_client_mock.pending_calls ())
+    check int "no Mock queue touched" 0 (Keeper_docker_client_mock.pending_calls ())
   | Error _ -> fail "expected Ok from Mock's default run_detached"
 ;;
 
 let test_start_error_injection_surfaces_typed () =
   setup ();
   let plan = sample_plan () in
-  Docker_client_mock.inject_run_detached (Error Docker_client.Daemon_unreachable);
+  Keeper_docker_client_mock.inject_run_detached (Error Keeper_docker_client.Daemon_unreachable);
   match Session.start plan with
-  | Error Docker_client.Daemon_unreachable -> ()
+  | Error Keeper_docker_client.Daemon_unreachable -> ()
   | Ok _ -> fail "injected Error should surface from start"
   | Error _ -> fail "wrong error variant"
 ;;
@@ -75,9 +75,9 @@ let test_start_error_injection_surfaces_typed () =
 let test_start_image_pull_failed_surfaces () =
   setup ();
   let plan = sample_plan () in
-  Docker_client_mock.inject_run_detached (Error Docker_client.Image_pull_failed);
+  Keeper_docker_client_mock.inject_run_detached (Error Keeper_docker_client.Image_pull_failed);
   match Session.start plan with
-  | Error Docker_client.Image_pull_failed -> ()
+  | Error Keeper_docker_client.Image_pull_failed -> ()
   | _ -> fail "expected Image_pull_failed from start"
 ;;
 
@@ -86,23 +86,23 @@ let test_start_image_pull_failed_surfaces () =
 let test_exec_forwards_to_docker_exec () =
   setup ();
   let handle = start_or_fail (sample_plan ()) in
-  Docker_client_mock.inject_exec
+  Keeper_docker_client_mock.inject_exec
     ~container:(Session.container_name handle)
     ~cmd:"echo hi"
     (Ok exec_ok);
   (match Session.exec handle ~cmd:"echo hi" with
    | Ok er -> check string "stdout threaded through" "out" er.stdout
    | Error _ -> fail "expected Ok exec_result");
-  check int "exec injection consumed" 0 (Docker_client_mock.pending_calls ())
+  check int "exec injection consumed" 0 (Keeper_docker_client_mock.pending_calls ())
 ;;
 
 let test_exec_nonzero_exit_is_ok_result () =
   setup ();
   let handle = start_or_fail (sample_plan ()) in
-  Docker_client_mock.inject_exec
+  Keeper_docker_client_mock.inject_exec
     ~container:(Session.container_name handle)
     ~cmd:"false"
-    (Ok Docker_response.{ exit_code = 1; stdout = ""; stderr = "boom" });
+    (Ok Keeper_docker_response.{ exit_code = 1; stdout = ""; stderr = "boom" });
   match Session.exec handle ~cmd:"false" with
   | Ok er ->
     check int "container-command exit code is the result, not an error" 1 er.exit_code
@@ -112,12 +112,12 @@ let test_exec_nonzero_exit_is_ok_result () =
 let test_exec_daemon_error_surfaces () =
   setup ();
   let handle = start_or_fail (sample_plan ()) in
-  Docker_client_mock.inject_exec
+  Keeper_docker_client_mock.inject_exec
     ~container:(Session.container_name handle)
     ~cmd:"echo hi"
-    (Error Docker_client.Daemon_unreachable);
+    (Error Keeper_docker_client.Daemon_unreachable);
   match Session.exec handle ~cmd:"echo hi" with
-  | Error Docker_client.Daemon_unreachable -> ()
+  | Error Keeper_docker_client.Daemon_unreachable -> ()
   | _ -> fail "daemon-level error must surface typed"
 ;;
 
@@ -125,7 +125,7 @@ let test_exec_no_injection_misses () =
   setup ();
   let handle = start_or_fail (sample_plan ()) in
   match Session.exec handle ~cmd:"echo hi" with
-  | Error Docker_client.Daemon_unreachable -> ()
+  | Error Keeper_docker_client.Daemon_unreachable -> ()
   | _ -> fail "no exec injection ⇒ Mock's default miss"
 ;;
 
@@ -134,21 +134,21 @@ let test_exec_no_injection_misses () =
 let test_cleanup_forwards_to_rm () =
   setup ();
   let handle = start_or_fail (sample_plan ()) in
-  Docker_client_mock.inject_rm (Session.container_name handle) (Ok ());
+  Keeper_docker_client_mock.inject_rm (Session.container_name handle) (Ok ());
   (match Session.cleanup handle with
    | Ok () -> ()
    | Error _ -> fail "expected Ok ()");
-  check int "rm injection consumed" 0 (Docker_client_mock.pending_calls ())
+  check int "rm injection consumed" 0 (Keeper_docker_client_mock.pending_calls ())
 ;;
 
 let test_cleanup_error_surfaces () =
   setup ();
   let handle = start_or_fail (sample_plan ()) in
-  Docker_client_mock.inject_rm
+  Keeper_docker_client_mock.inject_rm
     (Session.container_name handle)
-    (Error Docker_client.Cleanup_failed);
+    (Error Keeper_docker_client.Cleanup_failed);
   match Session.cleanup handle with
-  | Error Docker_client.Cleanup_failed -> ()
+  | Error Keeper_docker_client.Cleanup_failed -> ()
   | _ -> fail "rm error must surface typed"
 ;;
 
@@ -158,13 +158,13 @@ let test_lifecycle_start_exec_cleanup () =
   setup ();
   let handle = start_or_fail (sample_plan ()) in
   let c = Session.container_name handle in
-  Docker_client_mock.inject_exec ~container:c ~cmd:"step 1" (Ok exec_ok);
-  Docker_client_mock.inject_exec ~container:c ~cmd:"step 2" (Ok exec_ok);
-  Docker_client_mock.inject_rm c (Ok ());
+  Keeper_docker_client_mock.inject_exec ~container:c ~cmd:"step 1" (Ok exec_ok);
+  Keeper_docker_client_mock.inject_exec ~container:c ~cmd:"step 2" (Ok exec_ok);
+  Keeper_docker_client_mock.inject_rm c (Ok ());
   (match Session.exec handle ~cmd:"step 1" with Ok _ -> () | Error _ -> fail "step 1");
   (match Session.exec handle ~cmd:"step 2" with Ok _ -> () | Error _ -> fail "step 2");
   (match Session.cleanup handle with Ok () -> () | Error _ -> fail "cleanup");
-  check int "all injections drained in order" 0 (Docker_client_mock.pending_calls ())
+  check int "all injections drained in order" 0 (Keeper_docker_client_mock.pending_calls ())
 ;;
 
 (* ── determinism: same plan ⇒ same container_name ───────────── *)
@@ -183,7 +183,7 @@ let test_determinism_same_plan_same_name () =
 
 let () =
   run
-    "Sandbox_session_executor"
+    "Keeper_sandbox_session_executor"
     [ ( "start"
       , [ test_case
             "default ⇒ handle wraps plan's container_name"

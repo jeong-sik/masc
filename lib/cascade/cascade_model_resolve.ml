@@ -66,7 +66,7 @@ let unresolved_auto requested_model_id =
 
 let default_resolution_from_policy
       ?getenv
-      (policy : Provider_adapter.model_policy)
+      (policy : Provider_runtime_projection.model_policy)
       ~requested_model_id
   =
   match policy.default_model_env with
@@ -87,15 +87,14 @@ let default_resolution_from_policy
 ;;
 
 let default_resolution ?getenv provider_name ~requested_model_id =
-  match Provider_adapter.resolve_adapter_by_cascade_prefix provider_name with
-  | Some adapter ->
-    default_resolution_from_policy ?getenv adapter.model_policy ~requested_model_id
+  match Provider_runtime_projection.model_policy_for_cascade_prefix provider_name with
+  | Some policy ->
+    default_resolution_from_policy ?getenv policy ~requested_model_id
   | None -> unresolved_auto requested_model_id
 ;;
 
 let cascade_prefix_of_canonical_provider canonical_name =
-  Provider_adapter.resolve_direct_adapter canonical_name
-  |> Option.map Provider_adapter.cascade_prefix_of_adapter
+  Provider_runtime_projection.cascade_prefix_of_provider_label canonical_name
   |> Option.value ~default:canonical_name
 ;;
 
@@ -116,7 +115,7 @@ let resolve_glm_model ?getenv selector =
   let default_model =
     default_resolution
       ?getenv
-      (cascade_prefix_of_canonical_provider Provider_adapter.cn_glm)
+      (cascade_prefix_of_canonical_provider "glm")
       ~requested_model_id:model_id
   in
   let resolved_model_id =
@@ -141,7 +140,7 @@ let resolve_glm_coding_model ?getenv selector =
   let default_model =
     default_resolution
       ?getenv
-      (cascade_prefix_of_canonical_provider Provider_adapter.cn_glm_coding_plan)
+      (cascade_prefix_of_canonical_provider "glm-coding")
       ~requested_model_id:model_id
   in
   let resolved_model_id =
@@ -196,8 +195,8 @@ let resolve_auto_model
     | Concrete s -> s
     | Auto -> "auto"
   in
-  match Provider_adapter.resolve_adapter_by_cascade_prefix provider_name with
-  | Some { runtime_kind = Provider_adapter.Local; _ } ->
+  match Provider_runtime_projection.provider_profile_for_cascade_prefix provider_name with
+  | Some { runtime_kind = Provider_runtime_projection.Local; _ } ->
     (match selector with
      | Auto ->
        (match discover () with
@@ -205,11 +204,11 @@ let resolve_auto_model
           { requested_model_id = model_id; resolved_model_id; provenance = Discovery }
         | None -> default_resolution ?getenv provider_name ~requested_model_id:model_id)
      | Concrete _ -> explicit_resolution model_id model_id)
-  | Some { model_policy = { family = Provider_adapter.Glm_general; _ }; _ } ->
+  | Some { model_policy = { family = Provider_runtime_projection.Glm_general; _ }; _ } ->
     resolve_glm_model ?getenv selector
-  | Some { model_policy = { family = Provider_adapter.Glm_coding; _ }; _ } ->
+  | Some { model_policy = { family = Provider_runtime_projection.Glm_coding; _ }; _ } ->
     resolve_glm_coding_model ?getenv selector
-  | Some { model_policy = { family = Provider_adapter.Kimi_api_family; _ }; _ } ->
+  | Some { model_policy = { family = Provider_runtime_projection.Kimi_api_family; _ }; _ } ->
     resolve_kimi_model ?getenv selector
   | Some _ ->
     (match selector with

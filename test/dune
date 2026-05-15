@@ -1434,3 +1434,12 @@
  (name test_tool_capability_typed)
  (modules test_tool_capability_typed)
  (libraries masc_test_deps))
+
+; RFC-0084 PR-8 — MCP server telemetry wrap parity. Constants-only
+; (no lib dependency): pins the outcome label vocabulary and wrap site
+; count for mcp_server_eio_execute.ml:1065 + :1083 wraps. Real wrap
+; behaviour is unit-tested in test_guarded_dispatch_telemetry (PR-3).
+(test
+ (name test_mcp_telemetry)
+ (modules test_mcp_telemetry)
+ (libraries alcotest))

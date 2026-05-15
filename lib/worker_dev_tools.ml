@@ -398,6 +398,88 @@ type block_reason =
   | Pipes_not_allowed
   | Command_not_allowed of string
 
+let parse_error_fallback_reason cmd =
+  if contains_substring cmd "&&"
+     || contains_substring cmd "||"
+     || String.contains cmd ';'
+     || String.contains cmd '\n'
+     || String.contains cmd '\r'
+  then Chain_or_redirect
+  else if has_process_substitution cmd
+  then Process_substitution
+  else if has_unsafe_redirection cmd
+  then Unsafe_redirect
+  else if String.contains cmd '`'
+          || String.contains cmd '$'
+          || has_dangerous_ampersand cmd
+  then Injection
+  else Command_not_allowed "unsupported_shell_syntax"
+;;
+
+let has_unbalanced_shell_quotes cmd =
+  let len = String.length cmd in
+  let rec loop i quote escaped =
+    if i >= len
+    then quote <> None
+    else if escaped
+    then loop (i + 1) quote false
+    else (
+      match quote, cmd.[i] with
+      | Some '"', '\\' -> loop (i + 1) quote true
+      | None, '\'' -> loop (i + 1) (Some '\'') false
+      | None, '"' -> loop (i + 1) (Some '"') false
+      | Some '\'', '\'' -> loop (i + 1) None false
+      | Some '"', '"' -> loop (i + 1) None false
+      | _ -> loop (i + 1) quote false)
+  in
+  loop 0 None false
+;;
+
+let block_reason_of_too_complex = function
+  | `Proc_subst -> Process_substitution
+  | `Redirect | `Heredoc | `Here_string -> Unsafe_redirect
+  | `Logic_op -> Chain_or_redirect
+  | `Cmd_subst
+  | `Arith_expansion
+  | `Subshell
+  | `Control_flow
+  | `Function_def
+  | `Background
+  | `Glob_brace
+  | `Unknown_construct _ -> Injection
+;;
+
+let command_for_bash_structure_parse cmd =
+  cmd
+  |> split_shell_tokens
+  |> List.filter (fun token -> not (is_safe_fd_redirect_token token))
+  |> String.concat " "
+;;
+
+let validate_command_structure ?(allow_pipes = true) cmd =
+  let trimmed = String.trim cmd in
+  if trimmed = ""
+  then Error Empty_command
+  else (
+    match
+      trimmed
+      |> command_for_bash_structure_parse
+      |> Masc_exec_bash_parser.Bash.parse_string
+    with
+    | Masc_exec.Parsed.Parsed (Masc_exec.Shell_ir.Pipeline (_ :: _ :: _))
+      when not allow_pipes -> Error Pipes_not_allowed
+    | Masc_exec.Parsed.Parsed _ -> Ok ()
+    | Masc_exec.Parsed.Too_complex reason ->
+      Error (block_reason_of_too_complex reason)
+    | Masc_exec.Parsed.Parse_aborted _ ->
+      Error (Command_not_allowed "bash_parse_aborted")
+    | Masc_exec.Parsed.Parse_error _ ->
+      (match parse_error_fallback_reason trimmed with
+       | Command_not_allowed "unsupported_shell_syntax"
+         when not (has_unbalanced_shell_quotes trimmed) -> Ok ()
+       | reason -> Error reason))
+;;
+
 let block_reason_to_string = function
   | Empty_command -> "command must not be empty"
   | Chain_or_redirect ->
@@ -423,13 +505,17 @@ let validate_command_with_allowlist ~allowed_commands cmd =
   let trimmed = String.trim cmd in
   if trimmed = ""
   then Error Empty_command
-  else if contains_forbidden_shell_chars trimmed
-  then Error Chain_or_redirect
   else (
-    match extract_command_name trimmed with
-    | None -> Error Empty_command
-    | Some name when List.mem name allowed_commands -> Ok ()
-    | Some name -> Error (Command_not_allowed name))
+    match validate_command_structure ~allow_pipes:false trimmed with
+    | Error _ as err -> err
+    | Ok () ->
+      if contains_forbidden_shell_chars trimmed
+      then Error Chain_or_redirect
+      else (
+        match extract_command_name trimmed with
+        | None -> Error Empty_command
+        | Some name when List.mem name allowed_commands -> Ok ()
+        | Some name -> Error (Command_not_allowed name)))
 ;;
 
 let validate_command cmd =
@@ -444,28 +530,32 @@ let validate_command_coding_with_allowlist
   let trimmed = String.trim cmd in
   if trimmed = ""
   then Error Empty_command
-  else if contains_forbidden_shell_chars_coding trimmed
-  then Error Injection
-  else if has_process_substitution trimmed
-  then Error Process_substitution
-  else if has_unsafe_redirection trimmed
-  then Error Unsafe_redirect
   else (
-    match split_pipeline_segments trimmed with
-    | Error msg -> Error (Command_not_allowed msg)
-    | Ok segments ->
-      if (not allow_pipes) && List.length segments > 1
-      then Error Pipes_not_allowed
+    match validate_command_structure ~allow_pipes trimmed with
+    | Error _ as err -> err
+    | Ok () ->
+      if contains_forbidden_shell_chars_coding trimmed
+      then Error Injection
+      else if has_process_substitution trimmed
+      then Error Process_substitution
+      else if has_unsafe_redirection trimmed
+      then Error Unsafe_redirect
       else (
-        let rec validate_segments = function
-          | [] -> Ok ()
-          | segment :: rest ->
-            (match extract_command_name segment with
-             | None -> Error Empty_command
-             | Some name when List.mem name allowed_commands -> validate_segments rest
-             | Some name -> Error (Command_not_allowed name))
-        in
-        validate_segments segments))
+        match split_pipeline_segments trimmed with
+        | Error msg -> Error (Command_not_allowed msg)
+        | Ok segments ->
+          if (not allow_pipes) && List.length segments > 1
+          then Error Pipes_not_allowed
+          else (
+            let rec validate_segments = function
+              | [] -> Ok ()
+              | segment :: rest ->
+                (match extract_command_name segment with
+                 | None -> Error Empty_command
+                 | Some name when List.mem name allowed_commands -> validate_segments rest
+                 | Some name -> Error (Command_not_allowed name))
+            in
+            validate_segments segments)))
 ;;
 
 (** Relaxed command validation for Coding/Full preset keepers.

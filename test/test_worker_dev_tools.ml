@@ -532,6 +532,69 @@ let () =
         match Worker_dev_tools.validate_command_coding "dune test 2>&1" with
         | Ok () -> ()
         | Error e -> Alcotest.fail ("should allow 2>&1: " ^ Worker_dev_tools.block_reason_to_string e));
+      Alcotest.test_case "typed structure allows pipeline when enabled" `Quick
+        (fun () ->
+          match
+            Worker_dev_tools.validate_command_structure
+              ~allow_pipes:true
+              "git log | head -5"
+          with
+          | Ok () -> ()
+          | Error e ->
+            Alcotest.fail
+              ("typed structure should allow pipeline: "
+               ^ Worker_dev_tools.block_reason_to_string e));
+      Alcotest.test_case "typed structure rejects pipeline when disabled" `Quick
+        (fun () ->
+          match
+            Worker_dev_tools.validate_command_structure
+              ~allow_pipes:false
+              "git log | head -5"
+          with
+          | Error Worker_dev_tools.Pipes_not_allowed -> ()
+          | Error e ->
+            Alcotest.fail
+              ("wrong typed structure rejection: "
+               ^ Worker_dev_tools.block_reason_to_string e)
+          | Ok () -> Alcotest.fail "typed structure should reject pipeline");
+      Alcotest.test_case "typed structure keeps fd redirect exception" `Quick
+        (fun () ->
+          match
+            Worker_dev_tools.validate_command_structure
+              ~allow_pipes:false
+              "dune build 2>&1"
+          with
+          | Ok () -> ()
+          | Error e ->
+            Alcotest.fail
+              ("fd redirect should remain structural-safe: "
+               ^ Worker_dev_tools.block_reason_to_string e));
+      Alcotest.test_case "typed structure rejects command substitution" `Quick
+        (fun () ->
+          match
+            Worker_dev_tools.validate_command_structure
+              ~allow_pipes:true
+              "echo $(date)"
+          with
+          | Error Worker_dev_tools.Injection -> ()
+          | Error e ->
+            Alcotest.fail
+              ("wrong command-substitution rejection: "
+               ^ Worker_dev_tools.block_reason_to_string e)
+          | Ok () -> Alcotest.fail "command substitution must be rejected");
+      Alcotest.test_case "typed structure rejects unterminated quote" `Quick
+        (fun () ->
+          match
+            Worker_dev_tools.validate_command_structure
+              ~allow_pipes:true
+              "echo 'unterminated"
+          with
+          | Error (Worker_dev_tools.Command_not_allowed "unsupported_shell_syntax") -> ()
+          | Error e ->
+            Alcotest.fail
+              ("wrong unterminated-quote rejection: "
+               ^ Worker_dev_tools.block_reason_to_string e)
+          | Ok () -> Alcotest.fail "unterminated quote must be rejected");
       Alcotest.test_case "single-command contract rejects pipe" `Quick (fun () ->
         match
           Worker_dev_tools.validate_command_coding_with_allowlist

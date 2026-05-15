@@ -462,12 +462,73 @@ let handle_keeper_bash
       else (base_profile, base_network_mode, false)
     in
     let sandbox_root = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
-    (* Destructive guard: always active regardless of Docker or preset *)
-    if Worker_dev_tools.is_destructive_bash_operation cmd
-    then (
+    let command_blocked_json reason =
+      let reason_str = Worker_dev_tools.block_reason_to_string reason in
       Prometheus.inc_counter
         Keeper_metrics.metric_keeper_shell_bash_failures
-        ~labels:[("keeper", meta.name); ("site", "destructive")]
+        ~labels:[("site", "generic_blocked")]
+        ();
+      Log.Keeper.warn "keeper_bash blocked: %s (cmd=%s)" reason_str cmd_for_log;
+      let hint =
+        match reason with
+        | Worker_dev_tools.Command_not_allowed name
+          when String_util.equals_ci name "gh" ->
+          "`gh` is not allowed via keeper_bash. Use keeper_shell with \
+           op=\"gh\" (e.g. keeper_shell op=gh cmd=\"pr list --state open\")."
+        | Chain_or_redirect | Pipes_not_allowed | Unsafe_redirect ->
+          "Use separate tool calls instead of chaining. Call keeper_bash once per command."
+        | Injection | Process_substitution ->
+          "Avoid shell metacharacters. Use keeper_shell with a specific op (rg, find, ls) instead."
+        | Command_not_allowed _ ->
+          "Check the command for blocked patterns. Use keeper_shell for structured ops (rg, ls, find)."
+        | Empty_command ->
+          "Provide a non-empty command string."
+      in
+      let alternatives =
+        match reason with
+        | Worker_dev_tools.Command_not_allowed name
+          when String_util.equals_ci name "gh" ->
+          [ "Use keeper_shell with op=\"gh\" for GitHub CLI operations."
+          ; "Example: keeper_shell op=gh cmd=\"pr list --state open\"."
+          ]
+        | Chain_or_redirect | Pipes_not_allowed | Unsafe_redirect ->
+          [ "Break the pipeline into separate keeper_bash calls."
+          ; "Save intermediate output to a file, then process it in the next call."
+          ]
+        | Injection | Process_substitution ->
+          [ "Use keeper_shell with a specific op (rg, find, ls) for structured queries."
+          ; "Avoid $(...) and backtick substitution in commands."
+          ]
+        | Command_not_allowed _ ->
+          [ "Use keeper_shell for structured ops (rg, ls, find)."
+          ; "Check if the command is available under a different name or op."
+          ]
+        | Empty_command ->
+          [ "Provide a non-empty command string."
+          ; "Example: keeper_bash cmd='ls -la lib/'."
+          ]
+      in
+      Yojson.Safe.to_string
+        (Exec_core.blocked_result_json
+           ~cmd
+           ~error:"command_blocked"
+           ~reason:reason_str
+           ~hint
+           ~alternatives
+           ~diag:(Keeper_shell_shared.diagnosis_of_block_reason reason)
+           ~extra:[ "execution_time_ms", `Int 0 ]
+           ~env_snapshot:env_snap
+           ())
+    in
+    (* Destructive guard: always active regardless of Docker or preset *)
+    match Worker_dev_tools.validate_command_structure ~allow_pipes:write_enabled cmd with
+    | Error reason -> command_blocked_json reason
+    | Ok () ->
+      if Worker_dev_tools.is_destructive_bash_operation cmd
+      then (
+        Prometheus.inc_counter
+          Keeper_metrics.metric_keeper_shell_bash_failures
+          ~labels:[("keeper", meta.name); ("site", "destructive")]
         ();
       Log.Keeper.warn "keeper_bash DESTRUCTIVE blocked: %s (keeper=%s)" cmd_for_log meta.name;
       Yojson.Safe.to_string
@@ -677,66 +738,9 @@ let handle_keeper_bash
         else Worker_dev_tools.validate_command
       in
       match validate cmd with
-      | Error reason ->
-        let reason_str = Worker_dev_tools.block_reason_to_string reason in
-        Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_shell_bash_failures
-          ~labels:[("site", "generic_blocked")]
-          ();
-        Log.Keeper.warn "keeper_bash blocked: %s (cmd=%s)" reason_str cmd_for_log;
-        let hint =
-          match reason with
-          | Worker_dev_tools.Command_not_allowed name
-            when String_util.equals_ci name "gh" ->
-            "`gh` is not allowed via keeper_bash. Use keeper_shell with \
-             op=\"gh\" (e.g. keeper_shell op=gh cmd=\"pr list --state open\")."
-          | Chain_or_redirect | Pipes_not_allowed | Unsafe_redirect ->
-            "Use separate tool calls instead of chaining. Call keeper_bash once per command."
-          | Injection | Process_substitution ->
-            "Avoid shell metacharacters. Use keeper_shell with a specific op (rg, find, ls) instead."
-          | Command_not_allowed _ ->
-            "Check the command for blocked patterns. Use keeper_shell for structured ops (rg, ls, find)."
-          | Empty_command ->
-            "Provide a non-empty command string."
-        in
-        let alternatives =
-          match reason with
-          | Worker_dev_tools.Command_not_allowed name
-            when String_util.equals_ci name "gh" ->
-            [ "Use keeper_shell with op=\"gh\" for GitHub CLI operations."
-            ; "Example: keeper_shell op=gh cmd=\"pr list --state open\"."
-            ]
-          | Chain_or_redirect | Pipes_not_allowed | Unsafe_redirect ->
-            [ "Break the pipeline into separate keeper_bash calls."
-            ; "Save intermediate output to a file, then process it in the next call."
-            ]
-          | Injection | Process_substitution ->
-            [ "Use keeper_shell with a specific op (rg, find, ls) for structured queries."
-            ; "Avoid $(...) and backtick substitution in commands."
-            ]
-          | Command_not_allowed _ ->
-            [ "Use keeper_shell for structured ops (rg, ls, find)."
-            ; "Check if the command is available under a different name or op."
-            ]
-          | Empty_command ->
-            [ "Provide a non-empty command string."
-            ; "Example: keeper_bash cmd='ls -la lib/'."
-            ]
-        in
-        Yojson.Safe.to_string
-          (Exec_core.blocked_result_json
-             ~cmd
-             ~error:"command_blocked"
-             ~reason:reason_str
-             ~hint
-             ~alternatives
-             ~diag:(Keeper_shell_shared.diagnosis_of_block_reason reason)
-             ~extra:[ "execution_time_ms", `Int 0 ]
-             ~env_snapshot:env_snap
-             ())
+      | Error reason -> command_blocked_json reason
       | Ok () ->
-        (
-            (match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd with
+        (match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd with
              | Error e -> error_json e
              | Ok () ->
                if write_enabled
@@ -1033,7 +1037,7 @@ let handle_keeper_bash
                       (match Masc_exec.Exec_cache.lookup cache cmd with
                        | Some entry -> cached_result_json entry
                        | None -> run_uncached ())
-                    | None -> run_uncached ())
-               end))
+                   | None -> run_uncached ())
+               end)
   end)
 ;;

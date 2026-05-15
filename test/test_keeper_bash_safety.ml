@@ -366,6 +366,38 @@ let test_docker_blocks_docker_socket_reference () =
   | None ->
       Alcotest.fail ("expected error json, got: " ^ raw)
 
+let test_docker_bash_structural_gate_blocks_command_substitution () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_docker_meta "typed-structure-subst" in
+  let playground =
+    Filename.concat base_path (playground_path_of meta.name)
+  in
+  ensure_dir playground;
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:
+        (`Assoc
+           [ ("cmd", `String "echo $(date)") ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check (option string))
+    "error"
+    (Some "command_blocked")
+    (Json.member "error" json |> Json.to_string_option);
+  Alcotest.(check bool)
+    "reason names shell injection"
+    true
+    (String_util.contains_substring
+       (Json.member "reason" json |> Json.to_string)
+       "Shell injection syntax")
+
 let test_nested_runtime_detector_ignores_git_commit_message () =
   Alcotest.(check bool)
     "quoted docker in git commit message is not a nested runtime"
@@ -710,9 +742,7 @@ let test_keeper_shell_ls_recovers_doubled_playground_prefix () =
   let repos = Filename.concat playground "repos" in
   ensure_dir repos;
   ignore (Fs_compat.save_file_atomic (Filename.concat repos "demo.txt") "ok");
-  let doubled_path =
-    Filename.concat playground ((playground_path_of meta.name) ^ "repos")
-  in
+  let doubled_path = Filename.concat (playground_path_of meta.name) "repos" in
   let raw =
     Keeper_exec_shell.handle_keeper_shell
       ~turn_sandbox_factory:None ~exec_cache:None
@@ -992,6 +1022,8 @@ let () =
         test_docker_blocks_nested_docker_command;
       Alcotest.test_case "docker blocks docker socket reference" `Quick
         test_docker_blocks_docker_socket_reference;
+      Alcotest.test_case "docker keeper_bash uses typed structure gate" `Quick
+        test_docker_bash_structural_gate_blocks_command_substitution;
       Alcotest.test_case "nested runtime detector ignores commit messages" `Quick
         test_nested_runtime_detector_ignores_git_commit_message;
       Alcotest.test_case "command substitution trips docker guard" `Quick

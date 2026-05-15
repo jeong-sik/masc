@@ -42,6 +42,18 @@ type block_reason =
     {!Chain_or_redirect}, {!Injection}, etc.). *)
 val block_reason_to_string : block_reason -> string
 
+(** Menhir/Shell_ir-backed structural validator for Bash input.  It rejects
+    parser-classified shell constructs such as command substitution, unsafe
+    redirects, control operators, and disallowed pipelines before any
+    executor-specific routing can reach raw [bash -lc].  Parser gaps that do
+    not carry a known risky construct stay legacy-compatible.  It does not
+    enforce the command allowlist; callers that need command policy should
+    compose this with {!validate_command} / {!validate_command_coding}. *)
+val validate_command_structure
+  :  ?allow_pipes:bool
+  -> string
+  -> (unit, block_reason) result
+
 (** Strict (allowlist + no shell metacharacters) validator used by the
     default [shell_exec] tool.  Rejects empty input, chaining, and any
     command outside the dev allowlist (rg / grep / dune / git / ...). *)

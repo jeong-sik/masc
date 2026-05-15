@@ -1152,13 +1152,63 @@ let rec add_routes ~sw ~clock router =
               | Some src -> [src]
               | None -> Telemetry_unified.all_sources)
          in
+         let query_json =
+           let source_query =
+             match Server_utils.query_param req "source" with
+             | Some value -> `String value
+             | None -> `Null
+           in
+           `Assoc
+             [
+               ("source", source_query);
+               ( "resolved_sources",
+                 `List
+                   (List.map
+                      (fun source ->
+                        `String (Telemetry_unified.source_to_string source))
+                      sources) );
+               ("n", `Int n);
+               ( "keeper",
+                 Option.fold ~none:`Null
+                   ~some:(fun value -> `String value)
+                   keeper_name );
+               ( "session_id",
+                 Option.fold ~none:`Null
+                   ~some:(fun value -> `String value)
+                   session_id );
+               ( "operation_id",
+                 Option.fold ~none:`Null
+                   ~some:(fun value -> `String value)
+                   operation_id );
+               ( "worker_run_id",
+                 Option.fold ~none:`Null
+                   ~some:(fun value -> `String value)
+                   worker_run_id );
+               ( "since_ms",
+                 Option.fold ~none:`Null
+                   ~some:(fun value -> `Float (value *. 1000.0))
+                   since_ts );
+               ( "until_ms",
+                 Option.fold ~none:`Null
+                   ~some:(fun value -> `Float (value *. 1000.0))
+                   until_ts );
+             ]
+         in
          let result =
            Telemetry_unified.read_unified_result ~base_path ~masc_root ~sources
              ?keeper_name ?session_id ?operation_id ?worker_run_id
              ?since_ts ?until_ts ~n ()
          in
+         let generated_at = Masc_domain.now_iso () in
          let json = `Assoc [
-           ("generated_at", `String (Masc_domain.now_iso ()));
+           ("generated_at", `String generated_at);
+           ("generated_at_iso", `String generated_at);
+           ("dashboard_surface", `String "/api/v1/dashboard/telemetry");
+           ("source", `String "telemetry_unified");
+           ( "retention",
+             Telemetry_unified.replay_retention_json ~base_path ~masc_root
+               ~sources );
+           ("query", query_json);
            ("count", `Int (List.length result.entries));
            ("total_matching_entries", `Int result.total_matching_entries);
            ("truncated", `Bool result.truncated);

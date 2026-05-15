@@ -183,7 +183,7 @@ check_json "activity swimlane exposes spans" "$BASE/api/v1/activity/swimlane" "'
 check_http "telemetry summary 200" "$BASE/api/v1/dashboard/telemetry/summary" "200"
 check_json "telemetry summary has sources" "$BASE/api/v1/dashboard/telemetry/summary" "'sources' in d" '^True$'
 check_http "telemetry entries 200" "$BASE/api/v1/dashboard/telemetry?source=oas_event&n=5" "200"
-check_json "telemetry entries exposes replay envelope" "$BASE/api/v1/dashboard/telemetry?source=oas_event&n=5" "'entries' in d and 'total_matching_entries' in d and 'truncated' in d" '^True$'
+check_json "telemetry entries exposes replay provenance" "$BASE/api/v1/dashboard/telemetry?source=oas_event&n=5" "'entries' in d and 'total_matching_entries' in d and 'truncated' in d and d.get('dashboard_surface') == '/api/v1/dashboard/telemetry' and d.get('source') == 'telemetry_unified' and d.get('retention', {}).get('scope') == 'dashboard_telemetry_replay' and 'oas_event' in d.get('query', {}).get('resolved_sources', [])" '^True$'
 check_http "oas telemetry recent 200" "$BASE/api/v1/dashboard/oas/telemetry/recent?limit=5" "200"
 check_json "oas telemetry recent exposes provenance" "$BASE/api/v1/dashboard/oas/telemetry/recent?limit=5" "'samples' in d and 'dashboard_surface' in d and 'retention' in d" '^True$'
 check_http "oas telemetry summary 200" "$BASE/api/v1/dashboard/oas/telemetry/summary?limit=5" "200"

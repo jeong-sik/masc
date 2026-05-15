@@ -11,7 +11,7 @@ open Result_syntax
 let default_config =
   let home =
     try Sys.getenv "HOME" with
-    | Not_found -> "/tmp"
+    | Not_found -> Filename.get_temp_dir_name ()
   in
   { root = Filename.concat home ".oas" }
 ;;

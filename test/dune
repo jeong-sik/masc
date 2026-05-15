@@ -1690,3 +1690,9 @@
  (name test_rfc_0085_pr6_host_config_from_env)
  (modules test_rfc_0085_pr6_host_config_from_env)
  (libraries alcotest masc_mcp.host_config unix))
+
+; RFC-0085 PR-4 — tool_library + cdal proof_store /tmp fallback purge.
+(test
+ (name test_rfc_0085_pr4_tool_library_proof_store)
+ (modules test_rfc_0085_pr4_tool_library_proof_store)
+ (libraries alcotest ast_grep))

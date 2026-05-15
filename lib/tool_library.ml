@@ -87,7 +87,10 @@ type context = {
 
 (* Paths *)
 let library_root () =
-  let home = Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp" in
+  let home =
+    Sys.getenv_opt "HOME"
+    |> Option.value ~default:(Host_config.host ()).agent_runtime_root
+  in
   Filename.concat home "me/docs/library"
 
 let candidates_dir () =

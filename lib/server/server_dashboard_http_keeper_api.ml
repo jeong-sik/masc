@@ -1863,24 +1863,9 @@ let handle_keeper_checkpoints_post state req reqd body_str =
              (String.escaped e))
           reqd
 
-let is_valid_keeper_name name =
-  String.length name > 0
-  && String.length name <= 128
-  && String.to_seq name
-     |> Seq.for_all (fun c ->
-          (c >= 'a' && c <= 'z')
-          || (c >= 'A' && c <= 'Z')
-          || (c >= '0' && c <= '9')
-          || c = '_' || c = '-')
-
-let extract_keeper_name_for_post req_path suffix =
-  let plen = String.length keeper_api_prefix in
-  let slen = String.length suffix in
-  let raw =
-    String.trim
-      (String.sub req_path plen (String.length req_path - plen - slen))
-  in
-  if is_valid_keeper_name raw then raw else ""
+(* is_valid_keeper_name + extract_keeper_name_for_post moved to
+   Server_dashboard_http_keeper_api_types (intra-library file split,
+   2026-05-16). *)
 
 let refresh_keeper_execution_surfaces ~config ~name event =
   Operator_control_snapshot.invalidate_snapshot_cache ();

@@ -66,3 +66,12 @@ val latest_preview_of_messages :
 val continuity_summary_of_messages :
   Agent_sdk.Types.message list -> string option
 (** Latest [STATE]-derived continuity summary in the message history. *)
+
+(** {1 Keeper name validation} *)
+
+val is_valid_keeper_name : String.t -> bool
+(** [true] when [name] passes the shared keeper-name character class. *)
+
+val extract_keeper_name_for_post : string -> string -> string
+(** [extract_keeper_name_for_post path suffix]: variant used by the
+    POST dispatcher. *)

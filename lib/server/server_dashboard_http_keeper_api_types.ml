@@ -107,3 +107,22 @@ let continuity_summary_of_messages (messages : Agent_sdk.Types.message list) =
       Keeper_memory_policy.keeper_state_snapshot_to_summary_text snapshot
       |> trim_to_opt
   | None -> None
+
+let is_valid_keeper_name name =
+  String.length name > 0
+  && String.length name <= 128
+  && String.to_seq name
+     |> Seq.for_all (fun c ->
+          (c >= 'a' && c <= 'z')
+          || (c >= 'A' && c <= 'Z')
+          || (c >= '0' && c <= '9')
+          || c = '_' || c = '-')
+
+let extract_keeper_name_for_post req_path suffix =
+  let plen = String.length keeper_api_prefix in
+  let slen = String.length suffix in
+  let raw =
+    String.trim
+      (String.sub req_path plen (String.length req_path - plen - slen))
+  in
+  if is_valid_keeper_name raw then raw else ""

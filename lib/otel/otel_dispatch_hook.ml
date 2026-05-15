@@ -88,7 +88,7 @@ let tool_span_attrs (result : Tool_result.t) =
 ;;
 
 (** Record a tool call as an OTel span and Prometheus histogram observation. *)
-let on_tool_result (result : Tool_result.t) : Tool_result.t =
+let on_tool_result (result : Tool_result.t) : unit =
   (* Prometheus histogram: always active regardless of MASC_OTEL_ENABLED *)
   Prometheus.observe_histogram
     "masc_tool_call_duration_seconds"
@@ -96,8 +96,19 @@ let on_tool_result (result : Tool_result.t) : Tool_result.t =
     (result.duration_ms /. 1000.0);
   (* OTel span: only when enabled *)
   if enabled ()
-  then emit_span ~name:("tool/" ^ result.tool_name) ~attrs:(tool_span_attrs result);
-  result
+  then emit_span ~name:("tool/" ^ result.tool_name) ~attrs:(tool_span_attrs result)
 ;;
 
-let install () = Tool_dispatch.register_post_hook on_tool_result
+(* RFC-0084 PR-I-2.c — migrate to typed post-hook surface.
+   Behaviour-preserving: the histogram + span emission fires only on
+   (Handled, Some r), matching the legacy hook semantics (legacy
+   register_post_hook fired only when [dispatch] returned [Some
+   _]).  Non-Handled outcomes already get their 4-tuple emission
+   from [Tool_telemetry.with_span] in guarded_dispatch — they do
+   NOT need an additional masc_tool_call_duration_seconds observation
+   here. *)
+let install () =
+  Tool_dispatch.register_typed_post_hook (fun outcome result ->
+    match outcome, result with
+    | Dispatch_outcome.Handled, Some r -> on_tool_result r
+    | _ -> ())

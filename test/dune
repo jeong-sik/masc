@@ -1614,3 +1614,10 @@
  (name test_pr_i_2a_tool_metrics_typed)
  (modules test_pr_i_2a_tool_metrics_typed)
  (libraries alcotest))
+
+; RFC-0084 PR-I-2.b — Tool_usage_log typed post-hook migration.
+; Same pins as PR-I-2.a but for lib/tool_usage_log.ml.
+(test
+ (name test_pr_i_2b_tool_usage_log_typed)
+ (modules test_pr_i_2b_tool_usage_log_typed)
+ (libraries alcotest))

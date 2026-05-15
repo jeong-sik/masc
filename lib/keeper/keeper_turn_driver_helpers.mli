@@ -42,6 +42,7 @@ type empty_candidate_classification =
 val classify_empty_candidates :
   require_tool_choice_support:bool ->
   require_tool_support:bool ->
+  original_candidate_count:int ->
   tool_filtered_candidate_count:int ->
   empty_candidate_classification
 

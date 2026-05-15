@@ -307,6 +307,7 @@ let run_named
         classify_empty_candidates
           ~require_tool_choice_support
           ~require_tool_support
+          ~original_candidate_count
           ~tool_filtered_candidate_count
       in
       let classification_code =

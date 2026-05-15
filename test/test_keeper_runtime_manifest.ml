@@ -2009,18 +2009,28 @@ let test_empty_candidate_classification_separates_tool_filter_from_availability 
     (FT.classify_empty_candidates
        ~require_tool_choice_support:true
        ~require_tool_support:true
+       ~original_candidate_count:2
+       ~tool_filtered_candidate_count:0);
+  check "required tools but no resolved candidates"
+    FT.Provider_unavailable
+    (FT.classify_empty_candidates
+       ~require_tool_choice_support:true
+       ~require_tool_support:true
+       ~original_candidate_count:0
        ~tool_filtered_candidate_count:0);
   check "required tools but candidates were only unavailable"
     FT.Provider_unavailable
     (FT.classify_empty_candidates
        ~require_tool_choice_support:true
        ~require_tool_support:true
+       ~original_candidate_count:2
        ~tool_filtered_candidate_count:2);
   check "optional tools and no providers"
     FT.Provider_unavailable
     (FT.classify_empty_candidates
        ~require_tool_choice_support:false
        ~require_tool_support:false
+       ~original_candidate_count:0
        ~tool_filtered_candidate_count:0);
   Alcotest.(check string)
     "tool capability code"

@@ -93,30 +93,25 @@ let keeper_agent_status (meta : keeper_meta) =
     | None -> Masc_domain.Active)
 ;;
 
-(** Reset stale turn failures so the keeper can exit Failing phase.
-    Called unconditionally after presence sync (whether I/O was skipped or not).
-    If the underlying issue persists, the next turn will re-fail.
-    Manual reconcile blocker logic removed — see plan:
-    enchanted-strolling-bonbon. *)
-let maybe_recover_from_failing ~(ctx : _ context) ~(meta : keeper_meta) =
-  let stale_turn_failures =
+(** Preserve turn failure accounting when heartbeat recovers.
+
+    Heartbeat health and turn health are independent in the keeper FSM. A
+    successful heartbeat may recover [heartbeat_healthy], but it must not emit
+    [Turn_succeeded] or reset provider/tool failure counters. Otherwise a
+    cascade_exhausted turn can be erased by the next keepalive heartbeat before
+    auto-pause and diagnostics see the failure streak. *)
+let note_turn_failures_preserved_after_heartbeat ~(ctx : _ context) ~(meta : keeper_meta)
+  =
+  let turn_failures =
     Keeper_registry.get_turn_failures ~base_path:ctx.config.base_path meta.name
   in
-  if stale_turn_failures > 0
-  then (
-    Keeper_registry.reset_turn_failures ~base_path:ctx.config.base_path meta.name;
-    Keeper_registry.dispatch_event_unit
-      ~base_path:ctx.config.base_path
-      meta.name
-      Keeper_state_machine.Heartbeat_ok;
-    Keeper_keepalive_signal.dispatch_keepalive_event
-      ~ctx
-      ~keeper_name:meta.name
-      Keeper_state_machine.Turn_succeeded;
+  if turn_failures > 0
+  then
     Log.Keeper.info
-      "heartbeat recovery: reset %d stale turn failures for %s"
-      stale_turn_failures
-      meta.name)
+      "heartbeat healthy for %s; preserving %d turn failure(s) until a real \
+       turn succeeds"
+      meta.name
+      turn_failures
 ;;
 
 let sync_keeper_presence
@@ -137,7 +132,11 @@ let sync_keeper_presence
     Log.Keeper.debug
       "presence sync skipped: fresh heartbeat %.0fs ago"
       (t_presence_start -. !last_successful_heartbeat_ts);
-    maybe_recover_from_failing ~ctx ~meta:meta_current;
+    Keeper_registry.dispatch_event_unit
+      ~base_path:ctx.config.base_path
+      meta_current.name
+      Keeper_state_machine.Heartbeat_ok;
+    note_turn_failures_preserved_after_heartbeat ~ctx ~meta:meta_current;
     meta_current)
   else (
     try
@@ -184,7 +183,7 @@ let sync_keeper_presence
           Keeper_metrics.metric_keeper_heartbeat_successes
           ~labels:[ "keeper", meta_current.name ]
           ();
-        maybe_recover_from_failing ~ctx ~meta:meta_current);
+        note_turn_failures_preserved_after_heartbeat ~ctx ~meta:meta_current);
       match write_meta ctx.config synced with
       | Ok () -> synced
       | Error e ->

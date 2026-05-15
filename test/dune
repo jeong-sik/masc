@@ -1705,6 +1705,10 @@
  (modules test_rfc_0085_pr8_config_dir_resolver_host_config)
  (libraries alcotest ast_grep))
 
+; RFC-0085 PR-11 — Env_config_core deprecation mechanism removed.
+(test
+ (name test_rfc_0085_pr11_deprecation_purge)
+ (modules test_rfc_0085_pr11_deprecation_purge)
 ; RFC-0085 PR-10 — home + assets_dir env readers absorbed into
 ; Host_config.t; Env_config_core.assets_dir_opt fully removed,
 ; home_dir_opt demoted to file-private.

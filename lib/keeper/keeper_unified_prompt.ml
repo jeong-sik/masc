@@ -98,8 +98,15 @@ let format_board_events
                 | _ -> "")
            else ""
          in
-         Printf.sprintf "- [%s] %s%s%s%s: %s"
-           kind event.author hearth_note mention_note self_note event.preview)
+         Printf.sprintf "- [%s] post_id=%s title=%S author=%s%s%s%s preview: %s"
+           kind
+           event.post_id
+           (Keeper_types.short_preview ~max_len:80 event.title)
+           event.author
+           hearth_note
+           mention_note
+           self_note
+           event.preview)
        events)
 
 let line_block label value =
@@ -300,7 +307,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
   in
   let board_activity_guidance =
     if tool_allowed "keeper_board_get" && tool_allowed "keeper_board_comment" then
-      "- See board activity? Read the full post with keeper_board_get, then comment with keeper_board_comment.\n"
+      "- See board activity? Use the listed post_id with keeper_board_get before replying; do not use keeper_board_list to rediscover the target. Then comment with keeper_board_comment on that same post_id.\n"
     else
       ""
   in

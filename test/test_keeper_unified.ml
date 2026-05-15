@@ -7013,8 +7013,17 @@ let test_metrics_failure_response_redacts_resumable_cli_session_detail () =
 
 let test_prompt_includes_board_activity_section () =
   let obs = { base_observation with pending_board_events = [ sample_board_event ] } in
-  let _sys, user =
-    UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs ()
+  let board_meta =
+    { minimal_meta with
+      tool_access =
+        Preset
+          { preset = Social
+          ; also_allow = []
+          }
+    }
+  in
+  let sys, user =
+    UP.build_prompt ~base_path:"/test" ~meta:board_meta ~observation:obs ()
   in
   check
     bool
@@ -7039,7 +7048,22 @@ let test_prompt_includes_board_activity_section () =
        with
        | Not_found -> false
      in
-     found)
+     found);
+  check
+    bool
+    "includes board event post id"
+    true
+    (contains_substring user "post_id=board-post-1");
+  check
+    bool
+    "includes board event title"
+    true
+    (contains_substring user "title=\"Need help\"");
+  check
+    bool
+    "guides direct board get by post id"
+    true
+    (contains_substring sys "Use the listed post_id with keeper_board_get")
 ;;
 
 let test_prompt_marks_board_curation_due_for_multi_event_window () =

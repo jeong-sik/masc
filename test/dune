@@ -1705,6 +1705,14 @@
  (modules test_rfc_0085_pr8_config_dir_resolver_host_config)
  (libraries alcotest ast_grep))
 
+; RFC-0085 PR-7 — Retroactive AST test for retired_pg_env_keys +
+; clear_retired_pg_envs deletion (#15468 user-identified legacy;
+; shipped without a regression test; restored by #15495).
+(test
+ (name test_rfc_0085_pr7_retired_pg_envs_purge)
+ (modules test_rfc_0085_pr7_retired_pg_envs_purge)
+ (libraries alcotest ast_grep))
+
 ; RFC-0085 PR-18 — Retroactive AST test for execution_surfaces +
 ; namespace_truth rename (#15486 shipped without a regression test;
 ; restored by #15495).

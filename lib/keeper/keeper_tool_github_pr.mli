@@ -37,6 +37,9 @@ module For_testing : sig
     head:string option ->
     string list
 
+  val effective_repo_arg :
+    config:Coord.config -> string -> (string, string) result
+
   val draft_request_allowed : Yojson.Safe.t -> bool
 
   val quote_argv : string list -> string

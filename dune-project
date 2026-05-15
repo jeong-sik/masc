@@ -83,8 +83,10 @@
   (bisect_ppx (and :with-test (>= 2.8)))
   (mtime (>= 2.0))
   (uuidm (>= 0.9))
-  ; Neo4j Bolt native driver
-  (neo4j_bolt_eio (>= 0.4))
+  ; [neo4j_bolt_eio] removed: no caller in lib/ bin/ test/ since
+  ; continuous-loop iter #12 audit (2026-05-15).  Same shape as
+  ; pbrt_services (iter #11): declared but never imported.  Re-add
+  ; when Neo4j Bolt support resumes.
   ; OpenTelemetry observability + OTLP exporter
   (opentelemetry (>= 0.13))
   (ambient-context-eio (>= 0.2))

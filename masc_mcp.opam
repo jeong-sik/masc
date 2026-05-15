@@ -62,7 +62,6 @@ depends: [
   "bisect_ppx" {with-test & >= "2.8"}
   "mtime" {>= "2.0"}
   "uuidm" {>= "0.9"}
-  "neo4j_bolt_eio" {>= "0.4"}
   "opentelemetry" {>= "0.13"}
   "ambient-context-eio" {>= "0.2"}
   "crunch" {build & >= "4.0"}

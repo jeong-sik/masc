@@ -61,3 +61,37 @@ let cost_status_for_event
   else if runtime_unmetered then Cost_known_free
   else if runtime_unknown then Cost_runtime_unknown
   else Cost_oas_cost_unreported
+
+type thinking_log_summary =
+  { thinking_present : bool
+  ; thinking_blocks : int
+  ; thinking_chars : int
+  ; redacted_thinking_blocks : int
+  ; thinking_kind : string
+  }
+
+let summarize_thinking_blocks content =
+  let thinking_blocks = ref 0 in
+  let thinking_chars = ref 0 in
+  let redacted_thinking_blocks = ref 0 in
+  List.iter
+    (function
+      | Agent_sdk.Types.Thinking { content; _ } ->
+          incr thinking_blocks;
+          thinking_chars := !thinking_chars + String.length content
+      | Agent_sdk.Types.RedactedThinking _ -> incr redacted_thinking_blocks
+      | _ -> ())
+    content;
+  let thinking_kind =
+    match !thinking_blocks > 0, !redacted_thinking_blocks > 0 with
+    | false, false -> "none"
+    | true, false -> "thinking"
+    | false, true -> "redacted"
+    | true, true -> "mixed"
+  in
+  { thinking_present = !thinking_blocks > 0 || !redacted_thinking_blocks > 0
+  ; thinking_blocks = !thinking_blocks
+  ; thinking_chars = !thinking_chars
+  ; redacted_thinking_blocks = !redacted_thinking_blocks
+  ; thinking_kind
+  }

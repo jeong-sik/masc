@@ -37,3 +37,19 @@ val cost_status_for_event :
 val cost_label_usage_missing : string
 val cost_label_usage_untrusted : string
 val cost_label_oas_cost_unreported : string
+
+type thinking_log_summary =
+  { thinking_present : bool
+  ; thinking_blocks : int
+  ; thinking_chars : int
+  ; redacted_thinking_blocks : int
+  ; thinking_kind : string
+  }
+(** Redacted metadata for provider thinking blocks.  [thinking_chars] counts
+    only non-redacted [Thinking.content] bytes; raw content is never included
+    in this summary. *)
+
+val summarize_thinking_blocks :
+  Agent_sdk.Types.content_block list -> thinking_log_summary
+(** Summarize thinking block presence for logs/metrics without exposing raw
+    thinking content. *)

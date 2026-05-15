@@ -102,7 +102,7 @@ let is_typed_declarative_label_provider = function
 let cascade_name_to_string = Keeper_cascade_profile.runtime_name_to_string
 
 let has_execution_model_config () =
-  match Provider_adapter.preferred_execution_model_labels () with
+  match Provider_runtime_projection.preferred_execution_model_labels () with
   | _ :: _ -> true
   | [] -> false
 
@@ -111,17 +111,17 @@ let default_model_strings ~cascade_name =
     cascade_name |> cascade_name_to_string |> Keeper_cascade_profile.canonicalize
   in
   let all_labels =
-    match Provider_adapter.explicit_llama_model_label_result () with
+    match Provider_runtime_projection.explicit_local_model_label_result () with
     | Ok label -> [ label ]
     | Error _ -> (
-        match Provider_adapter.preferred_execution_model_labels () with
+        match Provider_runtime_projection.preferred_execution_model_labels () with
         | [] ->
           (* Neither explicit llama label nor any preferred execution
              label is configured.  Iter 25: surface so dashboards can
              alert on missing execution-lane config. *)
           Cascade_metrics.on_default_label_fallback
             ~cascade:cascade_name ~reason:"no_execution_labels";
-          [ Provider_adapter.default_local_fallback_label () ]
+          [ Provider_runtime_projection.default_local_fallback_label () ]
         | labels -> labels)
   in
   if is_local_only_cascade cascade_name then
@@ -132,7 +132,7 @@ let default_model_strings ~cascade_name =
          only remote providers.  Iter 25 counter. *)
       Cascade_metrics.on_default_label_fallback
         ~cascade:cascade_name ~reason:"local_cascade_no_local";
-      [ Provider_adapter.default_local_fallback_label () ]
+      [ Provider_runtime_projection.default_local_fallback_label () ]
     | local -> local
   else
     all_labels
@@ -351,16 +351,24 @@ let default_local_model_label_and_id () : string * string =
             if entry.is_available () then Some (label, model_id_of_label label)
             else None)
   in
-  match Provider_adapter.configured_default_model_label_result () with
+  match Provider_runtime_projection.configured_default_model_label_result () with
   | Ok label -> (
       match try_label label with
       | Some pair -> pair
       | None -> (
-          match List.find_map try_label (Provider_adapter.preferred_execution_model_labels ()) with
+          match
+            List.find_map
+              try_label
+              (Provider_runtime_projection.preferred_execution_model_labels ())
+          with
           | Some pair -> pair
           | None -> fallback))
   | Error _ -> (
-      match List.find_map try_label (Provider_adapter.preferred_execution_model_labels ()) with
+      match
+        List.find_map
+          try_label
+          (Provider_runtime_projection.preferred_execution_model_labels ())
+      with
       | Some pair -> pair
       | None -> fallback)
 

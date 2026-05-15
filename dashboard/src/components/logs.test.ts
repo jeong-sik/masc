@@ -141,6 +141,14 @@ describe('LogViewer Code links', () => {
   it('links safe structured log file details back to the Code IDE route', async () => {
     const fetchLogs = vi.fn().mockResolvedValue({
       total: 1,
+      generated_at_iso: '2026-05-15T01:00:00Z',
+      dashboard_surface: '/api/v1/dashboard/logs',
+      source: 'masc_log_ring',
+      retention: {
+        scope: 'dashboard_logs',
+        durable_store: '/Users/dancer/me/.masc/logs/system_log_2026-05-15.jsonl',
+      },
+      latest_seq: 1,
       entries: [{
         seq: 1,
         ts: '2026-05-14T00:00:00Z',
@@ -160,6 +168,10 @@ describe('LogViewer Code links', () => {
     const codeLink = container.querySelector('[data-testid="logs-code-link"]') as HTMLButtonElement
     expect(codeLink.textContent).toBe('Code')
     expect(codeLink.getAttribute('title')).toBe('Code lib/runtime.ml:12')
+    const provenance = container.querySelector('[data-testid="logs-provenance"]') as HTMLElement
+    expect(provenance.textContent).toContain('masc_log_ring')
+    expect(provenance.textContent).toContain('dashboard_logs')
+    expect(provenance.textContent).toContain('system_log_2026-05-15.jsonl')
 
     codeLink.click()
     expect(window.location.hash).toBe(

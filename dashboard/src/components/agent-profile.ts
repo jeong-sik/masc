@@ -14,6 +14,7 @@ import { EmptyState } from './common/empty-state'
 import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
 import { StatGrid } from './common/stat-tile'
+import { DashboardFeedSourceStrip } from './common/dashboard-feed-source-strip'
 import { formatTokens } from '../lib/format-number'
 import { findKeeper } from '../lib/keeper-utils'
 import { autonomyHint } from './keeper-detail-ctx-utils'
@@ -384,9 +385,10 @@ export function AgentProfile({ name }: { name: string }) {
           const collabs = rel.collaborators ?? []
           const interests = rel.interests ?? []
           const hasData = collabs.length > 0 || interests.length > 0
-          if (!hasData) return null
           return html`
             <${Card} title="관계 (${collabs.length})" class="ff-card rounded-[var(--r-1)]">
+              <${DashboardFeedSourceStrip} meta=${rel} className="mb-2" />
+              ${!hasData ? html`<${EmptyState} message="관계 데이터 없음" compact />` : null}
               ${collabs.length > 0 ? html`
                 <div class="flex flex-col gap-1">
                   ${collabs.map(c => html`
@@ -419,6 +421,7 @@ export function AgentProfile({ name }: { name: string }) {
         })()}
 
         <${Card} title="타임라인" class="ff-card rounded-[var(--r-1)]">
+          <${DashboardFeedSourceStrip} meta=${timeline} className="mb-2" />
           ${!timeline || (timeline.events ?? []).length === 0
             ? html`<${EmptyState} message="이벤트 없음" compact />`
             : html`<div class="flex flex-col gap-0.5 max-h-75 overflow-y-auto">${(timeline.events ?? []).map((evt: AgentTimelineEvent, idx: number) => {

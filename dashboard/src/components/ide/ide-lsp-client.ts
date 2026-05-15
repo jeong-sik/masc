@@ -17,6 +17,8 @@ import { StateField, StateEffect, RangeSetBuilder, type Extension } from '@codem
 import { signal } from '@preact/signals'
 import { normalizeIdeContextFilePath } from './ide-state'
 
+const DEFAULT_LANGUAGE_ID = 'text' as const
+
 // ── Types ─────────────────────────────────────────────────────────
 
 export interface LspCodeLens {
@@ -736,7 +738,7 @@ const lspViewPlugin = ViewPlugin.fromClass(
         this.conn.notifyDidClose(oldFilePath)
         clearLspDiagnosticSnapshot(oldFilePath)
         this.filePath = newFilePath
-        this.conn.notifyDidOpen(newFilePath, languageIdFromPath(newFilePath) ?? 'text')
+        this.conn.notifyDidOpen(newFilePath, languageIdFromPath(newFilePath) ?? DEFAULT_LANGUAGE_ID)
         this.scheduleRefresh()
       }
     }

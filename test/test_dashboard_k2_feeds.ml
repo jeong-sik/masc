@@ -209,6 +209,12 @@ let test_decisions_json_terminal_reason_duration_fallback () =
   let compact =
     Dash.keeper_decisions_json ~config ~keepers:[ meta ] ~limit:10 ()
   in
+  check string "compact dashboard surface" "/api/v1/dashboard/keeper-decisions"
+    Json.(compact |> member "dashboard_surface" |> to_string);
+  check string "compact source" "keeper_decision_log"
+    Json.(compact |> member "source" |> to_string);
+  check string "compact durable store" ".masc/keepers/:name.decisions.jsonl"
+    Json.(compact |> member "retention" |> member "durable_store" |> to_string);
   let compact_event =
     match Json.(compact |> member "events" |> to_list) with
     | event :: _ -> event

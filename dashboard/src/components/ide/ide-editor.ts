@@ -255,6 +255,7 @@ export function IdeEditor({
             </span>
             ${currentFileFocus.route_links && currentFileFocus.route_links.length > 0 ? html`
               <span class="ide-editor-context-route-links" aria-label="Focused context operational links">
+                <${EditorContextRouteCount} count=${currentFileFocus.route_links.length} label="focused context" />
                 ${currentFileFocus.route_links.map(link => EditorContextRouteLink(link))}
               </span>
             ` : null}
@@ -523,6 +524,24 @@ function EditorContextRouteLink(link: IdeContextRouteLink) {
     >
       ${link.label}
     </button>
+  `
+}
+
+function EditorContextRouteCount({
+  count,
+  label,
+}: {
+  readonly count: number
+  readonly label: string
+}) {
+  return html`
+    <span
+      class="ide-editor-context-route-count"
+      title=${`${count} linked ${label} routes`}
+      aria-label=${`${count} linked ${label} routes`}
+    >
+      CTX ${count}
+    </span>
   `
 }
 
@@ -1365,6 +1384,7 @@ function AnnotationPopover({
           aria-label="Annotation operational links"
           style=${{ marginTop: 'var(--sp-2)' }}
         >
+          <${EditorContextRouteCount} count=${routeLinks.length} label="annotation context" />
           ${routeLinks.map(link => EditorContextRouteLink(link))}
         </div>
       ` : null}

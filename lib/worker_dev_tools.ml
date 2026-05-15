@@ -497,6 +497,12 @@ let is_path_flag token =
   | _ -> false
 ;;
 
+let path_flag_requires_existing_dir token =
+  match strip_wrapping_quotes token with
+  | "-C" | "--work-tree" -> true
+  | _ -> false
+;;
+
 let path_value_of_flagged_token token =
   let token = strip_wrapping_quotes token in
   let prefixes = [ "--git-dir="; "--work-tree="; "--exec-path=" ] in
@@ -511,6 +517,17 @@ let path_value_of_flagged_token token =
               (String.length token - String.length prefix))
        else None)
     prefixes
+;;
+
+let inline_path_flag_requires_existing_dir token =
+  let token = strip_wrapping_quotes token in
+  String.starts_with ~prefix:"--work-tree=" token
+;;
+
+let path_is_existing_dir ?workdir path =
+  let resolved = resolve_path ?base_dir:workdir path in
+  try Sys.file_exists resolved && Sys.is_directory resolved with
+  | Sys_error _ -> false
 ;;
 
 let looks_like_path_token token =
@@ -577,43 +594,50 @@ let validate_command_paths ?workdir cmd =
           paths and explicit cwd."
          ^ path_rewrite_redirect_hint cmd)
     else (
-      let rec loop expect_path_value = function
+      let validate_path_value ~requires_existing_dir token =
+        if not (validate_path ?workdir token)
+        then
+          Error
+            (Printf.sprintf
+               "Path blocked: %s (outside allowed directories for this keeper \
+                command)"
+               token)
+        else if requires_existing_dir && not (path_is_existing_dir ?workdir token)
+        then
+          Error
+            (Printf.sprintf
+               "cwd_not_directory: %s (directory does not exist under cwd; create \
+                or repair the sandbox repo/worktree first)"
+               token)
+        else Ok ()
+      in
+      let rec loop expect_existing_dir = function
         | [] -> Ok ()
         | token :: rest ->
           let token = strip_wrapping_quotes token in
           if token = ""
-          then loop expect_path_value rest
-          else if expect_path_value
+          then loop expect_existing_dir rest
+          else if expect_existing_dir
           then
-            if validate_path ?workdir token
-            then loop false rest
-            else
-              Error
-                (Printf.sprintf
-                   "Path blocked: %s (outside allowed directories for this keeper \
-                    command)"
-                   token)
+            (match validate_path_value ~requires_existing_dir:true token with
+             | Ok () -> loop false rest
+             | Error _ as err -> err)
           else (
             match path_value_of_flagged_token token with
             | Some value ->
-              if validate_path ?workdir value
-              then loop false rest
-              else
-                Error
-                  (Printf.sprintf
-                     "Path blocked: %s (outside allowed directories for this keeper \
-                      command)"
-                     value)
-            | None when is_path_flag token -> loop true rest
+              (match
+                 validate_path_value
+                   ~requires_existing_dir:(inline_path_flag_requires_existing_dir token)
+                   value
+               with
+               | Ok () -> loop false rest
+               | Error _ as err -> err)
+            | None when is_path_flag token ->
+              loop (path_flag_requires_existing_dir token) rest
             | None when looks_like_path_token token ->
-              if validate_path ?workdir token
-              then loop false rest
-              else
-                Error
-                  (Printf.sprintf
-                     "Path blocked: %s (outside allowed directories for this keeper \
-                      command)"
-                     token)
+              (match validate_path_value ~requires_existing_dir:false token with
+               | Ok () -> loop false rest
+               | Error _ as err -> err)
             | None -> loop false rest)
       in
       cmd |> split_shell_tokens |> loop false)

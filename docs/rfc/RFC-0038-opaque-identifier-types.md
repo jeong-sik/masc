@@ -5,7 +5,7 @@
 - **Created**: 2026-05-07
 - **Related**: RFC-0024 (ollama cascade integration), RFC-0027 (capability-typed cascade), RFC-0032 (env knob unification), RFC-0037 (local-first enablement boundary)
 - **Files referenced**:
-  `lib/provider_adapter.ml:152-167` (cn_* SSOT constants),
+  `lib/provider_adapter.ml:152-167` (legacy provider-name constants),
   `lib/cascade/cascade_config.ml:277` (provider name match),
   `lib/keeper/keeper_status_detail.ml:199` (provider name match),
   `lib/keeper/keeper_cascade_profile.ml:14-22` (cascade variant SSOT),
@@ -18,7 +18,7 @@ code as **bare string literals** scattered across modules:
 
 | Identifier kind | SSOT location | Example drift sites | Drift count (`rg "<name>"` lib) |
 |-----------------|---------------|---------------------|---------------------------------|
-| Provider name (e.g. "ollama") | `Provider_adapter.cn_ollama` | `keeper_status_detail.ml:199`, `cascade_config.ml:277`, `server_routes_http_routes_cascade.ml:16` | 20+ across 14 files |
+| Provider name (e.g. "ollama") | legacy `Provider_adapter` provider-name constant | `keeper_status_detail.ml:199`, `cascade_config.ml:277`, `server_routes_http_routes_cascade.ml:16` | 20+ across 14 files |
 | Cascade name (e.g. "primary") | `Keeper_cascade_profile.t` variant | `cascade_routes.ml:65-94`, `cascade_config_loader.ml`, `cascade_routes.mli` | 5 files |
 | Model id (e.g. "qwen3-coder:30b") | `cascade.toml` (data) | scattered string equality checks across cascade resolvers, telemetry tags |  highly variable |
 
@@ -27,7 +27,7 @@ provider catalogs, cascade configurations, and external model registries
 that change independently of the source code. Embedding them as string
 literals creates three problems:
 
-1. **Drift risk**: SSOT exists (`cn_ollama`) but is bypassed by 14
+1. **Drift risk**: a provider-name SSOT exists but is bypassed by 14
    files that re-write `"ollama"` directly. A rename of the canonical
    name (e.g. `"ollama"` → `"ollama-local"`) breaks the unmigrated
    sites silently — unit tests pass, runtime fails.
@@ -89,7 +89,7 @@ val gemini : t
 val kimi : t
 val glm : t
 val custom : t
-(* ... one per Provider_adapter.cn_* constant *)
+(* ... one per legacy provider-name constant *)
 ```
 
 Identical pattern for `Cascade_id` (canonical names from
@@ -102,13 +102,13 @@ The repository has many places that compare strings. We migrate **call
 sites only**, not data structures, in three phases:
 
 **Phase A — Provider_id (this RFC, surgical PR)**:
-- Replace `String.equal x "ollama"` with `String.equal x Provider_adapter.cn_ollama` (or eventually `Provider_id.equal x Provider_id.ollama`).
+- Replace `String.equal x "ollama"` with a single provider-name boundary (or eventually `Provider_id.equal x Provider_id.ollama`).
 - This is the minimum drift fix — even without the full opaque type, just routing through SSOT eliminates the literal duplication. **Companion PR #14111 ships exactly this.**
 
 **Phase B — Phantom-typed wrappers**:
 - Introduce `Provider_id.t = private string`.
-- `Provider_adapter.cn_ollama : string` becomes `Provider_id.ollama : Provider_id.t`.
-- All call sites that imported `cn_ollama` get an automatic compile error and must update — desirable, this is how we find the migration surface.
+- legacy provider-name constants become `Provider_id.ollama : Provider_id.t`.
+- All call sites that imported legacy constants get an automatic compile error and must update — desirable, this is how we find the migration surface.
 - Estimate: ~80-150 LOC of mechanical updates spread across ~15 files.
 
 **Phase C — Cascade_id and Model_id**:
@@ -159,14 +159,14 @@ type-safety without forcing exhaustiveness.
 
 | Phase | Scope | LOC | Status |
 |-------|-------|-----|--------|
-| A | route through `Provider_adapter.cn_*` SSOT (no new module) | ~30 | DONE — companion PR #14111 |
+| A | route through the legacy provider-name SSOT (no new module) | ~30 | DONE — companion PR #14111 |
 | B | introduce `Provider_id.t = private string`, migrate call sites | ~150 | OPEN — needs separate sign-off |
 | C | `Cascade_id.t`, `Model_id.t` + migration | ~300 | DEFERRED — needs review of Phase B outcome |
 
 Phase A ships immediately to remove the most acute drift. Phase B is
 the actual type-safety win and requires a separate review because it
-introduces a new module convention and breaks every consumer of
-`cn_*` (fixable by mechanical rename).
+introduces a new module convention and breaks every consumer of the
+legacy provider-name constants (fixable by mechanical rename).
 
 ## 6. Validation
 
@@ -186,7 +186,7 @@ introduces a new module convention and breaks every consumer of
 - **Risk**: `private string` aliases interact awkwardly with JSON
   serialization libraries that demand concrete types. **Mitigation**:
   `to_string` is exposed; serialization sites call it explicitly.
-- **Tradeoff**: Phase A alone (`cn_*` routing) is a 30 LOC win that
+- **Tradeoff**: Phase A alone (provider-name SSOT routing) is a 30 LOC win that
   delivers most of the drift safety. Phase B is the type-safety win
   and is a much bigger refactor. We can ship A and stop, depending on
   Phase B review.

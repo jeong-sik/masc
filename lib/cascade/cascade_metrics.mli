@@ -291,10 +291,11 @@ val on_cascade_metrics_eviction : unit -> unit
     [cascade_max_keys] or canonicalize synthesized names. *)
 
 val on_max_tokens_clamped : unit -> unit
-(** Legacy iter-46 counter retained for metric compatibility. DD-020
-    replaced runtime max_tokens clipping with the structured
-    [max_tokens_ceiling_violation] pre-dispatch error, so current code
-    paths should not emit this counter. *)
+(** Tick when an automatically-derived max_tokens fallback is reduced to the
+    resolved cascade output ceiling. Repeated clamps are counted here even
+    when the corresponding WARN log is deduplicated. Explicit cascade.toml or
+    caller-provided over-ceiling values still use the structured
+    [max_tokens_ceiling_violation] pre-dispatch error instead. *)
 
 val on_cascade_audit_failure : stage:string -> unit
 (** Tick the cascade-audit subsystem failure counter at

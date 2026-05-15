@@ -86,6 +86,7 @@ val touch : string -> unit
 val update_last_event_id : string -> int -> unit
 val all_session_ids : unit -> string list
 val client_count : unit -> int
+val client_count_by_kind : session_kind -> int
 val close_all_clients : unit -> int
 val cleanup_stale : ?max_age_s:float -> unit -> string list
 

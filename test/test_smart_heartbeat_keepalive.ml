@@ -146,6 +146,53 @@ let test_cycle_pauses_on_skip_idle () =
   check bool "Skip_idle pauses cycle" false
     (KK.smart_heartbeat_cycle_continues (HS.Skip_idle next))
 
+let test_visibility_gate_delays_unobserved_idle_emit () =
+  let now = 1_000.0 in
+  match
+    KK.visibility_gate_decision
+      ~visible_consumers:0
+      ~has_pending_signal:false
+      ~now
+      ~last_heartbeat_cycle_ts:(now -. 60.0)
+      HS.Emit
+  with
+  | HS.Skip_idle next ->
+    check bool "next heartbeat stays bounded" true (next > now)
+  | HS.Emit | HS.Skip_busy -> fail "expected unobserved emit to become Skip_idle"
+
+let test_visibility_gate_allows_pending_signal () =
+  let decision =
+    KK.visibility_gate_decision
+      ~visible_consumers:0
+      ~has_pending_signal:true
+      ~now:1_000.0
+      ~last_heartbeat_cycle_ts:940.0
+      HS.Emit
+  in
+  check bool "pending signal keeps emit" true (decision = HS.Emit)
+
+let test_visibility_gate_allows_visible_consumer () =
+  let decision =
+    KK.visibility_gate_decision
+      ~visible_consumers:1
+      ~has_pending_signal:false
+      ~now:1_000.0
+      ~last_heartbeat_cycle_ts:940.0
+      HS.Emit
+  in
+  check bool "visible consumer keeps emit" true (decision = HS.Emit)
+
+let test_visibility_gate_preserves_busy () =
+  let decision =
+    KK.visibility_gate_decision
+      ~visible_consumers:0
+      ~has_pending_signal:false
+      ~now:1_000.0
+      ~last_heartbeat_cycle_ts:940.0
+      HS.Skip_busy
+  in
+  check bool "busy keeps cycle path" true (decision = HS.Skip_busy)
+
 (* ── MissedWakeup gap regression guard (KeeperHeartbeat.tla) ───────
    Skip_idle + Woken must promote the gate to [true]. Without this,
    external wakeup_keeper / board_signal calls that fire during a
@@ -363,6 +410,15 @@ let () =
         `Quick test_cycle_continues_on_skip_busy;
       test_case "Emit -> cycle continues" `Quick test_cycle_continues_on_emit;
       test_case "Skip_idle -> cycle pauses" `Quick test_cycle_pauses_on_skip_idle;
+    ];
+    "visibility_gate", [
+      test_case "unobserved idle emit delays dispatch" `Quick
+        test_visibility_gate_delays_unobserved_idle_emit;
+      test_case "pending signal bypasses no-consumer delay" `Quick
+        test_visibility_gate_allows_pending_signal;
+      test_case "visible consumer bypasses delay" `Quick
+        test_visibility_gate_allows_visible_consumer;
+      test_case "busy decision is preserved" `Quick test_visibility_gate_preserves_busy;
     ];
     "board_wakeup_selection", [
       test_case "generic board activity is capped"

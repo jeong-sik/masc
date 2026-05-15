@@ -62,10 +62,24 @@ const KIND_TOKEN: Record<ThreadKind, string> = {
   note: 'var(--color-fg-muted)',
   suggest: 'var(--color-status-warn)',
 }
+const CONVERSATION_CONTEXT_BADGE_STYLE = {
+  fontSize: 'var(--fs-9)',
+  padding: '0 3px',
+  border: '1px solid var(--color-border-default)',
+  borderRadius: 'var(--r-0)',
+  color: 'var(--color-fg-muted)',
+  background: 'var(--color-bg-surface)',
+  fontFamily: 'var(--font-mono)',
+}
 
 const EMPTY_POSTS: ReadonlyArray<BoardPost> = []
 const EMPTY_DECISIONS: ReadonlyArray<KeeperDecision> = []
 const EMPTY_CASCADE: ReadonlyArray<CascadeStrategyTraceEvent> = []
+
+interface ConversationContextSummary {
+  readonly label: string
+  readonly title: string
+}
 
 type ReplayRailItem =
   | { readonly source: 'thread'; readonly timestamp_ms: number; readonly post: BoardPost }
@@ -432,6 +446,7 @@ function PostCard(
   const thread = postToAnchoredThread(post)
   const anchor = thread?.anchor ?? null
   const routeLinks = conversationRouteLinks(post, anchor, kind, bodyText)
+  const contextSummary = conversationContextSummary(routeLinks)
 
   return html`
     <li class="ide-rail-item">
@@ -483,6 +498,7 @@ function PostCard(
               ${statusDot.label}
             </span>
           ` : null}
+          ${contextSummary ? ConversationContextBadge(contextSummary) : null}
           <span style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)', marginLeft: 'auto' }}>${formatThreadTime(createdMs)}</span>
         </div>
         ${post.hearth ? html`
@@ -565,6 +581,27 @@ function ConversationRouteLink(link: IdeContextRouteLink) {
   `
 }
 
+export function conversationContextSummary(
+  links: ReadonlyArray<IdeContextRouteLink>,
+): ConversationContextSummary | null {
+  if (links.length === 0) return null
+  return {
+    label: `CTX ${links.length}`,
+    title: `Linked context: ${links.map(link => link.label).join(', ')}`,
+  }
+}
+
+function ConversationContextBadge(summary: ConversationContextSummary) {
+  return html`
+    <span
+      class="ide-conversation-context-badge"
+      title=${summary.title}
+      aria-label=${summary.title}
+      style=${CONVERSATION_CONTEXT_BADGE_STYLE}
+    >${summary.label}</span>
+  `
+}
+
 function DecisionCard(
   item: Extract<ReplayRailItem, { source: 'decision' }>,
   entries: ReadonlyArray<KeeperPresenceEntry>,
@@ -590,6 +627,7 @@ function DecisionCard(
     hasFocus ? cursor.line : undefined,
     summary,
   )
+  const contextSummary = conversationContextSummary(routeLinks)
   return html`
     <li style=${{ display: 'block' }}>
       <div
@@ -631,6 +669,7 @@ function DecisionCard(
               ${statusDot.label}
             </span>
           ` : null}
+          ${contextSummary ? ConversationContextBadge(contextSummary) : null}
           <span style=${{ marginLeft: 'auto', fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)' }}>${formatThreadTime(item.timestamp_ms)}</span>
         </div>
         <p style=${{ margin: 0, color: 'var(--color-fg-secondary)', fontSize: 'var(--fs-12)' }}>${summary || 'decision event'}</p>
@@ -691,6 +730,7 @@ function decisionTelemetryQuery(decision: KeeperDecision, timestampMs: number): 
 function CascadeCard(item: Extract<ReplayRailItem, { source: 'cascade' }>) {
   const event = item.cascade
   const routeLinks = cascadeRouteLinks(item)
+  const contextSummary = conversationContextSummary(routeLinks)
   return html`
     <li style=${{ display: 'block' }}>
       <div
@@ -708,6 +748,7 @@ function CascadeCard(item: Extract<ReplayRailItem, { source: 'cascade' }>) {
         <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
           <span style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-accent-fg)', letterSpacing: '0.05em' }}>CASCADE</span>
           <span style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-secondary)' }}>${event.cascade_name}</span>
+          ${contextSummary ? ConversationContextBadge(contextSummary) : null}
           <span style=${{ marginLeft: 'auto', fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)' }}>${formatThreadTime(item.timestamp_ms)}</span>
         </div>
         <p style=${{ margin: 0, color: 'var(--color-fg-secondary)', fontSize: 'var(--fs-12)' }}>

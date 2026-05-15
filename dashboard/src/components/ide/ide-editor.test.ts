@@ -675,6 +675,7 @@ describe('IdeEditor', () => {
     const focusMeta = [...container.querySelectorAll('.ide-editor-context-focus-meta > span')]
       .map(node => node.textContent)
     expect(focusMeta).toEqual(['Task', 'keeper sangsu', 'source event-1', '2 links'])
+    expect(container.querySelector('.ide-editor-context-route-count')?.textContent).toBe('CTX 2')
     const routeLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-editor-context-route-link')]
     expect(routeLinks.map(link => link.textContent)).toEqual(['Task', 'Telemetry'])
     fireEvent.click(routeLinks.find(link => link.textContent === 'Telemetry')!)

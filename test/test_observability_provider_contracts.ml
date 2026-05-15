@@ -7,9 +7,6 @@
 
 open Alcotest
 
-(* ── Section 1: Provider_adapter contracts ── *)
-
-module Adapter = Masc_mcp.Provider_adapter
 module Model_resolve = Masc_mcp.Cascade_model_resolve
 
 let string_of_resolution_provenance = function
@@ -26,70 +23,7 @@ let resolution_provenance =
       Format.pp_print_string fmt (string_of_resolution_provenance provenance))
     ( = )
 
-let test_alias_roundtrip () =
-  let cases =
-    [ ("Claude", "claude");
-      ("Gemini", "gemini");
-      ("llama", "llama"); ("llamacpp", "llama");
-      ("glm", "glm");
-      ("glm-coding", "glm-coding");
-      ("claude-code", "claude_code");
-      ("codex-cli", "codex_cli");
-      ("openrouter", "openrouter") ]
-  in
-  List.iter (fun (input, expected) ->
-    match Adapter.resolve_direct_canonical_name input with
-    | Some canonical ->
-        check string (Printf.sprintf "alias %s -> %s" input expected)
-          expected canonical
-    | None ->
-        fail (Printf.sprintf "alias %s resolved to None" input))
-    cases
-
-let test_case_insensitive () =
-  let a1 = Adapter.resolve_direct_adapter "Claude" in
-  let a2 = Adapter.resolve_direct_adapter "CLAUDE" in
-  check bool "mixed case resolves" true (Option.is_some a1);
-  check bool "upper case resolves" true (Option.is_some a2)
-
-let test_whitespace_trimmed () =
-  let a = Adapter.resolve_direct_adapter "  claude  " in
-  check bool "whitespace trimmed" true (Option.is_some a);
-  check string "canonical" "claude"
-    (Option.get a).Adapter.canonical_name
-
-let test_unknown_returns_none () =
-  let a = Adapter.resolve_direct_adapter "nonexistent-provider-xyz" in
-  check (option string) "unknown returns None" None
-    (Option.map (fun (x : Adapter.adapter) -> x.canonical_name) a)
-
-let test_adapter_well_formed () =
-  List.iter (fun (a : Adapter.adapter) ->
-    check bool ("canonical non-empty: " ^ a.canonical_name)
-      true (String.length a.canonical_name > 0);
-    check bool ("has aliases: " ^ a.canonical_name)
-      true (List.length a.aliases > 0))
-    Adapter.direct_adapters
-
-let test_runtime_kind_strings () =
-  check string "local" "local" (Adapter.string_of_runtime_kind Adapter.Local);
-  check string "cli_agent" "cli_agent"
-    (Adapter.string_of_runtime_kind Adapter.Cli_agent);
-  check string "direct_api" "direct_api"
-    (Adapter.string_of_runtime_kind Adapter.Direct_api)
-
-(* ── Section 2: OAS model resolve contracts ── *)
-
-let test_resolve_canonical_wraps_adapter () =
-  let labels = [ "claude"; "gemini"; "llama"; "claude_code"; "codex_cli" ] in
-  List.iter (fun label ->
-    let via_fn = Adapter.resolve_direct_canonical_name label in
-    let via_adapter =
-      Option.map (fun (a : Adapter.adapter) -> a.canonical_name)
-        (Adapter.resolve_direct_adapter label)
-    in
-    check (option string) ("consistent: " ^ label) via_adapter via_fn)
-    labels
+(* ── Section 1: OAS model resolve contracts ── *)
 
 let test_dashboard_provider_snapshots_include_cli_and_api () =
   Eio_main.run (fun _env ->
@@ -246,7 +180,7 @@ let test_cascade_model_resolve_unresolved_auto_provenance () =
   check resolution_provenance "generic OAS binding provenance"
     Model_resolve.Hardcoded_default resolved.provenance
 
-(* ── Section 3: Dashboard schema contracts ── *)
+(* ── Section 2: Dashboard schema contracts ── *)
 
 let test_heartbeat_snapshot_has_required_fields () =
   let snapshot = `Assoc
@@ -271,7 +205,7 @@ let test_prometheus_text_format () =
   check bool "prometheus output non-empty" true
     (String.length metrics >= 0)
 
-(* ── Section 4: Telemetry contracts ── *)
+(* ── Section 3: Telemetry contracts ── *)
 
 let test_event_serialization_roundtrip () =
   let module T = Masc_mcp.Telemetry_eio in
@@ -303,7 +237,7 @@ let test_event_serialization_roundtrip () =
       true (String.length json_str > 0))
     events
 
-(* ── Section 5: Extended redaction contracts ── *)
+(* ── Section 4: Extended redaction contracts ── *)
 
 let test_bearer_token_redacted () =
   let input = "Authorization: Bearer sk-secret-key-12345" in
@@ -334,21 +268,10 @@ let test_redaction_idempotent () =
 let () =
   run "Observability Provider Contracts"
     [
-      ( "provider_adapter",
-        [
-          test_case "alias roundtrip" `Quick test_alias_roundtrip;
-          test_case "case insensitive" `Quick test_case_insensitive;
-          test_case "whitespace trimmed" `Quick test_whitespace_trimmed;
-          test_case "unknown returns none" `Quick test_unknown_returns_none;
-          test_case "adapter well formed" `Quick test_adapter_well_formed;
-          test_case "runtime kind strings" `Quick test_runtime_kind_strings;
-          test_case "dashboard snapshots include cli and api" `Quick
-            test_dashboard_provider_snapshots_include_cli_and_api;
-        ] );
       ( "oas_model_resolve",
         [
-          test_case "resolve canonical wraps adapter" `Quick
-            test_resolve_canonical_wraps_adapter;
+          test_case "dashboard snapshots include cli and api" `Quick
+            test_dashboard_provider_snapshots_include_cli_and_api;
           test_case "default registry populated" `Quick
             test_default_registry_populated;
           test_case "provider name of label" `Quick test_provider_name_of_label;

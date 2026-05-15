@@ -1586,6 +1586,77 @@ let test_mark_turn_cascade_exhausted_materializes_pre_disclosure_path () =
     fail "mark_turn_cascade_exhausted cleared observation"
   | None -> fail "entry missing"
 
+let test_mark_turn_provider_attempt_started_lands_on_executing () =
+  R.clear ();
+  let keeper_name = "k-provider-attempt-started" in
+  ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
+  R.mark_turn_started ~base_path:bp keeper_name;
+  R.mark_turn_provider_attempt_started ~base_path:bp keeper_name;
+  match R.get ~base_path:bp keeper_name with
+  | Some { current_turn_observation = Some obs; _ } ->
+    check bool "cascade_state lands on Cascade_trying" true
+      (obs.R.cascade_state = R.Packed R.Cascade_trying);
+    check bool "turn_phase lands on Turn_executing" true
+      (obs.R.turn_phase = R.Packed R.Turn_executing);
+    check bool "decision_stage records tool policy boundary" true
+      (obs.R.decision_stage = R.Packed R.Decision_tool_policy_selected)
+  | Some { current_turn_observation = None; _ } ->
+    fail "mark_turn_provider_attempt_started cleared observation"
+  | None -> fail "entry missing"
+
+let test_mark_turn_provider_attempt_started_no_op_without_obs () =
+  R.clear ();
+  let keeper_name = "k-provider-attempt-no-obs" in
+  ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
+  R.mark_turn_provider_attempt_started ~base_path:bp keeper_name;
+  match R.get ~base_path:bp keeper_name with
+  | Some { current_turn_observation = None; _ } -> ()
+  | Some { current_turn_observation = Some _; _ } ->
+    fail "mark_turn_provider_attempt_started installed observation without keeper-turn"
+  | None -> fail "entry missing"
+
+let test_mark_turn_provider_attempt_started_is_idempotent () =
+  R.clear ();
+  let keeper_name = "k-provider-attempt-idempotent" in
+  ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
+  R.mark_turn_started ~base_path:bp keeper_name;
+  R.mark_turn_provider_attempt_started ~base_path:bp keeper_name;
+  R.mark_turn_provider_attempt_started ~base_path:bp keeper_name;
+  match R.get ~base_path:bp keeper_name with
+  | Some { current_turn_observation = Some obs; _ } ->
+    check bool "cascade_state remains Cascade_trying" true
+      (obs.R.cascade_state = R.Packed R.Cascade_trying);
+    check bool "turn_phase remains Turn_executing" true
+      (obs.R.turn_phase = R.Packed R.Turn_executing)
+  | Some { current_turn_observation = None; _ } ->
+    fail "mark_turn_provider_attempt_started cleared observation"
+  | None -> fail "entry missing"
+
+let test_mark_turn_provider_attempt_started_no_op_after_done () =
+  R.clear ();
+  let keeper_name = "k-provider-attempt-done" in
+  ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
+  R.mark_turn_started ~base_path:bp keeper_name;
+  R.set_turn_cascade_state
+    ~base_path:bp
+    keeper_name
+    (R.Packed R.Cascade_selecting);
+  R.set_turn_cascade_state
+    ~base_path:bp
+    keeper_name
+    (R.Packed R.Cascade_trying);
+  R.set_turn_cascade_state ~base_path:bp keeper_name (R.Packed R.Cascade_done);
+  R.mark_turn_provider_attempt_started ~base_path:bp keeper_name;
+  match R.get ~base_path:bp keeper_name with
+  | Some { current_turn_observation = Some obs; _ } ->
+    check bool "cascade_state remains Cascade_done" true
+      (obs.R.cascade_state = R.Packed R.Cascade_done);
+    check bool "decision_stage remains unchanged" true
+      (obs.R.decision_stage = R.Packed R.Decision_undecided)
+  | Some { current_turn_observation = None; _ } ->
+    fail "mark_turn_provider_attempt_started cleared observation"
+  | None -> fail "entry missing"
+
 (* The production [Assert_failure] at keeper_registry.ml:775 was triggered
    when the SDK fired [before_turn_params] for a second time inside one
    keeper-turn.  This test reproduces the same shape: two
@@ -1810,6 +1881,14 @@ let () =
             test_mark_sdk_turn_started_no_op_without_obs;
           eio_test "mark_turn_cascade_exhausted materializes pre-disclosure path"
             test_mark_turn_cascade_exhausted_materializes_pre_disclosure_path;
+          eio_test "mark_turn_provider_attempt_started lands on executing"
+            test_mark_turn_provider_attempt_started_lands_on_executing;
+          eio_test "mark_turn_provider_attempt_started no-op without observation"
+            test_mark_turn_provider_attempt_started_no_op_without_obs;
+          eio_test "mark_turn_provider_attempt_started is idempotent"
+            test_mark_turn_provider_attempt_started_is_idempotent;
+          eio_test "mark_turn_provider_attempt_started no-op after done"
+            test_mark_turn_provider_attempt_started_no_op_after_done;
           eio_test "two SDK-turn boundaries inside one keeper-turn"
             test_two_sdk_turn_boundaries_no_assert;
           eio_test "set_turn_phase rejection bumps guard metric"

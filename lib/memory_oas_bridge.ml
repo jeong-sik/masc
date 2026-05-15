@@ -250,19 +250,31 @@ let make_backend ?base_dir ~(agent_name : string) ~(session_id : string) ()
   let base_dir = resolve_base_dir ?base_dir () in
   Memory_jsonl.make_backend ~base_dir ~agent_name ~session_id
 
+type created_memory =
+  { created_memory : Agent_sdk.Memory.t
+  ; created_memory_long_term_backend : Agent_sdk.Memory.long_term_backend
+  }
+
 (** Create an OAS [Memory.t] instance.
 
     Uses JSONL long_term_backend (filesystem-first).
     @param session_id Session identifier; defaults to timestamp-based ID. *)
-let create_memory ~(agent_name : string) ?(base_dir : string option)
+let create_memory_with_backend ~(agent_name : string) ?(base_dir : string option)
     ?(session_id : string option)
-    () : Agent_sdk.Memory.t =
+    () : created_memory =
   let sid = match session_id with
     | Some s -> s
     | None -> generate_session_id ()
   in
   let backend = make_backend ?base_dir ~agent_name ~session_id:sid () in
-  Agent_sdk.Memory.create ~long_term:backend ()
+  { created_memory = Agent_sdk.Memory.create ~long_term:backend ()
+  ; created_memory_long_term_backend = backend
+  }
+
+let create_memory ~(agent_name : string) ?(base_dir : string option)
+    ?(session_id : string option)
+    () : Agent_sdk.Memory.t =
+  (create_memory_with_backend ~agent_name ?base_dir ?session_id ()).created_memory
 
 (** Load and return the institution welcome text, or [None] when empty.
     Used by [load_institution_text]. *)

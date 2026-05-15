@@ -42,6 +42,20 @@ interface KeeperWorkSummary {
 }
 
 const EMPTY_TOOLS: ReadonlyArray<string> = []
+const QUEUED_TASK_STYLE = {
+  display: 'grid',
+  gap: 'var(--sp-1)',
+  minWidth: 0,
+  paddingTop: 'var(--sp-2)',
+  borderTop: '1px solid var(--color-border-divider)',
+}
+const QUEUED_TASK_META_STYLE = {
+  overflow: 'hidden',
+  color: 'var(--color-fg-muted)',
+  fontSize: 'var(--fs-11)',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+}
 
 export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
   const summary = keeperWorkSummary(keeperName, keepers.value, tasks.value)
@@ -53,6 +67,7 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
   const currentGoalProgress = summary.currentGoalId
     ? goalProgressFor(summary.currentGoalId)
     : null
+  const queuedTasks = queuedActiveTasks(summary.activeTasks, currentTask)
   const attention = Boolean(
     keeper?.needs_attention
     || keeper?.trust?.needs_attention
@@ -117,6 +132,7 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
               </div>
             `
           : html`<div class="ide-keeper-work-empty">no active keeper task in dashboard state</div>`}
+        ${QueuedTaskCards(queuedTasks, summary.currentGoalId, summary.displayName)}
         ${currentGoal
           ? GoalProgressCard(currentGoal, currentGoalProgress, summary.currentTaskId)
           : summary.currentGoalId
@@ -145,6 +161,40 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
           : null}
       </div>
     </section>
+  `
+}
+
+function QueuedTaskCards(
+  tasks: ReadonlyArray<Task>,
+  fallbackGoalId: string | null,
+  keeperId: string,
+) {
+  if (tasks.length === 0) return null
+  const shownTasks = tasks.slice(0, 3)
+  const hiddenCount = Math.max(0, tasks.length - shownTasks.length)
+  return html`
+    <div class="ide-keeper-work-card" aria-label="Keeper active task queue">
+      <div class="ide-keeper-work-card-top">
+        <span>ACTIVE QUEUE</span>
+        <span>${tasks.length} queued</span>
+      </div>
+      ${shownTasks.map(task => html`
+        <div key=${task.id} style=${QUEUED_TASK_STYLE}>
+          <div class="ide-keeper-work-card-top">
+            <span>${task.id}</span>
+            <span>${task.status ?? 'unknown'}</span>
+          </div>
+          <strong title=${task.title}>${task.title}</strong>
+          ${task.worktree
+            ? html`<span style=${QUEUED_TASK_META_STYLE} title=${task.worktree.path}>${task.worktree.branch} · ${task.worktree.repo_name}</span>`
+            : null}
+          ${TaskRouteLinks(task, fallbackGoalId, keeperId)}
+        </div>
+      `)}
+      ${hiddenCount > 0
+        ? html`<span>${hiddenCount} more active ${hiddenCount === 1 ? 'task' : 'tasks'}</span>`
+        : null}
+    </div>
   `
 }
 
@@ -212,6 +262,13 @@ function KeeperWorkRouteLinks(
   if (links.length === 0) return null
   return html`
     <div class="ide-keeper-work-links" aria-label=${label}>
+      <span
+        class="ide-keeper-work-route-count"
+        title=${`${links.length} linked keeper work context routes`}
+        aria-label=${`${links.length} linked keeper work context routes`}
+      >
+        CTX ${links.length}
+      </span>
       ${links.map(link => html`
         <button
           key=${link.id}
@@ -367,6 +424,14 @@ function uniqTasks(taskList: ReadonlyArray<Task>): Task[] {
     result.push(task)
   }
   return result
+}
+
+function queuedActiveTasks(
+  taskList: ReadonlyArray<Task>,
+  currentTask: Task | null,
+): ReadonlyArray<Task> {
+  if (!currentTask) return taskList
+  return taskList.filter(task => task.id !== currentTask.id)
 }
 
 function normalizedKeeperName(value: string): string {

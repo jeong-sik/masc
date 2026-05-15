@@ -1704,3 +1704,11 @@
  (name test_rfc_0085_pr8_config_dir_resolver_host_config)
  (modules test_rfc_0085_pr8_config_dir_resolver_host_config)
  (libraries alcotest ast_grep))
+
+; RFC-0085 PR-9 — Env_config_core.base_path_opt + base_path_raw_opt
+; public-surface purge; 9 caller migrate to Host_config.from_env;
+; Host_config.t gains base_path (normalised) + base_path_raw fields.
+(test
+ (name test_rfc_0085_pr9_base_path_opt_purge)
+ (modules test_rfc_0085_pr9_base_path_opt_purge)
+ (libraries alcotest ast_grep))

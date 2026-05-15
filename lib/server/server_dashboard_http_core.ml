@@ -1398,8 +1398,8 @@ let meta_cognition_summary_cached (config : Coord.config) : Yojson.Safe.t =
 
 let dashboard_shell_paths_json (config : Coord.config) : Yojson.Safe.t =
   Server_base_path_diagnostics.detect
-    ?input_base_path:(Env_config_core.base_path_raw_opt ())
-    ?env_masc_base_path:(Env_config_core.base_path_raw_opt ())
+    ?input_base_path:((Host_config.from_env ()).base_path_raw)
+    ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
     ~effective_base_path:config.base_path
     ~effective_masc_root:(Coord.masc_root_dir config)
     ()

@@ -77,12 +77,12 @@ let voice_config_file_in root =
   Filename.concat masc_dir "voice_config.json"
 
 let base_path_voice_config_path_opt () =
-  Env_config_core.base_path_opt ()
+  (Host_config.from_env ()).base_path
   |> Option.map voice_config_file_in
 
 let repo_voice_config_path_opt () =
   let root =
-    match Env_config_core.base_path_opt () with
+    match (Host_config.from_env ()).base_path with
     | Some bp -> bp
     | None ->
       let cwd = Sys.getcwd () in
@@ -94,7 +94,7 @@ let repo_voice_config_path_opt () =
 
 let fallback_voice_config_path () =
   let root =
-    match Env_config_core.base_path_opt () with
+    match (Host_config.from_env ()).base_path with
     | Some bp -> bp
     | None -> Sys.getcwd ()
   in

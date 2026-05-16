@@ -2077,6 +2077,79 @@ let test_oas_worker_exec_build_installs_ollama_kind_preserving_transport () =
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 ;;
 
+let test_cascade_runner_request_patch_preserves_tool_choice_override () =
+  let base =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.Glm
+      ~model_id:"glm-5.1"
+      ~base_url:"https://api.z.ai/api/coding/paas/v4"
+      ~supports_tool_choice_override:true
+      ()
+  in
+  let req =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"glm-5.1"
+      ~base_url:"http://agent-sdk-reconstructed.invalid/v1"
+      ~max_tokens:1234
+      ~tool_choice:Agent_sdk.Types.Any
+      ()
+  in
+  let patched =
+    Cascade_runner.For_testing.request_runtime_fields_on_base_config ~base req
+  in
+  Alcotest.(check string) "base url stays source of truth" base.base_url patched.base_url;
+  Alcotest.(check string) "model id stays source of truth" base.model_id patched.model_id;
+  Alcotest.(check (option int))
+    "runtime max_tokens comes from request"
+    req.max_tokens
+    patched.max_tokens;
+  Alcotest.(check bool)
+    "runtime tool_choice comes from request"
+    true
+    (patched.tool_choice = Some Agent_sdk.Types.Any);
+  Alcotest.(check (option bool))
+    "declared tool_choice support override survives request patch"
+    (Some true)
+    patched.supports_tool_choice_override
+;;
+
+let test_oas_worker_exec_build_applies_tool_choice_override_to_contract () =
+  let provider_cfg =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.Glm
+      ~model_id:"glm-5.1"
+      ~base_url:"https://api.z.ai/api/coding/paas/v4"
+      ~supports_tool_choice_override:true
+      ()
+  in
+  let config =
+    Cascade_runner.default_config
+      ~name:"oas-worker-glm-tool-choice-override"
+      ~provider_cfg
+      ~system_prompt:"system"
+      ~tools:[ make_noop_tool () ]
+  in
+  Eio.Switch.run
+  @@ fun sw ->
+  match Cascade_runner.build ~sw ~net:(require_test_net ()) ~config with
+  | Ok agent ->
+    let options = Agent_sdk.Agent.options agent in
+    Alcotest.(check bool)
+      "HTTP provider installs preserving transport"
+      true
+      (Option.is_some options.transport);
+    (match options.provider with
+     | Some provider ->
+       Alcotest.(check bool)
+         "contract capability sees declared tool_choice support"
+         true
+         (Agent_sdk.Provider.capabilities_for_config provider).supports_tool_choice
+     | None -> Alcotest.fail "expected provider options");
+    Agent_sdk.Agent.close agent
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
+;;
+
 let test_apply_stream_idle_timeout_default_passes_through_caller_value () =
   let provided = Some 7.5 in
   let result = Keeper_turn_driver.apply_stream_idle_timeout_default provided in
@@ -6509,6 +6582,14 @@ let () =
             "oas_worker installs native Ollama HTTP transport"
             `Quick
             test_oas_worker_exec_build_installs_ollama_kind_preserving_transport
+        ; Alcotest.test_case
+            "cascade request patch preserves tool_choice override"
+            `Quick
+            test_cascade_runner_request_patch_preserves_tool_choice_override
+        ; Alcotest.test_case
+            "oas_worker exposes tool_choice override to contract validation"
+            `Quick
+            test_oas_worker_exec_build_applies_tool_choice_override_to_contract
         ; Alcotest.test_case
             "apply_stream_idle_timeout_default passes Some through"
             `Quick

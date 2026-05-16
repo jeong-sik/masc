@@ -356,6 +356,14 @@ val metric_keeper_memory_llm_summary_chain_exhausted : string
     outcome.  Label [cascade] names the cascade.  A rising rate
     means consolidation is silently skipping the LLM summary step. *)
 
+val metric_keeper_user_visible_reply_source : string
+(** Counter for [Keeper_text_processing.user_visible_reply_text]
+    return paths.  Label [source] is governed by
+    {!Keeper_user_visible_reply_source}.  Rising
+    [hardcoded_default] rate is the operational signal that the
+    LLM is consistently producing no usable reply and the user is
+    being shown the literal ["State updated."]. *)
+
 val metric_keeper_continuity_summary_source : string
 (** Counter for [Keeper_world_observation.read_continuity_summary]
     return paths.  Label [source] is governed by
@@ -388,6 +396,18 @@ val metric_keeper_oas_env_key_rejections : string
     env-injection bypass.  Non-zero counts at startup mean the
     keeper TOML contains [keeper.oas_env.<X>] keys that the
     runtime silently ignored. *)
+
+val metric_keeper_continuity_ts_recovered : string
+(** Counter for the synthetic-ts recovery branch in
+    [Keeper_meta_json_parse.parse_last_continuity_update_ts]: when
+    the persisted [last_continuity_update_ts] is missing/invalid
+    ([<= 0.0]) but [continuity_summary] is non-empty, the loader
+    substitutes [Time_compat.now ()] so the cooldown gate does not
+    interpret the empty timestamp as "never reflected" and bypass
+    cooldown for the first run.  Each recovery event increments
+    this counter and emits a warn line; non-zero counts mean the
+    meta JSON was written without a valid timestamp or the field
+    was corrupted on disk. *)
 
 val metric_keeper_memory_write_failures : string
 val metric_keeper_memory_consolidations : string

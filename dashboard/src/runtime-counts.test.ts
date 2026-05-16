@@ -37,6 +37,21 @@ describe('resolveRuntimeCounts', () => {
     })
   })
 
+  it('preserves shell configured keepers when namespace counts omit configured keepers', () => {
+    expect(resolveRuntimeCounts({
+      executionLoaded: false,
+      agentsCount: 0,
+      keepersCount: 0,
+      namespaceTruthCounts: { agents: 2, keepers: 3, tasks: 12 },
+      shellCounts: { agents: 6, keepers: 1, tasks: 9, total_runtimes: 8 },
+      shellConfiguredKeepers: 7,
+    })).toEqual({
+      live: { agents: 0, keepers: 0, tasks: 0, totalRuntimes: 0, available: false },
+      configured: { keepers: 7, totalRuntimes: 8, source: 'shell' },
+      source: 'shell',
+    })
+  })
+
   it('exposes both live and configured views simultaneously when execution has hydrated', () => {
     expect(resolveRuntimeCounts({
       executionLoaded: true,

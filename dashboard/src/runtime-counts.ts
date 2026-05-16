@@ -72,9 +72,9 @@ function resolveConfiguredView({
   shellTotalRuntimes: number
   shellConfiguredKeepers: number | null
 }): ConfiguredRuntimeView {
-  if (namespaceConfiguredKeepers != null || namespaceTotalRuntimes > 0) {
+  if (namespaceConfiguredKeepers != null) {
     return {
-      keepers: namespaceConfiguredKeepers ?? 0,
+      keepers: namespaceConfiguredKeepers,
       totalRuntimes: namespaceTotalRuntimes,
       source: 'namespace-truth',
     }

@@ -328,6 +328,13 @@ let private_provider_hint_of_fields (fields : (string * Yojson.Safe.t) list) =
   | None -> read "provider"
 ;;
 
+let cascade_model_attribution_of_fields (fields : (string * Yojson.Safe.t) list) =
+  match json_string_field_opt "cascade_name" fields with
+  | Some cascade_name ->
+    Some (Keeper_cascade_profile.canonicalize cascade_name ^ " (cascade)")
+  | None -> None
+;;
+
 (* ── Parse-level failure variants ─────────────────────────────────────────────
    A typed reason every dropped record carries so silent-default substitutions
    (1970 timestamps, "unknown" model attributions, "success" outcome on missing
@@ -342,7 +349,7 @@ type parse_error =
   | Out_of_window                  (* ts_unix older than [since_unix] *)
   | No_telemetry_object            (* decisions.jsonl entry without telemetry { ... } *)
   | Missing_outcome                (* telemetry.outcome absent on success-branch row *)
-  | Missing_success_model          (* no selected_model / model_used on success turn *)
+  | Missing_success_model          (* no selected_model / model_used / cascade_name *)
   | Missing_error_model_attribution (* no candidate_models / cascade_name on error turn *)
   | Missing_cost_model             (* costs.jsonl row without "model" field *)
 
@@ -412,11 +419,8 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
              match List.assoc_opt "candidate_models" tfields with
              | Some (`List (`String m :: _)) -> Ok m
              | _ ->
-               (match List.assoc_opt "cascade_name" tfields with
-                | Some (`String s) ->
-                  (* Canonicalize so error attribution buckets match the
-                    SSOT profile names instead of drift/ghost values. *)
-                  Ok (Keeper_cascade_profile.canonicalize s ^ " (cascade)")
+               (match cascade_model_attribution_of_fields tfields with
+                | Some model -> Ok model
                 | _ -> Error Missing_error_model_attribution)
            in
            match model_result with
@@ -455,17 +459,21 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
              })
          else (
            (* Success turns: full telemetry parsing.
-              Model attribution is structural — refusing the row is the
-              only honest behaviour when neither selected_model nor
-              model_used is present (the older "unknown" default collapsed
-              every such row into one bucket and broke cost accounting). *)
+              Model attribution is structural: prefer explicit selected/model
+              fields, then fall back to the cascade route when the row proves
+              the route but OAS did not surface the concrete model. This keeps
+              null-model historical rows from being repeatedly dropped without
+              reintroducing the old "unknown" bucket. *)
            let model_result : (string, parse_error) result =
-             match List.assoc_opt "selected_model" tfields with
-             | Some (`String s) -> Ok s
+             match json_string_field_opt "selected_model" tfields with
+             | Some s -> Ok s
              | _ ->
-               (match List.assoc_opt "model_used" tfields with
-                | Some (`String s) -> Ok s
-                | _ -> Error Missing_success_model)
+               (match json_string_field_opt "model_used" tfields with
+                | Some s -> Ok s
+                | _ ->
+                  (match cascade_model_attribution_of_fields tfields with
+                   | Some model -> Ok model
+                   | None -> Error Missing_success_model))
            in
            match model_result with
            | Error _ as e -> e

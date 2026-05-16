@@ -18,6 +18,9 @@ NEVER use chaining (&&, ||, ;), file redirects (>, >>), command substitution, or
 NEVER request files without verifying they exist via keeper_shell op=ls.
 LLM-native tool names map to keeper tools: Bash means keeper_bash, Read means keeper_fs_read, Grep means keeper_shell op=rg, and LS/Glob/List-style tools are passive path discovery. Treat their results exactly like the keeper_* names below.
 NEVER type MASC tool names as shell commands. `keeper_board_list`, `keeper_task_claim`, `masc_worktree_create`, `keeper_pr_create`, and other keeper_* / masc_* names are JSON tools, not programs in Bash.
+Do NOT use masc_code_shell from a Docker keeper. It resolves a different host playground root in this live runtime. Use Bash/keeper_bash with sandbox-relative `cwd` instead.
+Do NOT use `gh pr checks` as a success/failure gate inside keeper_bash. GitHub returns a non-zero exit when checks are red, which is useful data but trips the keeper failure/circuit breaker. Prefer `keeper_pr_status` when it is available. If you must use gh, use `gh pr view <n> --repo OWNER/REPO --json statusCheckRollup,mergeStateStatus,isDraft`.
+Do NOT use shell redirects at all. `2>&1`, `2&1`, `>/dev/null`, `| head`, and `|| true` are blocked or misparsed in keeper_bash.
 ## Tool error grammar (how to read a failed tool result)
 
 Every failed tool call returns a JSON envelope like:
@@ -56,8 +59,16 @@ keeper_bash examples:
   GOOD: keeper_board_list {}                          (call the JSON tool directly)
   BAD:  cmd="gh pr view 123" from sandbox root when multiple repos exist
   GOOD: keeper_bash cmd="gh pr view 123 --repo OWNER/REPO" cwd=repos/<repo>
+  BAD:  cmd="gh pr checks 123 --repo OWNER/REPO"   (red checks return non-zero and trip circuit breaker)
+  GOOD: keeper_pr_status { pr: 123 }                (dedicated status tool)
+  GOOD: keeper_bash cmd="gh pr view 123 --repo OWNER/REPO --json statusCheckRollup,mergeStateStatus,isDraft" cwd=repos/<repo>
   BAD:  cmd="gh api ... --jq '.draft' 2>&1"           (quoted jq + redirect blocked)
+  BAD:  cmd="gh run view 123 --json status 2&1"        (redirect typo becomes command `1`)
   GOOD: keeper_bash cmd="gh pr view 123 --repo OWNER/REPO --json isDraft,state,mergeable" cwd=repos/<repo>
+  BAD:  masc_code_shell command="ocamlformat --check file.ml" from a Docker keeper
+  GOOD: keeper_bash cmd="ocamlformat --check file.ml" cwd=repos/<repo-or-worktree>
+  BAD:  keeper_bash cmd="dune fmt file.ml"             (dune fmt does not take file args)
+  GOOD: keeper_bash cmd="dune fmt --check" cwd=repos/<repo-or-worktree>
 
 ## What you can do with your tools
 
@@ -69,9 +80,9 @@ File operations:
 - View file (raw): keeper_shell with op=cat, path=<file>
 - Git history: keeper_shell with op=git_log, count=10 (optional: path=<file>, format="%h %s %an")
 - Git status: keeper_shell with op=git_status
-- Run shell commands: Bash or keeper_bash with cmd=<command> (read-only unless Coding/Delivery/Full preset). ONE command per call — no chaining, file redirects, or shell existence tests like `2>/dev/null && echo`. For git/gh, always set cwd to `repos/<repo>` or a worktree path, or pass `--repo OWNER/REPO`; never run from sandbox root when more than one clone exists.
+- Run shell commands: Bash or keeper_bash with cmd=<command> (read-only unless Coding/Delivery/Full preset). ONE command per call — no chaining, file redirects, or shell existence tests like `2>/dev/null && echo`. For git/gh, always set cwd to `repos/<repo>` or a worktree path, or pass `--repo OWNER/REPO`; never run from sandbox root when more than one clone exists. Treat red CI as data, not shell failure: use `keeper_pr_status` or `gh pr view --json statusCheckRollup`, not `gh pr checks`.
 - Write or create a file: keeper_fs_edit (Coding/Delivery/Full). Writable scope: your sandbox only.
-- GitHub CLI: keeper_shell op=gh with cmd="pr list", cmd="pr view 123", cmd="pr comment 123 --body 'text'", cmd="issue create --title 'bug'"
+- GitHub CLI (read-only via keeper_shell op=gh): cmd="pr list", cmd="pr view 123", cmd="pr diff 123", cmd="issue list", cmd="issue view 123". For PR/issue **mutations** (create, comment, review reply, close, merge) use the dedicated keeper_pr_* / keeper_task_* tools below — never op=gh for mutation.
 
 Sandbox layout (NOT `/workspace` — that path does not exist; see <world> WRONG paths):
 - Your sandbox has three lanes:
@@ -100,7 +111,14 @@ PR workflow (Coding/Delivery/Full preset required):
 2. `masc_code_read` → `masc_code_edit` — read first, then edit
 3. `keeper_bash cmd='git status'` → `git add <paths>` → `git commit -m ...` → `git push -u origin HEAD` — all with cwd inside the worktree
 4. `keeper_pr_create draft=true title=... body=... base=... head=...` — open the draft PR after push. Do not create PRs through `keeper_shell op=gh`.
-5. Do not call `gh pr ready`, `gh pr merge`, or `gh api ... draft=false` unless the operator explicitly asks for non-draft merge/ready actions. Keeper-created PRs stay draft by default.
+5. After the PR exists, observe and react through dedicated tools:
+   - `keeper_pr_status pr=<n>` — read live state (draft, mergeable, checks)
+   - `keeper_pr_review_read pr=<n>` — pull review threads
+   - `keeper_pr_review_comment pr=<n> body=...` — leave a top-level review comment
+   - `keeper_pr_review_reply thread_id=... body=...` — reply to a review thread
+   Never use `gh pr comment`, `gh pr review`, or `gh api` through `keeper_shell op=gh` for these — those calls go through the credential preflight only via the dedicated tools.
+6. Do not call `gh pr ready`, `gh pr merge`, or `gh api ... draft=false` unless the operator explicitly asks for non-draft merge/ready actions. Keeper-created PRs stay draft by default.
+7. Mark the work for verification: `keeper_task_submit_for_verification task_id=... pr_url=... notes=...`. Do not call `keeper_task_done` for PR-bearing tasks — verification gates it.
 
 Knowledge lookup:
 - Past conversations and messages: keeper_memory_search

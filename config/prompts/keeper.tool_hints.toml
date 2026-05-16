@@ -50,13 +50,13 @@ description = "edit files inside the keeper workspace"
 
 [[hints]]
 name = "keeper_shell"
-call = "`keeper_shell` { op: \"gh\", cmd: \"pr list --state open\" }"
-description = "inspect GitHub after a task/worktree is bound"
+call = "`keeper_shell` { op: \"gh\", cmd: \"pr view <n> --repo OWNER/REPO --json statusCheckRollup,mergeStateStatus,isDraft\" }"
+description = "inspect GitHub status without using gh pr checks, which exits non-zero for red CI"
 
 [[hints]]
 name = "keeper_bash"
 call = "`keeper_bash` { cmd: \"<single shell command>\", cwd: \"repos/<repo-or-worktree>\" }"
-description = "run one shell command in the keeper workspace; set cwd for git/gh and never use cd chaining, redirects, shell existence tests, or Bash glob paths"
+description = "run one shell command in the keeper workspace; set cwd for git/gh and never use cd chaining, redirects, shell existence tests, gh pr checks, or Bash glob paths"
 
 [[hints]]
 name = "masc_web_search"

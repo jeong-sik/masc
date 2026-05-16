@@ -119,6 +119,28 @@ let test_allows_ls_basename_glob_with_redirect () =
   | Error msg -> fail ("ls basename glob with stderr redirect should be allowed: " ^ msg)
 ;;
 
+let test_blocks_input_redirect_outside_path () =
+  match Wdt.validate_command_paths ~workdir:"/tmp" "cat < /etc/passwd" with
+  | Error msg ->
+    check bool "blocked diagnostic" true (contains_substring msg "Path blocked");
+    check bool "outside path reported" true (contains_substring msg "/etc/passwd")
+  | Ok () -> fail "Expected input redirect outside workdir to be blocked"
+;;
+
+let test_blocks_output_redirect_outside_path () =
+  match Wdt.validate_command_paths ~workdir:"/tmp" "echo ok > /outside/path" with
+  | Error msg ->
+    check bool "blocked diagnostic" true (contains_substring msg "Path blocked");
+    check bool "outside path reported" true (contains_substring msg "/outside/path")
+  | Ok () -> fail "Expected output redirect outside workdir to be blocked"
+;;
+
+let test_allows_input_redirect_inside_path () =
+  match Wdt.validate_command_paths ~workdir:"/tmp" "cat < ./safe.txt" with
+  | Ok () -> ()
+  | Error msg -> fail ("input redirect inside workdir should be allowed: " ^ msg)
+;;
+
 let test_blocks_pipeline_later_stage_outside_path () =
   match Wdt.validate_command_paths ~workdir:"/tmp" "echo ok | cat /etc/passwd" with
   | Error msg ->
@@ -189,6 +211,10 @@ let () =
             `Quick
             test_allows_ls_basename_glob_with_redirect
         ; test_case
+            "input_redirect_inside_path"
+            `Quick
+            test_allows_input_redirect_inside_path
+        ; test_case
             "pipeline_later_stage_inside_path"
             `Quick
             test_allows_pipeline_later_stage_inside_path
@@ -199,6 +225,14 @@ let () =
             "blocks_later_stage_outside_path"
             `Quick
             test_blocks_pipeline_later_stage_outside_path
+        ; test_case
+            "blocks_input_redirect_outside_path"
+            `Quick
+            test_blocks_input_redirect_outside_path
+        ; test_case
+            "blocks_output_redirect_outside_path"
+            `Quick
+            test_blocks_output_redirect_outside_path
         ] )
     ; ( "diagnostics"
       , [ test_case "error_contains_hint" `Quick test_error_contains_hint

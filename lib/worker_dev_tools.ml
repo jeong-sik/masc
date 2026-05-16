@@ -989,6 +989,15 @@ let validate_command_paths ?workdir cmd =
       let path_token_of_literal value =
         { value; quoted = false; escaped = false; globbed = false; braced = false }
       in
+      let rec validate_redirects = function
+        | [] -> Ok ()
+        | Masc_exec.Redirect_scope.File { target; _ } :: rest ->
+          let token = Masc_exec.Path_scope.raw target |> path_token_of_literal in
+          (match validate_path_value ~requires_existing_dir:false token with
+           | Ok () -> validate_redirects rest
+           | Error _ as err -> err)
+        | Masc_exec.Redirect_scope.Fd_to_fd _ :: rest -> validate_redirects rest
+      in
       let tokens_of_simple (simple : Masc_exec.Shell_ir.simple) =
         let command = Masc_exec.Bin.to_string simple.bin |> path_token_of_literal in
         let rec args acc = function
@@ -1002,7 +1011,11 @@ let validate_command_paths ?workdir cmd =
       let validate_parsed_shell_ir = function
         | Masc_exec.Shell_ir.Simple simple ->
           (match tokens_of_simple simple with
-           | Some tokens -> Some (validate_token_stream tokens)
+           | Some tokens ->
+             Some
+               (match validate_token_stream tokens with
+                | Ok () -> validate_redirects simple.redirects
+                | Error _ as err -> err)
            | None -> None)
         | Masc_exec.Shell_ir.Pipeline stages ->
           let rec loop = function
@@ -1012,7 +1025,10 @@ let validate_command_paths ?workdir cmd =
                | None -> None
                | Some tokens ->
                  (match validate_token_stream tokens with
-                  | Ok () -> loop rest
+                  | Ok () ->
+                    (match validate_redirects simple.redirects with
+                     | Ok () -> loop rest
+                     | Error _ as err -> Some err)
                   | Error _ as err -> Some err))
             | Masc_exec.Shell_ir.Pipeline _ :: _ -> None
           in

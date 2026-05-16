@@ -880,16 +880,37 @@ let () =
          character or the correct tool, so small-LLM keepers retried the
          same pattern. Each new branch must point the keeper at the
          concrete replacement. *)
-      Alcotest.test_case "glob path suggests masc_code_search file_pattern"
+      Alcotest.test_case "content glob path suggests masc_code_search file_pattern"
         `Quick (fun () ->
           match Worker_dev_tools.validate_command_paths
-                  ~workdir:"/tmp" "ls repos/*.ml" with
+                  ~workdir:"/tmp" "cat repos/*.ml" with
           | Error msg ->
             Alcotest.(check bool) "names glob char" true
               (contains_substring msg "Glob expansion");
             Alcotest.(check bool) "names masc_code_search" true
               (contains_substring msg "masc_code_search")
-          | Ok () -> Alcotest.fail "glob with path must be blocked");
+          | Ok () -> Alcotest.fail "content glob with path must be blocked");
+      Alcotest.test_case "ls basename glob under workdir is allowed"
+        `Quick (fun () ->
+          match
+            Worker_dev_tools.validate_command_paths
+              ~workdir:"/tmp"
+              "ls /tmp/repos/masc-mcp/.worktrees/keeper-sangsu-agent-task-238/lib/*.ml | head -30"
+          with
+          | Ok () -> ()
+          | Error msg ->
+            Alcotest.fail ("safe ls glob unexpectedly rejected: " ^ msg));
+      Alcotest.test_case "ls middle-segment glob is still blocked" `Quick
+        (fun () ->
+          match
+            Worker_dev_tools.validate_command_paths
+              ~workdir:"/tmp"
+              "ls /tmp/repos/masc-mcp/.worktrees/*/lib/foo.ml"
+          with
+          | Error msg ->
+            Alcotest.(check bool) "names glob char" true
+              (contains_substring msg "Glob expansion")
+          | Ok () -> Alcotest.fail "middle-segment glob must be blocked");
       Alcotest.test_case "brace path suggests per-target / rg" `Quick
         (fun () ->
           match Worker_dev_tools.validate_command_paths

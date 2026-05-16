@@ -558,8 +558,31 @@ type path_token =
   ; braced : bool
   }
 
-let token_has_rewrite_syntax token =
-  token.quoted || token.escaped || token.globbed || token.braced
+let token_has_unsafe_rewrite_syntax token =
+  token.quoted || token.escaped || token.braced
+;;
+
+let command_allows_safe_globbed_path = function
+  | "ls" -> true
+  | _ -> false
+;;
+
+let token_glob_is_limited_to_basename token =
+  let value = token.value in
+  let start =
+    match String.rindex_opt value '/' with
+    | None -> 0
+    | Some idx -> idx + 1
+  in
+  let rec loop i =
+    if i >= String.length value
+    then true
+    else (
+      match value.[i] with
+      | '*' | '?' | '[' | ']' -> i >= start && loop (i + 1)
+      | _ -> loop (i + 1))
+  in
+  loop 0
 ;;
 
 let path_token_error_hint token =
@@ -844,6 +867,11 @@ let validate_command_paths ?workdir cmd =
   match workdir with
   | None -> Ok ()
   | Some _ ->
+      let command_name =
+        match tokenize_path_args cmd with
+        | command :: _ -> Filename.basename command.value
+        | [] -> ""
+      in
       let validate_path_value ~requires_existing_dir token =
         if not (validate_path ?workdir token.value)
         then
@@ -885,8 +913,17 @@ let validate_command_paths ?workdir cmd =
             | None when is_path_flag token.value ->
               loop (path_flag_requires_existing_dir token.value) rest
             | None when looks_like_path_token token.value ->
-              if token_has_rewrite_syntax token
+              if token_has_unsafe_rewrite_syntax token
               then Error (path_syntax_blocked_message token)
+              else if token.globbed
+              then
+                if command_allows_safe_globbed_path command_name
+                   && token_glob_is_limited_to_basename token
+                then (
+                  match validate_path_value ~requires_existing_dir:false token with
+                  | Ok () -> loop false rest
+                  | Error _ as err -> err)
+                else Error (path_syntax_blocked_message token)
               else (
                 match validate_path_value ~requires_existing_dir:false token with
                 | Ok () -> loop false rest

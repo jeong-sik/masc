@@ -36,35 +36,46 @@ let destructive_class_to_string = function
   | Process_signal -> "process_signal"
   | System_control -> "system_control"
 
-(* Substring → class mapping.  Each entry mirrors one row in
-   [Eval_gate.destructive_patterns].  Order matters: longer
-   substrings come first so "rm -rf" matches before "rm -r". *)
-let destructive_class_substrings : (string * destructive_class) list = [
-  "rm -rf",            Recursive_delete;
-  "rm -r",             Recursive_delete;
-  "rmdir",             Recursive_delete;
-  "drop table",        Sql_destructive;
-  "drop database",     Sql_destructive;
-  "truncate table",    Sql_destructive;
-  "delete from",       Sql_destructive;
-  "git push --force",  Forced_git_mutation;
-  "git push -f",       Forced_git_mutation;
-  "git reset --hard",  Forced_git_mutation;
-  "git clean -f",      Forced_git_mutation;
-  "chmod 777",         Privilege_escalation;
-  "mkfs",              Filesystem_format;
-  "> /dev/",           Device_write;
-  "dd if=",            Device_write;
-  "kill -9",           Process_signal;
-  "pkill",             Process_signal;
-  "shutdown",          System_control;
-  "reboot",            System_control;
+type destructive_pattern = {
+  class_ : destructive_class;
+  pattern : string;
+  description : string;
+}
+
+(* SSOT for destructive shell patterns. [Eval_gate.destructive_patterns]
+   and [classify_destructive] both derive from this list — drift
+   between the legacy gate and the shadow classifier is impossible by
+   construction.
+
+   Order matters: longer substrings come first so "rm -rf" matches
+   before "rm -r" (both classify as Recursive_delete but the returned
+   substring differs). *)
+let destructive_patterns : destructive_pattern list = [
+  { class_ = Recursive_delete;     pattern = "rm -rf";           description = "recursive forced deletion" };
+  { class_ = Recursive_delete;     pattern = "rm -r";            description = "recursive deletion" };
+  { class_ = Recursive_delete;     pattern = "rmdir";            description = "directory removal" };
+  { class_ = Sql_destructive;      pattern = "drop table";       description = "SQL table drop" };
+  { class_ = Sql_destructive;      pattern = "drop database";    description = "SQL database drop" };
+  { class_ = Sql_destructive;      pattern = "truncate table";   description = "SQL table truncate" };
+  { class_ = Sql_destructive;      pattern = "delete from";      description = "SQL bulk delete" };
+  { class_ = Forced_git_mutation;  pattern = "git push --force"; description = "force push" };
+  { class_ = Forced_git_mutation;  pattern = "git push -f";      description = "force push" };
+  { class_ = Forced_git_mutation;  pattern = "git reset --hard"; description = "hard reset" };
+  { class_ = Forced_git_mutation;  pattern = "git clean -f";     description = "forced clean" };
+  { class_ = Privilege_escalation; pattern = "chmod 777";        description = "world-writable permissions" };
+  { class_ = Filesystem_format;    pattern = "mkfs";             description = "filesystem format" };
+  { class_ = Device_write;         pattern = "> /dev/";          description = "device write" };
+  { class_ = Device_write;         pattern = "dd if=";           description = "raw disk operation" };
+  { class_ = Process_signal;       pattern = "kill -9";          description = "forced process kill" };
+  { class_ = Process_signal;       pattern = "pkill";            description = "pattern-based process kill" };
+  { class_ = System_control;       pattern = "shutdown";         description = "system shutdown" };
+  { class_ = System_control;       pattern = "reboot";           description = "system reboot" };
 ]
 
 (* Delegates to [String_util.contains_substring_ci] (SSOT). Preserves
    the historical [sub = ""] -> true convention used by the original
    inline walker; the SSOT returns [false] for empty needle so we
-   guard here. [destructive_class_substrings] never carries an empty
+   guard here. [destructive_patterns] never carries an empty
    pattern, but the guard keeps the invariant explicit. *)
 let contains_sub_ci s sub =
   if sub = "" then true
@@ -74,9 +85,9 @@ let contains_sub_ci s sub =
    the literal substring that triggered.  [None] means "no known
    destructive pattern found". *)
 let classify_destructive cmd : (destructive_class * string) option =
-  List.find_map (fun (sub, cls) ->
-    if contains_sub_ci cmd sub then Some (cls, sub) else None)
-    destructive_class_substrings
+  List.find_map (fun { class_; pattern; description = _ } ->
+    if contains_sub_ci cmd pattern then Some (class_, pattern) else None)
+    destructive_patterns
 
 (* ================================================================ *)
 (* Legacy and shadow verdicts                                        *)

@@ -272,9 +272,7 @@ module Metrics = struct
       ?(on_streaming_first_chunk = default_streaming_first_chunk)
       ?(on_streaming_chunk = default_streaming_chunk) ()
       : Llm_provider.Metrics.t =
-    {
-      Llm_provider.Metrics.noop with
-      on_cache_hit;
+    { on_cache_hit;
       on_cache_miss;
       on_request_start;
       on_request_end;

@@ -72,30 +72,17 @@ let tool_policy_of_config (config : gate_config) =
 (* Destructive pattern detection                                     *)
 (* ================================================================ *)
 
-(** Known destructive shell patterns.
-    Each entry is (pattern, description) — pattern is matched against
-    the command string after basic normalization. *)
-let destructive_patterns : (string * string) list = [
-  ("rm -rf", "recursive forced deletion");
-  ("rm -r", "recursive deletion");
-  ("rmdir", "directory removal");
-  ("drop table", "SQL table drop");
-  ("drop database", "SQL database drop");
-  ("truncate table", "SQL table truncate");
-  ("delete from", "SQL bulk delete");
-  ("git push --force", "force push");
-  ("git push -f", "force push");
-  ("git reset --hard", "hard reset");
-  ("git clean -f", "forced clean");
-  ("chmod 777", "world-writable permissions");
-  ("mkfs", "filesystem format");
-  ("> /dev/", "device write");
-  ("dd if=", "raw disk operation");
-  ("kill -9", "forced process kill");
-  ("pkill", "pattern-based process kill");
-  ("shutdown", "system shutdown");
-  ("reboot", "system reboot");
-]
+(** Known destructive shell patterns — derived from the SSOT in
+    [Gate_diff_types.destructive_patterns].  Drops the typed class
+    field because [detect_destructive] only needs (substring, desc)
+    for its return shape; callers that need the class go through
+    [Gate_diff_types.classify_destructive].  Sharing the source list
+    means a new entry must update one place, not two. *)
+let destructive_patterns : (string * string) list =
+  List.map
+    (fun { Gate_diff_types.pattern; description; class_ = _ } ->
+       pattern, description)
+    Gate_diff_types.destructive_patterns
 
 (** Normalize a command string for pattern matching.
     Strips inline single/double quotes and collapses whitespace.

@@ -363,9 +363,23 @@ let has_task_claim_affordance = has_turn_affordance Task_claim
 
 let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
     ~(turn_affordances : string list) ~(allowed_tool_names : string list) =
+  let is_stay_silent name =
+    String.equal
+      (Keeper_tool_disclosure.canonical_tool_name name)
+      "keeper_stay_silent"
+  in
   let progress_tool_available name =
     List.mem name allowed_tool_names
     && Keeper_tool_disclosure.tool_name_can_satisfy_required_contract name
+  in
+  let executable_progress_tool_available =
+    List.exists
+      (fun name ->
+         progress_tool_available name
+         && (not (is_stay_silent name))
+         && ((not has_current_task)
+             || not (Keeper_tool_disclosure.is_claim_context_tool_name name)))
+      allowed_tool_names
   in
   if has_turn_affordance Board_curation turn_affordances
      && List.exists
@@ -425,6 +439,12 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
        affordance-driven gate would self-contradict — force a tool
        call when no applicable tool exists. *)
     Agent_sdk.Types.Auto
+  else if not executable_progress_tool_available then
+    (* Active-task gates are intentionally strict only when at least one
+       executable progress tool is actually visible.  Claim/stay_silent
+       tools cannot advance an already-owned task, so forcing [Any] here
+       creates an impossible contract and burns a retry. *)
+    Agent_sdk.Types.Auto
   else
     (* Active task in progress: keep the strict gate.  The keeper is
     expected to make progress via some tool call (board update,
@@ -465,31 +485,28 @@ let generic_required_tool_gate_guidance ~(has_current_task : bool)
   in
   let omitted = List.length actionable_tools - min 6 (List.length actionable_tools) in
   let suffix = if omitted > 0 then Printf.sprintf " (+%d more)" omitted else "" in
-  let visible_stay_silent = List.mem "keeper_stay_silent" allowed_tool_names in
-  let fallback =
-    if visible_stay_silent
-    then " If no valid action remains, call keeper_stay_silent with a concise reason."
-    else ""
-  in
   let claim_context_note =
     if has_current_task
     then " You already hold an active task; claim/context tools alone do not count as execution progress."
     else ""
   in
-  Printf.sprintf
-    "[TOOL REQUIRED] This turn has an actionable runtime signal. Before \
-     answering in natural language, call one of the currently visible keeper \
-     runtime tools. Preferred tools for this signal: %s%s. Passive reads/status \
-     alone do not satisfy this turn.%s%s"
-    (if String.equal preview ""
-     then
-       if has_current_task
-       then "any non-claim execution tool that advances the active task"
-       else "any active visible keeper tool"
-     else preview)
-    suffix
-    claim_context_note
-    fallback
+  if String.equal preview ""
+  then
+    Printf.sprintf
+      "[TOOL BLOCKED] This turn has an actionable runtime signal, but no \
+       currently visible keeper tool can advance it. Do not call passive \
+       reads/status, claim/context tools, or keeper_stay_silent merely to \
+       satisfy the contract.%s Emit a concise [STATE] blocker instead."
+      claim_context_note
+  else
+    Printf.sprintf
+      "[TOOL REQUIRED] This turn has an actionable runtime signal. Before \
+       answering in natural language, call one of the currently visible keeper \
+       runtime tools. Preferred tools for this signal: %s%s. Passive \
+       reads/status alone do not satisfy this turn.%s"
+      preview
+      suffix
+      claim_context_note
 
 let required_tool_names_for_turn ~(current_task_required_tool_names : string list)
     ~(per_call_required_tool_names : string list) =

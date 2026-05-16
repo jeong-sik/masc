@@ -11350,21 +11350,35 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
        (Printf.sprintf
           "expected Any for mixed passive/active required tools, got %s"
           (Agent_sdk.Types.show_tool_choice other)));
-  (* Active task keeper retains the strict gate even without a
-     specific applicable tool — the caller is expected to make
-     progress via board_post, task_update, etc. *)
+  (* Active task keepers retain the strict gate when an execution tool is
+     visible. *)
+  (match
+     choose
+       ~has_current_task:true
+       ~turn_affordances:[ "task_audit" ]
+       ~allowed_tool_names:[ "keeper_tasks_list"; "keeper_board_post" ]
+       ()
+   with
+   | Agent_sdk.Types.Any -> ()
+   | other ->
+     fail
+       (Printf.sprintf
+          "expected Any for active-task keeper (must make progress), got %s"
+          (Agent_sdk.Types.show_tool_choice other)));
+  (* Claim/stay_silent cannot advance an already-owned task, so forcing Any
+     here would create an impossible required-tool contract. *)
   match
     choose
       ~has_current_task:true
-      ~turn_affordances:[ "task_audit" ]
-      ~allowed_tool_names:[ "keeper_tasks_list"; "keeper_board_post" ]
+      ~turn_affordances:[ "task_claim" ]
+      ~allowed_tool_names:[ "keeper_task_claim"; "keeper_stay_silent"; "keeper_tasks_list" ]
       ()
   with
-  | Agent_sdk.Types.Any -> ()
+  | Agent_sdk.Types.Auto -> ()
   | other ->
     fail
       (Printf.sprintf
-         "expected Any for active-task keeper (must make progress), got %s"
+         "expected Auto when active-task keeper has no execution tool, got %s"
          (Agent_sdk.Types.show_tool_choice other))
 ;;
 
@@ -11428,7 +11442,7 @@ let test_generic_required_tool_gate_guidance_avoids_claim_after_owned_task () =
     (contains_substring guidance "claim/context tools alone do not count")
 ;;
 
-let test_generic_required_tool_gate_guidance_keeps_stay_silent_as_fallback () =
+let test_generic_required_tool_gate_guidance_blocks_stay_silent_fallback () =
   let module Surface = Masc_mcp.Keeper_agent_tool_surface in
   let guidance =
     Surface.generic_required_tool_gate_guidance
@@ -11443,14 +11457,14 @@ let test_generic_required_tool_gate_guidance_keeps_stay_silent_as_fallback () =
     (contains_substring guidance "Preferred tools for this signal: keeper_stay_silent");
   check
     bool
-    "guidance names owned-task execution fallback"
+    "guidance emits blocked state"
     true
-    (contains_substring guidance "non-claim execution tool");
+    (contains_substring guidance "[TOOL BLOCKED]");
   check
     bool
-    "guidance keeps stay_silent as fallback"
+    "guidance rejects stay_silent filler"
     true
-    (contains_substring guidance "If no valid action remains, call keeper_stay_silent")
+    (contains_substring guidance "or keeper_stay_silent merely to satisfy")
 ;;
 
 let test_direct_keeper_msg_timeout_overrides_meta_per_provider_timeout () =
@@ -13083,9 +13097,9 @@ let () =
             `Quick
             test_generic_required_tool_gate_guidance_avoids_claim_after_owned_task
         ; test_case
-            "generic required gate guidance keeps stay_silent as fallback"
+            "generic required gate guidance blocks stay_silent fallback"
             `Quick
-            test_generic_required_tool_gate_guidance_keeps_stay_silent_as_fallback
+            test_generic_required_tool_gate_guidance_blocks_stay_silent_fallback
         ; test_case
             "direct keeper msg timeout overrides stale per-provider timeout"
             `Quick

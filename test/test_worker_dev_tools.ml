@@ -1009,6 +1009,17 @@ let () =
           | Error msg ->
             Alcotest.fail
               ("quoted grep pattern unexpectedly rejected: " ^ msg));
+      Alcotest.test_case "rg --glob quoted pattern through pipe is allowed"
+        `Quick (fun () ->
+          match
+            Worker_dev_tools.validate_command_paths
+              ~workdir:"/tmp"
+              "rg -l \"awaiting_verification\" repos/masc-mcp/ --glob '*.json' 2>/dev/null | head -5"
+          with
+          | Ok () -> ()
+          | Error msg ->
+            Alcotest.fail
+              ("rg --glob pipe command unexpectedly rejected: " ^ msg));
       Alcotest.test_case "rg --files validates path args" `Quick
         (fun () ->
           match

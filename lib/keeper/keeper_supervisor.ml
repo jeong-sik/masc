@@ -31,24 +31,6 @@ let keep_last_n n item lst =
     (intra-library file split, 2026-05-16). *)
 include Keeper_supervisor_types
 
-let fresh_supervision_cohort_keepers ~base_path (cohort : supervision_cohort) =
-  List.filter_map
-    (fun (entry : Keeper_registry.registry_entry) ->
-       Keeper_registry.get ~base_path entry.name)
-    cohort.keepers
-;;
-
-let iter_supervision_cohorts ?(yield_between = Eio_guard.fair_yield) cohorts ~f =
-  let rec loop = function
-    | [] -> ()
-    | [ cohort ] -> f cohort
-    | cohort :: rest ->
-      f cohort;
-      yield_between ();
-      loop rest
-  in
-  loop cohorts
-;;
 
 let should_cleanup_dead ~now ~dead_ttl_sec (entry : Keeper_registry.registry_entry) =
   match entry.phase, entry.dead_since_ts with
@@ -628,30 +610,6 @@ let persona_profile_path_for_drift_check ~base_path persona_name =
       "profile.json"
 ;;
 
-type persona_drift_log_level =
-  | Persona_drift_warn
-  | Persona_drift_error
-
-let keeper_defaults_have_inline_identity
-    (defaults : Keeper_types_profile.keeper_profile_defaults)
-  =
-  Option.is_some defaults.goal
-  || Option.is_some defaults.short_goal
-  || Option.is_some defaults.mid_goal
-  || Option.is_some defaults.long_goal
-  || Option.is_some defaults.will
-  || Option.is_some defaults.needs
-  || Option.is_some defaults.desires
-  || Option.is_some defaults.instructions
-  || defaults.mention_targets <> []
-;;
-
-let persona_drift_log_level_for_missing_profile (meta : keeper_meta) =
-  match Keeper_types_profile.load_keeper_profile_defaults_result meta.name with
-  | Ok defaults when keeper_defaults_have_inline_identity defaults ->
-    Persona_drift_warn
-  | Ok _ | Error _ -> Persona_drift_error
-;;
 
 let log_persona_drift_if_missing ~base_path (meta : keeper_meta) =
   let persona_name = persona_name_for_drift_check meta in

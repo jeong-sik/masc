@@ -19,6 +19,10 @@ let temp_dir () =
   Unix.mkdir path 0o755;
   path
 
+let realpath_or_self path =
+  try Unix.realpath path with
+  | Unix.Unix_error _ -> path
+
 let cleanup_dir dir =
   let rec rm path =
     if Sys.file_exists path then
@@ -44,6 +48,12 @@ let write_text_file path content =
   Fun.protect
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
+
+let read_text_file path =
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> Stdlib.really_input_string ic (in_channel_length ic))
 
 let run_shell_ok ~cwd cmd =
   let quoted_cwd = Filename.quote cwd in
@@ -659,6 +669,68 @@ let test_read_only_preflight_accepts_sandbox_relative_repo_path () =
           [ "let alpha = 0.1"; "let beta = 0.2" ]
           lines))
 
+let test_write_preflight_accepts_sandbox_relative_repo_path () =
+  prime_keeper_bridge ();
+  let dir = temp_dir () |> realpath_or_self in
+  let keeper_name = "nick0cave" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_registry.unregister ~base_path:dir keeper_name;
+      cleanup_dir dir)
+    (fun () ->
+      run_shell_ok ~cwd:dir "git init --quiet";
+      let rel_path =
+        "repos/masc-mcp/.worktrees/keeper-nick0cave-agent-task-240/lib/foo.ml"
+      in
+      let file_path =
+        Filename.concat
+          dir
+          (Filename.concat ".masc/playground/docker/nick0cave" rel_path)
+      in
+      let keeper_config =
+        Filename.concat dir ".masc/config/keepers/nick0cave.toml"
+      in
+      ensure_dir (Filename.dirname keeper_config);
+      write_text_file keeper_config "[keeper]\nsandbox_profile = \"docker\"\n";
+      ensure_dir (Filename.dirname file_path);
+      write_text_file file_path "let x = 1\n";
+      run_with_fs (fun () ->
+        let config = Coord.default_config dir in
+        let meta =
+          make_meta
+            ~name:keeper_name
+            ~sandbox_profile:Masc_mcp.Keeper_types.Docker
+            ~tool_access:(Masc_mcp.Keeper_types.Custom [ "masc_code_edit" ])
+            ()
+        in
+        ignore (Masc_mcp.Keeper_registry.register ~base_path:dir keeper_name meta);
+        let raw =
+          Masc_mcp.Keeper_exec_masc.handle_keeper_masc_tool
+            ~config
+            ~keeper_name
+            ~name:"masc_code_edit"
+            ~args:
+              (`Assoc
+                [ "path", `String rel_path
+                ; "old_string", `String "let x = 1"
+                ; "new_string", `String "let x = 2"
+                ; "replace_all", `Bool false
+                ])
+        in
+        let json = Yojson.Safe.from_string raw in
+        (match Yojson.Safe.Util.member "error" json with
+         | `Null -> ()
+         | `String err ->
+           Alcotest.failf "masc_code_edit should pass write preflight, got: %s" err
+         | other ->
+           Alcotest.failf
+             "unexpected error shape: %s"
+             (Yojson.Safe.to_string other));
+        Alcotest.(check string)
+          "file edited"
+          "let x = 2\n"
+          (read_text_file file_path)))
+
 let test_schemas_match_names () =
   prime_keeper_bridge ();
   let meta =
@@ -794,6 +866,9 @@ let () =
           Alcotest.test_case
             "read preflight accepts sandbox-relative repo path" `Quick
             test_read_only_preflight_accepts_sandbox_relative_repo_path;
+          Alcotest.test_case
+            "write preflight accepts sandbox-relative repo path" `Quick
+            test_write_preflight_accepts_sandbox_relative_repo_path;
         ] );
       ( "consistency",
         [

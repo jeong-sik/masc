@@ -1817,18 +1817,13 @@ let keeper_cost_aggregates_json
     ("generated_at", `Float now_ts);
   ]
 
-let k2_feed_limit limit = max 1 (min 200 limit)
+(* k2_feed_limit moved to Dashboard_http_keeper_types
+   (intra-library file split, 2026-05-16). *)
 (* keeper_decisions_dashboard_surface moved to Dashboard_http_keeper_types
    (intra-library file split, 2026-05-16). *)
 
-let keeper_decisions_retention_json ~per_keeper_limit ~keeper_count =
-  `Assoc
-    [
-      ("scope", `String "per_keeper_jsonl_tail");
-      ("durable_store", `String ".masc/keepers/:name.decisions.jsonl");
-      ("per_keeper_tail_lines", `Int per_keeper_limit);
-      ("keeper_count", `Int keeper_count);
-    ]
+(* keeper_decisions_retention_json moved to Dashboard_http_keeper_types
+   (intra-library file split, 2026-05-16). *)
 
 (** Read per-keeper [.decisions.jsonl] files and return a unified,
     time-sorted stream of recent events (turn telemetry, tool_exec,
@@ -1946,19 +1941,8 @@ let keeper_decisions_json
     ("generated_at_iso", `String (Masc_domain.now_iso ()));
   ]
 
-let k2_iso8601_of_unix ts_unix =
-  if ts_unix <= 0.0 then ""
-  else
-    let t = Unix.gmtime ts_unix in
-    Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-      (t.Unix.tm_year + 1900) (t.Unix.tm_mon + 1) t.Unix.tm_mday
-      t.Unix.tm_hour t.Unix.tm_min t.Unix.tm_sec
-
-let k2_stable_id ~prefix ~keeper_name ~ts_unix ~raw =
-  let ms = Int64.of_float (ts_unix *. 1000.0) in
-  let hash = Digest.to_hex (Digest.string raw) in
-  Printf.sprintf "%s-%s-%016Lx-%s"
-    prefix keeper_name ms (String.sub hash 0 8)
+(* k2_iso8601_of_unix + k2_stable_id moved to Dashboard_http_keeper_types
+   (intra-library file split, 2026-05-16). *)
 
 (* memory_kind_for_log moved to Dashboard_http_keeper_types
    (intra-library file split, 2026-05-16). *)

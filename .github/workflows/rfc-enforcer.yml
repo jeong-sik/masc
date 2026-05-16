@@ -7,6 +7,10 @@ on:
       - 'docs/design/**'
   workflow_dispatch:
 
+concurrency:
+  group: rfc-enforcer-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   enforce:
     runs-on: ubuntu-latest

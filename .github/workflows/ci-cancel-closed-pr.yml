@@ -9,14 +9,18 @@ permissions:
   contents: read
   pull-requests: read
 
+concurrency:
+  group: closed-pr-ci-cleanup-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   cancel-pr-ci:
-    name: Cancel closed PR CI
+    name: Cancel closed PR checks
     runs-on: ubuntu-latest
     timeout-minutes: 2
 
     steps:
-      - name: Cancel in-flight pull_request CI for the closed PR head
+      - name: Cancel in-flight pull_request checks for the closed PR head
         env:
           GH_TOKEN: ${{ github.token }}
           PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
@@ -27,7 +31,6 @@ jobs:
           for status in queued in_progress pending; do
             gh run list \
               --repo "$GITHUB_REPOSITORY" \
-              --workflow ci.yml \
               --event pull_request \
               --branch "$PR_HEAD_REF" \
               --status "$status" \

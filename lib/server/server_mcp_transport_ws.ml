@@ -731,8 +731,13 @@ let send_dashboard_or_raw_sse session sse_event =
              collapses N identical [Bytes.of_string] allocations into 1. *)
           send_text_shared_checked ~context:"sse-forward" session sse_event
   end
-  else
-    send_text_shared_checked ~context:"sse-forward" session sse_event
+  else begin
+    (* Unauthenticated session: drop SSE events until dashboard/hello
+       completes.  Forwarding before hello floods the client with SSE
+       frames that can bury the JSON-RPC hello response, causing the
+       browser RPC timeout to fire and triggering a reconnect loop. *)
+    true
+  end
 
 let read_payload_string payload ~len ~on_complete =
   let buffer = Bytes.create len in

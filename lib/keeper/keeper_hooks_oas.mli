@@ -14,18 +14,8 @@ val keeper_denied_tools : string list
 (** Tool names that are always denied for keeper-bound execution
     regardless of cascade or persona policy. *)
 
-val usage_has_tokens : Agent_sdk.Types.api_usage -> bool
-(** [true] when the usage record carries a non-zero token count. *)
-
-(** {1 Pre-tool gate integration} *)
-
-val is_keeper_board_write_tool_name : string -> bool
-(** [true] when the tool writes to the shared MASC board; subject to
-    extra guard rules. *)
-
-val current_keeper_model : Keeper_types.keeper_meta -> string
-(** Neutral runtime lane used for keeper-facing tool-call telemetry.
-    Concrete provider/model identity is OAS-owned. *)
+(** usage_has_tokens / is_keeper_board_write_tool_name / current_keeper_model
+    moved to Keeper_hooks_oas_types (intra-library file split, 2026-05-16). *)
 
 val render_pre_tool_gate_output :
   Keeper_guards.gate_decision_event -> string
@@ -102,20 +92,10 @@ val record_usage_anomaly_metrics :
     [Keeper_hooks_oas.cost_status] etc. unchanged. *)
 include module type of Keeper_hooks_oas_types
 
-(** {1 Tool execution summary} *)
+(** {1 Tool execution summary}
 
-type tool_execution_summary = {
-  tool_name : string;
-  provider : string;
-  outcome : string;
-  duration_ms : float;
-}
-(** Per-tool-call record persisted in the keeper's trajectory. *)
-
-val tool_execution_summary :
-  tool_name:string ->
-  model:string -> success:bool -> duration_ms:float -> tool_execution_summary
-(** Build a [tool_execution_summary] from raw turn fields. *)
+    tool_execution_summary type + builder live in Keeper_hooks_oas_types
+    (intra-library file split, 2026-05-16). Re-exported via include. *)
 
 val record_keeper_tool_duration_metric :
   keeper_name:string -> tool_execution_summary -> unit

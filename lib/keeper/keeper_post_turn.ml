@@ -52,6 +52,24 @@ open Keeper_types
 open Keeper_memory
 open Keeper_context_core
 
+(* Observability for [apply_continuity_summary] outcomes.  Without this
+   counter, the [Missing_no_snapshot] branch silently returns [meta]
+   unchanged and [last_continuity_update_ts] never advances, trapping
+   the reflection-cooldown gate in {!Keeper_compact_policy} until ratio
+   crosses [emergency_compact_ratio_threshold].  Closes the silent
+   coupling flagged in .tmp/memory-compacting-analysis.html V01. *)
+let () =
+  Prometheus.register_counter
+    ~name:Keeper_metrics.metric_keeper_continuity_snapshot_outcomes
+    ~help:
+      "Total [apply_continuity_summary] outcomes per turn, classified by \
+       label [outcome] (from_state_block | from_structured_checkpoint | \
+       missing_no_snapshot).  Rising [missing_no_snapshot] rate means \
+       LLM-side [STATE] emission regressed and compaction cooldown is \
+       silently trapped."
+    ()
+;;
+
 type compaction_event = {
   attempted : bool;
   applied : bool;
@@ -403,11 +421,39 @@ let apply_post_turn_lifecycle_with_resilience_handles
           | None -> None)
       | None -> None
     in
-    let snapshot =
-      match latest_state_snapshot_from_messages (messages_of_context ctx) with
-      | Some _ as snapshot -> snapshot
-      | None -> structured_snapshot
+    let state_block_snapshot =
+      latest_state_snapshot_from_messages (messages_of_context ctx)
     in
+    let snapshot, outcome =
+      match state_block_snapshot with
+      | Some _ as snap ->
+          snap, Keeper_continuity_snapshot_outcome.From_state_block
+      | None ->
+          (match structured_snapshot with
+           | Some _ as snap ->
+               snap, Keeper_continuity_snapshot_outcome.From_structured_checkpoint
+           | None ->
+               None, Keeper_continuity_snapshot_outcome.Missing_no_snapshot)
+    in
+    Prometheus.inc_counter
+      Keeper_metrics.metric_keeper_continuity_snapshot_outcomes
+      ~labels:
+        [ ("keeper", meta.name)
+        ; ("outcome", Keeper_continuity_snapshot_outcome.to_label outcome)
+        ]
+      ();
+    (match outcome with
+     | Keeper_continuity_snapshot_outcome.Missing_no_snapshot ->
+         (* Warn only on the silent-failure branch.  Successful paths are
+            counted by the metric without flooding the log. *)
+         Log.Keeper.warn
+           "keeper:%s apply_continuity_summary: no [STATE] block and no \
+            structured working_context fallback; last_continuity_update_ts \
+            held at previous value — reflection cooldown stays trapped until \
+            ratio reaches emergency threshold"
+           meta.name
+     | Keeper_continuity_snapshot_outcome.From_state_block
+     | Keeper_continuity_snapshot_outcome.From_structured_checkpoint -> ());
     match snapshot with
     | None -> meta
     | Some snapshot ->

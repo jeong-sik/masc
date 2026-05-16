@@ -336,6 +336,16 @@ val metric_keeper_cascade_sync_failures : string
 val metric_keeper_local_discovery_failures : string
 val metric_keeper_thinking_persist_failures : string
 val metric_keeper_checkpoint_failures : string
+
+val metric_keeper_continuity_snapshot_outcomes : string
+(** Counter for [Keeper_post_turn.apply_continuity_summary] outcomes.
+    Each turn that runs the post-turn lifecycle increments this exactly
+    once with the [outcome] label governed by
+    {!Keeper_continuity_snapshot_outcome}.  A rising rate of the
+    [missing_no_snapshot] label is the operational signal that LLM-side
+    [STATE] emission has regressed and the compaction cooldown gate
+    will be silently trapped until ratio hits the emergency threshold. *)
+
 val metric_keeper_memory_write_failures : string
 val metric_keeper_memory_consolidations : string
 val metric_keeper_write_meta_cycle_failures : string

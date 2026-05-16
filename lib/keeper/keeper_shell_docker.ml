@@ -915,7 +915,9 @@ let run_docker_shell_command_with_status_internal
                            ~network_label
                            ()
                        @ [ "-i"; "--user"; Printf.sprintf "%d:%d" uid gid ]
-                       @ Keeper_sandbox_runtime.docker_user_env_args ()
+                       @ Keeper_sandbox_runtime.docker_sandbox_env_args
+                           ~base_path:config.base_path
+                           ~container_root
                        @ Keeper_sandbox_runtime.docker_nofile_args ()
                        @ Env_config_keeper.KeeperSandbox.read_only_rootfs_args ()
                        @ [ "--tmpfs"
@@ -934,6 +936,9 @@ let run_docker_shell_command_with_status_internal
                          ; "--workdir"
                          ; container_cwd
                          ]
+                       @ Keeper_sandbox_runtime.docker_config_mount_args
+                           ~base_path:config.base_path
+                           ~container_root
                        @ network_args
                        @ cred_mounts
                        @ cred_envs

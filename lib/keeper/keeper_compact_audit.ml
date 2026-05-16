@@ -324,6 +324,9 @@ module Pending = struct
   let tbl : (string, string * float) Hashtbl.t = Hashtbl.create 16
   let mu = Eio.Mutex.create ()
 
+  let clear () =
+    Eio.Mutex.use_rw ~protect:true mu (fun () -> Hashtbl.clear tbl)
+
   (* Returns the previously-stashed entry, if any.  Callers use this to
      report Pending_overwrite immediately rather than waiting until
      pair_events read time. *)
@@ -360,13 +363,14 @@ let pending_ttl_seconds = 300.0
 let pending_ttl_sweep_interval_s = 60.0
 
 (* Translate one OAS event into zero or one persist_* effect. *)
-let handle_event ~base_path ~retention_days (evt : Agent_sdk.Event_bus.event)
+let handle_event ?received_ts ~base_path ~retention_days (evt : Agent_sdk.Event_bus.event)
   : unit =
   let { Agent_sdk.Event_bus.correlation_id; run_id; ts; _ } = evt.meta in
+  let received_ts = Option.value received_ts ~default:(Time_compat.now ()) in
   match evt.payload with
   | Agent_sdk.Event_bus.ContextCompactStarted { agent_name; trigger } ->
     let compaction_id = synth_compaction_id ~ts_unix:ts ~keeper_name:agent_name in
-    (match Pending.stash ~keeper_name:agent_name ~compaction_id ~ts with
+    (match Pending.stash ~keeper_name:agent_name ~compaction_id ~ts:received_ts with
      | None -> ()
      | Some (prior_id, prior_ts) ->
        (* A second Started arrived before Complete for the prior id.  The
@@ -382,7 +386,7 @@ let handle_event ~base_path ~retention_days (evt : Agent_sdk.Event_bus.event)
          ();
        Log.Keeper.warn
          "keeper_compact_audit: pending overwrite keeper=%s prior_id=%s prior_age_s=%.1f"
-         agent_name prior_id (ts -. prior_ts));
+         agent_name prior_id (received_ts -. prior_ts));
     let r = {
       compaction_id;
       ts_unix = ts;
@@ -430,6 +434,15 @@ let handle_event ~base_path ~retention_days (evt : Agent_sdk.Event_bus.event)
          ();
        Log.Keeper.warn "keeper_compact_audit: persist_complete failed: %s" m)
   | _payload -> Log.Misc.debug "keeper_compact_audit: ignoring non-compaction event"
+
+module For_testing = struct
+  let clear_pending = Pending.clear
+  let evict_pending_older_than = Pending.evict_older_than
+
+  let handle_event_at ~received_ts ~base_path ~retention_days event =
+    handle_event ~received_ts ~base_path ~retention_days event
+  ;;
+end
 
 (* Filter: accept only the two compaction payload variants. Keeps
    subscriber's stream tight. *)

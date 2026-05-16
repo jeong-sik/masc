@@ -87,6 +87,7 @@
   keeper_discovered_tools
   keeper_tool_affinity
   keeper_exec_shared
+   keeper_path_check_error
    keeper_exec_board
    keeper_exec_fs
    keeper_exec_ide

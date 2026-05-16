@@ -172,6 +172,8 @@ module Metrics : sig
        chunk_index:int ->
        inter_chunk_ms:float ->
        unit) ->
+    ?on_tool_calls:
+      (provider:string -> model_id:string -> count:int -> unit) ->
     unit ->
     Llm_provider.Metrics.t
   (** Construct a [Llm_provider.Metrics.t] value.

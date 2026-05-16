@@ -935,3 +935,54 @@ let goal_event_timeline_json event =
         ("Goal Event", event_type, "ok")
   in
   timeline_event_json ~ts ~kind:event_type ~lane:"goal" ~title ~summary ~severity
+
+(** {1 Convergence + verification policy node helpers (pure)} *)
+
+let compute_convergence (goal : Goal_store.goal) linked_tasks children =
+  let goal_done_weight =
+    match goal.phase with
+    | Goal_phase.Completed -> 1.0
+    | Goal_phase.Executing
+    | Goal_phase.Awaiting_verification
+    | Goal_phase.Awaiting_approval
+    | Goal_phase.Blocked
+    | Goal_phase.Paused
+    | Goal_phase.Dropped ->
+        0.0
+  in
+  let task_count = List.length linked_tasks in
+  let done_count =
+    List.length
+      (List.filter
+         (fun ((task, _) : Masc_domain.task * string) -> task_is_done task)
+         linked_tasks)
+  in
+  let task_ratio =
+    if task_count = 0 then goal_done_weight
+    else float_of_int done_count /. float_of_int task_count
+  in
+  let child_ratios =
+    List.map (fun (child : tree_node) -> child.convergence) children
+  in
+  let child_avg =
+    match child_ratios with
+    | [] -> task_ratio
+    | rs ->
+        let sum = List.fold_left ( +. ) 0.0 rs in
+        sum /. float_of_int (List.length rs)
+  in
+  if task_count > 0 && children <> [] then
+    (task_ratio +. child_avg) /. 2.0
+  else if children <> [] then
+    child_avg
+  else
+    task_ratio
+let goal_policy_nodes goals =
+  List.map
+    (fun (goal : Goal_store.goal) ->
+      {
+        Goal_verification.goal_id = goal.id;
+        parent_goal_id = goal.parent_goal_id;
+        verifier_policy = goal.verifier_policy;
+      })
+    goals

@@ -238,3 +238,19 @@ val timeline_event_json :
 val json_member_or_null : string -> Yojson.Safe.t -> Yojson.Safe.t
 
 val goal_event_timeline_json : Yojson.Safe.t -> Yojson.Safe.t
+
+(** {1 Convergence + verification policy node helpers (pure)} *)
+
+val compute_convergence :
+  Goal_store.goal ->
+  (Masc_domain.task * string) list ->
+  tree_node list ->
+  float
+(** Pure: weighted average of linked task completion ratio and child
+    convergence ratios. Returns 1.0 when goal is Completed and no tasks
+    or children exist. *)
+
+val goal_policy_nodes :
+  Goal_store.goal list -> Goal_verification.goal_policy_node list
+(** Pure: project Goal_store.goal records into Goal_verification policy
+    nodes for use with [Goal_verification.effective_policy_for_nodes]. *)

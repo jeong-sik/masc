@@ -170,9 +170,19 @@ let should_promote_warn_to_error (record : Agent_sdk.Log.record) =
       true
   | _ -> false
 
+let should_demote_info_to_debug (record : Agent_sdk.Log.record) =
+  match record.level, record.module_name, record.message with
+  | ( Info,
+      "completion_contract",
+      "tool_choice contract relaxed (provider does not support tool_choice)" ) ->
+      true
+  | _ -> false
+
 let effective_level (record : Agent_sdk.Log.record) : Log.level =
   if should_promote_warn_to_error record then
     Log.Error
+  else if should_demote_info_to_debug record then
+    Log.Debug
   else
     level_to_masc record.level
 

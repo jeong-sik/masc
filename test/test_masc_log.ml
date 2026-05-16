@@ -163,6 +163,18 @@ let test_oas_bridge_promotes_missing_approval_callback_to_error () =
   Alcotest.(check string) "approval callback gap promoted" "ERROR"
     (Log.level_to_string level)
 
+let test_oas_bridge_demotes_tool_choice_relaxation_to_debug () =
+  let level =
+    Masc_mcp.Agent_sdk_log_bridge.effective_level
+      (oas_record
+         ~level:Agent_sdk.Log.Info
+         ~module_name:"completion_contract"
+         ~message:"tool_choice contract relaxed (provider does not support tool_choice)"
+         [ Agent_sdk.Log.S ("provider", "glm") ])
+  in
+  Alcotest.(check string) "tool_choice fallback demoted" "DEBUG"
+    (Log.level_to_string level)
+
 let test_file_sink_reopens_when_log_path_is_deleted () =
   let dir = temp_dir () in
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () ->
@@ -210,6 +222,9 @@ let () =
         Alcotest.test_case
           "oas bridge promotes missing approval callback"
           `Quick test_oas_bridge_promotes_missing_approval_callback_to_error;
+        Alcotest.test_case
+          "oas bridge demotes normal tool_choice relaxation"
+          `Quick test_oas_bridge_demotes_tool_choice_relaxation_to_debug;
         Alcotest.test_case
           "file sink reopens when current log path is deleted"
           `Quick test_file_sink_reopens_when_log_path_is_deleted;

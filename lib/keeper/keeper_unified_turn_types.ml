@@ -229,3 +229,52 @@ let record_turn_tool_events
        | _ -> ())
     events
 ;;
+
+(** Record the observation for a streaming turn that was cancelled
+    externally (supervisor stop or external cancel). FSM emits +
+    record_pre_dispatch_terminal_observation are *boundary* side
+    effects intentionally retained from the godfile. *)
+let record_streaming_cancelled_observation
+      ~(config : Coord.config)
+      ~(run_meta : Keeper_types.keeper_meta)
+      ~(run_generation : int)
+      ~(cascade_name : Keeper_execution_receipt.cascade_name)
+      ~(keeper_turn_id : int)
+      ()
+  : unit
+  =
+  let fiber_stop_set =
+    match Keeper_registry.get ~base_path:config.base_path run_meta.name with
+    | Some entry -> Atomic.get entry.fiber_stop
+    | None -> false
+  in
+  if fiber_stop_set
+  then
+    (* FSM: SupervisorRequestsStop — stop signal confirmed while streaming;
+       turn about to cancel cooperatively. *)
+    Keeper_turn_fsm.emit_transition
+      ~keeper_name:run_meta.name
+      ~turn_id:keeper_turn_id
+      ~prev:Keeper_turn_fsm.Streaming
+      Keeper_turn_fsm.Streaming;
+  let terminal_reason_code =
+    if fiber_stop_set then "supervisor_stop" else "external_cancel"
+  in
+  Keeper_turn_helpers.record_pre_dispatch_terminal_observation
+    ~config
+    ~meta:run_meta
+    ~generation:run_generation
+    ~cascade_name
+    ~outcome:`Cancelled
+    ~terminal_reason_code
+    ~activity_kind:"keeper.turn_cancelled"
+    ~trajectory_outcome:(Trajectory.Gated terminal_reason_code)
+    ~keeper_turn_id
+    ();
+  (* FSM: HonorStopSignal — cooperative cancel. *)
+  Keeper_turn_fsm.emit_transition
+    ~keeper_name:run_meta.name
+    ~turn_id:keeper_turn_id
+    ~prev:Keeper_turn_fsm.Streaming
+    (Keeper_turn_fsm.Cancelled Keeper_turn_fsm.Cancelled_supervisor_stop)
+;;

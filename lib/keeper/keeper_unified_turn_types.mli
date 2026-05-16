@@ -72,3 +72,16 @@ val record_turn_tool_events :
   turn_tool_event_tracker ->
   Agent_sdk.Event_bus.event list ->
   unit
+
+(** Record the observation for a streaming turn cancelled externally.
+    Reads the fiber_stop flag from [Keeper_registry], emits FSM
+    transitions, and writes a terminal observation via
+    [Keeper_turn_helpers.record_pre_dispatch_terminal_observation]. *)
+val record_streaming_cancelled_observation :
+  config:Coord.config ->
+  run_meta:Keeper_types.keeper_meta ->
+  run_generation:int ->
+  cascade_name:Keeper_execution_receipt.cascade_name ->
+  keeper_turn_id:int ->
+  unit ->
+  unit

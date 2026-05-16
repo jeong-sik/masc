@@ -115,3 +115,166 @@ let registry_failure_reason_of_terminal_reason
   | Keeper_turn_disposition.Post_commit_ambiguous
   | Keeper_turn_disposition.Unknown _ -> None
 ;;
+
+(** Tracker for matching ToolCalled/ToolCompleted event pairs within a
+    single keeper turn. Internal mutability ([Hashtbl] + [Queue] + mutable
+    fields); external API is pure-ish (push/pop are O(1) imperative). *)
+type turn_tool_event_tracker =
+  { pending_tool_inputs : (string, Yojson.Safe.t Queue.t) Hashtbl.t
+  ; mutable mutating_tools_committed : string list
+  ; mutable integrity_error : Agent_sdk.Error.sdk_error option
+  }
+
+let create_turn_tool_event_tracker () =
+  { pending_tool_inputs = Hashtbl.create 8
+  ; mutating_tools_committed = []
+  ; integrity_error = None
+  }
+;;
+
+let turn_tool_event_integrity_error tracker = tracker.integrity_error
+
+let committed_mutating_tools_from_events tracker =
+  Keeper_error_classify.committed_mutating_tools tracker.mutating_tools_committed
+;;
+
+let push_turn_tool_input tracker tool_name input =
+  let q =
+    match Hashtbl.find_opt tracker.pending_tool_inputs tool_name with
+    | Some q -> q
+    | None ->
+      let q = Queue.create () in
+      Hashtbl.add tracker.pending_tool_inputs tool_name q;
+      q
+  in
+  Queue.add input q
+;;
+
+let pop_turn_tool_input tracker tool_name =
+  match Hashtbl.find_opt tracker.pending_tool_inputs tool_name with
+  | Some q when not (Queue.is_empty q) -> Some (Queue.pop q)
+  | _ -> None
+;;
+
+let record_unmatched_tool_completed
+      tracker
+      ~keeper_name
+      ~tool_name
+      ~outcome
+      ~tool_committed
+  =
+  let message =
+    Printf.sprintf
+      "%s: keeper turn event-bus integrity error: ToolCompleted(%s) for tool=%s arrived \
+       without matching ToolCalled"
+      keeper_name
+      outcome
+      tool_name
+  in
+  Log.Keeper.error "%s" message;
+  let mutating_tool_committed =
+    tool_committed && Keeper_exec_tools.has_mutating_side_effect tool_name
+  in
+  if mutating_tool_committed
+  then tracker.mutating_tools_committed <- tool_name :: tracker.mutating_tools_committed;
+  match tracker.integrity_error with
+  | Some _ -> ()
+  | None ->
+    let base_error = Agent_sdk.Error.Internal message in
+    let error =
+      if mutating_tool_committed
+      then Keeper_error_classify.reclassify_error_after_side_effect ~tool_names:[ tool_name ] base_error
+      else base_error
+    in
+    tracker.integrity_error <- Some error
+;;
+
+let record_turn_tool_events
+      ?(has_mutating_side_effect_with_input =
+        Keeper_exec_tools.has_mutating_side_effect_with_input)
+      ~(keeper_name : string)
+      (tracker : turn_tool_event_tracker)
+      (events : Agent_sdk.Event_bus.event list)
+  : unit
+  =
+  List.iter
+    (fun (evt : Agent_sdk.Event_bus.event) ->
+       match evt.payload with
+       | Agent_sdk.Event_bus.ToolCalled { tool_name; input; _ } ->
+         push_turn_tool_input tracker tool_name input
+       | Agent_sdk.Event_bus.ToolCompleted { tool_name; output = Ok _; _ } ->
+         (match pop_turn_tool_input tracker tool_name with
+          | Some input ->
+            if has_mutating_side_effect_with_input ~tool_name ~input
+            then
+              tracker.mutating_tools_committed
+              <- tool_name :: tracker.mutating_tools_committed
+          | None ->
+            record_unmatched_tool_completed
+              tracker
+              ~keeper_name
+              ~tool_name
+              ~outcome:"ok"
+              ~tool_committed:true)
+       | Agent_sdk.Event_bus.ToolCompleted { tool_name; output = Error _; _ } ->
+         (match pop_turn_tool_input tracker tool_name with
+          | Some _ -> ()
+          | None ->
+            record_unmatched_tool_completed
+              tracker
+              ~keeper_name
+              ~tool_name
+              ~outcome:"error"
+              ~tool_committed:false)
+       | _ -> ())
+    events
+;;
+
+(** Record the observation for a streaming turn that was cancelled
+    externally (supervisor stop or external cancel). FSM emits +
+    record_pre_dispatch_terminal_observation are *boundary* side
+    effects intentionally retained from the godfile. *)
+let record_streaming_cancelled_observation
+      ~(config : Coord.config)
+      ~(run_meta : Keeper_types.keeper_meta)
+      ~(run_generation : int)
+      ~(cascade_name : Keeper_execution_receipt.cascade_name)
+      ~(keeper_turn_id : int)
+      ()
+  : unit
+  =
+  let fiber_stop_set =
+    match Keeper_registry.get ~base_path:config.base_path run_meta.name with
+    | Some entry -> Atomic.get entry.fiber_stop
+    | None -> false
+  in
+  if fiber_stop_set
+  then
+    (* FSM: SupervisorRequestsStop — stop signal confirmed while streaming;
+       turn about to cancel cooperatively. *)
+    Keeper_turn_fsm.emit_transition
+      ~keeper_name:run_meta.name
+      ~turn_id:keeper_turn_id
+      ~prev:Keeper_turn_fsm.Streaming
+      Keeper_turn_fsm.Streaming;
+  let terminal_reason_code =
+    if fiber_stop_set then "supervisor_stop" else "external_cancel"
+  in
+  Keeper_turn_helpers.record_pre_dispatch_terminal_observation
+    ~config
+    ~meta:run_meta
+    ~generation:run_generation
+    ~cascade_name
+    ~outcome:`Cancelled
+    ~terminal_reason_code
+    ~activity_kind:"keeper.turn_cancelled"
+    ~trajectory_outcome:(Trajectory.Gated terminal_reason_code)
+    ~keeper_turn_id
+    ();
+  (* FSM: HonorStopSignal — cooperative cancel. *)
+  Keeper_turn_fsm.emit_transition
+    ~keeper_name:run_meta.name
+    ~turn_id:keeper_turn_id
+    ~prev:Keeper_turn_fsm.Streaming
+    (Keeper_turn_fsm.Cancelled Keeper_turn_fsm.Cancelled_supervisor_stop)
+;;

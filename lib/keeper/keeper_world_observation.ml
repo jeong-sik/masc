@@ -497,15 +497,55 @@ let read_context_ratio ~(config : Coord.config) ~(meta : keeper_meta) : float =
   | _ -> 0.0
 ;;
 
+(* Observability for the 6-path fallback chain in
+   [read_continuity_summary].  Until this counter existed, the
+   meta-level [continuity_fallback_summary_text] was returned from
+   three distinct paths (no_snapshot / no_ctx / exception) without
+   any signal, and the catch-all [| _ -> ] silently swallowed every
+   non-Cancelled exception.  Closes the silent-failure gap flagged
+   in .tmp/memory-compacting-analysis.html (continuity summary
+   read fallback chain). *)
+let () =
+  Prometheus.register_counter
+    ~name:Keeper_metrics.metric_keeper_continuity_summary_source
+    ~help:
+      "Total [read_continuity_summary] returns, classified by label \
+       [source] (governed by Keeper_continuity_summary_source).  \
+       Label [keeper] names the keeper.  Rising \
+       [meta_fallback_exception] is the operational signal that the \
+       catch-all in [read_continuity_summary] is swallowing \
+       exceptions."
+    ()
+;;
+
+let record_continuity_summary_source ~(keeper_name : string)
+    ~(source : Keeper_continuity_summary_source.t) =
+  Prometheus.inc_counter
+    Keeper_metrics.metric_keeper_continuity_summary_source
+    ~labels:
+      [ ("source", Keeper_continuity_summary_source.to_label source)
+      ; ("keeper", keeper_name)
+      ]
+    ()
+
 (** Read continuity summary from checkpoint messages or meta fallback. *)
 let read_continuity_summary ~(config : Coord.config) ~(meta : keeper_meta) : string =
   let render_bounded_snapshot snapshot =
     keeper_state_snapshot_to_summary_text snapshot
     |> Keeper_memory_policy.cap_continuity_summary_text
   in
+  let meta_fallback ~source =
+    record_continuity_summary_source ~keeper_name:meta.name ~source;
+    continuity_fallback_summary_text
+      ~continuity_summary:meta.continuity_summary
+      ~last_continuity_update_ts:meta.runtime.last_continuity_update_ts
+  in
   try
     match Keeper_memory_policy.read_progress_snapshot ~config ~name:meta.name with
-    | Some snapshot -> render_bounded_snapshot snapshot
+    | Some snapshot ->
+      record_continuity_summary_source ~keeper_name:meta.name
+        ~source:Keeper_continuity_summary_source.Progress_snapshot;
+      render_bounded_snapshot snapshot
     | None ->
       let cascade_models = Keeper_model_labels.configured_model_labels_of_meta meta in
       let primary_max_context =
@@ -540,27 +580,40 @@ let read_continuity_summary ~(config : Coord.config) ~(meta : keeper_meta) : str
               | None -> None)
            | Error _ -> None
          in
-         let snapshot =
-           match latest_state_snapshot_from_messages (messages_of_context c) with
-           | Some _ as snapshot -> snapshot
-           | None -> structured_snapshot
+         let state_block_snapshot =
+           latest_state_snapshot_from_messages (messages_of_context c)
          in
-         (match snapshot with
-          | Some s -> render_bounded_snapshot s
-          | None ->
-            continuity_fallback_summary_text
-              ~continuity_summary:meta.continuity_summary
-              ~last_continuity_update_ts:meta.runtime.last_continuity_update_ts)
+         let snapshot, source =
+           match state_block_snapshot with
+           | Some _ as snap ->
+             snap, Some Keeper_continuity_summary_source.Checkpoint_state_block
+           | None ->
+             (match structured_snapshot with
+              | Some _ as snap ->
+                snap, Some Keeper_continuity_summary_source.Checkpoint_structured
+              | None -> None, None)
+         in
+         (match snapshot, source with
+          | Some s, Some src ->
+            record_continuity_summary_source ~keeper_name:meta.name ~source:src;
+            render_bounded_snapshot s
+          | _ ->
+            meta_fallback
+              ~source:Keeper_continuity_summary_source.Meta_fallback_no_snapshot)
        | None ->
-         continuity_fallback_summary_text
-           ~continuity_summary:meta.continuity_summary
-           ~last_continuity_update_ts:meta.runtime.last_continuity_update_ts)
+         meta_fallback
+           ~source:Keeper_continuity_summary_source.Meta_fallback_no_ctx)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | _ ->
-    continuity_fallback_summary_text
-      ~continuity_summary:meta.continuity_summary
-      ~last_continuity_update_ts:meta.runtime.last_continuity_update_ts
+  | exn ->
+    Log.Keeper.warn
+      "keeper:%s read_continuity_summary caught exception in fallback \
+       chain (%s) — using meta_fallback; investigate progress \
+       snapshot or checkpoint store"
+      meta.name
+      (Printexc.to_string exn);
+    meta_fallback
+      ~source:Keeper_continuity_summary_source.Meta_fallback_exception
 ;;
 
 (** Board event cursor bootstrap window (seconds). *)

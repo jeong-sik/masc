@@ -1,6 +1,20 @@
 # Changelog
 
 
+## [0.19.18] - 2026-05-17
+
+### Added
+- `specs/keeper-state-machine/KeeperCompactionCooldown.tla`: TLA+ model for keeper continuity cooldown behavior, with clean and buggy TLC configs wired into `scripts/tla-check.sh`.
+- `masc_keeper_continuity_no_state_total` and `masc_keeper_tool_pair_repair_total`: counters for no-STATE continuity cooldown advancement and keeper-local tool-pair repair.
+
+### Changed
+- `lib/keeper/keeper_compact_policy.{ml,mli}`: exposes pure `decide_compaction`, keeps tool-heavy emergency compaction eligible during cooldown, and isolates pre-compact dashboard health telemetry failures.
+- `scripts/harness/workload/keeper_continuity_validation.sh`: reads the current `masc_keeper_status.meta.*` schema and validates checkpoint truth from trace checkpoint paths.
+
+### Fixed
+- `lib/keeper/keeper_post_turn.ml`: no-STATE continuity passes now advance `last_continuity_update_ts`, preventing repeated cooldown misses.
+- `lib/keeper/keeper_run_tools.ml`: removes OAS synthetic dangling-tool repair from the keeper reducer path and records local tool-pair repair instead.
+
 ## [0.19.17] - 2026-05-11
 
 ### Fixed

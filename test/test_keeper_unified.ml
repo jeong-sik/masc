@@ -3056,7 +3056,7 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
     "keeper_shell schema documents gh claim prerequisite"
     true
     (source_file_contains
-       "lib/tool_shard.ml"
+       "lib/tool_shard_types.ml"
        "Requires an active claimed task/current_task_id");
   check
     bool
@@ -9341,6 +9341,38 @@ let test_final_keeper_tool_names_accepts_reported_mcp_keeper_tool () =
        ~tool_names:final_tools)
 ;;
 
+let test_requested_tool_names_seen_preserves_prior_turn_surface () =
+  let seen =
+    Masc_mcp.Keeper_run_tools.merge_requested_tool_names_seen
+      ~seen:[]
+      [ "keeper_board_curation_submit"; "keeper_board_post" ]
+  in
+  let seen =
+    Masc_mcp.Keeper_run_tools.merge_requested_tool_names_seen
+      ~seen
+      [ "keeper_board_post"; "keeper_board_comment" ]
+  in
+  check
+    (list string)
+    "run surface keeps prior-turn tools"
+    [ "keeper_board_curation_submit"; "keeper_board_post"; "keeper_board_comment" ]
+    seen;
+  check
+    (list string)
+    "prior-turn observed tool remains expected for run-level validation"
+    []
+    (KTD.unexpected_tool_names
+       ~allowed_tool_names:seen
+       ~tool_names:[ "keeper_board_curation_submit" ]);
+  check
+    (list string)
+    "last-turn-only surface would have false-positive unexpected tool"
+    [ "keeper_board_curation_submit" ]
+    (KTD.unexpected_tool_names
+       ~allowed_tool_names:[ "keeper_board_post"; "keeper_board_comment" ]
+       ~tool_names:[ "keeper_board_curation_submit" ])
+;;
+
 (* prioritized_disclosed_tool_names tests removed: function replaced
    by OAS Tool_selector.select in #5429 boundary cleanup. *)
 
@@ -11889,6 +11921,10 @@ let () =
             "final keeper tool names accept reported MCP keeper tool"
             `Quick
             test_final_keeper_tool_names_accepts_reported_mcp_keeper_tool
+        ; test_case
+            "requested tool names seen preserves prior turn surface"
+            `Quick
+            test_requested_tool_names_seen_preserves_prior_turn_surface
         ; test_case
             "tool query strips continuity noise"
             `Quick

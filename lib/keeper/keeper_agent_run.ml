@@ -886,7 +886,7 @@ let run_turn
                  canonical_tool_names_ref := canonical_tool_names;
                  let unexpected_tool_names =
                    Keeper_tool_disclosure.unexpected_tool_names
-                     ~allowed_tool_names:acc.requested_tool_names
+                     ~allowed_tool_names:acc.requested_tool_names_seen
                      ~tool_names:canonical_tool_names
                  in
                  unexpected_tool_names_ref := unexpected_tool_names;
@@ -907,13 +907,13 @@ let run_turn
                  if unexpected_tool_names <> [] && not valid_tool_calls_present
                  then (
                    let requested_preview =
-                     acc.requested_tool_names
+                     acc.requested_tool_names_seen
                      |> List.filteri (fun i _ -> i < 8)
                      |> String.concat ", "
                    in
                    let omitted =
-                     List.length acc.requested_tool_names
-                     - min 8 (List.length acc.requested_tool_names)
+                     List.length acc.requested_tool_names_seen
+                     - min 8 (List.length acc.requested_tool_names_seen)
                    in
                    let requested_suffix =
                      if omitted > 0 then Printf.sprintf " (+%d more)" omitted else ""
@@ -969,7 +969,7 @@ let run_turn
                      Keeper_tool_disclosure.final_keeper_tool_names
                        ~reported_tool_names
                        ~observed_tool_names
-                       ~allowed_tool_names:acc.requested_tool_names
+                       ~allowed_tool_names:acc.requested_tool_names_seen
                    in
                    actual_keeper_tool_names_ref := actual_keeper_tool_names;
                    let usage = Keeper_exec_context.usage_of_response result.response in
@@ -1810,7 +1810,7 @@ let run_turn
          ; terminal_reason_code
          ; response_text_present = !receipt_response_text_present_ref
          ; model_used = !receipt_model_used_ref
-         ; requested_tools = acc.requested_tool_names
+         ; requested_tools = acc.requested_tool_names_seen
          ; reported_tools = !reported_tool_names_ref
          ; observed_tools = !observed_tool_names_ref
          ; canonical_tools = !canonical_tool_names_ref

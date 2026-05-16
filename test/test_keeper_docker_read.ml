@@ -204,8 +204,7 @@ let test_read_outside_playground_returns_mapping_error () =
          in
          loop 0)
 
-let test_read_empty_image_config_errors () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
+let test_read_missing_file_preflight_errors () =
   let base, config, meta = setup_config "minjae" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
@@ -214,10 +213,10 @@ let test_read_empty_image_config_errors () =
     Keeper_docker_read.read_file_in_container ~config ~meta ~host_path
       ~max_bytes:4096 ~timeout_sec:5.0 ()
   with
-  | Ok _ -> Alcotest.fail "expected image-config error"
+  | Ok _ -> Alcotest.fail "expected missing-file preflight error"
   | Error msg ->
-      Alcotest.(check bool) "error mentions docker image" true
-        (let needle = "docker image" in
+      Alcotest.(check bool) "error mentions path_not_found" true
+        (let needle = "path_not_found" in
          let nlen = String.length needle in
          let mlen = String.length msg in
          let rec loop i =
@@ -252,8 +251,8 @@ let test_run_command_empty_argv_errors () =
          loop 0)
 
 let test_run_command_empty_image_errors () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   let base, config, meta = setup_config "minjae" in
+  let meta = { meta with sandbox_image = Some "" } in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   match
     Keeper_docker_read.run_command_in_container ~config ~meta
@@ -319,6 +318,10 @@ case \"$1\" in\n\
     ;;\n\
   run)\n\
     printf 'runtime-container\\n'\n\
+    exit 0\n\
+    ;;\n\
+  inspect)\n\
+    printf 'runtime-container-id\\n'\n\
     exit 0\n\
     ;;\n\
   exec)\n\
@@ -513,6 +516,50 @@ let test_docker_nofile_args_follow_config () =
   Alcotest.(check (list string)) "nofile floor"
     [ "--ulimit"; "nofile=1024:1024" ]
     (Keeper_sandbox_runtime.docker_nofile_args ())
+
+let test_docker_config_mount_and_env_args () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let config_root = Filename.concat base ".masc/config" in
+  ensure_dir config_root;
+  let container_root = "/home/keeper/playground/minjae" in
+  with_env "MASC_CONFIG_DIR" "" @@ fun () ->
+  Alcotest.(check string) "default host config root"
+    config_root
+    (Keeper_sandbox_runtime.docker_config_host_root ~base_path:base);
+  Alcotest.(check (list string)) "default config mount"
+    [ "-v"
+    ; config_root ^ ":" ^ container_root ^ "/.masc/config:ro"
+    ]
+    (Keeper_sandbox_runtime.docker_config_mount_args
+       ~base_path:base
+       ~container_root);
+  Alcotest.(check (list string)) "default config env"
+    [ "--env"
+    ; "MASC_BASE_PATH=" ^ container_root
+    ; "--env"
+    ; "MASC_BASE_PATH_INPUT=" ^ container_root
+    ; "--env"
+    ; "MASC_CONFIG_DIR=" ^ container_root ^ "/.masc/config"
+    ]
+    (Keeper_sandbox_runtime.docker_config_env_args
+       ~base_path:base
+       ~container_root);
+  let override_base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir override_base) @@ fun () ->
+  let override_root = Filename.concat override_base "config" in
+  ensure_dir override_root;
+  with_env "MASC_CONFIG_DIR" override_root @@ fun () ->
+  Alcotest.(check string) "override host config root"
+    override_root
+    (Keeper_sandbox_runtime.docker_config_host_root ~base_path:base);
+  Alcotest.(check (list string)) "override config mount"
+    [ "-v"
+    ; override_root ^ ":" ^ container_root ^ "/.masc/config:ro"
+    ]
+    (Keeper_sandbox_runtime.docker_config_mount_args
+       ~base_path:base
+       ~container_root)
 
 let test_cleanup_stale_containers_removes_only_stale_masc_scope () =
   with_fake_docker fake_docker_cleanup_script @@ fun () ->
@@ -825,6 +872,8 @@ let run_tests () =
             test_docker_network_args_follow_masc_policy;
           Alcotest.test_case "docker nofile args follow config" `Quick
             test_docker_nofile_args_follow_config;
+          Alcotest.test_case "docker config mount and env args" `Quick
+            test_docker_config_mount_and_env_args;
           Alcotest.test_case "managed label args include ttl" `Quick
             test_sandbox_container_label_args_include_managed_ttl;
           Alcotest.test_case "sandbox label args include owner scope" `Quick
@@ -840,8 +889,8 @@ let run_tests () =
         [
           Alcotest.test_case "outside playground returns mapping error"
             `Quick test_read_outside_playground_returns_mapping_error;
-          Alcotest.test_case "empty image configuration errors" `Quick
-            test_read_empty_image_config_errors;
+          Alcotest.test_case "missing file preflight errors" `Quick
+            test_read_missing_file_preflight_errors;
         ] );
       ( "run_command_in_container",
         [

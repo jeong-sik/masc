@@ -72,6 +72,38 @@ let per_provider_timeout_for_turn
      | None -> Some timeout_s)
 ;;
 
+let sse_event_progress_kind (event : Agent_sdk.Types.sse_event) =
+  match event with
+  | Agent_sdk.Types.MessageStart _ -> Some "sse_message_start"
+  | Agent_sdk.Types.ContentBlockStart { tool_name = Some _; _ } ->
+    Some "sse_tool_block_start"
+  | Agent_sdk.Types.ContentBlockStart _ -> Some "sse_content_block_start"
+  | Agent_sdk.Types.ContentBlockDelta { delta = Agent_sdk.Types.TextDelta _; _ } ->
+    Some "sse_text_delta"
+  | Agent_sdk.Types.ContentBlockDelta { delta = Agent_sdk.Types.ThinkingDelta _; _ } ->
+    Some "sse_thinking_delta"
+  | Agent_sdk.Types.ContentBlockDelta { delta = Agent_sdk.Types.InputJsonDelta _; _ } ->
+    Some "sse_tool_arg_delta"
+  | Agent_sdk.Types.ContentBlockStop _ -> Some "sse_content_block_stop"
+  | Agent_sdk.Types.MessageDelta _ -> Some "sse_message_delta"
+  | Agent_sdk.Types.MessageStop -> Some "sse_message_stop"
+  | Agent_sdk.Types.Ping -> None
+  | Agent_sdk.Types.SSEError _ -> Some "sse_error"
+  | Agent_sdk.Types.SSEParseFailed _ -> Some "sse_parse_failed"
+  | Agent_sdk.Types.SSEUnknownEventType _ -> Some "sse_unknown_event_type"
+;;
+
+let registry_progress_on_event ~record_turn_progress downstream event =
+  Option.iter record_turn_progress (sse_event_progress_kind event);
+  Option.iter (fun cb -> cb event) downstream
+;;
+
+module For_testing = struct
+  let sse_event_progress_kind = sse_event_progress_kind
+  let registry_progress_on_event = registry_progress_on_event
+end
+;;
+
 let should_require_provider_tool_choice_support
       ~initial_tool_requirement
       ~actionable_observation_requires_tool_support
@@ -476,21 +508,32 @@ let run_turn
       then Keeper_cdal_contract.of_keeper_meta meta
       else None
     in
+    let record_turn_progress event_kind =
+      Keeper_registry.record_turn_progress
+        ~base_path:config.base_path
+        meta.name
+        ~event_kind
+    in
     let yield_on_tool = Env_config.Slot.yield_enabled () in
     let on_yield =
       if yield_on_tool
       then
         Some
-          (fun () -> Log.Misc.debug "keeper %s: slot yielded (tool execution)" meta.name)
+          (fun () ->
+             record_turn_progress "slot_yield";
+             Log.Misc.debug "keeper %s: slot yielded (tool execution)" meta.name)
       else None
     in
     let on_resume =
       if yield_on_tool
       then
         Some
-          (fun () -> Log.Misc.debug "keeper %s: slot resumed (next LLM turn)" meta.name)
+          (fun () ->
+             record_turn_progress "slot_resume";
+             Log.Misc.debug "keeper %s: slot resumed (next LLM turn)" meta.name)
       else None
     in
+    let on_event = Some (registry_progress_on_event ~record_turn_progress on_event) in
     let priority =
       Option.value priority ~default:Llm_provider.Request_priority.Proactive
     in

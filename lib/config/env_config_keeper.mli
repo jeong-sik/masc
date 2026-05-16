@@ -108,6 +108,7 @@ end
 
 module KeeperWatchdog : sig
   val stale_threshold_sec : float
+  val progress_timeout_sec : float
   val poll_sec : float
   val noop_threshold : int
   val grace_period_sec : float

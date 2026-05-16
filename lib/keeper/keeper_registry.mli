@@ -339,17 +339,6 @@ val restore_tool_usage : base_path:string -> string -> unit
 
 (** {1 RFC-0002 Event Dispatch} *)
 
-(** Dispatch origin for paired post-turn lifecycle events.
-
-    [Compaction_started]/[Compaction_completed]/[Compaction_failed] and
-    [Handoff_started]/[Handoff_completed]/[Handoff_failed] are same-turn
-    lifecycle pairs. The registry rejects them from [Generic_dispatch] so
-    keepalive/guard/manual callers cannot emit half of a pair outside the
-    owner path. *)
-type lifecycle_event_origin =
-  | Generic_dispatch
-  | Post_turn_lifecycle
-  | Operator_compact
 
 (** Dispatch a typed event through the state machine.
     Updates conditions, derives new phase, syncs legacy state.

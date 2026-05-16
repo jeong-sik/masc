@@ -730,6 +730,28 @@ strategy = "priority_tier"
 fallback = true
 keeper-assignable = false
 
+[tier-group.strict_tool_candidates]
+# Tier-group for routes requiring tool_strict profile capabilities
+# (runtime_mcp_tools, runtime_tool_events, runtime_mcp_http_headers).
+# Falls through primary → keeper_diverse → __safe_lane (satisfies all profiles).
+tiers = ["primary", "keeper_diverse", "__safe_lane"]
+strategy = "priority_tier"
+fallback = true
+
+[tier-group.glm-coding-with-spark]
+# Tier-group for GLM-coding-first cascade with spark fallback.
+# Primary GLM members + codex-spark as fallback for resilience.
+tiers = ["primary", "keeper_diverse", "__safe_lane"]
+strategy = "priority_tier"
+fallback = true
+
+[tier-group.runpod_mtp]
+# Tier-group for runpod multi-tier-provider route.
+# Falls through primary → keeper_diverse → __safe_lane.
+tiers = ["primary", "keeper_diverse", "__safe_lane"]
+strategy = "priority_tier"
+fallback = true
+
 # ── Routes (logical usage → tier-group) ────────────────────────
 #
 # RFC-0058 §4 R6: route targets resolve to tier-groups, tiers,

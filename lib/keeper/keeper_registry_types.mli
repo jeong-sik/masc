@@ -614,3 +614,8 @@ and completed_turn_observation = {
   ct_cascade_state : packed_cascade_state;
   ct_selected_model : string option;
 }
+
+(** Resolve a keeper run completion promise at most once.
+    Returns [false] if another fiber won the resolve race. *)
+val try_resolve_done :
+  registry_entry -> [ `Stopped | `Crashed of string ] -> bool

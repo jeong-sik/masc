@@ -593,3 +593,73 @@ let tree_badges ~pending_approvals ~sandbox_risk ~cascade_risk ~fsm_risk ~stalle
   if stalled then badges := "stalled" :: !badges;
   if activity_unobserved then badges := "activity_unobserved" :: !badges;
   List.rev !badges
+
+(** {1 Approval matching + keeper assignee resolution + goal FSM projection (pure)} *)
+
+let approval_matches_goal goal_id approval_json =
+  let goal_ids =
+    approval_json |> member "goal_ids" |> to_list
+    |> List.filter_map to_string_option
+  in
+  List.mem goal_id goal_ids
+  ||
+  match approval_json |> member "goal_id" |> to_string_option with
+  | Some pending_goal_id -> String.equal pending_goal_id goal_id
+  | None -> false
+
+let keeper_name_matches_meta metas name =
+  List.exists (fun (meta : Keeper_types.keeper_meta) -> String.equal meta.name name) metas
+
+let keeper_name_of_assignee metas assignee =
+  match Keeper_types.canonical_keeper_name_from_agent_name assignee with
+  | Some keeper_name -> Some keeper_name
+  | None ->
+      if keeper_name_matches_meta metas assignee then Some assignee
+      else None
+let goal_fsm_state_kind = function
+  | Goal_phase.Executing -> "executing"
+  | Goal_phase.Awaiting_verification -> "verification_gate"
+  | Goal_phase.Awaiting_approval -> "approval_gate"
+  | Goal_phase.Blocked -> "blocked"
+  | Goal_phase.Paused -> "paused"
+  | Goal_phase.Completed -> "completed"
+  | Goal_phase.Dropped -> "dropped"
+
+let goal_fsm_next_actions ~goal_phase ~has_effective_verifier_policy
+    ~require_completion_approval =
+  [
+    Goal_phase.Request_complete;
+    Goal_phase.Approve_completion;
+    Goal_phase.Reject_completion;
+    Goal_phase.Pause;
+    Goal_phase.Resume;
+    Goal_phase.Operator_block;
+    Goal_phase.Operator_unblock;
+    Goal_phase.Drop;
+    Goal_phase.Reopen;
+  ]
+  |> List.filter (fun action ->
+         match
+           Goal_phase.decide_transition ~phase:goal_phase ~action
+             ~has_effective_verifier_policy ~require_completion_approval
+         with
+         | Ok _ -> true
+         | Error _ -> false)
+  |> List.map Goal_phase.action_to_string
+
+let goal_fsm_to_json ~effective_policy (goal : Goal_store.goal)
+    (node : tree_node) =
+  `Assoc
+    [
+      ("state", Goal_phase.to_yojson goal.phase);
+      ("source", `String "goal.phase");
+      ("state_kind", `String (goal_fsm_state_kind goal.phase));
+      ( "next_actions",
+        `List
+          (goal_fsm_next_actions ~goal_phase:goal.phase
+             ~has_effective_verifier_policy:(Option.is_some effective_policy)
+             ~require_completion_approval:goal.require_completion_approval
+          |> List.map (fun action -> `String action)) );
+      ("activity_observation", `String node.activity_observation);
+      ("stagnation_status", `String node.stagnation_status);
+    ]

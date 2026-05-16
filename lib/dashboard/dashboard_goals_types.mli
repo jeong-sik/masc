@@ -177,3 +177,26 @@ val tree_badges :
   stalled:bool ->
   activity_unobserved:bool ->
   string list
+
+(** {1 Approval matching + keeper assignee resolution + goal FSM projection (pure)} *)
+
+val approval_matches_goal : string -> Yojson.Safe.t -> bool
+
+val keeper_name_matches_meta : Keeper_types.keeper_meta list -> string -> bool
+
+val keeper_name_of_assignee :
+  Keeper_types.keeper_meta list -> string -> string option
+
+val goal_fsm_state_kind : Goal_phase.t -> string
+
+val goal_fsm_next_actions :
+  goal_phase:Goal_phase.t ->
+  has_effective_verifier_policy:bool ->
+  require_completion_approval:bool ->
+  string list
+
+val goal_fsm_to_json :
+  effective_policy:'a option ->
+  Goal_store.goal ->
+  tree_node ->
+  Yojson.Safe.t

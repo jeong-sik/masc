@@ -18,79 +18,12 @@
     visibility); persistent [StringMap] behind a single [ref]. *)
 
 open Keeper_types
-module StringMap = Map.Make (String)
 
 (** Failure-reason cluster moved to Keeper_registry_types (intra-library
     file split, 2026-05-16). Re-included here so existing 126 callers
     keep using [Keeper_registry.failure_reason] etc. unchanged. *)
 include Keeper_registry_types
 
-
-type turn_measurement =
-  { tm_captured_at : float
-  ; tm_auto_rules : Keeper_state_machine.auto_rule_summary
-  }
-
-type registry_entry =
-  { base_path : string
-  ; name : string
-  ; meta : keeper_meta
-  ; phase : Keeper_state_machine.phase
-    (** Keeper lifecycle phase (RFC-0002 13-state machine; 11 at #5229 → 12 Overflowed (MASC-1) → 13 Zombie #14707). *)
-  ; conditions : Keeper_state_machine.conditions
-    (** Observable conditions that derive [phase]. *)
-  ; fiber_stop : bool Atomic.t
-  ; fiber_wakeup : bool Atomic.t
-  ; event_queue : Keeper_event_queue.t Atomic.t
-  ; started_at : float
-  ; grpc_close : (unit -> unit) option Atomic.t
-  ; done_p : [ `Stopped | `Crashed of string ] Eio.Promise.t
-  ; done_r : [ `Stopped | `Crashed of string ] Eio.Promise.u
-  ; restart_count : int
-  ; last_restart_ts : float
-  ; dead_since_ts : float option
-  ; crash_log : (float * string) list
-  ; last_error : string option
-  ; last_failure_reason : failure_reason option
-  ; turn_consecutive_failures : int
-  ; last_agent_count : int
-  ; board_wakeups : float StringMap.t
-  ; board_cursor_ts : float
-  ; board_cursor_post_id : string option
-  ; tool_usage : tool_call_entry StringMap.t
-  ; transition_seq : int
-  ; waiting_for_inference : bool Atomic.t
-    (** Ephemeral flag: true when keeper is blocked in admission queue.
-          Set/cleared around [Admission_queue.with_permit].
-          Does not affect state machine phase derivation. *)
-  ; last_auto_rules : (float * Keeper_state_machine.auto_rule_summary) option
-  ; last_event_bus_correlation : string option
-  ; pending_turn_measurement : turn_measurement option
-  ; current_turn_observation : turn_observation option
-  ; last_completed_turn : completed_turn_observation option
-  ; last_skip_observation : (float * string list) option
-  ; compaction_stage : packed_compaction_stage
-  }
-
-and turn_observation =
-  { turn_id : int
-  ; started_at : float
-  ; turn_phase : packed_turn_phase
-  ; decision_stage : packed_decision_stage
-  ; cascade_state : packed_cascade_state
-  ; measurement : turn_measurement option
-  ; measurement_bind_count : int
-  ; selected_model : string option
-  }
-
-and completed_turn_observation =
-  { ct_turn_id : int
-  ; ct_started_at : float
-  ; ct_ended_at : float
-  ; ct_decision_stage : packed_decision_stage
-  ; ct_cascade_state : packed_cascade_state
-  ; ct_selected_model : string option
-  }
 
 let try_resolve_done entry value =
   match Eio.Promise.peek entry.done_p with

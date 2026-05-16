@@ -7400,17 +7400,17 @@ let test_prompt_guides_bash_globs_to_structured_tools () =
     bool
     "bash glob example is called out"
     true
-    (contains_substring sys "find repos/<repo>/lib -name nickname*");
+    (contains_substring sys "find repos/REPO/lib -name nickname*");
   check
     bool
     "bash globs use keeper_shell find"
     true
-    (contains_substring sys "keeper_shell op=find name=<glob> path=<dir>");
+    (contains_substring sys "keeper_shell op=find name=glob path=dir/path");
   check
     bool
     "bash globs can use masc code search"
     true
-    (contains_substring sys "masc_code_search file_pattern=<glob>")
+    (contains_substring sys "masc_code_search file_pattern=glob")
 ;;
 
 let test_sanitize_text_utf8_replaces_control_chars () =

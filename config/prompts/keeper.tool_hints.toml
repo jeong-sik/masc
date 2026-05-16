@@ -15,77 +15,77 @@ description = "inspect eligible task context"
 
 [[hints]]
 name = "keeper_task_create"
-call = "`keeper_task_create` { title: \"<verb + object>\", description: \"<acceptance criteria>\" }"
+call = "`keeper_task_create` { title: \"actionable title\", description: \"acceptance criteria\" }"
 description = "create a new backlog task with keeper-native evidence"
 
 [[hints]]
 name = "keeper_board_get"
-call = "`keeper_board_get` { id: \"<post-id>\" }"
+call = "`keeper_board_get` { id: \"POST_ID\" }"
 description = "read a board post before replying"
 
 [[hints]]
 name = "keeper_board_comment"
-call = "`keeper_board_comment` { post_id: \"<post-id>\", content: \"<reply>\" }"
+call = "`keeper_board_comment` { post_id: \"POST_ID\", content: \"reply\" }"
 description = "reply to a board post"
 
 [[hints]]
 name = "keeper_board_post"
-call = "`keeper_board_post` { content: \"<note>\" }"
+call = "`keeper_board_post` { content: \"note\" }"
 description = "coordinate via board"
 
 [[hints]]
 name = "keeper_broadcast"
-call = "`keeper_broadcast` { message: \"<note>\" }"
+call = "`keeper_broadcast` { message: \"note\" }"
 description = "share broadly in the namespace"
 
 [[hints]]
 name = "keeper_fs_read"
-call = "`keeper_fs_read` { path: \"<path>\" }"
+call = "`keeper_fs_read` { path: \"path/to/file\" }"
 description = "read a file before editing or reporting"
 
 [[hints]]
 name = "keeper_fs_edit"
-call = "`keeper_fs_edit` { path: \"<path>\", mode: \"patch\", old_string: \"...\", new_string: \"...\" }"
+call = "`keeper_fs_edit` { path: \"path/to/file\", mode: \"patch\", old_string: \"...\", new_string: \"...\" }"
 description = "edit files inside the keeper workspace"
 
 [[hints]]
 name = "keeper_shell"
-call = "`keeper_shell` { op: \"gh\", cmd: \"pr view <n> --repo OWNER/REPO --json statusCheckRollup,mergeStateStatus,isDraft\" }"
+call = "`keeper_shell` { op: \"gh\", cmd: \"pr view NUMBER --repo OWNER/REPO --json statusCheckRollup,mergeStateStatus,isDraft\" }"
 description = "inspect GitHub status without using gh pr checks, which exits non-zero for red CI"
 
 [[hints]]
 name = "keeper_bash"
-call = "`keeper_bash` { cmd: \"<single shell command>\", cwd: \"repos/<repo-or-worktree>\" }"
+call = "`keeper_bash` { cmd: \"single shell command\", cwd: \"repos/REPO\" }"
 description = "run one shell command in the keeper workspace; set cwd for git/gh and never use cd chaining, redirects, shell existence tests, gh pr checks, or Bash glob paths"
 
 [[hints]]
 name = "masc_web_search"
-call = "`masc_web_search` { query: \"<current-info query>\", limit: 5 }"
+call = "`masc_web_search` { query: \"current-info query\", limit: 5 }"
 description = "look up current public context before time-sensitive claims"
 
 [[hints]]
 name = "masc_web_fetch"
-call = "`masc_web_fetch` { url: \"<page-url>\", timeout: {{web_fetch_timeout}} }"
+call = "`masc_web_fetch` { url: \"https://example.com/page\", timeout: {{web_fetch_timeout}} }"
 description = "fetch and read a web page before citing it"
 
 [[hints]]
 name = "masc_worktree_create"
-call = "`masc_worktree_create` { task_id: \"<task-id>\", repo_name: \"masc-mcp\" }"
+call = "`masc_worktree_create` { task_id: \"TASK_ID\", repo_name: \"masc-mcp\" }"
 description = "create a repo worktree before code edits"
 
 [[hints]]
 name = "keeper_task_submit_for_verification"
-call = "`keeper_task_submit_for_verification` { notes: \"<evidence>\", pr_url: \"<url>\" }"
+call = "`keeper_task_submit_for_verification` { notes: \"evidence\", pr_url: \"https://github.com/OWNER/REPO/pull/NUMBER\" }"
 description = "submit PR/code work for verification"
 
 [[hints]]
 name = "masc_transition"
-call = "`masc_transition` { task_id: \"<task-id>\", action: \"approve\", notes: \"<verification evidence>\" }"
+call = "`masc_transition` { task_id: \"TASK_ID\", action: \"approve\", notes: \"verification evidence\" }"
 description = "approve or reject an awaiting_verification task after inspecting evidence"
 
 [[hints]]
 name = "keeper_task_done"
-call = "`keeper_task_done` { notes: \"<evidence>\" }"
+call = "`keeper_task_done` { notes: \"evidence\" }"
 description = "close non-PR task work with evidence"
 
 [[hints]]

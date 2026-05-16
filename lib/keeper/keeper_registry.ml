@@ -561,6 +561,13 @@ let update_current_turn e f =
   { e with current_turn_observation }
 ;;
 
+let stamp_turn_progress ~now ~event_kind obs =
+  { obs with
+    last_progress_at = now
+  ; last_progress_kind = Some event_kind
+  }
+;;
+
 let mark_turn_started ~base_path name =
   let changed = ref false in
   let now = Time_compat.now () in
@@ -569,6 +576,8 @@ let mark_turn_started ~base_path name =
     let obs =
       { turn_id
       ; started_at = now
+      ; last_progress_at = now
+      ; last_progress_kind = Some "turn_started"
       ; turn_phase = Packed Turn_prompting
       ; decision_stage = Packed Decision_undecided
       ; cascade_state = Packed Cascade_idle
@@ -583,6 +592,12 @@ let mark_turn_started ~base_path name =
     ; compaction_stage = Packed Compaction_accumulating
     }));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
+;;
+
+let record_turn_progress ~base_path name ~event_kind =
+  let now = Time_compat.now () in
+  ignore (update_entry_if_registered ~base_path name (fun e ->
+    update_current_turn e (stamp_turn_progress ~now ~event_kind)))
 ;;
 
 (* RFC-0045: SDK-turn boundary reset.  Resets in-turn FSM fields without
@@ -609,7 +624,7 @@ let mark_sdk_turn_started ~base_path name =
       else (
         changed := true;
         let new_obs =
-          { obs with
+          { (stamp_turn_progress ~now ~event_kind:"sdk_turn_started" obs) with
             turn_phase = Packed Turn_prompting
           ; cascade_state = Packed Cascade_idle
           ; decision_stage = Packed Decision_undecided
@@ -632,6 +647,8 @@ let mark_turn_measurement ~base_path name =
             { obs with
               measurement = Some measurement
             ; measurement_bind_count = obs.measurement_bind_count + 1
+            ; last_progress_at = now
+            ; last_progress_kind = Some "turn_measurement"
             }
       ; pending_turn_measurement = None
       }
@@ -713,7 +730,9 @@ let set_turn_decision_stage ~base_path name (decision_stage : decision_stage_act
       then obs
       else (
         changed := true;
-        { obs with decision_stage = target_packed }))));
+        { (stamp_turn_progress ~now ~event_kind:"decision_stage" obs) with
+          decision_stage = target_packed
+        }))));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
@@ -752,7 +771,10 @@ let set_turn_cascade_state ~base_path name (cascade_state : packed_cascade_state
       | Resolved_transition _ ->
         validate_turn_phase_transition ~from:obs.turn_phase ~to_:new_turn_phase;
         changed := true;
-        { obs with cascade_state; turn_phase = new_turn_phase }
+        { (stamp_turn_progress ~now ~event_kind:"cascade_state" obs) with
+          cascade_state
+        ; turn_phase = new_turn_phase
+        }
       | Resolved_violation violation ->
         Keeper_fsm_guard_runtime.wrap_unit
           ~action:"cascade_transition"
@@ -860,7 +882,9 @@ let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =
       | Resolved_turn_idempotent -> obs
       | Resolved_turn_transition _ ->
         changed := true;
-        { obs with turn_phase }
+        { (stamp_turn_progress ~now ~event_kind:"turn_phase" obs) with
+          turn_phase
+        }
       | Resolved_turn_violation violation ->
         (* #14926: route the violation raise through [wrap_unit] so the
            guard's Prometheus counter [metric_fsm_guard_violation]
@@ -892,7 +916,9 @@ let set_turn_selected_model ~base_path name selected_model =
   ignore (update_entry_if_registered ~base_path name (fun e ->
     update_current_turn e (fun obs ->
       changed := true;
-      { obs with selected_model })));
+      { (stamp_turn_progress ~now ~event_kind:"selected_model" obs) with
+        selected_model
+      })));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
@@ -906,7 +932,7 @@ let prepare_turn_retry_after_compaction ~base_path name =
         ~to_:(Packed Cascade_idle : packed_cascade_state);
       validate_turn_phase_transition ~from:obs.turn_phase ~to_:(Packed Turn_prompting);
       changed := true;
-      { obs with
+      { (stamp_turn_progress ~now ~event_kind:"retry_after_compaction" obs) with
         turn_phase = Packed Turn_prompting
       ; decision_stage = Packed Decision_guard_ok
       ; cascade_state = Packed Cascade_idle
@@ -934,7 +960,7 @@ let mark_turn_gate_rejected_by_name name =
       update_current_turn e (fun obs ->
         validate_turn_phase_transition ~from:obs.turn_phase ~to_:(Packed Turn_finalizing);
         changed := true;
-        { obs with
+        { (stamp_turn_progress ~now ~event_kind:"gate_rejected" obs) with
           decision_stage = Packed Decision_gate_rejected
         ; turn_phase = Packed Turn_finalizing
         }));

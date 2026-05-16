@@ -72,6 +72,35 @@ let per_provider_timeout_for_turn
      | None -> Some timeout_s)
 ;;
 
+let sse_event_progress_kind (event : Agent_sdk.Types.sse_event) =
+  match event with
+  | Agent_sdk.Types.MessageStart _ -> "sse_message_start"
+  | Agent_sdk.Types.ContentBlockStart { tool_name = Some _; _ } ->
+    "sse_tool_block_start"
+  | Agent_sdk.Types.ContentBlockStart _ -> "sse_content_block_start"
+  | Agent_sdk.Types.ContentBlockDelta { delta = Agent_sdk.Types.TextDelta _; _ } ->
+    "sse_text_delta"
+  | Agent_sdk.Types.ContentBlockDelta { delta = Agent_sdk.Types.ThinkingDelta _; _ } ->
+    "sse_thinking_delta"
+  | Agent_sdk.Types.ContentBlockDelta { delta = Agent_sdk.Types.InputJsonDelta _; _ } ->
+    "sse_tool_arg_delta"
+  | Agent_sdk.Types.ContentBlockStop _ -> "sse_content_block_stop"
+  | Agent_sdk.Types.MessageDelta _ -> "sse_message_delta"
+  | Agent_sdk.Types.MessageStop -> "sse_message_stop"
+  | Agent_sdk.Types.Ping -> "sse_ping"
+  | Agent_sdk.Types.SSEError _ -> "sse_error"
+  | Agent_sdk.Types.SSEParseFailed _ -> "sse_parse_failed"
+  | Agent_sdk.Types.SSEUnknownEventType _ -> "sse_unknown_event_type"
+;;
+
+let attach_registry_progress_on_event downstream =
+  match downstream, Cascade_attempt_liveness_config.current_mode () with
+  | Some _, _ -> true
+  | None, Cascade_attempt_liveness_config.Off -> false
+  | None, Cascade_attempt_liveness_config.Observe
+  | None, Cascade_attempt_liveness_config.Enforce -> true
+;;
+
 (** Run a single keeper turn via OAS Agent.run().
 
     Loads checkpoint, creates working context with the base keeper system
@@ -468,19 +497,38 @@ let run_turn
       then Keeper_cdal_contract.of_keeper_meta meta
       else None
     in
+    let record_turn_progress event_kind =
+      Keeper_registry.record_turn_progress
+        ~base_path:config.base_path
+        meta.name
+        ~event_kind
+    in
     let yield_on_tool = Env_config.Slot.yield_enabled () in
     let on_yield =
       if yield_on_tool
       then
         Some
-          (fun () -> Log.Misc.debug "keeper %s: slot yielded (tool execution)" meta.name)
+          (fun () ->
+             record_turn_progress "slot_yield";
+             Log.Misc.debug "keeper %s: slot yielded (tool execution)" meta.name)
       else None
     in
     let on_resume =
       if yield_on_tool
       then
         Some
-          (fun () -> Log.Misc.debug "keeper %s: slot resumed (next LLM turn)" meta.name)
+          (fun () ->
+             record_turn_progress "slot_resume";
+             Log.Misc.debug "keeper %s: slot resumed (next LLM turn)" meta.name)
+      else None
+    in
+    let on_event =
+      if attach_registry_progress_on_event on_event
+      then
+        Some
+          (fun event ->
+             record_turn_progress (sse_event_progress_kind event);
+             Option.iter (fun cb -> cb event) on_event)
       else None
     in
     let priority =

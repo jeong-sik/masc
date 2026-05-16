@@ -10,6 +10,7 @@ type t =
   | Healthy
   | Stale_turn_timeout_idle
   | Stale_turn_timeout_in_turn
+  | Stale_turn_timeout_no_progress
   | Stale_turn_timeout_noop
   | Stale_termination_storm
   | Stale_fleet_batch
@@ -26,7 +27,10 @@ type t =
 
 let to_wire = function
   | Healthy -> "healthy"
-  | Stale_turn_timeout_idle | Stale_turn_timeout_in_turn | Stale_turn_timeout_noop ->
+  | Stale_turn_timeout_idle
+  | Stale_turn_timeout_in_turn
+  | Stale_turn_timeout_no_progress
+  | Stale_turn_timeout_noop ->
     (* Existing wire emission collapses the three sub-classes into one
          cohort key. Preserved here so dashboards / Prometheus labels do
          not see a sudden cardinality change at PR-3 cutover. *)
@@ -78,6 +82,8 @@ let of_failure_reason : Keeper_registry.failure_reason -> t = function
     Stale_turn_timeout_idle
   | Keeper_registry.Stale_turn_timeout (Keeper_registry.In_turn_hung _) ->
     Stale_turn_timeout_in_turn
+  | Keeper_registry.Stale_turn_timeout (Keeper_registry.Mid_turn_no_progress _) ->
+    Stale_turn_timeout_no_progress
   | Keeper_registry.Stale_turn_timeout (Keeper_registry.Noop_failure_loop _) ->
     Stale_turn_timeout_noop
   | Keeper_registry.Stale_termination_storm _ -> Stale_termination_storm

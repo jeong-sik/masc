@@ -682,6 +682,28 @@ module KeeperWatchdog = struct
     else raw
   ;;
 
+  (** Seconds since the last in-turn progress signal before an active turn is
+      considered mid-turn-stale. Default: 300 (5 minutes).
+
+      This is intentionally separate from [stale_threshold_sec] (idle keepers)
+      and [turn_timeout_sec] (outer wall clock). It catches no-first-token and
+      inter-chunk-idle stalls while preserving the larger total turn budget for
+      turns that continue to make progress. *)
+  let progress_timeout_sec =
+    let raw =
+      Float.max 60.0 (get_float ~default:300.0 "MASC_KEEPER_WATCHDOG_PROGRESS_SEC")
+    in
+    if raw > KeeperKeepalive.turn_timeout_sec
+    then (
+      Log.warn
+        "MASC_KEEPER_WATCHDOG_PROGRESS_SEC (%.1f) exceeds turn_timeout_sec (%.1f); \
+         clamping to turn_timeout_sec"
+        raw
+        KeeperKeepalive.turn_timeout_sec;
+      KeeperKeepalive.turn_timeout_sec)
+    else raw
+  ;;
+
   (** Watchdog poll interval in seconds. Must be >= 5.
       Default: 30. *)
   let poll_sec = Float.max 5.0 (get_float ~default:30.0 "MASC_KEEPER_WATCHDOG_POLL_SEC")

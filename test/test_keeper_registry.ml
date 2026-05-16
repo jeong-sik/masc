@@ -1604,6 +1604,40 @@ let test_mark_sdk_turn_started_preserves_keeper_scope () =
     check (float 1e-6) "started_at preserved" started_at_before obs.R.started_at
   | _ -> fail "obs missing after SDK boundary"
 
+let test_turn_progress_starts_at_turn_boundary () =
+  R.clear ();
+  let keeper_name = "k-progress-start" in
+  ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
+  R.mark_turn_started ~base_path:bp keeper_name;
+  match R.get ~base_path:bp keeper_name with
+  | Some { current_turn_observation = Some obs; _ } ->
+    check (float 1e-6) "progress starts at started_at"
+      obs.R.started_at obs.R.last_progress_at;
+    check (option string) "progress kind"
+      (Some "turn_started")
+      obs.R.last_progress_kind
+  | _ -> fail "obs missing after mark_turn_started"
+
+let test_record_turn_progress_updates_live_observation () =
+  R.clear ();
+  let keeper_name = "k-progress-record" in
+  ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
+  R.mark_turn_started ~base_path:bp keeper_name;
+  let before =
+    match R.get ~base_path:bp keeper_name with
+    | Some { current_turn_observation = Some obs; _ } -> obs.R.last_progress_at
+    | _ -> fail "obs missing before progress"
+  in
+  R.record_turn_progress ~base_path:bp keeper_name ~event_kind:"sse_text_delta";
+  match R.get ~base_path:bp keeper_name with
+  | Some { current_turn_observation = Some obs; _ } ->
+    check bool "progress timestamp advances or stays equal" true
+      (obs.R.last_progress_at >= before);
+    check (option string) "progress kind updated"
+      (Some "sse_text_delta")
+      obs.R.last_progress_kind
+  | _ -> fail "obs missing after progress"
+
 let test_mark_sdk_turn_started_no_op_without_obs () =
   R.clear ();
   let keeper_name = "k-rfc-0045-no-obs" in
@@ -1933,6 +1967,10 @@ let () =
             test_mark_sdk_turn_started_resets_after_finalizing;
           eio_test "mark_sdk_turn_started preserves keeper-turn-scoped data"
             test_mark_sdk_turn_started_preserves_keeper_scope;
+          eio_test "turn progress starts at turn boundary"
+            test_turn_progress_starts_at_turn_boundary;
+          eio_test "record_turn_progress updates live observation"
+            test_record_turn_progress_updates_live_observation;
           eio_test "mark_sdk_turn_started no-op without observation"
             test_mark_sdk_turn_started_no_op_without_obs;
           eio_test "mark_turn_cascade_exhausted materializes pre-disclosure path"

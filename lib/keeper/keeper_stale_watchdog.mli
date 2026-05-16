@@ -37,6 +37,24 @@ val should_trigger_noop_failure_loop_for_test :
     [consecutive_noop_count] only triggers a no-op failure-loop kill
     after the current keeper fiber has completed a turn. *)
 
+type active_turn_stale_status = {
+  active_total_stale : bool;
+  progress_stale : bool;
+  active_seconds : float;
+  since_progress_seconds : float;
+}
+
+val active_turn_stale_status_for_test :
+  now:float ->
+  started_at:float ->
+  last_progress_at:float ->
+  active_turn_timeout_sec:float ->
+  progress_timeout_sec:float ->
+  fiber_age:float ->
+  startup_grace:float ->
+  active_turn_stale_status
+(** Test-only view of the active-turn liveness classifier. *)
+
 val reset_batch_terminations_for_test : unit -> unit
 (** Test-only reset for fleet batch termination history. *)
 
@@ -64,7 +82,7 @@ val fork_stale_watchdog :
   -> unit
 (** Fork a stale-turn watchdog fiber for the given keeper.
 
-    Three detection modes — see {!Keeper_registry.stale_kill_class}:
+    Four detection modes — see {!Keeper_registry.stale_kill_class}:
     - [Idle_turn]: [last_turn_ts] older than the idle threshold while
       the keeper phase is [Running] but no [current_turn_observation]
       is recorded.
@@ -72,6 +90,9 @@ val fork_stale_watchdog :
       and ran past [timeout_threshold] seconds — covers the
       "Orphaned Streaming" pattern described in the executor FSM
       analysis (TLA+ I2: [in_turn_age > grace_period → in_turn_stale]).
+    - [Mid_turn_no_progress]: a turn is still within the outer active-turn
+      cap, but its progress timestamp is stale, catching no-first-token and
+      inter-chunk-idle stalls without shortening the total turn budget.
     - [Noop_failure_loop]: turns kept firing but produced no tool
       calls; the keepalive's [consecutive_noop_count] reached the
       watchdog threshold — catches keepers in LLM timeout loops where

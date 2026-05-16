@@ -25,6 +25,17 @@ let test_in_turn_hung_label () =
        (In_turn_hung
           { active_seconds = 720.0; timeout_threshold = 600.0 }))
 
+let test_mid_turn_no_progress_label () =
+  r "mid_turn_no_progress label"
+    "mid_turn_no_progress(active=420s since_progress=301s threshold=300s last=sse_text_delta)"
+    (stale_kill_class_to_string
+       (Mid_turn_no_progress
+          { active_seconds = 420.0;
+            since_progress_seconds = 301.0;
+            progress_timeout_threshold = 300.0;
+            last_progress_kind = Some "sse_text_delta";
+          }))
+
 let test_noop_failure_loop_label () =
   r "noop_failure_loop label" "noop_failure_loop(noop=4)"
     (stale_kill_class_to_string
@@ -43,6 +54,18 @@ let test_failure_reason_to_string_in_turn () =
        (Stale_turn_timeout
           (In_turn_hung
              { active_seconds = 720.0; timeout_threshold = 600.0 })))
+
+let test_failure_reason_to_string_mid_turn_no_progress () =
+  r "Stale_turn_timeout(Mid_turn_no_progress) wraps with prefix"
+    "stale_turn_timeout(mid_turn_no_progress(active=420s since_progress=301s threshold=300s last=sse_text_delta))"
+    (failure_reason_to_string
+       (Stale_turn_timeout
+          (Mid_turn_no_progress
+             { active_seconds = 420.0;
+               since_progress_seconds = 301.0;
+               progress_timeout_threshold = 300.0;
+               last_progress_kind = Some "sse_text_delta";
+             })))
 
 let test_failure_reason_to_string_noop () =
   r "Stale_turn_timeout(Noop_failure_loop) wraps with prefix"
@@ -91,6 +114,16 @@ let test_cohort_key_collapses_subclasses () =
           (Stale_turn_timeout
              (In_turn_hung
                 { active_seconds = 1.0; timeout_threshold = 1.0 }))));
+  r "Mid_turn_no_progress cohort_key" "stale_turn_timeout"
+    (failure_reason_cohort_key
+       (Some
+          (Stale_turn_timeout
+             (Mid_turn_no_progress
+                { active_seconds = 2.0;
+                  since_progress_seconds = 1.0;
+                  progress_timeout_threshold = 1.0;
+                  last_progress_kind = None;
+                }))));
   r "Noop_failure_loop cohort_key" "stale_turn_timeout"
     (failure_reason_cohort_key
        (Some (Stale_turn_timeout (Noop_failure_loop { noop_count = 1 }))))
@@ -173,6 +206,46 @@ let test_stale_watchdog_replaces_prior_fleet_batch_label () =
         "stale_turn_timeout(in_turn_hung(active=720s threshold=600s))"
         (failure_reason_to_string reason)
   | None -> Alcotest.fail "expected stale reason"
+
+let test_active_turn_progress_stale_inside_outer_budget () =
+  let status =
+    SW.active_turn_stale_status_for_test
+      ~now:401.0
+      ~started_at:0.0
+      ~last_progress_at:100.0
+      ~active_turn_timeout_sec:600.0
+      ~progress_timeout_sec:300.0
+      ~fiber_age:500.0
+      ~startup_grace:360.0
+  in
+  Alcotest.(check bool)
+    "active turn is below the outer wall"
+    false
+    status.active_total_stale;
+  Alcotest.(check bool)
+    "progress gap is stale"
+    true
+    status.progress_stale
+
+let test_active_turn_progress_stale_respects_grace () =
+  let status =
+    SW.active_turn_stale_status_for_test
+      ~now:401.0
+      ~started_at:0.0
+      ~last_progress_at:100.0
+      ~active_turn_timeout_sec:600.0
+      ~progress_timeout_sec:300.0
+      ~fiber_age:120.0
+      ~startup_grace:360.0
+  in
+  Alcotest.(check bool)
+    "startup grace suppresses total stale"
+    false
+    status.active_total_stale;
+  Alcotest.(check bool)
+    "startup grace suppresses progress stale"
+    false
+    status.progress_stale
 
 let root_cause_label reasons =
   reasons
@@ -300,6 +373,8 @@ let () =
           Alcotest.test_case "Idle_turn label" `Quick test_idle_turn_label;
           Alcotest.test_case "In_turn_hung label" `Quick
             test_in_turn_hung_label;
+          Alcotest.test_case "Mid_turn_no_progress label" `Quick
+            test_mid_turn_no_progress_label;
           Alcotest.test_case "Noop_failure_loop label" `Quick
             test_noop_failure_loop_label;
         ] );
@@ -309,6 +384,10 @@ let () =
             test_failure_reason_to_string_idle;
           Alcotest.test_case "Stale_turn_timeout(In_turn_hung) wraps" `Quick
             test_failure_reason_to_string_in_turn;
+          Alcotest.test_case
+            "Stale_turn_timeout(Mid_turn_no_progress) wraps"
+            `Quick
+            test_failure_reason_to_string_mid_turn_no_progress;
           Alcotest.test_case "Stale_turn_timeout(Noop_failure_loop) wraps"
             `Quick test_failure_reason_to_string_noop;
           Alcotest.test_case "Oas_timeout_budget_loop wraps" `Quick
@@ -343,6 +422,13 @@ let () =
             test_stale_watchdog_replaces_prior_storm_label;
           Alcotest.test_case "replaces prior fleet batch label" `Quick
             test_stale_watchdog_replaces_prior_fleet_batch_label;
+        ] );
+      ( "active_turn_staleness",
+        [
+          Alcotest.test_case "progress stale inside outer budget" `Quick
+            test_active_turn_progress_stale_inside_outer_budget;
+          Alcotest.test_case "progress stale respects startup grace" `Quick
+            test_active_turn_progress_stale_respects_grace;
         ] );
       ( "batch_root_cause",
         [

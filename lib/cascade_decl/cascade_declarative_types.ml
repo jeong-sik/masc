@@ -25,6 +25,14 @@ type cascade_credential =
   | Inline of string
 [@@deriving show, eq]
 
+type cascade_provider_log =
+  { enabled : bool
+  ; path : string option
+  ; default_lines : int option
+  ; max_bytes : int option
+  }
+[@@deriving show, eq]
+
 (** Per-provider runtime + behavioral capabilities — RFC-0058 §2.4 +
     Phase 5.1 (capability fields) + §3.2 Phase 5.6 (tool/event support).
 
@@ -98,6 +106,7 @@ type cascade_provider =
   ; is_non_interactive : bool
   ; credentials : cascade_credential option
   ; capabilities : cascade_capabilities option
+  ; log : cascade_provider_log option
   ; headers : (string * string) list option
   }
 [@@deriving show, eq]

@@ -71,3 +71,34 @@ val stale_turn_timeout_cohort_key : string
 val active_supervision_keeper_count :
   Keeper_registry.registry_entry list -> int
 (** Count currently active keepers for self-preservation denominators. *)
+
+val next_auto_resume_after_sec :
+  initial_sec:float -> max_sec:float -> float option -> float option
+(** Compute the next auto-resume backoff delay after an auto-pause.  [None]
+    means this is the first auto-pause; [Some sec] means the previous
+    backoff should double up to [max_sec].  [initial_sec <= 0] disables
+    auto-resume. *)
+
+val liveness_recovery_backoff : int -> float
+(** Compute the exponential backoff delay for liveness recovery attempt [n]. *)
+
+val should_attempt_liveness_recovery :
+  now:float -> Keeper_registry.registry_entry -> bool
+(** Pure predicate: true when a Dead keeper passes the eligibility gate for
+    a liveness recovery attempt.  Exposed for tests. *)
+
+val detect_alive_but_stuck :
+  now:float ->
+  stall_multiplier:int ->
+  stall_floor_sec:float ->
+  Keeper_registry.registry_entry ->
+  float option
+(** Pure detection: returns [Some elapsed_sec] when a Running keeper has
+    exceeded its alive-but-stuck threshold. *)
+
+val alive_but_stuck_threshold :
+  stall_multiplier:int ->
+  stall_floor_sec:float ->
+  Keeper_registry.registry_entry ->
+  float
+(** Pure threshold computation for alive-but-stuck detection. *)

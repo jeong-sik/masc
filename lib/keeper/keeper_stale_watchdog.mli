@@ -56,6 +56,13 @@ val effective_startup_grace_sec :
     keeper.  It must cover the configured watchdog grace and the proactive
     startup warmup plus one poll interval. *)
 
+val should_warn_missing_registry_for_test :
+  captured_paused:bool -> persisted_paused:bool option -> bool
+(** Test-only view of missing-registry log classification. A missing
+    registry entry is expected once a paused keeper has been pruned from the
+    live registry, so the watchdog should stop its orphan fiber instead of
+    emitting repeated WARN lines. *)
+
 val fork_stale_watchdog :
      'a context
   -> keeper_meta

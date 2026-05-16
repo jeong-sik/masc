@@ -10,6 +10,10 @@ val count_context_tokens : Keeper_types.working_context -> int
 (** Render an error JSON envelope: [{"error": <message>; ...fields}]. *)
 val error_json : ?fields:(string * Yojson.Safe.t) list -> string -> string
 
+(** Render a failed [Tool_result.t] as [error_json], preserving
+    [failure_class] for keeper-facing routing and diagnostics. *)
+val tool_result_error_json : Tool_result.t -> string
+
 (** [Tool_result.t] passes [msg] through on success; wraps it
     in [error_json] on failure. *)
 val tool_result_or_error : Tool_result.t -> string

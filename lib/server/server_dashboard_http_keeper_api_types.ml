@@ -179,3 +179,123 @@ let manifest_row_matches ?turn_id keeper_name trace_id
   match turn_id with
   | None -> true
   | Some wanted -> row.keeper_turn_id = Some wanted
+
+let unique_present_paths paths =
+  paths
+  |> List.filter_map (fun value ->
+       match value with
+       | Some path when String.trim path <> "" -> Some path
+       | _ -> None)
+  |> Json_util.dedupe_keep_order
+
+let provider_attempt_row_json (row : Keeper_runtime_manifest.t) =
+  let decision_string key = json_string_member_opt key row.decision in
+  `Assoc
+    [
+      ("ts", `String row.ts);
+      ("event", `String (Keeper_runtime_manifest.event_kind_to_string row.event));
+      ("cascade_name", json_string_opt row.cascade_name);
+      ("model_source", json_string_opt (decision_string "model_source"));
+      ( "resolved_model_source",
+        json_string_opt (decision_string "resolved_model_source") );
+      ("capability_source", json_string_opt (decision_string "capability_source"));
+      ("fallback_authority", json_string_opt (decision_string "fallback_authority"));
+      ( "provider_source_cascade",
+        json_string_opt (decision_string "provider_source_cascade") );
+      ("status", `String row.status);
+      ("error", json_string_opt (decision_string "error"));
+      ( "exception_kind",
+        json_string_opt (decision_string "exception_kind") );
+    ]
+
+let string_contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len = 0 then true
+  else if needle_len > haystack_len then false
+  else
+    let rec loop idx =
+      if idx + needle_len > haystack_len then false
+      else if String.sub haystack idx needle_len = needle then true
+      else loop (idx + 1)
+    in
+    loop 0
+
+let runtime_trace_keeps_provider_attempt_provenance_key = function
+  | "model_source"
+  | "resolved_model_source"
+  | "capability_source"
+  | "fallback_authority"
+  | "provider_source_cascade"
+  | "terminal_model_source"
+  | "terminal_resolved_model_source"
+  | "terminal_capability_source"
+  | "terminal_fallback_authority"
+  | "terminal_provider_source_cascade" ->
+    true
+  | _ -> false
+
+let runtime_trace_redacts_provider_model_key key =
+  let key = String.lowercase_ascii key in
+  (not (runtime_trace_keeps_provider_attempt_provenance_key key))
+  &&
+  (string_contains_substring key "provider"
+   || string_contains_substring key "model"
+   || String.equal key "configured_labels")
+
+let rec runtime_trace_public_json = function
+  | `Assoc fields ->
+      `Assoc
+        (fields
+        |> List.filter_map (fun (key, value) ->
+               if runtime_trace_redacts_provider_model_key key then None
+               else Some (key, runtime_trace_public_json value)))
+  | `List values -> `List (List.map runtime_trace_public_json values)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value ->
+      value
+
+let tool_call_output_text_opt json =
+  match Yojson.Safe.Util.member "output" json with
+  | `String value -> Some value
+  | `Assoc _ as output -> (
+    match json_assoc_member_opt "_blob" output with
+    | Some blob -> json_string_member_opt "preview" blob
+    | None -> None)
+  | _ -> None
+
+let parse_tool_output_json_opt json =
+  match tool_call_output_text_opt json with
+  | None -> None
+  | Some output -> (
+    match Safe_ops.parse_json_safe ~context:"runtime_lens.tool_output" output with
+    | Ok parsed -> Some parsed
+    | Error _ -> None)
+
+let tool_call_runtime_contract json =
+  match json_assoc_member_opt "runtime_contract" json with
+  | Some contract -> contract
+  | None -> `Assoc []
+
+let tool_call_matches_trace ?turn_id ~keeper_name ~trace_id json =
+  let contract = tool_call_runtime_contract json in
+  let keeper_matches =
+    match json_string_member_opt "keeper" json with
+    | Some keeper -> String.equal keeper keeper_name
+    | None -> true
+  in
+  let trace_matches =
+    match
+      ( json_string_member_opt "trace_id" json,
+        json_string_member_opt "trace_id" contract )
+    with
+    | Some value, _ | _, Some value -> String.equal value trace_id
+    | None, None -> false
+  in
+  let turn_matches =
+    match turn_id with
+    | None -> true
+    | Some wanted ->
+      json_int_member_opt "keeper_turn_id" json = Some wanted
+      || json_int_member_opt "keeper_turn_id" contract = Some wanted
+  in
+  keeper_matches && trace_matches && turn_matches

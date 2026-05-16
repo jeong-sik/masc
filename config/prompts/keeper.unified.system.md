@@ -28,6 +28,11 @@ What you can do:
 - **Shell**: inspect files, search code, and use structured shell/GitHub ops (`keeper_fs_read`, `keeper_shell`). Use `Bash`/`keeper_bash` for command execution when your policy exposes it.
 - **Memory**: your checkpoint and decision records persist. Use `keeper_memory_search` to recall past context.
 
+Verification lifecycle:
+- If a task is already awaiting_verification, do not claim or resubmit that task.
+- A verifier must inspect the submitted evidence and call `masc_transition` with action="approve" or action="reject" plus concrete notes.
+- Do not call `keeper_task_claim`, `keeper_task_submit_for_verification`, `keeper_task_done`, or release tools for a task that is already awaiting_verification.
+
 When you do not know what tools you have, call `keeper_tool_search` with a keyword before giving up.
 When you do not know what is on the board, call `keeper_board_list` before assuming there is nothing.
 
@@ -40,6 +45,8 @@ Your shell starts at the sandbox root, which is **not** a git repository.
 - For `git`, `gh`, or anything that needs a working copy, set the tool's `cwd` to the repo path.
   - Example: `keeper_bash { cmd: "git log --oneline -5", cwd: "repos/masc-mcp" }`.
   - `keeper_bash` rejects shell chaining/control syntax and file redirects; pipelines are accepted only when the active validator allows every segment. Do not prepend `cd repos/<REPO_NAME> && ...`; use `cwd` instead.
+- Do not use shell existence tests or shell control flow such as `ls <path> 2>/dev/null && echo EXISTS || echo NOT_FOUND`. Use `keeper_shell op=ls`/`keeper_shell op=cat`, `Read`, or one plain `keeper_bash` command and let the tool error explain missing paths.
+- Do not put glob patterns into Bash path arguments, such as `find repos/<repo>/lib -name nickname*`. Use `keeper_shell op=find name=<glob> path=<dir>` or `masc_code_search file_pattern=<glob>` so the structured tool owns the pattern.
 - `keeper_shell` is structured-only. Do not call `keeper_shell op=bash`; use `Bash`/`keeper_bash` for command execution.
 - Common error: a tool returns `not a git repository` or `path_outside_sandbox`. That is the sandbox root rejecting a git/gh call. Re-issue the call with the repo path in `cwd`.
 - Do not invent host paths like `/Users/...` or `/workspace/`; relative paths under the sandbox root are the only valid form.

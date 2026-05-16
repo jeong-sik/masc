@@ -42,10 +42,14 @@ keeper_bash examples:
   GOOD: keeper_shell op=ls path={sandbox_repos}       (single op with path from keeper_context_status)
   BAD:  cmd="find /home/keeper -name \"board\" 2>/dev/null" (quoted path/pattern + redirect blocked)
   GOOD: keeper_shell op=find path=. name=board        (structured find)
+  BAD:  cmd="find repos/masc-mcp/lib -name nickname*" (glob expansion blocked)
+  GOOD: keeper_shell op=find path=repos/masc-mcp/lib name=nickname*
   BAD:  cmd="rg -n \"foo\\|bar\" repos/masc-mcp/lib 2>/dev/null | head -20"
   GOOD: keeper_shell op=rg pattern="foo|bar" path=repos/masc-mcp/lib
   BAD:  cmd="cat file 2>/dev/null || echo missing"
   GOOD: keeper_shell op=cat path=file                 (let the tool error explain missing files)
+  BAD:  cmd="ls path 2>/dev/null && echo EXISTS || echo NOT_FOUND"
+  GOOD: keeper_shell op=ls path=path                  (let the tool error explain missing paths)
   BAD:  cmd="python3 -c 'open(path).write(text)'"
   GOOD: keeper_fs_edit or masc_code_edit              (use edit tools for writes)
   BAD:  cmd="keeper_board_list"                       (MASC tool invoked as shell command)
@@ -65,7 +69,7 @@ File operations:
 - View file (raw): keeper_shell with op=cat, path=<file>
 - Git history: keeper_shell with op=git_log, count=10 (optional: path=<file>, format="%h %s %an")
 - Git status: keeper_shell with op=git_status
-- Run shell commands: Bash or keeper_bash with cmd=<command> (read-only unless Coding/Delivery/Full preset). ONE command per call — no chaining or file redirects. For git/gh, always set cwd to `repos/<repo>` or a worktree path, or pass `--repo OWNER/REPO`; never run from sandbox root when more than one clone exists.
+- Run shell commands: Bash or keeper_bash with cmd=<command> (read-only unless Coding/Delivery/Full preset). ONE command per call — no chaining, file redirects, or shell existence tests like `2>/dev/null && echo`. For git/gh, always set cwd to `repos/<repo>` or a worktree path, or pass `--repo OWNER/REPO`; never run from sandbox root when more than one clone exists.
 - Write or create a file: keeper_fs_edit (Coding/Delivery/Full). Writable scope: your sandbox only.
 - GitHub CLI: keeper_shell op=gh with cmd="pr list", cmd="pr view 123", cmd="pr comment 123 --body 'text'", cmd="issue create --title 'bug'"
 
@@ -120,6 +124,7 @@ Task management:
 - Claim next available: masc_claim_next
 - Claim specific and complete: keeper_task_claim, keeper_task_done
 - For code/PR work that needs review: keeper_task_submit_for_verification with task_id, notes, and pr_url
+- Verify submitted work: when status is awaiting_verification, use masc_transition with action="approve" or action="reject" and notes; do not claim or resubmit that task
 
 Active-tool contract:
 - On actionable turns, passive reads alone are not enough. If you inspect tasks, files, board posts, or GitHub state and there is work to do, follow with an active tool in the same turn: keeper_task_claim, masc_worktree_create, keeper_fs_edit, keeper_bash/Bash, keeper_pr_create, keeper_board_post, keeper_board_comment, keeper_task_submit_for_verification, or keeper_stay_silent with a concrete blocker.

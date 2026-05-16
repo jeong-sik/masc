@@ -25,6 +25,7 @@ type hook_accumulator =
   ; mutable tool_overlay : Agent_sdk.Tool_op.t
   ; mutable tool_surface : tool_surface_metrics
   ; mutable requested_tool_names : string list
+  ; mutable requested_tool_names_seen : string list
   ; mutable receipt_tool_contract_result :
       Keeper_execution_receipt.tool_contract_result
   }
@@ -40,11 +41,17 @@ type hook_outputs =
   ; out_tool_overlay : Agent_sdk.Tool_op.t
   ; out_tool_surface : tool_surface_metrics
   ; out_requested_tool_names : string list
+  ; out_requested_tool_names_seen : string list
   ; out_receipt_tool_contract_result :
       Keeper_execution_receipt.tool_contract_result
   }
 
 val freeze : hook_accumulator -> hook_outputs
+
+val merge_requested_tool_names_seen
+  :  seen:string list
+  -> string list
+  -> string list
 
 type tool_search_hit_partition =
   { visible_core_hits : (string * float) list

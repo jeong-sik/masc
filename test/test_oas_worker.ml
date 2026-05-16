@@ -1532,7 +1532,7 @@ let test_default_config_preserves_custom_local_request_path () =
   | _ -> Alcotest.fail "custom local OpenAI-compatible provider should stay OpenAICompat"
 ;;
 
-let test_run_named_per_provider_timeout_uses_clock_fallback_and_exempts_last_provider () =
+let test_run_named_local_per_provider_timeout_uses_liveness_floor () =
   Masc_mcp.Masc_eio_env.reset_for_test ();
   Alcotest.(check bool)
     "test requires no global Masc_eio_env"
@@ -1567,7 +1567,7 @@ let test_run_named_per_provider_timeout_uses_clock_fallback_and_exempts_last_pro
           ~clock
           ~port:first_port
           ~delay_s:0.2
-          (openai_text_response "first provider should timeout")
+          (openai_text_response "first provider survived local timeout floor")
       with
       | Unix.Unix_error (Unix.EPERM, "bind", _) | Unix.Unix_error (Unix.EACCES, "bind", _)
         -> Alcotest.skip ()
@@ -1590,10 +1590,10 @@ let test_run_named_per_provider_timeout_uses_clock_fallback_and_exempts_last_pro
          ~profile:"timeout_probe"
          [ "slow", first_url; "last", second_url ])
     @@ fun () ->
-    (* Disable liveness observer so [outer_wall_for_attempt] passes
-       per_provider_timeout_s through unchanged.  With Observe/Enforce
-       the budget wall (e.g. 180 s) clamps the 0.05 s test timeout
-       upward, letting the first provider succeed instead of timing out. *)
+    (* Local runtime candidates floor stale/tiny per-provider timeouts before
+       they reach OAS max_execution_time_s.  This prevents client-side closes
+       that show up as provider 500s while a local model is still loading or
+       generating. *)
     with_liveness_off
     @@ fun () ->
     match
@@ -1608,8 +1608,8 @@ let test_run_named_per_provider_timeout_uses_clock_fallback_and_exempts_last_pro
     with
     | Ok result ->
       Alcotest.(check string)
-        "last provider succeeds without timeout"
-        "last provider survived timeout"
+        "first local provider succeeds without timeout"
+        "first provider survived local timeout floor"
         (response_text result.response);
       flush_cascade_actor ();
       Eio.Switch.fail sw Exit
@@ -2648,11 +2648,15 @@ let make_ollama_provider_cfg ?(model_id = "qwen3:27b") () =
     ()
 ;;
 
-let make_openai_compat_provider_cfg ?(model_id = "gpt-4.1") () =
+let make_openai_compat_provider_cfg
+      ?(model_id = "gpt-4.1")
+      ?(base_url = "http://127.0.0.1:18080/v1")
+      ()
+  =
   Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.OpenAI_compat
     ~model_id
-    ~base_url:"http://127.0.0.1:18080/v1"
+    ~base_url
     ()
 ;;
 
@@ -2741,6 +2745,10 @@ let check_timeout_opt label expected actual =
   Alcotest.(check (option (float 0.001))) label expected actual
 ;;
 
+let local_runtime_timeout_floor_s =
+  Masc_mcp.Cascade_attempt_liveness.bootstrap.attempt_wall_max
+;;
+
 let provider_timeout ?(is_last = false) ?configured provider_cfg =
   let candidate =
     Masc_mcp.Cascade_runtime_candidate.of_provider_config provider_cfg
@@ -2772,21 +2780,28 @@ let test_provider_attempt_timeout_passes_gemini_cli_configured_timeout () =
     (provider_timeout ~configured:300.0 (make_gemini_cli_provider_cfg ()))
 ;;
 
-let test_provider_attempt_timeout_passes_ollama_configured_timeout () =
+let test_provider_attempt_timeout_floors_ollama_configured_timeout () =
   check_timeout_opt
-    "ollama configured attempt timeout passes through"
-    (Some 60.0)
+    "ollama configured attempt timeout is floored for local runtime"
+    (Some local_runtime_timeout_floor_s)
     (provider_timeout ~configured:60.0 (make_ollama_provider_cfg ()))
+;;
+
+let test_provider_attempt_timeout_floors_ollama_default_timeout () =
+  check_timeout_opt
+    "ollama absent attempt timeout gets local runtime floor"
+    (Some local_runtime_timeout_floor_s)
+    (provider_timeout (make_ollama_provider_cfg ()))
 ;;
 
 let test_provider_attempt_timeout_passes_final_configured_timeout () =
   check_timeout_opt
-    "final provider configured attempt timeout passes through"
+    "final non-local provider configured attempt timeout passes through"
     (Some 300.0)
     (provider_timeout
        ~is_last:true
        ~configured:300.0
-       (make_openai_compat_provider_cfg ()))
+       (make_openai_compat_provider_cfg ~base_url:"https://api.example.test/v1" ()))
 ;;
 
 let test_cascade_provider_labels_preserve_registered_openai_compat_family () =
@@ -6436,9 +6451,13 @@ let () =
             `Quick
             test_provider_attempt_timeout_passes_gemini_cli_configured_timeout
         ; Alcotest.test_case
-            "provider timeout passes ollama configured timeout"
+            "provider timeout floors ollama configured timeout"
             `Quick
-            test_provider_attempt_timeout_passes_ollama_configured_timeout
+            test_provider_attempt_timeout_floors_ollama_configured_timeout
+        ; Alcotest.test_case
+            "provider timeout floors ollama default timeout"
+            `Quick
+            test_provider_attempt_timeout_floors_ollama_default_timeout
         ; Alcotest.test_case
             "provider timeout passes final configured timeout"
             `Quick
@@ -6537,9 +6556,9 @@ let () =
             `Quick
             test_default_config_preserves_custom_local_request_path
         ; Alcotest.test_case
-            "per-provider timeout uses context clock and exempts last provider"
+            "local per-provider timeout uses liveness floor"
             `Quick
-            test_run_named_per_provider_timeout_uses_clock_fallback_and_exempts_last_provider
+            test_run_named_local_per_provider_timeout_uses_liveness_floor
         ; Alcotest.test_case
             "open circuit primary falls back without request"
             `Quick

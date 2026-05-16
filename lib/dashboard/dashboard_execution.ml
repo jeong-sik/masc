@@ -46,7 +46,11 @@ let messages_safe config =
 let assoc_upsert fields key value = (key, value) :: List.remove_assoc key fields
 
 let compact_keeper_trust_json ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) =
-  let runtime_trust = Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta in
+  let runtime_trust =
+    if Keeper_fd_pressure.active ()
+    then Keeper_fd_pressure.degraded_trust_json ()
+    else Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta
+  in
   let member key = Yojson.Safe.Util.member key runtime_trust in
   `Assoc
     [ "disposition", member "disposition"
@@ -62,6 +66,31 @@ let compact_keeper_trust_json ~(config : Coord.config) ~(meta : Keeper_types.kee
     ; "latest_next_action", member "latest_next_action"
     ; "latest_causal_event", member "latest_causal_event"
     ]
+;;
+
+let reconcile_keeper_attention_fields_with_trust fields trust =
+  match trust with
+  | `Assoc _ ->
+    let upsert key value fields = assoc_upsert fields key value in
+    fields
+    |> upsert "disposition" (Yojson.Safe.Util.member "disposition" trust)
+    |> upsert
+         "disposition_reason"
+         (Yojson.Safe.Util.member "disposition_reason" trust)
+    |> upsert
+         "operator_disposition"
+         (Yojson.Safe.Util.member "operator_disposition" trust)
+    |> upsert
+         "operator_disposition_reason"
+         (Yojson.Safe.Util.member "operator_disposition_reason" trust)
+    |> upsert "needs_attention" (Yojson.Safe.Util.member "needs_attention" trust)
+    |> upsert
+         "attention_reason"
+         (Yojson.Safe.Util.member "attention_reason" trust)
+    |> upsert
+         "next_human_action"
+         (Yojson.Safe.Util.member "next_human_action" trust)
+  | _ -> fields
 ;;
 
 (* #10710: bound on the per-render enrich fan-out. Code constant per
@@ -216,6 +245,7 @@ let enrich_keeper_with_diagnostic ~(config : Coord.config) (keeper_json : Yojson
           let fields = assoc_upsert fields "diagnostic" diagnostic in
           let fields = assoc_upsert fields "trust" trust in
           let fields = assoc_upsert fields "runtime_trust" trust in
+          let fields = reconcile_keeper_attention_fields_with_trust fields trust in
           `Assoc fields
         | Ok None | Error _ -> keeper_json)
      | _ -> keeper_json)

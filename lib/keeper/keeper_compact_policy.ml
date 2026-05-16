@@ -235,7 +235,7 @@ let compact_if_needed_typed
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
        Log.Harness.warn "[pre_compact] sse broadcast failed: %s" (Printexc.to_string exn));
-    let messages =
+    let messages, pair_repair_stats =
       let msgs_after_compact =
         (* Issue #8597 #1: dropped [~system_prompt] arg — compact
                ignored it (system prompt already present in messages
@@ -246,7 +246,7 @@ let compact_if_needed_typed
       let msgs_after_fold =
         Agent_sdk.Context_reducer.reduce fold_reducer msgs_after_compact
       in
-      Keeper_context_core.repair_broken_tool_call_pairs msgs_after_fold
+      Keeper_context_core.repair_broken_tool_call_pairs_with_stats msgs_after_fold
     in
     let compacted_ctx =
       sync_oas_context
@@ -286,12 +286,22 @@ let compact_if_needed_typed
             ; "after_tokens", `Int new_tok_count
             ; "saved_messages", `Int saved_messages
             ; "saved_tokens", `Int saved_tokens
+            ; ( "tool_pair_repair"
+              , `Assoc
+                  [ ( "downgraded_tool_uses"
+                    , `Int pair_repair_stats.downgraded_tool_uses )
+                  ; ( "downgraded_tool_results"
+                    , `Int pair_repair_stats.downgraded_tool_results )
+                  ] )
             ])
       (Printf.sprintf
-         "post_compact keeper=%s trigger=%s saved_tokens=%d"
+         "post_compact keeper=%s trigger=%s saved_tokens=%d pair_repair_tool_uses=%d \
+          pair_repair_tool_results=%d"
          meta.name
          trigger_human
-         saved_tokens);
+         saved_tokens
+         pair_repair_stats.downgraded_tool_uses
+         pair_repair_stats.downgraded_tool_results);
     compacted_ctx, Some trigger, decision
 ;;
 

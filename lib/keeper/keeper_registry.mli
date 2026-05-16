@@ -156,6 +156,15 @@ val set_turn_cascade_state :
     when no turn is active. *)
 val mark_turn_cascade_exhausted : base_path:string -> string -> unit
 
+(** Mark cascade success on the live turn.
+
+    When provider execution returns before the tool-disclosure hook advances the
+    registry projection, the live cascade axis can still be [Cascade_idle]. This
+    helper materializes the spec-valid pre-terminal path ([idle -> selecting ->
+    trying -> done]) instead of allowing callers to jump directly to
+    [Cascade_done]. No-op when no turn is active. *)
+val mark_turn_cascade_done : base_path:string -> string -> unit
+
 (** Mark that the live turn has entered a provider attempt.
 
     This materializes the registry-side projection that corresponds to

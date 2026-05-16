@@ -25,6 +25,7 @@ type hook_accumulator =
   ; mutable tool_overlay : Agent_sdk.Tool_op.t
   ; mutable tool_surface : tool_surface_metrics
   ; mutable requested_tool_names : string list
+  ; mutable requested_tool_names_seen : string list
   ; mutable receipt_tool_contract_result :
       Keeper_execution_receipt.tool_contract_result
   }
@@ -40,6 +41,7 @@ type hook_outputs =
   ; out_tool_overlay : Agent_sdk.Tool_op.t
   ; out_tool_surface : tool_surface_metrics
   ; out_requested_tool_names : string list
+  ; out_requested_tool_names_seen : string list
   ; out_receipt_tool_contract_result :
       Keeper_execution_receipt.tool_contract_result
   }
@@ -54,8 +56,18 @@ let freeze (acc : hook_accumulator) : hook_outputs =
   ; out_tool_overlay = acc.tool_overlay
   ; out_tool_surface = acc.tool_surface
   ; out_requested_tool_names = acc.requested_tool_names
+  ; out_requested_tool_names_seen = acc.requested_tool_names_seen
   ; out_receipt_tool_contract_result = acc.receipt_tool_contract_result
   }
+;;
+
+let merge_requested_tool_names_seen ~seen requested =
+  Keeper_types.dedupe_keep_order (seen @ requested)
+
+let record_requested_tool_names (acc : hook_accumulator) requested =
+  acc.requested_tool_names <- requested;
+  acc.requested_tool_names_seen <-
+    merge_requested_tool_names_seen ~seen:acc.requested_tool_names_seen requested
 ;;
 
 type tool_search_hit_partition =
@@ -243,6 +255,7 @@ let prepare_agent_setup
         ; approval_mode_derived
         }
     ; requested_tool_names = []
+    ; requested_tool_names_seen = []
     ; receipt_tool_contract_result =
         Keeper_execution_receipt.Contract_unknown
     }
@@ -1162,7 +1175,7 @@ let prepare_agent_setup
   match initial_tool_surface_result with
   | Error err -> Error err
   | Ok initial_tool_surface ->
-    acc.requested_tool_names <- initial_tool_surface.all_allowed;
+  record_requested_tool_names acc initial_tool_surface.all_allowed;
     let discover_work_nudge () : string option =
       let meta = acc.meta in
       match meta.work_discovery_enabled with
@@ -1636,7 +1649,7 @@ let prepare_agent_setup
                 if turn_completion_contract = Keeper_tool_disclosure.Require_tool_use
                 then acc.required_tool_use_seen <- true;
                 let lane = computed_surface.lane in
-                acc.requested_tool_names <- all_allowed;
+                record_requested_tool_names acc all_allowed;
                 acc.tool_surface
                 <- { turn_lane = lane
                    ; tool_surface_class = computed_surface.tool_surface_class

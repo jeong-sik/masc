@@ -100,6 +100,30 @@ let test_failure_reason_to_string_tool_required_unsatisfied () =
             detail = "no keeper tools";
           }))
 
+let check_missing_registry_warn ~msg ~captured_paused ~persisted_paused
+    ~expected =
+  Alcotest.(check bool) msg expected
+    (SW.should_warn_missing_registry_for_test ~captured_paused
+       ~persisted_paused)
+
+let test_missing_registry_warns_for_unpaused_keeper () =
+  check_missing_registry_warn
+    ~msg:"unpaused persisted state warns"
+    ~captured_paused:false ~persisted_paused:(Some false) ~expected:true
+
+let test_missing_registry_stops_for_persisted_paused_keeper () =
+  check_missing_registry_warn
+    ~msg:"persisted paused state suppresses warn"
+    ~captured_paused:false ~persisted_paused:(Some true) ~expected:false
+
+let test_missing_registry_falls_back_to_captured_pause () =
+  check_missing_registry_warn
+    ~msg:"missing persisted meta uses captured paused state"
+    ~captured_paused:true ~persisted_paused:None ~expected:false;
+  check_missing_registry_warn
+    ~msg:"missing persisted meta warns when captured active"
+    ~captured_paused:false ~persisted_paused:None ~expected:true
+
 let test_cohort_key_collapses_subclasses () =
   (* The cohort key intentionally ignores the sub-class — every stale
      kill is one cohort for dashboard rate computation.  Operators
@@ -429,6 +453,15 @@ let () =
             test_active_turn_progress_stale_inside_outer_budget;
           Alcotest.test_case "progress stale respects startup grace" `Quick
             test_active_turn_progress_stale_respects_grace;
+        ] );
+      ( "missing_registry",
+        [
+          Alcotest.test_case "warns for unpaused keeper" `Quick
+            test_missing_registry_warns_for_unpaused_keeper;
+          Alcotest.test_case "stops for persisted paused keeper" `Quick
+            test_missing_registry_stops_for_persisted_paused_keeper;
+          Alcotest.test_case "falls back to captured pause" `Quick
+            test_missing_registry_falls_back_to_captured_pause;
         ] );
       ( "batch_root_cause",
         [

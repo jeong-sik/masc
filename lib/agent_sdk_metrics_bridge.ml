@@ -56,7 +56,7 @@ let update_gauge_for purpose value =
 ;;
 
 let subscribe ~purpose ?(filter = Agent_sdk.Event_bus.accept_all) bus =
-  let sub = Agent_sdk.Event_bus.subscribe ~filter bus in
+  let sub = Agent_sdk.Event_bus.subscribe ~filter ~purpose bus in
   let t = { sub; purpose; filter; depth = ref 0; warned_above_threshold = ref false } in
   with_registry (fun () -> registry := t :: !registry);
   update_gauge_for purpose 0;

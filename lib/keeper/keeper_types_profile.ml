@@ -608,6 +608,24 @@ let oas_env_key_is_allowed suffix =
       && String.sub suffix 0 (String.length p) = p)
     allowed_prefixes
 
+(* Observability for the env-key allowlist drop branch.  Previously
+   any [keeper.oas_env.<X>] entry whose suffix did not match
+   [OAS_(CLAUDE|CODEX|GEMINI)_] or [MASC_KEEPER_OAS_] was filtered
+   out with no signal — operators could not tell whether a typo'd
+   key (e.g. [OAS_CLUADE_API_KEY]) had been silently ignored.
+   Closes the silent-drop gap noted in
+   .tmp/memory-compacting-analysis.html (oas_env allowlist drop). *)
+let () =
+  Prometheus.register_counter
+    ~name:Keeper_metrics.metric_keeper_oas_env_key_rejections
+    ~help:
+      "Total keeper.oas_env.<X> entries rejected by the allowlist \
+       in [extract_oas_env_from_doc].  Each rejected key produces \
+       a warn line; non-zero counts at startup mean the TOML \
+       contains keys the runtime silently ignored."
+    ()
+;;
+
 let extract_oas_env_from_doc (doc : Keeper_toml_loader.toml_doc)
     : (string * string) list =
   let prefix_len = String.length oas_env_key_prefix in
@@ -619,7 +637,18 @@ let extract_oas_env_from_doc (doc : Keeper_toml_loader.toml_doc)
         let suffix = String.sub k prefix_len (String.length k - prefix_len) in
         if oas_env_key_is_allowed suffix then
           Option.map (fun sv -> (suffix, sv)) (string_of_toml_value_for_env v)
-        else None
+        else begin
+          Prometheus.inc_counter
+            Keeper_metrics.metric_keeper_oas_env_key_rejections
+            ();
+          Log.Keeper.warn
+            "keeper.oas_env: dropping key=%S — suffix %S not in \
+             allowlist (OAS_CLAUDE_* | OAS_CODEX_* | OAS_GEMINI_* | \
+             MASC_KEEPER_OAS_*); fix the TOML or expand the allowlist"
+            k suffix;
+          ignore v;
+          None
+        end
       else None)
     doc
 

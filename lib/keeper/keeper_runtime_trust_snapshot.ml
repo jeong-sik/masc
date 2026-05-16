@@ -269,7 +269,7 @@ let latest_terminal_reason_opt ~meta ~runtime_blocker_fields ~latest_decision
 let severity_of_approval_event event decision =
   match event with
   | "pending" -> "warn"
-  | "expired" -> "bad"
+  | "expired" | "approval_timeout" | "cancelled" -> "bad"
   | "resolved" -> (
       match decision with
       | Some raw when String_util.contains_substring_ci raw "reject" -> "bad"
@@ -389,6 +389,16 @@ let approval_event_timeline_event json =
               Printf.sprintf "Approval · %s" tool_name,
               (Option.value ~default:"approval expired" decision) ^ blocker_note,
               Some next_action )
+        | "approval_timeout" | "cancelled" ->
+            let summary =
+              match decision with
+              | Some value -> value
+              | None -> "approval await cancelled"
+            in
+            ( "approval_expired",
+              Printf.sprintf "Approval · %s" tool_name,
+              summary,
+              Some "retry_or_rerun" )
         | "auto_approved_rule_match" ->
             let matched_by =
               json |> json_member "rule_match"
@@ -916,7 +926,8 @@ let approval_state_json ~pending_approval_count ~pending_approvals ~latest_tool_
       | Some "auto_approved_always" -> "always_flag"
       | Some "auto_approved_rule_match" -> "always_rule"
       | Some "resolved" -> "resolved"
-      | Some "expired" -> "expired"
+      | Some "expired" | Some "approval_timeout" -> "expired"
+      | Some "cancelled" -> "cancelled"
       | Some _ -> "observed"
       | None -> "idle"
   in

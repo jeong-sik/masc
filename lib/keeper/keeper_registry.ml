@@ -822,7 +822,43 @@ let mark_turn_cascade_exhausted ~base_path name =
 	         "registry: ignoring cascade exhaustion after Cascade_done name=%s \
 	          base_path=%s"
 	         name
-	         base_path)
+         base_path)
+;;
+
+let mark_turn_cascade_done ~base_path name =
+  let set_cascade_state cascade_state =
+    set_turn_cascade_state
+      ~base_path
+      name
+      (Packed cascade_state : packed_cascade_state)
+  in
+  match get ~base_path name with
+  | None | Some { current_turn_observation = None; _ } -> ()
+  | Some { current_turn_observation = Some obs; _ } ->
+    (match obs.cascade_state with
+     | Packed Cascade_idle ->
+       set_turn_decision_stage
+         ~base_path
+         name
+         Decision_active_tool_policy_selected;
+       set_cascade_state Cascade_selecting;
+       set_cascade_state Cascade_trying;
+       set_cascade_state Cascade_done
+     | Packed Cascade_selecting ->
+       set_turn_decision_stage
+         ~base_path
+         name
+         Decision_active_tool_policy_selected;
+       set_cascade_state Cascade_trying;
+       set_cascade_state Cascade_done
+     | Packed Cascade_trying -> set_cascade_state Cascade_done
+     | Packed Cascade_done -> set_cascade_state Cascade_done
+     | Packed Cascade_exhausted ->
+       Log.Keeper.warn
+         "registry: ignoring cascade completion after Cascade_exhausted name=%s \
+          base_path=%s"
+         name
+         base_path)
 ;;
 
 let mark_turn_provider_attempt_started ~base_path name =

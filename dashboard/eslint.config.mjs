@@ -4,10 +4,12 @@ import tseslint from 'typescript-eslint'
 
 const TARGET_FILES = [
   'src/api/dashboard-cascade.ts',
+  'src/api/dashboard.ts',
   'src/api/gate.ts',
   'src/api/goal-loop.ts',
   'src/api/schemas/cascade.ts',
   'src/api/schemas/dashboard-config.ts',
+  'src/api/schemas/provider-logs.ts',
   'src/api/transport-health.ts',
   'src/components/common/async-container.ts',
   'src/components/common/empty-state.ts',
@@ -45,6 +47,7 @@ const TEST_FILES = [
   'src/components/journey-panel.test.ts',
   'src/components/journey-waterfall-state.test.ts',
   'src/components/keeper-tool-call-inspector.test.ts',
+  'src/components/logs.test.ts',
   'src/components/transport-health.test.ts',
   'src/dashboard-ws.test.ts',
   'src/goal-loop-status.test.ts',

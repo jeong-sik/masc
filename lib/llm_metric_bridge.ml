@@ -448,29 +448,26 @@ let emit_request_latency ?provider ~model_id ~latency_ms () =
     - [on_streaming_first_chunk] → masc_llm_provider_streaming_first_chunk_seconds
     - [on_streaming_chunk] → masc_llm_provider_streaming_inter_chunk_seconds *)
 let make_sink () : Llm_provider.Metrics.t =
-  {
-    on_cache_hit = emit_cache_hit;
-    on_cache_miss = emit_cache_miss;
-    on_request_start = emit_request_start;
-    on_http_status =
-      (fun ~provider ~model_id ~status ->
-        emit_http_status ~provider ~model_id ~status);
-    on_request_end =
-      (fun ~model_id ~latency_ms ->
-        match latency_ms with
-        | Some latency_ms -> emit_request_latency ~model_id ~latency_ms ()
-        | None -> ());
-    on_capability_drop =
-      (fun ~model_id ~field ->
-        emit_capability_drop ~model_id ~field);
-    on_error = (fun ~model_id ~error -> emit_error ~model_id ~error);
-    on_retry = emit_retry;
-    on_circuit_state = emit_circuit_state;
-    on_token_usage = emit_token_usage;
-    on_tool_calls = emit_tool_calls;
-    on_streaming_first_chunk = emit_streaming_first_chunk;
-    on_streaming_chunk = emit_streaming_chunk;
-  }
+  Oas_compat.Metrics.make
+    ~on_cache_hit:emit_cache_hit
+    ~on_cache_miss:emit_cache_miss
+    ~on_request_start:emit_request_start
+    ~on_http_status:(fun ~provider ~model_id ~status ->
+      emit_http_status ~provider ~model_id ~status)
+    ~on_request_end:(fun ~model_id ~latency_ms ->
+      match latency_ms with
+      | Some latency_ms -> emit_request_latency ~model_id ~latency_ms ()
+      | None -> ())
+    ~on_capability_drop:(fun ~model_id ~field ->
+      emit_capability_drop ~model_id ~field)
+    ~on_error:(fun ~model_id ~error -> emit_error ~model_id ~error)
+    ~on_retry:emit_retry
+    ~on_circuit_state:emit_circuit_state
+    ~on_token_usage:emit_token_usage
+    ~on_tool_calls:emit_tool_calls
+    ~on_streaming_first_chunk:emit_streaming_first_chunk
+    ~on_streaming_chunk:emit_streaming_chunk
+    ()
 
 (** Install the sink as the process-wide default.  Idempotent — calling
     [install ()] multiple times overwrites the previous sink with a

@@ -340,8 +340,15 @@ let has_recovery_evidence candidate =
       && (info.events_in_window > 0 || info.latency_samples > 0)
       && info.success_rate > 0.0)
 
-let effective_attempt_timeout_s ~is_last:_ ~configured_timeout_s _candidate =
-  configured_timeout_s
+let local_runtime_attempt_timeout_floor_s =
+  Cascade_attempt_liveness.bootstrap.attempt_wall_max
+
+let effective_attempt_timeout_s ~is_last:_ ~configured_timeout_s candidate =
+  if Llm_provider.Provider_config.is_local candidate.provider_cfg then
+    match configured_timeout_s with
+    | None -> Some local_runtime_attempt_timeout_floor_s
+    | Some timeout_s -> Some (Float.max timeout_s local_runtime_attempt_timeout_floor_s)
+  else configured_timeout_s
 
 let resolve_tool_lane_for_oas_tools
     ?agent_name

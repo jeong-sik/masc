@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 readonly OAS_AGENT_SDK_URL="https://github.com/jeong-sik/oas.git"
-readonly OAS_AGENT_SDK_BASE_VERSION="v0.193.16"
-readonly OAS_AGENT_SDK_TRACK_REF="fix/ollama-parallel-tool-calls-20260517"
-readonly OAS_AGENT_SDK_SHA="c2bd601a807a7f48ebaef4dcd8bb9b8802a6f75f"
-readonly OAS_AGENT_SDK_MIN_VERSION="0.193.16"
+readonly OAS_AGENT_SDK_BASE_VERSION="v0.194.0"
+readonly OAS_AGENT_SDK_TRACK_REF="main"
+readonly OAS_AGENT_SDK_SHA="d88e2fe4f62519229b0f6069a0c1f7896316233a"
+readonly OAS_AGENT_SDK_MIN_VERSION="0.194.0"

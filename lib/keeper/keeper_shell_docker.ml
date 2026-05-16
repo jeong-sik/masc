@@ -449,6 +449,60 @@ let git_c_path cmd =
   scan tokens
 ;;
 
+let normalize_repos_path_token token =
+  let token = strip_simple_shell_quotes token |> String.trim in
+  let token =
+    if String.starts_with ~prefix:"./" token then
+      String.sub token 2 (String.length token - 2)
+    else token
+  in
+  match String.split_on_char '/' token with
+  | "repos" :: repo :: _ when Coord_worktree.safe_repo_name repo -> Some token
+  | _ -> None
+;;
+
+let cut_double_ampersand s =
+  let len = String.length s in
+  let rec loop i =
+    if i + 1 >= len then None
+    else if s.[i] = '&' && s.[i + 1] = '&' then
+      Some (String.sub s 0 i, String.sub s (i + 2) (len - i - 2))
+    else loop (i + 1)
+  in
+  loop 0
+;;
+
+let leading_cd_rewrite cmd =
+  let trimmed = String.trim cmd in
+  if not (String.starts_with ~prefix:"cd " trimmed) then None
+  else
+    match cut_double_ampersand trimmed with
+    | None -> None
+    | Some (cd_part, rest) ->
+      let path =
+        String.sub cd_part 3 (String.length cd_part - 3)
+        |> String.trim
+        |> normalize_repos_path_token
+      in
+      let rest = String.trim rest in
+      if rest = "" then None else Option.map (fun p -> (p, rest)) path
+;;
+
+let command_repos_path_hint cmd =
+  match leading_cd_rewrite cmd with
+  | Some (path, rest) -> Some (path, rest)
+  | None ->
+    let tokens =
+      String.split_on_char ' ' (String.trim cmd)
+      |> List.filter (fun s -> s <> "")
+    in
+    tokens
+    |> List.find_map (fun token ->
+         match normalize_repos_path_token token with
+         | Some path -> Some (path, String.trim cmd)
+         | None -> None)
+;;
+
 let resolve_sandbox_root_git_cwd ~(config : Coord.config) ~(meta : keeper_meta) ~cwd ~cmd =
   let host_root =
     keeper_playground_root ~config ~meta
@@ -504,20 +558,26 @@ let resolve_sandbox_root_git_cwd ~(config : Coord.config) ~(meta : keeper_meta) 
          self-correcting: include the original cmd and the exact
          next-call shape so the LLM can copy-paste rather than
          re-derive the cwd convention from prose. *)
-      let cmd_preview =
-        let s = String.trim cmd in
-        if String.length s > 120 then String.sub s 0 117 ^ "..." else s
+      let suggested_cwd, suggested_cmd =
+        match command_repos_path_hint cmd with
+        | Some (path, rest) -> path, rest
+        | None -> "repos/" ^ example_repo, String.trim cmd
+      in
+      let suggested_cmd =
+        if String.length suggested_cmd > 120 then
+          String.sub suggested_cmd 0 117 ^ "..."
+        else suggested_cmd
       in
       ( cwd
       , Some
           (Printf.sprintf
              "sandbox root cannot run git/gh: mount point %s is not a git repository and \
               multiple sandbox repos exist. Set cwd explicitly before retrying. Example \
-              next call: keeper_bash { \"cmd\": %S, \"cwd\": \"repos/%s\" }. Available \
+              next call: keeper_bash { \"cmd\": %S, \"cwd\": %S }. Available \
               repos: %s. Do not retry the same cmd from sandbox root."
              host_root
-             cmd_preview
-             example_repo
+             suggested_cmd
+             suggested_cwd
              (String.concat ", " many)) )))
   else cwd, None
 ;;

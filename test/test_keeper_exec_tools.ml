@@ -64,6 +64,15 @@ let payload_kind = function
   | KET.Plain_text -> "plain_text"
   | KET.Malformed_structured _ -> "malformed_structured"
 
+let contains_substring text needle =
+  let text_len = String.length text in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    idx + needle_len <= text_len
+    && (String.sub text idx needle_len = needle || loop (idx + 1))
+  in
+  needle_len = 0 || loop 0
+
 let check_kind ~msg expected payload =
   check string msg expected
     (payload_kind (KET.classify_tool_result_payload payload))
@@ -481,6 +490,55 @@ let test_preflight_allows_work_discovery_disabled_with_current_task () =
       check string "current task exposed" "task-owned"
         Yojson.Safe.Util.(member "current_task_id" work_discovery |> to_string))
 
+let workflow_rejection_message =
+  "Invalid task state: Self-approval not allowed: verifier must be a different agent"
+
+let test_tool_result_classifies_task_fsm_rejections_as_workflow () =
+  let result =
+    Tool_result.error
+      ~tool_name:"masc_transition"
+      ~start_time:(Unix.gettimeofday ())
+      workflow_rejection_message
+  in
+  match Tool_result.failure_class result with
+  | Some Tool_result.Workflow_rejection -> ()
+  | Some cls ->
+    fail
+      (Printf.sprintf
+         "expected workflow_rejection, got %s"
+         (Tool_result.tool_failure_class_to_string cls))
+  | None -> fail "expected failure_class"
+
+let test_tool_result_or_error_preserves_failure_class () =
+  let result =
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~tool_name:"masc_transition"
+      ~start_time:(Unix.gettimeofday ())
+      workflow_rejection_message
+  in
+  let json = Yojson.Safe.from_string (KES.tool_result_or_error result) in
+  check string "failure_class" "workflow_rejection"
+    Yojson.Safe.Util.(member "failure_class" json |> to_string)
+
+let test_workflow_rejection_payload_skips_circuit_breaker () =
+  let workflow_payload =
+    KES.error_json
+      ~fields:[ "failure_class", `String "workflow_rejection" ]
+      workflow_rejection_message
+  in
+  let runtime_payload =
+    KES.error_json
+      ~fields:[ "failure_class", `String "runtime_failure" ]
+      "No such file or directory"
+  in
+  check (option string) "extracts workflow class" (Some "workflow_rejection")
+    (KET.failure_class_of_tool_result_payload workflow_payload);
+  check bool "workflow rejection does not trip circuit breaker" false
+    (KET.should_apply_circuit_breaker_to_failure_payload workflow_payload);
+  check bool "runtime failure still trips circuit breaker" true
+    (KET.should_apply_circuit_breaker_to_failure_payload runtime_payload)
+
 let registered_dispatch_probe_tool = "test_keeper_registered_dispatch_probe"
 
 let register_registered_dispatch_probe () =
@@ -498,6 +556,22 @@ let register_registered_dispatch_probe () =
                 ; ("tool", `String name)
                 ; ("route", `String "registered")
                 ]))))
+
+let workflow_rejection_probe_tool = "test_keeper_workflow_rejection_probe"
+
+let register_workflow_rejection_probe () =
+  Masc_mcp.Tool_dispatch.register_name_tag
+    ~tool_name:workflow_rejection_probe_tool
+    ~tag:Masc_mcp.Tool_dispatch.Mod_misc;
+  Masc_mcp.Tool_dispatch.register
+    ~tool_name:workflow_rejection_probe_tool
+    ~handler:(fun ~name ~args:_ ->
+      Some
+        (Tool_result.error
+           ~failure_class:(Some Tool_result.Workflow_rejection)
+           ~tool_name:name
+           ~start_time:(Unix.gettimeofday ())
+           workflow_rejection_message))
 
 let test_registered_tool_dispatch_without_masc_prefix () =
   register_registered_dispatch_probe ();
@@ -519,6 +593,27 @@ let test_registered_tool_dispatch_without_masc_prefix () =
           Yojson.Safe.Util.(member "tool" json |> to_string);
         check string "registered route" "registered"
           Yojson.Safe.Util.(member "route" json |> to_string))
+
+let test_registered_dispatch_preserves_workflow_failure_class () =
+  register_workflow_rejection_probe ();
+  with_exec_fixture "keeper_exec_registered_workflow_rejection"
+    (fun ~config ~meta ~ctx_work:_ ->
+      match
+        Masc_mcp.Keeper_exec_masc.handle_registered_keeper_tool
+          ~config
+          ~keeper_name:meta.name
+          ~name:workflow_rejection_probe_tool
+          ~args:(`Assoc [])
+      with
+      | None -> fail "expected registered keeper tool dispatch"
+      | Some raw ->
+        let json = Yojson.Safe.from_string raw in
+        check string "failure class preserved" "workflow_rejection"
+          Yojson.Safe.Util.(member "failure_class" json |> to_string);
+        check bool "error message preserved" true
+          (contains_substring
+             Yojson.Safe.Util.(member "error" json |> to_string)
+             "Self-approval"))
 
 (* ── Exec cache integration tests ──────────────────────────── *)
 
@@ -680,8 +775,16 @@ let () =
         test_preflight_reports_work_discovery_disabled_without_current_task;
       test_case "preflight allows disabled work discovery with current task" `Quick
         test_preflight_allows_work_discovery_disabled_with_current_task;
+      test_case "task FSM errors classify as workflow rejection" `Quick
+        test_tool_result_classifies_task_fsm_rejections_as_workflow;
+      test_case "tool_result_or_error preserves failure_class" `Quick
+        test_tool_result_or_error_preserves_failure_class;
+      test_case "workflow rejection skips circuit breaker" `Quick
+        test_workflow_rejection_payload_skips_circuit_breaker;
       test_case "registered dispatch does not require masc_ prefix" `Quick
         test_registered_tool_dispatch_without_masc_prefix;
+      test_case "registered dispatch preserves workflow failure class" `Quick
+        test_registered_dispatch_preserves_workflow_failure_class;
     ]);
     ("tool_not_allowed_counter", [
       test_case "increments for not_in_allow_set" `Quick

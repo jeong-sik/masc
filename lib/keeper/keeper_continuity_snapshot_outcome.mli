@@ -7,8 +7,8 @@
     unchanged.  That [None] branch is load-bearing because
     [meta.runtime.last_continuity_update_ts] only advances on the
     [Some] path, and the reflection-cooldown gate in
-    {!Keeper_compact_policy} uses [last_continuity_update_ts] to decide
-    whether compaction is allowed (line 68-79).  An LLM that stops
+    {!Keeper_compact_policy} uses [last_continuity_update_ts] in its
+    compaction-age calculation.  An LLM that stops
     emitting [STATE] therefore silently traps the cooldown until ratio
     hits the emergency threshold.
 

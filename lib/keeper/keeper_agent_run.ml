@@ -80,6 +80,51 @@ let should_require_provider_tool_choice_support
   || actionable_observation_requires_tool_support
 ;;
 
+let tool_contract_result_for_observed_tools
+      ~(required_tool_names : string list)
+      ~(missing_visible_required : string list)
+      ~(had_owned_active_task_at_turn_start : bool)
+      ~(actual_keeper_tool_names : string list)
+  : Keeper_execution_receipt.tool_contract_result
+  =
+  let class_of name = Keeper_tool_disclosure.classify_tool_progress name in
+  let classes = List.map class_of actual_keeper_tool_names in
+  let has_class wanted = List.exists (( = ) wanted) classes in
+  let all_class wanted = classes <> [] && List.for_all (( = ) wanted) classes in
+  let all_required_used =
+    List.for_all (fun name -> List.mem name actual_keeper_tool_names) required_tool_names
+  in
+  if missing_visible_required <> []
+  then Contract_tool_surface_mismatch
+  else if required_tool_names <> [] && not all_required_used
+  then
+    if actual_keeper_tool_names = []
+    then Contract_missing_required_tool_use
+    else if
+      all_class Keeper_tool_disclosure.Claim_context
+      && had_owned_active_task_at_turn_start
+    then Contract_claim_only_after_owned_task
+    else if all_class Keeper_tool_disclosure.Passive_status
+    then Contract_passive_only
+    else Contract_missing_required_tool_use
+  else if actual_keeper_tool_names = []
+  then Contract_satisfied_completion
+  else if
+    all_class Keeper_tool_disclosure.Claim_context && had_owned_active_task_at_turn_start
+  then Contract_claim_only_after_owned_task
+  else if
+    has_class Keeper_tool_disclosure.Claim_context
+    && not had_owned_active_task_at_turn_start
+  then Contract_satisfied_execution
+  else if all_class Keeper_tool_disclosure.Passive_status
+  then Contract_passive_only
+  else if has_class Keeper_tool_disclosure.Completion
+  then Contract_satisfied_completion
+  else if has_class Keeper_tool_disclosure.Execution
+  then Contract_satisfied_execution
+  else Contract_needs_execution_progress
+;;
+
 (** Run a single keeper turn via OAS Agent.run().
 
     Loads checkpoint, creates working context with the base keeper system
@@ -1038,53 +1083,12 @@ let run_turn
                    in
                    let tool_contract_status ()
                        : Keeper_execution_receipt.tool_contract_result =
-                     let required_tool_names = acc.tool_surface.required_tool_names in
-                     let missing_visible_required =
-                       acc.tool_surface.missing_required_tool_names
-                     in
-                     let class_of name =
-                       Keeper_tool_disclosure.classify_tool_progress name
-                     in
-                     let classes = List.map class_of actual_keeper_tool_names in
-                     let has_class wanted = List.exists (( = ) wanted) classes in
-                     let all_class wanted =
-                       classes <> [] && List.for_all (( = ) wanted) classes
-                     in
-                     let all_required_used =
-                       List.for_all
-                         (fun name -> List.mem name actual_keeper_tool_names)
-                         required_tool_names
-                     in
-                     if missing_visible_required <> []
-                     then Contract_tool_surface_mismatch
-                     else if required_tool_names <> [] && not all_required_used
-                     then
-                       if actual_keeper_tool_names = []
-                       then Contract_missing_required_tool_use
-                       else if
-                         all_class Keeper_tool_disclosure.Claim_context
-                         && had_owned_active_task_at_turn_start
-                       then Contract_claim_only_after_owned_task
-                       else if all_class Keeper_tool_disclosure.Claim_context
-                       then Contract_needs_execution_progress
-                       else if all_class Keeper_tool_disclosure.Passive_status
-                       then Contract_passive_only
-                       else Contract_missing_required_tool_use
-                     else if actual_keeper_tool_names = []
-                     then Contract_satisfied_completion
-                     else if
-                       all_class Keeper_tool_disclosure.Claim_context
-                       && had_owned_active_task_at_turn_start
-                     then Contract_claim_only_after_owned_task
-                     else if all_class Keeper_tool_disclosure.Claim_context
-                     then Contract_needs_execution_progress
-                     else if all_class Keeper_tool_disclosure.Passive_status
-                     then Contract_passive_only
-                     else if has_class Keeper_tool_disclosure.Completion
-                     then Contract_satisfied_completion
-                     else if has_class Keeper_tool_disclosure.Execution
-                     then Contract_satisfied_execution
-                     else Contract_needs_execution_progress
+                     tool_contract_result_for_observed_tools
+                       ~required_tool_names:acc.tool_surface.required_tool_names
+                       ~missing_visible_required:
+                         acc.tool_surface.missing_required_tool_names
+                       ~had_owned_active_task_at_turn_start
+                       ~actual_keeper_tool_names
                    in
                    (* Required-tool turns are filtered onto providers that declare
             tool support plus tool_choice support. If a text-only response

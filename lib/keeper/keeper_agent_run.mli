@@ -142,6 +142,13 @@ val preferred_tool_choice_for_required_turn
   -> allowed_tool_names:string list
   -> Agent_sdk.Types.tool_choice
 
+val tool_contract_result_for_observed_tools
+  :  required_tool_names:string list
+  -> missing_visible_required:string list
+  -> had_owned_active_task_at_turn_start:bool
+  -> actual_keeper_tool_names:string list
+  -> Keeper_execution_receipt.tool_contract_result
+
 (** Filtered variant of [turn_affordances_require_tool_gate] (in
     {!Keeper_agent_tool_surface}): only counts an affordance when at
     least one tool capable of satisfying it appears in

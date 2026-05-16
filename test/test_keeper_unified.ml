@@ -9210,6 +9210,37 @@ let test_claim_tool_classification_covers_masc_claim_task () =
     (KTD.is_claim_tool_name "keeper_tasks_list")
 ;;
 
+let test_claim_contract_result_counts_initial_claim_as_execution () =
+  let result ?(had_owned_active_task_at_turn_start = false) ?(required = []) tools =
+    KAR.tool_contract_result_for_observed_tools
+      ~required_tool_names:required
+      ~missing_visible_required:[]
+      ~had_owned_active_task_at_turn_start
+      ~actual_keeper_tool_names:tools
+    |> Masc_mcp.Keeper_execution_receipt.tool_contract_result_to_string
+  in
+  check
+    string
+    "initial claim is execution progress"
+    "satisfied_execution"
+    (result [ "keeper_task_claim" ]);
+  check
+    string
+    "initial claim plus passive reads is still progress"
+    "satisfied_execution"
+    (result [ "keeper_task_claim"; "keeper_tasks_list" ]);
+  check
+    string
+    "claim after already owning task stays diagnostic"
+    "claim_only_after_owned_task"
+    (result ~had_owned_active_task_at_turn_start:true [ "keeper_task_claim" ]);
+  check
+    string
+    "claim does not satisfy unrelated explicit required tool"
+    "missing_required_tool_use"
+    (result ~required:[ "keeper_task_done" ] [ "keeper_task_claim" ])
+;;
+
 let test_actionable_tool_contract_allows_execution_tools () =
   check
     (option string)
@@ -12181,6 +12212,10 @@ let () =
             "claim tool classification covers masc claim task"
             `Quick
             test_claim_tool_classification_covers_masc_claim_task
+        ; test_case
+            "initial claim counts as contract progress"
+            `Quick
+            test_claim_contract_result_counts_initial_claim_as_execution
         ; test_case
             "actionable signal allows execution tools"
             `Quick

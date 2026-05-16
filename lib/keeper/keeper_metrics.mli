@@ -336,6 +336,15 @@ val metric_keeper_cascade_sync_failures : string
 val metric_keeper_local_discovery_failures : string
 val metric_keeper_thinking_persist_failures : string
 val metric_keeper_checkpoint_failures : string
+
+val metric_keeper_user_visible_reply_source : string
+(** Counter for [Keeper_text_processing.user_visible_reply_text]
+    return paths.  Label [source] is governed by
+    {!Keeper_user_visible_reply_source}.  Rising
+    [hardcoded_default] rate is the operational signal that the
+    LLM is consistently producing no usable reply and the user is
+    being shown the literal ["State updated."]. *)
+
 val metric_keeper_memory_write_failures : string
 val metric_keeper_memory_consolidations : string
 val metric_keeper_write_meta_cycle_failures : string

@@ -10828,6 +10828,11 @@ let test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool () =
     (gate ~tools:[ "keeper_board_post"; "keeper_task_create" ] [ "work_discovery" ]);
   check
     bool
+    "worktree delta with keeper_shell -> gate fires"
+    true
+    (gate ~tools:[ "keeper_shell" ] [ "inspect_worktree_delta" ]);
+  check
+    bool
     "work_discovery can accompany another concrete gated affordance"
     true
     (gate ~tools:[ "keeper_task_claim" ] [ "work_discovery"; "task_claim" ]);
@@ -11015,7 +11020,19 @@ let test_tools_for_gated_affordance_covers_each_variant () =
     true
     (List.mem
        "keeper_task_create"
-       (Surface.tools_for_gated_affordance Surface.Work_discovery))
+       (Surface.tools_for_gated_affordance Surface.Work_discovery));
+  check
+    bool
+    "worktree delta includes keeper_shell"
+    true
+    (List.mem
+       "keeper_shell"
+       (Surface.tools_for_gated_affordance Surface.Inspect_worktree_delta));
+  check
+    (list string)
+    "worktree delta prefers keeper shell path"
+    [ "keeper_shell"; "keeper_bash" ]
+    (Surface.preferred_tool_names_for_turn_affordances [ "inspect_worktree_delta" ])
 ;;
 
 let test_preferred_tool_choice_for_required_turn_claims_first () =

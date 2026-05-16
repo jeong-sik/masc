@@ -242,7 +242,8 @@ let tools_for_gated_affordance = function
       "keeper_board_post"; "keeper_task_create"; "masc_add_task";
       "keeper_tasks_audit"; "keeper_board_cleanup" ]
   | Inspect_worktree_delta ->
-    [ "keeper_bash"; "masc_code_shell"; "keeper_fs_edit"; "keeper_pr_create" ]
+    [ "keeper_shell"; "keeper_bash"; "masc_code_shell"; "keeper_fs_edit";
+      "keeper_pr_create" ]
 
 let preferred_tool_names_for_turn_affordances turn_affordances =
   turn_affordances
@@ -268,7 +269,7 @@ let preferred_tool_names_for_turn_affordances turn_affordances =
          [ "keeper_task_claim"; "keeper_task_create"; "masc_add_task";
            "keeper_board_comment"; "keeper_board_post" ]
        | Inspect_worktree_delta ->
-         [ "keeper_bash" ])
+         [ "keeper_shell"; "keeper_bash" ])
   |> Keeper_types.dedupe_keep_order
 
 (* Filtered variant of [turn_affordances_require_tool_gate]:  a gated

@@ -337,6 +337,22 @@ val metric_keeper_local_discovery_failures : string
 val metric_keeper_thinking_persist_failures : string
 val metric_keeper_checkpoint_failures : string
 
+val metric_keeper_reply_skill_route_strips : string
+(** Counter for [Keeper_text_processing.strip_internal_reply_markup]
+    invocations that found and stripped at least one
+    [SKILL:] / [SKILL_REASON:] line from the raw reply.  Each
+    increment is one invocation; pair with
+    [metric_keeper_reply_skill_route_lines_removed] for the total
+    line count.  Rising rate is the resonance-loop input indicator
+    for the *skill* marker (sibling of
+    [metric_keeper_summarizer_state_scrubs] for the [STATE] marker
+    in PR #15676). *)
+
+val metric_keeper_reply_skill_route_lines_removed : string
+(** Counter for the total number of SKILL: / SKILL_REASON: lines
+    stripped from raw replies.  Divide by
+    [_reply_skill_route_strips] for lines-per-invocation. *)
+
 val metric_keeper_oas_env_key_rejections : string
 (** Counter for [Keeper_types_profile.extract_oas_env_from_doc]
     entries dropped because the suffix did not match the

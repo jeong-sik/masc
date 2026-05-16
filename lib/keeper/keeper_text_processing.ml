@@ -55,7 +55,42 @@ let state_snapshot_reply_fallback (snapshot : keeper_state_snapshot option) :
   | Some { goal = Some goal; _ } -> trim_to_option goal
   | _ -> None
 
+(* Observability for SKILL: / SKILL_REASON: line scrubbing.  The
+   skill-route markers are the resonance-loop input for the
+   *skill* marker — assistant replies that still carry them indicate
+   the agent is echoing routing metadata back into reply prose.
+   Sibling of the [STATE] block scrub counter (PR #15676 iter 11).
+   Closes the silent gap noted in
+   .tmp/memory-compacting-analysis.html (reply skill-route scrub
+   visibility). *)
+let () =
+  Prometheus.register_counter
+    ~name:Keeper_metrics.metric_keeper_reply_skill_route_strips
+    ~help:
+      "Total [Keeper_text_processing.strip_internal_reply_markup] \
+       invocations that stripped one or more SKILL: / \
+       SKILL_REASON: lines.  Rising rate is the resonance-loop \
+       input indicator for the *skill* marker."
+    ();
+  Prometheus.register_counter
+    ~name:Keeper_metrics.metric_keeper_reply_skill_route_lines_removed
+    ~help:
+      "Total SKILL: / SKILL_REASON: lines stripped from raw replies. \
+       Divide by [_reply_skill_route_strips] for lines-per-invocation."
+    ()
+;;
+
 let strip_internal_reply_markup (raw : string) : string =
+  let skill_lines = Keeper_skill_routing.count_skill_route_lines raw in
+  if skill_lines > 0 then begin
+    Prometheus.inc_counter
+      Keeper_metrics.metric_keeper_reply_skill_route_strips
+      ();
+    Prometheus.inc_counter
+      Keeper_metrics.metric_keeper_reply_skill_route_lines_removed
+      ~delta:(float_of_int skill_lines)
+      ()
+  end;
   raw
   |> Keeper_skill_routing.strip_skill_route_lines
   |> strip_state_blocks_text

@@ -53,6 +53,16 @@ let test_rejects_backslash_escape_in_path () =
   | Ok () -> fail "Expected error for backslash in path"
 ;;
 
+let test_rejects_git_revisionish_traversal_path () =
+  match
+    Wdt.validate_command_paths ~workdir:"/tmp"
+      "git worktree add foo/../../outside HEAD"
+  with
+  | Error msg ->
+    check bool "mentions path block" true (contains_substring msg "Path blocked")
+  | Ok () -> fail "Expected git slash token with traversal segment to be blocked"
+;;
+
 let test_allows_plain_path () =
   match Wdt.validate_command_paths ~workdir:"/tmp" "cat /tmp/test.txt" with
   | Ok () -> ()
@@ -184,6 +194,10 @@ let () =
             test_rejects_glob_in_directory_path_segment
         ; test_case "brace_expansion" `Quick test_rejects_brace_expansion
         ; test_case "backslash_escape_in_path" `Quick test_rejects_backslash_escape_in_path
+        ; test_case
+            "git_revisionish_traversal_path"
+            `Quick
+            test_rejects_git_revisionish_traversal_path
         ] )
     ; ( "acceptance"
       , [ test_case "plain_path" `Quick test_allows_plain_path

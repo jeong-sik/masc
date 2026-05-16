@@ -560,11 +560,19 @@ let token_value_is_explicit_path token =
   || String.starts_with ~prefix:"~/" token
 ;;
 
+let token_has_parent_dir_segment token =
+  token
+  |> strip_wrapping_quotes
+  |> String.split_on_char '/'
+  |> List.exists (String.equal "..")
+;;
+
 let git_revisionish_token ?workdir token =
   let token = strip_wrapping_quotes token |> String.trim in
   token <> ""
   && String.contains token '/'
   && (not (token_value_is_explicit_path token))
+  && not (token_has_parent_dir_segment token)
   &&
   let resolved = resolve_path ?base_dir:workdir token in
   not (Sys.file_exists resolved)

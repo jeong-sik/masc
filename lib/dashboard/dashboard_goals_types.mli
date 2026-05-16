@@ -57,3 +57,39 @@ val task_updated_at : Masc_domain.task -> string
 
 val dedupe_sort : string list -> string list
 val link_source_of_values : string list -> string
+
+(** {1 Receipt / trust JSON inspectors + duration helpers} *)
+
+val receipt_error_kind : Yojson.Safe.t -> string option
+val receipt_error_message : Yojson.Safe.t -> string option
+val receipt_sandbox_kind : Yojson.Safe.t -> string option
+val receipt_approval_profile : Yojson.Safe.t -> string option
+val receipt_cascade_name : Yojson.Safe.t -> string option
+val receipt_cascade_outcome : Yojson.Safe.t -> string option
+val receipt_cascade_fallback_applied : Yojson.Safe.t -> bool
+val receipt_outcome : Yojson.Safe.t -> string option
+val receipt_started_at : Yojson.Safe.t -> string option
+val receipt_ended_at : Yojson.Safe.t -> string option
+val receipt_turn_count : Yojson.Safe.t -> int option
+
+val trust_disposition : Yojson.Safe.t -> string option
+val trust_disposition_reason : Yojson.Safe.t -> string option
+val trust_attention_reason : Yojson.Safe.t -> string option
+val trust_needs_attention : Yojson.Safe.t -> bool
+val trust_snapshot_unavailable : Yojson.Safe.t -> bool
+val trust_turn_id : Yojson.Safe.t -> int option
+val trust_latest_event : Yojson.Safe.t -> Yojson.Safe.t option
+val trust_latest_event_ts : Yojson.Safe.t -> string option
+val trust_latest_event_ts_unix : Yojson.Safe.t -> float option
+val trust_sandbox_risk : Yojson.Safe.t -> bool
+val trust_cascade_risk : Yojson.Safe.t -> bool
+
+val receipt_has_error : Yojson.Safe.t -> bool
+val receipt_has_sandbox_risk : Yojson.Safe.t -> bool
+val receipt_has_cascade_risk : Yojson.Safe.t -> bool
+
+val iso_max : string -> string -> string
+val latest_iso : ?fallback:string -> string list -> string option
+
+val stagnation_threshold_seconds : Goal_store.horizon -> int
+val human_duration : int -> string

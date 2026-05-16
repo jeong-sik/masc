@@ -336,6 +336,15 @@ val metric_keeper_cascade_sync_failures : string
 val metric_keeper_local_discovery_failures : string
 val metric_keeper_thinking_persist_failures : string
 val metric_keeper_checkpoint_failures : string
+
+val metric_keeper_repair_fabrications : string
+(** Counter for [Keeper_context_core.repair_broken_tool_call_pairs]
+    fabrications.  Each increment marks one ToolUse or ToolResult block
+    downgraded to plain Text because the matching half was dropped by
+    compaction/cap/rollover.  Label [kind] is governed by
+    [Keeper_repair_kind].  A rising rate is the signal that the context
+    reducer is silently breaking tool pairs. *)
+
 val metric_keeper_memory_write_failures : string
 val metric_keeper_memory_consolidations : string
 val metric_keeper_write_meta_cycle_failures : string

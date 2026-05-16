@@ -481,8 +481,45 @@ let tool_use_text_of_block
   let input_json = Yojson.Safe.to_string input |> Inference_utils.sanitize_text_utf8 in
   Printf.sprintf "[tool use %s %s input=%s]" tool_name tool_use_id input_json
 
+(* Observability for [repair_broken_tool_call_pairs] fabrications.  Until
+   this counter existed, the repair functions silently downgraded
+   [ToolUse]/[ToolResult] blocks to plain [Text] whenever the matching
+   half had been dropped by compaction/cap/rollover — no log, no metric,
+   no way to tell whether the context reducer was breaking tool pairs at
+   1 in 1000 turns or 1 in 10.  Label [kind] is governed by
+   {!Keeper_repair_kind}. *)
+let () =
+  Prometheus.register_counter
+    ~name:Keeper_metrics.metric_keeper_repair_fabrications
+    ~help:
+      "Total tool-pair fabrications performed by \
+       [Keeper_context_core.repair_broken_tool_call_pairs] after \
+       compaction/cap/rollover dropped the matching half of a \
+       ToolUse/ToolResult pair.  Each increment counts one block \
+       downgraded to plain Text.  Label [kind] is \
+       'dangling_tool_use' (ToolUse without next ToolResult) or \
+       'orphan_tool_result' (ToolResult without previous ToolUse).  \
+       Closes the silent-failure gap flagged in \
+       .tmp/oas-internal-audit.html C1."
+    ()
+;;
+
+(* Sample at most one fabricated id per call to keep the log line bounded
+   while still giving operators a sniff-test trail.  Counter carries the
+   true total. *)
+let sample_first_dangling_tool_use_id (msg : Agent_sdk.Types.message)
+    ~(next_tool_result_ids : string list) : string option =
+  List.find_map
+    (function
+      | Agent_sdk.Types.ToolUse { id; _ }
+        when not (List.mem id next_tool_result_ids) -> Some id
+      | _ -> None)
+    msg.content
+
 let repair_dangling_tool_use_messages
     (messages : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =
+  let fabricated = ref 0 in
+  let first_sample_id : string option ref = ref None in
   let repair_with_next
       (current : Agent_sdk.Types.message)
       (next_opt : Agent_sdk.Types.message option) =
@@ -507,12 +544,16 @@ let repair_dangling_tool_use_messages
         current.content
     in
     if not has_dangling then current
-    else
+    else begin
+      if !first_sample_id = None then
+        first_sample_id :=
+          sample_first_dangling_tool_use_id current ~next_tool_result_ids;
       let content =
         List.map
           (function
             | Agent_sdk.Types.ToolUse { id; name; input }
               when not (List.mem id next_tool_result_ids) ->
+                incr fabricated;
                 Agent_sdk.Types.Text
                   (tool_use_text_of_block
                      ~tool_use_id:id ~tool_name:name ~input)
@@ -520,6 +561,7 @@ let repair_dangling_tool_use_messages
           current.content
       in
       { current with content }
+    end
   in
   let rec loop acc = function
     | [] -> List.rev acc
@@ -529,10 +571,26 @@ let repair_dangling_tool_use_messages
         let repaired = repair_with_next current (Some next) in
         loop (repaired :: acc) rest
   in
-  loop [] messages
+  let repaired = loop [] messages in
+  if !fabricated > 0 then begin
+    Prometheus.inc_counter
+      Keeper_metrics.metric_keeper_repair_fabrications
+      ~labels:[("kind", Keeper_repair_kind.(to_label Dangling_tool_use))]
+      ~delta:(float_of_int !fabricated)
+      ();
+    Log.Keeper.warn
+      "repair_dangling_tool_use_messages: fabricated %d Text block(s) \
+       (sample tool_use_id=%s) — context reducer dropped matching \
+       ToolResult half; investigate context_reducer strategy"
+      !fabricated
+      (Option.value !first_sample_id ~default:"<none>")
+  end;
+  repaired
 
 let repair_orphan_tool_result_messages
     (messages : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =
+  let fabricated = ref 0 in
+  let first_sample_id : string option ref = ref None in
   let rec loop prev acc = function
     | [] -> List.rev acc
     | msg :: rest ->
@@ -566,7 +624,22 @@ let repair_orphan_tool_result_messages
                 msg.content
             in
             if not has_orphan then msg
-            else
+            else begin
+              (* Observability bookkeeping: count strictly-orphaned blocks
+                 only so the metric reflects the true Anthropic-pairing
+                 violation count, even though the rewrite below downgrades
+                 every ToolResult in this message (preserving long-standing
+                 behaviour — separating that into a behaviour fix is a
+                 distinct PR). *)
+              List.iter
+                (function
+                  | Agent_sdk.Types.ToolResult { tool_use_id; _ }
+                    when not (List.mem tool_use_id prev_tool_use_ids) ->
+                      incr fabricated;
+                      if !first_sample_id = None then
+                        first_sample_id := Some tool_use_id
+                  | _ -> ())
+                msg.content;
               let content =
                 List.map
                   (function
@@ -577,10 +650,25 @@ let repair_orphan_tool_result_messages
                   msg.content
               in
               { msg with content }
+            end
         in
         loop (Some repaired) (repaired :: acc) rest
   in
-  loop None [] messages
+  let repaired = loop None [] messages in
+  if !fabricated > 0 then begin
+    Prometheus.inc_counter
+      Keeper_metrics.metric_keeper_repair_fabrications
+      ~labels:[("kind", Keeper_repair_kind.(to_label Orphan_tool_result))]
+      ~delta:(float_of_int !fabricated)
+      ();
+    Log.Keeper.warn
+      "repair_orphan_tool_result_messages: fabricated %d Text block(s) \
+       (sample tool_use_id=%s) — checkpoint dropped matching ToolUse \
+       predecessor; investigate checkpoint cap / message_gate"
+      !fabricated
+      (Option.value !first_sample_id ~default:"<none>")
+  end;
+  repaired
 
 let repair_broken_tool_call_pairs
     (messages : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =

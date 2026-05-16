@@ -217,3 +217,24 @@ val goal_health_color : string -> string
 val task_status_color : string -> string
 
 val task_to_tree_json : Masc_domain.task * string -> Yojson.Safe.t
+
+(** {1 Tree flatten + goal-detail JSON + timeline projection (pure)} *)
+
+val flatten_tree : tree_node list -> tree_node list -> tree_node list
+(** Pre-order tree walk; [acc] is the reverse-accumulating list. Pass
+    [\[\]] as initial [acc]. *)
+
+val goal_detail_keeper_json : goal_detail_keeper -> Yojson.Safe.t
+
+val timeline_event_json :
+  ts:string ->
+  kind:string ->
+  lane:string ->
+  title:string ->
+  summary:string ->
+  severity:string ->
+  Yojson.Safe.t
+
+val json_member_or_null : string -> Yojson.Safe.t -> Yojson.Safe.t
+
+val goal_event_timeline_json : Yojson.Safe.t -> Yojson.Safe.t

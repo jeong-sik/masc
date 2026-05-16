@@ -915,6 +915,26 @@ let path_validation_tokens tokens =
       args
 ;;
 
+let existing_dir_path_values cmd =
+  let rec loop expect_existing_dir acc = function
+    | [] -> List.rev acc
+    | token :: rest ->
+      if token.value = ""
+      then loop expect_existing_dir acc rest
+      else if expect_existing_dir
+      then loop false (token.value :: acc) rest
+      else (
+        match path_value_of_flagged_token token.value with
+        | Some value when inline_path_flag_requires_existing_dir token.value ->
+          loop false (value :: acc) rest
+        | Some _ -> loop false acc rest
+        | None when is_path_flag token.value ->
+          loop (path_flag_requires_existing_dir token.value) acc rest
+        | None -> loop false acc rest)
+  in
+  cmd |> tokenize_path_args |> path_validation_tokens |> loop false []
+;;
+
 let validate_command_paths ?workdir cmd =
   match workdir with
   | None -> Ok ()

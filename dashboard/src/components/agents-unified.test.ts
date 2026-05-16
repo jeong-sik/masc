@@ -74,11 +74,11 @@ vi.mock('../namespace-truth-store', () => ({
 }))
 vi.mock('../runtime-counts', () => ({
   resolveRuntimeCounts: vi.fn(() => ({
-    totalRuntimes: 0,
-    keepers: 0,
-    agents: 0,
-    configuredKeepers: 0,
+    live: { agents: 0, keepers: 0, tasks: 0, totalRuntimes: 0, available: false },
+    configured: { keepers: 0, totalRuntimes: 0, source: 'none' },
+    source: 'unknown',
   })),
+  runtimeCountSourceLabel: vi.fn((source: string) => `label:${source}`),
 }))
 
 import { AgentsUnified } from './agents-unified'
@@ -88,12 +88,9 @@ const mockResolveRuntimeCounts = vi.mocked(resolveRuntimeCounts)
 const runtimeCounts = (
   overrides: Partial<ReturnType<typeof resolveRuntimeCounts>>,
 ): ReturnType<typeof resolveRuntimeCounts> => ({
-  agents: 0,
-  keepers: 0,
-  tasks: 0,
-  totalRuntimes: 0,
-  configuredKeepers: 0,
-  source: 'execution',
+  live: { agents: 0, keepers: 0, tasks: 0, totalRuntimes: 0, available: false },
+  configured: { keepers: 0, totalRuntimes: 0, source: 'none' },
+  source: 'unknown',
   ...overrides,
 })
 
@@ -167,23 +164,35 @@ describe('AgentsUnified', () => {
     expect(container.querySelector('[data-testid="fsm-hub"]')).not.toBeNull()
   })
 
-  it('shows runtime truth banner when configuredKeeperDelta > 0', () => {
+  it('shows runtime truth banner when a configured baseline is known', () => {
     mockResolveRuntimeCounts.mockReturnValue(runtimeCounts({
-      totalRuntimes: 5,
-      keepers: 2,
-      agents: 3,
-      configuredKeepers: 4,
+      live: { agents: 3, keepers: 2, tasks: 0, totalRuntimes: 5, available: true },
+      configured: { keepers: 4, totalRuntimes: 7, source: 'namespace-truth' },
+      source: 'execution',
     }))
     render(h(AgentsUnified, null), container)
     expect(container.textContent).toContain('runtime truth')
+    expect(container.textContent).toContain('활성 keeper 2')
+    expect(container.textContent).toContain('설정 keeper 4')
+    expect(container.textContent).toContain('일시정지/미기동 2')
   })
 
-  it('does not show runtime truth banner when configuredKeeperDelta is 0', () => {
+  it('shows runtime truth banner without delta when live equals configured', () => {
     mockResolveRuntimeCounts.mockReturnValue(runtimeCounts({
-      totalRuntimes: 5,
-      keepers: 2,
-      agents: 3,
-      configuredKeepers: 2,
+      live: { agents: 3, keepers: 2, tasks: 0, totalRuntimes: 5, available: true },
+      configured: { keepers: 2, totalRuntimes: 5, source: 'namespace-truth' },
+      source: 'execution',
+    }))
+    render(h(AgentsUnified, null), container)
+    expect(container.textContent).toContain('runtime truth')
+    expect(container.textContent).not.toContain('일시정지/미기동')
+  })
+
+  it('hides runtime truth banner when no configured baseline is available', () => {
+    mockResolveRuntimeCounts.mockReturnValue(runtimeCounts({
+      live: { agents: 3, keepers: 2, tasks: 0, totalRuntimes: 5, available: true },
+      configured: { keepers: 0, totalRuntimes: 0, source: 'none' },
+      source: 'execution',
     }))
     render(h(AgentsUnified, null), container)
     expect(container.textContent).not.toContain('runtime truth')

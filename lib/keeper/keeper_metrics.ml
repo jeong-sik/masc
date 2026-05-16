@@ -679,6 +679,10 @@ let metric_keeper_memory_jsonl_ops =
   "masc_keeper_memory_jsonl_ops_total"
 ;;
 
+let metric_keeper_user_visible_reply_source =
+  "masc_keeper_user_visible_reply_source_total"
+;;
+
 let metric_keeper_continuity_summary_source =
   "masc_keeper_continuity_summary_source_total"
 ;;
@@ -693,6 +697,10 @@ let metric_keeper_summarizer_state_blocks_removed =
 
 let metric_keeper_oas_env_key_rejections =
   "masc_keeper_oas_env_key_rejections_total"
+;;
+
+let metric_keeper_continuity_ts_recovered =
+  "masc_keeper_continuity_ts_recovered_total"
 ;;
 
 let metric_keeper_memory_write_failures = "masc_keeper_memory_write_failures_total"

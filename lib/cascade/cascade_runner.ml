@@ -214,6 +214,10 @@ let request_runtime_fields_on_base_config
     response_format = req_config.response_format;
     output_schema = req_config.output_schema;
     cache_system_prompt = req_config.cache_system_prompt;
+    supports_tool_choice_override =
+      (match req_config.supports_tool_choice_override with
+       | Some _ as override -> override
+       | None -> base.supports_tool_choice_override);
     seed = req_config.seed;
   }
 
@@ -239,14 +243,21 @@ let provider_config_preserving_http_transport
 
 let transport_for_provider ~sw ~net ~provider_cfg ?runtime_mcp_policy
     ?cli_transport_overrides () =
-  match provider_cfg.Llm_provider.Provider_config.kind with
-  | Llm_provider.Provider_config.Ollama ->
-      Ok
-        (Some
-           (provider_config_preserving_http_transport ~sw ~net ~provider_cfg))
-  | _ ->
+  if
+    Llm_provider.Provider_config.is_subprocess_cli
+      provider_cfg.Llm_provider.Provider_config.kind
+  then
       non_http_transport_of_provider ~sw ~provider_cfg ?runtime_mcp_policy
         ?cli_transport_overrides ()
+  else
+    Ok
+      (Some
+         (provider_config_preserving_http_transport ~sw ~net ~provider_cfg))
+
+module For_testing = struct
+  let request_runtime_fields_on_base_config =
+    request_runtime_fields_on_base_config
+end
 
 (* ================================================================ *)
 (* Internal: event publishing                                        *)

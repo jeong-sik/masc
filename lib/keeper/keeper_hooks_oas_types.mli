@@ -89,6 +89,15 @@ val key_error : string
 val key_ts : string
 val key_max_cost_usd : string
 
+(** Callback name labels used as Prometheus + log identifiers. *)
+val callback_label_after_turn_sse_broadcast : string
+val callback_label_post_tool_log_write : string
+val callback_label_on_tool_executed : string
+val callback_label_on_error : string
+val callback_label_on_tool_error : string
+val callback_label_pr_review_action_metrics_append : string
+val callback_label_pr_work_action_metrics_append : string
+
 type cost_status =
   | Cost_reported         (** Cost trusted because OAS reported it. *)
   | Cost_known_free       (** Runtime is structurally unmetered. *)

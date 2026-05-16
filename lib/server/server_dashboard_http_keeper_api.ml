@@ -315,48 +315,12 @@ let keeper_checkpoint_inventory_json
                    (Keeper_checkpoint_store.list_checkpoints ~session_dir)) );
           ] )
 
-let json_int_member_opt name json =
-  match Yojson.Safe.Util.member name json with
-  | `Int value -> Some value
-  | `Intlit raw -> int_of_string_opt raw
-  | _ -> None
+(* Yojson member extractors + take_last list helper moved to
+   Server_dashboard_http_keeper_api_types (intra-library file split,
+   2026-05-16). *)
 
-let json_string_member_opt name json =
-  match Yojson.Safe.Util.member name json with
-  | `String value -> Some value
-  | _ -> None
-
-let json_bool_member_opt name json =
-  match Yojson.Safe.Util.member name json with
-  | `Bool value -> Some value
-  | _ -> None
-
-let json_string_list_member name json =
-  match Yojson.Safe.Util.member name json with
-  | `List values ->
-    values
-    |> List.filter_map (function
-      | `String value when String.trim value <> "" -> Some value
-      | _ -> None)
-    |> Json_util.dedupe_keep_order
-  | _ -> []
-
-let json_string_opt = function
-  | Some value -> `String value
-  | None -> `Null
-
-let take_last limit values =
-  let len = List.length values in
-  if len <= limit then values
-  else List.filteri (fun idx _ -> idx >= len - limit) values
-
-let unique_present_paths paths =
-  paths
-  |> List.filter_map (fun value ->
-       match value with
-       | Some path when String.trim path <> "" -> Some path
-       | _ -> None)
-  |> Json_util.dedupe_keep_order
+(* unique_present_paths moved to Server_dashboard_http_keeper_api_types
+   (intra-library file split, 2026-05-16). *)
 
 let linked_artifact_json ~kind path =
   `Assoc
@@ -367,14 +331,8 @@ let linked_artifact_json ~kind path =
       ("file_stat", stat_json_of_path path);
     ]
 
-let manifest_row_matches ?turn_id keeper_name trace_id
-    (row : Keeper_runtime_manifest.t) =
-  String.equal row.keeper_name keeper_name
-  && String.equal row.trace_id trace_id
-  &&
-  match turn_id with
-  | None -> true
-  | Some wanted -> row.keeper_turn_id = Some wanted
+(* manifest_row_matches moved to Server_dashboard_http_keeper_api_types
+   (intra-library file split, 2026-05-16). *)
 
 type runtime_manifest_scan =
   { path : string
@@ -691,60 +649,14 @@ let string_contains ~needle value =
     in
     loop 0
 
-let json_assoc_member_opt name json =
-  match Yojson.Safe.Util.member name json with
-  | `Assoc _ as value -> Some value
-  | _ -> None
+(* json_assoc_member_opt + json_string_value_opt moved to
+   Server_dashboard_http_keeper_api_types (intra-library file split,
+   2026-05-16). *)
 
-let json_string_value_opt = function
-  | `String value -> Some value
-  | _ -> None
-
-let tool_call_output_text_opt json =
-  match Yojson.Safe.Util.member "output" json with
-  | `String value -> Some value
-  | `Assoc _ as output -> (
-    match json_assoc_member_opt "_blob" output with
-    | Some blob -> json_string_member_opt "preview" blob
-    | None -> None)
-  | _ -> None
-
-let parse_tool_output_json_opt json =
-  match tool_call_output_text_opt json with
-  | None -> None
-  | Some output -> (
-    match Safe_ops.parse_json_safe ~context:"runtime_lens.tool_output" output with
-    | Ok parsed -> Some parsed
-    | Error _ -> None)
-
-let tool_call_runtime_contract json =
-  match json_assoc_member_opt "runtime_contract" json with
-  | Some contract -> contract
-  | None -> `Assoc []
-
-let tool_call_matches_trace ?turn_id ~keeper_name ~trace_id json =
-  let contract = tool_call_runtime_contract json in
-  let keeper_matches =
-    match json_string_member_opt "keeper" json with
-    | Some keeper -> String.equal keeper keeper_name
-    | None -> true
-  in
-  let trace_matches =
-    match
-      ( json_string_member_opt "trace_id" json,
-        json_string_member_opt "trace_id" contract )
-    with
-    | Some value, _ | _, Some value -> String.equal value trace_id
-    | None, None -> false
-  in
-  let turn_matches =
-    match turn_id with
-    | None -> true
-    | Some wanted ->
-      json_int_member_opt "keeper_turn_id" json = Some wanted
-      || json_int_member_opt "keeper_turn_id" contract = Some wanted
-  in
-  keeper_matches && trace_matches && turn_matches
+(* tool_call_output_text_opt + parse_tool_output_json_opt +
+   tool_call_runtime_contract + tool_call_matches_trace moved to
+   Server_dashboard_http_keeper_api_types (intra-library file split,
+   2026-05-16). *)
 
 let claim_status_of_output output =
   let result =
@@ -1495,71 +1407,11 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
       ("gaps", `List (List.map runtime_lens_gap_json gaps));
     ]
 
-let provider_attempt_row_json (row : Keeper_runtime_manifest.t) =
-  let decision_string key = json_string_member_opt key row.decision in
-  `Assoc
-    [
-      ("ts", `String row.ts);
-      ("event", `String (Keeper_runtime_manifest.event_kind_to_string row.event));
-      ("cascade_name", json_string_opt row.cascade_name);
-      ("model_source", json_string_opt (decision_string "model_source"));
-      ( "resolved_model_source",
-        json_string_opt (decision_string "resolved_model_source") );
-      ("capability_source", json_string_opt (decision_string "capability_source"));
-      ("fallback_authority", json_string_opt (decision_string "fallback_authority"));
-      ( "provider_source_cascade",
-        json_string_opt (decision_string "provider_source_cascade") );
-      ("status", `String row.status);
-      ("error", json_string_opt (decision_string "error"));
-      ( "exception_kind",
-        json_string_opt (decision_string "exception_kind") );
-    ]
-
-let string_contains_substring haystack needle =
-  let haystack_len = String.length haystack in
-  let needle_len = String.length needle in
-  if needle_len = 0 then true
-  else if needle_len > haystack_len then false
-  else
-    let rec loop idx =
-      if idx + needle_len > haystack_len then false
-      else if String.sub haystack idx needle_len = needle then true
-      else loop (idx + 1)
-    in
-    loop 0
-
-let runtime_trace_keeps_provider_attempt_provenance_key = function
-  | "model_source"
-  | "resolved_model_source"
-  | "capability_source"
-  | "fallback_authority"
-  | "provider_source_cascade"
-  | "terminal_model_source"
-  | "terminal_resolved_model_source"
-  | "terminal_capability_source"
-  | "terminal_fallback_authority"
-  | "terminal_provider_source_cascade" ->
-    true
-  | _ -> false
-
-let runtime_trace_redacts_provider_model_key key =
-  let key = String.lowercase_ascii key in
-  (not (runtime_trace_keeps_provider_attempt_provenance_key key))
-  &&
-  (string_contains_substring key "provider"
-   || string_contains_substring key "model"
-   || String.equal key "configured_labels")
-
-let rec runtime_trace_public_json = function
-  | `Assoc fields ->
-      `Assoc
-        (fields
-        |> List.filter_map (fun (key, value) ->
-               if runtime_trace_redacts_provider_model_key key then None
-               else Some (key, runtime_trace_public_json value)))
-  | `List values -> `List (List.map runtime_trace_public_json values)
-  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value ->
-      value
+(* provider_attempt_row_json + string_contains_substring +
+   runtime_trace_keeps_provider_attempt_provenance_key +
+   runtime_trace_redacts_provider_model_key + runtime_trace_public_json
+   moved to Server_dashboard_http_keeper_api_types
+   (intra-library file split, 2026-05-16). *)
 
 let runtime_manifest_public_json row =
   Keeper_runtime_manifest.to_json row

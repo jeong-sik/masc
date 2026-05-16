@@ -92,6 +92,34 @@ let remaining_sec ?now () =
   max 0.0 (Atomic.get cooldown_until -. now)
 ;;
 
+let projection_fields ?now () =
+  let degraded = active ?now () in
+  [ "degraded", `Bool degraded
+  ; "degraded_reason", (if degraded then `String "fd_pressure" else `Null)
+  ; "fd_pressure_remaining_sec", `Float (remaining_sec ?now ())
+  ]
+;;
+
+let degraded_projection_json ?now () = `Assoc (projection_fields ?now ())
+
+let degraded_trust_json ?now () =
+  `Assoc
+    [ "disposition", `String "Degraded"
+    ; "disposition_reason", `String "fd_pressure"
+    ; "operator_disposition", `String "Pause"
+    ; "operator_disposition_reason", `String "fd_pressure"
+    ; "needs_attention", `Bool true
+    ; "attention_reason", `String "fd_pressure"
+    ; "next_human_action", `String "restore_fd_headroom"
+    ; "approval", `Null
+    ; "execution", `Null
+    ; "pending_approval_count", `Null
+    ; "latest_terminal_reason", `Null
+    ; "latest_next_action", `String "restore_fd_headroom"
+    ; "latest_causal_event", degraded_projection_json ?now ()
+    ]
+;;
+
 let reset_for_tests () =
   Atomic.set cooldown_until 0.0;
   Atomic.set last_log_at 0.0;

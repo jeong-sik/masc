@@ -209,6 +209,7 @@ let take n lst =
   aux [] n lst
 
 let now_iso () = Masc_domain.now_iso ()
+let fd_pressure_fields () = Keeper_fd_pressure.projection_fields ()
 
 let requests_json ?base_path ?task_id ?limit () : Yojson.Safe.t =
   let limit = clamp_limit limit in
@@ -216,11 +217,12 @@ let requests_json ?base_path ?task_id ?limit () : Yojson.Safe.t =
   let filtered = filter_by_task_id all task_id in
   let sorted = sort_desc filtered in
   let trimmed = take limit sorted in
-  `Assoc [
-    ("updated_at", `String (now_iso ()));
-    ("total", `Int (List.length filtered));
-    ("requests", `List (List.map request_to_json trimmed));
-  ]
+  `Assoc
+    ([ ("updated_at", `String (now_iso ()))
+     ; ("total", `Int (List.length filtered))
+     ; ("requests", `List (List.map request_to_json trimmed))
+     ]
+     @ fd_pressure_fields ())
 
 (* ── Summary projection ─────────────────────────────── *)
 
@@ -281,15 +283,17 @@ let summary_json ?base_path ?recent () : Yojson.Safe.t =
     |> take recent
     |> List.map rejection_row_json
   in
-  `Assoc [
-    ("updated_at", `String (now_iso ()));
-    ("total", `Int total);
-    ("by_status", `Assoc [
-      ("pending", `Int !pending);
-      ("approved", `Int !approved);
-      ("rejected", `Int !rejected);
-      (* timed_out reserved for future state-machine variant; always 0 today *)
-      ("timed_out", `Int 0);
-    ]);
-    ("recent_rejections", `List recent_rejections);
-  ]
+  `Assoc
+    ([ ("updated_at", `String (now_iso ()))
+     ; ("total", `Int total)
+     ; ( "by_status"
+       , `Assoc
+           [ ("pending", `Int !pending)
+           ; ("approved", `Int !approved)
+           ; ("rejected", `Int !rejected)
+           ; (* timed_out reserved for future state-machine variant; always 0 today *)
+             ("timed_out", `Int 0)
+           ] )
+     ; ("recent_rejections", `List recent_rejections)
+     ]
+     @ fd_pressure_fields ())

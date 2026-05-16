@@ -1029,6 +1029,72 @@ command = "c"
   | _ -> failwith "expected exactly one provider"
 ;;
 
+let test_provider_log_present () =
+  let toml =
+    {|
+[providers.ollama]
+protocol = "ollama-http"
+endpoint = "http://127.0.0.1:11434"
+
+[providers.ollama.log]
+enabled = true
+path = "~/.ollama/logs/server.log"
+default-lines = 250
+max-bytes = 1048576
+|}
+  in
+  let cfg = ok_config (parse_string toml) in
+  match cfg.providers with
+  | [ p ] ->
+    (match p.log with
+     | Some log ->
+       check bool "enabled" true log.enabled;
+       check opt_string "path" (Some "~/.ollama/logs/server.log") log.path;
+       check opt_int "default_lines" (Some 250) log.default_lines;
+       check opt_int "max_bytes" (Some 1048576) log.max_bytes
+     | None -> failwith "expected provider log config")
+  | _ -> failwith "expected exactly one provider"
+;;
+
+let test_provider_log_absent () =
+  let toml =
+    {|
+[providers.p]
+protocol = "anthropic-cli"
+command = "c"
+|}
+  in
+  let cfg = ok_config (parse_string toml) in
+  match cfg.providers with
+  | [ p ] -> check bool "no log sub-table → None" true (p.log = None)
+  | _ -> failwith "expected exactly one provider"
+;;
+
+let test_provider_log_non_positive_limits_ignored () =
+  let toml =
+    {|
+[providers.p]
+protocol = "anthropic-cli"
+command = "c"
+
+[providers.p.log]
+enabled = true
+path = "/tmp/provider.log"
+default-lines = 0
+max-bytes = -1
+|}
+  in
+  let cfg = ok_config (parse_string toml) in
+  match cfg.providers with
+  | [ p ] ->
+    (match p.log with
+     | Some log ->
+       check opt_int "default_lines ignored" None log.default_lines;
+       check opt_int "max_bytes ignored" None log.max_bytes
+     | None -> failwith "expected provider log config")
+  | _ -> failwith "expected exactly one provider"
+;;
+
 (* --- Model capabilities (M1 prep — RFC-0058 Phase 5.3 Model axis) --- *)
 
 let test_model_capabilities_present () =
@@ -1559,6 +1625,14 @@ let () =
             "declared but empty yields Some []"
             `Quick
             test_headers_declared_but_empty
+        ] )
+    ; ( "provider_log"
+      , [ test_case "present parses tail settings" `Quick test_provider_log_present
+        ; test_case "absent yields None" `Quick test_provider_log_absent
+        ; test_case
+            "non-positive limits ignored"
+            `Quick
+            test_provider_log_non_positive_limits_ignored
         ] )
     ; ( "capabilities_for_provider_id (A.3 prep)"
       , [ test_case

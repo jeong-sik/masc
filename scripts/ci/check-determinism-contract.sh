@@ -50,6 +50,12 @@ print_first_lines() {
   awk -v limit="$limit" 'NR <= limit { print }'
 }
 
+moved_det_ndt_lines_file="$(mktemp)"
+cleanup() {
+  rm -f "$moved_det_ndt_lines_file"
+}
+trap cleanup EXIT
+
 is_det_ndt_pattern() {
   local text="$1"
   if rg -q 'Unix\.gettimeofday|Random\.|Unix\.times|Sys\.time|Unix\.getpid' <<< "$text"; then
@@ -62,6 +68,38 @@ is_det_ndt_pattern() {
     return 0
   fi
   return 1
+}
+
+collect_moved_det_ndt_lines() {
+  local current_path=""
+  local raw=""
+  local text=""
+
+  : > "$moved_det_ndt_lines_file"
+  while IFS= read -r raw; do
+    case "$raw" in
+      "diff --git "*)
+        current_path=""
+        ;;
+      "--- a/"*)
+        current_path="${raw#--- a/}"
+        ;;
+      -*)
+        if [[ "$raw" != "---"* && "$current_path" == lib/*.ml ]]; then
+          text="${raw:1}"
+          if is_det_ndt_pattern "$text"; then
+            printf '%s\n' "$text" >> "$moved_det_ndt_lines_file"
+          fi
+        fi
+        ;;
+    esac
+  done < <(git diff --unified=0 "${base_ref}...${head_ref}" -- lib/ || true)
+}
+
+is_moved_det_ndt_line() {
+  local text="$1"
+  [ -s "$moved_det_ndt_lines_file" ] || return 1
+  grep -Fxq -- "$text" "$moved_det_ndt_lines_file"
 }
 
 has_det_ndt_ok_comment() {
@@ -107,6 +145,7 @@ scan_new_det_ndt_debt() {
           if [[ "$raw" != "+++"* && "$current_path" == lib/*.ml && "$new_line_no" -gt 0 ]]; then
             text="${raw:1}"
             if is_det_ndt_pattern "$text" \
+               && ! is_moved_det_ndt_line "$text" \
                && ! has_det_ndt_ok_comment "$current_path" "$new_line_no"; then
               failures+=("${source_label}: ${current_path}:${new_line_no}: ${text}")
             fi
@@ -141,6 +180,8 @@ scan_new_det_ndt_debt() {
 
   echo "PASS: no new deterministic-boundary debt added in ${base_ref}...${head_ref}, staged diff, or worktree diff"
 }
+
+collect_moved_det_ndt_lines
 
 # Diff ratchet: existing DET/NDT debt remains warning-only, but new sites fail.
 echo "=== Scan: new deterministic-boundary ratchet ==="

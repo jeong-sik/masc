@@ -81,6 +81,10 @@ let classify_from_dispatch_failure (message : string) : tool_failure_class =
   if
     contains_casefold message "awaiting_approval"
     || contains_casefold message "join required"
+    || contains_casefold message "Invalid task state"
+    || contains_casefold message "Invalid transition"
+    || contains_casefold message "Self-approval not allowed"
+    || contains_casefold message "Self-rejection not allowed"
   then Workflow_rejection
   else if
     contains_casefold message "egress_blocked"

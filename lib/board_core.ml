@@ -639,18 +639,31 @@ let create_post
     else (
       let board_result =
         with_lock store (fun () ->
-          (* Content dedup: reject identical (author, body) within a short
-             window.  Keeper turns sometimes emit the same board post N times
-             (observed 6x at 0s gap).  The dedup key is author + normalized
-             body; matching returns the existing post as Ok without SSE
-             emission (board_dispatch handles that on Ok). *)
+          (* Content dedup: reject identical (author, hearth, thread, body)
+             within a short window.  Keeper turns sometimes emit the same
+             board post N times (observed 6x at 0s gap).  The dedup key
+             includes hearth + thread_id so the same body posted into a
+             different hearth/thread is not collapsed onto an unrelated
+             existing post.  Matching returns the existing post as
+             [Dedup_hit] so the outer code skips [append_post] (no JSONL
+             duplicate) and [Agent_economy.earn] (no extra credits). *)
           let author_str = Agent_id.to_string author_id in
-          let dedup_key = author_str ^ "\x00" ^ normalized_body in
+          let hearth_part = Option.value ~default:"" hearth in
+          let thread_part = Option.value ~default:"" thread_id in
+          let dedup_key =
+            String.concat "\x00"
+              [ author_str; hearth_part; thread_part; normalized_body ]
+          in
           let dedup_match =
             Hashtbl.fold
               (fun _ (p : post) acc ->
                  let p_key =
-                   Agent_id.to_string p.author ^ "\x00" ^ p.body
+                   String.concat "\x00"
+                     [ Agent_id.to_string p.author
+                     ; Option.value ~default:"" p.hearth
+                     ; Option.value ~default:"" p.thread_id
+                     ; p.body
+                     ]
                  in
                  if String.equal p_key dedup_key then Some p else acc)
               store.posts None
@@ -662,7 +675,7 @@ let create_post
                existing_id=%s"
               author_str (String.length normalized_body)
               (Post_id.to_string existing.id);
-            Ok existing
+            Ok (`Dedup_hit existing)
           | None ->
             (match validate_sub_board_post_policy_unlocked store
                      ~author_id ~hearth
@@ -698,7 +711,7 @@ let create_post
                 Hashtbl.add store.posts (Post_id.to_string post.id) post;
                 Stdlib.incr store.post_count;
                 invalidate_post_caches store;
-                Ok post))
+                Ok (`Fresh post)))
       in
       (* Agent Economy: earn credits for board post.  Moved OUTSIDE
      [with_lock] because [Agent_economy.earn] does its own disk I/O
@@ -706,9 +719,12 @@ let create_post
      no board state — holding [store.mutex] across it was pure
      contention that blocked every other board reader/writer while
      the ledger write landed.  If the earn fails we log at warn; the
-     post itself is already in the store and on disk. *)
+     post itself is already in the store and on disk.
+
+     Dedup hits skip both [append_post] (avoids duplicate JSONL post id)
+     and [Agent_economy.earn] (avoids granting extra credits for retries). *)
       match board_result with
-      | Ok post ->
+      | Ok (`Fresh post) ->
         with_persist_lock store (fun () -> append_post post);
         (match
            Agent_economy.earn
@@ -721,6 +737,7 @@ let create_post
          | Ok _ -> ()
          | Error msg -> Log.BoardLog.warn "economy earn (post): %s" msg);
         Ok post
+      | Ok (`Dedup_hit existing) -> Ok existing
       | Error _ as e -> e)
 ;;
 

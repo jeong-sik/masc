@@ -47,3 +47,35 @@ let turn_event_bus_manifest_decision
       ("last_compaction", last_compaction);
     ]
 ;;
+
+(* Pure predicate (Keeper_exec_context + Keeper_behavioral_regime). *)
+let should_auto_pause_required_tool_contract_violation
+      ~(paused : bool)
+      ~(consecutive_failures : int)
+      (err : Agent_sdk.Error.sdk_error)
+  : bool
+  =
+  Keeper_error_classify.is_required_tool_contract_violation err
+  && consecutive_failures >= Keeper_behavioral_regime.turn_fail_streak_threshold
+  && not paused
+;;
+
+(* Pure constructor for the SDK retry-timeout error wire shape. *)
+let sdk_error_of_retry_slot_reacquire_timeout
+      ~(keeper_name : string)
+      (timeout : Keeper_turn_slot.semaphore_wait_timeout)
+  =
+  let phase = Keeper_turn_slot.semaphore_wait_phase_to_string timeout.timeout_phase in
+  let holder_summary = Keeper_turn_slot.format_slot_holders timeout.timeout_holders in
+  Agent_sdk.Error.Api
+    (Agent_sdk.Retry.Timeout
+       { message =
+           Printf.sprintf
+             "keeper turn slot reacquire timed out after degraded retry (keeper=%s \
+              phase=%s wait=%.0fs holders=%s)"
+             keeper_name
+             phase
+             timeout.timeout_wait_sec
+             holder_summary
+       })
+;;

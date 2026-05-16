@@ -10,44 +10,9 @@ open Keeper_status_bridge
 
 include Dashboard_http_keeper_detail
 
-(** Context-ratio thresholds for keeper health scoring.
-    These are distinct from Dashboard.ctx_* (compaction triggers) —
-    health scoring penalizes keepers approaching context limits.
-    Values sourced from [Env_config_keeper.DashboardHealth]. *)
-let health_ctx_critical = Env_config_keeper.DashboardHealth.ctx_critical
-let health_ctx_warn = Env_config_keeper.DashboardHealth.ctx_warn
-let health_penalty_critical = Env_config_keeper.DashboardHealth.penalty_critical
-let health_penalty_warn = Env_config_keeper.DashboardHealth.penalty_warn
-let runtime_warning_ctx_ratio =
-  Env_config_keeper.DashboardHealth.runtime_warning_ctx_ratio
-
-let live_keeper_cascade_name (raw : string) =
-  Keeper_cascade_profile.resolve_live raw
-
-(** Compute keeper health score (0-100). Pure function.
-    Inputs: restart_count, max_restarts, recent_crash_count,
-            is_dead, context_ratio (0.0-1.0). *)
-let compute_health_score
-    ~restart_count ~max_restarts ~recent_crash_count
-    ~is_dead ~context_ratio =
-  if is_dead then 0
-  else
-    let budget_penalty =
-      if max_restarts <= 0 then 0.0
-      else
-        let ratio = float_of_int restart_count /. float_of_int max_restarts in
-        Float.min 1.0 ratio *. 40.0
-    in
-    let crash_penalty =
-      Float.min 30.0 (float_of_int recent_crash_count *. 10.0)
-    in
-    let context_penalty =
-      if context_ratio > health_ctx_critical then health_penalty_critical
-      else if context_ratio > health_ctx_warn then health_penalty_warn
-      else 0.0
-    in
-    let raw = 100.0 -. budget_penalty -. crash_penalty -. context_penalty in
-    Int.max 0 (Int.min 100 (Float.to_int raw))
+(** Health constants + compute_health_score + live_keeper_cascade_name moved
+    to Dashboard_http_keeper_types (intra-library file split, 2026-05-16). *)
+include Dashboard_http_keeper_types
 
 (** Outcomes rollup: aggregate successes / failures / validation for a keeper.
 
@@ -210,30 +175,9 @@ let compute_outcomes_rollup
 (** Estimate seconds until Dead based on current restart_count and
     exponential backoff schedule. Returns None if already dead or
     restart_count >= max_restarts. *)
-let estimate_dead_eta_sec ~restart_count ~max_restarts =
-  if max_restarts <= 0 || restart_count >= max_restarts then None
-  else
-    let total = ref 0.0 in
-    for i = restart_count to max_restarts - 1 do
-      total := !total +. Keeper_supervisor.backoff_delay i
-    done;
-    Some !total
-
-let prompt_block_json key =
-  let resolved = Prompt_registry.resolve_prompt key in
-  `Assoc
-    [
-      ("key", `String key);
-      ("source", `String resolved.source);
-      ("text", `String resolved.effective);
-    ]
-
-let tokens_per_sec_json ~tokens ~latency_ms =
-  if tokens <= 0 || latency_ms <= 0 then `Null
-  else `Float ((float_of_int tokens *. 1000.0) /. float_of_int latency_ms)
-
-let last_latency_ms_json latency_ms =
-  if latency_ms <= 0 then `Null else `Int latency_ms
+(* estimate_dead_eta_sec / prompt_block_json / tokens_per_sec_json /
+   last_latency_ms_json moved to Dashboard_http_keeper_types
+   (intra-library file split, 2026-05-16). *)
 
 let json_string_list_member key json =
   match Yojson.Safe.Util.member key json with

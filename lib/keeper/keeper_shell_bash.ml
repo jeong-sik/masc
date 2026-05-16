@@ -256,7 +256,7 @@ let bash_shape_block_reason = function
 let bash_shape_block_hint = function
   | Gh_pr_checks ->
     "Use keeper_pr_status. If raw gh is the only visible status path, use gh \
-     pr view <n> --repo OWNER/REPO --json \
+     pr view NUMBER --repo OWNER/REPO --json \
      statusCheckRollup,mergeStateStatus,isDraft."
   | Pipe_or_redirect ->
     "Remove the pipe or redirect. Run the primary command once and summarize \
@@ -272,14 +272,14 @@ let bash_shape_block_alternatives = function
   | Gh_pr_checks ->
     [
       "keeper_pr_status";
-      "gh pr view <n> --repo OWNER/REPO --json \
+      "gh pr view NUMBER --repo OWNER/REPO --json \
        statusCheckRollup,mergeStateStatus,isDraft";
     ]
   | Pipe_or_redirect ->
     [
       "keeper_bash cmd='ls lib/'";
-      "keeper_shell op=head path=<file> lines=20";
-      "keeper_shell op=rg pattern=<pattern> path=<dir>";
+      "keeper_shell op=head path=file/path lines=20";
+      "keeper_shell op=rg pattern=search-term path=dir/path";
     ]
   | Chaining ->
     [

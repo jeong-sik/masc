@@ -1,5 +1,5 @@
 ---
-rfc: "0090"
+rfc: "0091"
 title: "Keeper bash tool: cmd string → typed Argv schema (lexer/validator 박멸)"
 status: Draft
 created: 2026-05-17
@@ -11,7 +11,13 @@ related: ["0042", "0084", "0089"]
 implementation_prs: []
 ---
 
-# RFC-0090 — Keeper bash tool: cmd string → typed Argv schema
+# RFC-0091 — Keeper bash tool: cmd string → typed Argv schema
+
+> **번호 변경 노트 (2026-05-17)**: 본 RFC 는 원래 RFC-0090 으로 push 되었으나
+> 같은 시점 다른 워크로드 (`write-side success-model attribution`, PR #15651)
+> 가 ledger 0090 을 먼저 머지하여 본 RFC 는 0091 로 재할당되었다. 사용자
+> feedback `memory/feedback_rfc_number_reservation_needed.md` 가 명시한 ledger
+> race-loss 시나리오의 실제 사례.
 
 ## §1 컨텍스트
 

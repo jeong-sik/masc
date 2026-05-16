@@ -677,6 +677,14 @@ let metric_keeper_user_visible_reply_source =
   "masc_keeper_user_visible_reply_source_total"
 ;;
 
+let metric_keeper_summarizer_state_scrubs =
+  "masc_keeper_summarizer_state_scrubs_total"
+;;
+
+let metric_keeper_summarizer_state_blocks_removed =
+  "masc_keeper_summarizer_state_blocks_removed_total"
+;;
+
 let metric_keeper_oas_env_key_rejections =
   "masc_keeper_oas_env_key_rejections_total"
 ;;

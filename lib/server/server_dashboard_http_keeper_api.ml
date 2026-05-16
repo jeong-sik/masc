@@ -653,51 +653,10 @@ let string_contains ~needle value =
    Server_dashboard_http_keeper_api_types (intra-library file split,
    2026-05-16). *)
 
-let tool_call_output_text_opt json =
-  match Yojson.Safe.Util.member "output" json with
-  | `String value -> Some value
-  | `Assoc _ as output -> (
-    match json_assoc_member_opt "_blob" output with
-    | Some blob -> json_string_member_opt "preview" blob
-    | None -> None)
-  | _ -> None
-
-let parse_tool_output_json_opt json =
-  match tool_call_output_text_opt json with
-  | None -> None
-  | Some output -> (
-    match Safe_ops.parse_json_safe ~context:"runtime_lens.tool_output" output with
-    | Ok parsed -> Some parsed
-    | Error _ -> None)
-
-let tool_call_runtime_contract json =
-  match json_assoc_member_opt "runtime_contract" json with
-  | Some contract -> contract
-  | None -> `Assoc []
-
-let tool_call_matches_trace ?turn_id ~keeper_name ~trace_id json =
-  let contract = tool_call_runtime_contract json in
-  let keeper_matches =
-    match json_string_member_opt "keeper" json with
-    | Some keeper -> String.equal keeper keeper_name
-    | None -> true
-  in
-  let trace_matches =
-    match
-      ( json_string_member_opt "trace_id" json,
-        json_string_member_opt "trace_id" contract )
-    with
-    | Some value, _ | _, Some value -> String.equal value trace_id
-    | None, None -> false
-  in
-  let turn_matches =
-    match turn_id with
-    | None -> true
-    | Some wanted ->
-      json_int_member_opt "keeper_turn_id" json = Some wanted
-      || json_int_member_opt "keeper_turn_id" contract = Some wanted
-  in
-  keeper_matches && trace_matches && turn_matches
+(* tool_call_output_text_opt + parse_tool_output_json_opt +
+   tool_call_runtime_contract + tool_call_matches_trace moved to
+   Server_dashboard_http_keeper_api_types (intra-library file split,
+   2026-05-16). *)
 
 let claim_status_of_output output =
   let result =

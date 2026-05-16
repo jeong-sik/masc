@@ -1018,3 +1018,14 @@ and completed_turn_observation =
   ; ct_selected_model : string option
   }
 
+let try_resolve_done entry value =
+  match Eio.Promise.peek entry.done_p with
+  | Some _ -> false
+  | None ->
+    (try
+       Eio.Promise.resolve entry.done_r value;
+       true
+     with
+     | Invalid_argument _ -> false)
+;;
+

@@ -61,35 +61,11 @@ val persona_profile_path_for_drift_check :
 (** Return the concrete persona [profile.json] path reported by supervisor
     drift diagnostics. *)
 
-type persona_drift_log_level =
-  | Persona_drift_warn
-  | Persona_drift_error
-
-val persona_drift_log_level_for_missing_profile :
-  keeper_meta -> persona_drift_log_level
-(** Classify a missing persona profile.  Keeper TOML with enough inline
-    identity remains operational and is WARN; keepers without TOML/persona
-    identity are ERROR. *)
-
-(** supervision_cohort type + foundational helpers live in
+(** supervision_cohort type + cohort/persona helpers live in
     Keeper_supervisor_types (intra-library file split, 2026-05-16).
     Re-exported here so existing callers keep using
     [Keeper_supervisor.supervision_cohort] etc. unchanged. *)
 include module type of Keeper_supervisor_types
-
-val fresh_supervision_cohort_keepers :
-  base_path:string ->
-  supervision_cohort ->
-  Keeper_registry.registry_entry list
-(** Re-read a cohort's keeper entries from the registry by name. Entries that
-    disappeared since the original sweep snapshot are omitted. *)
-
-val iter_supervision_cohorts :
-  ?yield_between:(unit -> unit) ->
-  supervision_cohort list ->
-  f:(supervision_cohort -> unit) ->
-  unit
-(** Iterate cohorts in order and yield only between cohort boundaries. *)
 
 val next_auto_resume_after_sec :
   initial_sec:float -> max_sec:float -> float option -> float option

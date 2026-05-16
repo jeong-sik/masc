@@ -311,8 +311,19 @@ let extract_command_name cmd =
         supported alternative (rg/jq)
       - everything else → plain allowlist
 
-    The helper is a pure function of the tried command name. *)
-let command_blocked_hint name =
+    The helper is a pure function of the tried command name and the
+    optional caller-specific allowlist. *)
+let default_common_allowed_commands_hint =
+  "dune, git, rg, ls, cat, head, tail, grep, find, make, node, npm, \
+   python3, pytest, cargo, go"
+;;
+
+let allowed_commands_hint = function
+  | [] -> "(none)"
+  | commands -> String.concat ", " commands
+;;
+
+let command_blocked_hint ?allowed_commands name =
   let looks_like_source_code s =
     (* Contains '.' at a non-boundary position (A.B), or starts with a
        reserved OCaml keyword that no shell command uses. *)
@@ -375,17 +386,18 @@ let command_blocked_hint name =
        masc_code_write / masc_code_read instead."
     | _ -> ""
   in
-  (* The "Allowed: ..." list below is a hand-curated prefix of
-     [dev_allowed_commands] — kept short so the hint fits in one line of
-     LLM context, but truthful (no stale entries). Keep in sync when
-     dev_allowed_commands changes; the pointer to keeper_tools_list
-     covers anything not in the printed prefix. *)
+  let list_label, commands =
+    match allowed_commands with
+    | None -> "Common allowed commands", default_common_allowed_commands_hint
+    | Some commands -> "Allowed commands for this tool", allowed_commands_hint commands
+  in
   Printf.sprintf
-    "Command blocked: '%s' is not allowed. Common allowed commands: dune, git, rg, ls, \
-     cat, head, tail, grep, find, make, node, npm, python3, pytest, cargo, go.%s See \
+    "Command blocked: '%s' is not allowed. %s: %s.%s See \
      keeper_tools_list for the exhaustive tool surface, and keeper_fs_read / \
      keeper_fs_edit for file operations."
     name
+    list_label
+    commands
     alt
 ;;
 
@@ -417,6 +429,11 @@ let block_reason_to_string = function
     "File redirects are not allowed. Only fd redirects like 2>&1 are permitted."
   | Pipes_not_allowed -> "Pipes are not allowed. Run one command per call."
   | Command_not_allowed name -> command_blocked_hint name
+;;
+
+let block_reason_to_string_with_allowlist ~allowed_commands = function
+  | Command_not_allowed name -> command_blocked_hint ~allowed_commands name
+  | reason -> block_reason_to_string reason
 ;;
 
 let validate_command_with_allowlist ~allowed_commands cmd =

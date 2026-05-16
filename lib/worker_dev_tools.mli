@@ -42,6 +42,13 @@ type block_reason =
     {!Chain_or_redirect}, {!Injection}, etc.). *)
 val block_reason_to_string : block_reason -> string
 
+val block_reason_to_string_with_allowlist :
+  allowed_commands:string list -> block_reason -> string
+(** Render a {!block_reason} with a caller-specific allowlist in the
+    [Command_not_allowed] hint. Use this when the caller deliberately
+    passes a narrower allowlist than {!validate_command_coding}; otherwise
+    the generic hint can name commands that the caller still rejects. *)
+
 (** Strict (allowlist + no shell metacharacters) validator used by the
     default [shell_exec] tool.  Rejects empty input, chaining, and any
     command outside the dev allowlist (rg / grep / dune / git / ...). *)

@@ -7,8 +7,8 @@
     without pulling in the full command-validation tool surface.
 
     Classification functions that depend on worker_dev_tools internals
-    (validate_command, shadow_parse_outcome) remain in worker_dev_tools.ml
-    and use these types via [Gate_diff_types.t].
+    (validate_command, shadow_parse_outcome_kind) remain in
+    worker_dev_tools.ml and use these types via [Gate_diff_types.t].
 
     @since godsplit-safety — variant unification & godfile decomposition *)
 

@@ -13,8 +13,8 @@
     (counters, telemetry) can reference the types without pulling in
     the full command-validation tool surface.  Classification functions
     that depend on [worker_dev_tools] internals (validate_command,
-    shadow_parse_outcome) stay in [worker_dev_tools.ml] and consume
-    these types via [Gate_diff_types.t].
+    shadow_parse_outcome_kind) stay in [worker_dev_tools.ml] and
+    consume these types via [Gate_diff_types.t].
 
     Both {!destructive_class} and {!gate_diff} are intentionally closed
     variants — adding a new class / outcome must touch every match
@@ -81,9 +81,9 @@ type parse_outcome_kind =
   | Too_complex of Masc_exec.Parsed.reason_too_complex
 
 val parse_outcome_kind_to_tag : parse_outcome_kind -> string
-(** Stable snake_case rendering. Matches the legacy
-    [shadow_parse_outcome] string surface byte-for-byte so log
-    aggregators / runbook greps continue to see the same tag set:
+(** Stable snake_case rendering for log / metric emission.
+    Operator dashboards and runbook greps depend on this exact
+    tag set:
     [Parsed_simple -> "parsed_simple"],
     [Parse_error -> "parse_error"],
     [Parse_aborted r -> "parse_aborted:<r>"],

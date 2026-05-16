@@ -1658,20 +1658,6 @@ let shadow_parse_outcome_kind (cmd : string) : parse_outcome_kind =
   | Masc_exec.Parsed.Too_complex r -> Too_complex r
 ;;
 
-(* Stable string rendering of the parse outcome — retained for log
-   emission and telemetry tags that already exist in operator
-   dashboards. Computes via the typed kind so the wording cannot
-   drift between this function and [Legendary_counters]. *)
-let shadow_parse_outcome (cmd : string) : string =
-  parse_outcome_kind_to_tag (shadow_parse_outcome_kind cmd)
-;;
-
-(* Legacy verdict ↔ shadow verdict cross-check.  Returns a tuple of
-   legacy allow/deny + shadow kind, so telemetry can spot "legacy
-   allows but shadow cannot parse" drift without needing two
-   separate call sites.  Intentionally side-effect free. *)
-let cross_check_command ~legacy cmd = legacy, shadow_parse_outcome_kind cmd
-
 (* Classification functions that depend on worker_dev_tools internals
    (validate_command, shadow_parse_outcome_kind). Types come from
    Gate_diff_types via [include Gate_diff_types] at the top. *)

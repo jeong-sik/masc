@@ -188,33 +188,17 @@ val make_readonly_tools
 (** {1 Shadow AST gate observability} *)
 
 (** Parse [cmd] with {!Masc_exec_bash_parser.Bash.parse_string} and
-    return the typed outcome — primary classification surface.
-    Downstream histogram dispatch consumes the variant exhaustively
-    so adding a new {!Masc_exec.Parsed.reason_too_complex} arm is a
-    compile-time forcing function, not a silent "other"-bucket
-    landing.  Never raises; the parser catches every internal
-    exception. *)
+    return the typed outcome — single classification surface for
+    shadow-gate observability.  Downstream histogram dispatch
+    consumes the variant exhaustively so adding a new
+    {!Masc_exec.Parsed.reason_too_complex} arm is a compile-time
+    forcing function, not a silent "other"-bucket landing.  Never
+    raises; the parser catches every internal exception.
+
+    Render to the string tag wording dashboards / runbook greps
+    track via {!Gate_diff_types.parse_outcome_kind_to_tag} at the
+    log / metric emission boundary. *)
 val shadow_parse_outcome_kind : string -> parse_outcome_kind
-
-(** Stable string rendering of {!shadow_parse_outcome_kind} — the
-    tag wording dashboards / runbook greps already track:
-
-    - ["parsed_simple"] — grammar accepts the command
-    - ["parse_error"] — Menhir/Lex error
-    - ["parse_aborted:<reason>"] — timeout/depth/token-limit
-    - ["too_complex:<reason>"] — recognised-but-unsupported construct
-
-    Computed via {!shadow_parse_outcome_kind} so the wording cannot
-    drift between this function and {!Legendary_counters}. *)
-val shadow_parse_outcome : string -> string
-
-(** Pair the supplied [legacy] verdict with the typed
-    {!shadow_parse_outcome_kind} for [cmd].  Polymorphic in [legacy] —
-    callers pass either the typed {!legacy_verdict} or the boolean
-    form used by older test sites.  Pure (no side effects); dashboards
-    consume the tuple to spot legacy/shadow drift without two parse
-    passes. *)
-val cross_check_command : legacy:'a -> string -> 'a * parse_outcome_kind
 
 (** Run both the legacy substring gate and the shadow AST gate on
     [cmd], returning their reconciliation outcome alongside both

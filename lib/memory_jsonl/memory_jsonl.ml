@@ -50,8 +50,31 @@ let encode_line ~key ~(value : Yojson.Safe.t option) : string =
     | Some v ->
       let s = Yojson.Safe.to_string v in
       if String.length s > max_value_size then begin
-        Log.Memory.warn "memory_jsonl: value for key=%s exceeds 1MB (%d bytes), truncating"
-          key (String.length s);
+        (* TYPE CONTRACT VIOLATION: the original [value] is a
+           [Yojson.Safe.t] of caller-defined shape, but when it
+           exceeds [max_value_size] (1MB) we replace it with a
+           [`String] of the truncated serialisation.  Callers that
+           later decode this entry will see a [String] where they
+           expected an [Assoc]/[List]/etc and silently fail to parse
+           the structured content.  Warn loudly so operators correlate
+           "key X reads as garbled string" with "key X was truncated
+           on persist". *)
+        Log.Memory.warn
+          "memory_jsonl: value for key=%s exceeds 1MB (%d bytes); \
+           truncating AND downgrading value type from %s to String — \
+           any structured decoder on this key will mis-parse on \
+           subsequent reads"
+          key
+          (String.length s)
+          (match v with
+           | `Assoc _ -> "Assoc"
+           | `List _ -> "List"
+           | `String _ -> "String"
+           | `Int _ -> "Int"
+           | `Float _ -> "Float"
+           | `Bool _ -> "Bool"
+           | `Null -> "Null"
+           | `Intlit _ -> "Intlit");
         let truncated = String.sub s 0 max_value_size in
         (* Wrap truncated string so it is valid JSON *)
         `String truncated
@@ -64,8 +87,19 @@ let encode_line ~key ~(value : Yojson.Safe.t option) : string =
   ] in
   Yojson.Safe.to_string obj ^ "\n"
 
+(** Bound the snippet length we log when a JSONL line is malformed
+    so a single huge garbled line cannot blow up the log file. *)
+let parse_drop_snippet_max = 80
+
+let snippet_of_line (line : string) : string =
+  if String.length line <= parse_drop_snippet_max then line
+  else String.sub line 0 parse_drop_snippet_max ^ "…"
+
 (** Parse a single JSONL line into (key, value option, ts).
-    Returns None if the line is malformed. *)
+    Returns None if the line is malformed.  Every silent-drop branch
+    now emits a warn so operators can spot data-corruption events; the
+    snippet is bounded by [parse_drop_snippet_max] to keep log size
+    manageable. *)
 let parse_line (line : string) : (string * Yojson.Safe.t option * float) option =
   let trimmed = String.trim line in
   if String.length trimmed = 0 then None
@@ -90,9 +124,25 @@ let parse_line (line : string) : (string * Yojson.Safe.t option * float) option 
         in
         (match key with
          | Some k -> Some (k, value, ts)
-         | None -> None)
-      | _ -> None
-    with Yojson.Json_error _ -> None
+         | None ->
+           Log.Memory.warn
+             "memory_jsonl: dropping JSONL line — [key] field missing \
+              or not a string (snippet: %S)"
+             (snippet_of_line trimmed);
+           None)
+      | _ ->
+        Log.Memory.warn
+          "memory_jsonl: dropping JSONL line — top-level JSON is not \
+           an Assoc record (snippet: %S)"
+          (snippet_of_line trimmed);
+        None
+    with Yojson.Json_error err ->
+      Log.Memory.warn
+        "memory_jsonl: dropping JSONL line — Yojson parse error %s \
+         (snippet: %S)"
+        err
+        (snippet_of_line trimmed);
+      None
 
 (** Read all lines from a session file.
     Returns empty list if file does not exist.

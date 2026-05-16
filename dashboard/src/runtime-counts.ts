@@ -63,11 +63,13 @@ function normalizeCounts(
 
 function resolveConfiguredView({
   namespaceTotalRuntimes,
+  namespaceKeepers,
   namespaceConfiguredKeepers,
   shellTotalRuntimes,
   shellConfiguredKeepers,
 }: {
   namespaceTotalRuntimes: number
+  namespaceKeepers: number
   namespaceConfiguredKeepers: number | null
   shellTotalRuntimes: number
   shellConfiguredKeepers: number | null
@@ -84,6 +86,13 @@ function resolveConfiguredView({
       keepers: shellConfiguredKeepers ?? 0,
       totalRuntimes: shellTotalRuntimes,
       source: 'shell',
+    }
+  }
+  if (namespaceTotalRuntimes > 0) {
+    return {
+      keepers: namespaceKeepers,
+      totalRuntimes: namespaceTotalRuntimes,
+      source: 'namespace-truth',
     }
   }
   return { keepers: 0, totalRuntimes: 0, source: 'none' }
@@ -137,6 +146,7 @@ export function resolveRuntimeCounts({
 
   const configured = resolveConfiguredView({
     namespaceTotalRuntimes: namespace?.totalRuntimes ?? 0,
+    namespaceKeepers: namespace?.keepers ?? 0,
     namespaceConfiguredKeepers,
     shellTotalRuntimes: shell?.totalRuntimes ?? 0,
     shellConfiguredKeepers: shellConfiguredKeeperCount,

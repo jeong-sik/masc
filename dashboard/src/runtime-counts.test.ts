@@ -52,6 +52,19 @@ describe('resolveRuntimeCounts', () => {
     })
   })
 
+  it('preserves namespace snapshot totals when configured keepers are omitted', () => {
+    expect(resolveRuntimeCounts({
+      executionLoaded: false,
+      agentsCount: 0,
+      keepersCount: 0,
+      namespaceTruthCounts: { agents: 2, keepers: 3, tasks: 12 },
+    })).toEqual({
+      live: { agents: 0, keepers: 0, tasks: 0, totalRuntimes: 0, available: false },
+      configured: { keepers: 3, totalRuntimes: 5, source: 'namespace-truth' },
+      source: 'project-snapshot',
+    })
+  })
+
   it('exposes both live and configured views simultaneously when execution has hydrated', () => {
     expect(resolveRuntimeCounts({
       executionLoaded: true,

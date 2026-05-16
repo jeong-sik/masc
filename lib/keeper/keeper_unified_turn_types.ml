@@ -79,3 +79,39 @@ let sdk_error_of_retry_slot_reacquire_timeout
              holder_summary
        })
 ;;
+
+(* RFC-0047 follow-up: exhaustive match on [Keeper_turn_disposition.t].
+   Pre-fix this used [String.starts_with ~prefix:"api_error_"] on the
+   wire form of [terminal_reason.code]; that substring guard depended
+   on SDK-error wires being routed through [Unknown { raw_error = _ }]
+   because [normalize_code] no longer collapsed them to "provider_error".
+   With [of_failure] now emitting [Provider_error (Sdk_error _)] typed
+   for the SDK-error fallback, this routing reduces to a clean variant
+   match — no substring classifier left in this function. *)
+let registry_failure_reason_of_terminal_reason
+      (terminal_reason : Keeper_turn_terminal.t)
+      ~(raw_error : string)
+  : Keeper_registry.failure_reason option
+  =
+  let detail = Keeper_types_profile.short_preview raw_error in
+  match terminal_reason.disposition with
+  | Keeper_turn_disposition.Required_tool_use_no_tool_call ->
+    Some
+      (Keeper_registry.Tool_required_unsatisfied
+         { code = "required_tool_use_no_tool_call"; detail })
+  | Keeper_turn_disposition.Required_tool_use_unsatisfied ->
+    Some
+      (Keeper_registry.Tool_required_unsatisfied
+         { code = "required_tool_use_unsatisfied"; detail })
+  | Keeper_turn_disposition.Provider_error c ->
+    Some
+      (Keeper_registry.Provider_runtime_error
+         { code = Keeper_turn_terminal_code.to_wire c; detail })
+  | Keeper_turn_disposition.Success
+  | Keeper_turn_disposition.External_cancel
+  | Keeper_turn_disposition.Turn_wall_clock_timeout
+  | Keeper_turn_disposition.Oas_timeout_budget
+  | Keeper_turn_disposition.Gh_repo_context_missing_worktree
+  | Keeper_turn_disposition.Post_commit_ambiguous
+  | Keeper_turn_disposition.Unknown _ -> None
+;;

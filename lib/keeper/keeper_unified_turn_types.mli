@@ -21,3 +21,13 @@ val sdk_error_of_retry_slot_reacquire_timeout :
   keeper_name:string ->
   Keeper_turn_slot.semaphore_wait_timeout ->
   Agent_sdk.Error.sdk_error
+
+(** [registry_failure_reason_of_terminal_reason terminal ~raw_error]
+    maps a [Keeper_turn_terminal.t] disposition to the corresponding
+    [Keeper_registry.failure_reason], or [None] for benign terminals
+    (Success, External_cancel, timeouts, etc.). [raw_error] is truncated
+    via [Keeper_types_profile.short_preview]. *)
+val registry_failure_reason_of_terminal_reason :
+  Keeper_turn_terminal.t ->
+  raw_error:string ->
+  Keeper_registry.failure_reason option

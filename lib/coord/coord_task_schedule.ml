@@ -96,7 +96,10 @@ let string_list_contains all value = List.exists (String.equal value) all
    tool surface, ~30-50 names. *)
 let build_allowed_set allowed =
   let set = Hashtbl.create 32 in
-  List.iter (fun name -> Hashtbl.replace set name ()) allowed;
+  List.iter
+    (fun name ->
+       Hashtbl.replace set (Coord_task_classify.canonical_required_tool_name name) ())
+    allowed;
   set
 ;;
 
@@ -112,7 +115,13 @@ let make_required_tools_predicate ?agent_tool_names () =
     fun required_tools ->
       (match required_tools with
        | [] -> true
-       | _ -> List.for_all (fun name -> Hashtbl.mem allowed_set name) required_tools)
+       | _ ->
+         List.for_all
+           (fun name ->
+              Hashtbl.mem
+                allowed_set
+                (Coord_task_classify.canonical_required_tool_name name))
+           required_tools)
 ;;
 
 let required_tools_allowed ?agent_tool_names required_tools =
@@ -310,9 +319,13 @@ let latest_receipt_blocks_required_tool_claim config ~agent_name ~required_tools
       @ json_string_list "canonical_tools" receipt
       @ tools_used
     in
+    let visible_set = build_allowed_set visible_tools in
     let required_tool_visible =
       List.exists
-        (fun required_tool -> string_list_contains visible_tools required_tool)
+        (fun required_tool ->
+           Hashtbl.mem
+             visible_set
+             (Coord_task_classify.canonical_required_tool_name required_tool))
         required_tools
     in
     (operator_reason = Some "tool_required_no_tools"

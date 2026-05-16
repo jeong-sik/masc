@@ -1831,6 +1831,40 @@ let prepare_agent_setup
         | Some r -> [ r ]
         | None -> []
       in
+      let tool_pair_counts messages =
+        List.fold_left
+          (fun (uses, results) (msg : Agent_sdk.Types.message) ->
+             List.fold_left
+               (fun (uses, results) -> function
+                 | Agent_sdk.Types.ToolUse _ -> uses + 1, results
+                 | Agent_sdk.Types.ToolResult _ -> uses, results + 1
+                 | Agent_sdk.Types.Text _
+                 | Agent_sdk.Types.Thinking _
+                 | Agent_sdk.Types.RedactedThinking _
+                 | Agent_sdk.Types.Image _
+                 | Agent_sdk.Types.Document _
+                 | Agent_sdk.Types.Audio _ -> uses, results)
+               (uses, results)
+               msg.content)
+          (0, 0)
+          messages
+      in
+      let repair_broken_tool_call_pairs_observed messages =
+        let before_uses, before_results = tool_pair_counts messages in
+        let repaired = Keeper_context_core.repair_broken_tool_call_pairs messages in
+        let after_uses, after_results = tool_pair_counts repaired in
+        let record kind delta =
+          if delta > 0 then
+            Prometheus.inc_counter
+              Keeper_metrics.metric_keeper_tool_pair_repair
+              ~labels:[ "keeper", agent_name; "kind", kind; "site", "keeper_reducer" ]
+              ~delta:(float_of_int delta)
+              ()
+        in
+        record "dangling_tool_use" (max 0 (before_uses - after_uses));
+        record "orphan_tool_result" (max 0 (before_results - after_results));
+        repaired
+      in
       Agent_sdk.Context_reducer.compose
         (hydrator_steps
          @ [ Agent_sdk.Context_reducer.drop_thinking
@@ -1839,10 +1873,9 @@ let prepare_agent_setup
            ; Agent_sdk.Context_reducer.cap_message_tokens
                ~max_tokens:Env_config_keeper.KeeperReducer.cap_message_tokens
                ~keep_recent:Env_config_keeper.KeeperReducer.cap_message_keep_recent
-           ; Agent_sdk.Context_reducer.repair_dangling_tool_calls
            ; { Agent_sdk.Context_reducer.strategy =
                  Agent_sdk.Context_reducer.Custom
-                   Keeper_context_core.repair_broken_tool_call_pairs
+                   repair_broken_tool_call_pairs_observed
              }
            ; Agent_sdk.Context_reducer.merge_contiguous
            ])

@@ -499,6 +499,8 @@ let metric_keeper_compaction_saved_tokens = "masc_keeper_compaction_saved_tokens
 let metric_keeper_operator_compact = "masc_keeper_operator_compact_total"
 let metric_keeper_operator_clear = "masc_keeper_operator_clear_total"
 let metric_keeper_compaction_noop = "masc_keeper_compaction_noop_total"
+let metric_keeper_continuity_no_state = "masc_keeper_continuity_no_state_total"
+let metric_keeper_tool_pair_repair = "masc_keeper_tool_pair_repair_total"
 let metric_keeper_tool_emission_registry_size = "masc_keeper_tool_emission_registry_size"
 let metric_keeper_tool_emission_pushes = "masc_keeper_tool_emission_pushes_total"
 

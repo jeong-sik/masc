@@ -409,7 +409,19 @@ let apply_post_turn_lifecycle_with_resilience_handles
       | None -> structured_snapshot
     in
     match snapshot with
-    | None -> meta
+    | None ->
+        Prometheus.inc_counter
+          Keeper_metrics.metric_keeper_continuity_no_state
+          ~labels:[("keeper", meta.name)]
+          ();
+        {
+          meta with
+          runtime =
+            {
+              meta.runtime with
+              last_continuity_update_ts = now_ts;
+            };
+        }
     | Some snapshot ->
         (* Gen7: cap snapshot size before rendering + persisting.
            Bounds string prose and list items so meta.continuity_summary

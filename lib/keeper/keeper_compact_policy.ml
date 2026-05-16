@@ -47,6 +47,54 @@ let compaction_decision_applied = function
     false
 ;;
 
+let decide_compaction
+      ~ratio
+      ~msg_count
+      ~tok_count
+      ~ratio_gate
+      ~message_gate
+      ~token_gate
+      ~cooldown_sec
+      ~last_continuity_update_ts
+      ~last_proactive_ts
+      ~now_ts
+  =
+  let cooldown = Float.of_int cooldown_sec in
+  let last_reflection_ts =
+    max last_continuity_update_ts last_proactive_ts
+  in
+  let emergency = ratio >= emergency_compact_ratio_threshold in
+  let reflection_ready =
+    emergency
+    || last_reflection_ts <= 0.0
+    || (last_reflection_ts > 0.0 && now_ts -. last_reflection_ts >= cooldown)
+  in
+  let hold_s =
+    if cooldown <= 0.0 || emergency || last_reflection_ts <= 0.0
+    then 0.0
+    else max 0.0 (Float.of_int cooldown_sec -. (now_ts -. last_reflection_ts))
+  in
+  (* Tool-heavy compaction is an operational safety valve: accumulated
+     tool result bloat slows local inference and can hide below the
+     normal ratio/message/token gates, so it bypasses the reflection
+     cooldown like the emergency ratio gate. *)
+  let tool_heavy =
+    msg_count > tool_heavy_msg_threshold
+    && ratio > tool_heavy_ratio_floor
+  in
+  if not reflection_ready && not tool_heavy
+  then Skipped_continuity_reflection { hold_s; cooldown_sec }
+  else if ratio >= ratio_gate
+  then Applied (Compaction_trigger.Ratio_threshold { ratio; threshold = ratio_gate })
+  else if message_gate > 0 && msg_count >= message_gate
+  then Applied (Compaction_trigger.Message_count { count = msg_count; threshold = message_gate })
+  else if token_gate > 0 && tok_count >= token_gate
+  then Applied (Compaction_trigger.Token_count { count = tok_count; threshold = token_gate })
+  else if tool_heavy
+  then Applied (Compaction_trigger.Tool_heavy { messages = msg_count; ratio })
+  else Blocked_below_thresholds
+;;
+
 let compaction_policy_of_keeper (meta : keeper_meta) : float * int * int =
   meta.compaction.ratio_gate, meta.compaction.message_gate, meta.compaction.token_gate
 ;;
@@ -64,54 +112,18 @@ let compact_if_needed_typed
      default token_gate=0 which disables this gate.  See keeper_guard.ml. *)
   let tok_count = token_count ctx in
   let ratio_gate, message_gate, token_gate = compaction_policy_of_keeper meta in
-  let cooldown = Float.of_int meta.compaction.cooldown_sec in
-  let last_reflection_ts =
-    max meta.runtime.last_continuity_update_ts meta.runtime.proactive_rt.last_ts
-  in
-  (* When no reflection has ever happened (ts=0.0), there is nothing to
-     preserve — allow compaction immediately.  Also bypass the cooldown
-     when context pressure is critical (ratio >= emergency_compact_ratio_threshold)
-     to prevent the overflow that killed janitor at 218K/200K (#5634). *)
-  let emergency = ratio >= emergency_compact_ratio_threshold in
-  let reflection_ready =
-    emergency
-    || last_reflection_ts <= 0.0
-    || (last_reflection_ts > 0.0 && now_ts -. last_reflection_ts >= cooldown)
-  in
-  let hold_s =
-    if cooldown <= 0.0 || emergency || last_reflection_ts <= 0.0
-    then 0.0
-    else
-      max 0.0 (Float.of_int meta.compaction.cooldown_sec -. (now_ts -. last_reflection_ts))
-  in
-  (* Tool-heavy gate: when accumulated tool results bloat context
-     without hitting ratio/message/token gates, stub old tool results
-     to prevent slow inference on local LLMs (#5802).
-     Bypasses reflection cooldown like the emergency ratio gate —
-     tool bloat is an operational risk, not a content concern. *)
-  let tool_heavy =
-    (reflection_ready || emergency)
-    && msg_count > tool_heavy_msg_threshold
-    && ratio > tool_heavy_ratio_floor
-  in
   let decision =
-    if not reflection_ready
-    then
-      Skipped_continuity_reflection
-        { hold_s; cooldown_sec = meta.compaction.cooldown_sec }
-    else if ratio >= ratio_gate
-    then Applied (Compaction_trigger.Ratio_threshold { ratio; threshold = ratio_gate })
-    else if message_gate > 0 && msg_count >= message_gate
-    then
-      Applied
-        (Compaction_trigger.Message_count { count = msg_count; threshold = message_gate })
-    else if token_gate > 0 && tok_count >= token_gate
-    then
-      Applied
-        (Compaction_trigger.Token_count { count = tok_count; threshold = token_gate })
-    else if tool_heavy
-    then Applied (Compaction_trigger.Tool_heavy { messages = msg_count; ratio })
-    else Blocked_below_thresholds
+    decide_compaction
+      ~ratio
+      ~msg_count
+      ~tok_count
+      ~ratio_gate
+      ~message_gate
+      ~token_gate
+      ~cooldown_sec:meta.compaction.cooldown_sec
+      ~last_continuity_update_ts:meta.runtime.last_continuity_update_ts
+      ~last_proactive_ts:meta.runtime.proactive_rt.last_ts
+      ~now_ts
   in
   match decision with
   | Blocked_below_thresholds | Skipped_no_checkpoint | Skipped_continuity_reflection _ ->
@@ -142,42 +154,54 @@ let compact_if_needed_typed
       Cascade_runtime_candidate.context_window_hint_of_labels model_labels
     in
     let pre_compact_event =
-      Dashboard_harness_health.record_pre_compact
-        ~keeper_name:meta.name
-        ~context_ratio:ratio
-        ~message_count:msg_count
-        ~token_count:tok_count
-        ~strategies:strategy_names
-        ~context_window:model_meta.context_window
-        ~is_local_model:model_meta.is_local_model
-        ~trigger
+      try
+        Some
+          (Dashboard_harness_health.record_pre_compact
+             ~keeper_name:meta.name
+             ~context_ratio:ratio
+             ~message_count:msg_count
+             ~token_count:tok_count
+             ~strategies:strategy_names
+             ~context_window:model_meta.context_window
+             ~is_local_model:model_meta.is_local_model
+             ~trigger)
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        Log.Harness.warn
+          "[pre_compact] dashboard record failed: %s"
+          (Printexc.to_string exn);
+        None
     in
-    (try
-       Sse.broadcast
-         (`Assoc
-             [ "type", `String "oas:masc:harness:pre_compact"
-             ; ( "payload"
-               , `Assoc
-                   [ "timestamp", `Float pre_compact_event.timestamp
-                   ; "keeper_name", `String pre_compact_event.keeper_name
-                   ; "context_ratio", `Float pre_compact_event.context_ratio
-                   ; "message_count", `Int pre_compact_event.message_count
-                   ; "token_count", `Int pre_compact_event.token_count
-                   ; ( "strategies"
-                     , `List
-                         (List.map
-                            (fun value -> `String value)
-                            pre_compact_event.strategies) )
-                   ; "context_window", `Int pre_compact_event.context_window
-                   ; "is_local_model", `Bool pre_compact_event.is_local_model
-                   ; "trigger", `String trigger_label
-                   ; "trigger_detail", trigger_detail
-                   ] )
-             ])
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-       Log.Harness.warn "[pre_compact] sse broadcast failed: %s" (Printexc.to_string exn));
+    (match pre_compact_event with
+     | None -> ()
+     | Some pre_compact_event ->
+       (try
+          Sse.broadcast
+            (`Assoc
+                [ "type", `String "oas:masc:harness:pre_compact"
+                ; ( "payload"
+                  , `Assoc
+                      [ "timestamp", `Float pre_compact_event.timestamp
+                      ; "keeper_name", `String pre_compact_event.keeper_name
+                      ; "context_ratio", `Float pre_compact_event.context_ratio
+                      ; "message_count", `Int pre_compact_event.message_count
+                      ; "token_count", `Int pre_compact_event.token_count
+                      ; ( "strategies"
+                        , `List
+                            (List.map
+                               (fun value -> `String value)
+                               pre_compact_event.strategies) )
+                      ; "context_window", `Int pre_compact_event.context_window
+                      ; "is_local_model", `Bool pre_compact_event.is_local_model
+                      ; "trigger", `String trigger_label
+                      ; "trigger_detail", trigger_detail
+                      ] )
+                ])
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+          Log.Harness.warn "[pre_compact] sse broadcast failed: %s" (Printexc.to_string exn)));
     let messages =
       let msgs_after_compact =
         (* Issue #8597 #1: dropped [~system_prompt] arg — compact

@@ -1376,6 +1376,17 @@ let init () =
     "Total compaction snapshots where before_tokens == after_tokens > 0 (compaction \
      triggered but produced no savings; labels: keeper, trigger)"
     Counter;
+  add
+    Keeper_metrics.metric_keeper_continuity_no_state
+    "Total post-turn continuity observations where no parseable STATE snapshot was \
+     present. The cooldown timestamp is still advanced; labels: keeper."
+    Counter;
+  add
+    Keeper_metrics.metric_keeper_tool_pair_repair
+    "Total keeper reducer repairs that downgraded broken tool-call metadata to plain \
+     text instead of fabricating tool results. Labels: keeper, kind \
+     (dangling_tool_use|orphan_tool_result), site."
+    Counter;
   (* K5: per-keeper tool-emission accumulator registry size.
      Updated by Keeper_tool_emission_hook on register/drop. *)
   add

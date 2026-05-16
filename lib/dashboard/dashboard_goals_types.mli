@@ -119,3 +119,25 @@ val strip_number_group_separators : string -> string
 val parse_first_float : string -> float option
 
 val parsed_target_unit : string option -> string -> attainment_unit
+
+(** {1 Goal attainment JSON projection — pure tree → JSON converter} *)
+
+val build_attainment_json :
+  state:string ->
+  basis:string ->
+  task_done_count:int ->
+  task_count:int ->
+  target_parse_status:string ->
+  unit:attainment_unit ->
+  observed_value:float option ->
+  target_numeric:float option ->
+  attainment_pct:int option ->
+  note:string ->
+  Goal_store.goal ->
+  Yojson.Safe.t
+
+val goal_attainment_pct_help : string
+val goal_attainment_measured_help : string
+
+val goal_attainment_to_json :
+  Goal_store.goal -> tree_node -> Yojson.Safe.t

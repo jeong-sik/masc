@@ -50,32 +50,6 @@ let compute_convergence (goal : Goal_store.goal) linked_tasks children =
     task_ratio
 
 
-let build_attainment_json ~state ~basis ~task_done_count ~task_count
-    ~target_parse_status ~unit ~observed_value ~target_numeric ~attainment_pct
-    ~note (goal : Goal_store.goal) =
-  `Assoc
-    [
-      ("state", `String state);
-      ("basis", `String basis);
-      ("metric", Json_util.string_opt_to_json goal.metric);
-      ("target_value", Json_util.string_opt_to_json goal.target_value);
-      ("target_parse_status", `String target_parse_status);
-      ("unit", `String (attainment_unit_to_string unit));
-      ("observed_value", json_float_opt observed_value);
-      ("target_numeric", json_float_opt target_numeric);
-      ("attainment_pct", json_int_opt attainment_pct);
-      ("task_done_count", `Int task_done_count);
-      ("task_count", `Int task_count);
-      ("note", `String note);
-    ]
-
-let goal_attainment_pct_help =
-  "Goal attainment percentage by goal_id. Use \
-   masc_goal_attainment_measured to distinguish real 0% from unmeasured."
-
-let goal_attainment_measured_help =
-  "Whether goal attainment percentage is currently measured by goal_id \
-   (1 = measured, 0 = unmeasured)."
 
 let observe_goal_attainment_metrics (goal : Goal_store.goal) attainment =
   let labels = [ ("goal_id", goal.id) ] in
@@ -92,106 +66,6 @@ let observe_goal_attainment_metrics (goal : Goal_store.goal) attainment =
   Prometheus.set_gauge Prometheus.metric_goal_attainment_measured ~labels
     measured
 
-let goal_attainment_to_json (goal : Goal_store.goal) (node : tree_node) =
-  let task_count = List.length node.tasks in
-  let task_done_count =
-    List.length
-      (List.filter
-         (fun ((task, _) : Masc_domain.task * string) -> task_is_done task)
-         node.tasks)
-  in
-  let task_completion_pct =
-    if task_count = 0 then None
-    else Some (float_of_int task_done_count /. float_of_int task_count *. 100.0)
-  in
-  let measured ~basis ~unit ~observed_value ~target_numeric ~target_parse_status =
-    let attainment_pct =
-      if target_numeric <= 0.0 then
-        None
-      else
-        Some (pct_of_float (observed_value /. target_numeric *. 100.0))
-    in
-    (* Post-#13131 review: state was derived from the rounded
-       [attainment_pct].  For small-but-nonzero progress (e.g.
-       1/1000 → 0.1%), rounding yields 0% and the state collapsed
-       to "not_started" even though [observed_value] > 0.  Use the
-       unrounded observed_value to disambiguate. *)
-    let state =
-      match attainment_pct with
-      | Some pct when pct >= 100 -> "attained"
-      | Some 0 when observed_value > 0.0 -> "in_progress"
-      | Some 0 -> "not_started"
-      | Some _ -> "in_progress"
-      | None -> "unmeasured"
-    in
-    build_attainment_json ~state ~basis ~task_done_count ~task_count
-      ~target_parse_status ~unit ~observed_value:(Some observed_value)
-      ~target_numeric:(Some target_numeric) ~attainment_pct
-      ~note:
-        (match unit with
-        | Percent -> "Derived from linked task completion against a percent target."
-        | Count -> "Derived from completed linked tasks against a count target."
-        | Unknown -> "Derived from linked goal evidence.")
-      goal
-  in
-  let unmeasured ?(unit = Unknown) ?target_numeric target_parse_status note =
-    build_attainment_json ~state:"unmeasured" ~basis:"unmeasured"
-      ~task_done_count ~task_count ~target_parse_status ~unit
-      ~observed_value:None ~target_numeric ~attainment_pct:None ~note goal
-  in
-  match goal.phase with
-  | Goal_phase.Completed ->
-      build_attainment_json ~state:"attained" ~basis:"goal_phase"
-        ~task_done_count ~task_count
-        ~target_parse_status:
-          (match goal.target_value with
-          | Some raw when parse_first_float raw <> None -> "parseable"
-          | Some _ -> "unparseable"
-          | None -> "absent")
-        ~unit:Percent ~observed_value:(Some 100.0) ~target_numeric:(Some 100.0)
-        ~attainment_pct:(Some 100)
-        ~note:"Goal lifecycle phase is completed." goal
-  | _ -> (
-      match goal.target_value with
-      | Some raw -> (
-          match parse_first_float raw with
-          | None ->
-              unmeasured "unparseable"
-                "Target value is not numeric enough for dashboard attainment."
-          | Some target_numeric when target_numeric <= 0.0 ->
-              unmeasured "invalid_target"
-                "Target value must be greater than zero."
-          | Some target_numeric -> (
-              let unit = parsed_target_unit goal.metric raw in
-              match unit with
-              | Percent -> (
-                  match task_completion_pct with
-                  | Some observed_value ->
-                      measured ~basis:"metric_target_percent" ~unit
-                        ~observed_value ~target_numeric
-                        ~target_parse_status:"parseable"
-                  | None ->
-                      unmeasured ~unit ~target_numeric "no_linked_tasks"
-                        "Percent target needs linked task evidence." )
-              | Count ->
-                  if metric_supports_count_target goal.metric then
-                    measured ~basis:"metric_target_count" ~unit
-                      ~observed_value:(float_of_int task_done_count)
-                      ~target_numeric ~target_parse_status:"parseable"
-                  else
-                    unmeasured ~unit ~target_numeric "unsupported_metric"
-                      "Numeric target is not mapped to a known count metric."
-              | Unknown ->
-                  unmeasured "unsupported_metric"
-                    "Target unit is unknown." ))
-      | None -> (
-          match task_completion_pct with
-          | Some observed_value ->
-              measured ~basis:"linked_tasks" ~unit:Percent ~observed_value
-                ~target_numeric:100.0 ~target_parse_status:"absent"
-          | None ->
-              unmeasured "absent"
-                "No target value or linked task evidence is available." ))
 
 let approval_matches_goal goal_id approval_json =
   let goal_ids =

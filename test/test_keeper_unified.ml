@@ -11368,6 +11368,40 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
          (Agent_sdk.Types.show_tool_choice other))
 ;;
 
+let test_generic_required_tool_gate_guidance_names_action_tools () =
+  let module Surface = Masc_mcp.Keeper_agent_tool_surface in
+  let guidance =
+    Surface.generic_required_tool_gate_guidance
+      ~turn_affordances:[ "board_post_or_comment" ]
+      ~allowed_tool_names:[ "keeper_tasks_list"; "keeper_board_comment"; "keeper_board_post" ]
+  in
+  check
+    bool
+    "guidance marks tool required"
+    true
+    (contains_substring guidance "[TOOL REQUIRED]");
+  check
+    bool
+    "guidance names active board comment tool"
+    true
+    (contains_substring guidance "keeper_board_comment");
+  check
+    bool
+    "guidance names active board post tool"
+    true
+    (contains_substring guidance "keeper_board_post");
+  check
+    bool
+    "guidance does not recommend passive read"
+    false
+    (contains_substring guidance "keeper_tasks_list");
+  check
+    bool
+    "guidance warns passive reads are insufficient"
+    true
+    (contains_substring guidance "Passive reads/status alone do not satisfy")
+;;
+
 let test_direct_keeper_msg_timeout_overrides_meta_per_provider_timeout () =
   let meta =
     { (make_meta "product-design-timeout") with per_provider_timeout_s = Some 300.0 }
@@ -12989,6 +13023,10 @@ let () =
             "task backlog required turn prefers claim tool choice"
             `Quick
             test_preferred_tool_choice_for_required_turn_claims_first
+        ; test_case
+            "generic required gate guidance names action tools"
+            `Quick
+            test_generic_required_tool_gate_guidance_names_action_tools
         ; test_case
             "direct keeper msg timeout overrides stale per-provider timeout"
             `Quick

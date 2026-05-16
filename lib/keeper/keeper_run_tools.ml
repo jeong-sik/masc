@@ -1577,6 +1577,13 @@ let prepare_agent_setup
                           before answering in natural language. Do not substitute a \
                           shell command or status read for a listed required tool."
                          (String.concat ", " computed_surface.required_tool_names))
+                  else if computed_surface.tool_gate_requested
+                  then
+                    append_ctx
+                      ctx
+                      (generic_required_tool_gate_guidance
+                         ~turn_affordances
+                         ~allowed_tool_names:computed_surface.all_allowed)
                   else if is_retry
                   then
                     append_ctx

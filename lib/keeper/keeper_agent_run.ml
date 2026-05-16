@@ -74,24 +74,28 @@ let per_provider_timeout_for_turn
 
 let sse_event_progress_kind (event : Agent_sdk.Types.sse_event) =
   match event with
-  | Agent_sdk.Types.MessageStart _ -> "sse_message_start"
+  | Agent_sdk.Types.MessageStart _ -> Some "sse_message_start"
   | Agent_sdk.Types.ContentBlockStart { tool_name = Some _; _ } ->
-    "sse_tool_block_start"
-  | Agent_sdk.Types.ContentBlockStart _ -> "sse_content_block_start"
+    Some "sse_tool_block_start"
+  | Agent_sdk.Types.ContentBlockStart _ -> Some "sse_content_block_start"
   | Agent_sdk.Types.ContentBlockDelta { delta = Agent_sdk.Types.TextDelta _; _ } ->
-    "sse_text_delta"
+    Some "sse_text_delta"
   | Agent_sdk.Types.ContentBlockDelta { delta = Agent_sdk.Types.ThinkingDelta _; _ } ->
-    "sse_thinking_delta"
+    Some "sse_thinking_delta"
   | Agent_sdk.Types.ContentBlockDelta { delta = Agent_sdk.Types.InputJsonDelta _; _ } ->
-    "sse_tool_arg_delta"
-  | Agent_sdk.Types.ContentBlockStop _ -> "sse_content_block_stop"
-  | Agent_sdk.Types.MessageDelta _ -> "sse_message_delta"
-  | Agent_sdk.Types.MessageStop -> "sse_message_stop"
-  | Agent_sdk.Types.Ping -> "sse_ping"
-  | Agent_sdk.Types.SSEError _ -> "sse_error"
-  | Agent_sdk.Types.SSEParseFailed _ -> "sse_parse_failed"
-  | Agent_sdk.Types.SSEUnknownEventType _ -> "sse_unknown_event_type"
+    Some "sse_tool_arg_delta"
+  | Agent_sdk.Types.ContentBlockStop _ -> Some "sse_content_block_stop"
+  | Agent_sdk.Types.MessageDelta _ -> Some "sse_message_delta"
+  | Agent_sdk.Types.MessageStop -> Some "sse_message_stop"
+  | Agent_sdk.Types.Ping -> None
+  | Agent_sdk.Types.SSEError _ -> Some "sse_error"
+  | Agent_sdk.Types.SSEParseFailed _ -> Some "sse_parse_failed"
+  | Agent_sdk.Types.SSEUnknownEventType _ -> Some "sse_unknown_event_type"
 ;;
+
+module For_testing = struct
+  let sse_event_progress_kind = sse_event_progress_kind
+end
 
 let attach_registry_progress_on_event downstream =
   match downstream, Cascade_attempt_liveness_config.current_mode () with
@@ -535,7 +539,7 @@ let run_turn
       then
         Some
           (fun event ->
-             record_turn_progress (sse_event_progress_kind event);
+             Option.iter record_turn_progress (sse_event_progress_kind event);
              Option.iter (fun cb -> cb event) on_event)
       else None
     in

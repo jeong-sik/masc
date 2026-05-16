@@ -223,6 +223,13 @@ val per_provider_timeout_for_turn
   -> unit
   -> float option
 
+module For_testing : sig
+  val sse_event_progress_kind : Agent_sdk.Types.sse_event -> string option
+  (** Classifies SSE events that should refresh the in-turn progress clock.
+      Keepalive [Ping] events return [None] so watchdog progress timeouts are
+      not masked by transport pings. *)
+end
+
 (** {1 Turn execution} *)
 
 (** Run a single keeper turn.

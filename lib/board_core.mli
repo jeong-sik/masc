@@ -261,10 +261,23 @@ val search_posts : store -> predicate:(post -> bool) -> limit:int -> post list
 (** Validates [post_id] / [author] / optional [parent_id]
     via {!Post_id.of_string} / {!Agent_id.of_string} /
     {!Comment_id.of_string} before taking the lock.
+    Exact duplicate [(post_id, parent_id, author, content)] writes
+    return the existing comment without appending JSONL, incrementing
+    [reply_count], or consuming thread capacity.
     Capacity guarded against {!Limits.max_comments_per_post}
     and the global [Limits.max_comments] ceiling.  Awards
     [Agent_economy.earn] credits outside the lock (same
     rationale as {!create_post}). *)
+val add_comment_with_status
+  :  store
+  -> post_id:string
+  -> author:string
+  -> content:string
+  -> ?parent_id:string
+  -> ?ttl_hours:int
+  -> unit
+  -> (comment * [ `Fresh | `Dedup ], board_error) Result.t
+
 val add_comment
   :  store
   -> post_id:string

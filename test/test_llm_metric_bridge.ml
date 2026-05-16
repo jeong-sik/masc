@@ -122,7 +122,7 @@ let test_sink_records_oas_callbacks () =
     ~state:Llm_provider.Metrics.Circuit_open;
   sink.on_token_usage
     ~provider ~model_id ~input_tokens:17 ~output_tokens:23;
-  sink.on_tool_calls ~provider ~model_id ~count:2;
+  sink.on_tool_calls ~provider ~model_id ~count:3;
   sink.on_streaming_first_chunk ~provider ~model_id ~ttfrc_ms:25.0;
   sink.on_streaming_chunk ~provider ~model_id ~chunk_index:1 ~inter_chunk_ms:7.5;
   check_metric_delta "cache hit +1"
@@ -149,9 +149,9 @@ let test_sink_records_oas_callbacks () =
   check_metric_delta "output tokens +23"
     Prom.metric_llm_provider_output_tokens
     ~labels:provider_model_labels ~before:before_output ~delta:23.0;
-  check_metric_delta "tool calls +2"
+  check_metric_delta "tool calls +3"
     Prom.metric_llm_provider_tool_calls
-    ~labels:provider_model_labels ~before:before_tool_calls ~delta:2.0;
+    ~labels:provider_model_labels ~before:before_tool_calls ~delta:3.0;
   check_metric_delta "circuit state open"
     Prom.metric_llm_provider_circuit_state
     ~labels:circuit_labels ~before:before_circuit_state ~delta:1.0;

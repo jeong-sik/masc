@@ -335,6 +335,29 @@ let cascade_model_attribution_of_fields (fields : (string * Yojson.Safe.t) list)
   | None -> None
 ;;
 
+let assoc_fields_opt key fields =
+  match List.assoc_opt key fields with
+  | Some (`Assoc nested) -> Some nested
+  | _ -> None
+;;
+
+let first_json_string_field_opt key field_sets =
+  List.find_map (json_string_field_opt key) field_sets
+;;
+
+let first_cascade_model_attribution field_sets =
+  List.find_map cascade_model_attribution_of_fields field_sets
+;;
+
+let first_candidate_model field_sets =
+  List.find_map
+    (fun fields ->
+       match List.assoc_opt "candidate_models" fields with
+       | Some (`List (`String m :: _)) -> Some m
+       | _ -> None)
+    field_sets
+;;
+
 (* ── Parse-level failure variants ─────────────────────────────────────────────
    A typed reason every dropped record carries so silent-default substitutions
    (1970 timestamps, "unknown" model attributions, "success" outcome on missing
@@ -404,10 +427,17 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
       in
       (match List.assoc_opt "telemetry" fields with
        | Some (`Assoc tfields) ->
+         let provider_context_fields =
+           match assoc_fields_opt "provider_context" fields with
+           | Some provider_context -> [ provider_context ]
+           | None -> []
+         in
+         let model_attribution_field_sets = tfields :: provider_context_fields in
+         let outcome_opt = first_json_string_field_opt "outcome" [ tfields; fields ] in
          (* Check if this is an error turn (telemetry.outcome = "error") *)
          let is_error =
-           match List.assoc_opt "outcome" tfields with
-           | Some (`String "error") -> true
+           match outcome_opt with
+           | Some "error" -> true
            | _ -> false
          in
          if is_error
@@ -416,12 +446,12 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
               [__error__] sentinel — refuse the row so caller sees the
               attribution gap typed. *)
            let model_result : (string, parse_error) result =
-             match List.assoc_opt "candidate_models" tfields with
-             | Some (`List (`String m :: _)) -> Ok m
-             | _ ->
-               (match cascade_model_attribution_of_fields tfields with
+             match first_candidate_model model_attribution_field_sets with
+             | Some model -> Ok model
+             | None ->
+               (match first_cascade_model_attribution model_attribution_field_sets with
                 | Some model -> Ok model
-                | _ -> Error Missing_error_model_attribution)
+                | None -> Error Missing_error_model_attribution)
            in
            match model_result with
            | Error _ as e -> e
@@ -465,15 +495,22 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
               null-model historical rows from being repeatedly dropped without
               reintroducing the old "unknown" bucket. *)
            let model_result : (string, parse_error) result =
-             match json_string_field_opt "selected_model" tfields with
+             match first_json_string_field_opt "selected_model" model_attribution_field_sets with
              | Some s -> Ok s
              | _ ->
-               (match json_string_field_opt "model_used" tfields with
+               (match first_json_string_field_opt "model_used" model_attribution_field_sets with
                 | Some s -> Ok s
                 | _ ->
-                  (match cascade_model_attribution_of_fields tfields with
+                  (match
+                     first_json_string_field_opt
+                       "resolved_model_id"
+                       model_attribution_field_sets
+                   with
+                   | Some s -> Ok s
+                   | None ->
+                  (match first_cascade_model_attribution model_attribution_field_sets with
                    | Some model -> Ok model
-                   | None -> Error Missing_success_model))
+                   | None -> Error Missing_success_model)))
            in
            match model_result with
            | Error _ as e -> e
@@ -578,7 +615,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
            (* Outcome must be present. Previous code defaulted to "success",
               which silently classified parse failures as successful turns —
               CRITICAL for cost/error-rate accounting. *)
-           match json_string_field_opt "outcome" tfields with
+           match outcome_opt with
            | None -> Error Missing_outcome
            | Some outcome ->
            Ok

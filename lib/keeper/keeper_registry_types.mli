@@ -40,9 +40,23 @@ type stale_kill_class =
     }
       (** A turn started ([current_turn_observation = Some]) and ran past
           [timeout_threshold] seconds. *)
+  | Mid_turn_no_progress of {
+      active_seconds : float;
+      since_progress_seconds : float;
+      progress_timeout_threshold : float;
+      last_progress_kind : string option;
+    }
+      (** A turn is still within the outer turn cap, but no streaming/tool
+          progress has been observed for [progress_timeout_threshold]
+          seconds.  This separates provider no-first-token /
+          inter-chunk-idle stalls from ordinary long-running turns. *)
   | Noop_failure_loop of { noop_count : int }
       (** Turns kept firing but produced no tool calls; the keepalive's
           [consecutive_noop_count] reached the watchdog threshold. *)
+
+val progress_kind_label : string option -> string
+(** Display label for optional progress-kind telemetry.  Missing means no
+    streaming/tool progress label was stamped yet, rendered as ["-"]. *)
 
 val stale_kill_class_to_string : stale_kill_class -> string
 (** Operator-facing label.  Used in [failure_reason_to_string] for the
@@ -595,6 +609,13 @@ and turn_observation = {
           [meta.runtime.usage.total_turns] + 1). *)
   started_at : float;
       (** Unix timestamp when this turn record was installed. *)
+  last_progress_at : float;
+      (** Unix timestamp of the most recent in-turn progress signal.
+          Initialized to [started_at] and updated by registry transitions,
+          SDK streaming events, and completed tool calls. *)
+  last_progress_kind : string option;
+      (** Low-cardinality label for the progress signal that most recently
+          refreshed [last_progress_at]. *)
   turn_phase : packed_turn_phase;
   decision_stage : packed_decision_stage;
   cascade_state : packed_cascade_state;

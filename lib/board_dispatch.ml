@@ -462,8 +462,11 @@ let add_comment ~post_id ~author ~content ?parent_id
     ?(ttl_hours = Board.Limits.default_ttl_hours) () =
   match backend () with
   | Jsonl store ->
-      (match Board.add_comment store ~post_id ~author ~content ?parent_id ~ttl_hours () with
-      | Ok comment as ok ->
+      (match
+         Board.add_comment_with_status store ~post_id ~author ~content ?parent_id
+           ~ttl_hours ()
+       with
+      | Ok (comment, `Fresh) ->
           let cid = Board.Comment_id.to_string comment.id in
           let auth = Board.Agent_id.to_string comment.author in
           (match Board.get_post store ~post_id with
@@ -482,7 +485,8 @@ let add_comment ~post_id ~author ~content ?parent_id
                 post_id (Board_types.show_board_error e));
           emit_board_sse_event
             (Comment_added { post_id; comment_id = cid; author = auth });
-          ok
+          Ok comment
+      | Ok (comment, `Dedup) -> Ok comment
       | Error _ as err -> err)
 
 let current_vote_for_post ~voter ~post_id =
@@ -692,4 +696,3 @@ let delete_sub_board ~sub_board_id =
 let update_sub_board ~sub_board_id ?name ?description ?members ?access () =
   match backend () with
   | Jsonl store -> Board.update_sub_board store ~sub_board_id ?name ?description ?members ?access ()
-

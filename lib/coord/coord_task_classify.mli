@@ -113,6 +113,7 @@ val normalize_execution_links
 val normalize_task_contract : Masc_domain.task_contract -> Masc_domain.task_contract
 val empty_task_contract : Masc_domain.task_contract
 val task_required_tools : Masc_domain.task -> string list
+val canonical_required_tool_name : string -> string
 val missing_required_tools : allowed:string list -> string list -> string list
 
 val required_tool_claim_guard

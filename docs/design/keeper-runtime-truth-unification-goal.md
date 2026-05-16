@@ -190,7 +190,7 @@ Latest verification:
 - `opam exec -- ocamlformat --check lib/config_doctor.ml lib/config_doctor.mli test/test_config_doctor.ml`
 - `MASC_CONFIG_DIR=/Users/dancer/me/.masc/config MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false ./_build/default/bin/main_eio.exe doctor config --base-path /Users/dancer/me --json`
   (expected exit 1: live `keeper_turn` and `tool_required` both target
-  `tier-group.coding_plan`, whose single candidate lacks the required tool
+  `tier-group.glm-coding-with-spark`, whose single candidate lacks the required tool
   lane; doctor now reports `no_tool_capable_provider` risk before runtime
   dispatch)
 - `scripts/keeper-runtime-truth-gate.sh --self-test` (success fixture plus
@@ -217,7 +217,7 @@ Latest-main live evidence:
   classified `PASS`; phase log shows active keepalive and room presence.
 - The active config root used in the live run was
   `/Users/dancer/me/.masc/config`, whose active catalog default was
-  `coding_plan`. The harness no longer hardcodes `primary`.
+  `glm-coding-with-spark`. The harness no longer hardcodes `primary`.
 - Latest post-fix live-like liveness rerun:
   `/private/tmp/keeper-runtime-truth-live-20260512-codex5`
   classified `FAIL`; bootstrap passed, liveness still timed out after the
@@ -248,7 +248,7 @@ Latest-main live evidence:
   `terminal_reason_code = no_tool_capable_provider`.
 - Current live `masc-mcp doctor config --base-path /Users/dancer/me --json`
   also reports `status = error` for the same route capability gap:
-  both `keeper_turn` and `tool_required` target `tier-group.coding_plan`, and
+  both `keeper_turn` and `tool_required` target `tier-group.glm-coding-with-spark`, and
   its single candidate is rejected for forced required-tool use with
   `runtime_mcp_caps_missing`.
 
@@ -555,7 +555,7 @@ Fragile parts:
   route has no candidate that materializes the required keeper tool support.
   `masc-mcp doctor config` now catches this same route-capability
   gap without starting a keeper turn.
-- Live config drift is real: the current config root exposes `coding_plan` as
+- Live config drift is real: the current config root exposes `glm-coding-with-spark` as
   the only active catalog profile, while older scripts assumed `primary`.
   The harness now avoids that hardcoded default, but operator docs/config still
   need cleanup.
@@ -573,7 +573,7 @@ It is acceptable to ship behind an operator-facing experimental gate if the
 goal is observability hardening. It is not yet acceptable as a final product
 runtime guarantee because the strongest live-like evidence on latest main now
 fails at route capability: the keeper message queues, but the active
-`tier-group.coding_plan` route has no tool-capable provider for the keeper's
+`tier-group.glm-coding-with-spark` route has no tool-capable provider for the keeper's
 materialized internal tool surface.
 
 Highest-risk gaps:
@@ -583,7 +583,7 @@ Highest-risk gaps:
    `no_tool_capable_provider`. The manifest now records
    `pre_dispatch_blocked`, and the receipt/turn terminal reason stays
    structured. `masc-mcp doctor config` now fails with the same diagnosis
-   before dispatch. Still open: configure `tier-group.coding_plan` with a
+   before dispatch. Still open: configure `tier-group.glm-coding-with-spark` with a
    concrete tool-capable provider for keeper-internal tools, or route these
    keeper turns to a provider lane that can materialize runtime MCP/inline
    tools.
@@ -679,7 +679,7 @@ Prompt-to-artifact checklist:
    observability/reliability improvement. It is not yet a final product
   runtime guarantee because the latest-main live-like run failed with a
   structured route-capability error:
-   `no_tool_capable_provider` for `tier-group.coding_plan` with no candidate
+   `no_tool_capable_provider` for `tier-group.glm-coding-with-spark` with no candidate
    that materializes the required keeper tool support.
 
 Completion status: not complete as a full product-readiness goal. The immediate

@@ -6800,20 +6800,20 @@ let test_fail_open_rotation_cascades_from_catalog_excludes_non_keeper_routes () 
         [
           KC.default_cascade_name ();
           "ollama_cloud_primary";
-          "coding_plan";
+          "glm-coding-with-spark";
         ]
       ~keeper_assignable:
         [
           KC.default_cascade_name ();
           "ollama_cloud_primary";
-          "coding_plan";
+          "glm-coding-with-spark";
         ]
       ()
   in
   check
     (option (list string))
     "catalog-derived rotation excludes non-keeper route targets"
-    (Some [ KC.default_cascade_name (); "coding_plan" ])
+    (Some [ KC.default_cascade_name (); "glm-coding-with-spark" ])
     rotation
 ;;
 
@@ -8469,7 +8469,7 @@ let test_degraded_retry_slot_phase_allows_max_execution_time_cascade_exhausted (
       ~base_cascade:"strict_tool_candidates"
       ~effective_cascade:"strict_tool_candidates"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
-      ~attempted_cascades:[ "strict_tool_candidates"; "tier-group.coding_plan" ]
+      ~attempted_cascades:[ "strict_tool_candidates"; "tier-group.glm-coding-with-spark" ]
       ~estimated_input_tokens:2_000
       ~max_turns:4
       ~time_spent_in_turn_s:(UT.degraded_retry_slot_phase_budget_sec +. 1.0)

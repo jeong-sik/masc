@@ -163,12 +163,12 @@ let test_required_tool_rotation_uses_explicit_fallback_hint () =
   in
   match
     KEC.degraded_rotation_after_recoverable_error
-      ~rotation_cascades:[ "coding_plan"; "strict_tool_candidates" ]
+      ~rotation_cascades:[ "glm-coding-with-spark"; "strict_tool_candidates" ]
       ~fallback_hint:"ollama_cloud_stable"
-      ~base_cascade:"coding_plan"
+      ~base_cascade:"glm-coding-with-spark"
       ~effective_cascade:"strict_tool_candidates"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
-      ~attempted_cascades:[ "strict_tool_candidates"; "coding_plan" ]
+      ~attempted_cascades:[ "strict_tool_candidates"; "glm-coding-with-spark" ]
       err
   with
   | Some retry ->

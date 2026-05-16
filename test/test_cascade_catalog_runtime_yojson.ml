@@ -173,12 +173,12 @@ max-concurrent = 1
 members = ["ollama.local-default"]
 strategy = "failover"
 
-[tier-group.coding_plan]
+[tier-group.glm-coding-with-spark]
 tiers = ["local"]
 strategy = "failover"
 
 [routes.keeper_turn]
-target = "tier-group.coding_plan"
+target = "tier-group.glm-coding-with-spark"
 |}
 
 let test_local_probe_without_eio_is_skipped_not_error () =
@@ -192,7 +192,7 @@ let test_local_probe_without_eio_is_skipped_not_error () =
     let profile =
       List.find
         (fun (profile : C.profile_build) ->
-          String.equal profile.name "tier-group.coding_plan")
+          String.equal profile.name "tier-group.glm-coding-with-spark")
         snapshot.profiles
     in
     (match profile.probes with
@@ -372,7 +372,7 @@ let test_terminal_attempt_capture_materialises_attempt () =
     ~latency_ms:(Some 237) ~error:None;
   let obs =
     LR.cascade_observation_with_metrics
-      ~cascade_name:(KP.runtime_name_of_string "tier-group.coding_plan")
+      ~cascade_name:(KP.runtime_name_of_string "tier-group.glm-coding-with-spark")
       ~configured_labels:[ "runtime.candidate" ]
       ~candidate_count:1
       ~selected_model_raw:(Some "runtime.candidate")

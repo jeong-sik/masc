@@ -613,7 +613,7 @@ let test_success_without_model_uses_cascade_attribution () =
     let path = make_keeper_dir base "null_model" in
     let ts = now_unix () in
     write_decisions path [
-      success_entry_without_model ~cascade_name:"tier-group.coding_plan"
+      success_entry_without_model ~cascade_name:"tier-group.glm-coding-with-spark"
         ~ts:(ts -. 5.0) ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
@@ -621,7 +621,7 @@ let test_success_without_model_uses_cascade_attribution () =
     check int "one attributed bucket" 1 (List.length agg.models);
     let s = List.hd agg.models in
     check string "cascade attribution"
-      "tier-group.coding_plan (cascade)"
+      "tier-group.glm-coding-with-spark (cascade)"
       s.model_id;
     check int "success count" 1 s.success_count;
     check int "tool calls preserved" 1 s.total_tool_calls;

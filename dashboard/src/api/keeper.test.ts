@@ -133,7 +133,7 @@ describe('keeper runtime trace', () => {
 	          {
 	            ts: '2026-05-12T00:00:00Z',
 	            event: 'provider_attempt_finished',
-	            cascade_name: 'coding_plan',
+	            cascade_name: 'glm-coding-with-spark',
 	            status: 'timeout',
 	            error: 'Timeout after 120.0s',
 	            exception_kind: 'outer_oas_timeout',

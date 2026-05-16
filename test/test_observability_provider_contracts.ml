@@ -59,14 +59,14 @@ let test_dashboard_provider_snapshots_include_cli_and_api () =
     let claude_api = provider_snapshot_by_name "claude" in
     let gemini_cli = provider_snapshot_by_name "gemini_cli" in
     let glm_api = provider_snapshot_by_name "glm" in
-    let glm_coding_plan = provider_snapshot_by_name "glm-coding" in
+    let glm_coding = provider_snapshot_by_name "glm-coding" in
     let legacy_claude_api = provider_snapshot_by_name "claude-api" in
     let legacy_glm_api = provider_snapshot_by_name "glm-api" in
     check bool "cli snapshot present" true (Option.is_some claude_cli);
     check bool "api snapshot present" true (Option.is_some claude_api);
     check bool "gemini cli snapshot present" true (Option.is_some gemini_cli);
     check bool "glm api snapshot present" true (Option.is_some glm_api);
-    check bool "glm coding snapshot present" true (Option.is_some glm_coding_plan);
+    check bool "glm coding snapshot present" true (Option.is_some glm_coding);
     check bool "legacy claude-api snapshot removed" false
       (Option.is_some legacy_claude_api);
     check bool "legacy glm-api snapshot removed" false
@@ -78,7 +78,7 @@ let test_dashboard_provider_snapshots_include_cli_and_api () =
     check string "glm api runtime kind" "direct_api"
       (Option.get glm_api).runtime_kind;
     check string "glm coding runtime kind" "direct_api"
-      (Option.get glm_coding_plan).runtime_kind;
+      (Option.get glm_coding).runtime_kind;
     check string "cli source" "oas/provider-runtime-binding"
       (Option.get claude_cli).source;
     check string "api source" "oas/provider-runtime-binding"

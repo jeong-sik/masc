@@ -141,3 +141,39 @@ val goal_attainment_measured_help : string
 
 val goal_attainment_to_json :
   Goal_store.goal -> tree_node -> Yojson.Safe.t
+
+(** {1 Goal phase health + reason + tree badges (pure)} *)
+
+val goal_phase_to_health : Goal_phase.t -> string option
+
+val goal_health_reason :
+  goal_phase:Goal_phase.t ->
+  blocked_by_receipt:bool ->
+  child_blocked:bool ->
+  pending_approvals:int ->
+  sandbox_risk:bool ->
+  cascade_risk:bool ->
+  fsm_risk:bool ->
+  stalled:bool ->
+  stagnation_seconds:int ->
+  child_at_risk:bool ->
+  linkage_warning_reason:string option ->
+  activity_observation:string ->
+  stagnation_status:string ->
+  string
+
+val tree_health :
+  goal_phase:Goal_phase.t ->
+  blocked_by_receipt:bool ->
+  child_blocked:bool ->
+  at_risk:bool ->
+  string
+
+val tree_badges :
+  pending_approvals:int ->
+  sandbox_risk:bool ->
+  cascade_risk:bool ->
+  fsm_risk:bool ->
+  stalled:bool ->
+  activity_unobserved:bool ->
+  string list

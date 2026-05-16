@@ -193,12 +193,12 @@ let percentile_sorted_float (sorted : float array) (p : float) : float =
 
 let keeper_cost_metric_row_is_event (json : Yojson.Safe.t) : bool =
   let field_equals key expected =
-    Safe_ops.json_string_opt key json
-    |> Option.map (fun value ->
-         String.equal
-           (String.lowercase_ascii (String.trim value))
-           expected)
-    |> Option.value ~default:false
+    match Safe_ops.json_string_opt key json with
+    | Some value ->
+      String.equal
+        (String.lowercase_ascii (String.trim value))
+        expected
+    | None -> false
   in
   not
     (field_equals "channel" "heartbeat"

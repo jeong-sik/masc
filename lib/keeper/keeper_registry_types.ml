@@ -1029,3 +1029,88 @@ let try_resolve_done entry value =
      | Invalid_argument _ -> false)
 ;;
 
+let registry_key ~base_path name =
+  if String.contains name '\x1f'
+  then invalid_arg (Printf.sprintf "keeper name contains unit separator: %s" name);
+  base_path ^ "\x1f" ^ name
+;;
+
+let turn_phase_of_cascade_state (s : packed_cascade_state) : packed_turn_phase =
+  match s with
+  | Packed Cascade_idle -> Packed Turn_prompting
+  | Packed Cascade_selecting -> Packed Turn_routing
+  | Packed Cascade_trying -> Packed Turn_executing
+  | Packed Cascade_done -> Packed Turn_finalizing
+  | Packed Cascade_exhausted -> Packed Turn_exhausted
+;;
+
+let completed_turn_outcome_of_observation (obs : turn_observation)
+  : Keeper_transition_audit.completed_turn_outcome
+  =
+  (* P1 silent-failure fix: the previous wildcard `| _ -> Turn_failed`
+     meant that adding a new variant to either ADT (decision_stage or
+     cascade_state) would silently fall through to Turn_failed without
+     a compile error.  Spelling out every variant lets the OCaml
+     exhaustiveness checker catch missing cases at build time. *)
+  match obs.decision_stage with
+  | Packed Decision_gate_rejected -> Keeper_transition_audit.Turn_gate_rejected
+  | Packed (Decision_undecided | Decision_guard_ok | Decision_tool_policy_selected) ->
+    (match obs.cascade_state with
+     | Packed Cascade_done -> Keeper_transition_audit.Turn_substantive
+     | Packed Cascade_idle
+     | Packed Cascade_selecting
+     | Packed Cascade_trying
+     | Packed Cascade_exhausted -> Keeper_transition_audit.Turn_failed)
+;;
+
+(* RFC-0002 Event Dispatch — lifecycle_event_origin type + pure helpers. *)
+type lifecycle_event_origin =
+  | Generic_dispatch
+  | Post_turn_lifecycle
+  | Operator_compact
+
+let lifecycle_event_origin_to_string = function
+  | Generic_dispatch -> "generic_dispatch"
+  | Post_turn_lifecycle -> "post_turn_lifecycle"
+  | Operator_compact -> "operator_compact"
+;;
+
+let is_paired_lifecycle_event = function
+  | Keeper_state_machine.Compaction_started
+  | Keeper_state_machine.Compaction_completed _
+  | Keeper_state_machine.Compaction_failed _
+  | Keeper_state_machine.Handoff_started
+  | Keeper_state_machine.Handoff_completed _
+  | Keeper_state_machine.Handoff_failed _ -> true
+  | _ -> false
+;;
+
+let origin_allows_paired_lifecycle_event origin event =
+  match origin, event with
+  | Post_turn_lifecycle, event when is_paired_lifecycle_event event -> true
+  | ( Operator_compact
+    , ( Keeper_state_machine.Compaction_started
+      | Keeper_state_machine.Compaction_completed _
+      | Keeper_state_machine.Compaction_failed _ ) ) -> true
+  | Generic_dispatch, event when is_paired_lifecycle_event event -> false
+  | Operator_compact, event when is_paired_lifecycle_event event -> false
+  | _, _ -> true
+;;
+
+let pending_measurement_after_event now entry event =
+  match event with
+  | Keeper_state_machine.Context_measured { auto_rules; _ } ->
+    Some { tm_captured_at = now; tm_auto_rules = auto_rules }
+  | _ -> entry.pending_turn_measurement
+;;
+
+let compaction_stage_of_event entry event =
+  match event with
+  | Keeper_state_machine.Compaction_started
+  | Keeper_state_machine.Auto_compact_triggered
+  | Keeper_state_machine.Operator_compact_requested -> Packed Compaction_compacting
+  | Keeper_state_machine.Compaction_completed _ -> Packed Compaction_done
+  | Keeper_state_machine.Compaction_failed _ -> Packed Compaction_accumulating
+  | _ -> entry.compaction_stage
+;;
+

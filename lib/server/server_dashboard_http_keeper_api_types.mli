@@ -75,3 +75,64 @@ val is_valid_keeper_name : String.t -> bool
 val extract_keeper_name_for_post : string -> string -> string
 (** [extract_keeper_name_for_post path suffix]: variant used by the
     POST dispatcher. *)
+
+(** {1 Internal JSON / list helpers}
+
+    Pure Yojson member extractors + a small list utility, used across
+    keeper_dashboard_http_keeper_api.ml's many response-builder helpers.
+    Exposed here so the godfile keeps referencing them through include. *)
+
+val json_int_member_opt : string -> Yojson.Safe.t -> int option
+val json_string_member_opt : string -> Yojson.Safe.t -> string option
+val json_bool_member_opt : string -> Yojson.Safe.t -> bool option
+val json_string_list_member : string -> Yojson.Safe.t -> string list
+val json_string_opt : string option -> Yojson.Safe.t
+val take_last : int -> 'a list -> 'a list
+val json_assoc_member_opt : string -> Yojson.Safe.t -> Yojson.Safe.t option
+val json_string_value_opt : Yojson.Safe.t -> string option
+
+val manifest_row_matches :
+  ?turn_id:int ->
+  string ->
+  string ->
+    Keeper_runtime_manifest.t ->
+  bool
+(** Pure: true when the runtime-manifest row matches the given keeper_name +
+    trace_id (and optionally turn_id). *)
+
+val unique_present_paths : string option list -> string list
+(** Pure: dedupe + trim filtered string list. *)
+
+val provider_attempt_row_json :
+  Keeper_runtime_manifest.t -> Yojson.Safe.t
+(** Pure: provider-attempt manifest row → JSON record. *)
+
+val string_contains_substring : string -> string -> bool
+(** Pure: naive substring presence test. *)
+
+val runtime_trace_keeps_provider_attempt_provenance_key : string -> bool
+(** Pure: allowlist for provider/model-related decision keys in
+    runtime-trace responses. *)
+
+val runtime_trace_redacts_provider_model_key : string -> bool
+(** Pure: redact-by-substring policy for the runtime-trace public surface. *)
+
+val runtime_trace_public_json : Yojson.Safe.t -> Yojson.Safe.t
+(** Pure: recursively redact provider/model identity fields from runtime
+    trace JSON before returning to external dashboards. *)
+
+(** {1 Tool-call JSON inspectors}
+
+    Pure helpers for extracting fields out of trajectory tool-call JSON
+    records. Used by the runtime-lens response builders. *)
+
+val tool_call_output_text_opt : Yojson.Safe.t -> string option
+val parse_tool_output_json_opt : Yojson.Safe.t -> Yojson.Safe.t option
+val tool_call_runtime_contract : Yojson.Safe.t -> Yojson.Safe.t
+
+val tool_call_matches_trace :
+  ?turn_id:int ->
+  keeper_name:string ->
+  trace_id:string ->
+  Yojson.Safe.t ->
+  bool

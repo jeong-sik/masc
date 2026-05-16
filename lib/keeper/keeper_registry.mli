@@ -149,6 +149,15 @@ val set_turn_cascade_state :
     when no turn is active. *)
 val mark_turn_cascade_exhausted : base_path:string -> string -> unit
 
+(** Mark cascade success on the live turn.
+
+    When provider execution returns before the tool-disclosure hook advances the
+    registry projection, the live cascade axis can still be [Cascade_idle]. This
+    helper materializes the spec-valid pre-terminal path ([idle -> selecting ->
+    trying -> done]) instead of allowing callers to jump directly to
+    [Cascade_done]. No-op when no turn is active. *)
+val mark_turn_cascade_done : base_path:string -> string -> unit
+
 (** Mark that the live turn has entered a provider attempt.
 
     This materializes the registry-side projection that corresponds to
@@ -339,17 +348,6 @@ val restore_tool_usage : base_path:string -> string -> unit
 
 (** {1 RFC-0002 Event Dispatch} *)
 
-(** Dispatch origin for paired post-turn lifecycle events.
-
-    [Compaction_started]/[Compaction_completed]/[Compaction_failed] and
-    [Handoff_started]/[Handoff_completed]/[Handoff_failed] are same-turn
-    lifecycle pairs. The registry rejects them from [Generic_dispatch] so
-    keepalive/guard/manual callers cannot emit half of a pair outside the
-    owner path. *)
-type lifecycle_event_origin =
-  | Generic_dispatch
-  | Post_turn_lifecycle
-  | Operator_compact
 
 (** Dispatch a typed event through the state machine.
     Updates conditions, derives new phase, syncs legacy state.

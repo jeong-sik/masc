@@ -481,8 +481,27 @@ let tool_use_text_of_block
   let input_json = Yojson.Safe.to_string input |> Inference_utils.sanitize_text_utf8 in
   Printf.sprintf "[tool use %s %s input=%s]" tool_name tool_use_id input_json
 
-let repair_dangling_tool_use_messages
-    (messages : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =
+type tool_pair_repair_stats =
+  { downgraded_tool_uses : int
+  ; downgraded_tool_results : int
+  }
+
+let empty_tool_pair_repair_stats =
+  { downgraded_tool_uses = 0; downgraded_tool_results = 0 }
+
+let add_tool_pair_repair_stats left right =
+  { downgraded_tool_uses =
+      left.downgraded_tool_uses + right.downgraded_tool_uses
+  ; downgraded_tool_results =
+      left.downgraded_tool_results + right.downgraded_tool_results
+  }
+
+let tool_pair_repair_stats_changed stats =
+  stats.downgraded_tool_uses > 0 || stats.downgraded_tool_results > 0
+
+let repair_dangling_tool_use_messages_with_stats
+    (messages : Agent_sdk.Types.message list)
+    : Agent_sdk.Types.message list * tool_pair_repair_stats =
   let repair_with_next
       (current : Agent_sdk.Types.message)
       (next_opt : Agent_sdk.Types.message option) =
@@ -506,38 +525,49 @@ let repair_dangling_tool_use_messages
           | Agent_sdk.Types.Audio _ -> false)
         current.content
     in
-    if not has_dangling then current
+    if not has_dangling then (current, empty_tool_pair_repair_stats)
     else
+      let downgraded_tool_uses = ref 0 in
       let content =
         List.map
           (function
             | Agent_sdk.Types.ToolUse { id; name; input }
               when not (List.mem id next_tool_result_ids) ->
+                incr downgraded_tool_uses;
                 Agent_sdk.Types.Text
                   (tool_use_text_of_block
                      ~tool_use_id:id ~tool_name:name ~input)
             | other -> other)
           current.content
       in
-      { current with content }
+      ( { current with content }
+      , { empty_tool_pair_repair_stats with
+          downgraded_tool_uses = !downgraded_tool_uses
+        } )
   in
-  let rec loop acc = function
-    | [] -> List.rev acc
+  let rec loop acc_stats acc = function
+    | [] -> List.rev acc, acc_stats
     | [ current ] ->
-        List.rev (repair_with_next current None :: acc)
+        let repaired, repair_stats = repair_with_next current None in
+        List.rev (repaired :: acc), add_tool_pair_repair_stats acc_stats repair_stats
     | current :: ((next :: _) as rest) ->
-        let repaired = repair_with_next current (Some next) in
-        loop (repaired :: acc) rest
+        let repaired, repair_stats = repair_with_next current (Some next) in
+        loop (add_tool_pair_repair_stats acc_stats repair_stats) (repaired :: acc) rest
   in
-  loop [] messages
+  loop empty_tool_pair_repair_stats [] messages
 
-let repair_orphan_tool_result_messages
-    (messages : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =
-  let rec loop prev acc = function
-    | [] -> List.rev acc
+let repair_dangling_tool_use_messages messages =
+  fst (repair_dangling_tool_use_messages_with_stats messages)
+
+let repair_orphan_tool_result_messages_with_stats
+    (messages : Agent_sdk.Types.message list)
+    : Agent_sdk.Types.message list * tool_pair_repair_stats =
+  let rec loop acc_stats prev acc = function
+    | [] -> List.rev acc, acc_stats
     | msg :: rest ->
-        let repaired =
-          if not (has_tool_result_block msg) then msg
+        let repaired, stats =
+          if not (has_tool_result_block msg) then
+            (msg, empty_tool_pair_repair_stats)
           else
             let prev_tool_use_ids =
               match prev with
@@ -565,28 +595,41 @@ let repair_orphan_tool_result_messages
                   | Agent_sdk.Types.Audio _ -> false)
                 msg.content
             in
-            if not has_orphan then msg
+            if not has_orphan then (msg, empty_tool_pair_repair_stats)
             else
+              let downgraded_tool_results = ref 0 in
               let content =
                 List.map
                   (function
                     | Agent_sdk.Types.ToolResult { tool_use_id; content; json; _ } ->
+                        incr downgraded_tool_results;
                         Agent_sdk.Types.Text
                           (tool_result_text_of_block ~tool_use_id ~content ~json)
                     | other -> other)
                   msg.content
               in
-              { msg with content }
+              ( { msg with content }
+              , { empty_tool_pair_repair_stats with
+                  downgraded_tool_results = !downgraded_tool_results
+                } )
         in
-        loop (Some repaired) (repaired :: acc) rest
+        loop (add_tool_pair_repair_stats acc_stats stats) (Some repaired) (repaired :: acc) rest
   in
-  loop None [] messages
+  loop empty_tool_pair_repair_stats None [] messages
+
+let repair_orphan_tool_result_messages messages =
+  fst (repair_orphan_tool_result_messages_with_stats messages)
+
+let repair_broken_tool_call_pairs_with_stats
+    (messages : Agent_sdk.Types.message list)
+    : Agent_sdk.Types.message list * tool_pair_repair_stats =
+  let messages, dangling_stats = repair_dangling_tool_use_messages_with_stats messages in
+  let messages, orphan_stats = repair_orphan_tool_result_messages_with_stats messages in
+  messages, add_tool_pair_repair_stats dangling_stats orphan_stats
 
 let repair_broken_tool_call_pairs
     (messages : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =
-  messages
-  |> repair_dangling_tool_use_messages
-  |> repair_orphan_tool_result_messages
+  fst (repair_broken_tool_call_pairs_with_stats messages)
 
 let serialize_context (ctx : working_context) : string =
   let json = `Assoc [

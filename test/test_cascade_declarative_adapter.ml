@@ -629,6 +629,7 @@ let test_alias_parent_missing () =
           ; is_non_interactive = false
           ; credentials = None
           ; capabilities = None
+          ; log = None
           ; headers = None
           }
         ]
@@ -761,6 +762,7 @@ let test_duplicate_routes () =
           ; is_non_interactive = false
           ; credentials = None
           ; capabilities = None
+          ; log = None
           ; headers = None
           }
         ]

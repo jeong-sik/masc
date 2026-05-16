@@ -619,3 +619,54 @@ and completed_turn_observation = {
     Returns [false] if another fiber won the resolve race. *)
 val try_resolve_done :
   registry_entry -> [ `Stopped | `Crashed of string ] -> bool
+
+(** Internal: keeper registry key composition (base_path ^ \\x1f ^ name).
+    Exposed via mli so keeper_registry.ml's state functions can use it
+    after the intra-library split; not intended for external callers. *)
+val registry_key : base_path:string -> string -> string
+
+(** Pure mapping from cascade_state witness to its parent turn_phase
+    witness. Used by composite observer derivations. *)
+val turn_phase_of_cascade_state :
+  packed_cascade_state -> packed_turn_phase
+
+(** Classify a live turn_observation into a completed_turn_outcome
+    using exhaustive pattern matching on (decision_stage, cascade_state).
+    Pure function, no state access. *)
+val completed_turn_outcome_of_observation :
+  turn_observation -> Keeper_transition_audit.completed_turn_outcome
+
+(** Dispatch origin for paired post-turn lifecycle events.
+
+    [Compaction_started]/[Compaction_completed]/[Compaction_failed] and
+    [Handoff_started]/[Handoff_completed]/[Handoff_failed] are same-turn
+    lifecycle pairs. The registry rejects them from [Generic_dispatch] so
+    keepalive/guard/manual callers cannot emit half of a pair outside the
+    owner path. *)
+type lifecycle_event_origin =
+  | Generic_dispatch
+  | Post_turn_lifecycle
+  | Operator_compact
+
+(** Pure converter for diagnostic / log labels. *)
+val lifecycle_event_origin_to_string : lifecycle_event_origin -> string
+
+(** Internal: predicate over [Keeper_state_machine.event] identifying the
+    compaction- and handoff-pair half-events. *)
+val is_paired_lifecycle_event : Keeper_state_machine.event -> bool
+
+(** Pure dispatch-origin gate: returns true iff the (origin, event) pair
+    is allowed under the paired-lifecycle invariant. *)
+val origin_allows_paired_lifecycle_event :
+  lifecycle_event_origin -> Keeper_state_machine.event -> bool
+
+(** Pure: derive the next [pending_turn_measurement] field after observing
+    [event] at wall-clock [now], preserving the prior value when the event
+    is not a [Context_measured]. *)
+val pending_measurement_after_event :
+  float -> registry_entry -> Keeper_state_machine.event -> turn_measurement option
+
+(** Pure: derive the next [compaction_stage] after observing [event],
+    preserving the entry's prior stage on non-compaction events. *)
+val compaction_stage_of_event :
+  registry_entry -> Keeper_state_machine.event -> packed_compaction_stage

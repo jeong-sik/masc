@@ -1532,7 +1532,7 @@ let test_default_config_preserves_custom_local_request_path () =
   | _ -> Alcotest.fail "custom local OpenAI-compatible provider should stay OpenAICompat"
 ;;
 
-let test_run_named_per_provider_timeout_uses_clock_fallback_and_exempts_last_provider () =
+let test_run_named_local_per_provider_timeout_uses_liveness_floor () =
   Masc_mcp.Masc_eio_env.reset_for_test ();
   Alcotest.(check bool)
     "test requires no global Masc_eio_env"
@@ -1567,7 +1567,7 @@ let test_run_named_per_provider_timeout_uses_clock_fallback_and_exempts_last_pro
           ~clock
           ~port:first_port
           ~delay_s:0.2
-          (openai_text_response "first provider should timeout")
+          (openai_text_response "first provider survived local timeout floor")
       with
       | Unix.Unix_error (Unix.EPERM, "bind", _) | Unix.Unix_error (Unix.EACCES, "bind", _)
         -> Alcotest.skip ()
@@ -1590,10 +1590,10 @@ let test_run_named_per_provider_timeout_uses_clock_fallback_and_exempts_last_pro
          ~profile:"timeout_probe"
          [ "slow", first_url; "last", second_url ])
     @@ fun () ->
-    (* Disable liveness observer so [outer_wall_for_attempt] passes
-       per_provider_timeout_s through unchanged.  With Observe/Enforce
-       the budget wall (e.g. 180 s) clamps the 0.05 s test timeout
-       upward, letting the first provider succeed instead of timing out. *)
+    (* Local runtime candidates floor stale/tiny per-provider timeouts before
+       they reach OAS max_execution_time_s.  This prevents client-side closes
+       that show up as provider 500s while a local model is still loading or
+       generating. *)
     with_liveness_off
     @@ fun () ->
     match
@@ -1608,8 +1608,8 @@ let test_run_named_per_provider_timeout_uses_clock_fallback_and_exempts_last_pro
     with
     | Ok result ->
       Alcotest.(check string)
-        "last provider succeeds without timeout"
-        "last provider survived timeout"
+        "first local provider succeeds without timeout"
+        "first provider survived local timeout floor"
         (response_text result.response);
       flush_cascade_actor ();
       Eio.Switch.fail sw Exit
@@ -2073,6 +2073,79 @@ let test_oas_worker_exec_build_installs_ollama_kind_preserving_transport () =
       "remote ollama installs native HTTP transport"
       true
       (Option.is_some transport);
+    Agent_sdk.Agent.close agent
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
+;;
+
+let test_cascade_runner_request_patch_preserves_tool_choice_override () =
+  let base =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.Glm
+      ~model_id:"glm-5.1"
+      ~base_url:"https://api.z.ai/api/coding/paas/v4"
+      ~supports_tool_choice_override:true
+      ()
+  in
+  let req =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"glm-5.1"
+      ~base_url:"http://agent-sdk-reconstructed.invalid/v1"
+      ~max_tokens:1234
+      ~tool_choice:Agent_sdk.Types.Any
+      ()
+  in
+  let patched =
+    Cascade_runner.For_testing.request_runtime_fields_on_base_config ~base req
+  in
+  Alcotest.(check string) "base url stays source of truth" base.base_url patched.base_url;
+  Alcotest.(check string) "model id stays source of truth" base.model_id patched.model_id;
+  Alcotest.(check (option int))
+    "runtime max_tokens comes from request"
+    req.max_tokens
+    patched.max_tokens;
+  Alcotest.(check bool)
+    "runtime tool_choice comes from request"
+    true
+    (patched.tool_choice = Some Agent_sdk.Types.Any);
+  Alcotest.(check (option bool))
+    "declared tool_choice support override survives request patch"
+    (Some true)
+    patched.supports_tool_choice_override
+;;
+
+let test_oas_worker_exec_build_applies_tool_choice_override_to_contract () =
+  let provider_cfg =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.Glm
+      ~model_id:"glm-5.1"
+      ~base_url:"https://api.z.ai/api/coding/paas/v4"
+      ~supports_tool_choice_override:true
+      ()
+  in
+  let config =
+    Cascade_runner.default_config
+      ~name:"oas-worker-glm-tool-choice-override"
+      ~provider_cfg
+      ~system_prompt:"system"
+      ~tools:[ make_noop_tool () ]
+  in
+  Eio.Switch.run
+  @@ fun sw ->
+  match Cascade_runner.build ~sw ~net:(require_test_net ()) ~config with
+  | Ok agent ->
+    let options = Agent_sdk.Agent.options agent in
+    Alcotest.(check bool)
+      "HTTP provider installs preserving transport"
+      true
+      (Option.is_some options.transport);
+    (match options.provider with
+     | Some provider ->
+       Alcotest.(check bool)
+         "contract capability sees declared tool_choice support"
+         true
+         (Agent_sdk.Provider.capabilities_for_config provider).supports_tool_choice
+     | None -> Alcotest.fail "expected provider options");
     Agent_sdk.Agent.close agent
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 ;;
@@ -2575,11 +2648,15 @@ let make_ollama_provider_cfg ?(model_id = "qwen3:27b") () =
     ()
 ;;
 
-let make_openai_compat_provider_cfg ?(model_id = "gpt-4.1") () =
+let make_openai_compat_provider_cfg
+      ?(model_id = "gpt-4.1")
+      ?(base_url = "http://127.0.0.1:18080/v1")
+      ()
+  =
   Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.OpenAI_compat
     ~model_id
-    ~base_url:"http://127.0.0.1:18080/v1"
+    ~base_url
     ()
 ;;
 
@@ -2668,6 +2745,10 @@ let check_timeout_opt label expected actual =
   Alcotest.(check (option (float 0.001))) label expected actual
 ;;
 
+let local_runtime_timeout_floor_s =
+  Masc_mcp.Cascade_attempt_liveness.bootstrap.attempt_wall_max
+;;
+
 let provider_timeout ?(is_last = false) ?configured provider_cfg =
   let candidate =
     Masc_mcp.Cascade_runtime_candidate.of_provider_config provider_cfg
@@ -2699,21 +2780,28 @@ let test_provider_attempt_timeout_passes_gemini_cli_configured_timeout () =
     (provider_timeout ~configured:300.0 (make_gemini_cli_provider_cfg ()))
 ;;
 
-let test_provider_attempt_timeout_passes_ollama_configured_timeout () =
+let test_provider_attempt_timeout_floors_ollama_configured_timeout () =
   check_timeout_opt
-    "ollama configured attempt timeout passes through"
-    (Some 60.0)
+    "ollama configured attempt timeout is floored for local runtime"
+    (Some local_runtime_timeout_floor_s)
     (provider_timeout ~configured:60.0 (make_ollama_provider_cfg ()))
+;;
+
+let test_provider_attempt_timeout_floors_ollama_default_timeout () =
+  check_timeout_opt
+    "ollama absent attempt timeout gets local runtime floor"
+    (Some local_runtime_timeout_floor_s)
+    (provider_timeout (make_ollama_provider_cfg ()))
 ;;
 
 let test_provider_attempt_timeout_passes_final_configured_timeout () =
   check_timeout_opt
-    "final provider configured attempt timeout passes through"
+    "final non-local provider configured attempt timeout passes through"
     (Some 300.0)
     (provider_timeout
        ~is_last:true
        ~configured:300.0
-       (make_openai_compat_provider_cfg ()))
+       (make_openai_compat_provider_cfg ~base_url:"https://api.example.test/v1" ()))
 ;;
 
 let test_cascade_provider_labels_preserve_registered_openai_compat_family () =
@@ -6363,9 +6451,13 @@ let () =
             `Quick
             test_provider_attempt_timeout_passes_gemini_cli_configured_timeout
         ; Alcotest.test_case
-            "provider timeout passes ollama configured timeout"
+            "provider timeout floors ollama configured timeout"
             `Quick
-            test_provider_attempt_timeout_passes_ollama_configured_timeout
+            test_provider_attempt_timeout_floors_ollama_configured_timeout
+        ; Alcotest.test_case
+            "provider timeout floors ollama default timeout"
+            `Quick
+            test_provider_attempt_timeout_floors_ollama_default_timeout
         ; Alcotest.test_case
             "provider timeout passes final configured timeout"
             `Quick
@@ -6464,9 +6556,9 @@ let () =
             `Quick
             test_default_config_preserves_custom_local_request_path
         ; Alcotest.test_case
-            "per-provider timeout uses context clock and exempts last provider"
+            "local per-provider timeout uses liveness floor"
             `Quick
-            test_run_named_per_provider_timeout_uses_clock_fallback_and_exempts_last_provider
+            test_run_named_local_per_provider_timeout_uses_liveness_floor
         ; Alcotest.test_case
             "open circuit primary falls back without request"
             `Quick
@@ -6509,6 +6601,14 @@ let () =
             "oas_worker installs native Ollama HTTP transport"
             `Quick
             test_oas_worker_exec_build_installs_ollama_kind_preserving_transport
+        ; Alcotest.test_case
+            "cascade request patch preserves tool_choice override"
+            `Quick
+            test_cascade_runner_request_patch_preserves_tool_choice_override
+        ; Alcotest.test_case
+            "oas_worker exposes tool_choice override to contract validation"
+            `Quick
+            test_oas_worker_exec_build_applies_tool_choice_override_to_contract
         ; Alcotest.test_case
             "apply_stream_idle_timeout_default passes Some through"
             `Quick

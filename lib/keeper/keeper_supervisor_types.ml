@@ -82,3 +82,122 @@ let persona_drift_log_level_for_missing_profile (meta : keeper_meta) =
     Persona_drift_warn
   | Ok _ | Error _ -> Persona_drift_error
 ;;
+
+let should_cleanup_dead ~now ~dead_ttl_sec (entry : Keeper_registry.registry_entry) =
+  match entry.phase, entry.dead_since_ts with
+  | Keeper_state_machine.Dead, Some dead_since -> now -. dead_since >= dead_ttl_sec
+  | Keeper_state_machine.Dead, None -> false
+  | ( ( Keeper_state_machine.Offline
+      | Keeper_state_machine.Running
+      | Keeper_state_machine.Failing
+      | Keeper_state_machine.Overflowed
+      | Keeper_state_machine.Compacting
+      | Keeper_state_machine.HandingOff
+      | Keeper_state_machine.Draining
+      | Keeper_state_machine.Paused
+      | Keeper_state_machine.Stopped
+      | Keeper_state_machine.Crashed
+      | Keeper_state_machine.Restarting
+      | Keeper_state_machine.Zombie )
+    , _ ) -> false
+;;
+
+let is_stale_paused_meta ~now ~paused_ttl_sec (meta : keeper_meta) =
+  if not meta.paused
+  then false
+  else
+    match Coord_resilience.Time.parse_iso8601_opt meta.updated_at with
+    | Some updated_ts -> updated_ts > 0.0 && now -. updated_ts >= paused_ttl_sec
+    | None -> false
+;;
+
+let paused_meta_requires_reconcile_recovery (meta : keeper_meta) =
+  meta.paused
+  &&
+  match meta.runtime.last_blocker with
+  | Some info -> blocker_class_continue_gate info.klass
+  | None -> false
+;;
+
+let cohort_key_of_reason = Keeper_registry.failure_reason_cohort_key
+
+let stale_turn_timeout_cohort_key =
+  cohort_key_of_reason
+    (Some
+       (Keeper_registry.Stale_turn_timeout
+          (Keeper_registry.Idle_turn { stall_seconds = 0.0 })))
+;;
+
+let active_supervision_keeper_count entries =
+  List_util.count_if
+    (fun (e : Keeper_registry.registry_entry) ->
+       e.phase = Keeper_state_machine.Running || e.phase = Keeper_state_machine.Crashed)
+    entries
+;;
+
+let next_auto_resume_after_sec ~initial_sec ~max_sec previous =
+  if initial_sec <= 0.0
+  then None
+  else
+    Some
+      (match previous with
+       | None -> Float.min max_sec initial_sec
+       | Some prev -> Float.min max_sec (prev *. 2.0))
+;;
+
+let liveness_recovery_backoff attempt =
+  let base = Env_config.KeeperSupervisor.liveness_recovery_backoff_base_sec in
+  let max_delay = Env_config.KeeperSupervisor.liveness_recovery_backoff_max_sec in
+  Float.min max_delay (base *. Float.of_int (1 lsl min attempt 20))
+;;
+
+let should_attempt_liveness_recovery ~now (entry : Keeper_registry.registry_entry) : bool =
+  if entry.phase <> Keeper_state_machine.Dead
+  then false
+  else if entry.conditions.zombie_timeout_reached
+  then false
+  else (
+    let min_dead_sec = Env_config.KeeperSupervisor.liveness_recovery_min_dead_sec in
+    match entry.dead_since_ts with
+    | None -> false
+    | Some dead_since -> now -. dead_since >= min_dead_sec)
+;;
+
+let detect_alive_but_stuck
+      ~now
+      ~stall_multiplier
+      ~stall_floor_sec
+      (entry : Keeper_registry.registry_entry)
+  : float option
+  =
+  let meta = entry.meta in
+  if meta.paused
+  then None
+  else if entry.phase <> Keeper_state_machine.Running
+  then None
+  else if meta.runtime.autonomous_turn_count <= 0
+  then None
+  else (
+    let cooldown_sec = float_of_int meta.proactive.cooldown_sec in
+    let stall_threshold =
+      Float.max stall_floor_sec (cooldown_sec *. float_of_int stall_multiplier)
+    in
+    let last_proactive_ts = meta.runtime.proactive_rt.last_ts in
+    let reference_ts =
+      if last_proactive_ts > 0.0
+      then Float.max last_proactive_ts entry.started_at
+      else entry.started_at
+    in
+    let elapsed = now -. reference_ts in
+    if elapsed > stall_threshold then Some elapsed else None)
+;;
+
+let alive_but_stuck_threshold
+      ~stall_multiplier
+      ~stall_floor_sec
+      (entry : Keeper_registry.registry_entry)
+  =
+  Float.max
+    stall_floor_sec
+    (float_of_int entry.meta.proactive.cooldown_sec *. float_of_int stall_multiplier)
+;;

@@ -32,45 +32,6 @@ let keep_last_n n item lst =
 include Keeper_supervisor_types
 
 
-let should_cleanup_dead ~now ~dead_ttl_sec (entry : Keeper_registry.registry_entry) =
-  match entry.phase, entry.dead_since_ts with
-  | Keeper_state_machine.Dead, Some dead_since -> now -. dead_since >= dead_ttl_sec
-  (* Dead but no [dead_since_ts] yet — first observation will set it. *)
-  | Keeper_state_machine.Dead, None -> false
-  (* Non-Dead phases never trigger Dead cleanup, regardless of timestamp. *)
-  | ( ( Keeper_state_machine.Offline
-      | Keeper_state_machine.Running
-      | Keeper_state_machine.Failing
-      | Keeper_state_machine.Overflowed
-      | Keeper_state_machine.Compacting
-      | Keeper_state_machine.HandingOff
-      | Keeper_state_machine.Draining
-      | Keeper_state_machine.Paused
-      | Keeper_state_machine.Stopped
-      | Keeper_state_machine.Crashed
-      | Keeper_state_machine.Restarting
-      | Keeper_state_machine.Zombie )
-    , _ ) -> false
-;;
-
-(** Check if a paused keeper meta file on disk is stale enough to remove. *)
-let is_stale_paused_meta ~now ~paused_ttl_sec (meta : keeper_meta) =
-  if not meta.paused
-  then false
-  else (
-    let updated_ts =
-      Coord_resilience.Time.parse_iso8601_opt meta.updated_at |> Option.value ~default:0.0
-    in
-    updated_ts > 0.0 && now -. updated_ts >= paused_ttl_sec)
-;;
-
-let paused_meta_requires_reconcile_recovery (meta : keeper_meta) =
-  meta.paused
-  &&
-  match meta.runtime.last_blocker with
-  | Some info -> blocker_class_continue_gate info.klass
-  | None -> false
-;;
 
 let committed_tools_of_ambiguous_blocker (blocker : string) =
   let trimmed = String.trim blocker in
@@ -1018,14 +979,6 @@ let cleanup_dead_tombstone (ctx : _ context) (entry : Keeper_registry.registry_e
     new variant in keeper_registry forces a same-PR converter update via
     the source module's exhaustive-match check, instead of breaking main
     here on first build (the recurring P0 pattern from #10490 + #10574). *)
-let cohort_key_of_reason = Keeper_registry.failure_reason_cohort_key
-
-let stale_turn_timeout_cohort_key =
-  cohort_key_of_reason
-    (Some
-       (Keeper_registry.Stale_turn_timeout
-          (Keeper_registry.Idle_turn { stall_seconds = 0.0 })))
-;;
 
 (* #10887: persistent self-preservation lock.  Fleet log shows 125
    identical [ratio=1.00, cohort=stale_turn_timeout] events / 2 days
@@ -1076,12 +1029,6 @@ let reset_self_preservation_escape_state_for_test () =
   sp_escape_state.consecutive_suppressions <- 0
 ;;
 
-let active_supervision_keeper_count entries =
-  List_util.count_if
-    (fun (e : Keeper_registry.registry_entry) ->
-       e.phase = Keeper_state_machine.Running || e.phase = Keeper_state_machine.Crashed)
-    entries
-;;
 
 (** Self-preservation gate. Suppresses restarts when a dominant failure
     cohort exceeds ratio threshold AND minimum candidate count.
@@ -1253,15 +1200,6 @@ let apply_self_preservation ~keepers_dir ~total_keepers to_restart =
     to_restart)
 ;;
 
-let next_auto_resume_after_sec ~initial_sec ~max_sec previous =
-  if initial_sec <= 0.0
-  then None
-  else
-    Some
-      (match previous with
-       | None -> Float.min max_sec initial_sec
-       | Some prev -> Float.min max_sec (prev *. 2.0))
-;;
 
 (** #10765 Phase 2: persist [meta.paused = true] for a keeper whose stale
     watchdog detected a termination storm (window count >= threshold).  The
@@ -2050,28 +1988,6 @@ let get_or_create_recovery_state name =
       s)
 ;;
 
-let liveness_recovery_backoff attempt =
-  let base = Env_config.KeeperSupervisor.liveness_recovery_backoff_base_sec in
-  let max_delay = Env_config.KeeperSupervisor.liveness_recovery_backoff_max_sec in
-  Float.min max_delay (base *. Float.of_int (1 lsl min attempt 20))
-;;
-
-let should_attempt_liveness_recovery ~now (entry : Keeper_registry.registry_entry) : bool =
-  (* Only Dead keepers, not Zombie (terminal_failure_latched = structural) *)
-  if entry.phase <> Keeper_state_machine.Dead
-  then false (* Zombie timeout reached: structural terminal — skip *)
-  else if entry.conditions.zombie_timeout_reached
-  then false
-  else (
-    let min_dead_sec = Env_config.KeeperSupervisor.liveness_recovery_min_dead_sec in
-    (* Pattern-match dead_since_ts directly: collapsing None -> 0.0 via
-       Option.value created a strict-`>` guard that rejected legitimate
-       at:0.0 fixtures (the synthetic epoch used in tests like
-       liveness_recovery_2 — see #12826). *)
-    match entry.dead_since_ts with
-    | None -> false
-    | Some dead_since -> now -. dead_since >= min_dead_sec)
-;;
 
 type credential_recovery_outcome =
   | Credential_recovery_not_needed
@@ -2305,36 +2221,6 @@ let liveness_recovery_scan (ctx : _ context) =
     production sample) without a separate code path.
 
     Returns [None] when not stuck.  Pure: no I/O, no global state. *)
-let detect_alive_but_stuck
-      ~now
-      ~stall_multiplier
-      ~stall_floor_sec
-      (entry : Keeper_registry.registry_entry)
-  : float option
-  =
-  let meta = entry.meta in
-  if meta.paused
-  then None
-  else if entry.phase <> Keeper_state_machine.Running
-  then None
-  else if meta.runtime.autonomous_turn_count <= 0
-  then
-    (* Brand-new keeper: not stuck, just hasn't started. *)
-    None
-  else (
-    let cooldown_sec = float_of_int meta.proactive.cooldown_sec in
-    let stall_threshold =
-      Float.max stall_floor_sec (cooldown_sec *. float_of_int stall_multiplier)
-    in
-    let last_proactive_ts = meta.runtime.proactive_rt.last_ts in
-    let reference_ts =
-      if last_proactive_ts > 0.0
-      then Float.max last_proactive_ts entry.started_at
-      else entry.started_at
-    in
-    let elapsed = now -. reference_ts in
-    if elapsed > stall_threshold then Some elapsed else None)
-;;
 
 (* Per-keeper dedup table for [alive_but_stuck_scan].  Bounds counter
    emission to one increment per [alive_but_stuck_dedup_ttl_sec] per
@@ -2352,15 +2238,6 @@ let alive_but_stuck_should_emit ~now ~dedup_ttl_sec name =
       true)
 ;;
 
-let alive_but_stuck_threshold
-      ~stall_multiplier
-      ~stall_floor_sec
-      (entry : Keeper_registry.registry_entry)
-  =
-  Float.max
-    stall_floor_sec
-    (float_of_int entry.meta.proactive.cooldown_sec *. float_of_int stall_multiplier)
-;;
 
 let set_alive_but_stuck_gauges
       ~(entry : Keeper_registry.registry_entry)

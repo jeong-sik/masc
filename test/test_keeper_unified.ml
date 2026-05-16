@@ -1478,6 +1478,97 @@ let test_scheduled_turn_decision_uses_backlog_acceleration () =
      | WO.Skip _ -> false)
 ;;
 
+let test_scheduled_turn_ignores_backlog_when_work_discovery_disabled () =
+  let meta =
+    { minimal_meta with
+      work_discovery_enabled = Some false
+    ; proactive = { enabled = true; idle_sec = 60; cooldown_sec = 900 }
+    ; runtime =
+        { minimal_meta.runtime with
+          proactive_rt =
+            { minimal_meta.runtime.proactive_rt with
+              last_ts = Time_compat.now () -. 320.0
+            }
+        }
+    }
+  in
+  let obs =
+    { base_observation with
+      idle_seconds = 120
+    ; claimable_task_count = 1
+    ; failed_task_count = 2
+    ; pending_verification_count = 1
+    ; backlog_updated_since_last_scheduled_autonomous = true
+    }
+  in
+  let decision =
+    WO.keeper_cycle_decision
+      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+      ~meta
+      obs
+  in
+  check
+    bool
+    "work-discovery-disabled keeper does not wake on backlog"
+    false
+    decision.should_run;
+  check
+    bool
+    "backlog is treated as no proactive work signal"
+    true
+    (match decision.verdict with
+     | WO.Skip { reasons = first, rest } -> List.mem WO.No_signal (first :: rest)
+     | WO.Run _ -> false)
+;;
+
+let test_scheduled_turn_allows_backlog_when_work_discovery_disabled_with_current_task () =
+  let current_task_id =
+    match Masc_mcp.Keeper_id.Task_id.of_string "task-owned" with
+    | Ok value -> value
+    | Error err -> fail ("task id parse failed: " ^ err)
+  in
+  let meta =
+    { minimal_meta with
+      work_discovery_enabled = Some false
+    ; current_task_id = Some current_task_id
+    ; proactive = { enabled = true; idle_sec = 60; cooldown_sec = 900 }
+    ; runtime =
+        { minimal_meta.runtime with
+          proactive_rt =
+            { minimal_meta.runtime.proactive_rt with
+              last_ts = Time_compat.now () -. 320.0
+            }
+        }
+    }
+  in
+  let obs =
+    { base_observation with
+      idle_seconds = 120
+    ; claimable_task_count = 1
+    ; backlog_updated_since_last_scheduled_autonomous = true
+    }
+  in
+  let decision =
+    WO.keeper_cycle_decision
+      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+      ~meta
+      obs
+  in
+  check bool "current task keeps backlog wake enabled" true decision.should_run;
+  check
+    bool
+    "owned task still emits task backlog reason"
+    true
+    (match decision.verdict with
+     | WO.Run { reasons = first, rest } ->
+       List.exists
+         (function
+           | WO.Task_backlog _ -> true
+           | _ -> false)
+         (first :: rest)
+     | WO.Skip _ -> false)
+;;
+
 let test_scheduled_turn_ignores_unclaimable_backlog () =
   let meta =
     { minimal_meta with
@@ -11515,6 +11606,14 @@ let () =
             "scheduled decision uses backlog acceleration"
             `Quick
             test_scheduled_turn_decision_uses_backlog_acceleration
+        ; test_case
+            "scheduled decision ignores backlog when work discovery disabled"
+            `Quick
+            test_scheduled_turn_ignores_backlog_when_work_discovery_disabled
+        ; test_case
+            "scheduled decision allows owned backlog when work discovery disabled"
+            `Quick
+            test_scheduled_turn_allows_backlog_when_work_discovery_disabled_with_current_task
         ; test_case
             "scheduled decision ignores unclaimable backlog"
             `Quick

@@ -279,11 +279,29 @@ let record_op_outcome
 
     Wraps each of the 5 closures so the JSONL operations are
     observable in [/metrics] without violating the leaf-library
-    boundary of [Memory_jsonl]. *)
+    boundary of [Memory_jsonl].  Query uses [Memory_jsonl]'s
+    pre-collapse observer because the OAS backend contract returns
+    an empty list for both legitimate empty results and failures. *)
 let make_backend ?base_dir ~(agent_name : string) ~(session_id : string) ()
   : Agent_sdk.Memory.long_term_backend =
   let base_dir = resolve_base_dir ?base_dir () in
-  let inner = Memory_jsonl.make_backend ~base_dir ~agent_name ~session_id in
+  let inner =
+    let on_query_result = function
+      | Ok _ ->
+        record_op_outcome
+          ~agent_name
+          ~outcome:Memory_oas_bridge_op_outcome.Query_ok
+      | Error _ ->
+        record_op_outcome
+          ~agent_name
+          ~outcome:Memory_oas_bridge_op_outcome.Query_failed
+    in
+    Memory_jsonl.make_backend_with_query_observer
+      ~on_query_result
+      ~base_dir
+      ~agent_name
+      ~session_id
+  in
   let persist ~key value =
     let r = inner.persist ~key value in
     let outcome =
@@ -325,11 +343,7 @@ let make_backend ?base_dir ~(agent_name : string) ~(session_id : string) ()
     r
   in
   let query ~prefix ~limit =
-    let r = inner.query ~prefix ~limit in
-    record_op_outcome
-      ~agent_name
-      ~outcome:Memory_oas_bridge_op_outcome.Query_ok;
-    r
+    inner.query ~prefix ~limit
   in
   { persist; retrieve; remove; batch_persist; query }
 

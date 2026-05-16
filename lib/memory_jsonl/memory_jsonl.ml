@@ -117,7 +117,8 @@ let read_lines ~path : (string * Yojson.Safe.t option * float) list =
     @param base_dir The .masc directory path
     @param agent_name Agent identifier
     @param session_id Session identifier (e.g. "acd905b7") *)
-let make_backend ~base_dir ~agent_name ~session_id
+let make_backend_with_query_observer ~on_query_result ~base_dir ~agent_name
+    ~session_id
   : Agent_sdk.Memory.long_term_backend =
   let path = session_path ~base_dir ~agent_name ~session_id in
 
@@ -184,36 +185,54 @@ let make_backend ~base_dir ~agent_name ~session_id
   in
 
   let query ~prefix ~limit =
-    try
-      let entries = read_lines ~path in
-      (* De-duplicate by key (latest wins), skip tombstones *)
-      let tbl = Hashtbl.create 32 in
-      List.iter (fun (key, value, ts) ->
-        if String.length key >= String.length prefix
-           && String.sub key 0 (String.length prefix) = prefix then
-          Hashtbl.replace tbl key (value, ts)
-      ) entries;
-      (* Collect non-tombstone entries *)
-      let results = Hashtbl.fold (fun key (value, ts) acc ->
-        match value with
-        | Some v -> (key, v, ts) :: acc
-        | None -> acc  (* tombstone *)
-      ) tbl [] in
-      (* Sort by ts descending *)
-      let sorted = List.sort (fun (_, _, t1) (_, _, t2) ->
-        Float.compare t2 t1
-      ) results in
-      (* Take up to limit, return (key, json) pairs *)
-      let rec take n acc = function
-        | [] -> List.rev acc
-        | _ when n <= 0 -> List.rev acc
-        | (k, v, _ts) :: rest -> take (n - 1) ((k, v) :: acc) rest
-      in
-      take limit [] sorted
-    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-      Log.Memory.error "memory_jsonl query(%s) failed: %s"
-        prefix (Printexc.to_string exn);
-      []
+    let result =
+      try
+        let entries = read_lines ~path in
+        (* De-duplicate by key (latest wins), skip tombstones *)
+        let tbl = Hashtbl.create 32 in
+        List.iter (fun (key, value, ts) ->
+          if String.length key >= String.length prefix
+             && String.sub key 0 (String.length prefix) = prefix then
+            Hashtbl.replace tbl key (value, ts)
+        ) entries;
+        (* Collect non-tombstone entries *)
+        let results = Hashtbl.fold (fun key (value, ts) acc ->
+          match value with
+          | Some v -> (key, v, ts) :: acc
+          | None -> acc  (* tombstone *)
+        ) tbl [] in
+        (* Sort by ts descending *)
+        let sorted = List.sort (fun (_, _, t1) (_, _, t2) ->
+          Float.compare t2 t1
+        ) results in
+        (* Take up to limit, return (key, json) pairs *)
+        let rec take n acc = function
+          | [] -> List.rev acc
+          | _ when n <= 0 -> List.rev acc
+          | (k, v, _ts) :: rest -> take (n - 1) ((k, v) :: acc) rest
+        in
+        Ok (take limit [] sorted)
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+        let msg =
+          Printf.sprintf
+            "memory_jsonl query(%s) failed: %s"
+            prefix
+            (Printexc.to_string exn)
+        in
+        Log.Memory.error "%s" msg;
+        Error msg
+    in
+    on_query_result result;
+    match result with
+    | Ok rows -> rows
+    | Error _ -> []
   in
 
   { Agent_sdk.Memory.persist; retrieve; remove; batch_persist; query }
+
+let make_backend ~base_dir ~agent_name ~session_id =
+  make_backend_with_query_observer
+    ~on_query_result:(fun _ -> ())
+    ~base_dir
+    ~agent_name
+    ~session_id

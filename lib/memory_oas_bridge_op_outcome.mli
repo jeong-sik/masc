@@ -37,7 +37,9 @@ type t =
   | Batch_persist_failed
       (** [batch_persist] returned [Error _]. *)
   | Query_ok
-      (** [query] returned (potentially empty) result list.  No
-          [Error] path exists in the OAS contract for this op. *)
+      (** [query] returned a real, potentially empty result list. *)
+  | Query_failed
+      (** [Memory_jsonl.query] hit an I/O/parse-path exception before
+          the OAS contract collapsed the failure to an empty list. *)
 
 val to_label : t -> string

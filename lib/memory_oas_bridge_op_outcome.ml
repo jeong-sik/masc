@@ -8,6 +8,7 @@ type t =
   | Batch_persist_ok
   | Batch_persist_failed
   | Query_ok
+  | Query_failed
 
 let to_label = function
   | Persist_ok -> "persist_ok"
@@ -19,4 +20,5 @@ let to_label = function
   | Batch_persist_ok -> "batch_persist_ok"
   | Batch_persist_failed -> "batch_persist_failed"
   | Query_ok -> "query_ok"
+  | Query_failed -> "query_failed"
 ;;

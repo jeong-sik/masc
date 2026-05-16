@@ -20,3 +20,16 @@ val make_backend :
 
     Files exceeding 50 MB log a warning but are still read. Individual
     values exceeding 1 MB are truncated and re-wrapped as JSON strings. *)
+
+val make_backend_with_query_observer :
+  on_query_result:(((string * Yojson.Safe.t) list, string) result -> unit) ->
+  base_dir:string ->
+  agent_name:string ->
+  session_id:string ->
+  Agent_sdk.Memory.long_term_backend
+(** Same as {!make_backend}, but [on_query_result] receives the pre-collapse
+    [query] outcome so callers can distinguish real empty query results from
+    I/O failures without changing the OAS backend contract.
+
+    Files exceeding 50 MB log a warning but are still read. Individual
+    values exceeding 1 MB are truncated and re-wrapped as JSON strings. *)

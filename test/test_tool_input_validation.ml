@@ -375,10 +375,34 @@ let masc_transition_schema =
 let masc_goal_list_schema =
   find_schema_exn "masc_goal_list" Tool_schemas_coord_extra.schemas
 
+let keeper_fs_edit_schema =
+  find_schema_exn "keeper_fs_edit" Config.raw_all_tool_schemas
+
 let assoc_string key json =
   match Yojson.Safe.Util.member key json with
   | `String value -> value
   | _ -> failwith ("expected string field: " ^ key)
+
+let test_registered_hook_keeper_fs_edit_patch_args () =
+  let args =
+    `Assoc
+      [ "path", `String "repos/masc-mcp/.worktrees/task/lib/foo.ml"
+      ; "mode", `String "patch"
+      ; "old_string", `String "let x = 1"
+      ; "new_string", `String "let x = 2"
+      ; "replace_all", `Bool false
+      ]
+  in
+  let blocked, forwarded =
+    run_registered_hook
+      ~schema:keeper_fs_edit_schema
+      ~tool_name:"keeper_fs_edit"
+      ~args
+      ()
+  in
+  Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
+  Alcotest.(check bool) "args unchanged" true
+    (Yojson.Safe.equal forwarded args)
 
 let validation_labels ~tool ~result ~reason =
   [ "tool", tool; "result", result; "reason", reason ]
@@ -758,6 +782,8 @@ let () =
         test_registered_hook_bypasses_unknown_tool;
       Alcotest.test_case "empty schema bypasses validation" `Quick
         test_registered_hook_bypasses_empty_schema;
+      Alcotest.test_case "keeper_fs_edit accepts patch args" `Quick
+        test_registered_hook_keeper_fs_edit_patch_args;
       Alcotest.test_case "direct validation uses explicit schema" `Quick
         test_validate_args_uses_explicit_schema_without_registry;
       Alcotest.test_case "masc_transition compat: to/note keys" `Quick

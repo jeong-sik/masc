@@ -635,10 +635,13 @@ let filesystem_tools : Masc_domain.tool_schema list =
     }
   ; { name = "keeper_fs_edit"
     ; description =
-        "Write or append to a file. path and content REQUIRED (both non-empty). mode: \
-         'overwrite' (default) or 'append'. Good: path='lib/foo.ml', content='let x = \
-         1'. Bad: path='', content=''. Bad: mode='create' (use overwrite). Creates \
-         parent dirs."
+        "Write, append, or patch a file. path is required. For mode='overwrite' \
+         (default) or 'append', content is required and non-empty. For mode='patch', \
+         old_string and new_string are required; old_string must match exactly once \
+         unless replace_all=true. Good overwrite: path='lib/foo.ml', content='let x = \
+         1'. Good patch: path='lib/foo.ml', mode='patch', old_string='old', \
+         new_string='new'. Bad: path='', content=''. Bad: mode='create' (use \
+         overwrite). Creates parent dirs."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -654,6 +657,21 @@ let filesystem_tools : Masc_domain.tool_schema list =
                       [ "type", `String "string"
                       ; "description", `String "File content to write"
                       ] )
+                ; ( "old_string"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; "description", `String "Patch mode substring to replace"
+                      ] )
+                ; ( "new_string"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; "description", `String "Patch mode replacement substring"
+                      ] )
+                ; ( "replace_all"
+                  , `Assoc
+                      [ "type", `String "boolean"
+                      ; "description", `String "Patch every occurrence instead of exactly one"
+                      ] )
                 ; (* Issue #8490: derive from local mirror that tracks
            [Keeper_exec_fs.valid_fs_write_mode_strings]. *)
                   ( "mode"
@@ -665,7 +683,7 @@ let filesystem_tools : Masc_domain.tool_schema list =
                       ; "description", `String "Write mode (default: overwrite)"
                       ] )
                 ] )
-          ; "required", `List [ `String "path"; `String "content" ]
+          ; "required", `List [ `String "path" ]
           ]
     }
   ; { name = "keeper_ide_annotate"

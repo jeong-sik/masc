@@ -12,6 +12,90 @@ let runtime_lane_label = "runtime"
 
 let runtime_lane_of_model (_model : string) : string = runtime_lane_label
 
+(** Prometheus + JSON label keys used across keeper_hooks_oas.ml call sites.
+    Exposed via mli so the rest of the godfile keeps referencing them through
+    `include Keeper_hooks_oas_types`. *)
+let label_keeper = "keeper"
+let label_callback = "callback"
+let label_tool = "tool"
+let label_source = "source"
+let label_alias = "alias"
+let label_surface = "surface"
+let label_shape = "shape"
+let label_model = "model"
+let label_provider = "provider"
+let label_provider_kind = "provider_kind"
+let label_status = "status"
+let label_site = "site"
+let label_reason = "reason"
+let label_outcome = "outcome"
+let label_severity = "severity"
+let label_decision = "decision"
+let label_stop_reason = "stop_reason"
+let label_keeper_name = "keeper_name"
+let label_channel = "channel"
+
+(** JSON field-key constants used across keeper_hooks_oas.ml. *)
+let key_agent = "agent"
+let key_task_id = "task_id"
+let key_input_tokens = "input_tokens"
+let key_output_tokens = "output_tokens"
+let key_cost_usd = "cost_usd"
+let key_cost_status = "cost_status"
+let key_cost_status_reason = "cost_status_reason"
+let key_cost_usd_source = "cost_usd_source"
+let key_usage_missing = "usage_missing"
+let key_timestamp = "timestamp"
+let key_raw_input_tokens = "raw_input_tokens"
+let key_raw_output_tokens = "raw_output_tokens"
+let key_raw_cost_usd = "raw_cost_usd"
+let key_reasoning_tokens = "reasoning_tokens"
+let key_cache_n = "cache_n"
+let key_prompt_per_second = "prompt_per_second"
+let key_provider_tokens_per_second = "provider_tokens_per_second"
+let key_hw_decode_tokens_per_second = "hw_decode_tokens_per_second"
+let key_peak_memory_gb = "peak_memory_gb"
+let key_request_latency_ms = "request_latency_ms"
+let key_tokens_per_second = "tokens_per_second"
+let key_status = "status"
+let key_reason = "reason"
+let key_provider = "provider"
+let key_model = "model"
+let key_source = "source"
+let key_pr_review_action = "pr_review_action"
+let key_pr_review_action_success = "pr_review_action_success"
+let key_pr_work_action = "pr_work_action"
+let key_pr_work_action_source = "pr_work_action_source"
+let key_pr_work_action_success = "pr_work_action_success"
+let key_type = "type"
+let key_turn = "turn"
+let key_model_used = "model_used"
+let key_has_state_block = "has_state_block"
+let key_tool_calls_made = "tool_calls_made"
+let key_total_turns = "total_turns"
+let key_scope = "scope"
+let key_slots = "slots"
+let key_slot_count = "slot_count"
+let key_active_slot_count = "active_slot_count"
+let key_inactive_slot_count = "inactive_slot_count"
+let key_deny_list_count = "deny_list_count"
+let key_max_cost_usd = "max_cost_usd"
+let key_ts = "ts"
+let key_ts_unix = "ts_unix"
+let key_name = "name"
+let key_generation = "generation"
+let key_active = "active"
+let key_via = "via"
+let key_route_via = "route_via"
+let key_metric_event = "metric_event"
+let key_agent_name = "agent_name"
+let key_tool_name = "tool_name"
+let key_tool_call_count = "tool_call_count"
+let key_tools_used = "tools_used"
+let key_duration_ms = "duration_ms"
+let key_channel = "channel"
+let key_error = "error"
+
 type cost_status =
   | Cost_reported
   | Cost_known_free
@@ -214,3 +298,32 @@ let zero_usage : Agent_sdk.Types.api_usage =
     cache_read_input_tokens = 0;
     cost_usd = None;
   }
+
+let telemetry_has_canonical_model_id
+    (telemetry : Agent_sdk.Types.inference_telemetry option) =
+  match telemetry with
+  | Some { canonical_model_id = Some id; _ } -> String.trim id <> ""
+  | Some _ | None -> false
+
+let is_runtime_selector_alias model =
+  let trimmed = String.trim model |> String.lowercase_ascii in
+  let leaf =
+    match String.rindex_opt trimmed ':' with
+    | None -> trimmed
+    | Some idx when idx >= String.length trimmed - 1 -> ""
+    | Some idx ->
+        String.sub trimmed (idx + 1) (String.length trimmed - idx - 1)
+        |> String.trim
+  in
+  String.equal leaf "auto"
+
+let ms_per_second = 1000.0
+
+let cost_source_unmetered_provider = "unmetered_provider"
+let cost_source_computed = "computed"
+
+let oas_reported_cost (usage : Agent_sdk.Types.api_usage) : float =
+  match usage.cost_usd with
+  | Some cost when cost > 0.0 -> cost
+  | Some _ -> 0.0
+  | None -> 0.0

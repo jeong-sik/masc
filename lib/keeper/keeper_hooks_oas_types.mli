@@ -6,6 +6,89 @@
     Re-included by Keeper_hooks_oas so existing callers continue to use
     [Keeper_hooks_oas.cost_status] etc. unchanged. *)
 
+(** Prometheus + JSON label-key string constants used across
+    keeper_hooks_oas.ml call sites. *)
+val label_keeper : string
+val label_callback : string
+val label_tool : string
+val label_source : string
+val label_alias : string
+val label_surface : string
+val label_shape : string
+val label_model : string
+val label_provider : string
+val label_provider_kind : string
+val label_status : string
+val label_site : string
+val label_reason : string
+val label_outcome : string
+val label_severity : string
+val label_decision : string
+val label_stop_reason : string
+val label_keeper_name : string
+val label_channel : string
+
+(** JSON field-key string constants used across keeper_hooks_oas.ml. *)
+val key_agent : string
+val key_task_id : string
+val key_input_tokens : string
+val key_output_tokens : string
+val key_cost_usd : string
+val key_cost_status : string
+val key_cost_status_reason : string
+val key_cost_usd_source : string
+val key_usage_missing : string
+val key_timestamp : string
+val key_raw_input_tokens : string
+val key_raw_output_tokens : string
+val key_raw_cost_usd : string
+val key_reasoning_tokens : string
+val key_cache_n : string
+val key_prompt_per_second : string
+val key_provider_tokens_per_second : string
+val key_hw_decode_tokens_per_second : string
+val key_peak_memory_gb : string
+val key_request_latency_ms : string
+val key_tokens_per_second : string
+val key_status : string
+val key_reason : string
+val key_provider : string
+val key_model : string
+val key_source : string
+val key_pr_review_action : string
+val key_pr_review_action_success : string
+val key_pr_work_action : string
+val key_pr_work_action_source : string
+val key_pr_work_action_success : string
+val key_type : string
+val key_turn : string
+val key_model_used : string
+val key_has_state_block : string
+val key_tool_calls_made : string
+val key_total_turns : string
+val key_scope : string
+val key_slots : string
+val key_slot_count : string
+val key_active_slot_count : string
+val key_inactive_slot_count : string
+val key_deny_list_count : string
+val key_ts_unix : string
+val key_name : string
+val key_generation : string
+val key_active : string
+val key_via : string
+val key_route_via : string
+val key_metric_event : string
+val key_agent_name : string
+val key_tool_name : string
+val key_tool_call_count : string
+val key_tools_used : string
+val key_duration_ms : string
+val key_channel : string
+val key_error : string
+val key_ts : string
+val key_max_cost_usd : string
+
 type cost_status =
   | Cost_reported         (** Cost trusted because OAS reported it. *)
   | Cost_known_free       (** Runtime is structurally unmetered. *)
@@ -133,3 +216,20 @@ val stop_reason_label_unknown : string
 val zero_usage : Agent_sdk.Types.api_usage
 (** Internal: zero-token api_usage sentinel used by classify_usage_trust
     when telemetry is missing. *)
+
+val telemetry_has_canonical_model_id :
+  Agent_sdk.Types.inference_telemetry option -> bool
+(** Internal: true when telemetry carries a non-empty canonical_model_id. *)
+
+val is_runtime_selector_alias : string -> bool
+(** Internal: true when the trimmed model leaf equals ["auto"]. *)
+
+val ms_per_second : float
+(** Internal: 1000.0 unit-conversion constant for duration_ms. *)
+
+val cost_source_unmetered_provider : string
+val cost_source_computed : string
+(** Internal: cost-source labels used by classify_cost_usd_source. *)
+
+val oas_reported_cost : Agent_sdk.Types.api_usage -> float
+(** Internal: extract positive cost from usage; clamps None/0/negative to 0.0. *)

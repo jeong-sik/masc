@@ -19,7 +19,7 @@ let handle_keeper_autoresearch_tool
   match Tool_autoresearch.dispatch ctx ~name ~args with
   | Some result ->
       if result.success then Tool_result.message result
-      else error_json (Tool_result.message result)
+      else tool_result_error_json result
   | None -> error_json ~fields:[ "tool", `String name ] "unknown_autoresearch_tool"
 ;;
 
@@ -161,7 +161,7 @@ let handle_keeper_masc_tool
          | Some tr ->
            let ok = tr.success in
            let msg = Tool_result.message tr in
-           if ok then msg else error_json msg
+           if ok then msg else tool_result_error_json tr
          | None ->
            if Tool_dispatch.is_mcp_context_required name
            then
@@ -203,7 +203,7 @@ let handle_keeper_masc_tool
                 | Some tr when tr.Tool_result.success ->
                   tr.Tool_result.legacy_message
                 | Some tr ->
-                  error_json tr.Tool_result.legacy_message
+                  tool_result_error_json tr
                 | None ->
                   Yojson.Safe.to_string
                     (`Assoc
@@ -237,7 +237,7 @@ let handle_registered_keeper_tool
        | None -> None
        | Some tr ->
          let msg = Tool_result.message tr in
-         Some (if tr.success then msg else error_json msg))
+         Some (if tr.success then msg else tool_result_error_json tr))
   in
   match dispatch_registered_handler () with
   | Some _ as result -> result

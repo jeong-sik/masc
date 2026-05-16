@@ -696,6 +696,73 @@ let test_dashboard_execution_surfaces_keeper_diagnostic () =
             check bool "active model label omitted on execution keeper row" true
               (row |> member "active_model_label" = `Null))))
 
+let test_dashboard_execution_reconciles_stale_approval_attention () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Coord_utils.default_config dir in
+      ignore (Lib.Coord.init config ~agent_name:None);
+      Eio.Switch.run (fun sw ->
+        Fun.protect
+          ~finally:(fun () ->
+            Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu")
+          (fun () ->
+            create_keeper env sw config "sangsu";
+            Lib.Dashboard_cache.invalidate_all ();
+            let approval_id =
+              Lib.Keeper_approval_queue.submit_pending
+                ~keeper_name:"sangsu"
+                ~tool_name:"Write"
+                ~input:(`Assoc [ ("file_path", `String "lib/example.ml") ])
+                ~risk_level:Lib.Keeper_approval_queue.High
+                ~base_path:dir
+                ~task_id:"task-dashboard-approval"
+                ~on_resolution:(fun _ -> ())
+                ()
+            in
+            let render () =
+              Lib.Dashboard_execution.json
+                ~config
+                ~sw
+                ~clock:(Eio.Stdenv.clock env)
+                ~proc_mgr:None
+                ()
+            in
+            let keeper_row json =
+              let open Yojson.Safe.Util in
+              json |> member "keepers" |> to_list
+              |> List.find (fun keeper ->
+                     keeper |> member "name" |> to_string = "sangsu")
+            in
+            let pending_row = keeper_row (render ()) in
+            let open Yojson.Safe.Util in
+            check string "cached snapshot starts with pending approval"
+              "approval_pending"
+              (pending_row |> member "attention_reason" |> to_string);
+            (match
+               Lib.Keeper_approval_queue.resolve
+                 ~id:approval_id
+                 ~decision:(Agent_sdk.Hooks.Reject "test resolved")
+             with
+             | Ok () -> ()
+             | Error err ->
+               fail
+                 (Lib.Keeper_approval_queue.resolve_error_to_string err));
+            let reconciled_row = keeper_row (render ()) in
+            let trust = reconciled_row |> member "runtime_trust" in
+            check int "fresh trust has no pending approvals" 0
+              (trust |> member "approval_state" |> member "pending_count" |> to_int);
+            check bool "fresh trust no longer needs attention" false
+              (trust |> member "needs_attention" |> to_bool);
+            check (option string) "row attention follows fresh trust"
+              (trust |> member "attention_reason" |> to_string_option)
+              (reconciled_row |> member "attention_reason" |> to_string_option);
+            check bool "stale approval reason cleared" true
+              (reconciled_row |> member "attention_reason" = `Null))))
+
 let test_execution_trust_surfaces_latest_receipt () =
   let dir = test_dir () in
   Fun.protect
@@ -1139,6 +1206,8 @@ let () =
             test_dashboard_execution_fresh_join_not_marked_stale;
           Alcotest.test_case "execution surfaces keeper diagnostic" `Quick
             test_dashboard_execution_surfaces_keeper_diagnostic;
+          Alcotest.test_case "execution clears stale approval attention" `Quick
+            test_dashboard_execution_reconciles_stale_approval_attention;
           Alcotest.test_case "execution trust surfaces latest receipt" `Quick
             test_execution_trust_surfaces_latest_receipt;
           Alcotest.test_case "execution queue surfaces keeper runtime trust" `Quick

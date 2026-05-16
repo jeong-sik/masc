@@ -27,7 +27,7 @@ export function extractLaneValue(
     case 'decision': return snapshot.decision.stage
     case 'cascade': return snapshot.cascade.state
     case 'compaction': return snapshot.compaction.stage
-    case 'breaker': return snapshot.circuit_breaker?.state ?? '(no circuit_breaker)'
+    case 'breaker': return snapshot.circuit_breaker?.state ?? 'clean'
   }
 }
 

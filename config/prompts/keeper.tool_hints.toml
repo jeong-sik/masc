@@ -55,8 +55,8 @@ description = "inspect GitHub after a task/worktree is bound"
 
 [[hints]]
 name = "keeper_bash"
-call = "`keeper_bash` { cmd: \"<single shell command>\" }"
-description = "run one shell command in the keeper workspace"
+call = "`keeper_bash` { cmd: \"<single shell command>\", cwd: \"repos/<repo-or-worktree>\" }"
+description = "run one shell command in the keeper workspace; set cwd for git/gh and never use cd chaining, redirects, shell existence tests, or Bash glob paths"
 
 [[hints]]
 name = "masc_web_search"
@@ -77,6 +77,11 @@ description = "create a repo worktree before code edits"
 name = "keeper_task_submit_for_verification"
 call = "`keeper_task_submit_for_verification` { notes: \"<evidence>\", pr_url: \"<url>\" }"
 description = "submit PR/code work for verification"
+
+[[hints]]
+name = "masc_transition"
+call = "`masc_transition` { task_id: \"<task-id>\", action: \"approve\", notes: \"<verification evidence>\" }"
+description = "approve or reject an awaiting_verification task after inspecting evidence"
 
 [[hints]]
 name = "keeper_task_done"

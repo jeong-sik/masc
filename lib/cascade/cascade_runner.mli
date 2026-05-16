@@ -204,6 +204,13 @@ val make_per_call_switch_transport :
   (sw:Eio.Switch.t -> Llm_provider.Llm_transport.t) ->
   Llm_provider.Llm_transport.t
 
+module For_testing : sig
+  val request_runtime_fields_on_base_config :
+    base:Llm_provider.Provider_config.t ->
+    Llm_provider.Provider_config.t ->
+    Llm_provider.Provider_config.t
+end
+
 (** {1 Lifecycle / checkpoint helpers (re-exported)} *)
 
 val publish_lifecycle :

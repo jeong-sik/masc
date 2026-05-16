@@ -635,10 +635,13 @@ let filesystem_tools : Masc_domain.tool_schema list =
     }
   ; { name = "keeper_fs_edit"
     ; description =
-        "Write or append to a file. path and content REQUIRED (both non-empty). mode: \
-         'overwrite' (default) or 'append'. Good: path='lib/foo.ml', content='let x = \
-         1'. Bad: path='', content=''. Bad: mode='create' (use overwrite). Creates \
-         parent dirs."
+        "Write, append, or patch a file. path is required. For mode='overwrite' \
+         (default) or 'append', content is required and non-empty. For mode='patch', \
+         old_string and new_string are required; old_string must match exactly once \
+         unless replace_all=true. Good overwrite: path='lib/foo.ml', content='let x = \
+         1'. Good patch: path='lib/foo.ml', mode='patch', old_string='old', \
+         new_string='new'. Bad: path='', content=''. Bad: mode='create' (use \
+         overwrite). Creates parent dirs."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -654,6 +657,21 @@ let filesystem_tools : Masc_domain.tool_schema list =
                       [ "type", `String "string"
                       ; "description", `String "File content to write"
                       ] )
+                ; ( "old_string"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; "description", `String "Patch mode substring to replace"
+                      ] )
+                ; ( "new_string"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; "description", `String "Patch mode replacement substring"
+                      ] )
+                ; ( "replace_all"
+                  , `Assoc
+                      [ "type", `String "boolean"
+                      ; "description", `String "Patch every occurrence instead of exactly one"
+                      ] )
                 ; (* Issue #8490: derive from local mirror that tracks
            [Keeper_exec_fs.valid_fs_write_mode_strings]. *)
                   ( "mode"
@@ -665,7 +683,7 @@ let filesystem_tools : Masc_domain.tool_schema list =
                       ; "description", `String "Write mode (default: overwrite)"
                       ] )
                 ] )
-          ; "required", `List [ `String "path"; `String "content" ]
+          ; "required", `List [ `String "path" ]
           ]
     }
   ; { name = "keeper_ide_annotate"
@@ -1127,3 +1145,172 @@ let coding_workspace_tool_names : string list =
   ]
 ;;
 
+(* coding_keeper_bridge_tools schema list moved to Tool_shard_types. *)
+(** Pre-flight validation for keeper autonomous work. *)
+let keeper_preflight_tools : Masc_domain.tool_schema list =
+  [ { name = "keeper_preflight_check"
+    ; description =
+        "Validate prerequisites before starting autonomous work: gh auth, repo access, \
+         keeper identity, preset level, cascade resilience, autonomous activation, repo \
+         readiness. Returns structured JSON with all check results. Read-only, no side \
+         effects."
+    ; input_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; ( "properties"
+            , `Assoc
+                [ ( "repo"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String "GitHub repo (owner/name) to check access for" )
+                      ] )
+                ; ( "repo_name"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "Optional sandbox repo directory name under repos/ when it \
+                             differs from the GitHub repo basename" )
+                      ] )
+                ] )
+          ; "required", `List [ `String "repo" ]
+          ]
+    }
+  ]
+;;
+
+(** Dedicated GitHub PR workflow tools. *)
+let keeper_github_pr_tools : Masc_domain.tool_schema list =
+  [ { name = "keeper_pr_list"
+    ; description =
+        "List GitHub pull requests with keeper-scoped credentials. Runs credential \
+         preflight before gh, accepts repo owner/name or cwd, and returns gh JSON. \
+         Read-only."
+    ; input_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; ( "properties"
+            , `Assoc
+                [ ( "repo"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "GitHub repo (owner/name). Optional when cwd is a git repo." )
+                      ] )
+                ; ( "cwd"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String "Optional keeper sandbox repo/worktree cwd." )
+                      ] )
+                ; ( "state"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "enum"
+                        , `List
+                            [ `String "open"
+                            ; `String "closed"
+                            ; `String "merged"
+                            ; `String "all"
+                            ] )
+                      ; "description", `String "PR state filter. Default open."
+                      ] )
+                ; ( "limit"
+                  , `Assoc
+                      [ "type", `String "integer"
+                      ; "description", `String "Max PRs to return, 1-100. Default 20."
+                      ] )
+                ] )
+          ]
+    }
+  ; { name = "keeper_pr_status"
+    ; description =
+        "Read one GitHub PR status/details with keeper-scoped credentials. Runs \
+         credential preflight before gh. Pass pr_number (preferred) or number."
+    ; input_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; ( "properties"
+            , `Assoc
+                [ ( "repo"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "GitHub repo (owner/name). Optional when cwd is a git repo." )
+                      ] )
+                ; ( "cwd"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String "Optional keeper sandbox repo/worktree cwd." )
+                      ] )
+                ; ( "pr_number"
+                  , `Assoc
+                      [ "type", `String "integer"
+                      ; "description", `String "PR number (preferred field name)"
+                      ] )
+                ; ( "number"
+                  , `Assoc
+                      [ "type", `String "integer"
+                      ; "description", `String "PR number (legacy alias for pr_number)"
+                      ] )
+                ] )
+          ]
+    }
+  ; { name = "keeper_pr_create"
+    ; description =
+        "Create a draft GitHub pull request with keeper-scoped credentials. Draft-only \
+         by policy: omit draft or set draft=true. Requires delivery, coding, or full \
+         preset."
+    ; input_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; ( "properties"
+            , `Assoc
+                [ ( "repo"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "GitHub repo (owner/name). Optional when cwd is a git repo." )
+                      ] )
+                ; ( "cwd"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "Keeper sandbox repo/worktree cwd. Required when repo cannot \
+                             infer the branch context." )
+                      ] )
+                ; ( "title"
+                  , `Assoc [ "type", `String "string"; "description", `String "PR title" ]
+                  )
+                ; ( "body"
+                  , `Assoc [ "type", `String "string"; "description", `String "PR body" ]
+                  )
+                ; ( "base"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; "description", `String "Optional base branch"
+                      ] )
+                ; ( "head"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; "description", `String "Optional head branch"
+                      ] )
+                ; ( "draft"
+                  , `Assoc
+                      [ "type", `String "boolean"
+                      ; ( "description"
+                        , `String
+                            "Must be true if provided; ready PR creation is rejected." )
+                      ] )
+                ] )
+          ; "required", `List [ `String "title"; `String "body" ]
+          ]
+    }
+  ]
+;;

@@ -487,6 +487,7 @@ val metric_llm_provider_errors_by_reason : string
 val metric_llm_provider_retries : string
 val metric_llm_provider_input_tokens : string
 val metric_llm_provider_output_tokens : string
+val metric_llm_provider_tool_calls : string
 val metric_llm_provider_circuit_state : string
 
 (** §7.3.2 Zero Silent Failure measurement: aggregate counter for every
@@ -805,6 +806,14 @@ val metric_memory_pipeline_flush_duration_seconds : string
 val metric_oas_bus_subscriber_stream_depth : string
 val metric_oas_bus_publish_block_seconds : string
 val metric_oas_bus_publish : string
+
+val metric_oas_bus_capacity : string
+(** Gauge: per-subscriber [Eio.Stream] capacity chosen at bus creation.
+    Labels: [bus] names the MASC bus ([oas_runtime] | [masc_domain]),
+    [policy] names the [Agent_sdk.Event_bus.backpressure_policy].
+    Published once per bus at [Masc_event_bus_policy.create_bus] so
+    operators can interpret [metric_oas_bus_subscriber_stream_depth]
+    as a fraction of capacity. *)
 val metric_runtime_ollama_probe_generate_skips : string
 
 (** #9632: subprocess executions that exceeded their configured

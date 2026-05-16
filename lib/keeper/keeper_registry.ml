@@ -53,12 +53,6 @@ let decr_running_count_clamped () =
 
     Pattern follows #7011 (executor_pool) and #7013 (runtime_state). *)
 
-let registry_key ~base_path name =
-  if String.contains name '\x1f'
-  then invalid_arg (Printf.sprintf "keeper name contains unit separator: %s" name);
-  base_path ^ "\x1f" ^ name
-;;
-
 let put_entry key entry =
   let rec loop () =
     let current = Atomic.get registry in
@@ -514,15 +508,6 @@ let set_last_correlation_id ~base_path name cid =
   update_entry ~base_path name (fun e -> { e with last_event_bus_correlation = Some cid })
 ;;
 
-let turn_phase_of_cascade_state (s : packed_cascade_state) : packed_turn_phase =
-  match s with
-  | Packed Cascade_idle -> Packed Turn_prompting
-  | Packed Cascade_selecting -> Packed Turn_routing
-  | Packed Cascade_trying -> Packed Turn_executing
-  | Packed Cascade_done -> Packed Turn_finalizing
-  | Packed Cascade_exhausted -> Packed Turn_exhausted
-;;
-
 let broadcast_composite_changed ~name ~ts_unix =
   try
     let json =
@@ -565,25 +550,6 @@ let record_phase_broadcast_failure ~name exn =
     "registry: keeper_phase_changed broadcast failed name=%s err=%s"
     name
     (Printexc.to_string exn)
-;;
-
-let completed_turn_outcome_of_observation (obs : turn_observation)
-  : Keeper_transition_audit.completed_turn_outcome
-  =
-  (* P1 silent-failure fix: the previous wildcard `| _ -> Turn_failed`
-     meant that adding a new variant to either ADT (decision_stage or
-     cascade_state) would silently fall through to Turn_failed without
-     a compile error.  Spelling out every variant lets the OCaml
-     exhaustiveness checker catch missing cases at build time. *)
-  match obs.decision_stage with
-  | Packed Decision_gate_rejected -> Keeper_transition_audit.Turn_gate_rejected
-  | Packed (Decision_undecided | Decision_guard_ok | Decision_tool_policy_selected) ->
-    (match obs.cascade_state with
-     | Packed Cascade_done -> Keeper_transition_audit.Turn_substantive
-     | Packed Cascade_idle
-     | Packed Cascade_selecting
-     | Packed Cascade_trying
-     | Packed Cascade_exhausted -> Keeper_transition_audit.Turn_failed)
 ;;
 
 let update_current_turn e f =
@@ -834,7 +800,43 @@ let mark_turn_cascade_exhausted ~base_path name =
 	         "registry: ignoring cascade exhaustion after Cascade_done name=%s \
 	          base_path=%s"
 	         name
-	         base_path)
+         base_path)
+;;
+
+let mark_turn_cascade_done ~base_path name =
+  let set_cascade_state cascade_state =
+    set_turn_cascade_state
+      ~base_path
+      name
+      (Packed cascade_state : packed_cascade_state)
+  in
+  match get ~base_path name with
+  | None | Some { current_turn_observation = None; _ } -> ()
+  | Some { current_turn_observation = Some obs; _ } ->
+    (match obs.cascade_state with
+     | Packed Cascade_idle ->
+       set_turn_decision_stage
+         ~base_path
+         name
+         Decision_active_tool_policy_selected;
+       set_cascade_state Cascade_selecting;
+       set_cascade_state Cascade_trying;
+       set_cascade_state Cascade_done
+     | Packed Cascade_selecting ->
+       set_turn_decision_stage
+         ~base_path
+         name
+         Decision_active_tool_policy_selected;
+       set_cascade_state Cascade_trying;
+       set_cascade_state Cascade_done
+     | Packed Cascade_trying -> set_cascade_state Cascade_done
+     | Packed Cascade_done -> set_cascade_state Cascade_done
+     | Packed Cascade_exhausted ->
+       Log.Keeper.warn
+         "registry: ignoring cascade completion after Cascade_exhausted name=%s \
+          base_path=%s"
+         name
+         base_path)
 ;;
 
 let mark_turn_provider_attempt_started ~base_path name =
@@ -1482,39 +1484,6 @@ let restore_tool_usage ~base_path name =
 
 (* ── RFC-0002 Event Dispatch ───────────────────────────── *)
 
-type lifecycle_event_origin =
-  | Generic_dispatch
-  | Post_turn_lifecycle
-  | Operator_compact
-
-let lifecycle_event_origin_to_string = function
-  | Generic_dispatch -> "generic_dispatch"
-  | Post_turn_lifecycle -> "post_turn_lifecycle"
-  | Operator_compact -> "operator_compact"
-;;
-
-let is_paired_lifecycle_event = function
-  | Keeper_state_machine.Compaction_started
-  | Keeper_state_machine.Compaction_completed _
-  | Keeper_state_machine.Compaction_failed _
-  | Keeper_state_machine.Handoff_started
-  | Keeper_state_machine.Handoff_completed _
-  | Keeper_state_machine.Handoff_failed _ -> true
-  | _ -> false
-;;
-
-let origin_allows_paired_lifecycle_event origin event =
-  match origin, event with
-  | Post_turn_lifecycle, event when is_paired_lifecycle_event event -> true
-  | ( Operator_compact
-    , ( Keeper_state_machine.Compaction_started
-      | Keeper_state_machine.Compaction_completed _
-      | Keeper_state_machine.Compaction_failed _ ) ) -> true
-  | Generic_dispatch, event when is_paired_lifecycle_event event -> false
-  | Operator_compact, event when is_paired_lifecycle_event event -> false
-  | _, _ -> true
-;;
-
 let validate_paired_lifecycle_origin origin event =
   if origin_allows_paired_lifecycle_event origin event
   then Ok ()
@@ -1582,23 +1551,6 @@ let record_followup_dispatch_rejection event =
     Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
     ~labels:[ "event", Keeper_state_machine.event_to_string event ]
     ()
-;;
-
-let pending_measurement_after_event now entry event =
-  match event with
-  | Keeper_state_machine.Context_measured { auto_rules; _ } ->
-    Some { tm_captured_at = now; tm_auto_rules = auto_rules }
-  | _ -> entry.pending_turn_measurement
-;;
-
-let compaction_stage_of_event entry event =
-  match event with
-  | Keeper_state_machine.Compaction_started
-  | Keeper_state_machine.Auto_compact_triggered
-  | Keeper_state_machine.Operator_compact_requested -> Packed Compaction_compacting
-  | Keeper_state_machine.Compaction_completed _ -> Packed Compaction_done
-  | Keeper_state_machine.Compaction_failed _ -> Packed Compaction_accumulating
-  | _ -> entry.compaction_stage
 ;;
 
 (* RFC-0072 Phase 6: the 3×3 compaction matrix dispatched as an exhaustive

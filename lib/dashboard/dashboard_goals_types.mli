@@ -276,3 +276,15 @@ val runtime_trust_from_receipt_fallback :
   meta:Keeper_types.keeper_meta ->
   Yojson.Safe.t ->
   Yojson.Safe.t
+
+(** {1 Goal timeline composition} *)
+
+(** Compose the task/approval/keeper/goal event lists into a single
+    timeline sorted by [ts] descending (newest first). Reads wall-clock
+    only as fallback when a keeper event lacks an [ts] field. *)
+val build_goal_timeline :
+  tree_node ->
+  goal_detail_keeper list ->
+  Yojson.Safe.t list ->
+  Yojson.Safe.t list ->
+  Yojson.Safe.t list

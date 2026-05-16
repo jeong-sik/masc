@@ -191,6 +191,8 @@ let start_container (t : t) ~(timeout_sec : float) =
                ()
            @ [ "--user"; Printf.sprintf "%d:%d" t.uid t.gid ]
            @ Keeper_sandbox_runtime.docker_user_env_args ()
+           @ Keeper_sandbox_runtime.docker_masc_runtime_env_args
+               ~container_root:t.container_root
            @ Keeper_sandbox_runtime.docker_nofile_args ()
            @ Env_config_keeper.KeeperSandbox.read_only_rootfs_args ()
            @ [ "--tmpfs"
@@ -206,9 +208,11 @@ let start_container (t : t) ~(timeout_sec : float) =
              ; Env_config_keeper.KeeperSandbox.memory ()
              ; "-v"
              ; t.host_root ^ ":" ^ t.container_root ^ ":rw"
-             ; "--workdir"
-             ; t.container_root
              ]
+           @ Keeper_sandbox_runtime.docker_masc_config_mount_args
+               ~base_path:t.config.base_path
+               ~container_root:t.container_root
+           @ [ "--workdir"; t.container_root ]
            @ identity_mounts
            @ network_args
            @ [ image; "sh"; "-lc"; "trap : TERM INT; while :; do sleep 3600; done" ]
@@ -277,6 +281,8 @@ let run_exec_with_status_once
       Keeper_sandbox_runtime.docker_command_argv ()
       @ [ "exec"; "--user"; Printf.sprintf "%d:%d" t.uid t.gid; "-w"; container_cwd ]
       @ Keeper_sandbox_runtime.docker_user_env_args ()
+      @ Keeper_sandbox_runtime.docker_masc_runtime_env_args
+          ~container_root:t.container_root
       @ (match stdin_content with
          | Some _ -> [ "-i" ]
          | None -> [])

@@ -321,6 +321,10 @@ case \"$1\" in\n\
     printf 'runtime-container\\n'\n\
     exit 0\n\
     ;;\n\
+  inspect)\n\
+    printf 'runtime-container-id\\n'\n\
+    exit 0\n\
+    ;;\n\
   exec)\n\
     printf 'exec ok\\n'\n\
     exit 0\n\
@@ -513,6 +517,37 @@ let test_docker_nofile_args_follow_config () =
   Alcotest.(check (list string)) "nofile floor"
     [ "--ulimit"; "nofile=1024:1024" ]
     (Keeper_sandbox_runtime.docker_nofile_args ())
+
+let test_docker_masc_config_binding_pins_container_runtime_paths () =
+  let base = "/tmp/masc-base" in
+  let container_root = "/home/keeper/playground/minjae" in
+  let expected_host_config =
+    Filename.concat (Common.masc_dir_from_base_path ~base_path:base) "config"
+  in
+  Alcotest.(check string)
+    "host config dir"
+    expected_host_config
+    (Keeper_sandbox_runtime.host_masc_config_dir ~base_path:base);
+  Alcotest.(check string)
+    "container config dir"
+    "/home/keeper/playground/minjae/.masc/config"
+    (Keeper_sandbox_runtime.container_masc_config_dir ~container_root);
+  Alcotest.(check (list string))
+    "runtime env args"
+    [ "--env"
+    ; "MASC_BASE_PATH=/home/keeper/playground/minjae"
+    ; "--env"
+    ; "MASC_CONFIG_DIR=/home/keeper/playground/minjae/.masc/config"
+    ]
+    (Keeper_sandbox_runtime.docker_masc_runtime_env_args ~container_root);
+  Alcotest.(check (list string))
+    "config bind mount"
+    [ "-v"
+    ; expected_host_config ^ ":/home/keeper/playground/minjae/.masc/config:ro"
+    ]
+    (Keeper_sandbox_runtime.docker_masc_config_mount_args
+       ~base_path:base
+       ~container_root)
 
 let test_cleanup_stale_containers_removes_only_stale_masc_scope () =
   with_fake_docker fake_docker_cleanup_script @@ fun () ->
@@ -718,7 +753,30 @@ let test_turn_runtime_reuses_single_container () =
   in
   Alcotest.(check int) "docker run happens once" 1 (count "run -d ");
   Alcotest.(check int) "docker exec happens twice" 2 (count "exec ");
-  Alcotest.(check int) "docker rm happens once" 1 (count "rm -f ")
+  Alcotest.(check int) "docker rm happens once" 1 (count "rm -f ");
+  let container_root = Keeper_sandbox.container_root meta.name in
+  let host_config_dir = Filename.concat (Filename.concat base Common.masc_dirname) "config" in
+  let container_config_dir =
+    Keeper_sandbox_runtime.container_masc_config_dir ~container_root
+  in
+  let run_line =
+    lines
+    |> List.find_opt (fun line -> String.starts_with ~prefix:"run -d " line)
+    |> Option.value ~default:""
+  in
+  let exec_line =
+    lines
+    |> List.find_opt (fun line -> String.starts_with ~prefix:"exec " line)
+    |> Option.value ~default:""
+  in
+  Alcotest.(check bool) "turn run mounts config read-only" true
+    (contains_substring
+       run_line
+       (host_config_dir ^ ":" ^ container_config_dir ^ ":ro"));
+  Alcotest.(check bool) "turn run pins MASC_CONFIG_DIR" true
+    (contains_substring run_line ("MASC_CONFIG_DIR=" ^ container_config_dir));
+  Alcotest.(check bool) "turn exec pins MASC_CONFIG_DIR" true
+    (contains_substring exec_line ("MASC_CONFIG_DIR=" ^ container_config_dir))
 
 let test_default_fs_hardening_helpers () =
   with_env "MASC_KEEPER_SANDBOX_RELAX_FS" "false" @@ fun () ->
@@ -825,6 +883,8 @@ let run_tests () =
             test_docker_network_args_follow_masc_policy;
           Alcotest.test_case "docker nofile args follow config" `Quick
             test_docker_nofile_args_follow_config;
+          Alcotest.test_case "docker MASC config binding pins paths" `Quick
+            test_docker_masc_config_binding_pins_container_runtime_paths;
           Alcotest.test_case "managed label args include ttl" `Quick
             test_sandbox_container_label_args_include_managed_ttl;
           Alcotest.test_case "sandbox label args include owner scope" `Quick

@@ -894,6 +894,51 @@ let docker_run_line log_path =
   | Some line -> line
   | None -> Alcotest.fail "expected docker run log line"
 
+let test_docker_shell_mounts_masc_config_runtime_paths () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
+  match
+    Keeper_shell_docker.run_docker_shell_command_with_status
+      ~config
+      ~meta
+      ~cwd:playground
+      ~timeout_sec:5.0
+      ~cmd:"pwd"
+      ~git_creds_enabled:false
+      ~network_mode:Keeper_types.Network_none
+  with
+  | Error msg -> Alcotest.failf "expected fake docker run, got %s" msg
+  | Ok result ->
+    (match result.Keeper_shell_docker.status with
+     | Unix.WEXITED 0 -> ()
+     | Unix.WEXITED code -> Alcotest.failf "expected exit 0, got %d" code
+     | Unix.WSIGNALED code -> Alcotest.failf "expected exit 0, signaled %d" code
+     | Unix.WSTOPPED code -> Alcotest.failf "expected exit 0, stopped %d" code);
+    let line = docker_run_line log_path in
+    let container_root = Keeper_sandbox.container_root meta.name in
+    let host_config_dir =
+      Filename.concat (Filename.concat config.Coord.base_path Common.masc_dirname) "config"
+    in
+    let container_config_dir =
+      Masc_mcp.Keeper_sandbox_runtime.container_masc_config_dir ~container_root
+    in
+    Alcotest.(check bool) "MASC config mounted read-only" true
+      (contains_substring
+         line
+         (host_config_dir ^ ":" ^ container_config_dir ^ ":ro"));
+    Alcotest.(check bool) "container MASC_BASE_PATH pinned" true
+      (contains_substring line ("MASC_BASE_PATH=" ^ container_root));
+    Alcotest.(check bool) "container MASC_CONFIG_DIR pinned" true
+      (contains_substring line ("MASC_CONFIG_DIR=" ^ container_config_dir))
+
 let run_git_creds_docker_shell ~config ~meta ~playground ~log_path =
   ensure_github_identity_bundle ~config Masc_mcp.Keeper_gh_env.root_github_identity;
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
@@ -1356,6 +1401,9 @@ let () =
           Alcotest.test_case
             "git-creds inherit network omits invalid docker flag"
             `Quick test_git_creds_inherit_network_omits_invalid_network_flag;
+          Alcotest.test_case
+            "docker shell mounts MASC config runtime paths"
+            `Quick test_docker_shell_mounts_masc_config_runtime_paths;
           Alcotest.test_case
             "git-creds mounts passwd entry for numeric uid"
             `Quick test_git_creds_mounts_numeric_user_identity;

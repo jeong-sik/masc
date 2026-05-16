@@ -3,8 +3,8 @@
     Pure: same request inputs ⇒ identical plan. Asserts the
     deterministic content the v2.3 pure/edge table specifies — the
     7-label set (and that PID/started_at are NOT in it), the workspace +
-    identity mount specs, the identity-file [(path, content)] pairs, the
-    4 hardcoded env overrides, the nofile ulimit. *)
+    config + identity mount specs, the identity-file [(path, content)]
+    pairs, the container env overrides, the nofile ulimit. *)
 
 open Alcotest
 open Masc_mcp
@@ -79,8 +79,9 @@ let test_mounts_workspace_then_identity () =
   let p = plan () in
   check
     (list string)
-    "workspace volume first, then passwd then group identity mounts"
+    "workspace volume first, then config, passwd, group mounts"
     [ "/var/masc/alice:/keeper/alice:rw"
+    ; "/srv/masc/.masc/config:/keeper/alice/.masc/config:ro"
     ; "/var/masc/alice/.docker-identity/passwd:/etc/passwd:ro"
     ; "/var/masc/alice/.docker-identity/group:/etc/group:ro"
     ]
@@ -103,8 +104,14 @@ let test_env_overrides () =
   let p = plan () in
   check
     (list (pair string string))
-    "4 hardcoded env vars, no host inheritance"
-    [ "HOME", "/tmp"; "USER", "keeper"; "LOGNAME", "keeper"; "SHELL", "/bin/sh" ]
+    "hardcoded env vars plus container MASC paths, no host inheritance"
+    [ "HOME", "/tmp"
+    ; "USER", "keeper"
+    ; "LOGNAME", "keeper"
+    ; "SHELL", "/bin/sh"
+    ; "MASC_BASE_PATH", "/keeper/alice"
+    ; "MASC_CONFIG_DIR", "/keeper/alice/.masc/config"
+    ]
     (Keeper_sandbox_session_plan.env_overrides p)
 ;;
 
@@ -133,6 +140,8 @@ let test_env_overrides_extra () =
       ; "USER", "keeper"
       ; "LOGNAME", "keeper"
       ; "SHELL", "/bin/sh"
+      ; "MASC_BASE_PATH", "/r"
+      ; "MASC_CONFIG_DIR", "/r/.masc/config"
       ; "FOO", "bar"
       ]
       (Keeper_sandbox_session_plan.env_overrides p)
@@ -215,7 +224,7 @@ let () =
         ; test_case "identity file content from uid/gid" `Quick test_identity_files_content
         ] )
     ; ( "env"
-      , [ test_case "4 hardcoded overrides" `Quick test_env_overrides
+      , [ test_case "container runtime overrides" `Quick test_env_overrides
         ; test_case "extra_env appended" `Quick test_env_overrides_extra
         ] )
     ; ( "labels"

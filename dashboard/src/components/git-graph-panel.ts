@@ -62,7 +62,7 @@ function clearGitGraphRouteFocus(): void {
 export function compactGitGraphPath(path: string): string {
   const normalized = path.replace(/\\/g, '/')
   const parts = normalized.split('/').filter(Boolean)
-  if (parts.length <= 2) return normalized || '(no path)'
+  if (parts.length <= 2) return normalized || 'workspace'
   return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`
 }
 

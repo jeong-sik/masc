@@ -345,6 +345,30 @@ val metric_keeper_memory_jsonl_ops : string
     JSONL-side issues that the dependency-leaf [Memory_jsonl] cannot
     self-report. *)
 
+val metric_keeper_summarizer_state_scrubs : string
+(** Counter for [Keeper_summarizer.keeper_summarizer] invocations,
+    classified by label [outcome] (with_scrub | without_scrub).
+    Rising [with_scrub] rate is the operational signal that the
+    OAS compaction summarizer is regularly receiving [STATE]
+    markers in summarisable messages — the resonance-loop input
+    that PR #7647 closed at the prompt-injection layer. *)
+
+val metric_keeper_summarizer_state_blocks_removed : string
+(** Counter for the total number of [STATE] block start markers
+    scrubbed.  Divide by [_summarizer_state_scrubs{outcome=with_scrub}]
+    to get blocks-per-scrub; diverging signals turn replay or
+    assistant echo of [STATE] across multiple messages. *)
+
+val metric_keeper_oas_env_key_rejections : string
+(** Counter for [Keeper_types_profile.extract_oas_env_from_doc]
+    entries dropped because the suffix did not match the
+    [OAS_(CLAUDE|CODEX|GEMINI)_] / [MASC_KEEPER_OAS_] allowlist.
+    Each rejected key increments by one and produces a warn line
+    so operators can spot configuration mistakes or attempted
+    env-injection bypass.  Non-zero counts at startup mean the
+    keeper TOML contains [keeper.oas_env.<X>] keys that the
+    runtime silently ignored. *)
+
 val metric_keeper_memory_write_failures : string
 val metric_keeper_memory_consolidations : string
 val metric_keeper_write_meta_cycle_failures : string

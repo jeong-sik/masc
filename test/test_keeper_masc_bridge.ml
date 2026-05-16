@@ -939,6 +939,9 @@ let () =
             "read preflight accepts sandbox-relative repo path" `Quick
             test_read_only_preflight_accepts_sandbox_relative_repo_path;
           Alcotest.test_case
+            "write preflight accepts sandbox-relative repo path" `Quick
+            test_write_preflight_accepts_sandbox_relative_repo_path;
+          Alcotest.test_case
             "write preflight accepts Docker container repo path" `Quick
             test_write_preflight_accepts_docker_container_repo_path;
           Alcotest.test_case

@@ -233,8 +233,21 @@ let test_wait_observation_reason_labels () =
        ())
 
 let test_cascade_backpressure_decision () =
+  let blocked_resilience : Masc_mcp.Keeper_exec_preflight.cascade_resilience =
+    {
+      ok = false;
+      cascade_name = "tier-group.coding_plan";
+      model_labels = [ "ollama.ollama-local-default.recovery" ];
+      pure_local = true;
+      fallback_cascade = None;
+      blocker = Some "pure_local_single_provider_no_fallback";
+      error = None;
+      hint = Some "local-only guard is active";
+    }
+  in
   let unhealthy =
     KHL.cascade_backpressure_decision
+      ~cascade_resilience:None
       ~should_run_turn:true
       ~cascade_name:"primary"
       ~cascade_status:(Masc_mcp.Keeper_health_probe.Unhealthy "failure_ratio")
@@ -246,6 +259,7 @@ let test_cascade_backpressure_decision () =
    | KHL.Cascade_admitted -> Alcotest.fail "unhealthy cascade was admitted");
   (match
      KHL.cascade_backpressure_decision
+       ~cascade_resilience:None
        ~should_run_turn:true
        ~cascade_name:"primary"
        ~cascade_status:Masc_mcp.Keeper_health_probe.Healthy
@@ -254,14 +268,33 @@ let test_cascade_backpressure_decision () =
    | KHL.Cascade_backpressured _ -> Alcotest.fail "healthy cascade was blocked");
   (match
      KHL.cascade_backpressure_decision
+       ~cascade_resilience:None
        ~should_run_turn:true
        ~cascade_name:"primary"
        ~cascade_status:Masc_mcp.Keeper_health_probe.Unknown
    with
    | KHL.Cascade_admitted -> ()
    | KHL.Cascade_backpressured _ -> Alcotest.fail "unknown cascade was blocked");
+  (match
+     KHL.cascade_backpressure_decision
+       ~cascade_resilience:(Some blocked_resilience)
+       ~should_run_turn:true
+       ~cascade_name:"tier-group.coding_plan"
+       ~cascade_status:Masc_mcp.Keeper_health_probe.Healthy
+   with
+   | KHL.Cascade_backpressured { cascade_name; reason } ->
+     Alcotest.(check string)
+       "resilience cascade name"
+       "tier-group.coding_plan"
+       cascade_name;
+     Alcotest.(check string)
+       "resilience reason"
+       "cascade_resilience_pure_local_single_provider_no_fallback"
+       reason
+   | KHL.Cascade_admitted -> Alcotest.fail "bad cascade resilience was admitted");
   match
     KHL.cascade_backpressure_decision
+      ~cascade_resilience:(Some blocked_resilience)
       ~should_run_turn:false
       ~cascade_name:"primary"
       ~cascade_status:(Masc_mcp.Keeper_health_probe.Unhealthy "failure_ratio")
@@ -274,7 +307,16 @@ let test_cascade_backpressure_reason_labels () =
   Alcotest.(check (list string))
     "cascade backpressure reasons"
     [ "cascade_backpressure"; "cascade_unhealthy"; "reason_failure_ratio_" ]
-    (KHL.cascade_backpressure_observation_reasons ~reason:"Failure Ratio!")
+    (KHL.cascade_backpressure_observation_reasons ~reason:"Failure Ratio!");
+  Alcotest.(check (list string))
+    "cascade resilience backpressure reasons"
+    [
+      "cascade_backpressure";
+      "cascade_resilience";
+      "reason_cascade_resilience_pure_local_single_provider_no_fallback";
+    ]
+    (KHL.cascade_backpressure_observation_reasons
+       ~reason:"cascade_resilience_pure_local_single_provider_no_fallback")
 
 let test_cascade_backpressure_updates_registry () =
   let base_path =

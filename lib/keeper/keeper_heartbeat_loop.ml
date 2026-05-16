@@ -415,19 +415,43 @@ let skip_reason_component raw =
 ;;
 
 let cascade_backpressure_observation_reasons ~reason =
+  let category =
+    if String.starts_with ~prefix:"cascade_resilience_" reason then
+      "cascade_resilience"
+    else "cascade_unhealthy"
+  in
   [ "cascade_backpressure"
-  ; "cascade_unhealthy"
+  ; category
   ; "reason_" ^ skip_reason_component reason
   ]
 ;;
 
-let cascade_backpressure_decision ~should_run_turn ~cascade_name ~cascade_status =
-  match should_run_turn, cascade_status with
-  | true, Keeper_health_probe.Unhealthy reason ->
+let cascade_resilience_backpressure_reason
+      (resilience : Keeper_exec_preflight.cascade_resilience)
+  =
+  Option.map
+    (fun blocker -> "cascade_resilience_" ^ blocker)
+    resilience.blocker
+;;
+
+let cascade_backpressure_decision
+      ~cascade_resilience
+      ~should_run_turn
+      ~cascade_name
+      ~cascade_status
+  =
+  let resilience_reason =
+    match cascade_resilience with
+    | None -> None
+    | Some resilience -> cascade_resilience_backpressure_reason resilience
+  in
+  match should_run_turn, cascade_status, resilience_reason with
+  | true, Keeper_health_probe.Unhealthy reason, _ ->
     Cascade_backpressured { cascade_name; reason }
-  | false, _
-  | true, Keeper_health_probe.Unknown
-  | true, Keeper_health_probe.Healthy -> Cascade_admitted
+  | true, _, Some reason -> Cascade_backpressured { cascade_name; reason }
+  | false, _, _
+  | true, Keeper_health_probe.Unknown, None
+  | true, Keeper_health_probe.Healthy, None -> Cascade_admitted
 ;;
 
 let record_cascade_backpressure_observation ~base_path ~keeper_name ~reason =
@@ -931,8 +955,12 @@ let run_keepalive_unified_turn
         (not (Atomic.get stop)) && turn_decision.should_run
       in
       let cascade_name = cascade_name_of_meta meta_after_triage in
+      let cascade_resilience =
+        Keeper_exec_preflight.cascade_resilience_of_name cascade_name
+      in
       let cascade_backpressure =
         cascade_backpressure_decision
+          ~cascade_resilience:(Some cascade_resilience)
           ~should_run_turn:requested_should_run_turn
           ~cascade_name
           ~cascade_status:(Keeper_health_probe.get_cascade_status ~cascade_name)

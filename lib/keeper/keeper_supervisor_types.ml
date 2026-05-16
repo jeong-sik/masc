@@ -134,3 +134,31 @@ let active_supervision_keeper_count entries =
        e.phase = Keeper_state_machine.Running || e.phase = Keeper_state_machine.Crashed)
     entries
 ;;
+
+let next_auto_resume_after_sec ~initial_sec ~max_sec previous =
+  if initial_sec <= 0.0
+  then None
+  else
+    Some
+      (match previous with
+       | None -> Float.min max_sec initial_sec
+       | Some prev -> Float.min max_sec (prev *. 2.0))
+;;
+
+let liveness_recovery_backoff attempt =
+  let base = Env_config.KeeperSupervisor.liveness_recovery_backoff_base_sec in
+  let max_delay = Env_config.KeeperSupervisor.liveness_recovery_backoff_max_sec in
+  Float.min max_delay (base *. Float.of_int (1 lsl min attempt 20))
+;;
+
+let should_attempt_liveness_recovery ~now (entry : Keeper_registry.registry_entry) : bool =
+  if entry.phase <> Keeper_state_machine.Dead
+  then false
+  else if entry.conditions.zombie_timeout_reached
+  then false
+  else (
+    let min_dead_sec = Env_config.KeeperSupervisor.liveness_recovery_min_dead_sec in
+    match entry.dead_since_ts with
+    | None -> false
+    | Some dead_since -> now -. dead_since >= min_dead_sec)
+;;

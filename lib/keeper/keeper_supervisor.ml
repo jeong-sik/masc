@@ -1200,15 +1200,6 @@ let apply_self_preservation ~keepers_dir ~total_keepers to_restart =
     to_restart)
 ;;
 
-let next_auto_resume_after_sec ~initial_sec ~max_sec previous =
-  if initial_sec <= 0.0
-  then None
-  else
-    Some
-      (match previous with
-       | None -> Float.min max_sec initial_sec
-       | Some prev -> Float.min max_sec (prev *. 2.0))
-;;
 
 (** #10765 Phase 2: persist [meta.paused = true] for a keeper whose stale
     watchdog detected a termination storm (window count >= threshold).  The
@@ -1997,28 +1988,6 @@ let get_or_create_recovery_state name =
       s)
 ;;
 
-let liveness_recovery_backoff attempt =
-  let base = Env_config.KeeperSupervisor.liveness_recovery_backoff_base_sec in
-  let max_delay = Env_config.KeeperSupervisor.liveness_recovery_backoff_max_sec in
-  Float.min max_delay (base *. Float.of_int (1 lsl min attempt 20))
-;;
-
-let should_attempt_liveness_recovery ~now (entry : Keeper_registry.registry_entry) : bool =
-  (* Only Dead keepers, not Zombie (terminal_failure_latched = structural) *)
-  if entry.phase <> Keeper_state_machine.Dead
-  then false (* Zombie timeout reached: structural terminal — skip *)
-  else if entry.conditions.zombie_timeout_reached
-  then false
-  else (
-    let min_dead_sec = Env_config.KeeperSupervisor.liveness_recovery_min_dead_sec in
-    (* Pattern-match dead_since_ts directly: collapsing None -> 0.0 via
-       Option.value created a strict-`>` guard that rejected legitimate
-       at:0.0 fixtures (the synthetic epoch used in tests like
-       liveness_recovery_2 — see #12826). *)
-    match entry.dead_since_ts with
-    | None -> false
-    | Some dead_since -> now -. dead_since >= min_dead_sec)
-;;
 
 type credential_recovery_outcome =
   | Credential_recovery_not_needed

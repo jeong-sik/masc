@@ -691,6 +691,10 @@ let metric_keeper_oas_env_key_rejections =
   "masc_keeper_oas_env_key_rejections_total"
 ;;
 
+let metric_keeper_continuity_ts_recovered =
+  "masc_keeper_continuity_ts_recovered_total"
+;;
+
 let metric_keeper_memory_write_failures = "masc_keeper_memory_write_failures_total"
 let metric_keeper_memory_consolidations = "masc_keeper_memory_consolidations_total"
 

@@ -55,12 +55,15 @@ keepers = []
 status = "Active"
 auto_sync = false
 sync_interval = 300
+aliases = ["project"]
 ```
 
 Fields to review:
 - `credential_id`: Assign the correct credential for this remote
 - `keepers`: List keeper IDs that should access this repository
 - `local_path`: Change if you want to keep the existing worktree location
+- `aliases`: Optional repo-evidence terms used by keeper worktree inference when
+  a task says `project` but the sandbox clone directory is named differently
 
 ### Phase 3: Backward Compatibility
 

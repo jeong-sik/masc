@@ -28,6 +28,32 @@ let assoc_string key json =
 
 let assoc_member key json = Yojson.Safe.Util.member key json
 
+let contains_substring text needle =
+  let text_len = String.length text in
+  let needle_len = String.length needle in
+  if needle_len = 0
+  then true
+  else if needle_len > text_len
+  then false
+  else (
+    let last = text_len - needle_len in
+    let rec loop idx =
+      idx <= last
+      && (String.equal (String.sub text idx needle_len) needle || loop (idx + 1))
+    in
+    loop 0)
+
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let with_temp_cascade_toml content f =
+  let path = Filename.temp_file "cascade-runtime-probe-" ".toml" in
+  write_file path content;
+  Fun.protect ~finally:(fun () -> try Sys.remove path with _ -> ()) (fun () -> f path)
+
 let test_probe_ok_real_identity () =
   let p =
     probe ~status:C.Probe_ok
@@ -128,6 +154,65 @@ let test_probe_skipped_real_identity () =
     (assoc_string "model_string" json);
   Alcotest.(check string) "status is skipped" "skipped"
     (assoc_string "status" json)
+
+let local_ollama_toml =
+  {|
+[providers.ollama]
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.local-default]
+api-name = "gemma4:31b-it-q4_K_M"
+max-context = 262144
+tools-support = true
+
+[ollama.local-default]
+max-concurrent = 1
+
+[tier.local]
+members = ["ollama.local-default"]
+strategy = "failover"
+
+[tier-group.coding_plan]
+tiers = ["local"]
+strategy = "failover"
+
+[routes.keeper_turn]
+target = "tier-group.coding_plan"
+|}
+
+let test_local_probe_without_eio_is_skipped_not_error () =
+  with_temp_cascade_toml local_ollama_toml @@ fun config_path ->
+  match C.validate_path ~config_path () with
+  | Error rejection ->
+    Alcotest.failf
+      "expected valid cascade, got rejection: %s"
+      (Yojson.Safe.to_string (C.rejection_to_yojson rejection))
+  | Ok snapshot ->
+    let profile =
+      List.find
+        (fun (profile : C.profile_build) ->
+          String.equal profile.name "tier-group.coding_plan")
+        snapshot.profiles
+    in
+    (match profile.probes with
+     | [ probe ] ->
+       (match probe.status with
+        | C.Probe_skipped reason ->
+          Alcotest.(check bool)
+            "skip reason mentions missing Eio capabilities"
+            true
+            (contains_substring reason "Eio runtime capabilities")
+        | C.Probe_error reason ->
+          Alcotest.failf "local no-Eio probe should not be error: %s" reason
+        | C.Probe_ok ->
+          Alcotest.fail "local no-Eio probe unexpectedly succeeded"
+        | C.Probe_not_applicable reason ->
+          Alcotest.failf
+            "local no-Eio probe should be skipped, not not_applicable: %s"
+            reason)
+     | probes ->
+       Alcotest.failf "expected one probe, got %d" (List.length probes))
 
 (* Anti-regression: assert specifically that the placeholder strings used
    pre-#15070 do NOT appear in the JSON when the probe carries real
@@ -296,6 +381,8 @@ let () =
             test_probe_error_real_identity;
           case "Probe_skipped emits real identity"
             test_probe_skipped_real_identity;
+          case "local no-Eio probe is skipped, not error"
+            test_local_probe_without_eio_is_skipped_not_error;
         ] );
       ( "candidate_probe anti-regression",
         [

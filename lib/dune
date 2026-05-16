@@ -101,6 +101,7 @@
    keeper_gh_shared
    keeper_tool_github_pr
    keeper_tool_pr_review
+   keeper_activation_readiness
    keeper_exec_preflight
    keeper_exec_task
    keeper_exec_voice

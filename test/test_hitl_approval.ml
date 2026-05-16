@@ -148,6 +148,19 @@ let with_test_config f =
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
       f state.room_config)
 
+let with_eio_base_path f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let base_path = temp_dir () in
+  AQ.For_testing.reset_audit_store ();
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_audit_store ();
+      cleanup_dir base_path)
+    (fun () -> f base_path)
+
 let with_temp_masc_base f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -726,12 +739,10 @@ let test_approval_get_dispatch_success () =
     (match !callback_result with Some (Agent_sdk.Hooks.Reject _) -> true | _ -> false)
 
 let test_resolve_with_policy_remembers_medium_allow () =
-  let base_path = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
-    (fun () ->
+  with_eio_base_path @@ fun base_path ->
       let id =
         AQ.submit_pending
+          ~base_path
           ~keeper_name:"remember-keeper"
           ~tool_name:"masc_claim_task"
           ~input:(`Assoc [])
@@ -753,15 +764,13 @@ let test_resolve_with_policy_remembers_medium_allow () =
       | Ok { remembered_rule = None } ->
           Alcotest.fail "expected remembered_rule for medium allow"
       | Error err ->
-          Alcotest.fail ("resolve_with_policy failed: " ^ AQ.resolve_error_to_string err))
+          Alcotest.fail ("resolve_with_policy failed: " ^ AQ.resolve_error_to_string err)
 
 let test_resolve_with_policy_does_not_remember_high_allow () =
-  let base_path = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
-    (fun () ->
+  with_eio_base_path @@ fun base_path ->
       let id =
         AQ.submit_pending
+          ~base_path
           ~keeper_name:"remember-keeper"
           ~tool_name:"keeper_fs_edit"
           ~input:(`Assoc [("path", `String "lib/example.ml")])
@@ -783,7 +792,7 @@ let test_resolve_with_policy_does_not_remember_high_allow () =
       | Ok { remembered_rule = Some _ } ->
           Alcotest.fail "high-risk allow should not be remembered"
       | Error err ->
-          Alcotest.fail ("resolve_with_policy failed: " ^ AQ.resolve_error_to_string err))
+          Alcotest.fail ("resolve_with_policy failed: " ^ AQ.resolve_error_to_string err)
 
 let test_dashboard_resolve_and_delete_rules_use_room_base_path () =
   let env_base = temp_dir () in
@@ -984,6 +993,101 @@ let test_callback_production_keeper_write_requires_approval () =
   | Some _ -> Alcotest.fail "expected Approve after operator resolution"
   | None -> Alcotest.fail "keeper write callback did not suspend for approval")
 
+let test_callback_production_claimed_worktree_write_auto_approved () =
+  with_test_config @@ fun config ->
+  let keeper_name = "sandbox-writer" in
+  let meta =
+    meta_from_json
+      (`Assoc
+        [
+          ("name", `String keeper_name);
+          ("agent_name", `String ("keeper-" ^ keeper_name ^ "-agent"));
+          ("trace_id", `String "sandbox-write-trace");
+          ("sandbox_profile", `String "docker");
+          ("network_mode", `String "inherit");
+          ("current_task_id", `String "task-210");
+        ])
+  in
+  let pending_before = AQ.pending_count () in
+  let cb =
+    GP.to_oas_approval_callback
+      ~config
+      ~governance_level:"production"
+      ~keeper_name
+      ~meta
+      ()
+  in
+  let decision =
+    cb
+      ~tool_name:"Write"
+      ~input:
+        (`Assoc
+          [
+            ( "file_path",
+              `String
+                "repos/masc-mcp/.worktrees/keeper-sandbox-writer-task-210/lib/example.ml"
+            );
+            ("content", `String "let x = 1\n");
+          ])
+  in
+  match decision with
+  | Agent_sdk.Hooks.Approve ->
+    Alcotest.(check int)
+      "claimed sandbox worktree write does not enqueue approval"
+      pending_before
+      (AQ.pending_count ())
+  | Agent_sdk.Hooks.Reject r ->
+    Alcotest.fail
+      ("expected Approve for claimed sandbox worktree write, got Reject: " ^ r)
+  | _ -> Alcotest.fail "unexpected decision"
+
+let test_sandbox_worktree_write_rule_rejects_unclaimed_or_root_checkout () =
+  with_test_config @@ fun config ->
+  let keeper_name = "sandbox-writer-negative" in
+  let claimed_meta =
+    meta_from_json
+      (`Assoc
+        [
+          ("name", `String keeper_name);
+          ("agent_name", `String ("keeper-" ^ keeper_name ^ "-agent"));
+          ("trace_id", `String "sandbox-write-negative-trace");
+          ("sandbox_profile", `String "docker");
+          ("network_mode", `String "inherit");
+          ("current_task_id", `String "task-210");
+        ])
+  in
+  let unclaimed_meta = { claimed_meta with current_task_id = None } in
+  let worktree_input =
+    `Assoc
+      [
+        ( "file_path",
+          `String
+            "repos/masc-mcp/.worktrees/keeper-sandbox-writer-negative-task-210/lib/example.ml"
+        );
+      ]
+  in
+  let root_checkout_input =
+    `Assoc [ ("file_path", `String "repos/masc-mcp/lib/example.ml") ]
+  in
+  Alcotest.(check (option string))
+    "unclaimed keeper has no code-write routine label"
+    None
+    (Masc_mcp.Keeper_routine_allowlist.sandboxed_code_write_rule_label
+       ~config
+       ~meta:unclaimed_meta
+       ~tool_name:"Write"
+       ~input:worktree_input
+       ~risk_level:AQ.High);
+  Alcotest.(check (option string))
+    "root checkout path has no code-write routine label"
+    None
+    (Masc_mcp.Keeper_routine_allowlist.sandboxed_code_write_rule_label
+       ~config
+       ~meta:claimed_meta
+       ~tool_name:"Write"
+       ~input:root_checkout_input
+       ~risk_level:AQ.High)
+
 let test_callback_production_keeper_shell_gh_read_only_auto_approved () =
   with_test_config @@ fun config ->
   let cb =
@@ -1021,12 +1125,10 @@ let test_callback_production_worktree_create_auto_approved () =
   | _ -> Alcotest.fail "unexpected decision"
 
 let test_callback_paranoid_medium_risk_uses_remembered_policy () =
-  let base_path = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
-    (fun () ->
+  with_eio_base_path @@ fun base_path ->
       let id =
         AQ.submit_pending
+          ~base_path
           ~keeper_name:"remember-keeper"
           ~tool_name:"masc_claim_task"
           ~input:(`Assoc [])
@@ -1059,7 +1161,7 @@ let test_callback_paranoid_medium_risk_uses_remembered_policy () =
       | Agent_sdk.Hooks.Reject reason ->
           Alcotest.fail ("expected remembered approve, got reject: " ^ reason)
       | Agent_sdk.Hooks.Edit _ ->
-          Alcotest.fail "expected remembered approve, got edit")
+          Alcotest.fail "expected remembered approve, got edit"
 
 let test_callback_always_approve_bypasses_threshold () =
   with_test_config @@ fun config ->
@@ -1068,6 +1170,8 @@ let test_callback_always_approve_bypasses_threshold () =
       (`Assoc [
         ("name", `String "test-keeper");
         ("trace_id", `String "test-trace");
+        ("sandbox_profile", `String "docker");
+        ("network_mode", `String "inherit");
         ("always_approve", `Bool true);
       ])
   in
@@ -1097,6 +1201,8 @@ let test_runtime_trust_classifies_always_approve_flag () =
           (`Assoc [
             ("name", `String keeper_name);
             ("trace_id", `String "trace-always-flag");
+            ("sandbox_profile", `String "docker");
+            ("network_mode", `String "inherit");
             ("always_approve", `Bool true);
           ])
       in
@@ -1134,6 +1240,8 @@ let test_callback_always_approve_respects_forbidden () =
           (`Assoc [
             ("name", `String "test-keeper");
             ("trace_id", `String "test-trace");
+            ("sandbox_profile", `String "docker");
+            ("network_mode", `String "inherit");
             ("always_approve", `Bool true);
           ])
       in
@@ -1257,6 +1365,12 @@ let () =
       Alcotest.test_case "low risk auto-approved" `Quick test_callback_approves_low_risk;
       Alcotest.test_case "production keeper write requires approval" `Quick
         test_callback_production_keeper_write_requires_approval;
+      Alcotest.test_case "production claimed worktree write auto-approved" `Quick
+        test_callback_production_claimed_worktree_write_auto_approved;
+      Alcotest.test_case
+        "sandbox worktree write routine rejects unclaimed/root checkout"
+        `Quick
+        test_sandbox_worktree_write_rule_rejects_unclaimed_or_root_checkout;
       Alcotest.test_case "production keeper_shell op=gh read-only auto-approved" `Quick
         test_callback_production_keeper_shell_gh_read_only_auto_approved;
       Alcotest.test_case "production worktree create auto-approved" `Quick

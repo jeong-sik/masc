@@ -66,14 +66,7 @@ let keeper_masc_path_blocked
     let resolve raw =
       if is_read_only
       then resolve_keeper_read_path ~config ~meta ~raw_path:raw
-      else
-        match Keeper_alerting_path.resolve_keeper_target_path
-          ~config
-          ~allowed_paths:effective_paths
-          ~raw_path:raw
-        with
-        | Error rej -> Error (Keeper_alerting_path.rejection_to_user_message rej)
-        | Ok p -> Ok p
+      else resolve_keeper_path ~config ~meta ~raw_path:raw
     in
     List.find_map
       (fun raw ->

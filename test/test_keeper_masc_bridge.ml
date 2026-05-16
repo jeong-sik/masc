@@ -90,6 +90,14 @@ let make_meta ?(name = "keeper-bridge-test") ?tool_access ?(tool_denylist = [])
   | Ok meta -> meta
   | Error e -> failwith e
 
+let with_registered_keeper ~config (meta : Masc_mcp.Keeper_types.keeper_meta) f =
+  let base_path = config.Coord.base_path in
+  Masc_mcp.Keeper_registry.unregister ~base_path meta.name;
+  ignore (Masc_mcp.Keeper_registry.register ~base_path meta.name meta);
+  Fun.protect
+    ~finally:(fun () -> Masc_mcp.Keeper_registry.unregister ~base_path meta.name)
+    f
+
 let allowed_names_of_json json =
   prime_keeper_bridge ();
   match Masc_test_deps.meta_of_json_fixture json with
@@ -326,7 +334,7 @@ let test_read_meta_file_rejects_legacy_tool_keys () =
       | Error e ->
           Alcotest.(check string)
             "legacy top-level keys rejected"
-            "removed keeper meta fields: tool_preset, tool_also_allow"
+            "removed keeper meta fields: allowed_providers, tool_preset, tool_also_allow"
             e;
           let persisted = read_json_file path in
           Alcotest.(check string) "legacy tool_preset left untouched" "coding"
@@ -594,19 +602,20 @@ let test_approval_pending_bridge_uses_keeper_safe_inline_dispatch () =
           ~tool_access:(Masc_mcp.Keeper_types.Custom [ "masc_approval_pending" ])
           ()
       in
-      let raw =
-        Masc_mcp.Keeper_exec_masc.handle_keeper_masc_tool
-          ~config
-          ~keeper_name:meta.name
-          ~name:"masc_approval_pending"
-          ~args:(`Assoc [])
-      in
-      match Yojson.Safe.from_string raw with
-      | `List _ -> ()
-      | _ ->
-        Alcotest.failf
-          "masc_approval_pending should return pending approval list, got: %s"
-          raw)
+      with_registered_keeper ~config meta (fun () ->
+          let raw =
+            Masc_mcp.Keeper_exec_masc.handle_keeper_masc_tool
+              ~config
+              ~keeper_name:meta.name
+              ~name:"masc_approval_pending"
+              ~args:(`Assoc [])
+          in
+          match Yojson.Safe.from_string raw with
+          | `List _ -> ()
+          | _ ->
+            Alcotest.failf
+              "masc_approval_pending should return pending approval list, got: %s"
+              raw))
 
 let test_read_only_preflight_accepts_sandbox_relative_repo_path () =
   let dir = temp_dir () in
@@ -630,34 +639,97 @@ let test_read_only_preflight_accepts_sandbox_relative_repo_path () =
             ~tool_access:(Masc_mcp.Keeper_types.Custom [ "masc_code_read" ])
             ()
         in
-        let raw =
-          Masc_mcp.Keeper_exec_masc.handle_keeper_masc_tool
-            ~config
-            ~keeper_name:meta.name
-            ~name:"masc_code_read"
-            ~args:
-              (`Assoc
-                [
-                  ("path", `String "repos/masc-mcp/lib/thompson_sampling.ml");
-                  ("offset", `Int 0);
-                  ("limit", `Int 2);
-                ])
+        with_registered_keeper ~config meta (fun () ->
+            let raw =
+              Masc_mcp.Keeper_exec_masc.handle_keeper_masc_tool
+                ~config
+                ~keeper_name:meta.name
+                ~name:"masc_code_read"
+                ~args:
+                  (`Assoc
+                    [
+                      ( "path",
+                        `String "repos/masc-mcp/lib/thompson_sampling.ml" );
+                      ("offset", `Int 0);
+                      ("limit", `Int 2);
+                    ])
+            in
+            let json = Yojson.Safe.from_string raw in
+            let path =
+              Yojson.Safe.Util.member "path" json |> Yojson.Safe.Util.to_string
+            in
+            let lines =
+              Yojson.Safe.Util.member "lines" json
+              |> Yojson.Safe.Util.to_list
+              |> List.map Yojson.Safe.Util.to_string
+            in
+            Alcotest.(check string) "path preserved"
+              "repos/masc-mcp/lib/thompson_sampling.ml"
+              path;
+            Alcotest.(check (list string)) "reads expected lines"
+              [ "let alpha = 0.1"; "let beta = 0.2" ]
+              lines)))
+
+let test_write_preflight_accepts_docker_container_repo_path () =
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      run_shell_ok ~cwd:dir "git init --quiet";
+      let keeper_toml =
+        Filename.concat dir ".masc/config/keepers/sangsu.toml"
+      in
+      ensure_dir (Filename.dirname keeper_toml);
+      write_text_file keeper_toml "[keeper]\nsandbox_profile = \"docker\"\n";
+      let file_path =
+        Filename.concat dir
+          ".masc/playground/docker/sangsu/repos/masc-mcp/.worktrees/keeper-sangsu-agent-task-210/lib/coord/coord_orphan_daemon.ml"
+      in
+      ensure_dir (Filename.dirname file_path);
+      write_text_file file_path "let before = 1\n";
+      run_with_fs (fun () ->
+        prime_keeper_bridge ();
+        let config = Coord.default_config dir in
+        ignore (Coord.init config ~agent_name:(Some "sangsu"));
+        let meta =
+          make_meta
+            ~name:"sangsu"
+            ~sandbox_profile:Masc_mcp.Keeper_types.Docker
+            ~tool_access:(Masc_mcp.Keeper_types.Custom [ "masc_code_edit" ])
+            ()
         in
-        let json = Yojson.Safe.from_string raw in
-        let path =
-          Yojson.Safe.Util.member "path" json |> Yojson.Safe.Util.to_string
-        in
-        let lines =
-          Yojson.Safe.Util.member "lines" json
-          |> Yojson.Safe.Util.to_list
-          |> List.map Yojson.Safe.Util.to_string
-        in
-        Alcotest.(check string) "path preserved"
-          "repos/masc-mcp/lib/thompson_sampling.ml"
-          path;
-        Alcotest.(check (list string)) "reads expected lines"
-          [ "let alpha = 0.1"; "let beta = 0.2" ]
-          lines))
+        with_registered_keeper ~config meta (fun () ->
+          let raw =
+            Masc_mcp.Keeper_exec_masc.handle_keeper_masc_tool
+              ~config
+              ~keeper_name:meta.name
+              ~name:"masc_code_edit"
+              ~args:
+                (`Assoc
+                  [
+                    ( "path",
+                      `String
+                        "/home/keeper/playground/sangsu/repos/masc-mcp/.worktrees/keeper-sangsu-agent-task-210/lib/coord/coord_orphan_daemon.ml"
+                    );
+                    ("old_string", `String "let before = 1");
+                    ("new_string", `String "let before = 2");
+                    ("replace_all", `Bool false);
+                  ])
+          in
+          let json = Yojson.Safe.from_string raw in
+          let status =
+            Yojson.Safe.Util.member "status" json |> Yojson.Safe.Util.to_string
+          in
+          let replacements =
+            Yojson.Safe.Util.member "replacements" json
+            |> Yojson.Safe.Util.to_int
+          in
+          Alcotest.(check string) "edit status" "ok" status;
+          Alcotest.(check int) "single replacement" 1 replacements;
+          Alcotest.(check string)
+            "file edited through host playground"
+            "let before = 2\n"
+            (Masc_test_deps.read_file file_path))))
 
 let test_schemas_match_names () =
   prime_keeper_bridge ();
@@ -794,6 +866,9 @@ let () =
           Alcotest.test_case
             "read preflight accepts sandbox-relative repo path" `Quick
             test_read_only_preflight_accepts_sandbox_relative_repo_path;
+          Alcotest.test_case
+            "write preflight accepts Docker container repo path" `Quick
+            test_write_preflight_accepts_docker_container_repo_path;
         ] );
       ( "consistency",
         [

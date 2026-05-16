@@ -103,6 +103,7 @@ let sample_repo ~id ~url local_path =
     name = id;
     url;
     local_path;
+    aliases = [];
     default_branch = "main";
     credential_id = "default";
     keepers = [];

@@ -11,6 +11,11 @@ let generic_transition_tool = "masc_transition"
 let transition_claim_input = `Assoc [("action", `String "claim")]
 let transition_start_input = `Assoc [("action", `String "start")]
 let transition_done_input = `Assoc [("action", `String "done"); ("notes", `String "Completed task implementation and verified correctness")]
+let goal_transition_request_complete_input =
+  `Assoc [("action", `String "request_complete")]
+
+let goal_transition_drop_input = `Assoc [("action", `String "drop")]
+let goal_transition_operator_block_input = `Assoc [("action", `String "operator_block")]
 let no_args = `Null
 
 (* ── Helpers ────────────────────────────────────────────────── *)
@@ -186,15 +191,47 @@ let test_risk_low_transition_done () =
   Alcotest.(check string) "transition done is low"
     "low" (Gp.risk_level_to_string risk)
 
-let test_risk_high_goal_upsert () =
+let test_risk_medium_goal_upsert () =
   let risk = Gp.assess_risk ~tool_name:"masc_goal_upsert" ~input:no_args in
-  Alcotest.(check string) "goal_upsert is high"
+  Alcotest.(check string) "goal_upsert is medium"
+    "medium" (Gp.risk_level_to_string risk)
+
+let test_risk_medium_goal_transition_request_complete () =
+  let risk =
+    Gp.assess_risk
+      ~tool_name:"masc_goal_transition"
+      ~input:goal_transition_request_complete_input
+  in
+  Alcotest.(check string) "goal_transition request_complete is medium"
+    "medium" (Gp.risk_level_to_string risk)
+
+let test_risk_high_goal_transition_missing_action () =
+  let risk = Gp.assess_risk ~tool_name:"masc_goal_transition" ~input:no_args in
+  Alcotest.(check string) "goal_transition without action is high"
     "high" (Gp.risk_level_to_string risk)
 
-let test_risk_high_goal_transition () =
-  let risk = Gp.assess_risk ~tool_name:"masc_goal_transition" ~input:no_args in
-  Alcotest.(check string) "goal_transition is high"
+let test_risk_high_goal_transition_drop () =
+  let risk =
+    Gp.assess_risk
+      ~tool_name:"masc_goal_transition"
+      ~input:goal_transition_drop_input
+  in
+  Alcotest.(check string) "goal_transition drop is high"
     "high" (Gp.risk_level_to_string risk)
+
+let test_risk_high_goal_transition_operator_block () =
+  let risk =
+    Gp.assess_risk
+      ~tool_name:"masc_goal_transition"
+      ~input:goal_transition_operator_block_input
+  in
+  Alcotest.(check string) "goal_transition operator_block is high"
+    "high" (Gp.risk_level_to_string risk)
+
+let test_risk_medium_goal_verify () =
+  let risk = Gp.assess_risk ~tool_name:"masc_goal_verify" ~input:no_args in
+  Alcotest.(check string) "goal_verify is medium"
+    "medium" (Gp.risk_level_to_string risk)
 
 let test_risk_low_keeper_msg () =
   let risk = Gp.assess_risk ~tool_name:"masc_keeper_msg" ~input:no_args in
@@ -209,6 +246,11 @@ let test_risk_medium_worktree_create () =
 let test_risk_medium_keeper_pr_create () =
   let risk = Gp.assess_risk ~tool_name:"keeper_pr_create" ~input:no_args in
   Alcotest.(check string) "keeper_pr_create is medium"
+    "medium" (Gp.risk_level_to_string risk)
+
+let test_risk_medium_keeper_task_create () =
+  let risk = Gp.assess_risk ~tool_name:"keeper_task_create" ~input:no_args in
+  Alcotest.(check string) "keeper_task_create is medium"
     "medium" (Gp.risk_level_to_string risk)
 
 let test_risk_medium_transition_start () =
@@ -912,6 +954,8 @@ let () =
         test_risk_medium_worktree_create;
       Alcotest.test_case "medium: keeper PR create" `Quick
         test_risk_medium_keeper_pr_create;
+      Alcotest.test_case "medium: keeper task create" `Quick
+        test_risk_medium_keeper_task_create;
       Alcotest.test_case "payload: rm -rf is critical" `Quick
         test_risk_payload_destructive_rm_rf;
       Alcotest.test_case "payload: $(date) is medium not critical" `Quick
@@ -920,9 +964,18 @@ let () =
         test_risk_payload_evasion_only_hex_escape;
       Alcotest.test_case "payload: destructive inside $(...) is critical"
         `Quick test_risk_payload_destructive_inside_substitution;
-      Alcotest.test_case "high: goal upsert" `Quick test_risk_high_goal_upsert;
-      Alcotest.test_case "high: goal transition" `Quick
-        test_risk_high_goal_transition;
+      Alcotest.test_case "medium: goal upsert" `Quick
+        test_risk_medium_goal_upsert;
+      Alcotest.test_case "medium: goal transition request_complete" `Quick
+        test_risk_medium_goal_transition_request_complete;
+      Alcotest.test_case "medium: goal verify" `Quick
+        test_risk_medium_goal_verify;
+      Alcotest.test_case "high: goal transition missing action" `Quick
+        test_risk_high_goal_transition_missing_action;
+      Alcotest.test_case "high: goal transition drop" `Quick
+        test_risk_high_goal_transition_drop;
+      Alcotest.test_case "high: goal transition operator block" `Quick
+        test_risk_high_goal_transition_operator_block;
       Alcotest.test_case "low: transition" `Quick test_risk_low_transition;
       Alcotest.test_case "low: transition done" `Quick test_risk_low_transition_done;
       Alcotest.test_case "low: keeper msg" `Quick test_risk_low_keeper_msg;

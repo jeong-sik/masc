@@ -463,21 +463,31 @@ let satisfied_required_tool_names_of_outcomes
 
 let preferred_tool_choice_for_required_tool_names
     ~(required_tool_names : string list) ~(allowed_tool_names : string list) =
+  let add_visible_required acc canonical visible_name via_public_alias =
+    if List.exists
+         (fun (_, existing_name, _) -> String.equal existing_name visible_name)
+         acc
+    then acc
+    else acc @ [ canonical, visible_name, via_public_alias ]
+  in
   let visible_required =
     required_tool_names
-    |> List.filter_map (fun name ->
-      let canonical = Keeper_tool_disclosure.canonical_tool_name name in
-      if List.mem canonical allowed_tool_names then Some (canonical, canonical)
-      else if List.mem name allowed_tool_names then Some (canonical, name)
-      else (
-        match Keeper_tool_alias.public_name_for_internal canonical with
-        | Some public when List.mem public allowed_tool_names ->
-          Some (canonical, public)
-        | _ -> None))
-    |> Keeper_types.dedupe_keep_order
+    |> List.fold_left
+         (fun acc name ->
+            let canonical = Keeper_tool_disclosure.canonical_tool_name name in
+            if List.mem canonical allowed_tool_names
+            then add_visible_required acc canonical canonical false
+            else if List.mem name allowed_tool_names
+            then add_visible_required acc canonical name false
+            else (
+              match Keeper_tool_alias.public_name_for_internal canonical with
+              | Some public when List.mem public allowed_tool_names ->
+                add_visible_required acc canonical public true
+              | _ -> acc))
+         []
   in
   match visible_required with
-  | [ canonical, name ]
+  | [ canonical, name, false ]
     when not
            (Keeper_tool_disclosure.tool_name_can_satisfy_required_contract
               canonical

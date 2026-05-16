@@ -115,16 +115,35 @@ type boot_meta_resolution = {
   materialized : bool;
 }
 
+type autoboot_exclusion = {
+  keeper_name : string;
+  reason : string;
+}
+
+let autoboot_exclusion_reason config name =
+  match read_meta_file_path (keeper_meta_path config name) with
+  | Ok (Some meta) when meta.paused -> Some "paused"
+  | Ok (Some meta) when not meta.autoboot_enabled -> Some "autoboot_disabled"
+  | Ok (Some _) -> None
+  | Ok None ->
+    (match (load_keeper_profile_defaults name).autoboot_enabled with
+     | Some false -> Some "declarative_autoboot_disabled"
+     | Some true | None -> None)
+  | Error _ ->
+    (* Preserve existing behavior: corrupt/unreadable meta still enters the
+       boot path so load_or_materialize_boot_meta can emit the precise error. *)
+    None
+
 let bootable_keeper_names config =
   configured_keeper_names config
-  |> List.filter (fun name ->
-         match read_meta_file_path (keeper_meta_path config name) with
-         | Ok (Some meta) -> not meta.paused && meta.autoboot_enabled
-         | Ok None ->
-             (match (load_keeper_profile_defaults name).autoboot_enabled with
-              | Some false -> false
-              | Some true | None -> true)
-         | Error _ -> true)
+  |> List.filter (fun name -> Option.is_none (autoboot_exclusion_reason config name))
+
+let autoboot_excluded_keeper_reasons config =
+  configured_keeper_names config
+  |> List.filter_map (fun name ->
+       match autoboot_exclusion_reason config name with
+       | Some reason -> Some { keeper_name = name; reason }
+       | None -> None)
 
 (* PR-3b1: convert a credential lookup name to its canonical
    keeper-<n>-agent form when it refers to a bootable keeper.

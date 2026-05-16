@@ -4,7 +4,8 @@ open Keeper_types
 
 (** Resolved inference and session context needed before prompt construction. *)
 type run_context =
-  { temperature : float
+  { meta : keeper_meta
+  ; temperature : float
   ; max_tokens : int
   ; context_injector : Agent_sdk.Hooks.context_injector
   ; shared_context : Agent_sdk.Context.t

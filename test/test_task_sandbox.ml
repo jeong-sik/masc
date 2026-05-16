@@ -609,6 +609,19 @@ let test_create_infers_repo_from_task_repo_mentions () =
         ignore
           (seed_playground_clone ~base_path:dir ~agent_name:"mention-agent"
              ~source_repo:masc_repo);
+        write_file
+          (Filename.concat
+             (Filename.concat
+                (Common.masc_dir_from_base_path ~base_path:dir)
+                "config")
+             "repositories.toml")
+          {|
+[repository.masc]
+name = "masc"
+url = "https://github.com/jeong-sik/masc-mcp"
+local_path = ".masc/repos/masc"
+aliases = ["keeper"]
+|};
         let mention_cases =
           [
             ( "trailing-period",
@@ -617,6 +630,14 @@ let test_create_infers_repo_from_task_repo_mentions () =
             ( "url-path",
               "Check github.com/org/masc-mcp before making changes",
               "" );
+            ( "configured-repo-name-alias",
+              "Document MASC_EXECUTOR_DOMAIN_COUNT runtime knob",
+              "The task mentions MASC runtime configuration but not the clone \
+               directory." );
+            ( "configured-extra-alias",
+              "Verify keeper-domain-pool failure logging",
+              "The task uses the operator's keeper vocabulary without spelling \
+               out masc-mcp." );
           ]
         in
         List.iter
@@ -639,7 +660,24 @@ let test_create_infers_repo_from_task_repo_mentions () =
                   (Task_sandbox.cleanup ~config ~agent_name:"mention-agent" sb)
             | Error e ->
                 fail (Printf.sprintf "%s: sandbox create failed: %s" label e))
-          mention_cases))
+          mention_cases;
+        write_tasks config
+          [
+            task ~id:"task-mention-direct-generic"
+              ~title:"Fix direct command routing"
+              ~description:"Generic direct wording is not repo evidence." ();
+          ];
+        match
+          Task_sandbox.create ~config ~task_id:"task-mention-direct-generic"
+            ~agent_name:"mention-agent" ()
+        with
+        | Ok sb ->
+            ignore
+              (Task_sandbox.cleanup ~config ~agent_name:"mention-agent" sb);
+            fail "generic direct token must not pick grpc-direct"
+        | Error e ->
+            check bool "generic direct remains ambiguous" true
+              (contains "ambiguous_task_repo" e)))
 
 let test_with_sandbox_lifecycle () =
   let base = make_temp_dir () in

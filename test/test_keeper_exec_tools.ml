@@ -325,7 +325,161 @@ let test_preflight_structured_block_is_execution_success () =
         (payload_kind result.payload_shape);
       let json = Yojson.Safe.from_string result.raw_output in
       check bool "preflight raw ok=false preserved" false
-        Yojson.Safe.Util.(member "ok" json |> to_bool))
+        Yojson.Safe.Util.(member "ok" json |> to_bool);
+      let cascade =
+        Yojson.Safe.Util.(member "cascade_resilience" json)
+      in
+      ignore Yojson.Safe.Util.(member "ok" cascade |> to_bool);
+      check bool "cascade name exposed" true
+        (String.length
+           Yojson.Safe.Util.(member "cascade" cascade |> to_string)
+         > 0))
+
+let test_preflight_reports_autoboot_disabled_activation_blocker () =
+  with_exec_fixture "keeper_exec_tools_preflight_autoboot_disabled"
+    (fun ~config ~meta ~ctx_work ->
+      let meta = { meta with autoboot_enabled = false; paused = false } in
+      let result =
+        KET.execute_keeper_tool_call_with_outcome
+          ~config ~meta ~ctx_work ~exec_cache:None
+          ~name:"keeper_preflight_check"
+          ~input:(`Assoc [])
+          ()
+      in
+      check string "preflight outcome" "success"
+        (match result.outcome with `Success -> "success" | `Failure -> "failure");
+      let json = Yojson.Safe.from_string result.raw_output in
+      let activation =
+        Yojson.Safe.Util.(member "autonomous_activation" json)
+      in
+      check bool "activation blocks disabled autoboot" false
+        Yojson.Safe.Util.(member "ok" activation |> to_bool);
+      check string "activation blocker" "autoboot_disabled"
+        Yojson.Safe.Util.(member "blocker" activation |> to_string);
+      check bool "autoboot exposed" false
+        Yojson.Safe.Util.(member "autoboot_enabled" activation |> to_bool);
+      check bool "paused exposed" false
+        Yojson.Safe.Util.(member "paused" activation |> to_bool))
+
+let test_preflight_reports_proactive_disabled_activation_blocker () =
+  with_exec_fixture "keeper_exec_tools_preflight_proactive_disabled"
+    (fun ~config ~meta ~ctx_work ->
+      let meta =
+        { meta with
+          autoboot_enabled = true
+        ; paused = false
+        ; proactive = { meta.proactive with enabled = false }
+        }
+      in
+      let result =
+        KET.execute_keeper_tool_call_with_outcome
+          ~config ~meta ~ctx_work ~exec_cache:None
+          ~name:"keeper_preflight_check"
+          ~input:(`Assoc [])
+          ()
+      in
+      check string "preflight outcome" "success"
+        (match result.outcome with `Success -> "success" | `Failure -> "failure");
+      let json = Yojson.Safe.from_string result.raw_output in
+      let activation =
+        Yojson.Safe.Util.(member "autonomous_activation" json)
+      in
+      check bool "activation blocks disabled proactive" false
+        Yojson.Safe.Util.(member "ok" activation |> to_bool);
+      check string "activation blocker" "proactive_disabled"
+        Yojson.Safe.Util.(member "blocker" activation |> to_string);
+      check bool "autoboot exposed" true
+        Yojson.Safe.Util.(member "autoboot_enabled" activation |> to_bool);
+      check bool "proactive exposed" false
+        Yojson.Safe.Util.(member "proactive_enabled" activation |> to_bool))
+
+let test_preflight_reports_paused_activation_blocker_first () =
+  with_exec_fixture "keeper_exec_tools_preflight_paused"
+    (fun ~config ~meta ~ctx_work ->
+      let meta = { meta with autoboot_enabled = false; paused = true } in
+      let result =
+        KET.execute_keeper_tool_call_with_outcome
+          ~config ~meta ~ctx_work ~exec_cache:None
+          ~name:"keeper_preflight_check"
+          ~input:(`Assoc [])
+          ()
+      in
+      check string "preflight outcome" "success"
+        (match result.outcome with `Success -> "success" | `Failure -> "failure");
+      let json = Yojson.Safe.from_string result.raw_output in
+      let activation =
+        Yojson.Safe.Util.(member "autonomous_activation" json)
+      in
+      check bool "activation blocks paused keeper" false
+        Yojson.Safe.Util.(member "ok" activation |> to_bool);
+      check string "paused wins blocker priority" "paused"
+        Yojson.Safe.Util.(member "blocker" activation |> to_string);
+      check bool "autoboot still exposed" false
+        Yojson.Safe.Util.(member "autoboot_enabled" activation |> to_bool);
+      check bool "paused exposed" true
+        Yojson.Safe.Util.(member "paused" activation |> to_bool))
+
+let test_preflight_reports_work_discovery_disabled_without_current_task () =
+  with_exec_fixture "keeper_exec_tools_preflight_work_discovery_disabled"
+    (fun ~config ~meta ~ctx_work ->
+      let meta =
+        { meta with work_discovery_enabled = Some false; current_task_id = None }
+      in
+      let result =
+        KET.execute_keeper_tool_call_with_outcome
+          ~config ~meta ~ctx_work ~exec_cache:None
+          ~name:"keeper_preflight_check"
+          ~input:(`Assoc [])
+          ()
+      in
+      check string "preflight outcome" "success"
+        (match result.outcome with `Success -> "success" | `Failure -> "failure");
+      let json = Yojson.Safe.from_string result.raw_output in
+      let work_discovery =
+        Yojson.Safe.Util.(member "work_discovery_activation" json)
+      in
+      check bool "work discovery blocks unassigned backlog" false
+        Yojson.Safe.Util.(member "ok" work_discovery |> to_bool);
+      check string "work discovery blocker" "work_discovery_disabled"
+        Yojson.Safe.Util.(member "blocker" work_discovery |> to_string);
+      check bool "work discovery exposed" false
+        Yojson.Safe.Util.(member "work_discovery_enabled" work_discovery |> to_bool);
+      check bool "current task absent" true
+        (match Yojson.Safe.Util.(member "current_task_id" work_discovery) with
+         | `Null -> true
+         | _ -> false))
+
+let test_preflight_allows_work_discovery_disabled_with_current_task () =
+  with_exec_fixture "keeper_exec_tools_preflight_work_discovery_current_task"
+    (fun ~config ~meta ~ctx_work ->
+      let current_task_id =
+        match Masc_mcp.Keeper_id.Task_id.of_string "task-owned" with
+        | Ok value -> value
+        | Error err -> fail ("task id parse failed: " ^ err)
+      in
+      let meta =
+        { meta with
+          work_discovery_enabled = Some false
+        ; current_task_id = Some current_task_id
+        }
+      in
+      let result =
+        KET.execute_keeper_tool_call_with_outcome
+          ~config ~meta ~ctx_work ~exec_cache:None
+          ~name:"keeper_preflight_check"
+          ~input:(`Assoc [])
+          ()
+      in
+      check string "preflight outcome" "success"
+        (match result.outcome with `Success -> "success" | `Failure -> "failure");
+      let json = Yojson.Safe.from_string result.raw_output in
+      let work_discovery =
+        Yojson.Safe.Util.(member "work_discovery_activation" json)
+      in
+      check bool "owned task allows work-discovery-disabled keeper" true
+        Yojson.Safe.Util.(member "ok" work_discovery |> to_bool);
+      check string "current task exposed" "task-owned"
+        Yojson.Safe.Util.(member "current_task_id" work_discovery |> to_string))
 
 let registered_dispatch_probe_tool = "test_keeper_registered_dispatch_probe"
 
@@ -516,6 +670,16 @@ let () =
         test_execute_with_outcome_bad_query_is_failure;
       test_case "preflight block is execution success" `Quick
         test_preflight_structured_block_is_execution_success;
+      test_case "preflight reports autoboot disabled activation blocker" `Quick
+        test_preflight_reports_autoboot_disabled_activation_blocker;
+      test_case "preflight reports proactive disabled activation blocker" `Quick
+        test_preflight_reports_proactive_disabled_activation_blocker;
+      test_case "preflight reports paused activation blocker first" `Quick
+        test_preflight_reports_paused_activation_blocker_first;
+      test_case "preflight reports disabled work discovery" `Quick
+        test_preflight_reports_work_discovery_disabled_without_current_task;
+      test_case "preflight allows disabled work discovery with current task" `Quick
+        test_preflight_allows_work_discovery_disabled_with_current_task;
       test_case "registered dispatch does not require masc_ prefix" `Quick
         test_registered_tool_dispatch_without_masc_prefix;
     ]);

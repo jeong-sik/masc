@@ -211,6 +211,8 @@ if [ -f "$KR_TYPES_ML" ]; then
       echo "INFO: ${KCL_TLA} not found — TLA+ cascade_state check skipped"
     fi
   fi
+else
+  echo "WARN: ${KR_TYPES_ML} not found — cascade_state check skipped"
 fi
 
 # ── Check 4: PHASE_STYLES coverage (TypeScript) vs KeeperPhase ───────────────

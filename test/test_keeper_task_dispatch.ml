@@ -551,6 +551,41 @@ let test_stale_current_task_id_is_cleared_from_backlog () =
         (current_task_id_string synced)))
 ;;
 
+let test_run_context_uses_reconciled_current_task_id () =
+  with_room (fun config ->
+    let task_id =
+      match Keeper_id.Task_id.of_string "task-missing" with
+      | Ok task_id -> task_id
+      | Error msg -> fail msg
+    in
+    let meta =
+      { (make_test_meta ~name:"run-context-keeper" ()) with
+        current_task_id = Some task_id;
+      }
+    in
+    with_registered_keeper config meta (fun () ->
+      (match Keeper_types.write_meta config meta with
+       | Ok () -> ()
+       | Error msg -> fail msg);
+      let ctx =
+        Keeper_run_context.prepare_run_context
+          ~config
+          ~meta
+          ~base_dir:(Filename.concat config.Coord.base_path "sessions")
+          ~max_context:4000
+          ~cascade_name:
+            (Keeper_cascade_profile.runtime_name_of_string
+               (Keeper_config.default_cascade_name ()))
+          ~generation:meta.runtime.generation
+          ()
+      in
+      check
+        (option string)
+        "run context exposes reconciled current_task_id"
+        None
+        (current_task_id_string ctx.Keeper_run_context.meta)))
+;;
+
 let test_heartbeat_current_task_id_reconciles_terminal_backlog () =
   with_room (fun config ->
     let meta = make_test_meta ~name:"heartbeat-keeper" () in
@@ -1787,6 +1822,10 @@ let () =
             "stale current_task_id clears from backlog"
             `Quick
             test_stale_current_task_id_is_cleared_from_backlog
+        ; test_case
+            "run context uses reconciled current_task_id"
+            `Quick
+            test_run_context_uses_reconciled_current_task_id
         ; test_case
             "heartbeat current_task_id reconciles terminal backlog"
             `Quick

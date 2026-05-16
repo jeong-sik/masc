@@ -39,6 +39,7 @@ let sample_repo id =
     name = "test-repo-" ^ id;
     url = "https://github.com/test/" ^ id;
     local_path = "repos/" ^ id;
+    aliases = [];
     default_branch = "main";
     credential_id = "cred-1";
     keepers = [ "keeper-a"; "keeper-b" ];
@@ -72,7 +73,7 @@ let test_load_all_backward_compat () =
 
 let test_save_and_load_roundtrip () =
   with_temp_base_path (fun base_path ->
-      let repos = [ sample_repo "r1"; sample_repo "r2" ] in
+      let repos = [ { (sample_repo "r1") with aliases = [ "keeper" ] }; sample_repo "r2" ] in
       match Repo_store.save_all ~base_path repos with
       | Error e -> Alcotest.fail ("save failed: " ^ e)
       | Ok () -> (
@@ -82,7 +83,9 @@ let test_save_and_load_roundtrip () =
               Alcotest.(check int) "count" 2 (List.length loaded);
               let ids = List.map (fun (r : repository) -> r.id) loaded in
               Alcotest.(check bool) "has r1" true (List.mem "r1" ids);
-              Alcotest.(check bool) "has r2" true (List.mem "r2" ids)))
+              Alcotest.(check bool) "has r2" true (List.mem "r2" ids);
+              let r1 = List.find (fun (r : repository) -> String.equal r.id "r1") loaded in
+              Alcotest.(check (list string)) "aliases roundtrip" [ "keeper" ] r1.aliases))
 
 let test_add_new_repo () =
   with_temp_base_path (fun base_path ->

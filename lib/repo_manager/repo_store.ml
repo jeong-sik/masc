@@ -62,6 +62,7 @@ let repository_of_toml toml id =
   let* name = Otoml.find_result toml Otoml.get_string (path "name") in
   let* url = Otoml.find_result toml Otoml.get_string (path "url") in
   let* local_path = find_string_default "local_path" (default_local_path id) in
+  let* aliases = find_string_list_default "aliases" [] in
   let* default_branch = find_string_default "default_branch" "main" in
   let* credential_id = find_string_default "credential_id" "default" in
   let* keepers = find_string_list_default "keepers" [] in
@@ -85,6 +86,7 @@ let repository_of_toml toml id =
       name;
       url;
       local_path;
+      aliases;
       default_branch;
       credential_id;
       keepers;
@@ -101,6 +103,9 @@ let toml_of_repository repo =
       ("name", Otoml.string repo.name);
       ("url", Otoml.string repo.url);
       ("local_path", Otoml.string repo.local_path);
+      ( "aliases",
+        Otoml.TomlArray (List.map (fun s -> Otoml.TomlString s) repo.aliases)
+      );
       ("default_branch", Otoml.string repo.default_branch);
       ("credential_id", Otoml.string repo.credential_id);
       ( "keepers",
@@ -133,6 +138,7 @@ let load_all ~base_path =
           name = Filename.basename base_path;
           url = "";
           local_path = base_path;
+          aliases = [];
           default_branch = "main";
           credential_id = "default";
           keepers = [];
@@ -446,6 +452,7 @@ let discover_repositories ~base_path =
                   name;
                   url;
                   local_path = abs_repo_dir;
+                  aliases = [];
                   default_branch = "main";
                   credential_id = "default";
                   keepers = [];

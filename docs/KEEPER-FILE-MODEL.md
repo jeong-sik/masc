@@ -163,7 +163,7 @@ These are still accepted by the loader, but for consistency they should be used 
 | `tool_denylist` | string array | Tool names blocked regardless of preset |
 | `active_goal_ids` | string array | Declarative goal scope for task claim eligibility |
 | `work_discovery_enabled` | bool | Enable work discovery loop |
-| `work_discovery_sources` | string array | e.g. `["github_issues", "stale_tasks"]` |
+| `work_discovery_sources` | string array | e.g. `["unclaimed_tasks", "stale_tasks", "awaiting_verification_tasks"]` |
 | `work_discovery_interval_sec` | int | Scan interval |
 | `work_discovery_guidance` | string | Hint string fed into the work-discovery prompt |
 | `telemetry_feedback_enabled` | bool | Surface recent telemetry in the keeper prompt |

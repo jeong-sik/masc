@@ -77,6 +77,7 @@ type cascade_backpressure_decision =
     }
 
 val cascade_backpressure_decision :
+  cascade_resilience:Keeper_exec_preflight.cascade_resilience option ->
   should_run_turn:bool ->
   cascade_name:string ->
   cascade_status:Keeper_health_probe.health_status ->

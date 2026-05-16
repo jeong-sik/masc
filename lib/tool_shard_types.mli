@@ -77,3 +77,9 @@ val shell_tools : Masc_domain.tool_schema list
 
 val coding_keeper_bridge_tools : Masc_domain.tool_schema list
 (** Pure: keeper_bash bridge tool schemas. *)
+
+val keeper_preflight_tools : Masc_domain.tool_schema list
+(** Pre-flight validation tools for keeper autonomous work. *)
+
+val keeper_github_pr_tools : Masc_domain.tool_schema list
+(** Dedicated GitHub PR workflow tools (list/view/create/checks). *)

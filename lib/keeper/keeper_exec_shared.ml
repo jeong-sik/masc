@@ -404,7 +404,7 @@ let playground_relative_unless_allowed_root
         in
         let fixed = Filename.concat pg_root rest in
         Log.Keeper.debug "playground_relative: fixed doubled abs %S → %S" trimmed fixed;
-        fixed)
+        Option.value ~default:fixed (project_relative_host_path ~config fixed))
       else trimmed)
     else trimmed
   in

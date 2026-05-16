@@ -550,79 +550,321 @@ let looks_like_path_token token =
       || String.contains token '/')
 ;;
 
-let has_path_rewrite_syntax cmd =
-  String.exists
-    (function
-      | '\'' | '"' | '\\' | '*' | '?' | '[' | ']' | '{' | '}' -> true
-      | _ -> false)
-    cmd
+type path_token =
+  { value : string
+  ; quoted : bool
+  ; escaped : bool
+  ; globbed : bool
+  ; braced : bool
+  }
+
+let token_has_rewrite_syntax token =
+  token.quoted || token.escaped || token.globbed || token.braced
 ;;
 
-(* When a path-bearing keeper command carries path-rewrite syntax, tell the
-   keeper which specific character tripped the block and what the supported
-   alternative is. Otherwise small-LLM keepers retry the same glob/quote
-   pattern (observed 62x on 2026-04-17/18). *)
-let path_rewrite_redirect_hint cmd =
-  let has ch = String.contains cmd ch in
+let path_token_error_hint token =
   let suggestions =
-    [ ( has '*' || has '?' || has '[' || has ']'
+    [ ( token.globbed
       , "Glob expansion ('*' / '?' / '[]') — use masc_code_search with file_pattern \
          (e.g. file_pattern='*.ml') or rg with --glob instead of letting the shell \
          expand." )
-    ; ( has '{' || has '}'
+    ; ( token.braced
       , "Brace expansion ('{a,b}') — run one command per target, or use masc_code_search \
          / rg which accept multiple patterns natively." )
-    ; ( has '\\'
+    ; ( token.escaped
       , "Backslash escaping — the keeper shell does not interpret escapes. Use \
          masc_code_search with is_regex=true for pattern work that would need \\. / \\w \
          / etc." )
-    ; ( has '\'' || has '"'
+    ; ( token.quoted
       , "Quoting — path args must be unquoted plain strings. Move any pattern into \
          masc_code_search.query with is_regex appropriately set." )
     ]
   in
-  let active =
-    List.filter_map (fun (cond, msg) -> if cond then Some msg else None) suggestions
+  suggestions
+  |> List.filter_map (fun (cond, msg) -> if cond then Some msg else None)
+  |> String.concat " "
+;;
+
+let path_syntax_blocked_message token =
+  let hint = path_token_error_hint token in
+  "Path syntax blocked: shell quoting, globbing, brace expansion, and backslash \
+   escapes are not allowed for path-bearing keeper commands. Use plain unquoted \
+   paths and explicit cwd."
+  ^ if hint = "" then "" else " " ^ hint
+;;
+
+let tokenize_path_args cmd =
+  let len = String.length cmd in
+  let tokens = ref [] in
+  let buf = Buffer.create 32 in
+  let quoted = ref false in
+  let escaped = ref false in
+  let globbed = ref false in
+  let braced = ref false in
+  let push () =
+    if Buffer.length buf > 0
+       || !quoted
+       || !escaped
+       || !globbed
+       || !braced
+    then (
+      tokens :=
+        { value = Buffer.contents buf
+        ; quoted = !quoted
+        ; escaped = !escaped
+        ; globbed = !globbed
+        ; braced = !braced
+        }
+        :: !tokens;
+      Buffer.clear buf;
+      quoted := false;
+      escaped := false;
+      globbed := false;
+      braced := false)
   in
-  match active with
-  | [] -> ""
-  | msgs -> " " ^ String.concat " " msgs
+  let rec scan i quote =
+    if i >= len
+    then push ()
+    else
+      match quote, cmd.[i] with
+      | None, (' ' | '\t' | '\n' | '\r') ->
+        push ();
+        scan (i + 1) None
+      | None, ('\'' | '"') ->
+        quoted := true;
+        scan (i + 1) (Some cmd.[i])
+      | Some q, ch when ch = q ->
+        scan (i + 1) None
+      | _, '\\' ->
+        escaped := true;
+        if i + 1 < len
+        then (
+          Buffer.add_char buf cmd.[i + 1];
+          scan (i + 2) quote)
+        else scan (i + 1) quote
+      | _, ('*' | '?' | '[' | ']') ->
+        globbed := true;
+        Buffer.add_char buf cmd.[i];
+        scan (i + 1) quote
+      | _, ('{' | '}') ->
+        braced := true;
+        Buffer.add_char buf cmd.[i];
+        scan (i + 1) quote
+      | _, ch ->
+        Buffer.add_char buf ch;
+        scan (i + 1) quote
+  in
+  scan 0 None;
+  List.rev !tokens
+;;
+
+let token_value_is_redirect_to_dev_null token =
+  let value = token.value in
+  String.equal value ">/dev/null"
+  || String.equal value "2>/dev/null"
+  || String.equal value "1>/dev/null"
+  || String.equal value ">>/dev/null"
+  || String.equal value "2>>/dev/null"
+  || String.equal value "1>>/dev/null"
+;;
+
+let token_value_is_redirect_op token =
+  match token.value with
+  | ">" | ">>" | "<" | "2>" | "2>>" | "1>" | "1>>" -> true
+  | _ -> false
+;;
+
+let command_pattern_arg_flags cmd =
+  match cmd with
+  | "find" ->
+    [ "-name", false
+    ; "-iname", false
+    ; "-path", false
+    ; "-ipath", false
+    ; "-wholename", false
+    ; "-iwholename", false
+    ; "-regex", false
+    ; "-iregex", false
+    ]
+  | "rg" ->
+    [ "-e", true
+    ; "--regexp", true
+    ; "-f", true
+    ; "--file", true
+    ; "-g", false
+    ; "--glob", false
+    ; "--iglob", false
+    ; "--type", false
+    ; "-t", false
+    ; "--type-not", false
+    ; "-T", false
+    ]
+  | "grep" ->
+    [ "-e", true
+    ; "--regexp", true
+    ; "-f", true
+    ; "--file", true
+    ; "--include", false
+    ; "--exclude", false
+    ]
+  | "sed" -> [ "-e", true; "--expression", true ]
+  | _ -> []
+;;
+
+let token_is_inline_pattern_flag cmd token =
+  let value = token.value in
+  command_pattern_arg_flags cmd
+  |> List.find_map (fun (flag, consumes_primary_pattern) ->
+    if String.starts_with ~prefix:(flag ^ "=") value
+    then Some consumes_primary_pattern
+    else None)
+;;
+
+let command_flag_pattern_arity cmd value =
+  command_pattern_arg_flags cmd
+  |> List.find_map (fun (flag, consumes_primary_pattern) ->
+    if String.equal flag value then Some consumes_primary_pattern else None)
+;;
+
+let rg_token_is_option_value token =
+  let value = token.value in
+  String.starts_with ~prefix:"-" value && String.length value > 1
+;;
+
+let command_treats_plain_args_as_content = function
+  | "echo" | "printf" -> true
+  | _ -> false
+;;
+
+let path_validation_tokens tokens =
+  match tokens with
+  | [] -> []
+  | command :: args ->
+    let command_name = command.value in
+    let rg_files_mode =
+      String.equal command_name "rg"
+      && List.exists (fun token -> String.equal token.value "--files") args
+    in
+    let rec loop ~skip_next_pattern ~redirect_target ~seen_primary_pattern acc =
+      function
+      | [] -> List.rev acc
+      | token :: rest ->
+        if redirect_target
+        then
+          let acc =
+            if String.equal token.value "/dev/null" then acc else token :: acc
+          in
+          loop ~skip_next_pattern:None ~redirect_target:false ~seen_primary_pattern acc rest
+        else if token_value_is_redirect_to_dev_null token
+        then loop ~skip_next_pattern:None ~redirect_target:false ~seen_primary_pattern acc rest
+        else (
+          match skip_next_pattern with
+          | Some consumes_primary_pattern ->
+            loop
+              ~skip_next_pattern:None
+              ~redirect_target:false
+              ~seen_primary_pattern:
+                (seen_primary_pattern || consumes_primary_pattern)
+              acc
+              rest
+          | None ->
+            if token_value_is_redirect_op token
+            then loop ~skip_next_pattern:None ~redirect_target:true ~seen_primary_pattern acc rest
+            else
+              (match command_flag_pattern_arity command_name token.value with
+               | Some consumes_primary_pattern ->
+                 loop
+                   ~skip_next_pattern:(Some consumes_primary_pattern)
+                   ~redirect_target:false
+                   ~seen_primary_pattern
+                   acc
+                   rest
+               | None ->
+                 (match token_is_inline_pattern_flag command_name token with
+                  | Some consumes_primary_pattern ->
+                    loop
+                      ~skip_next_pattern:None
+                      ~redirect_target:false
+                      ~seen_primary_pattern:
+                        (seen_primary_pattern || consumes_primary_pattern)
+                      acc
+                      rest
+                  | None when command_treats_plain_args_as_content command_name ->
+                    loop
+                      ~skip_next_pattern:None
+                      ~redirect_target:false
+                      ~seen_primary_pattern
+                      acc
+                      rest
+                  | None when command_name = "sed"
+                              && (not seen_primary_pattern)
+                              && not (rg_token_is_option_value token) ->
+                    loop
+                      ~skip_next_pattern:None
+                      ~redirect_target:false
+                      ~seen_primary_pattern:true
+                      acc
+                      rest
+                  | None when command_name = "rg"
+                              && (not rg_files_mode)
+                              && (not seen_primary_pattern)
+                              && not (rg_token_is_option_value token) ->
+                    loop
+                      ~skip_next_pattern:None
+                      ~redirect_target:false
+                      ~seen_primary_pattern:true
+                      acc
+                      rest
+                  | None when command_name = "grep"
+                              && (not seen_primary_pattern)
+                              && not (rg_token_is_option_value token) ->
+                    loop
+                      ~skip_next_pattern:None
+                      ~redirect_target:false
+                      ~seen_primary_pattern:true
+                      acc
+                      rest
+                  | None ->
+                    loop
+                      ~skip_next_pattern:None
+                      ~redirect_target:false
+                      ~seen_primary_pattern
+                      (token :: acc)
+                      rest)))
+    in
+    loop
+      ~skip_next_pattern:None
+      ~redirect_target:false
+      ~seen_primary_pattern:false
+      []
+      args
 ;;
 
 let validate_command_paths ?workdir cmd =
   match workdir with
   | None -> Ok ()
   | Some _ ->
-    if String.contains cmd '/' && has_path_rewrite_syntax cmd
-    then
-      Error
-        ("Path syntax blocked: shell quoting, globbing, brace expansion, and backslash \
-          escapes are not allowed for path-bearing keeper commands. Use plain unquoted \
-          paths and explicit cwd."
-         ^ path_rewrite_redirect_hint cmd)
-    else (
       let validate_path_value ~requires_existing_dir token =
-        if not (validate_path ?workdir token)
+        if not (validate_path ?workdir token.value)
         then
           Error
             (Printf.sprintf
                "Path blocked: %s (outside allowed directories for this keeper \
                 command)"
-               token)
-        else if requires_existing_dir && not (path_is_existing_dir ?workdir token)
+               token.value)
+        else if requires_existing_dir && not (path_is_existing_dir ?workdir token.value)
         then
           Error
             (Printf.sprintf
                "cwd_not_directory: %s (directory does not exist under cwd; create \
                 or repair the sandbox repo/worktree first)"
-               token)
+               token.value)
         else Ok ()
       in
       let rec loop expect_existing_dir = function
         | [] -> Ok ()
         | token :: rest ->
-          let token = strip_wrapping_quotes token in
-          if token = ""
+          if token.value = ""
           then loop expect_existing_dir rest
           else if expect_existing_dir
           then
@@ -630,24 +872,28 @@ let validate_command_paths ?workdir cmd =
              | Ok () -> loop false rest
              | Error _ as err -> err)
           else (
-            match path_value_of_flagged_token token with
+            match path_value_of_flagged_token token.value with
             | Some value ->
+              let token = { token with value } in
               (match
                  validate_path_value
-                   ~requires_existing_dir:(inline_path_flag_requires_existing_dir token)
-                   value
+                   ~requires_existing_dir:(inline_path_flag_requires_existing_dir token.value)
+                   token
                with
                | Ok () -> loop false rest
                | Error _ as err -> err)
-            | None when is_path_flag token ->
-              loop (path_flag_requires_existing_dir token) rest
-            | None when looks_like_path_token token ->
-              (match validate_path_value ~requires_existing_dir:false token with
-               | Ok () -> loop false rest
-               | Error _ as err -> err)
+            | None when is_path_flag token.value ->
+              loop (path_flag_requires_existing_dir token.value) rest
+            | None when looks_like_path_token token.value ->
+              if token_has_rewrite_syntax token
+              then Error (path_syntax_blocked_message token)
+              else (
+                match validate_path_value ~requires_existing_dir:false token with
+                | Ok () -> loop false rest
+                | Error _ as err -> err)
             | None -> loop false rest)
       in
-      cmd |> split_shell_tokens |> loop false)
+      cmd |> tokenize_path_args |> path_validation_tokens |> loop false
 ;;
 
 (** Check if a command performs write/mutating operations.

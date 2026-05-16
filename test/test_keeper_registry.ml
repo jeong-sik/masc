@@ -100,6 +100,26 @@ let test_fd_pressure_proactive_admission () =
        ~active_keepers:8
        ())
 
+let test_fd_pressure_degraded_projection () =
+  FD.reset_for_tests ();
+  Fun.protect
+    ~finally:FD.reset_for_tests
+    (fun () ->
+      FD.note ~site:"test" ~detail:"Too many open files in system" ();
+      check bool "pressure active" true (FD.active ());
+      let projection = `Assoc (FD.projection_fields ()) in
+      check bool "projection degraded" true
+        (Json.member "degraded" projection |> Json.to_bool);
+      check string "projection reason" "fd_pressure"
+        (Json.member "degraded_reason" projection |> Json.to_string);
+      let trust = FD.degraded_trust_json () in
+      check string "degraded disposition" "Degraded"
+        (Json.member "disposition" trust |> Json.to_string);
+      check bool "needs attention" true
+        (Json.member "needs_attention" trust |> Json.to_bool);
+      check string "next human action" "restore_fd_headroom"
+        (Json.member "next_human_action" trust |> Json.to_string))
+
 let test_bonsai_keepers_summary_uses_scoped_registry () =
   let base_path = temp_base_path "bonsai-summary" in
   let other_base_path = temp_base_path "bonsai-summary-other" in
@@ -1805,6 +1825,8 @@ let () =
             test_fd_pressure_nofile_cap;
           test_case "fd pressure proactive admission" `Quick
             test_fd_pressure_proactive_admission;
+          test_case "fd pressure degraded projection" `Quick
+            test_fd_pressure_degraded_projection;
           eio_test "bonsai summary uses scoped registry"
             test_bonsai_keepers_summary_uses_scoped_registry;
           eio_test "register and get" test_register_and_get;

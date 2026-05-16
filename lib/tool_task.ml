@@ -58,6 +58,11 @@ let verifier_transition_rejection ~agent_name ~action =
     "Verifier action guard: agent '%s' may only call masc_transition(action=approve|reject). Got action=%s. Inspect task history/status for completed tasks, and reject insufficient or analysis-only evidence instead of claiming, starting, releasing, submitting, cancelling, or marking tasks done."
     agent_name action
 
+let verifier_terminal_verdict_noop_message ~task_id ~action ~status =
+  Printf.sprintf
+    "Verifier stale verdict ignored: task %s is already %s, so masc_transition(action=%s) was treated as a no-op. Do not retry this verdict; inspect task history or list awaiting_verification tasks instead."
+    task_id status action
+
 let build_claim_observation_payload ~(now : float) ~(agent_name : string)
     ~(task_id : string) : Yojson.Safe.t =
   `Assoc
@@ -884,6 +889,24 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
   in
   let tasks = Coord.get_tasks_raw ctx.config in
   let task_opt = List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks in
+  let verifier_terminal_verdict_noop =
+    if is_verifier_agent_name ctx.agent_name
+       && verifier_transition_action_allowed action
+    then
+      match task_opt with
+      | Some task when Masc_domain.task_status_is_terminal task.task_status ->
+        Some
+          (verifier_terminal_verdict_noop_message
+             ~task_id
+             ~action:action_s
+             ~status:(Masc_domain.task_status_to_string task.task_status))
+      | _ -> None
+    else
+      None
+  in
+  match verifier_terminal_verdict_noop with
+  | Some message -> Tool_result.ok ~tool_name ~start_time message
+  | None ->
   match handoff_context with
   | Error error -> Tool_result.error ~tool_name ~start_time error
   | Ok handoff_context ->

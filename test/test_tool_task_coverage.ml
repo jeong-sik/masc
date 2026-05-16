@@ -818,6 +818,38 @@ let () = test "handle_transition_verifier_blocks_non_verdict_actions" (fun () ->
   assert_task_todo ctx;
   assert (Planning_eio.get_current_task ctx.config = None))
 
+let () = test "handle_transition_verifier_noops_terminal_verdicts" (fun () ->
+  let ctx = make_test_ctx_with_agent "worker" in
+  let verifier_ctx = { ctx with Tool_task.agent_name = "verifier" } in
+  let _ = Coord.add_task ctx.config ~title:"Already done" ~priority:1 ~description:"" in
+  let _ = Coord.claim_task ctx.config ~agent_name:"worker" ~task_id:"task-001" in
+  let done_result =
+    Coord.transition_task_r ctx.config ~agent_name:"worker"
+      ~task_id:"task-001" ~action:Masc_domain.Done_action ~notes:"complete" ()
+  in
+  (match done_result with
+   | Ok _ -> ()
+   | Error err -> failwith (Masc_domain.masc_error_to_string err));
+  List.iter
+    (fun action ->
+      let result =
+        Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0
+          verifier_ctx
+          (`Assoc
+            [
+              ("task_id", `String "task-001");
+              ("action", `String action);
+              ("notes", `String "stale verifier verdict");
+            ])
+      in
+      if not result.Tool_result.success then failwith result.Tool_result.legacy_message;
+      assert (str_contains result.Tool_result.legacy_message "stale verdict ignored");
+      assert (str_contains result.Tool_result.legacy_message "no-op"))
+    [ "approve"; "reject" ];
+  match (only_task ctx).Masc_domain.task_status with
+  | Masc_domain.Done _ -> ()
+  | _ -> failwith "expected terminal task to stay done")
+
 let () = test "handle_transition_verifier_allows_verdict_actions" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let worker_ctx = make_test_ctx_with_agent "worker" in

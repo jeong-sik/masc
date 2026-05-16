@@ -390,9 +390,14 @@ let approval_event_timeline_event json =
               (Option.value ~default:"approval expired" decision) ^ blocker_note,
               Some next_action )
         | "approval_timeout" | "cancelled" ->
+            let summary =
+              match decision with
+              | Some value -> value
+              | None -> "approval await cancelled"
+            in
             ( "approval_expired",
               Printf.sprintf "Approval · %s" tool_name,
-              Option.value ~default:"approval await cancelled" decision,
+              summary,
               Some "retry_or_rerun" )
         | "auto_approved_rule_match" ->
             let matched_by =

@@ -1005,7 +1005,21 @@ let rec process_pending ?store_ref acc = function
      | Delivered -> process_pending ?store_ref acc rest
      | Retryable_failure (pending, stage, exn) ->
        let attempt = pending.attempts + 1 in
-       if attempt >= relay_max_attempts
+       let fd_pressure =
+         Keeper_fd_pressure.active () || Keeper_fd_pressure.is_fd_exhaustion_exn exn
+       in
+       if fd_pressure
+       then (
+         Keeper_fd_pressure.note_exception ~site:"oas_event_bridge.relay" exn;
+         Prometheus.inc_counter
+           Prometheus.metric_oas_sse_relay_drops
+           ~labels:[ "stage", relay_stage_to_string stage ]
+           ();
+         let stage_label = relay_stage_to_string stage ^ ":fd_pressure" in
+         emit_relay_drop_log ~pending ~stage_label ~attempts:attempt;
+         broadcast_drop_marker ~pending ~stage_label ~attempts:attempt;
+         process_pending ?store_ref acc rest)
+       else if attempt >= relay_max_attempts
        then (
          Prometheus.inc_counter
            Prometheus.metric_oas_sse_relay_drops

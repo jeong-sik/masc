@@ -343,11 +343,26 @@ let list_requests base_path =
       ~detail
   in
   let dir = verifications_dir base_path in
-  if not (Sys.file_exists dir) then
+  if Keeper_fd_pressure.active ()
+  then []
+  else
+    let dir_exists =
+      try Sys.file_exists dir with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        Keeper_fd_pressure.note_exception ~site:"verification.list_requests.exists" exn;
+        report_drop
+          ~reason:Safe_ops.persistence_read_drop_reason_list_dir_error
+          ~path:dir
+          ~detail:(Printexc.to_string exn);
+        false
+    in
+    if not dir_exists then
     []
   else
     match Safe_ops.list_dir_safe dir with
     | Error detail ->
+      Keeper_fd_pressure.note_if_fd_exhaustion ~site:"verification.list_requests" detail;
       report_drop ~reason:Safe_ops.persistence_read_drop_reason_list_dir_error ~path:dir ~detail;
       []
     | Ok files ->

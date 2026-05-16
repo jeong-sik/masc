@@ -9,10 +9,6 @@ let json_string_opt = function
   | Some value -> `String value
   | None -> `Null
 
-let json_bool_opt = function
-  | Some value -> `Bool value
-  | None -> `Null
-
 let json_string_list values =
   `List (List.map (fun value -> `String value) values)
 
@@ -216,59 +212,28 @@ let handle_keeper_preflight_check
     add_check "accountability_risk" (not accountability_risk)
       (if accountability_risk then "RISK_HIGH" else "ok")
   in
-  (* Check 7: autonomous activation *)
-  let activation_blocker =
-    if meta.paused then Some "paused"
-    else if not meta.autoboot_enabled then Some "autoboot_disabled"
-    else if not meta.proactive.enabled then Some "proactive_disabled"
-    else None
-  in
-  let activation_ok = Option.is_none activation_blocker in
-  let activation_hint =
-    match activation_blocker with
-    | None -> None
-    | Some "paused" ->
-      Some "resume keeper before expecting autonomous keepalive or PR fan-out"
-    | Some "autoboot_disabled" ->
-      Some "set autoboot_enabled=true before expecting autonomous keepalive or PR fan-out"
-    | Some "proactive_disabled" ->
-      Some "set proactive_enabled=true before expecting scheduled autonomous work"
-    | Some reason -> Some ("activation blocked: " ^ reason)
-  in
-  let activation_check_value =
-    match activation_blocker with
-    | None -> "ok"
-    | Some reason -> reason
+  let activation_readiness = Keeper_activation_readiness.of_meta meta in
+  let autonomous_activation =
+    activation_readiness.Keeper_activation_readiness.autonomous_activation
   in
   let () =
-    add_check "autonomous_activation" activation_ok activation_check_value
+    add_check
+      "autonomous_activation"
+      autonomous_activation.ok
+      (Keeper_activation_readiness.autonomous_check_value autonomous_activation)
   in
-  (* Check 8: work-discovery lane readiness for unclaimed backlog. *)
-  let work_discovery_blocker =
-    match meta.work_discovery_enabled, meta.current_task_id with
-    | Some false, None -> Some "work_discovery_disabled"
-    | _ -> None
-  in
-  let work_discovery_ok = Option.is_none work_discovery_blocker in
-  let work_discovery_hint =
-    match work_discovery_blocker with
-    | None -> None
-    | Some "work_discovery_disabled" ->
-      Some
-        "set work_discovery_enabled=true or assign current_task_id before expecting \
-         backlog claim/PR upload fan-out"
-    | Some reason -> Some ("work discovery blocked: " ^ reason)
-  in
-  let work_discovery_check_value =
-    match work_discovery_blocker with
-    | None -> "ok"
-    | Some reason -> reason
+  let work_discovery_activation =
+    activation_readiness.Keeper_activation_readiness.work_discovery_activation
   in
   let () =
     add_check
       "work_discovery_activation"
-      work_discovery_ok
-      work_discovery_check_value
+      work_discovery_activation.ok
+      (Keeper_activation_readiness.work_discovery_check_value
+         work_discovery_activation)
+  in
+  let activation_readiness_json =
+    Keeper_activation_readiness.to_yojson activation_readiness
   in
   (* Check 9: sandbox clone target *)
   let repo_name_arg =
@@ -312,26 +277,14 @@ let handle_keeper_preflight_check
         ; "accountability_risk", `Bool accountability_risk
         ; "risk_band", `String risk_band
         ; "routing_hint", `String routing_hint
-        ; "autonomous_activation"
-        , `Assoc
-            [ "ok", `Bool activation_ok
-            ; "autoboot_enabled", `Bool meta.autoboot_enabled
-            ; "proactive_enabled", `Bool meta.proactive.enabled
-            ; "paused", `Bool meta.paused
-            ; "blocker", json_string_opt activation_blocker
-            ; "hint", json_string_opt activation_hint
-            ]
+        ; ( "autonomous_activation"
+          , Yojson.Safe.Util.member
+              "autonomous_activation"
+              activation_readiness_json )
         ; ( "work_discovery_activation"
-          , `Assoc
-              [ "ok", `Bool work_discovery_ok
-              ; "work_discovery_enabled", json_bool_opt meta.work_discovery_enabled
-              ; ( "current_task_id"
-                , json_string_opt
-                    (Option.map Keeper_id.Task_id.to_string meta.current_task_id)
-                )
-              ; "blocker", json_string_opt work_discovery_blocker
-              ; "hint", json_string_opt work_discovery_hint
-              ] )
+          , Yojson.Safe.Util.member
+              "work_discovery_activation"
+              activation_readiness_json )
         ; "clone_target", `String clone_target
         ; "repo_readiness", repo_readiness
         ; "keeper", `String meta.name

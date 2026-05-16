@@ -1138,74 +1138,8 @@ let composite_execution_config_drift execution =
   | _ -> false
 ;;
 
-let keeper_autonomous_activation_blocker (meta : Keeper_types.keeper_meta) =
-  if meta.paused then Some "paused"
-  else if not meta.autoboot_enabled then Some "autoboot_disabled"
-  else if not meta.proactive.enabled then Some "proactive_disabled"
-  else None
-;;
-
-let keeper_autonomous_activation_hint = function
-  | None -> None
-  | Some "paused" ->
-    Some "resume keeper before expecting autonomous keepalive or PR fan-out"
-  | Some "autoboot_disabled" ->
-    Some "set autoboot_enabled=true before expecting autonomous keepalive or PR fan-out"
-  | Some "proactive_disabled" ->
-    Some "set proactive_enabled=true before expecting scheduled autonomous work"
-  | Some reason -> Some ("activation blocked: " ^ reason)
-;;
-
-let keeper_work_discovery_activation_blocker (meta : Keeper_types.keeper_meta) =
-  match meta.work_discovery_enabled, meta.current_task_id with
-  | Some false, None -> Some "work_discovery_disabled"
-  | _ -> None
-;;
-
-let keeper_work_discovery_activation_hint = function
-  | None -> None
-  | Some "work_discovery_disabled" ->
-    Some
-      "set work_discovery_enabled=true or assign current_task_id before expecting \
-       backlog claim/PR upload fan-out"
-  | Some reason -> Some ("work discovery blocked: " ^ reason)
-;;
-
-let current_task_id_to_json (meta : Keeper_types.keeper_meta) =
-  Json_util.string_opt_to_json (Keeper_runtime_contract.current_task_id_opt meta)
-;;
-
 let keeper_activation_readiness_json (meta : Keeper_types.keeper_meta) =
-  let autonomous_blocker = keeper_autonomous_activation_blocker meta in
-  let work_discovery_blocker = keeper_work_discovery_activation_blocker meta in
-  let autonomous_ok = Option.is_none autonomous_blocker in
-  let work_discovery_ok = Option.is_none work_discovery_blocker in
-  `Assoc
-    [ "ok", `Bool (autonomous_ok && work_discovery_ok)
-    ; "ready_for_unclaimed_backlog", `Bool (autonomous_ok && work_discovery_ok)
-    ; ( "autonomous_activation"
-      , `Assoc
-          [ "ok", `Bool autonomous_ok
-          ; "autoboot_enabled", `Bool meta.autoboot_enabled
-          ; "proactive_enabled", `Bool meta.proactive.enabled
-          ; "paused", `Bool meta.paused
-          ; "blocker", Json_util.string_opt_to_json autonomous_blocker
-          ; "hint",
-            Json_util.string_opt_to_json
-              (keeper_autonomous_activation_hint autonomous_blocker)
-          ] )
-    ; ( "work_discovery_activation"
-      , `Assoc
-          [ "ok", `Bool work_discovery_ok
-          ; "work_discovery_enabled",
-            Json_util.bool_opt_to_json meta.work_discovery_enabled
-          ; "current_task_id", current_task_id_to_json meta
-          ; "blocker", Json_util.string_opt_to_json work_discovery_blocker
-          ; "hint",
-            Json_util.string_opt_to_json
-              (keeper_work_discovery_activation_hint work_discovery_blocker)
-          ] )
-    ]
+  Keeper_activation_readiness.(of_meta meta |> to_yojson)
 ;;
 
 let task_is_unclaimed_todo (task : Masc_domain.task) =
@@ -1232,11 +1166,6 @@ let unclaimed_todo_count ~(config : Coord.config) =
     0
 ;;
 
-let keeper_ready_for_unclaimed_backlog (meta : Keeper_types.keeper_meta) =
-  Option.is_none (keeper_autonomous_activation_blocker meta)
-  && Option.is_none (keeper_work_discovery_activation_blocker meta)
-;;
-
 let fleet_work_discovery_readiness_json
     ~(todo_unclaimed_count : int)
     (entries : Keeper_registry.registry_entry list)
@@ -1245,30 +1174,38 @@ let fleet_work_discovery_readiness_json
     List.map
       (fun (entry : Keeper_registry.registry_entry) ->
          let meta = entry.meta in
-         let autonomous_blocker = keeper_autonomous_activation_blocker meta in
-         let work_discovery_blocker =
-           keeper_work_discovery_activation_blocker meta
+         let readiness = Keeper_activation_readiness.of_meta meta in
+         let autonomous_activation =
+           readiness.Keeper_activation_readiness.autonomous_activation
+         in
+         let work_discovery_activation =
+           readiness.Keeper_activation_readiness.work_discovery_activation
          in
          `Assoc
            [ "keeper", `String entry.name
            ; "ready_for_unclaimed_backlog",
-             `Bool (keeper_ready_for_unclaimed_backlog meta)
-           ; "autonomous_blocker", Json_util.string_opt_to_json autonomous_blocker
+             `Bool readiness.ready_for_unclaimed_backlog
+           ; "autonomous_blocker",
+             Json_util.string_opt_to_json autonomous_activation.blocker
            ; "work_discovery_blocker",
-             Json_util.string_opt_to_json work_discovery_blocker
-           ; "paused", `Bool meta.paused
-           ; "autoboot_enabled", `Bool meta.autoboot_enabled
-           ; "proactive_enabled", `Bool meta.proactive.enabled
+             Json_util.string_opt_to_json work_discovery_activation.blocker
+           ; "paused", `Bool autonomous_activation.paused
+           ; "autoboot_enabled", `Bool autonomous_activation.autoboot_enabled
+           ; "proactive_enabled", `Bool autonomous_activation.proactive_enabled
            ; "work_discovery_enabled",
-             Json_util.bool_opt_to_json meta.work_discovery_enabled
-           ; "current_task_id", current_task_id_to_json meta
+             Json_util.bool_opt_to_json
+               work_discovery_activation.work_discovery_enabled
+           ; "current_task_id",
+             Json_util.string_opt_to_json work_discovery_activation.current_task_id
            ])
       entries
   in
   let ready_keeper_count =
     List.fold_left
       (fun count (entry : Keeper_registry.registry_entry) ->
-         if keeper_ready_for_unclaimed_backlog entry.meta then count + 1 else count)
+         if Keeper_activation_readiness.ready_for_unclaimed_backlog entry.meta
+         then count + 1
+         else count)
       0
       entries
   in

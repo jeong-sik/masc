@@ -179,14 +179,22 @@ let kill_child config pid =
   | Unix.Unix_error ((Unix.ESRCH | Unix.EPERM), _, _) -> ()
 ;;
 
-let spawn_child config effective =
+let close_quietly fd =
+  try Unix.close fd with
+  | Unix.Unix_error _ -> ()
+;;
+
+let spawn_child ~sw config effective =
   let stdin_fd = Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0 in
-  let stdout_r, stdout_w = Unix.pipe () in
-  let stderr_r, stderr_w = Unix.pipe () in
-  let close_quietly fd =
-    try Unix.close fd with
-    | Unix.Unix_error _ -> ()
-  in
+  let stdout_r, stdout_w = Unix.pipe ~cloexec:true () in
+  let stderr_r, stderr_w = Unix.pipe ~cloexec:true () in
+  (* Switch.on_release guarantees pipe close on cancellation or unexpected
+     raise. The previous Fun.protect + reader_started flag scheme had a
+     race: setting the flag preceded Eio.Fiber.fork, so a cancellation
+     between them orphaned the read end. close_quietly is idempotent with
+     drain_fd's own Fun.protect close — safe even when both fire. *)
+  Eio.Switch.on_release sw (fun () -> close_quietly stdout_r);
+  Eio.Switch.on_release sw (fun () -> close_quietly stderr_r);
   try
     Unix.set_nonblock stdout_r;
     Unix.set_nonblock stderr_r;
@@ -208,9 +216,7 @@ let spawn_child config effective =
   with
   | Unix.Unix_error (err, fn, arg) ->
     close_quietly stdin_fd;
-    close_quietly stdout_r;
     close_quietly stdout_w;
-    close_quietly stderr_r;
     close_quietly stderr_w;
     Error
       (file_op_error
@@ -240,33 +246,24 @@ let await_result promise map_exn =
 let run ~sw ~clock ~config ~argv ~timeout_s =
   let t0 = Unix.gettimeofday () in
   let* effective = effective_argv ~config ~argv in
-  let* pid, stdout_r, stderr_r = spawn_child config effective in
-  let close_quietly fd =
-    try Unix.close fd with
-    | Unix.Unix_error _ -> ()
-  in
-  let stdout_reader_started = ref false in
-  let stderr_reader_started = ref false in
-  let completed = ref false in
+  let* pid, stdout_r, stderr_r = spawn_child ~sw config effective in
+  (* Pipe FDs are owned by [sw] via Switch.on_release in spawn_child.
+     Only the child lifecycle remains as a manual cleanup concern here.
+     [reaped] tracks whether waitpid has consumed the child, so the
+     finally clause only kills (and avoids a SIGKILL race) when needed. *)
+  let reaped = ref false in
   Fun.protect
-    ~finally:(fun () ->
-      if not !completed
-      then (
-        kill_child config pid;
-        if not !stdout_reader_started then close_quietly stdout_r;
-        if not !stderr_reader_started then close_quietly stderr_r))
+    ~finally:(fun () -> if not !reaped then kill_child config pid)
     (fun () ->
        let wait_promise =
          spawn_result_promise ~sw (fun () ->
            Eio_unix.run_in_systhread ~label:"autonomy-exec-waitpid" (fun () ->
              snd (Unix.waitpid [] pid)))
        in
-       stdout_reader_started := true;
        let stdout_promise =
          spawn_result_promise ~sw (fun () ->
            drain_fd ~limit:config.stdout_limit_bytes stdout_r)
        in
-       stderr_reader_started := true;
        let stderr_promise =
          spawn_result_promise ~sw (fun () ->
            drain_fd ~limit:config.stderr_limit_bytes stderr_r)
@@ -299,9 +296,8 @@ let run ~sw ~clock ~config ~argv ~timeout_s =
                  ~path:(string_of_int pid)
                  ~detail:(Printexc.to_string exn)))
          in
-         let result = capture_and_finish (status_of_unix_status unix_status) in
-         completed := true;
-         result
+         reaped := true;
+         capture_and_finish (status_of_unix_status unix_status)
        with
        | Eio.Time.Timeout ->
          kill_child config pid;
@@ -317,9 +313,8 @@ let run ~sw ~clock ~config ~argv ~timeout_s =
            | Ok (Unix.WEXITED _) -> None
            | Error _ -> None
          in
-         let result = capture_and_finish (Timed_out timed_out_signal) in
-         completed := true;
-         result
+         reaped := true;
+         capture_and_finish (Timed_out timed_out_signal)
        | Eio.Cancel.Cancelled _ as exn -> raise exn)
 ;;
 

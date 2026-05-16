@@ -1,18 +1,31 @@
 import type { DashboardNamespaceTruthResponse, DashboardShellResponse } from './types'
 
-type RuntimeCountSource =
+export type RuntimeCountSource =
   | 'execution'
   | 'project-snapshot'
   | 'shell'
   | 'partial'
   | 'unknown'
 
-interface RuntimeCounts {
+export type ConfiguredCountSource = 'namespace-truth' | 'shell' | 'none'
+
+export interface LiveRuntimeView {
   agents: number
   keepers: number
   tasks: number
   totalRuntimes: number
-  configuredKeepers: number
+  available: boolean
+}
+
+export interface ConfiguredRuntimeView {
+  keepers: number
+  totalRuntimes: number
+  source: ConfiguredCountSource
+}
+
+export interface RuntimeCounts {
+  live: LiveRuntimeView
+  configured: ConfiguredRuntimeView
   source: RuntimeCountSource
 }
 
@@ -48,6 +61,61 @@ function normalizeCounts(
   }
 }
 
+function resolveConfiguredView({
+  namespaceTotalRuntimes,
+  namespaceKeepers,
+  namespaceConfiguredKeepers,
+  shellTotalRuntimes,
+  shellConfiguredKeepers,
+}: {
+  namespaceTotalRuntimes: number
+  namespaceKeepers: number
+  namespaceConfiguredKeepers: number | null
+  shellTotalRuntimes: number
+  shellConfiguredKeepers: number | null
+}): ConfiguredRuntimeView {
+  if (namespaceConfiguredKeepers != null) {
+    return {
+      keepers: namespaceConfiguredKeepers,
+      totalRuntimes: namespaceTotalRuntimes,
+      source: 'namespace-truth',
+    }
+  }
+  if (shellConfiguredKeepers != null || shellTotalRuntimes > 0) {
+    return {
+      keepers: shellConfiguredKeepers ?? 0,
+      totalRuntimes: shellTotalRuntimes,
+      source: 'shell',
+    }
+  }
+  if (namespaceTotalRuntimes > 0) {
+    return {
+      keepers: namespaceKeepers,
+      totalRuntimes: namespaceTotalRuntimes,
+      source: 'namespace-truth',
+    }
+  }
+  return { keepers: 0, totalRuntimes: 0, source: 'none' }
+}
+
+function deriveStatusSource({
+  executionLoaded,
+  live,
+  configured,
+}: {
+  executionLoaded: boolean
+  live: LiveRuntimeView
+  configured: ConfiguredRuntimeView
+}): RuntimeCountSource {
+  if (executionLoaded && (live.totalRuntimes > 0 || configured.totalRuntimes === 0)) {
+    return 'execution'
+  }
+  if (live.totalRuntimes > 0) return 'partial'
+  if (configured.source === 'namespace-truth') return 'project-snapshot'
+  if (configured.source === 'shell') return 'shell'
+  return executionLoaded ? 'execution' : 'unknown'
+}
+
 export function resolveRuntimeCounts({
   executionLoaded,
   agentsCount,
@@ -58,74 +126,34 @@ export function resolveRuntimeCounts({
   shellCounts,
   shellConfiguredKeepers,
 }: ResolveRuntimeCountsOptions): RuntimeCounts {
-  const live = {
-    agents: normalizeCount(agentsCount),
-    keepers: normalizeCount(keepersCount),
-    tasks: normalizeCount(tasksCount),
+  const liveAgents = normalizeCount(agentsCount)
+  const liveKeepers = normalizeCount(keepersCount)
+  const liveTasks = normalizeCount(tasksCount)
+  const live: LiveRuntimeView = {
+    agents: liveAgents,
+    keepers: liveKeepers,
+    tasks: liveTasks,
+    totalRuntimes: liveAgents + liveKeepers,
+    available: executionLoaded,
   }
+
   const namespace = normalizeCounts(namespaceTruthCounts)
   const shell = normalizeCounts(shellCounts)
-  const liveTotalRuntimes = live.agents + live.keepers
-  const namespaceTotalRuntimes = namespace?.totalRuntimes ?? 0
-  const shellTotalRuntimes = shell?.totalRuntimes ?? 0
-  const configuredKeepers =
-    namespaceTruthConfiguredKeepers != null
-      ? normalizeCount(namespaceTruthConfiguredKeepers)
-      : shellConfiguredKeepers != null
-        ? normalizeCount(shellConfiguredKeepers)
-        : live.keepers
+  const namespaceConfiguredKeepers =
+    namespaceTruthConfiguredKeepers != null ? normalizeCount(namespaceTruthConfiguredKeepers) : null
+  const shellConfiguredKeeperCount =
+    shellConfiguredKeepers != null ? normalizeCount(shellConfiguredKeepers) : null
 
-  if (executionLoaded && (liveTotalRuntimes > 0 || (namespaceTotalRuntimes === 0 && shellTotalRuntimes === 0))) {
-    return {
-      ...live,
-      totalRuntimes: liveTotalRuntimes,
-      configuredKeepers,
-      source: 'execution',
-    }
-  }
+  const configured = resolveConfiguredView({
+    namespaceTotalRuntimes: namespace?.totalRuntimes ?? 0,
+    namespaceKeepers: namespace?.keepers ?? 0,
+    namespaceConfiguredKeepers,
+    shellTotalRuntimes: shell?.totalRuntimes ?? 0,
+    shellConfiguredKeepers: shellConfiguredKeeperCount,
+  })
 
-  if (liveTotalRuntimes > 0) {
-    return {
-      ...live,
-      totalRuntimes: liveTotalRuntimes,
-      configuredKeepers,
-      source: 'partial',
-    }
-  }
-
-  if (namespaceTotalRuntimes > 0) {
-    return {
-      ...namespace!,
-      totalRuntimes: namespaceTotalRuntimes,
-      configuredKeepers,
-      source: 'project-snapshot',
-    }
-  }
-
-  if (shellTotalRuntimes > 0) {
-    return {
-      ...shell!,
-      totalRuntimes: shellTotalRuntimes,
-      configuredKeepers,
-      source: 'shell',
-    }
-  }
-
-  if (liveTotalRuntimes > 0 || live.tasks > 0) {
-    return {
-      ...live,
-      totalRuntimes: liveTotalRuntimes,
-      configuredKeepers,
-      source: executionLoaded ? 'execution' : 'partial',
-    }
-  }
-
-  return {
-    ...live,
-    totalRuntimes: liveTotalRuntimes,
-    configuredKeepers,
-    source: executionLoaded ? 'execution' : 'unknown',
-  }
+  const source = deriveStatusSource({ executionLoaded, live, configured })
+  return { live, configured, source }
 }
 
 export function runtimeCountSourceLabel(source: RuntimeCountSource): string {
@@ -141,6 +169,26 @@ export function runtimeCountSourceLabel(source: RuntimeCountSource): string {
     default:
       return '미수집'
   }
+}
+
+export function configuredCountSourceLabel(source: ConfiguredCountSource): string {
+  switch (source) {
+    case 'namespace-truth':
+      return 'project snapshot'
+    case 'shell':
+      return 'shell'
+    case 'none':
+      return '미수집'
+  }
+}
+
+export function formatActiveOverConfigured(
+  counts: Pick<RuntimeCounts, 'live' | 'configured'>,
+  kind: 'keeper' | 'runtime' = 'keeper',
+): string {
+  const active = kind === 'keeper' ? counts.live.keepers : counts.live.totalRuntimes
+  const configured = kind === 'keeper' ? counts.configured.keepers : counts.configured.totalRuntimes
+  return `활성 ${active} / 설정 ${configured}`
 }
 
 interface ExecutionFallbackStateOptions {

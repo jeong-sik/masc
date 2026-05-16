@@ -431,20 +431,24 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
     task_update, task_done, etc.). *)
     Agent_sdk.Types.Any
 
-let generic_required_tool_gate_guidance ~(turn_affordances : string list)
-    ~(allowed_tool_names : string list) =
+let generic_required_tool_gate_guidance ~(has_current_task : bool)
+    ~(turn_affordances : string list) ~(allowed_tool_names : string list) =
+  let can_recommend_tool name =
+    List.mem name allowed_tool_names
+    && Keeper_tool_disclosure.tool_name_can_satisfy_required_contract name
+    && ((not has_current_task)
+        || not (Keeper_tool_disclosure.is_claim_context_tool_name name))
+  in
   let actionable_tools =
     preferred_tool_names_for_turn_affordances turn_affordances
-    |> List.filter (fun name ->
-      List.mem name allowed_tool_names
-      && Keeper_tool_disclosure.tool_name_can_satisfy_required_contract name)
+    |> List.filter can_recommend_tool
     |> Keeper_types.dedupe_keep_order
   in
   let actionable_tools =
     match actionable_tools with
     | [] ->
         allowed_tool_names
-        |> List.filter Keeper_tool_disclosure.tool_name_can_satisfy_required_contract
+        |> List.filter can_recommend_tool
         |> Keeper_types.dedupe_keep_order
     | tools -> tools
   in
@@ -461,13 +465,19 @@ let generic_required_tool_gate_guidance ~(turn_affordances : string list)
     then " If no valid action remains, call keeper_stay_silent with a concise reason."
     else ""
   in
+  let claim_context_note =
+    if has_current_task
+    then " You already hold an active task; claim/context tools alone do not count as execution progress."
+    else ""
+  in
   Printf.sprintf
     "[TOOL REQUIRED] This turn has an actionable runtime signal. Before \
      answering in natural language, call one of the currently visible keeper \
      runtime tools. Preferred tools for this signal: %s%s. Passive reads/status \
-     alone do not satisfy this turn.%s"
+     alone do not satisfy this turn.%s%s"
     (if String.equal preview "" then "any active visible keeper tool" else preview)
     suffix
+    claim_context_note
     fallback
 
 let required_tool_names_for_turn ~(current_task_required_tool_names : string list)

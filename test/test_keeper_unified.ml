@@ -11372,6 +11372,7 @@ let test_generic_required_tool_gate_guidance_names_action_tools () =
   let module Surface = Masc_mcp.Keeper_agent_tool_surface in
   let guidance =
     Surface.generic_required_tool_gate_guidance
+      ~has_current_task:false
       ~turn_affordances:[ "board_post_or_comment" ]
       ~allowed_tool_names:[ "keeper_tasks_list"; "keeper_board_comment"; "keeper_board_post" ]
   in
@@ -11400,6 +11401,31 @@ let test_generic_required_tool_gate_guidance_names_action_tools () =
     "guidance warns passive reads are insufficient"
     true
     (contains_substring guidance "Passive reads/status alone do not satisfy")
+;;
+
+let test_generic_required_tool_gate_guidance_avoids_claim_after_owned_task () =
+  let module Surface = Masc_mcp.Keeper_agent_tool_surface in
+  let guidance =
+    Surface.generic_required_tool_gate_guidance
+      ~has_current_task:true
+      ~turn_affordances:[ "task_claim"; "board_post_or_comment" ]
+      ~allowed_tool_names:[ "keeper_task_claim"; "keeper_board_comment" ]
+  in
+  check
+    bool
+    "guidance does not recommend claim after owned task"
+    false
+    (contains_substring guidance "Preferred tools for this signal: keeper_task_claim");
+  check
+    bool
+    "guidance keeps execution tool"
+    true
+    (contains_substring guidance "keeper_board_comment");
+  check
+    bool
+    "guidance explains claim-only is insufficient"
+    true
+    (contains_substring guidance "claim/context tools alone do not count")
 ;;
 
 let test_direct_keeper_msg_timeout_overrides_meta_per_provider_timeout () =
@@ -13027,6 +13053,10 @@ let () =
             "generic required gate guidance names action tools"
             `Quick
             test_generic_required_tool_gate_guidance_names_action_tools
+        ; test_case
+            "generic required gate guidance avoids claim after owned task"
+            `Quick
+            test_generic_required_tool_gate_guidance_avoids_claim_after_owned_task
         ; test_case
             "direct keeper msg timeout overrides stale per-provider timeout"
             `Quick

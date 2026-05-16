@@ -200,7 +200,10 @@ val preferred_tool_choice_for_required_turn :
     turns, where no explicit [required_tool_names] exist but the runtime still
     requires a keeper tool call. *)
 val generic_required_tool_gate_guidance :
-  turn_affordances:string list -> allowed_tool_names:string list -> string
+  has_current_task:bool ->
+  turn_affordances:string list ->
+  allowed_tool_names:string list ->
+  string
 
 (** Per-call [masc_keeper_msg.required_tools] is an explicit operator/harness
     contract for this turn. When present, it takes precedence over the keeper's

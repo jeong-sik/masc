@@ -1582,6 +1582,7 @@ let prepare_agent_setup
                     append_ctx
                       ctx
                       (generic_required_tool_gate_guidance
+                         ~has_current_task:(keeper_has_owned_active_task ())
                          ~turn_affordances
                          ~allowed_tool_names:computed_surface.all_allowed)
                   else if is_retry

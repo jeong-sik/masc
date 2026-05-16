@@ -1037,3 +1037,80 @@ let runtime_blocker_event_from_meta ~config ~(meta : Keeper_types.keeper_meta) =
                  | _ -> "warn") );
             ("next_human_action", `String "inspect_runtime_blocker");
           ])
+
+(** {1 Runtime trust fallback projection from execution receipt (pure projection over IO-touched input)} *)
+
+let runtime_trust_from_receipt_fallback ~config ~(meta : Keeper_types.keeper_meta)
+    receipt =
+  let disposition, disposition_reason, operator_disposition,
+      operator_disposition_reason =
+    display_disposition_of_receipt_json receipt
+  in
+  let ts =
+    receipt_ended_at receipt
+    |> Option.value ~default:meta.updated_at
+  in
+  let turn_id = receipt_turn_count receipt in
+  let severity =
+    match disposition with
+    | "Pass" -> "ok"
+    | "Pause" -> "warn"
+    | _ -> "bad"
+  in
+  let latest_event =
+    `Assoc
+      [
+        ("kind", `String "execution_receipt");
+        ("ts", `String ts);
+        ("keeper_turn_id", Json_util.int_opt_to_json turn_id);
+        ("goal_ids", `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids));
+        ("title", `String "Keeper Execution Receipt");
+        ("summary", `String disposition_reason);
+        ("severity", `String severity);
+      ]
+  in
+  let runtime_blocker_fields =
+    Keeper_status_bridge.runtime_blocker_fields_json config meta
+  in
+  let causal_timeline =
+    let blocker_events =
+      runtime_blocker_event_from_meta ~config ~meta
+      |> Option.map (fun event -> [ event ])
+      |> Option.value ~default:[]
+    in
+    `List (latest_event :: blocker_events)
+  in
+  `Assoc
+    [
+      ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
+      ("generation", `Int meta.runtime.generation);
+      ("turn_id", Json_util.int_opt_to_json turn_id);
+      ("phase", `Null);
+      ("raw_phase", `Null);
+      ("goal_ids", `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids));
+      ("disposition", `String disposition);
+      ("disposition_reason", `String disposition_reason);
+      ("operator_disposition", `String operator_disposition);
+      ("operator_disposition_reason", `String operator_disposition_reason);
+      ("needs_attention", `Bool (not (String.equal disposition "Pass")));
+      ("attention_reason", `Null);
+      ("next_human_action", `Null);
+      ( "approval",
+        `Assoc
+          [
+            ("state", `String "idle");
+            ("summary", `String "idle");
+            ("pending_count", `Int 0);
+          ] );
+      ( "execution_summary",
+        `Assoc
+          [
+            ( "tool_contract_result",
+              receipt |> member "tool_contract_result" );
+            ("latest_receipt_at", `String ts);
+          ] );
+      ("runtime_blockers", `Assoc runtime_blocker_fields);
+      ("latest_causal_event", latest_event);
+      ("causal_timeline", causal_timeline);
+      ("latest_receipt", receipt);
+    ]

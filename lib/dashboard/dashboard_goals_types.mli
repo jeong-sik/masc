@@ -265,3 +265,14 @@ val runtime_blocker_event_from_meta :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   Yojson.Safe.t option
+
+(** {1 Runtime trust fallback projection from execution receipt} *)
+
+(** Compose disposition + receipt accessors + runtime blocker event into
+    a 19-key runtime_trust JSON record. Used when the upstream
+    [Keeper_runtime_trust_snapshot.snapshot_json] is unavailable. *)
+val runtime_trust_from_receipt_fallback :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  Yojson.Safe.t ->
+  Yojson.Safe.t

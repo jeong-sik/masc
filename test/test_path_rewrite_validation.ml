@@ -6,6 +6,17 @@ open Alcotest
 
 module Wdt = Masc_mcp.Worker_dev_tools
 
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop i =
+    needle_len = 0
+    || (i + needle_len <= haystack_len
+        && (String.sub haystack i needle_len = needle || loop (i + 1)))
+  in
+  loop 0
+;;
+
 let test_rejects_quoted_path () =
   match Wdt.validate_command_paths ~workdir:"/tmp" "cat '/tmp/test.txt'" with
   | Error _ -> ()
@@ -108,6 +119,20 @@ let test_allows_ls_basename_glob_with_redirect () =
   | Error msg -> fail ("ls basename glob with stderr redirect should be allowed: " ^ msg)
 ;;
 
+let test_blocks_pipeline_later_stage_outside_path () =
+  match Wdt.validate_command_paths ~workdir:"/tmp" "echo ok | cat /etc/passwd" with
+  | Error msg ->
+    check bool "blocked diagnostic" true (contains_substring msg "Path blocked");
+    check bool "outside path reported" true (contains_substring msg "/etc/passwd")
+  | Ok () -> fail "Expected pipeline stage path outside workdir to be blocked"
+;;
+
+let test_allows_pipeline_later_stage_inside_path () =
+  match Wdt.validate_command_paths ~workdir:"/tmp" "echo ok | cat /tmp/file.txt" with
+  | Ok () -> ()
+  | Error msg -> fail ("pipeline stage path under workdir should be allowed: " ^ msg)
+;;
+
 let test_no_workdir_skips_validation () =
   match Wdt.validate_command_paths "cat '/anything/with quotes and * globs'" with
   | Ok () -> ()
@@ -163,7 +188,17 @@ let () =
             "ls_basename_glob_with_redirect"
             `Quick
             test_allows_ls_basename_glob_with_redirect
+        ; test_case
+            "pipeline_later_stage_inside_path"
+            `Quick
+            test_allows_pipeline_later_stage_inside_path
         ; test_case "no_workdir_skips" `Quick test_no_workdir_skips_validation
+        ] )
+    ; ( "ast_pipeline"
+      , [ test_case
+            "blocks_later_stage_outside_path"
+            `Quick
+            test_blocks_pipeline_later_stage_outside_path
         ] )
     ; ( "diagnostics"
       , [ test_case "error_contains_hint" `Quick test_error_contains_hint

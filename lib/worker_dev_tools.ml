@@ -911,11 +911,6 @@ let validate_command_paths ?workdir cmd =
   match workdir with
   | None -> Ok ()
   | Some _ ->
-      let command_name =
-        match tokenize_path_args cmd with
-        | command :: _ -> Filename.basename command.value
-        | [] -> ""
-      in
       let validate_path_value ~requires_existing_dir token =
         if not (validate_path ?workdir token.value)
         then
@@ -933,15 +928,15 @@ let validate_command_paths ?workdir cmd =
                token.value)
         else Ok ()
       in
-      let rec loop expect_existing_dir = function
+      let rec validate_path_tokens ~command_name expect_existing_dir = function
         | [] -> Ok ()
         | token :: rest ->
           if token.value = ""
-          then loop expect_existing_dir rest
+          then validate_path_tokens ~command_name expect_existing_dir rest
           else if expect_existing_dir
           then
             (match validate_path_value ~requires_existing_dir:true token with
-             | Ok () -> loop false rest
+             | Ok () -> validate_path_tokens ~command_name false rest
              | Error _ as err -> err)
           else (
             match path_value_of_flagged_token token.value with
@@ -952,14 +947,17 @@ let validate_command_paths ?workdir cmd =
                    ~requires_existing_dir:(inline_path_flag_requires_existing_dir token.value)
                    token
                with
-               | Ok () -> loop false rest
+               | Ok () -> validate_path_tokens ~command_name false rest
                | Error _ as err -> err)
             | None when is_path_flag token.value ->
-              loop (path_flag_requires_existing_dir token.value) rest
+              validate_path_tokens
+                ~command_name
+                (path_flag_requires_existing_dir token.value)
+                rest
             | None
               when String.equal command_name "git"
                    && git_revisionish_token ?workdir token.value ->
-              loop false rest
+              validate_path_tokens ~command_name false rest
             | None when looks_like_path_token token.value ->
               if token_has_unsafe_rewrite_syntax token
               then Error (path_syntax_blocked_message token)
@@ -969,16 +967,76 @@ let validate_command_paths ?workdir cmd =
                    && token_glob_is_limited_to_basename token
                 then (
                   match validate_path_value ~requires_existing_dir:false token with
-                  | Ok () -> loop false rest
+                  | Ok () -> validate_path_tokens ~command_name false rest
                   | Error _ as err -> err)
                 else Error (path_syntax_blocked_message token)
               else (
                 match validate_path_value ~requires_existing_dir:false token with
-                | Ok () -> loop false rest
+                | Ok () -> validate_path_tokens ~command_name false rest
                 | Error _ as err -> err)
-            | None -> loop false rest)
+            | None -> validate_path_tokens ~command_name false rest)
       in
-      cmd |> tokenize_path_args |> path_validation_tokens |> loop false
+      let validate_token_stream tokens =
+        let command_name =
+          match tokens with
+          | command :: _ -> Filename.basename command.value
+          | [] -> ""
+        in
+        tokens
+        |> path_validation_tokens
+        |> validate_path_tokens ~command_name false
+      in
+      let path_token_of_literal value =
+        { value; quoted = false; escaped = false; globbed = false; braced = false }
+      in
+      let tokens_of_simple (simple : Masc_exec.Shell_ir.simple) =
+        let command = Masc_exec.Bin.to_string simple.bin |> path_token_of_literal in
+        let rec args acc = function
+          | [] -> Some (command :: List.rev acc)
+          | Masc_exec.Shell_ir.Lit value :: rest ->
+            args (path_token_of_literal value :: acc) rest
+          | Masc_exec.Shell_ir.Concat _ :: _ | Masc_exec.Shell_ir.Var _ :: _ -> None
+        in
+        args [] simple.args
+      in
+      let validate_parsed_shell_ir = function
+        | Masc_exec.Shell_ir.Simple simple ->
+          (match tokens_of_simple simple with
+           | Some tokens -> Some (validate_token_stream tokens)
+           | None -> None)
+        | Masc_exec.Shell_ir.Pipeline stages ->
+          let rec loop = function
+            | [] -> Some (Ok ())
+            | Masc_exec.Shell_ir.Simple simple :: rest ->
+              (match tokens_of_simple simple with
+               | None -> None
+               | Some tokens ->
+                 (match validate_token_stream tokens with
+                  | Ok () -> loop rest
+                  | Error _ as err -> Some err))
+            | Masc_exec.Shell_ir.Pipeline _ :: _ -> None
+          in
+          loop stages
+      in
+      let legacy_tokens = tokenize_path_args cmd in
+      let legacy_path_tokens = path_validation_tokens legacy_tokens in
+      let legacy_needs_syntax_sensitive_gate =
+        List.exists
+          (fun token -> token_has_unsafe_rewrite_syntax token || token.globbed)
+          legacy_path_tokens
+      in
+      if legacy_needs_syntax_sensitive_gate
+      then validate_token_stream legacy_tokens
+      else (
+        match Masc_exec_bash_parser.Bash.parse_string cmd with
+        | Masc_exec.Parsed.Parsed shell_ir ->
+          (match validate_parsed_shell_ir shell_ir with
+           | Some result -> result
+           | None -> validate_token_stream legacy_tokens)
+        | Masc_exec.Parsed.Parse_error _
+        | Masc_exec.Parsed.Parse_aborted _
+        | Masc_exec.Parsed.Too_complex _ ->
+          validate_token_stream legacy_tokens)
 ;;
 
 (** Check if a command performs write/mutating operations.

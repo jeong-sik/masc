@@ -254,3 +254,14 @@ val goal_policy_nodes :
   Goal_store.goal list -> Goal_verification.goal_policy_node list
 (** Pure: project Goal_store.goal records into Goal_verification policy
     nodes for use with [Goal_verification.effective_policy_for_nodes]. *)
+
+(** {1 Runtime blocker event projection (clock read; no state)} *)
+
+(** Build a JSON event from runtime blocker fields read from
+    [Keeper_status_bridge]. Returns [None] when both
+    [runtime_blocker_class] and [runtime_blocker_summary] are absent or
+    empty. Reads wall-clock for [ts] / [observed_at]. *)
+val runtime_blocker_event_from_meta :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  Yojson.Safe.t option

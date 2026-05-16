@@ -986,3 +986,54 @@ let goal_policy_nodes goals =
         verifier_policy = goal.verifier_policy;
       })
     goals
+
+(** {1 Runtime blocker event projection (clock read; no state)} *)
+
+let runtime_blocker_event_from_meta ~config ~(meta : Keeper_types.keeper_meta) =
+  let runtime_blocker_fields =
+    Keeper_status_bridge.runtime_blocker_fields_json config meta
+  in
+  let assoc_string_opt name =
+    match List.assoc_opt name runtime_blocker_fields with
+    | Some json -> to_string_option json
+    | None -> None
+  in
+  let blocker_class = assoc_string_opt "runtime_blocker_class" in
+  let blocker_summary = assoc_string_opt "runtime_blocker_summary" in
+  let summary =
+    match blocker_summary, blocker_class with
+    | Some value, _ when String.trim value <> "" -> Some value
+    | _, Some value when String.trim value <> "" -> Some value
+    | _ -> None
+  in
+  match summary with
+  | None -> None
+  | Some summary ->
+      let now_ts = Time_compat.now () in
+      let now_iso = Masc_domain.now_iso () in
+      Some
+        (`Assoc
+          [
+            ("kind", `String "runtime_blocker");
+            ("ts", `String now_iso);
+            ("ts_unix", `Float now_ts);
+            ("observed_at", `String now_iso);
+            ("observed_at_unix", `Float now_ts);
+            ("observation_only", `Bool true);
+            ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
+            ("keeper_turn_id", `Null);
+            ("task_id", `Null);
+            ( "goal_ids",
+              `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids)
+            );
+            ("title", `String "Runtime Blocker");
+            ("summary", `String summary);
+            ( "severity",
+              `String
+                (match blocker_class with
+                 | Some "cascade_exhausted"
+                 | Some "completion_contract_violation" ->
+                     "bad"
+                 | _ -> "warn") );
+            ("next_human_action", `String "inspect_runtime_blocker");
+          ])

@@ -44,7 +44,6 @@ AUTOBOOT_WARMUP_FAIRNESS_ALGORITHM = "int32_djb2_bounded_jitter"
 AUTOBOOT_WARMUP_REQUIRED_KEEPERS = (
     "analyst",
     "executor",
-    "glm-coding-plan",
     "issue_king",
     "janitor",
     "masc-improver",
@@ -54,6 +53,7 @@ AUTOBOOT_WARMUP_REQUIRED_KEEPERS = (
     "sangsu",
     "scholar",
     "taskmaster",
+    "tech_glutton",
     "velvet-hammer",
     "verifier",
 )

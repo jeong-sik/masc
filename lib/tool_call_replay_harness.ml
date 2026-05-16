@@ -133,7 +133,6 @@ let response_format_of_provider provider =
   | "glm"
   | "glm-api"
   | "glm-coding"
-  | "glm-coding-plan"
   | "kimi"
   | "kimi-api"
   | "openrouter"

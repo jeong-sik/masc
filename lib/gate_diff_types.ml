@@ -89,9 +89,47 @@ type legacy_verdict =
       (** The matching substring from [Eval_gate.destructive_patterns],
           NOT the description. *)
 
+(* Closed sum mirroring [Masc_exec.Parsed.t] sans the [Parsed _] AST
+   payload. Used as the typed dispatch value in [Legendary_counters]
+   so the per-reason histogram is exhaustive over the parser's full
+   variant surface. *)
+type parse_outcome_kind =
+  | Parsed_simple
+  | Parse_error
+  | Parse_aborted of Masc_exec.Parsed.reason_aborted
+  | Too_complex of Masc_exec.Parsed.reason_too_complex
+
+let reason_too_complex_to_tag (r : Masc_exec.Parsed.reason_too_complex) =
+  match r with
+  | `Heredoc -> "heredoc"
+  | `Here_string -> "here_string"
+  | `Cmd_subst -> "cmd_subst"
+  | `Proc_subst -> "proc_subst"
+  | `Subshell -> "subshell"
+  | `Arith_expansion -> "arith_expansion"
+  | `Control_flow -> "control_flow"
+  | `Logic_op -> "logic_op"
+  | `Function_def -> "function_def"
+  | `Glob_brace -> "glob_brace"
+  | `Background -> "background"
+  | `Redirect -> "redirect"
+  | `Unknown_construct s -> "unknown:" ^ s
+
+let reason_aborted_to_tag (r : Masc_exec.Parsed.reason_aborted) =
+  match r with
+  | `Timeout_50ms -> "timeout_50ms"
+  | `Depth_limit -> "depth_limit"
+  | `Token_limit_50k -> "token_limit_50k"
+
+let parse_outcome_kind_to_tag = function
+  | Parsed_simple -> "parsed_simple"
+  | Parse_error -> "parse_error"
+  | Parse_aborted r -> "parse_aborted:" ^ reason_aborted_to_tag r
+  | Too_complex r -> "too_complex:" ^ reason_too_complex_to_tag r
+
 type shadow_verdict =
-  | Shadow_allow of { parse_tag : string }
-  | Shadow_parse_unsupported of { parse_tag : string }
+  | Shadow_allow
+  | Shadow_parse_unsupported of { kind : parse_outcome_kind }
   | Shadow_deny_destructive of destructive_class * string
 
 (* ================================================================ *)
@@ -113,11 +151,11 @@ let gate_diff_to_string = function
 let diff_of_verdicts ~legacy ~shadow : gate_diff =
   match legacy, shadow with
   | _, Shadow_parse_unsupported _ -> Shadow_cannot_parse
-  | Legacy_allow, Shadow_allow _ -> Agree
+  | Legacy_allow, Shadow_allow -> Agree
   | Legacy_reject_by_allowlist, _ -> Agree
   | Legacy_reject_destructive _, Shadow_deny_destructive _ -> Agree
   | Legacy_allow, Shadow_deny_destructive _ -> Legacy_allow_shadow_deny
-  | Legacy_reject_destructive _, Shadow_allow _ -> Legacy_deny_shadow_allow
+  | Legacy_reject_destructive _, Shadow_allow -> Legacy_deny_shadow_allow
 
 let legacy_verdict_to_tag = function
   | Legacy_allow -> "legacy_allow"
@@ -125,7 +163,7 @@ let legacy_verdict_to_tag = function
   | Legacy_reject_destructive _ -> "legacy_reject_destructive"
 
 let shadow_verdict_to_tag = function
-  | Shadow_allow _ -> "shadow_allow"
+  | Shadow_allow -> "shadow_allow"
   | Shadow_parse_unsupported _ -> "shadow_parse_unsupported"
   | Shadow_deny_destructive _ -> "shadow_deny_destructive"
 

@@ -310,23 +310,27 @@ let handle_keeper_bash
        Legendary_counters.incr_gate_diff diff;
        (* Histogram refinement of the Shadow_cannot_parse bucket —
           per-reason counters let operators prioritise A1-PR-N
-          grammar expansion by construct frequency.  Only increments
-          when diff=Shadow_cannot_parse; other diff variants do not
-          map to a parse-reason tag.  The parse_tag inside
-          Shadow_parse_unsupported carries the bare reason
-          (e.g. "too_complex:redirect") emitted by
-          Worker_dev_tools.shadow_parse_outcome. *)
-       (match diff, shadow with
-        | Worker_dev_tools.Shadow_cannot_parse,
-          Worker_dev_tools.Shadow_parse_unsupported { parse_tag } ->
-          Legendary_counters.incr_too_complex_by_tag parse_tag
-        | Worker_dev_tools.Shadow_cannot_parse, _ ->
-          (* Defensive: diff_of_verdicts only returns
-             Shadow_cannot_parse when shadow is
-             Shadow_parse_unsupported.  If that invariant changes,
-             the "other" bucket preserves the count. *)
-          Legendary_counters.incr_too_complex_by_tag "other"
-        | _ -> ());
+          grammar expansion by construct frequency.  Typed dispatch
+          over the [parse_outcome_kind] payload of
+          [Shadow_parse_unsupported]; [classify_shadow] guarantees the
+          only kinds wrapped here are [Parse_error] / [Parse_aborted _]
+          / [Too_complex _].  A future divergence (e.g. wrapping
+          [Parsed_simple]) is a compile error rather than a silent
+          "other"-bucket landing. *)
+       (match shadow with
+        | Worker_dev_tools.Shadow_parse_unsupported { kind = Too_complex r } ->
+          Legendary_counters.incr_too_complex r
+        | Worker_dev_tools.Shadow_parse_unsupported { kind = Parse_error } ->
+          Legendary_counters.incr_too_complex_parse_error ()
+        | Worker_dev_tools.Shadow_parse_unsupported { kind = Parse_aborted r } ->
+          Legendary_counters.incr_too_complex_parse_aborted r
+        | Worker_dev_tools.Shadow_parse_unsupported { kind = Parsed_simple } ->
+          (* Unreachable by construction: [classify_shadow] yields
+             [Shadow_allow] for [Parsed_simple], not
+             [Shadow_parse_unsupported].  The arm exists so any future
+             change to [classify_shadow] forces a re-review here. *)
+          ()
+        | Shadow_allow | Shadow_deny_destructive _ -> ());
        (match diff with
         | Worker_dev_tools.Agree -> ()
         | _ ->

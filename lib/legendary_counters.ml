@@ -52,37 +52,36 @@ let incr_gh_exit_class (c : Gh_exit_class.t) =
   | Gh_exit_class.Network -> incr gh_exit_network
   | Gh_exit_class.Unknown -> incr gh_exit_unknown
 
-(* Strip the [too_complex:] / [parse_aborted:] prefix if present, so
-   callers can pass either the full [shadow_parse_outcome] tag or a
-   bare reason name. *)
-let bare_reason s =
-  let strip prefix =
-    if String.starts_with ~prefix s then
-      String.sub s (String.length prefix) (String.length s - String.length prefix)
-    else s
-  in
-  strip "too_complex:" |> fun s ->
-  if String.starts_with s ~prefix:"parse_aborted:"
-  then "__parse_aborted__"
-  else s
+(* Typed dispatch — exhaustive over [Masc_exec.Parsed.reason_too_complex].
+   Adding a new variant in [parsed.mli] is a compile-time forcing
+   function: this match (and the symmetric one in
+   [Gate_diff_types.reason_too_complex_to_tag]) must be updated.
 
-let incr_too_complex_by_tag tag =
-  match bare_reason tag with
-  | "redirect" -> incr too_complex_redirect
-  | "logic_op" -> incr too_complex_logic_op
-  | "heredoc" -> incr too_complex_heredoc
-  | "here_string" -> incr too_complex_here_string
-  | "cmd_subst" -> incr too_complex_cmd_subst
-  | "proc_subst" -> incr too_complex_proc_subst
-  | "subshell" -> incr too_complex_subshell
-  | "arith_expansion" -> incr too_complex_arith_expansion
-  | "control_flow" -> incr too_complex_control_flow
-  | "function_def" -> incr too_complex_function_def
-  | "glob_brace" -> incr too_complex_glob_brace
-  | "background" -> incr too_complex_background
-  | "parse_error" -> incr too_complex_parse_error
-  | "__parse_aborted__" -> incr too_complex_parse_aborted
-  | _ -> incr too_complex_other
+   [`Unknown_construct s] is the only payload-carrying variant; its
+   string is discarded here because the structured log line emitted in
+   [keeper_shell_bash.ml] carries the full tag.  All such counts land
+   in [too_complex_other], whose semantics is now "Unknown_construct
+   counter" rather than "catch-all sink for unrecognised strings". *)
+let incr_too_complex (r : Masc_exec.Parsed.reason_too_complex) =
+  match r with
+  | `Redirect -> incr too_complex_redirect
+  | `Logic_op -> incr too_complex_logic_op
+  | `Heredoc -> incr too_complex_heredoc
+  | `Here_string -> incr too_complex_here_string
+  | `Cmd_subst -> incr too_complex_cmd_subst
+  | `Proc_subst -> incr too_complex_proc_subst
+  | `Subshell -> incr too_complex_subshell
+  | `Arith_expansion -> incr too_complex_arith_expansion
+  | `Control_flow -> incr too_complex_control_flow
+  | `Function_def -> incr too_complex_function_def
+  | `Glob_brace -> incr too_complex_glob_brace
+  | `Background -> incr too_complex_background
+  | `Unknown_construct _ -> incr too_complex_other
+
+let incr_too_complex_parse_error () = incr too_complex_parse_error
+
+let incr_too_complex_parse_aborted (_r : Masc_exec.Parsed.reason_aborted) =
+  incr too_complex_parse_aborted
 
 let reset () =
   Atomic.set gate_diff_total 0;

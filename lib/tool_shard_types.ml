@@ -1842,3 +1842,104 @@ let shard_autoresearch : shard =
   }
 ;;
 
+let all_shards : shard StringMap.t =
+  List.fold_left
+    (fun map s -> StringMap.add s.name s map)
+    StringMap.empty
+    [ shard_base
+    ; shard_board
+    ; shard_filesystem
+    ; shard_shell
+    ; shard_coding
+    ; shard_voice
+    ; shard_library
+    ; shard_taskboard
+    ; shard_autoresearch
+    ]
+;;
+
+let all_read_only_keeper_tools () : string list =
+  StringMap.fold (fun _name shard acc -> shard.read_only_tools @ acc) all_shards []
+  |> List.sort_uniq String.compare
+;;
+
+(* #10101: single SSOT for every keeper-facing tool schema exposed
+   by this module.  Feeds [Config.raw_all_tool_schemas] so
+   [Tool_help_registry.find_entry] can resolve ANY shard tool,
+   not just the five base tools that the earlier #9912 patch
+   registered.
+
+   Built from [all_shards] (every shard category flows through
+   automatically — no future fix will regress the registry when
+   a new shard is added) plus the two non-shard tool lists
+   [keeper_preflight_tools], [keeper_github_pr_tools], and [keeper_pr_review_tools] that
+   live in this module but are not owned by any shard definition.
+
+   Callers must still run [Config.dedupe_schemas] because a
+   single tool can appear under multiple shards (e.g. tools that
+   [shard_coding] composes from [shard_shell]) and the schema
+   list may overlap with other roots (Tools.raw_schemas). *)
+let all_keeper_tool_schemas : Masc_domain.tool_schema list =
+  let shard_schemas =
+    StringMap.fold (fun _name (shard : shard) acc -> shard.tools @ acc) all_shards []
+  in
+  shard_schemas @ keeper_preflight_tools @ keeper_github_pr_tools @ keeper_pr_review_tools
+;;
+
+let recovery_minimum_shard_names () : string list =
+  StringMap.fold
+    (fun name shard acc -> if not shard.removable then name :: acc else acc)
+    all_shards
+    []
+  |> List.rev
+;;
+
+(** Get a shard by name *)
+let get_shard (name : string) : shard option = StringMap.find_opt name all_shards
+
+(** Combine tools from multiple shard names *)
+let tools_of_shards (shard_names : string list) : Masc_domain.tool_schema list =
+  shard_names
+  |> List.filter_map (fun name -> StringMap.find_opt name all_shards)
+  |> List.concat_map (fun (s : shard) -> s.tools)
+;;
+
+(** {1 Dynamic Shard Management} *)
+
+(** Grant a shard to an agent. Returns new active_shards list.
+    Fails if shard doesn't exist or is already granted. *)
+let grant_shard (active_shards : string list) (shard_name : string)
+  : (string list, string) Result.t
+  =
+  match StringMap.find_opt shard_name all_shards with
+  | None -> Error (Printf.sprintf "Unknown shard: %s" shard_name)
+  | Some _ ->
+    if List.mem shard_name active_shards
+    then Error (Printf.sprintf "Shard already granted: %s" shard_name)
+    else Ok (active_shards @ [ shard_name ])
+;;
+
+(** Revoke a shard from an agent. Returns new active_shards list.
+    Fails if shard is not removable or not currently granted. *)
+let revoke_shard (active_shards : string list) (shard_name : string)
+  : (string list, string) Result.t
+  =
+  match StringMap.find_opt shard_name all_shards with
+  | None -> Error (Printf.sprintf "Unknown shard: %s" shard_name)
+  | Some shard ->
+    if not shard.removable
+    then Error (Printf.sprintf "Cannot revoke non-removable shard: %s" shard_name)
+    else if not (List.mem shard_name active_shards)
+    then Error (Printf.sprintf "Shard not currently granted: %s" shard_name)
+    else Ok (List.filter (fun n -> not (String.equal n shard_name)) active_shards)
+;;
+
+(** List all available shards with their status *)
+let list_all_shards () : (string * bool * int) list =
+  StringMap.fold
+    (fun name (shard : shard) acc ->
+       (name, shard.removable, List.length shard.tools) :: acc)
+    all_shards
+    []
+  |> List.rev
+;;

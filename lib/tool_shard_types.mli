@@ -117,3 +117,15 @@ val shard_library : shard
 val shard_taskboard : shard
 val autoresearch_keeper_tools : Masc_domain.tool_schema list
 val shard_autoresearch : shard
+
+val all_shards : shard StringMap.t
+val all_read_only_keeper_tools : unit -> string list
+val all_keeper_tool_schemas : Masc_domain.tool_schema list
+val recovery_minimum_shard_names : unit -> string list
+val get_shard : string -> shard option
+val tools_of_shards : string list -> Masc_domain.tool_schema list
+val grant_shard :
+  string list -> string -> (string list, string) Result.t
+val revoke_shard :
+  string list -> string -> (string list, string) Result.t
+val list_all_shards : unit -> (string * bool * int) list

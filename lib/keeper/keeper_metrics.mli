@@ -336,6 +336,17 @@ val metric_keeper_cascade_sync_failures : string
 val metric_keeper_local_discovery_failures : string
 val metric_keeper_thinking_persist_failures : string
 val metric_keeper_checkpoint_failures : string
+
+val metric_keeper_decision_audit_ring_overflows : string
+(** Counter for [Keeper_decision_audit.append] overwriting an
+    unflushed record because the ring buffer was at capacity.
+    Label [keeper] names the affected keeper.  Each increment is
+    one decision_record lost to disk because the flush loop did
+    not keep up with the append rate.  Non-zero counts mean the
+    flush_batch_size / flush_interval_sec tuning is below the
+    decision-emission rate and forensics data is being silently
+    dropped. *)
+
 val metric_keeper_memory_write_failures : string
 val metric_keeper_memory_consolidations : string
 val metric_keeper_write_meta_cycle_failures : string

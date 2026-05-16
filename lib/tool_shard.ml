@@ -29,90 +29,9 @@ module Float = Stdlib.Float
     [test_types.ml :: pr_review_event_ssot] asserts these stay in
     lock-step so adding a new event in keeper_tool_pr_review.ml fails
     the test before shipping with a stale schema. *)
-let pr_review_event_enum_strings = [ "COMMENT"; "APPROVE"; "REQUEST_CHANGES" ]
 
-(** Issue #8484: hand-mirrored from
-    [Keeper_exec_memory.valid_memory_search_source_strings]. Direct
-    dependency would risk a Tool_shard -> Keeper_* -> Tool_shard cycle
-    (same shape as #8467 / #8480), so this stays a local mirror with a
-    sync regression test in [test_types.ml :: memory_search_source_ssot]. *)
-let memory_search_source_enum_strings = [ "memory"; "history"; "all" ]
-
-(** Issue #8527: hand-mirrored from
-    [Keeper_memory_policy.valid_memory_kind_strings] (derived from
-    [kind_caps ()]). Same cycle-avoidance pattern as #8467 / #8480 / #8484.
-    Previous hand-list dropped [long_term] even though
-    [keeper_memory_bank] actively writes long_term rows — LLMs could
-    not filter for the very rows the system writes. Sync regression
-    test in [test_types.ml :: memory_kind_ssot] catches drift. *)
-let memory_kind_enum_strings =
-  [ "constraints"; "decision"; "next"; "goal"; "progress"; "open_question"; "long_term" ]
-;;
-
-(** Issue #8490: hand-mirrored from
-    [Keeper_exec_fs.valid_fs_write_mode_strings]. Direct dependency
-    would risk a Tool_shard -> Keeper_* -> Tool_shard cycle (same
-    shape as #8467 / #8480 / #8484). Sync regression test in
-    [test_types.ml :: fs_write_mode_ssot] catches drift. *)
-let fs_write_mode_enum_strings = [ "overwrite"; "append"; "patch" ]
-
-(** Issue #8513: hand-mirrored from
-    [Board_dispatch.valid_sort_order_strings] (#8453 SSOT). Direct
-    dependency would risk a Tool_shard -> Board_* -> Tool_shard cycle.
-    Sync regression test in [test_types.ml :: sort_order_schema_ssot]
-    catches drift. The schema previously hand-listed only 3 of 5 sort
-    orders (recent/hot/updated) — Trending and Discussed were dropped,
-    so LLM clients couldn't filter by them via schema validation even
-    though [sort_order_of_string_opt] accepts them. Same shape as
-    #8430 / #8471 / #8474 / #8493 REAL drift bugs. *)
-let sort_order_enum_strings = [ "hot"; "trending"; "recent"; "updated"; "discussed" ]
-
-(** Issue #8506: hand-mirrored from
-    [Board_votes.valid_vote_direction_strings]. Direct dependency
-    would risk a Tool_shard -> Board_* -> Tool_shard cycle.  Sync
-    regression test in [test_types.ml :: vote_direction_ssot] catches
-    drift. Same shape as #8467 / #8480 / #8484 / #8490 mirror+sync
-    pattern. *)
-let vote_direction_enum_strings = [ "up"; "down" ]
-
-(** Issue #8524: hand-mirrored from
-    [Keeper_exec_shell.valid_shell_op_strings]. Direct dependency
-    would create a Tool_shard -> Keeper_* -> Tool_shard cycle (same
-    shape as #8467/#8480/#8484/#8490). Schema previously drifted from
-    the dispatcher (git_worktree was missing) and now intentionally
-    mirrors only structured keeper_shell ops; generic bash execution
-    belongs to Bash/keeper_bash. Sync regression test in
-    [test_types.ml :: keeper_shell_op_ssot] catches drift. *)
-let keeper_shell_op_enum_strings =
-  [ "pwd"
-  ; "ls"
-  ; "cat"
-  ; "rg"
-  ; "git_status"
-  ; "find"
-  ; "head"
-  ; "tail"
-  ; "wc"
-  ; "tree"
-  ; "git_log"
-  ; "git_diff"
-  ; "git_worktree"
-  ; "git_clone"
-  ; "gh"
-  ]
-;;
-
-(** A named collection of tools that can be granted/revoked. *)
-type shard =
-  { name : string
-  ; tools : Masc_domain.tool_schema list
-  ; read_only_tools : string list
-  ; removable : bool (** true = can be revoked at runtime *)
-  ; description : string
-  }
-
-module StringMap = Map.Make (String)
-
+(* enum-string SSOT mirrors + type shard + StringMap moved to Tool_shard_types. *)
+include Tool_shard_types
 (** Predefined shards *)
 
 let base_tools : Masc_domain.tool_schema list =

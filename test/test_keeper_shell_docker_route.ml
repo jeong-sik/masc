@@ -1264,6 +1264,66 @@ let test_bash_fake_docker_executes () =
   Alcotest.(check bool) "bash output includes fake docker stdout" true
     (response_mentions raw "output" "stdout:")
 
+let test_bash_blocks_pipe_redirect_before_docker () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Coding
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+      ~args:
+        (`Assoc
+          [
+            ("cmd", `String "ls lib/ 2>&1 | head -20");
+            ("cwd", `String playground);
+          ])
+      ()
+  in
+  Alcotest.(check (option bool)) "blocked before docker" (Some false)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option string))
+    "shape-block error"
+    (Some "keeper_bash_command_shape_blocked")
+    (parse_string_field raw "error");
+  Alcotest.(check (option string))
+    "shape_block"
+    (Some "pipe_or_redirect")
+    (parse_string_field raw "shape_block");
+  Alcotest.(check bool) "docker was not invoked" false
+    (Sys.file_exists log_path)
+
+let test_bash_blocks_gh_pr_checks_before_docker () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Coding
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+      ~args:
+        (`Assoc
+          [
+            ("cmd", `String "gh pr checks 15659 --repo jeong-sik/masc-mcp");
+            ("cwd", `String playground);
+          ])
+      ()
+  in
+  Alcotest.(check (option bool)) "blocked before docker" (Some false)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option string))
+    "shape_block"
+    (Some "gh_pr_checks")
+    (parse_string_field raw "shape_block");
+  Alcotest.(check bool) "hint points to PR status tool" true
+    (response_mentions raw "hint" "keeper_pr_status");
+  Alcotest.(check bool) "docker was not invoked" false
+    (Sys.file_exists log_path)
+
 let test_bash_rewrites_host_path_command_for_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
@@ -1278,7 +1338,7 @@ let test_bash_rewrites_host_path_command_for_docker () =
           [
             ( "cmd",
               `String
-                (Printf.sprintf "cd %s/repos/masc-mcp && pwd"
+                (Printf.sprintf "ls %s/repos/masc-mcp"
                    (Keeper_alerting_path.strip_trailing_slashes playground)) );
             ("cwd", `String playground);
           ])
@@ -1303,9 +1363,9 @@ let () =
           Alcotest.test_case
             "docker keeper bash routes through docker"
             `Quick test_bash_routes_through_docker;
-	          Alcotest.test_case
-	            "docker keeper bash git cmd routes through git-creds docker"
-	            `Quick test_bash_git_creds_routes_through_docker;
+          Alcotest.test_case
+            "docker keeper bash git cmd routes through git-creds docker"
+            `Quick test_bash_git_creds_routes_through_docker;
           Alcotest.test_case
             "docker keeper bash git creds bypass warm turn runtime"
             `Quick test_bash_git_creds_uses_oneshot_with_turn_runtime;
@@ -1333,6 +1393,12 @@ let () =
           Alcotest.test_case
             "docker keeper bash executes through fake docker"
             `Quick test_bash_fake_docker_executes;
+          Alcotest.test_case
+            "docker keeper bash blocks pipe redirects before docker"
+            `Quick test_bash_blocks_pipe_redirect_before_docker;
+          Alcotest.test_case
+            "docker keeper bash blocks gh pr checks before docker"
+            `Quick test_bash_blocks_gh_pr_checks_before_docker;
           Alcotest.test_case
             "docker keeper bash rewrites host paths before exec"
             `Quick test_bash_rewrites_host_path_command_for_docker;

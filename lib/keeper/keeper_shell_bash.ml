@@ -204,6 +204,124 @@ let rec cmd_contains_gh_pr_create cmd =
   | Some payload -> cmd_contains_gh_pr_create payload
   | None -> false
 
+type bash_shape_block =
+  | Gh_pr_checks
+  | Pipe_or_redirect
+  | Chaining
+  | Substitution
+
+let string_contains_char s ch = String.exists (Char.equal ch) s
+let string_contains_substring s needle = String_util.contains_substring s needle
+
+let keeper_bash_shape_block cmd =
+  let lower = String.lowercase_ascii cmd in
+  if string_contains_substring lower "gh pr checks"
+  then Some Gh_pr_checks
+  else if
+    string_contains_char cmd '|'
+    || string_contains_char cmd '>'
+    || string_contains_char cmd '<'
+  then Some Pipe_or_redirect
+  else if
+    string_contains_substring cmd "&&"
+    || string_contains_substring cmd "||"
+    || string_contains_char cmd ';'
+    || string_contains_char cmd '\n'
+    || string_contains_char cmd '\r'
+  then Some Chaining
+  else if string_contains_substring cmd "$(" || string_contains_char cmd '`'
+  then Some Substitution
+  else None
+
+let bash_shape_block_tag = function
+  | Gh_pr_checks -> "gh_pr_checks"
+  | Pipe_or_redirect -> "pipe_or_redirect"
+  | Chaining -> "chaining"
+  | Substitution -> "substitution"
+
+let bash_shape_block_reason = function
+  | Gh_pr_checks ->
+    "gh pr checks exits non-zero when checks are red. That is useful status \
+     data, but it trips keeper shell failure and circuit-breaker accounting."
+  | Pipe_or_redirect ->
+    "keeper_bash accepts one direct command. Pipes and redirects such as |, \
+     2>&1, 2&1, >/dev/null, <, and | head are blocked before execution."
+  | Chaining ->
+    "keeper_bash accepts one command per call. Chaining with &&, ||, ;, or \
+     newlines is blocked before execution."
+  | Substitution ->
+    "Command substitution is blocked before execution. Compute values in a \
+     separate tool call and pass literal arguments."
+
+let bash_shape_block_hint = function
+  | Gh_pr_checks ->
+    "Use keeper_pr_status. If raw gh is the only visible status path, use gh \
+     pr view <n> --repo OWNER/REPO --json \
+     statusCheckRollup,mergeStateStatus,isDraft."
+  | Pipe_or_redirect ->
+    "Remove the pipe or redirect. Run the primary command once and summarize \
+     the returned output; use keeper_shell op=head/tail for file slices."
+  | Chaining ->
+    "Split the work into separate keeper_bash calls and use the cwd argument \
+     instead of cd chaining."
+  | Substitution ->
+    "Run the discovery command first, then use its literal result in a second \
+     keeper_bash call."
+
+let bash_shape_block_alternatives = function
+  | Gh_pr_checks ->
+    [
+      "keeper_pr_status";
+      "gh pr view <n> --repo OWNER/REPO --json \
+       statusCheckRollup,mergeStateStatus,isDraft";
+    ]
+  | Pipe_or_redirect ->
+    [
+      "keeper_bash cmd='ls lib/'";
+      "keeper_shell op=head path=<file> lines=20";
+      "keeper_shell op=rg pattern=<pattern> path=<dir>";
+    ]
+  | Chaining ->
+    [
+      "keeper_bash cmd='git status' cwd='repos/REPO'";
+      "keeper_bash cmd='git log -1' cwd='repos/REPO'";
+    ]
+  | Substitution ->
+    [
+      "keeper_bash cmd='rg --files lib'";
+      "keeper_bash cmd='cat path/from/previous-step'";
+    ]
+
+let bash_shape_block_result ~cmd ~cmd_for_log ~env_snapshot block =
+  Yojson.Safe.to_string
+    (Exec_core.blocked_result_json
+       ~cmd
+       ~error:"keeper_bash_command_shape_blocked"
+       ~reason:(bash_shape_block_reason block)
+       ~hint:(bash_shape_block_hint block)
+       ~alternatives:(bash_shape_block_alternatives block)
+       ~diag:
+         (Some
+            {
+              Exec_core.rule_id =
+                "keeper_bash_" ^ bash_shape_block_tag block ^ "_blocked";
+              explanation = bash_shape_block_reason block;
+              rewrite = Some (bash_shape_block_hint block);
+              tool_suggestion =
+                (match block with
+                 | Gh_pr_checks -> Some "keeper_pr_status"
+                 | Pipe_or_redirect -> Some "keeper_shell"
+                 | Chaining | Substitution -> None);
+            })
+       ~extra:
+         [
+           "cmd", `String cmd_for_log;
+           "shape_block", `String (bash_shape_block_tag block);
+           "execution_time_ms", `Int 0;
+         ]
+       ~env_snapshot
+       ())
+
 let handle_keeper_bash
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(turn_sandbox_factory_git : Keeper_sandbox_factory.t option)
@@ -462,8 +580,23 @@ let handle_keeper_bash
       else (base_profile, base_network_mode, false)
     in
     let sandbox_root = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
-    (* Destructive guard: always active regardless of Docker or preset *)
-    if Worker_dev_tools.is_destructive_bash_operation cmd
+    match keeper_bash_shape_block cmd with
+    | Some block ->
+      Prometheus.inc_counter
+        Keeper_metrics.metric_keeper_shell_bash_failures
+        ~labels:
+          [ ("keeper", meta.name)
+          ; ("site", "command_shape")
+          ; ("shape_block", bash_shape_block_tag block)
+          ]
+        ();
+      Log.Keeper.warn
+        "keeper_bash command-shape blocked: keeper=%s block=%s cmd=%s"
+        meta.name (bash_shape_block_tag block) cmd_for_log;
+      bash_shape_block_result ~cmd ~cmd_for_log ~env_snapshot:env_snap block
+    | None ->
+      (* Destructive guard: always active regardless of Docker or preset *)
+      if Worker_dev_tools.is_destructive_bash_operation cmd
     then (
       Prometheus.inc_counter
         Keeper_metrics.metric_keeper_shell_bash_failures

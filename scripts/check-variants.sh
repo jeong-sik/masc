@@ -155,12 +155,12 @@ fi
 echo ""
 echo "=== Check 2: turn_phase (OCaml) vs KeeperCascadeLifecycle.tla domain ==="
 
-KR_ML="lib/keeper/keeper_registry.ml"
+KR_TYPES_ML="lib/keeper/keeper_registry_types.ml"
 KCL_TLA="specs/keeper-state-machine/KeeperCascadeLifecycle.tla"
 
-if [ -f "$KR_ML" ]; then
+if [ -f "$KR_TYPES_ML" ]; then
   # turn_phase constructors (strip "Turn_" prefix, lowercase for TLA+ comparison)
-  ocaml_turn_constructors=$(extract_ocaml_type "$KR_ML" "turn_phase")
+  ocaml_turn_constructors=$(extract_ocaml_type "$KR_TYPES_ML" "turn_phase")
   assert_contains_variant "OCaml(turn_phase)" "$ocaml_turn_constructors" "Turn_idle"
   assert_contains_variant "OCaml(turn_phase)" "$ocaml_turn_constructors" "Turn_prompting"
   ocaml_turn=$(echo "$ocaml_turn_constructors" \
@@ -181,10 +181,10 @@ if [ -f "$KR_ML" ]; then
       echo "INFO: ${KCL_TLA} not found — TLA+ turn_phase check skipped"
     fi
   else
-    echo "WARN: could not extract OCaml turn_phase from ${KR_ML}"
+    echo "WARN: could not extract OCaml turn_phase from ${KR_TYPES_ML}"
   fi
 else
-  echo "WARN: ${KR_ML} not found — turn_phase check skipped"
+  echo "WARN: ${KR_TYPES_ML} not found — turn_phase check skipped"
 fi
 
 # ── Check 3: cascade_state (OCaml) vs CascadeSet in TLA+ ────────────────────
@@ -192,8 +192,8 @@ fi
 echo ""
 echo "=== Check 3: cascade_state (OCaml) vs KeeperCascadeLifecycle.tla domain ==="
 
-if [ -f "$KR_ML" ]; then
-  ocaml_cascade=$(extract_ocaml_type "$KR_ML" "cascade_state" \
+if [ -f "$KR_TYPES_ML" ]; then
+  ocaml_cascade=$(extract_ocaml_type "$KR_TYPES_ML" "cascade_state" \
     | sed 's/Cascade_//' | tr '[:upper:]' '[:lower:]' | sort -u)
 
   if [ -n "$ocaml_cascade" ]; then

@@ -68,6 +68,31 @@ let compact_keeper_trust_json ~(config : Coord.config) ~(meta : Keeper_types.kee
     ]
 ;;
 
+let reconcile_keeper_attention_fields_with_trust fields trust =
+  match trust with
+  | `Assoc _ ->
+    let upsert key value fields = assoc_upsert fields key value in
+    fields
+    |> upsert "disposition" (Yojson.Safe.Util.member "disposition" trust)
+    |> upsert
+         "disposition_reason"
+         (Yojson.Safe.Util.member "disposition_reason" trust)
+    |> upsert
+         "operator_disposition"
+         (Yojson.Safe.Util.member "operator_disposition" trust)
+    |> upsert
+         "operator_disposition_reason"
+         (Yojson.Safe.Util.member "operator_disposition_reason" trust)
+    |> upsert "needs_attention" (Yojson.Safe.Util.member "needs_attention" trust)
+    |> upsert
+         "attention_reason"
+         (Yojson.Safe.Util.member "attention_reason" trust)
+    |> upsert
+         "next_human_action"
+         (Yojson.Safe.Util.member "next_human_action" trust)
+  | _ -> fields
+;;
+
 (* #10710: bound on the per-render enrich fan-out. Code constant per
    [feedback_no-hyperparameter-as-env-knob] — the calibrated value
    should not be operator-tunable. 8 is empirically just past the
@@ -220,6 +245,7 @@ let enrich_keeper_with_diagnostic ~(config : Coord.config) (keeper_json : Yojson
           let fields = assoc_upsert fields "diagnostic" diagnostic in
           let fields = assoc_upsert fields "trust" trust in
           let fields = assoc_upsert fields "runtime_trust" trust in
+          let fields = reconcile_keeper_attention_fields_with_trust fields trust in
           `Assoc fields
         | Ok None | Error _ -> keeper_json)
      | _ -> keeper_json)

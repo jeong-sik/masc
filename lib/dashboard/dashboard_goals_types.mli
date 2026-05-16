@@ -119,3 +119,187 @@ val strip_number_group_separators : string -> string
 val parse_first_float : string -> float option
 
 val parsed_target_unit : string option -> string -> attainment_unit
+
+(** {1 Goal attainment JSON projection — pure tree → JSON converter} *)
+
+val build_attainment_json :
+  state:string ->
+  basis:string ->
+  task_done_count:int ->
+  task_count:int ->
+  target_parse_status:string ->
+  unit:attainment_unit ->
+  observed_value:float option ->
+  target_numeric:float option ->
+  attainment_pct:int option ->
+  note:string ->
+  Goal_store.goal ->
+  Yojson.Safe.t
+
+val goal_attainment_pct_help : string
+val goal_attainment_measured_help : string
+
+val goal_attainment_to_json :
+  Goal_store.goal -> tree_node -> Yojson.Safe.t
+
+(** {1 Goal phase health + reason + tree badges (pure)} *)
+
+val goal_phase_to_health : Goal_phase.t -> string option
+
+val goal_health_reason :
+  goal_phase:Goal_phase.t ->
+  blocked_by_receipt:bool ->
+  child_blocked:bool ->
+  pending_approvals:int ->
+  sandbox_risk:bool ->
+  cascade_risk:bool ->
+  fsm_risk:bool ->
+  stalled:bool ->
+  stagnation_seconds:int ->
+  child_at_risk:bool ->
+  linkage_warning_reason:string option ->
+  activity_observation:string ->
+  stagnation_status:string ->
+  string
+
+val tree_health :
+  goal_phase:Goal_phase.t ->
+  blocked_by_receipt:bool ->
+  child_blocked:bool ->
+  at_risk:bool ->
+  string
+
+val tree_badges :
+  pending_approvals:int ->
+  sandbox_risk:bool ->
+  cascade_risk:bool ->
+  fsm_risk:bool ->
+  stalled:bool ->
+  activity_unobserved:bool ->
+  string list
+
+(** {1 Approval matching + keeper assignee resolution + goal FSM projection (pure)} *)
+
+val approval_matches_goal : string -> Yojson.Safe.t -> bool
+
+val keeper_name_matches_meta : Keeper_types.keeper_meta list -> string -> bool
+
+val keeper_name_of_assignee :
+  Keeper_types.keeper_meta list -> string -> string option
+
+val goal_fsm_state_kind : Goal_phase.t -> string
+
+val goal_fsm_next_actions :
+  goal_phase:Goal_phase.t ->
+  has_effective_verifier_policy:bool ->
+  require_completion_approval:bool ->
+  string list
+
+val goal_fsm_to_json :
+  effective_policy:'a option ->
+  Goal_store.goal ->
+  tree_node ->
+  Yojson.Safe.t
+
+(** {1 Operator-disposition normalizer (pure)} *)
+
+(** [display_disposition_of_receipt_json receipt] returns
+    [(severity, reason, raw_disposition, raw_reason)] where [severity]
+    is one of "Pass" | "Pause" | "Alert". *)
+val display_disposition_of_receipt_json :
+  Yojson.Safe.t -> string * string * string * string
+
+(** {1 Color helpers + task tree JSON projection (pure)} *)
+
+val goal_status_color : Goal_store.goal_status -> string
+val goal_phase_color : Goal_phase.t -> string
+val goal_health_color : string -> string
+val task_status_color : string -> string
+
+val task_to_tree_json : Masc_domain.task * string -> Yojson.Safe.t
+
+(** {1 Tree flatten + goal-detail JSON + timeline projection (pure)} *)
+
+val flatten_tree : tree_node list -> tree_node list -> tree_node list
+(** Pre-order tree walk; [acc] is the reverse-accumulating list. Pass
+    [\[\]] as initial [acc]. *)
+
+val goal_detail_keeper_json : goal_detail_keeper -> Yojson.Safe.t
+
+val timeline_event_json :
+  ts:string ->
+  kind:string ->
+  lane:string ->
+  title:string ->
+  summary:string ->
+  severity:string ->
+  Yojson.Safe.t
+
+val json_member_or_null : string -> Yojson.Safe.t -> Yojson.Safe.t
+
+val goal_event_timeline_json : Yojson.Safe.t -> Yojson.Safe.t
+
+(** {1 Convergence + verification policy node helpers (pure)} *)
+
+val compute_convergence :
+  Goal_store.goal ->
+  (Masc_domain.task * string) list ->
+  tree_node list ->
+  float
+(** Pure: weighted average of linked task completion ratio and child
+    convergence ratios. Returns 1.0 when goal is Completed and no tasks
+    or children exist. *)
+
+val goal_policy_nodes :
+  Goal_store.goal list -> Goal_verification.goal_policy_node list
+(** Pure: project Goal_store.goal records into Goal_verification policy
+    nodes for use with [Goal_verification.effective_policy_for_nodes]. *)
+
+(** {1 Runtime blocker event projection (clock read; no state)} *)
+
+(** Build a JSON event from runtime blocker fields read from
+    [Keeper_status_bridge]. Returns [None] when both
+    [runtime_blocker_class] and [runtime_blocker_summary] are absent or
+    empty. Reads wall-clock for [ts] / [observed_at]. *)
+val runtime_blocker_event_from_meta :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  Yojson.Safe.t option
+
+(** {1 Runtime trust fallback projection from execution receipt} *)
+
+(** Compose disposition + receipt accessors + runtime blocker event into
+    a 19-key runtime_trust JSON record. Used when the upstream
+    [Keeper_runtime_trust_snapshot.snapshot_json] is unavailable. *)
+val runtime_trust_from_receipt_fallback :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  Yojson.Safe.t ->
+  Yojson.Safe.t
+
+(** {1 Goal timeline composition} *)
+
+(** Compose the task/approval/keeper/goal event lists into a single
+    timeline sorted by [ts] descending (newest first). Reads wall-clock
+    only as fallback when a keeper event lacks an [ts] field. *)
+val build_goal_timeline :
+  tree_node ->
+  goal_detail_keeper list ->
+  Yojson.Safe.t list ->
+  Yojson.Safe.t list ->
+  Yojson.Safe.t list
+
+(** {1 Goal tree builder — recursive pure projection over context} *)
+
+type build_context = {
+  now_ts : float;
+  all_tasks : Masc_domain.task list;
+  pending_approvals : Yojson.Safe.t list;
+  keeper_metas : Keeper_types.keeper_meta list;
+  latest_receipts : (string * Yojson.Safe.t) list;
+  latest_runtime_trusts : (string * Yojson.Safe.t) list;
+}
+
+(** Recursive pure projection: given a [build_context] snapshot, build
+    the [tree_node] for [goal] and all descendants found in [goals]. *)
+val build_tree : build_context -> Goal_store.goal list -> Goal_store.goal -> tree_node

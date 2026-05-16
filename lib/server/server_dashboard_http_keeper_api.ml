@@ -625,16 +625,9 @@ let first_non_empty_string_list values =
   | Some values -> values
   | None -> []
 
-let first_string_opt values =
-  List.find_map (fun value -> value) values
-
-let first_int_opt values =
-  List.find_map (fun value -> value) values
-
-let string_has_prefix ~prefix value =
-  let prefix_len = String.length prefix in
-  String.length value >= prefix_len
-  && String.equal (String.sub value 0 prefix_len) prefix
+(* first_string_opt / first_int_opt / string_has_prefix moved to
+   Server_dashboard_http_keeper_api_types (intra-library file split,
+   2026-05-16). *)
 
 let string_contains ~needle value =
   let value = String.lowercase_ascii value in
@@ -653,84 +646,14 @@ let string_contains ~needle value =
    Server_dashboard_http_keeper_api_types (intra-library file split,
    2026-05-16). *)
 
-let tool_call_output_text_opt json =
-  match Yojson.Safe.Util.member "output" json with
-  | `String value -> Some value
-  | `Assoc _ as output -> (
-    match json_assoc_member_opt "_blob" output with
-    | Some blob -> json_string_member_opt "preview" blob
-    | None -> None)
-  | _ -> None
+(* tool_call_output_text_opt + parse_tool_output_json_opt +
+   tool_call_runtime_contract + tool_call_matches_trace moved to
+   Server_dashboard_http_keeper_api_types (intra-library file split,
+   2026-05-16). *)
 
-let parse_tool_output_json_opt json =
-  match tool_call_output_text_opt json with
-  | None -> None
-  | Some output -> (
-    match Safe_ops.parse_json_safe ~context:"runtime_lens.tool_output" output with
-    | Ok parsed -> Some parsed
-    | Error _ -> None)
-
-let tool_call_runtime_contract json =
-  match json_assoc_member_opt "runtime_contract" json with
-  | Some contract -> contract
-  | None -> `Assoc []
-
-let tool_call_matches_trace ?turn_id ~keeper_name ~trace_id json =
-  let contract = tool_call_runtime_contract json in
-  let keeper_matches =
-    match json_string_member_opt "keeper" json with
-    | Some keeper -> String.equal keeper keeper_name
-    | None -> true
-  in
-  let trace_matches =
-    match
-      ( json_string_member_opt "trace_id" json,
-        json_string_member_opt "trace_id" contract )
-    with
-    | Some value, _ | _, Some value -> String.equal value trace_id
-    | None, None -> false
-  in
-  let turn_matches =
-    match turn_id with
-    | None -> true
-    | Some wanted ->
-      json_int_member_opt "keeper_turn_id" json = Some wanted
-      || json_int_member_opt "keeper_turn_id" contract = Some wanted
-  in
-  keeper_matches && trace_matches && turn_matches
-
-let claim_status_of_output output =
-  let result =
-    match json_string_member_opt "result" output with
-    | Some value -> String.trim value
-    | None -> ""
-  in
-  match json_assoc_member_opt "claimed_task" output with
-  | Some _ -> "claimed"
-  | None when string_has_prefix ~prefix:"No eligible tasks" result -> "no_eligible"
-  | None when string_has_prefix ~prefix:"No unclaimed tasks" result -> "no_unclaimed"
-  | None when string_has_prefix ~prefix:"Error:" result -> "error"
-  | None when result = "" -> "unknown"
-  | None -> "observed"
-
-let claim_scope_summary_absent =
-  `Assoc
-    [ ("present", `Bool false)
-    ; ("source", `String "keeper_task_claim_tool_call")
-    ; ("status", `String "not_observed")
-    ; ("result", `Null)
-    ; ("mode", `Null)
-    ; ("scoped", `Null)
-    ; ("active_goal_ids", `List [])
-    ; ("effective_goal_ids", `List [])
-    ; ("fallback_reason", `Null)
-    ; ("matched_goal_id", `Null)
-    ; ("excluded_count", `Null)
-    ; ("claimed_task_id", `Null)
-    ; ("claimed_goal_id", `Null)
-    ; ("trace_id", `Null)
-    ; ("keeper_turn_id", `Null)
-    ]
+(* claim_status_of_output + claim_scope_summary_absent moved to
+   Server_dashboard_http_keeper_api_types (intra-library file split,
+   2026-05-16). *)
 
 let claim_scope_summary_json ~keeper_name ~trace_id ?turn_id () =
   let entries = Keeper_tool_call_log.read_recent ~keeper_name ~n:200 () in

@@ -1203,12 +1203,8 @@ let execution_trust_dashboard_json (config : Coord.config) : Yojson.Safe.t =
     @ source_health_fields
         ~now ~exists ~entry_count ~latest_ts ?coverage_gap ())
 
-let nonempty_string_opt value =
-  let trimmed = String.trim value in
-  if trimmed = "" then None else Some trimmed
-
-let parse_json_line_opt line =
-  try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None
+(* nonempty_string_opt + parse_json_line_opt moved to
+   Dashboard_http_keeper_types (intra-library file split, 2026-05-16). *)
 
 let recent_keeper_metric_jsons (config : Coord.config) name =
   let metrics_store = Keeper_types.keeper_metrics_store config name in
@@ -1222,29 +1218,9 @@ let recent_keeper_metric_jsons (config : Coord.config) name =
   in
   List.filter_map parse_json_line_opt lines
 
-let metric_ts json =
-  Safe_ops.json_float ~default:0.0 "ts_unix" json
-
-let sort_by_latest_ts jsons =
-  List.sort
-    (fun left right -> Float.compare (metric_ts right) (metric_ts left))
-    jsons
-
-let string_member_nonempty key json =
-  Option.bind (Safe_ops.json_string_opt key json) nonempty_string_opt
-
-let int_member_fallback key json =
-  let usage = Yojson.Safe.Util.member "usage" json in
-  match Safe_ops.json_int_opt key usage with
-  | Some value -> Some value
-  | None -> Safe_ops.json_int_opt key json
-
-let rec take_list n xs =
-  if n <= 0 then []
-  else
-    match xs with
-    | [] -> []
-    | x :: rest -> x :: take_list (n - 1) rest
+(* metric_ts + sort_by_latest_ts + string_member_nonempty +
+   int_member_fallback + take_list moved to Dashboard_http_keeper_types
+   (intra-library file split, 2026-05-16). *)
 
 let recent_token_spend_json metrics =
   metrics
@@ -1729,31 +1705,8 @@ let keeper_config_json (config : Coord.config) (name : string)
 
     This closes the Phase-2 gap between runtime metrics (already in
     /api/v1/models/metrics) and per-agent spend (required by preview). *)
-let percentile_sorted_float (sorted : float array) (p : float) : float =
-  let n = Array.length sorted in
-  if n = 0 then 0.0
-  else
-    let rank = p /. 100.0 *. Float.of_int (n - 1) in
-    let lo = int_of_float (floor rank) in
-    let hi = min (lo + 1) (n - 1) in
-    let frac = rank -. Float.of_int lo in
-    sorted.(lo) *. (1.0 -. frac) +. sorted.(hi) *. frac
-
-let keeper_cost_metric_row_is_event (json : Yojson.Safe.t) : bool =
-  let field_equals key expected =
-    Safe_ops.json_string_opt key json
-    |> Option.map (fun value ->
-         String.equal
-           (String.lowercase_ascii (String.trim value))
-           expected)
-    |> Option.value ~default:false
-  in
-  (* Heartbeat status rows carry cumulative runtime usage snapshots, not
-     per-call spend samples.  Counting them here inflates dashboard cost. *)
-  not
-    (field_equals "channel" "heartbeat"
-     || field_equals "work_kind" "status_tick"
-     || field_equals "snapshot_source" "keeper_context_status")
+(* percentile_sorted_float + keeper_cost_metric_row_is_event moved to
+   Dashboard_http_keeper_types (intra-library file split, 2026-05-16). *)
 
 let keeper_cost_aggregates_json
     ~(config : Coord.config)
@@ -1864,17 +1817,13 @@ let keeper_cost_aggregates_json
     ("generated_at", `Float now_ts);
   ]
 
-let k2_feed_limit limit = max 1 (min 200 limit)
-let keeper_decisions_dashboard_surface = "/api/v1/dashboard/keeper-decisions"
+(* k2_feed_limit moved to Dashboard_http_keeper_types
+   (intra-library file split, 2026-05-16). *)
+(* keeper_decisions_dashboard_surface moved to Dashboard_http_keeper_types
+   (intra-library file split, 2026-05-16). *)
 
-let keeper_decisions_retention_json ~per_keeper_limit ~keeper_count =
-  `Assoc
-    [
-      ("scope", `String "per_keeper_jsonl_tail");
-      ("durable_store", `String ".masc/keepers/:name.decisions.jsonl");
-      ("per_keeper_tail_lines", `Int per_keeper_limit);
-      ("keeper_count", `Int keeper_count);
-    ]
+(* keeper_decisions_retention_json moved to Dashboard_http_keeper_types
+   (intra-library file split, 2026-05-16). *)
 
 (** Read per-keeper [.decisions.jsonl] files and return a unified,
     time-sorted stream of recent events (turn telemetry, tool_exec,
@@ -1992,25 +1941,11 @@ let keeper_decisions_json
     ("generated_at_iso", `String (Masc_domain.now_iso ()));
   ]
 
-let k2_iso8601_of_unix ts_unix =
-  if ts_unix <= 0.0 then ""
-  else
-    let t = Unix.gmtime ts_unix in
-    Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-      (t.Unix.tm_year + 1900) (t.Unix.tm_mon + 1) t.Unix.tm_mday
-      t.Unix.tm_hour t.Unix.tm_min t.Unix.tm_sec
+(* k2_iso8601_of_unix + k2_stable_id moved to Dashboard_http_keeper_types
+   (intra-library file split, 2026-05-16). *)
 
-let k2_stable_id ~prefix ~keeper_name ~ts_unix ~raw =
-  let ms = Int64.of_float (ts_unix *. 1000.0) in
-  let hash = Digest.to_hex (Digest.string raw) in
-  Printf.sprintf "%s-%s-%016Lx-%s"
-    prefix keeper_name ms (String.sub hash 0 8)
-
-let memory_kind_for_log (kind : string) : string =
-  match String.lowercase_ascii (String.trim kind) with
-  | "progress" -> "episode"
-  | "goal" | "next" | "decision" -> "plan"
-  | _ -> "fact"
+(* memory_kind_for_log moved to Dashboard_http_keeper_types
+   (intra-library file split, 2026-05-16). *)
 
 let keeper_decisions_log_json
     ~(config : Coord.config)

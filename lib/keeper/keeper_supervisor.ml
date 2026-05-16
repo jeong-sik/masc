@@ -246,7 +246,7 @@ let launch_supervised_fiber
   if restart_launch_noop_enabled_for_test ()
   then ()
   else (
-    fork_stale_watchdog ctx meta reg;
+    fork_stale_watchdog ctx meta ~startup_warmup_sec:proactive_warmup_sec reg;
     (* Task 137: Inject bootstrap signal to ensure at least one warm-up turn runs
      and break the initial proactive deadlock. *)
     let bootstrap_signal : Keeper_event_queue.stimulus =

@@ -268,6 +268,30 @@ let test_noop_failure_loop_boundary_equal_timestamps () =
        ~started_at:200.0
        ~last_completed_turn_ended_at:(Some 200.0))
 
+let test_effective_startup_grace_covers_warmup () =
+  let check_float = Alcotest.(check (float 0.001)) in
+  check_float
+    "base grace remains when warmup fits inside it"
+    360.0
+    (SW.effective_startup_grace_sec
+       ~base_grace_sec:360.0
+       ~poll_sec:30.0
+       ~startup_warmup_sec:120);
+  check_float
+    "warmup plus one poll extends startup grace"
+    418.0
+    (SW.effective_startup_grace_sec
+       ~base_grace_sec:360.0
+       ~poll_sec:30.0
+       ~startup_warmup_sec:388);
+  check_float
+    "negative warmup is clamped"
+    360.0
+    (SW.effective_startup_grace_sec
+       ~base_grace_sec:360.0
+       ~poll_sec:30.0
+       ~startup_warmup_sec:(-1))
+
 let () =
   Alcotest.run "stale_kill_class"
     [
@@ -341,5 +365,10 @@ let () =
             test_noop_failure_loop_triggers_after_current_turn;
           Alcotest.test_case "boundary equal timestamps" `Quick
             test_noop_failure_loop_boundary_equal_timestamps;
+        ] );
+      ( "startup_grace",
+        [
+          Alcotest.test_case "covers proactive warmup" `Quick
+            test_effective_startup_grace_covers_warmup;
         ] );
     ]

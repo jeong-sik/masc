@@ -23,7 +23,11 @@ val supervise_keepalive :
 (** {1 Watchdog} *)
 
 val fork_stale_watchdog :
-  'a context -> keeper_meta -> Keeper_registry.registry_entry -> unit
+     'a context
+  -> keeper_meta
+  -> ?startup_warmup_sec:int
+  -> Keeper_registry.registry_entry
+  -> unit
 (** Fork a stale-turn watchdog fiber for the given keeper.  This is a
     re-export of {!Keeper_stale_watchdog.fork_stale_watchdog}; see
     that module's docstring for the authoritative description of the

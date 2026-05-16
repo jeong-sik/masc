@@ -307,6 +307,33 @@ let test_draft_request_rejects_ready_prs () =
     (K.For_testing.draft_request_allowed
        (`Assoc [ ("ready", `Bool true) ]))
 
+let test_pr_create_requires_repo_cwd_before_gh () =
+  with_fake_gh @@ fun () ->
+  with_fake_docker @@ fun () ->
+  setup_docker_pr_tool @@ fun ~config ~meta ->
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  let raw =
+    K.handle_keeper_pr_create ~config ~meta
+      ~args:
+        (`Assoc
+          [
+            ("repo", `String "jeong-sik/masc-mcp");
+            ("title", `String "missing cwd draft PR");
+            ("body", `String "missing cwd draft PR body");
+            ("base", `String "main");
+            ("head", `String "feature/missing-cwd");
+          ])
+  in
+  check (option bool) "pr create blocked before gh" (Some false)
+    (parse_bool_field raw "ok");
+  check (option string) "structured cwd error"
+    (Some "keeper_pr_create_requires_git_cwd")
+    (parse_string_field raw "error");
+  check bool "points keeper at repo cwd" true
+    (contains_substring raw "repos/REPO");
+  check bool "does not invoke docker gh" false (Sys.file_exists log_path)
+
 let test_pr_create_routes_through_docker () =
   with_fake_gh @@ fun () ->
   with_fake_docker @@ fun () ->
@@ -512,6 +539,8 @@ let () =
         ] );
       ( "docker_route",
         [
+          test_case "pr create requires repo cwd before gh" `Quick
+            test_pr_create_requires_repo_cwd_before_gh;
           test_case "pr create routes through docker" `Quick
             test_pr_create_routes_through_docker;
           test_case "pr create hard mode routes through broker" `Quick

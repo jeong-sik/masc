@@ -131,6 +131,11 @@ val should_require_tools_for_initial_turn
   -> turn_affordances:string list
   -> bool
 
+val should_require_provider_tool_choice_support
+  :  initial_tool_requirement:tool_requirement
+  -> actionable_observation_requires_tool_support:bool
+  -> bool
+
 val preferred_tool_choice_for_required_turn
   :  has_current_task:bool
   -> turn_affordances:string list

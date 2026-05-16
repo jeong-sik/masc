@@ -1406,8 +1406,7 @@ let test_idle_decay_triggers_turn () =
     ; proactive = { enabled = true; idle_sec = 0; cooldown_sec = 1800 }
     ; runtime =
         { minimal_meta.runtime with
-          consecutive_noop_count = 0
-        ; proactive_rt =
+          proactive_rt =
             { minimal_meta.runtime.proactive_rt with
               consecutive_noop_count = 0
             ; last_ts = Time_compat.now () -. 4000.0
@@ -1644,8 +1643,7 @@ let test_task_backlog_cooldown_applies_noop_backoff_once () =
         proactive = { enabled = true; idle_sec = 120; cooldown_sec = 300 }
       ; runtime =
           { minimal_meta.runtime with
-            consecutive_noop_count = 16
-          ; proactive_rt =
+            proactive_rt =
               { minimal_meta.runtime.proactive_rt with
                 consecutive_noop_count = 3
               ; last_ts = Time_compat.now () -. 1000.0
@@ -2435,8 +2433,7 @@ let test_prompt_includes_autonomous_trigger_section () =
     ; proactive = { enabled = true; idle_sec = 0; cooldown_sec = 60 }
     ; runtime =
         { minimal_meta.runtime with
-          consecutive_noop_count = 0
-        ; proactive_rt =
+          proactive_rt =
             { minimal_meta.runtime.proactive_rt with
               consecutive_noop_count = 0
             ; last_ts = Time_compat.now () -. 300.0

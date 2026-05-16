@@ -8,10 +8,20 @@ let error_json ?(fields = []) (message : string) =
   Yojson.Safe.to_string (`Assoc (("error", `String message) :: fields))
 ;;
 
+let tool_result_error_json (tr : Tool_result.t) =
+  let fields =
+    match Tool_result.failure_class tr with
+    | None -> []
+    | Some cls ->
+      [ "failure_class", `String (Tool_result.tool_failure_class_to_string cls) ]
+  in
+  error_json ~fields (Tool_result.message tr)
+;;
+
 let tool_result_or_error (tr : Tool_result.t) =
   let ok = tr.success in
   let msg = Tool_result.message tr in
-  if ok then msg else error_json msg
+  if ok then msg else tool_result_error_json tr
 ;;
 
 (** Phase B PR-5 precursor (2026-04-28): the action mapping itself,

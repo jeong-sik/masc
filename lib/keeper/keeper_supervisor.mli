@@ -31,8 +31,9 @@ val fork_stale_watchdog :
 (** Fork a stale-turn watchdog fiber for the given keeper.  This is a
     re-export of {!Keeper_stale_watchdog.fork_stale_watchdog}; see
     that module's docstring for the authoritative description of the
-    three detection modes ([Idle_turn] / [In_turn_hung] /
-    [Noop_failure_loop]) and per-class Prometheus counter. *)
+    four detection modes ([Idle_turn] / [In_turn_hung] /
+    [Mid_turn_no_progress] / [Noop_failure_loop]) and per-class
+    Prometheus counter. *)
 
 (** {1 Sweep and Recovery} *)
 

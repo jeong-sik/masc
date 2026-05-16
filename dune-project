@@ -3,7 +3,7 @@
 (using menhir 3.0)
 
 (name masc_mcp)
-(version 0.19.17)
+(version 0.19.18)
 
 (generate_opam_files true)
 (implicit_transitive_deps false)
@@ -43,7 +43,7 @@
   (cmdliner (>= 1.1))
   (cohttp (>= 5.0))
   (cohttp-eio (>= 6.0))
-  (agent_sdk (>= 0.193.16))
+  (agent_sdk (>= 0.194.0))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))

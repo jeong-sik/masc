@@ -42,6 +42,14 @@ let cases : (string * R.failure_reason option) list = [
   "Stale_turn_timeout/In_turn_hung",
     Some (R.Stale_turn_timeout
       (R.In_turn_hung { active_seconds = 120.0; timeout_threshold = 90.0 }));
+  "Stale_turn_timeout/Mid_turn_no_progress",
+    Some (R.Stale_turn_timeout
+      (R.Mid_turn_no_progress
+         { active_seconds = 120.0;
+           since_progress_seconds = 61.0;
+           progress_timeout_threshold = 60.0;
+           last_progress_kind = Some "sse_text_delta";
+         }));
   "Stale_turn_timeout/Noop_failure_loop",
     Some (R.Stale_turn_timeout (R.Noop_failure_loop { noop_count = 7 }));
   "Stale_termination_storm",

@@ -1184,6 +1184,93 @@ let test_claim_allows_required_tools_with_access () =
     | None -> fail "expected required-tool task to be claimed")
 ;;
 
+let test_required_tool_matching_canonicalizes_public_aliases () =
+  check
+    (list string)
+    "public Bash satisfies keeper_bash"
+    []
+    (Coord.missing_required_tools ~allowed:[ "Bash" ] [ "keeper_bash" ]);
+  check
+    (list string)
+    "internal keeper_bash satisfies public Bash"
+    []
+    (Coord.missing_required_tools ~allowed:[ "keeper_bash" ] [ "Bash" ]);
+  check
+    (list string)
+    "public Write is not masc_code_write"
+    [ "masc_code_write" ]
+    (Coord.missing_required_tools ~allowed:[ "Write" ] [ "masc_code_write" ]);
+  check
+    bool
+    "claim scheduler accepts public Bash alias"
+    true
+    (Coord_task_schedule.required_tools_allowed
+       ~agent_tool_names:[ "Bash" ]
+       [ "keeper_bash" ])
+;;
+
+let test_claim_does_not_treat_write_alias_as_masc_code_write () =
+  with_room (fun config ->
+    let meta = make_meta_with_tools [ "keeper_task_claim"; "keeper_tasks_list"; "Write" ] in
+    let _ =
+      Coord.add_task
+        ~contract:(contract_requiring_tools [ "masc_code_write" ])
+        config
+        ~title:"Needs masc code write"
+        ~priority:1
+        ~description:"requires masc_code_write"
+    in
+    let _ =
+      Coord.add_task
+        config
+        ~title:"Readable fallback"
+        ~priority:2
+        ~description:"does not require code write"
+    in
+    ignore (call_tool config meta "keeper_task_claim" (`Assoc []));
+    let claimed =
+      Coord.get_tasks_raw config
+      |> List.find_opt (fun (task : Masc_domain.task) ->
+        Masc_domain.task_assignee_of_status task.task_status = Some meta.agent_name)
+    in
+    match claimed with
+    | Some task ->
+      check string "Write alias does not satisfy masc_code_write" "Readable fallback" task.title
+    | None -> fail "expected fallback task to be claimed")
+;;
+
+let test_claim_allows_masc_code_write_with_access () =
+  with_room (fun config ->
+    let meta =
+      make_meta_with_tools [ "keeper_task_claim"; "keeper_tasks_list"; "masc_code_write" ]
+    in
+    let _ =
+      Coord.add_task
+        ~contract:(contract_requiring_tools [ "masc_code_write" ])
+        config
+        ~title:"Needs masc code write"
+        ~priority:1
+        ~description:"requires masc_code_write"
+    in
+    let _ =
+      Coord.add_task
+        config
+        ~title:"Readable fallback"
+        ~priority:2
+        ~description:"does not require code write"
+    in
+    ignore (call_tool config meta "keeper_task_claim" (`Assoc []));
+    let claimed =
+      Coord.get_tasks_raw config
+      |> List.find_opt (fun (task : Masc_domain.task) ->
+        Masc_domain.task_assignee_of_status task.task_status = Some meta.agent_name)
+    in
+    match claimed with
+    | Some task ->
+      check string "claimed masc_code_write task" "Needs masc code write" task.title
+    | None -> fail "expected masc_code_write task to be claimed")
+;;
+
 let test_create_defaults_single_active_goal_id () =
   with_room (fun config ->
     let goal, _ =
@@ -1692,7 +1779,7 @@ let test_tool_search_whitespace_query_returns_error () =
     | _ -> fail "expected error field for whitespace-only query")
 ;;
 
-let test_tool_search_without_search_fn_returns_error () =
+let test_tool_search_without_search_fn_uses_default_search () =
   with_room (fun config ->
     let meta = make_test_meta () in
     let result =
@@ -1703,14 +1790,8 @@ let test_tool_search_without_search_fn_returns_error () =
         (`Assoc [ "query", `String "filesystem read file" ])
     in
     let json = parse_json result in
-    match Yojson.Safe.Util.member "error" json with
-    | `String msg ->
-      check
-        bool
-        "error mentions missing search wiring"
-        true
-        (String_util.contains_substring msg "not configured")
-    | _ -> fail "expected error field for missing search_fn")
+    let results = Yojson.Safe.Util.(member "results" json |> to_list) in
+    check bool "default search returns candidates" true (results <> []))
 ;;
 
 let test_tool_search_max_results_clamped_to_10 () =
@@ -1876,6 +1957,18 @@ let () =
             `Quick
             test_claim_allows_required_tools_with_access
         ; test_case
+            "required tool matching canonicalizes public aliases"
+            `Quick
+            test_required_tool_matching_canonicalizes_public_aliases
+        ; test_case
+            "claim keeps masc_code_write distinct from Write alias"
+            `Quick
+            test_claim_does_not_treat_write_alias_as_masc_code_write
+        ; test_case
+            "claim allows masc_code_write when available"
+            `Quick
+            test_claim_allows_masc_code_write_with_access
+        ; test_case
             "create defaults single active goal_id"
             `Quick
             test_create_defaults_single_active_goal_id
@@ -1930,9 +2023,9 @@ let () =
             `Quick
             test_tool_search_whitespace_query_returns_error
         ; test_case
-            "non-empty query requires search_fn"
+            "non-empty query uses default search_fn"
             `Quick
-            test_tool_search_without_search_fn_returns_error
+            test_tool_search_without_search_fn_uses_default_search
         ; test_case
             "max_results clamped to 10"
             `Quick

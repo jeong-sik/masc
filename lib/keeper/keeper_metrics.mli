@@ -253,6 +253,8 @@ val metric_keeper_compaction_saved_tokens : string
 val metric_keeper_operator_compact : string
 val metric_keeper_operator_clear : string
 val metric_keeper_compaction_noop : string
+val metric_keeper_continuity_no_state : string
+val metric_keeper_tool_pair_repair : string
 val metric_keeper_tool_emission_registry_size : string
 val metric_keeper_tool_emission_pushes : string
 val metric_keeper_tool_underused_allowed_count : string
@@ -320,6 +322,7 @@ val metric_keeper_stale_fleet_batch_paused : string
 val metric_keeper_oas_timeout_budget_loop_paused : string
 val metric_keeper_cycle_exceptions : string
 val metric_keeper_snapshot_write_failures : string
+val metric_keeper_state_snapshot_skipped_no_state : string
 val metric_keeper_progress_updated_line_failures : string
 val metric_keeper_sse_broadcast_failures : string
 val metric_keeper_room_heartbeat_failures : string
@@ -336,6 +339,23 @@ val metric_keeper_cascade_sync_failures : string
 val metric_keeper_local_discovery_failures : string
 val metric_keeper_thinking_persist_failures : string
 val metric_keeper_checkpoint_failures : string
+
+val metric_keeper_user_visible_reply_source : string
+(** Counter for [Keeper_text_processing.user_visible_reply_text]
+    return paths.  Label [source] is governed by
+    {!Keeper_user_visible_reply_source}.  Rising
+    [hardcoded_default] rate is the operational signal that the
+    LLM is consistently producing no usable reply and the user is
+    being shown the literal ["State updated."]. *)
+
+val metric_keeper_continuity_summary_source : string
+(** Counter for [Keeper_world_observation.read_continuity_summary]
+    return paths.  Label [source] is governed by
+    {!Keeper_continuity_summary_source}; label [keeper] names the
+    keeper whose summary was read.  Rising
+    [meta_fallback_exception] is the operational signal that the
+    catch-all [| _ -> ] is swallowing exceptions that previously
+    had no audit trail. *)
 
 val metric_keeper_summarizer_state_scrubs : string
 (** Counter for [Keeper_summarizer.keeper_summarizer] invocations,
@@ -360,6 +380,18 @@ val metric_keeper_oas_env_key_rejections : string
     env-injection bypass.  Non-zero counts at startup mean the
     keeper TOML contains [keeper.oas_env.<X>] keys that the
     runtime silently ignored. *)
+
+val metric_keeper_continuity_ts_recovered : string
+(** Counter for the synthetic-ts recovery branch in
+    [Keeper_meta_json_parse.parse_last_continuity_update_ts]: when
+    the persisted [last_continuity_update_ts] is missing/invalid
+    ([<= 0.0]) but [continuity_summary] is non-empty, the loader
+    substitutes [Time_compat.now ()] so the cooldown gate does not
+    interpret the empty timestamp as "never reflected" and bypass
+    cooldown for the first run.  Each recovery event increments
+    this counter and emits a warn line; non-zero counts mean the
+    meta JSON was written without a valid timestamp or the field
+    was corrupted on disk. *)
 
 val metric_keeper_memory_write_failures : string
 val metric_keeper_memory_consolidations : string

@@ -34,6 +34,18 @@ let mk_complete ?(id = "id-1") ?(ts = 1_001.0) ?(keeper = "k")
     run_id = "run-y";
   }
 
+let mk_event ?(ts = 1_000.0) payload : Agent_sdk.Event_bus.event =
+  {
+    meta =
+      {
+        correlation_id = "corr-x";
+        run_id = "run-y";
+        ts;
+        caused_by = None;
+      };
+    payload;
+  }
+
 let tmp_base_path () =
   let dir = Filename.temp_file "kca_test_" "_dir" in
   Sys.remove dir;
@@ -170,6 +182,41 @@ let test_read_keeper_filter () =
       | [KCA.Start r] -> check string "alpha keeper" "alpha" r.keeper_name
       | _ -> fail "expected single Start for alpha")
 
+let test_pending_ttl_uses_receive_time () =
+  Eio_main.run @@ fun _env ->
+  let base = tmp_base_path () in
+  let finally () =
+    KCA.For_testing.clear_pending ();
+    rm_rf base
+  in
+  Fun.protect ~finally (fun () ->
+    KCA.For_testing.clear_pending ();
+    let received_ts = 1_000.0 in
+    let stale_event_ts = received_ts -. 310.0 in
+    let event =
+      mk_event
+        ~ts:stale_event_ts
+        (Agent_sdk.Event_bus.ContextCompactStarted
+           { agent_name = "slow-subscriber"; trigger = "proactive" })
+    in
+    KCA.For_testing.handle_event_at
+      ~received_ts
+      ~base_path:base
+      ~retention_days:14
+      event;
+    let immediate =
+      KCA.For_testing.evict_pending_older_than
+        ~max_age_s:300.0
+        ~now:(received_ts +. 1.0)
+    in
+    check int "fresh receive timestamp not evicted" 0 (List.length immediate);
+    let expired =
+      KCA.For_testing.evict_pending_older_than
+        ~max_age_s:300.0
+        ~now:(received_ts +. 301.0)
+    in
+    check int "entry expires by receive timestamp" 1 (List.length expired))
+
 let () =
   run "Keeper_compact_audit" [
     ("trigger", [
@@ -184,5 +231,8 @@ let () =
     ("persist", [
       test_case "persist + read + pair"          `Quick test_persist_and_read;
       test_case "keeper filter"                  `Quick test_read_keeper_filter;
+    ]);
+    ("pending", [
+      test_case "ttl uses receive time"          `Quick test_pending_ttl_uses_receive_time;
     ]);
   ]

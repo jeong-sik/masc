@@ -409,7 +409,31 @@ let apply_post_turn_lifecycle_with_resilience_handles
       | None -> structured_snapshot
     in
     match snapshot with
-    | None -> meta
+    | None ->
+        Prometheus.inc_counter
+          Keeper_metrics.metric_keeper_continuity_no_state
+          ~labels:[("keeper", meta.name)]
+          ();
+        (* No state captured this turn — neither LLM [STATE] block nor OAS
+           checkpoint working_context produced a snapshot.  Still advance the
+           continuity cooldown timestamp so the compaction cooldown gate in
+           Keeper_compact_policy treats this as an attempted reflection;
+           otherwise keepers that never emit [STATE] would bypass the
+           cooldown every turn while only emergency ratio (0.8) acts as a
+           safety net.  Record a counter so prompt / cascade drift becomes
+           observable. *)
+        Prometheus.inc_counter
+          Keeper_metrics.metric_keeper_state_snapshot_skipped_no_state
+          ~labels:[("keeper", meta.name)]
+          ();
+        {
+          meta with
+          runtime =
+            {
+              meta.runtime with
+              last_continuity_update_ts = now_ts;
+            };
+        }
     | Some snapshot ->
         (* Gen7: cap snapshot size before rendering + persisting.
            Bounds string prose and list items so meta.continuity_summary

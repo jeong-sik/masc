@@ -142,6 +142,36 @@ val docker_masc_runtime_env_args : container_root:string -> string list
 (** Docker [--env ...] argv fragment for the numeric keeper user. *)
 val docker_user_env_args : unit -> string list
 
+(** Host-side config root mounted into keeper containers. Honors
+    [MASC_CONFIG_DIR] when set; otherwise uses
+    [<base_path>/.masc/config]. *)
+val docker_config_host_root : base_path:string -> string
+
+(** Container-side config root under the keeper playground. *)
+val docker_config_container_root : container_root:string -> string
+
+(** Docker [-v ...] argv fragment that exposes the active config root
+    read-only at [<container_root>/.masc/config]. Returns [[]] when the
+    host config root is absent. *)
+val docker_config_mount_args
+  :  base_path:string
+  -> container_root:string
+  -> string list
+
+(** Docker [--env ...] argv fragment that points sandboxed processes at
+    the mounted config root. Returns [[]] when the host config root is absent. *)
+val docker_config_env_args
+  :  base_path:string
+  -> container_root:string
+  -> string list
+
+(** Standard keeper container env: sanitized user env plus the mounted
+    MASC config env when available. *)
+val docker_sandbox_env_args
+  :  base_path:string
+  -> container_root:string
+  -> string list
+
 (** Docker [-v ...] argv fragment that supplies passwd/group entries for
     the numeric host uid/gid used inside the keeper container. *)
 val docker_user_identity_mount_args

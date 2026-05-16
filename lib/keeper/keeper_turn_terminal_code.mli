@@ -26,6 +26,10 @@ type t =
   | Stale_turn_timeout_in_turn
   (** [Keeper_registry.Stale_turn_timeout (In_turn_hung _)]: a turn
           began and ran past its timeout threshold. *)
+  | Stale_turn_timeout_no_progress
+  (** [Keeper_registry.Stale_turn_timeout (Mid_turn_no_progress _)]: a live
+          turn stayed inside its outer timeout but stopped producing
+          streaming/tool progress. *)
   | Stale_turn_timeout_noop
   (** [Keeper_registry.Stale_turn_timeout (Noop_failure_loop _)]:
           turns kept firing but produced no tool calls. *)
@@ -77,7 +81,7 @@ type t =
     callers in PR-2 / PR-3 does not change the JSON received by
     dashboards, [bin/masc-trace], or external consumers.
 
-    The two [Stale_turn_timeout_*] variants and the two
+    The [Stale_turn_timeout_*] variants and the two
     [Ambiguous_partial_commit_*] variants intentionally collapse to a
     single wire string each ([stale_turn_timeout],
     [ambiguous_partial_commit]) to preserve the existing cohort keys;
@@ -89,8 +93,9 @@ val to_wire : t -> string
     [String.starts_with ~prefix] should instead handle [None] (or wait
     for PR-4, which removes the consumer side of [of_wire] entirely).
 
-    Some wire strings are lossy ([stale_turn_timeout] cannot
-    distinguish [Idle_turn] / [In_turn_hung] / [Noop_failure_loop]).
+    Some wire strings are lossy ([stale_turn_timeout] cannot distinguish
+    [Idle_turn] / [In_turn_hung] / [Mid_turn_no_progress] /
+    [Noop_failure_loop]).
     Such wire strings deserialise to a single canonical sub-class —
     documented in the [.ml] — to avoid silent fallthrough. *)
 val of_wire : string -> t option

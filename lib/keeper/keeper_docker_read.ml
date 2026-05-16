@@ -57,19 +57,21 @@ let container_path_of_host ~config ~(meta : keeper_meta) ~host_path
    argv to avoid coupling the two surfaces. The trailing
    [program ; arg1 ; ... ] is appended by the caller via
    [build_docker_argv ~command_argv]. *)
-let build_docker_argv ~base_path ~image ~container_name ~host_root ~croot
+let build_docker_argv ~image ~container_name ~base_path ~host_root ~croot
     ~uid ~gid ~seccomp_args ~command_argv =
   Keeper_sandbox_runtime.docker_command_argv ()
-  @ [ "run"
-    ; "--rm"
-    ; "--name"
-    ; container_name
-    ; "-i"
-    ; "--user"
-    ; Printf.sprintf "%d:%d" uid gid
+  @ [
+      "run";
+      "--rm";
+      "--name";
+      container_name;
+      "-i";
+      "--user";
+      Printf.sprintf "%d:%d" uid gid;
     ]
-  @ Keeper_sandbox_runtime.docker_user_env_args ()
-  @ Keeper_sandbox_runtime.docker_masc_runtime_env_args ~container_root:croot
+  @ Keeper_sandbox_runtime.docker_sandbox_env_args
+      ~base_path
+      ~container_root:croot
   @ Keeper_sandbox_runtime.docker_nofile_args ()
   @ Env_config_keeper.KeeperSandbox.read_only_rootfs_args ()
   @ [ "--tmpfs"
@@ -77,19 +79,22 @@ let build_docker_argv ~base_path ~image ~container_name ~host_root ~croot
     ; "--cap-drop=ALL"
     ; "--security-opt"
     ; "no-new-privileges"
-    ]
+  ]
   @ seccomp_args
-  @ [ "--pids-limit"
-    ; string_of_int (Env_config_keeper.KeeperSandbox.pids_limit ())
-    ; "--memory"
-    ; Env_config_keeper.KeeperSandbox.memory ()
-    ; "-v"
-    ; host_root ^ ":" ^ croot ^ ":ro"
-    ]
-  @ Keeper_sandbox_runtime.docker_masc_config_mount_args
+  @ [
+    "--pids-limit";
+    string_of_int (Env_config_keeper.KeeperSandbox.pids_limit ());
+    "--memory"; Env_config_keeper.KeeperSandbox.memory ();
+    "-v"; host_root ^ ":" ^ croot ^ ":ro";
+    "--workdir"; croot;
+    "--network"; "none";
+  ]
+  @ Keeper_sandbox_runtime.docker_config_mount_args
       ~base_path
       ~container_root:croot
-  @ [ "--workdir"; croot; "--network"; "none"; image ]
+  @ [
+    image;
+  ]
   @ command_argv
 
 let container_name_of meta =
@@ -131,16 +136,8 @@ let run_command_in_container_with_status ?turn_sandbox_factory
         let uid = Unix.getuid () in
         let gid = Unix.getgid () in
         let argv =
-          build_docker_argv
-            ~base_path:config.Coord.base_path
-            ~image
-            ~container_name
-            ~host_root
-            ~croot
-            ~uid
-            ~gid
-            ~seccomp_args
-            ~command_argv
+          build_docker_argv ~image ~container_name ~base_path:config.base_path ~host_root ~croot
+            ~uid ~gid ~seccomp_args ~command_argv
         in
         let st, out =
           Masc_exec.Exec_gate.run_argv_with_status

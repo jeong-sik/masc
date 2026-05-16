@@ -55,22 +55,87 @@ let state_snapshot_reply_fallback (snapshot : keeper_state_snapshot option) :
   | Some { goal = Some goal; _ } -> trim_to_option goal
   | _ -> None
 
+(* Observability for the 5-path fallback chain in
+   [user_visible_reply_text].  Until this counter existed, every
+   caller's reply landed on one of five sources with no audit trail
+   — in particular the hardcoded ["State updated."] branch was the
+   silent signal that the LLM produced no usable text.  Closes the
+   silent-failure gap flagged in
+   .tmp/memory-compacting-analysis.html (user-visible reply
+   fallback chain). *)
+let () =
+  Prometheus.register_counter
+    ~name:Keeper_metrics.metric_keeper_user_visible_reply_source
+    ~help:
+      "Total [user_visible_reply_text] returns, classified by label \
+       [source] (governed by Keeper_user_visible_reply_source).  \
+       Rising [hardcoded_default] rate is the operational signal \
+       that the LLM produced no usable reply at all."
+    ()
+;;
+
+let record_user_visible_reply_source
+    ~(source : Keeper_user_visible_reply_source.t) =
+  Prometheus.inc_counter
+    Keeper_metrics.metric_keeper_user_visible_reply_source
+    ~labels:
+      [ ("source", Keeper_user_visible_reply_source.to_label source) ]
+    ()
+
 let strip_internal_reply_markup (raw : string) : string =
   raw
   |> Keeper_skill_routing.strip_skill_route_lines
   |> strip_state_blocks_text
   |> String.trim
 
+(* Explicit split of [state_snapshot_reply_fallback] return so the
+   caller can tell whether [progress] or [goal] supplied the text.
+   Same logic, distinct outcome label. *)
+let state_snapshot_reply_fallback_typed
+    (snapshot : keeper_state_snapshot option)
+  : (string * Keeper_user_visible_reply_source.t) option =
+  match snapshot with
+  | Some { progress = Some progress; _ } ->
+    (match trim_to_option progress with
+     | Some text ->
+       Some (text, Keeper_user_visible_reply_source.State_snapshot_progress)
+     | None -> None)
+  | Some { goal = Some goal; _ } ->
+    (match trim_to_option goal with
+     | Some text ->
+       Some (text, Keeper_user_visible_reply_source.State_snapshot_goal)
+     | None -> None)
+  | _ -> None
+
 let user_visible_reply_text ?fallback (raw : string) : string =
   match trim_to_option (strip_internal_reply_markup raw) with
-  | Some text -> text
+  | Some text ->
+    record_user_visible_reply_source
+      ~source:Keeper_user_visible_reply_source.Stripped_raw;
+    text
   | None -> (
       match Option.bind fallback trim_to_option with
-      | Some text -> text
+      | Some text ->
+        record_user_visible_reply_source
+          ~source:Keeper_user_visible_reply_source.Fallback_param;
+        text
       | None -> (
-          match state_snapshot_reply_fallback (parse_state_snapshot_from_reply raw) with
-          | Some text -> text
-          | None -> "State updated."))
+          match
+            state_snapshot_reply_fallback_typed
+              (parse_state_snapshot_from_reply raw)
+          with
+          | Some (text, source) ->
+            record_user_visible_reply_source ~source;
+            text
+          | None ->
+            record_user_visible_reply_source
+              ~source:Keeper_user_visible_reply_source.Hardcoded_default;
+            Log.Keeper.warn
+              "user_visible_reply_text: every source empty — \
+               returning hardcoded \"State updated.\".  LLM \
+               produced no usable reply (raw_len=%d)"
+              (String.length raw);
+            "State updated."))
 
 let normalize_proactive_text (raw : string) : string =
   raw

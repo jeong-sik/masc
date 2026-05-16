@@ -205,16 +205,40 @@ let task_required_tools (task : Masc_domain.task) =
   | None -> []
 ;;
 
+let canonical_required_tool_name name =
+  (* Keep this low-dependency: masc_coord cannot depend on keeper runtime modules. *)
+  let name =
+    if String.starts_with ~prefix:"mcp__masc__" name
+    then String.sub name 11 (String.length name - 11)
+    else name
+  in
+  match name with
+  | "Bash" -> "keeper_bash"
+  | "Edit" | "Write" -> "keeper_fs_edit"
+  | "Grep" -> "keeper_shell"
+  | "Read" -> "keeper_fs_read"
+  | "WebFetch" -> "masc_web_fetch"
+  | "WebSearch" -> "masc_web_search"
+  | _ -> name
+;;
+
 let missing_required_tools ~allowed required =
   (* Build a name-keyed Hashtbl over [allowed] once; per-required-name
      check drops from O(|allowed|) to O(1).  Called on the task-claim
      guard path where [allowed] is typically the agent's tool surface
      (~30-50 names) and [required] is 1-5 contract tools.
      Constant initial bucket size avoids the [List.length allowed]
-     pre-traversal (Hashtbl grows automatically). *)
+     pre-traversal (Hashtbl grows automatically).  Compare canonical
+     runtime names so public aliases such as [Bash] satisfy contracts
+     written against their internal handler names such as [keeper_bash]. *)
   let allowed_set = Hashtbl.create 32 in
-  List.iter (fun name -> Hashtbl.replace allowed_set name ()) allowed;
-  List.filter (fun required_name -> not (Hashtbl.mem allowed_set required_name)) required
+  List.iter
+    (fun name -> Hashtbl.replace allowed_set (canonical_required_tool_name name) ())
+    allowed;
+  List.filter
+    (fun required_name ->
+       not (Hashtbl.mem allowed_set (canonical_required_tool_name required_name)))
+    required
 ;;
 
 let required_tool_claim_guard config ~agent_name ?agent_tool_names task =

@@ -273,6 +273,58 @@ let docker_user_env_args () =
   ]
 ;;
 
+let trim_env_opt key =
+  match Sys.getenv_opt key with
+  | Some value ->
+    let trimmed = String.trim value in
+    if trimmed = "" then None else Some trimmed
+  | None -> None
+;;
+
+let docker_config_host_root ~base_path =
+  match trim_env_opt "MASC_CONFIG_DIR" with
+  | Some config_root -> config_root
+  | None -> Filename.concat (Common.masc_dir_from_base_path ~base_path) "config"
+;;
+
+let docker_config_container_root ~container_root =
+  Filename.concat (Filename.concat container_root Common.masc_dirname) "config"
+;;
+
+let docker_config_available host_config_root =
+  try Sys.file_exists host_config_root && Sys.is_directory host_config_root with
+  | Sys_error _ -> false
+;;
+
+let docker_config_mount_args ~base_path ~container_root =
+  let host_config_root = docker_config_host_root ~base_path in
+  if not (docker_config_available host_config_root)
+  then []
+  else
+    [ "-v"
+    ; host_config_root ^ ":" ^ docker_config_container_root ~container_root ^ ":ro"
+    ]
+;;
+
+let docker_config_env_args ~base_path ~container_root =
+  let host_config_root = docker_config_host_root ~base_path in
+  if not (docker_config_available host_config_root)
+  then []
+  else
+    let container_config_root = docker_config_container_root ~container_root in
+    [ "--env"
+    ; "MASC_BASE_PATH=" ^ container_root
+    ; "--env"
+    ; "MASC_BASE_PATH_INPUT=" ^ container_root
+    ; "--env"
+    ; "MASC_CONFIG_DIR=" ^ container_config_root
+    ]
+;;
+
+let docker_sandbox_env_args ~base_path ~container_root =
+  docker_user_env_args () @ docker_config_env_args ~base_path ~container_root
+;;
+
 let docker_identity_dir ~host_root = Filename.concat host_root ".docker-identity"
 
 let docker_user_identity_mount_args ~host_root ~uid ~gid =

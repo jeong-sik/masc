@@ -142,6 +142,15 @@ let test_resolve_max_cascade_context () =
       [ "claude:claude-sonnet-4-6" ] in
   check bool "known provider returns positive context" true (ctx > 0)
 
+let test_resolve_primary_max_context_uses_first_registered_label () =
+  let first = "ollama:qwen3.5:35b-a3b-nvfp4" in
+  let labels = [ first; "glm:glm-5.1" ] in
+  check
+    int
+    "primary context follows first configured provider even when local runtime is down"
+    (Masc_mcp.Cascade_runtime.max_context_of_label first)
+    (Masc_mcp.Cascade_runtime.resolve_primary_max_context labels)
+
 let test_labels_require_local_discovery () =
   check bool "llama labels refresh local discovery" true
     (Masc_mcp.Cascade_runtime.labels_require_local_discovery
@@ -309,6 +318,8 @@ let () =
             test_cascade_model_resolve_unresolved_auto_provenance;
           test_case "resolve max cascade context" `Quick
             test_resolve_max_cascade_context;
+          test_case "primary context uses first registered label" `Quick
+            test_resolve_primary_max_context_uses_first_registered_label;
         ] );
       ( "dashboard_schema",
         [

@@ -259,6 +259,22 @@ let max_context_of_label (label : string) : int =
   | Some ctx -> effective_discovered_ctx ~static_ctx ~discovered:(Some ctx)
   | None -> static_ctx
 
+let context_if_registered (label : string) : int option =
+  match provider_name_of_label label with
+  | None -> None
+  | Some pname -> (
+      match Llm_provider.Provider_registry.find default_registry pname with
+      | None -> None
+      | Some entry ->
+          let static_ctx = static_context_of_entry entry in
+          let ctx =
+            match Cascade_config.resolve_label_context label with
+            | Some discovered ->
+                effective_discovered_ctx ~static_ctx ~discovered:(Some discovered)
+            | None -> static_ctx
+          in
+          Some ctx)
+
 let context_if_available (label : string) : int option =
   match provider_name_of_label label with
   | None -> None
@@ -279,10 +295,10 @@ let context_if_available (label : string) : int option =
             None)
 
 let resolve_primary_max_context (labels : string list) : int =
-  match List.find_map context_if_available labels with
+  match List.find_map context_if_registered labels with
   | Some ctx -> ctx
   | None ->
-    Cascade_metrics.on_max_context_fallback ~site:"primary_no_available";
+    Cascade_metrics.on_max_context_fallback ~site:"primary_no_registered";
     fallback_context_window
 
 let resolve_max_cascade_context (labels : string list) : int =

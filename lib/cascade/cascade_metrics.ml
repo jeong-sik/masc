@@ -434,9 +434,9 @@ let on_default_label_fallback ~cascade ~reason =
      label_unregistered_scheme   — [max_context_of_label]:
                                     [Provider_registry.find] returned
                                     None (scheme not registered)
-     primary_no_available        — [resolve_primary_max_context]:
-                                    no label had an available provider
-                                    via [context_if_available]
+     primary_no_registered       — [resolve_primary_max_context]:
+                                    no label had a registered provider
+                                    via [context_if_registered]
      cascade_max_no_available    — [resolve_max_cascade_context]:
                                     same condition, in the
                                     cascade-max-context aggregator

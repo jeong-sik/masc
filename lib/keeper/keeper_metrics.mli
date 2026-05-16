@@ -340,6 +340,14 @@ val metric_keeper_local_discovery_failures : string
 val metric_keeper_thinking_persist_failures : string
 val metric_keeper_checkpoint_failures : string
 
+val metric_keeper_memory_jsonl_ops : string
+(** Counter for [Agent_sdk.Memory.long_term_backend] operations
+    served by the JSONL backend, classified by label [outcome]
+    (one of the labels in {!Memory_oas_bridge_op_outcome}).
+    Labels: [outcome], [agent].  Rising failed/miss rates surface
+    JSONL-side issues that the dependency-leaf [Memory_jsonl] cannot
+    self-report. *)
+
 val metric_keeper_user_visible_reply_source : string
 (** Counter for [Keeper_text_processing.user_visible_reply_text]
     return paths.  Label [source] is governed by

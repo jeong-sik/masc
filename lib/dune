@@ -11,6 +11,7 @@
  keeper_paused_state_persist_phase
  keeper_bookkeeping_failure_kind
  keeper_checkpoint_failure_operation
+ memory_oas_bridge_op_outcome
  keeper_user_visible_reply_source
  keeper_continuity_summary_source
  keeper_profile_load_failure_site

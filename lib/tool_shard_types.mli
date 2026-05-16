@@ -77,3 +77,12 @@ val shell_tools : Masc_domain.tool_schema list
 
 val coding_keeper_bridge_tools : Masc_domain.tool_schema list
 (** Pure: keeper_bash bridge tool schemas. *)
+
+val voice_tools : Masc_domain.tool_schema list
+(** Voice tool schemas. *)
+
+val library_tools : Masc_domain.tool_schema list
+(** Library tool schemas. *)
+
+val taskboard_tools : Masc_domain.tool_schema list
+(** Taskboard tool schemas. *)

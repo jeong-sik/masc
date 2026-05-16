@@ -42,3 +42,38 @@ type shard = {
 }
 
 module StringMap : Map.S with type key = string
+
+(** {1 Schema selection + agent shard helpers} *)
+
+val select_named_schemas :
+  string list -> Masc_domain.tool_schema list -> Masc_domain.tool_schema list
+(** Pure: pick the named schemas (in input order) from the given pool. *)
+
+val default_shard_names : string list
+(** Pure: the 7 shards granted to a fresh agent. *)
+
+val tool_spec_read_only : string list
+val tool_spec_destructive : string list
+
+val tool_required_permission :
+  string -> Masc_domain.permission option
+(** Pure: required keeper permission for invoking a Tool_shard MASC tool. *)
+
+val tool_effect_domain :
+  string -> Tool_catalog.effect_domain option
+(** Pure: tool-catalog effect-domain classification for a Tool_shard MASC tool. *)
+
+val base_tools : Masc_domain.tool_schema list
+(** Pure: base tool schemas (always-on tools every keeper sees). *)
+
+val board_tools : Masc_domain.tool_schema list
+(** Pure: keeper_board tool schemas. *)
+
+val filesystem_tools : Masc_domain.tool_schema list
+(** Pure: keeper_fs tool schemas. *)
+
+val shell_tools : Masc_domain.tool_schema list
+(** Pure: keeper_shell tool schemas. *)
+
+val coding_keeper_bridge_tools : Masc_domain.tool_schema list
+(** Pure: keeper_bash bridge tool schemas. *)

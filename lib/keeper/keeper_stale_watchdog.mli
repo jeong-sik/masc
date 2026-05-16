@@ -47,8 +47,21 @@ val latch_stale_fleet_batch_reasons_for_test :
   config:Coord.config -> distinct_count:int -> string list -> unit
 (** Test-only wrapper for the batch failure-reason latch. *)
 
+val effective_startup_grace_sec :
+     base_grace_sec:float
+  -> poll_sec:float
+  -> startup_warmup_sec:int
+  -> float
+(** Effective grace window before stale detection can kill a newly-started
+    keeper.  It must cover the configured watchdog grace and the proactive
+    startup warmup plus one poll interval. *)
+
 val fork_stale_watchdog :
-  'a context -> keeper_meta -> Keeper_registry.registry_entry -> unit
+     'a context
+  -> keeper_meta
+  -> ?startup_warmup_sec:int
+  -> Keeper_registry.registry_entry
+  -> unit
 (** Fork a stale-turn watchdog fiber for the given keeper.
 
     Three detection modes — see {!Keeper_registry.stale_kill_class}:

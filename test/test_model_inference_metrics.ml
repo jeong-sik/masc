@@ -216,6 +216,26 @@ let success_entry_without_usage ~model ~ts ?provider
     ] @ extra_fields @ diag_fields));
   ]
 
+let success_entry_without_model ~cascade_name ~ts ?(tool_count = 1) () =
+  `Assoc [
+    ("ts_unix", `Float ts);
+    ("tool_call_count", `Int tool_count);
+    ("tools_used", `List [ `String "keeper_board_comment" ]);
+    ( "telemetry",
+      `Assoc [
+        ("model_used", `Null);
+        ("selected_model", `Null);
+        ("cascade_name", `String cascade_name);
+        ("outcome", `String "success");
+        ("stop_reason", `String "completed");
+        ("usage_reported", `Bool false);
+        ("telemetry_reported", `Bool false);
+        ("coverage_stage", `String "oas");
+        ("coverage_reason", `String "missing_usage_and_inference");
+        ("fallback_applied", `Bool false);
+      ] );
+  ]
+
 (* ── Tests ───────────────────────────────────────── *)
 
 let test_empty_dir () =
@@ -586,6 +606,28 @@ let test_coverage_diagnostics_survive_aggregation () =
       (recent_json |> member "outcome" |> to_string);
     check string "recent json stage" "oas"
       (recent_json |> member "coverage_stage" |> to_string))
+
+let test_success_without_model_uses_cascade_attribution () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "null_model" in
+    let ts = now_unix () in
+    write_decisions path [
+      success_entry_without_model ~cascade_name:"tier-group.coding_plan"
+        ~ts:(ts -. 5.0) ();
+    ];
+    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    check int "null-model row retained" 1 agg.total_entries;
+    check int "one attributed bucket" 1 (List.length agg.models);
+    let s = List.hd agg.models in
+    check string "cascade attribution"
+      "tier-group.coding_plan (cascade)"
+      s.model_id;
+    check int "success count" 1 s.success_count;
+    check int "tool calls preserved" 1 s.total_tool_calls;
+    check (option string) "coverage reason retained"
+      (Some "missing_usage_and_inference")
+      s.primary_coverage_reason)
 
 let test_costs_jsonl_backfills_wall_tok_per_sec () =
   let base = test_dir () in
@@ -1226,6 +1268,8 @@ let () =
       test_case "prompt tps and peak memory aggregates" `Quick test_prompt_tps_and_peak_memory_aggregates;
       test_case "missing usage serializes unknowns" `Quick test_missing_usage_serializes_unknowns;
       test_case "coverage diagnostics survive aggregation" `Quick test_coverage_diagnostics_survive_aggregation;
+      test_case "success without model uses cascade attribution" `Quick
+        test_success_without_model_uses_cascade_attribution;
       test_case "costs.jsonl backfills wall tok/sec" `Quick test_costs_jsonl_backfills_wall_tok_per_sec;
       test_case "costs.jsonl disambiguates matching model names by provider" `Quick
         test_costs_jsonl_disambiguates_matching_model_names_by_provider;

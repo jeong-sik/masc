@@ -852,6 +852,33 @@ let test_rewrite_docker_host_paths_to_container () =
        container_root host_root)
     rewritten
 
+let test_rewrite_docker_container_paths_for_host_validation () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  let meta = make_docker_meta "minjae" in
+  let host_root =
+    Keeper_sandbox.host_root_abs_of_meta ~config meta
+    |> Masc_mcp.Keeper_alerting_path.strip_trailing_slashes
+  in
+  let host_repo = Filename.concat (Filename.concat host_root "repos") "masc-mcp" in
+  let container_root = Keeper_sandbox.container_root meta.name in
+  let input =
+    Printf.sprintf "cd %s/repos/masc-mcp && git log --oneline -5\n" container_root
+  in
+  Alcotest.(check bool) "raw container path is outside host workdir" true
+    (is_error (Masc_mcp.Worker_dev_tools.validate_command_paths ~workdir:host_repo input));
+  let rewritten =
+    Keeper_shell_docker.rewrite_docker_command_paths_for_host_validation
+      ~config ~meta input
+  in
+  Alcotest.(check string) "container root rewritten to host root for validation"
+    (Printf.sprintf "cd %s/repos/masc-mcp && git log --oneline -5\n" host_root)
+    rewritten;
+  Alcotest.(check bool) "rewritten path validates under host workdir" true
+    (is_ok
+       (Masc_mcp.Worker_dev_tools.validate_command_paths ~workdir:host_repo rewritten))
+
 (* ── Negative / error-path tests (task-034) ──────────────────────── *)
 
 let test_bash_missing_cmd_field () =
@@ -1035,6 +1062,8 @@ let () =
         test_rewrite_turn_runtime_paths_to_host_is_noop_without_container_path;
       Alcotest.test_case "docker commands rewrite host paths to container paths" `Quick
         test_rewrite_docker_host_paths_to_container;
+      Alcotest.test_case "docker container paths validate as host paths" `Quick
+        test_rewrite_docker_container_paths_for_host_validation;
     ]);
     ("negative_path", [
       Alcotest.test_case "missing cmd field" `Quick test_bash_missing_cmd_field;

@@ -27,58 +27,10 @@ let keep_last_n n item lst =
   if List.length full <= n then full else List.filteri (fun i _ -> i < n) full
 ;;
 
-let supervision_cohort_size = 8
+(** supervision_cohort cluster moved to Keeper_supervisor_types
+    (intra-library file split, 2026-05-16). *)
+include Keeper_supervisor_types
 
-type supervision_cohort =
-  { cohort_id : int
-  ; keepers : Keeper_registry.registry_entry list
-  }
-
-let supervision_cohorts
-      ?(cohort_size = supervision_cohort_size)
-      (entries : Keeper_registry.registry_entry list)
-  =
-  let cohort_size = max 1 cohort_size in
-  let sorted =
-    List.sort
-      (fun (a : Keeper_registry.registry_entry) (b : Keeper_registry.registry_entry) ->
-         String.compare a.name b.name)
-      entries
-  in
-  let rec take n acc rest =
-    match n, rest with
-    | 0, rest -> List.rev acc, rest
-    | _, [] -> List.rev acc, []
-    | n, entry :: rest -> take (n - 1) (entry :: acc) rest
-  in
-  let rec loop cohort_id acc remaining =
-    match remaining with
-    | [] -> List.rev acc
-    | _ ->
-      let keepers, rest = take cohort_size [] remaining in
-      loop (cohort_id + 1) ({ cohort_id; keepers } :: acc) rest
-  in
-  loop 0 [] sorted
-;;
-
-let fresh_supervision_cohort_keepers ~base_path (cohort : supervision_cohort) =
-  List.filter_map
-    (fun (entry : Keeper_registry.registry_entry) ->
-       Keeper_registry.get ~base_path entry.name)
-    cohort.keepers
-;;
-
-let iter_supervision_cohorts ?(yield_between = Eio_guard.fair_yield) cohorts ~f =
-  let rec loop = function
-    | [] -> ()
-    | [ cohort ] -> f cohort
-    | cohort :: rest ->
-      f cohort;
-      yield_between ();
-      loop rest
-  in
-  loop cohorts
-;;
 
 let should_cleanup_dead ~now ~dead_ttl_sec (entry : Keeper_registry.registry_entry) =
   match entry.phase, entry.dead_since_ts with
@@ -246,7 +198,7 @@ let launch_supervised_fiber
   if restart_launch_noop_enabled_for_test ()
   then ()
   else (
-    fork_stale_watchdog ctx meta reg;
+    fork_stale_watchdog ctx meta ~startup_warmup_sec:proactive_warmup_sec reg;
     (* Task 137: Inject bootstrap signal to ensure at least one warm-up turn runs
      and break the initial proactive deadlock. *)
     let bootstrap_signal : Keeper_event_queue.stimulus =
@@ -658,30 +610,6 @@ let persona_profile_path_for_drift_check ~base_path persona_name =
       "profile.json"
 ;;
 
-type persona_drift_log_level =
-  | Persona_drift_warn
-  | Persona_drift_error
-
-let keeper_defaults_have_inline_identity
-    (defaults : Keeper_types_profile.keeper_profile_defaults)
-  =
-  Option.is_some defaults.goal
-  || Option.is_some defaults.short_goal
-  || Option.is_some defaults.mid_goal
-  || Option.is_some defaults.long_goal
-  || Option.is_some defaults.will
-  || Option.is_some defaults.needs
-  || Option.is_some defaults.desires
-  || Option.is_some defaults.instructions
-  || defaults.mention_targets <> []
-;;
-
-let persona_drift_log_level_for_missing_profile (meta : keeper_meta) =
-  match Keeper_types_profile.load_keeper_profile_defaults_result meta.name with
-  | Ok defaults when keeper_defaults_have_inline_identity defaults ->
-    Persona_drift_warn
-  | Ok _ | Error _ -> Persona_drift_error
-;;
 
 let log_persona_drift_if_missing ~base_path (meta : keeper_meta) =
   let persona_name = persona_name_for_drift_check meta in

@@ -117,6 +117,36 @@ let rewrite_docker_command_paths ~(config : Coord.config) ~(meta : keeper_meta) 
       rewritten
 ;;
 
+let rewrite_docker_command_paths_for_host_validation
+      ~(config : Coord.config)
+      ~(meta : keeper_meta)
+      cmd
+  =
+  let raw_host_root =
+    Keeper_sandbox.host_root_abs_of_meta ~config meta
+    |> Keeper_alerting_path.strip_trailing_slashes
+  in
+  let normalized_host_root =
+    raw_host_root |> Keeper_alerting_path.normalize_path_for_check_stripped
+  in
+  let container_root =
+    keeper_private_container_root meta |> Keeper_alerting_path.strip_trailing_slashes
+  in
+  let rewritten =
+    Keeper_sandbox_runtime.rewrite_host_root_to_container_root
+      ~host_root:container_root
+      ~container_root:raw_host_root
+      cmd
+  in
+  if String.equal raw_host_root normalized_host_root
+  then rewritten
+  else
+    Keeper_sandbox_runtime.rewrite_host_root_to_container_root
+      ~host_root:container_root
+      ~container_root:normalized_host_root
+      rewritten
+;;
+
 (* ── Profile resolution ────────────────────────────────── *)
 
 (* Invariant (root-fix family 2/3, 2026-04-28):
@@ -737,11 +767,15 @@ let run_docker_shell_command_with_status_internal
       | None ->
       let path_validation =
         if validate_command_paths
-        then Worker_dev_tools.validate_command_paths ~workdir:cwd cmd
+        then
+          let validation_cmd =
+            rewrite_docker_command_paths_for_host_validation ~config ~meta cmd
+          in
+          Worker_dev_tools.validate_command_paths ~workdir:cwd validation_cmd
         else Ok ()
       in
       match path_validation with
-      | Error err -> sandbox_error err
+      | Error err -> sandbox_error (Printf.sprintf "%s [blocked_cmd=%s]" err cmd)
       | Ok () ->
       let _cleanup =
         Keeper_sandbox_runtime.maybe_cleanup_stale_containers
@@ -996,8 +1030,11 @@ let run_docker_with_git_bash
       (match sandbox_root_git_blocker with
        | Some message -> sandbox_error_json message
        | None ->
-         (match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd with
-          | Error err -> sandbox_error_json err
+         let validation_cmd =
+           rewrite_docker_command_paths_for_host_validation ~config ~meta cmd
+         in
+         (match Worker_dev_tools.validate_command_paths ~workdir:cwd validation_cmd with
+          | Error err -> sandbox_error_json (Printf.sprintf "%s [blocked_cmd=%s]" err validation_cmd)
           | Ok () ->
            let _ = turn_sandbox_runtime in
            (match
@@ -1066,8 +1103,11 @@ let run_docker_hardened_bash
     match sandbox_root_git_blocker with
     | Some message -> sandbox_error_json message
     | None ->
-      (match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd with
-       | Error err -> sandbox_error_json err
+      let validation_cmd =
+        rewrite_docker_command_paths_for_host_validation ~config ~meta cmd
+      in
+      (match Worker_dev_tools.validate_command_paths ~workdir:cwd validation_cmd with
+       | Error err -> sandbox_error_json (Printf.sprintf "%s [blocked_cmd=%s]" err validation_cmd)
        | Ok () ->
       (match turn_sandbox_runtime, network_mode with
        | Some runtime, Network_none ->

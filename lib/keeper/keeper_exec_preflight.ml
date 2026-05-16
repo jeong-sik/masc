@@ -9,6 +9,10 @@ let json_string_opt = function
   | Some value -> `String value
   | None -> `Null
 
+let json_bool_opt = function
+  | Some value -> `Bool value
+  | None -> `Null
+
 let json_string_list values =
   `List (List.map (fun value -> `String value) values)
 
@@ -216,6 +220,7 @@ let handle_keeper_preflight_check
   let activation_blocker =
     if meta.paused then Some "paused"
     else if not meta.autoboot_enabled then Some "autoboot_disabled"
+    else if not meta.proactive.enabled then Some "proactive_disabled"
     else None
   in
   let activation_ok = Option.is_none activation_blocker in
@@ -226,6 +231,8 @@ let handle_keeper_preflight_check
       Some "resume keeper before expecting autonomous keepalive or PR fan-out"
     | Some "autoboot_disabled" ->
       Some "set autoboot_enabled=true before expecting autonomous keepalive or PR fan-out"
+    | Some "proactive_disabled" ->
+      Some "set proactive_enabled=true before expecting scheduled autonomous work"
     | Some reason -> Some ("activation blocked: " ^ reason)
   in
   let activation_check_value =
@@ -236,7 +243,34 @@ let handle_keeper_preflight_check
   let () =
     add_check "autonomous_activation" activation_ok activation_check_value
   in
-  (* Check 8: sandbox clone target *)
+  (* Check 8: work-discovery lane readiness for unclaimed backlog. *)
+  let work_discovery_blocker =
+    match meta.work_discovery_enabled, meta.current_task_id with
+    | Some false, None -> Some "work_discovery_disabled"
+    | _ -> None
+  in
+  let work_discovery_ok = Option.is_none work_discovery_blocker in
+  let work_discovery_hint =
+    match work_discovery_blocker with
+    | None -> None
+    | Some "work_discovery_disabled" ->
+      Some
+        "set work_discovery_enabled=true or assign current_task_id before expecting \
+         backlog claim/PR upload fan-out"
+    | Some reason -> Some ("work discovery blocked: " ^ reason)
+  in
+  let work_discovery_check_value =
+    match work_discovery_blocker with
+    | None -> "ok"
+    | Some reason -> reason
+  in
+  let () =
+    add_check
+      "work_discovery_activation"
+      work_discovery_ok
+      work_discovery_check_value
+  in
+  (* Check 9: sandbox clone target *)
   let repo_name_arg =
     Safe_ops.json_string ~default:"" "repo_name" args |> String.trim
   in
@@ -282,10 +316,22 @@ let handle_keeper_preflight_check
         , `Assoc
             [ "ok", `Bool activation_ok
             ; "autoboot_enabled", `Bool meta.autoboot_enabled
+            ; "proactive_enabled", `Bool meta.proactive.enabled
             ; "paused", `Bool meta.paused
             ; "blocker", json_string_opt activation_blocker
             ; "hint", json_string_opt activation_hint
             ]
+        ; ( "work_discovery_activation"
+          , `Assoc
+              [ "ok", `Bool work_discovery_ok
+              ; "work_discovery_enabled", json_bool_opt meta.work_discovery_enabled
+              ; ( "current_task_id"
+                , json_string_opt
+                    (Option.map Keeper_id.Task_id.to_string meta.current_task_id)
+                )
+              ; "blocker", json_string_opt work_discovery_blocker
+              ; "hint", json_string_opt work_discovery_hint
+              ] )
         ; "clone_target", `String clone_target
         ; "repo_readiness", repo_readiness
         ; "keeper", `String meta.name

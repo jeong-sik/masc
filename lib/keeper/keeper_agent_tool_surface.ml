@@ -433,9 +433,15 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
 
 let generic_required_tool_gate_guidance ~(has_current_task : bool)
     ~(turn_affordances : string list) ~(allowed_tool_names : string list) =
+  let is_stay_silent name =
+    String.equal
+      (Keeper_tool_disclosure.canonical_tool_name name)
+      "keeper_stay_silent"
+  in
   let can_recommend_tool name =
     List.mem name allowed_tool_names
     && Keeper_tool_disclosure.tool_name_can_satisfy_required_contract name
+    && not (is_stay_silent name)
     && ((not has_current_task)
         || not (Keeper_tool_disclosure.is_claim_context_tool_name name))
   in
@@ -475,7 +481,12 @@ let generic_required_tool_gate_guidance ~(has_current_task : bool)
      answering in natural language, call one of the currently visible keeper \
      runtime tools. Preferred tools for this signal: %s%s. Passive reads/status \
      alone do not satisfy this turn.%s%s"
-    (if String.equal preview "" then "any active visible keeper tool" else preview)
+    (if String.equal preview ""
+     then
+       if has_current_task
+       then "any non-claim execution tool that advances the active task"
+       else "any active visible keeper tool"
+     else preview)
     suffix
     claim_context_note
     fallback

@@ -11428,6 +11428,31 @@ let test_generic_required_tool_gate_guidance_avoids_claim_after_owned_task () =
     (contains_substring guidance "claim/context tools alone do not count")
 ;;
 
+let test_generic_required_tool_gate_guidance_keeps_stay_silent_as_fallback () =
+  let module Surface = Masc_mcp.Keeper_agent_tool_surface in
+  let guidance =
+    Surface.generic_required_tool_gate_guidance
+      ~has_current_task:true
+      ~turn_affordances:[ "task_claim" ]
+      ~allowed_tool_names:[ "keeper_task_claim"; "keeper_stay_silent" ]
+  in
+  check
+    bool
+    "guidance does not recommend stay_silent as primary action"
+    false
+    (contains_substring guidance "Preferred tools for this signal: keeper_stay_silent");
+  check
+    bool
+    "guidance names owned-task execution fallback"
+    true
+    (contains_substring guidance "non-claim execution tool");
+  check
+    bool
+    "guidance keeps stay_silent as fallback"
+    true
+    (contains_substring guidance "If no valid action remains, call keeper_stay_silent")
+;;
+
 let test_direct_keeper_msg_timeout_overrides_meta_per_provider_timeout () =
   let meta =
     { (make_meta "product-design-timeout") with per_provider_timeout_s = Some 300.0 }
@@ -13057,6 +13082,10 @@ let () =
             "generic required gate guidance avoids claim after owned task"
             `Quick
             test_generic_required_tool_gate_guidance_avoids_claim_after_owned_task
+        ; test_case
+            "generic required gate guidance keeps stay_silent as fallback"
+            `Quick
+            test_generic_required_tool_gate_guidance_keeps_stay_silent_as_fallback
         ; test_case
             "direct keeper msg timeout overrides stale per-provider timeout"
             `Quick

@@ -72,6 +72,14 @@ let per_provider_timeout_for_turn
      | None -> Some timeout_s)
 ;;
 
+let should_require_provider_tool_choice_support
+      ~initial_tool_requirement
+      ~actionable_observation_requires_tool_support
+  =
+  initial_tool_requirement = Required
+  || actionable_observation_requires_tool_support
+;;
+
 (** Run a single keeper turn via OAS Agent.run().
 
     Loads checkpoint, creates working context with the base keeper system
@@ -506,9 +514,6 @@ let run_turn
      with
      | Error e -> Error (Agent_sdk.Error.Internal e)
      | Ok oas_allowed_paths ->
-       let require_tool_choice_support =
-         initial_tool_surface.tool_requirement = Required
-       in
        let actionable_observation_requires_tool_support =
          match world_observation with
          | None -> false
@@ -522,6 +527,11 @@ let run_turn
          tools <> []
          && (initial_tool_surface.tool_requirement = Required
              || actionable_observation_requires_tool_support)
+       in
+       let require_tool_choice_support =
+         should_require_provider_tool_choice_support
+           ~initial_tool_requirement:initial_tool_surface.tool_requirement
+           ~actionable_observation_requires_tool_support
        in
        let timeout_s =
          match oas_timeout_s with

@@ -10588,6 +10588,31 @@ let test_should_require_tools_for_initial_turn_covers_actionable_affordances () 
     (require "inspect_worktree_delta")
 ;;
 
+let test_actionable_observation_requires_provider_tool_choice_filter () =
+  let open Masc_mcp.Keeper_agent_tool_surface in
+  check
+    bool
+    "initial required surface requires provider tool_choice support"
+    true
+    (KAR.should_require_provider_tool_choice_support
+       ~initial_tool_requirement:Required
+       ~actionable_observation_requires_tool_support:false);
+  check
+    bool
+    "actionable observation upgrades optional initial surface"
+    true
+    (KAR.should_require_provider_tool_choice_support
+       ~initial_tool_requirement:Optional
+       ~actionable_observation_requires_tool_support:true);
+  check
+    bool
+    "optional non-actionable turn keeps provider filter relaxed"
+    false
+    (KAR.should_require_provider_tool_choice_support
+       ~initial_tool_requirement:Optional
+       ~actionable_observation_requires_tool_support:false)
+;;
+
 let test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool () =
   (* P1: an affordance must have a matching tool in the keeper's
      visible surface to count as a "tool-gated" affordance.  This
@@ -12795,6 +12820,10 @@ let () =
             "initial tool requirement covers actionable affordances"
             `Quick
             test_should_require_tools_for_initial_turn_covers_actionable_affordances
+        ; test_case
+            "actionable observation requires provider tool_choice filter"
+            `Quick
+            test_actionable_observation_requires_provider_tool_choice_filter
         ; test_case
             "task backlog required turn prefers claim tool choice"
             `Quick

@@ -49,3 +49,26 @@ val push_turn_tool_input :
   turn_tool_event_tracker -> string -> Yojson.Safe.t -> unit
 val pop_turn_tool_input :
   turn_tool_event_tracker -> string -> Yojson.Safe.t option
+
+(** Record an unmatched [ToolCompleted] (no prior [ToolCalled]) into the
+    tracker. Logs an integrity error via [Log.Keeper.error], appends to
+    [tracker.mutating_tools_committed] when [tool_committed] AND the tool
+    has a mutating side-effect, and stores the first observed integrity
+    error in [tracker.integrity_error]. *)
+val record_unmatched_tool_completed :
+  turn_tool_event_tracker ->
+  keeper_name:string ->
+  tool_name:string ->
+  outcome:string ->
+  tool_committed:bool ->
+  unit
+
+(** Drive the tracker over a batch of [Agent_sdk.Event_bus.event]s,
+    matching [ToolCalled] <-> [ToolCompleted] pairs and recording
+    integrity violations + committed mutating tools. *)
+val record_turn_tool_events :
+  ?has_mutating_side_effect_with_input:(tool_name:string -> input:Yojson.Safe.t -> bool) ->
+  keeper_name:string ->
+  turn_tool_event_tracker ->
+  Agent_sdk.Event_bus.event list ->
+  unit

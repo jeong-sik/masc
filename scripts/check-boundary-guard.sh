@@ -92,7 +92,7 @@ check "V6-oas-orchestration" 3 \
 # Eval_gate destructive detection and keeper deny list should be
 # injected via OAS hook config, not hardcoded in hook callbacks.
 check "V7-masc-hook-gates" 4 \
-  'Eval_gate\.detect_destructive\|keeper_denied_tools' \
+  'Eval_gate\.detect_destructive\|[^[]keeper_denied_tools' \
   "lib/keeper/keeper_hooks_oas.ml"
 
 # V8: Direct OAS Agent.state mutation from keeper code

@@ -607,21 +607,72 @@ let candidate_string_field field candidate =
   | _ -> fail ("candidate string field missing: " ^ field)
 ;;
 
-let make_keeper_meta_json ?(name = "route_shadow_demo") ?(paused = true) () =
+let make_keeper_meta_json
+    ?(name = "route_shadow_demo")
+    ?(paused = true)
+    ?autoboot_enabled
+    ?proactive_enabled
+    ?work_discovery_enabled
+    ?current_task_id
+    ()
+  =
+  let opt_bool name = function
+    | Some value -> [ name, `Bool value ]
+    | None -> []
+  in
+  let opt_string name = function
+    | Some value -> [ name, `String value ]
+    | None -> []
+  in
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
-          [ "name", `String name
-          ; "agent_name", `String ("keeper-" ^ name ^ "-agent")
-          ; "trace_id", `String ("trace-" ^ name ^ "-seed")
-          ; "goal", `String "Route shadow regression fixture"
-          ; "cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ())
-          ; "updated_at", `String "2026-04-04T00:00:00Z"
-          ; "paused", `Bool paused
-          ])
+          ([ "name", `String name
+           ; "agent_name", `String ("keeper-" ^ name ^ "-agent")
+           ; "trace_id", `String ("trace-" ^ name ^ "-seed")
+           ; "goal", `String "Route shadow regression fixture"
+           ; "cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ())
+           ; "updated_at", `String "2026-04-04T00:00:00Z"
+           ; "paused", `Bool paused
+           ]
+           @ opt_bool "autoboot_enabled" autoboot_enabled
+           @ opt_bool "proactive_enabled" proactive_enabled
+           @ opt_bool "work_discovery_enabled" work_discovery_enabled
+           @ opt_string "current_task_id" current_task_id))
   with
   | Ok meta -> Masc_mcp.Keeper_types.meta_to_json meta |> Yojson.Safe.pretty_to_string
   | Error err -> fail ("keeper meta fixture parse failed: " ^ err)
+;;
+
+let write_and_register_keeper
+    config
+    ~keeper_name
+    ?autoboot_enabled
+    ?proactive_enabled
+    ?work_discovery_enabled
+    ?current_task_id
+    ()
+  =
+  Fs_compat.mkdir_p (Masc_mcp.Keeper_types.keeper_dir config);
+  write_file
+    (Masc_mcp.Keeper_types.keeper_meta_path config keeper_name)
+    (make_keeper_meta_json
+       ~name:keeper_name
+       ~paused:false
+       ?autoboot_enabled
+       ?proactive_enabled
+       ?work_discovery_enabled
+       ?current_task_id
+       ());
+  match Masc_mcp.Keeper_types.read_meta config keeper_name with
+  | Ok (Some meta) ->
+    ignore
+      (Masc_mcp.Keeper_registry.register_offline
+         ~base_path:config.base_path
+         keeper_name
+         meta)
+  | Ok None -> fail ("keeper meta missing after write: " ^ keeper_name)
+  | Error err -> fail ("keeper meta read failed: " ^ err)
 ;;
 
 let write_keeper_toml_fixture ~config_root ~keeper_name =
@@ -1698,6 +1749,109 @@ let test_composite_runtime_attention_surfaces_fiber_stop () =
            actions))
 ;;
 
+let with_fleet_work_discovery_fixture f =
+  let base_path = Filename.temp_file "dashboard-fleet-work-discovery-" "" in
+  (try Sys.remove base_path with
+   | _ -> ());
+  Unix.mkdir base_path 0o755;
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_registry.clear ();
+      rm_rf base_path)
+    (fun () ->
+       let config = Masc_mcp.Coord.default_config base_path in
+       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "bootstrap-admin"));
+       ignore
+         (Masc_mcp.Coord.add_task
+            config
+            ~title:"Unclaimed keeper fanout task"
+            ~priority:1
+            ~description:"fixture todo");
+       f config)
+;;
+
+let first_fleet_snapshot json =
+  let open Yojson.Safe.Util in
+  match json |> member "snapshots" |> to_list with
+  | snapshot :: _ -> snapshot
+  | [] -> fail "expected fleet snapshot"
+;;
+
+let readiness_row json keeper_name =
+  let open Yojson.Safe.Util in
+  json
+  |> member "work_discovery_readiness"
+  |> member "keepers"
+  |> to_list
+  |> List.find_opt (fun row -> row |> member "keeper" |> to_string = keeper_name)
+  |> function
+  | Some row -> row
+  | None -> fail ("missing readiness row for " ^ keeper_name)
+;;
+
+let test_fleet_composite_surfaces_no_work_discovery_keeper () =
+  with_fleet_work_discovery_fixture @@ fun config ->
+  let keeper_name = "blocked_fanout_demo" in
+  write_and_register_keeper
+    config
+    ~keeper_name
+    ~autoboot_enabled:true
+    ~proactive_enabled:true
+    ~work_discovery_enabled:false
+    ();
+  let open Yojson.Safe.Util in
+  let json = Masc_mcp.Server_dashboard_http.dashboard_fleet_composite_json ~config () in
+  let readiness = json |> member "work_discovery_readiness" in
+  check bool "fleet readiness blocked" false (readiness |> member "ok" |> to_bool);
+  check int "todo count surfaced" 1
+    (readiness |> member "todo_unclaimed_count" |> to_int);
+  check int "no ready keepers" 0
+    (readiness |> member "ready_keeper_count" |> to_int);
+  check string "fleet blocker" "no_ready_work_discovery_keeper"
+    (readiness |> member "blocker" |> to_string);
+  let row = readiness_row json keeper_name in
+  check bool "keeper row not ready" false
+    (row |> member "ready_for_unclaimed_backlog" |> to_bool);
+  check string "keeper work-discovery blocker" "work_discovery_disabled"
+    (row |> member "work_discovery_blocker" |> to_string);
+  let snapshot = first_fleet_snapshot json in
+  let activation = snapshot |> member "activation_readiness" in
+  check bool "snapshot activation readiness blocked" false
+    (activation |> member "ok" |> to_bool);
+  check string "snapshot work-discovery blocker" "work_discovery_disabled"
+    (activation
+     |> member "work_discovery_activation"
+     |> member "blocker"
+     |> to_string)
+;;
+
+let test_fleet_composite_counts_ready_work_discovery_keeper () =
+  with_fleet_work_discovery_fixture @@ fun config ->
+  let keeper_name = "ready_fanout_demo" in
+  write_and_register_keeper
+    config
+    ~keeper_name
+    ~autoboot_enabled:true
+    ~proactive_enabled:true
+    ~work_discovery_enabled:true
+    ();
+  let open Yojson.Safe.Util in
+  let json = Masc_mcp.Server_dashboard_http.dashboard_fleet_composite_json ~config () in
+  let readiness = json |> member "work_discovery_readiness" in
+  check bool "fleet readiness ok" true (readiness |> member "ok" |> to_bool);
+  check int "ready keeper counted" 1
+    (readiness |> member "ready_keeper_count" |> to_int);
+  check bool "row ready" true
+    (readiness_row json keeper_name
+     |> member "ready_for_unclaimed_backlog"
+     |> to_bool);
+  check bool "snapshot activation readiness ok" true
+    (first_fleet_snapshot json
+     |> member "activation_readiness"
+     |> member "ok"
+     |> to_bool)
+;;
+
 let test_composite_routes_skip_recent_successful_idle_recovery () =
   with_seeded_server
   @@ fun ~port ~config ~admin_token ~keeper_name ->
@@ -1998,6 +2152,14 @@ let () =
             "composite runtime attention surfaces fiber stop"
             `Quick
             test_composite_runtime_attention_surfaces_fiber_stop
+        ; test_case
+            "fleet composite surfaces no work-discovery keeper"
+            `Quick
+            test_fleet_composite_surfaces_no_work_discovery_keeper
+        ; test_case
+            "fleet composite counts ready work-discovery keeper"
+            `Quick
+            test_fleet_composite_counts_ready_work_discovery_keeper
         ; test_case
             "composite routes skip recent successful idle recovery"
             `Slow

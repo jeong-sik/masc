@@ -1138,6 +1138,161 @@ let composite_execution_config_drift execution =
   | _ -> false
 ;;
 
+let keeper_autonomous_activation_blocker (meta : Keeper_types.keeper_meta) =
+  if meta.paused then Some "paused"
+  else if not meta.autoboot_enabled then Some "autoboot_disabled"
+  else if not meta.proactive.enabled then Some "proactive_disabled"
+  else None
+;;
+
+let keeper_autonomous_activation_hint = function
+  | None -> None
+  | Some "paused" ->
+    Some "resume keeper before expecting autonomous keepalive or PR fan-out"
+  | Some "autoboot_disabled" ->
+    Some "set autoboot_enabled=true before expecting autonomous keepalive or PR fan-out"
+  | Some "proactive_disabled" ->
+    Some "set proactive_enabled=true before expecting scheduled autonomous work"
+  | Some reason -> Some ("activation blocked: " ^ reason)
+;;
+
+let keeper_work_discovery_activation_blocker (meta : Keeper_types.keeper_meta) =
+  match meta.work_discovery_enabled, meta.current_task_id with
+  | Some false, None -> Some "work_discovery_disabled"
+  | _ -> None
+;;
+
+let keeper_work_discovery_activation_hint = function
+  | None -> None
+  | Some "work_discovery_disabled" ->
+    Some
+      "set work_discovery_enabled=true or assign current_task_id before expecting \
+       backlog claim/PR upload fan-out"
+  | Some reason -> Some ("work discovery blocked: " ^ reason)
+;;
+
+let current_task_id_to_json (meta : Keeper_types.keeper_meta) =
+  Json_util.string_opt_to_json (Keeper_runtime_contract.current_task_id_opt meta)
+;;
+
+let keeper_activation_readiness_json (meta : Keeper_types.keeper_meta) =
+  let autonomous_blocker = keeper_autonomous_activation_blocker meta in
+  let work_discovery_blocker = keeper_work_discovery_activation_blocker meta in
+  let autonomous_ok = Option.is_none autonomous_blocker in
+  let work_discovery_ok = Option.is_none work_discovery_blocker in
+  `Assoc
+    [ "ok", `Bool (autonomous_ok && work_discovery_ok)
+    ; "ready_for_unclaimed_backlog", `Bool (autonomous_ok && work_discovery_ok)
+    ; ( "autonomous_activation"
+      , `Assoc
+          [ "ok", `Bool autonomous_ok
+          ; "autoboot_enabled", `Bool meta.autoboot_enabled
+          ; "proactive_enabled", `Bool meta.proactive.enabled
+          ; "paused", `Bool meta.paused
+          ; "blocker", Json_util.string_opt_to_json autonomous_blocker
+          ; "hint",
+            Json_util.string_opt_to_json
+              (keeper_autonomous_activation_hint autonomous_blocker)
+          ] )
+    ; ( "work_discovery_activation"
+      , `Assoc
+          [ "ok", `Bool work_discovery_ok
+          ; "work_discovery_enabled",
+            Json_util.bool_opt_to_json meta.work_discovery_enabled
+          ; "current_task_id", current_task_id_to_json meta
+          ; "blocker", Json_util.string_opt_to_json work_discovery_blocker
+          ; "hint",
+            Json_util.string_opt_to_json
+              (keeper_work_discovery_activation_hint work_discovery_blocker)
+          ] )
+    ]
+;;
+
+let task_is_unclaimed_todo (task : Masc_domain.task) =
+  match task.task_status with
+  | Todo -> true
+  | Claimed _ | InProgress _ | AwaitingVerification _ | Done _ | Cancelled _ -> false
+;;
+
+let unclaimed_todo_count ~(config : Coord.config) =
+  try
+    Coord.read_backlog config
+    |> fun backlog ->
+    List.fold_left
+      (fun count task -> if task_is_unclaimed_todo task then count + 1 else count)
+      0
+      backlog.tasks
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Dashboard.warn
+      "dashboard_fleet_composite_json failed to read backlog for work discovery \
+       readiness: %s"
+      (Printexc.to_string exn);
+    0
+;;
+
+let keeper_ready_for_unclaimed_backlog (meta : Keeper_types.keeper_meta) =
+  Option.is_none (keeper_autonomous_activation_blocker meta)
+  && Option.is_none (keeper_work_discovery_activation_blocker meta)
+;;
+
+let fleet_work_discovery_readiness_json
+    ~(todo_unclaimed_count : int)
+    (entries : Keeper_registry.registry_entry list)
+  =
+  let rows =
+    List.map
+      (fun (entry : Keeper_registry.registry_entry) ->
+         let meta = entry.meta in
+         let autonomous_blocker = keeper_autonomous_activation_blocker meta in
+         let work_discovery_blocker =
+           keeper_work_discovery_activation_blocker meta
+         in
+         `Assoc
+           [ "keeper", `String entry.name
+           ; "ready_for_unclaimed_backlog",
+             `Bool (keeper_ready_for_unclaimed_backlog meta)
+           ; "autonomous_blocker", Json_util.string_opt_to_json autonomous_blocker
+           ; "work_discovery_blocker",
+             Json_util.string_opt_to_json work_discovery_blocker
+           ; "paused", `Bool meta.paused
+           ; "autoboot_enabled", `Bool meta.autoboot_enabled
+           ; "proactive_enabled", `Bool meta.proactive.enabled
+           ; "work_discovery_enabled",
+             Json_util.bool_opt_to_json meta.work_discovery_enabled
+           ; "current_task_id", current_task_id_to_json meta
+           ])
+      entries
+  in
+  let ready_keeper_count =
+    List.fold_left
+      (fun count (entry : Keeper_registry.registry_entry) ->
+         if keeper_ready_for_unclaimed_backlog entry.meta then count + 1 else count)
+      0
+      entries
+  in
+  let ok = todo_unclaimed_count = 0 || ready_keeper_count > 0 in
+  `Assoc
+    [ "ok", `Bool ok
+    ; "todo_unclaimed_count", `Int todo_unclaimed_count
+    ; "ready_keeper_count", `Int ready_keeper_count
+    ; "keeper_count", `Int (List.length entries)
+    ; "blocker",
+      Json_util.string_opt_to_json
+        (if ok then None else Some "no_ready_work_discovery_keeper")
+    ; "hint",
+      Json_util.string_opt_to_json
+        (if ok
+         then None
+         else
+           Some
+             "enable autoboot, proactive, and work_discovery on at least one \
+              keeper before expecting todo backlog fan-out")
+    ; "keepers", `List rows
+    ]
+;;
+
 let composite_execution_blocked execution =
   composite_execution_tool_required execution
   || composite_execution_claim_no_eligible execution
@@ -1355,7 +1510,12 @@ let composite_recommended_actions_json ~keeper_name ~snapshot ~execution ~attent
      |> List.map (Operator_digest_types.recommended_action_to_yojson ~actor:"fleet_fsm"))
 ;;
 
-let enrich_composite_snapshot_json ~(config : Coord.config) ~keeper_name json =
+let enrich_composite_snapshot_json
+      ~(config : Coord.config)
+      (entry : Keeper_registry.registry_entry)
+      json
+  =
+  let keeper_name = entry.name in
   match json with
   | `Assoc fields ->
     let fields =
@@ -1364,6 +1524,7 @@ let enrich_composite_snapshot_json ~(config : Coord.config) ~keeper_name json =
            not
              (String.equal name "keeper"
               || String.equal name "execution"
+              || String.equal name "activation_readiness"
               || String.equal name "runtime_attention"
               || String.equal name "recommended_actions"))
         fields
@@ -1377,6 +1538,7 @@ let enrich_composite_snapshot_json ~(config : Coord.config) ~keeper_name json =
     `Assoc
       (fields
        @ [ "keeper", `String keeper_name
+         ; "activation_readiness", keeper_activation_readiness_json entry.meta
          ; "execution", execution
          ; "runtime_attention", runtime_attention
          ; "recommended_actions", recommended_actions
@@ -1391,15 +1553,18 @@ let dashboard_keeper_composite_json
   =
   Keeper_composite_observer.observe entry
   |> Keeper_composite_observer.snapshot_to_json
-  |> enrich_composite_snapshot_json ~config ~keeper_name:entry.name
+  |> enrich_composite_snapshot_json ~config entry
 ;;
 
 let dashboard_fleet_composite_json ~(config : Coord.config) () : Yojson.Safe.t =
   let entries = Keeper_registry.all ~base_path:config.base_path () in
   let snapshots = List.map (dashboard_keeper_composite_json ~config) entries in
+  let todo_unclaimed_count = unclaimed_todo_count ~config in
   `Assoc
     [ "generated_at", `Float (Unix.gettimeofday ())
     ; "count", `Int (List.length snapshots)
+    ; ( "work_discovery_readiness"
+      , fleet_work_discovery_readiness_json ~todo_unclaimed_count entries )
     ; "snapshots", `List snapshots
     ]
 ;;

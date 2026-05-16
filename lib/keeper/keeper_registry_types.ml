@@ -33,6 +33,11 @@ type stale_kill_class =
       }
   | Noop_failure_loop of { noop_count : int }
 
+let progress_kind_label = function
+  | Some kind -> kind
+  | None -> "-"
+;;
+
 let stale_kill_class_to_string = function
   | Idle_turn { stall_seconds } -> Printf.sprintf "idle_turn(%.0fs)" stall_seconds
   | In_turn_hung { active_seconds; timeout_threshold } ->
@@ -51,7 +56,7 @@ let stale_kill_class_to_string = function
       active_seconds
       since_progress_seconds
       progress_timeout_threshold
-      (Option.value ~default:"-" last_progress_kind)
+      (progress_kind_label last_progress_kind)
   | Noop_failure_loop { noop_count } ->
     Printf.sprintf "noop_failure_loop(noop=%d)" noop_count
 ;;

@@ -697,7 +697,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                      since_progress_seconds
                      active_seconds
                      progress_timeout_threshold
-                     (Option.value ~default:"-" last_progress_kind)
+                     (Keeper_registry.progress_kind_label last_progress_kind)
                  | Noop_failure_loop { noop_count = n } ->
                    Printf.sprintf "failure-loop noop=%d" n
                in

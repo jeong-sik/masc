@@ -54,6 +54,10 @@ type stale_kill_class =
       (** Turns kept firing but produced no tool calls; the keepalive's
           [consecutive_noop_count] reached the watchdog threshold. *)
 
+val progress_kind_label : string option -> string
+(** Display label for optional progress-kind telemetry.  Missing means no
+    streaming/tool progress label was stamped yet, rendered as ["-"]. *)
+
 val stale_kill_class_to_string : stale_kill_class -> string
 (** Operator-facing label.  Used in [failure_reason_to_string] for the
     [Stale_turn_timeout] arm and exposed for dashboards / metrics that

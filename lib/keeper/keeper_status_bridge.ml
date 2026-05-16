@@ -382,7 +382,7 @@ let stale_kill_class_summary (kill_class : Keeper_registry.stale_kill_class) =
       active_seconds
       since_progress_seconds
       progress_timeout_threshold
-      (Option.value ~default:"-" last_progress_kind)
+      (Keeper_registry.progress_kind_label last_progress_kind)
   | Keeper_registry.Noop_failure_loop { noop_count } ->
     Printf.sprintf
       "noop_failure_loop: %d consecutive turn(s) produced no tool calls; stale watchdog \

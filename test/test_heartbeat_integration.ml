@@ -405,6 +405,60 @@ let test_cohort_key_turn_failures () =
     (Some (R.Turn_consecutive_failures 10)) in
   check string "turn failure cohort" "turn_failures" key
 
+(** A healthy heartbeat must not erase provider/tool turn failures.
+    Regression for live 2026-05-16 evidence where a cascade_exhausted turn
+    moved Failing -> Running via a keepalive heartbeat before the next real
+    successful turn. *)
+let test_fresh_presence_preserves_turn_failures () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  R.clear ();
+  let base_path = temp_dir "fresh-presence-turn-failure" in
+  Fun.protect
+    ~finally:(fun () ->
+      R.clear ();
+      cleanup_dir base_path)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_path in
+      let ctx : _ KT.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = None;
+          net = None;
+        }
+      in
+      let meta = make_meta "fresh-presence-turn-failure" in
+      ignore (R.register ~base_path:config.base_path meta.name meta);
+      R.increment_turn_failures ~base_path:config.base_path meta.name;
+      ignore
+        (R.dispatch_event
+           ~base_path:config.base_path
+           meta.name
+           (KSM.Turn_failed { consecutive = 1; max_allowed = 3 }));
+      (match R.get_phase ~base_path:config.base_path meta.name with
+       | Some phase -> check string "phase after turn failure" "failing" (KSM.phase_to_string phase)
+       | None -> fail "expected registered keeper phase");
+      ignore
+        (Masc_mcp.Keeper_heartbeat_loop.sync_keeper_presence
+           ~ctx
+           ~meta_current:meta
+           ~t_presence_start:100.0
+           ~consecutive_failures:(ref 0)
+           ~last_successful_heartbeat_ts:(ref 99.0)
+           ~work_as_hb:(fun () -> true)
+           ~max_silence:(fun () -> 60.0));
+      check int
+        "turn failures preserved"
+        1
+        (R.get_turn_failures ~base_path:config.base_path meta.name);
+      match R.get_phase ~base_path:config.base_path meta.name with
+      | Some phase -> check string "heartbeat alone stays failing" "failing" (KSM.phase_to_string phase)
+      | None -> fail "expected registered keeper phase")
+
 (* ══════════════════════════════════════════════════════════
    8. Direct keepalive path resolves lifecycle promises
    ══════════════════════════════════════════════════════════ *)
@@ -635,6 +689,8 @@ let () =
     "turn_failure", [
       eio_test "turn crash flow" test_crash_turn_failures;
       test_case "cohort key" `Quick test_cohort_key_turn_failures;
+      test_case "fresh presence preserves turn failures" `Quick
+        test_fresh_presence_preserves_turn_failures;
     ];
     "direct_keepalive", [
       test_case "stop resolves done promise" `Quick

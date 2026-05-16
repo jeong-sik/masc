@@ -118,6 +118,20 @@ let test_keeper_task_claim_matches () =
        ~input:(`Assoc [ ("task_id", `String "t-1") ])
        ~risk_level:RL.Medium)
 
+let test_keeper_task_create_matches () =
+  Alcotest.(check bool) "keeper_task_create matches"
+    true
+    (RA.matches ~tool_name:"keeper_task_create"
+       ~input:(`Assoc [ ("title", `String "follow-up") ])
+       ~risk_level:RL.Medium)
+
+let test_keeper_task_create_high_does_not_match () =
+  Alcotest.(check bool) "keeper_task_create High exceeds max_risk"
+    false
+    (RA.matches ~tool_name:"keeper_task_create"
+       ~input:(`Assoc [ ("title", `String "follow-up") ])
+       ~risk_level:RL.High)
+
 let test_keeper_task_done_matches () =
   Alcotest.(check bool) "keeper_task_done matches"
     true
@@ -131,6 +145,70 @@ let test_keeper_task_submit_for_verification_matches () =
     (RA.matches ~tool_name:"keeper_task_submit_for_verification"
        ~input:(`Assoc [])
        ~risk_level:RL.Low)
+
+(* ── matches: goal store routine surface ───────────────────── *)
+
+let test_goal_upsert_matches () =
+  Alcotest.(check bool) "masc_goal_upsert matches"
+    true
+    (RA.matches ~tool_name:"masc_goal_upsert"
+       ~input:(`Assoc [ ("title", `String "stabilize keeper task flow") ])
+       ~risk_level:RL.Medium)
+
+let test_goal_upsert_high_does_not_match () =
+  Alcotest.(check bool) "masc_goal_upsert High exceeds max_risk"
+    false
+    (RA.matches ~tool_name:"masc_goal_upsert"
+       ~input:(`Assoc [ ("title", `String "stabilize keeper task flow") ])
+       ~risk_level:RL.High)
+
+let test_goal_transition_request_complete_matches () =
+  Alcotest.(check bool) "masc_goal_transition request_complete matches"
+    true
+    (RA.matches ~tool_name:"masc_goal_transition"
+       ~input:(`Assoc [ ("action", `String "request_complete") ])
+       ~risk_level:RL.Medium)
+
+let test_goal_transition_pause_matches () =
+  Alcotest.(check bool) "masc_goal_transition pause matches"
+    true
+    (RA.matches ~tool_name:"masc_goal_transition"
+       ~input:(`Assoc [ ("action", `String "pause") ])
+       ~risk_level:RL.Medium)
+
+let test_goal_transition_drop_does_not_match () =
+  Alcotest.(check bool) "masc_goal_transition drop stays gated"
+    false
+    (RA.matches ~tool_name:"masc_goal_transition"
+       ~input:(`Assoc [ ("action", `String "drop") ])
+       ~risk_level:RL.Medium)
+
+let test_goal_transition_operator_approve_does_not_match () =
+  Alcotest.(check bool) "masc_goal_transition approve_completion stays gated"
+    false
+    (RA.matches ~tool_name:"masc_goal_transition"
+       ~input:(`Assoc [ ("action", `String "approve_completion") ])
+       ~risk_level:RL.Medium)
+
+let test_goal_verify_matches () =
+  Alcotest.(check bool) "masc_goal_verify matches"
+    true
+    (RA.matches ~tool_name:"masc_goal_verify"
+       ~input:
+         (`Assoc
+           [
+             ("goal_id", `String "goal-1");
+             ("decision", `String "approve");
+             ("evidence_refs", `List [ `String "task-1" ]);
+           ])
+       ~risk_level:RL.Medium)
+
+let test_goal_verify_high_does_not_match () =
+  Alcotest.(check bool) "masc_goal_verify High exceeds max_risk"
+    false
+    (RA.matches ~tool_name:"masc_goal_verify"
+       ~input:(`Assoc [ ("decision", `String "approve") ])
+       ~risk_level:RL.High)
 
 (* ── matches: unrelated tools never match ──────────────────── *)
 
@@ -220,6 +298,26 @@ let test_rule_label_for_cancel_is_none () =
   in
   Alcotest.(check (option string)) "cancel has no label" None label
 
+let test_rule_label_for_task_create () =
+  let label =
+    RA.rule_label ~tool_name:"keeper_task_create"
+      ~input:(`Assoc [ ("title", `String "follow-up") ])
+      ~risk_level:RL.Medium
+  in
+  Alcotest.(check (option string)) "task create has routine label"
+    (Some "keeper_routine.keeper_task_create")
+    label
+
+let test_rule_label_for_goal_transition () =
+  let label =
+    RA.rule_label ~tool_name:"masc_goal_transition"
+      ~input:(`Assoc [ ("action", `String "request_complete") ])
+      ~risk_level:RL.Medium
+  in
+  Alcotest.(check (option string)) "goal transition has routine label"
+    (Some "keeper_routine.masc_goal_transition")
+    label
+
 (* ── rules_summary: stable JSON shape for dashboard ─────────── *)
 
 let test_rules_summary_is_list () =
@@ -297,10 +395,33 @@ let () =
         [
           Alcotest.test_case "keeper_task_claim" `Quick
             test_keeper_task_claim_matches;
+          Alcotest.test_case "keeper_task_create" `Quick
+            test_keeper_task_create_matches;
+          Alcotest.test_case "keeper_task_create high still gated" `Quick
+            test_keeper_task_create_high_does_not_match;
           Alcotest.test_case "keeper_task_done" `Quick
             test_keeper_task_done_matches;
           Alcotest.test_case "keeper_task_submit_for_verification" `Quick
             test_keeper_task_submit_for_verification_matches;
+        ] );
+      ( "goal_store_routine",
+        [
+          Alcotest.test_case "masc_goal_upsert" `Quick
+            test_goal_upsert_matches;
+          Alcotest.test_case "masc_goal_upsert high still gated" `Quick
+            test_goal_upsert_high_does_not_match;
+          Alcotest.test_case "goal_transition request_complete" `Quick
+            test_goal_transition_request_complete_matches;
+          Alcotest.test_case "goal_transition pause" `Quick
+            test_goal_transition_pause_matches;
+          Alcotest.test_case "goal_transition drop still gated" `Quick
+            test_goal_transition_drop_does_not_match;
+          Alcotest.test_case "goal_transition operator approve still gated"
+            `Quick test_goal_transition_operator_approve_does_not_match;
+          Alcotest.test_case "masc_goal_verify" `Quick
+            test_goal_verify_matches;
+          Alcotest.test_case "masc_goal_verify high still gated" `Quick
+            test_goal_verify_high_does_not_match;
         ] );
       ( "non_routine_tools_never_match",
         [
@@ -328,6 +449,10 @@ let () =
             test_rule_label_for_claim;
           Alcotest.test_case "cancel has no label" `Quick
             test_rule_label_for_cancel_is_none;
+          Alcotest.test_case "task create has label" `Quick
+            test_rule_label_for_task_create;
+          Alcotest.test_case "goal transition has label" `Quick
+            test_rule_label_for_goal_transition;
         ] );
       ( "rules_summary",
         [

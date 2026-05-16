@@ -794,6 +794,7 @@ let start_keeper_loops
             "autoboot: goal_repair failed (continuing without repair): %s"
             (Printexc.to_string exn));
       let names = Keeper_runtime.bootable_keeper_names config in
+      let exclusions = Keeper_runtime.autoboot_excluded_keeper_reasons config in
       let keeper_boot_ctx : _ Keeper_types.context =
         { config
         ; agent_name = "keeper-autoboot"
@@ -809,6 +810,18 @@ let start_keeper_loops
         (List.length names)
         Keeper_keepalive.keeper_turn_throttle_limit;
       Log.Keeper.info "autoboot: keeper set [%s]" (String.concat ", " names);
+      if exclusions <> []
+      then (
+        let rendered =
+          exclusions
+          |> List.map (fun Keeper_runtime.{ keeper_name; reason } ->
+            Printf.sprintf "%s=%s" keeper_name reason)
+          |> String.concat ", "
+        in
+        Log.Keeper.info
+          "autoboot: excluded %d configured keeper(s): [%s]"
+          (List.length exclusions)
+          rendered);
       let base_warmup = Keeper_config.keeper_bootstrap_proactive_warmup_sec () in
       let stagger_window = Keeper_config.keeper_bootstrap_stagger_step_sec () in
       (* Attempt to boot a single keeper. Returns true if started. *)

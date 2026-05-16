@@ -491,6 +491,33 @@ let test_route_evidence_skips_unproven_filesystem_calls () =
          | _ -> false)
     | _ -> Alcotest.fail "expected exactly one entry")
 
+let test_non_object_input_still_logs_action_radius () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"executor"
+      ~tool_name:"masc_code_write"
+      ~input:(`String "raw pre-tool gate payload")
+      ~output_text:"approval_required:governance_approval"
+      ~success:false
+      ~duration_ms:3.0
+      ();
+    let entries = Keeper_tool_call_log.read_recent ~n:1 () in
+    Alcotest.(check int) "entry persisted" 1 (List.length entries);
+    match entries with
+    | [ entry ] ->
+      let action_radius = Yojson.Safe.Util.member "action_radius" entry in
+      Alcotest.(check (option string)) "action key falls back to tool"
+        (Some "masc_code_write")
+        (Safe_ops.json_string_opt "action_key" action_radius);
+      Alcotest.(check (option string)) "target kind falls back to tool"
+        (Some "tool")
+        (Safe_ops.json_string_opt "target_kind" action_radius);
+      Alcotest.(check bool) "input preserved as string" true
+        (match Yojson.Safe.Util.member "input" entry with
+         | `String "raw pre-tool gate payload" -> true
+         | _ -> false)
+    | _ -> Alcotest.fail "expected exactly one entry")
+
 let find_bucket name json =
   json
   |> Yojson.Safe.Util.to_list
@@ -845,6 +872,8 @@ let () =
             test_route_evidence_stored_for_blob_backed_git_push
         ; eio_test "route evidence skips unproven filesystem calls"
             test_route_evidence_skips_unproven_filesystem_calls
+        ; eio_test "non-object input still logs action radius"
+            test_non_object_input_still_logs_action_radius
         ; eio_test "dashboard aggregate groups runtime fields"
             test_dashboard_aggregate_groups_runtime_fields
         ; eio_test "dashboard hourly trend buckets numeric ts"

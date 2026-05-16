@@ -1232,6 +1232,48 @@ let prepare_agent_setup
                         ~callback:"work_discovery_nudge"
                         exn;
                       None)
+                 | "awaiting_verification_tasks"
+                 | "verification_tasks" ->
+                   (try
+                      let backlog = Coord.read_backlog config in
+                      let awaiting =
+                        List.filter
+                          (fun (t : Masc_domain.task) ->
+                             match t.task_status with
+                             | Masc_domain.AwaitingVerification _ -> true
+                             | _ -> false)
+                          backlog.tasks
+                      in
+                      match awaiting with
+                      | [] -> None
+                      | tasks ->
+                        let n = min 5 (List.length tasks) in
+                        let preview =
+                          List.filteri (fun i _ -> i < n) tasks
+                          |> List.map (fun (t : Masc_domain.task) ->
+                            Printf.sprintf
+                              "  - %s (p%d): %s"
+                              t.id
+                              t.priority
+                              (String_util.utf8_safe ~max_bytes:83 ~suffix:"…" t.title
+                               |> String_util.to_string))
+                          |> String.concat "\n"
+                        in
+                        Some
+                          (Printf.sprintf
+                             "**Awaiting verification tasks (%d total, showing %d):**\n%s"
+                             (List.length tasks)
+                             n
+                             preview)
+                    with
+                    | Eio.Cancel.Cancelled _ as e -> raise e
+                    | exn ->
+                      Keeper_callback_failure.record
+                        ~base_dir:config.base_path
+                        ~meta
+                        ~callback:"work_discovery_nudge"
+                        exn;
+                      None)
                  | "stale_tasks" ->
                    Some
                      "**Stale task audit requested:** inspect stale/orphan task state with \

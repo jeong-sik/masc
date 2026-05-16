@@ -905,6 +905,7 @@ let run_keeper_cycle
                                        ~temperature:execution.temperature
                                        ~max_tokens:execution.max_tokens
                                        ~oas_timeout_s
+                                       ~oas_timeout_is_explicit:false
                                        ?max_cost_usd
                                        ~trajectory_acc
                                        ~is_retry

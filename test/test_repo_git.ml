@@ -91,6 +91,7 @@ let sample_repo ~url local_path =
     name = "test-repo";
     url;
     local_path;
+    aliases = [];
     default_branch = "main";
     credential_id = "default";
     keepers = [];

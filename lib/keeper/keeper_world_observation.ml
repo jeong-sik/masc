@@ -1126,8 +1126,27 @@ let actionable_signal_present (observation : world_observation) =
   || observation.work_discovery_due
 ;;
 
+let proactive_task_backlog_wake_enabled ~(meta : keeper_meta) =
+  match meta.work_discovery_enabled, meta.current_task_id with
+  | Some false, None -> false
+  | _ -> true
+;;
+
 let proactive_work_signal_present ~(meta : keeper_meta) (observation : world_observation) =
-  actionable_signal_present observation || Option.is_some meta.current_task_id
+  let task_backlog_signal =
+    proactive_task_backlog_wake_enabled ~meta
+    &&
+    (observation.claimable_task_count > 0
+     || observation.failed_task_count > 0
+     || observation.pending_verification_count > 0
+     || observation.work_discovery_due)
+  in
+  observation.pending_mentions <> []
+  || observation.pending_board_events <> []
+  || observation.pending_scope_messages <> []
+  || Option.is_some observation.worktree_change_summary
+  || task_backlog_signal
+  || Option.is_some meta.current_task_id
 ;;
 
 (** Compute effective scheduled autonomous cooldown with idle decay.
@@ -1311,7 +1330,8 @@ let keeper_cycle_decision
           max task_cooldown_floor (effective_cooldown / max 1 task_cooldown_divisor)
         in
         let has_actionable_tasks =
-          observation.claimable_task_count > 0 || observation.failed_task_count > 0
+          proactive_task_backlog_wake_enabled ~meta
+          && (observation.claimable_task_count > 0 || observation.failed_task_count > 0)
         in
         let idle_gate_elapsed = observation.idle_seconds >= idle_gate_sec in
         let cooldown_elapsed = since_last_scheduled_autonomous >= effective_cooldown in

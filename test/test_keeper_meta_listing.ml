@@ -145,6 +145,7 @@ let write_corrupt_keeper_meta_exn config ~name =
 let write_keeper_meta_exn ?(autoboot_enabled = true)
     ?(social_model = "bdi_speech_v1")
     ?(last_social_transition_reason = "")
+    ?(paused = false)
     ?active_goal_ids config ~name ~trace_id =
   let active_goal_ids =
     match active_goal_ids with
@@ -161,6 +162,7 @@ let write_keeper_meta_exn ?(autoboot_enabled = true)
         ("social_model", `String social_model);
         ("last_social_transition_reason", `String last_social_transition_reason);
         ("autoboot_enabled", `Bool autoboot_enabled);
+        ("paused", `Bool paused);
         ( "active_goal_ids",
           `List (List.map (fun goal_id -> `String goal_id) active_goal_ids) );
       ]
@@ -359,6 +361,52 @@ let test_bootable_keeper_names_skip_autoboot_disabled_meta () =
       check bool "autoboot disabled sangsu excluded from bootable list" false
         (List.mem "sangsu" names))
 
+let test_autoboot_exclusion_reasons_explain_skipped_keepers () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  with_clean_base_path_env @@ fun () ->
+  Eio.Switch.run @@ fun _sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Config_dir_resolver.reset ();
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      write_keeper_toml_exn config ~name:"active";
+      write_keeper_toml_exn config ~name:"disabled";
+      write_keeper_toml_exn config ~name:"paused";
+      let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+      write_minimal_cascade_toml config_root;
+      Unix.putenv "MASC_CONFIG_DIR" config_root;
+      Config_dir_resolver.reset ();
+      write_keeper_meta_exn
+        config
+        ~name:"active"
+        ~trace_id:"trace-active";
+      write_keeper_meta_exn
+        ~autoboot_enabled:false
+        config
+        ~name:"disabled"
+        ~trace_id:"trace-disabled";
+      write_keeper_meta_exn
+        ~paused:true
+        config
+        ~name:"paused"
+        ~trace_id:"trace-paused";
+      let exclusions =
+        Keeper_runtime.autoboot_excluded_keeper_reasons config
+        |> List.map (fun Keeper_runtime.{ keeper_name; reason } ->
+          keeper_name, reason)
+      in
+      check (list (pair string string))
+        "autoboot exclusion reasons"
+        [ "disabled", "autoboot_disabled"; "paused", "paused" ]
+        exclusions)
+
 let test_declarative_autoboot_disabled_skips_boot_without_meta () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -456,6 +504,133 @@ let test_keeper_up_uses_toml_autoboot_default () =
           check bool "autoboot_enabled defaulted from TOML" false
             meta.autoboot_enabled
       | Ok None -> fail "keeper meta missing after keeper_up"
+      | Error e -> fail ("read_meta failed: " ^ e))
+
+let test_keeper_up_update_resyncs_declarative_profile_defaults () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  with_clean_base_path_env @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "toml-update-defaults" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Config_dir_resolver.reset ();
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+      let keepers_dir = Filename.concat config_root "keepers" in
+      Fs_compat.mkdir_p keepers_dir;
+      Fs_compat.save_file
+        (Filename.concat keepers_dir (keeper_name ^ ".toml"))
+        {|[keeper]
+goal = "fresh goal"
+short_goal = "fresh short"
+mid_goal = "fresh mid"
+long_goal = "fresh long"
+instructions = "fresh instructions"
+sandbox_profile = "local"
+autoboot_enabled = false
+proactive_enabled = true
+proactive_idle_sec = 120
+proactive_cooldown_sec = 240
+work_discovery_sources = ["awaiting_verification_tasks"]
+per_provider_timeout = 120.0
+tool_denylist = ["keeper_task_claim", "masc_claim_next", "masc_claim_task"]
+
+[keeper.tool_access]
+kind = "preset"
+preset = "coding"
+also_allow = ["masc_tasks", "masc_transition"]
+|};
+      write_minimal_cascade_toml config_root;
+      Unix.putenv "MASC_CONFIG_DIR" config_root;
+      Config_dir_resolver.reset ();
+      let stale_meta =
+        match
+          Masc_test_deps.meta_of_json_fixture
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("agent_name", `String ("keeper-" ^ keeper_name ^ "-agent"));
+                ("trace_id", `String "trace-toml-update-defaults");
+                ("goal", `String "stale goal");
+                ("short_goal", `String "stale short");
+                ("mid_goal", `String "stale mid");
+                ("long_goal", `String "stale long");
+                ("instructions", `String "stale instructions");
+                ("autoboot_enabled", `Bool true);
+                ( "tool_access",
+                  `Assoc
+                    [
+                      ("kind", `String "preset");
+                      ("preset", `String "research");
+                      ("also_allow", `List []);
+                    ] );
+              ])
+        with
+        | Ok meta -> meta
+        | Error e -> fail ("meta_of_json failed: " ^ e)
+      in
+      (match Keeper_types.write_meta ~force:true config stale_meta with
+       | Ok () -> ()
+       | Error e -> fail ("write_meta failed: " ^ e));
+      let ctx = keeper_ctx env sw config "operator" in
+      let ok, _body =
+        match
+          Tool_keeper.dispatch ctx ~name:"masc_keeper_up"
+            ~args:(`Assoc [ ("name", `String keeper_name) ])
+        with
+        | Some result -> result
+        | None -> fail "expected masc_keeper_up dispatch"
+      in
+      check bool "keeper_up update ok" true ok;
+      match Keeper_types.read_meta config keeper_name with
+      | Ok (Some meta) ->
+          check string "goal resynced" "fresh goal" meta.goal;
+          check string "short_goal resynced" "fresh short" meta.short_goal;
+          check string "mid_goal resynced" "fresh mid" meta.mid_goal;
+          check string "long_goal resynced" "fresh long" meta.long_goal;
+          check string "instructions resynced" "fresh instructions"
+            meta.instructions;
+          check bool "autoboot_enabled resynced" false
+            meta.autoboot_enabled;
+          check bool "proactive enabled resynced" true meta.proactive.enabled;
+          check int "proactive idle resynced" 120 meta.proactive.idle_sec;
+          check int "proactive cooldown resynced" 240
+            meta.proactive.cooldown_sec;
+          check
+            (option string)
+            "tool preset resynced"
+            (Some "coding")
+            (Keeper_types.tool_access_preset meta.tool_access
+             |> Option.map Keeper_types.tool_preset_to_string);
+          check
+            (list string)
+            "tool allowlist resynced"
+            [ "masc_tasks"; "masc_transition" ]
+            (Keeper_types.tool_access_also_allowlist meta.tool_access);
+          check
+            (option (list string))
+            "work discovery sources resynced"
+            (Some [ "awaiting_verification_tasks" ])
+            meta.work_discovery_sources;
+          check
+            (option (float 0.0001))
+            "per provider timeout resynced"
+            (Some 120.0)
+            meta.per_provider_timeout_s;
+          check
+            (list string)
+            "tool denylist resynced"
+            [ "keeper_task_claim"; "masc_claim_next"; "masc_claim_task" ]
+            meta.tool_denylist
+      | Ok None -> fail "keeper meta missing after keeper_up update"
       | Error e -> fail ("read_meta failed: " ^ e))
 
 let test_keeper_list_normalizes_unknown_social_model () =
@@ -942,12 +1117,16 @@ let () =
             test_keeper_listing_ignores_sidecar_json_files;
           test_case "bootable list skips autoboot-disabled meta" `Quick
             test_bootable_keeper_names_skip_autoboot_disabled_meta;
+          test_case "autoboot exclusion reasons explain skipped keepers" `Quick
+            test_autoboot_exclusion_reasons_explain_skipped_keepers;
           test_case "declarative autoboot-disabled keeper skips boot without meta"
             `Quick test_declarative_autoboot_disabled_skips_boot_without_meta;
           test_case "autoboot policy resyncs from declarative TOML" `Quick
             test_autoboot_policy_resync_from_declarative_toml;
           test_case "keeper_up uses TOML autoboot default" `Quick
             test_keeper_up_uses_toml_autoboot_default;
+          test_case "keeper_up update resyncs declarative profile defaults"
+            `Quick test_keeper_up_update_resyncs_declarative_profile_defaults;
           test_case "tool keeper list normalizes unknown social model" `Quick
             test_keeper_list_normalizes_unknown_social_model;
           test_case "tool keeper list preserves known social model" `Quick

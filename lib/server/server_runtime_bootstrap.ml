@@ -994,6 +994,9 @@ let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
   let keeper_names =
     Keeper_runtime.bootable_keeper_names state.Mcp_server.room_config
   in
+  let excluded_keepers =
+    Keeper_runtime.autoboot_excluded_keeper_reasons state.Mcp_server.room_config
+  in
   let keeper_agent_names =
     List.map Keeper_types_profile.keeper_agent_name keeper_names
   in
@@ -1011,6 +1014,17 @@ let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
     Log.Server.info
       "startup verified %d bootable keeper credential(s)"
       synced_count;
+  if excluded_keepers <> [] then (
+    let rendered =
+      excluded_keepers
+      |> List.map (fun Keeper_runtime.{ keeper_name; reason } ->
+        Printf.sprintf "%s=%s" keeper_name reason)
+      |> String.concat ", "
+    in
+    Log.Server.info
+      "startup skipped credential sync for %d non-bootable keeper(s): [%s]"
+      (List.length excluded_keepers)
+      rendered);
   List.rev failed
   |> List.iter (fun (keeper_name, detail) ->
          Log.Server.error

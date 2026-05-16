@@ -97,6 +97,7 @@ let () =
     (Filename.concat base_path "config/cascade.toml")
     (Filename.concat test_config_dir "cascade.toml");
   Unix.putenv "MASC_BASE_PATH" test_base_path;
+  Unix.putenv "MASC_BASE_PATH_INPUT" test_base_path;
   Unix.putenv "MASC_CONFIG_DIR" test_config_dir;
   Config_dir_resolver.reset ();
   let prompts_dir = Filename.concat base_path "config/prompts" in
@@ -206,6 +207,12 @@ let with_env name value f =
     f
 ;;
 
+let set_test_base_path base_dir =
+  Unix.putenv "MASC_BASE_PATH" base_dir;
+  Unix.putenv "MASC_BASE_PATH_INPUT" base_dir;
+  Config_dir_resolver.reset ()
+;;
+
 let prepare_test_config_root base_dir =
   let config_dir = Filename.concat (Filename.concat base_dir ".masc") "config" in
   Keeper_types.mkdir_p config_dir;
@@ -218,6 +225,8 @@ let prepare_test_config_root base_dir =
 let with_test_runtime_roots base_dir f =
   let config_dir = prepare_test_config_root base_dir in
   with_env "MASC_BASE_PATH" base_dir
+  @@ fun () ->
+  with_env "MASC_BASE_PATH_INPUT" base_dir
   @@ fun () ->
   with_env "MASC_CONFIG_DIR" config_dir
   @@ fun () ->
@@ -343,7 +352,7 @@ let test_observe_uses_precollected_board_events () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       Unix.putenv "MASC_BASE_PATH" base_dir;
+       set_test_base_path base_dir;
        Masc_mcp.Board.reset_global_for_test ();
        Masc_mcp.Board_dispatch.reset_for_test ();
        Masc_mcp.Board_dispatch.init_jsonl ();
@@ -392,7 +401,7 @@ let test_board_signal_stimulus_becomes_pending_board_event () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       Unix.putenv "MASC_BASE_PATH" base_dir;
+       set_test_base_path base_dir;
        Masc_mcp.Board.reset_global_for_test ();
        Masc_mcp.Board_dispatch.reset_for_test ();
        Masc_mcp.Board_dispatch.init_jsonl ();
@@ -459,7 +468,7 @@ let test_legacy_board_comment_stimulus_becomes_pending_board_event () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       Unix.putenv "MASC_BASE_PATH" base_dir;
+       set_test_base_path base_dir;
        Masc_mcp.Board.reset_global_for_test ();
        Masc_mcp.Board_dispatch.reset_for_test ();
        Masc_mcp.Board_dispatch.init_jsonl ();
@@ -751,7 +760,7 @@ let test_collect_board_events_keeps_non_mentions_as_followup_signal () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       Unix.putenv "MASC_BASE_PATH" base_dir;
+       set_test_base_path base_dir;
        Masc_mcp.Board.reset_global_for_test ();
        Masc_mcp.Board_dispatch.reset_for_test ();
        Masc_mcp.Board_dispatch.init_jsonl ();
@@ -790,7 +799,7 @@ let test_collect_board_events_keeps_non_mentions_for_room_signal_keepers () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       Unix.putenv "MASC_BASE_PATH" base_dir;
+       set_test_base_path base_dir;
        Masc_mcp.Board.reset_global_for_test ();
        Masc_mcp.Board_dispatch.reset_for_test ();
        Masc_mcp.Board_dispatch.init_jsonl ();
@@ -826,7 +835,7 @@ let test_collect_board_events_keeps_external_replies_after_self_comment () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       Unix.putenv "MASC_BASE_PATH" base_dir;
+       set_test_base_path base_dir;
        Masc_mcp.Board.reset_global_for_test ();
        Masc_mcp.Board_dispatch.reset_for_test ();
        Masc_mcp.Board_dispatch.init_jsonl ();
@@ -893,7 +902,7 @@ let test_collect_board_events_treats_generated_alias_as_self_comment () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       Unix.putenv "MASC_BASE_PATH" base_dir;
+       set_test_base_path base_dir;
        Masc_mcp.Board.reset_global_for_test ();
        Masc_mcp.Board_dispatch.reset_for_test ();
        Masc_mcp.Board_dispatch.init_jsonl ();
@@ -958,7 +967,7 @@ let test_observe_ignores_scope_messages_without_room_signal_opt_in () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       Unix.putenv "MASC_BASE_PATH" base_dir;
+       set_test_base_path base_dir;
        let config = Masc_mcp.Coord.default_config base_dir in
        ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
        ignore
@@ -982,7 +991,7 @@ let test_observe_collects_scope_messages_for_room_signal_keepers () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       Unix.putenv "MASC_BASE_PATH" base_dir;
+       set_test_base_path base_dir;
        let config = Masc_mcp.Coord.default_config base_dir in
        ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
        ignore
@@ -1010,7 +1019,7 @@ let test_observe_damps_keeper_scope_chatter_but_keeps_direct_mentions () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       Unix.putenv "MASC_BASE_PATH" base_dir;
+       set_test_base_path base_dir;
        let config = Masc_mcp.Coord.default_config base_dir in
        ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
        ignore
@@ -1053,7 +1062,7 @@ let test_observe_skips_stale_terminal_task_mentions () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       Unix.putenv "MASC_BASE_PATH" base_dir;
+       set_test_base_path base_dir;
        let config = Masc_mcp.Coord.default_config base_dir in
        ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
        ignore
@@ -1466,6 +1475,97 @@ let test_scheduled_turn_decision_uses_backlog_acceleration () =
     (match decision.verdict with
      | WO.Run { reasons = first, rest } ->
        List.mem WO.Task_reactive_cooldown_elapsed (first :: rest)
+     | WO.Skip _ -> false)
+;;
+
+let test_scheduled_turn_ignores_backlog_when_work_discovery_disabled () =
+  let meta =
+    { minimal_meta with
+      work_discovery_enabled = Some false
+    ; proactive = { enabled = true; idle_sec = 60; cooldown_sec = 900 }
+    ; runtime =
+        { minimal_meta.runtime with
+          proactive_rt =
+            { minimal_meta.runtime.proactive_rt with
+              last_ts = Time_compat.now () -. 320.0
+            }
+        }
+    }
+  in
+  let obs =
+    { base_observation with
+      idle_seconds = 120
+    ; claimable_task_count = 1
+    ; failed_task_count = 2
+    ; pending_verification_count = 1
+    ; backlog_updated_since_last_scheduled_autonomous = true
+    }
+  in
+  let decision =
+    WO.keeper_cycle_decision
+      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+      ~meta
+      obs
+  in
+  check
+    bool
+    "work-discovery-disabled keeper does not wake on backlog"
+    false
+    decision.should_run;
+  check
+    bool
+    "backlog is treated as no proactive work signal"
+    true
+    (match decision.verdict with
+     | WO.Skip { reasons = first, rest } -> List.mem WO.No_signal (first :: rest)
+     | WO.Run _ -> false)
+;;
+
+let test_scheduled_turn_allows_backlog_when_work_discovery_disabled_with_current_task () =
+  let current_task_id =
+    match Masc_mcp.Keeper_id.Task_id.of_string "task-owned" with
+    | Ok value -> value
+    | Error err -> fail ("task id parse failed: " ^ err)
+  in
+  let meta =
+    { minimal_meta with
+      work_discovery_enabled = Some false
+    ; current_task_id = Some current_task_id
+    ; proactive = { enabled = true; idle_sec = 60; cooldown_sec = 900 }
+    ; runtime =
+        { minimal_meta.runtime with
+          proactive_rt =
+            { minimal_meta.runtime.proactive_rt with
+              last_ts = Time_compat.now () -. 320.0
+            }
+        }
+    }
+  in
+  let obs =
+    { base_observation with
+      idle_seconds = 120
+    ; claimable_task_count = 1
+    ; backlog_updated_since_last_scheduled_autonomous = true
+    }
+  in
+  let decision =
+    WO.keeper_cycle_decision
+      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
+      ~meta
+      obs
+  in
+  check bool "current task keeps backlog wake enabled" true decision.should_run;
+  check
+    bool
+    "owned task still emits task backlog reason"
+    true
+    (match decision.verdict with
+     | WO.Run { reasons = first, rest } ->
+       List.exists
+         (function
+           | WO.Task_backlog _ -> true
+           | _ -> false)
+         (first :: rest)
      | WO.Skip _ -> false)
 ;;
 
@@ -5303,16 +5403,20 @@ let test_run_keeper_cycle_skips_non_executable_phase () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   let old_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
+  let old_base_path_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
   Fun.protect
     ~finally:(fun () ->
       (match old_base_path with
        | Some value -> Unix.putenv "MASC_BASE_PATH" value
        | None -> Unix.putenv "MASC_BASE_PATH" "");
+      (match old_base_path_input with
+       | Some value -> Unix.putenv "MASC_BASE_PATH_INPUT" value
+       | None -> Unix.putenv "MASC_BASE_PATH_INPUT" "");
       KR.clear ();
       cleanup_dir base_dir)
     (fun () ->
        KR.clear ();
-       Unix.putenv "MASC_BASE_PATH" base_dir;
+       set_test_base_path base_dir;
        let meta = make_meta "phase-gated-keeper" in
        let config = Masc_mcp.Coord.default_config base_dir in
        ignore (KR.register ~base_path:base_dir meta.name meta);
@@ -5447,16 +5551,20 @@ let test_run_keeper_cycle_fails_closed_when_registry_phase_missing () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   let old_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
+  let old_base_path_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
   Fun.protect
     ~finally:(fun () ->
       (match old_base_path with
        | Some value -> Unix.putenv "MASC_BASE_PATH" value
        | None -> Unix.putenv "MASC_BASE_PATH" "");
+      (match old_base_path_input with
+       | Some value -> Unix.putenv "MASC_BASE_PATH_INPUT" value
+       | None -> Unix.putenv "MASC_BASE_PATH_INPUT" "");
       KR.clear ();
       cleanup_dir base_dir)
     (fun () ->
        KR.clear ();
-       Unix.putenv "MASC_BASE_PATH" base_dir;
+       set_test_base_path base_dir;
        let meta = make_meta "missing-registry-phase-keeper" in
        let config = Masc_mcp.Coord.default_config base_dir in
        ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
@@ -5926,6 +6034,14 @@ let test_run_keeper_cycle_surfaces_side_effect_failures_source_contract () =
     (source_file_contains
        "lib/tool_keeper.ml"
        "Turn.preflight_keeper_msg ctx resolved_args")
+  ;
+  check
+    bool
+    "manual keeper_msg preflight gates cascade resilience before async submit"
+    true
+    (source_file_contains
+       "lib/keeper/keeper_turn.ml"
+       "Keeper_exec_preflight.cascade_resilience_error_message")
 ;;
 
 let test_sync_keeper_paused_state_surfaces_write_failure_without_mutating_registry () =
@@ -8339,6 +8455,43 @@ let test_degraded_retry_slot_phase_allows_oas_timeout_local_recovery () =
   | UT.No_degraded_retry -> fail "expected recoverable retry candidate"
 ;;
 
+let max_execution_time_cascade_exhausted_error () =
+  Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
+    (Masc_mcp.Keeper_turn_driver.Cascade_exhausted
+       {
+         cascade_name = oas_error_cascade_name "strict_tool_candidates";
+         reason =
+           Keeper_types.Other_detail
+             "Agent execution exceeded max_execution_time_s (276.561292)";
+       })
+;;
+
+let test_degraded_retry_slot_phase_allows_max_execution_time_cascade_exhausted () =
+  match
+    UT.next_fail_open_cascade_for_turn_with_budget
+      ~base_cascade:"strict_tool_candidates"
+      ~effective_cascade:"strict_tool_candidates"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
+      ~attempted_cascades:[ "strict_tool_candidates"; "tier-group.coding_plan" ]
+      ~estimated_input_tokens:2_000
+      ~max_turns:4
+      ~time_spent_in_turn_s:(UT.degraded_retry_slot_phase_budget_sec +. 1.0)
+      ~remaining_turn_budget_s:300.0
+      (max_execution_time_cascade_exhausted_error ())
+  with
+  | UT.Degraded_retry_allowed retry ->
+    check string "retry cascade candidate" (phase_recovery_cascade_name ()) retry.next_cascade;
+    check
+      string
+      "fallback reason"
+      "cascade_exhausted"
+      (EC.degraded_retry_reason_to_string retry.fallback_reason)
+  | UT.Degraded_retry_slot_phase_exhausted _ ->
+    fail "expected max_execution_time_s cascade exhaustion to bypass slot phase"
+  | UT.Degraded_retry_budget_exhausted _ -> fail "expected retry budget to remain"
+  | UT.No_degraded_retry -> fail "expected recoverable retry candidate"
+;;
+
 let test_degraded_retry_slot_phase_allows_first_contract_rotation () =
   match
     UT.next_fail_open_cascade_for_turn_with_budget
@@ -9802,7 +9955,7 @@ let test_social_model_routes_blocker_to_board_post () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       Unix.putenv "MASC_BASE_PATH" base_dir;
+       set_test_base_path base_dir;
        Masc_mcp.Board.reset_global_for_test ();
        Masc_mcp.Board_dispatch.reset_for_test ();
        Masc_mcp.Board_dispatch.init_jsonl ();
@@ -11178,6 +11331,45 @@ let test_direct_keeper_msg_timeout_overrides_meta_per_provider_timeout () =
     (KAR.per_provider_timeout_for_turn ~meta ~timeout_s:900.0 ())
 ;;
 
+let test_internal_keeper_loop_timeout_honors_meta_per_provider_timeout () =
+  let meta =
+    { (make_meta "internal-timeout-cap") with per_provider_timeout_s = Some 120.0 }
+  in
+  check
+    (option (float 0.001))
+    "internal keeper-loop attempt timeout honors profile per-provider cap"
+    (Some 120.0)
+    (KAR.per_provider_timeout_for_turn
+       ~meta
+       ~oas_timeout_s:276.0
+       ~oas_timeout_is_explicit:false
+       ~timeout_s:276.0
+       ());
+  let meta_with_stale_high_cap =
+    { (make_meta "internal-timeout-high-cap") with
+      per_provider_timeout_s = Some 900.0
+    }
+  in
+  check
+    (option (float 0.001))
+    "profile per-provider timeout cannot exceed the enclosing attempt budget"
+    (Some 276.0)
+    (KAR.per_provider_timeout_for_turn
+       ~meta:meta_with_stale_high_cap
+       ~oas_timeout_s:276.0
+       ~oas_timeout_is_explicit:false
+       ~timeout_s:276.0
+       ())
+;;
+
+let test_unified_keeper_loop_marks_attempt_timeout_internal () =
+  check bool
+    "unified keeper loop passes computed OAS timeout as an internal attempt budget"
+    true
+    (source_file_contains "lib/keeper/keeper_unified_turn.ml"
+       "~oas_timeout_is_explicit:false")
+;;
+
 let test_try_provider_max_execution_time_uses_attempt_timeout () =
   check bool
     "try-provider helper resolves OAS max execution time from attempt timeout"
@@ -11524,6 +11716,14 @@ let () =
             "scheduled decision uses backlog acceleration"
             `Quick
             test_scheduled_turn_decision_uses_backlog_acceleration
+        ; test_case
+            "scheduled decision ignores backlog when work discovery disabled"
+            `Quick
+            test_scheduled_turn_ignores_backlog_when_work_discovery_disabled
+        ; test_case
+            "scheduled decision allows owned backlog when work discovery disabled"
+            `Quick
+            test_scheduled_turn_allows_backlog_when_work_discovery_disabled_with_current_task
         ; test_case
             "scheduled decision ignores unclaimable backlog"
             `Quick
@@ -12418,6 +12618,10 @@ let () =
             `Quick
             test_degraded_retry_slot_phase_allows_oas_timeout_local_recovery
         ; test_case
+            "max_execution_time_s cascade exhaustion can still rotate after slot phase"
+            `Quick
+            test_degraded_retry_slot_phase_allows_max_execution_time_cascade_exhausted
+        ; test_case
             "contract retry gets first rotation after slot phase (#12888)"
             `Quick
             test_degraded_retry_slot_phase_allows_first_contract_rotation
@@ -12728,6 +12932,14 @@ let () =
             "direct keeper msg timeout overrides stale per-provider timeout"
             `Quick
             test_direct_keeper_msg_timeout_overrides_meta_per_provider_timeout
+        ; test_case
+            "internal keeper loop honors profile per-provider timeout"
+            `Quick
+            test_internal_keeper_loop_timeout_honors_meta_per_provider_timeout
+        ; test_case
+            "unified keeper loop marks computed timeout internal"
+            `Quick
+            test_unified_keeper_loop_marks_attempt_timeout_internal
         ; test_case
             "provider attempt timeout drives OAS max execution time"
             `Quick

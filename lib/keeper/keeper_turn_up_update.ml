@@ -47,26 +47,41 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
   | Error msg -> (false, msg)
   | Ok active_goal_ids ->
   let goal_provided = Option.is_some p.goal_opt in
+  let profile_default_text opt fallback =
+    match opt with
+    | Some value when String.trim value <> "" -> value
+    | _ -> fallback
+  in
   let goal =
     match p.goal_opt with
     | Some g -> normalize_goal_horizon_text g
     | None ->
-        if String.trim old.goal <> "" then old.goal
-        else p.profile_defaults.goal |> Option.value ~default:""
+        profile_default_text p.profile_defaults.goal
+          (if String.trim old.goal <> "" then old.goal else "")
   in
   let short_goal_default = if goal_provided then goal else old.short_goal in
   let mid_goal_default = if goal_provided then goal else old.mid_goal in
   let long_goal_default = if goal_provided then goal else old.long_goal in
+  let horizon_default profile_opt old_default =
+    if goal_provided then old_default
+    else profile_default_text profile_opt old_default
+  in
   let short_goal =
-    Option.value ~default:short_goal_default p.short_goal_opt
+    Option.value
+      ~default:(horizon_default p.profile_defaults.short_goal short_goal_default)
+      p.short_goal_opt
     |> normalize_goal_horizon_text
   in
   let mid_goal =
-    Option.value ~default:mid_goal_default p.mid_goal_opt
+    Option.value
+      ~default:(horizon_default p.profile_defaults.mid_goal mid_goal_default)
+      p.mid_goal_opt
     |> normalize_goal_horizon_text
   in
   let long_goal =
-    Option.value ~default:long_goal_default p.long_goal_opt
+    Option.value
+      ~default:(horizon_default p.profile_defaults.long_goal long_goal_default)
+      p.long_goal_opt
     |> normalize_goal_horizon_text
   in
   let policy_voice_enabled =
@@ -95,7 +110,10 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
           old.network_mode
   in
   let autoboot_enabled =
-    Option.value ~default:old.autoboot_enabled p.autoboot_enabled_opt
+    match p.autoboot_enabled_opt, p.profile_defaults.autoboot_enabled with
+    | Some value, _ -> value
+    | None, Some value -> value
+    | None, None -> old.autoboot_enabled
   in
   let mention_targets =
     resolve_mention_targets
@@ -116,21 +134,34 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
       ~fallback_message:old.compaction.message_gate
       ~fallback_token:old.compaction.token_gate
   in
+  let profile_tool_preset =
+    Option.bind p.profile_defaults.tool_preset tool_preset_of_string
+  in
   let tool_access =
     match p.tool_access_opt with
     | Some access -> access
     | None ->
         match old.tool_access with
         | Preset current ->
-            let preset = Option.value ~default:current.preset p.tool_preset_opt in
+            let preset =
+              match p.tool_preset_opt with
+              | Some preset -> preset
+              | None -> (
+                  match profile_tool_preset with
+                  | Some preset -> preset
+                  | None -> current.preset)
+            in
             let also_allow =
               resolve_tool_name_list
                 ~preferred:p.tool_also_allow_opt
-                ~fallback:(Some current.also_allow)
+                ~fallback:
+                  (match p.profile_defaults.tool_also_allow with
+                   | Some _ as profile -> profile
+                   | None -> Some current.also_allow)
             in
             Preset { preset; also_allow }
         | Custom names -> (
-            match p.tool_preset_opt with
+            match first_some p.tool_preset_opt profile_tool_preset with
             | Some preset ->
                 let also_allow =
                   resolve_tool_name_list
@@ -291,6 +322,25 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
       Option.value ~default:old.voice_agent_id p.voice_agent_id_opt;
     mention_targets;
     room_signal_prompt_enabled;
+    work_discovery_enabled =
+      first_some p.profile_defaults.work_discovery_enabled old.work_discovery_enabled;
+    work_discovery_sources =
+      first_some p.profile_defaults.work_discovery_sources old.work_discovery_sources;
+    work_discovery_interval_sec =
+      first_some p.profile_defaults.work_discovery_interval_sec
+        old.work_discovery_interval_sec;
+    work_discovery_guidance =
+      first_some p.profile_defaults.work_discovery_guidance old.work_discovery_guidance;
+    telemetry_feedback_enabled =
+      first_some p.profile_defaults.telemetry_feedback_enabled
+        old.telemetry_feedback_enabled;
+    telemetry_feedback_window_hours =
+      first_some p.profile_defaults.telemetry_feedback_window_hours
+        old.telemetry_feedback_window_hours;
+    per_provider_timeout_s =
+      first_some p.profile_defaults.per_provider_timeout old.per_provider_timeout_s;
+    always_approve =
+      first_some p.profile_defaults.always_approve old.always_approve;
     proactive = {
       enabled =
         (match p.proactive_enabled_opt with

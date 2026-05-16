@@ -89,7 +89,14 @@ Clone-then-worktree (one turn is fine when the task is clear):
 4. Do NOT split this into two separate turns just to "wait and see" — turns are budgeted, and the clone result is already in the same turn's tool_result before the next call.
 
 PR workflow (Coding/Delivery/Full preset required):
+0. `keeper_preflight_check repo=<owner/repo>` — if `ok=false` or
+   `cascade_resilience.ok=false` or `autonomous_activation.ok=false`, do not
+   start PR work. Report the blocker from `checks` /
+   `cascade_resilience.hint` / `autonomous_activation.hint` instead of treating
+   a coding preset as active-fleet readiness.
 1. `masc_worktree_create task_id=<id>` — opens isolated branch
+   - If the task says MASC, keeper, runtime, `MASC_*`, or RFC work but does not
+     spell out the clone directory, call it with `repo_name="masc-mcp"`.
 2. `masc_code_read` → `masc_code_edit` — read first, then edit
 3. `keeper_bash cmd='git status'` → `git add <paths>` → `git commit -m ...` → `git push -u origin HEAD` — all with cwd inside the worktree
 4. `keeper_pr_create draft=true title=... body=... base=... head=...` — open the draft PR after push. Do not create PRs through `keeper_shell op=gh`.

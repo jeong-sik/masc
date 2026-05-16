@@ -149,6 +149,7 @@ let sample_repo id =
     name = "repo-" ^ id;
     url = "https://github.com/test/" ^ id;
     local_path = "repos/" ^ id;
+    aliases = [];
     default_branch = "main";
     credential_id = "cred-1";
     keepers = [];

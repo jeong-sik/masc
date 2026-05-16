@@ -276,6 +276,26 @@ let read_events ~base_path ~since ~until ?keeper () :
 
 (* ── Pairing ───────────────────────────────────────────────────── *)
 
+(* Observability for the "shouldn't happen" branch in [pair_events]
+   where multiple [Start]/[Complete] records share a
+   [compaction_id].  Until this counter existed, a collision was
+   silently reclassified as a stream of individual orphans with no
+   alarm — the only visible effect was an inflated orphan count.
+   Closes the silent assumption flagged in
+   .tmp/memory-compacting-analysis.html (pair_events id-collision
+   branch). *)
+let () =
+  Prometheus.register_counter
+    ~name:Keeper_metrics.metric_keeper_compact_audit_pair_collisions
+    ~help:
+      "Total [Keeper_compact_audit.pair_events] records that hit \
+       the multi-record collision branch (multiple Start or Complete \
+       rows sharing a compaction_id).  Non-zero means OAS \
+       compaction_id is colliding with itself or the audit JSONL \
+       was concatenated across sessions without dedup."
+    ()
+;;
+
 let pair_events rows : pair_result list =
   (* Group by compaction_id. Pair starts with completes by matching id. *)
   let tbl : (string, row list) Hashtbl.t = Hashtbl.create 32 in
@@ -290,7 +310,7 @@ let pair_events rows : pair_result list =
     rows;
   let out = ref [] in
   Hashtbl.iter
-    (fun _id group ->
+    (fun id group ->
       let starts, completes =
         List.partition_map
           (function Start s -> Left s | Complete c -> Right c)
@@ -301,8 +321,24 @@ let pair_events rows : pair_result list =
       | [s], []  -> out := Orphan_start s :: !out
       | [],  [c] -> out := Orphan_complete c :: !out
       | _ ->
-        (* Shouldn't happen: multiple with same id = ID collision.
-           Treat each as individual orphan for visibility. *)
+        (* "Shouldn't happen": multiple records share an id.  Surface
+           the collision in /metrics and warn with the offending id
+           plus the group breakdown so operators can correlate with
+           the audit JSONL contents. *)
+        let n_starts = List.length starts in
+        let n_completes = List.length completes in
+        Prometheus.inc_counter
+          Keeper_metrics.metric_keeper_compact_audit_pair_collisions
+          ~delta:(float_of_int (n_starts + n_completes))
+          ();
+        Log.Keeper.warn
+          "compact_audit.pair_events: compaction_id=%s collision \
+           (starts=%d completes=%d) — reclassifying each as an \
+           orphan; investigate OAS compaction_id generator or \
+           audit JSONL concatenation"
+          id
+          n_starts
+          n_completes;
         List.iter (fun s -> out := Orphan_start s    :: !out) starts;
         List.iter (fun c -> out := Orphan_complete c :: !out) completes)
     tbl;

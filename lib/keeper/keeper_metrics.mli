@@ -336,6 +336,17 @@ val metric_keeper_cascade_sync_failures : string
 val metric_keeper_local_discovery_failures : string
 val metric_keeper_thinking_persist_failures : string
 val metric_keeper_checkpoint_failures : string
+
+val metric_keeper_compact_audit_pair_collisions : string
+(** Counter for [Keeper_compact_audit.pair_events] hitting the
+    multi-record branch where two or more [Start] or [Complete]
+    records share a [compaction_id].  Each collision increments
+    by [starts + completes] (i.e. once per individual record
+    reclassified as an orphan).  A non-zero count means the
+    OAS-side [compaction_id] generator collided with itself or
+    the audit JSONL was concatenated across sessions without
+    dedup. *)
+
 val metric_keeper_memory_write_failures : string
 val metric_keeper_memory_consolidations : string
 val metric_keeper_write_meta_cycle_failures : string

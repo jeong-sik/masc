@@ -15,6 +15,12 @@
     @since Phase 7 — Eval_gate → OAS hooks migration *)
 
 
+(** Shared type/helper module (intra-library file split, 2026-05-16).
+    Hoisted to the top so the rest of this module can refer to its
+    bindings — see classify_usage_trust which calls
+    [context_max_of_telemetry]. *)
+include Keeper_hooks_oas_types
+
 (** Keeper deny list — derived from Tool_catalog surface SSOT.
     Administrative/destructive operations that should only be invoked
     by operators or through controlled workflows.
@@ -123,36 +129,8 @@ let runtime_lane_label = "runtime"
 
 let runtime_lane_of_model (_model : string) : string = runtime_lane_label
 
-let redacts_inference_telemetry_key key =
-  match String.lowercase_ascii (String.trim key) with
-  | "provider"
-  | "provider_id"
-  | "provider_kind"
-  | "provider_name"
-  | "model"
-  | "model_id"
-  | "canonical_model_id"
-  | "default_model"
-  | "discovered_model"
-  | "system_fingerprint" -> true
-  | _ -> false
-
-let rec redact_inference_telemetry_json = function
-  | `Assoc fields ->
-      `Assoc
-        (List.map
-           (fun (key, value) ->
-              if redacts_inference_telemetry_key key then (key, `Null)
-              else (key, redact_inference_telemetry_json value))
-           fields)
-  | `List values -> `List (List.map redact_inference_telemetry_json values)
-  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value ->
-      value
-
-let inference_telemetry_to_runtime_json telemetry =
-  telemetry
-  |> Agent_sdk.Types.inference_telemetry_to_yojson
-  |> redact_inference_telemetry_json
+(* Inference telemetry redaction moved to Keeper_hooks_oas_types
+   (intra-library file split, 2026-05-16). *)
 
 let usage_has_tokens (usage : Agent_sdk.Types.api_usage) =
   usage.input_tokens > 0
@@ -485,46 +463,8 @@ let record_response_content_quality_metric ~keeper_name
         ]
       ()
 
-let default_context_max = 0
-let context_max_of_telemetry
-    (telemetry : Agent_sdk.Types.inference_telemetry option) =
-  match telemetry with
-  | Some { effective_context_window = Some n; _ } when n > 0 -> n
-  | _ -> default_context_max
-
-type thinking_log_summary =
-  { thinking_present : bool
-  ; thinking_blocks : int
-  ; thinking_chars : int
-  ; redacted_thinking_blocks : int
-  ; thinking_kind : string
-  }
-
-let summarize_thinking_blocks content =
-  let thinking_blocks = ref 0 in
-  let thinking_chars = ref 0 in
-  let redacted_thinking_blocks = ref 0 in
-  List.iter
-    (function
-      | Agent_sdk.Types.Thinking { content; _ } ->
-          incr thinking_blocks;
-          thinking_chars := !thinking_chars + String.length content
-      | Agent_sdk.Types.RedactedThinking _ -> incr redacted_thinking_blocks
-      | _ -> ())
-    content;
-  let thinking_kind =
-    match !thinking_blocks > 0, !redacted_thinking_blocks > 0 with
-    | false, false -> "none"
-    | true, false -> "thinking"
-    | false, true -> "redacted"
-    | true, true -> "mixed"
-  in
-  { thinking_present = !thinking_blocks > 0 || !redacted_thinking_blocks > 0
-  ; thinking_blocks = !thinking_blocks
-  ; thinking_chars = !thinking_chars
-  ; redacted_thinking_blocks = !redacted_thinking_blocks
-  ; thinking_kind
-  }
+(* default_context_max + context_max_of_telemetry moved to
+   Keeper_hooks_oas_types (intra-library file split, 2026-05-16). *)
 
 let classify_usage_trust ?usage ~model ~telemetry () =
   let _ = model in
@@ -558,67 +498,13 @@ let record_usage_anomaly_metrics ~keeper_name ~model usage_trust =
            ())
       reasons
 
-type cost_status =
-  | Cost_reported
-  | Cost_known_free
-  | Cost_no_tokens
-  | Cost_usage_missing
-  | Cost_usage_untrusted
-  | Cost_runtime_unknown
-  | Cost_oas_cost_unreported
-
-let cost_label_reported = "reported"
-let cost_label_known_free = "known_free"
-let cost_label_no_tokens = "no_tokens"
-let cost_label_usage_missing = "usage_missing"
-let cost_label_usage_untrusted = "usage_untrusted"
-let cost_label_runtime_unknown = "runtime_unknown"
-let cost_label_oas_cost_unreported = "oas_cost_unreported"
-
-let cost_reason_reported = "oas_reported_cost"
-let cost_reason_known_free = "known_structurally_unmetered_or_zero_price"
-let cost_reason_no_tokens = "no_billable_tokens"
-let cost_reason_usage_missing = "usage_missing"
-let cost_reason_usage_untrusted = "usage_untrusted"
-let cost_reason_runtime_unknown = "runtime_unknown"
-let cost_reason_oas_cost_unreported = "oas_cost_unreported"
+(* cost_status / thinking_log_summary / pr_action types + telemetry helpers
+   moved to Keeper_hooks_oas_types (intra-library file split, 2026-05-16).
+   The include is hoisted to the top of this module — see the comment
+   near [keeper_denied_tools]. *)
 
 let cost_source_unmetered_provider = "unmetered_provider"
 let cost_source_computed = "computed"
-
-let cost_status_to_string = function
-  | Cost_reported -> cost_label_reported
-  | Cost_known_free -> cost_label_known_free
-  | Cost_no_tokens -> cost_label_no_tokens
-  | Cost_usage_missing -> cost_label_usage_missing
-  | Cost_usage_untrusted -> cost_label_usage_untrusted
-  | Cost_runtime_unknown -> cost_label_runtime_unknown
-  | Cost_oas_cost_unreported -> cost_label_oas_cost_unreported
-
-let cost_status_reason = function
-  | Cost_reported -> cost_reason_reported
-  | Cost_known_free -> cost_reason_known_free
-  | Cost_no_tokens -> cost_reason_no_tokens
-  | Cost_usage_missing -> cost_reason_usage_missing
-  | Cost_usage_untrusted -> cost_reason_usage_untrusted
-  | Cost_runtime_unknown -> cost_reason_runtime_unknown
-  | Cost_oas_cost_unreported -> cost_reason_oas_cost_unreported
-
-let cost_status_for_event
-    ~(runtime_unknown : bool)
-    ~(runtime_unmetered : bool)
-    ~(usage_missing : bool)
-    ~(usage_trusted : bool)
-    ~(input_tokens : int)
-    ~(output_tokens : int)
-    ~(cost_usd : float) =
-  if usage_missing then Cost_usage_missing
-  else if not usage_trusted then Cost_usage_untrusted
-  else if cost_usd > 0.0 then Cost_reported
-  else if input_tokens <= 0 && output_tokens <= 0 then Cost_no_tokens
-  else if runtime_unmetered then Cost_known_free
-  else if runtime_unknown then Cost_runtime_unknown
-  else Cost_oas_cost_unreported
 
 let oas_reported_cost (usage : Agent_sdk.Types.api_usage) : float =
   match usage.cost_usd with
@@ -1158,31 +1044,9 @@ let recent_tool_streak_count ?(within_sec = 900.0) ~(tool_name : string)
   in
   loop 0 (List.rev entries)
 
-type pr_review_action_metric_event = {
-  action : string;
-  pr_number : int option;
-  comment_id : int option;
-  success : bool;
-  route_via : string option;
-  credential : Yojson.Safe.t option;
-  identity_attestation : Yojson.Safe.t option;
-}
-
-type pr_work_action_metric_event = {
-  work_action : string;
-  work_source : string;
-  work_ref : string option;
-  pr_url : string option;
-  command : string option;
-  success : bool;
-  route_via : string option;
-}
-
-let normalize_pr_review_action raw =
-  let trimmed = String.trim raw |> String.uppercase_ascii in
-  match trimmed with
-  | "COMMENT" | "APPROVE" | "REQUEST_CHANGES" | "REPLY" -> Some trimmed
-  | _ -> None
+(* pr_review_action_metric_event / pr_work_action_metric_event /
+   normalize_pr_review_action moved to Keeper_hooks_oas_types
+   (intra-library file split, 2026-05-16). *)
 
 let json_int_opt key json = Safe_ops.json_int_opt key json
 

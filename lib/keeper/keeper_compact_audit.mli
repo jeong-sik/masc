@@ -119,6 +119,23 @@ type pair_result =
 (** Pair Start and Complete rows by [compaction_id]. *)
 val pair_events : row list -> pair_result list
 
+(** Test-only hooks for the in-memory pending-start cache. *)
+module For_testing : sig
+  val clear_pending : unit -> unit
+
+  val evict_pending_older_than
+    :  max_age_s:float
+    -> now:float
+    -> (string * string * float) list
+
+  val handle_event_at
+    :  received_ts:float
+    -> base_path:string
+    -> retention_days:int
+    -> Agent_sdk.Event_bus.event
+    -> unit
+end
+
 (** {1 Subscriber wireup} *)
 
 (** Spawn a background Eio fiber bound to [sw] that subscribes to

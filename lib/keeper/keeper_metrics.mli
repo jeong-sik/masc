@@ -322,6 +322,7 @@ val metric_keeper_stale_fleet_batch_paused : string
 val metric_keeper_oas_timeout_budget_loop_paused : string
 val metric_keeper_cycle_exceptions : string
 val metric_keeper_snapshot_write_failures : string
+val metric_keeper_state_snapshot_skipped_no_state : string
 val metric_keeper_progress_updated_line_failures : string
 val metric_keeper_sse_broadcast_failures : string
 val metric_keeper_room_heartbeat_failures : string

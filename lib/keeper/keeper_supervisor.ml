@@ -2221,36 +2221,6 @@ let liveness_recovery_scan (ctx : _ context) =
     production sample) without a separate code path.
 
     Returns [None] when not stuck.  Pure: no I/O, no global state. *)
-let detect_alive_but_stuck
-      ~now
-      ~stall_multiplier
-      ~stall_floor_sec
-      (entry : Keeper_registry.registry_entry)
-  : float option
-  =
-  let meta = entry.meta in
-  if meta.paused
-  then None
-  else if entry.phase <> Keeper_state_machine.Running
-  then None
-  else if meta.runtime.autonomous_turn_count <= 0
-  then
-    (* Brand-new keeper: not stuck, just hasn't started. *)
-    None
-  else (
-    let cooldown_sec = float_of_int meta.proactive.cooldown_sec in
-    let stall_threshold =
-      Float.max stall_floor_sec (cooldown_sec *. float_of_int stall_multiplier)
-    in
-    let last_proactive_ts = meta.runtime.proactive_rt.last_ts in
-    let reference_ts =
-      if last_proactive_ts > 0.0
-      then Float.max last_proactive_ts entry.started_at
-      else entry.started_at
-    in
-    let elapsed = now -. reference_ts in
-    if elapsed > stall_threshold then Some elapsed else None)
-;;
 
 (* Per-keeper dedup table for [alive_but_stuck_scan].  Bounds counter
    emission to one increment per [alive_but_stuck_dedup_ttl_sec] per
@@ -2268,15 +2238,6 @@ let alive_but_stuck_should_emit ~now ~dedup_ttl_sec name =
       true)
 ;;
 
-let alive_but_stuck_threshold
-      ~stall_multiplier
-      ~stall_floor_sec
-      (entry : Keeper_registry.registry_entry)
-  =
-  Float.max
-    stall_floor_sec
-    (float_of_int entry.meta.proactive.cooldown_sec *. float_of_int stall_multiplier)
-;;
 
 let set_alive_but_stuck_gauges
       ~(entry : Keeper_registry.registry_entry)

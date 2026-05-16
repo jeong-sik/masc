@@ -1095,6 +1095,27 @@ let submit_and_await
   in
   Eio_guard.protect await_with_timeout ~finally:(fun () ->
     Safe_ops.protect ~default:() (fun () ->
+      (match Eio.Promise.peek promise with
+       | Some _ -> ()
+       | None ->
+         let reason = "approval await cancelled before operator decision" in
+         audit_approval_event
+           ?base_path:entry.audit_base_path
+           ~event_type:"cancelled"
+           ~id
+           ~keeper_name
+           ~tool_name
+           ~risk_level
+           ?turn_id
+           ?task_id
+           ?goal_id
+           ~goal_ids
+           ?runtime_contract
+           ?selected_model
+           ?disposition
+           ?disposition_reason
+           ~decision:(Approval_expired reason)
+           ());
       atomic_update pending (fun map -> SMap.remove id map)))
 ;;
 

@@ -89,6 +89,19 @@ val text_of_history_jsonl_json : Yojson.Safe.t -> string
 val repair_broken_tool_call_pairs :
   Agent_sdk.Types.message list -> Agent_sdk.Types.message list
 
+type tool_pair_repair_stats =
+  { downgraded_tool_uses : int
+  ; downgraded_tool_results : int
+  }
+
+val tool_pair_repair_stats_changed : tool_pair_repair_stats -> bool
+
+(** Same repair as {!repair_broken_tool_call_pairs}, plus counters for
+    ToolUse/ToolResult blocks downgraded to plain text. This keeps the
+    repair path observable without changing the legacy return type. *)
+val repair_broken_tool_call_pairs_with_stats :
+  Agent_sdk.Types.message list -> Agent_sdk.Types.message list * tool_pair_repair_stats
+
 (** {1 Context (de)serialization} *)
 
 val serialize_context : working_context -> string

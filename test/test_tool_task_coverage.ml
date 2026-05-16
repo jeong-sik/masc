@@ -791,6 +791,102 @@ let () = test "handle_transition_done_on_awaiting_verification_is_explicit" (fun
     assert (not result.Tool_result.success);
     assert (str_contains result.Tool_result.legacy_message "awaiting verification");
     assert (str_contains result.Tool_result.legacy_message "approve or reject")))
+
+let () = test "handle_transition_verifier_blocks_non_verdict_actions" (fun () ->
+  let ctx = make_test_ctx_with_agent "verifier" in
+  let _ =
+    Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc [ ("title", `String "Verifier must not claim") ])
+  in
+  List.iter
+    (fun action ->
+      let result =
+        Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+          (`Assoc
+            [
+              ("task_id", `String "task-001");
+              ("action", `String action);
+              ("notes", `String "stale verifier context attempted workflow mutation");
+            ])
+      in
+      assert (not result.Tool_result.success);
+      assert
+        (Tool_result.failure_class result = Some Tool_result.Workflow_rejection);
+      assert (str_contains result.Tool_result.legacy_message "Verifier action guard");
+      assert (str_contains result.Tool_result.legacy_message "approve|reject"))
+    [ "claim"; "done" ];
+  assert_task_todo ctx;
+  assert (Planning_eio.get_current_task ctx.config = None))
+
+let () = test "handle_transition_verifier_noops_terminal_verdicts" (fun () ->
+  let ctx = make_test_ctx_with_agent "worker" in
+  let verifier_ctx = { ctx with Tool_task.agent_name = "verifier" } in
+  let _ = Coord.add_task ctx.config ~title:"Already done" ~priority:1 ~description:"" in
+  let _ = Coord.claim_task ctx.config ~agent_name:"worker" ~task_id:"task-001" in
+  let done_result =
+    Coord.transition_task_r ctx.config ~agent_name:"worker"
+      ~task_id:"task-001" ~action:Masc_domain.Done_action ~notes:"complete" ()
+  in
+  (match done_result with
+   | Ok _ -> ()
+   | Error err -> failwith (Masc_domain.masc_error_to_string err));
+  List.iter
+    (fun action ->
+      let result =
+        Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0
+          verifier_ctx
+          (`Assoc
+            [
+              ("task_id", `String "task-001");
+              ("action", `String action);
+              ("notes", `String "stale verifier verdict");
+            ])
+      in
+      if not result.Tool_result.success then failwith result.Tool_result.legacy_message;
+      assert (str_contains result.Tool_result.legacy_message "stale verdict ignored");
+      assert (str_contains result.Tool_result.legacy_message "no-op"))
+    [ "approve"; "reject" ];
+  match (only_task ctx).Masc_domain.task_status with
+  | Masc_domain.Done _ -> ()
+  | _ -> failwith "expected terminal task to stay done")
+
+let () = test "handle_transition_verifier_allows_verdict_actions" (fun () ->
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    let worker_ctx = make_test_ctx_with_agent "worker" in
+    let verifier_ctx = { worker_ctx with Tool_task.agent_name = "verifier" } in
+    let _ =
+      Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 worker_ctx
+        (`Assoc [ ("title", `String "Verifier may approve") ])
+    in
+    let _ =
+      Coord.claim_task worker_ctx.config ~agent_name:"worker" ~task_id:"task-001"
+    in
+    let submit_result =
+      Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0
+        worker_ctx
+        (`Assoc
+          [
+            ("task_id", `String "task-001");
+            ("action", `String "submit_for_verification");
+            ("notes", `String "ready for verifier");
+          ])
+    in
+    if not submit_result.Tool_result.success then
+      failwith submit_result.Tool_result.legacy_message;
+    let result =
+      Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0
+        verifier_ctx
+        (`Assoc
+          [
+            ("task_id", `String "task-001");
+            ("action", `String "approve");
+            ("notes", `String "evidence verified");
+          ])
+    in
+    if not result.Tool_result.success then failwith result.Tool_result.legacy_message;
+    match (only_task worker_ctx).Masc_domain.task_status with
+    | Masc_domain.Done _ -> ()
+    | _ -> failwith "expected verifier approval to complete task"))
 let () = test "handle_claim_sets_planning_current_task" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Claim direct")]) in

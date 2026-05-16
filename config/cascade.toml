@@ -72,6 +72,12 @@ display-name = "Ollama Local"
 protocol = "ollama-http"
 endpoint = "http://127.0.0.1:11434"
 
+[providers.ollama.log]
+enabled = false
+path = "~/.ollama/logs/server.log"
+default-lines = 200
+max-bytes = 1048576
+
 [providers.ollama.capabilities]
 # Local Ollama is a viable bound-actor fallback target in catalogs
 # that include Codex CLI — its HTTP surface accepts per-keeper auth

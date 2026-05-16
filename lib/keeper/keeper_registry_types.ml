@@ -25,7 +25,18 @@ type stale_kill_class =
       { active_seconds : float
       ; timeout_threshold : float
       }
+  | Mid_turn_no_progress of
+      { active_seconds : float
+      ; since_progress_seconds : float
+      ; progress_timeout_threshold : float
+      ; last_progress_kind : string option
+      }
   | Noop_failure_loop of { noop_count : int }
+
+let progress_kind_label = function
+  | Some kind -> kind
+  | None -> "-"
+;;
 
 let stale_kill_class_to_string = function
   | Idle_turn { stall_seconds } -> Printf.sprintf "idle_turn(%.0fs)" stall_seconds
@@ -34,6 +45,18 @@ let stale_kill_class_to_string = function
       "in_turn_hung(active=%.0fs threshold=%.0fs)"
       active_seconds
       timeout_threshold
+  | Mid_turn_no_progress
+      { active_seconds
+      ; since_progress_seconds
+      ; progress_timeout_threshold
+      ; last_progress_kind
+      } ->
+    Printf.sprintf
+      "mid_turn_no_progress(active=%.0fs since_progress=%.0fs threshold=%.0fs last=%s)"
+      active_seconds
+      since_progress_seconds
+      progress_timeout_threshold
+      (progress_kind_label last_progress_kind)
   | Noop_failure_loop { noop_count } ->
     Printf.sprintf "noop_failure_loop(noop=%d)" noop_count
 ;;
@@ -1001,6 +1024,8 @@ type registry_entry =
 and turn_observation =
   { turn_id : int
   ; started_at : float
+  ; last_progress_at : float
+  ; last_progress_kind : string option
   ; turn_phase : packed_turn_phase
   ; decision_stage : packed_decision_stage
   ; cascade_state : packed_cascade_state
@@ -1113,4 +1138,3 @@ let compaction_stage_of_event entry event =
   | Keeper_state_machine.Compaction_failed _ -> Packed Compaction_accumulating
   | _ -> entry.compaction_stage
 ;;
-

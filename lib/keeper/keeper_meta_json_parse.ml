@@ -400,10 +400,45 @@ let parse_proactive_runtime (json : Yojson.Safe.t) : proactive_runtime =
   }
 ;;
 
+(* Observability for the synthetic-ts recovery branch.  Without
+   this counter, the loader silently substituted [Time_compat.now ()]
+   when persisted [last_continuity_update_ts] was missing/invalid
+   but [continuity_summary] was non-empty — a recovery designed to
+   stop the cooldown gate from bypassing on a corrupted meta JSON.
+   The substitution itself is correct, but operators had no way to
+   tell whether a keeper booted with a real timestamp or a
+   synthesised one.  Closes the silent-recovery gap noted in
+   .tmp/memory-compacting-analysis.html (continuity ts recovery). *)
+let () =
+  Prometheus.register_counter
+    ~name:Keeper_metrics.metric_keeper_continuity_ts_recovered
+    ~help:
+      "Total [parse_last_continuity_update_ts] events where the \
+       persisted timestamp was missing/invalid but the continuity \
+       summary was non-empty, triggering a synthetic now() \
+       substitution.  Non-zero counts mean the meta JSON was \
+       written without a valid timestamp or the field was \
+       corrupted on disk."
+    ()
+;;
+
 let parse_last_continuity_update_ts ~(continuity_summary : string) (json : Yojson.Safe.t) =
   let parsed_ts = Safe_ops.json_float ~default:0.0 "last_continuity_update_ts" json in
   if parsed_ts <= 0.0 && String.trim continuity_summary <> ""
-  then Time_compat.now ()
+  then begin
+    let synthetic = Time_compat.now () in
+    Prometheus.inc_counter
+      Keeper_metrics.metric_keeper_continuity_ts_recovered
+      ();
+    Log.Keeper.warn
+      "parse_last_continuity_update_ts: persisted ts missing/invalid \
+       (=%f) but continuity_summary is non-empty (len=%d); \
+       substituting now()=%f to keep cooldown gate from bypassing"
+      parsed_ts
+      (String.length continuity_summary)
+      synthetic;
+    synthetic
+  end
   else parsed_ts
 ;;
 

@@ -159,9 +159,14 @@ function expectedCountForKeeperFilter(
   keeperFilter: KeeperFilterMode,
   counts: ReturnType<typeof resolveRuntimeCounts>,
 ): number {
-  if (keeperFilter === 'keeper-only') return counts.keepers
-  if (keeperFilter === 'agent-only') return counts.agents
-  return counts.totalRuntimes
+  // Live counts are authoritative when execution has anything; fall back to the
+  // configured baseline so "expected N runtimes" hints survive a cold-start
+  // before the execution stream hydrates. `configured` has no agent dimension —
+  // agent counts always come from the live view.
+  const useLive = counts.live.totalRuntimes > 0
+  if (keeperFilter === 'keeper-only') return useLive ? counts.live.keepers : counts.configured.keepers
+  if (keeperFilter === 'agent-only') return counts.live.agents
+  return useLive ? counts.live.totalRuntimes : counts.configured.totalRuntimes
 }
 
 const FILTER_META: Record<StatusFilter, { label: string; description: string }> = {
@@ -525,17 +530,18 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     count: executionLoaded.value || scopedAgents.length > 0 ? counts[key] : null,
     title: FILTER_META[key].description,
   }))
+  const liveKeepers = runtimeCounts.live.keepers
+  const configuredKeepers = runtimeCounts.configured.keepers
+  const configuredKeeperDelta = Math.max(0, configuredKeepers - liveKeepers)
   const scopeLabel = keeperFilter === 'keeper-only'
-    ? `키퍼 ${expectedScopedCount}개`
+    ? `키퍼 활성 ${liveKeepers}개 / 설정 ${configuredKeepers}개`
     : keeperFilter === 'agent-only'
-      ? `일반 에이전트 ${expectedScopedCount}개`
-      : `에이전트/키퍼 ${expectedScopedCount}개`
-  const configuredKeeperHint =
-    keeperFilter === 'agent-only' || runtimeCounts.configuredKeepers <= 0
+      ? `일반 에이전트 ${runtimeCounts.live.agents}개`
+      : `에이전트/키퍼 활성 ${runtimeCounts.live.totalRuntimes}개 / 설정 ${runtimeCounts.configured.totalRuntimes}개`
+  const configuredIdleHint =
+    keeperFilter === 'agent-only' || configuredKeeperDelta === 0
       ? null
-      : runtimeCounts.configuredKeepers > runtimeCounts.keepers
-        ? `설정된 keeper ${runtimeCounts.configuredKeepers}개 · runtime ${runtimeCounts.keepers}개 · 일시정지/미기동 ${runtimeCounts.configuredKeepers - runtimeCounts.keepers}개`
-        : `설정된 keeper ${runtimeCounts.configuredKeepers}개`
+      : `일시정지/미기동 ${configuredKeeperDelta}개`
   const fallbackStateTitle =
     executionError.value
       ? '상세 상태 불러오기 실패'
@@ -546,8 +552,8 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     executionError.value
       ? `${countSourceLabel} 기준 ${scopeLabel}가 등록되어 있지만 상세 상태 정보를 아직 가져오지 못했습니다.`
       : executionLoaded.value
-        ? `${countSourceLabel} 기준 ${scopeLabel}가 등록되어 있고 일부만 상세 목록에 반영됐습니다.${configuredKeeperHint ? ` ${configuredKeeperHint}.` : ''}`
-        : `${countSourceLabel} 기준 ${scopeLabel}가 등록되어 있습니다.${configuredKeeperHint ? ` ${configuredKeeperHint}.` : ''} 상세 상태 정보가 올라오면 상태별 분류와 카드가 채워집니다.`
+        ? `${countSourceLabel} 기준 ${scopeLabel}가 등록되어 있고 일부만 상세 목록에 반영됐습니다.${configuredIdleHint ? ` ${configuredIdleHint}.` : ''}`
+        : `${countSourceLabel} 기준 ${scopeLabel}가 등록되어 있습니다.${configuredIdleHint ? ` ${configuredIdleHint}.` : ''} 상세 상태 정보가 올라오면 상태별 분류와 카드가 채워집니다.`
 
   return html`
     <div class="agent-page flex w-full flex-col gap-5 px-0 py-1">
@@ -600,7 +606,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                     <p class="m-0 text-xs leading-paragraph text-[var(--color-fg-primary)]">${fallbackStateMessage}</p>
                     <div class="flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]">
                       <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5">scope ${namespaceName}</span>
-                      ${configuredKeeperHint ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5">${configuredKeeperHint}</span>` : null}
+                      ${configuredIdleHint ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5">${configuredIdleHint}</span>` : null}
                     </div>
                   </div>
                 </div>

@@ -278,7 +278,7 @@ refresh_latest_evidence_from_status() {
   [[ -z "$status_json" ]] && return 0
   LATEST_TRACE_ID="$(printf '%s' "$status_json" | jq -r '.meta.trace_id // ""')"
   LATEST_GENERATION="$(printf '%s' "$status_json" | jq -r '.generation // .meta.generation // ""')"
-  LATEST_COMPACTIONS="$(printf '%s' "$status_json" | jq -r '.compaction_count // ""')"
+  LATEST_COMPACTIONS="$(printf '%s' "$status_json" | jq -r '.compaction_count // .meta.compaction_count // ""')"
   LATEST_HANDOFFS="$(printf '%s' "$status_json" | jq -r '.handoff_count_total // ""')"
   LATEST_HEALTH="$(printf '%s' "$status_json" | jq -r '.diagnostic.health_state // ""')"
   if [[ "$(printf '%s' "$status_json" | jq -r '.keepalive_running // false')" == "true" ]] \
@@ -884,8 +884,8 @@ real_run() {
   snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
   status_json="$(cat "$snapshot_file")"
   baseline_continuity_ts="$(printf '%s' "$status_json" | jq -r '(.meta.last_continuity_update_ts | tonumber?) // 0')"
-  baseline_compactions="$(printf '%s' "$status_json" | jq -r '(.compaction_count | tonumber?) // 0')"
-  baseline_generation="$(printf '%s' "$status_json" | jq -r '(.generation | tonumber?) // 0')"
+  baseline_compactions="$(printf '%s' "$status_json" | jq -r '((.compaction_count // .meta.compaction_count) | tonumber?) // 0')"
+  baseline_generation="$(printf '%s' "$status_json" | jq -r '((.generation // .meta.generation) | tonumber?) // 0')"
   baseline_handoffs="$(printf '%s' "$status_json" | jq -r '(.handoff_count_total | tonumber?) // 0')"
   baseline_trace="$(printf '%s' "$status_json" | jq -r '.meta.trace_id')"
   compaction_done=0
@@ -902,7 +902,7 @@ real_run() {
       append_phase "continuity" "fail" "continuity turn failed: $LAST_TOOL_ERROR" "$snapshot_file" "$heartbeat_file"
       return 1
     fi
-	    if ! wait_for_keeper_status_condition "(((.meta.total_turns | tonumber?) // 0) > $continuity_baseline_turns) and ((((.meta.last_continuity_update_ts | tonumber?) // 0) > (($baseline_continuity_ts | tonumber))) and (((.continuity_summary // \"\") | length) > 0))" "$((TURN_TIMEOUT_SEC + 30))" >/dev/null; then
+	    if ! wait_for_keeper_status_condition "(((.meta.total_turns | tonumber?) // 0) > $continuity_baseline_turns) and (((.meta.last_continuity_update_ts | tonumber?) // 0) > ($baseline_continuity_ts | tonumber)) and (((.continuity_summary // .meta.continuity_summary // \"\") | length) > 0)" "$((TURN_TIMEOUT_SEC + 30))" >/dev/null; then
 	      snapshot_info="$(capture_snapshot continuity)"
 	      snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
 	      heartbeat_file="$(printf '%s' "$snapshot_info" | sed -n '2p')"
@@ -921,7 +921,7 @@ real_run() {
     status_json="$(cat "$snapshot_file")"
     refresh_latest_evidence_from_status "$status_json"
     if [[ "$(printf '%s' "$status_json" | jq -r '(((.meta.last_continuity_update_ts | tonumber?) // 0) > (($old | tonumber?) // 0))' --arg old "$baseline_continuity_ts")" == "true" ]] \
-      && [[ "$(printf '%s' "$status_json" | jq -r '(.continuity_summary // "") | length > 0')" == "true" ]]; then
+      && [[ "$(printf '%s' "$status_json" | jq -r '(.continuity_summary // .meta.continuity_summary // "") | length > 0')" == "true" ]]; then
       CONTINUITY_PASS=1
       append_phase "continuity" "pass" "continuity summary and timestamp advanced after a real turn" "$snapshot_file" "$heartbeat_file"
       baseline_continuity_ts="$(printf '%s' "$status_json" | jq -r '(.meta.last_continuity_update_ts | tonumber?) // 0')"
@@ -946,21 +946,21 @@ real_run() {
     refresh_latest_evidence_from_status "$status_after"
 
     if [[ $compaction_done -eq 0 ]] \
-      && [[ "$(printf '%s' "$status_after" | jq -r '(((.compaction_count | tonumber?) // 0) > (($old | tonumber?) // 0))' --arg old "$baseline_compactions")" == "true" ]]; then
+      && [[ "$(printf '%s' "$status_after" | jq -r '((((.compaction_count // .meta.compaction_count) | tonumber?) // 0) > (($old | tonumber?) // 0))' --arg old "$baseline_compactions")" == "true" ]]; then
       COMPACTION_PASS=1
       compaction_done=1
       append_phase "compaction" "pass" "compaction counter increased under isolated pressure" "$snapshot_file" "$heartbeat_file"
-      baseline_compactions="$(printf '%s' "$status_after" | jq -r '(.compaction_count | tonumber?) // 0')"
+      baseline_compactions="$(printf '%s' "$status_after" | jq -r '((.compaction_count // .meta.compaction_count) | tonumber?) // 0')"
     fi
 
     if [[ $handoff_done -eq 0 ]] \
-      && { [[ "$(printf '%s' "$status_after" | jq -r '(((.generation | tonumber?) // 0) > (($old | tonumber?) // 0))' --arg old "$baseline_generation")" == "true" ]] \
+      && { [[ "$(printf '%s' "$status_after" | jq -r '((((.generation // .meta.generation) | tonumber?) // 0) > (($old | tonumber?) // 0))' --arg old "$baseline_generation")" == "true" ]] \
         || [[ "$(printf '%s' "$status_after" | jq -r '(((.handoff_count_total | tonumber?) // 0) > (($old | tonumber?) // 0))' --arg old "$baseline_handoffs")" == "true" ]] \
         || [[ "$(printf '%s' "$status_after" | jq -r '.meta.trace_id != $old' --arg old "$baseline_trace")" == "true" ]]; }; then
       HANDOFF_PASS=1
       handoff_done=1
       append_phase "handoff" "pass" "handoff/generation evidence changed under isolated pressure" "$snapshot_file" "$heartbeat_file"
-      baseline_generation="$(printf '%s' "$status_after" | jq -r '(.generation | tonumber?) // 0')"
+      baseline_generation="$(printf '%s' "$status_after" | jq -r '((.generation // .meta.generation) | tonumber?) // 0')"
       baseline_handoffs="$(printf '%s' "$status_after" | jq -r '(.handoff_count_total | tonumber?) // 0')"
       baseline_trace="$(printf '%s' "$status_after" | jq -r '.meta.trace_id')"
     fi
@@ -988,7 +988,7 @@ real_run() {
     status_json="$(keeper_status_json)"
     agent_name="$(printf '%s' "$status_json" | jq -r '.meta.agent_name')"
     LATEST_TRACE_ID="$(printf '%s' "$status_json" | jq -r '.meta.trace_id')"
-    LATEST_GENERATION="$(printf '%s' "$status_json" | jq -r '.generation')"
+    LATEST_GENERATION="$(printf '%s' "$status_json" | jq -r '.generation // .meta.generation // ""')"
     if ! stop_keeper false false; then
       snapshot_info="$(capture_snapshot recovery-down)"
       snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
@@ -1022,16 +1022,23 @@ real_run() {
           refresh_latest_evidence_from_status "$status_after"
           if [[ "$(printf '%s' "$status_after" | jq -r '.keepalive_running')" == "true" ]] \
             && [[ "$(printf '%s' "$status_after" | jq -r '.last_turn_ago_s < 120')" == "true" ]] \
-            && [[ "$(printf '%s' "$status_after" | jq -r '(.continuity_summary // "") | length > 0')" == "true" ]] \
+            && [[ "$(printf '%s' "$status_after" | jq -r '(.continuity_summary // .meta.continuity_summary // "") | length > 0')" == "true" ]] \
             && [[ "$(printf '%s' "$status_after" | jq -r '.agent.exists')" == "true" ]]; then
             # OAS #467 regression guard: verify checkpoint messages > 0
             recovery_trace_id="$(printf '%s' "$status_after" | jq -r '.meta.trace_id // empty')"
             if [[ -z "$recovery_trace_id" ]]; then
               append_phase "checkpoint_truth" "skip" "trace_id missing from status — cannot locate checkpoint" "$snapshot_file" "$heartbeat_file"
             else
-              ckpt_dir="${BASE_PATH}/.masc/keepers/${KEEPER_NAME}/${recovery_trace_id}"
-              ckpt_file="${ckpt_dir}/${recovery_trace_id}.json"
-              if [[ -f "$ckpt_file" ]]; then
+              ckpt_file=""
+              for candidate in \
+                "${BASE_PATH}/.masc/keepers/${KEEPER_NAME}/${recovery_trace_id}/${recovery_trace_id}.json" \
+                "${BASE_PATH}/.masc/traces/${recovery_trace_id}/${recovery_trace_id}.json"; do
+                if [[ -f "$candidate" ]]; then
+                  ckpt_file="$candidate"
+                  break
+                fi
+              done
+              if [[ -n "$ckpt_file" ]]; then
                 if ckpt_msg_count="$(jq '.messages | length' "$ckpt_file")"; then
                   if [[ "$ckpt_msg_count" -gt 0 ]]; then
                     append_phase "checkpoint_truth" "pass" "load_oas checkpoint contains ${ckpt_msg_count} messages (OAS #467 regression guard)" "$snapshot_file" "$heartbeat_file"
@@ -1042,7 +1049,7 @@ real_run() {
                   append_phase "checkpoint_truth" "error" "checkpoint JSON parse failed at ${ckpt_file} — possible file corruption" "$snapshot_file" "$heartbeat_file"
                 fi
               else
-                append_phase "checkpoint_truth" "skip" "checkpoint file not found at ${ckpt_file}" "$snapshot_file" "$heartbeat_file"
+                append_phase "checkpoint_truth" "skip" "checkpoint file not found under keeper or trace checkpoint paths for ${recovery_trace_id}" "$snapshot_file" "$heartbeat_file"
               fi
             fi
             RECOVERY_PASS=1

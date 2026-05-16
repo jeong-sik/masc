@@ -966,7 +966,7 @@ let search_posts store ~predicate ~limit : post list =
 
 (** {1 Comment Operations} *)
 
-let add_comment
+let add_comment_with_status
       store
       ~post_id
       ~author
@@ -974,7 +974,7 @@ let add_comment
       ?parent_id
       ?(ttl_hours = Limits.default_ttl_hours)
       ()
-  : (comment, board_error) Result.t
+  : (comment * [ `Fresh | `Dedup ], board_error) Result.t
   =
   maybe_sweep store;
   (* Validate all IDs first *)
@@ -1007,21 +1007,47 @@ let add_comment
                 match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
                 | None -> Error (Post_not_found post_id)
                 | Some post ->
-                  (* Check comment count using index *)
                   let post_key = Post_id.to_string pid in
-                  let post_comment_count =
+                  let comment_ids =
                     Hashtbl.find_opt store.comments_by_post post_key
                     |> Option.value ~default:[]
-                    |> List.length
                   in
-                  if post_comment_count >= Limits.max_comments_per_post
-                  then
-                    Error
-                      (Capacity_exceeded
-                         { current = post_comment_count
-                         ; max = Limits.max_comments_per_post
-                         })
-                  else (
+                  let author_str = Agent_id.to_string author_id in
+                  let parent_key = Option.map Comment_id.to_string parent_cid in
+                  let dedup_match =
+                    comment_ids
+                    |> List.filter_map (fun cid -> Hashtbl.find_opt store.comments cid)
+                    |> List.find_opt (fun (c : comment) ->
+                      String.equal (Agent_id.to_string c.author) author_str
+                      && Option.equal
+                           String.equal
+                           (Option.map Comment_id.to_string c.parent_id)
+                           parent_key
+                      && String.equal c.content content)
+                  in
+                  (match dedup_match with
+                   | Some existing ->
+                     Log.BoardLog.info
+                       "dedup: skipping duplicate comment author=%s post_id=%s \
+                        content_len=%d existing_id=%s"
+                       author_str
+                       post_key
+                       (String.length content)
+                       (Comment_id.to_string existing.id);
+                     Ok (`Dedup_hit existing)
+                   | None ->
+                     (* Check comment count using index after duplicate
+                        detection so a retry of an existing comment remains
+                        idempotent even on a full thread. *)
+                     let post_comment_count = List.length comment_ids in
+                     if post_comment_count >= Limits.max_comments_per_post
+                     then
+                       Error
+                         (Capacity_exceeded
+                            { current = post_comment_count
+                            ; max = Limits.max_comments_per_post
+                            })
+                     else (
                     let now = Time_compat.now () in
                     let ttl =
                       match post.post_kind with
@@ -1064,13 +1090,23 @@ let add_comment
                       { post with reply_count = post.reply_count + 1; updated_at = now };
                     invalidate_post_caches store;
                     invalidate_comment_caches store;
-                    Ok comment))
+                    Ok (`Fresh comment))))
             in
             match board_result with
-            | Ok comment ->
+            | Ok (`Fresh comment) ->
               with_persist_lock store (fun () -> append_comment comment);
-              Ok comment
+              Ok (comment, `Fresh)
+            | Ok (`Dedup_hit existing) -> Ok (existing, `Dedup)
             | Error _ as e -> e)))
+;;
+
+let add_comment store ~post_id ~author ~content ?parent_id ?ttl_hours () :
+  (comment, board_error) Result.t =
+  match add_comment_with_status store ~post_id ~author ~content ?parent_id
+          ?ttl_hours ()
+  with
+  | Ok (comment, _) -> Ok comment
+  | Error _ as e -> e
 ;;
 
 let get_comments store ~post_id : (comment list, board_error) Result.t =

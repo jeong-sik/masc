@@ -530,11 +530,19 @@ let operator_disposition (receipt : t)
            (fun required -> List.mem required used_tool_names)
            required_tool_names
     in
+    let generic_claim_context_progress =
+      (* Generic require_tool_use has no named required-tool set. A successful
+         claim-only turn still made scheduling progress; the next turn must
+         execute, but this receipt should not be reclassified as a human pause. *)
+      required_tool_names = []
+      && receipt.tool_surface.missing_required_tools = []
+      && List.exists Keeper_tool_disclosure.is_claim_context_tool_name used_tool_names
+    in
     let ok_followup_progress =
       receipt.outcome = `Ok
       && receipt.cascade_outcome = Cascade_completed
       && receipt.tool_contract_result = Contract_needs_execution_progress
-      && required_tools_satisfied
+      && (required_tools_satisfied || generic_claim_context_progress)
     in
     receipt.tool_surface.tool_requirement = Required
     && (List.mem
@@ -938,6 +946,7 @@ let append (config : Coord.config) (receipt : t) =
 let stale_kill_class_label = function
   | Keeper_registry.Idle_turn _ -> "idle_turn"
   | Keeper_registry.In_turn_hung _ -> "in_turn_hung"
+  | Keeper_registry.Mid_turn_no_progress _ -> "mid_turn_no_progress"
   | Keeper_registry.Noop_failure_loop _ -> "noop_failure_loop"
 ;;
 

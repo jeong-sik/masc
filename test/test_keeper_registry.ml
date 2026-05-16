@@ -1624,6 +1624,108 @@ let test_mark_sdk_turn_started_preserves_keeper_scope () =
     check (float 1e-6) "started_at preserved" started_at_before obs.R.started_at
   | _ -> fail "obs missing after SDK boundary"
 
+let test_turn_progress_starts_at_turn_boundary () =
+  R.clear ();
+  let keeper_name = "k-progress-start" in
+  ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
+  R.mark_turn_started ~base_path:bp keeper_name;
+  match R.get ~base_path:bp keeper_name with
+  | Some { current_turn_observation = Some obs; _ } ->
+    check (float 1e-6) "progress starts at started_at"
+      obs.R.started_at obs.R.last_progress_at;
+    check (option string) "progress kind"
+      (Some "turn_started")
+      obs.R.last_progress_kind
+  | _ -> fail "obs missing after mark_turn_started"
+
+let test_record_turn_progress_updates_live_observation () =
+  R.clear ();
+  let keeper_name = "k-progress-record" in
+  ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
+  R.mark_turn_started ~base_path:bp keeper_name;
+  let before =
+    match R.get ~base_path:bp keeper_name with
+    | Some { current_turn_observation = Some obs; _ } -> obs.R.last_progress_at
+    | _ -> fail "obs missing before progress"
+  in
+  R.record_turn_progress ~base_path:bp keeper_name ~event_kind:"sse_text_delta";
+  match R.get ~base_path:bp keeper_name with
+  | Some { current_turn_observation = Some obs; _ } ->
+    check bool "progress timestamp advances or stays equal" true
+      (obs.R.last_progress_at >= before);
+    check (option string) "progress kind updated"
+      (Some "sse_text_delta")
+      obs.R.last_progress_kind
+  | _ -> fail "obs missing after progress"
+
+let test_sse_ping_does_not_refresh_progress_observation () =
+  R.clear ();
+  let keeper_name = "k-progress-ping-ignored" in
+  ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
+  R.mark_turn_started ~base_path:bp keeper_name;
+  let before_at, before_kind =
+    match R.get ~base_path:bp keeper_name with
+    | Some { current_turn_observation = Some obs; _ } ->
+      obs.R.last_progress_at, obs.R.last_progress_kind
+    | _ -> fail "obs missing before ping"
+  in
+  let ping_kind =
+    Masc_mcp.Keeper_agent_run.For_testing.sse_event_progress_kind
+      Agent_sdk.Types.Ping
+  in
+  check (option string) "ping has no progress kind" None ping_kind;
+  Option.iter
+    (fun event_kind ->
+       R.record_turn_progress ~base_path:bp keeper_name ~event_kind)
+    ping_kind;
+  (match R.get ~base_path:bp keeper_name with
+   | Some { current_turn_observation = Some obs; _ } ->
+     check (float 1e-6) "ping leaves progress timestamp unchanged"
+       before_at obs.R.last_progress_at;
+     check (option string) "ping leaves progress kind unchanged"
+       before_kind obs.R.last_progress_kind
+   | _ -> fail "obs missing after ping");
+  let text_kind =
+    Masc_mcp.Keeper_agent_run.For_testing.sse_event_progress_kind
+      (Agent_sdk.Types.ContentBlockDelta
+         { index = 0; delta = Agent_sdk.Types.TextDelta "token" })
+  in
+  (match text_kind with
+   | Some event_kind ->
+     R.record_turn_progress ~base_path:bp keeper_name ~event_kind
+   | None -> fail "text delta should classify as progress");
+  match R.get ~base_path:bp keeper_name with
+  | Some { current_turn_observation = Some obs; _ } ->
+    check (option string) "text delta updates progress kind"
+      (Some "sse_text_delta")
+      obs.R.last_progress_kind
+  | _ -> fail "obs missing after text delta"
+
+let test_registry_progress_wrapper_survives_liveness_off () =
+  with_env "MASC_CASCADE_ATTEMPT_LIVENESS" "off" @@ fun () ->
+  Masc_mcp.Cascade_attempt_liveness_config.reset_cache_for_test ();
+  Fun.protect
+    ~finally:Masc_mcp.Cascade_attempt_liveness_config.reset_cache_for_test
+  @@ fun () ->
+  check string "liveness mode" "off"
+    (Masc_mcp.Cascade_attempt_liveness_config.mode_label
+       (Masc_mcp.Cascade_attempt_liveness_config.current_mode ()));
+  let stamped = ref [] in
+  let on_event =
+    Masc_mcp.Keeper_agent_run.For_testing.registry_progress_on_event
+      ~record_turn_progress:(fun event_kind ->
+        stamped := event_kind :: !stamped)
+      None
+  in
+  on_event Agent_sdk.Types.Ping;
+  check (list string) "ping still ignored" [] (List.rev !stamped);
+  on_event
+    (Agent_sdk.Types.ContentBlockDelta
+       { index = 0; delta = Agent_sdk.Types.TextDelta "token" });
+  check (list string) "text delta stamps progress"
+    [ "sse_text_delta" ]
+    (List.rev !stamped)
+
 let test_mark_sdk_turn_started_no_op_without_obs () =
   R.clear ();
   let keeper_name = "k-rfc-0045-no-obs" in
@@ -2001,6 +2103,14 @@ let () =
             test_mark_sdk_turn_started_resets_after_finalizing;
           eio_test "mark_sdk_turn_started preserves keeper-turn-scoped data"
             test_mark_sdk_turn_started_preserves_keeper_scope;
+          eio_test "turn progress starts at turn boundary"
+            test_turn_progress_starts_at_turn_boundary;
+          eio_test "record_turn_progress updates live observation"
+            test_record_turn_progress_updates_live_observation;
+          eio_test "SSE ping does not refresh progress observation"
+            test_sse_ping_does_not_refresh_progress_observation;
+          eio_test "registry progress wrapper survives liveness off"
+            test_registry_progress_wrapper_survives_liveness_off;
           eio_test "mark_sdk_turn_started no-op without observation"
             test_mark_sdk_turn_started_no_op_without_obs;
           eio_test "mark_turn_cascade_exhausted materializes pre-disclosure path"

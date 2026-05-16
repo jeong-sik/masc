@@ -76,6 +76,93 @@ let test_tool_heavy_floor_in_range () =
   Alcotest.(check bool) "tool_heavy_ratio_floor is a meaningful ratio [0,1]"
     true (v >= 0.0 && v <= 1.0)
 
+(* ── pure gate decision ─────────────────────────────────────────────── *)
+
+let decide
+    ?(ratio = 0.1)
+    ?(msg_count = 1)
+    ?(tok_count = 1)
+    ?(ratio_gate = 0.5)
+    ?(message_gate = 0)
+    ?(token_gate = 0)
+    ?(cooldown_sec = 60)
+    ?(last_continuity_update_ts = 0.0)
+    ?(last_proactive_ts = 0.0)
+    ?(now_ts = 100.0)
+    () =
+  KCP.decide_compaction
+    ~ratio
+    ~msg_count
+    ~tok_count
+    ~ratio_gate
+    ~message_gate
+    ~token_gate
+    ~cooldown_sec
+    ~last_continuity_update_ts
+    ~last_proactive_ts
+    ~now_ts
+
+let test_decide_ts_zero_bypasses_cooldown () =
+  match decide ~ratio:0.6 ~ratio_gate:0.5 ~last_continuity_update_ts:0.0 () with
+  | KCP.Applied (Compaction_trigger.Ratio_threshold _) -> ()
+  | other ->
+    Alcotest.fail
+      ("expected ratio compaction, got "
+       ^ KCP.compaction_decision_to_string other)
+
+let test_decide_recent_state_blocks_non_emergency () =
+  match
+    decide
+      ~ratio:0.6
+      ~ratio_gate:0.5
+      ~last_continuity_update_ts:95.0
+      ~now_ts:100.0
+      ~cooldown_sec:60
+      ()
+  with
+  | KCP.Skipped_continuity_reflection { hold_s; cooldown_sec } ->
+    Alcotest.(check int) "cooldown" 60 cooldown_sec;
+    Alcotest.(check bool) "hold positive" true (hold_s > 0.0)
+  | other ->
+    Alcotest.fail
+      ("expected continuity skip, got "
+       ^ KCP.compaction_decision_to_string other)
+
+let test_decide_emergency_bypasses_cooldown () =
+  match
+    decide
+      ~ratio:KCP.emergency_compact_ratio_threshold
+      ~ratio_gate:0.5
+      ~last_continuity_update_ts:99.0
+      ~now_ts:100.0
+      ~cooldown_sec:60
+      ()
+  with
+  | KCP.Applied (Compaction_trigger.Ratio_threshold _) -> ()
+  | other ->
+    Alcotest.fail
+      ("expected emergency ratio compaction, got "
+       ^ KCP.compaction_decision_to_string other)
+
+let test_decide_tool_heavy_bypasses_cooldown () =
+  match
+    decide
+      ~ratio:(KCP.tool_heavy_ratio_floor +. 0.01)
+      ~msg_count:(KCP.tool_heavy_msg_threshold + 1)
+      ~ratio_gate:0.99
+      ~message_gate:0
+      ~token_gate:0
+      ~last_continuity_update_ts:99.0
+      ~now_ts:100.0
+      ~cooldown_sec:60
+      ()
+  with
+  | KCP.Applied (Compaction_trigger.Tool_heavy _) -> ()
+  | other ->
+    Alcotest.fail
+      ("expected tool-heavy compaction, got "
+       ^ KCP.compaction_decision_to_string other)
+
 (* ── runner ──────────────────────────────────────────────────────────── *)
 
 let () =
@@ -111,5 +198,16 @@ let () =
             test_tool_heavy_threshold_positive;
           Alcotest.test_case "tool_heavy ratio in [0,1]" `Quick
             test_tool_heavy_floor_in_range;
+        ] );
+      ( "decide_compaction",
+        [
+          Alcotest.test_case "ts=0 bypasses cooldown" `Quick
+            test_decide_ts_zero_bypasses_cooldown;
+          Alcotest.test_case "recent state blocks non-emergency" `Quick
+            test_decide_recent_state_blocks_non_emergency;
+          Alcotest.test_case "emergency bypasses cooldown" `Quick
+            test_decide_emergency_bypasses_cooldown;
+          Alcotest.test_case "tool-heavy bypasses cooldown" `Quick
+            test_decide_tool_heavy_bypasses_cooldown;
         ] );
     ]

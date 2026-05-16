@@ -499,6 +499,8 @@ let metric_keeper_compaction_saved_tokens = "masc_keeper_compaction_saved_tokens
 let metric_keeper_operator_compact = "masc_keeper_operator_compact_total"
 let metric_keeper_operator_clear = "masc_keeper_operator_clear_total"
 let metric_keeper_compaction_noop = "masc_keeper_compaction_noop_total"
+let metric_keeper_continuity_no_state = "masc_keeper_continuity_no_state_total"
+let metric_keeper_tool_pair_repair = "masc_keeper_tool_pair_repair_total"
 let metric_keeper_tool_emission_registry_size = "masc_keeper_tool_emission_registry_size"
 let metric_keeper_tool_emission_pushes = "masc_keeper_tool_emission_pushes_total"
 
@@ -632,6 +634,14 @@ let metric_keeper_oas_timeout_budget_loop_paused =
 let metric_keeper_cycle_exceptions = "masc_keeper_cycle_exceptions_total"
 let metric_keeper_snapshot_write_failures = "masc_keeper_snapshot_write_failures_total"
 
+(** Counts post-turn invocations where neither the LLM reply nor the OAS
+    checkpoint produced a state snapshot.  Used to detect prompt / cascade
+    drift; a keeper that never emits state has no reflection content for
+    the compaction cooldown to protect. *)
+let metric_keeper_state_snapshot_skipped_no_state =
+  "masc_keeper_state_snapshot_skipped_no_state_total"
+;;
+
 let metric_keeper_progress_updated_line_failures =
   "masc_keeper_progress_updated_line_failures_total"
 ;;
@@ -673,6 +683,14 @@ let metric_keeper_thinking_persist_failures =
 
 let metric_keeper_checkpoint_failures = "masc_keeper_checkpoint_failures_total"
 
+let metric_keeper_memory_jsonl_ops =
+  "masc_keeper_memory_jsonl_ops_total"
+;;
+
+let metric_keeper_user_visible_reply_source =
+  "masc_keeper_user_visible_reply_source_total"
+;;
+
 let metric_keeper_continuity_summary_source =
   "masc_keeper_continuity_summary_source_total"
 ;;
@@ -687,6 +705,10 @@ let metric_keeper_summarizer_state_blocks_removed =
 
 let metric_keeper_oas_env_key_rejections =
   "masc_keeper_oas_env_key_rejections_total"
+;;
+
+let metric_keeper_continuity_ts_recovered =
+  "masc_keeper_continuity_ts_recovered_total"
 ;;
 
 let metric_keeper_memory_write_failures = "masc_keeper_memory_write_failures_total"

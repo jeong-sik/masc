@@ -36,40 +36,9 @@ let dedupe_thinking_lines (lines : Trajectory.trajectory_line list)
             true))
     lines
 
-let internal_history_json_to_trajectory_line (json : Yojson.Safe.t)
-    : Trajectory.trajectory_line option =
-  let source = Safe_ops.json_string ~default:"" "source" json in
-  let content = Safe_ops.json_string ~default:"" "content" json in
-  if source <> "internal_assistant" || String.trim content = "" then None
-  else
-    let ts =
-      match Safe_ops.json_float_opt "ts_unix" json with
-      | Some value when value > 0.0 -> value
-      | _ ->
-          match Safe_ops.json_float_opt "timestamp" json with
-          | Some value when value > 0.0 -> value
-          | _ -> 0.0
-    in
-    if ts <= 0.0 then None
-    else
-      let ts_iso =
-        match Safe_ops.json_string_opt "ts_iso" json with
-        | Some value when String.trim value <> "" -> value
-        | _ ->
-            match Safe_ops.json_string_opt "ts" json with
-            | Some value when String.trim value <> "" -> value
-            | _ -> Dashboard_utils.iso_of_unix ts
-      in
-      Some
-        (Trajectory.Thinking
-           {
-             ts;
-             ts_iso;
-             turn = Safe_ops.json_int ~default:0 "turn" json;
-             content;
-             content_length = String.length content;
-             redacted = Safe_ops.json_bool ~default:false "redacted" json;
-           })
+(* internal_history_json_to_trajectory_line moved to
+   Server_dashboard_http_keeper_api_types (intra-library file split,
+   2026-05-16). *)
 
 let read_internal_history_lines ~(config : Coord.config) ~(trace_id : string)
     : Trajectory.trajectory_line list =
@@ -1377,9 +1346,9 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
    moved to Server_dashboard_http_keeper_api_types
    (intra-library file split, 2026-05-16). *)
 
-let runtime_manifest_public_json row =
-  Keeper_runtime_manifest.to_json row
-  |> runtime_trace_public_json
+(* runtime_manifest_public_json moved to
+   Server_dashboard_http_keeper_api_types (intra-library file split,
+   2026-05-16). *)
 
 let provider_attempts_summary_json scan =
   let attempt_rows = queue_to_list scan.provider_attempt_rows in

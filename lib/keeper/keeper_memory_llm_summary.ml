@@ -6,6 +6,32 @@
 
 let summary_max_tokens = 512
 
+(* Observability for [summarize_with_provider] outcomes and
+   [summarize_with_providers] chain exhaustion.  Existing warn lines
+   are preserved; this adds a typed counter so operators can read
+   success rate per provider, and an explicit warn when the cascade
+   yields no summary at all (previously silent).  Closes the
+   silent-failure gap flagged in
+   .tmp/memory-compacting-analysis.html (LLM-summary triple-silent
+   fallback chain). *)
+let () =
+  Prometheus.register_counter
+    ~name:Keeper_metrics.metric_keeper_memory_llm_summary_outcomes
+    ~help:
+      "Total [summarize_with_provider] attempts classified by label \
+       [outcome] (ok_summary | timed_out | http_error | empty_response). \
+       Labels: [outcome], [provider] (model_id), [cascade]."
+    ();
+  Prometheus.register_counter
+    ~name:Keeper_metrics.metric_keeper_memory_llm_summary_chain_exhausted
+    ~help:
+      "Total [summarize_with_providers] runs where every provider \
+       returned a non-Ok outcome and the consolidation pass received \
+       no summary.  Label [cascade] names the cascade.  Rising rate \
+       means consolidation is silently skipping the LLM summary."
+    ()
+;;
+
 type complete_fn =
   sw:Eio.Switch.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
@@ -88,10 +114,24 @@ let with_timeout ?clock ~timeout_sec f =
       try Some (Eio.Time.with_timeout_exn clock timeout_sec f)
       with Eio.Time.Timeout -> None
 
+let record_summary_outcome
+    ~(cascade_name : string)
+    ~(provider_cfg : Llm_provider.Provider_config.t)
+    ~(outcome : Keeper_memory_llm_summary_outcome.t) =
+  Prometheus.inc_counter
+    Keeper_metrics.metric_keeper_memory_llm_summary_outcomes
+    ~labels:
+      [ ("outcome", Keeper_memory_llm_summary_outcome.to_label outcome)
+      ; ("provider", provider_cfg.Llm_provider.Provider_config.model_id)
+      ; ("cascade", cascade_name)
+      ]
+    ()
+
 let summarize_with_provider
     ?(complete : complete_fn = default_complete)
     ?clock
     ?(timeout_sec = Env_config_governance.Inference.timeout_seconds)
+    ?(cascade_name = "")
     ~sw
     ~net
     ~(provider_cfg : Llm_provider.Provider_config.t)
@@ -100,35 +140,69 @@ let summarize_with_provider
     () : string option =
   let provider_cfg = provider_for_summary provider_cfg in
   let messages = messages_for_summary ~trace_id ~texts in
-  match
-    with_timeout ?clock ~timeout_sec (fun () ->
-      complete ~sw ~net ?clock ~config:provider_cfg ~messages ())
-  with
-  | None ->
-      Log.Keeper.warn
-        "memory LLM summary timed out trace_id=%s provider=%s timeout_sec=%.1f"
-        trace_id provider_cfg.model_id timeout_sec;
-      None
-  | Some (Ok response) -> response_text response
-  | Some (Error err) ->
-      Log.Keeper.warn
-        "memory LLM summary failed trace_id=%s provider=%s: %s"
-        trace_id provider_cfg.model_id (Oas_compat.Http_client.error_message err);
-      None
+  let result, outcome =
+    match
+      with_timeout ?clock ~timeout_sec (fun () ->
+        complete ~sw ~net ?clock ~config:provider_cfg ~messages ())
+    with
+    | None ->
+        Log.Keeper.warn
+          "memory LLM summary timed out trace_id=%s provider=%s timeout_sec=%.1f"
+          trace_id provider_cfg.model_id timeout_sec;
+        None, Keeper_memory_llm_summary_outcome.Timed_out
+    | Some (Ok response) ->
+        (match response_text response with
+         | Some _ as summary ->
+             summary, Keeper_memory_llm_summary_outcome.Ok_summary
+         | None ->
+             Log.Keeper.warn
+               "memory LLM summary empty trace_id=%s provider=%s"
+               trace_id provider_cfg.model_id;
+             None, Keeper_memory_llm_summary_outcome.Empty_response)
+    | Some (Error err) ->
+        Log.Keeper.warn
+          "memory LLM summary failed trace_id=%s provider=%s: %s"
+          trace_id provider_cfg.model_id (Oas_compat.Http_client.error_message err);
+        None, Keeper_memory_llm_summary_outcome.Http_error
+  in
+  record_summary_outcome ~cascade_name ~provider_cfg ~outcome;
+  result
 
-let summarize_with_providers ?complete ?clock ?timeout_sec ~sw ~net ~providers
-    ~trace_id ~texts () =
+let summarize_with_providers
+    ?complete
+    ?clock
+    ?timeout_sec
+    ?(cascade_name = "")
+    ~sw
+    ~net
+    ~providers
+    ~trace_id
+    ~texts
+    () =
   let rec go = function
     | [] -> None
     | provider_cfg :: rest -> (
         match
-          summarize_with_provider ?complete ?clock ?timeout_sec ~sw ~net
-            ~provider_cfg ~trace_id ~texts ()
+          summarize_with_provider ?complete ?clock ?timeout_sec ~cascade_name
+            ~sw ~net ~provider_cfg ~trace_id ~texts ()
         with
         | Some summary -> Some summary
         | None -> go rest)
   in
-  go providers
+  match go providers with
+  | Some _ as summary -> summary
+  | None ->
+      Prometheus.inc_counter
+        Keeper_metrics.metric_keeper_memory_llm_summary_chain_exhausted
+        ~labels:[("cascade", cascade_name)]
+        ();
+      Log.Keeper.warn
+        "memory LLM summary chain exhausted trace_id=%s cascade=%s \
+         providers_attempted=%d — consolidation skipped LLM summary"
+        trace_id
+        cascade_name
+        (List.length providers);
+      None
 
 let make
     ?complete
@@ -163,8 +237,8 @@ let make
              end else
                Some
                  (fun ~trace_id ~texts ->
-                   summarize_with_providers ?complete ?clock ?timeout_sec ~sw ~net
-                     ~providers ~trace_id ~texts ()))
+                   summarize_with_providers ?complete ?clock ?timeout_sec
+                     ~cascade_name ~sw ~net ~providers ~trace_id ~texts ()))
     | _ ->
         Log.Keeper.warn
           "keeper:%s memory LLM summary skipped: Eio context unavailable cascade=%s"

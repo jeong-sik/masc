@@ -324,16 +324,40 @@ module Pending = struct
   let tbl : (string, string * float) Hashtbl.t = Hashtbl.create 16
   let mu = Eio.Mutex.create ()
 
+  (* Returns the previously-stashed entry, if any.  Callers use this to
+     report Pending_overwrite immediately rather than waiting until
+     pair_events read time. *)
   let stash ~keeper_name ~compaction_id ~ts =
     Eio.Mutex.use_rw ~protect:true mu (fun () ->
-      Hashtbl.replace tbl keeper_name (compaction_id, ts))
+      let prior = Hashtbl.find_opt tbl keeper_name in
+      Hashtbl.replace tbl keeper_name (compaction_id, ts);
+      prior)
 
   let take ~keeper_name =
     Eio.Mutex.use_rw ~protect:true mu (fun () ->
       let r = Hashtbl.find_opt tbl keeper_name in
       (match r with Some _ -> Hashtbl.remove tbl keeper_name | None -> ());
       r)
+
+  (* Evict entries whose ts is older than [now -. max_age_s].  Returns the
+     list of [(keeper_name, compaction_id, ts)] that were removed so the
+     caller can report each one. *)
+  let evict_older_than ~max_age_s ~now =
+    Eio.Mutex.use_rw ~protect:true mu (fun () ->
+      let cutoff = now -. max_age_s in
+      let stale = ref [] in
+      Hashtbl.iter
+        (fun k (id, ts) -> if ts < cutoff then stale := (k, id, ts) :: !stale)
+        tbl;
+      List.iter (fun (k, _, _) -> Hashtbl.remove tbl k) !stale;
+      !stale)
 end
+
+(* Upper bound on how long a Pending entry can sit waiting for its
+   ContextCompacted match.  Real compactions take ms; this is generous to
+   absorb LLM pauses and disk-bound persist while still bounding memory. *)
+let pending_ttl_seconds = 300.0
+let pending_ttl_sweep_interval_s = 60.0
 
 (* Translate one OAS event into zero or one persist_* effect. *)
 let handle_event ~base_path ~retention_days (evt : Agent_sdk.Event_bus.event)
@@ -342,7 +366,23 @@ let handle_event ~base_path ~retention_days (evt : Agent_sdk.Event_bus.event)
   match evt.payload with
   | Agent_sdk.Event_bus.ContextCompactStarted { agent_name; trigger } ->
     let compaction_id = synth_compaction_id ~ts_unix:ts ~keeper_name:agent_name in
-    Pending.stash ~keeper_name:agent_name ~compaction_id ~ts;
+    (match Pending.stash ~keeper_name:agent_name ~compaction_id ~ts with
+     | None -> ()
+     | Some (prior_id, prior_ts) ->
+       (* A second Started arrived before Complete for the prior id.  The
+          prior Start row is already persisted in JSONL, so pair_events
+          will eventually classify it Orphan_start; surface the event now
+          so operators don't have to wait for a JSONL read. *)
+       Prometheus.inc_counter
+         Keeper_metrics.metric_keeper_compact_audit_failures
+         ~labels:[
+           ("keeper", agent_name);
+           ("site", Keeper_compact_audit_failure_site.(to_label Pending_overwrite));
+         ]
+         ();
+       Log.Keeper.warn
+         "keeper_compact_audit: pending overwrite keeper=%s prior_id=%s prior_age_s=%.1f"
+         agent_name prior_id (ts -. prior_ts));
     let r = {
       compaction_id;
       ts_unix = ts;
@@ -433,4 +473,36 @@ let spawn_subscriber
       Eio.Time.sleep clock drain_interval_s;
       loop ()
     in
-    loop ())
+    loop ());
+  (* TTL sweeper: removes Pending entries whose Complete never arrived
+     (process crash mid-compact, OAS event drop).  Without this the
+     Hashtbl grows unbounded and pair_events never observes them. *)
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec ttl_loop () =
+      Eio.Time.sleep clock pending_ttl_sweep_interval_s;
+      let now = Time_compat.now () in
+      let evicted =
+        try Pending.evict_older_than ~max_age_s:pending_ttl_seconds ~now
+        with Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+          Log.Keeper.warn
+            "keeper_compact_audit: pending ttl sweep failed: %s"
+            (Printexc.to_string exn);
+          []
+      in
+      List.iter
+        (fun (k, id, ts) ->
+          Prometheus.inc_counter
+            Keeper_metrics.metric_keeper_compact_audit_failures
+            ~labels:[
+              ("keeper", k);
+              ("site", Keeper_compact_audit_failure_site.(to_label Pending_ttl_evict));
+            ]
+            ();
+          Log.Keeper.warn
+            "keeper_compact_audit: pending ttl evict keeper=%s id=%s age_s=%.1f"
+            k id (now -. ts))
+        evicted;
+      ttl_loop ()
+    in
+    ttl_loop ())

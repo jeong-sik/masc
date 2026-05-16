@@ -35,6 +35,29 @@ let result_to_response ~tool_name ~start_time = function
   | Ok msg -> Tool_result.ok ~tool_name ~start_time msg
   | Error e -> Tool_result.error ~tool_name ~start_time (Masc_domain.masc_error_to_string e)
 
+let is_verifier_agent_name agent_name =
+  let normalized = String.lowercase_ascii (String.trim agent_name) in
+  String.equal normalized "verifier"
+  || String.equal normalized "keeper-verifier-agent"
+
+let verifier_transition_action_allowed = function
+  | Masc_domain.Approve_verification
+  | Masc_domain.Reject_verification ->
+    true
+  | Masc_domain.Claim
+  | Masc_domain.Start
+  | Masc_domain.Done_action
+  | Masc_domain.Cancel
+  | Masc_domain.Release
+  | Masc_domain.Submit_for_verification
+  | Masc_domain.Submit_pr_evidence ->
+    false
+
+let verifier_transition_rejection ~agent_name ~action =
+  Printf.sprintf
+    "Verifier action guard: agent '%s' may only call masc_transition(action=approve|reject). Got action=%s. Inspect task history/status for completed tasks, and reject insufficient or analysis-only evidence instead of claiming, starting, releasing, submitting, cancelling, or marking tasks done."
+    agent_name action
+
 let build_claim_observation_payload ~(now : float) ~(agent_name : string)
     ~(task_id : string) : Yojson.Safe.t =
   `Assoc
@@ -828,6 +851,15 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
   | Error msg -> Tool_result.error ~tool_name ~start_time msg
   | Ok action ->
   let action_s = Masc_domain.task_action_to_string action in
+  if is_verifier_agent_name ctx.agent_name
+     && not (verifier_transition_action_allowed action)
+  then
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~tool_name
+      ~start_time
+      (verifier_transition_rejection ~agent_name:ctx.agent_name ~action:action_s)
+  else
   let notes = get_string args "notes" "" in
   let reason = get_string args "reason" "" in
   let completion_contract =

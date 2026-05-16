@@ -110,3 +110,26 @@ val tool_execution_summary :
   tool_name:string ->
   model:string -> success:bool -> duration_ms:float -> tool_execution_summary
 (** Build a [tool_execution_summary] from raw turn fields. *)
+
+val usage_has_tokens : Agent_sdk.Types.api_usage -> bool
+(** [true] when the usage record carries a non-zero token count. *)
+
+val is_keeper_board_write_tool_name : string -> bool
+(** [true] when the tool writes to the shared MASC board; subject to
+    extra guard rules. *)
+
+val current_keeper_model : Keeper_types.keeper_meta -> string
+(** Neutral runtime lane used for keeper-facing tool-call telemetry.
+    Concrete provider/model identity is OAS-owned. *)
+
+(** Internal: stop-reason string labels exposed for keeper_hooks_oas.ml
+    consumers that emit them across multiple call sites. *)
+val stop_reason_label_end_turn : string
+val stop_reason_label_tool_use : string
+val stop_reason_label_max_tokens : string
+val stop_reason_label_stop_sequence : string
+val stop_reason_label_unknown : string
+
+val zero_usage : Agent_sdk.Types.api_usage
+(** Internal: zero-token api_usage sentinel used by classify_usage_trust
+    when telemetry is missing. *)

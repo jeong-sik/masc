@@ -14,18 +14,8 @@ val keeper_denied_tools : string list
 (** Tool names that are always denied for keeper-bound execution
     regardless of cascade or persona policy. *)
 
-val usage_has_tokens : Agent_sdk.Types.api_usage -> bool
-(** [true] when the usage record carries a non-zero token count. *)
-
-(** {1 Pre-tool gate integration} *)
-
-val is_keeper_board_write_tool_name : string -> bool
-(** [true] when the tool writes to the shared MASC board; subject to
-    extra guard rules. *)
-
-val current_keeper_model : Keeper_types.keeper_meta -> string
-(** Neutral runtime lane used for keeper-facing tool-call telemetry.
-    Concrete provider/model identity is OAS-owned. *)
+(** usage_has_tokens / is_keeper_board_write_tool_name / current_keeper_model
+    moved to Keeper_hooks_oas_types (intra-library file split, 2026-05-16). *)
 
 val render_pre_tool_gate_output :
   Keeper_guards.gate_decision_event -> string

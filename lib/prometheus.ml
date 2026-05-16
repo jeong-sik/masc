@@ -891,6 +891,7 @@ let metric_provider_health_probe_error = "masc_provider_health_probe_error_total
 let metric_oas_bus_subscriber_stream_depth = "masc_oas_bus_subscriber_stream_depth"
 let metric_oas_bus_publish_block_seconds = "masc_oas_bus_publish_block_seconds_total"
 let metric_oas_bus_publish = "masc_oas_bus_publish_total"
+let metric_oas_bus_capacity = "masc_oas_bus_capacity"
 
 let metric_runtime_ollama_probe_generate_skips =
   "masc_runtime_ollama_probe_generate_skips_total"

@@ -93,16 +93,15 @@ let sse_event_progress_kind (event : Agent_sdk.Types.sse_event) =
   | Agent_sdk.Types.SSEUnknownEventType _ -> Some "sse_unknown_event_type"
 ;;
 
+let registry_progress_on_event ~record_turn_progress downstream event =
+  Option.iter record_turn_progress (sse_event_progress_kind event);
+  Option.iter (fun cb -> cb event) downstream
+;;
+
 module For_testing = struct
   let sse_event_progress_kind = sse_event_progress_kind
+  let registry_progress_on_event = registry_progress_on_event
 end
-
-let attach_registry_progress_on_event downstream =
-  match downstream, Cascade_attempt_liveness_config.current_mode () with
-  | Some _, _ -> true
-  | None, Cascade_attempt_liveness_config.Off -> false
-  | None, Cascade_attempt_liveness_config.Observe
-  | None, Cascade_attempt_liveness_config.Enforce -> true
 ;;
 
 let should_require_provider_tool_choice_support
@@ -534,15 +533,7 @@ let run_turn
              Log.Misc.debug "keeper %s: slot resumed (next LLM turn)" meta.name)
       else None
     in
-    let on_event =
-      if attach_registry_progress_on_event on_event
-      then
-        Some
-          (fun event ->
-             Option.iter record_turn_progress (sse_event_progress_kind event);
-             Option.iter (fun cb -> cb event) on_event)
-      else None
-    in
+    let on_event = Some (registry_progress_on_event ~record_turn_progress on_event) in
     let priority =
       Option.value priority ~default:Llm_provider.Request_priority.Proactive
     in

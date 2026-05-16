@@ -228,6 +228,16 @@ module For_testing : sig
   (** Classifies SSE events that should refresh the in-turn progress clock.
       Keepalive [Ping] events return [None] so watchdog progress timeouts are
       not masked by transport pings. *)
+
+  val registry_progress_on_event
+    :  record_turn_progress:(string -> unit)
+    -> (Agent_sdk.Types.sse_event -> unit) option
+    -> Agent_sdk.Types.sse_event
+    -> unit
+  (** Wraps an optional downstream SSE callback with registry progress
+      stamping. The wrapper is intentionally independent from cascade
+      attempt-liveness mode so watchdog progress timeouts still observe
+      healthy stream chunks when liveness enforcement is off. *)
 end
 
 (** {1 Turn execution} *)

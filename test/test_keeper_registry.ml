@@ -1701,6 +1701,31 @@ let test_sse_ping_does_not_refresh_progress_observation () =
       obs.R.last_progress_kind
   | _ -> fail "obs missing after text delta"
 
+let test_registry_progress_wrapper_survives_liveness_off () =
+  with_env "MASC_CASCADE_ATTEMPT_LIVENESS" "off" @@ fun () ->
+  Masc_mcp.Cascade_attempt_liveness_config.reset_cache_for_test ();
+  Fun.protect
+    ~finally:Masc_mcp.Cascade_attempt_liveness_config.reset_cache_for_test
+  @@ fun () ->
+  check string "liveness mode" "off"
+    (Masc_mcp.Cascade_attempt_liveness_config.mode_label
+       (Masc_mcp.Cascade_attempt_liveness_config.current_mode ()));
+  let stamped = ref [] in
+  let on_event =
+    Masc_mcp.Keeper_agent_run.For_testing.registry_progress_on_event
+      ~record_turn_progress:(fun event_kind ->
+        stamped := event_kind :: !stamped)
+      None
+  in
+  on_event Agent_sdk.Types.Ping;
+  check (list string) "ping still ignored" [] (List.rev !stamped);
+  on_event
+    (Agent_sdk.Types.ContentBlockDelta
+       { index = 0; delta = Agent_sdk.Types.TextDelta "token" });
+  check (list string) "text delta stamps progress"
+    [ "sse_text_delta" ]
+    (List.rev !stamped)
+
 let test_mark_sdk_turn_started_no_op_without_obs () =
   R.clear ();
   let keeper_name = "k-rfc-0045-no-obs" in
@@ -2084,6 +2109,8 @@ let () =
             test_record_turn_progress_updates_live_observation;
           eio_test "SSE ping does not refresh progress observation"
             test_sse_ping_does_not_refresh_progress_observation;
+          eio_test "registry progress wrapper survives liveness off"
+            test_registry_progress_wrapper_survives_liveness_off;
           eio_test "mark_sdk_turn_started no-op without observation"
             test_mark_sdk_turn_started_no_op_without_obs;
           eio_test "mark_turn_cascade_exhausted materializes pre-disclosure path"

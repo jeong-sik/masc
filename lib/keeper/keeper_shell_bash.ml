@@ -737,7 +737,7 @@ let handle_keeper_bash
       | Ok () ->
         (
             (match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd with
-             | Error e -> error_json e
+             | Error e -> error_json ~fields:["blocked_cmd", `String cmd_for_log] e
              | Ok () ->
                if write_enabled
                   && Worker_dev_tools.is_write_operation cmd then

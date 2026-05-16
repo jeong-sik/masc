@@ -604,6 +604,8 @@
         test_worker_dev_tools
         test_shadow_parse
         test_destructive_class
+        test_path_rewrite_validation
+        test_board_content_dedup
         test_gate_diff
         test_legendary_counters
         test_legendary_bash_bg_tasks_route
@@ -824,6 +826,8 @@
         test_shadow_parse
         test_destructive_class
         test_gate_diff
+        test_path_rewrite_validation
+        test_board_content_dedup
         test_legendary_counters
         test_legendary_bash_bg_tasks_route
         test_oas_integration

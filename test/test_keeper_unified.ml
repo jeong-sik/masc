@@ -7258,6 +7258,27 @@ let test_prompt_guides_awaiting_verification_actions () =
     (contains_substring sys "do not claim or resubmit that task")
 ;;
 
+let test_prompt_guides_shell_existence_checks_to_structured_tools () =
+  let sys, _user =
+    UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:base_observation ()
+  in
+  check
+    bool
+    "shell existence checks avoid redirects and chaining"
+    true
+    (contains_substring sys "2>/dev/null && echo");
+  check
+    bool
+    "shell existence checks use keeper_shell ls"
+    true
+    (contains_substring sys "Use `keeper_shell op=ls`");
+  check
+    bool
+    "keeper bash hint forbids shell existence tests"
+    true
+    (contains_substring sys "shell existence tests")
+;;
+
 let test_sanitize_text_utf8_replaces_control_chars () =
   let raw = "alpha\000beta\001gamma\127delta\n\tomega" in
   let sanitized = Masc_mcp.Inference_utils.sanitize_text_utf8 raw in
@@ -11662,6 +11683,10 @@ let () =
             "guides awaiting verification actions"
             `Quick
             test_prompt_guides_awaiting_verification_actions
+        ; test_case
+            "guides shell existence checks to structured tools"
+            `Quick
+            test_prompt_guides_shell_existence_checks_to_structured_tools
         ; test_case
             "sanitize_text_utf8 replaces control chars"
             `Quick

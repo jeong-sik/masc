@@ -46,6 +46,8 @@ keeper_bash examples:
   GOOD: keeper_shell op=rg pattern="foo|bar" path=repos/masc-mcp/lib
   BAD:  cmd="cat file 2>/dev/null || echo missing"
   GOOD: keeper_shell op=cat path=file                 (let the tool error explain missing files)
+  BAD:  cmd="ls path 2>/dev/null && echo EXISTS || echo NOT_FOUND"
+  GOOD: keeper_shell op=ls path=path                  (let the tool error explain missing paths)
   BAD:  cmd="python3 -c 'open(path).write(text)'"
   GOOD: keeper_fs_edit or masc_code_edit              (use edit tools for writes)
   BAD:  cmd="keeper_board_list"                       (MASC tool invoked as shell command)
@@ -65,7 +67,7 @@ File operations:
 - View file (raw): keeper_shell with op=cat, path=<file>
 - Git history: keeper_shell with op=git_log, count=10 (optional: path=<file>, format="%h %s %an")
 - Git status: keeper_shell with op=git_status
-- Run shell commands: Bash or keeper_bash with cmd=<command> (read-only unless Coding/Delivery/Full preset). ONE command per call — no chaining or file redirects. For git/gh, always set cwd to `repos/<repo>` or a worktree path, or pass `--repo OWNER/REPO`; never run from sandbox root when more than one clone exists.
+- Run shell commands: Bash or keeper_bash with cmd=<command> (read-only unless Coding/Delivery/Full preset). ONE command per call — no chaining, file redirects, or shell existence tests like `2>/dev/null && echo`. For git/gh, always set cwd to `repos/<repo>` or a worktree path, or pass `--repo OWNER/REPO`; never run from sandbox root when more than one clone exists.
 - Write or create a file: keeper_fs_edit (Coding/Delivery/Full). Writable scope: your sandbox only.
 - GitHub CLI: keeper_shell op=gh with cmd="pr list", cmd="pr view 123", cmd="pr comment 123 --body 'text'", cmd="issue create --title 'bug'"
 

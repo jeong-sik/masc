@@ -18,10 +18,16 @@ let test_rejects_double_quoted_path () =
   | Ok () -> fail "Expected error for double-quoted path"
 ;;
 
-let test_rejects_glob () =
-  match Wdt.validate_command_paths ~workdir:"/tmp" "ls /tmp/*.ml" with
+let test_rejects_glob_in_non_globbed_command_path () =
+  match Wdt.validate_command_paths ~workdir:"/tmp" "cat /tmp/*.ml" with
   | Error _ -> ()
-  | Ok () -> fail "Expected error for glob in path"
+  | Ok () -> fail "Expected error for glob in cat path"
+;;
+
+let test_rejects_glob_in_directory_path_segment () =
+  match Wdt.validate_command_paths ~workdir:"/tmp" "ls /t*/file.ml" with
+  | Error _ -> ()
+  | Ok () -> fail "Expected error for glob in directory path segment"
 ;;
 
 let test_rejects_brace_expansion () =
@@ -30,8 +36,8 @@ let test_rejects_brace_expansion () =
   | Ok () -> fail "Expected error for brace expansion in path"
 ;;
 
-let test_rejects_backslash_escape () =
-  match Wdt.validate_command_paths ~workdir:"/tmp" "grep \\w+ /tmp/file" with
+let test_rejects_backslash_escape_in_path () =
+  match Wdt.validate_command_paths ~workdir:"/tmp" "cat /tmp/foo\\ bar" with
   | Error _ -> ()
   | Ok () -> fail "Expected error for backslash in path"
 ;;
@@ -48,6 +54,18 @@ let test_allows_relative_path () =
   | Error msg -> fail ("Relative path should be allowed: " ^ msg)
 ;;
 
+let test_allows_ls_basename_glob () =
+  match Wdt.validate_command_paths ~workdir:"/tmp" "ls /tmp/*.ml" with
+  | Ok () -> ()
+  | Error msg -> fail ("ls basename glob should be allowed: " ^ msg)
+;;
+
+let test_allows_grep_regex_pattern_backslash () =
+  match Wdt.validate_command_paths ~workdir:"/tmp" "grep \\w+ /tmp/file" with
+  | Ok () -> ()
+  | Error msg -> fail ("grep regex pattern should be allowed: " ^ msg)
+;;
+
 let test_no_workdir_skips_validation () =
   match Wdt.validate_command_paths "cat '/anything/with quotes and * globs'" with
   | Ok () -> ()
@@ -55,7 +73,7 @@ let test_no_workdir_skips_validation () =
 ;;
 
 let test_error_contains_hint () =
-  match Wdt.validate_command_paths ~workdir:"/tmp" "ls /tmp/*.ml" with
+  match Wdt.validate_command_paths ~workdir:"/tmp" "cat /tmp/*.ml" with
   | Error msg ->
     check bool "error mentions glob expansion" true
       (String.length msg > 10)
@@ -67,13 +85,25 @@ let () =
     [ ( "rejection"
       , [ test_case "quoted_path" `Quick test_rejects_quoted_path
         ; test_case "double_quoted_path" `Quick test_rejects_double_quoted_path
-        ; test_case "glob" `Quick test_rejects_glob
+        ; test_case
+            "glob_non_globbed_command_path"
+            `Quick
+            test_rejects_glob_in_non_globbed_command_path
+        ; test_case
+            "glob_directory_path_segment"
+            `Quick
+            test_rejects_glob_in_directory_path_segment
         ; test_case "brace_expansion" `Quick test_rejects_brace_expansion
-        ; test_case "backslash_escape" `Quick test_rejects_backslash_escape
+        ; test_case "backslash_escape_in_path" `Quick test_rejects_backslash_escape_in_path
         ] )
     ; ( "acceptance"
       , [ test_case "plain_path" `Quick test_allows_plain_path
         ; test_case "relative_path" `Quick test_allows_relative_path
+        ; test_case "ls_basename_glob" `Quick test_allows_ls_basename_glob
+        ; test_case
+            "grep_regex_pattern_backslash"
+            `Quick
+            test_allows_grep_regex_pattern_backslash
         ; test_case "no_workdir_skips" `Quick test_no_workdir_skips_validation
         ] )
     ; ( "diagnostics"

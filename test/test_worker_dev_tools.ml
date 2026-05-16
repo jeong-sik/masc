@@ -1059,6 +1059,52 @@ let () =
           | Ok () -> ()
           | Error msg ->
             Alcotest.fail ("plain path unexpectedly rejected: " ^ msg));
+      Alcotest.test_case
+        "absolute own-repo path is allowed from repo worktree cwd"
+        `Quick
+        (fun () ->
+          let repo_root =
+            Filename.concat
+              (Sys.getcwd ())
+              "_worker_dev_tools_repo_worktree_allow"
+          in
+          let target = Filename.concat repo_root "lib/foo.ml" in
+          let workdir = Filename.concat repo_root ".worktrees/task" in
+          let rec mkdir_p path =
+            if path = "" || path = "." || path = "/" then ()
+            else if Sys.file_exists path then ()
+            else (
+              mkdir_p (Filename.dirname path);
+              Unix.mkdir path 0o755)
+          in
+          let rec cleanup path =
+            if Sys.file_exists path then
+              match Unix.lstat path with
+              | { Unix.st_kind = Unix.S_DIR; _ } ->
+                Array.iter
+                  (fun name -> cleanup (Filename.concat path name))
+                  (Sys.readdir path);
+                Unix.rmdir path
+              | _ -> Sys.remove path
+          in
+          Fun.protect
+            ~finally:(fun () -> try cleanup repo_root with _ -> ())
+            (fun () ->
+              mkdir_p (Filename.dirname target);
+              mkdir_p workdir;
+              Out_channel.with_open_text (Filename.concat repo_root ".git")
+                (fun oc -> output_string oc "gitdir: .git/worktrees/task\n");
+              Out_channel.with_open_text target
+                (fun oc -> output_string oc "let x = 1\n");
+              match
+                Worker_dev_tools.validate_command_paths
+                  ~workdir
+                  (Printf.sprintf "cat %s" target)
+              with
+              | Ok () -> ()
+              | Error msg ->
+                Alcotest.fail
+                  ("own repo path from worktree cwd rejected: " ^ msg)));
       Alcotest.test_case "git -C missing worktree is cwd_not_directory"
         `Quick (fun () ->
           let workdir = Filename.temp_file "wdt_git_c_" "" in

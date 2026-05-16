@@ -15,10 +15,6 @@ let elapsed_duration_ms ~start_time ~end_time =
   | _ when elapsed_ms < 1. -> 1
   | _ -> int_of_float elapsed_ms
 
-module For_testing = struct
-  let elapsed_duration_ms = elapsed_duration_ms
-end
-
 type shell_quote_state = No_quote | Single_quote | Double_quote
 
 type shell_word = {
@@ -213,7 +209,7 @@ type bash_shape_block =
 let string_contains_char s ch = String.exists (Char.equal ch) s
 let string_contains_substring s needle = String_util.contains_substring s needle
 
-let keeper_bash_shape_block cmd =
+let raw_keeper_bash_shape_block cmd =
   let lower = String.lowercase_ascii cmd in
   if string_contains_substring lower "gh pr checks"
   then Some Gh_pr_checks
@@ -233,11 +229,47 @@ let keeper_bash_shape_block cmd =
   then Some Substitution
   else None
 
+let arg_text = function
+  | Masc_exec.Shell_ir.Lit text -> Some (String.lowercase_ascii text)
+  | Masc_exec.Shell_ir.Var _ | Masc_exec.Shell_ir.Concat _ -> None
+
+let simple_is_gh_pr_checks (simple : Masc_exec.Shell_ir.simple) =
+  match Masc_exec.Bin.known simple.bin, simple.args with
+  | Some Masc_exec.Bin.Gh, arg_pr :: arg_checks :: _ ->
+    (match arg_text arg_pr, arg_text arg_checks with
+     | Some "pr", Some "checks" -> true
+     | _ -> false)
+  | _ -> false
+
+let rec parsed_keeper_bash_shape_block = function
+  | Masc_exec.Shell_ir.Pipeline _ -> Some Pipe_or_redirect
+  | Masc_exec.Shell_ir.Simple simple ->
+    if simple.redirects <> []
+    then Some Pipe_or_redirect
+    else if simple_is_gh_pr_checks simple
+    then Some Gh_pr_checks
+    else None
+
+let keeper_bash_shape_block cmd =
+  match Masc_exec_bash_parser.Bash.parse_string cmd with
+  | Masc_exec.Parsed.Parsed ir -> parsed_keeper_bash_shape_block ir
+  | Masc_exec.Parsed.Parse_error _
+  | Masc_exec.Parsed.Parse_aborted _
+  | Masc_exec.Parsed.Too_complex _ ->
+    raw_keeper_bash_shape_block cmd
+
 let bash_shape_block_tag = function
   | Gh_pr_checks -> "gh_pr_checks"
   | Pipe_or_redirect -> "pipe_or_redirect"
   | Chaining -> "chaining"
   | Substitution -> "substitution"
+
+module For_testing = struct
+  let elapsed_duration_ms = elapsed_duration_ms
+
+  let keeper_bash_shape_block_tag cmd =
+    Option.map bash_shape_block_tag (keeper_bash_shape_block cmd)
+end
 
 let bash_shape_block_reason = function
   | Gh_pr_checks ->

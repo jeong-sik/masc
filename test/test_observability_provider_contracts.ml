@@ -142,14 +142,34 @@ let test_resolve_max_cascade_context () =
       [ "claude:claude-sonnet-4-6" ] in
   check bool "known provider returns positive context" true (ctx > 0)
 
-let test_resolve_primary_max_context_uses_first_registered_label () =
-  let first = "ollama:qwen3.5:35b-a3b-nvfp4" in
-  let labels = [ first; "glm:glm-5.1" ] in
+let fake_registry_entry ~name ~max_context ~available =
+  { Llm_provider.Provider_registry.name = name
+  ; defaults =
+      { kind = Llm_provider.Provider_config.OpenAI_compat
+      ; base_url = "http://127.0.0.1"
+      ; api_key_env = ""
+      ; request_path = "/v1/chat/completions"
+      }
+  ; max_context
+  ; capabilities = Llm_provider.Capabilities.default_capabilities
+  ; is_available = (fun () -> available)
+  }
+
+let test_resolve_primary_max_context_uses_first_available_label () =
+  let registry = Llm_provider.Provider_registry.create () in
+  Llm_provider.Provider_registry.register registry
+    (fake_registry_entry ~name:"offline-large" ~max_context:1_000_000
+       ~available:false);
+  Llm_provider.Provider_registry.register registry
+    (fake_registry_entry ~name:"online-small" ~max_context:32_768
+       ~available:true);
+  let labels = [ "offline-large:huge"; "online-small:small" ] in
   check
     int
-    "primary context follows first configured provider even when local runtime is down"
-    (Masc_mcp.Cascade_runtime.max_context_of_label first)
-    (Masc_mcp.Cascade_runtime.resolve_primary_max_context labels)
+    "primary context follows first available provider"
+    32_768
+    (Masc_mcp.Cascade_runtime.For_testing.resolve_primary_max_context_in_registry
+       registry labels)
 
 let test_labels_require_local_discovery () =
   check bool "llama labels refresh local discovery" true
@@ -318,8 +338,8 @@ let () =
             test_cascade_model_resolve_unresolved_auto_provenance;
           test_case "resolve max cascade context" `Quick
             test_resolve_max_cascade_context;
-          test_case "primary context uses first registered label" `Quick
-            test_resolve_primary_max_context_uses_first_registered_label;
+          test_case "primary context uses first available label" `Quick
+            test_resolve_primary_max_context_uses_first_available_label;
         ] );
       ( "dashboard_schema",
         [

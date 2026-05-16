@@ -324,6 +324,22 @@ let test_keeper_bash_elapsed_duration_preserves_positive_sub_ms () =
   Alcotest.(check int) "nan duration is zero" 0
     (elapsed ~start_time:Float.nan ~end_time:10.0)
 
+let test_keeper_bash_shape_uses_shell_ir_for_quoted_literals () =
+  let block_tag = Keeper_exec_shell.For_testing.keeper_bash_shape_block_tag in
+  Alcotest.(check (option string)) "quoted angle brackets are data" None
+    (block_tag "echo '<tag>'");
+  Alcotest.(check (option string)) "quoted gh pr checks is data" None
+    (block_tag {|echo "run gh pr checks later"|});
+  Alcotest.(check (option string)) "real redirect blocks"
+    (Some "pipe_or_redirect")
+    (block_tag "cat < /tmp/x");
+  Alcotest.(check (option string)) "real gh pr checks blocks"
+    (Some "gh_pr_checks")
+    (block_tag "gh pr checks 15659 --repo jeong-sik/masc-mcp");
+  Alcotest.(check (option string)) "parse-failure fallback remains conservative"
+    (Some "substitution")
+    (block_tag "echo $(complex-substitution)")
+
 let test_docker_blocks_nested_docker_command () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
@@ -1014,6 +1030,8 @@ let () =
     ("edge", [
       Alcotest.test_case "elapsed duration preserves positive sub-ms" `Quick
         test_keeper_bash_elapsed_duration_preserves_positive_sub_ms;
+      Alcotest.test_case "shape guard parses quoted metachar literals" `Quick
+        test_keeper_bash_shape_uses_shell_ir_for_quoted_literals;
       Alcotest.test_case "empty command blocked" `Quick test_empty_command;
       Alcotest.test_case "docker blocks nested docker command" `Quick
         test_docker_blocks_nested_docker_command;

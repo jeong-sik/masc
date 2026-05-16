@@ -26,3 +26,10 @@ let gh_repo_context_error_json = Keeper_shell_gh_context.gh_repo_context_error_j
 let resolve_gh_repo_context = Keeper_shell_gh_context.resolve_gh_repo_context
 
 include Keeper_shell_ops
+
+module For_testing = struct
+  let elapsed_duration_ms = Keeper_shell_bash.For_testing.elapsed_duration_ms
+
+  let keeper_bash_shape_block_tag =
+    Keeper_shell_bash.For_testing.keeper_bash_shape_block_tag
+end

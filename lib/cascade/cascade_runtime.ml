@@ -259,47 +259,40 @@ let max_context_of_label (label : string) : int =
   | Some ctx -> effective_discovered_ctx ~static_ctx ~discovered:(Some ctx)
   | None -> static_ctx
 
-let context_if_registered (label : string) : int option =
+let context_of_entry (label : string) (entry : Llm_provider.Provider_registry.entry)
+    : int =
+  let static_ctx = static_context_of_entry entry in
+  match Cascade_config.resolve_label_context label with
+  | Some discovered ->
+      effective_discovered_ctx ~static_ctx ~discovered:(Some discovered)
+  | None -> static_ctx
+
+let context_of_registry_label ?(require_available = false)
+    (registry : Llm_provider.Provider_registry.t) (label : string) : int option =
   match provider_name_of_label label with
   | None -> None
   | Some pname -> (
-      match Llm_provider.Provider_registry.find default_registry pname with
+      match Llm_provider.Provider_registry.find registry pname with
       | None -> None
-      | Some entry ->
-          let static_ctx = static_context_of_entry entry in
-          let ctx =
-            match Cascade_config.resolve_label_context label with
-            | Some discovered ->
-                effective_discovered_ctx ~static_ctx ~discovered:(Some discovered)
-            | None -> static_ctx
-          in
-          Some ctx)
+      | Some entry when require_available && not (entry.is_available ()) -> None
+      | Some entry -> Some (context_of_entry label entry))
 
 let context_if_available (label : string) : int option =
-  match provider_name_of_label label with
-  | None -> None
-  | Some pname -> (
-      match Llm_provider.Provider_registry.find default_registry pname with
-      | None -> None
-      | Some entry ->
-          if entry.is_available () then
-            let static_ctx = static_context_of_entry entry in
-            let ctx =
-              match Cascade_config.resolve_label_context label with
-              | Some discovered ->
-                  effective_discovered_ctx ~static_ctx ~discovered:(Some discovered)
-              | None -> static_ctx
-            in
-            Some ctx
-          else
-            None)
+  context_of_registry_label ~require_available:true default_registry label
 
-let resolve_primary_max_context (labels : string list) : int =
-  match List.find_map context_if_registered labels with
+let resolve_primary_max_context_in_registry registry (labels : string list) : int =
+  match
+    List.find_map
+      (context_of_registry_label ~require_available:true registry)
+      labels
+  with
   | Some ctx -> ctx
   | None ->
-    Cascade_metrics.on_max_context_fallback ~site:"primary_no_registered";
+    Cascade_metrics.on_max_context_fallback ~site:"primary_no_available";
     fallback_context_window
+
+let resolve_primary_max_context (labels : string list) : int =
+  resolve_primary_max_context_in_registry default_registry labels
 
 let resolve_max_cascade_context (labels : string list) : int =
   match List.filter_map context_if_available labels with
@@ -307,6 +300,11 @@ let resolve_max_cascade_context (labels : string list) : int =
     Cascade_metrics.on_max_context_fallback ~site:"cascade_max_no_available";
     fallback_context_window
   | ctxs -> List.fold_left max 0 ctxs
+
+module For_testing = struct
+  let resolve_primary_max_context_in_registry =
+    resolve_primary_max_context_in_registry
+end
 
 let labels_are_pure_local (labels : string list) : bool =
   labels <> []

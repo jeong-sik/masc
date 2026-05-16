@@ -95,7 +95,7 @@ val manifest_row_matches :
   ?turn_id:int ->
   string ->
   string ->
-  Keeper_runtime_manifest.t ->
+    Keeper_runtime_manifest.t ->
   bool
 (** Pure: true when the runtime-manifest row matches the given keeper_name +
     trace_id (and optionally turn_id). *)

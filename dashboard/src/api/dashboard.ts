@@ -26,6 +26,14 @@ import {
   type DashboardConfigResponse,
 } from './schemas/dashboard-config'
 import { parseLogsResponse, type LogEntry, type LogsResponse } from './schemas/logs'
+import {
+  parseProviderLogTailResponse,
+  parseProviderLogsCatalogResponse,
+  type ProviderLogCatalogEntry,
+  type ProviderLogsCatalogResponse,
+  type ProviderLogTailLine,
+  type ProviderLogTailResponse,
+} from './schemas/provider-logs'
 import { asKeeperRuntimeBlockerClass } from '../lib/runtime-blocker-class'
 import type {
   KeeperConfig,
@@ -156,6 +164,13 @@ export function fetchDashboardShell(opts?: DashboardShellRequestOptions): Promis
 
 export type { LogEntry, LogsResponse }
 export { LogsSchemaDriftError } from './schemas/logs'
+export type {
+  ProviderLogCatalogEntry,
+  ProviderLogsCatalogResponse,
+  ProviderLogTailLine,
+  ProviderLogTailResponse,
+}
+export { ProviderLogsSchemaDriftError } from './schemas/provider-logs'
 
 export async function fetchLogs(opts?: {
   limit?: number
@@ -173,6 +188,22 @@ export async function fetchLogs(opts?: {
   const qs = params.toString()
   const raw = await get<unknown>(`/api/v1/dashboard/logs${qs ? `?${qs}` : ''}`)
   return parseLogsResponse(raw)
+}
+
+export async function fetchProviderLogsCatalog(): Promise<ProviderLogsCatalogResponse> {
+  const raw = await get<unknown>('/api/v1/dashboard/provider-logs')
+  return parseProviderLogsCatalogResponse(raw)
+}
+
+export async function fetchProviderLogTail(
+  provider: string,
+  opts?: { lines?: number },
+): Promise<ProviderLogTailResponse> {
+  const params = new URLSearchParams()
+  params.set('provider', provider)
+  if (opts?.lines) params.set('lines', String(opts.lines))
+  const raw = await get<unknown>(`/api/v1/dashboard/provider-logs/tail?${params.toString()}`)
+  return parseProviderLogTailResponse(raw)
 }
 
 export type { AgentTimelineEvent, AgentTimelineResponse }
@@ -1962,6 +1993,13 @@ function asLooseBoolean(value: unknown, fallback = false): boolean {
   return fallback
 }
 
+function asLooseNullableBoolean(value: unknown): boolean | null {
+  const booleanValue = asBoolean(value)
+  if (booleanValue !== undefined) return booleanValue
+  if (typeof value !== 'string') return null
+  return asLooseBoolean(value)
+}
+
 function asLooseNumber(value: unknown): number | undefined {
   const direct = asNumber(value)
   if (direct !== undefined) return direct
@@ -2165,12 +2203,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     },
     drift: {
       status: normalizeKeeperFeatureStatus(drift.status),
-      enabled:
-        typeof drift.enabled === 'boolean'
-          ? drift.enabled
-          : (typeof drift.enabled === 'string'
-              ? asLooseBoolean(drift.enabled)
-              : null),
+      enabled: asLooseNullableBoolean(drift.enabled),
       min_turn_gap: asInt(drift.min_turn_gap) ?? null,
       count_total: asInt(drift.count_total) ?? null,
       last_reason: asNullableString(drift.last_reason),
@@ -2204,12 +2237,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       active_model_label: null,
       last_model_used_label: null,
       runtime_blocker_summary: asNullableString(runtime.runtime_blocker_summary),
-      runtime_blocker_continue_gate:
-        typeof runtime.runtime_blocker_continue_gate === 'boolean'
-          ? runtime.runtime_blocker_continue_gate
-          : (typeof runtime.runtime_blocker_continue_gate === 'string'
-              ? asLooseBoolean(runtime.runtime_blocker_continue_gate)
-              : null),
+      runtime_blocker_continue_gate: asLooseNullableBoolean(runtime.runtime_blocker_continue_gate),
     },
     runtime_trust: runtimeTrust,
     coordination: {

@@ -30,13 +30,8 @@ let keeper_denied_tools =
 
 (* label_* string constants moved to Keeper_hooks_oas_types
    (intra-library file split, 2026-05-16). *)
-let callback_label_after_turn_sse_broadcast = "after_turn_sse_broadcast"
-let callback_label_post_tool_log_write = "post_tool_log_write"
-let callback_label_on_tool_executed = "on_tool_executed"
-let callback_label_on_error = "on_error"
-let callback_label_on_tool_error = "on_tool_error"
-let callback_label_pr_review_action_metrics_append = "pr_review_action_metrics_append"
-let callback_label_pr_work_action_metrics_append = "pr_work_action_metrics_append"
+(* callback_label_* constants moved to Keeper_hooks_oas_types
+   (intra-library file split, 2026-05-16). *)
 (* outcome_ok / outcome_error already moved to Keeper_hooks_oas_types in
    step 5; this duplicate block was left behind by accident and is now
    cleaned up. *)

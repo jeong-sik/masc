@@ -67,15 +67,6 @@ val persona_profile_path_for_drift_check :
     [Keeper_supervisor.supervision_cohort] etc. unchanged. *)
 include module type of Keeper_supervisor_types
 
-val next_auto_resume_after_sec :
-  initial_sec:float -> max_sec:float -> float option -> float option
-(** Compute the next auto-resume backoff delay after an auto-pause.  [None]
-    means this is the first auto-pause; [Some sec] means the previous
-    backoff should double up to [max_sec].  [initial_sec <= 0] disables
-    auto-resume. *)
-
-val should_cleanup_dead : now:float -> dead_ttl_sec:float -> Keeper_registry.registry_entry -> bool
-(** True when a dead tombstone has exceeded the configured TTL. *)
 
 val cohort_key_of_reason : Keeper_registry.failure_reason option -> string
 (** Map a structured failure_reason to a cohort key for self-preservation grouping. *)
@@ -139,30 +130,11 @@ val credential_recovery_before_restart_for_test :
 (** Test hook for the credential self-heal step used before liveness recovery
     relaunches a [credential_archived] keeper. *)
 
-val liveness_recovery_backoff : int -> float
-(** Compute the exponential backoff delay for liveness recovery attempt [n]. *)
-
-val should_attempt_liveness_recovery :
-  now:float -> Keeper_registry.registry_entry -> bool
-(** Pure predicate: true when a Dead keeper passes the eligibility gate for
-    a liveness recovery attempt.  Exposed for tests. *)
 
 (** {1 Alive-but-stuck detector (#12838)} *)
 
-val detect_alive_but_stuck :
-  now:float ->
-  stall_multiplier:int ->
-  stall_floor_sec:float ->
-  Keeper_registry.registry_entry ->
-  float option
-(** Pure detection: returns [Some elapsed_sec] when a non-Dead, non-paused
-    keeper has gone longer than
-    [max(stall_floor_sec, stall_multiplier * proactive.cooldown_sec)]
-    without a proactive turn while autonomous turns kept advancing.
-    Reference timestamp is the newer of [proactive_rt.last_ts] and
-    [entry.started_at] if proactive has fired, else [entry.started_at]
-    (covers the never-started case).  Returns [None] otherwise.  Exposed
-    for tests. *)
+(** detect_alive_but_stuck moved to Keeper_supervisor_types (intra-library
+    file split, 2026-05-16). Re-exported via include above. *)
 
 val alive_but_stuck_scan : 'a context -> unit
 (** Scan all keepers in [Keeper_registry].  For each keeper detected as

@@ -119,6 +119,30 @@ let parse_capabilities ~(path : string) (tbl : Otoml.t) : cascade_capabilities =
   }
 ;;
 
+let positive_int_opt_field ~(path : string) (tbl : Otoml.t) key =
+  match Otoml.find_opt tbl Otoml.get_integer [ key ] with
+  | None -> None
+  | Some n when n > 0 -> Some n
+  | Some n ->
+    Logs.warn (fun m ->
+      m
+        "cascade_declarative_parser: %s.%s = %d — expected positive integer, \
+         ignoring"
+        path
+        key
+        n);
+    None
+;;
+
+let parse_provider_log ~(path : string) (tbl : Otoml.t) : cascade_provider_log =
+  let enabled = Otoml.find_or ~default:false tbl Otoml.get_boolean [ "enabled" ] in
+  { enabled
+  ; path = Otoml.find_opt tbl Otoml.get_string [ "path" ]
+  ; default_lines = positive_int_opt_field ~path tbl "default-lines"
+  ; max_bytes = positive_int_opt_field ~path tbl "max-bytes"
+  }
+;;
+
 (** Parse a [providers.<id>.headers] sub-table into a sorted association
     list. Caller invokes only when the sub-table key exists, so the
     returned list distinguishes "declared but empty / all entries rejected"
@@ -200,6 +224,10 @@ let parse_provider (id : string) (tbl : Otoml.t)
       Otoml.find_opt tbl Fun.id [ "capabilities" ]
       |> Option.map (parse_capabilities ~path)
     in
+    let log =
+      Otoml.find_opt tbl Fun.id [ "log" ]
+      |> Option.map (parse_provider_log ~path:(path ^ ".log"))
+    in
     let headers =
       match Otoml.find_opt tbl Fun.id [ "headers" ] with
       | None -> None
@@ -214,6 +242,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
       ; is_non_interactive
       ; credentials
       ; capabilities
+      ; log
       ; headers
       }
 ;;

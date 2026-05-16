@@ -654,3 +654,19 @@ val lifecycle_event_origin_to_string : lifecycle_event_origin -> string
 (** Internal: predicate over [Keeper_state_machine.event] identifying the
     compaction- and handoff-pair half-events. *)
 val is_paired_lifecycle_event : Keeper_state_machine.event -> bool
+
+(** Pure dispatch-origin gate: returns true iff the (origin, event) pair
+    is allowed under the paired-lifecycle invariant. *)
+val origin_allows_paired_lifecycle_event :
+  lifecycle_event_origin -> Keeper_state_machine.event -> bool
+
+(** Pure: derive the next [pending_turn_measurement] field after observing
+    [event] at wall-clock [now], preserving the prior value when the event
+    is not a [Context_measured]. *)
+val pending_measurement_after_event :
+  float -> registry_entry -> Keeper_state_machine.event -> turn_measurement option
+
+(** Pure: derive the next [compaction_stage] after observing [event],
+    preserving the entry's prior stage on non-compaction events. *)
+val compaction_stage_of_event :
+  registry_entry -> Keeper_state_machine.event -> packed_compaction_stage

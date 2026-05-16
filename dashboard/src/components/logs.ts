@@ -1,8 +1,13 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
-import { fetchLogs } from '../api/dashboard.js'
-import type { LogEntry } from '../api/dashboard.js'
+import { fetchLogs, fetchProviderLogsCatalog, fetchProviderLogTail } from '../api/dashboard.js'
+import type {
+  LogEntry,
+  ProviderLogCatalogEntry,
+  ProviderLogsCatalogResponse,
+  ProviderLogTailResponse,
+} from '../api/dashboard.js'
 import { VirtualList } from './common/virtual-list'
 import { TextInput } from './common/input'
 import { Select } from './common/select'
@@ -39,11 +44,15 @@ export interface LogWindowSummary {
 }
 
 const logResource = createAsyncResource<LogData>()
+const providerLogCatalogResource = createAsyncResource<ProviderLogsCatalogResponse>()
+const providerLogTailResource = createAsyncResource<ProviderLogTailResponse>()
 const levelFilter = signal('INFO')
 const moduleInput = signal('')
 const appliedModuleFilter = signal('')
 const autoRefresh = signal(true)
 const logLimit = signal(200)
+const providerLogProvider = signal('')
+const providerLogLines = signal(200)
 const latestSeq = signal<number | null>(null)
 
 const POLL_INTERVAL_MS = 3000
@@ -390,6 +399,19 @@ function sourceTone(source: string): string {
   }
 }
 
+function selectableProviderLogs(
+  catalog: ProviderLogsCatalogResponse | undefined,
+): ProviderLogCatalogEntry[] {
+  return (catalog?.providers ?? []).filter(provider =>
+    provider.enabled && typeof provider.path === 'string' && provider.path.trim() !== '',
+  )
+}
+
+function providerLogOptionLabel(provider: ProviderLogCatalogEntry): string {
+  const pathLabel = lastPathSegment(provider.path ?? undefined)
+  return pathLabel ? `${provider.display_name} - ${pathLabel}` : provider.display_name
+}
+
 async function loadLogs(mode: LoadMode = 'reset') {
   const requestId = ++latestRequestId
 
@@ -435,6 +457,29 @@ async function loadLogs(mode: LoadMode = 'reset') {
     if (requestId !== latestRequestId) return
     // Delta failures don't overwrite loaded state — keep existing data visible
   }
+}
+
+async function loadProviderLogCatalog() {
+  return providerLogCatalogResource.load(async () => {
+    const resp = await fetchProviderLogsCatalog()
+    const selectable = selectableProviderLogs(resp)
+    const stillSelected = selectable.some(provider => provider.id === providerLogProvider.value)
+    if (!stillSelected) {
+      providerLogProvider.value = selectable[0]?.id ?? ''
+    }
+    return resp
+  })
+}
+
+async function loadSelectedProviderLog() {
+  const provider = providerLogProvider.value
+  if (!provider) {
+    providerLogTailResource.reset()
+    return
+  }
+  return providerLogTailResource.load(() =>
+    fetchProviderLogTail(provider, { lines: providerLogLines.value }),
+  )
 }
 
 function renderLogRow(entry: LogEntry) {
@@ -598,6 +643,100 @@ function renderLogProvenance(data: LogData | undefined) {
   `
 }
 
+function renderProviderLogPanel() {
+  const catalogState = providerLogCatalogResource.state.value
+  const catalog = catalogState.status === 'loaded' ? catalogState.data : undefined
+  const configuredProviders = catalog?.providers ?? []
+  const selectableProviders = selectableProviderLogs(catalog)
+  const selectedProvider =
+    selectableProviders.find(provider => provider.id === providerLogProvider.value) ?? null
+  const tailState = providerLogTailResource.state.value
+  const tail = tailState.status === 'loaded' ? tailState.data : undefined
+  const tailText = tail?.entries.map(entry => entry.text).join('\n') ?? ''
+  const disabledCount = configuredProviders.filter(provider => !provider.enabled).length
+
+  if (
+    catalogState.status === 'idle'
+    || (configuredProviders.length === 0 && catalogState.status !== 'error')
+  ) {
+    return null
+  }
+
+  return html`
+    <div class="mx-3 mt-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]">
+      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border-divider)] px-3 py-2">
+        <div class="flex flex-wrap items-center gap-2 text-2xs">
+          <${StatusChip} tone="info" uppercase=${false}>provider logs</${StatusChip}>
+          ${selectedProvider
+            ? html`<${StatusChip} tone="neutral" uppercase=${false}>${selectedProvider.protocol}</${StatusChip}>`
+            : null}
+          ${selectedProvider?.path
+            ? html`<${StatusChip} tone="neutral" uppercase=${false}>${lastPathSegment(selectedProvider.path)}</${StatusChip}>`
+            : null}
+          ${disabledCount > 0
+            ? html`<${StatusChip} tone="warn" uppercase=${false}>disabled ${disabledCount}</${StatusChip}>`
+            : null}
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+          ${selectableProviders.length > 0
+            ? html`
+              <${Select}
+                class="logs-select px-3 py-2 text-xs"
+                name="provider-log-provider"
+                ariaLabel="Provider log"
+                value=${providerLogProvider.value}
+                options=${selectableProviders.map(provider => ({
+                  value: provider.id,
+                  label: providerLogOptionLabel(provider),
+                }))}
+                onInput=${(value: string) => { providerLogProvider.value = value }}
+              />
+              <${Select}
+                class="logs-select px-3 py-2 text-xs"
+                name="provider-log-lines"
+                ariaLabel="Provider log lines"
+                value=${String(providerLogLines.value)}
+                options=${['50', '100', '200', '500', '1000', '3000']}
+                onInput=${(value: string) => { providerLogLines.value = parseInt(value, 10) }}
+              />
+              <button
+                type="button"
+                class="logs-refresh-btn rounded-[var(--r-1)] border border-[var(--accent-22)] bg-[var(--accent-10)] px-3 py-2 text-2xs font-medium text-[var(--color-accent-fg)]"
+                onClick=${() => { void loadSelectedProviderLog() }}
+                disabled=${tailState.status === 'loading'}
+              >
+                ${tailState.status === 'loading' ? '...' : 'tail'}
+              </button>
+            `
+            : null}
+        </div>
+      </div>
+
+      ${catalogState.status === 'error'
+        ? html`<div class="px-3 py-3 text-xs text-[var(--err-fg)]">${catalogState.message}</div>`
+        : null}
+      ${catalog?.error
+        ? html`<div class="px-3 py-3 text-xs text-[var(--err-fg)]">${catalog.error}</div>`
+        : null}
+      ${selectableProviders.length === 0 && catalogState.status === 'loaded'
+        ? html`<div class="px-3 py-3 text-xs text-[var(--color-fg-muted)]">cascade.toml provider log tail is disabled.</div>`
+        : null}
+      ${tailState.status === 'error'
+        ? html`<div class="px-3 py-3 text-xs text-[var(--err-fg)]">${tailState.message}</div>`
+        : null}
+      ${selectedProvider && tailState.status !== 'error'
+        ? html`
+          <pre
+            class="m-0 max-h-72 min-h-32 overflow-auto whitespace-pre-wrap break-words px-3 py-3 font-mono text-2xs leading-relaxed text-[var(--color-fg-primary)]"
+            data-testid="provider-log-tail"
+          >${tailState.status === 'loading' && !tail ? 'loading...' : tailText}</pre>
+        `
+        : null}
+    </div>
+  `
+}
+
 export function LogViewer() {
   useEffect(() => {
     let pollId: ReturnType<typeof setInterval> | null = null
@@ -638,6 +777,44 @@ export function LogViewer() {
     if (moduleDebounceTimer) {
       clearTimeout(moduleDebounceTimer)
       moduleDebounceTimer = null
+    }
+  }, [])
+
+  useEffect(() => {
+    providerLogCatalogResource.reset()
+    providerLogTailResource.reset()
+    void loadProviderLogCatalog()
+  }, [])
+
+  useEffect(() => {
+    let pollId: ReturnType<typeof setInterval> | null = null
+
+    const restart = () => {
+      if (pollId) {
+        clearInterval(pollId)
+        pollId = null
+      }
+      providerLogTailResource.reset()
+      void loadSelectedProviderLog()
+      if (!autoRefresh.value || !providerLogProvider.value) return
+      pollId = setInterval(() => {
+        void loadSelectedProviderLog()
+      }, POLL_INTERVAL_MS)
+    }
+
+    restart()
+
+    const unsubscribeProvider = providerLogProvider.subscribe(restart)
+    const unsubscribeLines = providerLogLines.subscribe(restart)
+    const unsubscribeAutoRefresh = autoRefresh.subscribe(restart)
+
+    return () => {
+      if (pollId) {
+        clearInterval(pollId)
+      }
+      unsubscribeProvider()
+      unsubscribeLines()
+      unsubscribeAutoRefresh()
     }
   }, [])
 
@@ -721,6 +898,8 @@ export function LogViewer() {
                 latestSeq.value = null
                 logResource.reset()
                 void loadLogs('reset')
+                void loadProviderLogCatalog()
+                void loadSelectedProviderLog()
               }}
               disabled=${logLoading}
             >
@@ -734,6 +913,7 @@ export function LogViewer() {
         ` : null}
 
         ${renderLogSummary(summary)}
+        ${renderProviderLogPanel()}
 
         <div class="px-3 pt-3">
           <div class="grid grid-cols-[11rem_5rem_10rem_8rem_minmax(0,1fr)] gap-3 px-3 py-2 text-left text-3xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)]">

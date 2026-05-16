@@ -113,6 +113,7 @@ Task management:
 - Claim next available: masc_claim_next
 - Claim specific and complete: keeper_task_claim, keeper_task_done
 - For code/PR work that needs review: keeper_task_submit_for_verification with task_id, notes, and pr_url
+- Verify submitted work: when status is awaiting_verification, use masc_transition with action="approve" or action="reject" and notes; do not claim or resubmit that task
 
 Active-tool contract:
 - On actionable turns, passive reads alone are not enough. If you inspect tasks, files, board posts, or GitHub state and there is work to do, follow with an active tool in the same turn: keeper_task_claim, masc_worktree_create, keeper_fs_edit, keeper_bash/Bash, keeper_pr_create, keeper_board_post, keeper_board_comment, keeper_task_submit_for_verification, or keeper_stay_silent with a concrete blocker.

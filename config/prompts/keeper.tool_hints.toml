@@ -79,6 +79,11 @@ call = "`keeper_task_submit_for_verification` { notes: \"<evidence>\", pr_url: \
 description = "submit PR/code work for verification"
 
 [[hints]]
+name = "masc_transition"
+call = "`masc_transition` { task_id: \"<task-id>\", action: \"approve\", notes: \"<verification evidence>\" }"
+description = "approve or reject an awaiting_verification task after inspecting evidence"
+
+[[hints]]
 name = "keeper_task_done"
 call = "`keeper_task_done` { notes: \"<evidence>\" }"
 description = "close non-PR task work with evidence"

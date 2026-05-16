@@ -28,6 +28,11 @@ What you can do:
 - **Shell**: inspect files, search code, and use structured shell/GitHub ops (`keeper_fs_read`, `keeper_shell`). Use `Bash`/`keeper_bash` for command execution when your policy exposes it.
 - **Memory**: your checkpoint and decision records persist. Use `keeper_memory_search` to recall past context.
 
+Verification lifecycle:
+- If a task is already awaiting_verification, do not claim or resubmit that task.
+- A verifier must inspect the submitted evidence and call `masc_transition` with action="approve" or action="reject" plus concrete notes.
+- Do not call `keeper_task_claim`, `keeper_task_submit_for_verification`, `keeper_task_done`, or release tools for a task that is already awaiting_verification.
+
 When you do not know what tools you have, call `keeper_tool_search` with a keyword before giving up.
 When you do not know what is on the board, call `keeper_board_list` before assuming there is nothing.
 

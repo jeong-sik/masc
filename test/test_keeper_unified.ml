@@ -7226,10 +7226,36 @@ let test_prompt_prefers_silence_guidance () =
        try
          ignore (Str.search_forward (Str.regexp_string "SPEECH_ACT:") sys 0);
          true
-       with
-       | Not_found -> false
+     with
+     | Not_found -> false
      in
      found)
+;;
+
+let test_prompt_guides_awaiting_verification_actions () =
+  let sys, _user =
+    UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:base_observation ()
+  in
+  check
+    bool
+    "awaiting verification tasks use approve or reject"
+    true
+    (contains_substring sys "If a task is already awaiting_verification");
+  check
+    bool
+    "verifier uses masc_transition approve"
+    true
+    (contains_substring sys "action=\"approve\"");
+  check
+    bool
+    "verifier uses masc_transition reject"
+    true
+    (contains_substring sys "action=\"reject\"");
+  check
+    bool
+    "verification hint forbids claim/resubmit"
+    true
+    (contains_substring sys "do not claim or resubmit that task")
 ;;
 
 let test_sanitize_text_utf8_replaces_control_chars () =
@@ -11632,6 +11658,10 @@ let () =
             `Quick
             test_tool_guidance_guard_falls_back_when_prompt_registry_empty
         ; test_case "prefers silence guidance" `Quick test_prompt_prefers_silence_guidance
+        ; test_case
+            "guides awaiting verification actions"
+            `Quick
+            test_prompt_guides_awaiting_verification_actions
         ; test_case
             "sanitize_text_utf8 replaces control chars"
             `Quick

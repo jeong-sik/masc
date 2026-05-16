@@ -1,6 +1,6 @@
 {
-  "pinned_sha": "1599ee03516446007d96426f304bde4c3b3086d2",
-  "pinned_version": "v0.193.15",
+  "pinned_sha": "94628a436bc17b8d839214bdb205bcee2d4c6d2a",
+  "pinned_version": "v0.193.16",
   "surfaces": {
     "event_bus_payload_variants": [
       "AgentCompleted",
@@ -44,6 +44,7 @@
       "on_streaming_chunk",
       "on_streaming_first_chunk",
       "on_token_usage",
+      "on_tool_calls",
       "provider"
     ]
   }

@@ -163,8 +163,7 @@ module Metrics : sig
        input_tokens:int ->
        output_tokens:int ->
        unit) ->
-    ?on_tool_calls:
-      (provider:string -> model_id:string -> count:int -> unit) ->
+    ?on_tool_calls:(provider:string -> model_id:string -> count:int -> unit) ->
     ?on_streaming_first_chunk:
       (provider:string -> model_id:string -> ttfrc_ms:float -> unit) ->
     ?on_streaming_chunk:

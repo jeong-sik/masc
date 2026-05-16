@@ -82,18 +82,13 @@ let resolve_join_state ~room_initialized ~join_required ~agent_name ~base_path ~
       | Error _ -> false))
 ;;
 
-let is_ephemeral_agent_name name = String.starts_with name ~prefix:"agent-"
-
-let is_transient_agent_name name =
-  is_ephemeral_agent_name name || Nickname.is_dictionary_generated_nickname name
-;;
 
 let silent_auth_token_error_kind err =
   Auth_error_kind.to_string (Auth_error_kind.classify err)
 ;;
 
 let should_read_legacy_persisted_agent_name ~has_explicit_agent_name ~agent_name =
-  (not has_explicit_agent_name) && is_ephemeral_agent_name agent_name
+  (not has_explicit_agent_name) && Agent_name_kind.is_ephemeral agent_name
 ;;
 
 let caller_agent_name_from_arguments arguments =
@@ -369,7 +364,7 @@ let execute_tool_eio
        alias and let auth preflight reject it if the token does not
        authorize that identity. We only fall back to token ownership
        when the request did not explicitly name an agent. *)
-    | Some t when (not has_explicit_agent_name) && is_transient_agent_name agent_name ->
+    | Some t when (not has_explicit_agent_name) && Agent_name_kind.is_transient agent_name ->
       (match Auth.resolve_agent_from_token config.base_path ~token:t with
        | Ok resolved -> resolved
        | Error err ->

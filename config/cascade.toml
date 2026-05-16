@@ -724,6 +724,11 @@ strategy = "priority_tier"
 fallback = true
 keeper-assignable = false
 
+[tier-group.ollama_cloud_stable]
+tiers = ["tier_medium", "primary", "__safe_lane"]
+strategy = "priority_tier"
+fallback = true
+
 [tier-group.governance]
 tiers = ["governance", "__safe_lane"]
 strategy = "priority_tier"

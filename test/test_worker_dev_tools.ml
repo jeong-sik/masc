@@ -880,16 +880,37 @@ let () =
          character or the correct tool, so small-LLM keepers retried the
          same pattern. Each new branch must point the keeper at the
          concrete replacement. *)
-      Alcotest.test_case "glob path suggests masc_code_search file_pattern"
+      Alcotest.test_case "content glob path suggests masc_code_search file_pattern"
         `Quick (fun () ->
           match Worker_dev_tools.validate_command_paths
-                  ~workdir:"/tmp" "ls repos/*.ml" with
+                  ~workdir:"/tmp" "cat repos/*.ml" with
           | Error msg ->
             Alcotest.(check bool) "names glob char" true
               (contains_substring msg "Glob expansion");
             Alcotest.(check bool) "names masc_code_search" true
               (contains_substring msg "masc_code_search")
-          | Ok () -> Alcotest.fail "glob with path must be blocked");
+          | Ok () -> Alcotest.fail "content glob with path must be blocked");
+      Alcotest.test_case "ls basename glob under workdir is allowed"
+        `Quick (fun () ->
+          match
+            Worker_dev_tools.validate_command_paths
+              ~workdir:"/tmp"
+              "ls /tmp/repos/masc-mcp/.worktrees/keeper-sangsu-agent-task-238/lib/*.ml | head -30"
+          with
+          | Ok () -> ()
+          | Error msg ->
+            Alcotest.fail ("safe ls glob unexpectedly rejected: " ^ msg));
+      Alcotest.test_case "ls middle-segment glob is still blocked" `Quick
+        (fun () ->
+          match
+            Worker_dev_tools.validate_command_paths
+              ~workdir:"/tmp"
+              "ls /tmp/repos/masc-mcp/.worktrees/*/lib/foo.ml"
+          with
+          | Error msg ->
+            Alcotest.(check bool) "names glob char" true
+              (contains_substring msg "Glob expansion")
+          | Ok () -> Alcotest.fail "middle-segment glob must be blocked");
       Alcotest.test_case "brace path suggests per-target / rg" `Quick
         (fun () ->
           match Worker_dev_tools.validate_command_paths
@@ -898,16 +919,139 @@ let () =
             Alcotest.(check bool) "names brace" true
               (contains_substring msg "Brace expansion")
           | Ok () -> Alcotest.fail "brace with path must be blocked");
-      Alcotest.test_case "backslash path names masc_code_search is_regex"
+      Alcotest.test_case "regex pattern with backslash and path is allowed"
         `Quick (fun () ->
-          match Worker_dev_tools.validate_command_paths
-                  ~workdir:"/tmp" "grep '\\.ml$' repos/" with
+          match
+            Worker_dev_tools.validate_command_paths
+              ~workdir:"/tmp"
+              "grep '\\.ml$' repos/"
+          with
+          | Ok () -> ()
+          | Error msg ->
+            Alcotest.fail ("regex pattern unexpectedly rejected: " ^ msg));
+      Alcotest.test_case "escaped path still names is_regex hint"
+        `Quick (fun () ->
+          match
+            Worker_dev_tools.validate_command_paths
+              ~workdir:"/tmp"
+              "cat repos/foo\\ bar.ml"
+          with
           | Error msg ->
             Alcotest.(check bool) "names escape" true
               (contains_substring msg "Backslash escaping");
             Alcotest.(check bool) "points at is_regex" true
               (contains_substring msg "is_regex")
-          | Ok () -> Alcotest.fail "backslash with path must be blocked");
+          | Ok () -> Alcotest.fail "escaped path must be blocked");
+      Alcotest.test_case "quoted path is still blocked" `Quick
+        (fun () ->
+          match
+            Worker_dev_tools.validate_command_paths
+              ~workdir:"/tmp"
+              "cat 'repos/masc-mcp/lib/foo.ml'"
+          with
+          | Error msg ->
+            Alcotest.(check bool) "names quote" true
+              (contains_substring msg "Quoting")
+          | Ok () -> Alcotest.fail "quoted path must be blocked");
+      Alcotest.test_case "find -name glob pattern with path is allowed"
+        `Quick (fun () ->
+          match
+            Worker_dev_tools.validate_command_paths
+              ~workdir:"/tmp"
+              "find repos/masc-mcp/.masc/config/keepers/ -type f -name '*.toml' 2>/dev/null"
+          with
+          | Ok () -> ()
+          | Error msg ->
+            Alcotest.fail
+              ("find -name pattern unexpectedly rejected: " ^ msg));
+      Alcotest.test_case "rg quoted regex pattern with path is allowed"
+        `Quick (fun () ->
+          match
+            Worker_dev_tools.validate_command_paths
+              ~workdir:"/tmp"
+              "rg \"Hashtbl\\.\" repos/masc-mcp/lib/ --count-matches -t ml"
+          with
+          | Ok () -> ()
+          | Error msg ->
+            Alcotest.fail
+              ("rg regex pattern unexpectedly rejected: " ^ msg));
+      Alcotest.test_case "sed range script with path is allowed" `Quick
+        (fun () ->
+          match
+            Worker_dev_tools.validate_command_paths
+              ~workdir:"/tmp"
+              "sed -n '1186,1190p' repos/masc-mcp/test/dune"
+          with
+          | Ok () -> ()
+          | Error msg ->
+            Alcotest.fail
+              ("sed range script unexpectedly rejected: " ^ msg));
+      Alcotest.test_case "sed edit script with slash path is allowed" `Quick
+        (fun () ->
+          match
+            Worker_dev_tools.validate_command_paths
+              ~workdir:"/tmp"
+              "sed -i '/include_file stanzas\\/test_ci_hardening_source.inc/d' repos/masc-mcp/test/dune"
+          with
+          | Ok () -> ()
+          | Error msg ->
+            Alcotest.fail
+              ("sed edit script unexpectedly rejected: " ^ msg));
+      Alcotest.test_case "echo content redirect validates target only"
+        `Quick (fun () ->
+          match
+            Worker_dev_tools.validate_command_paths
+              ~workdir:"/tmp"
+              "echo \"# Upload Canary Test\" > repos/masc-mcp/.worktrees/task/.canary-upload-test.md"
+          with
+          | Ok () -> ()
+          | Error msg ->
+            Alcotest.fail
+              ("echo redirect target unexpectedly rejected: " ^ msg));
+      Alcotest.test_case "printf content redirect validates target only"
+        `Quick (fun () ->
+          match
+            Worker_dev_tools.validate_command_paths
+              ~workdir:"/tmp"
+              "printf '%s\\n' 'content/with/slash' > repos/masc-mcp/.worktrees/task/file.ml"
+          with
+          | Ok () -> ()
+          | Error msg ->
+            Alcotest.fail
+              ("printf redirect target unexpectedly rejected: " ^ msg));
+      Alcotest.test_case "quoted grep pattern after pipe is allowed" `Quick
+        (fun () ->
+          match
+            Worker_dev_tools.validate_command_paths
+              ~workdir:"/tmp"
+              "cat .masc/backlog.json 2>/dev/null | grep -A5 'task-210'"
+          with
+          | Ok () -> ()
+          | Error msg ->
+            Alcotest.fail
+              ("quoted grep pattern unexpectedly rejected: " ^ msg));
+      Alcotest.test_case "rg --glob quoted pattern through pipe is allowed"
+        `Quick (fun () ->
+          match
+            Worker_dev_tools.validate_command_paths
+              ~workdir:"/tmp"
+              "rg -l \"awaiting_verification\" repos/masc-mcp/ --glob '*.json' 2>/dev/null | head -5"
+          with
+          | Ok () -> ()
+          | Error msg ->
+            Alcotest.fail
+              ("rg --glob pipe command unexpectedly rejected: " ^ msg));
+      Alcotest.test_case "rg --files validates path args" `Quick
+        (fun () ->
+          match
+            Worker_dev_tools.validate_command_paths
+              ~workdir:"/tmp"
+              "rg --files /etc"
+          with
+          | Error msg ->
+            Alcotest.(check bool) "outside path blocked" true
+              (contains_substring msg "outside allowed directories")
+          | Ok () -> Alcotest.fail "rg --files path must be validated");
       Alcotest.test_case "plain path with no rewrite syntax is allowed"
         `Quick (fun () ->
           match Worker_dev_tools.validate_command_paths

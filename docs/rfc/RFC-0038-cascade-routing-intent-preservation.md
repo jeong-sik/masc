@@ -187,7 +187,7 @@ RFC-0027 §3.4 PR #3 가 "cross-cascade fallback resolver capability propagation
 |---|------|
 | NG1 | ollama transport 가 keeper-bound MCP HTTP header (`X-MASC-Agent-Name`) 를 carry 하도록 만드는 것 — fundamental architectural change, 별도 RFC. |
 | NG2 | Permission-aware candidate filtering (keeper credential set 과 모델 권한 매칭) — 별도 RFC, RFC-0026 admission layer 와 통합 검토. |
-| NG3 | `glm-coding:*` ↔ `glm-coding-plan:*` namespace mismatch (B2 — 100% substitution 의 직접 원인) — 본 RFC 와 병렬 단일 hot fix PR 로 분리 (`retired_coding_profile` cascade 의 model label 정규화). |
+| NG3 | `glm-coding:*` ↔ retired planning namespace mismatch (B2 — 100% substitution 의 직접 원인) — 본 RFC 와 병렬 단일 hot fix PR 로 분리 (`retired_coding_profile` cascade 의 model label 정규화). |
 | NG4 | BDI defer loop (PR #11210 의 원래 motivation) — fallback chain 명시화로 자연스레 해소될 것으로 예상하나 본 RFC 의 success criterion 에는 미포함. |
 | NG5 | RFC-0026 admission scheduler 변경. |
 | NG6 | **Streaming-state provider-level timeout** (현재 keeper hard cap 3600s 만 존재, provider 가 stream tool-call 없이 멈출 때 graceful recovery 부재). 별도 RFC — Kimi `executor_reanalysis.md` §4 문제 1. |
@@ -312,7 +312,7 @@ and capability_filter_summary = {
 |----|-------|-------------|--------------|---------|
 | **PR-A** | L0 + L4 schema | `oas_worker_named.ml:270-312`, `oas_worker_named_cascade.ml:473-550`, `oas_worker_cascade.ml:220-258`, `cascade_config.ml` | none | RFC-0001, RFC-0027 §3.4 PR #3 |
 | **PR-B** | L0 migration | `.masc/config/cascade.toml` 의 모든 cascade 에 명시적 `fallback_cascade` chain | PR-A | RFC-0027 §3.4 PR #4 (`__safe_lane`) |
-| **PR-C** | B2 hot fix | `glm-coding:*` ↔ `glm-coding-plan:*` namespace mismatch 정규화 | none (parallel) | RFC-0027 §3 |
+| **PR-C** | B2 hot fix | `glm-coding:*` ↔ retired planning namespace mismatch 정규화 | none (parallel) | RFC-0027 §3 |
 | **PR-D** | L1 override table | `cascade_config.ml` capability_overrides schema, cascade.toml 등록 | PR-A 권장 | RFC-0024, RFC-0027 |
 | **PR-E** | L1 pattern table | `lib/provider_tool_support.ml`, `lib/llm_provider/capabilities.ml` model-id pattern 분류 | PR-D | RFC-0024, RFC-0027 |
 | **PR-F** | L1 live probe | ollama `/api/show` probe + cache | PR-E | RFC-0024 |

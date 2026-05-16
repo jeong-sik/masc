@@ -115,3 +115,43 @@ let registry_failure_reason_of_terminal_reason
   | Keeper_turn_disposition.Post_commit_ambiguous
   | Keeper_turn_disposition.Unknown _ -> None
 ;;
+
+(** Tracker for matching ToolCalled/ToolCompleted event pairs within a
+    single keeper turn. Internal mutability ([Hashtbl] + [Queue] + mutable
+    fields); external API is pure-ish (push/pop are O(1) imperative). *)
+type turn_tool_event_tracker =
+  { pending_tool_inputs : (string, Yojson.Safe.t Queue.t) Hashtbl.t
+  ; mutable mutating_tools_committed : string list
+  ; mutable integrity_error : Agent_sdk.Error.sdk_error option
+  }
+
+let create_turn_tool_event_tracker () =
+  { pending_tool_inputs = Hashtbl.create 8
+  ; mutating_tools_committed = []
+  ; integrity_error = None
+  }
+;;
+
+let turn_tool_event_integrity_error tracker = tracker.integrity_error
+
+let committed_mutating_tools_from_events tracker =
+  Keeper_error_classify.committed_mutating_tools tracker.mutating_tools_committed
+;;
+
+let push_turn_tool_input tracker tool_name input =
+  let q =
+    match Hashtbl.find_opt tracker.pending_tool_inputs tool_name with
+    | Some q -> q
+    | None ->
+      let q = Queue.create () in
+      Hashtbl.add tracker.pending_tool_inputs tool_name q;
+      q
+  in
+  Queue.add input q
+;;
+
+let pop_turn_tool_input tracker tool_name =
+  match Hashtbl.find_opt tracker.pending_tool_inputs tool_name with
+  | Some q when not (Queue.is_empty q) -> Some (Queue.pop q)
+  | _ -> None
+;;

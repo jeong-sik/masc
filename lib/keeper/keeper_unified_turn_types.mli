@@ -31,3 +31,21 @@ val registry_failure_reason_of_terminal_reason :
   Keeper_turn_terminal.t ->
   raw_error:string ->
   Keeper_registry.failure_reason option
+
+(** Tracker for matching ToolCalled/ToolCompleted event pairs within a
+    single keeper turn. *)
+type turn_tool_event_tracker = {
+  pending_tool_inputs : (string, Yojson.Safe.t Queue.t) Hashtbl.t;
+  mutable mutating_tools_committed : string list;
+  mutable integrity_error : Agent_sdk.Error.sdk_error option;
+}
+
+val create_turn_tool_event_tracker : unit -> turn_tool_event_tracker
+val turn_tool_event_integrity_error :
+  turn_tool_event_tracker -> Agent_sdk.Error.sdk_error option
+val committed_mutating_tools_from_events :
+  turn_tool_event_tracker -> string list
+val push_turn_tool_input :
+  turn_tool_event_tracker -> string -> Yojson.Safe.t -> unit
+val pop_turn_tool_input :
+  turn_tool_event_tracker -> string -> Yojson.Safe.t option

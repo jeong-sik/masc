@@ -66,42 +66,6 @@ let record_streaming_cancelled_observation
 
 
 
-type turn_tool_event_tracker =
-  { pending_tool_inputs : (string, Yojson.Safe.t Queue.t) Hashtbl.t
-  ; mutable mutating_tools_committed : string list
-  ; mutable integrity_error : Agent_sdk.Error.sdk_error option
-  }
-
-let create_turn_tool_event_tracker () =
-  { pending_tool_inputs = Hashtbl.create 8
-  ; mutating_tools_committed = []
-  ; integrity_error = None
-  }
-;;
-
-let turn_tool_event_integrity_error tracker = tracker.integrity_error
-
-let committed_mutating_tools_from_events tracker =
-  EC.committed_mutating_tools tracker.mutating_tools_committed
-;;
-
-let push_turn_tool_input tracker tool_name input =
-  let q =
-    match Hashtbl.find_opt tracker.pending_tool_inputs tool_name with
-    | Some q -> q
-    | None ->
-      let q = Queue.create () in
-      Hashtbl.add tracker.pending_tool_inputs tool_name q;
-      q
-  in
-  Queue.add input q
-;;
-
-let pop_turn_tool_input tracker tool_name =
-  match Hashtbl.find_opt tracker.pending_tool_inputs tool_name with
-  | Some q when not (Queue.is_empty q) -> Some (Queue.pop q)
-  | _ -> None
-;;
 
 let record_unmatched_tool_completed
       tracker

@@ -632,63 +632,6 @@ let build_forest ~(config : Coord.config) ~goals ~tasks =
   |> List.filter is_root
   |> List.map (build_tree context goals)
 
-let goal_status_color = function
-  | Goal_store.Active -> "#4ade80"
-  | Goal_store.Paused -> "#f59e0b"
-  | Goal_store.Done -> "#60a5fa"
-  | Goal_store.Dropped -> "#6b7280"
-
-let goal_phase_color = function
-  | Goal_phase.Executing -> "#4ade80"
-  | Goal_phase.Awaiting_verification -> "#f59e0b"
-  | Goal_phase.Awaiting_approval -> "#fb7185"
-  | Goal_phase.Blocked -> "#ef4444"
-  | Goal_phase.Paused -> "#94a3b8"
-  | Goal_phase.Completed -> "#60a5fa"
-  | Goal_phase.Dropped -> "#6b7280"
-
-let goal_health_color = function
-  | "done" -> "#60a5fa"
-  | "paused" -> "#f59e0b"
-  | "blocked" -> "#ef4444"
-  | "at_risk" -> "#f59e0b"
-  | "on_track" -> "#4ade80"
-  | _ -> "#94a3b8"
-
-let task_status_color status_label =
-  match status_label with
-  | "pending" -> "#6b7280"
-  | "claimed" -> "#f59e0b"
-  | "in_progress" -> "#3b82f6"
-  | "awaiting_verification" -> "#a78bfa"
-  | "completed" -> "#4ade80"
-  | "cancelled" -> "#ef4444"
-  | _ -> "#888888"
-
-let task_to_tree_json ((task, linkage_source) : Masc_domain.task * string) =
-  let status = task_status_label task in
-  `Assoc
-    [
-      ("id", `String task.id);
-      ("title", `String task.title);
-      ("goal_id", Json_util.string_opt_to_json task.goal_id);
-      ("status", `String status);
-      ("status_color", `String (task_status_color status));
-      ("priority", `Int task.priority);
-      ("goal_id", Json_util.string_opt_to_json task.goal_id);
-      ("assignee",
-       match task_assignee task with
-       | Some assignee -> `String assignee
-       | None -> `Null);
-      ("goal_id",
-       match task.goal_id with
-       | Some goal_id -> `String goal_id
-       | None -> `Null);
-      ("linkage_source", `String linkage_source);
-      ("is_terminal", `Bool (task_is_terminal task));
-      ("created_at", `String task.created_at);
-      ("updated_at", `String (task_updated_at task));
-    ]
 
 let goal_policy_nodes goals =
   List.map

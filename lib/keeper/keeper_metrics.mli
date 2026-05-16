@@ -372,6 +372,18 @@ val metric_keeper_oas_env_key_rejections : string
     keeper TOML contains [keeper.oas_env.<X>] keys that the
     runtime silently ignored. *)
 
+val metric_keeper_continuity_ts_recovered : string
+(** Counter for the synthetic-ts recovery branch in
+    [Keeper_meta_json_parse.parse_last_continuity_update_ts]: when
+    the persisted [last_continuity_update_ts] is missing/invalid
+    ([<= 0.0]) but [continuity_summary] is non-empty, the loader
+    substitutes [Time_compat.now ()] so the cooldown gate does not
+    interpret the empty timestamp as "never reflected" and bypass
+    cooldown for the first run.  Each recovery event increments
+    this counter and emits a warn line; non-zero counts mean the
+    meta JSON was written without a valid timestamp or the field
+    was corrupted on disk. *)
+
 val metric_keeper_memory_write_failures : string
 val metric_keeper_memory_consolidations : string
 val metric_keeper_write_meta_cycle_failures : string

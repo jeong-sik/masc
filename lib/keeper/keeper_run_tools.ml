@@ -63,6 +63,7 @@ let freeze (acc : hook_accumulator) : hook_outputs =
 
 let merge_requested_tool_names_seen ~seen requested =
   Keeper_types.dedupe_keep_order (seen @ requested)
+;;
 
 let record_requested_tool_names (acc : hook_accumulator) requested =
   acc.requested_tool_names <- requested;
@@ -1175,7 +1176,7 @@ let prepare_agent_setup
   match initial_tool_surface_result with
   | Error err -> Error err
   | Ok initial_tool_surface ->
-  record_requested_tool_names acc initial_tool_surface.all_allowed;
+    record_requested_tool_names acc initial_tool_surface.all_allowed;
     let discover_work_nudge () : string option =
       let meta = acc.meta in
       match meta.work_discovery_enabled with

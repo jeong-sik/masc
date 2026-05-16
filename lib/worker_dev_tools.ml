@@ -550,6 +550,26 @@ let looks_like_path_token token =
       || String.contains token '/')
 ;;
 
+let token_value_is_explicit_path token =
+  let token = strip_wrapping_quotes token in
+  token = "."
+  || token = ".."
+  || String.starts_with ~prefix:"/" token
+  || String.starts_with ~prefix:"./" token
+  || String.starts_with ~prefix:"../" token
+  || String.starts_with ~prefix:"~/" token
+;;
+
+let git_revisionish_token ?workdir token =
+  let token = strip_wrapping_quotes token |> String.trim in
+  token <> ""
+  && String.contains token '/'
+  && (not (token_value_is_explicit_path token))
+  &&
+  let resolved = resolve_path ?base_dir:workdir token in
+  not (Sys.file_exists resolved)
+;;
+
 type path_token =
   { value : string
   ; quoted : bool
@@ -731,6 +751,30 @@ let command_pattern_arg_flags cmd =
     ; "--exclude", false
     ]
   | "sed" -> [ "-e", true; "--expression", true ]
+  | "gh" ->
+    [ "-R", false
+    ; "--repo", false
+    ; "--json", false
+    ; "--jq", false
+    ; "--template", false
+    ; "--search", false
+    ; "--state", false
+    ; "--author", false
+    ; "--assignee", false
+    ; "--label", false
+    ; "--base", false
+    ; "--head", false
+    ]
+  | "git" ->
+    [ "--branches", false
+    ; "--remotes", false
+    ; "--glob", false
+    ; "--exclude", false
+    ; "--format", false
+    ; "--pretty", false
+    ; "--author", false
+    ; "--grep", false
+    ]
   | _ -> []
 ;;
 
@@ -912,6 +956,10 @@ let validate_command_paths ?workdir cmd =
                | Error _ as err -> err)
             | None when is_path_flag token.value ->
               loop (path_flag_requires_existing_dir token.value) rest
+            | None
+              when String.equal command_name "git"
+                   && git_revisionish_token ?workdir token.value ->
+              loop false rest
             | None when looks_like_path_token token.value ->
               if token_has_unsafe_rewrite_syntax token
               then Error (path_syntax_blocked_message token)

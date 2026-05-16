@@ -66,6 +66,48 @@ let test_allows_grep_regex_pattern_backslash () =
   | Error msg -> fail ("grep regex pattern should be allowed: " ^ msg)
 ;;
 
+let test_allows_quoted_gh_repo_slug () =
+  match
+    Wdt.validate_command_paths ~workdir:"/tmp"
+      "gh pr view 15660 -R 'yousleepwhen/masc-mcp' --json title,body,state 2>&1"
+  with
+  | Ok () -> ()
+  | Error msg -> fail ("quoted gh repo slug should not be path-validated: " ^ msg)
+;;
+
+let test_allows_gh_repo_slug_with_pipeline () =
+  match
+    Wdt.validate_command_paths ~workdir:"/tmp"
+      "gh pr diff 15660 --repo yousleepwhen/masc-mcp 2>&1 | head -c 65536"
+  with
+  | Ok () -> ()
+  | Error msg -> fail ("gh repo slug with pipeline should be allowed: " ^ msg)
+;;
+
+let test_allows_git_revision_with_slash () =
+  match
+    Wdt.validate_command_paths ~workdir:"/tmp"
+      "git log origin/feature/refactor-overview --oneline -10 2>/dev/null"
+  with
+  | Ok () -> ()
+  | Error msg -> fail ("git revision refs with slash should be allowed: " ^ msg)
+;;
+
+let test_allows_git_branch_filter_with_quoted_slash () =
+  match
+    Wdt.validate_command_paths ~workdir:"/tmp"
+      "git log --oneline -10 --all --no-walk --branches='feature/refactor-overview'"
+  with
+  | Ok () -> ()
+  | Error msg -> fail ("quoted git branch filter should be allowed: " ^ msg)
+;;
+
+let test_allows_ls_basename_glob_with_redirect () =
+  match Wdt.validate_command_paths ~workdir:"/tmp" "ls -la /tmp/agent_name_kind.* 2>&1" with
+  | Ok () -> ()
+  | Error msg -> fail ("ls basename glob with stderr redirect should be allowed: " ^ msg)
+;;
+
 let test_no_workdir_skips_validation () =
   match Wdt.validate_command_paths "cat '/anything/with quotes and * globs'" with
   | Ok () -> ()
@@ -104,6 +146,23 @@ let () =
             "grep_regex_pattern_backslash"
             `Quick
             test_allows_grep_regex_pattern_backslash
+        ; test_case "quoted_gh_repo_slug" `Quick test_allows_quoted_gh_repo_slug
+        ; test_case
+            "gh_repo_slug_with_pipeline"
+            `Quick
+            test_allows_gh_repo_slug_with_pipeline
+        ; test_case
+            "git_revision_with_slash"
+            `Quick
+            test_allows_git_revision_with_slash
+        ; test_case
+            "git_branch_filter_with_quoted_slash"
+            `Quick
+            test_allows_git_branch_filter_with_quoted_slash
+        ; test_case
+            "ls_basename_glob_with_redirect"
+            `Quick
+            test_allows_ls_basename_glob_with_redirect
         ; test_case "no_workdir_skips" `Quick test_no_workdir_skips_validation
         ] )
     ; ( "diagnostics"

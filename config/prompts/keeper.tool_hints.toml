@@ -56,7 +56,7 @@ description = "inspect GitHub after a task/worktree is bound"
 [[hints]]
 name = "keeper_bash"
 call = "`keeper_bash` { cmd: \"<single shell command>\", cwd: \"repos/<repo-or-worktree>\" }"
-description = "run one shell command in the keeper workspace; set cwd for git/gh and never use cd chaining, redirects, or shell existence tests"
+description = "run one shell command in the keeper workspace; set cwd for git/gh and never use cd chaining, redirects, shell existence tests, or Bash glob paths"
 
 [[hints]]
 name = "masc_web_search"

@@ -7279,6 +7279,27 @@ let test_prompt_guides_shell_existence_checks_to_structured_tools () =
     (contains_substring sys "shell existence tests")
 ;;
 
+let test_prompt_guides_bash_globs_to_structured_tools () =
+  let sys, _user =
+    UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:base_observation ()
+  in
+  check
+    bool
+    "bash glob example is called out"
+    true
+    (contains_substring sys "find repos/<repo>/lib -name nickname*");
+  check
+    bool
+    "bash globs use keeper_shell find"
+    true
+    (contains_substring sys "keeper_shell op=find name=<glob> path=<dir>");
+  check
+    bool
+    "bash globs can use masc code search"
+    true
+    (contains_substring sys "masc_code_search file_pattern=<glob>")
+;;
+
 let test_sanitize_text_utf8_replaces_control_chars () =
   let raw = "alpha\000beta\001gamma\127delta\n\tomega" in
   let sanitized = Masc_mcp.Inference_utils.sanitize_text_utf8 raw in
@@ -11687,6 +11708,10 @@ let () =
             "guides shell existence checks to structured tools"
             `Quick
             test_prompt_guides_shell_existence_checks_to_structured_tools
+        ; test_case
+            "guides bash globs to structured tools"
+            `Quick
+            test_prompt_guides_bash_globs_to_structured_tools
         ; test_case
             "sanitize_text_utf8 replaces control chars"
             `Quick

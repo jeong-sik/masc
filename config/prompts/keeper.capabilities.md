@@ -42,6 +42,8 @@ keeper_bash examples:
   GOOD: keeper_shell op=ls path={sandbox_repos}       (single op with path from keeper_context_status)
   BAD:  cmd="find /home/keeper -name \"board\" 2>/dev/null" (quoted path/pattern + redirect blocked)
   GOOD: keeper_shell op=find path=. name=board        (structured find)
+  BAD:  cmd="find repos/masc-mcp/lib -name nickname*" (glob expansion blocked)
+  GOOD: keeper_shell op=find path=repos/masc-mcp/lib name=nickname*
   BAD:  cmd="rg -n \"foo\\|bar\" repos/masc-mcp/lib 2>/dev/null | head -20"
   GOOD: keeper_shell op=rg pattern="foo|bar" path=repos/masc-mcp/lib
   BAD:  cmd="cat file 2>/dev/null || echo missing"

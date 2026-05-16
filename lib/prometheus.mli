@@ -487,6 +487,7 @@ val metric_llm_provider_errors_by_reason : string
 val metric_llm_provider_retries : string
 val metric_llm_provider_input_tokens : string
 val metric_llm_provider_output_tokens : string
+val metric_llm_provider_tool_calls : string
 val metric_llm_provider_circuit_state : string
 
 (** §7.3.2 Zero Silent Failure measurement: aggregate counter for every

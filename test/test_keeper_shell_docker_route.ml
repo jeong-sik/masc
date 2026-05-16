@@ -992,6 +992,34 @@ let test_sandbox_root_git_cwd_multi_repo_blocks_before_exec () =
     Alcotest.(check bool) "lists beta too" true
       (contains_substring msg "alpha, beta")
 
+let test_sandbox_root_git_cwd_multi_repo_cd_hint_uses_command_repo () =
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let repos = Filename.concat playground "repos" in
+  let repo_a = Filename.concat repos "grpc-direct" in
+  let repo_b = Filename.concat repos "masc-mcp" in
+  let worktree = Filename.concat repo_b ".worktrees/keeper-nick0cave-agent-task-236" in
+  ensure_dir repo_a;
+  ensure_dir worktree;
+  run_ok ~cwd:repo_a "git init -q";
+  run_ok ~cwd:repo_b "git init -q";
+  let cwd, error =
+    Keeper_shell_docker.resolve_sandbox_root_git_cwd ~config ~meta
+      ~cwd:playground
+      ~cmd:"cd repos/masc-mcp/.worktrees/keeper-nick0cave-agent-task-236 && git status"
+  in
+  Alcotest.(check string) "cwd remains sandbox root" playground cwd;
+  match error with
+  | None -> Alcotest.fail "expected multi repo cwd guidance"
+  | Some msg ->
+    Alcotest.(check bool) "suggests stripped command" true
+      (contains_substring msg "\"cmd\": \"git status\"");
+    Alcotest.(check bool) "suggests command-selected worktree cwd" true
+      (contains_substring msg
+         "\"cwd\": \"repos/masc-mcp/.worktrees/keeper-nick0cave-agent-task-236\"");
+    Alcotest.(check bool) "does not suggest unrelated first repo" false
+      (contains_substring msg "\"cwd\": \"repos/grpc-direct\"")
+
 let test_git_creds_skips_missing_ssh_auth_sock () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
@@ -1361,5 +1389,9 @@ let () =
           Alcotest.test_case
             "sandbox-root git with multiple repos gives cwd correction"
             `Quick test_sandbox_root_git_cwd_multi_repo_blocks_before_exec;
+          Alcotest.test_case
+            "sandbox-root git cd-chain hint uses command repo"
+            `Quick
+            test_sandbox_root_git_cwd_multi_repo_cd_hint_uses_command_repo;
         ] );
     ]

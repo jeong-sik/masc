@@ -2483,7 +2483,17 @@ let test_world_prompt_distinguishes_sandbox_and_worktree () =
     bool
     "world prompt names canonical sandbox-relative worktree path"
     true
-    (contains_substring prompt "repos/<REPO_NAME>/.worktrees/<branch-or-task>/")
+    (contains_substring prompt "repos/<REPO_NAME>/.worktrees/<branch-or-task>/");
+  check
+    bool
+    "world prompt tells bash to use cwd instead of cd chaining"
+    true
+    (contains_substring prompt "Always set the tool `cwd` first");
+  check
+    bool
+    "world prompt does not show bare cd git chaining"
+    false
+    (contains_substring prompt "cd repos/<REPO_NAME> && git status")
 ;;
 
 let test_system_prompt_prefers_bash_and_gh_pr_lane () =
@@ -7329,10 +7339,78 @@ let test_prompt_prefers_silence_guidance () =
        try
          ignore (Str.search_forward (Str.regexp_string "SPEECH_ACT:") sys 0);
          true
-       with
-       | Not_found -> false
+     with
+     | Not_found -> false
      in
      found)
+;;
+
+let test_prompt_guides_awaiting_verification_actions () =
+  let sys, _user =
+    UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:base_observation ()
+  in
+  check
+    bool
+    "awaiting verification tasks use approve or reject"
+    true
+    (contains_substring sys "If a task is already awaiting_verification");
+  check
+    bool
+    "verifier uses masc_transition approve"
+    true
+    (contains_substring sys "action=\"approve\"");
+  check
+    bool
+    "verifier uses masc_transition reject"
+    true
+    (contains_substring sys "action=\"reject\"");
+  check
+    bool
+    "verification hint forbids claim/resubmit"
+    true
+    (contains_substring sys "do not claim or resubmit that task")
+;;
+
+let test_prompt_guides_shell_existence_checks_to_structured_tools () =
+  let sys, _user =
+    UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:base_observation ()
+  in
+  check
+    bool
+    "shell existence checks avoid redirects and chaining"
+    true
+    (contains_substring sys "2>/dev/null && echo");
+  check
+    bool
+    "shell existence checks use keeper_shell ls"
+    true
+    (contains_substring sys "Use `keeper_shell op=ls`");
+  check
+    bool
+    "keeper bash hint forbids shell existence tests"
+    true
+    (contains_substring sys "shell existence tests")
+;;
+
+let test_prompt_guides_bash_globs_to_structured_tools () =
+  let sys, _user =
+    UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:base_observation ()
+  in
+  check
+    bool
+    "bash glob example is called out"
+    true
+    (contains_substring sys "find repos/<repo>/lib -name nickname*");
+  check
+    bool
+    "bash globs use keeper_shell find"
+    true
+    (contains_substring sys "keeper_shell op=find name=<glob> path=<dir>");
+  check
+    bool
+    "bash globs can use masc code search"
+    true
+    (contains_substring sys "masc_code_search file_pattern=<glob>")
 ;;
 
 let test_sanitize_text_utf8_replaces_control_chars () =
@@ -9491,6 +9569,38 @@ let test_final_keeper_tool_names_accepts_reported_mcp_keeper_tool () =
        ~tool_names:final_tools)
 ;;
 
+let test_requested_tool_names_seen_preserves_prior_turn_surface () =
+  let seen =
+    Masc_mcp.Keeper_run_tools.merge_requested_tool_names_seen
+      ~seen:[]
+      [ "keeper_board_curation_submit"; "keeper_board_post" ]
+  in
+  let seen =
+    Masc_mcp.Keeper_run_tools.merge_requested_tool_names_seen
+      ~seen
+      [ "keeper_board_post"; "keeper_board_comment" ]
+  in
+  check
+    (list string)
+    "run surface keeps prior-turn tools"
+    [ "keeper_board_curation_submit"; "keeper_board_post"; "keeper_board_comment" ]
+    seen;
+  check
+    (list string)
+    "prior-turn observed tool remains expected for run-level validation"
+    []
+    (KTD.unexpected_tool_names
+       ~allowed_tool_names:seen
+       ~tool_names:[ "keeper_board_curation_submit" ]);
+  check
+    (list string)
+    "last-turn-only surface would have false-positive unexpected tool"
+    [ "keeper_board_curation_submit" ]
+    (KTD.unexpected_tool_names
+       ~allowed_tool_names:[ "keeper_board_post"; "keeper_board_comment" ]
+       ~tool_names:[ "keeper_board_curation_submit" ])
+;;
+
 (* prioritized_disclosed_tool_names tests removed: function replaced
    by OAS Tool_selector.select in #5429 boundary cleanup. *)
 
@@ -10586,6 +10696,31 @@ let test_should_require_tools_for_initial_turn_covers_actionable_affordances () 
     "worktree inspection requires tool gate"
     true
     (require "inspect_worktree_delta")
+;;
+
+let test_actionable_observation_requires_provider_tool_choice_filter () =
+  let open Masc_mcp.Keeper_agent_tool_surface in
+  check
+    bool
+    "initial required surface requires provider tool_choice support"
+    true
+    (KAR.should_require_provider_tool_choice_support
+       ~initial_tool_requirement:Required
+       ~actionable_observation_requires_tool_support:false);
+  check
+    bool
+    "actionable observation upgrades optional initial surface"
+    true
+    (KAR.should_require_provider_tool_choice_support
+       ~initial_tool_requirement:Optional
+       ~actionable_observation_requires_tool_support:true);
+  check
+    bool
+    "optional non-actionable turn keeps provider filter relaxed"
+    false
+    (KAR.should_require_provider_tool_choice_support
+       ~initial_tool_requirement:Optional
+       ~actionable_observation_requires_tool_support:false)
 ;;
 
 let test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool () =
@@ -11788,6 +11923,18 @@ let () =
             test_tool_guidance_guard_falls_back_when_prompt_registry_empty
         ; test_case "prefers silence guidance" `Quick test_prompt_prefers_silence_guidance
         ; test_case
+            "guides awaiting verification actions"
+            `Quick
+            test_prompt_guides_awaiting_verification_actions
+        ; test_case
+            "guides shell existence checks to structured tools"
+            `Quick
+            test_prompt_guides_shell_existence_checks_to_structured_tools
+        ; test_case
+            "guides bash globs to structured tools"
+            `Quick
+            test_prompt_guides_bash_globs_to_structured_tools
+        ; test_case
             "sanitize_text_utf8 replaces control chars"
             `Quick
             test_sanitize_text_utf8_replaces_control_chars
@@ -12086,6 +12233,10 @@ let () =
             "final keeper tool names accept reported MCP keeper tool"
             `Quick
             test_final_keeper_tool_names_accepts_reported_mcp_keeper_tool
+        ; test_case
+            "requested tool names seen preserves prior turn surface"
+            `Quick
+            test_requested_tool_names_seen_preserves_prior_turn_surface
         ; test_case
             "tool query strips continuity noise"
             `Quick
@@ -12795,6 +12946,10 @@ let () =
             "initial tool requirement covers actionable affordances"
             `Quick
             test_should_require_tools_for_initial_turn_covers_actionable_affordances
+        ; test_case
+            "actionable observation requires provider tool_choice filter"
+            `Quick
+            test_actionable_observation_requires_provider_tool_choice_filter
         ; test_case
             "task backlog required turn prefers claim tool choice"
             `Quick

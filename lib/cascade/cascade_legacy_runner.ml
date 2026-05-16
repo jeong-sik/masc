@@ -418,6 +418,8 @@ let cascade_metrics_for_candidates ~candidate_count:(_ : int) () =
       ~on_token_usage:(fun ~provider ~model_id ~input_tokens ~output_tokens ->
         Llm_metric_bridge.emit_token_usage
           ~provider ~model_id ~input_tokens ~output_tokens)
+      ~on_tool_calls:(fun ~provider ~model_id ~count ->
+        Llm_metric_bridge.emit_tool_calls ~provider ~model_id ~count)
       ()
   in
   (capture, metrics)

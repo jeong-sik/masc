@@ -27,6 +27,7 @@
 
 module UT = Masc_mcp.Keeper_unified_turn
 module EC = Masc_mcp.Keeper_error_classify
+module KC = Masc_mcp.Keeper_context_core
 
 (* ── Generators ──────────────────────────────────────────── *)
 
@@ -248,6 +249,60 @@ let test_pair_repair_integration () =
        | _ -> false)
   end
 
+let user_text text : Agent_sdk.Types.message =
+  { role = Agent_sdk.Types.User
+  ; content = [ Agent_sdk.Types.Text text ]
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = []
+  }
+
+let assistant_tool_use id name : Agent_sdk.Types.message =
+  { role = Agent_sdk.Types.Assistant
+  ; content = [ Agent_sdk.Types.ToolUse { id; name; input = `Null } ]
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = []
+  }
+
+let user_tool_result id content : Agent_sdk.Types.message =
+  { role = Agent_sdk.Types.User
+  ; content =
+      [ Agent_sdk.Types.ToolResult
+          { tool_use_id = id; content; is_error = false; json = None }
+      ]
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = []
+  }
+
+let test_pair_repair_stats_count_downgrades () =
+  let messages =
+    [ user_text "q"
+    ; assistant_tool_use "dangling" "calc"
+    ; user_text "interrupt"
+    ; user_tool_result "orphan" "late"
+    ]
+  in
+  let repaired, stats = KC.repair_broken_tool_call_pairs_with_stats messages in
+  Alcotest.(check bool)
+    "repair stats changed"
+    true
+    (KC.tool_pair_repair_stats_changed stats);
+  Alcotest.(check int) "dangling tool use downgraded" 1 stats.downgraded_tool_uses;
+  Alcotest.(check int) "orphan tool result downgraded" 1 stats.downgraded_tool_results;
+  let has_structured_tool_block =
+    List.exists
+      (fun (msg : Agent_sdk.Types.message) ->
+         List.exists
+           (function
+             | Agent_sdk.Types.ToolUse _ | Agent_sdk.Types.ToolResult _ -> true
+             | _ -> false)
+           msg.content)
+      repaired
+  in
+  Alcotest.(check bool) "structured tool blocks removed" false has_structured_tool_block
+
 (* ── Gospel-style specification (documentation) ────────── *)
 (*
    @gospel — formal specification (Ortac runtime not available on 5.4)
@@ -283,5 +338,7 @@ let () =
         test_cap_message_tokens_integration;
       Alcotest.test_case "local pair repair integrated in reducer chain" `Quick
         test_pair_repair_integration;
+      Alcotest.test_case "pair repair stats count downgrades" `Quick
+        test_pair_repair_stats_count_downgrades;
     ]);
   ]

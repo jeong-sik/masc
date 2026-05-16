@@ -128,6 +128,19 @@ let keeper_runtime_identity_fields (meta : Keeper_types.keeper_meta) =
   ]
 ;;
 
+let degraded_keeper_runtime_identity_fields (meta : Keeper_types.keeper_meta) =
+  let cascade_name = non_empty_trimmed_string_opt (Keeper_types.cascade_name_of_meta meta) in
+  let cascade_json = string_option_to_json cascade_name in
+  [ "cascade_name", cascade_json
+  ; "cascade_canonical", cascade_json
+  ; "selected_cascade_canonical", cascade_json
+  ; "primary_model", `Null
+  ; "active_model", `Null
+  ; "active_model_label", `Null
+  ; "last_model_used_label", `Null
+  ]
+;;
+
 type action_result_status =
   | ActionOk
   | ActionError
@@ -543,7 +556,11 @@ let compact_keeper_runtime_trust_json
       ~(config : Coord.config)
       ~(meta : Keeper_types.keeper_meta)
   =
-  let runtime_trust = Keeper_runtime_trust_snapshot.summary_json ~config ~meta in
+  let runtime_trust =
+    if Keeper_fd_pressure.active ()
+    then Keeper_fd_pressure.degraded_trust_json ()
+    else Keeper_runtime_trust_snapshot.summary_json ~config ~meta
+  in
   let member key = Yojson.Safe.Util.member key runtime_trust in
   `Assoc
     [ "disposition", member "disposition"
@@ -558,6 +575,41 @@ let compact_keeper_runtime_trust_json
     ; "latest_next_action", member "latest_next_action"
     ; "latest_causal_event", member "latest_causal_event"
     ]
+;;
+
+let degraded_keeper_snapshot_row (meta : Keeper_types.keeper_meta) =
+  let runtime_trust = Keeper_fd_pressure.degraded_trust_json () in
+  let fd_fields = Keeper_fd_pressure.projection_fields () in
+  `Assoc
+    ([ "runtime_class", `String "keeper"
+     ; "pipeline_stage", `String "degraded"
+     ; "phase", `String "degraded"
+     ; "name", `String meta.name
+     ; "agent_name", `String meta.agent_name
+     ; ( "trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) )
+     ; "goal", `String meta.goal
+     ; "short_goal", `String meta.short_goal
+     ; "mid_goal", `String meta.mid_goal
+     ; "long_goal", `String meta.long_goal
+     ; "status", `String "degraded"
+     ; "agent", `Null
+     ; "generation", `Int meta.runtime.generation
+     ; "turn_count", `Int meta.runtime.usage.total_turns
+     ; "paused", `Bool meta.paused
+     ; "keepalive_running", `Bool false
+     ; "last_model_used", `Null
+     ; "next_model_hint", `Null
+     ; ( "active_goal_ids"
+       , `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids) )
+     ; "recent_activity", `List []
+     ; "runtime_trust", runtime_trust
+     ; "trust", runtime_trust
+     ; "diagnostic", Keeper_fd_pressure.degraded_projection_json ()
+     ; "updated_at", `String meta.updated_at
+     ; "created_at", `String meta.created_at
+     ]
+     @ degraded_keeper_runtime_identity_fields meta
+     @ fd_fields)
 ;;
 
 let keepers_json
@@ -577,6 +629,8 @@ let keepers_json
      construction can cause memory spikes during dashboard refresh. *)
   let n = List.length names in
   let results = Array.make n None in
+  let fd_degraded = Keeper_fd_pressure.active () in
+  let keeper_sem = if fd_degraded then Eio.Semaphore.make 1 else _keeper_sem in
   Eio.Fiber.all
     (List.mapi
        (fun idx name () ->
@@ -588,11 +642,11 @@ let keepers_json
             half exceeds the same 500ms threshold used by the outer
             [timed] helper, keeping the log quiet on healthy snapshots. *)
           let t_wait_start = Time_compat.now () in
-          Eio.Semaphore.acquire _keeper_sem;
+          Eio.Semaphore.acquire keeper_sem;
           let t_work_start = Time_compat.now () in
           let wait_ms = (t_work_start -. t_wait_start) *. 1000.0 in
           Eio.Switch.on_release keeper_sw (fun () ->
-            Eio.Semaphore.release _keeper_sem;
+            Eio.Semaphore.release keeper_sem;
             let work_ms = (Time_compat.now () -. t_work_start) *. 1000.0 in
             if work_ms > 500.0 || wait_ms > 500.0
             then
@@ -636,7 +690,11 @@ let keepers_json
                 | Error _ | Ok None -> None
                 | Ok (Some meta) ->
                   dt_meta := Time_compat.now () -. t0;
-                  if lightweight && meta.paused
+                  if fd_degraded
+                  then (
+                    emit_timing_log (Time_compat.now () -. t_work_start);
+                    Some (degraded_keeper_snapshot_row meta))
+                  else if lightweight && meta.paused
                   then (
                     let t_ph = Time_compat.now () in
                     let phase_str =

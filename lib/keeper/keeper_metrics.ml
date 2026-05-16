@@ -673,6 +673,10 @@ let metric_keeper_thinking_persist_failures =
 
 let metric_keeper_checkpoint_failures = "masc_keeper_checkpoint_failures_total"
 
+let metric_keeper_continuity_summary_source =
+  "masc_keeper_continuity_summary_source_total"
+;;
+
 let metric_keeper_summarizer_state_scrubs =
   "masc_keeper_summarizer_state_scrubs_total"
 ;;

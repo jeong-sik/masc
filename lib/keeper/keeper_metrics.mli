@@ -337,6 +337,15 @@ val metric_keeper_local_discovery_failures : string
 val metric_keeper_thinking_persist_failures : string
 val metric_keeper_checkpoint_failures : string
 
+val metric_keeper_continuity_summary_source : string
+(** Counter for [Keeper_world_observation.read_continuity_summary]
+    return paths.  Label [source] is governed by
+    {!Keeper_continuity_summary_source}; label [keeper] names the
+    keeper whose summary was read.  Rising
+    [meta_fallback_exception] is the operational signal that the
+    catch-all [| _ -> ] is swallowing exceptions that previously
+    had no audit trail. *)
+
 val metric_keeper_summarizer_state_scrubs : string
 (** Counter for [Keeper_summarizer.keeper_summarizer] invocations,
     classified by label [outcome] (with_scrub | without_scrub).

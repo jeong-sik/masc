@@ -276,3 +276,30 @@ val runtime_trust_from_receipt_fallback :
   meta:Keeper_types.keeper_meta ->
   Yojson.Safe.t ->
   Yojson.Safe.t
+
+(** {1 Goal timeline composition} *)
+
+(** Compose the task/approval/keeper/goal event lists into a single
+    timeline sorted by [ts] descending (newest first). Reads wall-clock
+    only as fallback when a keeper event lacks an [ts] field. *)
+val build_goal_timeline :
+  tree_node ->
+  goal_detail_keeper list ->
+  Yojson.Safe.t list ->
+  Yojson.Safe.t list ->
+  Yojson.Safe.t list
+
+(** {1 Goal tree builder — recursive pure projection over context} *)
+
+type build_context = {
+  now_ts : float;
+  all_tasks : Masc_domain.task list;
+  pending_approvals : Yojson.Safe.t list;
+  keeper_metas : Keeper_types.keeper_meta list;
+  latest_receipts : (string * Yojson.Safe.t) list;
+  latest_runtime_trusts : (string * Yojson.Safe.t) list;
+}
+
+(** Recursive pure projection: given a [build_context] snapshot, build
+    the [tree_node] for [goal] and all descendants found in [goals]. *)
+val build_tree : build_context -> Goal_store.goal list -> Goal_store.goal -> tree_node

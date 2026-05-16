@@ -252,6 +252,8 @@ module Metrics = struct
       =
     ()
 
+  let default_tool_calls ~provider:_ ~model_id:_ ~count:_ = ()
+
   let default_streaming_first_chunk ~provider:_ ~model_id:_ ~ttfrc_ms:_ = ()
 
   let default_streaming_chunk ~provider:_ ~model_id:_ ~chunk_index:_
@@ -266,6 +268,7 @@ module Metrics = struct
       ?(on_circuit_state = default_circuit_state)
       ?(on_capability_drop = default_capability_drop)
       ?(on_retry = default_retry) ?(on_token_usage = default_token_usage)
+      ?(on_tool_calls = default_tool_calls)
       ?(on_streaming_first_chunk = default_streaming_first_chunk)
       ?(on_streaming_chunk = default_streaming_chunk) ()
       : Llm_provider.Metrics.t =
@@ -281,6 +284,7 @@ module Metrics = struct
       on_capability_drop;
       on_retry;
       on_token_usage;
+      on_tool_calls;
       on_streaming_first_chunk;
       on_streaming_chunk;
     }

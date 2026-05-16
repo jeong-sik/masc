@@ -95,47 +95,6 @@ let keeper_runtime_trust_snapshot_json ~config ~(meta : Keeper_types.keeper_meta
           ("causal_timeline", `List []);
         ]
 
-let display_disposition_of_receipt_json receipt =
-  let operator_disposition =
-    receipt |> member "operator_disposition" |> to_string_option
-    |> Option.value ~default:"unknown"
-  in
-  let operator_disposition_reason =
-    receipt |> member "operator_disposition_reason" |> to_string_option
-    |> Option.value ~default:""
-  in
-  let reason fallback =
-    match String.trim operator_disposition_reason with
-    | "" -> fallback
-    | value -> value
-  in
-  match String.lowercase_ascii operator_disposition with
-  | "pass" -> ("Pass", "healthy", operator_disposition, operator_disposition_reason)
-  | "skipped" ->
-      ("Pass", "phase_skipped", operator_disposition, operator_disposition_reason)
-  | "pass_next_model" ->
-      ("Pass", "cascade_fallback", operator_disposition, operator_disposition_reason)
-  | "pause_human" ->
-      ( "Pause",
-        reason "needs_human_attention",
-        operator_disposition,
-        operator_disposition_reason )
-  | "fail_open_next_cascade" ->
-      ("Pause", reason "degraded_retry", operator_disposition, operator_disposition_reason)
-  | "user_cancelled" ->
-      ("Pause", reason "cancelled", operator_disposition, operator_disposition_reason)
-  | "alert_exhausted" ->
-      ("Alert", reason "cascade_exhausted", operator_disposition, operator_disposition_reason)
-  | "unknown" ->
-      ( "Alert",
-        reason "unmapped_cascade_state",
-        operator_disposition,
-        operator_disposition_reason )
-  | _ ->
-      ( "Alert",
-        reason "unmapped_operator_disposition",
-        operator_disposition,
-        operator_disposition_reason )
 
 let runtime_blocker_event_from_meta ~config ~(meta : Keeper_types.keeper_meta) =
   let runtime_blocker_fields =

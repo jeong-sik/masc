@@ -200,3 +200,11 @@ val goal_fsm_to_json :
   Goal_store.goal ->
   tree_node ->
   Yojson.Safe.t
+
+(** {1 Operator-disposition normalizer (pure)} *)
+
+(** [display_disposition_of_receipt_json receipt] returns
+    [(severity, reason, raw_disposition, raw_reason)] where [severity]
+    is one of "Pass" | "Pause" | "Alert". *)
+val display_disposition_of_receipt_json :
+  Yojson.Safe.t -> string * string * string * string

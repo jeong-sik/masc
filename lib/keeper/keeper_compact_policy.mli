@@ -31,6 +31,22 @@ type compaction_decision =
 val compaction_decision_to_string : compaction_decision -> string
 val compaction_decision_applied : compaction_decision -> bool
 
+(** Pure compaction gate decision. Exposed so the FSM-level cooldown
+    contract can be tested without constructing an OAS checkpoint or
+    running reducers. *)
+val decide_compaction
+  :  ratio:float
+  -> msg_count:int
+  -> tok_count:int
+  -> ratio_gate:float
+  -> message_gate:int
+  -> token_gate:int
+  -> cooldown_sec:int
+  -> last_continuity_update_ts:float
+  -> last_proactive_ts:float
+  -> now_ts:float
+  -> compaction_decision
+
 (** Project [meta] to its [(ratio_gate, message_gate, token_gate)]
     tuple. *)
 val compaction_policy_of_keeper : Keeper_types.keeper_meta -> float * int * int

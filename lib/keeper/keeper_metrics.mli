@@ -253,6 +253,8 @@ val metric_keeper_compaction_saved_tokens : string
 val metric_keeper_operator_compact : string
 val metric_keeper_operator_clear : string
 val metric_keeper_compaction_noop : string
+val metric_keeper_continuity_no_state : string
+val metric_keeper_tool_pair_repair : string
 val metric_keeper_tool_emission_registry_size : string
 val metric_keeper_tool_emission_pushes : string
 val metric_keeper_tool_underused_allowed_count : string

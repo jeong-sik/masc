@@ -19,11 +19,12 @@
 
     Property 5 (Reducer integration):
       keeper_run_tools source contains cap_message_tokens in the
-      keeper reducer chain, ordered before repair_dangling_tool_calls.
+      keeper reducer chain, ordered before the local pair repair.
 
     Property 6 (Reducer hardening):
-      keeper_run_tools source contains the keeper-local
-      repair_broken_tool_call_pairs reducer after repair_dangling_tool_calls. *)
+      keeper_run_tools source uses the keeper-local repair path and does
+      not call OAS repair_dangling_tool_calls, which fabricates synthetic
+      ToolResult messages for dangling tool uses. *)
 
 module UT = Masc_mcp.Keeper_unified_turn
 module EC = Masc_mcp.Keeper_error_classify
@@ -140,7 +141,7 @@ let test_structural_absence () =
   end
 
 let test_cap_message_tokens_integration () =
-  let find_substring haystack needle =
+  let find_substring ?(start = 0) haystack needle =
     let hlen = String.length haystack in
     let nlen = String.length needle in
     let rec loop i =
@@ -148,7 +149,7 @@ let test_cap_message_tokens_integration () =
       else if String.sub haystack i nlen = needle then Some i
       else loop (i + 1)
     in
-    if nlen = 0 then Some 0 else loop 0
+    if nlen = 0 then Some start else loop start
   in
   let has_prompt_root path =
     Sys.file_exists (Filename.concat path "config/prompts/keeper.unified.system.md")
@@ -182,10 +183,13 @@ let test_cap_message_tokens_integration () =
       find_substring content "Agent_sdk.Context_reducer.cap_message_tokens"
     in
     let repair_pos =
-      find_substring content "Agent_sdk.Context_reducer.repair_dangling_tool_calls"
+      match cap_pos with
+      | Some cap_pos ->
+          find_substring ~start:cap_pos content "repair_broken_tool_call_pairs_observed"
+      | None -> None
     in
     Alcotest.(check bool)
-      "keeper_run_tools.ml must integrate cap_message_tokens before repair_dangling_tool_calls"
+      "keeper_run_tools.ml must integrate cap_message_tokens before local pair repair"
       true
       (match cap_pos, repair_pos with
        | Some cap_pos, Some repair_pos -> cap_pos < repair_pos
@@ -231,22 +235,20 @@ let test_pair_repair_integration () =
         really_input ic buf 0 len;
         Bytes.to_string buf)
     in
-    let repair_pos =
+    let oas_repair_pos =
       find_substring content "Agent_sdk.Context_reducer.repair_dangling_tool_calls"
     in
     let local_pos =
-      match repair_pos with
-      | Some repair_pos ->
-          find_substring ~start:repair_pos content
-            "Keeper_context_core.repair_broken_tool_call_pairs"
-      | None -> None
+      find_substring content "Keeper_context_core.repair_broken_tool_call_pairs"
     in
     Alcotest.(check bool)
-      "keeper_run_tools.ml must integrate local pair repair after repair_dangling_tool_calls"
+      "keeper_run_tools.ml must not invoke OAS synthetic repair_dangling_tool_calls"
       true
-      (match repair_pos, local_pos with
-       | Some repair_pos, Some local_pos -> repair_pos < local_pos
-       | _ -> false)
+      (Option.is_none oas_repair_pos);
+    Alcotest.(check bool)
+      "keeper_run_tools.ml must integrate local non-fabricating pair repair"
+      true
+      (Option.is_some local_pos)
   end
 
 let user_text text : Agent_sdk.Types.message =

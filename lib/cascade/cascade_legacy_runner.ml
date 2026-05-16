@@ -176,7 +176,7 @@ let strip_latest_suffix s =
 
 let cascade_observation_of_candidates ~cascade_name ?strategy ~configured_labels
     ~(candidate_count : int)
-    ~selected_model_raw:(_ : string option)
+    ~(selected_model_raw : string option)
     ?(attempts = [])
     ?(fallback_events = [])
     ?(attempt_details_available = false)
@@ -189,7 +189,14 @@ let cascade_observation_of_candidates ~cascade_name ?strategy ~configured_labels
     match candidate_models with first :: _ -> Some first | [] -> None
   in
   let selected_index = None in
-  let selected_model = None in
+  (* Thread the caller-supplied raw model attribution into both fields.
+     Without this, success rows lose model attribution at construction
+     time and downstream consumers (model_inference_metrics
+     parse_telemetry_entry, execution receipts, composite observer)
+     drop the row as Missing_success_model. Public-surface redaction to
+     [public_runtime_model_label] happens at the redacted JSON emitter
+     layer, not at observation construction. *)
+  let selected_model = selected_model_raw in
   let fallback_hops = Option.map (fun idx -> max 0 idx) selected_index in
   let fallback_applied =
     match fallback_hops with
@@ -203,7 +210,7 @@ let cascade_observation_of_candidates ~cascade_name ?strategy ~configured_labels
     candidate_models;
     primary_model;
     selected_model;
-    selected_model_raw = None;
+    selected_model_raw;
     selected_index;
     fallback_hops;
     fallback_applied;

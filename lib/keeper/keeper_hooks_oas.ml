@@ -512,20 +512,8 @@ let oas_reported_cost (usage : Agent_sdk.Types.api_usage) : float =
   | Some _ -> 0.0
   | None -> 0.0
 
-type tool_execution_summary =
-  { tool_name : string
-  ; provider : string
-  ; outcome : string
-  ; duration_ms : float
-  }
-
-let tool_execution_summary ~tool_name ~model ~success ~duration_ms :
-    tool_execution_summary =
-  { tool_name
-  ; provider = runtime_lane_of_model model
-  ; outcome = if success then outcome_ok else outcome_error
-  ; duration_ms = max 0.0 duration_ms
-  }
+(* type tool_execution_summary + builder moved to Keeper_hooks_oas_types
+   (intra-library file split, 2026-05-16). *)
 
 let record_keeper_tool_duration_metric
     ~(keeper_name : string)

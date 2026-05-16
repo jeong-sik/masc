@@ -3,6 +3,15 @@
 
     See keeper_hooks_oas_types.mli for rationale and contract. *)
 
+let outcome_ok = "ok"
+let outcome_error = "error"
+
+(** Keeper-facing telemetry uses a neutral runtime lane.  Concrete
+    provider/model identity belongs to OAS and lower-level cascade adapters. *)
+let runtime_lane_label = "runtime"
+
+let runtime_lane_of_model (_model : string) : string = runtime_lane_label
+
 type cost_status =
   | Cost_reported
   | Cost_known_free
@@ -160,3 +169,18 @@ let normalize_pr_review_action raw =
   match trimmed with
   | "COMMENT" | "APPROVE" | "REQUEST_CHANGES" | "REPLY" -> Some trimmed
   | _ -> None
+
+type tool_execution_summary =
+  { tool_name : string
+  ; provider : string
+  ; outcome : string
+  ; duration_ms : float
+  }
+
+let tool_execution_summary ~tool_name ~model ~success ~duration_ms :
+    tool_execution_summary =
+  { tool_name
+  ; provider = runtime_lane_of_model model
+  ; outcome = if success then outcome_ok else outcome_error
+  ; duration_ms = max 0.0 duration_ms
+  }

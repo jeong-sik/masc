@@ -24,18 +24,6 @@ open Keeper_types
     keep using [Keeper_registry.failure_reason] etc. unchanged. *)
 include Keeper_registry_types
 
-
-let try_resolve_done entry value =
-  match Eio.Promise.peek entry.done_p with
-  | Some _ -> false
-  | None ->
-    (try
-       Eio.Promise.resolve entry.done_r value;
-       true
-     with
-     | Invalid_argument _ -> false)
-;;
-
 let registry : registry_entry StringMap.t Atomic.t = Atomic.make StringMap.empty
 let running_count_atomic = Atomic.make 0
 

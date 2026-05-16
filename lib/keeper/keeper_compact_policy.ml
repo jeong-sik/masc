@@ -47,6 +47,62 @@ let compaction_decision_applied = function
     false
 ;;
 
+(** Map the runtime decision to a stable Prometheus label.  The
+    decision value carries per-call numerics (ratio, threshold,
+    hold_s, …) that would explode cardinality; this helper drops
+    them and keeps only the bounded label set governed by
+    {!Keeper_compaction_decision_label}. *)
+let decision_label : compaction_decision -> Keeper_compaction_decision_label.t =
+  function
+  | Applied (Compaction_trigger.Ratio_threshold _) ->
+    Keeper_compaction_decision_label.Applied_ratio
+  | Applied (Compaction_trigger.Message_count _) ->
+    Keeper_compaction_decision_label.Applied_message
+  | Applied (Compaction_trigger.Token_count _) ->
+    Keeper_compaction_decision_label.Applied_token
+  | Applied (Compaction_trigger.Tool_heavy _) ->
+    Keeper_compaction_decision_label.Applied_tool_heavy
+  | Applied Compaction_trigger.Manual ->
+    Keeper_compaction_decision_label.Applied_manual
+  | Blocked_below_thresholds ->
+    Keeper_compaction_decision_label.Blocked_below_thresholds
+  | Skipped_no_checkpoint ->
+    Keeper_compaction_decision_label.Skipped_no_checkpoint
+  | Skipped_continuity_reflection _ ->
+    Keeper_compaction_decision_label.Skipped_continuity_reflection
+;;
+
+(* Observability for every decision out of [compact_if_needed_typed].
+   The existing [metric_keeper_compactions] only counts the applied
+   path and lacks a trigger label; this counter complements it by
+   exposing the per-gate breakdown and the previously uncounted
+   skipped/blocked decisions.  Closes the silent-failure gap
+   flagged in .tmp/memory-compacting-analysis.html (compaction
+   decision visibility). *)
+let () =
+  Prometheus.register_counter
+    ~name:Keeper_metrics.metric_keeper_compaction_decisions
+    ~help:
+      "Total [Keeper_compact_policy.compact_if_needed_typed] \
+       decisions, classified by label [decision] (governed by \
+       Keeper_compaction_decision_label).  Labels: [keeper], \
+       [decision].  Complements [masc_keeper_compactions_total] \
+       (applied-only, no trigger label)."
+    ()
+;;
+
+let record_compaction_decision ~(keeper_name : string)
+    ~(decision : compaction_decision) =
+  Prometheus.inc_counter
+    Keeper_metrics.metric_keeper_compaction_decisions
+    ~labels:
+      [ ("keeper", keeper_name)
+      ; ( "decision"
+        , Keeper_compaction_decision_label.(to_label (decision_label decision))
+        )
+      ]
+    ()
+
 let compaction_policy_of_keeper (meta : keeper_meta) : float * int * int =
   meta.compaction.ratio_gate, meta.compaction.message_gate, meta.compaction.token_gate
 ;;
@@ -113,6 +169,7 @@ let compact_if_needed_typed
     then Applied (Compaction_trigger.Tool_heavy { messages = msg_count; ratio })
     else Blocked_below_thresholds
   in
+  record_compaction_decision ~keeper_name:meta.name ~decision;
   match decision with
   | Blocked_below_thresholds | Skipped_no_checkpoint | Skipped_continuity_reflection _ ->
     ctx, None, decision

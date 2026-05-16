@@ -60,3 +60,22 @@ val compact_if_needed
   -> now_ts:float
   -> Keeper_context_core.working_context
   -> Keeper_context_core.working_context * string option * string
+
+(** Flatten a runtime [compaction_decision] into the stable
+    Prometheus label sum so callers can record bypassed paths
+    (e.g. {!Skipped_no_checkpoint} branches that do not run
+    {!compact_if_needed_typed}) without duplicating the variant
+    mapping. *)
+val decision_label
+  :  compaction_decision
+  -> Keeper_compaction_decision_label.t
+
+(** Emit the [metric_keeper_compaction_decisions] counter with the
+    [keeper] and [decision] labels for the given decision.  Called
+    automatically inside {!compact_if_needed_typed}; expose it for
+    bypassed paths such as [Skipped_no_checkpoint] constructed in
+    {!Keeper_post_turn} when [checkpoint = None]. *)
+val record_compaction_decision
+  :  keeper_name:string
+  -> decision:compaction_decision
+  -> unit

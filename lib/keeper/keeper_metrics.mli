@@ -336,6 +336,17 @@ val metric_keeper_cascade_sync_failures : string
 val metric_keeper_local_discovery_failures : string
 val metric_keeper_thinking_persist_failures : string
 val metric_keeper_checkpoint_failures : string
+
+val metric_keeper_compaction_decisions : string
+(** Counter for every
+    [Keeper_compact_policy.compact_if_needed_typed] decision,
+    classified by label [decision] (governed by
+    {!Keeper_compaction_decision_label}).  Labels: [keeper],
+    [decision].  Complements [metric_keeper_compactions] (which
+    only counts applied compactions and lacks a trigger label) by
+    exposing the gate breakdown and the previously-uncounted
+    skipped/blocked decisions. *)
+
 val metric_keeper_memory_write_failures : string
 val metric_keeper_memory_consolidations : string
 val metric_keeper_write_meta_cycle_failures : string

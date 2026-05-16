@@ -449,6 +449,13 @@ let apply_post_turn_lifecycle_with_resilience_handles
   in
   let body = match checkpoint with
   | None ->
+      (* Skipped_no_checkpoint path bypasses [compact_if_needed_typed],
+         so emit the decision counter here so the bypassed path is
+         not invisible in /metrics.  Pair with
+         [Keeper_compact_policy.record_compaction_decision]. *)
+      Keeper_compact_policy.record_compaction_decision
+        ~keeper_name:meta.name
+        ~decision:no_checkpoint_decision;
       let updated_meta =
         map_runtime
           (fun rt ->

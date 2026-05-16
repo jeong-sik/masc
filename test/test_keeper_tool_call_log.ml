@@ -821,6 +821,35 @@ let test_output_inline_string_preserved () =
         "small inline result" s
     | _ -> Alcotest.fail "expected exactly one entry")
 
+let test_string_input_keeps_action_radius () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k" ~tool_name:"tool_large_input"
+      ~input:(`String "{\"action\":\"write\"}")
+      ~output_text:"ok"
+      ~success:true ~duration_ms:1.0 ();
+    let results = Keeper_tool_call_log.read_recent ~n:1 () in
+    match results with
+    | [ json ] ->
+      let action_radius =
+        match json with
+        | `Assoc fields ->
+          Option.value (List.assoc_opt "action_radius" fields) ~default:`Null
+        | _ -> `Null
+      in
+      let action_key =
+        Safe_ops.json_string ~default:"" "action_key" action_radius
+      in
+      let target_kind =
+        Safe_ops.json_string ~default:"" "target_kind" action_radius
+      in
+      Alcotest.(check string)
+        "falls back when input is not a JSON object"
+        "tool_large_input"
+        action_key;
+      Alcotest.(check string) "non-object input has tool target" "tool" target_kind
+    | _ -> Alcotest.fail "expected exactly one entry")
+
 let () =
   Alcotest.run "keeper_tool_call_log"
     [ ( "read_recent",
@@ -867,5 +896,9 @@ let () =
             test_output_blob_sentinel_normalized
         ; eio_test "inline string output stays a JSON string"
             test_output_inline_string_preserved
+        ] )
+    ; ( "action_radius",
+        [ eio_test "string input does not break action radius"
+            test_string_input_keeps_action_radius
         ] )
     ]

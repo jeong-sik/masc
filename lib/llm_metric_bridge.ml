@@ -42,6 +42,7 @@ let error_by_reason_metric = Prometheus.metric_llm_provider_errors_by_reason
 let retry_metric = Prometheus.metric_llm_provider_retries
 let input_tokens_metric = Prometheus.metric_llm_provider_input_tokens
 let output_tokens_metric = Prometheus.metric_llm_provider_output_tokens
+let tool_calls_metric = Prometheus.metric_llm_provider_tool_calls
 let circuit_state_metric = Prometheus.metric_llm_provider_circuit_state
 let streaming_first_chunk_metric =
   Prometheus.metric_llm_provider_streaming_first_chunk
@@ -254,6 +255,14 @@ let emit_token_usage ~provider ~model_id ~input_tokens ~output_tokens =
       ~delta:(Float.of_int output_tokens)
       ()
 
+let emit_tool_calls ~provider ~model_id ~count =
+  remember_provider ~model_id ~provider;
+  if count > 0 then
+    Prometheus.inc_counter tool_calls_metric
+      ~labels:[("provider", provider); ("model", model_id)]
+      ~delta:(Float.of_int count)
+      ()
+
 (** Validation outcome for a streaming or latency duration carried in
     milliseconds. Internal — kept out of [.mli] so callers stay
     byte-identical.
@@ -435,6 +444,7 @@ let emit_request_latency ?provider ~model_id ~latency_ms () =
     - [on_retry]        → masc_llm_provider_retries_total
     - [on_circuit_state] → masc_llm_provider_circuit_state
     - [on_token_usage]  → masc_llm_provider_{input,output}_tokens_total
+    - [on_tool_calls]   → masc_llm_provider_tool_calls_total
     - [on_streaming_first_chunk] → masc_llm_provider_streaming_first_chunk_seconds
     - [on_streaming_chunk] → masc_llm_provider_streaming_inter_chunk_seconds *)
 let make_sink () : Llm_provider.Metrics.t =
@@ -454,6 +464,7 @@ let make_sink () : Llm_provider.Metrics.t =
     ~on_retry:emit_retry
     ~on_circuit_state:emit_circuit_state
     ~on_token_usage:emit_token_usage
+    ~on_tool_calls:emit_tool_calls
     ~on_streaming_first_chunk:emit_streaming_first_chunk
     ~on_streaming_chunk:emit_streaming_chunk
     ()

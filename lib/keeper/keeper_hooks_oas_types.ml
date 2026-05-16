@@ -3,6 +3,15 @@
 
     See keeper_hooks_oas_types.mli for rationale and contract. *)
 
+let outcome_ok = "ok"
+let outcome_error = "error"
+
+(** Keeper-facing telemetry uses a neutral runtime lane.  Concrete
+    provider/model identity belongs to OAS and lower-level cascade adapters. *)
+let runtime_lane_label = "runtime"
+
+let runtime_lane_of_model (_model : string) : string = runtime_lane_label
+
 type cost_status =
   | Cost_reported
   | Cost_known_free
@@ -160,3 +169,48 @@ let normalize_pr_review_action raw =
   match trimmed with
   | "COMMENT" | "APPROVE" | "REQUEST_CHANGES" | "REPLY" -> Some trimmed
   | _ -> None
+
+type tool_execution_summary =
+  { tool_name : string
+  ; provider : string
+  ; outcome : string
+  ; duration_ms : float
+  }
+
+let tool_execution_summary ~tool_name ~model ~success ~duration_ms :
+    tool_execution_summary =
+  { tool_name
+  ; provider = runtime_lane_of_model model
+  ; outcome = if success then outcome_ok else outcome_error
+  ; duration_ms = max 0.0 duration_ms
+  }
+
+let usage_has_tokens (usage : Agent_sdk.Types.api_usage) =
+  usage.input_tokens > 0
+  || usage.output_tokens > 0
+  || usage.cache_creation_input_tokens > 0
+  || usage.cache_read_input_tokens > 0
+
+let is_keeper_board_write_tool_name tool_name =
+  match Tool_name.Keeper.of_string tool_name with
+  | Some tool -> Tool_name.Keeper.is_board_write tool
+  | None -> false
+
+let current_keeper_model meta =
+  let _ = meta in
+  runtime_lane_label
+
+let stop_reason_label_end_turn = "end_turn"
+let stop_reason_label_tool_use = "tool_use"
+let stop_reason_label_max_tokens = "max_tokens"
+let stop_reason_label_stop_sequence = "stop_sequence"
+let stop_reason_label_unknown = "unknown"
+
+let zero_usage : Agent_sdk.Types.api_usage =
+  {
+    input_tokens = 0;
+    output_tokens = 0;
+    cache_creation_input_tokens = 0;
+    cache_read_input_tokens = 0;
+    cost_usd = None;
+  }

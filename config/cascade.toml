@@ -728,6 +728,10 @@ keeper-assignable = false
 tiers = ["tier_medium", "primary", "__safe_lane"]
 strategy = "priority_tier"
 fallback = true
+keeper-assignable = false
+keeper-assignable = false
+keeper-assignable = false
+keeper-assignable = false
 
 [tier-group.governance]
 tiers = ["governance", "__safe_lane"]

@@ -48,17 +48,17 @@ max-concurrent = 2
 is-default = true
 max-concurrent = 1
 
-[tier.coding_plan]
+[tier.glm-coding-with-spark]
 members = ["glm-coding.glm-5-turbo", "kimi_cli.kimi-coding"]
 strategy = "failover"
 
-[tier-group.coding_plan]
-tiers = ["coding_plan"]
+[tier-group.glm-coding-with-spark]
+tiers = ["glm-coding-with-spark"]
 strategy = "priority_tier"
 fallback = true
 
 [routes.keeper_turn]
-target = "tier-group.coding_plan"
+target = "tier-group.glm-coding-with-spark"
 ```
 
 ## Ollama Fallback
@@ -87,7 +87,7 @@ members = ["ollama.qwen3"]
 strategy = "failover"
 
 [tier-group.local_recovery]
-tiers = ["local_recovery", "coding_plan"]
+tiers = ["local_recovery", "glm-coding-with-spark"]
 strategy = "priority_tier"
 fallback = true
 

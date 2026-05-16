@@ -51,17 +51,17 @@ streaming = true
 is-default = true
 max-concurrent = 2
 
-[tier.coding_plan]
+[tier.glm-coding-with-spark]
 members = ["glm-coding.glm-5-turbo"]
 strategy = "failover"
 
-[tier-group.coding_plan]
-tiers = ["coding_plan"]
+[tier-group.glm-coding-with-spark]
+tiers = ["glm-coding-with-spark"]
 strategy = "priority_tier"
 fallback = true
 
 [routes.keeper_turn]
-target = "tier-group.coding_plan"
+target = "tier-group.glm-coding-with-spark"
 ```
 
 ## Ollama

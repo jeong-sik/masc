@@ -2385,7 +2385,17 @@ let test_world_prompt_distinguishes_sandbox_and_worktree () =
     bool
     "world prompt names canonical sandbox-relative worktree path"
     true
-    (contains_substring prompt "repos/<REPO_NAME>/.worktrees/<branch-or-task>/")
+    (contains_substring prompt "repos/<REPO_NAME>/.worktrees/<branch-or-task>/");
+  check
+    bool
+    "world prompt tells bash to use cwd instead of cd chaining"
+    true
+    (contains_substring prompt "Always set the tool `cwd` first");
+  check
+    bool
+    "world prompt does not show bare cd git chaining"
+    false
+    (contains_substring prompt "cd repos/<REPO_NAME> && git status")
 ;;
 
 let test_system_prompt_prefers_bash_and_gh_pr_lane () =

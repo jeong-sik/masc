@@ -149,6 +149,26 @@ let test_catalog_rotation_preserves_order_without_base_injection () =
       (KEC.degraded_retry_reason_to_string retry.fallback_reason)
   | None -> fail "Expected catalog-ordered degraded retry"
 
+let test_rotation_skips_direct_tier_after_attempted_tier_group () =
+  let err = make_cascade_exhausted KT.Candidates_filtered_after_cycles in
+  match
+    KEC.degraded_rotation_after_recoverable_error
+      ~rotation_cascades:
+        [ "tier.strict_tool_candidates"; "tier-group.glm-coding-with-spark" ]
+      ~base_cascade:"tier-group.strict_tool_candidates"
+      ~effective_cascade:"tier-group.strict_tool_candidates"
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
+      ~attempted_cascades:[ "tier-group.strict_tool_candidates" ]
+      err
+  with
+  | Some retry ->
+    check
+      string
+      "skip direct tier duplicate"
+      "tier-group.glm-coding-with-spark"
+      retry.next_cascade
+  | None -> fail "Expected rotation to skip duplicate direct tier candidate"
+
 let test_required_tool_rotation_uses_explicit_fallback_hint () =
   let err =
     Owne.sdk_error_of_masc_internal_error
@@ -369,6 +389,8 @@ let () =
         [
           test_case "catalog order is not prefixed by base cascade" `Quick
             test_catalog_rotation_preserves_order_without_base_injection;
+          test_case "skips direct tier after attempted tier-group" `Quick
+            test_rotation_skips_direct_tier_after_attempted_tier_group;
           test_case "required-tool rotation honors explicit fallback hint" `Quick
             test_required_tool_rotation_uses_explicit_fallback_hint;
           test_case "soft rate-limit rotates to next cascade" `Quick

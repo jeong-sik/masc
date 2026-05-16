@@ -253,6 +253,8 @@ val metric_keeper_compaction_saved_tokens : string
 val metric_keeper_operator_compact : string
 val metric_keeper_operator_clear : string
 val metric_keeper_compaction_noop : string
+val metric_keeper_continuity_no_state : string
+val metric_keeper_tool_pair_repair : string
 val metric_keeper_tool_emission_registry_size : string
 val metric_keeper_tool_emission_pushes : string
 val metric_keeper_tool_underused_allowed_count : string
@@ -336,6 +338,15 @@ val metric_keeper_cascade_sync_failures : string
 val metric_keeper_local_discovery_failures : string
 val metric_keeper_thinking_persist_failures : string
 val metric_keeper_checkpoint_failures : string
+
+val metric_keeper_continuity_summary_source : string
+(** Counter for [Keeper_world_observation.read_continuity_summary]
+    return paths.  Label [source] is governed by
+    {!Keeper_continuity_summary_source}; label [keeper] names the
+    keeper whose summary was read.  Rising
+    [meta_fallback_exception] is the operational signal that the
+    catch-all [| _ -> ] is swallowing exceptions that previously
+    had no audit trail. *)
 
 val metric_keeper_summarizer_state_scrubs : string
 (** Counter for [Keeper_summarizer.keeper_summarizer] invocations,

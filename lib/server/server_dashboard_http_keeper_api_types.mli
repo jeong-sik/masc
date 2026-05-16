@@ -136,3 +136,18 @@ val tool_call_matches_trace :
   trace_id:string ->
   Yojson.Safe.t ->
   bool
+
+(** {1 Option list + string utilities} *)
+
+val first_string_opt : string option list -> string option
+val first_int_opt : int option list -> int option
+val string_has_prefix : prefix:string -> string -> bool
+
+(** {1 Claim tool-call summary} *)
+
+val claim_status_of_output : Yojson.Safe.t -> string
+(** Pure: classify a keeper_task_claim tool-call output JSON. *)
+
+val claim_scope_summary_absent : Yojson.Safe.t
+(** Pure constant: JSON record returned when no matching claim was
+    observed. *)

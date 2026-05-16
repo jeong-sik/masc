@@ -776,6 +776,15 @@ let run_named
             ~decision:(`Assoc decision_fields)
             Keeper_runtime_manifest.Provider_attempt_finished)
       in
+      let record_attempt_terminal ~error attempt_latency_ms =
+        let latency_ms =
+          if Float.is_finite attempt_latency_ms && attempt_latency_ms >= 0.0
+          then Some (int_of_float attempt_latency_ms)
+          else None
+        in
+        Cascade_legacy_runner.record_attempt_terminal capture
+          ~model_id:runtime_candidate_label ~latency_ms ~error
+      in
       let (result, checkpoint_after, liveness_success_sample, attempt_latency_ms) =
         Eio.Switch.run (fun provider_attempt_sw ->
           Eio.Switch.on_release provider_attempt_sw (fun () ->
@@ -793,6 +802,12 @@ let run_named
                       "provider attempt scope released before completion; parent \
                        cancellation or outer timeout interrupted the attempt")
                   ~exception_kind:"cancelled"
+                  attempt_latency_ms;
+                record_attempt_terminal
+                  ~error:
+                    (Some
+                       "provider attempt scope released before completion; parent \
+                        cancellation or outer timeout interrupted the attempt")
                   attempt_latency_ms));
           match
             try_provider
@@ -821,6 +836,12 @@ let run_named
                  | Error sdk_err -> `String (Agent_sdk.Error.to_string sdk_err))
               ?exception_kind:(provider_attempt_exception_kind_of_result result)
               attempt_latency_ms;
+            record_attempt_terminal
+              ~error:
+                (match result with
+                 | Ok _ -> None
+                 | Error sdk_err -> Some (Agent_sdk.Error.to_string sdk_err))
+              attempt_latency_ms;
             result, checkpoint_after, liveness_success_sample, attempt_latency_ms
           | exception exn ->
             let bt = Printexc.get_raw_backtrace () in
@@ -835,6 +856,7 @@ let run_named
               ~error:(`String error)
               ~exception_kind:status
               attempt_latency_ms;
+            record_attempt_terminal ~error:(Some error) attempt_latency_ms;
             Printexc.raise_with_backtrace exn bt)
       in
       let record_accepted_liveness_sample () =

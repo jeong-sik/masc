@@ -366,6 +366,27 @@ let test_observation_no_runtime_placeholder () =
       "\"to_model_id\":\"runtime\"";
     ]
 
+let test_terminal_attempt_capture_materialises_attempt () =
+  let capture, _metrics = LR.cascade_metrics_for_candidates ~candidate_count:1 () in
+  LR.record_attempt_terminal capture ~model_id:"runtime.candidate"
+    ~latency_ms:(Some 237) ~error:None;
+  let obs =
+    LR.cascade_observation_with_metrics
+      ~cascade_name:(KP.runtime_name_of_string "tier-group.coding_plan")
+      ~configured_labels:[ "runtime.candidate" ]
+      ~candidate_count:1
+      ~selected_model_raw:(Some "runtime.candidate")
+      ~capture ()
+  in
+  Alcotest.(check int)
+    "manual attempt captured" 1 (List.length obs.attempts);
+  match obs.attempts with
+  | [ attempt ] ->
+      Alcotest.(check int) "attempt latency" 237
+        (Option.value attempt.latency_ms ~default:(-1));
+      Alcotest.(check (option string)) "attempt error" None attempt.error
+  | _ -> Alcotest.fail "expected one captured attempt"
+
 let case name f = Alcotest.test_case name `Quick f
 
 let () =
@@ -397,5 +418,7 @@ let () =
             test_observation_fallback_events_emit_real_ids;
           case "no runtime placeholder for model identity"
             test_observation_no_runtime_placeholder;
+          case "manual terminal attempt is materialised"
+            test_terminal_attempt_capture_materialises_attempt;
         ] );
     ]

@@ -356,6 +356,8 @@ let ensure_terminal_attempt (capture : cascade_metrics_capture)
         :: capture.attempts_rev);
   log_cascade_attempt_terminal ~model_id ~model_label ~latency_ms ~error
 
+let record_attempt_terminal = ensure_terminal_attempt
+
 let record_fallback_event (capture : cascade_metrics_capture)
     ~from_model:_ ~to_model:_ ~(reason : string) =
   capture.fallback_events_rev <-

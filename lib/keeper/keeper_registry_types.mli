@@ -619,3 +619,16 @@ and completed_turn_observation = {
     Returns [false] if another fiber won the resolve race. *)
 val try_resolve_done :
   registry_entry -> [ `Stopped | `Crashed of string ] -> bool
+
+(** Compose registry key from base path and name.
+    Raises [Invalid_argument] if [name] contains the unit-separator byte. *)
+val registry_key : base_path:string -> string -> string
+
+(** GADT witness mapping from cascade state to turn phase. *)
+val turn_phase_of_cascade_state : packed_cascade_state -> packed_turn_phase
+
+(** Classify turn observation into a completed-turn outcome.
+    Exhaustive match — adding a new variant to [decision_stage] or
+    [cascade_state] forces a compile error here. *)
+val completed_turn_outcome_of_observation :
+  turn_observation -> Keeper_transition_audit.completed_turn_outcome

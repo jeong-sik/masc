@@ -430,3 +430,64 @@ val raise_cascade_transition_violation
   -> violation:cascade_transition_spec_violation
   -> 'a
 
+type compaction_stage =
+  | Compaction_accumulating [@tla.idle]
+  | Compaction_compacting [@tla.active]
+  | Compaction_done [@tla.terminal]
+[@@deriving tla]
+
+(** {1 Compaction stage GADT infrastructure (Cycle 21 / Tier B5)} *)
+
+type compaction_accumulating
+type compaction_compacting
+type compaction_done
+
+type 'a compaction_stage_witness =
+  | Compaction_accumulating : compaction_accumulating compaction_stage_witness
+  | Compaction_compacting : compaction_compacting compaction_stage_witness
+  | Compaction_done : compaction_done compaction_stage_witness
+
+type packed_compaction_stage =
+  | Packed : 'a compaction_stage_witness -> packed_compaction_stage
+
+val compaction_stage_to_witness : compaction_stage -> packed_compaction_stage
+val witness_to_compaction_stage : packed_compaction_stage -> compaction_stage
+
+(** Diagnostic label using the constructor name (e.g. ["Compaction_done"]).
+    Used by the [Compaction_transition_violation] [Printexc] printer. *)
+val packed_compaction_stage_label : packed_compaction_stage -> string
+
+(** RFC-0072 Phase 6: typed error for the 3 forbidden compaction-stage
+    transitions (3 idempotent + 3 valid + 3 forbidden = 9 = 3×3). *)
+type compaction_transition_spec_violation =
+  | Accumulating_to_done
+  | Done_to_accumulating
+  | Done_to_compacting
+
+val compaction_transition_spec_violation_to_tag
+  :  compaction_transition_spec_violation
+  -> string
+
+(** RFC-0072 Phase 6: raised by [validate_compaction_transition] on a
+    forbidden compaction transition, carrying the typed
+    [compaction_transition_spec_violation] payload (replaces the prior bare
+    [assert] / [Assert_failure]).  [where] is a diagnostic label naming the
+    raising function.  A [Printexc] printer is registered so
+    [Printexc.to_string] renders the labelled message. *)
+exception
+  Compaction_transition_violation of
+    { where : string
+    ; from : packed_compaction_stage
+    ; to_ : packed_compaction_stage
+    ; violation : compaction_transition_spec_violation
+    }
+
+(** Raises [Compaction_transition_violation] with the typed payload.
+    Same rationale as the turn_phase / cascade raise helpers above. *)
+val raise_compaction_transition_violation
+  :  where:string
+  -> from:packed_compaction_stage
+  -> to_:packed_compaction_stage
+  -> violation:compaction_transition_spec_violation
+  -> 'a
+

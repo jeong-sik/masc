@@ -33,6 +33,14 @@ type cascade_credential =
 
 (** {1 Layer 1: Providers} *)
 
+type cascade_provider_log =
+  { enabled : bool
+  ; path : string option
+  ; default_lines : int option
+  ; max_bytes : int option
+  }
+[@@deriving show, eq]
+
 (** Per-provider runtime + behavioral capabilities — RFC-0058 §2.4 +
     Phase 5.1 (caller cutover prep, A.1) + §3.2 Phase 5.6 (tool/event support).
 
@@ -70,6 +78,10 @@ type cascade_provider =
       - [Llm_provider.Capabilities.*] variant defaults (Phase 5.6, tool/event fields)
       - [Cascade_transport] / [Provider_tool_support] / [Cascade_error_classify] /
         [Keeper_usage_trust] closed-variant matches (Phase 5.1, dispatch fields) *)
+  ; log : cascade_provider_log option
+    (** Optional operator-facing provider log tail. When enabled, the
+      dashboard may read only this configured path for the provider; the
+      request never accepts an arbitrary file path. *)
   ; headers : (string * string) list option
     (** Reserved schema (Phase 5.6 prep). Additional HTTP headers per
       provider, e.g. [("anthropic-version", "2023-06-01")] for Anthropic

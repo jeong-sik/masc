@@ -1122,11 +1122,9 @@ let run_keeper_cycle
                              ~base_path:config.base_path
                              meta.name
                              selected_model;
-                           Keeper_registry.set_turn_cascade_state
+                           Keeper_registry.mark_turn_cascade_done
                              ~base_path:config.base_path
-                             meta.name
-                             (Keeper_registry.Packed Cascade_done
-                              : Keeper_registry.packed_cascade_state);
+                             meta.name;
                            Ok result
                          | Error err ->
                            let err =

@@ -223,7 +223,6 @@ type agent_runtime_state = {
   board_reactive_turn_count: int;
   mention_reactive_turn_count: int;
   noop_turn_count: int;
-  consecutive_noop_count: int;
   last_speech_act: string;
   last_social_transition_reason: string;
   last_active_desire: string;

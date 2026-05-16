@@ -19,10 +19,22 @@ function entry(overrides: Partial<LogEntry>): LogEntry {
   }
 }
 
-async function loadLogs(fetchLogs: ReturnType<typeof vi.fn>) {
+async function loadLogs(
+  fetchLogs: ReturnType<typeof vi.fn>,
+  providerMocks?: {
+    fetchProviderLogsCatalog?: ReturnType<typeof vi.fn>
+    fetchProviderLogTail?: ReturnType<typeof vi.fn>
+  },
+) {
+  const fetchProviderLogsCatalog = providerMocks?.fetchProviderLogsCatalog
+    ?? vi.fn().mockResolvedValue({ providers: [] })
+  const fetchProviderLogTail = providerMocks?.fetchProviderLogTail
+    ?? vi.fn().mockResolvedValue({ provider: { id: 'none', display_name: 'none', protocol: 'none' }, entries: [] })
   vi.resetModules()
   vi.doMock('../api/dashboard.js', () => ({
     fetchLogs,
+    fetchProviderLogsCatalog,
+    fetchProviderLogTail,
   }))
   return import('./logs')
 }
@@ -177,6 +189,45 @@ describe('LogViewer Code links', () => {
     expect(window.location.hash).toBe(
       '#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=12&surface=Log&label=keeper_tool&source_id=log%3A1',
     )
+  })
+
+  it('renders enabled provider log tail from the configured provider path', async () => {
+    const fetchLogs = vi.fn().mockResolvedValue({ total: 0, entries: [] })
+    const fetchProviderLogsCatalog = vi.fn().mockResolvedValue({
+      providers: [{
+        id: 'ollama',
+        display_name: 'Ollama Local',
+        protocol: 'ollama-http',
+        enabled: true,
+        path: '~/.ollama/logs/server.log',
+        resolved_path: '/Users/dancer/.ollama/logs/server.log',
+        default_lines: 200,
+        max_bytes: 1048576,
+      }],
+    })
+    const fetchProviderLogTail = vi.fn().mockResolvedValue({
+      provider: {
+        id: 'ollama',
+        display_name: 'Ollama Local',
+        protocol: 'ollama-http',
+      },
+      entries: [
+        { line: 1, text: 'aborting completion request due to client closing the connection' },
+      ],
+    })
+
+    const { LogViewer } = await loadLogs(fetchLogs, {
+      fetchProviderLogsCatalog,
+      fetchProviderLogTail,
+    })
+    const { container } = render(h(LogViewer, {}))
+
+    await waitFor(() =>
+      expect(container.querySelector('[data-testid="provider-log-tail"]')?.textContent)
+        .toContain('client closing the connection'),
+    )
+    expect(fetchProviderLogTail).toHaveBeenCalledWith('ollama', { lines: 200 })
+    expect(container.textContent).toContain('server.log')
   })
 
   // RFC-0079 removed the dropped-rows surface. parseLogsResponse now

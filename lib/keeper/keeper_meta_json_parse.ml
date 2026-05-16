@@ -444,9 +444,6 @@ let parse_keeper_state
     Safe_ops.json_int ~default:0 "mention_reactive_turn_count" json
   in
   let noop_turn_count = Safe_ops.json_int ~default:0 "noop_turn_count" json in
-  let consecutive_noop_count =
-    Safe_ops.json_int ~default:0 "consecutive_noop_count" json
-  in
   let last_speech_act = Safe_ops.json_string ~default:"" "last_speech_act" json in
   let last_social_transition_reason =
     Safe_ops.json_string ~default:"" "last_social_transition_reason" json
@@ -534,7 +531,6 @@ let parse_keeper_state
       ; board_reactive_turn_count
       ; mention_reactive_turn_count
       ; noop_turn_count
-      ; consecutive_noop_count
       ; last_speech_act
       ; last_social_transition_reason
       ; last_active_desire

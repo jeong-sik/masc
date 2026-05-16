@@ -363,10 +363,9 @@ let pending_ttl_seconds = 300.0
 let pending_ttl_sweep_interval_s = 60.0
 
 (* Translate one OAS event into zero or one persist_* effect. *)
-let handle_event ?received_ts ~base_path ~retention_days (evt : Agent_sdk.Event_bus.event)
+let handle_event ~received_ts ~base_path ~retention_days (evt : Agent_sdk.Event_bus.event)
   : unit =
   let { Agent_sdk.Event_bus.correlation_id; run_id; ts; _ } = evt.meta in
-  let received_ts = Option.value received_ts ~default:(Time_compat.now ()) in
   match evt.payload with
   | Agent_sdk.Event_bus.ContextCompactStarted { agent_name; trigger } ->
     let compaction_id = synth_compaction_id ~ts_unix:ts ~keeper_name:agent_name in
@@ -473,7 +472,11 @@ let spawn_subscriber
       let batch = Agent_sdk_metrics_bridge.drain sub in
       List.iter
         (fun event ->
-           try handle_event ~base_path ~retention_days:effective_retention event
+           (* NDT-OK: subscriber ingress boundary stamps receipt time before
+              deterministic event-to-record handling. *)
+           let received_ts = Time_compat.now () in
+           try handle_event ~received_ts ~base_path ~retention_days:effective_retention
+                 event
            with Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
                Prometheus.inc_counter

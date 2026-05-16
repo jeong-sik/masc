@@ -318,6 +318,25 @@ let pair_events rows : pair_result list =
 
 (* ── Subscriber ────────────────────────────────────────────────── *)
 
+(* Observability counter for Pending.stash outcomes.  Without this,
+   a concurrent second Compaction_started for the same keeper would
+   silently overwrite the first one's (compaction_id, ts_unix); the
+   lost start surfaces later only as an Orphan_complete and operators
+   never learn about the race.  Closes the silent-failure gap flagged
+   in .tmp/memory-compacting-analysis.html V02. *)
+let () =
+  Prometheus.register_counter
+    ~name:Keeper_metrics.metric_keeper_compact_audit_stash
+    ~help:
+      "Total [Keeper_compact_audit.Pending.stash] calls, classified \
+       by label [outcome] (inserted | replaced_dropped).  Label \
+       [keeper] names the affected keeper.  Rising [replaced_dropped] \
+       means a second Compaction_started landed for the same keeper \
+       before the first one's Compaction_completed; the lost pair \
+       will surface as Orphan_complete in [pair_events]."
+    ()
+;;
+
 (* Per-keeper pending start: maps keeper_name → (compaction_id, ts_start).
    Needed because OAS events don't carry a compaction-scoped correlation. *)
 module Pending = struct
@@ -325,8 +344,39 @@ module Pending = struct
   let mu = Eio.Mutex.create ()
 
   let stash ~keeper_name ~compaction_id ~ts =
-    Eio.Mutex.use_rw ~protect:true mu (fun () ->
-      Hashtbl.replace tbl keeper_name (compaction_id, ts))
+    let outcome =
+      Eio.Mutex.use_rw ~protect:true mu (fun () ->
+        let outcome =
+          match Hashtbl.find_opt tbl keeper_name with
+          | None -> Keeper_compact_audit_stash_outcome.Inserted
+          | Some (previous_compaction_id, previous_ts_unix) ->
+              Keeper_compact_audit_stash_outcome.Replaced_dropped
+                { previous_compaction_id; previous_ts_unix }
+        in
+        Hashtbl.replace tbl keeper_name (compaction_id, ts);
+        outcome)
+    in
+    Prometheus.inc_counter
+      Keeper_metrics.metric_keeper_compact_audit_stash
+      ~labels:
+        [ ("keeper", keeper_name)
+        ; ( "outcome"
+          , Keeper_compact_audit_stash_outcome.to_label outcome )
+        ]
+      ();
+    match outcome with
+    | Keeper_compact_audit_stash_outcome.Inserted -> ()
+    | Keeper_compact_audit_stash_outcome.Replaced_dropped
+        { previous_compaction_id; previous_ts_unix } ->
+        Log.Keeper.warn
+          "keeper:%s compact_audit.Pending.stash dropped pending start \
+           (previous compaction_id=%s ts=%.3f) — second \
+           Compaction_started arrived before first one's \
+           Compaction_completed; lost pair will surface as \
+           Orphan_complete"
+          keeper_name
+          previous_compaction_id
+          previous_ts_unix
 
   let take ~keeper_name =
     Eio.Mutex.use_rw ~protect:true mu (fun () ->

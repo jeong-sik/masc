@@ -336,6 +336,15 @@ val metric_keeper_cascade_sync_failures : string
 val metric_keeper_local_discovery_failures : string
 val metric_keeper_thinking_persist_failures : string
 val metric_keeper_checkpoint_failures : string
+
+val metric_keeper_compact_audit_stash : string
+(** Counter for [Keeper_compact_audit.Pending.stash] outcomes.  Label
+    [outcome] is governed by {!Keeper_compact_audit_stash_outcome}.
+    A rising [replaced_dropped] rate means a second
+    Compaction_started event landed for the same keeper before the
+    first one's Compaction_completed arrived; the lost stash will
+    later surface only as an [Orphan_complete] in [pair_events]. *)
+
 val metric_keeper_memory_write_failures : string
 val metric_keeper_memory_consolidations : string
 val metric_keeper_write_meta_cycle_failures : string

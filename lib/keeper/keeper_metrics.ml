@@ -672,6 +672,11 @@ let metric_keeper_thinking_persist_failures =
 ;;
 
 let metric_keeper_checkpoint_failures = "masc_keeper_checkpoint_failures_total"
+
+let metric_keeper_compact_audit_stash =
+  "masc_keeper_compact_audit_stash_total"
+;;
+
 let metric_keeper_memory_write_failures = "masc_keeper_memory_write_failures_total"
 let metric_keeper_memory_consolidations = "masc_keeper_memory_consolidations_total"
 

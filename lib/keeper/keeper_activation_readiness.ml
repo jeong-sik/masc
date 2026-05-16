@@ -94,11 +94,15 @@ let of_meta meta =
 let ready_for_unclaimed_backlog meta = (of_meta meta).ready_for_unclaimed_backlog
 
 let autonomous_check_value (activation : autonomous_activation) =
-  Option.value ~default:"ok" activation.blocker
+  match activation.blocker with
+  | None -> "ok"
+  | Some blocker -> blocker
 ;;
 
 let work_discovery_check_value (activation : work_discovery_activation) =
-  Option.value ~default:"ok" activation.blocker
+  match activation.blocker with
+  | None -> "ok"
+  | Some blocker -> blocker
 ;;
 
 let autonomous_activation_to_yojson (activation : autonomous_activation) =

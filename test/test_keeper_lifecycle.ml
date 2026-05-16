@@ -491,6 +491,79 @@ let test_apply_post_turn_lifecycle_keeps_checkpoint_when_compaction_skips () =
             (List.length (ctx_messages loaded))
       | None -> fail "expected original checkpoint to remain available")
 
+let test_apply_post_turn_lifecycle_no_state_advances_continuity_cooldown ()
+    =
+  let base_dir = temp_dir "keeper_lifecycle_no_state_cooldown" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let meta =
+        let base =
+          make_keeper_meta ~name:"no-state-cooldown-keeper"
+            ~trace_id:"trace-no-state-cooldown" ()
+        in
+        {
+          base with
+          auto_handoff = false;
+          continuity_summary = "previous summary";
+          compaction =
+            {
+              base.compaction with
+              ratio_gate = 1.0;
+              message_gate = 0;
+              token_gate = 0;
+              cooldown_sec = 60;
+            };
+          runtime =
+            {
+              base.runtime with
+              last_continuity_update_ts = 0.0;
+            };
+        }
+      in
+      let ctx =
+        KEC.create ~system_prompt:"keeper lifecycle" ~max_tokens:4096
+        |> fun ctx ->
+        KEC.append ctx
+          (Agent_sdk.Types.assistant_msg "plain reply without state")
+        |> KEC.sync_oas_context
+      in
+      let checkpoint = save_checkpoint ~base_dir ~meta ~ctx in
+      let labels = [ ("keeper", meta.name) ] in
+      let before =
+        P.metric_value_or_zero
+          Masc_mcp.Keeper_metrics.metric_keeper_continuity_no_state
+          ~labels
+          ()
+      in
+      let lifecycle =
+        KEC.apply_post_turn_lifecycle
+          ~on_compaction_started:(fun () -> ())
+          ~on_handoff_started:(fun () -> ())
+          ~base_dir ~meta
+          ~model:"llama:auto"
+          ~primary_model_max_tokens:4096
+          ~current_turn_blocker_info:None
+          ~checkpoint:(Some checkpoint)
+      in
+      check bool "compaction not attempted" false lifecycle.compaction.attempted;
+      check bool "compaction skipped" false lifecycle.compaction.applied;
+      check string "skip decision recorded" "blocked:below_thresholds"
+        (KEC.compaction_decision_to_string lifecycle.compaction.decision);
+      check string "continuity summary unchanged" meta.continuity_summary
+        lifecycle.updated_meta.continuity_summary;
+      check bool "no-state advances continuity cooldown" true
+        (lifecycle.updated_meta.runtime.last_continuity_update_ts > 0.0);
+      check (float 0.0001) "no-state metric increments"
+        (before +. 1.0)
+        (P.metric_value_or_zero
+           Masc_mcp.Keeper_metrics.metric_keeper_continuity_no_state
+           ~labels
+           ()))
+
 let test_apply_post_turn_lifecycle_handoffs_after_compaction () =
   let base_dir = temp_dir "keeper_lifecycle_handoff" in
   Fun.protect
@@ -2845,6 +2918,8 @@ let () =
             test_compaction_callback_failure_records_coverage_gap;
           test_case "skip compaction keeps checkpoint" `Quick
             test_apply_post_turn_lifecycle_keeps_checkpoint_when_compaction_skips;
+          test_case "no STATE advances continuity cooldown" `Quick
+            test_apply_post_turn_lifecycle_no_state_advances_continuity_cooldown;
           test_case "handoff runs after compaction" `Quick
             test_apply_post_turn_lifecycle_handoffs_after_compaction;
           test_case "handoff callback failure records coverage gap" `Quick

@@ -93,7 +93,7 @@ let execution_trust_freshness_slo_s = 900.0
 let max_ts_opt current candidate =
   match current with
   | Some existing when existing >= candidate -> current
-  | _ -> Some candidate
+  | Some _ | None -> Some candidate
 
 let latest_receipt_ts_of_keeper_rows rows =
   rows

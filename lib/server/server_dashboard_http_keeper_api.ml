@@ -315,40 +315,9 @@ let keeper_checkpoint_inventory_json
                    (Keeper_checkpoint_store.list_checkpoints ~session_dir)) );
           ] )
 
-let json_int_member_opt name json =
-  match Yojson.Safe.Util.member name json with
-  | `Int value -> Some value
-  | `Intlit raw -> int_of_string_opt raw
-  | _ -> None
-
-let json_string_member_opt name json =
-  match Yojson.Safe.Util.member name json with
-  | `String value -> Some value
-  | _ -> None
-
-let json_bool_member_opt name json =
-  match Yojson.Safe.Util.member name json with
-  | `Bool value -> Some value
-  | _ -> None
-
-let json_string_list_member name json =
-  match Yojson.Safe.Util.member name json with
-  | `List values ->
-    values
-    |> List.filter_map (function
-      | `String value when String.trim value <> "" -> Some value
-      | _ -> None)
-    |> Json_util.dedupe_keep_order
-  | _ -> []
-
-let json_string_opt = function
-  | Some value -> `String value
-  | None -> `Null
-
-let take_last limit values =
-  let len = List.length values in
-  if len <= limit then values
-  else List.filteri (fun idx _ -> idx >= len - limit) values
+(* Yojson member extractors + take_last list helper moved to
+   Server_dashboard_http_keeper_api_types (intra-library file split,
+   2026-05-16). *)
 
 let unique_present_paths paths =
   paths
@@ -367,14 +336,8 @@ let linked_artifact_json ~kind path =
       ("file_stat", stat_json_of_path path);
     ]
 
-let manifest_row_matches ?turn_id keeper_name trace_id
-    (row : Keeper_runtime_manifest.t) =
-  String.equal row.keeper_name keeper_name
-  && String.equal row.trace_id trace_id
-  &&
-  match turn_id with
-  | None -> true
-  | Some wanted -> row.keeper_turn_id = Some wanted
+(* manifest_row_matches moved to Server_dashboard_http_keeper_api_types
+   (intra-library file split, 2026-05-16). *)
 
 type runtime_manifest_scan =
   { path : string
@@ -691,14 +654,9 @@ let string_contains ~needle value =
     in
     loop 0
 
-let json_assoc_member_opt name json =
-  match Yojson.Safe.Util.member name json with
-  | `Assoc _ as value -> Some value
-  | _ -> None
-
-let json_string_value_opt = function
-  | `String value -> Some value
-  | _ -> None
+(* json_assoc_member_opt + json_string_value_opt moved to
+   Server_dashboard_http_keeper_api_types (intra-library file split,
+   2026-05-16). *)
 
 let tool_call_output_text_opt json =
   match Yojson.Safe.Util.member "output" json with

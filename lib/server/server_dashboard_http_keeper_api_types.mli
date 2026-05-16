@@ -75,3 +75,27 @@ val is_valid_keeper_name : String.t -> bool
 val extract_keeper_name_for_post : string -> string -> string
 (** [extract_keeper_name_for_post path suffix]: variant used by the
     POST dispatcher. *)
+
+(** {1 Internal JSON / list helpers}
+
+    Pure Yojson member extractors + a small list utility, used across
+    keeper_dashboard_http_keeper_api.ml's many response-builder helpers.
+    Exposed here so the godfile keeps referencing them through include. *)
+
+val json_int_member_opt : string -> Yojson.Safe.t -> int option
+val json_string_member_opt : string -> Yojson.Safe.t -> string option
+val json_bool_member_opt : string -> Yojson.Safe.t -> bool option
+val json_string_list_member : string -> Yojson.Safe.t -> string list
+val json_string_opt : string option -> Yojson.Safe.t
+val take_last : int -> 'a list -> 'a list
+val json_assoc_member_opt : string -> Yojson.Safe.t -> Yojson.Safe.t option
+val json_string_value_opt : Yojson.Safe.t -> string option
+
+val manifest_row_matches :
+  ?turn_id:int ->
+  string ->
+  string ->
+  Keeper_runtime_manifest.t ->
+  bool
+(** Pure: true when the runtime-manifest row matches the given keeper_name +
+    trace_id (and optionally turn_id). *)

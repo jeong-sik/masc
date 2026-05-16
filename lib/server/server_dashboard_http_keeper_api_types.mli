@@ -95,7 +95,7 @@ val manifest_row_matches :
   ?turn_id:int ->
   string ->
   string ->
-  Keeper_runtime_manifest.t ->
+    Keeper_runtime_manifest.t ->
   bool
 (** Pure: true when the runtime-manifest row matches the given keeper_name +
     trace_id (and optionally turn_id). *)
@@ -120,3 +120,19 @@ val runtime_trace_redacts_provider_model_key : string -> bool
 val runtime_trace_public_json : Yojson.Safe.t -> Yojson.Safe.t
 (** Pure: recursively redact provider/model identity fields from runtime
     trace JSON before returning to external dashboards. *)
+
+(** {1 Tool-call JSON inspectors}
+
+    Pure helpers for extracting fields out of trajectory tool-call JSON
+    records. Used by the runtime-lens response builders. *)
+
+val tool_call_output_text_opt : Yojson.Safe.t -> string option
+val parse_tool_output_json_opt : Yojson.Safe.t -> Yojson.Safe.t option
+val tool_call_runtime_contract : Yojson.Safe.t -> Yojson.Safe.t
+
+val tool_call_matches_trace :
+  ?turn_id:int ->
+  keeper_name:string ->
+  trace_id:string ->
+  Yojson.Safe.t ->
+  bool

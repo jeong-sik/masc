@@ -205,8 +205,13 @@ let start_keeper_loops
       Keeper_metrics.metric_keeper_claim_auto_provision
       ~labels:[ "outcome", outcome; "agent_name", agent_name ]
       ());
-  (* Shared Agent_sdk Event_bus used as the runtime transport between subsystems. *)
-  let event_bus = Agent_sdk.Event_bus.create () in
+  (* Shared Agent_sdk Event_bus used as the runtime transport between subsystems.
+     Configuration is sourced from [Masc_event_bus_policy.oas_runtime] so the
+     buffer-size/policy choice is auditable in source rather than implicit in
+     OAS defaults, and the chosen capacity is published to /metrics. *)
+  let event_bus =
+    Masc_event_bus_policy.create_bus Masc_event_bus_policy.oas_runtime
+  in
   (* Eio fiber isolation: each subsystem runs in its own fiber.
      If one crashes, others keep running — Eio's structured concurrency.
      Subsystem_health tracks liveness at module level (no init timing dependency). *)
@@ -334,7 +339,9 @@ let start_keeper_loops
      here per OAS event_bus.mli:103-107 boundary. Dashboard SSE consumers
      see both channels as one stream — the relay translates masc.* →
      masc:* on the wire for backward compatibility. *)
-  let masc_event_bus = Agent_sdk.Event_bus.create () in
+  let masc_event_bus =
+    Masc_event_bus_policy.create_bus Masc_event_bus_policy.masc_domain
+  in
   Masc_event_bus.set masc_event_bus;
   (* Event_bus → SSE bridge: relay both OAS and MASC buses to dashboard *)
   Cascade_event_bridge.start ~sw ~clock ~config:state.room_config ~bus:event_bus;

@@ -385,6 +385,14 @@ let effective_startup_grace_sec ~base_grace_sec ~poll_sec ~startup_warmup_sec =
     base_grace_sec
     (Float.of_int (max 0 startup_warmup_sec) +. Float.max 0.0 poll_sec)
 
+let should_warn_missing_registry ~captured_paused ~persisted_paused =
+  match persisted_paused with
+  | Some true -> false
+  | Some false -> true
+  | None -> not captured_paused
+
+let should_warn_missing_registry_for_test = should_warn_missing_registry
+
 let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
     ?(startup_warmup_sec = 0)
     (reg : Keeper_registry.registry_entry) =
@@ -754,7 +762,22 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                emit_watchdog_broadcast ~failure_reason ~stall_seconds
              end
            | None ->
-             Log.Keeper.warn "%s: watchdog: registry entry NOT FOUND" meta.name
+             let persisted_paused =
+               match read_meta ctx.config meta.name with
+               | Ok (Some latest_meta) -> Some latest_meta.paused
+               | Ok None | Error _ -> None
+             in
+             if should_warn_missing_registry ~captured_paused:meta.paused
+                  ~persisted_paused
+             then
+               Log.Keeper.warn "%s: watchdog: registry entry NOT FOUND" meta.name
+             else begin
+               request_watchdog_stop ();
+               Log.Keeper.routine
+                 "%s: watchdog: registry entry absent for paused keeper; \
+                  stopping orphan watchdog"
+                 meta.name
+             end
            | Some entry ->
              Log.Keeper.info
                "%s: watchdog: phase=%s (not Running, skipping)"

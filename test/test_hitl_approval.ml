@@ -537,6 +537,44 @@ let test_approval_queue_cancel_cleans_up () =
   let final_count = AQ.pending_count () in
   Alcotest.(check int) "no orphan entries" initial_count final_count
 
+let test_approval_queue_cancel_records_terminal_audit () =
+  Eio_main.run @@ fun _env ->
+  let base_path = temp_dir () in
+  let keeper_name = "cancel-audit-test" in
+  AQ.For_testing.reset_audit_store ();
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_audit_store ();
+      cleanup_dir base_path)
+    (fun () ->
+      let initial_count = AQ.pending_count () in
+      (try
+         Eio.Switch.run @@ fun sw ->
+         Eio.Fiber.fork ~sw (fun () ->
+           ignore
+             (AQ.submit_and_await
+                ~keeper_name
+                ~tool_name:"masc_code_delete"
+                ~input:(`Assoc [ ("path", `String "lib/example.ml") ])
+                ~risk_level:AQ.Critical
+                ~base_path
+                ()));
+         yield_until (fun () ->
+           AQ.pending_count_for_keeper ~keeper_name = 1);
+         Eio.Switch.fail sw (Failure "simulated shutdown")
+       with Failure _ -> ());
+      Alcotest.(check int) "no orphan entries" initial_count (AQ.pending_count ());
+      match AQ.read_recent_audit ~base_path ~keeper_name ~n:1 () with
+      | latest :: _ ->
+        let open Yojson.Safe.Util in
+        Alcotest.(check string) "latest event is terminal" "cancelled"
+          (latest |> member "event" |> to_string);
+        Alcotest.(check bool) "decision records cancellation" true
+          (contains_substring
+             (latest |> member "decision" |> to_string)
+             "approval await cancelled")
+      | [] -> Alcotest.fail "expected cancellation audit row")
+
 let test_background_pending_callback_and_keeper_lookup () =
   Eio_main.run @@ fun _env ->
   let initial_count = AQ.pending_count () in
@@ -1332,6 +1370,8 @@ let () =
         test_submit_and_await_clock_returns_manual_decision;
       Alcotest.test_case "resolve nonexistent" `Quick test_approval_resolve_nonexistent;
       Alcotest.test_case "cancel cleans up" `Quick test_approval_queue_cancel_cleans_up;
+      Alcotest.test_case "cancel records terminal audit" `Quick
+        test_approval_queue_cancel_records_terminal_audit;
       Alcotest.test_case "failure observation labels site" `Quick
         test_approval_queue_failure_metric_labels_site;
       Alcotest.test_case "background pending callback" `Quick

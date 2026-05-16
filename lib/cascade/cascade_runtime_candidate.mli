@@ -55,6 +55,10 @@ val has_recovery_evidence : t -> bool
 
 val effective_attempt_timeout_s :
   is_last:bool -> configured_timeout_s:float option -> t -> float option
+(** Effective attempt timeout passed to OAS for this candidate. Local runtime
+    providers are floored to the liveness bootstrap wall so stale keeper
+    [per_provider_timeout] values do not cause client-side aborts during slow
+    local model load/generation. Non-local providers keep the configured value. *)
 
 val resolve_tool_lane_for_oas_tools :
   ?agent_name:string ->

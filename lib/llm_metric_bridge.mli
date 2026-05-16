@@ -61,6 +61,10 @@ val emit_token_usage :
   output_tokens:int ->
   unit
 
+(** Emit provider-agnostic tool-call count observations from OAS metrics
+    callbacks. Labels are [provider] and [model]. *)
+val emit_tool_calls : provider:string -> model_id:string -> count:int -> unit
+
 (** Emit streaming first-response-chunk and inter-chunk observations from OAS
     streaming metrics callbacks. Labels are [provider] and [model]. *)
 val emit_streaming_first_chunk :

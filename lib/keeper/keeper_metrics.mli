@@ -345,6 +345,16 @@ val metric_keeper_user_visible_reply_source : string
     LLM is consistently producing no usable reply and the user is
     being shown the literal ["State updated."]. *)
 
+val metric_keeper_oas_env_key_rejections : string
+(** Counter for [Keeper_types_profile.extract_oas_env_from_doc]
+    entries dropped because the suffix did not match the
+    [OAS_(CLAUDE|CODEX|GEMINI)_] / [MASC_KEEPER_OAS_] allowlist.
+    Each rejected key increments by one and produces a warn line
+    so operators can spot configuration mistakes or attempted
+    env-injection bypass.  Non-zero counts at startup mean the
+    keeper TOML contains [keeper.oas_env.<X>] keys that the
+    runtime silently ignored. *)
+
 val metric_keeper_memory_write_failures : string
 val metric_keeper_memory_consolidations : string
 val metric_keeper_write_meta_cycle_failures : string

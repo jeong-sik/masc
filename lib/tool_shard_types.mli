@@ -77,3 +77,9 @@ val shell_tools : Masc_domain.tool_schema list
 
 val coding_keeper_bridge_tools : Masc_domain.tool_schema list
 (** Pure: keeper_bash bridge tool schemas. *)
+
+val keeper_pr_review_tools : Masc_domain.tool_schema list
+(** PR review tools — read diffs, leave comments, approve/request changes. *)
+
+val coding_workspace_tool_names : string list
+(** Tool names that compose [coding_workspace_tools]. *)

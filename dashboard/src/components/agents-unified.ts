@@ -12,7 +12,7 @@ import { AgentProfile } from './agent-profile'
 import { KeeperDetailPage } from './keeper-detail'
 import { RouteLink } from './common/route-link'
 import { namespaceTruth } from '../namespace-truth-store'
-import { resolveRuntimeCounts } from '../runtime-counts'
+import { resolveRuntimeCounts, runtimeCountSourceLabel } from '../runtime-counts'
 import { KeeperSpawnPanel } from './keeper-spawn/keeper-spawn-panel'
 import { KeeperTokenStats } from './keeper-token-stats'
 import { KeeperMultiSelect } from './keeper-multi-select'
@@ -53,7 +53,10 @@ export function AgentsUnified() {
 
   const currentView = activeView.value
 
-  // Compute counts for chip badges.
+  // Chip badges show live counts only — they reflect what's currently in the
+  // execution stream. The configured baseline (persona-registered keepers) is
+  // surfaced in the dedicated "runtime truth" panel below so a single badge
+  // never has to swap meaning between live and configured views.
   const liveRuntimeCounts = countRuntimeKinds(agents.value, keepers.value)
   const runtimeCounts = resolveRuntimeCounts({
     executionLoaded: executionLoaded.value,
@@ -64,14 +67,14 @@ export function AgentsUnified() {
     shellCounts: shellCounts.value,
     shellConfiguredKeepers: shellCounts.value?.configured_keepers,
   })
-  const totalCount = runtimeCounts.totalRuntimes
-  const keeperCount = runtimeCounts.keepers
-  const agentOnlyCount = runtimeCounts.agents
-  const configuredKeeperDelta = Math.max(0, runtimeCounts.configuredKeepers - keeperCount)
+  const liveKeepers = runtimeCounts.live.keepers
+  const configuredKeepers = runtimeCounts.configured.keepers
+  const configuredKeeperDelta = Math.max(0, configuredKeepers - liveKeepers)
+  const sourceLabel = runtimeCountSourceLabel(runtimeCounts.source)
   function chipCount(id: AgentsView): number | null {
-    if (id === 'all') return totalCount
-    if (id === 'agents') return agentOnlyCount
-    if (id === 'keepers') return keeperCount
+    if (id === 'all') return runtimeCounts.live.totalRuntimes
+    if (id === 'agents') return runtimeCounts.live.agents
+    if (id === 'keepers') return liveKeepers
     return null
   }
   const viewChips = CHIPS.map(chip => ({
@@ -94,10 +97,11 @@ export function AgentsUnified() {
         class="monitor-muted-panel w-fit p-1.5 shadow-[inset_0_1px_0_var(--color-border-default)]"
       />
 
-      ${configuredKeeperDelta > 0 ? html`
+      ${runtimeCounts.configured.source !== 'none' ? html`
         <div class="monitor-muted-panel flex w-fit flex-wrap items-center gap-2 px-3 py-2 text-xs text-[var(--color-fg-muted)]">
           <span class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">runtime truth</span>
-          <span>live runtime ${keeperCount} · configured keeper ${runtimeCounts.configuredKeepers} · 일시정지/미기동 ${configuredKeeperDelta}</span>
+          <span>활성 keeper ${liveKeepers} · 설정 keeper ${configuredKeepers}${configuredKeeperDelta > 0 ? html` · 일시정지/미기동 ${configuredKeeperDelta}` : ''}</span>
+          <span class="text-2xs text-[var(--color-fg-muted)]">source: ${sourceLabel}</span>
         </div>
       ` : null}
 

@@ -404,7 +404,14 @@ let playground_relative_unless_allowed_root
         in
         let fixed = Filename.concat pg_root rest in
         Log.Keeper.debug "playground_relative: fixed doubled abs %S → %S" trimmed fixed;
-        Option.value ~default:fixed (project_relative_host_path ~config fixed))
+        (match project_relative_host_path ~config fixed with
+         | Some rel -> rel
+         | None ->
+           (* NDT-OK: [fixed] is produced by deterministic prefix removal from an
+              absolute keeper playground path. If it is not under the project root,
+              keep the absolute value so the downstream resolver enforces the
+              containment boundary. *)
+           fixed))
       else trimmed)
     else trimmed
   in

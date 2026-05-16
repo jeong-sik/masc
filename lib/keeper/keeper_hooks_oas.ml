@@ -501,7 +501,7 @@ let record_usage_anomaly_metrics ~keeper_name ~model usage_trust =
 (* cost_status / thinking_log_summary / pr_action types + telemetry helpers
    moved to Keeper_hooks_oas_types (intra-library file split, 2026-05-16).
    The include is hoisted to the top of this module — see the comment
-   near [keeper_denied_tools]. *)
+   near the keeper deny-list binding. *)
 
 let cost_source_unmetered_provider = "unmetered_provider"
 let cost_source_computed = "computed"

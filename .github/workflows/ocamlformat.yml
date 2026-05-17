@@ -25,20 +25,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up OCaml
-        uses: ocaml/setup-ocaml@v3
-        with:
-          ocaml-compiler: '5.2'
-
-      - name: Install ocamlformat
-        run: |
-          version=$(grep -E '^version' .ocamlformat | head -1 | awk -F= '{gsub(/[ \t]/,"",$2); print $2}')
-          if [ -z "$version" ]; then
-            echo "::error::no version pin in .ocamlformat"
-            exit 1
-          fi
-          opam install -y "ocamlformat.${version}"
-
+      # Move changed-file detection BEFORE OCaml setup so 0-file PRs skip the
+      # ~120s setup-ocaml + opam install entirely (paths filter already triggers
+      # on .ocamlformat or workflow yaml changes, where there may be no .ml diff).
       - name: Identify changed OCaml files
         id: changed
         run: |
@@ -58,6 +47,45 @@ jobs:
             echo "Changed OCaml files:"
             cat /tmp/changed-ocaml-files.txt
           fi
+
+      - name: Read ocamlformat version pin
+        id: pin
+        if: steps.changed.outputs.no_files != 'true'
+        run: |
+          set -euo pipefail
+          version=$(grep -E '^version' .ocamlformat | head -1 | awk -F= '{gsub(/[ \t]/,"",$2); print $2}')
+          if [ -z "$version" ]; then
+            echo "::error::no version pin in .ocamlformat"
+            exit 1
+          fi
+          echo "ocamlformat_version=$version" >> "$GITHUB_OUTPUT"
+
+      # Explicit cache scoped to ocamlformat version + ocaml-compiler + OS so a
+      # second run of any PR (or a PR after a previous PR populated the same
+      # ocamlformat version) reuses the opam switch instead of rebuilding it.
+      # Namespace is distinct from setup-ocaml-toolchain composite (different
+      # cache prefix), so no cross-contamination.
+      - name: Cache opam (ocamlformat)
+        if: steps.changed.outputs.no_files != 'true'
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.opam
+            ~/.local/share/opam
+          key: opam-ocamlformat-${{ steps.pin.outputs.ocamlformat_version }}-ocaml-5.2-${{ runner.os }}-v1
+          restore-keys: |
+            opam-ocamlformat-${{ steps.pin.outputs.ocamlformat_version }}-ocaml-5.2-${{ runner.os }}-
+
+      - name: Set up OCaml
+        if: steps.changed.outputs.no_files != 'true'
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: '5.2'
+
+      - name: Install ocamlformat
+        if: steps.changed.outputs.no_files != 'true'
+        run: |
+          opam install -y "ocamlformat.${{ steps.pin.outputs.ocamlformat_version }}"
 
       - name: Check formatting (changed files only)
         if: steps.changed.outputs.no_files != 'true'

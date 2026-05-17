@@ -31,7 +31,7 @@ Truth fields:
 - `strict_mode_requested`
 - `startup_rejected`
 
-If `effective_base_path` is not the base path you expected, fix that first. In shared `~/me` setups, the live auth store may be `~/me/.masc/auth` even when the server process is running from a sub-repo worktree.
+If `effective_base_path` is not the base path you expected, fix that first. In shared workspace setups, the live auth store is `<base-path>/.masc/auth` even when the server process is running from a sub-repo worktree.
 
 ## 2. Understand the Gate
 

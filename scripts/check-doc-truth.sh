@@ -96,7 +96,7 @@ require_not_contains docs/TUI-GUIDE.md './start-masc-mcp.sh --tui'
 require_contains docs/QUICK-START.md '"method":"initialize"'
 require_contains docs/QUICK-START.md 'Mcp-Session-Id: ${SESSION_ID}'
 require_contains docs/QUICK-START.md 'masc_join(agent_name="codex")'
-require_contains docs/QUICK-START.md '명시적인 `MASC_BASE_PATH`가 없으면 `HOME`을 implicit base path로 사용한다.'
+require_contains docs/QUICK-START.md '운영 기준은 항상 `<base-path>/.masc`다.'
 require_contains docs/QUICK-START.md 'scripts/release-evidence.sh _build/default/bin/main_eio.exe .release-evidence/local-release-evidence.md'
 
 require_contains README.md 'docs/RELEASE-EVIDENCE.md'

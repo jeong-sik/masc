@@ -141,7 +141,8 @@ root to edit.
 ### Low-level fallback note
 
 `Config_dir_resolver` still has optional repo fallback behavior behind
-`MASC_ALLOW_REPO_CONFIG_FALLBACK=true`, plus home-level compatibility paths.
+`MASC_ALLOW_REPO_CONFIG_FALLBACK=true`; it does not consult a home-level config
+root.
 Those are implementation details, not the normal operator contract.
 
 If you need to answer “what should I edit right now?”, use `doctor`, not the raw

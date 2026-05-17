@@ -1,7 +1,7 @@
 (** Config directory resolution — SSOT for locating MASC config files.
 
     Resolution order: [MASC_CONFIG_DIR] env > [$MASC_BASE_PATH/.masc/config] >
-    [$HOME/.masc/config] > repo fallback (opt-in) > missing.
+    repo fallback (opt-in) > missing.
 
     The module caches the result of the first [resolve] call; use [reset] to
     force re-evaluation (e.g. after env var changes in tests). *)
@@ -11,7 +11,6 @@
 type source =
   | Env
   | Local_masc
-  | Home_masc
   | Invalid_env
   | Exe_relative
   | Cwd
@@ -46,7 +45,6 @@ type inputs = {
   env_base_path : string option;
   env_config_dir : string option;
   env_personas_dir : string option;
-  env_home : string option;
 }
 
 (** {1 SSOT filenames}
@@ -98,14 +96,12 @@ val config_signature_exists : string -> bool
 
     Sanitized env var readers that strip inherited test values when running
     under a test executable. [MASC_BASE_PATH] uses
-    [MASC_TEST_ALLOW_BASE_PATH_OVERRIDE]; config/persona paths and [HOME]
-    use [MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE]. *)
+    [MASC_TEST_ALLOW_BASE_PATH_OVERRIDE]; config/persona paths use
+    [MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE]. *)
 
 val current_env_base_path_opt : unit -> string option
 val current_env_config_dir_opt : unit -> string option
-val current_env_base_path_opt : unit -> string option
 val current_env_personas_dir_opt : unit -> string option
-val current_env_home_opt : unit -> string option
 
 (** Sanitize inherited test environment values.
     Strips env vars captured at process start when running under a test

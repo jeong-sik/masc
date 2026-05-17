@@ -187,7 +187,7 @@ type run_result = {
 - `raw_trace`에는 아직 provider attempt record가 없으므로 raw-trace만으로는 opaque 하다
 - 따라서 attempt details source는 `oas_metrics_callbacks` 또는 `no_oas_observation`처럼 경계를 명시한다
 
-Hardcoded fallback (cascade.toml 없을 때):
+Runtime failsafe fallback (cascade.toml 없을 때):
 - `llama:{MASC_DEFAULT_MODEL}` (로컬)
 - `glm:auto` (ZAI_API_KEY 존재 시)
 

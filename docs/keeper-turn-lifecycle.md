@@ -116,7 +116,7 @@ correlator the receipt does.
 ## Tooling
 
 - **`bin/masc-trace <base-path> <keeper> <turn_id>`** (#11168) — reads
-  `~/.masc/keepers/<keeper>/execution-receipts/*.jsonl` and prints every
+  `<base-path>/.masc/keepers/<keeper>/execution-receipts/*.jsonl` and prints every
   row that matches the turn id.  First source the receipt path already
   populates; subsequent stacks widen to `tool_calls/` and `system_log_*`.
 

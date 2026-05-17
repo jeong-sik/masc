@@ -19,14 +19,14 @@ silent host-fallback bypass:
 | —  | `make_tool_bundle` cold-started a new container per tool call | #11679 (PR-3b) |
 
 Static validation (counting `sandbox_profile` fields across
-`~/.masc/keepers/*.json` and `<repo>/.masc/keepers/*.json`) is
+`<base-path>/.masc/keepers/*.json` and `<repo>/.masc/keepers/*.json`) is
 necessary but not sufficient.  The dynamic check below confirms the
 container actually executes the tool call.
 
 ## Static validation
 
 ```bash
-for k in ~/.masc/keepers/*.json /path/to/masc-mcp/.masc/keepers/*.json; do
+for k in /path/to/base/.masc/keepers/*.json /path/to/masc-mcp/.masc/keepers/*.json; do
   name=$(basename "$k" .json)
   profile=$(jq -r '.sandbox_profile // "<missing>"' "$k" 2>/dev/null)
   network=$(jq -r '.network_mode // "<missing>"' "$k" 2>/dev/null)

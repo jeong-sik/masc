@@ -141,11 +141,12 @@ curl "http://127.0.0.1:${PORT}/health"
 | Dir-local | `scripts/run-local.sh --target-dir /path` | 프로젝트별 격리, 경로에서 결정론적 포트 선정 (9100-9999) |
 | Full runtime | `./start-masc-mcp.sh --http` | 모든 transport, keeper autoboot, dashboard |
 | Stdio MCP | `./start-masc-mcp.sh --stdio` | stdio-only 클라이언트 |
-| Direct binary | `./_build/default/bin/main_eio.exe --port 8935 --base-path "$HOME"` | 수동 |
+| Direct binary | `./_build/default/bin/main_eio.exe --port 8935 --base-path /path/to/base` | 수동; runtime root는 `/path/to/base/.masc` |
 
 기본값:
 
 - bind host: `127.0.0.1`
+- runtime data root: `<base-path>/.masc`
 - dir-local data root: `<target>/.masc/`
 - dir-local config root: `<target>/.masc/config`
 - dir-local transports: HTTP on, gRPC/WS/WebRTC off

@@ -161,6 +161,16 @@ is_absolute_path() {
     esac
 }
 
+default_base_path() {
+    if [ -n "${ME_ROOT:-}" ]; then
+        printf '%s\n' "$ME_ROOT"
+    elif [ -n "${HOME:-}" ] && [ -d "$HOME/me" ]; then
+        printf '%s\n' "$HOME/me"
+    else
+        printf '%s\n' "$SCRIPT_DIR"
+    fi
+}
+
 # Resolve a path to its git-root equivalent (worktree-aware).
 # Used both by the ambiguity guard and the final MASC_BASE_PATH export
 # so both see the same effective base path.
@@ -598,7 +608,8 @@ PORT_EXPLICIT=0
 PRINT_PORT_ONLY=0
 WORKTREE_PORT_HINT=""
 HTTP_MODE="${MASC_MCP_HTTP:-true}"
-BASE_PATH="${MASC_BASE_PATH:-${HOME:-$SCRIPT_DIR}}"
+DEFAULT_BASE_PATH="$(default_base_path)"
+BASE_PATH="${MASC_BASE_PATH:-$DEFAULT_BASE_PATH}"
 SIDECAR_ROOT="${MASC_SIDECAR_ROOT:-}"
 HOST="${MASC_HOST:-127.0.0.1}"
 # NOTE: Eio is now the default runtime (Lwt deprecated since 2026-01)
@@ -665,8 +676,10 @@ if [ "$BASE_PATH_EXPLICIT" = "1" ]; then
     BASE_PATH_RESOLUTION_SOURCE="explicit_cli"
 elif [ "$MASC_BASE_PATH_WAS_SET" = "1" ] && is_absolute_path "$BASE_PATH"; then
     BASE_PATH_RESOLUTION_SOURCE="explicit_env"
-elif [ -z "${MASC_BASE_PATH:-}" ] && [ -n "${HOME:-}" ] && [ "$BASE_PATH" = "$HOME" ]; then
-    BASE_PATH_RESOLUTION_SOURCE="implicit_home"
+elif [ -z "${MASC_BASE_PATH:-}" ] && [ -n "${ME_ROOT:-}" ] && [ "$BASE_PATH" = "$ME_ROOT" ]; then
+    BASE_PATH_RESOLUTION_SOURCE="implicit_me_root"
+elif [ -z "${MASC_BASE_PATH:-}" ] && [ -n "${HOME:-}" ] && [ "$BASE_PATH" = "$HOME/me" ]; then
+    BASE_PATH_RESOLUTION_SOURCE="implicit_me_root"
 fi
 
 if [ "$PORT_EXPLICIT" != "1" ]; then

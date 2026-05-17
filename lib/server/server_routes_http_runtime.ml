@@ -148,10 +148,73 @@ let health_path_diagnostics () =
 
 type paused_keeper_scan = {
   names : string list;
+  autoboot_enabled_names : string list;
+  details : Yojson.Safe.t list;
   read_errors : (string * string) list;
 }
 
 let sorted_unique_strings values = List.sort_uniq String.compare values
+
+let json_float_opt = function
+  | Some value -> `Float value
+  | None -> `Null
+
+let json_string_opt = function
+  | Some value -> `String value
+  | None -> `Null
+
+let effective_autoboot_enabled name (meta : Keeper_types.keeper_meta) =
+  match (Keeper_types_profile.load_keeper_profile_defaults name).autoboot_enabled with
+  | Some value -> value
+  | None -> meta.autoboot_enabled
+
+let blocker_class_string (info : Keeper_types.blocker_info option) =
+  match info with
+  | Some info -> Some (Keeper_types.blocker_class_to_string info.klass)
+  | None -> None
+
+let blocker_detail (info : Keeper_types.blocker_info option) =
+  match info with
+  | Some { detail; _ } when String.trim detail <> "" -> Some detail
+  | Some _ | None -> None
+
+let pause_elapsed_sec now (meta : Keeper_types.keeper_meta) =
+  match Coord_resilience.Time.parse_iso8601_opt meta.updated_at with
+  | Some updated_ts when updated_ts > 0.0 -> Some (max 0.0 (now -. updated_ts))
+  | Some _ | None -> None
+
+let pause_kind (meta : Keeper_types.keeper_meta) =
+  if Keeper_supervisor_types.paused_meta_requires_reconcile_recovery meta then
+    "reconcile_gated"
+  else
+    match meta.auto_resume_after_sec with
+    | Some _ -> "auto_recoverable"
+    | None -> "operator_paused"
+
+let paused_keeper_detail_json ~now ~name ~(autoboot_enabled : bool)
+    (meta : Keeper_types.keeper_meta) =
+  let elapsed = pause_elapsed_sec now meta in
+  let remaining =
+    match (meta.auto_resume_after_sec, elapsed) with
+    | Some resume_after, Some elapsed -> Some (max 0.0 (resume_after -. elapsed))
+    | Some resume_after, None -> Some resume_after
+    | None, _ -> None
+  in
+  let last_blocker = meta.runtime.last_blocker in
+  `Assoc [
+    ("name", `String name);
+    ("autoboot_enabled", `Bool autoboot_enabled);
+    ("pause_kind", `String (pause_kind meta));
+    ("auto_resume_after_sec", json_float_opt meta.auto_resume_after_sec);
+    ("paused_elapsed_sec", json_float_opt elapsed);
+    ("auto_resume_remaining_sec", json_float_opt remaining);
+    ("last_blocker_class", json_string_opt (blocker_class_string last_blocker));
+    ("last_blocker_detail", json_string_opt (blocker_detail last_blocker));
+    ( "missing_pause_root_cause",
+      `Bool
+        (Option.is_some meta.auto_resume_after_sec
+         && Option.is_none meta.runtime.last_blocker) );
+  ]
 
 let running_paused_keeper_names () =
   Keeper_registry.all ()
@@ -160,19 +223,44 @@ let running_paused_keeper_names () =
   |> sorted_unique_strings
 
 let durable_paused_keeper_scan config =
+  (* NDT-OK: HTTP health snapshots report wall-clock pause age; state transitions remain ledger-driven. *)
+  let now = Unix.gettimeofday () in
   Keeper_types.keeper_names config
   |> List.fold_left
        (fun acc name ->
          match Keeper_types.read_meta config name with
          | Ok (Some meta) when meta.paused ->
-             { acc with names = meta.name :: acc.names }
+             let autoboot_enabled = effective_autoboot_enabled name meta in
+             {
+               acc with
+               names = meta.name :: acc.names;
+               autoboot_enabled_names =
+                 (if autoboot_enabled then meta.name :: acc.autoboot_enabled_names
+                  else acc.autoboot_enabled_names);
+               details =
+                 paused_keeper_detail_json ~now ~name:meta.name ~autoboot_enabled meta
+                 :: acc.details;
+             }
          | Ok (Some _) | Ok None -> acc
          | Error err ->
              { acc with read_errors = (name, err) :: acc.read_errors })
-       { names = []; read_errors = [] }
+       { names = []; autoboot_enabled_names = []; details = []; read_errors = [] }
   |> fun scan ->
   {
     names = sorted_unique_strings scan.names;
+    autoboot_enabled_names = sorted_unique_strings scan.autoboot_enabled_names;
+    details =
+      List.sort
+        (fun left right ->
+          let name = function
+            | `Assoc fields -> (
+              match List.assoc_opt "name" fields with
+              | Some (`String value) -> value
+              | _ -> "" )
+            | _ -> ""
+          in
+          String.compare (name left) (name right))
+        scan.details;
     read_errors = List.sort (fun (a, _) (b, _) -> String.compare a b) scan.read_errors;
   }
 
@@ -181,7 +269,7 @@ let paused_keepers_health_json () =
   let durable_scan =
     match current_server_state_opt () with
     | Some state -> durable_paused_keeper_scan state.Mcp_server.room_config
-    | None -> { names = []; read_errors = [] }
+    | None -> { names = []; autoboot_enabled_names = []; details = []; read_errors = [] }
   in
   let names = sorted_unique_strings (running_names @ durable_scan.names) in
   `Assoc [
@@ -191,6 +279,11 @@ let paused_keepers_health_json () =
     ("running_names", `List (List.map (fun name -> `String name) running_names));
     ("durable_count", `Int (List.length durable_scan.names));
     ("durable_names", `List (List.map (fun name -> `String name) durable_scan.names));
+    ( "autoboot_enabled_count",
+      `Int (List.length durable_scan.autoboot_enabled_names) );
+    ( "autoboot_enabled_names",
+      `List (List.map (fun name -> `String name) durable_scan.autoboot_enabled_names) );
+    ("details", `List durable_scan.details);
     ("read_error_count", `Int (List.length durable_scan.read_errors));
     ( "read_errors",
       `List
@@ -200,26 +293,60 @@ let paused_keepers_health_json () =
            durable_scan.read_errors) );
   ]
 
+type autoboot_keeper_scan = {
+  autoboot_names : string list;
+  read_errors : (string * string) list;
+}
+
+let autoboot_enabled_keeper_scan config =
+  sorted_unique_strings (Keeper_types.configured_keeper_names config @ Keeper_types.keeper_names config)
+  |> List.fold_left
+       (fun acc name ->
+         match Keeper_types.read_meta config name with
+         | Ok (Some meta) ->
+             if effective_autoboot_enabled name meta then
+               { acc with autoboot_names = meta.name :: acc.autoboot_names }
+             else acc
+         | Ok None ->
+             if Keeper_meta_store.declarative_autoboot_enabled_by_default name then
+               { acc with autoboot_names = name :: acc.autoboot_names }
+             else acc
+         | Error err ->
+             {
+               autoboot_names = name :: acc.autoboot_names;
+               read_errors = (name, err) :: acc.read_errors;
+             })
+       { autoboot_names = []; read_errors = [] }
+  |> fun scan ->
+  {
+    autoboot_names = sorted_unique_strings scan.autoboot_names;
+    read_errors = List.sort (fun (a, _) (b, _) -> String.compare a b) scan.read_errors;
+  }
+
 let keeper_fleet_safety_health_json ~keeper_fibers ~paused_keepers_json =
-  let bootable_names =
+  let bootable_names, autoboot_scan =
     match current_server_state_opt () with
     | Some state ->
-        (try Keeper_runtime.bootable_keeper_names state.Mcp_server.room_config with
+        (try
+           ( Keeper_runtime.bootable_keeper_names state.Mcp_server.room_config,
+             autoboot_enabled_keeper_scan state.Mcp_server.room_config )
+         with
          | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn ->
              Log.Keeper.warn
                "health: failed to compute bootable keeper names: %s"
                (Printexc.to_string exn);
-             [])
-    | None -> []
+             ([], { autoboot_names = []; read_errors = [] }))
+    | None -> ([], { autoboot_names = []; read_errors = [] })
   in
   let bootable_count = List.length bootable_names in
+  let target_count = List.length autoboot_scan.autoboot_names in
   let minimum_running_fibers =
-    if bootable_count <= 1 then bootable_count else 2
+    if target_count <= 1 then target_count else 2
   in
-  let no_running_fibers = bootable_count > 0 && keeper_fibers = 0 in
+  let no_running_fibers = target_count > 0 && keeper_fibers = 0 in
   let low_running_fiber_margin =
-    bootable_count > 1 && keeper_fibers < minimum_running_fibers
+    target_count > 1 && keeper_fibers < minimum_running_fibers
   in
   let status =
     if no_running_fibers then "blocked"
@@ -230,20 +357,55 @@ let keeper_fleet_safety_health_json ~keeper_fibers ~paused_keepers_json =
     match paused_keepers_json with
     | `Assoc fields ->
         (match List.assoc_opt "count" fields with
+       | Some (`Int count) -> count
+       | _ -> 0)
+    | _ -> 0
+  in
+  let paused_autoboot_count =
+    match paused_keepers_json with
+    | `Assoc fields ->
+        (match List.assoc_opt "autoboot_enabled_count" fields with
          | Some (`Int count) -> count
          | _ -> 0)
     | _ -> 0
   in
+  let blocked_count =
+    if no_running_fibers || low_running_fiber_margin then
+      max 0 (target_count - keeper_fibers)
+    else 0
+  in
+  let blocker =
+    if no_running_fibers then Some "no_running_fibers"
+    else if low_running_fiber_margin then Some "low_running_fiber_margin"
+    else if paused_autoboot_count > 0 then Some "durable_paused_autoboot_enabled"
+    else None
+  in
   `Assoc
     [ "status", `String status
+    ; ("blocker", json_string_opt blocker)
     ; "bootable_keeper_count", `Int bootable_count
     ; ( "bootable_keeper_names"
       , `List (List.map (fun name -> `String name) bootable_names) )
+    ; "autoboot_enabled_keeper_count", `Int target_count
+    ; ( "autoboot_enabled_keeper_names"
+      , `List (List.map (fun name -> `String name) autoboot_scan.autoboot_names) )
+    ; "autoboot_enabled_read_error_count", `Int (List.length autoboot_scan.read_errors)
+    ; ( "autoboot_enabled_read_errors"
+      , `List
+          (List.map
+             (fun (keeper, error) ->
+               `Assoc [ ("keeper", `String keeper); ("error", `String error) ])
+             autoboot_scan.read_errors) )
     ; "running_keeper_fiber_count", `Int keeper_fibers
+    ; "effective_reaction_capacity_count", `Int keeper_fibers
+    ; "target_reaction_capacity_count", `Int target_count
     ; "minimum_running_fibers", `Int minimum_running_fibers
     ; "no_running_fibers", `Bool no_running_fibers
     ; "low_running_fiber_margin", `Bool low_running_fiber_margin
     ; "paused_keeper_count", `Int paused_total_count
+    ; "paused_autoboot_enabled_keeper_count", `Int paused_autoboot_count
+    ; "blocked_count", `Int blocked_count
+    ; "blocked_keepers", `Int blocked_count
     ; ( "operator_action_required"
       , `Bool (no_running_fibers || low_running_fiber_margin) )
     ]

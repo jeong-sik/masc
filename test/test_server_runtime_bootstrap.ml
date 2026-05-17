@@ -1001,6 +1001,27 @@ let test_health_json_surfaces_durable_paused_keepers () =
             (paused |> member "durable_count" |> to_int);
           Alcotest.(check (list string)) "durable paused names"
             [ "durable-paused" ] durable_names;
+          Alcotest.(check int) "durable paused autoboot count" 1
+            (paused |> member "autoboot_enabled_count" |> to_int);
+          Alcotest.(check (list string)) "durable paused autoboot names"
+            [ "durable-paused" ]
+            (paused |> member "autoboot_enabled_names" |> to_list
+             |> List.map to_string);
+          let paused_details = paused |> member "details" |> to_list in
+          let durable_paused_detail =
+            paused_details
+            |> List.find (fun detail ->
+                 detail |> member "name" |> to_string = "durable-paused")
+          in
+          Alcotest.(check string) "pause kind" "auto_recoverable"
+            (durable_paused_detail |> member "pause_kind" |> to_string);
+          Alcotest.(check bool) "pause missing root cause" true
+            (durable_paused_detail |> member "missing_pause_root_cause" |> to_bool);
+          Alcotest.(check bool) "pause detail keeps autoboot" true
+            (durable_paused_detail |> member "autoboot_enabled" |> to_bool);
+          Alcotest.(check (option (float 0.0001))) "pause detail auto resume"
+            (Some 3600.0)
+            (durable_paused_detail |> member "auto_resume_after_sec" |> to_float_option);
           Alcotest.(check bool) "union includes durable paused keeper" true
             (List.exists (( = ) "durable-paused") names);
           Alcotest.(check bool) "union excludes active durable keeper" false
@@ -1039,9 +1060,20 @@ let test_health_json_surfaces_durable_paused_keepers () =
             Fd_accountant.all_kinds;
           Alcotest.(check int) "health exposes bootable keeper count" 1
             (fleet_safety |> member "bootable_keeper_count" |> to_int);
-          Alcotest.(check int) "health exposes minimum running fibers" 1
+          Alcotest.(check int) "health exposes autoboot keeper count" 3
+            (fleet_safety |> member "autoboot_enabled_keeper_count" |> to_int);
+          Alcotest.(check int) "health exposes paused autoboot keeper count" 1
+            (fleet_safety |> member "paused_autoboot_enabled_keeper_count" |> to_int);
+          Alcotest.(check int) "health exposes target reaction capacity" 3
+            (fleet_safety |> member "target_reaction_capacity_count" |> to_int);
+          Alcotest.(check int) "health exposes minimum running fibers" 2
             (fleet_safety |> member "minimum_running_fibers" |> to_int);
-          ignore (fleet_safety |> member "status" |> to_string);
+          Alcotest.(check string) "health marks fleet blocked" "blocked"
+            (fleet_safety |> member "status" |> to_string);
+          Alcotest.(check string) "health marks fleet blocker" "no_running_fibers"
+            (fleet_safety |> member "blocker" |> to_string);
+          Alcotest.(check bool) "health fleet asks for operator action" true
+            (fleet_safety |> member "operator_action_required" |> to_bool);
           Alcotest.(check string) "health reaction ledger degraded"
             "degraded"
             (reaction_ledger |> member "status" |> to_string);

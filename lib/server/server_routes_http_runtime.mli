@@ -133,8 +133,12 @@ val make_health_json :
     metas with [paused = true].  The nested [running_*] and
     [durable_*] fields keep the two sources inspectable so a keeper
     that has been auto-paused and removed from the live keepalive set
-    does not disappear from [/health].  [read_error_count] surfaces
-    corrupt durable meta instead of silently reporting a clean zero.
+    does not disappear from [/health].  [autoboot_enabled_*] and
+    [details] distinguish auto-recoverable, operator-paused, and
+    reconcile-gated durable pauses without auto-unpausing them.
+    [missing_pause_root_cause] is true when a keeper is auto-recoverable
+    but its persisted runtime has no typed [last_blocker].  [read_error_count]
+    surfaces corrupt durable meta instead of silently reporting a clean zero.
 
     {2 keeper_fd_pressure and keeper_fleet_safety contract}
 
@@ -150,10 +154,13 @@ val make_health_json :
     whether FD pressure is active, and each resource kind's in-flight,
     configured-concurrency, and effective-concurrency counts.
 
-    [keeper_fleet_safety] compares configured bootable keepers with the
-    live keeper fiber count.  It reports [blocked] when bootable keepers
-    exist but no fiber is running, and [degraded] when multiple bootable
-    keepers exist but the running fiber count is below the safety margin.
+    [keeper_fleet_safety] compares configured autoboot-enabled keepers
+    with the live keeper fiber count while separately reporting
+    [bootable_keeper_*] after durable pause filtering.  It reports
+    [blocked] when autoboot-enabled keepers exist but no fiber is running,
+    and [degraded] when the running fiber count is below the safety margin.
+    [paused_autoboot_enabled_keeper_count] makes the intended fleet size
+    visible even when durable pauses suppress every bootable keeper.
 
     [keeper_reaction_ledger] summarizes recent durable stimulus -> reaction
     rows per keeper.  It reports [degraded] when a persisted stimulus has no

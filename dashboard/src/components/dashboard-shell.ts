@@ -188,7 +188,32 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
   if (!fleetSafety) return null
   const fibers = fleetSafety.keeper_fibers
   const paused = fleetSafety.paused_keepers ?? 0
+  const fleet = fleetSafety.keeper_fleet_safety
+  const fleetStatus = fleet?.status
+  const runningFibers = fleet?.running_keeper_fiber_count ?? fibers
+  const pausedKeepers = fleet?.paused_keeper_count ?? paused
+  const targetCapacity = fleet?.target_reaction_capacity_count ?? fleet?.autoboot_enabled_keeper_count ?? null
+  const bootableKeepers = fleet?.bootable_keeper_count ?? null
+  const minimumRunning = fleet?.minimum_running_fibers ?? null
+  const noFibers = fleet?.no_running_fibers ?? fleetSafety.keeper_fleet_no_fibers
+  const requiresAction = fleet?.operator_action_required === true
   const blocked = fleetPressureBlockedKeepers(fleetSafety)
+  if (fleetStatus === 'blocked' || (requiresAction && (runningFibers === 0 || noFibers === true))) {
+    const capacityDetail = [
+      `status=${fleetStatus ?? 'blocked'}`,
+      `running_keeper_fiber_count=${runningFibers ?? 0}`,
+      `paused_keeper_count=${pausedKeepers}`,
+      bootableKeepers != null ? `bootable_keeper_count=${bootableKeepers}` : null,
+      targetCapacity != null ? `target_reaction_capacity_count=${targetCapacity}` : null,
+      minimumRunning != null ? `minimum_running_fibers=${minimumRunning}` : null,
+    ].filter((item): item is string => item != null).join(', ')
+    return {
+      key: 'fleet-liveness-risk',
+      label: 'P0 fleet blocked',
+      detail: `${capacityDetail}; resume selected paused keepers or confirm an intentional operator pause policy.`,
+      tone: 'bad',
+    }
+  }
   if (blocked >= 24) {
     return {
       key: 'fleet-liveness-risk',

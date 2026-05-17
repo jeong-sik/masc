@@ -468,6 +468,108 @@ let test_register_discovered_skips_existing () =
         | Error e -> Alcotest.fail ("second register failed: " ^ e)
         | Ok second ->
             Alcotest.(check int) "second count empty" 0 (List.length second))
+
+(* RFC-0128 §4.5 — reverse lookup tests. *)
+
+let with_two_absolute_repos f =
+  with_temp_base_path (fun base_path ->
+    init_empty_store base_path;
+    let masc_path = Filename.concat base_path "workspace/masc" in
+    let oas_path = Filename.concat base_path "workspace/oas" in
+    Unix.mkdir (Filename.concat base_path "workspace") 0o755;
+    Unix.mkdir masc_path 0o755;
+    Unix.mkdir oas_path 0o755;
+    let masc =
+      { (sample_repo "masc") with
+        url = "https://github.com/jeong-sik/masc-mcp"
+      ; local_path = masc_path
+      }
+    in
+    let oas =
+      { (sample_repo "oas") with
+        url = "https://github.com/jeong-sik/oas"
+      ; local_path = oas_path
+      }
+    in
+    (match Repo_store.save_all ~base_path [ masc; oas ] with
+     | Ok () -> ()
+     | Error e -> Alcotest.fail ("save_all: " ^ e));
+    f ~base_path ~masc_path ~oas_path)
+
+let test_find_url_by_id_known () =
+  with_two_absolute_repos (fun ~base_path ~masc_path:_ ~oas_path:_ ->
+    match Repo_store.find_url_by_id ~base_path "masc" with
+    | Some url ->
+      Alcotest.(check string)
+        "masc url"
+        "https://github.com/jeong-sik/masc-mcp"
+        url
+    | None -> Alcotest.fail "expected Some url for masc")
+
+let test_find_url_by_id_unknown () =
+  with_two_absolute_repos (fun ~base_path ~masc_path:_ ~oas_path:_ ->
+    match Repo_store.find_url_by_id ~base_path "nonexistent" with
+    | None -> ()
+    | Some s -> Alcotest.fail ("expected None for unknown, got: " ^ s))
+
+let test_find_repo_by_path_prefix_match () =
+  with_two_absolute_repos (fun ~base_path ~masc_path ~oas_path:_ ->
+    let abs = Filename.concat masc_path "lib/foo.ml" in
+    match Repo_store.find_repo_by_path_prefix ~base_path abs with
+    | Some (repo, rel) ->
+      Alcotest.(check string) "matched repo id" "masc" repo.id;
+      Alcotest.(check string) "relative path" "lib/foo.ml" rel
+    | None -> Alcotest.fail "expected match under masc_path")
+
+let test_find_repo_by_path_prefix_outside () =
+  with_two_absolute_repos (fun ~base_path ~masc_path:_ ~oas_path:_ ->
+    match Repo_store.find_repo_by_path_prefix ~base_path "/tmp/elsewhere.ml" with
+    | None -> ()
+    | Some (repo, _) ->
+      Alcotest.fail ("unexpected match: " ^ repo.id))
+
+let test_find_repo_by_path_prefix_sibling_not_matched () =
+  (* Sibling-style collision: /tmp/masc and /tmp/masc-mirror must not
+     match each other's paths. Guards against pure-substring prefix. *)
+  with_temp_base_path (fun base_path ->
+    init_empty_store base_path;
+    let workspace = Filename.concat base_path "workspace" in
+    Unix.mkdir workspace 0o755;
+    let masc = Filename.concat workspace "masc" in
+    let mirror = Filename.concat workspace "masc-mirror" in
+    Unix.mkdir masc 0o755;
+    Unix.mkdir mirror 0o755;
+    let r1 =
+      { (sample_repo "masc") with
+        url = "https://github.com/owner/masc"
+      ; local_path = masc
+      }
+    in
+    let r2 =
+      { (sample_repo "mirror") with
+        url = "https://github.com/owner/masc-mirror"
+      ; local_path = mirror
+      }
+    in
+    (match Repo_store.save_all ~base_path [ r1; r2 ] with
+     | Ok () -> ()
+     | Error e -> Alcotest.fail ("save_all: " ^ e));
+    let inside_mirror = Filename.concat mirror "lib/x.ml" in
+    match Repo_store.find_repo_by_path_prefix ~base_path inside_mirror with
+    | Some (repo, rel) ->
+      Alcotest.(check string) "must pick mirror, not masc" "mirror" repo.id;
+      Alcotest.(check string) "rel" "lib/x.ml" rel
+    | None -> Alcotest.fail "expected match under mirror")
+
+let test_find_repo_by_path_prefix_root () =
+  (* abs_path equals the repo's local_path itself → empty rel. *)
+  with_two_absolute_repos (fun ~base_path ~masc_path ~oas_path:_ ->
+    match Repo_store.find_repo_by_path_prefix ~base_path masc_path with
+    | Some (repo, rel) ->
+      Alcotest.(check string) "matched repo id" "masc" repo.id;
+      Alcotest.(check string) "empty rel at root" "" rel
+    | None -> Alcotest.fail "expected match at repo root")
+
 let () =
   Alcotest.run "Repo_store"
     [
@@ -539,5 +641,15 @@ let () =
             test_register_discovered_includes_legacy_root_repo;
           Alcotest.test_case "register_discovered skips existing" `Quick
             test_register_discovered_skips_existing;
+        ] );
+      ( "reverse_lookup (RFC-0128)",
+        [
+          Alcotest.test_case "find_url_by_id known" `Quick test_find_url_by_id_known;
+          Alcotest.test_case "find_url_by_id unknown" `Quick test_find_url_by_id_unknown;
+          Alcotest.test_case "path_prefix match" `Quick test_find_repo_by_path_prefix_match;
+          Alcotest.test_case "path_prefix outside" `Quick test_find_repo_by_path_prefix_outside;
+          Alcotest.test_case "path_prefix sibling-safe" `Quick
+            test_find_repo_by_path_prefix_sibling_not_matched;
+          Alcotest.test_case "path_prefix at repo root" `Quick test_find_repo_by_path_prefix_root;
         ] );
     ]

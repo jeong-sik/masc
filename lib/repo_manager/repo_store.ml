@@ -490,3 +490,71 @@ let register_discovered ~base_path =
   | registered ->
       let* () = save_all ~base_path (existing @ registered) in
       Ok registered
+
+(* RFC-0128 §4.5 — reverse lookups.
+
+   These two helpers return raw [url] / [repository] values; the caller
+   normalises the URL with [Ide_paths.canonical_url_of_remote] when it
+   needs a canonical slug. Splitting normalisation out of the lookup
+   keeps [repo_manager] free of a dependency on [masc_ide]. *)
+
+let find_url_by_id ~base_path id =
+  match find ~base_path id with
+  | Ok repo -> if repo.url = "" then None else Some repo.url
+  | Error _ -> None
+
+(* Strip trailing '/' to make prefix comparison robust. *)
+let strip_trailing_slash s =
+  let n = String.length s in
+  if n > 0 && s.[n - 1] = '/' then String.sub s 0 (n - 1) else s
+
+(* [is_path_prefix ~prefix path]: does [path] sit under [prefix] as a
+   directory ancestor, not merely a string prefix? Requires either
+   [path = prefix] or [path] starts with [prefix ^ "/"] to avoid
+   matching siblings like "/a/repos/masc" vs "/a/repos/masc-mirror". *)
+let is_path_prefix ~prefix path =
+  let prefix = strip_trailing_slash prefix in
+  let plen = String.length prefix in
+  if plen = 0 then false
+  else if String.length path = plen && path = prefix then true
+  else if String.length path > plen
+       && String.sub path 0 plen = prefix
+       && path.[plen] = '/'
+  then true
+  else false
+
+let rel_under_path ~prefix path =
+  let prefix = strip_trailing_slash prefix in
+  let plen = String.length prefix in
+  if String.length path = plen then ""
+  else String.sub path (plen + 1) (String.length path - plen - 1)
+
+let find_repo_by_path_prefix ~base_path abs_path =
+  match load_all ~base_path with
+  | Error _ -> None
+  | Ok repos ->
+    (* Longest-match wins. Two repositories rooted at /a/r and /a/r/sub
+       will both match a path under /a/r/sub/...; choose the one with
+       the longer local_path. *)
+    let candidates =
+      List.filter_map
+        (fun (repo : repository) ->
+          let local = local_path ~base_path repo in
+          if is_path_prefix ~prefix:local abs_path
+          then Some (repo, local, rel_under_path ~prefix:local abs_path)
+          else None)
+        repos
+    in
+    match candidates with
+    | [] -> None
+    | _ ->
+      let (best_repo, _, best_rel) =
+        List.fold_left
+          (fun ((_, best_local, _) as best) ((_, local, _) as candidate) ->
+            if String.length local > String.length best_local
+            then candidate
+            else best)
+          (List.hd candidates)
+          (List.tl candidates)
+      in
+      Some (best_repo, best_rel)

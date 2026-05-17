@@ -225,6 +225,82 @@ strategy = "failover"
          "expected at least two candidates, got %d"
          (List.length candidates))
 
+let test_tier_group_inference_max_tokens_uses_model_capability () =
+  let toml =
+    {|
+[providers.runpod_mtp]
+protocol = "openai-http"
+endpoint = "https://example.test/v1"
+
+[providers.glm-coding]
+protocol = "openai-http"
+endpoint = "https://glm.example.test/v1"
+
+[models.qwen36-mtp]
+max-context = 160000
+api-name = "qwen"
+tools-support = true
+
+[models.qwen36-mtp.capabilities]
+max-output-tokens = 8192
+supports-tool-choice = true
+
+[models.glm-turbo]
+max-context = 128000
+api-name = "glm-5-turbo"
+tools-support = true
+
+[models.glm-turbo.capabilities]
+max-output-tokens = 16384
+supports-tool-choice = true
+
+[runpod_mtp.qwen36-mtp]
+is-default = true
+
+[runpod_mtp.qwen36-mtp.keeper]
+temperature = 0.3
+
+[glm-coding.glm-turbo]
+is-default = true
+
+[glm-coding.glm-turbo.keeper]
+max-output = 16384
+temperature = 0.3
+
+[tier.strict_tool_candidates]
+members = ["runpod_mtp.qwen36-mtp.keeper", "glm-coding.glm-turbo.keeper"]
+strategy = "failover"
+
+[tier-group.strict_tool_candidates]
+tiers = ["strict_tool_candidates"]
+strategy = "failover"
+|}
+  in
+  let snapshot = get_snapshot toml in
+  let strict = find_profile snapshot "tier-group.strict_tool_candidates" in
+  check
+    (option int)
+    "tier-group max_tokens follows narrowest model capability"
+    (Some 8192)
+    strict.Hotpath.inference_params.max_tokens;
+  match strict.Hotpath.candidates with
+  | qwen :: glm :: _ ->
+    check
+      (option int)
+      "qwen candidate inherits model output cap"
+      (Some 8192)
+      qwen.Hotpath.provider_cfg.Llm_provider.Provider_config.max_tokens;
+    check
+      (option int)
+      "glm candidate keeps alias cap"
+      (Some 16384)
+      glm.Hotpath.provider_cfg.Llm_provider.Provider_config.max_tokens
+  | candidates ->
+    fail
+      (Printf.sprintf
+         "expected at least two candidates, got %d"
+         (List.length candidates))
+
 let test_model_string_format () =
   let snapshot = get_snapshot valid_toml in
   let local = find_profile snapshot "tier.local" in
@@ -665,6 +741,10 @@ let () =
           "failover inference max_tokens uses narrowest candidate"
           `Quick
           test_failover_inference_max_tokens_uses_narrowest_candidate;
+        test_case
+          "tier-group max_tokens uses model capability"
+          `Quick
+          test_tier_group_inference_max_tokens_uses_model_capability;
         test_case "strategy preserved" `Quick test_strategy_preserved;
         test_case "probes field absent" `Quick test_probes_field_absent;
         test_case "ollama_max_concurrent" `Quick test_ollama_max_concurrent;

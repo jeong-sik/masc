@@ -333,6 +333,75 @@ target = "tier-group.strict_tool_candidates"
         ~provider_ceiling:ceiling resolved
       |> check_ok "narrowest failover value accepted" 8192)
 
+let test_resolve_tier_group_max_tokens_uses_model_capability_ceiling () =
+  let cascade_name =
+    Masc_mcp.Keeper_cascade_profile.Runtime_name
+      "tier-group.strict_tool_candidates"
+  in
+  with_temp_cascade_toml
+    {|
+[providers.runpod_mtp]
+protocol = "openai-http"
+endpoint = "https://example.test/v1"
+
+[providers.glm-coding]
+protocol = "openai-http"
+endpoint = "https://glm.example.test/v1"
+
+[models.qwen36-mtp]
+api-name = "qwen"
+max-context = 160000
+tools-support = true
+
+[models.qwen36-mtp.capabilities]
+max-output-tokens = 8192
+supports-tool-choice = true
+
+[models.glm-turbo]
+api-name = "glm-5-turbo"
+max-context = 128000
+tools-support = true
+
+[models.glm-turbo.capabilities]
+max-output-tokens = 16384
+supports-tool-choice = true
+
+[runpod_mtp.qwen36-mtp]
+is-default = true
+
+[runpod_mtp.qwen36-mtp.keeper]
+temperature = 0.3
+
+[glm-coding.glm-turbo]
+is-default = true
+
+[glm-coding.glm-turbo.keeper]
+max-output = 16384
+temperature = 0.3
+
+[tier.strict_tool_candidates]
+members = ["runpod_mtp.qwen36-mtp.keeper", "glm-coding.glm-turbo.keeper"]
+strategy = "failover"
+
+[tier-group.strict_tool_candidates]
+tiers = ["strict_tool_candidates"]
+strategy = "failover"
+
+[routes.keeper_turn]
+target = "tier-group.strict_tool_candidates"
+|}
+    (fun () ->
+      let ceiling = CR.max_output_tokens_ceiling_of_cascade_name cascade_name in
+      check (option int) "tier-group output ceiling" (Some 8192) ceiling;
+      let resolved =
+        CI.resolve_max_tokens ~cascade_name ~fallback:(fun () -> 65536)
+      in
+      check int "tier-group max_tokens follows model capability ceiling" 8192
+        resolved;
+      CI.validate_max_tokens_within_ceiling ~cascade_name
+        ~provider_ceiling:ceiling resolved
+      |> check_ok "model capability capped value accepted" 8192)
+
 let () =
   run "cascade_capability_gate" [
     "max_tokens_ceiling_validation", [
@@ -362,5 +431,9 @@ let () =
         "provider-derived max_tokens matches failover ceiling"
         `Quick
         test_resolve_provider_derived_max_tokens_matches_failover_ceiling;
+      test_case
+        "tier-group max_tokens uses model capability ceiling"
+        `Quick
+        test_resolve_tier_group_max_tokens_uses_model_capability_ceiling;
     ];
   ]

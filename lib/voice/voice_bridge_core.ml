@@ -160,23 +160,21 @@ let find_executable_in_path ?path_value executable =
   in
   List.find_opt (fun path -> Sys.file_exists path && not (Sys.is_directory path)) candidates
 
-let local_playback_argv ?path_value ~audio_file () =
+let local_playback_argvs ?path_value ~audio_file () =
   let commands =
     [
+      ("afplay", []);
       ("ffplay", [ "-nodisp"; "-autoexit"; "-loglevel"; "error" ]);
       ("mpg123", [ "-q" ]);
       ("play", [ "-q" ]);
       ("open", []);
     ]
   in
-  let rec pick = function
-    | [] -> None
-    | (executable, args) :: rest -> (
-        match find_executable_in_path ?path_value executable with
-        | Some path -> Some (path :: args @ [ audio_file ])
-        | None -> pick rest)
-  in
-  pick commands
+  commands
+  |> List.filter_map (fun (executable, args) ->
+    match find_executable_in_path ?path_value executable with
+    | Some path -> Some (path :: args @ [ audio_file ])
+    | None -> None)
 
 (** Runs local playback with mutex-protected dedup check.
     Returns:
@@ -197,12 +195,12 @@ let run_local_playback ~sw:_ ~agent_id ?message ~audio_file () =
     if not (Voice_config.local_playback_enabled_for_agent config agent_id) then
       `Played None
     else
-      match local_playback_argv ~audio_file () with
-      | None ->
+      match local_playback_argvs ~audio_file () with
+      | [] ->
         log_error
-          "local voice playback unavailable: no ffplay/mpg123/play/open executable found";
+          "local voice playback unavailable: no afplay/ffplay/mpg123/play/open executable found";
         `Played None
-      | Some argv ->
+      | candidates ->
         Eio.Mutex.use_rw ~protect:true playback_mu (fun () ->
           let dedup_hit =
             match message with
@@ -221,55 +219,67 @@ let run_local_playback ~sw:_ ~agent_id ?message ~audio_file () =
             (match message with
              | Some m -> record_playback ~agent_id ~message:m
              | None -> ());
-            let t0 = Unix.gettimeofday () in
-            let raw_source =
-              String.concat " " (List.map Filename.quote argv)
+            let rec try_candidates = function
+              | [] -> `Played None
+              | argv :: rest ->
+                let t0 = Unix.gettimeofday () in
+                let raw_source =
+                  String.concat " " (List.map Filename.quote argv)
+                in
+                let executable =
+                  match argv with h :: _ -> h | [] -> "unknown"
+                in
+                try
+                  match
+                    Masc_exec.Exec_gate.run_argv_with_status
+                      ~actor:(Masc_exec.Agent_id.of_string "voice/bridge_core")
+                      ~raw_source
+                      ~summary:"voice local playback"
+                      ~timeout_sec:
+                        (Env_config_exec_timeout.timeout_sec ~caller:Voice ())
+                      argv
+                  with
+                  | Unix.WEXITED 0, _ ->
+                    let dur = Unix.gettimeofday () -. t0 in
+                    log_info
+                      (Printf.sprintf
+                         "local voice playback finished: agent=%s file=%s via=%s \
+                          duration=%.1fs"
+                         agent_id audio_file executable dur);
+                    `Played (Some dur)
+                  | Unix.WEXITED code, output ->
+                    log_error
+                      (Printf.sprintf
+                         "local voice playback candidate failed (exit=%d): %s%s"
+                         code (String.concat " " argv)
+                         (if String.trim output = "" then ""
+                          else " :: " ^ String.trim output));
+                    try_candidates rest
+                  | Unix.WSTOPPED signal, output ->
+                    log_error
+                      (Printf.sprintf
+                         "local voice playback candidate stopped (sig=%d): %s%s"
+                         signal (String.concat " " argv)
+                         (if String.trim output = "" then ""
+                          else " :: " ^ String.trim output));
+                    try_candidates rest
+                  | Unix.WSIGNALED signal, output ->
+                    log_error
+                      (Printf.sprintf
+                         "local voice playback candidate signaled (sig=%d): %s%s"
+                         signal (String.concat " " argv)
+                         (if String.trim output = "" then ""
+                          else " :: " ^ String.trim output));
+                    try_candidates rest
+                with
+                | Eio.Cancel.Cancelled _ as e -> raise e
+                | exn ->
+                  log_error
+                    (Printf.sprintf "voice playback candidate exception: %s"
+                       (Printexc.to_string exn));
+                  try_candidates rest
             in
-            try
-              match
-                Masc_exec.Exec_gate.run_argv_with_status
-                  ~actor:(Masc_exec.Agent_id.of_string "voice/bridge_core")
-                  ~raw_source
-                  ~summary:"voice local playback"
-                  ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Voice ())
-                  argv
-              with
-              | Unix.WEXITED 0, _ ->
-                let dur = Unix.gettimeofday () -. t0 in
-                log_info
-                  (Printf.sprintf
-                     "local voice playback finished: agent=%s file=%s via=%s duration=%.1fs"
-                     agent_id audio_file
-                     (match argv with h :: _ -> h | [] -> "unknown")
-                     dur);
-                `Played (Some dur)
-              | Unix.WEXITED code, output ->
-                log_error
-                  (Printf.sprintf
-                     "local voice playback failed (exit=%d): %s%s"
-                     code (String.concat " " argv)
-                     (if String.trim output = "" then "" else " :: " ^ String.trim output));
-                `Played None
-              | Unix.WSTOPPED signal, output ->
-                log_error
-                  (Printf.sprintf
-                     "local voice playback stopped (sig=%d): %s%s"
-                     signal (String.concat " " argv)
-                     (if String.trim output = "" then "" else " :: " ^ String.trim output));
-                `Played None
-              | Unix.WSIGNALED signal, output ->
-                log_error
-                  (Printf.sprintf
-                     "local voice playback signaled (sig=%d): %s%s"
-                     signal (String.concat " " argv)
-                     (if String.trim output = "" then "" else " :: " ^ String.trim output));
-                `Played None
-            with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | exn ->
-              log_error (Printf.sprintf "voice playback exception: %s"
-                (Printexc.to_string exn));
-              `Played None
+            try_candidates candidates
           end)
 
 let start_local_playback ~sw ~agent_id ~audio_file =

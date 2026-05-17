@@ -228,6 +228,7 @@ let snapshot_json () =
   `Assoc
     [ "mode", `String "passthrough"
     ; "throttle_owner", `String "oas_cascade"
+    ; "local_tool_resource_gates", Tool_resource_gate.snapshot_json ()
     ; "max_concurrent", `Int s.max_concurrent
     ; "active", `Int s.active
     ; "available", `Int s.available

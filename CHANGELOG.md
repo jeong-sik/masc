@@ -1,6 +1,26 @@
 # Changelog
 
 
+## [0.19.20] - 2026-05-17
+
+### Added
+- `lib/keeper/keeper_reaction_ledger.ml`: keeper-local Reaction Ledger summaries are exposed through runtime health and dashboard runtime-resolution payloads, so pending stimuli show as degraded/operator-action-required instead of disappearing into post-turn internals.
+- `lib/server/fd_accountant.ml`: 4-kind FD accounting pool with Docker spawn throttle delegation for the RFC-0101 fleet pressure path.
+- `lib/sse_event/`: typed SSE event migration for tool/turn and handoff/context/replacement/slot arms, with byte-level tests covering the new RFC-0004 PR-3/PR-4 event emitters.
+- `docs/rfc/0101-fd-accountant-generic-pool.md` and RFC-0089 inventory partition updates document the next FD-accountant and close-prep lanes.
+
+### Changed
+- `lib/dashboard/` and dashboard runtime trust views label system-blocked states as `Blocked` rather than human `Pause`, separating operator pauses from runtime blockers.
+- MCP server internals remove the legacy `respond_mcp_*` / `mcp_internal_error_json` factories from the active response path.
+- Cascade max-token handling clamps model/provider output ceilings explicitly.
+- Cascade qwen configuration declares chat-template thinking support explicitly and removes the legacy `cap_auto_resolved_max_tokens` alias from active cascade code and historical DD-020 notes.
+
+### Fixed
+- `lib/keeper/keeper_agent_run.ml`: captured CDAL proof files are persisted into keeper run outputs.
+- `lib/server/server_mcp_transport_ws.ml`: silent websocket JSON parse drops now increment metrics and emit warnings.
+- Runtime base-path handling no longer falls back to `ME_ROOT`.
+- Release notes now cover the completed world-reactivity closeout wave, including Runtime Lens proof surfacing, required-tool route failure splitting, Reaction Ledger health, and CDAL proof persistence.
+
 ## [0.19.19] - 2026-05-17
 
 ### Added

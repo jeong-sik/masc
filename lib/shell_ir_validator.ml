@@ -19,6 +19,29 @@ let advisory_tag = function
   | Reject _ -> "reject"
   | Cannot_parse _ -> "cannot_parse"
 
+let cannot_parse_kind_tag = function
+  | Parse_error -> "parse_error"
+  | Parse_aborted `Timeout_50ms -> "timeout"
+  | Parse_aborted `Depth_limit -> "depth_limit"
+  | Parse_aborted `Token_limit_50k -> "token_limit"
+  | Too_complex `Heredoc -> "heredoc"
+  | Too_complex `Here_string -> "here_string"
+  | Too_complex `Cmd_subst -> "cmd_subst"
+  | Too_complex `Proc_subst -> "proc_subst"
+  | Too_complex `Subshell -> "subshell"
+  | Too_complex `Arith_expansion -> "arith_expansion"
+  | Too_complex `Control_flow -> "control_flow"
+  | Too_complex `Logic_op -> "logic_op"
+  | Too_complex `Function_def -> "function_def"
+  | Too_complex `Glob_brace -> "glob_brace"
+  | Too_complex `Background -> "background"
+  | Too_complex `Redirect -> "redirect"
+  | Too_complex (`Unknown_construct _) -> "other"
+
+let reject_reason_tag = function
+  | Command_not_in_allowlist _ -> "command"
+  | Pipeline_segment_disallowed _ -> "pipeline_segment"
+
 let bin_in_allowlist ~allowlist (bin : Masc_exec.Bin.t) : bool =
   let name = Masc_exec.Bin.to_string bin in
   List.exists (String.equal name) allowlist

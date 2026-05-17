@@ -59,3 +59,47 @@ val advisory_tag : advisory -> string
     [Allow -> "allow"], [Reject _ -> "reject"],
     [Cannot_parse _ -> "cannot_parse"].  Pin the wording — future
     dashboard rules grep on these literals. *)
+
+val cannot_parse_kind_tag : cannot_parse_kind -> string
+(** Stable snake_case sub-tag for the [Cannot_parse] arm.  Pinned
+    1:1 to the [too_complex_*] / [parse_*] field names in
+    {!Legendary_counters.snapshot} so a dashboard histogram of
+    typed-advisor bailouts can grep the same literals already used
+    by the substring-gate shadow counters:
+
+    {ul
+      {- [Parse_error -> "parse_error"]}
+      {- [Parse_aborted `Timeout_50ms -> "timeout"]}
+      {- [Parse_aborted `Depth_limit -> "depth_limit"]}
+      {- [Parse_aborted `Token_limit_50k -> "token_limit"]}
+      {- [Too_complex `Heredoc -> "heredoc"]}
+      {- [Too_complex `Here_string -> "here_string"]}
+      {- [Too_complex `Cmd_subst -> "cmd_subst"]}
+      {- [Too_complex `Proc_subst -> "proc_subst"]}
+      {- [Too_complex `Subshell -> "subshell"]}
+      {- [Too_complex `Arith_expansion -> "arith_expansion"]}
+      {- [Too_complex `Control_flow -> "control_flow"]}
+      {- [Too_complex `Logic_op -> "logic_op"]}
+      {- [Too_complex `Function_def -> "function_def"]}
+      {- [Too_complex `Glob_brace -> "glob_brace"]}
+      {- [Too_complex `Background -> "background"]}
+      {- [Too_complex `Redirect -> "redirect"]}
+      {- [Too_complex (`Unknown_construct _) -> "other"]}
+    }
+
+    Adding a new variant in {!Masc_exec.Parsed.reason_too_complex}
+    or [reason_aborted] forces an exhaustive-match update here at
+    compile time — the catch-all sits only on the
+    [`Unknown_construct] arm where the substring payload is already
+    free-form and not stable. *)
+
+val reject_reason_tag : reject_reason -> string
+(** Stable snake_case sub-tag for the [Reject] arm: pinpoints
+    whether the reject came from a single command or a pipeline
+    segment without leaking the offending binary name into the
+    metric label.  Pinned values:
+
+    {ul
+      {- [Command_not_in_allowlist _ -> "command"]}
+      {- [Pipeline_segment_disallowed _ -> "pipeline_segment"]}
+    } *)

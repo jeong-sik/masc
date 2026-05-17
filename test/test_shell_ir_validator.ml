@@ -88,6 +88,72 @@ let test_advisory_tag_stable () =
     (V.advisory_tag (V.Cannot_parse { kind = V.Parse_error }))
 ;;
 
+let test_cannot_parse_kind_tag_pinned () =
+  (* Pin every wording: dashboards greppable on these literals.  Any
+     new variant added to Parsed.reason_too_complex / reason_aborted
+     forces an exhaustive-match update in cannot_parse_kind_tag so
+     this test does not have to enumerate the new arm to catch the
+     regression — the compile-time failure does. *)
+  let cases =
+    [ "parse_error", V.Parse_error
+    ; "timeout", V.Parse_aborted `Timeout_50ms
+    ; "depth_limit", V.Parse_aborted `Depth_limit
+    ; "token_limit", V.Parse_aborted `Token_limit_50k
+    ; "heredoc", V.Too_complex `Heredoc
+    ; "here_string", V.Too_complex `Here_string
+    ; "cmd_subst", V.Too_complex `Cmd_subst
+    ; "proc_subst", V.Too_complex `Proc_subst
+    ; "subshell", V.Too_complex `Subshell
+    ; "arith_expansion", V.Too_complex `Arith_expansion
+    ; "control_flow", V.Too_complex `Control_flow
+    ; "logic_op", V.Too_complex `Logic_op
+    ; "function_def", V.Too_complex `Function_def
+    ; "glob_brace", V.Too_complex `Glob_brace
+    ; "background", V.Too_complex `Background
+    ; "redirect", V.Too_complex `Redirect
+    ; "other", V.Too_complex (`Unknown_construct "future_thing")
+    ]
+  in
+  List.iter
+    (fun (expected, kind) ->
+      Alcotest.(check string)
+        (Printf.sprintf "%s tag" expected)
+        expected
+        (V.cannot_parse_kind_tag kind))
+    cases
+;;
+
+let test_reject_reason_tag_pinned () =
+  Alcotest.(check string)
+    "command tag"
+    "command"
+    (V.reject_reason_tag (V.Command_not_in_allowlist "x"));
+  Alcotest.(check string)
+    "pipeline_segment tag"
+    "pipeline_segment"
+    (V.reject_reason_tag (V.Pipeline_segment_disallowed "x"))
+;;
+
+let test_sub_tag_constant_under_binary_variation () =
+  (* Reject-reason sub-tag must be CONSTANT across different
+     offending binaries — the metric label is a fixed bucket name,
+     not a per-command string.  Pin by computing the tag for two
+     distinct bin names and asserting equality (plus equality to the
+     pinned literal). *)
+  let a = V.reject_reason_tag (V.Command_not_in_allowlist "rm") in
+  let b = V.reject_reason_tag (V.Command_not_in_allowlist "curl") in
+  Alcotest.(check string) "command tag a = pinned" "command" a;
+  Alcotest.(check string) "command tag b = pinned" "command" b;
+  let p1 =
+    V.reject_reason_tag (V.Pipeline_segment_disallowed "rm")
+  in
+  let p2 =
+    V.reject_reason_tag (V.Pipeline_segment_disallowed "curl")
+  in
+  Alcotest.(check string) "pipeline tag p1 = pinned" "pipeline_segment" p1;
+  Alcotest.(check string) "pipeline tag p2 = pinned" "pipeline_segment" p2
+;;
+
 let test_empty_allowlist_rejects_known_bin () =
   (* Empty allowlist must reject any simple command — the allowlist is
      the only allow source; an empty list means deny all. *)
@@ -137,5 +203,19 @@ let () =
     ; ( "advisory_tag"
       , [ Alcotest.test_case "stable wording" `Quick test_advisory_tag_stable ]
       )
+    ; ( "sub_tags"
+      , [ Alcotest.test_case
+            "cannot_parse_kind_tag pinned"
+            `Quick
+            test_cannot_parse_kind_tag_pinned
+        ; Alcotest.test_case
+            "reject_reason_tag pinned"
+            `Quick
+            test_reject_reason_tag_pinned
+        ; Alcotest.test_case
+            "sub tag constant under binary variation"
+            `Quick
+            test_sub_tag_constant_under_binary_variation
+        ] )
     ]
 ;;

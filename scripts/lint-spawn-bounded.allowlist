@@ -1,0 +1,36 @@
+# RFC-0109 P1 — known-bounded Eio.Process.spawn call sites.
+#
+# Each line is a `path:line_number` (matching the leading prefix that
+# `rg -n 'Eio\.Process\.spawn' lib/ --type=ml --no-heading` emits).
+#
+# To add a new entry: run `bash scripts/lint-spawn-bounded.sh`, copy the
+# VIOLATION lines into this file, AND verify that the call site is
+# either:
+#   1. The Bounded_proc helper itself (the canonical bounded primitive), or
+#   2. Wrapped at the call layer in `Eio.Time.with_timeout_exn` +
+#      a fresh `Eio.Switch.run`, with the wall-clock budget sourced from
+#      a typed configuration (no hard-coded literal), or
+#   3. Explicitly justified inline with a `(* SPAWN-UNBOUNDED-OK: <reason> *)`
+#      comment on the same line (e.g. boot-time one-shot probes).
+#
+# Removal: an entry SHOULD be removed when the spawn site itself is removed,
+# never when a "we'll wrap it later" excuse appears.
+
+# lib/bounded_proc/bounded_proc.ml:17  — the canonical helper itself.
+lib/bounded_proc/bounded_proc.ml:17
+
+# lib/process/process_eio.ml:457, 484 — `spawn_and_drain_{stdout,both}`.
+# Private functions. Every caller (run_argv*, run_argv_with_status*,
+# run_argv_with_stdin*) wraps in `Eio.Time.with_timeout_exn clk timeout_sec`
+# + `Eio.Switch.run` (process_eio.ml:521-523, 557-559, 605-609, 674-678).
+lib/process/process_eio.ml:457
+lib/process/process_eio.ml:484
+
+# lib/server/lsp_process_manager.ml:178 — LSP child process. Lifetime is
+# bound to the LSP session switch; idle eviction handled by the LSP
+# manager itself. Bounded by session scope, not by per-call timeout.
+lib/server/lsp_process_manager.ml:178
+
+# lib/worker_dev_tools.ml:1690 — dev-tools worker spawn. Wrapped by the
+# worker switch; bounded by the dev-tools session lifetime.
+lib/worker_dev_tools.ml:1690

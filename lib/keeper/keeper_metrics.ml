@@ -72,6 +72,7 @@ type t =
   | GuardsFailures
   | ProfileLoadFailures
   | CompactAuditFailures
+  | CompactAuditRetentionParse
   | FsFailures
   | CrashPersistenceFailures
   | GenerationLineageFailures
@@ -271,6 +272,7 @@ let to_string = function
   | GuardsFailures -> "masc_keeper_guards_failures_total"
   | ProfileLoadFailures -> "masc_keeper_profile_load_failures_total"
   | CompactAuditFailures -> "masc_keeper_compact_audit_failures_total"
+  | CompactAuditRetentionParse -> "masc_keeper_compact_audit_retention_parse_total"
   | FsFailures -> "masc_keeper_fs_failures_total"
   | CrashPersistenceFailures -> "masc_keeper_crash_persistence_failures_total"
   | GenerationLineageFailures -> "masc_keeper_generation_lineage_failures_total"
@@ -544,6 +546,11 @@ let metric_keeper_approval_queue_failures = "masc_keeper_approval_queue_failures
 let metric_keeper_guards_failures = "masc_keeper_guards_failures_total"
 let metric_keeper_profile_load_failures = "masc_keeper_profile_load_failures_total"
 let metric_keeper_compact_audit_failures = "masc_keeper_compact_audit_failures_total"
+
+let metric_keeper_compact_audit_retention_parse =
+  "masc_keeper_compact_audit_retention_parse_total"
+;;
+
 let metric_keeper_fs_failures = "masc_keeper_fs_failures_total"
 
 let metric_keeper_crash_persistence_failures =

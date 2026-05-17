@@ -143,6 +143,77 @@ let parse_provider_log ~(path : string) (tbl : Otoml.t) : cascade_provider_log =
   }
 ;;
 
+let key_variants key =
+  let replace from_char to_char =
+    String.map (fun ch -> if Char.equal ch from_char then to_char else ch) key
+  in
+  let hyphenated = replace '_' '-' in
+  let underscored = replace '-' '_' in
+  if String.equal hyphenated underscored then [ key ] else [ hyphenated; underscored ]
+;;
+
+let find_string_opt_any tbl key =
+  key_variants key
+  |> List.find_map (fun key -> Otoml.find_opt tbl Otoml.get_string [ key ])
+;;
+
+let find_int_opt_any tbl key =
+  key_variants key
+  |> List.find_map (fun key -> Otoml.find_opt tbl Otoml.get_integer [ key ])
+;;
+
+let positive_int_field_any ~(path : string) tbl ~key ~default =
+  match find_int_opt_any tbl key with
+  | None -> default
+  | Some n when n > 0 -> n
+  | Some n ->
+    Logs.warn (fun m ->
+      m
+        "cascade_declarative_parser: %s.%s = %d — expected positive integer, \
+         using default %d"
+        path
+        key
+        n
+        default);
+    default
+;;
+
+let probe_interval_field ~(path : string) tbl =
+  match find_int_opt_any tbl "probe-interval-seconds" with
+  | None -> 60
+  | Some n when n >= 60 -> n
+  | Some n when n > 0 ->
+    Logs.warn (fun m ->
+      m
+        "cascade_declarative_parser: %s.probe-interval-seconds = %d — minimum is \
+         60s; clamping to 60"
+        path
+        n);
+    60
+  | Some n ->
+    Logs.warn (fun m ->
+      m
+        "cascade_declarative_parser: %s.probe-interval-seconds = %d — expected \
+         positive integer; using default 60"
+        path
+        n);
+    60
+;;
+
+let parse_provider_healthcheck ~(path : string) (tbl : Otoml.t)
+  : cascade_provider_healthcheck
+  =
+  let enabled = Otoml.find_or ~default:false tbl Otoml.get_boolean [ "enabled" ] in
+  { enabled
+  ; endpoint = find_string_opt_any tbl "endpoint"
+  ; probe_interval_seconds = probe_interval_field ~path tbl
+  ; unhealthy_threshold =
+      positive_int_field_any ~path tbl ~key:"unhealthy-threshold" ~default:3
+  ; recovery_threshold =
+      positive_int_field_any ~path tbl ~key:"recovery-threshold" ~default:1
+  }
+;;
+
 (** Parse a [providers.<id>.headers] sub-table into a sorted association
     list. Caller invokes only when the sub-table key exists, so the
     returned list distinguishes "declared but empty / all entries rejected"
@@ -228,6 +299,10 @@ let parse_provider (id : string) (tbl : Otoml.t)
       Otoml.find_opt tbl Fun.id [ "log" ]
       |> Option.map (parse_provider_log ~path:(path ^ ".log"))
     in
+    let healthcheck =
+      Otoml.find_opt tbl Fun.id [ "healthcheck" ]
+      |> Option.map (parse_provider_healthcheck ~path:(path ^ ".healthcheck"))
+    in
     let headers =
       match Otoml.find_opt tbl Fun.id [ "headers" ] with
       | None -> None
@@ -243,6 +318,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
       ; credentials
       ; capabilities
       ; log
+      ; healthcheck
       ; headers
       }
 ;;

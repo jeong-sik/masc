@@ -342,6 +342,36 @@ let run_named
       tool_filtered_candidate_count
       local_prefiltered_candidate_count;
   let provider_attempt_provenance = base_provider_attempt_provenance in
+  let filter_provider_health_fail_open candidates =
+    match Provider_health.active () with
+    | None -> candidates
+    | Some health ->
+      Provider_health.filter_healthy health
+        ~provider_id:Cascade_runtime_candidate.health_key
+        candidates
+  in
+  let record_provider_health_result candidate ~success ~http_status =
+    match Provider_health.active () with
+    | None -> ()
+    | Some health ->
+      Provider_health.record_attempt_result health
+        ~provider_id:(Cascade_runtime_candidate.health_key candidate)
+        ~success
+        ~http_status
+  in
+  let record_provider_health_error candidate = function
+    | Provider_error.ServerError { code; _ } ->
+      record_provider_health_result candidate ~success:false ~http_status:(Some code)
+    | Provider_error.CapacityExhausted _
+    | Provider_error.RateLimit _
+    | Provider_error.AuthError
+    | Provider_error.InvalidRequest _
+    | Provider_error.CliWrappedHardQuota _
+    | Provider_error.CliWrappedMaxTurns _
+    | Provider_error.CliWrappedResumableSession _
+    | Provider_error.PermissionDenied _
+    | Provider_error.ModelNotFound -> ()
+  in
   match candidates with
   | [] ->
       let required_tool_names =
@@ -964,6 +994,7 @@ let run_named
          a single number, which would mislead strategy ranking. *)
       (match result with
       | Ok result when accept result.response ->
+        record_provider_health_result candidate ~success:true ~http_status:None;
         record_accepted_liveness_sample ();
         record_candidate_success candidate ~latency_ms:attempt_latency_ms result;
         (* FSM: Call_ok → Accept *)
@@ -997,6 +1028,7 @@ let run_named
           { response = result.response; reason } in
         (match Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last outcome with
            | Cascade_fsm.Accept_on_exhaustion { response; _ } ->
+           record_provider_health_result candidate ~success:true ~http_status:None;
            record_accepted_liveness_sample ();
            record_candidate_success candidate ~latency_ms:attempt_latency_ms result;
            let observation =
@@ -1024,7 +1056,7 @@ let run_named
            (* The rejected response is not trusted progress.  Resuming
               from its checkpoint can turn a fallback provider into a
               replay of the rejected empty/schema-invalid turn. *)
-           try_cascade ?resume_checkpoint rest new_err
+           try_cascade ?resume_checkpoint (filter_provider_health_fail_open rest) new_err
          | Cascade_fsm.Exhausted _ ->
            record_candidate_health_rejected candidate ~reason;
            let observation =
@@ -1055,6 +1087,7 @@ let run_named
               real FSM contract violation, not a tunable. *)
            Cascade_metrics.on_cascade_invariant_violation ();
            Log.Misc.warn "cascade %s: unexpected Accept in Accept_rejected branch (runtime=%s)" cascade_name runtime_candidate_label;
+           record_provider_health_result candidate ~success:true ~http_status:None;
            record_accepted_liveness_sample ();
            record_candidate_success candidate ~latency_ms:attempt_latency_ms result;
            let observation =
@@ -1089,16 +1122,19 @@ let run_named
            state. *)
         let err_str = Agent_sdk.Error.to_string sdk_err in
         record_candidate_health_error candidate sdk_err;
-                let provider_error =
-                  emit_sdk_provider_error_metric ~cascade_name:error_cascade_name
-                    ~provider:runtime_candidate_label sdk_err
-                in
-                record_cascade_attempt
-                  candidate
-                  ?http_status:(http_status_of_provider_error provider_error)
-                  ~outcome:(`Failure (Agent_sdk.Error.to_string sdk_err))
-                  ();
-                let _ = err_str in
+        let provider_error =
+          emit_sdk_provider_error_metric
+            ~cascade_name:error_cascade_name
+            ~provider:runtime_candidate_label
+            sdk_err
+        in
+        record_cascade_attempt
+          candidate
+          ?http_status:(http_status_of_provider_error provider_error)
+          ~outcome:(`Failure (Agent_sdk.Error.to_string sdk_err))
+          ();
+        Option.iter (record_provider_health_error candidate) provider_error;
+        let _ = err_str in
         let cascade_outcome = sdk_error_to_cascade_outcome sdk_err in
         Option.iter
           (fun _ -> record_candidate_error candidate sdk_err)
@@ -1191,7 +1227,10 @@ let run_named
                 else
                   next_resume
               in
-              try_cascade ?resume_checkpoint:retry_resume_checkpoint rest new_err
+              try_cascade
+                ?resume_checkpoint:retry_resume_checkpoint
+                (filter_provider_health_fail_open rest)
+                new_err
             | Cascade_fsm.Exhausted _ ->
               let observation =
                 Cascade_legacy_runner.cascade_observation_with_metrics
@@ -1314,6 +1353,7 @@ let run_named
     let ordered =
       Cascade_strategy.order_candidates strategy
         ~adapter ~ctx:signal_ctx ~cycle:n candidates
+      |> filter_provider_health_fail_open
     in
     let last_cycle = n + 1 >= strategy.cycle.max_cycles in
     match ordered with

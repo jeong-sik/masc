@@ -1680,6 +1680,8 @@
 
 (include stanzas/test_process_eio_default_timeout.inc)
 
+(include stanzas/test_provider_health.inc)
+
 (include stanzas/test_provider_kind_resolution.inc)
 
 (include stanzas/test_release_train_guard_script.inc)

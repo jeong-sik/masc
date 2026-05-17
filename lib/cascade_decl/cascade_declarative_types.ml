@@ -33,6 +33,15 @@ type cascade_provider_log =
   }
 [@@deriving show, eq]
 
+type cascade_provider_healthcheck =
+  { enabled : bool
+  ; endpoint : string option
+  ; probe_interval_seconds : int
+  ; unhealthy_threshold : int
+  ; recovery_threshold : int
+  }
+[@@deriving show, eq]
+
 (** Per-provider runtime + behavioral capabilities — RFC-0058 §2.4 +
     Phase 5.1 (capability fields) + §3.2 Phase 5.6 (tool/event support).
 
@@ -107,6 +116,7 @@ type cascade_provider =
   ; credentials : cascade_credential option
   ; capabilities : cascade_capabilities option
   ; log : cascade_provider_log option
+  ; healthcheck : cascade_provider_healthcheck option
   ; headers : (string * string) list option
   }
 [@@deriving show, eq]

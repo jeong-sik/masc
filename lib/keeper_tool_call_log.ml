@@ -44,6 +44,7 @@ type turn_context =
   ; tool_surface_class : string option
   ; visible_tool_count : int option
   ; required_tools : string list option
+  ; required_tool_candidates : string list option
   ; missing_required_tools : string list option
   ; cascade_profile : string option
   }
@@ -70,6 +71,7 @@ let empty_turn_context =
   ; tool_surface_class = None
   ; visible_tool_count = None
   ; required_tools = None
+  ; required_tool_candidates = None
   ; missing_required_tools = None
   ; cascade_profile = None
   }
@@ -112,6 +114,7 @@ let set_turn_context
       ?tool_surface_class
       ?visible_tool_count
       ?required_tools
+      ?required_tool_candidates
       ?missing_required_tools
       ?cascade_profile
       ()
@@ -140,6 +143,7 @@ let set_turn_context
     ; tool_surface_class
     ; visible_tool_count
     ; required_tools
+    ; required_tool_candidates
     ; missing_required_tools
     ; cascade_profile
     }
@@ -194,6 +198,7 @@ let runtime_contract_json_for_call ~keeper_name ?model () =
     ?tool_surface_class:ctx.tool_surface_class
     ?visible_tool_count:ctx.visible_tool_count
     ?required_tools:ctx.required_tools
+    ?required_tool_candidates:ctx.required_tool_candidates
     ?missing_required_tools:ctx.missing_required_tools
     ?model:(optional_model model)
     ?cascade_profile:ctx.cascade_profile
@@ -608,6 +613,7 @@ let log_call
       ?tool_surface_class
       ?visible_tool_count
       ?required_tools
+      ?required_tool_candidates
       ?missing_required_tools
       ?cascade_profile
       ?result_bytes
@@ -743,6 +749,11 @@ let log_call
         | Some _ -> required_tools
         | None -> ctx.required_tools
       in
+      let required_tool_candidates =
+        match required_tool_candidates with
+        | Some _ -> required_tool_candidates
+        | None -> ctx.required_tool_candidates
+      in
       let missing_required_tools =
         match missing_required_tools with
         | Some _ -> missing_required_tools
@@ -874,6 +885,7 @@ let log_call
           ?tool_surface_class
           ?visible_tool_count
           ?required_tools
+          ?required_tool_candidates
           ?missing_required_tools
           ?model:model_opt
           ?cascade_profile

@@ -1804,6 +1804,15 @@
 ; count so future additions surface in the diff. Requires masc_test_deps
 ; because it accesses Masc_mcp.Tool_name.* values directly.
 
+; RFC-0107 Phase D.4 — Pool_metrics Prometheus exporter regression test.
+; Pins the 5 metric name constants, register () idempotency, and the
+; /metrics text contains the metric families with correct TYPE lines.
+
+(test
+ (name test_pool_metrics)
+ (modules test_pool_metrics)
+ (libraries masc_test_deps))
+
 (test
  (name test_tool_name_exhaustive)
  (modules test_tool_name_exhaustive)

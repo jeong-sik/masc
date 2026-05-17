@@ -412,6 +412,16 @@ let metric_fd_limit = "masc_fd_limit"
 let metric_fd_in_flight = "masc_fd_in_flight"
 let metric_fd_pressure_active = "masc_fd_pressure_active"
 
+(* RFC-0107 Phase D.4 — piaf-backed connection pool gauges/counters.
+   Names are owned by [Pool_metrics] (lib/server/pool_metrics.ml).
+   Re-aliased here so [init] can register them in the central registry
+   without reaching into the masc_http_client library. *)
+let metric_pool_idle_total = Pool_metrics.metric_idle_total
+let metric_pool_inflight_total = Pool_metrics.metric_inflight_total
+let metric_pool_reuse_total = Pool_metrics.metric_reuse_total
+let metric_pool_evict_total = Pool_metrics.metric_evict_total
+let metric_pool_create_total = Pool_metrics.metric_create_total
+
 (* Core counters / gauges — used outside init. *)
 let metric_mcp_requests = "masc_mcp_requests_total"
 let metric_llm_inference_duration = "masc_llm_inference_duration_seconds"
@@ -2125,6 +2135,30 @@ let init () =
     metric_fd_pressure_active
     "Whether the shared keeper FD-pressure breaker is active (1 active, 0 inactive)."
     Gauge;
+  (* RFC-0107 Phase D.4 — piaf connection pool metrics.  Snapshot
+     pushed by [update_pool_metrics_gauges] inside [to_prometheus_text]. *)
+  add
+    metric_pool_idle_total
+    "Idle (reusable) connections held by the piaf-backed HTTP pool. \
+     With label [host=\"scheme://host:port\"] this is the per-endpoint \
+     count; the unlabelled time series is the across-host total."
+    Gauge;
+  add
+    metric_pool_inflight_total
+    "Currently in-flight HTTP requests checked out of the piaf-backed pool."
+    Gauge;
+  add
+    metric_pool_reuse_total
+    "Cumulative count of pooled connection reuses (keep-alive hits)."
+    Counter;
+  add
+    metric_pool_evict_total
+    "Cumulative count of pooled connections evicted by idle-TTL or LRU cap."
+    Counter;
+  add
+    metric_pool_create_total
+    "Cumulative count of fresh piaf [Client.t] connections created on pool miss."
+    Counter;
   (* Per-keeper turn outcome + token counters.  Labels are populated
      dynamically via inc_counter; no upfront registration needed.
      Covers issues #7495 (cost/token attribution) and #7519 (SLO). *)
@@ -2935,10 +2969,29 @@ let text_metric_type = function
 let type_to_string metric_type = Prometheus_text.type_to_string (text_metric_type metric_type)
 let labels_to_string = Prometheus_format.labels_to_string
 
+let update_pool_metrics_gauges () =
+  match Pool_metrics.current_snapshot () with
+  | None -> ()
+  | Some stats ->
+    set_gauge metric_pool_inflight_total (float_of_int stats.total_inflight);
+    List.iter
+      (fun (host, idle) ->
+        set_gauge
+          metric_pool_idle_total
+          ~labels:[ "host", host ]
+          (float_of_int idle))
+      stats.idle_per_host;
+    set_gauge metric_pool_idle_total (float_of_int stats.total_idle);
+    set_gauge metric_pool_reuse_total (float_of_int stats.reuse_count_total);
+    set_gauge metric_pool_evict_total (float_of_int stats.evict_count_total);
+    set_gauge metric_pool_create_total (float_of_int stats.create_count_total)
+;;
+
 let to_prometheus_text () =
   update_uptime ();
   update_fd_gauges ();
   update_fd_accountant_gauges ();
+  update_pool_metrics_gauges ();
   (* Snapshot (name, help, metric_type, value, labels) under the mutex so
      the render phase sees a consistent view even when concurrent fibers
      are still updating [metrics].  [m.value] is mutable so we copy it

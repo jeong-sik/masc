@@ -186,6 +186,54 @@ target. Rejected — host-platform incompatible.
 
 Same problem as C. Rejected — same reason.
 
+### E. Replace Docker with microVM (Firecracker / Apple Virtualization Framework / exec-sandbox)
+
+Pattern adopted by OpenHands proposal #13203 (QEMU microVM via
+exec-sandbox). Startup measured at 1-2 ms warm and ~100 ms cold via
+L1 snapshot. Hardware-level isolation rather than namespace-level.
+
+Rejected for this RFC because:
+
+1. macOS development would require Apple Virtualization Framework
+   (newer, less battle-tested than HVF QEMU) or HVF directly — neither
+   has the operator familiarity that Docker has accumulated over the
+   masc-mcp history.
+2. Image tooling — our keeper images are Docker images. Switching to
+   microVM image format requires a parallel build pipeline (rootfs
+   assembly, kernel pinning, init system selection).
+3. Scope explosion — microVM migration is multi-quarter. RFC-0097's
+   four-phase plan ships within one sprint cycle.
+
+Re-evaluate in two quarters once RFC-0097 reaches phase 2 (default
+`persistent`) and we have production data on per-keeper container FD
+and memory cost. If `docker exec`-heavy load reveals daemon FD or
+memory regressions we did not project, microVM is the next step —
+OpenHands is moving in this direction, and our motivation overlaps
+(host FD pressure, macOS Docker Desktop friction).
+
+### F. Replace Docker with OS-level sandbox (bubblewrap / seatbelt)
+
+Pattern adopted by Anthropic Claude Code (bubblewrap on Linux,
+seatbelt on macOS). Near-zero overhead, no container daemon, no
+spawn-rate variable at all.
+
+Rejected for the keeper use case because:
+
+1. Keeper sessions need persistent process state (long-lived shell,
+   environment, working directory). OS-level sandboxes are
+   per-process; a persistent shell would need a separate state layer.
+2. `cap-drop` / `pids-limit` / memory cgroup enforcement is uniform
+   across distributions with Docker; hand-assembled bubblewrap
+   profiles fragment per-host.
+3. Image-based reproducibility — Docker images can be pinned per
+   keeper version. OS-level sandbox has no equivalent (the keeper
+   runs against whatever is on the host).
+
+This is the opposite end of the design space from E (microVM).
+Anthropic optimized for startup cost on a per-command CLI shell;
+masc-mcp keepers are the opposite shape (long-lived, stateful), so
+the trade-off does not invert in our favor.
+
 ## Workaround rejection bar (self-check)
 
 - [x] Not telemetry-as-fix — removes the FD cost source
@@ -217,6 +265,17 @@ Same problem as C. Rejected — same reason.
 3. **macOS Docker Desktop FD accounting under exec-heavy load** — needs
    measurement during phase 1 to confirm host FD usage actually drops as
    projected.
+4. **macOS Docker Desktop license — commercial-use scope, not
+   production-only** — Docker Desktop requires a paid Pro/Team/Business
+   subscription for any commercial use inside organizations with >250
+   employees OR >$10M annual revenue (cited as motivation by OpenHands
+   proposal #13203). Scope is *commercial use*, not deployment tier, so
+   phase 1 (macOS developer machines) is also affected once the
+   organization crosses either threshold. Action: confirm subscription
+   status before phase 1 macOS rollout in such organizations; evaluate
+   Colima / Rancher Desktop / docker-cli + remote daemon as fallbacks
+   for both phases. Phase 2 default flip on macOS production hosts
+   remains a hard block until license or alternative is resolved.
 
 ## Evidence
 
@@ -232,3 +291,12 @@ Same problem as C. Rejected — same reason.
 - CLAUDE.md `<workaround_rejection_bar>` — symptom suppression vs. structural fix.
 - RFC-0042 — closed-sum-types as the prevention pattern for catch-all
   classifiers (this RFC is the analogous pattern for spawn-cost).
+- `~/me/knowledge/research/2026-05-17-agent-sandbox-deep-dive.md` —
+  external cross-check of five agent sandbox systems
+  (Claude Code, OpenHands, SWE-ReX, Devin, Docker Sandboxes) against
+  this RFC; source of the E (microVM) and F (bubblewrap/seatbelt)
+  alternatives analysis.
+- Anthropic Claude Code sandboxing — https://code.claude.com/docs/en/sandboxing
+  (basis for option F).
+- OpenHands microVM proposal — https://github.com/OpenHands/OpenHands/issues/13203
+  (basis for option E and Open question 4).

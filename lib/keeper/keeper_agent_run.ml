@@ -256,6 +256,25 @@ let run_turn
   in
   Eio_guard.protect ~finally:safe_emit_turn_end
   @@ fun () ->
+  (* RFC-0107 §3.3 Phase C.1 wiring — turn-scoped Eio.Switch.
+     Resources opened during a turn (HTTP connections, sandbox exec
+     handles, retry sub-tasks via [Keeper_turn_driver_try_provider])
+     that read [Eio_context.get_switch_opt ()] now attach to [turn_sw],
+     not the server root_sw. When this [Eio.Switch.run] closes (turn
+     end, success or cancellation), those resources are released —
+     bounding per-turn FD growth.
+
+     Server/dashboard fibers that read [get_switch_opt] from *outside*
+     this binding are unaffected (audit §10.2): they have no
+     [Eio.Fiber] binding for [sw_key], so [get_switch_opt] falls
+     through to the global atomic = server root_sw.
+
+     The [with_turn_switch] binding propagates with [Eio.Fiber.fork]
+     children, so cascade attempts and tool invocations spawned inside
+     the turn body all see [turn_sw] automatically. *)
+  Eio.Switch.run @@ fun turn_sw ->
+  Eio_context.with_turn_switch turn_sw
+  @@ fun () ->
   let cascade_name_string = Keeper_cascade_profile.runtime_name_to_string cascade_name in
   (* Steps 0–4: inference params, session dir, checkpoint, base prompt,
      working context, checkpoint hygiene — all in Keeper_run_context. *)

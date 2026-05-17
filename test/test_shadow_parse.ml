@@ -48,7 +48,14 @@ let test_cross_check_pairs_legacy_and_shadow () =
     Masc_mcp.Worker_dev_tools.cross_check_command ~legacy:legacy_ok "ls"
   in
   (match legacy with Ok () -> () | Error _ -> fail "legacy preserved");
-  check string "shadow=parsed_simple" "parsed_simple" shadow
+  (* cross_check_command now returns the typed [parse_outcome_kind];
+     "ls" parses cleanly so the kind is [Parsed_simple]. *)
+  match shadow with
+  | Masc_mcp.Gate_diff_types.Parsed_simple -> ()
+  | other ->
+    fail
+      ("expected Parsed_simple, got "
+       ^ Masc_mcp.Gate_diff_types.parse_outcome_kind_to_tag other)
 
 let () =
   run "shadow_parse" [

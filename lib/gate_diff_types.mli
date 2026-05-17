@@ -68,9 +68,37 @@ type legacy_verdict =
         (** The matching substring from
             [Eval_gate.destructive_patterns], NOT the description. *)
 
+(** Outcome of running the bash subset parser on a candidate command.
+    1:1 with [Masc_exec.Parsed.t] excluding the payload [Parsed _]
+    (the shadow gate only cares about the parse classification, not
+    the AST itself). Typed so that downstream histogram dispatch
+    is exhaustive — a new [Parsed.reason_too_complex] variant fails
+    to compile rather than silently landing in a catch-all bucket. *)
+type parse_outcome_kind =
+  | Parsed_simple
+  | Parse_error
+  | Parse_aborted of Masc_exec.Parsed.reason_aborted
+  | Too_complex of Masc_exec.Parsed.reason_too_complex
+
+val parse_outcome_kind_to_tag : parse_outcome_kind -> string
+(** Stable snake_case rendering. Matches the legacy
+    [shadow_parse_outcome] string surface byte-for-byte so log
+    aggregators / runbook greps continue to see the same tag set:
+    [Parsed_simple -> "parsed_simple"],
+    [Parse_error -> "parse_error"],
+    [Parse_aborted r -> "parse_aborted:<r>"],
+    [Too_complex r -> "too_complex:<r>"].
+    Pin the wording — operator alerts grep on these literals. *)
+
 type shadow_verdict =
-  | Shadow_allow of { parse_tag : string }
-  | Shadow_parse_unsupported of { parse_tag : string }
+  | Shadow_allow
+        (** Shadow parsed the command as a simple command (the only
+            parse outcome that yields an allow verdict at this layer).
+            Carries no payload — the [Parsed_simple] kind is implicit. *)
+  | Shadow_parse_unsupported of { kind : parse_outcome_kind }
+        (** Shadow could not parse the command. [kind] is one of
+            [Parse_error] / [Parse_aborted _] / [Too_complex _];
+            [Parsed_simple] is excluded by construction. *)
   | Shadow_deny_destructive of destructive_class * string
 
 (** {1 Gate diff} *)

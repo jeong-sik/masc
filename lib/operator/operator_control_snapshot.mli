@@ -212,7 +212,12 @@ val remote_client_type_of_context : 'a context -> string
 
 type snapshot_slot =
   | Cached of { value : Yojson.Safe.t; expires_at : float }
-  | Computing of { cond : Eio.Condition.t }
+  | Computing of
+      { cond : Eio.Condition.t
+      ; stale : Yojson.Safe.t option
+      ; started_at : float
+      ; stuck_warned : bool ref
+      }
 
 val _snapshot_mu : Eio.Mutex.t
 val _snapshot_table : (string, snapshot_slot) Hashtbl.t

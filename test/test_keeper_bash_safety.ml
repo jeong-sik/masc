@@ -362,6 +362,37 @@ let test_keeper_bash_raw_shape_fallback_is_quote_aware () =
   Alcotest.(check (option string)) "single-quoted substitution is data" None
     (block_tag {|echo '$(date) > out'|})
 
+let test_keeper_bash_blocks_repo_wide_scans () =
+  let block_tag = Keeper_exec_shell.For_testing.keeper_bash_shape_block_tag in
+  List.iter
+    (fun cmd ->
+      Alcotest.(check (option string))
+        ("repo-wide scan blocked: " ^ cmd)
+        (Some "repo_wide_scan")
+        (block_tag cmd))
+    [
+      {|grep -r "board_post" --include="*.ml" -l|};
+      {|find repos/ -type f -name "*.ml"|};
+      {|find . -type f -name "*.ml"|};
+      {|rg -l "keeper_board_post|board_post" repos/ --type ml|};
+      {|rg "board_post"|};
+      {|git log --all --oneline --grep board_post|};
+      {|bash -lc 'grep -ri "yojson" --include="*.ml" -l'|};
+    ];
+  List.iter
+    (fun cmd ->
+      Alcotest.(check (option string))
+        ("scoped scan allowed: " ^ cmd)
+        None
+        (block_tag cmd))
+    [
+      {|grep -r "board_post" lib|};
+      {|find lib -type f -name "*.ml"|};
+      {|rg -l "board_post" lib --type ml|};
+      {|rg --files lib|};
+      {|git log --oneline -20|};
+    ]
+
 let test_docker_blocks_nested_docker_command () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
@@ -1056,6 +1087,8 @@ let () =
         test_keeper_bash_shape_uses_shell_ir_for_quoted_literals;
       Alcotest.test_case "raw shape fallback is quote-aware" `Quick
         test_keeper_bash_raw_shape_fallback_is_quote_aware;
+      Alcotest.test_case "repo-wide scans blocked" `Quick
+        test_keeper_bash_blocks_repo_wide_scans;
       Alcotest.test_case "empty command blocked" `Quick test_empty_command;
       Alcotest.test_case "docker blocks nested docker command" `Quick
         test_docker_blocks_nested_docker_command;

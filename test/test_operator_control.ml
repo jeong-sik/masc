@@ -71,6 +71,10 @@ let () =
           Alcotest.test_case "snapshot waiters share inflight result" `Quick
             Test_operator_control_snapshot
             .test_snapshot_waiters_share_inflight_result;
+          Alcotest.test_case "snapshot waiters use stale inflight result"
+            `Quick
+            Test_operator_control_snapshot
+            .test_snapshot_waiter_returns_stale_inflight_result;
           (* orchestra room core shape removed (CP purge) *)
           Alcotest.test_case "digest room pending confirm attention" `Quick
             Test_operator_control_snapshot

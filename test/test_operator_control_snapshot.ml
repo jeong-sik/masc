@@ -1011,7 +1011,13 @@ let test_snapshot_waiters_share_inflight_result () =
       Eio.Mutex.use_rw ~protect:true Operator_control_snapshot._snapshot_mu
         (fun () ->
           Hashtbl.replace Operator_control_snapshot._snapshot_table cache_key
-            (Operator_control_snapshot.Computing { cond }));
+            (Operator_control_snapshot.Computing
+               {
+                 cond;
+                 stale = None;
+                 started_at = Time_compat.now ();
+                 stuck_warned = ref false;
+               }));
       let waiter_a, resolve_waiter_a = Eio.Promise.create () in
       let waiter_b, resolve_waiter_b = Eio.Promise.create () in
       Eio.Fiber.fork ~sw (fun () ->
@@ -1052,6 +1058,63 @@ let test_snapshot_waiters_share_inflight_result () =
             | _ -> false)
       in
       Alcotest.(check bool) "healthy inflight slot not evicted" true cached_retained)
+
+let test_snapshot_waiter_returns_stale_inflight_result () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "owner"));
+      ignore (Coord.join config ~agent_name:"owner" ~capabilities:[] ());
+      Operator_control.invalidate_snapshot_cache ();
+      let ctx = operator_ctx env sw config "owner" in
+      ignore (Operator_control.snapshot_json ctx);
+      let cache_key =
+        Eio.Mutex.use_rw ~protect:true Operator_control_snapshot._snapshot_mu
+          (fun () ->
+            match
+              Hashtbl.to_seq_keys Operator_control_snapshot._snapshot_table
+              |> List.of_seq
+            with
+            | key :: _ -> key
+            | [] -> Alcotest.fail "expected primed snapshot cache key")
+      in
+      let cond = Eio.Condition.create () in
+      let stale =
+        `Assoc
+          [
+            ("trace_id", `String "stale-trace");
+            ("status", `String "stale");
+          ]
+      in
+      Eio.Mutex.use_rw ~protect:true Operator_control_snapshot._snapshot_mu
+        (fun () ->
+          Hashtbl.replace Operator_control_snapshot._snapshot_table cache_key
+            (Operator_control_snapshot.Computing
+               {
+                 cond;
+                 stale = Some stale;
+                 started_at = Time_compat.now () -. 120.0;
+                 stuck_warned = ref false;
+               }));
+      let returned = Operator_control.snapshot_json ctx in
+      Alcotest.(check string) "waiter got stale trace" "stale-trace"
+        Yojson.Safe.Util.(returned |> member "trace_id" |> to_string);
+      let still_computing =
+        Eio.Mutex.use_rw ~protect:true Operator_control_snapshot._snapshot_mu
+          (fun () ->
+            match
+              Hashtbl.find_opt Operator_control_snapshot._snapshot_table cache_key
+            with
+            | Some (Operator_control_snapshot.Computing _) -> true
+            | _ -> false)
+      in
+      Alcotest.(check bool) "stale waiter does not replace owner" true
+        still_computing)
 
 (* test_orchestra_room_core_shape removed (CP purge: Command_plane_orchestra deleted) *)
 

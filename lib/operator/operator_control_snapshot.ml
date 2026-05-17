@@ -1398,7 +1398,12 @@ type snapshot_slot =
       { value : Yojson.Safe.t
       ; expires_at : float
       }
-  | Computing of { cond : Eio.Condition.t }
+  | Computing of
+      { cond : Eio.Condition.t
+      ; stale : Yojson.Safe.t option
+      ; started_at : float
+      ; stuck_warned : bool ref
+      }
 
 let _snapshot_table : (string, snapshot_slot) Hashtbl.t = Hashtbl.create 4
 let _snapshot_mu = Eio.Mutex.create ()
@@ -1445,10 +1450,11 @@ let _maybe_evict_snapshot () =
       (match !oldest_cached with
        | Some (key, _) -> Hashtbl.remove _snapshot_table key
        | None ->
-         (* Last resort: evict a Computing slot to enforce the cap *)
-         (match !any_key with
-          | Some key -> Hashtbl.remove _snapshot_table key
-          | None -> ())))
+         (* Never evict an in-flight compute to enforce the entry cap.  Under
+            64-keeper load, replacing a [Computing] slot starts duplicate
+            dashboard snapshots while the old one is still doing filesystem
+            work.  Temporary cache growth is cheaper than a compute stampede. *)
+         ignore !any_key)
 ;;
 
 let invalidate_snapshot_cache () =
@@ -1460,7 +1466,7 @@ let invalidate_snapshot_cache () =
           Hashtbl.fold
             (fun _key slot acc ->
                match slot with
-               | Computing { cond } -> cond :: acc
+               | Computing { cond; _ } -> cond :: acc
                | Cached _ -> acc)
             _snapshot_table
             []
@@ -1524,25 +1530,43 @@ let snapshot_json
           match Hashtbl.find_opt _snapshot_table cache_key with
           | Some (Cached { value; expires_at }) when Time_compat.now () < expires_at ->
             `Hit value
-          | Some (Computing { cond }) ->
-            if waited >= _max_wait_s
+          | Some (Computing { stale = Some value; _ }) -> `Hit value
+          | Some (Computing { started_at; stuck_warned; _ }) ->
+            if waited >= _max_wait_s && not !stuck_warned
             then (
-              (* Stuck compute — evict and take over *)
+              stuck_warned := true;
               Log.Dashboard.warn
-                "[snapshot_json] evicting stuck Computing slot for %s (%.1fs waited)"
+                "[snapshot_json] Computing slot still running for %s \
+                 (waited=%.1fs elapsed=%.1fs); keeping singleflight owner"
                 cache_key
-                waited;
-              Hashtbl.remove _snapshot_table cache_key;
-              Eio.Condition.broadcast cond;
-              let new_cond = Eio.Condition.create () in
-              _maybe_evict_snapshot ();
-              Hashtbl.replace _snapshot_table cache_key (Computing { cond = new_cond });
-              `Compute new_cond)
-            else `Wait
+                waited
+                (Time_compat.now () -. started_at));
+            `Wait
+          | Some (Cached { value; _ }) ->
+            let cond = Eio.Condition.create () in
+            _maybe_evict_snapshot ();
+            Hashtbl.replace
+              _snapshot_table
+              cache_key
+              (Computing
+                 { cond
+                 ; stale = Some value
+                 ; started_at = Time_compat.now ()
+                 ; stuck_warned = ref false
+                 });
+            `Compute cond
           | _ ->
             let cond = Eio.Condition.create () in
             _maybe_evict_snapshot ();
-            Hashtbl.replace _snapshot_table cache_key (Computing { cond });
+            Hashtbl.replace
+              _snapshot_table
+              cache_key
+              (Computing
+                 { cond
+                 ; stale = None
+                 ; started_at = Time_compat.now ()
+                 ; stuck_warned = ref false
+                 });
             `Compute cond)
       in
       match action with
@@ -1559,7 +1583,7 @@ let snapshot_json
            Eio.Mutex.use_rw ~protect:true _snapshot_mu (fun () ->
              (* Only write back if we still own the slot *)
              match Hashtbl.find_opt _snapshot_table cache_key with
-             | Some (Computing { cond = c }) when c == cond ->
+             | Some (Computing { cond = c; _ }) when c == cond ->
                _maybe_evict_snapshot ();
                Hashtbl.replace
                  _snapshot_table
@@ -1574,7 +1598,7 @@ let snapshot_json
            let bt = Printexc.get_raw_backtrace () in
            Eio.Mutex.use_rw ~protect:true _snapshot_mu (fun () ->
              match Hashtbl.find_opt _snapshot_table cache_key with
-             | Some (Computing { cond = c }) when c == cond ->
+             | Some (Computing { cond = c; _ }) when c == cond ->
                Hashtbl.remove _snapshot_table cache_key
              | Some (Cached _) -> ()
              | Some (Computing _) -> ()

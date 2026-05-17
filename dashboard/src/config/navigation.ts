@@ -22,6 +22,7 @@ type SurfaceSectionId =
   | 'goal-loop'
   | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + monitoring governance
   | 'doctor'         // Dedicated entry for /api/v1/dashboard/doctor (formerly buried inside Command → Operations → Inspector → "진단" sub-tab)
+  | 'transport-health' // Dedicated entry for /api/v1/dashboard/transport-health (was 5-hop buried inside Command → Operations → Inspector → "서버 설정" → ServerConfig → TransportHealthPanel)
   // command
   | 'operations'     // Phase 1+6: absorbs intervene + governance + inspector (Phase 7: connectors split out)
   // connectors (Phase 7: top-level surface — sidecar-driven channel bridges)
@@ -205,6 +206,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Doctor',
       description: 'Sidecar and config doctor diagnostics.',
       params: { section: 'doctor' },
+    },
+    {
+      id: 'transport-health',
+      label: 'Transport Health',
+      description: 'SSE/gRPC/WebSocket/WebRTC transport state.',
+      params: { section: 'transport-health' },
     },
     {
       id: 'journey',

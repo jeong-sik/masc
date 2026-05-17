@@ -18,9 +18,28 @@ let contains_substring haystack needle =
   in
   loop 0
 
+let repo_config_dir_from start_dir =
+  let rec loop dir =
+    let config_dir = Filename.concat dir "config" in
+    let cascade_toml = Filename.concat config_dir "cascade.toml" in
+    if Sys.file_exists cascade_toml
+    then Some config_dir
+    else (
+      let parent = Filename.dirname dir in
+      if String.equal parent dir then None else loop parent)
+  in
+  loop start_dir
+
+let worktree_config_dir () =
+  match repo_config_dir_from (Sys.getcwd ()) with
+  | Some config_dir -> config_dir
+  | None ->
+    failf
+      "unable to locate repo config/cascade.toml from cwd=%s"
+      (Sys.getcwd ())
+
 let with_worktree_config_root f =
-  let cwd = Sys.getcwd () in
-  let config_dir = Filename.concat cwd "config" in
+  let config_dir = worktree_config_dir () in
   let prev_config_dir = Sys.getenv_opt "MASC_CONFIG_DIR" in
   let prev_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
   Fun.protect
@@ -108,6 +127,18 @@ let test_meta_of_json_rejects_legacy_models () =
     check bool "legacy models rejected" true
       (contains_substring err "models")
 
+let test_worktree_config_dir_resolves_from_sandbox_subdir () =
+  let repo_config_dir = worktree_config_dir () in
+  let sandbox_like_dir =
+    Filename.concat
+      (Filename.concat (Filename.concat (Sys.getcwd ()) "_build") ".sandbox")
+      "keeper-llama-only/default/test"
+  in
+  check (option string)
+    "sandbox subdir still resolves repo config"
+    (Some repo_config_dir)
+    (repo_config_dir_from sandbox_like_dir)
+
 let () =
   run "keeper_llama_only"
     [
@@ -121,5 +152,7 @@ let () =
             test_legacy_explicit_models_do_not_override_cascade_resolution;
           test_case "rejects legacy models while parsing keeper meta" `Quick
             test_meta_of_json_rejects_legacy_models;
+          test_case "resolves config from sandbox cwd" `Quick
+            test_worktree_config_dir_resolves_from_sandbox_subdir;
         ] );
     ]

@@ -51,13 +51,24 @@ val is_terminal_unhealthy : Keeper_state_machine.phase -> bool
 
 (** {1 Cascade health scan} *)
 
+(** [max_failed_allowed_for_cascade ~total] returns the maximum number
+    of terminal-unhealthy keepers (Dead/Zombie/Crashed) a cascade of
+    size [total] can hold while still being treated as healthy.
+    Formula: [max 1 (total / 10)] — one keeper down is always allowed,
+    larger cascades scale at 10%.  Exposed so tests and other callers
+    can derive the same admission threshold without duplicating the
+    arithmetic. *)
+val max_failed_allowed_for_cascade : total:int -> int
+
 (** [check_cascade_health ~base_path] scans the registry and computes
-    the failure ratio for each active cascade.  Returns a list of
+    the health status of each active cascade.  Returns a list of
     (cascade_name, is_healthy) pairs.  A keeper is counted as failed
     only when its phase is Dead, Zombie, or Crashed — not based on
     restart_count, which is monotonic and would cause permanent
-    cascade pollution.  This function performs I/O and should be
-    called from the probe fiber, not the supervisor sweep. *)
+    cascade pollution.  Healthy iff
+    [failed <= max_failed_allowed_for_cascade ~total].  This function
+    performs I/O and should be called from the probe fiber, not the
+    supervisor sweep. *)
 val check_cascade_health : base_path:string -> (string * bool) list
 
 (** [get_cascade_status ~cascade_name] returns the cached cascade-level

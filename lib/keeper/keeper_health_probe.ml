@@ -106,9 +106,22 @@ let is_terminal_unhealthy (phase : Keeper_state_machine.phase) =
   | Offline | Running | Failing | Overflowed | Compacting
   | HandingOff | Draining | Paused | Stopped | Restarting -> false
 
-(** Compute failure ratio per cascade from registry entries.
-    Returns (cascade_name, is_healthy) where healthy means
-    failure_ratio < 0.10.
+(** Threshold semantics: a cascade is healthy iff [failed <= max_failed_allowed]
+    where [max_failed_allowed = max 1 (total / 10)]. The single-failure floor
+    keeps small cascades (N<10) from tripping on the first transient pause;
+    larger cascades retain the original 10% rule.
+
+    The previous formula [ratio < 0.10] meant any cascade with N<10 had a
+    de-facto zero tolerance (1/3 = 0.333 ≥ 0.10), so a single auto-paused
+    keeper in a 3-member cascade became a permanent admission block in
+    [keeper_supervisor.ml]'s auto-resume path. The floor restores the obvious
+    invariant ("one keeper down out of N is recoverable") at every N. *)
+let max_failed_allowed_for_cascade ~total =
+  max 1 (total / 10)
+;;
+
+(** Compute health per cascade from registry entries.
+    Returns (cascade_name, is_healthy).
 
     A keeper is counted as "failed" only when its phase is a terminal
     unhealthy state (Dead, Zombie, or Crashed).  Past restarts
@@ -135,10 +148,10 @@ let check_cascade_health ~base_path =
     entries;
   Hashtbl.fold
     (fun cascade (total, failed) acc ->
-       let ratio =
-         if total <= 0 then 0.0 else float_of_int failed /. float_of_int total
+       let healthy =
+         if total <= 0 then true
+         else failed <= max_failed_allowed_for_cascade ~total
        in
-       let healthy = ratio < 0.10 in
        (cascade, healthy) :: acc)
     by_cascade
     []

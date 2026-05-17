@@ -269,6 +269,357 @@ let test_turn_ready_byte_equal () =
   Alcotest.(check string) "turn_ready typed == baseline" baseline typed
 ;;
 
+(* === PR-4 byte-equal cases: handoff, context, content_replacement,
+   slot_scheduler === *)
+
+let baseline_handoff_requested ~from_agent ~to_agent ~reason =
+  let payload =
+    `Assoc
+      [ "from_agent", `String from_agent
+      ; "to_agent", `String to_agent
+      ; "reason", `String reason
+      ]
+  in
+  baseline_wrap_event
+    ~ts:common_ts
+    ~correlation_id:common_corr
+    ~run_id:common_run
+    ~event_type:"handoff_requested"
+    ~payload
+    ~agent_name:from_agent
+    ()
+;;
+
+let baseline_handoff_completed ~from_agent ~to_agent ~elapsed_s =
+  let payload =
+    `Assoc
+      [ "from_agent", `String from_agent
+      ; "to_agent", `String to_agent
+      ; "elapsed_s", `Float elapsed_s
+      ]
+  in
+  baseline_wrap_event
+    ~ts:common_ts
+    ~correlation_id:common_corr
+    ~run_id:common_run
+    ~event_type:"handoff_completed"
+    ~payload
+    ~agent_name:from_agent
+    ()
+;;
+
+let baseline_context_compacted
+      ~agent_name
+      ~before_tokens
+      ~after_tokens
+      ~phase
+  =
+  let payload =
+    `Assoc
+      [ "agent_name", `String agent_name
+      ; "before_tokens", `Int before_tokens
+      ; "after_tokens", `Int after_tokens
+      ; "phase", `String phase
+      ]
+  in
+  baseline_wrap_event
+    ~ts:common_ts
+    ~correlation_id:common_corr
+    ~run_id:common_run
+    ~event_type:"context_compacted"
+    ~payload
+    ~agent_name
+    ()
+;;
+
+let baseline_context_overflow_imminent
+      ~agent_name
+      ~estimated_tokens
+      ~limit_tokens
+      ~ratio
+  =
+  let payload =
+    `Assoc
+      [ "agent_name", `String agent_name
+      ; "estimated_tokens", `Int estimated_tokens
+      ; "limit_tokens", `Int limit_tokens
+      ; "ratio", `Float ratio
+      ]
+  in
+  baseline_wrap_event
+    ~ts:common_ts
+    ~correlation_id:common_corr
+    ~run_id:common_run
+    ~event_type:"context_overflow_imminent"
+    ~payload
+    ~agent_name
+    ()
+;;
+
+let baseline_context_compact_started ~agent_name ~trigger =
+  let payload =
+    `Assoc
+      [ "agent_name", `String agent_name; "trigger", `String trigger ]
+  in
+  baseline_wrap_event
+    ~ts:common_ts
+    ~correlation_id:common_corr
+    ~run_id:common_run
+    ~event_type:"context_compact_started"
+    ~payload
+    ~agent_name
+    ()
+;;
+
+let baseline_content_replacement_replaced
+      ~tool_use_id
+      ~preview
+      ~original_chars
+      ~seen_count_after
+  =
+  let payload =
+    `Assoc
+      [ "tool_use_id", `String tool_use_id
+      ; "preview", `String preview
+      ; "original_chars", `Int original_chars
+      ; "seen_count_after", `Int seen_count_after
+      ]
+  in
+  baseline_wrap_event
+    ~ts:common_ts
+    ~correlation_id:common_corr
+    ~run_id:common_run
+    ~event_type:"content_replacement_replaced"
+    ~payload
+    ()
+;;
+
+let baseline_content_replacement_kept ~tool_use_id ~seen_count_after =
+  let payload =
+    `Assoc
+      [ "tool_use_id", `String tool_use_id
+      ; "seen_count_after", `Int seen_count_after
+      ]
+  in
+  baseline_wrap_event
+    ~ts:common_ts
+    ~correlation_id:common_corr
+    ~run_id:common_run
+    ~event_type:"content_replacement_kept"
+    ~payload
+    ()
+;;
+
+let baseline_slot_scheduler_observed
+      ~max_slots
+      ~active
+      ~available
+      ~queue_length
+      ~state
+  =
+  let payload =
+    `Assoc
+      [ "max_slots", `Int max_slots
+      ; "active", `Int active
+      ; "available", `Int available
+      ; "queue_length", `Int queue_length
+      ; "state", `String state
+      ]
+  in
+  baseline_wrap_event
+    ~ts:common_ts
+    ~correlation_id:common_corr
+    ~run_id:common_run
+    ~event_type:"slot_scheduler_observed"
+    ~payload
+    ()
+;;
+
+let test_handoff_requested_byte_equal () =
+  let baseline =
+    Yojson.Safe.to_string
+      (baseline_handoff_requested
+         ~from_agent:"alpha"
+         ~to_agent:"beta"
+         ~reason:"low_progress")
+  in
+  let typed =
+    Yojson.Safe.to_string
+      (Sse_event.handoff_requested
+         ~ts_unix:common_ts
+         ~correlation_id:common_corr
+         ~run_id:common_run
+         ~from_agent:"alpha"
+         ~to_agent:"beta"
+         ~reason:"low_progress")
+  in
+  Alcotest.(check string) "handoff_requested typed == baseline" baseline typed
+;;
+
+let test_handoff_completed_byte_equal () =
+  let baseline =
+    Yojson.Safe.to_string
+      (baseline_handoff_completed
+         ~from_agent:"alpha"
+         ~to_agent:"beta"
+         ~elapsed_s:1.25)
+  in
+  let typed =
+    Yojson.Safe.to_string
+      (Sse_event.handoff_completed
+         ~ts_unix:common_ts
+         ~correlation_id:common_corr
+         ~run_id:common_run
+         ~from_agent:"alpha"
+         ~to_agent:"beta"
+         ~elapsed_s:1.25)
+  in
+  Alcotest.(check string) "handoff_completed typed == baseline" baseline typed
+;;
+
+let test_context_compacted_byte_equal () =
+  let baseline =
+    Yojson.Safe.to_string
+      (baseline_context_compacted
+         ~agent_name:"alpha"
+         ~before_tokens:120000
+         ~after_tokens:42000
+         ~phase:"post_compact")
+  in
+  let typed =
+    Yojson.Safe.to_string
+      (Sse_event.context_compacted
+         ~ts_unix:common_ts
+         ~correlation_id:common_corr
+         ~run_id:common_run
+         ~agent_name:"alpha"
+         ~before_tokens:120000
+         ~after_tokens:42000
+         ~phase:"post_compact")
+  in
+  Alcotest.(check string) "context_compacted typed == baseline" baseline typed
+;;
+
+let test_context_overflow_imminent_byte_equal () =
+  let baseline =
+    Yojson.Safe.to_string
+      (baseline_context_overflow_imminent
+         ~agent_name:"alpha"
+         ~estimated_tokens:180000
+         ~limit_tokens:200000
+         ~ratio:0.9)
+  in
+  let typed =
+    Yojson.Safe.to_string
+      (Sse_event.context_overflow_imminent
+         ~ts_unix:common_ts
+         ~correlation_id:common_corr
+         ~run_id:common_run
+         ~agent_name:"alpha"
+         ~estimated_tokens:180000
+         ~limit_tokens:200000
+         ~ratio:0.9)
+  in
+  Alcotest.(check string)
+    "context_overflow_imminent typed == baseline"
+    baseline
+    typed
+;;
+
+let test_context_compact_started_byte_equal () =
+  let baseline =
+    Yojson.Safe.to_string
+      (baseline_context_compact_started ~agent_name:"alpha" ~trigger:"manual")
+  in
+  let typed =
+    Yojson.Safe.to_string
+      (Sse_event.context_compact_started
+         ~ts_unix:common_ts
+         ~correlation_id:common_corr
+         ~run_id:common_run
+         ~agent_name:"alpha"
+         ~trigger:"manual")
+  in
+  Alcotest.(check string)
+    "context_compact_started typed == baseline"
+    baseline
+    typed
+;;
+
+let test_content_replacement_replaced_byte_equal () =
+  let baseline =
+    Yojson.Safe.to_string
+      (baseline_content_replacement_replaced
+         ~tool_use_id:"tu_1"
+         ~preview:"<truncated 1024 chars>"
+         ~original_chars:1024
+         ~seen_count_after:3)
+  in
+  let typed =
+    Yojson.Safe.to_string
+      (Sse_event.content_replacement_replaced
+         ~ts_unix:common_ts
+         ~correlation_id:common_corr
+         ~run_id:common_run
+         ~tool_use_id:"tu_1"
+         ~preview:"<truncated 1024 chars>"
+         ~original_chars:1024
+         ~seen_count_after:3)
+  in
+  Alcotest.(check string)
+    "content_replacement_replaced typed == baseline"
+    baseline
+    typed
+;;
+
+let test_content_replacement_kept_byte_equal () =
+  let baseline =
+    Yojson.Safe.to_string
+      (baseline_content_replacement_kept ~tool_use_id:"tu_1" ~seen_count_after:1)
+  in
+  let typed =
+    Yojson.Safe.to_string
+      (Sse_event.content_replacement_kept
+         ~ts_unix:common_ts
+         ~correlation_id:common_corr
+         ~run_id:common_run
+         ~tool_use_id:"tu_1"
+         ~seen_count_after:1)
+  in
+  Alcotest.(check string)
+    "content_replacement_kept typed == baseline"
+    baseline
+    typed
+;;
+
+let test_slot_scheduler_observed_byte_equal () =
+  let baseline =
+    Yojson.Safe.to_string
+      (baseline_slot_scheduler_observed
+         ~max_slots:8
+         ~active:5
+         ~available:3
+         ~queue_length:0
+         ~state:"idle")
+  in
+  let typed =
+    Yojson.Safe.to_string
+      (Sse_event.slot_scheduler_observed
+         ~ts_unix:common_ts
+         ~correlation_id:common_corr
+         ~run_id:common_run
+         ~max_slots:8
+         ~active:5
+         ~available:3
+         ~queue_length:0
+         ~state:"idle")
+  in
+  Alcotest.(check string)
+    "slot_scheduler_observed typed == baseline"
+    baseline
+    typed
+;;
+
 let test_json_string_opt_empty_to_null () =
   (* Regression guard for the empty-string-coerced-to-null semantics
      that atd's default nullable does NOT express. *)
@@ -303,6 +654,22 @@ let () =
         ; Alcotest.test_case "turn_completed" `Quick
             test_turn_completed_byte_equal
         ; Alcotest.test_case "turn_ready" `Quick test_turn_ready_byte_equal
+        ; Alcotest.test_case "handoff_requested" `Quick
+            test_handoff_requested_byte_equal
+        ; Alcotest.test_case "handoff_completed" `Quick
+            test_handoff_completed_byte_equal
+        ; Alcotest.test_case "context_compacted" `Quick
+            test_context_compacted_byte_equal
+        ; Alcotest.test_case "context_overflow_imminent" `Quick
+            test_context_overflow_imminent_byte_equal
+        ; Alcotest.test_case "context_compact_started" `Quick
+            test_context_compact_started_byte_equal
+        ; Alcotest.test_case "content_replacement_replaced" `Quick
+            test_content_replacement_replaced_byte_equal
+        ; Alcotest.test_case "content_replacement_kept" `Quick
+            test_content_replacement_kept_byte_equal
+        ; Alcotest.test_case "slot_scheduler_observed" `Quick
+            test_slot_scheduler_observed_byte_equal
         ] )
     ; ( "json_string_opt"
       , [ Alcotest.test_case "Some empty → null" `Quick

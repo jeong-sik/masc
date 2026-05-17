@@ -47,3 +47,62 @@ type turn_ready_payload = {
   names_hash: string;
   tool_names: string list;
 }
+
+(* PR-4 events: handoff_requested, handoff_completed, context_compacted,
+   context_overflow_imminent, context_compact_started,
+   content_replacement_replaced, content_replacement_kept,
+   slot_scheduler_observed.  All simple records.  Side effects in the
+   cascade arms (Context_overflow_action_tracker, Prometheus counters)
+   remain in cascade_event_bridge.ml -- typed constructors emit JSON
+   only. *)
+
+type handoff_requested_payload = {
+  from_agent: string;
+  to_agent: string;
+  reason: string;
+}
+
+type handoff_completed_payload = {
+  from_agent: string;
+  to_agent: string;
+  elapsed_s: float;
+}
+
+type context_compacted_payload = {
+  agent_name: string;
+  before_tokens: int;
+  after_tokens: int;
+  phase: string;
+}
+
+type context_overflow_imminent_payload = {
+  agent_name: string;
+  estimated_tokens: int;
+  limit_tokens: int;
+  ratio: float;
+}
+
+type context_compact_started_payload = {
+  agent_name: string;
+  trigger: string;
+}
+
+type content_replacement_replaced_payload = {
+  tool_use_id: string;
+  preview: string;
+  original_chars: int;
+  seen_count_after: int;
+}
+
+type content_replacement_kept_payload = {
+  tool_use_id: string;
+  seen_count_after: int;
+}
+
+type slot_scheduler_observed_payload = {
+  max_slots: int;
+  active: int;
+  available: int;
+  queue_length: int;
+  state: string;
+}

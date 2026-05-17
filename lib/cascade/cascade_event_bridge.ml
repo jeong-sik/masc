@@ -597,33 +597,47 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
     in
     Some (wrap ~event_type:"agent_failed" ~payload ~agent_name ~task_id ())
   | Agent_sdk.Event_bus.ToolCalled { agent_name; tool_name; _ } ->
-    let payload =
-      `Assoc [ "agent_name", `String agent_name; "tool_name", `String tool_name ]
-    in
-    Some (wrap ~event_type:"tool_called" ~payload ~agent_name ~tool_name ())
+    (* RFC-0004 Phase A0.1 PR-3 *)
+    Some
+      (Sse_event.tool_called
+         ~ts_unix:ts
+         ~correlation_id
+         ~run_id
+         ~agent_name
+         ~tool_name)
   | Agent_sdk.Event_bus.ToolCompleted { agent_name; tool_name; _ } ->
-    let payload =
-      `Assoc [ "agent_name", `String agent_name; "tool_name", `String tool_name ]
-    in
-    Some (wrap ~event_type:"tool_completed" ~payload ~agent_name ~tool_name ())
+    Some
+      (Sse_event.tool_completed
+         ~ts_unix:ts
+         ~correlation_id
+         ~run_id
+         ~agent_name
+         ~tool_name)
   | Agent_sdk.Event_bus.TurnStarted { agent_name; turn } ->
-    let payload = `Assoc [ "agent_name", `String agent_name; "turn", `Int turn ] in
-    Some (wrap ~event_type:"turn_started" ~payload ~agent_name ~turn ())
+    Some
+      (Sse_event.turn_started
+         ~ts_unix:ts
+         ~correlation_id
+         ~run_id
+         ~agent_name
+         ~turn)
   | Agent_sdk.Event_bus.TurnCompleted { agent_name; turn } ->
-    let payload = `Assoc [ "agent_name", `String agent_name; "turn", `Int turn ] in
-    Some (wrap ~event_type:"turn_completed" ~payload ~agent_name ~turn ())
+    Some
+      (Sse_event.turn_completed
+         ~ts_unix:ts
+         ~correlation_id
+         ~run_id
+         ~agent_name
+         ~turn)
   | Agent_sdk.Event_bus.TurnReady { agent_name; turn; tool_names } ->
-    let names_hash = Digest.to_hex (Digest.string (String.concat "\n" tool_names)) in
-    let payload =
-      `Assoc
-        [ "agent_name", `String agent_name
-        ; "turn", `Int turn
-        ; "count", `Int (List.length tool_names)
-        ; "names_hash", `String (String.sub names_hash 0 16)
-        ; "tool_names", `List (List.map (fun name -> `String name) tool_names)
-        ]
-    in
-    Some (wrap ~event_type:"turn_ready" ~payload ~agent_name ~turn ())
+    Some
+      (Sse_event.turn_ready
+         ~ts_unix:ts
+         ~correlation_id
+         ~run_id
+         ~agent_name
+         ~turn
+         ~tool_names)
   | Agent_sdk.Event_bus.HandoffRequested { from_agent; to_agent; reason } ->
     let payload =
       `Assoc

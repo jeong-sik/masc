@@ -90,6 +90,185 @@ let test_agent_started_byte_equal () =
   Alcotest.(check string) "agent_started typed == cascade baseline" baseline typed
 ;;
 
+(* === PR-3 byte-equal cases: tool_called, tool_completed, turn_started,
+   turn_completed, turn_ready === *)
+
+let common_ts = 1747460000.5
+let common_corr = "corr-001"
+let common_run = "run-001"
+
+let baseline_tool_called ~agent_name ~tool_name =
+  let payload =
+    `Assoc
+      [ "agent_name", `String agent_name; "tool_name", `String tool_name ]
+  in
+  baseline_wrap_event
+    ~ts:common_ts
+    ~correlation_id:common_corr
+    ~run_id:common_run
+    ~event_type:"tool_called"
+    ~payload
+    ~agent_name
+    ~tool_name
+    ()
+;;
+
+let baseline_tool_completed ~agent_name ~tool_name =
+  let payload =
+    `Assoc
+      [ "agent_name", `String agent_name; "tool_name", `String tool_name ]
+  in
+  baseline_wrap_event
+    ~ts:common_ts
+    ~correlation_id:common_corr
+    ~run_id:common_run
+    ~event_type:"tool_completed"
+    ~payload
+    ~agent_name
+    ~tool_name
+    ()
+;;
+
+let baseline_turn_started ~agent_name ~turn =
+  let payload =
+    `Assoc [ "agent_name", `String agent_name; "turn", `Int turn ]
+  in
+  baseline_wrap_event
+    ~ts:common_ts
+    ~correlation_id:common_corr
+    ~run_id:common_run
+    ~event_type:"turn_started"
+    ~payload
+    ~agent_name
+    ~turn
+    ()
+;;
+
+let baseline_turn_completed ~agent_name ~turn =
+  let payload =
+    `Assoc [ "agent_name", `String agent_name; "turn", `Int turn ]
+  in
+  baseline_wrap_event
+    ~ts:common_ts
+    ~correlation_id:common_corr
+    ~run_id:common_run
+    ~event_type:"turn_completed"
+    ~payload
+    ~agent_name
+    ~turn
+    ()
+;;
+
+let baseline_turn_ready ~agent_name ~turn ~tool_names =
+  let names_hash =
+    Digest.to_hex (Digest.string (String.concat "\n" tool_names))
+  in
+  let payload =
+    `Assoc
+      [ "agent_name", `String agent_name
+      ; "turn", `Int turn
+      ; "count", `Int (List.length tool_names)
+      ; "names_hash", `String (String.sub names_hash 0 16)
+      ; ( "tool_names"
+        , `List (List.map (fun name -> `String name) tool_names) )
+      ]
+  in
+  baseline_wrap_event
+    ~ts:common_ts
+    ~correlation_id:common_corr
+    ~run_id:common_run
+    ~event_type:"turn_ready"
+    ~payload
+    ~agent_name
+    ~turn
+    ()
+;;
+
+let test_tool_called_byte_equal () =
+  let baseline =
+    Yojson.Safe.to_string
+      (baseline_tool_called ~agent_name:"alpha" ~tool_name:"Read")
+  in
+  let typed =
+    Yojson.Safe.to_string
+      (Sse_event.tool_called
+         ~ts_unix:common_ts
+         ~correlation_id:common_corr
+         ~run_id:common_run
+         ~agent_name:"alpha"
+         ~tool_name:"Read")
+  in
+  Alcotest.(check string) "tool_called typed == baseline" baseline typed
+;;
+
+let test_tool_completed_byte_equal () =
+  let baseline =
+    Yojson.Safe.to_string
+      (baseline_tool_completed ~agent_name:"alpha" ~tool_name:"Read")
+  in
+  let typed =
+    Yojson.Safe.to_string
+      (Sse_event.tool_completed
+         ~ts_unix:common_ts
+         ~correlation_id:common_corr
+         ~run_id:common_run
+         ~agent_name:"alpha"
+         ~tool_name:"Read")
+  in
+  Alcotest.(check string) "tool_completed typed == baseline" baseline typed
+;;
+
+let test_turn_started_byte_equal () =
+  let baseline =
+    Yojson.Safe.to_string (baseline_turn_started ~agent_name:"alpha" ~turn:3)
+  in
+  let typed =
+    Yojson.Safe.to_string
+      (Sse_event.turn_started
+         ~ts_unix:common_ts
+         ~correlation_id:common_corr
+         ~run_id:common_run
+         ~agent_name:"alpha"
+         ~turn:3)
+  in
+  Alcotest.(check string) "turn_started typed == baseline" baseline typed
+;;
+
+let test_turn_completed_byte_equal () =
+  let baseline =
+    Yojson.Safe.to_string (baseline_turn_completed ~agent_name:"alpha" ~turn:3)
+  in
+  let typed =
+    Yojson.Safe.to_string
+      (Sse_event.turn_completed
+         ~ts_unix:common_ts
+         ~correlation_id:common_corr
+         ~run_id:common_run
+         ~agent_name:"alpha"
+         ~turn:3)
+  in
+  Alcotest.(check string) "turn_completed typed == baseline" baseline typed
+;;
+
+let test_turn_ready_byte_equal () =
+  let tool_names = [ "Read"; "Write"; "Bash"; "Edit" ] in
+  let baseline =
+    Yojson.Safe.to_string
+      (baseline_turn_ready ~agent_name:"alpha" ~turn:3 ~tool_names)
+  in
+  let typed =
+    Yojson.Safe.to_string
+      (Sse_event.turn_ready
+         ~ts_unix:common_ts
+         ~correlation_id:common_corr
+         ~run_id:common_run
+         ~agent_name:"alpha"
+         ~turn:3
+         ~tool_names)
+  in
+  Alcotest.(check string) "turn_ready typed == baseline" baseline typed
+;;
+
 let test_json_string_opt_empty_to_null () =
   (* Regression guard for the empty-string-coerced-to-null semantics
      that atd's default nullable does NOT express. *)
@@ -117,6 +296,13 @@ let () =
     [ ( "byte_equal"
       , [ Alcotest.test_case "agent_started full envelope" `Quick
             test_agent_started_byte_equal
+        ; Alcotest.test_case "tool_called" `Quick test_tool_called_byte_equal
+        ; Alcotest.test_case "tool_completed" `Quick
+            test_tool_completed_byte_equal
+        ; Alcotest.test_case "turn_started" `Quick test_turn_started_byte_equal
+        ; Alcotest.test_case "turn_completed" `Quick
+            test_turn_completed_byte_equal
+        ; Alcotest.test_case "turn_ready" `Quick test_turn_ready_byte_equal
         ] )
     ; ( "json_string_opt"
       , [ Alcotest.test_case "Some empty → null" `Quick

@@ -15,3 +15,35 @@ type agent_started_payload = {
   agent_name: string;
   task_id: string;
 }
+
+(* PR-3 events: tool_called, tool_completed, turn_started,
+   turn_completed, turn_ready.  All simple records -- byte-equal
+   guaranteed by atdgen -j -j-std, verified in test_sse_event.ml. *)
+
+type tool_called_payload = {
+  agent_name: string;
+  tool_name: string;
+}
+
+type tool_completed_payload = {
+  agent_name: string;
+  tool_name: string;
+}
+
+type turn_started_payload = {
+  agent_name: string;
+  turn: int;
+}
+
+type turn_completed_payload = {
+  agent_name: string;
+  turn: int;
+}
+
+type turn_ready_payload = {
+  agent_name: string;
+  turn: int;
+  count: int;
+  names_hash: string;
+  tool_names: string list;
+}

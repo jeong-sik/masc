@@ -21,3 +21,44 @@ val agent_started
   -> agent_name:string
   -> task_id:string
   -> Yojson.Safe.t
+
+val tool_called
+  :  ts_unix:float
+  -> correlation_id:string
+  -> run_id:string
+  -> agent_name:string
+  -> tool_name:string
+  -> Yojson.Safe.t
+
+val tool_completed
+  :  ts_unix:float
+  -> correlation_id:string
+  -> run_id:string
+  -> agent_name:string
+  -> tool_name:string
+  -> Yojson.Safe.t
+
+val turn_started
+  :  ts_unix:float
+  -> correlation_id:string
+  -> run_id:string
+  -> agent_name:string
+  -> turn:int
+  -> Yojson.Safe.t
+
+val turn_completed
+  :  ts_unix:float
+  -> correlation_id:string
+  -> run_id:string
+  -> agent_name:string
+  -> turn:int
+  -> Yojson.Safe.t
+
+val turn_ready
+  :  ts_unix:float
+  -> correlation_id:string
+  -> run_id:string
+  -> agent_name:string
+  -> turn:int
+  -> tool_names:string list
+  -> Yojson.Safe.t

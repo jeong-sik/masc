@@ -30,11 +30,12 @@ let run_git ~timeout_sec ~workdir args =
     let argv = [ "git"; "-C"; workdir; "--no-optional-locks" ] @ args in
     let raw_source = String.concat " " (List.map Filename.quote argv) in
     Some
-      (Masc_exec.Exec_gate.run_argv_with_status
-         ~actor:(Masc_exec.Agent_id.of_string "system/chronicle_ingest")
-         ~raw_source
-         ~summary:"chronicle git log ingestion"
-         ~timeout_sec argv)
+      (Fd_accountant.with_slot ~kind:Sandbox_exec (fun () ->
+         Masc_exec.Exec_gate.run_argv_with_status
+           ~actor:(Masc_exec.Agent_id.of_string "system/chronicle_ingest")
+           ~raw_source
+           ~summary:"chronicle git log ingestion"
+           ~timeout_sec argv))
 
 let run_git_output ~workdir args =
   match run_git ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Git_meta ()) ~workdir args with

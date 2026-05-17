@@ -218,9 +218,21 @@ let handle_keeper_task_tool
                 "action", `String action_hint ])
   | "keeper_task_force_release" ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
-    let reason = Safe_ops.json_string ~default:"" "reason" args in
+    let reason = Safe_ops.json_string ~default:"" "reason" args |> String.trim in
     if task_id = ""
     then error_json "task_id is required. Use the task_id from keeper_tasks_list or keeper_tasks_audit."
+    else if reason = ""
+    then
+      (* Schema (tool_shard_types.ml:1363) declares [reason] as a
+         required, minLength:1 field for audit-trail reasons: this is
+         an admin override of the normal release path and the operator
+         must record why. The previous implementation accepted an empty
+         reason and emitted "(reason: no reason given)" to the room,
+         which both contradicted the schema and left a silent audit
+         gap. Enforce the schema here. *)
+      error_json
+        "reason is required. Audit trail: record why this task is being \
+         force-released. Example: reason='assignee offline >10 min, no heartbeat'."
     else (
       let agent = keeper_agent_sender ~meta in
       let _ =
@@ -231,15 +243,27 @@ let handle_keeper_task_tool
             (Printf.sprintf
                "Force-releasing task %s (reason: %s)"
                task_id
-               (if reason = "" then "no reason given" else reason))
+               reason)
       in
       keeper_task_result_json
         (Coord.force_release_task_r config ~agent_name:agent ~task_id ()))
   | "keeper_task_force_done" ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
-    let notes = Safe_ops.json_string ~default:"" "notes" args in
+    let notes = Safe_ops.json_string ~default:"" "notes" args |> String.trim in
     if task_id = ""
     then error_json "task_id is required. Use the task_id from keeper_tasks_list or keeper_tasks_audit."
+    else if notes = ""
+    then
+      (* Schema (tool_shard_types.ml:1391) declares [notes] as a
+         required, minLength:1 field — this is an admin override of
+         the normal done path and the operator must record completion
+         evidence. The previous implementation accepted an empty
+         [notes] and silently passed it through to Coord, contradicting
+         the schema and leaving a silent audit gap. Enforce the
+         schema here. *)
+      error_json
+        "notes is required. Audit trail: record completion evidence. \
+         Example: notes='PR #12345 merged, all tests green'."
     else
       keeper_task_result_json
         (Coord.force_done_task_r

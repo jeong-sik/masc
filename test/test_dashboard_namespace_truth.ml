@@ -502,6 +502,64 @@ let test_namespace_truth_cached_snapshot_matches_http_projection_blocks () =
           [ "namespace"; "execution"; "meta_cognition"; "command"; "operator"; "focus" ];
       ))
 
+let test_dashboard_namespace_truth_warm_request_uses_stale_shell () =
+  let dir = test_dir () in
+  let original_last_good = Atomic.get Lib.Server_dashboard_http.last_good_shell in
+  let original_warmed = Atomic.get Lib.Server_dashboard_http.shell_warmed in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Lib.Server_dashboard_http.last_good_shell original_last_good;
+      Atomic.set Lib.Server_dashboard_http.shell_warmed original_warmed;
+      cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      let config = state.Lib.Mcp_server.room_config in
+      warm_execution_cache ();
+      let cached_shell =
+        `Assoc
+          [
+            ( "status",
+              `Assoc
+                [
+                  ("project", `String "ready");
+                  ("generated_at", `String "2026-05-18T00:00:00Z");
+                ] );
+            ( "counts",
+              `Assoc
+                [
+                  ("agents", `Int 7);
+                  ("tasks", `Int 0);
+                  ("keepers", `Int 2);
+                  ("total_runtimes", `Int 9);
+                ] );
+            ( "paths",
+              `Assoc [ ("effective_base_path", `String config.base_path) ] );
+            ("configured_keepers", `Int 2);
+            ("meta_cognition", `Null);
+          ]
+      in
+      Atomic.set Lib.Server_dashboard_http.last_good_shell cached_shell;
+      Atomic.set Lib.Server_dashboard_http.shell_warmed true;
+      Eio.Switch.run (fun sw ->
+        let json =
+          Lib.Server_dashboard_http.dashboard_namespace_truth_http_json
+            ~state ~sw ~clock:(Eio.Stdenv.clock env)
+            (request "/api/v1/dashboard/namespace-truth")
+        in
+        let open Yojson.Safe.Util in
+        check int "warm request uses cached shell counts"
+          7
+          (json |> member "root" |> member "counts" |> member "agents" |> to_int);
+        check string "warm request reports stale-while-revalidate"
+          "stale_while_revalidate"
+          (json |> member "projection_diagnostics" |> member "cache_mode" |> to_string);
+        check string "warm request shell source is last-good"
+          "last_good_shell"
+          (json |> member "projection_diagnostics" |> member "shell_source" |> to_string)
+      ))
+
 let test_dashboard_namespace_truth_cold_cache_falls_back_to_partial_truth () =
   let dir = test_dir () in
   Fun.protect
@@ -628,6 +686,8 @@ let () =
             test_dashboard_namespace_truth_does_not_auto_post_meta_digest;
           test_case "cached snapshot matches HTTP projection blocks" `Quick
             test_namespace_truth_cached_snapshot_matches_http_projection_blocks;
+          test_case "warm request uses stale shell while refreshing" `Quick
+            test_dashboard_namespace_truth_warm_request_uses_stale_shell;
           test_case "expired execution warmup falls back to partial truth" `Quick
             test_dashboard_namespace_truth_cold_cache_falls_back_to_partial_truth;
           test_case "last-good shell fallback preserves namespace counts" `Quick

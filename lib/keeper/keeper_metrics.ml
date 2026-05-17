@@ -682,6 +682,9 @@ let metric_keeper_thinking_persist_failures =
 ;;
 
 let metric_keeper_checkpoint_failures = "masc_keeper_checkpoint_failures_total"
+let metric_keeper_decision_audit_ring_overflows =
+  "masc_keeper_decision_audit_ring_overflows_total"
+;;
 
 let metric_keeper_memory_llm_summary_outcomes =
   "masc_keeper_memory_llm_summary_outcomes_total"

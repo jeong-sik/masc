@@ -209,6 +209,14 @@ type bash_shape_block =
 let string_contains_char s ch = String.exists (Char.equal ch) s
 let string_contains_substring s needle = String_util.contains_substring s needle
 
+let has_malformed_dev_null_redirect_token scan_text =
+  scan_text
+  |> String.split_on_char ' '
+  |> List.exists (fun token ->
+    match String.trim (String.lowercase_ascii token) with
+    | "0/dev/null" | "1/dev/null" | "2/dev/null" -> true
+    | _ -> false)
+
 let quote_aware_shape_scan_text cmd =
   let len = String.length cmd in
   let buf = Buffer.create len in
@@ -263,6 +271,8 @@ let raw_keeper_bash_shape_block cmd =
   let lower = String.lowercase_ascii scan_text in
   if string_contains_substring lower "gh pr checks"
   then Some Gh_pr_checks
+  else if has_malformed_dev_null_redirect_token scan_text
+  then Some Pipe_or_redirect
   else if
     string_contains_char scan_text '|'
     || string_contains_char scan_text '>'
@@ -302,6 +312,10 @@ let rec parsed_keeper_bash_shape_block = function
     else None
 
 let keeper_bash_shape_block cmd =
+  let scan_text = quote_aware_shape_scan_text cmd in
+  if has_malformed_dev_null_redirect_token scan_text
+  then Some Pipe_or_redirect
+  else
   match Masc_exec_bash_parser.Bash.parse_string cmd with
   | Masc_exec.Parsed.Parsed ir -> parsed_keeper_bash_shape_block ir
   | Masc_exec.Parsed.Parse_error _

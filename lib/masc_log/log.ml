@@ -789,6 +789,11 @@ module Transport = Make(struct let name = "Transport" end)
 module Gc = Make(struct let name = "GC" end)
 module Reputation = Make(struct let name = "Reputation" end)
 module Keeper = Make(struct let name = "Keeper" end)
+(* RFC-0058 Phase 8.1.5: dedicated cascade namespace so partial-catalog
+   warnings and other cascade-domain events route through a stable
+   channel that alerting/dashboard filters can target without false
+   positives from the Keeper namespace. *)
+module Cascade = Make(struct let name = "Cascade" end)
 module Memory = Make(struct let name = "Memory" end)
 module Mention = Make(struct let name = "Mention" end)
 module Misc = Make(struct let name = "Misc" end)

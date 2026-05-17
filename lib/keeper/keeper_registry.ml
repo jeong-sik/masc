@@ -506,16 +506,33 @@ let last_cascade_attempt ~base_path ~keeper_name =
     | _ -> None
 ;;
 
+(* Stale provenance threshold: cascade attempts older than this are not
+   attached to a fresh [fiber_unresolved] outcome (P1 review finding).
+   Long enough to span a normal keeper turn cascade chain; short enough
+   that a quiescent slot from a prior turn does not taint a new crash. *)
+let cascade_attempt_freshness_threshold_sec = 120.0
+
 let enrich_fiber_unresolved_outcome ~base_path ~keeper_name outcome =
-  let fiber_unresolved =
-    failure_reason_to_string Fiber_unresolved
-  in
+  let fiber_unresolved = failure_reason_to_string Fiber_unresolved in
   if not (String.equal outcome fiber_unresolved)
   then outcome
   else
     match last_cascade_attempt ~base_path ~keeper_name with
     | None -> outcome
-    | Some attempt -> outcome ^ cascade_attempt_suffix attempt
+    | Some attempt ->
+      (* P2 finding: only failure attempts explain a fiber_unresolved
+         outcome. A persisted success would otherwise inherit
+         [provider=... http=none] into a later failure label. *)
+      (match attempt.outcome with
+       | `Success -> outcome
+       | `Failure _ ->
+         (* P1 finding: gate enrichment on attempt freshness so a stale
+            slot from an earlier turn cannot taint a new crash. NDT-OK:
+            wall-clock comparison against persisted attempt timestamp. *)
+         let age = Unix.gettimeofday () -. attempt.timestamp in
+         if age > cascade_attempt_freshness_threshold_sec
+         then outcome
+         else outcome ^ cascade_attempt_suffix attempt)
 ;;
 
 let sync_meta_if_registered ~base_path name meta =

@@ -1,13 +1,12 @@
-(** Keeper_tool_resolution — unified resolution behind the 15-fold OR membership check.
+(** Keeper_tool_resolution — unified policy tool-name resolution.
 
-    RFC-0080 Phase 2 shim. Wraps the existing sources behind a single [resolve]
-    function that returns a typed [resolution]. Every call site that previously
-    used [is_known_policy_tool_name] now goes through [resolve].
+    RFC-0080 Phase 2. Wraps the existing policy admission sources behind a
+    single [resolve] function that returns a typed [resolution].
 
-    Behaviour: identical short-circuit order as the original 15-fold OR in
-    [Keeper_tool_policy_config.is_known_policy_tool_name]. The first source
-    that admits the name determines the [tried_source] tag. If none admit,
-    all tried sources are collected in [Unknown.tried].
+    Behaviour: preserve the short-circuit order of the original policy
+    admission chain. The first source that admits the name determines the
+    [tried_source] tag. If none admit, all tried sources are collected in
+    [Unknown.tried].
 
     @since 2.219.0 — RFC-0080 *)
 
@@ -118,13 +117,6 @@ let resolve name =
         check_surfaces surfaces_to_check
       end
   end
-
-(* ── Legacy adapter ───────────────────────────────────────────────── *)
-
-let is_known_policy_tool_name name =
-  match resolve name with
-  | Resolved _ | Alias_to _ -> true
-  | Unknown _ -> false
 
 (* ── Phase 5: full-probe (no short-circuit) ────────────────────────── *)
 

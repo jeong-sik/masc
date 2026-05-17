@@ -29,10 +29,6 @@ type resolution =
     Short-circuits on first hit, same order as the original 15-fold OR. *)
 val resolve : string -> resolution
 
-(** Legacy adapter: [true] if resolved or aliased, [false] if unknown.
-    Drop-in replacement for [Keeper_tool_policy_config.is_known_policy_tool_name]. *)
-val is_known_policy_tool_name : string -> bool
-
 (** Human-readable label for a single source. *)
 val string_of_tried_source : tried_source -> string
 

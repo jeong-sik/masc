@@ -226,8 +226,6 @@ let unresolved_tool_message ~label ~name =
       Some (Printf.sprintf "%s: tool '%s' unresolved: tried [%s]"
               label name (Keeper_tool_resolution.string_of_tried tried))
 
-let is_known_policy_tool_name = Keeper_tool_resolution.is_known_policy_tool_name
-
 (* Shortcut: if the caller's [base_path] already points at a project root
    that has [base_path/config/tool_policy.toml], prefer that directly.
    This is the common case when callers pass the result of

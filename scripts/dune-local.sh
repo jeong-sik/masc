@@ -22,6 +22,7 @@ Set MASC_DUNE_THROTTLE=0 to bypass the local lock.
 Set MASC_OPAM_LOCK=0 or MASC_SKIP_OPAM_LOCK=1 to bypass the shared opam switch lock.
 Set MASC_OPAM_LOCK_PATH=/path/to/lock to override the shared opam lock path.
 Set MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT=seconds to bound opam-lock wait after the Dune lock (0 = wait forever).
+Set MASC_DUNE_LOCK_DIAG=0 to suppress best-effort lock holder diagnostics.
 Set MASC_DUNE_DRY_RUN=1 to print the command without running it.
 Set MASC_SKIP_PIN_CHECK=1 to skip the agent_sdk pin guard.
 Set MASC_SKIP_DEPS_CHECK=1 to skip the core-deps installed guard.
@@ -124,12 +125,37 @@ _needs_dune_lock() {
   return 0
 }
 
+_print_lock_holders() {
+  local lock_file="$1"
+  local label="$2"
+  [[ "${MASC_DUNE_LOCK_DIAG:-1}" != "0" ]] || return 0
+  command -v lsof >/dev/null 2>&1 || return 0
+  command -v ps >/dev/null 2>&1 || return 0
+
+  local pids
+  pids="$(lsof -t "$lock_file" 2>/dev/null | sort -u || true)"
+  [[ -n "$pids" ]] || return 0
+
+  printf '[dune-local] %s lock holder(s):\n' "$label" >&2
+  local pid row
+  while IFS= read -r pid; do
+    [[ "$pid" =~ ^[0-9]+$ ]] || continue
+    row="$(ps -p "$pid" -o pid=,ppid=,stat=,etime=,command= 2>/dev/null || true)"
+    if [[ -n "$row" ]]; then
+      printf '[dune-local]   %s\n' "$row" >&2
+    else
+      printf '[dune-local]   pid=%s (process exited before ps snapshot)\n' "$pid" >&2
+    fi
+  done <<< "$pids"
+}
+
 # Acquire the build throttle before the opam-switch lock.  The opam lock is
 # intentionally held while the active build uses the shared switch, but queued
 # builds must not hold it while waiting for the Dune throttle; otherwise stale
 # worktrees can block pin repair before they are actually compiling.
 if _needs_dune_lock; then
   printf '[dune-local] waiting for lock %s\n' "$lock_path" >&2
+  _print_lock_holders "$lock_path" "Dune"
   if command -v lockf >/dev/null 2>&1; then
     exec lockf -k "$lock_path" env MASC_DUNE_LOCK_HELD=1 "$script_path" "$@"
   elif command -v flock >/dev/null 2>&1; then
@@ -153,6 +179,7 @@ _needs_opam_lock() {
 
 if _needs_opam_lock; then
   printf '[dune-local] waiting for opam switch lock %s\n' "$opam_lock_path" >&2
+  _print_lock_holders "$opam_lock_path" "opam switch"
   # Apply the bounded-wait deadlock guard whenever this invocation is
   # already holding the Dune lock AND the operator opted in by setting
   # MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT=<positive integer>. Default is

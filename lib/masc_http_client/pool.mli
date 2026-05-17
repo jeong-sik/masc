@@ -1,0 +1,130 @@
+(** RFC-0107 Phase D Connection Pool — interface skeleton.
+
+    Phase D.2a delivers the interface only; implementations raise
+    [Failure "Pool.<fn>: not implemented (Phase D.2b)"] until the piaf
+    binding lands in D.2b.
+
+    Design rationale lives in [docs/rfc/RFC-0107-phase-d-pool-design.md].
+    Critical findings absorbed from Phase B Prior Art research
+    ([knowledge/research/2026-05-17-piaf-ocsigen-eio-fd-prior-art.md]):
+
+    - piaf's [Client.t] is per-endpoint, not multi-host. We build the
+      [Host_key -> piaf Client.t queue] layer ourselves on top.
+    - cohttp upstream patch is not viable (issue #85 closed 2014, eio
+      not covered). piaf is the only rational transport choice.
+    - Eio #244 "exactly-one-owner" principle motivates the no-double-
+      release invariant enforced by the [request] / [with_connection]
+      callback API (no naked acquire / release exposed). *)
+
+(** Opaque per-process connection pool. Attaches to a long-lived
+    [Eio.Switch] (typically server root_sw via [Eio_context]). The pool
+    survives turn boundaries; per-host connection state evicts on
+    [idle_ttl]. *)
+type t
+
+(** Pool tuning parameters. Conservative defaults derived from
+    RFC-0101 §2 nofile cap (10240).
+
+    [max_idle_per_host]: bound on idle (reusable) connections kept per
+    {scheme, host, port} tuple after a request completes.
+
+    [max_total_idle]: bound on idle connections across all hosts. When
+    exceeded, the LRU host's oldest idle connection is evicted before
+    a new one is parked.
+
+    [idle_ttl_seconds]: idle connection's max age before eviction. A
+    pool fiber walks idle queues periodically; expired entries are
+    closed and dropped.
+
+    [connect_timeout_seconds]: max wait when establishing a fresh
+    connection. Surfaces as [Error "connect timeout ..."] to the
+    caller. *)
+type config = {
+  max_idle_per_host : int;
+  max_total_idle    : int;
+  idle_ttl_seconds  : float;
+  connect_timeout_seconds : float;
+}
+
+val default_config : config
+(** [{ max_idle_per_host = 8; max_total_idle = 256;
+       idle_ttl_seconds = 60.0; connect_timeout_seconds = 5.0 }]. *)
+
+val create :
+  sw:Eio.Switch.t ->
+  net:[> `Generic ] Eio.Net.ty Eio.Resource.t ->
+  ?https:
+    (Uri.t ->
+     [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t ->
+     [ `Close | `Flow | `R | `Shutdown | `Tls | `W ] Eio.Resource.t) ->
+  ?config:config ->
+  unit ->
+  t
+(** Initialize the pool on a long-lived switch (server root_sw). Idle
+    connections close when [sw] closes; in-flight requests outlive
+    pool cleanup via per-call sub-switches. *)
+
+(* ── Request API ───────────────────────────────────────────────── *)
+
+(** Typed HTTP response. Mirrors [Masc_http_client] response shape so
+    the migration shim is a one-line wrap. *)
+type response = {
+  status : int;
+  headers : (string * string) list;
+  body : string;
+}
+
+type http_method = [ `GET | `POST | `PUT | `DELETE | `HEAD | `PATCH ]
+
+val request :
+  t ->
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  ?timeout_seconds:float ->
+  method_:http_method ->
+  url:string ->
+  ?headers:(string * string) list ->
+  ?body:string ->
+  unit ->
+  (response, string) result
+(** Scoped one-shot request. Acquires a connection from the per-host
+    pool (or creates one if the pool is empty / under
+    [max_idle_per_host]), issues the request, releases the connection
+    back to the pool for keep-alive reuse, and returns the typed
+    response.
+
+    Failure modes (all return [Error]):
+    - DNS / TCP / TLS failure during connect
+    - HTTP read error during reuse (pool drops the bad connection)
+    - timeout when [clock] and [timeout_seconds] are both provided
+
+    Notably absent: silent retry. If a reused connection fails, the
+    caller sees [Error] with the underlying reason. Caller decides
+    whether to retry — N-of-M silent retry is an
+    RFC-0107 §"Workaround Rejection Bar" anti-pattern. *)
+
+val with_connection :
+  t ->
+  url:string ->
+  (unit -> 'a) -> 'a
+(** Scoped low-level handle for streaming bodies (voice_bridge). The
+    callback runs with a connection borrowed from the pool; on return
+    (success or exception) the connection is released back to the
+    pool. Most callers should use [request] instead.
+
+    Phase D.2b will refine the callback signature to expose the
+    transport handle (piaf [Client.t] or equivalent). *)
+
+(* ── Telemetry ─────────────────────────────────────────────────── *)
+
+(** Non-mutating pool snapshot for Prometheus / dashboard. Phase D.4
+    wires this to the metrics layer. *)
+type stats = {
+  idle_per_host : (string * int) list;
+  total_idle : int;
+  total_inflight : int;
+  reuse_count_total : int;
+  evict_count_total : int;
+  create_count_total : int;
+}
+
+val stats : t -> stats

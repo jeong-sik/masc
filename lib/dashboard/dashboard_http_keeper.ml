@@ -168,6 +168,7 @@ let compute_outcomes_rollup
       ("cdal_gate", cdal_bucket Cdal_verdict_gate.strict_gate_label);
       ("cdal_gate_advisory",
         cdal_bucket Cdal_verdict_gate.advisory_gate_label);
+      ("cdal_runtime", Cdal_runtime_health.snapshot_json ~recent_limit:50 ());
       ("last_verdict_at", last_verdict_at);
     ]);
   ]

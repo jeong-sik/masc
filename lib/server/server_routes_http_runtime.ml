@@ -386,6 +386,7 @@ let make_health_json ?(listener = "http/1.1") request =
        so an operator can correlate with the cause encoded in their
        last_blocker_class. *)
     (key_paused_keepers, paused_keepers_json);
+    ("cdal", Cdal_runtime_health.snapshot_json ());
     ("keeper_config_parse_error_count",
      `Int keeper_config_parse_error_count);
     ( "keeper_config_parse_errors",

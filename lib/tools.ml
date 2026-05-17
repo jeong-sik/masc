@@ -6,9 +6,21 @@
 
 open Masc_domain
 
+module StringSet = Set.Make (String)
+
 let retired_front_door_schema_names =
   [
   ]
+
+let dedupe_schemas_by_name (schemas : tool_schema list) =
+  let unique, _ =
+    List.fold_left
+      (fun (acc, seen) (schema : tool_schema) ->
+        if StringSet.mem schema.name seen then (acc, seen)
+        else (schema :: acc, StringSet.add schema.name seen))
+      ([], StringSet.empty) schemas
+  in
+  List.rev unique
 
 let filter_retired_front_door_schemas (schemas : tool_schema list) =
   List.filter
@@ -43,6 +55,7 @@ let all_schemas_extended =
     @ Keeper_types.schemas
     @ Tool_local_runtime.schemas @ Tool_shard.schemas
     @ Tool_autoresearch.schemas)
+  |> dedupe_schemas_by_name
 
 (** Get tool by name *)
 let find_tool name =

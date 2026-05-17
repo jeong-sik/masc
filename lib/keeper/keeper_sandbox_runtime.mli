@@ -159,11 +159,11 @@ val docker_config_mount_args
   -> string list
 
 (** Docker [-v ...] specs for the read-only room-state subset that keeper
-    task worktrees may read through their [.masc] link. This intentionally
-    excludes auth, credentials, locks, logs, metrics, and keeper private
-    state. Existing paths are mounted both under [<container_root>/.masc]
-    and at the original absolute [.masc] path so host-created worktree
-    symlinks remain readable inside Docker. *)
+    task worktrees may read through their container-side [.masc]
+    projection. This intentionally excludes auth, credentials, locks,
+    logs, metrics, and keeper private state. Existing paths are mounted
+    only under [<container_root>/.masc]; host-absolute [.masc] targets
+    must never be used as Docker mount destinations. *)
 val docker_room_state_mount_specs
   :  base_path:string
   -> container_root:string

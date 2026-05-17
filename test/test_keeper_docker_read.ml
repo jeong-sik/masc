@@ -613,11 +613,19 @@ let test_docker_room_state_mount_args_expose_safe_subset () =
     (List.mem
        (tasks_host ^ ":" ^ container_root ^ "/.masc/tasks:ro")
        specs);
-  Alcotest.(check bool) "mounts tasks at absolute symlink target" true
+  Alcotest.(check bool) "does not mount tasks at host absolute target" false
     (List.mem (tasks_host ^ ":" ^ tasks_host ^ ":ro") specs);
   Alcotest.(check bool) "mounts board posts" true
     (List.mem
        (board_host ^ ":" ^ container_root ^ "/.masc/board_posts.jsonl:ro")
+       specs);
+  Alcotest.(check bool) "all targets stay under container .masc" true
+    (List.for_all
+       (fun spec ->
+         match String.split_on_char ':' spec with
+         | [ _source; target; "ro" ] ->
+           String.starts_with ~prefix:(container_root ^ "/.masc/") target
+         | _ -> false)
        specs);
   Alcotest.(check bool) "does not mount auth" false
     (List.exists (fun spec -> contains_substring spec "/auth/") specs)

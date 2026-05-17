@@ -90,6 +90,84 @@ let safe_is_directory path =
   | Sys_error _ -> false
 ;;
 
+let strip_trailing_slashes path =
+  let rec loop i =
+    if i > 0 && path.[i - 1] = '/' then loop (i - 1) else i
+  in
+  let len = loop (String.length path) in
+  if len = String.length path then path else String.sub path 0 len
+;;
+
+let suffix_under ~prefix path =
+  let prefix = strip_trailing_slashes prefix in
+  let path = strip_trailing_slashes path in
+  if String.equal path prefix
+  then Some ""
+  else (
+    let prefix_with_sep = prefix ^ "/" in
+    if String.starts_with ~prefix:prefix_with_sep path
+    then
+      Some
+        (String.sub
+           path
+           (String.length prefix_with_sep)
+           (String.length path - String.length prefix_with_sep))
+    else None)
+;;
+
+let path_segments path =
+  path
+  |> String.split_on_char '/'
+  |> List.filter (fun segment -> String.trim segment <> "")
+;;
+
+let relative_masc_projection_target ~docker_host_root ~worktree_path =
+  match suffix_under ~prefix:docker_host_root worktree_path with
+  | None -> None
+  | Some "" -> Some Common.masc_dirname
+  | Some suffix ->
+    let ups = suffix |> path_segments |> List.map (fun _ -> "..") in
+    Some (String.concat "/" (ups @ [ Common.masc_dirname ]))
+;;
+
+let docker_masc_projection_dir ~config ~agent_name =
+  let repos_dir =
+    Coord_worktree.repos_dir_of_keeper config agent_name |> strip_trailing_slashes
+  in
+  Filename.concat (Filename.dirname repos_dir) Common.masc_dirname
+;;
+
+let ensure_dir_result path =
+  try
+    Fs_compat.mkdir_p path;
+    Ok ()
+  with
+  | Sys_error msg ->
+    Error (Printf.sprintf "mkdir failed: path=%s error=%s" path msg)
+  | Unix.Unix_error (e, _, _) ->
+    Error
+      (Printf.sprintf
+         "mkdir failed: path=%s error=%s"
+         path
+         (Unix.error_message e))
+;;
+
+let docker_masc_symlink_source ~config ~agent_name ~worktree_path =
+  let projection_dir = docker_masc_projection_dir ~config ~agent_name in
+  match ensure_dir_result projection_dir with
+  | Error _ as err -> err
+  | Ok () ->
+    let docker_host_root = Filename.dirname projection_dir in
+    (match relative_masc_projection_target ~docker_host_root ~worktree_path with
+     | Some target -> Ok target
+     | None ->
+       Error
+         (Printf.sprintf
+            "docker .masc projection failed: worktree=%s is outside host_root=%s"
+            worktree_path
+            docker_host_root))
+;;
+
 let host_worktree_path ~config ~agent_name ~task_id ~repo_name =
   let repo_root =
     Filename.concat (Coord_worktree.repos_dir_of_keeper config agent_name) repo_name
@@ -119,9 +197,10 @@ let resolve_created_worktree_path ~config ~agent_name ~task_id ~response_path ~r
          (Option.value host_candidate ~default:"<missing>"))
 ;;
 
-(** Symlink [.masc/] from the active runtime base into the worktree for read-only
-    access to room state. Idempotent: does nothing if link already exists. *)
-let symlink_masc ~base_path ~worktree_path =
+(** Symlink [.masc/] into the worktree for read-only room state access.
+    Docker keepers use a playground-local projection so the symlink remains
+    valid inside the container without host-absolute bind targets. *)
+let symlink_masc ~config ~base_path ~agent_name ~worktree_path =
   let masc_source = Common.masc_dir_from_base_path ~base_path in
   let masc_target = Common.masc_dir_from_base_path ~base_path:worktree_path in
   if not (safe_is_directory masc_source)
@@ -129,17 +208,25 @@ let symlink_masc ~base_path ~worktree_path =
   else if safe_file_exists masc_target
   then Ok ()
   else
-    try
-      Unix.symlink masc_source masc_target;
-      Ok ()
-    with
-    | Unix.Unix_error (e, _, _) ->
-      Error
-        (Printf.sprintf
-           "symlink .masc failed: source=%s target=%s error=%s"
-           masc_source
-           masc_target
-           (Unix.error_message e))
+    let source =
+      if Coord_worktree.keeper_uses_docker_sandbox ~config ~agent_name
+      then docker_masc_symlink_source ~config ~agent_name ~worktree_path
+      else Ok masc_source
+    in
+    match source with
+    | Error _ as err -> err
+    | Ok source ->
+      try
+        Unix.symlink source masc_target;
+        Ok ()
+      with
+      | Unix.Unix_error (e, _, _) ->
+        Error
+          (Printf.sprintf
+             "symlink .masc failed: source=%s target=%s error=%s"
+             source
+             masc_target
+             (Unix.error_message e))
 ;;
 
 let create ~config ~task_id ?(base_branch = "main") ?repo_name ~agent_name () =
@@ -174,7 +261,7 @@ let create ~config ~task_id ?(base_branch = "main") ?repo_name ~agent_name () =
               ~default:(Playground_paths.worktree_branch_name agent_name task_id)
        in
        (* Symlink .masc/ into the worktree *)
-       (match symlink_masc ~base_path ~worktree_path with
+       (match symlink_masc ~config ~base_path ~agent_name ~worktree_path with
         | Error e -> Error e
         | Ok () ->
           Ok { task_id; worktree_path; branch_name; created_at = Time_compat.now () }))

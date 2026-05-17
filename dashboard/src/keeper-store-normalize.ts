@@ -14,6 +14,7 @@ import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp 
 import { isOfflineStatus } from './lib/status-utils'
 import { keeperDisplayStatus } from './lib/keeper-runtime-display'
 import { asKeeperRuntimeBlockerClass } from './lib/runtime-blocker-class'
+import { normalizeStopCause } from './lib/stop-cause'
 import { contextThresholds } from './config/context-thresholds'
 import { normalizeKeeperDiagnostic } from './keeper-state'
 import type { CascadeRef } from './types'
@@ -507,6 +508,22 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
           : undefined
 
       const providerHealth: ProviderHealth | null = null
+      const runtimeBlockerClass = asKeeperRuntimeBlockerClass(row.runtime_blocker_class)
+      const runtimeBlockerSummary = asString(row.runtime_blocker_summary) ?? null
+      const trust = normalizeKeeperTrust(row.runtime_trust ?? row.trust)
+      const terminalReason = trust?.latest_terminal_reason ?? null
+      const nextHumanAction = asString(row.next_human_action) ?? null
+      const stopCause = normalizeStopCause({
+        stop_cause: row.stop_cause,
+        runtime_blocker_class: runtimeBlockerClass,
+        runtime_blocker_summary: runtimeBlockerSummary,
+        terminal_reason_code: terminalReason?.code ?? null,
+        terminal_reason_summary: terminalReason?.summary ?? null,
+        terminal_reason_severity: terminalReason?.severity ?? null,
+        terminal_reason_next_action: terminalReason?.next_action ?? null,
+        attention_reason: asString(row.attention_reason) ?? trust?.attention_reason ?? null,
+        next_action: nextHumanAction ?? trust?.next_human_action ?? trust?.latest_next_action ?? null,
+      })
 
       return {
         name,
@@ -543,17 +560,18 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
           typeof row.proactive_enabled === 'boolean' ? row.proactive_enabled : undefined,
         proactive_idle_sec: asNumber(row.proactive_idle_sec),
         proactive_cooldown_sec: asNumber(row.proactive_cooldown_sec),
-        runtime_blocker_class: asKeeperRuntimeBlockerClass(row.runtime_blocker_class),
-        runtime_blocker_summary: asString(row.runtime_blocker_summary) ?? null,
+        runtime_blocker_class: runtimeBlockerClass,
+        runtime_blocker_summary: runtimeBlockerSummary,
         runtime_blocker_continue_gate:
           typeof row.runtime_blocker_continue_gate === 'boolean'
             ? row.runtime_blocker_continue_gate
             : null,
+        stop_cause: stopCause,
         needs_attention:
           typeof row.needs_attention === 'boolean' ? row.needs_attention : null,
         attention_reason: asString(row.attention_reason) ?? null,
-        next_human_action: asString(row.next_human_action) ?? null,
-        trust: normalizeKeeperTrust(row.runtime_trust ?? row.trust),
+        next_human_action: nextHumanAction,
+        trust,
         active_goal_ids: asStringArray(row.active_goal_ids) ?? [],
         goal: asString(row.goal) ?? null,
         short_goal: asString(row.short_goal) ?? null,

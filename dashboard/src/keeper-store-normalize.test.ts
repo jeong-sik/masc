@@ -413,6 +413,37 @@ describe('normalizeKeepers lifecycle metrics', () => {
       },
       latest_next_action: 'inspect_timeout_budget',
     })
+    expect(keeper?.stop_cause).toMatchObject({
+      code: 'timeout_budget_exhausted',
+      source: 'terminal_reason_code',
+      summary: 'Turn budget exhausted after 15 turns',
+      next_action: 'inspect_timeout_budget',
+    })
+  })
+
+  it('prefers runtime blocker as the normalized stop cause for keeper detail', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'blocked-keeper',
+        status: 'active',
+        runtime_blocker_class: 'turn_timeout',
+        runtime_blocker_summary: 'turn has not made progress',
+        trust: {
+          latest_terminal_reason: {
+            code: 'api_error_timeout',
+            source: 'execution_receipt',
+            severity: 'bad',
+            summary: 'provider timed out',
+          },
+        },
+      },
+    ])
+
+    expect(keeper?.stop_cause).toMatchObject({
+      code: 'turn_timeout',
+      source: 'runtime_blocker_class',
+      summary: 'turn has not made progress',
+    })
   })
 
   it('returns null latest_terminal_reason when code is missing', () => {

@@ -1,4 +1,4 @@
-import type { Agent, BoardPost } from './core'
+import type { Agent, BoardPost, StopCause } from './core'
 import type { OperatorAttentionItem, OperatorRecommendedAction } from './dashboard-mission'
 import type { BoardMonitoring, GovernanceMonitoring, GovernanceDecisionItem, GovernanceTimelineEvent, GovernanceJudgeSummary, GovernanceJudgment, KeeperApprovalQueueItem, KeeperApprovalRule, PendingConfirmation, PendingConfirmSummary } from './governance'
 
@@ -328,6 +328,7 @@ export interface DashboardExecutionQueueItem {
   attention_reason?: string | null
   next_human_action?: string | null
   terminal_reason_code?: string | null
+  stop_cause?: StopCause | null
   runtime_trust?: GoalKeeperTrustSummary | null
   top_handoff?: DashboardExecutionHandoff | null
   intervene_handoff?: DashboardExecutionHandoff | null

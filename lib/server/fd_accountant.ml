@@ -87,6 +87,14 @@ let with_slot ~kind f =
     else
       run ()
 
+let acquire_lifetime_slot ~kind () =
+  let { sem ; _ } = state_of kind in
+  Eio.Semaphore.acquire sem;
+  let released = Atomic.make false in
+  fun () ->
+    if Atomic.compare_and_set released false true then
+      Eio.Semaphore.release sem
+
 let configured_concurrency ~kind = (state_of kind).cap
 
 let effective_concurrency ~kind =
@@ -130,11 +138,22 @@ let install_autonomy_exec_sandbox_exec_guard () =
             f ())
     }
 
+let install_bg_task_sandbox_exec_guard () =
+  Bg_task.set_lifetime_guard
+    { Bg_task.acquire =
+        (fun () ->
+          if Eio_guard.is_ready () then
+            acquire_lifetime_slot ~kind:Sandbox_exec ()
+          else
+            fun () -> ())
+    }
+
 let () =
   install_dated_jsonl_log_writer_guard ();
   install_process_eio_sandbox_exec_guard ();
   install_with_process_sandbox_exec_guard ();
-  install_autonomy_exec_sandbox_exec_guard ()
+  install_autonomy_exec_sandbox_exec_guard ();
+  install_bg_task_sandbox_exec_guard ()
 
 (* In-flight count = configured cap minus current semaphore credits.
    Eio.Semaphore exposes [get_value] which returns the available credit

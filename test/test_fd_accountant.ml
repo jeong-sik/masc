@@ -260,6 +260,36 @@ let test_autonomy_exec_run_uses_sandbox_slot () =
       check int "Autonomy_exec sandbox slot released" 0
         (kind_in_flight FA.Sandbox_exec))
 
+let test_bg_task_uses_sandbox_lifetime_slot () =
+  Eio_main.run @@ fun env ->
+  Eio_guard.enable () ;
+  Fun.protect
+    ~finally:(fun () ->
+      Bg_task.reset_lifetime_guard_for_testing () ;
+      Eio_guard.disable ())
+    (fun () ->
+      Bg_task.reset_lifetime_guard_for_testing () ;
+      FA.install_bg_task_sandbox_exec_guard () ;
+      let tid =
+        match
+          Bg_task.spawn ~keeper:"fd-accountant-bg-task"
+            ~argv:[ "/bin/sleep"; "0.05" ]
+            ~cwd:"" ~envp:(Unix.environment ()) ~timeout_sec:0.0 ()
+        with
+        | Ok tid -> tid
+        | Error _ -> Alcotest.fail "Bg_task spawn failed"
+      in
+      check int "Bg_task holds sandbox slot after spawn" 1
+        (kind_in_flight FA.Sandbox_exec) ;
+      let clock = Eio.Stdenv.clock env in
+      check bool "Bg_task eventually closes" true
+        (wait_until ~clock ~attempts:200 (fun () ->
+             match Bg_task.read tid ~since_stdout:0 ~since_stderr:0 with
+             | Ok snapshot -> snapshot.closed
+             | Error _ -> false)) ;
+      check int "Bg_task sandbox slot released on close" 0
+        (kind_in_flight FA.Sandbox_exec))
+
 let () =
   Alcotest.run "Fd_accountant"
     [
@@ -302,5 +332,7 @@ let () =
             test_with_process_uses_sandbox_slot ;
           test_case "Autonomy_exec run uses sandbox slot" `Quick
             test_autonomy_exec_run_uses_sandbox_slot ;
+          test_case "Bg_task uses sandbox lifetime slot" `Quick
+            test_bg_task_uses_sandbox_lifetime_slot ;
         ] ) ;
     ]

@@ -274,6 +274,24 @@ let test_timeout_enforced () =
   in
   check bool "closed via timeout" true closed
 
+let test_lifetime_guard_released_on_close () =
+  let acquired = ref 0 in
+  let released = ref 0 in
+  Bg_task.set_lifetime_guard
+    { Bg_task.acquire =
+        (fun () ->
+          incr acquired;
+          fun () -> incr released)
+    };
+  Fun.protect ~finally:Bg_task.reset_lifetime_guard_for_testing (fun () ->
+      let tid =
+        sp ~keeper:"kp-lifetime-guard" [ "/bin/echo"; "guarded" ]
+      in
+      check int "guard acquired at spawn" 1 !acquired;
+      check int "guard not released before close" 0 !released;
+      check bool "task closed" true (poll_for_closed tid);
+      check int "guard released on close" 1 !released)
+
 let test_global_capacity_blocks_detached_stampede () =
   with_bg_task_limits ~global:"1" ~per_keeper:"4" (fun () ->
       let first = sp ~keeper:"kp-cap-a" [ "/bin/sleep"; "30" ] in
@@ -518,6 +536,8 @@ let () =
             test_list_tracks_keeper;
           test_case "timeout enforcement fires tree_kill" `Quick
             test_timeout_enforced;
+          test_case "lifetime guard releases on task close" `Quick
+            test_lifetime_guard_released_on_close;
           test_case "global capacity blocks detached stampede" `Quick
             test_global_capacity_blocks_detached_stampede;
         ] );

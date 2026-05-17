@@ -110,9 +110,8 @@ let task_scope_json ?base_dir ?(recent_limit = Env_config_runtime.Cdal.verdict_l
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
-    `Assoc
-      [ "status", `String "error"
-      ; "recent_limit", `Int recent_limit
+    Tool_args.error_assoc
+      [ "recent_limit", `Int recent_limit
       ; "recent_rows", `Int 0
       ; "task_id_rows", `Int 0
       ; "missing_task_scope", `Bool false

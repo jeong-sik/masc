@@ -157,53 +157,87 @@ let pass_result = function
   | _ -> "pass"
 ;;
 
+let validation_schema_of_json ~name json_schema : Agent_sdk.Types.tool_schema =
+  { name; description = ""; parameters = Tool_bridge.params_of_json_schema json_schema }
+;;
+
+let validation_exception_action ~name exn =
+  let error_text = Printexc.to_string exn in
+  let message =
+    Printf.sprintf
+      "Tool '%s' parameter validation failed before dispatch: %s"
+      name
+      error_text
+  in
+  emit_validation_telemetry ~tool:name ~result:"fail" ~reason:"validation_exception";
+  Log.error "%s" message;
+  Reject
+    { Tool_result.success = false
+    ; data =
+        `Assoc
+          [ "error", `String message
+          ; "validation", `String "oas_tool_middleware"
+          ; "exception", `String error_text
+          ]
+    ; legacy_message = message
+    ; tool_name = name
+    ; duration_ms = 0.0
+    ; failure_class = Some Tool_result.Runtime_failure
+    }
+;;
+
 let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
-  let lookup name =
+  try
+    let lookup name =
+      let schema =
+        match schema with
+        | Some schema -> Some schema
+        | None -> Tool_dispatch.lookup_schema name
+      in
+      Option.map (validation_schema_of_json ~name) schema
+    in
+    let hook = Agent_sdk.Tool_middleware.make_validation_hook ~lookup in
     let schema =
       match schema with
-      | Some schema -> Some schema
+      | Some _ as schema -> schema
       | None -> Tool_dispatch.lookup_schema name
     in
-    Option.map (Agent_sdk.Tool_middleware.tool_schema_of_json ~name) schema
-  in
-  let hook = Agent_sdk.Tool_middleware.make_validation_hook ~lookup in
-  let schema =
-    match schema with
-    | Some _ as schema -> schema
-    | None -> Tool_dispatch.lookup_schema name
-  in
-  let prepared_args = prepare_args ?schema ~name args in
-  match hook ~name ~args:prepared_args with
-  | Agent_sdk.Tool_middleware.Pass when not (Yojson.Safe.equal prepared_args args) ->
-    let reason = pass_reason ~schema ~args ~prepared_args in
-    let result = pass_result reason in
-    emit_validation_telemetry ~tool:name ~result ~reason;
-    Log.debug "tool_input_validation normalized args for %s" name;
-    Proceed prepared_args
-  | Agent_sdk.Tool_middleware.Pass ->
-    let reason = pass_reason ~schema ~args ~prepared_args in
-    let result = pass_result reason in
-    emit_validation_telemetry ~tool:name ~result ~reason;
-    Pass
-  | Agent_sdk.Tool_middleware.Proceed coerced ->
-    emit_validation_telemetry ~tool:name ~result:"pass" ~reason:"coerced";
-    Log.debug "tool_input_validation coerced args for %s" name;
-    Proceed coerced
-  | Agent_sdk.Tool_middleware.Reject { message; _ } ->
-    emit_validation_telemetry ~tool:name ~result:"fail" ~reason:"invalid_args";
-    Log.info "tool_input_validation rejected %s: %s" name message;
-    Reject
-      { Tool_result.success = false
-      ; data =
-          `Assoc [ "error", `String message; "validation", `String "oas_tool_middleware" ]
-      ; legacy_message = message
-      ; tool_name = name
-      ; duration_ms = 0.0
-      ; (* Input-schema / policy rejection — classify so the
-         dispatch-level metric label (failure_class) reflects the
-         actual category instead of bucketing as "unclassified". *)
-        failure_class = Some Tool_result.Policy_rejection
-      }
+    let prepared_args = prepare_args ?schema ~name args in
+    match hook ~name ~args:prepared_args with
+    | Agent_sdk.Tool_middleware.Pass when not (Yojson.Safe.equal prepared_args args) ->
+      let reason = pass_reason ~schema ~args ~prepared_args in
+      let result = pass_result reason in
+      emit_validation_telemetry ~tool:name ~result ~reason;
+      Log.debug "tool_input_validation normalized args for %s" name;
+      Proceed prepared_args
+    | Agent_sdk.Tool_middleware.Pass ->
+      let reason = pass_reason ~schema ~args ~prepared_args in
+      let result = pass_result reason in
+      emit_validation_telemetry ~tool:name ~result ~reason;
+      Pass
+    | Agent_sdk.Tool_middleware.Proceed coerced ->
+      emit_validation_telemetry ~tool:name ~result:"pass" ~reason:"coerced";
+      Log.debug "tool_input_validation coerced args for %s" name;
+      Proceed coerced
+    | Agent_sdk.Tool_middleware.Reject { message; _ } ->
+      emit_validation_telemetry ~tool:name ~result:"fail" ~reason:"invalid_args";
+      Log.info "tool_input_validation rejected %s: %s" name message;
+      Reject
+        { Tool_result.success = false
+        ; data =
+            `Assoc
+              [ "error", `String message; "validation", `String "oas_tool_middleware" ]
+        ; legacy_message = message
+        ; tool_name = name
+        ; duration_ms = 0.0
+        ; (* Input-schema / policy rejection — classify so the
+             dispatch-level metric label (failure_class) reflects the
+             actual category instead of bucketing as "unclassified". *)
+          failure_class = Some Tool_result.Policy_rejection
+        }
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn -> validation_exception_action ~name exn
 ;;
 
 let validate_args ?schema ~name ~args () =

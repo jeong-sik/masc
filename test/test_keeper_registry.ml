@@ -151,7 +151,7 @@ let test_fd_pressure_probe_unknown_admission () =
       ~starting_keepers:1
       ()
   in
-  check_block_kind "system fd probe unknown" "system_fd_probe_unknown" system_unknown;
+  check bool "system fd probe unknown stays advisory" true (FD.admitted system_unknown);
   let runtime =
     FD.runtime_state_json
       ~soft_limit:(Some 245_760)
@@ -162,9 +162,9 @@ let test_fd_pressure_probe_unknown_admission () =
       ~requested_keepers:24
       ()
   in
-  check string "runtime exposes probe-unknown reason" "system_fd_probe_unknown"
-    (Json.member "reason" runtime |> Json.to_string);
-  check bool "runtime marks admission blocked" true
+  check bool "runtime exposes system probe unsupported" false
+    (Json.member "system_fd_probe_supported" runtime |> Json.to_bool);
+  check bool "runtime does not block on system probe unknown" false
     (Json.member "admission_blocked" runtime |> Json.to_bool)
 
 let test_fd_pressure_system_admission () =

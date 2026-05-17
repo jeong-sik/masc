@@ -87,6 +87,53 @@ let test_running_is_healthy () =
     (H.is_terminal_unhealthy KSM.Running)
 ;;
 
+(* ------------------------------------------------------------------ *)
+(* Size-aware admission threshold                                     *)
+(* ------------------------------------------------------------------ *)
+
+let check_max_failed name ~total ~expected =
+  Alcotest.(check int)
+    (Printf.sprintf "max_failed_allowed N=%d %s" total name)
+    expected
+    (H.max_failed_allowed_for_cascade ~total)
+;;
+
+let test_max_failed_small_cascade_floor () =
+  (* N<10: floor of 1 — small cascades must tolerate at least 1 down.
+     Regression: the prior ratio<0.10 rule meant N=3 had zero tolerance
+     and a single auto-paused keeper became a permanent admission
+     block in keeper_supervisor.ml. *)
+  check_max_failed "N=0 floors to 1" ~total:0 ~expected:1;
+  check_max_failed "N=1 floors to 1" ~total:1 ~expected:1;
+  check_max_failed "N=3 floors to 1 (was 0 under ratio<0.10)" ~total:3 ~expected:1;
+  check_max_failed "N=9 floors to 1" ~total:9 ~expected:1
+;;
+
+let test_max_failed_scales_at_ten_percent () =
+  (* N>=10: original 10% scaling preserved. *)
+  check_max_failed "N=10 = 1" ~total:10 ~expected:1;
+  check_max_failed "N=19 = 1" ~total:19 ~expected:1;
+  check_max_failed "N=20 = 2" ~total:20 ~expected:2;
+  check_max_failed "N=100 = 10" ~total:100 ~expected:10
+;;
+
+let test_max_failed_monotone_nondecreasing () =
+  (* As N grows, the allowed-failed count must never shrink.
+     Guards against future floor changes that would silently tighten
+     admission for some N. *)
+  let rec loop prev n =
+    if n > 50 then ()
+    else
+      let cur = H.max_failed_allowed_for_cascade ~total:n in
+      Alcotest.(check bool)
+        (Printf.sprintf "max_failed N=%d >= N=%d" n (n - 1))
+        true
+        (cur >= prev);
+      loop cur (n + 1)
+  in
+  loop 0 0
+;;
+
 let () =
   Alcotest.run
     "keeper_health_probe"
@@ -116,6 +163,20 @@ let () =
             "running_is_healthy"
             `Quick
             test_running_is_healthy
+        ] )
+    ; ( "admission_threshold"
+      , [ Alcotest.test_case
+            "small_cascade_floor_of_one"
+            `Quick
+            test_max_failed_small_cascade_floor
+        ; Alcotest.test_case
+            "scales_at_ten_percent"
+            `Quick
+            test_max_failed_scales_at_ten_percent
+        ; Alcotest.test_case
+            "monotone_nondecreasing"
+            `Quick
+            test_max_failed_monotone_nondecreasing
         ] )
     ]
 ;;

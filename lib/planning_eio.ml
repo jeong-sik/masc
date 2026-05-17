@@ -306,25 +306,93 @@ let set_deliverable (config : Coord.config) ~task_id ~content : (planning_contex
 let current_task_file (config : Coord.config) =
   Filename.concat (Coord_utils.masc_dir config) "current_task"
 
+(* Issue #16010: the planning [current_task] file has been observed as a
+   directory at runtime, after which every keeper claim path fails with
+   [Sys_error "Is a directory"]. Whatever process originally produced the
+   directory shape, this module owns the helper API and must remain
+   resilient: a single corrupt path on disk cannot wedge the entire
+   keeper fleet's claim/set/clear path.
+
+   The recovery contract here is small and local:
+   - reads return [None] (i.e. "no current task") and warn — never raise;
+   - writes quarantine the offending directory to [.masc/_trash/] with an
+     ISO-millisecond suffix so an operator can forensically inspect it,
+     then proceed to write the fresh file;
+   - clears prefer [Sys.rmdir] when the path is an empty directory and
+     fall back to logging a warn for non-empty corruption (the writer
+     path will quarantine it on the next [set_current_task]).
+*)
+
+let is_directory_path path =
+  try Sys.is_directory path with Sys_error _ -> false
+
+let quarantine_dir_under_trash (config : Coord.config) ~path ~op =
+  let trash_dir = Filename.concat (Coord_utils.masc_dir config) "_trash" in
+  ensure_dir trash_dir;
+  let stamp =
+    let t = Time_compat.now () in
+    let ms = int_of_float (t *. 1000.) mod 1000 in
+    let tm = Unix.gmtime t in
+    Printf.sprintf "%04d%02d%02dT%02d%02d%02dZ-%03d"
+      (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+      tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec ms
+  in
+  let dest =
+    Filename.concat trash_dir
+      (Printf.sprintf "current_task.%s" stamp)
+  in
+  try
+    Sys.rename path dest;
+    Log.Keeper.warn
+      "planning_eio.%s: current_task path was a directory; quarantined to %s"
+      op dest;
+    Ok dest
+  with
+  | Sys_error msg ->
+    Log.Keeper.warn
+      "planning_eio.%s: failed to quarantine directory at %s: %s"
+      op path msg;
+    Error msg
+
 (** Get current task_id for session *)
 let get_current_task (config : Coord.config) : string option =
   let path = current_task_file config in
-  if Sys.file_exists path then
-    Some (String.trim (read_file_content path))
-  else
+  if not (Sys.file_exists path) then None
+  else if is_directory_path path then begin
+    Log.Keeper.warn
+      "planning_eio.get_current_task: %s is a directory; treating as cleared"
+      path;
     None
+  end
+  else Some (String.trim (read_file_content path))
 
 (** Set current task_id for session *)
 let set_current_task (config : Coord.config) ~task_id : unit =
   let path = current_task_file config in
   ensure_dir (Filename.dirname path);
+  if is_directory_path path then
+    ignore (quarantine_dir_under_trash config ~path ~op:"set_current_task" : (string, string) result);
   write_file_content path task_id
 
 (** Clear current task *)
 let clear_current_task (config : Coord.config) : unit =
   let path = current_task_file config in
-  if Sys.file_exists path then
-    Sys.remove path
+  if not (Sys.file_exists path) then ()
+  else if is_directory_path path then begin
+    match Sys.readdir path with
+    | [||] ->
+      (try Unix.rmdir path with
+       | Unix.Unix_error _ as e ->
+         Log.Keeper.warn
+           "planning_eio.clear_current_task: rmdir %s failed: %s"
+           path (Printexc.to_string e))
+    | _ ->
+      Log.Keeper.warn
+        "planning_eio.clear_current_task: %s is a non-empty directory; \
+         leaving for set_current_task to quarantine"
+        path
+  end
+  else Sys.remove path
 
 (** Resolve task_id - use provided or fall back to current *)
 let resolve_task_id (config : Coord.config) ~task_id : (string, string) result =

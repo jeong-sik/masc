@@ -1,0 +1,15 @@
+(include_subdirs no)
+
+(library
+ (name sse_event_poc)
+ (libraries yojson atdgen-runtime))
+
+(rule
+ (targets sse_event_t.ml sse_event_t.mli)
+ (deps sse_event.atd)
+ (action (run atdgen -t %{deps})))
+
+(rule
+ (targets sse_event_j.ml sse_event_j.mli)
+ (deps sse_event.atd)
+ (action (run atdgen -j -j-std %{deps})))

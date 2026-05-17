@@ -490,3 +490,11 @@ let register_discovered ~base_path =
   | registered ->
       let* () = save_all ~base_path (existing @ registered) in
       Ok registered
+
+module Lookup = Repo_store_lookup.Make (struct
+  let load_all = load_all
+  let local_path = local_path
+end)
+
+let find_url_by_id = Lookup.find_url_by_id
+let find_repo_by_path_prefix = Lookup.find_repo_by_path_prefix

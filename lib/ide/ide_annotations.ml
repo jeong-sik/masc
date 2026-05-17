@@ -1,4 +1,5 @@
-(** IDE annotation storage — CRUD backed by [.masc-ide/annotations.jsonl].
+(** IDE annotation storage — CRUD backed by [annotations.jsonl] in the
+    selected {!Ide_paths.partition} directory.
 
     In-memory compaction rewrites the store when tombstones exceed
     [COMPACT_THRESHOLD]. *)
@@ -7,13 +8,32 @@ open Ide_annotation_types
 
 let store_path ~base_dir = Ide_paths.store_path ~base_dir
 
-let annotations_file ~base_dir =
-  Filename.concat (store_path ~base_dir) "annotations.jsonl"
+let partition_dir ~base_dir partition =
+  Ide_paths.partition_store_dir ~base_dir partition
 ;;
 
-let ensure_store ~base_dir =
-  let path = store_path ~base_dir in
-  if not (Sys.file_exists path && Sys.is_directory path) then Unix.mkdir path 0o755
+let annotations_file_for ~base_dir partition =
+  Filename.concat (partition_dir ~base_dir partition) "annotations.jsonl"
+;;
+
+let annotations_file ~base_dir =
+  annotations_file_for ~base_dir Ide_paths.Legacy
+;;
+
+(* RFC-0128 §4.2: [_orphan/] and [by-url/<slug>/] live one or two
+   levels deeper than the legacy flat store. Recursive mkdir avoids
+   ENOENT when the parent chain has never been created. *)
+let rec ensure_dir path =
+  if path = "" || path = "/" || (Sys.file_exists path && Sys.is_directory path)
+  then ()
+  else (
+    ensure_dir (Filename.dirname path);
+    try Unix.mkdir path 0o755 with
+    | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+;;
+
+let ensure_store ~base_dir ?(partition = Ide_paths.Legacy) () =
+  ensure_dir (partition_dir ~base_dir partition)
 ;;
 
 let compact_threshold = 0.2
@@ -52,13 +72,11 @@ let annotation_id json =
   | _ -> None
 ;;
 
-let load_all ~base_dir =
-  let path = annotations_file ~base_dir in
+let load_all_partition ~base_dir partition =
+  let path = annotations_file_for ~base_dir partition in
   if not (Sys.file_exists path)
   then []
   else
-    (* Streaming filter + decode — tombstone rejection happens during the
-       fold so the full JSONL list never lands in memory at once. *)
     Fs_compat.fold_jsonl_lines
       ~init:[]
       ~f:(fun acc ~line_no:_ j ->
@@ -72,8 +90,8 @@ let load_all ~base_dir =
     |> List.rev
 ;;
 
-let write_all ~base_dir annotations =
-  let path = annotations_file ~base_dir in
+let write_all_partition ~base_dir partition annotations =
+  let path = annotations_file_for ~base_dir partition in
   let jsons = List.map annotation_to_json annotations in
   let lines = List.map Yojson.Safe.to_string jsons in
   let tmp_path = path ^ ".tmp" in
@@ -89,6 +107,7 @@ let write_all ~base_dir annotations =
 
 let create
       ~base_dir
+      ?(partition = Ide_paths.Legacy)
       ~keeper_id
       ~file_path
       ~line_start
@@ -107,7 +126,7 @@ let create
       ?worker_run_id
       ()
   =
-  ensure_store ~base_dir;
+  ensure_store ~base_dir ~partition ();
   if file_path = ""
   then Error "file_path is required"
   else if line_start < 1 || line_end < line_start
@@ -138,13 +157,15 @@ let create
       ; updated_at_ms = ts
       }
     in
-    Fs_compat.append_jsonl (annotations_file ~base_dir) (annotation_to_json annotation);
+    Fs_compat.append_jsonl
+      (annotations_file_for ~base_dir partition)
+      (annotation_to_json annotation);
     Ok annotation)
 ;;
 
-let list ~base_dir ~filter =
-  ensure_store ~base_dir;
-  let all : annotation list = load_all ~base_dir in
+let list ~base_dir ?(partition = Ide_paths.Legacy) ~filter () =
+  ensure_store ~base_dir ~partition ();
+  let all : annotation list = load_all_partition ~base_dir partition in
   let by_file =
     match filter.file_path with
     | Some fp -> List.filter (fun (a : annotation) -> a.file_path = fp) all
@@ -180,31 +201,31 @@ let list ~base_dir ~filter =
   List.sort (fun a b -> Int64.compare b.created_at_ms a.created_at_ms) by_task
 ;;
 
-let compact ~base_dir =
-  let all = load_all ~base_dir in
-  write_all ~base_dir all
+let compact ~base_dir ?(partition = Ide_paths.Legacy) () =
+  let all = load_all_partition ~base_dir partition in
+  write_all_partition ~base_dir partition all
 ;;
 
-let delete ~base_dir ~id ~keeper_id =
-  ensure_store ~base_dir;
-  let all = load_all ~base_dir in
+let delete ~base_dir ?(partition = Ide_paths.Legacy) ~id ~keeper_id () =
+  ensure_store ~base_dir ~partition ();
+  let all = load_all_partition ~base_dir partition in
   match List.find_opt (fun a -> a.id = id && a.keeper_id = keeper_id) all with
   | None -> Error "annotation not found or keeper mismatch"
   | Some _ ->
     let ts = now_ms () in
-    Fs_compat.append_jsonl (annotations_file ~base_dir) (tombstone_json id keeper_id ts);
-    (* Streaming count — we only need cardinalities to compute the
-       compaction ratio, not the row list itself. *)
+    Fs_compat.append_jsonl
+      (annotations_file_for ~base_dir partition)
+      (tombstone_json id keeper_id ts);
     let tombstone_count =
       Fs_compat.fold_jsonl_lines
         ~init:0
         ~f:(fun acc ~line_no:_ j -> if is_tombstone j then acc + 1 else acc)
-        (annotations_file ~base_dir)
+        (annotations_file_for ~base_dir partition)
     in
     let total = List.length all + tombstone_count in
     if
       total > 0
       && float_of_int tombstone_count /. float_of_int total >= compact_threshold
-    then compact ~base_dir;
+    then compact ~base_dir ~partition ();
     Ok ()
 ;;

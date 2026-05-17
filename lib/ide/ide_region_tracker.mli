@@ -32,14 +32,32 @@ val extract_region_from_full_file :
 (** When a Keeper uses [write_file] with full content, the region is
     the entire file (lines 1 to line count of [content]). *)
 
-val regions_file : base_dir:string -> string
-(** Fixed append-only region store path under [.masc-ide/regions.jsonl]. *)
+val regions_file
+  :  base_dir:string
+  -> ?partition:Ide_paths.partition
+  -> unit
+  -> string
+(** Append-only region store path under the chosen
+    {!Ide_paths.partition}. Default [partition] is
+    {!Ide_paths.Legacy} (the pre-RFC-0128 flat
+    [base_dir/.masc-ide/regions.jsonl]). *)
 
-val append_region : base_dir:string -> code_region -> unit
-(** Append one region to [.masc-ide/regions.jsonl]. *)
+val append_region
+  :  base_dir:string
+  -> ?partition:Ide_paths.partition
+  -> code_region
+  -> unit
+(** Append one region to the chosen partition's [regions.jsonl].
+    Default [partition] is {!Ide_paths.Legacy}. *)
 
-val ingest_tool_call :
-  base_dir:string -> keeper_id:string -> turn:int -> Yojson.Safe.t -> unit
-(** Inspect a tool_call JSON record.  If it is a file-writing tool,
-    extract regions and append them to [.masc-ide/regions.jsonl].
-    Non-matching tool_calls are silently ignored. *)
+val ingest_tool_call
+  :  base_dir:string
+  -> ?partition:Ide_paths.partition
+  -> keeper_id:string
+  -> turn:int
+  -> Yojson.Safe.t
+  -> unit
+(** Inspect a tool_call JSON record. If it is a file-writing tool,
+    extract regions and append them to the chosen partition's
+    [regions.jsonl]. Non-matching tool_calls are silently ignored.
+    Default [partition] is {!Ide_paths.Legacy}. *)

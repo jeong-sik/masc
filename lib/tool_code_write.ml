@@ -64,6 +64,41 @@ let validate_code_shell_command (command : string) : (unit, string) Result.t =
        (Worker_dev_tools.block_reason_to_string_with_allowlist
           ~allowed_commands:allowed_shell_commands)
 
+type code_shell_exit_status =
+  | Shell_ok
+  | Shell_ok_expected_nonzero of string
+  | Shell_error
+
+let first_token_basename segment =
+  let trimmed = String.trim segment in
+  if String.equal trimmed "" then None
+  else
+    let len = String.length trimmed in
+    let rec find_sep i =
+      if i >= len then len
+      else
+        match trimmed.[i] with
+        | ' ' | '\t' -> i
+        | _ -> find_sep (i + 1)
+    in
+    Some (Filename.basename (String.sub trimmed 0 (find_sep 0)))
+
+let last_pipeline_command_name command =
+  command
+  |> String.split_on_char '|'
+  |> List.rev
+  |> List.find_map first_token_basename
+
+let classify_code_shell_exit ~command code =
+  match code with
+  | 0 -> Shell_ok
+  | 1 -> (
+      match last_pipeline_command_name command with
+      | Some ("rg" | "grep") -> Shell_ok_expected_nonzero "no_matches"
+      | Some "diff" -> Shell_ok_expected_nonzero "differences"
+      | _ -> Shell_error)
+  | _ -> Shell_error
+
 let git_common_root path =
   try
     match
@@ -686,16 +721,28 @@ let handle_code_shell ~tool_name ~start_time ctx args =
              in
              match Masc_exec.Exec_gate.run_argv_with_status ~actor:`Tool_local_runtime ~raw_source:(String.concat " " full_cmd) ~summary:"shell command execution" ~timeout_sec:safe_timeout full_cmd with
              | Unix.WEXITED code, output ->
-                 let response = `Assoc [
-                   ("status", `String (if code = 0 then "ok" else "error"));
-                   ("exit_code", `Int code);
-                   ("output", `String (truncate_output output));
-                   ("command", `String command);
-                   ("agent", `String ctx.agent_name);
-                 ] in
-                 (if code = 0
-                  then fun msg -> Tool_result.ok ~tool_name ~start_time msg
-                  else fun msg -> Tool_result.error ~tool_name ~start_time msg)
+                 let exit_status = classify_code_shell_exit ~command code in
+                 let response_fields =
+                   [
+                     ( "status",
+                       `String (match exit_status with Shell_error -> "error" | _ -> "ok") );
+                     ("exit_code", `Int code);
+                     ("output", `String (truncate_output output));
+                     ("command", `String command);
+                     ("agent", `String ctx.agent_name);
+                   ]
+                   @
+                   match exit_status with
+                   | Shell_ok_expected_nonzero reason ->
+                       [ ("exit_semantics", `String reason) ]
+                   | Shell_ok | Shell_error -> []
+                 in
+                 let response = `Assoc response_fields in
+                 (match exit_status with
+                  | Shell_ok | Shell_ok_expected_nonzero _ ->
+                      fun msg -> Tool_result.ok ~tool_name ~start_time msg
+                  | Shell_error ->
+                      fun msg -> Tool_result.error ~tool_name ~start_time msg)
                    (Yojson.Safe.pretty_to_string response)
              | _, output ->
                  Tool_result.error ~tool_name ~start_time (Printf.sprintf "Command failed: %s" (truncate_output output)))

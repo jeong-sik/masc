@@ -27,6 +27,14 @@ let json_string_field key text =
      | _ -> fail ("missing JSON string field: " ^ key))
   | _ -> fail "expected JSON object"
 
+let json_int_field key text =
+  match Yojson.Safe.from_string text with
+  | `Assoc fields ->
+    (match List.assoc_opt key fields with
+     | Some (`Int value) -> value
+     | _ -> fail ("missing JSON int field: " ^ key))
+  | _ -> fail "expected JSON object"
+
 let tool_code_write_policy_load_failure_metric () =
   Prometheus.metric_value_or_zero
     Masc_mcp.Keeper_metrics.metric_keeper_tool_policy_failures
@@ -574,6 +582,64 @@ let test_code_shell_missing_docker_cwd_reports_worktree_hint () =
   check bool "error suggests worktree creation" true
     (contains "masc_worktree_create" msg)
 
+let test_code_shell_rg_exit_one_no_matches_is_success () =
+  with_temp_dir "tool-code-shell-rg" @@ fun dir ->
+  let fixture = Filename.concat dir "sample.ml" in
+  write_file fixture "let present = 1\n";
+  let ctx = make_ctx () in
+  let args =
+    `Assoc
+      [
+        ( "command",
+          `String
+            (Printf.sprintf "rg __masc_code_shell_16015_no_match__ %s"
+               (Filename.quote fixture)) );
+        ("timeout", `Int 5);
+      ]
+  in
+  let ok, msg = dispatch_exn ctx ~name:"masc_code_shell" ~args in
+  check bool "rg no-match exit 1 is a successful empty result" true ok;
+  check string "status" "ok" (json_string_field "status" msg);
+  check int "exit_code" 1 (json_int_field "exit_code" msg);
+  check string "exit_semantics" "no_matches"
+    (json_string_field "exit_semantics" msg)
+
+let test_code_shell_grep_exit_one_no_matches_is_success () =
+  with_temp_dir "tool-code-shell-grep" @@ fun dir ->
+  let fixture = Filename.concat dir "sample.txt" in
+  write_file fixture "present\n";
+  let ctx = make_ctx () in
+  let args =
+    `Assoc
+      [
+        ( "command",
+          `String
+            (Printf.sprintf "grep __masc_code_shell_16015_no_match__ %s"
+               (Filename.quote fixture)) );
+        ("timeout", `Int 5);
+      ]
+  in
+  let ok, msg = dispatch_exn ctx ~name:"masc_code_shell" ~args in
+  check bool "grep no-match exit 1 is a successful empty result" true ok;
+  check string "status" "ok" (json_string_field "status" msg);
+  check int "exit_code" 1 (json_int_field "exit_code" msg);
+  check string "exit_semantics" "no_matches"
+    (json_string_field "exit_semantics" msg)
+
+let test_code_shell_rg_exit_two_remains_error () =
+  let ctx = make_ctx () in
+  let args =
+    `Assoc
+      [
+        ("command", `String "rg --regexp [");
+        ("timeout", `Int 5);
+      ]
+  in
+  let ok, msg = dispatch_exn ctx ~name:"masc_code_shell" ~args in
+  check bool "rg syntax error stays failed" false ok;
+  check string "status" "error" (json_string_field "status" msg);
+  check int "exit_code" 2 (json_int_field "exit_code" msg)
+
 let test_code_git_missing_docker_cwd_reports_worktree_hint () =
   let base_path = fresh_base_path () in
   let config = make_config base_path in
@@ -793,6 +859,12 @@ let () =
         test_validate_code_shell_command_rejects_semicolon;
       test_case "missing docker cwd reports worktree hint" `Quick
         test_code_shell_missing_docker_cwd_reports_worktree_hint;
+      test_case "rg exit 1 no-match is success" `Quick
+        test_code_shell_rg_exit_one_no_matches_is_success;
+      test_case "grep exit 1 no-match is success" `Quick
+        test_code_shell_grep_exit_one_no_matches_is_success;
+      test_case "rg exit 2 remains error" `Quick
+        test_code_shell_rg_exit_two_remains_error;
     ]);
     ("per_agent_containment_6527_iter6", [
       test_case "writable_path allows own playground" `Quick

@@ -69,6 +69,25 @@ val startup_prune_keeper_checkpoints : Mcp_server.server_state -> unit
 val startup_migrate_keeper_histories : Mcp_server.server_state -> unit
 val sync_bootable_keeper_credentials : Mcp_server.server_state -> unit
 
+type lazy_startup_execution =
+  | Parallel
+  | Serial
+
+type lazy_startup_group = {
+  group_name : string;
+  execution : lazy_startup_execution;
+  task_names : string list;
+}
+
+val lazy_startup_plan : has_legacy_traces:bool -> lazy_startup_group list
+(** Deterministic startup task grouping.  [Parallel] groups contain only
+    tasks whose stores are independent; [Serial] groups preserve ordering for
+    shared tool state and cleanup phases. *)
+
+val lazy_startup_task_names : has_legacy_traces:bool -> string list
+(** Flattened task names in the same dependency order used to activate
+    {!Server_startup_state}'s lazy task queue. *)
+
 (** {2 Codex MCP Client Auth} *)
 
 type codex_mcp_config_sync_status =

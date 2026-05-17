@@ -1333,6 +1333,91 @@ let test_blocking_bootstrap_ignores_whitespace_legacy_room_dirs () =
         "whitespace room backlog does not promote into root" false
         root_backlog_promoted)
 
+let execution_label = function
+  | Server_runtime_bootstrap.Parallel -> "parallel"
+  | Server_runtime_bootstrap.Serial -> "serial"
+
+let check_lazy_group group ~name ~execution ~tasks =
+  Alcotest.(check string) "group name" name group.Server_runtime_bootstrap.group_name;
+  Alcotest.(check string)
+    (name ^ " execution")
+    execution
+    (execution_label group.Server_runtime_bootstrap.execution);
+  Alcotest.(check (list string))
+    (name ^ " tasks")
+    tasks
+    group.Server_runtime_bootstrap.task_names
+
+let test_lazy_startup_plan_groups_independent_tasks () =
+  let groups = Server_runtime_bootstrap.lazy_startup_plan ~has_legacy_traces:false in
+  Alcotest.(check (list string))
+    "group order"
+    [ "initialize"; "tool_state"; "cleanup" ]
+    (List.map
+       (fun group -> group.Server_runtime_bootstrap.group_name)
+       groups);
+  match groups with
+  | [ initialize; tool_state; cleanup ] ->
+      check_lazy_group initialize ~name:"initialize" ~execution:"parallel"
+        ~tasks:
+          [
+            "restore_sessions";
+            "reconcile_active_agents";
+            "prompt_bootstrap";
+            "keeper_history_migration";
+          ];
+      check_lazy_group tool_state ~name:"tool_state" ~execution:"serial"
+        ~tasks:[ "telemetry_warmup"; "tool_metrics_restore" ];
+      check_lazy_group cleanup ~name:"cleanup" ~execution:"serial"
+        ~tasks:
+          [ "jsonl_prune"; "keeper_checkpoint_prune"; "auth_archive_prune" ];
+      Alcotest.(check (list string))
+        "flattened task order"
+        [
+          "restore_sessions";
+          "reconcile_active_agents";
+          "prompt_bootstrap";
+          "keeper_history_migration";
+          "telemetry_warmup";
+          "tool_metrics_restore";
+          "jsonl_prune";
+          "keeper_checkpoint_prune";
+          "auth_archive_prune";
+        ]
+        (Server_runtime_bootstrap.lazy_startup_task_names
+           ~has_legacy_traces:false)
+  | _ -> Alcotest.fail "unexpected lazy startup group shape"
+
+let test_lazy_startup_plan_keeps_legacy_migration_serial () =
+  let groups = Server_runtime_bootstrap.lazy_startup_plan ~has_legacy_traces:true in
+  Alcotest.(check (list string))
+    "group order"
+    [ "initialize"; "tool_state"; "legacy_trace_migration"; "cleanup" ]
+    (List.map
+       (fun group -> group.Server_runtime_bootstrap.group_name)
+       groups);
+  match groups with
+  | [ _initialize; _tool_state; legacy_migration; _cleanup ] ->
+      check_lazy_group legacy_migration ~name:"legacy_trace_migration"
+        ~execution:"serial" ~tasks:[ "legacy_trace_dir_migration" ];
+      Alcotest.(check (list string))
+        "flattened task order includes legacy migration before cleanup"
+        [
+          "restore_sessions";
+          "reconcile_active_agents";
+          "prompt_bootstrap";
+          "keeper_history_migration";
+          "telemetry_warmup";
+          "tool_metrics_restore";
+          "legacy_trace_dir_migration";
+          "jsonl_prune";
+          "keeper_checkpoint_prune";
+          "auth_archive_prune";
+        ]
+        (Server_runtime_bootstrap.lazy_startup_task_names
+           ~has_legacy_traces:true)
+  | _ -> Alcotest.fail "unexpected legacy lazy startup group shape"
+
 let test_startup_state_json () =
   Server_startup_state.reset ~backend_mode:"postgres-native" ();
   Server_startup_state.mark_state_ready ~backend_mode:"postgres-native";
@@ -2632,6 +2717,10 @@ let () =
             "blocking bootstrap ignores whitespace legacy room dirs"
             `Quick
             test_blocking_bootstrap_ignores_whitespace_legacy_room_dirs;
+          Alcotest.test_case "lazy startup plan parallelizes independent tasks"
+            `Quick test_lazy_startup_plan_groups_independent_tasks;
+          Alcotest.test_case "lazy startup plan keeps legacy migration serial"
+            `Quick test_lazy_startup_plan_keeps_legacy_migration_serial;
           Alcotest.test_case "startup state json reports lazy failure" `Quick
             test_startup_state_json;
           Alcotest.test_case

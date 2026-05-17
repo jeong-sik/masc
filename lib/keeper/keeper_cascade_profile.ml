@@ -78,6 +78,23 @@ let lookup_names_of_qualified_names names =
   (names @ List.map strip_declarative_profile_prefix names)
   |> List.sort_uniq String.compare
 
+(* RFC-0058 Phase 8.2: switch to [try_load_partial] so a single stale
+   binding does not invalidate the whole catalog. Adapter errors are
+   logged but the resolvable subset is still exposed to keeper toml
+   validation. See RFC-0058-phase-8-cascade-catalog-partial-parse.md §3.3. *)
+let log_partial_catalog_errors ~path
+    (errors : Cascade_declarative_adapter.adapter_error list) =
+  if errors <> [] then
+    let rendered =
+      errors
+      |> List.map Cascade_declarative_adapter.show_adapter_error
+      |> String.concat "; "
+    in
+    Log.Keeper.warn
+      "declarative cascade catalog has %d adapter error(s) in %s; \
+       surfacing valid subset to keeper validation: %s"
+      (List.length errors) path rendered
+
 let declarative_public_catalog_names ?config_path () =
   let path_opt =
     match config_path with
@@ -87,19 +104,13 @@ let declarative_public_catalog_names ?config_path () =
   match path_opt with
   | None -> Error "cascade catalog path is not resolved"
   | Some path -> (
-      match Cascade_declarative_hotpath.try_load_declarative path with
-      | Some (Ok snapshot) ->
+      match Cascade_declarative_hotpath.try_load_partial path with
+      | Some { snapshot; errors } ->
+          log_partial_catalog_errors ~path errors;
           let names = public_names_of_declarative_snapshot snapshot in
           if names = []
           then Error "declarative cascade catalog contains no profiles"
           else Ok names
-      | Some (Error errors) ->
-          let rendered =
-            errors
-            |> List.map Cascade_declarative_adapter.show_adapter_error
-            |> String.concat "; "
-          in
-          Error ("declarative cascade catalog invalid: " ^ rendered)
       | None -> Error "cascade.toml is not a declarative cascade catalog")
 
 let declarative_catalog_lookup_names ?config_path () =
@@ -111,8 +122,9 @@ let declarative_catalog_lookup_names ?config_path () =
   match path_opt with
   | None -> Error "cascade catalog path is not resolved"
   | Some path -> (
-      match Cascade_declarative_hotpath.try_load_declarative path with
-      | Some (Ok snapshot) ->
+      match Cascade_declarative_hotpath.try_load_partial path with
+      | Some { snapshot; errors } ->
+          log_partial_catalog_errors ~path errors;
           let names =
             qualified_names_of_declarative_snapshot snapshot
             |> lookup_names_of_qualified_names
@@ -120,13 +132,6 @@ let declarative_catalog_lookup_names ?config_path () =
           if names = []
           then Error "declarative cascade catalog contains no profiles"
           else Ok names
-      | Some (Error errors) ->
-          let rendered =
-            errors
-            |> List.map Cascade_declarative_adapter.show_adapter_error
-            |> String.concat "; "
-          in
-          Error ("declarative cascade catalog invalid: " ^ rendered)
       | None -> Error "cascade.toml is not a declarative cascade catalog")
 
 (** RFC-0066 Phase 2: prefer the live validated snapshot (declarative

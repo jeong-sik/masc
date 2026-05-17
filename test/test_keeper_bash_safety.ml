@@ -333,6 +333,11 @@ let test_keeper_bash_shape_uses_shell_ir_for_quoted_literals () =
   Alcotest.(check (option string)) "real redirect blocks"
     (Some "pipe_or_redirect")
     (block_tag "cat < /tmp/x");
+  Alcotest.(check (option string)) "malformed stderr redirect token blocks"
+    (Some "pipe_or_redirect")
+    (block_tag "ls repos/masc-mcp/.worktrees/ 2/dev/null");
+  Alcotest.(check (option string)) "quoted malformed redirect token is data" None
+    (block_tag {|echo "2/dev/null"|});
   Alcotest.(check (option string)) "real gh pr checks blocks"
     (Some "gh_pr_checks")
     (block_tag "gh pr checks 15659 --repo jeong-sik/masc-mcp");

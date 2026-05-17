@@ -1623,6 +1623,18 @@ let init () =
     "Total keeper compact audit failures (persist/prune/handle), labeled by keeper and \
      site"
     Counter;
+  (* V17 burst visibility: drain-loop observability for keeper_compact_audit. *)
+  add
+    Keeper_metrics.metric_keeper_compact_audit_drain_batches
+    "Total keeper compact_audit drain-loop iterations (used with drain_batch_size_bucket \
+     for mean batch size and burst detection)"
+    Counter;
+  add
+    Keeper_metrics.metric_keeper_compact_audit_drain_batch_size_bucket
+    "Keeper compact_audit drain batch size distribution. Closed-vocab bucket label: \
+     0|1_9|10_49|50_99|100_499|500_plus. Burst >= 100/batch indicates 9-keeper \
+     compaction storm or JSONL writer lag."
+    Counter;
   add
     Keeper_metrics.metric_keeper_fs_failures
     "Total keeper filesystem operation failures (ensure_dir/save_atomic), labeled by \

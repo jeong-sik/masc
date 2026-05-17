@@ -178,6 +178,114 @@ let test_blank_url_lands_in_orphan () =
     | _ -> fail "expected Orphan for blank-URL repo")
 ;;
 
+(* RFC-0128 PR-6 — sandbox playground path resolution. Keeper writes
+   inside the sandbox land at [<base>/.masc/playground/<keeper>/repos/
+   <repo_id>/<rel>], which is NOT a registered repo prefix. The
+   resolver should still produce the same [By_url <slug>] as a write
+   in the working-tree clone. *)
+let test_sandbox_playground_path_joins_with_worktree () =
+  with_temp_base_dir (fun base_dir ->
+    (* Only register the working-tree clone; the sandbox playground
+       has no entry in repositories.toml, which mirrors the real
+       operating environment. *)
+    let worktree = Filename.concat base_dir "workspace/repo" in
+    mkdir_p worktree;
+    touch (Filename.concat worktree "lib/foo.ml");
+    let repo =
+      { id = "masc"
+      ; name = "masc"
+      ; url = "https://github.com/owner/repo"
+      ; local_path = worktree
+      ; aliases = []
+      ; default_branch = "main"
+      ; credential_id = "default"
+      ; keepers = []
+      ; status = Active
+      ; auto_sync = false
+      ; sync_interval = 0
+      ; created_at = Int64.zero
+      ; updated_at = Int64.zero
+      }
+    in
+    (match Repo_store.save_all ~base_path:base_dir [ repo ] with
+     | Ok () -> ()
+     | Error msg -> failf "save_all: %s" msg);
+    let sandbox_file =
+      Filename.concat
+        base_dir
+        ".masc/playground/sangsu/repos/masc/lib/foo.ml"
+    in
+    let worktree_file = Filename.concat worktree "lib/foo.ml" in
+    let sandbox_partition, sandbox_rel =
+      Masc_mcp.Keeper_exec_fs.resolve_partition_for_write
+        ~base_dir
+        ~kind:"region"
+        ~file_path:sandbox_file
+    in
+    let worktree_partition, worktree_rel =
+      Masc_mcp.Keeper_exec_fs.resolve_partition_for_write
+        ~base_dir
+        ~kind:"region"
+        ~file_path:worktree_file
+    in
+    (match sandbox_partition, worktree_partition with
+     | Ide_paths.By_url s1, Ide_paths.By_url s2 ->
+       check string "sandbox / working-tree join via canonical_url" s1 s2
+     | _ ->
+       failf
+         "expected By_url _ on both sides, got %s / %s"
+         (match sandbox_partition with
+          | Ide_paths.Legacy -> "Legacy"
+          | Ide_paths.By_url s -> "By_url " ^ s
+          | Ide_paths.Orphan -> "Orphan")
+         (match worktree_partition with
+          | Ide_paths.Legacy -> "Legacy"
+          | Ide_paths.By_url s -> "By_url " ^ s
+          | Ide_paths.Orphan -> "Orphan"));
+    check string "sandbox rel stripped to repo-relative" "lib/foo.ml" sandbox_rel;
+    check string "worktree rel stripped" "lib/foo.ml" worktree_rel)
+;;
+
+let test_docker_playground_path_also_resolves () =
+  with_temp_base_dir (fun base_dir ->
+    let worktree = Filename.concat base_dir "workspace/repo" in
+    mkdir_p worktree;
+    let repo =
+      { id = "masc"
+      ; name = "masc"
+      ; url = "https://github.com/owner/repo"
+      ; local_path = worktree
+      ; aliases = []
+      ; default_branch = "main"
+      ; credential_id = "default"
+      ; keepers = []
+      ; status = Active
+      ; auto_sync = false
+      ; sync_interval = 0
+      ; created_at = Int64.zero
+      ; updated_at = Int64.zero
+      }
+    in
+    (match Repo_store.save_all ~base_path:base_dir [ repo ] with
+     | Ok () -> ()
+     | Error msg -> failf "save_all: %s" msg);
+    let docker_file =
+      Filename.concat
+        base_dir
+        ".masc/playground/docker/tech_glutton/repos/masc/lib/foo.ml"
+    in
+    let partition, rel =
+      Masc_mcp.Keeper_exec_fs.resolve_partition_for_write
+        ~base_dir
+        ~kind:"region"
+        ~file_path:docker_file
+    in
+    match partition with
+    | Ide_paths.By_url _ ->
+      check string "docker sandbox rel" "lib/foo.ml" rel
+    | _ -> fail "Docker sandbox path should resolve via repo_id lookup")
+;;
+
 let () =
   run
     "ide_canonical_url_join"
@@ -194,6 +302,14 @@ let () =
             "blank URL → Orphan"
             `Quick
             test_blank_url_lands_in_orphan
+        ; test_case
+            "sandbox playground path joins with working-tree (PR-6)"
+            `Quick
+            test_sandbox_playground_path_joins_with_worktree
+        ; test_case
+            "docker playground path resolves via repo_id (PR-6)"
+            `Quick
+            test_docker_playground_path_also_resolves
         ] )
     ]
 ;;

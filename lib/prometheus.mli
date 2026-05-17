@@ -174,6 +174,12 @@ val metric_tool_metrics_persist_dropped : string
     Each increment corresponds to one extra [compute ()] call. No labels. *)
 val metric_tool_keeper_cache_cas_conflicts : string
 
+(** Counter for [tool_keeper.cache_ttl_seconds] env-var parse fallback events.
+    Increments when the operator-supplied env var is present but unparseable
+    or out-of-range, and the helper falls back to its default. Labels:
+    [env_var, reason] with reason in [invalid_float | negative_or_nan]. *)
+val metric_tool_keeper_cache_ttl_parse_failures : string
+
 (** #9771: counter for keeper turn-slot semaphore wait timeouts.
     Labels: [keeper, channel] with channel in
     [autonomous_queue_head | autonomous | turn]. *)

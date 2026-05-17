@@ -356,6 +356,17 @@ let metric_tool_metrics_persist_dropped =
 let metric_tool_keeper_cache_cas_conflicts =
   "masc_tool_keeper_cache_cas_conflicts_total"
 
+(* tool_keeper.cache_ttl_seconds env-var parse fallback observability.
+   Operator-supplied env var (e.g. MASC_KEEPER_LIST_CACHE_TTL_S) is
+   present but the value cannot be parsed as a non-negative float; the
+   helper silently coalesces to the per-caller default. Without this
+   counter the operator never learns the env var has no effect ("set
+   to 5s but cache still 2s" symptom). Closed-vocabulary labels:
+     env_var: the env var name (bounded to the handful of callers)
+     reason:  invalid_float | negative_or_nan *)
+let metric_tool_keeper_cache_ttl_parse_failures =
+  "masc_tool_keeper_cache_ttl_parse_failures_total"
+
 (* #9771: keeper turn-slot semaphore wait timeout counter.
 
    Production observed multiple keepers ([sangsu], [janitor],
@@ -1340,6 +1351,11 @@ let init () =
     metric_tool_keeper_cache_cas_conflicts
     "Total tool_keeper.cached_text_by_key Atomic CAS retry events. Each \
      increment corresponds to one extra compute() call. No labels."
+    Counter;
+  add
+    metric_tool_keeper_cache_ttl_parse_failures
+    "Total tool_keeper.cache_ttl_seconds env-var parse fallback events. \
+     Labels: env_var, reason in {invalid_float | negative_or_nan}."
     Counter;
   add
     Keeper_metrics.metric_keeper_turn_queue_depth

@@ -161,6 +161,12 @@ end = struct
       Masc_http_client.post_sync ~net:client.net ~url ~headers ~body ()
     with
     | Error err_msg ->
+      (* RFC-0106: re-raise Eio.Cancel.Cancelled when the exporter fiber
+         was cancelled. Masc_http_client.post_sync's piaf pool catches
+         all exceptions (including Cancelled) and reports them as Error
+         strings; without this check the exporter would log a spurious
+         "export failed" instead of unwinding cancellation. *)
+      Eio.Cancel.check ();
       Error
         (`Failure
            (spf

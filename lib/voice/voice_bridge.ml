@@ -477,6 +477,13 @@ let single_voice_mcp_call ~net ~uri ~headers_list ~body_str =
   | Ok (code, body) ->
     Error (Printf.sprintf "HTTP %d: %s" code body)
   | Error e ->
+    (* RFC-0106: re-raise Eio.Cancel.Cancelled when the surrounding fiber
+       was cancelled. Masc_http_client.post_sync delegates to a piaf pool
+       whose [Pool.do_request] catches all exceptions including Cancelled
+       and reports them as an Error string; without this check the retry
+       loop in [call_voice_mcp_endpoint] would sleep and re-attempt
+       instead of unwinding cancellation immediately. *)
+    Eio.Cancel.check ();
     Error (Printf.sprintf "Connection error: %s" e)
 ;;
 

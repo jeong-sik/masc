@@ -18,8 +18,10 @@ type SurfaceSectionId =
   | 'agents'
   | 'cognition'
   | 'runtime'
+  | 'cascade-config' // Dedicated entry for cascade.toml TOML editor (formerly buried inside runtime/cascade view)
   | 'goal-loop'
   | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + monitoring governance
+  | 'doctor'         // Dedicated entry for /api/v1/dashboard/doctor (formerly buried inside Command → Operations → Inspector → "진단" sub-tab)
   // command
   | 'operations'     // Phase 1+6: absorbs intervene + governance + inspector (Phase 7: connectors split out)
   // connectors (Phase 7: top-level surface — sidecar-driven channel bridges)
@@ -175,6 +177,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       params: { section: 'runtime' },
     },
     {
+      id: 'cascade-config',
+      label: 'Cascade Config',
+      description: 'Live cascade.toml editor and diagnostics.',
+      params: { section: 'cascade-config' },
+    },
+    {
       id: 'agents',
       label: 'Agent Observatory',
       description: 'Live roster with fleet state capsules.',
@@ -191,6 +199,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'System Telemetry',
       description: 'System signals for tools and governance.',
       params: { section: 'fleet-health' },
+    },
+    {
+      id: 'doctor',
+      label: 'Doctor',
+      description: 'Sidecar and config doctor diagnostics.',
+      params: { section: 'doctor' },
     },
     {
       id: 'journey',

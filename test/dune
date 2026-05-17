@@ -1252,6 +1252,7 @@
 (include stanzas/test_event_kind.inc)
 (include stanzas/test_feature_flag_registry.inc)
 (include stanzas/test_fs_atomic_orphan_sweep_10130.inc)
+(include stanzas/test_fs_compat_append_jsonl_atomicity.inc)
 (include stanzas/test_fs_compat_home_guard.inc)
 (include stanzas/test_fsm_drift_per_agent_counter.inc)
 (include stanzas/test_gate_protocol.inc)

@@ -637,12 +637,81 @@ let fold_jsonl_lines ~init ~f path =
            !acc))
 ;;
 
-(** Append JSON value as line to JSONL file. *)
+(* RFC-0108 root fix: dedicated per-path Stdlib.Mutex registry for
+   JSONL appends, with fresh fd open/close on every call.
+
+   The previous implementation called [append_file] → [append_file_unix]
+   → [Append_fd_cache.with_lock] which shared one [out_channel] across
+   all callers/domains. While the cache mutex serialized cache lookups
+   it did not protect the OCaml-runtime [out_channel] buffer state
+   itself, which is not domain-safe — concurrent writes from different
+   domains through the same cached channel corrupted records mid-line
+   (observed 2026-05-17 as utf-8 multibyte tears across trajectories/,
+   keepers/*/reaction-ledger/, and as "}{"-concat in oas-events/ —
+   total 243 live malformed lines pre-fix).
+
+   This fix targets [append_jsonl] specifically (not all of
+   [append_file]) because:
+   1. JSONL records are line-bounded and have a clear atomicity unit
+      (one full record + newline). Generic byte append (used by other
+      callers of [append_file]) does not.
+   2. Most observed corruption is in JSONL files. PR-3/4/5 fixed four
+      site-specific writers; this is the catch-all root fix that
+      protects the remaining 30+ [append_jsonl] callers (ide_annotations,
+      memory_jsonl, drift_guard, operator action_log, dashboard, etc.)
+      without per-site PRs.
+   3. Performance: fresh-fd-per-call replaces the LRU fd cache. The
+      cache's stated motivation (lib/fs_compat/fs_compat.ml:137-156)
+      was to cut three syscalls (open/output_string/close) per record
+      down to one cached output_string under 64 keepers' telemetry.
+      The trade is between that throughput optimization and
+      cross-domain correctness; correctness wins. A future cache that
+      is genuinely domain-safe (one fd per domain, or a single-writer
+      coordinator) can be added back under RFC-0108 §6 performance
+      follow-up. *)
+let jsonl_path_mutex_registry : (string, Stdlib.Mutex.t) Hashtbl.t =
+  Hashtbl.create 32
+let jsonl_path_mutex_registry_mu = Stdlib.Mutex.create ()
+
+let get_jsonl_path_mutex path =
+  Stdlib.Mutex.lock jsonl_path_mutex_registry_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock jsonl_path_mutex_registry_mu)
+    (fun () ->
+      match Hashtbl.find_opt jsonl_path_mutex_registry path with
+      | Some m -> m
+      | None ->
+        let m = Stdlib.Mutex.create () in
+        Hashtbl.add jsonl_path_mutex_registry path m;
+        m)
+
+(** Append JSON value as line to JSONL file.
+
+    Atomic per record (in-process): a per-path Stdlib.Mutex serializes
+    callers against each other, and a fresh fd is opened and closed
+    around a single [output_string] of [record + "\n"]. Cross-domain
+    safe. Records of any size are written without interleaving (the
+    mutex spans the whole syscall sequence). Crash durability is
+    not guaranteed (no fsync). *)
 let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =
+  test_exec_home_guard ~op:"append_jsonl" path;
   let dir = Stdlib.Filename.dirname path in
   mkdir_p dir;
   let line = Yojson.Safe.to_string json ^ "\n" in
-  append_file path line
+  let mu = get_jsonl_path_mutex path in
+  Stdlib.Mutex.lock mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock mu)
+    (fun () ->
+      let oc =
+        Stdlib.open_out_gen
+          [ Stdlib.Open_append; Stdlib.Open_creat; Stdlib.Open_wronly ]
+          0o644
+          path
+      in
+      Fun.protect
+        ~finally:(fun () -> Stdlib.close_out_noerr oc)
+        (fun () -> Stdlib.output_string oc line))
 ;;
 
 (* ================================================================ *)

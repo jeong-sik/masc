@@ -45,7 +45,8 @@ jobs:
 
       - name: Download tla2tools.jar (pinned v1.8.0)
         run: |
-          curl -fsSL -o specs/keeper-state-machine/tla2tools.jar \
+          curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors \
+            -o specs/keeper-state-machine/tla2tools.jar \
             https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
 
       - name: Run TLA+ model checking

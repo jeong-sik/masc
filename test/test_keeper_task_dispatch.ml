@@ -1479,6 +1479,27 @@ let test_done_with_empty_task_id () =
     | _ -> fail "expected error for empty task_id")
 ;;
 
+(* Regression: keeper_task_done schema declares [result] as a
+   required minLength:1 field. The handler must reject an empty
+   result with a keeper-vocabulary error rather than silently
+   passing non-strict tasks done with no summary or deferring the
+   rejection to parse_handoff_context. *)
+let test_done_requires_result () =
+  with_room (fun config ->
+    let meta = make_test_meta () in
+    let result =
+      call_tool
+        config
+        meta
+        "keeper_task_done"
+        (`Assoc [ "task_id", `String "T-1"; "result", `String "" ])
+    in
+    let json = parse_json result in
+    match Yojson.Safe.Util.member "error" json with
+    | `String msg -> check bool "mentions result" true (contains_substring msg "result")
+    | _ -> fail "expected error for empty result")
+;;
+
 let test_done_with_nonexistent_id () =
   with_room (fun config ->
     let meta = make_test_meta () in
@@ -2137,6 +2158,7 @@ let () =
         ] )
     ; ( "done"
       , [ test_case "empty task_id returns error" `Quick test_done_with_empty_task_id
+        ; test_case "empty result returns error (schema enforcement)" `Quick test_done_requires_result
         ; test_case "nonexistent id returns error" `Quick test_done_with_nonexistent_id
         ; test_case "done after claim" `Quick test_done_after_claim
         ; test_case

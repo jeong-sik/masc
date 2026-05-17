@@ -426,28 +426,34 @@ let handle_keeper_task_tool
     let result_text = Safe_ops.json_string ~default:"" "result" args |> String.trim in
     if task_id = ""
     then error_json "task_id is required. Use the task_id you got from keeper_task_claim."
+    else if result_text = ""
+    then
+      (* Schema (tool_shard_types.ml:1447) declares [result] as a
+         required, minLength:1 field. Other agents verify completion
+         from this field, so an empty result hides the audit trail.
+         Previously the handler accepted an empty result and either
+         (a) silently passed non-strict tasks done with no summary or
+         (b) deferred the rejection to parse_handoff_context for
+         strict-contract tasks (where keepers received the confusing
+         "handoff_context.summary is required" message instead of a
+         keeper-vocabulary error). Enforce the schema here so the
+         error names the field the keeper actually sent. *)
+      error_json
+        "result is required. Audit trail: describe what you completed. \
+         Example: result='Refactored module X, all tests green, no flake'."
     else (
       (* Map keeper vocabulary (`result`) onto MASC domain typed
-         handoff_context.summary so that the action=done strict-contract
-         path can read the completion summary directly from a typed field
-         instead of relying on string-blob siblings. When [result] is
-         empty we omit handoff_context entirely; the downstream contract
-         check decides whether a summary is mandatory for this task. *)
-      let base_args =
+         handoff_context.summary so the action=done strict-contract
+         path can read the completion summary directly from a typed
+         field instead of relying on string-blob siblings. *)
+      let args_for_transition =
         [
           "task_id", `String task_id;
           "action", `String "done";
           "notes", `String result_text;
+          ( "handoff_context",
+            `Assoc [ "summary", `String result_text ] );
         ]
-      in
-      let args_for_transition =
-        if String.equal result_text "" then base_args
-        else
-          base_args
-          @ [
-              ( "handoff_context",
-                `Assoc [ "summary", `String result_text ] );
-            ]
       in
       let transition_result =
         Tool_task.handle_transition

@@ -109,6 +109,7 @@
         test_keeper_generation_lineage
         test_keeper_deliberation
         test_keeper_registry
+        test_keeper_fd_pressure_fleet
         test_docker_spawn_throttle
         test_keeper_supervisor
         test_keeper_alerting_path
@@ -355,6 +356,7 @@
           test_keeper_generation_lineage
           test_keeper_deliberation
           test_keeper_registry
+          test_keeper_fd_pressure_fleet
           test_docker_spawn_throttle
           test_keeper_supervisor
           test_keeper_alerting_path

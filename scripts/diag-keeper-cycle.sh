@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # diag-keeper-cycle.sh — keeper "active → silent → error burst → silent" cycle reproducer
 #
-# Reads existing on-disk evidence (~/.masc/keepers/<name>.decisions.jsonl,
+# Reads existing on-disk evidence (<base_path>/.masc/keepers/<name>.decisions.jsonl,
 # <name>.json) and emits per-keeper cycle metrics. Code change zero — this is
 # strictly a measurement tool that surfaces signals already persisted by the
 # server but currently invisible to operators.

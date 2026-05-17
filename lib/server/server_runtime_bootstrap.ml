@@ -1398,7 +1398,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Log.Server.info "Backend_mutex_metrics installed (masc_backend_mutex_*)";
       (* Forward Agent_sdk.Log records (per-turn timing from oas#816 and
          any subsequent structured emits) into the masc-mcp log ring so
-         they land in ~/.masc/logs/system_log_*.jsonl alongside
+         they land in <base_path>/.masc/logs/system_log_*.jsonl alongside
          masc-mcp's own records.  Without this, OAS's structured Log
          global sink registry is empty and every Log.info inside
          agent_sdk is a silent drop. *)

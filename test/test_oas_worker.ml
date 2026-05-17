@@ -6332,7 +6332,7 @@ let test_run_named_circuit_breaker_skips_open_provider () =
    MASC_BASE_PATH / MASC_BASE_PATH_INPUT.  When the compiled binary is
    executed directly (./_build/default/test/test_oas_worker.exe) those
    env vars are absent, so tests would fall through to the developer's
-   live ~/.masc config and trigger ~40/150 failures.
+   live <base_path>/.masc config and trigger ~40/150 failures.
 
    Set a safe /tmp base when neither variable is present; individual
    tests that need a specific config still use [with_temp_masc_base_path]

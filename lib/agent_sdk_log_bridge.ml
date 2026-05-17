@@ -16,7 +16,7 @@
       keep oas records from colliding with masc-mcp's own Keeper /
       Server / Dashboard module names
     - [details] assembled from the record fields as a Yojson object so
-      the existing JSONL sink (e.g. [~/.masc/logs/system_log_*.jsonl])
+      the existing JSONL sink (e.g. [<base_path>/.masc/logs/system_log_*.jsonl])
       captures every field as a first-class key
 
     No retry, no buffering — the sink is pure forwarding, so fiber

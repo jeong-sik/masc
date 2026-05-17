@@ -69,19 +69,35 @@ let test_alias_masc_to_internal () =
       fail (Printf.sprintf "masc_board_post should resolve, got Unknown (tried: %s)"
               (TR.string_of_tried tried))
 
-(* ── is_known_policy_tool_name legacy adapter ── *)
+(* ── Policy validation surface ── *)
 
-let test_legacy_adapter_known () =
-  check bool "keeper_bash is known" true
-    (TR.is_known_policy_tool_name "keeper_bash");
-  check bool "Bash is known" true
-    (TR.is_known_policy_tool_name "Bash");
-  check bool "masc_status is known" true
-    (TR.is_known_policy_tool_name "masc_status")
+let resolves name =
+  match TR.resolve name with
+  | TR.Resolved _ | TR.Alias_to _ -> true
+  | TR.Unknown _ -> false
 
-let test_legacy_adapter_unknown () =
-  check bool "__missing_tool is not known" false
-    (TR.is_known_policy_tool_name "__missing_tool")
+let policy_validation_tool_names =
+  [ "keeper_board_post"
+  ; "keeper_shell"
+  ; "keeper_bash"
+  ; "Bash"
+  ; "Read"
+  ; "keeper_task_done"
+  ; "keeper_time_now"
+  ; "masc_status"
+  ; "mcp__masc__masc_status"
+  ; "masc_code_git"
+  ; "extend_turns"
+  ; "masc_complete_task"
+  ]
+
+let test_policy_validation_known_tools_resolve () =
+  List.iter
+    (fun name -> check bool (name ^ " resolves") true (resolves name))
+    policy_validation_tool_names
+
+let test_policy_validation_unknown_tool_misses () =
+  check bool "__missing_tool misses" false (resolves "__missing_tool")
 
 (* ── Phase 4: 88×15 Matrix — every tool_policy.toml tool resolves ── *)
 
@@ -201,9 +217,9 @@ let () =
         test_case "masc_code_git resolves via surface" `Quick test_surface_admits_masc_code_git;
         test_case "masc_board_post resolves via alias" `Quick test_alias_masc_to_internal;
       ]
-    ; "legacy_adapter", [
-        test_case "known tools return true" `Quick test_legacy_adapter_known;
-        test_case "unknown tools return false" `Quick test_legacy_adapter_unknown;
+    ; "policy_validation", [
+        test_case "known tools resolve" `Quick test_policy_validation_known_tools_resolve;
+        test_case "unknown tools miss" `Quick test_policy_validation_unknown_tool_misses;
       ]
     ; "matrix", [
         test_case "all policy tools resolve" `Quick test_all_policy_tools_resolve;

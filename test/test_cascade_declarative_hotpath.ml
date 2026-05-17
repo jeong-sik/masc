@@ -495,6 +495,148 @@ let test_try_load_partial_clean_has_no_errors () =
       | Some { snapshot = _; errors } ->
         check int "clean parse has no errors" 0 (List.length errors))
 
+(* --- RFC-0058 Phase 8.4: dispatch-path partial invariants ---
+
+   These tests strengthen the snapshot invariants that downstream
+   dispatch (Cascade_catalog_runtime.known_profile_names,
+   lookup_active_profile, etc.) relies on. The runtime dispatch path
+   reads [snapshot.profiles] without re-checking per-member
+   resolvability — so if the adapter ever exposed a half-stitched tier
+   (e.g. tier-group referencing an unresolvable tier) in the snapshot,
+   dispatch would crash or fall through to reserved without warning.
+
+   Phase 8.1's adapted_profile_to_profile + adapted_catalog_to_snapshot
+   already enforce these invariants via [List.filter_map] +
+   [None when provider_configs = []]. These tests mechanize that
+   guarantee so a future refactor of the adapter cannot silently
+   weaken it.
+
+   See RFC-0058-phase-8-cascade-catalog-partial-parse.md §6.4. *)
+
+(* Catalog with two tiers: one fully resolvable, one with all members
+   referencing missing bindings. A tier-group composes both. The fully
+   unresolvable tier must NOT appear in the snapshot; the tier-group
+   surfaces because it has at least one resolvable tier. *)
+let mixed_tier_resolvability_toml = {|
+[providers.ollama]
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.qwen3]
+max-context = 32768
+api-name = "qwen3:8b"
+tools-support = true
+
+[ollama.qwen3]
+
+[tier.good]
+members = ["ollama.qwen3"]
+strategy = "failover"
+
+[tier.bad]
+members = ["ghost.ghost-model"]
+strategy = "failover"
+
+[tier-group.mixed]
+tiers = ["good", "bad"]
+strategy = "failover"
+|}
+
+let test_partial_snapshot_excludes_zero_member_tiers () =
+  let path = write_temp_toml mixed_tier_resolvability_toml in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove path with _ -> ())
+    (fun () ->
+      match Hotpath.try_load_partial path with
+      | None -> fail "expected Some partial result (mixed tier resolvability)"
+      | Some { snapshot; errors } ->
+        let names = Hotpath.decl_snapshot_profile_names snapshot in
+        check bool "errors recorded for bad tier" true (List.length errors > 0);
+        check bool "tier.good in snapshot" true
+          (List.exists (fun n -> n = "tier.good") names);
+        check bool "tier.bad excluded from snapshot (zero resolvable members)"
+          true
+          (not (List.exists (fun n -> n = "tier.bad") names));
+        check bool "tier-group.mixed surfaces (one good tier suffices)" true
+          (List.exists (fun n -> n = "tier-group.mixed") names))
+
+let test_partial_snapshot_errors_disjoint_from_profile_names () =
+  let path = write_temp_toml mixed_tier_resolvability_toml in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove path with _ -> ())
+    (fun () ->
+      match Hotpath.try_load_partial path with
+      | None -> fail "expected Some result"
+      | Some { snapshot; errors } ->
+        let names = Hotpath.decl_snapshot_profile_names snapshot in
+        (* Error subjects (provider/model names mentioned in the errors)
+           must not appear as profile names. The snapshot exposes only
+           resolved entries; failed bindings/tiers are reported in
+           [errors], never half-published as profiles.
+
+           This is the invariant downstream dispatch (lookup_active_profile)
+           relies on: a name in [snapshot.profiles] always points at a
+           fully resolved profile. *)
+        let error_subjects =
+          errors
+          |> List.filter_map (function
+              | Adapter.Provider_not_found s -> Some s
+              | Adapter.Model_not_found s -> Some s
+              | Adapter.Tier_group_empty s -> Some s
+              | _ -> None)
+        in
+        List.iter (fun subject ->
+          check bool
+            (Printf.sprintf "error subject %S not in snapshot profile_names"
+               subject)
+            false
+            (List.exists (fun n -> n = subject) names))
+          error_subjects)
+
+(* Catalog where every tier-group member is unresolvable. Snapshot must
+   be None (or the tier-group must be excluded from a non-empty snapshot
+   produced by other valid profiles). *)
+let all_tiers_unresolvable_toml = {|
+[providers.ollama]
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.qwen3]
+max-context = 32768
+api-name = "qwen3:8b"
+tools-support = true
+
+[ollama.qwen3]
+
+[tier.lone-good]
+members = ["ollama.qwen3"]
+strategy = "failover"
+
+[tier.all-bad]
+members = ["ghost.a", "ghost.b"]
+strategy = "failover"
+
+[tier-group.doomed]
+tiers = ["all-bad"]
+strategy = "failover"
+|}
+
+let test_tier_group_with_all_unresolvable_tiers_excluded () =
+  let path = write_temp_toml all_tiers_unresolvable_toml in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove path with _ -> ())
+    (fun () ->
+      match Hotpath.try_load_partial path with
+      | None -> fail "expected Some result (tier.lone-good is resolvable)"
+      | Some { snapshot; errors = _ } ->
+        let names = Hotpath.decl_snapshot_profile_names snapshot in
+        check bool "tier.lone-good in snapshot" true
+          (List.exists (fun n -> n = "tier.lone-good") names);
+        check bool "tier-group.doomed not in snapshot (all tiers fail)" true
+          (not (List.exists (fun n -> n = "tier-group.doomed") names));
+        check bool "tier.all-bad not in snapshot (zero members)" true
+          (not (List.exists (fun n -> n = "tier.all-bad") names)))
+
 (* --- Test suite --- *)
 
 let () =
@@ -552,5 +694,20 @@ let () =
           "try_load_partial clean parse has empty errors"
           `Quick
           test_try_load_partial_clean_has_no_errors;
+      ];
+      "phase8_4_dispatch_invariants",
+      [
+        test_case
+          "partial snapshot excludes zero-member tiers"
+          `Quick
+          test_partial_snapshot_excludes_zero_member_tiers;
+        test_case
+          "errors disjoint from profile_names"
+          `Quick
+          test_partial_snapshot_errors_disjoint_from_profile_names;
+        test_case
+          "tier-group with all unresolvable tiers excluded"
+          `Quick
+          test_tier_group_with_all_unresolvable_tiers_excluded;
       ];
     ]

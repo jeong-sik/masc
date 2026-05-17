@@ -77,6 +77,20 @@ val validate_session_requirement :
       [Error "Mcp-Session-Id header required. Call initialize first
       to obtain a session."] *)
 
+val validate_session_known :
+  session_was_provided:bool ->
+  is_known:bool ->
+  string ->
+  (unit, string) result
+(** RFC-0100 PR-3 — Q3 default. Reject [POST /mcp] when the client
+    echoes an [Mcp-Session-Id] the server has no state for. Returns
+    [Ok ()] when [session_was_provided = false] (a missing header is
+    handled by {!validate_session_requirement}), when [is_known = true],
+    or when the JSON-RPC method is one of the handshake set
+    ([initialize] / [notifications/initialized] / [ping]). Otherwise
+    returns [Error] with a message suitable for a [404 Not Found]
+    response body. *)
+
 (** {1 Re-exports} *)
 
 val protocol_version_from_body : string -> string option

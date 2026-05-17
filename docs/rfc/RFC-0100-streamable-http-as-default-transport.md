@@ -1,19 +1,19 @@
 ---
 rfc: "0100"
 title: "Streamable HTTP as default transport (MCP 2025-03-26)"
-status: Draft
+status: Active
 created: 2026-05-17
 updated: 2026-05-17
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0098", "0099"]
-implementation_prs: []
+implementation_prs: ["15798", "15865"]
 ---
 
 # RFC-0100 — Streamable HTTP as default transport (MCP 2025-03-26)
 
-Status: Draft
+Status: Active (PR-3 merge promotes to Active; PR-5 removal flips to Implemented)
 Author: jeong-sik (vincent)
 Date: 2026-05-17
 Scope: HTTP transport surface (`POST /mcp`) — chunked-first default, auto-upgrade to SSE on demand, `Mcp-Session-Id` header, legacy `GET /sse` deprecation window
@@ -149,17 +149,17 @@ PR-2 is **wire-shape-changing** (chunked framing replaces full-body); but the *b
 ## 7. Open questions
 
 - **Q1**: Should the 50 ms first-byte budget be configurable via env knob? **Decision (default)**: no — it's a spec/middlebox requirement, not a tunable. If a use case appears, revisit.
-- **Q2**: What's the exact upgrade dispatch signal? Tool catalog metadata (`streaming: true`)? Or runtime-decided (first chunk-emit from the OAS path)? **Open** — PR-3 picks one based on which has lower wiring cost.
-- **Q3**: Should server reject `POST /mcp` with `Mcp-Session-Id: <unknown>` (force re-open) or silently mint a new session? **Decision (default)**: reject with `404 Not Found` + new `Mcp-Session-Id` header — explicit handshake aligns with [[RFC-0099]]'s `Open` event being a real lifecycle transition.
+- **Q2**: What's the exact upgrade dispatch signal? Tool catalog metadata (`streaming: true`)? Or runtime-decided (first chunk-emit from the OAS path)? **Decision (PR-3)**: tool catalog metadata, surfaced through `Server_mcp_streaming_tools.is_streaming_capable`. The registry is a hand-curated SSOT inside `lib/server/`; adding or removing a tool name flips its POST response between SSE framing and chunked JSON. The runtime-decided alternative was rejected because the first-chunk-emit signal arrives after the response shape is already framed, so it would require speculative framing or a second connection.
+- **Q3**: Should server reject `POST /mcp` with `Mcp-Session-Id: <unknown>` (force re-open) or silently mint a new session? **Decision (PR-3)**: reject with `404 Not Found` + new `Mcp-Session-Id` header. Implemented as `validate_session_known` in `Server_mcp_transport_http_protocol`; the handshake set (`initialize` / `ping` / `notifications/initialized`) is exempt because those are the methods that legitimately establish a known session.
 
 ## 8. Acceptance
 
-- [ ] PR-1 (this RFC body): review + merge.
-- [ ] PR-2: chunked first-flush + 50 ms latency target.
-- [ ] PR-3: auto-upgrade + `Mcp-Session-Id` header.
+- [x] PR-1 (this RFC body): review + merge — `#15798`.
+- [x] PR-2: chunked first-flush + 50 ms latency target — `#15865`.
+- [x] PR-3: auto-upgrade + `Mcp-Session-Id` header (this PR).
 - [ ] PR-4: `Last-Event-ID` honored + deprecation headers.
 - [ ] PR-5 (T+6 months): legacy `GET /sse` removed.
-- [ ] RFC promoted to `Active` at PR-3 merge; `Implemented` after PR-5.
+- [x] RFC promoted to `Active` at PR-3 merge; `Implemented` after PR-5.
 
 ## 9. References
 

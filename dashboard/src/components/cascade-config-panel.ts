@@ -128,17 +128,22 @@ interface RawConfigModeSummary {
 function rawConfigModeSummary(
   raw: Pick<
     CascadeRawConfigResponse,
-    'source_path'
+    'source_editable' | 'source_path'
   > | null,
 ): RawConfigModeSummary {
   const sourcePath = raw?.source_path ?? 'cascade.toml'
+  const editable = raw !== null && raw.source_editable !== false
   return {
     title: 'Active Cascade Source',
     primary:
-      `현재 active source는 ${sourcePath} 입니다. 원본 cascade.toml 내용은 dashboard API에서 redaction됩니다.`,
+      editable
+        ? `현재 active source는 ${sourcePath} 입니다.`
+        : `현재 active source는 ${sourcePath} 이지만 읽기 전용 상태입니다.`,
     secondary:
-      '프로필, 후보 label, weight, health, validation 상태만 노출됩니다.',
-    saveLabel: '저장 비활성',
+      editable
+        ? '수정 후 저장하면 서버가 TOML을 검증하고 cascade snapshot을 다시 불러옵니다.'
+        : '소스 파일을 읽을 수 없어 프로필, 후보 label, weight, health, validation 상태만 노출됩니다.',
+    saveLabel: editable ? '저장' : '저장 비활성',
   }
 }
 

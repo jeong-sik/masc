@@ -266,3 +266,66 @@ Phase D step 2 가 그 결정 위에 구현.
 - **자체 FD 회계 시스템 (X)** — RFC-0101 의 `Fd_accountant` 와 별개.
   pool 의 stats 는 reuse/evict/create counter 만, throttle 없음. Phase
   F retirement gate 의 measurement.
+
+## 8. Phase B Prior Art findings — design 정정 (2026-05-17 후속)
+
+Phase B 의 `knowledge/research/2026-05-17-piaf-ocsigen-eio-fd-prior-art.md`
+가 본 design 의 두 가지 가정을 정정한다.
+
+### 8.1 정정 — piaf 는 multi-host pool *이 아니다*
+
+본 design §3 가 "piaf 가 이미 구현" 으로 기술한 부분은 *부정확*:
+
+> From `piaf.mli`: "A client instance represents a connection to a
+> **single remote endpoint**, and the remaining functions in this module
+> will issue requests to that endpoint only."
+
+piaf `Client.t` 는 *per-endpoint persistent client* — single-host
+keep-alive + redirect-aware reconnect. `Host → Pool[Connection]` 자료
+구조는 piaf 가 **제공하지 않는다**. 다음 항목들도 piaf 에 없음:
+- `idle_ttl_seconds` (idle eviction)
+- `max_idle_per_host`, `max_total_idle`
+- per-host TLS context cache
+
+### 8.2 정정 — cohttp upstream patch 후보 reject
+
+ocaml-cohttp issue #85 는 **2014 closed** 됐고 resolution 은
+`cohttp-lwt` + `cohttp-async` 한정. `cohttp-eio` 는 inherit 받지 않았으며
+별도의 open FD-hygiene 이슈 (#965 / #1121 / #676) 가 진행 중. 따라서
+RFC-0107 §3.1 의 후보 (b) "cohttp-eio + 자체 upstream patch" 는
+실현 가능 path 가 없다. **piaf 직진이 유일한 합리적 후보**.
+
+### 8.3 D.1 → D.2 sizing 재조정
+
+위 두 finding 의 결과로 D.2 작업량이 *증가* 한다:
+
+| 항목 | D.1 가정 | B 후 정정 |
+|---|---|---|
+| pool 자료구조 | piaf 가 제공 → thin wrapper | 자체 구현 (`Host_key → piaf Client.t queue`) |
+| idle eviction fiber | piaf 가 제공 | 자체 구현 (Eio fiber on pool's root_sw) |
+| per-host TLS context | piaf 가 캐싱 | 자체 캐시 (Eio_context 의 `_https_connector_cache` 확장 또는 pool 내장) |
+| pool 의 unit type | raw FD | `piaf Client.t` (FD ownership 은 piaf+Eio.Switch 에 위임) |
+
+**D.2 LoC re-estimate**: 400 → **600** (host map + eviction fiber +
+TLS cache 추가). 13 callsite 마이그레이션은 동일.
+
+§7 의 "Anti-prior-art — 자체 connection pool 재구현 (X)" 도 정정:
+*"piaf 가 single-host keep-alive 를 제공하므로 그 위에 multi-host pool
+layer (host map + eviction) 만 build. 자체 single-host 재구현은 여전히
+거부."* — 즉 **single-host keep-alive 는 piaf 에 위임, multi-host pool
+은 자체 build** 가 정확한 경계.
+
+### 8.4 Eio #244 인용 추가 (TLA+ motivation)
+
+B finding §"Eio #244 — exactly-one-owner 원칙" 이 우리 design 에
+직접 인용 가능:
+
+> Talex5 본인이 `Unix.close` 이중 close 패닉을 만나 `accept_fork` API
+> shape 을 바꿔서 해결. 우리 masc-mcp 의 `connection: close` 강제
+> 워크어라운드와 cohttp-eio #965 가 같은 버그 class.
+
+D.2 에서 추가할 TLA+ spec `Pool_no_double_close.tla` 의 motivation
+으로 차용. 본 spec 은 `Pool.release` 가 connection 을 *idle queue 로
+반환* 하는 경로와 *close 하는* 경로 사이의 exclusive choice 를
+모델링하여 같은 connection 의 release+release 또는 release+close 가
+불가능함을 증명한다.

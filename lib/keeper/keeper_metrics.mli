@@ -308,6 +308,12 @@ val metric_keeper_tool_underused_allowed_count : string
 val metric_keeper_tool_underused_allowed : string
 val metric_keeper_path_rejection : string
 val metric_keeper_path_resolver_identity_mismatch : string
+
+val metric_ide_orphan_writes : string
+(** RFC-0128 §4.2 — increments when an IDE annotation/region write
+    cannot be assigned to a canonical-URL bucket and lands in
+    [.masc-ide/_orphan/]. Counter labels:
+    [kind = "annotation" | "region"], [reason]. *)
 val metric_keeper_heartbeat_successes : string
 val metric_keeper_heartbeat_failures : string
 val metric_keeper_cleanup_tracking_failures : string

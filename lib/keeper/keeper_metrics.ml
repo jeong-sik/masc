@@ -538,6 +538,12 @@ let metric_keeper_tool_underused_allowed_count =
 let metric_keeper_tool_underused_allowed = "masc_keeper_tool_underused_allowed"
 let metric_keeper_path_rejection = "masc_keeper_path_rejection_total"
 
+(* RFC-0128 §4.2 — counter for records that could not be assigned to a
+   canonical-URL bucket and landed in [.masc-ide/_orphan/]. Labels:
+   [kind = "annotation" | "region"], [reason = "unregistered_repo"
+   | "blank_url" | "url_unparseable"]. *)
+let metric_ide_orphan_writes = "masc_ide_orphan_writes_total"
+
 let metric_keeper_path_resolver_identity_mismatch =
   "masc_keeper_path_resolver_identity_mismatch_total"
 ;;

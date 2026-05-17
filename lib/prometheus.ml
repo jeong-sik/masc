@@ -2699,6 +2699,12 @@ let init () =
     "Keeper path rejections (sandbox escape / outside roots). Labels: kind."
     Counter;
   add
+    Keeper_metrics.metric_ide_orphan_writes
+    "RFC-0128 §4.2: IDE annotation/region writes that landed in \
+     .masc-ide/_orphan/ because the canonical URL could not be resolved. \
+     Labels: kind (annotation | region), reason."
+    Counter;
+  add
     Keeper_metrics.metric_keeper_provider_cooldown_remaining_sec
     "Provider cooldown remaining seconds. Labels: keeper, provider."
     Gauge;

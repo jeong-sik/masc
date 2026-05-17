@@ -34,6 +34,40 @@ let resolve_workspace_base ~state ~uri =
     ~keeper_param:(Uri.get_query_param uri "keeper")
 ;;
 
+(* RFC-0128 §4.5 — resolve the partition for a query.
+
+   Priority:
+     1. [?canonical_url=...] explicit override (still re-normalised so a
+        misspelt query falls back to Legacy rather than silently
+        creating a new bucket).
+     2. [?repo_id=...] → lookup repo.url in [Repo_store] → normalise.
+     3. Default → [Legacy] so traffic that has not been updated to use
+        either parameter keeps reading the historical flat store.
+
+   PR-1d removes the [Legacy] fallback once the data migration runs. *)
+let resolve_partition_for_query ~state ~uri =
+  let project_base = base_path_of_state state in
+  let from_canonical =
+    match Uri.get_query_param uri "canonical_url" with
+    | Some s when String.trim s <> "" -> Ide_paths.canonical_url_of_remote s
+    | _ -> None
+  in
+  let from_repo_id () =
+    match Uri.get_query_param uri "repo_id" with
+    | Some id when String.trim id <> "" ->
+      (match Repo_store.find_url_by_id ~base_path:project_base id with
+       | Some url -> Ide_paths.canonical_url_of_remote url
+       | None -> None)
+    | _ -> None
+  in
+  match from_canonical with
+  | Some slug -> Ide_paths.By_url slug
+  | None ->
+    (match from_repo_id () with
+     | Some slug -> Ide_paths.By_url slug
+     | None -> Ide_paths.Legacy)
+;;
+
 let json_error message = `Assoc [ "ok", `Bool false; "error", `String message ]
 let json_ok data = `Assoc [ "ok", `Bool true; "data", data ]
 
@@ -111,7 +145,10 @@ let add_routes router =
            | _ -> None
          in
          let filter = { Ide_annotation_types.file_path; keeper_id; goal_id; task_id } in
-         let annotations = Ide_annotations.list ~base_dir:base ~filter () in
+         let partition = resolve_partition_for_query ~state ~uri in
+         let annotations =
+           Ide_annotations.list ~base_dir:base ~partition ~filter ()
+         in
          let json =
            `List (List.map Ide_annotation_types.annotation_to_json annotations)
          in
@@ -174,9 +211,11 @@ let add_routes router =
              let session_id = find_string "session_id" in
              let operation_id = find_string "operation_id" in
              let worker_run_id = find_string "worker_run_id" in
+             let partition = resolve_partition_for_query ~state ~uri in
              (match
                 Ide_annotations.create
                   ~base_dir:base
+                  ~partition
                   ~keeper_id
                   ~file_path
                   ~line_start
@@ -243,7 +282,8 @@ let add_routes router =
              (Yojson.Safe.to_string (json_error "Missing id or keeper_id"))
              reqd
          else (
-           match Ide_annotations.delete ~base_dir:base ~id ~keeper_id () with
+           let partition = resolve_partition_for_query ~state ~uri in
+           match Ide_annotations.delete ~base_dir:base ~partition ~id ~keeper_id () with
            | Ok () -> Http.Response.json ~status:`No_content ~request "{}" reqd
            | Error msg ->
              Http.Response.json

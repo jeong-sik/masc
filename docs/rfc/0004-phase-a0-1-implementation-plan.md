@@ -1,8 +1,61 @@
 # RFC-0004 Phase A0.1 — implementation plan (`Sse_event` typed envelope)
 
-Status: Draft (2026-05-17)
+Status: Completed (2026-05-17)
 Companion to: docs/rfc/RFC-0004-shared-contract-ocaml-ts.md §Phase A0
 Related: PR #15745 (quick-win null guard), PR #15747 (RFC-0004 body resume), me PR #1125 (research synthesis)
+
+## Completion summary (2026-05-17)
+
+All sub-PRs merged.  Every `Agent_sdk.Event_bus` variant arm in
+`lib/cascade/cascade_event_bridge.ml` routes through a typed
+`Sse_event` constructor.  The `wrap_event` helper remains live for
+the catch-all kind-only fallback (warning 11 idiom, defending the
+OAS pin-bump P0 class — see plan §4 row "PR-4" completion criteria).
+
+| Sub-PR | PR # | Merged | Events |
+|---|---|---|---|
+| PR-1 (atd + lib base + PoC) | #15807 | 2026-05-17 | agent_started |
+| PR-2 (AgentStarted arm migrate) | #15811 | 2026-05-17 | (migration only) |
+| PR-3 (5 tool/turn arms) | #15824 | 2026-05-17 | tool_called, tool_completed, turn_started, turn_completed, turn_ready |
+| PR-4 (8 handoff/context/replacement/slot arms) | #15830 | 2026-05-17 | handoff_requested, handoff_completed, context_compacted, context_overflow_imminent, context_compact_started, content_replacement_replaced, content_replacement_kept, slot_scheduler_observed |
+| PR-3b (variable-shape addendum) | #15835 | 2026-05-17 | agent_completed, agent_failed |
+
+### Scope adjustments vs original plan
+
+- **PR-3 split into PR-3 + PR-3b**: `AgentCompleted` / `AgentFailed`
+  carry a payload tail produced by helpers that close over
+  `Agent_sdk.Types.api_response` and `Agent_sdk.Error.t`.  Pulling
+  those into the leaf event library would have re-introduced the
+  `Agent_sdk` dependency the migration is meant to localise.  PR-3
+  shipped the 5 simple-record arms; PR-3b added the
+  caller-supplied addendum pattern
+  (`merge_addendum_into_record` + `~result_fields` / `~error_fields`)
+  to cover the remaining two arms without leaking the dep.
+
+- **`wrap_event` retained**: The catch-all arm
+  (`cascade_event_bridge.ml` near line 831) emits a kind-only
+  placeholder for any unmigrated OAS variant.  This path stays on
+  `wrap_event` by design — see plan §4 footnote on the warning-11
+  catch-all.
+
+### Verification harness
+
+`test/sse_event/test_sse_event.ml` carries one byte-equal test per
+event (19 cases total: 14 envelopes + 1 `json_string_opt` regression
++ 4 PR-3b cases including the empty-addendum guard).  The baseline
+algorithm is an inline replica of `wrap_event` + `json_string_opt`,
+deliberately re-stated in the test file to avoid linking the heavy
+`cascade` dependency chain.  Any future change to the wire envelope
+must update both the cascade emitter and the inline replica — the
+test will diverge until both sides match.
+
+### What this unlocks (next phases)
+
+Phase A0.2 work (TypeScript decoder generation, golden-file replay,
+CLI emitter) can now consume `lib/sse_event/sse_event.atd` as a SSOT
+without any per-event work on the OCaml side.  The atd file is the
+contract; the cascade arms are the publishers; the test harness is
+the gate.
 
 ## 1. 작업 범위 재정의 (research 후속)
 

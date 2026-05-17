@@ -128,3 +128,21 @@ type stats = {
 }
 
 val stats : t -> stats
+
+(** {1 Test-only — internal data structures}
+
+    Exposed for unit testing of the pure pieces (Host_key normalization,
+    config defaults) without requiring piaf integration. Do not call
+    from production code. *)
+module For_testing : sig
+  module Host_key : sig
+    type t = {
+      scheme : string;
+      host   : string;
+      port   : int;
+    }
+    val of_uri : Uri.t -> t
+    val to_string : t -> string
+    val compare : t -> t -> int
+  end
+end

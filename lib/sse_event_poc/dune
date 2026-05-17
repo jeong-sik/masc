@@ -1,8 +1,13 @@
 (include_subdirs no)
 
+; PoC library — used only by test/sse_event_poc. Mark (optional) so that
+; production `opam install masc_mcp` (with-test=false) skips this lib when
+; atdgen-runtime is absent, keeping atdgen/atdgen-runtime as with-test-only
+; dependencies in masc_mcp.opam. No caller in lib/ depends on this module.
 (library
  (name sse_event_poc)
- (libraries yojson atdgen-runtime))
+ (libraries yojson atdgen-runtime)
+ (optional))
 
 (rule
  (targets sse_event_t.ml sse_event_t.mli)

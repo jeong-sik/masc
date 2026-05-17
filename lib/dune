@@ -81,6 +81,7 @@
  server_mcp_transport_http_conn
  server_mcp_transport_http_respond
  server_mcp_transport_http_agui
+ server_mcp_streaming_tools
   keeper_tool_registry
   keeper_tool_resolution
   keeper_tool_policy_config

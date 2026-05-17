@@ -93,6 +93,22 @@ let body_jsonrpc_id body_str =
     | _ -> None
   with Yojson.Json_error _ -> None
 
+(* RFC-0100 PR-3: extract [params.name] from a [tools/call] body for
+   streaming-registry lookup. Returns [None] when the body is malformed,
+   not a [tools/call], or missing [params.name]. *)
+let body_tools_call_name body_str =
+  try
+    match Yojson.Safe.from_string body_str with
+    | `Assoc fields -> (
+        match List.assoc_opt "params" fields with
+        | Some (`Assoc params) -> (
+            match List.assoc_opt "name" params with
+            | Some (`String name) -> Some name
+            | _ -> None)
+        | _ -> None)
+    | _ -> None
+  with Yojson.Json_error _ -> None
+
 let session_cookie_header = Server_mcp_transport_http_headers.session_cookie_header
 
 let sse_headers = Server_mcp_transport_http_headers.sse_headers
@@ -163,7 +179,16 @@ let should_stream_post_tools_call request body_str accept_mode =
   && not (request_force_json_response request)
   &&
   match body_jsonrpc_method body_str with
-  | Some ("tools/call", true) -> true
+  | Some ("tools/call", true) -> (
+      (* RFC-0100 PR-3: the [tools/call] request only upgrades to SSE
+         framing when the named tool is on the streaming registry
+         ([Server_mcp_streaming_tools]). Tools outside the registry stay on
+         the RFC-0100 PR-2 chunked-JSON default. Returns [false] when
+         [params.name] is missing — a malformed body never triggers the
+         streaming branch. *)
+      match body_tools_call_name body_str with
+      | Some name -> Server_mcp_streaming_tools.is_streaming_capable name
+      | None -> false)
   | _ -> false
 
 (** Inject or replace [_agent_name] in MCP [tools/call] arguments.
@@ -343,6 +368,41 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
             in
             safe_respond_with_string reqd
               (Httpun.Response.create ~headers `Bad_request)
+              body;
+            Error ()
+      in
+      let* () =
+        (* RFC-0100 PR-3 — Q3 default. If the client echoed an
+           [Mcp-Session-Id] the server has no protocol-version state
+           for, respond [404 Not Found] with a freshly minted
+           [Mcp-Session-Id] header so the client re-handshakes via
+           [initialize] instead of silently riding on a phantom
+           session. The handshake methods are exempt: [initialize]
+           legitimately mints the state we are about to check for,
+           and [ping] / [notifications/initialized] are allowed
+           without a known session per the existing contract. *)
+        let is_known =
+          session_was_provided && is_known_session session_id
+        in
+        match
+          validate_session_known ~session_was_provided ~is_known body_str
+        with
+        | Ok () -> Ok ()
+        | Error msg ->
+            let new_session_id = Mcp_session.generate () in
+            let body =
+              Printf.sprintf
+                {|{"jsonrpc":"2.0","error":{"code":-32600,"message":%s},"id":null}|}
+                (Yojson.Safe.to_string (`String msg))
+            in
+            let headers =
+              Httpun.Headers.of_list
+                (("content-length", string_of_int (String.length body))
+                :: json_headers ~deps new_session_id protocol_version
+                     origin)
+            in
+            safe_respond_with_string reqd
+              (Httpun.Response.create ~headers `Not_found)
               body;
             Error ()
       in

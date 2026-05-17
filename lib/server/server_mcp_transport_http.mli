@@ -59,6 +59,13 @@ val body_with_canonical_http_actor :
   string
 val validate_session_requirement :
   session_was_provided:bool -> string -> (unit, string) result
+val validate_session_known :
+  session_was_provided:bool ->
+  is_known:bool ->
+  string ->
+  (unit, string) result
+val is_known_session : string -> bool
+val body_tools_call_name : string -> string option
 val protocol_version_from_body : string -> string option
 val get_session_id_query : string -> string option
 val get_header_any_case : Httpun.Headers.t -> string -> string option

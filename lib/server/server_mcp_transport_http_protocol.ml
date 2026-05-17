@@ -47,6 +47,28 @@ let validate_session_requirement ~session_was_provided body_str =
           "Mcp-Session-Id header required. Call initialize first to obtain a \
            session."
 
+(** RFC-0100 PR-3 — Q3 default: reject [POST /mcp] requests that echo an
+    [Mcp-Session-Id] header the server has no state for. Returns [Ok ()]
+    when the request is the initial handshake ([initialize]/[ping]/init
+    notification — these legitimately mint a new session) or when the
+    session is already known to the server.
+
+    Methods that require an existing session (everything other than the
+    handshake set) receive [Error] when the client supplied an unknown id.
+    The transport responds with [404 Not Found] and a freshly minted
+    [Mcp-Session-Id] header so the client can re-handshake. *)
+let validate_session_known ~session_was_provided ~is_known body_str =
+  if not session_was_provided then Ok ()
+  else if is_known then Ok ()
+  else
+    match method_from_body body_str with
+    | Some "initialize" | Some "notifications/initialized" | Some "ping" ->
+        Ok ()
+    | Some _ | None ->
+        Error
+          "Unknown Mcp-Session-Id. The server has no state for the supplied \
+           session id. Re-initialize to obtain a fresh session."
+
 let protocol_version_from_body = Mcp_transport_protocol.protocol_version_from_body
 
 let is_http_error_response = Server_mcp_transport_http_headers.is_http_error_response

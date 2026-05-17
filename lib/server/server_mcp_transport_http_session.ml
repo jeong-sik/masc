@@ -35,6 +35,22 @@ let remember_protocol_version session_id version =
   if is_valid_protocol_version version then
     atomic_update protocol_version_by_session (fun map -> SMap.add session_id version map)
 
+(** RFC-0100 PR-3 — Q3 default: known-session predicate.
+
+    A session is "known" once an [initialize] body has registered a
+    protocol version for its id (see [remember_protocol_version]). Use
+    this to distinguish the legitimate "fresh session, no header"
+    handshake (where the server mints an id) from a client echoing an
+    [Mcp-Session-Id] header that the server has no state for — the latter
+    is rejected with [404 Not Found] so the client must re-handshake
+    instead of silently riding on a phantom session.
+
+    [mcp_profile_by_session] is not consulted because it is populated on
+    every POST regardless of whether [initialize] has succeeded, so it
+    cannot distinguish the handshake transition. *)
+let is_known_session session_id =
+  SMap.mem session_id (Atomic.get protocol_version_by_session)
+
 let remember_mcp_profile session_id profile =
   atomic_update mcp_profile_by_session (fun map -> SMap.add session_id profile map)
 

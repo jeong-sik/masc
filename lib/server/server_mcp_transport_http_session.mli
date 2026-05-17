@@ -33,6 +33,14 @@ val remember_protocol_version : string -> string -> unit
     silently no-ops on unknown versions (the upstream caller is
     expected to have validated first). *)
 
+val is_known_session : string -> bool
+(** RFC-0100 PR-3 — Q3 default. [true] iff the server has previously
+    recorded a protocol version for [session_id] (i.e., an
+    [initialize] request has succeeded). The complementary
+    {!mcp_profile_by_session} registry is not consulted because it
+    is populated on every POST regardless of [initialize]
+    completion. *)
+
 val remember_mcp_profile :
   string -> Server_mcp_transport_http_types.tool_profile -> unit
 

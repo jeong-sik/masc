@@ -21,7 +21,23 @@ val get_mono_clock_opt : unit -> Eio.Time.Mono.ty Eio.Resource.t option
 (** Get the global Eio monotonic clock if available. *)
 
 val set_switch : Eio.Switch.t -> unit
-(** Set the global Eio switch. *)
+(** Set the global Eio switch (server root_sw). Written once at server
+    bootstrap; survives until process exit. *)
+
+val with_turn_switch : Eio.Switch.t -> (unit -> 'a) -> 'a
+(** [with_turn_switch sw f] binds [sw] as the turn-scoped switch on the
+    *current fiber* and any fibers forked from inside [f]. Reads of
+    [get_switch_opt] / [get_switch] from within that scope return [sw];
+    reads from outside the binding (server, dashboard, bootstrap fibers)
+    fall through to the global atomic set by [set_switch] (= server
+    root_sw).
+
+    Used by [keeper_agent_run.run_turn] to constrain resources opened
+    during a single turn to that turn's lifetime: when the outer
+    [Eio.Switch.run] closes, those resources are released, preventing
+    the FD accumulation observed in the 2026-05-16 ENFILE storm.
+
+    Reference: RFC-0107 §3.3, audit §10.5. *)
 
 val with_test_env :
   net:[> `Network | `Platform of [> `Generic | `Unix ]] Eio.Resource.t ->

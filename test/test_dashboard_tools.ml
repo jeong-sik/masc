@@ -164,6 +164,17 @@ let test_dashboard_tools_projection () =
         (match runtime_resolution |> member "keeper_fd_pressure" with
          | `Assoc _ -> true
          | _ -> false);
+      check bool "runtime fd accountant surfaced" true
+        (match runtime_resolution |> member "fd_accountant" with
+         | `Assoc _ -> true
+         | _ -> false);
+      check int "runtime fd accountant kinds surfaced"
+        (List.length Lib.Fd_accountant.all_kinds)
+        (runtime_resolution
+         |> member "fd_accountant"
+         |> member "per_kind"
+         |> to_list
+         |> List.length);
       check bool "runtime keeper fleet safety surfaced" true
         (match runtime_resolution |> member "keeper_fleet_safety" with
          | `Assoc _ -> true

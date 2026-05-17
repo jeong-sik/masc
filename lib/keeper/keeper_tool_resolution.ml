@@ -193,13 +193,9 @@ type runtime_decision_outcome =
     [Keeper_tool_disclosure.canonical_tool_name] to this entry. PR-11
     removes the legacy wrapper in favour of this one. *)
 let runtime_decision name =
-  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix name in
-  match Keeper_tool_alias.public_masc_to_internal stripped with
-  | Some internal -> Mcp_mapped { stripped; internal }
-  | None ->
-    (match Keeper_tool_alias.route stripped with
-     | Some r -> Route_hit { internal = r.internal_name }
-     | None ->
-       if Keeper_tool_alias.is_known_internal stripped
-       then Already_internal { canonical = stripped }
-       else Miss)
+  match Keeper_tool_alias.canonical_resolution name with
+  | Keeper_tool_alias.Public_mcp { stripped; internal } ->
+    Mcp_mapped { stripped; internal }
+  | Keeper_tool_alias.Public_alias { internal } -> Route_hit { internal }
+  | Keeper_tool_alias.Internal { canonical } -> Already_internal { canonical }
+  | Keeper_tool_alias.Unknown -> Miss

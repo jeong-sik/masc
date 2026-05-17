@@ -146,6 +146,33 @@ let strip_mcp_masc_prefix name =
   else name
 ;;
 
+type canonical_resolution =
+  | Public_mcp of
+      { stripped : string
+      ; internal : string
+      }
+  | Public_alias of { internal : string }
+  | Internal of { canonical : string }
+  | Unknown
+
+let canonical_resolution name =
+  let stripped = strip_mcp_masc_prefix name in
+  match public_masc_to_internal stripped with
+  | Some internal -> Public_mcp { stripped; internal }
+  | None ->
+    (match route stripped with
+     | Some r -> Public_alias { internal = r.internal_name }
+     | None ->
+       if is_known_internal stripped then Internal { canonical = stripped } else Unknown)
+;;
+
+let canonical_internal_name name =
+  match canonical_resolution name with
+  | Public_mcp { internal; _ } | Public_alias { internal } -> Some internal
+  | Internal { canonical } -> Some canonical
+  | Unknown -> None
+;;
+
 (* ── Schema helpers (local) ──────────────────────────────────────── *)
 
 let property name typ description =

@@ -69,6 +69,27 @@ val public_masc_to_internal : string -> string option
     present. *)
 val strip_mcp_masc_prefix : string -> string
 
+(** Pure canonical routing result for set-logic and routing callers that need
+    the same alias interpretation without emitting telemetry. *)
+type canonical_resolution =
+  | Public_mcp of
+      { stripped : string
+      ; internal : string
+      }
+  | Public_alias of { internal : string }
+  | Internal of { canonical : string }
+  | Unknown
+
+(** [canonical_resolution name] applies MCP-prefix stripping, public MCP
+    replacement, LLM-native alias routing, and known-internal detection. *)
+val canonical_resolution : string -> canonical_resolution
+
+(** [canonical_internal_name name] returns the internal keeper/MASC tool name
+    used for pure set-logic comparisons after applying the same public alias
+    and MCP-prefix routing rules used by runtime dispatch. [None] means the
+    name is not a recognised public, public-MCP, or internal tool. *)
+val canonical_internal_name : string -> string option
+
 (** {1 Public schemas} *)
 
 (** [public_input_schema public_name] returns the LLM-facing JSON schema

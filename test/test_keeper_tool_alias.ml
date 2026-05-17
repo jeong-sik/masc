@@ -230,6 +230,29 @@ let test_mcp_prefixed_keeper_internal_routes () =
     canonical
 ;;
 
+let test_alias_canonical_internal_name_for_set_logic () =
+  Alcotest.(check (option string))
+    "public Bash canonicalises to keeper_bash"
+    (Some "keeper_bash")
+    (Alias.canonical_internal_name "Bash");
+  Alcotest.(check (option string))
+    "public Grep canonicalises to keeper_shell"
+    (Some "keeper_shell")
+    (Alias.canonical_internal_name "Grep");
+  Alcotest.(check (option string))
+    "MCP-prefixed public MASC name canonicalises to internal keeper tool"
+    (Some "keeper_board_post")
+    (Alias.canonical_internal_name "mcp__masc__masc_board_post");
+  Alcotest.(check (option string))
+    "known internal name stays internal"
+    (Some "keeper_bash")
+    (Alias.canonical_internal_name "keeper_bash");
+  Alcotest.(check (option string))
+    "unknown name stays unknown"
+    None
+    (Alias.canonical_internal_name "Skill")
+;;
+
 let test_mcp_prefixed_public_masc_goal_tool_routes () =
   let canonical = Disclosure.canonical_tool_name "mcp__masc__masc_goal_list" in
   Alcotest.(check string)
@@ -750,6 +773,10 @@ let () =
             "mcp-prefixed keeper internal canonicalises to stripped"
             `Quick
             test_mcp_prefixed_keeper_internal_routes
+        ; Alcotest.test_case
+            "canonical internal name for set logic"
+            `Quick
+            test_alias_canonical_internal_name_for_set_logic
         ; Alcotest.test_case
             "mcp-prefixed public MASC goal tool canonicalises to stripped"
             `Quick

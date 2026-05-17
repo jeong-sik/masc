@@ -5,6 +5,11 @@ let default_threshold = 10
    not in [Sys.getenv_opt]. *)
 let threshold () = default_threshold
 
+type record_outcome =
+  | Normal
+  | Loop_detected of { streak : int; threshold : int }
+  | Loop_reset of { previous_streak : int; was_latched : bool }
+
 (* Per-keeper state: current streak + latched flag so the
    detected-counter only bumps once per loop episode, not on every
    turn while the keeper is stuck. *)
@@ -54,14 +59,18 @@ let record_turn ~keeper_name ~speech_act =
            — keeper is returning stay_silent repeatedly. Check preset \
            mismatch (#9926 proposal 1) or scheduler/backlog drift. \
            Counter will not re-fire until the streak resets via any \
-           non-stay_silent speech act."
-          keeper_name s.streak t
-      end
+          non-stay_silent speech act."
+          keeper_name s.streak t;
+        Loop_detected { streak = s.streak; threshold = t }
+      end else Normal
     end else begin
+      let previous_streak = s.streak in
+      let was_latched = s.detected_latched in
       if s.streak > 0 then
         update_streak_gauge keeper_name 0;
       s.streak <- 0;
-      s.detected_latched <- false
+      s.detected_latched <- false;
+      if previous_streak = 0 then Normal else Loop_reset { previous_streak; was_latched }
     end)
 
 let current_streak ~keeper_name =

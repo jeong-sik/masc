@@ -312,6 +312,7 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
     | Turn_timeout_after_queue_wait
     | Turn_timeout
     | Completion_contract_violation
+    | Stay_silent_loop
     | Fiber_unresolved
     | Stale_turn_timeout
     | Stale_fleet_batch
@@ -342,6 +343,7 @@ let runtime_blocker_surface_of_legacy_string reason cls =
   | Turn_timeout
   | Completion_contract_violation
   | No_tool_capable_provider
+  | Stay_silent_loop
   | Fiber_unresolved
   | Stale_turn_timeout
   | Stale_fleet_batch

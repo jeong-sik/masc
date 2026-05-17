@@ -17,12 +17,107 @@ include Keeper_unified_turn_types
 
 let runtime_lane_label = "runtime"
 
+let stay_silent_recovery_stimulus ~now ~keeper_name ~streak ~threshold =
+  let payload =
+    `Assoc
+      [ "source", `String "stay_silent_recovery"
+      ; "keeper", `String keeper_name
+      ; "streak", `Int streak
+      ; "threshold", `Int threshold
+      ; ( "message"
+        , `String
+            "stay_silent loop threshold crossed; run a recovery cycle instead of \
+             remaining silent" )
+      ]
+    |> Yojson.Safe.to_string
+  in
+  { Keeper_event_queue.post_id = "stay-silent-loop:" ^ keeper_name
+  ; urgency = Keeper_event_queue.Immediate
+  ; arrived_at = now
+  ; payload
+  }
+;;
 
+let mark_stay_silent_loop_detected ~(config : Coord.config) meta ~streak ~threshold =
+  let detail =
+    Printf.sprintf
+      "stay_silent loop detected: streak=%d threshold=%d; recovery stimulus queued"
+      streak
+      threshold
+  in
+  let failure_reason =
+    Keeper_registry.Tool_required_unsatisfied
+      { code = "stay_silent_loop"; detail }
+  in
+  Keeper_registry.set_failure_reason
+    ~base_path:config.base_path
+    meta.name
+    (Some failure_reason);
+  let stimulus =
+    stay_silent_recovery_stimulus
+      ~now:(Time_compat.now ())
+      ~keeper_name:meta.name
+      ~streak
+      ~threshold
+  in
+  Keeper_registry.enqueue_event ~base_path:config.base_path meta.name stimulus;
+  Keeper_registry.wakeup ~base_path:config.base_path meta.name;
+  (try
+     Keeper_reaction_ledger.record_event_queue_stimulus
+       ~base_path:config.base_path
+       ~keeper_name:meta.name
+       stimulus
+   with
+   | Eio.Cancel.Cancelled _ as exn -> raise exn
+   | exn ->
+     Log.Keeper.warn
+       "%s: failed to persist stay-silent recovery stimulus in reaction ledger: %s"
+       meta.name
+       (Printexc.to_string exn));
+  Log.Keeper.warn
+    "%s: stay_silent loop escalated to blocker and recovery stimulus \
+     (streak=%d threshold=%d)"
+    meta.name
+    streak
+    threshold;
+  Keeper_types.map_runtime
+    (fun rt ->
+       { rt with
+         last_blocker =
+           Some
+             (Keeper_meta_contract.blocker_info_of_class
+                ~detail
+                Keeper_types.Stay_silent_loop)
+       })
+    meta
+;;
 
-
-
-
-
+let clear_stay_silent_loop_if_recovered
+      ~(config : Coord.config)
+      meta
+      ~previous_streak
+      ~was_latched
+  =
+  if was_latched then begin
+    match Keeper_registry.get ~base_path:config.base_path meta.name with
+    | Some { Keeper_registry.last_failure_reason =
+               Some (Keeper_registry.Tool_required_unsatisfied { code; _ })
+           ; _
+           }
+      when String.equal code "stay_silent_loop" ->
+      Keeper_registry.set_failure_reason ~base_path:config.base_path meta.name None;
+      Log.Keeper.info
+        "%s: stay_silent loop recovered after non-silent turn \
+         (previous_streak=%d)"
+        meta.name
+        previous_streak
+    | _ -> ()
+  end;
+  match meta.runtime.last_blocker with
+  | Some { Keeper_meta_contract.klass = Keeper_types.Stay_silent_loop; _ } ->
+    Keeper_types.map_runtime (fun rt -> { rt with last_blocker = None }) meta
+  | _ -> meta
+;;
 
 let run_keeper_cycle
       ~(config : Coord.config)
@@ -2301,11 +2396,30 @@ let run_keeper_cycle
                   (* #9926: observe consecutive stay_silent turns to detect the
              masc-improver-style loop that burned 13.3h of LLM time on
              unclaimable backlog. Pure in-memory counter; fires a latched
-             warn + counter metric when the streak crosses
-             MASC_STAY_SILENT_LOOP_THRESHOLD (default 10). *)
-                  Keeper_stay_silent_loop_detector.record_turn
-                    ~keeper_name:updated_meta.Keeper_types.name
-                    ~speech_act:updated_meta.Keeper_types.runtime.last_speech_act;
+             warn + counter metric when the streak crosses the product
+             threshold (default 10). *)
+                  let updated_meta =
+                    match
+                      Keeper_stay_silent_loop_detector.record_turn
+                        ~keeper_name:updated_meta.Keeper_types.name
+                        ~speech_act:updated_meta.Keeper_types.runtime.last_speech_act
+                    with
+                    | Keeper_stay_silent_loop_detector.Normal -> updated_meta
+                    | Keeper_stay_silent_loop_detector.Loop_detected
+                        { streak; threshold } ->
+                      mark_stay_silent_loop_detected
+                        ~config
+                        updated_meta
+                        ~streak
+                        ~threshold
+                    | Keeper_stay_silent_loop_detector.Loop_reset
+                        { previous_streak; was_latched } ->
+                      clear_stay_silent_loop_if_recovered
+                        ~config
+                        updated_meta
+                        ~previous_streak
+                        ~was_latched
+                  in
                   (* #12799: observe consecutive passive-read turns to detect keepers
              stuck issuing only status/read tools without execution progress.
              Derive the dominant progress class from the tool names used this

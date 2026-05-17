@@ -35,6 +35,7 @@ let valid_sections =
       ; "goal-loop"
       ; "fleet-health"
       ; "doctor"
+      ; "transport-health"
       ] )
   ; "command", [ "operations" ]
   ; "connectors", [ "connector-status" ]

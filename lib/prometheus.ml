@@ -2969,18 +2969,41 @@ let text_metric_type = function
 let type_to_string metric_type = Prometheus_text.type_to_string (text_metric_type metric_type)
 let labels_to_string = Prometheus_format.labels_to_string
 
+(* Track host labels seen in previous scrapes so we can zero out gauges
+   for hosts that disappeared from the pool. Without this, an evicted
+   host's last non-zero idle value would persist in the registry forever
+   and the metrics table would grow unboundedly with every unique host
+   seen. Set is module-local: only [update_pool_metrics_gauges] reads
+   or writes it, and [to_prometheus_text]'s mutex serialises calls. *)
+let pool_idle_seen_hosts : (string, unit) Hashtbl.t = Hashtbl.create 16
+
 let update_pool_metrics_gauges () =
   match Pool_metrics.current_snapshot () with
   | None -> ()
   | Some stats ->
     set_gauge metric_pool_inflight_total (float_of_int stats.total_inflight);
+    let current_hosts = List.map fst stats.idle_per_host in
+    let current_set = List.fold_left (fun acc h -> Hashtbl.replace acc h (); acc)
+                        (Hashtbl.create (List.length current_hosts)) current_hosts in
+    (* Zero out gauges for hosts that disappeared since the last scrape. *)
+    Hashtbl.iter
+      (fun host () ->
+        if not (Hashtbl.mem current_set host)
+        then set_gauge metric_pool_idle_total ~labels:[ "host", host ] 0.0)
+      pool_idle_seen_hosts;
+    (* Write current values + remember them for the next scrape. *)
     List.iter
       (fun (host, idle) ->
         set_gauge
           metric_pool_idle_total
           ~labels:[ "host", host ]
-          (float_of_int idle))
+          (float_of_int idle);
+        Hashtbl.replace pool_idle_seen_hosts host ())
       stats.idle_per_host;
+    (* Drop evicted hosts from the seen-set so we stop tracking them. *)
+    Hashtbl.filter_map_inplace
+      (fun host () -> if Hashtbl.mem current_set host then Some () else None)
+      pool_idle_seen_hosts;
     set_gauge metric_pool_idle_total (float_of_int stats.total_idle);
     set_gauge metric_pool_reuse_total (float_of_int stats.reuse_count_total);
     set_gauge metric_pool_evict_total (float_of_int stats.evict_count_total);

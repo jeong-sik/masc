@@ -148,7 +148,23 @@ val fairness_delay_sec_at : now:float -> keeper_name:string -> float
     fiber may double-release; Eio counting semaphores tolerate this
     bounded over-release.
 
-    See [keeper_turn_slot.ml] doc for full design rationale. *)
+    See [keeper_turn_slot.ml] doc for full design rationale.
+
+    {b WORKAROUND (RFC-0125)}: This function only releases the semaphore
+    permit. The underlying stuck OS subprocess (LLM HTTPS read,
+    [docker exec]) keeps running until process restart. The structural
+    fix is RFC-0125 P4 [keeper-level max-turn watchdog]
+    (PR #15964), which cancels the keepalive fiber at a typed wall-clock
+    boundary BEFORE the slot is leaked, so this rescue path stops being
+    reached. Removal target: 30-day soak on
+    [metric_keeper_oas_timeout_budget_watchdog_termination] reaching
+    zero after `MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC` is enabled
+    fleet-wide. Do not invoke from new call sites. Existing legitimate
+    callers (slated to be unwound under removal target above):
+    - [Keeper_supervisor.force_unresolved_watchdog_crash] — primary
+      watchdog rescue.
+    - [Keeper_keepalive.stop_keepalive] — manual stop path
+      (`lib/keeper/keeper_keepalive.ml`). *)
 val force_release_holder_for : keeper_name:string -> (string * float) list
 
 (** Test-only: stamp a completion time directly (bypasses [Time_compat.now]). *)

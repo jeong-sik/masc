@@ -53,7 +53,7 @@ let load_regions base_dir =
       match Types.region_of_json json with
       | Ok region -> region :: acc
       | Error msg -> fail msg)
-    (Region.regions_file ~base_dir)
+    (Region.regions_file ~base_dir ())
   |> List.rev
 ;;
 
@@ -148,7 +148,7 @@ let test_create_lists_route_context () =
         ; task_id = None
         }
       in
-      (match Store.list ~base_dir ~filter with
+      (match Store.list ~base_dir ~filter () with
        | [ listed ] ->
          check string "id" created.id listed.id;
          check (option string) "listed comment" (Some "comment-1") listed.comment_id;
@@ -243,7 +243,7 @@ let test_region_tracker_writes_fixed_regions_file () =
               ; "content", `String "let x = 1\n"
               ] )
         ]);
-    check bool "fixed regions file exists" true (Sys.file_exists (Region.regions_file ~base_dir));
+    check bool "fixed regions file exists" true (Sys.file_exists (Region.regions_file ~base_dir ()));
     match load_regions base_dir with
     | [ region ] ->
       check string "file path" "lib/a.ml" region.Types.file_path;
@@ -275,7 +275,7 @@ let test_meta_sync_flush_writes_fixed_regions_file () =
     let state = Sync.flush_regions config state in
     let stats = Sync.get_stats state in
     check int "pending regions cleared" 0 stats.pending_region_count;
-    check bool "fixed regions file exists" true (Sys.file_exists (Region.regions_file ~base_dir));
+    check bool "fixed regions file exists" true (Sys.file_exists (Region.regions_file ~base_dir ()));
     match load_regions base_dir with
     | [ region ] ->
       check string "file path" "lib/b.ml" region.Types.file_path;
@@ -286,6 +286,166 @@ let test_meta_sync_flush_writes_fixed_regions_file () =
          check int "turn" 8 turn
        | Types.Manual _ -> fail "expected tool-call source")
     | rows -> failf "expected one region, got %d" (List.length rows))
+;;
+
+(* RFC-0128 §4.2 — partition-aware store routing. *)
+
+let make_filter () : Types.annotation_filter =
+  { file_path = None; keeper_id = None; goal_id = None; task_id = None }
+
+let create_in_partition ~base_dir ~partition ~kind ~content () =
+  Store.create
+    ~base_dir
+    ~partition
+    ~keeper_id:"sangsu"
+    ~file_path:"lib/foo.ml"
+    ~line_start:1
+    ~line_end:3
+    ~kind
+    ~content
+    ()
+;;
+
+let test_create_by_url_isolates_from_legacy () =
+  with_temp_dir (fun base_dir ->
+    let slug = "github.com_owner_repo" in
+    let _ =
+      create_in_partition
+        ~base_dir
+        ~partition:(Ide_paths.By_url slug)
+        ~kind:Types.Comment
+        ~content:"in by-url"
+        ()
+    in
+    let by_url =
+      Store.list
+        ~base_dir
+        ~partition:(Ide_paths.By_url slug)
+        ~filter:(make_filter ())
+        ()
+    in
+    let legacy = Store.list ~base_dir ~filter:(make_filter ()) () in
+    check int "by-url count" 1 (List.length by_url);
+    check int "legacy is empty" 0 (List.length legacy))
+;;
+
+let test_create_orphan_separates_from_by_url () =
+  with_temp_dir (fun base_dir ->
+    let slug = "github.com_owner_repo" in
+    let _ =
+      create_in_partition
+        ~base_dir
+        ~partition:Ide_paths.Orphan
+        ~kind:Types.Comment
+        ~content:"orphan record"
+        ()
+    in
+    let _ =
+      create_in_partition
+        ~base_dir
+        ~partition:(Ide_paths.By_url slug)
+        ~kind:Types.Comment
+        ~content:"by-url record"
+        ()
+    in
+    let by_url =
+      Store.list
+        ~base_dir
+        ~partition:(Ide_paths.By_url slug)
+        ~filter:(make_filter ())
+        ()
+    in
+    let orphan =
+      Store.list ~base_dir ~partition:Ide_paths.Orphan ~filter:(make_filter ()) ()
+    in
+    check int "by-url count" 1 (List.length by_url);
+    check int "orphan count" 1 (List.length orphan);
+    let by_url_content = (List.hd by_url).content in
+    let orphan_content = (List.hd orphan).content in
+    check string "by-url content" "by-url record" by_url_content;
+    check string "orphan content" "orphan record" orphan_content)
+;;
+
+let test_legacy_default_is_unchanged () =
+  with_temp_dir (fun base_dir ->
+    (* No ?partition argument → defaults to Legacy → writes to the
+       historical flat path. PR-1c will flip the keeper write path,
+       but until then existing behaviour MUST remain. *)
+    let _ =
+      Store.create
+        ~base_dir
+        ~keeper_id:"sangsu"
+        ~file_path:"lib/foo.ml"
+        ~line_start:1
+        ~line_end:3
+        ~kind:Types.Comment
+        ~content:"legacy default"
+        ()
+    in
+    let legacy_path =
+      Filename.concat
+        (Ide_paths.partition_store_dir ~base_dir Ide_paths.Legacy)
+        "annotations.jsonl"
+    in
+    check bool "legacy file exists" true (Sys.file_exists legacy_path);
+    let legacy = Store.list ~base_dir ~filter:(make_filter ()) () in
+    check int "legacy count" 1 (List.length legacy))
+;;
+
+let test_delete_partition_scoped () =
+  with_temp_dir (fun base_dir ->
+    let slug = "github.com_owner_repo" in
+    let by_url =
+      Result.get_ok
+        (create_in_partition
+           ~base_dir
+           ~partition:(Ide_paths.By_url slug)
+           ~kind:Types.Comment
+           ~content:"to delete"
+           ())
+    in
+    (* Delete in matching partition succeeds; same id in Legacy fails. *)
+    let in_legacy =
+      Store.delete
+        ~base_dir
+        ~partition:Ide_paths.Legacy
+        ~id:by_url.id
+        ~keeper_id:"sangsu"
+        ()
+    in
+    (match in_legacy with
+     | Ok () -> fail "Legacy delete must miss when annotation lives in By_url"
+     | Error _ -> ());
+    let in_by_url =
+      Store.delete
+        ~base_dir
+        ~partition:(Ide_paths.By_url slug)
+        ~id:by_url.id
+        ~keeper_id:"sangsu"
+        ()
+    in
+    (match in_by_url with
+     | Ok () -> ()
+     | Error msg -> failf "By_url delete failed: %s" msg))
+;;
+
+let test_region_append_by_url_isolates_from_legacy () =
+  with_temp_dir (fun base_dir ->
+    let slug = "github.com_owner_repo" in
+    let region : Types.code_region =
+      { keeper_id = "sangsu"
+      ; file_path = "lib/foo.ml"
+      ; line_start = 1
+      ; line_end = 5
+      ; source = Types.Tool_call { tool_name = "write_file"; turn = 0 }
+      ; timestamp_ms = 1L
+      }
+    in
+    Region.append_region ~base_dir ~partition:(Ide_paths.By_url slug) region;
+    let by_url_path = Region.regions_file ~base_dir ~partition:(Ide_paths.By_url slug) () in
+    let legacy_path = Region.regions_file ~base_dir () in
+    check bool "by-url regions exists" true (Sys.file_exists by_url_path);
+    check bool "legacy regions absent" false (Sys.file_exists legacy_path))
 ;;
 
 let () =
@@ -309,6 +469,28 @@ let () =
             "meta sync flush writes fixed regions.jsonl"
             `Quick
             test_meta_sync_flush_writes_fixed_regions_file
+        ] )
+    ; ( "partition (RFC-0128)"
+      , [ test_case
+            "create By_url isolates from Legacy"
+            `Quick
+            test_create_by_url_isolates_from_legacy
+        ; test_case
+            "Orphan and By_url are separate buckets"
+            `Quick
+            test_create_orphan_separates_from_by_url
+        ; test_case
+            "Legacy default is unchanged"
+            `Quick
+            test_legacy_default_is_unchanged
+        ; test_case
+            "delete is partition-scoped"
+            `Quick
+            test_delete_partition_scoped
+        ; test_case
+            "append_region By_url isolates from Legacy"
+            `Quick
+            test_region_append_by_url_isolates_from_legacy
         ] )
     ]
 ;;

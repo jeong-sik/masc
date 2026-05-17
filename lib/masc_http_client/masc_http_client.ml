@@ -1,78 +1,14 @@
-(** Masc_http_client — cohttp-eio wrapper with explicit socket close.
+(** Masc_http_client — typed pool front-end for outbound HTTP.
 
-    cohttp-eio 6.1.1 does not reliably close the underlying TCP socket fd
-    when the Eio.Switch exits (observed on macOS). This module intercepts
-    the connection factory via [make_generic] to capture the raw socket and
-    close it explicitly on switch release.
+    All callers go through the per-process [Pool.t] singleton via
+    [post_sync] / [get_sync] / [get_response_sync]; the pool owns the
+    underlying piaf transport, keep-alive, and TLS context cache.
 
-    All MASC code that makes outbound HTTP requests should use this module
-    instead of [Cohttp_eio.Client.make] directly.
-
-    @see <https://github.com/jeong-sik/masc-mcp/issues/3221> *)
-
-let make_closing_client ~sw ~net ~https =
-  let net = (net :> [ `Generic ] Eio.Net.ty Eio.Resource.t) in
-  let tracked_flows :
-    [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t list ref =
-    ref []
-  in
-  let clone_resource resource =
-    let Eio.Resource.T (value, ops) = resource in
-    Eio.Resource.T (value, ops)
-  in
-  let register_flow flow =
-    tracked_flows := clone_resource flow :: !tracked_flows;
-    flow
-  in
-  let close_flow flow =
-    try Eio.Resource.close flow
-    with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Printf.eprintf "[masc_http_client] close flow failed: %s\n%!" (Printexc.to_string exn)
-  in
-  let connect ~sw:conn_sw uri =
-    let service =
-      match Uri.port uri with
-      | Some port -> Int.to_string port
-      | _ -> Uri.scheme uri |> Option.value ~default:"http"
-    in
-    let addr =
-      match
-        Eio.Net.getaddrinfo_stream ~service net
-          (Uri.host_with_default ~default:"localhost" uri)
-      with
-      | ip :: _ -> ip
-      | [] -> raise (Invalid_argument "masc_http_client: failed to resolve hostname")
-    in
-    let sock = Eio.Net.connect ~sw:conn_sw net addr in
-    (* Return type must include `Close for cohttp-eio make_generic. *)
-    match Uri.scheme uri with
-    | Some "https" -> (
-        match https with
-        | Some wrap -> (
-            let wrapped =
-              try
-                wrap uri sock
-              with exn ->
-                close_flow
-                  (clone_resource
-                     (sock :> [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t));
-                raise exn
-            in
-            tracked_flows :=
-              (clone_resource wrapped
-                :> [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t)
-              :: !tracked_flows;
-            (wrapped :> [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t))
-        | None -> raise (Invalid_argument "masc_http_client: HTTPS requested but not enabled"))
-    | _ ->
-        register_flow
-          (sock :> [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t)
-  in
-  let client = Cohttp_eio.Client.make_generic connect in
-  Eio.Switch.on_release sw (fun () ->
-    let flows = !tracked_flows in
-    tracked_flows := [];
-    List.iter close_flow flows);
-  client
+    The [~net] and [?https] arguments are accepted for source-level
+    backwards compatibility with callers that still pass them, but are
+    ignored — the pool, not the caller, owns the network resource.
+    Those arguments will be dropped in a follow-up API cleanup once
+    every callsite has been audited. *)
 
 (** POST with structured error handling.
     DNS resolution, TLS, and I/O errors return Error instead of crashing the fiber. *)
@@ -104,17 +40,8 @@ let with_optional_timeout ?clock ?timeout_sec f =
           Error (Printf.sprintf "timeout after %.1fs" timeout_sec))
   | _ -> f ()
 
-(* ── Pool singleton ─────────────────────────────────────────────────
-
-   RFC-0107 Phase D.2c — the per-process [Pool.t] is lazy-initialized
-   on first use, reading [sw] and [env] from [Eio_context].  This
-   keeps the existing [post_sync] / [get_sync] / [get_response_sync]
-   signatures stable: 13 callsites in lib/ continue to pass [~net]
-   and optionally [?https], but those are now ignored (pool owns the
-   transport).  Once D.2c bis migrates [voice_bridge_core] +
-   [opentelemetry_client_cohttp_eio] off [make_closing_client],
-   [~net] and [~https] can be dropped from the public mli (planned
-   for D.2c.2 follow-up). *)
+(* Per-process Pool singleton, lazily initialised on first use by
+   reading [sw] and [env] from [Eio_context]. *)
 let pool_ref : Pool.t option ref = ref None
 let pool_mu = Eio.Mutex.create ()
 
@@ -165,14 +92,9 @@ let get_sync ?clock ?timeout_sec ~net ?https ~url ~headers () =
   | Ok response -> Ok (response.status, response.body)
   | Error _ as error -> error
 
-(* RFC-0107 Phase D.4 — read-only accessor on the per-process pool
-   singleton.  Returns [None] before the first HTTP call (pool not
-   yet lazy-initialized) so callers like [Pool_metrics] can no-op
-   instead of forcing the pool open just to read zeros. *)
+(* Read-only accessor on the per-process pool singleton.  Returns
+   [None] before the first HTTP call so callers like [Pool_metrics]
+   can no-op instead of forcing the pool open just to read zeros. *)
 let pool_singleton_opt () : Pool.t option = !pool_ref
 
-(* RFC-0107 Phase D.2d — re-export Pool under Masc_http_client.Pool
-   so the test suite (and any direct consumer that wants the
-   typed surface rather than the legacy shim) can name it without
-   reaching into the wrapped library's mangled module path. *)
 module Pool = Pool

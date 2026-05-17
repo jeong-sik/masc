@@ -2,14 +2,15 @@
 # check-main-branch-protection.sh - detect branch-protection drift for #9738.
 #
 # The draft PR guard only prevents ready/merge races when GitHub branch
-# protection requires the guard checks and applies them to admins.  This check
-# keeps that repository setting visible in CI instead of relying on memory of a
-# one-time settings change.
+# protection requires the guard checks and applies them to admins.  #15938
+# showed that a one-time settings change can drift back; this check must fail
+# closed when it cannot read the setting, otherwise CI silently masks the drift.
 set -euo pipefail
 
 repo="${BRANCH_PROTECTION_REPOSITORY:-${GITHUB_REPOSITORY:-}}"
 branch="${BRANCH_PROTECTION_BRANCH:-${GITHUB_BASE_REF:-${GITHUB_REF_NAME:-main}}}"
 required_contexts_csv="${BRANCH_PROTECTION_REQUIRED_CONTEXTS:-CI Gate,Draft Auto-Merge Guard}"
+allow_unreadable="${BRANCH_PROTECTION_ALLOW_UNREADABLE:-0}"
 
 if [[ -z "$repo" ]]; then
   echo "::error title=Branch protection check misconfigured::BRANCH_PROTECTION_REPOSITORY or GITHUB_REPOSITORY is required."
@@ -42,17 +43,21 @@ escape_workflow_command_data() {
   printf '%s' "$value"
 }
 
-skip_integration_forbidden() {
+handle_integration_forbidden() {
   local output="$1"
   local details
   details="$(escape_workflow_command_data "$output")"
-  echo "::warning title=Branch protection check unavailable::Could not read ${repo}/${branch} branch protection with this GitHub token; skipping drift check. Details: ${details}"
-  exit 0
+  if [[ "$allow_unreadable" == "1" || "$allow_unreadable" == "true" ]]; then
+    echo "::warning title=Branch protection check unavailable::Could not read ${repo}/${branch} branch protection with this GitHub token; BRANCH_PROTECTION_ALLOW_UNREADABLE=${allow_unreadable} permits this diagnostic bypass. Details: ${details}"
+    exit 0
+  fi
+  echo "::error title=Branch protection check unavailable::Could not read ${repo}/${branch} branch protection with this GitHub token; refusing to skip drift check. Provide a token that can read branch protection, or set BRANCH_PROTECTION_ALLOW_UNREADABLE=1 only for non-required diagnostics. Details: ${details}"
+  exit 1
 }
 
 if ! enforce_admins="$(gh api "$endpoint" --jq '.enforce_admins.enabled' 2>&1)"; then
   if is_integration_forbidden "$enforce_admins"; then
-    skip_integration_forbidden "$enforce_admins"
+    handle_integration_forbidden "$enforce_admins"
   fi
   echo "::error title=Branch protection check failed::Could not read ${repo}/${branch} branch protection: ${enforce_admins}"
   exit 1
@@ -60,7 +65,7 @@ fi
 
 if ! contexts="$(gh api "$endpoint" --jq '.required_status_checks.contexts[]?' 2>&1)"; then
   if is_integration_forbidden "$contexts"; then
-    skip_integration_forbidden "$contexts"
+    handle_integration_forbidden "$contexts"
   fi
   echo "::error title=Branch protection check failed::Could not read required status contexts for ${repo}/${branch}: ${contexts}"
   exit 1

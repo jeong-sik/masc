@@ -1,0 +1,24 @@
+name: Branch Protection Watchdog
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 * * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  branch-protection-watchdog:
+    name: Branch Protection Watchdog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Verify main branch protection drift
+        env:
+          GH_TOKEN: ${{ secrets.BRANCH_PROTECTION_AUDIT_TOKEN || github.token }}
+          BRANCH_PROTECTION_REPOSITORY: ${{ github.repository }}
+          BRANCH_PROTECTION_BRANCH: main
+          BRANCH_PROTECTION_REQUIRED_CONTEXTS: CI Gate,Draft Auto-Merge Guard
+        run: bash scripts/ci/check-main-branch-protection.sh

@@ -111,7 +111,7 @@ let add_routes router =
            | _ -> None
          in
          let filter = { Ide_annotation_types.file_path; keeper_id; goal_id; task_id } in
-         let annotations = Ide_annotations.list ~base_dir:base ~filter in
+         let annotations = Ide_annotations.list ~base_dir:base ~filter () in
          let json =
            `List (List.map Ide_annotation_types.annotation_to_json annotations)
          in
@@ -243,7 +243,7 @@ let add_routes router =
              (Yojson.Safe.to_string (json_error "Missing id or keeper_id"))
              reqd
          else (
-           match Ide_annotations.delete ~base_dir:base ~id ~keeper_id with
+           match Ide_annotations.delete ~base_dir:base ~id ~keeper_id () with
            | Ok () -> Http.Response.json ~status:`No_content ~request "{}" reqd
            | Error msg ->
              Http.Response.json

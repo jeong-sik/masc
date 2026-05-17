@@ -14,7 +14,8 @@ let () =
         | Bootstrap -> "Bootstrap"
         | Unsupported s -> "Unsupported("^s^")"
         | Board_signal -> "Board_signal"
-        | Alive_but_stuck_recovery -> "Alive_but_stuck_recovery")));
+        | Alive_but_stuck_recovery -> "Alive_but_stuck_recovery"
+        | Stay_silent_recovery -> "Stay_silent_recovery")));
 
   let live_comment_payload =
     {|{"source":"board_signal","kind":"comment","post_id":"p2","author":"alice","title":"Long board event","content":"this mirrors the long live payload that used to miss the prefix check","hearth":null,"wake_reason":"scope_message"}|}
@@ -30,7 +31,8 @@ let () =
         | Bootstrap -> "Bootstrap"
         | Unsupported s -> "Unsupported("^s^")"
         | Board_signal -> "Board_signal"
-        | Alive_but_stuck_recovery -> "Alive_but_stuck_recovery")));
+        | Alive_but_stuck_recovery -> "Alive_but_stuck_recovery"
+        | Stay_silent_recovery -> "Stay_silent_recovery")));
 
   (* --- classify: bootstrap --- *)
   let bootstrap_stim = {
@@ -45,7 +47,8 @@ let () =
         | Board_signal -> "Board_signal"
         | Unsupported s -> "Unsupported("^s^")"
         | Bootstrap -> "Bootstrap"
-        | Alive_but_stuck_recovery -> "Alive_but_stuck_recovery")));
+        | Alive_but_stuck_recovery -> "Alive_but_stuck_recovery"
+        | Stay_silent_recovery -> "Stay_silent_recovery")));
 
   (* --- classify: unsupported --- *)
   let unknown_stim = {
@@ -58,7 +61,12 @@ let () =
        Alcotest.fail "unsupported prefix should be truncated to 40 chars"
    | other ->
      Alcotest.fail (Printf.sprintf "expected Unsupported, got %s"
-       (match other with Board_signal -> "Board_signal" | Bootstrap -> "Bootstrap" | _ -> "other")));
+       (match other with
+        | Board_signal -> "Board_signal"
+        | Bootstrap -> "Bootstrap"
+        | Alive_but_stuck_recovery -> "Alive_but_stuck_recovery"
+        | Stay_silent_recovery -> "Stay_silent_recovery"
+        | Unsupported _ -> "Unsupported")));
 
   (* --- classify: malformed JSON is unsupported --- *)
   let broken_json = {
@@ -79,7 +87,23 @@ let () =
         | Board_signal -> "Board_signal"
         | Bootstrap -> "Bootstrap"
         | Unsupported _ -> "Unsupported"
-        | Alive_but_stuck_recovery -> "Alive_but_stuck_recovery")));
+        | Alive_but_stuck_recovery -> "Alive_but_stuck_recovery"
+        | Stay_silent_recovery -> "Stay_silent_recovery")));
+
+  let stay_silent_recovery_stim = {
+    post_id = "stay-silent-loop:k"; urgency = Immediate; arrived_at = 0.0;
+    payload = {|{"source":"stay_silent_recovery","keeper":"k","streak":10}|};
+  } in
+  (match classify stay_silent_recovery_stim with
+   | Stay_silent_recovery -> ()
+   | other ->
+     Alcotest.fail (Printf.sprintf "expected Stay_silent_recovery, got %s"
+       (match other with
+        | Board_signal -> "Board_signal"
+        | Bootstrap -> "Bootstrap"
+        | Unsupported s -> "Unsupported("^s^")"
+        | Alive_but_stuck_recovery -> "Alive_but_stuck_recovery"
+        | Stay_silent_recovery -> "Stay_silent_recovery")));
 
   (* --- queue operations preserved --- *)
   let q = empty in

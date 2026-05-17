@@ -139,17 +139,9 @@ end = struct
     { net :> [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t; https = Some https }
   ;;
 
-  (* RFC-0107 Phase D.2c bis — migrated off [make_closing_client] to
-     the pooled [Pool.request] surface.  The OTLP exporter is the
-     prototypical *one-shot* HTTP caller (single POST per signal
-     batch); a connection pool with keep-alive trims a TCP handshake
-     per export tick and lets the [Eio.Switch.run] / on_release
-     scaffolding of the legacy [make_closing_client] go away.
-
-     The [client.net] / [client.https] fields of [t] are kept on the
-     record so the public [create] signature stays stable (existing
-     callers in [Opentelemetry_client] still build), but the pool
-     owns the transport — those fields are unused on this path. *)
+  (* [client.net] / [client.https] fields of [t] are kept on the
+     record so the public [create] signature stays stable, but the
+     pool owns the transport — those fields are unused on this path. *)
   let send (client : t) ~url ~decode (body : string) : ('a, error) result =
     let headers =
       ("Content-Type", "application/x-protobuf") :: Config.Env.get_headers ()

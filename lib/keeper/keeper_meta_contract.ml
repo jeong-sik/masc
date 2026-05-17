@@ -99,6 +99,7 @@ type blocker_class =
   | Turn_timeout
   | Completion_contract_violation
   | No_tool_capable_provider
+  | Stay_silent_loop
   | Fiber_unresolved
     (** 2026-05-05: turn fiber finished without invoking [resolve_done]
         (cancelled mid-turn, raised an exception not handled by the
@@ -143,6 +144,7 @@ let blocker_class_to_string = function
   | Turn_timeout -> "turn_timeout"
   | Completion_contract_violation -> "completion_contract_violation"
   | No_tool_capable_provider -> "no_tool_capable_provider"
+  | Stay_silent_loop -> "stay_silent_loop"
   | Fiber_unresolved -> "fiber_unresolved"
   | Stale_turn_timeout -> "stale_turn_timeout"
   | Stale_fleet_batch -> "stale_fleet_batch"
@@ -168,6 +170,7 @@ let blocker_class_of_serialized_string = function
   | "turn_timeout" -> Some Turn_timeout
   | "completion_contract_violation" -> Some Completion_contract_violation
   | "no_tool_capable_provider" -> Some No_tool_capable_provider
+  | "stay_silent_loop" -> Some Stay_silent_loop
   | "fiber_unresolved" -> Some Fiber_unresolved
   | "stale_turn_timeout" -> Some Stale_turn_timeout
   | "stale_fleet_batch" -> Some Stale_fleet_batch

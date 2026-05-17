@@ -1253,6 +1253,76 @@ let () = test "transition_submit_for_verification_rejects_todo_pr_evidence" (fun
     assert_task_todo ctx)
 )
 
+(* Regression: the transport-level [pr_url] alias must be hoisted onto
+   the typed [handoff_context.evidence_refs] domain, not concatenated
+   into the [notes] string blob. *)
+let () = test "transition_normalize_pr_url_into_typed_handoff_context" (fun () ->
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    let ctx = make_test_ctx_with_agent "codex-mcp-client" in
+    add_task_requiring_tools ctx ~title:"Typed pr_url normalize" [ "keeper_bash" ];
+    let pr_url = "https://github.com/jeong-sik/masc-mcp/pull/77777" in
+    let submit_result =
+      Tool_task.handle_transition
+        ~agent_tool_names:[ "masc_status"; "masc_transition" ]
+        ~tool_name:"test_tool" ~start_time:0.0
+        ctx
+        (`Assoc
+          [
+            ("task_id", `String "task-001");
+            ("action", `String "submit_pr_evidence");
+            ("pr_url", `String pr_url);
+            ("notes", `String "evidence available");
+          ])
+    in
+    if not submit_result.Tool_result.success then
+      failwith submit_result.Tool_result.legacy_message;
+    let task = only_task ctx in
+    match task.handoff_context with
+    | Some hc ->
+      assert (List.mem pr_url hc.evidence_refs)
+    | None -> failwith "expected handoff_context to receive pr_url evidence")
+)
+
+(* Regression: when a caller supplies both [pr_url] and an explicit
+   [handoff_context] object, normalize_args must append pr_url to the
+   existing [evidence_refs] list rather than overwrite it or fall back
+   to the notes blob. *)
+let () = test "transition_normalize_pr_url_merges_into_existing_handoff_context" (fun () ->
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    let ctx = make_test_ctx_with_agent "codex-mcp-client" in
+    add_task_requiring_tools ctx ~title:"pr_url merge" [ "keeper_bash" ];
+    let existing_ref = "logs/run-42.json" in
+    let pr_url = "https://github.com/jeong-sik/masc-mcp/pull/88888" in
+    let submit_result =
+      Tool_task.handle_transition
+        ~agent_tool_names:[ "masc_status"; "masc_transition" ]
+        ~tool_name:"test_tool" ~start_time:0.0
+        ctx
+        (`Assoc
+          [
+            ("task_id", `String "task-001");
+            ("action", `String "submit_pr_evidence");
+            ("pr_url", `String pr_url);
+            ("notes", `String "evidence available");
+            ( "handoff_context",
+              `Assoc
+                [
+                  ("summary", `String "tests pass");
+                  ("evidence_refs", `List [ `String existing_ref ]);
+                ] );
+          ])
+    in
+    if not submit_result.Tool_result.success then
+      failwith submit_result.Tool_result.legacy_message;
+    let task = only_task ctx in
+    match task.handoff_context with
+    | Some hc ->
+      assert (List.mem existing_ref hc.evidence_refs);
+      assert (List.mem pr_url hc.evidence_refs);
+      assert (String.equal hc.summary "tests pass")
+    | None -> failwith "expected handoff_context to be persisted")
+)
+
 let () = test "transition_submit_pr_evidence_accepts_todo_pr_evidence_without_required_tool" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "codex-mcp-client" in

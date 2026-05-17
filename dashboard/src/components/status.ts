@@ -10,6 +10,7 @@ import { LoadingState } from './common/feedback-state'
 export type StatusSection =
   | 'observatory' | 'journey' | 'agents' | 'runtime' | 'cascade-config'
   | 'goal-loop' | 'fleet-health' | 'doctor' | 'transport-health'
+  | 'feature-health'
   | 'cognition'
 
 const LazyAgentsUnified = lazy(async () => ({
@@ -29,6 +30,9 @@ const LazyDoctorPanel = lazy(async () => ({
 }))
 const LazyTransportHealthPanel = lazy(async () => ({
   default: (await import('./transport-health')).TransportHealthPanel,
+}))
+const LazyFeatureHealth = lazy(async () => ({
+  default: (await import('./feature-health')).FeatureHealth,
 }))
 const LazyGoalLoopPanel = lazy(async () => ({
   default: (await import('./goal-loop-panel')).GoalLoopPanel,
@@ -65,6 +69,8 @@ export function sectionLabel(section: StatusSection): string {
       return 'Doctor'
     case 'transport-health':
       return 'Transport Health'
+    case 'feature-health':
+      return 'Feature Flags'
     case 'cognition':
       return 'Cognition'
     case 'agents':
@@ -90,6 +96,8 @@ function renderSection(section: StatusSection) {
       return html`<${LazyDoctorPanel} />`
     case 'transport-health':
       return html`<${LazyTransportHealthPanel} />`
+    case 'feature-health':
+      return html`<${LazyFeatureHealth} />`
     case 'cognition':
       return html`<${LazyCognitionPlane} />`
     case 'agents':
@@ -107,6 +115,7 @@ export function normalizeStatusSection(section: string | undefined): StatusSecti
     || section === 'fleet-health'
     || section === 'doctor'
     || section === 'transport-health'
+    || section === 'feature-health'
     || section === 'cognition'
     || section === 'agents'
   ) return section

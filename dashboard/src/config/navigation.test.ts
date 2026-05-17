@@ -109,6 +109,7 @@ describe('monitoring navigation labels', () => {
     expect(labelFor('fleet-health')).toBe('System Telemetry')
     expect(labelFor('observatory')).toBe('Activity Timeline')
     expect(labelFor('transport-health')).toBe('Transport Health')
+    expect(labelFor('feature-health')).toBe('Feature Flags')
     expect(labelFor('cognition')).toBe('Keeper Cognition')
     expect(labelFor('journey')).toBeUndefined()
   })
@@ -145,7 +146,7 @@ describe('monitoring navigation labels', () => {
     expect(defaultParamsForTab('monitoring')).toEqual({ section: 'runtime' })
     expect(ids).toEqual([
       'runtime', 'cascade-config', 'agents', 'goal-loop', 'fleet-health',
-      'doctor', 'transport-health', 'observatory', 'cognition',
+      'doctor', 'transport-health', 'feature-health', 'observatory', 'cognition',
     ])
     expect(ids).toContain('fleet-health')
     expect(ids).toContain('runtime')
@@ -154,6 +155,7 @@ describe('monitoring navigation labels', () => {
     expect(ids).toContain('goal-loop')
     expect(ids).toContain('doctor')
     expect(ids).toContain('transport-health')
+    expect(ids).toContain('feature-health')
     expect(ids).toContain('observatory')
     expect(ids).toContain('cognition')
     expect(ids).not.toContain('journey')
@@ -181,8 +183,9 @@ describe('monitoring navigation labels', () => {
     expect(sections[4]?.id).toBe('fleet-health')
     expect(sections[5]?.id).toBe('doctor')
     expect(sections[6]?.id).toBe('transport-health')
-    expect(sections[7]?.id).toBe('observatory')
-    expect(sections[8]?.id).toBe('cognition')
+    expect(sections[7]?.id).toBe('feature-health')
+    expect(sections[8]?.id).toBe('observatory')
+    expect(sections[9]?.id).toBe('cognition')
   })
 
   it('keeps diagnostic monitoring routes available but hidden from the sidebar', () => {

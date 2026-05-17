@@ -35,6 +35,7 @@ let nofile_soft_limit_mutex = Stdlib.Mutex.create ()
 type system_fd_snapshot =
   { open_files : int
   ; max_files : int
+  ; max_files_per_process : int option
   }
 
 type system_fd_cache_entry =
@@ -57,6 +58,15 @@ type admission_block =
   | System_fd_budget_exhausted of
       { open_files : int
       ; max_files : int
+      ; remaining_files : int
+      ; required_headroom : int
+      ; projected_fds : int
+      ; active_keepers : int
+      ; starting_keepers : int
+      }
+  | Host_fd_hotspot_budget_exhausted of
+      { open_files : int
+      ; max_files_per_process : int
       ; remaining_files : int
       ; required_headroom : int
       ; projected_fds : int
@@ -248,8 +258,11 @@ let process_open_fd_count () =
 
 let parse_system_fd_snapshot lines =
   match List.filter_map (fun line -> int_of_string_opt (String.trim line)) lines with
+  | open_files :: max_files :: max_files_per_process :: _
+    when open_files >= 0 && max_files > 0 && max_files_per_process > 0 ->
+    Some { open_files; max_files; max_files_per_process = Some max_files_per_process }
   | open_files :: max_files :: _ when open_files >= 0 && max_files > 0 ->
-    Some { open_files; max_files }
+    Some { open_files; max_files; max_files_per_process = None }
   | _ -> None
 ;;
 
@@ -276,7 +289,7 @@ let detect_linux_system_fd_snapshot_now () =
          if String.equal field "" then None else int_of_string_opt field)
      with
      | open_files :: _unused_files :: max_files :: _ when open_files >= 0 && max_files > 0 ->
-       Some { open_files; max_files }
+       Some { open_files; max_files; max_files_per_process = None }
      | _ -> None)
   | None -> None
 ;;
@@ -292,7 +305,7 @@ let detect_darwin_system_fd_snapshot_now () =
         let lines, status =
           With_process.with_process_args_in
             "/usr/sbin/sysctl"
-            [| "sysctl"; "-n"; "kern.num_files"; "kern.maxfiles" |]
+            [| "sysctl"; "-n"; "kern.num_files"; "kern.maxfiles"; "kern.maxfilesperproc" |]
             With_process.drain_lines
         in
         match status with
@@ -375,6 +388,11 @@ let system_fd_headroom () =
   |> max (fd_headroom ())
 ;;
 
+let host_fd_hotspot_headroom () =
+  Env_config_core.get_int ~default:49152 "MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM"
+  |> max (system_fd_headroom ())
+;;
+
 let active_keeper_cap_for_soft_limit soft =
   let usable = max 0 (soft - fd_headroom ()) in
   max 1 (usable / fd_per_active_keeper ())
@@ -399,7 +417,7 @@ let projected_fd_budget
 
 let system_fd_budget_block system_fds ~projected_fds ~active_keepers ~starting_keepers =
   match system_fds with
-  | Some { open_files; max_files } ->
+  | Some { open_files; max_files; max_files_per_process } ->
     let remaining_files = max 0 (max_files - open_files) in
     let required_headroom = system_fd_headroom () in
     if remaining_files < required_headroom + projected_fds
@@ -414,7 +432,25 @@ let system_fd_budget_block system_fds ~projected_fds ~active_keepers ~starting_k
            ; active_keepers = max 0 active_keepers
            ; starting_keepers = max 0 starting_keepers
            })
-    else None
+    else (
+      match max_files_per_process with
+      | Some max_files_per_process when max_files_per_process > 0 ->
+        let remaining_files = max 0 (max_files_per_process - open_files) in
+        let required_headroom = host_fd_hotspot_headroom () in
+        if remaining_files < required_headroom + projected_fds
+        then
+          Some
+            (Host_fd_hotspot_budget_exhausted
+               { open_files
+               ; max_files_per_process
+               ; remaining_files
+               ; required_headroom
+               ; projected_fds
+               ; active_keepers = max 0 active_keepers
+               ; starting_keepers = max 0 starting_keepers
+               })
+        else None
+      | _ -> None)
   | None -> None
 ;;
 
@@ -505,6 +541,25 @@ let admission_block_to_json = function
       ; "active_keepers", `Int active_keepers
       ; "starting_keepers", `Int starting_keepers
       ]
+  | Host_fd_hotspot_budget_exhausted
+      { open_files
+      ; max_files_per_process
+      ; remaining_files
+      ; required_headroom
+      ; projected_fds
+      ; active_keepers
+      ; starting_keepers
+      } ->
+    `Assoc
+      [ "kind", `String "host_fd_hotspot_budget_exhausted"
+      ; "system_open_files", `Int open_files
+      ; "system_max_files_per_process", `Int max_files_per_process
+      ; "host_fd_hotspot_remaining", `Int remaining_files
+      ; "host_fd_hotspot_headroom", `Int required_headroom
+      ; "projected_fds", `Int projected_fds
+      ; "active_keepers", `Int active_keepers
+      ; "starting_keepers", `Int starting_keepers
+      ]
 ;;
 
 let admission_decision_to_json = function
@@ -517,6 +572,7 @@ let admission_block_kind = function
   | Fd_pressure_cooldown _ -> "fd_pressure_cooldown"
   | Projected_fd_budget_exhausted _ -> "projected_fd_budget_exhausted"
   | System_fd_budget_exhausted _ -> "system_fd_budget_exhausted"
+  | Host_fd_hotspot_budget_exhausted _ -> "host_fd_hotspot_budget_exhausted"
 ;;
 
 let runtime_state_json ?(soft_limit = process_nofile_soft_limit ())
@@ -548,14 +604,30 @@ let runtime_state_json ?(soft_limit = process_nofile_soft_limit ())
     | Some soft when soft > 0 -> `Int (active_keeper_cap_for_soft_limit soft)
     | _ -> `Null
   in
-  let system_open_files, system_max_files, system_fd_remaining, system_fd_utilization =
+  let ( system_open_files
+      , system_max_files
+      , system_fd_remaining
+      , system_fd_utilization
+      , system_max_files_per_process
+      , host_fd_hotspot_remaining
+      , host_fd_hotspot_probe_supported )
+    =
     match system_fds with
-    | Some { open_files; max_files } ->
+    | Some { open_files; max_files; max_files_per_process } ->
+      let max_files_per_process_json, hotspot_remaining, hotspot_supported =
+        match max_files_per_process with
+        | Some limit ->
+          `Int limit, `Int (max 0 (limit - open_files)), `Bool true
+        | None -> `Null, `Null, `Bool false
+      in
       ( `Int open_files
       , `Int max_files
       , `Int (max 0 (max_files - open_files))
-      , `Float (float_of_int open_files /. float_of_int max_files) )
-    | None -> `Null, `Null, `Null, `Null
+      , `Float (float_of_int open_files /. float_of_int max_files)
+      , max_files_per_process_json
+      , hotspot_remaining
+      , hotspot_supported )
+    | None -> `Null, `Null, `Null, `Null, `Null, `Null, `Bool false
   in
   `Assoc
     [ "status", `String status
@@ -570,6 +642,10 @@ let runtime_state_json ?(soft_limit = process_nofile_soft_limit ())
     ; "system_fd_utilization", system_fd_utilization
     ; "system_fd_headroom", `Int (system_fd_headroom ())
     ; "system_fd_probe_supported", `Bool (Option.is_some system_fds)
+    ; "system_max_files_per_process", system_max_files_per_process
+    ; "host_fd_hotspot_remaining", host_fd_hotspot_remaining
+    ; "host_fd_hotspot_headroom", `Int (host_fd_hotspot_headroom ())
+    ; "host_fd_hotspot_probe_supported", host_fd_hotspot_probe_supported
     ; "headroom", `Int (fd_headroom ())
     ; "fd_per_active_keeper", `Int (fd_per_active_keeper ())
     ; "min_nofile_for_24_keepers", `Int (min_nofile_for_24_keepers ())

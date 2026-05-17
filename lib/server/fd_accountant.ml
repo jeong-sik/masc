@@ -69,6 +69,15 @@ let effective_concurrency ~kind =
   if Keeper_fd_pressure.active () then 1
   else (state_of kind).cap
 
+let install_dated_jsonl_log_writer_guard () =
+  Dated_jsonl.set_append_guard (fun f ->
+    if Eio_guard.is_ready () then
+      with_slot ~kind:Log_writer f
+    else
+      f ())
+
+let () = install_dated_jsonl_log_writer_guard ()
+
 (* In-flight count = configured cap minus current semaphore credits.
    Eio.Semaphore exposes [get_value] which returns the available credit
    count; in-flight = cap − available. *)

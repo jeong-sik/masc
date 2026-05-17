@@ -21,6 +21,12 @@ val append : t -> Yojson.Safe.t -> unit
 (** Append [json] to today's [DD.jsonl] inside [YYYY-MM/].
     Creates directories as needed.  Thread-safe via internal mutex. *)
 
+val set_append_guard : ((unit -> unit) -> unit) -> unit
+(** [set_append_guard guard] installs a process-wide wrapper around
+    {!append}.  The default guard runs the callback immediately.  Higher-level
+    runtimes can install resource accounting/backpressure without making this
+    low-level storage library depend on those policy modules. *)
+
 val read_recent : t -> int -> Yojson.Safe.t list
 (** [read_recent t n] returns the newest [n] entries in chronological order
     (oldest first).  Scans day-files from newest to oldest, stops early. *)
@@ -71,4 +77,6 @@ module For_testing : sig
   val registry_size : unit -> int
   (** Number of distinct [base_dir] keys currently held by the
       file-scope mutex registry. *)
+
+  val reset_append_guard : unit -> unit
 end

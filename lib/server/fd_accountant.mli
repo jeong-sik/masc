@@ -58,6 +58,14 @@ val configured_concurrency : kind:kind -> int
 (** [configured_concurrency ~kind] returns the env-configured cap
     irrespective of current pressure state. *)
 
+val install_dated_jsonl_log_writer_guard : unit -> unit
+(** [install_dated_jsonl_log_writer_guard ()] installs the process-wide
+    {!Dated_jsonl} append guard that accounts date-split JSONL writes as
+    {!Log_writer} while {!Eio_guard} is ready. Before Eio startup, the guard
+    runs the append directly so module-load and pure test paths stay safe. The
+    module installs it at load time; the explicit function exists for tests and
+    future bootstrap code that resets storage hooks. *)
+
 type snapshot = {
   per_kind : (kind * int) list ;
       (** in-flight count per class (cap − available semaphore slots). *)

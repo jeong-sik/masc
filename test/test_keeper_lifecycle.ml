@@ -269,6 +269,75 @@ let test_load_context_prefers_live_primary_max_tokens_over_checkpoint_limit () =
             (KEC.max_tokens_of_context loaded)
       | None -> fail "expected checkpoint context to load")
 
+let test_apply_post_turn_lifecycle_no_state_advances_cooldown_ts () =
+  let base_dir = temp_dir "keeper_lifecycle_no_state" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      Fs_compat.clear_fs ();
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let now_ts = Time_compat.now () in
+      let stale_ts = now_ts -. 5_000.0 in
+      let meta =
+        let base = make_keeper_meta ~name:"keeper-no-state-test" () in
+        {
+          base with
+          compaction =
+            {
+              base.compaction with
+              ratio_gate = 0.99;
+              cooldown_sec = 60;
+            };
+          runtime =
+            {
+              base.runtime with
+              last_continuity_update_ts = stale_ts;
+            };
+        }
+      in
+      (* Reply emits no [STATE] block, so [apply_continuity_summary] sees
+         [snapshot = None] when the checkpoint's working_context also lacks
+         a state snapshot. *)
+      let reply_without_state = "all good, nothing to checkpoint" in
+      let ctx =
+        build_dense_context ~turns:2 ~max_tokens:4096
+          ~state_reply:reply_without_state
+      in
+      let checkpoint = save_checkpoint ~base_dir ~meta ~ctx in
+      let labels = [ "keeper", meta.name ] in
+      let before =
+        Masc_mcp.Prometheus.get_metric_value
+          Masc_mcp.Keeper_metrics
+          .metric_keeper_state_snapshot_skipped_no_state
+          ~labels ()
+        |> Option.value ~default:0.0
+      in
+      let lifecycle =
+        KEC.apply_post_turn_lifecycle
+          ~on_compaction_started:(fun () -> ())
+          ~on_handoff_started:(fun () -> ())
+          ~base_dir ~meta
+          ~model:"llama:auto"
+          ~primary_model_max_tokens:4096
+          ~current_turn_blocker_info:None
+          ~checkpoint:(Some checkpoint)
+      in
+      let after =
+        Masc_mcp.Prometheus.get_metric_value
+          Masc_mcp.Keeper_metrics
+          .metric_keeper_state_snapshot_skipped_no_state
+          ~labels ()
+        |> Option.value ~default:0.0
+      in
+      let advanced_ts =
+        lifecycle.updated_meta.runtime.last_continuity_update_ts
+      in
+      check bool "cooldown ts advanced past stale value" true
+        (advanced_ts > stale_ts);
+      check bool "skipped_no_state counter incremented" true
+        (after -. before >= 1.0))
+
 let test_apply_post_turn_lifecycle_compacts_and_updates_continuity () =
   let base_dir = temp_dir "keeper_lifecycle_compact" in
   Fun.protect
@@ -2912,6 +2981,8 @@ let () =
             test_apply_post_turn_lifecycle_without_checkpoint_records_skip;
           test_case "restore prefers live primary max tokens" `Quick
             test_load_context_prefers_live_primary_max_tokens_over_checkpoint_limit;
+          test_case "no STATE still advances cooldown ts + counter" `Quick
+            test_apply_post_turn_lifecycle_no_state_advances_cooldown_ts;
           test_case "compaction persists checkpoint and continuity" `Quick
             test_apply_post_turn_lifecycle_compacts_and_updates_continuity;
           test_case "compaction callback failure records coverage gap" `Quick

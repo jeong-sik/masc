@@ -98,6 +98,12 @@ val set_last_correlation_id : base_path:string -> string -> string -> unit
     Must be paired with [mark_turn_finished] (or [mark_turn_failed]). *)
 val mark_turn_started : base_path:string -> string -> unit
 
+(** Refresh the live turn's progress timestamp without changing its FSM
+    projection.  No-op when no turn is active.  [event_kind] must be a
+    low-cardinality diagnostic label. *)
+val record_turn_progress :
+  base_path:string -> string -> event_kind:string -> unit
+
 (** Mark the beginning of an SDK turn within an existing keeper turn.
 
     The Agent SDK [run_loop] iterates N SDK turns inside a single MASC
@@ -114,8 +120,9 @@ val mark_turn_started : base_path:string -> string -> unit
     [cascade_state], [decision_stage]) on the existing observation, the
     same way [mark_turn_started] bypasses the validator with a fresh
     install. [turn_id], [started_at], [selected_model], [measurement],
-    and [measurement_bind_count] are preserved across SDK turns inside
-    one keeper turn (they are keeper-turn-scoped, not SDK-turn-scoped).
+    [measurement_bind_count], and progress timestamp are preserved across
+    SDK turns inside one keeper turn (they are keeper-turn-scoped, not
+    SDK-turn-scoped).
 
     No-op when [current_turn_observation = None] (defensive: should not
     happen in normal flow because [mark_turn_started] runs first).

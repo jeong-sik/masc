@@ -322,6 +322,7 @@ val metric_keeper_stale_fleet_batch_paused : string
 val metric_keeper_oas_timeout_budget_loop_paused : string
 val metric_keeper_cycle_exceptions : string
 val metric_keeper_snapshot_write_failures : string
+val metric_keeper_state_snapshot_skipped_no_state : string
 val metric_keeper_progress_updated_line_failures : string
 val metric_keeper_sse_broadcast_failures : string
 val metric_keeper_room_heartbeat_failures : string
@@ -354,6 +355,31 @@ val metric_keeper_reply_skill_route_lines_removed : string
 (** Counter for the total number of SKILL: / SKILL_REASON: lines
     stripped from raw replies.  Divide by
     [_reply_skill_route_strips] for lines-per-invocation. *)
+
+val metric_keeper_memory_llm_summary_outcomes : string
+(** Counter for [Keeper_memory_llm_summary.summarize_with_provider]
+    attempts, classified by label [outcome] (ok_summary | timed_out |
+    http_error | empty_response).  Labels: [outcome], [provider]
+    (model_id of the attempt), [cascade] (cascade name driving the
+    chain).  Adjacent counter
+    [metric_keeper_memory_llm_summary_chain_exhausted] increments
+    only when every provider in the cascade returned a non-Ok
+    outcome — the operational signal that the consolidation pass
+    received no summary at all. *)
+
+val metric_keeper_memory_llm_summary_chain_exhausted : string
+(** Counter for [Keeper_memory_llm_summary.summarize_with_providers]
+    runs where every provider in the cascade returned a non-Ok
+    outcome.  Label [cascade] names the cascade.  A rising rate
+    means consolidation is silently skipping the LLM summary step. *)
+
+val metric_keeper_memory_jsonl_ops : string
+(** Counter for [Agent_sdk.Memory.long_term_backend] operations
+    served by the JSONL backend, classified by label [outcome]
+    (one of the labels in {!Memory_oas_bridge_op_outcome}).
+    Labels: [outcome], [agent].  Rising failed/miss rates surface
+    JSONL-side issues that the dependency-leaf [Memory_jsonl] cannot
+    self-report. *)
 
 val metric_keeper_user_visible_reply_source : string
 (** Counter for [Keeper_text_processing.user_visible_reply_text]

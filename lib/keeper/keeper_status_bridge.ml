@@ -370,6 +370,19 @@ let stale_kill_class_summary (kill_class : Keeper_registry.stale_kill_class) =
        stopped the keeper."
       active_seconds
       timeout_threshold
+  | Keeper_registry.Mid_turn_no_progress
+      { active_seconds
+      ; since_progress_seconds
+      ; progress_timeout_threshold
+      ; last_progress_kind
+      } ->
+    Printf.sprintf
+      "mid_turn_no_progress: active turn ran for %.0fs but produced no progress for %.0fs \
+       past the %.0fs progress timeout (last=%s); stale watchdog stopped the keeper."
+      active_seconds
+      since_progress_seconds
+      progress_timeout_threshold
+      (Keeper_registry.progress_kind_label last_progress_kind)
   | Keeper_registry.Noop_failure_loop { noop_count } ->
     Printf.sprintf
       "noop_failure_loop: %d consecutive turn(s) produced no tool calls; stale watchdog \

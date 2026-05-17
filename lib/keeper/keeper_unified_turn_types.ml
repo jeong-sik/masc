@@ -80,6 +80,57 @@ let sdk_error_of_retry_slot_reacquire_timeout
        })
 ;;
 
+let cascade_exhaustion_detail_code detail =
+  let contains needle = String_util.contains_substring_ci detail needle in
+  if contains "no_first_token"
+  then "cascade_exhausted_no_first_token"
+  else if contains "inter_chunk_idle"
+  then "cascade_exhausted_inter_chunk_idle"
+  else if contains "http 429" || contains "usage limit" || contains "rate limit"
+  then "cascade_exhausted_rate_limited"
+  else if contains "max_execution_time"
+  then "cascade_exhausted_max_execution_time"
+  else if contains "wall-clock timeout"
+  then "cascade_exhausted_wall_clock_timeout"
+  else if contains "connection closed by peer"
+  then "cascade_exhausted_connection_closed"
+  else if contains "connection refused"
+  then "cascade_exhausted_connection_refused"
+  else "cascade_exhausted_provider_failure"
+;;
+
+let cascade_exhaustion_reason_code
+      (reason : Keeper_types.cascade_exhaustion_reason)
+  =
+  match reason with
+  | Keeper_types.Connection_refused -> "cascade_exhausted_connection_refused"
+  | Keeper_types.No_providers_available -> "cascade_exhausted_no_providers_available"
+  | Keeper_types.All_providers_failed -> "cascade_exhausted_all_providers_failed"
+  | Keeper_types.Candidates_filtered_after_cycles ->
+    "cascade_exhausted_candidates_filtered"
+  | Keeper_types.Max_turns_exceeded -> "cascade_exhausted_max_turns"
+  | Keeper_types.Other_detail detail -> cascade_exhaustion_detail_code detail
+;;
+
+let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
+  match Cascade_error_classify.classify_masc_internal_error_of_string raw_error with
+  | Some (Cascade_error_classify.Cascade_exhausted { reason; _ }) ->
+    Some
+      (Keeper_registry.Provider_runtime_error
+         { code = cascade_exhaustion_reason_code reason; detail })
+  | Some
+      ( Cascade_error_classify.Resumable_cli_session _
+      | Cascade_error_classify.No_tool_capable_provider _
+      | Cascade_error_classify.Accept_rejected _
+      | Cascade_error_classify.Admission_queue_timeout _
+      | Cascade_error_classify.Admission_queue_rejected _
+      | Cascade_error_classify.Turn_timeout _
+      | Cascade_error_classify.Oas_timeout_budget _
+      | Cascade_error_classify.Max_tokens_ceiling_violation _
+      | Cascade_error_classify.Ambiguous_post_commit _ )
+  | None -> None
+;;
+
 (* RFC-0047 follow-up: exhaustive match on [Keeper_turn_disposition.t].
    Pre-fix this used [String.starts_with ~prefix:"api_error_"] on the
    wire form of [terminal_reason.code]; that substring guard depended
@@ -94,6 +145,9 @@ let registry_failure_reason_of_terminal_reason
   : Keeper_registry.failure_reason option
   =
   let detail = Keeper_types_profile.short_preview raw_error in
+  match cascade_exhausted_failure_reason_of_raw_error ~detail raw_error with
+  | Some _ as reason -> reason
+  | None ->
   match terminal_reason.disposition with
   | Keeper_turn_disposition.Required_tool_use_no_tool_call ->
     Some

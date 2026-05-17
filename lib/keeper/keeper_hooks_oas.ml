@@ -1718,6 +1718,12 @@ let make_hooks
   (* Per-turn tool call counter for SSE enrichment.
      Incremented in post_tool_use, reset in after_turn. *)
   let tool_call_count_ref = ref 0 in
+  let record_progress event_kind =
+    Keeper_registry.record_turn_progress
+      ~base_path:config.base_path
+      (!meta_ref).name
+      ~event_kind
+  in
   (* Streak gate state: tracks consecutive calls to the same tool
      name (regardless of args). Lives across invocations via the
      [make_hooks] closure — one state per keeper. *)
@@ -1760,6 +1766,7 @@ let make_hooks
     before_turn = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.BeforeTurn _ ->
+        record_progress "sdk_before_turn";
         let loop_alert = passive_loop_nudge () in
         let work_text = discover_work_nudge () in
         let combined_with_source =
@@ -1795,6 +1802,7 @@ let make_hooks
     after_turn = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.AfterTurn { turn; response } ->
+        record_progress "sdk_after_turn";
         let meta = !meta_ref in
         let model = resolve_after_turn_model ~keeper_name:meta.name ~response in
         let usage_trust =
@@ -1974,6 +1982,7 @@ let make_hooks
     post_tool_use = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.PostToolUse { tool_name; input; output; duration_ms = hook_duration_ms; _ } ->
+        record_progress ("tool_completed:" ^ tool_name);
         incr tool_call_count_ref;
         let output_text = match output with
           | Ok { Agent_sdk.Types.content; _ } -> content

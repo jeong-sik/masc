@@ -139,10 +139,11 @@ val make_health_json :
     {2 keeper_fd_pressure and keeper_fleet_safety contract}
 
     [keeper_fd_pressure] exposes the effective process [nofile] soft
-    limit, currently open FD count when available, projected 24-Keeper
-    budget, and the admission decision used by the FD guard.  This lets
-    operators distinguish "shell says the host limit is high" from the
-    actual runtime inherited by the server process.
+    limit, currently open FD count when available, the host kernel file-table
+    snapshot when available, projected 24-Keeper budget, and the admission
+    decision used by the FD guard.  This lets operators distinguish "shell
+    says the host limit is high" from the actual runtime inherited by the
+    server process, and distinguish process-local EMFILE from host-wide ENFILE.
 
     [keeper_fleet_safety] compares configured bootable keepers with the
     live keeper fiber count.  It reports [blocked] when bootable keepers

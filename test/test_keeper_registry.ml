@@ -101,6 +101,53 @@ let test_fd_pressure_proactive_admission () =
        ~active_keepers:8
        ())
 
+let test_fd_pressure_system_admission () =
+  FD.reset_for_tests ();
+  Fun.protect
+    ~finally:FD.reset_for_tests
+    (fun () ->
+      with_env "MASC_KEEPER_SYSTEM_FD_HEADROOM" "256" (fun () ->
+        let healthy = FD.{ open_files = 100; max_files = 10_000 } in
+        let pressured = FD.{ open_files = 9_500; max_files = 10_000 } in
+        check bool "admits when system file table has headroom" true
+          (FD.admit_start
+             ~soft_limit:(Some 245_760)
+             ~open_fds:(Some 64)
+             ~system_fds:(Some healthy)
+             ~active_keepers:2
+             ~starting_keepers:1
+             ());
+        let decision =
+          FD.admission_decision
+            ~soft_limit:(Some 245_760)
+            ~open_fds:(Some 64)
+            ~system_fds:(Some pressured)
+            ~active_keepers:2
+            ~starting_keepers:1
+            ()
+        in
+        check bool "blocks before host-wide ENFILE" false (FD.admitted decision);
+        check string "system block kind" "system_fd_budget_exhausted"
+          (match decision with
+           | FD.Block block -> FD.admission_block_kind block
+           | FD.Admit -> "admit");
+        let json =
+          FD.runtime_state_json
+            ~soft_limit:(Some 245_760)
+            ~open_fds:(Some 64)
+            ~system_fds:(Some pressured)
+            ~active_keepers:2
+            ~starting_keepers:1
+            ~requested_keepers:24
+            ()
+        in
+        check string "runtime reason" "system_fd_budget_exhausted"
+          (Json.member "reason" json |> Json.to_string);
+        check int "system open files exposed" 9_500
+          (Json.member "system_open_files" json |> Json.to_int);
+        check int "system file table remaining exposed" 500
+          (Json.member "system_fd_remaining" json |> Json.to_int)))
+
 let test_fd_pressure_degraded_projection () =
   FD.reset_for_tests ();
   Fun.protect
@@ -2039,6 +2086,8 @@ let () =
             test_fd_pressure_nofile_cap;
           test_case "fd pressure proactive admission" `Quick
             test_fd_pressure_proactive_admission;
+          test_case "fd pressure system admission" `Quick
+            test_fd_pressure_system_admission;
           test_case "fd pressure degraded projection" `Quick
             test_fd_pressure_degraded_projection;
           test_case "disk pressure classifiers" `Quick

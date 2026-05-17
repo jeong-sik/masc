@@ -1,10 +1,13 @@
-(** Keeper_fd_pressure — process-local FD exhaustion guard.
+(** Keeper_fd_pressure — FD exhaustion guard.
 
     The fleet failure mode is not a classic mutex deadlock. Once the
     process reaches EMFILE/ENFILE pressure, unrelated append/read/spawn paths
     all start failing and retries amplify the outage. This module provides a
     low-cardinality circuit breaker that can be tripped from central error
-    sites and consulted by turn/spawn scheduling.
+    sites and consulted by turn/spawn scheduling. It checks both the process
+    [nofile] budget and, when available, the host kernel's global file-table
+    budget because ENFILE can fire while the MASC server's own FD count is
+    still low.
 
     Fleet baseline (2026-05-17): default capacity targets 64 active keepers
     (= 64 * fd_per_active_keeper + fd_headroom). The previous default named
@@ -29,6 +32,19 @@ type nofile_cache =
 let nofile_soft_limit_cache : nofile_cache Atomic.t = Atomic.make Uninitialized
 let nofile_soft_limit_mutex = Stdlib.Mutex.create ()
 
+type system_fd_snapshot =
+  { open_files : int
+  ; max_files : int
+  }
+
+type system_fd_cache_entry =
+  { sampled_at : float
+  ; snapshot : system_fd_snapshot option
+  }
+
+let system_fd_cache : system_fd_cache_entry option Atomic.t = Atomic.make None
+let system_fd_mutex = Stdlib.Mutex.create ()
+
 type admission_block =
   | Fd_pressure_cooldown of float
   | Projected_fd_budget_exhausted of
@@ -37,6 +53,15 @@ type admission_block =
       ; active_keepers : int
       ; starting_keepers : int
       ; projected_fds : int
+      }
+  | System_fd_budget_exhausted of
+      { open_files : int
+      ; max_files : int
+      ; remaining_files : int
+      ; required_headroom : int
+      ; projected_fds : int
+      ; active_keepers : int
+      ; starting_keepers : int
       }
 
 type admission_decision =
@@ -159,7 +184,8 @@ let reset_for_tests () =
   Atomic.set cooldown_until 0.0;
   Atomic.set last_log_at 0.0;
   Atomic.set nofile_guard_warned false;
-  Atomic.set nofile_soft_limit_cache Uninitialized
+  Atomic.set nofile_soft_limit_cache Uninitialized;
+  Atomic.set system_fd_cache None
 ;;
 
 (* Detect the host's nofile soft limit by spawning [sh -c 'ulimit -n']. The
@@ -218,6 +244,94 @@ let process_open_fd_count () =
   | None -> count_dir "/proc/self/fd"
 ;;
 
+let parse_system_fd_snapshot lines =
+  match List.filter_map (fun line -> int_of_string_opt (String.trim line)) lines with
+  | open_files :: max_files :: _ when open_files >= 0 && max_files > 0 ->
+    Some { open_files; max_files }
+  | _ -> None
+;;
+
+let read_first_line path =
+  try
+    let ic = open_in path in
+    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () -> Some (input_line ic))
+  with
+  | Sys_error _ | Unix.Unix_error _ | End_of_file -> None
+;;
+
+let detect_linux_system_fd_snapshot_now () =
+  match read_first_line "/proc/sys/fs/file-nr" with
+  | Some line ->
+    let normalized =
+      String.map (function
+        | '\t' | '\r' | '\n' -> ' '
+        | c -> c)
+        line
+    in
+    (match
+       String.split_on_char ' ' normalized
+       |> List.filter_map (fun field ->
+         if String.equal field "" then None else int_of_string_opt field)
+     with
+     | open_files :: _unused_files :: max_files :: _ when open_files >= 0 && max_files > 0 ->
+       Some { open_files; max_files }
+     | _ -> None)
+  | None -> None
+;;
+
+let detect_darwin_system_fd_snapshot_now () =
+  if not (Sys.file_exists "/System/Library/CoreServices/SystemVersion.plist")
+  then None
+  else
+    try
+      let lines, status =
+        With_process.with_process_args_in
+          "/usr/sbin/sysctl"
+          [| "sysctl"; "-n"; "kern.num_files"; "kern.maxfiles" |]
+          With_process.drain_lines
+      in
+      match status with
+      | Unix.WEXITED 0 -> parse_system_fd_snapshot lines
+      | _ -> None
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | _ -> None
+;;
+
+let detect_system_fd_snapshot_now () =
+  match detect_linux_system_fd_snapshot_now () with
+  | Some _ as snapshot -> snapshot
+  | None -> detect_darwin_system_fd_snapshot_now ()
+;;
+
+let system_fd_probe_ttl_sec () =
+  Env_config_core.get_float ~default:2.0 "MASC_KEEPER_SYSTEM_FD_PROBE_TTL_SEC"
+  |> Float.max 0.25
+  |> Float.min 30.0
+;;
+
+let system_fd_snapshot ?now () =
+  let now = Option.value ~default:(Time_compat.now ()) now in
+  let fresh = function
+    | Some { sampled_at; snapshot } when now -. sampled_at <= system_fd_probe_ttl_sec () ->
+      Some snapshot
+    | _ -> None
+  in
+  match fresh (Atomic.get system_fd_cache) with
+  | Some snapshot -> snapshot
+  | None ->
+    Stdlib.Mutex.lock system_fd_mutex;
+    Fun.protect
+      ~finally:(fun () -> Stdlib.Mutex.unlock system_fd_mutex)
+      (fun () ->
+        match fresh (Atomic.get system_fd_cache) with
+        | Some snapshot -> snapshot
+        | None ->
+          let snapshot = detect_system_fd_snapshot_now () in
+          Atomic.set system_fd_cache (Some { sampled_at = now; snapshot });
+          snapshot)
+;;
+
 (* Fleet baseline (renamed 2026-05-17 from min_nofile_for_24_keepers).
    Default targets 64 active keepers: 64 * fd_per_active_keeper (96)
    + fd_headroom (128) ≈ 6272; with 2x margin → 12288. The legacy env name
@@ -254,6 +368,11 @@ let fd_per_active_keeper () =
   |> max 16
 ;;
 
+let system_fd_headroom () =
+  Env_config_core.get_int ~default:8192 "MASC_KEEPER_SYSTEM_FD_HEADROOM"
+  |> max (fd_headroom ())
+;;
+
 let active_keeper_cap_for_soft_limit soft =
   let usable = max 0 (soft - fd_headroom ()) in
   max 1 (usable / fd_per_active_keeper ())
@@ -276,9 +395,31 @@ let projected_fd_budget
     max fleet_projected (max 0 open_fds + fd_headroom () + (starting_keepers * fd_per_active_keeper ()))
 ;;
 
+let system_fd_budget_block system_fds ~projected_fds ~active_keepers ~starting_keepers =
+  match system_fds with
+  | Some { open_files; max_files } ->
+    let remaining_files = max 0 (max_files - open_files) in
+    let required_headroom = system_fd_headroom () in
+    if remaining_files < required_headroom + projected_fds
+    then
+      Some
+        (System_fd_budget_exhausted
+           { open_files
+           ; max_files
+           ; remaining_files
+           ; required_headroom
+           ; projected_fds
+           ; active_keepers = max 0 active_keepers
+           ; starting_keepers = max 0 starting_keepers
+           })
+    else None
+  | None -> None
+;;
+
 let admission_decision
   ?(soft_limit = process_nofile_soft_limit ())
   ?(open_fds = process_open_fd_count ())
+  ?(system_fds = system_fd_snapshot ())
   ~active_keepers
   ~starting_keepers
   ()
@@ -286,14 +427,13 @@ let admission_decision
   if active ()
   then Block (Fd_pressure_cooldown (remaining_sec ()))
   else (
+    let projected_fds =
+      projected_fd_budget ?open_fds ~active_keepers ~starting_keepers ()
+    in
     match soft_limit with
     | Some soft_limit when soft_limit > 0 ->
-      let projected_fds =
-        projected_fd_budget ?open_fds ~active_keepers ~starting_keepers ()
-      in
-      if projected_fds <= soft_limit
-      then Admit
-      else
+      if projected_fds > soft_limit
+      then
         Block
           (Projected_fd_budget_exhausted
              { soft_limit
@@ -302,7 +442,20 @@ let admission_decision
              ; starting_keepers = max 0 starting_keepers
              ; projected_fds
              })
-    | _ -> Admit)
+      else
+        (match
+           system_fd_budget_block system_fds ~projected_fds ~active_keepers
+             ~starting_keepers
+         with
+         | Some block -> Block block
+         | None -> Admit)
+    | _ ->
+      (match
+         system_fd_budget_block system_fds ~projected_fds ~active_keepers
+           ~starting_keepers
+       with
+       | Some block -> Block block
+       | None -> Admit))
 ;;
 
 let admitted = function
@@ -331,6 +484,25 @@ let admission_block_to_json = function
       ; "starting_keepers", `Int starting_keepers
       ; "projected_fds", `Int projected_fds
       ]
+  | System_fd_budget_exhausted
+      { open_files
+      ; max_files
+      ; remaining_files
+      ; required_headroom
+      ; projected_fds
+      ; active_keepers
+      ; starting_keepers
+      } ->
+    `Assoc
+      [ "kind", `String "system_fd_budget_exhausted"
+      ; "system_open_files", `Int open_files
+      ; "system_max_files", `Int max_files
+      ; "system_fd_remaining", `Int remaining_files
+      ; "system_fd_headroom", `Int required_headroom
+      ; "projected_fds", `Int projected_fds
+      ; "active_keepers", `Int active_keepers
+      ; "starting_keepers", `Int starting_keepers
+      ]
 ;;
 
 let admission_decision_to_json = function
@@ -342,11 +514,12 @@ let admission_decision_to_json = function
 let admission_block_kind = function
   | Fd_pressure_cooldown _ -> "fd_pressure_cooldown"
   | Projected_fd_budget_exhausted _ -> "projected_fd_budget_exhausted"
+  | System_fd_budget_exhausted _ -> "system_fd_budget_exhausted"
 ;;
 
 let runtime_state_json ?(soft_limit = process_nofile_soft_limit ())
-    ?(open_fds = process_open_fd_count ()) ~active_keepers ~starting_keepers
-    ~requested_keepers () =
+    ?(open_fds = process_open_fd_count ()) ?(system_fds = system_fd_snapshot ())
+    ~active_keepers ~starting_keepers ~requested_keepers () =
   let active_keepers = max 0 active_keepers in
   let starting_keepers = max 0 starting_keepers in
   let requested_keepers = max 0 requested_keepers in
@@ -359,7 +532,7 @@ let runtime_state_json ?(soft_limit = process_nofile_soft_limit ())
       ~starting_keepers:projected_starting_keepers ()
   in
   let admission_decision =
-    admission_decision ~soft_limit ~open_fds ~active_keepers
+    admission_decision ~soft_limit ~open_fds ~system_fds ~active_keepers
       ~starting_keepers:projected_starting_keepers ()
   in
   let admission_blocked = not (admitted admission_decision) in
@@ -373,6 +546,15 @@ let runtime_state_json ?(soft_limit = process_nofile_soft_limit ())
     | Some soft when soft > 0 -> `Int (active_keeper_cap_for_soft_limit soft)
     | _ -> `Null
   in
+  let system_open_files, system_max_files, system_fd_remaining, system_fd_utilization =
+    match system_fds with
+    | Some { open_files; max_files } ->
+      ( `Int open_files
+      , `Int max_files
+      , `Int (max 0 (max_files - open_files))
+      , `Float (float_of_int open_files /. float_of_int max_files) )
+    | None -> `Null, `Null, `Null, `Null
+  in
   `Assoc
     [ "status", `String status
     ; "reason", reason
@@ -380,6 +562,12 @@ let runtime_state_json ?(soft_limit = process_nofile_soft_limit ())
     ; "fd_pressure_remaining_sec", `Float (remaining_sec ())
     ; "soft_limit", option_int_json soft_limit
     ; "open_fds", option_int_json open_fds
+    ; "system_open_files", system_open_files
+    ; "system_max_files", system_max_files
+    ; "system_fd_remaining", system_fd_remaining
+    ; "system_fd_utilization", system_fd_utilization
+    ; "system_fd_headroom", `Int (system_fd_headroom ())
+    ; "system_fd_probe_supported", `Bool (Option.is_some system_fds)
     ; "headroom", `Int (fd_headroom ())
     ; "fd_per_active_keeper", `Int (fd_per_active_keeper ())
     ; "min_nofile_for_24_keepers", `Int (min_nofile_for_24_keepers ())
@@ -398,12 +586,19 @@ let runtime_state_json ?(soft_limit = process_nofile_soft_limit ())
     ]
 ;;
 
-let admit_start ?soft_limit ?open_fds ~active_keepers ~starting_keepers () =
-  admitted (admission_decision ?soft_limit ?open_fds ~active_keepers ~starting_keepers ())
+let admit_start ?soft_limit ?open_fds ?system_fds ~active_keepers ~starting_keepers () =
+  admitted
+    (admission_decision
+       ?soft_limit
+       ?open_fds
+       ?system_fds
+       ~active_keepers
+       ~starting_keepers
+       ())
 ;;
 
-let admit_turn ?soft_limit ?open_fds ~active_keepers () =
-  admit_start ?soft_limit ?open_fds ~active_keepers ~starting_keepers:0 ()
+let admit_turn ?soft_limit ?open_fds ?system_fds ~active_keepers () =
+  admit_start ?soft_limit ?open_fds ?system_fds ~active_keepers ~starting_keepers:0 ()
 ;;
 
 let cap_active_keepers_for_nofile ?(soft_limit = process_nofile_soft_limit ()) requested =

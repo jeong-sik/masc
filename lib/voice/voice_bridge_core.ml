@@ -141,6 +141,9 @@ let log_error msg =
 let log_debug msg =
   Log.debug "%s %s" log_prefix msg
 
+let with_voice_output_turn ~agent_id:_ f =
+  Eio.Mutex.use_rw ~protect:true playback_mu f
+
 let split_path_env value =
   String.split_on_char ':' value
   |> List.filter (fun entry -> String.trim entry <> "")

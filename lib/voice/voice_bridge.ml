@@ -603,20 +603,21 @@ let attempt_tts_endpoint
         ; "priority", `Int priority
         ]
     in
-    (match
-       call_voice_mcp_endpoint
-         ~sw
-         ~clock
-         ~net
-         ~endpoint
-         ~tool_name:"agent_speak"
-         ~arguments:args
-     with
-     | Ok json ->
-       (match extract_mcp_result json with
-        | Ok data -> Ok (append_provider_metadata data endpoint)
-        | Error error -> Error error)
-     | Error error -> Error error)
+    with_voice_output_turn ~agent_id (fun () ->
+      match
+        call_voice_mcp_endpoint
+          ~sw
+          ~clock
+          ~net
+          ~endpoint
+          ~tool_name:"agent_speak"
+          ~arguments:args
+      with
+      | Ok json ->
+        (match extract_mcp_result json with
+         | Ok data -> Ok (append_provider_metadata data endpoint)
+         | Error error -> Error error)
+      | Error error -> Error error)
 ;;
 
 (** ============================================

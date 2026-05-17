@@ -8,7 +8,7 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0107"]
-implementation_prs: []
+implementation_prs: ["#15991"]
 ---
 
 # RFC-0097 — Keeper sandbox container reuse

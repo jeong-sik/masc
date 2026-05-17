@@ -183,3 +183,12 @@ val shadow_diff_log_enabled : unit -> bool
     of the documented truthy values: [1], [true], [TRUE], [yes],
     [on], [log].  Any other value (including unset) returns
     [false] — the gate logs nothing by default. *)
+
+val typed_advisor_log_enabled : unit -> bool
+(** RFC-0092 Phase A advisor opt-in.  Returns [true] iff the
+    [MASC_BASH_TYPED_ADVISOR] environment variable is set to one of
+    the documented truthy values: [1], [true], [TRUE], [yes], [on],
+    [log].  Default off — the typed-validation parity-measurement
+    counters do not increment until an operator opts in.  Phase C
+    will flip authority via a separate [MASC_BASH_TYPED_AUTHORITY]
+    flag in a follow-up PR. *)

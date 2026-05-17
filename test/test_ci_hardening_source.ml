@@ -130,6 +130,46 @@ let run_agent_draft_policy env =
   in
   Sys.command cmd
 
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end
+    else Sys.remove path
+
+let with_temp_dir prefix f =
+  let dir = Filename.temp_file prefix "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
+
+let run_branch_protection_with_forbidden_token ?(allow_unreadable = false) () =
+  with_temp_dir "branch-protection-gh" (fun dir ->
+    let fake_gh = Filename.concat dir "gh" in
+    write_file fake_gh
+      "#!/usr/bin/env bash\necho 'gh: Resource not accessible by integration (HTTP 403)' >&2\nexit 1\n";
+    Unix.chmod fake_gh 0o755;
+    let path = Printf.sprintf "%s:%s" dir (Sys.getenv "PATH") in
+    let allow =
+      if allow_unreadable then "BRANCH_PROTECTION_ALLOW_UNREADABLE=1 " else ""
+    in
+    let script =
+      Filename.concat (source_root ()) "scripts/ci/check-main-branch-protection.sh"
+    in
+    let cmd =
+      Printf.sprintf
+        "cd %s && env PATH=%s BRANCH_PROTECTION_REPOSITORY=jeong-sik/masc-mcp BRANCH_PROTECTION_BRANCH=main %sbash %s >/dev/null 2>&1"
+        (quote (source_root ())) (quote path) allow (quote script)
+    in
+    Sys.command cmd)
+
 let test_ci_sync_and_asset_contracts () =
   check bool "pr sync script added" true
     (file_contains_pattern "scripts/check-pr-sync.sh" "workflow payload head");
@@ -196,6 +236,22 @@ let test_ci_sync_and_asset_contracts () =
   check bool "meta guards verify main branch protection drift" true
     (file_contains_pattern ".github/workflows/ci.yml"
        "bash scripts/ci/check-main-branch-protection.sh");
+  check bool "required meta guards use explicit branch-protection diagnostic bypass"
+    true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "BRANCH_PROTECTION_ALLOW_UNREADABLE: 1");
+  check bool "branch protection watchdog workflow exists" true
+    (file_contains_pattern ".github/workflows/branch-protection-watchdog.yml"
+       "Branch Protection Watchdog");
+  check bool "branch protection watchdog is scheduled" true
+    (file_contains_pattern ".github/workflows/branch-protection-watchdog.yml"
+       "schedule:");
+  check bool "branch protection watchdog uses audit token" true
+    (file_contains_pattern ".github/workflows/branch-protection-watchdog.yml"
+       "BRANCH_PROTECTION_AUDIT_TOKEN");
+  check bool "branch protection watchdog runs fail-closed checker" true
+    (file_contains_pattern ".github/workflows/branch-protection-watchdog.yml"
+       "bash scripts/ci/check-main-branch-protection.sh");
   check bool "branch protection drift check exists" true
     (file_contains_pattern "scripts/ci/check-main-branch-protection.sh"
        "enforce_admins.enabled");
@@ -205,6 +261,16 @@ let test_ci_sync_and_asset_contracts () =
   check bool "branch protection drift check requires CI gate context" true
     (file_contains_pattern "scripts/ci/check-main-branch-protection.sh"
        "CI Gate");
+  check bool "branch protection check fail-closes on unreadable protection" true
+    (file_contains_pattern "scripts/ci/check-main-branch-protection.sh"
+       "refusing to skip drift check");
+  check bool "branch protection check has explicit diagnostic bypass" true
+    (file_contains_pattern "scripts/ci/check-main-branch-protection.sh"
+       "BRANCH_PROTECTION_ALLOW_UNREADABLE");
+  check bool "branch protection unreadable token fails by default" true
+    (run_branch_protection_with_forbidden_token () <> 0);
+  check int "branch protection unreadable token bypass is opt-in" 0
+    (run_branch_protection_with_forbidden_token ~allow_unreadable:true ());
   check bool "heavy CI no longer trusts stale draft payload" true
     (file_not_contains_pattern ".github/workflows/ci.yml"
        "github.event.pull_request.draft == false");

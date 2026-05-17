@@ -399,6 +399,7 @@ jobs:
           BRANCH_PROTECTION_REPOSITORY: ${{ github.repository }}
           BRANCH_PROTECTION_BRANCH: ${{ github.base_ref || github.ref_name }}
           BRANCH_PROTECTION_REQUIRED_CONTEXTS: CI Gate,Draft Auto-Merge Guard
+          BRANCH_PROTECTION_ALLOW_UNREADABLE: 1
         run: |
           chmod +x scripts/ci/*.sh
           echo "=== Running meta bug-class gates (see #9516 #9517 #9519 #9521) ==="

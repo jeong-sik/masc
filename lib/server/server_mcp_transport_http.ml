@@ -44,6 +44,38 @@ let safe_respond_with_string reqd response body =
         "[mcp-http-post] respond_with_string unexpected exception: %s"
         (Printexc.to_string exn)
 
+(* RFC-0100 PR-2: chunked first-flush variant of safe_respond_with_string.
+   Writes [body] via [Httpun.Reqd.respond_with_streaming] so the response
+   uses [Transfer-Encoding: chunked] framing instead of
+   [Content-Length: N]. Body bytes and headers (other than transfer-encoding /
+   content-length) are byte-identical to the non-chunked form, so well-behaved
+   JSON clients are unaffected.
+
+   The 50 ms first-flush budget is implicit at PR-2 — current sync code
+   paths compute the body in well under 50 ms, so the first (and only)
+   chunk flushes immediately. The placeholder-stub flow for slow paths
+   is RFC-0100 PR-3's auto-upgrade work, not this PR.
+
+   Same race-safe wrapping as {!safe_respond_with_string} — the
+   2026-05-05 OAS cancel-race exception class is caught and downgraded
+   to a WARN. *)
+let safe_respond_chunked reqd response body =
+  try
+    let writer = Httpun.Reqd.respond_with_streaming reqd response in
+    Httpun.Body.Writer.write_string writer body ;
+    Httpun.Body.Writer.close writer
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Failure msg ->
+      Log.Server.warn
+        "[mcp-http-post] respond_chunked skipped (reqd invalid state; \
+         2026-05-05 OAS cancel race): %s"
+        msg
+  | exn ->
+      Log.Server.warn
+        "[mcp-http-post] respond_chunked unexpected exception: %s"
+        (Printexc.to_string exn)
+
 let body_jsonrpc_method = Server_mcp_transport_http_headers.body_jsonrpc_method
 
 let sse_prime_event = Server_mcp_transport_http_headers.sse_prime_event
@@ -487,11 +519,19 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                     safe_respond_with_string reqd response
                                       body
                                 | json ->
+                                    (* RFC-0100 PR-2: chunked first-flush.
+                                       Body bytes + Content-Type identical
+                                       to pre-PR behaviour; only the
+                                       framing changes (content-length →
+                                       transfer-encoding: chunked).
+                                       Well-behaved JSON clients are
+                                       unaffected; this opt-out can be
+                                       re-introduced via env knob if a
+                                       legacy client surface needs it. *)
                                     let body = Yojson.Safe.to_string json in
                                     let headers =
                                       Httpun.Headers.of_list
-                                        (("content-length",
-                                          string_of_int (String.length body))
+                                        (("transfer-encoding", "chunked")
                                         :: accept_warn_headers
                                         @ json_headers ~deps session_id
                                             protocol_version origin)
@@ -499,8 +539,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                     let response =
                                       Httpun.Response.create ~headers `OK
                                     in
-                                    safe_respond_with_string reqd response
-                                      body
+                                    safe_respond_chunked reqd response body
                             with
                             | Eio.Cancel.Cancelled _ as e -> raise e
                             | exn ->

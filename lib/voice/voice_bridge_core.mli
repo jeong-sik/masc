@@ -2,7 +2,7 @@
     and TTS helper utilities shared by {!Voice_bridge}.
 
     Internal helpers ([log_prefix], [split_path_env],
-    [find_executable_in_path], [local_playback_argv],
+    [find_executable_in_path], [local_playback_argvs],
     [record_playback], the dedup [last_playback] state, the playback
     mutex, the [elevenlabs_voice_ids] constant table, [trim_opt],
     [resolved_base_path_opt], [strip_provider_metadata], and

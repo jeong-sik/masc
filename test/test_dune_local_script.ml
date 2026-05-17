@@ -301,6 +301,60 @@ exec "$@"
         (contains_substring lock_log opam_lock_path);
       check bool "dune was invoked" true (Sys.file_exists dune_log))
 
+let test_dune_lock_wait_reports_holder () =
+  with_temp_dir "dune-local-lock-diag" (fun dir ->
+      let bin_dir, dune_log =
+        setup_fake_repo dir ~pin_check_exit_code:0
+          ~pin_check_stderr_msg:"pin ok"
+      in
+      let dune_lock_path = Filename.concat dir "dune-local.lock" in
+      let lockf_log = Filename.concat dir "lockf-calls.log" in
+      write_executable
+        (Filename.concat bin_dir "lockf")
+        (Printf.sprintf
+           {|#!/bin/sh
+printf 'argv=%%s\n' "$*" >> %s
+while [ "${1#-}" != "$1" ]; do
+  case "$1" in
+    -t) shift 2 ;;
+    *) shift ;;
+  esac
+done
+shift
+exec "$@"
+|}
+           (quote lockf_log));
+      write_executable
+        (Filename.concat bin_dir "lsof")
+        (Printf.sprintf
+           {|#!/bin/sh
+if [ "${1:-}" = "-t" ] && [ "${2:-}" = %s ]; then
+  printf '1234\n'
+  exit 0
+fi
+exit 1
+|}
+           (quote dune_lock_path));
+      write_executable
+        (Filename.concat bin_dir "ps")
+        {|#!/bin/sh
+if [ "${1:-}" = "-p" ] && [ "${2:-}" = "1234" ]; then
+  printf ' 1234 999 S 00:42 fake-dune-holder --target test\n'
+  exit 0
+fi
+exit 1
+|};
+      let code, _stdout, stderr =
+        run_dune_local dir bin_dir ~unset_env:[ "GITHUB_ACTIONS" ] "build"
+      in
+      check int "exits zero through lockf reexec" 0 code;
+      check bool "reports Dune lock holders" true
+        (contains_substring stderr "Dune lock holder(s)");
+      check bool "reports holder command" true
+        (contains_substring stderr "fake-dune-holder --target test");
+      check bool "dune was invoked after reexec" true
+        (Sys.file_exists dune_log))
+
 let test_opam_lockf_reexec_env_passthrough () =
   with_temp_dir "dune-local-opam-lockf" (fun dir ->
       let bin_dir, dune_log =
@@ -1010,6 +1064,8 @@ let () =
             test_github_actions_bypasses_pin_guard;
           test_case "opam absent skips pin guard" `Quick
             test_opam_absent_skips_pin_guard;
+          test_case "Dune lock wait reports holder" `Quick
+            test_dune_lock_wait_reports_holder;
           test_case "opam lockf reexec propagates env" `Quick
             test_opam_lockf_reexec_env_passthrough;
           test_case "opam lock timeout releases Dune lock" `Quick

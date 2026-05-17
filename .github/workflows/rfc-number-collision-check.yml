@@ -50,10 +50,14 @@ jobs:
             --base-ref "origin/${{ github.base_ref }}" \
             --head-ref "HEAD"
 
-      - name: Comment on PR if collision detected
+      - name: Run ledger monotonic check
+        run: |
+          python scripts/rfc_enforcer.py --check-ledger-monotonic
+
+      - name: Comment on PR if RFC numbering failed
         if: failure() && github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh pr comment "${{ github.event.pull_request.number }}" \
-            --body "RFC number collision detected. Allocate a fresh number via \`bash scripts/rfc-allocate-next.sh\` and rebase. For multi-phase additions, add \`RFC-EXTEND: NNNN\` to the PR body or \`extends: \"NNNN\"\` to the RFC frontmatter. See RFC-0078 (\`docs/rfc/RFC-0078-rfc-number-reservation-ledger.md\`)."
+            --body "RFC numbering check failed. Allocate a fresh number via \`bash scripts/rfc-allocate-next.sh\`, keep \`docs/rfc/.next-number\` above the highest existing RFC number, and rebase. For multi-phase additions, add \`RFC-EXTEND: NNNN\` to the PR body or \`extends: \"NNNN\"\` to the RFC frontmatter. See RFC-0078 (\`docs/rfc/RFC-0078-rfc-number-reservation-ledger.md\`)."

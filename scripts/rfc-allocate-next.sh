@@ -36,6 +36,23 @@ if ! [[ "${CURRENT}" =~ ^[0-9]{4}$ ]]; then
   exit 1
 fi
 
+MAX_EXISTING="0000"
+while IFS= read -r -d '' RFC_FILE; do
+  RFC_NAME="${RFC_FILE##*/}"
+  RFC_NUM="${RFC_NAME#RFC-}"
+  RFC_NUM="${RFC_NUM%%-*}"
+  if [[ "${RFC_NUM}" =~ ^[0-9]{4}$ ]] && ((10#${RFC_NUM} > 10#${MAX_EXISTING})); then
+    MAX_EXISTING="${RFC_NUM}"
+  fi
+done < <(find "${REPO_ROOT}/docs/rfc" -maxdepth 1 -type f -name 'RFC-[0-9][0-9][0-9][0-9]-*.md' -print0)
+
+if ((10#${CURRENT} <= 10#${MAX_EXISTING})); then
+  MIN_NEXT=$(printf "%04d" "$((10#${MAX_EXISTING} + 1))")
+  echo "error: RFC ledger drift: ${LEDGER} is ${CURRENT}, but RFC-${MAX_EXISTING} already exists" >&2
+  echo "       update the ledger to at least ${MIN_NEXT} before allocating another RFC" >&2
+  exit 1
+fi
+
 # Force base-10 parsing — leading zeros must not be interpreted as octal.
 NEXT=$(printf "%04d" "$((10#${CURRENT} + 1))")
 

@@ -506,6 +506,21 @@ let task_has_persisted_contract = function
   | Some (task : Masc_domain.task) -> Option.is_some task.contract
   | None -> false
 
+let task_has_strict_persisted_contract = function
+  | Some ({ contract = Some { strict = true; _ }; _ } : Masc_domain.task) ->
+    true
+  | _ -> false
+
+let contract_requires_verification (contract : Masc_domain.task_contract) =
+  Stdlib.List.length contract.completion_contract > 0
+  || Stdlib.List.length contract.required_evidence > 0
+  || Stdlib.List.length contract.verify_gate_evidence > 0
+
+let task_requires_verification = function
+  | Some ({ contract = Some contract; _ } : Masc_domain.task) ->
+    contract_requires_verification contract
+  | _ -> false
+
 let strict_release_requires_handoff = function
   | Some ({ contract = Some contract; _ } : Masc_domain.task) -> contract.strict
   | _ -> false
@@ -1080,8 +1095,17 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
   let completion_owned_by_caller =
     force || can_review_completion ~task_opt ~agent_name:ctx.agent_name
   in
+  let done_redirects_to_verification =
+    (=) action Masc_domain.Done_action
+    && Env_config_runtime.Verification.fsm_enabled ()
+    && completion_owned_by_caller
+    && task_requires_verification task_opt
+  in
   let persisted_gate_rejection =
-    if (=) action Masc_domain.Done_action && not force then
+    if (=) action Masc_domain.Done_action
+       && not force
+       && not done_redirects_to_verification
+    then
       if not completion_owned_by_caller then
         None
       else if task_has_persisted_contract task_opt then
@@ -1126,19 +1150,17 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
      above; this replaces Gate 2.5 (substring match) with real
      measurement by the verifier. See issue #7598. *)
   let action =
-    if (=) action Masc_domain.Done_action
-       && Env_config_runtime.Verification.fsm_enabled ()
-       && completion_owned_by_caller
-    then
+    if done_redirects_to_verification then
       match task_opt with
       | Some task ->
         (match task.contract with
-         | Some contract
-           when Stdlib.List.length contract.completion_contract > 0 || Stdlib.List.length contract.required_evidence > 0 ->
+         | Some contract when contract_requires_verification contract ->
            Log.Task.info
              "[verifier-gate] redirecting Done→Submit_for_verification task=%s agent=%s contract_items=%d"
              task_id ctx.agent_name
-             (List.length contract.completion_contract + List.length contract.required_evidence);
+             (List.length contract.completion_contract
+              + List.length contract.required_evidence
+              + List.length contract.verify_gate_evidence);
            Masc_domain.Submit_for_verification
          | _ -> action)
       | None -> action
@@ -1230,6 +1252,18 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
     | Masc_domain.Submit_pr_evidence ->
       None
   in
+  let verifier_approve_gate_rejection =
+    if (=) action Masc_domain.Approve_verification
+       && task_has_strict_persisted_contract task_opt
+    then
+      persisted_contract_rejection ~ctx ~task_opt ~notes
+    else
+      None
+  in
+  match verifier_approve_gate_rejection with
+  | Some reason ->
+    Tool_result.error ~tool_name ~start_time reason
+  | None ->
   let rec try_transition attempt =
     match submit_evidence_error with
     | Some reason ->

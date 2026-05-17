@@ -1554,6 +1554,7 @@ let test_done_after_claim () =
 ;;
 
 let test_done_respects_persisted_cdal_gate () =
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "false") (fun () ->
   with_env "MASC_CDAL_GATE_ENABLED" (Some "true") (fun () ->
     with_room (fun config ->
       let meta = make_test_meta () in
@@ -1584,13 +1585,13 @@ let test_done_respects_persisted_cdal_gate () =
           "mentions CDAL verdict"
           true
           (Astring.String.is_infix ~affix:"CDAL verdict" error)
-      | _ -> fail "expected strict contract gate rejection"))
+      | _ -> fail "expected strict contract gate rejection")))
 ;;
 
 let test_done_redirects_to_verification_fsm () =
   ensure_rng ();
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
-    with_env "MASC_CDAL_GATE_ENABLED" (Some "false") (fun () ->
+    with_env "MASC_CDAL_GATE_ENABLED" (Some "true") (fun () ->
       with_room (fun config ->
         let meta = make_test_meta () in
         let contract = strict_contract ~verify_gate_evidence:[ "output.json" ] () in

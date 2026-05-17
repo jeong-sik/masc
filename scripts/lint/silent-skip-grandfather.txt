@@ -1,7 +1,7 @@
 # RFC-0098 — Silent-skip grandfather inventory (lib/).
 #
 # Format: <relative-path>:<line>:<pattern-kind>
-# Updated: 2026-05-17 (HEAD ccf0d9d3f0)
+# Updated: 2026-05-17 (HEAD 9d1caf7ea6)
 #
 # pattern-kind:
 #   E1  =  | Error _ -> ()             (typed silent-skip)
@@ -31,7 +31,7 @@ lib/tool_task.ml:736:E1
 lib/tool_task.ml:1160:E1
 lib/keeper/keeper_tool_emission_hook.ml:80:E1
 lib/shared_audit/store.ml:40:E1
-lib/keeper/keeper_shell_bash.ml:634:E2
+lib/keeper/keeper_shell_bash.ml:666:E2
 
 # T1 sites (try ... with _ -> ()) — 3 baseline in code
 # (note: many doc comments mention this pattern; lint excludes

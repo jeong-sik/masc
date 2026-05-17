@@ -175,6 +175,20 @@ let supports_tool_choice_override_of_model_spec (spec : cascade_model_spec) =
   | None -> None
 ;;
 
+let max_output_tokens_of_model_spec (spec : cascade_model_spec) =
+  match spec.capabilities with
+  | Some capabilities -> capabilities.max_output_tokens
+  | None -> None
+;;
+
+let effective_max_tokens_for_model spec requested =
+  match requested, max_output_tokens_of_model_spec spec with
+  | Some configured, Some capability -> Some (min configured capability)
+  | Some configured, None -> Some configured
+  | None, Some capability -> Some capability
+  | None, None -> None
+;;
+
 let provider_config_from_declared_provider
     (provider : cascade_provider)
     (spec : cascade_model_spec)
@@ -184,6 +198,7 @@ let provider_config_from_declared_provider
   let supports_tool_choice_override =
     supports_tool_choice_override_of_model_spec spec
   in
+  let max_tokens = effective_max_tokens_for_model spec max_tokens in
   match provider.transport with
   | Http base_url ->
     let base_url = Masc_network_defaults.normalize_loopback_base_url base_url in

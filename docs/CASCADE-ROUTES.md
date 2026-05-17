@@ -180,23 +180,23 @@ strategy = "failover"
 keeper-assignable = false   # system-only; keeper 가 직접 잡지 못하게
 
 [tier-group.fast_judge]
-tiers = ["fast_judge_primary", "coding_plan_primary", "local_recovery"]
+tiers = ["fast_judge_primary", "glm-coding-primary", "local_recovery"]
 strategy = "failover"
 fallback = true
 
 # ── Deep lane: keeper turn / review / research ───────────────
-# 기존 coding_plan 유지. 1차 GLM-Coding (비용 최적),
+# 1차 GLM-Coding (비용 최적),
 # 2차 strict_tool_candidates (Claude/Kimi 다양화),
 # 3차 ollama_cloud, 4차 local.
-[tier-group.coding_plan]
-tiers = ["coding_plan_primary", "strict_tool_candidates",
+[tier-group.glm-coding-with-spark]
+tiers = ["glm-coding-primary", "strict_tool_candidates",
          "ollama_cloud_primary", "local_recovery"]
 strategy = "failover"
 fallback = true
 
 # ── Sweep lane: provider benchmark only ──────────────────────
 [tier-group.provider_benchmark]
-tiers = ["coding_plan_primary", "strict_tool_candidates",
+tiers = ["glm-coding-primary", "strict_tool_candidates",
          "cli_manual", "direct_api_manual",
          "ollama_cloud_primary", "local_recovery"]
 strategy = "failover"
@@ -207,13 +207,13 @@ routes 는 §2 분류대로 매핑. 19 개 모두 명시 (누락 = silent fallba
 
 ```toml
 # Deep — keeper 본 작업 / 검증 / 생성
-[routes.keeper_turn]          target = "tier-group.coding_plan"   # keeper 본 turn (default)
-[routes.cross_verifier]       target = "tier-group.coding_plan"   # anti-rationalization 평가 (3-pass)
-[routes.autoresearch]         target = "tier-group.coding_plan"   # research codegen + 최적화 cycle
-[routes.adversarial_reviewer] target = "tier-group.coding_plan"   # PR/코드 심층 review subagent
-[routes.persona_generation]   target = "tier-group.coding_plan"   # keeper persona 초기화 (boot 1회)
-[routes.moderate_task]        target = "tier-group.coding_plan"   # complexity router moderate 라벨
-[routes.complex_task]         target = "tier-group.coding_plan"   # complexity router complex 라벨
+[routes.keeper_turn]          target = "tier-group.glm-coding-with-spark"   # keeper 본 turn (default)
+[routes.cross_verifier]       target = "tier-group.glm-coding-with-spark"   # anti-rationalization 평가 (3-pass)
+[routes.autoresearch]         target = "tier-group.glm-coding-with-spark"   # research codegen + 최적화 cycle
+[routes.adversarial_reviewer] target = "tier-group.glm-coding-with-spark"   # PR/코드 심층 review subagent
+[routes.persona_generation]   target = "tier-group.glm-coding-with-spark"   # keeper persona 초기화 (boot 1회)
+[routes.moderate_task]        target = "tier-group.glm-coding-with-spark"   # complexity router moderate 라벨
+[routes.complex_task]         target = "tier-group.glm-coding-with-spark"   # complexity router complex 라벨
 
 # Fast — verdict / score / ack / passthrough
 [routes.routing]            target = "tier-group.fast_judge"   # 다음 cascade/모델 선택 결정

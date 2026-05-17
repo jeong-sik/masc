@@ -59,14 +59,14 @@ let test_dashboard_provider_snapshots_include_cli_and_api () =
     let claude_api = provider_snapshot_by_name "claude" in
     let gemini_cli = provider_snapshot_by_name "gemini_cli" in
     let glm_api = provider_snapshot_by_name "glm" in
-    let glm_coding_plan = provider_snapshot_by_name "glm-coding" in
+    let glm_coding = provider_snapshot_by_name "glm-coding" in
     let legacy_claude_api = provider_snapshot_by_name "claude-api" in
     let legacy_glm_api = provider_snapshot_by_name "glm-api" in
     check bool "cli snapshot present" true (Option.is_some claude_cli);
     check bool "api snapshot present" true (Option.is_some claude_api);
     check bool "gemini cli snapshot present" true (Option.is_some gemini_cli);
     check bool "glm api snapshot present" true (Option.is_some glm_api);
-    check bool "glm coding snapshot present" true (Option.is_some glm_coding_plan);
+    check bool "glm coding snapshot present" true (Option.is_some glm_coding);
     check bool "legacy claude-api snapshot removed" false
       (Option.is_some legacy_claude_api);
     check bool "legacy glm-api snapshot removed" false
@@ -78,7 +78,7 @@ let test_dashboard_provider_snapshots_include_cli_and_api () =
     check string "glm api runtime kind" "direct_api"
       (Option.get glm_api).runtime_kind;
     check string "glm coding runtime kind" "direct_api"
-      (Option.get glm_coding_plan).runtime_kind;
+      (Option.get glm_coding).runtime_kind;
     check string "cli source" "oas/provider-runtime-binding"
       (Option.get claude_cli).source;
     check string "api source" "oas/provider-runtime-binding"
@@ -141,6 +141,35 @@ let test_resolve_max_cascade_context () =
   let ctx = Masc_mcp.Cascade_runtime.resolve_max_cascade_context
       [ "claude:claude-sonnet-4-6" ] in
   check bool "known provider returns positive context" true (ctx > 0)
+
+let fake_registry_entry ~name ~max_context ~available =
+  { Llm_provider.Provider_registry.name = name
+  ; defaults =
+      { kind = Llm_provider.Provider_config.OpenAI_compat
+      ; base_url = "http://127.0.0.1"
+      ; api_key_env = ""
+      ; request_path = "/v1/chat/completions"
+      }
+  ; max_context
+  ; capabilities = Llm_provider.Capabilities.default_capabilities
+  ; is_available = (fun () -> available)
+  }
+
+let test_resolve_primary_max_context_uses_first_available_label () =
+  let registry = Llm_provider.Provider_registry.create () in
+  Llm_provider.Provider_registry.register registry
+    (fake_registry_entry ~name:"offline-large" ~max_context:1_000_000
+       ~available:false);
+  Llm_provider.Provider_registry.register registry
+    (fake_registry_entry ~name:"online-small" ~max_context:32_768
+       ~available:true);
+  let labels = [ "offline-large:huge"; "online-small:small" ] in
+  check
+    int
+    "primary context follows first available provider"
+    32_768
+    (Masc_mcp.Cascade_runtime.For_testing.resolve_primary_max_context_in_registry
+       registry labels)
 
 let test_labels_require_local_discovery () =
   check bool "llama labels refresh local discovery" true
@@ -309,6 +338,8 @@ let () =
             test_cascade_model_resolve_unresolved_auto_provenance;
           test_case "resolve max cascade context" `Quick
             test_resolve_max_cascade_context;
+          test_case "primary context uses first available label" `Quick
+            test_resolve_primary_max_context_uses_first_available_label;
         ] );
       ( "dashboard_schema",
         [

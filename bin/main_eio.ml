@@ -1197,7 +1197,7 @@ let keeper_doctor_primary_reason ~claim_scope ~config_drift ~config_report ~asyn
   | _ when cascade_override -> "keeper_cascade_override_drift"
   | _ when route_gap -> "route_tool_capability_gap"
   | _ when lost_after_side_effect -> "request_lost_after_side_effect"
-  | _ when Config_doctor.exit_code config_report <> 0 -> "config_doctor_not_ok"
+  | _ when Config_doctor.has_blocking_warning config_report -> "config_doctor_not_ok"
   | _ -> "ok"
 
 let keeper_doctor_next_actions reason =

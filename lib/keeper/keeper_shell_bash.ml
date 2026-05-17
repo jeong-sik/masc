@@ -15,10 +15,6 @@ let elapsed_duration_ms ~start_time ~end_time =
   | _ when elapsed_ms < 1. -> 1
   | _ -> int_of_float elapsed_ms
 
-module For_testing = struct
-  let elapsed_duration_ms = elapsed_duration_ms
-end
-
 type shell_quote_state = No_quote | Single_quote | Double_quote
 
 type shell_word = {
@@ -203,6 +199,214 @@ let rec cmd_contains_gh_pr_create cmd =
   match shell_c_payload words with
   | Some payload -> cmd_contains_gh_pr_create payload
   | None -> false
+
+type bash_shape_block =
+  | Gh_pr_checks
+  | Pipe_or_redirect
+  | Chaining
+  | Substitution
+
+let string_contains_char s ch = String.exists (Char.equal ch) s
+let string_contains_substring s needle = String_util.contains_substring s needle
+
+let quote_aware_shape_scan_text cmd =
+  let len = String.length cmd in
+  let buf = Buffer.create len in
+  let add_space () = Buffer.add_char buf ' ' in
+  let rec loop quote_state escaped i =
+    if i >= len
+    then Buffer.contents buf
+    else if escaped
+    then (
+      add_space ();
+      loop quote_state false (i + 1))
+    else (
+      match quote_state, cmd.[i] with
+      | Single_quote, '\'' ->
+        add_space ();
+        loop No_quote false (i + 1)
+      | Single_quote, _ ->
+        add_space ();
+        loop Single_quote false (i + 1)
+      | Double_quote, '"' ->
+        add_space ();
+        loop No_quote false (i + 1)
+      | Double_quote, '\\' ->
+        add_space ();
+        loop Double_quote true (i + 1)
+      | Double_quote, '$' when i + 1 < len && Char.equal cmd.[i + 1] '(' ->
+        Buffer.add_string buf "$(";
+        loop Double_quote false (i + 2)
+      | Double_quote, '`' ->
+        Buffer.add_char buf '`';
+        loop Double_quote false (i + 1)
+      | Double_quote, _ ->
+        add_space ();
+        loop Double_quote false (i + 1)
+      | No_quote, '\'' ->
+        add_space ();
+        loop Single_quote false (i + 1)
+      | No_quote, '"' ->
+        add_space ();
+        loop Double_quote false (i + 1)
+      | No_quote, '\\' ->
+        add_space ();
+        loop No_quote true (i + 1)
+      | No_quote, ch ->
+        Buffer.add_char buf ch;
+        loop No_quote false (i + 1))
+  in
+  loop No_quote false 0
+
+let raw_keeper_bash_shape_block cmd =
+  let scan_text = quote_aware_shape_scan_text cmd in
+  let lower = String.lowercase_ascii scan_text in
+  if string_contains_substring lower "gh pr checks"
+  then Some Gh_pr_checks
+  else if
+    string_contains_char scan_text '|'
+    || string_contains_char scan_text '>'
+    || string_contains_char scan_text '<'
+  then Some Pipe_or_redirect
+  else if
+    string_contains_substring scan_text "&&"
+    || string_contains_substring scan_text "||"
+    || string_contains_char scan_text ';'
+    || string_contains_char scan_text '\n'
+    || string_contains_char scan_text '\r'
+  then Some Chaining
+  else if
+    string_contains_substring scan_text "$(" || string_contains_char scan_text '`'
+  then Some Substitution
+  else None
+
+let arg_text = function
+  | Masc_exec.Shell_ir.Lit text -> Some (String.lowercase_ascii text)
+  | Masc_exec.Shell_ir.Var _ | Masc_exec.Shell_ir.Concat _ -> None
+
+let simple_is_gh_pr_checks (simple : Masc_exec.Shell_ir.simple) =
+  match Masc_exec.Bin.known simple.bin, simple.args with
+  | Some Masc_exec.Bin.Gh, arg_pr :: arg_checks :: _ ->
+    (match arg_text arg_pr, arg_text arg_checks with
+     | Some "pr", Some "checks" -> true
+     | _ -> false)
+  | _ -> false
+
+let rec parsed_keeper_bash_shape_block = function
+  | Masc_exec.Shell_ir.Pipeline _ -> Some Pipe_or_redirect
+  | Masc_exec.Shell_ir.Simple simple ->
+    if simple.redirects <> []
+    then Some Pipe_or_redirect
+    else if simple_is_gh_pr_checks simple
+    then Some Gh_pr_checks
+    else None
+
+let keeper_bash_shape_block cmd =
+  match Masc_exec_bash_parser.Bash.parse_string cmd with
+  | Masc_exec.Parsed.Parsed ir -> parsed_keeper_bash_shape_block ir
+  | Masc_exec.Parsed.Parse_error _
+  | Masc_exec.Parsed.Parse_aborted _
+  | Masc_exec.Parsed.Too_complex _ ->
+    raw_keeper_bash_shape_block cmd
+
+let bash_shape_block_tag = function
+  | Gh_pr_checks -> "gh_pr_checks"
+  | Pipe_or_redirect -> "pipe_or_redirect"
+  | Chaining -> "chaining"
+  | Substitution -> "substitution"
+
+module For_testing = struct
+  let elapsed_duration_ms = elapsed_duration_ms
+
+  let keeper_bash_shape_block_tag cmd =
+    Option.map bash_shape_block_tag (keeper_bash_shape_block cmd)
+
+  let raw_keeper_bash_shape_block_tag cmd =
+    Option.map bash_shape_block_tag (raw_keeper_bash_shape_block cmd)
+end
+
+let bash_shape_block_reason = function
+  | Gh_pr_checks ->
+    "gh pr checks exits non-zero when checks are red. That is useful status \
+     data, but it trips keeper shell failure and circuit-breaker accounting."
+  | Pipe_or_redirect ->
+    "keeper_bash accepts one direct command. Pipes and redirects such as |, \
+     2>&1, 2&1, >/dev/null, <, and | head are blocked before execution."
+  | Chaining ->
+    "keeper_bash accepts one command per call. Chaining with &&, ||, ;, or \
+     newlines is blocked before execution."
+  | Substitution ->
+    "Command substitution is blocked before execution. Compute values in a \
+     separate tool call and pass literal arguments."
+
+let bash_shape_block_hint = function
+  | Gh_pr_checks ->
+    "Use keeper_pr_status. If raw gh is the only visible status path, use gh \
+     pr view NUMBER --repo OWNER/REPO --json \
+     statusCheckRollup,mergeStateStatus,isDraft."
+  | Pipe_or_redirect ->
+    "Remove the pipe or redirect. Run the primary command once and summarize \
+     the returned output; use keeper_shell op=head/tail for file slices."
+  | Chaining ->
+    "Split the work into separate keeper_bash calls and use the cwd argument \
+     instead of cd chaining."
+  | Substitution ->
+    "Run the discovery command first, then use its literal result in a second \
+     keeper_bash call."
+
+let bash_shape_block_alternatives = function
+  | Gh_pr_checks ->
+    [
+      "keeper_pr_status";
+      "gh pr view NUMBER --repo OWNER/REPO --json \
+       statusCheckRollup,mergeStateStatus,isDraft";
+    ]
+  | Pipe_or_redirect ->
+    [
+      "keeper_bash cmd='ls lib/'";
+      "keeper_shell op=head path=file/path lines=20";
+      "keeper_shell op=rg pattern=search-term path=dir/path";
+    ]
+  | Chaining ->
+    [
+      "keeper_bash cmd='git status' cwd='repos/REPO'";
+      "keeper_bash cmd='git log -1' cwd='repos/REPO'";
+    ]
+  | Substitution ->
+    [
+      "keeper_bash cmd='rg --files lib'";
+      "keeper_bash cmd='cat path/from/previous-step'";
+    ]
+
+let bash_shape_block_result ~cmd ~cmd_for_log ~env_snapshot block =
+  Yojson.Safe.to_string
+    (Exec_core.blocked_result_json
+       ~cmd
+       ~error:"keeper_bash_command_shape_blocked"
+       ~reason:(bash_shape_block_reason block)
+       ~hint:(bash_shape_block_hint block)
+       ~alternatives:(bash_shape_block_alternatives block)
+       ~diag:
+         (Some
+            {
+              Exec_core.rule_id =
+                "keeper_bash_" ^ bash_shape_block_tag block ^ "_blocked";
+              explanation = bash_shape_block_reason block;
+              rewrite = Some (bash_shape_block_hint block);
+              tool_suggestion =
+                (match block with
+                 | Gh_pr_checks -> Some "keeper_pr_status"
+                 | Pipe_or_redirect -> Some "keeper_shell"
+                 | Chaining | Substitution -> None);
+            })
+       ~extra:
+         [
+           "cmd", `String cmd_for_log;
+           "shape_block", `String (bash_shape_block_tag block);
+           "execution_time_ms", `Int 0;
+         ]
+       ~env_snapshot
+       ())
 
 let handle_keeper_bash
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
@@ -462,8 +666,23 @@ let handle_keeper_bash
       else (base_profile, base_network_mode, false)
     in
     let sandbox_root = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
-    (* Destructive guard: always active regardless of Docker or preset *)
-    if Worker_dev_tools.is_destructive_bash_operation cmd
+    match keeper_bash_shape_block cmd with
+    | Some block ->
+      Prometheus.inc_counter
+        Keeper_metrics.metric_keeper_shell_bash_failures
+        ~labels:
+          [ ("keeper", meta.name)
+          ; ("site", "command_shape")
+          ; ("shape_block", bash_shape_block_tag block)
+          ]
+        ();
+      Log.Keeper.warn
+        "keeper_bash command-shape blocked: keeper=%s block=%s cmd=%s"
+        meta.name (bash_shape_block_tag block) cmd_for_log;
+      bash_shape_block_result ~cmd ~cmd_for_log ~env_snapshot:env_snap block
+    | None ->
+      (* Destructive guard: always active regardless of Docker or preset *)
+      if Worker_dev_tools.is_destructive_bash_operation cmd
     then (
       Prometheus.inc_counter
         Keeper_metrics.metric_keeper_shell_bash_failures

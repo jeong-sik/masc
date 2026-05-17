@@ -16,7 +16,7 @@ Cascade catalog는 현재 capability-blind. `retired_coding_profile.fallback = p
 
 ### 2.1 사고 사례 (2026-05-05)
 
-3 keeper (`sangsu`, `masc-improver`, `glm-coding-plan`)가 stuck. cascade `retired_coding_profile` (model = `glm-coding:auto`)의 fallback이 `primary`인데, primary의 `gemini_cli:auto` (7 variants) + `codex_cli:gpt-5.3-codex-spark`가 모두 `Runtime_mcp_http_headers_required` rejection. 통과한 claude_code/glm-coding/kimi가 있어도 turn semaphore 별도 사고로 막힘.
+3 keeper (`sangsu`, `masc-improver`, retired coding keeper)가 stuck. cascade `retired_coding_profile` (model = `glm-coding:auto`)의 fallback이 `primary`인데, primary의 `gemini_cli:auto` (7 variants) + `codex_cli:gpt-5.3-codex-spark`가 모두 `Runtime_mcp_http_headers_required` rejection. 통과한 claude_code/glm-coding/kimi가 있어도 turn semaphore 별도 사고로 막힘.
 
 ### 2.2 Root cause
 

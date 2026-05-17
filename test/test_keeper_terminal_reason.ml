@@ -487,7 +487,7 @@ let test_structured_no_tool_capable_provider () =
       (Masc_mcp.Keeper_turn_driver.No_tool_capable_provider
          { cascade_name =
              Masc_mcp.Keeper_turn_driver.cascade_name_of_string
-               "tier-group.coding_plan"
+               "tier-group.glm-coding-with-spark"
          ; configured_labels = [ "glm:glm-5.1" ]
          ; required_tool_names = [ "keeper_tool_search" ]
          ; provider_rejections = []

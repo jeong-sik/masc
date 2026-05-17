@@ -25,6 +25,10 @@ val effective_discovered_ctx : static_ctx:int -> discovered:int option -> int
 val max_context_of_label : string -> int
 val resolve_primary_max_context : string list -> int
 val resolve_max_cascade_context : string list -> int
+module For_testing : sig
+  val resolve_primary_max_context_in_registry :
+    Llm_provider.Provider_registry.t -> string list -> int
+end
 val labels_are_pure_local : string list -> bool
 val clamp_context_for_pure_local_labels :
   labels:string list -> max_context:int -> int

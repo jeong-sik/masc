@@ -35,11 +35,11 @@
       "within_bound": true
     },
     {
-      "keeper_name": "glm-coding-plan",
+      "keeper_name": "tech_glutton",
       "boot_position": 2,
-      "name_hash": 846962750,
-      "jitter_bucket": 14,
-      "warmup_sec": 74,
+      "name_hash": 816906101,
+      "jitter_bucket": 5,
+      "warmup_sec": 65,
       "within_bound": true
     },
     {

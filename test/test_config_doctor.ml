@@ -124,6 +124,16 @@ let contains_substring ~needle s =
     in
     loop 0
 
+let test_bootstrap_seed_warning_is_non_blocking () =
+  let warning =
+    "Repo config seed exists at /tmp/repo/_build/default/config; it is \
+     bootstrap-only, not the active config root."
+  in
+  check bool "bootstrap seed warning is visible but non-blocking" false
+    (Config_doctor.warning_is_blocking warning);
+  check bool "ordinary warning remains blocking" true
+    (Config_doctor.warning_is_blocking "Active config root is not initialized")
+
 let list_contains_substring ~needle values =
   List.exists (contains_substring ~needle) values
 
@@ -294,20 +304,20 @@ supports-response-format-json = true
 is-default = true
 max-concurrent = 1
 
-[tier.coding_plan_primary]
+[tier.glm-coding-primary]
 members = ["codex_cli.codex-spark"]
 strategy = "failover"
 
-[tier-group.coding_plan]
-tiers = ["coding_plan_primary"]
+[tier-group.glm-coding-with-spark]
+tiers = ["glm-coding-primary"]
 strategy = "priority_tier"
 fallback = false
 
 [routes.keeper_turn]
-target = "tier-group.coding_plan"
+target = "tier-group.glm-coding-with-spark"
 
 [routes.tool_required]
-target = "tier-group.coding_plan"
+target = "tier-group.glm-coding-with-spark"
 |}
     config_root;
   with_config_dir config_root @@ fun () ->
@@ -379,20 +389,20 @@ supports-response-format-json = true
 is-default = true
 max-concurrent = 1
 
-[tier.coding_plan_primary]
+[tier.glm-coding-primary]
 members = ["glm-coding.glm-5-1"]
 strategy = "failover"
 
-[tier-group.coding_plan]
-tiers = ["coding_plan_primary"]
+[tier-group.glm-coding-with-spark]
+tiers = ["glm-coding-primary"]
 strategy = "priority_tier"
 fallback = false
 
 [routes.keeper_turn]
-target = "tier-group.coding_plan"
+target = "tier-group.glm-coding-with-spark"
 
 [routes.tool_required]
-target = "tier-group.coding_plan"
+target = "tier-group.glm-coding-with-spark"
 |}
     config_root;
   with_config_dir config_root @@ fun () ->
@@ -409,11 +419,11 @@ target = "tier-group.coding_plan"
   check string "status escalates to error" "error" (status report.status);
   check bool "keeper route tool warning present" true
     (list_contains_substring
-       ~needle:"Tool-required cascade route keeper_turn targets tier-group.coding_plan"
+       ~needle:"Tool-required cascade route keeper_turn targets tier-group.glm-coding-with-spark"
        report.warnings);
   check bool "tool route tool warning present" true
     (list_contains_substring
-       ~needle:"Tool-required cascade route tool_required targets tier-group.coding_plan"
+       ~needle:"Tool-required cascade route tool_required targets tier-group.glm-coding-with-spark"
        report.warnings);
   check bool "forced tool-use reason present" true
     (list_contains_substring
@@ -436,6 +446,8 @@ let () =
              test_invalid_explicit_config_dir;
            test_case "missing init without explicit config" `Quick
              test_missing_init_without_explicit_config;
+           test_case "bootstrap seed warning is non-blocking" `Quick
+             test_bootstrap_seed_warning_is_non_blocking;
            test_case "initialized local base config" `Quick
              test_initialized_local_base_config;
            test_case "initialized config without cascade.toml errors"

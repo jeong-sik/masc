@@ -100,10 +100,10 @@ let default_config
   ; max_idle_turns = 3
   ; stream_idle_timeout_s = None
   ; max_execution_time_s = None
-  ; max_tokens = Cascade_legacy_runner.default_max_tokens
+  ; max_tokens = Llm_provider.Constants.Inference_profile.agent_default.max_tokens
   ; max_input_tokens = None
   ; max_cost_usd = None
-  ; temperature = Cascade_legacy_runner.default_temperature
+  ; temperature = Llm_provider.Constants.Inference_profile.agent_default.temperature
   ; hooks = None
   ; context_reducer = None
   ; guardrails = None

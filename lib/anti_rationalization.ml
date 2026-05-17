@@ -649,7 +649,7 @@ let review
                    ~masc_tools:[ report_review_verdict_schema ]
                    ~dispatch
                    ~max_turns:1
-                   ~temperature:Cascade_legacy_runner.deterministic_temperature
+                   ~temperature:Llm_provider.Constants.Inference_profile.deterministic.temperature
                    ~max_tokens:200
                    ~approval:Approval_callbacks.auto_approve
                    ?sw

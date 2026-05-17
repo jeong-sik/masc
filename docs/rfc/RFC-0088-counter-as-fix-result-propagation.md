@@ -1,14 +1,14 @@
 ---
 rfc: "0088"
 title: "Counter-as-Fix → Result Propagation (umbrella scoping)"
-status: Draft
+status: Active
 created: 2026-05-15
-updated: 2026-05-15
+updated: 2026-05-17
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0044", "0062", "0063", "0077"]
-implementation_prs: []
+implementation_prs: ["15519"]
 ---
 
 # RFC-0088 — Counter-as-Fix → Result Propagation (umbrella scoping)
@@ -83,14 +83,16 @@ The *event itself is the telemetry payload*. The "data loss" is loss of a single
 
 ### 4.3 Decision (RFC-0088 §4.3)
 
-Two options, choose at promotion to Active:
+**Decided 2026-05-17: Option A. Implemented via PR #15519.**
+
+Two options were considered:
 
 | Option | Outcome | Cost |
 |--------|---------|------|
-| **A — fold into RFC-0044** | Add `Coord_telemetry_drop_reason.t` (closed sum with `Agent_lifecycle | Task_transition | Accountability`) under the existing RFC-0044 read-drop typed family. Update Coord 3 sites + `Prometheus.metric_coord_telemetry_drop` label to use `to_wire`. | Single small PR (~80 LoC). No behavior change. |
-| **B — buffered replay** | Introduce `lib/coord/telemetry_buffer.ml` (bounded `Eio.Stream`) + drain fiber in `server_runtime_bootstrap`. Coord enqueues; drain replays inside Eio. Drop counter retained only as overflow signal. | RFC-scope. Touches bootstrap + ordering invariants. Defer to follow-up RFC if Option A is insufficient. |
+| **A — typed event next to RFC-0044 family** *(chosen)* | Closed sum `Coord_telemetry_drop_event.t` (`Agent_lifecycle | Task_transition | Accountability`) in `lib/coord/coord_telemetry_drop_event.{ml,mli}`. Updates Coord 3 call sites + `Prometheus.metric_coord_telemetry_drop` label encoding via `family_to_wire` / `kind_to_wire` / `to_prometheus_labels`. | Single PR (~80 LoC). Zero behavior change; only label cardinality is now compiler-bounded. |
+| **B — buffered replay** *(rejected for now)* | Introduce `lib/coord/telemetry_buffer.ml` (bounded `Eio.Stream`) + drain fiber in `server_runtime_bootstrap`. Coord enqueues; drain replays inside Eio. Drop counter retained only as overflow signal. | RFC-scope. Touches bootstrap + ordering invariants. Re-open as a follow-up RFC only if dashboard data shows non-trivial drop volume. |
 
-**Recommendation**: A first. B is a follow-up if dashboards show non-trivial drop volume.
+Implementation note: instead of merging the typed reason *into* RFC-0044's `Read_drop_reason.t` (the original "tentative amendment to RFC-0044" framing in Open question Q2), PR #15519 placed it in a sibling module under `lib/coord/`. This keeps RFC-0044 focused on persistence read-drops and avoids cross-domain coupling. The Q2 wording in §9 is therefore superseded by what shipped.
 
 ## 5. Merge-reject bar consolidation
 
@@ -131,10 +133,12 @@ This RFC introduces **zero** behavior change. No code is touched by RFC-0088 mer
 
 ## 10. Acceptance
 
-- [ ] §3 inventory table reviewed and rows confirmed or contested by maintainer.
-- [ ] §4.3 decision A vs B made; if A, follow-up PR opens against RFC-0044 (not this RFC).
-- [ ] §5 merge-reject bar referenced in `~/me/scripts/pr-rfc-check.sh` subsystem-keyword map (`metric_silent_`, `metric_coord_telemetry_drop` → owning RFC).
-- [ ] When Phase B PR-2 Strict default lands, rows 1-3 disposition transitions to "retired" in this RFC (one-line update).
+- [x] §3 inventory table reviewed and rows confirmed or contested by maintainer. *(Inventory frozen at 2026-05-15; drift guard in §7 covers ongoing reviewer enforcement.)*
+- [x] §4.3 decision A vs B made; **A chosen, implemented via PR #15519** (sibling module under `lib/coord/`, not an RFC-0044 amendment — see §4.3 implementation note).
+- [x] §5 merge-reject bar referenced in `~/me/scripts/pr-rfc-check.sh` subsystem-keyword map (`metric_silent_`, `metric_coord_telemetry_drop` → owning RFC). *(see ~/me PR for pr-rfc-check expansion)*
+- [ ] When Phase B PR-2 Strict default lands, rows 1-3 disposition transitions to "retired" in this RFC (one-line update). *(Tracked separately under the auth-strict track; not a blocker for `Active` status — see §9 Q1.)*
+
+With the first three items closed and the fourth scoped out (`§9 Q1` "independent" verdict), this RFC moves from Draft to **Active** as of 2026-05-17.
 
 ## 11. References
 

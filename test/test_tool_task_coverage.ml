@@ -695,6 +695,87 @@ let () = test "handle_transition_release_prefers_notes_then_reason_for_synthesis
   | _ -> failwith "expected exactly one task"
 )
 
+(* Regression: 2026-05-17 nick0cave production case. masc_transition with
+   action=claim/start does not require [handoff_context.summary]; the LLM
+   has nothing to summarize at work entry. Previously the parser rejected
+   any empty summary regardless of action, which broke entry-class
+   transitions when the keeper did not invent a placeholder. *)
+let () = test "handle_transition_claim_does_not_require_summary" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ =
+    Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc [ ("title", `String "Entry-class action") ])
+  in
+  let result =
+    Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "claim");
+        ])
+  in
+  if not result.Tool_result.success then
+    failwith
+      ("claim must succeed without handoff_context.summary: "
+       ^ result.Tool_result.legacy_message)
+)
+
+let () = test "handle_transition_claim_with_empty_handoff_context_ok" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ =
+    Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc [ ("title", `String "Entry with empty context") ])
+  in
+  let result =
+    Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "claim");
+          (* Empty handoff_context object: keeper sent the shape but no
+             content. Entry-class action treats this as absent, not as
+             an error. *)
+          ("handoff_context", `Assoc [ ("summary", `String "") ]);
+        ])
+  in
+  if not result.Tool_result.success then
+    failwith
+      ("claim with empty handoff_context.summary must succeed: "
+       ^ result.Tool_result.legacy_message)
+)
+
+let () = test "handle_transition_done_still_requires_summary" (fun () ->
+  (* Exit-class action [done] keeps the strict summary contract.
+     Regression guard: the entry-class relaxation above must not leak
+     into exit-class actions. *)
+  let ctx = make_test_ctx () in
+  let _ =
+    Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc
+        [
+          ("title", `String "Strict done task");
+          ("contract", `Assoc [ ("strict", `Bool true) ]);
+        ])
+  in
+  let _ =
+    Tool_task.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc [ ("task_id", `String "task-001") ])
+  in
+  let result =
+    Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc
+        [
+          ("task_id", `String "task-001");
+          ("action", `String "done");
+          ("handoff_context", `Assoc [ ("summary", `String "") ]);
+        ])
+  in
+  assert (not result.Tool_result.success);
+  assert
+    (str_contains result.Tool_result.legacy_message
+       "handoff_context.summary is required for action=done")
+)
+
 let () = test "handle_transition_release_empty_summary_error_includes_example" (fun () ->
   let ctx = make_test_ctx () in
   let _ =

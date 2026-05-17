@@ -391,9 +391,46 @@ let synthesize_summary_from_siblings args =
       | Some s -> Some (truncate ~max_len:240 (first_line s))
       | None -> None
 
-let parse_handoff_context ~(agent_name : string) args =
+(* A transition's [handoff_context.summary] is only meaningful when the
+   action represents a *work-state exit* — the keeper is reporting the
+   outcome of work it did. Pure ownership transitions (Claim, Start)
+   have no outcome to summarize yet, so requiring a summary just makes
+   the LLM either invent one (degrading audit signal) or fail the call
+   entirely (the 2026-05-17 nick0cave production case).
+
+   Exit-class actions:
+     Done_action / Cancel / Release / Submit_for_verification /
+     Submit_pr_evidence / Approve_verification / Reject_verification
+   Entry-class actions (no summary required):
+     Claim / Start
+
+   This split is exhaustive over [Masc_domain.task_action]; adding a
+   new variant forces a compile-time decision here, not a runtime
+   permissive default. *)
+let transition_action_requires_summary : Masc_domain.task_action -> bool =
+  function
+  | Masc_domain.Done_action
+  | Masc_domain.Cancel
+  | Masc_domain.Release
+  | Masc_domain.Submit_for_verification
+  | Masc_domain.Submit_pr_evidence
+  | Masc_domain.Approve_verification
+  | Masc_domain.Reject_verification ->
+    true
+  | Masc_domain.Claim | Masc_domain.Start ->
+    false
+
+let parse_handoff_context ~(agent_name : string)
+    ~(action : Masc_domain.task_action) args =
+  let summary_required = transition_action_requires_summary action in
   match args |> member "handoff_context" with
-  | `Null -> Ok None
+  | `Null ->
+    (* No handoff_context object provided. For entry-class actions this
+       is the expected shape; for exit-class actions the caller's
+       strict-release / contract checks downstream will surface the
+       missing summary if the task contract demands it. We do not
+       fabricate an empty handoff_context here. *)
+    Ok None
   | (`Assoc _ as json) -> (
       match Masc_domain.task_handoff_context_of_yojson json with
       | Error error ->
@@ -407,12 +444,23 @@ let parse_handoff_context ~(agent_name : string) args =
             else summary
           in
           if String.equal summary "" then
-            Error
-              "handoff_context.summary is required (non-empty string). \
-               Example: {\"summary\": \"tests green, PR #123 pending review\", \
-               \"next_step\": \"wait for CI\", \"evidence_refs\": [\"PR#123\"]}. \
-               Alternatively pass a non-empty top-level 'notes' or 'reason' \
-               and it will be synthesized into summary automatically."
+            if summary_required then
+              Error
+                (Printf.sprintf
+                   "handoff_context.summary is required for action=%s \
+                    (non-empty string). Example: {\"summary\": \"tests \
+                    green, PR #123 pending review\", \"next_step\": \"wait \
+                    for CI\", \"evidence_refs\": [\"PR#123\"]}. \
+                    Alternatively pass a non-empty top-level 'notes' or \
+                    'reason' and it will be synthesized into summary \
+                    automatically."
+                   (Masc_domain.task_action_to_string action))
+            else
+              (* Entry-class action (claim/start) with an empty
+                 handoff_context object. The summary is meaningless at
+                 work entry; treat the empty context as absent rather
+                 than failing the call. *)
+              Ok None
           else
             Ok
               (Some
@@ -717,7 +765,10 @@ let handle_release ~tool_name ~start_time ctx args =
   let expected_version = get_int_opt args "expected_version" in
   let tasks = Coord.get_tasks_raw ctx.config in
   let task_opt = List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks in
-  let handoff_context = parse_handoff_context ~agent_name:ctx.agent_name args in
+  let handoff_context =
+    parse_handoff_context ~agent_name:ctx.agent_name
+      ~action:Masc_domain.Release args
+  in
   (match handoff_context with
    | Error error -> Tool_result.error ~tool_name ~start_time error
    | Ok handoff_context ->
@@ -913,7 +964,9 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
     | items -> Some items
   in
   let evaluator_cascade = get_string_opt args "evaluator_cascade" in
-  let handoff_context = parse_handoff_context ~agent_name:ctx.agent_name args in
+  let handoff_context =
+    parse_handoff_context ~agent_name:ctx.agent_name ~action args
+  in
   let expected_version = get_int_opt args "expected_version" in
   let force_raw = get_bool args "force" false in
   (* force=true requires admin privilege: initial_admin or Admin role *)

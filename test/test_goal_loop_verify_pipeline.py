@@ -12,6 +12,13 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "goal_loop_verify_pipeline.py"
+CURRENT_VERIFY_PIPELINE_FIXTURE = (
+    REPO_ROOT
+    / "test"
+    / "fixtures"
+    / "goal_loop"
+    / "verify-pipeline.current.external-claim.json"
+)
 
 spec = importlib.util.spec_from_file_location("goal_loop_verify_pipeline", SCRIPT_PATH)
 assert spec is not None
@@ -72,6 +79,20 @@ class GoalLoopVerifyPipelineTest(unittest.TestCase):
             "prompt_tla_spec_missing",
         )
         self.assertEqual(by_id["post_act_log_contract"].reason, "missing_post_act_logs")
+
+    def test_current_fixture_matches_default_blocked_report(self) -> None:
+        report = goal_loop_verify_pipeline.build_pipeline_report(
+            repo_root=REPO_ROOT,
+            metrics_json=None,
+            tla_results=None,
+            log_paths=[],
+            unit_tests_passed=False,
+            unit_tests_failed=False,
+        )
+
+        expected = json.loads(goal_loop_verify_pipeline.report_to_json(report))
+        actual = json.loads(CURRENT_VERIFY_PIPELINE_FIXTURE.read_text(encoding="utf-8"))
+        self.assertEqual(actual, expected)
 
     def test_metric_snapshot_covers_required_production_gates(self) -> None:
         with tempfile.TemporaryDirectory() as raw_dir:

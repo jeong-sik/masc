@@ -513,6 +513,11 @@ let audit_stores_mu = Stdlib.Mutex.create ()
 let audit_io_mu = Stdlib.Mutex.create ()
 let audit_stores : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 4
 
+let keeper_audit_metric_label = function
+  | Some keeper when String.trim keeper <> "" -> keeper
+  | Some _ | None -> "aggregate"
+;;
+
 let audit_today_path base_dir =
   let open Unix in
   let tm = gmtime (gettimeofday ()) in
@@ -682,7 +687,7 @@ let read_recent_audit ?base_path ?keeper_name ?(n = 20) () : Yojson.Safe.t list 
           Keeper_metrics.metric_keeper_approval_queue_failures
           ~labels:
             [ "keeper",
-              Option.value ~default:"aggregate" keeper_name;
+              keeper_audit_metric_label keeper_name;
               "site",
               Keeper_approval_queue_failure_site.(to_label Audit_read_recent)
             ]

@@ -60,13 +60,40 @@ val adapted_catalog_to_snapshot :
 
 (** {1 TOML loading} *)
 
+type partial_load_result = {
+  snapshot : decl_snapshot;
+  errors : Cascade_declarative_adapter.adapter_error list;
+}
+(** Result of a partial catalog load. [snapshot] always contains the
+    subset of profiles whose internal cross-references resolved
+    successfully. [errors] lists per-entry failures (unresolved
+    provider/model/binding/tier). [errors = []] is the all-clean case.
+
+    Surfacing both fields at the same time lets downstream callers (notably
+    keeper toml validation) accept the valid subset while logging the
+    failed entries — see RFC-0058 Phase 8. *)
+
+val try_load_partial : string -> partial_load_result option
+(** [try_load_partial config_path] attempts to parse a 5-layer TOML and
+    convert it to a partial snapshot.
+
+    Returns:
+    - [Some { snapshot; errors = [] }] — 5-layer TOML, all entries resolved
+    - [Some { snapshot; errors = e :: _ }] — 5-layer TOML, partial parse;
+      [snapshot] contains the resolvable subset
+    - [None] — not a 5-layer TOML (parse failed), or no entry resolvable
+      at all (caller should fall back to the legacy profile loader) *)
+
 val try_load_declarative :
   string ->
   (decl_snapshot,
     Cascade_declarative_adapter.adapter_error list)
   result option
-(** [try_load_declarative config_path] attempts to parse a 5-layer TOML
-    and convert it to a snapshot.
+(** Backward-compatible binary variant of {!try_load_partial}: collapses
+    a partial result to [Error] when any error is present, otherwise
+    returns [Ok snapshot]. Retained for boot-gate callers that require
+    all-or-nothing semantics (e.g.
+    [Cascade_catalog_runtime.validate_path_result]).
 
     Returns:
     - [Some (Ok snapshot)] — 5-layer TOML found and fully converted

@@ -31,6 +31,7 @@ let valid_sections =
       ; "agents"
       ; "cognition"
       ; "runtime"
+      ; "cascade-config"
       ; "goal-loop"
       ; "fleet-health"
       ] )

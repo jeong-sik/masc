@@ -42,6 +42,25 @@ let ensure_dir ~base_dir ~agent_name =
 (** Get current timestamp as float. *)
 let now () = Time_compat.now ()
 
+(** Length of the inline preview embedded in the truncation marker (1 KB). *)
+let truncation_preview_len = 1024
+
+(** Classify a [Yojson.Safe.t] by its top-level constructor name.
+
+    Used by [encode_line] when constructing a truncation marker so
+    downstream decoders can recover what shape the original payload
+    had before serialisation exceeded [max_value_size]. *)
+let original_type_of_json (v : Yojson.Safe.t) : string =
+  match v with
+  | `Assoc _ -> "Assoc"
+  | `List _ -> "List"
+  | `String _ -> "String"
+  | `Int _ -> "Int"
+  | `Float _ -> "Float"
+  | `Bool _ -> "Bool"
+  | `Null -> "Null"
+  | `Intlit _ -> "Intlit"
+
 (** Encode a JSONL line. Truncates value if over [max_value_size]. *)
 let encode_line ~key ~(value : Yojson.Safe.t option) : string =
   let ts = now () in
@@ -50,34 +69,32 @@ let encode_line ~key ~(value : Yojson.Safe.t option) : string =
     | Some v ->
       let s = Yojson.Safe.to_string v in
       if String.length s > max_value_size then begin
-        (* TYPE CONTRACT VIOLATION: the original [value] is a
-           [Yojson.Safe.t] of caller-defined shape, but when it
-           exceeds [max_value_size] (1MB) we replace it with a
-           [`String] of the truncated serialisation.  Callers that
-           later decode this entry will see a [String] where they
-           expected an [Assoc]/[List]/etc and silently fail to parse
-           the structured content.  Warn loudly so operators correlate
-           "key X reads as garbled string" with "key X was truncated
-           on persist". *)
+        (* Iter 6 (PR #15668) added the warn line below.  Iter 25
+           closes the structural half by replacing the bare
+           [`String truncated] payload — which silently violated the
+           caller's value-type contract — with a typed-marker
+           [`Assoc] that downstream decoders can recognise via
+           [value_is_truncated_marker].  The marker carries the
+           original constructor name, the original byte size, and a
+           bounded preview so operators can correlate downstream
+           parse failures with truncation events on persist. *)
+        let original_type = original_type_of_json v in
         Log.Memory.warn
           "memory_jsonl: value for key=%s exceeds 1MB (%d bytes); \
-           truncating AND downgrading value type from %s to String — \
-           any structured decoder on this key will mis-parse on \
-           subsequent reads"
+           wrapping in typed truncation marker \
+           (_truncated:true, _original_type=%s) — decoders must \
+           branch via value_is_truncated_marker"
           key
           (String.length s)
-          (match v with
-           | `Assoc _ -> "Assoc"
-           | `List _ -> "List"
-           | `String _ -> "String"
-           | `Int _ -> "Int"
-           | `Float _ -> "Float"
-           | `Bool _ -> "Bool"
-           | `Null -> "Null"
-           | `Intlit _ -> "Intlit");
-        let truncated = String.sub s 0 max_value_size in
-        (* Wrap truncated string so it is valid JSON *)
-        `String truncated
+          original_type;
+        let preview_len = min (String.length s) truncation_preview_len in
+        let preview = String.sub s 0 preview_len in
+        `Assoc [
+          ("_truncated", `Bool true);
+          ("_original_type", `String original_type);
+          ("_original_size_bytes", `Int (String.length s));
+          ("_preview", `String preview);
+        ]
       end else v
   in
   let obj = `Assoc [
@@ -86,6 +103,62 @@ let encode_line ~key ~(value : Yojson.Safe.t option) : string =
     ("ts", `Float ts);
   ] in
   Yojson.Safe.to_string obj ^ "\n"
+
+(** Recognise a typed truncation marker produced by [encode_line] when
+    the serialised value exceeded [max_value_size].
+
+    A marker is an [`Assoc] whose [_truncated] field is exactly
+    [`Bool true].  Legacy bare-[`String] truncated entries written
+    before iter 25 will NOT be recognised — those continue to decode
+    as plain strings, which matches their existing handling on read.
+
+    Discrimination is purely structural (Yojson constructor + Bool
+    field equality) — no substring matching on payload content. *)
+let value_is_truncated_marker (v : Yojson.Safe.t) : bool =
+  match v with
+  | `Assoc fields ->
+    (match List.assoc_opt "_truncated" fields with
+     | Some (`Bool true) -> true
+     | _ -> false)
+  | _ -> false
+
+(** Return the inline preview (first ~[truncation_preview_len] bytes
+    of the original serialised payload) if [v] is a truncation
+    marker, [None] otherwise. *)
+let truncation_marker_preview (v : Yojson.Safe.t) : string option =
+  if not (value_is_truncated_marker v) then None
+  else
+    match v with
+    | `Assoc fields ->
+      (match List.assoc_opt "_preview" fields with
+       | Some (`String s) -> Some s
+       | _ -> None)
+    | _ -> None
+
+(** Return the original payload's top-level constructor name
+    ("Assoc"/"List"/"String"/...) if [v] is a truncation marker,
+    [None] otherwise. *)
+let truncation_marker_original_type (v : Yojson.Safe.t) : string option =
+  if not (value_is_truncated_marker v) then None
+  else
+    match v with
+    | `Assoc fields ->
+      (match List.assoc_opt "_original_type" fields with
+       | Some (`String s) -> Some s
+       | _ -> None)
+    | _ -> None
+
+(** Return the original payload's serialised byte size if [v] is a
+    truncation marker, [None] otherwise. *)
+let truncation_marker_original_size_bytes (v : Yojson.Safe.t) : int option =
+  if not (value_is_truncated_marker v) then None
+  else
+    match v with
+    | `Assoc fields ->
+      (match List.assoc_opt "_original_size_bytes" fields with
+       | Some (`Int n) -> Some n
+       | _ -> None)
+    | _ -> None
 
 (** Bound the snippet length we log when a JSONL line is malformed
     so a single huge garbled line cannot blow up the log file. *)

@@ -88,6 +88,7 @@
         test_keeper_wake_telemetry
         test_keeper_timing
         test_keeper_memory
+        test_memory_jsonl_truncation
         test_keeper_chat_store
         test_keeper_runtime_trust_snapshot
         test_ide_annotations
@@ -336,6 +337,7 @@
           test_keeper_wake_telemetry
           test_keeper_timing
           test_keeper_memory
+          test_memory_jsonl_truncation
           test_keeper_chat_store
           test_keeper_runtime_trust_snapshot
           test_ide_annotations

@@ -1,19 +1,19 @@
 ---
 rfc: "0101"
 title: "FD accountant — generic Eio.Pool extension to cover all spawn classes"
-status: Draft
+status: Active
 created: 2026-05-17
 updated: 2026-05-17
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0098", "0099", "0100"]
-implementation_prs: []
+implementation_prs: [15727, 15816]
 ---
 
 # RFC-0101 — FD accountant: generic Eio.Pool extension across all spawn classes
 
-Status: Draft
+Status: Active (prereq #15727 + PR-2 #15816 + PR-3 oas #1618 merged; PR-4/5/6 pending)
 Author: jeong-sik (vincent)
 Date: 2026-05-17
 Scope: generic FD accountant that *extends* `Docker_spawn_throttle` ([[#15727]] merged) + `Keeper_fd_pressure` ([[#15727]]) into a multi-class pool covering provider HTTP, sandbox exec, log writer, and any other FD-bound spawn kind
@@ -196,13 +196,14 @@ PR-2 is **wire-inert** (docker behavior preserved via delegation). PR-3 onward o
 
 ## 8. Acceptance
 
-- [ ] PR-1 (this RFC body): review + merge.
-- [ ] PR-2: `Fd_accountant` module + docker delegation (wire-inert).
-- [ ] PR-3: provider HTTP wrap.
-- [ ] PR-4: sandbox exec + log writer wrap.
-- [ ] PR-5: `/metrics` + dashboard + startup log.
-- [ ] PR-6: RFC-0099 Backpressure compose.
-- [ ] RFC promoted to `Active` at PR-2 merge; `Implemented` after PR-5.
+- [x] **Prereq** (#15727): `Docker_spawn_throttle` Layer A (per-class semaphore) + Layer B (`Keeper_fd_pressure`-aware mutex) — the docker-only ancestor this RFC extends.
+- [x] **PR-1** (#15803): RFC body merged.
+- [x] **PR-2** (#15816): `lib/server/fd_accountant.ml(i)` 4-kind generic pool (`Docker_spawn` / `Provider_http` / `Sandbox_exec` / `Log_writer`) + `Docker_spawn_throttle.with_slot` delegation (public API preserved, wire-inert) — 8 tests including cap-bounds fan-in.
+- [x] **PR-3** (oas #1618): provider HTTP wrap via dependency-injection hook (`Fd_throttle_hook` in oas + `Provider_throttle.with_permit_priority` composes), since oas cannot depend on masc-mcp directly. RFC §3.3 originally specified direct `Fd_accountant` call from `backend_*.ml`; DI pattern replaces that. Embedder (masc-mcp) wires `Fd_throttle_hook.set_handler (fun thunk -> Fd_accountant.with_slot ~kind:Provider_http thunk)` at bootstrap (follow-up commit, not in PR-3 itself).
+- [ ] **PR-4**: sandbox exec wrap (`keeper_shell_*.ml`) + log writer wrap (largest writers only).
+- [ ] **PR-5**: `Fd_accountant.fd_snapshot` → Prometheus `/metrics` + dashboard `System Health` panel + startup nofile-limit log.
+- [ ] **PR-6**: compose with [[RFC-0099]] `Backpressure` evict signal — `pressure_active = true > 5 s` → `Session_lifecycle_event.Evict { reason = Backpressure }` publish.
+- [x] **Status promoted to `Active`** at PR-2 merge (this closeout commit). `Implemented` promotion deferred until PR-5 (operator-visibility surface) at minimum. The wire-up commit on the masc-mcp side that calls `Fd_throttle_hook.set_handler` is intentionally separated from this closeout and tracked as a follow-up.
 
 ## 9. References
 

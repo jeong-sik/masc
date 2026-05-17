@@ -546,6 +546,24 @@ let handle_keeper_bash
             (Worker_dev_tools.legacy_verdict_to_tag legacy)
             (Worker_dev_tools.shadow_verdict_to_tag shadow))
      end);
+    (* RFC-0092 Phase A — typed-validation advisor (behavior-neutral).
+       Flag-gated; emits a structured log line + per-bucket counter so
+       operators can measure parity vs the legacy substring gate
+       before the Phase C authority flip.  No allow/deny decision is
+       driven from the typed path at this stage. *)
+    (if Worker_dev_tools.typed_advisor_log_enabled () then begin
+       let advisory =
+         Shell_ir_validator.advise
+           ~cmd
+           ~allowlist:Worker_dev_tools.dev_allowed_commands
+       in
+       Legendary_counters.incr_typed_advisor advisory;
+       Log.Keeper.info
+         "typed_advisor keeper=%s cmd_hash=%s outcome=%s"
+         meta.name
+         (Worker_dev_tools.cmd_hash_for_log cmd)
+         (Shell_ir_validator.advisory_tag advisory)
+     end);
     (* Resolve cwd early — needed for playground detection before validation. *)
     match Keeper_shell_shared.resolve_keeper_shell_write_cwd ~config ~meta ~args with
     | Error e -> error_json e

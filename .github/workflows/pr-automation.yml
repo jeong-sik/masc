@@ -286,7 +286,7 @@ jobs:
               core.info(`Draft PR guard soft-failure (${actionName}): ${summary}`);
             };
 
-            if (hasAutoMergeRequest) {
+            const latestCiGateForHead = async () => {
               const checks = await github.rest.checks.listForRef({
                 owner,
                 repo,
@@ -294,12 +294,42 @@ jobs:
                 check_name: "CI Gate",
                 per_page: 100
               });
-              const ciGateRuns = [...(checks.data.check_runs || [])].sort((a, b) => {
+              return [...(checks.data.check_runs || [])].sort((a, b) => {
                 const aTime = Date.parse(a.started_at || a.created_at || "") || 0;
                 const bTime = Date.parse(b.started_at || b.created_at || "") || 0;
                 return bTime - aTime;
-              });
-              const latestCiGate = ciGateRuns[0];
+              })[0];
+            };
+
+            const waitForCiGate = async () => {
+              const waitSeconds = Number.parseInt(
+                process.env.AGENT_DRAFT_GUARD_CI_GATE_WAIT_SECONDS || "600",
+                10
+              );
+              const deadline = Date.now() + Math.max(0, waitSeconds) * 1000;
+              let latestCiGate = await latestCiGateForHead();
+              while (
+                (!latestCiGate || latestCiGate.status !== "completed") &&
+                Date.now() < deadline
+              ) {
+                const status = latestCiGate
+                  ? `${latestCiGate.status}/${latestCiGate.conclusion || "none"}`
+                  : "missing";
+                core.info(
+                  `Waiting for CI Gate on head ${pr.head.sha}: ${status}.`
+                );
+                await new Promise((resolve) => setTimeout(resolve, 15000));
+                latestCiGate = await latestCiGateForHead();
+              }
+              return latestCiGate;
+            };
+
+            const ciGateRequiredForBypass =
+              verifiedBypassLabels.length > 0 ||
+              unsafeDraftBoundaryAction ||
+              hasAutoMergeRequest;
+            if (ciGateRequiredForBypass) {
+              const latestCiGate = await waitForCiGate();
               if (
                 !latestCiGate ||
                 latestCiGate.status !== "completed" ||
@@ -308,66 +338,10 @@ jobs:
                 const ciGateStatus = latestCiGate
                   ? `${latestCiGate.status}/${latestCiGate.conclusion || "none"} ${latestCiGate.html_url}`
                   : "missing";
-                // CI Gate may be missing/pending, or left as cancelled by a
-                // superseded draft run, immediately after auto-merge is
-                // enabled or a synchronize event starts a replacement CI run.
-                // Branch protection still prevents merge until a successful
-                // current-head CI Gate exists, so do not disable auto-merge
-                // for this startup race.
-                const ciGateStartupRaceAction =
-                  action === "auto_merge_enabled" || action === "synchronize";
-                const ciWorkflowActiveCheckNames = new Set([
-                  "PR Sync Check",
-                  "Detect Changed Surfaces",
-                  "Keeper Cwd Leak Gate",
-                  "Meta Guards",
-                  "Health",
-                  "Build and Test",
-                  "Lint",
-                  "Dashboard",
-                  "OCaml Structure Ratchet",
-                  "TLA+ Model Checking",
-                  "CI Gate"
-                ]);
-                let activeHeadChecks = [];
-                if (
-                  ciGateStartupRaceAction &&
-                  latestCiGate?.status === "completed" &&
-                  latestCiGate?.conclusion === "failure"
-                ) {
-                  const refChecks = await github.rest.checks.listForRef({
-                    owner,
-                    repo,
-                    ref: pr.head.sha,
-                    per_page: 100
-                  });
-                  activeHeadChecks = (refChecks.data.check_runs || [])
-                    .filter((run) => run.status !== "completed")
-                    .filter((run) => ciWorkflowActiveCheckNames.has(run.name))
-                    .map((run) => `${run.name}:${run.status}`);
-                }
-                const staleFailedCiGateDuringActiveRun =
-                  ciGateStartupRaceAction &&
-                  latestCiGate?.status === "completed" &&
-                  latestCiGate?.conclusion === "failure" &&
-                  activeHeadChecks.length > 0;
-                const ciGateStartupRace =
-                  ciGateStartupRaceAction &&
-                  (!latestCiGate ||
-                    latestCiGate.status !== "completed" ||
-                    latestCiGate.conclusion === "cancelled" ||
-                    staleFailedCiGateDuringActiveRun);
-                if (ciGateStartupRace) {
-                  const activeSuffix =
-                    activeHeadChecks.length > 0
-                      ? `; active head checks: ${activeHeadChecks.join(", ")}`
-                      : "";
-                  core.info(`CI Gate is ${ciGateStatus} for head ${pr.head.sha}${activeSuffix}; skipping block on ${action} event.`);
-                } else {
-                  policyFailures.push(`CI Gate is not completed successfully for head ${pr.head.sha}: ${ciGateStatus}`);
-                  shouldDisableAutoMerge = true;
-                  ciGatePolicyFailure = true;
-                }
+                policyFailures.push(`CI Gate is not completed successfully for head ${pr.head.sha}: ${ciGateStatus}`);
+                shouldRestoreDraft = !current.isDraft;
+                shouldDisableAutoMerge = hasAutoMergeRequest;
+                ciGatePolicyFailure = true;
               }
             }
 

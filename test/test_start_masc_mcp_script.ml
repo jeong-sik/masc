@@ -268,7 +268,7 @@ let test_realtime_transports_default_to_base_path_config_and_preserve_override (
           ~env:
             [
               ("FAKE_CAPTURE_FILE", capture_default);
-              ("HOME", home_dir);
+              ("HOME", ignored_dir);
               ("MASC_BASE_PATH", dir);
               ("MASC_CONFIG_DIR", "");
             ]

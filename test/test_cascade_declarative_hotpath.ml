@@ -577,13 +577,24 @@ let test_partial_snapshot_errors_disjoint_from_profile_names () =
            This is the invariant downstream dispatch (lookup_active_profile)
            relies on: a name in [snapshot.profiles] always points at a
            fully resolved profile. *)
+        (* Exhaustive over Adapter.adapter_error. Subjects that name a
+           binding-like entity (provider/model/binding/alias/tier-group)
+           must not appear as snapshot profile_names. Strategy_mismatch
+           carries a tier name, Duplicate_route a route name, Internal an
+           internal message — none of those are binding subjects, so they
+           are excluded explicitly. Catch-all removed to force review on
+           new variants. *)
         let error_subjects =
           errors
           |> List.filter_map (function
-              | Adapter.Provider_not_found s -> Some s
-              | Adapter.Model_not_found s -> Some s
+              | Adapter.Provider_not_found s
+              | Adapter.Model_not_found s
+              | Adapter.Binding_resolution_failed s
+              | Adapter.Alias_resolution_failed s
               | Adapter.Tier_group_empty s -> Some s
-              | _ -> None)
+              | Adapter.Strategy_mismatch _
+              | Adapter.Duplicate_route _
+              | Adapter.Internal _ -> None)
         in
         List.iter (fun subject ->
           check bool

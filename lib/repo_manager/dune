@@ -19,6 +19,7 @@
    masc_mcp.fs_compat
    masc_mcp.masc_exec
    masc_mcp.masc_log
+   masc_mcp.masc_process
    digestif
    yojson
    otoml

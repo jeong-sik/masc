@@ -449,14 +449,9 @@ let handle_keeper_task_tool
     then error_json "pr_url is required. Include the PR opened for this task."
     else (
       (* Map keeper vocabulary (notes + pr_url) onto MASC domain typed
-         handoff_context fields: notes -> summary, [pr_url] -> evidence_refs.
-         Previously these were concatenated into a single [notes] blob
-         ("notes\nPR: pr_url") which lost the structural separation and
-         left strict-contract callers without a typed evidence_refs list
-         to inspect. We continue to send the legacy concatenated [notes]
-         too for backward compatibility with any downstream reader that
-         still expects it, but the canonical signal is now the typed
-         handoff_context. *)
+         handoff_context fields: notes -> summary, [pr_url] ->
+         evidence_refs. The previous concat blob
+         ("notes\nPR: pr_url") had no in-repo reader and is removed. *)
       let handoff_context =
         `Assoc
           [
@@ -477,7 +472,7 @@ let handle_keeper_task_tool
              [
                "task_id", `String task_id;
                "action", `String "submit_for_verification";
-               "notes", `String (notes ^ "\nPR: " ^ pr_url);
+               "notes", `String notes;
                "handoff_context", handoff_context;
              ])
       in

@@ -897,22 +897,52 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
         else
           List.filter (fun (k, _) -> not (String.equal k "to") || not (has "action")) kvs
       in
+      (* Transport-level alias [pr_url] is hoisted into the typed
+         [handoff_context.evidence_refs] list. Previously this aliased
+         into a "PR: <url>" string blob inside [notes], which the
+         downstream task-handoff schema then had to recover via
+         sibling synthesis or substring scanning. There is no
+         in-repo reader of that [notes] blob — pr_url consumers
+         (keeper_tool_call_log, keeper_hooks_oas, audit_keeper_*)
+         already read pr_url as a typed field elsewhere — so the
+         legacy blob is dead-on-write.
+
+         Merge semantics: if a [handoff_context] object is already
+         present in args, append pr_url to its [evidence_refs]
+         (preserving any existing refs). Otherwise inject a new
+         minimal handoff_context = { evidence_refs = [pr_url] }. *)
       let kvs =
         match List.find_opt (fun (k, _) -> String.equal k "pr_url") kvs with
         | Some (_, `String pr_url) when not (String.equal pr_url "") ->
             let kvs = List.filter (fun (k, _) -> not (String.equal k "pr_url")) kvs in
-            let kvs =
-              match List.find_opt (fun (k, _) -> String.equal k "notes") kvs with
-              | Some (_, `String notes) ->
-                  List.map
-                    (fun (k, v) ->
-                      if String.equal k "notes"
-                      then ("notes", `String (notes ^ "\nPR: " ^ pr_url))
-                      else (k, v))
-                    kvs
-              | _ -> kvs @ [ ("notes", `String ("PR: " ^ pr_url)) ]
+            let merge_pr_url_into_handoff (hc : Yojson.Safe.t) : Yojson.Safe.t =
+              match hc with
+              | `Assoc hc_fields ->
+                let existing_refs =
+                  match List.assoc_opt "evidence_refs" hc_fields with
+                  | Some (`List xs) -> xs
+                  | _ -> []
+                in
+                let new_refs = existing_refs @ [ `String pr_url ] in
+                let hc_fields =
+                  List.filter
+                    (fun (k, _) -> not (String.equal k "evidence_refs"))
+                    hc_fields
+                  @ [ "evidence_refs", `List new_refs ]
+                in
+                `Assoc hc_fields
+              | _ -> `Assoc [ "evidence_refs", `List [ `String pr_url ] ]
             in
-            kvs
+            (match List.find_opt (fun (k, _) -> String.equal k "handoff_context") kvs with
+             | Some _ ->
+               List.map
+                 (fun (k, v) ->
+                   if String.equal k "handoff_context"
+                   then ("handoff_context", merge_pr_url_into_handoff v)
+                   else (k, v))
+                 kvs
+             | None ->
+               kvs @ [ "handoff_context", merge_pr_url_into_handoff `Null ])
         | Some _ -> List.filter (fun (k, _) -> not (String.equal k "pr_url")) kvs
         | None -> kvs
       in

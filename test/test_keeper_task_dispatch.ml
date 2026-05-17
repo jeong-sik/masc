@@ -1858,6 +1858,47 @@ let test_submit_for_verification_maps_to_typed_handoff_evidence_refs () =
           fail "expected keeper_task_submit_for_verification to succeed")))
 ;;
 
+(* --- keeper_task_force_release / keeper_task_force_done dispatch tests --- *)
+
+(* Regression: keeper_task_force_release schema declares [reason] as
+   a required minLength:1 field for audit-trail. The handler must
+   reject an empty reason rather than fall through to a "no reason
+   given" broadcast (silent audit gap). *)
+let test_force_release_requires_reason () =
+  with_room (fun config ->
+    let meta = make_test_meta () in
+    let result =
+      call_tool
+        config
+        meta
+        "keeper_task_force_release"
+        (`Assoc [ "task_id", `String "T-1"; "reason", `String "" ])
+    in
+    let json = parse_json result in
+    match Yojson.Safe.Util.member "error" json with
+    | `String msg -> check bool "mentions reason" true (contains_substring msg "reason")
+    | _ -> fail "expected error for empty reason")
+;;
+
+(* Regression: keeper_task_force_done schema declares [notes] as a
+   required minLength:1 field. The handler must reject an empty
+   notes rather than silently pass through to Coord. *)
+let test_force_done_requires_notes () =
+  with_room (fun config ->
+    let meta = make_test_meta () in
+    let result =
+      call_tool
+        config
+        meta
+        "keeper_task_force_done"
+        (`Assoc [ "task_id", `String "T-1"; "notes", `String "" ])
+    in
+    let json = parse_json result in
+    match Yojson.Safe.Util.member "error" json with
+    | `String msg -> check bool "mentions notes" true (contains_substring msg "notes")
+    | _ -> fail "expected error for empty notes")
+;;
+
 (* --- keeper_tool_search tests --- *)
 
 let test_tool_search_empty_query_returns_error () =
@@ -2125,6 +2166,16 @@ let () =
             "notes/pr_url map to typed handoff_context fields"
             `Quick
             test_submit_for_verification_maps_to_typed_handoff_evidence_refs
+        ] )
+    ; ( "force_task"
+      , [ test_case
+            "force_release requires reason (schema enforcement)"
+            `Quick
+            test_force_release_requires_reason
+        ; test_case
+            "force_done requires notes (schema enforcement)"
+            `Quick
+            test_force_done_requires_notes
         ] )
     ; ( "keeper_tool_search"
       , [ test_case

@@ -223,9 +223,16 @@ val partial_clone_error : clone_path:string -> msg:string -> Masc_domain.masc_er
 (** {1 Workspace repo discovery} *)
 
 val workspace_repo_matches :
-  search_root:String.t -> repo_name:string -> String.t list
+  search_root:String.t ->
+  repo_name:string ->
+  ?max_dirs:int ->
+  ?max_entries:int ->
+  unit ->
+  String.t list
 (** Return absolute paths of every directory under [search_root] whose
-    basename equals [repo_name] and which looks like a git checkout. *)
+    basename equals [repo_name] and which looks like a git checkout.
+    [max_dirs] and [max_entries] bound fallback discovery so wide workspaces
+    cannot monopolize the server domain. *)
 
 val git_origin_url : string -> string option
 (** [git -C root config --get remote.origin.url], or [None] if unset. *)

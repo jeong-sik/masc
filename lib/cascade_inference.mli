@@ -75,9 +75,7 @@ val cap_max_tokens_to_cascade_ceiling :
     either a non-positive budget, an invalid provider ceiling, or a cascade
     reload between resolve and validate.
 
-    @since DD-020 (semantics revised 2026-05-17: cascade-config and fallback
-    values are silently clamped upstream; internal keeper overrides should
-    use the same clamp helper before dispatch.) *)
+    @since DD-020. *)
 val validate_max_tokens_within_ceiling :
   cascade_name:Keeper_cascade_profile.runtime_name ->
   provider_ceiling:int option ->

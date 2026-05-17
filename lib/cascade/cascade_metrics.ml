@@ -859,11 +859,10 @@ let on_cascade_metrics_eviction () =
   Prometheus.inc_counter metric_cascade_metrics_eviction ()
 
 (* Counts max_tokens budgets reduced to the resolved cascade output ceiling.
-   DD-020 originally treated all over-ceiling budgets as structured
-   [max_tokens_ceiling_violation] errors.  The 2026-05-17 multilane cascade
-   rollout showed that internal cascade-config/fallback/keeper override
-   budgets must be normalized before dispatch because the narrowest failover
-   member can be lower than the caller-visible primary route. *)
+   Internal cascade-config / fallback / keeper override budgets are
+   normalized by {!Cascade_inference.cap_max_tokens_to_cascade_ceiling}
+   before dispatch because the narrowest failover member can be lower than
+   the caller-visible primary route. *)
 let metric_max_tokens_clamped = "masc_cascade_max_tokens_clamped_total"
 
 let on_max_tokens_clamped () =

@@ -113,24 +113,17 @@ let should_log_auto_max_tokens_clamp ~cascade_name ~source ~max_tokens ~ceiling 
   auto_max_tokens_clamp_key ~cascade_name ~source ~max_tokens ~ceiling
   |> mark_auto_max_tokens_clamp_seen
 
-(** Cap a max_tokens value to the narrowest output ceiling in the resolved
-    cascade. Both auto-derived [fallback] values and cascade-config explicit
-    values are clamped here.
-
-    Rationale (2026-05-17, supersedes original DD-020 phrasing): with
-    multilane cascades (tier-groups whose [tiers] union members from groups
-    of differing output budgets), the *narrowest* ceiling is a property of
-    cascade-internal fallback structure that the caller has no clean way
-    to discover. Letting cascade-config values bypass this cap caused
-    fleet-wide [pre_dispatch_max_tokens_ceiling_violation] when a previously
-    16384-narrow cascade was unioned with an 8192-narrow secondary tier.
-    Clamping unifies the two sites; a deduplicated WARN preserves operator
+(** Cap a max_tokens value to the resolved cascade's narrowest output
+    ceiling. Cascade-config, fallback, and internal keeper override budgets
+    all flow through this helper. A deduplicated WARN per
+    (cascade, source, requested, ceiling) tuple preserves operator
     visibility into the silent reduction.
 
-    Runtime overrides supplied by internal keeper callers should also flow
-    through this helper before the final pre-dispatch validator. The validator
-    remains as a hard guard for non-positive budgets, invalid ceilings, and
-    stale values after a cascade reload. *)
+    The narrowest ceiling is a property of cascade-internal fallback
+    structure (multilane tier-groups can union members of differing output
+    budgets), so callers cannot infer it. The pre-dispatch validator
+    remains as a hard guard for non-positive budgets, invalid ceilings,
+    and stale values after a cascade reload. *)
 let cap_max_tokens_to_cascade_ceiling ~cascade_name ~source max_tokens =
   match Cascade_runtime.max_output_tokens_ceiling_of_cascade_name cascade_name with
   | Some ceiling when ceiling > 0 && max_tokens > ceiling ->
@@ -144,10 +137,6 @@ let cap_max_tokens_to_cascade_ceiling ~cascade_name ~source max_tokens =
         max_tokens source ceiling;
     ceiling
   | _ -> max_tokens
-
-(** Backwards-compatible alias retained for any out-of-tree callers; new
-    code should call [cap_max_tokens_to_cascade_ceiling] directly. *)
-let cap_auto_resolved_max_tokens = cap_max_tokens_to_cascade_ceiling
 
 (** Resolve a max_tokens value: cascade config (capped) -> capped fallback. *)
 let resolve_max_tokens

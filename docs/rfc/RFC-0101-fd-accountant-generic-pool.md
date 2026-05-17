@@ -8,7 +8,7 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0098", "0099", "0100"]
-implementation_prs: [15727, 15816]
+implementation_prs: [15727, 15816, 15943]
 ---
 
 # RFC-0101 — FD accountant: generic Eio.Pool extension across all spawn classes

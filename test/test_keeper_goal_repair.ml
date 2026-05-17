@@ -16,8 +16,16 @@ let test_goal_title_of_purpose () =
   in
   check bool "long ends with (auto)" true ends_with_auto
 
+let test_repair_source_to_string () =
+  let open Alcotest in
+  let module KGR = Masc_mcp.Keeper_goal_repair in
+  check string "created" "created" (KGR.repair_source_to_string `Created);
+  check string "reused"  "reused"  (KGR.repair_source_to_string `Reused)
+
 let () =
   Alcotest.run "Keeper_goal_repair"
     [ ("goal_title_of_purpose",
-       [ Alcotest.test_case "truncation" `Quick test_goal_title_of_purpose ])
+       [ Alcotest.test_case "truncation" `Quick test_goal_title_of_purpose ]);
+      ("repair_source",
+       [ Alcotest.test_case "to_string" `Quick test_repair_source_to_string ])
     ]

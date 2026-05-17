@@ -12,6 +12,10 @@
 type sweep_config = {
   dropped_ttl_days : int;  (** Delete Dropped goals after this many days. Default 7. *)
   stagnant_days : int;     (** Drop Active goals with no update after this many days. Default 30. *)
+  auto_stagnant_days : int;
+      (** Drop auto-generated Active goals (title suffix " (auto)") with no
+          update after this many days. Default 7 — closes auto-goal accretion
+          from Keeper_goal_repair leftovers. *)
   orphan_task_escalation_age_seconds : int;
       (** Report unclaimed tasks without goal linkage after this age. Default 30 min. *)
 }
@@ -19,8 +23,25 @@ type sweep_config = {
 let default_config = {
   dropped_ttl_days = 7;
   stagnant_days = 30;
+  auto_stagnant_days = 7;
   orphan_task_escalation_age_seconds = 30 * 60;
 }
+
+let runtime_config () =
+  { default_config with
+    auto_stagnant_days =
+      Env_config_runtime.Goal_janitor.auto_stagnant_days ();
+  }
+
+(** Suffix produced by [Keeper_goal_repair.goal_title_of_purpose]: short
+    purpose ends in [" (auto)"], truncated purpose ends in [{e …}] +
+    [" (auto)"]. We accept both. *)
+let is_auto_generated_goal (g : Goal_store.goal) =
+  let ends_with ~suffix s =
+    let n = String.length s and m = String.length suffix in
+    n >= m && String.sub s (n - m) m = suffix
+  in
+  ends_with ~suffix:" (auto)" g.title
 
 type sweep_result = {
   purged : int;     (** Dropped goals deleted *)
@@ -47,6 +68,8 @@ let days_since_update (goal : Goal_store.goal) ~now =
   | None -> None
 
 (** Sweep goals: purge old Dropped, stagnate old Active.
+    Auto-generated goals (title suffix " (auto)") use the shorter
+    [auto_stagnant_days] threshold.
     Returns (updated_goals, sweep_result). Does NOT write state. *)
 let sweep_goals ~(config : sweep_config) (goals : Goal_store.goal list)
   : Goal_store.goal list * sweep_result =
@@ -54,6 +77,10 @@ let sweep_goals ~(config : sweep_config) (goals : Goal_store.goal list)
   let iso_now = Masc_domain.now_iso () in
   let purged = ref 0 in
   let stagnated = ref 0 in
+  let stagnate_threshold (g : Goal_store.goal) =
+    if is_auto_generated_goal g then config.auto_stagnant_days
+    else config.stagnant_days
+  in
   let result =
     goals |> List.filter_map (fun (g : Goal_store.goal) ->
       let age = days_since_update g ~now in
@@ -63,10 +90,11 @@ let sweep_goals ~(config : sweep_config) (goals : Goal_store.goal list)
         Log.Misc.info "[GoalJanitor] purge: %s (%s, dropped %d days ago)"
           g.id g.title d;
         None
-      | Goal_phase.Executing, Some d when d >= config.stagnant_days ->
+      | Goal_phase.Executing, Some d when d >= stagnate_threshold g ->
         incr stagnated;
-        Log.Misc.info "[GoalJanitor] stagnate: %s (%s, no update for %d days)"
-          g.id g.title d;
+        let kind = if is_auto_generated_goal g then "auto" else "manual" in
+        Log.Misc.info "[GoalJanitor] stagnate: %s (%s, %s, no update for %d days, threshold=%d)"
+          g.id g.title kind d (stagnate_threshold g);
         Some { g with
                phase = Goal_phase.Dropped;
                status = Goal_store.Dropped;

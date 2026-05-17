@@ -4,7 +4,11 @@
     1. Purge: delete [Dropped] goals older than
        [dropped_ttl_days] (default 7).
     2. Stagnate: mark [Active] goals with no update after
-       [stagnant_days] (default 30) as [Dropped].
+       [stagnant_days] (default 30) as [Dropped].  Auto-generated
+       goals (title suffix [" (auto)"] or ["… (auto)"], produced by
+       {!Keeper_goal_repair}) use the shorter [auto_stagnant_days]
+       threshold (default 7) so the keeper-repair leftovers do not
+       accumulate.
     3. Orphan: remove [active_goal_ids] entries from each
        [keeper_meta] that reference non-existent goals in the Goal
        Store.
@@ -17,11 +21,31 @@
 type sweep_config = {
   dropped_ttl_days : int;  (** Delete Dropped goals after this many days. *)
   stagnant_days : int;     (** Drop Active goals with no update after this many days. *)
+  auto_stagnant_days : int;
+      (** Drop {b auto-generated} Active goals with no update after this many
+          days.  Auto-generated = title suffix [" (auto)"] or [{e … (auto)}]
+          (the {!Keeper_goal_repair.goal_title_of_purpose} contract).
+          Default 7 — short enough to keep keeper-repair leftovers from
+          accreting, long enough to survive a transient operator pause. *)
   orphan_task_escalation_age_seconds : int;
       (** Report unclaimed tasks without goal linkage after this age. *)
 }
 
 val default_config : sweep_config
+
+val runtime_config : unit -> sweep_config
+(** [runtime_config ()] returns {!default_config} with
+    [auto_stagnant_days] overridden by
+    [MASC_GOAL_JANITOR_AUTO_STAGNATE_DAYS] when present.  Used by the
+    server-side fiber and the dashboard-triggered sweep so operator
+    overrides land in both paths.  Tests should keep using
+    {!default_config} (or build a literal record) for determinism. *)
+
+val is_auto_generated_goal : Goal_store.goal -> bool
+(** [is_auto_generated_goal g] returns [true] when [g.title] carries
+    the [" (auto)"] or [{e … (auto)}] suffix produced by
+    {!Keeper_goal_repair.goal_title_of_purpose}.  Exposed for unit
+    tests of the auto-stagnate branch. *)
 
 (** {1 Result} *)
 

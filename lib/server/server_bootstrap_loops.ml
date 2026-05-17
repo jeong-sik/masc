@@ -688,7 +688,8 @@ let start_keeper_loops
       let rec loop () =
         Eio.Time.sleep clock interval;
         (try
-           let _result = Goal_janitor.run state.room_config in
+           let config = Goal_janitor.runtime_config () in
+           let _result = Goal_janitor.run ~config state.room_config in
            ()
          with
          | Eio.Cancel.Cancelled _ as e -> raise e

@@ -575,11 +575,12 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           noop_turn_count = 0;
           last_speech_act = "";
           last_social_transition_reason = "";
-          last_active_desire = "";
-          last_current_intention = "";
-          last_blocker = None;
-          last_need = "";
-        };
+	          last_active_desire = "";
+	          last_current_intention = "";
+	          last_blocker = None;
+	          last_cascade_attempt = None;
+	          last_need = "";
+	        };
       keeper_id = None;
       oas_env = p.profile_defaults.oas_env;
       meta_version = 0;

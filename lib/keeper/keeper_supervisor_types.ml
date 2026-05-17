@@ -119,6 +119,18 @@ let paused_meta_requires_reconcile_recovery (meta : keeper_meta) =
   | None -> false
 ;;
 
+let paused_meta_auto_resume_due ~now (meta : keeper_meta) =
+  if (not meta.paused) || paused_meta_requires_reconcile_recovery meta
+  then false
+  else
+    match meta.auto_resume_after_sec with
+    | None -> false
+    | Some resume_after_sec ->
+      (match Coord_resilience.Time.parse_iso8601_opt meta.updated_at with
+       | Some paused_ts -> paused_ts > 0.0 && now -. paused_ts >= resume_after_sec
+       | None -> false)
+;;
+
 let cohort_key_of_reason = Keeper_registry.failure_reason_cohort_key
 
 let stale_turn_timeout_cohort_key =

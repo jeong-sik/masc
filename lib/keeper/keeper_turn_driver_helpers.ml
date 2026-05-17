@@ -58,26 +58,35 @@ let resolved_tool_lane_label ~effective_tools ~runtime_mcp_policy =
   | false, false, Some _ -> "runtime_mcp_connect_only"
   | false, false, None -> "none"
 
-let canonical_tool_support_name name =
-  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix name in
-  match Keeper_tool_alias.public_masc_to_internal stripped with
+let canonical_tool_name_for_lane_check name =
+  match Keeper_tool_alias.canonical_internal_name name with
   | Some internal -> internal
-  | None ->
-    (match Keeper_tool_alias.route stripped with
-     | Some route -> route.internal_name
-     | None -> stripped)
+  | None -> name
+
+let canonical_tool_names_for_lane_check names =
+  names |> List.map canonical_tool_name_for_lane_check |> dedupe_keep_order
+
+let dedupe_required_tool_names_for_lane_check names =
+  let rec loop seen acc = function
+    | [] -> List.rev acc
+    | name :: rest ->
+      let canonical = canonical_tool_name_for_lane_check name in
+      if List.mem canonical seen
+      then loop seen acc rest
+      else loop (canonical :: seen) (name :: acc) rest
+  in
+  loop [] [] names
 
 let missing_required_tool_names_after_lane_by_name ~required_tool_names
     ~materialized_tool_names =
-  let materialized = Hashtbl.create 32 in
-  List.iter
-    (fun name ->
-      Hashtbl.replace materialized (canonical_tool_support_name name) ())
-    materialized_tool_names;
+  let materialized_tool_names =
+    canonical_tool_names_for_lane_check materialized_tool_names
+  in
   required_tool_names
-  |> dedupe_keep_order
+  |> dedupe_required_tool_names_for_lane_check
   |> List.filter (fun name ->
-       not (Hashtbl.mem materialized (canonical_tool_support_name name)))
+       let canonical = canonical_tool_name_for_lane_check name in
+       not (List.mem canonical materialized_tool_names))
 
 let missing_required_tool_names_after_lane ~required_tool_names ~effective_tools
     ~runtime_mcp_policy =

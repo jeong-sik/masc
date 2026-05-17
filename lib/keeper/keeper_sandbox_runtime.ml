@@ -362,11 +362,7 @@ let docker_room_state_mount_specs ~base_path ~container_root =
     if not (room_state_path_available kind host_path)
     then []
     else
-      [ Printf.sprintf
-          "%s:%s:ro"
-          host_path
-          (Filename.concat container_masc_root rel_path)
-      ; Printf.sprintf "%s:%s:ro" host_path host_path
+      [ Printf.sprintf "%s:%s:ro" host_path (Filename.concat container_masc_root rel_path)
       ])
   |> unique_preserving_order
 ;;

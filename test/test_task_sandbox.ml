@@ -619,8 +619,18 @@ let test_create_resolves_docker_visible_path_to_host_worktree () =
         | Ok sb ->
           check string "returns host worktree path" expected_worktree sb.worktree_path;
           check bool "host worktree exists" true (Sys.file_exists sb.worktree_path);
-          check bool "linked .masc at host worktree" true
-            (Sys.file_exists (Filename.concat sb.worktree_path Common.masc_dirname));
+          let masc_link = Filename.concat sb.worktree_path Common.masc_dirname in
+          check bool "linked .masc at host worktree" true (Sys.file_exists masc_link);
+          check string "docker .masc link uses playground projection"
+            "../../../../.masc"
+            (Unix.readlink masc_link);
+          let docker_projection =
+            Filename.concat
+              (Filename.dirname (Filename.dirname docker_clone))
+              Common.masc_dirname
+          in
+          check bool "docker .masc projection exists" true
+            (Sys.file_exists docker_projection);
           ignore (Task_sandbox.cleanup ~config ~agent_name:"docker-agent" sb)))
 
 let test_create_fails_ambiguous_multi_repo_without_evidence () =

@@ -93,6 +93,11 @@
   ; gating once the typed lib became production-required (PR-1).
   (atdgen (and :build (>= 4.2.0)))
   (atdgen-runtime (>= 4.2.0))
+  ; RFC-0004 Phase A0.2 PR-2: atdts generates TypeScript decoders
+  ; from sse_event.atd for the dashboard (committed at
+  ; dashboard/src/schemas/sse_event_generated.ts).  Build-time only;
+  ; no runtime linkage.  CI invokes it via dashboard/scripts/gen-sse-types.sh.
+  (atdts (and :build (>= 4.2.0)))
   ; [neo4j_bolt_eio] removed: no caller in lib/ bin/ test/ since
   ; continuous-loop iter #12 audit (2026-05-15).  Same shape as
   ; pbrt_services (iter #11): declared but never imported.  Re-add

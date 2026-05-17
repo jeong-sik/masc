@@ -157,6 +157,9 @@ let test_ci_sync_and_asset_contracts () =
     (file_contains_pattern ".github/workflows/ci.yml" "PR_LIVE_IS_DRAFT");
   check bool "ci gate refreshes live labels" true
     (file_contains_pattern ".github/workflows/ci.yml" "PR_LIVE_LABELS");
+  check bool "ci gate exports empty live labels" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       {|if live_labels="$(gh pr view "$PR_NUMBER"|});
   (* #10192: ci gate must also pass live PR state to the
      policy script so already-merged PRs do not flip red. *)
   check bool "ci gate refreshes live PR state" true
@@ -235,6 +238,24 @@ let test_agent_draft_policy_script () =
        :: ("PR_LIVE_LABELS", "enhancement,human-approved-ready")
        :: ("PR_IS_DRAFT", "true")
        :: base));
+  check bool "live empty labels override stale event bypass" true
+    (run_agent_draft_policy
+       (("PR_LIVE_IS_DRAFT", "false")
+       :: ("PR_LIVE_LABELS", "")
+       :: ("PR_IS_DRAFT", "true")
+       :: ("PR_LABELS", "enhancement,human-approved-ready")
+       :: List.remove_assoc "PR_LABELS" base)
+    <> 0);
+  check int "live empty labels override stale hard-stop labels" 0
+    (run_agent_draft_policy
+       [
+         ("GITHUB_EVENT_NAME", "pull_request");
+         ("PR_IS_DRAFT", "false");
+         ("PR_TITLE", "fix: human authored branch");
+         ("PR_HEAD_REF", "feature/human-branch");
+         ("PR_LABELS", "do-not-merge");
+         ("PR_LIVE_LABELS", "");
+       ]);
   check bool "ready agent PR without bypass fails" true
     (run_agent_draft_policy (("PR_IS_DRAFT", "false") :: base) <> 0);
   check bool "ready feature PR with agent-pr label fails" true

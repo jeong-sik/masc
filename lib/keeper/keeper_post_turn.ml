@@ -541,7 +541,7 @@ let apply_post_turn_lifecycle_with_resilience_handles
          compaction not applied — keeping ctx/checkpoint/metrics consistent. *)
       let effective_compaction_applied, compaction_failure_reason, effective_ctx, checkpoint =
         if not compaction_decided then (false, None, ctx, Some cp)
-        else
+        else (
           (* PR-J: lifecycle callbacks fire dispatch_keeper_phase_event,
              which can raise on transient registry contention or stale
              entry mismatches. The naked invocation here used to abort
@@ -594,6 +594,7 @@ let apply_post_turn_lifecycle_with_resilience_handles
                 ~labels:[("keeper", base_meta.name); ("phase", "compaction_save")]
                 ();
               (false, Some e, ctx, Some cp))
+        )
       in
       let after_tokens = token_count effective_ctx in
       let saved_tokens = max 0 (before_tokens - after_tokens) in

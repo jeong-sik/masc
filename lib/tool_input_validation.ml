@@ -161,7 +161,7 @@ let validation_schema_of_json ~name json_schema : Agent_sdk.Types.tool_schema =
   { name; description = ""; parameters = Tool_bridge.params_of_json_schema json_schema }
 ;;
 
-let validation_exception_action ~name exn =
+let validation_exception_action ~name exn : Tool_dispatch.pre_hook_action =
   let error_text = Printexc.to_string exn in
   let message =
     Printf.sprintf
@@ -171,7 +171,7 @@ let validation_exception_action ~name exn =
   in
   emit_validation_telemetry ~tool:name ~result:"fail" ~reason:"validation_exception";
   Log.error "%s" message;
-  Reject
+  Tool_dispatch.Reject
     { Tool_result.success = false
     ; data =
         `Assoc

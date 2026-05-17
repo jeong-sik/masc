@@ -155,6 +155,36 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
       | _ -> []
     in
     let compact_sessions = take 3 (List.map Briefing_compactors.compact_session_json sessions) in
+    (* PR #15777 (V14) follow-up: emit Prometheus counter for the typed
+       [last_event.source] marker produced by [Briefing_compactors]. The
+       compactor lives in a dep-clean leaf sublib, so this wrapper-side
+       observer is where the Prometheus signal travels at the boundary.
+       The 2 SSOT labels come from
+       [Briefing_session_last_event_source.to_label]; the 3 defensive
+       labels guard against future regressions in the leaf module. *)
+    let classify_session_source raw =
+      match raw with
+      | "recent_event_latest" | "fabricated_no_recent_events" -> raw
+      | _ -> "unknown"
+    in
+    let observe_session_last_event_source session_json =
+      let source =
+        match session_json with
+        | `Assoc kv -> (
+            match List.assoc_opt "last_event" kv with
+            | Some (`Assoc le) -> (
+                match List.assoc_opt "source" le with
+                | Some (`String s) -> classify_session_source s
+                | _ -> "missing")
+            | _ -> "no_last_event")
+        | _ -> "not_assoc"
+      in
+      Prometheus.inc_counter
+        Keeper_metrics.metric_briefing_session_last_event_source
+        ~labels:[ ("source", source) ]
+        ()
+    in
+    List.iter observe_session_last_event_source compact_sessions;
     let compact_keepers = take 3 (List.map Briefing_compactors.compact_keeper_json keepers) in
     let agents_json = Coord.get_agents_raw config |> List.map Briefing_compactors.compact_agent_json in
     let compact_agents = take 5 agents_json in

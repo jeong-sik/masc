@@ -789,6 +789,14 @@ let metric_keeper_lifecycle_callback_failures =
   "masc_keeper_lifecycle_callback_failures_total"
 ;;
 
+(* Counter for the [last_event.source] provenance marker emitted by
+   [Briefing_compactors.compact_session_json] (PR #15777, V14 follow-up).
+   Wrapper-side observer at [dashboard_mission_briefing] keeps the
+   [briefing_compactors] leaf sublib Prometheus-free. *)
+let metric_briefing_session_last_event_source =
+  "masc_briefing_session_last_event_source_total"
+;;
+
 let metric_keeper_event_bus_drain = "masc_keeper_event_bus_drain_total"
 
 let metric_keeper_supervisor_cleanup_failures =

@@ -512,6 +512,19 @@ val metric_keeper_turn_fsm_transitions : string
 val metric_keeper_turn_phase_duration : string
 val metric_keeper_lifecycle_transitions : string
 val metric_keeper_lifecycle_callback_failures : string
+
+val metric_briefing_session_last_event_source : string
+(** Counter for the [last_event.source] provenance marker emitted by
+    [Briefing_compactors.compact_session_json] (PR #15777, V14).
+    Label [source] uses a closed 5-value vocabulary:
+    - [recent_event_latest], [fabricated_no_recent_events]
+      (SSOT labels from {!Briefing_session_last_event_source.to_label})
+    - [missing], [no_last_event], [not_assoc]
+      (defensive guards against future regressions in the leaf module)
+    Emitted once per session per briefing at the
+    [dashboard_mission_briefing] wrapper. Cardinality bound:
+    [take 3] sessions per briefing × small briefing rate. *)
+
 val metric_keeper_event_bus_drain : string
 val metric_keeper_supervisor_cleanup_failures : string
 val metric_keeper_slot_force_released : string

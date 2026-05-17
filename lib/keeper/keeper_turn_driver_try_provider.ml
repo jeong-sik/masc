@@ -332,12 +332,12 @@ let run_try_provider
     let liveness_observer_opt =
       match liveness_mode with
       | Cascade_attempt_liveness_config.Off ->
-        (* RFC-0094 Phase 0 diagnostic trace — capture Off-mode turns. Combined with
+        (* RFC-0095 Phase 0 diagnostic trace — capture Off-mode turns. Combined with
            the existing Observe/Enforce-branch log below, this gives full visibility
            into whether the streaming master switch is the gating factor for
            openai_compat candidates. Removed at Phase 0 closeout. *)
         Log.Misc.debug
-          "rfc0094-trace: liveness_mode=Off observer disabled cascade=%s provider=%s \
+          "rfc0095-trace: liveness_mode=Off observer disabled cascade=%s provider=%s \
            candidate=%s"
           ctx.cascade_name
           provider_label

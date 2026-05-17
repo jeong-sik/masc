@@ -310,6 +310,7 @@
   test_gh_api_classification
   test_stale_kill_class
   test_workspace_routes_keeper
+  test_workspace_tree_exclusions
   test_provider_capability_matrix
   test_effect_evidence_source_path
   test_cognitive_gravity
@@ -609,6 +610,7 @@
   test_keeper_turn_fsm_wired_sites
   test_effective_oas_env
   test_workspace_routes_keeper
+  test_workspace_tree_exclusions
   test_effect_evidence_source_path
   test_cognitive_gravity
   test_intentional_projection

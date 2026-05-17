@@ -867,8 +867,6 @@ let orchestrator_entries =
 
 let path_entries =
   [
-    entry ~default:"false" "MASC_ALLOW_REPO_CONFIG_FALLBACK"
-      "Allow repo config fallback resolution";
     entry ~default:"(none)" "MASC_ASSETS_DIR"
       "Assets directory override; None when unset";
     entry ~default:"(none)" "MASC_BASE_PATH_INPUT"

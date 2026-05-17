@@ -157,7 +157,6 @@ let make_inputs ?env_config_dir ?env_personas_dir ~cwd ~base_path_input () =
       env_config_dir;
       env_personas_dir;
       resolution_source = Some "explicit_cli";
-      repo_config_fallback_enabled = false;
     }
 
 (* RFC-0058 §9: cascade.toml is the only on-disk cascade source.  The
@@ -166,6 +165,8 @@ let make_inputs ?env_config_dir ?env_personas_dir ~cwd ~base_path_input () =
    catalog ("no presets configured" baseline). *)
 let initialize_config_root ?(cascade_toml="") root =
   write_file (Filename.concat root "cascade.toml") cascade_toml;
+  mkdir_p (Filename.concat root "prompts");
+  mkdir_p (Filename.concat root "keepers");
   mkdir_p (Filename.concat root "personas")
 
 let test_invalid_explicit_config_dir () =
@@ -289,6 +290,10 @@ is-non-interactive = true
 [providers.codex_cli.credentials]
 type = "env"
 key = "OPENAI_API_KEY"
+
+[providers.codex_cli.capabilities]
+requires-per-keeper-bridging-for-bound-actor-tools = true
+identity-runtime-mcp-header-keys = ["x-masc-agent-name", "x-masc-keeper-name"]
 
 [models.codex-spark]
 api-name = "gpt-5.3-codex-spark"

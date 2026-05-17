@@ -138,12 +138,11 @@ root to edit.
 - `main_eio.exe --base-path ...`
   - bootstraps `<base-path>/.masc/config` before runtime initialization
 
-### Low-level fallback note
+### Repo Seed Note
 
-`Config_dir_resolver` still has optional repo fallback behavior behind
-`MASC_ALLOW_REPO_CONFIG_FALLBACK=true`; it does not consult a home-level config
-root.
-Those are implementation details, not the normal operator contract.
+`Config_dir_resolver` may report a checked-in repo `config/` path as a bootstrap
+seed, but it never treats that path as the active config root. It also does not
+consult a home-level config root.
 
-If you need to answer “what should I edit right now?”, use `doctor`, not the raw
-fallback chain.
+If you need to answer “what should I edit right now?”, use `doctor`, not a repo
+seed path.

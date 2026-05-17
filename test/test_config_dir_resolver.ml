@@ -262,10 +262,9 @@ let test_env_override_invalid_no_fallback () =
   check bool "cascade missing" false resolution.cascade.exists;
   check bool "warnings present" true (resolution.warnings <> [])
 
-let test_cwd_fallback_disabled_by_default () =
+let test_cwd_config_is_seed_only_not_fallback () =
   with_temp_dir "config-dir-cwd" @@ fun cwd ->
   let _config = make_config_root cwd in
-  with_env "MASC_ALLOW_REPO_CONFIG_FALLBACK" None @@ fun () ->
   let resolution =
     Config_dir_resolver.resolve_with
       (make_inputs ~cwd ~executable_name:"/tmp/nonexistent-masc" ())
@@ -274,28 +273,24 @@ let test_cwd_fallback_disabled_by_default () =
     (Config_dir_resolver.status_to_string resolution.status);
   check string "root source" "missing"
     (Config_dir_resolver.source_to_string resolution.config_root.source);
-  check bool "cascade hidden when repo fallback disabled"
-    false resolution.cascade.exists;
-  check bool "warning mentions opt-in" true
-    (List.exists
-       (string_contains ~needle:"MASC_ALLOW_REPO_CONFIG_FALLBACK=true")
-       resolution.warnings)
+  check bool "cascade hidden because repo config is seed-only"
+    false resolution.cascade.exists
 
-let test_cwd_fallback_opt_in () =
-  with_temp_dir "config-dir-cwd-opt-in" @@ fun cwd ->
+let test_cwd_config_remains_seed_only () =
+  with_temp_dir "config-dir-cwd-seed-only" @@ fun cwd ->
   let _config = make_config_root cwd in
-  with_env "MASC_ALLOW_REPO_CONFIG_FALLBACK" (Some "true") @@ fun () ->
   let resolution =
     Config_dir_resolver.resolve_with
       (make_inputs ~cwd ~executable_name:"/tmp/nonexistent-masc" ())
   in
-  check string "status" "ready"
+  check string "status" "missing"
     (Config_dir_resolver.status_to_string resolution.status);
-  check string "root source" "cwd"
+  check string "root source" "missing"
     (Config_dir_resolver.source_to_string resolution.config_root.source);
-  check bool "keepers exists" true resolution.keepers.exists
+  check bool "keepers hidden because repo config is not active"
+    false resolution.keepers.exists
 
-let test_executable_relative_fallback_opt_in () =
+let test_executable_relative_config_is_seed_only_not_fallback () =
   with_temp_dir "config-dir-exe" @@ fun root ->
   let repo = Filename.concat root "repo" in
   let _config = make_config_root repo in
@@ -303,16 +298,16 @@ let test_executable_relative_fallback_opt_in () =
   mkdir_p bin_dir;
   let executable_name = Filename.concat bin_dir "masc-mcp" in
   write_file executable_name "#!/bin/sh\n";
-  with_env "MASC_ALLOW_REPO_CONFIG_FALLBACK" (Some "true") @@ fun () ->
   let resolution =
     Config_dir_resolver.resolve_with
       (make_inputs ~cwd:"/tmp/nonexistent-cwd" ~executable_name ())
   in
-  check string "status" "ready"
+  check string "status" "missing"
     (Config_dir_resolver.status_to_string resolution.status);
-  check string "root source" "exe_relative"
+  check string "root source" "missing"
     (Config_dir_resolver.source_to_string resolution.config_root.source);
-  check bool "personas exists" true resolution.personas.exists
+  check bool "personas hidden because repo config is not active"
+    false resolution.personas.exists
 
 let test_home_config_is_not_a_fallback () =
   with_temp_dir "config-dir-home" @@ fun home ->
@@ -445,12 +440,12 @@ let () =
             test_env_override_valid_with_toml_only_root;
           test_case "env override invalid does not fallback" `Quick
             test_env_override_invalid_no_fallback;
-          test_case "cwd fallback disabled by default" `Quick
-            test_cwd_fallback_disabled_by_default;
-          test_case "cwd fallback opt-in" `Quick
-            test_cwd_fallback_opt_in;
-          test_case "exe-relative fallback opt-in" `Quick
-            test_executable_relative_fallback_opt_in;
+          test_case "cwd config is seed-only, not fallback" `Quick
+            test_cwd_config_is_seed_only_not_fallback;
+          test_case "cwd config remains seed-only" `Quick
+            test_cwd_config_remains_seed_only;
+          test_case "exe-relative config is seed-only, not fallback" `Quick
+            test_executable_relative_config_is_seed_only_not_fallback;
           test_case "local masc fallback ignores home config" `Quick
             test_local_masc_fallback_ignores_home_config;
           test_case "local masc fallback collapses explicit .masc dir"

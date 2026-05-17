@@ -64,7 +64,7 @@ code_refs:
 | `LIBDATACHANNEL_PATH` | string | 자동 탐색 | WebRTC 라이브러리 경로 |
 
 runtime data root는 `MASC_BASE_PATH`를 사용한다. 운영 공식은 `<base-path>/.masc`다. 미설정 시 일부 경로는 현재 작업 디렉토리 기준 fallback을 사용한다.
-resolved config root는 별도 탐색 규칙을 가진다: `MASC_CONFIG_DIR` -> `<MASC_BASE_PATH>/.masc/config` -> `cwd/config` -> executable-relative `config/`. repo `config/` fallback은 `MASC_ALLOW_REPO_CONFIG_FALLBACK=true`일 때만 켜진다. repo `config/`는 체크인된 default/example source이며, live root가 아니다.
+resolved config root는 별도 탐색 규칙을 가진다: `MASC_CONFIG_DIR` -> `<MASC_BASE_PATH>/.masc/config` -> missing/uninitialized. repo `config/`는 체크인된 default/example seed source이며, live root fallback이 아니다.
 
 ### 3.2 Runtime (Env_config_runtime)
 
@@ -592,8 +592,7 @@ $MASC_PERSONAS_DIR
 > where resolved config root =
   $MASC_CONFIG_DIR
   > $MASC_BASE_PATH/.masc/config
-  > cwd/config (only when MASC_ALLOW_REPO_CONFIG_FALLBACK=true)
-  > executable-relative config/ (only when MASC_ALLOW_REPO_CONFIG_FALLBACK=true)
+  > missing/uninitialized
 ```
 
 암묵적 secondary search(`~/.masc/personas`, `$MASC_BASE_PATH/.masc/personas`)는 사용하지 않는다.

@@ -383,7 +383,6 @@ the categorization roadmap. Newly-added typed getters in
 |---|---|---|---|---|---|
 | `MASC_A2A_DELEGATION_TIMEOUT_SEC` | string_literal | n/a | n/a | 994 |  |
 | `MASC_ALLOW_ANONYMOUS_MUTATIONS` | string_literal | n/a | n/a | 178 |  |
-| `MASC_ALLOW_REPO_CONFIG_FALLBACK` | string_literal | n/a | n/a | 870 |  |
 | `MASC_ASSETS_DIR` | string_literal | n/a | n/a | 872 |  |
 | `MASC_BASE_PATH_RESOLUTION_SOURCE` | string_literal | n/a | n/a | 876 |  |
 | `MASC_BASE_PATH_STRICT` | string_literal | n/a | n/a | 878 |  |

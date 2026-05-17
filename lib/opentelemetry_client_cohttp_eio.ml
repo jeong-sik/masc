@@ -166,7 +166,7 @@ end = struct
          all exceptions (including Cancelled) and reports them as Error
          strings; without this check the exporter would log a spurious
          "export failed" instead of unwinding cancellation. *)
-      Eio.Cancel.check ();
+      Eio.Fiber.check ();
       Error
         (`Failure
            (spf

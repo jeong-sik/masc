@@ -483,7 +483,7 @@ let single_voice_mcp_call ~net ~uri ~headers_list ~body_str =
        and reports them as an Error string; without this check the retry
        loop in [call_voice_mcp_endpoint] would sleep and re-attempt
        instead of unwinding cancellation immediately. *)
-    Eio.Cancel.check ();
+    Eio.Fiber.check ();
     Error (Printf.sprintf "Connection error: %s" e)
 ;;
 
@@ -722,7 +722,7 @@ let is_voice_server_available ~sw:_ ~clock ~net =
              fiber was cancelled. Masc_http_client.get_sync's piaf pool
              catches Cancelled as an Error string; without this check
              the availability probe would mask cancellation as Ok false. *)
-          Eio.Cancel.check ();
+          Eio.Fiber.check ();
           Log.Transport.warn "voice server check failed: %s" msg;
           voice_server_available := Some false;
           Ok false
@@ -1010,7 +1010,7 @@ let health_check ~sw:_ ~clock:_ ~net () =
          fiber was cancelled. Pool.do_request captures Cancelled as an
          Error string; without this check shutdown is reported as a
          normal "Not reachable" failure. *)
-      Eio.Cancel.check ();
+      Eio.Fiber.check ();
       Error (Printf.sprintf "Not reachable: %s" msg)
     | Ok { Masc_http_client.status; body = body_str; _ } ->
       if status >= 200 && status < 300

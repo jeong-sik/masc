@@ -27,6 +27,23 @@
 
 - Research synthesis: `~/me/knowledge/research/2026-05-17-dashboard-sse-ssot-state.md`
 - Quick win PR (workaround, 본 RFC 대체 트랙 X — 사용자 crash 차단 only): `fix/ide-context-lens-null-guard` 의 `ide-context-lens.ts:304/325` null guard
+
+### Phase A0.1 completion (2026-05-17)
+
+Track A 의 Phase A0.1 sprint (atd-based typed SSE envelope) 완료. 5 sub-PR + 1 closeout doc, 약 1.5 시간:
+
+| Sub-PR | PR # | 결과 |
+|---|---|---|
+| PR-1 | #15807 | atd schema + leaf lib + agent_started constructor + byte-equal PoC |
+| PR-2 | #15811 | AgentStarted cascade arm typed-routed |
+| PR-3 | #15824 | 5 simple-record arms (tool/turn) |
+| PR-4 | #15830 | 8 simple-record arms (handoff/context/replacement/slot) |
+| PR-3b | #15835 | agent_completed/agent_failed — variable-shape addendum 패턴 |
+| Closeout doc | #15841 | implementation plan Status → Completed |
+
+상세 sub-PR 매핑 + scope 조정 사유 (PR-3 split, `wrap_event` 보존) + verification harness (19 byte-equal tests) 는 `docs/rfc/0004-phase-a0-1-implementation-plan.md` §Completion summary 참조.
+
+**Track A 다음 단계 (Phase A0.2+)**: TypeScript decoder generation (atdgen-ts 또는 manual zod from `.atd`), golden-file replay 시스템, CLI emitter. `lib/sse_event/sse_event.atd` 를 SSOT 로 소비.
 - Track A 의 sprint 분할은 §Phase A0 끝 부분의 **A0.1~A0.5 표** 참조 (resume update 로 추가)
 
 ## Design Anchors

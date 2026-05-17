@@ -171,23 +171,31 @@ let command_mentions_github cmd =
   || String.starts_with ~prefix:"git push" (String.trim cmd)
 ;;
 
-let resource_class_of_keeper_shell_op = function
-  | "gh" | "git_clone" -> Some Github
-  | "git_worktree" -> Some Filesystem_write
-  | "git_status" | "git_log" | "git_diff" -> Some Filesystem_read
+type keeper_shell_op_classification =
+  | Known_shell_op of resource_class
+  | Unknown_shell_op of string
+
+let classify_keeper_shell_op_value raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "gh" | "git_clone" -> Known_shell_op Github
+  | "git_worktree" -> Known_shell_op Filesystem_write
+  | "git_status" | "git_log" | "git_diff" -> Known_shell_op Filesystem_read
   | "rg" | "find" | "tree" | "cat" | "head" | "tail" | "wc" | "ls" ->
-    Some Filesystem_read
-  | _ -> None
+    Known_shell_op Filesystem_read
+  | "bash" | "exec" | "shell" | "sh" -> Known_shell_op Shell
+  | unknown -> Unknown_shell_op unknown
 ;;
 
 let classify_keeper_shell_op args =
   match json_string_opt "op" args with
   | Some raw ->
-    (match
-       String.lowercase_ascii (String.trim raw) |> resource_class_of_keeper_shell_op
-     with
-     | Some resource_class -> resource_class
-     | None -> Shell)
+    (match classify_keeper_shell_op_value raw with
+     | Known_shell_op resource_class -> resource_class
+     | Unknown_shell_op unknown ->
+       Log.Mcp.warn
+         "unknown keeper_shell op; defaulting resource gate to shell: op=%s"
+         unknown;
+       Shell)
   | None -> Shell
 ;;
 

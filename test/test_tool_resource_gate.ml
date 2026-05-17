@@ -59,6 +59,14 @@ let test_classifies_host_local_bottlenecks () =
        "keeper_shell"
        ~is_read_only:true
        ~args:(`Assoc [ "op", `String "git_clone" ]));
+  check
+    string
+    "keeper_shell unknown op defaults visibly to shell"
+    "shell"
+    (classify
+       "keeper_shell"
+       ~is_read_only:true
+       ~args:(`Assoc [ "op", `String "future_op" ]));
   check string "board write" "board_write" (classify "masc_board_post");
   check string "transition" "coordination_write" (classify "masc_transition");
   check string "bash output bypasses gate" "ungated" (classify "keeper_bash_output");

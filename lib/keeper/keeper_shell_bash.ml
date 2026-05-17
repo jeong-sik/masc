@@ -724,10 +724,11 @@ let handle_keeper_bash
     | Error e -> error_json e
     | Ok cwd ->
     let env_snap =
-      try Some (Exec_core.snapshot_env ~cwd)
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | _ -> None
+      (* RFC-0106 P1: route Cancelled re-raise through Cancel_safe.protect.
+         Silent [_ -> None] preserved verbatim — env snapshot is optional. *)
+      Cancel_safe.protect
+        ~on_exn:(fun _ -> None)
+        (fun () -> Some (Exec_core.snapshot_env ~cwd))
     in
     let cached_result_json
           (entry : Masc_exec.Exec_cache.cache_entry) =

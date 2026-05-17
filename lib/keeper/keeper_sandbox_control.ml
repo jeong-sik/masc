@@ -305,23 +305,27 @@ let git_metadata_timeout_sec = 2.0
 let max_live_git_enrichment_repos = 20
 
 let git_string_opt repo_path args =
-  try
-    let argv = "git" :: "-C" :: repo_path :: args in
-    let status, out =
-      Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
-        ~raw_source:(String.concat " " argv)
-        ~summary:"keeper sandbox git metadata"
-        ~timeout_sec:git_metadata_timeout_sec
-        argv
-    in
-    match status with
-    | Unix.WEXITED 0 ->
-        let trimmed = String.trim out in
-        if String.equal trimmed "" then None else Some trimmed
-    | _ -> None
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | _ -> None
+  (* RFC-0106 P1: Cancelled re-raise centralised via Cancel_safe.protect.
+     The [_ -> None] silent default is pre-existing behaviour (git
+     metadata is treated as optional by callers) and is preserved
+     verbatim. Promoting it to a logged/counted failure is a separate
+     visibility concern outside this PR's migration scope. *)
+  Cancel_safe.protect
+    ~on_exn:(fun _ -> None)
+    (fun () ->
+      let argv = "git" :: "-C" :: repo_path :: args in
+      let status, out =
+        Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
+          ~raw_source:(String.concat " " argv)
+          ~summary:"keeper sandbox git metadata"
+          ~timeout_sec:git_metadata_timeout_sec
+          argv
+      in
+      match status with
+      | Unix.WEXITED 0 ->
+          let trimmed = String.trim out in
+          if String.equal trimmed "" then None else Some trimmed
+      | _ -> None)
 
 let enrich_playground_repo_from_git
       ~(source : string) ~(repo_name : string) ~(repo_path : string)

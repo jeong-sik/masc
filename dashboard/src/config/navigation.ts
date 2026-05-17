@@ -215,13 +215,17 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     },
     {
       id: 'observatory',
-      label: 'Observatory',
+      // Renamed from 'Observatory' to disambiguate from 'Agent Observatory'
+      // (sibling section id=agents). Sidebar-label uniqueness is enforced by
+      // navigation.test.ts; the canonical section id remains 'observatory'.
+      label: 'Activity Timeline',
       description: 'Live collaboration and investigative timelines.',
       params: { section: 'observatory' },
-      // RFC-MASC-006 Phase 2a: kept as a hidden diagnostic surface, not yet promoted to main nav.
-      // Reachable via legacy redirects (monitoring:activity, monitoring:live) and direct URL.
-      // Remove hidden:true when Phase 2b drill-down is complete.
-      hidden: true,
+      // RFC-MASC-006 Phase 2b: 3-track timeline (events + tool-calls + metric)
+      // + cross-signal readout + ObservatoryActivityPanels (cascade waterfall,
+      // keeper phase timeline, derived analyses) are wired. Promoted to main
+      // nav 2026-05-17. Legacy redirects (monitoring:activity, monitoring:live)
+      // still resolve here.
     },
     {
       id: 'cognition',

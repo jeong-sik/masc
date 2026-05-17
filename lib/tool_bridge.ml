@@ -17,11 +17,13 @@ module Float = Stdlib.Float
 
 (** OAS boundary adapter for tool results, schemas, and tool definitions.
 
-    MASC tools use [(bool * string)] internally (success flag + message).
-    OAS uses [Agent_sdk.Types.tool_result = (tool_output, tool_error) Result.t].
+    MASC dispatch uses typed [Tool_result.t] internally.  Some older leaf
+    helpers still expose [(bool * string)] locally; this module is the boundary
+    adapter that converts those leaf results to/from
+    [Agent_sdk.Types.tool_result = (tool_output, tool_error) Result.t].
 
-    This module converts at the OAS boundary only — internal MASC
-    tool handlers keep their existing convention unchanged.
+    Central [Tool_dispatch.handler] implementations should return
+    [Tool_result.t] directly rather than reintroducing tuple dispatch.
 
     @since 2.95.1 — result conversion
     @since 2.110.0 — schema conversion + OAS Tool.t creation

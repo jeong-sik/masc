@@ -318,13 +318,13 @@ Streamable HTTP 엔드포인트에서 노출되는 도구 집합의 프로필: `
 O(1) Hashtbl 기반의 중앙 도구 라우팅 레지스트리. 각 Tool 모듈이 클로저를 등록하고, 호출 시 이름으로 O(1) 조회하여 실행한다. Pre-hook/Post-hook 체인을 지원한다. `-> lib/tool_dispatch.mli`
 
 **Handler**
-도구 호출 처리 함수의 통합 타입: `name:string -> args:Yojson.Safe.t -> (bool * string) option`. `None`은 해당 핸들러가 이 도구를 모르는 경우를 나타낸다. `-> lib/tool_dispatch.mli`
+도구 호출 처리 함수의 통합 타입: `name:string -> args:Yojson.Safe.t -> Tool_result.t option`. `None`은 해당 핸들러가 이 도구를 모르는 경우를 나타낸다. `-> lib/tool_dispatch.mli`
 
 **Pre-hook**
-도구 핸들러 실행 전 호출되는 가로채기 함수. `None` 반환 시 진행, `Some result` 반환 시 핸들러를 건너뛰고 단축 반환한다. Governance Pipeline이 pre-hook으로 설치된다. `-> lib/tool_dispatch.mli`
+도구 핸들러 실행 전 호출되는 가로채기 함수. `Pass`는 진행, `Proceed args`는 정규화/강제 변환 후 진행, `Reject result`는 핸들러를 건너뛰고 단축 반환한다. Governance Pipeline과 input validation이 pre-hook으로 설치된다. `-> lib/tool_dispatch.mli`
 
 **Post-hook**
-도구 핸들러 실행 후 호출되는 변환 함수. 결과를 수신하여 (변환된) 결과를 반환한다. `-> lib/tool_dispatch.mli`
+도구 핸들러 실행 후 호출되는 typed 관찰 hook. 결과 변환은 별도 `result_transformer`가 담당한다. `-> lib/tool_dispatch.mli`
 
 **Module Tag**
 도구 이름에서 담당 모듈로의 O(1) 2-level 디스패치를 위한 태그. 시작 시 도구 이름 -> 모듈 태그 매핑이 구축되고, 호출 시 태그로 모듈 컨텍스트를 lazy 생성한다. `-> lib/tool_dispatch.mli`

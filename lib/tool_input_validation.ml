@@ -26,7 +26,8 @@ module Float = Stdlib.Float
 (** Register input validation as a Tool_dispatch pre-hook.
     Must be called after all tool schemas are registered (server init).
 
-    Tools without a registered schema are allowed through (permissive). *)
+    Tools without a registered schema are rejected fail-closed.  Empty
+    schemas are accepted only for empty/no-arg calls. *)
 let is_internal_marker_key key = String.length key > 0 && Char.equal key.[0] '_'
 
 let strip_internal_marker_args (args : Yojson.Safe.t) : Yojson.Safe.t =
@@ -129,6 +130,11 @@ let schema_has_properties = function
   | _ -> false
 ;;
 
+let empty_tool_args = function
+  | `Null | `Assoc [] -> true
+  | _ -> false
+;;
+
 let emit_validation_telemetry ~tool ~result ~reason =
   Prometheus.inc_counter
     Prometheus.metric_tool_input_validation
@@ -146,19 +152,32 @@ let emit_validation_telemetry ~tool ~result ~reason =
 
 let pass_reason ~schema ~args ~prepared_args =
   match schema with
-  | None -> "missing_schema"
   | Some schema when not (schema_has_properties schema) -> "empty_schema"
   | Some _ when not (Yojson.Safe.equal prepared_args args) -> "normalized"
   | Some _ -> "valid"
-;;
-
-let pass_result = function
-  | "missing_schema" | "empty_schema" -> "bypass"
-  | _ -> "pass"
+  | None -> "missing_schema"
 ;;
 
 let validation_schema_of_json ~name json_schema : Agent_sdk.Types.tool_schema =
   { name; description = ""; parameters = Tool_bridge.params_of_json_schema json_schema }
+;;
+
+let reject_validation ~name ~reason ~message =
+  emit_validation_telemetry ~tool:name ~result:"fail" ~reason;
+  Log.info "tool_input_validation rejected %s: %s" name message;
+  Tool_dispatch.Reject
+    { Tool_result.success = false
+    ; data =
+        `Assoc
+          [ "error", `String message
+          ; "validation", `String "oas_tool_middleware"
+          ; "reason", `String reason
+          ]
+    ; legacy_message = message
+    ; tool_name = name
+    ; duration_ms = 0.0
+    ; failure_class = Some Tool_result.Policy_rejection
+    }
 ;;
 
 let validation_exception_action ~name exn : Tool_dispatch.pre_hook_action =
@@ -188,32 +207,65 @@ let validation_exception_action ~name exn : Tool_dispatch.pre_hook_action =
 
 let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
   try
-    let lookup name =
-      let schema =
-        match schema with
-        | Some schema -> Some schema
-        | None -> Tool_dispatch.lookup_schema name
-      in
-      Option.map (validation_schema_of_json ~name) schema
-    in
-    let hook = Agent_sdk.Tool_middleware.make_validation_hook ~lookup in
     let schema =
       match schema with
       | Some _ as schema -> schema
       | None -> Tool_dispatch.lookup_schema name
     in
     let prepared_args = prepare_args ?schema ~name args in
-    match hook ~name ~args:prepared_args with
+    match schema with
+    | None ->
+      reject_validation
+        ~name
+        ~reason:"missing_schema"
+        ~message:
+          (Printf.sprintf
+             "Tool '%s' has no registered input schema; refusing schema-less dispatch"
+             name)
+    | Some schema when not (schema_has_properties schema) ->
+      let required = required_names schema in
+      if required <> []
+      then
+        reject_validation
+          ~name
+          ~reason:"malformed_schema"
+          ~message:
+            (Printf.sprintf
+               "Tool '%s' schema declares required fields without input properties"
+               name)
+      else if empty_tool_args prepared_args
+      then (
+        emit_validation_telemetry ~tool:name ~result:"pass" ~reason:"empty_schema";
+        if Yojson.Safe.equal prepared_args args
+        then Tool_dispatch.Pass
+        else Tool_dispatch.Proceed prepared_args)
+      else
+        reject_validation
+          ~name
+          ~reason:"empty_schema_args"
+          ~message:
+            (Printf.sprintf
+               "Tool '%s' declares no input fields but received arguments"
+               name)
+    | Some schema ->
+      let lookup lookup_name =
+        let schema_opt =
+          if String.equal lookup_name name
+          then Some schema
+          else Tool_dispatch.lookup_schema lookup_name
+        in
+        Option.map (validation_schema_of_json ~name:lookup_name) schema_opt
+      in
+      let hook = Agent_sdk.Tool_middleware.make_validation_hook ~lookup in
+      (match hook ~name ~args:prepared_args with
     | Agent_sdk.Tool_middleware.Pass when not (Yojson.Safe.equal prepared_args args) ->
-      let reason = pass_reason ~schema ~args ~prepared_args in
-      let result = pass_result reason in
-      emit_validation_telemetry ~tool:name ~result ~reason;
+      let reason = pass_reason ~schema:(Some schema) ~args ~prepared_args in
+      emit_validation_telemetry ~tool:name ~result:"pass" ~reason;
       Log.debug "tool_input_validation normalized args for %s" name;
       Tool_dispatch.Proceed prepared_args
     | Agent_sdk.Tool_middleware.Pass ->
-      let reason = pass_reason ~schema ~args ~prepared_args in
-      let result = pass_result reason in
-      emit_validation_telemetry ~tool:name ~result ~reason;
+      let reason = pass_reason ~schema:(Some schema) ~args ~prepared_args in
+      emit_validation_telemetry ~tool:name ~result:"pass" ~reason;
       Tool_dispatch.Pass
     | Agent_sdk.Tool_middleware.Proceed coerced ->
       emit_validation_telemetry ~tool:name ~result:"pass" ~reason:"coerced";
@@ -235,6 +287,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
              actual category instead of bucketing as "unclassified". *)
           failure_class = Some Tool_result.Policy_rejection
         }
+      )
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> validation_exception_action ~name exn

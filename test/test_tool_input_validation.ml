@@ -243,13 +243,60 @@ let test_extra_fields_allowed () =
   | Proceed _ -> ()
   | Reject r -> Alcotest.fail (Yojson.Safe.to_string r.data)
 
-let test_empty_schema_passes () =
+let test_empty_schema_allows_empty_args () =
   let schema = `Assoc [] in
-  let args = `Assoc [("anything", `String "goes")] in
-  match validate_via_oas ~tool_name:"test" ~schema ~args with
-  | Pass -> ()  (* empty params -> Pass *)
-  | Proceed _ -> Alcotest.fail "Empty schema should Pass"
-  | Reject r -> Alcotest.fail (Yojson.Safe.to_string r.data)
+  match
+    Tool_input_validation.validate_args
+      ~schema
+      ~name:"__tool_input_validation_empty_schema_empty_args"
+      ~args:(`Assoc [])
+      ()
+  with
+  | Ok (`Assoc []) -> ()
+  | Ok forwarded ->
+    Alcotest.failf
+      "expected empty args to pass unchanged, got %s"
+      (Yojson.Safe.to_string forwarded)
+  | Error result ->
+    Alcotest.failf
+      "expected empty schema with empty args to pass, got %s"
+      (Yojson.Safe.to_string result.Tool_result.data)
+
+let test_empty_schema_rejects_arguments () =
+  let schema = `Assoc [] in
+  match
+    Tool_input_validation.validate_args
+      ~schema
+      ~name:"__tool_input_validation_empty_schema_rejects_args"
+      ~args:(`Assoc [ "anything", `String "goes" ])
+      ()
+  with
+  | Error result ->
+    let msg = Yojson.Safe.to_string result.Tool_result.data in
+    Alcotest.(check bool) "reason is empty_schema_args" true
+      (string_contains msg "empty_schema_args")
+  | Ok forwarded ->
+    Alcotest.failf
+      "expected empty schema with arguments to fail, got %s"
+      (Yojson.Safe.to_string forwarded)
+
+let test_required_without_properties_rejects_schema () =
+  let schema = `Assoc [ "required", `List [ `String "name" ] ] in
+  match
+    Tool_input_validation.validate_args
+      ~schema
+      ~name:"__tool_input_validation_malformed_schema"
+      ~args:(`Assoc [])
+      ()
+  with
+  | Error result ->
+    let msg = Yojson.Safe.to_string result.Tool_result.data in
+    Alcotest.(check bool) "reason is malformed_schema" true
+      (string_contains msg "malformed_schema")
+  | Ok forwarded ->
+    Alcotest.failf
+      "expected malformed schema to fail, got %s"
+      (Yojson.Safe.to_string forwarded)
 
 let test_schema_union_type_does_not_raise () =
   let schema =
@@ -321,7 +368,7 @@ let test_registered_hook_keeps_noop_as_pass () =
   Alcotest.(check bool) "args unchanged" true
     (Yojson.Safe.equal forwarded args)
 
-let test_registered_hook_bypasses_unknown_tool () =
+let test_registered_hook_rejects_unknown_tool () =
   let args = `Assoc [("count", `String "42")] in
   let blocked, forwarded =
     run_registered_hook
@@ -329,11 +376,17 @@ let test_registered_hook_bypasses_unknown_tool () =
       ~args
       ()
   in
-  Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
-  Alcotest.(check bool) "args unchanged" true
-    (Yojson.Safe.equal forwarded args)
+  Alcotest.(check bool) "blocked" true (Option.is_some blocked);
+  Alcotest.(check bool) "args unchanged on rejection" true
+    (Yojson.Safe.equal forwarded args);
+  match blocked with
+  | Some result ->
+    let msg = Yojson.Safe.to_string result.Tool_result.data in
+    Alcotest.(check bool) "reason is missing_schema" true
+      (string_contains msg "missing_schema")
+  | None -> Alcotest.fail "expected missing-schema rejection"
 
-let test_registered_hook_bypasses_empty_schema () =
+let test_registered_hook_rejects_empty_schema_arguments () =
   let args = `Assoc [("anything", `String "goes")] in
   let blocked, forwarded =
     run_registered_hook
@@ -342,9 +395,27 @@ let test_registered_hook_bypasses_empty_schema () =
       ~args
       ()
   in
+  Alcotest.(check bool) "blocked" true (Option.is_some blocked);
+  Alcotest.(check bool) "args unchanged on rejection" true
+    (Yojson.Safe.equal forwarded args);
+  match blocked with
+  | Some result ->
+    let msg = Yojson.Safe.to_string result.Tool_result.data in
+    Alcotest.(check bool) "reason is empty_schema_args" true
+      (string_contains msg "empty_schema_args")
+  | None -> Alcotest.fail "expected empty-schema argument rejection"
+
+let test_registered_hook_allows_empty_schema_without_arguments () =
+  let args = `Assoc [] in
+  let blocked, forwarded =
+    run_registered_hook
+      ~schema:(`Assoc [])
+      ~tool_name:"__tool_input_validation_registered_empty_no_args"
+      ~args
+      ()
+  in
   Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
-  Alcotest.(check bool) "args unchanged" true
-    (Yojson.Safe.equal forwarded args)
+  Alcotest.(check bool) "args unchanged" true (Yojson.Safe.equal forwarded args)
 
 let test_validate_args_uses_explicit_schema_without_registry () =
   Tool_dispatch.clear_hooks ();
@@ -483,7 +554,7 @@ let attr_string key attrs =
   | Some (`String value) -> Some value
   | _ -> None
 
-let test_validation_telemetry_records_pass_fail_and_bypass () =
+let test_validation_telemetry_records_pass_and_fail_counters () =
   let valid_tool = "__tool_input_validation_metric_valid" in
   let valid_schema = make_schema [ "count", "integer" ] in
   check_validation_metric_increment
@@ -544,7 +615,7 @@ let test_validation_telemetry_records_pass_fail_and_bypass () =
   let missing_tool = "__tool_input_validation_metric_missing_schema" in
   check_validation_metric_increment
     ~tool:missing_tool
-    ~result:"bypass"
+    ~result:"fail"
     ~reason:"missing_schema"
     (fun () ->
        match
@@ -553,30 +624,30 @@ let test_validation_telemetry_records_pass_fail_and_bypass () =
            ~args:(`Assoc [ "count", `String "not-validated" ])
            ()
        with
-       | Ok _ -> ()
-       | Error result ->
+       | Error _ -> ()
+       | Ok forwarded ->
          Alcotest.fail
            (Printf.sprintf
-              "expected missing schema bypass, got %s"
-              (Yojson.Safe.to_string result.Tool_result.data)));
+              "expected missing schema failure, got %s"
+              (Yojson.Safe.to_string forwarded)));
   let empty_tool = "__tool_input_validation_metric_empty_schema" in
   check_validation_metric_increment
     ~tool:empty_tool
-    ~result:"bypass"
+    ~result:"pass"
     ~reason:"empty_schema"
     (fun () ->
        match
          Tool_input_validation.validate_args
            ~schema:(`Assoc [])
            ~name:empty_tool
-           ~args:(`Assoc [ "anything", `String "goes" ])
+           ~args:(`Assoc [])
            ()
        with
        | Ok _ -> ()
        | Error result ->
          Alcotest.fail
            (Printf.sprintf
-              "expected empty schema bypass, got %s"
+              "expected empty schema no-arg pass, got %s"
               (Yojson.Safe.to_string result.Tool_result.data)))
 
 let test_validation_telemetry_records_normalized_transition () =
@@ -817,13 +888,18 @@ let () =
       Alcotest.test_case "null args no required" `Quick test_null_args_no_required;
       Alcotest.test_case "null args with required" `Quick test_null_args_with_required;
       Alcotest.test_case "extra fields allowed" `Quick test_extra_fields_allowed;
-      Alcotest.test_case "empty schema passes" `Quick test_empty_schema_passes;
+      Alcotest.test_case "empty schema allows empty args" `Quick
+        test_empty_schema_allows_empty_args;
+      Alcotest.test_case "empty schema rejects arguments" `Quick
+        test_empty_schema_rejects_arguments;
+      Alcotest.test_case "required without properties rejects schema" `Quick
+        test_required_without_properties_rejects_schema;
       Alcotest.test_case "schema union type does not raise" `Quick
         test_schema_union_type_does_not_raise;
     ]);
     ("telemetry", [
-      Alcotest.test_case "records pass, fail, and bypass counters" `Quick
-        test_validation_telemetry_records_pass_fail_and_bypass;
+      Alcotest.test_case "records pass and fail counters" `Quick
+        test_validation_telemetry_records_pass_and_fail_counters;
       Alcotest.test_case "records normalized transition counter" `Quick
         test_validation_telemetry_records_normalized_transition;
       Alcotest.test_case "emits OTel validation event" `Quick
@@ -834,10 +910,12 @@ let () =
         test_registered_hook_coerces_args;
       Alcotest.test_case "no-op coercion stays pass" `Quick
         test_registered_hook_keeps_noop_as_pass;
-      Alcotest.test_case "unknown tool bypasses validation" `Quick
-        test_registered_hook_bypasses_unknown_tool;
-      Alcotest.test_case "empty schema bypasses validation" `Quick
-        test_registered_hook_bypasses_empty_schema;
+      Alcotest.test_case "unknown tool rejects validation" `Quick
+        test_registered_hook_rejects_unknown_tool;
+      Alcotest.test_case "empty schema rejects arguments" `Quick
+        test_registered_hook_rejects_empty_schema_arguments;
+      Alcotest.test_case "empty schema allows empty args" `Quick
+        test_registered_hook_allows_empty_schema_without_arguments;
       Alcotest.test_case "keeper_fs_edit accepts patch args" `Quick
         test_registered_hook_keeper_fs_edit_patch_args;
       Alcotest.test_case "keeper_board_post accepts sources array" `Quick

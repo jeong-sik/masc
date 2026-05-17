@@ -19,13 +19,10 @@ val register_module : schemas:Masc_domain.tool_schema list -> handler:handler ->
 
 (** {1 Dispatch} *)
 
-(* RFC-0084 PR-11 — [val dispatch] removed from the public mli surface.
-   External callers MUST use [guarded_dispatch] (see below) which wraps
-   the same handler-registry path with [Tool_telemetry.with_span] and
-   the pre-hook chain. [dispatch] remains in [tool_dispatch.ml] as a
-   private implementation detail used by [guarded_dispatch] internally;
-   PR-14 lint asserts the public surface has zero callers of [dispatch]
-   in [lib/] and [bin/]. *)
+(* RFC-0084 PR-11/14 — [dispatch] and [dispatch_structured] were removed from
+   the public surface and the file-private chain. External callers MUST use
+   [guarded_dispatch], which owns telemetry, pre-hooks, handler execution,
+   result transformation, and typed post-hook fan-out. *)
 
 val mint_token : name:string -> (Tool_token.t, string) Result.t
 (** Mint a [Tool_token.t] validated against both tag and handler registries.
@@ -126,47 +123,17 @@ val run_typed_post_hooks :
     [Handled] arm, [None] otherwise).  Sole observer-side dispatch
     seam after PR-I-3 retired the legacy [run_post_hooks]. *)
 
-(* RFC-0084 PR-11 — [val dispatch_structured] removed from the public mli
-   surface. PR-7~9 migration verified external callers = 0 (rg in lib/ +
-   bin/). [dispatch_structured] remains in [tool_dispatch.ml] as a
-   private implementation detail invoked exclusively by
-   [guarded_dispatch] to run the pre-hook chain. *)
-
 val guarded_dispatch
   :  token:Tool_token.t
   -> args:Yojson.Safe.t
   -> unit
   -> Tool_result.t option
-(** RFC-0084 §2.2 — Single dispatch entry with 4-tuple telemetry.
+(** RFC-0084 §2.2 — Single dispatch entry with 4-label telemetry.
 
-    Wraps [dispatch] with [Tool_telemetry.with_span], so every
-    invocation emits an OTel span, a Prometheus counter increment, and a
-    [trace_id] thunk available to the handler. The audit emission slot is
-    filled by callers based on the returned [Tool_result.t option]; PR-10
-    will unify audit emission via a typed [Dispatch_outcome.t].
-
-    PR-3 introduces this entry. No callers migrate in this PR. Migration
-    plan: PR-7 keeper turn, PR-8 MCP server, PR-9 tag-dispatch fallback.
-    PR-11 removes [dispatch] and [dispatch_structured] in favour of this
-    single path. *)
-
-val guarded_dispatch
-  :  token:Tool_token.t
-  -> args:Yojson.Safe.t
-  -> unit
-  -> Tool_result.t option
-(** RFC-0084 §2.2 — Single dispatch entry with 4-tuple telemetry.
-
-    Wraps [dispatch] with [Tool_telemetry.with_span], so every
-    invocation emits an OTel span, a Prometheus counter increment, and a
-    [trace_id] thunk available to the handler. The audit emission slot is
-    filled by callers based on the returned [Tool_result.t option]; PR-10
-    will unify audit emission via a typed [Dispatch_outcome.t].
-
-    PR-3 introduces this entry. No callers migrate in this PR. Migration
-    plan: PR-7 keeper turn, PR-8 MCP server, PR-9 tag-dispatch fallback.
-    PR-11 removes [dispatch] and [dispatch_structured] in favour of this
-    single path. *)
+    Owns [Tool_telemetry.with_span], the pre-hook chain, handler lookup,
+    exception capture, result transformation, and typed post-hook fan-out.
+    The dispatch return is typed [Tool_result.t option]; the old
+    [dispatch]/[dispatch_structured] entry points are gone. *)
 
 (** {1 Introspection} *)
 

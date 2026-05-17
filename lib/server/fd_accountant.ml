@@ -57,6 +57,8 @@ let _shared_pressure_mutex = Eio.Mutex.create ()
 let held_kinds_key : kind list Eio.Fiber.key = Eio.Fiber.create_key ()
 
 let held_kinds () =
+  (* NDT-OK: fiber-local runtime state only prevents same-fiber slot
+     double-accounting; policy decisions stay outside this boundary. *)
   try Option.value ~default:[] (Eio.Fiber.get held_kinds_key)
   with _ -> []
 

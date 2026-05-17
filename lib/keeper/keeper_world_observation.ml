@@ -987,6 +987,13 @@ let collect_board_events_with_cursor_policy
                (ts, post_id)
                (fst base_cursor, Option.value ~default:"" (snd base_cursor))
              > 0 ->
+        Keeper_reaction_ledger.record_board_cursor_ack
+          ~base_path
+          ~keeper_name:meta.name
+          ~stimulus_id:(Keeper_reaction_ledger.board_stimulus_id ~post_id)
+          ~cursor_ts:ts
+          ~post_id:(Some post_id)
+          ();
         Keeper_registry.set_board_cursor ~base_path meta.name ts (Some post_id)
       | Some (ts, post_id) ->
         Log.Keeper.debug

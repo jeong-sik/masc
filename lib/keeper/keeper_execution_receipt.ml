@@ -916,7 +916,28 @@ let append (config : Coord.config) (receipt : t) =
   let store =
     Keeper_types_support.keeper_execution_receipt_store config receipt.keeper_name
   in
-  Dated_jsonl.append store (to_json receipt);
+  let receipt_json = to_json receipt in
+  Dated_jsonl.append store receipt_json;
+  (try
+     Keeper_reaction_ledger.record_execution_receipt_reaction
+       config
+       ~keeper_name:receipt.keeper_name
+       ~trace_id:receipt.trace_id
+       ?turn_count:receipt.turn_count
+       ~current_task_id:receipt.current_task_id
+       ~goal_ids:receipt.goal_ids
+       ~outcome:(outcome_kind_to_tla_receipt receipt.outcome)
+       ~terminal_reason_code:receipt.terminal_reason_code
+       ~receipt_json
+       ()
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+     Log.Keeper.warn
+       "%s: reaction ledger receipt append failed trace_id=%s: %s"
+       receipt.keeper_name
+       receipt.trace_id
+       (Printexc.to_string exn));
   let disposition, reason = operator_disposition receipt in
   if needs_operator_broadcast disposition
   then (

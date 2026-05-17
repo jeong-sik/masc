@@ -431,6 +431,10 @@ val metric_mcp_tool_schema_tokens_approx : string
 
 (** {1 Core counters / gauges} *)
 
+val metric_fd_open : string
+val metric_fd_limit : string
+val metric_fd_in_flight : string
+val metric_fd_pressure_active : string
 val metric_mcp_requests : string
 val metric_llm_inference_duration : string
 

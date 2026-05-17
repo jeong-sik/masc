@@ -93,15 +93,25 @@ let read_fd_open () =
   in
   try_dirs candidates
 
+let fd_limit_cache : int option Atomic.t = Atomic.make None
+
 let read_fd_limit () =
-  try
-    let chan = Unix.open_process_in "ulimit -n" in
-    let line = input_line chan in
-    let _ = Unix.close_process_in chan in
-    match int_of_string_opt (String.trim line) with
-    | Some n -> n
-    | None -> -1
-  with _ -> -1
+  match Atomic.get fd_limit_cache with
+  | Some value -> value
+  | None ->
+    let value =
+      try
+        let chan = Unix.open_process_in "ulimit -n" in
+        let line = input_line chan in
+        let _ = Unix.close_process_in chan in
+        match int_of_string_opt (String.trim line) with
+        | Some n -> n
+        | None -> -1
+      with
+      | _ -> -1
+    in
+    Atomic.set fd_limit_cache (Some value);
+    value
 
 type snapshot = {
   per_kind : (kind * int) list ;

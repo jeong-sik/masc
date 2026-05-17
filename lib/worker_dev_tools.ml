@@ -686,11 +686,10 @@ let path_token_error_hint token =
 ;;
 
 let path_syntax_blocked_message token =
-  let hint = path_token_error_hint token in
-  "Path syntax blocked: shell quoting, globbing, brace expansion, and backslash \
-   escapes are not allowed for path-bearing keeper commands. Use plain unquoted \
-   paths and explicit cwd."
-  ^ if hint = "" then "" else " " ^ hint
+  let raw_hint = path_token_error_hint token in
+  let hint = if raw_hint = "" then None else Some raw_hint in
+  Keeper_path_check_error.(
+    to_message (Path_syntax_blocked { token = token.value; hint }))
 ;;
 
 let tokenize_path_args cmd =
@@ -992,17 +991,15 @@ let validate_command_paths ?workdir cmd =
         if not (validate_path ?workdir token.value)
         then
           Error
-            (Printf.sprintf
-               "Path blocked: %s (outside allowed directories for this keeper \
-                command)"
-               token.value)
+            (Keeper_path_check_error.(
+               to_message
+                 (Path_outside_whitelist
+                    { path = token.value; for_keeper_command = true })))
         else if requires_existing_dir && not (path_is_existing_dir ?workdir token.value)
         then
           Error
-            (Printf.sprintf
-               "cwd_not_directory: %s (directory does not exist under cwd; create \
-                or repair the sandbox repo/worktree first)"
-               token.value)
+            (Keeper_path_check_error.(
+               to_message (Cwd_not_directory { path = token.value; hint = None })))
         else Ok ()
       in
       let rec validate_path_tokens ~command_name expect_existing_dir = function
@@ -1473,7 +1470,10 @@ let make_file_read ?workdir ?on_exec () =
          if not (validate_path ?workdir path)
          then (
            let err =
-             Printf.sprintf "Path blocked: %s (outside allowed directories)" path
+             Keeper_path_check_error.(
+               to_message
+                 (Path_outside_whitelist
+                    { path; for_keeper_command = false }))
            in
            let duration_ms = int_of_float ((Time_compat.now () -. started) *. 1000.0) in
            Option.iter
@@ -1550,7 +1550,10 @@ let make_file_write ?workdir ?on_exec () =
          if not (validate_path ?workdir path)
          then (
            let err =
-             Printf.sprintf "Path blocked: %s (outside allowed directories)" path
+             Keeper_path_check_error.(
+               to_message
+                 (Path_outside_whitelist
+                    { path; for_keeper_command = false }))
            in
            let duration_ms = int_of_float ((Time_compat.now () -. started) *. 1000.0) in
            Option.iter

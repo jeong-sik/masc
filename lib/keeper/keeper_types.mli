@@ -212,6 +212,19 @@ val blocker_info_of_class : ?detail:string -> blocker_class -> blocker_info
 val blocker_info_to_json : blocker_info -> Yojson.Safe.t
 val blocker_info_of_json : Yojson.Safe.t -> blocker_info option
 
+type cascade_attempt_record = Keeper_meta_contract.cascade_attempt_record = {
+  provider_id : string;
+  http_status : int option;
+  outcome : [ `Success | `Failure of string ];
+  timestamp : float;
+}
+
+val cascade_attempt_record_to_json :
+  cascade_attempt_record -> Yojson.Safe.t
+
+val cascade_attempt_record_of_json :
+  Yojson.Safe.t -> cascade_attempt_record option
+
 type agent_runtime_state = {
   usage: usage_metrics;
   compaction_rt: compaction_runtime;
@@ -234,6 +247,7 @@ type agent_runtime_state = {
   last_active_desire: string;
   last_current_intention: string;
   last_blocker: blocker_info option;
+  last_cascade_attempt: cascade_attempt_record option;
   last_need: string;
 }
 

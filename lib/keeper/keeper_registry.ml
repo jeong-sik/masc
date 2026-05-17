@@ -440,6 +440,84 @@ let update_meta ~base_path name meta =
   update_entry ~base_path name (fun e -> { e with meta })
 ;;
 
+let cascade_attempt_merge ~(latest : keeper_meta) ~(caller : keeper_meta) =
+  { latest with
+    meta_version = latest.meta_version
+  ; runtime =
+      { latest.runtime with
+        last_cascade_attempt = caller.runtime.last_cascade_attempt
+      }
+  }
+;;
+
+let meta_for_cascade_attempt ~base_path ~keeper_name =
+  let config = Coord.default_config base_path in
+  match read_meta config keeper_name with
+  | Ok (Some meta) -> Some (config, meta)
+  | Ok None | Error _ ->
+    (match get ~base_path keeper_name with
+     | Some entry -> Some (config, entry.meta)
+     | None -> None)
+;;
+
+let record_cascade_attempt ~base_path ~keeper_name attempt =
+  try
+    let keeper_name = String.trim keeper_name in
+    if String.equal keeper_name ""
+    then ()
+    else
+      match meta_for_cascade_attempt ~base_path ~keeper_name with
+      | None -> ()
+      | Some (config, meta) ->
+        let caller =
+          { meta with
+            runtime = { meta.runtime with last_cascade_attempt = Some attempt }
+          }
+        in
+        ignore
+          (write_meta_with_merge
+             ~merge:cascade_attempt_merge
+             config
+             caller
+            : (unit, string) result)
+  with
+  | _ -> ()
+;;
+
+let cascade_attempt_suffix (attempt : cascade_attempt_record) =
+  let http =
+    match attempt.http_status with
+    | Some status -> string_of_int status
+    | None -> "none"
+  in
+  Printf.sprintf " provider=%s http=%s" attempt.provider_id http
+;;
+
+let last_cascade_attempt ~base_path ~keeper_name =
+  let keeper_name = String.trim keeper_name in
+  if String.equal keeper_name ""
+  then None
+  else
+    try
+      match meta_for_cascade_attempt ~base_path ~keeper_name with
+      | Some (_config, meta) -> meta.runtime.last_cascade_attempt
+      | None -> None
+    with
+    | _ -> None
+;;
+
+let enrich_fiber_unresolved_outcome ~base_path ~keeper_name outcome =
+  let fiber_unresolved =
+    failure_reason_to_string Fiber_unresolved
+  in
+  if not (String.equal outcome fiber_unresolved)
+  then outcome
+  else
+    match last_cascade_attempt ~base_path ~keeper_name with
+    | None -> outcome
+    | Some attempt -> outcome ^ cascade_attempt_suffix attempt
+;;
+
 let sync_meta_if_registered ~base_path name meta =
   let key = registry_key ~base_path name in
   let rec loop () =

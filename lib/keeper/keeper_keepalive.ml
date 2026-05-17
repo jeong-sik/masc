@@ -618,11 +618,17 @@ let record_keeper_crashed
   let reason = Keeper_registry.failure_reason_to_string failure_reason in
   if resolve_registry_done entry (`Crashed reason)
   then (
+    let outcome =
+      Keeper_registry.enrich_fiber_unresolved_outcome
+        ~base_path
+        ~keeper_name
+        reason
+    in
     Keeper_registry.set_failure_reason ~base_path keeper_name (Some failure_reason);
     Keeper_registry.dispatch_event_unit
       ~base_path
       keeper_name
-      (Keeper_state_machine.Fiber_terminated { outcome = reason });
+      (Keeper_state_machine.Fiber_terminated { outcome });
     Keeper_registry.record_crash ~base_path keeper_name (Time_compat.now ()) reason;
     Keeper_registry.record_error ~base_path keeper_name reason;
     publish_keeper_phase_lifecycle

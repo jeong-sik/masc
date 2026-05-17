@@ -162,6 +162,7 @@ let runtime_candidate_label = "runtime"
     @since Phase 2 — MASC-driven cascade FSM *)
 let run_named
     ~cascade_name
+    ?base_path
     ?(keeper_name = "")
     ~goal
     ?provider_filter
@@ -554,15 +555,45 @@ let run_named
       |> append
     | _ -> ()
   in
-  let try_provider ?resume_checkpoint ?per_provider_timeout_s candidate =
-    Keeper_turn_driver_try_provider.run_try_provider
-      try_provider_ctx
-      ?resume_checkpoint
-      ?per_provider_timeout_s
-      candidate
-  in
-  let positive_finite_float = function
-    | value when Float.is_finite value && value > 0.0 -> Some value
+          let try_provider ?resume_checkpoint ?per_provider_timeout_s candidate =
+            Keeper_turn_driver_try_provider.run_try_provider
+              try_provider_ctx
+              ?resume_checkpoint
+              ?per_provider_timeout_s
+              candidate
+          in
+          let record_cascade_attempt candidate ?http_status ~outcome () =
+            match base_path with
+            | None -> ()
+            | Some base_path ->
+              if String.equal (String.trim keeper_name) ""
+              then ()
+              else
+                let record : Keeper_types.cascade_attempt_record =
+                  { provider_id = Cascade_runtime_candidate.provider_label candidate
+                  ; http_status
+                  ; outcome
+                  ; timestamp = Unix.gettimeofday ()
+                  }
+                in
+                Keeper_registry.record_cascade_attempt ~base_path ~keeper_name record
+          in
+          let http_status_of_provider_error = function
+            | Some (Provider_error.ServerError { code; _ }) -> Some code
+            | Some
+                (Provider_error.CapacityExhausted _
+                | Provider_error.RateLimit _
+                | Provider_error.AuthError
+                | Provider_error.InvalidRequest _
+                | Provider_error.CliWrappedHardQuota _
+                | Provider_error.CliWrappedMaxTurns _
+                | Provider_error.CliWrappedResumableSession _
+                | Provider_error.PermissionDenied _
+                | Provider_error.ModelNotFound)
+            | None -> None
+          in
+          let positive_finite_float = function
+            | value when Float.is_finite value && value > 0.0 -> Some value
     | _ -> None
   in
   let health_error_kind label =
@@ -942,11 +973,12 @@ let run_named
             ~capture ()
         in
         let result = { result with cascade_observation = Some observation } in
-        Cascade_legacy_runner.record_cascade ~keeper_name
-          ~cascade_name:error_cascade_name
-          ~outcome:`Success ~observation:(Some observation) ();
-        on_success ~provider_key:(Cascade_runtime_candidate.health_key candidate);
-        Ok result
+                Cascade_legacy_runner.record_cascade ~keeper_name
+                  ~cascade_name:error_cascade_name
+                  ~outcome:`Success ~observation:(Some observation) ();
+                record_cascade_attempt candidate ~outcome:`Success ();
+                on_success ~provider_key:(Cascade_runtime_candidate.health_key candidate);
+                Ok result
       | Ok result ->
         (* Response arrived but failed the cascade's [accept] predicate
            (empty body, schema gate, etc.).  Prior to 0.160.0 this
@@ -973,11 +1005,12 @@ let run_named
                ~capture ()
            in
            let result = { result with cascade_observation = Some observation } in
-           Cascade_legacy_runner.record_cascade ~keeper_name
-             ~cascade_name:error_cascade_name
-             ~outcome:`Success ~observation:(Some observation) ();
-           on_success ~provider_key:(Cascade_runtime_candidate.health_key candidate);
-           Ok result
+                   Cascade_legacy_runner.record_cascade ~keeper_name
+                     ~cascade_name:error_cascade_name
+                     ~outcome:`Success ~observation:(Some observation) ();
+                   record_cascade_attempt candidate ~outcome:`Success ();
+                   on_success ~provider_key:(Cascade_runtime_candidate.health_key candidate);
+                   Ok result
          | Cascade_fsm.Try_next { last_err = new_err } ->
            (* Demoted from WARN to INFO (task-239): cascade will retry the
               next tier.  Tagged [cascade-fallback] so dashboard filters
@@ -1030,11 +1063,12 @@ let run_named
                ~capture ()
            in
            let result = { result with cascade_observation = Some observation } in
-           Cascade_legacy_runner.record_cascade ~keeper_name
-             ~cascade_name:error_cascade_name
-             ~outcome:`Success ~observation:(Some observation) ();
-           on_success ~provider_key:(Cascade_runtime_candidate.health_key candidate);
-           Ok result)
+                   Cascade_legacy_runner.record_cascade ~keeper_name
+                     ~cascade_name:error_cascade_name
+                     ~outcome:`Success ~observation:(Some observation) ();
+                   record_cascade_attempt candidate ~outcome:`Success ();
+                   on_success ~provider_key:(Cascade_runtime_candidate.health_key candidate);
+                   Ok result)
       | Error sdk_err ->
         let sdk_err =
           match
@@ -1053,11 +1087,16 @@ let run_named
            state. *)
         let err_str = Agent_sdk.Error.to_string sdk_err in
         record_candidate_health_error candidate sdk_err;
-        let (_ : Provider_error.t option) =
-          emit_sdk_provider_error_metric ~cascade_name:error_cascade_name
-            ~provider:runtime_candidate_label sdk_err
-        in
-        let _ = err_str in
+                let provider_error =
+                  emit_sdk_provider_error_metric ~cascade_name:error_cascade_name
+                    ~provider:runtime_candidate_label sdk_err
+                in
+                record_cascade_attempt
+                  candidate
+                  ?http_status:(http_status_of_provider_error provider_error)
+                  ~outcome:(`Failure (Agent_sdk.Error.to_string sdk_err))
+                  ();
+                let _ = err_str in
         let cascade_outcome = sdk_error_to_cascade_outcome sdk_err in
         Option.iter
           (fun _ -> record_candidate_error candidate sdk_err)

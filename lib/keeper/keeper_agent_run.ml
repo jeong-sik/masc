@@ -802,9 +802,10 @@ let run_turn
                  Keeper_llm_bridge.run_with_timeout_and_fallback
                    ~timeout_s:bridge_timeout_s
                    (fun () ->
-                   Keeper_turn_driver.run_named
-                     ~cascade_name:cascade_name_string
-                     ~keeper_name:meta.name
+                           Keeper_turn_driver.run_named
+                             ~cascade_name:cascade_name_string
+                             ~base_path:config.base_path
+                             ~keeper_name:meta.name
                      ?provider_filter
                      ~require_tool_choice_support
                      ~require_tool_support
@@ -1830,28 +1831,28 @@ let run_turn
                       with
                       | Error e -> Error (Agent_sdk.Error.Internal e)
                       | Ok response_text -> finalize_response_text response_text)))))
-	       in
-	       (match turn_result with
-	        | Ok _ -> ()
-	        | Error err ->
-	          let status, exception_kind =
-	            match err with
-	            | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _) ->
-	              "timeout", Some "outer_oas_timeout"
-	            | _ -> "error", Some "outer_oas_error"
-	          in
-	          Keeper_runtime_manifest
-	          .append_unfinished_provider_attempt_finished_best_effort
-	            ~site:"keeper_llm_bridge_terminal"
-	            config
-	            runtime_manifest_context
-	            ~status
-	            ~error:(Agent_sdk.Error.to_string err)
-	            ?exception_kind
-	            ());
-	       (match turn_result with
-	        | Ok _ -> ()
-	        | Error err ->
+               in
+               (match turn_result with
+                | Ok _ -> ()
+                | Error err ->
+                  let status, exception_kind =
+                    match err with
+                    | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _) ->
+                      "timeout", Some "outer_oas_timeout"
+                    | _ -> "error", Some "outer_oas_error"
+                  in
+                  Keeper_runtime_manifest
+                  .append_unfinished_provider_attempt_finished_best_effort
+                    ~site:"keeper_llm_bridge_terminal"
+                    config
+                    runtime_manifest_context
+                    ~status
+                    ~error:(Agent_sdk.Error.to_string err)
+                    ?exception_kind
+                    ());
+               (match turn_result with
+                | Ok _ -> ()
+                | Error err ->
           let oas_turn_count = !receipt_turn_count_ref in
           Keeper_agent_memory_episode.record_failure
             ~config

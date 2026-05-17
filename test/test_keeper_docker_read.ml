@@ -529,20 +529,20 @@ let test_docker_masc_config_binding_pins_container_runtime_paths () =
     (Keeper_sandbox_runtime.host_masc_config_dir ~base_path:base);
   Alcotest.(check string)
     "container config dir"
-    "/home/keeper/playground/minjae/.masc/config"
+    "/tmp/masc-runtime/.masc/config"
     (Keeper_sandbox_runtime.container_masc_config_dir ~container_root);
   Alcotest.(check (list string))
     "runtime env args"
     [ "--env"
-    ; "MASC_BASE_PATH=/home/keeper/playground/minjae"
+    ; "MASC_BASE_PATH=/tmp/masc-runtime"
     ; "--env"
-    ; "MASC_CONFIG_DIR=/home/keeper/playground/minjae/.masc/config"
+    ; "MASC_CONFIG_DIR=/tmp/masc-runtime/.masc/config"
     ]
     (Keeper_sandbox_runtime.docker_masc_runtime_env_args ~container_root);
   Alcotest.(check (list string))
     "config bind mount"
     [ "-v"
-    ; expected_host_config ^ ":/home/keeper/playground/minjae/.masc/config:ro"
+    ; expected_host_config ^ ":/tmp/masc-runtime/.masc/config:ro"
     ]
     (Keeper_sandbox_runtime.docker_masc_config_mount_args
        ~base_path:base
@@ -560,18 +560,18 @@ let test_docker_config_mount_and_env_args () =
     (Keeper_sandbox_runtime.docker_config_host_root ~base_path:base);
   Alcotest.(check (list string)) "default config mount"
     [ "-v"
-    ; config_root ^ ":" ^ container_root ^ "/.masc/config:ro"
+    ; config_root ^ ":/tmp/masc-runtime/.masc/config:ro"
     ]
     (Keeper_sandbox_runtime.docker_config_mount_args
        ~base_path:base
        ~container_root);
   Alcotest.(check (list string)) "default config env"
     [ "--env"
-    ; "MASC_BASE_PATH=" ^ container_root
+    ; "MASC_BASE_PATH=/tmp/masc-runtime"
     ; "--env"
-    ; "MASC_BASE_PATH_INPUT=" ^ container_root
+    ; "MASC_BASE_PATH_INPUT=/tmp/masc-runtime"
     ; "--env"
-    ; "MASC_CONFIG_DIR=" ^ container_root ^ "/.masc/config"
+    ; "MASC_CONFIG_DIR=/tmp/masc-runtime/.masc/config"
     ]
     (Keeper_sandbox_runtime.docker_config_env_args
        ~base_path:base
@@ -586,7 +586,7 @@ let test_docker_config_mount_and_env_args () =
     (Keeper_sandbox_runtime.docker_config_host_root ~base_path:base);
   Alcotest.(check (list string)) "override config mount"
     [ "-v"
-    ; override_root ^ ":" ^ container_root ^ "/.masc/config:ro"
+    ; override_root ^ ":/tmp/masc-runtime/.masc/config:ro"
     ]
     (Keeper_sandbox_runtime.docker_config_mount_args
        ~base_path:base
@@ -609,22 +609,30 @@ let test_docker_room_state_mount_args_expose_safe_subset () =
   in
   let tasks_host = Filename.concat masc_root "tasks" in
   let board_host = Filename.concat masc_root "board_posts.jsonl" in
-  Alcotest.(check bool) "mounts tasks under container .masc" true
+  Alcotest.(check bool) "mounts tasks under runtime .masc" true
     (List.mem
-       (tasks_host ^ ":" ^ container_root ^ "/.masc/tasks:ro")
+       (tasks_host ^ ":/tmp/masc-runtime/.masc/tasks:ro")
        specs);
   Alcotest.(check bool) "does not mount tasks at host absolute target" false
     (List.mem (tasks_host ^ ":" ^ tasks_host ^ ":ro") specs);
   Alcotest.(check bool) "mounts board posts" true
     (List.mem
-       (board_host ^ ":" ^ container_root ^ "/.masc/board_posts.jsonl:ro")
+       (board_host ^ ":/tmp/masc-runtime/.masc/board_posts.jsonl:ro")
        specs);
-  Alcotest.(check bool) "all targets stay under container .masc" true
+  Alcotest.(check bool) "all targets stay under runtime .masc" true
     (List.for_all
        (fun spec ->
          match String.split_on_char ':' spec with
          | [ _source; target; "ro" ] ->
-           String.starts_with ~prefix:(container_root ^ "/.masc/") target
+           String.starts_with ~prefix:"/tmp/masc-runtime/.masc/" target
+         | _ -> false)
+       specs);
+  Alcotest.(check bool) "no targets nested under playground bind mount" true
+    (List.for_all
+       (fun spec ->
+         match String.split_on_char ':' spec with
+         | [ _source; target; "ro" ] ->
+           not (String.starts_with ~prefix:(container_root ^ "/") target)
          | _ -> false)
        specs);
   Alcotest.(check bool) "does not mount auth" false

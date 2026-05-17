@@ -969,14 +969,18 @@ let test_docker_shell_mounts_masc_config_runtime_paths () =
          line
          (host_config_dir ^ ":" ^ container_config_dir ^ ":ro"));
     Alcotest.(check bool) "container MASC_BASE_PATH pinned" true
-      (contains_substring line ("MASC_BASE_PATH=" ^ container_root));
+      (contains_substring line "MASC_BASE_PATH=/tmp/masc-runtime");
     Alcotest.(check bool) "container MASC_CONFIG_DIR pinned" true
       (contains_substring line ("MASC_CONFIG_DIR=" ^ container_config_dir));
     Alcotest.(check bool) "oneshot container has ttl label" true
       (contains_substring line "masc.mcp.ttl_sec=");
     Alcotest.(check bool) "oneshot cleanup attempts docker rm" true
       (contains_substring log "\nrm -f masc-keeper-");
-    Alcotest.(check bool) "room tasks mounted under container root" true
+    Alcotest.(check bool) "room tasks mounted under runtime root" true
+      (contains_substring
+         line
+         (tasks_host ^ ":/tmp/masc-runtime/.masc/tasks:ro"));
+    Alcotest.(check bool) "room tasks not nested under playground bind mount" false
       (contains_substring
          line
          (tasks_host ^ ":" ^ container_root ^ "/.masc/tasks:ro"));

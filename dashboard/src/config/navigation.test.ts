@@ -109,8 +109,8 @@ describe('monitoring navigation labels', () => {
     expect(labelFor('fleet-health')).toBe('System Telemetry')
     expect(labelFor('observatory')).toBe('Activity Timeline')
     expect(labelFor('transport-health')).toBe('Transport Health')
+    expect(labelFor('cognition')).toBe('Keeper Cognition')
     expect(labelFor('journey')).toBeUndefined()
-    expect(labelFor('cognition')).toBeUndefined()
   })
 
   it('keeps monitoring descriptions concise instead of comma-heavy domain lists', () => {
@@ -145,7 +145,7 @@ describe('monitoring navigation labels', () => {
     expect(defaultParamsForTab('monitoring')).toEqual({ section: 'runtime' })
     expect(ids).toEqual([
       'runtime', 'cascade-config', 'agents', 'goal-loop', 'fleet-health',
-      'doctor', 'transport-health', 'observatory',
+      'doctor', 'transport-health', 'observatory', 'cognition',
     ])
     expect(ids).toContain('fleet-health')
     expect(ids).toContain('runtime')
@@ -155,8 +155,8 @@ describe('monitoring navigation labels', () => {
     expect(ids).toContain('doctor')
     expect(ids).toContain('transport-health')
     expect(ids).toContain('observatory')
+    expect(ids).toContain('cognition')
     expect(ids).not.toContain('journey')
-    expect(ids).not.toContain('cognition')
     // Legacy sections removed in Phase 1
     expect(ids).not.toContain('live')
     expect(ids).not.toContain('git-graph')
@@ -182,13 +182,14 @@ describe('monitoring navigation labels', () => {
     expect(sections[5]?.id).toBe('doctor')
     expect(sections[6]?.id).toBe('transport-health')
     expect(sections[7]?.id).toBe('observatory')
+    expect(sections[8]?.id).toBe('cognition')
   })
 
   it('keeps diagnostic monitoring routes available but hidden from the sidebar', () => {
     const sections = sectionItemsForTab('monitoring')
     const hiddenIds = sections.filter(item => item.hidden).map(item => item.id)
 
-    expect(hiddenIds).toEqual(['journey', 'cognition'])
+    expect(hiddenIds).toEqual(['journey'])
   })
 
   it('monitoring sidebar labels are unique (no overloaded term like "런타임")', () => {

@@ -236,10 +236,16 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     },
     {
       id: 'cognition',
-      label: 'Cognition',
+      // Distinguish from sibling labels in Monitor sidebar; the section id
+      // (used in URLs, deep links from KeeperCognitionInspector, and the
+      // backend nav-event allowlist) remains 'cognition'.
+      label: 'Keeper Cognition',
       description: 'Keeper cognition drill-down.',
       params: { section: 'cognition' },
-      hidden: true,
+      // Surface wiring complete: 7-view FilterChips (overview, keeper,
+      // token-stats, decisions, memory, episodes, autoresearch) + deep-link
+      // navigate target from KeeperCognitionInspector. Promoted to main nav
+      // 2026-05-17 — sidebar entry was the only missing piece.
     },
   ],
   command: [

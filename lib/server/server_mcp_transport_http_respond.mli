@@ -43,14 +43,18 @@ val respond_mcp_auth_error :
   protocol_version:string ->
   string ->
   unit
+  [@@deprecated
+    "RFC-0098 PR-3: all in-tree callers migrated. Use \
+     [respond_mcp_error ~code:Mcp_error_code.Auth_error ...]. This \
+     wrapper is scheduled for removal in PR-4."]
 (** [respond_mcp_auth_error ?extra_headers ~deps request reqd
     ~session_id ~protocol_version msg] writes a JSON-RPC 2.0 error
     response with code [-32001] and HTTP status [401 Unauthorized].
 
-    {b RFC-0098 PR-2 (this PR)}: now delegates to {!respond_mcp_error}
-    with [~code:Auth_error]. New call sites SHOULD prefer
-    {!respond_mcp_error}. A follow-up PR-2.1 will migrate all in-tree
-    callers and add a [\[@@deprecated\]] alert.
+    {b RFC-0098 PR-3 (this PR)}: all in-tree callers migrated to
+    {!respond_mcp_error} with [~code:Mcp_error_code.Auth_error].
+    Function kept as [\[@@deprecated\]] alias; scheduled removal in
+    PR-4.
 
     The response always carries [www-authenticate: Bearer]; this is
     pinned because the MCP client SDKs key off the literal challenge
@@ -73,15 +77,20 @@ val respond_mcp_internal_error :
   protocol_version:string ->
   string ->
   unit
+  [@@deprecated
+    "RFC-0098 PR-3: all in-tree callers migrated. Use \
+     [respond_mcp_error ~code:Mcp_error_code.Internal_error ...] (or \
+     a more specific code variant). This wrapper is scheduled for \
+     removal in PR-4."]
 (** [respond_mcp_internal_error ?extra_headers ~deps request reqd
     ~session_id ~protocol_version msg] writes a JSON-RPC 2.0 error
     response with code [-32603] (the standard "Internal error" slot)
     and HTTP status [500 Internal Server Error].
 
-    {b RFC-0098 PR-2 (this PR)}: now delegates to {!respond_mcp_error}
-    with [~code:Internal_error]. New call sites SHOULD prefer
-    {!respond_mcp_error} and a more specific code variant where one
-    fits (e.g. [Provider_timeout], [Tool_dispatch_failure]).
+    {b RFC-0098 PR-3 (this PR)}: all in-tree callers migrated to
+    {!respond_mcp_error} with [~code:Mcp_error_code.Internal_error].
+    Function kept as [\[@@deprecated\]] alias; scheduled removal in
+    PR-4.
 
     Used as the catch-all for runtime failures the transport cannot
     classify more precisely.  The wording of [msg] is operator-visible
@@ -143,6 +152,10 @@ val respond_sse_rate_limited :
     the exact spelling. *)
 
 val mcp_internal_error_json : ?id:Yojson.Safe.t -> string -> Yojson.Safe.t
+  [@@deprecated
+    "RFC-0098 PR-3: all in-tree callers migrated. Use \
+     [error_body ~code:Mcp_error_code.Internal_error ...]. This \
+     wrapper is scheduled for removal in PR-4."]
 (** [mcp_internal_error_json ?id msg] returns a JSON-RPC 2.0 error
     object with code [-32603] (matching {!respond_mcp_internal_error})
     suitable for embedding in an SSE batch frame or a multi-response

@@ -286,7 +286,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
       match auth_result with
       | Ok () -> Ok ()
       | Error msg ->
-          respond_mcp_auth_error ~deps request reqd ~session_id
+          respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps request reqd ~session_id
             ~protocol_version msg;
           Error ()
     in
@@ -353,7 +353,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
         match request_runtime_result deps with
         | Ok r -> Ok r
         | Error msg ->
-            respond_mcp_internal_error ~deps request reqd
+            respond_mcp_error ~code:Mcp_error_code.Internal_error ~deps request reqd
               ~session_id ~protocol_version msg;
             Error ()
       in
@@ -507,7 +507,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                 (match !inline_sse with
                                 | Some info ->
                                     stream_post_sse_json info
-                                      (mcp_internal_error_json ?id:response_id
+                                      (error_body ~code:Mcp_error_code.Internal_error ?id:response_id
                                          ("Internal error: "
                                         ^ Printexc.to_string exn));
                                     stream_post_sse_finish info
@@ -516,7 +516,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                       get_protocol_version_for_session ~session_id
                                         request
                                     in
-                                    respond_mcp_internal_error ~deps request reqd
+                                    respond_mcp_error ~code:Mcp_error_code.Internal_error ~deps request reqd
                                       ~session_id ~protocol_version
                                       ("Internal error: "
                                      ^ Printexc.to_string exn))))))))
@@ -574,7 +574,7 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
       | Ok () ->
       (match auth_result with
       | Error msg ->
-          respond_mcp_auth_error ~deps request reqd ~session_id
+          respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps request reqd ~session_id
             ~protocol_version ~extra_headers:legacy_headers msg
       | Ok () ->
       remember_mcp_profile session_id profile;
@@ -705,7 +705,7 @@ let handle_get_operator_mcp ~deps request reqd =
   let base_path = deps.get_base_path () in
   match deps.verify_operator_mcp_auth ~base_path request with
   | Error msg ->
-      respond_mcp_auth_error ~deps request reqd ~session_id ~protocol_version
+      respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps request reqd ~session_id ~protocol_version
         msg
   | Ok () ->
       handle_get_mcp ~deps ~profile:Operator_remote request reqd
@@ -741,13 +741,13 @@ let handle_post_messages ~deps request reqd =
       let base_path = deps.get_base_path () in
       (match deps.verify_mcp_auth ~base_path request with
       | Error msg ->
-          respond_mcp_auth_error ~deps request reqd ~session_id
+          respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps request reqd ~session_id
             ~protocol_version ~extra_headers:legacy_headers msg
       | Ok () ->
           Http.Request.read_body_async reqd (fun body_str ->
               match request_runtime_result deps with
               | Error msg ->
-                  respond_mcp_internal_error ~extra_headers:legacy_headers
+                  respond_mcp_error ~code:Mcp_error_code.Internal_error ~extra_headers:legacy_headers
                     ~deps request reqd ~session_id ~protocol_version msg
               | Ok runtime ->
                   let sw = runtime.sw in
@@ -791,7 +791,7 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
   | Error msg ->
       let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
       let protocol_version = get_protocol_version_for_session ~session_id request in
-      respond_mcp_auth_error ~deps request reqd ~session_id ~protocol_version
+      respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps request reqd ~session_id ~protocol_version
         msg
   | Ok () -> (
       match get_session_id_any request with

@@ -148,8 +148,8 @@ repo-synthesis는 `masc_autoresearch_cycle` 내부에서 cycle system을 통해 
 ### 첫 번째 concrete example: 18+ keeper fleet evidence
 
 가장 먼저 검증할 예시는 research-radar가 아니라 runtime truth가 남은
-keeper fleet이다. 예전 `team-session`/public `swarm` proof lane은 retired
-되었고, compatibility entrypoint는 keeper production-readiness gate를 실행한다.
+keeper fleet이다. 예전 `team-session`/public `swarm` proof lane과 compatibility
+entrypoint는 retired 되었고, keeper production-readiness gate만 남긴다.
 
 실행 순서:
 
@@ -158,7 +158,7 @@ keeper fleet이다. 예전 `team-session`/public `swarm` proof lane은 retired
 2. repo root에서 아래를 실행한다.
 
 ```bash
-scripts/harness_agent_swarm_live.sh
+scripts/harness/workload/agent_swarm_live.sh
 ```
 
 기본 프로파일:

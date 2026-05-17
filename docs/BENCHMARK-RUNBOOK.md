@@ -3,7 +3,7 @@ status: runbook
 last_verified: 2026-05-15
 code_refs:
   - scripts/harness_keeper_campaign.sh
-  - scripts/harness_agent_swarm_live.sh
+  - scripts/harness/workload/agent_swarm_live.sh
   - test/
 ---
 
@@ -114,12 +114,11 @@ baseline/fleet fixture answers는 `test/fixtures/repo_synthesis_benchmark/`에 �
 
 ## 첫 smoke는 18+ keeper fleet evidence로 한다
 
-`team-session`/public `swarm` read surface는 retired 되었다. Compatibility
-entrypoint 이름은 유지하지만, `scripts/harness_agent_swarm_live.sh`는 이제
-read-only keeper fleet readiness gate를 실행한다.
+`team-session`/public `swarm` read surface와 compatibility entrypoint는
+retired 되었다. Canonical gate는 read-only keeper fleet readiness만 실행한다.
 
 ```bash
-scripts/harness_agent_swarm_live.sh
+scripts/harness/workload/agent_swarm_live.sh
 ```
 
 기본 전제:

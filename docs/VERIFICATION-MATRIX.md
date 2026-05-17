@@ -16,9 +16,8 @@
 - transport harness suite
   - `scripts/harness/transport/run_all.sh`
   - self-bootstrapping local server + gRPC/WS/WebRTC/h2c smoke
-- contract harness 3종
+- contract harness
   - `scripts/harness/contract/streamable_http_contract.sh`
-  - `scripts/harness/contract/team_session_contract.sh`
   - `scripts/harness/contract/golden_path_1_contract.sh`
 
 로컬 진입점:
@@ -64,7 +63,7 @@ make test-contract
 대표 항목:
 
 - benchmark / keeper fleet proof
-  - `scripts/harness_agent_swarm_live.sh`
+  - `scripts/harness/workload/agent_swarm_live.sh`
   - `docs/BENCHMARK-RUNBOOK.md`
 - supervised delivery / operator path
   - `docs/SUPERVISOR-MODE.md`

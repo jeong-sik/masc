@@ -14,7 +14,7 @@
 
 - `control`
   - 18+ keeper runtime evidence proof
-  - harness: `./scripts/harness_agent_swarm_live.sh`
+  - harness: `./scripts/harness/workload/agent_swarm_live.sh`
 ## One-Shot Entrypoint
 
 ```bash

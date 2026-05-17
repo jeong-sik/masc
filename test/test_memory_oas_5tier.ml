@@ -394,6 +394,12 @@ let test_stats_all_tiers () =
 (* JSONL backend + bridge verification                                *)
 (* ================================================================ *)
 
+let memory_jsonl_ops_value ~agent_name ~outcome =
+  Prometheus.metric_value_or_zero
+    Keeper_metrics.metric_keeper_memory_jsonl_ops
+    ~labels:[ ("outcome", outcome); ("agent", agent_name) ]
+    ()
+
 let test_jsonl_backend_persist () =
   let sid = Printf.sprintf "test-persist-%d" (int_of_float (Unix.gettimeofday () *. 1000.0)) in
   let backend =
@@ -412,11 +418,62 @@ let test_jsonl_backend_retrieve () =
 
 let test_jsonl_backend_query () =
   let sid = Printf.sprintf "test-query-%d" (int_of_float (Unix.gettimeofday () *. 1000.0)) in
+  let agent_name = "test-jsonl-query-ok-" ^ sid in
+  let before_ok = memory_jsonl_ops_value ~agent_name ~outcome:"query_ok" in
+  let before_failed =
+    memory_jsonl_ops_value ~agent_name ~outcome:"query_failed"
+  in
   let backend =
-    Memory_oas_bridge.make_backend ~agent_name:"test-jsonl" ~session_id:sid ()
+    Memory_oas_bridge.make_backend ~agent_name ~session_id:sid ()
   in
   let result = backend.query ~prefix:"test" ~limit:10 in
-  Alcotest.(check int) "query returns empty on fresh session" 0 (List.length result)
+  Alcotest.(check int) "query returns empty on fresh session" 0 (List.length result);
+  Alcotest.(check (float 0.01))
+    "empty successful query counts as ok"
+    (before_ok +. 1.0)
+    (memory_jsonl_ops_value ~agent_name ~outcome:"query_ok");
+  Alcotest.(check (float 0.01))
+    "empty successful query does not count as failed"
+    before_failed
+    (memory_jsonl_ops_value ~agent_name ~outcome:"query_failed")
+
+let test_jsonl_backend_query_failure_counter () =
+  let dir = setup_tmp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tmp_dir dir)
+    (fun () ->
+      let base_dir = Filename.concat dir ".masc-query-failure" in
+      let sid =
+        Printf.sprintf
+          "test-query-failure-%d"
+          (int_of_float (Unix.gettimeofday () *. 1000.0))
+      in
+      let agent_name = "test-jsonl-query-failure-" ^ sid in
+      let session_dir =
+        Filename.concat (Filename.concat base_dir "memory") agent_name
+      in
+      Fs_compat.mkdir_p session_dir;
+      Unix.mkdir (Filename.concat session_dir (sid ^ ".jsonl")) 0o700;
+      let before_ok = memory_jsonl_ops_value ~agent_name ~outcome:"query_ok" in
+      let before_failed =
+        memory_jsonl_ops_value ~agent_name ~outcome:"query_failed"
+      in
+      let backend =
+        Memory_oas_bridge.make_backend ~base_dir ~agent_name ~session_id:sid ()
+      in
+      let result = backend.query ~prefix:"test" ~limit:10 in
+      Alcotest.(check int)
+        "query contract still collapses failure to empty"
+        0
+        (List.length result);
+      Alcotest.(check (float 0.01))
+        "failed query does not count as ok"
+        before_ok
+        (memory_jsonl_ops_value ~agent_name ~outcome:"query_ok");
+      Alcotest.(check (float 0.01))
+        "failed query increments failed counter"
+        (before_failed +. 1.0)
+        (memory_jsonl_ops_value ~agent_name ~outcome:"query_failed"))
 
 let test_jsonl_backend_uses_explicit_base_dir () =
   let dir = setup_tmp_dir () in
@@ -635,6 +692,8 @@ let () =
       Alcotest.test_case "persist returns Ok" `Quick test_jsonl_backend_persist;
       Alcotest.test_case "retrieve returns None" `Quick test_jsonl_backend_retrieve;
       Alcotest.test_case "query returns empty" `Quick test_jsonl_backend_query;
+      Alcotest.test_case "query failure increments failed counter" `Quick
+        test_jsonl_backend_query_failure_counter;
       Alcotest.test_case "uses explicit base_dir" `Quick
         test_jsonl_backend_uses_explicit_base_dir;
       Alcotest.test_case "create_memory_with_backend uses same backend" `Quick

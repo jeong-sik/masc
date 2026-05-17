@@ -1544,7 +1544,7 @@ let init () =
     Counter;
   add
     metric_llm_provider_tool_calls
-    "Total OAS LLM tool calls emitted by models, labeled by provider and model"
+    "Total OAS LLM provider-emitted tool calls, labeled by provider and model"
     Counter;
   add
     metric_llm_provider_circuit_state

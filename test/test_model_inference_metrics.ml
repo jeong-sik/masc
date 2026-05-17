@@ -236,6 +236,35 @@ let success_entry_without_model ~cascade_name ~ts ?(tool_count = 1) () =
       ] );
   ]
 
+let sparse_provider_context_entry ~outcome ~cascade_name ~ts () =
+  `Assoc [
+    ("ts_unix", `Float ts);
+    ("outcome", `String outcome);
+    ("tool_call_count", `Int 0);
+    ("tools_used", `List []);
+    ( "provider_context",
+      `Assoc [
+        ("cascade_name", `String cascade_name);
+        ("selected_model", `Null);
+        ("candidate_models", `List []);
+      ] );
+    ( "telemetry",
+      `Assoc [
+        ("model_used", `Null);
+        ("selected_model", `Null);
+        ("usage_reported", `Bool false);
+        ("telemetry_reported", `Bool false);
+        ( "coverage_stage",
+          `String (if String.equal outcome "error" then "unknown" else "oas") );
+        ( "coverage_reason",
+          `String
+            (if String.equal outcome "error"
+             then "error_turn"
+             else "missing_usage_and_inference") );
+        ("fallback_applied", `Bool false);
+      ] );
+  ]
+
 (* ── Tests ───────────────────────────────────────── *)
 
 let test_empty_dir () =
@@ -628,6 +657,30 @@ let test_success_without_model_uses_cascade_attribution () =
     check (option string) "coverage reason retained"
       (Some "missing_usage_and_inference")
       s.primary_coverage_reason)
+
+let test_provider_context_attribution_survives_sparse_telemetry () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "provider_context_sparse" in
+    let ts = now_unix () in
+    write_decisions path [
+      sparse_provider_context_entry ~outcome:"success"
+        ~cascade_name:"tier-group.coding_plan"
+        ~ts:(ts -. 5.0) ();
+      sparse_provider_context_entry ~outcome:"error"
+        ~cascade_name:"tier-group.coding_plan"
+        ~ts:(ts -. 10.0) ();
+    ];
+    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    check int "sparse rows retained" 2 agg.total_entries;
+    check int "error row counted" 1 agg.total_error_entries;
+    check int "one attributed bucket" 1 (List.length agg.models);
+    let s = List.hd agg.models in
+    check string "provider_context cascade attribution"
+      "tier-group.coding_plan (cascade)"
+      s.model_id;
+    check int "success count" 1 s.success_count;
+    check int "error count" 1 s.error_count)
 
 let test_costs_jsonl_backfills_wall_tok_per_sec () =
   let base = test_dir () in
@@ -1270,6 +1323,8 @@ let () =
       test_case "coverage diagnostics survive aggregation" `Quick test_coverage_diagnostics_survive_aggregation;
       test_case "success without model uses cascade attribution" `Quick
         test_success_without_model_uses_cascade_attribution;
+      test_case "provider_context attribution survives sparse telemetry" `Quick
+        test_provider_context_attribution_survives_sparse_telemetry;
       test_case "costs.jsonl backfills wall tok/sec" `Quick test_costs_jsonl_backfills_wall_tok_per_sec;
       test_case "costs.jsonl disambiguates matching model names by provider" `Quick
         test_costs_jsonl_disambiguates_matching_model_names_by_provider;

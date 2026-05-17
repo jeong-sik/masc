@@ -278,6 +278,19 @@ let test_pass_for_completed_claim_progress () =
   check_disp "completed claim progress" r "pass" "healthy"
 ;;
 
+let test_pass_for_completed_generic_claim_progress () =
+  let r =
+    mk_receipt
+      ~outcome:`Ok
+      ~cascade_outcome:R.Cascade_completed
+      ~tool_contract_result:Contract_needs_execution_progress
+      ~tools_used:[ "keeper_task_claim" ]
+      ~terminal_reason_code:"completed"
+      ()
+  in
+  check_disp "completed generic claim progress" r "pass" "healthy"
+;;
+
 let test_pause_when_unrelated_tool_used_for_required_progress () =
   let r =
     mk_receipt
@@ -685,6 +698,10 @@ let () =
             "ok+completed claim progress -> pass"
             `Quick
             test_pass_for_completed_claim_progress
+        ; test_case
+            "ok+completed generic claim progress -> pass"
+            `Quick
+            test_pass_for_completed_generic_claim_progress
         ; test_case
             "unrelated tool does not satisfy required progress"
             `Quick

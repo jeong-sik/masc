@@ -240,15 +240,112 @@ let top_procedures_cached ~(agent_name : string) ~(limit : int) =
          Float.compare b.confidence a.confidence)
   |> List.filteri (fun i _ -> i < limit)
 
+(* Observability for the JSONL-backed [long_term_backend].  The
+   sub-library [Memory_jsonl] is a dependency leaf (RFC-0056 Phase
+   1F) and cannot increment Prometheus counters directly; this
+   wrapper records each operation outcome with a typed label.
+   Pair with [.tmp/memory-compacting-analysis.html] memory_jsonl
+   silent-path entries; the in-module log-only PR (#15668) handles
+   parse-line drops + truncation flags. *)
+let () =
+  Prometheus.register_counter
+    ~name:Keeper_metrics.metric_keeper_memory_jsonl_ops
+    ~help:
+      "Total [Agent_sdk.Memory.long_term_backend] operations served \
+       by the JSONL backend, classified by label [outcome] \
+       (governed by Memory_oas_bridge_op_outcome).  Label [agent] \
+       names the keeper/agent owning the session.  Rising failure \
+       or miss rates surface JSONL-side issues that the \
+       dependency-leaf Memory_jsonl cannot self-report."
+    ()
+;;
+
+let record_op_outcome
+    ~(agent_name : string)
+    ~(outcome : Memory_oas_bridge_op_outcome.t) =
+  Prometheus.inc_counter
+    Keeper_metrics.metric_keeper_memory_jsonl_ops
+    ~labels:
+      [ ("outcome", Memory_oas_bridge_op_outcome.to_label outcome)
+      ; ("agent", agent_name)
+      ]
+    ()
+
 (** Create an OAS [long_term_backend].
 
     Always uses session-based JSONL files under
     [.masc/memory/<agent_name>/<session_id>.jsonl].
-    Filesystem-first: PG pool availability is not checked. *)
+    Filesystem-first: PG pool availability is not checked.
+
+    Wraps each of the 5 closures so the JSONL operations are
+    observable in [/metrics] without violating the leaf-library
+    boundary of [Memory_jsonl].  Query uses [Memory_jsonl]'s
+    pre-collapse observer because the OAS backend contract returns
+    an empty list for both legitimate empty results and failures. *)
 let make_backend ?base_dir ~(agent_name : string) ~(session_id : string) ()
   : Agent_sdk.Memory.long_term_backend =
   let base_dir = resolve_base_dir ?base_dir () in
-  Memory_jsonl.make_backend ~base_dir ~agent_name ~session_id
+  let inner =
+    let on_query_result = function
+      | Ok _ ->
+        record_op_outcome
+          ~agent_name
+          ~outcome:Memory_oas_bridge_op_outcome.Query_ok
+      | Error _ ->
+        record_op_outcome
+          ~agent_name
+          ~outcome:Memory_oas_bridge_op_outcome.Query_failed
+    in
+    Memory_jsonl.make_backend_with_query_observer
+      ~on_query_result
+      ~base_dir
+      ~agent_name
+      ~session_id
+  in
+  let persist ~key value =
+    let r = inner.persist ~key value in
+    let outcome =
+      match r with
+      | Ok () -> Memory_oas_bridge_op_outcome.Persist_ok
+      | Error _ -> Memory_oas_bridge_op_outcome.Persist_failed
+    in
+    record_op_outcome ~agent_name ~outcome;
+    r
+  in
+  let retrieve ~key =
+    let r = inner.retrieve ~key in
+    let outcome =
+      match r with
+      | Some _ -> Memory_oas_bridge_op_outcome.Retrieve_hit
+      | None -> Memory_oas_bridge_op_outcome.Retrieve_miss
+    in
+    record_op_outcome ~agent_name ~outcome;
+    r
+  in
+  let remove ~key =
+    let r = inner.remove ~key in
+    let outcome =
+      match r with
+      | Ok () -> Memory_oas_bridge_op_outcome.Remove_ok
+      | Error _ -> Memory_oas_bridge_op_outcome.Remove_failed
+    in
+    record_op_outcome ~agent_name ~outcome;
+    r
+  in
+  let batch_persist entries =
+    let r = inner.batch_persist entries in
+    let outcome =
+      match r with
+      | Ok () -> Memory_oas_bridge_op_outcome.Batch_persist_ok
+      | Error _ -> Memory_oas_bridge_op_outcome.Batch_persist_failed
+    in
+    record_op_outcome ~agent_name ~outcome;
+    r
+  in
+  let query ~prefix ~limit =
+    inner.query ~prefix ~limit
+  in
+  { persist; retrieve; remove; batch_persist; query }
 
 type created_memory =
   { created_memory : Agent_sdk.Memory.t

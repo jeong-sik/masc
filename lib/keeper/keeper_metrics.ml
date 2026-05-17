@@ -634,6 +634,14 @@ let metric_keeper_oas_timeout_budget_loop_paused =
 let metric_keeper_cycle_exceptions = "masc_keeper_cycle_exceptions_total"
 let metric_keeper_snapshot_write_failures = "masc_keeper_snapshot_write_failures_total"
 
+(** Counts post-turn invocations where neither the LLM reply nor the OAS
+    checkpoint produced a state snapshot.  Used to detect prompt / cascade
+    drift; a keeper that never emits state has no reflection content for
+    the compaction cooldown to protect. *)
+let metric_keeper_state_snapshot_skipped_no_state =
+  "masc_keeper_state_snapshot_skipped_no_state_total"
+;;
+
 let metric_keeper_progress_updated_line_failures =
   "masc_keeper_progress_updated_line_failures_total"
 ;;
@@ -674,9 +682,20 @@ let metric_keeper_thinking_persist_failures =
 ;;
 
 let metric_keeper_checkpoint_failures = "masc_keeper_checkpoint_failures_total"
-
 let metric_keeper_decision_audit_ring_overflows =
   "masc_keeper_decision_audit_ring_overflows_total"
+;;
+
+let metric_keeper_memory_llm_summary_outcomes =
+  "masc_keeper_memory_llm_summary_outcomes_total"
+;;
+
+let metric_keeper_memory_llm_summary_chain_exhausted =
+  "masc_keeper_memory_llm_summary_chain_exhausted_total"
+;;
+
+let metric_keeper_memory_jsonl_ops =
+  "masc_keeper_memory_jsonl_ops_total"
 ;;
 
 let metric_keeper_user_visible_reply_source =

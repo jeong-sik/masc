@@ -4,7 +4,7 @@
     [Keeper_keepalive]. Both modules call [fork_stale_watchdog] through
     this shared implementation.
 
-    Three stall detection modes — see {!Keeper_registry.stale_kill_class}:
+    Four stall detection modes — see {!Keeper_registry.stale_kill_class}:
     1. [Idle_turn]: [last_turn_ts] older than the idle threshold while
        the keeper phase is [Running] but no [current_turn_observation]
        is recorded, with no recent keepalive skip verdict proving the
@@ -13,7 +13,9 @@
        and ran past [timeout_threshold] seconds — covers the
        "Orphaned Streaming" pattern (executor FSM analysis §4 I2:
        [in_turn_age > grace_period → in_turn_stale]).
-    3. [Noop_failure_loop]: turns kept firing but produced no tool
+    3. [Mid_turn_no_progress]: a turn is still within the outer turn
+       cap, but streaming/tool progress has gone silent.
+    4. [Noop_failure_loop]: turns kept firing but produced no tool
        calls; the keepalive's [consecutive_noop_count] reached the
        watchdog threshold — catches keepers in LLM timeout loops where
        [last_turn_ts] stays fresh because each failed turn updates it.
@@ -119,6 +121,7 @@ let stale_kill_class_label (cls : Keeper_registry.stale_kill_class) : string =
   match cls with
   | Idle_turn _ -> "idle_turn"
   | In_turn_hung _ -> "in_turn_hung"
+  | Mid_turn_no_progress _ -> "mid_turn_no_progress"
   | Noop_failure_loop _ -> "noop_failure_loop"
 
 let should_trigger_noop_failure_loop
@@ -133,6 +136,35 @@ let should_trigger_noop_failure_loop
 
 let should_trigger_noop_failure_loop_for_test =
   should_trigger_noop_failure_loop
+
+type active_turn_stale_status =
+  { active_total_stale : bool
+  ; progress_stale : bool
+  ; active_seconds : float
+  ; since_progress_seconds : float
+  }
+
+let active_turn_stale_status
+    ~now
+    ~started_at
+    ~last_progress_at
+    ~active_turn_timeout_sec
+    ~progress_timeout_sec
+    ~fiber_age
+    ~startup_grace =
+  let active_seconds = now -. started_at in
+  let since_progress_seconds = now -. last_progress_at in
+  let outside_startup_grace = fiber_age >= startup_grace in
+  { active_total_stale =
+      active_seconds > active_turn_timeout_sec && outside_startup_grace
+  ; progress_stale =
+      since_progress_seconds > progress_timeout_sec && outside_startup_grace
+  ; active_seconds
+  ; since_progress_seconds
+  }
+;;
+
+let active_turn_stale_status_for_test = active_turn_stale_status
 
 type batch_root_cause =
   | Cascade_unhealthy
@@ -409,6 +441,9 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
   let grace_period_sec () =
     Env_config_keeper.KeeperWatchdog.grace_period_sec
   in
+  let progress_timeout_sec () =
+    Env_config_keeper.KeeperWatchdog.progress_timeout_sec
+  in
   let effective_grace_period_sec () =
     effective_startup_grace_sec
       ~base_grace_sec:(grace_period_sec ())
@@ -456,16 +491,28 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                let turn_timeout = Keeper_runtime_resolved.turn_timeout_sec () in
                Float.max turn_timeout threshold
              in
+             let progress_timeout = progress_timeout_sec () in
              let active_slot_holder_age = slot_holder_age ~now meta.name in
-             let idle_stale, in_turn_stale, in_turn_age,
-                 idle_skip_suppressed =
+             let idle_stale, active_total_stale, progress_stale, in_turn_age,
+                 since_progress_age, last_progress_kind, idle_skip_suppressed =
                match entry.current_turn_observation with
                | Some obs ->
-                 let elapsed = now -. obs.started_at in
+                 let status =
+                   active_turn_stale_status
+                     ~now
+                     ~started_at:obs.started_at
+                     ~last_progress_at:obs.last_progress_at
+                     ~active_turn_timeout_sec
+                     ~progress_timeout_sec:progress_timeout
+                     ~fiber_age
+                     ~startup_grace
+                 in
                 ( false
-                , elapsed > active_turn_timeout_sec
-                  && fiber_age >= startup_grace
-                , elapsed
+                , status.active_total_stale
+                , status.progress_stale
+                , status.active_seconds
+                , status.since_progress_seconds
+                , obs.last_progress_kind
                 , false )
                | None -> (
                  match active_slot_holder_age with
@@ -479,7 +526,10 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                    ( false
                    , elapsed > active_turn_timeout_sec
                      && fiber_age >= startup_grace
+                   , false
                    , elapsed
+                   , 0.0
+                   , None
                    , false )
                  | None ->
                  let skip_observed =
@@ -491,8 +541,9 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                    && fiber_age >= startup_grace
                    && not skip_observed
                  in
-                 (stale, false, 0.0, skip_observed))
+                 (stale, false, false, 0.0, 0.0, None, skip_observed))
              in
+             let in_turn_stale = active_total_stale || progress_stale in
              let noop_count =
                entry.meta.runtime.proactive_rt.consecutive_noop_count
              in
@@ -517,10 +568,11 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                 intermediate heartbeat/noop snapshot. *)
              let log_line =
                Printf.sprintf
-                 "%s: watchdog tick noop=%d idle_stale=%b idle_skip_suppressed=%b in_turn_stale=%b in_turn_age=%.0f failure_loop=%b stale=%b last_turn=%.0f fiber_age=%.0f grace_rem=%.0f"
+                 "%s: watchdog tick noop=%d idle_stale=%b idle_skip_suppressed=%b in_turn_stale=%b active_total_stale=%b progress_stale=%b in_turn_age=%.0f since_progress=%.0f progress_timeout=%.0f failure_loop=%b stale=%b last_turn=%.0f fiber_age=%.0f grace_rem=%.0f"
                  meta.name noop_count idle_stale idle_skip_suppressed
-                 in_turn_stale in_turn_age failure_loop stale last_turn
-                 fiber_age grace_remaining
+                 in_turn_stale active_total_stale progress_stale in_turn_age
+                 since_progress_age progress_timeout failure_loop stale
+                 last_turn fiber_age grace_remaining
              in
              Log.Keeper.routine "%s" log_line;
              let cooldown_ok =
@@ -607,9 +659,16 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                   string.  The three sub-causes need different operator
                   actions, so they need different typed labels.  The
                   surrounding [reason_desc] log line still embeds the
-                  same human-readable text via [stale_kill_class_to_string]. *)
+               same human-readable text via [stale_kill_class_to_string]. *)
                let kill_class : Keeper_registry.stale_kill_class =
-                 if in_turn_stale then
+                 if progress_stale then
+                   Mid_turn_no_progress
+                     { active_seconds = in_turn_age
+                     ; since_progress_seconds = since_progress_age
+                     ; progress_timeout_threshold = progress_timeout
+                     ; last_progress_kind
+                     }
+                 else if active_total_stale then
                    In_turn_hung
                      { active_seconds = in_turn_age;
                        timeout_threshold = active_turn_timeout_sec;
@@ -627,11 +686,25 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                  | In_turn_hung { active_seconds; timeout_threshold } ->
                    Printf.sprintf "active turn hung %.0fs (timeout %.0fs)"
                      active_seconds timeout_threshold
+                 | Mid_turn_no_progress
+                     { active_seconds
+                     ; since_progress_seconds
+                     ; progress_timeout_threshold
+                     ; last_progress_kind
+                     } ->
+                   Printf.sprintf
+                     "active turn made no progress for %.0fs (active %.0fs timeout %.0fs last=%s)"
+                     since_progress_seconds
+                     active_seconds
+                     progress_timeout_threshold
+                     (Keeper_registry.progress_kind_label last_progress_kind)
                  | Noop_failure_loop { noop_count = n } ->
                    Printf.sprintf "failure-loop noop=%d" n
                in
                let stall_seconds =
-                 if in_turn_stale then in_turn_age else now -. last_turn
+                 if progress_stale then since_progress_age
+                 else if in_turn_stale then in_turn_age
+                 else now -. last_turn
                in
                let prior_failure_reason = entry.last_failure_reason in
                let failure_reason =

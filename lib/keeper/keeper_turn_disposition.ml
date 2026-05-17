@@ -99,6 +99,7 @@ let of_termination_code (c : Code.t) : t =
   | Code.Healthy -> Success
   | Code.Stale_turn_timeout_idle
   | Code.Stale_turn_timeout_in_turn
+  | Code.Stale_turn_timeout_no_progress
   | Code.Stale_turn_timeout_noop -> Turn_wall_clock_timeout
   | Code.Oas_timeout_budget -> Oas_timeout_budget
   | Code.Tool_required_unsatisfied _ -> Required_tool_use_unsatisfied

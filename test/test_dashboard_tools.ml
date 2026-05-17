@@ -121,6 +121,14 @@ let test_dashboard_tools_projection () =
         (match runtime_resolution |> member "source_mismatch" with
          | `Bool _ -> true
          | _ -> false);
+      check bool "runtime binary git commit surfaced" true
+        (match runtime_resolution |> member "runtime_binary_git_commit" with
+         | `Null | `String _ -> true
+         | _ -> false);
+      check bool "runtime repo head git commit surfaced" true
+        (match runtime_resolution |> member "runtime_repo_head_git_commit" with
+         | `Null | `String _ -> true
+         | _ -> false);
       let server_workspace_mismatch =
         match runtime_resolution |> member "server_workspace_mismatch" with
         | `Bool value -> value

@@ -20,6 +20,40 @@ let test_resolve_commit_uses_probe_when_env_missing () =
   in
   Alcotest.(check (option string)) "probe used" (Some "deadbeef") commit
 
+let test_resolve_commit_details_splits_env_and_repo_head () =
+  let details =
+    Build_identity.resolve_commit_details
+      ~env_value:(Some " abc12345 ")
+      ~probe:(fun () -> Some "deadbeef")
+  in
+  Alcotest.(check (option string)) "compat commit uses env"
+    (Some "abc12345") details.commit;
+  Alcotest.(check (option string)) "commit source is env"
+    (Some "env:MASC_BUILD_GIT_COMMIT") details.commit_source;
+  Alcotest.(check (option string)) "binary commit uses env"
+    (Some "abc12345") details.binary_commit;
+  Alcotest.(check (option string)) "binary source is env"
+    (Some "env:MASC_BUILD_GIT_COMMIT") details.binary_commit_source;
+  Alcotest.(check (option string)) "repo head still surfaced"
+    (Some "deadbeef") details.repo_head_commit;
+  Alcotest.(check (option string)) "repo head source"
+    (Some "runtime_repo_head") details.repo_head_commit_source
+
+let test_resolve_commit_details_marks_repo_head_fallback () =
+  let details =
+    Build_identity.resolve_commit_details
+      ~env_value:None
+      ~probe:(fun () -> Some "deadbeef")
+  in
+  Alcotest.(check (option string)) "compat commit falls back to repo head"
+    (Some "deadbeef") details.commit;
+  Alcotest.(check (option string)) "commit source is repo head"
+    (Some "runtime_repo_head") details.commit_source;
+  Alcotest.(check (option string)) "binary commit absent" None
+    details.binary_commit;
+  Alcotest.(check (option string)) "repo head commit present"
+    (Some "deadbeef") details.repo_head_commit
+
 let test_current_started_at_is_stable () =
   let first = Build_identity.current () in
   Unix.sleepf 0.01;
@@ -32,6 +66,16 @@ let test_current_json_exposes_runtime_binary_identity () =
   let current = Build_identity.current () in
   let json = Build_identity.to_yojson current in
   let open Yojson.Safe.Util in
+  Alcotest.(check bool) "binary version populated" true
+    (String.length (json |> member "binary_version" |> to_string) > 0);
+  Alcotest.(check bool) "repo version field present" true
+    (match json |> member "repo_version" with `Null | `String _ -> true | _ -> false);
+  Alcotest.(check bool) "commit source field present" true
+    (match json |> member "commit_source" with `Null | `String _ -> true | _ -> false);
+  Alcotest.(check bool) "binary commit field present" true
+    (match json |> member "binary_commit" with `Null | `String _ -> true | _ -> false);
+  Alcotest.(check bool) "repo head commit field present" true
+    (match json |> member "repo_head_commit" with `Null | `String _ -> true | _ -> false);
   Alcotest.(check bool) "executable path populated" true
     (String.length (json |> member "executable_path" |> to_string) > 0);
   Alcotest.(check bool) "executable dir populated" true
@@ -103,6 +147,14 @@ let test_parse_commit_unix_ts_output () =
         (Build_identity.parse_commit_unix_ts_output raw))
     [ "nan"; "inf"; "-1"; "1.0"; "1e9"; "0x660b7d80"; "4102444801" ]
 
+let test_parse_dune_project_version () =
+  Alcotest.(check (option string)) "version parsed"
+    (Some "0.19.20")
+    (Build_identity.parse_dune_project_version
+       "(lang dune 3.22)\n\n(name masc_mcp)\n(version 0.19.20)\n");
+  Alcotest.(check (option string)) "missing version" None
+    (Build_identity.parse_dune_project_version "(lang dune 3.22)\n")
+
 let build_identity_probe_failure_count site =
   Prometheus.metric_value_or_zero
     Prometheus.metric_build_identity_probe_failures
@@ -148,6 +200,11 @@ let () =
             test_resolve_commit_prefers_env;
           Alcotest.test_case "resolve commit falls back to probe" `Quick
             test_resolve_commit_uses_probe_when_env_missing;
+          Alcotest.test_case "resolve commit details splits env and repo head"
+            `Quick test_resolve_commit_details_splits_env_and_repo_head;
+          Alcotest.test_case
+            "resolve commit details marks repo head fallback" `Quick
+            test_resolve_commit_details_marks_repo_head_fallback;
           Alcotest.test_case "current started_at stable" `Quick
             test_current_started_at_is_stable;
           Alcotest.test_case "current JSON exposes runtime binary identity" `Quick
@@ -163,6 +220,8 @@ let () =
             test_pick_repo_candidates_not_sorted_alphabetically;
           Alcotest.test_case "parse commit timestamp output" `Quick
             test_parse_commit_unix_ts_output;
+          Alcotest.test_case "parse dune-project version" `Quick
+            test_parse_dune_project_version;
           Alcotest.test_case "probe failure observer increments metric" `Quick
             test_probe_failure_observer_increments_metric;
           Alcotest.test_case "git status failure increments metric" `Quick

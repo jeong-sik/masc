@@ -1,24 +1,47 @@
 (** Build identity for the running server process.
 
     Captures release version, git commit, start time, and uptime.
-    Commit is resolved at startup from [MASC_BUILD_GIT_COMMIT] env var
-    or by probing the git repository. *)
+    [commit] is kept as a backwards-compatible field, but callers that
+    need binary freshness must inspect [binary_commit] / [commit_source]
+    rather than treating a runtime git probe as compile-time proof. *)
 
 type t = {
   release_version : string;
+  binary_version : string;
+    (** Alias for [release_version], named explicitly for callers that
+        compare the running executable against [repo_version]. *)
+  repo_version : string option;
+    (** Package version read from the runtime checkout's [dune-project],
+        when available.  This is runtime repo truth, not binary truth. *)
   commit : string option;
+    (** Backwards-compatible identity field.  Uses [binary_commit] when
+        [MASC_BUILD_GIT_COMMIT] is set, otherwise falls back to
+        [repo_head_commit].  Inspect [commit_source] before using this as
+        deploy proof. *)
+  commit_source : string option;
+    (** [Some "env:MASC_BUILD_GIT_COMMIT"] when [commit] came from the
+        build env override, [Some "runtime_repo_head"] when it came from
+        probing the current checkout, [None] when unknown. *)
   commit_unix_ts : float option;
-    (** Unix timestamp of the resolved git commit (probed at startup
-        via [git log -1 --format=%ct <commit>]).  [None] when commit
-        could not be resolved or git probe failed.  Exposed on
-        [/health] so operators / dashboards can compute
-        [now - commit_unix_ts] and surface stale-binary deploy gaps
-        without an external git fetch from the dashboard side. *)
+    (** Unix timestamp of [commit].  Kept for compatibility; prefer the
+        source-specific timestamp fields below. *)
   commit_age_seconds : int option;
-    (** Convenience field: [Some (now - commit_unix_ts)] when both
-        are available, [None] otherwise.  Recomputed on every
-        [current ()] call so the value tracks wall clock as the
-        process keeps running on a stale binary. *)
+    (** Age of [commit_unix_ts].  Kept for compatibility; prefer
+        [binary_commit_age_seconds] for binary freshness. *)
+  binary_commit : string option;
+    (** Commit supplied by [MASC_BUILD_GIT_COMMIT], when available.  This is
+        the only commit field that operators should use as binary-build
+        identity in this module. *)
+  binary_commit_source : string option;
+  binary_commit_unix_ts : float option;
+  binary_commit_age_seconds : int option;
+  repo_head_commit : string option;
+    (** Current checkout HEAD probed at runtime from [repo_root], when
+        available.  Useful operational context, but not proof that the
+        executable was built from this commit. *)
+  repo_head_commit_source : string option;
+  repo_head_commit_unix_ts : float option;
+  repo_head_commit_age_seconds : int option;
   executable_path : string;
     (** Absolute best-effort path to the running executable.  Exposed on
         [/health] so operators can distinguish a root-lane binary from a
@@ -50,6 +73,20 @@ val resolve_commit :
 (** Resolve commit hash from env var or probe function.
     Exposed for testing. *)
 
+type commit_resolution = {
+  commit : string option;
+  commit_source : string option;
+  binary_commit : string option;
+  binary_commit_source : string option;
+  repo_head_commit : string option;
+  repo_head_commit_source : string option;
+}
+
+val resolve_commit_details :
+  env_value:string option -> probe:(unit -> string option) -> commit_resolution
+(** Resolve the compatibility [commit] plus the source-specific binary/env
+    and runtime repo-head fields.  Exposed for testing. *)
+
 val pick_repo_candidates :
   exe_dir:string -> cwd:string -> string list
 (** Ordered list of directories to probe for a git repo. Places [exe_dir]
@@ -60,6 +97,9 @@ val pick_repo_candidates :
 val parse_commit_unix_ts_output : string -> float option
 (** Parse raw [git log -1 --format=%ct] output. Pure — exposed for unit
     testing. *)
+
+val parse_dune_project_version : string -> string option
+(** Parse the top-level [(version ...)] field from [dune-project] contents. *)
 
 module For_testing : sig
   val observe_probe_failure : site:string -> exn -> unit

@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Keeper Product Readiness Checkpoint - 2026-05-17</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17202a;
+      --muted: #59636f;
+      --line: #c9d1d9;
+      --panel: #f7f9fb;
+      --ok: #1f7a4d;
+      --warn: #9a5b00;
+      --bad: #a4312a;
+      --accent: #245c8f;
+    }
+    body {
+      margin: 0;
+      font: 15px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: white;
+    }
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 32px 24px 48px;
+    }
+    h1, h2, h3 { line-height: 1.2; margin: 0 0 12px; }
+    h1 { font-size: 28px; }
+    h2 { font-size: 20px; margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--line); }
+    h3 { font-size: 16px; margin-top: 18px; }
+    p { margin: 0 0 12px; color: var(--muted); }
+    table { width: 100%; border-collapse: collapse; margin: 12px 0 20px; }
+    th, td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: var(--panel); color: var(--ink); }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    pre {
+      overflow-x: auto;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 12px;
+      margin: 10px 0 18px;
+      color: #27313b;
+    }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 650; }
+    .ok { background: #dff3e8; color: var(--ok); }
+    .warn { background: #fff0cf; color: var(--warn); }
+    .bad { background: #f9dedb; color: var(--bad); }
+    .accent { color: var(--accent); font-weight: 650; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Keeper Product Readiness Checkpoint</h1>
+  <p><span class="accent">Date:</span> 2026-05-17. <span class="accent">Goal:</span> reach a basic product level where keepers do not die silently and repeated silence cannot remain invisible.</p>
+
+  <h2>Product Invariant</h2>
+  <table>
+    <thead>
+      <tr><th>Invariant</th><th>Expected runtime behavior</th><th>Status in this pass</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>No silent death</td>
+        <td>Admission denial, crash, watchdog, and dead phases must produce typed lifecycle, metric, or health/operator signal.</td>
+        <td><span class="pill warn">partially covered</span> Existing supervisor surfaces are strong; open queue still needs PR gate cleanup.</td>
+      </tr>
+      <tr>
+        <td>No repeated silence</td>
+        <td>Repeated <code>stay_silent</code> crosses from observation into blocker + recovery stimulus + operator visibility.</td>
+        <td><span class="pill ok">wired</span> Detector now returns typed outcomes and the turn path enqueues <code>stay_silent_recovery</code>.</td>
+      </tr>
+      <tr>
+        <td>No ledger blind spots</td>
+        <td>Unknown reaction kinds and malformed typed payloads degrade KRL summaries instead of disappearing.</td>
+        <td><span class="pill ok">wired</span> KRL summary now counts unsupported stimuli, unknown reactions, and typed payload parse errors.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Flowcharts</h2>
+  <h3>Keeper death and recovery</h3>
+  <pre>Boot/TOML
+  -> supervise_keepalive
+  -> spawn_slots_decision
+     -> deny: admission_denied + metric + health/operator blocked
+     -> permit: keeper fiber running
+        -> heartbeat / turn / receipt
+        -> crash, watchdog, or unresolved fiber?
+           -> no: continue
+           -> yes: sweep_and_recover
+              -> clearable within budget: relaunch
+              -> not clearable: Dead or Paused with blocker/operator action</pre>
+
+  <h3>Repeated stay_silent</h3>
+  <pre>Turn result
+  -> speech_act
+     -> non-silent: reset streak; clear stay_silent_loop blocker when it was latched
+     -> stay_silent: increment streak + gauge
+        -> below threshold: observe only
+        -> threshold crossed:
+           -> metric + warning
+           -> registry failure_reason = Tool_required_unsatisfied(stay_silent_loop)
+           -> meta blocker_class = stay_silent_loop
+           -> enqueue + wake stay_silent_recovery stimulus
+           -> KRL records typed stimulus</pre>
+
+  <h3>KRL degraded summary</h3>
+  <pre>Reaction ledger rows
+  -> summarize
+     -> pending stimulus: degraded + operator_action_required
+     -> unsupported stimulus kind: degraded + operator_action_required
+     -> malformed typed payload: degraded + operator_action_required
+     -> unknown reaction kind: degraded + operator_action_required
+     -> all stimuli reacted and no degraded rows: ok</pre>
+
+  <h2>Changed Runtime Surfaces</h2>
+  <table>
+    <thead>
+      <tr><th>Surface</th><th>Change</th><th>Operator effect</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>Keeper_stay_silent_loop_detector.record_turn</code></td>
+        <td>Returns <code>Normal</code>, <code>Loop_detected</code>, or <code>Loop_reset</code>.</td>
+        <td>Callers can take durable recovery action once per loop episode.</td>
+      </tr>
+      <tr>
+        <td><code>blocker_class</code></td>
+        <td>Adds <code>stay_silent_loop</code>.</td>
+        <td>Dashboard/runtime surfaces can distinguish silence loops from generic contract failure.</td>
+      </tr>
+      <tr>
+        <td><code>Keeper_event_queue.classify</code></td>
+        <td>Adds <code>Stay_silent_recovery</code> for <code>{"source":"stay_silent_recovery"}</code>.</td>
+        <td>Recovery wakeups are typed, not unsupported queue noise.</td>
+      </tr>
+      <tr>
+        <td><code>Keeper_reaction_ledger.summary_for_keeper</code></td>
+        <td>Counts unsupported stimuli, unknown reactions, and typed payload parse errors as degraded.</td>
+        <td>Malformed or legacy rows require operator attention instead of looking clean.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Verification Commands</h2>
+  <pre>scripts/dune-local.sh build \
+  test/test_stay_silent_loop_detector.exe \
+  test/test_keeper_reaction_ledger.exe \
+  test/test_keeper_event_queue.exe \
+  test/keeper_event_queue/test_keeper_event_queue.exe
+
+./_build/default/test/test_stay_silent_loop_detector.exe
+./_build/default/test/test_keeper_reaction_ledger.exe
+./_build/default/test/test_keeper_event_queue.exe
+./_build/default/test/keeper_event_queue/test_keeper_event_queue.exe
+
+git diff --check</pre>
+</main>
+</body>
+</html>

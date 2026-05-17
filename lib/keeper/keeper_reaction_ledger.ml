@@ -7,6 +7,7 @@ type stimulus_kind =
   | Board_signal
   | Bootstrap
   | Alive_but_stuck_recovery
+  | Stay_silent_recovery
   | Unknown of string
 
 type reaction_kind =
@@ -15,6 +16,7 @@ type reaction_kind =
   | Terminal_reason
   | Cursor_ack
   | Operator_escalation
+  | Supervisor_recovery_requested
   | Unknown_reaction of string
 
 let schema = "keeper.reaction_ledger.v1"
@@ -23,6 +25,7 @@ let stimulus_kind_to_string = function
   | Board_signal -> "board_signal"
   | Bootstrap -> "bootstrap"
   | Alive_but_stuck_recovery -> "alive_but_stuck_recovery"
+  | Stay_silent_recovery -> "stay_silent_recovery"
   | Unknown value -> value
 ;;
 
@@ -32,6 +35,7 @@ let reaction_kind_to_string = function
   | Terminal_reason -> "terminal_reason"
   | Cursor_ack -> "cursor_ack"
   | Operator_escalation -> "operator_escalation"
+  | Supervisor_recovery_requested -> "supervisor_recovery_requested"
   | Unknown_reaction value -> value
 ;;
 
@@ -42,13 +46,23 @@ let option_json f = function
 
 let list_json values = `List (List.map (fun value -> `String value) values)
 
-let payload_field name payload =
+let payload_json payload =
   try
-    match Yojson.Safe.from_string payload with
-    | `Assoc fields -> List.assoc_opt name fields
-    | _ -> None
+    Ok (Yojson.Safe.from_string payload)
   with
-  | Yojson.Json_error _ -> None
+  | Yojson.Json_error msg -> Error msg
+;;
+
+let payload_field name payload =
+  match payload_json payload with
+  | Ok (`Assoc fields) -> List.assoc_opt name fields
+  | Ok _ | Error _ -> None
+;;
+
+let payload_parse_error payload =
+  match payload_json payload with
+  | Ok _ -> None
+  | Error msg -> Some msg
 ;;
 
 let payload_float_field name payload =
@@ -73,6 +87,7 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Board_signal -> Board_signal
   | Bootstrap -> Bootstrap
   | Alive_but_stuck_recovery -> Alive_but_stuck_recovery
+  | Stay_silent_recovery -> Stay_silent_recovery
   | Unsupported prefix -> Unknown prefix
 ;;
 
@@ -131,7 +146,13 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
   let board_updated_at =
     match kind with
     | Board_signal -> payload_float_field "updated_at_unix" stimulus.payload
-    | Bootstrap | Alive_but_stuck_recovery | Unknown _ -> None
+    | Bootstrap | Alive_but_stuck_recovery | Stay_silent_recovery | Unknown _ -> None
+  in
+  let parse_error =
+    match kind with
+    | Board_signal | Alive_but_stuck_recovery | Stay_silent_recovery ->
+      payload_parse_error stimulus.payload
+    | Bootstrap | Unknown _ -> None
   in
   `Assoc
     (base_fields
@@ -148,6 +169,7 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
              ; "urgency", `String (urgency_to_string stimulus.urgency)
              ; "arrived_at_unix", `Float stimulus.arrived_at
              ; "board_updated_at_unix", option_json (fun value -> `Float value) board_updated_at
+             ; "payload_parse_error", option_json (fun value -> `String value) parse_error
              ; "payload_preview", `String (payload_preview stimulus.payload)
              ] )
        ])
@@ -403,6 +425,9 @@ let summarize_rows ~keeper_name ~limit rows =
   let execution_receipt_count = ref 0 in
   let terminal_reason_count = ref 0 in
   let operator_escalation_count = ref 0 in
+  let supervisor_recovery_requested_count = ref 0 in
+  let unsupported_stimulus_count = ref 0 in
+  let payload_parse_error_count = ref 0 in
   let unknown_reaction_count = ref 0 in
   let latest_recorded_at = ref None in
   let latest_stimulus_id = ref None in
@@ -471,8 +496,24 @@ let summarize_rows ~keeper_name ~limit rows =
     | Some "execution_receipt" -> incr execution_receipt_count
     | Some "terminal_reason" -> incr terminal_reason_count
     | Some "operator_escalation" -> incr operator_escalation_count
+    | Some "supervisor_recovery_requested" -> incr supervisor_recovery_requested_count
     | Some _ -> incr unknown_reaction_count
     | None -> incr unknown_reaction_count
+  in
+  let note_stimulus_kind = function
+    | Some "board_signal"
+    | Some "bootstrap"
+    | Some "alive_but_stuck_recovery"
+    | Some "stay_silent_recovery" -> ()
+    | Some _ | None -> incr unsupported_stimulus_count
+  in
+  let note_payload_parse_error row =
+    match assoc_field "stimulus" row with
+    | Some stimulus_json ->
+      (match assoc_field "payload_parse_error" stimulus_json with
+       | Some (`String _) -> incr payload_parse_error_count
+       | _ -> ())
+    | None -> ()
   in
   List.iter
     (fun row ->
@@ -484,6 +525,8 @@ let summarize_rows ~keeper_name ~limit rows =
       match string_field "record_kind" row, stimulus_id with
       | Some "stimulus", Some id ->
         incr stimulus_count;
+        note_stimulus_kind (nested_string_field "stimulus" "kind" row);
+        note_payload_parse_error row;
         remember_stimulus id;
         remember_board_stimulus row id
       | Some "reaction", Some id ->
@@ -525,16 +568,22 @@ let summarize_rows ~keeper_name ~limit rows =
       | Some true | None -> false)
   in
   let pending_stimulus_count = List.length pending_stimulus_ids in
+  let degraded_signal_count =
+    pending_stimulus_count
+    + !unsupported_stimulus_count
+    + !payload_parse_error_count
+    + !unknown_reaction_count
+  in
   let status =
     if row_count = 0 then "empty"
-    else if pending_stimulus_count = 0 then "ok"
+    else if degraded_signal_count = 0 then "ok"
     else "degraded"
   in
   `Assoc
     [ "schema", `String summary_schema
     ; "keeper_name", `String keeper_name
     ; "status", `String status
-    ; "operator_action_required", `Bool (pending_stimulus_count > 0)
+    ; "operator_action_required", `Bool (degraded_signal_count > 0)
     ; "scanned_row_limit", `Int limit
     ; "row_count", `Int row_count
     ; "stimulus_count", `Int !stimulus_count
@@ -544,6 +593,9 @@ let summarize_rows ~keeper_name ~limit rows =
     ; "execution_receipt_count", `Int !execution_receipt_count
     ; "terminal_reason_count", `Int !terminal_reason_count
     ; "operator_escalation_count", `Int !operator_escalation_count
+    ; "supervisor_recovery_requested_count", `Int !supervisor_recovery_requested_count
+    ; "unsupported_stimulus_count", `Int !unsupported_stimulus_count
+    ; "payload_parse_error_count", `Int !payload_parse_error_count
     ; "unknown_reaction_count", `Int !unknown_reaction_count
     ; "cursor_swept_stimulus_count", `Int !cursor_swept_stimulus_count
     ; "legacy_cursor_swept_stimulus_count", `Int !legacy_cursor_swept_stimulus_count
@@ -574,6 +626,9 @@ let error_summary ~keeper_name ~limit error =
     ; "execution_receipt_count", `Int 0
     ; "terminal_reason_count", `Int 0
     ; "operator_escalation_count", `Int 0
+    ; "supervisor_recovery_requested_count", `Int 0
+    ; "unsupported_stimulus_count", `Int 0
+    ; "payload_parse_error_count", `Int 0
     ; "unknown_reaction_count", `Int 0
     ; "cursor_swept_stimulus_count", `Int 0
     ; "legacy_cursor_swept_stimulus_count", `Int 0
@@ -644,10 +699,18 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
       summaries
   in
   let pending_count = total_int "pending_stimulus_count" in
+  let unknown_reaction_count = total_int "unknown_reaction_count" in
+  let unsupported_stimulus_count = total_int "unsupported_stimulus_count" in
+  let payload_parse_error_count = total_int "payload_parse_error_count" in
   let row_count = total_int "row_count" in
   let status =
     if read_error_count > 0 then "unknown"
-    else if pending_count > 0 then "degraded"
+    else if
+      pending_count > 0
+      || unknown_reaction_count > 0
+      || unsupported_stimulus_count > 0
+      || payload_parse_error_count > 0
+    then "degraded"
     else if row_count = 0 then "empty"
     else if List.exists (fun summary -> summary_status summary = "degraded") summaries
     then "degraded"
@@ -657,7 +720,12 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     [ "schema", `String fleet_summary_schema
     ; "status", `String status
     ; ( "operator_action_required"
-      , `Bool (read_error_count > 0 || pending_count > 0) )
+      , `Bool
+          (read_error_count > 0
+           || pending_count > 0
+           || unknown_reaction_count > 0
+           || unsupported_stimulus_count > 0
+           || payload_parse_error_count > 0) )
     ; "keeper_count", `Int (List.length keeper_names)
     ; "keeper_names", `List (List.map (fun value -> `String value) keeper_names)
     ; "scanned_row_limit_per_keeper", `Int limit_per_keeper
@@ -669,7 +737,10 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     ; "execution_receipt_count", `Int (total_int "execution_receipt_count")
     ; "terminal_reason_count", `Int (total_int "terminal_reason_count")
     ; "operator_escalation_count", `Int (total_int "operator_escalation_count")
-    ; "unknown_reaction_count", `Int (total_int "unknown_reaction_count")
+    ; "supervisor_recovery_requested_count", `Int (total_int "supervisor_recovery_requested_count")
+    ; "unsupported_stimulus_count", `Int unsupported_stimulus_count
+    ; "payload_parse_error_count", `Int payload_parse_error_count
+    ; "unknown_reaction_count", `Int unknown_reaction_count
     ; "cursor_swept_stimulus_count", `Int (total_int "cursor_swept_stimulus_count")
     ; ( "legacy_cursor_swept_stimulus_count"
       , `Int (total_int "legacy_cursor_swept_stimulus_count") )

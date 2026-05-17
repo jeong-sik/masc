@@ -14,6 +14,7 @@ type stimulus_kind =
   | Board_signal
   | Bootstrap
   | Alive_but_stuck_recovery
+  | Stay_silent_recovery
   | Unknown of string
 
 type reaction_kind =
@@ -22,6 +23,7 @@ type reaction_kind =
   | Terminal_reason
   | Cursor_ack
   | Operator_escalation
+  | Supervisor_recovery_requested
   | Unknown_reaction of string
 
 val stimulus_kind_to_string : stimulus_kind -> string

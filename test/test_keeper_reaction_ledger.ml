@@ -35,6 +35,25 @@ let board_stimulus ?(post_id = "post-42") ?updated_at () :
   }
 ;;
 
+let stay_silent_recovery_stimulus ?(keeper_name = "silent-keeper") () :
+  Keeper_event_queue.stimulus
+  =
+  let payload =
+    `Assoc
+      [ "source", `String "stay_silent_recovery"
+      ; "keeper", `String keeper_name
+      ; "streak", `Int 10
+      ; "threshold", `Int 10
+      ]
+    |> Yojson.Safe.to_string
+  in
+  { post_id = "stay-silent-loop:" ^ keeper_name
+  ; urgency = Immediate
+  ; arrived_at = 1234.5
+  ; payload
+  }
+;;
+
 let check_member_string label expected key json =
   check string label expected (json |> member key |> to_string)
 ;;
@@ -263,6 +282,107 @@ let test_summary_cursor_ack_respects_post_id_tiebreaker () =
     (complete_summary |> member "pending_stimulus_count" |> to_int)
 ;;
 
+let test_stay_silent_recovery_stimulus_is_typed () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "silent-keeper" in
+  let stimulus = stay_silent_recovery_stimulus ~keeper_name () in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    stimulus;
+  let row =
+    Keeper_reaction_ledger.read_recent_for_keeper ~base_path ~keeper_name ~limit:1
+    |> latest_row
+  in
+  check_member_string
+    "stay-silent stimulus kind"
+    "stay_silent_recovery"
+    "kind"
+    (row |> member "stimulus");
+  check string "stable stimulus prefix" "stimulus:"
+    (String.sub (row |> member "stimulus_id" |> to_string) 0 9)
+;;
+
+let test_stay_silent_recovery_reaction_clears_pending () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "silent-keeper" in
+  let stimulus = stay_silent_recovery_stimulus ~keeper_name () in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    stimulus;
+  let pending_summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check_member_string "pending recovery summary status" "degraded" "status" pending_summary;
+  check int "recovery stimulus pending" 1
+    (pending_summary |> member "pending_stimulus_count" |> to_int);
+  Keeper_reaction_ledger.record_event_queue_reaction
+    ~base_path
+    ~keeper_name
+    ~reaction_kind:Keeper_reaction_ledger.Turn_started
+    stimulus;
+  let reacted_summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check_member_string "reacted recovery summary status" "ok" "status" reacted_summary;
+  check bool "reacted recovery needs no operator action" false
+    (reacted_summary |> member "operator_action_required" |> to_bool);
+  check int "recovery stimulus cleared" 0
+    (reacted_summary |> member "pending_stimulus_count" |> to_int);
+  check int "turn-start reaction counted" 1
+    (reacted_summary |> member "turn_started_count" |> to_int)
+;;
+
+let test_unknown_reaction_degrades_summary () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "unknown-reaction-keeper" in
+  let stimulus = board_stimulus ~post_id:"post-unknown-reaction" () in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    stimulus;
+  Keeper_reaction_ledger.record_event_queue_reaction
+    ~base_path
+    ~keeper_name
+    ~reaction_kind:(Keeper_reaction_ledger.Unknown_reaction "legacy_custom")
+    stimulus;
+  let summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check_member_string "unknown reaction summary status" "degraded" "status" summary;
+  check bool "unknown reaction requires operator action" true
+    (summary |> member "operator_action_required" |> to_bool);
+  check int "unknown reaction counted" 1
+    (summary |> member "unknown_reaction_count" |> to_int);
+  check int "pending cleared by reaction row" 0
+    (summary |> member "pending_stimulus_count" |> to_int)
+;;
+
+let test_malformed_typed_payload_degrades_summary () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "malformed-payload-keeper" in
+  let stimulus =
+    { Keeper_event_queue.post_id = "bad-board"
+    ; urgency = Immediate
+    ; arrived_at = 1234.5
+    ; payload = {|{"source":"board_signal"|}
+    }
+  in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    stimulus;
+  let summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check_member_string "malformed payload summary status" "degraded" "status" summary;
+  check bool "malformed payload requires operator action" true
+    (summary |> member "operator_action_required" |> to_bool);
+  check int "payload parse error counted" 1
+    (summary |> member "payload_parse_error_count" |> to_int)
+;;
+
 let () =
   run
     "keeper_reaction_ledger"
@@ -291,6 +411,22 @@ let () =
             "summary cursor ack respects board post id tiebreaker"
             `Quick
             test_summary_cursor_ack_respects_post_id_tiebreaker
+        ; test_case
+            "stay-silent recovery stimulus is typed"
+            `Quick
+            test_stay_silent_recovery_stimulus_is_typed
+        ; test_case
+            "stay-silent recovery reaction clears pending"
+            `Quick
+            test_stay_silent_recovery_reaction_clears_pending
+        ; test_case
+            "unknown reaction degrades summary"
+            `Quick
+            test_unknown_reaction_degrades_summary
+        ; test_case
+            "malformed typed payload degrades summary"
+            `Quick
+            test_malformed_typed_payload_degrades_summary
         ] )
     ]
 ;;

@@ -78,6 +78,7 @@ let blocker_class_indicates_overflow (klass : blocker_class) : bool =
   | Turn_timeout
   | Completion_contract_violation
   | No_tool_capable_provider
+  | Stay_silent_loop
   | Fiber_unresolved
   | Stale_turn_timeout
   | Stale_fleet_batch

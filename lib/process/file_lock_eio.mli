@@ -104,6 +104,16 @@ val on_lock_attempt_fn :
   (caller:string -> retries:int -> elapsed_s:float -> outcome:string -> unit)
     Atomic.t
 
+(** Observability hook fired on every CAS retry inside [atomic_update*].
+    The lock table is shared by [prune_stale_entries] and [get_entry];
+    high fiber contention (many fibers traversing the table for
+    different paths) drives retry rate, the precise contention signal
+    that was previously invisible. Wired at startup ([lib/coord.ml]) to
+    a no-label Prometheus counter ([masc_file_lock_table_cas_retries]).
+    [masc_process] cannot depend on [Prometheus] (sub-library
+    boundary), so emission goes through this Atomic ref. *)
+val on_cas_retry_fn : (unit -> unit) Atomic.t
+
 (** {1 Diagnostics} *)
 
 (** Current number of tracked lock paths. *)

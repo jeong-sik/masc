@@ -38,17 +38,39 @@ let observe_lock_attempt ~caller ~retries ~started_at ~outcome =
   try (Atomic.get on_lock_attempt_fn) ~caller ~retries ~elapsed_s ~outcome
   with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()
 
+(** Observability hook fired on every CAS retry inside [atomic_update*].
+    The lock table is a single shared [Atomic.t]; under high fiber
+    contention (many fibers concurrently calling [prune_stale_entries]
+    / [get_entry] for different paths) the retry rate is the precise
+    contention signal but was previously invisible.
+
+    Default no-op; [masc_process] cannot depend on [Prometheus]
+    (sub-library boundary), so emission is wired from the [masc_mcp]
+    root via this Atomic ref (mirrors [on_lock_attempt_fn] pattern). *)
+let on_cas_retry_fn : (unit -> unit) Atomic.t =
+  Atomic.make (fun () -> ())
+
+let observe_cas_retry () =
+  try (Atomic.get on_cas_retry_fn) ()
+  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()
+
 let rec atomic_update atomic f =
   let old_val = Atomic.get atomic in
   let new_val = f old_val in
   if Atomic.compare_and_set atomic old_val new_val then ()
-  else atomic_update atomic f
+  else begin
+    observe_cas_retry ();
+    atomic_update atomic f
+  end
 
 let rec atomic_update_with_result atomic f =
   let old_val = Atomic.get atomic in
   let new_val, result = f old_val in
   if Atomic.compare_and_set atomic old_val new_val then result
-  else atomic_update_with_result atomic f
+  else begin
+    observe_cas_retry ();
+    atomic_update_with_result atomic f
+  end
 
 type lock_entry = {
   mu : Eio.Mutex.t;

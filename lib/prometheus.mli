@@ -174,6 +174,14 @@ val metric_tool_metrics_persist_dropped : string
     Each increment corresponds to one extra [compute ()] call. No labels. *)
 val metric_tool_keeper_cache_cas_conflicts : string
 
+(** Counter for [File_lock_eio] lock-table CAS retries (both
+    [prune_stale_entries] and [get_entry] share the same single
+    [table] Atomic). Each increment corresponds to one extra
+    [Atomic.compare_and_set] failure under fiber contention.
+    Sustained non-zero rate indicates fan-out into the lock table
+    under load. No labels — only one shared atomic in the module. *)
+val metric_file_lock_table_cas_retries : string
+
 (** Counter for [tool_keeper.cache_ttl_seconds] env-var parse fallback events.
     Increments when the operator-supplied env var is present but unparseable
     or out-of-range, and the helper falls back to its default. Labels:

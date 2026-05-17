@@ -255,8 +255,18 @@ let bool_field name = function
   | _ -> false
 ;;
 
+(* Scope keeper counts to the active workspace's base_path so a running
+   keeper from another workspace cannot mask a local outage in fleet
+   safety. `bootable_keeper_count` is already derived from
+   `state.room_config`, so the running count must use the same scope. *)
+let current_room_base_path_opt () =
+  match current_server_state_opt () with
+  | Some state -> Some state.Mcp_server.room_config.base_path
+  | None -> None
+
 let keeper_fleet_runtime_resolution_fields () =
-  let keeper_fibers = Keeper_registry.count_running () in
+  let base_path = current_room_base_path_opt () in
+  let keeper_fibers = Keeper_registry.count_running ?base_path () in
   let paused_keepers_json = paused_keepers_health_json () in
   let fleet_safety =
     keeper_fleet_safety_health_json ~keeper_fibers ~paused_keepers_json
@@ -321,7 +331,8 @@ let make_health_json ?(listener = "http/1.1") request =
     else "none"
   in
   let key_paused_keepers = "paused_keepers" in
-  let keeper_fibers = Keeper_registry.count_running () in
+  let base_path = current_room_base_path_opt () in
+  let keeper_fibers = Keeper_registry.count_running ?base_path () in
   let paused_keepers_json = paused_keepers_health_json () in
   Tool_args.ok_assoc [
     ("server", `String "masc-mcp");

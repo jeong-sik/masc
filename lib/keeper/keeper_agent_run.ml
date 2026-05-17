@@ -98,9 +98,16 @@ let registry_progress_on_event ~record_turn_progress downstream event =
   Option.iter (fun cb -> cb event) downstream
 ;;
 
+let select_cdal_proof ~result_proof ~captured_proof =
+  match result_proof with
+  | Some _ -> result_proof
+  | None -> captured_proof
+;;
+
 module For_testing = struct
   let sse_event_progress_kind = sse_event_progress_kind
   let registry_progress_on_event = registry_progress_on_event
+  let select_cdal_proof = select_cdal_proof
 end
 ;;
 
@@ -521,6 +528,7 @@ let run_turn
           ])
       Keeper_runtime_manifest.Tool_surface_selected;
     let agent_ref : Agent_sdk.Agent.t option ref = ref None in
+    let proof_ref : Masc_mcp_cdal_runtime.Cdal_proof.t option ref = ref None in
     let initial_tool_surface = s.Keeper_run_tools.initial_tool_surface in
     let initial_tool_surface_blocker_ref =
       s.Keeper_run_tools.initial_tool_surface_blocker
@@ -827,6 +835,7 @@ let run_turn
                      ?on_yield
                      ?on_resume
                      ~agent_ref
+                     ~proof_ref
                      ?contract
                      ?cli_transport_overrides
                      ~allowed_paths:oas_allowed_paths
@@ -1466,7 +1475,11 @@ let run_turn
                      match saved_checkpoint_result with
                      | Error e -> Error e
                      | Ok saved_checkpoint ->
-                       (match result.proof with
+                       (match
+                          select_cdal_proof
+                            ~result_proof:result.proof
+                            ~captured_proof:!proof_ref
+                        with
                         | Some p ->
                           Keeper_turn_telemetry.log_keeper_proof ~keeper_name:meta.name p;
                           let store = Masc_mcp_cdal_runtime.Proof_store.default_config in

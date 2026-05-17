@@ -4,6 +4,7 @@ open Masc_mcp
 module RC = Masc_mcp_cdal_runtime.Risk_contract
 module EM = Masc_mcp_cdal_runtime.Execution_mode
 module RK = Masc_mcp_cdal_runtime.Risk_class
+module CP = Masc_mcp_cdal_runtime.Cdal_proof
 
 let make_meta ?(name = "cdal-keeper") ?current_task_id () =
   let fields =
@@ -61,6 +62,39 @@ let check_json_list key expected json =
   | value -> failf "expected %s to be list, got %s" key (Yojson.Safe.to_string value)
 ;;
 
+let make_proof run_id : CP.t =
+  { schema_version = CP.schema_version_current
+  ; run_id
+  ; contract_id = "md5:test"
+  ; requested_execution_mode = EM.Execute
+  ; effective_execution_mode = EM.Execute
+  ; mode_decision_source = "passthrough"
+  ; risk_class = RK.Low
+  ; provider_snapshot =
+      { provider_name = "test"; model_id = "test-model"; api_version = None }
+  ; capability_snapshot =
+      { tools = []
+      ; mcp_servers = []
+      ; max_turns = 8
+      ; max_tokens = Some 4096
+      ; thinking_enabled = None
+      }
+  ; tool_trace_refs = []
+  ; raw_evidence_refs = []
+  ; checkpoint_ref = None
+  ; result_status = CP.Completed
+  ; started_at = 1000.0
+  ; ended_at = 1001.0
+  ; scope = None
+  }
+;;
+
+let check_selected_proof_run_id label expected selected =
+  match selected with
+  | Some proof -> check string label expected proof.CP.run_id
+  | None -> failf "expected %s proof" label
+;;
+
 let test_keeper_meta_projects_capture_only_contract () =
   let meta = make_meta ~current_task_id:"task-cdal-001" () in
   let contract = require_contract meta in
@@ -92,6 +126,23 @@ let test_contract_id_is_stable_for_same_meta () =
   check string "contract id" (RC.contract_id first) (RC.contract_id second)
 ;;
 
+let test_select_cdal_proof_prefers_result_proof () =
+  let result_proof = make_proof "result-proof" in
+  let captured_proof = make_proof "captured-proof" in
+  Keeper_agent_run.For_testing.select_cdal_proof
+    ~result_proof:(Some result_proof)
+    ~captured_proof:(Some captured_proof)
+  |> check_selected_proof_run_id "selected proof" "result-proof"
+;;
+
+let test_select_cdal_proof_falls_back_to_captured_proof () =
+  let captured_proof = make_proof "captured-proof" in
+  Keeper_agent_run.For_testing.select_cdal_proof
+    ~result_proof:None
+    ~captured_proof:(Some captured_proof)
+  |> check_selected_proof_run_id "selected proof" "captured-proof"
+;;
+
 let () =
   Alcotest.run
     "keeper_cdal_contract"
@@ -104,6 +155,16 @@ let () =
             "contract id stable for same keeper meta"
             `Quick
             test_contract_id_is_stable_for_same_meta
+        ] )
+    ; ( "run"
+      , [ test_case
+            "selects result proof before captured proof"
+            `Quick
+            test_select_cdal_proof_prefers_result_proof
+        ; test_case
+            "falls back to captured proof"
+            `Quick
+            test_select_cdal_proof_falls_back_to_captured_proof
         ] )
     ]
 ;;

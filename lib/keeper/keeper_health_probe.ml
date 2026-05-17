@@ -2,9 +2,7 @@
    See [.mli] for TLA+ modeling notes.
 
    RFC-0041 Phase B2: migrated from per-cascade (string) cache keys to
-   per-keeper, per-item (string * string) keys. The old [is_healthy]
-   remains as a backward-compatible alias that checks whether ANY item
-   for the keeper is healthy. *)
+   per-keeper, per-item (string * string) keys. *)
 
 type health_status =
   | Unknown
@@ -45,36 +43,13 @@ let record_item_result ~keeper_name ~item_id ~success =
   set_item_health ~keeper_name ~item_id status
 ;;
 
-(* ------------------------------------------------------------------ *)
-(* Backward-compatible per-keeper health (deprecated)                 *)
-(* ------------------------------------------------------------------ *)
-
-(** [is_healthy ~keeper_name] returns true if ANY item for this keeper
-    is Healthy. This is the backward-compatible alias for code that
-    hasn't migrated to per-item health checks yet.
-
-    Deprecated: use [is_item_healthy] for RFC-0041 per-item routing. *)
-let is_healthy ~keeper_name =
-  Eio.Mutex.use_ro health_cache_mu (fun () ->
-    let found = ref false in
-    Hashtbl.iter
-      (fun (kn, _item_id) (status, _ts) ->
-         if String.equal kn keeper_name
-         then (
-           match status with
-           | Healthy -> found := true
-           | _ -> ()))
-      health_cache;
-    !found)
-;;
-
-let set_health ~keeper_name status =
+let set_cascade_status ~cascade_name status =
   Eio.Mutex.use_rw ~protect:true health_cache_mu (fun () ->
-    Hashtbl.replace health_cache (keeper_name, "") (status, Time_compat.now ()))
+    Hashtbl.replace health_cache (cascade_name, "") (status, Time_compat.now ()))
 ;;
 
 (** [get_cascade_status ~cascade_name] reads the cascade-level entry
-    written by [set_health]/[run_once].  Three-valued:
+    written by [run_once].  Three-valued:
       - [Healthy]    : last probe saw the cascade at < threshold ratio.
       - [Unhealthy r]: last probe saw the cascade at >= threshold ratio.
       - [Unknown]    : probe never wrote this cascade (e.g. boot before
@@ -166,16 +141,14 @@ let run_once ~base_path =
   List.iter
     (fun (cascade, healthy) ->
        let status = if healthy then Healthy else Unhealthy "failure_ratio" in
-       (* Cache keyed by cascade name so ResumeFromPause can look it up.
-         Uses empty item_id for backward compat. *)
-       set_health ~keeper_name:cascade status)
+       set_cascade_status ~cascade_name:cascade status)
     results
 ;;
 
 let rec probe_loop ~base_path ~interval_sec ~clock () =
   (* Cancel-aware: Safe_ops.protect re-raises Eio.Cancel.Cancelled and swallows
      other exceptions so a transient registry I/O failure cannot kill the fiber
-     and freeze [is_healthy] at [false] forever. *)
+     and leave cascade status stale forever. *)
   Safe_ops.protect ~default:() (fun () -> run_once ~base_path);
   Eio.Time.sleep clock interval_sec;
   probe_loop ~base_path ~interval_sec ~clock ()

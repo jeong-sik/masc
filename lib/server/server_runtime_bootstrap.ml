@@ -1112,6 +1112,69 @@ let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
                agent_name outcome.token_hash_prefix detail))
     rotation_outcomes
 
+type lazy_startup_execution =
+  | Parallel
+  | Serial
+
+type lazy_startup_group = {
+  group_name : string;
+  execution : lazy_startup_execution;
+  task_names : string list;
+}
+
+let lazy_startup_plan ~has_legacy_traces =
+  let initial_groups =
+    [
+      {
+        group_name = "initialize";
+        execution = Parallel;
+        task_names =
+          [
+            "restore_sessions";
+            "reconcile_active_agents";
+            "prompt_bootstrap";
+            "keeper_history_migration";
+          ];
+      };
+      {
+        group_name = "tool_state";
+        execution = Serial;
+        task_names = [ "telemetry_warmup"; "tool_metrics_restore" ];
+      };
+    ]
+  in
+  let legacy_groups =
+    if has_legacy_traces then
+      [
+        {
+          group_name = "legacy_trace_migration";
+          execution = Serial;
+          task_names = [ "legacy_trace_dir_migration" ];
+        };
+      ]
+    else
+      []
+  in
+  let cleanup_groups =
+    [
+      {
+        group_name = "cleanup";
+        execution = Serial;
+        task_names =
+          [
+            "jsonl_prune";
+            "keeper_checkpoint_prune";
+            "auth_archive_prune";
+          ];
+      };
+    ]
+  in
+  initial_groups @ legacy_groups @ cleanup_groups
+
+let lazy_startup_task_names ~has_legacy_traces =
+  lazy_startup_plan ~has_legacy_traces
+  |> List.concat_map (fun group -> group.task_names)
+
 let bootstrap_prompt_state (state : Mcp_server.server_state) =
   Config_dir_resolver.log_warnings ~context:"ServerBootstrap" ();
   Config_dir_resolver.log_resolution ~context:"ServerBootstrap" ();
@@ -1589,35 +1652,56 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       let has_legacy_traces =
         Sys.file_exists (Filename.concat masc_root "perpetual")
       in
-      let tasks =
-        [
-          ("restore_sessions", fun () -> restore_persisted_sessions state);
-          ("reconcile_active_agents", fun () -> reconcile_active_agents_gauge state);
-          ("prompt_bootstrap", fun () -> bootstrap_prompt_state state);
-          ("telemetry_warmup", fun () -> warm_tool_registry_from_telemetry state);
-          ("tool_metrics_restore", fun () -> restore_tool_metrics_from_disk state);
-          ("keeper_history_migration", fun () -> startup_migrate_keeper_histories state);
-        ]
-        @ (if has_legacy_traces then
-             [("legacy_trace_dir_migration", fun () ->
-                 migrate_legacy_trace_dirs state)]
-           else [])
-        @ [
-          ("jsonl_prune", fun () -> startup_prune_jsonl state);
-          ( "keeper_checkpoint_prune",
-            fun () -> startup_prune_keeper_checkpoints state );
-          ( "auth_archive_prune",
-            fun () -> startup_prune_auth_archive state );
-          (* keeper_bootstrap removed: keeper_autoboot subsystem in
-             start_keeper_loops handles this in a dedicated fiber,
-             avoiding bootstrap contention with dashboard refresh loops. *)
-        ]
+      let task_fn = function
+        | "restore_sessions" -> fun () -> restore_persisted_sessions state
+        | "reconcile_active_agents" -> fun () ->
+            reconcile_active_agents_gauge state
+        | "prompt_bootstrap" -> fun () -> bootstrap_prompt_state state
+        | "keeper_history_migration" -> fun () ->
+            startup_migrate_keeper_histories state
+        | "telemetry_warmup" -> fun () ->
+            warm_tool_registry_from_telemetry state
+        | "tool_metrics_restore" -> fun () ->
+            restore_tool_metrics_from_disk state
+        | "legacy_trace_dir_migration" -> fun () ->
+            migrate_legacy_trace_dirs state
+        | "jsonl_prune" -> fun () -> startup_prune_jsonl state
+        | "keeper_checkpoint_prune" -> fun () ->
+            startup_prune_keeper_checkpoints state
+        | "auth_archive_prune" -> fun () -> startup_prune_auth_archive state
+        | task_name ->
+            raise
+              (Invalid_argument
+                 (Printf.sprintf "unknown lazy startup task: %s" task_name))
       in
-      let task_names = List.map fst tasks in
+      let task_names = lazy_startup_task_names ~has_legacy_traces in
+      let task_groups =
+        lazy_startup_plan ~has_legacy_traces
+        |> List.map (fun group ->
+               (group, List.map (fun name -> (name, task_fn name)) group.task_names))
+      in
+      let execution_to_string = function
+        | Parallel -> "parallel"
+        | Serial -> "serial"
+      in
+      let run_lazy_task_group (group, tasks) =
+        Log.Server.info
+          "lazy_task_group: starting %s (%s, %d tasks)"
+          group.group_name
+          (execution_to_string group.execution)
+          (List.length tasks);
+        (match group.execution with
+         | Parallel ->
+             Eio.Fiber.all
+               (List.map (fun task () -> run_lazy_task task) tasks)
+             |> ignore
+         | Serial -> List.iter run_lazy_task tasks);
+        Log.Server.info "lazy_task_group: finished %s" group.group_name
+      in
       Server_startup_state.activate_lazy
         ~backend_mode:(Coord.backend_name state.room_config)
         ~tasks:task_names;
-      Eio.Fiber.fork ~sw (fun () -> List.iter run_lazy_task tasks)
+      Eio.Fiber.fork ~sw (fun () -> List.iter run_lazy_task_group task_groups)
     in
     try
       Server_startup_state.mark_blocking ~backend_mode:initial_backend_mode;

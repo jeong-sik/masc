@@ -874,7 +874,7 @@ let run_keepalive_unified_turn
                 meta_after_triage.name;
               []
             | Stay_silent_recovery ->
-              Log.Keeper.warn
+              Log.Keeper.info
                 "turn entry: stay-silent recovery stimulus consumed post_id=%s \
                  (keeper=%s)"
                 stim.post_id

@@ -54,7 +54,7 @@ let record_turn ~keeper_name ~speech_act =
         Prometheus.inc_counter
           Keeper_metrics.metric_keeper_stay_silent_loop_detected
           ~labels:[ ("keeper", keeper_name) ] ();
-        Log.Keeper.warn
+        Log.Keeper.error
           "#9926 stay_silent loop detected keeper=%s streak=%d threshold=%d \
            — keeper is returning stay_silent repeatedly. Check preset \
            mismatch (#9926 proposal 1) or scheduler/backlog drift. \

@@ -60,6 +60,7 @@ logs/
 .trunk-lock/
 
 # Dashboard SPA (Vite)
+dashboard/node_modules
 dashboard/node_modules/
 dashboard/package-lock.json
 dashboard/bun.lock

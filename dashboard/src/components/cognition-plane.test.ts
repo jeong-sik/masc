@@ -16,9 +16,6 @@ async function flushUi(): Promise<void> {
 async function loadPlane() {
   vi.resetModules()
   vi.doMock('../router', () => ({ route, navigate: navigateMock }))
-  vi.doMock('./agents-unified', () => ({
-    AgentsUnified: () => html`<div data-testid="agents-unified">AgentsUnified</div>`,
-  }))
   vi.doMock('./autoresearch', () => ({
     Autoresearch: () => html`<div data-testid="autoresearch">Autoresearch</div>`,
   }))
@@ -34,6 +31,11 @@ async function loadPlane() {
   vi.doMock('./memory-subsystems', () => ({
     MemorySubsystems: ({ focus }: { focus?: string }) =>
       html`<div data-testid="memory-subsystems" data-focus=${focus ?? ''}>MemorySubsystems</div>`,
+  }))
+  vi.doMock('./common/route-link', () => ({
+    RouteLink: ({ children, params }: { children?: unknown; params?: Record<string, string> }) => html`
+      <a data-testid="route-link" data-section=${params?.section ?? ''} data-view=${params?.view ?? ''}>${children}</a>
+    `,
   }))
   return import('./cognition-plane')
 }
@@ -55,12 +57,26 @@ describe('CognitionPlane', () => {
     vi.restoreAllMocks()
     vi.resetModules()
     vi.doUnmock('../router')
-    vi.doUnmock('./agents-unified')
     vi.doUnmock('./autoresearch')
     vi.doUnmock('./keeper-decisions-stream')
     vi.doUnmock('./keeper-cognition-inspector')
     vi.doUnmock('./keeper-token-stats')
     vi.doUnmock('./memory-subsystems')
+    vi.doUnmock('./common/route-link')
+  })
+
+  it('renders a cognition overview without embedding the agent roster', async () => {
+    route.value.params = { section: 'cognition' }
+    const { CognitionPlane } = await loadPlane()
+
+    render(html`<${CognitionPlane} />`, container)
+    await flushUi()
+
+    expect(container.textContent).toContain('Keeper')
+    expect(container.textContent).toContain('Agent Observatory')
+    expect(container.querySelector('[data-testid="agents-unified"]')).toBeNull()
+    expect(container.querySelector('[data-testid="keeper-token-stats"]')).toBeNull()
+    expect(container.querySelector('[data-section="agents"]')).not.toBeNull()
   })
 
   it('renders the keeper cognition inspector for the keeper view', async () => {
@@ -71,7 +87,7 @@ describe('CognitionPlane', () => {
     await flushUi()
 
     expect(container.querySelector('[data-testid="keeper-cognition-inspector"]')).not.toBeNull()
-    expect(container.querySelector('[data-testid="agents-unified"]')).toBeNull()
+    expect(container.querySelector('[data-section="agents"]')).toBeNull()
   })
 
   it('renders the live decisions stream for the decisions view', async () => {

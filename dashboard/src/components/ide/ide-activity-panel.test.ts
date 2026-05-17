@@ -58,6 +58,14 @@ describe('IdeActivityPanel', () => {
     expect(container.textContent).toContain('no keeper activity')
   })
 
+  it('treats a null active file as no active file', () => {
+    const container = document.createElement('div')
+    render(h(IdeActivityPanel, { activeFile: null }), container)
+
+    expect(container.querySelector('[role="region"]')?.getAttribute('aria-label')).toBe('EVENT TIMELINE')
+    expect(container.textContent).toContain('0 events · 0 keepers')
+  })
+
   it('renders file context from annotation and diff props', () => {
     const container = document.createElement('div')
     render(h(IdeActivityPanel, {

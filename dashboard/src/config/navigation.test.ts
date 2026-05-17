@@ -105,7 +105,6 @@ describe('monitoring navigation labels', () => {
 
     expect(labelFor('runtime')).toBe('Live Runtime')
     expect(labelFor('agents')).toBe('Agent Observatory')
-    expect(labelFor('goal-loop')).toBe('Goal Navigator')
     expect(labelFor('fleet-health')).toBe('System Telemetry')
     expect(labelFor('observatory')).toBe('Activity Timeline')
     expect(labelFor('transport-health')).toBe('Transport Health')
@@ -119,9 +118,8 @@ describe('monitoring navigation labels', () => {
     const descriptions = Object.fromEntries(sections.map(item => [item.id, item.description]))
 
     expect(descriptions).toMatchObject({
-      runtime: 'Live cascade routing and provider health.',
+      runtime: 'Provider health and runtime diagnostics.',
       agents: 'Live roster with fleet state capsules.',
-      'goal-loop': 'Active goals with blockers and next actions.',
       'fleet-health': 'System signals for tools and governance.',
     })
 
@@ -145,14 +143,13 @@ describe('monitoring navigation labels', () => {
 
     expect(defaultParamsForTab('monitoring')).toEqual({ section: 'runtime' })
     expect(ids).toEqual([
-      'runtime', 'cascade-config', 'agents', 'goal-loop', 'fleet-health',
+      'runtime', 'cascade-config', 'agents', 'fleet-health',
       'doctor', 'transport-health', 'feature-health', 'observatory', 'cognition',
     ])
     expect(ids).toContain('fleet-health')
     expect(ids).toContain('runtime')
     expect(ids).toContain('cascade-config')
     expect(ids).toContain('agents')
-    expect(ids).toContain('goal-loop')
     expect(ids).toContain('doctor')
     expect(ids).toContain('transport-health')
     expect(ids).toContain('feature-health')
@@ -179,13 +176,12 @@ describe('monitoring navigation labels', () => {
     expect(sections[0]?.id).toBe('runtime')
     expect(sections[1]?.id).toBe('cascade-config')
     expect(sections[2]?.id).toBe('agents')
-    expect(sections[3]?.id).toBe('goal-loop')
-    expect(sections[4]?.id).toBe('fleet-health')
-    expect(sections[5]?.id).toBe('doctor')
-    expect(sections[6]?.id).toBe('transport-health')
-    expect(sections[7]?.id).toBe('feature-health')
-    expect(sections[8]?.id).toBe('observatory')
-    expect(sections[9]?.id).toBe('cognition')
+    expect(sections[3]?.id).toBe('fleet-health')
+    expect(sections[4]?.id).toBe('doctor')
+    expect(sections[5]?.id).toBe('transport-health')
+    expect(sections[6]?.id).toBe('feature-health')
+    expect(sections[7]?.id).toBe('observatory')
+    expect(sections[8]?.id).toBe('cognition')
   })
 
   it('keeps diagnostic monitoring routes available but hidden from the sidebar', () => {
@@ -215,9 +211,11 @@ describe('workspace navigation labels', () => {
     const labelFor = (id: string) => sections.find(item => item.id === id)?.label
 
     expect(labelFor('planning')).toBe('Plans & Goals')
+    expect(labelFor('moderation')).toBe('Moderation')
     // goals is no longer a standalone section
     const ids = sections.map(item => item.id)
     expect(ids).not.toContain('goals')
+    expect(ids).toContain('moderation')
   })
 })
 
@@ -260,6 +258,12 @@ describe('normalizeRouteParams backward compat (RFC-MASC-006 Phase 0)', () => {
     expect(normalizeRouteParams('monitoring', { section: 'cost' })).toMatchObject({
       section: 'runtime',
       view: 'cost',
+    })
+  })
+
+  it('redirects legacy runtime cascade view to the dedicated cascade config surface', () => {
+    expect(normalizeRouteParams('monitoring', { section: 'runtime', view: 'cascade' })).toMatchObject({
+      section: 'cascade-config',
     })
   })
 
@@ -400,6 +404,7 @@ describe('consolidation redirects (Phase 1)', () => {
     ['fleet', {}, 'fleet-health', 'comparison', {}],
     ['fsm-hub', {}, 'agents', 'fsm', {}],
     ['metrics', {}, 'runtime', undefined, {}],
+    ['cascade', {}, 'cascade-config', undefined, {}],
   ])(
     'monitoring:%s → %s (view: %s) preserves params',
     (oldSection, extra, expectedSection, expectedView, preserved) => {

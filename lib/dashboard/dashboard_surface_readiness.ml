@@ -192,17 +192,6 @@ let all_entries =
       ~tool_name:"masc_operator_snapshot"
       ()
   ; entry
-      ~id:"monitoring.goal-loop"
-      ~label:"Goal Navigator"
-      ~exposure_status:"main"
-      ~hidden_from_nav:false
-      ~meets_main_gate:true
-      ~rationale:"Active goal-loop status with blockers and next actions."
-      ~route_hash:"#monitoring?section=goal-loop"
-      ~live_spotcheck:"/api/v1/dashboard/goal-loop/status"
-      ~tool_name:"masc_goal_status"
-      ()
-  ; entry
       ~id:"monitoring.fleet-health"
       ~label:"System Telemetry"
       ~exposure_status:"main"
@@ -324,12 +313,23 @@ let all_entries =
       ~tool_name:"masc_board_list"
       ()
   ; entry
+      ~id:"workspace.moderation"
+      ~label:"Moderation"
+      ~exposure_status:"main"
+      ~hidden_from_nav:false
+      ~meets_main_gate:true
+      ~rationale:"Board moderation queue and action surface."
+      ~route_hash:"#workspace?section=moderation"
+      ~live_spotcheck:"/api/v1/dashboard/board/moderation/queue"
+      ~tool_name:"masc_board_list"
+      ()
+  ; entry
       ~id:"workspace.planning"
       ~label:"Plans & Goals"
       ~exposure_status:"main"
       ~hidden_from_nav:false
       ~meets_main_gate:true
-      ~rationale:"Task kanban and goal tree planning surface."
+      ~rationale:"Goal loop, goal tree, and task kanban planning surface."
       ~route_hash:"#workspace?section=planning"
       ~live_spotcheck:"/api/v1/dashboard/planning"
       ~tool_name:"masc_plan_get"

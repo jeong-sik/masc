@@ -128,7 +128,7 @@ export const COCKPIT_ENTRYPOINTS: CockpitEntrypoint[] = [
   {
     mode: 'observe',
     aliases: ['cascade'],
-    target: { tab: 'monitoring', params: { section: 'runtime', view: 'cascade' } },
+    target: { tab: 'monitoring', params: { section: 'cascade-config' } },
     coverage: 'covered',
   },
   {
@@ -185,7 +185,7 @@ export const COCKPIT_LEGACY_ENTRYPOINTS: CockpitEntrypoint[] = [
   { mode: 'comms', aliases: ['cm-st', 'composer-state'], target: { tab: 'command', params: { section: 'operations', view: 'ops', focus: 'state' } }, coverage: 'covered' },
 
   // Observe Plane legacy design subtabs.
-  { mode: 'observe', aliases: ['cs-list', 'cascade-list'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'cascade' } }, coverage: 'covered' },
+  { mode: 'observe', aliases: ['cs-list', 'cascade-list'], target: { tab: 'monitoring', params: { section: 'cascade-config' } }, coverage: 'covered' },
   { mode: 'observe', aliases: ['cs-deep', 'cascade-deep-dive'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'inspector', focus: 'deep-dive' } }, coverage: 'covered' },
   { mode: 'observe', aliases: ['cs-cmp', 'cascade-compare'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'inspector', focus: 'compare' } }, coverage: 'covered' },
   { mode: 'observe', aliases: ['au-led', 'audit-ledger'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'audit' } }, coverage: 'covered' },

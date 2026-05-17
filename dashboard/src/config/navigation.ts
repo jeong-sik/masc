@@ -19,7 +19,6 @@ type SurfaceSectionId =
   | 'cognition'
   | 'runtime'
   | 'cascade-config' // Dedicated entry for cascade.toml TOML editor (formerly buried inside runtime/cascade view)
-  | 'goal-loop'
   | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + monitoring governance
   | 'doctor'         // Dedicated entry for /api/v1/dashboard/doctor (formerly buried inside Command → Operations → Inspector → "진단" sub-tab)
   | 'transport-health' // Dedicated entry for /api/v1/dashboard/transport-health (was 5-hop buried inside Command → Operations → Inspector → "서버 설정" → ServerConfig → TransportHealthPanel)
@@ -34,6 +33,7 @@ type SurfaceSectionId =
   // workspace
   | 'board'
   | 'sub-boards'     // Phase 2: SubBoard named spaces within the board
+  | 'moderation'     // Board moderation queue and actions
   | 'planning'       // Phase 1: absorbs goals
   | 'repositories'   // Multi-repository cockpit and keeper access mapping
   | 'verification'   // CDAL follow-up (#7531): Mission detail verification table
@@ -175,13 +175,13 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'runtime',
       label: 'Live Runtime',
-      description: 'Live cascade routing and provider health.',
+      description: 'Provider health and runtime diagnostics.',
       params: { section: 'runtime' },
     },
     {
       id: 'cascade-config',
       label: 'Cascade Config',
-      description: 'Live cascade.toml editor and diagnostics.',
+      description: 'Cascade providers, models and rules.',
       params: { section: 'cascade-config' },
     },
     {
@@ -189,12 +189,6 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Agent Observatory',
       description: 'Live roster with fleet state capsules.',
       params: { section: 'agents' },
-    },
-    {
-      id: 'goal-loop',
-      label: 'Goal Navigator',
-      description: 'Active goals with blockers and next actions.',
-      params: { section: 'goal-loop' },
     },
     {
       id: 'fleet-health',
@@ -285,9 +279,15 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       params: { section: 'sub-boards' },
     },
     {
+      id: 'moderation',
+      label: 'Moderation',
+      description: 'Flagged board posts and moderation actions.',
+      params: { section: 'moderation' },
+    },
+    {
       id: 'planning',
       label: 'Plans & Goals',
-      description: 'Task kanban with the higher-level goal tree.',
+      description: 'Goal loop, goal tree, and task kanban.',
       params: { section: 'planning' },
     },
     {
@@ -391,6 +391,7 @@ export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
   'monitoring:metrics':      { section: 'runtime' },
   'monitoring:cascade-inspector': { section: 'runtime', view: 'inspector' },
   'monitoring:cost': { section: 'runtime', view: 'cost' },
+  'monitoring:cascade': { section: 'cascade-config' },
 
   // Dashboard consolidation Phase 1+6: command surface
   'command:intervene':    { section: 'operations' },
@@ -444,6 +445,11 @@ export function normalizeRouteParams(tabId: TabId, params: Record<string, string
 
   if (!validSectionIds(typedTabId).includes(next.section as SurfaceSectionId)) {
     next.section = defaultParamsForTab(tabId).section ?? ''
+  }
+
+  if (tabId === 'monitoring' && next.section === 'runtime' && next.view === 'cascade') {
+    next.section = 'cascade-config'
+    delete next.view
   }
 
   if (!(tabId === 'code' && next.section === 'ide-shell')) {

@@ -698,6 +698,10 @@ let metric_agent_stale_total = "masc_agent_stale_total"
 (* Process-level FD gauges — used in init() and update_fd_gauges. *)
 let metric_open_fds = "masc_process_open_fds"
 let metric_fd_warn_threshold = "masc_process_fd_warn_threshold"
+let metric_fd_open = "masc_fd_open"
+let metric_fd_limit = "masc_fd_limit"
+let metric_fd_in_flight = "masc_fd_in_flight"
+let metric_fd_pressure_active = "masc_fd_pressure_active"
 
 (* Core counters / gauges — used outside init. *)
 let metric_mcp_requests = "masc_mcp_requests_total"
@@ -2385,6 +2389,22 @@ let init () =
     metric_fd_warn_threshold
     "Threshold above which open_fds triggers a one-shot WARN log."
     Gauge;
+  add
+    metric_fd_open
+    "Best-effort FD accountant observation of process-wide open file descriptors."
+    Gauge;
+  add
+    metric_fd_limit
+    "Best-effort FD accountant observation of the process RLIMIT_NOFILE soft cap."
+    Gauge;
+  add
+    metric_fd_in_flight
+    "Current in-flight FD-accounted operations by kind. Labels: kind."
+    Gauge;
+  add
+    metric_fd_pressure_active
+    "Whether the shared keeper FD-pressure breaker is active (1 active, 0 inactive)."
+    Gauge;
   (* Per-keeper turn outcome + token counters.  Labels are populated
      dynamically via inc_counter; no upfront registration needed.
      Covers issues #7495 (cost/token attribution) and #7519 (SLO). *)
@@ -3165,6 +3185,22 @@ let update_fd_gauges () =
     ~metric_open_fds
 ;;
 
+let update_fd_accountant_gauges () =
+  let snapshot = Fd_accountant.fd_snapshot () in
+  set_gauge metric_fd_open (float_of_int snapshot.fd_open);
+  set_gauge metric_fd_limit (float_of_int snapshot.fd_limit);
+  set_gauge
+    metric_fd_pressure_active
+    (if snapshot.pressure_active then 1.0 else 0.0);
+  List.iter
+    (fun (kind, in_flight) ->
+      set_gauge
+        metric_fd_in_flight
+        ~labels:[ "kind", Fd_accountant.kind_to_string kind ]
+        (float_of_int in_flight))
+    snapshot.per_kind
+;;
+
 let set_tool_schema_stats ~count ~approx_tokens =
   set_gauge metric_mcp_tool_schema_count (float_of_int count);
   set_gauge metric_mcp_tool_schema_tokens_approx (float_of_int approx_tokens)
@@ -3182,6 +3218,7 @@ let labels_to_string = Prometheus_format.labels_to_string
 let to_prometheus_text () =
   update_uptime ();
   update_fd_gauges ();
+  update_fd_accountant_gauges ();
   (* Snapshot (name, help, metric_type, value, labels) under the mutex so
      the render phase sees a consistent view even when concurrent fibers
      are still updating [metrics].  [m.value] is mutable so we copy it

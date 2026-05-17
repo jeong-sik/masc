@@ -291,6 +291,30 @@ let count_lines_with_prefix text prefix =
   |> List.length
 ;;
 
+let test_to_prometheus_text_has_fd_accountant_metrics () =
+  let text = Prometheus.to_prometheus_text () in
+  check
+    bool
+    "has fd open HELP"
+    true
+    (text_has_literal text ("# HELP " ^ Prometheus.metric_fd_open ^ " "));
+  check
+    bool
+    "has fd limit TYPE"
+    true
+    (text_has_literal text ("# TYPE " ^ Prometheus.metric_fd_limit ^ " gauge"));
+  check
+    bool
+    "has pressure active sample"
+    true
+    (text_has_literal text (Prometheus.metric_fd_pressure_active ^ " "));
+  check
+    int
+    "one in-flight sample per FD kind"
+    (List.length Masc_mcp.Fd_accountant.all_kinds)
+    (count_lines_with_prefix text (Prometheus.metric_fd_in_flight ^ "{kind="))
+;;
+
 let rec rm_rf path =
   if Sys.file_exists path
   then
@@ -878,6 +902,10 @@ let () =
         ; test_case "has TYPE" `Quick test_to_prometheus_text_has_type
         ; test_case "has uptime" `Quick test_to_prometheus_text_has_uptime
         ; test_case "has sse metrics" `Quick test_to_prometheus_text_has_sse_metrics
+        ; test_case
+            "has fd accountant metrics"
+            `Quick
+            test_to_prometheus_text_has_fd_accountant_metrics
         ; test_case "keeper metrics registered" `Quick test_keeper_metrics_registered
         ; test_case
             "new issue metrics registered (#12801/#12797/#12799)"

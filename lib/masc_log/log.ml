@@ -283,15 +283,44 @@ module Ring = struct
       end
     end
 
+  (* RFC-0108: serialize the JSONL append under a single mutex
+     critical section so concurrent fibers (or domains) cannot
+     interleave bytes from different records.  Pre-fix, the three-
+     call sequence [output_string oc json; output_char oc '\n';
+     flush oc] left a race window between the JSON and the newline —
+     observed on 2026-05-17 as ["}{"]-concat lines in
+     [.masc/logs/system_log_2026-05-17.jsonl:3498] and [:4635].
+
+     [Stdlib.Mutex] is sufficient here because [Ring.init_file_sink]
+     runs before [Eio_main.run] (see [bin/main_eio.ml]); the writer
+     therefore cannot assume an Eio scheduler is available and must
+     work from non-Eio contexts (e.g. [at_exit]).  The mutex protects
+     the single global [file_channel], so one lock covers the whole
+     write path. Building the [json + "\n"] payload as a single
+     string before [output_string] also keeps the kernel-visible
+     write boundary at record granularity (the channel buffer is
+     flushed once per record).
+
+     [rotate_if_needed] runs outside the mutex on purpose — it only
+     mutates [file_channel] when the date rolls, and recursing into
+     the mutex there would deadlock.  Reading [!file_channel] inside
+     the lock means a rotate racing with a write sees whichever
+     channel is current; the worst case is one record on the
+     about-to-rotate channel, which is harmless. *)
+  let sink_mutex = Stdlib.Mutex.create ()
+
   let write_to_sink entry_json =
     rotate_if_needed ();
-    match !file_channel with
-    | Some oc ->
-        output_string oc (Yojson.Safe.to_string entry_json);
-        output_char oc '\n';
-        (* flush on warn/error for timely persistence *)
-        protect ~default:() (fun () -> flush oc)
-    | None -> ()
+    Stdlib.Mutex.lock sink_mutex;
+    Fun.protect
+      ~finally:(fun () -> Stdlib.Mutex.unlock sink_mutex)
+      (fun () ->
+        match !file_channel with
+        | Some oc ->
+            let line = Yojson.Safe.to_string entry_json ^ "\n" in
+            output_string oc line;
+            protect ~default:() (fun () -> flush oc)
+        | None -> ())
 
   exception Entry_decode_error of string
 

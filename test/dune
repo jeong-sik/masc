@@ -1367,6 +1367,7 @@
 (include stanzas/test_sse_storm_e2e.inc)
 (include stanzas/test_start_masc_mcp_script.inc)
 (include stanzas/test_supervisor_start_predicate.inc)
+(include stanzas/test_system_log_atomicity.inc)
 (include stanzas/test_telemetry_task_transition_10358.inc)
 (include stanzas/test_timeout_policy.inc)
 (include stanzas/test_timeout_policy_overshoot_counter.inc)

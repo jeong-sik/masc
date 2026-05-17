@@ -149,14 +149,11 @@ let rewrite_docker_command_paths_for_host_validation
 
 (* ── Profile resolution ────────────────────────────────── *)
 
-(* Invariant (root-fix family 2/3, 2026-04-28):
-   When [meta.sandbox_profile = Docker], the effective profile is ALWAYS
-   Docker, regardless of [in_playground]. The historical behavior of
-   silently dropping back to Local when the cwd was outside the playground
-   was the proximate cause of the host-fallback bypass reported in the
-   2026-04-28 sandbox audit. The Local→Docker upgrade path stays gated on
-   [in_playground] because that branch is opt-in via DockerPlayground —
-   only the down-conversion (Docker→Local) is removed. *)
+(* Invariant (root-fix family 2/3, 2026-04-28; local-overrotation fix,
+   2026-05-18): the declared sandbox profile is the execution contract.
+   Docker keepers must never silently fall back to Local, and Local keepers
+   must never silently upgrade to Docker.  DockerPlayground is a runtime
+   capability switch, not permission to reinterpret sandbox_profile=local. *)
 let effective_sandbox_profile ~(meta : keeper_meta) ~in_playground =
   if Env_config_keeper.KeeperSandbox.hard_mode ()
   then meta.sandbox_profile, meta.network_mode
@@ -165,11 +162,9 @@ let effective_sandbox_profile ~(meta : keeper_meta) ~in_playground =
     | Docker ->
       (* Invariant: meta=Docker → effective=Docker. No silent host fallback. *)
       Docker, meta.network_mode
-    | Local when Env_config_keeper.DockerPlayground.enabled && in_playground ->
-      (* Opt-in upgrade: Local→Docker only when the playground feature is
-           enabled and the cwd is inside the playground root. *)
-      Docker, Network_inherit
-    | Local -> Local, meta.network_mode)
+    | Local ->
+      let _ = in_playground in
+      Local, meta.network_mode)
 ;;
 
 (* ── Nested runtime detection ──────────────────────────── *)

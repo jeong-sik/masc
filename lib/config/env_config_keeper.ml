@@ -834,10 +834,11 @@ end
 (** {1 Docker Playground} *)
 
 module DockerPlayground = struct
-  (** Route keeper_bash commands through a Docker container instead of
-      local subprocess.  The container must be running and named
-      [keeper-playground].  When disabled, commands run locally with
-      the existing allowlist restrictions.
+  (** Legacy Docker playground capability flag.  It does not override a
+      keeper's declared [sandbox_profile]: local keepers run locally, and
+      docker keepers run through the hardened Docker path.  The legacy
+      playground container name/root settings are retained for compatibility
+      with diagnostics and path translation.
       Env: [MASC_KEEPER_DOCKER_PLAYGROUND]. Default: false.
       P2b: aliased to {!Env_config_sandbox.Runtime.docker_playground_enabled};
       [()] call freezes the value at module init to preserve the

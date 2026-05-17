@@ -57,11 +57,9 @@ val rewrite_docker_command_paths_for_host_validation :
   string ->
   string
 
-(** Resolve [(sandbox_profile, network_mode)] given the keeper's
-    declared profile and whether the cwd is in-playground. Hard
-    mode forces the keeper's declared profile; otherwise [Local]
-    in playground may be auto-promoted to [Docker / Network_inherit]
-    when [DockerPlayground.enabled]. *)
+(** Resolve [(sandbox_profile, network_mode)] from the keeper's declared
+    profile.  [in_playground] is retained for call-site compatibility, but
+    it must not reinterpret [sandbox_profile=local] as Docker. *)
 val effective_sandbox_profile :
   meta:Keeper_types.keeper_meta ->
   in_playground:bool ->

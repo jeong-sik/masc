@@ -746,8 +746,6 @@ let handle_keeper_status ctx args : tool_result =
          in
          let effective_sandbox_image =
            if m.sandbox_profile = Docker
-              || (m.sandbox_profile = Local
-                  && Env_config_keeper.DockerPlayground.enabled)
            then
              Some (
                match m.sandbox_image with

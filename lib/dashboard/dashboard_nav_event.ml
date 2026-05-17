@@ -34,6 +34,7 @@ let valid_sections =
       ; "cascade-config"
       ; "goal-loop"
       ; "fleet-health"
+      ; "doctor"
       ] )
   ; "command", [ "operations" ]
   ; "connectors", [ "connector-status" ]

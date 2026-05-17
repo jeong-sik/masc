@@ -18,6 +18,7 @@ type SurfaceSectionId =
   | 'agents'
   | 'cognition'
   | 'runtime'
+  | 'cascade-config' // Dedicated entry for cascade.toml TOML editor (formerly buried inside runtime/cascade view)
   | 'goal-loop'
   | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + monitoring governance
   // command
@@ -173,6 +174,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Live Runtime',
       description: 'Live cascade routing and provider health.',
       params: { section: 'runtime' },
+    },
+    {
+      id: 'cascade-config',
+      label: 'Cascade Config',
+      description: 'Live cascade.toml editor and diagnostics.',
+      params: { section: 'cascade-config' },
     },
     {
       id: 'agents',

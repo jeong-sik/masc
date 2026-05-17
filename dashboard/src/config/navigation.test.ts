@@ -141,9 +141,10 @@ describe('monitoring navigation labels', () => {
     const ids = sections.map(item => item.id)
 
     expect(defaultParamsForTab('monitoring')).toEqual({ section: 'runtime' })
-    expect(ids).toEqual(['runtime', 'agents', 'goal-loop', 'fleet-health'])
+    expect(ids).toEqual(['runtime', 'cascade-config', 'agents', 'goal-loop', 'fleet-health'])
     expect(ids).toContain('fleet-health')
     expect(ids).toContain('runtime')
+    expect(ids).toContain('cascade-config')
     expect(ids).toContain('agents')
     expect(ids).toContain('goal-loop')
     expect(ids).not.toContain('journey')
@@ -167,9 +168,10 @@ describe('monitoring navigation labels', () => {
   it('puts the operator story first before drill-down status surfaces', () => {
     const sections = visibleSectionItemsForTab('monitoring')
     expect(sections[0]?.id).toBe('runtime')
-    expect(sections[1]?.id).toBe('agents')
-    expect(sections[2]?.id).toBe('goal-loop')
-    expect(sections[3]?.id).toBe('fleet-health')
+    expect(sections[1]?.id).toBe('cascade-config')
+    expect(sections[2]?.id).toBe('agents')
+    expect(sections[3]?.id).toBe('goal-loop')
+    expect(sections[4]?.id).toBe('fleet-health')
   })
 
   it('keeps diagnostic monitoring routes available but hidden from the sidebar', () => {

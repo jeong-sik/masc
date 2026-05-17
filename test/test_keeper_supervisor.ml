@@ -6,6 +6,7 @@ open Alcotest
 module Sup = Masc_mcp.Keeper_supervisor
 module Reg = Masc_mcp.Keeper_registry
 module KT = Masc_mcp.Keeper_types
+module KR = Masc_mcp.Keeper_runtime
 module AQ = Masc_mcp.Keeper_approval_queue
 module KSM = Masc_mcp.Keeper_state_machine
 module KLH = Masc_mcp.Keeper_lifecycle_hooks
@@ -61,6 +62,17 @@ let with_config_dir f =
       Unix.putenv "MASC_CONFIG_DIR" config_dir;
       Config_dir_resolver.reset ();
       f config_dir)
+
+let write_keeper_toml config_dir ~name =
+  write_file
+    (Filename.concat (Filename.concat config_dir "keepers") (name ^ ".toml"))
+    (Printf.sprintf
+       {|
+[keeper]
+name = "%s"
+goal = "test keeper"
+|}
+       name)
 
 let with_restart_launch_noop f =
   Sup.with_restart_launch_noop_for_test f
@@ -1314,9 +1326,11 @@ let test_auto_resume_after_sec_doubles_on_repause () =
 
 (* Test: Phase 3.5 sweep auto-resumes a keeper whose timer has elapsed. *)
 let test_sweep_auto_resumes_after_backoff () =
+  with_restart_launch_noop @@ fun () ->
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
+  with_config_dir @@ fun config_dir ->
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
@@ -1327,6 +1341,7 @@ let test_sweep_auto_resumes_after_backoff () =
       let config = Masc_mcp.Coord.default_config base_dir in
       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
       let name = "auto-resume-keeper" in
+      write_keeper_toml config_dir ~name;
       (* Simulate a keeper paused 2h ago with a 1h (3600s) auto-resume
          delay.  Since 7200 > 3600 the sweep should clear [paused]. *)
       let two_hours_ago =
@@ -1345,6 +1360,8 @@ let test_sweep_auto_resumes_after_backoff () =
       (match KT.write_meta config paused_meta with
        | Ok () -> ()
        | Error err -> fail err);
+      check bool "precondition: paused keeper is not bootable" false
+        (List.mem name (KR.bootable_keeper_names config));
       let baseline_auto_resume =
         Masc_mcp.Prometheus.metric_total
           Masc_mcp.Keeper_metrics.metric_keeper_auto_resumed_total
@@ -1367,9 +1384,15 @@ let test_sweep_auto_resumes_after_backoff () =
              false m.paused;
            (* auto_resume_after_sec is retained (ready for next pause). *)
            check bool "auto_resume_after_sec retained for next cycle"
-             true (Option.is_some m.auto_resume_after_sec)
+             true (Option.is_some m.auto_resume_after_sec);
+           check bool "last_blocker cleared after auto-resume" true
+             (Option.is_none m.runtime.last_blocker)
        | Ok None -> fail "meta missing after auto-resume"
        | Error err -> fail ("read_meta failed: " ^ err));
+      check bool "auto-resumed keeper re-enters bootable set" true
+        (List.mem name (KR.bootable_keeper_names config));
+      check bool "auto-resumed keeper is reconciled into registry" true
+        (Reg.is_registered ~base_path:config.base_path name);
       let after_auto_resume =
         Masc_mcp.Prometheus.metric_total
           Masc_mcp.Keeper_metrics.metric_keeper_auto_resumed_total
@@ -1383,6 +1406,7 @@ let test_operator_pause_not_auto_resumed () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
+  with_config_dir @@ fun config_dir ->
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
@@ -1393,6 +1417,7 @@ let test_operator_pause_not_auto_resumed () =
       let config = Masc_mcp.Coord.default_config base_dir in
       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
       let name = "operator-paused-keeper" in
+      write_keeper_toml config_dir ~name;
       (* Paused 2h ago with NO auto_resume_after_sec (operator pause). *)
       let two_hours_ago =
         let t = Unix.gmtime (Unix.time () -. 7200.0) in
@@ -1410,6 +1435,8 @@ let test_operator_pause_not_auto_resumed () =
       (match KT.write_meta config paused_meta with
        | Ok () -> ()
        | Error err -> fail err);
+      check bool "precondition: operator pause is not bootable" false
+        (List.mem name (KR.bootable_keeper_names config));
       let baseline_auto_resume =
         Masc_mcp.Prometheus.metric_total
           Masc_mcp.Keeper_metrics.metric_keeper_auto_resumed_total
@@ -1432,6 +1459,10 @@ let test_operator_pause_not_auto_resumed () =
              true m.paused
        | Ok None -> fail "meta missing"
        | Error err -> fail ("read_meta failed: " ^ err));
+      check bool "operator pause remains out of bootable set" false
+        (List.mem name (KR.bootable_keeper_names config));
+      check bool "operator pause is not reconciled into registry" false
+        (Reg.is_registered ~base_path:config.base_path name);
       let after_auto_resume =
         Masc_mcp.Prometheus.metric_total
           Masc_mcp.Keeper_metrics.metric_keeper_auto_resumed_total

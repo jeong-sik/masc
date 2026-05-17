@@ -6,8 +6,10 @@
     low-cardinality circuit breaker that can be tripped from central error
     sites and consulted by turn/spawn scheduling. It checks both the process
     [nofile] budget and, when available, the host kernel's global file-table
-    budget because ENFILE can fire while the MASC server's own FD count is
-    still low.
+    budget when available because ENFILE can fire while the MASC server's own
+    FD count is still low. System probe failures remain telemetry-only: a
+    sandbox or restricted host must not block keeper launches after the direct
+    process nofile budget has passed.
 
     Fleet baseline (2026-05-17): default capacity targets 64 active keepers
     (= 64 * fd_per_active_keeper + fd_headroom). The previous default named
@@ -505,12 +507,7 @@ let admission_decision
              })
       else
         (match system_fds with
-         | None ->
-           probe_unknown_block
-             ~probe:"system_fd"
-             ~projected_fds
-             ~active_keepers
-             ~starting_keepers
+         | None -> Admit
          | Some _ ->
            (match
               system_fd_budget_block system_fds ~projected_fds ~active_keepers

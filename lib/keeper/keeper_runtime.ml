@@ -150,6 +150,37 @@ let autoboot_excluded_keeper_reasons config =
        | Some reason -> Some { keeper_name = name; reason }
        | None -> None)
 
+let auto_recoverable_paused_keeper_names ?now config =
+  let now =
+    match now with
+    | Some value -> value
+    | None ->
+      (* NDT-OK: cold-start supervisor admission uses wall-clock pause age to decide whether the recovery sweep must run. *)
+      Unix.gettimeofday ()
+  in
+  configured_keeper_names config
+  |> List.filter_map (fun name ->
+       match read_meta_file_path (keeper_meta_path config name) with
+       | Ok (Some meta)
+         when meta.paused
+              &&
+              (match (load_keeper_profile_defaults name).autoboot_enabled with
+               | Some value -> value
+               | None -> meta.autoboot_enabled)
+              && Keeper_supervisor_types.paused_meta_auto_resume_due ~now meta ->
+         Some meta.name
+       | Ok (Some _) | Ok None -> None
+       | Error msg ->
+         Prometheus.inc_counter
+           Keeper_metrics.metric_keeper_meta_read_failures
+           ~labels:[ ("keeper", name); ("site", "auto_recoverable_paused_read") ]
+           ();
+         Log.Keeper.warn
+           "auto_recoverable_paused_keeper_names: meta read failed for %s: %s"
+           name
+           msg;
+         None)
+
 (* PR-3b1: convert a credential lookup name to its canonical
    keeper-<n>-agent form when it refers to a bootable keeper.
    Non-keeper names (dashboard, admin, codex-mcp-client, ...) are
@@ -900,6 +931,7 @@ let existing_keepalive_bootstrap_done : (string, unit) Hashtbl.t =
 
 let has_boot_entries config =
   bootable_keeper_names config <> []
+  || auto_recoverable_paused_keeper_names config <> []
 
 (* #10125: extracted predicate so it can be unit-tested without
    spinning up an Eio + Pulse runtime.  See [maybe_start_supervisor_sweep]

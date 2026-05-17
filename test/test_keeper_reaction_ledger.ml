@@ -303,6 +303,37 @@ let test_stay_silent_recovery_stimulus_is_typed () =
     (String.sub (row |> member "stimulus_id" |> to_string) 0 9)
 ;;
 
+let test_stay_silent_recovery_reaction_clears_pending () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "silent-keeper" in
+  let stimulus = stay_silent_recovery_stimulus ~keeper_name () in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    stimulus;
+  let pending_summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check_member_string "pending recovery summary status" "degraded" "status" pending_summary;
+  check int "recovery stimulus pending" 1
+    (pending_summary |> member "pending_stimulus_count" |> to_int);
+  Keeper_reaction_ledger.record_event_queue_reaction
+    ~base_path
+    ~keeper_name
+    ~reaction_kind:Keeper_reaction_ledger.Turn_started
+    stimulus;
+  let reacted_summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check_member_string "reacted recovery summary status" "ok" "status" reacted_summary;
+  check bool "reacted recovery needs no operator action" false
+    (reacted_summary |> member "operator_action_required" |> to_bool);
+  check int "recovery stimulus cleared" 0
+    (reacted_summary |> member "pending_stimulus_count" |> to_int);
+  check int "turn-start reaction counted" 1
+    (reacted_summary |> member "turn_started_count" |> to_int)
+;;
+
 let test_unknown_reaction_degrades_summary () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "unknown-reaction-keeper" in
@@ -384,6 +415,10 @@ let () =
             "stay-silent recovery stimulus is typed"
             `Quick
             test_stay_silent_recovery_stimulus_is_typed
+        ; test_case
+            "stay-silent recovery reaction clears pending"
+            `Quick
+            test_stay_silent_recovery_reaction_clears_pending
         ; test_case
             "unknown reaction degrades summary"
             `Quick

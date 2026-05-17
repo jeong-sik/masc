@@ -394,6 +394,28 @@ let record_semaphore_wait_observation
     ~reasons:(semaphore_wait_observation_reasons ?phase_label ~kind ~channel ())
 ;;
 
+let record_recovery_stimulus_turn_started
+      ~(ctx : _ context)
+      ~keeper_name
+      (stimulus : Keeper_event_queue.stimulus)
+  =
+  try
+    Keeper_reaction_ledger.record_event_queue_reaction
+      ~base_path:ctx.config.base_path
+      ~keeper_name
+      ~reaction_kind:Keeper_reaction_ledger.Turn_started
+      stimulus
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Keeper.error
+      "turn entry: failed to persist recovery stimulus reaction post_id=%s \
+       (keeper=%s): %s"
+      stimulus.post_id
+      keeper_name
+      (Printexc.to_string exn)
+;;
+
 type cascade_backpressure_decision =
   | Cascade_admitted
   | Cascade_backpressured of {
@@ -872,6 +894,10 @@ let run_keepalive_unified_turn
                  (keeper=%s)"
                 stim.post_id
                 meta_after_triage.name;
+              record_recovery_stimulus_turn_started
+                ~ctx
+                ~keeper_name:meta_after_triage.name
+                stim;
               []
             | Stay_silent_recovery ->
               Log.Keeper.info
@@ -879,6 +905,10 @@ let run_keepalive_unified_turn
                  (keeper=%s)"
                 stim.post_id
                 meta_after_triage.name;
+              record_recovery_stimulus_turn_started
+                ~ctx
+                ~keeper_name:meta_after_triage.name
+                stim;
               []
             | Unsupported prefix ->
               Prometheus.inc_counter

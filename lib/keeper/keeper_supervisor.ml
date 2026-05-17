@@ -235,12 +235,51 @@ let launch_supervised_fiber
       Eio_guard.protect
         (fun () ->
            try
-             Keeper_keepalive.run_heartbeat_loop
-               ~proactive_warmup_sec
-               ctx
-               meta
-               reg.fiber_stop
-               ~wakeup:reg.fiber_wakeup;
+             (* RFC-0109 P4: opt-in keeper-level max-turn watchdog.
+                When [MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC] is set
+                to a positive float, race the keepalive loop against
+                [Eio.Time.sleep ctx.clock t] via [Eio.Fiber.first].
+                Timer expiry stamps
+                [Stale_turn_timeout (In_turn_hung ...)] BEFORE the
+                timer fiber returns so the existing watchdog_triggered
+                branch (below) treats the cancellation as a crash and
+                [sweep_and_recover] restarts the keeper. Default
+                disabled — opt-in. *)
+             (match
+                Env_config_runtime.Keeper_max_turn_watchdog.timeout_sec_opt
+                  ()
+              with
+              | None ->
+                Keeper_keepalive.run_heartbeat_loop
+                  ~proactive_warmup_sec
+                  ctx
+                  meta
+                  reg.fiber_stop
+                  ~wakeup:reg.fiber_wakeup
+              | Some timeout_s ->
+                Eio.Fiber.first
+                  (fun () ->
+                    Eio.Time.sleep ctx.clock timeout_s;
+                    Keeper_registry.set_failure_reason
+                      ~base_path
+                      meta.name
+                      (Some
+                         (Keeper_registry.Stale_turn_timeout
+                            (Keeper_registry_types.In_turn_hung
+                               { active_seconds = timeout_s
+                               ; timeout_threshold = timeout_s
+                               })));
+                    Log.Keeper.warn
+                      "%s: max-turn watchdog fired after %.1fs (RFC-0109 P4)"
+                      meta.name
+                      timeout_s)
+                  (fun () ->
+                    Keeper_keepalive.run_heartbeat_loop
+                      ~proactive_warmup_sec
+                      ctx
+                      meta
+                      reg.fiber_stop
+                      ~wakeup:reg.fiber_wakeup));
              (* Check if watchdog set a failure reason that should trigger
               crash recovery instead of a clean stop. When the stale
               watchdog sets fiber_stop + Stale_turn_timeout, the heartbeat

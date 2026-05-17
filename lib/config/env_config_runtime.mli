@@ -216,6 +216,28 @@ module Approval_janitor : sig
   val interval_seconds : float
 end
 
+(** {1 Keeper max-turn watchdog (RFC-0109 P4)} *)
+
+module Keeper_max_turn_watchdog : sig
+  val timeout_sec_opt : unit -> float option
+  (** [timeout_sec_opt ()] returns the keeper-level max-turn wall-clock
+      budget when [MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC] is set to
+      a positive number, or [None] when the env var is unset / zero /
+      negative.
+
+      When [Some t] is returned, the supervisor races each keeper's
+      [Keeper_keepalive.run_heartbeat_loop] against
+      [Eio.Time.sleep ctx.clock t] via [Eio.Fiber.first]. Timer expiry
+      cancels the keepalive fiber and stamps [Stale_turn_timeout
+      "max_turn_watchdog"] on the registry so [sweep_and_recover]
+      restarts the keeper instead of treating the cancellation as a
+      clean stop.
+
+      Default: [None] (disabled). Recommended live value: [600.0]
+      (10 minutes). Set lower for aggressive sangsu-style stuck
+      recovery, higher for long-running research keepers. *)
+end
+
 (** {1 Slot scheduling} *)
 
 module Slot : sig

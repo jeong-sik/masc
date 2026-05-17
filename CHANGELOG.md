@@ -1,6 +1,13 @@
 # Changelog
 
 
+## [0.19.22] - 2026-05-17
+
+### Changed
+- Bumped the downstream OAS `agent_sdk` pin to `main@5f8e07b7` (`v0.194.1`) and raised the dependency floor to `agent_sdk >= 0.194.1`.
+- Moved the OAS pin note out of the older 0.19.20 changelog section so release history matches merge chronology.
+- Captured the follow-on runtime wave: required-tool candidate hotfix, force-done/release schema-audit enforcement, dashboard A0.2 atdts PoC, current goal-loop verify fixture, and chunked first-flush for POST `/mcp` JSON responses.
+
 ## [0.19.21] - 2026-05-17
 
 ### Added
@@ -30,7 +37,6 @@
 
 ### Changed
 - `lib/dashboard/` and dashboard runtime trust views label system-blocked states as `Blocked` rather than human `Pause`, separating operator pauses from runtime blockers.
-- Bumped the downstream OAS `agent_sdk` pin to `main@5f8e07b7` (`v0.194.1`) and raised the dependency floor to `agent_sdk >= 0.194.1`.
 - MCP server internals remove the legacy `respond_mcp_*` / `mcp_internal_error_json` factories from the active response path.
 - Cascade max-token handling clamps model/provider output ceilings explicitly.
 - Cascade qwen configuration declares chat-template thinking support explicitly and removes the legacy `cap_auto_resolved_max_tokens` alias from active cascade code and historical DD-020 notes.

@@ -206,6 +206,7 @@ type t =
   | RecurringFailures
   | TurnCleanupFailures
   | MemoryBankLoadHistorySwallowedExceptions
+  | CascadeHttpProbeJsonParseFailures
 
 (** String conversion
 
@@ -414,6 +415,8 @@ let to_string = function
   | TurnCleanupFailures -> "masc_keeper_turn_cleanup_failures_total"
   | MemoryBankLoadHistorySwallowedExceptions ->
       "masc_keeper_memory_bank_load_history_swallowed_exceptions_total"
+  | CascadeHttpProbeJsonParseFailures ->
+      "masc_cascade_http_probe_json_parse_failures_total"
 ;;
 
 (** Backward-compatible string constants
@@ -932,4 +935,8 @@ let metric_keeper_session_cleanup_failures = "masc_keeper_session_cleanup_failur
 
 let metric_keeper_memory_bank_load_history_swallowed_exceptions =
   to_string MemoryBankLoadHistorySwallowedExceptions
+;;
+
+let metric_cascade_http_probe_json_parse_failures =
+  to_string CascadeHttpProbeJsonParseFailures
 ;;

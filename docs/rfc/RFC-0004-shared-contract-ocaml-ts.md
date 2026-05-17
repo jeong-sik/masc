@@ -23,7 +23,7 @@
 
 ### Resume note (2026-05-17)
 
-본 RFC 작성 (2026-04-17) 후 약 1년간 Draft 상태로 묵힘. 2026-05-17 dashboard IDE crash 사고 (`.trim() on null` at `ide-context-lens-...js`, schema drift event drop 다수) 가 **본 RFC §Phase A0 미구현의 누적 발현** 으로 진단됨. Track A 재개. Track B 는 여전히 별 트랙.
+본 RFC 작성 (2026-04-17) 후 약 1 개월 (2026-04-17 → 2026-05-17) Draft 상태로 묵힘. 2026-05-17 dashboard IDE crash 사고 (`.trim() on null` at `ide-context-lens-...js`, schema drift event drop 다수) 가 **본 RFC §Phase A0 미구현의 누적 발현** 으로 진단됨. Track A 재개. Track B 는 여전히 별 트랙.
 
 - Research synthesis: `~/me/knowledge/research/2026-05-17-dashboard-sse-ssot-state.md`
 - Quick win PR (workaround, 본 RFC 대체 트랙 X — 사용자 crash 차단 only): `fix/ide-context-lens-null-guard` 의 `ide-context-lens.ts:304/325` null guard

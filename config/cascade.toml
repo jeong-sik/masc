@@ -752,6 +752,23 @@ tiers = ["primary", "keeper_diverse", "__safe_lane"]
 strategy = "priority_tier"
 fallback = true
 
+[tier-group.ollama_cloud_stable]
+# Recovery target for cascade_exhausted on local Ollama lanes.
+# Referenced by keeper turn disposition (test_keeper_turn_disposition.ml:280)
+# and by error classifier fallback hints (test_keeper_error_classify_recoverable.ml:187).
+tiers = ["tier_medium", "primary", "__safe_lane"]
+strategy = "priority_tier"
+fallback = true
+
+[tier-group.provider_benchmark]
+# Sweep lane for full provider inventory performance measurement
+# (docs/CASCADE-ROUTES.md §sweep). Background only; isolated from
+# production fallback chains to avoid resource contention with live work.
+tiers = ["primary", "keeper_diverse", "__safe_lane"]
+strategy = "priority_tier"
+fallback = true
+keeper-assignable = false
+
 # ── Routes (logical usage → tier-group) ────────────────────────
 #
 # RFC-0058 §4 R6: route targets resolve to tier-groups, tiers,

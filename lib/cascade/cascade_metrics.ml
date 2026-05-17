@@ -858,10 +858,12 @@ let metric_cascade_metrics_eviction =
 let on_cascade_metrics_eviction () =
   Prometheus.inc_counter metric_cascade_metrics_eviction ()
 
-(* Legacy iter-46 counter retained for metric compatibility.  DD-020
-   replaced runtime max_tokens clipping with a structured
-   [max_tokens_ceiling_violation] pre-dispatch error, so this counter
-   should stay at zero on current code paths. *)
+(* Counts max_tokens budgets reduced to the resolved cascade output ceiling.
+   DD-020 originally treated all over-ceiling budgets as structured
+   [max_tokens_ceiling_violation] errors.  The 2026-05-17 multilane cascade
+   rollout showed that internal cascade-config/fallback/keeper override
+   budgets must be normalized before dispatch because the narrowest failover
+   member can be lower than the caller-visible primary route. *)
 let metric_max_tokens_clamped = "masc_cascade_max_tokens_clamped_total"
 
 let on_max_tokens_clamped () =

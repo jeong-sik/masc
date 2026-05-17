@@ -564,6 +564,11 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
          ~agent_name
          ~task_id)
   | Agent_sdk.Event_bus.AgentCompleted { agent_name; task_id; elapsed; result } ->
+    (* RFC-0004 Phase A0.1 PR-3b: migrated to Sse_event.agent_completed
+       with a caller-supplied addendum.  The leaf event library stays
+       free of [Agent_sdk] dependencies -- [agent_completed_result_fields]
+       remains here because it closes over [Agent_sdk.Types.api_response]
+       and the cost-observation Prometheus side effect. *)
     (match result with
      | Ok (response : Agent_sdk.Types.api_response) ->
        let provider =
@@ -577,25 +582,25 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
        in
        observe_inference_cost ~provider ~model_bucket cost_usd
      | Error _ -> ());
-    let payload =
-      `Assoc
-        ([ "agent_name", `String agent_name
-         ; "task_id", `String task_id
-         ; "elapsed_s", `Float elapsed
-         ]
-         @ agent_completed_result_fields result)
-    in
-    Some (wrap ~event_type:"agent_completed" ~payload ~agent_name ~task_id ())
+    Some
+      (Sse_event.agent_completed
+         ~ts_unix:ts
+         ~correlation_id
+         ~run_id
+         ~agent_name
+         ~task_id
+         ~elapsed_s:elapsed
+         ~result_fields:(agent_completed_result_fields result))
   | Agent_sdk.Event_bus.AgentFailed { agent_name; task_id; error; elapsed } ->
-    let payload =
-      `Assoc
-        ([ "agent_name", `String agent_name
-         ; "task_id", `String task_id
-         ; "elapsed_s", `Float elapsed
-         ]
-         @ agent_failed_error_fields error)
-    in
-    Some (wrap ~event_type:"agent_failed" ~payload ~agent_name ~task_id ())
+    Some
+      (Sse_event.agent_failed
+         ~ts_unix:ts
+         ~correlation_id
+         ~run_id
+         ~agent_name
+         ~task_id
+         ~elapsed_s:elapsed
+         ~error_fields:(agent_failed_error_fields error))
   | Agent_sdk.Event_bus.ToolCalled { agent_name; tool_name; _ } ->
     (* RFC-0004 Phase A0.1 PR-3 *)
     Some

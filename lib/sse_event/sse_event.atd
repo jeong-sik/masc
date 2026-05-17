@@ -106,3 +106,34 @@ type slot_scheduler_observed_payload = {
   queue_length: int;
   state: string;
 }
+
+(* PR-3b events: agent_completed, agent_failed.
+
+   These two events carry a variable-shape payload tail beyond the
+   three base fields (agent_name, task_id, elapsed_s).  The tail is
+   produced by cascade-local helpers that close over Agent_sdk
+   variant types (Agent_sdk.Types.api_response, Agent_sdk.Error.t,
+   Keeper_agent_error / Keeper_turn_terminal_code).
+
+   Bringing those variant types into a leaf event library would
+   force Agent_sdk dependency on the leaf -- the same boundary
+   violation that motivated splitting agent_completed / agent_failed
+   off of PR-3.
+
+   Design choice: atd encodes the three base fields only, and the
+   typed constructor in [Sse_event] accepts a caller-supplied
+   [(string * Yojson.Safe.t) list] addendum which is appended to
+   the atd record output.  Byte-equality with the previous inline
+   `Assoc-construction path is verified in test_sse_event.ml. *)
+
+type agent_completed_payload = {
+  agent_name: string;
+  task_id: string;
+  elapsed_s: float;
+}
+
+type agent_failed_payload = {
+  agent_name: string;
+  task_id: string;
+  elapsed_s: float;
+}

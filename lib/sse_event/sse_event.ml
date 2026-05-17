@@ -481,3 +481,94 @@ let slot_scheduler_observed
     }
     payload_json
 ;;
+
+(** Append a caller-supplied addendum to an atd-emitted record JSON.
+
+    Used by [agent_completed] and [agent_failed] to splice the
+    cascade-local Result/Error projection ([result_fields] /
+    [error_fields]) onto the typed base record without forcing the
+    leaf event library to depend on [Agent_sdk] variant types.
+
+    Field order is [<base record fields in atd declaration order> @
+    <addendum>], which matches the previous inline `Assoc path in
+    [cascade_event_bridge.ml] and is the property the byte-equal
+    tests in [test_sse_event.ml] pin against. *)
+let merge_addendum_into_record
+      (record_json : Yojson.Safe.t)
+      (addendum : (string * Yojson.Safe.t) list)
+  : Yojson.Safe.t
+  =
+  match record_json with
+  | `Assoc base -> `Assoc (base @ addendum)
+  | _ ->
+    invalid_arg
+      "Sse_event.merge_addendum_into_record: atdgen record JSON must be `Assoc"
+;;
+
+(** Emit an [agent_completed] envelope.  The cascade arm in
+    [cascade_event_bridge.ml] retains its [observe_inference_cost]
+    side effect (Prometheus histogram) and invokes
+    [agent_completed_result_fields result] to project the
+    [Agent_sdk] [Result.t] into the [result_fields] addendum. *)
+let agent_completed
+      ~(ts_unix : float)
+      ~(correlation_id : string)
+      ~(run_id : string)
+      ~(agent_name : string)
+      ~(task_id : string)
+      ~(elapsed_s : float)
+      ~(result_fields : (string * Yojson.Safe.t) list)
+  : Yojson.Safe.t
+  =
+  let base_json =
+    let p : Sse_event_t.agent_completed_payload =
+      { agent_name; task_id; elapsed_s }
+    in
+    Yojson.Safe.from_string (Sse_event_j.string_of_agent_completed_payload p)
+  in
+  let payload_json = merge_addendum_into_record base_json result_fields in
+  wrap_envelope
+    { event_type = "agent_completed"
+    ; ts_unix
+    ; correlation_id
+    ; run_id
+    ; agent_name = Some agent_name
+    ; task_id = Some task_id
+    ; turn = None
+    ; tool_name = None
+    }
+    payload_json
+;;
+
+(** Emit an [agent_failed] envelope.  The cascade arm invokes
+    [agent_failed_error_fields error] to project the [Agent_sdk]
+    [Error.t] into the [error_fields] addendum. *)
+let agent_failed
+      ~(ts_unix : float)
+      ~(correlation_id : string)
+      ~(run_id : string)
+      ~(agent_name : string)
+      ~(task_id : string)
+      ~(elapsed_s : float)
+      ~(error_fields : (string * Yojson.Safe.t) list)
+  : Yojson.Safe.t
+  =
+  let base_json =
+    let p : Sse_event_t.agent_failed_payload =
+      { agent_name; task_id; elapsed_s }
+    in
+    Yojson.Safe.from_string (Sse_event_j.string_of_agent_failed_payload p)
+  in
+  let payload_json = merge_addendum_into_record base_json error_fields in
+  wrap_envelope
+    { event_type = "agent_failed"
+    ; ts_unix
+    ; correlation_id
+    ; run_id
+    ; agent_name = Some agent_name
+    ; task_id = Some task_id
+    ; turn = None
+    ; tool_name = None
+    }
+    payload_json
+;;

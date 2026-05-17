@@ -4,7 +4,7 @@
 #
 # Modes:
 #   (default)          test/ scan for fake-test patterns (Alcotest assertions)
-#   --production-scan  lib/  scan for silent-failure anti-patterns (RFC-0097 §3.4)
+#   --production-scan  lib/  scan for silent-failure anti-patterns (RFC-0098 §3.4)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -23,7 +23,7 @@ if ! command -v rg >/dev/null 2>&1; then
 fi
 
 if [ "$MODE" = "production-scan" ]; then
-  # RFC-0097 §3.4 — production-code silent-failure scan against lib/.
+  # RFC-0098 §3.4 — production-code silent-failure scan against lib/.
   # Baseline is captured in scripts/lint/silent-skip-grandfather.txt;
   # any new occurrence outside the grandfather list fails the gate.
   GRANDFATHER="scripts/lint/silent-skip-grandfather.txt"
@@ -32,7 +32,7 @@ if [ "$MODE" = "production-scan" ]; then
     exit 2
   fi
 
-  echo "=== Production Silent-Failure Scan (RFC-0097) ==="
+  echo "=== Production Silent-Failure Scan (RFC-0098) ==="
   echo ""
 
   # Build the grandfather allow-list of "path:line" pairs.
@@ -49,7 +49,7 @@ if [ "$MODE" = "production-scan" ]; then
   # Pattern 1: ignore (Error _) — HARD FAIL on any occurrence.
   IGNORE_ERROR_HITS=$(rg -n --type ocaml -e 'ignore \(Error ' lib/ 2>/dev/null || true)
   if [ -n "$IGNORE_ERROR_HITS" ]; then
-    echo "FAIL: \`ignore (Error _)\` is unconditional silent-skip (RFC-0097 §3.4)."
+    echo "FAIL: \`ignore (Error _)\` is unconditional silent-skip (RFC-0098 §3.4)."
     echo "      Baseline is 0; new occurrences must propagate the Result."
     echo "$IGNORE_ERROR_HITS"
     FAIL=$((FAIL + 1))
@@ -63,7 +63,7 @@ if [ "$MODE" = "production-scan" ]; then
       key=$(printf '%s' "$line" | awk -F: '{print $1":"$2}')
       if ! printf '%s\n' "$ALLOW" | grep -Fxq "$key"; then
         echo "FAIL: ungrandfathered silent-skip at $key"
-        echo "      (RFC-0097 §3.4 — add to $GRANDFATHER with Quiet justification,"
+        echo "      (RFC-0098 §3.4 — add to $GRANDFATHER with Quiet justification,"
         echo "       or migrate to typed propagation)"
         echo "      $line"
         FAIL=$((FAIL + 1))
@@ -99,7 +99,7 @@ if [ "$MODE" = "production-scan" ]; then
       key=$(printf '%s' "$line" | awk -F: '{print $1":"$2}')
       if ! printf '%s\n' "$ALLOW" | grep -Fxq "$key"; then
         echo "FAIL: ungrandfathered try-with-underscore-unit at $key"
-        echo "      (RFC-0097 §3.4)"
+        echo "      (RFC-0098 §3.4)"
         echo "      $line"
         FAIL=$((FAIL + 1))
       fi
@@ -109,7 +109,7 @@ if [ "$MODE" = "production-scan" ]; then
   # Pattern 4: let _ = ... |> Result.bind — HARD FAIL on any occurrence.
   RB_HITS=$(rg -n --type ocaml -e 'let _ = .*\|> Result\.bind' lib/ 2>/dev/null || true)
   if [ -n "$RB_HITS" ]; then
-    echo "FAIL: \`let _ = ... |> Result.bind\` discards a chained Result (RFC-0097 §3.4)."
+    echo "FAIL: \`let _ = ... |> Result.bind\` discards a chained Result (RFC-0098 §3.4)."
     echo "$RB_HITS"
     FAIL=$((FAIL + 1))
   fi

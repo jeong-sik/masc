@@ -147,7 +147,7 @@ val respond_mcp_error :
 (** [respond_mcp_error ?extra_headers ?data ?id ~deps request reqd
     ~session_id ~protocol_version ~code msg] writes a single JSON-RPC
     2.0 error response derived from a typed {!Mcp_error_code.t}. This
-    is the {b RFC-0097 SSOT} for transport-boundary error envelopes;
+    is the {b RFC-0098 SSOT} for transport-boundary error envelopes;
     new call sites SHOULD use this in preference to the per-code
     factories below.
 
@@ -169,7 +169,7 @@ val respond_mcp_error :
     function never raises (uses the same safe_respond_with_string
     helper as the legacy factories).
 
-    PR-1 (RFC-0097) introduces this SSOT in parallel with the legacy
+    PR-1 (RFC-0098) introduces this SSOT in parallel with the legacy
     four factories. PR-2 migrates the legacy factories to thin
     delegations and marks them [@@deprecated]. *)
 

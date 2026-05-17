@@ -1,4 +1,4 @@
-(** Uniqueness + range tests for [Mcp_error_code.t] (RFC-0097).
+(** Uniqueness + range tests for [Mcp_error_code.t] (RFC-0098).
 
     These tests pin the closed-variant contract: every constructor maps
     to a unique wire integer, every wire integer lies in the

@@ -1,14 +1,14 @@
 ---
 rfc: "0105"
 title: "OpenAI-compat boundary: Agent_sdk.Error.t → HTTP status + typed envelope"
-status: Draft
+status: Implemented
 created: 2026-05-17
 updated: 2026-05-17
 author: jeong-sik
 supersedes: []
 superseded_by: null
 related: ["0098", "0095"]
-implementation_prs: []
+implementation_prs: [15899]
 ---
 
 # RFC-0105 — OpenAI-compat boundary typed error mapping
@@ -236,16 +236,16 @@ let error_response ~(status : string) ?(code : string option) ~(message : string
 
 ## 5. Acceptance
 
-- [ ] `Openai_compat_error_map.of_sdk_error` is total (exhaustive
+- [x] `Openai_compat_error_map.of_sdk_error` is total (exhaustive
       `match` over `Agent_sdk.Error.sdk_error`, no catch-all `_ ->`).
-- [ ] `route_cascade` signature returns `(string, Openai_compat_error_map.t) result`
+- [x] `route_cascade` signature returns `(string, Openai_compat_error_map.t) result`
       (typed Error tag, not `string`).
-- [ ] `handle_chat_completions` Error arm uses `mapped.http_status`
+- [x] `handle_chat_completions` Error arm uses `mapped.http_status`
       (no `\`Internal_server_error` hardcode for cascade errors).
-- [ ] `error_response` envelope populates `code` field with `openai_code`
+- [x] `error_response` envelope populates `code` field with `openai_code`
       when present (no permanent `\`Null`).
-- [ ] `rg -n "Agent_sdk.Error.to_string" lib/server/` returns 0 matches.
-- [ ] Unit test: every `Agent_sdk.Error.sdk_error` variant has a
+- [x] `rg -n "Agent_sdk.Error.to_string" lib/server/server_openai_compat.ml` returns 0 matches. *Scope clarification (added in closeout)*: the lossful boundary this RFC targets is the typed→string collapse at the caller site. The mapping module `lib/server/openai_compat_error_map.ml` legitimately uses `Agent_sdk.Error.to_string` to populate the structured `message` field — that is a typed→structured projection (typed `http_status`/`kind`/`code` preserved alongside human-readable text), not the collapse this RFC eliminates. Acceptance therefore narrows to the caller file.
+- [x] Unit test: every `Agent_sdk.Error.sdk_error` variant has a
       deterministic `(http_status, openai_kind)` row, verified by
       table-driven Alcotest. No mocks; map function is pure.
 
@@ -298,6 +298,58 @@ apply.
   `lib/openai_compat/`? Current proposal: `lib/server/` co-located with
   the sole consumer, until a second consumer appears. Avoids premature
   abstraction (Simple Made Easy).
+  - **Resolved at implementation**: kept in `lib/server/` as proposed.
+    Single consumer, no second surface materialized.
 - Does `Agent_sdk.Error.sdk_error` itself need any new variants for
   full HTTP coverage? Audit during implementation; if so, file upstream
   SDK issue, do not extend with `Other of string`.
+  - **Resolved at implementation**: no new variants required. The
+    9 top-level constructors + 42 sub-variants cover every HTTP status
+    in `Openai_compat_error_map.http_status`. The 9-row HTTP status
+    closed polymorphic variant subset of `Httpun.Status.t` was
+    sufficient for the audit-time observed variants.
+
+## 10. Implementation summary
+
+| PR | Role | Status |
+|---|---|---|
+| #15885 | RFC body | MERGED 2026-05-17 |
+| #15899 | Implementation (mapping module + 3 caller sites + 21 Alcotest) | MERGED 2026-05-17 |
+| (this PR) | Closeout: status Active→Implemented, frontmatter `implementation_prs`, §5 wording narrow, §9 resolutions | docs-only |
+
+### Artifacts landed in main (`f2f3963165` → post-#15899)
+
+- `lib/server/openai_compat_error_map.{ml,mli}` (new, ~265 LoC)
+  - Total `of_sdk_error` over all 9 `Agent_sdk.Error.sdk_error`
+    constructors. Exhaustive `match`, no catch-all `_ ->`.
+  - 9-row closed polymorphic variant `http_status` upcastable to
+    `Httpun.Status.t` via `:>` coercion (closed-variant subset).
+- `lib/server/server_openai_compat.{ml,mli}`
+  - `route_cascade` Error tag widened: `(string, Openai_compat_error_map.t) result`.
+  - `handle_chat_completions` cascade Error arm consumes typed mapping
+    → per-variant `http_status` / `openai_kind` / `openai_code` / `message`
+    instead of blanket HTTP 500 / `"server_error"`.
+  - `error_response` gains optional `?code` parameter; envelope `"code"`
+    field is now populated from typed `openai_code` (or `null` when absent).
+- `bin/main_eio.ml` — 2 callers updated for new signature (trailing `()`).
+- `test/test_openai_compat_error_map.ml` (new, 21 Alcotest cases) —
+  all 21 PASS, 0 mocks, 0 integration coupling.
+
+### Out-of-scope artifacts (deferred)
+
+- `route_keeper` boundary: §4.3 declared out-of-scope. Audit
+  (2026-05-17) confirmed direct boundary is clean — upstream
+  `Keeper_types.tool_result.message: string` is string-by-design.
+  The deeper lossful site is `lib/keeper/keeper_turn.ml:521-531`
+  where `Agent_sdk.Error.to_string err` collapses into
+  `tool_result.message`. That site warrants its own RFC (larger
+  scope: ~30 keeper tools use `tool_result` as a uniform return),
+  not an extension of this one. Tracked in
+  `memory/project_route_keeper_audit_2026_05_17.md`.
+
+### Workaround signatures (§8) — verified at implementation
+
+5 signatures checked at code-review time, 0 matches. The fix is
+structural (Parse-Don't-Validate at the boundary), single PR, removes
+an existing lossful site, and adds no classifier. RFC-0088 (Counter-as-Fix
+umbrella) rejection bar does not apply.

@@ -249,6 +249,47 @@ let test_two_handles_share_mutex () =
       with e -> failf "invalid JSON: %s" (Printexc.to_string e))
     lines
 
+(* ── Scenario 5: path spellings collapse to one mutex (Codex P1 #15906) ── *)
+
+let test_path_spelling_collapse () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let dir = tmpdir "jsonl_atomic_spelling" in
+  (* Same file via two different spellings: with and without a "./"
+     prefix on the leading segment. canonicalize_path should fold
+     them into the same registry key, so the two writers serialize
+     against each other. *)
+  let path_a = Filename.concat dir "out.jsonl" in
+  let path_b = Filename.concat (Filename.concat dir ".") "out.jsonl" in
+  let fs = Eio.Stdenv.fs env in
+  let wa = Jsonl_atomic.open_writer ~sw ~fs ~path:path_a in
+  let wb = Jsonl_atomic.open_writer ~sw ~fs ~path:path_b in
+  let n = 500 in
+  Eio.Fiber.both
+    (fun () ->
+      for i = 0 to n - 1 do
+        match Jsonl_atomic.append wa (`Assoc [("h", `String "a"); ("i", `Int i)]) with
+        | Ok () -> ()
+        | Error (`Io m) -> failwith m
+      done)
+    (fun () ->
+      for i = 0 to n - 1 do
+        match Jsonl_atomic.append wb (`Assoc [("h", `String "b"); ("i", `Int i)]) with
+        | Ok () -> ()
+        | Error (`Io m) -> failwith m
+      done);
+  Jsonl_atomic.close wa;
+  Jsonl_atomic.close wb;
+  let lines = read_lines path_a in
+  check int "both spellings wrote to one file" (2 * n) (List.length lines);
+  (* And every line is valid JSON — if the two spellings had used
+     different mutexes, race-induced corruption would surface here. *)
+  List.iter
+    (fun line ->
+      try ignore (Yojson.Safe.from_string line)
+      with e -> failf "invalid JSON: %s" (Printexc.to_string e))
+    lines
+
 let () =
   Alcotest.run
     "jsonl_atomic"
@@ -259,5 +300,6 @@ let () =
           test_case "PIPE_BUF-exceeding records" `Quick test_large_records;
           test_case "multibyte boundary stress" `Quick test_multibyte_boundary;
           test_case "two handles share mutex" `Quick test_two_handles_share_mutex;
+          test_case "path spellings collapse" `Quick test_path_spelling_collapse;
         ] );
     ]

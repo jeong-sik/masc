@@ -26,12 +26,20 @@ val open_writer :
   path:string ->
   t
 (** [open_writer ~sw ~fs ~path] returns a writer for [path]. The
-    parent directory is created if missing. The underlying fd is owned
-    by [sw] and is closed when [sw] ends (or earlier via {!close}).
+    parent directory is created via [Eio.Path.mkdirs] within the
+    provided [fs] root (so scoped filesystem handles work
+    correctly). The underlying fd is owned by [sw] and is closed when
+    [sw] ends (or earlier via {!close}).
 
-    Calling [open_writer] twice for the same [path] returns two
-    distinct handles that share the same per-path mutex — concurrent
-    appends through either handle remain serialized. *)
+    Calling [open_writer] twice for the same effective path returns
+    two distinct handles that share the same per-path mutex —
+    concurrent appends through either handle remain serialized. The
+    mutex key is the canonicalized form of [path] (relative paths
+    are anchored at the process cwd at call time, and ["."] / [".."]
+    segments are resolved), so different spellings of the same file
+    share serialization. Symlink resolution is *not* applied — two
+    paths whose only difference is a symlink hop are treated as
+    distinct. *)
 
 val append : t -> Yojson.Safe.t -> (unit, [`Io of string]) result
 (** [append t json] appends [json] as a single JSONL line. Returns

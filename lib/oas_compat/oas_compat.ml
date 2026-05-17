@@ -260,8 +260,6 @@ module Metrics = struct
       ~inter_chunk_ms:_ =
     ()
 
-  let default_tool_calls ~provider:_ ~model_id:_ ~count:_ = ()
-
   let make ?(on_cache_hit = default_model_hook)
       ?(on_cache_miss = default_model_hook)
       ?(on_request_start = default_model_hook)
@@ -272,8 +270,7 @@ module Metrics = struct
       ?(on_retry = default_retry) ?(on_token_usage = default_token_usage)
       ?(on_tool_calls = default_tool_calls)
       ?(on_streaming_first_chunk = default_streaming_first_chunk)
-      ?(on_streaming_chunk = default_streaming_chunk)
-      ?(on_tool_calls = default_tool_calls) ()
+      ?(on_streaming_chunk = default_streaming_chunk) ()
       : Llm_provider.Metrics.t =
     {
       on_cache_hit;
@@ -289,6 +286,5 @@ module Metrics = struct
       on_tool_calls;
       on_streaming_first_chunk;
       on_streaming_chunk;
-      on_tool_calls;
     }
 end

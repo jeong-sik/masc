@@ -11,6 +11,8 @@ import type {
   DashboardConfigResolutionItem,
   DashboardFleetPressureHealth,
   DashboardFleetSafetyHealth,
+  DashboardKeeperReactionLedgerHealth,
+  DashboardKeeperReactionLedgerPendingKeeper,
   DashboardRuntimeDiagnostic,
   DashboardRuntimeResolution,
   KeeperRuntimeResolved,
@@ -635,18 +637,99 @@ function normalizeDashboardFleetPressureHealth(raw: unknown): DashboardFleetPres
   }
 }
 
+function normalizeDashboardKeeperReactionLedgerPendingKeeper(
+  raw: unknown,
+): DashboardKeeperReactionLedgerPendingKeeper | null {
+  if (!isRecord(raw)) return null
+  const keeperName = asString(raw.keeper_name)
+  const pendingStimulusCount = asNumber(raw.pending_stimulus_count)
+  if (!keeperName || pendingStimulusCount == null) return null
+  return {
+    keeper_name: keeperName,
+    pending_stimulus_count: pendingStimulusCount,
+    pending_stimulus_ids: asStringArray(raw.pending_stimulus_ids),
+  }
+}
+
+function normalizeDashboardKeeperReactionLedgerHealth(
+  raw: unknown,
+): DashboardKeeperReactionLedgerHealth | null {
+  if (!isRecord(raw)) return null
+  const status = asString(raw.status) ?? null
+  const operatorActionRequired = asBoolean(raw.operator_action_required) ?? null
+  const keeperCount = asNumber(raw.keeper_count)
+  const rowCount = asNumber(raw.row_count)
+  const stimulusCount = asNumber(raw.stimulus_count)
+  const reactionCount = asNumber(raw.reaction_count)
+  const turnStartedCount = asNumber(raw.turn_started_count)
+  const cursorAckCount = asNumber(raw.cursor_ack_count)
+  const executionReceiptCount = asNumber(raw.execution_receipt_count)
+  const terminalReasonCount = asNumber(raw.terminal_reason_count)
+  const operatorEscalationCount = asNumber(raw.operator_escalation_count)
+  const unknownReactionCount = asNumber(raw.unknown_reaction_count)
+  const cursorSweptStimulusCount = asNumber(raw.cursor_swept_stimulus_count)
+  const legacyCursorSweptStimulusCount = asNumber(raw.legacy_cursor_swept_stimulus_count)
+  const pendingStimulusCount = asNumber(raw.pending_stimulus_count)
+  const readErrorCount = asNumber(raw.read_error_count)
+  const pendingByKeeper = (Array.isArray(raw.pending_by_keeper) ? raw.pending_by_keeper : [])
+    .map(normalizeDashboardKeeperReactionLedgerPendingKeeper)
+    .filter((item): item is DashboardKeeperReactionLedgerPendingKeeper => item !== null)
+  if (
+    status == null
+    && operatorActionRequired == null
+    && keeperCount == null
+    && rowCount == null
+    && stimulusCount == null
+    && reactionCount == null
+    && turnStartedCount == null
+    && cursorAckCount == null
+    && executionReceiptCount == null
+    && terminalReasonCount == null
+    && operatorEscalationCount == null
+    && unknownReactionCount == null
+    && cursorSweptStimulusCount == null
+    && legacyCursorSweptStimulusCount == null
+    && pendingStimulusCount == null
+    && readErrorCount == null
+    && pendingByKeeper.length === 0
+  ) {
+    return null
+  }
+  return {
+    status,
+    operator_action_required: operatorActionRequired,
+    keeper_count: keeperCount ?? null,
+    row_count: rowCount ?? null,
+    stimulus_count: stimulusCount ?? null,
+    reaction_count: reactionCount ?? null,
+    turn_started_count: turnStartedCount ?? null,
+    cursor_ack_count: cursorAckCount ?? null,
+    execution_receipt_count: executionReceiptCount ?? null,
+    terminal_reason_count: terminalReasonCount ?? null,
+    operator_escalation_count: operatorEscalationCount ?? null,
+    unknown_reaction_count: unknownReactionCount ?? null,
+    cursor_swept_stimulus_count: cursorSweptStimulusCount ?? null,
+    legacy_cursor_swept_stimulus_count: legacyCursorSweptStimulusCount ?? null,
+    pending_stimulus_count: pendingStimulusCount ?? null,
+    read_error_count: readErrorCount ?? null,
+    pending_by_keeper: pendingByKeeper,
+  }
+}
+
 function normalizeDashboardFleetSafetyHealth(raw: Record<string, unknown>): DashboardFleetSafetyHealth | null {
   const keeperFibers = asNumber(raw.keeper_fibers)
   const pausedKeepers = asNumber(raw.paused_keepers)
   const noFibers = asBoolean(raw.keeper_fleet_no_fibers)
   const fdPressure = normalizeDashboardFleetPressureHealth(raw.keeper_fd_pressure)
   const fleetSafety = normalizeDashboardFleetPressureHealth(raw.keeper_fleet_safety)
+  const reactionLedger = normalizeDashboardKeeperReactionLedgerHealth(raw.keeper_reaction_ledger)
   if (
     keeperFibers == null
     && pausedKeepers == null
     && noFibers == null
     && fdPressure == null
     && fleetSafety == null
+    && reactionLedger == null
   ) {
     return null
   }
@@ -656,6 +739,7 @@ function normalizeDashboardFleetSafetyHealth(raw: Record<string, unknown>): Dash
     keeper_fleet_no_fibers: noFibers ?? null,
     keeper_fd_pressure: fdPressure,
     keeper_fleet_safety: fleetSafety,
+    keeper_reaction_ledger: reactionLedger,
   }
 }
 

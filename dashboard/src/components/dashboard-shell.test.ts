@@ -151,4 +151,79 @@ describe('dashboardHealthChips', () => {
     })])
     expect(chips[0]?.detail).toContain('blocking 24 keepers')
   })
+
+  it('surfaces reaction ledger cursor sweeps even when pending backlog is clear', () => {
+    const chips = dashboardHealthChips({
+      connected: true,
+      counts: { keepers: 2, configured_keepers: 2 },
+      keepers: [],
+      runtimeResolution: {
+        status: 'ready',
+        warnings: [],
+        fleet_safety: {
+          keeper_fibers: null,
+          paused_keepers: null,
+          keeper_fleet_no_fibers: null,
+          keeper_fd_pressure: null,
+          keeper_fleet_safety: null,
+          keeper_reaction_ledger: {
+            status: 'ok',
+            operator_action_required: false,
+            cursor_ack_count: 4,
+            cursor_swept_stimulus_count: 3,
+            legacy_cursor_swept_stimulus_count: 1,
+            pending_stimulus_count: 0,
+            read_error_count: 0,
+          },
+        },
+      } as any,
+      executionError: null,
+      loading: false,
+    })
+
+    expect(chips).toEqual([expect.objectContaining({
+      key: 'reaction-ledger',
+      label: 'Reaction ledger swept 4',
+      tone: 'ok',
+    })])
+    expect(chips[0]?.detail).toContain('cursor_swept=3')
+    expect(chips[0]?.detail).toContain('legacy_swept=1')
+  })
+
+  it('warns on real reaction ledger pending backlog', () => {
+    const chips = dashboardHealthChips({
+      connected: true,
+      counts: { keepers: 2, configured_keepers: 2 },
+      keepers: [],
+      runtimeResolution: {
+        status: 'ready',
+        warnings: [],
+        fleet_safety: {
+          keeper_fibers: null,
+          paused_keepers: null,
+          keeper_fleet_no_fibers: null,
+          keeper_fd_pressure: null,
+          keeper_fleet_safety: null,
+          keeper_reaction_ledger: {
+            status: 'degraded',
+            operator_action_required: true,
+            cursor_ack_count: 4,
+            cursor_swept_stimulus_count: 3,
+            legacy_cursor_swept_stimulus_count: 1,
+            pending_stimulus_count: 2,
+            read_error_count: 0,
+          },
+        },
+      } as any,
+      executionError: null,
+      loading: false,
+    })
+
+    expect(chips).toEqual([expect.objectContaining({
+      key: 'reaction-ledger',
+      label: 'Reaction ledger pending 2',
+      tone: 'warn',
+    })])
+    expect(chips[0]?.detail).toContain('pending=2')
+  })
 })

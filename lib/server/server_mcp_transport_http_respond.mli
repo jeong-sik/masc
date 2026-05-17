@@ -47,13 +47,22 @@ val respond_mcp_auth_error :
     ~session_id ~protocol_version msg] writes a JSON-RPC 2.0 error
     response with code [-32001] and HTTP status [401 Unauthorized].
 
+    {b RFC-0097 PR-2 (this PR)}: now delegates to {!respond_mcp_error}
+    with [~code:Auth_error]. New call sites SHOULD prefer
+    {!respond_mcp_error}. A follow-up PR-2.1 will migrate all in-tree
+    callers and add a [\[@@deprecated\]] alert.
+
     The response always carries [www-authenticate: Bearer]; this is
     pinned because the MCP client SDKs key off the literal challenge
     string when deciding whether to re-prompt for a token.  A future
     "support digest auth" change must extend the contract explicitly.
 
     [extra_headers] are prepended (operator-visible HTTP headers),
-    {!json_headers} append.  The function never raises. *)
+    {!json_headers} append.  The function never raises.
+
+    {b RFC-0097 PR-2 wire-byte change}: response body now contains
+    [["id":null]] per JSON-RPC 2.0 §5.1 (was previously omitted —
+    spec violation). *)
 
 val respond_mcp_internal_error :
   ?extra_headers:(string * string) list ->
@@ -69,10 +78,19 @@ val respond_mcp_internal_error :
     response with code [-32603] (the standard "Internal error" slot)
     and HTTP status [500 Internal Server Error].
 
+    {b RFC-0097 PR-2 (this PR)}: now delegates to {!respond_mcp_error}
+    with [~code:Internal_error]. New call sites SHOULD prefer
+    {!respond_mcp_error} and a more specific code variant where one
+    fits (e.g. [Provider_timeout], [Tool_dispatch_failure]).
+
     Used as the catch-all for runtime failures the transport cannot
     classify more precisely.  The wording of [msg] is operator-visible
     in JSON bodies — callers should keep it stable across builds so
-    grep alerts remain valid. *)
+    grep alerts remain valid.
+
+    {b RFC-0097 PR-2 wire-byte change}: response body now contains
+    [["id":null]] per JSON-RPC 2.0 §5.1 (was previously omitted —
+    spec violation). *)
 
 val respond_not_ready :
   deps:Server_mcp_transport_http_types.deps ->
@@ -130,7 +148,28 @@ val mcp_internal_error_json : ?id:Yojson.Safe.t -> string -> Yojson.Safe.t
     suitable for embedding in an SSE batch frame or a multi-response
     array.  When [id] is omitted, the field is set to [`Null] (per
     JSON-RPC 2.0 §5.1 — error responses must echo back the request id
-    or [null] when it cannot be parsed). *)
+    or [null] when it cannot be parsed).
+
+    {b RFC-0097 PR-2}: now delegates to {!error_body} with
+    [~code:Internal_error]. Wire bytes unchanged. *)
+
+val error_body :
+  ?id:Yojson.Safe.t ->
+  ?data:Yojson.Safe.t ->
+  code:Mcp_error_code.t ->
+  string ->
+  Yojson.Safe.t
+(** [error_body ?id ?data ~code msg] builds a JSON-RPC 2.0 error
+    object suitable for either a stand-alone response body or
+    embedding in an SSE batch / multi-response array. Splitting it
+    out makes the wire shape diffable and testable without
+    instantiating an [Httpun.Reqd.t].
+
+    Defaults: [id = `Null] (per JSON-RPC 2.0 §5.1), no [data] field.
+
+    Used internally by {!respond_mcp_error}; exposed here for callers
+    that build SSE batch frames (the {!mcp_internal_error_json}
+    use-case generalised to any {!Mcp_error_code.t}). *)
 
 val respond_mcp_error :
   ?extra_headers:(string * string) list ->

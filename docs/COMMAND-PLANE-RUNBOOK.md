@@ -183,6 +183,57 @@ scripts/harness/workload/agent_swarm_live.sh
 - `logs/keeper_fleet_readiness/<run-id>/summary.md`
 - direct gate: `scripts/keeper-production-readiness-gate.py --json ...`
 
+### Docker Playground FD Hotspot
+
+macOS Docker Desktop can retain file descriptors for shared files under
+`.masc/playground/docker`. When stale keeper repo worktrees accumulate there,
+the hotspot can approach `kern.maxfilesperproc` even while MASC's own process
+FD count and `/health.status` look healthy.
+
+Inspect the current Docker playground fanout and any host process with open FDs
+inside it:
+
+```bash
+scripts/docker-playground-fd-status.sh --root ~/me/.masc/playground/docker
+```
+
+Review stale clean worktree candidates first:
+
+```bash
+scripts/cleanup-docker-playground-worktrees.sh \
+  --root ~/me/.masc/playground/docker \
+  --repo masc-mcp \
+  --days 7
+```
+
+Apply only after reviewing the `CANDID` lines:
+
+```bash
+scripts/cleanup-docker-playground-worktrees.sh \
+  --root ~/me/.masc/playground/docker \
+  --repo masc-mcp \
+  --days 7 \
+  --apply
+```
+
+The cleanup path is conservative: dry-run by default, skips dirty or
+runtime-referenced worktrees, removes clean git worktrees through
+`git worktree remove`, and leaves branches intact.
+
+If the dry-run reports `BROKEN` entries, review them separately. They are not
+removed unless the operator explicitly opts in:
+
+```bash
+scripts/cleanup-docker-playground-worktrees.sh \
+  --root ~/me/.masc/playground/docker \
+  --repo masc-mcp \
+  --days 7 \
+  --include-broken
+```
+
+Then apply with both `--include-broken` and `--apply` only after confirming the
+`BROKEN_CANDID` paths are stale orphan directories.
+
 대표 failure class:
 
 - `keeper_count < expected_keepers`

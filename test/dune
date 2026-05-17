@@ -1434,6 +1434,8 @@
 
 (include stanzas/test_dune_local_script.inc)
 
+(include stanzas/test_docker_playground_gc_script.inc)
+
 (include stanzas/test_env_config_coord_git_local_timeout.inc)
 
 (include stanzas/test_env_config_dashboard_compute_timeouts.inc)

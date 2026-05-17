@@ -8,7 +8,7 @@ open Alcotest
     - lib/cdal_runtime/proof_store.ml: Not_found -> "/tmp" 리터럴 및
       home-level [.oas] fallback 제거. cdal_runtime sub-library는
       masc_mcp 본 라이브러리와 격리되어 있으므로 MASC_BASE_PATH /
-      ME_ROOT / cwd 순서만 직접 사용한다.
+      cwd 순서만 직접 사용한다.
 
     AST-based via Ast_grep. *)
 
@@ -38,18 +38,20 @@ let test_no_home_default_in_proof_store () =
   check int "HOME literal removed from proof_store fallback" 0 n
 ;;
 
-let test_proof_store_uses_base_path_inputs () =
+let test_proof_store_uses_base_path_input_only () =
   let path = "lib/cdal_runtime/proof_store.ml" in
   let masc_base =
     Ast_grep.count_string_literals ~module_path:path ~needle:"MASC_BASE_PATH"
   in
-  let me_root = Ast_grep.count_string_literals ~module_path:path ~needle:"ME_ROOT" in
-  if masc_base < 1 || me_root < 1
+  let legacy_me_root =
+    Ast_grep.count_string_literals ~module_path:path ~needle:(String.concat "" [ "ME"; "_ROOT" ])
+  in
+  if masc_base < 1 || legacy_me_root <> 0
   then
     failf
-      "proof_store fallback should use MASC_BASE_PATH and ME_ROOT, got MASC_BASE_PATH=%d ME_ROOT=%d"
+      "proof_store fallback should use MASC_BASE_PATH only, got MASC_BASE_PATH=%d legacy-root=%d"
       masc_base
-      me_root
+      legacy_me_root
 ;;
 
 let () =
@@ -62,7 +64,10 @@ let () =
     ; ( "proof_store"
       , [ test_case "no /tmp literal" `Quick test_no_tmp_default_in_proof_store
         ; test_case "no HOME literal" `Quick test_no_home_default_in_proof_store
-        ; test_case "uses base-path inputs" `Quick test_proof_store_uses_base_path_inputs
+        ; test_case
+            "uses base-path input only"
+            `Quick
+            test_proof_store_uses_base_path_input_only
         ] )
     ]
 ;;

@@ -67,10 +67,7 @@ let host () =
   let default_workspace_root fallback =
     match get_opt "MASC_BASE_PATH" with
     | Some root -> Env_config_core.normalize_masc_base_path_input root
-    | None ->
-      (match get_opt "ME_ROOT" with
-       | Some root -> root
-       | None -> fallback)
+    | None -> fallback
   in
   { cred_root = Filename.concat tmp "keeper-creds"
   ; host_bash = "/bin/bash"
@@ -171,10 +168,7 @@ let resolve ?base_path () =
   let default_workspace_root fallback =
     match get_opt "MASC_BASE_PATH" with
     | Some root -> Env_config_core.normalize_masc_base_path_input root
-    | None ->
-      (match get_opt "ME_ROOT" with
-       | Some root -> root
-       | None -> fallback)
+    | None -> fallback
   in
   let agent_runtime_root = Filename.concat base ".masc/runtime/agent" in
   let cred_root = Filename.concat base ".masc/credentials" in

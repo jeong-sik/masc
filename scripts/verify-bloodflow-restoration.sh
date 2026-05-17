@@ -44,8 +44,6 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 default_base_path() {
   if [ -n "${MASC_BASE_PATH:-}" ]; then
     printf '%s\n' "$MASC_BASE_PATH"
-  elif [ -n "${ME_ROOT:-}" ]; then
-    printf '%s\n' "$ME_ROOT"
   else
     printf '%s\n' "$ROOT"
   fi

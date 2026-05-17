@@ -162,9 +162,7 @@ is_absolute_path() {
 }
 
 default_base_path() {
-    if [ -n "${ME_ROOT:-}" ]; then
-        printf '%s\n' "$ME_ROOT"
-    elif [ -n "${HOME:-}" ] && [ -d "$HOME/me" ]; then
+    if [ -n "${HOME:-}" ] && [ -d "$HOME/me" ]; then
         printf '%s\n' "$HOME/me"
     else
         printf '%s\n' "$SCRIPT_DIR"
@@ -676,10 +674,8 @@ if [ "$BASE_PATH_EXPLICIT" = "1" ]; then
     BASE_PATH_RESOLUTION_SOURCE="explicit_cli"
 elif [ "$MASC_BASE_PATH_WAS_SET" = "1" ] && is_absolute_path "$BASE_PATH"; then
     BASE_PATH_RESOLUTION_SOURCE="explicit_env"
-elif [ -z "${MASC_BASE_PATH:-}" ] && [ -n "${ME_ROOT:-}" ] && [ "$BASE_PATH" = "$ME_ROOT" ]; then
-    BASE_PATH_RESOLUTION_SOURCE="implicit_me_root"
 elif [ -z "${MASC_BASE_PATH:-}" ] && [ -n "${HOME:-}" ] && [ "$BASE_PATH" = "$HOME/me" ]; then
-    BASE_PATH_RESOLUTION_SOURCE="implicit_me_root"
+    BASE_PATH_RESOLUTION_SOURCE="implicit_home_me"
 fi
 
 if [ "$PORT_EXPLICIT" != "1" ]; then

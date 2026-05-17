@@ -20,10 +20,7 @@ let default_root () =
   let base_path =
     match env_non_empty "MASC_BASE_PATH" with
     | Some path -> path
-    | None ->
-      (match env_non_empty "ME_ROOT" with
-       | Some path -> path
-       | None -> Sys.getcwd ())
+    | None -> Sys.getcwd ()
   in
   Filename.concat base_path ".oas"
 ;;

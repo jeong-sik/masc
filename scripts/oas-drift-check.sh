@@ -52,14 +52,12 @@ resolve_source_dir() {
   # Candidate local repo paths, checked in order:
   #   1. $AGENT_SDK_LOCAL_REPO (explicit opt-in)
   #   2. Sibling checkout: <masc-mcp-parent>/oas
-  #   3. Explicit workspace root: $ME_ROOT/workspace/yousleepwhen/oas
   # Each must be a git checkout at the pinned SHA to qualify.
   local masc_parent
   masc_parent="$(cd "${REPO_ROOT}/.." && pwd)"
   local -a candidates=(
     "${AGENT_SDK_LOCAL_REPO:-}"
     "${masc_parent}/oas"
-    "${ME_ROOT:-}/workspace/yousleepwhen/oas"
   )
   local candidate head
   for candidate in "${candidates[@]}"; do

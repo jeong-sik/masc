@@ -48,10 +48,7 @@ let proof_root_candidates configured_root =
   let maybe_home =
     env_non_empty "HOME" |> Option.map (fun home -> Filename.concat home ".oas")
   in
-  let maybe_me_root =
-    env_non_empty "ME_ROOT" |> Option.map (fun root -> Filename.concat root ".oas")
-  in
-  [ maybe_home; maybe_me_root ]
+  [ maybe_home ]
   |> List.filter_map Fun.id
   |> List.filter (fun root -> not (String.equal root configured_root))
   |> List.sort_uniq String.compare

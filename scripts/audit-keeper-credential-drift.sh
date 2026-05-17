@@ -37,7 +37,7 @@
 #   scripts/audit-keeper-credential-drift.sh [--base-path PATH] [--json]
 #
 # Options:
-#   --base-path PATH   Server base_path (default: MASC_BASE_PATH, ME_ROOT, then cwd)
+#   --base-path PATH   Server base_path (default: MASC_BASE_PATH, then cwd)
 #   --json             Emit machine-readable JSON only (no human report)
 #   -h, --help         Show this help
 set -o pipefail
@@ -51,8 +51,6 @@ set -o pipefail
 default_base_path() {
   if [ -n "${MASC_BASE_PATH:-}" ]; then
     printf '%s\n' "$MASC_BASE_PATH"
-  elif [ -n "${ME_ROOT:-}" ]; then
-    printf '%s\n' "$ME_ROOT"
   else
     pwd
   fi

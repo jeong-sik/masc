@@ -39,7 +39,7 @@ Scope:
 | `MASC_PERSONAS_DIR` | Explicit personas root override. | `Config_dir_resolver`, keeper/persona loading |
 | `MASC_STORAGE_TYPE` | Runtime backend selector. Only `filesystem` is active; PostgreSQL backend was removed. | bootstrap and backend setup |
 | `HOME` | Shell/user-home context for external tools and non-config artifact stores. | Host process environment |
-| `MASC_WORKSPACE_ROOT`, `ME_ROOT`, `DUNE_SOURCEROOT` | Workspace discovery, legacy repo fallback, some knowledge paths, `scripts/sb` resolution. | `Env_config_core`, `autoresearch_knowledge`, legacy paths |
+| `MASC_WORKSPACE_ROOT`, `DUNE_SOURCEROOT` | Workspace discovery and legacy repo fallback. | `Env_config_core`, `autoresearch_knowledge`, legacy paths |
 | `MASC_HOST`, `MASC_HTTP_PORT`, `MASC_HTTP_BASE_URL` | Bind address and derived HTTP endpoint identity. | HTTP/bootstrap/provider routing |
 | `MASC_ADMIN_TOKEN` | Privileged endpoint auth. | server auth |
 
@@ -287,11 +287,11 @@ Compatibility note:
   - `state.json`
   - `swarm.json`
   - `worktree/`
-- `<me_root>/.masc/autoresearch/findings/findings.jsonl`
+- `<base-path>/.masc/autoresearch/findings/findings.jsonl`
 
 Important outlier:
 
-- The findings store is resolved from `ME_ROOT` or `HOME`, not from the room-config runtime root.
+- The findings store should resolve from `MASC_BASE_PATH` or `HOME`, not from the room-config runtime root.
 - Legacy links from team-session artifacts to autoresearch loops may still exist.
 
 ### 3.6 Keepers
@@ -506,7 +506,6 @@ MASC_STORAGE_TYPE
 MASC_TELEMETRY_ENABLED
 MASC_TOOL_AUTH_STRICT
 MASC_WORKSPACE_ROOT
-ME_ROOT
 ```
 
 ### A.2 `env_config_runtime`
@@ -770,5 +769,5 @@ To regenerate the inventories:
 ```bash
 rg -oN '"MASC_[A-Z0-9_]+"' lib/config/env_config_core.ml lib/config/env_config_runtime.ml lib/config/env_config_governance.ml lib/config/env_config_keeper.ml | tr -d '"' | sort -u
 rg -oN '"MASC_[A-Z0-9_]+"' lib bin | tr -d '"' | sort -u
-rg -oN '"(LLAMA_[A-Z0-9_]+|OLLAMA_[A-Z0-9_]+|VOICE_MCP_[A-Z0-9_]+|ME_ROOT|HOME|DUNE_SOURCEROOT)"' lib bin | tr -d '"' | sort -u
+rg -oN '"(LLAMA_[A-Z0-9_]+|OLLAMA_[A-Z0-9_]+|VOICE_MCP_[A-Z0-9_]+|HOME|DUNE_SOURCEROOT)"' lib bin | tr -d '"' | sort -u
 ```

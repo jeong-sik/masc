@@ -11,8 +11,6 @@ default_base_path() {
     printf '%s\n' "$BASE_PATH"
   elif [ -n "${MASC_BASE_PATH:-}" ]; then
     printf '%s\n' "$MASC_BASE_PATH"
-  elif [ -n "${ME_ROOT:-}" ]; then
-    printf '%s\n' "$ME_ROOT"
   else
     printf '%s\n' "$REPO_ROOT"
   fi

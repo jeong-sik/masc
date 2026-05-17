@@ -107,21 +107,34 @@ Contract:
 
 ### 3.3 L3 Switch hierarchy — `run_turn` fresh switch
 
+> **Phase C 복잡도 정정 (2026-05-17)**: 본 절은 초기에 "run_turn 본문을 `Eio.Switch.run` 으로 감싸기 — ~반일" 로 추정됐다. Phase C.0 audit 결과 (`RFC-0107-eio-context-switch-audit.md`) `lib/eio_context/eio_context.ml:84` `get_switch_opt ()` 가 **전역 atomic** 으로 root switch 를 반환하고, **26 callsite** (server/dashboard 9 + keeper-turn 16 + misc 1) 가 이걸 거치므로 naïve wrap 단독으로는 효과가 없음이 드러났다. 실제 wiring 은 별도 Phase C.1 PR 로 분리한다.
+
+**의도된 lifecycle**:
+
 ```ocaml
-(* lib/keeper/keeper_agent_run.ml:196 (Phase C) *)
+(* lib/keeper/keeper_agent_run.ml:196 — Phase C.1 (wiring) *)
 
 let run_turn ... =
   Eio.Switch.run @@ fun turn_sw ->
   (* turn 본체. retry 시 fresh sub-switch 는 try_provider:406 이 이미 보장.
-     turn_sw 는 turn 의 모든 FD 의 절대 상한 lifetime 으로 동작. *)
+     turn_sw 는 turn 의 모든 FD 의 절대 상한 lifetime 으로 동작.
+
+     주의: 단순 wrap 만으로는 부족하다. body 내부 호출이
+     Eio_context.get_switch_opt () 를 거치는 경우 root_sw 로 우회된다.
+     audit §4 의 Option (2)/(3)/(4) 중 결정 필요. *)
   ...
 ```
 
-Invariant (Phase C TLA+ spec):
+**Invariant (Phase C TLA+ spec — `specs/keeper-switch-hierarchy/`)**:
 - For any FD `f` opened during `run_turn`, `f ∈ turn_sw.resources` at any timepoint
 - After `run_turn` returns, `turn_sw.alive = false` ∧ `∀ f. f ∉ turn_sw.resources`
+- **추가 invariant**: `∀ r. r.role = server ⇒ r.attached = root_sw` — server/dashboard fiber 가 fork 한 자원은 *반드시* root_sw 에 attach. 이 invariant 가 buggy.cfg 에서 깨지는 race scenario 가 `ServerForkDuringTurn` (audit §5).
 
 `try_provider:406` 의 attempt switch 는 turn switch 의 *자식* 으로 nested — Eio Switch 가 부모-자식 lifecycle 을 정상 지원하므로 변경 불필요. 주석만 강화.
+
+**Phase C 분할**:
+- **Phase C.0** (본 RFC 와 함께 머지): audit doc + TLA+ spec (clean+buggy). wiring 없음.
+- **Phase C.1** (audit §6 결정 후): Option (2) atomic swap + §2.1 root_sw_ref 분리 *OR* Option (3) fiber-local *OR* Option (4) 명시적 ~sw propagation. critical path 가 아니므로 Phase D pool 머지를 차단하지 않는다.
 
 ### 3.4 L4 Sandbox transport — Docker HTTP API via UDS
 
@@ -146,7 +159,8 @@ sandbox_exec
 | A.0 | Prior Art deep-read | yes (prereq) |
 | A | RFC Draft + push | yes |
 | B | HTTP transport spike + 결정 | yes |
-| C | `run_turn` fresh Switch (TLA+ 포함) | yes (B 와 병행) |
+| C.0 | Audit + TLA+ spec (wiring 없음) | yes (본 RFC 와 함께) |
+| C.1 | run_turn wrap + Option (2/3/4) 결정 wiring | follow-up (critical path 아님) |
 | D | L2 Pool 도입 — user-visible ENFILE 종결 | yes |
 | E | Docker UDS + RFC-0097 활성화 | yes |
 | F | Fd_accountant retirement (30일 production soak 후) | no (long tail) |

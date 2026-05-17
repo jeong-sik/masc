@@ -234,3 +234,250 @@ let turn_ready
     }
     payload_json
 ;;
+
+(** Emit a [handoff_requested] envelope.  Envelope [agent_name] mirrors
+    the [from_agent] field, matching cascade arm at lines 641-649. *)
+let handoff_requested
+      ~(ts_unix : float)
+      ~(correlation_id : string)
+      ~(run_id : string)
+      ~(from_agent : string)
+      ~(to_agent : string)
+      ~(reason : string)
+  : Yojson.Safe.t
+  =
+  let payload_json =
+    let p : Sse_event_t.handoff_requested_payload =
+      { from_agent; to_agent; reason }
+    in
+    Yojson.Safe.from_string (Sse_event_j.string_of_handoff_requested_payload p)
+  in
+  wrap_envelope
+    { event_type = "handoff_requested"
+    ; ts_unix
+    ; correlation_id
+    ; run_id
+    ; agent_name = Some from_agent
+    ; task_id = None
+    ; turn = None
+    ; tool_name = None
+    }
+    payload_json
+;;
+
+(** Emit a [handoff_completed] envelope. *)
+let handoff_completed
+      ~(ts_unix : float)
+      ~(correlation_id : string)
+      ~(run_id : string)
+      ~(from_agent : string)
+      ~(to_agent : string)
+      ~(elapsed_s : float)
+  : Yojson.Safe.t
+  =
+  let payload_json =
+    let p : Sse_event_t.handoff_completed_payload =
+      { from_agent; to_agent; elapsed_s }
+    in
+    Yojson.Safe.from_string (Sse_event_j.string_of_handoff_completed_payload p)
+  in
+  wrap_envelope
+    { event_type = "handoff_completed"
+    ; ts_unix
+    ; correlation_id
+    ; run_id
+    ; agent_name = Some from_agent
+    ; task_id = None
+    ; turn = None
+    ; tool_name = None
+    }
+    payload_json
+;;
+
+(** Emit a [context_compacted] envelope.  Cascade-side side effect
+    (Context_overflow_action_tracker.record_action) is retained in the
+    cascade arm and runs before this constructor. *)
+let context_compacted
+      ~(ts_unix : float)
+      ~(correlation_id : string)
+      ~(run_id : string)
+      ~(agent_name : string)
+      ~(before_tokens : int)
+      ~(after_tokens : int)
+      ~(phase : string)
+  : Yojson.Safe.t
+  =
+  let payload_json =
+    let p : Sse_event_t.context_compacted_payload =
+      { agent_name; before_tokens; after_tokens; phase }
+    in
+    Yojson.Safe.from_string (Sse_event_j.string_of_context_compacted_payload p)
+  in
+  wrap_envelope
+    { event_type = "context_compacted"
+    ; ts_unix
+    ; correlation_id
+    ; run_id
+    ; agent_name = Some agent_name
+    ; task_id = None
+    ; turn = None
+    ; tool_name = None
+    }
+    payload_json
+;;
+
+(** Emit a [context_overflow_imminent] envelope.  Prometheus gauge +
+    tracker side effects stay in the cascade arm. *)
+let context_overflow_imminent
+      ~(ts_unix : float)
+      ~(correlation_id : string)
+      ~(run_id : string)
+      ~(agent_name : string)
+      ~(estimated_tokens : int)
+      ~(limit_tokens : int)
+      ~(ratio : float)
+  : Yojson.Safe.t
+  =
+  let payload_json =
+    let p : Sse_event_t.context_overflow_imminent_payload =
+      { agent_name; estimated_tokens; limit_tokens; ratio }
+    in
+    Yojson.Safe.from_string
+      (Sse_event_j.string_of_context_overflow_imminent_payload p)
+  in
+  wrap_envelope
+    { event_type = "context_overflow_imminent"
+    ; ts_unix
+    ; correlation_id
+    ; run_id
+    ; agent_name = Some agent_name
+    ; task_id = None
+    ; turn = None
+    ; tool_name = None
+    }
+    payload_json
+;;
+
+(** Emit a [context_compact_started] envelope. *)
+let context_compact_started
+      ~(ts_unix : float)
+      ~(correlation_id : string)
+      ~(run_id : string)
+      ~(agent_name : string)
+      ~(trigger : string)
+  : Yojson.Safe.t
+  =
+  let payload_json =
+    let p : Sse_event_t.context_compact_started_payload =
+      { agent_name; trigger }
+    in
+    Yojson.Safe.from_string
+      (Sse_event_j.string_of_context_compact_started_payload p)
+  in
+  wrap_envelope
+    { event_type = "context_compact_started"
+    ; ts_unix
+    ; correlation_id
+    ; run_id
+    ; agent_name = Some agent_name
+    ; task_id = None
+    ; turn = None
+    ; tool_name = None
+    }
+    payload_json
+;;
+
+(** Emit a [content_replacement_replaced] envelope.  Envelope
+    [agent_name] is None, matching cascade arm at lines 708-717. *)
+let content_replacement_replaced
+      ~(ts_unix : float)
+      ~(correlation_id : string)
+      ~(run_id : string)
+      ~(tool_use_id : string)
+      ~(preview : string)
+      ~(original_chars : int)
+      ~(seen_count_after : int)
+  : Yojson.Safe.t
+  =
+  let payload_json =
+    let p : Sse_event_t.content_replacement_replaced_payload =
+      { tool_use_id; preview; original_chars; seen_count_after }
+    in
+    Yojson.Safe.from_string
+      (Sse_event_j.string_of_content_replacement_replaced_payload p)
+  in
+  wrap_envelope
+    { event_type = "content_replacement_replaced"
+    ; ts_unix
+    ; correlation_id
+    ; run_id
+    ; agent_name = None
+    ; task_id = None
+    ; turn = None
+    ; tool_name = None
+    }
+    payload_json
+;;
+
+(** Emit a [content_replacement_kept] envelope. *)
+let content_replacement_kept
+      ~(ts_unix : float)
+      ~(correlation_id : string)
+      ~(run_id : string)
+      ~(tool_use_id : string)
+      ~(seen_count_after : int)
+  : Yojson.Safe.t
+  =
+  let payload_json =
+    let p : Sse_event_t.content_replacement_kept_payload =
+      { tool_use_id; seen_count_after }
+    in
+    Yojson.Safe.from_string
+      (Sse_event_j.string_of_content_replacement_kept_payload p)
+  in
+  wrap_envelope
+    { event_type = "content_replacement_kept"
+    ; ts_unix
+    ; correlation_id
+    ; run_id
+    ; agent_name = None
+    ; task_id = None
+    ; turn = None
+    ; tool_name = None
+    }
+    payload_json
+;;
+
+(** Emit a [slot_scheduler_observed] envelope.  The [state] variant
+    (Idle/Queued/Saturated) is stringified by the cascade arm before
+    invocation. *)
+let slot_scheduler_observed
+      ~(ts_unix : float)
+      ~(correlation_id : string)
+      ~(run_id : string)
+      ~(max_slots : int)
+      ~(active : int)
+      ~(available : int)
+      ~(queue_length : int)
+      ~(state : string)
+  : Yojson.Safe.t
+  =
+  let payload_json =
+    let p : Sse_event_t.slot_scheduler_observed_payload =
+      { max_slots; active; available; queue_length; state }
+    in
+    Yojson.Safe.from_string
+      (Sse_event_j.string_of_slot_scheduler_observed_payload p)
+  in
+  wrap_envelope
+    { event_type = "slot_scheduler_observed"
+    ; ts_unix
+    ; correlation_id
+    ; run_id
+    ; agent_name = None
+    ; task_id = None
+    ; turn = None
+    ; tool_name = None
+    }
+    payload_json
+;;

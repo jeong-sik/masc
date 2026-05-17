@@ -639,37 +639,38 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
          ~turn
          ~tool_names)
   | Agent_sdk.Event_bus.HandoffRequested { from_agent; to_agent; reason } ->
-    let payload =
-      `Assoc
-        [ "from_agent", `String from_agent
-        ; "to_agent", `String to_agent
-        ; "reason", `String reason
-        ]
-    in
-    Some (wrap ~event_type:"handoff_requested" ~payload ~agent_name:from_agent ())
+    (* RFC-0004 Phase A0.1 PR-4 *)
+    Some
+      (Sse_event.handoff_requested
+         ~ts_unix:ts
+         ~correlation_id
+         ~run_id
+         ~from_agent
+         ~to_agent
+         ~reason)
   | Agent_sdk.Event_bus.HandoffCompleted { from_agent; to_agent; elapsed } ->
-    let payload =
-      `Assoc
-        [ "from_agent", `String from_agent
-        ; "to_agent", `String to_agent
-        ; "elapsed_s", `Float elapsed
-        ]
-    in
-    Some (wrap ~event_type:"handoff_completed" ~payload ~agent_name:from_agent ())
+    Some
+      (Sse_event.handoff_completed
+         ~ts_unix:ts
+         ~correlation_id
+         ~run_id
+         ~from_agent
+         ~to_agent
+         ~elapsed_s:elapsed)
   | Agent_sdk.Event_bus.ContextCompacted
       { agent_name; before_tokens; after_tokens; phase } ->
     (* #9935: compaction completed — clears any pending
          imminent and fires action-taken counter. *)
     Context_overflow_action_tracker.record_action ~keeper_name:agent_name;
-    let payload =
-      `Assoc
-        [ "agent_name", `String agent_name
-        ; "before_tokens", `Int before_tokens
-        ; "after_tokens", `Int after_tokens
-        ; "phase", `String phase
-        ]
-    in
-    Some (wrap ~event_type:"context_compacted" ~payload ~agent_name ())
+    Some
+      (Sse_event.context_compacted
+         ~ts_unix:ts
+         ~correlation_id
+         ~run_id
+         ~agent_name
+         ~before_tokens
+         ~after_tokens
+         ~phase)
   | Agent_sdk.Event_bus.ElicitationCompleted _ -> None (* Internal; no SSE relay needed *)
   | Agent_sdk.Event_bus.ContextOverflowImminent
       { agent_name; estimated_tokens; limit_tokens; ratio } ->
@@ -684,15 +685,15 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
     Context_overflow_action_tracker.record_imminent
       ~keeper_name:agent_name
       ~ts:(Time_compat.now ());
-    let payload =
-      `Assoc
-        [ "agent_name", `String agent_name
-        ; "estimated_tokens", `Int estimated_tokens
-        ; "limit_tokens", `Int limit_tokens
-        ; "ratio", `Float ratio
-        ]
-    in
-    Some (wrap ~event_type:"context_overflow_imminent" ~payload ~agent_name ())
+    Some
+      (Sse_event.context_overflow_imminent
+         ~ts_unix:ts
+         ~correlation_id
+         ~run_id
+         ~agent_name
+         ~estimated_tokens
+         ~limit_tokens
+         ~ratio)
   | Agent_sdk.Event_bus.ContextCompactStarted { agent_name; trigger } ->
     (* #9935: compaction started — clears pending imminent
          and fires action-taken counter. *)
@@ -701,27 +702,32 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
       Prometheus.metric_oas_context_compaction_total
       ~labels:[ "agent_name", agent_name; "trigger", trigger ]
       ();
-    let payload =
-      `Assoc [ "agent_name", `String agent_name; "trigger", `String trigger ]
-    in
-    Some (wrap ~event_type:"context_compact_started" ~payload ~agent_name ())
+    Some
+      (Sse_event.context_compact_started
+         ~ts_unix:ts
+         ~correlation_id
+         ~run_id
+         ~agent_name
+         ~trigger)
   | Agent_sdk.Event_bus.ContentReplacementReplaced
       { tool_use_id; preview; original_chars; seen_count_after } ->
-    let payload =
-      `Assoc
-        [ "tool_use_id", `String tool_use_id
-        ; "preview", `String preview
-        ; "original_chars", `Int original_chars
-        ; "seen_count_after", `Int seen_count_after
-        ]
-    in
-    Some (wrap ~event_type:"content_replacement_replaced" ~payload ())
+    Some
+      (Sse_event.content_replacement_replaced
+         ~ts_unix:ts
+         ~correlation_id
+         ~run_id
+         ~tool_use_id
+         ~preview
+         ~original_chars
+         ~seen_count_after)
   | Agent_sdk.Event_bus.ContentReplacementKept { tool_use_id; seen_count_after } ->
-    let payload =
-      `Assoc
-        [ "tool_use_id", `String tool_use_id; "seen_count_after", `Int seen_count_after ]
-    in
-    Some (wrap ~event_type:"content_replacement_kept" ~payload ())
+    Some
+      (Sse_event.content_replacement_kept
+         ~ts_unix:ts
+         ~correlation_id
+         ~run_id
+         ~tool_use_id
+         ~seen_count_after)
   | Agent_sdk.Event_bus.SlotSchedulerObserved
       { max_slots; active; available; queue_length; state } ->
     let state_str =
@@ -730,16 +736,16 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
       | Agent_sdk.Event_bus.Queued -> "queued"
       | Agent_sdk.Event_bus.Saturated -> "saturated"
     in
-    let payload =
-      `Assoc
-        [ "max_slots", `Int max_slots
-        ; "active", `Int active
-        ; "available", `Int available
-        ; "queue_length", `Int queue_length
-        ; "state", `String state_str
-        ]
-    in
-    Some (wrap ~event_type:"slot_scheduler_observed" ~payload ())
+    Some
+      (Sse_event.slot_scheduler_observed
+         ~ts_unix:ts
+         ~correlation_id
+         ~run_id
+         ~max_slots
+         ~active
+         ~available
+         ~queue_length
+         ~state:state_str)
   | Agent_sdk.Event_bus.Custom (name, payload) ->
     (* Wire compatibility: dashboard consumers historically decoded
          [masc:broadcast] / [masc:keeper:snapshot] (all colons).

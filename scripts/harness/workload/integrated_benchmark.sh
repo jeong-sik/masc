@@ -24,7 +24,7 @@ require_tools() {
 phase_script() {
   case "$1" in
     control)
-      printf '%s\n' "$ROOT_DIR/scripts/harness_agent_swarm_live.sh"
+      printf '%s\n' "$ROOT_DIR/scripts/harness/workload/agent_swarm_live.sh"
       ;;
     *)
       return 1

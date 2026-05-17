@@ -69,7 +69,7 @@ Useful but not core to coordination.
 
 | Module | Lines | Role | Status |
 |--------|-------|------|--------|
-| tool_team_session | **4412** | Team session spawning | Active, too large |
+| tool_team_session | 0 | Team session spawning | Retired and removed |
 | tool_mdal | 1092 | Metric-Driven Agent Loop | Active |
 | tool_llama | 1052 | llama.cpp runtime mgmt | Active |
 | tool_voice | ~200 | TTS/voice | OFF by default |
@@ -176,7 +176,6 @@ types (leaf) <- parse <- spawn <- handlers <- tool_team_session (entry)
 
 ### Phase 3: Structural improvements (separate PRs)
 
-- [ ] tool_team_session split (4412 lines -> 5 files)
 - [ ] Mode/profile system: core (5) / standard (17) / full (72) dispatchers
 - [ ] Environment variables -> config file consolidation
 

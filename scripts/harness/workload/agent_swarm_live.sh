@@ -30,7 +30,7 @@ PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-0}"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/harness_agent_swarm_live.sh [options]
+Usage: scripts/harness/workload/agent_swarm_live.sh [options]
 
 Keeper fleet production-readiness gate against persisted runtime truth.
 

@@ -958,10 +958,17 @@ let handle_keeper_bash
              ~env_snapshot:env_snap
              ())
       | Ok () ->
-        (
-            (match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd with
-             | Error e -> error_json ~fields:["blocked_cmd", `String cmd_for_log] e
-             | Ok () ->
+        begin
+          let path_validation =
+           match
+             Keeper_task_worktree_lazy.ensure_command_existing_dirs ~config ~meta ~cwd ~cmd
+           with
+           | Error e -> Error e
+           | Ok () -> Worker_dev_tools.validate_command_paths ~workdir:cwd cmd
+          in
+          match path_validation with
+          | Error e -> error_json ~fields:["blocked_cmd", `String cmd_for_log] e
+          | Ok () ->
                if write_enabled
                   && Worker_dev_tools.is_write_operation cmd then
                  Log.Keeper.info "WRITE_AUDIT: keeper=%s cwd=%s cmd=%s playground=%b"
@@ -1257,6 +1264,7 @@ let handle_keeper_bash
                        | Some entry -> cached_result_json entry
                        | None -> run_uncached ())
                     | None -> run_uncached ())
-               end))
+               end
+        end
   end)
 ;;

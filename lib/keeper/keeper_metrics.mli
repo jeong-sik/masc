@@ -104,6 +104,7 @@ type t =
   | DecisionAuditFlushFailures
   | OasCancel
   | ClaimAutoProvision
+  | TaskWorktreeLazyRepair
   | TomlInvalid
   | PersonaDriftMissing
   | RoomInitFailures
@@ -312,6 +313,7 @@ val metric_keeper_reconcile_failures : string
 val metric_keeper_decision_audit_flush_failures : string
 val metric_keeper_oas_cancel : string
 val metric_keeper_claim_auto_provision : string
+val metric_keeper_task_worktree_lazy_repair : string
 val metric_keeper_toml_invalid : string
 val metric_keeper_persona_drift_missing : string
 val metric_keeper_room_init_failures : string

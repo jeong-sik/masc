@@ -77,6 +77,14 @@ val validate_command_coding_with_allowlist
     [workdir = None]. *)
 val validate_command_paths : ?workdir:string -> string -> (unit, string) result
 
+(** Return path values in [cmd] that the shell validator treats as
+    existing-directory requirements (for example [git -C <dir>] and
+    [--work-tree=<dir>]).  Callers may use this to repair an expected
+    sandbox directory before delegating to {!validate_command_paths};
+    the validator remains the authority for blocking unsafe syntax and
+    out-of-sandbox paths. *)
+val existing_dir_path_values : string -> string list
+
 (** {1 Bash safety classifiers} *)
 
 (** [true] iff the command performs a write/mutating operation

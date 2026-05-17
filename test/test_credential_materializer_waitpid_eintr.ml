@@ -1,42 +1,19 @@
 (* test/test_credential_materializer_waitpid_eintr.ml
 
-   Regression guard for issue #13060 (EINTR escape from
-   [Unix.waitpid] in [lib/repo_manager/credential_materializer.ml]).
+   Regression guard for issue #13060 and the later command-plane
+   cutover. Credential materialization used to own subprocess pipes
+   and blocking [Unix.waitpid] calls directly. That fixed EINTR with a
+   local retry helper, but still left this module outside the shared
+   Process_eio timeout and FD-accounting plane.
 
-   Background.  Three blocking [Unix.waitpid [] pid] sites in the
-   credential materializer used to raise
-     [Unix.Unix_error (Unix.EINTR, "waitpid", "")]
-   whenever a Posix signal interrupted the wait.  Observed live at
-   ~5/hr on 2026-05-05 — every interruption surfaced as
-     [tools/call crashed: Unix_error EINTR waitpid]
-   for keeper_bash / docker shell / git command paths, contributing
-   to the stale_turn cycle.  PR #13088 wraps every blocking
-   [Unix.waitpid] in a [waitpid_no_intr] helper that retries on
-   EINTR (canonical Posix idiom, mirrors prior-art
-   [waitpid_blocking] in [lib/process/process_eio.ml]).
-
-   This test asserts the fix structurally — a future refactor that
-   re-introduces a bare [Unix.waitpid] in the file fails CI before
-   it can re-arm the EINTR escape.  Behavioural EINTR reproduction
-   is non-trivial (deterministically delivering signals to a child
-   during waitpid is racy), and the fix is a 1-line idiom with
-   established prior art, so the regression we guard against is
-   "wrap removed" — a substring/anchor check catches that cheaply.
-
-   This stanza re-adds the regression guard from the closed PR
-   #13068, with copilot-pull-request-reviewer's two outstanding
-   robustness comments folded in:
-
-   1. Source-path resolution candidates extended with deeper
-      "../../" / "../../../" fallbacks, and the failure message now
-      prints the candidate list so debugging under unusual dune
-      sandbox / CWD layouts is possible.
-   2. The [Unix.waitpid] occurrence count strips both OCaml
-      comments AND string literals before counting.  This protects
-      against a future log/error message that mentions "Unix.waitpid"
-      in a string from triggering a false positive, and against the
-      explanatory block comment in this module from triggering a
-      false positive on the source itself. *)
+   The invariant is now stronger: credential subprocesses must not use
+   direct Unix process primitives at all. They route through
+   [Process_eio.run_argv_with_status_split] for read-only gh probes and
+   [run_argv_with_stdin_and_status_split] for
+   [gh auth login --with-token]. This keeps token stdin handling local
+   to Process_eio and lets the global spawn guard account foreground
+   subprocess pressure without recording credential-specific env in
+   approval-gate telemetry. *)
 
 let read_file path =
   let ic = open_in path in
@@ -63,10 +40,10 @@ let assert_contains ~label haystack needle =
 
 (* Strip OCaml [(* ... *)] comments (nesting-aware) and OCaml
    string literals — both regular ["..."] (with [\\] escapes) and
-   quoted ["{|...|}"] / ["{tag|...|tag}"] forms — so that mentions
-   of [Unix.waitpid] inside comments or strings do not skew the
-   bare-call-site count below.  The output is a code-only view that
-   preserves all real expressions and identifiers. *)
+   quoted ["{|...|}"] / ["{tag|...|tag}"] forms — so mentions inside
+   comments or strings do not skew the structural call-site checks.
+   The output is a code-only view that preserves real expressions and
+   identifiers. *)
 let strip_comments_and_strings s =
   let n = String.length s in
   let buf = Buffer.create n in
@@ -154,76 +131,46 @@ let () =
             (cwd=%s, exe=%s, candidates=[%s])"
            (Sys.getcwd ()) exe (String.concat "; " candidates))
   in
-  (* Anchor 1: helper present.  Needle does not include parameters
-     so it matches both the original [waitpid_no_intr pid] form
-     (closed PR #13068) and the more general [waitpid_no_intr flags
-     pid] form that landed via #13088. *)
-  assert_contains
-    ~label:"waitpid_no_intr helper definition"
-    src
-    "let rec waitpid_no_intr";
-  (* Anchor 2: helper retries on EINTR specifically — not on any
-     [Unix_error].  Anchor on the invariant rather than on one
-     specific syntactic shape: the helper body must mention
-     [Unix.EINTR] (so the retry is EINTR-scoped, not "swallow every
-     Unix_error") and must contain a call back to [waitpid_no_intr]
-     (so EINTR actually loops rather than falling through).  The
-     code-only view (comments + strings stripped) keeps the
-     explanatory block comment from triggering a false positive on
-     the [Unix.EINTR] mention. *)
-  let code_only_for_eintr = strip_comments_and_strings src in
-  if not (count_substring ~needle:"Unix.EINTR" code_only_for_eintr >= 1) then
-    failwith
-      "expected helper body to mention [Unix.EINTR] (retry must be \
-       EINTR-scoped, not blanket Unix_error swallow) — see issue #13060";
-  if not
-       (count_substring ~needle:"waitpid_no_intr" code_only_for_eintr >= 2)
-  then
-    failwith
-      "expected at least one recursive call back to [waitpid_no_intr] \
-       inside its own body (retry on EINTR must actually loop) — \
-       see issue #13060";
-  (* Anchor 3: only one bare [Unix.waitpid] call may exist in the
-     module — the one inside [waitpid_no_intr].  We count after
-     stripping comments AND string literals so that:
-     * the explanatory block comment naming [Unix.waitpid] in this
-       module does not skew the count (false positive guard);
-     * a future log/error message that cites the API by name in a
-       string literal does not trip the test (false positive
-       guard).
-     The bare-token needle is intentional — it catches any
-     reintroduced bare call regardless of surrounding syntax
-     (including the bracket-less [Unix.waitpid flags pid] form used
-     by the current helper after #13088). *)
   let code_only = strip_comments_and_strings src in
-  let bare_waitpid = count_substring ~needle:"Unix.waitpid" code_only in
-  if bare_waitpid <> 1 then
+  let assert_absent needle =
+    let count = count_substring ~needle code_only in
+    if count <> 0 then
+      failwith
+        (Printf.sprintf
+           "expected no %s call sites in credential_materializer.ml; found %d"
+           needle count)
+  in
+  assert_absent "Unix.create_process";
+  assert_absent "Unix.create_process_env";
+  assert_absent "Unix.open_process";
+  assert_absent "Unix.waitpid";
+  assert_absent "Unix.pipe";
+  assert_contains
+    ~label:"read-only gh probes use Process_eio"
+    src
+    "Process_eio.run_argv_with_status_split";
+  assert_contains
+    ~label:"with-token provisioning uses Process_eio stdin API"
+    src
+    "Process_eio.run_argv_with_stdin_and_status_split";
+  let status_split_uses =
+    count_substring
+      ~needle:"Process_eio.run_argv_with_status_split"
+      code_only
+  in
+  if status_split_uses < 2 then
     failwith
       (Printf.sprintf
-         "expected exactly 1 [Unix.waitpid] use in code (inside \
-          waitpid_no_intr); found %d.  Every blocking waitpid in \
-          credential_materializer.ml must route through \
-          waitpid_no_intr — see issue #13060."
-         bare_waitpid);
-  (* Anchor 4: ≥3 distinct call sites route through
-     [waitpid_no_intr] — the only safe wrapper for blocking waitpid
-     in this module.  Anchor on the helper's identifier rather than
-     a specific tuple-discard syntax so a refactor like
-     [let _, status = waitpid_no_intr ... in ...] still passes.
-     The total count is "5 helper-name occurrences" =
-     1 [let rec waitpid_no_intr] + 1 recursive call + 3 caller
-     sites; the bare helper name appears in code only (comments and
-     strings already stripped above).  We require ≥5 occurrences
-     and subtract the 2 helper-internal references to derive the
-     ≥3 caller floor. *)
-  let helper_uses = count_substring ~needle:"waitpid_no_intr" code_only in
-  let caller_lower_bound = helper_uses - 2 in
-  if caller_lower_bound < 3 then
-    failwith
-      (Printf.sprintf
-         "expected ≥3 [waitpid_no_intr] caller invocations (total %d \
-          helper-name occurrences in code; subtract the [let rec] \
-          definition and the recursive EINTR call to get the caller \
-          floor).  See issue #13060."
-         helper_uses);
-  print_endline "test_credential_materializer_waitpid_eintr: OK"
+         "expected at least 2 read-only Process_eio status-split uses; found %d"
+         status_split_uses);
+  let stdin_status_split_uses =
+    count_substring
+      ~needle:"Process_eio.run_argv_with_stdin_and_status_split"
+      code_only
+  in
+  if stdin_status_split_uses < 1 then
+      failwith
+        (Printf.sprintf
+         "expected at least 1 stdin Process_eio status-split use; found %d"
+         stdin_status_split_uses);
+  print_endline "test_credential_materializer_process_plane: OK"

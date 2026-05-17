@@ -377,6 +377,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
           p.continuity_compaction_cooldown_sec_opt
         |> normalize_continuity_compaction_cooldown_sec;
       max_checkpoint_messages = old.compaction.max_checkpoint_messages;
+      keep_recent_tool_results = old.compaction.keep_recent_tool_results;
     };
     auto_handoff = Option.value ~default:old.auto_handoff p.auto_handoff_opt;
     handoff_threshold = Option.value ~default:old.handoff_threshold p.handoff_threshold_opt;

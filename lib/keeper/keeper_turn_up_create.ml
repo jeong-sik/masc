@@ -502,6 +502,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
              keeper JSON still win.  See #7859. *)
           max_checkpoint_messages =
             Keeper_context_core.default_max_checkpoint_messages;
+          keep_recent_tool_results =
+            Keeper_config.default_keep_recent_tool_results;
         };
         auto_handoff;
         handoff_threshold;

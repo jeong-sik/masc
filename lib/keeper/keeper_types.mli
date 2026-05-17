@@ -57,6 +57,11 @@ type compaction_policy = {
   token_gate: int;
   cooldown_sec: int;
   max_checkpoint_messages: int;
+  keep_recent_tool_results: int;
+    (** Verbatim tool-result tail length passed to
+        [Agent_sdk.Context_reducer.stub_tool_results ~keep_recent]
+        during OAS context compaction.  See
+        {!Keeper_meta_contract.compaction_policy} for full semantics. *)
 }
 
 type proactive_policy = {

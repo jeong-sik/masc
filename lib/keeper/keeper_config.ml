@@ -584,6 +584,42 @@ let normalize_compaction_token_gate (v : int) : int =
 let normalize_continuity_compaction_cooldown_sec (v : int) : int =
   clamp_int v ~min_v:0 ~max_v:172800
 
+(** Default number of recent tool results to keep verbatim during
+    OAS context compaction (consumed by
+    [Agent_sdk.Context_reducer.stub_tool_results ~keep_recent]).
+    Preserves prior hardcoded behavior in [keeper_compact_policy.ml]. *)
+let default_keep_recent_tool_results = 2
+
+(** Hard upper bound for operator-supplied [keep_recent_tool_results].
+    Values above this likely indicate operator typos (e.g. 5000); we
+    log a warn and clamp back to the safe default so a typo does not
+    silently disable compaction.  Lower bound is 0 (keep none). *)
+let keep_recent_tool_results_max = 50
+
+(** Validate and normalize [keep_recent_tool_results].
+    Returns the in-range value untouched, or [default_keep_recent_tool_results]
+    after logging a warn when the operator-supplied value is out of
+    [0, keep_recent_tool_results_max].  Caller context (keeper name)
+    is included in the warn for triage. *)
+let normalize_keep_recent_tool_results ?keeper_name (v : int) : int =
+  if v >= 0 && v <= keep_recent_tool_results_max
+  then v
+  else begin
+    let ctx =
+      match keeper_name with
+      | Some n -> Printf.sprintf " keeper=%s" n
+      | None -> ""
+    in
+    Log.Keeper.warn
+      "[compaction] keep_recent_tool_results=%d out of range [0,%d];%s \
+       clamping to default %d"
+      v
+      keep_recent_tool_results_max
+      ctx
+      default_keep_recent_tool_results;
+    default_keep_recent_tool_results
+  end
+
 let default_compaction_profile = "custom"
 
 let canonical_compaction_profile raw =

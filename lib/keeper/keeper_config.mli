@@ -187,6 +187,20 @@ val normalize_compaction_message_gate : int -> int
 val normalize_compaction_token_gate : int -> int
 val normalize_continuity_compaction_cooldown_sec : int -> int
 
+(** Default number of recent tool results to keep verbatim during
+    OAS context compaction.  Preserves prior hardcoded [keep_recent:2]
+    behavior in [Keeper_compact_policy]. *)
+val default_keep_recent_tool_results : int
+
+(** Hard upper bound for operator-supplied
+    [keep_recent_tool_results] (typo guard). *)
+val keep_recent_tool_results_max : int
+
+(** Clamp [keep_recent_tool_results] to [[0, keep_recent_tool_results_max]].
+    Out-of-range values fall back to {!default_keep_recent_tool_results}
+    with a [Log.Keeper.warn] including [keeper_name] when supplied. *)
+val normalize_keep_recent_tool_results : ?keeper_name:string -> int -> int
+
 val normalize_proactive_idle_sec : int -> int
 val normalize_proactive_cooldown_sec : int -> int
 

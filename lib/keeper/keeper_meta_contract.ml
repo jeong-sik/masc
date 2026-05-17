@@ -16,6 +16,11 @@ type compaction_policy =
   ; token_gate : int
   ; cooldown_sec : int
   ; max_checkpoint_messages : int
+  ; keep_recent_tool_results : int
+    (* Verbatim tool-result tail length for OAS context compaction
+       (consumed by [Agent_sdk.Context_reducer.stub_tool_results
+       ~keep_recent]).  Default 2; parsers clamp to
+       [[0, Keeper_config.keep_recent_tool_results_max]]. *)
   }
 
 type proactive_policy =

@@ -121,11 +121,15 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "last_social_transition_reason", `String rt.last_social_transition_reason
     ; "last_active_desire", `String rt.last_active_desire
     ; "last_current_intention", `String rt.last_current_intention
-    ; ( "last_blocker"
-      , match rt.last_blocker with
-        | Some info -> blocker_info_to_json info
-        | None -> `Null )
-    ; "last_need", `String rt.last_need
+	    ; ( "last_blocker"
+	      , match rt.last_blocker with
+	        | Some info -> blocker_info_to_json info
+	        | None -> `Null )
+	    ; ( "last_cascade_attempt"
+	      , match rt.last_cascade_attempt with
+	        | Some record -> cascade_attempt_record_to_json record
+	        | None -> `Null )
+	    ; "last_need", `String rt.last_need
     ; "paused", `Bool m.paused
     ; "auto_resume_after_sec", Json_util.float_opt_to_json m.auto_resume_after_sec
     ; "autoboot_enabled", `Bool m.autoboot_enabled
@@ -241,9 +245,10 @@ let fallback_canonical_keeper_meta_key_names =
   ; "last_speech_act"
   ; "last_social_transition_reason"
   ; "last_active_desire"
-  ; "last_current_intention"
-  ; "last_blocker"
-  ; "last_need"
+	  ; "last_current_intention"
+	  ; "last_blocker"
+	  ; "last_cascade_attempt"
+	  ; "last_need"
   ; "paused"
   ; "auto_resume_after_sec"
   ; "autoboot_enabled"

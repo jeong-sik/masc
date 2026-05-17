@@ -533,9 +533,17 @@ let parse_keeper_state
        | Some klass -> Some { klass; detail }
        | None -> None)
     | _ -> None
-  in
-  let last_need = cap_loaded (Safe_ops.json_string ~default:"" "last_need" json) in
-  let ps_paused = Safe_ops.json_bool ~default:false "paused" json in
+	  in
+	  let last_need = cap_loaded (Safe_ops.json_string ~default:"" "last_need" json) in
+	  let last_cascade_attempt =
+	    match json with
+	    | `Assoc fields ->
+	      (match List.assoc_opt "last_cascade_attempt" fields with
+	       | Some raw -> cascade_attempt_record_of_json raw
+	       | None -> None)
+	    | _ -> None
+	  in
+	  let ps_paused = Safe_ops.json_bool ~default:false "paused" json in
   let ps_auto_resume_after_sec = Safe_ops.json_float_opt "auto_resume_after_sec" json in
   let ps_autoboot_enabled = Safe_ops.json_bool ~default:true "autoboot_enabled" json in
   let ps_current_task_id =
@@ -576,10 +584,11 @@ let parse_keeper_state
       ; last_speech_act
       ; last_social_transition_reason
       ; last_active_desire
-      ; last_current_intention
-      ; last_blocker
-      ; last_need
-      }
+	      ; last_current_intention
+	      ; last_blocker
+	      ; last_cascade_attempt
+	      ; last_need
+	      }
   }
 ;;
 

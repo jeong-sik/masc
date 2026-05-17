@@ -317,13 +317,19 @@ let launch_supervised_fiber
                      e.last_failure_reason
                    |> Option.value ~default:"stale_turn_timeout"
                  | None -> "stale_turn_timeout"
-               in
-               (match
-                  Keeper_registry.dispatch_event
-                    ~base_path
-                    meta.name
-                    (Keeper_state_machine.Fiber_terminated { outcome = reason })
-                with
+	               in
+	               let outcome =
+	                 Keeper_registry.enrich_fiber_unresolved_outcome
+	                   ~base_path
+	                   ~keeper_name:meta.name
+	                   reason
+	               in
+	               (match
+	                  Keeper_registry.dispatch_event
+	                    ~base_path
+	                    meta.name
+	                    (Keeper_state_machine.Fiber_terminated { outcome })
+	                with
                 | Ok _ -> ()
                 | Error e ->
                   Prometheus.inc_counter
@@ -396,15 +402,21 @@ let launch_supervised_fiber
                       e.last_failure_reason
                   | None -> Keeper_registry.Exception "fiber_crash (unregistered)")
                | _ -> Keeper_registry.Exception (Printexc.to_string exn)
-             in
-             let reason = Keeper_registry.failure_reason_to_string fr in
-             Keeper_registry.set_failure_reason ~base_path meta.name (Some fr);
-             (match
-                Keeper_registry.dispatch_event
-                  ~base_path
-                  meta.name
-                  (Keeper_state_machine.Fiber_terminated { outcome = reason })
-              with
+	             in
+	             let reason = Keeper_registry.failure_reason_to_string fr in
+	             let outcome =
+	               Keeper_registry.enrich_fiber_unresolved_outcome
+	                 ~base_path
+	                 ~keeper_name:meta.name
+	                 reason
+	             in
+	             Keeper_registry.set_failure_reason ~base_path meta.name (Some fr);
+	             (match
+	                Keeper_registry.dispatch_event
+	                  ~base_path
+	                  meta.name
+	                  (Keeper_state_machine.Fiber_terminated { outcome })
+	              with
               | Ok _ -> ()
               | Error e ->
                 Prometheus.inc_counter
@@ -463,12 +475,18 @@ let launch_supervised_fiber
                 Keeper_registry.mark_dead ~base_path meta.name ~at:(Time_compat.now ());
                 ignore (resolve_done (`Crashed "shutdown")))
               else (
-                let reason =
-                  Keeper_registry.failure_reason_to_string
-                    Keeper_registry.Fiber_unresolved
-                in
-                Keeper_registry.set_failure_reason
-                  ~base_path
+	                let reason =
+	                  Keeper_registry.failure_reason_to_string
+	                    Keeper_registry.Fiber_unresolved
+	                in
+	                let outcome =
+	                  Keeper_registry.enrich_fiber_unresolved_outcome
+	                    ~base_path
+	                    ~keeper_name:meta.name
+	                    reason
+	                in
+	                Keeper_registry.set_failure_reason
+	                  ~base_path
                   meta.name
                   (Some Keeper_registry.Fiber_unresolved);
                 (* 2026-05-05 fleet-stuck cycle: keeper meta runtime
@@ -525,10 +543,10 @@ let launch_supervised_fiber
                   ~reason
                   ~restart_count:rc;
                 Keeper_registry.record_error ~base_path meta.name reason;
-                Keeper_registry.dispatch_event_unit
-                  ~base_path
-                  meta.name
-                  (Keeper_state_machine.Fiber_terminated { outcome = reason });
+	                Keeper_registry.dispatch_event_unit
+	                  ~base_path
+	                  meta.name
+	                  (Keeper_state_machine.Fiber_terminated { outcome });
                 if resolve_done (`Crashed reason)
                 then
                   publish_phase_lifecycle
@@ -1618,13 +1636,19 @@ let sweep_and_recover (ctx : _ context) =
          "%s: force-released stale slots after watchdog crash: %s"
          entry.name
          summary);
-    if Keeper_registry.try_resolve_done entry (`Crashed msg)
-    then (
-      ignore
-        (Keeper_registry.dispatch_event_and_log
-           ~base_path
-           entry.name
-           (Keeper_state_machine.Fiber_terminated { outcome = msg }));
+	    if Keeper_registry.try_resolve_done entry (`Crashed msg)
+	    then (
+	      let outcome =
+	        Keeper_registry.enrich_fiber_unresolved_outcome
+	          ~base_path
+	          ~keeper_name:entry.name
+	          msg
+	      in
+	      ignore
+	        (Keeper_registry.dispatch_event_and_log
+	           ~base_path
+	           entry.name
+	           (Keeper_state_machine.Fiber_terminated { outcome }));
       let ts = Time_compat.now () in
       Keeper_registry.record_crash ~base_path entry.name ts msg;
       Keeper_registry.record_error ~base_path entry.name msg;

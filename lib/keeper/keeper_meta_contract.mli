@@ -229,6 +229,24 @@ val blocker_info_of_json : Yojson.Safe.t -> blocker_info option
     Returns [None] for [`Null] or any value whose [klass] field is
     absent / not recognisable. *)
 
+(** {1 Cascade attempt provenance} *)
+
+type cascade_attempt_record = {
+  provider_id : string;
+  http_status : int option;
+  outcome : [ `Success | `Failure of string ];
+  timestamp : float;
+}
+(** Last observed provider attempt for a keeper-managed cascade turn.
+    Persisted in [agent_runtime_state] so supervisor-only terminal
+    outcomes can still surface provider/HTTP context. *)
+
+val cascade_attempt_record_to_json :
+  cascade_attempt_record -> Yojson.Safe.t
+
+val cascade_attempt_record_of_json :
+  Yojson.Safe.t -> cascade_attempt_record option
+
 (** {1 Agent runtime state record} *)
 
 type agent_runtime_state = {
@@ -253,6 +271,7 @@ type agent_runtime_state = {
   last_active_desire : string;
   last_current_intention : string;
   last_blocker : blocker_info option;
+  last_cascade_attempt : cascade_attempt_record option;
   last_need : string;
 }
 

@@ -291,6 +291,82 @@ let blocker_info_of_json (json : Yojson.Safe.t) : blocker_info option =
   | _ -> None
 ;;
 
+type cascade_attempt_record =
+  { provider_id : string
+  ; http_status : int option
+  ; outcome : [ `Success | `Failure of string ]
+  ; timestamp : float
+  }
+
+let cascade_attempt_outcome_to_json = function
+  | `Success -> `Assoc [ "kind", `String "success" ]
+  | `Failure message ->
+    `Assoc [ "kind", `String "failure"; "message", `String message ]
+;;
+
+let cascade_attempt_outcome_of_json = function
+  | `Assoc fields ->
+    (match List.assoc_opt "kind" fields with
+     | Some (`String "success") -> Some `Success
+     | Some (`String "failure") ->
+       (match List.assoc_opt "message" fields with
+        | Some (`String message) -> Some (`Failure message)
+        (* DET-OK: legacy attempt rows encoded failure without a message;
+           keep the lossy historical record instead of dropping it. *)
+        | _ -> Some (`Failure ""))
+     | _ -> None)
+  | `String "success" -> Some `Success
+  | `String "failure" -> Some (`Failure "")
+  | _ -> None
+;;
+
+let cascade_attempt_record_to_json (record : cascade_attempt_record) : Yojson.Safe.t =
+  `Assoc
+    [ "provider_id", `String record.provider_id
+    ; ( "http_status"
+      , match record.http_status with
+        | Some status -> `Int status
+        | None -> `Null )
+    ; "outcome", cascade_attempt_outcome_to_json record.outcome
+    ; "timestamp", `Float record.timestamp
+    ]
+;;
+
+let cascade_attempt_record_of_json (json : Yojson.Safe.t)
+  : cascade_attempt_record option
+  =
+  match json with
+  | `Null -> None
+  | `Assoc fields ->
+    let provider_id =
+      match List.assoc_opt "provider_id" fields with
+      | Some (`String value) -> Some value
+      | _ -> None
+    in
+    let http_status =
+      match List.assoc_opt "http_status" fields with
+      | Some (`Int status) -> Some status
+      | Some `Null | None -> None
+      | _ -> None
+    in
+    let outcome =
+      match List.assoc_opt "outcome" fields with
+      | Some value -> cascade_attempt_outcome_of_json value
+      | None -> None
+    in
+    let timestamp =
+      match List.assoc_opt "timestamp" fields with
+      | Some (`Float value) -> Some value
+      | Some (`Int value) -> Some (float_of_int value)
+      | _ -> None
+    in
+    (match provider_id, outcome, timestamp with
+     | Some provider_id, Some outcome, Some timestamp ->
+       Some { provider_id; http_status; outcome; timestamp }
+     | _ -> None)
+  | _ -> None
+;;
+
 type usage_metrics =
   { total_turns : int
   ; total_input_tokens : int
@@ -327,6 +403,7 @@ type agent_runtime_state =
   ; last_active_desire : string
   ; last_current_intention : string
   ; last_blocker : blocker_info option
+  ; last_cascade_attempt : cascade_attempt_record option
   ; last_need : string
   }
 

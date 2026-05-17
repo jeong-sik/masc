@@ -55,13 +55,37 @@ let empty_text_cache ~generation =
 
 let keeper_list_cache = Atomic.make (empty_text_cache ~generation:0)
 
+(* Env-var parse fallback observability: previously the [Some _ when ...] +
+   wildcard arm silently coalesced unparseable / negative / NaN values to
+   the per-caller default. Operators setting MASC_KEEPER_LIST_CACHE_TTL_S
+   with a unit suffix ("5s") or sign typo received default 2.0s with no
+   warning. We now log + bump a closed-vocabulary counter on the fallback
+   path while preserving the return value. *)
 let cache_ttl_seconds env_var ~default =
   match Sys.getenv_opt env_var with
-  | Some raw -> (
-      match Float.of_string_opt (String.trim raw) with
-      | Some value when Stdlib.Float.compare value 0.0 >= 0 -> value
-      | _ -> default)
   | None -> default
+  | Some raw ->
+      let trimmed = String.trim raw in
+      (match Float.of_string_opt trimmed with
+       | Some value when Stdlib.Float.compare value 0.0 >= 0 -> value
+       | Some _ ->
+           Prometheus.inc_counter
+             Prometheus.metric_tool_keeper_cache_ttl_parse_failures
+             ~labels:[ ("env_var", env_var); ("reason", "negative_or_nan") ]
+             ();
+           Log.Keeper.warn
+             "cache_ttl_seconds: %s=%S negative or NaN; using default %.3fs"
+             env_var trimmed default;
+           default
+       | None ->
+           Prometheus.inc_counter
+             Prometheus.metric_tool_keeper_cache_ttl_parse_failures
+             ~labels:[ ("env_var", env_var); ("reason", "invalid_float") ]
+             ();
+           Log.Keeper.warn
+             "cache_ttl_seconds: %s=%S not a float; using default %.3fs"
+             env_var trimmed default;
+           default)
 
 let keeper_list_cache_ttl_s () =
   cache_ttl_seconds "MASC_KEEPER_LIST_CACHE_TTL_S" ~default:2.0

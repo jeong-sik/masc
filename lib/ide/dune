@@ -9,7 +9,6 @@
  (modules
   ide_annotation_types
   ide_annotations
-  ide_meta_sync
   ide_migration
   ide_paths
   ide_region_tracker)
@@ -20,7 +19,6 @@
   yojson
   uuidm
   fs_compat
-  dated_jsonl
   ;; RFC-0128 §5 Phase 3 — Ide_migration uses Repo_store.find_repo_by_path_prefix
   ;; to route legacy records to their canonical-URL bucket. repo_manager
   ;; depends only on config/fs_compat/exec/log so the new edge introduces

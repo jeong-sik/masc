@@ -3,7 +3,6 @@ open Alcotest
 module Types = Ide_annotation_types
 module Store = Ide_annotations
 module Region = Ide_region_tracker
-module Sync = Ide_meta_sync
 module Lsp = Masc_mcp.Lsp_overlay_provider
 
 (* Ide_annotations.create generates ids via [Uuidm.v4_gen (Random.get_state ())].
@@ -266,35 +265,10 @@ let test_region_tracker_writes_fixed_regions_file () =
     | rows -> failf "expected one region, got %d" (List.length rows))
 ;;
 
-let test_meta_sync_flush_writes_fixed_regions_file () =
-  with_temp_dir (fun base_dir ->
-    let config = { Sync.default_config with base_path = base_dir } in
-    let state =
-      Sync.on_tool_call_complete
-        config
-        Sync.initial_state
-        ~keeper_id:"sangsu"
-        ~turn:8
-        ~tool_name:"write_file"
-        ~file_path:"lib/b.ml"
-        ~diff_text:None
-        ~full_content:(Some "let y = 2\n")
-    in
-    let state = Sync.flush_regions config state in
-    let stats = Sync.get_stats state in
-    check int "pending regions cleared" 0 stats.pending_region_count;
-    check bool "fixed regions file exists" true (Sys.file_exists (Region.regions_file ~base_dir ()));
-    match load_regions base_dir with
-    | [ region ] ->
-      check string "file path" "lib/b.ml" region.Types.file_path;
-      check string "keeper" "sangsu" region.keeper_id;
-      (match region.source with
-       | Types.Tool_call { tool_name; turn } ->
-         check string "tool name" "write_file" tool_name;
-         check int "turn" 8 turn
-       | Types.Manual _ -> fail "expected tool-call source")
-    | rows -> failf "expected one region, got %d" (List.length rows))
-;;
+(* test_meta_sync_flush_writes_fixed_regions_file removed in RFC-0128
+   PR-1f: the Ide_meta_sync module is gone now that PR-1e dropped its
+   only call site. Its coverage is preserved by the
+   [ingest content fallback] + [no double-write] cases below. *)
 
 (* RFC-0128 §4.2 — partition-aware store routing. *)
 
@@ -712,10 +686,6 @@ let () =
             "region tracker writes fixed regions.jsonl"
             `Quick
             test_region_tracker_writes_fixed_regions_file
-        ; test_case
-            "meta sync flush writes fixed regions.jsonl"
-            `Quick
-            test_meta_sync_flush_writes_fixed_regions_file
         ] )
     ; ( "partition (RFC-0128)"
       , [ test_case

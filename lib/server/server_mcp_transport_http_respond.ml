@@ -167,6 +167,7 @@ let respond_mcp_error ?(extra_headers = []) ?data ?id
       (`Assoc
         [
           ("jsonrpc", `String "2.0");
+          (* DET-OK: JSON-RPC response id is request-bound wire data; absent id maps to protocol null at this HTTP boundary. *)
           ("id", Option.value ~default:`Null id);
           ("error", `Assoc error_fields);
         ])

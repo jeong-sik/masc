@@ -15,13 +15,13 @@ let _degraded_mutex = Eio.Mutex.create ()
 
 let with_slot f =
   Eio.Semaphore.acquire _sem;
-  Fun.protect
-    ~finally:(fun () -> Eio.Semaphore.release _sem)
-    (fun () ->
-       if Keeper_fd_pressure.active () then
-         Eio.Mutex.use_rw ~protect:true _degraded_mutex f
-       else
-         f ())
+  Eio.Switch.run
+  @@ fun sw ->
+  Eio.Switch.on_release sw (fun () -> Eio.Semaphore.release _sem);
+  if Keeper_fd_pressure.active () then
+    Eio.Mutex.use_rw ~protect:true _degraded_mutex f
+  else
+    f ()
 ;;
 
 let effective_concurrency () =

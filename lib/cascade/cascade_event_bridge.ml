@@ -553,10 +553,16 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
   let wrap = wrap_event ~ts ~correlation_id ~run_id in
   match[@warning "-11"] evt.payload with
   | Agent_sdk.Event_bus.AgentStarted { agent_name; task_id } ->
-    let payload =
-      `Assoc [ "agent_name", `String agent_name; "task_id", `String task_id ]
-    in
-    Some (wrap ~event_type:"agent_started" ~payload ~agent_name ~task_id ())
+    (* RFC-0004 Phase A0.1 PR-2: migrated to Sse_event.agent_started.
+       Byte-equal vs the previous inline `Assoc + wrap_event path was
+       proven in test/sse_event/test_sse_event.ml on PR-1 (#15807). *)
+    Some
+      (Sse_event.agent_started
+         ~ts_unix:ts
+         ~correlation_id
+         ~run_id
+         ~agent_name
+         ~task_id)
   | Agent_sdk.Event_bus.AgentCompleted { agent_name; task_id; elapsed; result } ->
     (match result with
      | Ok (response : Agent_sdk.Types.api_response) ->

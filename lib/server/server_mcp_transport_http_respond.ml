@@ -38,49 +38,96 @@ let mcp_headers = Server_mcp_transport_http_headers.mcp_headers
 
 let json_headers = Server_mcp_transport_http_headers.json_headers
 
-let respond_mcp_auth_error ?(extra_headers = []) ~(deps : Server_mcp_transport_http_types.deps) request reqd ~session_id
-    ~protocol_version msg =
+(* RFC-0097 — typed SSOT for transport-boundary error envelopes.
+   New code should call [respond_mcp_error] with the typed
+   [Mcp_error_code.t] variant; the per-code factories below remain
+   as [@@deprecated] thin delegations during the migration window. *)
+
+(** Pure-JSON body builder shared by [respond_mcp_error] and
+    [mcp_internal_error_json]. Splitting it out makes the wire-shape
+    diffable and testable without instantiating an [Httpun.Reqd.t]. *)
+let error_body ?(id = `Null) ?data ~(code : Mcp_error_code.t) msg :
+    Yojson.Safe.t =
+  let error_fields =
+    let base =
+      [
+        ("code", `Int (Mcp_error_code.to_wire_code code));
+        ("message", `String msg);
+      ]
+    in
+    match data with Some d -> base @ [ ("data", d) ] | None -> base
+  in
+  `Assoc
+    [
+      ("jsonrpc", `String "2.0");
+      ("id", id);
+      ("error", `Assoc error_fields);
+    ]
+
+let respond_mcp_error ?(extra_headers = []) ?data ?id
+    ~(deps : Server_mcp_transport_http_types.deps) request reqd ~session_id
+    ~protocol_version ~(code : Mcp_error_code.t) msg =
   let origin = deps.get_origin request in
+  let id_for_body = Option.value ~default:`Null id in
   let body =
-    Yojson.Safe.to_string
-      (`Assoc
-        [
-          ("jsonrpc", `String "2.0");
-          ( "error",
-            `Assoc
-              [ ("code", `Int (-32001)); ("message", `String msg) ] );
-        ])
+    Yojson.Safe.to_string (error_body ~id:id_for_body ?data ~code msg)
+  in
+  (* Constructors qualified explicitly (Mcp_error_code.Auth_error rather
+     than bare Auth_error) — consistent with #15759 P1 review on the
+     legacy path; defence-in-depth against future loss of the
+     [~(code : Mcp_error_code.t)] type annotation or relocation. *)
+  let per_code_headers : (string * string) list =
+    match code with
+    | Mcp_error_code.Auth_error -> [ ("www-authenticate", "Bearer") ]
+    | Mcp_error_code.Not_ready -> [ ("retry-after", "2") ]
+    | Mcp_error_code.Backpressure_shed -> [ ("retry-after", "1") ]
+    | _ -> []
   in
   let headers =
     Httpun.Headers.of_list
       ((("content-length", string_of_int (String.length body))
-       :: ("www-authenticate", "Bearer")
-       :: extra_headers)
+       :: per_code_headers)
+      @ extra_headers
       @ json_headers ~deps session_id protocol_version origin)
   in
-  let response = Httpun.Response.create ~headers `Unauthorized in
+  let response =
+    Httpun.Response.create ~headers (Mcp_error_code.to_http_status code)
+  in
   safe_respond_with_string reqd response body
 
-let respond_mcp_internal_error ?(extra_headers = []) ~(deps : Server_mcp_transport_http_types.deps) request reqd
-    ~session_id ~protocol_version msg =
-  let origin = deps.get_origin request in
-  let body =
-    Yojson.Safe.to_string
-      (`Assoc
-        [
-          ("jsonrpc", `String "2.0");
-          ( "error",
-            `Assoc
-              [ ("code", `Int (-32603)); ("message", `String msg) ] );
-        ])
-  in
-  let headers =
-    Httpun.Headers.of_list
-      ((("content-length", string_of_int (String.length body)) :: extra_headers)
-      @ json_headers ~deps session_id protocol_version origin)
-  in
-  let response = Httpun.Response.create ~headers `Internal_server_error in
-  safe_respond_with_string reqd response body
+(* RFC-0097 PR-2 — thin delegations.
+
+   Wire-byte differences vs PR-1 baseline (documented intentional):
+
+   - JSON body now includes ["id": null] per JSON-RPC 2.0 §5.1 (error
+     responses MUST echo the request id or null when it cannot be
+     parsed). Previous bodies omitted the field — a spec violation
+     grandfathered until this PR.
+
+   - Headers: per-code header ordering is now [content-length ::
+     per-code :: extra :: json_headers] (was [content-length ::
+     per-code :: extra @ json_headers] for auth, equivalent here;
+     [content-length :: extra @ json_headers] for internal, with no
+     per-code header — equivalent here).
+
+   Out of PR-2 scope: [respond_not_ready] retains its bespoke
+   implementation because it runs before [session_id] /
+   [protocol_version] / [json_headers] are available (literal
+   [content-type: application/json] + raw [cors_headers] only).
+   PR-2.1 will introduce a sibling [respond_mcp_error_pre_ready] or
+   widen [respond_mcp_error] to handle the pre-runtime case. *)
+
+let respond_mcp_auth_error ?(extra_headers = [])
+    ~(deps : Server_mcp_transport_http_types.deps) request reqd ~session_id
+    ~protocol_version msg =
+  respond_mcp_error ~extra_headers ~deps request reqd ~session_id
+    ~protocol_version ~code:Mcp_error_code.Auth_error msg
+
+let respond_mcp_internal_error ?(extra_headers = [])
+    ~(deps : Server_mcp_transport_http_types.deps) request reqd ~session_id
+    ~protocol_version msg =
+  respond_mcp_error ~extra_headers ~deps request reqd ~session_id
+    ~protocol_version ~code:Mcp_error_code.Internal_error msg
 
 let respond_not_ready ~(deps : Server_mcp_transport_http_types.deps) request reqd =
   let origin = deps.get_origin request in
@@ -137,62 +184,7 @@ let respond_sse_rate_limited ~(deps : Server_mcp_transport_http_types.deps) ~ori
   safe_respond_with_string reqd response body
 
 let mcp_internal_error_json ?id msg =
-  `Assoc
-    [
-      ("jsonrpc", `String "2.0");
-      ("id", Option.value ~default:`Null id);
-      ("error", `Assoc [ ("code", `Int (-32603)); ("message", `String msg) ]);
-    ]
-
-(* RFC-0098 — typed SSOT for transport-boundary error envelopes. The
-   legacy factories above are intentionally untouched in PR-1 to
-   guarantee byte-exact wire on existing call paths; PR-2 migrates
-   them to delegations and documents the wire change (adding id:null
-   per JSON-RPC 2.0 §5.1). *)
-let respond_mcp_error ?(extra_headers = []) ?data ?id
-    ~(deps : Server_mcp_transport_http_types.deps) request reqd ~session_id
-    ~protocol_version ~(code : Mcp_error_code.t) msg =
-  let origin = deps.get_origin request in
-  let error_fields =
-    let base =
-      [
-        ("code", `Int (Mcp_error_code.to_wire_code code));
-        ("message", `String msg);
-      ]
-    in
-    match data with Some d -> base @ [ ("data", d) ] | None -> base
-  in
-  let body =
-    Yojson.Safe.to_string
-      (`Assoc
-        [
-          ("jsonrpc", `String "2.0");
-          (* DET-OK: JSON-RPC response id is request-bound wire data; absent id maps to protocol null at this HTTP boundary. *)
-          ("id", Option.value ~default:`Null id);
-          ("error", `Assoc error_fields);
-        ])
-  in
-  (* Constructors qualified explicitly (Mcp_error_code.Auth_error rather
-     than bare Auth_error) so the match is robust to future loss of the
-     [~(code : Mcp_error_code.t)] type annotation or to relocation of
-     the function. Bare constructors would compile today via OCaml's
-     type-directed disambiguation but the reviewer's defence-in-depth
-     concern (PR #15759 codex P1) is well-taken. *)
-  let per_code_headers : (string * string) list =
-    match code with
-    | Mcp_error_code.Auth_error -> [ ("www-authenticate", "Bearer") ]
-    | Mcp_error_code.Not_ready -> [ ("retry-after", "2") ]
-    | Mcp_error_code.Backpressure_shed -> [ ("retry-after", "1") ]
-    | _ -> []
-  in
-  let headers =
-    Httpun.Headers.of_list
-      ((("content-length", string_of_int (String.length body))
-       :: per_code_headers)
-      @ extra_headers
-      @ json_headers ~deps session_id protocol_version origin)
-  in
-  let response =
-    Httpun.Response.create ~headers (Mcp_error_code.to_http_status code)
-  in
-  safe_respond_with_string reqd response body
+  (* RFC-0097 PR-2: delegate to error_body SSOT. The duplicate
+     respond_mcp_error definition that lived here on the legacy path is
+     removed — PR-2's SSOT-using definition is at L67. *)
+  error_body ?id ~code:Mcp_error_code.Internal_error msg

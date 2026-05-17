@@ -279,3 +279,30 @@ $ rg -ln "Dashboard_cache|Relation_materializer|Board_dispatch|Server_dashboard_
 5. 작업량 ≈ 반일, race-free by construction, anti-pattern (전역 atomic) 그대로 두되 *fiber-local 가 우선* 하는 단방향 변경
 
 Option (2) atomic swap 은 §2.1 9 callsite refactor 가 필요 (§10.2 가 그 전제를 제거). Option (4) 명시적 `~sw` 는 별도 long-term RFC 로 유지.
+
+### 10.6 `keeper_keepalive.ml:369` source 정독 결과 (step 1 후속)
+
+`run_grpc_heartbeat_fiber ~sw ... ~clock` (line 359) — 본 함수가 `Eio_context.get_switch_opt ()` 를 line 369 에서 호출하여 `grpc_sw` 를 얻고, `Masc_grpc_client.heartbeat_stream grpc_client ~sw:grpc_sw ~env` 로 long-lived bidirectional stream 을 연다 (reconnect 5회, `stop : bool Atomic.t` 까지 생존).
+
+**Caller chain**:
+- `start_keeper_grpc_heartbeat ~ctx ~m ~stop` (line 428) 가 `run_grpc_heartbeat_fiber ~sw:ctx.sw ...` 를 호출.
+- `start_keeper_grpc_heartbeat` 의 호출처는 `start_keepalive` (line 673) — keeper *bootstrap* 경로. server 시작 시 1회. **turn 외부**.
+
+**Option (3) 하에서의 동작**:
+- bootstrap 시점 → `Fiber.get sw_key` 는 binding 없음 → `None` → `Atomic.get current_sw` fallback → server root_sw → **CORRECT** (heartbeat 가 root_sw 에 attach, 서버 lifetime 동안 생존).
+- 만약 *어떤 이유로* turn 안에서 호출됐다면 → turn_sw 에 attach → turn 종료 시 강제 release → 잘못. 그러나 caller chain 상 이런 경로는 존재하지 않음 (registry 시작 경로 only).
+
+**결정**: `keeper_keepalive.ml:369` **무변경**. Option (3) 의 자연 fallback 이 자동 정답.
+
+**§10.4 재추정 보정**:
+
+| 항목 | LoC (revised) |
+|---|---|
+| `Eio_context.with_turn_switch` + `sw_key` 신규 | ~20 |
+| `get_switch_opt` 본문 변경 | ~5 |
+| `keeper_agent_run.ml:196` wrap | ~3 |
+| `keeper_keepalive.ml:369` — **무변경** | 0 (was 0-5) |
+| Tests | ~80 |
+| TLA+ `KeeperFiberLocalSwitch.tla` | ~120 |
+
+**합계 ~225 LoC**, 모두 *추가 only* — 기존 26 callsite 의 코드는 그대로. Phase C.1 step 2 는 truly half-day. step 1 의 마지막 unknown 해소 완료.

@@ -205,6 +205,7 @@ type bash_shape_block =
   | Pipe_or_redirect
   | Chaining
   | Substitution
+  | Repo_wide_scan
 
 let string_contains_char s ch = String.exists (Char.equal ch) s
 let string_contains_substring s needle = String_util.contains_substring s needle
@@ -216,6 +217,126 @@ let has_malformed_dev_null_redirect_token scan_text =
     match String.trim (String.lowercase_ascii token) with
     | "0/dev/null" | "1/dev/null" | "2/dev/null" -> true
     | _ -> false)
+
+let strip_trailing_slashes text =
+  let rec loop i =
+    if i > 0 && Char.equal text.[i - 1] '/' then loop (i - 1) else i
+  in
+  let len = loop (String.length text) in
+  if len = String.length text then text else String.sub text 0 len
+
+let is_repo_wide_root text =
+  let text = String.trim text |> strip_trailing_slashes in
+  String.equal text "."
+  || String.equal text "./"
+  || String.equal text "repos"
+  || String.equal text "./repos"
+
+let is_scoped_read_root text =
+  let text = String.trim text |> strip_trailing_slashes in
+  String.starts_with ~prefix:"lib" text
+  || String.starts_with ~prefix:"test" text
+  || String.starts_with ~prefix:"bin" text
+  || String.starts_with ~prefix:"docs" text
+  || String.starts_with ~prefix:"src" text
+  || String.starts_with ~prefix:"repos/" text
+  || String.contains text '/'
+
+let option_consumes_next_arg text =
+  match text with
+  | "-e" | "-f" | "-g" | "-m" | "-t" | "--after-context" | "--before-context"
+  | "--context" | "--exclude" | "--exclude-dir" | "--glob" | "--include"
+  | "--max-count" | "--regexp" | "--type" | "--type-add" -> true
+  | _ -> false
+
+let rec non_option_args = function
+  | [] -> []
+  | arg :: _ :: rest when option_consumes_next_arg arg.text -> non_option_args rest
+  | arg :: rest when String.starts_with ~prefix:"--" arg.text ->
+    non_option_args rest
+  | arg :: rest
+    when String.length arg.text > 1 && Char.equal arg.text.[0] '-' ->
+    non_option_args rest
+  | arg :: rest -> arg.text :: non_option_args rest
+
+let grep_has_recursive_flag args =
+  List.exists
+    (fun arg ->
+       String.equal arg.text "-r"
+       || String.equal arg.text "-R"
+       ||
+       (String.length arg.text > 2
+        && Char.equal arg.text.[0] '-'
+        && not (String.starts_with ~prefix:"--" arg.text)
+        && String.exists (function 'r' | 'R' -> true | _ -> false) arg.text))
+    args
+
+let grep_is_repo_wide args =
+  if not (grep_has_recursive_flag args)
+  then false
+  else (
+    let positional = non_option_args args in
+    let paths =
+      match positional with
+      | _pattern :: paths -> paths
+      | [] -> []
+    in
+    paths = []
+    || List.exists is_repo_wide_root paths
+    || not (List.exists is_scoped_read_root paths))
+
+let find_is_repo_wide args =
+  match non_option_args args with
+  | root :: _ -> is_repo_wide_root root
+  | [] -> true
+
+let rg_has_files_mode args =
+  List.exists (fun arg -> String.equal arg.text "--files") args
+
+let rg_is_repo_wide args =
+  let positional = non_option_args args in
+  let paths =
+    if rg_has_files_mode args
+    then positional
+    else (
+      match positional with
+      | _pattern :: paths -> paths
+      | [] -> [])
+  in
+  paths = []
+  || List.exists is_repo_wide_root paths
+  || not (List.exists is_scoped_read_root paths)
+
+let git_log_all_is_repo_wide args =
+  match args with
+  | subcmd :: rest when String.equal subcmd.text "log" ->
+    List.exists (fun arg -> String.equal arg.text "--all") rest
+  | _ -> false
+
+let simple_command_is_repo_wide_scan words =
+  match strip_command_wrappers words with
+  | bin :: args ->
+    (match command_name bin.text with
+     | "grep" | "egrep" | "fgrep" -> grep_is_repo_wide args
+     | "find" -> find_is_repo_wide args
+     | "rg" -> rg_is_repo_wide args
+     | "git" -> git_log_all_is_repo_wide args
+     | _ -> false)
+  | [] -> false
+
+let rec command_has_repo_wide_scan cmd =
+  let words = shell_words_with_boundaries cmd in
+  let rec loop = function
+    | word :: rest when word.starts_command ->
+      simple_command_is_repo_wide_scan (word :: rest) || loop rest
+    | _ :: rest -> loop rest
+    | [] -> false
+  in
+  loop words
+  ||
+  match shell_c_payload words with
+  | Some payload -> command_has_repo_wide_scan payload
+  | None -> false
 
 let quote_aware_shape_scan_text cmd =
   let len = String.length cmd in
@@ -271,6 +392,8 @@ let raw_keeper_bash_shape_block cmd =
   let lower = String.lowercase_ascii scan_text in
   if string_contains_substring lower "gh pr checks"
   then Some Gh_pr_checks
+  else if command_has_repo_wide_scan cmd
+  then Some Repo_wide_scan
   else if has_malformed_dev_null_redirect_token scan_text
   then Some Pipe_or_redirect
   else if
@@ -313,7 +436,9 @@ let rec parsed_keeper_bash_shape_block = function
 
 let keeper_bash_shape_block cmd =
   let scan_text = quote_aware_shape_scan_text cmd in
-  if has_malformed_dev_null_redirect_token scan_text
+  if command_has_repo_wide_scan cmd
+  then Some Repo_wide_scan
+  else if has_malformed_dev_null_redirect_token scan_text
   then Some Pipe_or_redirect
   else
   match Masc_exec_bash_parser.Bash.parse_string cmd with
@@ -328,6 +453,7 @@ let bash_shape_block_tag = function
   | Pipe_or_redirect -> "pipe_or_redirect"
   | Chaining -> "chaining"
   | Substitution -> "substitution"
+  | Repo_wide_scan -> "repo_wide_scan"
 
 module For_testing = struct
   let elapsed_duration_ms = elapsed_duration_ms
@@ -352,6 +478,10 @@ let bash_shape_block_reason = function
   | Substitution ->
     "Command substitution is blocked before execution. Compute values in a \
      separate tool call and pass literal arguments."
+  | Repo_wide_scan ->
+    "Repo-wide recursive scans are blocked in raw keeper_bash. Under long \
+     running Keeper fleets they can stampede Docker bind mounts and exhaust \
+     host file descriptors."
 
 let bash_shape_block_hint = function
   | Gh_pr_checks ->
@@ -367,6 +497,10 @@ let bash_shape_block_hint = function
   | Substitution ->
     "Run the discovery command first, then use its literal result in a second \
      keeper_bash call."
+  | Repo_wide_scan ->
+    "Use keeper_shell op=rg/find with a scoped path such as lib/, test/, or a \
+     specific repos/REPO subdirectory; avoid scanning . or repos/ from raw \
+     bash."
 
 let bash_shape_block_alternatives = function
   | Gh_pr_checks ->
@@ -390,6 +524,12 @@ let bash_shape_block_alternatives = function
     [
       "keeper_bash cmd='rg --files lib'";
       "keeper_bash cmd='cat path/from/previous-step'";
+    ]
+  | Repo_wide_scan ->
+    [
+      "keeper_shell op=rg pattern=search-term path=lib";
+      "keeper_shell op=find path=lib name='*.ml'";
+      "keeper_bash cmd='git log --oneline -20'";
     ]
 
 let bash_shape_block_result ~cmd ~cmd_for_log ~env_snapshot block =

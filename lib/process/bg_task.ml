@@ -92,6 +92,29 @@ let sidecar_failure_observer :
 let set_sidecar_failure_observer f =
   Atomic.set sidecar_failure_observer (Some f)
 
+(* Observer for unexpected (non-EAGAIN/EWOULDBLOCK/EINTR/EOF)
+   drain-pipe read errors.  Labels are closed-vocabulary:
+   [fd_kind = "stdout" | "stderr"] (call-site tagged) and
+   [error_kind = "unix_error" | "other"] (typed match arm).
+   Cardinality bound: 2 × 2 = 4.  See top-level Prometheus
+   module for the registered counter. *)
+let drain_failure_observer :
+    ((fd_kind:string -> error_kind:string -> unit) option) Atomic.t =
+  Atomic.make None
+
+let set_drain_failure_observer f =
+  Atomic.set drain_failure_observer (Some f)
+
+let observe_drain_failure ~fd_kind ~error_kind =
+  match Atomic.get drain_failure_observer with
+  | None -> ()
+  | Some observe ->
+      (try observe ~fd_kind ~error_kind with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | observer_exn ->
+           Log.Misc.warn "bg_task drain observer failed: %s"
+             (Printexc.to_string observer_exn))
+
 let observe_sidecar_failure ~site exn =
   match exn with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -220,9 +243,35 @@ let trim_buffer_to_ring buf base_offset =
     base_offset + drop_len
   end
 
-(* [drain_fd_to_buf buf fd] reads every byte currently available on
-   [fd] without blocking. Returns [true] if EOF was observed. *)
-let drain_fd_to_buf buf fd =
+(* [drain_fd_to_buf ~fd_kind buf fd] reads every byte currently
+   available on [fd] without blocking. Returns [true] if EOF was
+   observed.
+
+   The previous implementation collapsed every non-EAGAIN/EINTR
+   exception into a permissive [true] (EOF), silently misreporting
+   genuine read errors (EBADF, EIO, ENOMEM, ENOSPC, …) as clean
+   close.  This typed split:
+
+   - Re-raises [Eio.Cancel.Cancelled] so cancellation propagates
+     through the enclosing switch.
+   - Splits [Unix.Unix_error] (anything that isn't EAGAIN /
+     EWOULDBLOCK / EINTR) into a distinct arm: tick the
+     drain-failure counter with [error_kind = "unix_error"] and a
+     bounded warn naming the [errno].  EBADF/EIO/ENOMEM are the
+     most likely realistic failure modes here and are forensically
+     valuable.
+   - Final arm: any other exception ticks with
+     [error_kind = "other"] and a bounded warn carrying
+     [Printexc.to_string] in the log body only (closed-vocab
+     label).
+
+   Returning [true] in the failure arms preserves the existing
+   operational behavior (the caller advances [stdout_eof] /
+   [stderr_eof] and eventually closes the FD).  This is a
+   deliberate conservative choice — flipping it to [false] would
+   change reap semantics and belongs in a future RFC, not in this
+   visibility patch. *)
+let drain_fd_to_buf ~fd_kind buf fd =
   let chunk = Bytes.create 4096 in
   let rec loop () =
     let readable =
@@ -237,7 +286,19 @@ let drain_fd_to_buf buf fd =
       | n -> Buffer.add_subbytes buf chunk 0 n; loop ()
       | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) -> false
       | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop ()
-      | exception _ -> true
+      | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+      | exception Unix.Unix_error (errno, fn, _) ->
+          Log.Misc.warn
+            "bg_task drain_fd_to_buf %s Unix_error in %s: %s"
+            fd_kind fn (Unix.error_message errno);
+          observe_drain_failure ~fd_kind ~error_kind:"unix_error";
+          true
+      | exception exn ->
+          Log.Misc.warn
+            "bg_task drain_fd_to_buf %s unexpected exception: %s"
+            fd_kind (Printexc.to_string exn);
+          observe_drain_failure ~fd_kind ~error_kind:"other";
+          true
   in
   loop ()
 
@@ -247,13 +308,19 @@ let poll_state st =
   if st.closed then ()
   else begin
     if not st.stdout_eof then begin
-      let eof = drain_fd_to_buf st.stdout_buf st.handle.stdout_fd in
+      let eof =
+        drain_fd_to_buf ~fd_kind:"stdout"
+          st.stdout_buf st.handle.stdout_fd
+      in
       st.stdout_base_offset <-
         trim_buffer_to_ring st.stdout_buf st.stdout_base_offset;
       st.stdout_eof <- eof
     end;
     if not st.stderr_eof then begin
-      let eof = drain_fd_to_buf st.stderr_buf st.handle.stderr_fd in
+      let eof =
+        drain_fd_to_buf ~fd_kind:"stderr"
+          st.stderr_buf st.handle.stderr_fd
+      in
       st.stderr_base_offset <-
         trim_buffer_to_ring st.stderr_buf st.stderr_base_offset;
       st.stderr_eof <- eof

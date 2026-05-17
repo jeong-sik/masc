@@ -265,14 +265,17 @@ the trade-off does not invert in our favor.
 3. **macOS Docker Desktop FD accounting under exec-heavy load** — needs
    measurement during phase 1 to confirm host FD usage actually drops as
    projected.
-4. **macOS Docker Desktop license for production hosts** — Docker
-   Desktop requires a paid license for organizations with >250
-   employees or >$10M annual revenue (cited as motivation by OpenHands
-   proposal #13203). If any production target is macOS, evaluate
-   Colima / Rancher Desktop / docker-cli + remote daemon as
-   alternatives. Not blocking phase 1 (developer machines only); does
-   block phase 2 default flip if production rollout includes macOS
-   hosts.
+4. **macOS Docker Desktop license — commercial-use scope, not
+   production-only** — Docker Desktop requires a paid Pro/Team/Business
+   subscription for any commercial use inside organizations with >250
+   employees OR >$10M annual revenue (cited as motivation by OpenHands
+   proposal #13203). Scope is *commercial use*, not deployment tier, so
+   phase 1 (macOS developer machines) is also affected once the
+   organization crosses either threshold. Action: confirm subscription
+   status before phase 1 macOS rollout in such organizations; evaluate
+   Colima / Rancher Desktop / docker-cli + remote daemon as fallbacks
+   for both phases. Phase 2 default flip on macOS production hosts
+   remains a hard block until license or alternative is resolved.
 
 ## Evidence
 

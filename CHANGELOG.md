@@ -31,6 +31,12 @@
 ### Added
 - Documented RFC-0105's OpenAI-compatible boundary typed error mapping for tool validation and provider/runtime failure surfaces.
 - Added RFC-0106's cancel-safe `try`/`with` discipline draft for callback and cleanup paths.
+- Added Docker playground FD-hotspot operator tooling:
+  `scripts/docker-playground-fd-status.sh` surfaces worktree fanout and
+  `lsof` holders under `.masc/playground/docker`, while
+  `scripts/cleanup-docker-playground-worktrees.sh` dry-runs/applies
+  conservative stale clean worktree cleanup for #15931, with explicit
+  `--include-broken` handling for old non-git orphan directories.
 
 ### Fixed
 - Wired the `Sandbox_exec` slot at non-Docker spawn callsites and gated keeper admission on system FD pressure, so fleet startup respects host-level descriptor pressure.

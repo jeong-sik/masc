@@ -84,6 +84,36 @@ let test_drain_to_buffer () =
   in
   check string "buffer contents" "ab\n" (Buffer.contents buf)
 
+let test_process_guard_wraps_helpers () =
+  let depth = Atomic.make 0 in
+  let high_water = Atomic.make 0 in
+  let update_high () =
+    let cur = Atomic.get depth in
+    let rec bump () =
+      let h = Atomic.get high_water in
+      if cur > h then
+        if Atomic.compare_and_set high_water h cur then () else bump ()
+    in
+    bump ()
+  in
+  WP.set_process_guard
+    { WP.run =
+        (fun f ->
+          Atomic.incr depth;
+          update_high ();
+          Fun.protect ~finally:(fun () -> Atomic.decr depth) f)
+    };
+  Fun.protect ~finally:WP.reset_process_guard_for_testing (fun () ->
+      let lines, _ =
+        WP.with_process_args_in "/bin/echo" [| "/bin/echo"; "guard" |]
+          WP.drain_lines
+      in
+      check (list string) "guarded stdout" [ "guard" ] lines;
+      let lines, _ = WP.with_process_in "printf guard2" WP.drain_lines in
+      check (list string) "guarded shell stdout" [ "guard2" ] lines;
+      check int "guard high-water" 1 (Atomic.get high_water);
+      check int "guard released" 0 (Atomic.get depth))
+
 let () =
   run "with_process"
     [
@@ -93,6 +123,9 @@ let () =
           test_case "drain_to_buffer fills buffer" `Quick
             test_drain_to_buffer;
         ] );
+      ( "guard",
+        [ test_case "process guard wraps helpers" `Quick
+            test_process_guard_wraps_helpers ] );
       ( "error_path",
         [
           test_case "Sys_error in callback closes pipe" `Quick

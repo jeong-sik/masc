@@ -1,5 +1,16 @@
 (** Exception-safe subprocess stdout capture — SSOT for #8538. *)
 
+type process_guard = { run : 'a. (unit -> 'a) -> 'a }
+(** Process-wide guard wrapped around [Unix.open_process_*] helpers.
+    Intended for resource accounting/admission control at the subprocess
+    lifetime boundary. *)
+
+val set_process_guard : process_guard -> unit
+(** Install a process-wide guard. The default guard runs directly. *)
+
+val reset_process_guard_for_testing : unit -> unit
+(** Restore the default direct guard. Intended for focused tests. *)
+
 val with_process_in :
   string -> (in_channel -> 'a) -> 'a * Unix.process_status
 (** [with_process_in cmd f] opens [cmd] via [Unix.open_process_in], passes

@@ -197,6 +197,33 @@ let test_process_eio_run_argv_uses_sandbox_slot () =
       check int "Process_eio sandbox slot released" 0
         (kind_in_flight FA.Sandbox_exec))
 
+let test_with_process_uses_sandbox_slot () =
+  Eio_main.run @@ fun _env ->
+  Eio_guard.enable () ;
+  Fun.protect
+    ~finally:(fun () ->
+      With_process.reset_process_guard_for_testing () ;
+      Eio_guard.disable ())
+    (fun () ->
+      With_process.reset_process_guard_for_testing () ;
+      FA.install_with_process_sandbox_exec_guard () ;
+      let (observed, lines), status =
+        With_process.with_process_args_in "/bin/echo"
+          [| "/bin/echo" ; "with-process-slot" |]
+          (fun ic ->
+            let observed = kind_in_flight FA.Sandbox_exec in
+            (observed, With_process.drain_lines ic))
+      in
+      check int "With_process holds sandbox slot during callback" 1
+        observed ;
+      check (list string) "With_process stdout" [ "with-process-slot" ]
+        lines ;
+      (match status with
+      | Unix.WEXITED 0 -> ()
+      | _ -> Alcotest.fail "expected With_process child to exit 0") ;
+      check int "With_process sandbox slot released" 0
+        (kind_in_flight FA.Sandbox_exec))
+
 let () =
   Alcotest.run "Fd_accountant"
     [
@@ -233,5 +260,7 @@ let () =
         [
           test_case "Process_eio run_argv uses sandbox slot" `Quick
             test_process_eio_run_argv_uses_sandbox_slot ;
+          test_case "With_process uses sandbox slot" `Quick
+            test_with_process_uses_sandbox_slot ;
         ] ) ;
     ]

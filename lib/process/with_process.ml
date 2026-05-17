@@ -13,29 +13,39 @@
     raise [Failure "equal: abstract value"] when called on already-closed
     channels.  The close is best-effort; the primary contract is fd reclaim. *)
 
+type process_guard = { run : 'a. (unit -> 'a) -> 'a }
+
+let default_process_guard = { run = (fun f -> f ()) }
+let process_guard : process_guard Atomic.t = Atomic.make default_process_guard
+let set_process_guard guard = Atomic.set process_guard guard
+let reset_process_guard_for_testing () = Atomic.set process_guard default_process_guard
+let with_process_guard f = (Atomic.get process_guard).run f
+
 let close_best_effort ic =
   try let _ = (Unix.close_process_in ic : Unix.process_status) in ()
   with Unix.Unix_error _ | Sys_error _ | Failure _ -> ()
 
 let with_process_in cmd f =
-  let ic = Unix.open_process_in cmd in
-  match f ic with
-  | result ->
-      let status = Unix.close_process_in ic in
-      (result, status)
-  | exception exn ->
-      close_best_effort ic;
-      raise exn
+  with_process_guard (fun () ->
+      let ic = Unix.open_process_in cmd in
+      match f ic with
+      | result ->
+          let status = Unix.close_process_in ic in
+          (result, status)
+      | exception exn ->
+          close_best_effort ic;
+          raise exn)
 
 let with_process_args_in prog argv f =
-  let ic = Unix.open_process_args_in prog argv in
-  match f ic with
-  | result ->
-      let status = Unix.close_process_in ic in
-      (result, status)
-  | exception exn ->
-      close_best_effort ic;
-      raise exn
+  with_process_guard (fun () ->
+      let ic = Unix.open_process_args_in prog argv in
+      match f ic with
+      | result ->
+          let status = Unix.close_process_in ic in
+          (result, status)
+      | exception exn ->
+          close_best_effort ic;
+          raise exn)
 
 let drain_to_buffer ?(chunk = 4096) ic =
   let buf = Buffer.create chunk in

@@ -79,6 +79,13 @@ val install_process_eio_sandbox_exec_guard : unit -> unit
     installs it at load time; the explicit function exists for tests and future
     bootstrap code that resets process hooks. *)
 
+val install_with_process_sandbox_exec_guard : unit -> unit
+(** [install_with_process_sandbox_exec_guard ()] installs the process-wide
+    {!With_process} guard that accounts [Unix.open_process_*] helper calls as
+    {!Sandbox_exec} while {!Eio_guard} is ready. The slot covers the whole
+    subprocess lifetime: open, caller drain, and close. Before Eio startup, the
+    guard runs directly so pure test/module paths stay safe. *)
+
 type snapshot = {
   per_kind : (kind * int) list ;
       (** in-flight count per class (cap − available semaphore slots). *)

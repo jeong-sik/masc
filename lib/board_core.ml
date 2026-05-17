@@ -584,7 +584,15 @@ let validate_sub_board_post_policy_unlocked store ~author_id ~hearth =
 
 (** {1 Post Operations} *)
 
-let create_post
+type create_post_outcome =
+  | Fresh_post of post
+  | Dedup_hit of post
+
+let post_of_create_post_outcome = function
+  | Fresh_post post | Dedup_hit post -> post
+;;
+
+let create_post_with_outcome
       store
       ~author
       ~content
@@ -594,10 +602,10 @@ let create_post
       ?meta_json
       ?(visibility = Internal)
       ?(ttl_hours = Limits.default_ttl_hours)
-      ?hearth
-      ?thread_id
-      ()
-  : (post, board_error) Result.t
+  ?hearth
+  ?thread_id
+  ()
+  : (create_post_outcome, board_error) Result.t
   =
   maybe_sweep store;
   (* Validate author *)
@@ -743,9 +751,42 @@ let create_post
          with
          | Ok _ -> ()
          | Error msg -> Log.BoardLog.warn "economy earn (post): %s" msg);
-        Ok post
-      | Ok (`Dedup_hit existing) -> Ok existing
+        Ok (Fresh_post post)
+      | Ok (`Dedup_hit existing) -> Ok (Dedup_hit existing)
       | Error _ as e -> e)
+;;
+
+let create_post
+      store
+      ~author
+      ~content
+      ?title
+      ?body
+      ~post_kind
+      ?meta_json
+      ?visibility
+      ?ttl_hours
+      ?hearth
+      ?thread_id
+      ()
+  =
+  match
+    create_post_with_outcome
+      store
+      ~author
+      ~content
+      ?title
+      ?body
+      ~post_kind
+      ?meta_json
+      ?visibility
+      ?ttl_hours
+      ?hearth
+      ?thread_id
+      ()
+  with
+  | Ok outcome -> Ok (post_of_create_post_outcome outcome)
+  | Error _ as err -> err
 ;;
 
 let get_post store ~post_id : (post, board_error) Result.t =

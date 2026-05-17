@@ -355,10 +355,10 @@ let create_post ~author ~content ?title ?body ~post_kind ?meta_json
   match backend () with
   | Jsonl store ->
       (match
-         Board.create_post store ~author ~content ?title ?body ~post_kind ?meta_json
-           ~visibility ~ttl_hours ?hearth ?thread_id ()
+         Board.create_post_with_outcome store ~author ~content ?title ?body
+           ~post_kind ?meta_json ~visibility ~ttl_hours ?hearth ?thread_id ()
        with
-      | Ok post as ok ->
+      | Ok (Board.Fresh_post post) ->
           let pid = Board.Post_id.to_string post.id in
           let auth = Board.Agent_id.to_string post.author in
           emit_keeper_board_signal
@@ -375,7 +375,8 @@ let create_post ~author ~content ?title ?body ~post_kind ?meta_json
                { post_id = pid; author = auth; title = post.title;
                  content = post.content; post_kind = post.post_kind;
                  hearth = post.hearth });
-          ok
+          Ok post
+      | Ok (Board.Dedup_hit post) -> Ok post
       | Error _ as err -> err)
 
 let get_post ~post_id =

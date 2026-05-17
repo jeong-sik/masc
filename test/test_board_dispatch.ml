@@ -106,6 +106,35 @@ let test_keeper_signal_hook_cancellation_propagates () =
    with Eio.Cancel.Cancelled _ -> raised := true);
   Alcotest.(check bool) "cancellation propagated" true !raised
 
+let test_dedup_hit_does_not_emit_post_created_fanout () =
+  let keeper_signals = ref 0 in
+  let sse_post_created = ref 0 in
+  Board_dispatch.set_keeper_board_signal_hook (fun _ -> incr keeper_signals);
+  Board_dispatch.set_board_sse_hook (function
+    | Board_dispatch.Post_created _ -> incr sse_post_created
+    | _ -> ());
+  let create () =
+    Board_dispatch.create_post ~author:"dedup-agent"
+      ~content:"same post body from one keeper turn"
+      ~post_kind:Board.Automation_post ~hearth:"keepers" ~thread_id:"turn-15650" ()
+  in
+  let first =
+    match create () with
+    | Ok post -> post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let second =
+    match create () with
+    | Ok post -> post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  Alcotest.(check string)
+    "dedup returns existing post"
+    (Board.Post_id.to_string first.id)
+    (Board.Post_id.to_string second.id);
+  Alcotest.(check int) "keeper signal emitted once" 1 !keeper_signals;
+  Alcotest.(check int) "SSE post_created emitted once" 1 !sse_post_created
+
 let test_structured_post_roundtrip () =
   let meta = `Assoc [("source", `String "keeper_autonomy")] in
   match Board_dispatch.create_post ~author:"sangsu"
@@ -1108,6 +1137,8 @@ let () =
         (with_eio test_keeper_signal_hook_failure_does_not_abort_create_post);
       Alcotest.test_case "keeper hook cancellation propagates" `Quick
         (with_eio test_keeper_signal_hook_cancellation_propagates);
+      Alcotest.test_case "dedup hit does not fan out post_created" `Quick
+        (with_eio test_dedup_hit_does_not_emit_post_created_fanout);
       Alcotest.test_case "structured roundtrip" `Quick (with_eio test_structured_post_roundtrip);
       Alcotest.test_case "SSE post_created includes post_kind" `Quick
         (with_eio test_board_sse_post_created_includes_post_kind);

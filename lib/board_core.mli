@@ -189,6 +189,36 @@ val reaction_key
 
 (** {1 Post operations} *)
 
+(** Result of a create-post attempt before the legacy API folds it
+    back to just the persisted/found post.  Dispatch layers use this
+    to avoid re-emitting post-created fanout for receive-side dedup
+    hits. *)
+type create_post_outcome =
+  | Fresh_post of post
+  | Dedup_hit of post
+
+(** Extract the post carried by {!create_post_outcome}. *)
+val post_of_create_post_outcome : create_post_outcome -> post
+
+(** Creates a post and preserves whether the operation was fresh or a
+    receive-side dedup hit.  Same validation and persistence semantics as
+    {!create_post}; fresh posts append JSONL + earn credits, dedup hits
+    return the existing post without those side effects. *)
+val create_post_with_outcome
+  :  store
+  -> author:string
+  -> content:string
+  -> ?title:string
+  -> ?body:string
+  -> post_kind:post_kind
+  -> ?meta_json:Yojson.Safe.t
+  -> ?visibility:visibility
+  -> ?ttl_hours:int
+  -> ?hearth:string
+  -> ?thread_id:string
+  -> unit
+  -> (create_post_outcome, board_error) Result.t
+
 (** Creates a new post.  Validates [author] via
     {!Agent_id.of_string}, normalises [hearth] (lowercased +
     trimmed), folds the canonical [title / body / kind /

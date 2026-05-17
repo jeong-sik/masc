@@ -177,7 +177,7 @@ V09 는 본 RFC scope 밖 (silent fallback 아니라 type API drift). 별도 RFC
 | PR | iter | 패턴 | 위치 |
 |---|---|---|---|
 | (iter 46) | 46 | G (fiber contention) | `File_lock_eio.atomic_update*` CAS retries counter |
-| (iter 48) | 48 | A∩E (RFC-0110 §5.1 A canary) | `Memory_jsonl.parse_line` 3 drop site typed reason counter |
+| (iter 48) | 48 | A∩E (RFC-0126 §5.1 A canary) | `Memory_jsonl.parse_line` 3 drop site typed reason counter |
 
 cluster G 는 본 RFC §6.1 클러스터 (A-F) 의 *외부* — 기존 silent path 의 가시화가 아니라 *처음부터 가시화 없던 차원* 의 첫 surface 추가. spiral 누적 아님.
 

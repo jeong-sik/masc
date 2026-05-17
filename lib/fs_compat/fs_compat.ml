@@ -132,119 +132,70 @@ let save_file_unix (path : string) (content : string) : unit =
     (fun () -> Stdlib.output_string oc content)
 ;;
 
-(** LRU fd cache for [append_file_unix].
+(* RFC-0108: per-path Stdlib.Mutex registry + fresh-fd open/close
+   on every append.
 
-    Tier-A perf change: previously every [append_file] call did
-    [open_out_gen] + [output_string] + [close_out] — three syscalls
-    per JSONL line.  Under 64+ keepers each emitting telemetry every
-    turn, that fd churn dominated kernel time and gated keeper
-    progress on file I/O.
+   Background: prior [Append_fd_cache] LRU cached an [out_channel]
+   per path and reused it across calls. Cache lookup was mutex-
+   protected, but the OCaml-runtime [out_channel] buffer state is
+   not domain-safe — two domains writing through the same cached
+   channel corrupted records mid-line (observed 2026-05-17:
+   utf-8 multibyte tears across trajectories/, keepers/*/reaction-
+   ledger/, plus "}{"-concat in oas-events/ — total 243 live
+   malformed lines).
 
-    Cache up to [fd_cache_max_size] open append channels keyed by
-    absolute path.  On hit, re-use the cached channel and [flush] so
-    bytes reach the kernel buffer before the call returns (preserves
-    durability semantics for crash-after-append scenarios — without
-    the flush, OCaml's per-channel buffer would coalesce writes and
-    a SIGKILL between [output_string] and the next [flush] could lose
-    data).  On miss, open the file and insert; if the cache is full,
-    evict the least-recently-used entry first (closing its channel).
+   PR #15936 (RFC-0108 root-fix scope #1) addressed [append_jsonl]
+   with its own per-path registry but left [append_file_unix] still
+   pointing at the cache. This PR extends the fix to
+   [append_file_unix] (and removes the now-dead [Append_fd_cache]
+   module and [at_exit] hook) so the ~15 [append_file] callers
+   (autoresearch_storage, metrics_store_eio, memory_jsonl,
+   coord_utils_ops, board_core, keeper_chat_store, etc.) get the
+   same guarantee.
 
-    Uses [Stdlib.Mutex] (not [Eio.Mutex]) because [append_file] is
-    callable from non-Eio contexts (init, [at_exit], pure-Unix
-    fallback paths).  Single-domain assumption holds — multi-domain
-    rollout is gated on RFC-Domain-Split (out-of-scope here); when
-    that lands, the cache should become domain-local.
+   The mutex registry is shared between [append_file_unix] and
+   [append_jsonl] (single [append_path_mutex_registry]) so a
+   caller mixing the two helpers on a single path remains
+   race-free. Per-path granularity lets appends to *different*
+   files run concurrently.
 
-    The [at_exit] handler closes every cached channel so normal
-    shutdown flushes all pending bytes; abnormal termination
-    (SIGKILL) still loses any kernel-buffered writes that haven't
-    been [fsync]'d, but that was already true before this change. *)
-let fd_cache_max_size = 16
+   Throughput trade-off (RFC-0108 §6 performance follow-up): the
+   removed cache folded three syscalls (open/output_string/close)
+   into one cached output_string under 64-keeper telemetry. Fresh
+   fd per call restores those three syscalls. A future domain-safe
+   cache (per-domain fd, or a single-writer coordinator fiber) can
+   reinstate the optimization without giving up correctness. *)
+let append_path_mutex_registry : (string, Stdlib.Mutex.t) Hashtbl.t =
+  Hashtbl.create 32
+let append_path_mutex_registry_mu = Stdlib.Mutex.create ()
 
-module Append_fd_cache = struct
-  type entry =
-    { channel : Stdlib.out_channel
-    ; mutable last_used : int
-    }
-
-  let cache : (string, entry) Hashtbl.t = Hashtbl.create 17
-  let counter = ref 0
-  let mutex = Mutex.create ()
-
-  let with_lock f =
-    Mutex.lock mutex;
-    Fun.protect ~finally:(fun () -> Mutex.unlock mutex) f
-  ;;
-
-  let evict_lru_if_needed_locked () =
-    if Hashtbl.length cache >= fd_cache_max_size
-    then (
-      let victim_path = ref None in
-      let victim_use = ref max_int in
-      Hashtbl.iter
-        (fun path entry ->
-           if entry.last_used < !victim_use
-           then (
-             victim_path := Some path;
-             victim_use := entry.last_used))
-        cache;
-      match !victim_path with
-      | None -> ()
-      | Some path ->
-        (match Hashtbl.find_opt cache path with
-         | Some entry ->
-           Stdlib.close_out_noerr entry.channel;
-           Hashtbl.remove cache path
-         | None -> ()))
-  ;;
-
-  let get_or_open_locked path =
-    match Hashtbl.find_opt cache path with
-    | Some entry ->
-      incr counter;
-      entry.last_used <- !counter;
-      entry.channel
-    | None ->
-      evict_lru_if_needed_locked ();
-      let oc = Stdlib.open_out_gen [ Stdlib.Open_append; Stdlib.Open_creat ] 0o644 path in
-      incr counter;
-      let entry = { channel = oc; last_used = !counter } in
-      Hashtbl.add cache path entry;
-      oc
-  ;;
-
-  let invalidate path =
-    with_lock (fun () ->
-      match Hashtbl.find_opt cache path with
-      | None -> ()
-      | Some entry ->
-        Stdlib.close_out_noerr entry.channel;
-        Hashtbl.remove cache path)
-  ;;
-
-  let close_all () =
-    with_lock (fun () ->
-      Hashtbl.iter (fun _ entry -> Stdlib.close_out_noerr entry.channel) cache;
-      Hashtbl.clear cache)
-  ;;
-end
-
-let () = Stdlib.at_exit Append_fd_cache.close_all
+let get_append_path_mutex path =
+  Stdlib.Mutex.lock append_path_mutex_registry_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock append_path_mutex_registry_mu)
+    (fun () ->
+      match Hashtbl.find_opt append_path_mutex_registry path with
+      | Some m -> m
+      | None ->
+        let m = Stdlib.Mutex.create () in
+        Hashtbl.add append_path_mutex_registry path m;
+        m)
 
 let append_file_unix (path : string) (content : string) : unit =
-  let write_with_cached () =
-    Append_fd_cache.with_lock (fun () ->
-      let oc = Append_fd_cache.get_or_open_locked path in
-      Stdlib.output_string oc content;
-      Stdlib.flush oc)
-  in
-  try write_with_cached () with
-  | exn ->
-    (* On I/O error invalidate the cached fd so the next call re-opens
-       fresh.  Re-raise so callers see the same error class as before
-       (Sys_error wrapping Unix_error). *)
-    Append_fd_cache.invalidate path;
-    raise exn
+  let mu = get_append_path_mutex path in
+  Stdlib.Mutex.lock mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock mu)
+    (fun () ->
+      let oc =
+        Stdlib.open_out_gen
+          [ Stdlib.Open_append; Stdlib.Open_creat; Stdlib.Open_wronly ]
+          0o644
+          path
+      in
+      Fun.protect
+        ~finally:(fun () -> Stdlib.close_out_noerr oc)
+        (fun () -> Stdlib.output_string oc content))
 ;;
 
 let mkdir_p_unix (path : string) : unit =
@@ -637,68 +588,26 @@ let fold_jsonl_lines ~init ~f path =
            !acc))
 ;;
 
-(* RFC-0108 root fix: dedicated per-path Stdlib.Mutex registry for
-   JSONL appends, with fresh fd open/close on every call.
-
-   The previous implementation called [append_file] → [append_file_unix]
-   → [Append_fd_cache.with_lock] which shared one [out_channel] across
-   all callers/domains. While the cache mutex serialized cache lookups
-   it did not protect the OCaml-runtime [out_channel] buffer state
-   itself, which is not domain-safe — concurrent writes from different
-   domains through the same cached channel corrupted records mid-line
-   (observed 2026-05-17 as utf-8 multibyte tears across trajectories/,
-   keepers/*/reaction-ledger/, and as "}{"-concat in oas-events/ —
-   total 243 live malformed lines pre-fix).
-
-   This fix targets [append_jsonl] specifically (not all of
-   [append_file]) because:
-   1. JSONL records are line-bounded and have a clear atomicity unit
-      (one full record + newline). Generic byte append (used by other
-      callers of [append_file]) does not.
-   2. Most observed corruption is in JSONL files. PR-3/4/5 fixed four
-      site-specific writers; this is the catch-all root fix that
-      protects the remaining 30+ [append_jsonl] callers (ide_annotations,
-      memory_jsonl, drift_guard, operator action_log, dashboard, etc.)
-      without per-site PRs.
-   3. Performance: fresh-fd-per-call replaces the LRU fd cache. The
-      cache's stated motivation (lib/fs_compat/fs_compat.ml:137-156)
-      was to cut three syscalls (open/output_string/close) per record
-      down to one cached output_string under 64 keepers' telemetry.
-      The trade is between that throughput optimization and
-      cross-domain correctness; correctness wins. A future cache that
-      is genuinely domain-safe (one fd per domain, or a single-writer
-      coordinator) can be added back under RFC-0108 §6 performance
-      follow-up. *)
-let jsonl_path_mutex_registry : (string, Stdlib.Mutex.t) Hashtbl.t =
-  Hashtbl.create 32
-let jsonl_path_mutex_registry_mu = Stdlib.Mutex.create ()
-
-let get_jsonl_path_mutex path =
-  Stdlib.Mutex.lock jsonl_path_mutex_registry_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock jsonl_path_mutex_registry_mu)
-    (fun () ->
-      match Hashtbl.find_opt jsonl_path_mutex_registry path with
-      | Some m -> m
-      | None ->
-        let m = Stdlib.Mutex.create () in
-        Hashtbl.add jsonl_path_mutex_registry path m;
-        m)
-
 (** Append JSON value as line to JSONL file.
 
-    Atomic per record (in-process): a per-path Stdlib.Mutex serializes
-    callers against each other, and a fresh fd is opened and closed
-    around a single [output_string] of [record + "\n"]. Cross-domain
-    safe. Records of any size are written without interleaving (the
-    mutex spans the whole syscall sequence). Crash durability is
-    not guaranteed (no fsync). *)
+    Atomic per record (in-process): the same [append_path_mutex_registry]
+    used by {!append_file_unix} serializes callers against each
+    other, and a fresh fd is opened and closed around a single
+    [output_string] of [record + "\n"]. Cross-domain safe. Records
+    of any size are written without interleaving (the mutex spans
+    the whole syscall sequence). Crash durability is not guaranteed
+    (no fsync).
+
+    PR #15936 introduced this helper with its own per-path
+    registry. This commit unifies the registry with
+    [append_file_unix] so a caller mixing the two helpers on a
+    single path remains race-free. *)
 let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =
   test_exec_home_guard ~op:"append_jsonl" path;
   let dir = Stdlib.Filename.dirname path in
   mkdir_p dir;
   let line = Yojson.Safe.to_string json ^ "\n" in
-  let mu = get_jsonl_path_mutex path in
+  let mu = get_append_path_mutex path in
   Stdlib.Mutex.lock mu;
   Fun.protect
     ~finally:(fun () -> Stdlib.Mutex.unlock mu)

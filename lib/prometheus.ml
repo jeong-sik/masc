@@ -346,6 +346,16 @@ let metric_tool_join_required_guard = "masc_tool_join_required_guard_total"
 let metric_tool_metrics_persist_dropped =
   "masc_tool_metrics_persist_dropped_total"
 
+(* tool_keeper.cached_text_by_key CAS conflicts.
+   Incremented once per recursive retry caused by an
+   [Atomic.compare_and_set cache_ref] failure in the helper.  Each
+   conflict triggers a second [compute ()] call, so sustained non-zero
+   rate is a recompute-amplification signal.  No labels: the helper is
+   currently used only for keeper_list_cache; add a cache label if a
+   second caller is introduced. *)
+let metric_tool_keeper_cache_cas_conflicts =
+  "masc_tool_keeper_cache_cas_conflicts_total"
+
 (* #9771: keeper turn-slot semaphore wait timeout counter.
 
    Production observed multiple keepers ([sangsu], [janitor],
@@ -1325,6 +1335,11 @@ let init () =
     metric_tool_metrics_persist_dropped
     "Total JSONL records dropped by tool_metrics_persist because the bounded \
      write queue is full. No labels."
+    Counter;
+  add
+    metric_tool_keeper_cache_cas_conflicts
+    "Total tool_keeper.cached_text_by_key Atomic CAS retry events. Each \
+     increment corresponds to one extra compute() call. No labels."
     Counter;
   add
     Keeper_metrics.metric_keeper_turn_queue_depth

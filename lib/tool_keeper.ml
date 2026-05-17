@@ -90,7 +90,11 @@ let rec cached_text_by_key cache_ref ~key ~ttl_s compute =
         }
       in
       if Atomic.compare_and_set cache_ref cache next then value
-      else cached_text_by_key cache_ref ~key ~ttl_s compute
+      else begin
+        Prometheus.inc_counter
+          Prometheus.metric_tool_keeper_cache_cas_conflicts ();
+        cached_text_by_key cache_ref ~key ~ttl_s compute
+      end
 
 module For_testing = struct
   let reset_keeper_list_cache () =

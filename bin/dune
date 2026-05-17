@@ -45,6 +45,17 @@
  (package masc_mcp)
  (libraries masc_mcp masc_core unix eio eio_main))
 
+;; RFC-0128 §5 Phase 3 — flat-file purge migration CLI. Walks the
+;; Legacy .masc-ide stores and rewrites every record into the
+;; canonical-URL bucket resolved from its file_path. Default is
+;; --dry-run; --commit performs the destructive move.
+(executable
+ (name masc_ide_migrate)
+ (modules masc_ide_migrate)
+ (public_name masc-ide-migrate)
+ (package masc_mcp)
+ (libraries masc_mcp masc_mcp.ide unix))
+
 ;; Read-only keeper feature proof CLI: renders the same JSON as
 ;; /api/v1/dashboard/keeper-feature-proof without starting a server.
 (executable

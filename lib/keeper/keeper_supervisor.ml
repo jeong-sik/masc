@@ -235,22 +235,59 @@ let launch_supervised_fiber
       Eio_guard.protect
         (fun () ->
            try
-             Keeper_keepalive.run_heartbeat_loop
-               ~proactive_warmup_sec
-               ctx
-               meta
-               reg.fiber_stop
-               ~wakeup:reg.fiber_wakeup;
+             (* RFC-0109 P4: opt-in keeper-level max-turn watchdog.
+                When [MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC] is set
+                to a positive float, race the keepalive loop against
+                [Eio.Time.sleep ctx.clock t] via [Eio.Fiber.first].
+                Timer expiry stamps
+                [Stale_turn_timeout (In_turn_hung ...)] BEFORE the
+                timer fiber returns so the existing watchdog_triggered
+                branch (below) treats the cancellation as a crash and
+                [sweep_and_recover] restarts the keeper. Default
+                disabled — opt-in. *)
+             (match
+                Env_config_runtime.Keeper_max_turn_watchdog.timeout_sec_opt
+                  ()
+              with
+              | None ->
+                Keeper_keepalive.run_heartbeat_loop
+                  ~proactive_warmup_sec
+                  ctx
+                  meta
+                  reg.fiber_stop
+                  ~wakeup:reg.fiber_wakeup
+              | Some timeout_s ->
+                Eio.Fiber.first
+                  (fun () ->
+                    Eio.Time.sleep ctx.clock timeout_s;
+                    Keeper_registry.set_failure_reason
+                      ~base_path
+                      meta.name
+                      (Some
+                         (Keeper_registry.Stale_turn_timeout
+                            (Keeper_registry_types.In_turn_hung
+                               { active_seconds = timeout_s
+                               ; timeout_threshold = timeout_s
+                               })));
+                    Log.Keeper.warn
+                      "%s: max-turn watchdog fired after %.1fs (RFC-0109 P4)"
+                      meta.name
+                      timeout_s)
+                  (fun () ->
+                    Keeper_keepalive.run_heartbeat_loop
+                      ~proactive_warmup_sec
+                      ctx
+                      meta
+                      reg.fiber_stop
+                      ~wakeup:reg.fiber_wakeup));
              (* Check if watchdog set a failure reason that should trigger
               crash recovery instead of a clean stop. When the stale
               watchdog sets fiber_stop + Stale_turn_timeout, the heartbeat
               loop exits normally but the supervisor must treat this as a
-              crash so sweep_and_recover restarts the keeper.
-              #10765 Phase 2: [Stale_termination_storm] and
-              [Stale_fleet_batch] also funnel through the crash path, but
-              [sweep_and_recover]'s [`Crashed] branch detects these variants
-              and routes to auto-pause instead of [to_restart], breaking the
-              restart-loop-back-to-stale cycle. *)
+              crash so sweep_and_recover restarts the keeper. Storm and
+              budget-loop cohorts still route to auto-pause; legacy
+              Stale_fleet_batch remains a watchdog signal but no longer
+              pauses the keeper. *)
              let watchdog_triggered =
                match Keeper_registry.get ~base_path meta.name with
                | Some e ->
@@ -1346,28 +1383,6 @@ let handle_stale_storm_pause
          count)
 ;;
 
-let handle_stale_fleet_batch_pause
-      (ctx : _ context)
-      (entry : Keeper_registry.registry_entry)
-      ~distinct_count
-  =
-  handle_crash_auto_pause
-    ctx
-    entry
-    ~reason_tag:"stale_fleet_batch"
-    ~metric_name:Keeper_metrics.metric_keeper_stale_fleet_batch_paused
-    ~lifecycle_detail:
-      (Printf.sprintf "stale_fleet_batch distinct_count=%d" distinct_count)
-    ~blocker_class:(Some Stale_fleet_batch)
-    ~log_message:
-      (Printf.sprintf
-         "STALE FLEET BATCH AUTO-PAUSED (distinct_keepers=%d in batch window). \
-          Supervisor will attempt self-healing auto-resume with exponential back-off \
-          instead of restarting each keeper into the same systemic failure mode (cascade \
-          dead, provider auth, fd leak, etc.). See #10765 / #10474 / #10745."
-         distinct_count)
-;;
-
 let handle_oas_timeout_budget_pause
       (ctx : _ context)
       (entry : Keeper_registry.registry_entry)
@@ -1455,12 +1470,6 @@ let sweep_and_recover (ctx : _ context) =
            once per storm, not once per sweep tick). *)
       handle_stale_storm_pause ctx entry ~count;
       to_unregister := entry :: !to_unregister
-    | Some (Keeper_registry.Stale_fleet_batch { distinct_count }) ->
-      (* Fleet batch detection means multiple keepers crossed the stale
-           watchdog together. Treating those as independent keeper crashes
-           immediately replays the batch. Pause/backoff instead. *)
-      handle_stale_fleet_batch_pause ctx entry ~distinct_count;
-      to_unregister := entry :: !to_unregister
     | Some (Keeper_registry.Oas_timeout_budget_loop { count }) ->
       (* Repeated OAS budget exhaustion means the active
            cascade/model is not producing within the turn budget.
@@ -1475,6 +1484,7 @@ let sweep_and_recover (ctx : _ context) =
     | Some (Keeper_registry.Heartbeat_consecutive_failures _)
     | Some (Keeper_registry.Turn_consecutive_failures _)
     | Some (Keeper_registry.Stale_turn_timeout _)
+    | Some (Keeper_registry.Stale_fleet_batch _)
     | Some (Keeper_registry.Provider_runtime_error _)
     | Some (Keeper_registry.Tool_required_unsatisfied _)
     | Some (Keeper_registry.Ambiguous_partial_commit _)
@@ -1523,9 +1533,9 @@ let sweep_and_recover (ctx : _ context) =
        [watchdog_stop_pending]. *)
     let stamp_cohort =
       match entry.last_failure_reason with
-      | Some (Keeper_registry.Stale_fleet_batch _) -> Some Stale_fleet_batch
       | Some (Keeper_registry.Oas_timeout_budget_loop _) -> Some Oas_timeout_budget
       | Some (Keeper_registry.Stale_turn_timeout _)
+      | Some (Keeper_registry.Stale_fleet_batch _)
       | Some (Keeper_registry.Stale_termination_storm _) -> Some Stale_turn_timeout
       (* Non-watchdog failure reasons do not seed a watchdog blocker_class. *)
       | Some (Keeper_registry.Heartbeat_consecutive_failures _)
@@ -2342,10 +2352,11 @@ let request_alive_but_stuck_recovery
      a watchdog stop.  The prior reason is captured in the log line
      for postmortem.
 
-     Idempotent: if the keeper is already in a watchdog cohort
+     Idempotent: if the keeper is already in an active watchdog cohort
      ([Stale_turn_timeout] / [Stale_termination_storm] /
-     [Stale_fleet_batch] / [Oas_timeout_budget_loop]), preserve it so we don't churn the
-     [stall_seconds] field on every poll. *)
+     [Oas_timeout_budget_loop]), preserve it so we don't churn the
+     [stall_seconds] field on every poll.  Legacy [Stale_fleet_batch] is not
+     preserved because fleet-batch detection is observation-only now. *)
   let prior_str =
     Option.map Keeper_registry.failure_reason_to_string current_entry.last_failure_reason
     |> Option.value ~default:"none"
@@ -2355,7 +2366,6 @@ let request_alive_but_stuck_recovery
     | Some
         ( Keeper_registry.Stale_turn_timeout _
         | Keeper_registry.Stale_termination_storm _
-        | Keeper_registry.Stale_fleet_batch _
         | Keeper_registry.Oas_timeout_budget_loop _ ) as kept -> kept
     (* Non-stale failure reasons (and no prior reason) are overwritten with
        a fresh [Stale_turn_timeout] carrying the current kill class.  Any new
@@ -2365,6 +2375,7 @@ let request_alive_but_stuck_recovery
     | Some (Keeper_registry.Provider_runtime_error _)
     | Some (Keeper_registry.Tool_required_unsatisfied _)
     | Some (Keeper_registry.Ambiguous_partial_commit _)
+    | Some (Keeper_registry.Stale_fleet_batch _)
     | Some Keeper_registry.Fiber_unresolved
     | Some (Keeper_registry.Exception _)
     | None -> Some (Keeper_registry.Stale_turn_timeout kill_class)

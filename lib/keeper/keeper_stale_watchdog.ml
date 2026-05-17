@@ -321,12 +321,16 @@ let () =
    individually unless an operator notices.
 
    Track recent terminations across all keepers in a small bounded
-   window.  When the number of distinct keepers in the window
-   reaches the threshold we emit a fleet-tier ERROR, a Prometheus
-   counter labelled by the low-cardinality [batch_root_cause], and
-   latch the affected keepers into [Stale_fleet_batch].  The supervisor
-   then pauses/backs off those keepers instead of restarting each one
-   into the same systemic failure mode. *)
+   window.  When the number of distinct keepers in the window reaches
+   the threshold we emit a fleet-tier WARN and a Prometheus counter
+   labelled by the low-cardinality [batch_root_cause].
+
+   This is deliberately observation-only.  A fleet-wide stale burst is a
+   useful signal for operators and provider/cascade health, but it is not
+   itself a keeper terminal reason.  Keepers retain their per-keeper
+   watchdog reason so the supervisor can apply the normal restart/dead
+   budget instead of amplifying one shared upstream hiccup into a durable
+   fleet pause. *)
 let batch_window_sec = Env_config_keeper.KeeperWatchdog.batch_window_sec
 let batch_threshold = Env_config_keeper.KeeperWatchdog.batch_threshold
 let batch_terminations : (string * float) list Atomic.t = Atomic.make []
@@ -349,68 +353,6 @@ let reset_batch_terminations_for_test () =
   Atomic.set batch_terminations []
 
 let record_batch_termination_for_test = record_batch_termination
-
-let stamp_stale_fleet_batch_meta ~config ~keeper_name ~distinct_count
-    ~root_reason =
-  let base_path = config.Coord.base_path in
-  match Keeper_registry.get ~base_path keeper_name with
-  | None -> ()
-  | Some entry ->
-    let root_text =
-      root_reason
-      |> Option.map Keeper_registry.failure_reason_to_string
-      |> Option.value ~default:"none"
-    in
-    let blocker =
-      Printf.sprintf "stale_fleet_batch(distinct_count=%d root_cause=%s)"
-        distinct_count root_text
-    in
-    let meta =
-      { entry.meta with
-        runtime =
-          { entry.meta.runtime with
-            last_blocker =
-              Some (blocker_info_of_class
-                      ~detail:blocker Stale_fleet_batch);
-          };
-      }
-    in
-    (match
-       write_meta_with_merge
-         ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-         config meta
-     with
-     | Ok () -> ()
-     | Error err ->
-       Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_write_meta_failures
-         ~labels:[("keeper", keeper_name); ("phase", "stale_fleet_batch_stamp")]
-         ();
-       Log.Keeper.warn
-         "%s: stale_fleet_batch meta stamp failed: %s"
-         keeper_name err)
-
-let latch_stale_fleet_batch_reasons ~config ~distinct_count keeper_names =
-  let base_path = config.Coord.base_path in
-  List.iter
-    (fun keeper_name ->
-       match Keeper_registry.get ~base_path keeper_name with
-       | None -> ()
-       | Some entry ->
-           (match entry.last_failure_reason with
-            | Some (Keeper_registry.Stale_fleet_batch { distinct_count = n })
-              when n >= distinct_count ->
-                ()
-            | root_reason ->
-                stamp_stale_fleet_batch_meta ~config ~keeper_name
-                  ~distinct_count ~root_reason;
-                Keeper_registry.set_failure_reason ~base_path keeper_name
-                  (Some
-                     (Keeper_registry.Stale_fleet_batch { distinct_count }))))
-    keeper_names
-
-let latch_stale_fleet_batch_reasons_for_test =
-  latch_stale_fleet_batch_reasons
 
 let effective_startup_grace_sec ~base_grace_sec ~poll_sec ~startup_warmup_sec =
   Float.max
@@ -804,8 +746,10 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                    escalation_threshold
                end
                end;
-               (* #10765 phase 2: fleet batch detection.  See module-level
-                  comment on [batch_terminations] for rationale. *)
+               (* Fleet batch detection is observation-only.  It must not
+                  rewrite per-keeper failure reasons or persist a blocker; the
+                  supervisor can restart each keeper under its normal budget
+                  while operators still get a fleet-wide signal. *)
                let batch = record_batch_termination meta.name now in
                if List.length batch >= batch_threshold then begin
                  let root_cause =
@@ -816,19 +760,16 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                    batch_root_cause_to_string root_cause
                  in
                  let distinct_count = List.length batch in
-                 latch_stale_fleet_batch_reasons ~config:ctx.config ~distinct_count
-                   batch;
                  Prometheus.inc_counter
                    Keeper_metrics.metric_keeper_stale_termination_batch
                    ~labels:[ ("root_cause", root_cause_label) ]
                    ();
-                 Log.Keeper.error
-                   "FLEET BATCH TERMINATION: %d distinct keepers \
+                 Log.Keeper.warn
+                   "FLEET STALE BURST: %d distinct keepers \
                     terminated in last %.0fs [%s] — systemic signal \
-                    root_cause=%s.  \
-                    Affected keepers are latched for auto-pause/backoff \
-                    instead of independent restart.  See #10765, #10474, \
-                    #10745."
+                    root_cause=%s.  Observation-only; keepers retain their \
+                    per-keeper watchdog reason and remain restart-eligible \
+                    under the normal supervisor budget."
                    distinct_count batch_window_sec
                    (String.concat ", " batch) root_cause_label
                end;

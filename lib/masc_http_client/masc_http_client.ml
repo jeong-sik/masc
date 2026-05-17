@@ -164,3 +164,15 @@ let get_sync ?clock ?timeout_sec ~net ?https ~url ~headers () =
   with
   | Ok response -> Ok (response.status, response.body)
   | Error _ as error -> error
+
+(* RFC-0107 Phase D.4 — read-only accessor on the per-process pool
+   singleton.  Returns [None] before the first HTTP call (pool not
+   yet lazy-initialized) so callers like [Pool_metrics] can no-op
+   instead of forcing the pool open just to read zeros. *)
+let pool_singleton_opt () : Pool.t option = !pool_ref
+
+(* RFC-0107 Phase D.2d — re-export Pool under Masc_http_client.Pool
+   so the test suite (and any direct consumer that wants the
+   typed surface rather than the legacy shim) can name it without
+   reaching into the wrapped library's mangled module path. *)
+module Pool = Pool

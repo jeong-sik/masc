@@ -454,20 +454,37 @@ let rec retry_with_backoff ~clock ~attempt ~max_attempts ~backoff_sec operation 
     failure
 ;;
 
-(** Make single HTTP POST request to Voice MCP server - Eio version *)
-let single_voice_mcp_call ~sw ~client ~uri ~headers ~body_str =
-  try
-    let body = Cohttp_eio.Body.of_string body_str in
-    let resp, resp_body = Cohttp_eio.Client.post ~sw ~body ~headers client uri in
-    let status = Cohttp.Response.status resp in
-    (* Read body using Eio.Buf_read *)
-    let body_str = Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:max_int in
-    if Cohttp.Code.is_success (Cohttp.Code.code_of_status status)
-    then Ok (Yojson.Safe.from_string body_str)
-    else Error (Printf.sprintf "HTTP %d: %s" (Cohttp.Code.code_of_status status) body_str)
+(** Make a single HTTP POST request to the Voice MCP server.
+
+    RFC-0107 Phase D.2c bis-2 — migrated off the legacy
+    [Cohttp_eio.Client.post] + [Masc_http_client.make_closing_client]
+    pattern.  Now routes through [Masc_http_client.post_sync] which
+    delegates to the process-wide piaf pool (keep-alive across the
+    retry loop in [call_voice_mcp_endpoint] above).
+
+    [~net] is kept on the signature because the existing public
+    [Masc_http_client.post_sync] still takes it (will be dropped in a
+    future API cleanup once all callers are pool-aware). *)
+let single_voice_mcp_call ~net ~uri ~headers_list ~body_str =
+  match
+    Masc_http_client.post_sync ~net ~url:(Uri.to_string uri)
+      ~headers:headers_list ~body:body_str ()
   with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn -> Error (Printf.sprintf "Connection error: %s" (Printexc.to_string exn))
+  | Ok (code, body) when code >= 200 && code < 300 ->
+    (try Ok (Yojson.Safe.from_string body) with
+     | Yojson.Json_error msg ->
+       Error (Printf.sprintf "Voice MCP: invalid JSON body: %s" msg))
+  | Ok (code, body) ->
+    Error (Printf.sprintf "HTTP %d: %s" code body)
+  | Error e ->
+    (* RFC-0106: re-raise Eio.Cancel.Cancelled when the surrounding fiber
+       was cancelled. Masc_http_client.post_sync delegates to a piaf pool
+       whose [Pool.do_request] catches all exceptions including Cancelled
+       and reports them as an Error string; without this check the retry
+       loop in [call_voice_mcp_endpoint] would sleep and re-attempt
+       instead of unwinding cancellation immediately. *)
+    Eio.Fiber.check ();
+    Error (Printf.sprintf "Connection error: %s" e)
 ;;
 
 (** Extract result from MCP response *)
@@ -511,26 +528,23 @@ let call_voice_mcp_endpoint ~sw ~clock ~net ~endpoint ~tool_name ~arguments =
       ]
   in
   let body_str = Yojson.Safe.to_string request_body in
-  let headers =
-    Cohttp.Header.of_list
-      [ "Content-Type", "application/json"; "Accept", "application/json" ]
+  let headers_list =
+    [ "Content-Type", "application/json"; "Accept", "application/json" ]
   in
-  match client_for_uri_result ~sw ~net uri with
-  | Error error -> Error error
-  | Ok client ->
-    let operation () =
-      let timeout =
-        Option.value endpoint.timeout_seconds ~default:(request_timeout_seconds ())
-      in
-      with_timeout ~clock ~timeout (fun () ->
-        single_voice_mcp_call ~sw ~client ~uri ~headers ~body_str)
+  let _ = sw in
+  let operation () =
+    let timeout =
+      Option.value endpoint.timeout_seconds ~default:(request_timeout_seconds ())
     in
-    retry_with_backoff
-      ~clock
-      ~attempt:1
-      ~max_attempts:(Option.value endpoint.max_retries ~default:(max_retries ()))
-      ~backoff_sec:(initial_backoff_seconds ())
-      operation
+    with_timeout ~clock ~timeout (fun () ->
+      single_voice_mcp_call ~net ~uri ~headers_list ~body_str)
+  in
+  retry_with_backoff
+    ~clock
+    ~attempt:1
+    ~max_attempts:(Option.value endpoint.max_retries ~default:(max_retries ()))
+    ~backoff_sec:(initial_backoff_seconds ())
+    operation
 ;;
 
 let attempt_tts_endpoint
@@ -687,26 +701,29 @@ let is_voice_server_available ~sw:_ ~clock ~net =
     else (
       voice_server_check_time := now;
       let check () =
-        try
-          Eio.Switch.run
-          @@ fun inner_sw ->
-          let uri =
-            match Voice_runtime_overlay.session_health_url_of_endpoint endpoint with
-            | Ok url -> Uri.of_string url
-            | Error _ -> voice_health_uri ()
-          in
-          match client_for_uri_result ~sw:inner_sw ~net uri with
-          | Error error -> Error error
-          | Ok client ->
-            let resp, _ = Cohttp_eio.Client.get ~sw:inner_sw client uri in
-            let status = Cohttp.Response.status resp in
-            let available = Cohttp.Code.is_success (Cohttp.Code.code_of_status status) in
-            voice_server_available := Some available;
-            Ok available
+        (* RFC-0107 Phase D.2c bis-2 — migrated off make_closing_client to
+           the pooled get_sync.  Health check is one-shot and idempotent;
+           pool reuse across check intervals trims the TLS handshake. *)
+        let uri =
+          match Voice_runtime_overlay.session_health_url_of_endpoint endpoint with
+          | Ok url -> Uri.of_string url
+          | Error _ -> voice_health_uri ()
+        in
+        match
+          Masc_http_client.get_sync ~net ~url:(Uri.to_string uri)
+            ~headers:[] ()
         with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          Log.Transport.warn "voice server check failed: %s" (Printexc.to_string exn);
+        | Ok (code, _) ->
+          let available = code >= 200 && code < 300 in
+          voice_server_available := Some available;
+          Ok available
+        | Error msg ->
+          (* RFC-0106: re-raise Eio.Cancel.Cancelled when the surrounding
+             fiber was cancelled. Masc_http_client.get_sync's piaf pool
+             catches Cancelled as an Error string; without this check
+             the availability probe would mask cancellation as Ok false. *)
+          Eio.Fiber.check ();
+          Log.Transport.warn "voice server check failed: %s" msg;
           voice_server_available := Some false;
           Ok false
       in
@@ -981,32 +998,35 @@ let health_check ~sw:_ ~clock:_ ~net () =
       | Ok url -> Uri.of_string url
       | Error _ -> voice_health_uri ()
     in
-    (try
-       Eio.Switch.run
-       @@ fun inner_sw ->
-       match client_for_uri_result ~sw:inner_sw ~net uri with
-       | Error error -> Error error
-       | Ok client ->
-         let resp, body = Cohttp_eio.Client.get ~sw:inner_sw client uri in
-         let status = Cohttp.Response.status resp in
-         let body_str = Eio.Buf_read.(parse_exn take_all) body ~max_size:max_int in
-         if Cohttp.Code.is_success (Cohttp.Code.code_of_status status)
-         then
-           Ok
-             (append_provider_metadata
-                (`Assoc
-                    [ "status", `String "healthy"
-                    ; "server", `String (Uri.to_string uri)
-                    ; ( "response"
-                      , try Yojson.Safe.from_string body_str with
-                        | Yojson.Json_error _ -> `String body_str )
-                    ])
-                endpoint)
-         else
-           Error (Printf.sprintf "Unhealthy: HTTP %d" (Cohttp.Code.code_of_status status))
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn -> Error (Printf.sprintf "Not reachable: %s" (Printexc.to_string exn)))
+    (* RFC-0107 Phase D.2c bis-2 — migrated off make_closing_client to
+       get_response_sync (typed full response with body).  Pool reuse
+       trims TLS handshake on repeated health checks. *)
+    match
+      Masc_http_client.get_response_sync ~net ~url:(Uri.to_string uri)
+        ~headers:[] ()
+    with
+    | Error msg ->
+      (* RFC-0106: re-raise Eio.Cancel.Cancelled when the health-check
+         fiber was cancelled. Pool.do_request captures Cancelled as an
+         Error string; without this check shutdown is reported as a
+         normal "Not reachable" failure. *)
+      Eio.Fiber.check ();
+      Error (Printf.sprintf "Not reachable: %s" msg)
+    | Ok { Masc_http_client.status; body = body_str; _ } ->
+      if status >= 200 && status < 300
+      then
+        Ok
+          (append_provider_metadata
+             (`Assoc
+                 [ "status", `String "healthy"
+                 ; "server", `String (Uri.to_string uri)
+                 ; ( "response"
+                   , try Yojson.Safe.from_string body_str with
+                     | Yojson.Json_error _ -> `String body_str )
+                 ])
+             endpoint)
+      else
+        Error (Printf.sprintf "Unhealthy: HTTP %d" status)
 ;;
 
 (** {1 Microphone record + transcribe} *)

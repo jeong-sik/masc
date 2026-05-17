@@ -1,5 +1,5 @@
 (** Keeper_approval_queue_failure_site — closed sum for [site] label on
-    [metric_keeper_approval_queue_failures] (7 sites). *)
+    [metric_keeper_approval_queue_failures]. *)
 
 type t =
   | Upsert_rule_save
@@ -9,5 +9,6 @@ type t =
   | Remember_rule
   | Approval_expired
   | Expire_callback
+  | Audit_read_recent
 
 val to_label : t -> string

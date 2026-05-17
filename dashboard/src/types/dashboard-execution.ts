@@ -157,10 +157,22 @@ export interface DashboardKeeperReactionLedgerHealth {
 export interface DashboardFleetPressureHealth {
   status: string | null
   reason: string | null
+  blocker?: string | null
   admission_blocked: boolean | null
   admission_blocked_keepers: number | null
   blocked_keepers: number | null
   blocked_count: number | null
+  bootable_keeper_count?: number | null
+  running_keeper_fiber_count?: number | null
+  minimum_running_fibers?: number | null
+  no_running_fibers?: boolean | null
+  low_running_fiber_margin?: boolean | null
+  paused_keeper_count?: number | null
+  autoboot_enabled_keeper_count?: number | null
+  paused_autoboot_enabled_keeper_count?: number | null
+  effective_reaction_capacity_count?: number | null
+  target_reaction_capacity_count?: number | null
+  operator_action_required?: boolean | null
 }
 
 export interface DashboardShellResponse {

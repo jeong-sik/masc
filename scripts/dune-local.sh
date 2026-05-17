@@ -24,6 +24,7 @@ Set MASC_OPAM_LOCK_PATH=/path/to/lock to override the shared opam lock path.
 Set MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT=seconds to bound opam-lock wait after the Dune lock (0 = wait forever).
 Set MASC_DUNE_LOCK_DIAG=0 to suppress best-effort lock holder diagnostics.
 Set MASC_DUNE_DRY_RUN=1 to print the command without running it.
+Set MASC_DUNE_ALLOW_LIVE_BUILD_LOCK=1 to wait behind a live _build/.lock holder.
 Set MASC_SKIP_PIN_CHECK=1 to skip the agent_sdk pin guard.
 Set MASC_SKIP_DEPS_CHECK=1 to skip the core-deps installed guard.
 Set MASC_SKIP_OCAML_VERSION_CHECK=1 to skip the OCaml minimum version guard.
@@ -282,21 +283,44 @@ fi
 #   MASC_DUNE_DRY_RUN=1     – dry-run never mutates state
 #   subcommand == clean     – clean removes everything anyway
 #   MASC_SKIP_STALE_CLEANUP=1 – operator opt-out
+#   MASC_DUNE_ALLOW_LIVE_BUILD_LOCK=1 – operator opts into waiting
+#       behind a live build-dir lock holder (usually bare `dune`)
 if [[ "${GITHUB_ACTIONS:-}" != "true" \
       && "${MASC_DUNE_DRY_RUN:-0}" != "1" \
       && "${MASC_SKIP_STALE_CLEANUP:-0}" != "1" \
       && "${_subcommand}" != "clean" ]]; then
   _build_lock="${DUNE_BUILD_DIR:-$repo_root/_build}/.lock"
   if [[ -f "${_build_lock}" ]]; then
-    _has_dune=0
-    if command -v pgrep >/dev/null 2>&1; then
-      if pgrep -x dune >/dev/null 2>&1; then _has_dune=1; fi
-    elif command -v ps >/dev/null 2>&1; then
-      if ps aux 2>/dev/null | grep -q '[d]une'; then _has_dune=1; fi
+    _lock_holders=""
+    _lock_probe=0
+    if command -v lsof >/dev/null 2>&1; then
+      _lock_probe=1
+      _lock_holders="$(lsof -t "${_build_lock}" 2>/dev/null | sort -u || true)"
     fi
-    if [[ "${_has_dune}" -eq 0 ]]; then
+    if [[ "${_lock_probe}" -eq 1 && -n "${_lock_holders}" ]]; then
+      printf '[dune-local] live Dune build-dir lock holder(s) on %s\n' \
+        "${_build_lock}" >&2
+      _print_lock_holders "${_build_lock}" "Dune build-dir"
+      if [[ "${MASC_DUNE_ALLOW_LIVE_BUILD_LOCK:-0}" != "1" ]]; then
+        printf '[dune-local] refusing to wait behind a live _build/.lock holder outside the local wrapper\n' >&2
+        printf '[dune-local] stop the bare `dune` process or set MASC_DUNE_ALLOW_LIVE_BUILD_LOCK=1 to wait anyway\n' >&2
+        exit 75
+      fi
+      printf '[dune-local] continuing because MASC_DUNE_ALLOW_LIVE_BUILD_LOCK=1\n' >&2
+    elif [[ "${_lock_probe}" -eq 1 ]]; then
       printf '[dune-local] removing stale _build/.lock (no dune process running)\n' >&2
       rm -f "${_build_lock}"
+    else
+      _has_dune=0
+      if command -v pgrep >/dev/null 2>&1; then
+        if pgrep -x dune >/dev/null 2>&1; then _has_dune=1; fi
+      elif command -v ps >/dev/null 2>&1; then
+        if ps aux 2>/dev/null | grep -q '[d]une'; then _has_dune=1; fi
+      fi
+      if [[ "${_has_dune}" -eq 0 ]]; then
+        printf '[dune-local] removing stale _build/.lock (no dune process running)\n' >&2
+        rm -f "${_build_lock}"
+      fi
     fi
   fi
   # Stale RPC daemon sockets: ~/.local/share/dune/rpc/<pid>.csexp

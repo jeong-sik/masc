@@ -1,14 +1,14 @@
 ---
 rfc: "0108"
 title: "Atomic JSONL Append (in-process)"
-status: Draft
+status: Active
 created: 2026-05-17
 updated: 2026-05-17
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0079", "0088"]
-implementation_prs: []
+implementation_prs: [15906, 15922, 15926, 15928, 15936, 15949]
 ---
 
 # RFC-0108: Atomic JSONL Append (in-process)
@@ -62,7 +62,24 @@ implementation_prs: []
 
 3 단계의 분기 누적은 RFC-0088 (Counter-as-Fix umbrella) 가 가리키는 *Symptom 억제 패턴*의 사례다. 한 모듈씩 fix가 들어갈 때마다 그 모듈에만 적합한 작은 mutex 가 추가됐고, 통일된 SSOT 로 수렴된 적이 없다. 이번 RFC는 그 수렴을 한다.
 
-## 3. Design: `Jsonl_atomic.append` SSOT
+## 2.5. Diagnosis Evolution (implementation 진행 중 발견)
+
+§2 의 초기 가설 (a) + (b) 는 *부분만* 맞았다. PR-4 (#15926, trajectory in-line mutex) 작업 시 더 정확한 root cause 가 드러났다.
+
+**기존 가설**: Tier-1 의 손상은 `Stdlib.Mutex` 가 multi-domain 에서 무효해서 발생.
+
+**실제 root cause**: `Append_fd_cache` 가 mutex 로 cache lookup *을* 보호하지만, *cached `out_channel` 의 buffer state* 자체는 보호하지 못한다. OCaml runtime 의 `out_channel` buffer 는 *domain-safe 가 아니다* — 두 도메인이 같은 cached channel 로 `output_string` 을 호출하면, mutex critical section *안에서도* OCaml runtime buffer 가 corrupt 된다.
+
+증거:
+- `Fs_compat.append_file_unix` 는 *이미* `Append_fd_cache.with_lock` (Stdlib.Mutex) 로 모든 IO 를 감쌌다 (lib/fs_compat/fs_compat.ml:175-176, 234-248). mutex 가 부재한 게 아니라 *충분치 않았다*.
+- mutex 안에서 `Stdlib.output_string oc content; Stdlib.flush oc` 가 호출된다. 두 syscall 이지만 mutex 안이라 race 가 발생하면 안 된다. 그럼에도 손상 발생.
+- 따라서 race source 는 syscall 사이가 아니라 *OCaml channel buffer 의 메모리 자체* 다.
+
+**결정적 fix 패턴**: per-call `open_out_gen` + `close_out_noerr`. cache 우회 (shared channel 없음). mutex 가 lookup 만이 아니라 *fd 의 lifetime 자체*도 다른 caller 와 시간 단위로 분리.
+
+이 진단은 RFC §3.2 의 보장 모델을 강화한다 — *cross-domain race 0* 는 *Eio.Mutex 채택* 외에 *fresh fd per call* 도 필요충분조건.
+
+## 3. Design: Dual SSOT (Eio + Sync)
 
 새 모듈 `lib/jsonl_atomic/jsonl_atomic.ml` 를 신설하여 4 writer 가 모두 이걸로 수렴한다.
 
@@ -132,15 +149,28 @@ val close : t -> unit
 - `Fs_compat.append_file` 자체는 유지 (non-jsonl generic append 호출자: ledger 등). `Fs_compat.append_jsonl` 은 `Jsonl_atomic.append` 로 위임만 하는 thin wrapper 가 되어 점진적 deprecate.
 - `Append_fd_cache` LRU 는 Tier-1 caller 가 사라지면 데드 코드가 됨. 별도 PR 에서 정리.
 
-### 4.3 PR 분할 (stack)
+### 4.3 PR 분할 (실제 진행)
 
-각 PR 이 독립 머지 가능하게 구성한다 (post-merge child orphan 회피, `feedback_stacked_pr_auto_close_recovery`).
+§2.5 의 진단 evolution 으로 실제 구현 경로가 §4.1 의 *예정 계획* 보다 풍부해졌다. 4-layer 로 정리:
 
-1. **PR-1** (본 PR): RFC docs-only.
-2. **PR-2**: `Jsonl_atomic` 모듈 + `test/test_jsonl_atomic.ml`. Caller 0 으로 머지 가능 (`Jsonl_atomic_test` 만 caller).
-3. **PR-3**: system_log 마이그레이션. 가장 단순, 가장 큰 효과 (`}{` concat 즉시 차단).
-4. **PR-4**: trajectories 마이그레이션.
-5. **PR-5**: `Dated_jsonl` 내부 swap (oas-events + reaction-ledger 동시 fix).
+| Layer | 의도 | PR | 상태 |
+|---|---|---|---|
+| L1 | RFC body (이 문서) | #15901 | MERGED |
+| L2 — SSOT 모듈 | `lib/jsonl_atomic/` Eio API + 5 stress test | #15906 | MERGED |
+| L2 — In-line 국소 fix | system_log inline mutex (boot path 제약) | #15922 | MERGED |
+| L2 — In-line 국소 fix | trajectory inline mutex + fresh fd (caller 가 sw/fs 없음) | #15926 | MERGED |
+| L2 — In-line 국소 fix | dated_jsonl inline mutex + fresh fd | #15928 | MERGED |
+| L3 — Root fix | `Fs_compat.append_jsonl` 본체 atomic | #15936 | MERGED |
+| L3 — Root fix 확장 | `Fs_compat.append_file_unix` atomic + `Append_fd_cache` **제거** | #15949 | MERGED |
+| L4 — Cleanup | trajectory + dated_jsonl 의 inline 헬퍼 제거 (L3 delegate) | #15953 | Draft |
+
+**진행 중 발견들** (RFC 본문 갱신 가치):
+1. system_log writer (`Ring.init_file_sink`) 가 `Eio_main.run` *전*에 실행된다 (`bin/main_eio.ml:683`). Eio API 적용 불가 → in-line Stdlib.Mutex pattern. boot-path vs runtime writer 구분 필요.
+2. trajectory caller (`record_runtime_mcp_keeper_trajectory`) 가 `~sw ~fs` 안 받음. Eio API 적용 시 3+ caller signature 변경 필요 → in-line pattern 선택.
+3. `Append_fd_cache` 자체가 race 의 진원지 (cached `out_channel` 공유). cache 제거가 *correctness fix* 이자 *code reduction* (-91 LoC, #15949).
+4. L2 inline pattern 이 L3 root fix 와 *equivalent guarantee*. L4 cleanup 에서 inline → library delegate (-109 LoC).
+
+`feedback_stacked_pr_auto_close_recovery` 학습 반영: 각 PR 이 독립 머지 가능하게 구성, post-merge push 회피 (실제로 PR #15936 머지 직후 force-push 시도가 실패 — `feedback_post_merge_push_check_required` 발동).
 
 ## 5. Verification
 

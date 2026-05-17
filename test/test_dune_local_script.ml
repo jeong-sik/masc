@@ -355,6 +355,48 @@ exit 1
       check bool "dune was invoked after reexec" true
         (Sys.file_exists dune_log))
 
+let test_live_build_lock_aborts_before_dune () =
+  with_temp_dir "dune-local-live-build-lock" (fun dir ->
+      let bin_dir, dune_log =
+        setup_fake_repo dir ~pin_check_exit_code:0
+          ~pin_check_stderr_msg:"pin ok"
+      in
+      let build_dir = Filename.concat dir "_build" in
+      mkdir_p build_dir;
+      let build_lock_path = Filename.concat build_dir ".lock" in
+      write_file build_lock_path "";
+      write_executable
+        (Filename.concat bin_dir "lsof")
+        (Printf.sprintf
+           {|#!/bin/sh
+if [ "${1:-}" = "-t" ] && [ "${2:-}" = %s ]; then
+  printf '4321\n'
+  exit 0
+fi
+exit 1
+|}
+           (quote build_lock_path));
+      write_executable
+        (Filename.concat bin_dir "ps")
+        {|#!/bin/sh
+if [ "${1:-}" = "-p" ] && [ "${2:-}" = "4321" ]; then
+  printf ' 4321 1 S 12:34 dune build --root stale-worktree\n'
+  exit 0
+fi
+exit 1
+|};
+      let code, _stdout, stderr =
+        run_dune_local dir bin_dir ~unset_env:[ "GITHUB_ACTIONS" ] "build"
+      in
+      check int "exits tempfail on live build-dir lock" 75 code;
+      check bool "reports live build-dir lock" true
+        (contains_substring stderr "live Dune build-dir lock holder");
+      check bool "reports holder command" true
+        (contains_substring stderr "dune build --root stale-worktree");
+      check bool "explains bare dune bypass" true
+        (contains_substring stderr "bare `dune` process");
+      check bool "dune was not invoked" false (Sys.file_exists dune_log))
+
 let test_opam_lockf_reexec_env_passthrough () =
   with_temp_dir "dune-local-opam-lockf" (fun dir ->
       let bin_dir, dune_log =
@@ -1066,6 +1108,8 @@ let () =
             test_opam_absent_skips_pin_guard;
           test_case "Dune lock wait reports holder" `Quick
             test_dune_lock_wait_reports_holder;
+          test_case "live build-dir lock aborts before Dune" `Quick
+            test_live_build_lock_aborts_before_dune;
           test_case "opam lockf reexec propagates env" `Quick
             test_opam_lockf_reexec_env_passthrough;
           test_case "opam lock timeout releases Dune lock" `Quick

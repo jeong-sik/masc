@@ -57,6 +57,7 @@
   test_read_drop_reason
   test_log_ring_encoder
   test_eio_context_fiber_local
+  test_pool
   test_keeper_turn_disposition
   test_keeper_turn_terminal_disposition_field
   test_attempt_state
@@ -343,6 +344,7 @@
   test_read_drop_reason
   test_log_ring_encoder
   test_eio_context_fiber_local
+  test_pool
   test_keeper_turn_disposition
   test_keeper_turn_terminal_disposition_field
   test_attempt_state
@@ -1432,6 +1434,8 @@
 
 (include stanzas/test_dune_local_script.inc)
 
+(include stanzas/test_docker_playground_gc_script.inc)
+
 (include stanzas/test_env_config_coord_git_local_timeout.inc)
 
 (include stanzas/test_env_config_dashboard_compute_timeouts.inc)
@@ -1801,6 +1805,15 @@
 ; Masc_keeper.t variants through to_string/of_string and pins the variant
 ; count so future additions surface in the diff. Requires masc_test_deps
 ; because it accesses Masc_mcp.Tool_name.* values directly.
+
+; RFC-0107 Phase D.4 — Pool_metrics Prometheus exporter regression test.
+; Pins the 5 metric name constants, register () idempotency, and the
+; /metrics text contains the metric families with correct TYPE lines.
+
+(test
+ (name test_pool_metrics)
+ (modules test_pool_metrics)
+ (libraries masc_test_deps))
 
 (test
  (name test_tool_name_exhaustive)

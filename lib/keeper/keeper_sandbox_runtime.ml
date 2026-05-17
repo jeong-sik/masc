@@ -34,6 +34,10 @@ let docker_command_argv () =
   | _ -> [ docker_command () ]
 ;;
 
+(* RFC-0107 Phase E step 2 — branch on MASC_DOCKER_TRANSPORT env flag here.
+   When set to "api", route through [Sandbox.Docker_api] (UDS HTTP) instead
+   of forking a [docker] subprocess; the subprocess path stays as the
+   transitional fallback. Default "subprocess" until step 2 lands. *)
 let run_docker_argv_with_status ~summary ~timeout_sec argv =
   Docker_spawn_throttle.with_slot (fun () ->
     Masc_exec.Exec_gate.run_argv_with_status

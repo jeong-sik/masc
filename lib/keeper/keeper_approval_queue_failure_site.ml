@@ -6,6 +6,7 @@ type t =
   | Remember_rule
   | Approval_expired
   | Expire_callback
+  | Audit_read_recent
 
 let to_label = function
   | Upsert_rule_save -> "upsert_rule_save"
@@ -15,4 +16,5 @@ let to_label = function
   | Remember_rule -> "remember_rule"
   | Approval_expired -> "approval_expired"
   | Expire_callback -> "expire_callback"
+  | Audit_read_recent -> "audit_read_recent"
 ;;

@@ -191,6 +191,7 @@ type ws_frame_json_parse_error_kind =
   | Yojson_parse_error
   | Other_ws_frame_json_parse_error
 
+
 (** Increments [masc_server_mcp_ws_frame_json_parse_failures_total] for a
     silent-drop visibility event in [parse_sse_dashboard_event].
     [error_kind] must be one of the closed vocab values

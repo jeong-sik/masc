@@ -100,6 +100,10 @@ let run_process_with_timeout
    share the global docker spawn throttle. The cleanup path used to bypass it,
    which meant a 64-worker cancellation/completion wave could still fan out
    [docker rm -f] even after the main [docker run] path was gated. *)
+(* RFC-0107 Phase E step 2 — branch on MASC_DOCKER_TRANSPORT env flag here.
+   When set to "api", route through [Sandbox.Docker_api] (UDS HTTP) instead
+   of forking a [docker] subprocess; the subprocess path stays as the
+   transitional fallback. Default "subprocess" until step 2 lands. *)
 let run_docker_process_with_throttle ?stdin_content ~clock_opt ~timeout_sec ~argv ~env () =
   Docker_spawn_throttle.with_slot (fun () ->
     run_process_with_timeout

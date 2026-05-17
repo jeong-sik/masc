@@ -10,6 +10,40 @@ open Keeper_exec_shared
    this module's call sites. *)
 let coreutils = (Host_config.host ()).coreutils
 
+(* Domain-owned Prometheus metric (RFC-0043 Phase 0): the metric name
+   and registration live next to the bumper here rather than in the
+   central prometheus.ml registry, keeping that file under the
+   godfile-size-regression cap. *)
+let metric_bash_history_append_failures =
+  "masc_bash_history_append_failures_total"
+
+let () =
+  Prometheus.register_counter
+    ~name:metric_bash_history_append_failures
+    ~help:
+      "Total bash-history audit append failures observed at \
+       keeper_shell_ops. Bash_history.append returned Error (Sys_error \
+       from open/write/close). Decoupled from tool-call success/failure. \
+       No labels."
+    ()
+
+(* Bash_history.append now returns [Result] (audit-trail write
+   decoupled from tool-call semantics). Centralise the swallow +
+   observe at both call sites — Sys_error from open/write/close no
+   longer surfaces as a keeper tool failure, but increments
+   masc_bash_history_append_failures_total and emits a WARN with
+   keeper/path/exn for correlation. *)
+let observe_history_append ~root ~keeper_name entry =
+  match Masc_exec.Bash_history.append ~base_path:root ~keeper_name entry with
+  | Ok () -> ()
+  | Error exn ->
+      Prometheus.inc_counter
+        metric_bash_history_append_failures ();
+      Log.KeeperExec.warn
+        "bash_history.append failed: keeper=%s base=%s exn=%s"
+        keeper_name root (Printexc.to_string exn)
+;;
+
 let handle_keeper_shell
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~exec_cache:(_exec_cache : Masc_exec.Exec_cache.t option)
@@ -89,7 +123,7 @@ let handle_keeper_shell
       duration_ms = 0;
       success;
     } in
-    Masc_exec.Bash_history.append ~base_path:root ~keeper_name:meta.name entry;
+    observe_history_append ~root ~keeper_name:meta.name entry;
     let insight_extra =
       let patterns = Masc_exec.Bash_history.failure_insight
         ~base_path:root ~keeper_name:meta.name
@@ -145,7 +179,7 @@ let handle_keeper_shell
       duration_ms = elapsed_ms;
       success;
     } in
-    Masc_exec.Bash_history.append ~base_path:root ~keeper_name:meta.name entry;
+    observe_history_append ~root ~keeper_name:meta.name entry;
     let insight_extra =
       let patterns = Masc_exec.Bash_history.failure_insight
         ~base_path:root ~keeper_name:meta.name

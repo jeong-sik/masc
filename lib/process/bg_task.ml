@@ -95,21 +95,21 @@ let set_sidecar_failure_observer f =
 (* Observer for unexpected (non-EAGAIN/EWOULDBLOCK/EINTR/EOF)
    drain-pipe read errors.  Labels are closed-vocabulary:
    [fd_kind = "stdout" | "stderr"] (call-site tagged) and
-   [error_kind = "unix_error" | "other"] (typed match arm).
+   [err_kind = "unix_error" | "other"] (typed match arm).
    Cardinality bound: 2 × 2 = 4.  See top-level Prometheus
    module for the registered counter. *)
 let drain_failure_observer :
-    ((fd_kind:string -> error_kind:string -> unit) option) Atomic.t =
+    ((fd_kind:string -> err_kind:string -> unit) option) Atomic.t =
   Atomic.make None
 
 let set_drain_failure_observer f =
   Atomic.set drain_failure_observer (Some f)
 
-let observe_drain_failure ~fd_kind ~error_kind =
+let observe_drain_failure ~fd_kind ~err_kind =
   match Atomic.get drain_failure_observer with
   | None -> ()
   | Some observe ->
-      (try observe ~fd_kind ~error_kind with
+      (try observe ~fd_kind ~err_kind with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | observer_exn ->
            Log.Misc.warn "bg_task drain observer failed: %s"
@@ -291,13 +291,13 @@ let drain_fd_to_buf ~fd_kind buf fd =
           Log.Misc.warn
             "bg_task drain_fd_to_buf %s Unix_error in %s: %s"
             fd_kind fn (Unix.error_message errno);
-          observe_drain_failure ~fd_kind ~error_kind:"unix_error";
+          observe_drain_failure ~fd_kind ~err_kind:"unix_error";
           true
       | exception exn ->
           Log.Misc.warn
             "bg_task drain_fd_to_buf %s unexpected exception: %s"
             fd_kind (Printexc.to_string exn);
-          observe_drain_failure ~fd_kind ~error_kind:"other";
+          observe_drain_failure ~fd_kind ~err_kind:"other";
           true
   in
   loop ()

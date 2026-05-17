@@ -221,6 +221,19 @@ let request_runtime_fields_on_base_config
     seed = req_config.seed;
   }
 
+let provider_http_slot_transport
+    (transport : Llm_provider.Llm_transport.t)
+  : Llm_provider.Llm_transport.t =
+  { complete_sync =
+      (fun req ->
+        Fd_accountant.with_slot ~kind:Provider_http (fun () ->
+          transport.complete_sync req));
+    complete_stream =
+      (fun ?on_telemetry ~on_event req ->
+        Fd_accountant.with_slot ~kind:Provider_http (fun () ->
+          transport.complete_stream ?on_telemetry ~on_event req));
+  }
+
 let provider_config_preserving_http_transport
     ~sw
     ~net
@@ -233,14 +246,15 @@ let provider_config_preserving_http_transport
         request_runtime_fields_on_base_config ~base:provider_cfg req.config;
     }
   in
-  { complete_sync =
+  provider_http_slot_transport
+    { complete_sync =
       (fun req ->
         (* RFC-0095 Phase 0 diagnostic trace — verify which transport path is invoked
            per turn for each provider. Removed at Phase 0 closeout. *)
         Log.Misc.debug
           "rfc0095-trace: cascade_runner http_transport.complete_sync invoked";
         http_transport.complete_sync (patch_request req));
-    complete_stream =
+      complete_stream =
       (fun ?on_telemetry ~on_event req ->
         (* RFC-0095 Phase 0 diagnostic trace — verify which transport path is invoked
            per turn for each provider. Removed at Phase 0 closeout. *)
@@ -248,7 +262,7 @@ let provider_config_preserving_http_transport
           "rfc0095-trace: cascade_runner http_transport.complete_stream invoked";
         http_transport.complete_stream ?on_telemetry ~on_event
           (patch_request req));
-  }
+    }
 
 let transport_for_provider ~sw ~net ~provider_cfg ?runtime_mcp_policy
     ?cli_transport_overrides () =
@@ -266,6 +280,8 @@ let transport_for_provider ~sw ~net ~provider_cfg ?runtime_mcp_policy
 module For_testing = struct
   let request_runtime_fields_on_base_config =
     request_runtime_fields_on_base_config
+
+  let provider_http_slot_transport = provider_http_slot_transport
 end
 
 (* ================================================================ *)

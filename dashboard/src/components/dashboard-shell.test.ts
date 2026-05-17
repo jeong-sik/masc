@@ -117,6 +117,57 @@ describe('dashboardHealthChips', () => {
     expect(chips[0]?.detail).toContain('keeper_fibers=1')
   })
 
+  it('surfaces a P0 blocked fleet when health reports zero running keeper fibers', () => {
+    const chips = dashboardHealthChips({
+      connected: true,
+      counts: { keepers: 14, configured_keepers: 14 },
+      keepers: [],
+      runtimeResolution: {
+        status: 'ready',
+        warnings: [],
+        fleet_safety: {
+          keeper_fibers: 0,
+          paused_keepers: 13,
+          keeper_fleet_no_fibers: true,
+          keeper_fd_pressure: null,
+          keeper_fleet_safety: {
+            status: 'blocked',
+            reason: null,
+            blocker: 'no_running_fibers',
+            admission_blocked: null,
+            admission_blocked_keepers: null,
+            blocked_keepers: 14,
+            blocked_count: 14,
+            bootable_keeper_count: 1,
+            running_keeper_fiber_count: 0,
+            minimum_running_fibers: 1,
+            no_running_fibers: true,
+            low_running_fiber_margin: false,
+            paused_keeper_count: 13,
+            autoboot_enabled_keeper_count: 14,
+            paused_autoboot_enabled_keeper_count: 13,
+            effective_reaction_capacity_count: 0,
+            target_reaction_capacity_count: 14,
+            operator_action_required: true,
+          },
+        },
+      } as any,
+      executionError: null,
+      loading: false,
+    })
+
+    expect(chips).toEqual([expect.objectContaining({
+      key: 'fleet-liveness-risk',
+      label: 'P0 fleet blocked',
+      tone: 'bad',
+    })])
+    expect(chips[0]?.detail).toContain('status=blocked')
+    expect(chips[0]?.detail).toContain('running_keeper_fiber_count=0')
+    expect(chips[0]?.detail).toContain('paused_keeper_count=13')
+    expect(chips[0]?.detail).toContain('target_reaction_capacity_count=14')
+    expect(chips[0]?.detail).toContain('resume selected paused keepers')
+  })
+
   it('surfaces fleet liveness risk when FD pressure blocks 24 keepers', () => {
     const chips = dashboardHealthChips({
       connected: true,

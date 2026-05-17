@@ -119,10 +119,9 @@ type blocker_class =
         majority cohort during a fleet stall (observed: 6/14 keepers
         in cohort=stale_turn_timeout, every meta showing null). *)
   | Stale_fleet_batch
-    (** Multiple keepers were stale-watchdog terminated inside the fleet
-        batch window. This mirrors [Keeper_registry.Stale_fleet_batch] so
-        keeper_meta and dashboard status can report the systemic blocker
-        instead of collapsing it to a generic turn timeout. *)
+    (** Legacy blocker class for pre-existing fleet-batch state. Current
+        fleet-batch detection is observation-only and should not stamp keeper
+        meta; stale keepers use their per-keeper watchdog blocker instead. *)
   | Sdk_max_turns_exceeded
   | Sdk_token_budget_exceeded
   | Sdk_cost_budget_exceeded

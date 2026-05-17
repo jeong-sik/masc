@@ -1,10 +1,42 @@
 # Changelog
 
+## [0.19.25] - 2026-05-17
+
+### Added
+- Added the RFC-0109 `Bounded_proc` helper and tests for time-bounded subprocess execution.
+- Added the RFC-0107 `Masc_http_client.Pool` interface skeleton for the next connection-pool implementation lane.
+- Exposed FD accountant metrics through Prometheus, including coverage for the new metric names.
+- Documented RFC-0108's PR/worktree operation safety gates and in-process atomic JSONL append direction.
+
+### Changed
+- Migrated additional cancel-safe shell, sandbox, response, and host-FD probe paths onto `Cancel_safe` helpers.
+
+### Fixed
+- Blocked Docker keeper shell runs during host FD hotspot pressure and added Darwin maxfilesperproc visibility plus best-effort Docker one-shot cleanup.
+- Serialized `system_log` JSONL writes and trajectory appends with per-path mutex/fresh-fd handling, then removed the unsafe append-fd cache path.
+- Removed remaining inline atomic helpers from `dated_jsonl` and `trajectory` so those paths use the shared `Fs_compat` surface.
+- Restored the `home_dir` test reference left behind by the config-surface rename.
+- Counted `tool_keeper` `cache_ttl_seconds` environment parse fallbacks through Prometheus.
+- Replaced the CDAL runtime health inline error envelope with the shared `Tool_args` helper.
+- Routed CDAL proof-store health path checks through the `Proof_store` owner API.
+- Removed the backend mutex metrics log suffix that tripped the OCaml comment terminator lint.
+- Split keeper shell-op resource classification parsing from the explicit shell fallback, and added the `Types_core` interface required by the OCaml structure ratchet.
+- Replaced raw `error_kind:string` signatures in keeper memory validation and WebSocket parse metrics with closed typed variants.
+- Kept keeper compaction observe sequencing in the correct branch and closed the snapshot-eviction match-arm regression that broke the main binary build.
+- Parallelized safe lazy startup tasks and added tool/cache flusher outcome counters for clearer startup and dispatch diagnostics.
+- Added the auto-upgrade dispatch and `Mcp-Session-Id` 404 handling path for the RFC-0100 server session lane.
+
 ## [0.19.24] - 2026-05-17
 
 ### Added
 - Documented RFC-0105's OpenAI-compatible boundary typed error mapping for tool validation and provider/runtime failure surfaces.
 - Added RFC-0106's cancel-safe `try`/`with` discipline draft for callback and cleanup paths.
+- Added Docker playground FD-hotspot operator tooling:
+  `scripts/docker-playground-fd-status.sh` surfaces worktree fanout and
+  `lsof` holders under `.masc/playground/docker`, while
+  `scripts/cleanup-docker-playground-worktrees.sh` dry-runs/applies
+  conservative stale clean worktree cleanup for #15931, with explicit
+  `--include-broken` handling for old non-git orphan directories.
 
 ### Fixed
 - Wired the `Sandbox_exec` slot at non-Docker spawn callsites and gated keeper admission on system FD pressure, so fleet startup respects host-level descriptor pressure.

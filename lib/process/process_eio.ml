@@ -47,13 +47,22 @@ let observe_process_timeout argv ~timeout_sec =
     Log.Misc.warn "[Process_eio] timeout observer failed: %s"
       (Printexc.to_string exn)
 
+type spawn_guard = { run : 'a. (unit -> 'a) -> 'a }
+
+let default_spawn_guard = { run = (fun f -> f ()) }
+let spawn_guard : spawn_guard Atomic.t = Atomic.make default_spawn_guard
+let set_spawn_guard guard = Atomic.set spawn_guard guard
+let reset_spawn_guard_for_testing () = Atomic.set spawn_guard default_spawn_guard
+let with_spawn_guard f = (Atomic.get spawn_guard).run f
+
 let init ~cwd_default ~proc_mgr ~clock =
   Atomic.set runtime_state (Some { proc_mgr; clock; cwd_default })
 
 let is_initialized () = Option.is_some (Atomic.get runtime_state)
 
 let reset_for_testing () =
-  Atomic.set runtime_state None
+  Atomic.set runtime_state None;
+  reset_spawn_guard_for_testing ()
 
 let default_buffer_size = 1024
 
@@ -508,74 +517,78 @@ let spawn_and_drain_both ~sw pm ~cwd ?env ?stdin_source argv stdout_buf
 
 let run_argv ?(timeout_sec = default_timeout_sec) ?env (argv : string list) : string =
   Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv ~argv ?env ();
-  if not (is_initialized ()) then
-    run_unix_argv_fallback ~timeout_sec ?env argv
-  else
-    match get_proc_mgr (), get_clock (), get_cwd_default () with
-    | Error _, _, _ | _, Error _, _ | _, _, Error _ ->
+  with_spawn_guard (fun () ->
+      if not (is_initialized ()) then
         run_unix_argv_fallback ~timeout_sec ?env argv
-    | Ok pm, Ok clk, Ok cwd ->
-        let buf = Buffer.create default_buffer_size in
-        let label = String.concat " " (List.map Filename.quote argv) in
-        try
-          Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
-              Eio.Switch.run (fun sw ->
-                  let status = spawn_and_drain_stdout ~sw pm ~cwd ?env argv buf in
-                  output_for_status ~status ~stdout:(Buffer.contents buf) ~stderr:""))
-        with
-        | Eio.Time.Timeout ->
-            Log.Misc.warn "[Process_eio] Timeout after %.0fs: %s"
-              timeout_sec label;
-            observe_process_timeout argv ~timeout_sec;
-            process_error_output ~label
-              ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec) ()
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn ->
-            if should_retry_unix_fallback exn then (
-              Log.Misc.warn
-                "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
-                label (Printexc.to_string exn);
-              run_unix_argv_fallback ~timeout_sec ?env argv
-            ) else (
-              Log.Misc.error "[Process_eio] argv error: %s — %s" label
-                (Printexc.to_string exn);
-              process_error_output ~label ~reason:(reason_of_exn_for_output exn) ())
+      else
+        match get_proc_mgr (), get_clock (), get_cwd_default () with
+        | Error _, _, _ | _, Error _, _ | _, _, Error _ ->
+            run_unix_argv_fallback ~timeout_sec ?env argv
+        | Ok pm, Ok clk, Ok cwd ->
+            let buf = Buffer.create default_buffer_size in
+            let label = String.concat " " (List.map Filename.quote argv) in
+            try
+              Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
+                  Eio.Switch.run (fun sw ->
+                      let status = spawn_and_drain_stdout ~sw pm ~cwd ?env argv buf in
+                      output_for_status ~status ~stdout:(Buffer.contents buf) ~stderr:""))
+            with
+            | Eio.Time.Timeout ->
+                Log.Misc.warn "[Process_eio] Timeout after %.0fs: %s"
+                  timeout_sec label;
+                observe_process_timeout argv ~timeout_sec;
+                process_error_output ~label
+                  ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec) ()
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn ->
+                if should_retry_unix_fallback exn then (
+                  Log.Misc.warn
+                    "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
+                    label (Printexc.to_string exn);
+                  run_unix_argv_fallback ~timeout_sec ?env argv
+                ) else (
+                  Log.Misc.error "[Process_eio] argv error: %s — %s" label
+                    (Printexc.to_string exn);
+                  process_error_output ~label ~reason:(reason_of_exn_for_output exn) ()))
 
 let run_argv_with_stdin ?(timeout_sec = default_timeout_sec) ?env ~(stdin_content : string) (argv : string list) : string =
   Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv_with_stdin ~argv ?env ();
-  if not (is_initialized ()) then
-    run_unix_argv_with_stdin_fallback ~timeout_sec ?env ~stdin_content argv
-  else
-    match get_proc_mgr (), get_clock (), get_cwd_default () with
-    | Error _, _, _ | _, Error _, _ | _, _, Error _ ->
+  with_spawn_guard (fun () ->
+      if not (is_initialized ()) then
         run_unix_argv_with_stdin_fallback ~timeout_sec ?env ~stdin_content argv
-    | Ok pm, Ok clk, Ok cwd ->
-        let buf = Buffer.create default_buffer_size in
-        let label = String.concat " " (List.map Filename.quote argv) in
-        let stdin_source = Eio.Flow.string_source stdin_content in
-        try
-          Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
-              Eio.Switch.run (fun sw ->
-                  let status = spawn_and_drain_stdout ~sw pm ~cwd ?env ~stdin_source argv buf in
-                  output_for_status ~status ~stdout:(Buffer.contents buf) ~stderr:""))
-        with
-        | Eio.Time.Timeout ->
-            Log.Misc.warn "[Process_eio] Timeout after %.0fs: %s"
-              timeout_sec label;
-            observe_process_timeout argv ~timeout_sec;
-            process_error_output ~label
-              ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec) ()
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn ->
-            if should_retry_unix_fallback exn then (
-              Log.Misc.warn
-                "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
-                label (Printexc.to_string exn);
-              run_unix_argv_with_stdin_fallback ~timeout_sec ?env ~stdin_content argv
-            ) else (
-              Log.Misc.error "[Process_eio] argv error: %s — %s" label
-                (Printexc.to_string exn);
-              process_error_output ~label ~reason:(reason_of_exn_for_output exn) ())
+      else
+        match get_proc_mgr (), get_clock (), get_cwd_default () with
+        | Error _, _, _ | _, Error _, _ | _, _, Error _ ->
+            run_unix_argv_with_stdin_fallback ~timeout_sec ?env ~stdin_content argv
+        | Ok pm, Ok clk, Ok cwd ->
+            let buf = Buffer.create default_buffer_size in
+            let label = String.concat " " (List.map Filename.quote argv) in
+            let stdin_source = Eio.Flow.string_source stdin_content in
+            try
+              Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
+                  Eio.Switch.run (fun sw ->
+                      let status =
+                        spawn_and_drain_stdout ~sw pm ~cwd ?env ~stdin_source argv buf
+                      in
+                      output_for_status ~status ~stdout:(Buffer.contents buf) ~stderr:""))
+            with
+            | Eio.Time.Timeout ->
+                Log.Misc.warn "[Process_eio] Timeout after %.0fs: %s"
+                  timeout_sec label;
+                observe_process_timeout argv ~timeout_sec;
+                process_error_output ~label
+                  ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec) ()
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn ->
+                if should_retry_unix_fallback exn then (
+                  Log.Misc.warn
+                    "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
+                    label (Printexc.to_string exn);
+                  run_unix_argv_with_stdin_fallback ~timeout_sec ?env ~stdin_content argv
+                ) else (
+                  Log.Misc.error "[Process_eio] argv error: %s — %s" label
+                    (Printexc.to_string exn);
+                  process_error_output ~label ~reason:(reason_of_exn_for_output exn) ()))
 
 let run_argv_with_stdin_and_status_split
     ?(timeout_sec = default_timeout_sec)
@@ -584,62 +597,65 @@ let run_argv_with_stdin_and_status_split
     ~(stdin_content : string)
     (argv : string list) : Unix.process_status * string * string =
   Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv_with_stdin_and_status ~argv ?env ();
-  if not (is_initialized ()) then
-    run_unix_argv_with_stdin_and_status_split_fallback ~timeout_sec ?env ?cwd
-      ~stdin_content argv
-  else
-    match get_proc_mgr (), get_clock (), get_cwd_default () with
-    | Error _, _, _ | _, Error _, _ | _, _, Error _ ->
-        run_unix_argv_with_stdin_and_status_split_fallback ~timeout_sec ?env ?cwd
-          ~stdin_content argv
-    | Ok pm, Ok clk, Ok default_cwd ->
-        let effective_cwd =
-          match cwd with
-          | None -> default_cwd
-          | Some dir -> Eio.Path.(default_cwd / dir)
-        in
-        let stdout_buf = Buffer.create default_buffer_size in
-        let stderr_buf = Buffer.create default_buffer_size in
-        let label = String.concat " " (List.map Filename.quote argv) in
-        let stdin_source = Eio.Flow.string_source stdin_content in
-        try
-          Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
-              let unix_status =
-                Eio.Switch.run (fun sw ->
-                    spawn_and_drain_both ~sw pm ~cwd:effective_cwd ?env
-                      ~stdin_source argv stdout_buf stderr_buf)
-              in
-              (unix_status, Buffer.contents stdout_buf, Buffer.contents stderr_buf))
-        with
-        | Eio.Time.Timeout ->
-            Log.Misc.warn "[Process_eio] Timeout after %.0fs: %s"
-              timeout_sec label;
-            observe_process_timeout argv ~timeout_sec;
-            let timeout_status = Unix.WEXITED 124 in
-            let stdout = Buffer.contents stdout_buf in
-            let stderr = Buffer.contents stderr_buf in
-            let stderr =
-              if String.trim stdout = "" && String.trim stderr = "" then
-                process_error_output ~label
-                  ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec) ()
-              else stderr
+  with_spawn_guard (fun () ->
+      if not (is_initialized ()) then
+        run_unix_argv_with_stdin_and_status_split_fallback ~timeout_sec ?env
+          ?cwd ~stdin_content argv
+      else
+        match get_proc_mgr (), get_clock (), get_cwd_default () with
+        | Error _, _, _ | _, Error _, _ | _, _, Error _ ->
+            run_unix_argv_with_stdin_and_status_split_fallback ~timeout_sec
+              ?env ?cwd ~stdin_content argv
+        | Ok pm, Ok clk, Ok default_cwd ->
+            let effective_cwd =
+              match cwd with
+              | None -> default_cwd
+              | Some dir -> Eio.Path.(default_cwd / dir)
             in
-            (timeout_status, stdout, stderr)
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn ->
-            if should_retry_unix_fallback exn then (
-              Log.Misc.warn
-                "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
-                label (Printexc.to_string exn);
-              run_unix_argv_with_stdin_and_status_split_fallback ~timeout_sec
-                ?env ?cwd ~stdin_content argv
-            ) else (
-              Log.Misc.error "[Process_eio] argv error: %s — %s" label
-                (Printexc.to_string exn);
-              ( Unix.WEXITED 127,
-                "",
-                process_error_output ~label
-                  ~reason:(reason_of_exn_for_output exn) () ))
+            let stdout_buf = Buffer.create default_buffer_size in
+            let stderr_buf = Buffer.create default_buffer_size in
+            let label = String.concat " " (List.map Filename.quote argv) in
+            let stdin_source = Eio.Flow.string_source stdin_content in
+            try
+              Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
+                  let unix_status =
+                    Eio.Switch.run (fun sw ->
+                        spawn_and_drain_both ~sw pm ~cwd:effective_cwd ?env
+                          ~stdin_source argv stdout_buf stderr_buf)
+                  in
+                  ( unix_status,
+                    Buffer.contents stdout_buf,
+                    Buffer.contents stderr_buf ))
+            with
+            | Eio.Time.Timeout ->
+                Log.Misc.warn "[Process_eio] Timeout after %.0fs: %s"
+                  timeout_sec label;
+                observe_process_timeout argv ~timeout_sec;
+                let timeout_status = Unix.WEXITED 124 in
+                let stdout = Buffer.contents stdout_buf in
+                let stderr = Buffer.contents stderr_buf in
+                let stderr =
+                  if String.trim stdout = "" && String.trim stderr = "" then
+                    process_error_output ~label
+                      ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec) ()
+                  else stderr
+                in
+                (timeout_status, stdout, stderr)
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn ->
+                if should_retry_unix_fallback exn then (
+                  Log.Misc.warn
+                    "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
+                    label (Printexc.to_string exn);
+                  run_unix_argv_with_stdin_and_status_split_fallback
+                    ~timeout_sec ?env ?cwd ~stdin_content argv
+                ) else (
+                  Log.Misc.error "[Process_eio] argv error: %s — %s" label
+                    (Printexc.to_string exn);
+                  ( Unix.WEXITED 127,
+                    "",
+                    process_error_output ~label
+                      ~reason:(reason_of_exn_for_output exn) () )))
 
 let run_argv_with_stdin_and_status
     ?(timeout_sec = default_timeout_sec)
@@ -656,58 +672,63 @@ let run_argv_with_stdin_and_status
 let run_argv_with_status_split ?(timeout_sec = default_timeout_sec) ?env ?cwd
     (argv : string list) : Unix.process_status * string * string =
   Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv_with_status ~argv ?env ?cwd ();
-  if not (is_initialized ()) then
-    run_unix_argv_with_status_split_fallback ~timeout_sec ?env ?cwd argv
-  else
-    match get_proc_mgr (), get_clock (), get_cwd_default () with
-    | Error _, _, _ | _, Error _, _ | _, _, Error _ ->
+  with_spawn_guard (fun () ->
+      if not (is_initialized ()) then
         run_unix_argv_with_status_split_fallback ~timeout_sec ?env ?cwd argv
-    | Ok pm, Ok clk, Ok default_cwd ->
-        let effective_cwd =
-          match cwd with
-          | None -> default_cwd
-          | Some dir -> Eio.Path.(default_cwd / dir)
-        in
-        let stdout_buf = Buffer.create default_buffer_size in
-        let stderr_buf = Buffer.create 256 in
-        let label = String.concat " " (List.map Filename.quote argv) in
-        try
-          Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
-              let unix_status =
-                Eio.Switch.run (fun sw ->
-                    spawn_and_drain_both ~sw pm ~cwd:effective_cwd ?env argv
-                      stdout_buf stderr_buf)
-              in
-              (unix_status, Buffer.contents stdout_buf, Buffer.contents stderr_buf))
-        with
-        | Eio.Time.Timeout ->
-            Log.Misc.warn "[Process_eio] Timeout after %.0fs: %s"
-              timeout_sec label;
-            observe_process_timeout argv ~timeout_sec;
-            let timeout_status = Unix.WEXITED 124 in
-            let stdout = Buffer.contents stdout_buf in
-            let stderr = Buffer.contents stderr_buf in
-            let stderr =
-              if String.trim stdout = "" && String.trim stderr = "" then
-                process_error_output ~label
-                  ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec) ()
-              else stderr
+      else
+        match get_proc_mgr (), get_clock (), get_cwd_default () with
+        | Error _, _, _ | _, Error _, _ | _, _, Error _ ->
+            run_unix_argv_with_status_split_fallback ~timeout_sec ?env ?cwd
+              argv
+        | Ok pm, Ok clk, Ok default_cwd ->
+            let effective_cwd =
+              match cwd with
+              | None -> default_cwd
+              | Some dir -> Eio.Path.(default_cwd / dir)
             in
-            (timeout_status, stdout, stderr)
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn ->
-            if should_retry_unix_fallback exn then (
-              Log.Misc.warn
-                "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
-                label (Printexc.to_string exn);
-              run_unix_argv_with_status_split_fallback ~timeout_sec ?env ?cwd argv
-            ) else (
-              Log.Misc.error "[Process_eio] argv error: %s — %s" label
-                (Printexc.to_string exn);
-              ( Unix.WEXITED 127,
-                "",
-                process_error_output ~label
-                  ~reason:(reason_of_exn_for_output exn) () ))
+            let stdout_buf = Buffer.create default_buffer_size in
+            let stderr_buf = Buffer.create 256 in
+            let label = String.concat " " (List.map Filename.quote argv) in
+            try
+              Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
+                  let unix_status =
+                    Eio.Switch.run (fun sw ->
+                        spawn_and_drain_both ~sw pm ~cwd:effective_cwd ?env
+                          argv stdout_buf stderr_buf)
+                  in
+                  ( unix_status,
+                    Buffer.contents stdout_buf,
+                    Buffer.contents stderr_buf ))
+            with
+            | Eio.Time.Timeout ->
+                Log.Misc.warn "[Process_eio] Timeout after %.0fs: %s"
+                  timeout_sec label;
+                observe_process_timeout argv ~timeout_sec;
+                let timeout_status = Unix.WEXITED 124 in
+                let stdout = Buffer.contents stdout_buf in
+                let stderr = Buffer.contents stderr_buf in
+                let stderr =
+                  if String.trim stdout = "" && String.trim stderr = "" then
+                    process_error_output ~label
+                      ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec) ()
+                  else stderr
+                in
+                (timeout_status, stdout, stderr)
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn ->
+                if should_retry_unix_fallback exn then (
+                  Log.Misc.warn
+                    "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
+                    label (Printexc.to_string exn);
+                  run_unix_argv_with_status_split_fallback ~timeout_sec ?env
+                    ?cwd argv
+                ) else (
+                  Log.Misc.error "[Process_eio] argv error: %s — %s" label
+                    (Printexc.to_string exn);
+                  ( Unix.WEXITED 127,
+                    "",
+                    process_error_output ~label
+                      ~reason:(reason_of_exn_for_output exn) () )))
 
 let run_argv_with_status ?(timeout_sec = default_timeout_sec) ?env ?cwd
     (argv : string list) : Unix.process_status * string =

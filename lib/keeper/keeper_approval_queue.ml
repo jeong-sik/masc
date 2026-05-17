@@ -500,17 +500,23 @@ let find_matching_rule
 
 (* ── Persistent audit log ────────────────────────────────── *)
 
-(* Eio.Mutex: audit store map and audit-IO are accessed from approval-flow
-   Eio fibers (single domain). Stdlib.Mutex with PTHREAD_MUTEX_ERRORCHECK
-   raises EDEADLK on fiber contention (memory: feedback_eio-mutex-vs-stdlib). *)
+(* Stdlib.Mutex: the store registry critical section only mutates an in-memory
+   hashtable and creates a Dated_jsonl handle. It is also used by synchronous
+   tests outside an Eio context, so an Eio mutex would either raise Get_context
+   or poison the registry after a recoverable store-creation failure. *)
 (** Dated JSONL audit trail for approval events.
     Stored at [<base_path>/.masc/audit-approvals/YYYY-MM/DD.jsonl].
     Dashboard and room-scoped keeper runs pass [base_path] explicitly so approval
     history stays with the room that made the decision. *)
-let audit_stores_mu = Eio.Mutex.create ()
+let audit_stores_mu = Stdlib.Mutex.create ()
 
-let audit_io_mu = Eio.Mutex.create ()
+let audit_io_mu = Stdlib.Mutex.create ()
 let audit_stores : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 4
+
+let keeper_audit_metric_label = function
+  | Some keeper when String.trim keeper <> "" -> keeper
+  | Some _ | None -> "aggregate"
+;;
 
 let audit_today_path base_dir =
   let open Unix in
@@ -523,35 +529,50 @@ let audit_today_path base_dir =
 ;;
 
 let get_audit_store ?base_path () =
-  let base =
-    match base_path with
-    | Some base -> base
-    | None -> Env_config_core.base_path ()
-  in
-  try
-    Eio.Mutex.use_rw ~protect:true audit_stores_mu (fun () ->
-      match Hashtbl.find_opt audit_stores base with
-      | Some store -> Some store
-      | None ->
-        let dir =
-          Filename.concat
-            (Common.masc_dir_from_base_path ~base_path:base)
-            "audit-approvals"
-        in
-        let store = Dated_jsonl.create ~base_dir:dir () in
-        Hashtbl.replace audit_stores base store;
-        Some store)
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
+  let report_failure exn =
+    Keeper_fd_pressure.note_exception ~site:"approval_audit.store_create" exn;
     Prometheus.inc_counter
       Keeper_metrics.metric_keeper_approval_queue_failures
-      ~labels:[ "keeper", "aggregate"; "site", Keeper_approval_queue_failure_site.(to_label Audit_store_create) ]
+      ~labels:
+        [ "keeper", "aggregate"
+        ; "site", Keeper_approval_queue_failure_site.(to_label Audit_store_create)
+        ]
       ();
     Log.Keeper.warn
       "approval_queue: audit store creation failed: %s"
       (Printexc.to_string exn);
     None
+  in
+  try
+    let base =
+      match base_path with
+      | Some base -> base
+      | None -> Env_config_core.base_path ()
+    in
+    match
+      Stdlib.Mutex.protect audit_stores_mu (fun () ->
+        try
+          Ok
+            (match Hashtbl.find_opt audit_stores base with
+             | Some store -> Some store
+             | None ->
+               let dir =
+                 Filename.concat
+                   (Common.masc_dir_from_base_path ~base_path:base)
+                   "audit-approvals"
+               in
+               let store = Dated_jsonl.create ~base_dir:dir () in
+               Hashtbl.replace audit_stores base store;
+               Some store)
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn -> Error exn)
+    with
+    | Ok store -> store
+    | Error exn -> report_failure exn
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn -> report_failure exn
 ;;
 
 let audit_approval_event
@@ -612,7 +633,7 @@ let audit_approval_event
          | Some value -> [ "auto_approved", `Bool value ]
          | None -> [])
     in
-    Eio.Mutex.use_rw ~protect:true audit_io_mu (fun () ->
+    Stdlib.Mutex.protect audit_io_mu (fun () ->
       try Fs_compat.append_jsonl (audit_today_path (Dated_jsonl.base_dir store)) json with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn -> record_queue_failure ~keeper_name ~site:"audit_append" ~id ~event_type exn)
@@ -647,21 +668,36 @@ let read_recent_audit ?base_path ?keeper_name ?(n = 20) () : Yojson.Safe.t list 
     match get_audit_store ?base_path () with
     | None -> []
     | Some store ->
-      let raw = Dated_jsonl.read_recent store (audit_scan_window ?keeper_name n) in
-      let filtered =
-        match keeper_name with
-        | None -> raw
-        | Some name ->
-          raw
-          |> List.filter (fun json ->
-            String.equal name (Safe_ops.json_string ~default:"" "keeper" json))
-      in
-      filtered |> List.rev |> List.filteri (fun idx _ -> idx < n))
+      try
+        let raw = Dated_jsonl.read_recent store (audit_scan_window ?keeper_name n) in
+        let filtered =
+          match keeper_name with
+          | None -> raw
+          | Some name ->
+            raw
+            |> List.filter (fun json ->
+              String.equal name (Safe_ops.json_string ~default:"" "keeper" json))
+        in
+        filtered |> List.rev |> List.filteri (fun idx _ -> idx < n)
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        Keeper_fd_pressure.note_exception ~site:"approval_audit.read_recent" exn;
+        Prometheus.inc_counter
+          Keeper_metrics.metric_keeper_approval_queue_failures
+          ~labels:
+            [ "keeper",
+              keeper_audit_metric_label keeper_name;
+              "site",
+              Keeper_approval_queue_failure_site.(to_label Audit_read_recent)
+            ]
+          ();
+        [])
 ;;
 
 module For_testing = struct
   let reset_audit_store () =
-    Eio.Mutex.use_rw ~protect:true audit_stores_mu (fun () -> Hashtbl.clear audit_stores)
+    Stdlib.Mutex.protect audit_stores_mu (fun () -> Hashtbl.clear audit_stores)
   ;;
 end
 

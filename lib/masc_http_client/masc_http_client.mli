@@ -124,3 +124,22 @@ val get_sync :
 (** [get_sync] is {!get_response_sync} with the response headers
     discarded — returns [Ok (status_code, body_string)] for callers
     that only care about status + body. *)
+
+(** {1 Typed pool surface — RFC-0107 Phase D}
+
+    Re-exports [Pool] (lib/masc_http_client/pool.mli) so callers and
+    tests can name the typed connection pool without reaching into
+    the wrapped module path. Most callers should keep using
+    [post_sync] / [get_sync] / [get_response_sync] which delegate
+    through the per-process [Pool.t] singleton internally; direct
+    [Pool.request] is reserved for code that needs typed responses
+    with header maps or non-default config. *)
+module Pool : module type of Pool
+
+val pool_singleton_opt : unit -> Pool.t option
+(** [pool_singleton_opt ()] returns the per-process [Pool.t] if it
+    has been lazy-initialized by a prior HTTP call, [None] otherwise.
+    Read-only accessor for telemetry consumers (Phase D.4 Prometheus
+    exporter); does not trigger pool initialization.  Callers that
+    need the pool initialized should issue a request through
+    [post_sync] / [get_sync] / [get_response_sync] instead. *)

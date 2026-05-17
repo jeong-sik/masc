@@ -122,7 +122,6 @@ type t =
   | PresenceSyncFailures
   | SelfPreservationUniversal
   | StaleStormPaused
-  | StaleFleetBatchPaused
   | OasTimeoutBudgetLoopPaused
   | CycleExceptions
   | SnapshotWriteFailures
@@ -328,7 +327,6 @@ let to_string = function
   | PresenceSyncFailures -> "masc_keeper_presence_sync_failures_total"
   | SelfPreservationUniversal -> "masc_keeper_self_preservation_universal_total"
   | StaleStormPaused -> "masc_keeper_stale_storm_paused_total"
-  | StaleFleetBatchPaused -> "masc_keeper_stale_fleet_batch_paused_total"
   | OasTimeoutBudgetLoopPaused -> "masc_keeper_oas_timeout_budget_loop_paused_total"
   | CycleExceptions -> "masc_keeper_cycle_exceptions_total"
   | SnapshotWriteFailures -> "masc_keeper_snapshot_write_failures_total"
@@ -674,7 +672,6 @@ let metric_keeper_self_preservation_universal =
 ;;
 
 let metric_keeper_stale_storm_paused = "masc_keeper_stale_storm_paused_total"
-let metric_keeper_stale_fleet_batch_paused = "masc_keeper_stale_fleet_batch_paused_total"
 
 let metric_keeper_oas_timeout_budget_loop_paused =
   "masc_keeper_oas_timeout_budget_loop_paused_total"

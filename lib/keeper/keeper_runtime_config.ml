@@ -200,16 +200,49 @@ let resolve_overrides
   in
   (count, List.rev !applied)
 
+(* Domain-owned Prometheus metric (RFC-0043 Phase 0): the bootstrap
+   caller (server_runtime_bootstrap.ml:284) already logs
+   Log.Server.warn on Error, so failures are not silent — but they
+   were not aggregated by Prometheus, forcing operators to scrape logs
+   to detect a degraded keeper config.  The counter below mirrors the
+   WARN event into a typed two-reason vocabulary so monitoring can
+   alert independently.  file_not_found is the [Ok 0] path (no
+   overrides applied) and is intentionally outside the counter.
+
+   Defined here (next to the bumper) rather than in lib/prometheus.ml
+   to keep that file under the godfile-size-regression cap. *)
+let metric_keeper_runtime_config_load_failures =
+  "masc_keeper_runtime_config_load_failures_total"
+
+let () =
+  Prometheus.register_counter
+    ~name:metric_keeper_runtime_config_load_failures
+    ~help:
+      "Total Keeper_runtime_config.load_and_apply failures. Bootstrap \
+       already logs WARN; this counter exposes the same event to monitoring \
+       aggregation. Labels: reason in {read_error | parse_error}."
+    ()
+
+let observe_load_failure reason =
+  Prometheus.inc_counter
+    metric_keeper_runtime_config_load_failures
+    ~labels:[ ("reason", reason) ]
+    ()
+
 let load_and_apply ~base_path =
   let path = toml_path ~base_path in
   if not (Sys.file_exists path) then
     Ok 0
   else
     match read_file path with
-    | Error msg -> Error (Printf.sprintf "read %s: %s" path msg)
+    | Error msg ->
+      observe_load_failure "read_error";
+      Error (Printf.sprintf "read %s: %s" path msg)
     | Ok content ->
       match Keeper_toml_loader.parse_toml content with
-      | Error msg -> Error (Printf.sprintf "parse %s: %s" path msg)
+      | Error msg ->
+        observe_load_failure "parse_error";
+        Error (Printf.sprintf "parse %s: %s" path msg)
       | Ok doc ->
         let count =
           List.fold_left

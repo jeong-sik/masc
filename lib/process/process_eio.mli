@@ -38,6 +38,20 @@ val argv_program : string list -> string
     ["<empty>"] for an empty argv).  Exposed for tests and parity with
     the hook payload. *)
 
+(** {1 Spawn guard hook} *)
+
+type spawn_guard = { run : 'a. (unit -> 'a) -> 'a }
+(** Process-wide wrapper around foreground [run_argv*] subprocess calls.
+    The default guard runs the callback immediately. Higher-level runtimes can
+    install resource accounting/backpressure without making this lower
+    [masc_process] library depend on those policy modules. *)
+
+val set_spawn_guard : spawn_guard -> unit
+(** Install the process-wide foreground spawn guard. *)
+
+val reset_spawn_guard_for_testing : unit -> unit
+(** Restore the default no-op foreground spawn guard. *)
+
 val default_timeout_sec : float
 (** Default subprocess wall-clock budget shared by every [run_argv*],
     [run_unix_argv*_fallback], and [with_unix_capture] [?timeout_sec]

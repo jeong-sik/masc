@@ -69,21 +69,11 @@ val voice_health_uri : unit -> Uri.t
 val voice_mcp_host : unit -> string
 val voice_mcp_port : unit -> int
 
-(** {1 HTTP client construction} *)
-
-val client_for_uri :
-  sw:Eio.Switch.t ->
-  net:_ Eio.Net.t ->
-  Uri.t ->
-  (Cohttp_eio.Client.t, string) result
-
-val client_for_uri_result :
-  sw:Eio.Switch.t ->
-  net:_ Eio.Net.t ->
-  Uri.t ->
-  (Cohttp_eio.Client.t, string) result
-(** [client_for_uri] wrapped to convert exceptions into
-    [Error msg]; cancellation re-raises. *)
+(* RFC-0107 Phase D.2c bis-2 — [client_for_uri] / [client_for_uri_result]
+   removed.  Voice HTTP callers now route through [Masc_http_client]
+   {[post_sync]/[get_sync]/[get_response_sync]} which delegate to the
+   per-process piaf pool.  See voice_bridge_core.ml for the in-place
+   note explaining the migration. *)
 
 (** {1 Local playback} *)
 

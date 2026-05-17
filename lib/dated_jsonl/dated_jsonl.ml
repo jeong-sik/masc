@@ -21,6 +21,9 @@ type t = {
   last_prune_day : string option Atomic.t;
 }
 
+let default_append_guard f = f ()
+let append_guard : ((unit -> unit) -> unit) Atomic.t = Atomic.make default_append_guard
+
 let mutex_registry : (string, Eio.Mutex.t Atomic.t) Hashtbl.t = Hashtbl.create 16
 let mutex_registry_mu = Stdlib.Mutex.create ()
 
@@ -253,7 +256,7 @@ let prune_unlocked t ~days =
 
 (* ── Public API ───────────────────────────────────────── *)
 
-let append t json =
+let append_inner t json =
   let mutex = Atomic.get t.mutex in
   (* [use_ro] serializes file appends without poisoning the shared mutex on
      IO failure, so retry paths can keep using the same registry entry.
@@ -275,6 +278,11 @@ let append t json =
         ignore (prune_unlocked t ~days : int);
         Atomic.set t.last_prune_day (Some today)
       end)
+
+let append t json =
+  (Atomic.get append_guard) (fun () -> append_inner t json)
+
+let set_append_guard guard = Atomic.set append_guard guard
 
 let read_recent t n =
   if n <= 0 then []
@@ -407,6 +415,8 @@ module For_testing = struct
   let registry_size () =
     Stdlib.Mutex.protect mutex_registry_mu (fun () ->
       Hashtbl.length mutex_registry)
+
+  let reset_append_guard () = Atomic.set append_guard default_append_guard
 end
 
 (* Duplicate count_entries removed — canonical definition at line 225 *)

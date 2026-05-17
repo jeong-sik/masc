@@ -129,7 +129,7 @@ val set_sidecar_failure_observer : (site:string -> exn -> unit) -> unit
     to avoid a lower-library dependency cycle. *)
 
 val set_drain_failure_observer :
-  (fd_kind:string -> error_kind:string -> unit) -> unit
+  (fd_kind:string -> err_kind:string -> unit) -> unit
 (** Install the process-local observer for unexpected (non-EAGAIN /
     EWOULDBLOCK / EINTR / EOF) errors raised by [Unix.read] inside
     [drain_fd_to_buf].  The top-level Prometheus module wires this to
@@ -137,7 +137,7 @@ val set_drain_failure_observer :
 
     Labels are closed-vocabulary and cardinality-bounded:
     - [fd_kind] is either ["stdout"] or ["stderr"] (call-site tagged).
-    - [error_kind] is either ["unix_error"] (a [Unix.Unix_error] that
+    - [err_kind] is either ["unix_error"] (a [Unix.Unix_error] that
       is neither EAGAIN/EWOULDBLOCK nor EINTR — e.g. EBADF, EIO,
       ENOMEM) or ["other"] (any other exception).
 

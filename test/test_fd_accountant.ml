@@ -12,6 +12,12 @@ open Alcotest
 module FA = Masc_mcp.Fd_accountant
 module DST = Masc_mcp.Docker_spawn_throttle
 
+let tmpdir prefix =
+  Filename.concat
+    (Filename.get_temp_dir_name ())
+    (Printf.sprintf "%s_%d_%.0f" prefix (Unix.getpid ())
+       (Unix.gettimeofday ()))
+
 let test_kind_round_trip () =
   List.iter
     (fun k ->
@@ -112,6 +118,85 @@ let test_snapshot_shape () =
   check bool "pressure_active mirrors Keeper_fd_pressure" expected
     s.pressure_active
 
+let log_writer_in_flight () =
+  let snapshot = FA.fd_snapshot () in
+  List.assoc FA.Log_writer snapshot.per_kind
+
+let kind_in_flight kind =
+  let snapshot = FA.fd_snapshot () in
+  List.assoc kind snapshot.per_kind
+
+let wait_until ~clock ~attempts predicate =
+  let rec loop remaining =
+    if predicate () then true
+    else if remaining <= 0 then false
+    else (
+      Eio.Time.sleep clock 0.001 ;
+      loop (remaining - 1))
+  in
+  loop attempts
+
+let test_with_slot_reentrant_same_kind () =
+  Eio_main.run @@ fun _env ->
+  FA.with_slot ~kind:FA.Sandbox_exec (fun () ->
+      check int "outer sandbox slot held" 1
+        (kind_in_flight FA.Sandbox_exec) ;
+      FA.with_slot ~kind:FA.Sandbox_exec (fun () ->
+          check int "inner sandbox slot reuses outer slot" 1
+            (kind_in_flight FA.Sandbox_exec))) ;
+  check int "sandbox slot released" 0 (kind_in_flight FA.Sandbox_exec)
+
+let test_dated_jsonl_append_uses_log_writer_slot () =
+  Eio_main.run @@ fun env ->
+  Eio_guard.enable () ;
+  let dir = tmpdir "fd_accountant_dated_jsonl_log_writer" in
+  Fs_compat.mkdir_p dir ;
+  Fs_compat.set_fs (Eio.Stdenv.fs env) ;
+  Fun.protect ~finally:Eio_guard.disable (fun () ->
+      Dated_jsonl.For_testing.reset_append_guard () ;
+      FA.install_dated_jsonl_log_writer_guard () ;
+      let store = Dated_jsonl.create ~base_dir:dir () in
+      let mutex = Dated_jsonl.For_testing.mutex store in
+      let clock = Eio.Stdenv.clock env in
+      let () =
+        Eio.Switch.run @@ fun sw ->
+        Eio.Mutex.use_rw ~protect:true mutex (fun () ->
+            Eio.Fiber.fork ~sw (fun () ->
+                Dated_jsonl.append store (`Assoc [ ("i", `Int 1) ])) ;
+            check bool "append waits while holding log writer slot" true
+              (wait_until ~clock ~attempts:100 (fun () ->
+                   log_writer_in_flight () > 0)))
+      in
+      check int "log writer slot released" 0 (log_writer_in_flight ()))
+
+let test_process_eio_run_argv_uses_sandbox_slot () =
+  Eio_main.run @@ fun env ->
+  Eio_guard.enable () ;
+  Fun.protect
+    ~finally:(fun () ->
+      Process_eio.reset_for_testing () ;
+      Eio_guard.disable ())
+    (fun () ->
+      Process_eio.reset_for_testing () ;
+      Process_eio.init
+        ~cwd_default:(Eio.Stdenv.fs env)
+        ~proc_mgr:(Eio.Stdenv.process_mgr env)
+        ~clock:(Eio.Stdenv.clock env) ;
+      FA.install_process_eio_sandbox_exec_guard () ;
+      let clock = Eio.Stdenv.clock env in
+      let () =
+        Eio.Switch.run @@ fun sw ->
+        Eio.Fiber.fork ~sw (fun () ->
+            ignore
+              (Process_eio.run_argv_with_status ~timeout_sec:2.0
+                 [ "/bin/sleep"; "0.05" ])) ;
+        check bool "Process_eio holds sandbox slot while child runs" true
+          (wait_until ~clock ~attempts:100 (fun () ->
+               kind_in_flight FA.Sandbox_exec > 0))
+      in
+      check int "Process_eio sandbox slot released" 0
+        (kind_in_flight FA.Sandbox_exec))
+
 let () =
   Alcotest.run "Fd_accountant"
     [
@@ -129,6 +214,8 @@ let () =
           test_case "release on exception" `Quick
             test_with_slot_releases_on_exception ;
           test_case "cap bounds fan-in" `Quick test_cap_bounds_fan_in ;
+          test_case "reentrant same-kind slot" `Quick
+            test_with_slot_reentrant_same_kind ;
         ] ) ;
       ( "delegation",
         [
@@ -137,4 +224,14 @@ let () =
         ] ) ;
       ( "snapshot",
         [ test_case "shape" `Quick test_snapshot_shape ] ) ;
+      ( "log writer",
+        [
+          test_case "Dated_jsonl append uses slot" `Quick
+            test_dated_jsonl_append_uses_log_writer_slot ;
+        ] ) ;
+      ( "process",
+        [
+          test_case "Process_eio run_argv uses sandbox slot" `Quick
+            test_process_eio_run_argv_uses_sandbox_slot ;
+        ] ) ;
     ]

@@ -323,6 +323,12 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   in
   Server_startup_state.note_runtime_resolution ~path_diagnostics
     ~config_resolution;
+  (* RFC-0107 Phase D.4 — wire piaf connection pool Prometheus exporter.
+     Metric registration itself runs at [Prometheus] module load; this
+     call is the explicit dependency-order anchor and warms the snapshot
+     accessor so a misconfigured pool surfaces here rather than at first
+     [/metrics] scrape. *)
+  Pool_metrics.register ();
   state
 
 let runtime_path_diagnostics ?input_base_path (state : Mcp_server.server_state) =

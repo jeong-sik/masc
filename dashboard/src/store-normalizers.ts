@@ -605,6 +605,7 @@ function normalizeDashboardFleetPressureHealth(raw: unknown): DashboardFleetPres
   if (!isRecord(raw)) return null
   const status = asString(raw.status) ?? asString(raw.state) ?? null
   const reason = asString(raw.reason) ?? asString(raw.message) ?? null
+  const blocker = asString(raw.blocker) ?? null
   const admissionBlocked = asBoolean(raw.admission_blocked)
     ?? asBoolean(raw.admission_blocks)
     ?? null
@@ -617,23 +618,58 @@ function normalizeDashboardFleetPressureHealth(raw: unknown): DashboardFleetPres
   const blockedCount = asNumber(raw.blocked_count)
     ?? asNumber(raw.blocked)
     ?? null
+  const bootableKeeperCount = asNumber(raw.bootable_keeper_count)
+  const runningKeeperFiberCount = asNumber(raw.running_keeper_fiber_count)
+  const minimumRunningFibers = asNumber(raw.minimum_running_fibers)
+  const noRunningFibers = asBoolean(raw.no_running_fibers)
+  const lowRunningFiberMargin = asBoolean(raw.low_running_fiber_margin)
+  const pausedKeeperCount = asNumber(raw.paused_keeper_count)
+  const autobootEnabledKeeperCount = asNumber(raw.autoboot_enabled_keeper_count)
+  const pausedAutobootEnabledKeeperCount = asNumber(raw.paused_autoboot_enabled_keeper_count)
+  const effectiveReactionCapacityCount = asNumber(raw.effective_reaction_capacity_count)
+  const targetReactionCapacityCount = asNumber(raw.target_reaction_capacity_count)
+  const operatorActionRequired = asBoolean(raw.operator_action_required)
   if (
     status == null
     && reason == null
+    && blocker == null
     && admissionBlocked == null
     && admissionBlockedKeepers == null
     && blockedKeepers == null
     && blockedCount == null
+    && bootableKeeperCount == null
+    && runningKeeperFiberCount == null
+    && minimumRunningFibers == null
+    && noRunningFibers == null
+    && lowRunningFiberMargin == null
+    && pausedKeeperCount == null
+    && autobootEnabledKeeperCount == null
+    && pausedAutobootEnabledKeeperCount == null
+    && effectiveReactionCapacityCount == null
+    && targetReactionCapacityCount == null
+    && operatorActionRequired == null
   ) {
     return null
   }
   return {
     status,
     reason,
+    blocker,
     admission_blocked: admissionBlocked,
     admission_blocked_keepers: admissionBlockedKeepers,
     blocked_keepers: blockedKeepers,
     blocked_count: blockedCount,
+    bootable_keeper_count: bootableKeeperCount ?? null,
+    running_keeper_fiber_count: runningKeeperFiberCount ?? null,
+    minimum_running_fibers: minimumRunningFibers ?? null,
+    no_running_fibers: noRunningFibers ?? null,
+    low_running_fiber_margin: lowRunningFiberMargin ?? null,
+    paused_keeper_count: pausedKeeperCount ?? null,
+    autoboot_enabled_keeper_count: autobootEnabledKeeperCount ?? null,
+    paused_autoboot_enabled_keeper_count: pausedAutobootEnabledKeeperCount ?? null,
+    effective_reaction_capacity_count: effectiveReactionCapacityCount ?? null,
+    target_reaction_capacity_count: targetReactionCapacityCount ?? null,
+    operator_action_required: operatorActionRequired ?? null,
   }
 }
 

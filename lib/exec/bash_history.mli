@@ -22,9 +22,15 @@ val append :
   base_path:string ->
   keeper_name:string ->
   history_entry ->
-  unit
+  (unit, exn) result
 (** Append one entry to the keeper's JSONL history file.  Creates the
-    directory and file if they don't exist. *)
+    directory and file if they don't exist.
+
+    Returns [Error exn] on [Sys_error] from [open_out_gen] / output /
+    close.  Previously these raised through to keeper tool dispatch
+    and surfaced as a tool failure even though the tool itself had
+    completed.  The audit trail is best-effort; callers decide whether
+    to swallow + observe or propagate. *)
 
 val compact :
   base_path:string ->

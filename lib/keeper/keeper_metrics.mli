@@ -340,6 +340,23 @@ val metric_keeper_local_discovery_failures : string
 val metric_keeper_thinking_persist_failures : string
 val metric_keeper_checkpoint_failures : string
 
+val metric_keeper_memory_llm_summary_outcomes : string
+(** Counter for [Keeper_memory_llm_summary.summarize_with_provider]
+    attempts, classified by label [outcome] (ok_summary | timed_out |
+    http_error | empty_response).  Labels: [outcome], [provider]
+    (model_id of the attempt), [cascade] (cascade name driving the
+    chain).  Adjacent counter
+    [metric_keeper_memory_llm_summary_chain_exhausted] increments
+    only when every provider in the cascade returned a non-Ok
+    outcome — the operational signal that the consolidation pass
+    received no summary at all. *)
+
+val metric_keeper_memory_llm_summary_chain_exhausted : string
+(** Counter for [Keeper_memory_llm_summary.summarize_with_providers]
+    runs where every provider in the cascade returned a non-Ok
+    outcome.  Label [cascade] names the cascade.  A rising rate
+    means consolidation is silently skipping the LLM summary step. *)
+
 val metric_keeper_memory_jsonl_ops : string
 (** Counter for [Agent_sdk.Memory.long_term_backend] operations
     served by the JSONL backend, classified by label [outcome]

@@ -683,6 +683,14 @@ let metric_keeper_thinking_persist_failures =
 
 let metric_keeper_checkpoint_failures = "masc_keeper_checkpoint_failures_total"
 
+let metric_keeper_memory_llm_summary_outcomes =
+  "masc_keeper_memory_llm_summary_outcomes_total"
+;;
+
+let metric_keeper_memory_llm_summary_chain_exhausted =
+  "masc_keeper_memory_llm_summary_chain_exhausted_total"
+;;
+
 let metric_keeper_memory_jsonl_ops =
   "masc_keeper_memory_jsonl_ops_total"
 ;;

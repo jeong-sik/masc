@@ -144,6 +144,8 @@ let try_delete_pid_file = function
 let registry : (string, state) Hashtbl.t = Hashtbl.create 16
 let registry_mu = Mutex.create ()
 let id_counter = ref 0
+let pending_spawn_global = ref 0
+let pending_spawn_by_keeper : (string, int) Hashtbl.t = Hashtbl.create 16
 
 let with_reg f =
   Mutex.lock registry_mu;
@@ -168,6 +170,20 @@ let shell_ring_line_limit () =
       | Some n when n >= 0 -> n
       | _ -> 5000)
   | None -> 5000
+
+let env_int ?(min_v = 1) name default =
+  match Sys.getenv_opt name with
+  | Some raw ->
+      (match int_of_string_opt (String.trim raw) with
+       | Some n -> max min_v n
+       | None -> default)
+  | None -> default
+
+let global_task_limit () =
+  env_int "MASC_KEEPER_BG_TASK_GLOBAL_MAX" 12
+
+let per_keeper_task_limit () =
+  env_int "MASC_KEEPER_BG_TASK_PER_KEEPER_MAX" 2
 
 let retained_start_for_last_lines s ~limit =
   if limit <= 0 then String.length s
@@ -270,10 +286,58 @@ let poll_state st =
     end
   end
 
+let poll_all_states () =
+  Hashtbl.iter (fun _ st -> poll_state st) registry
+
+let live_task_count ?keeper () =
+  Hashtbl.fold
+    (fun _ st acc ->
+      if st.closed then acc
+      else
+        match keeper with
+        | Some expected when not (String.equal st.keeper expected) -> acc
+        | Some _ | None -> acc + 1)
+    registry
+    0
+
+let pending_keeper_count keeper =
+  Hashtbl.find_opt pending_spawn_by_keeper keeper
+  |> Option.value ~default:0
+
+let reserve_spawn_slot ~keeper =
+  with_reg (fun () ->
+    poll_all_states ();
+    let global_limit = global_task_limit () in
+    let per_keeper_limit = per_keeper_task_limit () in
+    let keeper_pending = pending_keeper_count keeper in
+    let keeper_count = live_task_count ~keeper () + keeper_pending in
+    let global_count = live_task_count () + !pending_spawn_global in
+    if keeper_count >= per_keeper_limit then
+      Error (Too_many_tasks { keeper; limit = per_keeper_limit })
+    else if global_count >= global_limit then
+      Error (Too_many_tasks { keeper = "global"; limit = global_limit })
+    else begin
+      incr pending_spawn_global;
+      Hashtbl.replace pending_spawn_by_keeper keeper (keeper_pending + 1);
+      Ok ()
+    end)
+
+let release_spawn_slot ~keeper =
+  with_reg (fun () ->
+    pending_spawn_global := max 0 (!pending_spawn_global - 1);
+    let next = max 0 (pending_keeper_count keeper - 1) in
+    if next = 0 then Hashtbl.remove pending_spawn_by_keeper keeper
+    else Hashtbl.replace pending_spawn_by_keeper keeper next)
+
 let spawn ?base_path ~keeper ~argv ~cwd ~envp ~timeout_sec () =
-  match Process_eio.spawn_detached ~argv ~env:envp ~cwd with
-  | Error e -> Error (Spawn_failed e)
-  | Ok handle ->
+  match reserve_spawn_slot ~keeper with
+  | Error err -> Error err
+  | Ok () ->
+    match Process_eio.spawn_detached ~argv ~env:envp ~cwd with
+    | Error e ->
+      release_spawn_slot ~keeper;
+      Error (Spawn_failed e)
+    | Ok handle ->
       try_set_nonblock handle.stdout_fd;
       try_set_nonblock handle.stderr_fd;
       let tid = fresh_id () in
@@ -304,7 +368,12 @@ let spawn ?base_path ~keeper ~argv ~cwd ~envp ~timeout_sec () =
           pid_file;
         }
       in
-      with_reg (fun () -> Hashtbl.replace registry tid st);
+      with_reg (fun () ->
+        Hashtbl.replace registry tid st;
+        pending_spawn_global := max 0 (!pending_spawn_global - 1);
+        let next = max 0 (pending_keeper_count keeper - 1) in
+        if next = 0 then Hashtbl.remove pending_spawn_by_keeper keeper
+        else Hashtbl.replace pending_spawn_by_keeper keeper next);
       Ok tid
 
 let bufsub buf ~base_offset since =

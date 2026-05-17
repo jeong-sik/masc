@@ -3,7 +3,7 @@ import { signal } from '@preact/signals'
 import { lazy, Suspense } from 'preact/compat'
 import { useEffect } from 'preact/hooks'
 import type { RouteState, TabId } from '../types'
-import type { DashboardRuntimeResolution, Keeper } from '../types'
+import type { DashboardFleetSafetyHealth, DashboardRuntimeResolution, Keeper } from '../types'
 import { hashForRoute, navigate, route } from '../router'
 import { connected, reconnectCount, lastDisconnectedAt } from '../sse'
 import { dashboardWsOnlyEnabled } from '../dashboard-ws-cutover'
@@ -172,6 +172,42 @@ function keeperLooksPaused(keeper: Keeper): boolean {
   return keeper.paused === true || phase === 'paused' || stage === 'paused' || status === 'paused'
 }
 
+function fleetPressureBlockedKeepers(fleetSafety: DashboardFleetSafetyHealth): number {
+  const candidates = [
+    fleetSafety.keeper_fd_pressure?.admission_blocked_keepers,
+    fleetSafety.keeper_fd_pressure?.blocked_keepers,
+    fleetSafety.keeper_fd_pressure?.blocked_count,
+    fleetSafety.keeper_fleet_safety?.admission_blocked_keepers,
+    fleetSafety.keeper_fleet_safety?.blocked_keepers,
+    fleetSafety.keeper_fleet_safety?.blocked_count,
+  ].filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+  return candidates.length > 0 ? Math.max(...candidates) : 0
+}
+
+function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): DashboardHealthChip | null {
+  if (!fleetSafety) return null
+  const fibers = fleetSafety.keeper_fibers
+  const paused = fleetSafety.paused_keepers ?? 0
+  const blocked = fleetPressureBlockedKeepers(fleetSafety)
+  if (blocked >= 24) {
+    return {
+      key: 'fleet-liveness-risk',
+      label: 'Fleet liveness risk',
+      detail: `FD pressure admission is blocking ${blocked} keepers; keeper turns may not start.`,
+      tone: 'bad',
+    }
+  }
+  if (fleetSafety.keeper_fleet_no_fibers === true || (fibers != null && fibers <= 1 && paused > 0)) {
+    return {
+      key: 'fleet-liveness-risk',
+      label: 'Fleet liveness risk',
+      detail: `keeper_fibers=${fibers ?? 0}, paused_keepers=${paused}; keeper fleet may be stalled.`,
+      tone: 'bad',
+    }
+  }
+  return null
+}
+
 export function dashboardHealthChips(input: DashboardHealthInput): DashboardHealthChip[] {
   const chips: DashboardHealthChip[] = []
   if (!input.connected) {
@@ -208,6 +244,11 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
       detail: 'One or more keeper rows are paused; board/tool activity may look quiet.',
       tone: 'warn',
     })
+  }
+
+  const fleetChip = fleetSafetyHealthChip(runtime?.fleet_safety ?? null)
+  if (fleetChip) {
+    chips.push(fleetChip)
   }
 
   const configured = input.counts?.configured_keepers ?? 0

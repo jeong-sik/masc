@@ -1,0 +1,234 @@
+---
+rfc: "0097"
+title: "Keeper sandbox container reuse (long-running sandbox per keeper)"
+status: Draft
+created: 2026-05-17
+updated: 2026-05-17
+author: vincent
+supersedes: []
+superseded_by: null
+related: ["0042"]
+implementation_prs: []
+---
+
+# RFC-0097 — Keeper sandbox container reuse
+
+Status: Draft
+Author: jeong-sik (vincent)
+Date: 2026-05-17
+Related: PR #15678 (autonomy_exec pipe FD root fix), PR #15722 (docker spawn throttle — adjacent backpressure).
+
+## Summary
+
+Replace the per-call `docker run --rm` model used by keeper sandbox
+execution with a long-running container per keeper. Container lifetime
+is bound to the keeper lifecycle. Per-turn commands run via
+`docker exec` against the existing container.
+
+This removes the spawn-rate variable that the 2026-05-16 ENFILE storm
+saturated. The host FD ceiling becomes a function of *active keeper count*
+(stable, ≤ 24) rather than *per-turn command count* (unbounded burst).
+
+## Problem
+
+Every keeper Bash sandbox call today goes through:
+
+```
+docker run --rm <flags> <image> bash -lc "<cmd>"
+```
+
+Cost per call (measured 2026-05-16):
+
+- Host: process-group setup, 4+ pipes, daemon API socket.
+- Docker daemon: container struct, cgroup, namespace, network namespace,
+  veth pair, OCI runtime fork-exec.
+- Wall-clock: 1–5 s startup before `bash -lc` even begins.
+
+When the cascade-failure-storm at 2026-05-16 18:08-18:15 fired,
+12+ keepers retried tier rotations in lockstep, each retry spawning
+a fresh container. Host FD usage crossed `kern.maxfiles` (491_520),
+ENFILE returned for `fstatat`/`execve`/`fork`, and unrelated
+subsystems (cost emitter, OAS event bridge, keeper runtime manifest
+appender, git worktree checks) all failed simultaneously. The system
+took ~10 minutes to drain.
+
+PR #15678 fixed one source (an autonomy_exec pipe leak via missing
+`~cloexec:true`). PR #15722 added Layer A/B backpressure
+(orchestrator semaphore + fd_pressure-aware serialization). These
+are necessary but address the *rate*, not the *cost*.
+
+## Goals
+
+1. Remove container lifecycle from the per-call path.
+2. Bound peak host FD consumption to `O(active_keepers)` rather than
+   `O(active_keepers * inflight_calls)`.
+3. Preserve current security envelope (`--cap-drop=ALL`, `--read-only`,
+   `--pids-limit`, `--memory`, seccomp profile).
+4. Preserve current identity envelope (per-keeper UID/GID, credential
+   mounts, label set).
+5. No regression in per-call latency P50; aim for ≥ 5× P50 improvement.
+
+## Non-goals
+
+- Removing Docker as the sandbox backend.
+- Sharing containers across keepers.
+- Changing the keeper-shell DSL or Bash semantics.
+- Eliminating the per-call `Masc_exec.Exec_gate` typed approval pipeline
+  (it still wraps every `docker exec`).
+
+## Proposed design
+
+### Lifecycle binding
+
+Each keeper has, at most, one long-running sandbox container, named
+`masc-keeper-<keeper-name>-persistent`. The container's lifetime is
+bound to the keeper lifecycle (`Keeper_supervisor` start/stop). It is
+created lazily on the first sandbox call and removed when the keeper
+transitions to `Terminated` / `Compacted_out`.
+
+```
+Keeper_supervisor.start keeper:
+  on first Bash call → ensure_sandbox_container keeper
+  on subsequent calls → docker exec <container> bash -lc "<cmd>"
+Keeper_supervisor.stop keeper:
+  → docker rm -f <container>  (idempotent, best-effort)
+```
+
+### Persistent container shape
+
+```
+docker run -d                              # detached
+  --name masc-keeper-<keeper>-persistent
+  --label masc.mcp.component=keeper-sandbox
+  --label masc.mcp.keeper=<keeper>
+  --label masc.mcp.kind=persistent         # (vs. existing kind=oneshot)
+  --user <uid>:<gid>
+  --read-only --tmpfs /tmp:rw,nosuid,nodev,noexec,size=256m
+  --cap-drop=ALL --security-opt no-new-privileges
+  --pids-limit <cfg>  --memory <cfg>
+  --network <inherit|host|none>
+  -v /Users/dancer/me/.masc/playground/docker/<keeper>:/home/keeper/...:rw
+  -v <credential mounts>:ro
+  <image> sleep infinity
+```
+
+Per-call execution:
+
+```
+docker exec -i <container> bash -lc "<cmd>"
+```
+
+### Failure modes and recovery
+
+| Failure | Detection | Recovery |
+|---|---|---|
+| Container missing (host restart, OOM kill, manual `docker rm`) | `docker exec` returns "No such container" | Re-create container, re-execute call |
+| Container unresponsive (frozen, network partition) | `docker exec` timeout | `docker kill` + recreate |
+| Image upgrade | image digest changes | Recreate container at next call |
+| Credential rotation | mount path changes | Recreate container at next call |
+| `--read-only` violation needing `-v` change | spec hash changes | Recreate container at next call |
+
+The lazy-recreate path uses the same `ensure_sandbox_container`
+helper, so recovery is the steady-state path under failure rather than
+a separate code branch.
+
+### Backpressure interaction
+
+The Layer A throttle (`Docker_spawn_throttle`) shipped in PR #15722
+caps the spawn rate. Under this RFC the spawn count drops by 10×–100×
+(one `docker run` per keeper lifetime instead of per call), so the
+semaphore effectively becomes a no-op. We keep it as a guardrail for
+container-creation bursts (24 keepers starting simultaneously after a
+server restart).
+
+`docker exec` is *not* wrapped by the throttle. Per-keeper-serialization
+of `exec` is enforced naturally because each keeper turn is single-threaded
+inside `Keeper_unified_turn`; multiple `exec` calls to the same
+container do not race.
+
+### Configuration
+
+| Env | Default | Purpose |
+|---|---|---|
+| `MASC_KEEPER_SANDBOX_MODE` | `oneshot` (phase 0) → `persistent` (phase 2) | Feature-flag the migration |
+| `MASC_KEEPER_SANDBOX_PERSISTENT_TTL_SEC` | 3600 | Idle TTL before container is recycled |
+| `MASC_KEEPER_SANDBOX_RECREATE_ON_IMAGE_CHANGE` | true | Auto-recreate on image digest change |
+
+## Migration plan
+
+| Phase | Scope | Default | Risk |
+|---|---|---|---|
+| 0 (this RFC) | Spec only | n/a | None |
+| 1 | Implementation gated behind `MASC_KEEPER_SANDBOX_MODE=persistent` env opt-in; CI exercises both paths | `oneshot` | Low — opt-in |
+| 2 | Default flips to `persistent`; `oneshot` still selectable | `persistent` | Medium — operational risk |
+| 3 | `oneshot` code path removed | `persistent` | Low — once phase 2 stable for 2 weeks |
+
+## Alternatives considered
+
+### A. Keep oneshot, increase concurrency cap
+
+Already shipped (PR #15722). Buys headroom but does not change the
+relationship `FD_cost ∝ call_rate`. Storm still possible at sufficient
+fan-in.
+
+### B. Container reuse pool (shared across keepers)
+
+Eliminates per-keeper isolation. Cap-drop / cred-mount sets differ
+per keeper. Rejected — security envelope incompatible.
+
+### C. Replace Docker with chroot+namespaces directly
+
+Lower overhead, but loses macOS portability (Docker Desktop's
+Linux VM abstracts the namespace stack). macOS is the primary dev
+target. Rejected — host-platform incompatible.
+
+### D. Replace Docker with Linux user containers via runc
+
+Same problem as C. Rejected — same reason.
+
+## Workaround rejection bar (self-check)
+
+- [x] Not telemetry-as-fix — removes the FD cost source
+- [x] Not string/substring classifier
+- [x] Not N-of-M — single migration path, all per-call sites move together
+- [x] No catch-all
+- [x] No cap/cooldown/dedup/repair — repair path (recreate-on-missing) is
+      not a workaround but the natural lazy-init pattern
+
+## Cost / risk
+
+- Implementation: estimated 2-3 sprint-weeks (lifecycle binding, exec
+  wrapper, recovery path, two-mode CI matrix).
+- Operational risk: phase-2 default-flip requires a rollback path
+  (env flag). Production telemetry must distinguish per-mode failure rates
+  before phase 3.
+- FD savings (projection from 05-16 incident): peak FD usage drops from
+  ~491k (storm) to <50k (24 active keepers × ~2k FDs/container). Headroom
+  10× the system ceiling.
+
+## Open questions
+
+1. **Container freeze under idle** — should `MASC_KEEPER_SANDBOX_PERSISTENT_TTL_SEC`
+   apply or do we keep containers alive indefinitely? Bias toward indefinite,
+   since recreation cost is what we're amortizing.
+2. **Container exec timeout enforcement** — `docker exec` has no built-in
+   wall-clock timeout. Continue using `Process_eio` timeout wrapper around
+   the exec call, same as today.
+3. **macOS Docker Desktop FD accounting under exec-heavy load** — needs
+   measurement during phase 1 to confirm host FD usage actually drops as
+   projected.
+
+## Evidence
+
+- Incident: `~/me/.masc/logs/system_log_2026-05-16.jsonl` 18:08-18:15Z
+  (53 ENFILE entries, 12+ affected keepers).
+- Detection module: `lib/keeper_fd_pressure.ml:36-46 is_fd_exhaustion_text`.
+- Throttle (Layer A/B): `lib/docker_spawn_throttle.ml` (PR #15722).
+- Spawn sites today: `lib/worker_runtime_docker.ml:394 run_worker_spec`,
+  `lib/keeper/keeper_shell_docker.ml:976 docker run --rm`.
+
+## References
+
+- CLAUDE.md `<workaround_rejection_bar>` — symptom suppression vs. structural fix.
+- RFC-0042 — closed-sum-types as the prevention pattern for catch-all
+  classifiers (this RFC is the analogous pattern for spawn-cost).

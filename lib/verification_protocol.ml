@@ -16,9 +16,9 @@
    - [criteria]: the operator-facing "must be true" statements →
      [task.contract.completion_contract] wrapped in [Verification.Custom].
    - [evidence_refs]: the artefact list the verifier expects to see →
-     [task.contract.verify_gate_evidence], passed in by the caller at
-     [tool_task.ml] so this function does not reach into task.contract
-   twice for different fields. *)
+     [task.contract.verify_gate_evidence] plus required evidence refs,
+     passed in by the caller at [coord_task.ml] so this function does
+     not reach into task.contract twice for different fields. *)
 type submit_request_spec =
   { criteria : Verification.criterion list
   ; output : Yojson.Safe.t
@@ -106,10 +106,13 @@ let warn_contract_gap (task : Masc_domain.task) =
        "[verification-submit] task=%s has no contract — completion_contract \
         and evidence will be empty in the verification record"
        task.id
-   | Some c when c.completion_contract = [] && c.verify_gate_evidence = [] ->
+   | Some c
+     when c.completion_contract = []
+          && c.required_evidence = []
+          && c.verify_gate_evidence = [] ->
      Log.Task.warn
        "[verification-submit] task=%s has a contract but both \
-       completion_contract and verify_gate_evidence are empty"
+       completion_contract and verification evidence are empty"
        task.id
    | Some _ -> ())
 

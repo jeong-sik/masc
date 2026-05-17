@@ -907,6 +907,14 @@ let metric_runtime_ollama_probe_generate_skips =
 
 let metric_process_timeout = "masc_process_timeout_total"
 let metric_bg_task_sidecar_failures = "masc_bg_task_sidecar_failures_total"
+(* iter 30: typed split for [Bg_task.drain_fd_to_buf] silent error
+   swallow.  Previously every non-EAGAIN/EWOULDBLOCK/EINTR exception
+   was collapsed into a permissive EOF, hiding real read errors
+   (EBADF, EIO, ENOMEM, …).  Labels are closed-vocabulary:
+   [fd_kind = stdout | stderr] × [error_kind = unix_error | other],
+   cardinality 4. *)
+let metric_bg_task_drain_unexpected_errors =
+  "masc_bg_task_drain_unexpected_errors_total"
 let metric_build_identity_probe_failures = "masc_build_identity_probe_failures_total"
 let metric_distributed_lock_acquire_failed = "masc_distributed_lock_acquire_failed_total"
 
@@ -2451,6 +2459,17 @@ let init () =
     Counter;
   Bg_task.set_sidecar_failure_observer (fun ~site _exn ->
     inc_counter metric_bg_task_sidecar_failures ~labels:[ "site", site ] ());
+  add
+    metric_bg_task_drain_unexpected_errors
+    "Total unexpected (non-EAGAIN/EWOULDBLOCK/EINTR/EOF) errors raised by \
+     Unix.read inside Bg_task.drain_fd_to_buf. Labeled by \
+     fd_kind=stdout|stderr and error_kind=unix_error|other. A non-zero \
+     rate indicates the previous silent-EOF fallback would have hidden a \
+     real read error and lost output between the error and process exit."
+    Counter;
+  Bg_task.set_drain_failure_observer (fun ~fd_kind ~error_kind ->
+    inc_counter metric_bg_task_drain_unexpected_errors
+      ~labels:[ "fd_kind", fd_kind; "error_kind", error_kind ] ());
   add
     metric_build_identity_probe_failures
     "Total build identity git probe failures. Labeled by \

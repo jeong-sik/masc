@@ -824,6 +824,17 @@ val metric_process_timeout : string
     [site] = [write | read | read_parse | readdir | is_dir | unlink]. *)
 val metric_bg_task_sidecar_failures : string
 
+(** iter 30: unexpected (non-EAGAIN / EWOULDBLOCK / EINTR / EOF)
+    errors raised by [Unix.read] inside [Bg_task.drain_fd_to_buf].
+    Replaces the previous silent-EOF catch-all that hid genuine read
+    errors (EBADF, EIO, ENOMEM, …) and lost any output between the
+    error and process exit.  Labels are closed-vocabulary and
+    cardinality-bounded:
+    - [fd_kind] = [stdout | stderr] (call-site tagged).
+    - [error_kind] = [unix_error | other] (typed match arm).
+    Total cardinality: 4. *)
+val metric_bg_task_drain_unexpected_errors : string
+
 (** Build identity git probe failures. Labels:
     [site] = [commit_ts_git_capture | commit_ts_git_status | commit_ts_parse]. *)
 val metric_build_identity_probe_failures : string

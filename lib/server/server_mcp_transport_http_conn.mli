@@ -69,6 +69,30 @@ val stop_sse_session : string -> unit
     AND clears the connect-rate guard state for [session_id].
     Calls {!close_sse_conn} on the removed connection. *)
 
+val stop_sse_session_evict :
+  string -> reason:Session_lifecycle_event.evict_reason -> unit
+(** [stop_sse_session_evict session_id ~reason] is
+    {!stop_sse_session} *plus* (a) a best-effort SSE
+    [event: evicted] close frame written to the client before the
+    writer closes, and (b) a typed
+    {!Session_lifecycle_event.Evict}/{!Session_lifecycle_event.Close}
+    pair published on the bus topic.
+
+    Frame format: [event: evicted\\ndata: {"type":"evicted","reason":<reason>}\\n\\n]
+    where [reason] is {!Session_lifecycle_event.evict_reason_to_string}.
+    Operators and SDK clients key off the literal [event: evicted]
+    line — RFC-0099 §3.
+
+    Frame write is best-effort: a failure (writer already closed,
+    network gone) logs at debug and continues to the close + publish
+    path. Eviction does not abort on observability failure.
+
+    PR-3 (RFC-0099) introduces this variant; cap-exceeded /
+    backpressure / idle-timeout sites that previously called
+    {!stop_sse_session} silently should migrate to this when the
+    eviction is a *server-policy decision* (not a client
+    disconnect). *)
+
 val stop_sse_session_preserve_guard : string -> unit
 (** [stop_sse_session_preserve_guard session_id] removes the
     registry entry but **preserves** the connect-rate guard

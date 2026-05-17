@@ -90,3 +90,32 @@ val bus_topic : string
 
 val pp : Format.formatter -> t -> unit
 (** Pretty-printer for tests and operator diagnostics. *)
+
+(** {1 Publisher injection (PR-3)}
+
+    The transport layer ({!Server_mcp_transport_http}, AGUI, etc.)
+    cannot reach into the running {!Agent_sdk.Event_bus} directly —
+    the bus handle lives behind {!Server_bootstrap_loops}. PR-3
+    introduces a publisher hook so transport-side eviction sites can
+    emit events without taking a hard dependency on bus plumbing. *)
+
+val publish : t -> unit
+(** [publish evt] forwards [evt] to the currently-installed
+    publisher. No-op when no publisher is installed (identity
+    default). Never raises; a publisher that raises is logged and
+    swallowed so a failing observer cannot kill the transport
+    eviction path. *)
+
+val set_publisher : (t -> unit) -> unit
+(** [set_publisher p] installs [p] as the publisher. Subsequent
+    {!publish} calls invoke [p]. Idempotent / overwriting — the most
+    recently set publisher wins. Intended to be called once at server
+    bootstrap. *)
+
+val reset_publisher : unit -> unit
+(** [reset_publisher ()] restores the no-op default. Test-only. *)
+
+val is_publisher_installed : unit -> bool
+(** [is_publisher_installed ()] returns true iff a non-no-op
+    publisher is currently installed. Observability only — not a
+    synchronization primitive. *)

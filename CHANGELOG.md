@@ -4,10 +4,13 @@
 
 ### Added
 - Documented RFC-0105's OpenAI-compatible boundary typed error mapping for tool validation and provider/runtime failure surfaces.
+- Added RFC-0106's cancel-safe `try`/`with` discipline draft for callback and cleanup paths.
 
 ### Fixed
 - Wired the `Sandbox_exec` slot at non-Docker spawn callsites and gated keeper admission on system FD pressure, so fleet startup respects host-level descriptor pressure.
 - Closed setup file descriptors on process spawn failure.
+- Preserved typed PR evidence through task handling and prevented long-run workload stampedes.
+- Deduplicated keeper goal repair and added janitor auto-stagnate threshold handling.
 - Split background-task drain failures into typed handling for `drain_fd_to_buf` instead of silently swallowing read-side errors.
 - Failed closed on tool validation failures, tagged fabricated pair-repair messages, and re-raised `Eio.Cancel.Cancelled` from the keeper compaction-start callback.
 - Swept cursor-covered reaction stimuli so already-advanced keeper cursors do not leave stale pending work.

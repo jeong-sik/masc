@@ -191,6 +191,15 @@ val has_turn_affordance : turn_affordance -> string list -> bool
 
 val has_task_claim_affordance : string list -> bool
 
+(** Ordered executable candidates for generic required-tool gates.
+    Claim/context tools are excluded when the keeper already owns active work,
+    and passive status/read tools are never recommended. *)
+val generic_required_actionable_tool_names :
+  has_current_task:bool ->
+  turn_affordances:string list ->
+  allowed_tool_names:string list ->
+  string list
+
 (** Pick the model-facing [tool_choice] when the gate fires. *)
 val preferred_tool_choice_for_required_turn :
   has_current_task:bool ->

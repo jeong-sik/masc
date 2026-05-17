@@ -11377,11 +11377,48 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
        ()
    with
    | Agent_sdk.Types.Any -> ()
+  | other ->
+    fail
+      (Printf.sprintf
+         "expected Any for active-task keeper (must make progress), got %s"
+         (Agent_sdk.Types.show_tool_choice other)));
+  (match
+     choose
+       ~has_current_task:true
+       ~turn_affordances:[ "inspect_worktree_delta" ]
+       ~allowed_tool_names:[ "Bash"; "keeper_tasks_list" ]
+       ()
+   with
+   | Agent_sdk.Types.Tool "Bash" -> ()
    | other ->
      fail
        (Printf.sprintf
-          "expected Any for active-task keeper (must make progress), got %s"
+          "expected exact public Bash for single public generic required candidate, got \
+           %s"
           (Agent_sdk.Types.show_tool_choice other)));
+  (match
+     choose
+       ~has_current_task:true
+       ~turn_affordances:[ "inspect_worktree_delta" ]
+       ~allowed_tool_names:[ "keeper_pr_create"; "keeper_tasks_list" ]
+       ()
+   with
+   | Agent_sdk.Types.Any -> ()
+   | other ->
+     fail
+       (Printf.sprintf
+          "expected Any for single internal generic required candidate to avoid MCP \
+           raw-name mismatches, got %s"
+          (Agent_sdk.Types.show_tool_choice other)));
+  check
+    (list string)
+    "generic required candidates exclude claim after owned task"
+    [ "keeper_board_post" ]
+    (Surface.generic_required_actionable_tool_names
+       ~has_current_task:true
+       ~turn_affordances:[ "work_discovery" ]
+       ~allowed_tool_names:[ "keeper_task_claim"; "keeper_board_post";
+                             "keeper_tasks_list" ]);
   (* Claim/stay_silent cannot advance an already-owned task, so forcing Any
      here would create an impossible required-tool contract. *)
   match

@@ -1,6 +1,32 @@
 import { describe, expect, it } from 'vitest'
 
-import { normalizeExecutionQueueItem, normalizeExecutionSessionBrief, normalizeMessage } from './store-normalizers'
+import {
+  normalizeDashboardRuntimeResolution,
+  normalizeExecutionQueueItem,
+  normalizeExecutionSessionBrief,
+  normalizeMessage,
+} from './store-normalizers'
+
+const configItem = { path: '/tmp/masc', source: 'test', exists: true }
+const build = {
+  release_version: 'dev',
+  started_at: '2026-05-17T00:00:00Z',
+  uptime_seconds: 12,
+}
+
+function runtimeResolutionRaw(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    status: 'ready',
+    warnings: [],
+    base_path: configItem,
+    workspace_path: configItem,
+    resolved_base_path: configItem,
+    data_root: configItem,
+    prompt_markdown_dir: configItem,
+    build,
+    ...overrides,
+  }
+}
 
 describe('normalizeExecutionSessionBrief', () => {
   it('promotes legacy room-only payloads to namespace while keeping the room alias', () => {
@@ -91,6 +117,46 @@ describe('normalizeMessage', () => {
       from: 'sangsu',
       content: 'handoff ready',
       room: 'keeper-room',
+    })
+  })
+})
+
+describe('normalizeDashboardRuntimeResolution fleet safety', () => {
+  it('keeps old runtime payloads compatible when fleet safety fields are absent', () => {
+    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw())
+
+    expect(result?.fleet_safety).toBeNull()
+  })
+
+  it('parses optional health fleet-safety fields type-safely', () => {
+    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
+      keeper_fibers: 1,
+      paused_keepers: 3,
+      keeper_fleet_no_fibers: false,
+      keeper_fd_pressure: {
+        status: 'blocked',
+        reason: 'fd_pressure',
+        admission_blocked: true,
+        admission_blocked_keepers: 24,
+      },
+      keeper_fleet_safety: {
+        blocked_keepers: 24,
+      },
+    }))
+
+    expect(result?.fleet_safety).toMatchObject({
+      keeper_fibers: 1,
+      paused_keepers: 3,
+      keeper_fleet_no_fibers: false,
+      keeper_fd_pressure: {
+        status: 'blocked',
+        reason: 'fd_pressure',
+        admission_blocked: true,
+        admission_blocked_keepers: 24,
+      },
+      keeper_fleet_safety: {
+        blocked_keepers: 24,
+      },
     })
   })
 })

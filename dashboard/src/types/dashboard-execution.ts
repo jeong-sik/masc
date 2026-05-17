@@ -116,6 +116,24 @@ export interface DashboardRuntimeResolution {
   diagnostics: DashboardRuntimeDiagnostic[]
   build: ServerBuildIdentity
   keeper_runtime: KeeperRuntimeResolved | null
+  fleet_safety: DashboardFleetSafetyHealth | null
+}
+
+export interface DashboardFleetSafetyHealth {
+  keeper_fibers: number | null
+  paused_keepers: number | null
+  keeper_fleet_no_fibers: boolean | null
+  keeper_fd_pressure: DashboardFleetPressureHealth | null
+  keeper_fleet_safety: DashboardFleetPressureHealth | null
+}
+
+export interface DashboardFleetPressureHealth {
+  status: string | null
+  reason: string | null
+  admission_blocked: boolean | null
+  admission_blocked_keepers: number | null
+  blocked_keepers: number | null
+  blocked_count: number | null
 }
 
 export interface DashboardShellResponse {

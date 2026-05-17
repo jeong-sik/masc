@@ -8,6 +8,8 @@ import type {
   DashboardExecutionContinuityBrief,
   DashboardConfigResolution,
   DashboardConfigResolutionItem,
+  DashboardFleetPressureHealth,
+  DashboardFleetSafetyHealth,
   DashboardRuntimeDiagnostic,
   DashboardRuntimeResolution,
   KeeperRuntimeResolved,
@@ -577,6 +579,67 @@ export function normalizeDashboardRuntimeResolution(
       .filter((item): item is DashboardRuntimeDiagnostic => item !== null),
     build,
     keeper_runtime: normalizeKeeperRuntimeResolved(raw.keeper_runtime),
+    fleet_safety: normalizeDashboardFleetSafetyHealth(raw),
+  }
+}
+
+function normalizeDashboardFleetPressureHealth(raw: unknown): DashboardFleetPressureHealth | null {
+  if (!isRecord(raw)) return null
+  const status = asString(raw.status) ?? asString(raw.state) ?? null
+  const reason = asString(raw.reason) ?? asString(raw.message) ?? null
+  const admissionBlocked = asBoolean(raw.admission_blocked)
+    ?? asBoolean(raw.admission_blocks)
+    ?? null
+  const admissionBlockedKeepers = asNumber(raw.admission_blocked_keepers)
+    ?? asNumber(raw.admission_blocked_count)
+    ?? null
+  const blockedKeepers = asNumber(raw.blocked_keepers)
+    ?? asNumber(raw.keepers_blocked)
+    ?? null
+  const blockedCount = asNumber(raw.blocked_count)
+    ?? asNumber(raw.blocked)
+    ?? null
+  if (
+    status == null
+    && reason == null
+    && admissionBlocked == null
+    && admissionBlockedKeepers == null
+    && blockedKeepers == null
+    && blockedCount == null
+  ) {
+    return null
+  }
+  return {
+    status,
+    reason,
+    admission_blocked: admissionBlocked,
+    admission_blocked_keepers: admissionBlockedKeepers,
+    blocked_keepers: blockedKeepers,
+    blocked_count: blockedCount,
+  }
+}
+
+function normalizeDashboardFleetSafetyHealth(raw: Record<string, unknown>): DashboardFleetSafetyHealth | null {
+  const keeperFibers = asNumber(raw.keeper_fibers)
+  const pausedKeepers = asNumber(raw.paused_keepers)
+  const noFibers = asBoolean(raw.keeper_fleet_no_fibers)
+  const fdPressure = normalizeDashboardFleetPressureHealth(raw.keeper_fd_pressure)
+  const fleetSafety = normalizeDashboardFleetPressureHealth(raw.keeper_fleet_safety)
+  if (
+    keeperFibers == null
+    && pausedKeepers == null
+    && noFibers == null
+    && fdPressure == null
+    && fleetSafety == null
+  ) {
+    return null
+  }
+  return {
+    keeper_fibers: keeperFibers ?? null,
+    paused_keepers: pausedKeepers ?? null,
+    keeper_fleet_no_fibers: noFibers ?? null,
+    keeper_fd_pressure: fdPressure,
+    keeper_fleet_safety: fleetSafety,
   }
 }
 

@@ -150,10 +150,10 @@ let transition provider ~success =
           match provider.state with
           | Unhealthy { since; _ } -> since
           | Healthy ->
+            Unix.gettimeofday ()
             (* NDT-OK: external probe observation time stamps the first
                Healthy→Unhealthy transition; deterministic logic depends
                on counters. *)
-            Unix.gettimeofday ()
         in
         provider.state
         <- Unhealthy

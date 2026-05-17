@@ -87,3 +87,150 @@ let agent_started
     }
     payload_json
 ;;
+
+(** Emit a [tool_called] envelope.  Matches cascade arm at
+    lib/cascade/cascade_event_bridge.ml:599-603 (pre-PR-3): envelope
+    populates ~agent_name ~tool_name; payload mirrors the same two
+    fields. *)
+let tool_called
+      ~(ts_unix : float)
+      ~(correlation_id : string)
+      ~(run_id : string)
+      ~(agent_name : string)
+      ~(tool_name : string)
+  : Yojson.Safe.t
+  =
+  let payload_json =
+    let p : Sse_event_t.tool_called_payload = { agent_name; tool_name } in
+    Yojson.Safe.from_string (Sse_event_j.string_of_tool_called_payload p)
+  in
+  wrap_envelope
+    { event_type = "tool_called"
+    ; ts_unix
+    ; correlation_id
+    ; run_id
+    ; agent_name = Some agent_name
+    ; task_id = None
+    ; turn = None
+    ; tool_name = Some tool_name
+    }
+    payload_json
+;;
+
+(** Emit a [tool_completed] envelope.  Same shape as [tool_called]. *)
+let tool_completed
+      ~(ts_unix : float)
+      ~(correlation_id : string)
+      ~(run_id : string)
+      ~(agent_name : string)
+      ~(tool_name : string)
+  : Yojson.Safe.t
+  =
+  let payload_json =
+    let p : Sse_event_t.tool_completed_payload = { agent_name; tool_name } in
+    Yojson.Safe.from_string (Sse_event_j.string_of_tool_completed_payload p)
+  in
+  wrap_envelope
+    { event_type = "tool_completed"
+    ; ts_unix
+    ; correlation_id
+    ; run_id
+    ; agent_name = Some agent_name
+    ; task_id = None
+    ; turn = None
+    ; tool_name = Some tool_name
+    }
+    payload_json
+;;
+
+(** Emit a [turn_started] envelope. *)
+let turn_started
+      ~(ts_unix : float)
+      ~(correlation_id : string)
+      ~(run_id : string)
+      ~(agent_name : string)
+      ~(turn : int)
+  : Yojson.Safe.t
+  =
+  let payload_json =
+    let p : Sse_event_t.turn_started_payload = { agent_name; turn } in
+    Yojson.Safe.from_string (Sse_event_j.string_of_turn_started_payload p)
+  in
+  wrap_envelope
+    { event_type = "turn_started"
+    ; ts_unix
+    ; correlation_id
+    ; run_id
+    ; agent_name = Some agent_name
+    ; task_id = None
+    ; turn = Some turn
+    ; tool_name = None
+    }
+    payload_json
+;;
+
+(** Emit a [turn_completed] envelope. *)
+let turn_completed
+      ~(ts_unix : float)
+      ~(correlation_id : string)
+      ~(run_id : string)
+      ~(agent_name : string)
+      ~(turn : int)
+  : Yojson.Safe.t
+  =
+  let payload_json =
+    let p : Sse_event_t.turn_completed_payload = { agent_name; turn } in
+    Yojson.Safe.from_string (Sse_event_j.string_of_turn_completed_payload p)
+  in
+  wrap_envelope
+    { event_type = "turn_completed"
+    ; ts_unix
+    ; correlation_id
+    ; run_id
+    ; agent_name = Some agent_name
+    ; task_id = None
+    ; turn = Some turn
+    ; tool_name = None
+    }
+    payload_json
+;;
+
+(** Emit a [turn_ready] envelope.  The wrapper computes [count] from
+    [List.length tool_names] and [names_hash] as the first 16 chars
+    of [Digest.to_hex (Digest.string (String.concat "\n" tool_names))],
+    matching cascade arm at cascade_event_bridge.ml:615-624 (pre-PR-3). *)
+let turn_ready
+      ~(ts_unix : float)
+      ~(correlation_id : string)
+      ~(run_id : string)
+      ~(agent_name : string)
+      ~(turn : int)
+      ~(tool_names : string list)
+  : Yojson.Safe.t
+  =
+  let names_hash =
+    Digest.to_hex (Digest.string (String.concat "\n" tool_names))
+  in
+  let payload_json =
+    let p : Sse_event_t.turn_ready_payload =
+      { agent_name
+      ; turn
+      ; count = List.length tool_names
+      ; names_hash = String.sub names_hash 0 16
+      ; tool_names
+      }
+    in
+    Yojson.Safe.from_string (Sse_event_j.string_of_turn_ready_payload p)
+  in
+  wrap_envelope
+    { event_type = "turn_ready"
+    ; ts_unix
+    ; correlation_id
+    ; run_id
+    ; agent_name = Some agent_name
+    ; task_id = None
+    ; turn = Some turn
+    ; tool_name = None
+    }
+    payload_json
+;;

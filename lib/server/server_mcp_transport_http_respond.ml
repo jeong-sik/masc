@@ -13,26 +13,31 @@ let safe_respond_with_string reqd response body =
      available.  The known-race arm (Failure path) keeps its compact
      one-line format because the failure mode is well-classified and
      the surrounding incident note already captures the diagnostic
-     intent — adding a backtrace there would just churn parsers. *)
-  try Httpun.Reqd.respond_with_string reqd response body
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | Failure msg ->
-      Log.Server.warn
-        "[mcp-http] respond_with_string skipped (reqd invalid state; \
-         2026-05-05 OAS cancel race): %s"
-        msg
-  | exn ->
-      let backtrace = Printexc.get_backtrace () in
-      let summary = Printexc.to_string exn in
-      if String.trim backtrace = "" then
-        Log.Server.warn
-          "[mcp-http] respond_with_string unexpected exception: %s"
-          summary
-      else
-        Log.Server.warn
-          "[mcp-http] respond_with_string unexpected exception: %s\n%s"
-          summary backtrace
+     intent — adding a backtrace there would just churn parsers.
+
+     RFC-0106 P1: routed via [Cancel_safe.observe] so the Cancelled
+     re-raise discipline lives in one place. The [Failure] arm is
+     preserved inside [on_exn] because it is a typed boundary
+     (2026-05-05 OAS cancel race), not a catch-all. *)
+  Cancel_safe.observe
+    ~on_exn:(function
+      | Failure msg ->
+          Log.Server.warn
+            "[mcp-http] respond_with_string skipped (reqd invalid state; \
+             2026-05-05 OAS cancel race): %s"
+            msg
+      | exn ->
+          let backtrace = Printexc.get_backtrace () in
+          let summary = Printexc.to_string exn in
+          if String.trim backtrace = "" then
+            Log.Server.warn
+              "[mcp-http] respond_with_string unexpected exception: %s"
+              summary
+          else
+            Log.Server.warn
+              "[mcp-http] respond_with_string unexpected exception: %s\n%s"
+              summary backtrace)
+    (fun () -> Httpun.Reqd.respond_with_string reqd response body)
 
 let mcp_headers = Server_mcp_transport_http_headers.mcp_headers
 

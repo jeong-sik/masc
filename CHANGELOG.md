@@ -1,6 +1,20 @@
 # Changelog
 
 
+## [0.19.19] - 2026-05-17
+
+### Added
+- `docs/rfc/0004-phase-a0-1-implementation-plan.md`: RFC-0004 Phase A0.1 implementation plan — sub-PR sequencing (PR-0 through PR-4), byte-equal golden test protocol, atd schema candidate for SSE wire envelope.
+- `lib/sse_event_poc/`: byte-equal PoC sublib (atdgen + atdgen-runtime, `(optional)`) demonstrating 3-way byte-equal output (`` `Assoc `` + `Yojson.Safe.to_string` vs hand-coded module vs atdgen `-j -j-std`) for `agent_started` payload. Gated behind `with-test` to avoid leaking atdgen into production opam install.
+- `test/sse_event_poc/test_sse_event_poc.ml`: 3-way byte-equal Alcotest fixture (PASS, single run, byte-identical across all three emit paths).
+- `docs/rfc/RFC-0004-shared-contract-ocaml-ts.md`: Resume note (2026-05-17), Phase A0 sprint A0.1-A0.5 분할 table, drift surface quantification (SSE event types 60+→68 over 12 months, 4 drift categories with 3 silent pass).
+
+### Changed
+- `dashboard/src/components/ide/ide-context-lens.ts`: defensive `?? ''` null coalescing on `link.label.trim()` and `anchor.surface.trim()` to stop runtime crash from SSE schema drift (`TypeError: Cannot read properties of null (reading 'trim')`, observed 2026-05-17). Marked WORKAROUND; root removal once RFC-0004 Phase A0.4 (Zod-from-JSON-Schema payload nested validation) lands.
+
+### Notes
+- No production runtime change; PoC sublib is test-only via `(optional)` + opam `:with-test`.
+
 ## [0.19.18] - 2026-05-17
 
 ### Added

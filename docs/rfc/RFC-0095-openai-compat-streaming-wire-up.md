@@ -1,5 +1,5 @@
 ---
-rfc: "0094"
+rfc: "0095"
 title: "OpenAI-compat provider streaming wire-up"
 status: Draft
 created: 2026-05-17
@@ -11,7 +11,7 @@ related: ["0047", "0045", "0033", "0058"]
 implementation_prs: []
 ---
 
-# RFC-0094 — OpenAI-compat provider streaming wire-up
+# RFC-0095 — OpenAI-compat provider streaming wire-up
 
 ## 1. Summary
 
@@ -143,7 +143,7 @@ Phase 0 PR 은 **production behavior 무변경**. trace 코드는 `-tags trace`
   않는 *layer-above* fix.
 
 Fix 자체는 **production-impacting**. 다음 안전망 적용:
-- `feature/rfc-0094-openai-compat-streaming` 브랜치 + Draft PR + sangsu /
+- `feature/rfc-0095-openai-compat-streaming` 브랜치 + Draft PR + sangsu /
   imseonghan / jobsian_purist 등 *runpod_mtp cascade 사용 7 keeper*
   canary observation.
 - Rollback path: cascade.toml 에서 `streaming = false` per-model override

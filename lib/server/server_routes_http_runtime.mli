@@ -117,8 +117,8 @@ val make_health_json :
     [build] / [protocol] (default + listener + supported list) /
     [transport] / [paths] / [uptime] / [sse_clients] /
     [startup] / [subsystems] / [feature_flags] / [gc] /
-    [keeper_fibers] / [keeper_fd_pressure] / [keeper_fleet_safety] /
-    [keeper_reaction_ledger] / [paused_keepers] /
+    [keeper_fibers] / [keeper_fd_pressure] / [fd_accountant] /
+    [keeper_fleet_safety] / [keeper_reaction_ledger] / [paused_keepers] /
     [keeper_config_parse_error_count] / [keeper_config_parse_errors] /
     [keeper_config_unknown_key_count] / [keeper_config_unknown_keys] /
     [keeper_config_schema_status] / [keeper_config_schema_blocking] /
@@ -144,6 +144,11 @@ val make_health_json :
     decision used by the FD guard.  This lets operators distinguish "shell
     says the host limit is high" from the actual runtime inherited by the
     server process, and distinguish process-local EMFILE from host-wide ENFILE.
+
+    [fd_accountant] exposes the live resource accountant snapshot used by the
+    shared spawn/HTTP/log backpressure layer: process FD open/limit readings,
+    whether FD pressure is active, and each resource kind's in-flight,
+    configured-concurrency, and effective-concurrency counts.
 
     [keeper_fleet_safety] compares configured bootable keepers with the
     live keeper fiber count.  It reports [blocked] when bootable keepers
@@ -173,7 +178,9 @@ val keeper_fleet_runtime_resolution_fields : unit -> (string * Yojson.Safe.t) li
     [/health] keeps the richer paused keeper object.  The
     [keeper_reaction_ledger] field keeps the same summary object as
     [/health] so the dashboard can render pending durable stimuli without a
-    second endpoint. *)
+    second endpoint.  [fd_accountant] is also projected here so the dashboard
+    shell can show the same backpressure source as [/health] without scraping
+    Prometheus. *)
 
 val health_handler : Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** [health_handler request reqd] writes

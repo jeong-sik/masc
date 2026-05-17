@@ -483,7 +483,14 @@ let rewrite_reactions store =
   with_persist_lock store (fun () -> save_reactions_jsonl content)
 ;;
 
-(** {1 Append Helpers} *)
+(** {1 Append Helpers}
+
+    RFC-0091: [append_post] / [append_comment] are *create-only fast paths*.
+    Callers must guarantee the post/comment has never been written before
+    (the create flow in this module satisfies that via the [Dedup_hit] check
+    above). Mutation/vote flushes MUST go through [save_jsonl_snapshot] in
+    [board_votes.flush_dirty], not these helpers — otherwise the JSONL grows
+    one line per mutation per id (the dup vector RFC-0091 closes). *)
 
 let append_post (p : post) =
   try

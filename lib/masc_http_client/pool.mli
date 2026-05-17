@@ -52,17 +52,17 @@ val default_config : config
 
 val create :
   sw:Eio.Switch.t ->
-  net:[> `Generic ] Eio.Net.ty Eio.Resource.t ->
-  ?https:
-    (Uri.t ->
-     [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t ->
-     [ `Close | `Flow | `R | `Shutdown | `Tls | `W ] Eio.Resource.t) ->
+  env:Eio_unix.Stdenv.base ->
   ?config:config ->
   unit ->
   t
 (** Initialize the pool on a long-lived switch (server root_sw). Idle
     connections close when [sw] closes; in-flight requests outlive
-    pool cleanup via per-call sub-switches. *)
+    pool cleanup via per-call sub-switches.
+
+    [env] is the full Eio standard environment, required by the piaf
+    transport (h1/h2 client creation). The pool keeps a reference and
+    issues [Piaf.Client.create ~sw env uri] internally on cache miss. *)
 
 (* ── Request API ───────────────────────────────────────────────── *)
 
@@ -78,7 +78,7 @@ type http_method = [ `GET | `POST | `PUT | `DELETE | `HEAD | `PATCH ]
 
 val request :
   t ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?timeout_seconds:float ->
   method_:http_method ->
   url:string ->

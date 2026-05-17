@@ -43,6 +43,15 @@
   (cmdliner (>= 1.1))
   (cohttp (>= 5.0))
   (cohttp-eio (>= 6.0))
+  ; RFC-0107 Phase D — pooled keep-alive HTTP transport. piaf provides
+  ; per-endpoint persistent client (Client.t) + h1/h2 + Eio integration;
+  ; multi-host pool layer (Host_key map, idle eviction, TLS cache) is
+  ; built on top in lib/masc_http_client/pool.ml.  macOS install needs
+  ; brew openssl@3 + CPATH=/opt/homebrew/opt/openssl@3/include
+  ; LIBRARY_PATH=/opt/homebrew/opt/openssl@3/lib environment overrides
+  ; (upstream piaf 0.2.0 missing conf-libssl dependency on macOS arm64).
+  (piaf (>= 0.2.0))
+  (eio-ssl (>= 0.3.0))
   (agent_sdk (>= 0.195.0))
   (uri (>= 4.4))
   (tls (>= 2.0))

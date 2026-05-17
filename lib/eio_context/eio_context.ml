@@ -20,6 +20,12 @@ let current_net : eio_net option Atomic.t = Atomic.make None
 let current_clock : float Eio.Time.clock_ty Eio.Resource.t option Atomic.t = Atomic.make None
 let current_mono_clock : Eio.Time.Mono.ty Eio.Resource.t option Atomic.t = Atomic.make None
 let current_sw : Eio.Switch.t option Atomic.t = Atomic.make None
+(* RFC-0107 Phase D.2c — full Eio standard environment, required by
+   piaf [Client.create] (and any other API needing more than just
+   [net]/[clock]).  Set once at server bootstrap; read by long-lived
+   consumers like [Masc_http_client] that initialize their per-process
+   [Pool.t] lazily.  Same WORM atomic pattern as the other fields. *)
+let current_env : Eio_unix.Stdenv.base option Atomic.t = Atomic.make None
 let net_initialized : bool Atomic.t = Atomic.make false
 let with_test_env_lock = Eio.Mutex.create ()
 
@@ -70,6 +76,12 @@ let get_mono_clock_opt () =
 
 let set_switch sw =
   Atomic.set current_sw (Some sw)
+
+let set_env env =
+  Atomic.set current_env (Some env)
+
+let get_env_opt () : Eio_unix.Stdenv.base option =
+  Atomic.get current_env
 
 (* RFC-0107 §3.3 wiring — bind a turn-scoped switch on the *current fiber*
    (and all children forked inside [f]). On exit the binding is removed,

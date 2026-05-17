@@ -26,7 +26,7 @@ let run_cmd base_path =
   let state, _remaining_work =
     Gc.ramp_up (fun () ->
       Server_runtime_bootstrap.create_server_state ~sw ~base_path ~clock
-        ~mono_clock ~net ~proc_mgr ~fs)
+        ~mono_clock ~net ~proc_mgr ~fs ~env ())
   in
   Server_runtime_bootstrap.bootstrap_server_state_blocking state;
   ignore (Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state);

@@ -43,7 +43,15 @@ val create_server_state :
   net:[> `Generic | `Unix] Eio.Net.ty Eio.Resource.t ->
   proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t ->
   fs:Eio.Fs.dir_ty Eio.Path.t ->
+  ?env:Eio_unix.Stdenv.base ->
+  unit ->
   Mcp_server.server_state
+(** [env] is optional for backwards compatibility with existing
+    [create_server_state] callers (tests, MCP execute contexts);
+    when supplied (server bootstrap path), it is recorded into
+    [Eio_context.set_env] so long-lived HTTP consumers like
+    [Masc_http_client.Pool] can lazy-init with the full
+    {!Eio_unix.Stdenv.base}.  RFC-0107 Phase D.2c. *)
 
 val runtime_path_diagnostics :
   ?input_base_path:string ->

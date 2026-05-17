@@ -350,7 +350,7 @@ let dashboard_transport_health_snapshot_json () =
 
 (* Issue #8396: cache patchers used to recognise only 7 lifecycle event
    names while [Keeper_lifecycle_events.all_event_names] now publishes
-   10. The drift left dashboard rows stale until the next full
+   12. The drift left dashboard rows stale until the next full
    recompute when the supervisor emitted [dead_cleaned],
    [self_preservation], [paused_pruned], or the phase-derived [running].
 
@@ -365,6 +365,7 @@ let keepalive_running_of_lifecycle_event = function
   | "resumed" | "self_preservation" | "auto_resumed" -> Some true
   | "paused" -> Some true
   | "paused_pruned" -> Some false (* prune == removed from supervision *)
+  | "admission_denied" -> Some false (* admission guard refused to launch a fiber *)
   | "dead_cleaned" -> Some false (* cleanup == no longer alive *)
   | "stopped" | "crashed" | "dead" -> Some false
   | _ -> None
@@ -374,6 +375,7 @@ let phase_of_lifecycle_event = function
   | "started" | "restarted" | "reconciled" | "running" -> Some "running"
   | "resumed" | "self_preservation" | "auto_resumed" -> Some "running"
   | "paused" -> Some "paused"
+  | "admission_denied" -> Some "offline"
   | "paused_pruned" -> Some "stopped"
   | "stopped" -> Some "stopped"
   | "crashed" -> Some "crashed"
@@ -385,6 +387,7 @@ let pipeline_stage_of_lifecycle_event = function
   | "started" | "restarted" | "reconciled" | "running" -> Some "idle"
   | "resumed" | "self_preservation" | "auto_resumed" -> Some "idle"
   | "paused" -> Some "paused"
+  | "admission_denied" -> Some "offline"
   | "paused_pruned" -> Some "offline"
   | "stopped" | "dead" | "dead_cleaned" -> Some "offline"
   | "crashed" -> Some "crashed"
@@ -400,6 +403,7 @@ let paused_of_lifecycle_event = function
   | "self_preservation"
   | "auto_resumed" -> Some false
   | "paused" | "paused_pruned" | "stopped" -> Some true
+  | "admission_denied" -> Some false
   | "dead" | "dead_cleaned" | "crashed" -> Some false
   | _ -> None
 ;;

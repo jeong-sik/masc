@@ -48,6 +48,12 @@ let system_fd_mutex = Stdlib.Mutex.create ()
 
 type admission_block =
   | Fd_pressure_cooldown of float
+  | Probe_unknown of
+      { probe : string
+      ; active_keepers : int
+      ; starting_keepers : int
+      ; projected_fds : int
+      }
   | Projected_fd_budget_exhausted of
       { soft_limit : int
       ; open_fds : int option
@@ -454,6 +460,16 @@ let system_fd_budget_block system_fds ~projected_fds ~active_keepers ~starting_k
   | None -> None
 ;;
 
+let probe_unknown_block ~probe ~projected_fds ~active_keepers ~starting_keepers =
+  Block
+    (Probe_unknown
+       { probe
+       ; active_keepers = max 0 active_keepers
+       ; starting_keepers = max 0 starting_keepers
+       ; projected_fds
+       })
+;;
+
 let admission_decision
   ?(soft_limit = process_nofile_soft_limit ())
   ?(open_fds = process_open_fd_count ())
@@ -470,7 +486,14 @@ let admission_decision
     in
     match soft_limit with
     | Some soft_limit when soft_limit > 0 ->
-      if projected_fds > soft_limit
+      if Option.is_none open_fds
+      then
+        probe_unknown_block
+          ~probe:"process_open_fds"
+          ~projected_fds
+          ~active_keepers
+          ~starting_keepers
+      else if projected_fds > soft_limit
       then
         Block
           (Projected_fd_budget_exhausted
@@ -481,19 +504,26 @@ let admission_decision
              ; projected_fds
              })
       else
-        (match
-           system_fd_budget_block system_fds ~projected_fds ~active_keepers
+        (match system_fds with
+         | None ->
+           probe_unknown_block
+             ~probe:"system_fd"
+             ~projected_fds
+             ~active_keepers
              ~starting_keepers
-         with
-         | Some block -> Block block
-         | None -> Admit)
+         | Some _ ->
+           (match
+              system_fd_budget_block system_fds ~projected_fds ~active_keepers
+                ~starting_keepers
+            with
+            | Some block -> Block block
+            | None -> Admit))
     | _ ->
-      (match
-         system_fd_budget_block system_fds ~projected_fds ~active_keepers
-           ~starting_keepers
-       with
-       | Some block -> Block block
-       | None -> Admit))
+      probe_unknown_block
+        ~probe:"process_nofile_soft_limit"
+        ~projected_fds
+        ~active_keepers
+        ~starting_keepers)
 ;;
 
 let admitted = function
@@ -511,6 +541,14 @@ let admission_block_to_json = function
     `Assoc
       [ "kind", `String "fd_pressure_cooldown"
       ; "remaining_sec", `Float remaining_sec
+      ]
+  | Probe_unknown { probe; active_keepers; starting_keepers; projected_fds } ->
+    `Assoc
+      [ "kind", `String (probe ^ "_probe_unknown")
+      ; "probe", `String probe
+      ; "active_keepers", `Int active_keepers
+      ; "starting_keepers", `Int starting_keepers
+      ; "projected_fds", `Int projected_fds
       ]
   | Projected_fd_budget_exhausted
       { soft_limit; open_fds; active_keepers; starting_keepers; projected_fds } ->
@@ -570,6 +608,7 @@ let admission_decision_to_json = function
 
 let admission_block_kind = function
   | Fd_pressure_cooldown _ -> "fd_pressure_cooldown"
+  | Probe_unknown { probe; _ } -> probe ^ "_probe_unknown"
   | Projected_fd_budget_exhausted _ -> "projected_fd_budget_exhausted"
   | System_fd_budget_exhausted _ -> "system_fd_budget_exhausted"
   | Host_fd_hotspot_budget_exhausted _ -> "host_fd_hotspot_budget_exhausted"

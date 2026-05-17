@@ -1,0 +1,808 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MASC/OAS Keeper Stop &amp; Silent Failure Analysis - 2026-05-17</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fa;
+      --panel: #ffffff;
+      --ink: #17202a;
+      --muted: #5c6875;
+      --line: #d7dee7;
+      --soft: #eef3f8;
+      --blue: #1f6feb;
+      --green: #177245;
+      --amber: #996c00;
+      --red: #b42318;
+      --violet: #6941c6;
+      --code: #0f172a;
+      --code-bg: #f2f5f9;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.55;
+    }
+
+    header {
+      background: #0f1b2d;
+      color: #f8fafc;
+      padding: 36px 40px 28px;
+      border-bottom: 1px solid #26364f;
+    }
+
+    main {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 28px 24px 56px;
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: 30px;
+      line-height: 1.18;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 34px 0 12px;
+      font-size: 22px;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 24px 0 10px;
+      font-size: 17px;
+      letter-spacing: 0;
+    }
+
+    p { margin: 8px 0 12px; }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: var(--code);
+      background: var(--code-bg);
+      border: 1px solid #dde4ef;
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-size: 0.92em;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 18px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 28px;
+      padding: 4px 10px;
+      border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 999px;
+      background: rgba(255,255,255,0.09);
+      color: #e5edf7;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 20px;
+      margin: 18px 0;
+      box-shadow: 0 1px 2px rgba(16,24,40,0.04);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      background: #fbfcfe;
+      min-height: 112px;
+    }
+
+    .metric .num {
+      display: block;
+      font-size: 28px;
+      font-weight: 700;
+      line-height: 1;
+      margin-bottom: 8px;
+    }
+
+    .metric .label {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 10px 0 4px;
+      font-size: 14px;
+    }
+
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      border: 1px solid var(--line);
+      padding: 9px 10px;
+    }
+
+    th {
+      background: #edf2f7;
+      font-weight: 700;
+    }
+
+    tr:nth-child(even) td { background: #fbfdff; }
+
+    .tag {
+      display: inline-block;
+      min-width: 72px;
+      text-align: center;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .stop { color: #7a271a; background: #ffead5; border: 1px solid #fedf89; }
+    .pause { color: #7f5600; background: #fef0c7; border: 1px solid #fedf89; }
+    .dead { color: #912018; background: #fee4e2; border: 1px solid #fecdca; }
+    .skip { color: #1849a9; background: #d1e9ff; border: 1px solid #b2ddff; }
+    .silent { color: #5925dc; background: #ebe9fe; border: 1px solid #d9d6fe; }
+    .error { color: #9e165f; background: #fce7f6; border: 1px solid #fcceee; }
+
+    .flow {
+      background: #101828;
+      color: #eef4ff;
+      border-radius: 8px;
+      border: 1px solid #26364f;
+      padding: 16px;
+      overflow-x: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.55;
+      white-space: pre;
+    }
+
+    .note {
+      border-left: 4px solid var(--blue);
+      padding: 10px 12px;
+      background: #eef6ff;
+      color: #233348;
+      border-radius: 0 6px 6px 0;
+    }
+
+    .warn {
+      border-left: 4px solid var(--amber);
+      padding: 10px 12px;
+      background: #fff8e6;
+      color: #3d2e00;
+      border-radius: 0 6px 6px 0;
+    }
+
+    .refs {
+      columns: 2;
+      column-gap: 28px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .refs li { break-inside: avoid; margin-bottom: 5px; }
+
+    @media (max-width: 900px) {
+      header { padding: 26px 22px 22px; }
+      main { padding: 18px 14px 40px; }
+      .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      table { font-size: 13px; }
+      th, td { padding: 8px; }
+      .refs { columns: 1; }
+    }
+
+    @media (max-width: 560px) {
+      .grid { grid-template-columns: 1fr; }
+      h1 { font-size: 24px; }
+    }
+
+    /* a11y additions (revision 2026-05-17 evening) */
+    .skip-link {
+      position: absolute; left: -9999px; top: 0;
+      background: #0f1b2d; color: #fff; padding: 8px 14px;
+      text-decoration: none; border-radius: 0 0 6px 0; z-index: 100;
+    }
+    .skip-link:focus { left: 0; outline: 2px solid #9ec5ff; }
+    caption {
+      caption-side: top; text-align: left; padding: 6px 2px 10px;
+      font-size: 12px; color: var(--muted); font-weight: 600;
+    }
+    th[scope="row"] { background: #f5f8fc; font-weight: 600; }
+
+    /* RFC + workaround marker styles */
+    .rfc-tag {
+      display: inline-block; padding: 1px 6px; border-radius: 4px;
+      background: #ebe9fe; color: #5925dc; font-size: 11px;
+      font-weight: 700; margin-right: 4px; white-space: nowrap;
+      border: 1px solid #d9d6fe;
+    }
+    .rfc-tag.merged { background: #d1fadf; color: #027a48; border-color: #abefc6; }
+    .rfc-tag.draft  { background: #fef0c7; color: #7a4a00; border-color: #fedf89; }
+    .workaround-warn {
+      display: inline-block; padding: 1px 6px; border-radius: 4px;
+      background: #fee4e2; color: #912018; font-size: 11px;
+      font-weight: 700; margin-right: 6px; border: 1px solid #fecdca;
+    }
+    del.rfc-rejected { color: #912018; text-decoration: line-through wavy; }
+    .added-note {
+      background: #f0fdf4; border-left: 4px solid #16a34a;
+      padding: 6px 10px; font-size: 13px; color: #14532d;
+      border-radius: 0 4px 4px 0; margin: 6px 0;
+    }
+  </style>
+</head>
+<body>
+  <a href="#main" class="skip-link">본문으로 건너뛰기</a>
+  <header>
+    <h1>MASC/OAS Keeper Stop &amp; Silent Failure Analysis</h1>
+    <p>대상: <code>/Users/dancer/me/workspace/yousleepwhen/masc-mcp</code> 와 인접 <code>oas</code> 런타임. 코드 레벨 정적 분석으로 Keeper가 멈추거나 멈춘 것처럼 보이는 경로, 그리고 silent/low-visibility failure를 순서도 단위로 정리했다.</p>
+    <div class="meta">
+      <span class="pill">작성일: 2026-05-17 Asia/Seoul</span>
+      <span class="pill">As-of commit: <code style="background:rgba(255,255,255,0.12);color:#e5edf7;border:none">6c4a9598a1</code> (fix(tool_keeper): observe env-var parse fallback #15954)</span>
+      <span class="pill">개정: 2026-05-17 evening — RFC cross-ref + RFC-0088 anti-pattern marking + derive_phase 동기화</span>
+      <span class="pill">검증 방식: rg/sed line inspection, no runtime mutation — 재현 명령은 §<a href="#verification" style="color:#e5edf7">Verification</a></span>
+    </div>
+    <p style="margin-top:14px;font-size:13px"><a href="#whatchanged" style="color:#9ec5ff">↪ What changed since first draft</a> · <a href="#rfc-index" style="color:#9ec5ff">↪ RFC index</a> · <a href="#verification" style="color:#9ec5ff">↪ Verification &amp; freshness policy</a></p>
+  </header>
+
+  <main>
+    <section class="section">
+      <h2>Executive Summary</h2>
+      <div class="grid">
+        <div class="metric">
+          <span class="num">31</span>
+          <span class="label">MASC Keeper 정지/비활성/무응답 원인군</span>
+        </div>
+        <div class="metric">
+          <span class="num">24</span>
+          <span class="label">OAS agent/provider/tool 계층 종료/오류 원인군</span>
+        </div>
+        <div class="metric">
+          <span class="num">18</span>
+          <span class="label">silent 또는 low-visibility failure 지점</span>
+        </div>
+        <div class="metric">
+          <span class="num">4</span>
+          <span class="label">주요 사이클: supervisor, heartbeat, watchdog, OAS turn</span>
+        </div>
+      </div>
+      <p class="note">가장 중요한 결론: “keeper가 멈춤”은 단일 상태가 아니다. 코드상으로는 <code>Stopped</code>, <code>Paused</code>, <code>Dead</code>, <code>Zombie</code>, <code>Crashed/Restarting</code>, 그리고 <code>Running</code>이지만 <code>should_run=false</code> 또는 admission/visibility gate로 turn이 스케줄되지 않는 상태가 모두 같은 증상으로 보인다.</p>
+      <p class="warn">가장 위험한 silent 계열은 “정지로 승격되지 않고 turn만 스킵되는 경로”다. FD/disk pressure admission, visibility idle gate, cascade backpressure, semaphore wait timeout, board/event 수집 실패, recurring task auto-disable, OAS callback swallow가 여기에 들어간다.</p>
+      <div class="added-note">
+        <strong>가장 위험도 높은 단일 항목</strong>: OAS <code>ApprovalRequired</code> + callback 없음 = 도구 실행됨 (silent safety bypass).
+        <code>oas/lib/agent/agent_tools.ml:562-584</code>에서 <code>None -&gt; Log.debug "...executing"</code> 분기 확인됨.
+        keeper/runtime profile에서 fail-closed 강제가 단일 root fix. (Suggested Fix Queue §P0 §2)
+      </div>
+    </section>
+
+    <section class="section" id="whatchanged">
+      <h2>What changed since first draft</h2>
+      <p>2026-05-17 evening 개정에서 추가/수정된 사항. 원래 draft는 오전 작업.</p>
+      <ul>
+        <li><strong>+RFC mapping 컬럼</strong>: MASC/OAS inventory 테이블과 Silent ledger에 관련 RFC(0072/0086/0088/0097/0106/0107/0108) 인용 추가.</li>
+        <li><strong>+RFC-0088 anti-pattern marking</strong>: Suggested Fix Queue와 Silent Ledger의 “counter/event 추가” 권장 중 RFC-0088 §1 “텔레메트리-as-fix”에 해당하는 항목을 <span class="workaround-warn">WORKAROUND</span> 로 표시. root fix로 승격할 RFC 후보 명시.</li>
+        <li><strong>+Cycle 2 derive_phase 동기화</strong>: <code>Offline</code> phase (priority 2, <code>launch_pending &amp;&amp; !fiber_alive</code>)와 <code>Stopped</code> 조건의 <code>&amp;&amp; !compaction_active &amp;&amp; !handoff_active</code> 가드(TLA+ TLC deadlock fix 결과) 누락 보완.</li>
+        <li><strong>+S2 RFC-0106 P1 ack</strong>: FD probe <code>None</code> fallback은 이미 코드에서 <code>Cancel_safe.protect ~on_exn:(fun _ -&gt; None)</code> 패턴으로 acknowledged. 단순 “silent”가 아니라 “acknowledged fallback + probe_unknown gauge 미보강” 상태.</li>
+        <li><strong>+a11y</strong>: skip-link, <code>&lt;caption&gt;</code> on tables, <code>scope="col"</code> on TH, RFC tag legend.</li>
+        <li><strong>+Verification</strong>: 각 라인 인용 재현 명령 예시 추가, freshness/sunset 정책 신설.</li>
+      </ul>
+      <p class="note">Drift 의심 1건: <code>keeper_heartbeat_loop.ml:560-676</code>의 “OAS budget strike” 인용은 :560 라인 기준 <code>run_keeper_cycle_with_slot</code> 정의에 가까움. strike 코드 자체는 존재(원안 통과)하나 라인 범위는 재조정 필요 — <strong>TBV (to be verified)</strong> 표시 유지.</p>
+    </section>
+
+    <section class="section" id="rfc-index">
+      <h2>RFC Index (이 보고서 항목 ↔ RFC)</h2>
+      <table>
+        <caption>본 보고서 cause/ledger entries와 매핑되는 MASC RFC 목록. <span class="rfc-tag merged">Merged</span> = 본문 RFC 머지됨, <span class="rfc-tag draft">Draft/WIP</span> = 진행 중, <span class="rfc-tag">Candidate</span> = 미존재, root fix 필요.</caption>
+        <thead>
+          <tr>
+            <th scope="col">RFC</th>
+            <th scope="col">제목 / 범위</th>
+            <th scope="col">상태</th>
+            <th scope="col">본 보고서 관련 항목</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">RFC-0072</th><td>Keeper sub-FSM transitions typed (KSM/KTC/KDP/KMC/KCL)</td><td><span class="rfc-tag merged">Implemented</span></td><td>MASC #5, S9 (orphan), Cycle 2 전체</td></tr>
+          <tr><th scope="row">RFC-0086</th><td>Keeper sub-library extraction + FD storm sweep</td><td><span class="rfc-tag draft">In progress (PR-2E)</span></td><td>MASC #17, S1, S2</td></tr>
+          <tr><th scope="row">RFC-0088</th><td>Counter-as-Fix umbrella — text/telemetry workaround rejection bar</td><td><span class="rfc-tag merged">Active</span></td><td><strong>Suggested Fix Queue 다수 + S5/S6/S10/S14/S15 rejection 기준</strong></td></tr>
+          <tr><th scope="row">RFC-0097</th><td>Docker spawn throttle + container reuse (FD storm root fix)</td><td><span class="rfc-tag merged">Implemented (#15727/#15728)</span></td><td>MASC #17, host pressure tree</td></tr>
+          <tr><th scope="row">RFC-0106</th><td>Cancel_safe.protect / observe — Cancelled 삼킴 박멸</td><td><span class="rfc-tag merged">P0~P1d implemented (#15904~#15925)</span></td><td>MASC #5/#16, OAS #19/#22/#24, S2/S14/S15</td></tr>
+          <tr><th scope="row">RFC-0107</th><td>Eio_context Switch wiring + Jsonl_atomic writer</td><td><span class="rfc-tag merged">Phase C.1 (#15906/#15932)</span></td><td>MASC #16, S11 (meta CAS)</td></tr>
+          <tr><th scope="row">RFC-0108</th><td>PR/Worktree safety + atomic JSONL append</td><td><span class="rfc-tag merged">Implemented (#15921/#15928/#15936)</span></td><td>S11/S12 (meta/prune persistence)</td></tr>
+          <tr><th scope="row">OAS-021</th><td>ApprovalRequired missing-callback policy boundary</td><td><span class="rfc-tag draft">Draft written</span></td><td>OAS #18, S13 — silent safety bypass root fix</td></tr>
+          <tr><th scope="row">RFC-0109</th><td>Keeper admission denial boundary</td><td><span class="rfc-tag draft">Draft written</span></td><td>S1, S2, S3, S4, P0 §1/§3 — typed admission-denial root fix</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>Cycle 1: MASC Keeper Supervisor/Heartbeat/Turn</h2>
+      <pre class="flow">keeper_supervisor.reconcile/sweep
+  |
+  |-- meta.paused=true -------------------------------> Paused; relaunch skipped
+  |-- registry missing/offline ------------------------> supervise_keepalive
+  |-- spawn_slots_available=false --------------------> no launch; looks idle/silent
+  |
+  v
+prepare_fiber_launch -> Fiber_started -> run_heartbeat_loop
+  |
+  |-- sync_keeper_presence
+  |     |-- consecutive heartbeat failures >= threshold -> Keeper_fiber_crash
+  |
+  |-- smart heartbeat gate
+  |     |-- no visible consumers + no pending signal ----> Skip_idle sleep
+  |     |-- pending queue/durable signal ----------------> run turn
+  |
+  |-- run_keepalive_unified_turn
+        |
+        |-- warmup/cooldown/should_run=false -----------> skip, still alive
+        |-- FD/disk/cascade backpressure ---------------> skip, still alive
+        |-- turn slot wait timeout ---------------------> skip, still alive
+        |-- Keeper_unified_turn.run_keeper_cycle
+              |
+              |-- success ------------------------------> reset failures, write meta
+              |-- auto-recoverable error ---------------> no crash count
+              |-- cascade/tool contract streak ---------> auto-pause
+              |-- persistent failures >= threshold -----> Keeper_fiber_crash
+              |-- ambiguous partial commit -------------> pause + continue gate
+              |-- OAS timeout budget strikes >= 3 ------> Keeper_fiber_crash
+  |
+  v
+fiber exits/raises -> supervisor finalizer -> Stopped or Crashed
+  |
+  v
+sweep_and_recover
+  |-- restart budget left -----------------------------> Restarting -> Running
+  |-- restart budget exhausted ------------------------> Dead
+  |-- stale storm/fleet batch/OAS budget loop ---------> Paused + unregister
+  |-- unresolved fiber/slot holder --------------------> force release + crash record</pre>
+    </section>
+
+    <section class="section">
+      <h2>Cycle 2: Watchdog/State Machine</h2>
+      <p style="font-size:13px;color:var(--muted);margin:6px 0 10px">
+        주: priority 순서는 코드 (<code>lib/keeper/keeper_state_machine.ml:473~</code> <code>derive_phase</code>) 그대로.
+        Stopped는 TLA+ TLC가 detect한 deadlock 패치(2026-05 이전) 이후
+        <code>compaction_active</code>/<code>handoff_active</code>가 false일 때만 진입.
+        Offline은 <code>launch_pending &amp;&amp; !fiber_alive</code>의 유일한 진입점.
+      </p>
+      <pre class="flow">Keeper_state_machine.derive_phase  (priority — first match wins)
+  |
+  |-- [0] credential_archived OR zombie_timeout_reached ------> Dead
+  |-- [1] stop_requested AND drain_complete
+  |       AND !compaction_active AND !handoff_active ---------> Stopped
+  |-- [2] launch_pending AND !fiber_alive --------------------> Offline   <-- NEW (was missing in draft)
+  |-- [3] terminal_failure_latched ---------------------------> Zombie
+  |-- [4] !fiber_alive AND !restart_budget -------------------> Dead
+  |-- [4] !fiber_alive AND restart_budget AND backoff_elapsed > Restarting
+  |-- [4] !fiber_alive AND restart_budget --------------------> Crashed
+  |-- [5] stop_requested -------------------------------------> Draining
+  |-- [6] guardrail_triggered --------------------------------> Failing
+  |-- [7] operator_paused OR
+  |       (context_overflow AND compact_retry_exhausted) -----> Paused
+  |-- [8] handoff_active -------------------------------------> HandingOff
+  |-- [8] compaction_active ----------------------------------> Compacting
+  |-- [8] context_overflow -----------------------------------> Overflowed
+  |-- [9] heartbeat_unhealthy OR turn_unhealthy --------------> Failing
+  |-- [10] fiber_alive ---------------------------------------> Running
+
+Keeper_stale_watchdog.fork_stale_watchdog
+  |
+  |-- Running only scanned
+  |-- idle turn stale --------------------------------> Stale_turn_timeout
+  |-- in-turn hung -----------------------------------> Stale_turn_timeout
+  |-- mid-turn no progress ---------------------------> Stale_turn_timeout
+  |-- noop failure loop ------------------------------> Stale_turn_timeout
+  |-- repeated terminations in window ----------------> Stale_termination_storm
+  |-- many keepers in same stale batch ---------------> Stale_fleet_batch
+  |-- pending OAS timeout budget ---------------------> Oas_timeout_budget_loop
+  |
+  v
+set failure_reason + fiber_stop/wakeup -> supervisor finalizer/sweep decides pause/restart/dead</pre>
+    </section>
+
+    <section class="section">
+      <h2>Cycle 3: OAS Agent/Provider/Tool Turn</h2>
+      <pre class="flow">Agent.run / run_stream
+  |
+  |-- with_optional_timeout(max_execution_time_s) ----> Timeout sdk_error
+  |-- periodic callbacks -----------------------------> exceptions to stderr, run continues
+  |
+  v
+run_loop
+  |-- exit_condition ---------------------------------> ExitConditionMet
+  |-- turn_count >= max_turns ------------------------> MaxTurnsExceeded
+  |-- consecutive idle turns -------------------------> IdleDetected
+  |-- token/cost budget ------------------------------> Budget error
+  |
+  v
+Pipeline.run_turn
+  |-- stage_input/parse/guardrails -------------------> GuardrailViolation or prep error
+  |-- proactive compact no reduction ----------------> later context overflow risk
+  |-- route/provider
+        |-- provider config/env missing -------------> Config error
+        |-- CLI transport missing -------------------> CliTransportRequired
+        |-- HTTP/stream/body/CLI stdout timeout -----> Retryable timeout, then error
+        |-- hard quota/auth/invalid/context ---------> non-retryable error
+        |-- provider terminal max_turns -------------> MaxTurnsExceeded
+        |-- cascade all failed/circuit open ---------> cascade error to MASC
+  |-- completion contract ---------------------------> CompletionContractViolation
+  |-- tool execution
+        |-- no tool visible for required tool --------> contract violation
+        |-- validation/shell constraint fail --------> tool result error, retry policy
+        |-- tool not found --------------------------> deterministic tool error
+        |-- ApprovalRequired without callback -------> executes anyway
+        |-- hook Skip/Override ----------------------> can look successful without tool side effect
+        |-- exception -------------------------------> non-retryable tool result error
+  |
+  v
+Agent_trace.finalize
+  |-- Raw_trace finish failure -----------------------> Error replaces prior result
+  |-- on_run_complete exception ---------------------> stderr warn, result preserved</pre>
+    </section>
+
+    <section class="section">
+      <h2>MASC Stop/Pause/Dead Cause Inventory</h2>
+      <p style="font-size:13px;color:var(--muted);margin:4px 0 8px">
+        선택된 행의 “운영 증상” 칸에 관련 RFC tag 추가됨. 전체 매핑은 §<a href="#rfc-index">RFC Index</a>.
+      </p>
+      <table>
+        <caption>MASC keeper가 Stop/Pause/Dead/Skip 상태로 분류되는 31가지 코드 경로. RFC 진행 중 항목은 인라인 태그로 표시.</caption>
+        <thead>
+          <tr>
+            <th scope="col">#</th>
+            <th scope="col">분류</th>
+            <th scope="col">원인</th>
+            <th scope="col">코드 근거</th>
+            <th scope="col">운영 증상</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>1</td><td><span class="tag stop">Stopped</span></td><td>명시적 stop 요청 후 drain 완료</td><td><code>keeper_state_machine.ml:473-541</code>, <code>keeper_supervisor.ml:307-344</code></td><td>정상 종료. 재시작은 operator/reconcile 정책에 의존.</td></tr>
+          <tr><td>2</td><td><span class="tag pause">Paused</span></td><td>operator pause 또는 meta.paused=true</td><td><code>keeper_state_machine.ml:525-527</code>, <code>keeper_supervisor.ml:803-865</code></td><td>fiber relaunch가 skip되어 죽은 것처럼 보임.</td></tr>
+          <tr><td>3</td><td><span class="tag dead">Dead</span></td><td>credential archived 또는 zombie timeout</td><td><code>keeper_state_machine.ml:484-488</code>, <code>keeper_registry.ml:461-500</code></td><td>keeper가 terminal로 분류되고 turn 실행 불가.</td></tr>
+          <tr><td>4</td><td><span class="tag dead">Dead</span></td><td>fiber not alive + restart budget exhausted</td><td><code>keeper_state_machine.ml:496-507</code>, <code>keeper_supervisor.ml:1647-1702</code></td><td>restart loop 종료. liveness recovery 대상이 되거나 tombstone으로 정리.</td></tr>
+          <tr><td>5</td><td><span class="tag error">Crash</span></td><td>heartbeat consecutive failures threshold 초과</td><td><code>keeper_heartbeat_loop.ml:1734-1743</code>, <code>keeper_registry_types.ml:64-96</code></td><td><span class="rfc-tag merged">RFC-0106</span> presence/room 접근 실패가 누적되면 supervisor crash path 진입. Cancel_safe 적용으로 Cancelled-vs-actual 구분.</td></tr>
+          <tr><td>6</td><td><span class="tag error">Crash</span></td><td>persistent turn failures threshold 초과</td><td><code>keeper_unified_turn.ml:2045-2214</code></td><td>자동복구 불가 오류가 누적되면 keeper fiber crash.</td></tr>
+          <tr><td>7</td><td><span class="tag pause">Auto-Pause</span></td><td>cascade_exhausted 반복</td><td><code>keeper_unified_turn.ml:2103-2162</code></td><td>provider/cascade가 고장난 상태에서 restart loop 대신 pause.</td></tr>
+          <tr><td>8</td><td><span class="tag pause">Auto-Pause</span></td><td>required tool contract violation 반복</td><td><code>keeper_unified_turn.ml:2123-2173</code></td><td>모델이 필수 도구 호출을 계속 누락하면 pause 및 task release.</td></tr>
+          <tr><td>9</td><td><span class="tag pause">Auto-Pause</span></td><td>OAS timeout budget loop</td><td><code>keeper_heartbeat_loop.ml:560-676</code>, <code>keeper_turn_slot.ml:867-929</code>, <code>keeper_supervisor.ml:1360-1380</code></td><td>3 strikes 후 crash, sweep에서 timeout-budget auto-pause.</td></tr>
+          <tr><td>10</td><td><span class="tag error">Watchdog</span></td><td>idle turn stale</td><td><code>keeper_stale_watchdog.ml:7-24</code>, <code>keeper_stale_watchdog.ml:428-881</code></td><td>Running인데 turn timestamp가 갱신되지 않으면 kill/restart/pause 경로.</td></tr>
+          <tr><td>11</td><td><span class="tag error">Watchdog</span></td><td>in-turn hung</td><td><code>keeper_stale_watchdog.ml:147-165</code>, <code>keeper_stale_watchdog.ml:471-565</code></td><td>turn_running 상태에서 완료/진행 신호가 없으면 stale kill.</td></tr>
+          <tr><td>12</td><td><span class="tag error">Watchdog</span></td><td>mid-turn no progress</td><td><code>keeper_stale_watchdog.ml:147-165</code>, <code>keeper_supervisor.ml:2185-2380</code></td><td>alive metrics는 있는데 proactive progress가 멈춘 케이스.</td></tr>
+          <tr><td>13</td><td><span class="tag error">Watchdog</span></td><td>noop failure loop</td><td><code>keeper_stale_watchdog.ml:7-24</code>, <code>keeper_unified_turn.ml:2082-2102</code></td><td>실패 이유 없이 반복되던 silent loop를 failure_reason으로 승격.</td></tr>
+          <tr><td>14</td><td><span class="tag pause">Auto-Pause</span></td><td>stale termination storm</td><td><code>keeper_stale_watchdog.ml:773-805</code>, <code>keeper_supervisor.ml:1317-1336</code></td><td>개별 재시작 대신 fleet 보호 pause.</td></tr>
+          <tr><td>15</td><td><span class="tag pause">Auto-Pause</span></td><td>stale fleet batch</td><td><code>keeper_stale_watchdog.ml:807-835</code>, <code>keeper_supervisor.ml:1338-1358</code></td><td>동시 다발 stale이면 provider/host 공통 원인으로 보고 pause.</td></tr>
+          <tr><td>16</td><td><span class="tag error">Crash</span></td><td>fiber unresolved, slot holder leak</td><td><code>keeper_supervisor.ml:401-528</code>, <code>keeper_supervisor.ml:1498-1603</code>, <code>keeper_turn_slot.ml:779-860</code></td><td><span class="rfc-tag merged">RFC-0106</span><span class="rfc-tag merged">RFC-0107</span> done_p resolve 실패 시 watchdog crash 승격 + slot force-release. turn-scoped Switch wiring으로 fiber-local cleanup 강화.</td></tr>
+          <tr><td>17</td><td><span class="tag skip">Not Scheduled</span></td><td>FD pressure / nofile cap</td><td><code>keeper_fd_pressure.ml:1-16</code>, <code>keeper_registry.ml:1200-1210</code>, <code>fd_accountant.ml:57-70</code></td><td><span class="rfc-tag merged">RFC-0097 #15727/#15728</span> 새 keeper/turn admission이 막혀 살아 있지만 일하지 않음. Docker spawn throttle + container reuse로 storm root closed.</td></tr>
+          <tr><td>18</td><td><span class="tag skip">Not Scheduled</span></td><td>disk pressure</td><td><code>keeper_disk_pressure.ml:235-267</code>, <code>keeper_registry.ml:1200-1210</code></td><td>low free space면 admission block. <strong>probe error는 Admit라서 감지가 약함</strong> — root fix 후보(<a href="#rfc-index">RFC candidate</a>).</td></tr>
+          <tr><td>19</td><td><span class="tag skip">Skipped</span></td><td>turn slot/semaphore wait timeout</td><td><code>keeper_turn_slot.ml:538-560</code>, <code>keeper_turn_slot.ml:955-1079</code>, <code>keeper_heartbeat_loop.ml:1197-1200</code></td><td>turn은 실패가 아니라 skip. 장시간이면 멈춤처럼 보임.</td></tr>
+          <tr><td>20</td><td><span class="tag skip">Skipped</span></td><td>smart heartbeat visibility gate</td><td><code>keeper_heartbeat_loop.ml:1304-1512</code></td><td>visible consumer가 없고 pending signal도 없으면 idle turn이 장시간 지연.</td></tr>
+          <tr><td>21</td><td><span class="tag skip">Skipped</span></td><td>cascade backpressure/resilience blocker</td><td><code>keeper_heartbeat_loop.ml:437-455</code>, <code>keeper_heartbeat_loop.ml:995-1078</code></td><td>cascade unhealthy면 turn 자체가 스케줄되지 않음.</td></tr>
+          <tr><td>22</td><td><span class="tag skip">Skipped</span></td><td>warmup/cooldown/should_run=false</td><td><code>keeper_heartbeat_loop.ml:789-1218</code></td><td>정책상 조용히 대기. stop은 아니지만 외부에서는 무응답.</td></tr>
+          <tr><td>23</td><td><span class="tag silent">Silent-ish</span></td><td>board event collection failure/unsupported stimulus</td><td><code>keeper_heartbeat_loop.ml:220-247</code>, <code>keeper_heartbeat_loop.ml:789-1218</code></td><td>WARN/metric 후 empty event 또는 no signal. reactive turn이 빠질 수 있음.</td></tr>
+          <tr><td>24</td><td><span class="tag silent">Silent-ish</span></td><td>recurring task auto-disabled</td><td><code>keeper_heartbeat_loop.ml:1255-1302</code></td><td>recurring heartbeat broadcast가 없어져도 keeper 자체는 살아 있음.</td></tr>
+          <tr><td>25</td><td><span class="tag pause">Paused</span></td><td>context overflow + compaction retry exhausted/noop compaction</td><td><code>keeper_state_machine.ml:525-527</code>, <code>keeper_state_machine.ml:547-620</code>, <code>keeper_unified_turn.ml:1547-1588</code></td><td>Overflowed/Compacting/Paused는 <code>can_execute_turn=false</code>.</td></tr>
+          <tr><td>26</td><td><span class="tag skip">Non-Exec</span></td><td>handoff/compaction active phase</td><td><code>keeper_state_machine.ml:392-405</code>, <code>keeper_state_machine.ml:515-523</code></td><td>Running/Failing 외 phase는 turn 실행 불가.</td></tr>
+          <tr><td>27</td><td><span class="tag silent">Silent-ish</span></td><td>registry orphan update / missing phase</td><td><code>keeper_registry.ml:65-89</code>, <code>keeper_registry.ml:135-179</code>, <code>keeper_unified_turn.ml:213-255</code></td><td><span class="rfc-tag merged">RFC-0072</span> orphan fiber update가 drop되거나 turn이 registry missing error로 종료. Sub-FSM transitions typed로 catch-all 제거 진행.</td></tr>
+          <tr><td>28</td><td><span class="tag dead">Cleanup</span></td><td>stale paused meta prune / dead tombstone cleanup</td><td><code>keeper_supervisor.ml:867-975</code>, <code>keeper_supervisor.ml:1824-1864</code></td><td>오래된 paused/dead keeper가 디스크에서 사라져 “왜 없어졌나”로 보임.</td></tr>
+          <tr><td>29</td><td><span class="tag dead">Dead</span></td><td>liveness recovery budget exhausted or credential self-heal failed</td><td><code>keeper_supervisor.ml:2027-2183</code></td><td>dead keeper가 자동 부활하지 않음.</td></tr>
+          <tr><td>30</td><td><span class="tag silent">Mismatch</span></td><td>meta write/CAS/read failure</td><td><code>keeper_unified_turn.ml:1987-2018</code>, <code>keeper_supervisor.ml:680-687</code>, <code>keeper_supervisor.ml:1216-1315</code></td><td><span class="rfc-tag merged">RFC-0107</span><span class="rfc-tag merged">RFC-0108</span> 메모리 상태와 디스크 상태가 갈라져 restart 후 다르게 보일 수 있음. Jsonl_atomic + per-path mutex로 write race 차단(#15906/#15928/#15936).</td></tr>
+          <tr><td>31</td><td><span class="tag silent">Ops</span></td><td>base_path/runtime-root mismatch or stale serving process</td><td><code>docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md</code>, memory-derived prior incidents</td><td>TOML을 바꿔도 live server가 다른 root를 보고 있으면 keeper가 살아나지 않음.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>OAS Stop/Error Cause Inventory</h2>
+      <table>
+        <caption>OAS agent/provider/tool 계층의 24가지 종료/오류 경로와 MASC keeper에 보이는 형태. 우선 마킹된 RFC는 §<a href="#rfc-index">RFC Index</a> 참조.</caption>
+        <thead>
+          <tr>
+            <th scope="col">#</th>
+            <th scope="col">분류</th>
+            <th scope="col">원인</th>
+            <th scope="col">코드 근거</th>
+            <th scope="col">MASC에 보이는 형태</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>1</td><td><span class="tag stop">Exit</span></td><td>exit_condition fired</td><td><code>oas/lib/agent/agent.ml:64-85</code></td><td><code>ExitConditionMet</code> agent error</td></tr>
+          <tr><td>2</td><td><span class="tag stop">Exit</span></td><td>max_turns exceeded</td><td><code>oas/lib/agent/agent.ml:69-75</code></td><td><code>MaxTurnsExceeded</code>; provider terminal도 동일 매핑</td></tr>
+          <tr><td>3</td><td><span class="tag stop">Exit</span></td><td>idle detected</td><td><code>oas/lib/agent/agent.ml:75-81</code>, <code>oas/lib/pipeline/stage_execute.ml:52-133</code></td><td><code>IdleDetected</code> 또는 IdleSkipped complete</td></tr>
+          <tr><td>4</td><td><span class="tag stop">Budget</span></td><td>token/cost budget exceeded</td><td><code>oas/lib/agent/agent.ml:83-85</code></td><td>budget sdk_error</td></tr>
+          <tr><td>5</td><td><span class="tag error">Timeout</span></td><td>agent max_execution_time_s</td><td><code>oas/lib/agent/agent.ml:264-279</code></td><td>API Timeout; MASC에서는 OAS timeout류로 분류 가능</td></tr>
+          <tr><td>6</td><td><span class="tag error">Config</span></td><td>provider env/config missing or unregistered provider</td><td><code>oas/lib/provider.ml:724-860</code></td><td>Config error; persistent turn failure로 누적</td></tr>
+          <tr><td>7</td><td><span class="tag error">Config</span></td><td>CLI transport required but missing</td><td><code>oas/lib/pipeline/pipeline_stage_route.ml:13-21</code>, <code>oas/lib/llm_provider/complete.ml:1110-1114</code></td><td>non-retryable InvalidRequest</td></tr>
+          <tr><td>8</td><td><span class="tag error">Provider</span></td><td>HTTP auth/invalid/not found/context overflow</td><td><code>oas/lib/llm_provider/retry.ml:167-188</code></td><td>non-retryable provider error; MASC turn failure</td></tr>
+          <tr><td>9</td><td><span class="tag error">Retry</span></td><td>rate limit/server/network timeout after retries</td><td><code>oas/lib/llm_provider/complete.ml:1132-1190</code></td><td>turn failure; transient may not count toward MASC crash</td></tr>
+          <tr><td>10</td><td><span class="tag error">Cascade</span></td><td>all cascade steps failed or circuits open</td><td><code>oas/lib/llm_provider/complete_cascade.ml:542-658</code></td><td>cascade_exhausted; MASC can auto-pause after streak</td></tr>
+          <tr><td>11</td><td><span class="tag error">Quota</span></td><td>hard quota</td><td><code>oas/lib/llm_provider/retry.ml:114-165</code>, <code>oas/lib/llm_provider/complete_cascade.ml:649-650</code></td><td>hard failure, not useful to retry same key</td></tr>
+          <tr><td>12</td><td><span class="tag error">Timeout</span></td><td>body_timeout_s / stream idle timeout</td><td><code>oas/lib/llm_provider/complete.ml:1537-1658</code>, <code>oas/lib/llm_provider/http_client.ml:584-629</code></td><td>structured NetworkError Timeout</td></tr>
+          <tr><td>13</td><td><span class="tag error">CLI</span></td><td>CLI stdout idle timeout, nonzero exit, parse issue</td><td><code>oas/lib/llm_provider/cli_common_subprocess.ml:63-304</code></td><td>NetworkError; stdout recovery can convert nonzero exit to success</td></tr>
+          <tr><td>14</td><td><span class="tag error">Contract</span></td><td>tool_choice visibility impossible</td><td><code>oas/lib/pipeline/pipeline.ml:201-230</code></td><td><code>CompletionContractViolation</code></td></tr>
+          <tr><td>15</td><td><span class="tag error">Contract</span></td><td>missing required tool use retry exhausted</td><td><code>oas/lib/pipeline/pipeline.ml:442-505</code></td><td><code>CompletionContractViolation</code>, MASC required-tool pause path 가능</td></tr>
+          <tr><td>16</td><td><span class="tag error">Tool</span></td><td>tool validation/shell constraint failure</td><td><code>oas/lib/agent/agent_tools.ml:266-311</code></td><td>tool result error; retry policy decides continue/exhaust</td></tr>
+          <tr><td>17</td><td><span class="tag error">Tool</span></td><td>tool not found</td><td><code>oas/lib/agent/agent_tools.ml:391-416</code></td><td>deterministic non-retryable tool result error</td></tr>
+          <tr style="background:#fff4f3"><td>18</td><td><span class="tag silent">Safety</span></td><td><code>ApprovalRequired</code> but approval callback absent</td><td><code>oas/lib/agent/agent_tools.ml:562-584</code> — <code>None -&gt; Log.debug "...executing"</code></td><td><strong>도구가 실행됨</strong>. 멈춤 원인보다 더 위험한 silent approval bypass. RFC candidate: keeper/runtime profile에서 fail-closed 강제.</td></tr>
+          <tr><td>19</td><td><span class="tag error">Tool</span></td><td>tool exception</td><td><code>oas/lib/agent/agent_tools.ml:417-423</code>, <code>oas/lib/agent/agent_tools.ml:674-689</code></td><td><span class="rfc-tag merged">RFC-0106</span> non-retryable tool result error; cancellation은 re-raise (Cancel_safe 패턴 ack됨).</td></tr>
+          <tr><td>20</td><td><span class="tag error">Guardrail</span></td><td>input/output guardrail fail</td><td><code>oas/lib/pipeline/pipeline.ml:1065-1075</code>, <code>oas/lib/pipeline/pipeline.ml:1205-1211</code></td><td><code>GuardrailViolation</code></td></tr>
+          <tr><td>21</td><td><span class="tag error">Trace</span></td><td>raw_trace start/finish/record failure</td><td><code>oas/lib/agent/agent_trace.ml:131-211</code>, <code>oas/lib/pipeline/stage_execute.ml:144-149</code></td><td>Trace error can replace actual run result</td></tr>
+          <tr><td>22</td><td><span class="tag silent">Callback</span></td><td>periodic/on_run_complete callback exception swallowed</td><td><code>oas/lib/agent/agent.ml:228-261</code>, <code>oas/lib/agent/agent_trace.ml:119-128</code></td><td><span class="rfc-tag merged">RFC-0106 partial</span> stderr warn only; run continues/preserves result. Cancelled/OOM/Stack_overflow/Sys.Break는 re-raise. Event_bus 전파는 미보강.</td></tr>
+          <tr><td>23</td><td><span class="tag silent">Context</span></td><td>context/tool result offload fail-open</td><td><code>oas/lib/context_offload.ml:36-67</code>, <code>oas/lib/tool_result_store.ml:125-147</code></td><td>원문이 그대로 들어가 context overflow를 유발할 수 있음. (RFC candidate: typed boundary)</td></tr>
+          <tr><td>24</td><td><span class="tag silent">Async</span></td><td>Async_agent exception masking/cancel</td><td><code>oas/lib/async_agent.ml:41-82</code>, <code>oas/lib/async_agent.ml:92-103</code></td><td><span class="rfc-tag merged">RFC-0106</span> 세부 exception이 generic <code>agent execution failed</code>/<code>cancelled</code>로 축약. Cancel_safe로 Cancelled-vs-generic 구분 필요.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>Silent / Low-Visibility Ledger</h2>
+      <p style="font-size:13px;color:var(--muted);margin:4px 0 8px">
+        <span class="workaround-warn">WORKAROUND</span> 마킹된 권장은 CLAUDE.md software-development.md §“워크어라운드 거부 기준” 및
+        RFC-0088 §1 “텔레메트리-as-fix” 안티패턴. counter/이벤트 추가는 *가시화*일 뿐 *fix*가 아니므로
+        production-blocking 상황 외에는 root fix(RFC) 경로로 흡수해야 한다.
+      </p>
+      <table>
+        <caption>18개 silent/low-visibility 지점. “권장 hardening” 열의 <span class="workaround-warn">WORKAROUND</span> 표시는 RFC-0088 rejection 대상.</caption>
+        <thead>
+          <tr>
+            <th scope="col">#</th>
+            <th scope="col">지점</th>
+            <th scope="col">왜 silent인가</th>
+            <th scope="col">현재 신호</th>
+            <th scope="col">권장 hardening</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>S1</td><td>MASC <code>spawn_slots_available=false</code></td><td><code>supervise_keepalive</code>가 launch를 하지 않고 반환한다.</td><td>FD/disk/admission metric은 있으나 keeper별 launch-denied 이벤트가 약함.</td><td>keeper_name + reason을 registry lifecycle event로 남긴다.</td></tr>
+          <tr><td>S2</td><td>FD probe failures</td><td>nofile/sysctl probe 예외가 <code>None</code>으로 흡수된다.</td><td><code>keeper_fd_pressure.ml:199-215</code>, <code>284-300</code> — <strong><span class="rfc-tag merged">RFC-0106 P1 ack</span></strong>: 이미 <code>Cancel_safe.protect ~on_exn:(fun _ -&gt; None)</code> 패턴으로 acknowledged fallback. Cancelled re-raise 보장.</td><td><span class="workaround-warn">WORKAROUND</span> probe_unknown gauge는 텔레메트리-as-fix. <strong>Root</strong>: admission decision에서 probe-unknown을 <em>실패</em>로 분류 (Admit→Deny on unknown) — typed boundary 변경 필요.</td></tr>
+          <tr><td>S3</td><td>disk probe error admits</td><td>disk pressure probe error가 <code>Admit</code>로 흐른다.</td><td><code>keeper_disk_pressure.ml:235-267</code></td><td>probe_error 상태를 dashboard와 admission reason에 표시.</td></tr>
+          <tr><td>S4</td><td>visibility idle gate</td><td>consumer가 없으면 turn이 지연되어도 failure가 아니다.</td><td><code>keeper_heartbeat_loop.ml:1330-1512</code></td><td>no_visible_consumers 누적 시간을 keeper status에 직접 표시.</td></tr>
+          <tr><td>S5</td><td>turn slot wait timeout</td><td>실패가 아니라 skip으로 처리된다.</td><td><code>keeper_turn_slot.ml:955-1079</code></td><td><span class="workaround-warn">WORKAROUND</span> consecutive skip counter는 counter-as-fix. <strong>Root</strong>: timeout 시 typed <code>Slot_wait_exceeded</code> Result로 분류 → 호출자가 retry/escalate 선택. Counter는 *효과* 확인용으로만.</td></tr>
+          <tr><td>S6</td><td>board event count/read failure</td><td>WARN/metric 후 empty list로 계속된다.</td><td><code>keeper_heartbeat_loop.ml:220-247</code></td><td><span class="workaround-warn">WORKAROUND</span> per-keeper missed-event counter는 counter-as-fix. <strong>Root</strong>: board read 실패는 <code>Result.t</code>로 호출 측에 도달 → reactive turn이 “empty”와 “read failed”를 구분.</td></tr>
+          <tr><td>S7</td><td>unsupported stimulus</td><td>wake는 왔지만 no_signal로 흐른다.</td><td><code>keeper_heartbeat_loop.ml:789-1218</code></td><td>unsupported stimulus payload type을 event queue diagnostic에 노출.</td></tr>
+          <tr><td>S8</td><td>recurring task auto-disable</td><td>due task가 꺼지면 heartbeat broadcast가 사라진다.</td><td><code>keeper_heartbeat_loop.ml:1255-1302</code></td><td>auto-disabled recurring tasks를 liveness reason으로 표시.</td></tr>
+          <tr><td>S9</td><td>orphan registry update</td><td>absent entry update가 drop된다.</td><td><code>keeper_registry.ml:65-89</code>, <code>135-179</code></td><td>orphan drop threshold WARN 외에 per-keeper final event 생성.</td></tr>
+          <tr><td>S10</td><td>broadcast failure</td><td>SSE/dashboard broadcast exception은 log/metric 후 진행한다.</td><td><code>keeper_registry.ml:526-557</code></td><td><span class="workaround-warn">WORKAROUND partial</span> stale badge↔metric 연결은 텔레메트리. <strong>Root</strong>: SSE drop은 read-side reconnect protocol(version/cursor 기반)로 흡수, broadcast 측은 backpressure만.</td></tr>
+          <tr><td>S11</td><td>meta write/CAS mismatch</td><td>in-memory transition과 persisted meta가 달라질 수 있다.</td><td><code>keeper_unified_turn.ml:1987-2018</code>, <code>keeper_supervisor.ml:680-687</code> — <span class="rfc-tag merged">RFC-0107 SSOT Jsonl_atomic</span> 적용 후 write race 일부 차단.</td><td>divergence checker는 *active verification*이라 telemetry-as-fix 아님. 유지 권장. 추가로 CAS path 자체를 typed transition으로 좁히는 것이 root.</td></tr>
+          <tr><td>S12</td><td>paused meta TTL prune</td><td>keeper가 오래 pause되면 파일이 정리되어 disappear로 보인다.</td><td><code>keeper_supervisor.ml:1824-1864</code></td><td>prune 전 operator-visible tombstone event 남기기.</td></tr>
+          <tr><td>S13</td><td>OAS <code>ApprovalRequired</code> without callback</td><td>approval이 필요한 도구가 callback 없으면 실행된다.</td><td><code>oas/lib/agent/agent_tools.ml:562-584</code></td><td>keeper/runtime profile에서는 fail-closed 옵션을 강제.</td></tr>
+          <tr><td>S14</td><td>OAS periodic callback</td><td>callback 예외가 stderr로만 찍히고 run은 계속된다.</td><td><code>oas/lib/agent/agent.ml:228-261</code> — <span class="rfc-tag merged">RFC-0106 partial ack</span> Cancelled/OOM/Stack_overflow/Sys.Break는 이미 re-raise.</td><td><span class="workaround-warn">WORKAROUND</span> event_bus/trace 기록은 텔레메트리. <strong>Root</strong>: callback 시그니처를 <code>Result.t</code>로 변경해 caller가 명시 처리, 또는 callback failure를 supervisor가 분류 가능한 typed event로.</td></tr>
+          <tr><td>S15</td><td>OAS on_run_complete</td><td>finalization callback exception이 result를 바꾸지 않는다.</td><td><code>oas/lib/agent/agent_trace.ml:119-128</code></td><td><span class="workaround-warn">WORKAROUND</span> raw_trace side-channel은 텔레메트리. <strong>Root</strong>: finalization 단계에서 failure가 result envelope을 augment하도록 typed 변경.</td></tr>
+          <tr><td>S16</td><td>OAS context offload fail-open</td><td>write 실패 시 큰 원문이 그대로 context에 남는다.</td><td><code>oas/lib/context_offload.ml:36-67</code></td><td>fail-open 발생 시 context-risk marker를 다음 turn prep에 전달.</td></tr>
+          <tr><td>S17</td><td>CLI stdout recovery</td><td>nonzero exit을 stdout이 완전하면 success로 복구한다.</td><td><code>oas/lib/llm_provider/cli_common_subprocess.ml:229-270</code></td><td>success response telemetry에 recovered_exit_code를 필수 노출.</td></tr>
+          <tr><td>S18</td><td>capability drift warnings</td><td>provider capability mismatch가 warning/diag에 머문다.</td><td><code>oas/lib/llm_provider/complete.ml:132-203</code>, <code>282-290</code></td><td>required-tool keeper에서는 drift를 policy blocker로 승격.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>Top Failure Trees</h2>
+      <h3>1. Provider/Cascade Failure Tree</h3>
+      <pre class="flow">provider auth/quota/network/config/capability issue
+  -> OAS retry/cascade
+    -> retry exhausted or all providers failed
+      -> MASC run_keeper_cycle error
+        -> transient? no crash count
+        -> cascade_exhausted? failure_reason stamped early
+          -> streak threshold reached
+            -> auto-pause, not restart loop
+        -> persistent threshold reached without auto-pause
+          -> Keeper_fiber_crash -> restart/dead</pre>
+
+      <h3>2. Host Pressure Failure Tree</h3>
+      <pre class="flow">low nofile / FD exhaustion / disk pressure
+  -> Keeper_fd_pressure or Keeper_disk_pressure admission decision
+    -> spawn denied or turn denied
+      -> keeper remains registered/alive
+        -> no turn scheduled
+          -> watchdog may later classify stale, or operator sees silent idle
+  -> if actual FD exhaustion error occurs
+    -> record_error -> fd pressure circuit trips
+      -> subsequent admission blocked/capped</pre>
+
+      <h3>3. Stale/Watchdog Failure Tree</h3>
+      <pre class="flow">Running keeper with stale last turn/progress
+  -> stale watchdog classifies idle/in-turn/mid-turn/noop
+    -> sets failure_reason + stop/wakeup
+      -> supervisor observes fiber done or forces unresolved crash
+        -> if storm/batch/OAS timeout: auto-pause
+        -> else restart until budget exhausted
+          -> Dead</pre>
+
+      <h3>4. Approval/Tool Contract Failure Tree</h3>
+      <pre class="flow">required tool expected
+  -> OAS completion lacks visible/required tool use
+    -> retry feedback if policy configured
+      -> exhausted -> CompletionContractViolation
+        -> MASC required-tool failure reason
+          -> repeated failures -> auto-pause
+
+tool requires approval
+  -> ApprovalRequired
+    -> callback present: approve/reject/edit
+    -> callback missing: executes anyway (silent safety failure)</pre>
+    </section>
+
+    <section class="section">
+      <h2>Suggested Fix/Hardening Queue</h2>
+      <p style="font-size:13px;color:var(--muted);margin:4px 0 8px">
+        revision 2026-05-17 evening: 원안의 P0/P1/P2 중 일부가 RFC-0088 §1 “텔레메트리-as-fix” 안티패턴에 해당하여
+        <span class="workaround-warn">WORKAROUND</span> 로 재분류. counter/event 추가는 *가시화*일 뿐 *fix* 아니므로
+        production-blocking 상황에만 머지(라벨 필수), 그 외에는 root fix RFC 경로로 흡수.
+      </p>
+      <table>
+        <caption>Hardening queue. RFC-0088 rejection 바에 걸리는 항목은 root path를 같이 명시.</caption>
+        <thead>
+          <tr>
+            <th scope="col">우선순위</th>
+            <th scope="col">작업</th>
+            <th scope="col">이유 / 분류</th>
+            <th scope="col">대상 / Root path</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>P0</td><td>Keeper launch-denied/admission-denied <strong>typed event ADT</strong> 추가 (counter 아님)</td><td>FD/disk/max-active 때문에 시작/turn이 안 도는 케이스가 제일 “멈춘 듯 조용한” 형태다. <em>RFC candidate: launch-deny event ADT.</em></td><td><code>keeper_registry.ml</code>, <code>keeper_supervisor.ml</code>, <code>keeper_heartbeat_loop.ml</code> — discriminated union → operator-visible.</td></tr>
+          <tr><td>P0</td><td>OAS ApprovalRequired-without-callback <strong>fail-closed</strong>를 keeper profile에서 강제</td><td>멈춤보다 위험한 silent safety bypass. (OAS #18 / S13)</td><td><code>oas/lib/agent/agent_tools.ml:562-584</code>, MASC OAS agent builder — runtime profile policy.</td></tr>
+          <tr><td>P0</td><td>FD/disk admission에서 <strong>probe_unknown → Deny</strong> (Admit 폐기)</td><td>S2/S3 root. probe-unknown을 Admit 처리하는 한 gauge 추가는 RFC-0088 위반.</td><td><code>keeper_fd_pressure.ml</code>, <code>keeper_disk_pressure.ml</code> — admission decision boundary.</td></tr>
+          <tr><td>P1 <span class="workaround-warn">WORKAROUND</span></td><td><del class="rfc-rejected">no_visible_consumers / slot_wait_timeout / should_run=false를 keeper status에 누적 reason</del></td><td>RFC-0088 §1 텔레메트리-as-fix. Running인데 일을 안 하는 상태는 *원인 typed* 으로 분류해야 함. <strong>Root</strong>: should_run=false 등을 <code>Idle_reason</code> ADT로 캡슐화, status는 ADT를 그대로 표면화.</td><td>대체 RFC candidate: visibility-gate event ADT (RFC Index 참조).</td></tr>
+          <tr><td>P1 <span class="workaround-warn">WORKAROUND partial</span></td><td><del class="rfc-rejected">disk/FD probe_unknown gauge 및 one-shot WARN</del></td><td>gauge 부분이 텔레메트리-as-fix. <strong>Root</strong>: P0 §3 (probe_unknown → Deny)이 닫음.</td><td>P0 §3과 동일.</td></tr>
+          <tr><td>P1</td><td>disk-vs-registry divergence checker (active verification — telemetry-as-fix 아님)</td><td>meta write/CAS 실패 후 restart 시 paused/running truth가 갈라질 수 있음. *능동 검증*이라 RFC-0088 §1 해당 아님 — 권장 유지.</td><td><code>keeper_supervisor.ml</code>, heartbeat snapshot. <span class="rfc-tag merged">RFC-0107/0108</span> 와 시너지.</td></tr>
+          <tr><td>P2 <span class="workaround-warn">WORKAROUND</span></td><td><del class="rfc-rejected">OAS callback failure를 stderr 외 event_bus/raw_trace로 기록</del></td><td>RFC-0088 §1 텔레메트리-as-fix. <strong>Root</strong>: S14 — callback 시그니처 <code>Result.t</code> 변경 + caller-driven dispatch.</td><td>OAS RFC 후보, agent 계층 ABI 변경 필요.</td></tr>
+          <tr><td>P2 <span class="workaround-warn">WORKAROUND</span></td><td><del class="rfc-rejected">stdout_recovery success telemetry 필수화</del></td><td>RFC-0088 §1. recovered_exit_code를 *추가 카운터/필드*로 노출하는 것은 fix가 아니라 alarm. <strong>Root</strong>: nonzero exit recovery는 <code>Recovered_from_exit { code; reason }</code> typed result로 표현 → downstream이 success/recovered/error를 컴파일 타임에 구분.</td><td><code>oas/lib/llm_provider/cli_common_subprocess.ml</code>, transport response typed envelope.</td></tr>
+        </tbody>
+      </table>
+      <p class="warn" style="margin-top:14px">
+        Production-blocking 상황에서 <span class="workaround-warn">WORKAROUND</span> 항목을 일시적으로 머지하려면
+        PR body에 <code>WORKAROUND: production-blocking, deprecated path</code> 라벨 + 대체 RFC 번호 + removal target 필수
+        (CLAUDE.md software-development.md §“Override 조건”).
+      </p>
+    </section>
+
+    <section class="section" id="implementation-addendum">
+      <h2>Implementation Addendum (2026-05-17 21:37 KST)</h2>
+      <p>
+        본 분석서 기준 P0 일부를 코드로 착수했다. 변경은 root checkout이 아니라 worktree-first 원칙대로
+        <code>masc-mcp/.worktrees/fix-keeper-admission-observability</code>와
+        <code>oas/.worktrees/fix-approval-required-fail-closed</code>에 분리되어 있다.
+      </p>
+      <h3>MASC P0: launch/admission silent failure 제거</h3>
+      <ul>
+        <li><code>Keeper_registry.spawn_slots_decision</code>을 bool gate에서 typed denial reason으로 확장.</li>
+        <li><code>keeper_supervisor</code>와 <code>keeper_keepalive</code>의 no-op skip을 <code>admission_denied</code> lifecycle event + Prometheus counter + WARN log로 전환.</li>
+        <li><code>masc_keeper_spawn_slot_denied_total</code> metric 추가. labels: <code>keeper</code>, <code>surface</code>, <code>reason</code>.</li>
+        <li>dashboard lifecycle patcher가 <code>admission_denied</code>를 Offline 상태로 반영하도록 확장.</li>
+        <li>설계 SSOT: <code>docs/rfc/RFC-0109-keeper-admission-denial-boundary.md</code>.</li>
+      </ul>
+      <h3>MASC P0: FD/disk probe-unknown fail-closed</h3>
+      <ul>
+        <li><code>keeper_fd_pressure</code>: <code>process_nofile_soft_limit</code>, <code>process_open_fds</code>, <code>system_fd</code> probe가 unknown이면 Admit 대신 block.</li>
+        <li><code>keeper_disk_pressure</code>: <code>Probe_error</code>가 더 이상 Admit으로 빠지지 않고 <code>disk_probe_error</code> admission block으로 노출.</li>
+        <li>supervisor/keepalive launch gate가 <code>base_path</code>를 넘겨 disk admission까지 실행하도록 연결.</li>
+        <li>테스트 환경의 host probe 권한 차이는 <code>Keeper_registry.For_testing</code> hook으로만 우회하고, public runtime path는 strict policy 유지.</li>
+        <li>설계 SSOT: <code>docs/rfc/RFC-0109-keeper-admission-denial-boundary.md</code>.</li>
+      </ul>
+      <h3>OAS P0: ApprovalRequired no-callback fail-closed option</h3>
+      <ul>
+        <li><code>Hooks.missing_approval_callback_policy</code> 추가: <code>Execute_without_callback</code>는 compat default, <code>Reject_without_callback</code>는 fail-closed.</li>
+        <li><code>Agent_options</code>, <code>Builder</code>, <code>Agent_tools.execute_tools</code>, <code>Agent_trace</code> 경로에 정책 전달.</li>
+        <li>no callback + <code>ApprovalRequired</code> + reject policy이면 deterministic non-retryable tool error로 종료.</li>
+        <li>설계 SSOT: <code>docs/rfc/RFC-OAS-021-approval-required-missing-callback-policy.md</code>.</li>
+      </ul>
+      <h3>현재 검증</h3>
+      <pre class="flow"># masc-mcp worktree
+scripts/dune-local.sh build test/test_keeper_registry.exe test/test_types.exe
+./_build/default/test/test_keeper_registry.exe   # 106 tests passed
+./_build/default/test/test_types.exe             # 115 tests passed
+git diff --check
+
+# oas worktree
+scripts/dune-local.sh build test/test_approval.exe test/test_builder.exe test/test_builder_coverage.exe
+./_build/default/test/test_approval.exe          # 17 tests passed
+./_build/default/test/test_builder.exe           # 44 tests passed
+./_build/default/test/test_builder_coverage.exe  # 17 tests passed
+git diff --check</pre>
+    </section>
+
+    <section class="section" id="verification">
+      <h2>Verification &amp; Freshness Policy</h2>
+      <p>본 보고서의 모든 라인 인용은 <code>as-of commit 6c4a9598a1</code> 기준. 라인 drift 시 다음 단계로 재확인.</p>
+      <h3>라인 인용 재확인 (예시)</h3>
+      <pre class="flow"># 1. As-of commit 기준 정합 확인 (보고서 commit ↔ 현재 main 비교)
+cd ~/me/workspace/yousleepwhen/masc-mcp
+git log --oneline 6c4a9598a1..origin/main -- lib/keeper/ | head
+
+# 2. 함수 단위 재탐색 (라인 번호가 흔들리면 심볼로 찾기)
+rg -n 'let derive_phase'        lib/keeper/keeper_state_machine.ml
+rg -n 'let supervise_keepalive' lib/keeper/keeper_supervisor.ml
+rg -n 'let spawn_slots_available' lib/keeper/keeper_registry.ml
+rg -n 'let detect_nofile_soft_limit_now' lib/keeper_fd_pressure.ml
+
+# 3. 핫스팟 행 단위 검증 (예: derive_phase 우선순위 코드)
+sed -n '473,541p' lib/keeper/keeper_state_machine.ml
+
+# 4. RFC 매핑 검증
+ls docs/rfc/ | rg 'RFC-(0072|0086|0088|0097|0106|0107|0108)'
+gh pr list --search 'RFC-0106 in:title' --state merged</pre>
+      <h3>Freshness / Sunset</h3>
+      <ul>
+        <li><strong>14일 안</strong>: 인용된 라인 범위 중 <code>±20%</code>를 sample 재확인. 절반 이상 drift면 본 보고서를 <code>OUTDATED</code> 마킹.</li>
+        <li><strong>RFC 머지</strong>: 본 보고서 RFC Index의 candidate(<em>fail-closed ApprovalRequired</em>, <em>launch-deny event ADT</em>)가 RFC로 작성되면 해당 §에 링크 추가.</li>
+        <li><strong>새 incident</strong>: 해당 cause/silent ledger 행 update — 단순 “알려진 이슈”가 아니라 “발생 후 fix 진행 상태”로 격상.</li>
+        <li><strong>승계 보고서</strong>: 본 파일을 그대로 두고 <code>reports/keeper-stop-analysis-YYYYMMDD.html</code>로 신규 작성. 본 파일 헤더에 ⟶ next 링크.</li>
+      </ul>
+      <h3>본 개정의 한계 (TBV)</h3>
+      <ul>
+        <li>MASC #9 OAS budget strike의 <code>keeper_heartbeat_loop.ml:560-676</code> 인용은 :560 라인이 <code>run_keeper_cycle_with_slot</code> 정의에 가깝게 drift. strike 로직 자체는 존재하나 정확한 라인 재확정 필요.</li>
+        <li>RFC-0086 (FD storm sweep)의 “PR-2E blocked on cycle” 상태는 메모리 기반 — 최신 머지 큐와 한 번 더 cross-check 권장.</li>
+        <li>OAS 인용은 모두 <code>~/me/workspace/yousleepwhen/oas</code> 기준 main 사본. OAS upstream과의 동기화 시점 명시 없음.</li>
+      </ul>
+    </section>
+
+    <section class="section">
+      <h2>Evidence References</h2>
+      <ul class="refs">
+        <li><code>masc-mcp/lib/keeper/keeper_state_machine.ml:6-19</code> phase set</li>
+        <li><code>masc-mcp/lib/keeper/keeper_state_machine.ml:321-405</code> transitions and executable phases</li>
+        <li><code>masc-mcp/lib/keeper/keeper_state_machine.ml:473-541</code> phase derivation priority</li>
+        <li><code>masc-mcp/lib/keeper/keeper_registry_types.ml:64-96</code> failure_reason ADT</li>
+        <li><code>masc-mcp/lib/keeper/keeper_registry.ml:65-89</code>, <code>135-179</code> orphan update handling</li>
+        <li><code>masc-mcp/lib/keeper/keeper_registry.ml:1200-1210</code> spawn/admission slots</li>
+        <li><code>masc-mcp/lib/keeper/keeper_heartbeat_loop.ml:117-218</code> presence heartbeat failures</li>
+        <li><code>masc-mcp/lib/keeper/keeper_heartbeat_loop.ml:437-455</code> cascade backpressure</li>
+        <li><code>masc-mcp/lib/keeper/keeper_heartbeat_loop.ml:560-676</code> OAS budget strike/crash path</li>
+        <li><code>masc-mcp/lib/keeper/keeper_heartbeat_loop.ml:789-1218</code> unified keepalive turn scheduling</li>
+        <li><code>masc-mcp/lib/keeper/keeper_heartbeat_loop.ml:1304-1512</code> smart heartbeat gate</li>
+        <li><code>masc-mcp/lib/keeper/keeper_heartbeat_loop.ml:1734-1743</code> heartbeat threshold crash</li>
+        <li><code>masc-mcp/lib/keeper/keeper_supervisor.ml:244-400</code> normal exit vs crash handling</li>
+        <li><code>masc-mcp/lib/keeper/keeper_supervisor.ml:604-665</code> supervise_keepalive launch gate</li>
+        <li><code>masc-mcp/lib/keeper/keeper_supervisor.ml:1216-1380</code> auto-pause handlers</li>
+        <li><code>masc-mcp/lib/keeper/keeper_supervisor.ml:1382-1963</code> sweep/recover/restart/dead</li>
+        <li><code>masc-mcp/lib/keeper/keeper_supervisor.ml:2027-2380</code> liveness and alive-but-stuck recovery</li>
+        <li><code>masc-mcp/lib/keeper/keeper_stale_watchdog.ml:7-24</code>, <code>428-881</code> stale classes and kill path</li>
+        <li><code>masc-mcp/lib/keeper/keeper_turn_slot.ml:538-560</code>, <code>955-1079</code> semaphore wait timeout</li>
+        <li><code>masc-mcp/lib/keeper_fd_pressure.ml:199-215</code>, <code>421-460</code> FD probe/admission</li>
+        <li><code>masc-mcp/lib/keeper_disk_pressure.ml:235-267</code> disk admission</li>
+        <li><code>oas/lib/agent/agent.ml:64-85</code> loop guard</li>
+        <li><code>oas/lib/agent/agent.ml:228-279</code> callbacks and max execution timeout</li>
+        <li><code>oas/lib/agent/agent_trace.ml:119-211</code> trace/finalization behavior</li>
+        <li><code>oas/lib/pipeline/pipeline.ml:201-230</code>, <code>442-505</code>, <code>1118-1221</code> contract, route, output handling</li>
+        <li><code>oas/lib/agent/agent_tools.ml:562-584</code> approval-required fallback</li>
+        <li><code>oas/lib/llm_provider/complete.ml:1132-1190</code>, <code>1537-1658</code> retry and body/stream timeout</li>
+        <li><code>oas/lib/llm_provider/complete_cascade.ml:542-658</code> cascade fallback/circuit logic</li>
+        <li><code>oas/lib/llm_provider/cli_common_subprocess.ml:63-304</code> CLI subprocess timeout/recovery</li>
+        <li><code>oas/lib/context_offload.ml:36-67</code> fail-open context offload</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

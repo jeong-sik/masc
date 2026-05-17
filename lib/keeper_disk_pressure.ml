@@ -23,6 +23,7 @@ type snapshot_result =
 
 type admission_block =
   | Disk_pressure_cooldown of float
+  | Disk_probe_error of { detail : string }
   | Disk_free_space_low of
       { path : string
       ; available_bytes : int
@@ -237,7 +238,7 @@ let admission_decision_of_snapshot ?now snapshot =
   then Block (Disk_pressure_cooldown (remaining_sec ?now ()))
   else (
     match snapshot with
-    | Probe_error _ -> Admit
+    | Probe_error detail -> Block (Disk_probe_error { detail })
     | Snapshot s ->
       let min_free_bytes = min_free_bytes () in
       let min_free_percent = min_free_percent () in
@@ -288,6 +289,11 @@ let admission_block_to_json = function
     `Assoc
       [ "tag", `String "disk_pressure_cooldown"
       ; "remaining_sec", `Float remaining_sec
+      ]
+  | Disk_probe_error { detail } ->
+    `Assoc
+      [ "tag", `String "disk_probe_error"
+      ; "detail", `String detail
       ]
   | Disk_free_space_low
       { path; available_bytes; min_free_bytes; available_percent; min_free_percent } ->

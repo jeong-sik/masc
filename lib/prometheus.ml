@@ -1893,6 +1893,13 @@ let init () =
      (turn|autonomous|reactive)."
     Counter;
   add
+    Keeper_metrics.metric_keeper_spawn_slot_denied
+    "Total keeper launch/admission attempts denied before a fiber was started. Labels: \
+     keeper, surface (supervisor|keepalive), reason \
+     (fd_pressure_active|disk_pressure_active|fd_admission_blocked|disk_admission_blocked|\
+     max_active_keepers)."
+    Counter;
+  add
     Keeper_metrics.metric_keeper_registry_update_dropped
     "Total Keeper_registry.update_entry drops (caller raced a deregistration, no entry \
      found). Labeled by name. Sustained per-keeper rate => orphan turn fiber. Pairs with \

@@ -153,6 +153,7 @@ type t =
   | EventBusDrain
   | SupervisorCleanupFailures
   | SlotForceReleased
+  | SpawnSlotDenied
   | RegistryUpdateDropped
   | RegistryOrphanThresholdBreached
   | StaleWatchdogTickFailures
@@ -546,6 +547,7 @@ val metric_briefing_session_last_event_source : string
 val metric_keeper_event_bus_drain : string
 val metric_keeper_supervisor_cleanup_failures : string
 val metric_keeper_slot_force_released : string
+val metric_keeper_spawn_slot_denied : string
 val metric_keeper_registry_update_dropped : string
 val metric_keeper_registry_orphan_threshold_breached : string
 val metric_keeper_stale_watchdog_tick_failures : string

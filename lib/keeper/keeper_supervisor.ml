@@ -604,9 +604,20 @@ let log_persona_drift_if_missing ~base_path (meta : keeper_meta) =
 let supervise_keepalive ~proactive_warmup_sec (ctx : _ context) (meta : keeper_meta) =
   if Keeper_registry.is_registered ~base_path:ctx.config.base_path meta.name
   then ()
-  else if not (Keeper_registry.spawn_slots_available ())
-  then ()
-  else (
+  else
+    match Keeper_registry.spawn_slots_decision ~base_path:ctx.config.base_path () with
+    | Error reason ->
+      Keeper_registry.record_spawn_slot_denied ~keeper_name:meta.name ~surface:"supervisor" reason;
+      publish_lifecycle
+        ~event:
+          (Keeper_lifecycle_events.Custom_event
+             { verb = Keeper_lifecycle_events.Admission_denied
+             ; phase = Some Keeper_state_machine.Offline
+             })
+        meta.name
+        (Keeper_registry.spawn_slot_denial_reason_to_detail reason)
+        ()
+    | Ok () -> (
     log_persona_drift_if_missing ~base_path:ctx.config.base_path meta;
     (* Register in Keeper_registry — single source of truth. *)
     let reg =

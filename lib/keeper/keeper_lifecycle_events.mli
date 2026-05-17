@@ -10,6 +10,7 @@ type t =
   | Self_preservation
   | Paused_pruned
   | Auto_resumed
+  | Admission_denied
 
 val to_string : t -> string
 val all_custom_events : t list

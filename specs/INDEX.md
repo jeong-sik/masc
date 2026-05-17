@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-05-16T17:16:53Z (HEAD: 9d3a6dd2bd)
+Generated: 2026-05-17T13:32:54Z (HEAD: 621ef006aa)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -13,12 +13,12 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | Metric | Value |
 |--------|-------|
-| Total .tla files | 96 |
-| Manual specs | 96 |
+| Total .tla files | 99 |
+| Manual specs | 99 |
 | TTrace (auto-generated) | 0 |
-| Directories | 18 |
-| Total .cfg files | 200 |
-| Buggy .cfg (bug-model pair) | 102 |
+| Directories | 19 |
+| Total .cfg files | 206 |
+| Buggy .cfg (bug-model pair) | 105 |
 
 `kind` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (`*TTrace*` or trace marker in header). `cfg`/`buggy` columns count companion `.cfg` files. `invariants/properties` lists names per cfg label (`clean=...`, `buggy=...`). `source hash` is the tracked `.tla` blob fingerprint.
 
@@ -152,6 +152,14 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | KeeperTurnSlot.tla | KeeperTurnSlot | manual | 2 | 1 | clean={inv:Safety} buggy={inv:RetryPhaseRequiresReleased} | 6c970f9002bd |
 | KeeperWorkPipeline.tla | KeeperWorkPipeline | manual | 1 | 0 | clean={inv:TypeOK, inv:WorkspaceAlwaysBounded, inv:IdentityConsistent, inv:NoForcePush, inv:ReviewBeforeSubmit, prop:EventualCompletion, prop:NoOrphanWorkspace} | 1b85e3e4ba20 |
 | OperatorPauseBroadcast.tla | OperatorPauseBroadcast | manual | 2 | 1 | clean={inv:TypeOK, inv:EmittedBeforeResolved, prop:PauseLeadsToBroadcast, prop:OperatorPauseEverHandled} buggy={inv:TypeOK, prop:PauseLeadsToBroadcast} | 8c678dba2425 |
+
+### specs/keeper-switch-hierarchy (3 specs)
+
+| File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
+|------|--------|------|-----|-------|-------------------------|---------------|
+| KeeperFiberLocalSwitch.tla | KeeperFiberLocalSwitch | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant, inv:ServerBindingAlwaysNone} buggy={inv:SafetyInvariant} | b833a9c5ae3c |
+| KeeperSwitchHierarchy.tla | KeeperSwitchHierarchy | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:SafetyInvariant} | 0cf543355b1b |
+| Pool_no_double_close.tla | Pool_no_double_close | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:SafetyInvariant} | 4bd890fd0c19 |
 
 ### specs/keeper-turn-fsm (1 specs)
 

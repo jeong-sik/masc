@@ -903,7 +903,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
          downstream task-handoff schema then had to recover via
          sibling synthesis or substring scanning. There is no
          in-repo reader of that [notes] blob — pr_url consumers
-         (keeper_tool_call_log, keeper_hooks_oas, audit_keeper_*)
+         (keeper_tool_call_log, keeper_hooks_oas, audit_keeper_...)
          already read pr_url as a typed field elsewhere — so the
          legacy blob is dead-on-write.
 

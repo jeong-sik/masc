@@ -968,12 +968,30 @@ let test_health_json_surfaces_durable_paused_keepers () =
           write_keeper_meta_exn config
             (make_keeper_meta ~name:"durable-active" ~trace_id:"trace-active"
                ~paused:false ());
+          let ledger_stimulus : Keeper_event_queue.stimulus =
+            { post_id = "health-post-1"
+            ; urgency = Immediate
+            ; arrived_at = 1234.5
+            ; payload =
+                Yojson.Safe.to_string
+                  (`Assoc
+                     [ "source", `String "board_signal"
+                     ; "kind", `String "post_created"
+                     ; "post_id", `String "health-post-1"
+                     ])
+            }
+          in
+          Keeper_reaction_ledger.record_event_queue_stimulus
+            ~base_path:dir
+            ~keeper_name:"durable-active"
+            ledger_stimulus;
           let request = Httpun.Request.create `GET "/health" in
           let json = Server_routes_http_runtime.make_health_json request in
           let open Yojson.Safe.Util in
           let paused = json |> member "paused_keepers" in
           let fd_pressure = json |> member "keeper_fd_pressure" in
           let fleet_safety = json |> member "keeper_fleet_safety" in
+          let reaction_ledger = json |> member "keeper_reaction_ledger" in
           let durable_names =
             paused |> member "durable_names" |> to_list |> List.map to_string
           in
@@ -1001,7 +1019,15 @@ let test_health_json_surfaces_durable_paused_keepers () =
             (fleet_safety |> member "bootable_keeper_count" |> to_int);
           Alcotest.(check int) "health exposes minimum running fibers" 1
             (fleet_safety |> member "minimum_running_fibers" |> to_int);
-          ignore (fleet_safety |> member "status" |> to_string)))
+          ignore (fleet_safety |> member "status" |> to_string);
+          Alcotest.(check string) "health reaction ledger degraded"
+            "degraded"
+            (reaction_ledger |> member "status" |> to_string);
+          Alcotest.(check int) "health reaction ledger pending stimuli" 1
+            (reaction_ledger |> member "pending_stimulus_count" |> to_int);
+          Alcotest.(check bool) "health reaction ledger asks for operator action"
+            true
+            (reaction_ledger |> member "operator_action_required" |> to_bool)))
 
 let test_health_json_surfaces_log_ring_summary () =
   Log.set_level Log.Info;

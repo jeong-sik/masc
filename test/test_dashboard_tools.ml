@@ -160,6 +160,10 @@ let test_dashboard_tools_projection () =
         (match runtime_resolution |> member "keeper_fleet_safety" with
          | `Assoc _ -> true
          | _ -> false);
+      check bool "runtime keeper reaction ledger surfaced" true
+        (match runtime_resolution |> member "keeper_reaction_ledger" with
+         | `Assoc _ -> true
+         | _ -> false);
       check bool "build started_at surfaced" true
         (match runtime_resolution |> member "build" |> member "started_at" with
          | `String value -> String.length value > 0

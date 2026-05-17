@@ -75,3 +75,16 @@ val record_execution_receipt_reaction :
 val read_recent_for_keeper :
   base_path:string -> keeper_name:string -> limit:int -> Yojson.Safe.t list
 (** Read the newest rows for tests and dashboards. *)
+
+val summary_for_keeper :
+  base_path:string -> keeper_name:string -> limit:int -> Yojson.Safe.t
+(** Summarize the recent ledger rows for a keeper.  The summary is intentionally
+    derived from the durable JSONL rows so an operator can see a stimulus that
+    has not yet produced a turn/reaction/cursor acknowledgement. *)
+
+val fleet_summary_json :
+  base_path:string ->
+  keeper_names:string list ->
+  limit_per_keeper:int ->
+  Yojson.Safe.t
+(** Summarize recent reaction-ledger state for a bounded keeper fleet. *)

@@ -140,6 +140,45 @@ let test_execution_receipt_links_to_reaction_ledger () =
     (reaction |> member "receipt")
 ;;
 
+let test_summary_marks_unreacted_and_reacted_stimuli () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "summary-keeper" in
+  let stimulus = board_stimulus ~post_id:"post-summary" () in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    stimulus;
+  let pending_summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check_member_string "pending summary status" "degraded" "status" pending_summary;
+  check bool "pending summary asks for operator visibility" true
+    (pending_summary |> member "operator_action_required" |> to_bool);
+  check int "pending stimulus count" 1
+    (pending_summary |> member "pending_stimulus_count" |> to_int);
+  check string "pending stimulus id" "board:post-summary"
+    (pending_summary
+     |> member "pending_stimulus_ids"
+     |> to_list
+     |> List.hd
+     |> to_string);
+  Keeper_reaction_ledger.record_event_queue_reaction
+    ~base_path
+    ~keeper_name
+    ~reaction_kind:Keeper_reaction_ledger.Turn_started
+    stimulus;
+  let reacted_summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check_member_string "reacted summary status" "ok" "status" reacted_summary;
+  check bool "reacted summary clears operator action" false
+    (reacted_summary |> member "operator_action_required" |> to_bool);
+  check int "reacted pending stimulus count" 0
+    (reacted_summary |> member "pending_stimulus_count" |> to_int);
+  check int "turn started count" 1
+    (reacted_summary |> member "turn_started_count" |> to_int)
+;;
+
 let () =
   run
     "keeper_reaction_ledger"
@@ -156,6 +195,10 @@ let () =
             "execution receipt links to reaction ledger"
             `Quick
             test_execution_receipt_links_to_reaction_ledger
+        ; test_case
+            "summary marks unreacted and reacted stimuli"
+            `Quick
+            test_summary_marks_unreacted_and_reacted_stimuli
         ] )
     ]
 ;;

@@ -265,7 +265,7 @@ Apply the TLA+ Bug Model pattern from `software-development.md`:
 
 ## 8. References
 
-- `~/me/.masc/config/cascade.json` (live SSOT, lines 30, 67--73, 92, 127, 169)
+- `<base-path>/.masc/config/cascade.json` (live SSOT, lines 30, 67--73, 92, 127, 169)
 - `lib/provider_tool_support.ml` (lines 160--249, runtime capability gate)
 - `docs/tla-audit/state-fsm-gap-2026-04-13.md` (P1/P3/P4 proposals)
 - RFC-0041: Hierarchical cascade config + TOML groups (PR #14358, merged 2026-05-08)

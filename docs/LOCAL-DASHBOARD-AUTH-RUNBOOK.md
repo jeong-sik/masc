@@ -64,7 +64,7 @@ For dashboard-side keeper lifecycle control, the target shape is:
 Use the auth doctor before editing tokens or role files:
 
 ```bash
-BASE_PATH="${MASC_BASE_PATH:-$HOME}"
+BASE_PATH="${MASC_BASE_PATH:-${ME_ROOT:-/path/to/base}}"
 ./_build/default/bin/main_eio.exe doctor auth --base-path "$BASE_PATH"
 ```
 
@@ -104,7 +104,7 @@ when bootstrapping or rotating the bearer; export the printed value as
 `MASC_MCP_TOKEN` in the shell that starts Codex:
 
 ```bash
-BASE_PATH="${MASC_BASE_PATH:-$HOME}"
+BASE_PATH="${MASC_BASE_PATH:-${ME_ROOT:-/path/to/base}}"
 ./_build/default/bin/main_eio.exe login \
   --base-path "$BASE_PATH" \
   --agent codex-mcp-client \
@@ -160,7 +160,7 @@ the raw value on disk and causes auth drift when the token is rotated.
 To initialise or repair the Codex config from the repo:
 
 ```bash
-BASE_PATH="${MASC_BASE_PATH:-$HOME}"
+BASE_PATH="${MASC_BASE_PATH:-${ME_ROOT:-/path/to/base}}"
 scripts/init-codex-mcp-config.sh --base-path "$BASE_PATH"
 ```
 
@@ -181,7 +181,7 @@ Claude and Gemini must not reuse the Codex bearer. Mint each local MCP client
 as its own worker identity, then sync the shared client config:
 
 ```bash
-BASE_PATH="${MASC_BASE_PATH:-$HOME/me}"
+BASE_PATH="${MASC_BASE_PATH:-${ME_ROOT:-/path/to/base}}"
 
 ./_build/default/bin/main_eio.exe login \
   --base-path "$BASE_PATH" \
@@ -217,7 +217,7 @@ files rather than embedding literal tokens in the config.
 When running from a worktree but using a shared local coordination root, start the server with an explicit base path:
 
 ```bash
-BASE_PATH="${MASC_BASE_PATH:-$HOME}"
+BASE_PATH="${MASC_BASE_PATH:-${ME_ROOT:-/path/to/base}}"
 MASC_BASE_PATH="$BASE_PATH" \
 ./_build/default/bin/main_eio.exe \
   --host 127.0.0.1 \
@@ -234,7 +234,7 @@ If you already have an admin bearer, skip to step 7.
 The shortest local CLI path is:
 
 ```bash
-BASE_PATH="${MASC_BASE_PATH:-$HOME}"
+BASE_PATH="${MASC_BASE_PATH:-${ME_ROOT:-/path/to/base}}"
 ./_build/default/bin/main_eio.exe login \
   --base-path "$BASE_PATH" \
   --agent codex-local-admin \
@@ -258,7 +258,7 @@ If you do not have that path, the reliable local fallback is to seed the auth st
 1. Back up the auth config:
 
 ```bash
-BASE_PATH="${MASC_BASE_PATH:-$HOME}"
+BASE_PATH="${MASC_BASE_PATH:-${ME_ROOT:-/path/to/base}}"
 cp "$BASE_PATH/.masc/auth/config.json" "$BASE_PATH/.masc/auth/config.json.bak"
 ```
 
@@ -399,7 +399,7 @@ If you need to go back to anonymous loopback behavior:
 Example:
 
 ```bash
-BASE_PATH="${MASC_BASE_PATH:-$HOME}"
+BASE_PATH="${MASC_BASE_PATH:-${ME_ROOT:-/path/to/base}}"
 mv "$BASE_PATH/.masc/auth/config.json.bak" "$BASE_PATH/.masc/auth/config.json"
 rm -f "$BASE_PATH/.masc/auth/agents/codex-tool-matrix.json"
 ```

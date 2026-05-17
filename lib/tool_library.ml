@@ -86,12 +86,17 @@ type context = {
 }
 
 (* Paths *)
+let workspace_root () =
+  match Sys.getenv_opt "ME_ROOT" |> Option.map String.trim with
+  | Some root when root <> "" -> root
+  | _ ->
+    let fallback = (Host_config.host ()).agent_runtime_root in
+    (match Sys.getenv_opt "HOME" |> Option.map String.trim with
+     | Some home when home <> "" -> Filename.concat home "me"
+     | _ -> fallback)
+
 let library_root () =
-  let home =
-    Sys.getenv_opt "HOME"
-    |> Option.value ~default:(Host_config.host ()).agent_runtime_root
-  in
-  Filename.concat home "me/docs/library"
+  Filename.concat (workspace_root ()) "docs/library"
 
 let candidates_dir () =
   Filename.concat (library_root ()) "candidates"

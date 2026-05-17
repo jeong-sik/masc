@@ -3,7 +3,21 @@
 
 set -euo pipefail
 
-BASE_PATH="${MASC_BASE_PATH:-$HOME}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+default_base_path() {
+  if [ -n "${ME_ROOT:-}" ]; then
+    printf '%s\n' "$ME_ROOT"
+  elif [ -n "${HOME:-}" ] && [ -d "$HOME/me" ]; then
+    printf '%s\n' "$HOME/me"
+  else
+    printf '%s\n' "$REPO_DIR"
+  fi
+}
+
+DEFAULT_BASE_PATH="$(default_base_path)"
+BASE_PATH="${MASC_BASE_PATH:-$DEFAULT_BASE_PATH}"
 HOST="127.0.0.1"
 PORT="8935"
 DRY_RUN=0
@@ -22,7 +36,7 @@ the MASC auth doctor (doctor auth) expects:
   - http_headers with Accept and X-MASC-Agent  (no Authorization header)
 
 After writing the stanza, mint a codex-mcp-client bearer token (if missing):
-  BASE_PATH="${MASC_BASE_PATH:-$HOME}"
+  BASE_PATH="${MASC_BASE_PATH:-<script default base path>}"
   eval "$(masc-mcp login \
     --base-path "$BASE_PATH" --agent codex-mcp-client --role worker --shell)"
   export MASC_MCP_TOKEN  # export to Codex's shell environment
@@ -34,7 +48,7 @@ Security notes:
   - Run `masc-mcp doctor auth` to verify the config is correct.
 
 Env:
-  MASC_BASE_PATH         Base path for the MASC data root (default: $HOME)
+  MASC_BASE_PATH         Base path for the MASC data root (default: ME_ROOT, $HOME/me, then repo root)
   MASC_CODEX_CONFIG_PATH Override the Codex config path (default: ~/.codex/config.toml)
 EOF
   exit 0

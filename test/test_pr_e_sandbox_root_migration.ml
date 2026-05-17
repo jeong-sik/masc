@@ -12,7 +12,7 @@ open Alcotest
     - the literal regressing into [worker_dev_tools.ml]
       ([pinned_home_me_literal_count = 0])
     - the [sandbox_workspace_root] field drifting away from the
-      [HOME/me] / [/tmp/masc-fleet] contract that PR-12 documented
+      [ME_ROOT] / [HOME/me] / [/tmp/masc-fleet] contract
       (also covered by [test_host_config_resolution] but pinned
       here so the migration intent is explicit). *)
 
@@ -55,9 +55,10 @@ let test_no_home_me_literal_in_worker_dev_tools () =
 let test_sandbox_workspace_root_contract () =
   let d = Host_config.host () in
   let acceptable_roots =
-    match Sys.getenv_opt "HOME" with
-    | Some home -> [ Filename.concat home "me" ]
-    | None -> [ "/tmp/masc-fleet" ]
+    match Sys.getenv_opt "ME_ROOT", Sys.getenv_opt "HOME" with
+    | Some root, _ when String.trim root <> "" -> [ root ]
+    | _, Some home when String.trim home <> "" -> [ Filename.concat home "me" ]
+    | _ -> [ "/tmp/masc-fleet" ]
   in
   let actual = d.sandbox_workspace_root in
   let matched = List.exists (String.equal actual) acceptable_roots in

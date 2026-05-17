@@ -14,7 +14,16 @@ set -euo pipefail
 DURATION_HOURS="${1:-24}"
 DURATION_SECS=$((DURATION_HOURS * 3600))
 TEST_AGENTS=("dreamer" "connector" "historian")
-BASE_PATH="${MASC_BASE_PATH:-$HOME}"
+default_base_path() {
+    if [ -n "${ME_ROOT:-}" ]; then
+        printf '%s\n' "$ME_ROOT"
+    elif [ -n "${HOME:-}" ] && [ -d "$HOME/me" ]; then
+        printf '%s\n' "$HOME/me"
+    else
+        pwd
+    fi
+}
+BASE_PATH="${MASC_BASE_PATH:-$(default_base_path)}"
 LOG_DIR="${BASE_PATH}/.masc/logs/emergent_identity_test"
 METRICS_FILE="$LOG_DIR/metrics_$(date +%Y%m%d_%H%M%S).json"
 

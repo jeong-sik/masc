@@ -306,7 +306,7 @@ Phase 1 was originally framed as the load-bearing change. The 2026-05-15 measure
 ## §8 Open questions
 
 1. Probe payload — `keeper_time_now` is no-op; should it be a *real* cascade attempt to a known-cheap model instead, so probe outcome reflects cascade routing not just network? *Tentative*: cheap real attempt, with separate `probe_max_tokens = 1` budget guard.
-2. Probe interval — 5 min default. Per-keeper override via toml? *Tentative*: yes, `keeper.diagnostic_probe_interval_sec` in `~/.masc/config/keepers/<name>.toml`.
+2. Probe interval — 5 min default. Per-keeper override via toml? *Tentative*: yes, `keeper.diagnostic_probe_interval_sec` in `<base-path>/.masc/config/keepers/<name>.toml`.
 3. Should `last_blocker` carry a `cleared_at` history rather than a single `None`? — *Tentative*: yes, for audit; new field `last_blocker_history : (timestamp × clear_reason) list` capped at 16 entries.
 
 ## §9 Stop conditions

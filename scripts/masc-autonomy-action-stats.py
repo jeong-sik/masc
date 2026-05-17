@@ -10,6 +10,21 @@ import os
 from typing import Dict, Iterable, List, Tuple
 
 
+def default_base_path() -> str:
+    masc_base = os.environ.get("MASC_BASE_PATH", "").strip()
+    if masc_base:
+        return masc_base
+    me_root = os.environ.get("ME_ROOT", "").strip()
+    if me_root:
+        return me_root
+    home = os.environ.get("HOME", "").strip()
+    if home:
+        home_me = os.path.join(home, "me")
+        if os.path.isdir(home_me):
+            return home_me
+    return os.getcwd()
+
+
 def parse_date(s: str) -> dt.datetime:
     return dt.datetime.strptime(s, "%Y-%m-%d")
 
@@ -115,7 +130,7 @@ def main() -> int:
     parser.add_argument("--format", type=str, default="text", choices=["text", "json"], help="Output format")
     args = parser.parse_args()
 
-    base_path = (os.environ.get("MASC_BASE_PATH") or os.path.expanduser("~")).strip()
+    base_path = default_base_path()
     traces_dir = os.path.join(base_path, ".masc", "traces")
 
     start_ts, end_ts = ts_range_from_args(args.days, args.since, args.until)

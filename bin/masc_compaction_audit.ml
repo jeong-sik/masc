@@ -52,16 +52,8 @@ let base_path () =
   (* sb/main_eio uses Masc_mcp.Env_config.base_path.
      Replicating the env lookup avoids pulling heavy deps into this CLI. *)
   match Sys.getenv_opt "MASC_BASE_PATH" with
-  | Some p when p <> "" -> p
-  | _ ->
-    let home =
-      match Sys.getenv_opt "HOME" with
-      | Some h -> h
-      | None -> "."
-    in
-    (* #9571: use Common.masc_dirname SSOT (from masc_core) instead of
-       inlining ".masc". *)
-    Filename.concat home (Filename.concat "me" Common.masc_dirname)
+  | Some p when String.trim p <> "" -> p
+  | _ -> Sys.getcwd ()
 
 let retention_from_env default =
   match Sys.getenv_opt "MASC_COMPACTION_AUDIT_RETENTION_DAYS" with

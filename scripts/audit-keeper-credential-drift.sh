@@ -37,7 +37,7 @@
 #   scripts/audit-keeper-credential-drift.sh [--base-path PATH] [--json]
 #
 # Options:
-#   --base-path PATH   Server base_path (default: $HOME/me)
+#   --base-path PATH   Server base_path (default: MASC_BASE_PATH, ME_ROOT, $HOME/me if present, then cwd)
 #   --json             Emit machine-readable JSON only (no human report)
 #   -h, --help         Show this help
 set -o pipefail
@@ -48,7 +48,19 @@ set -o pipefail
 # script handles explicitly. We rely on pipefail and explicit exit
 # code accounting instead.
 
-BASE_PATH="${HOME}/me"
+default_base_path() {
+  if [ -n "${MASC_BASE_PATH:-}" ]; then
+    printf '%s\n' "$MASC_BASE_PATH"
+  elif [ -n "${ME_ROOT:-}" ]; then
+    printf '%s\n' "$ME_ROOT"
+  elif [ -n "${HOME:-}" ] && [ -d "$HOME/me" ]; then
+    printf '%s\n' "$HOME/me"
+  else
+    pwd
+  fi
+}
+
+BASE_PATH="$(default_base_path)"
 EMIT_JSON=0
 
 usage() {

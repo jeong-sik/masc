@@ -4,8 +4,9 @@
     for 5 tools: masc_library_list, masc_library_read, masc_library_add,
     masc_library_promote, masc_library_search
 
-    Note: Tool_library uses HOME env var for library_root(), so tests
-    override HOME to a temp directory with the expected structure.
+    Note: Tool_library uses ME_ROOT first, then HOME/me, for library_root().
+    Tests scrub ME_ROOT and override HOME to a temp directory with the
+    expected structure.
 *)
 
 module Tool_library = Masc_mcp.Tool_library
@@ -49,17 +50,22 @@ let setup_library_dirs home =
   (lib_dir, cand_dir)
 
 let original_home = Sys.getenv_opt "HOME"
+let original_me_root = Sys.getenv_opt "ME_ROOT"
 
 (** Run a test function with a temporary HOME containing library dirs *)
 let with_temp_home f =
   let home = temp_dir () in
+  Unix.putenv "ME_ROOT" "";
   Unix.putenv "HOME" home;
   let _ = setup_library_dirs home in
   let ctx : Tool_library.context = { agent_name = "test-agent" } in
   Fun.protect ~finally:(fun () ->
+    (match original_me_root with
+     | Some root -> Unix.putenv "ME_ROOT" root
+     | None -> Unix.putenv "ME_ROOT" "");
     (match original_home with
      | Some h -> Unix.putenv "HOME" h
-     | None -> ());
+     | None -> Unix.putenv "HOME" "");
     cleanup_dir home
   ) (fun () -> f ctx)
 

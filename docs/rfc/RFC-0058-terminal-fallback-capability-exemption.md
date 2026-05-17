@@ -22,7 +22,7 @@ However, the current enforcement has a gap: **removing the `_required_capability
 | _ -> None  (* <-- Cp_unset / None on EITHER side: skip check entirely *)
 ```
 
-This is the current workaround in `~/.masc/config/cascade.json`: `local_recovery`, `retired_local_profile`, `ollama_only`, `ollama_bench` have no `_required_capability_profile` field, so the monotonicity gate is bypassed implicitly.
+This is the current workaround in `<base-path>/.masc/config/cascade.json`: `local_recovery`, `retired_local_profile`, `ollama_only`, `ollama_bench` have no `_required_capability_profile` field, so the monotonicity gate is bypassed implicitly.
 
 ### 1.1 Why This Matters
 
@@ -204,5 +204,5 @@ retired_tool_profile (tool_strict)
 - `lib/cascade/cascade_tier.ml:15` (`is_subset_profile`)
 - `lib/cascade/cascade_capability_profile.ml` (profile definitions)
 - `lib/provider_tool_support.ml:148-164` (`supports_required_tool_use`)
-- `~/.masc/config/cascade.json` (live SSOT)
+- `<base-path>/.masc/config/cascade.json` (live SSOT)
 - RFC-0055: GADT phantom-typed cascade tier routing (north star)

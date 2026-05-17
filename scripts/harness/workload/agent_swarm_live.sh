@@ -6,7 +6,20 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
 RUN_ID="${RUN_ID:-keeper-fleet-readiness-$(date +%Y%m%d_%H%M%S)}"
 RUN_DIR="${RUN_DIR:-$REPO_ROOT/logs/keeper_fleet_readiness/$RUN_ID}"
-BASE_PATH="${BASE_PATH:-${MASC_BASE_PATH:-$HOME/me}}"
+default_base_path() {
+  if [ -n "${BASE_PATH:-}" ]; then
+    printf '%s\n' "$BASE_PATH"
+  elif [ -n "${MASC_BASE_PATH:-}" ]; then
+    printf '%s\n' "$MASC_BASE_PATH"
+  elif [ -n "${ME_ROOT:-}" ]; then
+    printf '%s\n' "$ME_ROOT"
+  elif [ -n "${HOME:-}" ] && [ -d "$HOME/me" ]; then
+    printf '%s\n' "$HOME/me"
+  else
+    printf '%s\n' "$REPO_ROOT"
+  fi
+}
+BASE_PATH="$(default_base_path)"
 EXPECTED_KEEPERS="${EXPECTED_KEEPERS:-18}"
 KEEPER_NAMES="${KEEPER_NAMES:-}"
 MAX_TRACES_PER_KEEPER="${MAX_TRACES_PER_KEEPER:-20}"

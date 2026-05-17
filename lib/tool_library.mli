@@ -4,7 +4,8 @@
     Implements 5 tools ([masc_library_list], [masc_library_read],
     [masc_library_add], [masc_library_promote],
     [masc_library_search]) backed by Markdown documents under
-    {!library_root} ([\$HOME/me/docs/library]) with YAML
+    {!library_root} ([ME_ROOT/docs/library], or [\$HOME/me/docs/library]
+    when [ME_ROOT] is unset) with YAML
     frontmatter ([title], [source], [confidence], [author],
     [created], [tags], [verified_by]).
 
@@ -82,9 +83,10 @@ type context = {
 (** {1 Path resolution} *)
 
 val library_root : unit -> string
-(** [library_root ()] is [\$HOME/me/docs/library] with [\$HOME]
-    falling back to ["/tmp"] when unset.  Read every call —
-    env mutation between calls takes effect. *)
+(** [library_root ()] is [ME_ROOT/docs/library] when [ME_ROOT] is set,
+    otherwise [\$HOME/me/docs/library].  If both are unset, it falls back to
+    the host-config agent runtime root.  Read every call — env mutation
+    between calls takes effect. *)
 
 val candidates_dir : unit -> string
 (** [candidates_dir ()] is [{library_root}/candidates].

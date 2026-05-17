@@ -18,7 +18,7 @@
 #   TTL_DAYS=14 scripts/cleanup-autoresearch.sh --apply  # custom TTL
 #
 # Environment:
-#   MASC_BASE_PATH  base path (default: $HOME/me)
+#   MASC_BASE_PATH  base path (default: ME_ROOT, $HOME/me, then cwd)
 #   TTL_DAYS        days a dir must be untouched to qualify (default: 7)
 #
 # Refuses to quarantine a dir that any process holds an open FD to.
@@ -36,7 +36,19 @@ for arg in "$@"; do
   esac
 done
 
-BASE="${MASC_BASE_PATH:-$HOME/me}"
+default_base_path() {
+  if [ -n "${MASC_BASE_PATH:-}" ]; then
+    printf '%s\n' "$MASC_BASE_PATH"
+  elif [ -n "${ME_ROOT:-}" ]; then
+    printf '%s\n' "$ME_ROOT"
+  elif [ -n "${HOME:-}" ] && [ -d "$HOME/me" ]; then
+    printf '%s\n' "$HOME/me"
+  else
+    pwd
+  fi
+}
+
+BASE="$(default_base_path)"
 TTL_DAYS="${TTL_DAYS:-7}"
 AR_DIR="$BASE/.masc/autoresearch"
 QUARANTINE_DIR="$BASE/.tmp/leak-quarantine-$(date +%Y-%m-%d)"

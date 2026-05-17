@@ -25,7 +25,21 @@ SUMMARY_FILE="$RUN_DIR/summary.json"
 AUDIT_FILE="$RUN_DIR/audit-docker-pr-lifecycle.json"
 AUDIT_STATUS_RESULT=0
 
-BASE_PATH="${BASE_PATH:-${MASC_BASE_PATH:-$HOME/me}}"
+default_base_path() {
+  if [ -n "${BASE_PATH:-}" ]; then
+    printf '%s\n' "$BASE_PATH"
+  elif [ -n "${MASC_BASE_PATH:-}" ]; then
+    printf '%s\n' "$MASC_BASE_PATH"
+  elif [ -n "${ME_ROOT:-}" ]; then
+    printf '%s\n' "$ME_ROOT"
+  elif [ -n "${HOME:-}" ] && [ -d "$HOME/me" ]; then
+    printf '%s\n' "$HOME/me"
+  else
+    printf '%s\n' "$REPO_ROOT"
+  fi
+}
+
+BASE_PATH="$(default_base_path)"
 EXPECTED_KEEPERS="${EXPECTED_KEEPERS:-14}"
 KEEPER_NAMES="${KEEPER_NAMES:-}"
 MAX_KEEPERS="${MAX_KEEPERS:-0}"
@@ -78,7 +92,8 @@ Options:
   --max-keepers N          Limit targets after discovery/CSV expansion.
   --expected-keepers N     Expected configured keeper count for audit.
   --repo OWNER/REPO        Target repository slug in the keeper prompt.
-  --base-path PATH         MASC base path for audit (default: $HOME/me).
+  --base-path PATH         MASC base path for audit (default: MASC_BASE_PATH,
+                           ME_ROOT, $HOME/me if present, then repo root).
   --mcp-url URL            MCP endpoint (default: http://127.0.0.1:8935/mcp).
   --expected-server-commit COMMIT
                            Fail unless /health build.commit matches this commit.

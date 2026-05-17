@@ -13,7 +13,19 @@
 
 set -euo pipefail
 
-BASE_PATH="${MASC_BASE_PATH:-${ME_ROOT:-$HOME/me}}"
+default_base_path() {
+  if [ -n "${MASC_BASE_PATH:-}" ]; then
+    printf '%s\n' "$MASC_BASE_PATH"
+  elif [ -n "${ME_ROOT:-}" ]; then
+    printf '%s\n' "$ME_ROOT"
+  elif [ -n "${HOME:-}" ] && [ -d "$HOME/me" ]; then
+    printf '%s\n' "$HOME/me"
+  else
+    pwd
+  fi
+}
+
+BASE_PATH="$(default_base_path)"
 KEEPER_FILTER=""
 WINDOW_MIN=60
 TOP_GAPS=5

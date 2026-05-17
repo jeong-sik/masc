@@ -610,7 +610,7 @@ let guard_self_repo_base_path base_path =
        (executable: %s)\n\
        Runtime state would pollute the repo. Use a workspace root instead:\n\
        \  --base-path $MASC_BASE_PATH    (recommended)\n\
-       \  --base-path $HOME              (home-scoped runtime)\n\
+       \  --base-path /path/to/workspace (explicit workspace root)\n\
        Or start via: sb mcp masc start\n"
       base_path abs_exe;
     exit 1

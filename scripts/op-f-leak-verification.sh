@@ -10,8 +10,8 @@
 # JSONL log produced by the masc-mcp server.  The log path is resolved
 # via scripts/lib/masc-log-path.sh, which detects the active file from
 # the running server (lsof on the listening socket) and falls back to
-# $MASC_BASE_PATH or $HOME/me when no server is running.  No state is
-# kept between runs — re-execute after any merge or restart to refresh
+# MASC_BASE_PATH, ME_ROOT, $HOME/me if present, or cwd when no server is
+# running. No state is kept between runs — re-execute after any merge or restart to refresh
 # the snapshot.
 #
 # Origin: 2026-04-25 keeper docker git_clone E2E investigation
@@ -28,8 +28,9 @@ set -u
 # Resolve the active log path through the SSOT helper.  When the server
 # is running, this detects the actual file via lsof on the listening
 # socket — authoritative regardless of how the server was started.
-# Otherwise falls back to MASC_BASE_PATH or $HOME/me.  Override with $1
-# or $MASC_LOG when the log lives elsewhere (e.g. /tmp/masc-postmerge.log).
+# Otherwise falls back to MASC_BASE_PATH, ME_ROOT, $HOME/me if present,
+# or cwd. Override with $1 or $MASC_LOG when the log lives elsewhere
+# (e.g. /tmp/masc-postmerge.log).
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck disable=SC1091
 . "${SCRIPT_DIR}/lib/masc-log-path.sh"

@@ -105,7 +105,7 @@ let parse_args () =
     ("--port", Arg.Set_int port, Printf.sprintf "MASC server port (default: %d)" (Env_config_core.masc_http_port_int ()));
     ("--room", Arg.Set_string room, "Coord name (default: from base path)");
     ("--refresh", Arg.Set_float refresh, "Refresh interval in seconds (default: 2)");
-    ("--base", Arg.Set_string base_path, "Base path (default: MASC_BASE_PATH or HOME)");
+    ("--base", Arg.Set_string base_path, "Base path (default: MASC_BASE_PATH or cwd)");
   ] in
 
   Arg.parse specs (fun _ -> ()) "masc-tui [OPTIONS]";
@@ -116,10 +116,7 @@ let parse_args () =
     else
       match Sys.getenv_opt "MASC_BASE_PATH" with
       | Some p when String.trim p <> "" -> p
-      | _ ->
-          (match Sys.getenv_opt "HOME" with
-           | Some home when String.trim home <> "" -> home
-           | _ -> Sys.getcwd ())
+      | _ -> Sys.getcwd ()
   in
 
   (* Resolve room *)

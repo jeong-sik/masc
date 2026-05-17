@@ -301,7 +301,11 @@ function selectVisibleContextAnchors(
 function contextAnchorBuckets(anchor: IdeContextAnchor): ReadonlySet<ContextAnchorBucket> {
   const buckets = new Set<ContextAnchorBucket>()
   for (const link of anchor.route_links ?? []) {
-    const label = link.label.trim().toLowerCase()
+    // WORKAROUND: link.label TS 타입은 string (non-nullable) 이지만 SSE schema drift
+    // 시 stale store 가 null 을 통과시켜 .trim() 폭발 (dashboard IDE crash 사고
+    // 2026-05-17 console). 근본 해결: RFC-0004 Phase A0.4 (Zod payload nested 검증)
+    // 도입 시 null 자체가 표면에 못 들어옴 → 본 guard 제거.
+    const label = (link.label ?? '').trim().toLowerCase()
     if (label === 'goal') buckets.add('goal')
     else if (label === 'task') buckets.add('task')
     else if (label === 'board') buckets.add('board')
@@ -322,7 +326,8 @@ function contextAnchorBuckets(anchor: IdeContextAnchor): ReadonlySet<ContextAnch
     else if (label === 'keeper') buckets.add('keeper')
   }
 
-  const surface = anchor.surface.trim().toLowerCase()
+  // WORKAROUND: 같은 사유 (link.label null guard 위 참조). RFC-0004 Phase A0.4 도입 시 제거.
+  const surface = (anchor.surface ?? '').trim().toLowerCase()
   if (surface === 'lsp') buckets.add('lsp')
   else if (surface === 'line') buckets.add('line')
   else if (surface === 'goal') buckets.add('goal')

@@ -6,4 +6,4 @@
  (modules process_eio file_lock_eio exec_tap with_process bg_task)
  ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on.
  (flags (:standard -w +4))
- (libraries masc_core masc_log time_compat eio eio.unix unix threads))
+ (libraries masc_core masc_log time_compat masc_cancel_safe eio eio.unix unix threads))

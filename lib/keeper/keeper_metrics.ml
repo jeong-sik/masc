@@ -501,6 +501,14 @@ let metric_keeper_slot_yield_total = "masc_keeper_slot_yield_total"
 let metric_keeper_compactions = "masc_keeper_compactions_total"
 let metric_keeper_compaction_ratio_change = "masc_keeper_compaction_ratio_change"
 let metric_keeper_compaction_saved_tokens = "masc_keeper_compaction_saved_tokens_total"
+
+(* Effective emergency compaction ratio threshold (set once at module init
+   from [MASC_KEEPER_EMERGENCY_COMPACT_RATIO_THRESHOLD], clamped [0.5,0.99]).
+   Gauge so operators can confirm the live value via /metrics without
+   restarting under instrumentation. *)
+let metric_keeper_emergency_compact_ratio_threshold =
+  "masc_keeper_emergency_compact_ratio_threshold"
+;;
 let metric_keeper_operator_compact = "masc_keeper_operator_compact_total"
 let metric_keeper_operator_clear = "masc_keeper_operator_clear_total"
 let metric_keeper_compaction_noop = "masc_keeper_compaction_noop_total"

@@ -6,7 +6,13 @@
     Extracted from Keeper_exec_context as part of #4955 god-file split. *)
 
 (** Fraction of context window at which compaction is treated as an
-    emergency, bypassing the continuity-reflection cooldown gate. *)
+    emergency, bypassing the continuity-reflection cooldown gate.
+
+    Env override: [MASC_KEEPER_EMERGENCY_COMPACT_RATIO_THRESHOLD]
+    (default 0.8, valid range \[0.5, 0.99\]; out-of-range falls back
+    to default with warn). Read once at module init; restart required
+    to change. Effective value is exported as Prometheus gauge
+    {!Keeper_metrics.metric_keeper_emergency_compact_ratio_threshold}. *)
 val emergency_compact_ratio_threshold : float
 
 (** Tool-heavy compaction gate: minimum message count before the

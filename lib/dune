@@ -404,6 +404,8 @@
    masc_compression
    ;; Eio context (extracted sub-library)
    masc_eio_context
+   ;; Cancel-safe try-with combinators (RFC-0106 P0)
+   masc_cancel_safe
    ;; Backend storage (extracted sub-library)
    masc_backend
    ;; Process execution + file locking (extracted sub-library)

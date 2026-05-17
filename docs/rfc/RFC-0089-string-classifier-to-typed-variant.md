@@ -121,8 +121,9 @@ skill routing) 은 후속 PR 대상으로 남았다.
 
 - `String.starts_with ~prefix:"..."` lib/ 합계 (2026-05-15 audit): **215 site**
 - `String.starts_with ~prefix:"..."` lib/ 합계 (2026-05-17 재측정): **301 site (+86)**
-  - +86 의 의미: RFC 가 Draft 상태로 enforce 되지 않은 11 일 동안 신규 코드가
-    string classifier 를 추가로 도입했음. status 승격 (Accepted) 의 직접 motivation.
+  - +86 의 의미: RFC 가 Draft 상태로 enforce 되지 않은 2 일 (2026-05-15 → 2026-05-17)
+    동안 신규 코드가 string classifier 를 추가로 도입했음. 2 일 +86 누적은
+    enforce 부재의 직접적 비용이며 status 승격 (Accepted) 의 motivation.
 - 10-site sample triage 결과: scope-in 6 / scope-out 4 (60% / 40%)
 - 단순 외삽 시 scope-in 추정 ~130 site (검증 안 됨, full inventory에서 정정).
   외삽치는 본 RFC §4 우선순위 결정에만 사용, 본문 acceptance에 포함하지 않음.

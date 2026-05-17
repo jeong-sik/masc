@@ -157,9 +157,14 @@ let json_response_with_source ~status ~source req reqd json =
 
 let is_digit c = c >= '0' && c <= '9'
 
+(* RFC-0128 §4.6 — [.masc-ide/] is keeper metadata about the
+   workspace, not workspace content. Listing it in the file tree
+   exposes the agent's annotation store to the user IDE as a regular
+   directory, which is a leak observed on 2026-05-17 against
+   [?repo_id=masc]. *)
 let excluded_dirs =
   [ ".git"; "node_modules"; "_build"; ".obsidian"; "__pycache__";
-    ".masc"; ".worktrees"; ".cache"; ".tmp"; "dist"; "build" ]
+    ".masc"; ".masc-ide"; ".worktrees"; ".cache"; ".tmp"; "dist"; "build" ]
 
 let default_tree_node_limit = 750
 let max_tree_node_limit = 2000

@@ -983,6 +983,9 @@ export interface KeeperDecision {
   keeper_name: string
   event_type: string
   outcome: string | null
+  choice: string | null
+  reason: string | null
+  context: KeeperDecisionContext | null
   model_used: string | null
   latency_ms: number | null
   cost_usd: number | null
@@ -995,10 +998,51 @@ export interface KeeperDecision {
   match_count: number | null
 }
 
+export interface KeeperDecisionContext {
+  file_path?: string | null
+  line?: number | null
+  goal_id?: string
+  task_id?: string
+  board_post_id?: string
+  comment_id?: string
+  pr_id?: string
+  git_ref?: string
+  log_id?: string
+  session_id?: string
+  operation_id?: string
+  worker_run_id?: string
+}
+
 export interface KeeperDecisionsResponse extends DashboardFeedMetadata {
   events: KeeperDecision[]
   limit: number
   generated_at: number | null
+}
+
+function decodeKeeperDecisionContext(raw: unknown): KeeperDecisionContext | null {
+  if (!isRecord(raw)) return null
+  const context: KeeperDecisionContext = {}
+  const filePath = asNullableString(raw.file_path)
+  if (filePath !== null) context.file_path = filePath
+  const line = asNumber(raw.line)
+  if (line !== undefined) context.line = line
+  const stringFields = [
+    ['goal_id', 'goal_id'],
+    ['task_id', 'task_id'],
+    ['board_post_id', 'board_post_id'],
+    ['comment_id', 'comment_id'],
+    ['pr_id', 'pr_id'],
+    ['git_ref', 'git_ref'],
+    ['log_id', 'log_id'],
+    ['session_id', 'session_id'],
+    ['operation_id', 'operation_id'],
+    ['worker_run_id', 'worker_run_id'],
+  ] as const
+  for (const [sourceKey, targetKey] of stringFields) {
+    const value = asString(raw[sourceKey])
+    if (value !== undefined) context[targetKey] = value
+  }
+  return Object.keys(context).length > 0 ? context : null
 }
 
 function decodeKeeperDecision(raw: unknown): KeeperDecision | null {
@@ -1008,6 +1052,9 @@ function decodeKeeperDecision(raw: unknown): KeeperDecision | null {
     keeper_name: asString(raw.keeper_name) ?? '',
     event_type: asString(raw.event_type) ?? '(unknown event_type)',
     outcome: asNullableString(raw.outcome),
+    choice: asNullableString(raw.choice),
+    reason: asNullableString(raw.reason),
+    context: decodeKeeperDecisionContext(raw.context),
     model_used: null,
     latency_ms: asNumber(raw.latency_ms) ?? null,
     cost_usd: asNumber(raw.cost_usd) ?? null,

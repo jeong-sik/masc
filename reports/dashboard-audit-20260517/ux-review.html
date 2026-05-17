@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard UX Review</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <header>
+    <div class="topbar">
+      <div>
+        <h1>UX Review</h1>
+        <p>Research-backed rubric for autonomous agent operator dashboards.</p>
+      </div>
+      <nav>
+        <a href="./index.html">Index</a>
+        <a href="./ia-map.html">IA Map</a>
+        <a href="./gap-matrix.html">Gap Matrix</a>
+        <a href="./roadmap.html">Roadmap</a>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <section>
+      <h2>Product Framing</h2>
+      <p>
+        MASC Dashboard should be judged as an operator console for long-running autonomous coding agents.
+        It is not a generic SaaS dashboard and not a decorative cockpit. The primary UX promise is continuity:
+        a human can see what each Keeper is doing, why it chose a tool/path, what proof exists, and what needs intervention.
+      </p>
+    </section>
+
+    <section>
+      <h2>Scoring Rubric</h2>
+      <table>
+        <thead>
+          <tr><th>Dimension</th><th>4/4 Standard</th><th>Current Judgment</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>IA</td>
+            <td>First screen answers who, what task/repo, risk, human action, proof location.</td>
+            <td class="warn">Broad but too diagnostic-heavy under Monitor.</td>
+          </tr>
+          <tr>
+            <td>Transparency</td>
+            <td>Every status distinguishes live/configured/fallback, verdict/advice, satisfied/inconclusive, evidence source, timestamp.</td>
+            <td class="warn">Good direction; parity and proof/readiness drift weaken trust.</td>
+          </tr>
+          <tr>
+            <td>Control</td>
+            <td>Pause/resume/recover/message/approve flows use preview-confirm-recheck and reversible controls.</td>
+            <td class="warn">Command surface is good; audit every write button.</td>
+          </tr>
+          <tr>
+            <td>Oversight</td>
+            <td>Dedicated queues for stale keepers, failed turns, approval requests, drift, missing evidence, escalations.</td>
+            <td class="warn">Some signals exist; Overview should be stronger as operator queue.</td>
+          </tr>
+          <tr>
+            <td>Accessibility</td>
+            <td>WCAG 2.2 AA: keyboard, focus, contrast, status messages, semantic roles, no color-only state.</td>
+            <td class="info">Many components show ARIA/focus work; needs full screen pass.</td>
+          </tr>
+          <tr>
+            <td>Auditability</td>
+            <td>Trace/task/keeper/tool/model IDs correlate logs, spans, decisions, approvals, overrides, evidence gaps.</td>
+            <td class="ok">Decision context now reaches Code IDE trace chips locally; full screen audit remains pending.</td>
+          </tr>
+          <tr>
+            <td>Progressive Disclosure</td>
+            <td>Overview is high signal; diagnostics unfold by keeper/task/trace.</td>
+            <td class="warn">Monitor should be regrouped.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>UX Best Practices Applied</h2>
+      <div class="grid">
+        <article class="card">
+          <h3>Human-AI Interaction</h3>
+          <p>Set expectations, show uncertainty, allow correction, and support graceful failure. Apply this as: do not show AI advice as proof; distinguish evidence gaps from success.</p>
+        </article>
+        <article class="card">
+          <h3>Agentic AI Security</h3>
+          <p>Continuous agents need least privilege, explicit accountability, action logging, human oversight, and reversibility. Apply this as: risk boundary panels and intervention queue.</p>
+        </article>
+        <article class="card">
+          <h3>Accessibility</h3>
+          <p>Dense operator tools still need keyboard support, visible focus, semantic status messages, and non-color severity labels.</p>
+        </article>
+        <article class="card">
+          <h3>Observability</h3>
+          <p>Logs alone are not enough. Trace/span/log correlation should explain root cause without manual grep across surfaces.</p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>Research And Standards Sources</h2>
+      <table>
+        <thead>
+          <tr><th>Source</th><th>Used For</th><th>Link</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Microsoft Guidelines for Human-AI Interaction, CHI 2019</td>
+            <td>Capability expectations, uncertainty, user control, correction, failure handling.</td>
+            <td><a href="https://www.microsoft.com/en-us/research/publication/guidelines-for-human-ai-interaction/">Microsoft Research publication</a></td>
+          </tr>
+          <tr>
+            <td>NIST AI Risk Management Framework 1.0</td>
+            <td>Trustworthiness, transparency, accountability, documentation, auditability.</td>
+            <td><a href="https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-ai-rmf-10">NIST AI RMF 1.0</a></td>
+          </tr>
+          <tr>
+            <td>Five Eyes careful adoption of agentic AI services, 2026</td>
+            <td>Agent accountability, monitoring, human oversight, least privilege, reversibility.</td>
+            <td><a href="https://www.ncsc.govt.nz/protect-your-organisation/careful-adoption-of-agentic-ai-services/">NZ NCSC official page</a></td>
+          </tr>
+          <tr>
+            <td>WCAG 2.2</td>
+            <td>Keyboard, focus, contrast, status messages, accessible control semantics.</td>
+            <td><a href="https://www.w3.org/TR/WCAG22/">W3C WCAG 2.2</a></td>
+          </tr>
+          <tr>
+            <td>Google PAIR Guidebook</td>
+            <td>Trust calibration, explainability, user feedback and controls.</td>
+            <td><a href="https://pair.withgoogle.com/guidebook-v2/">PAIR Guidebook</a></td>
+          </tr>
+          <tr>
+            <td>OpenTelemetry Observability Primer</td>
+            <td>Correlating traces, metrics, logs for root-cause visibility.</td>
+            <td><a href="https://opentelemetry.io/docs/concepts/observability-primer/">OpenTelemetry docs</a></td>
+          </tr>
+          <tr>
+            <td>NN/g usability heuristics and progressive disclosure</td>
+            <td>Keep operator UI simple by default and reveal advanced diagnostics by need.</td>
+            <td><a href="https://www.nngroup.com/articles/ten-usability-heuristics/">NN/g heuristics</a></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>UX Recommendations</h2>
+      <ol>
+        <li>Make Overview an action queue, not a decorative summary.</li>
+        <li>Promote only surfaces that pass readiness parity and have a clear operator question.</li>
+        <li>Render all status with source, timestamp, and proof completeness.</li>
+        <li>Use a single evidence vocabulary: Satisfied, Missing evidence, Inconclusive, Failed, Advice.</li>
+        <li>Use preview-confirm-recheck for all dashboard mutations.</li>
+        <li>Make Code IDE line chips explain: Keeper, file/line, tool, decision, reason, trace, task, repo.</li>
+        <li>Keep Lab and raw logs off the first screen; expose them through drilldowns/search.</li>
+      </ol>
+    </section>
+  </main>
+  <footer>External sources checked via web search on 2026-05-17.</footer>
+</body>
+</html>

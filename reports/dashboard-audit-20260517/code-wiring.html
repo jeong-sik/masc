@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard Code Wiring</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <header>
+    <div class="topbar">
+      <div>
+        <h1>Code Wiring</h1>
+        <p>Frontend, server, runtime store, and `.masc-ide` evidence.</p>
+      </div>
+      <nav>
+        <a href="./index.html">Index</a>
+        <a href="./ia-map.html">IA Map</a>
+        <a href="./feature-flows.html">Flows</a>
+        <a href="./gap-matrix.html">Gap Matrix</a>
+        <a href="./roadmap.html">Roadmap</a>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <section>
+      <h2>Frontend Wiring</h2>
+      <table>
+        <thead>
+          <tr><th>Layer</th><th>Status</th><th>Evidence</th><th>Notes</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Navigation SSOT</td>
+            <td class="ok">Implemented</td>
+            <td>`dashboard/src/config/navigation.ts:77-480`</td>
+            <td>Surfaces and valid section ids are centralized. Hidden cockpit/journey are explicit.</td>
+          </tr>
+          <tr>
+            <td>Router</td>
+            <td class="warn">Mostly implemented</td>
+            <td>`dashboard/src/router.ts:97-164`</td>
+            <td>Cross-surface redirects exist; slash-style command legacy route is a gap.</td>
+          </tr>
+          <tr>
+            <td>App boot</td>
+            <td class="ok">Implemented</td>
+            <td>`dashboard/src/app.ts:120-230`</td>
+            <td>Auth bootstrap, shell refresh, namespace truth, WS/SSE, periodic refresh are wired.</td>
+          </tr>
+          <tr>
+            <td>Surface dispatch</td>
+            <td class="ok">Implemented</td>
+            <td>`dashboard-shell.ts:706-770`</td>
+            <td>Lazy-loaded tabs cover Overview, Monitor, Workspace, Command, Connectors, Lab, Cockpit, Code, Logs.</td>
+          </tr>
+          <tr>
+            <td>Monitor dispatch</td>
+            <td class="ok">Implemented</td>
+            <td>`status.ts:10-140`</td>
+            <td>All current Monitor sections have lazy component dispatch.</td>
+          </tr>
+          <tr>
+            <td>Workspace dispatch</td>
+            <td class="warn">Mostly implemented</td>
+            <td>`work.ts:13-47`</td>
+            <td>`moderation` remains in renderer but not in navigation.</td>
+          </tr>
+          <tr>
+            <td>Command dispatch</td>
+            <td class="ok">Implemented</td>
+            <td>`operations-panel.ts:15-95`</td>
+            <td>Good internal view consolidation under one top-level command section.</td>
+          </tr>
+          <tr>
+            <td>Code IDE</td>
+            <td class="ok">Implemented locally</td>
+            <td>`ide-shell.ts:413-735`, `ide-data-coordinator.ts:144-221`</td>
+            <td>Repo-scoped `.masc-ide` annotation/region APIs and decision trace context are wired locally; live runtime probe remains pending.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Server/API Wiring</h2>
+      <table>
+        <thead>
+          <tr><th>Area</th><th>Status</th><th>Evidence</th><th>Risk</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>HTTP route composition</td>
+            <td class="ok">Implemented</td>
+            <td>`server_routes_http.ml:9-30`</td>
+            <td>Frontend, dashboard, activity/board, repositories, credentials, keeper repos, verification, multimodal are composed.</td>
+          </tr>
+          <tr>
+            <td>Dashboard shell</td>
+            <td class="ok">Implemented</td>
+            <td>`server_routes_http_routes_dashboard.ml:703`, `server_dashboard_http_core.ml:1623-1976`</td>
+            <td>Payload, cache, auth, fallback exist.</td>
+          </tr>
+          <tr>
+            <td>Keeper routes</td>
+            <td class="ok">Implemented</td>
+            <td>`server_routes_http_routes_dashboard.ml:1506-1534`, `server_dashboard_http_keeper_api.ml:2340`</td>
+            <td>Broad route family exists for keeper detail and actions.</td>
+          </tr>
+          <tr>
+            <td>Repository/credential routes</td>
+            <td class="warn">Implemented with policy risk</td>
+            <td>`server_routes_http_routes_repositories.ml:396`, `credentials.ml:23-202`, `keeper_repos.ml:118-127`</td>
+            <td>Credential JSON is redacted, but reads are public-read in local mode; missing keeper mapping falls back to wildcard.</td>
+          </tr>
+          <tr>
+            <td>Board API</td>
+            <td class="warn">Partial mismatch</td>
+            <td>`dashboard/src/api/board.ts:777,829,843`; static search found tool but not server HTTP routes for all frontend paths.</td>
+            <td>Verify `/api/v1/board/reactions` and `/api/v1/tools/masc_board_comment_vote` server registration.</td>
+          </tr>
+          <tr>
+            <td>SubBoard auth</td>
+            <td class="ok">Fixed locally</td>
+            <td>`server_routes_http_routes_activity.ml:344-345`, `tool_board_schemas.ml:475-477`, `tool_board.ml:1836-1838`</td>
+            <td>Fixed locally: HTTP auth uses canonical `masc_board_sub_board_create/update/delete` names.</td>
+          </tr>
+          <tr>
+            <td>H2 gateway</td>
+            <td class="ok">Fixed locally</td>
+            <td>`server_h2_gateway.ml:698-719` vs `server_routes_http_routes_dashboard.ml:890-903`</td>
+            <td>Fixed locally: H2 POST now uses token-bound `CanAdmin` before reading request body. Live H2 unauthenticated POST probe still pending.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Code IDE Wiring Details</h2>
+      <pre class="flow">Implemented path:
+  repo select -> activeRepositoryId
+  -> fetchWorkspaceTree(repo_id)
+  -> fetchWorkspaceFile(repo_id)
+  -> fetchGitBlame(repo_id)
+  -> fetchGitDiff(repo_id)
+  -> editor/diff/ownership render
+
+Repaired metadata path:
+  activeRepositoryId exists in coordinator opts
+  -> api/ide.ts IdeApiOptions carries keeper + repoId
+  -> fetchIdeAnnotations / fetchIdeRegions / create / delete append repo_id
+  -> server resolves selected repository base
+  -> selected repo `.masc-ide` can show
+
+Repaired region store path:
+  producer writes .masc-ide/regions.jsonl
+  reader reads .masc-ide/regions.jsonl
+  -> generated regions are visible through the existing HTTP reader
+
+Repaired decision trace path:
+  keeper .decisions.jsonl
+  -> keeper_decisions_json emits choice + reason + context
+  -> dashboard.ts decodes KeeperDecision.context
+  -> decision-log-trace-bridge preserves choice/reason/context
+  -> overlay focus and editor line chips show the decision at file/line</pre>
+      <table>
+        <thead>
+          <tr><th>Evidence</th><th>Meaning</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>`workspace.ts:44-52`</td><td>Workspace API options include `repoId` and append `repo_id`.</td></tr>
+          <tr><td>`api/ide.ts:12-80`</td><td>IDE API options include `repoId` and append `repo_id` for read/write annotation and region paths.</td></tr>
+          <tr><td>`code-document-store.ts:27,55-64`</td><td>Region loader opts preserve `repoId`.</td></tr>
+          <tr><td>`server_ide_http.ml:14-35`</td><td>Backend can resolve repo_id if frontend sends it.</td></tr>
+          <tr><td>`server_ide_http.ml:125-255`</td><td>Annotation POST/DELETE use `with_public_read`; confirm intended auth policy.</td></tr>
+          <tr><td>`ide_meta_sync.ml:73-82`, `ide_region_tracker.ml:105-109`</td><td>Writer uses the fixed region JSONL contract.</td></tr>
+          <tr><td>`server_ide_http.ml:266-286`</td><td>Region reader reads one fixed `regions.jsonl` file.</td></tr>
+          <tr><td>`dashboard_http_keeper.ml:1834-1988`</td><td>Keeper decision feed carries `choice`, `reason`, and normalized route context.</td></tr>
+          <tr><td>`decision-log-trace-bridge.ts`, `overlay-keeper-trace.ts`, `ide-editor-extensions.ts`</td><td>Decision metadata reaches trace focus and line-level IDE chips.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Bonsai Split</h2>
+      <p>
+        `dashboard_bonsai` is a separate OCaml/Bonsai dashboard under `/dashboard/b/*`, while the main Preact dashboard is `/dashboard/*`.
+        Treat it as a parallel/experimental surface unless product owners explicitly promote it into the canonical operator console.
+      </p>
+      <p class="evidence">Evidence: `dashboard_bonsai/README.md`, `dashboard_bonsai/src/route.ml`, `server_routes_http_routes_frontend.ml:115-164`.</p>
+      <p class="warn">Audit note: Bonsai contains multimodal files, but the main dashboard source tree had no `*multimodal*` frontend files. Do not count Bonsai-only multimodal UI as complete main-dashboard IA.</p>
+    </section>
+  </main>
+  <footer>Report reflects the local implementation patch in this worktree.</footer>
+</body>
+</html>

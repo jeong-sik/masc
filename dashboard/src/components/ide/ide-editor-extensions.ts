@@ -8,7 +8,7 @@ import {
   type StreamParser,
 } from '@codemirror/language'
 import type { LineOwnership } from './keeper-line-ownership-store'
-import type { KeeperTraceEvent, KeeperTraceSource } from './keeper-trace-store'
+import type { KeeperTraceContextFields, KeeperTraceEvent, KeeperTraceSource } from './keeper-trace-store'
 import { kSigil } from '../keeper-badge'
 
 // ── Read-only lock ────────────────────────────────────────────────
@@ -350,6 +350,8 @@ export interface EditorKeeperTraceLineEvent {
   readonly sessionId?: string
   readonly operationId?: string
   readonly workerRunId?: string
+  readonly decisionChoice?: string | null
+  readonly decisionReason?: string | null
 }
 
 export interface EditorKeeperTraceLine {
@@ -547,6 +549,7 @@ export function keeperTraceLinesForFile(
     if (filePath !== normalizedFilePath) continue
     if (line === null) continue
     const existing = byLine.get(line) ?? []
+    const context = traceEventContextFields(event)
     existing.push({
       id: event.id,
       source: event.source,
@@ -558,16 +561,18 @@ export function keeperTraceLinesForFile(
       eventId: event.source === 'activity-event' ? event.eventId : undefined,
       threadId: event.source === 'anchored-thread' ? event.threadId : undefined,
       surface: traceEventSurface(event),
-      goalId: event.source === 'activity-event' ? event.goalId : undefined,
-      taskId: event.source === 'activity-event' ? event.taskId : undefined,
-      boardPostId: event.source === 'activity-event' ? event.boardPostId : undefined,
-      commentId: event.source === 'activity-event' ? event.commentId : undefined,
-      prId: event.source === 'activity-event' ? event.prId : undefined,
-      gitRef: event.source === 'activity-event' ? event.gitRef : undefined,
-      logId: event.source === 'activity-event' ? event.logId : undefined,
-      sessionId: event.source === 'activity-event' ? event.sessionId : undefined,
-      operationId: event.source === 'activity-event' ? event.operationId : undefined,
-      workerRunId: event.source === 'activity-event' ? event.workerRunId : undefined,
+      goalId: context.goalId,
+      taskId: context.taskId,
+      boardPostId: context.boardPostId,
+      commentId: context.commentId,
+      prId: context.prId,
+      gitRef: context.gitRef,
+      logId: context.logId,
+      sessionId: context.sessionId,
+      operationId: context.operationId,
+      workerRunId: context.workerRunId,
+      decisionChoice: event.source === 'decision-log' ? event.decisionChoice : undefined,
+      decisionReason: event.source === 'decision-log' ? event.decisionReason : undefined,
     })
     byLine.set(line, existing)
   }
@@ -641,6 +646,11 @@ function traceSourceLabel(source: KeeperTraceSource): string {
 function traceEventFilePath(event: KeeperTraceEvent): string | null {
   if (event.source === 'anchored-thread') return event.filePath ?? null
   if (event.source === 'activity-event') return event.filePath
+  if (
+    event.source === 'cascade-hop'
+    || event.source === 'bdi-snapshot'
+    || event.source === 'decision-log'
+  ) return event.filePath ?? null
   return null
 }
 
@@ -655,11 +665,31 @@ function traceEventLine(event: KeeperTraceEvent): number | null {
       ? event.line
       : null
   }
+  if (
+    event.source === 'cascade-hop'
+    || event.source === 'bdi-snapshot'
+    || event.source === 'decision-log'
+  ) {
+    const line = event.line
+    return line !== undefined && Number.isSafeInteger(line) && line >= 1
+      ? line
+      : null
+  }
   return null
 }
 
 function traceEventSurface(event: KeeperTraceEvent): string | undefined {
   return event.source === 'activity-event' ? event.surface : undefined
+}
+
+function traceEventContextFields(event: KeeperTraceEvent): KeeperTraceContextFields {
+  if (
+    event.source === 'activity-event'
+    || event.source === 'cascade-hop'
+    || event.source === 'bdi-snapshot'
+    || event.source === 'decision-log'
+  ) return event
+  return {}
 }
 
 function traceEventLabel(event: EditorKeeperTraceLineEvent): string {
@@ -716,6 +746,13 @@ function traceLineChipLabel(event: EditorKeeperTraceLineEvent): string {
   }
   if (event.source === 'anchored-thread') {
     return event.threadId ? `thread ${event.threadId}` : 'thread'
+  }
+  if (event.source === 'decision-log') {
+    const choice = event.decisionChoice?.trim()
+    const reason = event.decisionReason?.trim()
+    if (choice && reason) return `${choice}: ${reason}`
+    if (choice) return choice
+    if (reason) return reason
   }
   return traceLineChipSurface(event)
 }

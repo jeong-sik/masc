@@ -1594,6 +1594,22 @@ describe('fetchKeeperDecisions', () => {
             keeper_name: 'keeper-alpha',
             event_type: 'turn',
             outcome: 'success',
+            choice: 'use_shell',
+            reason: 'verify touched test target',
+            context: {
+              file_path: 'runtime.ts',
+              line: 19,
+              goal_id: 'goal-decision',
+              task_id: 'task-decision',
+              board_post_id: 'post-decision',
+              comment_id: 'comment-decision',
+              pr_id: '15035',
+              git_ref: 'refs/heads/decision-route',
+              log_id: 'decision-turn-19',
+              session_id: 'sess-decision',
+              operation_id: 'op-decision',
+              worker_run_id: 'worker-decision',
+            },
             model_used: 'private-provider:model-a',
           },
         ],
@@ -1609,6 +1625,22 @@ describe('fetchKeeperDecisions', () => {
     const result = await fetchKeeperDecisions(1)
 
     expect(result.events[0]?.model_used).toBeNull()
+    expect(result.events[0]?.choice).toBe('use_shell')
+    expect(result.events[0]?.reason).toBe('verify touched test target')
+    expect(result.events[0]?.context).toEqual({
+      file_path: 'runtime.ts',
+      line: 19,
+      goal_id: 'goal-decision',
+      task_id: 'task-decision',
+      board_post_id: 'post-decision',
+      comment_id: 'comment-decision',
+      pr_id: '15035',
+      git_ref: 'refs/heads/decision-route',
+      log_id: 'decision-turn-19',
+      session_id: 'sess-decision',
+      operation_id: 'op-decision',
+      worker_run_id: 'worker-decision',
+    })
   })
 })
 

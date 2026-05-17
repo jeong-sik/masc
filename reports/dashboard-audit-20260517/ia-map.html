@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard IA Map</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <header>
+    <div class="topbar">
+      <div>
+        <h1>IA Map</h1>
+        <p>Navigation tree from top surface down to section depth.</p>
+      </div>
+      <nav>
+        <a href="./index.html">Index</a>
+        <a href="./feature-flows.html">Flows</a>
+        <a href="./code-wiring.html">Code Wiring</a>
+        <a href="./gap-matrix.html">Gap Matrix</a>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <section>
+      <h2>Current Top-Level Surfaces</h2>
+      <pre class="flow">Dashboard
+  cockpit        hidden
+  overview       visible, sectionless
+  monitoring     visible, default section=runtime
+  command        visible, default section=operations
+  connectors     visible, default section=connector-status
+  workspace      visible, default section=board
+  lab            visible, default section=tools
+  code           visible, default section=ide-shell
+  logs           visible, sectionless</pre>
+      <p class="evidence">
+        Evidence: `dashboard/src/config/navigation.ts:77-158`, `dashboard/src/components/dashboard-shell.ts:706-770`.
+      </p>
+    </section>
+
+    <section>
+      <h2>Depth 1: Sections</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Surface</th>
+            <th>Visible Sections</th>
+            <th>Hidden / Internal</th>
+            <th>Judgment</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Monitor</td>
+            <td>`runtime`, `cascade-config`, `agents`, `goal-loop`, `fleet-health`, `doctor`, `transport-health`, `feature-health`, `observatory`, `cognition`</td>
+            <td>`journey`</td>
+            <td class="warn">Too wide. Mixed operator status and admin diagnostics. Readiness parity currently fails.</td>
+          </tr>
+          <tr>
+            <td>Command</td>
+            <td>`operations`</td>
+            <td>Internal views: default, ops, governance, safety, surfaces, inspector</td>
+            <td class="ok">Good consolidation pattern. Top-level surface is stable and drill-down is explicit.</td>
+          </tr>
+          <tr>
+            <td>Connectors</td>
+            <td>`connector-status`</td>
+            <td>Per-connector tabs collapsed into picker</td>
+            <td class="ok">Good: avoids Discord/iMessage/Slack/Telegram nav sprawl.</td>
+          </tr>
+          <tr>
+            <td>Workspace</td>
+            <td>`board`, `sub-boards`, `planning`, `repositories`, `verification`</td>
+            <td>`moderation` renderer exists but normal nav cannot reach it</td>
+            <td class="warn">Mostly coherent; stale `moderation` branch needs route decision.</td>
+          </tr>
+          <tr>
+            <td>Lab</td>
+            <td>`tools`, `autoresearch`, `harness`</td>
+            <td>None found at nav level</td>
+            <td class="ok">Appropriate as non-default experimental bucket.</td>
+          </tr>
+          <tr>
+            <td>Code</td>
+            <td>`ide-shell`</td>
+            <td>IDE sub-state in query params, right rail, tabs</td>
+            <td class="ok">Good as an immersive surface; route preserves `surface` only for code IDE.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Route Canonicalization</h2>
+      <pre class="flow">URL/hash
+  -> router.parseHash / parsePathname
+  -> parseSegments
+  -> cross-surface redirect table
+  -> normalizeRouteParams
+  -> section validation
+  -> DashboardMain
+  -> TabContent
+  -> surface dispatcher</pre>
+      <table>
+        <thead>
+          <tr><th>Route Case</th><th>Status</th><th>Evidence</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Legacy `monitoring:git-graph`</td>
+            <td class="ok">Redirects to workspace repositories graph.</td>
+            <td>`router.ts:26-37`</td>
+          </tr>
+          <tr>
+            <td>Legacy `command?section=connectors`</td>
+            <td class="ok">Redirected inside OperationsPanel to Connectors surface.</td>
+            <td>`navigation.ts:396-399`, `operations-panel.ts:43-57`</td>
+          </tr>
+          <tr>
+            <td>Slash route `#command/connectors`</td>
+            <td class="warn">Likely falls back to `operations` before redirect table can preserve `view=connectors`.</td>
+            <td>`router.ts:136-145`; command slash parser validates only current command sections.</td>
+          </tr>
+          <tr>
+            <td>`workspace?section=moderation`</td>
+            <td class="warn">Renderer supports it, nav validation drops it.</td>
+            <td>`work.ts:13-35`, `navigation.ts:443-447`</td>
+          </tr>
+          <tr>
+            <td>Code IDE params</td>
+            <td class="ok">`surface` is preserved only for `code/ide-shell`.</td>
+            <td>`navigation.ts:449-471`</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Recommended IA Shape</h2>
+      <div class="grid">
+        <article class="card">
+          <h3>Default Operator Path</h3>
+          <pre class="flow">Overview
+  -> Attention queue
+  -> Keeper health
+  -> Active tasks
+  -> Pending approvals
+  -> Evidence gaps
+  -> Last refresh / live source</pre>
+        </article>
+        <article class="card">
+          <h3>Monitor</h3>
+          <pre class="flow">Monitor
+  Runtime
+  Keepers
+  Goal Navigator
+  Fleet Health
+  Activity Timeline
+  Keeper Cognition
+  Diagnostics
+    Cascade Config
+    Doctor
+    Transport Health
+    Feature Flags
+    Journey Map</pre>
+        </article>
+        <article class="card">
+          <h3>Workspace</h3>
+          <pre class="flow">Workspace
+  Board
+  Sub-Boards
+  Plans & Goals
+  Repositories
+  Verification
+  Moderation?  decide: route it, hide it, or delete it</pre>
+        </article>
+      </div>
+    </section>
+  </main>
+  <footer>IA evidence is grounded in `dashboard/src/config/navigation.ts`, `dashboard/src/router.ts`, and surface dispatchers.</footer>
+</body>
+</html>

@@ -24,7 +24,10 @@ export interface CodeDocumentStore {
   readonly line: (lineNumber: number) => CodeDocumentLine | null
   readonly regions: () => ReadonlyArray<IdeCodeRegion>
   readonly regionsLoading: () => boolean
-  readonly loadRegions: (filePath: string, opts?: { keeper?: string; signal?: AbortSignal }) => Promise<void>
+  readonly loadRegions: (
+    filePath: string,
+    opts?: { keeper?: string; repoId?: string | null; signal?: AbortSignal },
+  ) => Promise<void>
   readonly subscribe: (listener: () => void) => () => void
 }
 
@@ -52,7 +55,10 @@ export function createCodeDocumentStore(
     return true
   }
 
-  const loadRegions = async (filePath: string, opts?: { keeper?: string; signal?: AbortSignal }): Promise<void> => {
+  const loadRegions = async (
+    filePath: string,
+    opts?: { keeper?: string; repoId?: string | null; signal?: AbortSignal },
+  ): Promise<void> => {
     regionsLoadingSignal.value = true
     try {
       const fetched = await fetchIdeRegions(filePath, opts ?? {})

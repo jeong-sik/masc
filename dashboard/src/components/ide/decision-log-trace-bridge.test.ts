@@ -14,8 +14,9 @@ function dec(
   event_type = 'turn',
   outcome: string | null = 'ok',
   context: DecisionLogProducerInput['context'] = undefined,
+  extra: Partial<DecisionLogProducerInput> = {},
 ): DecisionLogProducerInput {
-  return { keeper_name, ts_unix, event_type, outcome, context }
+  return { keeper_name, ts_unix, event_type, outcome, context, ...extra }
 }
 
 beforeEach(() => {
@@ -160,6 +161,21 @@ describe('bridgeDecisionsToTrace — RFC-0028 PR-δ decision-log producer', () =
       operationId: 'op-decision',
       workerRunId: 'worker-decision',
     })
+  })
+
+  it('preserves decision choice and reason for line-level trace labels', () => {
+    bridgeDecisionsToTrace(
+      [dec('scholar', 1_715_000_000, 'tool_use', 'ok', undefined, {
+        choice: 'use_shell',
+        reason: 'verify touched test target',
+      })],
+      new Set(),
+    )
+    const event = keeperTraceState.value.events[0]!
+    if (event.source === 'decision-log') {
+      expect(event.decisionChoice).toBe('use_shell')
+      expect(event.decisionReason).toBe('verify touched test target')
+    }
   })
 
   it('preserves a null semanticOutcome (in-flight decisions)', () => {

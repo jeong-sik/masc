@@ -61,6 +61,8 @@ export interface DecisionLogProducerInput {
   readonly keeper_name: string
   readonly event_type: string
   readonly outcome: string | null
+  readonly choice?: string | null
+  readonly reason?: string | null
   readonly context?: KeeperTraceProducerContextInput | null
 }
 
@@ -97,6 +99,8 @@ export function bridgeDecisionsToTrace(
       source: 'decision-log',
       decisionId: key,
       semanticOutcome: decision.outcome,
+      decisionChoice: decision.choice ?? null,
+      decisionReason: decision.reason ?? null,
       ...normalizeTraceProducerContext(decision.context),
     })
     next.add(key)

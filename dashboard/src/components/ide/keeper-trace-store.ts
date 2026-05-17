@@ -82,6 +82,8 @@ export type KeeperTraceEvent =
       readonly source: 'decision-log'
       readonly decisionId: string
       readonly semanticOutcome: string | null
+      readonly decisionChoice?: string | null
+      readonly decisionReason?: string | null
     })
   | (KeeperTraceBase & {
       readonly source: 'activity-event'

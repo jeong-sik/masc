@@ -286,8 +286,6 @@ let test_hidden_diagnostic_surfaces_are_not_main_gate () =
     [
       "cockpit";
       "monitoring.journey";
-      "monitoring.observatory";
-      "monitoring.cognition";
     ]
 
 let () =

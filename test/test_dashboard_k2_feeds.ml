@@ -197,6 +197,16 @@ let test_decisions_json_terminal_reason_duration_fallback () =
         [ "ts_unix", `Float 1_300.0
         ; "keeper_name", `String meta.name
         ; "outcome", `String "error"
+        ; "choice", `String "use_shell"
+        ; "reason", `String "verify touched test target"
+        ; ( "context"
+          , `Assoc
+              [ "file_path", `String "runtime.ts"
+              ; "line", `Int 19
+              ; "goal_id", `String "goal-decision"
+              ; "task_id", `String "task-decision"
+              ; "log_id", `String "decision-turn-19"
+              ] )
         ; "latency_ms", `Int 321
         ; ( "terminal_reason"
           , `Assoc
@@ -224,6 +234,20 @@ let test_decisions_json_terminal_reason_duration_fallback () =
     Json.(compact_event |> member "terminal_reason_code" |> to_string);
   check (float 0.001) "compact duration fallback" 321.0
     Json.(compact_event |> member "duration_ms" |> to_float);
+  check string "compact choice" "use_shell"
+    Json.(compact_event |> member "choice" |> to_string);
+  check string "compact reason" "verify touched test target"
+    Json.(compact_event |> member "reason" |> to_string);
+  check string "compact context file" "runtime.ts"
+    Json.(compact_event |> member "context" |> member "file_path" |> to_string);
+  check int "compact context line" 19
+    Json.(compact_event |> member "context" |> member "line" |> to_int);
+  check string "compact context goal" "goal-decision"
+    Json.(compact_event |> member "context" |> member "goal_id" |> to_string);
+  check string "compact context task" "task-decision"
+    Json.(compact_event |> member "context" |> member "task_id" |> to_string);
+  check string "compact context log" "decision-turn-19"
+    Json.(compact_event |> member "context" |> member "log_id" |> to_string);
   let log =
     Dash.keeper_decisions_log_json ~config ~keepers:[ meta ] ~limit:10 ()
   in

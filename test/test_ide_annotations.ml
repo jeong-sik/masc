@@ -2,6 +2,8 @@ open Alcotest
 
 module Types = Ide_annotation_types
 module Store = Ide_annotations
+module Region = Ide_region_tracker
+module Sync = Ide_meta_sync
 module Lsp = Masc_mcp.Lsp_overlay_provider
 
 let route_annotation : Types.annotation =
@@ -42,6 +44,17 @@ let with_temp_dir f =
   Sys.remove path;
   Unix.mkdir path 0o700;
   Fun.protect ~finally:(fun () -> rm_rf path) (fun () -> f path)
+;;
+
+let load_regions base_dir =
+  Fs_compat.fold_jsonl_lines
+    ~init:[]
+    ~f:(fun acc ~line_no:_ json ->
+      match Types.region_of_json json with
+      | Ok region -> region :: acc
+      | Error msg -> fail msg)
+    (Region.regions_file ~base_dir)
+  |> List.rev
 ;;
 
 let contains ~needle haystack =
@@ -216,6 +229,65 @@ let test_lsp_overlay_exposes_route_context () =
       check_contains "hover carries operation route" "op:op-9" value))
 ;;
 
+let test_region_tracker_writes_fixed_regions_file () =
+  with_temp_dir (fun base_dir ->
+    Region.ingest_tool_call
+      ~base_dir
+      ~keeper_id:"sangsu"
+      ~turn:7
+      (`Assoc
+        [ "name", `String "write_file"
+        ; ( "arguments"
+          , `Assoc
+              [ "path", `String "lib/a.ml"
+              ; "content", `String "let x = 1\n"
+              ] )
+        ]);
+    check bool "fixed regions file exists" true (Sys.file_exists (Region.regions_file ~base_dir));
+    match load_regions base_dir with
+    | [ region ] ->
+      check string "file path" "lib/a.ml" region.Types.file_path;
+      check int "line start" 1 region.line_start;
+      check int "line end" 1 region.line_end;
+      check string "keeper" "sangsu" region.keeper_id;
+      (match region.source with
+       | Types.Tool_call { tool_name; turn } ->
+         check string "tool name" "write_file" tool_name;
+         check int "turn" 7 turn
+       | Types.Manual _ -> fail "expected tool-call source")
+    | rows -> failf "expected one region, got %d" (List.length rows))
+;;
+
+let test_meta_sync_flush_writes_fixed_regions_file () =
+  with_temp_dir (fun base_dir ->
+    let config = { Sync.default_config with base_path = base_dir } in
+    let state =
+      Sync.on_tool_call_complete
+        config
+        Sync.initial_state
+        ~keeper_id:"sangsu"
+        ~turn:8
+        ~tool_name:"write_file"
+        ~file_path:"lib/b.ml"
+        ~diff_text:None
+        ~full_content:(Some "let y = 2\n")
+    in
+    let state = Sync.flush_regions config state in
+    let stats = Sync.get_stats state in
+    check int "pending regions cleared" 0 stats.pending_region_count;
+    check bool "fixed regions file exists" true (Sys.file_exists (Region.regions_file ~base_dir));
+    match load_regions base_dir with
+    | [ region ] ->
+      check string "file path" "lib/b.ml" region.Types.file_path;
+      check string "keeper" "sangsu" region.keeper_id;
+      (match region.source with
+       | Types.Tool_call { tool_name; turn } ->
+         check string "tool name" "write_file" tool_name;
+         check int "turn" 8 turn
+       | Types.Manual _ -> fail "expected tool-call source")
+    | rows -> failf "expected one region, got %d" (List.length rows))
+;;
+
 let () =
   run
     "ide_annotations"
@@ -229,6 +301,14 @@ let () =
             "LSP overlays expose route context"
             `Quick
             test_lsp_overlay_exposes_route_context
+        ; test_case
+            "region tracker writes fixed regions.jsonl"
+            `Quick
+            test_region_tracker_writes_fixed_regions_file
+        ; test_case
+            "meta sync flush writes fixed regions.jsonl"
+            `Quick
+            test_meta_sync_flush_writes_fixed_regions_file
         ] )
     ]
 ;;

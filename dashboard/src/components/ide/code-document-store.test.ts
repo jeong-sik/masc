@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from 'vitest'
 vi.mock('../../api/ide', () => ({
   fetchIdeRegions: vi.fn().mockResolvedValue([]),
 }))
+import { fetchIdeRegions } from '../../api/ide'
 import { createCodeDocumentStore } from './code-document-store'
+
+const fetchIdeRegionsMock = vi.mocked(fetchIdeRegions)
 
 describe('createCodeDocumentStore', () => {
   it('parses code content into stable one-indexed lines', () => {
@@ -63,5 +66,21 @@ describe('createCodeDocumentStore', () => {
     store.load({ file_path: 'c.ts', language: 'typescript', content: 'c' })
 
     expect(calls).toBe(1)
+  })
+
+  it('forwards keeper and repo workspace params when loading regions', async () => {
+    fetchIdeRegionsMock.mockResolvedValueOnce([])
+    const store = createCodeDocumentStore({
+      file_path: 'a.ts',
+      language: 'typescript',
+      content: 'export {}',
+    })
+
+    await store.loadRegions('a.ts', { keeper: 'sangsu', repoId: 'masc' })
+
+    expect(fetchIdeRegionsMock).toHaveBeenCalledWith('a.ts', {
+      keeper: 'sangsu',
+      repoId: 'masc',
+    })
   })
 })

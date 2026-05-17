@@ -11,6 +11,7 @@ export type { IdeAnnotation, IdeCodeRegion, AnnotationKind } from './schemas/ide
 
 export interface IdeApiOptions extends GetOptions {
   readonly keeper?: string
+  readonly repoId?: string | null
 }
 
 export interface IdeAnnotationFilter {
@@ -54,6 +55,7 @@ function appendWorkspaceParams(
   opts: IdeApiOptions,
 ): void {
   if (opts.keeper) params.set('keeper', opts.keeper)
+  if (opts.repoId) params.set('repo_id', opts.repoId)
 }
 
 export async function fetchIdeAnnotations(
@@ -71,9 +73,12 @@ export async function fetchIdeAnnotations(
 
 export async function createIdeAnnotation(
   input: CreateAnnotationInput,
-  _opts: IdeApiOptions = {},
+  opts: IdeApiOptions = {},
 ): Promise<IdeAnnotation | null> {
-  const raw = await post<unknown>('/api/v1/ide/annotations', input)
+  const params = new URLSearchParams()
+  appendWorkspaceParams(params, opts)
+  const query = params.size > 0 ? `?${params.toString()}` : ''
+  const raw = await post<unknown>(`/api/v1/ide/annotations${query}`, input)
   if (!isRecord(raw) || raw.ok !== true) return null
   return parseIdeAnnotations([raw.data])[0] ?? null
 }

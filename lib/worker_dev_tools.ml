@@ -532,6 +532,12 @@ let inline_path_flag_requires_existing_dir token =
   String.starts_with ~prefix:"--work-tree=" token
 ;;
 
+let command_materializes_path_arg = function
+  | "cat" | "find" | "grep" | "head" | "ls" | "nl" | "rg" | "sed" | "stat"
+  | "tail" | "wc" -> true
+  | _ -> false
+;;
+
 let path_is_existing_dir ?workdir path =
   let resolved = resolve_path ?base_dir:workdir path in
   try Sys.file_exists resolved && Sys.is_directory resolved with
@@ -916,6 +922,11 @@ let path_validation_tokens tokens =
 ;;
 
 let existing_dir_path_values cmd =
+  let command_name =
+    match tokenize_path_args cmd with
+    | command :: _ -> Filename.basename command.value
+    | [] -> ""
+  in
   let rec loop expect_existing_dir acc = function
     | [] -> List.rev acc
     | token :: rest ->
@@ -930,6 +941,12 @@ let existing_dir_path_values cmd =
         | Some _ -> loop false acc rest
         | None when is_path_flag token.value ->
           loop (path_flag_requires_existing_dir token.value) acc rest
+        | None
+          when command_materializes_path_arg command_name
+               && looks_like_path_token token.value
+               && not (token_has_unsafe_rewrite_syntax token)
+               && not token.globbed ->
+          loop false (token.value :: acc) rest
         | None -> loop false acc rest)
   in
   cmd |> tokenize_path_args |> path_validation_tokens |> loop false []

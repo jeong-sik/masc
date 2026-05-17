@@ -216,6 +216,9 @@ let start_container (t : t) ~(timeout_sec : float) =
            @ Keeper_sandbox_runtime.docker_config_mount_args
                ~base_path:t.config.base_path
                ~container_root:t.container_root
+           @ Keeper_sandbox_runtime.docker_room_state_mount_args
+               ~base_path:t.config.base_path
+               ~container_root:t.container_root
            @ identity_mounts
            @ network_args
            @ [ image; "sh"; "-lc"; "trap : TERM INT; while :; do sleep 3600; done" ]

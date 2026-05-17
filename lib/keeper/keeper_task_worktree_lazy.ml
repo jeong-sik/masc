@@ -57,12 +57,19 @@ let candidate_of_path ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta
       | None -> None
       | Some suffix ->
         (match Keeper_alerting_path.split_relative_components suffix with
-         | [ repo_name; ".worktrees"; worktree_name ]
+         | repo_name :: ".worktrees" :: worktree_name :: _
            when Coord_worktree.safe_repo_name repo_name
                 && String.equal
                      worktree_name
                      (Playground_paths.worktree_dir_name agent_name task_id) ->
-           Some { agent_name; task_id; repo_name; worktree_path = path }
+           let worktree_path =
+             Filename.concat
+               repos_dir
+               (Filename.concat
+                  repo_name
+                  (Filename.concat ".worktrees" worktree_name))
+           in
+           Some { agent_name; task_id; repo_name; worktree_path }
          | _ -> None))
 ;;
 

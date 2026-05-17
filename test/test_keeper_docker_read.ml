@@ -592,6 +592,36 @@ let test_docker_config_mount_and_env_args () =
        ~base_path:base
        ~container_root)
 
+let test_docker_room_state_mount_args_expose_safe_subset () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let masc_root = Filename.concat base ".masc" in
+  ensure_dir (Filename.concat masc_root "tasks");
+  write_file (Filename.concat (Filename.concat masc_root "tasks") "backlog.json") "{}";
+  write_file (Filename.concat masc_root "board_posts.jsonl") "";
+  ensure_dir (Filename.concat masc_root "auth");
+  write_file (Filename.concat (Filename.concat masc_root "auth") "keeper.token") "secret";
+  let container_root = "/home/keeper/playground/minjae" in
+  let specs =
+    Keeper_sandbox_runtime.docker_room_state_mount_specs
+      ~base_path:base
+      ~container_root
+  in
+  let tasks_host = Filename.concat masc_root "tasks" in
+  let board_host = Filename.concat masc_root "board_posts.jsonl" in
+  Alcotest.(check bool) "mounts tasks under container .masc" true
+    (List.mem
+       (tasks_host ^ ":" ^ container_root ^ "/.masc/tasks:ro")
+       specs);
+  Alcotest.(check bool) "mounts tasks at absolute symlink target" true
+    (List.mem (tasks_host ^ ":" ^ tasks_host ^ ":ro") specs);
+  Alcotest.(check bool) "mounts board posts" true
+    (List.mem
+       (board_host ^ ":" ^ container_root ^ "/.masc/board_posts.jsonl:ro")
+       specs);
+  Alcotest.(check bool) "does not mount auth" false
+    (List.exists (fun spec -> contains_substring spec "/auth/") specs)
+
 let test_cleanup_stale_containers_removes_only_stale_masc_scope () =
   with_fake_docker fake_docker_cleanup_script @@ fun () ->
   let base = temp_dir () in
@@ -976,6 +1006,8 @@ let run_tests () =
             test_docker_masc_config_binding_pins_container_runtime_paths;
           Alcotest.test_case "docker config mount and env args" `Quick
             test_docker_config_mount_and_env_args;
+          Alcotest.test_case "docker room state mount exposes safe subset" `Quick
+            test_docker_room_state_mount_args_expose_safe_subset;
           Alcotest.test_case "managed label args include ttl" `Quick
             test_sandbox_container_label_args_include_managed_ttl;
           Alcotest.test_case "sandbox label args include owner scope" `Quick

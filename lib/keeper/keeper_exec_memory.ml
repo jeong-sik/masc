@@ -525,6 +525,9 @@ let single_field_snapshot_for_kind ~(kind : string) ~(text : string)
 
 let keeper_memory_write_max_title_chars = 120
 
+(** Pure validation result for a [keeper_memory_write] call. Splitting
+    this from the persistence step lets tests pin the error_kind
+    taxonomy without constructing a [Coord.config]. *)
 type memory_write_error_kind =
   | Invalid_memory_kind
   | Title_too_long
@@ -541,24 +544,6 @@ let memory_write_error_kind_to_string = function
     "long_term_via_explicit_write_not_yet_supported"
   | Rows_dropped_by_cap -> "rows_dropped_by_cap"
   | No_memory_write_error -> ""
-;;
-
-(** Pure validation result for a [keeper_memory_write] call. Splitting
-    this from the persistence step lets tests pin the error_kind
-    taxonomy without constructing a [Coord.config]. *)
-type memory_write_error_kind =
-  | Invalid_memory_kind
-  | Title_too_long
-  | Content_empty
-  | Long_term_via_explicit_write_not_yet_supported
-;;
-
-let memory_write_error_kind_to_string = function
-  | Invalid_memory_kind -> "invalid_memory_kind"
-  | Title_too_long -> "title_too_long"
-  | Content_empty -> "content_empty"
-  | Long_term_via_explicit_write_not_yet_supported ->
-    "long_term_via_explicit_write_not_yet_supported"
 ;;
 
 type memory_write_validation =
@@ -627,7 +612,7 @@ let keeper_memory_write_json
   in
   match validate_memory_write_args args with
   | Memory_write_invalid { error_kind; extras } ->
-    respond ~ok:false ~error_kind:(memory_write_error_kind_to_string error_kind) extras
+    respond ~ok:false ~error_kind extras
   | Memory_write_ok { kind; body = _; snapshot } ->
     let rows_written, kinds_written =
       Keeper_memory_bank.append_memory_notes_from_reply

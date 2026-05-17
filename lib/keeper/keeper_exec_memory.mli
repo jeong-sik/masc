@@ -57,16 +57,6 @@ val keeper_memory_write_json
 (** Title length cap exposed for sync regression tests. *)
 val keeper_memory_write_max_title_chars : int
 
-type memory_write_error_kind =
-  | Invalid_memory_kind
-  | Title_too_long
-  | Content_empty
-  | Long_term_via_explicit_write_not_yet_supported
-  | Rows_dropped_by_cap
-  | No_memory_write_error
-
-val memory_write_error_kind_to_string : memory_write_error_kind -> string
-
 (** Result of validating a [keeper_memory_write] call's args. Exposed
     so tests can pin the error_kind taxonomy without constructing a
     [Coord.config]. *)
@@ -75,6 +65,8 @@ type memory_write_error_kind =
   | Title_too_long
   | Content_empty
   | Long_term_via_explicit_write_not_yet_supported
+  | Rows_dropped_by_cap
+  | No_memory_write_error
 
 val memory_write_error_kind_to_string : memory_write_error_kind -> string
 

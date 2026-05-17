@@ -339,7 +339,7 @@
           <tr><th scope="row">RFC-0107</th><td>Eio_context Switch wiring + Jsonl_atomic writer</td><td><span class="rfc-tag merged">Phase C.1 (#15906/#15932)</span></td><td>MASC #16, S11 (meta CAS)</td></tr>
           <tr><th scope="row">RFC-0108</th><td>PR/Worktree safety + atomic JSONL append</td><td><span class="rfc-tag merged">Implemented (#15921/#15928/#15936)</span></td><td>S11/S12 (meta/prune persistence)</td></tr>
           <tr><th scope="row">OAS-021</th><td>ApprovalRequired missing-callback policy boundary</td><td><span class="rfc-tag draft">Draft written</span></td><td>OAS #18, S13 — silent safety bypass root fix</td></tr>
-          <tr><th scope="row">RFC-0109</th><td>Keeper admission denial boundary</td><td><span class="rfc-tag draft">Draft written</span></td><td>S1, S2, S3, S4, P0 §1/§3 — typed admission-denial root fix</td></tr>
+          <tr><th scope="row">RFC-0124</th><td>Keeper admission denial boundary</td><td><span class="rfc-tag draft">Draft written</span></td><td>S1, S2, S3, S4, P0 §1/§3 — typed admission-denial root fix</td></tr>
         </tbody>
       </table>
     </section>
@@ -701,7 +701,7 @@ tool requires approval
         <li><code>keeper_supervisor</code>와 <code>keeper_keepalive</code>의 no-op skip을 <code>admission_denied</code> lifecycle event + Prometheus counter + WARN log로 전환.</li>
         <li><code>masc_keeper_spawn_slot_denied_total</code> metric 추가. labels: <code>keeper</code>, <code>surface</code>, <code>reason</code>.</li>
         <li>dashboard lifecycle patcher가 <code>admission_denied</code>를 Offline 상태로 반영하도록 확장.</li>
-        <li>설계 SSOT: <code>docs/rfc/RFC-0109-keeper-admission-denial-boundary.md</code>.</li>
+        <li>설계 SSOT: <code>docs/rfc/RFC-0124-keeper-admission-denial-boundary.md</code>.</li>
       </ul>
       <h3>MASC P0: FD/disk probe-unknown fail-closed</h3>
       <ul>
@@ -709,7 +709,7 @@ tool requires approval
         <li><code>keeper_disk_pressure</code>: <code>Probe_error</code>가 더 이상 Admit으로 빠지지 않고 <code>disk_probe_error</code> admission block으로 노출.</li>
         <li>supervisor/keepalive launch gate가 <code>base_path</code>를 넘겨 disk admission까지 실행하도록 연결.</li>
         <li>테스트 환경의 host probe 권한 차이는 <code>Keeper_registry.For_testing</code> hook으로만 우회하고, public runtime path는 strict policy 유지.</li>
-        <li>설계 SSOT: <code>docs/rfc/RFC-0109-keeper-admission-denial-boundary.md</code>.</li>
+        <li>설계 SSOT: <code>docs/rfc/RFC-0124-keeper-admission-denial-boundary.md</code>.</li>
       </ul>
       <h3>OAS P0: ApprovalRequired no-callback fail-closed option</h3>
       <ul>

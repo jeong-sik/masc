@@ -123,12 +123,15 @@ let enqueue (result : Tool_result.t) =
         false))
   in
   if dropped_for_full_queue
-  then
+  then begin
+    Prometheus.inc_counter
+      Prometheus.metric_tool_metrics_persist_dropped ();
     let dropped = Atomic.fetch_and_add dropped_full_queue 1 + 1 in
     if dropped = 1 || dropped mod 1024 = 0 then
       Log.Metrics.warn
         "tool_metrics_persist: dropped %d record(s) because write queue is full"
         dropped
+  end
 
 (* ── Flush logic ────────────────────────────────────── *)
 

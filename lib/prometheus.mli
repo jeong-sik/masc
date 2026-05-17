@@ -167,6 +167,9 @@ val metric_backend_mutex_held_sec : string
     [room_uninitialized | agent_not_joined]. *)
 val metric_tool_join_required_guard : string
 
+(** Counter for [tool_metrics_persist] write-queue overflow drops. No labels. *)
+val metric_tool_metrics_persist_dropped : string
+
 (** #9771: counter for keeper turn-slot semaphore wait timeouts.
     Labels: [keeper, channel] with channel in
     [autonomous_queue_head | autonomous | turn]. *)

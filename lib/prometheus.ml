@@ -337,6 +337,15 @@ let install_backend_mutex_observers () =
    Cardinality: ~50 × ~10 × 2 = ~1000 series, safe for Prometheus. *)
 let metric_tool_join_required_guard = "masc_tool_join_required_guard_total"
 
+(* tool_metrics_persist write queue overflow.
+   Counts JSONL records dropped because the bounded write queue is full.
+   No labels (single source). Existing in-memory [dropped_full_queue]
+   Atomic counter is summarised by sampled WARN (every 1024th drop);
+   this Prometheus counter exposes per-drop emission so alerting on
+   sustained pressure does not depend on log scraping. *)
+let metric_tool_metrics_persist_dropped =
+  "masc_tool_metrics_persist_dropped_total"
+
 (* #9771: keeper turn-slot semaphore wait timeout counter.
 
    Production observed multiple keepers ([sangsu], [janitor],
@@ -1297,6 +1306,11 @@ let init () =
     metric_tool_join_required_guard
     "Total join-required guard rejections before tool execution (labels: tool, \
      agent_name, reason=room_uninitialized|agent_not_joined)"
+    Counter;
+  add
+    metric_tool_metrics_persist_dropped
+    "Total JSONL records dropped by tool_metrics_persist because the bounded \
+     write queue is full. No labels."
     Counter;
   add
     Keeper_metrics.metric_keeper_turn_queue_depth

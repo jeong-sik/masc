@@ -1,47 +1,17 @@
-(** Masc_http_client — cohttp-eio wrapper with explicit socket close.
+(** Masc_http_client — typed pool front-end for outbound HTTP.
 
-    cohttp-eio 6.1.1 does not reliably close the underlying TCP
-    socket fd when the {!Eio.Switch} exits (observed on macOS).
-    This module intercepts the connection factory via
-    [Cohttp_eio.Client.make_generic] to capture the raw socket and
-    close it explicitly on switch release.
+    Every public entry point delegates to a process-wide
+    {!Pool.t} (lib/masc_http_client/pool.mli), which owns the
+    underlying piaf transport, keep-alive, and TLS context cache.
+    Callers should reach for [post_sync] / [get_sync] /
+    [get_response_sync] for plain status+body access, or import
+    {!Pool} directly when they need typed response headers or
+    non-default pool configuration.
 
-    All MASC code that makes outbound HTTP requests should use this
-    module instead of {!Cohttp_eio.Client.make} directly.  See
-    {{:https://github.com/jeong-sik/masc-mcp/issues/3221} #3221}.
-
-    Internal helper {!with_optional_timeout} stays private — every
-    public entry point exposes [?clock ?timeout_sec] directly so
-    callers do not see the timeout-fiber-race scaffolding. *)
-
-(** {1 Connection factory} *)
-
-val make_closing_client :
-  sw:Eio.Switch.t ->
-  net:[> `Network | `Platform of [> `Generic ] ] Eio.Resource.t ->
-  https:
-    (Uri.t ->
-     [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t ->
-     [> `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t)
-    option ->
-  Cohttp_eio.Client.t
-(** [make_closing_client ~sw ~net ~https] builds a
-    {!Cohttp_eio.Client.t} that:
-
-    + Resolves the URI hostname via {!Eio.Net.getaddrinfo_stream}
-      (raises [Invalid_argument] when no result).
-    + Connects raw via {!Eio.Net.connect}.
-    + For [https://] URIs, calls [https = Some wrap] with [(uri,
-      sock)] to layer TLS; raises [Invalid_argument] when [https =
-      None] but the URI is HTTPS.
-    + Tracks every connection in an internal flow list and registers
-      an {!Eio.Switch.on_release} hook to close all flows when the
-      switch exits.
-
-    The polymorphic [net] / [https] arguments accept any
-    Eio.Net.t-compatible resource and any TLS wrapper that returns
-    a flow-shaped resource — kept abstract so callers can plug in
-    their own TLS stack. *)
+    The [~net] / [?https] arguments on the sync helpers are
+    accepted (and ignored) for source-level backwards compatibility
+    with callers that still thread an [Eio.Net] handle; they will be
+    dropped in a follow-up API cleanup. *)
 
 (** {1 Response payload} *)
 
@@ -57,14 +27,14 @@ type response = {
 (** {1 Synchronous request helpers}
 
     All three helpers:
-    - Run inside {!Eio.Switch.run}, so connection cleanup is
-      guaranteed regardless of success or exception.
-    - Add [Connection: close] to the request headers so the
-      cohttp-eio reader stops at end-of-stream.
+    - Acquire a connection from the per-process {!Pool.t}; keep-alive
+      lets repeated requests against the same host reuse the same TCP+TLS
+      session.  Connection cleanup is owned by the pool's idle-eviction
+      fiber, not the caller switch.
     - Cap the response body at 8 MB; oversize bodies surface
       [Error "masc_http_client: body size exceeds 8 MB"].
-    - Convert [Eio.Cancel.Cancelled] re-raises (cancellation
-      propagates), wrap any other exception as
+    - Convert {!Eio.Cancel.Cancelled} re-raises (cancellation
+      propagates); wrap any other exception as
       [Error (Printexc.to_string exn)].
     - When [?clock] {b and} [?timeout_sec > 0.0] are both supplied,
       race the request against an {!Eio.Time.sleep} fiber.  On
@@ -125,7 +95,7 @@ val get_sync :
     discarded — returns [Ok (status_code, body_string)] for callers
     that only care about status + body. *)
 
-(** {1 Typed pool surface — RFC-0107 Phase D}
+(** {1 Typed pool surface}
 
     Re-exports [Pool] (lib/masc_http_client/pool.mli) so callers and
     tests can name the typed connection pool without reaching into

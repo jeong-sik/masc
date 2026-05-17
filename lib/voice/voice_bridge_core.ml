@@ -107,13 +107,6 @@ let voice_mcp_port () =
   | Some port -> port
   | None -> Env_config_runtime.Voice.default_port
 
-(* RFC-0107 Phase D.2c bis-2 — [client_for_uri] / [client_for_uri_result]
-   removed.  All voice_bridge HTTP callers now route through
-   [Masc_http_client.post_sync] / [.get_sync] / [.get_response_sync],
-   which delegate to the per-process piaf pool.  The legacy explicit
-   client factory + [make_closing_client] workaround is no longer
-   needed; the pool owns transport and TLS context caching. *)
-
 (** ============================================
     Structured Logging
     ============================================ *)

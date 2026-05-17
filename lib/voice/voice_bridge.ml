@@ -454,17 +454,7 @@ let rec retry_with_backoff ~clock ~attempt ~max_attempts ~backoff_sec operation 
     failure
 ;;
 
-(** Make a single HTTP POST request to the Voice MCP server.
-
-    RFC-0107 Phase D.2c bis-2 — migrated off the legacy
-    [Cohttp_eio.Client.post] + [Masc_http_client.make_closing_client]
-    pattern.  Now routes through [Masc_http_client.post_sync] which
-    delegates to the process-wide piaf pool (keep-alive across the
-    retry loop in [call_voice_mcp_endpoint] above).
-
-    [~net] is kept on the signature because the existing public
-    [Masc_http_client.post_sync] still takes it (will be dropped in a
-    future API cleanup once all callers are pool-aware). *)
+(** Make a single HTTP POST request to the Voice MCP server. *)
 let single_voice_mcp_call ~net ~uri ~headers_list ~body_str =
   match
     Masc_http_client.post_sync ~net ~url:(Uri.to_string uri)
@@ -701,9 +691,6 @@ let is_voice_server_available ~sw:_ ~clock ~net =
     else (
       voice_server_check_time := now;
       let check () =
-        (* RFC-0107 Phase D.2c bis-2 — migrated off make_closing_client to
-           the pooled get_sync.  Health check is one-shot and idempotent;
-           pool reuse across check intervals trims the TLS handshake. *)
         let uri =
           match Voice_runtime_overlay.session_health_url_of_endpoint endpoint with
           | Ok url -> Uri.of_string url
@@ -998,9 +985,6 @@ let health_check ~sw:_ ~clock:_ ~net () =
       | Ok url -> Uri.of_string url
       | Error _ -> voice_health_uri ()
     in
-    (* RFC-0107 Phase D.2c bis-2 — migrated off make_closing_client to
-       get_response_sync (typed full response with body).  Pool reuse
-       trims TLS handshake on repeated health checks. *)
     match
       Masc_http_client.get_response_sync ~net ~url:(Uri.to_string uri)
         ~headers:[] ()

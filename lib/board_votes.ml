@@ -883,33 +883,21 @@ let reset_global_for_test () =
     load_persisted_sub_boards store;
     store)
 
-(** Flush any dirty state to disk. Call on shutdown to prevent data loss. *)
+(** Flush any dirty state to disk. Call on shutdown to prevent data loss.
+
+    RFC-0091 (board persistence path unification): mutation/vote flushes
+    write a full snapshot via [save_jsonl_snapshot] instead of replaying
+    the dirty list through [append_post]/[append_comment]. The previous
+    [List.iter append_post posts] grew [board_posts.jsonl] by one line per
+    vote/mutation per post, sharing the same .id, producing the dup vector
+    that motivated the RFC. The snapshot path was already canonical for
+    restart-load ([load_persisted_posts]), so promoting it to the
+    flush-write path makes [board_posts.jsonl] a true snapshot file with
+    one line per id and atomic rewrite semantics. *)
 let flush_dirty store =
-  let posts, comments, vote_log =
+  let had_dirty, vote_log =
     with_lock store (fun () ->
       let had_dirty = store.dirty_posts || store.dirty_comments in
-      let posts =
-        if store.dirty_posts then
-          Hashtbl.fold
-            (fun post_id () acc ->
-              match Hashtbl.find_opt store.posts post_id with
-              | Some post -> post :: acc
-              | None -> acc)
-            store.dirty_post_ids []
-        else
-          []
-      in
-      let comments =
-        if store.dirty_comments then
-          Hashtbl.fold
-            (fun comment_id () acc ->
-              match Hashtbl.find_opt store.comments comment_id with
-              | Some comment -> comment :: acc
-              | None -> acc)
-            store.dirty_comment_ids []
-        else
-          []
-      in
       Hashtbl.clear store.dirty_post_ids;
       Hashtbl.clear store.dirty_comment_ids;
       store.dirty_posts <- false;
@@ -918,11 +906,19 @@ let flush_dirty store =
       let vote_log =
         if had_dirty then Some (vote_log_jsonl store) else None
       in
-      (posts, comments, vote_log))
+      (had_dirty, vote_log))
   in
   with_persist_lock store (fun () ->
-      List.iter append_post posts;
-      List.iter append_comment comments;
+      if had_dirty then begin
+        let posts_jsonl = with_lock store (fun () -> posts_jsonl_snapshot store) in
+        let comments_jsonl =
+          with_lock store (fun () -> comments_jsonl_snapshot store)
+        in
+        save_jsonl_snapshot ~where:"flush_posts"
+          ~path:(persist_path ()) posts_jsonl;
+        save_jsonl_snapshot ~where:"flush_comments"
+          ~path:(comments_path ()) comments_jsonl
+      end;
       Option.iter save_vote_log_jsonl vote_log)
 
 

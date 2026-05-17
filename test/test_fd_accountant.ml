@@ -224,6 +224,34 @@ let test_with_process_uses_sandbox_slot () =
       check int "With_process sandbox slot released" 0
         (kind_in_flight FA.Sandbox_exec))
 
+let test_autonomy_exec_run_uses_sandbox_slot () =
+  Eio_main.run @@ fun env ->
+  Eio_guard.enable () ;
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp_cdal_runtime.Autonomy_exec.reset_run_guard_for_testing () ;
+      Eio_guard.disable ())
+    (fun () ->
+      Masc_mcp_cdal_runtime.Autonomy_exec.reset_run_guard_for_testing () ;
+      FA.install_autonomy_exec_sandbox_exec_guard () ;
+      let clock = Eio.Stdenv.clock env in
+      let () =
+        Eio.Switch.run @@ fun sw ->
+        Eio.Fiber.fork ~sw (fun () ->
+            ignore
+              (Masc_mcp_cdal_runtime.Autonomy_exec.run
+                 ~sw
+                 ~clock
+                 ~config:Masc_mcp_cdal_runtime.Autonomy_exec.default_config
+                 ~argv:[ "/bin/sleep"; "0.05" ]
+                 ~timeout_s:2.0)) ;
+        check bool "Autonomy_exec holds sandbox slot while child runs" true
+          (wait_until ~clock ~attempts:100 (fun () ->
+               kind_in_flight FA.Sandbox_exec > 0))
+      in
+      check int "Autonomy_exec sandbox slot released" 0
+        (kind_in_flight FA.Sandbox_exec))
+
 let () =
   Alcotest.run "Fd_accountant"
     [
@@ -262,5 +290,7 @@ let () =
             test_process_eio_run_argv_uses_sandbox_slot ;
           test_case "With_process uses sandbox slot" `Quick
             test_with_process_uses_sandbox_slot ;
+          test_case "Autonomy_exec run uses sandbox slot" `Quick
+            test_autonomy_exec_run_uses_sandbox_slot ;
         ] ) ;
     ]

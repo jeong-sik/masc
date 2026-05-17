@@ -144,6 +144,8 @@ let transition provider ~success =
         provider.state
         <- Unhealthy
              {
+               (* NDT-OK: provider health transitions stamp the external probe
+                  observation time; deterministic logic depends on counters. *)
                since = Unix.gettimeofday ();
                consecutive_failures = provider.consecutive_failures;
              }

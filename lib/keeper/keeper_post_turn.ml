@@ -557,6 +557,7 @@ let apply_post_turn_lifecycle_with_resilience_handles
           let () =
             try on_compaction_started ()
             with
+            | Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
                 Keeper_callback_failure.record ~base_dir ~meta:base_meta
                   ~callback:"on_compaction_started" exn

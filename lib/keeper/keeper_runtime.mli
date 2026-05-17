@@ -55,6 +55,13 @@ val bootable_keeper_names : Coord.config -> string list
 val autoboot_excluded_keeper_reasons : Coord.config -> autoboot_exclusion list
 (** Configured keepers skipped by autoboot with operator-facing reason labels. *)
 
+val auto_recoverable_paused_keeper_names : ?now:float -> Coord.config -> string list
+(** Configured, autoboot-enabled keepers that are currently paused but whose
+    supervisor-owned auto-resume timer has elapsed.  These keepers remain
+    excluded from {!bootable_keeper_names} until the supervisor clears
+    [paused=false], but they are enough reason to start the supervisor sweep on
+    cold boot. *)
+
 val canonicalize_if_keeper : Coord.config -> string -> string
 (** [canonicalize_if_keeper config name] returns [keeper-<n>-agent]
     when [name] (bare or already canonical) refers to a configured

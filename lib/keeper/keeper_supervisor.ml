@@ -1907,9 +1907,7 @@ let sweep_and_recover (ctx : _ context) =
     else (
       match read_meta ctx.config name with
       | Ok (Some meta)
-        when meta.paused
-             && Option.is_some meta.auto_resume_after_sec
-             && (not (paused_meta_requires_reconcile_recovery meta))
+        when Keeper_supervisor_types.paused_meta_auto_resume_due ~now meta
              && not (Keeper_approval_queue.has_pending_for_keeper ~keeper_name:meta.name)
         ->
         let cascade_name = Keeper_types.cascade_name_of_meta meta in

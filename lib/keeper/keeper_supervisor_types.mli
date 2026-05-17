@@ -61,6 +61,13 @@ val paused_meta_requires_reconcile_recovery : keeper_meta -> bool
 (** Internal: predicate identifying paused metas whose last_blocker class
     requires reconcile-recovery rather than straight resume. *)
 
+val paused_meta_auto_resume_due : now:float -> keeper_meta -> bool
+(** True when [meta] is an auto-paused keeper whose self-healing backoff has
+    elapsed.  Intentional/operator pauses ([auto_resume_after_sec = None])
+    and reconcile-gated pauses are excluded.  This pure predicate deliberately
+    does not inspect cascade health or approval queues; callers that can see
+    those runtime surfaces must still apply them before mutating state. *)
+
 val cohort_key_of_reason : Keeper_registry.failure_reason option -> string
 (** Map a structured failure_reason to a cohort key for self-preservation grouping. *)
 

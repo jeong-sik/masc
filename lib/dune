@@ -91,6 +91,7 @@
    keeper_exec_fs
    keeper_exec_ide
    keeper_shell_docker
+   keeper_task_worktree_lazy
    keeper_egress_audit
    keeper_shell_gh_context
    keeper_shell_bg_task

@@ -64,6 +64,30 @@ let status_to_string = function
   | Warn -> "warn"
   | Error -> "error"
 
+let string_has_prefix ~prefix value =
+  let prefix_len = String.length prefix in
+  String.length value >= prefix_len && String.sub value 0 prefix_len = prefix
+
+let string_has_suffix ~suffix value =
+  let suffix_len = String.length suffix in
+  let value_len = String.length value in
+  value_len >= suffix_len
+  && String.sub value (value_len - suffix_len) suffix_len = suffix
+
+let warning_is_bootstrap_seed_only warning =
+  string_has_prefix ~prefix:"Repo config seed exists at " warning
+  && string_has_suffix
+       ~suffix:"; it is bootstrap-only, not the active config root."
+       warning
+
+let warning_is_blocking warning = not (warning_is_bootstrap_seed_only warning)
+
+let has_blocking_warning (report : t) =
+  match report.status with
+  | Ok -> false
+  | Error -> true
+  | Warn -> List.exists warning_is_blocking report.warnings
+
 let dedupe_keep_order values =
   let seen = Hashtbl.create (List.length values) in
   List.filter

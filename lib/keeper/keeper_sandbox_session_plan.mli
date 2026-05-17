@@ -87,7 +87,9 @@ type t
     - [labels] — the 7 deterministic labels only (component /
       base_path_hash / keeper / kind / network / turn_id /
       ttl_sec-if-given); the edge adds [owner_pid] + [started_at].
-    - [mounts] — the workspace volume ([host_root:container_root:rw])
+    - [mounts] — the workspace volume ([host_root:container_root:rw]),
+      the read-only MASC config mount
+      ([<base_path>/.masc/config:<container_root>/.masc/config:ro]),
       followed by the two identity mounts
       ([<host_root>/.docker-identity/passwd:/etc/passwd:ro], [.../group:/etc/group:ro]).
     - [identity_files] — the [(passwd_path, passwd_content);
@@ -95,7 +97,8 @@ type t
       the identity mounts are valid. Content is deterministic in
       [uid]/[gid].
     - [env_overrides] — [("HOME","/tmp"); ("USER","keeper");
-      ("LOGNAME","keeper"); ("SHELL","/bin/sh")] then [extra_env].
+      ("LOGNAME","keeper"); ("SHELL","/bin/sh")], container-side
+      [MASC_BASE_PATH] / [MASC_CONFIG_DIR], then [extra_env].
     - [ulimits] — [[{ name = "nofile"; soft = n; hard = n }]] where
       [n = Env_config_keeper.KeeperSandbox.nofile_limit ()].
     - [pids_limit], [memory_limit], [tmpfs], [read_only_rootfs] —

@@ -51,7 +51,7 @@ let first_nonempty_line output =
 let allowed_shell_commands = [
   "dune"; "make"; "npm"; "npx"; "node";
   "git"; "ls"; "cat"; "head"; "tail"; "wc";
-  "rg"; "find"; "diff"; "patch"; "mkdir";
+  "rg"; "grep"; "find"; "diff"; "patch"; "mkdir";
   "opam"; "ocamlfind"; "tsc";
 ]
 
@@ -60,7 +60,9 @@ let validate_code_shell_command (command : string) : (unit, string) Result.t =
     ~allow_pipes:true
     ~allowed_commands:allowed_shell_commands
     command
-  |> Result.map_error Worker_dev_tools.block_reason_to_string
+  |> Result.map_error
+       (Worker_dev_tools.block_reason_to_string_with_allowlist
+          ~allowed_commands:allowed_shell_commands)
 
 let git_common_root path =
   try

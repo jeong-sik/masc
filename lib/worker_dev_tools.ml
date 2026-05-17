@@ -311,8 +311,19 @@ let extract_command_name cmd =
         supported alternative (rg/jq)
       - everything else → plain allowlist
 
-    The helper is a pure function of the tried command name. *)
-let command_blocked_hint name =
+    The helper is a pure function of the tried command name and the
+    optional caller-specific allowlist. *)
+let default_common_allowed_commands_hint =
+  "dune, git, rg, ls, cat, head, tail, grep, find, make, node, npm, \
+   python3, pytest, cargo, go"
+;;
+
+let allowed_commands_hint = function
+  | [] -> "(none)"
+  | commands -> String.concat ", " commands
+;;
+
+let command_blocked_hint ?allowed_commands name =
   let looks_like_source_code s =
     (* Contains '.' at a non-boundary position (A.B), or starts with a
        reserved OCaml keyword that no shell command uses. *)
@@ -375,17 +386,18 @@ let command_blocked_hint name =
        masc_code_write / masc_code_read instead."
     | _ -> ""
   in
-  (* The "Allowed: ..." list below is a hand-curated prefix of
-     [dev_allowed_commands] — kept short so the hint fits in one line of
-     LLM context, but truthful (no stale entries). Keep in sync when
-     dev_allowed_commands changes; the pointer to keeper_tools_list
-     covers anything not in the printed prefix. *)
+  let list_label, commands =
+    match allowed_commands with
+    | None -> "Common allowed commands", default_common_allowed_commands_hint
+    | Some commands -> "Allowed commands for this tool", allowed_commands_hint commands
+  in
   Printf.sprintf
-    "Command blocked: '%s' is not allowed. Common allowed commands: dune, git, rg, ls, \
-     cat, head, tail, grep, find, make, node, npm, python3, pytest, cargo, go.%s See \
+    "Command blocked: '%s' is not allowed. %s: %s.%s See \
      keeper_tools_list for the exhaustive tool surface, and keeper_fs_read / \
      keeper_fs_edit for file operations."
     name
+    list_label
+    commands
     alt
 ;;
 
@@ -417,6 +429,11 @@ let block_reason_to_string = function
     "File redirects are not allowed. Only fd redirects like 2>&1 are permitted."
   | Pipes_not_allowed -> "Pipes are not allowed. Run one command per call."
   | Command_not_allowed name -> command_blocked_hint name
+;;
+
+let block_reason_to_string_with_allowlist ~allowed_commands = function
+  | Command_not_allowed name -> command_blocked_hint ~allowed_commands name
+  | reason -> block_reason_to_string reason
 ;;
 
 let validate_command_with_allowlist ~allowed_commands cmd =
@@ -913,6 +930,26 @@ let path_validation_tokens tokens =
       ~seen_primary_pattern:false
       []
       args
+;;
+
+let existing_dir_path_values cmd =
+  let rec loop expect_existing_dir acc = function
+    | [] -> List.rev acc
+    | token :: rest ->
+      if token.value = ""
+      then loop expect_existing_dir acc rest
+      else if expect_existing_dir
+      then loop false (token.value :: acc) rest
+      else (
+        match path_value_of_flagged_token token.value with
+        | Some value when inline_path_flag_requires_existing_dir token.value ->
+          loop false (value :: acc) rest
+        | Some _ -> loop false acc rest
+        | None when is_path_flag token.value ->
+          loop (path_flag_requires_existing_dir token.value) acc rest
+        | None -> loop false acc rest)
+  in
+  cmd |> tokenize_path_args |> path_validation_tokens |> loop false []
 ;;
 
 let validate_command_paths ?workdir cmd =
@@ -1774,48 +1811,36 @@ let make_readonly_tools ~proc_mgr ~clock ?workdir ?on_exec () : Agent_sdk.Tool.t
 (* exception internally and surfaces them via Parsed.t.             *)
 (* ================================================================ *)
 
-let too_complex_reason_tag (r : Masc_exec.Parsed.reason_too_complex) =
-  match r with
-  | `Heredoc -> "heredoc"
-  | `Here_string -> "here_string"
-  | `Cmd_subst -> "cmd_subst"
-  | `Proc_subst -> "proc_subst"
-  | `Subshell -> "subshell"
-  | `Arith_expansion -> "arith_expansion"
-  | `Control_flow -> "control_flow"
-  | `Logic_op -> "logic_op"
-  | `Function_def -> "function_def"
-  | `Glob_brace -> "glob_brace"
-  | `Background -> "background"
-  | `Redirect -> "redirect"
-  | `Unknown_construct s -> "unknown:" ^ s
-;;
-
-let aborted_reason_tag (r : Masc_exec.Parsed.reason_aborted) =
-  match r with
-  | `Timeout_50ms -> "timeout_50ms"
-  | `Depth_limit -> "depth_limit"
-  | `Token_limit_50k -> "token_limit_50k"
-;;
-
-(* Coarse outcome tags.  Stable strings so downstream telemetry can
-   histogram them without re-parsing. *)
-let shadow_parse_outcome (cmd : string) : string =
+(* Typed parser outcome — primary classification surface.  String
+   renderings exist only at log-emission boundaries via
+   [Gate_diff_types.parse_outcome_kind_to_tag].  Downstream histogram
+   dispatch (Legendary_counters) consumes the typed variant exhaustively
+   so a new [Parsed.reason_too_complex] arm is a compile-time forcing
+   function, not a silent "other"-bucket landing. *)
+let shadow_parse_outcome_kind (cmd : string) : parse_outcome_kind =
   match Masc_exec_bash_parser.Bash.parse_string cmd with
-  | Masc_exec.Parsed.Parsed _ -> "parsed_simple"
-  | Masc_exec.Parsed.Parse_error _ -> "parse_error"
-  | Masc_exec.Parsed.Parse_aborted r -> "parse_aborted:" ^ aborted_reason_tag r
-  | Masc_exec.Parsed.Too_complex r -> "too_complex:" ^ too_complex_reason_tag r
+  | Masc_exec.Parsed.Parsed _ -> Parsed_simple
+  | Masc_exec.Parsed.Parse_error _ -> Parse_error
+  | Masc_exec.Parsed.Parse_aborted r -> Parse_aborted r
+  | Masc_exec.Parsed.Too_complex r -> Too_complex r
+;;
+
+(* Stable string rendering of the parse outcome — retained for log
+   emission and telemetry tags that already exist in operator
+   dashboards. Computes via the typed kind so the wording cannot
+   drift between this function and [Legendary_counters]. *)
+let shadow_parse_outcome (cmd : string) : string =
+  parse_outcome_kind_to_tag (shadow_parse_outcome_kind cmd)
 ;;
 
 (* Legacy verdict ↔ shadow verdict cross-check.  Returns a tuple of
-   legacy allow/deny + shadow tag, so telemetry can spot "legacy
+   legacy allow/deny + shadow kind, so telemetry can spot "legacy
    allows but shadow cannot parse" drift without needing two
    separate call sites.  Intentionally side-effect free. *)
-let cross_check_command ~legacy cmd = legacy, shadow_parse_outcome cmd
+let cross_check_command ~legacy cmd = legacy, shadow_parse_outcome_kind cmd
 
 (* Classification functions that depend on worker_dev_tools internals
-   (validate_command, shadow_parse_outcome). Types come from
+   (validate_command, shadow_parse_outcome_kind). Types come from
    Gate_diff_types via [include Gate_diff_types] at the top. *)
 
 let classify_legacy cmd : legacy_verdict =
@@ -1828,7 +1853,6 @@ let classify_legacy cmd : legacy_verdict =
 ;;
 
 let classify_shadow cmd : shadow_verdict =
-  let parse_tag = shadow_parse_outcome cmd in
   (* Destructive classifier runs on the raw string regardless of
      parser success — the substring catalogue does not need AST
      structure. This keeps the shadow path meaningful on commands
@@ -1836,9 +1860,10 @@ let classify_shadow cmd : shadow_verdict =
   match classify_destructive cmd with
   | Some (cls, sub) -> Shadow_deny_destructive (cls, sub)
   | None ->
-    if parse_tag = "parsed_simple"
-    then Shadow_allow { parse_tag }
-    else Shadow_parse_unsupported { parse_tag }
+    (match shadow_parse_outcome_kind cmd with
+     | Parsed_simple -> Shadow_allow
+     | (Parse_error | Parse_aborted _ | Too_complex _) as kind ->
+       Shadow_parse_unsupported { kind })
 ;;
 
 let diff_command cmd : gate_diff * legacy_verdict * shadow_verdict =

@@ -66,7 +66,6 @@ let test_autoboot_warmup_jitter_is_bounded_not_linear () =
     [
       "analyst";
       "executor";
-      "glm-coding-plan";
       "issue_king";
       "janitor";
       "masc-improver";
@@ -76,6 +75,7 @@ let test_autoboot_warmup_jitter_is_bounded_not_linear () =
       "sangsu";
       "scholar";
       "taskmaster";
+      "tech_glutton";
       "velvet-hammer";
       "verifier";
     ]

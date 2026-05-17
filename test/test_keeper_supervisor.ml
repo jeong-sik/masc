@@ -251,15 +251,15 @@ let test_persona_drift_check_uses_toml_persona_name () =
     (Filename.concat executor_persona_dir "profile.json")
     {|{"name":"Executor","role":"execution"}|};
   write_file
-    (Filename.concat keepers_dir "glm-coding-plan.toml")
+    (Filename.concat keepers_dir "tech_glutton.toml")
     {|
 [keeper]
-name = "glm-coding-plan"
+name = "tech_glutton"
 persona_name = "executor"
 goal = "plan coding work"
 |};
   check string "drift check honors TOML persona_name" "executor"
-    (Sup.persona_name_for_drift_check (make_meta "glm-coding-plan"))
+    (Sup.persona_name_for_drift_check (make_meta "tech_glutton"))
 
 let test_persona_drift_path_points_to_profile_json () =
   with_config_dir @@ fun config_dir ->
@@ -2152,7 +2152,7 @@ let () =
                   (Keeper_event_queue.length queue2)));
         test_case "never_started + autonomous + old started_at → Some" `Quick
           (fun () ->
-            (* Mirrors production case: glm-coding-plan with
+            (* Mirrors production case: an autonomous keeper with
                proactive.last_outcome=never_started but autonomous_turn_count>0. *)
             let entry = make_test_entry
                 ~name:"abs-never-started"

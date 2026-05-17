@@ -132,11 +132,37 @@ let get_or_create_ring name =
     Hashtbl.replace rings name r;
     r
 
+(* Observability for ring overflow.  When [ring.unflushed = cap] at
+   append time, the slot we are about to write into already holds an
+   unflushed decision_record — the flush loop has not kept up with
+   the append rate and a forensic record is being silently dropped.
+   Without this counter, ring overflow was invisible: [unflushed]
+   stayed pegged at [cap] and no Prometheus signal fired.  Closes
+   the silent data-loss gap noted in
+   .tmp/memory-compacting-analysis.html (decision_audit ring
+   overflow). *)
+let () =
+  Prometheus.register_counter
+    ~name:Keeper_metrics.metric_keeper_decision_audit_ring_overflows
+    ~help:
+      "Total [Keeper_decision_audit.append] events where the ring \
+       buffer slot being overwritten still held an unflushed \
+       record.  Each increment is one lost decision_record.  \
+       Non-zero counts mean flush_batch_size / flush_interval_sec \
+       is below the decision-emission rate."
+    ()
+;;
+
 let append ~keeper_name (rec_ : decision_record) =
   if not (audit_enabled ()) then ()
   else begin
     let ring = get_or_create_ring keeper_name in
     let cap = Array.length ring.buf in
+    if ring.unflushed >= cap then
+      Prometheus.inc_counter
+        Keeper_metrics.metric_keeper_decision_audit_ring_overflows
+        ~labels:[("keeper", keeper_name)]
+        ();
     ring.buf.(ring.pos mod cap) <- Some rec_;
     ring.pos <- (ring.pos + 1) mod cap;
     ring.count <- min (ring.count + 1) cap;

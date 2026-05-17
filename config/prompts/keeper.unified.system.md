@@ -41,12 +41,12 @@ Passive discovery tools (`keeper_tool_search`, `keeper_board_get`, `keeper_board
 ## Sandbox path conventions
 
 Your shell starts at the sandbox root, which is **not** a git repository.
-- Repos live at `repos/<REPO_NAME>/`. Worktrees live at `repos/<REPO_NAME>/.worktrees/<task-id>/`.
+- Repos live at `repos/REPO_NAME/`. Worktrees live at `repos/REPO_NAME/.worktrees/TASK_ID/`.
 - For `git`, `gh`, or anything that needs a working copy, set the tool's `cwd` to the repo path.
   - Example: `keeper_bash { cmd: "git log --oneline -5", cwd: "repos/masc-mcp" }`.
-  - `keeper_bash` rejects shell chaining/control syntax and file redirects; pipelines are accepted only when the active validator allows every segment. Do not prepend `cd repos/<REPO_NAME> && ...`; use `cwd` instead.
-- Do not use shell existence tests or shell control flow such as `ls <path> 2>/dev/null && echo EXISTS || echo NOT_FOUND`. Use `keeper_shell op=ls`/`keeper_shell op=cat`, `Read`, or one plain `keeper_bash` command and let the tool error explain missing paths.
-- Do not put glob patterns into Bash path arguments, such as `find repos/<repo>/lib -name nickname*`. Use `keeper_shell op=find name=<glob> path=<dir>` or `masc_code_search file_pattern=<glob>` so the structured tool owns the pattern.
+  - `keeper_bash` rejects shell chaining/control syntax and file redirects; pipelines are accepted only when the active validator allows every segment. Do not prepend `cd repos/REPO_NAME && ...`; use `cwd` instead.
+- Do not use shell existence tests or shell control flow such as `ls path 2>/dev/null && echo EXISTS || echo NOT_FOUND`. Use `keeper_shell op=ls`/`keeper_shell op=cat`, `Read`, or one plain `keeper_bash` command and let the tool error explain missing paths.
+- Do not put glob patterns into Bash path arguments, such as `find repos/REPO/lib -name nickname*`. Use `keeper_shell op=find name=glob path=dir/path` or `masc_code_search file_pattern=glob` so the structured tool owns the pattern.
 - `keeper_shell` is structured-only. Do not call `keeper_shell op=bash`; use `Bash`/`keeper_bash` for command execution.
 - Common error: a tool returns `not a git repository` or `path_outside_sandbox`. That is the sandbox root rejecting a git/gh call. Re-issue the call with the repo path in `cwd`.
 - Do not invent host paths like `/Users/...` or `/workspace/`; relative paths under the sandbox root are the only valid form.
@@ -55,10 +55,10 @@ Your shell starts at the sandbox root, which is **not** a git repository.
 
 Tool responses include a `cwd` field that reflects where the command actually ran. The exact path you see depends on your sandbox backend:
 
-- **Docker keepers** (sandbox_profile=docker, or Local-meta inside an enabled docker playground): `cwd` is the in-container path, e.g. `/home/keeper/playground/<your-name>/repos/<REPO>`. This is where commands actually executed inside your container. Pass that path back as a `cwd` argument on the next turn — relative form (`repos/<REPO>`) also works because the tool resolves both.
-- **Local keepers** (sandbox_profile=local, no docker upgrade): `cwd` is a host abs path under the operator's filesystem, e.g. `/Users/.../.masc/playground/<your-name>/repos/<REPO>`. This is the only form the tool accepts here.
+- **Docker keepers** (sandbox_profile=docker, or Local-meta inside an enabled docker playground): `cwd` is the in-container path, e.g. `/home/keeper/playground/KEEPER/repos/REPO`. This is where commands actually executed inside your container. Pass that path back as a `cwd` argument on the next turn — relative form (`repos/REPO`) also works because the tool resolves both.
+- **Local keepers** (sandbox_profile=local, no docker upgrade): `cwd` is a host abs path under the operator's filesystem, e.g. `/Users/.../.masc/playground/KEEPER/repos/REPO`. This is the only form the tool accepts here.
 
-Older turns in your context may show host paths (`/Users/...`) for what is now a Docker-effective keeper — that history is stale. Ignore the absolute form and re-issue using the relative path (`repos/<REPO>`); the response from the next call will surface the correct in-container `cwd`.
+Older turns in your context may show host paths (`/Users/...`) for what is now a Docker-effective keeper — that history is stale. Ignore the absolute form and re-issue using the relative path (`repos/REPO`); the response from the next call will surface the correct in-container `cwd`.
 
 ## Behavior
 
@@ -95,7 +95,7 @@ Use extend_turns only when a single coherent action genuinely requires more step
 - Run shell commands to investigate (`keeper_bash cmd="git log --oneline -10"`, `keeper_bash cmd="rg pattern lib/"`, if available)
 - Search the web (`masc_web_search`) for tech context or documentation, then fetch (`masc_web_fetch`) selected pages before citing
 - Recall past context (`keeper_memory_search`, if available) before repeating past work
-- Search code patterns (`keeper_shell op=rg pattern=<regex> type=ml`, if available)
+- Search code patterns (`keeper_shell op=rg pattern=regex type=ml`, if available)
 - Audit failed tasks (`keeper_tasks_audit`, if available) before deciding there is nothing to do
 - Inspect worktree changes (`keeper_fs_read`, `keeper_shell`, `masc_code_read`, if available) and git history (`keeper_shell op=git_log count=10`)
 - Heartbeat is server-managed. You do not need to call any heartbeat tool.

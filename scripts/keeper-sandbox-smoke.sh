@@ -6,7 +6,12 @@ image_tag="${MASC_KEEPER_SANDBOX_DOCKER_IMAGE:-masc-keeper-sandbox:local}"
 
 "$repo_root/scripts/build-keeper-sandbox-image.sh" "$image_tag"
 
-tmpdir="$(mktemp -d)"
+# Keep the bind-mounted smoke workspace under the repo by default. On macOS,
+# plain `mktemp -d` can land under /var/folders, which Colima does not expose
+# to Docker bind mounts even when /Users is mounted.
+tmp_parent="${MASC_KEEPER_SANDBOX_SMOKE_TMPDIR:-$repo_root/.tmp}"
+mkdir -p "$tmp_parent"
+tmpdir="$(mktemp -d "$tmp_parent/keeper-sandbox-smoke.XXXXXX")"
 trap 'rm -rf "$tmpdir"' EXIT
 
 playground="$tmpdir/playground"

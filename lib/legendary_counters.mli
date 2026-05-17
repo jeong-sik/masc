@@ -32,17 +32,33 @@ val incr_gh_exit_class : Gh_exit_class.t -> unit
     This is the first production consumer of {!Gh_exit_class};
     previous callers only relied on raw exit codes. *)
 
-val incr_too_complex_by_tag : string -> unit
-(** Record one shadow rejection attributable to a subset-excluded
-    bash construct.  [tag] is the [parse_tag] string emitted by
-    [Worker_dev_tools.shadow_parse_outcome] — accepted forms are the
-    full [too_complex:<reason>] prefix or the bare [<reason>] suffix.
-    Unknown reasons are bucketed under [too_complex_other] so the
-    total is always consistent with [gate_diff_shadow_cannot_parse].
+val incr_too_complex : Masc_exec.Parsed.reason_too_complex -> unit
+(** Record one shadow rejection attributable to a recognised-but-
+    unsupported bash construct.  Typed dispatch over the parser's full
+    [reason_too_complex] surface — every variant maps to a specific
+    atom; a new variant in [Masc_exec.Parsed] forces this function to
+    be updated at compile time.
+
+    [`Unknown_construct _] is the only payload-carrying variant; its
+    string is intentionally discarded at the counter boundary (the
+    structured log line carries it separately).  All [`Unknown_construct]
+    counts land in [too_complex_other] — the catch-all atom is now
+    reserved exclusively for this variant rather than being a sink for
+    unrecognised strings.
 
     Callers should invoke this IN ADDITION to [incr_gate_diff
-    `Shadow_cannot_parse] — the per-reason buckets are a histogram
+    Shadow_cannot_parse] — the per-reason buckets are a histogram
     refinement of that single bucket, not a replacement. *)
+
+val incr_too_complex_parse_error : unit -> unit
+(** Record one [Parse_error] outcome — Menhir/Lex error on the input.
+    Increments [too_complex_parse_error]. *)
+
+val incr_too_complex_parse_aborted : Masc_exec.Parsed.reason_aborted -> unit
+(** Record one [Parse_aborted _] outcome — parser bailed due to
+    timeout, depth limit, or token limit.  All three reasons collapse
+    into [too_complex_parse_aborted]; per-reason breakdown would be a
+    separate metric-rename PR. *)
 
 val reset : unit -> unit
 (** Zero every counter.  Used by tests; operators should not rely on

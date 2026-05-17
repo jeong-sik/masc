@@ -10,6 +10,9 @@ open Alcotest
 
 module Task_sandbox = Masc_mcp.Task_sandbox
 module Coord = Masc_mcp.Coord
+module Keeper_shell_shared = Masc_mcp.Keeper_shell_shared
+module Keeper_task_worktree_lazy = Masc_mcp.Keeper_task_worktree_lazy
+module Worker_dev_tools = Masc_mcp.Worker_dev_tools
 
 (* ============================================================
    Helpers
@@ -259,6 +262,98 @@ let write_tasks config tasks =
   let backlog = Coord.read_backlog config in
   Coord.write_backlog config
     { Masc_domain.tasks = tasks; last_updated = Masc_domain.now_iso (); version = backlog.version + 1 }
+
+let make_meta_with_current_task ~name ~task_id =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+          [ "name", `String name
+          ; "agent_name", `String name
+          ; "trace_id", `String ("trace-" ^ name)
+          ; "goal", `String "lazy worktree test"
+          ; "current_task_id", `String task_id
+          ])
+  with
+  | Ok meta -> meta
+  | Error err -> fail ("meta fixture failed: " ^ err)
+
+let with_lazy_worktree_fixture f =
+  let base = make_temp_dir () in
+  let dir = base in
+  ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)));
+  let saved_base = Sys.getenv_opt "MASC_BASE_PATH" in
+  Fun.protect
+    ~finally:(fun () ->
+      (match saved_base with
+       | Some v -> Unix.putenv "MASC_BASE_PATH" v
+       | None -> Unix.putenv "MASC_BASE_PATH" "");
+      ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir))))
+    (fun () ->
+      Eio_main.run (fun env ->
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+        run_cmd (Printf.sprintf "git init -q -b main %s" (Filename.quote dir));
+        let proc_mgr = Eio.Stdenv.process_mgr env in
+        let clock = Eio.Stdenv.clock env in
+        let cwd = Eio.Stdenv.cwd env in
+        Process_eio.init ~cwd_default:cwd ~proc_mgr ~clock;
+
+        Unix.putenv "MASC_BASE_PATH" dir;
+        let config = Coord.default_config dir in
+        let _msg = Coord.init config ~agent_name:None in
+        let agent_name = "lazy-agent" in
+        let _join = Coord.join config ~agent_name ~capabilities:[ "test" ] () in
+        let source_repo =
+          setup_named_repo_with_file ~base_path:dir ~repo_name:"masc-mcp"
+            ~file_path:"README.md"
+        in
+        let clone_path =
+          seed_playground_clone ~base_path:dir ~agent_name ~source_repo
+        in
+        let task_id = "task-lazy" in
+        let worktree_name = Playground_paths.worktree_dir_name agent_name task_id in
+        let worktree_path =
+          Filename.concat clone_path (Filename.concat ".worktrees" worktree_name)
+        in
+        let meta = make_meta_with_current_task ~name:agent_name ~task_id in
+        f ~config ~meta ~clone_path ~task_id ~worktree_name ~worktree_path))
+
+let test_resolve_write_cwd_lazy_creates_current_task_worktree () =
+  with_lazy_worktree_fixture
+    (fun ~config ~meta ~clone_path:_ ~task_id:_ ~worktree_name ~worktree_path ->
+       check bool "worktree initially missing" false (Sys.file_exists worktree_path);
+       let args =
+         `Assoc
+           [ ( "cwd"
+             , `String (Printf.sprintf "repos/masc-mcp/.worktrees/%s" worktree_name)
+             )
+           ]
+       in
+       match Keeper_shell_shared.resolve_keeper_shell_write_cwd ~config ~meta ~args with
+       | Error msg -> fail ("expected lazy cwd repair, got: " ^ msg)
+       | Ok cwd ->
+         check string "resolved cwd" worktree_path cwd;
+         check bool "worktree created" true (Sys.is_directory cwd);
+         check bool ".masc linked" true
+           (Sys.file_exists (Filename.concat cwd Common.masc_dirname)))
+
+let test_command_path_lazy_creates_current_task_worktree () =
+  with_lazy_worktree_fixture
+    (fun ~config ~meta ~clone_path ~task_id:_ ~worktree_name ~worktree_path ->
+       check bool "worktree initially missing" false (Sys.file_exists worktree_path);
+       let cmd = Printf.sprintf "git -C .worktrees/%s status -sb" worktree_name in
+       (match
+          Keeper_task_worktree_lazy.ensure_command_existing_dirs
+            ~config
+            ~meta
+            ~cwd:clone_path
+            ~cmd
+        with
+        | Error msg -> fail ("expected lazy command-path repair, got: " ^ msg)
+        | Ok () -> ());
+       check bool "worktree created" true (Sys.is_directory worktree_path);
+       match Worker_dev_tools.validate_command_paths ~workdir:clone_path cmd with
+       | Error msg -> fail ("validator should pass after lazy repair: " ^ msg)
+       | Ok () -> ())
 
 let test_full_lifecycle () =
   let base = make_temp_dir () in
@@ -830,6 +925,10 @@ let () =
         test_create_infers_repo_from_task_file_evidence;
       test_case "docker_visible_path_resolves_to_host" `Quick
         test_create_resolves_docker_visible_path_to_host_worktree;
+      test_case "lazy_write_cwd_creates_current_task_worktree" `Quick
+        test_resolve_write_cwd_lazy_creates_current_task_worktree;
+      test_case "lazy_command_path_creates_current_task_worktree" `Quick
+        test_command_path_lazy_creates_current_task_worktree;
       test_case "ambiguous_multi_repo_without_evidence" `Quick
         test_create_fails_ambiguous_multi_repo_without_evidence;
       test_case "infer_repo_from_task_repo_mentions" `Quick

@@ -74,11 +74,11 @@ let build_docker_argv ~image ~container_name ~base_path ~host_root ~croot
       ~container_root:croot
   @ Keeper_sandbox_runtime.docker_nofile_args ()
   @ Env_config_keeper.KeeperSandbox.read_only_rootfs_args ()
-  @ [
-    "--tmpfs";
-    Env_config_keeper.KeeperSandbox.tmpfs_mount ();
-    "--cap-drop=ALL";
-    "--security-opt"; "no-new-privileges";
+  @ [ "--tmpfs"
+    ; Env_config_keeper.KeeperSandbox.tmpfs_mount ()
+    ; "--cap-drop=ALL"
+    ; "--security-opt"
+    ; "no-new-privileges"
   ]
   @ seccomp_args
   @ [

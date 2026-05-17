@@ -63,6 +63,7 @@ let freeze (acc : hook_accumulator) : hook_outputs =
 
 let merge_requested_tool_names_seen ~seen requested =
   Keeper_types.dedupe_keep_order (seen @ requested)
+;;
 
 let record_requested_tool_names (acc : hook_accumulator) requested =
   acc.requested_tool_names <- requested;
@@ -1175,7 +1176,7 @@ let prepare_agent_setup
   match initial_tool_surface_result with
   | Error err -> Error err
   | Ok initial_tool_surface ->
-  record_requested_tool_names acc initial_tool_surface.all_allowed;
+    record_requested_tool_names acc initial_tool_surface.all_allowed;
     let discover_work_nudge () : string option =
       let meta = acc.meta in
       match meta.work_discovery_enabled with
@@ -1576,6 +1577,14 @@ let prepare_agent_setup
                           before answering in natural language. Do not substitute a \
                           shell command or status read for a listed required tool."
                          (String.concat ", " computed_surface.required_tool_names))
+                  else if computed_surface.tool_gate_requested
+                  then
+                    append_ctx
+                      ctx
+                      (generic_required_tool_gate_guidance
+                         ~has_current_task:(keeper_has_owned_active_task ())
+                         ~turn_affordances
+                         ~allowed_tool_names:computed_surface.all_allowed)
                   else if is_retry
                   then
                     append_ctx

@@ -11,7 +11,7 @@
 
 Three observations from `~/me/memory/procedural-memory/2026-04-24-keeper-docker-github-provider-evidence-record.md`:
 
-- **F-1**: `~/.masc/github-identities/anyang-keepers/gh/hosts.yml` stores the same OAuth token as `gh auth token` on the operator host (SHA-256 prefix `406d098bd41b` matches both sides). Identity separation is cosmetic.
+- **F-1**: `<base_path>/.masc/github-identities/anyang-keepers/gh/hosts.yml` stores the same OAuth token as `gh auth token` on the operator host (SHA-256 prefix `406d098bd41b` matches both sides). Identity separation is cosmetic.
 - **F-2**: `gh auth login --with-token` (Option B path) rewrites `hosts.yml:user` to the real token owner. Any downstream code that reads `user:` loses the identity label.
 - **F-4**: `scripts/rotate-keeper-gh-token.sh` used to default `GH_CONFIG_DIR` to a retired unscoped path. PAT rotation happened off-path, which is how F-1 drifted in.
 

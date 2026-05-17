@@ -23,7 +23,7 @@ Phase 2 closes both gaps without giving the trust loop authority to silently rew
 | Opt-in by default | `MASC_CASCADE_TRUST_PERSIST=1` (or `=dry`) gates everything in this RFC. Default-off for the first release. |
 | Observation over action | Phase 2a (operator recommendation) is observation-only. Phase 2b (persist) is a separate feature flag and a separate PR. |
 | No self-reload loops | Hot-reload must skip files the trust loop just wrote; otherwise each persist triggers a reload triggers a re-emit. |
-| Audit everything | Every persist write goes to `~/.masc/cascade_trust/applied/YYYY-MM/DD.jsonl` with before/after values and reason. |
+| Audit everything | Every persist write goes to `<base_path>/.masc/cascade_trust/applied/YYYY-MM/DD.jsonl` with before/after values and reason. |
 
 ## Phase 2a — Operator recommendation (observation only)
 
@@ -133,7 +133,7 @@ Recommendation: mtime threshold + a process-local flag (`Atomic.t` with timestam
 ## Out of scope
 
 - **Phase 3** (cost-aware boost via OAS `cost_tracker` token usage) — separate RFC.
-- **Cross-host trust sync** — every host has its own `~/.masc`; no fleet-level reputation in this RFC.
+- **Cross-host trust sync** — every host has its own `<base_path>/.masc`; no fleet-level reputation in this RFC.
 - **Auto-disable of dead cascade** — operator decides; the recommendation only suggests.
 
 ## Verification plan

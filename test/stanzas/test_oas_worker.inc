@@ -1,6 +1,6 @@
 ; OAS Worker (suppresses warning 32)
 ; setenv isolates MASC_BASE_PATH so tests never touch the developer's
-; live ~/.masc config when run via `dune test`.
+; live <base_path>/.masc config when run via `dune test`.
 
 (test
  (name test_oas_worker)

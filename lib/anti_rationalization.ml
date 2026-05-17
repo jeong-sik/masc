@@ -80,7 +80,7 @@ type review_result =
 
    Korean coverage is the immediate gap to close — the keeper
    fleet's 한국어 LLM output produced 0% detection pre-fix while
-   `~/.masc/institution_episodes.jsonl` carried real entries
+   `<base_path>/.masc/institution_episodes.jsonl` carried real entries
    like "나중에", "범위 밖", "재현 안됨".  English false-positives
    remain (substring has no word boundary) and are tracked under
    the same issue's option C/D follow-up. *)

@@ -58,7 +58,7 @@ or the turn dies before the cascade gets a chance to recover.
 
 ### 2.1 Empirical evidence (2026-05-01)
 
-`diag-keeper-cycle.sh` over `~/.masc/keepers/` shows:
+`diag-keeper-cycle.sh` over `<base_path>/.masc/keepers/` shows:
 
 ```
 KEEPER          TOTAL     OK    ERR   NULL    P50_S    P95_S    MAX_S

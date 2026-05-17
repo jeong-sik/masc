@@ -66,7 +66,7 @@ Acceptance: `unexpected_tool_names` distinct list shrinks to ≤ 0 occurrences o
 
 For any keeper with `sandbox_profile = Docker_hardened`:
 
-- A **per-turn container** owns the keeper's working set: `/work/playground` (rw, mounted from `~/.masc/playground/<keeper>/`), `/work/repos/<repo>` (rw if cloned), `/work/cache` (rw, ephemeral).
+- A **per-turn container** owns the keeper's working set: `/work/playground` (rw, mounted from `<base_path>/.masc/playground/<keeper>/`), `/work/repos/<repo>` (rw if cloned), `/work/cache` (rw, ephemeral).
 - The **host filesystem is not mounted**. `/Users`, `/Volumes`, `/`, `/etc`, etc. are invisible inside the container.
 - All four tools dispatch into the container:
   - `Bash` → `docker exec <cid> sh -c …` (existing path)
@@ -126,7 +126,7 @@ The external surface is now collapsed to two variants:
 
 | Old external variant | New external variant | Notes |
 |----------------------|----------------------|-------|
-| `Legacy_local`       | `Local`              | Same semantics. Fs scoped to `~/.masc/playground/<keeper>/`. |
+| `Legacy_local`       | `Local`              | Same semantics. Fs scoped to `<base_path>/.masc/playground/<keeper>/`. |
 | `Docker_hardened`    | `Docker`             | Same base semantics (hardened container with network=none). |
 | `Docker_with_git`    | `Docker` + per-command dispatch | No longer a profile. When `sandbox_profile=Docker` and the `keeper_bash` cmd's leading token is `git`/`gh`, the container is launched with network=inherit + gh/git credential mounts *for that one command*. Surfaced in response JSON as `git_creds_enabled: true`. |
 

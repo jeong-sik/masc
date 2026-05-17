@@ -29,6 +29,8 @@
    (re_export masc_compression)
    (re_export masc_core)
    (re_export masc_eio_context)
+   ; RFC-0107 Phase D.2d — pool unit tests need access to Pool module.
+   (re_export masc_mcp.http_client)
    (re_export masc_log)
    (re_export masc_mcp)
    (re_export masc_mcp.oas_compat)

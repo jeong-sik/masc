@@ -56,7 +56,14 @@ module Host_key = struct
 
   let of_uri uri =
     let scheme = Uri.scheme uri |> Option.value ~default:"http" in
-    let host = Uri.host uri |> Option.value ~default:"localhost" in
+    (* [Uri.host] returns [Some ""] for URLs like "http:///path" instead
+       of [None] (empty authority section). Treat empty as missing so
+       downstream connect doesn't try to resolve "". *)
+    let host =
+      match Uri.host uri with
+      | Some "" | None -> "localhost"
+      | Some h -> h
+    in
     let port = Uri.port uri |> Option.value ~default:(default_port scheme) in
     { scheme; host; port }
 end
@@ -373,3 +380,9 @@ let stats t : stats =
       reuse_count_total = t.counters.reuse_count_total;
       evict_count_total = t.counters.evict_count_total;
       create_count_total = t.counters.create_count_total; })
+
+(* ── Test-only ─────────────────────────────────────────────────── *)
+
+module For_testing = struct
+  module Host_key = Host_key
+end

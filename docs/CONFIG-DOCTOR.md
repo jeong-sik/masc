@@ -141,8 +141,8 @@ root to edit.
 ### Repo Seed Note
 
 `Config_dir_resolver` may report a checked-in repo `config/` path as a bootstrap
-seed, but it never treats that path as the active config root. It also does not
-consult a home-level config root.
+seed, but it never treats that path as the active config root. It only resolves
+operator config from `MASC_CONFIG_DIR` or `<base-path>/.masc/config`.
 
 If you need to answer “what should I edit right now?”, use `doctor`, not a repo
 seed path.

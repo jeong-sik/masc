@@ -17,9 +17,12 @@ let home () =
 let disable_escape_hatch () =
   Unix.putenv "MASC_TEST_ALLOW_HOME_BASE_PATH" ""
 
+let guard_path name =
+  Filename.concat (home ()) (Filename.concat "masc-home-guard" name)
+
 let test_append_under_home_raises () =
   disable_escape_hatch ();
-  let path = Filename.concat (home ()) ".masc/_9921_guard_probe.jsonl" in
+  let path = guard_path "_9921_guard_probe.jsonl" in
   try
     FC.append_file path "{\"probe\":1}\n";
     Alcotest.failf "expected Test_isolation_breach, but write succeeded to %S" path
@@ -38,7 +41,7 @@ let test_append_under_home_raises () =
 
 let test_save_under_home_raises () =
   disable_escape_hatch ();
-  let path = Filename.concat (home ()) ".masc/_9921_guard_probe_save.txt" in
+  let path = guard_path "_9921_guard_probe_save.txt" in
   try
     FC.save_file path "probe";
     Alcotest.fail "expected Test_isolation_breach on save_file"
@@ -46,7 +49,7 @@ let test_save_under_home_raises () =
 
 let test_mkdir_under_home_raises () =
   disable_escape_hatch ();
-  let path = Filename.concat (home ()) ".masc/_9921_guard_probe_dir" in
+  let path = guard_path "_9921_guard_probe_dir" in
   try
     FC.mkdir_p path;
     Alcotest.fail "expected Test_isolation_breach on mkdir_p"
@@ -68,7 +71,7 @@ let test_tmp_write_allowed () =
 
 let test_escape_hatch_allows_home () =
   Unix.putenv "MASC_TEST_ALLOW_HOME_BASE_PATH" "1";
-  let path = Filename.concat (home ()) ".masc/_9921_guard_probe_bypass.jsonl" in
+  let path = guard_path "_9921_guard_probe_bypass.jsonl" in
   let parent = Filename.dirname path in
   let parent_existed = Sys.file_exists parent in
   Fun.protect

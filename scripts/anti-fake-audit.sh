@@ -36,7 +36,13 @@ if [ "$MODE" = "production-scan" ]; then
   echo ""
 
   # Build the grandfather allow-list of "path:line" pairs.
-  ALLOW=$(grep -vE '^(#|$)' "$GRANDFATHER" | awk -F: '{print $1":"$2}' | sort -u)
+  # `grep -vE '^(#|$)'` returns exit 1 when the file is all comments /
+  # blanks (or empty after full migration). Under `set -euo pipefail`
+  # that aborts the script before any scan runs — exactly the wrong
+  # failure mode for "no grandfathered sites means migration is done."
+  # `|| true` keeps the empty-allow-list case as a valid baseline.
+  # (PR #15759 codex review P2.)
+  ALLOW=$(grep -vE '^(#|$)' "$GRANDFATHER" | awk -F: '{print $1":"$2}' | sort -u || true)
 
   FAIL=0
 
@@ -70,7 +76,13 @@ if [ "$MODE" = "production-scan" ]; then
   # `[with _ -> ()]` inside [...] brackets. Skip if:
   #   - line content starts with `*` or `(*` (line is inside a comment block)
   #   - the matched substring appears inside square brackets (doc citation)
-  #   - line ends with `*)` (comment close on a citation line)
+  #
+  # NOT skipped: lines that *end* with `*)`. A naive `\*\)\s*$` filter
+  # would let `with _ -> () (* rationale *)` (real silent skip with an
+  # inline rationale comment after it) bypass the lint — exactly the
+  # bypass class the reviewer flagged in PR #15759 codex P2. Decision:
+  # prefer false positives (force grandfather entry) over false
+  # negatives (silent skip slips through).
   T_HITS=$(rg -nU --type ocaml --multiline -e 'with[[:space:]]+_[[:space:]]+->[[:space:]]+\(\)' lib/ 2>/dev/null || true)
   if [ -n "$T_HITS" ]; then
     while IFS= read -r line; do
@@ -80,12 +92,8 @@ if [ "$MODE" = "production-scan" ]; then
       if printf '%s' "$content" | grep -qE '^[[:space:]]*(\*|\(\*)'; then
         continue
       fi
-      # Filter B: doc citation pattern [with _ -> ()] inside brackets,
-      # or line ends with comment close *).
+      # Filter B: doc citation pattern [with _ -> ()] inside brackets.
       if printf '%s' "$content" | grep -qE '\[[^][]*with[[:space:]]+_[[:space:]]+->[[:space:]]+\(\)[^][]*\]'; then
-        continue
-      fi
-      if printf '%s' "$content" | grep -qE '\*\)[[:space:]]*$'; then
         continue
       fi
       key=$(printf '%s' "$line" | awk -F: '{print $1":"$2}')

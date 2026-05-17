@@ -172,11 +172,17 @@ let respond_mcp_error ?(extra_headers = []) ?data ?id
           ("error", `Assoc error_fields);
         ])
   in
+  (* Constructors qualified explicitly (Mcp_error_code.Auth_error rather
+     than bare Auth_error) so the match is robust to future loss of the
+     [~(code : Mcp_error_code.t)] type annotation or to relocation of
+     the function. Bare constructors would compile today via OCaml's
+     type-directed disambiguation but the reviewer's defence-in-depth
+     concern (PR #15759 codex P1) is well-taken. *)
   let per_code_headers : (string * string) list =
     match code with
-    | Auth_error -> [ ("www-authenticate", "Bearer") ]
-    | Not_ready -> [ ("retry-after", "2") ]
-    | Backpressure_shed -> [ ("retry-after", "1") ]
+    | Mcp_error_code.Auth_error -> [ ("www-authenticate", "Bearer") ]
+    | Mcp_error_code.Not_ready -> [ ("retry-after", "2") ]
+    | Mcp_error_code.Backpressure_shed -> [ ("retry-after", "1") ]
     | _ -> []
   in
   let headers =

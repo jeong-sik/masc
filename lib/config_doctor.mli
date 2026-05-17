@@ -60,7 +60,6 @@ type inputs = {
   env_config_dir : string option;
   env_personas_dir : string option;
   resolution_source : string option;
-  repo_config_fallback_enabled : bool;
 }
 (** Inputs to {!analyze_with}.  Concrete record because callers
     construct via [{ Config_doctor.cwd; ... }] at the dispatch
@@ -79,7 +78,6 @@ type t = {
   explicit_config_dir : string option;
   explicit_personas_dir : string option;
   repo_config_seed_path : string option;
-  repo_fallback_enabled : bool;
   keeper_runtime_toml_present : bool;
   warnings : string list;
   next_actions : string list;

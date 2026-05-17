@@ -1,7 +1,8 @@
 (** Config directory resolution — SSOT for locating MASC config files.
 
     Resolution order: [MASC_CONFIG_DIR] env > [$MASC_BASE_PATH/.masc/config] >
-    repo fallback (opt-in) > missing.
+    missing. Checked-in repo [config/] may be reported as a bootstrap seed, but
+    it is never an active config-root fallback.
 
     The module caches the result of the first [resolve] call; use [reset] to
     force re-evaluation (e.g. after env var changes in tests). *)
@@ -12,8 +13,6 @@ type source =
   | Env
   | Local_masc
   | Invalid_env
-  | Exe_relative
-  | Cwd
   | Missing
 
 type status =
@@ -127,8 +126,6 @@ val sanitize_inherited_test_base_path_opt :
 val path_from_executable : cwd:string -> string -> string option
 
 val path_from_cwd : string -> string option
-
-val repo_config_fallback_enabled : unit -> bool
 
 (** {1 Warnings and logging} *)
 

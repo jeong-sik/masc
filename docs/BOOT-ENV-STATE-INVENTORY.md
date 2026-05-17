@@ -39,7 +39,7 @@ Scope:
 | `MASC_PERSONAS_DIR` | Explicit personas root override. | `Config_dir_resolver`, keeper/persona loading |
 | `MASC_STORAGE_TYPE` | Runtime backend selector. Only `filesystem` is active; PostgreSQL backend was removed. | bootstrap and backend setup |
 | `HOME` | Shell/user-home context for external tools and non-config artifact stores. | Host process environment |
-| `MASC_WORKSPACE_ROOT`, `DUNE_SOURCEROOT` | Workspace discovery and legacy repo fallback. | `Env_config_core`, `autoresearch_knowledge`, legacy paths |
+| `MASC_WORKSPACE_ROOT`, `ME_ROOT`, `DUNE_SOURCEROOT` | Workspace discovery, knowledge paths, `scripts/sb` resolution. | `Env_config_core`, `autoresearch_knowledge`, workspace paths |
 | `MASC_HOST`, `MASC_HTTP_PORT`, `MASC_HTTP_BASE_URL` | Bind address and derived HTTP endpoint identity. | HTTP/bootstrap/provider routing |
 | `MASC_ADMIN_TOKEN` | Privileged endpoint auth. | server auth |
 
@@ -56,8 +56,7 @@ Low-level resolver precedence is:
 
 1. `MASC_CONFIG_DIR`
 2. `<MASC_BASE_PATH>/.masc/config`
-3. `cwd/config` when `MASC_ALLOW_REPO_CONFIG_FALLBACK=true`
-4. executable-relative `config/` when `MASC_ALLOW_REPO_CONFIG_FALLBACK=true`
+3. missing/uninitialized `<base-path>/.masc/config`
 
 Important boot behavior:
 
@@ -429,7 +428,7 @@ Interpretation:
 - `/Users/dancer/me/.masc` is the current canonical runtime root.
 - `/Users/dancer/me/.masc/.masc` should be treated as historical drift from earlier runs that used `/Users/dancer/me/.masc` itself as `base_path`.
 - The active config root should be treated as the resolved runtime config root under `/Users/dancer/me/.masc/config` unless `MASC_CONFIG_DIR` explicitly points elsewhere.
-- The checked-in repo `config/` tree is the versioned default/fallback source, not the live runtime truth by itself.
+- The checked-in repo `config/` tree is the versioned default/seed source, not the live runtime truth by itself.
 
 Current host definitely has live filesystem data for:
 

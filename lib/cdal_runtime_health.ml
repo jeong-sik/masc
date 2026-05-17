@@ -45,10 +45,14 @@ let age_seconds ~now = function
 let proof_root_default () = Masc_mcp_cdal_runtime.Proof_store.default_config.root
 
 let proof_root_candidates configured_root =
-  let maybe_home =
-    env_non_empty "HOME" |> Option.map (fun home -> Filename.concat home ".oas")
+  let maybe_base_path =
+    env_non_empty "MASC_BASE_PATH"
+    |> Option.map (fun base_path -> Filename.concat base_path ".oas")
   in
-  [ maybe_home ]
+  let maybe_me_root =
+    env_non_empty "ME_ROOT" |> Option.map (fun root -> Filename.concat root ".oas")
+  in
+  [ maybe_base_path; maybe_me_root ]
   |> List.filter_map Fun.id
   |> List.filter (fun root -> not (String.equal root configured_root))
   |> List.sort_uniq String.compare

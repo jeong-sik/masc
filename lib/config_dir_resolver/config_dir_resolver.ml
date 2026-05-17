@@ -11,8 +11,6 @@ type source =
   | Env
   | Local_masc
   | Invalid_env
-  | Exe_relative
-  | Cwd
   | Missing
 
 type status =
@@ -147,8 +145,6 @@ let source_to_string = function
   | Env -> "env"
   | Local_masc -> "local_masc"
   | Invalid_env -> "invalid_env"
-  | Exe_relative -> "exe_relative"
-  | Cwd -> "cwd"
   | Missing -> "missing"
 
 let status_to_string = function
@@ -207,35 +203,6 @@ let path_from_cwd cwd =
   let candidate = Filename.concat cwd "config" |> absolute_path_from ~cwd in
   if config_signature_exists candidate then Some candidate else None
 
-let repo_config_fallback_enabled () =
-  Env_config_core.get_bool ~default:false "MASC_ALLOW_REPO_CONFIG_FALLBACK"
-
-let disabled_repo_config_fallback_warnings (inputs : inputs) =
-  if repo_config_fallback_enabled () then
-    []
-  else
-    let candidates =
-      [
-        ("cwd", path_from_cwd inputs.cwd);
-        ("exe_relative", path_from_executable ~cwd:inputs.cwd inputs.executable_name);
-      ]
-      |> List.filter_map (fun (label, path_opt) ->
-             Option.map (fun path -> (label, path)) path_opt)
-    in
-    match candidates with
-    | [] -> []
-    | hits ->
-        let rendered =
-          hits
-          |> List.map (fun (label, path) -> Printf.sprintf "%s:%s" label path)
-          |> String.concat ", "
-        in
-        [
-          Printf.sprintf
-            "Repo config fallback is disabled by default; set MASC_ALLOW_REPO_CONFIG_FALLBACK=true to use %s"
-            rendered;
-        ]
-
 let base_path_config_root ~cwd base_path =
   let base_path =
     base_path
@@ -260,8 +227,7 @@ let default_missing_root (inputs : inputs) =
 
 let config_root_resolution (inputs : inputs) =
   let missing path warnings =
-    ( { path; exists = false; source = Missing },
-      warnings @ disabled_repo_config_fallback_warnings inputs )
+    ({ path; exists = false; source = Missing }, warnings)
   in
   match trim_opt inputs.env_config_dir with
   | Some raw ->
@@ -278,28 +244,13 @@ let config_root_resolution (inputs : inputs) =
       match path_from_local_masc inputs with
       | Some path -> ({ path; exists = true; source = Local_masc }, [])
       | None ->
-          if repo_config_fallback_enabled () then
-            match path_from_cwd inputs.cwd with
-            | Some path -> ({ path; exists = true; source = Cwd }, [])
-            | None ->
-                match path_from_executable ~cwd:inputs.cwd inputs.executable_name with
-                | Some path -> ({ path; exists = true; source = Exe_relative }, [])
-                | None ->
-                    let path = default_missing_root inputs in
-                    missing path
-                      [
-                        Printf.sprintf
-                          "Unable to resolve config directory; set MASC_CONFIG_DIR or initialize the base-path config root: %s"
-                          path;
-                      ]
-          else
-            let path = default_missing_root inputs in
-            missing path
-              [
-                Printf.sprintf
-                  "Unable to resolve config directory; set MASC_CONFIG_DIR or initialize the base-path config root: %s"
-                  path;
-              ]
+          let path = default_missing_root inputs in
+          missing path
+            [
+              Printf.sprintf
+                "Unable to resolve config directory; set MASC_CONFIG_DIR or initialize the base-path config root: %s"
+                path;
+            ]
 
 let child_item (root : path_item) name =
   let path = Filename.concat root.path name in
@@ -360,7 +311,7 @@ let resolve_with inputs =
     match config_root.source with
     | Invalid_env -> Invalid_env_status
     | Missing -> Missing_status
-    | Env | Local_masc | Exe_relative | Cwd ->
+    | Env | Local_masc ->
         if warnings = [] then Ready else Warn
   in
   {
@@ -391,11 +342,9 @@ let reset () =
 let cascade_path_opt () =
   let resolution = resolve () in
   match resolution.config_root.source with
-  | Env | Local_masc | Exe_relative | Cwd
-    when resolution.cascade_authoring.exists ->
+  | Env | Local_masc when resolution.cascade_authoring.exists ->
       Some resolution.cascade_authoring.path
-  | Env | Local_masc | Exe_relative | Cwd
-  | Invalid_env | Missing ->
+  | Env | Local_masc | Invalid_env | Missing ->
       None
 
 let cascade_path_candidate () =
@@ -413,11 +362,9 @@ let keepers_dir () =
 let personas_dir_opt () =
   let resolution = resolve () in
   match resolution.config_root.source with
-  | Env | Local_masc | Exe_relative | Cwd
-    when resolution.personas.exists ->
+  | Env | Local_masc when resolution.personas.exists ->
       Some resolution.personas.path
-  | Env | Local_masc | Exe_relative | Cwd
-  | Invalid_env | Missing ->
+  | Env | Local_masc | Invalid_env | Missing ->
       None
 
 let dedupe_paths paths =
@@ -457,7 +404,7 @@ let personas_dirs_with inputs resolution =
     let primary =
       match resolution.config_root.source with
       | Invalid_env | Missing -> []
-      | Env | Local_masc | Exe_relative | Cwd ->
+      | Env | Local_masc ->
         if resolution.personas.exists then [ resolution.personas.path ] else []
     in
     dedupe_paths primary

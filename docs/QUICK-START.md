@@ -275,7 +275,7 @@ masc_keeper_up(name: "sangsu")
 - 운영 기준은 항상 `<base-path>/.masc`다. 공유 keeper 상태를 보려면 `--base-path` 또는 `MASC_BASE_PATH`를 명시해서 서버와 같은 base path를 사용한다.
 - `start-masc-mcp.sh`는 worktree에서 실행해도 base-path 규칙을 그대로 따른다.
 - shared keeper 상태 대신 별도 `.masc/`를 쓰고 싶을 때만 `--base-path`를 다른 base path로 명시적으로 덮어쓴다.
-- resolved config root는 `MASC_CONFIG_DIR` 우선이며, 없으면 `<MASC_BASE_PATH>/.masc/config`를 초기화/사용한다. repo `config/` 자동 탐색은 `MASC_ALLOW_REPO_CONFIG_FALLBACK=true`일 때만 켜지는 default fallback이다. repo `config/`는 체크인된 default/example source이며, live root가 아니다.
+- resolved config root는 `MASC_CONFIG_DIR` 우선이며, 없으면 `<MASC_BASE_PATH>/.masc/config`를 초기화/사용한다. repo `config/`는 체크인된 default/example seed source이며, live root가 아니다.
 - `MASC_PERSONAS_DIR` 환경변수로 persona만 repo 밖 경로로 분리할 수 있다.
 
 ## 8. Release-Grade Smoke

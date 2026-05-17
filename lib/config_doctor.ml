@@ -17,7 +17,6 @@ type inputs = {
   env_config_dir : string option;
   env_personas_dir : string option;
   resolution_source : string option;
-  repo_config_fallback_enabled : bool;
 }
 
 type t = {
@@ -33,7 +32,6 @@ type t = {
   explicit_config_dir : string option;
   explicit_personas_dir : string option;
   repo_config_seed_path : string option;
-  repo_fallback_enabled : bool;
   keeper_runtime_toml_present : bool;
   warnings : string list;
   next_actions : string list;
@@ -252,7 +250,6 @@ let current_inputs ~base_path_input ~default_base_path () =
     env_config_dir = Config_dir_resolver.current_env_config_dir_opt ();
     env_personas_dir = Config_dir_resolver.current_env_personas_dir_opt ();
     resolution_source;
-    repo_config_fallback_enabled = Config_dir_resolver.repo_config_fallback_enabled ();
   }
 
 let analyze_with (inputs : inputs) =
@@ -384,11 +381,6 @@ let analyze_with (inputs : inputs) =
                 "Repo config seed exists at %s; it is bootstrap-only, not the active config root."
                 path)
        | _ -> None);
-      (if inputs.repo_config_fallback_enabled then
-         Some
-           "MASC_ALLOW_REPO_CONFIG_FALLBACK=true is enabled; low-level resolver fallback remains available."
-       else
-         None);
       path_diag.warning;
     ]
     |> List.filter_map (fun warning -> warning)
@@ -501,7 +493,6 @@ let analyze_with (inputs : inputs) =
     explicit_config_dir;
     explicit_personas_dir;
     repo_config_seed_path;
-    repo_fallback_enabled = inputs.repo_config_fallback_enabled;
     keeper_runtime_toml_present;
     warnings;
     next_actions;
@@ -750,7 +741,6 @@ let to_yojson (report : t) =
       (option_field "explicit_config_dir" report.explicit_config_dir);
       (option_field "explicit_personas_dir" report.explicit_personas_dir);
       (option_field "repo_config_seed_path" report.repo_config_seed_path);
-      ("repo_fallback_enabled", `Bool report.repo_fallback_enabled);
       ("keeper_runtime_toml_present", `Bool report.keeper_runtime_toml_present);
       ("warnings", `List (List.map (fun value -> `String value) report.warnings));
       ("next_actions", `List (List.map (fun value -> `String value) report.next_actions));
@@ -801,9 +791,6 @@ let render_text (report : t) =
   add_line
     (Printf.sprintf "repo_config_seed_path: %s"
        (Option.value ~default:"(not found)" report.repo_config_seed_path));
-  add_line
-    (Printf.sprintf "repo_fallback_enabled: %s"
-       (if report.repo_fallback_enabled then "yes" else "no"));
   add_line
     (Printf.sprintf "keeper_runtime.toml: %s"
        (if report.keeper_runtime_toml_present then "present" else "missing"));

@@ -105,16 +105,18 @@ val run_local_playback :
   ?message:string ->
   audio_file:string ->
   unit ->
-  [ `Dedup_hit | `Played of float option ]
+  [ `Dedup_hit | `Played of float | `Skipped of string | `Failed of string ]
 (** Mutex-protected local audio playback with a 30s dedup window
     keyed on [(agent_id, hash message)]. Returns:
 
     - [`Dedup_hit] — another fiber already played this same message
       recently (check happens inside the playback mutex to close the
       check-then-act race);
-    - [`Played None] — playback was disabled, no executable available,
-      or the player exited non-zero;
-    - [`Played (Some duration_seconds)] — playback succeeded.
+    - [`Skipped reason] — playback was intentionally skipped, for example
+      because local playback is disabled for the agent;
+    - [`Failed reason] — local playback was requested but no candidate player
+      succeeded;
+    - [`Played duration_seconds] — playback succeeded.
 
     When [message] is omitted the dedup re-check is skipped (legacy
     callers that do not propagate the message string). *)

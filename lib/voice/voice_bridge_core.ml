@@ -181,8 +181,9 @@ let local_playback_argvs ?path_value ~audio_file () =
     - [`Dedup_hit] if another fiber already played this same message recently
       (check happens INSIDE the mutex to close the check-then-act race where two
       fibers both pass the outer [is_dedup_hit] before either records).
-    - [`Played None] if playback was disabled, unavailable, or failed.
-    - [`Played (Some dur)] if playback succeeded with the given duration.
+    - [`Skipped reason] if playback was intentionally skipped.
+    - [`Failed reason] if playback was requested but unavailable or failed.
+    - [`Played dur] if playback succeeded with the given duration.
 
     When [message] is [None] the dedup re-check is skipped (legacy callers that
     do not propagate the message string). *)
@@ -190,16 +191,19 @@ let run_local_playback ~sw:_ ~agent_id ?message ~audio_file () =
   match load_voice_config () with
   | Error e ->
     Log.Misc.warn "voice config load failed, skipping playback for %s: %s" agent_id e;
-    `Played None
+    `Failed ("voice config load failed: " ^ e)
   | Ok config ->
     if not (Voice_config.local_playback_enabled_for_agent config agent_id) then
-      `Played None
+      `Skipped "local playback disabled for agent"
     else
       match local_playback_argvs ~audio_file () with
       | [] ->
+        let reason =
+          "no afplay/ffplay/mpg123/play/open executable found"
+        in
         log_error
-          "local voice playback unavailable: no afplay/ffplay/mpg123/play/open executable found";
-        `Played None
+          (Printf.sprintf "local voice playback unavailable: %s" reason);
+        `Failed reason
       | candidates ->
         Eio.Mutex.use_rw ~protect:true playback_mu (fun () ->
           let dedup_hit =
@@ -219,8 +223,14 @@ let run_local_playback ~sw:_ ~agent_id ?message ~audio_file () =
             (match message with
              | Some m -> record_playback ~agent_id ~message:m
              | None -> ());
-            let rec try_candidates = function
-              | [] -> `Played None
+            let rec try_candidates failures = function
+              | [] ->
+                let reason =
+                  match List.rev failures with
+                  | [] -> "all local playback candidates failed"
+                  | failures -> String.concat " | " failures
+                in
+                `Failed reason
               | argv :: rest ->
                 let t0 = Unix.gettimeofday () in
                 let raw_source =
@@ -246,44 +256,65 @@ let run_local_playback ~sw:_ ~agent_id ?message ~audio_file () =
                          "local voice playback finished: agent=%s file=%s via=%s \
                           duration=%.1fs"
                          agent_id audio_file executable dur);
-                    `Played (Some dur)
+                    `Played dur
                   | Unix.WEXITED code, output ->
+                    let failure =
+                      Printf.sprintf "%s exited %d%s" executable code
+                        (if String.trim output = "" then ""
+                         else ": " ^ String.trim output)
+                    in
                     log_error
                       (Printf.sprintf
                          "local voice playback candidate failed (exit=%d): %s%s"
                          code (String.concat " " argv)
                          (if String.trim output = "" then ""
                           else " :: " ^ String.trim output));
-                    try_candidates rest
+                    try_candidates (failure :: failures) rest
                   | Unix.WSTOPPED signal, output ->
+                    let failure =
+                      Printf.sprintf "%s stopped by signal %d%s" executable signal
+                        (if String.trim output = "" then ""
+                         else ": " ^ String.trim output)
+                    in
                     log_error
                       (Printf.sprintf
                          "local voice playback candidate stopped (sig=%d): %s%s"
                          signal (String.concat " " argv)
                          (if String.trim output = "" then ""
                           else " :: " ^ String.trim output));
-                    try_candidates rest
+                    try_candidates (failure :: failures) rest
                   | Unix.WSIGNALED signal, output ->
+                    let failure =
+                      Printf.sprintf "%s signaled %d%s" executable signal
+                        (if String.trim output = "" then ""
+                         else ": " ^ String.trim output)
+                    in
                     log_error
                       (Printf.sprintf
                          "local voice playback candidate signaled (sig=%d): %s%s"
                          signal (String.concat " " argv)
                          (if String.trim output = "" then ""
                           else " :: " ^ String.trim output));
-                    try_candidates rest
+                    try_candidates (failure :: failures) rest
                 with
                 | Eio.Cancel.Cancelled _ as e -> raise e
                 | exn ->
+                  let failure =
+                    Printf.sprintf "%s exception: %s" executable
+                      (Printexc.to_string exn)
+                  in
                   log_error
                     (Printf.sprintf "voice playback candidate exception: %s"
                        (Printexc.to_string exn));
-                  try_candidates rest
+                  try_candidates (failure :: failures) rest
             in
-            try_candidates candidates
+            try_candidates [] candidates
           end)
 
 let start_local_playback ~sw ~agent_id ~audio_file =
-  ignore (run_local_playback ~sw ~agent_id ~audio_file () : [`Dedup_hit | `Played of float option])
+  ignore
+    (run_local_playback ~sw ~agent_id ~audio_file ()
+      : [ `Dedup_hit | `Failed of string | `Played of float | `Skipped of string ])
 
 (** Get voice for agent, defaults to "Sarah" if config is unavailable *)
 let get_voice_for_agent agent_id =

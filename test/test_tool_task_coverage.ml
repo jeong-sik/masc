@@ -425,7 +425,8 @@ let () = test "handle_batch_add_tasks_injects_default_verification_contracts" (f
 let () = test "handle_done_uses_persisted_contract_gate" (fun () ->
   (* MASC_CDAL_GATE_ENABLED default flipped to [true] in v0.9.5 (PR #7579).
      With gate enabled + strict contract + no persisted verdict, handle_done
-     must be blocked with a gate rejection message. *)
+     must be blocked with a gate rejection message on the direct Done path. *)
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "false") (fun () ->
   let ctx = make_test_ctx () in
   let _ =
     Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
@@ -456,7 +457,45 @@ let () = test "handle_done_uses_persisted_contract_gate" (fun () ->
   if not (str_contains result_done.Tool_result.legacy_message "CDAL verdict") then
     failwith
       (Printf.sprintf "expected CDAL gate rejection message, got: %s" result_done.Tool_result.legacy_message)
-)
+))
+
+let () = test "handle_done_redirects_to_verification_before_cdal_gate" (fun () ->
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    with_env "MASC_CDAL_GATE_ENABLED" (Some "true") (fun () ->
+      with_env "MASC_DATA_DIR" (Some (make_temp_dir "masc-cdal-empty")) (fun () ->
+        let ctx = make_test_ctx () in
+        let _ =
+          Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+            (`Assoc
+              [
+                ("title", `String "Strict verifier task");
+                ( "contract",
+                  `Assoc
+                    [
+                      ("strict", `Bool true);
+                      ( "completion_contract",
+                        `List [ `String "deliverable-ready" ] );
+                      ("required_evidence", `List [ `String "run_deliverable" ]);
+                    ] );
+              ])
+        in
+        let _ =
+          Tool_task.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx
+            (`Assoc [ ("task_id", `String "task-001") ])
+        in
+        let result_done =
+          Tool_task.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx
+            (`Assoc
+              [
+                ("task_id", `String "task-001");
+                ( "notes",
+                  `String
+                    "Implemented deliverable-ready output and captured run_deliverable evidence." );
+              ])
+        in
+        if not result_done.Tool_result.success then
+          failwith result_done.Tool_result.legacy_message;
+        assert_task_awaiting_verification_by ctx "test-agent"))))
 
 (* Advisory contract (strict=false): CDAL gate must still record an attribution
    event so the dashboard has a verification trace, but must NOT block the
@@ -464,6 +503,7 @@ let () = test "handle_done_uses_persisted_contract_gate" (fun () ->
    안 보인다" — strict=false tasks used to bypass the gate entirely, leaving
    no audit trail. *)
 let () = test "handle_done_advisory_contract_records_attribution" (fun () ->
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "false") (fun () ->
   Dashboard_attribution.reset ();
   let ctx = make_test_ctx_with_agent "advisory-agent" in
   let _ =
@@ -510,7 +550,7 @@ let () = test "handle_done_advisory_contract_records_attribution" (fun () ->
     failwith
       "advisory recording must not leak into the strict cdal_verdict \
        bucket"
-)
+))
 
 let () = test "handle_transition_release_requires_handoff_for_strict_task" (fun () ->
   let ctx = make_test_ctx () in
@@ -968,6 +1008,61 @@ let () = test "handle_transition_verifier_allows_verdict_actions" (fun () ->
     match (only_task worker_ctx).Masc_domain.task_status with
     | Masc_domain.Done _ -> ()
     | _ -> failwith "expected verifier approval to complete task"))
+
+let () = test "handle_transition_approve_enforces_strict_cdal_gate" (fun () ->
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    with_env "MASC_CDAL_GATE_ENABLED" (Some "true") (fun () ->
+      with_env "MASC_DATA_DIR" (Some (make_temp_dir "masc-cdal-empty")) (fun () ->
+        let worker_ctx = make_test_ctx_with_agent "worker" in
+        let verifier_ctx = { worker_ctx with Tool_task.agent_name = "verifier" } in
+        let _ =
+          Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0
+            worker_ctx
+            (`Assoc
+              [
+                ("title", `String "Strict verifier approval");
+                ( "contract",
+                  `Assoc
+                    [
+                      ("strict", `Bool true);
+                      ("completion_contract", `List [ `String "tests pass" ]);
+                    ] );
+              ])
+        in
+        let _ =
+          Coord.claim_task worker_ctx.config ~agent_name:"worker"
+            ~task_id:"task-001"
+        in
+        let submit =
+          Coord.transition_task_r worker_ctx.config ~agent_name:"worker"
+            ~task_id:"task-001" ~action:Masc_domain.Submit_for_verification
+            ()
+        in
+        (match submit with
+         | Ok _ -> ()
+         | Error err ->
+           failwith
+             ("submit_for_verification failed: "
+              ^ Masc_domain.masc_error_to_string err));
+        let result =
+          Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0
+            verifier_ctx
+            (`Assoc
+              [
+                ("task_id", `String "task-001");
+                ("action", `String "approve");
+                ("notes", `String "evidence verified");
+              ])
+        in
+        if result.Tool_result.success then
+          failwith "expected strict CDAL gate to block verifier approval";
+        if not (str_contains result.Tool_result.legacy_message "CDAL verdict")
+        then
+          failwith
+            (Printf.sprintf "expected CDAL gate rejection, got: %s"
+               result.Tool_result.legacy_message);
+        assert_task_awaiting_verification_by worker_ctx "worker"))))
+
 let () = test "handle_claim_sets_planning_current_task" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Claim direct")]) in

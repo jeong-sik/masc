@@ -75,11 +75,10 @@ type failure_reason =
           investigate the underlying cascade/provider/fd issue before
           resuming the keeper. *)
   | Stale_fleet_batch of { distinct_count : int }
-      (** Latched when the stale watchdog observes several distinct keepers
-          terminating inside the fleet batch window. This is a systemic
-          cascade/provider/runtime signal, so the supervisor pauses affected
-          keepers with auto-resume backoff instead of restarting each keeper
-          independently into the same failure mode. *)
+      (** Legacy wire value for stale watchdog fleet-batch state. Current
+          fleet-batch detection is observation-only and must not create this
+          failure reason; if old runtime state still contains it, the
+          supervisor treats it like a restartable watchdog crash. *)
   | Oas_timeout_budget_loop of { count : int }
       (** Latched when the same keeper exhausts the OAS turn budget on
           consecutive cycles. This is a provider/cascade/runtime throughput
@@ -113,8 +112,8 @@ val stale_watchdog_failure_reason :
   prior:failure_reason option -> kill_class:stale_kill_class -> failure_reason option
 (** Preserve authoritative terminal failure reasons when the stale watchdog
     fires after a failed turn, but do not carry stale-watchdog cohort labels
-    across fresh watchdog kills. Storm/fleet labels are relatched only by the
-    current threshold or batch detector. *)
+    across fresh watchdog kills. Storm labels are relatched only by the current
+    per-keeper threshold; fleet-batch detection is observation-only. *)
 
 (** Pure control-flow signal for immediate fiber termination (RFC-0002).
     Carries no state — failure reason must be pre-stored via

@@ -73,11 +73,10 @@ type failure_reason =
           investigate the underlying cascade/provider/fd issue before
           resuming the keeper. *)
   | Stale_fleet_batch of { distinct_count : int }
-  (** Latched when the stale watchdog observes several distinct keepers
-          terminating inside the fleet batch window. This is a systemic
-          cascade/provider/runtime signal, so the supervisor pauses affected
-          keepers with auto-resume backoff instead of restarting each keeper
-          independently into the same failure mode. *)
+  (** Legacy wire value for stale watchdog fleet-batch state. Current
+          fleet-batch detection is observation-only and must not create this
+          failure reason; if old runtime state still contains it, the
+          supervisor treats it like a restartable watchdog crash. *)
   | Oas_timeout_budget_loop of { count : int }
   (** Latched when the same keeper exhausts the OAS turn budget on
           consecutive cycles. This is a provider/cascade/runtime throughput

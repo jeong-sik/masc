@@ -1,4 +1,5 @@
 let null = `Null
+module Proof_store = Masc_mcp_cdal_runtime.Proof_store
 
 let float_opt_to_json = function
   | None -> null
@@ -42,7 +43,7 @@ let age_seconds ~now = function
   | Some ts -> Some (max 0.0 (now -. ts))
 ;;
 
-let proof_root_default () = Masc_mcp_cdal_runtime.Proof_store.default_config.root
+let proof_root_default () = Proof_store.default_config.root
 
 let proof_root_candidates configured_root =
   let maybe_base_path =
@@ -59,7 +60,7 @@ let proof_root_candidates configured_root =
 ;;
 
 let proof_store_root_json ~now ~stale_age_seconds root =
-  let proofs_dir = Filename.concat root "proofs" in
+  let proofs_dir = Proof_store.proofs_dir { root } in
   let latest_mtime = stat_mtime_if_dir proofs_dir in
   let age_seconds = age_seconds ~now latest_mtime in
   let exists = is_dir proofs_dir in
@@ -110,9 +111,8 @@ let task_scope_json ?base_dir ?(recent_limit = Env_config_runtime.Cdal.verdict_l
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
-    `Assoc
-      [ "status", `String "error"
-      ; "recent_limit", `Int recent_limit
+    Tool_args.error_assoc
+      [ "recent_limit", `Int recent_limit
       ; "recent_rows", `Int 0
       ; "task_id_rows", `Int 0
       ; "missing_task_scope", `Bool false

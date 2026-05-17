@@ -525,6 +525,24 @@ let single_field_snapshot_for_kind ~(kind : string) ~(text : string)
 
 let keeper_memory_write_max_title_chars = 120
 
+type memory_write_error_kind =
+  | Invalid_memory_kind
+  | Title_too_long
+  | Content_empty
+  | Long_term_via_explicit_write_not_yet_supported
+  | Rows_dropped_by_cap
+  | No_memory_write_error
+
+let memory_write_error_kind_to_string = function
+  | Invalid_memory_kind -> "invalid_memory_kind"
+  | Title_too_long -> "title_too_long"
+  | Content_empty -> "content_empty"
+  | Long_term_via_explicit_write_not_yet_supported ->
+    "long_term_via_explicit_write_not_yet_supported"
+  | Rows_dropped_by_cap -> "rows_dropped_by_cap"
+  | No_memory_write_error -> ""
+;;
+
 (** Pure validation result for a [keeper_memory_write] call. Splitting
     this from the persistence step lets tests pin the error_kind
     taxonomy without constructing a [Coord.config]. *)
@@ -535,7 +553,7 @@ type memory_write_validation =
       ; snapshot : Keeper_memory_policy.keeper_state_snapshot
       }
   | Memory_write_invalid of
-      { error_kind : string
+      { error_kind : memory_write_error_kind
       ; extras : (string * Yojson.Safe.t) list
       }
 
@@ -546,7 +564,7 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
   if not (List.mem kind Keeper_memory_policy.valid_memory_kind_strings)
   then
     Memory_write_invalid
-      { error_kind = "invalid_memory_kind"
+      { error_kind = Invalid_memory_kind
       ; extras =
           [ "provided_kind", `String kind
           ; ( "supported_kinds"
@@ -559,25 +577,25 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
   else if String.length title > keeper_memory_write_max_title_chars
   then
     Memory_write_invalid
-      { error_kind = "title_too_long"
+      { error_kind = Title_too_long
       ; extras =
           [ "max_chars", `Int keeper_memory_write_max_title_chars
           ; "title_chars", `Int (String.length title)
           ]
       }
   else if content = ""
-  then Memory_write_invalid { error_kind = "content_empty"; extras = [] }
+  then Memory_write_invalid { error_kind = Content_empty; extras = [] }
   else if kind = "long_term"
   then
     Memory_write_invalid
-      { error_kind = "long_term_via_explicit_write_not_yet_supported"; extras = [] }
+      { error_kind = Long_term_via_explicit_write_not_yet_supported; extras = [] }
   else (
     let body = if title = "" then content else Printf.sprintf "**%s** %s" title content in
     match single_field_snapshot_for_kind ~kind ~text:body with
     | None ->
       (* Defensive — validation above should have caught this. *)
       Memory_write_invalid
-        { error_kind = "invalid_memory_kind"; extras = [ "provided_kind", `String kind ] }
+        { error_kind = Invalid_memory_kind; extras = [ "provided_kind", `String kind ] }
     | Some snapshot -> Memory_write_ok { kind; body; snapshot })
 ;;
 
@@ -588,6 +606,7 @@ let keeper_memory_write_json
   : string
   =
   let respond ~ok ~error_kind extras =
+    let error_kind = memory_write_error_kind_to_string error_kind in
     Yojson.Safe.to_string
       (`Assoc ([ "ok", `Bool ok; "error_kind", `String error_kind ] @ extras))
   in
@@ -607,7 +626,7 @@ let keeper_memory_write_json
     then
       respond
         ~ok:false
-        ~error_kind:"rows_dropped_by_cap"
+        ~error_kind:Rows_dropped_by_cap
         [ "kind", `String kind
         ; ( "hint"
           , `String
@@ -617,7 +636,7 @@ let keeper_memory_write_json
     else
       respond
         ~ok:true
-        ~error_kind:""
+        ~error_kind:No_memory_write_error
         [ "rows_written", `Int rows_written
         ; "kinds_written", `List (List.map (fun k -> `String k) kinds_written)
         ; "kind", `String kind

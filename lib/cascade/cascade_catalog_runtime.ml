@@ -202,11 +202,10 @@ let load_declarative_catalog_info ~config_path =
           ~source_path:config_path catalog
       in
       let profile_names =
-        catalog.profiles
-        |> List.map
-             (fun (profile : Cascade_declarative_adapter.adapted_profile) ->
-               profile.name)
-        |> List.sort_uniq String.compare
+        match snapshot with
+        | Some snap ->
+            Cascade_declarative_hotpath.decl_snapshot_profile_names snap
+        | None -> []
       in
       Some
         {

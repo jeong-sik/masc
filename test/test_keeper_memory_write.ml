@@ -29,7 +29,11 @@ let validate_memory_write_args_call args =
 
 let assert_invalid ~error_kind result =
   match (result : Keeper_exec_memory.memory_write_validation) with
-  | Memory_write_invalid r -> Alcotest.(check string) "error_kind" error_kind r.error_kind
+  | Memory_write_invalid r ->
+    Alcotest.(check string)
+      "error_kind"
+      error_kind
+      (Keeper_exec_memory.memory_write_error_kind_to_string r.error_kind)
   | Memory_write_ok _ ->
     Alcotest.failf "expected Memory_write_invalid %s, got Memory_write_ok" error_kind
 ;;
@@ -41,7 +45,7 @@ let assert_ok ~kind result =
     Alcotest.failf
       "expected Memory_write_ok kind=%s, got Memory_write_invalid %s"
       kind
-      r.error_kind
+      (Keeper_exec_memory.memory_write_error_kind_to_string r.error_kind)
 ;;
 
 (* --- snapshot mapping (kind -> populated field) -------------------- *)
@@ -151,7 +155,9 @@ let test_valid_call_constructs_snapshot () =
       [ "**hook** body text" ]
       r.snapshot.decisions
   | Memory_write_invalid r ->
-    Alcotest.failf "expected Memory_write_ok, got invalid %s" r.error_kind
+    Alcotest.failf
+      "expected Memory_write_ok, got invalid %s"
+      (Keeper_exec_memory.memory_write_error_kind_to_string r.error_kind)
 ;;
 
 let test_valid_call_empty_title_uses_content_alone () =
@@ -161,7 +167,9 @@ let test_valid_call_empty_title_uses_content_alone () =
   | Memory_write_ok r ->
     Alcotest.(check string) "body is content alone when title empty" "hello" r.body
   | Memory_write_invalid r ->
-    Alcotest.failf "expected Memory_write_ok, got invalid %s" r.error_kind
+    Alcotest.failf
+      "expected Memory_write_ok, got invalid %s"
+      (Keeper_exec_memory.memory_write_error_kind_to_string r.error_kind)
 ;;
 
 (* --- constants ----------------------------------------------------- *)

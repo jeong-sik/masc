@@ -187,12 +187,17 @@ val inc_ws_parse_cache_hit : unit -> unit
 (** Increments [masc_ws_parse_cache_misses_total]. *)
 val inc_ws_parse_cache_miss : unit -> unit
 
+type ws_frame_json_parse_error_kind =
+  | Yojson_parse_error
+  | Other_ws_frame_json_parse_error
+
 (** Increments [masc_server_mcp_ws_frame_json_parse_failures_total] for a
     silent-drop visibility event in [parse_sse_dashboard_event].
     [error_kind] must be one of the closed vocab values
     [{"yojson_parse_error"; "other"}] — keeps Prometheus cardinality
     bounded. Iter 28. *)
-val inc_ws_frame_json_parse_failure : error_kind:string -> unit
+val inc_ws_frame_json_parse_failure :
+  error_kind:ws_frame_json_parse_error_kind -> unit
 
 (** Increments [masc_ws_bytes_cache_hits_total]. *)
 val inc_ws_bytes_cache_hit : unit -> unit

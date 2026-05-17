@@ -445,15 +445,17 @@ let raw_config_json () =
            msg;
          "", Some msg)
   in
-  let _ = source_text, raw_json, materialization_error in
   `Assoc
     [ "updated_at", `String (now_iso ())
     ; "source_kind", `String (Cascade_toml_materializer.source_kind_to_string source.kind)
     ; "source_path", `String source.source_path
-    ; "source_editable", `Bool false
-    ; "source_text", `String ""
-    ; "raw_json", `String ""
-    ; "materialization_error", `Null
+    ; "source_editable", `Bool (Option.is_none !source_read_error)
+    ; "source_text", `String source_text
+    ; "raw_json", `String raw_json
+    ; ( "materialization_error"
+      , match materialization_error with
+        | Some msg -> `String msg
+        | None -> `Null )
     ]
 ;;
 

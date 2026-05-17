@@ -317,7 +317,7 @@ let current_room_base_path_opt () =
   | Some state -> Some state.Mcp_server.room_config.base_path
   | None -> None
 
-let keeper_fleet_runtime_resolution_fields () =
+let keeper_fleet_runtime_resolution_base_fields () =
   let base_path = current_room_base_path_opt () in
   let keeper_fibers = Keeper_registry.count_running ?base_path () in
   let paused_keepers_json = paused_keepers_health_json () in
@@ -334,6 +334,32 @@ let keeper_fleet_runtime_resolution_fields () =
   ; "keeper_fleet_safety", fleet_safety
   ; "keeper_reaction_ledger", reaction_ledger_json
   ]
+;;
+
+let fd_accountant_snapshot_json () =
+  let snapshot = Fd_accountant.fd_snapshot () in
+  let per_kind =
+    snapshot.per_kind
+    |> List.map (fun (kind, in_flight) ->
+      let kind_name = Fd_accountant.kind_to_string kind in
+      `Assoc
+        [ "kind", `String kind_name
+        ; "in_flight", `Int in_flight
+        ; "configured_concurrency", `Int (Fd_accountant.configured_concurrency ~kind)
+        ; "effective_concurrency", `Int (Fd_accountant.effective_concurrency ~kind)
+        ])
+  in
+  `Assoc
+    [ "fd_open", `Int snapshot.fd_open
+    ; "fd_limit", `Int snapshot.fd_limit
+    ; "pressure_active", `Bool snapshot.pressure_active
+    ; "per_kind", `List per_kind
+    ]
+;;
+
+let keeper_fleet_runtime_resolution_fields () =
+  keeper_fleet_runtime_resolution_base_fields ()
+  @ [ "fd_accountant", fd_accountant_snapshot_json () ]
 ;;
 
 let make_health_json ?(listener = "http/1.1") request =
@@ -432,6 +458,7 @@ let make_health_json ?(listener = "http/1.1") request =
     ( "keeper_fd_pressure"
     , Keeper_fd_pressure.runtime_state_json ~active_keepers:keeper_fibers
         ~starting_keepers:0 ~requested_keepers:24 () );
+    ("fd_accountant", fd_accountant_snapshot_json ());
     ( "keeper_fleet_safety"
     , keeper_fleet_safety_health_json ~keeper_fibers
         ~paused_keepers_json );

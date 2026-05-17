@@ -990,6 +990,7 @@ let test_health_json_surfaces_durable_paused_keepers () =
           let open Yojson.Safe.Util in
           let paused = json |> member "paused_keepers" in
           let fd_pressure = json |> member "keeper_fd_pressure" in
+          let fd_accountant = json |> member "fd_accountant" in
           let fleet_safety = json |> member "keeper_fleet_safety" in
           let reaction_ledger = json |> member "keeper_reaction_ledger" in
           let durable_names =
@@ -1015,6 +1016,27 @@ let test_health_json_surfaces_durable_paused_keepers () =
           ignore (fd_pressure |> member "admission_blocked" |> to_bool);
           ignore
             (fd_pressure |> member "admission_decision" |> member "status" |> to_string);
+          ignore (fd_accountant |> member "fd_open" |> to_int);
+          ignore (fd_accountant |> member "fd_limit" |> to_int);
+          ignore (fd_accountant |> member "pressure_active" |> to_bool);
+          let fd_accountant_per_kind =
+            fd_accountant |> member "per_kind" |> to_list
+          in
+          Alcotest.(check int) "health exposes all FD accountant kinds"
+            (List.length Fd_accountant.all_kinds)
+            (List.length fd_accountant_per_kind);
+          List.iter
+            (fun kind ->
+              let kind_name = Fd_accountant.kind_to_string kind in
+              let row =
+                fd_accountant_per_kind
+                |> List.find (fun row ->
+                  String.equal (row |> member "kind" |> to_string) kind_name)
+              in
+              ignore (row |> member "in_flight" |> to_int);
+              ignore (row |> member "configured_concurrency" |> to_int);
+              ignore (row |> member "effective_concurrency" |> to_int))
+            Fd_accountant.all_kinds;
           Alcotest.(check int) "health exposes bootable keeper count" 1
             (fleet_safety |> member "bootable_keeper_count" |> to_int);
           Alcotest.(check int) "health exposes minimum running fibers" 1

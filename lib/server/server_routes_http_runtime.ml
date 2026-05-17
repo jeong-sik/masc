@@ -323,7 +323,39 @@ let autoboot_enabled_keeper_scan config =
     read_errors = List.sort (fun (a, _) (b, _) -> String.compare a b) scan.read_errors;
   }
 
-let keeper_fleet_safety_health_json ~keeper_fibers ~paused_keepers_json =
+type keeper_phase_counts =
+  { running : int
+  ; failing : int
+  ; executable : int
+  }
+
+let keeper_phase_counts ?base_path () =
+  Keeper_registry.all ?base_path ()
+  |> List.fold_left
+       (fun acc (entry : Keeper_registry.registry_entry) ->
+          let executable =
+            if Keeper_state_machine.can_execute_turn entry.phase then acc.executable + 1
+            else acc.executable
+          in
+          match entry.phase with
+          | Keeper_state_machine.Running ->
+            { acc with running = acc.running + 1; executable }
+          | Keeper_state_machine.Failing ->
+            { acc with failing = acc.failing + 1; executable }
+          | Keeper_state_machine.Offline
+          | Keeper_state_machine.Overflowed
+          | Keeper_state_machine.Compacting
+          | Keeper_state_machine.HandingOff
+          | Keeper_state_machine.Draining
+          | Keeper_state_machine.Paused
+          | Keeper_state_machine.Stopped
+          | Keeper_state_machine.Crashed
+          | Keeper_state_machine.Restarting
+          | Keeper_state_machine.Dead
+          | Keeper_state_machine.Zombie -> { acc with executable })
+       { running = 0; failing = 0; executable = 0 }
+
+let keeper_fleet_safety_health_json ~phase_counts ~paused_keepers_json =
   let bootable_names, autoboot_scan =
     match current_server_state_opt () with
     | Some state ->
@@ -344,13 +376,26 @@ let keeper_fleet_safety_health_json ~keeper_fibers ~paused_keepers_json =
   let minimum_running_fibers =
     if target_count <= 1 then target_count else 2
   in
-  let no_running_fibers = target_count > 0 && keeper_fibers = 0 in
+  let no_running_fibers = target_count > 0 && phase_counts.running = 0 in
+  let no_executable_keeper_fibers = target_count > 0 && phase_counts.executable = 0 in
   let low_running_fiber_margin =
-    target_count > 1 && keeper_fibers < minimum_running_fibers
+    target_count > 1 && phase_counts.running < minimum_running_fibers
+  in
+  let reaction_capacity_shortfall_count = max 0 (target_count - phase_counts.running) in
+  let reaction_capacity_below_target =
+    target_count > 0 && reaction_capacity_shortfall_count > 0
+  in
+  let executable_reaction_capacity_shortfall_count =
+    max 0 (target_count - phase_counts.executable)
+  in
+  let executable_reaction_capacity_below_target =
+    target_count > 0 && executable_reaction_capacity_shortfall_count > 0
   in
   let status =
-    if no_running_fibers then "blocked"
+    if no_executable_keeper_fibers then "blocked"
+    else if no_running_fibers then "degraded"
     else if low_running_fiber_margin then "degraded"
+    else if reaction_capacity_below_target then "degraded"
     else "ok"
   in
   let paused_total_count =
@@ -370,13 +415,17 @@ let keeper_fleet_safety_health_json ~keeper_fibers ~paused_keepers_json =
     | _ -> 0
   in
   let blocked_count =
-    if no_running_fibers || low_running_fiber_margin then
-      max 0 (target_count - keeper_fibers)
+    if no_executable_keeper_fibers then executable_reaction_capacity_shortfall_count
+    else if no_running_fibers || low_running_fiber_margin || reaction_capacity_below_target
+    then
+      reaction_capacity_shortfall_count
     else 0
   in
   let blocker =
-    if no_running_fibers then Some "no_running_fibers"
+    if no_executable_keeper_fibers then Some "no_executable_keeper_fibers"
+    else if no_running_fibers then Some "no_healthy_running_keeper_fibers"
     else if low_running_fiber_margin then Some "low_running_fiber_margin"
+    else if reaction_capacity_below_target then Some "reaction_capacity_below_target"
     else if paused_autoboot_count > 0 then Some "durable_paused_autoboot_enabled"
     else None
   in
@@ -396,18 +445,33 @@ let keeper_fleet_safety_health_json ~keeper_fibers ~paused_keepers_json =
              (fun (keeper, error) ->
                `Assoc [ ("keeper", `String keeper); ("error", `String error) ])
              autoboot_scan.read_errors) )
-    ; "running_keeper_fiber_count", `Int keeper_fibers
-    ; "effective_reaction_capacity_count", `Int keeper_fibers
+    ; "running_keeper_fiber_count", `Int phase_counts.running
+    ; "healthy_running_keeper_fiber_count", `Int phase_counts.running
+    ; "failing_keeper_fiber_count", `Int phase_counts.failing
+    ; "executable_keeper_fiber_count", `Int phase_counts.executable
+    ; "effective_reaction_capacity_count", `Int phase_counts.running
+    ; "executable_reaction_capacity_count", `Int phase_counts.executable
     ; "target_reaction_capacity_count", `Int target_count
     ; "minimum_running_fibers", `Int minimum_running_fibers
     ; "no_running_fibers", `Bool no_running_fibers
+    ; "no_executable_keeper_fibers", `Bool no_executable_keeper_fibers
     ; "low_running_fiber_margin", `Bool low_running_fiber_margin
+    ; "reaction_capacity_below_target", `Bool reaction_capacity_below_target
+    ; "reaction_capacity_shortfall_count", `Int reaction_capacity_shortfall_count
+    ; ( "executable_reaction_capacity_below_target"
+      , `Bool executable_reaction_capacity_below_target )
+    ; ( "executable_reaction_capacity_shortfall_count"
+      , `Int executable_reaction_capacity_shortfall_count )
     ; "paused_keeper_count", `Int paused_total_count
     ; "paused_autoboot_enabled_keeper_count", `Int paused_autoboot_count
     ; "blocked_count", `Int blocked_count
     ; "blocked_keepers", `Int blocked_count
     ; ( "operator_action_required"
-      , `Bool (no_running_fibers || low_running_fiber_margin) )
+      , `Bool
+          (no_executable_keeper_fibers
+           || no_running_fibers
+           || low_running_fiber_margin
+           || reaction_capacity_below_target) )
     ]
 
 let take limit values =
@@ -481,11 +545,12 @@ let current_room_base_path_opt () =
 
 let keeper_fleet_runtime_resolution_base_fields () =
   let base_path = current_room_base_path_opt () in
-  let keeper_fibers = Keeper_registry.count_running ?base_path () in
+  let phase_counts = keeper_phase_counts ?base_path () in
+  let keeper_fibers = phase_counts.running in
   let paused_keepers_json = paused_keepers_health_json () in
   let reaction_ledger_json = keeper_reaction_ledger_health_json () in
   let fleet_safety =
-    keeper_fleet_safety_health_json ~keeper_fibers ~paused_keepers_json
+    keeper_fleet_safety_health_json ~phase_counts ~paused_keepers_json
   in
   [ "keeper_fibers", `Int keeper_fibers
   ; "paused_keepers", `Int (paused_keeper_count paused_keepers_json)
@@ -575,7 +640,8 @@ let make_health_json ?(listener = "http/1.1") request =
   in
   let key_paused_keepers = "paused_keepers" in
   let base_path = current_room_base_path_opt () in
-  let keeper_fibers = Keeper_registry.count_running ?base_path () in
+  let phase_counts = keeper_phase_counts ?base_path () in
+  let keeper_fibers = phase_counts.running in
   let paused_keepers_json = paused_keepers_health_json () in
   let reaction_ledger_json = keeper_reaction_ledger_health_json () in
   Tool_args.ok_assoc [
@@ -622,7 +688,7 @@ let make_health_json ?(listener = "http/1.1") request =
         ~starting_keepers:0 ~requested_keepers:24 () );
     ("fd_accountant", fd_accountant_snapshot_json ());
     ( "keeper_fleet_safety"
-    , keeper_fleet_safety_health_json ~keeper_fibers
+    , keeper_fleet_safety_health_json ~phase_counts
         ~paused_keepers_json );
     ("keeper_reaction_ledger", reaction_ledger_json);
     (* Paused-keeper visibility: a keeper with [meta.paused = true] does not

@@ -140,13 +140,22 @@ describe('dashboardHealthChips', () => {
             blocked_count: 14,
             bootable_keeper_count: 1,
             running_keeper_fiber_count: 0,
+            healthy_running_keeper_fiber_count: 0,
+            failing_keeper_fiber_count: 0,
+            executable_keeper_fiber_count: 0,
             minimum_running_fibers: 1,
             no_running_fibers: true,
+            no_executable_keeper_fibers: true,
             low_running_fiber_margin: false,
+            reaction_capacity_below_target: true,
+            reaction_capacity_shortfall_count: 14,
+            executable_reaction_capacity_below_target: true,
+            executable_reaction_capacity_shortfall_count: 14,
             paused_keeper_count: 13,
             autoboot_enabled_keeper_count: 14,
             paused_autoboot_enabled_keeper_count: 13,
             effective_reaction_capacity_count: 0,
+            executable_reaction_capacity_count: 0,
             target_reaction_capacity_count: 14,
             operator_action_required: true,
           },
@@ -166,6 +175,68 @@ describe('dashboardHealthChips', () => {
     expect(chips[0]?.detail).toContain('paused_keeper_count=13')
     expect(chips[0]?.detail).toContain('target_reaction_capacity_count=14')
     expect(chips[0]?.detail).toContain('resume selected paused keepers')
+  })
+
+  it('surfaces fleet capacity degradation when running fibers are below target', () => {
+    const chips = dashboardHealthChips({
+      connected: true,
+      counts: { keepers: 13, configured_keepers: 13 },
+      keepers: [],
+      runtimeResolution: {
+        status: 'ready',
+        warnings: [],
+        fleet_safety: {
+          keeper_fibers: 3,
+          paused_keepers: 2,
+          keeper_fleet_no_fibers: false,
+          keeper_fd_pressure: null,
+          keeper_fleet_safety: {
+            status: 'degraded',
+            reason: null,
+            blocker: 'reaction_capacity_below_target',
+            admission_blocked: null,
+            admission_blocked_keepers: null,
+            blocked_keepers: 10,
+            blocked_count: 10,
+            bootable_keeper_count: 11,
+            running_keeper_fiber_count: 3,
+            healthy_running_keeper_fiber_count: 3,
+            failing_keeper_fiber_count: 8,
+            executable_keeper_fiber_count: 11,
+            minimum_running_fibers: 2,
+            no_running_fibers: false,
+            no_executable_keeper_fibers: false,
+            low_running_fiber_margin: false,
+            reaction_capacity_below_target: true,
+            reaction_capacity_shortfall_count: 10,
+            executable_reaction_capacity_below_target: true,
+            executable_reaction_capacity_shortfall_count: 2,
+            paused_keeper_count: 2,
+            autoboot_enabled_keeper_count: 13,
+            paused_autoboot_enabled_keeper_count: 2,
+            effective_reaction_capacity_count: 3,
+            executable_reaction_capacity_count: 11,
+            target_reaction_capacity_count: 13,
+            operator_action_required: true,
+          },
+        },
+      } as any,
+      executionError: null,
+      loading: false,
+    })
+
+    expect(chips).toEqual([expect.objectContaining({
+      key: 'fleet-liveness-risk',
+      label: 'Fleet capacity degraded',
+      tone: 'warn',
+    })])
+    expect(chips[0]?.detail).toContain('status=degraded')
+    expect(chips[0]?.detail).toContain('healthy_running_keeper_fiber_count=3')
+    expect(chips[0]?.detail).toContain('executable_keeper_fiber_count=11')
+    expect(chips[0]?.detail).toContain('failing_keeper_fiber_count=8')
+    expect(chips[0]?.detail).toContain('target_reaction_capacity_count=13')
+    expect(chips[0]?.detail).toContain('reaction_capacity_shortfall_count=10')
+    expect(chips[0]?.detail).toContain('blocker=reaction_capacity_below_target')
   })
 
   it('surfaces fleet liveness risk when FD pressure blocks 24 keepers', () => {

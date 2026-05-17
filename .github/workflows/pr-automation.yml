@@ -241,10 +241,12 @@ jobs:
               action === "ready_for_review" ||
               action === "auto_merge_enabled";
             // Keep the required Draft Auto-Merge Guard context red for
-            // agent-like PRs until a verified human approval label exists.
+            // every draft PR and agent-like PR until a verified human
+            // approval label exists.
             // A green draft-only check can be reused by a later ready/merge
             // race before the boundary event has a chance to fail closed.
             const approvalRequired =
+              current.isDraft ||
               looksAgentAuthored ||
               unsafeDraftBoundaryAction ||
               hasAutoMergeRequest ||

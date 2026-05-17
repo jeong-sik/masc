@@ -22,6 +22,16 @@ let assoc_field name = function
   | `Assoc fields -> List.assoc_opt name fields
   | _ -> None
 
+let tmpdir prefix =
+  let dir = Filename.temp_file prefix "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let require_ok = function
+  | Ok () -> ()
+  | Error msg -> Alcotest.fail msg
+
 let test_round_trip_small_assoc () =
   let payload : Yojson.Safe.t =
     `Assoc [("foo", `String "bar"); ("n", `Int 42)]
@@ -167,6 +177,35 @@ let test_marker_field_set () =
       true (assoc_field "_preview" marker <> None)
   | _ -> Alcotest.fail "parse_line failed"
 
+let test_backend_streaming_last_write_wins () =
+  let base_dir = tmpdir "memory-jsonl-streaming" in
+  let backend =
+    Memory_jsonl.make_backend
+      ~base_dir
+      ~agent_name:"agent"
+      ~session_id:"session"
+  in
+  require_ok (backend.persist ~key:"pref:first" (`String "old"));
+  require_ok (backend.persist ~key:"pref:first" (`String "new"));
+  require_ok (backend.persist ~key:"pref:second" (`String "two"));
+  require_ok (backend.remove ~key:"pref:first");
+  Alcotest.(check bool)
+    "tombstone wins on retrieve"
+    true
+    (Option.is_none (backend.retrieve ~key:"pref:first"));
+  Alcotest.(check (option string))
+    "second key survives"
+    (Some "two")
+    (match backend.retrieve ~key:"pref:second" with
+     | Some (`String value) -> Some value
+     | _ -> None);
+  let rows = backend.query ~prefix:"pref:" ~limit:10 in
+  Alcotest.(check int) "query skips tombstone" 1 (List.length rows);
+  Alcotest.(check (list string))
+    "query returns live key"
+    [ "pref:second" ]
+    (List.map fst rows)
+
 let () =
   Alcotest.run "memory_jsonl_truncation"
     [
@@ -189,5 +228,9 @@ let () =
           test_no_false_positive_on_truncated_field_with_bool_false;
         Alcotest.test_case "legacy bare String is not a marker" `Quick
           test_no_false_positive_on_bare_string;
+      ]);
+      ("backend", [
+        Alcotest.test_case "streaming read keeps last-write semantics" `Quick
+          test_backend_streaming_last_write_wins;
       ]);
     ]

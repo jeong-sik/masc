@@ -341,18 +341,15 @@ let read_recent ~n : (tool_event list, string) Result.t =
 let warm_up () : unit =
   try
     let store = get_or_create_store () in
-    let jsons = Dated_jsonl.read_recent store 100_000 in
     let decode_failures = create_failure_acc () in
     Eio_guard.with_mutex index_mu (fun () ->
       Hashtbl.clear agent_index;
-      List.iter
-        (fun json ->
-          match event_of_json json with
-          | Ok (Assigned { assignment_id; agent_id; _ }) ->
-              Hashtbl.replace agent_index agent_id assignment_id
-          | Error msg -> add_decode_failure decode_failures msg
-          | _ -> ())
-        jsons);
+      Dated_jsonl.iter_all store (fun json ->
+        match event_of_json json with
+        | Ok (Assigned { assignment_id; agent_id; _ }) ->
+          Hashtbl.replace agent_index agent_id assignment_id
+        | Error msg -> add_decode_failure decode_failures msg
+        | _ -> ()));
     observe_decode_failures ~site:"warm_up_decode" decode_failures
   with
   | Eio.Cancel.Cancelled _ as e -> raise e

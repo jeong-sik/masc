@@ -16,6 +16,8 @@ let tmpdir prefix =
 let make_json i =
   `Assoc [("i", `Int i); ("ts", `Float (Unix.gettimeofday ()))]
 
+let json_i json = Yojson.Safe.Util.(json |> member "i" |> to_int)
+
 (* ── append creates YYYY-MM/DD.jsonl ──────────────────── *)
 
 let test_append_creates_dated_file () =
@@ -178,6 +180,34 @@ let test_read_range_malformed () =
   let result = Dated_jsonl.read_range store ~since:"bad" ~until:"dates" in
   check int "malformed dates return empty" 0 (List.length result)
 
+let write_dated_file dir month day lines =
+  let month_dir = Filename.concat dir month in
+  Fs_compat.mkdir_p month_dir;
+  Fs_compat.append_file
+    (Filename.concat month_dir (day ^ ".jsonl"))
+    (String.concat "\n" lines ^ "\n")
+
+let test_iter_all_chronological_skips_malformed () =
+  let dir = tmpdir "dated_jsonl_iter_all" in
+  write_dated_file dir "2026-01" "01" [ {|{"i":1}|}; "not-json" ];
+  write_dated_file dir "2026-01" "02" [ {|{"i":2}|} ];
+  write_dated_file dir "2026-02" "01" [ {|{"i":3}|} ];
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  let seen = ref [] in
+  Dated_jsonl.iter_all store (fun json -> seen := json_i json :: !seen);
+  check (list int) "iter_all chronological" [ 1; 2; 3 ] (List.rev !seen)
+
+let test_iter_range_chronological () =
+  let dir = tmpdir "dated_jsonl_iter_range" in
+  write_dated_file dir "2026-01" "01" [ {|{"i":1}|} ];
+  write_dated_file dir "2026-01" "02" [ {|{"i":2}|} ];
+  write_dated_file dir "2026-02" "01" [ {|{"i":3}|} ];
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  let seen = ref [] in
+  Dated_jsonl.iter_range store ~since:"2026-01-02" ~until:"2026-02-01"
+    (fun json -> seen := json_i json :: !seen);
+  check (list int) "iter_range chronological" [ 2; 3 ] (List.rev !seen)
+
 (* ── prune removes old files ───────────────────────────── *)
 
 let test_prune () =
@@ -267,6 +297,9 @@ let () =
         [
           test_case "today range non-empty" `Quick test_read_range;
           test_case "malformed dates safe" `Quick test_read_range_malformed;
+          test_case "iter_all chronological" `Quick
+            test_iter_all_chronological_skips_malformed;
+          test_case "iter_range chronological" `Quick test_iter_range_chronological;
         ] );
       ( "prune",
         [

@@ -34,6 +34,14 @@ val read_range : t -> since:string -> until:string -> Yojson.Safe.t list
     within [[since, until]] (inclusive, format ["YYYY-MM-DD"]).
     Result is in chronological order. *)
 
+val iter_all : t -> (Yojson.Safe.t -> unit) -> unit
+(** [iter_all t f] calls [f] for every parseable JSONL entry in chronological
+    order without loading a whole day-file into memory. Malformed rows are
+    skipped, matching {!read_recent} and {!read_range}. *)
+
+val iter_range : t -> since:string -> until:string -> (Yojson.Safe.t -> unit) -> unit
+(** Streaming variant of {!read_range}. Invalid dates iterate zero rows. *)
+
 val prune : t -> days:int -> int
 (** [prune t ~days] deletes day-files older than [days] days ago.
     Returns the number of files deleted.  Removes empty month directories. *)

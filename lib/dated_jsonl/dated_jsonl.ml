@@ -122,14 +122,18 @@ let list_day_files month_path =
 
 (* ── Lines from a single file ─────────────────────────── *)
 
-let load_lines path =
-  if not (Fs_compat.file_exists path) then []
-  else
+let iter_non_empty_lines path f =
+  if Fs_compat.file_exists path then
     try
-      Fs_compat.load_file path
-      |> String.split_on_char '\n'
-      |> List.filter (fun l -> String.trim l <> "")
-    with Sys_error _ -> []
+      let ic = open_in_bin path in
+      Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+        try
+          while true do
+            let line = input_line ic in
+            if String.trim line <> "" then f line
+          done
+        with End_of_file -> ())
+    with Sys_error _ -> ()
 
 let count_non_empty_lines path =
   if not (Fs_compat.file_exists path) then 0
@@ -328,6 +332,43 @@ let read_recent_lines t n =
     !collected
   end
 
+let iter_json_file path f =
+  iter_non_empty_lines path (fun line ->
+    try f (Yojson.Safe.from_string line) with
+    | Yojson.Json_error _ -> ())
+
+let iter_all t f =
+  let months = list_month_dirs t.base_dir |> List.rev in
+  List.iter
+    (fun m ->
+       let month_path = Filename.concat t.base_dir m in
+       let days = list_day_files month_path |> List.rev in
+       List.iter
+         (fun d -> iter_json_file (Filename.concat month_path d) f)
+         days)
+    months
+
+let iter_range t ~since ~until f =
+  match parse_date since, parse_date until with
+  | None, _ | _, None -> ()
+  | Some (since_month, since_day), Some (until_month, until_day) ->
+    let months = list_month_dirs t.base_dir |> List.rev in
+    List.iter (fun m ->
+      if String.compare m since_month >= 0
+         && String.compare m until_month <= 0 then begin
+        let month_path = Filename.concat t.base_dir m in
+        let days = list_day_files month_path |> List.rev in
+        List.iter (fun d ->
+          let day_num = Filename.remove_extension d in
+          let dominated =
+            (m = since_month && String.compare day_num since_day < 0)
+            || (m = until_month && String.compare day_num until_day > 0)
+          in
+          if not dominated then iter_json_file (Filename.concat month_path d) f)
+          days
+      end)
+      months
+
 let count_entries t =
   let months = list_month_dirs t.base_dir in
   List.fold_left (fun total month ->
@@ -340,36 +381,9 @@ let count_entries t =
       ) 0 days
   ) 0 months
 let read_range t ~since ~until =
-  match parse_date since, parse_date until with
-  | None, _ | _, None -> []
-  | Some (since_month, since_day), Some (until_month, until_day) ->
-    let collected = ref [] in
-    let months = list_month_dirs t.base_dir |> List.rev in (* ascending *)
-    List.iter (fun m ->
-      if String.compare m since_month >= 0
-         && String.compare m until_month <= 0 then begin
-        let month_path = Filename.concat t.base_dir m in
-        let days = list_day_files month_path |> List.rev in (* ascending *)
-        List.iter (fun d ->
-          let day_num = Filename.remove_extension d in
-          let dominated =
-            (m = since_month && String.compare day_num since_day < 0)
-            || (m = until_month && String.compare day_num until_day > 0)
-          in
-          if not dominated then begin
-            let path = Filename.concat month_path d in
-            let lines = load_lines path in
-            List.iter (fun line ->
-              (try
-                 let json = Yojson.Safe.from_string line in
-                 collected := json :: !collected
-               with Yojson.Json_error _ -> ())
-            ) lines
-          end
-        ) days
-      end
-    ) months;
-    List.rev !collected
+  let collected = ref [] in
+  iter_range t ~since ~until (fun json -> collected := json :: !collected);
+  List.rev !collected
 
 let prune t ~days =
   let mutex = Atomic.get t.mutex in

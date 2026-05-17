@@ -199,26 +199,24 @@ let restore ~base_path : int =
   let skipped = ref 0 in
   let first_skip_reason = ref None in
   (try
-     (* Read all available records (cap at 1M to avoid OOM on huge histories) *)
-     let jsons = Dated_jsonl.read_recent store 1_000_000 in
-     List.iter (fun json ->
+     Dated_jsonl.iter_all store (fun json ->
        match parse_record json with
        | Ok r ->
-         let result : Tool_result.t = {
-           tool_name = r.tool_name;
-           success = r.success;
-           duration_ms = r.duration_ms;
-           data = `Null;
-           legacy_message = "";
-           failure_class = None;
-         } in
+         let result : Tool_result.t =
+           { tool_name = r.tool_name
+           ; success = r.success
+           ; duration_ms = r.duration_ms
+           ; data = `Null
+           ; legacy_message = ""
+           ; failure_class = None
+           }
+         in
          Tool_metrics.record result;
          Stdlib.incr count
        | Error reason ->
          Stdlib.incr skipped;
          if Option.is_none !first_skip_reason then
-           first_skip_reason := Some reason
-     ) jsons;
+           first_skip_reason := Some reason);
      if !skipped > 0 then
        Log.Metrics.warn
          "tool_metrics_persist: skipped %d malformed restore record(s)%s"

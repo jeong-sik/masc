@@ -99,7 +99,7 @@ runs:
         opam_url="https://github.com/ocaml/opam/releases/download/${opam_version}/opam-${opam_version}-${opam_arch}-linux"
 
         mkdir -p "${opam_dir}"
-        curl -L --fail "${opam_url}" -o "${opam_dir}/opam"
+        curl -L --fail --retry 3 --retry-delay 5 --retry-all-errors "${opam_url}" -o "${opam_dir}/opam"
         chmod +x "${opam_dir}/opam"
         export PATH="${opam_dir}:${PATH}"
         echo "${opam_dir}" >> "${GITHUB_PATH}"

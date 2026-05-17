@@ -417,6 +417,7 @@ type operator_disposition_reason =
   | Reason_provider_runtime_error
   | Reason_internal_error
   | Reason_tool_required_unsatisfied
+  | Reason_tool_route_recoverable_failure
   | Reason_turn_livelock_blocked
   | Reason_cancelled
   | Reason_phase_skipped
@@ -431,6 +432,7 @@ let operator_disposition_reason_to_string = function
   | Reason_provider_runtime_error -> "provider_runtime_error"
   | Reason_internal_error -> "internal_error"
   | Reason_tool_required_unsatisfied -> "tool_required_unsatisfied"
+  | Reason_tool_route_recoverable_failure -> "tool_route_recoverable_failure"
   | Reason_turn_livelock_blocked -> "turn_livelock_blocked"
   | Reason_cancelled -> "cancelled"
   | Reason_phase_skipped -> "phase_skipped"
@@ -512,7 +514,7 @@ let operator_disposition (receipt : t)
     | Some "internal" -> true
     | Some _ | None -> false
   then Disp_pause_human, Reason_internal_error
-  else if
+  else
     let canonical_names names =
       names
       |> List.map Keeper_tool_disclosure.canonical_tool_name
@@ -544,63 +546,81 @@ let operator_disposition (receipt : t)
       && receipt.tool_contract_result = Contract_needs_execution_progress
       && (required_tools_satisfied || generic_claim_context_progress)
     in
-    receipt.tool_surface.tool_requirement = Required
-    && (List.mem
-          receipt.tool_contract_result
-          [ Contract_violated
-          ; Contract_unknown
-          ; Contract_needs_execution_progress
-          ; Contract_missing_required_tool_use
-          ; Contract_passive_only
-          ; Contract_claim_only_after_owned_task
-          ; Contract_tool_surface_mismatch
-          ; Contract_no_tool_capable_provider
-          ]
-        || receipt.tools_used = [])
-    && not ok_followup_progress
-  then Disp_pause_human, Reason_tool_required_unsatisfied
-  else if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_cascade
-  then Disp_fail_open_next_cascade, Reason_degraded_retry
-  else if
-    receipt.cascade_fallback_applied
-    || receipt.cascade_outcome = Cascade_passed_to_next_model
-  then Disp_pass_next_model, Reason_cascade_fallback
-  (* "healthy" requires an explicit success signal: turn completed without
-     error AND cascade reached the configured terminal. Any other fallthrough
-     is an unmapped state — surface it as "unknown" so a new cascade_outcome
-     or terminal_reason_code does not silently display as "healthy" on the
-     dashboard. See #9900 and CLAUDE.md anti-pattern #2.
+    let required_tool_contract_unsatisfied =
+      receipt.tool_surface.tool_requirement = Required
+      && (List.mem
+            receipt.tool_contract_result
+            [ Contract_violated
+            ; Contract_unknown
+            ; Contract_needs_execution_progress
+            ; Contract_missing_required_tool_use
+            ; Contract_passive_only
+            ; Contract_claim_only_after_owned_task
+            ; Contract_tool_surface_mismatch
+            ; Contract_no_tool_capable_provider
+            ]
+          || receipt.tools_used = [])
+      && not ok_followup_progress
+    in
+    let required_tool_route_failure =
+      List.mem
+        receipt.tool_contract_result
+        [ Contract_tool_surface_mismatch; Contract_no_tool_capable_provider ]
+    in
+    if required_tool_contract_unsatisfied && required_tool_route_failure
+    then
+      if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_cascade
+      then Disp_fail_open_next_cascade, Reason_tool_route_recoverable_failure
+      else if
+        receipt.cascade_fallback_applied
+        || receipt.cascade_outcome = Cascade_passed_to_next_model
+      then Disp_pass_next_model, Reason_tool_route_recoverable_failure
+      else Disp_pause_human, Reason_tool_route_recoverable_failure
+    else if required_tool_contract_unsatisfied
+    then Disp_pause_human, Reason_tool_required_unsatisfied
+    else if
+      receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_cascade
+    then Disp_fail_open_next_cascade, Reason_degraded_retry
+    else if
+      receipt.cascade_fallback_applied
+      || receipt.cascade_outcome = Cascade_passed_to_next_model
+    then Disp_pass_next_model, Reason_cascade_fallback
+    (* "healthy" requires an explicit success signal: turn completed without
+       error AND cascade reached the configured terminal. Any other fallthrough
+       is an unmapped state — surface it as "unknown" so a new cascade_outcome
+       or terminal_reason_code does not silently display as "healthy" on the
+       dashboard. See #9900 and CLAUDE.md anti-pattern #2.
 
-     Cancelled is split out from the legacy binary outcome so dashboards
-     and replay decoders can distinguish a user-initiated cancellation
-     from a true failure. Skipped corresponds to the TLA+ [PhaseGateSkip]
-     action: a turn that intentionally never dispatched, so cascade
-     never engaged. It is a successful no-op rather than a failure or
-     an unmapped state. Spec parity with [ReceiptOutcomeSet] in
-     [specs/keeper-turn-fsm/KeeperTurnFSM.tla]. *)
-  else (
-    match receipt.outcome with
-    | `Cancelled -> Disp_user_cancelled, Reason_cancelled
-    | `Skipped -> Disp_skipped, Reason_phase_skipped
-    | `Ok when receipt.cascade_outcome = Cascade_completed -> Disp_pass, Reason_healthy
-    | _ ->
-      Prometheus.inc_counter Keeper_metrics.metric_keeper_receipt_unmapped_disposition ();
-      Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_execution_receipt_failures
-        ~labels:[ "keeper", receipt.keeper_name; "site", Keeper_execution_receipt_failure_site.(to_label Unmapped_disposition) ]
-        ();
-      Log.Keeper.warn
-        "operator_disposition: unmapped (outcome=%s cascade_outcome=%s \
-         terminal_reason=%s tool_contract_result=%s error_kind=%s) — investigate \
-         regression of #11651 silent-path fix"
-        (outcome_kind_to_string receipt.outcome)
-        (cascade_outcome_to_string receipt.cascade_outcome)
-        terminal_reason
-        (tool_contract_result_to_string receipt.tool_contract_result)
-        (Option.value
-           (Option.map error_kind_to_string receipt.error_kind)
-           ~default:"<none>");
-      Disp_unknown, Reason_unmapped_cascade_state)
+       Cancelled is split out from the legacy binary outcome so dashboards
+       and replay decoders can distinguish a user-initiated cancellation
+       from a true failure. Skipped corresponds to the TLA+ [PhaseGateSkip]
+       action: a turn that intentionally never dispatched, so cascade
+       never engaged. It is a successful no-op rather than a failure or
+       an unmapped state. Spec parity with [ReceiptOutcomeSet] in
+       [specs/keeper-turn-fsm/KeeperTurnFSM.tla]. *)
+    else (
+      match receipt.outcome with
+      | `Cancelled -> Disp_user_cancelled, Reason_cancelled
+      | `Skipped -> Disp_skipped, Reason_phase_skipped
+      | `Ok when receipt.cascade_outcome = Cascade_completed -> Disp_pass, Reason_healthy
+      | _ ->
+        Prometheus.inc_counter Keeper_metrics.metric_keeper_receipt_unmapped_disposition ();
+        Prometheus.inc_counter
+          Keeper_metrics.metric_keeper_execution_receipt_failures
+          ~labels:[ "keeper", receipt.keeper_name; "site", Keeper_execution_receipt_failure_site.(to_label Unmapped_disposition) ]
+          ();
+        Log.Keeper.warn
+          "operator_disposition: unmapped (outcome=%s cascade_outcome=%s \
+           terminal_reason=%s tool_contract_result=%s error_kind=%s) — investigate \
+           regression of #11651 silent-path fix"
+          (outcome_kind_to_string receipt.outcome)
+          (cascade_outcome_to_string receipt.cascade_outcome)
+          terminal_reason
+          (tool_contract_result_to_string receipt.tool_contract_result)
+          (Option.value
+             (Option.map error_kind_to_string receipt.error_kind)
+             ~default:"<none>");
+        Disp_unknown, Reason_unmapped_cascade_state)
 ;;
 
 let to_json (receipt : t) =

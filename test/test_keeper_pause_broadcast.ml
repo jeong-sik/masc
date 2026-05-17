@@ -115,26 +115,71 @@ let check_disp label receipt expected_disp expected_reason =
     (R.operator_disposition_reason_to_string reason)
 ;;
 
-(* === Bug class: tool_contract_result violations must pause_human ====== *)
+(* === Bug class: required-tool failures must keep route failures distinct == *)
 
-let violation_variants : (string * R.tool_contract_result) list =
+let human_required_violation_variants : (string * R.tool_contract_result) list =
   [ "violated", Contract_violated
   ; "unknown", Contract_unknown
   ; "needs_execution_progress", Contract_needs_execution_progress
   ; "missing_required_tool_use", Contract_missing_required_tool_use
   ; "passive_only", Contract_passive_only
   ; "claim_only_after_owned_task", Contract_claim_only_after_owned_task
-  ; "tool_surface_mismatch", Contract_tool_surface_mismatch
+  ]
+;;
+
+let route_failure_variants : (string * R.tool_contract_result) list =
+  [ "tool_surface_mismatch", Contract_tool_surface_mismatch
   ; "no_tool_capable_provider", Contract_no_tool_capable_provider
   ]
 ;;
 
-let test_pause_human_for_each_violation () =
+let test_pause_human_for_each_human_required_violation () =
   List.iter
     (fun (label, v) ->
        let r = mk_receipt ~tool_contract_result:v () in
        check_disp ("violation:" ^ label) r "pause_human" "tool_required_unsatisfied")
-    violation_variants
+    human_required_violation_variants
+;;
+
+let test_route_failure_uses_recoverable_reason () =
+  List.iter
+    (fun (label, v) ->
+       let r = mk_receipt ~tool_contract_result:v () in
+       check_disp
+         ("route_failure:" ^ label)
+         r
+         "pause_human"
+         "tool_route_recoverable_failure")
+    route_failure_variants
+;;
+
+let test_route_failure_passes_next_when_fallback_available () =
+  let r =
+    mk_receipt
+      ~cascade_fallback_applied:true
+      ~cascade_outcome:R.Cascade_passed_to_next_model
+      ~tool_contract_result:Contract_tool_surface_mismatch
+      ()
+  in
+  check_disp
+    "route_failure fallback"
+    r
+    "pass_next_model"
+    "tool_route_recoverable_failure"
+;;
+
+let test_route_failure_fail_open_when_degraded_retry_available () =
+  let r =
+    mk_receipt
+      ~degraded_retry_applied:true
+      ~tool_contract_result:Contract_no_tool_capable_provider
+      ()
+  in
+  check_disp
+    "route_failure degraded"
+    r
+    "fail_open_next_cascade"
+    "tool_route_recoverable_failure"
 ;;
 
 let test_pause_human_when_no_tools_used () =
@@ -660,9 +705,21 @@ let () =
     "keeper_pause_broadcast"
     [ ( "operator_disposition"
       , [ test_case
-            "all 8 contract violations -> pause_human"
+            "human required contract violations -> pause_human"
             `Quick
-            test_pause_human_for_each_violation
+            test_pause_human_for_each_human_required_violation
+        ; test_case
+            "route/tool-surface failures keep recoverable reason"
+            `Quick
+            test_route_failure_uses_recoverable_reason
+        ; test_case
+            "route/tool-surface fallback -> pass_next_model"
+            `Quick
+            test_route_failure_passes_next_when_fallback_available
+        ; test_case
+            "route/tool-surface degraded -> fail_open_next_cascade"
+            `Quick
+            test_route_failure_fail_open_when_degraded_retry_available
         ; test_case
             "tools_used=[] -> pause_human"
             `Quick

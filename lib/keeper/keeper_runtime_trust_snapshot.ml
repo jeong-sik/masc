@@ -151,8 +151,11 @@ let terminal_reason_from_receipt receipt =
     match operator_disposition, operator_disposition_reason, tool_contract_result with
     | Some "pause_human", Some "tool_required_unsatisfied", _
     | _, Some "tool_required_unsatisfied", _
+    | _, Some "tool_route_recoverable_failure", _
     | _, _, Some "needs_execution_progress"
     | _, _, Some "missing_required_tool_use"
+    | _, _, Some "tool_surface_mismatch"
+    | _, _, Some "no_tool_capable_provider"
     | _, _, Some "passive_only"
     | _, _, Some "violated" ->
         true

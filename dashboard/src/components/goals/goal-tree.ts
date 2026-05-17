@@ -229,6 +229,7 @@ function blockerSourceLabel(source: GoalTreeNode['blocking_source']): string {
 function humanizeBlockingReason(reason: string): string {
   switch (reason) {
     case 'tool_required_unsatisfied': return '필요한 도구가 충족되지 않음'
+    case 'tool_route_recoverable_failure': return '도구 라우팅 복구 필요'
     case 'degraded_retry': return '재시도 중 (성능 저하)'
     case 'reaction_chain_break': return '반응 체인 단절'
     case 'awaiting_verification': return '검증 대기'

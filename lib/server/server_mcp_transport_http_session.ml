@@ -19,15 +19,12 @@ let mcp_profile_by_session : Server_mcp_transport_http_types.tool_profile SMap.t
 let default_base_path () =
   (* Match the launcher guard: a direct binary launch from a checkout with its
      own .masc must not silently inherit a stale parent MASC_BASE_PATH.
-     When no explicit base path is set, prefer HOME so runtime artifacts land
-     under ~/.masc instead of the current checkout. *)
+     When no explicit base path is set, use the current checkout/cwd rather
+     than HOME so runtime artifacts stay under a visible base path. *)
   let requested_path =
     match (Host_config.from_env ()).base_path with
     | Some _ -> Sys.getcwd ()
-    | None -> (
-        match (Host_config.from_env ()).home with
-        | Some home -> home
-        | None -> Sys.getcwd ())
+    | None -> Sys.getcwd ()
   in
   Coord_utils_backend_setup.resolve_server_default_base_path requested_path
 

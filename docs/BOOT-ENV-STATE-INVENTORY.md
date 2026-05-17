@@ -38,7 +38,7 @@ Scope:
 | `MASC_CONFIG_DIR` | Explicit config root override. Highest-precedence config selector. | `Config_dir_resolver`, bootstrap, keeper/persona config resolution |
 | `MASC_PERSONAS_DIR` | Explicit personas root override. | `Config_dir_resolver`, keeper/persona loading |
 | `MASC_STORAGE_TYPE` | Runtime backend selector. Only `filesystem` is active; PostgreSQL backend was removed. | bootstrap and backend setup |
-| `HOME` | Fallback for home-level config discovery. | `Config_dir_resolver`, some artifact stores |
+| `HOME` | Shell/user-home context for external tools and non-config artifact stores. | Host process environment |
 | `MASC_WORKSPACE_ROOT`, `ME_ROOT`, `DUNE_SOURCEROOT` | Workspace discovery, legacy repo fallback, some knowledge paths, `scripts/sb` resolution. | `Env_config_core`, `autoresearch_knowledge`, legacy paths |
 | `MASC_HOST`, `MASC_HTTP_PORT`, `MASC_HTTP_BASE_URL` | Bind address and derived HTTP endpoint identity. | HTTP/bootstrap/provider routing |
 | `MASC_ADMIN_TOKEN` | Privileged endpoint auth. | server auth |
@@ -56,9 +56,8 @@ Low-level resolver precedence is:
 
 1. `MASC_CONFIG_DIR`
 2. `<MASC_BASE_PATH>/.masc/config`
-3. `~/.masc/config`
-4. `cwd/config` when `MASC_ALLOW_REPO_CONFIG_FALLBACK=true`
-5. executable-relative `config/` when `MASC_ALLOW_REPO_CONFIG_FALLBACK=true`
+3. `cwd/config` when `MASC_ALLOW_REPO_CONFIG_FALLBACK=true`
+4. executable-relative `config/` when `MASC_ALLOW_REPO_CONFIG_FALLBACK=true`
 
 Important boot behavior:
 
@@ -67,6 +66,8 @@ Important boot behavior:
 - Supported launchers and `main_eio.exe doctor` should be read with a simpler operator contract:
   active config is `MASC_CONFIG_DIR` when set, otherwise `<MASC_BASE_PATH>/.masc/config`.
 - This means a passive base-path config root can exist on disk even when it is not the active config root.
+- There is no home-level config fallback. On shared hosts, use an explicit base
+  path and expect live config under `<base-path>/.masc/config`.
 
 ### 1.3 Personas root resolution
 
@@ -183,21 +184,21 @@ without mutating the parent environment.
 
 ### 2.1 Root formulas
 
-- Default cluster runtime root: `<base_path>/.masc`
-- When no explicit `base_path` is provided, runtime state falls back to `~/.masc`
-  by treating `HOME` as the implicit base path.
-- Named cluster runtime root: `<base_path>/.masc/clusters/<cluster_name>`
+- Default cluster runtime root: `<base-path>/.masc`
+- Normal operator runbooks should name the base path explicitly; runtime state
+  is then rooted at `<base-path>/.masc`.
+- Named cluster runtime root: `<base-path>/.masc/clusters/<cluster_name>`
 - Config root: resolved separately by the precedence chain above
 - Personas root: resolved separately from the config root
-- Planning root: `<base_path>/planning/<task_id>` (important outlier: not inside `.masc`)
+- Planning root: `<base-path>/planning/<task_id>` (important outlier: not inside `.masc`)
 
 ### 2.2 Path matrix
 
 | Artifact lane | Canonical path |
 | --- | --- |
-| Runtime root | `<base_path>/.masc` |
-| Cluster root | `<base_path>/.masc/clusters/<cluster_name>` |
-| Base-path config root | `<base_path>/.masc/config` |
+| Runtime root | `<base-path>/.masc` |
+| Cluster root | `<base-path>/.masc/clusters/<cluster_name>` |
+| Base-path config root | `<base-path>/.masc/config` |
 | Keepers | `<runtime_root>/keepers` |
 | Traces | `<runtime_root>/traces` |
 | Playground | `<runtime_root>/playground/<keeper>/...` |
@@ -206,7 +207,7 @@ without mutating the parent environment.
 | Agents | `<runtime_root>/agents` |
 | Messages | `<runtime_root>/messages` |
 | Current task pointer | `<runtime_root>/current_task` |
-| Planning context | `<base_path>/planning/<task_id>/` |
+| Planning context | `<base-path>/planning/<task_id>/` |
 | Runs | `<runtime_root>/runs/<task_id>/` |
 | Board | `<runtime_root>/board_posts.jsonl`, `board_comments.jsonl`, `board_votes.jsonl` |
 | Goals | `<runtime_root>/goals.json`, `goals_snapshots/`, `goals_scheduler_state.json` |
@@ -232,7 +233,7 @@ without mutating the parent environment.
 - `<runtime_root>/agents/`: agent membership and state snapshots.
 - `<runtime_root>/messages/`: room and broadcast message artifacts.
 - `<runtime_root>/current_task`: planning pointer for the current claimed task.
-- `<base_path>/planning/<task_id>/`: planning-with-files context:
+- `<base-path>/planning/<task_id>/`: planning-with-files context:
   - `task_plan.md`
   - `notes.md`
   - `errors.md`
@@ -244,7 +245,7 @@ without mutating the parent environment.
   - `deliverable.md`
   - `log.jsonl`
 
-Important outlier: planning data does not live under `.masc`; it lives under `<base_path>/planning/`.
+Important outlier: planning data does not live under `.masc`; it lives under `<base-path>/planning/`.
 
 ### 3.2 Board
 
@@ -402,7 +403,7 @@ Notes:
 
 These still exist because some execution and proof surfaces have not been fully migrated away from them. They should not be treated as the main product-level operator concept.
 
-## 4. Current Host Audit (2026-04-09)
+## 4. Current Host Audit (2026-05-17)
 
 Current observed state on the inspected host:
 
@@ -414,10 +415,10 @@ Current observed state on the inspected host:
   - `/Users/dancer/me/.masc`
 - Effective config root:
   - `/Users/dancer/me/.masc/config`
-  - Reason: for the normal `--base-path=/Users/dancer/me` runtime without an explicit `MASC_CONFIG_DIR` override, config resolves under the base path.
+  - Reason: live `/health` reports `startup.config_resolution.config_root.path` as `/Users/dancer/me/.masc/config`.
 - Checked-in fallback/default config tree:
   - `/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config`
-- Home fallback config root is absent on this host right now:
+- Removed home-level config root:
   - `/Users/dancer/.masc/config` does not exist.
 - Both of these trees exist at the same time:
   - `/Users/dancer/me/.masc/*`
@@ -445,16 +446,15 @@ Current host definitely has live filesystem data for:
 
 Current log sink observed today:
 
-- `/Users/dancer/me/.masc/logs/masc-server.log`
-- `/Users/dancer/me/.masc/logs/system_log_2026-04-09.jsonl`
+- `/Users/dancer/me/.masc/logs`
+- current file-sink date: `2026-05-17`
 
 [근거]
 
-- `ps aux | rg 'main_eio\.exe --host=127.0.0.1 --port=8935 --base-path=/Users/dancer/me'`; 확인일시: 2026-04-09 Asia/Seoul; 신뢰도: High
-- `ps eww -p 3568` with secret-bearing values redacted; 확인일시: 2026-04-09 Asia/Seoul; 신뢰도: High
-- `env | sort | rg '^(HOME|ME_ROOT|MASC_BASE_PATH|MASC_CONFIG_DIR|MASC_PERSONAS_DIR)='`; 확인일시: 2026-04-09 Asia/Seoul; 신뢰도: High
-- `find /Users/dancer/me/.masc ...`; 확인일시: 2026-04-09 Asia/Seoul; 신뢰도: High
-- `test -d /Users/dancer/.masc/config && echo present || echo absent`; 확인일시: 2026-04-09 Asia/Seoul; 신뢰도: High
+- `curl -fsS http://127.0.0.1:8935/health`; 확인일시: 2026-05-17 Asia/Seoul; 신뢰도: High
+- `pgrep -fl main_eio`; 확인일시: 2026-05-17 Asia/Seoul; 신뢰도: High
+- `test ! -e /Users/dancer/.masc/config`; 확인일시: 2026-05-17 Asia/Seoul; 신뢰도: High
+- `test -f /Users/dancer/me/.masc/config/cascade.toml`; 확인일시: 2026-05-17 Asia/Seoul; 신뢰도: High
 
 ## 5. Operator Checklist for Root Drift
 
@@ -464,8 +464,8 @@ Current log sink observed today:
 2. Pick one active config root.
    - If `MASC_CONFIG_DIR` is set, that wins.
    - If you want the base-path config root to become active, unset `MASC_CONFIG_DIR` and restart.
-   - The home fallback is only relevant when both of the above fail and `~/.masc/config` actually exists.
-3. Treat `<base_path>/planning/` as a separate backup and cleanup lane from `.masc/`.
+   - Do not recreate a home-level config directory as a second operator surface; the resolver no longer consults it.
+3. Treat `<base-path>/planning/` as a separate backup and cleanup lane from `.masc/`.
 4. Do not delete a nested `.masc/.masc` tree until you have checked whether it still contains needed logs, traces, or backlog state.
 5. When debugging keeper shell, clone, or PR-submit behavior, inspect these paths first:
    - `<runtime_root>/playground/<keeper>/repos/`

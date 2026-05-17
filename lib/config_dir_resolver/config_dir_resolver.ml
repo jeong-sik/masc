@@ -10,7 +10,6 @@ let keeper_runtime_toml_filename = "keeper_runtime.toml"
 type source =
   | Env
   | Local_masc
-  | Home_masc
   | Invalid_env
   | Exe_relative
   | Cwd
@@ -45,7 +44,6 @@ type inputs = {
   env_base_path : string option;
   env_config_dir : string option;
   env_personas_dir : string option;
-  env_home : string option;
 }
 
 let trim_opt = Env_config_core.trim_opt
@@ -139,14 +137,6 @@ let current_env_personas_dir_opt () =
     ~initial:initial_env_personas_dir
     ~current:((Host_config.from_env ()).personas_dir)
 
-let current_env_home_opt () =
-  sanitize_inherited_test_env_opt
-    ~running_under_test_executable:
-      (running_under_test_executable ())
-    ~allow_inherited:(allow_inherited_test_config_paths ())
-    ~initial:initial_env_home
-    ~current:(Sys.getenv_opt "HOME" |> trim_opt)
-
 let absolute_path path =
   if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path
 
@@ -156,7 +146,6 @@ let absolute_path_from ~cwd path =
 let source_to_string = function
   | Env -> "env"
   | Local_masc -> "local_masc"
-  | Home_masc -> "home_masc"
   | Invalid_env -> "invalid_env"
   | Exe_relative -> "exe_relative"
   | Cwd -> "cwd"
@@ -247,29 +236,27 @@ let disabled_repo_config_fallback_warnings (inputs : inputs) =
             rendered;
         ]
 
-let path_from_home_masc (inputs : inputs) =
-  match trim_opt inputs.env_home with
-  | None -> None
-  | Some home ->
-      let candidate = Filename.concat (Common.masc_dir_from_base_path ~base_path:home) "config" in
-      if config_signature_exists candidate then Some candidate else None
+let base_path_config_root ~cwd base_path =
+  let base_path =
+    base_path
+    |> Env_config_core.normalize_masc_base_path_input
+    |> absolute_path_from ~cwd
+  in
+  Filename.concat (Common.masc_dir_from_base_path ~base_path) "config"
 
 let path_from_local_masc (inputs : inputs) =
   match trim_opt inputs.env_base_path with
   | None -> None
   | Some base_path ->
-      let base_path =
-        base_path
-        |> Env_config_core.normalize_masc_base_path_input
-        |> absolute_path_from ~cwd:inputs.cwd
-      in
-      let candidate = Filename.concat (Common.masc_dir_from_base_path ~base_path) "config" in
+      let candidate = base_path_config_root ~cwd:inputs.cwd base_path in
       if config_signature_exists candidate then Some candidate else None
 
 let default_missing_root (inputs : inputs) =
-  match trim_opt inputs.env_home with
-  | Some home -> Filename.concat (Common.masc_dir_from_base_path ~base_path:home) "config"
-  | None -> Filename.concat inputs.cwd "config" |> absolute_path_from ~cwd:inputs.cwd
+  match trim_opt inputs.env_base_path with
+  | Some base_path -> base_path_config_root ~cwd:inputs.cwd base_path
+  | None ->
+      let cwd = absolute_path_from ~cwd:inputs.cwd inputs.cwd in
+      Filename.concat (Common.masc_dir_from_base_path ~base_path:cwd) "config"
 
 let config_root_resolution (inputs : inputs) =
   let missing path warnings =
@@ -291,50 +278,28 @@ let config_root_resolution (inputs : inputs) =
       match path_from_local_masc inputs with
       | Some path -> ({ path; exists = true; source = Local_masc }, [])
       | None ->
-          match path_from_home_masc inputs with
-          | Some path ->
-              (* Warn only when MASC_BASE_PATH was set but local resolution
-                 still failed — that is the #9896 drift signature (harness
-                 subprocess has env set or is meant to, yet Local_masc
-                 didn't resolve so we slid into HOME). If env_base_path is
-                 empty the user deliberately runs without an explicit base
-                 path and HOME is the intended root; no warning needed. *)
-              let warnings =
-                match trim_opt inputs.env_base_path with
-                | None -> []
-                | Some _ ->
-                    [
-                      Printf.sprintf
-                        "MASC_BASE_PATH is set but its .masc/config was \
-                         not found; falling back to HOME (%s). Check \
-                         subprocess env propagation. See #9896."
-                        path;
-                    ]
-              in
-              ({ path; exists = true; source = Home_masc }, warnings)
-          | None ->
-              if repo_config_fallback_enabled () then
-                match path_from_cwd inputs.cwd with
-                | Some path -> ({ path; exists = true; source = Cwd }, [])
+          if repo_config_fallback_enabled () then
+            match path_from_cwd inputs.cwd with
+            | Some path -> ({ path; exists = true; source = Cwd }, [])
+            | None ->
+                match path_from_executable ~cwd:inputs.cwd inputs.executable_name with
+                | Some path -> ({ path; exists = true; source = Exe_relative }, [])
                 | None ->
-                    match path_from_executable ~cwd:inputs.cwd inputs.executable_name with
-                    | Some path -> ({ path; exists = true; source = Exe_relative }, [])
-                    | None ->
-                        let path = default_missing_root inputs in
-                        missing path
-                          [
-                            Printf.sprintf
-                              "Unable to resolve config directory; set MASC_CONFIG_DIR (current fallback candidate: %s)"
-                              path;
-                          ]
-              else
-                let path = default_missing_root inputs in
-                missing path
-                  [
-                    Printf.sprintf
-                      "Unable to resolve config directory; set MASC_CONFIG_DIR (current fallback candidate: %s)"
-                      path;
-                  ]
+                    let path = default_missing_root inputs in
+                    missing path
+                      [
+                        Printf.sprintf
+                          "Unable to resolve config directory; set MASC_CONFIG_DIR or initialize the base-path config root: %s"
+                          path;
+                      ]
+          else
+            let path = default_missing_root inputs in
+            missing path
+              [
+                Printf.sprintf
+                  "Unable to resolve config directory; set MASC_CONFIG_DIR or initialize the base-path config root: %s"
+                  path;
+              ]
 
 let child_item (root : path_item) name =
   let path = Filename.concat root.path name in
@@ -366,7 +331,6 @@ let inputs_from_env () =
     env_base_path = current_env_base_path_opt ();
     env_config_dir = current_env_config_dir_opt ();
     env_personas_dir = current_env_personas_dir_opt ();
-    env_home = current_env_home_opt ();
   }
 
 let resolve_with inputs =
@@ -396,7 +360,7 @@ let resolve_with inputs =
     match config_root.source with
     | Invalid_env -> Invalid_env_status
     | Missing -> Missing_status
-    | Env | Local_masc | Home_masc | Exe_relative | Cwd ->
+    | Env | Local_masc | Exe_relative | Cwd ->
         if warnings = [] then Ready else Warn
   in
   {
@@ -427,10 +391,10 @@ let reset () =
 let cascade_path_opt () =
   let resolution = resolve () in
   match resolution.config_root.source with
-  | Env | Local_masc | Home_masc | Exe_relative | Cwd
+  | Env | Local_masc | Exe_relative | Cwd
     when resolution.cascade_authoring.exists ->
       Some resolution.cascade_authoring.path
-  | Env | Local_masc | Home_masc | Exe_relative | Cwd
+  | Env | Local_masc | Exe_relative | Cwd
   | Invalid_env | Missing ->
       None
 
@@ -449,10 +413,10 @@ let keepers_dir () =
 let personas_dir_opt () =
   let resolution = resolve () in
   match resolution.config_root.source with
-  | Env | Local_masc | Home_masc | Exe_relative | Cwd
+  | Env | Local_masc | Exe_relative | Cwd
     when resolution.personas.exists ->
       Some resolution.personas.path
-  | Env | Local_masc | Home_masc | Exe_relative | Cwd
+  | Env | Local_masc | Exe_relative | Cwd
   | Invalid_env | Missing ->
       None
 
@@ -493,7 +457,7 @@ let personas_dirs_with inputs resolution =
     let primary =
       match resolution.config_root.source with
       | Invalid_env | Missing -> []
-      | Env | Local_masc | Home_masc | Exe_relative | Cwd ->
+      | Env | Local_masc | Exe_relative | Cwd ->
         if resolution.personas.exists then [ resolution.personas.path ] else []
     in
     dedupe_paths primary

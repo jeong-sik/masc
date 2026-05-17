@@ -43,10 +43,9 @@ let with_io ~path f =
 
 (* #9921: defense-in-depth write-boundary guard.
 
-   [Env_config_core.base_path_prod_guard] stops HOME fallback during path
-   resolution.  This stops writes when the resolved path nevertheless
-   points under HOME — any code that caches a stale [base_path ()] result
-   or builds a HOME-relative path directly hits this gate before the
+   [Env_config_core.base_path_prod_guard] stops test-time writes when path
+   resolution points under HOME.  Any code that caches a stale [base_path ()]
+   result or builds a HOME-relative path directly hits this gate before the
    write lands on the production ledger.
 
    The prod ledger observed 106 test-pattern rows

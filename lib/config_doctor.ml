@@ -238,16 +238,7 @@ let current_inputs ~base_path_input ~default_base_path () =
           if inherited_env_matches then
             "explicit_env"
           else if String.equal normalized_default normalized_base_path then
-            (match (Host_config.from_env ()).home with
-             | Some home ->
-                 let normalized_home =
-                   Env_config_core.normalize_masc_base_path_input home
-                 in
-                 if String.equal normalized_home normalized_default then
-                   "implicit_home"
-                 else
-                   "implicit_repo_root"
-             | None -> "implicit_repo_root")
+            "implicit_default"
           else
             "explicit_cli"
         in

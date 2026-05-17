@@ -26,7 +26,7 @@
     record any overrides in the process-local boot override store.
 
     The resolved config root honors [MASC_CONFIG_DIR] when set; otherwise it
-    follows the standard base-path/home fallback chain.
+    uses [<base_path>/.masc/config].
 
     Process-level env vars set by the caller take precedence — the TOML
     value is only applied when the env var is unset. This preserves the

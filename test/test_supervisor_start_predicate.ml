@@ -11,9 +11,9 @@
 
    Note on test isolation: [Keeper_runtime.has_boot_entries] reads
    keeper TOML profiles via [Config_dir_resolver.keepers_dir ()],
-   which is a GLOBAL path (operator's [$HOME/.masc/config/keepers/])
-   independent of the [Coord.config.base_path].  So in every test
-   environment with the operator profile present,
+   which is the active resolved config root independent of the
+   [Coord.config.base_path].  So in every test environment with an
+   active operator profile present,
    [bootable_keeper_names] returns non-empty.  The tests below
    exploit that — they verify the post-fix path
    ([enabled = false] still triggers sweep) without trying to

@@ -68,6 +68,7 @@ let run_shell ?(env = []) ~cwd cmd =
   let scrubbed_env =
     [
       "MASC_STORAGE_TYPE";
+      "ME_ROOT";
       "MASC_KEEPER_BOOTSTRAP_ENABLED";
       "MASC_MCP_PORT";
       "MASC_HOST";
@@ -346,15 +347,16 @@ let test_bootstraps_base_path_config_from_repo_when_unset () =
       check bool "repo config copied to base path config" true
         (Sys.file_exists (Filename.concat bootstrapped_config "cascade.toml")))
 
-let test_default_base_path_falls_back_to_home_when_unset () =
-  with_temp_dir "start-masc-script-home-fallback" (fun dir ->
+let test_default_base_path_uses_home_me_when_unset () =
+  with_temp_dir "start-masc-script-home-me-default" (fun dir ->
       let script = Filename.concat dir "start-masc-mcp.sh" in
       copy_script (script_path ()) script;
       ignore (make_config_root dir);
       make_fake_eio_exe dir;
       let home_dir = Filename.concat dir "home" in
-      mkdir_p home_dir;
-      let capture = Filename.concat dir "captured-home-fallback.txt" in
+      let me_root = Filename.concat home_dir "me" in
+      mkdir_p me_root;
+      let capture = Filename.concat dir "captured-home-me-default.txt" in
       let code, stdout, stderr =
         run_shell ~cwd:dir
           ~env:
@@ -370,12 +372,12 @@ let test_default_base_path_falls_back_to_home_when_unset () =
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s"
           code stdout stderr;
       let captured = read_file capture in
-      let expected_home = canonical_path home_dir in
-      check bool "default base path falls back to home" true
-        (contains_substring captured ("MASC_BASE_PATH=" ^ expected_home));
-      check bool "default config root follows home fallback" true
+      let expected_root = canonical_path me_root in
+      check bool "default base path uses home me root" true
+        (contains_substring captured ("MASC_BASE_PATH=" ^ expected_root));
+      check bool "default config root follows base path" true
         (contains_substring captured
-           ("MASC_CONFIG_DIR=" ^ Filename.concat expected_home ".masc/config")))
+           ("MASC_CONFIG_DIR=" ^ Filename.concat expected_root ".masc/config")))
 
 let test_absolute_env_base_path_is_preserved () =
   with_temp_dir "start-masc-script" (fun dir ->
@@ -921,8 +923,8 @@ let () =
             test_realtime_transports_default_to_base_path_config_and_preserve_override;
           test_case "bootstraps base path config from repo when unset" `Quick
             test_bootstraps_base_path_config_from_repo_when_unset;
-          test_case "default base path falls back to home when unset" `Quick
-            test_default_base_path_falls_back_to_home_when_unset;
+          test_case "default base path uses home me when unset" `Quick
+            test_default_base_path_uses_home_me_when_unset;
           test_case
             "absolute env base path is preserved"
             `Quick

@@ -47,5 +47,7 @@ val resolve_auto_model_id : string -> string -> string
 
 (** Parse a "model@url" custom model spec.
     Returns [(model_id, base_url)].
-    Without [@], uses [CUSTOM_LLM_BASE_URL] env or ["http://127.0.0.1:8080"]. *)
+    Without [@], uses [CUSTOM_LLM_BASE_URL] env or the local discovery
+    default endpoint. Prefer explicit cascade provider endpoints for
+    operator-configured routing. *)
 val parse_custom_model : string -> string * string

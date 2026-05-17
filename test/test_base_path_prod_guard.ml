@@ -3,11 +3,9 @@
    #9903: production-path safeguard for test executables.
 
    The underlying MASC_BASE_PATH override mechanism has a latent
-   failure mode in which a test's [Unix.putenv] does not take
-   effect by the time [base_path()] resolves (root cause still
-   under investigation). When that failure happens, [base_path()]
-   silently falls back to HOME, and the test writes fixture data
-   to the production ledger at [~/me/.masc/board_votes.jsonl] —
+   failure mode in which a test's [Unix.putenv] points [base_path()]
+   at the operator HOME tree. When that happens, the test can write
+   fixture data to the production ledger under the operator workspace —
    the exact corruption observed in #9903's evidence record.
 
    The guard closes the fallback path for test executables: if
@@ -17,18 +15,19 @@
 
 module EC = Env_config_core
 
-(* Ensure no explicit MASC_BASE_PATH is set — we want the fallback
-   path to HOME to trigger the guard. *)
+(* Ensure no explicit MASC_BASE_PATH is set. *)
 let clear_base_path () =
   Unix.putenv "MASC_BASE_PATH" "";
   Unix.putenv "MASC_BASE_PATH_INPUT" ""
 
-let test_guard_raises_on_home_fallback () =
-  clear_base_path ();
+let test_guard_raises_on_explicit_home_path () =
+  let home = Option.value ~default:"/tmp" (Sys.getenv_opt "HOME") in
+  Unix.putenv "MASC_BASE_PATH" home;
+  Unix.putenv "MASC_BASE_PATH_INPUT" home;
   Unix.putenv "MASC_TEST_ALLOW_HOME_BASE_PATH" "";
   (* test_base_path_prod_guard executable has basename "test_...",
-     so [running_under_test_executable] returns true. Fallback to
-     HOME should now raise. *)
+     so [running_under_test_executable] returns true. HOME-prefixed
+     paths should raise. *)
   try
     let path = EC.base_path () in
     Alcotest.failf
@@ -56,10 +55,13 @@ let test_guard_raises_on_home_fallback () =
 
 let test_guard_honors_explicit_tmp_override () =
   (* A proper test-time override to /tmp must NOT trigger the guard. *)
-  Unix.putenv "MASC_BASE_PATH"
-    (Filename.concat
-       (Filename.get_temp_dir_name ())
-       (Printf.sprintf "masc-test-base-path-guard-%d" (Unix.getpid ())));
+  let tmp_base =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-test-base-path-guard-%d" (Unix.getpid ()))
+  in
+  Unix.putenv "MASC_BASE_PATH" tmp_base;
+  Unix.putenv "MASC_BASE_PATH_INPUT" tmp_base;
   Unix.putenv "MASC_TEST_ALLOW_HOME_BASE_PATH" "";
   let path = EC.base_path () in
   let is_tmp =
@@ -72,9 +74,11 @@ let test_guard_honors_explicit_tmp_override () =
     true is_tmp
 
 let test_guard_bypass_escape_hatch () =
-  clear_base_path ();
+  let home = Option.value ~default:"/tmp" (Sys.getenv_opt "HOME") in
+  Unix.putenv "MASC_BASE_PATH" home;
+  Unix.putenv "MASC_BASE_PATH_INPUT" home;
   Unix.putenv "MASC_TEST_ALLOW_HOME_BASE_PATH" "1";
-  (* With the escape hatch set, HOME fallback is allowed even under
+  (* With the escape hatch set, HOME-prefixed paths are allowed even under
      a test executable. *)
   let path = EC.base_path () in
   Alcotest.(check bool)
@@ -87,8 +91,8 @@ let () =
     [
       ( "#9903 safeguard",
         [
-          Alcotest.test_case "HOME fallback raises Config_error"
-            `Quick test_guard_raises_on_home_fallback;
+          Alcotest.test_case "HOME path raises Config_error"
+            `Quick test_guard_raises_on_explicit_home_path;
           Alcotest.test_case "explicit /tmp override is allowed"
             `Quick test_guard_honors_explicit_tmp_override;
           Alcotest.test_case "MASC_TEST_ALLOW_HOME_BASE_PATH=1 bypass"

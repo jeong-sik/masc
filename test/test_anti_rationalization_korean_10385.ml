@@ -25,8 +25,8 @@ open Alcotest
 
 module A = Masc_mcp.Anti_rationalization
 
-(* Isolate the loader from the real user's
-   [~/.masc/config/excuse_patterns.json], but still reproduce the
+(* Isolate the loader from the real user's active config root
+   [excuse_patterns.json], but still reproduce the
    important deployment case: an older persisted default config
    exists and contains only the English patterns.  Without the
    runtime migration in [load_excuse_patterns], Korean detection

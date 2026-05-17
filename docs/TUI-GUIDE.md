@@ -18,10 +18,7 @@ Terminal UI for monitoring and interacting with MASC keepers.
 dune build --root . bin/masc_tui.exe
 
 # Run against the same shared runtime root as the server
-MASC_BASE_PATH="$HOME/me" ./_build/default/bin/masc_tui.exe
-
-# Or inspect the implicit home-scoped runtime (~/.masc)
-./_build/default/bin/masc_tui.exe
+MASC_BASE_PATH="/path/to/base" ./_build/default/bin/masc_tui.exe
 
 # Or, if installed
 masc-tui

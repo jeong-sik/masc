@@ -370,15 +370,12 @@ let base_path_prod_guard path =
         else path
   end
 
-(** Project base path with HOME fallback, then "." fallback when unset. *)
+(** Project base path. Missing [MASC_BASE_PATH] falls back to cwd, not HOME. *)
 let base_path () =
   let raw =
     match base_path_opt () with
     | Some path -> path
-    | None ->
-        (match home_dir_opt () with
-         | Some home -> normalize_masc_base_path_input home
-         | None -> ".")
+    | None -> "."
   in
   base_path_prod_guard raw
 

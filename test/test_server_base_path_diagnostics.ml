@@ -247,8 +247,8 @@ let test_default_base_path_ignores_base_path_override_without_local_masc () =
     (canonical_path repo)
     (Server_mcp_transport_http.default_base_path () |> canonical_path)
 
-let test_default_base_path_falls_back_to_home_when_unset () =
-  with_temp_dir "base-path-default-home-fallback" @@ fun root ->
+let test_default_base_path_uses_cwd_when_unset () =
+  with_temp_dir "base-path-default-cwd" @@ fun root ->
   let repo = Filename.concat root "repo" in
   let home = Filename.concat root "home" in
   mkdir_p repo;
@@ -258,8 +258,8 @@ let test_default_base_path_falls_back_to_home_when_unset () =
   with_env "MASC_TEST_ALLOW_BASE_PATH_OVERRIDE" None @@ fun () ->
   with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
   with_env "HOME" (Some home) @@ fun () ->
-  Alcotest.(check string) "default base path falls back to home"
-    (canonical_path home)
+  Alcotest.(check string) "default base path uses cwd"
+    (canonical_path repo)
     (Server_mcp_transport_http.default_base_path () |> canonical_path)
 
 let () =
@@ -295,7 +295,7 @@ let () =
             "default base path ignores base path override without local .masc"
             `Quick test_default_base_path_ignores_base_path_override_without_local_masc;
           Alcotest.test_case
-            "default base path falls back to home when unset"
-            `Quick test_default_base_path_falls_back_to_home_when_unset;
+            "default base path uses cwd when unset"
+            `Quick test_default_base_path_uses_cwd_when_unset;
         ] );
     ]

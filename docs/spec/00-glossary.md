@@ -83,7 +83,7 @@ Keeper 런타임은 12-state FSM과 turn/post-turn sub-FSM으로 구성된다. `
 노드 기반 실행 파이프라인 엔진(`lib/chain/`)은 purge됐다. `Chain`, `Node`, `Node Type`(23 variant), `Chain Result` 같은 세부 용어도 같이 제거. 현재 execution은 OAS swarm + keeper FSM + verifier 조합이다.
 
 **Cascade**
-LLM 모델 호출의 폴백 순서를 정의하는 설정. `config/cascade.toml`에 cascade 이름별로 모델 리스트가 지정된다. 첫 번째 모델 실패 시 다음 모델로 폴백한다. 기본 순서: llama(local) -> GLM Cloud -> Skip. `-> config/cascade.toml`, `-> lib/cascade_inference.mli`
+LLM 모델 호출의 폴백 순서를 정의하는 설정. live authoring source는 `<base-path>/.masc/config/cascade.toml` 또는 명시적 `MASC_CONFIG_DIR/cascade.toml`이고, 체크인된 `config/cascade.toml`은 default/example fallback source다. 실제 순서는 route/tier-group 설정을 따른다. `-> docs/cascade/README.md`, `-> lib/cascade/cascade_runtime.mli`
 
 **Cascade Inference**
 cascade.toml에서 cascade 이름별 추론 파라미터(temperature, max_tokens)를 읽어 해결하는 모듈. 해결 순서: cascade별 값 -> default 값 -> 호출자 fallback. `-> lib/cascade_inference.mli`

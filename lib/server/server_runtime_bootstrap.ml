@@ -208,7 +208,6 @@ let startup_config_resolution ~base_path =
         env_base_path = Some base_path;
         env_config_dir = Config_dir_resolver.current_env_config_dir_opt ();
         env_personas_dir = Config_dir_resolver.current_env_personas_dir_opt ();
-        env_home = Config_dir_resolver.current_env_home_opt ();
       }
 
 (* GC tuning for long-running server with bursty allocation.

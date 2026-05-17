@@ -251,6 +251,14 @@ val metric_keeper_slot_yield_total : string
 val metric_keeper_compactions : string
 val metric_keeper_compaction_ratio_change : string
 val metric_keeper_compaction_saved_tokens : string
+
+(** Effective emergency compaction ratio threshold, set once at module
+    init in {!Keeper_compact_policy} from the env override
+    [MASC_KEEPER_EMERGENCY_COMPACT_RATIO_THRESHOLD] (default 0.8,
+    clamped to \[0.5, 0.99\]). Gauge so operators can confirm via
+    /metrics what value the running process actually uses without
+    restarting under instrumentation. *)
+val metric_keeper_emergency_compact_ratio_threshold : string
 val metric_keeper_operator_compact : string
 val metric_keeper_operator_clear : string
 val metric_keeper_compaction_noop : string

@@ -12,8 +12,61 @@ open Keeper_context_core
     emergency, bypassing the continuity-reflection cooldown gate.
     Distinct from [ratio_gate] (per-keeper compaction threshold) and
     [handoff_threshold] (handoff gate); this is a safety floor that
-    prevents context overflow regardless of cooldown state (#5634). *)
-let emergency_compact_ratio_threshold = 0.8
+    prevents context overflow regardless of cooldown state (#5634).
+
+    Operator override: [MASC_KEEPER_EMERGENCY_COMPACT_RATIO_THRESHOLD].
+    Default 0.8. Valid range [0.5, 0.99]; out-of-range falls back to
+    the default with a one-time warn (parse-correctness, not silent
+    coercion — a stale operator typo should not push the emergency
+    floor outside the policy envelope, but it also should not block
+    boot). The effective value is exposed via Prometheus gauge
+    {!Keeper_metrics.metric_keeper_emergency_compact_ratio_threshold}
+    so operators can see what the running process is actually using.
+
+    Read once at module init: keeper compact policy is a hot path and
+    re-reading env per gate call would be wasteful. Operator must
+    restart the process to change the threshold (consistent with
+    [context_ratio_hard_cap] and other compact knobs in
+    {!Env_config_keeper}). *)
+let emergency_compact_ratio_threshold : float =
+  let env_var = "MASC_KEEPER_EMERGENCY_COMPACT_RATIO_THRESHOLD" in
+  let default_value = 0.8 in
+  let min_valid = 0.5 in
+  let max_valid = 0.99 in
+  let raw = Env_config_core.get_float ~default:default_value env_var in
+  let effective =
+    if (not (Float.is_finite raw)) || raw < min_valid || raw > max_valid
+    then (
+      (* Only warn when an explicit override was supplied and out of range;
+         silently accept the default fall-through case (raw = default_value
+         and default is in-range). *)
+      if not (Float.equal raw default_value)
+      then
+        Log.Harness.warn
+          "[compact_policy] %s=%f out of range [%.2f, %.2f]; falling back to default \
+           %.2f"
+          env_var
+          raw
+          min_valid
+          max_valid
+          default_value;
+      default_value)
+    else raw
+  in
+  (* Surface the effective value for operators via /metrics. Registered
+     here so the gauge exists from module init regardless of whether any
+     compaction has fired yet. *)
+  Prometheus.register_gauge
+    ~name:Keeper_metrics.metric_keeper_emergency_compact_ratio_threshold
+    ~help:
+      "Effective emergency compaction ratio threshold (env-overridable via \
+       MASC_KEEPER_EMERGENCY_COMPACT_RATIO_THRESHOLD; clamped to [0.5, 0.99])."
+    ();
+  Prometheus.set_gauge
+    Keeper_metrics.metric_keeper_emergency_compact_ratio_threshold
+    effective;
+  effective
+;;
 
 (** Tool-heavy compaction thresholds.
     When message count exceeds [tool_heavy_msg_threshold] AND context

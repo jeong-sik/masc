@@ -1,7 +1,7 @@
 # masc-mcp Roadmap
 
-> Current package version: v0.19.23
-> Latest changelog entry: v0.19.23 (2026-05-17)
+> Current package version: v0.19.24
+> Latest changelog entry: v0.19.24 (2026-05-17)
 > Latest published GitHub release: v0.19.22 (2026-05-17)
 > Updated: 2026-05-17
 

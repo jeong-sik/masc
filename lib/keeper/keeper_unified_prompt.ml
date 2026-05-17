@@ -113,12 +113,7 @@ let line_block label value =
   if value = "" then ""
   else Printf.sprintf "%s: %s\n" label value
 
-let state_block_instruction_text =
-  "For non-direct keeper turns, end every response with a [STATE]...[/STATE] block unless a more specific turn-level output guard says continuity is runtime-managed:\n\
-   DONE: what you accomplished this cycle\n\
-   NEXT: what the next cycle should do\n\
-   Goal: current active goal\n\
-   Decisions: key decisions (semicolon-separated)"
+let state_block_instruction_text = Keeper_state_block_prompt.instruction_text
 
 (* In-binary mirror of config/prompts/keeper.turn_intent.md (minus the
    {{...}} substitution slots that cannot be filled during a fallback).

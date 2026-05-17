@@ -1,6 +1,7 @@
 ---
 description: keeper continuity rules and STATE block format
 category: keeper
+template_variables: [state_block_instruction]
 ---
 
 Continuity rules:
@@ -16,12 +17,4 @@ PR merge rules (MANDATORY):
 - Do NOT merge a PR that has an unresolved BLOCK review. Only the original reviewer or the user can unblock.
 - Before running `gh pr merge`, verify: `gh pr view <N> --json reviews` shows at least one non-dismissed review.
 
-State block template (must use these exact markers):
-[STATE]
-Goal: <short>
-Progress: <short>
-Next: <0-3 items separated by ';'>
-Decisions: <0-3 items separated by ';'>
-OpenQuestions: <0-3 items separated by ';'>
-Constraints: <0-3 items separated by ';'>
-[/STATE]
+{{state_block_instruction}}

@@ -287,6 +287,30 @@ let test_unified_state_instruction_respects_turn_level_guard () =
        ("End every response with a "
         ^ "[STATE]...[/STATE] block:"))
 
+let test_state_block_schema_is_canonical_six_field_shape () =
+  let text = KUP.state_block_instruction_text in
+  List.iter
+    (fun field ->
+      check bool ("schema includes " ^ field) true (has_in text field))
+    [
+      "DONE: what you accomplished this turn";
+      "NEXT: what the next turn should do";
+      "Goal: current active goal";
+      "Decisions: key decisions";
+      "OpenQuestions: unresolved items";
+      "Constraints: active constraints";
+    ];
+  check bool "schema excludes old Progress field" false (has_in text "Progress:")
+
+let test_constitution_uses_canonical_state_instruction () =
+  let text = KP.keeper_constitution () in
+  check bool "constitution placeholder rendered" false
+    (has_in text "{{state_block_instruction}}");
+  check bool "constitution embeds canonical instruction" true
+    (has_in text KUP.state_block_instruction_text);
+  check bool "constitution excludes old Progress template" false
+    (has_in text "Progress: <short>")
+
 let test_prompt_mentions_runtime_operator_approval_for_risky_actions () =
   let prompt =
     KP.build_keeper_system_prompt
@@ -478,6 +502,10 @@ let () =
             test_state_block_guard_is_runtime_managed_not_absolute_never;
           test_case "unified state instruction respects turn-level guard" `Quick
             test_unified_state_instruction_respects_turn_level_guard;
+          test_case "state block schema is canonical six-field shape" `Quick
+            test_state_block_schema_is_canonical_six_field_shape;
+          test_case "constitution uses canonical state instruction" `Quick
+            test_constitution_uses_canonical_state_instruction;
           test_case "prompt mentions runtime operator approval for risky actions" `Quick
             test_prompt_mentions_runtime_operator_approval_for_risky_actions;
           test_case "prompt marks git clone policy unavailable" `Quick

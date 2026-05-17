@@ -1,0 +1,17 @@
+(* RFC-0004 Phase A0.1 PR-1 — typed SSE event payload schemas.
+
+   Scope: agent_started payload only.  Subsequent PRs extend with
+   agent_completed, agent_failed, tool_*, turn_*, handoff_*,
+   context_*, content_replacement_*, slot_scheduler_observed.
+
+   Envelope (type, event_type, ts_unix, correlation_id, run_id,
+   agent_name, task_id, turn, tool_name, payload) is wrapped by
+   [Sse_event.wrap_envelope] in [sse_event.ml] — keeping the
+   nullable-with-empty-string-coerced-to-null semantics of
+   [lib/cascade/cascade_event_bridge.json_string_opt] outside the
+   atd schema (atd's default nullable cannot express it). *)
+
+type agent_started_payload = {
+  agent_name: string;
+  task_id: string;
+}

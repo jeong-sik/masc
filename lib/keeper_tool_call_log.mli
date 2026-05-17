@@ -49,6 +49,7 @@ val set_turn_context :
   ?tool_surface_class:string ->
   ?visible_tool_count:int ->
   ?required_tools:string list ->
+  ?required_tool_candidates:string list ->
   ?missing_required_tools:string list ->
   ?cascade_profile:string ->
   unit ->
@@ -143,6 +144,7 @@ val log_call :
   ?tool_surface_class:string ->
   ?visible_tool_count:int ->
   ?required_tools:string list ->
+  ?required_tool_candidates:string list ->
   ?missing_required_tools:string list ->
   ?cascade_profile:string ->
   ?result_bytes:int ->

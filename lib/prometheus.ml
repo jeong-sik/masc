@@ -598,6 +598,10 @@ let metric_ws_parse_cache_misses = "masc_ws_parse_cache_misses_total"
 let metric_server_mcp_ws_frame_json_parse_failures =
   "masc_server_mcp_ws_frame_json_parse_failures_total"
 ;;
+
+let metric_sidecar_schema_field_types_json_parse_failures =
+  "masc_sidecar_schema_field_types_json_parse_failures_total"
+;;
 let metric_ws_bytes_cache_hits = "masc_ws_bytes_cache_hits_total"
 let metric_ws_bytes_cache_misses = "masc_ws_bytes_cache_misses_total"
 let metric_ws_dashboard_hello_latency_seconds = "masc_ws_dashboard_hello_latency_seconds"
@@ -2900,6 +2904,13 @@ let init () =
     "WebSocket transport incoming-frame JSON parse failures (frame dropped). \
      Labels: error_kind={yojson_parse_error|other}. Iter 28 visibility \
      fix for previously-silent drops in parse_sse_dashboard_event."
+    Counter;
+  add
+    metric_sidecar_schema_field_types_json_parse_failures
+    "Sidecar HTTP route schema_field_types JSON parse failures (returns []). \
+     Labels: error_kind={json_parse_error|other}. Iter 31 visibility \
+     fix for previously-silent type-validation bypass on malformed schema \
+     JSON in server_routes_http_routes_sidecar.schema_field_types."
     Counter;
   add
     metric_ws_bytes_cache_hits

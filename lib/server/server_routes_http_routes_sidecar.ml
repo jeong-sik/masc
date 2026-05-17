@@ -1099,7 +1099,44 @@ let schema_field_types ?base_path id : (string * declared_type) list =
             (fun (k, v) -> Option.map (fun typ -> k, typ) (parse_declared_type v))
             assoc
         | _ -> [])
-     | exception _ -> [])
+     (* Iter 31 (silent-drop visibility): previously a catch-all
+        [exception _ -> []] swallowed any Yojson failure. Returning []
+        here is a silent type-validation bypass — downstream callers
+        (e.g. [coerce_value] in TOML sidecar handlers) accept untyped
+        raw values. Behavior is preserved (we still return []); the
+        counter + warn now distinguish "schema present but malformed"
+        from "schema missing". [Eio.Cancel.Cancelled] is re-raised so
+        cancellation semantics are preserved. Closed error_kind vocab
+        keeps Prometheus label cardinality bounded.
+        Same pattern as iter 28 (#15820, mcp-ws transport) and iter 29
+        (#15840, cascade_http_probe). *)
+     | exception Eio.Cancel.Cancelled e -> raise (Eio.Cancel.Cancelled e)
+     | exception Yojson.Json_error msg ->
+       let preview_len = min 200 (String.length json_str) in
+       Log.Server.warn
+         "[sidecar.schema_field_types] id=%s json_parse_error: %s \
+          (body_preview=%S)"
+         id
+         msg
+         (String.sub json_str 0 preview_len);
+       Prometheus.inc_counter
+         Prometheus.metric_sidecar_schema_field_types_json_parse_failures
+         ~labels:[ "error_kind", "json_parse_error" ]
+         ();
+       []
+     | exception exn ->
+       let preview_len = min 200 (String.length json_str) in
+       Log.Server.warn
+         "[sidecar.schema_field_types] id=%s other: %s \
+          (body_preview=%S)"
+         id
+         (Printexc.to_string exn)
+         (String.sub json_str 0 preview_len);
+       Prometheus.inc_counter
+         Prometheus.metric_sidecar_schema_field_types_json_parse_failures
+         ~labels:[ "error_kind", "other" ]
+         ();
+       [])
 ;;
 
 let coerce_value (typ : declared_type) (raw : string) : (toml_value, string) result =

@@ -993,6 +993,16 @@ val metric_ws_bytes_cache_misses : string
     Labels: [error_kind = yojson_parse_error | other]. Iter 28. *)
 val metric_server_mcp_ws_frame_json_parse_failures : string
 
+(** Counter of sidecar HTTP route [schema_field_types] JSON parse
+    failures. Previously the catch-all returned [] silently, allowing
+    callers (e.g. [coerce_value] in TOML sidecar handlers) to proceed
+    with zero type information — a silent type-validation bypass on
+    malformed schema JSON. Behavior is preserved (still returns []);
+    operators now get a counter + warn log to distinguish
+    "schema missing" from "schema present but malformed".
+    Labels: [error_kind = json_parse_error | other]. Iter 31. *)
+val metric_sidecar_schema_field_types_json_parse_failures : string
+
 (** Histogram of dashboard/hello JSON-RPC processing latency in seconds.
     Labels: [outcome = success | error]. *)
 val metric_ws_dashboard_hello_latency_seconds : string

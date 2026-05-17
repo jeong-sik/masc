@@ -259,6 +259,43 @@ let test_persist_explicit_base_dir_avoids_default_resolution () =
          (CL.load_error_to_string err))
 ;;
 
+let test_persist_task_id_envelope () =
+  let store, tmp = setup_store () in
+  let run_id = "persist-task-id-envelope" in
+  let contract = make_contract () in
+  let contract_id = Masc_mcp_cdal_runtime.Risk_contract.contract_id contract in
+  let proof = make_proof ~run_id ~contract_id () in
+  Masc_mcp_cdal_runtime.Proof_store.init_run store ~run_id;
+  Masc_mcp_cdal_runtime.Proof_store.write_manifest store ~run_id proof;
+  Masc_mcp_cdal_runtime.Proof_store.write_contract store ~run_id contract;
+  match CE.evaluate ~store proof with
+  | Verdict (v, _) ->
+    let base_dir = Filename.concat tmp "cdal_verdicts" in
+    Eio_main.run
+    @@ fun _env ->
+    CE.persist ~base_dir ~task_id:"task-cdal-123" v;
+    let verdict_store = Dated_jsonl.create ~base_dir () in
+    (match Dated_jsonl.read_recent verdict_store 1 with
+     | [ `Assoc fields ] ->
+       (match List.assoc_opt "_task_id" fields with
+        | Some (`String task_id) ->
+          Alcotest.(check string) "task id envelope" "task-cdal-123" task_id
+        | Some json ->
+          Alcotest.fail
+            (Printf.sprintf
+               "expected _task_id string, got %s"
+               (Yojson.Safe.to_string json))
+        | None -> Alcotest.fail "expected _task_id envelope field")
+     | rows ->
+       Alcotest.fail
+         (Printf.sprintf "expected one persisted row, got %d" (List.length rows)))
+  | Load_failure (err, _) ->
+    Alcotest.fail
+      (Printf.sprintf
+         "expected Verdict, got Load_failure: %s"
+         (CL.load_error_to_string err))
+;;
+
 (* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
@@ -281,6 +318,10 @@ let () =
             "persist explicit base_dir avoids default resolution"
             `Quick
             test_persist_explicit_base_dir_avoids_default_resolution
+        ; Alcotest.test_case
+            "persist task_id envelope"
+            `Quick
+            test_persist_task_id_envelope
         ] )
     ]
 ;;

@@ -1,11 +1,18 @@
 # Changelog
 
+## [0.19.23] - 2026-05-17
+
+### Changed
+- Promoted the RFC-0099 / RFC-0101 closeout docs to Active after the session-close and FD-accountant runtime lanes merged.
+- Bumped the downstream OAS `agent_sdk` pin to `main@79262f37` (`v0.195.0`) and raised the dependency floor to `agent_sdk >= 0.195.0`, covering the OAS body-timeout release wave.
+
+### Fixed
+- Streamed large JSONL restore reads and removed the keeper-health legacy alias now that callers use the current health fields.
 
 ## [0.19.22] - 2026-05-17
 
 ### Changed
 - Bumped the downstream OAS `agent_sdk` pin to `main@5f8e07b7` (`v0.194.1`) and raised the dependency floor to `agent_sdk >= 0.194.1`.
-- Bumped the downstream OAS `agent_sdk` pin again to `main@79262f37` (`v0.195.0`) after the OAS body-timeout release wave.
 - Moved the OAS pin note out of the older 0.19.20 changelog section so release history matches merge chronology.
 - Captured the follow-on runtime wave: required-tool candidate hotfix, force-done/release schema-audit enforcement, dashboard A0.2 atdts PoC, current goal-loop verify fixture, and chunked first-flush for POST `/mcp` JSON responses.
 

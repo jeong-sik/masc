@@ -137,3 +137,35 @@ val slot_scheduler_observed
   -> queue_length:int
   -> state:string
   -> Yojson.Safe.t
+
+(** [agent_completed] and [agent_failed] carry a variable-shape
+    payload tail beyond the three base fields ([agent_name],
+    [task_id], [elapsed_s]).  The tail comes from cascade-local
+    helpers ([agent_completed_result_fields] /
+    [agent_failed_error_fields]) that close over [Agent_sdk]
+    variant types.  To keep [Sse_event] free of [Agent_sdk]
+    dependencies, the caller projects the tail into a
+    [(string * Yojson.Safe.t) list] and passes it via
+    [~result_fields] / [~error_fields].  The list is appended to
+    the atd-emitted base record in declaration order, preserving
+    byte equality with the previous inline `Assoc-construction path. *)
+
+val agent_completed
+  :  ts_unix:float
+  -> correlation_id:string
+  -> run_id:string
+  -> agent_name:string
+  -> task_id:string
+  -> elapsed_s:float
+  -> result_fields:(string * Yojson.Safe.t) list
+  -> Yojson.Safe.t
+
+val agent_failed
+  :  ts_unix:float
+  -> correlation_id:string
+  -> run_id:string
+  -> agent_name:string
+  -> task_id:string
+  -> elapsed_s:float
+  -> error_fields:(string * Yojson.Safe.t) list
+  -> Yojson.Safe.t

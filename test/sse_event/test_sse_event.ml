@@ -620,6 +620,195 @@ let test_slot_scheduler_observed_byte_equal () =
     typed
 ;;
 
+(* === PR-3b byte-equal cases: agent_completed (Ok + Error), agent_failed.
+
+   These three cases pin the caller-supplied-addendum splice path
+   (Sse_event.merge_addendum_into_record) against the pre-PR-3b
+   inline `Assoc construction in cascade_event_bridge.ml.  Field
+   order is [base record (atd declaration order) @ addendum]. *)
+
+let baseline_agent_completed ~agent_name ~task_id ~elapsed_s ~result_fields =
+  let payload =
+    `Assoc
+      ([ "agent_name", `String agent_name
+       ; "task_id", `String task_id
+       ; "elapsed_s", `Float elapsed_s
+       ]
+       @ result_fields)
+  in
+  baseline_wrap_event
+    ~ts:common_ts
+    ~correlation_id:common_corr
+    ~run_id:common_run
+    ~event_type:"agent_completed"
+    ~payload
+    ~agent_name
+    ~task_id
+    ()
+;;
+
+let baseline_agent_failed ~agent_name ~task_id ~elapsed_s ~error_fields =
+  let payload =
+    `Assoc
+      ([ "agent_name", `String agent_name
+       ; "task_id", `String task_id
+       ; "elapsed_s", `Float elapsed_s
+       ]
+       @ error_fields)
+  in
+  baseline_wrap_event
+    ~ts:common_ts
+    ~correlation_id:common_corr
+    ~run_id:common_run
+    ~event_type:"agent_failed"
+    ~payload
+    ~agent_name
+    ~task_id
+    ()
+;;
+
+let agent_completed_ok_fields : (string * Yojson.Safe.t) list =
+  (* Shape mirrors cascade_event_bridge.agent_completed_result_fields
+     for the Ok branch, including the usage tail.  Concrete values are
+     arbitrary -- the test pins the byte-equal property, not the
+     business meaning. *)
+  [ "success", `Bool true
+  ; "result", `String "ok"
+  ; "response_id", `String "resp_abc"
+  ; "model", `String "claude-opus-4-7"
+  ; "stop_reason", `String "end_turn"
+  ; "input_tokens", `Int 1234
+  ; "output_tokens", `Int 567
+  ; "cost_usd", `Float 0.0125
+  ]
+;;
+
+let agent_completed_error_fields : (string * Yojson.Safe.t) list =
+  [ "success", `Bool false
+  ; "result", `String "error"
+  ; "error", `String "MaxTurnsExceeded { turns = 20; limit = 20 }"
+  ; "usage_reported", `Bool false
+  ]
+;;
+
+let agent_failed_error_fields_sample : (string * Yojson.Safe.t) list =
+  [ "error", `String "MaxTurnsExceeded { turns = 20; limit = 20 }"
+  ; "error_domain", `String "max_turns"
+  ; "error_code", `String "max_turns_exceeded"
+  ; "error_retryable", `Bool false
+  ; ( "error_detail"
+    , `Assoc
+        [ "variant", `String "max_turns_exceeded"
+        ; "turns", `Int 20
+        ; "limit", `Int 20
+        ] )
+  ]
+;;
+
+let test_agent_completed_ok_byte_equal () =
+  let baseline =
+    Yojson.Safe.to_string
+      (baseline_agent_completed
+         ~agent_name:"alpha"
+         ~task_id:"task_42"
+         ~elapsed_s:3.5
+         ~result_fields:agent_completed_ok_fields)
+  in
+  let typed =
+    Yojson.Safe.to_string
+      (Sse_event.agent_completed
+         ~ts_unix:common_ts
+         ~correlation_id:common_corr
+         ~run_id:common_run
+         ~agent_name:"alpha"
+         ~task_id:"task_42"
+         ~elapsed_s:3.5
+         ~result_fields:agent_completed_ok_fields)
+  in
+  Alcotest.(check string)
+    "agent_completed (Ok) typed == baseline"
+    baseline
+    typed
+;;
+
+let test_agent_completed_error_byte_equal () =
+  let baseline =
+    Yojson.Safe.to_string
+      (baseline_agent_completed
+         ~agent_name:"alpha"
+         ~task_id:"task_42"
+         ~elapsed_s:3.5
+         ~result_fields:agent_completed_error_fields)
+  in
+  let typed =
+    Yojson.Safe.to_string
+      (Sse_event.agent_completed
+         ~ts_unix:common_ts
+         ~correlation_id:common_corr
+         ~run_id:common_run
+         ~agent_name:"alpha"
+         ~task_id:"task_42"
+         ~elapsed_s:3.5
+         ~result_fields:agent_completed_error_fields)
+  in
+  Alcotest.(check string)
+    "agent_completed (Error) typed == baseline"
+    baseline
+    typed
+;;
+
+let test_agent_failed_byte_equal () =
+  let baseline =
+    Yojson.Safe.to_string
+      (baseline_agent_failed
+         ~agent_name:"alpha"
+         ~task_id:"task_42"
+         ~elapsed_s:3.5
+         ~error_fields:agent_failed_error_fields_sample)
+  in
+  let typed =
+    Yojson.Safe.to_string
+      (Sse_event.agent_failed
+         ~ts_unix:common_ts
+         ~correlation_id:common_corr
+         ~run_id:common_run
+         ~agent_name:"alpha"
+         ~task_id:"task_42"
+         ~elapsed_s:3.5
+         ~error_fields:agent_failed_error_fields_sample)
+  in
+  Alcotest.(check string) "agent_failed typed == baseline" baseline typed
+;;
+
+let test_agent_completed_empty_addendum_byte_equal () =
+  (* Regression guard for the empty-addendum case -- byte-equal
+     property must hold even when [result_fields = []], confirming
+     the splice helper does not introduce trailing commas / spacing. *)
+  let baseline =
+    Yojson.Safe.to_string
+      (baseline_agent_completed
+         ~agent_name:"alpha"
+         ~task_id:"task_42"
+         ~elapsed_s:0.001
+         ~result_fields:[])
+  in
+  let typed =
+    Yojson.Safe.to_string
+      (Sse_event.agent_completed
+         ~ts_unix:common_ts
+         ~correlation_id:common_corr
+         ~run_id:common_run
+         ~agent_name:"alpha"
+         ~task_id:"task_42"
+         ~elapsed_s:0.001
+         ~result_fields:[])
+  in
+  Alcotest.(check string)
+    "agent_completed (empty addendum) typed == baseline"
+    baseline
+    typed
+;;
+
 let test_json_string_opt_empty_to_null () =
   (* Regression guard for the empty-string-coerced-to-null semantics
      that atd's default nullable does NOT express. *)
@@ -670,6 +859,13 @@ let () =
             test_content_replacement_kept_byte_equal
         ; Alcotest.test_case "slot_scheduler_observed" `Quick
             test_slot_scheduler_observed_byte_equal
+        ; Alcotest.test_case "agent_completed (Ok)" `Quick
+            test_agent_completed_ok_byte_equal
+        ; Alcotest.test_case "agent_completed (Error)" `Quick
+            test_agent_completed_error_byte_equal
+        ; Alcotest.test_case "agent_failed" `Quick test_agent_failed_byte_equal
+        ; Alcotest.test_case "agent_completed (empty addendum)" `Quick
+            test_agent_completed_empty_addendum_byte_equal
         ] )
     ; ( "json_string_opt"
       , [ Alcotest.test_case "Some empty → null" `Quick

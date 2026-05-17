@@ -107,8 +107,12 @@ let test_fd_pressure_system_admission () =
     ~finally:FD.reset_for_tests
     (fun () ->
       with_env "MASC_KEEPER_SYSTEM_FD_HEADROOM" "256" (fun () ->
-        let healthy = FD.{ open_files = 100; max_files = 10_000 } in
-        let pressured = FD.{ open_files = 9_500; max_files = 10_000 } in
+        let healthy =
+          FD.{ open_files = 100; max_files = 10_000; max_files_per_process = None }
+        in
+        let pressured =
+          FD.{ open_files = 9_500; max_files = 10_000; max_files_per_process = None }
+        in
         check bool "admits when system file table has headroom" true
           (FD.admit_start
              ~soft_limit:(Some 245_760)
@@ -147,6 +151,53 @@ let test_fd_pressure_system_admission () =
           (Json.member "system_open_files" json |> Json.to_int);
         check int "system file table remaining exposed" 500
           (Json.member "system_fd_remaining" json |> Json.to_int)))
+
+let test_fd_pressure_host_hotspot_admission () =
+  FD.reset_for_tests ();
+  Fun.protect
+    ~finally:FD.reset_for_tests
+    (fun () ->
+      with_env "MASC_KEEPER_SYSTEM_FD_HEADROOM" "0" (fun () ->
+      with_env "MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM" "1024" (fun () ->
+        let hotspot =
+          FD.
+            { open_files = 9_200
+            ; max_files = 1_000_000
+            ; max_files_per_process = Some 10_000
+            }
+        in
+        let decision =
+          FD.admission_decision
+            ~soft_limit:(Some 245_760)
+            ~open_fds:(Some 64)
+            ~system_fds:(Some hotspot)
+            ~active_keepers:2
+            ~starting_keepers:1
+            ()
+        in
+        check bool "blocks before host process fd hotspot" false (FD.admitted decision);
+        check string "host hotspot block kind" "host_fd_hotspot_budget_exhausted"
+          (match decision with
+           | FD.Block block -> FD.admission_block_kind block
+           | FD.Admit -> "admit");
+        let json =
+          FD.runtime_state_json
+            ~soft_limit:(Some 245_760)
+            ~open_fds:(Some 64)
+            ~system_fds:(Some hotspot)
+            ~active_keepers:2
+            ~starting_keepers:1
+            ~requested_keepers:24
+            ()
+        in
+        check string "runtime reason" "host_fd_hotspot_budget_exhausted"
+          (Json.member "reason" json |> Json.to_string);
+        check int "per-process limit exposed" 10_000
+          (Json.member "system_max_files_per_process" json |> Json.to_int);
+        check int "hotspot remaining exposed" 800
+          (Json.member "host_fd_hotspot_remaining" json |> Json.to_int);
+        check int "hotspot headroom exposed" 1024
+          (Json.member "host_fd_hotspot_headroom" json |> Json.to_int))))
 
 let test_fd_pressure_degraded_projection () =
   FD.reset_for_tests ();
@@ -2091,6 +2142,8 @@ let () =
             test_fd_pressure_proactive_admission;
           test_case "fd pressure system admission" `Quick
             test_fd_pressure_system_admission;
+          test_case "fd pressure host hotspot admission" `Quick
+            test_fd_pressure_host_hotspot_admission;
           test_case "fd pressure degraded projection" `Quick
             test_fd_pressure_degraded_projection;
           test_case "disk pressure classifiers" `Quick

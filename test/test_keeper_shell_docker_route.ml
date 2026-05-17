@@ -222,7 +222,9 @@ let with_fake_docker script f =
   in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) @@ fun () ->
   with_env "MASC_TEST_FAKE_DOCKER_PATH" docker_path @@ fun () ->
-  with_env "PATH" path f
+  with_env "PATH" path @@ fun () ->
+  with_env "MASC_KEEPER_SYSTEM_FD_HEADROOM" "0" @@ fun () ->
+  with_env "MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM" "0" f
 
 let with_tool_policy_config f =
   let project_root = Masc_test_deps.find_project_root () in
@@ -954,6 +956,7 @@ let test_docker_shell_mounts_masc_config_runtime_paths () =
      | Unix.WSIGNALED code -> Alcotest.failf "expected exit 0, signaled %d" code
      | Unix.WSTOPPED code -> Alcotest.failf "expected exit 0, stopped %d" code);
     let line = docker_run_line log_path in
+    let log = read_file log_path in
     let container_root = Keeper_sandbox.container_root meta.name in
     let host_config_dir =
       Filename.concat (Filename.concat config.Coord.base_path Common.masc_dirname) "config"
@@ -969,11 +972,15 @@ let test_docker_shell_mounts_masc_config_runtime_paths () =
       (contains_substring line ("MASC_BASE_PATH=" ^ container_root));
     Alcotest.(check bool) "container MASC_CONFIG_DIR pinned" true
       (contains_substring line ("MASC_CONFIG_DIR=" ^ container_config_dir));
+    Alcotest.(check bool) "oneshot container has ttl label" true
+      (contains_substring line "masc.mcp.ttl_sec=");
+    Alcotest.(check bool) "oneshot cleanup attempts docker rm" true
+      (contains_substring log "\nrm -f masc-keeper-");
     Alcotest.(check bool) "room tasks mounted under container root" true
       (contains_substring
          line
          (tasks_host ^ ":" ^ container_root ^ "/.masc/tasks:ro"));
-    Alcotest.(check bool) "room tasks mounted for worktree symlink target" true
+    Alcotest.(check bool) "room tasks not mounted at host absolute target" false
       (contains_substring
          line
          (tasks_host ^ ":" ^ tasks_host ^ ":ro"));

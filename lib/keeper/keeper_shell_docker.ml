@@ -776,6 +776,61 @@ type docker_shell_result =
    only to the run path, not to docker exec against a warm container. *)
 let docker_run_min_timeout_sec = 5.0
 
+let docker_cleanup_rm_timeout_sec () =
+  Env_config_sandbox.Shell_timeout.timeout_sec
+    ~bucket:Env_config_sandbox.Shell_timeout.Cleanup_rm
+    ()
+;;
+
+let docker_oneshot_ttl_sec ~timeout_sec =
+  timeout_sec +. docker_cleanup_rm_timeout_sec () +. 10.0
+;;
+
+let docker_rm_no_such_container text =
+  String_util.contains_substring_ci text "no such container"
+  || String_util.contains_substring_ci text "no such object"
+;;
+
+let cleanup_oneshot_container ~container_name =
+  let argv = Keeper_sandbox_runtime.docker_command_argv () @ [ "rm"; "-f"; container_name ] in
+  let status, output =
+    Docker_spawn_throttle.with_slot (fun () ->
+      Masc_exec.Exec_gate.run_argv_with_status
+        ~actor:`System_task_sandbox
+        ~raw_source:(String.concat " " argv)
+        ~summary:"keeper docker oneshot cleanup"
+        ~env:(Unix.environment ())
+        ~cwd:(Sys.getcwd ())
+        ~timeout_sec:(docker_cleanup_rm_timeout_sec ())
+        argv)
+  in
+  match status with
+  | Unix.WEXITED 0 -> ()
+  | _ when docker_rm_no_such_container output -> ()
+  | _ ->
+    Log.Keeper.warn
+      "docker oneshot cleanup failed for %s (status=%s, output=%s)"
+      container_name
+      (docker_exec_status_label status)
+      (Worker_dev_tools.truncate_for_log output)
+;;
+
+let fd_admission_error ~(config : Coord.config) =
+  let active_keepers = Keeper_registry.count_running ~base_path:config.base_path () in
+  match
+    Keeper_fd_pressure.admission_decision
+      ~active_keepers
+      ~starting_keepers:0
+      ()
+  with
+  | Keeper_fd_pressure.Admit -> None
+  | Keeper_fd_pressure.Block block ->
+    Some
+      (Printf.sprintf
+         "docker_shell_failed: fd_pressure: %s"
+         (Keeper_fd_pressure.admission_block_kind block))
+;;
+
 let run_docker_shell_command_with_status_internal
       ~validate_command_paths
       ~(config : Coord.config)
@@ -850,6 +905,9 @@ let run_docker_shell_command_with_status_internal
       match path_validation with
       | Error err -> sandbox_error (Printf.sprintf "%s [blocked_cmd=%s]" err cmd)
       | Ok () ->
+      (match fd_admission_error ~config with
+       | Some err -> sandbox_error err
+       | None ->
       let _cleanup =
         Keeper_sandbox_runtime.maybe_cleanup_stale_containers
           ~base_path:config.base_path
@@ -986,6 +1044,7 @@ let run_docker_shell_command_with_status_internal
                            ~keeper_name:meta.name
                            ~container_kind:"oneshot"
                            ~network_label
+                           ~ttl_sec:(docker_oneshot_ttl_sec ~timeout_sec)
                            ()
                        @ [ "-i"; "--user"; Printf.sprintf "%d:%d" uid gid ]
                        @ Keeper_sandbox_runtime.docker_sandbox_env_args
@@ -1023,7 +1082,10 @@ let run_docker_shell_command_with_status_internal
                      in
                      (try
                         let status, output =
-                          Eio_guard.protect ~finally:restore_gitdirs
+                          Eio_guard.protect
+                            ~finally:(fun () ->
+                              cleanup_oneshot_container ~container_name;
+                              restore_gitdirs ())
                           @@ fun () ->
                           Docker_spawn_throttle.with_slot (fun () ->
                             Masc_exec.Exec_gate.run_argv_with_status
@@ -1071,7 +1133,7 @@ let run_docker_shell_command_with_status_internal
                              "docker_shell_failed: unix_error: %s: %s(%s)"
                              (Unix.error_message code)
                              fn
-                             arg))))))
+                             arg)))))))
 ;;
 
 let run_docker_shell_command_with_status =

@@ -202,6 +202,7 @@ type t =
   | PostTurnWireinFailures
   | RecurringFailures
   | TurnCleanupFailures
+  | MemoryBankLoadHistorySwallowedExceptions
 
 (** String conversion
 
@@ -404,6 +405,8 @@ let to_string = function
   | PostTurnWireinFailures -> "masc_keeper_post_turn_wirein_failures_total"
   | RecurringFailures -> "masc_keeper_recurring_failures_total"
   | TurnCleanupFailures -> "masc_keeper_turn_cleanup_failures_total"
+  | MemoryBankLoadHistorySwallowedExceptions ->
+      "masc_keeper_memory_bank_load_history_swallowed_exceptions_total"
 ;;
 
 (** Backward-compatible string constants
@@ -882,3 +885,7 @@ let metric_keeper_post_turn_wirein_failures =
 let metric_keeper_recurring_failures = "masc_keeper_recurring_failures_total"
 let metric_keeper_turn_cleanup_failures = "masc_keeper_turn_cleanup_failures_total"
 let metric_keeper_session_cleanup_failures = "masc_keeper_session_cleanup_failures_total"
+
+let metric_keeper_memory_bank_load_history_swallowed_exceptions =
+  to_string MemoryBankLoadHistorySwallowedExceptions
+;;

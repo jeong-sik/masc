@@ -631,7 +631,23 @@ let load_history_user_messages ~(path : string) ~(max_n : int) : string list =
            then None
            else Some content
          else None
-       with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None)
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+           (* V07 (HIGH): make non-Cancel failures visible instead of
+              masking JSONL corruption / fs faults as "no history".
+              Behavior preserved — we still drop this line and return
+              [None]; only logging + counter are added. *)
+           let exn_class = Printexc.to_string exn in
+           Log.Keeper.warn
+             "load_history_user_messages: skipping line in %s: %s"
+             path exn_class;
+           Prometheus.inc_counter
+             Keeper_metrics
+             .metric_keeper_memory_bank_load_history_swallowed_exceptions
+             ~labels:[ ("exception_class", exn_class) ]
+             ();
+           None)
   |> take max_n
 
 (** Build recall candidates by merging checkpoint messages with history.jsonl.

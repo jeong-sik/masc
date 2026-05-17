@@ -147,6 +147,8 @@ let health_path_diagnostics () =
         ~effective_base_path ~effective_masc_root ()
 
 let health_uptime_secs () =
+  (* NDT-OK: /health exposes wall-clock process uptime for operators; no
+     persisted state transition or scheduler decision depends on this value. *)
   int_of_float (Unix.gettimeofday () -. server_start_time)
 
 let health_uptime_string uptime_secs =

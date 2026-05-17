@@ -18,6 +18,22 @@
 (** Maximum file size before logging a warning (50 MB). *)
 let max_file_size = 50 * 1024 * 1024
 
+(** Observability hook fired on every [parse_line] silent drop with a
+    closed-vocabulary reason label.  The leaf [masc_mcp_memory_jsonl]
+    sub-library cannot depend on [Prometheus] (cycle), so emission is
+    wired from [lib/coord.ml] at startup via this Atomic ref (mirrors
+    [File_lock_eio.on_lock_attempt_fn] / [on_cas_retry_fn] pattern).
+
+    [reason] is one of [no_key | not_assoc | json_parse_error] — bounded
+    closed vocabulary.  Empty lines are intentionally not counted (file
+    end newlines are benign).  RFC-0109 §5.1 Option A canary. *)
+let on_parse_drop_fn : (reason:string -> unit) Atomic.t =
+  Atomic.make (fun ~reason:_ -> ())
+
+let observe_parse_drop ~reason =
+  try (Atomic.get on_parse_drop_fn) ~reason
+  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ()
+
 (** Maximum single value size before truncation (1 MB). *)
 let max_value_size = 1 * 1024 * 1024
 
@@ -202,12 +218,14 @@ let parse_line (line : string) : (string * Yojson.Safe.t option * float) option 
              "memory_jsonl: dropping JSONL line — [key] field missing \
               or not a string (snippet: %S)"
              (snippet_of_line trimmed);
+           observe_parse_drop ~reason:"no_key";
            None)
       | _ ->
         Log.Memory.warn
           "memory_jsonl: dropping JSONL line — top-level JSON is not \
            an Assoc record (snippet: %S)"
           (snippet_of_line trimmed);
+        observe_parse_drop ~reason:"not_assoc";
         None
     with Yojson.Json_error err ->
       Log.Memory.warn
@@ -215,6 +233,7 @@ let parse_line (line : string) : (string * Yojson.Safe.t option * float) option 
          (snippet: %S)"
         err
         (snippet_of_line trimmed);
+      observe_parse_drop ~reason:"json_parse_error";
       None
 
 (** Stream parsed rows from a session file.

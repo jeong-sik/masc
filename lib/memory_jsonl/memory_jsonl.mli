@@ -85,3 +85,16 @@ val make_backend_with_query_observer :
     Files exceeding 50 MB log a warning but are still read. Individual
     values exceeding 1 MB are replaced with a typed truncation marker
     (see {!encode_line} and {!value_is_truncated_marker}). *)
+
+(** Observability hook fired on every {!parse_line} silent drop with a
+    closed-vocabulary [reason] in [no_key | not_assoc | json_parse_error].
+    Empty lines are intentionally not counted (file-end newlines are
+    benign).
+
+    The leaf [masc_mcp_memory_jsonl] sub-library cannot depend on
+    [Prometheus] (cycle), so emission is wired from the [masc_mcp] root
+    at startup ([lib/coord.ml]) via this Atomic ref.  Mirrors the
+    [File_lock_eio.on_lock_attempt_fn] / [on_cas_retry_fn] pattern.
+
+    RFC-0109 §5.1 Option A canary for V15. *)
+val on_parse_drop_fn : (reason:string -> unit) Atomic.t

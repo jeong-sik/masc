@@ -474,6 +474,16 @@ let record_file_lock_table_cas_retry () =
 
 let () = Atomic.set File_lock_eio.on_cas_retry_fn record_file_lock_table_cas_retry
 
+let record_memory_jsonl_parse_drop ~reason =
+  Prometheus.inc_counter
+    Prometheus.metric_memory_jsonl_parse_drops
+    ~labels:[ ("reason", reason) ]
+    ()
+;;
+
+let () =
+  Atomic.set Memory_jsonl.on_parse_drop_fn record_memory_jsonl_parse_drop
+
 let clear_agent_current_task_cache config ~task_id =
   let agents_path = agents_dir config in
   if path_exists config agents_path

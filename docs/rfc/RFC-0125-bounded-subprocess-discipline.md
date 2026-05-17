@@ -50,18 +50,35 @@ implementation_prs: []
 
 ## 3. Problem (코드 site)
 
-`lib/process/process_eio.ml:454-507` 의 두 함수:
+### 3.1 진단 정정 (2026-05-17 amend)
 
-- `spawn_and_drain_stdout ~sw pm ~cwd ?env ?stdin_source argv stdout_buf`
-- `spawn_and_drain_both ~sw pm ~cwd ?env ?stdin_source argv stdout_buf stderr_buf`
+RFC 초안의 진단이 **부분 부정확**했다. P0 머지 직전 audit 으로 확인:
 
-두 함수의 결함:
+- `lib/process/process_eio.ml` 의 `spawn_and_drain_{stdout,both}` 는 **private** (`process_eio.mli` 미노출).
+- 모든 public 진입점 (`run_argv`, `run_argv_with_status`, `run_argv_with_status_split`, stdin/split 변형) 은 **이미 `Eio.Time.with_timeout_exn clk timeout_sec (fun () -> Eio.Switch.run (fun sw -> spawn_and_drain_* ~sw ...))` 으로 wrap** (line 521-523, 557-559, 605-609, 674-678). 즉 inner Switch.run scope + outer timeout 가 *이미 매번 fresh*.
+- `lib/keeper/keeper_docker_client_real.ml` 의 `gated_argv_with_status_split` 도 4 hot site 중 2개 (line 243 `~timeout_sec:(session_exec_timeout_sec ())`, line 273 `~timeout_sec`) 는 명시 전파, 2개 (line 278 `docker rm`, line 309 `docker info`) 는 `default_timeout_sec ()` (60s) 적용. 즉 *unbounded 아님*.
 
-1. **caller 의 `~sw` 를 그대로 spawn 에 attach** — `Eio.Process.spawn ~sw pm` (line 457, 484). caller sw 는 보통 keeper turn 또는 keeper lifetime — long-lived. process 자동 SIGKILL 영원히 발동 안 됨.
-2. **inner `Switch.run` scope 부재** — process 의 lifetime 이 caller sw 의 lifetime 과 묶임. unbound.
-3. **`timeout_sec` 파라미터 부재** — `with_unix_capture` (Unix fallback path, line 438) 는 받지만 Eio-native path 는 안 받음. 즉 Eio path = unbounded execution.
+따라서 process_eio + keeper_docker_client_real 차원에서는 *bounded scope 가 이미 보장*된다.
 
-이 결함이 docker exec / LLM HTTPS client / git/gh subprocess 모두에 전파된다 (`keeper_docker_client_real.ml:245/251/273/456` 의 `gated_argv_with_status_split` 가 이 두 함수에 의존).
+### 3.2 진짜 root (남은 layer)
+
+sangsu `mid_turn_no_progress 307s` 와 masc-improver `oas_timeout_budget 276s` 의 진짜 root 는 **process spawn 을 거치지 않는 socket-level layer**:
+
+1. **cohttp-eio 6.1.1 socket-not-closed bug** (RFC-0107 §1) — `Eio.Flow.read` 가 socket-blocked 상태에서 Eio.Cancel 안 받음. `Eio.Process.await` 와 달리 SIGCHLD 같은 OS wakeup 신호 없음.
+2. **connection pool 부재** — 매 attempt 마다 새 socket. 누수.
+3. **`run_turn:196` ambient switch** (RFC-0107 §3) — turn-scoped FD boundary 없어서 LLM HTTPS socket 이 keeper lifetime 까지 살아남음.
+4. **Docker daemon socket 사용 안 함** (RFC-0107 §4) — `/var/run/docker.sock` 직접 통신 대신 subprocess `docker exec/run` 만 사용. spawn churn + 매 호출 process overhead.
+
+이 4가지는 **RFC-0107 (outbound HTTP stack consolidation, Draft)** 가 다루는 영역이다. RFC-0109 는 **process spawn 레벨에서 동일한 *bounded scope* 패턴이 socket level 에도 적용되어야 함을 보강**한다 — 즉 *general principle* 명시.
+
+### 3.3 정확한 진단 한 줄
+
+> `Eio.Process.spawn ~sw` 는 SIGCHLD 기반이라 cancel 받는다 (P0 test #2 PASS). 그러나 `cohttp-eio` 의 `Eio.Flow.read` 는 socket-level OS read 라 cancel 안 받는다. *process* layer 는 이미 bounded, *socket* layer 가 unbounded.
+
+따라서 RFC-0109 의 적용 범위는:
+
+- (i) 새 subprocess spawn site 가 추가될 때 SSOT helper 사용 강제 — `Bounded_proc.run_argv_with_timeout` (P0 완료).
+- (ii) socket-level (cohttp-eio, websocket, raw Eio.Flow) 의 *같은 bounded scope 패턴* 보강 — RFC-0107 와 *coordinated* 진행.
 
 ## 4. Proposed approach
 
@@ -132,16 +149,18 @@ let with_bounded_run ~clock ~process_mgr ~cwd ?env ?stdin_source
 
 ### 4.2 Migration plan (phased, 사이트별 PR)
 
+§3.1 audit 결과 P1 의 정의가 narrow 됐다. process_eio 와 keeper_docker_client_real 은 *이미 bounded*. 따라서 P1+ 는 **새 spawn site 의 ratchet** + **socket-level layer (RFC-0107 coordinated)** 만 다룬다.
+
 | Phase | 범위 | 산출 | PR 크기 |
 |---|---|---|---|
-| **P0** (본 RFC body) | helper module 추가 + unit test (TLA+/property 아닌 OCaml test) | `lib/bounded_proc/` + `test/test_bounded_proc.ml` | ~200 LoC |
-| **P1** (canary) | `process_eio.spawn_and_drain_{stdout,both}` 를 helper 기반으로 재작성 + `?timeout_sec` 시그너처 추가 (caller 전파) | `lib/process/process_eio.ml` patch + caller 수정 | ~150 LoC |
-| **P2** | `keeper_docker_client_real` 가 모든 `docker exec`/`docker run` 호출에 keeper meta `per_provider_timeout_s` 전파 | 사이트별 patch | ~100 LoC |
-| **P3** | `cascade_event_bridge` LLM HTTPS client 호출에 attempt-level budget 전파 | provider 별 patch | ~150 LoC |
-| **P4** | `keeper_supervisor` 의 fiber fork 도 `Fiber.first (max_turn_timer) (heartbeat_loop)` 패턴 적용 → keeper-level watchdog | supervisor patch | ~100 LoC |
-| **P5** | `force_release_holder_for` deprecation — P1~P4 적용 후 *fiber_unresolved* 발생률 측정 → 0 이면 helper removal | semaphore over-release 제거 | ~50 LoC |
+| **P0** (Closed) | helper module + unit test | `lib/bounded_proc/` + `test/test_bounded_proc.ml` (4/4 PASS) | ~200 LoC (PR #15948) |
+| **P1 ratchet** | CI lint: 새 `Eio.Process.spawn` 호출 시 (a) `Bounded_proc.run_argv_with_timeout` 사용 또는 (b) 명시적 outer `Eio.Time.with_timeout_exn` + inner `Eio.Switch.run` wrap 강제. `scripts/lint-spawn-bounded.sh` + drift-guard test | shell script + drift test | ~100 LoC |
+| **P2 keeper_docker default audit** | line 278 (`docker rm`) + line 309 (`docker info`) 의 `default_timeout_sec ()` 가 keeper-specific `per_provider_timeout_s` 또는 *daemon liveness budget* 으로 narrow. 의도 명시화 | `keeper_docker_client_real.ml` patch | ~50 LoC |
+| **P3 cascade socket budget (RFC-0107 coordinated)** | `cascade_event_bridge` 의 cohttp-eio client 가 attempt 마다 `Bounded_proc` 시그너처와 동등한 inner Switch + Fiber.first 적용. *RFC-0107 의 connection pool + scoped switch 위에 build*. RFC-0107 머지 후 stack | cascade patch | ~200 LoC |
+| **P4 supervisor watchdog** | `keeper_supervisor` 의 outer fiber fork (line 224) 에 `Fiber.first (max_turn_timer) (heartbeat_loop)` 패턴 적용. keeper-level wall-clock invariant | supervisor patch | ~100 LoC |
+| **P5 deprecation** | `Keeper_turn_slot.force_release_holder_for` (keeper_supervisor.ml:1578) 가 *symptom suppression*. P1~P4 적용 후 `metric_keeper_oas_timeout_budget_watchdog_termination` 30일 trend 가 0 으로 수렴하면 remove | semaphore over-release 제거 | ~50 LoC |
 
-각 Phase 의 PR 은 root-fix loop 와 분리하여 *atomic* 으로 머지한다.
+각 Phase 의 PR 은 root-fix loop 와 분리하여 *atomic* 으로 머지한다. P3 는 RFC-0107 의 머지 후 진행 (dependency).
 
 ### 4.3 Non-scope
 

@@ -58,11 +58,26 @@ let resolved_tool_lane_label ~effective_tools ~runtime_mcp_policy =
   | false, false, Some _ -> "runtime_mcp_connect_only"
   | false, false, None -> "none"
 
+let canonical_tool_support_name name =
+  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix name in
+  match Keeper_tool_alias.public_masc_to_internal stripped with
+  | Some internal -> internal
+  | None ->
+    (match Keeper_tool_alias.route stripped with
+     | Some route -> route.internal_name
+     | None -> stripped)
+
 let missing_required_tool_names_after_lane_by_name ~required_tool_names
     ~materialized_tool_names =
+  let materialized = Hashtbl.create 32 in
+  List.iter
+    (fun name ->
+      Hashtbl.replace materialized (canonical_tool_support_name name) ())
+    materialized_tool_names;
   required_tool_names
   |> dedupe_keep_order
-  |> List.filter (fun name -> not (List.mem name materialized_tool_names))
+  |> List.filter (fun name ->
+       not (Hashtbl.mem materialized (canonical_tool_support_name name)))
 
 let missing_required_tool_names_after_lane ~required_tool_names ~effective_tools
     ~runtime_mcp_policy =

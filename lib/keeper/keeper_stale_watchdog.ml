@@ -852,7 +852,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                  meta.name
              end
            | Some entry ->
-             Log.Keeper.info
+             Log.Keeper.debug
                "%s: watchdog: phase=%s (not Running, skipping)"
                meta.name
                (Keeper_state_machine.phase_to_string entry.phase)

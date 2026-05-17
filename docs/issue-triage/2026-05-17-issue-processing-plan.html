@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>masc-mcp Issue Processing Plan - 2026-05-17</title>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({ startOnLoad: true, theme: "base", securityLevel: "loose" });
+  </script>
+  <style>
+    :root {
+      --bg: #f7f7f4;
+      --panel: #ffffff;
+      --ink: #1f2933;
+      --muted: #5d6673;
+      --line: #d8d7d2;
+      --red: #b42318;
+      --amber: #a15c07;
+      --green: #1f7a4d;
+      --blue: #1d5e91;
+      --violet: #6741a2;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+
+    header {
+      padding: 40px 32px 24px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 28px 24px 64px;
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin: 0;
+      line-height: 1.2;
+    }
+
+    h1 {
+      font-size: 34px;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin-top: 36px;
+      font-size: 24px;
+    }
+
+    h3 {
+      margin-top: 20px;
+      font-size: 17px;
+    }
+
+    p {
+      margin: 10px 0;
+    }
+
+    a {
+      color: var(--blue);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    code {
+      padding: 2px 5px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: #f0efeb;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.92em;
+    }
+
+    .lede {
+      max-width: 880px;
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .snapshot,
+    .grid {
+      display: grid;
+      gap: 12px;
+    }
+
+    .snapshot {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      margin-top: 20px;
+    }
+
+    .grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .tile,
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+
+    .tile {
+      padding: 16px;
+    }
+
+    .tile strong {
+      display: block;
+      font-size: 28px;
+      line-height: 1.1;
+    }
+
+    .tile span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .panel {
+      margin-top: 14px;
+      padding: 18px;
+    }
+
+    .rubric {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .rubric .tile {
+      min-height: 150px;
+    }
+
+    .badge {
+      display: inline-block;
+      margin: 2px 4px 2px 0;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: #ece9df;
+      color: #303740;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .p0 {
+      color: var(--red);
+      font-weight: 700;
+    }
+
+    .p1 {
+      color: var(--amber);
+      font-weight: 700;
+    }
+
+    .p2 {
+      color: var(--violet);
+      font-weight: 700;
+    }
+
+    .p3 {
+      color: var(--blue);
+      font-weight: 700;
+    }
+
+    .p4 {
+      color: var(--green);
+      font-weight: 700;
+    }
+
+    table {
+      width: 100%;
+      margin-top: 12px;
+      border-collapse: collapse;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      font-size: 14px;
+    }
+
+    th,
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #ece9df;
+      font-size: 12px;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .issue-title {
+      min-width: 320px;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .flow {
+      overflow-x: auto;
+    }
+
+    .commands {
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    @media (max-width: 900px) {
+      .snapshot,
+      .grid,
+      .rubric {
+        grid-template-columns: 1fr;
+      }
+
+      header {
+        padding: 28px 20px 20px;
+      }
+
+      main {
+        padding: 20px 16px 48px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>masc-mcp Issue Processing Plan</h1>
+    <p class="lede">2026-05-17 live GitHub snapshot에 기반한 evidence-first 이슈 처리 계획이다. 목적은 열린 이슈를 성급히 닫는 것이 아니라, 닫기/묶기/유지 판단에 필요한 증거 기준을 먼저 고정하고 47개 이슈 전체를 실행 가능한 bucket으로 배정하는 것이다.</p>
+    <div class="snapshot" aria-label="Live snapshot">
+      <div class="tile">
+        <strong>47</strong>
+        <span>masc-mcp open issues</span>
+      </div>
+      <div class="tile">
+        <strong>18</strong>
+        <span>masc-mcp open draft PRs</span>
+      </div>
+      <div class="tile">
+        <strong>0</strong>
+        <span>open target:later issues</span>
+      </div>
+      <div class="tile">
+        <strong>12</strong>
+        <span>oas open issues for cross-repo routing</span>
+      </div>
+    </div>
+    <p class="muted">Snapshot checked at <code>2026-05-17T04:08:33Z</code> with <code>gh search issues</code>, <code>gh issue list</code>, and <code>gh pr list</code>.</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>Operating Decision</h2>
+      <div class="panel">
+        <p><strong>Default posture:</strong> evidence-first. No <code>target:now</code>, <code>live-defect</code>, or main-health issue should be closed unless it has fixed-on-main evidence, a linked PR/check result, or a documented superseding parent issue.</p>
+        <p><strong>Primary output:</strong> this HTML report plus the Mermaid flow below. The next execution pass can use it to comment, relabel, close duplicates, or preserve blockers without re-litigating the triage policy.</p>
+        <p><strong>Boundary:</strong> OAS-owned items remain cross-repo evidence dependencies. MASC should not mark them done from a MASC-only patch.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2>Evidence Rubric</h2>
+      <div class="rubric">
+        <div class="tile">
+          <h3>E3 Current/live</h3>
+          <p>Recent runtime logs, CI failure, reproduction command, or direct health evidence proves the issue is still active.</p>
+          <p class="muted">Action: keep open, assign next proof step, avoid archival.</p>
+        </div>
+        <div class="tile">
+          <h3>E2 Fixed/linked</h3>
+          <p>Merged PR, passing check, release/pin propagation, or exact code path change proves the issue was addressed.</p>
+          <p class="muted">Action: comment evidence, then close as completed.</p>
+        </div>
+        <div class="tile">
+          <h3>E1 Plausible/stale</h3>
+          <p>Symptom and likely cause exist, but current reproduction, owner, or acceptance criteria are missing.</p>
+          <p class="muted">Action: request evidence or downgrade priority.</p>
+        </div>
+        <div class="tile">
+          <h3>E0 Not actionable</h3>
+          <p>Two or more of symptom, repro, cause, owner, and next action are missing or superseded.</p>
+          <p class="muted">Action: archive candidate, or fold into a parent tracker.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Research Anchors</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Source</th>
+            <th>Use in this triage</th>
+            <th>Evidence</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><a href="https://www.simula.no/research/evidence-based-software-engineering">Kitchenham, Dyba, Jorgensen - Evidence-Based Software Engineering</a></td>
+            <td>Research synthesis precedes RFC or implementation; claims need checkable evidence.</td>
+            <td>[근거] Official Simula publication page, checked 2026-05-17, High.</td>
+          </tr>
+          <tr>
+            <td><a href="https://www.st.cs.uni-saarland.de/publications/details/bettenburg-tr-2008/">Bettenburg et al. - What Makes a Good Bug Report?</a></td>
+            <td>Repro steps, stack traces/logs, and test cases become closure gates.</td>
+            <td>[근거] University publication page, checked 2026-05-17, High.</td>
+          </tr>
+          <tr>
+            <td><a href="https://portal.research.lu.se/en/publications/detection-of-duplicate-defect-reports-using-natural-language-proc/">Runeson, Alexandersson, Nyholm - Duplicate Defect Reports</a></td>
+            <td>Duplicate detection is a candidate signal, not automatic closure authority.</td>
+            <td>[근거] Lund University publication page and DOI metadata, checked 2026-05-17, High.</td>
+          </tr>
+          <tr>
+            <td><a href="https://plg.uwaterloo.ca/~migod/846/papers/anvik-icse06.pdf">Anvik, Hiew, Murphy - Who Should Fix This Bug?</a></td>
+            <td>Ownership should follow module/history evidence, not title intuition.</td>
+            <td>[근거] ICSE paper PDF mirror, checked 2026-05-17, Medium.</td>
+          </tr>
+          <tr>
+            <td><a href="https://dblp.org/rec/journals/tse/KameiSAHMSU13">Kamei et al. - Just-in-Time Quality Assurance</a></td>
+            <td>Prioritize recent change, CI, and high-risk runtime areas for first action.</td>
+            <td>[근거] DBLP metadata with DOI, checked 2026-05-17, High.</td>
+          </tr>
+          <tr>
+            <td><a href="https://sre.google/sre-book/postmortem-culture/">Google SRE - Postmortem Culture</a></td>
+            <td>Live defect closure requires cause, impact, mitigation, and follow-up action.</td>
+            <td>[근거] Google SRE official book, checked 2026-05-17, High.</td>
+          </tr>
+          <tr>
+            <td><a href="https://dora.dev/guides/dora-metrics/">DORA - Software Delivery Performance Metrics</a></td>
+            <td>CI/release issues are prioritized by recovery time, lead time, and failure impact.</td>
+            <td>[근거] DORA official guide, checked 2026-05-17, High.</td>
+          </tr>
+          <tr>
+            <td><a href="https://www.inderscience.com/info/inarticle.php?artid=54280">Yu and Ramaswamy - Bug Reports as Quality Measure</a></td>
+            <td>Open issue count is not treated as quality by itself; evidence density matters.</td>
+            <td>[근거] Publisher abstract and DOI metadata, checked 2026-05-17, Medium.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Bucket Rules</h2>
+      <div class="grid">
+        <div class="panel">
+          <h3><span class="p0">P0</span> Runtime/live defect</h3>
+          <p><code>target:now</code>, <code>live-defect</code>, keeper runtime, sandbox, cascade, or explicit P0 title. Close only with E2 fixed evidence.</p>
+        </div>
+        <div class="panel">
+          <h3><span class="p1">P1</span> Main health and CI</h3>
+          <p><code>area:ci</code>, <code>main-health</code>, or test issues. Verify current <code>origin/main</code> and PR/check linkage first.</p>
+        </div>
+        <div class="panel">
+          <h3><span class="p2">P2</span> Contract/root-cause architecture</h3>
+          <p><code>contract</code>, <code>root-cause</code>, meta epics, and architecture debt. Split meta from leaf work before closing.</p>
+        </div>
+        <div class="panel">
+          <h3><span class="p3">P3</span> Cross-repo OAS</h3>
+          <p><code>cross-repo/oas</code> and OAS boundary issues. Require upstream OAS issue, PR, or pin evidence.</p>
+        </div>
+        <div class="panel">
+          <h3><span class="p4">P4</span> Feature, performance, research</h3>
+          <p>Feature/performance plans. Keep only if acceptance criteria and owner path are clear; otherwise archive candidate.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Issue Matrix</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Bucket</th>
+            <th>Issue</th>
+            <th class="issue-title">Title</th>
+            <th>Labels</th>
+            <th>Next evidence action</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="p0">P0</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/15731">#15731</a></td><td>P0: enforce Keeper world reactivity with fleet liveness, reaction ledger, and tool-capable cascade admission</td><td><span class="badge">triage-required</span></td><td>Add missing planning labels and prove current P0 evidence before implementation.</td></tr>
+          <tr><td class="p0">P0</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/15551">#15551</a></td><td>Cluster M: keeper_bash cwd_not_directory - worktree-task path missing under cwd</td><td><span class="badge">target:now</span><span class="badge">live-defect</span><span class="badge">docker</span><span class="badge">runtime</span></td><td>Reproduce cwd path inside keeper sandbox and link fixing PR.</td></tr>
+          <tr><td class="p0">P0</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/15545">#15545</a></td><td>Cluster L: keeper_bash Path blocked - outside allowed directories whitelist rejects own-repo paths</td><td><span class="badge">target:now</span><span class="badge">live-defect</span><span class="badge">runtime</span></td><td>Confirm whitelist resolver behavior against current keeper_bash path policy.</td></tr>
+          <tr><td class="p0">P0</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/15542">#15542</a></td><td>Cluster K: Completion contract [require_tool_use] violated</td><td><span class="badge">target:now</span><span class="badge">live-defect</span><span class="badge">contract</span></td><td>Link required-tool enforcement PR and verify no read-only escape remains.</td></tr>
+          <tr><td class="p0">P0</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/15530">#15530</a></td><td>Cluster E: decisions.jsonl parse drop reason=missing_success_model</td><td><span class="badge">target:now</span><span class="badge">live-defect</span><span class="badge">telemetry</span></td><td>Require parser evidence plus success_model preservation test.</td></tr>
+          <tr><td class="p0">P0</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/15529">#15529</a></td><td>Cluster D: keeper sandbox docker exec - cwd/config path missing inside container</td><td><span class="badge">target:now</span><span class="badge">live-defect</span><span class="badge">docker</span></td><td>Capture container-visible path/config proof and linked fix.</td></tr>
+          <tr><td class="p0">P0</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/15526">#15526</a></td><td>Cluster A: cascade providers unavailable after health/cooldown filter</td><td><span class="badge">target:now</span><span class="badge">live-defect</span><span class="badge">runtime</span></td><td>Verify provider health recovery path and cooldown evidence.</td></tr>
+          <tr><td class="p0">P0</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/15319">#15319</a></td><td>Stuck-keeper causal chain: turn-level contract to watchdog seal</td><td><span class="badge">target:now</span><span class="badge">type:epic</span><span class="badge">live-defect</span></td><td>Keep as parent until all Cluster A/M leaf issues have closure proof.</td></tr>
+          <tr><td class="p0">P0</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/13795">#13795</a></td><td>GOAL LOOP Verify pipeline current gate result is blocked</td><td><span class="badge">target:now</span><span class="badge">contract</span><span class="badge">runtime</span></td><td>Run current verify-gate proof or connect to active PR.</td></tr>
+          <tr><td class="p0">P0</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/13738">#13738</a></td><td>Track keeper goal-scope observation/claim race</td><td><span class="badge">target:now</span><span class="badge">runtime</span></td><td>Confirm race is still live after latest keeper scheduling changes.</td></tr>
+          <tr><td class="p0">P0</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/13636">#13636</a></td><td>GOAL LOOP prompt closeout checklist still has non-PASS requirements</td><td><span class="badge">target:now</span><span class="badge">contract</span><span class="badge">runtime</span></td><td>Collect current closeout checklist result and failing requirement IDs.</td></tr>
+          <tr><td class="p0">P0</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/13569">#13569</a></td><td>Keeper proof: exercise zero-evidence tool surfaces</td><td><span class="badge">target:now</span><span class="badge">contract</span><span class="badge">runtime</span></td><td>Attach proof harness coverage or split missing surfaces.</td></tr>
+          <tr><td class="p0">P0</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/13568">#13568</a></td><td>Keeper proof: repair sandbox path and precondition failures</td><td><span class="badge">target:now</span><span class="badge">docker</span><span class="badge">contract</span></td><td>Pair with #15529/#15551 and close only after shared path evidence.</td></tr>
+          <tr><td class="p0">P0</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/13567">#13567</a></td><td>Keeper proof: repair policy and approval denials in feature gates</td><td><span class="badge">target:now</span><span class="badge">contract</span><span class="badge">runtime</span></td><td>Confirm approval denial class and policy gate expected behavior.</td></tr>
+          <tr><td class="p0">P0</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/13534">#13534</a></td><td>Track keeper autonomy feature coverage proof gaps</td><td><span class="badge">target:now</span><span class="badge">type:epic</span><span class="badge">runtime</span></td><td>Use as parent for keeper proof gaps, not as a leaf fix.</td></tr>
+          <tr><td class="p0">P0</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/13276">#13276</a></td><td>Track Docker multi-keeper credential and rootless isolation validation</td><td><span class="badge">target:now</span><span class="badge">docker</span><span class="badge">runtime</span></td><td>Need Docker-visible credential and isolation validation evidence.</td></tr>
+          <tr><td class="p0">P0</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/13274">#13274</a></td><td>Track workflow-level tool failure severity for approval and egress blockers</td><td><span class="badge">target:now</span><span class="badge">telemetry</span><span class="badge">contract</span></td><td>Require severity mapping and tool-failure telemetry proof.</td></tr>
+          <tr><td class="p0">P0</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/13265">#13265</a></td><td>GOAL LOOP full 206-finding audit corpus is not replayable from repo</td><td><span class="badge">target:now</span><span class="badge">context</span><span class="badge">runtime</span></td><td>Verify corpus replay path from repo or record non-replayable blockers.</td></tr>
+          <tr><td class="p0">P0</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/11079">#11079</a></td><td>[logic/OAS] compute_judgments timeout - governance_judge cascade timeout cluster</td><td><span class="badge">target:now</span><span class="badge">runtime</span></td><td>Preserve as P0 until OAS timeout evidence and MASC impact are separated.</td></tr>
+          <tr><td class="p0">P0</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/11040">#11040</a></td><td>[hygiene/leak] git worktree count 539 - stale worktrees and no cleanup hook</td><td><span class="badge">target:now</span><span class="badge">runtime</span></td><td>Re-measure current worktree count before closing as operationally fixed.</td></tr>
+          <tr><td class="p0">P0</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/10349">#10349</a></td><td>Keeper identity drift across contract/gate/FS resolver layers</td><td><span class="badge">target:now</span><span class="badge">runtime</span></td><td>Verify identity drift path against current credential and sandbox code.</td></tr>
+
+          <tr><td class="p1">P1</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/15504">#15504</a></td><td>[CI] test_keeper_llama_only fails under sandboxed runtest</td><td><span class="badge">area:ci</span><span class="badge">target:now</span><span class="badge">main-health</span></td><td>Check active PR #15730 and main CI after merge.</td></tr>
+          <tr><td class="p1">P1</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/15317">#15317</a></td><td>Agent PR draft invariant failed: #15313 merged after draft guard failure</td><td><span class="badge">area:ci</span><span class="badge">target:now</span><span class="badge">github-auth</span></td><td>Confirm guard and GitHub permission class before closure.</td></tr>
+          <tr><td class="p1">P1</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/15269">#15269</a></td><td>Pre-existing test regression: test_keeper_masc_bridge and test_tools_coverage</td><td><span class="badge">area:ci</span><span class="badge">target:now</span><span class="badge">main-health</span></td><td>Re-run focused targets or link current failing check.</td></tr>
+          <tr><td class="p1">P1</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/15191">#15191</a></td><td>test: test_mcp_server_eio can hold dune-local lock idle</td><td><span class="badge">area:ci</span><span class="badge">target:now</span><span class="badge">test</span></td><td>Verify lock behavior under repo wrapper, not full dune build.</td></tr>
+          <tr><td class="p1">P1</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/15179">#15179</a></td><td>test: test_dashboard_tools projection case hangs after Coord.init</td><td><span class="badge">area:ci</span><span class="badge">target:now</span><span class="badge">test</span></td><td>Run focused dashboard test or confirm fixed by merged PR.</td></tr>
+          <tr><td class="p1">P1</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/15138">#15138</a></td><td>CI Gate uses stale PR labels when live label set is empty</td><td><span class="badge">area:ci</span><span class="badge">target:now</span><span class="badge">main-health</span></td><td>Check active PR #15724 and CI gate behavior.</td></tr>
+          <tr><td class="p1">P1</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/14991">#14991</a></td><td>test_repo_store.exe: pre-existing failures in discover/migration tests</td><td><span class="badge">area:ci</span><span class="badge">target:now</span><span class="badge">test</span></td><td>Confirm whether origin/main still fails under focused wrapper.</td></tr>
+          <tr><td class="p1">P1</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/13530">#13530</a></td><td>Decide focused CI coverage for draft OCaml PRs</td><td><span class="badge">area:ci</span><span class="badge">target:next</span><span class="badge">type:architecture</span></td><td>Turn into policy/RFC acceptance criteria, not a runtime blocker.</td></tr>
+          <tr><td class="p1">P1</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/13278">#13278</a></td><td>Track unrelated local verification blockers from dashboard keeper cockpit fix</td><td><span class="badge">area:ci</span><span class="badge">target:now</span><span class="badge">main-health</span></td><td>Compare current main blockers against original dashboard fix context.</td></tr>
+
+          <tr><td class="p2">P2</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/15257">#15257</a></td><td>Tool descriptor SSOT drift: enum duplication and behavior-rule coverage</td><td><span class="badge">contract</span><span class="badge">type:architecture</span></td><td>Define SSOT contract and split implementation slices.</td></tr>
+          <tr><td class="p2">P2</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/15034">#15034</a></td><td>[STATE] block triple-brain across unified.system.md, state_block_instruction_text, constitution.md</td><td><span class="badge">contract</span><span class="badge">context</span><span class="badge">type:architecture</span></td><td>Pick canonical schema owner and archive superseded duplicates only after links.</td></tr>
+          <tr><td class="p2">P2</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/13132">#13132</a></td><td>RFC-0027 PR-9c: dual-track resolver hardening</td><td><span class="badge">contract</span><span class="badge">target:next</span></td><td>Keep if still linked to open implementation PR; otherwise fold into RFC parent.</td></tr>
+          <tr><td class="p2">P2</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/13128">#13128</a></td><td>Track digest-stable Types facade interface for lib/types</td><td><span class="badge">contract</span><span class="badge">area:ci</span><span class="badge">target:next</span></td><td>Require digest evidence and focused CI acceptance criteria.</td></tr>
+          <tr><td class="p2">P2</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/11036">#11036</a></td><td>[Meta-epic] 7-axis Structural Prevention CI Gate Suite</td><td><span class="badge">root-cause</span><span class="badge">type:epic</span></td><td>Keep as root-cause parent; close only if all child gates are tracked elsewhere.</td></tr>
+          <tr><td class="p2">P2</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/10733">#10733</a></td><td>env knob proliferation systemic - runtime tunables across config modules</td><td><span class="badge">root-cause</span><span class="badge">type:architecture</span></td><td>Require inventory delta and migration path before implementation.</td></tr>
+          <tr><td class="p2">P2</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/9521">#9521</a></td><td>[Meta] string matching root prevention: type-safe enum enforcement</td><td><span class="badge">root-cause</span><span class="badge">root-cause:STR</span><span class="badge">contract</span></td><td>Keep as root-cause parent until open typed-classifier PRs land.</td></tr>
+          <tr><td class="p2">P2</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/9520">#9520</a></td><td>[Meta] telemetry root prevention: 100% instrumentation enforcement</td><td><span class="badge">root-cause</span><span class="badge">root-cause:TEL</span><span class="badge">telemetry</span></td><td>Keep as telemetry parent; require metric coverage evidence per child.</td></tr>
+
+          <tr><td class="p3">P3</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/15028">#15028</a></td><td>Track OAS-owned provider/model boundary migration</td><td><span class="badge">cross-repo/oas</span><span class="badge">target:next</span></td><td>Require OAS PR/pin evidence before MASC closure.</td></tr>
+          <tr><td class="p3">P3</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/11929">#11929</a></td><td>[OAS] I-H5 OAS internal cancellation guard</td><td><span class="badge">cross-repo/oas</span><span class="badge">target:next</span></td><td>Mirror to OAS issue state and keep MASC as downstream tracker.</td></tr>
+          <tr><td class="p3">P3</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/11923">#11923</a></td><td>[Meta] MASC-MCP x OAS root improvement roadmap</td><td><span class="badge">cross-repo/oas</span><span class="badge">type:epic</span><span class="badge">context</span></td><td>Keep as roadmap parent; avoid using it as a leaf closure target.</td></tr>
+
+          <tr><td class="p4">P4</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/15298">#15298</a></td><td>Split lib/prometheus.ml below Godfile size cap</td><td><span class="badge">performance</span><span class="badge">type:architecture</span></td><td>Needs acceptance threshold and file-size target before implementation.</td></tr>
+          <tr><td class="p4">P4</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/15114">#15114</a></td><td>lazy_task: parallelize independent startup tasks</td><td><span class="badge">performance</span><span class="badge">target:next</span></td><td>Require baseline and regression bound before changing concurrency.</td></tr>
+          <tr><td class="p4">P4</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/11573">#11573</a></td><td>[Phase 2 backend] Goal snapshot diff</td><td><span class="badge">type:feature</span><span class="badge">backend-rfc</span><span class="badge">context</span></td><td>Keep only if dashboard/backend acceptance criteria are current.</td></tr>
+          <tr><td class="p4">P4</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/11342">#11342</a></td><td>[Plan] A4: Perf/Cost FMEA - validate assumptions quantitatively</td><td><span class="badge">performance</span><span class="badge">type:feature</span></td><td>Needs measurement protocol or archive as research backlog.</td></tr>
+          <tr><td class="p4">P4</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/11329">#11329</a></td><td>[Plan] A3: Broadcast Temporal Decay + Backpressure</td><td><span class="badge">enhancement</span><span class="badge">type:feature</span></td><td>Needs failure mode and rollout target before implementation.</td></tr>
+          <tr><td class="p4">P4</td><td><a href="https://github.com/jeong-sik/masc-mcp/issues/11316">#11316</a></td><td>[Plan] A1: Dialectical Verification + Veto light adoption</td><td><span class="badge">enhancement</span><span class="badge">type:feature</span></td><td>Needs product acceptance criteria or fold into research parent.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Flowchart</h2>
+      <div class="panel flow">
+        <pre class="mermaid">
+flowchart TD
+  A[Freeze live GitHub snapshot] --> B[Score each issue E0 to E3]
+  B --> C{target:now or live-defect or explicit P0?}
+  C -- yes --> P0[P0 Runtime/live defect]
+  C -- no --> D{CI/main-health/test?}
+  D -- yes --> P1[P1 Main health and CI]
+  D -- no --> E{contract/root-cause/meta architecture?}
+  E -- yes --> P2[P2 Contract/root-cause architecture]
+  E -- no --> F{cross-repo/oas?}
+  F -- yes --> P3[P3 Cross-repo OAS]
+  F -- no --> P4[P4 Feature/perf/research]
+  P0 --> G{Fixed on main with proof?}
+  P1 --> G
+  P2 --> H{Duplicate or superseded by parent?}
+  P3 --> I{Upstream OAS evidence exists?}
+  P4 --> J{Acceptance criteria exists?}
+  G -- yes --> K[Comment evidence and close completed]
+  G -- no --> L[Keep open with next proof step]
+  H -- yes --> M[Comment parent link and close duplicate/not planned]
+  H -- no --> L
+  I -- yes --> L
+  I -- no --> N[Comment blocked evidence and keep or transfer]
+  J -- yes --> L
+  J -- no --> O[Archive candidate with rationale]
+        </pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>Execution Commands</h2>
+      <div class="panel commands"><code>gh search issues --repo jeong-sik/masc-mcp --state open --json number --limit 200 | jq 'length'
+gh issue list --repo jeong-sik/masc-mcp --state open --limit 200 --json number,title,labels,updatedAt
+gh pr list --repo jeong-sik/masc-mcp --state open --limit 100 --json number,title,headRefName,labels,isDraft,updatedAt
+gh search issues --repo jeong-sik/masc-mcp --state open --label target:later --json number --limit 50 | jq 'length'
+gh issue list --repo jeong-sik/oas --state open --limit 100 --json number,title,labels,updatedAt</code></div>
+    </section>
+
+    <section>
+      <h2>Next Execution Pass</h2>
+      <div class="panel">
+        <ol>
+          <li>Patch <a href="https://github.com/jeong-sik/masc-mcp/issues/15731">#15731</a> planning labels first because it is a live P0 with <code>triage-required</code>.</li>
+          <li>For P0/P1, map each issue to an open PR or a focused verification command. Close nothing without E2 proof.</li>
+          <li>For P2, comment parent/child links before closing duplicates or superseded architecture trackers.</li>
+          <li>For P3, verify corresponding OAS issue/PR/pin state and leave a blocked evidence comment where upstream is missing.</li>
+          <li>For P4, add missing acceptance criteria or archive as not planned with explicit rationale.</li>
+        </ol>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

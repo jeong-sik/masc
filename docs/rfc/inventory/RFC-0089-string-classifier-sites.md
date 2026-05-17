@@ -64,10 +64,10 @@ PR에서 줄여나간다.
 | Domain | File(s) | Count | Status |
 |---|---|---|---|
 | G5 skill routing protocol marker | `lib/keeper_skill_routing/keeper_skill_routing.ml` | 4 | **pending PR** |
-| G6 anti-rationalization LLM output | `lib/anti_rationalization.ml` | 0 in raw scan, RFC inline only | **needs domain audit** (may live in different module) |
+| G6 anti-rationalization LLM output | `lib/anti_rationalization.ml` | 2 in raw scan (parse_verdict APPROVE/REJECT prefix) | **scope-in** — RFC-0089 §10 Q3 |
 | Long-tail (2-site files × ~30, 1-site files × ~25) | various | ~55 | per-domain mop-up |
 
-**Active scope-in cluster: ~4-10 sites in two domains (G5 + G6).** Long-tail
+**Active scope-in cluster: ~6-12 sites in two domains (G5 + G6).** Long-tail
 residual (~55 sites across single-site files) is dominated by URL/path/CLI
 classifiers — boundary by inspection but not bulk-audited here.
 
@@ -78,7 +78,7 @@ Last close criterion: "잔여 §3.1 3 도메인 완료 *또는* sites <30 임계
 - Path A (residual domain): G3 (audit_log) re-classified to **scope-out** in
   this update. 잔여 §3.1 = **2 domains** (G5 skill_routing + G6
   anti_rationalization). Smaller than the previous "3 domains" estimate.
-- Path B (sites <30): Active scope-in cluster (G5 + G6) = **~4-10 sites**.
+- Path B (sites <30): Active scope-in cluster (G5 + G6) = **~6-12 sites**.
   Long-tail (~55 single/dual-site files) is unaudited but pattern-wise
   boundary-heavy. Strict <30 threshold for *audited scope-in* is satisfied;
   long-tail requires single-file confirmation.

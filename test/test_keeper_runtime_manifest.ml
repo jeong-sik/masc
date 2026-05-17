@@ -2182,6 +2182,45 @@ let test_health_filter_fail_open_preserves_tool_capable_candidates () =
     candidates;
   Alcotest.(check bool) "no fallback without tool-capable candidates" false fail_open
 
+let provider_config ?(kind = Llm_provider.Provider_config.OpenAI_compat)
+    ~model_id ~base_url () =
+  Llm_provider.Provider_config.make ~kind ~model_id ~base_url ()
+
+let test_local_preflight_filters_unhealthy_local_endpoints () =
+  let module C = Masc_mcp.Cascade_runtime_candidate in
+  let ollama =
+    provider_config ~kind:Llm_provider.Provider_config.Ollama
+      ~model_id:"gemma4:e2b" ~base_url:"http://localhost:11434/" ()
+  in
+  let cloud =
+    provider_config ~model_id:"glm-5-turbo"
+      ~base_url:"https://api.example.com/v1" ()
+  in
+  let candidates = C.of_provider_configs [ ollama; cloud ] in
+  Alcotest.(check (list string))
+    "local endpoint is normalized for discovery"
+    [ "http://127.0.0.1:11434" ]
+    (C.local_runtime_urls candidates);
+  let filtered, dropped =
+    C.filter_unhealthy_local_runtime_urls
+      ~endpoint_health:[ ("http://127.0.0.1:11434", false) ]
+      candidates
+  in
+  Alcotest.(check int) "unhealthy local candidate is dropped" 1
+    (List.length filtered);
+  Alcotest.(check (list string))
+    "dropped endpoint is normalized"
+    [ "http://127.0.0.1:11434" ]
+    dropped;
+  let filtered, dropped =
+    C.filter_unhealthy_local_runtime_urls
+      ~endpoint_health:[ ("http://127.0.0.1:11434", true) ]
+      candidates
+  in
+  Alcotest.(check int) "healthy local endpoint is kept" 2
+    (List.length filtered);
+  Alcotest.(check (list string)) "nothing dropped when healthy" [] dropped
+
 let test_keeper_cascade_engine_boundary () =
   let module E = Masc_mcp.Keeper_cascade_engine in
   let engine = E.keeper_managed in
@@ -2553,6 +2592,9 @@ let () =
             "health filter fail-open preserves tool-capable candidates"
             `Quick
             test_health_filter_fail_open_preserves_tool_capable_candidates;
+          Alcotest.test_case
+            "local preflight drops unhealthy local endpoints"
+            `Quick test_local_preflight_filters_unhealthy_local_endpoints;
           Alcotest.test_case "keeper cascade engine boundary is typed"
             `Quick test_keeper_cascade_engine_boundary;
           Alcotest.test_case "keeper hot path avoids OAS Complete_cascade"

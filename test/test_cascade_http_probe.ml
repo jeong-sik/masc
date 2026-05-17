@@ -32,6 +32,20 @@ let test_is_ollama_url_negative () =
   check bool "empty → not ollama" false
     (P.is_ollama_url "")
 
+let test_normalize_loopback_base_url () =
+  check string "localhost canonicalizes to IPv4 loopback"
+    "http://127.0.0.1:11434"
+    (Masc_network_defaults.normalize_loopback_base_url
+       "http://localhost:11434/");
+  check string "IPv6 loopback canonicalizes to IPv4 loopback"
+    "http://127.0.0.1:11434"
+    (Masc_network_defaults.normalize_loopback_base_url
+       "http://[::1]:11434/");
+  check string "remote host preserved"
+    "https://gpu.example.com:11434/v1"
+    (Masc_network_defaults.normalize_loopback_base_url
+       "https://gpu.example.com:11434/v1/")
+
 (* ── parse_response ─────────────────────────────────────────── *)
 
 let test_parse_response_one_loaded () =
@@ -156,6 +170,8 @@ let () =
     "is_ollama_url", [
       test_case "positive matches" `Quick test_is_ollama_url_positive;
       test_case "negative cases" `Quick test_is_ollama_url_negative;
+      test_case "loopback base URL canonicalization" `Quick
+        test_normalize_loopback_base_url;
     ];
     "Http_probe URL registry", [
       test_case "ollama_default_url registered at load" `Quick

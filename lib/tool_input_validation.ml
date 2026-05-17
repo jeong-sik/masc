@@ -209,20 +209,20 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
       let result = pass_result reason in
       emit_validation_telemetry ~tool:name ~result ~reason;
       Log.debug "tool_input_validation normalized args for %s" name;
-      Proceed prepared_args
+      Tool_dispatch.Proceed prepared_args
     | Agent_sdk.Tool_middleware.Pass ->
       let reason = pass_reason ~schema ~args ~prepared_args in
       let result = pass_result reason in
       emit_validation_telemetry ~tool:name ~result ~reason;
-      Pass
+      Tool_dispatch.Pass
     | Agent_sdk.Tool_middleware.Proceed coerced ->
       emit_validation_telemetry ~tool:name ~result:"pass" ~reason:"coerced";
       Log.debug "tool_input_validation coerced args for %s" name;
-      Proceed coerced
+      Tool_dispatch.Proceed coerced
     | Agent_sdk.Tool_middleware.Reject { message; _ } ->
       emit_validation_telemetry ~tool:name ~result:"fail" ~reason:"invalid_args";
       Log.info "tool_input_validation rejected %s: %s" name message;
-      Reject
+      Tool_dispatch.Reject
         { Tool_result.success = false
         ; data =
             `Assoc
@@ -242,9 +242,9 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
 
 let validate_args ?schema ~name ~args () =
   match validation_action ?schema ~name ~args () with
-  | Pass -> Ok args
-  | Proceed coerced -> Ok coerced
-  | Reject result -> Error result
+  | Tool_dispatch.Pass -> Ok args
+  | Tool_dispatch.Proceed coerced -> Ok coerced
+  | Tool_dispatch.Reject result -> Error result
 ;;
 
 let register_pre_hook () =

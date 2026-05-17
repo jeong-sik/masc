@@ -49,8 +49,8 @@ type t =
             Maps to [<tmp>] from [host ()] and [<base_path>/.masc/runtime/agent]
             from [resolve]. *)
   ; sandbox_workspace_root : string
-        (** Fleet sandbox root.  Default [<HOME>/me] when [HOME] is
-            set, else [<tmp>/masc-fleet]. *)
+        (** Fleet sandbox root.  Defaults through [MASC_BASE_PATH], then
+            [ME_ROOT], then [<tmp>/masc-fleet] from [host ()]. *)
   ; test_mode : test_mode_kind
         (** Typed test-mode boundary. *)
   ; log_dir : string

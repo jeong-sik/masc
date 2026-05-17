@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import sys
@@ -26,6 +27,12 @@ IDENTITY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 SECTION_RE = re.compile(r"^\s*\[[^\]]+\]\s*(?:#.*)?$")
 
 
+def default_base_path() -> str:
+    return (
+        os.environ.get("MASC_BASE_PATH") or os.environ.get("ME_ROOT") or str(Path.cwd())
+    )
+
+
 @dataclass(frozen=True)
 class Assignment:
     keeper: str
@@ -39,8 +46,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--base-path",
-        default=str(Path.home() / "me"),
-        help="MASC base path containing .masc (default: ~/me).",
+        default=default_base_path(),
+        help="MASC base path containing .masc (default: MASC_BASE_PATH, then ME_ROOT, then cwd).",
     )
     parser.add_argument(
         "--identity",
@@ -92,16 +99,16 @@ def keeper_config_paths(base_path: Path, explicit_names: str) -> list[Path]:
     if not config_dir.is_dir():
         raise FileNotFoundError(f"keeper config dir not found: {config_dir}")
     if explicit_names.strip():
-        names = [
-            item.strip()
-            for item in explicit_names.split(",")
-            if item.strip()
-        ]
+        names = [item.strip() for item in explicit_names.split(",") if item.strip()]
         return [config_dir / f"{name}.toml" for name in names]
-    return sorted(path for path in config_dir.glob("*.toml") if path.name != "base.toml")
+    return sorted(
+        path for path in config_dir.glob("*.toml") if path.name != "base.toml"
+    )
 
 
-def build_plan(base_path: Path, identities: list[str], config_paths: list[Path]) -> list[Assignment]:
+def build_plan(
+    base_path: Path, identities: list[str], config_paths: list[Path]
+) -> list[Assignment]:
     plan: list[Assignment] = []
     for index, config_path in enumerate(config_paths):
         if not config_path.is_file():
@@ -137,7 +144,13 @@ def keeper_section_bounds(lines: list[str], path: Path) -> tuple[int, int]:
 
 
 def set_toml_string_field(
-    lines: list[str], *, path: Path, section_start: int, section_end: int, key: str, value: str
+    lines: list[str],
+    *,
+    path: Path,
+    section_start: int,
+    section_end: int,
+    key: str,
+    value: str,
 ) -> tuple[list[str], int]:
     pattern = re.compile(rf'^(\s*{re.escape(key)}\s*=\s*)".*?"(\s*(?:#.*)?)$')
     for idx in range(section_start + 1, section_end):
@@ -188,7 +201,9 @@ def default_backup_dir(base_path: Path) -> Path:
     return base_path / ".masc" / "backups" / f"keeper-identity-split-{stamp}"
 
 
-def apply_plan(base_path: Path, plan: list[Assignment], *, backup_dir: str, allow_missing: bool) -> Path:
+def apply_plan(
+    base_path: Path, plan: list[Assignment], *, backup_dir: str, allow_missing: bool
+) -> Path:
     missing = [item for item in plan if not item.credential_dir_exists]
     if missing and not allow_missing:
         names = ", ".join(sorted({item.github_identity for item in missing}))
@@ -196,7 +211,9 @@ def apply_plan(base_path: Path, plan: list[Assignment], *, backup_dir: str, allo
             "refusing --apply because identity GH config dirs are missing: "
             f"{names}. Provision bundles first or pass --allow-missing-bundles."
         )
-    backup_root = Path(backup_dir).expanduser() if backup_dir else default_backup_dir(base_path)
+    backup_root = (
+        Path(backup_dir).expanduser() if backup_dir else default_backup_dir(base_path)
+    )
     backup_root.mkdir(parents=True, exist_ok=False)
     for item in plan:
         path = Path(item.config_path)

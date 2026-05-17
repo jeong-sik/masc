@@ -23,6 +23,12 @@ from typing import Any
 ERROR_STATUSES = {"error", "failed", "failure", "timeout", "cancelled", "canceled"}
 
 
+def default_base_path() -> str:
+    return (
+        os.environ.get("MASC_BASE_PATH") or os.environ.get("ME_ROOT") or str(Path.cwd())
+    )
+
+
 @dataclass
 class Thresholds:
     expected_keepers: int = 1
@@ -815,7 +821,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--base-path",
-        default=os.environ.get("MASC_BASE_PATH") or os.path.expanduser("~/me"),
+        default=default_base_path(),
+        help="MASC base path containing .masc (default: MASC_BASE_PATH, then ME_ROOT, then cwd).",
     )
     parser.add_argument(
         "--keeper", action="append", default=[], help="Keeper name to scan. Repeatable."

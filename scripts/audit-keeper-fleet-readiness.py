@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shlex
 import sys
@@ -92,6 +93,12 @@ PR_CREATED_NUMBER_RE = re.compile(
 GH_PR_CREATE_RE = re.compile(r"\bgh\s+pr\s+create\b", re.IGNORECASE)
 GH_HOSTS_USER_RE = re.compile(r"^\s*user:\s*['\"]?([^'\"\s#]+)")
 ERROR_STATUSES = {"error", "failed", "failure", "timeout", "cancelled", "canceled"}
+
+
+def default_base_path() -> str:
+    return (
+        os.environ.get("MASC_BASE_PATH") or os.environ.get("ME_ROOT") or str(Path.cwd())
+    )
 
 
 @dataclass
@@ -1731,14 +1738,17 @@ def scan_persistent_work_evidence(
         for row in rows:
             links = row_links(row)
             if row_event(row) == "checkpoint_saved":
-                checkpoint_path = path_from_link(base_path, links.get("checkpoint_path"))
+                checkpoint_path = path_from_link(
+                    base_path, links.get("checkpoint_path")
+                )
                 if checkpoint_path is not None and checkpoint_path.is_file():
                     checkpoint_refs.add(
-                        "checkpoint:"
-                        f"{ref}:{path_label(base_path, checkpoint_path)}"
+                        f"checkpoint:{ref}:{path_label(base_path, checkpoint_path)}"
                     )
             if row_event(row) == "turn_finished":
-                tool_log_path = path_from_link(base_path, links.get("tool_call_log_path"))
+                tool_log_path = path_from_link(
+                    base_path, links.get("tool_call_log_path")
+                )
                 if (
                     tool_log_path is not None
                     and tool_log_path.is_file()
@@ -1751,8 +1761,7 @@ def scan_persistent_work_evidence(
                     )
                 ):
                     tool_call_log_refs.add(
-                        "tool_call_log:"
-                        f"{ref}:{path_label(base_path, tool_log_path)}"
+                        f"tool_call_log:{ref}:{path_label(base_path, tool_log_path)}"
                     )
 
     return PersistentWorkEvidence(
@@ -2032,14 +2041,10 @@ def audit_keeper(
         docker_pr_lifecycle_evidence=sorted(docker_pr_lifecycle_evidence),
         pr_evidence_refs=sorted(pr_creation_evidence.refs),
         pr_evidence_sources=sorted(pr_creation_evidence.sources),
-        provider_turn_evidence_refs=sorted(
-            persistent_work_evidence.provider_turn_refs
-        ),
+        provider_turn_evidence_refs=sorted(persistent_work_evidence.provider_turn_refs),
         checkpoint_evidence_refs=sorted(persistent_work_evidence.checkpoint_refs),
         history_evidence_refs=sorted(persistent_work_evidence.history_refs),
-        tool_call_log_evidence_refs=sorted(
-            persistent_work_evidence.tool_call_log_refs
-        ),
+        tool_call_log_evidence_refs=sorted(persistent_work_evidence.tool_call_log_refs),
         failures=failures,
         warnings=warnings,
     )
@@ -2070,7 +2075,8 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             require_product_evidence=args.require_product_evidence,
             require_design_evidence=args.require_design_evidence,
             require_pr_surface_evidence=(
-                args.require_pr_surface_evidence or args.require_persistent_work_evidence
+                args.require_pr_surface_evidence
+                or args.require_persistent_work_evidence
             ),
             require_pr_review_evidence=args.require_pr_review_evidence,
             require_pr_create_evidence=(
@@ -2101,7 +2107,8 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
                 or args.require_persistent_work_evidence
             ),
             require_checkpoint_evidence=(
-                args.require_checkpoint_evidence or args.require_persistent_work_evidence
+                args.require_checkpoint_evidence
+                or args.require_persistent_work_evidence
             ),
             require_history_evidence=(
                 args.require_history_evidence or args.require_persistent_work_evidence
@@ -2290,8 +2297,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--base-path",
-        default=str(Path.home() / "me"),
-        help="MASC base path containing .masc (default: ~/me)",
+        default=default_base_path(),
+        help="MASC base path containing .masc (default: MASC_BASE_PATH, then ME_ROOT, then cwd)",
     )
     parser.add_argument(
         "--expected-keepers",

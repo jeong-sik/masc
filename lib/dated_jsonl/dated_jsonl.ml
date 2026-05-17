@@ -253,70 +253,19 @@ let prune_unlocked t ~days =
 
 (* ── Public API ───────────────────────────────────────── *)
 
-(* RFC-0108: in-line per-path Stdlib.Mutex + fresh fd open/close on
-   every append.  Replaces the prior [Fs_compat.append_jsonl] path
-   whose LRU [Append_fd_cache] shared one [out_channel] across all
-   callers/domains; observed 2026-05-17 as 38 line-tear / "}{"-concat
-   failures in [.masc/oas-events/2026-04/22.jsonl] (12), [23.jsonl]
-   (4), [24.jsonl] (2), [25.jsonl] (20), plus 114 utf-8 multibyte
-   tears in [keepers/*/reaction-ledger/2026-05/17.jsonl] (11 files).
-
-   Same hypothesis as RFC-0108 PR-4 (lib/trajectory/trajectory.ml):
-   OCaml [out_channel] buffer state is not domain-safe, so the
-   Append_fd_cache mutex protected the cache lookup but not the
-   buffer mutations from concurrent domains writing through the same
-   cached channel.  Fresh fd per call sidesteps that entirely.
-
-   The pre-existing [Eio.Mutex.use_ro] still wraps this body so
-   fiber-level serialization plus retention-prune ordering are
-   preserved.  The new per-path Stdlib.Mutex registry is a second
-   line of defence and the actual cross-domain barrier: it lives in
-   this module so it does not share state with Fs_compat. *)
-let path_mutex_registry : (string, Stdlib.Mutex.t) Hashtbl.t =
-  Hashtbl.create 16
-let path_mutex_registry_mu = Stdlib.Mutex.create ()
-
-let get_path_mutex path =
-  Stdlib.Mutex.lock path_mutex_registry_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock path_mutex_registry_mu)
-    (fun () ->
-      match Hashtbl.find_opt path_mutex_registry path with
-      | Some m -> m
-      | None ->
-        let m = Stdlib.Mutex.create () in
-        Hashtbl.add path_mutex_registry path m;
-        m)
-
-let atomic_append_jsonl path json =
-  let line = Yojson.Safe.to_string json ^ "\n" in
-  (* Ensure parent directory exists. mkdir_p is a no-op when already
-     present; we cannot rely on [today_path]'s caller to have created
-     the YYYY-MM dir on first use. *)
-  Fs_compat.mkdir_p (Filename.dirname path);
-  let mu = get_path_mutex path in
-  Stdlib.Mutex.lock mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock mu)
-    (fun () ->
-      let oc =
-        Stdlib.open_out_gen
-          [ Stdlib.Open_append; Stdlib.Open_creat; Stdlib.Open_wronly ]
-          0o644
-          path
-      in
-      Fun.protect
-        ~finally:(fun () -> Stdlib.close_out_noerr oc)
-        (fun () -> Stdlib.output_string oc line))
-
 let append t json =
   let mutex = Atomic.get t.mutex in
   (* [use_ro] serializes file appends without poisoning the shared mutex on
      IO failure, so retry paths can keep using the same registry entry.
-     [use_rw] would poison on any exception regardless of [~protect]. *)
+     [use_rw] would poison on any exception regardless of [~protect].
+
+     [Fs_compat.append_jsonl] (post-RFC-0108 #15936) already provides
+     per-path cross-domain atomicity via its own Stdlib.Mutex registry
+     and fresh-fd-per-call. The PR-5 (#15928) inline [atomic_append_jsonl]
+     was a pre-emptive duplicate of that guarantee — removed here. *)
   Eio.Mutex.use_ro mutex (fun () ->
     let path = today_path t in
-    atomic_append_jsonl path json;
+    Fs_compat.append_jsonl path json;
     match t.retention_days with
     | None -> ()
     | Some days ->

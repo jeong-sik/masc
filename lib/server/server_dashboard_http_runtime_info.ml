@@ -425,7 +425,8 @@ let dashboard_runtime_probe_http_json ?(force = false) () =
 
 let runtime_resolution_json (config : Coord.config) =
   let build = Build_identity.current () in
-  let runtime_commit = build.commit in
+  let runtime_commit = build.binary_commit in
+  let runtime_commit_known = Option.is_some runtime_commit in
   let server_repo_path = Build_identity.repo_root () in
   let server_repo_commit = Option.bind server_repo_path git_rev_parse_short in
   let workspace_commit = git_rev_parse_short config.workspace_path in
@@ -473,6 +474,14 @@ let runtime_resolution_json (config : Coord.config) =
         source_label
         source_commit
       :: acc)
+    else acc
+  in
+  let add_binary_commit_unknown_warning acc =
+    if (not runtime_commit_known) && Option.is_some build.repo_head_commit
+    then
+      "Runtime binary commit is unknown; build.repo_head_commit is only the \
+       current checkout HEAD and must not be treated as rebuild proof."
+      :: acc
     else acc
   in
   let add_server_workspace_mismatch_warning acc =
@@ -527,6 +536,7 @@ let runtime_resolution_json (config : Coord.config) =
   let warnings =
     []
     |> add_source_mismatch_warning
+    |> add_binary_commit_unknown_warning
     |> add_server_workspace_mismatch_warning
     |> add_prompt_dir_mismatch_warning
     |> add_signal_warning
@@ -551,6 +561,10 @@ let runtime_resolution_json (config : Coord.config) =
               [ "path", `Null; "exists", `Bool false; "source", `String "server_binary" ] )
       ; ( "server_repo_git_commit"
         , Option.fold ~none:`Null ~some:(fun value -> `String value) server_repo_commit )
+      ; ( "runtime_binary_git_commit"
+        , Option.fold ~none:`Null ~some:(fun value -> `String value) runtime_commit )
+      ; ( "runtime_repo_head_git_commit"
+        , Option.fold ~none:`Null ~some:(fun value -> `String value) build.repo_head_commit )
       ; ( "workspace_git_commit"
         , Option.fold ~none:`Null ~some:(fun value -> `String value) workspace_commit )
       ; ( "resolved_base_git_commit"

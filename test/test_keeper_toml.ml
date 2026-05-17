@@ -1808,6 +1808,14 @@ let test_health_json_build_exposes_runtime_binary_identity () =
   let json = Runtime.make_health_json request in
   let open Yojson.Safe.Util in
   let build = json |> member "build" in
+  check bool "build binary version populated" true
+    (String.length (build |> member "binary_version" |> to_string) > 0);
+  check bool "build commit source field present" true
+    (match build |> member "commit_source" with `Null | `String _ -> true | _ -> false);
+  check bool "build binary commit field present" true
+    (match build |> member "binary_commit" with `Null | `String _ -> true | _ -> false);
+  check bool "build repo head commit field present" true
+    (match build |> member "repo_head_commit" with `Null | `String _ -> true | _ -> false);
   check bool "build executable path populated" true
     (String.length (build |> member "executable_path" |> to_string) > 0);
   check bool "build executable dir populated" true

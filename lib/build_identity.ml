@@ -2,9 +2,20 @@
 
 type t =
   { release_version : string
+  ; binary_version : string
+  ; repo_version : string option [@default None]
   ; commit : string option [@default None]
+  ; commit_source : string option [@default None]
   ; commit_unix_ts : float option [@default None]
   ; commit_age_seconds : int option [@default None]
+  ; binary_commit : string option [@default None]
+  ; binary_commit_source : string option [@default None]
+  ; binary_commit_unix_ts : float option [@default None]
+  ; binary_commit_age_seconds : int option [@default None]
+  ; repo_head_commit : string option [@default None]
+  ; repo_head_commit_source : string option [@default None]
+  ; repo_head_commit_unix_ts : float option [@default None]
+  ; repo_head_commit_age_seconds : int option [@default None]
   ; executable_path : string [@default ""]
   ; executable_dir : string [@default ""]
   ; repo_root : string option [@default None]
@@ -140,6 +151,41 @@ let probe_repo_root () =
   |> List.find_map find_git_root
 ;;
 
+let parse_dune_project_version raw =
+  raw
+  |> String.split_on_char '\n'
+  |> List.find_map (fun line ->
+    let line = String.trim line in
+    let prefix = "(version " in
+    if String.starts_with ~prefix line && String.ends_with ~suffix:")" line
+    then
+      String.sub
+        line
+        (String.length prefix)
+        (String.length line - String.length prefix - String.length ")")
+      |> trim_to_option
+    else None)
+;;
+
+let read_file path =
+  try
+    let ic = open_in path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () -> really_input_string ic (in_channel_length ic))
+    |> fun contents -> Some contents
+  with
+  | Sys_error _ -> None
+  | exn ->
+    Log.Identity.warn "build_identity read_file %s failed: %s" path (Printexc.to_string exn);
+    None
+;;
+
+let probe_repo_version repo_root =
+  let dune_project = Filename.concat repo_root "dune-project" in
+  Option.bind (read_file dune_project) parse_dune_project_version
+;;
+
 let decimal_digits_only s =
   String.length s > 0 && String.for_all (fun c -> c >= '0' && c <= '9') s
 ;;
@@ -234,37 +280,82 @@ let resolve_commit ~env_value ~probe =
   | None -> probe ()
 ;;
 
+type commit_resolution =
+  { commit : string option
+  ; commit_source : string option
+  ; binary_commit : string option
+  ; binary_commit_source : string option
+  ; repo_head_commit : string option
+  ; repo_head_commit_source : string option
+  }
+
+let build_env_commit_source = "env:MASC_BUILD_GIT_COMMIT"
+let runtime_repo_head_source = "runtime_repo_head"
+
+let resolve_commit_details ~env_value ~probe =
+  let binary_commit = Option.bind env_value trim_to_option in
+  let repo_head_commit = probe () in
+  let commit, commit_source =
+    match binary_commit, repo_head_commit with
+    | Some commit, _ -> Some commit, Some build_env_commit_source
+    | None, Some commit -> Some commit, Some runtime_repo_head_source
+    | None, None -> None, None
+  in
+  { commit
+  ; commit_source
+  ; binary_commit
+  ; binary_commit_source = Option.map (fun _ -> build_env_commit_source) binary_commit
+  ; repo_head_commit
+  ; repo_head_commit_source = Option.map (fun _ -> runtime_repo_head_source) repo_head_commit
+  }
+;;
+
+let age_seconds ~now ts_opt =
+  match ts_opt with
+  | None -> None
+  | Some ts ->
+    let age = now -. ts in
+    if Float.is_finite age then Some (max 0 (int_of_float age)) else None
+;;
+
 let started_at_unix = Unix.gettimeofday ()
 let started_at_iso = iso8601_of_unix started_at_unix
 let resolved_executable_path = executable_path ()
 let resolved_executable_dir = Filename.dirname resolved_executable_path
 
-(** Commit hash — eagerly resolved at startup.
+(** Commit hashes — eagerly resolved at startup.
     Not using [Eio.Lazy] because this is called from tests without Eio context.
     Env var check + git probe are fast and side-effect-free. *)
-let commit =
-  resolve_commit
+let commit_resolution =
+  resolve_commit_details
     ~env_value:(Env_config_core.build_git_commit_opt ())
     ~probe:probe_git_commit
 ;;
 
 let resolved_repo_root = probe_repo_root ()
 let repo_root () = resolved_repo_root
-let commit_unix_ts = probe_commit_unix_ts commit
+let repo_version = Option.bind resolved_repo_root probe_repo_version
+let commit_unix_ts = probe_commit_unix_ts commit_resolution.commit
+let binary_commit_unix_ts = probe_commit_unix_ts commit_resolution.binary_commit
+let repo_head_commit_unix_ts = probe_commit_unix_ts commit_resolution.repo_head_commit
 
 let current () =
   let now = Unix.gettimeofday () in
-  let commit_age_seconds =
-    match commit_unix_ts with
-    | None -> None
-    | Some ts ->
-      let age = now -. ts in
-      if Float.is_finite age then Some (max 0 (int_of_float age)) else None
-  in
   { release_version = Version.version
-  ; commit
+  ; binary_version = Version.version
+  ; repo_version
+  ; commit = commit_resolution.commit
+  ; commit_source = commit_resolution.commit_source
   ; commit_unix_ts
-  ; commit_age_seconds
+  ; commit_age_seconds = age_seconds ~now commit_unix_ts
+  ; binary_commit = commit_resolution.binary_commit
+  ; binary_commit_source = commit_resolution.binary_commit_source
+  ; binary_commit_unix_ts
+  ; binary_commit_age_seconds = age_seconds ~now binary_commit_unix_ts
+  ; repo_head_commit = commit_resolution.repo_head_commit
+  ; repo_head_commit_source = commit_resolution.repo_head_commit_source
+  ; repo_head_commit_unix_ts
+  ; repo_head_commit_age_seconds = age_seconds ~now repo_head_commit_unix_ts
   ; executable_path = resolved_executable_path
   ; executable_dir = resolved_executable_dir
   ; repo_root = resolved_repo_root

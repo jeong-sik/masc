@@ -97,6 +97,15 @@ let agent_card_json request =
             ( "commit",
               Option.fold ~none:`Null ~some:(fun value -> `String value)
                 build.commit );
+            ( "commit_source",
+              Option.fold ~none:`Null ~some:(fun value -> `String value)
+                build.commit_source );
+            ( "binary_commit",
+              Option.fold ~none:`Null ~some:(fun value -> `String value)
+                build.binary_commit );
+            ( "repo_head_commit",
+              Option.fold ~none:`Null ~some:(fun value -> `String value)
+                build.repo_head_commit );
             ("started_at", `String build.started_at);
             ("uptime_seconds", `Int build.uptime_seconds);
           ] );

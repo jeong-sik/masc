@@ -371,6 +371,15 @@ let execution_receipt_path_for_today config ~keeper_name =
   |> Dated_jsonl.base_dir
   |> dated_jsonl_today_path
 
+let retention_days () =
+  (* Opt-in: see lib/keeper_tool_call_log.ml retention_days. *)
+  match Sys.getenv_opt "MASC_RUNTIME_MANIFEST_RETENTION_DAYS" with
+  | Some raw ->
+    (match int_of_string_opt (String.trim raw) with
+     | Some days when days > 0 -> Some days
+     | _ -> None)
+  | None -> None
+
 let base_dir config ~keeper_name =
   Filename.concat
     (Filename.concat
@@ -381,6 +390,59 @@ let base_dir config ~keeper_name =
 let path_for_trace config ~keeper_name ~trace_id =
   Filename.concat (base_dir config ~keeper_name)
     (safe_segment trace_id ^ ".jsonl")
+
+let prune_mu = Stdlib.Mutex.create ()
+let last_prune_day_by_base_dir : (string, string) Hashtbl.t = Hashtbl.create 64
+
+let today_key () =
+  let open Unix in
+  let tm = gmtime (gettimeofday ()) in
+  Printf.sprintf "%04d-%02d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
+
+let is_runtime_manifest_file name =
+  String.ends_with ~suffix:".jsonl" name
+  && not (String.equal name ".jsonl")
+  && String.equal (Filename.basename name) name
+
+let prune_old_trace_files ~base_dir ~days =
+  if days <= 0 || not (Sys.file_exists base_dir) then 0
+  else (
+    let cutoff = Unix.gettimeofday () -. (float_of_int days *. 86400.0) in
+    let deleted = ref 0 in
+    let entries =
+      try Sys.readdir base_dir with
+      | Sys_error _ -> [||]
+    in
+    Array.iter
+      (fun name ->
+         if is_runtime_manifest_file name
+         then (
+           let path = Filename.concat base_dir name in
+           try
+             let st = Unix.stat path in
+             if st.Unix.st_kind = Unix.S_REG && st.Unix.st_mtime < cutoff
+             then (
+               Sys.remove path;
+               incr deleted)
+           with
+           | Unix.Unix_error _ | Sys_error _ -> ()))
+      entries;
+    !deleted)
+
+let maybe_prune_retention ~base_dir =
+  match retention_days () with
+  | None -> ()
+  | Some days ->
+    let today = today_key () in
+    let should_prune =
+      Stdlib.Mutex.protect prune_mu (fun () ->
+        match Hashtbl.find_opt last_prune_day_by_base_dir base_dir with
+        | Some day when String.equal day today -> false
+        | _ ->
+          Hashtbl.replace last_prune_day_by_base_dir base_dir today;
+          true)
+    in
+    if should_prune then ignore (prune_old_trace_files ~base_dir ~days : int)
 
 let append_to_path path manifest =
   try
@@ -394,19 +456,31 @@ let append_to_path path manifest =
     Keeper_fd_pressure.note_exception
       ~site:"keeper_runtime_manifest.append_to_path"
       exn;
+    Keeper_disk_pressure.note_exception
+      ~site:"keeper_runtime_manifest.append_to_path"
+      exn;
     Error (Printexc.to_string exn)
 
 let append config manifest =
-  append_to_path
-    (path_for_trace config ~keeper_name:manifest.keeper_name
-       ~trace_id:manifest.trace_id)
-    manifest
+  let base_dir = base_dir config ~keeper_name:manifest.keeper_name in
+  match
+    append_to_path
+      (Filename.concat base_dir (safe_segment manifest.trace_id ^ ".jsonl"))
+      manifest
+  with
+  | Ok () ->
+    maybe_prune_retention ~base_dir;
+    Ok ()
+  | Error _ as err -> err
 
 let append_best_effort ?(site = "runtime_manifest") config manifest =
   match append config manifest with
   | Ok () -> ()
   | Error msg ->
       Keeper_fd_pressure.note_if_fd_exhaustion
+        ~site:"keeper_runtime_manifest.append_best_effort"
+        msg;
+      Keeper_disk_pressure.note_if_disk_exhaustion
         ~site:"keeper_runtime_manifest.append_best_effort"
         msg;
       let masc_root = Coord.masc_root_dir config in

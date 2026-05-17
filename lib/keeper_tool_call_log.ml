@@ -44,7 +44,6 @@ type turn_context =
   ; tool_surface_class : string option
   ; visible_tool_count : int option
   ; required_tools : string list option
-  ; required_tool_candidates : string list option
   ; missing_required_tools : string list option
   ; cascade_profile : string option
   }
@@ -71,7 +70,6 @@ let empty_turn_context =
   ; tool_surface_class = None
   ; visible_tool_count = None
   ; required_tools = None
-  ; required_tool_candidates = None
   ; missing_required_tools = None
   ; cascade_profile = None
   }
@@ -114,7 +112,6 @@ let set_turn_context
       ?tool_surface_class
       ?visible_tool_count
       ?required_tools
-      ?required_tool_candidates
       ?missing_required_tools
       ?cascade_profile
       ()
@@ -143,7 +140,6 @@ let set_turn_context
     ; tool_surface_class
     ; visible_tool_count
     ; required_tools
-    ; required_tool_candidates
     ; missing_required_tools
     ; cascade_profile
     }
@@ -198,7 +194,6 @@ let runtime_contract_json_for_call ~keeper_name ?model () =
     ?tool_surface_class:ctx.tool_surface_class
     ?visible_tool_count:ctx.visible_tool_count
     ?required_tools:ctx.required_tools
-    ?required_tool_candidates:ctx.required_tool_candidates
     ?missing_required_tools:ctx.missing_required_tools
     ?model:(optional_model model)
     ?cascade_profile:ctx.cascade_profile
@@ -402,6 +397,18 @@ let route_evidence_json_of_tool_io ~tool_name ~input ~output_text =
 let store_ref : Dated_jsonl.t option ref = ref None
 let configured_store_ref : (string * string) option ref = ref None
 
+let retention_days () =
+  (* Opt-in: default disabled. Operators set MASC_TOOL_CALL_LOG_RETENTION_DAYS
+     to a positive int to enable pruning. Default unset = unbounded growth,
+     surfaced via disk-pressure circuit breaker (PR-4) and pending volume
+     RFC (Context_window_usage telemetry-as-fix root). *)
+  match Sys.getenv_opt "MASC_TOOL_CALL_LOG_RETENTION_DAYS" with
+  | Some raw ->
+    (match int_of_string_opt (String.trim raw) with
+     | Some days when days > 0 -> Some days
+     | _ -> None)
+  | None -> None
+
 let init ?cluster_name ~base_path () =
   let cluster_name =
     Option.value ~default:(Env_config_core.cluster_name ()) cluster_name
@@ -410,7 +417,8 @@ let init ?cluster_name ~base_path () =
   let dir = Filename.concat masc_root "tool_calls" in
   configured_store_ref := Some (masc_root, dir);
   try
-    let store = Dated_jsonl.create ~base_dir:dir () in
+    let retention_days = retention_days () in
+    let store = Dated_jsonl.create ~base_dir:dir ?retention_days () in
     store_ref := Some store
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -600,7 +608,6 @@ let log_call
       ?tool_surface_class
       ?visible_tool_count
       ?required_tools
-      ?required_tool_candidates
       ?missing_required_tools
       ?cascade_profile
       ?result_bytes
@@ -736,11 +743,6 @@ let log_call
         | Some _ -> required_tools
         | None -> ctx.required_tools
       in
-      let required_tool_candidates =
-        match required_tool_candidates with
-        | Some _ -> required_tool_candidates
-        | None -> ctx.required_tool_candidates
-      in
       let missing_required_tools =
         match missing_required_tools with
         | Some _ -> missing_required_tools
@@ -872,7 +874,6 @@ let log_call
           ?tool_surface_class
           ?visible_tool_count
           ?required_tools
-          ?required_tool_candidates
           ?missing_required_tools
           ?model:model_opt
           ?cascade_profile
@@ -939,6 +940,8 @@ let log_call
       (try Dated_jsonl.append store safe_json with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
+         Keeper_fd_pressure.note_exception ~site:"keeper_tool_call_log.append" exn;
+         Keeper_disk_pressure.note_exception ~site:"keeper_tool_call_log.append" exn;
          Log.Misc.warn
            "keeper_tool_call_log: append failed for %s/%s: %s"
            keeper_name

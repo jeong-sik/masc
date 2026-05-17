@@ -54,6 +54,15 @@ let freshness_slo_s = 3600.0
 
 let store_dir masc_root = Filename.concat masc_root "tool_usage"
 
+let retention_days () =
+  (* Opt-in: see lib/keeper_tool_call_log.ml retention_days. *)
+  match Sys.getenv_opt "MASC_TOOL_USAGE_LOG_RETENTION_DAYS" with
+  | Some raw ->
+    (match int_of_string_opt (String.trim raw) with
+     | Some days when days > 0 -> Some days
+     | _ -> None)
+  | None -> None
+
 let max_ts_opt current candidate =
   match current with
   | Some existing when existing >= candidate -> current
@@ -207,7 +216,8 @@ let init ?cluster_name ~base_path () =
   let dir = store_dir masc_root in
   (try
      Fs_compat.mkdir_p dir;
-     let store = Dated_jsonl.create ~base_dir:dir () in
+     let retention_days = retention_days () in
+     let store = Dated_jsonl.create ~base_dir:dir ?retention_days () in
      store_ref := Some store
    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
      store_ref := None;
@@ -244,6 +254,8 @@ let log_call ~tool_name ~success ~caller =
       let json = record_to_json ~tool_name ~success ~caller in
       (try Dated_jsonl.append store json
        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+         Keeper_fd_pressure.note_exception ~site:"tool_usage_log.append" exn;
+         Keeper_disk_pressure.note_exception ~site:"tool_usage_log.append" exn;
          Log.Misc.warn "tool_usage_log: append failed for %s: %s"
            tool_name (Stdlib.Printexc.to_string exn);
          let durable_store = Dated_jsonl.base_dir store in

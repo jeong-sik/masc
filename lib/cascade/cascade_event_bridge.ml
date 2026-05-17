@@ -553,22 +553,11 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
   let wrap = wrap_event ~ts ~correlation_id ~run_id in
   match[@warning "-11"] evt.payload with
   | Agent_sdk.Event_bus.AgentStarted { agent_name; task_id } ->
-    (* RFC-0004 Phase A0.1 PR-2: migrated to Sse_event.agent_started.
-       Byte-equal vs the previous inline `Assoc + wrap_event path was
-       proven in test/sse_event/test_sse_event.ml on PR-1 (#15807). *)
-    Some
-      (Sse_event.agent_started
-         ~ts_unix:ts
-         ~correlation_id
-         ~run_id
-         ~agent_name
-         ~task_id)
+    let payload =
+      `Assoc [ "agent_name", `String agent_name; "task_id", `String task_id ]
+    in
+    Some (wrap ~event_type:"agent_started" ~payload ~agent_name ~task_id ())
   | Agent_sdk.Event_bus.AgentCompleted { agent_name; task_id; elapsed; result } ->
-    (* RFC-0004 Phase A0.1 PR-3b: migrated to Sse_event.agent_completed
-       with a caller-supplied addendum.  The leaf event library stays
-       free of [Agent_sdk] dependencies -- [agent_completed_result_fields]
-       remains here because it closes over [Agent_sdk.Types.api_response]
-       and the cost-observation Prometheus side effect. *)
     (match result with
      | Ok (response : Agent_sdk.Types.api_response) ->
        let provider =
@@ -582,100 +571,85 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
        in
        observe_inference_cost ~provider ~model_bucket cost_usd
      | Error _ -> ());
-    Some
-      (Sse_event.agent_completed
-         ~ts_unix:ts
-         ~correlation_id
-         ~run_id
-         ~agent_name
-         ~task_id
-         ~elapsed_s:elapsed
-         ~result_fields:(agent_completed_result_fields result))
+    let payload =
+      `Assoc
+        ([ "agent_name", `String agent_name
+         ; "task_id", `String task_id
+         ; "elapsed_s", `Float elapsed
+         ]
+         @ agent_completed_result_fields result)
+    in
+    Some (wrap ~event_type:"agent_completed" ~payload ~agent_name ~task_id ())
   | Agent_sdk.Event_bus.AgentFailed { agent_name; task_id; error; elapsed } ->
-    Some
-      (Sse_event.agent_failed
-         ~ts_unix:ts
-         ~correlation_id
-         ~run_id
-         ~agent_name
-         ~task_id
-         ~elapsed_s:elapsed
-         ~error_fields:(agent_failed_error_fields error))
+    let payload =
+      `Assoc
+        ([ "agent_name", `String agent_name
+         ; "task_id", `String task_id
+         ; "elapsed_s", `Float elapsed
+         ]
+         @ agent_failed_error_fields error)
+    in
+    Some (wrap ~event_type:"agent_failed" ~payload ~agent_name ~task_id ())
   | Agent_sdk.Event_bus.ToolCalled { agent_name; tool_name; _ } ->
-    (* RFC-0004 Phase A0.1 PR-3 *)
-    Some
-      (Sse_event.tool_called
-         ~ts_unix:ts
-         ~correlation_id
-         ~run_id
-         ~agent_name
-         ~tool_name)
+    let payload =
+      `Assoc [ "agent_name", `String agent_name; "tool_name", `String tool_name ]
+    in
+    Some (wrap ~event_type:"tool_called" ~payload ~agent_name ~tool_name ())
   | Agent_sdk.Event_bus.ToolCompleted { agent_name; tool_name; _ } ->
-    Some
-      (Sse_event.tool_completed
-         ~ts_unix:ts
-         ~correlation_id
-         ~run_id
-         ~agent_name
-         ~tool_name)
+    let payload =
+      `Assoc [ "agent_name", `String agent_name; "tool_name", `String tool_name ]
+    in
+    Some (wrap ~event_type:"tool_completed" ~payload ~agent_name ~tool_name ())
   | Agent_sdk.Event_bus.TurnStarted { agent_name; turn } ->
-    Some
-      (Sse_event.turn_started
-         ~ts_unix:ts
-         ~correlation_id
-         ~run_id
-         ~agent_name
-         ~turn)
+    let payload = `Assoc [ "agent_name", `String agent_name; "turn", `Int turn ] in
+    Some (wrap ~event_type:"turn_started" ~payload ~agent_name ~turn ())
   | Agent_sdk.Event_bus.TurnCompleted { agent_name; turn } ->
-    Some
-      (Sse_event.turn_completed
-         ~ts_unix:ts
-         ~correlation_id
-         ~run_id
-         ~agent_name
-         ~turn)
+    let payload = `Assoc [ "agent_name", `String agent_name; "turn", `Int turn ] in
+    Some (wrap ~event_type:"turn_completed" ~payload ~agent_name ~turn ())
   | Agent_sdk.Event_bus.TurnReady { agent_name; turn; tool_names } ->
-    Some
-      (Sse_event.turn_ready
-         ~ts_unix:ts
-         ~correlation_id
-         ~run_id
-         ~agent_name
-         ~turn
-         ~tool_names)
+    let names_hash = Digest.to_hex (Digest.string (String.concat "\n" tool_names)) in
+    let payload =
+      `Assoc
+        [ "agent_name", `String agent_name
+        ; "turn", `Int turn
+        ; "count", `Int (List.length tool_names)
+        ; "names_hash", `String (String.sub names_hash 0 16)
+        ; "tool_names", `List (List.map (fun name -> `String name) tool_names)
+        ]
+    in
+    Some (wrap ~event_type:"turn_ready" ~payload ~agent_name ~turn ())
   | Agent_sdk.Event_bus.HandoffRequested { from_agent; to_agent; reason } ->
-    (* RFC-0004 Phase A0.1 PR-4 *)
-    Some
-      (Sse_event.handoff_requested
-         ~ts_unix:ts
-         ~correlation_id
-         ~run_id
-         ~from_agent
-         ~to_agent
-         ~reason)
+    let payload =
+      `Assoc
+        [ "from_agent", `String from_agent
+        ; "to_agent", `String to_agent
+        ; "reason", `String reason
+        ]
+    in
+    Some (wrap ~event_type:"handoff_requested" ~payload ~agent_name:from_agent ())
   | Agent_sdk.Event_bus.HandoffCompleted { from_agent; to_agent; elapsed } ->
-    Some
-      (Sse_event.handoff_completed
-         ~ts_unix:ts
-         ~correlation_id
-         ~run_id
-         ~from_agent
-         ~to_agent
-         ~elapsed_s:elapsed)
+    let payload =
+      `Assoc
+        [ "from_agent", `String from_agent
+        ; "to_agent", `String to_agent
+        ; "elapsed_s", `Float elapsed
+        ]
+    in
+    Some (wrap ~event_type:"handoff_completed" ~payload ~agent_name:from_agent ())
   | Agent_sdk.Event_bus.ContextCompacted
       { agent_name; before_tokens; after_tokens; phase } ->
     (* #9935: compaction completed — clears any pending
          imminent and fires action-taken counter. *)
     Context_overflow_action_tracker.record_action ~keeper_name:agent_name;
-    Some
-      (Sse_event.context_compacted
-         ~ts_unix:ts
-         ~correlation_id
-         ~run_id
-         ~agent_name
-         ~before_tokens
-         ~after_tokens
-         ~phase)
+    let payload =
+      `Assoc
+        [ "agent_name", `String agent_name
+        ; "before_tokens", `Int before_tokens
+        ; "after_tokens", `Int after_tokens
+        ; "phase", `String phase
+        ]
+    in
+    Some (wrap ~event_type:"context_compacted" ~payload ~agent_name ())
   | Agent_sdk.Event_bus.ElicitationCompleted _ -> None (* Internal; no SSE relay needed *)
   | Agent_sdk.Event_bus.ContextOverflowImminent
       { agent_name; estimated_tokens; limit_tokens; ratio } ->
@@ -690,15 +664,15 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
     Context_overflow_action_tracker.record_imminent
       ~keeper_name:agent_name
       ~ts:(Time_compat.now ());
-    Some
-      (Sse_event.context_overflow_imminent
-         ~ts_unix:ts
-         ~correlation_id
-         ~run_id
-         ~agent_name
-         ~estimated_tokens
-         ~limit_tokens
-         ~ratio)
+    let payload =
+      `Assoc
+        [ "agent_name", `String agent_name
+        ; "estimated_tokens", `Int estimated_tokens
+        ; "limit_tokens", `Int limit_tokens
+        ; "ratio", `Float ratio
+        ]
+    in
+    Some (wrap ~event_type:"context_overflow_imminent" ~payload ~agent_name ())
   | Agent_sdk.Event_bus.ContextCompactStarted { agent_name; trigger } ->
     (* #9935: compaction started — clears pending imminent
          and fires action-taken counter. *)
@@ -707,32 +681,27 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
       Prometheus.metric_oas_context_compaction_total
       ~labels:[ "agent_name", agent_name; "trigger", trigger ]
       ();
-    Some
-      (Sse_event.context_compact_started
-         ~ts_unix:ts
-         ~correlation_id
-         ~run_id
-         ~agent_name
-         ~trigger)
+    let payload =
+      `Assoc [ "agent_name", `String agent_name; "trigger", `String trigger ]
+    in
+    Some (wrap ~event_type:"context_compact_started" ~payload ~agent_name ())
   | Agent_sdk.Event_bus.ContentReplacementReplaced
       { tool_use_id; preview; original_chars; seen_count_after } ->
-    Some
-      (Sse_event.content_replacement_replaced
-         ~ts_unix:ts
-         ~correlation_id
-         ~run_id
-         ~tool_use_id
-         ~preview
-         ~original_chars
-         ~seen_count_after)
+    let payload =
+      `Assoc
+        [ "tool_use_id", `String tool_use_id
+        ; "preview", `String preview
+        ; "original_chars", `Int original_chars
+        ; "seen_count_after", `Int seen_count_after
+        ]
+    in
+    Some (wrap ~event_type:"content_replacement_replaced" ~payload ())
   | Agent_sdk.Event_bus.ContentReplacementKept { tool_use_id; seen_count_after } ->
-    Some
-      (Sse_event.content_replacement_kept
-         ~ts_unix:ts
-         ~correlation_id
-         ~run_id
-         ~tool_use_id
-         ~seen_count_after)
+    let payload =
+      `Assoc
+        [ "tool_use_id", `String tool_use_id; "seen_count_after", `Int seen_count_after ]
+    in
+    Some (wrap ~event_type:"content_replacement_kept" ~payload ())
   | Agent_sdk.Event_bus.SlotSchedulerObserved
       { max_slots; active; available; queue_length; state } ->
     let state_str =
@@ -741,16 +710,16 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
       | Agent_sdk.Event_bus.Queued -> "queued"
       | Agent_sdk.Event_bus.Saturated -> "saturated"
     in
-    Some
-      (Sse_event.slot_scheduler_observed
-         ~ts_unix:ts
-         ~correlation_id
-         ~run_id
-         ~max_slots
-         ~active
-         ~available
-         ~queue_length
-         ~state:state_str)
+    let payload =
+      `Assoc
+        [ "max_slots", `Int max_slots
+        ; "active", `Int active
+        ; "available", `Int available
+        ; "queue_length", `Int queue_length
+        ; "state", `String state_str
+        ]
+    in
+    Some (wrap ~event_type:"slot_scheduler_observed" ~payload ())
   | Agent_sdk.Event_bus.Custom (name, payload) ->
     (* Wire compatibility: dashboard consumers historically decoded
          [masc:broadcast] / [masc:keeper:snapshot] (all colons).
@@ -1001,6 +970,18 @@ let deliver_pending_with
   | exn -> Retryable_failure (pending, Broadcast, exn)
 ;;
 
+let oas_event_retention_days () =
+  (* Opt-in: see lib/keeper_tool_call_log.ml retention_days. oas-events is the
+     largest JSONL hotspot (Context_window_usage telemetry-as-fix). Default
+     unset = unbounded growth pending RFC for typed event volume reduction. *)
+  match Sys.getenv_opt "MASC_OAS_EVENTS_RETENTION_DAYS" with
+  | Some raw ->
+    (match int_of_string_opt (String.trim raw) with
+     | Some days when days > 0 -> Some days
+     | _ -> None)
+  | None -> None
+;;
+
 let deliver_pending ?store_ref (pending : pending_relay) =
   let append_json =
     match store_ref with
@@ -1011,7 +992,12 @@ let deliver_pending ?store_ref (pending : pending_relay) =
         (try Dated_jsonl.append store json with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
-           store_ref := Dated_jsonl.create ~base_dir:(Dated_jsonl.base_dir store) ();
+           let retention_days = oas_event_retention_days () in
+           store_ref :=
+             Dated_jsonl.create
+               ~base_dir:(Dated_jsonl.base_dir store)
+               ?retention_days
+               ();
            raise exn)
   in
   try deliver_pending_with ~append_json ~broadcast_json:broadcast_relay_json pending with
@@ -1039,14 +1025,24 @@ let rec process_pending ?store_ref acc = function
        let fd_pressure =
          Keeper_fd_pressure.active () || Keeper_fd_pressure.is_fd_exhaustion_exn exn
        in
-       if fd_pressure
+       let disk_pressure =
+         Keeper_disk_pressure.active ()
+         || Keeper_disk_pressure.is_disk_exhaustion_exn exn
+       in
+       if disk_pressure
+       then Keeper_disk_pressure.note_exception ~site:"oas_event_bridge.relay" exn;
+       if fd_pressure || disk_pressure
        then (
-         Keeper_fd_pressure.note_exception ~site:"oas_event_bridge.relay" exn;
+         if fd_pressure
+         then Keeper_fd_pressure.note_exception ~site:"oas_event_bridge.relay" exn;
          Prometheus.inc_counter
            Prometheus.metric_oas_sse_relay_drops
            ~labels:[ "stage", relay_stage_to_string stage ]
            ();
-         let stage_label = relay_stage_to_string stage ^ ":fd_pressure" in
+         let stage_label =
+           relay_stage_to_string stage
+           ^ (if fd_pressure then ":fd_pressure" else ":disk_pressure")
+         in
          emit_relay_drop_log ~pending ~stage_label ~attempts:attempt;
          broadcast_drop_marker ~pending ~stage_label ~attempts:attempt;
          process_pending ?store_ref acc rest)
@@ -1077,6 +1073,14 @@ let rec process_pending ?store_ref acc = function
 type bridge_pending_relay = pending_relay
 type bridge_relay_stage = relay_stage
 type bridge_relay_result = relay_result
+
+let oas_event_store ~config =
+  let retention_days = oas_event_retention_days () in
+  Dated_jsonl.create
+    ~base_dir:(Filename.concat (Coord.masc_root_dir config) "oas-events")
+    ?retention_days
+    ()
+;;
 
 let deliver_pending_with_impl = deliver_pending_with
 
@@ -1135,12 +1139,7 @@ module For_testing = struct
 end
 
 let start_impl ~interval_s ~sw ~clock ~(config : Coord.config) ~bus =
-  let store =
-    ref
-      (Dated_jsonl.create
-         ~base_dir:(Filename.concat (Coord.masc_root_dir config) "oas-events")
-         ())
-  in
+  let store = ref (oas_event_store ~config) in
   let sub =
     Agent_sdk_metrics_bridge.subscribe
       ~purpose:"sse_bridge"

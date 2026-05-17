@@ -41,6 +41,14 @@ let test_configured_within_bounds () =
           (FA.kind_to_string k) cap)
     FA.all_kinds
 
+let test_fd_limit_reuses_keeper_pressure_cache () =
+  let expected = 4242 in
+  Atomic.set
+    Masc_mcp.Keeper_fd_pressure.nofile_soft_limit_cache
+    (Masc_mcp.Keeper_fd_pressure.Resolved (Some expected));
+  let snapshot = FA.fd_snapshot () in
+  check int "fd_limit from Keeper_fd_pressure cache" expected snapshot.fd_limit
+
 let test_with_slot_runs_callback () =
   Eio_main.run @@ fun _env ->
   let result = FA.with_slot ~kind:Docker_spawn (fun () -> 42) in
@@ -261,6 +269,8 @@ let () =
           test_case "unknown rejected" `Quick test_kind_unknown_rejected ;
           test_case "cap within bounds" `Quick
             test_configured_within_bounds ;
+          test_case "fd limit reuses Keeper_fd_pressure cache" `Quick
+            test_fd_limit_reuses_keeper_pressure_cache ;
         ] ) ;
       ( "slot semantics",
         [

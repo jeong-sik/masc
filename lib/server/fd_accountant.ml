@@ -161,15 +161,9 @@ let read_fd_limit () =
   | Some value -> value
   | None ->
     let value =
-      try
-        let chan = Unix.open_process_in "ulimit -n" in
-        let line = input_line chan in
-        let _ = Unix.close_process_in chan in
-        match int_of_string_opt (String.trim line) with
-        | Some n -> n
-        | None -> -1
-      with
-      | _ -> -1
+      match Keeper_fd_pressure.process_nofile_soft_limit () with
+      | Some n -> n
+      | None -> -1
     in
     Atomic.set fd_limit_cache (Some value);
     value

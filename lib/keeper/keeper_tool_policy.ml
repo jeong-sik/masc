@@ -445,9 +445,21 @@ let tool_name_set names =
   List.fold_left (fun acc name -> StringSet.add name acc) StringSet.empty names
 
 let tool_access_lookup_of_meta (meta : keeper_meta) =
+  (* keeper_base_candidate_tool_names already pulls [groups.voice] from
+     tool_policy.toml via all_group_tools, so disabling
+     policy_voice_enabled must subtract voice tools here — otherwise they
+     remain in candidate_set and stay discoverable via filter_by_universe
+     even though they are dropped from allow_set. *)
+  let base = keeper_base_candidate_tool_names () in
+  let base_after_voice_policy =
+    if meta.policy_voice_enabled then base
+    else
+      let voice_set = tool_name_set (keeper_voice_tool_names ()) in
+      List.filter (fun name -> not (StringSet.mem name voice_set)) base
+  in
   let candidate_names =
     dedupe_tool_names
-      (keeper_base_candidate_tool_names ()
+      (base_after_voice_policy
        @ explicit_optional_candidate_tool_names meta
        @ voice_tools_allowed_by_policy meta)
   in

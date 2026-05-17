@@ -51,8 +51,8 @@ let test_diff_command_returns_triple_shape () =
    | W.Legacy_allow -> ()
    | _ -> fail "ls is in legacy allowlist");
   (match shadow with
-   | W.Shadow_allow { parse_tag = "parsed_simple" } -> ()
-   | _ -> fail "ls shadow should be parsed_simple")
+   | W.Shadow_allow -> ()
+   | _ -> fail "ls shadow should be Shadow_allow")
 
 let test_destructive_class_surfaced_on_shadow_deny () =
   let _, _, shadow = W.diff_command "git push --force origin main" in

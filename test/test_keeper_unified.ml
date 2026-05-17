@@ -6800,20 +6800,20 @@ let test_fail_open_rotation_cascades_from_catalog_excludes_non_keeper_routes () 
         [
           KC.default_cascade_name ();
           "ollama_cloud_primary";
-          "coding_plan";
+          "glm-coding-with-spark";
         ]
       ~keeper_assignable:
         [
           KC.default_cascade_name ();
           "ollama_cloud_primary";
-          "coding_plan";
+          "glm-coding-with-spark";
         ]
       ()
   in
   check
     (option (list string))
     "catalog-derived rotation excludes non-keeper route targets"
-    (Some [ KC.default_cascade_name (); "coding_plan" ])
+    (Some [ KC.default_cascade_name (); "glm-coding-with-spark" ])
     rotation
 ;;
 
@@ -7400,17 +7400,17 @@ let test_prompt_guides_bash_globs_to_structured_tools () =
     bool
     "bash glob example is called out"
     true
-    (contains_substring sys "find repos/<repo>/lib -name nickname*");
+    (contains_substring sys "find repos/REPO/lib -name nickname*");
   check
     bool
     "bash globs use keeper_shell find"
     true
-    (contains_substring sys "keeper_shell op=find name=<glob> path=<dir>");
+    (contains_substring sys "keeper_shell op=find name=glob path=dir/path");
   check
     bool
     "bash globs can use masc code search"
     true
-    (contains_substring sys "masc_code_search file_pattern=<glob>")
+    (contains_substring sys "masc_code_search file_pattern=glob")
 ;;
 
 let test_sanitize_text_utf8_replaces_control_chars () =
@@ -8469,7 +8469,7 @@ let test_degraded_retry_slot_phase_allows_max_execution_time_cascade_exhausted (
       ~base_cascade:"strict_tool_candidates"
       ~effective_cascade:"strict_tool_candidates"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
-      ~attempted_cascades:[ "strict_tool_candidates"; "tier-group.coding_plan" ]
+      ~attempted_cascades:[ "strict_tool_candidates"; "tier-group.glm-coding-with-spark" ]
       ~estimated_input_tokens:2_000
       ~max_turns:4
       ~time_spent_in_turn_s:(UT.degraded_retry_slot_phase_budget_sec +. 1.0)
@@ -9208,6 +9208,37 @@ let test_claim_tool_classification_covers_masc_claim_task () =
     "task list is not claim tool"
     false
     (KTD.is_claim_tool_name "keeper_tasks_list")
+;;
+
+let test_claim_contract_result_counts_initial_claim_as_execution () =
+  let result ?(had_owned_active_task_at_turn_start = false) ?(required = []) tools =
+    KAR.tool_contract_result_for_observed_tools
+      ~required_tool_names:required
+      ~missing_visible_required:[]
+      ~had_owned_active_task_at_turn_start
+      ~actual_keeper_tool_names:tools
+    |> Masc_mcp.Keeper_execution_receipt.tool_contract_result_to_string
+  in
+  check
+    string
+    "initial claim is execution progress"
+    "satisfied_execution"
+    (result [ "keeper_task_claim" ]);
+  check
+    string
+    "initial claim plus passive reads is still progress"
+    "satisfied_execution"
+    (result [ "keeper_task_claim"; "keeper_tasks_list" ]);
+  check
+    string
+    "claim after already owning task stays diagnostic"
+    "claim_only_after_owned_task"
+    (result ~had_owned_active_task_at_turn_start:true [ "keeper_task_claim" ]);
+  check
+    string
+    "claim does not satisfy unrelated explicit required tool"
+    "missing_required_tool_use"
+    (result ~required:[ "keeper_task_done" ] [ "keeper_task_claim" ])
 ;;
 
 let test_actionable_tool_contract_allows_execution_tools () =
@@ -10797,6 +10828,11 @@ let test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool () =
     (gate ~tools:[ "keeper_board_post"; "keeper_task_create" ] [ "work_discovery" ]);
   check
     bool
+    "worktree delta with keeper_shell -> gate fires"
+    true
+    (gate ~tools:[ "keeper_shell" ] [ "inspect_worktree_delta" ]);
+  check
+    bool
     "work_discovery can accompany another concrete gated affordance"
     true
     (gate ~tools:[ "keeper_task_claim" ] [ "work_discovery"; "task_claim" ]);
@@ -10984,7 +11020,19 @@ let test_tools_for_gated_affordance_covers_each_variant () =
     true
     (List.mem
        "keeper_task_create"
-       (Surface.tools_for_gated_affordance Surface.Work_discovery))
+       (Surface.tools_for_gated_affordance Surface.Work_discovery));
+  check
+    bool
+    "worktree delta includes keeper_shell"
+    true
+    (List.mem
+       "keeper_shell"
+       (Surface.tools_for_gated_affordance Surface.Inspect_worktree_delta));
+  check
+    (list string)
+    "worktree delta prefers keeper shell path"
+    [ "keeper_shell"; "keeper_bash" ]
+    (Surface.preferred_tool_names_for_turn_affordances [ "inspect_worktree_delta" ])
 ;;
 
 let test_preferred_tool_choice_for_required_turn_claims_first () =
@@ -11319,22 +11367,121 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
        (Printf.sprintf
           "expected Any for mixed passive/active required tools, got %s"
           (Agent_sdk.Types.show_tool_choice other)));
-  (* Active task keeper retains the strict gate even without a
-     specific applicable tool — the caller is expected to make
-     progress via board_post, task_update, etc. *)
+  (* Active task keepers retain the strict gate when an execution tool is
+     visible. *)
+  (match
+     choose
+       ~has_current_task:true
+       ~turn_affordances:[ "task_audit" ]
+       ~allowed_tool_names:[ "keeper_tasks_list"; "keeper_board_post" ]
+       ()
+   with
+   | Agent_sdk.Types.Any -> ()
+   | other ->
+     fail
+       (Printf.sprintf
+          "expected Any for active-task keeper (must make progress), got %s"
+          (Agent_sdk.Types.show_tool_choice other)));
+  (* Claim/stay_silent cannot advance an already-owned task, so forcing Any
+     here would create an impossible required-tool contract. *)
   match
     choose
       ~has_current_task:true
-      ~turn_affordances:[ "task_audit" ]
-      ~allowed_tool_names:[ "keeper_tasks_list"; "keeper_board_post" ]
+      ~turn_affordances:[ "task_claim" ]
+      ~allowed_tool_names:[ "keeper_task_claim"; "keeper_stay_silent"; "keeper_tasks_list" ]
       ()
   with
-  | Agent_sdk.Types.Any -> ()
+  | Agent_sdk.Types.Auto -> ()
   | other ->
     fail
       (Printf.sprintf
-         "expected Any for active-task keeper (must make progress), got %s"
+         "expected Auto when active-task keeper has no execution tool, got %s"
          (Agent_sdk.Types.show_tool_choice other))
+;;
+
+let test_generic_required_tool_gate_guidance_names_action_tools () =
+  let module Surface = Masc_mcp.Keeper_agent_tool_surface in
+  let guidance =
+    Surface.generic_required_tool_gate_guidance
+      ~has_current_task:false
+      ~turn_affordances:[ "board_post_or_comment" ]
+      ~allowed_tool_names:[ "keeper_tasks_list"; "keeper_board_comment"; "keeper_board_post" ]
+  in
+  check
+    bool
+    "guidance marks tool required"
+    true
+    (contains_substring guidance "[TOOL REQUIRED]");
+  check
+    bool
+    "guidance names active board comment tool"
+    true
+    (contains_substring guidance "keeper_board_comment");
+  check
+    bool
+    "guidance names active board post tool"
+    true
+    (contains_substring guidance "keeper_board_post");
+  check
+    bool
+    "guidance does not recommend passive read"
+    false
+    (contains_substring guidance "keeper_tasks_list");
+  check
+    bool
+    "guidance warns passive reads are insufficient"
+    true
+    (contains_substring guidance "Passive reads/status alone do not satisfy")
+;;
+
+let test_generic_required_tool_gate_guidance_avoids_claim_after_owned_task () =
+  let module Surface = Masc_mcp.Keeper_agent_tool_surface in
+  let guidance =
+    Surface.generic_required_tool_gate_guidance
+      ~has_current_task:true
+      ~turn_affordances:[ "task_claim"; "board_post_or_comment" ]
+      ~allowed_tool_names:[ "keeper_task_claim"; "keeper_board_comment" ]
+  in
+  check
+    bool
+    "guidance does not recommend claim after owned task"
+    false
+    (contains_substring guidance "Preferred tools for this signal: keeper_task_claim");
+  check
+    bool
+    "guidance keeps execution tool"
+    true
+    (contains_substring guidance "keeper_board_comment");
+  check
+    bool
+    "guidance explains claim-only is insufficient"
+    true
+    (contains_substring guidance "claim/context tools alone do not count")
+;;
+
+let test_generic_required_tool_gate_guidance_blocks_stay_silent_fallback () =
+  let module Surface = Masc_mcp.Keeper_agent_tool_surface in
+  let guidance =
+    Surface.generic_required_tool_gate_guidance
+      ~has_current_task:true
+      ~turn_affordances:[ "task_claim" ]
+      ~allowed_tool_names:[ "keeper_task_claim"; "keeper_stay_silent" ]
+  in
+  check
+    bool
+    "guidance does not recommend stay_silent as primary action"
+    false
+    (contains_substring guidance "Preferred tools for this signal: keeper_stay_silent");
+  check
+    bool
+    "guidance emits blocked state"
+    true
+    (contains_substring guidance "[TOOL BLOCKED]");
+  check
+    bool
+    "guidance rejects stay_silent filler"
+    true
+    (contains_substring guidance "or keeper_stay_silent merely to satisfy")
 ;;
 
 let test_direct_keeper_msg_timeout_overrides_meta_per_provider_timeout () =
@@ -12182,6 +12329,10 @@ let () =
             `Quick
             test_claim_tool_classification_covers_masc_claim_task
         ; test_case
+            "initial claim counts as contract progress"
+            `Quick
+            test_claim_contract_result_counts_initial_claim_as_execution
+        ; test_case
             "actionable signal allows execution tools"
             `Quick
             test_actionable_tool_contract_allows_execution_tools
@@ -12954,6 +13105,18 @@ let () =
             "task backlog required turn prefers claim tool choice"
             `Quick
             test_preferred_tool_choice_for_required_turn_claims_first
+        ; test_case
+            "generic required gate guidance names action tools"
+            `Quick
+            test_generic_required_tool_gate_guidance_names_action_tools
+        ; test_case
+            "generic required gate guidance avoids claim after owned task"
+            `Quick
+            test_generic_required_tool_gate_guidance_avoids_claim_after_owned_task
+        ; test_case
+            "generic required gate guidance blocks stay_silent fallback"
+            `Quick
+            test_generic_required_tool_gate_guidance_blocks_stay_silent_fallback
         ; test_case
             "direct keeper msg timeout overrides stale per-provider timeout"
             `Quick

@@ -411,7 +411,16 @@ let resolve_keeper_shell_write_cwd
   match resolved with
   | Error _ as err -> err
   | Ok cwd when Fs_compat.file_exists cwd && Sys.is_directory cwd -> Ok cwd
-  | Ok cwd -> Error (Printf.sprintf "cwd_not_directory: %s" cwd)
+  | Ok cwd ->
+    (match Keeper_task_worktree_lazy.ensure_path ~site:"write_cwd" ~config ~meta ~path:cwd with
+     | Ok Keeper_task_worktree_lazy.Created
+     | Ok Keeper_task_worktree_lazy.Already_present ->
+       if Fs_compat.file_exists cwd && Sys.is_directory cwd
+       then Ok cwd
+       else Error (Printf.sprintf "cwd_not_directory: %s" cwd)
+     | Ok Keeper_task_worktree_lazy.Not_current_task_worktree ->
+       Error (Printf.sprintf "cwd_not_directory: %s" cwd)
+     | Error msg -> Error msg)
 
 (* Docker playground path mapping: host → container.
    Host:      <base_path>/.masc/playground/<keeper>/repos/X

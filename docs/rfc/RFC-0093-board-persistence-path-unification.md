@@ -1,5 +1,5 @@
 ---
-rfc: "0091"
+rfc: "0093"
 title: "Board persistence — path unification (snapshot vs append)"
 status: Draft
 created: 2026-05-17
@@ -11,7 +11,7 @@ related: ["0077", "0042", "0062"]
 implementation_prs: []
 ---
 
-# RFC-0091 — Board persistence: path unification
+# RFC-0093 — Board persistence: path unification
 
 Status: Draft
 Author: jeong-sik (vincent)
@@ -120,6 +120,6 @@ Test plan:
 
 ## 8. Related work
 
-- RFC-0077 (Draft) — write-side silent failure typed propagation. Adjacent but distinct: RFC-0077 forces callers to *receive* write failures; RFC-0091 ensures there is *one* write path to receive failures from.
+- RFC-0077 (Draft) — write-side silent failure typed propagation. Adjacent but distinct: RFC-0077 forces callers to *receive* write failures; RFC-0093 ensures there is *one* write path to receive failures from.
 - RFC-0042 — closed sum / typed variants.
 - CLAUDE.md *워크어라운드 거부 기준* §3 (Abstraction 부재 admits) — this RFC closes one such admission.

@@ -296,6 +296,56 @@ let output_json ?(extra_fields = []) ~ok ~tool ~operation ~meta ~binding
        ]
        @ extra_fields))
 
+let nearest_git_root_within ~sandbox_root cwd =
+  let normalize = Keeper_alerting_path.normalize_path_for_check_stripped in
+  let sandbox_root = normalize sandbox_root in
+  let rec loop dir =
+    let dir = normalize dir in
+    if safe_file_exists (Filename.concat dir ".git") then Some dir
+    else if String.equal dir sandbox_root then None
+    else
+      let parent = Filename.dirname dir in
+      if String.equal parent dir then None else loop parent
+  in
+  loop cwd
+
+let pr_create_git_cwd_error ~(meta : keeper_meta) ~cwd ~sandbox_root =
+  Yojson.Safe.to_string
+    (`Assoc
+      [
+        "ok", `Bool false;
+        "tool", `String "keeper_pr_create";
+        "operation", `String "pr_create";
+        "error", `String "keeper_pr_create_requires_git_cwd";
+        "reason",
+        `String
+          "keeper_pr_create must run from a cloned repo or task worktree cwd, \
+           not the sandbox root.";
+        "keeper", `String meta.name;
+        "cwd", `String cwd;
+        "sandbox_root", `String sandbox_root;
+        "hint",
+        `String
+          "Pass cwd=\"repos/REPO\" or \
+           cwd=\"repos/REPO/.worktrees/TASK_ID\" after cloning and pushing \
+           the branch.";
+        "expected_cwd_examples",
+        `List
+          [
+            `String "repos/masc-mcp";
+            `String "repos/masc-mcp/.worktrees/KEEPER-TASK_ID";
+          ];
+      ])
+
+let validate_pr_create_git_cwd ~config ~meta ~cwd =
+  let sandbox_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  let normalize = Keeper_alerting_path.normalize_path_for_check_stripped in
+  match nearest_git_root_within ~sandbox_root cwd with
+  | Some git_root when not (String.equal (normalize git_root) (normalize sandbox_root)) ->
+      Ok ()
+  | Some _ | None ->
+      Error (pr_create_git_cwd_error ~meta ~cwd ~sandbox_root)
+
 let run_gh ?recover_pr_create ~tool ~operation ~config ~meta ~args ~write argv =
   match scoped_credential_or_error ~config ~meta with
   | Error json -> Yojson.Safe.to_string json
@@ -318,6 +368,14 @@ let run_gh ?recover_pr_create ~tool ~operation ~config ~meta ~args ~write argv =
                 "keeper", `String meta.name;
               ])
       | Ok cwd ->
+          let cwd_preflight =
+            if String.equal tool "keeper_pr_create" then
+              validate_pr_create_git_cwd ~config ~meta ~cwd
+            else Ok ()
+          in
+          (match cwd_preflight with
+           | Error json -> json
+           | Ok () ->
           let timeout_sec =
             Env_config_exec_timeout.timeout_sec
               ~caller:(if write then Pr_review_post else Pr_review)
@@ -356,6 +414,7 @@ let run_gh ?recover_pr_create ~tool ~operation ~config ~meta ~args ~write argv =
            | None ->
                output_json ~ok:result_ok ~tool ~operation ~meta ~binding
                  ~state ~cwd ~via:result.via ~output:result.output ()))
+          )
 
 let handle_keeper_pr_list ~(config : Coord.config) ~(meta : keeper_meta)
     ~(args : Yojson.Safe.t) =

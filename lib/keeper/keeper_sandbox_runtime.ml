@@ -231,6 +231,36 @@ let docker_nofile_args () =
   [ "--ulimit"; Printf.sprintf "nofile=%d:%d" limit limit ]
 ;;
 
+let container_masc_config_dir ~container_root =
+  Filename.concat (Filename.concat container_root Common.masc_dirname) "config"
+;;
+
+let host_masc_config_dir ~base_path =
+  Filename.concat (Common.masc_dir_from_base_path ~base_path) "config"
+;;
+
+let docker_masc_config_mount_spec ~base_path ~container_root =
+  Printf.sprintf
+    "%s:%s:ro"
+    (host_masc_config_dir ~base_path)
+    (container_masc_config_dir ~container_root)
+;;
+
+let docker_masc_config_mount_args ~base_path ~container_root =
+  [ "-v"; docker_masc_config_mount_spec ~base_path ~container_root ]
+;;
+
+let docker_masc_runtime_env_pairs ~container_root =
+  [ Env_config_core.base_path_env_key, container_root
+  ; Env_config_core.config_dir_env_key, container_masc_config_dir ~container_root
+  ]
+;;
+
+let docker_masc_runtime_env_args ~container_root =
+  docker_masc_runtime_env_pairs ~container_root
+  |> List.concat_map (fun (key, value) -> [ "--env"; key ^ "=" ^ value ])
+;;
+
 let docker_user_env_args () =
   [ "--env"
   ; "HOME=/tmp"

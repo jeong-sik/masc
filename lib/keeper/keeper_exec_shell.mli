@@ -69,6 +69,8 @@ val handle_keeper_bash :
 
 module For_testing : sig
   val elapsed_duration_ms : start_time:float -> end_time:float -> int
+  val keeper_bash_shape_block_tag : string -> string option
+  val raw_keeper_bash_shape_block_tag : string -> string option
 end
 
 val handle_keeper_bash_output :

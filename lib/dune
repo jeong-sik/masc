@@ -11,6 +11,7 @@
  keeper_paused_state_persist_phase
  keeper_bookkeeping_failure_kind
  keeper_checkpoint_failure_operation
+ keeper_memory_llm_summary_outcome
  memory_oas_bridge_op_outcome
  keeper_user_visible_reply_source
  keeper_continuity_summary_source
@@ -90,6 +91,7 @@
    keeper_exec_fs
    keeper_exec_ide
    keeper_shell_docker
+   keeper_task_worktree_lazy
    keeper_egress_audit
    keeper_shell_gh_context
    keeper_shell_bg_task

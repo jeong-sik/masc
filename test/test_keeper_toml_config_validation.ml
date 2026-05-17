@@ -586,7 +586,7 @@ tools-support = true
 [ollama.qwen3]
 max-concurrent = 1
 
-[tier.coding_plan_primary]
+[tier.glm-coding-primary]
 members = ["ollama.qwen3"]
 strategy = "failover"
 
@@ -595,12 +595,12 @@ members = ["ollama.qwen3"]
 strategy = "failover"
 keeper-assignable = true
 
-[tier-group.coding_plan]
-tiers = ["coding_plan_primary"]
+[tier-group.glm-coding-with-spark]
+tiers = ["glm-coding-primary"]
 strategy = "failover"
 
 [routes.keeper_turn]
-target = "tier-group.coding_plan"
+target = "tier-group.glm-coding-with-spark"
 
 [routes.provider_benchmark]
 target = "tier.ollama_cloud_primary"

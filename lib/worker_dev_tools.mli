@@ -42,6 +42,13 @@ type block_reason =
     {!Chain_or_redirect}, {!Injection}, etc.). *)
 val block_reason_to_string : block_reason -> string
 
+val block_reason_to_string_with_allowlist :
+  allowed_commands:string list -> block_reason -> string
+(** Render a {!block_reason} with a caller-specific allowlist in the
+    [Command_not_allowed] hint. Use this when the caller deliberately
+    passes a narrower allowlist than {!validate_command_coding}; otherwise
+    the generic hint can name commands that the caller still rejects. *)
+
 (** Strict (allowlist + no shell metacharacters) validator used by the
     default [shell_exec] tool.  Rejects empty input, chaining, and any
     command outside the dev allowlist (rg / grep / dune / git / ...). *)
@@ -69,6 +76,14 @@ val validate_command_coding_with_allowlist
     escapes [workdir].  Returns [Ok ()] unconditionally when
     [workdir = None]. *)
 val validate_command_paths : ?workdir:string -> string -> (unit, string) result
+
+(** Return path values in [cmd] that the shell validator treats as
+    existing-directory requirements (for example [git -C <dir>] and
+    [--work-tree=<dir>]).  Callers may use this to repair an expected
+    sandbox directory before delegating to {!validate_command_paths};
+    the validator remains the authority for blocking unsafe syntax and
+    out-of-sandbox paths. *)
+val existing_dir_path_values : string -> string list
 
 (** {1 Bash safety classifiers} *)
 
@@ -188,22 +203,33 @@ val make_readonly_tools
 (** {1 Shadow AST gate observability} *)
 
 (** Parse [cmd] with {!Masc_exec_bash_parser.Bash.parse_string} and
-    return a stable, telemetry-suitable tag:
+    return the typed outcome — primary classification surface.
+    Downstream histogram dispatch consumes the variant exhaustively
+    so adding a new {!Masc_exec.Parsed.reason_too_complex} arm is a
+    compile-time forcing function, not a silent "other"-bucket
+    landing.  Never raises; the parser catches every internal
+    exception. *)
+val shadow_parse_outcome_kind : string -> parse_outcome_kind
+
+(** Stable string rendering of {!shadow_parse_outcome_kind} — the
+    tag wording dashboards / runbook greps already track:
 
     - ["parsed_simple"] — grammar accepts the command
     - ["parse_error"] — Menhir/Lex error
     - ["parse_aborted:<reason>"] — timeout/depth/token-limit
     - ["too_complex:<reason>"] — recognised-but-unsupported construct
 
-    Never raises; the parser catches every internal exception. *)
+    Computed via {!shadow_parse_outcome_kind} so the wording cannot
+    drift between this function and {!Legendary_counters}. *)
 val shadow_parse_outcome : string -> string
 
-(** Pair the supplied [legacy] verdict with the {!shadow_parse_outcome}
-    tag for [cmd].  Polymorphic in [legacy] — callers pass either the
-    typed {!legacy_verdict} or the boolean form used by older test
-    sites.  Pure (no side effects); dashboards consume the tuple to
-    spot legacy/shadow drift without two parse passes. *)
-val cross_check_command : legacy:'a -> string -> 'a * string
+(** Pair the supplied [legacy] verdict with the typed
+    {!shadow_parse_outcome_kind} for [cmd].  Polymorphic in [legacy] —
+    callers pass either the typed {!legacy_verdict} or the boolean
+    form used by older test sites.  Pure (no side effects); dashboards
+    consume the tuple to spot legacy/shadow drift without two parse
+    passes. *)
+val cross_check_command : legacy:'a -> string -> 'a * parse_outcome_kind
 
 (** Run both the legacy substring gate and the shadow AST gate on
     [cmd], returning their reconciliation outcome alongside both

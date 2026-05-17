@@ -372,13 +372,13 @@ max-concurrent = 1
 members = ["ollama_cloud.ollama-cloud-default"]
 strategy = "failover"
 
-[tier-group.coding_plan]
+[tier-group.glm-coding-with-spark]
 tiers = ["ollama_cloud_primary"]
 strategy = "failover"
 fallback = false
 
 [routes.keeper_turn]
-target = "tier-group.coding_plan"
+target = "tier-group.glm-coding-with-spark"
 |}
   in
   with_env "OLLAMA_CLOUD_API_KEY" "test-token" @@ fun () ->
@@ -387,7 +387,7 @@ target = "tier-group.coding_plan"
     Masc_mcp.Cascade_catalog_runtime.resolve_named_providers_strict
       ~require_tool_choice_support:true
       ~require_tool_support:true
-      ~cascade_name:"tier-group.coding_plan"
+      ~cascade_name:"tier-group.glm-coding-with-spark"
       ()
   with
   | Error err -> fail err

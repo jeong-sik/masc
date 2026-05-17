@@ -32,6 +32,19 @@ let with_env key value f =
       | None -> Unix.putenv key "")
     f
 
+let with_config_dir config_dir f =
+  let prior = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Fun.protect
+    ~finally:(fun () ->
+      (match prior with
+       | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
+       | None -> Unix.putenv "MASC_CONFIG_DIR" "");
+      Config_dir_resolver.reset ())
+    (fun () ->
+      Unix.putenv "MASC_CONFIG_DIR" config_dir;
+      Config_dir_resolver.reset ();
+      f ())
+
 let temp_dir () =
   let dir = Filename.temp_file "keeper_shell_docker_route_" "" in
   Unix.unlink dir;
@@ -70,6 +83,16 @@ let contains_substring haystack needle =
     else loop (i + 1)
   in
   loop 0
+
+let check_line_contains msg line needle =
+  if not (contains_substring line needle) then
+    Alcotest.failf "%s: missing %S in docker line %S" msg needle line
+
+let gh_config_mount_spec gh_dir =
+  gh_dir
+  ^ ":"
+  ^ Filename.concat Masc_mcp.Keeper_host_config_provider.cred_root ".config/gh"
+  ^ ":ro"
 
 let rec ensure_dir path =
   if path = "" || path = "." || path = "/" then ()
@@ -129,6 +152,10 @@ let setup ~sandbox f =
   with_eio_fs @@ fun () ->
   let base = temp_dir () in
   ensure_dir (Filename.concat base Common.masc_dirname);
+  let config_dir =
+    Filename.concat (Filename.concat base Common.masc_dirname) "config"
+  in
+  ensure_dir config_dir;
   let config = Coord.default_config base in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Keeper_registry.clear ();
@@ -141,6 +168,10 @@ let setup_with_preset ~sandbox ~preset f =
   with_eio_fs @@ fun () ->
   let base = temp_dir () in
   ensure_dir (Filename.concat base Common.masc_dirname);
+  let config_dir =
+    Filename.concat (Filename.concat base Common.masc_dirname) "config"
+  in
+  ensure_dir config_dir;
   let config = Coord.default_config base in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Keeper_registry.clear ();
@@ -153,6 +184,10 @@ let setup_two_docker_keepers f =
   with_eio_fs @@ fun () ->
   let base = temp_dir () in
   ensure_dir (Filename.concat base Common.masc_dirname);
+  let config_dir =
+    Filename.concat (Filename.concat base Common.masc_dirname) "config"
+  in
+  ensure_dir config_dir;
   let config = Coord.default_config base in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Keeper_registry.clear ();
@@ -205,18 +240,13 @@ let with_tool_policy_config f =
   | Ok () -> f ()
   | Error msg -> Alcotest.failf "init_policy_config failed: %s" msg
 
-let with_config_dir config_dir f =
-  let prior = Sys.getenv_opt "MASC_CONFIG_DIR" in
-  Fun.protect
-    ~finally:(fun () ->
-      (match prior with
-       | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
-       | None -> Unix.putenv "MASC_CONFIG_DIR" "");
-      Config_dir_resolver.reset ())
-    (fun () ->
-      Unix.putenv "MASC_CONFIG_DIR" config_dir;
-      Config_dir_resolver.reset ();
-      f ())
+let write_fake_github_hosts gh_dir =
+  ensure_dir gh_dir;
+  write_file
+    (Filename.concat gh_dir "hosts.yml")
+    "github.com:\n\
+    \    oauth_token: ghp_fake_test_token_for_docker_route\n\
+    \    user: test-user\n"
 
 let with_keeper_identity_toml ~config ~keeper_name ~github_identity
     ~git_identity_mode f =
@@ -231,7 +261,7 @@ let with_keeper_identity_toml ~config ~keeper_name ~github_identity
       "gh"
   in
   ensure_dir keepers_dir;
-  ensure_dir gh_dir;
+  write_fake_github_hosts gh_dir;
   write_file
     (Filename.concat keepers_dir (keeper_name ^ ".toml"))
     (Printf.sprintf
@@ -248,12 +278,7 @@ let ensure_github_identity_bundle ~config github_identity =
          github_identity)
       "gh"
   in
-  ensure_dir gh_dir;
-  write_file
-    (Filename.concat gh_dir "hosts.yml")
-    "github.com:\n\
-    \    oauth_token: ghp_fake_test_token_for_docker_route\n\
-    \    user: test-user\n"
+  write_fake_github_hosts gh_dir
 
 let parse_field raw field =
   Yojson.Safe.from_string raw |> Json.member field
@@ -283,51 +308,52 @@ let parse_status_exit_code raw =
   | None -> Alcotest.failf "missing status.code in %s" raw
 
 let assert_docker_route_fires ~config ~meta ~playground =
-  let host_path = Filename.concat playground "mind/demo.txt" in
+  let rel_path = "mind/demo.txt" in
+  let rel_dir = "mind" in
+  let host_path = Filename.concat playground rel_path in
   ensure_dir (Filename.dirname host_path);
   ignore (Fs_compat.save_file_atomic host_path "alpha\nbeta\ngamma\n");
   let cases =
     [
-      ("cat", `Assoc [ ("op", `String "cat"); ("path", `String host_path) ]);
-      ("ls", `Assoc [ ("op", `String "ls"); ("path", `String playground) ]);
+      ("cat", `Assoc [ ("op", `String "cat"); ("path", `String rel_path) ]);
+      ("ls", `Assoc [ ("op", `String "ls"); ("path", `String rel_dir) ]);
       ( "rg",
         `Assoc
           [
             ("op", `String "rg");
             ("pattern", `String "alpha");
-            ("path", `String playground);
+            ("path", `String rel_dir);
           ] );
       ( "find",
         `Assoc
           [
             ("op", `String "find");
             ("pattern", `String "*.txt");
-            ("path", `String playground);
+            ("path", `String rel_dir);
           ] );
       ( "head",
         `Assoc
           [
             ("op", `String "head");
             ("lines", `Int 1);
-            ("path", `String host_path);
+            ("path", `String rel_path);
           ] );
       ( "tail",
         `Assoc
           [
             ("op", `String "tail");
             ("lines", `Int 1);
-            ("path", `String host_path);
+            ("path", `String rel_path);
           ] );
-      ("wc", `Assoc [ ("op", `String "wc"); ("path", `String host_path) ]);
-      ("tree", `Assoc [ ("op", `String "tree"); ("path", `String playground) ]);
-      ("pwd", `Assoc [ ("op", `String "pwd"); ("cwd", `String playground) ]);
+      ("wc", `Assoc [ ("op", `String "wc"); ("path", `String rel_path) ]);
+      ("tree", `Assoc [ ("op", `String "tree"); ("path", `String rel_dir) ]);
+      ("pwd", `Assoc [ ("op", `String "pwd") ]);
       ( "git_status",
-        `Assoc [ ("op", `String "git_status"); ("cwd", `String playground) ] );
+        `Assoc [ ("op", `String "git_status") ] );
       ( "git_log",
         `Assoc
           [
             ("op", `String "git_log");
-            ("cwd", `String playground);
             ("count", `Int 1);
           ] );
     ]
@@ -337,10 +363,8 @@ let assert_docker_route_fires ~config ~meta ~playground =
       let raw =
         Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta ~args
       in
-      Alcotest.(check bool)
-        (Printf.sprintf "%s surfaces docker image config error (docker route fired)" op)
-        true
-        (response_mentions raw "error" "docker image"))
+      if not (response_mentions raw "error" "docker image") then
+        Alcotest.failf "unexpected %s docker-route response: %s" op raw)
     cases
 
 (* ── Tests ───────────────────────────────────────────────────────── *)
@@ -406,7 +430,7 @@ let test_rg_no_match_remains_successful_in_docker_route () =
             [
               ("op", `String "rg");
               ("pattern", `String "missing");
-              ("path", `String playground);
+              ("path", `String "mind");
             ])
   in
   Alcotest.(check (option bool)) "rg no-match stays ok" (Some true)
@@ -586,8 +610,8 @@ let test_bash_git_creds_uses_oneshot_with_turn_runtime () =
   let root_gh_dir =
     Masc_mcp.Keeper_gh_env.root_gh_config_dir config
   in
-  Alcotest.(check bool) "one-shot run mounted GH identity bundle" true
-    (contains_substring log (root_gh_dir ^ ":/tmp/keeper-creds/.config/gh:ro"))
+  check_line_contains "one-shot run mounted GH identity bundle" log
+    (gh_config_mount_spec root_gh_dir)
 
 let test_bash_git_c_option_missing_dir_blocks_before_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
@@ -712,8 +736,8 @@ let test_bash_git_push_routes_through_git_creds_docker () =
   let root_gh_dir =
     Masc_mcp.Keeper_gh_env.root_gh_config_dir config
   in
-  Alcotest.(check bool) "push mounted GH identity bundle" true
-    (contains_substring log (root_gh_dir ^ ":/tmp/keeper-creds/.config/gh:ro"))
+  check_line_contains "push mounted GH identity bundle" log
+    (gh_config_mount_spec root_gh_dir)
 
 let test_repair_container_worktree_gitdirs () =
   setup ~sandbox:Keeper_types.Docker
@@ -807,7 +831,7 @@ let test_git_worktree_add_uses_host_git_metadata () =
             ("action", `String "add");
             ("branch", `String "feature/docker-wt");
             ("base", `String "HEAD");
-            ("cwd", `String repo);
+            ("cwd", `String "repos/masc-mcp");
           ])
   in
   Alcotest.(check (option bool)) "git_worktree add succeeds on host"
@@ -893,6 +917,51 @@ let docker_run_line log_path =
   |> function
   | Some line -> line
   | None -> Alcotest.fail "expected docker run log line"
+
+let test_docker_shell_mounts_masc_config_runtime_paths () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
+  match
+    Keeper_shell_docker.run_docker_shell_command_with_status
+      ~config
+      ~meta
+      ~cwd:playground
+      ~timeout_sec:5.0
+      ~cmd:"pwd"
+      ~git_creds_enabled:false
+      ~network_mode:Keeper_types.Network_none
+  with
+  | Error msg -> Alcotest.failf "expected fake docker run, got %s" msg
+  | Ok result ->
+    (match result.Keeper_shell_docker.status with
+     | Unix.WEXITED 0 -> ()
+     | Unix.WEXITED code -> Alcotest.failf "expected exit 0, got %d" code
+     | Unix.WSIGNALED code -> Alcotest.failf "expected exit 0, signaled %d" code
+     | Unix.WSTOPPED code -> Alcotest.failf "expected exit 0, stopped %d" code);
+    let line = docker_run_line log_path in
+    let container_root = Keeper_sandbox.container_root meta.name in
+    let host_config_dir =
+      Filename.concat (Filename.concat config.Coord.base_path Common.masc_dirname) "config"
+    in
+    let container_config_dir =
+      Masc_mcp.Keeper_sandbox_runtime.container_masc_config_dir ~container_root
+    in
+    Alcotest.(check bool) "MASC config mounted read-only" true
+      (contains_substring
+         line
+         (host_config_dir ^ ":" ^ container_config_dir ^ ":ro"));
+    Alcotest.(check bool) "container MASC_BASE_PATH pinned" true
+      (contains_substring line ("MASC_BASE_PATH=" ^ container_root));
+    Alcotest.(check bool) "container MASC_CONFIG_DIR pinned" true
+      (contains_substring line ("MASC_CONFIG_DIR=" ^ container_config_dir))
 
 let run_git_creds_docker_shell ~config ~meta ~playground ~log_path =
   ensure_github_identity_bundle ~config Masc_mcp.Keeper_gh_env.root_github_identity;
@@ -1036,7 +1105,10 @@ let test_git_creds_skips_missing_ssh_auth_sock () =
   Alcotest.(check bool) "missing ssh-agent socket is not mounted" false
     (contains_substring line missing_sock);
   Alcotest.(check bool) "missing ssh-agent env is not forwarded" false
-    (contains_substring line "SSH_AUTH_SOCK=/tmp/keeper-creds/ssh-agent.sock")
+    (contains_substring line
+       ("SSH_AUTH_SOCK="
+        ^ Filename.concat Masc_mcp.Keeper_host_config_provider.cred_root
+            "ssh-agent.sock"))
 
 let test_git_creds_inherit_network_omits_invalid_network_flag () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
@@ -1062,8 +1134,8 @@ let test_git_creds_mounts_numeric_user_identity () =
   let root_gh_dir =
     Masc_mcp.Keeper_gh_env.root_gh_config_dir config
   in
-  Alcotest.(check bool) "root GH identity bundle mounted" true
-    (contains_substring line (root_gh_dir ^ ":/tmp/keeper-creds/.config/gh:ro"));
+  check_line_contains "root GH identity bundle mounted" line
+    (gh_config_mount_spec root_gh_dir);
   Alcotest.(check bool) "ambient GH_TOKEN not forwarded" false
     (contains_substring line "GH_TOKEN=");
   Alcotest.(check bool) "ambient GITHUB_TOKEN not forwarded" false
@@ -1147,21 +1219,18 @@ let test_git_creds_mounts_only_selected_keeper_identity () =
       Keeper_alerting_path.normalize_path_for_check playground
       |> Keeper_alerting_path.strip_trailing_slashes
     in
-    Alcotest.(check bool)
+    check_line_contains
       (github_identity ^ " selected GH bundle mounted read-only")
-      true
-      (contains_substring line
-         (selected_gh ^ ":/tmp/keeper-creds/.config/gh:ro"));
+      line
+      (gh_config_mount_spec selected_gh);
     Alcotest.(check bool)
       (github_identity ^ " root fallback bundle not mounted")
       false
-      (contains_substring line
-         (root_gh_dir ^ ":/tmp/keeper-creds/.config/gh:ro"));
+      (contains_substring line (gh_config_mount_spec root_gh_dir));
     Alcotest.(check bool)
       (github_identity ^ " sibling keeper bundle not mounted")
       false
-      (contains_substring line
-         (other_gh ^ ":/tmp/keeper-creds/.config/gh:ro"));
+      (contains_substring line (gh_config_mount_spec other_gh));
     Alcotest.(check bool)
       (github_identity ^ " own playground mounted")
       true
@@ -1264,6 +1333,66 @@ let test_bash_fake_docker_executes () =
   Alcotest.(check bool) "bash output includes fake docker stdout" true
     (response_mentions raw "output" "stdout:")
 
+let test_bash_blocks_pipe_redirect_before_docker () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Coding
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+      ~args:
+        (`Assoc
+          [
+            ("cmd", `String "ls lib/ 2>&1 | head -20");
+            ("cwd", `String playground);
+          ])
+      ()
+  in
+  Alcotest.(check (option bool)) "blocked before docker" (Some false)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option string))
+    "shape-block error"
+    (Some "keeper_bash_command_shape_blocked")
+    (parse_string_field raw "error");
+  Alcotest.(check (option string))
+    "shape_block"
+    (Some "pipe_or_redirect")
+    (parse_string_field raw "shape_block");
+  Alcotest.(check bool) "docker was not invoked" false
+    (Sys.file_exists log_path)
+
+let test_bash_blocks_gh_pr_checks_before_docker () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Coding
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+      ~args:
+        (`Assoc
+          [
+            ("cmd", `String "gh pr checks 15659 --repo jeong-sik/masc-mcp");
+            ("cwd", `String playground);
+          ])
+      ()
+  in
+  Alcotest.(check (option bool)) "blocked before docker" (Some false)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option string))
+    "shape_block"
+    (Some "gh_pr_checks")
+    (parse_string_field raw "shape_block");
+  Alcotest.(check bool) "hint points to PR status tool" true
+    (response_mentions raw "hint" "keeper_pr_status");
+  Alcotest.(check bool) "docker was not invoked" false
+    (Sys.file_exists log_path)
+
 let test_bash_rewrites_host_path_command_for_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
@@ -1278,7 +1407,7 @@ let test_bash_rewrites_host_path_command_for_docker () =
           [
             ( "cmd",
               `String
-                (Printf.sprintf "cd %s/repos/masc-mcp && pwd"
+                (Printf.sprintf "ls %s/repos/masc-mcp"
                    (Keeper_alerting_path.strip_trailing_slashes playground)) );
             ("cwd", `String playground);
           ])
@@ -1303,9 +1432,9 @@ let () =
           Alcotest.test_case
             "docker keeper bash routes through docker"
             `Quick test_bash_routes_through_docker;
-	          Alcotest.test_case
-	            "docker keeper bash git cmd routes through git-creds docker"
-	            `Quick test_bash_git_creds_routes_through_docker;
+          Alcotest.test_case
+            "docker keeper bash git cmd routes through git-creds docker"
+            `Quick test_bash_git_creds_routes_through_docker;
           Alcotest.test_case
             "docker keeper bash git creds bypass warm turn runtime"
             `Quick test_bash_git_creds_uses_oneshot_with_turn_runtime;
@@ -1334,6 +1463,12 @@ let () =
             "docker keeper bash executes through fake docker"
             `Quick test_bash_fake_docker_executes;
           Alcotest.test_case
+            "docker keeper bash blocks pipe redirects before docker"
+            `Quick test_bash_blocks_pipe_redirect_before_docker;
+          Alcotest.test_case
+            "docker keeper bash blocks gh pr checks before docker"
+            `Quick test_bash_blocks_gh_pr_checks_before_docker;
+          Alcotest.test_case
             "docker keeper bash rewrites host paths before exec"
             `Quick test_bash_rewrites_host_path_command_for_docker;
         ] );
@@ -1356,6 +1491,9 @@ let () =
           Alcotest.test_case
             "git-creds inherit network omits invalid docker flag"
             `Quick test_git_creds_inherit_network_omits_invalid_network_flag;
+          Alcotest.test_case
+            "docker shell mounts MASC config runtime paths"
+            `Quick test_docker_shell_mounts_masc_config_runtime_paths;
           Alcotest.test_case
             "git-creds mounts passwd entry for numeric uid"
             `Quick test_git_creds_mounts_numeric_user_identity;

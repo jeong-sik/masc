@@ -82,8 +82,8 @@ let classify_actionable_signal_for_tools ~(allowed_tool_names : string list) o =
     && has_any_tool
          [ "keeper_board_post"; "keeper_board_comment"; "keeper_task_create";
            "masc_add_task"; "keeper_tasks_audit"; "keeper_board_cleanup";
-           "keeper_bash"; "masc_code_shell"; "keeper_fs_edit"; "masc_code_edit";
-           "Write"; "Edit"; "MultiEdit"; "keeper_pr_create";
+           "keeper_shell"; "keeper_bash"; "masc_code_shell"; "keeper_fs_edit";
+           "masc_code_edit"; "Write"; "Edit"; "MultiEdit"; "keeper_pr_create";
            "keeper_task_submit_for_verification"; "keeper_task_done" ]
   then Has_discovered_work
   else No_actionable_signal

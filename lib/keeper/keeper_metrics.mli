@@ -104,6 +104,7 @@ type t =
   | DecisionAuditFlushFailures
   | OasCancel
   | ClaimAutoProvision
+  | TaskWorktreeLazyRepair
   | TomlInvalid
   | PersonaDriftMissing
   | RoomInitFailures
@@ -312,6 +313,7 @@ val metric_keeper_reconcile_failures : string
 val metric_keeper_decision_audit_flush_failures : string
 val metric_keeper_oas_cancel : string
 val metric_keeper_claim_auto_provision : string
+val metric_keeper_task_worktree_lazy_repair : string
 val metric_keeper_toml_invalid : string
 val metric_keeper_persona_drift_missing : string
 val metric_keeper_room_init_failures : string
@@ -339,6 +341,33 @@ val metric_keeper_cascade_sync_failures : string
 val metric_keeper_local_discovery_failures : string
 val metric_keeper_thinking_persist_failures : string
 val metric_keeper_checkpoint_failures : string
+
+val metric_keeper_decision_audit_ring_overflows : string
+(** Counter for [Keeper_decision_audit.append] overwriting an
+    unflushed record because the ring buffer was at capacity.
+    Label [keeper] names the affected keeper.  Each increment is
+    one decision_record lost to disk because the flush loop did
+    not keep up with the append rate.  Non-zero counts mean the
+    flush_batch_size / flush_interval_sec tuning is below the
+    decision-emission rate and forensics data is being silently
+    dropped. *)
+
+val metric_keeper_memory_llm_summary_outcomes : string
+(** Counter for [Keeper_memory_llm_summary.summarize_with_provider]
+    attempts, classified by label [outcome] (ok_summary | timed_out |
+    http_error | empty_response).  Labels: [outcome], [provider]
+    (model_id of the attempt), [cascade] (cascade name driving the
+    chain).  Adjacent counter
+    [metric_keeper_memory_llm_summary_chain_exhausted] increments
+    only when every provider in the cascade returned a non-Ok
+    outcome — the operational signal that the consolidation pass
+    received no summary at all. *)
+
+val metric_keeper_memory_llm_summary_chain_exhausted : string
+(** Counter for [Keeper_memory_llm_summary.summarize_with_providers]
+    runs where every provider in the cascade returned a non-Ok
+    outcome.  Label [cascade] names the cascade.  A rising rate
+    means consolidation is silently skipping the LLM summary step. *)
 
 val metric_keeper_memory_jsonl_ops : string
 (** Counter for [Agent_sdk.Memory.long_term_backend] operations

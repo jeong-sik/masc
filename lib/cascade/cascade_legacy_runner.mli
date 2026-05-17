@@ -151,6 +151,17 @@ val cascade_attempt_terminal_event_json :
     when tracing why a cascade exhausted or why a keeper released its turn
     slot instead of scheduling another degraded retry. *)
 
+val record_attempt_terminal :
+  cascade_metrics_capture ->
+  model_id:string ->
+  latency_ms:int option ->
+  error:string option ->
+  unit
+(** Records one terminal provider attempt in [capture]. This is for
+    named-cascade runners that receive provider-attempt completion
+    directly but cannot thread OAS's per-call metrics sink through the
+    provider invocation path. *)
+
 val cascade_metrics_for_candidates :
   candidate_count:int ->
   unit ->

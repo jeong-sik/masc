@@ -338,19 +338,19 @@ tools-support = true
 [ollama_cloud.glm-5-1-cloud]
 max-concurrent = 1
 
-[tier.coding_plan]
+[tier.glm-coding-with-spark]
 members = ["ollama_cloud.glm-5-1-cloud"]
 strategy = "failover"
 |}
     in
     let catalog = adapt_toml toml in
     no_errors catalog.errors;
-    let coding_plan =
+    let coding_tier =
       List.find
-        (fun (p : adapted_profile) -> p.name = "tier.coding_plan")
+        (fun (p : adapted_profile) -> p.name = "tier.glm-coding-with-spark")
         catalog.profiles
     in
-    match coding_plan.provider_configs with
+    match coding_tier.provider_configs with
     | [ cfg ] ->
       check
         bool
@@ -453,7 +453,7 @@ supports-tool-choice = true
 [glm-coding.glm-5-1]
 max-concurrent = 1
 
-[tier.coding_plan_primary]
+[tier.glm-coding-primary]
 members = ["glm-coding.glm-5-1"]
 strategy = "failover"
 |}
@@ -462,7 +462,7 @@ strategy = "failover"
   no_errors catalog.errors;
   let tier =
     List.find
-      (fun (p : adapted_profile) -> p.name = "tier.coding_plan_primary")
+      (fun (p : adapted_profile) -> p.name = "tier.glm-coding-primary")
       catalog.profiles
   in
   match tier.provider_configs with

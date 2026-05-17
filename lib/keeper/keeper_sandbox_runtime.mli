@@ -118,6 +118,27 @@ val docker_network_args : Keeper_types.network_mode -> string list * string
     sandbox containers. *)
 val docker_nofile_args : unit -> string list
 
+(** Container-visible config root under the keeper playground. *)
+val container_masc_config_dir : container_root:string -> string
+
+(** Host-side config root for a MASC base path. *)
+val host_masc_config_dir : base_path:string -> string
+
+(** Docker [-v ...] spec that exposes [<base_path>/.masc/config] read-only
+    as [<container_root>/.masc/config]. *)
+val docker_masc_config_mount_spec : base_path:string -> container_root:string -> string
+
+(** Docker [-v ...] argv fragment for the MASC config bind mount. *)
+val docker_masc_config_mount_args : base_path:string -> container_root:string -> string list
+
+(** [MASC_BASE_PATH] and [MASC_CONFIG_DIR] values to pin inside the
+    container. *)
+val docker_masc_runtime_env_pairs : container_root:string -> (string * string) list
+
+(** Docker [--env ...] argv fragment for the container-side MASC runtime
+    paths. *)
+val docker_masc_runtime_env_args : container_root:string -> string list
+
 (** Docker [--env ...] argv fragment for the numeric keeper user. *)
 val docker_user_env_args : unit -> string list
 

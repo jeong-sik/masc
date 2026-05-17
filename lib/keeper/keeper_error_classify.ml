@@ -426,6 +426,27 @@ let normalized_cascade_name ~catalog_names name =
   then trimmed
   else Keeper_cascade_profile.normalize_declared_name trimmed
 
+let strip_prefix ~prefix value =
+  if String.starts_with ~prefix value then
+    Some
+      (String.sub value (String.length prefix)
+         (String.length value - String.length prefix))
+  else None
+
+let direct_tier_duplicates_attempted_group
+    ~(attempted : string list)
+    ~(candidate : string)
+  =
+  match strip_prefix ~prefix:"tier." candidate with
+  | None -> false
+  | Some suffix ->
+    List.exists
+      (fun attempted ->
+         match strip_prefix ~prefix:"tier-group." attempted with
+         | Some attempted_suffix -> String.equal suffix attempted_suffix
+         | None -> false)
+      attempted
+
 let required_tool_rotation_candidate
     ?(allow_local_recovery = false)
     ~catalog_names
@@ -554,7 +575,8 @@ let degraded_rotation_after_recoverable_error
         ~fallback_hint
         ~base_cascade ~effective_cascade ~tool_requirement
       |> List.find_opt (fun candidate ->
-             not (List.exists (String.equal candidate) attempted))
+             (not (List.exists (String.equal candidate) attempted))
+             && not (direct_tier_duplicates_attempted_group ~attempted ~candidate))
       |> Option.map (fun next_cascade -> { next_cascade; fallback_reason })
 
 let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =

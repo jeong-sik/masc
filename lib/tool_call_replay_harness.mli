@@ -82,7 +82,7 @@ val validate_snapshot : snapshot -> (unit, string list) Result.t
        {!response_format_of_provider} (OAS canonical names:
        [openai] / [glm] / [glm-coding] / [kimi] / [openrouter] /
        [ollama] / [llama], plus legacy snapshot aliases
-       [codex-api] / [glm-api] / [glm-coding-plan] / [kimi-api]; unsupported:
+       [codex-api] / [glm-api] / [kimi-api]; unsupported:
        ["snapshot provider '<p>' (canonical '<c>') is not supported by replay harness yet"]).
     3. Response must be the OpenAI Chat Completions shape with at
        least one [choices\[\]] entry containing

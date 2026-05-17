@@ -119,7 +119,7 @@ val probe :
 
 | variant | Trigger | Evidence ref |
 |---|---|---|
-| `Lane_unavailable` | sangsu keeper (active+keepalive) 의 cascade=tier-group.coding_plan 이 lane=runtime_mcp 로 진입할 때 *materialize 단계*에서 sandbox-요구 도구가 LLM 표면에서 제거. dashboard `resolved_allowlist` 는 통과했으나 materialize 단계 silent strip 으로 `masc_code_git` 미존재 → `required_tool_lane_unavailable` error. | board `p-6502d7dbfaaf89ae24e6ff749a06f914` |
+| `Lane_unavailable` | sangsu keeper (active+keepalive) 의 cascade=tier-group.glm-coding-with-spark 이 lane=runtime_mcp 로 진입할 때 *materialize 단계*에서 sandbox-요구 도구가 LLM 표면에서 제거. dashboard `resolved_allowlist` 는 통과했으나 materialize 단계 silent strip 으로 `masc_code_git` 미존재 → `required_tool_lane_unavailable` error. | board `p-6502d7dbfaaf89ae24e6ff749a06f914` |
 | `Tool_naming_inconsistency` | tech_glutton keeper 의 cascade 가 lane=runtime_mcp 가 아니라 *local Claude SDK pass-through* 로 routing. `visible_tools` 가 `[Bash, Edit, Grep, WebSearch, Write]` 같은 Claude Code 내장 이름이라 `masc_web_search` 같은 MCP-native 이름과 매칭 실패. 같은 의미, 다른 surface naming. | board `p-15634a8257cd0c1db8092677de5a3ee2` |
 | `Verifier_blocked_no_open_request` | verifier keeper 가 *자율적으로* 발견. goal phase=executing 에서 `active_verification_request_id=null` 이면 verifier 가 reject 조차 vote 불가 — `conflict: goal has no active verification request`. RFC-0074 의 paused-blocked variant 와 *직교*. | board `p-38c3289abd46b765bee74ca765c9c2ea` (verifier 가 직접 post) |
 

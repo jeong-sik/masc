@@ -831,7 +831,15 @@ let run_docker_shell_command_with_status_internal
           let validation_cmd =
             rewrite_docker_command_paths_for_host_validation ~config ~meta cmd
           in
-          Worker_dev_tools.validate_command_paths ~workdir:cwd validation_cmd
+          (match
+             Keeper_task_worktree_lazy.ensure_command_existing_dirs
+               ~config
+               ~meta
+               ~cwd
+               ~cmd:validation_cmd
+           with
+           | Error e -> Error e
+           | Ok () -> Worker_dev_tools.validate_command_paths ~workdir:cwd validation_cmd)
         else Ok ()
       in
       match path_validation with
@@ -1098,7 +1106,18 @@ let run_docker_with_git_bash
          let validation_cmd =
            rewrite_docker_command_paths_for_host_validation ~config ~meta cmd
          in
-         (match Worker_dev_tools.validate_command_paths ~workdir:cwd validation_cmd with
+         let path_validation =
+           match
+             Keeper_task_worktree_lazy.ensure_command_existing_dirs
+               ~config
+               ~meta
+               ~cwd
+               ~cmd:validation_cmd
+           with
+           | Error e -> Error e
+           | Ok () -> Worker_dev_tools.validate_command_paths ~workdir:cwd validation_cmd
+         in
+         (match path_validation with
           | Error err -> sandbox_error_json (Printf.sprintf "%s [blocked_cmd=%s]" err validation_cmd)
           | Ok () ->
            let _ = turn_sandbox_runtime in
@@ -1171,7 +1190,18 @@ let run_docker_hardened_bash
       let validation_cmd =
         rewrite_docker_command_paths_for_host_validation ~config ~meta cmd
       in
-      (match Worker_dev_tools.validate_command_paths ~workdir:cwd validation_cmd with
+      let path_validation =
+        match
+          Keeper_task_worktree_lazy.ensure_command_existing_dirs
+            ~config
+            ~meta
+            ~cwd
+            ~cmd:validation_cmd
+        with
+        | Error e -> Error e
+        | Ok () -> Worker_dev_tools.validate_command_paths ~workdir:cwd validation_cmd
+      in
+      (match path_validation with
        | Error err -> sandbox_error_json (Printf.sprintf "%s [blocked_cmd=%s]" err validation_cmd)
        | Ok () ->
       (match turn_sandbox_runtime, network_mode with

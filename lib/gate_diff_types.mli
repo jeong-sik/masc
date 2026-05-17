@@ -41,22 +41,41 @@ val destructive_class_to_string : destructive_class -> string
     alerts grep on these literals.  Do not change without a
     coordinated metric-rename PR. *)
 
-val classify_destructive : string -> (destructive_class * string) option
-(** [classify_destructive cmd] returns the first matching
-    [(class, substring)] pair in declaration order, or [None] when
-    no destructive pattern matches.
+(** Single source of truth for one destructive shell pattern.  Carries
+    its substring (matched case-insensitively), its operator-visible
+    description, and its typed {!destructive_class}.  Replaces the
+    previously parallel [Eval_gate.destructive_patterns]
+    [(pattern, desc)] list and [destructive_class_substrings]
+    [(pattern, class)] list — both derive from this catalogue, so
+    drift between the legacy gate and the shadow classifier is
+    impossible by construction. *)
+type destructive_pattern = {
+  class_ : destructive_class;
+  pattern : string;
+  description : string;
+}
+
+val destructive_patterns : destructive_pattern list
+(** The canonical destructive-pattern catalogue.
 
     Order matters: longer substrings come first so [rm -rf] matches
     before [rm -r] (both classify as {!Recursive_delete} but the
-    returned substring differs).  The returned substring is suitable
-    for inclusion in an audit-log diagnostic — it is the literal
-    that triggered classification, not a description.
+    returned substring differs).
 
-    The substring set mirrors one row per pattern in
-    {!Eval_gate.destructive_patterns}.  Drift between the two lists
-    means the legacy gate and the shadow gate disagree by
-    construction — pinning the order at the contract seam keeps the
-    drift detectable.  Case-insensitive substring matching via
+    Length is pinned at 19 by [test_destructive_class.test_coverage_count]
+    — a new entry must update that count.  The list is the only
+    SSOT; [Eval_gate.destructive_patterns] and {!classify_destructive}
+    both walk this list, eliminating the previous drift surface
+    enforced only at runtime test time. *)
+
+val classify_destructive : string -> (destructive_class * string) option
+(** [classify_destructive cmd] returns the first matching
+    [(class, substring)] pair in declaration order over
+    {!destructive_patterns}, or [None] when no pattern matches.
+
+    The returned substring is suitable for inclusion in an audit-log
+    diagnostic — it is the literal that triggered classification,
+    not a description.  Case-insensitive substring matching via
     {!String_util.contains_substring_ci}. *)
 
 (** {1 Legacy and shadow verdicts} *)
@@ -68,9 +87,37 @@ type legacy_verdict =
         (** The matching substring from
             [Eval_gate.destructive_patterns], NOT the description. *)
 
+(** Outcome of running the bash subset parser on a candidate command.
+    1:1 with [Masc_exec.Parsed.t] excluding the payload [Parsed _]
+    (the shadow gate only cares about the parse classification, not
+    the AST itself). Typed so that downstream histogram dispatch
+    is exhaustive — a new [Parsed.reason_too_complex] variant fails
+    to compile rather than silently landing in a catch-all bucket. *)
+type parse_outcome_kind =
+  | Parsed_simple
+  | Parse_error
+  | Parse_aborted of Masc_exec.Parsed.reason_aborted
+  | Too_complex of Masc_exec.Parsed.reason_too_complex
+
+val parse_outcome_kind_to_tag : parse_outcome_kind -> string
+(** Stable snake_case rendering. Matches the legacy
+    [shadow_parse_outcome] string surface byte-for-byte so log
+    aggregators / runbook greps continue to see the same tag set:
+    [Parsed_simple -> "parsed_simple"],
+    [Parse_error -> "parse_error"],
+    [Parse_aborted r -> "parse_aborted:<r>"],
+    [Too_complex r -> "too_complex:<r>"].
+    Pin the wording — operator alerts grep on these literals. *)
+
 type shadow_verdict =
-  | Shadow_allow of { parse_tag : string }
-  | Shadow_parse_unsupported of { parse_tag : string }
+  | Shadow_allow
+        (** Shadow parsed the command as a simple command (the only
+            parse outcome that yields an allow verdict at this layer).
+            Carries no payload — the [Parsed_simple] kind is implicit. *)
+  | Shadow_parse_unsupported of { kind : parse_outcome_kind }
+        (** Shadow could not parse the command. [kind] is one of
+            [Parse_error] / [Parse_aborted _] / [Too_complex _];
+            [Parsed_simple] is excluded by construction. *)
   | Shadow_deny_destructive of destructive_class * string
 
 (** {1 Gate diff} *)

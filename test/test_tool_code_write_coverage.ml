@@ -399,6 +399,19 @@ let test_validate_code_shell_command_allows_direct_build () =
   check (result unit string) "direct build allowed" (Ok ())
     (Tool_code_write.validate_code_shell_command "dune build 2>&1")
 
+let test_validate_code_shell_command_allows_grep () =
+  check (result unit string) "grep allowed" (Ok ())
+    (Tool_code_write.validate_code_shell_command "grep -R -n TODO lib")
+
+let test_validate_code_shell_command_uses_code_shell_allowlist_hint () =
+  match Tool_code_write.validate_code_shell_command "python3 --version" with
+  | Error reason ->
+      check bool "uses caller-specific allowlist label" true
+        (msg_contains ~needle:"Allowed commands for this tool" reason);
+      check bool "names grep because code shell allows it" true
+        (msg_contains ~needle:"grep" reason)
+  | Ok () -> fail "expected python3 to be rejected by masc_code_shell allowlist"
+
 let test_validate_code_shell_command_rejects_semicolon () =
   match
     Tool_code_write.validate_code_shell_command
@@ -772,6 +785,10 @@ let () =
         test_validate_code_shell_command_rejects_pipe_to_disallowed;
       test_case "allows direct build" `Quick
         test_validate_code_shell_command_allows_direct_build;
+      test_case "allows grep" `Quick
+        test_validate_code_shell_command_allows_grep;
+      test_case "uses code shell allowlist hint" `Quick
+        test_validate_code_shell_command_uses_code_shell_allowlist_hint;
       test_case "rejects semicolon" `Quick
         test_validate_code_shell_command_rejects_semicolon;
       test_case "missing docker cwd reports worktree hint" `Quick

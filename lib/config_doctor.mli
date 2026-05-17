@@ -45,6 +45,11 @@ val status_to_string : status -> string
     ["ok"] / ["warn"] / ["error"].  Pinned literal — drift would
     break tooling that parses the config-doctor JSON. *)
 
+val warning_is_blocking : string -> bool
+(** [warning_is_blocking warning] returns [false] for informational
+    warnings that should remain visible in config-doctor output without
+    blocking higher-level diagnostics such as [doctor keeper]. *)
+
 (** {1 Inputs + report records} *)
 
 type inputs = {
@@ -84,6 +89,11 @@ type t = {
 (** Aggregate report.  Concrete record — callers (CLI rendering,
     tests, dashboard JSON) destructure fields directly.
     18 fields; new fields go through this contract. *)
+
+val has_blocking_warning : t -> bool
+(** [has_blocking_warning report] treats [Error] reports as blocking and
+    [Warn] reports as blocking only when at least one warning needs operator
+    action before another diagnostic should proceed. *)
 
 (** {1 Catalog issue re-exports} *)
 

@@ -1,0 +1,83 @@
+(** Generic 4-kind FD accountant (RFC-0101).
+
+    Extends {!Docker_spawn_throttle}'s 2-layer cap (semaphore + FD-pressure
+    serialization) into a multi-class pool covering every spawn class
+    that shares the host [kern.maxfiles] ceiling.
+
+    Reference incident: 2026-05-16 18:08-18:15 ENFILE storm — 12+
+    keepers concurrently retried cascade tiers, each retry spawned a
+    fresh [docker run --rm], no backpressure existed at the host
+    layer. PR #15727 closed docker; this RFC closes the other three
+    classes against the same ceiling.
+
+    Layer A (per-kind): bounded concurrency via [Eio.Semaphore]. Each
+    [kind] has its own slot count, env-overridable.
+
+    Layer B (shared): when [Keeper_fd_pressure.active ()] is true, ALL
+    kinds serialize against a shared global mutex. Engaged
+    automatically; gives the cooldown room to drain.
+
+    Callers wrap with [with_slot ~kind f]; [f] is invoked after a slot
+    is acquired and FD-pressure (if active) is taken. *)
+
+type kind =
+  | Docker_spawn
+      (** [docker run / exec / ...] subprocess. Migrates from
+          {!Docker_spawn_throttle.with_slot} which now delegates here. *)
+  | Provider_http
+      (** Outbound LLM/tool HTTP connection
+          ([Eio.Net.with_tcp_connect] + TLS state). One slot per
+          in-flight call. *)
+  | Sandbox_exec
+      (** Inner shell exec inside a sandbox container (popen pipes
+          stdin/out/err + cgroup FD). Distinct from [Docker_spawn]
+          which is the *container* spawn. *)
+  | Log_writer
+      (** High-throughput log writer (dashboard SSE log stream,
+          telemetry JSONL append). Low-throughput [Log.warn] /
+          [Log.error] paths are NOT slotted — they're FD-cost
+          negligible. *)
+
+val with_slot : kind:kind -> (unit -> 'a) -> 'a
+(** [with_slot ~kind f] acquires a [kind]-typed slot, runs [f ()],
+    releases the slot, returns [f]'s result. When
+    [Keeper_fd_pressure.active ()] is true at acquire time, [f] is
+    additionally serialized against all in-flight callers across all
+    kinds.
+
+    Exceptions from [f] propagate; the slot is always released
+    (via [Eio.Switch.on_release]). *)
+
+val effective_concurrency : kind:kind -> int
+(** [effective_concurrency ~kind] returns the current cap.
+    Returns [1] while [Keeper_fd_pressure.active ()] is true
+    (degraded serialization), the kind's configured maximum
+    otherwise. Observability only — not a synchronization primitive. *)
+
+val configured_concurrency : kind:kind -> int
+(** [configured_concurrency ~kind] returns the env-configured cap
+    irrespective of current pressure state. *)
+
+type snapshot = {
+  per_kind : (kind * int) list ;
+      (** in-flight count per class (cap − available semaphore slots). *)
+  fd_open : int ;
+      (** Best-effort observation of process-wide open FDs.
+          On macOS / Linux uses [/dev/fd] / [/proc/self/fd] counting;
+          on platforms where neither is available, returns [-1]. *)
+  fd_limit : int ;
+      (** [RLIMIT_NOFILE] soft cap. [-1] when not available. *)
+  pressure_active : bool ;
+}
+
+val fd_snapshot : unit -> snapshot
+(** [fd_snapshot ()] returns a point-in-time observability snapshot
+    suitable for the [/metrics] Prometheus endpoint (PR-5) and the
+    dashboard System Health panel. Best-effort: missing platform data
+    is reported as [-1] rather than raising. *)
+
+val kind_to_string : kind -> string
+val kind_of_string : string -> kind option
+
+val all_kinds : kind list
+(** Enumerable list, used by snapshot iteration and tests. *)

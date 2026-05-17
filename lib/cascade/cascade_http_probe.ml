@@ -161,14 +161,53 @@ let try_probe ~sw ~net ?clock ?timeout_s ?now url =
   with
   | Error _ -> None
   | Ok (status, body) when status = 200 ->
-    (match Yojson.Safe.from_string body with
-     | exception _ -> None
-     | json ->
+    (* Iter 29 (V07 follow-up): make malformed JSON probe responses
+       visible. Previously the [exception _ -> None] catch-all returned
+       [None] without log or counter, masking "endpoint up but emitting
+       bad JSON" as "endpoint down". Behavior preserved — we still
+       return [None]; the counter + warn exist so the two failure modes
+       can be told apart in production. [Eio.Cancel.Cancelled] is
+       re-raised so cancellation semantics are preserved. *)
+    let body_preview =
+      String.sub body 0 (min 200 (String.length body))
+    in
+    let parsed =
+      try Ok (Yojson.Safe.from_string body) with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | Yojson.Json_error msg -> Error (`Json_parse_error msg)
+      | exn -> Error (`Other exn)
+    in
+    (match parsed with
+     | Ok json ->
        (match parse_response ~now json with
         | None -> None
         | Some cap ->
           store_capacity ~url ~capacity:cap ~now;
-          Some cap))
+          Some cap)
+     | Error (`Json_parse_error msg) ->
+       Log.Cascade.warn
+         "[cascade-http-probe] dropping probe response from %s: \
+          malformed JSON (%s); body_preview=%S"
+         endpoint msg body_preview;
+       Prometheus.inc_counter
+         Keeper_metrics.metric_cascade_http_probe_json_parse_failures
+         ~labels:
+           [ ("error_kind", "yojson_parse_error")
+           ; ("probe_kind", "ollama_api_ps")
+           ]
+         ();
+       None
+     | Error (`Other exn) ->
+       Log.Cascade.warn
+         "[cascade-http-probe] dropping probe response from %s: %s; \
+          body_preview=%S"
+         endpoint (Printexc.to_string exn) body_preview;
+       Prometheus.inc_counter
+         Keeper_metrics.metric_cascade_http_probe_json_parse_failures
+         ~labels:
+           [ ("error_kind", "other"); ("probe_kind", "ollama_api_ps") ]
+         ();
+       None)
   | Ok _ -> None
 ;;
 

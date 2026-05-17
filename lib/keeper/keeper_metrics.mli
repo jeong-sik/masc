@@ -198,6 +198,7 @@ type t =
   | RecurringFailures
   | TurnCleanupFailures
   | MemoryBankLoadHistorySwallowedExceptions
+  | CascadeHttpProbeJsonParseFailures
 
 val to_string : t -> string
 
@@ -609,6 +610,32 @@ val metric_keeper_session_cleanup_failures : string
     line); the counter exists so JSONL corruption / fs faults stop
     masking as "no history". *)
 val metric_keeper_memory_bank_load_history_swallowed_exceptions : string
+
+(** Counter for probe responses dropped by the silent JSON parse catch-all
+    in [Cascade_http_probe.try_probe]. Before this counter existed the
+    [match Yojson.Safe.from_string body with | exception _ -> None] branch
+    returned [None] without log/counter, leaving operators unable to
+    distinguish "endpoint down" from "endpoint up but emitting bad JSON".
+
+    Labels:
+    {ul
+    {- [error_kind] — closed 2-value vocabulary
+       \{[yojson_parse_error] | [other]\}. [yojson_parse_error] is
+       [Yojson.Json_error _]; [other] is the terminal bucket for any
+       other (non-[Eio.Cancel.Cancelled]) exception. Bounded by
+       constructor-level pattern match on the [exn] type, not a
+       substring scan on [Printexc.to_string].}
+    {- [probe_kind] — closed 1-value vocabulary \{[ollama_api_ps]\}.
+       Only one probe site exists in [cascade_http_probe.ml]; the label
+       is named after the [/api/ps] endpoint it targets.}}
+
+    Cardinality bound: 2 × 1 = 2 label combinations.
+    Behavior is unchanged (the probe still returns [None] on parse
+    failure); the counter and accompanying [Log.Cascade.warn] exist so
+    "endpoint up but JSON is garbage" stops being indistinguishable
+    from "endpoint down". *)
+val metric_cascade_http_probe_json_parse_failures : string
+
 val metric_keeper_path_resolver_identity_mismatch : string
 val metric_keeper_passive_loop_streak : string
 val metric_keeper_passive_loop_streak_exceeded : string

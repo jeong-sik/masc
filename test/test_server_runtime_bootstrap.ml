@@ -972,6 +972,8 @@ let test_health_json_surfaces_durable_paused_keepers () =
           let json = Server_routes_http_runtime.make_health_json request in
           let open Yojson.Safe.Util in
           let paused = json |> member "paused_keepers" in
+          let fd_pressure = json |> member "keeper_fd_pressure" in
+          let fleet_safety = json |> member "keeper_fleet_safety" in
           let durable_names =
             paused |> member "durable_names" |> to_list |> List.map to_string
           in
@@ -985,7 +987,21 @@ let test_health_json_surfaces_durable_paused_keepers () =
           Alcotest.(check bool) "union excludes active durable keeper" false
             (List.exists (( = ) "durable-active") names);
           Alcotest.(check int) "durable read errors" 0
-            (paused |> member "read_error_count" |> to_int)))
+            (paused |> member "read_error_count" |> to_int);
+          Alcotest.(check int) "health exposes requested 24-keeper FD budget"
+            24
+            (fd_pressure |> member "requested_keepers" |> to_int);
+          Alcotest.(check int) "health exposes target 24-keeper FD budget" 24
+            (fd_pressure |> member "target_keeper_count" |> to_int);
+          ignore (fd_pressure |> member "status" |> to_string);
+          ignore (fd_pressure |> member "admission_blocked" |> to_bool);
+          ignore
+            (fd_pressure |> member "admission_decision" |> member "status" |> to_string);
+          Alcotest.(check int) "health exposes bootable keeper count" 1
+            (fleet_safety |> member "bootable_keeper_count" |> to_int);
+          Alcotest.(check int) "health exposes minimum running fibers" 1
+            (fleet_safety |> member "minimum_running_fibers" |> to_int);
+          ignore (fleet_safety |> member "status" |> to_string)))
 
 let test_health_json_surfaces_log_ring_summary () =
   Log.set_level Log.Info;

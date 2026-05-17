@@ -30,13 +30,6 @@ let test_get_cascade_status_default_unknown () =
     (H.get_cascade_status ~cascade_name:"never-written-cascade-xyz")
 ;;
 
-let test_is_healthy_unknown () =
-  Alcotest.(check bool)
-    "is_healthy on uninitialized keeper = false"
-    false
-    (Masc_mcp.Keeper_health_probe.is_healthy ~keeper_name:"k1-never-set")
-;;
-
 let test_check_cascade_health_all_healthy () =
   let base_dir = Filename.temp_file "probe-" "" in
   Sys.remove base_dir;
@@ -142,7 +135,6 @@ let () =
             "default_status_is_unknown"
             `Quick
             test_get_cascade_status_default_unknown
-        ; Alcotest.test_case "is_healthy_unknown_compat" `Quick test_is_healthy_unknown
         ] )
     ; ( "cascade"
       , [ Alcotest.test_case

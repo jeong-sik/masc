@@ -29,17 +29,6 @@ val set_item_health : keeper_name:string -> item_id:string -> health_status -> u
     state based on turn outcome. Success -> Healthy, Failure -> Unhealthy. *)
 val record_item_result : keeper_name:string -> item_id:string -> success:bool -> unit
 
-(** {1 Backward-compatible per-keeper health (deprecated)} *)
-
-(** [is_healthy ~keeper_name] returns true if ANY item for this keeper
-    is Healthy. Deprecated: use [is_item_healthy] for per-item routing.
-    Kept for existing callers that haven't migrated yet. *)
-val is_healthy : keeper_name:string -> bool
-
-(** [set_health ~keeper_name status] sets health for the legacy
-    per-cascade key. Kept for the background probe fiber. *)
-val set_health : keeper_name:string -> health_status -> unit
-
 (** {1 Phase-based health predicate} *)
 
 (** [is_terminal_unhealthy phase] returns true only for terminal
@@ -72,16 +61,16 @@ val max_failed_allowed_for_cascade : total:int -> int
 val check_cascade_health : base_path:string -> (string * bool) list
 
 (** [get_cascade_status ~cascade_name] returns the cached cascade-level
-    [health_status] written by [run_once]/[set_health].  Unlike
-    [is_healthy], this preserves the [Unknown] case so the supervisor's
-    auto-resume guard can distinguish "no probe data yet" from
+    [health_status] written by [run_once].  This preserves the [Unknown]
+    case so the supervisor's auto-resume guard can distinguish
+    "no probe data yet" from
     "probe observed restart pressure" and treat the former
     permissively.
 
     Background: prior to wiring this distinction, the supervisor's
-    Phase 3.5 guard called [is_healthy] which collapsed [Unknown] and
-    [Unhealthy] to [false] — turning the boot-time cold-cache window
-    into a permanent auto-resume lockout for every cascade. *)
+    Phase 3.5 guard collapsed [Unknown] and [Unhealthy] to the same
+    boolean result — turning the boot-time cold-cache window into a
+    permanent auto-resume lockout for every cascade. *)
 val get_cascade_status : cascade_name:string -> health_status
 
 (** [run_once ~base_path] runs [check_cascade_health] and writes the

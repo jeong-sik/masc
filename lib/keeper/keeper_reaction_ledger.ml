@@ -42,6 +42,22 @@ let option_json f = function
 
 let list_json values = `List (List.map (fun value -> `String value) values)
 
+let payload_field name payload =
+  try
+    match Yojson.Safe.from_string payload with
+    | `Assoc fields -> List.assoc_opt name fields
+    | _ -> None
+  with
+  | Yojson.Json_error _ -> None
+;;
+
+let payload_float_field name payload =
+  match payload_field name payload with
+  | Some (`Float value) -> Some value
+  | Some (`Int value) -> Some (float_of_int value)
+  | _ -> None
+;;
+
 let payload_preview payload =
   let limit = 512 in
   if String.length payload <= limit
@@ -112,6 +128,11 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
   let kind = stimulus_kind_of_event_queue stimulus in
   let stimulus_id = stimulus_id_of_event_queue stimulus in
   let recorded_at = Time_compat.now () in
+  let board_updated_at =
+    match kind with
+    | Board_signal -> payload_float_field "updated_at_unix" stimulus.payload
+    | Bootstrap | Alive_but_stuck_recovery | Unknown _ -> None
+  in
   `Assoc
     (base_fields
        ~record_kind:"stimulus"
@@ -126,6 +147,7 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
              ; "post_id", `String stimulus.post_id
              ; "urgency", `String (urgency_to_string stimulus.urgency)
              ; "arrived_at_unix", `Float stimulus.arrived_at
+             ; "board_updated_at_unix", option_json (fun value -> `Float value) board_updated_at
              ; "payload_preview", `String (payload_preview stimulus.payload)
              ] )
        ])
@@ -320,6 +342,12 @@ let nested_string_field outer inner json =
   | None -> None
 ;;
 
+let nested_float_field outer inner json =
+  match assoc_field outer json with
+  | Some nested -> float_field inner nested
+  | None -> None
+;;
+
 let option_string_json = function
   | Some value -> `String value
   | None -> `Null
@@ -342,6 +370,30 @@ let cap_list limit values =
   loop limit [] values
 ;;
 
+let compare_board_cursor_token (ts_a, post_id_a) (ts_b, post_id_b) =
+  let cmp = Float.compare ts_a ts_b in
+  if cmp <> 0 then cmp else String.compare post_id_a post_id_b
+;;
+
+let board_stimulus_token row =
+  match nested_string_field "stimulus" "kind" row with
+  | Some "board_signal" ->
+    let post_id =
+      match nested_string_field "stimulus" "post_id" row with
+      | Some value -> value
+      | None -> ""
+    in
+    (match nested_float_field "stimulus" "board_updated_at_unix" row with
+     | Some updated_at -> Some ((updated_at, post_id), false)
+     | None ->
+       (* Legacy rows written before board cursor tokens were persisted still
+          need a conservative replay path for live operator visibility. *)
+       (match nested_float_field "stimulus" "arrived_at_unix" row with
+        | Some arrived_at -> Some ((arrived_at, post_id), true)
+        | None -> None))
+  | _ -> None
+;;
+
 let summarize_rows ~keeper_name ~limit rows =
   let row_count = List.length rows in
   let stimulus_count = ref 0 in
@@ -355,7 +407,11 @@ let summarize_rows ~keeper_name ~limit rows =
   let latest_recorded_at = ref None in
   let latest_stimulus_id = ref None in
   let stimulus_seen = Hashtbl.create 16 in
+  let board_stimulus_tokens = Hashtbl.create 16 in
   let stimulus_order = ref [] in
+  let latest_board_cursor = ref None in
+  let cursor_swept_stimulus_count = ref 0 in
+  let legacy_cursor_swept_stimulus_count = ref 0 in
   let remember_stimulus stimulus_id =
     if not (Hashtbl.mem stimulus_seen stimulus_id) then begin
       Hashtbl.add stimulus_seen stimulus_id false;
@@ -365,6 +421,48 @@ let summarize_rows ~keeper_name ~limit rows =
   let mark_reacted stimulus_id =
     match Hashtbl.find_opt stimulus_seen stimulus_id with
     | Some _ -> Hashtbl.replace stimulus_seen stimulus_id true
+    | None -> ()
+  in
+  let mark_cursor_swept stimulus_id =
+    match Hashtbl.find_opt stimulus_seen stimulus_id with
+    | Some false ->
+      Hashtbl.replace stimulus_seen stimulus_id true;
+      incr cursor_swept_stimulus_count
+    | Some true | None -> ()
+  in
+  let mark_board_cursor_swept cursor_token =
+    Hashtbl.iter
+      (fun stimulus_id (stimulus_token, legacy_token) ->
+        if compare_board_cursor_token stimulus_token cursor_token <= 0 then begin
+          let before = Hashtbl.find_opt stimulus_seen stimulus_id in
+          mark_cursor_swept stimulus_id;
+          match before, Hashtbl.find_opt stimulus_seen stimulus_id with
+          | Some false, Some true when legacy_token ->
+            incr legacy_cursor_swept_stimulus_count
+          | _ -> ()
+        end)
+      board_stimulus_tokens
+  in
+  let note_board_cursor cursor_token =
+    (match !latest_board_cursor with
+     | Some latest when compare_board_cursor_token latest cursor_token >= 0 -> ()
+     | _ -> latest_board_cursor := Some cursor_token);
+    mark_board_cursor_swept cursor_token
+  in
+  let remember_board_stimulus row stimulus_id =
+    match board_stimulus_token row with
+    | Some (stimulus_token, legacy_token) ->
+      Hashtbl.replace board_stimulus_tokens stimulus_id (stimulus_token, legacy_token);
+      (match !latest_board_cursor with
+       | Some cursor_token
+         when compare_board_cursor_token stimulus_token cursor_token <= 0 ->
+         let before = Hashtbl.find_opt stimulus_seen stimulus_id in
+         mark_cursor_swept stimulus_id;
+         (match before, Hashtbl.find_opt stimulus_seen stimulus_id with
+          | Some false, Some true when legacy_token ->
+            incr legacy_cursor_swept_stimulus_count
+          | _ -> ())
+       | _ -> ())
     | None -> ()
   in
   let note_reaction_kind = function
@@ -386,7 +484,8 @@ let summarize_rows ~keeper_name ~limit rows =
       match string_field "record_kind" row, stimulus_id with
       | Some "stimulus", Some id ->
         incr stimulus_count;
-        remember_stimulus id
+        remember_stimulus id;
+        remember_board_stimulus row id
       | Some "reaction", Some id ->
         incr reaction_count;
         note_reaction_kind (nested_string_field "reaction" "kind" row);
@@ -394,13 +493,27 @@ let summarize_rows ~keeper_name ~limit rows =
       | Some "cursor_ack", Some id ->
         incr reaction_count;
         incr cursor_ack_count;
-        mark_reacted id
+        mark_reacted id;
+        (match nested_float_field "cursor" "cursor_ts" row with
+         | Some cursor_ts ->
+           let cursor_post_id =
+             nested_string_field "cursor" "post_id" row |> Option.value ~default:""
+           in
+           note_board_cursor (cursor_ts, cursor_post_id)
+         | None -> ())
       | Some "reaction", None ->
         incr reaction_count;
         note_reaction_kind (nested_string_field "reaction" "kind" row)
       | Some "cursor_ack", None ->
         incr reaction_count;
-        incr cursor_ack_count
+        incr cursor_ack_count;
+        (match nested_float_field "cursor" "cursor_ts" row with
+         | Some cursor_ts ->
+           let cursor_post_id =
+             nested_string_field "cursor" "post_id" row |> Option.value ~default:""
+           in
+           note_board_cursor (cursor_ts, cursor_post_id)
+         | None -> ())
       | _ -> ())
     rows;
   let pending_stimulus_ids =
@@ -432,6 +545,8 @@ let summarize_rows ~keeper_name ~limit rows =
     ; "terminal_reason_count", `Int !terminal_reason_count
     ; "operator_escalation_count", `Int !operator_escalation_count
     ; "unknown_reaction_count", `Int !unknown_reaction_count
+    ; "cursor_swept_stimulus_count", `Int !cursor_swept_stimulus_count
+    ; "legacy_cursor_swept_stimulus_count", `Int !legacy_cursor_swept_stimulus_count
     ; "pending_stimulus_count", `Int pending_stimulus_count
     ; ( "pending_stimulus_ids"
       , `List
@@ -460,6 +575,8 @@ let error_summary ~keeper_name ~limit error =
     ; "terminal_reason_count", `Int 0
     ; "operator_escalation_count", `Int 0
     ; "unknown_reaction_count", `Int 0
+    ; "cursor_swept_stimulus_count", `Int 0
+    ; "legacy_cursor_swept_stimulus_count", `Int 0
     ; "pending_stimulus_count", `Int 0
     ; "pending_stimulus_ids", `List []
     ; "latest_recorded_at_unix", `Null
@@ -553,6 +670,9 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     ; "terminal_reason_count", `Int (total_int "terminal_reason_count")
     ; "operator_escalation_count", `Int (total_int "operator_escalation_count")
     ; "unknown_reaction_count", `Int (total_int "unknown_reaction_count")
+    ; "cursor_swept_stimulus_count", `Int (total_int "cursor_swept_stimulus_count")
+    ; ( "legacy_cursor_swept_stimulus_count"
+      , `Int (total_int "legacy_cursor_swept_stimulus_count") )
     ; "pending_stimulus_count", `Int pending_count
     ; "pending_by_keeper", `List pending_by_keeper
     ; "read_error_count", `Int read_error_count

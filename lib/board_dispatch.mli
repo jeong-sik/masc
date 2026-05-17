@@ -44,6 +44,7 @@ type keeper_board_signal = {
   title : string;
   content : string;
   hearth : string option;
+  updated_at : float option;
 }
 
 type board_sse_event =

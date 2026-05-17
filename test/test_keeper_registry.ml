@@ -1537,6 +1537,7 @@ let test_board_signal_wakeup_ignores_unmatched_posts_without_opt_in () =
             title = post.title;
             content = post.content;
             hearth = post.hearth;
+            updated_at = Some post.updated_at;
           }
         in
         KK.wakeup_relevant_keeper_for_board_signal ~config signal;
@@ -1582,6 +1583,7 @@ let test_board_signal_wakeup_only_wakes_opted_in_scope_keeper () =
             title = post.title;
             content = post.content;
             hearth = post.hearth;
+            updated_at = Some post.updated_at;
           }
         in
         KK.wakeup_relevant_keeper_for_board_signal ~config signal;
@@ -1649,6 +1651,7 @@ let test_board_signal_wakeup_keeps_thread_reply_after_self_comment () =
             title = post.title;
             content = "There is a new question for you.";
             hearth = post.hearth;
+            updated_at = Some post.updated_at;
           }
         in
         KK.wakeup_relevant_keeper_for_board_signal ~config signal;

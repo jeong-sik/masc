@@ -242,6 +242,8 @@ let board_signal_stimulus ~(reason : string) (signal : Board_dispatch.keeper_boa
       ; "title", `String signal.title
       ; "content", `String signal.content
       ; "hearth", (match signal.hearth with Some v -> `String v | None -> `Null)
+      ; ( "updated_at_unix"
+        , match signal.updated_at with Some v -> `Float v | None -> `Null )
       ; "wake_reason", `String reason
       ]
     |> Yojson.Safe.to_string

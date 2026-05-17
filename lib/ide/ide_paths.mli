@@ -31,6 +31,32 @@ val orphan_path : base_dir:string -> string
     Records whose canonical URL cannot be resolved land here so silent
     loss is impossible. *)
 
+type partition =
+  | Legacy
+  | By_url of string
+  | Orphan
+(** RFC-0128 §4.2 store partition selector.
+
+    [Legacy] selects the flat pre-RFC-0128 directory
+    [base_dir/.masc-ide/] (the historical location of
+    [annotations.jsonl] and [regions.jsonl]). New callers should not
+    pass this; it stays as the optional-arg default in PR-1b so
+    every existing call site keeps writing/reading where it used to,
+    and the cut-over to [By_url] happens in PR-1c.
+
+    [By_url slug] selects [base_dir/.masc-ide/by-url/<slug>/]. The
+    caller must obtain [slug] from {!canonical_url_of_remote}.
+
+    [Orphan] selects [base_dir/.masc-ide/_orphan/]. Used when the
+    caller knows a record cannot be assigned to a canonical URL
+    (reverse lookup failed). Silent loss is avoided by routing
+    failures here instead of dropping them. *)
+
+val partition_store_dir : base_dir:string -> partition -> string
+(** [partition_store_dir ~base_dir partition] returns the directory
+    that holds [annotations.jsonl] / [regions.jsonl] for the chosen
+    partition. Total. *)
+
 val canonical_url_of_remote : string -> string option
 (** [canonical_url_of_remote remote] normalises a git remote string
     into a host_path slug, e.g.

@@ -21,7 +21,7 @@ module Cache = struct
         let filter : annotation_filter =
           { file_path = Some file_path; keeper_id = None; goal_id = None; task_id = None }
         in
-        let annotations = Ide_annotations.list ~base_dir ~filter in
+        let annotations = Ide_annotations.list ~base_dir ~filter () in
         Hashtbl.replace tbl k annotations;
         annotations)
 

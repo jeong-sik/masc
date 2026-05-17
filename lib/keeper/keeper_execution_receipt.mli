@@ -245,6 +245,7 @@ type operator_disposition_reason =
   | Reason_provider_runtime_error
   | Reason_internal_error
   | Reason_tool_required_unsatisfied
+  | Reason_tool_route_recoverable_failure
   | Reason_turn_livelock_blocked
   | Reason_cancelled
   | Reason_phase_skipped

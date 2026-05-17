@@ -1108,7 +1108,7 @@ let composite_execution_tool_required execution =
     ]
   || string_opt_is_any
        (json_string "operator_disposition_reason" execution)
-       [ "tool_required_unsatisfied" ]
+       [ "tool_required_unsatisfied"; "tool_route_recoverable_failure" ]
 ;;
 
 let composite_execution_config_blocked execution =

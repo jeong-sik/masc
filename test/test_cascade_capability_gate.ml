@@ -136,6 +136,44 @@ target = "tier.primary"
         ~provider_ceiling:ceiling 65536
       |> check_violation "requested_exceeds_provider_ceiling" 65536 8192)
 
+let test_public_cap_helper_clamps_caller_override_to_cascade_ceiling () =
+  with_temp_cascade_toml
+    {|
+[providers.remote]
+protocol = "openai-http"
+endpoint = "https://example.test/v1"
+
+[models.narrow]
+api-name = "remote-narrow"
+max-context = 200000
+tools-support = true
+
+[models.narrow.capabilities]
+max-output-tokens = 8192
+
+[remote.narrow]
+max-concurrent = 1
+
+[tier.primary]
+members = ["remote.narrow"]
+
+[routes.keeper_unified]
+target = "tier.primary"
+|}
+    (fun () ->
+      let ceiling = CR.max_output_tokens_ceiling_of_cascade_name cascade_name in
+      check (option int) "output ceiling" (Some 8192) ceiling;
+      let capped =
+        CI.cap_max_tokens_to_cascade_ceiling
+          ~cascade_name
+          ~source:"caller_override"
+          16384
+      in
+      check int "caller override capped to ceiling" 8192 capped;
+      CI.validate_max_tokens_within_ceiling ~cascade_name
+        ~provider_ceiling:ceiling capped
+      |> check_ok "capped caller override accepted" 8192)
+
 let test_resolve_max_tokens_caps_automatic_value_to_cascade_ceiling () =
   with_temp_cascade_toml
     {|
@@ -350,6 +388,10 @@ let () =
         "cascade output cap, not context window, gates max_tokens"
         `Quick
         test_cascade_output_cap_not_context_window;
+      test_case
+        "caller override clamp uses cascade output ceiling"
+        `Quick
+        test_public_cap_helper_clamps_caller_override_to_cascade_ceiling;
       test_case
         "automatic max_tokens respects mixed failover ceiling"
         `Quick

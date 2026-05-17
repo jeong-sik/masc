@@ -54,7 +54,11 @@ let prepare_run_context
   in
   let max_tokens =
     match max_tokens with
-    | Some t -> t
+    | Some t ->
+      Cascade_inference.cap_max_tokens_to_cascade_ceiling
+        ~cascade_name
+        ~source:"caller_override"
+        t
     | None ->
       Cascade_inference.resolve_max_tokens
         ~cascade_name

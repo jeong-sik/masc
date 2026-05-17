@@ -1136,8 +1136,13 @@ let auto_provision_sandbox_clone ~config ~agent_name ~repos_dir ~repo_name =
                          origin_url err)))
              | Ok () ->
                  let origin_url = normalize_github_clone_url origin_url in
+                 (* Network-bound clone: default local_op_timeout_sec (30s)
+                    aborts at ~25% on 6464-file repos (#9587 same root).
+                    Use the longer git_fetch_timeout_sec budget. *)
                  let status, output =
-                   run_argv_with_status [ "git"; "clone"; origin_url; clone_path ]
+                   run_argv_with_status
+                     ~timeout_sec:(Env_config_core.git_fetch_timeout_sec ())
+                     [ "git"; "clone"; origin_url; clone_path ]
                  in
                  if status <> Unix.WEXITED 0 then
                    Error

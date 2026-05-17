@@ -151,7 +151,7 @@ let publish_keeper_snapshot (_bus : Agent_sdk.Event_bus.t) ~keeper_name
     Issue #8575: the previous docstring listed only five names, so
     operators silently missed the cleanup and self-healing events
     (\[reconciled\] / \[dead_cleaned\] / \[self_preservation\] /
-    \[paused_pruned\]) — exactly the events that signal supervisor
+    \[paused_pruned\] / \[admission_denied\]) — exactly the events that signal supervisor
     recovery actions where observability matters most. Subscribe to
     {!Keeper_lifecycle_events.all_event_names} to receive the full
     stream; the sync test in [test_types.ml ::

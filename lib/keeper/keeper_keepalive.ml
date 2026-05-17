@@ -658,9 +658,20 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
      | _ -> ());
     if Keeper_registry.is_registered ~base_path:ctx.config.base_path m.name
     then Log.Keeper.info "start_keepalive: skipped %s (already registered)" m.name
-    else if not (Keeper_registry.spawn_slots_available ())
-    then Log.Keeper.info "start_keepalive: skipped %s (no spawn slots)" m.name
-    else (
+    else
+      match Keeper_registry.spawn_slots_decision ~base_path:ctx.config.base_path () with
+      | Error reason ->
+        Keeper_registry.record_spawn_slot_denied ~keeper_name:m.name ~surface:"keepalive" reason;
+        publish_keeper_lifecycle
+          ~event:
+            (Keeper_lifecycle_events.Custom_event
+               { verb = Keeper_lifecycle_events.Admission_denied
+               ; phase = Some Keeper_state_machine.Offline
+               })
+          ~keeper_name:m.name
+          ~detail:(Keeper_registry.spawn_slot_denial_reason_to_detail reason)
+          ()
+      | Ok () -> (
       (* Register in Keeper_registry first — single source of truth. *)
       let reg =
         Keeper_registry.register_offline ~base_path:ctx.config.base_path m.name m

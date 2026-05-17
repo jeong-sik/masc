@@ -160,6 +160,7 @@ type t =
   | EventBusDrain
   | SupervisorCleanupFailures
   | SlotForceReleased
+  | SpawnSlotDenied
   | RegistryUpdateDropped
   | RegistryOrphanThresholdBreached
   | StaleWatchdogTickFailures
@@ -364,6 +365,7 @@ let to_string = function
   | EventBusDrain -> "masc_keeper_event_bus_drain_total"
   | SupervisorCleanupFailures -> "masc_keeper_supervisor_cleanup_failures_total"
   | SlotForceReleased -> "masc_keeper_slot_force_released_total"
+  | SpawnSlotDenied -> "masc_keeper_spawn_slot_denied_total"
   | RegistryUpdateDropped -> "masc_keeper_registry_update_dropped_total"
   | RegistryOrphanThresholdBreached ->
     "masc_keeper_registry_orphan_threshold_breached_total"
@@ -821,6 +823,7 @@ let metric_keeper_supervisor_cleanup_failures =
 ;;
 
 let metric_keeper_slot_force_released = "masc_keeper_slot_force_released_total"
+let metric_keeper_spawn_slot_denied = "masc_keeper_spawn_slot_denied_total"
 let metric_keeper_registry_update_dropped = "masc_keeper_registry_update_dropped_total"
 
 let metric_keeper_registry_orphan_threshold_breached =

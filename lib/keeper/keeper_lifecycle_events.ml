@@ -1,14 +1,15 @@
 (** Issue #8575: SSOT for the [event] string emitted by
     {!Cascade_events.publish_keeper_lifecycle}.
 
-    The supervisor and keepalive together emit eleven distinct event
+    The supervisor and keepalive together emit twelve distinct event
     names through that function. The docstring on
     [Cascade_events.publish_keeper_lifecycle] previously listed only five
     of them, so operators reading the doc subscribed to the
     phase-derived events ([started] / [stopped] / [crashed] /
     [restarted] / [dead]) and silently missed the cleanup /
     self-healing events ([reconciled] / [dead_cleaned] /
-    [self_preservation] / [paused_pruned] / [auto_resumed]) — exactly
+    [self_preservation] / [paused_pruned] / [auto_resumed] /
+    [admission_denied]) — exactly
     the events that signal supervisor recovery actions where
     observability matters most.
 
@@ -33,7 +34,8 @@
     - [Dead_cleaned]       : tombstone cleanup after restart budget exhaustion
     - [Self_preservation]  : supervisor refused a cascade-wide action to protect itself
     - [Paused_pruned]      : paused keeper removed from registry after timeout
-    - [Auto_resumed]       : supervisor auto-resumed a keeper after circuit-breaker back-off *)
+    - [Auto_resumed]       : supervisor auto-resumed a keeper after circuit-breaker back-off
+    - [Admission_denied]   : spawn/admission guard refused to launch a keeper *)
 type t =
   | Started
   | Reconciled
@@ -42,6 +44,7 @@ type t =
   | Self_preservation
   | Paused_pruned
   | Auto_resumed
+  | Admission_denied
 
 let to_string = function
   | Started -> "started"
@@ -51,10 +54,11 @@ let to_string = function
   | Self_preservation -> "self_preservation"
   | Paused_pruned -> "paused_pruned"
   | Auto_resumed -> "auto_resumed"
+  | Admission_denied -> "admission_denied"
 
 let all_custom_events : t list =
   [ Started; Reconciled; Restarted; Dead_cleaned;
-    Self_preservation; Paused_pruned; Auto_resumed ]
+    Self_preservation; Paused_pruned; Auto_resumed; Admission_denied ]
 
 let valid_custom_event_strings : string list =
   List.map to_string all_custom_events
@@ -84,7 +88,7 @@ let all_event_names : string list =
     time but not at compile time.
 
     This sum type unifies the two pre-existing typed vocabularies
-    ([t] for the 6 custom verbs, [Keeper_state_machine.phase] for the
+    ([t] for the custom verbs, [Keeper_state_machine.phase] for the
     4 phase-derived names) so the wire string is computed inside
     [Cascade_events.publish_keeper_lifecycle] from a fully-typed argument.
     A typo at the call site is now a build error.

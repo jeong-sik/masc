@@ -13,6 +13,9 @@ module Disk = Masc_mcp.Keeper_disk_pressure
 
 let bp = "/tmp/test"
 
+let healthy_fd_snapshot =
+  FD.{ open_files = 100; max_files = 10_000; max_files_per_process = None }
+
 let with_env name value f =
   let old = Sys.getenv_opt name in
   Unix.putenv name value;
@@ -84,6 +87,7 @@ let test_fd_pressure_proactive_admission () =
     (FD.admit_start
        ~soft_limit:(Some 512)
        ~open_fds:(Some 16)
+       ~system_fds:(Some healthy_fd_snapshot)
        ~active_keepers:2
        ~starting_keepers:1
        ());
@@ -91,6 +95,7 @@ let test_fd_pressure_proactive_admission () =
     (FD.admit_start
        ~soft_limit:(Some 512)
        ~open_fds:(Some 460)
+       ~system_fds:(Some healthy_fd_snapshot)
        ~active_keepers:2
        ~starting_keepers:1
        ());
@@ -98,8 +103,69 @@ let test_fd_pressure_proactive_admission () =
     (FD.admit_turn
        ~soft_limit:(Some 512)
        ~open_fds:(Some 16)
+       ~system_fds:(Some healthy_fd_snapshot)
        ~active_keepers:8
        ())
+
+let test_fd_pressure_probe_unknown_admission () =
+  FD.reset_for_tests ();
+  let check_block_kind label expected decision =
+    check bool (label ^ " blocks admission") false (FD.admitted decision);
+    check string (label ^ " reason") expected
+      (match decision with
+       | FD.Block block -> FD.admission_block_kind block
+       | FD.Admit -> "admit")
+  in
+  let soft_unknown =
+    FD.admission_decision
+      ~soft_limit:None
+      ~open_fds:(Some 64)
+      ~system_fds:(Some healthy_fd_snapshot)
+      ~active_keepers:2
+      ~starting_keepers:1
+      ()
+  in
+  check_block_kind
+    "soft limit probe unknown"
+    "process_nofile_soft_limit_probe_unknown"
+    soft_unknown;
+  let open_fds_unknown =
+    FD.admission_decision
+      ~soft_limit:(Some 245_760)
+      ~open_fds:None
+      ~system_fds:(Some healthy_fd_snapshot)
+      ~active_keepers:2
+      ~starting_keepers:1
+      ()
+  in
+  check_block_kind
+    "open fd probe unknown"
+    "process_open_fds_probe_unknown"
+    open_fds_unknown;
+  let system_unknown =
+    FD.admission_decision
+      ~soft_limit:(Some 245_760)
+      ~open_fds:(Some 64)
+      ~system_fds:None
+      ~active_keepers:2
+      ~starting_keepers:1
+      ()
+  in
+  check_block_kind "system fd probe unknown" "system_fd_probe_unknown" system_unknown;
+  let runtime =
+    FD.runtime_state_json
+      ~soft_limit:(Some 245_760)
+      ~open_fds:(Some 64)
+      ~system_fds:None
+      ~active_keepers:2
+      ~starting_keepers:1
+      ~requested_keepers:24
+      ()
+  in
+  check string "runtime exposes probe-unknown reason" "system_fd_probe_unknown"
+    (Json.member "reason" runtime |> Json.to_string);
+  check bool "runtime marks admission blocked" true
+    (Json.member "admission_blocked" runtime |> Json.to_bool)
 
 let test_fd_pressure_system_admission () =
   FD.reset_for_tests ();
@@ -260,6 +326,17 @@ let test_disk_pressure_proactive_admission () =
                 (Disk.admission_decision_of_snapshot
                    (disk_snapshot ~available_bytes:(gib 1) ())
                  |> disk_admitted);
+              let probe_error =
+                Disk.admission_decision_of_snapshot (Disk.Probe_error "df -Pk failed")
+              in
+              check bool "blocks when disk probe fails" false
+                (disk_admitted probe_error);
+              check string "disk probe failure tag" "disk_probe_error"
+                (match probe_error with
+                 | Disk.Block block ->
+                   Json.member "tag" (Disk.admission_block_to_json block)
+                   |> Json.to_string
+                 | Disk.Admit -> "admit");
               Disk.note ~site:"test" ~detail:"No space left on device" ();
               check bool "cooldown blocks after ENOSPC" false
                 (Disk.admission_decision_of_snapshot (disk_snapshot ()) |> disk_admitted))))
@@ -1142,7 +1219,47 @@ let test_shared_refs () =
 
 let test_spawn_slots () =
   R.clear ();
-  check bool "slots available" true (R.spawn_slots_available ())
+  check bool "slots available" true
+    (R.For_testing.spawn_slots_available ~fd_admitted:true ());
+  check string "disk admission denial returned" "disk_admission_blocked"
+    (match R.For_testing.spawn_slots_decision ~fd_admitted:true ~disk_admitted:false () with
+     | Ok () -> "ok"
+     | Error reason -> R.spawn_slot_denial_reason_to_label reason)
+
+let test_spawn_slot_denial_reason_labels () =
+  check string "fd pressure label" "fd_pressure_active"
+    (R.spawn_slot_denial_reason_to_label R.Fd_pressure_active);
+  check string "disk pressure label" "disk_pressure_active"
+    (R.spawn_slot_denial_reason_to_label R.Disk_pressure_active);
+  check string "fd admission label" "fd_admission_blocked"
+    (R.spawn_slot_denial_reason_to_label R.Fd_admission_blocked);
+  check string "disk admission label" "disk_admission_blocked"
+    (R.spawn_slot_denial_reason_to_label R.Disk_admission_blocked);
+  check string "max active label" "max_active_keepers"
+    (R.spawn_slot_denial_reason_to_label
+       (R.Max_active_keepers { running_count = 4; max_keepers = 4 }));
+  check string "max active detail"
+    "spawn slot denied: max active keepers reached (running_count=4 max_keepers=4)"
+    (R.spawn_slot_denial_reason_to_detail
+       (R.Max_active_keepers { running_count = 4; max_keepers = 4 }))
+
+let test_record_spawn_slot_denied_emits_metric () =
+  let keeper_name = "spawn-slot-denied-counter-test" in
+  let labels =
+    [
+      ("keeper", keeper_name);
+      ("surface", "unit_test");
+      ("reason", "max_active_keepers");
+    ]
+  in
+  let metric = Masc_mcp.Keeper_metrics.metric_keeper_spawn_slot_denied in
+  let before = Masc_mcp.Prometheus.metric_value_or_zero metric ~labels () in
+  R.record_spawn_slot_denied
+    ~keeper_name
+    ~surface:"unit_test"
+    (R.Max_active_keepers { running_count = 4; max_keepers = 4 });
+  let after = Masc_mcp.Prometheus.metric_value_or_zero metric ~labels () in
+  check (float 0.001) "spawn denial metric incremented" (before +. 1.0) after
 
 (* ── Board tracking tests ─────────────────────────────── *)
 
@@ -2140,6 +2257,8 @@ let () =
             test_fd_pressure_nofile_cap;
           test_case "fd pressure proactive admission" `Quick
             test_fd_pressure_proactive_admission;
+          test_case "fd pressure probe unknown admission" `Quick
+            test_fd_pressure_probe_unknown_admission;
           test_case "fd pressure system admission" `Quick
             test_fd_pressure_system_admission;
           test_case "fd pressure host hotspot admission" `Quick
@@ -2217,6 +2336,10 @@ let () =
           eio_test "fiber_health dead state" test_fiber_health_dead_state;
           eio_test "shared refs" test_shared_refs;
           eio_test "spawn slots" test_spawn_slots;
+          eio_test "spawn slot denial reason labels"
+            test_spawn_slot_denial_reason_labels;
+          eio_test "spawn slot denial emits metric"
+            test_record_spawn_slot_denied_emits_metric;
         ] );
       ( "board_tracking",
         [

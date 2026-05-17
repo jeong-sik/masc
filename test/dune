@@ -1803,3 +1803,8 @@
  (name test_rfc_0085_pr9_base_path_opt_purge)
  (modules test_rfc_0085_pr9_base_path_opt_purge)
  (libraries alcotest ast_grep))
+
+(test
+ (name test_success_model_attribution)
+ (modules test_success_model_attribution)
+ (libraries masc_test_deps))

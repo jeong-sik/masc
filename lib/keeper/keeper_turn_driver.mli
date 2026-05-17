@@ -218,4 +218,6 @@ module For_testing : sig
     required_tool_names:string list ->
     materialized_tool_names:string list ->
     string list
+
+  val success_selected_model_raw : Cascade_runtime_candidate.t -> string option
 end

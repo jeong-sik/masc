@@ -65,6 +65,14 @@ let provider_attempt_provenance_fields p =
   | Some source_cascade ->
       ("provider_source_cascade", `String source_cascade) :: base
 
+let success_selected_model_raw candidate =
+  Some (Cascade_runtime_candidate.model_health_key candidate)
+
+(* Error/rejected/exhausted observations intentionally leave the concrete
+   selected model absent. Downstream attribution uses candidate_models or the
+   cascade route for those outcomes. *)
+let error_selected_model_raw = None
+
 let health_error_kind label =
   Cascade_health_tracker.error_kind_of_string label
 
@@ -655,7 +663,7 @@ let run_named
         Cascade_legacy_runner.cascade_observation_with_metrics
           ~cascade_name:error_cascade_name
           ?strategy:!cascade_strategy_name_ref ~configured_labels
-          ~candidate_count ~selected_model_raw:None ~capture ()
+          ~candidate_count ~selected_model_raw:error_selected_model_raw ~capture ()
       in
       Cascade_legacy_runner.record_cascade ~keeper_name
         ~cascade_name:error_cascade_name
@@ -896,9 +904,7 @@ let run_named
           Cascade_legacy_runner.cascade_observation_with_metrics
             ~cascade_name:error_cascade_name
             ?strategy:!cascade_strategy_name_ref ~configured_labels
-            ~candidate_count
-            ~selected_model_raw:
-              (Some (Cascade_runtime_candidate.model_health_key candidate))
+            ~candidate_count ~selected_model_raw:(success_selected_model_raw candidate)
             ~capture ()
         in
         let result = { result with cascade_observation = Some observation } in
@@ -929,9 +935,7 @@ let run_named
              Cascade_legacy_runner.cascade_observation_with_metrics
                ~cascade_name:error_cascade_name
                ?strategy:!cascade_strategy_name_ref ~configured_labels
-               ~candidate_count
-               ~selected_model_raw:
-                 (Some (Cascade_runtime_candidate.model_health_key candidate))
+               ~candidate_count ~selected_model_raw:(success_selected_model_raw candidate)
                ~capture ()
            in
            let result = { result with cascade_observation = Some observation } in
@@ -958,7 +962,7 @@ let run_named
              Cascade_legacy_runner.cascade_observation_with_metrics
                ~cascade_name:error_cascade_name
                ?strategy:!cascade_strategy_name_ref ~configured_labels
-               ~candidate_count ~selected_model_raw:None
+               ~candidate_count ~selected_model_raw:error_selected_model_raw
                ~capture ()
            in
            Cascade_legacy_runner.record_cascade ~keeper_name
@@ -988,7 +992,8 @@ let run_named
              Cascade_legacy_runner.cascade_observation_with_metrics
                ~cascade_name:error_cascade_name
                ?strategy:!cascade_strategy_name_ref ~configured_labels
-               ~candidate_count ~selected_model_raw:None ~capture ()
+               ~candidate_count ~selected_model_raw:(success_selected_model_raw candidate)
+               ~capture ()
            in
            let result = { result with cascade_observation = Some observation } in
            Cascade_legacy_runner.record_cascade ~keeper_name
@@ -1117,7 +1122,7 @@ let run_named
                 Cascade_legacy_runner.cascade_observation_with_metrics
                   ~cascade_name:error_cascade_name
                   ?strategy:!cascade_strategy_name_ref ~configured_labels
-                  ~candidate_count ~selected_model_raw:None ~capture ()
+                  ~candidate_count ~selected_model_raw:error_selected_model_raw ~capture ()
               in
               Cascade_legacy_runner.record_cascade ~keeper_name
                 ~cascade_name:error_cascade_name
@@ -1139,7 +1144,7 @@ let run_named
              Cascade_legacy_runner.cascade_observation_with_metrics
                ~cascade_name:error_cascade_name
                ?strategy:!cascade_strategy_name_ref ~configured_labels
-               ~candidate_count ~selected_model_raw:None ~capture ()
+               ~candidate_count ~selected_model_raw:error_selected_model_raw ~capture ()
            in
            Cascade_legacy_runner.record_cascade ~keeper_name
              ~cascade_name:error_cascade_name
@@ -1199,7 +1204,7 @@ let run_named
       Cascade_legacy_runner.cascade_observation_with_metrics
         ~cascade_name:error_cascade_name
         ?strategy:!cascade_strategy_name_ref ~configured_labels
-        ~candidate_count ~selected_model_raw:None ~capture ()
+        ~candidate_count ~selected_model_raw:error_selected_model_raw ~capture ()
     in
     Cascade_legacy_runner.record_cascade ~keeper_name
       ~cascade_name:error_cascade_name
@@ -1282,4 +1287,5 @@ module For_testing = struct
   let checkpoint_after_attempt = checkpoint_after_attempt
   let missing_required_tool_names_after_lane_by_name =
     missing_required_tool_names_after_lane_by_name
+  let success_selected_model_raw = success_selected_model_raw
 end

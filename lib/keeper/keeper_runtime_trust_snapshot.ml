@@ -1008,13 +1008,14 @@ let execution_summary_json ~meta ~latest_receipt =
     | Some receipt -> json_string_list_member "unexpected_tools" receipt
     | None -> []
   in
-  let required_tools, missing_required_tools =
+  let required_tools, required_tool_candidates, missing_required_tools =
     match latest_receipt with
     | Some receipt ->
         let surface = json_member "tool_surface" receipt in
         ( json_string_list_member "required_tools" surface,
+          json_string_list_member "required_tool_candidates" surface,
           json_string_list_member "missing_required_tools" surface )
-    | None -> [], []
+    | None -> [], [], []
   in
   let cascade_json =
     match latest_receipt with
@@ -1050,6 +1051,7 @@ let execution_summary_json ~meta ~latest_receipt =
       ( "runtime_proof_status",
         Json_util.string_opt_to_json tool_contract_result );
       ("required_tools", string_list_json required_tools);
+      ("required_tool_candidates", string_list_json required_tool_candidates);
       ("missing_required_tools", string_list_json missing_required_tools);
       ("requested_tools", string_list_json requested_tools);
       ("tools_used", string_list_json tools_used);

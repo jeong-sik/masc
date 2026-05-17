@@ -205,6 +205,7 @@ let test_turn_context_fields_stored () =
       ~tool_surface_class:"execution"
       ~visible_tool_count:2
       ~required_tools:["keeper_bash"]
+      ~required_tool_candidates:["keeper_bash"; "keeper_shell"]
       ~missing_required_tools:["keeper_fs_edit"]
       ~cascade_profile:"tool_use_strict"
       ();
@@ -280,6 +281,11 @@ let test_turn_context_fields_stored () =
       ["keeper_bash"]
       Yojson.Safe.Util.(
         runtime_contract |> member "required_tools" |> to_list |> List.map to_string);
+    Alcotest.(check (list string)) "runtime_contract required_tool_candidates"
+      ["keeper_bash"; "keeper_shell"]
+      Yojson.Safe.Util.(
+        runtime_contract |> member "required_tool_candidates" |> to_list
+        |> List.map to_string);
     Alcotest.(check (list string)) "runtime_contract missing_required_tools"
       ["keeper_fs_edit"]
       Yojson.Safe.Util.(

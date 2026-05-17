@@ -1063,6 +1063,7 @@ let test_keeper_zombie_field_contracts () =
           tool_gate_enabled = true;
           tool_surface_fallback_used = false;
           required_tools = [ "Read" ];
+          required_tool_candidates = [];
           missing_required_tools = [];
         };
       sandbox_kind = Masc_mcp.Keeper_types.Local;

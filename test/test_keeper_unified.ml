@@ -11401,6 +11401,15 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
 
 let test_generic_required_tool_gate_guidance_names_action_tools () =
   let module Surface = Masc_mcp.Keeper_agent_tool_surface in
+  check
+    (list string)
+    "generic required gate exposes active candidate tools"
+    [ "keeper_board_comment"; "keeper_board_post" ]
+    (Surface.generic_required_tool_candidate_names
+       ~has_current_task:false
+       ~turn_affordances:[ "board_post_or_comment" ]
+       ~allowed_tool_names:
+         [ "keeper_tasks_list"; "keeper_board_comment"; "keeper_board_post" ]);
   let guidance =
     Surface.generic_required_tool_gate_guidance
       ~has_current_task:false

@@ -741,6 +741,7 @@ let append_execution_receipt
     ?(degraded_retry_cascade =
       Some Masc_mcp.Keeper_config.local_recovery_cascade_name)
     ?(fallback_reason = Some Masc_mcp.Keeper_error_classify.Turn_timeout)
+    ?(required_tool_candidates = [])
     config ~keeper_name =
   let meta =
     match Masc_mcp.Keeper_types.read_meta config keeper_name with
@@ -783,6 +784,7 @@ let append_execution_receipt
           tool_gate_enabled = true;
           tool_surface_fallback_used = false;
           required_tools = [];
+          required_tool_candidates;
           missing_required_tools = [];
         };
       sandbox_kind =
@@ -1495,6 +1497,7 @@ let test_execution_trust_route_surfaces_trust_summary_fields () =
     ~degraded_retry_applied:false
     ~degraded_retry_cascade:None
     ~fallback_reason:None
+    ~required_tool_candidates:[ "keeper_board_comment"; "keeper_board_post" ]
     config ~keeper_name;
   let result =
     run_curl_get ~port ~path:"/api/v1/dashboard/execution-trust" ()
@@ -1543,6 +1546,11 @@ let test_execution_trust_route_surfaces_trust_summary_fields () =
   check int "route surfaces unexpected tool count" 1
     (row |> member "trust" |> member "execution_summary"
      |> member "unexpected_tool_count" |> to_int);
+  check (list string) "route surfaces required tool candidates"
+    [ "keeper_board_comment"; "keeper_board_post" ]
+    (row |> member "trust" |> member "execution_summary"
+     |> member "required_tool_candidates" |> to_list
+     |> List.map to_string);
   check bool "route surfaces latest causal event field" true
     (match row |> member "trust" |> member "latest_causal_event" with
      | `Null | `Assoc _ -> true
@@ -1585,7 +1593,9 @@ let test_composite_routes_surface_latest_execution_receipt () =
   in
   require_status "boot route registers keeper before composite read" 200 boot_result;
   wait_for_boot_receipt_side_effects config ~keeper_name;
-  append_execution_receipt config ~keeper_name;
+  append_execution_receipt
+    ~required_tool_candidates:[ "keeper_board_comment"; "keeper_board_post" ]
+    config ~keeper_name;
   let per_keeper_path =
     Printf.sprintf "/api/v1/keepers/%s/composite" keeper_name
   in
@@ -1628,6 +1638,10 @@ let test_composite_routes_surface_latest_execution_receipt () =
     [ "WebSearch" ]
     (execution |> member "tool_surface" |> member "unexpected_tools" |> to_list
      |> List.map to_string);
+  check (list string) "composite tool surface exposes required tool candidates"
+    [ "keeper_board_comment"; "keeper_board_post" ]
+    (execution |> member "tool_surface" |> member "required_tool_candidates"
+     |> to_list |> List.map to_string);
   let fleet = run_curl_get ~port ~path:"/api/v1/keepers/composite" () in
   require_status "fleet composite GET returns 200" 200 fleet;
   let fleet_json = Yojson.Safe.from_string fleet.body in

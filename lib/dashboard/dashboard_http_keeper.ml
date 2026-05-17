@@ -233,13 +233,14 @@ let keeper_trust_json ?(include_receipt = false)
     | Some receipt -> json_string_list_member "requested_tools" receipt
     | None -> []
   in
-  let required_tools, missing_required_tools =
+  let required_tools, required_tool_candidates, missing_required_tools =
     match latest_receipt with
     | Some receipt ->
         let surface = Yojson.Safe.Util.member "tool_surface" receipt in
         ( json_string_list_member "required_tools" surface,
+          json_string_list_member "required_tool_candidates" surface,
           json_string_list_member "missing_required_tools" surface )
-    | None -> [], []
+    | None -> [], [], []
   in
   let tools_used =
     match latest_receipt with
@@ -277,6 +278,9 @@ let keeper_trust_json ?(include_receipt = false)
       ("requested_tool_count", `Int (List.length requested_tools));
       ( "required_tools",
         `List (List.map (fun value -> `String value) required_tools) );
+      ( "required_tool_candidates",
+        `List (List.map (fun value -> `String value) required_tool_candidates)
+      );
       ( "missing_required_tools",
         `List (List.map (fun value -> `String value) missing_required_tools) );
       ("tools_used", `List (List.map (fun value -> `String value) tools_used));

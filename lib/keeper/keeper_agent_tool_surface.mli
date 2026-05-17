@@ -94,6 +94,7 @@ type tool_surface_metrics =
   ; tool_gate_enabled : bool
   ; tool_surface_fallback_used : bool
   ; required_tool_names : string list
+  ; required_tool_candidate_names : string list
   ; missing_required_tool_names : string list
   ; config_root : string
   ; cascade_config_path : string option
@@ -122,6 +123,7 @@ type computed_tool_surface =
   ; tool_gate_requested : bool
   ; tool_surface_fallback_used : bool
   ; required_tool_names : string list
+  ; required_tool_candidate_names : string list
   ; missing_required_tool_names : string list
   ; lane : turn_lane
   ; query_text : string
@@ -204,6 +206,16 @@ val generic_required_tool_gate_guidance :
   turn_affordances:string list ->
   allowed_tool_names:string list ->
   string
+
+(** Candidate tools a generic required-tool gate can recommend. This is
+    distinct from explicit [required_tool_names]: callers may satisfy a
+    generic gate with any execution-progress tool, while this list explains
+    the preferred candidates exposed to the model/operator. *)
+val generic_required_tool_candidate_names :
+  has_current_task:bool ->
+  turn_affordances:string list ->
+  allowed_tool_names:string list ->
+  string list
 
 (** Per-call [masc_keeper_msg.required_tools] is an explicit operator/harness
     contract for this turn. When present, it takes precedence over the keeper's

@@ -145,6 +145,7 @@ let append_keeper_receipt
           tool_gate_enabled = true;
           tool_surface_fallback_used = false;
           required_tools = [];
+          required_tool_candidates = [];
           missing_required_tools = [];
         };
       sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta;

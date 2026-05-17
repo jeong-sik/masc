@@ -248,6 +248,7 @@ let prepare_agent_setup
         ; tool_gate_enabled = false
         ; tool_surface_fallback_used = false
         ; required_tool_names = []
+        ; required_tool_candidate_names = []
         ; missing_required_tool_names = []
         ; config_root
         ; cascade_config_path
@@ -1053,6 +1054,15 @@ let prepare_agent_setup
            not (List.mem canonical allowed_canonical_tool_names))
         required_tool_names
     in
+    let required_tool_candidate_names =
+      if tool_gate_requested && required_tool_names = []
+      then
+        generic_required_tool_candidate_names
+          ~has_current_task:(keeper_has_owned_active_task ())
+          ~turn_affordances
+          ~allowed_tool_names:all_allowed
+      else []
+    in
     let visible_tool_count = List.length all_allowed in
     let tool_surface_class : Keeper_agent_tool_surface.tool_surface_class =
       if visible_tool_count = 0
@@ -1097,6 +1107,7 @@ let prepare_agent_setup
     ; tool_gate_requested
     ; tool_surface_fallback_used
     ; required_tool_names
+    ; required_tool_candidate_names
     ; missing_required_tool_names
     ; lane
     ; query_text
@@ -1119,6 +1130,8 @@ let prepare_agent_setup
      ; tool_gate_enabled = initial_tool_surface.tool_gate_requested
      ; tool_surface_fallback_used = initial_tool_surface.tool_surface_fallback_used
      ; required_tool_names = initial_tool_surface.required_tool_names
+     ; required_tool_candidate_names =
+         initial_tool_surface.required_tool_candidate_names
      ; missing_required_tool_names = initial_tool_surface.missing_required_tool_names
      ; config_root
      ; cascade_config_path
@@ -1668,6 +1681,8 @@ let prepare_agent_setup
                    ; tool_surface_fallback_used =
                        computed_surface.tool_surface_fallback_used
                    ; required_tool_names = computed_surface.required_tool_names
+                   ; required_tool_candidate_names =
+                       computed_surface.required_tool_candidate_names
                    ; missing_required_tool_names =
                        computed_surface.missing_required_tool_names
                    ; config_root
@@ -1715,6 +1730,8 @@ let prepare_agent_setup
                        computed_surface.tool_surface_class)
                   ~visible_tool_count:(List.length all_allowed)
                   ~required_tools:computed_surface.required_tool_names
+                  ~required_tool_candidates:
+                    computed_surface.required_tool_candidate_names
                   ~missing_required_tools:computed_surface.missing_required_tool_names
                   ~cascade_profile:cascade_name_string
                   ();

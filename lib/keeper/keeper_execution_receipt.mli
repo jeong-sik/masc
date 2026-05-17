@@ -96,6 +96,7 @@ type tool_surface =
   ; tool_gate_enabled : bool
   ; tool_surface_fallback_used : bool
   ; required_tools : string list
+  ; required_tool_candidates : string list
   ; missing_required_tools : string list
   }
 

@@ -14,6 +14,7 @@ module U = Yojson.Safe.Util
 let mk_tool_surface
       ?(tool_requirement = Masc_mcp.Keeper_agent_tool_surface.Required)
       ?(required_tools = [])
+      ?(required_tool_candidates = [])
       ?(missing_required_tools = [])
       ()
   : R.tool_surface
@@ -32,6 +33,7 @@ let mk_tool_surface
   ; tool_gate_enabled = true
   ; tool_surface_fallback_used = false
   ; required_tools
+  ; required_tool_candidates
   ; missing_required_tools
   }
 ;;
@@ -46,6 +48,7 @@ let mk_receipt
       ?(reported_tools = [])
       ?(requested_tools = [])
       ?(required_tools = [])
+      ?(required_tool_candidates = [])
       ?(missing_required_tools = [])
       ?(tool_requirement = Masc_mcp.Keeper_agent_tool_surface.Required)
       ?(cascade_outcome : R.cascade_outcome = Cascade_completed)
@@ -78,7 +81,12 @@ let mk_receipt
   ; tools_used
   ; tool_contract_result
   ; tool_surface =
-      mk_tool_surface ~tool_requirement ~required_tools ~missing_required_tools ()
+      mk_tool_surface
+        ~tool_requirement
+        ~required_tools
+        ~required_tool_candidates
+        ~missing_required_tools
+        ()
   ; sandbox_kind = Masc_mcp.Keeper_types.Local
   ; sandbox_root = None
   ; network_mode = Masc_mcp.Keeper_types.Network_none
@@ -468,6 +476,7 @@ let test_broadcast_payload_carries_turn_diagnostics () =
       ~tools_used:[ "keeper_tasks_list"; "keeper_stay_silent" ]
       ~observed_tools:[ "keeper_tasks_list"; "keeper_stay_silent" ]
       ~required_tools:[ "keeper_shell"; "masc_worktree_create" ]
+      ~required_tool_candidates:[ "keeper_shell"; "keeper_bash" ]
       ~missing_required_tools:[ "keeper_shell" ]
       ~current_task_id:"task-102"
       ~stop_reason:Masc_mcp.Cascade_runner.Completed
@@ -509,6 +518,11 @@ let test_broadcast_payload_carries_turn_diagnostics () =
     "required tools"
     [ "keeper_shell"; "masc_worktree_create" ]
     (string_list_member "required_tools" contract);
+  check
+    (list string)
+    "required tool candidates"
+    [ "keeper_shell"; "keeper_bash" ]
+    (string_list_member "required_tool_candidates" contract);
   check
     (list string)
     "missing required tools"

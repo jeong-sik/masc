@@ -805,6 +805,9 @@ let compact_receipt_tool_surface_json receipt =
       ; ( "required_tools"
         , Json_util.json_string_list (Json_util.get_string_list surface "required_tools")
         )
+      ; ( "required_tool_candidates"
+        , Json_util.json_string_list
+            (Json_util.get_string_list surface "required_tool_candidates") )
       ; "unexpected_tools", Json_util.json_string_list unexpected_tools
       ; "unexpected_tool_count", `Int (List.length unexpected_tools)
       ]

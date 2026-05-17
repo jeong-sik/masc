@@ -64,8 +64,14 @@ val handle_chat_completions :
     |---|---|---|
     | Missing or empty [model] | `Bad_request` | `invalid_request_error` |
     | No user message in [messages] array | `Bad_request` | `invalid_request_error` |
-    | Keeper / cascade returned [Error] | `Internal_server_error` | `server_error` |
+    | Keeper route returned [Error] | `Internal_server_error` | `server_error` |
+    | Cascade returned [Error err] | per {!Openai_compat_error_map.of_sdk_error} | per same |
     | Body is not valid JSON | `Bad_request` | `invalid_request_error` |
+
+    The cascade row is the RFC-0105 boundary: HTTP status and OpenAI
+    [type]/[code] are derived from the typed {!Agent_sdk.Error.sdk_error}
+    variant rather than a blanket [`Internal_server_error] /
+    [server_error] flattening.
 
     {2 Field defaults}
 

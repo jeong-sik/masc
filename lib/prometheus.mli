@@ -511,6 +511,11 @@ val metric_fallback_triggered : string
     fallback classes. *)
 val metric_board_truncated_posts : string
 
+(** Counter for board flusher actor startup non-success outcomes.
+    Closed-vocab label [outcome]: [switch_finished | cas_exhausted].
+    Cardinality: 2 series. *)
+val metric_board_dispatch_flusher_start_outcomes : string
+
 val metric_anti_rationalization_fallback : string
 
 (** #10113: per-pattern + per-decision counter for the gate 2

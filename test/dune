@@ -1258,6 +1258,7 @@
 (include stanzas/test_heuristic_metrics_diagnostics.inc)
 (include stanzas/test_heuristic_metrics_scrub.inc)
 (include stanzas/test_join_required_guard_counter.inc)
+(include stanzas/test_jsonl_atomic.inc)
 (include stanzas/test_k2_pipeline_e2e.inc)
 (include stanzas/test_k3_tool_pipeline_e2e.inc)
 (include stanzas/test_keeper_alerting_path_norms.inc)

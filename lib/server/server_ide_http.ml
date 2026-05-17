@@ -123,7 +123,14 @@ let add_routes router =
     with_public_read
       (fun state _req reqd ->
          let uri = Uri.of_string request.target in
-         let base, _source = resolve_workspace_base ~state ~uri in
+         (* RFC-0128 §4.2 PR-8: partition storage lives under the
+            *server* base_path (single .masc-ide/ tree), not the
+            workspace tree returned by [resolve_workspace_base]. The
+            latter exists for /api/v1/workspace/{tree,file} routes
+            that browse a specific repo's filesystem contents. IDE
+            annotation/region storage must mirror the keeper write
+            path, which writes to [server-base/.masc-ide/]. *)
+         let base = base_path_of_state state in
          let file_path =
            match Uri.get_query_param uri "file_path" with
            | Some p when p <> "" -> Some p
@@ -173,7 +180,14 @@ let add_routes router =
     with_public_read
       (fun state req reqd ->
          let uri = Uri.of_string request.target in
-         let base, _source = resolve_workspace_base ~state ~uri in
+         (* RFC-0128 §4.2 PR-8: partition storage lives under the
+            *server* base_path (single .masc-ide/ tree), not the
+            workspace tree returned by [resolve_workspace_base]. The
+            latter exists for /api/v1/workspace/{tree,file} routes
+            that browse a specific repo's filesystem contents. IDE
+            annotation/region storage must mirror the keeper write
+            path, which writes to [server-base/.masc-ide/]. *)
+         let base = base_path_of_state state in
          Http.Request.read_body_async reqd (fun body_str ->
            let json =
              try Yojson.Safe.from_string body_str with
@@ -269,7 +283,14 @@ let add_routes router =
     with_public_read
       (fun state _req reqd ->
          let uri = Uri.of_string request.target in
-         let base, _source = resolve_workspace_base ~state ~uri in
+         (* RFC-0128 §4.2 PR-8: partition storage lives under the
+            *server* base_path (single .masc-ide/ tree), not the
+            workspace tree returned by [resolve_workspace_base]. The
+            latter exists for /api/v1/workspace/{tree,file} routes
+            that browse a specific repo's filesystem contents. IDE
+            annotation/region storage must mirror the keeper write
+            path, which writes to [server-base/.masc-ide/]. *)
+         let base = base_path_of_state state in
          let id =
            match
              extract_path_param
@@ -307,7 +328,14 @@ let add_routes router =
     with_public_read
       (fun state _req reqd ->
          let uri = Uri.of_string request.target in
-         let base, _source = resolve_workspace_base ~state ~uri in
+         (* RFC-0128 §4.2 PR-8: partition storage lives under the
+            *server* base_path (single .masc-ide/ tree), not the
+            workspace tree returned by [resolve_workspace_base]. The
+            latter exists for /api/v1/workspace/{tree,file} routes
+            that browse a specific repo's filesystem contents. IDE
+            annotation/region storage must mirror the keeper write
+            path, which writes to [server-base/.masc-ide/]. *)
+         let base = base_path_of_state state in
          let file_path =
            match Uri.get_query_param uri "file_path" with
            | Some p when p <> "" -> Some p

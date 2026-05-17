@@ -1,6 +1,25 @@
 # Changelog
 
 
+## [0.19.21] - 2026-05-17
+
+### Added
+- `lib/server/`: SSE close frames and `Session_lifecycle` publisher hook for the RFC-0099 session close path.
+- `lib/keeper/`: required-tool candidate surfacing, Docker sandbox room-state exposure, and disk-pressure circuit breaker support for the keeper resource-gate lane.
+- `lib/admission/`: Tool-resource-gate snapshots are exposed through the admission queue for the PR-6 resource-gate lane.
+- `scripts/`: lint coverage for OCaml block-comment terminator traps so `_*)`-style failures are caught before PR merge.
+
+### Changed
+- Runtime configuration now continues purging legacy path/default fallback surfaces, including repo-config fallback removal and legacy path default cleanup.
+- Log retention defaults are opt-in disabled as part of the RFC-0103 closeout path.
+- Cascade legacy-runner worker tuning constants are lifted to SSOT, and the obsolete swarm harness entrypoint is removed.
+- RFC-0004 docs now record Phase A0.1 completion and add the Phase A0.2 implementation plan while additional SSE event arms move onto typed emitters.
+
+### Fixed
+- Keeper/tool gates: lane semaphores, generic required-tool gate behavior, typed handoff-context vocabulary, and tool-input validation exception qualification.
+- Process/tool task reliability: background task reserve/release wiring into spawn, stale `pr_url` blob cleanup, and the OCaml comment terminator regression in `tool_task`.
+- Transport/runtime visibility: cascade HTTP probe silent JSON parse drops now warn/count, and board-post validation stays at the correct boundary.
+
 ## [0.19.20] - 2026-05-17
 
 ### Added

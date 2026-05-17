@@ -536,31 +536,32 @@ let runtime_resolution_json (config : Coord.config) =
   in
   let status = if warnings = [] then "ready" else "warn" in
   `Assoc
-    [ "status", `String status
-    ; "warnings", `List (List.map (fun warning -> `String warning) warnings)
-    ; "base_path", path_item_json ~source:"input" base_path_input
-    ; "workspace_path", path_item_json ~source:"workspace" config.workspace_path
-    ; "resolved_base_path", path_item_json ~source:"resolved_base" config.base_path
-    ; "data_root", path_item_json ~source:"runtime_data" (Coord.masc_root_dir config)
-    ; "prompt_markdown_dir", path_item_json ~source:"prompt_registry" prompt_markdown_dir
-    ; ( "server_repo_path"
-      , match server_repo_path with
-        | Some path -> path_item_json ~source:"server_binary" path
-        | None ->
-          `Assoc
-            [ "path", `Null; "exists", `Bool false; "source", `String "server_binary" ] )
-    ; ( "server_repo_git_commit"
-      , Option.fold ~none:`Null ~some:(fun value -> `String value) server_repo_commit )
-    ; ( "workspace_git_commit"
-      , Option.fold ~none:`Null ~some:(fun value -> `String value) workspace_commit )
-    ; ( "resolved_base_git_commit"
-      , Option.fold ~none:`Null ~some:(fun value -> `String value) resolved_base_commit )
-    ; "source_mismatch", `Bool source_mismatch
-    ; "server_workspace_mismatch", `Bool server_workspace_mismatch
-    ; "diagnostics", diagnostics
-    ; ("keeper_runtime", Keeper_runtime_resolved.(current () |> to_yojson))
-    ; "build", Build_identity.to_yojson build
-    ]
+    ( [ "status", `String status
+      ; "warnings", `List (List.map (fun warning -> `String warning) warnings)
+      ; "base_path", path_item_json ~source:"input" base_path_input
+      ; "workspace_path", path_item_json ~source:"workspace" config.workspace_path
+      ; "resolved_base_path", path_item_json ~source:"resolved_base" config.base_path
+      ; "data_root", path_item_json ~source:"runtime_data" (Coord.masc_root_dir config)
+      ; "prompt_markdown_dir", path_item_json ~source:"prompt_registry" prompt_markdown_dir
+      ; ( "server_repo_path"
+        , match server_repo_path with
+          | Some path -> path_item_json ~source:"server_binary" path
+          | None ->
+            `Assoc
+              [ "path", `Null; "exists", `Bool false; "source", `String "server_binary" ] )
+      ; ( "server_repo_git_commit"
+        , Option.fold ~none:`Null ~some:(fun value -> `String value) server_repo_commit )
+      ; ( "workspace_git_commit"
+        , Option.fold ~none:`Null ~some:(fun value -> `String value) workspace_commit )
+      ; ( "resolved_base_git_commit"
+        , Option.fold ~none:`Null ~some:(fun value -> `String value) resolved_base_commit )
+      ; "source_mismatch", `Bool source_mismatch
+      ; "server_workspace_mismatch", `Bool server_workspace_mismatch
+      ; "diagnostics", diagnostics
+      ; ("keeper_runtime", Keeper_runtime_resolved.(current () |> to_yojson))
+      ; "build", Build_identity.to_yojson build
+      ]
+      @ Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields () )
 ;;
 
 let dashboard_tools_http_json ?actor (config : Coord.config) : Yojson.Safe.t =

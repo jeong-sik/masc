@@ -144,6 +144,22 @@ let test_dashboard_tools_projection () =
         (match runtime_resolution |> member "diagnostics" with
          | `List _ -> true
          | _ -> false);
+      check bool "runtime keeper_fibers surfaced" true
+        (match runtime_resolution |> member "keeper_fibers" with
+         | `Int _ -> true
+         | _ -> false);
+      check bool "runtime paused_keepers count surfaced" true
+        (match runtime_resolution |> member "paused_keepers" with
+         | `Int _ -> true
+         | _ -> false);
+      check bool "runtime keeper fd pressure surfaced" true
+        (match runtime_resolution |> member "keeper_fd_pressure" with
+         | `Assoc _ -> true
+         | _ -> false);
+      check bool "runtime keeper fleet safety surfaced" true
+        (match runtime_resolution |> member "keeper_fleet_safety" with
+         | `Assoc _ -> true
+         | _ -> false);
       check bool "build started_at surfaced" true
         (match runtime_resolution |> member "build" |> member "started_at" with
          | `String value -> String.length value > 0

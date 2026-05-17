@@ -231,6 +231,94 @@ let admitted = function
   | Block _ -> false
 ;;
 
+let option_int_json = function
+  | Some value -> `Int value
+  | None -> `Null
+;;
+
+let admission_block_to_json = function
+  | Fd_pressure_cooldown remaining_sec ->
+    `Assoc
+      [ "kind", `String "fd_pressure_cooldown"
+      ; "remaining_sec", `Float remaining_sec
+      ]
+  | Projected_fd_budget_exhausted
+      { soft_limit; open_fds; active_keepers; starting_keepers; projected_fds } ->
+    `Assoc
+      [ "kind", `String "projected_fd_budget_exhausted"
+      ; "soft_limit", `Int soft_limit
+      ; "open_fds", option_int_json open_fds
+      ; "active_keepers", `Int active_keepers
+      ; "starting_keepers", `Int starting_keepers
+      ; "projected_fds", `Int projected_fds
+      ]
+;;
+
+let admission_decision_to_json = function
+  | Admit -> `Assoc [ "status", `String "admit"; "block", `Null ]
+  | Block block ->
+    `Assoc [ "status", `String "block"; "block", admission_block_to_json block ]
+;;
+
+let admission_block_kind = function
+  | Fd_pressure_cooldown _ -> "fd_pressure_cooldown"
+  | Projected_fd_budget_exhausted _ -> "projected_fd_budget_exhausted"
+;;
+
+let runtime_state_json ?(soft_limit = process_nofile_soft_limit ())
+    ?(open_fds = process_open_fd_count ()) ~active_keepers ~starting_keepers
+    ~requested_keepers () =
+  let active_keepers = max 0 active_keepers in
+  let starting_keepers = max 0 starting_keepers in
+  let requested_keepers = max 0 requested_keepers in
+  let target_keeper_count = max requested_keepers (active_keepers + starting_keepers) in
+  let projected_starting_keepers =
+    max starting_keepers (target_keeper_count - active_keepers)
+  in
+  let projected_fds =
+    projected_fd_budget ?open_fds ~active_keepers
+      ~starting_keepers:projected_starting_keepers ()
+  in
+  let admission_decision =
+    admission_decision ~soft_limit ~open_fds ~active_keepers
+      ~starting_keepers:projected_starting_keepers ()
+  in
+  let admission_blocked = not (admitted admission_decision) in
+  let status, reason =
+    match admission_decision with
+    | Admit -> "ok", `Null
+    | Block block -> "blocked", `String (admission_block_kind block)
+  in
+  let active_keeper_cap =
+    match soft_limit with
+    | Some soft when soft > 0 -> `Int (active_keeper_cap_for_soft_limit soft)
+    | _ -> `Null
+  in
+  `Assoc
+    [ "status", `String status
+    ; "reason", reason
+    ; "degraded", `Bool (active ())
+    ; "fd_pressure_remaining_sec", `Float (remaining_sec ())
+    ; "soft_limit", option_int_json soft_limit
+    ; "open_fds", option_int_json open_fds
+    ; "headroom", `Int (fd_headroom ())
+    ; "fd_per_active_keeper", `Int (fd_per_active_keeper ())
+    ; "min_nofile_for_24_keepers", `Int (min_nofile_for_24_keepers ())
+    ; "requested_keepers", `Int requested_keepers
+    ; "target_keeper_count", `Int target_keeper_count
+    ; "active_keepers", `Int active_keepers
+    ; "starting_keepers", `Int starting_keepers
+    ; "projected_starting_keepers", `Int projected_starting_keepers
+    ; "projected_fds", `Int projected_fds
+    ; "active_keeper_cap", active_keeper_cap
+    ; "admission_decision", admission_decision_to_json admission_decision
+    ; "admission_blocked", `Bool admission_blocked
+    ; ( "admission_blocked_keepers"
+      , if admission_blocked then `Int requested_keepers else `Null )
+    ; "operator_action_required", `Bool admission_blocked
+    ]
+;;
+
 let admit_start ?soft_limit ?open_fds ~active_keepers ~starting_keepers () =
   admitted (admission_decision ?soft_limit ?open_fds ~active_keepers ~starting_keepers ())
 ;;

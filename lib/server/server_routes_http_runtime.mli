@@ -117,7 +117,8 @@ val make_health_json :
     [build] / [protocol] (default + listener + supported list) /
     [transport] / [paths] / [uptime] / [sse_clients] /
     [startup] / [subsystems] / [feature_flags] / [gc] /
-    [keeper_fibers] / [paused_keepers] /
+    [keeper_fibers] / [keeper_fd_pressure] / [keeper_fleet_safety] /
+    [paused_keepers] /
     [keeper_config_parse_error_count] / [keeper_config_parse_errors] /
     [keeper_config_unknown_key_count] / [keeper_config_unknown_keys] /
     [keeper_config_schema_status] / [keeper_config_schema_blocking] /
@@ -135,6 +136,19 @@ val make_health_json :
     does not disappear from [/health].  [read_error_count] surfaces
     corrupt durable meta instead of silently reporting a clean zero.
 
+    {2 keeper_fd_pressure and keeper_fleet_safety contract}
+
+    [keeper_fd_pressure] exposes the effective process [nofile] soft
+    limit, currently open FD count when available, projected 24-Keeper
+    budget, and the admission decision used by the FD guard.  This lets
+    operators distinguish "shell says the host limit is high" from the
+    actual runtime inherited by the server process.
+
+    [keeper_fleet_safety] compares configured bootable keepers with the
+    live keeper fiber count.  It reports [blocked] when bootable keepers
+    exist but no fiber is running, and [degraded] when multiple bootable
+    keepers exist but the running fiber count is below the safety margin.
+
     {2 lazy_task_boot_guard_fires_total contract (P2 silent-
     failure fix)}
 
@@ -144,6 +158,13 @@ val make_health_json :
     "ok"] while keepers had silently failed to start.  Pinning
     at the contract seam: a future "drop unused metric" PR
     must touch this. *)
+
+val keeper_fleet_runtime_resolution_fields : unit -> (string * Yojson.Safe.t) list
+(** [keeper_fleet_runtime_resolution_fields ()] returns the health/fleet
+    safety subset projected into [/api/v1/dashboard/shell]'s
+    [runtime_resolution].  It intentionally flattens
+    [paused_keepers] to a count for the dashboard shell health chip while
+    [/health] keeps the richer paused keeper object. *)
 
 val health_handler : Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** [health_handler request reqd] writes

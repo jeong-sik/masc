@@ -191,6 +191,86 @@ let paused_keepers_health_json () =
            durable_scan.read_errors) );
   ]
 
+let keeper_fleet_safety_health_json ~keeper_fibers ~paused_keepers_json =
+  let bootable_names =
+    match current_server_state_opt () with
+    | Some state ->
+        (try Keeper_runtime.bootable_keeper_names state.Mcp_server.room_config with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn ->
+             Log.Keeper.warn
+               "health: failed to compute bootable keeper names: %s"
+               (Printexc.to_string exn);
+             [])
+    | None -> []
+  in
+  let bootable_count = List.length bootable_names in
+  let minimum_running_fibers =
+    if bootable_count <= 1 then bootable_count else 2
+  in
+  let no_running_fibers = bootable_count > 0 && keeper_fibers = 0 in
+  let low_running_fiber_margin =
+    bootable_count > 1 && keeper_fibers < minimum_running_fibers
+  in
+  let status =
+    if no_running_fibers then "blocked"
+    else if low_running_fiber_margin then "degraded"
+    else "ok"
+  in
+  let paused_total_count =
+    match paused_keepers_json with
+    | `Assoc fields ->
+        (match List.assoc_opt "count" fields with
+         | Some (`Int count) -> count
+         | _ -> 0)
+    | _ -> 0
+  in
+  `Assoc
+    [ "status", `String status
+    ; "bootable_keeper_count", `Int bootable_count
+    ; ( "bootable_keeper_names"
+      , `List (List.map (fun name -> `String name) bootable_names) )
+    ; "running_keeper_fiber_count", `Int keeper_fibers
+    ; "minimum_running_fibers", `Int minimum_running_fibers
+    ; "no_running_fibers", `Bool no_running_fibers
+    ; "low_running_fiber_margin", `Bool low_running_fiber_margin
+    ; "paused_keeper_count", `Int paused_total_count
+    ; ( "operator_action_required"
+      , `Bool (no_running_fibers || low_running_fiber_margin) )
+    ]
+
+let paused_keeper_count = function
+  | `Assoc fields ->
+      (match List.assoc_opt "count" fields with
+       | Some (`Int count) -> count
+       | _ -> 0)
+  | _ -> 0
+;;
+
+let bool_field name = function
+  | `Assoc fields ->
+      (match List.assoc_opt name fields with
+       | Some (`Bool value) -> value
+       | _ -> false)
+  | _ -> false
+;;
+
+let keeper_fleet_runtime_resolution_fields () =
+  let keeper_fibers = Keeper_registry.count_running () in
+  let paused_keepers_json = paused_keepers_health_json () in
+  let fleet_safety =
+    keeper_fleet_safety_health_json ~keeper_fibers ~paused_keepers_json
+  in
+  [ "keeper_fibers", `Int keeper_fibers
+  ; "paused_keepers", `Int (paused_keeper_count paused_keepers_json)
+  ; "keeper_fleet_no_fibers", `Bool (bool_field "no_running_fibers" fleet_safety)
+  ; ( "keeper_fd_pressure"
+    , Keeper_fd_pressure.runtime_state_json ~active_keepers:keeper_fibers
+        ~starting_keepers:0 ~requested_keepers:24 () )
+  ; "keeper_fleet_safety", fleet_safety
+  ]
+;;
+
 let make_health_json ?(listener = "http/1.1") request =
   let uptime_secs = int_of_float (Unix.gettimeofday () -. server_start_time) in
   let uptime_str =
@@ -241,6 +321,8 @@ let make_health_json ?(listener = "http/1.1") request =
     else "none"
   in
   let key_paused_keepers = "paused_keepers" in
+  let keeper_fibers = Keeper_registry.count_running () in
+  let paused_keepers_json = paused_keepers_health_json () in
   Tool_args.ok_assoc [
     ("server", `String "masc-mcp");
     ("version", `String build.release_version);
@@ -279,14 +361,20 @@ let make_health_json ?(listener = "http/1.1") request =
       ("live_words", `Int s.live_words);
       ("minor_heap_size", `Int (let c = Gc.get () in c.minor_heap_size));
     ]);
-    ("keeper_fibers", `Int (Keeper_registry.count_running ()));
+    ("keeper_fibers", `Int keeper_fibers);
+    ( "keeper_fd_pressure"
+    , Keeper_fd_pressure.runtime_state_json ~active_keepers:keeper_fibers
+        ~starting_keepers:0 ~requested_keepers:24 () );
+    ( "keeper_fleet_safety"
+    , keeper_fleet_safety_health_json ~keeper_fibers
+        ~paused_keepers_json );
     (* Paused-keeper visibility: a keeper with [meta.paused = true] does not
        run turns, and auto-paused keepers may no longer have a live registry
        entry. The dashboard "깨우기" button now auto-resumes paused keepers,
        but ops still need a quick count without scraping /metrics. List names
        so an operator can correlate with the cause encoded in their
        last_blocker_class. *)
-    (key_paused_keepers, paused_keepers_health_json ());
+    (key_paused_keepers, paused_keepers_json);
     ("keeper_config_parse_error_count",
      `Int keeper_config_parse_error_count);
     ( "keeper_config_parse_errors",

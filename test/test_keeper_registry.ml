@@ -120,6 +120,37 @@ let test_fd_pressure_degraded_projection () =
       check string "next human action" "restore_fd_headroom"
         (Json.member "next_human_action" trust |> Json.to_string))
 
+let test_fd_pressure_runtime_state_json () =
+  FD.reset_for_tests ();
+  let json =
+    FD.runtime_state_json
+      ~soft_limit:(Some 512)
+      ~open_fds:(Some 460)
+      ~active_keepers:2
+      ~starting_keepers:1
+      ~requested_keepers:24
+      ()
+  in
+  let decision = Json.member "admission_decision" json in
+  check int "runtime soft limit" 512
+    (Json.member "soft_limit" json |> Json.to_int);
+  check int "runtime requested keepers" 24
+    (Json.member "requested_keepers" json |> Json.to_int);
+  check int "runtime target keeper count" 24
+    (Json.member "target_keeper_count" json |> Json.to_int);
+  check int "runtime projected starting keepers" 22
+    (Json.member "projected_starting_keepers" json |> Json.to_int);
+  check string "runtime status" "blocked"
+    (Json.member "status" json |> Json.to_string);
+  check string "runtime admission blocks unsafe projection" "block"
+    (Json.member "status" decision |> Json.to_string);
+  check bool "runtime admission_blocked flag" true
+    (Json.member "admission_blocked" json |> Json.to_bool);
+  check int "runtime admission_blocked_keepers" 24
+    (Json.member "admission_blocked_keepers" json |> Json.to_int);
+  check bool "runtime operator action required" true
+    (Json.member "operator_action_required" json |> Json.to_bool)
+
 let test_bonsai_keepers_summary_uses_scoped_registry () =
   let base_path = temp_base_path "bonsai-summary" in
   let other_base_path = temp_base_path "bonsai-summary-other" in
@@ -1975,6 +2006,8 @@ let () =
             test_fd_pressure_proactive_admission;
           test_case "fd pressure degraded projection" `Quick
             test_fd_pressure_degraded_projection;
+          test_case "fd pressure runtime state json" `Quick
+            test_fd_pressure_runtime_state_json;
           eio_test "bonsai summary uses scoped registry"
             test_bonsai_keepers_summary_uses_scoped_registry;
           eio_test "register and get" test_register_and_get;

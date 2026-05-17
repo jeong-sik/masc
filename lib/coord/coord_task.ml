@@ -16,6 +16,32 @@ include Coord_task_classify
 include Coord_task_create
 include Coord_task_claim
 
+let action_persists_handoff_context = function
+  | Masc_domain.Release
+  | Masc_domain.Done_action
+  | Masc_domain.Submit_for_verification
+  | Masc_domain.Submit_pr_evidence ->
+    true
+  | Masc_domain.Claim
+  | Masc_domain.Start
+  | Masc_domain.Cancel
+  | Masc_domain.Approve_verification
+  | Masc_domain.Reject_verification ->
+    false
+
+let verification_submission_evidence_refs task handoff_context =
+  let contract_refs =
+    match task.contract with
+    | Some c -> c.verify_gate_evidence
+    | None -> []
+  in
+  let handoff_refs =
+    match handoff_context with
+    | Some (hc : Masc_domain.task_handoff_context) -> hc.evidence_refs
+    | None -> []
+  in
+  normalized_string_list (contract_refs @ handoff_refs)
+
 let transition_task_r
       config
       ~agent_name
@@ -229,9 +255,7 @@ let transition_task_r
             , Masc_domain.AwaitingVerification { assignee; verification_id; _ }
             , Some prepare ) ->
             let evidence_refs =
-              match task.contract with
-              | Some c -> c.verify_gate_evidence
-              | None -> []
+              verification_submission_evidence_refs task handoff_context
             in
             (match prepare ~task ~assignee ~verification_id ~evidence_refs with
              | Ok () -> Ok ()
@@ -520,16 +544,9 @@ let transition_task_r
                    { t with
                      task_status = new_status
                    ; handoff_context =
-                       (match action with
-                        | Masc_domain.Release -> handoff_context
-                        | Masc_domain.Claim
-                        | Masc_domain.Start
-                        | Masc_domain.Done_action
-                        | Masc_domain.Cancel
-                        | Masc_domain.Submit_for_verification
-                        | Masc_domain.Submit_pr_evidence
-                        | Masc_domain.Approve_verification
-                        | Masc_domain.Reject_verification -> None)
+                       (if action_persists_handoff_context action
+                        then handoff_context
+                        else None)
                    ; cycle_count
                    ; do_not_reclaim_reason
                    })
@@ -563,9 +580,9 @@ let transition_task_r
                ?notes:(trim_opt (Some notes))
                ?reason:(trim_opt (Some reason))
                ?handoff_context:
-                 (match handoff_context with
-                  | Some _ when action = Masc_domain.Release -> handoff_context
-                  | _ -> None)
+                 (if action_persists_handoff_context action
+                  then handoff_context
+                  else None)
                ());
           (match action with
            | Masc_domain.Claim ->
@@ -621,12 +638,23 @@ let transition_task_r
                         ]
                       | None -> []))
            | Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence ->
+             let payload =
+               `Assoc
+                 ([ "task_id", `String task_id ]
+                  @
+                  match handoff_context with
+                  | Some handoff_context ->
+                    [ ( "handoff_context"
+                      , Masc_domain.task_handoff_context_to_yojson handoff_context )
+                    ]
+                  | None -> [])
+             in
              emit_task_activity
                config
                ~agent_name
                ~task_id
                ~kind:(Event_kind.Task.to_string Event_kind.Task.Submit_for_verification)
-               ~payload:(`Assoc [ "task_id", `String task_id ])
+               ~payload
            | Masc_domain.Approve_verification ->
              emit_task_activity
                config

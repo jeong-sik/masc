@@ -296,7 +296,7 @@ let terminal_reason_requires_attention trust =
 
 let trust_disposition_requires_attention trust =
   match lowercase_json_string "disposition" trust with
-  | Some ("alert" | "pause") -> true
+  | Some ("alert" | "blocked" | "pause") -> true
   | _ -> false
 ;;
 
@@ -314,7 +314,7 @@ let keeper_queue_severity keeper trust =
      | _ ->
        (match lowercase_json_string "disposition" trust with
         | Some "alert" -> "bad"
-        | Some "pause" -> "warn"
+        | Some ("blocked" | "pause") -> "warn"
         | _ ->
           if Option.is_some (string_field_opt "runtime_blocker_class" keeper)
           then "bad"

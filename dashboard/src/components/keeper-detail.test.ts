@@ -305,7 +305,7 @@ describe('KeeperDetailPage', () => {
         next_eligible_at_s: null,
       },
       trust: {
-        disposition: 'Pause',
+        disposition: 'Blocked',
         disposition_reason: 'tool_required_unsatisfied',
         needs_attention: true,
       },

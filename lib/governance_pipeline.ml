@@ -512,7 +512,7 @@ let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock
                ?goal_ids
                ?runtime_contract
                ?selected_model
-               ~disposition:"Pause"
+               ~disposition:"Blocked"
                ~disposition_reason:"waiting_approval"
                ~risk_level
                ?clock

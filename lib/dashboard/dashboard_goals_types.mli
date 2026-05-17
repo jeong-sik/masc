@@ -204,8 +204,9 @@ val goal_fsm_to_json :
 (** {1 Operator-disposition normalizer (pure)} *)
 
 (** [display_disposition_of_receipt_json receipt] returns
-    [(severity, reason, raw_disposition, raw_reason)] where [severity]
-    is one of "Pass" | "Pause" | "Alert". *)
+    [(disposition, reason, raw_disposition, raw_reason)] where [disposition]
+    is one of "Pass" | "Blocked" | "Alert". Legacy "Pause" payloads are
+    still accepted by downstream readers. *)
 val display_disposition_of_receipt_json :
   Yojson.Safe.t -> string * string * string * string
 

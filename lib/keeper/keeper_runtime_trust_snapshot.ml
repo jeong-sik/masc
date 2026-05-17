@@ -671,8 +671,8 @@ let disposition_of_snapshot ~pending_approval_count ~runtime_blocker_fields =
   let blocker_summary =
     assoc_string_opt "runtime_blocker_summary" runtime_blocker_fields
   in
-  if pending_approval_count > 0 then ("Pause", "waiting_approval")
-  else if continue_gate then ("Pause", "waiting_human_decision")
+  if pending_approval_count > 0 then ("Blocked", "waiting_approval")
+  else if continue_gate then ("Blocked", "waiting_human_decision")
   else
     match blocker_class, blocker_summary with
     | Some "cascade_exhausted", _ -> ("Alert", "cascade_exhausted")
@@ -686,6 +686,7 @@ let disposition_of_snapshot ~pending_approval_count ~runtime_blocker_fields =
 let operator_disposition_of_display ~disposition ~disposition_reason =
   match disposition with
   | "Pass" -> ("pass", disposition_reason)
+  | "Blocked" -> ("pause_human", disposition_reason)
   | "Pause" -> ("pause_human", disposition_reason)
   | "Alert" -> ("alert_exhausted", disposition_reason)
   | _ -> ("pause_human", disposition_reason)
@@ -701,12 +702,17 @@ let display_disposition_of_operator ~operator_disposition
   | "pass" -> ("Pass", "healthy")
   | "skipped" -> ("Pass", "phase_skipped")
   | "pass_next_model" -> ("Pass", "cascade_fallback")
-  | "pause_human" -> ("Pause", reason "needs_human_attention")
-  | "fail_open_next_cascade" -> ("Pause", reason "degraded_retry")
-  | "user_cancelled" -> ("Pause", reason "cancelled")
+  | "blocked" | "blocked_runtime" -> ("Blocked", reason "runtime_blocked")
+  | "pause_human" -> ("Blocked", reason "needs_human_attention")
+  | "fail_open_next_cascade" -> ("Blocked", reason "degraded_retry")
+  | "user_cancelled" -> ("Blocked", reason "cancelled")
   | "alert_exhausted" -> ("Alert", reason "cascade_exhausted")
   | "unknown" -> ("Alert", reason "unmapped_cascade_state")
   | _ -> ("Alert", reason "unmapped_operator_disposition")
+
+let display_disposition_requires_attention = function
+  | "Blocked" | "Pause" | "Alert" -> true
+  | _ -> false
 
 let receipt_operator_disposition receipt =
   match
@@ -1154,8 +1160,7 @@ let summary_json ~(config : Coord.config) ~(meta : keeper_meta) =
   in
   let needs_attention =
     assoc_bool_default "needs_attention" ~default:false attention_fields
-    || String.equal disposition "Pause"
-    || String.equal disposition "Alert"
+    || display_disposition_requires_attention disposition
   in
   let attention_reason =
     attention_reason_or_disposition ~needs_attention ~disposition_reason
@@ -1339,8 +1344,7 @@ let snapshot_json ~(config : Coord.config) ~(meta : keeper_meta) =
   in
   let needs_attention =
     assoc_bool_default "needs_attention" ~default:false attention_fields
-    || String.equal disposition "Pause"
-    || String.equal disposition "Alert"
+    || display_disposition_requires_attention disposition
   in
   let attention_reason =
     attention_reason_or_disposition ~needs_attention ~disposition_reason

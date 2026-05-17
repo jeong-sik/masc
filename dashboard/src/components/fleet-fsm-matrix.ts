@@ -406,8 +406,8 @@ function blockingCause(snapshot: KeeperCompositeSnapshot): string {
   if (execution.operator_disposition === 'pause_human') {
     parts.push(
       execution.operator_disposition_reason
-        ? `operator pause: ${execution.operator_disposition_reason}`
-        : 'operator pause requested',
+        ? `blocked: ${execution.operator_disposition_reason}`
+        : 'blocked by operator disposition',
     )
   }
   if (execution.tool_contract_result === 'missing_required_tool_use') {
@@ -449,7 +449,7 @@ function blockingNextStep(snapshot: KeeperCompositeSnapshot): string {
     return 'provider timeout budget/cascade lane 확인'
   }
   if (execution.operator_disposition === 'pause_human') {
-    return 'operator gate/approval 상태와 최신 receipt 확인'
+    return 'blocker gate/approval 상태와 최신 receipt 확인'
   }
   if (execution.terminal_reason_code && execution.terminal_reason_code !== 'completed') {
     return `terminal=${execution.terminal_reason_code} receipt 확인`

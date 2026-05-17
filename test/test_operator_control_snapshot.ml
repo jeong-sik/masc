@@ -466,7 +466,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
       Alcotest.(check bool) "attention surfaced" true
         (keeper |> member "needs_attention" |> to_bool);
       let trust = keeper |> member "runtime_trust" in
-      Alcotest.(check string) "trust disposition pauses" "Pause"
+      Alcotest.(check string) "trust disposition blocks" "Blocked"
         (trust |> member "disposition" |> to_string);
       Alcotest.(check string) "operator reason preserved"
         "tool_required_unsatisfied"

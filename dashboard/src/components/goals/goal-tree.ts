@@ -193,7 +193,7 @@ function healthLabel(health: GoalTreeNode['health']): string {
 
 function trustDispositionLabel(disposition: string | null | undefined): string | null {
   if (!disposition) return null
-  return ({ Alert: '경보', Pause: '정지', Pass: '통과' } as Record<string, string>)[
+  return ({ Alert: '경보', Blocked: '차단', Pause: '정지', Pass: '통과' } as Record<string, string>)[
     disposition
   ] ?? disposition
 }
@@ -317,7 +317,7 @@ function keeperTrustDispositionClass(
 ): string {
   const disposition = trust?.disposition
   if (disposition === 'Alert') return 'border-bad/25 bg-bad/10 text-bad'
-  if (disposition === 'Pause' || trust?.needs_attention) {
+  if (disposition === 'Blocked' || disposition === 'Pause' || trust?.needs_attention) {
     return 'border-warn/25 bg-warn/10 text-warn'
   }
   if (disposition === 'Pass') return 'border-ok/25 bg-ok/10 text-ok'

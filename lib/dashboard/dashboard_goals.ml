@@ -38,7 +38,7 @@ let keeper_runtime_trust_snapshot_json ~config ~(meta : Keeper_types.keeper_meta
       let error = Printexc.to_string exn in
       `Assoc
         [
-          ("disposition", `String "Pause");
+          ("disposition", `String "Blocked");
           ("disposition_reason", `String "runtime_trust_snapshot_unavailable");
           ("needs_attention", `Bool true);
           ("attention_reason", `String "runtime_trust_snapshot_unavailable");

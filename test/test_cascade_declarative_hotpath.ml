@@ -413,6 +413,88 @@ target = "tier-group.glm-coding-with-spark"
          "expected one provider config, got %d"
          (List.length cfgs))
 
+(* --- RFC-0058 Phase 8: partial parse --- *)
+
+(* Reproduces the 2026-05-17 keeper-skip incident: a stale [<ghost>.<m>]
+   binding referencing a removed provider used to invalidate the
+   entire catalog at the [try_load_declarative] surface, even though
+   well-formed tier-groups elsewhere in the file resolved cleanly.
+   See RFC-0058 Phase 8 §1. *)
+let partial_toml = {|
+[providers.ollama]
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.qwen3]
+max-context = 32768
+api-name = "qwen3:8b"
+tools-support = true
+
+[ollama.qwen3]
+
+[tier.local]
+members = ["ollama.qwen3"]
+strategy = "failover"
+
+[tier-group.local-group]
+tiers = ["local"]
+strategy = "failover"
+
+# Stale binding — provider [providers.ghost] does not exist.
+# Before Phase 8 this single error invalidates the whole catalog.
+[ghost.ghost-model]
+max-concurrent = 1
+|}
+
+let write_temp_toml content =
+  let path = Filename.temp_file "rfc0058_phase8" ".toml" in
+  write_file path content;
+  path
+
+let test_try_load_partial_returns_snapshot_with_errors () =
+  let path = write_temp_toml partial_toml in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove path with _ -> ())
+    (fun () ->
+      match Hotpath.try_load_partial path with
+      | None ->
+        fail
+          "expected Some partial_load_result (catalog has resolvable \
+           tier-group.local-group), got None"
+      | Some { snapshot; errors } ->
+        check bool "snapshot has profiles" true
+          (List.length snapshot.Hotpath.profiles > 0);
+        check bool "errors recorded" true (List.length errors > 0);
+        let names = Hotpath.decl_snapshot_profile_names snapshot in
+        check bool
+          "tier-group.local-group surfaces in partial snapshot" true
+          (List.exists (fun n -> n = "tier-group.local-group") names))
+
+let test_try_load_declarative_collapses_partial_to_error () =
+  let path = write_temp_toml partial_toml in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove path with _ -> ())
+    (fun () ->
+      match Hotpath.try_load_declarative path with
+      | None -> fail "expected Some result"
+      | Some (Ok _) ->
+        fail
+          "backward-compat shim must surface Error when partial errors \
+           exist; got Ok"
+      | Some (Error errors) ->
+        check bool "binary shim reports errors" true
+          (List.length errors > 0))
+
+let test_try_load_partial_clean_has_no_errors () =
+  let path = write_temp_toml valid_toml in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove path with _ -> ())
+    (fun () ->
+      match Hotpath.try_load_partial path with
+      | None -> fail "expected Some for clean valid_toml"
+      | Some { snapshot = _; errors } ->
+        check int "clean parse has no errors" 0 (List.length errors))
+
 (* --- Test suite --- *)
 
 let () =
@@ -455,5 +537,20 @@ let () =
           "runtime resolution uses direct declarative Provider_config"
           `Quick
           test_runtime_resolution_uses_direct_declarative_provider_config;
+      ];
+      "phase8_partial_parse",
+      [
+        test_case
+          "try_load_partial surfaces snapshot + errors for partial catalog"
+          `Quick
+          test_try_load_partial_returns_snapshot_with_errors;
+        test_case
+          "try_load_declarative remains binary (Error on partial)"
+          `Quick
+          test_try_load_declarative_collapses_partial_to_error;
+        test_case
+          "try_load_partial clean parse has empty errors"
+          `Quick
+          test_try_load_partial_clean_has_no_errors;
       ];
     ]

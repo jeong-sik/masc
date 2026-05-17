@@ -134,20 +134,37 @@ let adapted_catalog_to_snapshot ~source_path (ac : adapted_catalog) :
 
 (* --- TOML loading --- *)
 
-let try_load_declarative (config_path : string) :
-    (decl_snapshot, adapter_error list) result option =
+type partial_load_result = {
+  snapshot : decl_snapshot;
+  errors : adapter_error list;
+}
+
+let try_load_partial (config_path : string) : partial_load_result option =
   match Cascade_declarative_parser.parse_file config_path with
   | Error _ -> None  (* not a 5-layer TOML *)
   | Ok cfg ->
     let catalog = adapt_config cfg in
     match adapted_catalog_to_snapshot ~source_path:config_path catalog with
     | Some snapshot ->
-      if List.length catalog.errors > 0 then
-        Some (Error catalog.errors)
-      else
-        Some (Ok snapshot)
+      Some { snapshot; errors = catalog.errors }
     | None ->
-      Some (Error catalog.errors)
+      (* No profile resolvable. Caller falls back to the legacy loader. *)
+      None
+
+let try_load_declarative (config_path : string) :
+    (decl_snapshot, adapter_error list) result option =
+  match try_load_partial config_path with
+  | None -> (
+    (* Preserve historical behavior: when no profile resolved but the
+       parse step itself produced adapter errors, surface them as Error
+       so the boot gate can still report the catalog state. *)
+    match Cascade_declarative_parser.parse_file config_path with
+    | Error _ -> None
+    | Ok cfg ->
+      let catalog = adapt_config cfg in
+      Some (Error catalog.errors))
+  | Some { snapshot; errors = [] } -> Some (Ok snapshot)
+  | Some { snapshot = _; errors } -> Some (Error errors)
 
 (* --- Route bindings --- *)
 

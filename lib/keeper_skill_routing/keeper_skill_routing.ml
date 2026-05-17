@@ -127,18 +127,50 @@ let format_skill_route_reason (route : keeper_skill_route) : string =
   | Model_selected r -> Printf.sprintf "SKILL_REASON: %s" r
   | Model_rejected r -> Printf.sprintf "SKILL_REASON: %s (heuristic fallback)" r
 
+(* RFC-0089 G5 — closed sum for skill route marker lines. The LLM
+   model_select response is the producer; markers are the wire-level
+   protocol tokens. A new marker variant added here forces every reader
+   to handle it (compiler-enforced via exhaustive match), replacing the
+   previous open string-prefix classifier. *)
+type skill_marker = Skill | Skill_reason
+
+let skill_marker_to_wire = function
+  | Skill -> "SKILL:"
+  | Skill_reason -> "SKILL_REASON:"
+
+let skill_marker_wire_length m = String.length (skill_marker_to_wire m)
+
+(* Case-insensitive lookup. Returns the matching marker variant or None.
+   All [String.starts_with] usage for skill markers in this module is
+   encapsulated here so a new marker variant only requires extending the
+   [skill_marker] sum + this table. *)
+let skill_marker_table_ci : (string * skill_marker) list =
+  [ "skill:", Skill; "skill_reason:", Skill_reason ]
+
+let skill_marker_of_lowered_trimmed (s : string) : skill_marker option =
+  List.find_map
+    (fun (prefix, marker) ->
+      if String.starts_with ~prefix s then Some marker else None)
+    skill_marker_table_ci
+
+(* Case-sensitive scan over a raw line — used by [parse_skill_route_response]
+   where the model is asked to emit upper-case markers verbatim. Reuses the
+   typed marker domain. *)
+let skill_marker_prefix_of_line (line : string) : skill_marker option =
+  List.find_map
+    (fun (_, marker) ->
+      let wire = skill_marker_to_wire marker in
+      if String.starts_with ~prefix:wire line then Some marker else None)
+    skill_marker_table_ci
+
 (* Shared classifier: a "skill route" line is a non-blank line whose
-   trimmed lowercased prefix is "skill:" or "skill_reason:".  Blank
-   lines are not route lines (they pass through the strip).  Used by
-   both [strip_skill_route_lines] and [count_skill_route_lines] so
-   the count semantics stay in sync with the strip semantics. *)
+   trimmed lowercased prefix matches a known [skill_marker] variant. *)
 let is_skill_route_line (line : string) : bool =
   let trimmed = String.trim line in
   if trimmed = "" then false
   else
     let lc = String.lowercase_ascii trimmed in
-    String.starts_with ~prefix:"skill:" lc
-    || String.starts_with ~prefix:"skill_reason:" lc
+    Option.is_some (skill_marker_of_lowered_trimmed lc)
 
 let strip_skill_route_lines (raw : string) : string =
   let lines = String.split_on_char '\n' raw in
@@ -155,15 +187,23 @@ let count_skill_route_lines (raw : string) : int =
 let parse_skill_route_response (text : string)
     ~(fallback_route : keeper_skill_route) : keeper_skill_route =
   let lines = String.split_on_char '\n' text in
-  let skill_line = List.find_opt (String.starts_with ~prefix:"SKILL:") lines in
-  let reason_line =
-    List.find_opt (String.starts_with ~prefix:"SKILL_REASON:") lines
+  let find_marker_line marker =
+    List.find_opt
+      (fun line ->
+        match skill_marker_prefix_of_line line with
+        | Some m when m = marker -> true
+        | _ -> false)
+      lines
+  in
+  let skill_line = find_marker_line Skill in
+  let reason_line = find_marker_line Skill_reason in
+  let strip_marker_prefix marker line =
+    let n = skill_marker_wire_length marker in
+    String.sub line n (String.length line - n) |> String.trim
   in
   match skill_line with
   | Some line ->
-      let raw =
-        String.sub line 6 (String.length line - 6) |> String.trim
-      in
+      let raw = strip_marker_prefix Skill line in
       let primary, secondary =
         if contains_ci raw "(+" then
           match String.split_on_char '(' raw with
@@ -182,8 +222,7 @@ let parse_skill_route_response (text : string)
       if is_valid_keeper_skill primary then
         let reason =
           match reason_line with
-          | Some rl ->
-              String.sub rl 13 (String.length rl - 13) |> String.trim
+          | Some rl -> strip_marker_prefix Skill_reason rl
           | None -> "No reason provided by model"
         in
         { primary_skill = primary

@@ -246,13 +246,18 @@ let discover_profile_names ~config_path ~json : string list =
              end
              else true)
       |> List.sort_uniq String.compare
-  | Some { declarative_snapshot = Some _; declarative_profile_names = names;
+  | Some { declarative_snapshot = Some snap;
            declarative_errors = (_ :: _ as errs); _ }
     when allow_partial_boot () ->
       (* RFC-0058 Phase 8.3: opt-in partial-boot tolerance. Declarative
          parser ran with adapter errors, but [MASC_CASCADE_PARTIAL_BOOT]
          is set, so surface the resolvable subset of profiles and emit
-         a structured WARN per error. *)
+         a structured WARN per error. Source names from the snapshot
+         (not [declarative_profile_names], which is built from
+         catalog.profiles before empty/unresolvable profiles are
+         removed). Otherwise route-target/default validation can pass
+         for profiles that are no longer in the snapshot, surfacing
+         only later as dispatch failures. *)
       Cascade_metrics.on_declarative_parse_error ();
       List.iter
         (fun err ->
@@ -262,7 +267,7 @@ let discover_profile_names ~config_path ~json : string list =
             (render_declarative_adapter_error err))
         errs;
       Cascade_metrics.on_profile_discovery ~path:"declarative_partial_boot";
-      names
+      Cascade_declarative_hotpath.decl_snapshot_profile_names snap
       |> List.filter (fun profile ->
              not
                (Cascade_config_loader.is_deprecated_logical_profile_name

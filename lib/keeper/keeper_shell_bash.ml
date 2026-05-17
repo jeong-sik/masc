@@ -996,7 +996,12 @@ let handle_keeper_bash
              Keeper_task_worktree_lazy.ensure_command_existing_dirs ~config ~meta ~cwd ~cmd
            with
            | Error e -> Error e
-           | Ok () -> Worker_dev_tools.validate_command_paths ~workdir:cwd cmd
+           | Ok () ->
+             Worker_dev_tools.validate_command_paths
+               ~keeper_id:meta.name
+               ~base_path:root
+               ~workdir:cwd
+               cmd
           in
           match path_validation with
           | Error e -> error_json ~fields:["blocked_cmd", `String cmd_for_log] e

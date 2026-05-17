@@ -18,6 +18,81 @@ let contains_substring s needle =
   in
   if n_len = 0 then true else loop 0
 
+let rec ensure_dir path =
+  if path = "" || path = "." || path = "/" || Sys.file_exists path then ()
+  else (
+    ensure_dir (Filename.dirname path);
+    Unix.mkdir path 0o755)
+
+let rec cleanup_path path =
+  if Sys.file_exists path then
+    match Unix.lstat path with
+    | { Unix.st_kind = Unix.S_DIR; _ } ->
+      Array.iter
+        (fun name -> cleanup_path (Filename.concat path name))
+        (Sys.readdir path);
+      Unix.rmdir path
+    | _ -> Sys.remove path
+
+let registered_repo id local_path : Repo_manager_types.repository =
+  { id
+  ; name = id
+  ; url = "https://github.com/example/" ^ id ^ ".git"
+  ; local_path
+  ; aliases = []
+  ; default_branch = "main"
+  ; credential_id = ""
+  ; keepers = []
+  ; status = Repo_manager_types.Active
+  ; auto_sync = false
+  ; sync_interval = 0
+  ; created_at = 0L
+  ; updated_at = 0L
+  }
+
+let with_registered_repo_fixture f =
+  let base_path =
+    Filename.concat
+      (Sys.getcwd ())
+      (Printf.sprintf "_worker_dev_tools_repo_mapping_%d" (Unix.getpid ()))
+  in
+  let workdir = Filename.temp_file "wdt_repo_mapping_cwd_" "" in
+  Fun.protect
+    ~finally:(fun () ->
+      (try cleanup_path base_path with _ -> ());
+      try cleanup_path workdir with _ -> ())
+    (fun () ->
+       if Sys.file_exists base_path then cleanup_path base_path;
+       Sys.remove workdir;
+       Unix.mkdir workdir 0o755;
+       let repo_a_dir = Filename.concat base_path "repo-a" in
+       let repo_b_dir = Filename.concat base_path "repo-b" in
+       let target = Filename.concat repo_a_dir "lib/foo.ml" in
+       ensure_dir (Filename.dirname target);
+       ensure_dir repo_b_dir;
+       ensure_dir workdir;
+       (match
+          Repo_store.save_all
+            ~base_path
+            [ registered_repo "repo-a" repo_a_dir
+            ; registered_repo "repo-b" repo_b_dir
+            ]
+        with
+        | Ok () -> ()
+        | Error msg -> Alcotest.fail ("repo store setup failed: " ^ msg));
+       let save_mapping keeper_id repository_ids =
+         match
+           Keeper_repo_mapping.save_mapping
+             ~base_path
+             { keeper_id; repository_ids; github_credential_id = None }
+         with
+         | Ok () -> ()
+         | Error msg -> Alcotest.fail ("mapping setup failed: " ^ msg)
+       in
+       save_mapping "keeper-1" [ "repo-a" ];
+       save_mapping "keeper-2" [ "repo-b" ];
+       f ~base_path ~workdir ~target)
+
 (* --- Tool structure tests --- *)
 
 let test_tool_count () =
@@ -1105,6 +1180,61 @@ let () =
               | Error msg ->
                 Alcotest.fail
                   ("own repo path from worktree cwd rejected: " ^ msg)));
+      Alcotest.test_case
+        "registered repo path is blocked without keeper context"
+        `Quick
+        (fun () ->
+          with_registered_repo_fixture
+            (fun ~base_path:_ ~workdir ~target ->
+               match
+                 Worker_dev_tools.validate_command_paths
+                   ~workdir
+                   (Printf.sprintf "cat %s" target)
+               with
+               | Error msg ->
+                 Alcotest.(check bool)
+                   "outside path blocked"
+                   true
+                   (contains_substring msg "outside allowed directories")
+               | Ok () ->
+                 Alcotest.fail
+                   "registered repo path must still need keeper context"));
+      Alcotest.test_case
+        "registered repo path is allowed for mapped keeper"
+        `Quick
+        (fun () ->
+          with_registered_repo_fixture
+            (fun ~base_path ~workdir ~target ->
+               match
+                 Worker_dev_tools.validate_command_paths
+                   ~keeper_id:"keeper-1"
+                   ~base_path
+                   ~workdir
+                   (Printf.sprintf "cat %s" target)
+               with
+               | Ok () -> ()
+               | Error msg ->
+                 Alcotest.fail ("mapped repo path rejected: " ^ msg)));
+      Alcotest.test_case
+        "registered repo path is denied for mismatched keeper mapping"
+        `Quick
+        (fun () ->
+          with_registered_repo_fixture
+            (fun ~base_path ~workdir ~target ->
+               match
+                 Worker_dev_tools.validate_command_paths
+                   ~keeper_id:"keeper-2"
+                   ~base_path
+                   ~workdir
+                   (Printf.sprintf "cat %s" target)
+               with
+               | Error msg ->
+                 Alcotest.(check bool)
+                   "outside path blocked"
+                   true
+                   (contains_substring msg "outside allowed directories")
+               | Ok () ->
+                 Alcotest.fail "unmapped keeper must not inherit repo path access"));
       Alcotest.test_case "git -C missing worktree is cwd_not_directory"
         `Quick (fun () ->
           let workdir = Filename.temp_file "wdt_git_c_" "" in

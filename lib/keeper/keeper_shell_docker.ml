@@ -839,7 +839,12 @@ let run_docker_shell_command_with_status_internal
                ~cmd:validation_cmd
            with
            | Error e -> Error e
-           | Ok () -> Worker_dev_tools.validate_command_paths ~workdir:cwd validation_cmd)
+           | Ok () ->
+             Worker_dev_tools.validate_command_paths
+               ~keeper_id:meta.name
+               ~base_path:(Keeper_alerting_path.project_root_of_config config)
+               ~workdir:cwd
+               validation_cmd)
         else Ok ()
       in
       match path_validation with
@@ -1116,7 +1121,12 @@ let run_docker_with_git_bash
                ~cmd:validation_cmd
            with
            | Error e -> Error e
-           | Ok () -> Worker_dev_tools.validate_command_paths ~workdir:cwd validation_cmd
+           | Ok () ->
+             Worker_dev_tools.validate_command_paths
+               ~keeper_id:meta.name
+               ~base_path:(Keeper_alerting_path.project_root_of_config config)
+               ~workdir:cwd
+               validation_cmd
          in
          (match path_validation with
           | Error err -> sandbox_error_json (Printf.sprintf "%s [blocked_cmd=%s]" err validation_cmd)
@@ -1200,7 +1210,12 @@ let run_docker_hardened_bash
             ~cmd:validation_cmd
         with
         | Error e -> Error e
-        | Ok () -> Worker_dev_tools.validate_command_paths ~workdir:cwd validation_cmd
+        | Ok () ->
+          Worker_dev_tools.validate_command_paths
+            ~keeper_id:meta.name
+            ~base_path:(Keeper_alerting_path.project_root_of_config config)
+            ~workdir:cwd
+            validation_cmd
       in
       (match path_validation with
        | Error err -> sandbox_error_json (Printf.sprintf "%s [blocked_cmd=%s]" err validation_cmd)

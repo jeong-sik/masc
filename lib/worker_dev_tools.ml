@@ -105,8 +105,25 @@ let worktree_repo_root_of_workdir workdir =
     surfaces a documented fallback ([/tmp/masc-fleet]) which is allowed.
     This aligns the Fleet worker with the same SSOT that other keeper
     sandbox surfaces will migrate to in later cleanup PRs. *)
-let validate_path ?workdir path =
+let keeper_registered_repo_path_allowed ?keeper_id ?base_path path =
+  match keeper_id, base_path with
+  | Some keeper_id, Some base_path -> (
+    match Keeper_repo_mapping.repository_id_of_path ~base_path ~path with
+    | None -> false
+    | Some repository_id ->
+      (match
+         Keeper_repo_mapping.validate_access ~keeper_id ~repository_id ~base_path
+       with
+       | Ok () -> true
+       | Error _ -> false))
+  | _ -> false
+;;
+
+let validate_path ?keeper_id ?base_path ?workdir path =
   let resolved = resolve_path ?base_dir:workdir path in
+  let registered_repo_allowed =
+    keeper_registered_repo_path_allowed ?keeper_id ?base_path resolved
+  in
   match workdir with
   | Some wd ->
     let resolved_wd = resolve_path wd in
@@ -118,11 +135,13 @@ let validate_path ?workdir path =
     is_within_dir ~dir:(resolve_path "/tmp") resolved
     || is_within_dir ~dir:resolved_wd resolved
     || within_worktree_repo_root
+    || registered_repo_allowed
   | None ->
     let cfg = Host_config.host () in
     is_within_dir ~dir:(resolve_path "/tmp") resolved
     || is_within_dir ~dir:(resolve_path (Sys.getcwd ())) resolved
     || is_within_dir ~dir:(resolve_path cfg.sandbox_workspace_root) resolved
+    || registered_repo_allowed
 ;;
 
 let tool_error ?(recoverable = false) message : Agent_sdk.Types.tool_result =
@@ -916,12 +935,12 @@ let existing_dir_path_values cmd =
   cmd |> tokenize_path_args |> path_validation_tokens |> loop false []
 ;;
 
-let validate_command_paths ?workdir cmd =
+let validate_command_paths ?keeper_id ?base_path ?workdir cmd =
   match workdir with
   | None -> Ok ()
   | Some _ ->
       let validate_path_value ~requires_existing_dir token =
-        if not (validate_path ?workdir token.value)
+        if not (validate_path ?keeper_id ?base_path ?workdir token.value)
         then
           Error
             (Keeper_path_check_error.(

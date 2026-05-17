@@ -171,15 +171,23 @@ let command_mentions_github cmd =
   || String.starts_with ~prefix:"git push" (String.trim cmd)
 ;;
 
+let resource_class_of_keeper_shell_op = function
+  | "gh" | "git_clone" -> Some Github
+  | "git_worktree" -> Some Filesystem_write
+  | "git_status" | "git_log" | "git_diff" -> Some Filesystem_read
+  | "rg" | "find" | "tree" | "cat" | "head" | "tail" | "wc" | "ls" ->
+    Some Filesystem_read
+  | _ -> None
+;;
+
 let classify_keeper_shell_op args =
   match json_string_opt "op" args with
   | Some raw ->
-    (match String.lowercase_ascii (String.trim raw) with
-     | "gh" | "git_clone" -> Github
-     | "git_worktree" -> Filesystem_write
-     | "git_status" | "git_log" | "git_diff" -> Filesystem_read
-     | "rg" | "find" | "tree" | "cat" | "head" | "tail" | "wc" | "ls" -> Filesystem_read
-     | _ -> Shell)
+    (match
+       String.lowercase_ascii (String.trim raw) |> resource_class_of_keeper_shell_op
+     with
+     | Some resource_class -> resource_class
+     | None -> Shell)
   | None -> Shell
 ;;
 

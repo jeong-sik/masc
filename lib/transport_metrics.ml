@@ -143,13 +143,22 @@ let inc_ws_parse_cache_miss () =
   Prometheus.inc_counter Prometheus.metric_ws_parse_cache_misses ()
 ;;
 
+type ws_frame_json_parse_error_kind =
+  | Yojson_parse_error
+  | Other_ws_frame_json_parse_error
+
+let ws_frame_json_parse_error_kind_to_string = function
+  | Yojson_parse_error -> "yojson_parse_error"
+  | Other_ws_frame_json_parse_error -> "other"
+;;
+
 (** Iter 28 visibility fix — counter for previously-silent JSON parse
     drops in parse_sse_dashboard_event. Closed 2-value error_kind
     vocab keeps Prometheus label cardinality bounded. *)
 let inc_ws_frame_json_parse_failure ~error_kind =
   Prometheus.inc_counter
     Prometheus.metric_server_mcp_ws_frame_json_parse_failures
-    ~labels:[ "error_kind", error_kind ]
+    ~labels:[ "error_kind", ws_frame_json_parse_error_kind_to_string error_kind ]
     ()
 ;;
 

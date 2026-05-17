@@ -57,6 +57,50 @@ let test_cascade_toml_validates () =
   check bool "routes generated" true (List.length catalog.routes > 0)
 ;;
 
+let set_env_opt key = function
+  | Some value -> Unix.putenv key value
+  | None -> Unix.putenv key ""
+;;
+
+let with_env key value f =
+  let previous = Sys.getenv_opt key in
+  Fun.protect
+    ~finally:(fun () -> set_env_opt key previous)
+    (fun () ->
+       set_env_opt key value;
+       f ())
+;;
+
+let reset_runtime_config_caches () =
+  Config_dir_resolver.reset ();
+  Masc_mcp.Cascade_catalog_runtime.reset_cache_for_tests ()
+;;
+
+let test_cascade_toml_runtime_validates_without_rejected_profiles () =
+  let path = config_path "cascade.toml" in
+  let config_dir = Filename.dirname path in
+  with_env "MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE" (Some "1") @@ fun () ->
+  with_env "MASC_CONFIG_DIR" (Some config_dir) @@ fun () ->
+  Fun.protect
+    ~finally:reset_runtime_config_caches
+    (fun () ->
+       reset_runtime_config_caches ();
+       match Masc_mcp.Cascade_catalog_runtime.inspect_active () with
+       | Ok (Masc_mcp.Cascade_catalog_runtime.Validated _) -> ()
+       | Ok (Masc_mcp.Cascade_catalog_runtime.Validated_with_rejections { rejected_update; _ })
+       | Ok (Masc_mcp.Cascade_catalog_runtime.Serving_last_known_good { rejected_update; _ })
+         ->
+         failf
+           "checked-in cascade.toml should not produce rejected runtime profiles: %s"
+           (Yojson.Safe.to_string
+              (Masc_mcp.Cascade_catalog_runtime.rejection_to_yojson rejected_update))
+       | Error rejection ->
+         failf
+           "checked-in cascade.toml should validate at runtime: %s"
+           (Yojson.Safe.to_string
+              (Masc_mcp.Cascade_catalog_runtime.rejection_to_yojson rejection)))
+;;
+
 let test_cascade_json_absent () =
   check bool "config/cascade.json absent" false (Sys.file_exists (config_path "cascade.json"))
 ;;
@@ -84,6 +128,10 @@ let () =
     "cascade config validity"
     [ ( "checked-in seed"
       , [ test_case "cascade.toml parses, validates, and adapts" `Quick test_cascade_toml_validates
+        ; test_case
+            "cascade.toml has no rejected runtime profiles"
+            `Quick
+            test_cascade_toml_runtime_validates_without_rejected_profiles
         ; test_case "cascade.json is not a checked-in source" `Quick test_cascade_json_absent
         ; test_case
             "qwen models use chat_template_kwargs thinking control"

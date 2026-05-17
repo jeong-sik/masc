@@ -562,7 +562,7 @@ let parse_sse_dashboard_event sse_event =
               msg
               (String.sub json_body 0 preview_len);
             Transport_metrics.inc_ws_frame_json_parse_failure
-              ~error_kind:"yojson_parse_error";
+              ~error_kind:Transport_metrics.Yojson_parse_error;
             None
         | exception Eio.Cancel.Cancelled e -> raise (Eio.Cancel.Cancelled e)
         | exception exn ->
@@ -572,7 +572,7 @@ let parse_sse_dashboard_event sse_event =
               (Printexc.to_string exn)
               (String.sub json_body 0 preview_len);
             Transport_metrics.inc_ws_frame_json_parse_failure
-              ~error_kind:"other";
+              ~error_kind:Transport_metrics.Other_ws_frame_json_parse_error;
             None
         | `Assoc fields as event_json -> (
             match List.assoc_opt "type" fields with

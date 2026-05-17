@@ -67,9 +67,10 @@ OAS_GEMINI_NO_MCP = "1"
 OAS_GEMINI_APPROVAL_MODE = "plan"
 # Codex는 -c TOML override로만 제어 가능
 OAS_CODEX_CONFIG = "mcp_servers={},sandbox_mode=read-only"
+MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS = 8192
 ```
 
-키는 반드시 `^OAS_(CLAUDE|CODEX|GEMINI)_.+` 패턴에 맞아야 한다. 그 외 키(`PATH`, `LD_PRELOAD`, 임의 변수 등)는 silently 드롭되어 ambient env 주입을 차단한다. bool 값은 `true`→`"1"`, `false`→`"0"`으로 자동 변환된다.
+키는 반드시 `^OAS_(CLAUDE|CODEX|GEMINI)_.+` 또는 `^MASC_KEEPER_OAS_.+` 패턴에 맞아야 한다. `MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS`는 해당 keeper turn의 `max_tokens` fallback에도 반영된다. 그 외 키(`PATH`, `LD_PRELOAD`, 임의 변수 등)는 silently 드롭되어 ambient env 주입을 차단한다. bool 값은 `true`→`"1"`, `false`→`"0"`으로 자동 변환된다.
 
 ### 1.2 MASC --- 조정 레이어
 

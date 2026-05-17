@@ -500,12 +500,12 @@ val metric_keeper_summarizer_state_blocks_removed : string
 val metric_keeper_oas_env_key_rejections : string
 (** Counter for [Keeper_types_profile.extract_oas_env_from_doc]
     entries dropped because the suffix did not match the
-    [OAS_(CLAUDE|CODEX|GEMINI)_] / [MASC_KEEPER_OAS_] allowlist.
-    Each rejected key increments by one and produces a warn line
-    so operators can spot configuration mistakes or attempted
-    env-injection bypass.  Non-zero counts at startup mean the
-    keeper TOML contains [keeper.oas_env.<X>] keys that the
-    runtime silently ignored. *)
+    [OAS_(CLAUDE|CODEX|GEMINI)_] / [MASC_KEEPER_OAS_] prefix allowlist, apart
+    from a narrow legacy alias for the keeper unified max-token knob.  Each
+    rejected key increments by one and produces a warn line so operators can
+    spot configuration mistakes or attempted env-injection bypass.  Non-zero
+    counts at startup mean the keeper TOML contains [keeper.oas_env.<X>] keys
+    that the runtime silently ignored. *)
 
 val metric_keeper_continuity_ts_recovered : string
 (** Counter for the synthetic-ts recovery branch in

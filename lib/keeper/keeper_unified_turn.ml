@@ -447,6 +447,18 @@ let run_keeper_cycle
       (match None with
        | Some meta_after_skip -> Ok meta_after_skip
        | None ->
+         let profile_defaults =
+           Keeper_types_profile.load_keeper_profile_defaults meta.name
+         in
+         let keeper_unified_max_tokens_fallback () =
+           match
+             Keeper_types_profile.unified_max_tokens_override_of_oas_env
+               ~keeper_name:meta.name
+               profile_defaults.oas_env
+           with
+           | Some value -> value
+           | None -> Keeper_config.keeper_unified_max_tokens ()
+         in
          let build_cascade_execution ~(cascade_name : KCP.runtime_name)
            : (cascade_execution, Agent_sdk.Error.sdk_error) result
            =
@@ -475,7 +487,7 @@ let run_keeper_cycle
                 let raw_max_tokens =
                   Cascade_inference.resolve_max_tokens
                     ~cascade_name
-                    ~fallback:Keeper_config.keeper_unified_max_tokens
+                    ~fallback:keeper_unified_max_tokens_fallback
                 in
                 let max_output_ceiling =
                   Cascade_runtime.max_output_tokens_ceiling_of_cascade_name

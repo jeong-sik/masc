@@ -17,11 +17,6 @@ def default_base_path() -> str:
     me_root = os.environ.get("ME_ROOT", "").strip()
     if me_root:
         return me_root
-    home = os.environ.get("HOME", "").strip()
-    if home:
-        home_me = os.path.join(home, "me")
-        if os.path.isdir(home_me):
-            return home_me
     return os.getcwd()
 
 

@@ -7,17 +7,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 default_base_path() {
-  if [ -n "${ME_ROOT:-}" ]; then
+  if [ -n "${MASC_BASE_PATH:-}" ]; then
+    printf '%s\n' "$MASC_BASE_PATH"
+  elif [ -n "${ME_ROOT:-}" ]; then
     printf '%s\n' "$ME_ROOT"
-  elif [ -n "${HOME:-}" ] && [ -d "$HOME/me" ]; then
-    printf '%s\n' "$HOME/me"
   else
     printf '%s\n' "$REPO_DIR"
   fi
 }
 
 DEFAULT_BASE_PATH="$(default_base_path)"
-BASE_PATH="${MASC_BASE_PATH:-$DEFAULT_BASE_PATH}"
+BASE_PATH="$DEFAULT_BASE_PATH"
 HOST="127.0.0.1"
 PORT="8935"
 DRY_RUN=0
@@ -48,7 +48,7 @@ Security notes:
   - Run `masc-mcp doctor auth` to verify the config is correct.
 
 Env:
-  MASC_BASE_PATH         Base path for the MASC data root (default: ME_ROOT, $HOME/me, then repo root)
+  MASC_BASE_PATH         Base path for the MASC data root (default: MASC_BASE_PATH, ME_ROOT, then repo root)
   MASC_CODEX_CONFIG_PATH Override the Codex config path (default: ~/.codex/config.toml)
 EOF
   exit 0

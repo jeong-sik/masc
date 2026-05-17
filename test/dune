@@ -1533,7 +1533,7 @@
  (libraries masc_test_deps))
 
 ; RFC-0084 host-config-cleanup-E — Fleet worker sandbox root migration.
-; Pins literal `Filename.concat home "me"` count at 0 in
+; Pins the old home-workspace literal count at 0 in
 ; lib/worker_dev_tools.ml and asserts Host_config.host
 ; is invoked there. Cross-checks sandbox_workspace_root contract from
 ; PR-12. Requires masc_test_deps because it accesses

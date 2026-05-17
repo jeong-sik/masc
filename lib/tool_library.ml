@@ -87,13 +87,12 @@ type context = {
 
 (* Paths *)
 let workspace_root () =
-  match Sys.getenv_opt "ME_ROOT" |> Option.map String.trim with
-  | Some root when root <> "" -> root
+  match Sys.getenv_opt "MASC_BASE_PATH" |> Option.map String.trim with
+  | Some root when root <> "" -> Env_config_core.normalize_masc_base_path_input root
   | _ ->
-    let fallback = (Host_config.host ()).agent_runtime_root in
-    (match Sys.getenv_opt "HOME" |> Option.map String.trim with
-     | Some home when home <> "" -> Filename.concat home "me"
-     | _ -> fallback)
+    (match Sys.getenv_opt "ME_ROOT" |> Option.map String.trim with
+     | Some root when root <> "" -> root
+     | _ -> (Host_config.host ()).agent_runtime_root)
 
 let library_root () =
   Filename.concat (workspace_root ()) "docs/library"

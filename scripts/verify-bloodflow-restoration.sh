@@ -46,8 +46,6 @@ default_base_path() {
     printf '%s\n' "$MASC_BASE_PATH"
   elif [ -n "${ME_ROOT:-}" ]; then
     printf '%s\n' "$ME_ROOT"
-  elif [ -n "${HOME:-}" ] && [ -d "$HOME/me" ]; then
-    printf '%s\n' "$HOME/me"
   else
     printf '%s\n' "$ROOT"
   fi

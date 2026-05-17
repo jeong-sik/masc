@@ -92,7 +92,7 @@ end
 
 - **Files**: rewrite `scripts/rotate-keeper-gh-token.sh` (in the `me` repo, branch `feat/rotate-keeper-gh-token`) to:
   - require `IDENTITY=<name>` argument,
-  - target `$HOME/me/.masc/github-identities/$IDENTITY/gh` only,
+  - target `$MASC_BASE_PATH/.masc/github-identities/$IDENTITY/gh` only,
   - verify the new token's SHA-256 **differs** from `gh auth token` (F-1 gate — `provider_gate` equivalent at rotation time).
 - **`Host_config_provider` update**: `resolve` adds a metadata line `sha256_prefix=<first 12>` and surfaces it in `binding.metadata` so `provider_gate` in PR-3 can consult it without re-reading the file.
 - **Why safe**: script is operator-facing; a mismatched identity × PAT never reaches the runtime.

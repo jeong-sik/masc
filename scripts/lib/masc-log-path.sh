@@ -9,9 +9,8 @@
 #                        the server is running, regardless of how it was
 #                        started (argv --base-path, env, or anything else).
 #   3. $MASC_BASE_PATH - env-provided base path; <base>/.masc/logs/system_log_TODAY.jsonl
-#   4. $ME_ROOT        - second-brain workspace default.
-#   5. $HOME/me        - second-brain default, only if it already exists.
-#   6. $PWD            - last fallback.
+#   4. $ME_ROOT        - explicit second-brain workspace root.
+#   5. $PWD            - last fallback.
 #
 # Sourced by scripts/logs-follow.sh and scripts/op-f-leak-verification.sh.
 #
@@ -26,10 +25,6 @@ masc_log_resolve_base() {
   fi
   if [ -n "${ME_ROOT:-}" ]; then
     echo "$ME_ROOT"
-    return 0
-  fi
-  if [ -n "${HOME:-}" ] && [ -d "$HOME/me" ]; then
-    echo "$HOME/me"
     return 0
   fi
   pwd

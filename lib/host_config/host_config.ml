@@ -65,11 +65,11 @@ let host () =
     | Some s -> if String.trim s = "" then None else Some s
   in
   let default_workspace_root fallback =
-    match get_opt "ME_ROOT" with
-    | Some root -> root
+    match get_opt "MASC_BASE_PATH" with
+    | Some root -> Env_config_core.normalize_masc_base_path_input root
     | None ->
-      (match get_opt "HOME" with
-       | Some home -> Filename.concat home "me"
+      (match get_opt "ME_ROOT" with
+       | Some root -> root
        | None -> fallback)
   in
   { cred_root = Filename.concat tmp "keeper-creds"
@@ -169,11 +169,11 @@ let resolve ?base_path () =
     | Some s -> if String.trim s = "" then None else Some s
   in
   let default_workspace_root fallback =
-    match get_opt "ME_ROOT" with
-    | Some root -> root
+    match get_opt "MASC_BASE_PATH" with
+    | Some root -> Env_config_core.normalize_masc_base_path_input root
     | None ->
-      (match get_opt "HOME" with
-       | Some home -> Filename.concat home "me"
+      (match get_opt "ME_ROOT" with
+       | Some root -> root
        | None -> fallback)
   in
   let agent_runtime_root = Filename.concat base ".masc/runtime/agent" in

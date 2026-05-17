@@ -18,7 +18,7 @@
 #   TTL_DAYS=14 scripts/cleanup-autoresearch.sh --apply  # custom TTL
 #
 # Environment:
-#   MASC_BASE_PATH  base path (default: ME_ROOT, $HOME/me, then cwd)
+#   MASC_BASE_PATH  base path (default: MASC_BASE_PATH, ME_ROOT, then cwd)
 #   TTL_DAYS        days a dir must be untouched to qualify (default: 7)
 #
 # Refuses to quarantine a dir that any process holds an open FD to.
@@ -41,8 +41,6 @@ default_base_path() {
     printf '%s\n' "$MASC_BASE_PATH"
   elif [ -n "${ME_ROOT:-}" ]; then
     printf '%s\n' "$ME_ROOT"
-  elif [ -n "${HOME:-}" ] && [ -d "$HOME/me" ]; then
-    printf '%s\n' "$HOME/me"
   else
     pwd
   fi

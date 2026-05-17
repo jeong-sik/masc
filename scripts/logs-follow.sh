@@ -191,7 +191,7 @@ validate_args
 #   1. --base-path override          (user-provided path, run through worktree-aware resolver)
 #   2. helper masc_log_dir           (detects via lsof on the running server when available;
 #                                     falls back to MASC_BASE_PATH, ME_ROOT,
-#                                     $HOME/me if present, or cwd)
+#                                     ME_ROOT, or cwd)
 # This avoids the historical drift where logs-follow defaulted to $HOME
 # while the server actually wrote under <base>/.masc/logs/, leaving
 # operators staring at an empty directory.

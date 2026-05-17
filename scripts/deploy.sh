@@ -20,15 +20,15 @@ RELEASE_DIR="$REPO_DIR/releases"
 PROD_PORT=8945
 HEALTH_URL="http://127.0.0.1:$PROD_PORT/health"
 default_base_path() {
-    if [ -n "${ME_ROOT:-}" ]; then
+    if [ -n "${MASC_BASE_PATH:-}" ]; then
+        printf '%s\n' "$MASC_BASE_PATH"
+    elif [ -n "${ME_ROOT:-}" ]; then
         printf '%s\n' "$ME_ROOT"
-    elif [ -n "${HOME:-}" ] && [ -d "$HOME/me" ]; then
-        printf '%s\n' "$HOME/me"
     else
         printf '%s\n' "$REPO_DIR"
     fi
 }
-BASE_PATH="${MASC_BASE_PATH:-$(default_base_path)}"
+BASE_PATH="$(default_base_path)"
 RUNTIME_ROOT="${BASE_PATH}/.masc"
 PID_FILE="${RUNTIME_ROOT}/masc-prod.pid"
 LOG_DIR="${RUNTIME_ROOT}/logs"

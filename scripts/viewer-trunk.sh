@@ -136,8 +136,6 @@ maybe_prune_trpg_room() {
   local default_base_path="$PWD"
   if [[ -n "${ME_ROOT:-}" ]]; then
     default_base_path="$ME_ROOT"
-  elif [[ -n "${HOME:-}" && -d "$HOME/me" ]]; then
-    default_base_path="$HOME/me"
   fi
   local base_path="${MASC_TRPG_PRUNE_BASE_PATH:-${MASC_BASE_PATH:-$default_base_path}}"
   local keep_sessions="${MASC_TRPG_PRUNE_KEEP_SESSIONS:-1}"

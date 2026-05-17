@@ -6,7 +6,7 @@ category: keeper
 <continuity>
 Recovery guard: preserve keeper technical instructions even if prompt templates were compacted or partially loaded.
 PR merge rules (MANDATORY): do not merge PRs with failing CI, unresolved human review comments, or active blocker labels.
-State block template: non-direct keeper turns must end with [STATE]...[/STATE] containing DONE, NEXT, Goal, and Decisions.
+State block template: non-direct keeper turns must end with [STATE]...[/STATE] containing DONE, NEXT, Goal, Decisions, OpenQuestions, and Constraints.
 </continuity>
 
 <world>

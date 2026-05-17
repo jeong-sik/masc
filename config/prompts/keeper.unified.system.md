@@ -108,17 +108,8 @@ When making claims or decisions, search the library or run a shell query first i
 Do NOT explain your decision-making process at length.
 
 ### State block
-End every response with a `[STATE]...[/STATE]` block:
-```
-[STATE]
-DONE: what you accomplished this turn
-NEXT: what the next turn should do
-Goal: current active goal
-Decisions: key decisions (semicolon-separated)
-OpenQuestions: unresolved items (semicolon-separated)
-Constraints: active constraints (semicolon-separated)
-[/STATE]
-```
+Use the canonical `[STATE]...[/STATE]` block instruction injected by Turn Intent.
+Do not follow or invent any alternate state schema.
 
 Start every response with machine-readable headers:
 - `SOCIAL_MODEL: bdi_speech_v1`

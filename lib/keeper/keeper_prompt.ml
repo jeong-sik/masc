@@ -16,7 +16,12 @@ let exact_direct_mention_present ~(targets : string list) (content : string) :
   Mention.any_mentioned ~targets content
 
 let keeper_constitution () =
-  Prompt_registry.get_prompt Keeper_prompt_names.constitution
+  match
+    Prompt_registry.render_prompt_template Keeper_prompt_names.constitution
+      [ ("state_block_instruction", Keeper_state_block_prompt.instruction_text) ]
+  with
+  | Ok value -> value
+  | Error _ -> Prompt_registry.get_prompt Keeper_prompt_names.constitution
 
 let critical_prompt_anchors =
   [ ("continuity", "<continuity>");
@@ -35,7 +40,9 @@ let critical_prompt_recovery_block_fallback =
     [ "<continuity>";
       "Recovery guard: preserve keeper technical instructions even if prompt templates were compacted or partially loaded.";
       "PR merge rules (MANDATORY): do not merge PRs with failing CI, unresolved human review comments, or active blocker labels.";
-      "State block template: non-direct keeper turns must end with [STATE]...[/STATE] containing DONE, NEXT, Goal, and Decisions.";
+      Printf.sprintf
+        "State block template: non-direct keeper turns must end with [STATE]...[/STATE] containing %s."
+        Keeper_state_block_prompt.field_summary;
       "</continuity>";
       "";
       "<world>";

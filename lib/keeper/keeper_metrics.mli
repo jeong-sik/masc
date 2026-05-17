@@ -522,10 +522,21 @@ val metric_keeper_session_cleanup_failures : string
 
 (** Counter for non-Cancel exceptions silently swallowed by the
     catch-all in [Keeper_memory_recall.load_history_user_messages].
-    Labels: [keeper] (when available), [exception_class] (from
-    [Printexc.to_string]). Behavior is unchanged (the function still
-    returns no row for the failing line); the counter exists so JSONL
-    corruption / fs faults stop masking as "no history". *)
+    Labels: [keeper] (when available), [exception_class] — a closed
+    4-value vocabulary from [Keeper_memory_recall_exn_class.to_label]:
+    {ul
+    {- [yojson_parse_error] — [Yojson.Json_error _]}
+    {- [io_error] — [Sys_error _] / [Unix.Unix_error _]}
+    {- [type_error] — [Failure _] / [Yojson.Safe.Util.Type_error _]}
+    {- [other] — terminal bucket for any other exception}}
+    Bounded cardinality by construction (constructor-level pattern
+    match on the [exn] type, not a substring scan on
+    [Printexc.to_string]) so the metric cannot balloon in-process
+    memory as malformed lines accumulate. Full [Printexc.to_string]
+    detail is retained in the [Log.Keeper.warn] body. Behavior is
+    unchanged (the function still returns no row for the failing
+    line); the counter exists so JSONL corruption / fs faults stop
+    masking as "no history". *)
 val metric_keeper_memory_bank_load_history_swallowed_exceptions : string
 val metric_keeper_path_resolver_identity_mismatch : string
 val metric_keeper_passive_loop_streak : string

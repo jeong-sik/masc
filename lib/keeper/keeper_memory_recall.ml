@@ -637,15 +637,25 @@ let load_history_user_messages ~(path : string) ~(max_n : int) : string list =
            (* V07 (HIGH): make non-Cancel failures visible instead of
               masking JSONL corruption / fs faults as "no history".
               Behavior preserved — we still drop this line and return
-              [None]; only logging + counter are added. *)
-           let exn_class = Printexc.to_string exn in
+              [None]; only logging + counter are added.
+
+              Codex P1 follow-up: the [exception_class] label is now a
+              4-value closed sum from [Keeper_memory_recall_exn_class]
+              (constructor-level match on the [exn] type, not a
+              substring scan on [Printexc.to_string]) so the metric
+              cardinality is bounded. The full error string is still
+              emitted to the log body. *)
+           let exn_detail = Printexc.to_string exn in
+           let exn_label =
+             Keeper_memory_recall_exn_class.(to_label (classify exn))
+           in
            Log.Keeper.warn
              "load_history_user_messages: skipping line in %s: %s"
-             path exn_class;
+             path exn_detail;
            Prometheus.inc_counter
              Keeper_metrics
              .metric_keeper_memory_bank_load_history_swallowed_exceptions
-             ~labels:[ ("exception_class", exn_class) ]
+             ~labels:[ ("exception_class", exn_label) ]
              ();
            None)
   |> take max_n

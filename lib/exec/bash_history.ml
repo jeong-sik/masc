@@ -178,10 +178,25 @@ let compact_to = 1_000
 let append ~base_path ~keeper_name entry =
   let path, ensure_dir = history_path ~base_path ~keeper_name in
   ensure_dir ();
-  let oc = open_out_gen [ Open_wronly; Open_creat; Open_append ] 0o644 path in
-  output_string oc (Yojson.Safe.to_string (entry_to_json entry));
-  output_char oc '\n';
-  close_out_no_err oc
+  (* Previously [open_out_gen]/[output_*] propagated [Sys_error] up to
+     keeper tool dispatch — a transient audit-trail write failure
+     (disk full, lock contention, permission flap) surfaced as a
+     keeper tool failure even though the tool itself had completed.
+     Audit trail is best-effort; surface the exception as a [Result]
+     so the caller can observe + swallow without conflating audit
+     I/O with tool-call semantics. *)
+  match open_out_gen [ Open_wronly; Open_creat; Open_append ] 0o644 path with
+  | exception (Sys_error _ as exn) -> Error exn
+  | oc ->
+    (match
+       output_string oc (Yojson.Safe.to_string (entry_to_json entry));
+       output_char oc '\n';
+       close_out_no_err oc
+     with
+     | () -> Ok ()
+     | exception (Sys_error _ as exn) ->
+       close_out_no_err oc;
+       Error exn)
 ;;
 
 let count_lines path =

@@ -57,6 +57,8 @@ let _shared_pressure_mutex = Eio.Mutex.create ()
 let held_kinds_key : kind list Eio.Fiber.key = Eio.Fiber.create_key ()
 
 let held_kinds () =
+  (* NDT-OK: fiber-local runtime state only prevents same-fiber slot
+     double-accounting; policy decisions stay outside this boundary. *)
   try Option.value ~default:[] (Eio.Fiber.get held_kinds_key)
   with _ -> []
 
@@ -102,9 +104,20 @@ let install_process_eio_sandbox_exec_guard () =
             f ())
     }
 
+let install_with_process_sandbox_exec_guard () =
+  With_process.set_process_guard
+    { With_process.run =
+        (fun f ->
+          if Eio_guard.is_ready () then
+            with_slot ~kind:Sandbox_exec f
+          else
+            f ())
+    }
+
 let () =
   install_dated_jsonl_log_writer_guard ();
-  install_process_eio_sandbox_exec_guard ()
+  install_process_eio_sandbox_exec_guard ();
+  install_with_process_sandbox_exec_guard ()
 
 (* In-flight count = configured cap minus current semaphore credits.
    Eio.Semaphore exposes [get_value] which returns the available credit

@@ -1681,29 +1681,30 @@ let make_shell_exec_with_allowlist
                let result =
                  try
                    let status, output =
-                     Eio.Time.with_timeout_exn clock timeout (fun () ->
-                       Eio.Switch.run
-                       @@ fun sw ->
-                       let stdout_r, stdout_w = Eio.Process.pipe ~sw proc_mgr in
-                       let proc =
-                         Eio.Process.spawn
-                           ~sw
-                           proc_mgr
-                           ~stdout:stdout_w
-                           [ "sh"; "-c"; wrapped_command ^ " 2>&1" ]
-                       in
-                       Eio.Flow.close stdout_w;
-                       (try
-                          Eio.Flow.copy stdout_r (Eio.Flow.buffer_sink buf);
-                          Eio.Flow.close stdout_r
-                        with
-                        | Eio.Cancel.Cancelled _ as e ->
-                          (try Eio.Flow.close stdout_r with
-                           | Eio.Cancel.Cancelled _ as ce -> raise ce
-                           | _ -> ());
-                          raise e);
-                       let status = Eio.Process.await proc in
-                       status, Buffer.contents buf)
+                     Fd_accountant.with_slot ~kind:Sandbox_exec (fun () ->
+                       Eio.Time.with_timeout_exn clock timeout (fun () ->
+                         Eio.Switch.run
+                         @@ fun sw ->
+                         let stdout_r, stdout_w = Eio.Process.pipe ~sw proc_mgr in
+                         let proc =
+                           Eio.Process.spawn
+                             ~sw
+                             proc_mgr
+                             ~stdout:stdout_w
+                             [ "sh"; "-c"; wrapped_command ^ " 2>&1" ]
+                         in
+                         Eio.Flow.close stdout_w;
+                         (try
+                            Eio.Flow.copy stdout_r (Eio.Flow.buffer_sink buf);
+                            Eio.Flow.close stdout_r
+                          with
+                          | Eio.Cancel.Cancelled _ as e ->
+                            (try Eio.Flow.close stdout_r with
+                             | Eio.Cancel.Cancelled _ as ce -> raise ce
+                             | _ -> ());
+                            raise e);
+                         let status = Eio.Process.await proc in
+                         status, Buffer.contents buf))
                    in
                    match status with
                    | `Exited 0 -> Ok { Agent_sdk.Types.content = output }

@@ -34,17 +34,25 @@ let docker_command_argv () =
   | _ -> [ docker_command () ]
 ;;
 
+let run_docker_argv_with_status ~summary ~timeout_sec argv =
+  Docker_spawn_throttle.with_slot (fun () ->
+    Masc_exec.Exec_gate.run_argv_with_status
+      ~actor:`System_task_sandbox
+      ~raw_source:(String.concat " " argv)
+      ~summary
+      ~env:(Unix.environment ())
+      ~cwd:(Sys.getcwd ())
+      ~timeout_sec
+      argv)
+;;
+
 let docker_info_security_options ~timeout_sec =
   let argv =
     docker_command_argv () @ [ "info"; "--format"; "{{json .SecurityOptions}}" ]
   in
   let st, out =
-    Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:`System_task_sandbox
-      ~raw_source:(String.concat " " argv)
+    run_docker_argv_with_status
       ~summary:"keeper sandbox docker info"
-      ~env:(Unix.environment ())
-      ~cwd:(Sys.getcwd ())
       ~timeout_sec
       argv
   in
@@ -592,12 +600,8 @@ let inspect_cleanup_container ~container_id ~timeout_sec =
   in
   let argv = docker_command_argv () @ [ "inspect"; "--format"; format; container_id ] in
   let st, out =
-    Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:`System_task_sandbox
-      ~raw_source:(String.concat " " argv)
+    run_docker_argv_with_status
       ~summary:"keeper sandbox docker inspect cleanup"
-      ~env:(Unix.environment ())
-      ~cwd:(Sys.getcwd ())
       ~timeout_sec
       argv
   in
@@ -621,12 +625,8 @@ let inspect_cleanup_container ~container_id ~timeout_sec =
 let remove_cleanup_container ~container_id ~timeout_sec =
   let argv = docker_command_argv () @ [ "rm"; "-f"; container_id ] in
   let st, out =
-    Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:`System_task_sandbox
-      ~raw_source:(String.concat " " argv)
+    run_docker_argv_with_status
       ~summary:"keeper sandbox docker rm cleanup"
-      ~env:(Unix.environment ())
-      ~cwd:(Sys.getcwd ())
       ~timeout_sec
       argv
   in
@@ -659,12 +659,8 @@ let cleanup_stale_containers
         ]
     in
     let st, out =
-      Masc_exec.Exec_gate.run_argv_with_status
-        ~actor:`System_task_sandbox
-        ~raw_source:(String.concat " " argv)
+      run_docker_argv_with_status
         ~summary:"keeper sandbox docker ps cleanup"
-        ~env:(Unix.environment ())
-        ~cwd:(Sys.getcwd ())
         ~timeout_sec
         argv
     in
@@ -730,12 +726,8 @@ let list_container_ids ?keeper_name ?container_kind ~base_path ~timeout_sec () =
       @ docker_filter_args ?keeper_name ?container_kind ~base_path ()
     in
     let st, out =
-      Masc_exec.Exec_gate.run_argv_with_status
-        ~actor:`System_task_sandbox
-        ~raw_source:(String.concat " " argv)
+      run_docker_argv_with_status
         ~summary:"keeper sandbox docker ps list"
-        ~env:(Unix.environment ())
-        ~cwd:(Sys.getcwd ())
         ~timeout_sec
         argv
     in
@@ -781,12 +773,8 @@ let list_containers ?keeper_name ?container_kind ~base_path ~timeout_sec () =
       docker_command_argv () @ [ "inspect"; "--format"; live_inspect_format ] @ ids
     in
     let st, out =
-      Masc_exec.Exec_gate.run_argv_with_status
-        ~actor:`System_task_sandbox
-        ~raw_source:(String.concat " " argv)
+      run_docker_argv_with_status
         ~summary:"keeper sandbox docker inspect live"
-        ~env:(Unix.environment ())
-        ~cwd:(Sys.getcwd ())
         ~timeout_sec
         argv
     in
@@ -867,7 +855,18 @@ let stop_containers ?keeper_name ?container_kind ~base_path ~timeout_sec () =
     { matched = List.length ids; removed; errors = List.rev errors }
 ;;
 
-let last_cleanup_at = ref 0.0
+(* [last_cleanup_at] gates concurrent cleanup sweeps. Previous implementation
+   was [ref 0.0] with non-atomic check-then-write: under 64 concurrent turn
+   starts, multiple fibers passed the [now -. !last_cleanup_at < interval]
+   gate before any of them advanced the timestamp, fanning out N parallel
+   [docker ps + inspect × N + rm × M] sweeps. Each sweep itself spawns docker
+   subprocesses outside [Docker_spawn_throttle], so the duplication is what
+   ENFILE storm scenarios amplify the hardest.
+   [Atomic.t float] + [Atomic.compare_and_set] means exactly one fiber wins
+   the gate per [interval] window; losers see [None] and skip silently. *)
+let last_cleanup_at : float Atomic.t = Atomic.make 0.0
+
+let reset_last_cleanup_for_tests () = Atomic.set last_cleanup_at 0.0
 
 let maybe_cleanup_stale_containers ~base_path ~timeout_sec () =
   if not (Env_config_keeper.KeeperSandbox.cleanup_enabled ())
@@ -875,11 +874,12 @@ let maybe_cleanup_stale_containers ~base_path ~timeout_sec () =
   else (
     let now = Unix.gettimeofday () in
     let interval = Env_config_keeper.KeeperSandbox.cleanup_interval_sec () in
-    if now -. !last_cleanup_at < interval
+    let prev = Atomic.get last_cleanup_at in
+    if now -. prev < interval
     then None
-    else (
-      last_cleanup_at := now;
-      Some (cleanup_stale_containers ~now ~base_path ~timeout_sec ())))
+    else if Atomic.compare_and_set last_cleanup_at prev now
+    then Some (cleanup_stale_containers ~now ~base_path ~timeout_sec ())
+    else None)
 ;;
 
 let docker_image_present ~image ~timeout_sec =
@@ -888,12 +888,8 @@ let docker_image_present ~image ~timeout_sec =
   else (
     let argv = docker_command_argv () @ [ "image"; "inspect"; image ] in
     let st, out =
-      Masc_exec.Exec_gate.run_argv_with_status
-        ~actor:`System_task_sandbox
-        ~raw_source:(String.concat " " argv)
+      run_docker_argv_with_status
         ~summary:"keeper sandbox docker image inspect"
-        ~env:(Unix.environment ())
-        ~cwd:(Sys.getcwd ())
         ~timeout_sec
         argv
     in
@@ -920,12 +916,8 @@ let docker_image_required_commands ~image ~timeout_sec =
     @ [ "run"; "--rm"; "--network"; "none"; "--entrypoint"; "sh"; image; "-lc"; script ]
   in
   let st, out =
-    Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:`System_task_sandbox
-      ~raw_source:(String.concat " " argv)
+    run_docker_argv_with_status
       ~summary:"keeper sandbox docker run required commands"
-      ~env:(Unix.environment ())
-      ~cwd:(Sys.getcwd ())
       ~timeout_sec
       argv
   in

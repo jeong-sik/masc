@@ -1,15 +1,32 @@
 (** Keeper_fd_pressure — process-local FD exhaustion guard.
 
-    The 24-keeper failure mode is not a classic mutex deadlock. Once the
+    The fleet failure mode is not a classic mutex deadlock. Once the
     process reaches EMFILE/ENFILE pressure, unrelated append/read/spawn paths
     all start failing and retries amplify the outage. This module provides a
     low-cardinality circuit breaker that can be tripped from central error
-    sites and consulted by turn/spawn scheduling. *)
+    sites and consulted by turn/spawn scheduling.
+
+    Fleet baseline (2026-05-17): default capacity targets 64 active keepers
+    (= 64 * fd_per_active_keeper + fd_headroom). The previous default named
+    [MASC_KEEPER_MIN_NOFILE_FOR_24] (= 4096) capped the fleet at ~41 keepers
+    under macOS launchctl defaults; ramping to 64-keeper baseline closes that
+    gap without changing the admission policy itself. *)
 
 let cooldown_until = Atomic.make 0.0
 let last_log_at = Atomic.make 0.0
 let nofile_guard_warned = Atomic.make false
-let nofile_soft_limit_cache : int option option Atomic.t = Atomic.make None
+
+(** [nofile_cache] is a 3-state variant rather than [int option option] so
+    concurrent first-call fibers can claim the slot via [In_flight] and avoid
+    spawning N parallel [/bin/sh -c "ulimit -n"] subprocesses (which would
+    themselves consume FDs precisely when we are trying to measure them).
+    See [process_nofile_soft_limit] for the single-flight protocol. *)
+type nofile_cache =
+  | Uninitialized
+  | In_flight
+  | Resolved of int option
+
+let nofile_soft_limit_cache : nofile_cache Atomic.t = Atomic.make Uninitialized
 
 type admission_block =
   | Fd_pressure_cooldown of float
@@ -51,20 +68,37 @@ let cooldown_sec () =
   |> Float.min 600.0
 ;;
 
+(* [cas_monotonic_max atom new_v] = [if new_v > atom then atom := new_v] but
+   safe under concurrent updates. Without CAS, two fibers racing in [note]
+   could each read the same [prev], then the larger [until_ts] could be
+   clobbered by a smaller subsequent write — shortening cooldown silently.
+   Returns [true] iff the slot was actually advanced. *)
+let cas_monotonic_max ~(atom : float Atomic.t) (new_v : float) : bool =
+  let rec loop () =
+    let prev = Atomic.get atom in
+    if new_v <= prev
+    then false
+    else if Atomic.compare_and_set atom prev new_v
+    then true
+    else loop ()
+  in
+  loop ()
+;;
+
 let note ?(site = "unknown") ?(detail = "") () =
   let now = Time_compat.now () in
   let until_ts = now +. cooldown_sec () in
-  let prev = Atomic.get cooldown_until in
-  if until_ts > prev then Atomic.set cooldown_until until_ts;
+  let _ : bool = cas_monotonic_max ~atom:cooldown_until until_ts in
+  (* Log-throttle (10s window): only the CAS winner emits, so concurrent
+     noters can't double-log under storm. *)
   let last = Atomic.get last_log_at in
-  if now -. last >= 10.0 then begin
-    Atomic.set last_log_at now;
+  if now -. last >= 10.0 && Atomic.compare_and_set last_log_at last now
+  then
     Log.Keeper.error
       "fd_pressure: circuit breaker active for %.0fs site=%s detail=%s"
       (max 0.0 (Atomic.get cooldown_until -. now))
       site
       detail
-  end
 ;;
 
 let note_if_fd_exhaustion ?site detail =
@@ -124,30 +158,62 @@ let reset_for_tests () =
   Atomic.set cooldown_until 0.0;
   Atomic.set last_log_at 0.0;
   Atomic.set nofile_guard_warned false;
-  Atomic.set nofile_soft_limit_cache None
+  Atomic.set nofile_soft_limit_cache Uninitialized
+;;
+
+(* Detect the host's nofile soft limit by spawning [sh -c 'ulimit -n']. The
+   subprocess itself consumes pipes/FDs, so under fleet startup we must run
+   it at most once. Single-flight protocol:
+   - Uninitialized → CAS to In_flight. Winner runs detection, stores Resolved.
+   - In_flight → loser waits with a short bounded busy-yield until Resolved.
+   - Resolved cached → return immediately.
+   Bounded wait (~1s) is a safety net for the pathological case where the
+   detector subprocess hangs; falling back to [None] keeps admission permissive
+   rather than blocking the fleet on a stuck probe. *)
+let detect_nofile_soft_limit_now () =
+  try
+    let lines, status =
+      With_process.with_process_args_in
+        "/bin/sh"
+        [| "sh"; "-c"; "ulimit -n" |]
+        With_process.drain_lines
+    in
+    match status, lines with
+    | Unix.WEXITED 0, line :: _ -> int_of_string_opt (String.trim line)
+    | _ -> None
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | _ -> None
 ;;
 
 let process_nofile_soft_limit () =
   match Atomic.get nofile_soft_limit_cache with
-  | Some cached -> cached
-  | None ->
-    let detected =
+  | Resolved cached -> cached
+  | _ ->
+    if Atomic.compare_and_set nofile_soft_limit_cache Uninitialized In_flight
+    then (
       try
-        let lines, status =
-          With_process.with_process_args_in
-            "/bin/sh"
-            [| "sh"; "-c"; "ulimit -n" |]
-            With_process.drain_lines
-        in
-        match status, lines with
-        | Unix.WEXITED 0, line :: _ -> int_of_string_opt (String.trim line)
-        | _ -> None
+        let detected = detect_nofile_soft_limit_now () in
+        Atomic.set nofile_soft_limit_cache (Resolved detected);
+        detected
       with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | _ -> None
-    in
-    Atomic.set nofile_soft_limit_cache (Some detected);
-    detected
+      | Eio.Cancel.Cancelled _ as exn ->
+        Atomic.set nofile_soft_limit_cache Uninitialized;
+        raise exn)
+    else (
+      (* Lost race or already In_flight. Wait until the winner publishes.
+         1ms × 1000 attempts = ~1s bounded; longer than any sane [ulimit -n]
+         runtime. Past the bound, return [None] (permissive admission) rather
+         than blocking the caller. *)
+      let rec wait remaining =
+        match Atomic.get nofile_soft_limit_cache with
+        | Resolved cached -> cached
+        | _ when remaining <= 0 -> None
+        | _ ->
+          Unix.sleepf 0.001;
+          wait (remaining - 1)
+      in
+      wait 1000)
 ;;
 
 let process_open_fd_count () =
@@ -160,10 +226,31 @@ let process_open_fd_count () =
   | None -> count_dir "/proc/self/fd"
 ;;
 
-let min_nofile_for_24_keepers () =
-  Env_config_core.get_int ~default:4096 "MASC_KEEPER_MIN_NOFILE_FOR_24"
-  |> max 256
+(* Fleet baseline (renamed 2026-05-17 from min_nofile_for_24_keepers).
+   Default targets 64 active keepers: 64 * fd_per_active_keeper (96)
+   + fd_headroom (128) ≈ 6272; with 2x margin → 12288. The legacy env name
+   [MASC_KEEPER_MIN_NOFILE_FOR_24] is still honored for operators who set it
+   pre-rename, but FLEET takes precedence and the legacy var only applies
+   when FLEET is absent. *)
+let min_nofile_for_fleet () =
+  let fleet_default = 12288 in
+  let from_fleet =
+    Env_config_core.get_int ~default:0 "MASC_KEEPER_MIN_NOFILE_FOR_FLEET"
+  in
+  let resolved =
+    if from_fleet > 0
+    then from_fleet
+    else (
+      let legacy =
+        Env_config_core.get_int ~default:0 "MASC_KEEPER_MIN_NOFILE_FOR_24"
+      in
+      if legacy > 0 then legacy else fleet_default)
+  in
+  max 256 resolved
 ;;
+
+(* Compat alias preserved for any out-of-tree callers; do not add new uses. *)
+let min_nofile_for_24_keepers = min_nofile_for_fleet
 
 let fd_headroom () =
   Env_config_core.get_int ~default:128 "MASC_KEEPER_FD_HEADROOM"
@@ -329,19 +416,21 @@ let admit_turn ?soft_limit ?open_fds ~active_keepers () =
 
 let cap_active_keepers_for_nofile ?(soft_limit = process_nofile_soft_limit ()) requested =
   match soft_limit with
-  | Some soft when soft > 0 && soft < min_nofile_for_24_keepers () ->
+  | Some soft when soft > 0 && soft < min_nofile_for_fleet () ->
     let soft_cap = active_keeper_cap_for_soft_limit soft in
     let cap = if requested <= 0 then soft_cap else min requested soft_cap in
-    if (requested <= 0 || cap < requested) && not (Atomic.get nofile_guard_warned) then begin
-      Atomic.set nofile_guard_warned true;
+    if (requested <= 0 || cap < requested)
+       && Atomic.compare_and_set nofile_guard_warned false true
+    then
       Log.Keeper.error
-        "fd_pressure: process nofile soft limit %d is below safe 24-keeper floor %d; \
-         reducing active keeper cap from %d to %d"
+        "fd_pressure: process nofile soft limit %d is below fleet floor %d \
+         (64-keeper baseline); reducing active keeper cap from %d to %d. \
+         Raise launchctl maxfiles or set MASC_KEEPER_MIN_NOFILE_FOR_FLEET \
+         to match your fleet size."
         soft
-        (min_nofile_for_24_keepers ())
+        (min_nofile_for_fleet ())
         requested
-        cap
-    end;
+        cap;
     cap
   | _ -> requested
 ;;

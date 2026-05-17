@@ -615,6 +615,49 @@ let test_cleanup_stale_containers_removes_only_stale_masc_scope () =
   Alcotest.(check bool) "keeps fresh container" false
     (contains_substring log "rm -f fresh-container")
 
+let test_maybe_cleanup_stale_containers_runs_once_per_interval () =
+  with_fake_docker fake_docker_cleanup_script @@ fun () ->
+  let base = temp_dir () in
+  let log_path = Filename.concat base "docker.log" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_sandbox_runtime.reset_last_cleanup_for_tests ();
+      cleanup_dir base)
+  @@ fun () ->
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_env "KEEPER_TEST_PID" (string_of_int (Unix.getpid ())) @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "true" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC" "10" @@ fun () ->
+  Keeper_sandbox_runtime.reset_last_cleanup_for_tests ();
+  let results = ref [] in
+  (Eio.Switch.run @@ fun sw ->
+   for _ = 1 to 16 do
+     Eio.Fiber.fork ~sw (fun () ->
+       let result =
+         Keeper_sandbox_runtime.maybe_cleanup_stale_containers
+           ~base_path:base
+           ~timeout_sec:5.0
+           ()
+       in
+       results := result :: !results)
+   done);
+  let ran =
+    List.fold_left
+      (fun acc -> function
+         | Some _ -> acc + 1
+         | None -> acc)
+      0
+      !results
+  in
+  Alcotest.(check int) "only one cleanup sweep enters per interval" 1 ran;
+  let ps_count =
+    read_file log_path
+    |> String.split_on_char '\n'
+    |> List.filter (String.starts_with ~prefix:"ps -aq ")
+    |> List.length
+  in
+  Alcotest.(check int) "only one docker ps cleanup spawn" 1 ps_count
+
 let test_docker_preflight_reports_ready_image () =
   with_fake_docker fake_docker_preflight_ok_script @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "true" @@ fun () ->
@@ -992,6 +1035,8 @@ let run_tests () =
             test_sandbox_container_label_args_include_owner_scope;
           Alcotest.test_case "cleanup removes stale scoped containers" `Quick
             test_cleanup_stale_containers_removes_only_stale_masc_scope;
+          Alcotest.test_case "cleanup CAS runs once per interval" `Quick
+            test_maybe_cleanup_stale_containers_runs_once_per_interval;
         ] );
     ]
 

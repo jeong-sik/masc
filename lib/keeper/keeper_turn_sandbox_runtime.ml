@@ -104,49 +104,51 @@ let container_missing_error out =
 
 let run_argv_with_status_retry_eintr ~timeout_sec argv =
   let max_eintr_retries = 8 in
-  let rec loop attempts_left =
-    let st, out =
-      Masc_exec.Exec_gate.run_argv_with_status
-        ~actor:`System_task_sandbox
-        ~raw_source:(String.concat " " argv)
-        ~summary:"keeper turn sandbox command"
-        ~env:(Unix.environment ())
-        ~cwd:(Sys.getcwd ())
-        ~timeout_sec
-        argv
+  Docker_spawn_throttle.with_slot (fun () ->
+    let rec loop attempts_left =
+      let st, out =
+        Masc_exec.Exec_gate.run_argv_with_status
+          ~actor:`System_task_sandbox
+          ~raw_source:(String.concat " " argv)
+          ~summary:"keeper turn sandbox command"
+          ~env:(Unix.environment ())
+          ~cwd:(Sys.getcwd ())
+          ~timeout_sec
+          argv
+      in
+      match st with
+      | Unix.WEXITED 127
+        when attempts_left > 0
+             && String_util.contains_substring_ci out "interrupted system call" ->
+        loop (attempts_left - 1)
+      | _ -> st, out
     in
-    match st with
-    | Unix.WEXITED 127
-      when attempts_left > 0
-           && String_util.contains_substring_ci out "interrupted system call" ->
-      loop (attempts_left - 1)
-    | _ -> st, out
-  in
-  loop max_eintr_retries
+    loop max_eintr_retries)
 ;;
 
 let run_argv_with_stdin_and_status_retry_eintr ~timeout_sec ~stdin_content argv =
   let max_eintr_retries = 8 in
-  let rec loop attempts_left =
-    let st, out =
-      Masc_exec.Exec_gate.run_argv_with_stdin_and_status
-        ~actor:`System_task_sandbox
-        ~raw_source:(String.concat " " argv)
-        ~summary:"keeper turn sandbox stdin command"
-        ~env:(Unix.environment ())
-        ~cwd:(Sys.getcwd ())
-        ~timeout_sec
-        ~stdin_content
-        argv
+  Docker_spawn_throttle.with_slot (fun () ->
+    let rec loop attempts_left =
+      let st, out =
+        Masc_exec.Exec_gate.run_argv_with_stdin_and_status
+          ~actor:`System_task_sandbox
+          ~raw_source:(String.concat " " argv)
+          ~summary:"keeper turn sandbox stdin command"
+          ~env:(Unix.environment ())
+          ~cwd:(Sys.getcwd ())
+          ~timeout_sec
+          ~stdin_content
+          argv
+      in
+      match st with
+      | Unix.WEXITED 127
+        when attempts_left > 0
+             && String_util.contains_substring_ci out "interrupted system call" ->
+        loop (attempts_left - 1)
+      | _ -> st, out
     in
-    match st with
-    | Unix.WEXITED 127
-      when attempts_left > 0
-           && String_util.contains_substring_ci out "interrupted system call" ->
-      loop (attempts_left - 1)
-    | _ -> st, out
-  in
-  loop max_eintr_retries
+    loop max_eintr_retries)
 ;;
 
 let start_container (t : t) ~(timeout_sec : float) =

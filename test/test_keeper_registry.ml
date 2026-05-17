@@ -22,6 +22,12 @@ let with_env name value f =
       | None -> Unix.putenv name "")
     f
 
+let with_fd_pressure_default_env f =
+  with_env "MASC_KEEPER_MIN_NOFILE_FOR_FLEET" "" @@ fun () ->
+  with_env "MASC_KEEPER_MIN_NOFILE_FOR_24" "" @@ fun () ->
+  with_env "MASC_KEEPER_FD_HEADROOM" "" @@ fun () ->
+  with_env "MASC_KEEPER_FD_PER_ACTIVE_KEEPER" "" f
+
 let rec rm_rf path =
   if Sys.file_exists path then
     if Sys.is_directory path then (
@@ -70,12 +76,30 @@ let test_fd_pressure_structured_classifier () =
 
 let test_fd_pressure_nofile_cap () =
   FD.reset_for_tests ();
+  with_fd_pressure_default_env @@ fun () ->
   check int "low process nofile degrades 24-keeper boot" 1
     (FD.cap_active_keepers_for_nofile ~soft_limit:(Some 256) 24);
-  check int "safe process nofile leaves 24-keeper boot alone" 24
+  check int "4096 nofile still admits the old 24-keeper baseline" 24
     (FD.cap_active_keepers_for_nofile ~soft_limit:(Some 4096) 24);
+  check int "4096 nofile caps the 64-keeper fleet baseline" 41
+    (FD.cap_active_keepers_for_nofile ~soft_limit:(Some 4096) 64);
   check int "low process nofile also caps unlimited boot config" 1
     (FD.cap_active_keepers_for_nofile ~soft_limit:(Some 256) 0)
+
+let test_fd_pressure_fleet_floor_env () =
+  FD.reset_for_tests ();
+  with_fd_pressure_default_env @@ fun () ->
+  check int "default fleet nofile floor targets 64 keepers" 12288
+    (FD.min_nofile_for_fleet ());
+  with_env "MASC_KEEPER_MIN_NOFILE_FOR_24" "4096" @@ fun () ->
+  check int "legacy nofile floor remains honored" 4096
+    (FD.min_nofile_for_fleet ());
+  with_env "MASC_KEEPER_MIN_NOFILE_FOR_FLEET" "12288" @@ fun () ->
+  check int "fleet nofile floor overrides legacy floor" 12288
+    (FD.min_nofile_for_fleet ());
+  with_env "MASC_KEEPER_MIN_NOFILE_FOR_FLEET" "2048" @@ fun () ->
+  check int "fleet nofile floor keeps precedence when lower than legacy" 2048
+    (FD.min_nofile_for_fleet ())
 
 let test_fd_pressure_proactive_admission () =
   FD.reset_for_tests ();
@@ -2002,6 +2026,8 @@ let () =
             test_fd_pressure_structured_classifier;
           test_case "fd pressure nofile boot cap" `Quick
             test_fd_pressure_nofile_cap;
+          test_case "fd pressure fleet nofile floor env" `Quick
+            test_fd_pressure_fleet_floor_env;
           test_case "fd pressure proactive admission" `Quick
             test_fd_pressure_proactive_admission;
           test_case "fd pressure degraded projection" `Quick

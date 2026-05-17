@@ -514,12 +514,12 @@ let list_with_started_at ~keeper =
 (* Directory walk helpers — avoid Filename.Infix / extra deps. *)
 
 let safe_readdir dir =
-  try Array.to_list (Sys.readdir dir) with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
+  Cancel_safe.protect
+    ~on_exn:(fun exn ->
       if Sys.file_exists dir then
         observe_sidecar_failure ~site:"readdir" exn;
-      []
+      [])
+    (fun () -> Array.to_list (Sys.readdir dir))
 
 let is_dir p =
   try (Unix.stat p).Unix.st_kind = Unix.S_DIR with
@@ -529,32 +529,31 @@ let is_dir p =
       false
 
 let read_pid_file path =
-  try
-    let ic = open_in path in
-    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-      let input_line_opt ic =
-        try Some (input_line ic) with End_of_file -> None
-      in
-      let pid_line = input_line_opt ic in
-      let pgid_line = input_line_opt ic in
-      let parse_int line =
-        Option.bind (Option.map String.trim line) int_of_string_opt
-      in
-      match parse_int pid_line, parse_int pgid_line with
-      | Some pid, Some pgid -> Some (pid, pgid)
-      | _ ->
-          observe_sidecar_failure ~site:"read_parse"
-            (Failure (Printf.sprintf "invalid PID sidecar: %s" path));
-          None)
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
+  Cancel_safe.protect
+    ~on_exn:(fun exn ->
       if Sys.file_exists path then
         observe_sidecar_failure ~site:"read"
           (Failure
              (Printf.sprintf "read PID sidecar %s: %s" path
                 (Printexc.to_string exn)));
-      None
+      None)
+    (fun () ->
+      let ic = open_in path in
+      Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+        let input_line_opt ic =
+          try Some (input_line ic) with End_of_file -> None
+        in
+        let pid_line = input_line_opt ic in
+        let pgid_line = input_line_opt ic in
+        let parse_int line =
+          Option.bind (Option.map String.trim line) int_of_string_opt
+        in
+        match parse_int pid_line, parse_int pgid_line with
+        | Some pid, Some pgid -> Some (pid, pgid)
+        | _ ->
+            observe_sidecar_failure ~site:"read_parse"
+              (Failure (Printf.sprintf "invalid PID sidecar: %s" path));
+            None))
 
 let pid_is_live pid =
   try Unix.kill pid 0; true

@@ -1824,3 +1824,5 @@
  (name test_success_model_attribution)
  (modules test_success_model_attribution)
  (libraries masc_test_deps))
+
+(include stanzas/test_tool_resource_gate.inc)

@@ -156,17 +156,39 @@ let ingest_tool_call ~base_dir ?(partition = Ide_paths.Legacy) ~keeper_id ~turn 
     match file_path with
     | None -> ()
     | Some fp ->
+        (* Region-extraction priority per tool_name:
+             write_file → "content" → full-file region.
+             edit_file / apply_patch → "diff" or "patch" hunks (preferred,
+               preserves the changed line ranges only) → fall back to
+               "content" full-file region when only the post-edit
+               content is available.
+           RFC-0128 PR-1e: the content fallback for edit_file/apply_patch
+           used to be served by Ide_meta_sync.flush_regions, which wrote
+           to the Legacy partition and produced a double-write against the
+           by-url partition once PR-1c routed ingest_tool_call. Moving the
+           fallback into ingest_tool_call lets us drop the meta_sync call
+           site so all keeper write records land in a single, consistent
+           partition bucket. *)
+        let extract_full_file () =
+          match List.assoc_opt "content" arguments with
+          | Some (`String content) ->
+            [ extract_region_from_full_file ~keeper_id ~file_path:fp ~turn ~content ]
+          | _ -> []
+        in
         let regions =
-          if tool_name = "write_file" then
-            match List.assoc_opt "content" arguments with
-            | Some (`String content) -> [extract_region_from_full_file ~keeper_id ~file_path:fp ~turn ~content]
-            | _ -> []
+          if tool_name = "write_file" then extract_full_file ()
           else
             match List.assoc_opt "diff" arguments with
-            | Some (`String diff_text) -> extract_regions_from_diff ~keeper_id ~file_path:fp ~turn ~diff_text
-            | _ -> (
-                match List.assoc_opt "patch" arguments with
-                | Some (`String patch_text) -> extract_regions_from_diff ~keeper_id ~file_path:fp ~turn ~diff_text:patch_text
-                | _ -> [])
+            | Some (`String diff_text) ->
+              extract_regions_from_diff ~keeper_id ~file_path:fp ~turn ~diff_text
+            | _ ->
+              (match List.assoc_opt "patch" arguments with
+               | Some (`String patch_text) ->
+                 extract_regions_from_diff
+                   ~keeper_id
+                   ~file_path:fp
+                   ~turn
+                   ~diff_text:patch_text
+               | _ -> extract_full_file ())
         in
         List.iter (append_region ~base_dir ~partition) regions

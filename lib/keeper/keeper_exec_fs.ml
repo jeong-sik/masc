@@ -1,7 +1,6 @@
 open Keeper_types
 open Keeper_exec_shared
 open Ide_region_tracker
-open Ide_meta_sync
 
 (* Issue #8490: Variant SSOT for fs write mode. Adding a constructor
    forces compilation in [fs_write_mode_to_string] and
@@ -293,34 +292,14 @@ let track_write_region
     | Some Patch -> "edit_file"
     | _ -> "write_file"
   in
-  (* IDE meta sync: persist to .masc-ide/index.jsonl. Wrap in the same
-     log-and-continue pattern as Ide_region_tracker.ingest_tool_call below
-     so a mkdir/open_out/failwith inside Ide_meta_sync never blocks the
-     write path. *)
-  (try
-     let meta_config = { Ide_meta_sync.default_config with base_path = base_dir } in
-     let diff_text = None in
-     let state = Ide_meta_sync.initial_state in
-     let state =
-       Ide_meta_sync.on_tool_call_complete
-         meta_config
-         state
-         ~keeper_id:keeper_name
-         ~turn
-         ~tool_name
-         ~file_path
-         ~diff_text
-         ~full_content:(Some content)
-     in
-     let _state = Ide_meta_sync.flush_regions meta_config state in
-     ()
-   with
-   | exn ->
-     Log.Keeper.warn
-       "IDE meta sync failed for keeper=%s path=%s: %s"
-       keeper_name
-       file_path
-       (Printexc.to_string exn));
+  (* RFC-0128 PR-1e: the Ide_meta_sync invocation that used to live here
+     wrote to the Legacy partition (server base_path) while
+     Ide_region_tracker.ingest_tool_call below now writes to the
+     resolved partition (PR-1c). That produced a double-write of the
+     same region into two different bucket layouts. The full-file
+     region fallback meta_sync was carrying for edit_file/apply_patch
+     is now served directly by ingest_tool_call (see the [extract_full_file]
+     fallback in Ide_region_tracker), so we drop this path entirely. *)
   let arguments =
     let fields = [ "path", `String rel_file_path; "content", `String content ] in
     match fs_write_mode_of_string_opt mode_raw with

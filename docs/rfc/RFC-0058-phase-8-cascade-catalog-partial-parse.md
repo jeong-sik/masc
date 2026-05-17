@@ -1,7 +1,7 @@
 ---
 rfc: "0058"
 title: "Cascade Catalog Partial Parse Resilience"
-status: Draft
+status: Active
 created: 2026-05-17
 updated: 2026-05-17
 author: vincent
@@ -9,17 +9,18 @@ extends: "0058"
 supersedes: []
 superseded_by: null
 related: ["0042", "0027", "0066"]
-implementation_prs: []
+implementation_prs: [15733, 15737]
 ---
 
 # RFC-0058 Phase 8: Cascade Catalog Partial Parse Resilience
 
 | | |
 |---|---|
-| Status | Draft |
+| Status | Active — Phase 8.1 / 8.2 머지 (#15733 / #15737, 2026-05-17 04:23 UTC). Phase 8.1.5 / 8.3 / 8.4 미완 |
 | Depends-on | RFC-0058 §2.4 (Cross-reference validation at load time), Phase 5 (closed variant erase) |
-| Scope | `Cascade_declarative_hotpath.try_load_declarative` return shape; downstream `keeper_cascade_profile` validation; reserved-name fallback obsolescence |
+| Scope | `Cascade_declarative_hotpath.try_load_declarative` return shape; downstream `keeper_cascade_profile` validation; logging substrate; boot-gate tolerance; dispatch resolver partial invariants |
 | Breaking | No — public API is widened (additive); existing `Ok snapshot` shape preserved |
+| Self-review | Post-merge audit (this amend) surfaced 6 gaps; RFC scope expanded from 3 → 5 sub-phases. See §11. |
 
 ## 1. Problem
 
@@ -65,11 +66,16 @@ RFC-0058 §2.4 states *"Cross-reference validation happens at load time."* The i
 
 ### 1.3 Why `reserved_cascade_names` is also a smell, but not the root
 
-`lib/keeper/keeper_config.ml:35-43` hardcodes `phase_routing_cascade_names = [local_only_cascade_name; local_recovery_cascade_name]` and `tool_use_strict_cascade_name`. `keeper_types_profile.ml:47-50` unions them as `reserved_cascade_names`. These are used as a *safe minimal fallback* when the catalog `Error`-s, and as a fast-path skip in normal validation (line 803-805).
+`lib/keeper/keeper_config.ml:35-43` defines `phase_routing_cascade_names = [local_only_cascade_name; local_recovery_cascade_name]` and `tool_use_strict_cascade_name`. `keeper_types_profile.ml:47-50` unions them as `reserved_cascade_names`. These are used as a *safe minimal fallback* when the catalog `Error`-s, and as a fast-path skip in normal validation (line 803-805).
 
 Treating the reserved list as the root would lead to a workaround-class fix: *expand the reserved list to include all production tier-groups*. That is N-of-M (CLAUDE.md §workaround rejection bar): every new tier-group requires an OCaml edit, the SSOT moves *back* into code, and RFC-0058 §2.1 is violated more, not less.
 
-The reserved list is **legitimate as a phase-routing internal**, but **illegitimate as a fallback for missing catalog data**. The right fix is to make the catalog *not need* a hardcoded fallback. That requires Bug B's resolution: partial-parse.
+**Correction (2026-05-17 amend)**: an earlier draft of this section claimed reserved is *"legitimate as a phase-routing internal only"*. That is **incorrect**. Server log evidence (`masc-mcp-8935.log:562` shows `reserved: tier-group.glm-coding-with-spark, tier-group.strict_tool_candidates`) proves the reserved list includes the *current resolved value* of `cascade_name_for_use`, which **reads cascade.toml at runtime**. Hence:
+
+- `local_only` / `local_recovery` from `phase_routing_cascade_names` are *literal* internal names.
+- `glm-coding-with-spark` (and similar) appear in reserved because `Cascade_routes.cascade_name_for_use Tool_required` resolves to whatever the toml currently maps `Tool_required` to (here, `tier-group.strict_tool_candidates`).
+
+So reserved is **partially catalog-dependent**, not a pure compile-time enum. The dependency direction is *catalog → reserved*, not the other way. Expanding reserved manually still violates SSOT, but the diagnosis is sharper: reserved is *already SSOT-derived for its phase-routing slot*, and the gap is purely the *adapter binary surface* (Bug B). Phase 8.1 + 8.2 close that gap; reserved retains its legitimate role unchanged.
 
 ## 2. Root cause
 
@@ -163,7 +169,9 @@ No code deletion is mandatory in Phase 8. The fallback becomes correct-but-irrel
 
 ## 4. Implementation phases
 
-### Phase 8.1 — Adapter partial surface (this RFC, PR-1)
+Phase 8 splits into **5 sub-phases**. Phase 8.1 + 8.2 shipped 2026-05-17 (#15733 / #15737). 8.1.5 / 8.3 / 8.4 are post-merge follow-ups identified in §11 (self-review).
+
+### Phase 8.1 — Adapter partial surface — **MERGED #15733**
 
 **Scope (smallest viable):** Add `try_load_partial` + `partial_load_result` to `cascade_declarative_hotpath.{ml,mli}`. Keep `try_load_declarative` as a thin wrapper that returns `Ok snapshot` when `errors = []` and `Error errors` otherwise.
 
@@ -171,29 +179,72 @@ No code deletion is mandatory in Phase 8. The fallback becomes correct-but-irrel
 - `lib/cascade/cascade_declarative_hotpath.ml` — new type, new function, refactor `try_load_declarative` to wrap it.
 - `lib/cascade/cascade_declarative_hotpath.mli` — expose `partial_load_result`, `try_load_partial`.
 
-**Tests:** `test/test_cascade_declarative_hotpath_partial.ml` — fixture with 1 stale binding + 4 valid tier-groups; assert `snapshot.profile_names` contains all 4 tier-group names; `errors` list contains exactly the 1 binding failure.
+**Tests:** `test/test_cascade_declarative_hotpath.ml` — `phase8_partial_parse` group, 3 cases; fixture with 1 stale `[ghost.ghost-model]` binding + 1 valid `[tier-group.local-group]`; assert `snapshot.profile_names` contains the tier-group; `errors` list non-empty.
 
-**No downstream changes in PR-1.** This is a pure surface widening.
+**Status:** Merged at `423ad519` on 2026-05-17 04:23:28 UTC. No downstream caller switched; pure surface widening.
 
-### Phase 8.2 — Keeper validation consumes partial (PR-2)
+### Phase 8.2 — Keeper validation consumes partial — **MERGED #15737**
 
 **Scope:** Switch `declarative_public_catalog_names` + `declarative_catalog_lookup_names` to call `try_load_partial` and treat non-empty `errors` as *log + degrade*, not *fail*.
 
+**Files (as shipped):**
+- `lib/keeper/keeper_cascade_profile.ml` — both helpers switched; `log_partial_catalog_errors` emits via `Log.Keeper.warn` (interim — see 8.1.5 below).
+- `test/test_keeper_cascade_profile_partial.ml` — 3 integration cases against `catalog_names_for_validation`, `catalog_names`, `catalog_names_result`.
+
+**Status:** Merged at `4cd26c33` on 2026-05-17 04:23:42 UTC. Operates on live reload path; keeper toml validation now accepts partial subsets.
+
+**Known shortcomings (closed by 8.1.5 below):**
+- Logging routed through `Log.Keeper` because `Log.Cascade` namespace does not exist yet — alerting that filters on cascade-domain warnings misroutes.
+- No `(path, mtime)`-keyed dedup; helper is called by every keeper toml load, producing N×2 warns per reload.
+
+### Phase 8.1.5 — Logging substrate cleanup — **PENDING (PR-B)**
+
+**Scope:** Add `Log.Cascade` log namespace + structured `(path, mtime)` dedup for partial-catalog errors. Migrate `log_partial_catalog_errors` from `Log.Keeper.warn` to `Log.Cascade.warn`.
+
+**Why:** The post-merge audit (§11) flagged log spam (N×2 warns per reload across N keeper toml files) and a misrouted namespace (cascade-domain issue logged under keeper-domain channel). Phase 8.2 deferred dedup with the rationale *"only if log volume becomes an issue"*, but the audit reclassified this as **must-have alongside 8.2**, not optional, to match CLAUDE.md §workaround §4 (avoid log spam as accepted operational state).
+
 **Files:**
-- `lib/keeper/keeper_cascade_profile.ml:81-130` — replace match arms; emit `Log.Cascade.warn` per unique error per mtime via a small `Hashtbl.t` keyed on `(path, mtime)` to avoid log spam.
+- New `Log.Cascade` namespace module (mirroring existing `Log.Keeper`).
+- `lib/keeper/keeper_cascade_profile.ml` — rewrite `log_partial_catalog_errors` to:
+  - dedup via `Hashtbl.t` keyed on `(path, mtime, sorted_error_signatures)` with `Atomic.t`-backed mutex
+  - emit via `Log.Cascade.warn`
+- Test: assert the same `(path, mtime)` triggers the warn *exactly once* across 9 sequential calls.
 
-**Tests:** `test/test_keeper_cascade_validation_partial.ml` — load cascade.toml with mid-edit drift; assert `catalog_names_for_validation` returns `Ok names` containing the production tier-groups; assert log entries record the dropped entries exactly once.
+**Acceptance:** Server reload after a mid-edit cascade.toml triggers 1 WARN, not 32.
 
-### Phase 8.3 — Boot gate semantics (PR-3)
+### Phase 8.3 — Boot-gate partial tolerance — **PENDING (PR-C)**
 
-**Scope:** Make `Cascade_catalog_runtime.validate_path_result` *explicit* about its strict mode. Document that boot remains all-or-nothing while live reload is partial. Add a `--cascade-allow-partial-boot` operator flag (off by default) for emergency boot with degraded config.
+**Scope:** Make `Cascade_catalog_runtime.validate_path_result` explicit about its strict mode. Document that boot remains all-or-nothing by default while live reload is partial. Add a `--cascade-allow-partial-boot` operator flag (off by default) and a corresponding env var (`MASC_CASCADE_PARTIAL_BOOT=1`) for emergency boot with degraded config.
+
+**Why this is reclassified from "skipped if 8.2 covers live reload" to "must-have"**: the post-merge audit (§11) corrected the assumption that 8.2 covers the original incident. **It does not.** 8.2 only helps if the server is already running when the operator edits cascade.toml. The 2026-05-17 incident reproduces equally on **cold boot** with a stale binding, and in that case the boot gate's binary `try_load_declarative` aborts startup before the keeper validators run. 8.3 is the only sub-phase that addresses cold-boot recovery.
 
 **Files:**
-- `lib/cascade/cascade_catalog_runtime.ml` — flag gate.
-- `bin/server/server_runtime_bootstrap.ml` — flag wiring.
-- `docs/operator/cascade-degraded-mode.md` — operator runbook.
+- `lib/cascade/cascade_catalog_runtime.ml` — `validate_path_result` accepts `?allow_partial:bool` parameter; default `false` preserves current strict semantics.
+- `lib/server/server_runtime_bootstrap.ml` — read flag from CLI / env, pass through.
+- `dashboard/src/components/cascade-status` — visible banner when partial-boot mode is active.
+- `docs/operator/cascade-degraded-mode.md` — runbook.
 
-**Skipped if 8.2 covers the live-reload need** without operator-facing boot relaxation. Phase 8.3 is *opt-in extension*, not required for the original 9-keeper-skip incident.
+**Acceptance:** With `MASC_CASCADE_PARTIAL_BOOT=1` set, server boots with a mid-edit cascade.toml; dashboard banner reflects degraded mode; affected keepers boot or wait depending on cascade_name resolvability.
+
+**Risk:** Operator footgun if the flag is left on. Mitigations: off-by-default; dashboard banner; structured log on every reload while flag is active.
+
+### Phase 8.4 — Dispatch resolver partial invariants — **PENDING (PR-D)**
+
+**Scope:** Verify (via tests, not code change) that the cascade dispatch path operates correctly when the snapshot reaching it carries `errors`. The catalog runtime's `known_profile_names` and downstream resolvers must:
+
+- Return the **valid subset** when consulted with a partial snapshot
+- Never expose a profile whose tier resolves to zero members
+- Fail-loud (not silently fall back) when a `cascade_name` that *was* in the catalog drops out of the resolvable subset between two reloads
+
+**Why test-only:** §3.3 already asserts the adapter-level invariant (a tier-group surfacing in the snapshot has ≥1 resolvable member). The risk surfaced in §11 is that no test currently exercises *runtime dispatch* against a partial snapshot. We add the tests; if they pass without code change, the invariant is preserved through dispatch. If they fail, that finding triggers Phase 8.4.1 (separate RFC scope).
+
+**Files:**
+- `test/test_cascade_dispatch_partial.ml` — new file. Cases:
+  - dispatch on partial snapshot with valid tier resolves correctly
+  - dispatch on partial snapshot referencing a now-missing tier returns a structured error (not silent fallback to reserved)
+  - reload that drops a previously-resolvable tier triggers `WARN` and removes that tier from dispatch eligibility
+
+**Acceptance:** All 3 cases pass against current main. If any fails, escalate to Phase 8.4.1 code fix.
 
 ## 5. Non-goals
 
@@ -204,46 +255,43 @@ No code deletion is mandatory in Phase 8. The fallback becomes correct-but-irrel
 
 ## 6. Verification
 
-### 6.1 Reproduction of the 2026-05-17 incident
+### 6.1 What 8.1 + 8.2 actually verify — and what they don't
 
-```bash
-# Setup: cascade.toml with a stale [claude.claude-api-sonnet] binding
-# but valid [tier-group.runpod_mtp] etc.
+**Corrected scope (2026-05-17 amend).** An earlier draft of §6 claimed 8.1 + 8.2 *"unblock"* the 9 keeper skip incident. That is overstated. The accurate framing:
 
-# Before this RFC:
-$ sb masc keeper-list
-# 9 keepers (analyst, imseonghan, jobsian_purist, masc-improver,
-#  ramarama, sangsu, scholar, tech_glutton, velvet-hammer) skip on load.
+- **8.1 + 8.2 prevent recurrence** of the load-time skip *when the server is already running*. If an operator edits cascade.toml mid-session and introduces a stale binding, the live reload now degrades gracefully instead of dropping 9 keepers.
+- **8.1 + 8.2 do NOT recover cold boot.** A server restart with a stale cascade.toml still aborts at `validate_path_result` (boot gate), before keeper validators run. **Cold-boot recovery is Phase 8.3's responsibility**, not 8.2's.
+- **At time of merge, the 9 keepers were already booting.** The operator hand-edited cascade.toml to remove the stale `[claude.claude-api-sonnet]` binding before the PR landed, which is what actually restored the keepers. 8.1 + 8.2 prevent the *next* occurrence; they did not cause the *current* recovery.
 
-# After this RFC (Phase 8.1 + 8.2):
-$ sb masc keeper-list
-# 16 keepers load. Server log records:
-#   [WARN] [Cascade] catalog drift in cascade.toml mtime=...:
-#     Binding_resolution_failed "claude.claude-api-sonnet"
-#   (logged once per mtime)
-```
+Honest framing: **8.1 + 8.2 are a regression guard, not an active fix**. The active fix was the cascade.toml hand-edit. Phase 8.3 is the active fix for the *same incident shape on cold boot*.
 
-### 6.2 Bug B is the only fix needed; Bug A is implicitly resolved
+### 6.2 What `reserved_cascade_names` still does
 
 Once Phase 8.2 lands:
 
-- Keeper toml validation reaches `catalog_names_for_validation` → `Ok [tier-group.runpod_mtp; tier-group.local_mtp; ...]`.
-- Reserved fallback branch (kcp_types_profile.ml:838-844) becomes unreachable on the production codepath. It remains as defensive code for the catastrophic case (catalog has zero resolvable entries, e.g. corrupted file).
-- No edit to `reserved_cascade_names` is required.
+- Keeper toml validation reaches `catalog_names_for_validation` → `Ok names` containing the resolvable tier-groups.
+- Reserved fallback branch (`keeper_types_profile.ml:838-844`) is reachable **only** when the catalog has zero resolvable entries (corrupt file, missing file, or all bindings broken). It remains correct as a defensive last resort.
+- Reserved fast-path (`keeper_types_profile.ml:803-805`) is unchanged. As §1.3 (corrected) clarifies, this list is *catalog-derived for its phase-routing slot*, not a static hardcode. No edit to it is required by 8.x.
 
-This is **one fix, not two**. The earlier diagnosis treating Bug A as a separate concern was wrong — it would have led to a workaround-class expansion of the reserved list.
+This is **one structural fix at the adapter surface**, not a deletion of reserved logic.
 
-### 6.3 Property — partial snapshot invariant
+### 6.3 Property — partial snapshot invariant (Phase 8.1)
 
-`test/test_cascade_declarative_hotpath_partial.ml` asserts via property-based generation:
+`test/test_cascade_declarative_hotpath.ml` `phase8_partial_parse` group asserts (currently as fixed example-based cases, not yet generative):
 
 ```
-∀ catalog c:
-  let { snapshot; errors } = try_load_partial c in
-  every tier-group g in snapshot has ≥1 resolvable member
-  every tier t in snapshot has ≥1 resolvable binding
+For the fixture (1 stale [ghost.ghost-model] + 1 valid [tier-group.local-group]):
+  let { snapshot; errors } = try_load_partial fixture in
+  snapshot.profile_names ⊇ { tier-group.local-group }
+  errors ⊇ { Provider_not_found "ghost", Model_not_found "ghost-model" }
   errors ∩ snapshot.profile_names = ∅
 ```
+
+A future Phase 8.1.1 may upgrade this to generative property-based testing.
+
+### 6.4 Dispatch invariant (Phase 8.4, pending)
+
+The above only covers the *catalog load* surface. The *runtime dispatch* path is **not yet covered by tests**. Phase 8.4 adds that coverage; if it surfaces a violation, Phase 8.4.1 fixes it.
 
 ## 7. Migration
 
@@ -270,6 +318,46 @@ No operator action required. cascade.toml schema unchanged. Existing keepers tha
 
 ## 10. Implementation log
 
-(Filled in as PRs land.)
+- 2026-05-17 04:23:28 UTC — Phase 8.1 merged. PR #15733 (`feat/rfc-0058-phase-8-cascade-toml-ssot` → main, commit `423ad519`). Adapter partial surface (`try_load_partial`, `partial_load_result`) + 3 property tests.
+- 2026-05-17 04:23:42 UTC — Phase 8.2 merged. PR #15737 (`feat/rfc-0058-phase-8-keeper-consume` → main, commit `4cd26c33`). Keeper validation helpers switched to `try_load_partial` + 3 integration tests.
+- 2026-05-17 (this amend) — Post-merge self-review surfaced 6 gaps (§11). RFC scope expanded from 3 → 5 sub-phases. Phase 8.1.5, 8.3, 8.4 reclassified from optional to required.
+- (pending) Phase 8.1.5 — `Log.Cascade` namespace + `(path, mtime)` dedup. PR-B.
+- (pending) Phase 8.3 — boot-gate partial tolerance flag. PR-C.
+- (pending) Phase 8.4 — dispatch resolver partial invariant tests. PR-D.
 
-- 2026-05-17 — RFC body draft on `feat/rfc-0058-phase-8-cascade-toml-ssot`. PR-1 (Phase 8.1 adapter partial surface) in progress.
+## 11. Post-merge self-review (2026-05-17)
+
+After 8.1 + 8.2 merged, an adversarial review against the original RFC body identified 6 gaps. They are categorized below by whether they invalidate the merged work (none do) or extend scope (all 6 do).
+
+### 11.1 Gaps that *extend scope*, do not invalidate merged work
+
+| # | Gap | Severity | Closed by |
+|---|---|---|---|
+| 1 | Boot gate stays binary — cold boot with stale cascade.toml still aborts at `validate_path_result`. | **HIGH** | Phase 8.3 |
+| 2 | Dispatch resolver has no test coverage against partial snapshots. | **MEDIUM** | Phase 8.4 |
+| 3 | `log_partial_catalog_errors` emits via `Log.Keeper.warn` because `Log.Cascade` namespace does not exist. Alerting routes misclassify. | **LOW** | Phase 8.1.5 |
+| 4 | No `(path, mtime)`-keyed dedup; helper emits per keeper toml load. | **LOW** | Phase 8.1.5 |
+| 5 | §1.3 of the original RFC body claimed `reserved_cascade_names` is *"phase-routing internal only"*. Evidence shows it is *catalog-derived for the phase-routing slot*. Diagnosis was sharper than original draft. | **LOW** | This amend (§1.3 correction) |
+| 6 | §6 framed 8.1 + 8.2 as *"unblock 9 keepers"*. Accurate framing is *regression guard*; the operator's cascade.toml hand-edit was the active recovery. | **LOW** | This amend (§6.1 correction) |
+
+### 11.2 Why merged 8.1 + 8.2 are still correct
+
+None of the 6 gaps reverse 8.1 or 8.2. Both:
+
+- Preserve the existing binary `try_load_declarative` semantics (boot gate unchanged).
+- Add purely additive APIs (`try_load_partial`, `partial_load_result`) — no caller is forced.
+- Switch two helpers (`declarative_public_catalog_names`, `declarative_catalog_lookup_names`) to a *strict superset* of their previous return values: cases that previously returned `Error` may now return `Ok subset`; cases that previously returned `Ok` still return `Ok` with identical content.
+
+Gaps 1, 2 widen coverage; gaps 3, 4 improve observability; gaps 5, 6 correct documentation. None require revert.
+
+### 11.3 Why this was missed during the original PR review
+
+The original RFC §4 framed Phase 8.3 as *"opt-in extension"* contingent on whether 8.2 covered the operational need. The error was failing to distinguish *live reload* (covered by 8.2) from *cold boot* (uncovered). Both produce the same error signature in the server log; the original draft conflated them. The amend (§6.1) makes the distinction explicit.
+
+The framing failure is the kind CLAUDE.md §워크어라운드 §1 ("telemetry-as-fix") warns about indirectly: the test fixture (a *running* server with mid-edit toml) and the production scenario (a *restarted* server with mid-edit toml) had the same surface (WARN line in log) but different causal paths. The fixture was treated as canonical without checking which boot phase the original incident hit.
+
+### 11.4 Operating principle adopted by this amend
+
+- Every "Phase N done" claim must distinguish *load path covered* from *boot path covered* from *dispatch path covered*. Three separate axes.
+- Every operational claim ("X is unblocked") must specify *active vs regression-prevention*. Hand-edits to config files are not the RFC's work.
+- RFC body updates after merge are first-class. A merged RFC whose §6 overstates effects is itself a workaround (documentation drift). Amend in the open.

@@ -1,5 +1,5 @@
 ---
-rfc: "0091"
+rfc: "0096"
 title: "Keeper Turn Contract — multi-turn reasoning + tier-group SPOF root-fix"
 status: Draft
 created: 2026-05-17
@@ -11,7 +11,7 @@ related: ["0084", "0085", "0086", "0087", "0089"]
 implementation_prs: []
 ---
 
-# RFC-0091 — Keeper Turn Contract: multi-turn reasoning + tier-group SPOF
+# RFC-0096 — Keeper Turn Contract: multi-turn reasoning + tier-group SPOF
 
 > Promote the causal-chain map in issue #15319 to a design-doc level RFC,
 > scoped tightly to two root mismatches. Closes the loop on a 17-second
@@ -31,6 +31,20 @@ Root #2 (cascade rotation cap + `alert_exhausted` broadcast spam)
 는 amplifier 이지 root 가 아니며, Root #1/#3 가 fix 되면 trigger 자체
 가 사라진다. Layer 4 (`stale_fleet_batch` watchdog seal) 는 visibility
 의 결과 — 별도 RFC 가 필요 없다.
+
+현재 caller/context 좌표는 `lib/keeper/keeper_tool_disclosure.ml:466`
+의 required-tool satisfaction entrypoint, `lib/keeper/keeper_tool_disclosure.ml:483`
+의 read-only 불만족 판정, `lib/keeper/keeper_execution_receipt.ml:475`
+의 cascade-exhausted → alert disposition 파생이다. Checked-in cascade
+profile 쪽 provider surface 는 `config/cascade.toml:57` 에서 시작한다.
+
+```ocaml
+(* current contract shape: one turn, one satisfaction decision *)
+let required_tool_satisfaction call =
+  match effect_of_call call with
+  | Some Tool_catalog.Read_only -> false
+  | _ -> true
+```
 
 ## §2 의도된 결과
 

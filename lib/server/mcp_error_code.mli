@@ -1,4 +1,4 @@
-(** JSON-RPC 2.0 + MCP server-defined error code variant (RFC-0097).
+(** JSON-RPC 2.0 + MCP server-defined error code variant (RFC-0098).
 
     Closed sum type. Adding a new variant requires RFC-level discussion;
     there is no [Other] escape hatch by design — the absence forces

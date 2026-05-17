@@ -70,6 +70,14 @@ val memory_write_error_kind_to_string : memory_write_error_kind -> string
 (** Result of validating a [keeper_memory_write] call's args. Exposed
     so tests can pin the error_kind taxonomy without constructing a
     [Coord.config]. *)
+type memory_write_error_kind =
+  | Invalid_memory_kind
+  | Title_too_long
+  | Content_empty
+  | Long_term_via_explicit_write_not_yet_supported
+
+val memory_write_error_kind_to_string : memory_write_error_kind -> string
+
 type memory_write_validation =
   | Memory_write_ok of
       { kind : string

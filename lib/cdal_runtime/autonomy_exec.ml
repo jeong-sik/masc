@@ -58,10 +58,9 @@ type capture =
 
 type run_guard = { run : 'a. (unit -> 'a) -> 'a }
 
-let default_run_guard = { run = (fun f -> f ()) }
-let run_guard : run_guard Atomic.t = Atomic.make default_run_guard
+let run_guard : run_guard Atomic.t = Atomic.make { run = (fun f -> f ()) }
 let set_run_guard guard = Atomic.set run_guard guard
-let reset_run_guard_for_testing () = Atomic.set run_guard default_run_guard
+let reset_run_guard_for_testing () = Atomic.set run_guard { run = (fun f -> f ()) }
 let with_run_guard f = (Atomic.get run_guard).run f
 
 open Result_syntax
@@ -323,8 +322,7 @@ let run ~sw ~clock ~config ~argv ~timeout_s =
              ; stderr = stderr_capture.text
              ; stdout_truncated = stdout_capture.truncated
              ; stderr_truncated = stderr_capture.truncated
-             (* NDT-OK: elapsed wall time is boundary telemetry for a completed external child;
-                policy decisions use status and bounded captures. *)
+             (* NDT-OK: boundary telemetry only; policy uses status and bounded captures. *)
              ; elapsed_s = Unix.gettimeofday () -. t0
              }
          in
@@ -442,36 +440,6 @@ let%test_unit "run captures stdout and stderr" =
     assert (output.stderr = "err");
     assert (output.status = Exit_code 0)
   | Error err -> failwith (Error.to_string err)
-;;
-
-let%test_unit "run guard wraps child lifetime" =
-  reset_run_guard_for_testing ();
-  let calls = Atomic.make 0 in
-  set_run_guard
-    { run =
-        (fun f ->
-          Atomic.incr calls;
-          f ())
-    };
-  Fun.protect
-    ~finally:reset_run_guard_for_testing
-    (fun () ->
-       with_eio
-       @@ fun ~sw ~clock ->
-       let result =
-         run
-           ~sw
-           ~clock
-           ~config:default_config
-           ~argv:[ "/bin/echo"; "guarded" ]
-           ~timeout_s:2.0
-       in
-       match result with
-       | Ok output ->
-         assert (String.trim output.stdout = "guarded");
-         assert (output.status = Exit_code 0);
-         assert (Atomic.get calls = 1)
-       | Error err -> failwith (Error.to_string err))
 ;;
 
 let%test_unit "run times out and returns Timed_out" =

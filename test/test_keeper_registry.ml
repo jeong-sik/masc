@@ -287,16 +287,22 @@ let test_fd_pressure_degraded_projection () =
 
 let gib n = n * 1024 * 1024 * 1024
 
-let disk_snapshot ?(available_bytes = gib 40) () =
+let disk_snapshot ?(total_bytes = gib 100) ?(available_bytes = gib 40) () =
+  let used_bytes = max 0 (total_bytes - available_bytes) in
   Disk.Snapshot
     { path = "/tmp"
     ; filesystem = "/dev/test"
-    ; total_bytes = gib 100
-    ; used_bytes = gib 60
+    ; total_bytes
+    ; used_bytes
     ; available_bytes
-    ; capacity_percent = 60.0
+    ; capacity_percent =
+        (if total_bytes <= 0
+         then 0.0
+         else float_of_int used_bytes /. float_of_int total_bytes *. 100.0)
     ; available_percent =
-        (float_of_int available_bytes /. float_of_int (gib 100)) *. 100.0
+        (if total_bytes <= 0
+         then 0.0
+         else float_of_int available_bytes /. float_of_int total_bytes *. 100.0)
     ; mounted_on = "/"
     }
 
@@ -322,6 +328,14 @@ let test_disk_pressure_proactive_admission () =
           with_env "MASC_KEEPER_DISK_MIN_FREE_PERCENT" "5.0" (fun () ->
               check bool "admits filesystem with disk headroom" true
                 (Disk.admission_decision_of_snapshot (disk_snapshot ()) |> disk_admitted);
+              check bool "admits large filesystem above capped percent floor" true
+                (Disk.admission_decision_of_snapshot
+                   (disk_snapshot ~total_bytes:(gib 4096) ~available_bytes:(gib 52) ())
+                 |> disk_admitted);
+              check bool "blocks large filesystem below capped percent floor" false
+                (Disk.admission_decision_of_snapshot
+                   (disk_snapshot ~total_bytes:(gib 4096) ~available_bytes:(gib 30) ())
+                 |> disk_admitted);
               check bool "blocks filesystem below disk floor" false
                 (Disk.admission_decision_of_snapshot
                    (disk_snapshot ~available_bytes:(gib 1) ())

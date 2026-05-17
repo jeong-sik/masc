@@ -28,8 +28,10 @@ type admission_block =
       { path : string
       ; available_bytes : int
       ; min_free_bytes : int
+      ; effective_min_free_bytes : int
       ; available_percent : float
       ; min_free_percent : float
+      ; percent_floor_max_bytes : int
       }
 
 type admission_decision =
@@ -143,8 +145,32 @@ let min_free_percent () =
   env_float_clamped "MASC_KEEPER_DISK_MIN_FREE_PERCENT" ~default:5.0 ~min_v:0.1
 ;;
 
+let percent_floor_max_bytes () =
+  (* Keep the percent floor from scaling into hundreds of GiB on multi-TiB
+     volumes. The explicit min_free knobs remain the operator-facing tuning
+     surface; this cap is a guardrail against over-strict defaults. *)
+  40 * 1024 * 1024 * 1024
+;;
+
 let snapshot_ttl_sec () =
   env_float_clamped "MASC_KEEPER_DISK_SNAPSHOT_TTL_SEC" ~default:30.0 ~min_v:1.0
+;;
+
+let percent_floor_bytes s ~min_free_percent =
+  if s.total_bytes <= 0
+  then 0
+  else
+    float_of_int s.total_bytes *. min_free_percent /. 100.0
+    |> ceil
+    |> int_of_float
+;;
+
+let effective_min_free_bytes s ~min_free_bytes ~min_free_percent =
+  let percent_floor_max_bytes = percent_floor_max_bytes () in
+  let capped_percent_floor =
+    min (percent_floor_bytes s ~min_free_percent) percent_floor_max_bytes
+  in
+  max min_free_bytes capped_percent_floor
 ;;
 
 let rec nearest_existing_path path =
@@ -242,15 +268,21 @@ let admission_decision_of_snapshot ?now snapshot =
     | Snapshot s ->
       let min_free_bytes = min_free_bytes () in
       let min_free_percent = min_free_percent () in
-      if s.available_bytes < min_free_bytes || s.available_percent < min_free_percent
+      let percent_floor_max_bytes = percent_floor_max_bytes () in
+      let effective_min_free_bytes =
+        effective_min_free_bytes s ~min_free_bytes ~min_free_percent
+      in
+      if s.available_bytes < effective_min_free_bytes
       then
         Block
           (Disk_free_space_low
              { path = s.path
              ; available_bytes = s.available_bytes
              ; min_free_bytes
+             ; effective_min_free_bytes
              ; available_percent = s.available_percent
              ; min_free_percent
+             ; percent_floor_max_bytes
              })
       else Admit)
 ;;
@@ -296,14 +328,23 @@ let admission_block_to_json = function
       ; "detail", `String detail
       ]
   | Disk_free_space_low
-      { path; available_bytes; min_free_bytes; available_percent; min_free_percent } ->
+      { path
+      ; available_bytes
+      ; min_free_bytes
+      ; effective_min_free_bytes
+      ; available_percent
+      ; min_free_percent
+      ; percent_floor_max_bytes
+      } ->
     `Assoc
       [ "tag", `String "disk_free_space_low"
       ; "path", `String path
       ; "available_bytes", `Int available_bytes
       ; "min_free_bytes", `Int min_free_bytes
+      ; "effective_min_free_bytes", `Int effective_min_free_bytes
       ; "available_percent", `Float available_percent
       ; "min_free_percent", `Float min_free_percent
+      ; "percent_floor_max_bytes", `Int percent_floor_max_bytes
       ]
 ;;
 
@@ -333,6 +374,7 @@ let snapshot_json ?now ~masc_root () =
     ; "masc_root", `String masc_root
     ; "min_free_bytes", `Int (min_free_bytes ())
     ; "min_free_percent", `Float (min_free_percent ())
+    ; "percent_floor_max_bytes", `Int (percent_floor_max_bytes ())
     ; "snapshot_ttl_sec", `Float (snapshot_ttl_sec ())
     ; "filesystem", snapshot_result_to_json snapshot
     ; "admission", admission_decision_to_json (admission_decision_of_snapshot ?now snapshot)

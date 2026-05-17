@@ -26,7 +26,7 @@ JSONL log retention (tool_calls, tool_usage, oas-events, runtime-manifests)
 
 ## 2. Background
 
-5/16 host FD storm 사고의 부수 작업 중 `~/.masc` 디스크 사용량 audit:
+5/16 host FD storm 사고의 부수 작업 중 base-path `.masc` 디스크 사용량 audit:
 
 | Path | Size | 24-hour growth |
 |---|---|---|

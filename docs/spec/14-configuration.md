@@ -595,7 +595,7 @@ $MASC_PERSONAS_DIR
   > missing/uninitialized
 ```
 
-암묵적 secondary search(`~/.masc/personas`, `$MASC_BASE_PATH/.masc/personas`)는 사용하지 않는다.
+암묵적 secondary search(운영자 home personas, base-path root personas)는 사용하지 않는다.
 Persona, keeper TOML, prompt markdown, cascade, tool_policy는 모두 같은 resolved config root를 기준으로 해석한다.
 
 ### 12.4 Template 변경 반영

@@ -256,9 +256,9 @@ let test_realtime_transports_default_to_base_path_config_and_preserve_override (
       copy_script (script_path ()) script;
       ignore (make_config_root dir);
       make_fake_eio_exe dir;
-      let home_dir = Filename.concat dir "home" in
-      mkdir_p (Filename.concat home_dir ".masc/config/prompts");
-      write_file (Filename.concat home_dir ".masc/config/cascade.toml") "";
+      let ignored_dir = Filename.concat dir "ignored" in
+      mkdir_p (Filename.concat ignored_dir "config/prompts");
+      write_file (Filename.concat ignored_dir "config/cascade.toml") "";
       let bootstrapped_config =
         Filename.concat (canonical_path dir) ".masc/config"
       in

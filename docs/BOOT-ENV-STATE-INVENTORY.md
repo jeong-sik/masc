@@ -65,8 +65,8 @@ Important boot behavior:
 - Supported launchers and `main_eio.exe doctor` should be read with a simpler operator contract:
   active config is `MASC_CONFIG_DIR` when set, otherwise `<MASC_BASE_PATH>/.masc/config`.
 - This means a passive base-path config root can exist on disk even when it is not the active config root.
-- There is no home-level config fallback. On shared hosts, use an explicit base
-  path and expect live config under `<base-path>/.masc/config`.
+- There is no secondary operator config fallback. On shared hosts, use an
+  explicit base path and expect live config under `<base-path>/.masc/config`.
 
 ### 1.3 Personas root resolution
 
@@ -417,8 +417,6 @@ Current observed state on the inspected host:
   - Reason: live `/health` reports `startup.config_resolution.config_root.path` as `/Users/dancer/me/.masc/config`.
 - Checked-in fallback/default config tree:
   - `/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config`
-- Removed home-level config root:
-  - `/Users/dancer/.masc/config` does not exist.
 - Both of these trees exist at the same time:
   - `/Users/dancer/me/.masc/*`
   - `/Users/dancer/me/.masc/.masc/*`
@@ -452,7 +450,6 @@ Current log sink observed today:
 
 - `curl -fsS http://127.0.0.1:8935/health`; 확인일시: 2026-05-17 Asia/Seoul; 신뢰도: High
 - `pgrep -fl main_eio`; 확인일시: 2026-05-17 Asia/Seoul; 신뢰도: High
-- `test ! -e /Users/dancer/.masc/config`; 확인일시: 2026-05-17 Asia/Seoul; 신뢰도: High
 - `test -f /Users/dancer/me/.masc/config/cascade.toml`; 확인일시: 2026-05-17 Asia/Seoul; 신뢰도: High
 
 ## 5. Operator Checklist for Root Drift
@@ -463,7 +460,7 @@ Current log sink observed today:
 2. Pick one active config root.
    - If `MASC_CONFIG_DIR` is set, that wins.
    - If you want the base-path config root to become active, unset `MASC_CONFIG_DIR` and restart.
-   - Do not recreate a home-level config directory as a second operator surface; the resolver no longer consults it.
+   - Do not create a second operator config surface; the resolver only consults the active config root.
 3. Treat `<base-path>/planning/` as a separate backup and cleanup lane from `.masc/`.
 4. Do not delete a nested `.masc/.masc` tree until you have checked whether it still contains needed logs, traces, or backlog state.
 5. When debugging keeper shell, clone, or PR-submit behavior, inspect these paths first:

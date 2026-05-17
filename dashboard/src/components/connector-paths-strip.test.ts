@@ -49,10 +49,10 @@ describe('deriveMascPaths', () => {
     const c1 = mkConnector({ connector_id: 'discord', names_path: '' } as never)
     const c2 = mkConnector({
       connector_id: 'slack',
-      names_path: '/home/bob/.masc/connectors/slack/names.json',
+      names_path: '/srv/project/.masc/connectors/slack/names.json',
     } as never)
     const paths = deriveMascPaths([c1, c2])
-    expect(paths.connectorsDir).toBe('/home/bob/.masc/connectors/')
+    expect(paths.connectorsDir).toBe('/srv/project/.masc/connectors/')
   })
 })
 

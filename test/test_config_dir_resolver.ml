@@ -309,10 +309,10 @@ let test_executable_relative_config_is_seed_only_not_fallback () =
   check bool "personas hidden because repo config is not active"
     false resolution.personas.exists
 
-let test_home_config_is_not_a_fallback () =
-  with_temp_dir "config-dir-home" @@ fun home ->
-  let home_config_root = Filename.concat home Common.masc_dirname in
-  ignore (make_config_root home_config_root);
+let test_external_config_is_not_a_fallback () =
+  with_temp_dir "config-dir-external" @@ fun external_root ->
+  let external_config_root = Filename.concat external_root Common.masc_dirname in
+  ignore (make_config_root external_config_root);
   let resolution =
     Config_dir_resolver.resolve_with
       (make_inputs ~cwd:"/tmp/missing-cwd"
@@ -324,12 +324,12 @@ let test_home_config_is_not_a_fallback () =
     (Config_dir_resolver.source_to_string resolution.config_root.source);
   check bool "prompts hidden" false resolution.prompts.exists
 
-let test_local_masc_fallback_ignores_home_config () =
+let test_local_masc_fallback_ignores_external_config () =
   with_temp_dir "config-dir-local" @@ fun root ->
   let target = Filename.concat root "target" in
   let local_config = make_config_root (Filename.concat target Common.masc_dirname) in
-  let home = Filename.concat root "home" in
-  ignore (make_config_root (Filename.concat home Common.masc_dirname));
+  let external_root = Filename.concat root "external" in
+  ignore (make_config_root (Filename.concat external_root Common.masc_dirname));
   let resolution =
     Config_dir_resolver.resolve_with
       (make_inputs ~cwd:root ~env_base_path:target
@@ -386,29 +386,29 @@ let test_personas_dirs_default_repo_only () =
   check (list string) "repo personas only"
     [ Filename.concat config "personas" ] dirs
 
-let test_personas_dirs_ignores_home_personas () =
-  with_temp_dir "pd-home" @@ fun root ->
+let test_personas_dirs_ignores_external_personas () =
+  with_temp_dir "pd-external" @@ fun root ->
   let config = make_config_root root in
-  let home = Filename.concat root "home" in
-  let home_personas = Filename.concat home ".masc/personas" in
-  mkdir_p home_personas;
+  let external_root = Filename.concat root "external" in
+  let external_personas = Filename.concat external_root ".masc/personas" in
+  mkdir_p external_personas;
   let inputs = make_inputs ~env_config_dir:config () in
   let resolution = Config_dir_resolver.resolve_with inputs in
   let dirs = Config_dir_resolver.personas_dirs_with inputs resolution in
-  check (list string) "repo personas only despite home personas"
+  check (list string) "repo personas only despite external personas"
     [ Filename.concat config "personas" ] dirs
 
 let test_personas_dirs_env_override_is_sole_source () =
   with_temp_dir "pd-env" @@ fun root ->
   let env_personas = Filename.concat root "env-personas" in
   mkdir_p env_personas;
-  let home = Filename.concat root "home" in
-  let home_personas = Filename.concat home ".masc/personas" in
-  mkdir_p home_personas;
+  let external_root = Filename.concat root "external" in
+  let external_personas = Filename.concat external_root ".masc/personas" in
+  mkdir_p external_personas;
   let inputs = make_inputs ~env_personas_dir:env_personas () in
   let resolution = Config_dir_resolver.resolve_with inputs in
   let dirs = Config_dir_resolver.personas_dirs_with inputs resolution in
-  (* MASC_PERSONAS_DIR overrides: only the env dir, no home dir *)
+  (* MASC_PERSONAS_DIR overrides: only the env dir, no secondary dir *)
   check (list string) "env override only" [ env_personas ] dirs
 
 let test_personas_dirs_ignores_base_path_fallback () =
@@ -446,12 +446,12 @@ let () =
             test_cwd_config_remains_seed_only;
           test_case "exe-relative config is seed-only, not fallback" `Quick
             test_executable_relative_config_is_seed_only_not_fallback;
-          test_case "local masc fallback ignores home config" `Quick
-            test_local_masc_fallback_ignores_home_config;
+          test_case "local masc fallback ignores external config" `Quick
+            test_local_masc_fallback_ignores_external_config;
           test_case "local masc fallback collapses explicit .masc dir"
             `Quick test_local_masc_fallback_collapses_explicit_masc_dir;
-          test_case "home config is not a fallback" `Quick
-            test_home_config_is_not_a_fallback;
+          test_case "external config is not a fallback" `Quick
+            test_external_config_is_not_a_fallback;
           test_case "does not fallback to legacy me_root repo path" `Quick
             test_no_legacy_me_root_fallback;
         ] );
@@ -459,8 +459,8 @@ let () =
         [
           test_case "default returns repo personas only" `Quick
             test_personas_dirs_default_repo_only;
-          test_case "ignores home .masc/personas" `Quick
-            test_personas_dirs_ignores_home_personas;
+          test_case "ignores secondary personas dir" `Quick
+            test_personas_dirs_ignores_external_personas;
           test_case "MASC_PERSONAS_DIR overrides as sole source" `Quick
             test_personas_dirs_env_override_is_sole_source;
           test_case "ignores base_path .masc/personas fallback" `Quick

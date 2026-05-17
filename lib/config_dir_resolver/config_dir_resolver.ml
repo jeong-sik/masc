@@ -388,7 +388,7 @@ let personas_dirs_with inputs resolution =
        operator-declared persona roots stand on their own — a user may
        legitimately want personas without a full MASC config directory)
      - otherwise the resolved config root's personas/
-     Hidden secondary searches (~/.masc/personas, $MASC_BASE_PATH/.masc/personas)
+     Hidden secondary searches (secondary personas roots, base-path-root personas)
      make the dashboard/config panel lie about the actual source of truth. *)
   match explicit_personas_dir_override with
   | Some _ ->

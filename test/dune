@@ -132,6 +132,7 @@
   test_keeper_runtime_trust_snapshot
   test_ide_annotations
   test_ide_paths
+  test_ide_canonical_url_join
   test_keeper_runtime_manifest
   test_schema_surface_index
   test_keeper_accountability
@@ -419,6 +420,7 @@
   test_keeper_runtime_trust_snapshot
   test_ide_annotations
   test_ide_paths
+  test_ide_canonical_url_join
   test_keeper_runtime_manifest
   test_schema_surface_index
   test_keeper_accountability

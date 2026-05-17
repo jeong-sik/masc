@@ -216,10 +216,63 @@ let raise_fs_edit_error ?fields message =
   raise (Fs_edit_error (error_json ?fields message))
 ;;
 
+(* RFC-0128 §4.5 — resolve an absolute or base-relative file_path to
+   a partition + repo-relative path. Three outcomes:
+
+   1. [Repo_store.find_repo_by_path_prefix] hits AND the repo's [url]
+      normalises via [Ide_paths.canonical_url_of_remote] → [By_url slug]
+      bucket + the repo-relative [rel_path].
+   2. [Repo_store.find_repo_by_path_prefix] hits but the URL is blank or
+      unparseable → [Orphan] + original path. Counter labelled
+      [reason=blank_url] or [reason=url_unparseable].
+   3. No registered repo contains this path → [Orphan] + original path.
+      Counter labelled [reason=unregistered_repo].
+
+   The keeper write path is fire-and-forget; this resolver also never
+   raises — failures during [load_all] degrade to [Orphan] silently
+   with the [reason=unregistered_repo] label so the operator can see
+   how often it happens. *)
+let resolve_partition_for_write ~base_dir ~kind ~file_path =
+  let abs =
+    if Filename.is_relative file_path
+    then Filename.concat base_dir file_path
+    else file_path
+  in
+  let bump_orphan ~reason =
+    Prometheus.inc_counter
+      Keeper_metrics.metric_ide_orphan_writes
+      ~labels:[ "kind", kind; "reason", reason ]
+      ()
+  in
+  match Repo_store.find_repo_by_path_prefix ~base_path:base_dir abs with
+  | None ->
+    bump_orphan ~reason:"unregistered_repo";
+    (Ide_paths.Orphan, file_path)
+  | Some (repo, rel) ->
+    let url = String.trim repo.url in
+    if url = "" then begin
+      bump_orphan ~reason:"blank_url";
+      (Ide_paths.Orphan, file_path)
+    end
+    else
+      match Ide_paths.canonical_url_of_remote url with
+      | None ->
+        bump_orphan ~reason:"url_unparseable";
+        (Ide_paths.Orphan, file_path)
+      | Some slug -> (Ide_paths.By_url slug, rel)
+;;
+
 (** After a successful file write, record the code region in [.masc-ide/].
     Fire-and-forget: errors are logged but never block the write path.
     Uses [Ide_region_tracker.ingest_tool_call] which silently ignores
-    non-file-write tools. *)
+    non-file-write tools.
+
+    RFC-0128 §4.5: the partition is resolved per-write from the
+    [file_path] so sandbox-clone keeper writes and working-tree IDE
+    reads see the same [By_url <slug>] bucket. When the path cannot
+    be resolved to a registered repo the record goes to
+    [.masc-ide/_orphan/] and the [masc_ide_orphan_writes_total]
+    counter increments. *)
 let track_write_region
       ~config
       ~keeper_name
@@ -232,6 +285,9 @@ let track_write_region
       ()
   =
   let base_dir = Keeper_alerting_path.project_root_of_config config in
+  let partition, rel_file_path =
+    resolve_partition_for_write ~base_dir ~kind:"region" ~file_path
+  in
   let tool_name =
     match fs_write_mode_of_string_opt mode_raw with
     | Some Patch -> "edit_file"
@@ -266,7 +322,7 @@ let track_write_region
        file_path
        (Printexc.to_string exn));
   let arguments =
-    let fields = [ "path", `String file_path; "content", `String content ] in
+    let fields = [ "path", `String rel_file_path; "content", `String content ] in
     match fs_write_mode_of_string_opt mode_raw with
     | Some Patch ->
       `Assoc
@@ -277,6 +333,7 @@ let track_write_region
   try
     Ide_region_tracker.ingest_tool_call
       ~base_dir
+      ~partition
       ~keeper_id:keeper_name
       ~turn
       tool_call_json

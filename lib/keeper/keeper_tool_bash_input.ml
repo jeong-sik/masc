@@ -41,10 +41,15 @@ let is_allowed ~mode name =
   | Readonly -> Dev_exec_allowlist.is_readonly_allowed name
 ;;
 
+(* Execve-style: argv tokens pass verbatim to the child process, so
+   shell metacharacters ([;|&><`$*?]) are literal data, not operators.
+   Only control characters that cannot survive process-boundary
+   serialization are rejected.  See .mli "Design constraints" for the
+   rationale and contrast with the legacy lexer in [Worker_dev_tools]. *)
 let shell_metachar_in_token token =
   String.exists
     (function
-      | ';' | '|' | '&' | '>' | '<' | '`' | '$' | '\n' | '\r' | '*' | '?' -> true
+      | '\000' | '\n' | '\r' -> true
       | _ -> false)
     token
 ;;

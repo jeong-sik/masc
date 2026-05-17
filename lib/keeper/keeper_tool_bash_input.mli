@@ -13,9 +13,22 @@
 
     - **No string parsing**.  Validation is membership against
       {!Dev_exec_allowlist} plus structural checks on argv/cwd.
-    - **No shell metacharacters in argv**.  Each {!exec_stage}
-      element is a single token; pipes between stages are explicit
-      {!Pipeline} cases, not [|]-delimited strings.
+    - **Execve-style argv semantics**.  Each token in [argv] is passed
+      verbatim to the child process; the implementation invokes the
+      executable directly (no [/bin/sh -c "..."] wrapping).  Therefore
+      shell metacharacters like [*], [?], [|], [&], [;], [>], [<],
+      [`], [$] inside an argv token are *literal characters*, not
+      shell operators.  This is the principal RFC-0091 progress: the
+      legacy lexer in [Worker_dev_tools] rejects [find . -name *.ml]
+      with [path_syntax_blocked]; the typed schema accepts it because
+      [*.ml] is a [find]-internal pattern, not a shell glob.
+    - **Pipelines are explicit**.  [Pipeline.stages] enumerates each
+      [exec_stage] separately; [|]-delimited strings are never parsed.
+    - **Forbidden in argv tokens**: only control characters that
+      cannot survive process boundary serialization
+      ([NUL], [\n], [\r]).  The validator rejects them via
+      {!Argv_contains_shell_metachar} (name kept for log continuity;
+      semantics narrowed in PR-1 follow-up commit).
     - **Cwd is a string for now**.  Path SSOT does not yet expose a
       [Path.t] type (RFC-0091 §2.3 mis-cited [Host_config.cwd_for_keeper]
       which does not exist).  Absolute-path enforcement happens in

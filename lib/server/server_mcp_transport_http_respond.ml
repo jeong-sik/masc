@@ -95,39 +95,14 @@ let respond_mcp_error ?(extra_headers = []) ?data ?id
   in
   safe_respond_with_string reqd response body
 
-(* RFC-0098 PR-2 — thin delegations.
-
-   Wire-byte differences vs PR-1 baseline (documented intentional):
-
-   - JSON body now includes ["id": null] per JSON-RPC 2.0 §5.1 (error
-     responses MUST echo the request id or null when it cannot be
-     parsed). Previous bodies omitted the field — a spec violation
-     grandfathered until this PR.
-
-   - Headers: per-code header ordering is now [content-length ::
-     per-code :: extra :: json_headers] (was [content-length ::
-     per-code :: extra @ json_headers] for auth, equivalent here;
-     [content-length :: extra @ json_headers] for internal, with no
-     per-code header — equivalent here).
-
-   Out of PR-2 scope: [respond_not_ready] retains its bespoke
-   implementation because it runs before [session_id] /
-   [protocol_version] / [json_headers] are available (literal
-   [content-type: application/json] + raw [cors_headers] only).
-   PR-2.1 will introduce a sibling [respond_mcp_error_pre_ready] or
-   widen [respond_mcp_error] to handle the pre-runtime case. *)
-
-let respond_mcp_auth_error ?(extra_headers = [])
-    ~(deps : Server_mcp_transport_http_types.deps) request reqd ~session_id
-    ~protocol_version msg =
-  respond_mcp_error ~extra_headers ~deps request reqd ~session_id
-    ~protocol_version ~code:Mcp_error_code.Auth_error msg
-
-let respond_mcp_internal_error ?(extra_headers = [])
-    ~(deps : Server_mcp_transport_http_types.deps) request reqd ~session_id
-    ~protocol_version msg =
-  respond_mcp_error ~extra_headers ~deps request reqd ~session_id
-    ~protocol_version ~code:Mcp_error_code.Internal_error msg
+(* RFC-0098 PR-4 — legacy [respond_mcp_auth_error] /
+   [respond_mcp_internal_error] / [mcp_internal_error_json] removed.
+   PR-3 (#15793) migrated all 10 in-tree callers to [respond_mcp_error
+   ~code:...] / [error_body ~code:...]. The wrappers carried no
+   semantics beyond delegation and are gone. [respond_not_ready] is
+   intentionally retained — it runs before [json_headers] /
+   [session_id] are available; widening [respond_mcp_error] to the
+   pre-runtime case is a separate concern. *)
 
 let respond_not_ready ~(deps : Server_mcp_transport_http_types.deps) request reqd =
   let origin = deps.get_origin request in
@@ -183,8 +158,5 @@ let respond_sse_rate_limited ~(deps : Server_mcp_transport_http_types.deps) ~ori
   let response = Httpun.Response.create ~headers `Too_many_requests in
   safe_respond_with_string reqd response body
 
-let mcp_internal_error_json ?id msg =
-  (* RFC-0098 PR-2: delegate to error_body SSOT. The duplicate
-     respond_mcp_error definition that lived here on the legacy path is
-     removed — PR-2's SSOT-using definition is at L67. *)
-  error_body ?id ~code:Mcp_error_code.Internal_error msg
+(* RFC-0098 PR-4: [mcp_internal_error_json] removed.
+   Call [error_body ~code:Mcp_error_code.Internal_error ...] directly. *)

@@ -1,17 +1,13 @@
-(** Wire-shape assertions for RFC-0098 PR-2 delegation.
+(** Wire-shape assertions for [error_body] — the RFC-0098 SSOT.
 
-    Pins down the JSON body produced by {!error_body} (the SSOT
-    introduced in PR-2) and documents the wire-byte change vs the
-    pre-PR-2 baseline: error responses now carry [["id": null]] per
-    JSON-RPC 2.0 §5.1, where the legacy hand-rolled bodies omitted
-    the field. *)
+    Originally written at PR-2 to assert *parity* between legacy
+    [mcp_internal_error_json] and the new [error_body]. PR-4 removed
+    the legacy function entirely; what remains is the standalone
+    wire-shape contract for [error_body], plus a regression guard
+    pinning the JSON-RPC 2.0 §5.1 [["id": null]] compliance fix
+    introduced in PR-2.
 
-(* RFC-0098 PR-3: this test file is the SOLE remaining caller of the
-   deprecated legacy [mcp_internal_error_json] (asserts parity with
-   the SSOT [error_body]). Suppress the deprecation alert here only
-   — production code may not. PR-4 will remove both the legacy
-   function and this suppression. *)
-[@@@alert "-deprecated"]
+    File name retained to keep git-blame continuity across PR-2 → PR-4. *)
 
 open Alcotest
 module R = Masc_mcp.Server_mcp_transport_http_respond
@@ -84,26 +80,11 @@ let test_error_body_includes_data_when_supplied () =
   in
   check json_testable "data field included when supplied" expected body
 
-let test_mcp_internal_error_json_now_typed () =
-  (* The legacy [mcp_internal_error_json] is a thin delegation. It
-     must produce the same wire bytes as [error_body
-     ~code:Internal_error] — that is the PR-2 contract. *)
-  let via_legacy = R.mcp_internal_error_json "explosion" in
-  let via_ssot = R.error_body ~code:C.Internal_error "explosion" in
-  check json_testable "mcp_internal_error_json == error_body Internal_error"
-    via_ssot via_legacy
-
-let test_mcp_internal_error_json_with_id () =
-  let via_legacy = R.mcp_internal_error_json ~id:(`Int 7) "oops" in
-  let via_ssot = R.error_body ~id:(`Int 7) ~code:C.Internal_error "oops" in
-  check json_testable "mcp_internal_error_json ~id == error_body ~id"
-    via_ssot via_legacy
-
 let test_wire_byte_change_documented () =
-  (* Documents the intentional wire-byte change introduced by PR-2:
-     the response body now contains "id":null where it previously did
-     not. This is a one-way contract change — bumping for spec
-     compliance. *)
+  (* PR-2 wire-byte change regression guard — outlives the legacy
+     factories removed in PR-4. Pre-PR-2 bodies omitted "id";
+     [error_body] always emits "id":null per JSON-RPC 2.0 §5.1.
+     A revert would break clients that switch on the typed shape. *)
   let pr1_baseline_no_id =
     `Assoc
       [
@@ -121,8 +102,8 @@ let test_wire_byte_change_documented () =
             <> Yojson.Safe.to_string pr2_with_id_null in
   if not differ then
     Alcotest.fail
-      "PR-2 should differ from PR-1 baseline by adding id:null; if this \
-       fails, the wire change was reverted unintentionally"
+      "PR-2 wire-byte change reverted unintentionally — error body \
+       must include id:null per JSON-RPC 2.0 §5.1"
 
 let () =
   Alcotest.run "Error_body_delegation"
@@ -135,14 +116,7 @@ let () =
             test_error_body_echoes_request_id;
           test_case "data field when supplied" `Quick
             test_error_body_includes_data_when_supplied;
-        ] );
-      ( "legacy delegation",
-        [
-          test_case "mcp_internal_error_json delegates" `Quick
-            test_mcp_internal_error_json_now_typed;
-          test_case "mcp_internal_error_json ~id delegates" `Quick
-            test_mcp_internal_error_json_with_id;
-          test_case "PR-2 wire-byte change is intentional" `Quick
-            test_wire_byte_change_documented;
+          test_case "PR-2 wire-byte change is intentional (regression guard)"
+            `Quick test_wire_byte_change_documented;
         ] );
     ]

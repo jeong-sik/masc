@@ -799,6 +799,20 @@ let metric_anti_rationalization_excuse_pattern =
 ;;
 
 let metric_board_truncated_posts = "masc_board_truncated_posts_total"
+
+(* Board flusher actor startup outcome.
+   Closed-vocab label [outcome]:
+     [switch_finished] — start_flusher_actor raised
+       Invalid_argument "Switch finished!"; the warn at the swallow
+       site has no Prometheus signal otherwise.
+     [cas_exhausted] — flusher_start_cas_retries exhausted under
+       contention; current state stays Active(_, false), next backend
+       access retries.
+   Cardinality: 2 series.  No success label — a non-event would imply
+   either steady-state idle or in-flight start, neither of which is a
+   useful counter increment. *)
+let metric_board_dispatch_flusher_start_outcomes =
+  "masc_board_dispatch_flusher_start_outcomes_total"
 let metric_cascade_strategy_decisions = "masc_cascade_strategy_decisions_total"
 let metric_cascade_capacity_events = "masc_cascade_capacity_events_total"
 
@@ -2287,6 +2301,13 @@ let init () =
   add
     metric_board_truncated_posts
     "Total board posts truncated due to size limits"
+    Counter;
+  add
+    metric_board_dispatch_flusher_start_outcomes
+    "Total board flusher actor startup non-success outcomes (label \
+     outcome=switch_finished|cas_exhausted). switch_finished = \
+     start_flusher_actor raised Invalid_argument \"Switch finished!\"; \
+     cas_exhausted = backend_state CAS retries depleted under contention."
     Counter;
   add
     Keeper_metrics.metric_keeper_quantitative_claim_rejections

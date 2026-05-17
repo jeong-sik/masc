@@ -1,4 +1,4 @@
-(** Wire-shape assertions for RFC-0097 PR-2 delegation.
+(** Wire-shape assertions for RFC-0098 PR-2 delegation.
 
     Pins down the JSON body produced by {!error_body} (the SSOT
     introduced in PR-2) and documents the wire-byte change vs the

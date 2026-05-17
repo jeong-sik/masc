@@ -47,7 +47,7 @@ val respond_mcp_auth_error :
     ~session_id ~protocol_version msg] writes a JSON-RPC 2.0 error
     response with code [-32001] and HTTP status [401 Unauthorized].
 
-    {b RFC-0097 PR-2 (this PR)}: now delegates to {!respond_mcp_error}
+    {b RFC-0098 PR-2 (this PR)}: now delegates to {!respond_mcp_error}
     with [~code:Auth_error]. New call sites SHOULD prefer
     {!respond_mcp_error}. A follow-up PR-2.1 will migrate all in-tree
     callers and add a [\[@@deprecated\]] alert.
@@ -60,7 +60,7 @@ val respond_mcp_auth_error :
     [extra_headers] are prepended (operator-visible HTTP headers),
     {!json_headers} append.  The function never raises.
 
-    {b RFC-0097 PR-2 wire-byte change}: response body now contains
+    {b RFC-0098 PR-2 wire-byte change}: response body now contains
     [["id":null]] per JSON-RPC 2.0 §5.1 (was previously omitted —
     spec violation). *)
 
@@ -78,7 +78,7 @@ val respond_mcp_internal_error :
     response with code [-32603] (the standard "Internal error" slot)
     and HTTP status [500 Internal Server Error].
 
-    {b RFC-0097 PR-2 (this PR)}: now delegates to {!respond_mcp_error}
+    {b RFC-0098 PR-2 (this PR)}: now delegates to {!respond_mcp_error}
     with [~code:Internal_error]. New call sites SHOULD prefer
     {!respond_mcp_error} and a more specific code variant where one
     fits (e.g. [Provider_timeout], [Tool_dispatch_failure]).
@@ -88,7 +88,7 @@ val respond_mcp_internal_error :
     in JSON bodies — callers should keep it stable across builds so
     grep alerts remain valid.
 
-    {b RFC-0097 PR-2 wire-byte change}: response body now contains
+    {b RFC-0098 PR-2 wire-byte change}: response body now contains
     [["id":null]] per JSON-RPC 2.0 §5.1 (was previously omitted —
     spec violation). *)
 
@@ -150,7 +150,7 @@ val mcp_internal_error_json : ?id:Yojson.Safe.t -> string -> Yojson.Safe.t
     JSON-RPC 2.0 §5.1 — error responses must echo back the request id
     or [null] when it cannot be parsed).
 
-    {b RFC-0097 PR-2}: now delegates to {!error_body} with
+    {b RFC-0098 PR-2}: now delegates to {!error_body} with
     [~code:Internal_error]. Wire bytes unchanged. *)
 
 val error_body :
@@ -211,4 +211,3 @@ val respond_mcp_error :
     PR-1 (RFC-0098) introduces this SSOT in parallel with the legacy
     four factories. PR-2 migrates the legacy factories to thin
     delegations and marks them [@@deprecated]. *)
-

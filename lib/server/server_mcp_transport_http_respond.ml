@@ -38,7 +38,7 @@ let mcp_headers = Server_mcp_transport_http_headers.mcp_headers
 
 let json_headers = Server_mcp_transport_http_headers.json_headers
 
-(* RFC-0097 — typed SSOT for transport-boundary error envelopes.
+(* RFC-0098 — typed SSOT for transport-boundary error envelopes.
    New code should call [respond_mcp_error] with the typed
    [Mcp_error_code.t] variant; the per-code factories below remain
    as [@@deprecated] thin delegations during the migration window. *)
@@ -95,7 +95,7 @@ let respond_mcp_error ?(extra_headers = []) ?data ?id
   in
   safe_respond_with_string reqd response body
 
-(* RFC-0097 PR-2 — thin delegations.
+(* RFC-0098 PR-2 — thin delegations.
 
    Wire-byte differences vs PR-1 baseline (documented intentional):
 
@@ -184,7 +184,7 @@ let respond_sse_rate_limited ~(deps : Server_mcp_transport_http_types.deps) ~ori
   safe_respond_with_string reqd response body
 
 let mcp_internal_error_json ?id msg =
-  (* RFC-0097 PR-2: delegate to error_body SSOT. The duplicate
+  (* RFC-0098 PR-2: delegate to error_body SSOT. The duplicate
      respond_mcp_error definition that lived here on the legacy path is
      removed — PR-2's SSOT-using definition is at L67. *)
   error_body ?id ~code:Mcp_error_code.Internal_error msg

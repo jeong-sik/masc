@@ -245,6 +245,12 @@ module For_testing : sig
       stamping. The wrapper is intentionally independent from cascade
       attempt-liveness mode so watchdog progress timeouts still observe
       healthy stream chunks when liveness enforcement is off. *)
+
+  val select_cdal_proof
+    :  result_proof:Masc_mcp_cdal_runtime.Cdal_proof.t option
+    -> captured_proof:Masc_mcp_cdal_runtime.Cdal_proof.t option
+    -> Masc_mcp_cdal_runtime.Cdal_proof.t option
+  (** Selects the proof used for keeper-side CDAL verdict persistence. *)
 end
 
 (** {1 Turn execution} *)

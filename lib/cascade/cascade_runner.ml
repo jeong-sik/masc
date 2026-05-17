@@ -525,7 +525,9 @@ let run
         (r, None)
     in
     let run_total_duration_ms = run_duration_ms_since run_started_at in
-    (match proof_ref with Some ref_ -> ref_ := proof | None -> ());
+    (match proof_ref, proof with
+     | Some ref_, Some _ -> ref_ := proof
+     | _ -> ());
     let checkpoint =
       let ckpt =
         build_checkpoint ~session_id

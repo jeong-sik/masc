@@ -19,6 +19,16 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # Supersede older guard bundles for the same PR. Keep main pushes
+  # uncancelled so every merge still gets its own regression signal.
+  group: >-
+    fundamental-check-${{
+      github.event_name == 'push' && github.ref_name == 'main' && github.sha
+      || github.event.pull_request.number || github.ref
+    }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   no-roadmap-stale-hardcoding:
     name: Hardcoded model prefix

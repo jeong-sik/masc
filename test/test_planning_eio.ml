@@ -29,6 +29,22 @@ let teardown () =
 let make_config () : Coord.config =
   Coord.default_config !temp_dir
 
+let current_task_path config =
+  Filename.concat (Coord_utils.masc_dir config) "current_task"
+
+let ensure_masc_dir config =
+  let dir = Coord_utils.masc_dir config in
+  if not (Sys.file_exists dir) then Unix.mkdir dir 0o755
+
+let trash_dir config =
+  Filename.concat (Coord_utils.masc_dir config) "_trash"
+
+let has_current_task_quarantine config =
+  if not (Sys.file_exists (trash_dir config)) then false
+  else
+    Sys.readdir (trash_dir config)
+    |> Array.exists (fun name -> String.starts_with ~prefix:"current_task." name)
+
 (* ===== Type Tests ===== *)
 
 let test_create_context () =
@@ -363,6 +379,44 @@ let test_session_context () =
   Planning_eio.clear_current_task config;
   check (option string) "current task cleared" None (Planning_eio.get_current_task config)
 
+let test_current_task_dir_read_is_cleared () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let config = make_config () in
+  let path = current_task_path config in
+  ensure_masc_dir config;
+  Unix.mkdir path 0o755;
+  check (option string) "directory current_task reads as none" None
+    (Planning_eio.get_current_task config);
+  check bool "directory remains for write-path quarantine" true
+    (Sys.file_exists path && Sys.is_directory path);
+  rm_rf path
+
+let test_set_current_task_quarantines_dir () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let config = make_config () in
+  let path = current_task_path config in
+  ensure_masc_dir config;
+  Unix.mkdir path 0o755;
+  Fs_compat.save_file (Filename.concat path "forensics.txt") "kept";
+  Planning_eio.set_current_task config ~task_id:"recovered-task";
+  check (option string) "recovered current task" (Some "recovered-task")
+    (Planning_eio.get_current_task config);
+  check bool "old directory quarantined" true
+    (has_current_task_quarantine config);
+  Planning_eio.clear_current_task config
+
+let test_clear_current_task_removes_empty_dir () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let config = make_config () in
+  let path = current_task_path config in
+  ensure_masc_dir config;
+  Unix.mkdir path 0o755;
+  Planning_eio.clear_current_task config;
+  check bool "empty directory removed" false (Sys.file_exists path)
+
 let test_resolve_task_id () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -434,6 +488,12 @@ let () =
     ];
     "session_context", [
       test_case "session_context" `Quick test_session_context;
+      test_case "current_task dir read is cleared" `Quick
+        test_current_task_dir_read_is_cleared;
+      test_case "set_current_task quarantines dir" `Quick
+        test_set_current_task_quarantines_dir;
+      test_case "clear_current_task removes empty dir" `Quick
+        test_clear_current_task_removes_empty_dir;
       test_case "resolve_task_id" `Quick test_resolve_task_id;
     ];
     "display", [

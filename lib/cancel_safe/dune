@@ -1,0 +1,8 @@
+(include_subdirs no)
+(library
+ (name masc_cancel_safe)
+ (public_name masc_mcp.cancel_safe)
+ (wrapped false)
+ (modules cancel_safe)
+ (flags (:standard -w +4))
+ (libraries eio))

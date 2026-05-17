@@ -554,14 +554,13 @@ let apply_post_turn_lifecycle_with_resilience_handles
              docs/architecture/actor-mailbox-pattern.md for the
              reasoning behind the keep-going-on-callback-failure
              policy. *)
-          let () =
-            try on_compaction_started ()
-            with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | exn ->
-                Keeper_callback_failure.record ~base_dir ~meta:base_meta
-                  ~callback:"on_compaction_started" exn
-          in
+          (* RFC-0106 P0 canary: use Cancel_safe.observe so Cancelled
+             propagates without per-site discipline drift. *)
+          Cancel_safe.observe
+            ~on_exn:(fun exn ->
+              Keeper_callback_failure.record ~base_dir ~meta:base_meta
+                ~callback:"on_compaction_started" exn)
+            on_compaction_started;
           let session =
             create_session ~session_id:(Keeper_id.Trace_id.to_string base_meta.runtime.trace_id) ~base_dir
           in

@@ -1398,9 +1398,9 @@ let init () =
      (dangling_tool_use|orphan_tool_result), site."
     Counter;
   (* C1 (CRIT) from oas-internal-audit.html §6: compaction call site
-     fabrication counter. Closes the Prometheus-counter half — the
-     was_fabricated:true message metadata half is RFC-scope. Kind label is
-     a closed 2-value vocabulary tied directly to pair_repair_stats from
+     fabrication counter. Repaired messages also carry was_fabricated:true
+     metadata plus bounded provenance. Kind label is a closed 2-value
+     vocabulary tied directly to pair_repair_stats from
      Keeper_context_core.repair_broken_tool_call_pairs_with_stats. *)
   add
     Keeper_metrics.metric_keeper_compaction_pair_repair_fabrications

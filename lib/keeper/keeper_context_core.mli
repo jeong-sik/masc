@@ -96,6 +96,10 @@ type tool_pair_repair_stats =
 
 val tool_pair_repair_stats_changed : tool_pair_repair_stats -> bool
 
+val pair_repair_metadata_key : string
+(** Message metadata key carrying bounded provenance for tool-pair repair
+    fabrications. Repaired messages also carry [was_fabricated=true]. *)
+
 (** Same repair as {!repair_broken_tool_call_pairs}, plus counters for
     ToolUse/ToolResult blocks downgraded to plain text. This keeps the
     repair path observable without changing the legacy return type. *)

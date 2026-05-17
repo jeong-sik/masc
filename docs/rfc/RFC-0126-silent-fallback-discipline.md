@@ -134,6 +134,39 @@ try expensive_io () with
 
 기존 머지된 iter 6/18/19/20/21/22/23/25/28/29/31 등도 retrospective 로 본 RFC §5 와 정합한다.
 
+#### 6.1.a Already-resolved evidence (memory-compacting audit 2026-05-17 01:22 retrospective)
+
+audit doc `.tmp/memory-compacting-analysis.html` 가 작성 시점(01:22) 에 미해결로 표시한 V 라벨 중 다수가 *그 후* 머지된 iter 들로 이미 fix 됨. 2026-05-17 저녁 시점 direct grep 결과:
+
+| V | 위치 | audit 클레임 | 실제 상태 |
+|---|---|---|---|
+| V02 (CRIT) | `keeper_compact_audit.ml:323-336` | Pending Hashtbl silent overwrite | **FIX** — `Pending.stash` returns prior, `handle_event` line 397-408 emits `Pending_overwrite` counter |
+| V03 (HIGH) | `keeper_compact_policy.ml:92-96` | tool_heavy 주석/코드 불일치 | **FIX** — line 152-159 bypass 정합, 주석/코드 align |
+| V04 (HIGH) | `keeper_compact_policy.ml:145-154` | record_pre_compact try/catch 외부 | **FIX** — line 244-261 `Cancelled re-raise + warn + None` pattern (RFC-0106 정합) |
+| V06 (HIGH) | `memory_jsonl.ml:100-113` | 50MB load_file 일괄 메모리 | **FIX** — `iter_lines` streaming (`input_line` per row, line 231-245) |
+| V08 (MED) | `keeper_memory_llm_summary.ml:107-117` | 3-silent timeout/http/empty | **FIX** — `Keeper_memory_llm_summary_outcome.t` typed variant (Timed_out / Ok_summary / Empty_response / Http_error) |
+| V11 (MED) | `keeper_post_turn.ml:511` | callback exception swallow | **FIX** — RFC-0106 P0 canary (iter 32+34, `Cancel_safe.observe` 적용) |
+
+→ 6/9 V 라벨이 audit 시점 이후 iter 들로 흡수 완료. memory `feedback_workdir_grep_must_cross_check_origin_main` 정신 = audit doc 직접 grep 검증 의무의 정량 evidence (66.7% stale rate).
+
+#### 6.1.b Phase 1 remaining backlog (audit-derived)
+
+| V | 위치 | 클러스터 매핑 | RFC §5 권고 |
+|---|---|---|---|
+| V15 (LOW) | `memory_jsonl.ml:69-95 parse_line` | A (wildcard parse drop) + E (warn 있고 counter 부재) | §5.1 OPTION A — closed-vocab `{empty_line / no_key / not_assoc / json_parse_error}` reason label, counter 추가 |
+| V16 (LOW) | `memory_jsonl.ml:120-219 long_term_backend` | B (Result.t asymmetry) | §5.1 OPTION B — `retrieve/query` 시그니처를 `(_, retrieve_error) result` 로 통일 |
+| V09 (MED) | `keeper_compact_policy.ml compaction_decision` | H (type API drift) — *spiral 외* | RFC sub-issue: `Skipped_no_checkpoint` 를 wrapper variant 로 분리 또는 policy 내부 생성. invasive, 별도 RFC 후보. |
+
+V09 는 본 RFC scope 밖 (silent fallback 아니라 type API drift). 별도 RFC issue 후보.
+
+#### 6.1.c Non-spiral observability extension (cluster G)
+
+| PR | iter | 패턴 | 위치 |
+|---|---|---|---|
+| (iter 46) | 46 | G (fiber contention) | `File_lock_eio.atomic_update*` CAS retries counter |
+
+cluster G 는 본 RFC §6.1 클러스터 (A-F) 의 *외부* — 기존 silent path 의 가시화가 아니라 *처음부터 가시화 없던 차원* 의 첫 surface 추가. spiral 누적 아님.
+
 ### Phase 2 — ppxlib AST lint
 
 RFC-0106 §3.3 의 Phase 2 (`scripts/lint-cancel-guard.sh` ppxlib 확장) 와 sibling. AST visitor 가 다음을 검출:

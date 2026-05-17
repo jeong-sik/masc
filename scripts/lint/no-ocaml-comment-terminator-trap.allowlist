@@ -1,0 +1,11 @@
+# OCaml block-comment terminator trap — allowlist
+#
+# Format: path:line  (one per line, blank lines and '#' comments
+# allowed). Each entry is a known-safe occurrence of the `_*)`
+# substring inside a string literal, where `*)` does not function
+# as a comment terminator.
+#
+# Audited 2026-05-17 (PR adding scripts/lint/no-ocaml-comment-terminator-trap.sh).
+
+lib/server/server_runtime_bootstrap.ml:1398
+lib/keeper/keeper_types_profile.ml:647

@@ -454,6 +454,32 @@ module Approval_janitor = struct
     get_float ~default:60.0 "MASC_APPROVAL_JANITOR_INTERVAL_SEC"
 end
 
+(** {1 Keeper Max-Turn Watchdog (RFC-0109 P4)}
+
+    Opt-in keeper-level wall-clock watchdog. Default disabled — opt-in
+    via [MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC]. Backward-compat
+    until an operator turns it on.
+
+    When enabled, the supervisor races each keeper's keepalive loop
+    against [Eio.Time.sleep clock t] via [Eio.Fiber.first]. Timer
+    expiry cancels the loop fiber and the registry is stamped with
+    [Stale_turn_timeout "max_turn_watchdog"], which the existing
+    [sweep_and_recover] crash-recovery path already understands.
+
+    Closes the sangsu / masc-improver mid_turn_no_progress class of
+    stucks without touching the existing stale_turn_timeout fast path
+    (which only detects in-turn no-progress, not "stuck for too long
+    in a single attempt"). *)
+module Keeper_max_turn_watchdog = struct
+  let timeout_sec_opt () =
+    let v =
+      get_float
+        ~default:0.0
+        "MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC"
+    in
+    if v > 0.0 then Some v else None
+end
+
 (** {1 Slot Scheduling} *)
 
 module Slot = struct

@@ -6,6 +6,14 @@ module Region = Ide_region_tracker
 module Sync = Ide_meta_sync
 module Lsp = Masc_mcp.Lsp_overlay_provider
 
+(* Ide_annotations.create generates ids via [Uuidm.v4_gen (Random.get_state ())].
+   [Random.get_state] returns a COPY of the global state, so two
+   close-succession calls without an explicit global advance produce
+   the same uuid and collide under merge dedup. The PR-2 merge tests
+   create two annotations in sequence, so seed the global state once
+   to make uuids deterministic-distinct across the run. *)
+let () = Random.self_init ()
+
 let route_annotation : Types.annotation =
   { id = "ann-route"
   ; file_path = "lib/keeper/keeper_exec_ide.ml"
@@ -505,6 +513,158 @@ let test_ingest_edit_file_content_fallback () =
     check int "edit_file content fallback emits one region" 1 (count_lines by_url_path))
 ;;
 
+(* RFC-0128 §5 PR-2 — read-side multi-source merge. *)
+
+let test_list_merge_legacy_surfaces_old_records () =
+  with_temp_dir (fun base_dir ->
+    let slug = "github.com_owner_repo" in
+    let _ =
+      create_in_partition
+        ~base_dir
+        ~partition:Ide_paths.Legacy
+        ~kind:Types.Comment
+        ~content:"legacy record"
+        ()
+    in
+    let _ =
+      create_in_partition
+        ~base_dir
+        ~partition:(Ide_paths.By_url slug)
+        ~kind:Types.Comment
+        ~content:"by-url record"
+        ()
+    in
+    let no_merge =
+      Store.list
+        ~base_dir
+        ~partition:(Ide_paths.By_url slug)
+        ~filter:(make_filter ())
+        ()
+    in
+    check int "no-merge sees only by-url" 1 (List.length no_merge);
+    let merged =
+      Store.list
+        ~base_dir
+        ~partition:(Ide_paths.By_url slug)
+        ~merge_legacy:true
+        ~filter:(make_filter ())
+        ()
+    in
+    check int "merge surfaces legacy + by-url" 2 (List.length merged))
+;;
+
+let test_list_merge_dedup_primary_wins () =
+  with_temp_dir (fun base_dir ->
+    let slug = "github.com_owner_repo" in
+    let by_url =
+      Result.get_ok
+        (create_in_partition
+           ~base_dir
+           ~partition:(Ide_paths.By_url slug)
+           ~kind:Types.Comment
+           ~content:"primary content"
+           ())
+    in
+    let legacy_clone =
+      Types.{ by_url with content = "legacy content (older)"; created_at_ms = 0L }
+    in
+    Fs_compat.append_jsonl
+      (Filename.concat
+         (Ide_paths.partition_store_dir ~base_dir Ide_paths.Legacy)
+         "annotations.jsonl")
+      (Types.annotation_to_json legacy_clone);
+    let merged =
+      Store.list
+        ~base_dir
+        ~partition:(Ide_paths.By_url slug)
+        ~merge_legacy:true
+        ~filter:(make_filter ())
+        ()
+    in
+    check int "no duplicate on id collision" 1 (List.length merged);
+    let winner = List.hd merged in
+    check string "primary content wins" "primary content" winner.content)
+;;
+
+let test_list_merge_noop_when_partition_is_legacy () =
+  with_temp_dir (fun base_dir ->
+    let _ =
+      create_in_partition
+        ~base_dir
+        ~partition:Ide_paths.Legacy
+        ~kind:Types.Comment
+        ~content:"only legacy"
+        ()
+    in
+    let merged =
+      Store.list
+        ~base_dir
+        ~partition:Ide_paths.Legacy
+        ~merge_legacy:true
+        ~filter:(make_filter ())
+        ()
+    in
+    check int "Legacy + merge is a single read" 1 (List.length merged))
+;;
+
+let test_read_regions_merge_legacy_surfaces_old () =
+  with_temp_dir (fun base_dir ->
+    let slug = "github.com_owner_repo" in
+    let mk_region ~ts ~src : Types.code_region =
+      { keeper_id = "sangsu"
+      ; file_path = "lib/foo.ml"
+      ; line_start = 1
+      ; line_end = 3
+      ; source = Types.Tool_call { tool_name = src; turn = 0 }
+      ; timestamp_ms = ts
+      }
+    in
+    Region.append_region
+      ~base_dir
+      ~partition:Ide_paths.Legacy
+      (mk_region ~ts:1L ~src:"write_file");
+    Region.append_region
+      ~base_dir
+      ~partition:(Ide_paths.By_url slug)
+      (mk_region ~ts:2L ~src:"edit_file");
+    let primary_only =
+      Region.read_regions ~base_dir ~partition:(Ide_paths.By_url slug) ()
+    in
+    let merged =
+      Region.read_regions
+        ~base_dir
+        ~partition:(Ide_paths.By_url slug)
+        ~merge_legacy:true
+        ()
+    in
+    check int "primary-only sees by-url only" 1 (List.length primary_only);
+    check int "merge sees both" 2 (List.length merged))
+;;
+
+let test_read_regions_dedup_structural_key () =
+  with_temp_dir (fun base_dir ->
+    let slug = "github.com_owner_repo" in
+    let region : Types.code_region =
+      { keeper_id = "sangsu"
+      ; file_path = "lib/foo.ml"
+      ; line_start = 1
+      ; line_end = 5
+      ; source = Types.Tool_call { tool_name = "write_file"; turn = 0 }
+      ; timestamp_ms = 1L
+      }
+    in
+    Region.append_region ~base_dir ~partition:Ide_paths.Legacy region;
+    Region.append_region ~base_dir ~partition:(Ide_paths.By_url slug) region;
+    let merged =
+      Region.read_regions
+        ~base_dir
+        ~partition:(Ide_paths.By_url slug)
+        ~merge_legacy:true
+        ()
+    in
+    check int "structural dedup collapses duplicates" 1 (List.length merged))
+;;
+
 let test_ingest_no_double_write () =
   with_temp_dir (fun base_dir ->
     let slug = "github.com_owner_repo" in
@@ -586,6 +746,26 @@ let () =
             "ingest no double-write across partitions (PR-1e)"
             `Quick
             test_ingest_no_double_write
+        ; test_case
+            "list merge_legacy surfaces old records (PR-2)"
+            `Quick
+            test_list_merge_legacy_surfaces_old_records
+        ; test_case
+            "list merge dedup — primary wins (PR-2)"
+            `Quick
+            test_list_merge_dedup_primary_wins
+        ; test_case
+            "list merge is no-op when partition=Legacy (PR-2)"
+            `Quick
+            test_list_merge_noop_when_partition_is_legacy
+        ; test_case
+            "read_regions merge_legacy surfaces old (PR-2)"
+            `Quick
+            test_read_regions_merge_legacy_surfaces_old
+        ; test_case
+            "read_regions structural dedup (PR-2)"
+            `Quick
+            test_read_regions_dedup_structural_key
         ] )
     ]
 ;;

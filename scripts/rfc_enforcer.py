@@ -14,11 +14,15 @@
   additions opt in via PR body line ``RFC-EXTEND: NNNN`` (env PR_BODY) or
   RFC frontmatter ``extends: "NNNN"``.
 
+--check-ledger-monotonic mode: ensure docs/rfc/.next-number is greater than
+  every RFC-NNNN-*.md file currently present in the checkout.
+
 Usage:
     python scripts/rfc_enforcer.py --check docs/rfc/
     python scripts/rfc_enforcer.py --check docs/rfc/ --strict
     python scripts/rfc_enforcer.py --check-numbering \
         --base-ref origin/main --head-ref HEAD
+    python scripts/rfc_enforcer.py --check-ledger-monotonic
 
 Exit codes:
     0 — all checks pass
@@ -237,6 +241,60 @@ def _extends_optin_numbers(pr_body: str, added_files: List[str]) -> Set[str]:
     return numbers
 
 
+def check_ledger_monotonic(rfc_dir: Path) -> List[Violation]:
+    """Return violations when .next-number can allocate an existing RFC number."""
+    violations: List[Violation] = []
+    ledger = rfc_dir / ".next-number"
+    if not ledger.exists():
+        return [
+            Violation(
+                ledger,
+                0,
+                "RFC_LEDGER_MISSING",
+                "RFC ledger file is missing",
+            )
+        ]
+
+    value = ledger.read_text(encoding="utf-8").strip()
+    if re.fullmatch(r"\d{4}", value) is None:
+        return [
+            Violation(
+                ledger,
+                1,
+                "RFC_LEDGER_INVALID",
+                f"RFC ledger value must be a 4-digit number, got: {value!r}",
+            )
+        ]
+
+    max_existing = 0
+    max_name = None
+    for rfc_file in rfc_dir.glob("RFC-*.md"):
+        match = _RFC_FILENAME_RE.match(rfc_file.name)
+        if match is None:
+            continue
+        number = int(match.group(1), 10)
+        if number > max_existing:
+            max_existing = number
+            max_name = rfc_file.name
+
+    current = int(value, 10)
+    if current <= max_existing:
+        expected = f"{max_existing + 1:04d}"
+        violations.append(
+            Violation(
+                ledger,
+                1,
+                "RFC_LEDGER_NOT_MONOTONIC",
+                (
+                    f"ledger is {value}, but highest existing RFC is "
+                    f"{max_existing:04d} ({max_name}); expected at least {expected}"
+                ),
+            )
+        )
+
+    return violations
+
+
 def check_numbering(base_ref: str, head_ref: str, pr_body: str) -> List[Violation]:
     """Return collision violations for RFC numbers added in this PR."""
     violations: List[Violation] = []
@@ -293,6 +351,17 @@ def main() -> int:
         help="Check for RFC number collisions between PR additions and base ref",
     )
     parser.add_argument(
+        "--check-ledger-monotonic",
+        action="store_true",
+        help="Check that docs/rfc/.next-number is above every existing RFC number",
+    )
+    parser.add_argument(
+        "--rfc-dir",
+        type=Path,
+        default=Path("docs/rfc"),
+        help="RFC directory for --check-ledger-monotonic (default: docs/rfc)",
+    )
+    parser.add_argument(
         "--base-ref",
         default="origin/main",
         help="Base git ref for --check-numbering (default: origin/main)",
@@ -325,7 +394,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    # --check-numbering mode runs independently of --check.
+    # --check-numbering and --check-ledger-monotonic run independently of --check.
     if args.check_numbering:
         pr_body = os.environ.get("PR_BODY", "")
         violations = check_numbering(args.base_ref, args.head_ref, pr_body)
@@ -336,6 +405,17 @@ def main() -> int:
             print()
             return 1
         print("RFC numbering: no collisions detected.")
+        return 0
+
+    if args.check_ledger_monotonic:
+        violations = check_ledger_monotonic(args.rfc_dir)
+        if violations:
+            print(f"Found {len(violations)} RFC ledger violation(s):\n")
+            for v in violations:
+                print(v.format())
+            print()
+            return 1
+        print("RFC ledger: monotonic.")
         return 0
 
     if args.check is None:

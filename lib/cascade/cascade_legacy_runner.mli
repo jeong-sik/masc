@@ -1,13 +1,7 @@
 (** Cascade_legacy_runner — cascade observation, metrics
     capture, and a single-actor cascade-counter store.
 
-    The .ml is 685 lines.  Splits into three concerns:
-    - {b Worker tuning constants}
-      ([default_temperature], [worker_temperature],
-      [worker_top_p], [worker_top_k],
-      [worker_max_tool_calls_per_turn]) consumed by
-      {!Worker_container.build_resume_config} and the
-      OAS-named worker path.
+    The .ml splits into two concerns:
     - {b Cascade observation}: the {!cascade_observation}
       record + companion attempt / fallback events,
       built per-turn in {!Keeper_turn_driver} via the
@@ -20,19 +14,15 @@
       callers do not contend on the in-memory counter
       maps.
 
-    Sister facade {!Oas_worker} does
-    [include Cascade_legacy_runner] to re-expose the constants
-    + observation type at the package boundary; this .mli
-    therefore pins the surface that
-    {!Cascade_legacy_runner.X} dotted callers and the
-    cascade-include consumer both rely on.
+    Dotted callers ({!Cascade_legacy_runner.X}) and the
+    cascade-include consumer rely on the surface pinned here.
 
     Internal helpers stay private at this boundary
     ([cascade_attempt] / [cascade_fallback_event] type
     bodies (exposed as part of {!cascade_observation}'s
     [attempts] / [fallback_events] fields with their full
     record shape),
-    [cascade_counter] type, [StringMap], [worker_min_p],
+    [cascade_counter] type, [StringMap],
     [cascade_max_keys], [create_cascade_counter],
     [cascade_eviction] type, [find_cascade_eviction_candidate],
     [display_provider_name_of_config], [strip_latest_suffix],
@@ -49,17 +39,6 @@
     [msg], [state] types, the [stream] queue,
     [handle_record], [handle_get_metrics], [run_actor],
     [cascade_metrics_json]). *)
-
-(** {1 Worker tuning constants} *)
-
-val default_temperature : float
-val default_max_tokens : int
-val deterministic_temperature : float
-
-val worker_temperature : float
-val worker_top_p : float
-val worker_top_k : int
-val worker_max_tool_calls_per_turn : int
 
 (** {1 Cascade observation types} *)
 

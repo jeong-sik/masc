@@ -77,6 +77,33 @@ let add_strict_task config =
   | Some t -> t.id
   | None -> Alcotest.fail "new task not found after add_task"
 
+let add_required_evidence_only_task config =
+  let existing_ids =
+    Coord.read_backlog config
+    |> fun backlog -> List.map (fun (t : Masc_domain.task) -> t.id) backlog.tasks
+  in
+  let contract : Masc_domain.task_contract = {
+    strict = true;
+    completion_contract = [];
+    required_tools = [];
+    required_evidence = ["artifact://coverage.json"];
+    inspect_gate_evidence = [];
+    verify_gate_evidence = [];
+    links = { operation_id = None; session_id = None; autoresearch_loop_id = None };
+  } in
+  let _msg =
+    Coord.add_task ~contract config ~title:"required evidence only"
+      ~priority:3 ~description:"requires a named evidence artifact"
+  in
+  let backlog = Coord.read_backlog config in
+  match
+    List.find_opt
+      (fun (t : Masc_domain.task) -> not (List.mem t.id existing_ids))
+      backlog.tasks
+  with
+  | Some t -> t.id
+  | None -> Alcotest.fail "new task not found after add_task"
+
 let claim_and_start config agent_name task_id =
   let _ = Coord.transition_task_r config ~agent_name ~task_id
     ~action:Masc_domain.Claim () in
@@ -280,6 +307,34 @@ let test_submit_populates_criteria_from_completion_contract () =
     in
     Alcotest.(check (list string)) "evidence_refs from verify_gate_evidence"
       ["output.json"] persisted_refs)
+
+let test_submit_uses_required_evidence_when_verify_refs_empty () =
+  with_temp_config ~fsm_enabled:true (fun config ->
+    let task_id = add_required_evidence_only_task config in
+    claim_and_start config "worker" task_id;
+    let captured_refs = ref None in
+    let result =
+      Coord.transition_task_r
+        config
+        ~agent_name:"worker"
+        ~task_id
+        ~action:Masc_domain.Submit_for_verification
+        ~notes:"implementation complete"
+        ~prepare_verification_request:
+          (fun ~task:_ ~assignee:_ ~verification_id:_ ~evidence_refs ->
+             captured_refs := Some evidence_refs;
+             Ok ())
+        ()
+    in
+    (match result with
+     | Ok _ -> ()
+     | Error e ->
+       Alcotest.fail
+         (Printf.sprintf "submit failed: %s" (Masc_domain.show_masc_error e)));
+    Alcotest.(check (list string))
+      "required_evidence carried to verification refs"
+      ["artifact://coverage.json"]
+      (Option.value ~default:[] !captured_refs))
 
 let test_submit_marks_conflict_triage_when_deliverable_claims_completion () =
   with_temp_config ~fsm_enabled:true (fun config ->
@@ -699,6 +754,8 @@ let () =
         `Quick test_submit_prepare_failure_keeps_task_in_progress;
       Alcotest.test_case "submit splits criteria/evidence by contract field"
         `Quick test_submit_populates_criteria_from_completion_contract;
+      Alcotest.test_case "submit carries required_evidence into verifier refs"
+        `Quick test_submit_uses_required_evidence_when_verify_refs_empty;
       Alcotest.test_case "submit marks conflict triage from completed deliverable"
         `Quick test_submit_marks_conflict_triage_when_deliverable_claims_completion;
       Alcotest.test_case "cross-agent approve moves to done" `Quick

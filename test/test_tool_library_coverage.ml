@@ -4,8 +4,8 @@
     for 5 tools: masc_library_list, masc_library_read, masc_library_add,
     masc_library_promote, masc_library_search
 
-    Note: Tool_library uses MASC_BASE_PATH first, then ME_ROOT, for
-    library_root(). Tests scrub ME_ROOT and override MASC_BASE_PATH to a
+    Note: Tool_library uses MASC_BASE_PATH first for library_root().
+    Tests override MASC_BASE_PATH to a
     temp directory with the expected structure.
 *)
 
@@ -48,23 +48,18 @@ let setup_library_dirs base_path =
   (lib_dir, cand_dir)
 
 let original_home = Sys.getenv_opt "HOME"
-let original_me_root = Sys.getenv_opt "ME_ROOT"
 let original_masc_base_path = Sys.getenv_opt "MASC_BASE_PATH"
 
 (** Run a test function with a temporary MASC_BASE_PATH containing library dirs. *)
 let with_temp_base_path f =
   let base_path = temp_dir () in
   Unix.putenv "MASC_BASE_PATH" base_path;
-  Unix.putenv "ME_ROOT" "";
   let _ = setup_library_dirs base_path in
   let ctx : Tool_library.context = { agent_name = "test-agent" } in
   Fun.protect ~finally:(fun () ->
     (match original_masc_base_path with
      | Some root -> Unix.putenv "MASC_BASE_PATH" root
      | None -> Unix.putenv "MASC_BASE_PATH" "");
-    (match original_me_root with
-     | Some root -> Unix.putenv "ME_ROOT" root
-     | None -> Unix.putenv "ME_ROOT" "");
     (match original_home with
      | Some h -> Unix.putenv "HOME" h
      | None -> Unix.putenv "HOME" "");

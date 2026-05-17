@@ -28,7 +28,6 @@ User=masc
 Group=masc
 WorkingDirectory=/opt/masc-mcp
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
-Environment=ME_ROOT=/opt/masc-mcp
 Environment=MASC_BASE_PATH=/var/lib/masc-mcp
 Environment=MASC_CONFIG_DIR=/opt/masc-mcp/config
 Environment=MASC_MCP_PORT=8080

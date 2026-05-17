@@ -9,8 +9,7 @@
 
 type config = {
   root : string
-      (** Default: [<MASC_BASE_PATH>/.oas], then [<ME_ROOT>/.oas], then
-          [<cwd>/.oas]. *)
+      (** Default: [<MASC_BASE_PATH>/.oas], then [<cwd>/.oas]. *)
 }
 
 type resolved_ref =

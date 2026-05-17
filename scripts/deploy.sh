@@ -22,8 +22,6 @@ HEALTH_URL="http://127.0.0.1:$PROD_PORT/health"
 default_base_path() {
     if [ -n "${MASC_BASE_PATH:-}" ]; then
         printf '%s\n' "$MASC_BASE_PATH"
-    elif [ -n "${ME_ROOT:-}" ]; then
-        printf '%s\n' "$ME_ROOT"
     else
         printf '%s\n' "$REPO_DIR"
     fi

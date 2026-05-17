@@ -9,7 +9,7 @@
     <!-- NOTE: Paths below are machine-specific. Adjust for your setup:
          - ProgramArguments: path to start-masc-mcp.sh in the repo
          - StandardOutPath/StandardErrorPath: log directory
-         - ME_ROOT / MASC_BASE_PATH / WorkingDirectory: your ME_ROOT -->
+         - MASC_BASE_PATH / WorkingDirectory: your base path -->
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
@@ -43,8 +43,6 @@
     <dict>
         <key>PATH</key>
         <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
-        <key>ME_ROOT</key>
-        <string>/Users/dancer/me</string>
         <key>MASC_MCP_PORT</key>
         <string>8935</string>
         <key>MASC_BASE_PATH</key>

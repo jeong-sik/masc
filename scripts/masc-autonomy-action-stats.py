@@ -14,9 +14,6 @@ def default_base_path() -> str:
     masc_base = os.environ.get("MASC_BASE_PATH", "").strip()
     if masc_base:
         return masc_base
-    me_root = os.environ.get("ME_ROOT", "").strip()
-    if me_root:
-        return me_root
     return os.getcwd()
 
 

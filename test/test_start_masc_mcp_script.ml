@@ -68,7 +68,6 @@ let run_shell ?(env = []) ~cwd cmd =
   let scrubbed_env =
     [
       "MASC_STORAGE_TYPE";
-      "ME_ROOT";
       "MASC_KEEPER_BOOTSTRAP_ENABLED";
       "MASC_MCP_PORT";
       "MASC_HOST";

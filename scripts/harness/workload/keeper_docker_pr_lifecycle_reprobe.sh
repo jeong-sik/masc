@@ -30,8 +30,6 @@ default_base_path() {
     printf '%s\n' "$BASE_PATH"
   elif [ -n "${MASC_BASE_PATH:-}" ]; then
     printf '%s\n' "$MASC_BASE_PATH"
-  elif [ -n "${ME_ROOT:-}" ]; then
-    printf '%s\n' "$ME_ROOT"
   else
     printf '%s\n' "$REPO_ROOT"
   fi
@@ -91,7 +89,7 @@ Options:
   --expected-keepers N     Expected configured keeper count for audit.
   --repo OWNER/REPO        Target repository slug in the keeper prompt.
   --base-path PATH         MASC base path for audit (default: MASC_BASE_PATH,
-                           ME_ROOT, then repo root).
+                           then repo root).
   --mcp-url URL            MCP endpoint (default: http://127.0.0.1:8935/mcp).
   --expected-server-commit COMMIT
                            Fail unless /health build.commit matches this commit.

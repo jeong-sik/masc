@@ -17,8 +17,6 @@ set -euo pipefail
 default_base_path() {
   if [ -n "${MASC_BASE_PATH:-}" ]; then
     printf '%s\n' "$MASC_BASE_PATH"
-  elif [ -n "${ME_ROOT:-}" ]; then
-    printf '%s\n' "$ME_ROOT"
   else
     pwd
   fi

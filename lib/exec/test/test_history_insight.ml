@@ -32,7 +32,12 @@ let make_entry ~cmd ~success ~duration =
     BH.success }
 
 let append_entries dir name entries =
-  List.iter (BH.append ~base_path:dir ~keeper_name:name) entries
+  List.iter
+    (fun e ->
+      match BH.append ~base_path:dir ~keeper_name:name e with
+      | Ok () -> ()
+      | Error exn -> failwith (Printexc.to_string exn))
+    entries
 
 (* --- tests --- *)
 

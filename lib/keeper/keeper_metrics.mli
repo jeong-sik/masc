@@ -194,6 +194,7 @@ type t =
   | PostTurnWireinFailures
   | RecurringFailures
   | TurnCleanupFailures
+  | MemoryBankLoadHistorySwallowedExceptions
 
 val to_string : t -> string
 
@@ -510,6 +511,14 @@ val metric_keeper_post_turn_wirein_failures : string
 val metric_keeper_recurring_failures : string
 val metric_keeper_turn_cleanup_failures : string
 val metric_keeper_session_cleanup_failures : string
+
+(** Counter for non-Cancel exceptions silently swallowed by the
+    catch-all in [Keeper_memory_recall.load_history_user_messages].
+    Labels: [keeper] (when available), [exception_class] (from
+    [Printexc.to_string]). Behavior is unchanged (the function still
+    returns no row for the failing line); the counter exists so JSONL
+    corruption / fs faults stop masking as "no history". *)
+val metric_keeper_memory_bank_load_history_swallowed_exceptions : string
 val metric_keeper_path_resolver_identity_mismatch : string
 val metric_keeper_passive_loop_streak : string
 val metric_keeper_passive_loop_streak_exceeded : string

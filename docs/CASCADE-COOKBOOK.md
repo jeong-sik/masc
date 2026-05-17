@@ -164,6 +164,9 @@ streaming = true
 [models.qwen36-35b-a3b-mtp-local.capabilities]
 max-output-tokens = 8192
 supports-tool-choice = true
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "chat-template-kwargs"
 supports-native-streaming = true
 supports-response-format-json = true
 

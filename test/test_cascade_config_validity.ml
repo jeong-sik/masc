@@ -8,6 +8,7 @@ open Alcotest
 
 module Adapter = Masc_mcp.Cascade_declarative_adapter
 module Parser = Cascade_declarative_parser
+module Types = Cascade_declarative_types
 module Validator = Cascade_declarative_validator
 
 let config_path name =
@@ -60,12 +61,34 @@ let test_cascade_json_absent () =
   check bool "config/cascade.json absent" false (Sys.file_exists (config_path "cascade.json"))
 ;;
 
+let check_qwen_thinking_control cfg model_id =
+  match Types.model_capabilities_for_id cfg model_id with
+  | Some c ->
+    check bool (model_id ^ " reasoning budget") true c.supports_reasoning_budget;
+    check
+      string
+      (model_id ^ " thinking control")
+      "Cascade_declarative_types.Chat_template_kwargs"
+      (Types.show_cascade_thinking_control_format c.thinking_control_format)
+  | None -> failf "missing capabilities for %s" model_id
+;;
+
+let test_qwen_models_use_chat_template_kwargs () =
+  let cfg = load_checked_in_cascade_toml () in
+  check_qwen_thinking_control cfg "qwen3";
+  check_qwen_thinking_control cfg "qwen3-5"
+;;
+
 let () =
   run
     "cascade config validity"
     [ ( "checked-in seed"
       , [ test_case "cascade.toml parses, validates, and adapts" `Quick test_cascade_toml_validates
         ; test_case "cascade.json is not a checked-in source" `Quick test_cascade_json_absent
+        ; test_case
+            "qwen models use chat_template_kwargs thinking control"
+            `Quick
+            test_qwen_models_use_chat_template_kwargs
         ] )
     ]
 ;;

@@ -170,6 +170,21 @@ let render_declarative_adapter_error error =
     "declarative cascade adapter error: %s"
     (Cascade_declarative_adapter.show_adapter_error error)
 
+(* RFC-0058 Phase 8.3: operator opt-in flag for cold-boot tolerance of
+   partial cascade catalogs. Default is [false], preserving the existing
+   all-or-nothing boot semantics. When set, [validate_path_result] and
+   [discover_profile_names] surface the resolvable subset (via the
+   Phase 8.1 partial-aware adapter) instead of failing closed.
+
+   This is a footgun: leaving it on means operators may not notice
+   degraded cascade.toml until dispatch fails. The dashboard banner and
+   periodic WARN are the mitigations.
+
+   Env var: [MASC_CASCADE_PARTIAL_BOOT=1] (or "true"/"yes").
+   Default: false. *)
+let allow_partial_boot () =
+  Env_config_core.get_bool ~default:false "MASC_CASCADE_PARTIAL_BOOT"
+
 let load_declarative_catalog_info ~config_path =
   match Cascade_declarative_parser.parse_file config_path with
   | Error errors ->
@@ -230,6 +245,28 @@ let discover_profile_names ~config_path ~json : string list =
                false
              end
              else true)
+      |> List.sort_uniq String.compare
+  | Some { declarative_snapshot = Some _; declarative_profile_names = names;
+           declarative_errors = (_ :: _ as errs); _ }
+    when allow_partial_boot () ->
+      (* RFC-0058 Phase 8.3: opt-in partial-boot tolerance. Declarative
+         parser ran with adapter errors, but [MASC_CASCADE_PARTIAL_BOOT]
+         is set, so surface the resolvable subset of profiles and emit
+         a structured WARN per error. *)
+      Cascade_metrics.on_declarative_parse_error ();
+      List.iter
+        (fun err ->
+          Log.Misc.warn
+            "partial-boot mode: declarative adapter error \
+             (continuing with valid subset): %s"
+            (render_declarative_adapter_error err))
+        errs;
+      Cascade_metrics.on_profile_discovery ~path:"declarative_partial_boot";
+      names
+      |> List.filter (fun profile ->
+             not
+               (Cascade_config_loader.is_deprecated_logical_profile_name
+                  profile))
       |> List.sort_uniq String.compare
   | Some { declarative_errors = errs; _ } ->
       (* Declarative parser ran but produced adapter errors.  Do not fall
@@ -783,7 +820,38 @@ let validate_path_result ?sw ?net ~config_path () =
           List.map render_declarative_parse_error declarative_parse_errors
           @ List.map render_declarative_adapter_error declarative_errors
         in
-        if fatal_declarative_errors <> [] then
+        (* RFC-0058 Phase 8.3: partial-boot tolerance.
+
+           Parser-level errors (declarative_parse_errors) are always
+           fatal — the toml could not be tokenised, no snapshot exists.
+           Adapter-level errors (declarative_errors) are tolerable under
+           [MASC_CASCADE_PARTIAL_BOOT=1] iff a non-empty snapshot is
+           available.
+
+           When tolerated, we emit a structured WARN per error and fall
+           through to the normal profile-resolution path; the snapshot
+           already excludes unresolvable entries (Phase 8.1 invariant). *)
+        let parser_fatal =
+          declarative_parse_errors <> []
+        in
+        let adapter_only_errors =
+          declarative_parse_errors = [] && declarative_errors <> []
+        in
+        let tolerate_adapter_errors =
+          adapter_only_errors
+          && declarative_snapshot <> None
+          && allow_partial_boot ()
+        in
+        if tolerate_adapter_errors then
+          List.iter
+            (fun err ->
+              Log.Misc.warn
+                "partial-boot mode: declarative adapter error in %s \
+                 (continuing): %s"
+                source_path (render_declarative_adapter_error err))
+            declarative_errors;
+        if (parser_fatal || (adapter_only_errors && not tolerate_adapter_errors))
+           && fatal_declarative_errors <> [] then
           Error
             (rejection_of_path ~config_path:source_path ~attempted_mtime
                ~checked_at ~errors:fatal_declarative_errors ~profiles:[])

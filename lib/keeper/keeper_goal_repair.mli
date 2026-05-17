@@ -16,13 +16,26 @@
 
     @since 2.237.0 *)
 
+type repair_source = [ `Created | `Reused ]
+(** Records whether {!run} {b created} a new goal or {b reused} an
+    existing auto-goal with the same derived title.  Reuse path closes
+    the auto-goal accretion observed live 2026-05-17 (Goal Store had 3
+    identical verifier-keeper goals across 10 days because each repair
+    turn minted a fresh id). *)
+
+val repair_source_to_string : repair_source -> string
+(** [repair_source_to_string s] returns ["created"] or ["reused"] —
+    the canonical wire form used in {!repair_result_to_yojson}. *)
+
 type repair_action = {
   keeper_name : string;
   goal_id : string;
   goal_title : string;
+  source : repair_source;
 }
-(** One repair entry.  [goal_id] is ["(dry-run)"] for {!dry_run}
-    actions and the actual goal id for {!run}. *)
+(** One repair entry.  [goal_id] is ["(dry-run-create)"] or
+    ["(dry-run-reuse)"] for {!dry_run} actions (the marker matches
+    {!field-source}), and the actual goal id for {!run}. *)
 
 type repair_result = {
   actions : repair_action list;
@@ -56,16 +69,19 @@ val repair_result_to_yojson : repair_result -> Yojson.Safe.t
 (** [repair_result_to_yojson r] renders the result as
     {[
       `Assoc [
-        ("repaired", `Int <count>);
+        ("repaired", `Int <count>);  (* actions length *)
+        ("created", `Int <count>);   (* dedupe miss *)
+        ("reused", `Int <count>);    (* dedupe hit  *)
         ("skipped", `Int <count>);
         ("errors", `Int <count>);
-        ("actions", `List [<repair_action>...]);
+        ("actions", `List [<repair_action>...]);  (* each carries [source] *)
         ("skipped_details", `List [<{name, reason}>...]);
         ("error_details", `List [<{name, error}>...]);
       ]
     ]}
-    The triple count + per-list detail shape is the dashboard
-    contract — operator runbooks read these field names verbatim. *)
+    The triple count + per-list detail shape plus the new
+    [created]/[reused] split is the dashboard contract — operator
+    runbooks read these field names verbatim. *)
 
 val dry_run : Coord.config -> repair_result
 (** [dry_run config] scans every keeper meta under
@@ -82,11 +98,16 @@ val run : Coord.config -> repair_result
     1. Derives a title from the keeper's purpose statement
        (truncated to 115 chars + ["… (auto)"] suffix; falls back to
        ["(unnamed keeper)"] when the purpose is empty).
-    2. Calls {!Goal_store.upsert_goal} which must report [`created]
+    2. {b Dedupe pass}: scans the Goal Store for an existing non-
+       terminal goal (phase ≠ [Dropped]/[Completed]) with the same
+       derived title.  If found, that goal id is reused and
+       {!field-source} is [`Reused].  Otherwise, calls
+       {!Goal_store.upsert_goal} which must report [`created]
        (an [`updated] response is treated as an error — repair
-       expects fresh-goal creation, not an existing-goal collision).
-    3. Writes the keeper meta with the new goal id assigned to
-       [active_goal_ids].
+       expects fresh-goal creation, not an existing-goal collision)
+       and {!field-source} is [`Created].
+    3. Writes the keeper meta with the (reused or new) goal id
+       assigned to [active_goal_ids].
 
     Side-effects:
     - Creates one goal record per repaired keeper.

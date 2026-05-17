@@ -195,6 +195,43 @@ let test_prune_orphaned_ids () =
   check bool "g1 kept" true (List.mem "g1" pruned);
   check bool "g2 kept" true (List.mem "g2" pruned)
 
+let test_is_auto_generated_goal () =
+  let g_auto    = make_goal "g-a" "verifier persona (auto)" in
+  let g_manual  = make_goal "g-m" "RFC-0097 Phase 1 rollout" in
+  let g_unnamed = make_goal "g-u" "(unnamed keeper)" in
+  check bool "short (auto) suffix" true  (Goal_janitor.is_auto_generated_goal g_auto);
+  check bool "manual title"        false (Goal_janitor.is_auto_generated_goal g_manual);
+  check bool "(unnamed keeper) is not auto-suffixed" false
+    (Goal_janitor.is_auto_generated_goal g_unnamed)
+
+let test_auto_stagnate_short_threshold () =
+  with_room @@ fun config ->
+  (* auto-goal at 10d should drop (default auto_stagnant_days=7);
+     manual at 10d should NOT drop (default stagnant_days=30). *)
+  let g_auto   = make_goal ~status:Active ~days_ago:10 "g-a" "do things (auto)" in
+  let g_manual = make_goal ~status:Active ~days_ago:10 "g-m" "Manual long goal" in
+  Goal_store.write_state config
+    { version = 1; updated_at = Masc_domain.now_iso ();
+      goals = [g_auto; g_manual] };
+  let result = Goal_janitor.run config in
+  check int "1 auto stagnated" 1 result.stagnated;
+  let goals = Goal_store.list_goals config () in
+  let g_auto'   = List.find (fun (g : Goal_store.goal) -> g.id = "g-a") goals in
+  let g_manual' = List.find (fun (g : Goal_store.goal) -> g.id = "g-m") goals in
+  check string "auto-goal now Dropped" "dropped"
+    (match g_auto'.status with Dropped -> "dropped" | _ -> "not-dropped");
+  check string "manual goal still Active" "active"
+    (match g_manual'.status with Active -> "active" | _ -> "not-active")
+
+let test_auto_stagnate_below_threshold () =
+  with_room @@ fun config ->
+  let g_auto = make_goal ~status:Active ~days_ago:3 "g-a" "fresh purpose (auto)" in
+  Goal_store.write_state config
+    { version = 1; updated_at = Masc_domain.now_iso ();
+      goals = [g_auto] };
+  let result = Goal_janitor.run config in
+  check int "no stagnation below 7d" 0 result.stagnated
+
 let () =
   run "Goal_janitor" [
     "sweep", [
@@ -206,5 +243,12 @@ let () =
     ];
     "prune", [
       test_case "prune orphaned active_goal_ids" `Quick test_prune_orphaned_ids;
+    ];
+    "auto_threshold", [
+      test_case "is_auto_generated_goal" `Quick test_is_auto_generated_goal;
+      test_case "auto-goal stagnates at 10d (default 7d threshold)" `Quick
+        test_auto_stagnate_short_threshold;
+      test_case "auto-goal survives at 3d" `Quick
+        test_auto_stagnate_below_threshold;
     ];
   ]

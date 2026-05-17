@@ -456,7 +456,8 @@ let add_delete_action_routes router =
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state _agent_name _req reqd ->
          let config = state.Mcp_server.room_config in
-         let result = Goal_janitor.run config in
+         let sweep_config = Goal_janitor.runtime_config () in
+         let result = Goal_janitor.run ~config:sweep_config config in
          Http.Response.json ~compress:true ~request
            (Yojson.Safe.to_string
               (`Assoc [("ok", `Bool true);

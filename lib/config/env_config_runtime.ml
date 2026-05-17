@@ -413,6 +413,14 @@ module Goal_janitor = struct
       to be tight; a coarse sweep keeps the fleet log uncluttered. *)
   let interval_seconds =
     get_float ~default:3600.0 "MASC_GOAL_JANITOR_INTERVAL_SEC"
+
+  (** Stagnate threshold (days) for auto-generated goals.  Default: 7.
+      Auto-generated = title suffix [" (auto)"] from
+      [Keeper_goal_repair.goal_title_of_purpose].  Separate from the
+      manual [stagnant_days] (30) so keeper-repair leftovers do not
+      accumulate while operator-authored long-running goals survive. *)
+  let auto_stagnant_days () =
+    get_int ~default:7 "MASC_GOAL_JANITOR_AUTO_STAGNATE_DAYS"
 end
 
 (** {1 Approval Janitor}

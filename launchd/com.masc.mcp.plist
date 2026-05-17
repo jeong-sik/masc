@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  RFC-0101 §2 — Phase G launchd plist for masc-mcp.
+
+  Purpose: raise the per-process NumberOfFiles soft/hard limit before the
+  OCaml binary starts, so that `Fd_accountant.fd_snapshot` (RFC-0101 §3.5)
+  reports `rlimit_nofile soft=10240 hard=10240 (launchd raise: success)`.
+
+  Install:
+    launchctl bootstrap gui/$(id -u) launchd/com.masc.mcp.plist
+  Remove:
+    launchctl bootout gui/$(id -u)/com.masc.mcp
+  Verify:
+    launchctl print gui/$(id -u)/com.masc.mcp | grep -i -E '(state|limit|files)'
+    # In a running masc-mcp process: ulimit -n  → 10240
+
+  IMPORTANT:
+  - Edit the WorkingDirectory + StandardOutPath + StandardErrorPath +
+    EnvironmentVariables.HOME below to match the operator's machine.
+  - NumberOfFiles=10240 matches RFC-0101 §2 (`soft=10240 hard=10240`).
+    Raising hard cap to 65536 is an open question (see launchd/README.md).
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.masc.mcp</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/USERNAME/me/workspace/yousleepwhen/masc-mcp/launchd/masc-mcp-start.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/USERNAME/me/workspace/yousleepwhen/masc-mcp</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key>
+    <string>/Users/USERNAME</string>
+    <key>MASC_BASE_PATH</key>
+    <string>/Users/USERNAME/me/workspace/yousleepwhen/masc-mcp</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/USERNAME/me/workspace/yousleepwhen/masc-mcp/logs/masc-mcp.out</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/USERNAME/me/workspace/yousleepwhen/masc-mcp/logs/masc-mcp.err</string>
+
+  <!-- RFC-0101 §2 cap: soft=10240, hard=10240.
+       Hard=65536 deferred (open question, see launchd/README.md §Open questions). -->
+  <key>SoftResourceLimits</key>
+  <dict>
+    <key>NumberOfFiles</key>
+    <integer>10240</integer>
+  </dict>
+
+  <key>HardResourceLimits</key>
+  <dict>
+    <key>NumberOfFiles</key>
+    <integer>10240</integer>
+  </dict>
+</dict>
+</plist>

@@ -1483,6 +1483,9 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr
           ~fs ~env ()
       in
+      let provider_health = Provider_health.create state.room_config in
+      Provider_health.set_active provider_health;
+      Provider_health.start_probe_fiber ~sw ~env provider_health;
       let format_catalog_validation_error label rejection =
         Printf.sprintf
           "%s: %s"

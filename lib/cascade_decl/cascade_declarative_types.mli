@@ -41,6 +41,15 @@ type cascade_provider_log =
   }
 [@@deriving show, eq]
 
+type cascade_provider_healthcheck =
+  { enabled : bool
+  ; endpoint : string option
+  ; probe_interval_seconds : int
+  ; unhealthy_threshold : int
+  ; recovery_threshold : int
+  }
+[@@deriving show, eq]
+
 (** Per-provider runtime + behavioral capabilities — RFC-0058 §2.4 +
     Phase 5.1 (caller cutover prep, A.1) + §3.2 Phase 5.6 (tool/event support).
 
@@ -82,6 +91,10 @@ type cascade_provider =
     (** Optional operator-facing provider log tail. When enabled, the
       dashboard may read only this configured path for the provider; the
       request never accepts an arbitrary file path. *)
+  ; healthcheck : cascade_provider_healthcheck option
+    (** Optional active provider-health probe loop settings. When
+      [enabled=true], server startup probes [endpoint] and combines probe
+      outcomes with in-band cascade attempt results. *)
   ; headers : (string * string) list option
     (** Reserved schema (Phase 5.6 prep). Additional HTTP headers per
       provider, e.g. [("anthropic-version", "2023-06-01")] for Anthropic

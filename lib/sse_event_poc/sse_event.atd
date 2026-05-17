@@ -1,0 +1,16 @@
+(* Phase A0.1 PoC — single-payload byte-equal probe vs hand-coded.
+
+   Scope: agent_started payload field only.  Envelope wrap is out of scope
+   here (envelope has nullable-with-empty-string-coerced-to-null semantics
+   via cascade_event_bridge.json_string_opt that atdgen cannot express
+   without a custom JSON adapter).
+
+   Goal: determine whether atdgen's default record write matches
+   Yojson.Safe.to_string of a hand-coded `Assoc` for the simplest possible
+   case.  If yes → A0.1+A0.2 integration (atd from day 1) is viable.
+   If no → the byte-diff documents the adapter work needed. *)
+
+type agent_started_payload = {
+  agent_name: string;
+  task_id: string;
+}

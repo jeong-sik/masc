@@ -98,80 +98,13 @@ let tool_error ?(recoverable = false) message : Agent_sdk.Types.tool_result =
 ;;
 
 (** shell_exec intentionally supports only a narrow allowlist of dev/test
-    commands and rejects shell control syntax to keep execution predictable. *)
-let dev_allowed_commands =
-  [ "cat"
-  ; "cargo"
-  ; "cmake"
-  ; "cut"
-  ; "dune"
-  ; "echo"
-  ; "env"
-  ; "file"
-  ; "find"
-  ; "git"
-  ; "go"
-  ; "gofmt"
-  ; "gradle"
-  ; "grep"
-  ; "head"
-  ; "java"
-  ; "javac"
-  ; "ls"
-  ; "make"
-  ; "mvn"
-  ; "node"
-  ; "npm"
-  ; "ninja"
-  ; "npx"
-  ; "opam"
-  ; "pip"
-  ; "pnpm"
-  ; "printf"
-  ; "pwd"
-  ; "pyright"
-  ; "pytest"
-  ; "python"
-  ; "python3"
-  ; "rg"
-  ; "ruff"
-  ; "rustc"
-  ; "sed"
-  ; "sort"
-  ; "stat"
-  ; "tail"
-  ; "tr"
-  ; "uniq"
-  ; "uv"
-  ; "wc"
-  ; "which"
-  ; "yarn"
-  ]
-;;
+    commands and rejects shell control syntax to keep execution predictable.
 
-let readonly_allowed_commands =
-  [ "cat"
-  ; "cut"
-  ; "echo"
-  ; "env"
-  ; "file"
-  ; "find"
-  ; "grep"
-  ; "head"
-  ; "ls"
-  ; "printf"
-  ; "pwd"
-  ; "rg"
-  ; "sed"
-  ; "sort"
-  ; "stat"
-  ; "tail"
-  ; "tr"
-  ; "uniq"
-  ; "wc"
-  ; "which"
-  ]
-;;
+    RFC-0091 PR-1: allowlist tables moved to {!Dev_exec_allowlist}.  These
+    bindings remain as in-module aliases until PR-2 deletes the legacy
+    string-cmd lexer entirely and all callers reference the typed schema. *)
+let dev_allowed_commands = Dev_exec_allowlist.dev
+let readonly_allowed_commands = Dev_exec_allowlist.readonly
 
 (* Mirror of [Gh_command_validation.forbidden_shell_chars].  Kept as a
    list for docs/tests; the scan uses a closed pattern match below so the

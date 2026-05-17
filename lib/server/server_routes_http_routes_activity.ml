@@ -342,7 +342,7 @@ let add_routes ~sw ~clock router =
        respond_board_json reqd (board_sub_boards_json ()))
 
   |> Http.Router.post "/api/v1/board/sub-boards" (fun request reqd ->
-       with_tool_auth ~tool_name:"board_sub_board_create"
+       with_tool_auth ~tool_name:"masc_board_sub_board_create"
          (fun _state _req reqd ->
          Http.Request.read_body_async reqd (fun body ->
            try
@@ -406,7 +406,7 @@ let add_routes ~sw ~clock router =
                    reqd)))
 
   |> Http.Router.prefix_delete "/api/v1/board/sub-boards/" (fun request reqd ->
-       with_tool_auth ~tool_name:"board_sub_board_delete"
+       with_tool_auth ~tool_name:"masc_board_sub_board_delete"
          (fun _state _req reqd ->
          let path = Http.Request.path request in
          (match extract_path_param ~prefix:"/api/v1/board/sub-boards/" path with
@@ -428,7 +428,7 @@ let add_routes ~sw ~clock router =
          request reqd)
 
   |> Http.Router.prefix_put "/api/v1/board/sub-boards/" (fun request reqd ->
-       with_tool_auth ~tool_name:"board_sub_board_update"
+       with_tool_auth ~tool_name:"masc_board_sub_board_update"
          (fun _state _req reqd ->
          Http.Request.read_body_async reqd (fun body ->
            try

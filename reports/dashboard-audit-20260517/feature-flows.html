@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard Feature Flows</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <header>
+    <div class="topbar">
+      <div>
+        <h1>Feature Flows</h1>
+        <p>Sequence-level flowcharts for Keeper product behavior and dashboard wiring.</p>
+      </div>
+      <nav>
+        <a href="./index.html">Index</a>
+        <a href="./ia-map.html">IA Map</a>
+        <a href="./code-wiring.html">Code Wiring</a>
+        <a href="./gap-matrix.html">Gap Matrix</a>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <section>
+      <h2>1. Dashboard Boot And Runtime Truth</h2>
+      <pre class="flow">Browser opens dashboard
+  -> App mounts
+  -> initRouter()
+  -> ensureDevToken() for loopback dashboard
+  -> refreshShell(light=true)
+  -> requestNamespaceTruthNow()
+  -> fetchDashboardConfig()
+  -> replay OAS runtime telemetry
+  -> connectDashboardWS(route)
+  -> connectSSE() unless WS-only
+  -> startPeriodicRefresh()
+  -> route change calls refreshForRoute()</pre>
+      <p class="evidence">Evidence: `dashboard/src/app.ts:120-230`, `dashboard/src/components/dashboard-shell.ts:301-334`.</p>
+      <p class="warn">Audit note: local `/health` probe timed out, so live runtime state was not proven during this pass.</p>
+    </section>
+
+    <section>
+      <h2>2. Keeper Task And Board Loop</h2>
+      <pre class="flow">Goal / board context exists
+  -> Task appears in Coord task store
+  -> Keeper claims task
+  -> claim_post_provision hook runs
+     -> Local keeper: project root
+     -> Docker keeper: Task_sandbox.create()
+  -> Keeper executes tools
+  -> Board posts/comments/votes and task status mutate
+  -> SSE/WS refreshes dashboard
+  -> Verification/CDAL surfaces show proof and follow-up state</pre>
+      <p class="evidence">
+        Evidence: `server_bootstrap_loops.ml:144-160`, `server_dashboard_http_core.ml:143-280`,
+        `dashboard/src/api/board.ts:699-950`, `server_routes_http_routes_verification.ml:47-86`.
+      </p>
+    </section>
+
+    <section>
+      <h2>3. Repository Selection And Code IDE</h2>
+      <pre class="flow">Code surface
+  -> IdeShell creates IdeDataCoordinator
+  -> User selects repository in explorer
+  -> activeRepositoryId signal updates
+  -> workspace tree/file/blame/diff fetches include repo_id
+  -> editor renders file, diff, blame ownership
+  -> annotation/region fetch includes repo_id after local implementation patch
+  -> selected repository .masc-ide metadata can resolve through backend workspace selection</pre>
+      <p class="evidence">
+        Evidence: `ide-shell.ts:413-436`, `ide-data-coordinator.ts:144-221`, `workspace.ts:44-113`, `api/ide.ts:12-115`.
+      </p>
+    </section>
+
+    <section>
+      <h2>4. `.masc-ide` Metadata Production</h2>
+      <pre class="flow">Keeper writes/edits code
+  -> keeper_exec_fs.track_write_region()
+  -> Ide_meta_sync.on_tool_call_complete()
+  -> Ide_meta_sync.flush_regions()
+  -> append .masc-ide/regions.jsonl after local implementation patch
+
+Keeper calls keeper_ide_annotate
+  -> keeper_exec_ide.handle_keeper_ide_annotate()
+  -> Ide_annotations.create()
+  -> append .masc-ide/annotations.jsonl
+
+Dashboard reads
+  -> GET /api/v1/ide/annotations reads annotations.jsonl
+  -> GET /api/v1/ide/regions reads regions.jsonl
+  -> generated regions now share the reader contract</pre>
+      <p class="evidence">
+        Evidence: `keeper_exec_fs.ml:219-282`, `ide_meta_sync.ml:73-87`, `ide_region_tracker.ml:156-160`,
+        `keeper_exec_ide.ml:13-79`, `server_ide_http.ml:256-286`.
+      </p>
+    </section>
+
+    <section>
+      <h2>5. Decision Context To IDE Line Chips</h2>
+      <pre class="flow">Keeper records decision
+  -> .masc/keepers/:name.decisions.jsonl includes choice, reason, context
+  -> keeper_decisions_json normalizes choice/reason/context
+  -> fetchKeeperDecisions decodes KeeperDecision.context
+  -> bridgeDecisionsToTrace pushes decisionChoice/decisionReason plus file/line
+  -> OverlayKeeperTrace focus links to Code/Goal/Task/Board/PR/Git/Log/Telemetry/Keeper
+  -> CodeMirror trace gutter renders the decision on the matching file line</pre>
+      <p class="evidence">
+        Evidence: `dashboard_http_keeper.ml`, `dashboard.ts`, `decision-log-trace-bridge.ts`, `overlay-keeper-trace.ts`, `ide-editor-extensions.ts`.
+      </p>
+    </section>
+
+    <section>
+      <h2>6. Human Intervention And Command</h2>
+      <pre class="flow">Operator opens Command
+  -> operations section
+  -> FilterChips choose All / Intervene / Governance / Safety / Surfaces / Inspector
+  -> Ops and governance panels read operator APIs
+  -> Safety and surface-readiness expose control/proof state
+  -> high-impact actions should follow preview -> confirm -> execute -> recheck</pre>
+      <p class="evidence">Evidence: `operations-panel.ts:15-95`, `operator-actions.ts:79`, `api/core.ts:710`.</p>
+      <p class="warn">UX requirement: dashboard write buttons without preview-confirm-recheck should be hidden or converted into copy/run operator commands.</p>
+    </section>
+
+    <section>
+      <h2>7. Connectors, Voice, Image, Multimodal</h2>
+      <pre class="flow">External channel / artifact surface
+  -> connector sidecars use gate routes for messages and keeper status
+  -> Connectors dashboard aggregates sidecar state
+  -> Voice config is exposed at /api/v1/voice/config
+  -> Multimodal dashboard exposes list/get/provenance endpoints
+  -> Rich content/link previews support image URLs and provenance display
+  -> Main Preact dashboard does not expose a first-class voice session or multimodal gallery surface</pre>
+      <p class="evidence">
+        Evidence: `server_routes_http_routes_channel_gate.ml:529`, `server_routes_http_routes_frontend.ml:219`,
+        `server_routes_http_routes_multimodal.ml:160-208`, `common/rich-content.ts`, no `dashboard/src/*multimodal*` files found.
+      </p>
+      <p class="warn">Recommendation: keep these as drill-down/lab/operator-support surfaces, not first-screen defaults.</p>
+    </section>
+
+    <section>
+      <h2>8. Approval, Verification, And CDAL</h2>
+      <pre class="flow">Keeper hits human approval or verification boundary
+  -> HITL approval queue can suspend keeper fibers
+  -> Governance UI resolves approvals
+  -> Verification panel handles approve/reject proof requests
+  -> Goal/task/CDAL verdict attribution appears in separate surfaces
+  -> Current product gap: no single unified operator queue for all pending human decisions</pre>
+      <p class="evidence">
+        Evidence: `keeper_approval_queue.ml`, `governance.ts:488`, `verification-requests-panel.ts`, `cdal_verdict_gate.ml:289`.
+      </p>
+    </section>
+  </main>
+  <footer>Flows are implementation-level summaries, not intended architecture only.</footer>
+</body>
+</html>

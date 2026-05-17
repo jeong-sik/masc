@@ -169,6 +169,17 @@ let all_entries =
       ~tool_name:"masc_operator_snapshot"
       ()
   ; entry
+      ~id:"monitoring.cascade-config"
+      ~label:"Cascade Config"
+      ~exposure_status:"main"
+      ~hidden_from_nav:false
+      ~meets_main_gate:true
+      ~rationale:"Dedicated cascade.toml editor and diagnostics surface."
+      ~route_hash:"#monitoring?section=cascade-config"
+      ~live_spotcheck:"/api/v1/cascade/config"
+      ~tool_name:"masc_operator_snapshot"
+      ()
+  ; entry
       ~id:"monitoring.agents"
       ~label:"Agent Observatory"
       ~exposure_status:"main"
@@ -203,6 +214,39 @@ let all_entries =
       ~tool_name:"masc_operator_snapshot"
       ()
   ; entry
+      ~id:"monitoring.doctor"
+      ~label:"Doctor"
+      ~exposure_status:"main"
+      ~hidden_from_nav:false
+      ~meets_main_gate:true
+      ~rationale:"Sidecar and config doctor diagnostics promoted to Monitor."
+      ~route_hash:"#monitoring?section=doctor"
+      ~live_spotcheck:"/api/v1/dashboard/doctor"
+      ~tool_name:"masc_operator_snapshot"
+      ()
+  ; entry
+      ~id:"monitoring.transport-health"
+      ~label:"Transport Health"
+      ~exposure_status:"main"
+      ~hidden_from_nav:false
+      ~meets_main_gate:true
+      ~rationale:"Transport health read model for SSE, gRPC, WebSocket, and WebRTC."
+      ~route_hash:"#monitoring?section=transport-health"
+      ~live_spotcheck:"/api/v1/dashboard/transport-health"
+      ~tool_name:"masc_operator_snapshot"
+      ()
+  ; entry
+      ~id:"monitoring.feature-health"
+      ~label:"Feature Flags"
+      ~exposure_status:"main"
+      ~hidden_from_nav:false
+      ~meets_main_gate:true
+      ~rationale:"Feature flag rollout and health snapshot promoted to Monitor."
+      ~route_hash:"#monitoring?section=feature-health"
+      ~live_spotcheck:"/api/v1/dashboard/feature-health"
+      ~tool_name:"masc_operator_snapshot"
+      ()
+  ; entry
       ~id:"monitoring.journey"
       ~label:"Journey Map"
       ~exposure_status:"diagnostic"
@@ -216,22 +260,22 @@ let all_entries =
       ()
   ; entry
       ~id:"monitoring.observatory"
-      ~label:"Observatory"
-      ~exposure_status:"diagnostic"
-      ~hidden_from_nav:true
-      ~meets_main_gate:false
-      ~rationale:"Hidden live-collaboration and investigation timeline drill-down."
+      ~label:"Activity Timeline"
+      ~exposure_status:"main"
+      ~hidden_from_nav:false
+      ~meets_main_gate:true
+      ~rationale:"Live collaboration and investigation timeline promoted to Monitor."
       ~route_hash:"#monitoring?section=observatory"
       ~fixture_harness:"dune exec ./test/test_activity_graph.exe"
       ~live_spotcheck:"/api/v1/activity/graph"
       ()
   ; entry
       ~id:"monitoring.cognition"
-      ~label:"Cognition"
-      ~exposure_status:"diagnostic"
-      ~hidden_from_nav:true
-      ~meets_main_gate:false
-      ~rationale:"Hidden keeper cognition and memory drill-down."
+      ~label:"Keeper Cognition"
+      ~exposure_status:"main"
+      ~hidden_from_nav:false
+      ~meets_main_gate:true
+      ~rationale:"Keeper cognition and memory drill-down promoted to Monitor."
       ~route_hash:"#monitoring?section=cognition"
       ~live_spotcheck:"/api/v1/dashboard/memory-subsystems"
       ()

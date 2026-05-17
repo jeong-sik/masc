@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MASC Dashboard Audit - 2026-05-17</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <header>
+    <div class="topbar">
+      <div>
+        <h1>MASC Dashboard Audit</h1>
+        <p>Top-down IA, feature wiring, Keeper runtime, Code IDE, UX/research review.</p>
+        <div class="meta">
+          <span class="pill">Date: 2026-05-17 17:25 KST</span>
+          <span class="pill">Commit: 63824db14e + local implementation patch</span>
+          <span class="pill">Worktree: .worktrees/dashboard-audit-20260517</span>
+        </div>
+      </div>
+      <nav aria-label="Report pages">
+        <a href="./ia-map.html">IA Map</a>
+        <a href="./feature-flows.html">Flows</a>
+        <a href="./code-wiring.html">Code Wiring</a>
+        <a href="./gap-matrix.html">Gap Matrix</a>
+        <a href="./ux-review.html">UX Review</a>
+        <a href="./roadmap.html">Roadmap</a>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <section class="callout bad">
+      <h2>Executive Verdict</h2>
+      <p>
+        Dashboard is broad and real, not a mock. Core shell, Monitor, Workspace, Command, Logs, and a substantial Code IDE are implemented.
+        The weak point is not absence of screens; it is end-to-end truth wiring and operator-grade IA discipline.
+      </p>
+      <p>
+        Initial P0 issues were surface readiness parity, selected-repo `.masc-ide` metadata pass-through,
+        region writer/reader storage mismatch, H2 dashboard config mutation parity, and SubBoard auth tool names.
+        The local implementation pass fixes those wiring/auth items and carries line-level decision choice/reason/context into the IDE trace layer.
+      </p>
+    </section>
+
+    <section class="grid">
+      <article class="card">
+        <h3>What Is Complete</h3>
+        <ul>
+          <li>Preact/Vite dashboard shell with route canonicalization and lazy surface dispatch.</li>
+          <li>Main IA surfaces: Overview, Monitor, Command, Connectors, Workspace, Lab, Code, Logs.</li>
+          <li>Workspace board/planning/repository/verification surfaces are largely wired.</li>
+          <li>Code IDE has repo tree, file content, git diff/blame, presence, annotation rendering, and right-rail context.</li>
+          <li>Server exposes dashboard shell, keeper, repository, credential, board, verification, transport, multimodal, and IDE routes.</li>
+        </ul>
+      </article>
+
+      <article class="card">
+        <h3>What Is Missing Or Weak</h3>
+        <ul>
+          <li>Fixed locally: `scripts/check-dashboard-surface-parity.sh` now passes for promoted Monitor surfaces.</li>
+          <li>Fixed locally: Code IDE annotation/region APIs now preserve selected `repo_id`.</li>
+          <li>Fixed locally: generated regions append to the fixed `.masc-ide/regions.jsonl` read by HTTP.</li>
+          <li>Fixed locally: decision choice/reason/context now flows from keeper decision JSON to IDE trace chips.</li>
+          <li>Some board frontend endpoints could not be matched to server routes.</li>
+          <li>Fixed locally: SubBoard HTTP auth uses canonical `masc_board_sub_board_*` tool names.</li>
+          <li>Fixed locally: H2 excuse-pattern config mutation now requires token-bound `CanAdmin` before body read.</li>
+          <li>Voice and typed multimodal/image artifact workflows exist in runtime/server code but are not first-class dashboard surfaces.</li>
+        </ul>
+      </article>
+
+      <article class="card">
+        <h3>Product IA Decision</h3>
+        <p>
+          Treat Dashboard as a read-mostly operator console for continuous Keeper agents. First screen should answer:
+          who is acting, on what repo/task, with which risk, what needs human action, and where proof lives.
+        </p>
+        <p>
+          Do not promote every diagnostic to top-level IA. Keep operator story first; move config/doctor/transport/feature internals behind diagnostics unless parity and usage justify them.
+        </p>
+      </article>
+    </section>
+
+    <section>
+      <h2>Top Findings</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Priority</th>
+            <th>Finding</th>
+            <th>Evidence</th>
+            <th>Fix Direction</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="ok">Fixed</td>
+            <td>Surface readiness parity was out of sync with current nav.</td>
+            <td class="evidence">Readiness registry now includes `cascade-config`, `doctor`, `transport-health`, `feature-health`; Observatory/Cognition labels and main exposure match nav.</td>
+            <td>`scripts/check-dashboard-surface-parity.sh` passes.</td>
+          </tr>
+          <tr>
+            <td class="ok">Fixed</td>
+            <td>Selected-repo Code IDE metadata pass-through was incomplete.</td>
+            <td class="evidence">`api/ide.ts` and `code-document-store.ts` now preserve `repoId` for annotations, regions, create, and delete paths.</td>
+            <td>Focused Vitest URL/store tests pass.</td>
+          </tr>
+          <tr>
+            <td class="ok">Fixed</td>
+            <td>`.masc-ide` generated region storage was internally inconsistent.</td>
+            <td class="evidence">Writers now append to the same fixed `.masc-ide/regions.jsonl` file read by HTTP.</td>
+            <td>OCaml regression tests added; focused Dune build passes.</td>
+          </tr>
+          <tr>
+            <td class="ok">Fixed</td>
+            <td>H2 dashboard config mutation bypassed HTTP/1 admin guard.</td>
+            <td class="evidence">H2 POST `/api/v1/dashboard/config/excuse-patterns` now uses token-bound `CanAdmin` before reading the request body.</td>
+            <td>Source guard asserts auth helper, `CanAdmin`, and auth-before-body-read ordering.</td>
+          </tr>
+          <tr>
+            <td class="ok">Fixed</td>
+            <td>SubBoard HTTP auth names did not match registered tool names.</td>
+            <td class="evidence">HTTP routes now authorize with `masc_board_sub_board_create/update/delete`.</td>
+            <td>Source sweep confirms legacy `board_sub_board_*` route auth names are gone.</td>
+          </tr>
+          <tr>
+            <td class="ok">Fixed</td>
+            <td>Decision choice/reason metadata was missing from line-level IDE context.</td>
+            <td class="evidence">`keeper_decisions_json` now emits `choice`, `reason`, and normalized `context`; dashboard decode, decision trace bridge, overlay focus, and editor line chips preserve them.</td>
+            <td>Focused dashboard API, trace bridge, overlay, rail, and editor tests pass.</td>
+          </tr>
+          <tr>
+            <td class="warn">P1</td>
+            <td>Monitor IA is too wide for a first-level operator story.</td>
+            <td class="evidence">Monitor has runtime, cascade config, agents, goal loop, fleet health, doctor, transport, feature flags, observatory, cognition; `journey` hidden.</td>
+            <td>Group diagnostics; keep first-level Monitor focused on runtime, keepers, goals, fleet, activity/cognition only if readiness is current.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Validation Snapshot</h2>
+      <ul>
+        <li>Worktree rebased onto `origin/main` at `63824db14e` before final status. The local patch adds P0 wiring fixes and focused tests.</li>
+        <li>Live probe `curl --max-time 2 http://127.0.0.1:8935/health` timed out during audit; runtime truth could not be confirmed through local server.</li>
+        <li>`scripts/check-dashboard-surface-parity.sh` passes.</li>
+        <li>Focused Vitest was run using a temporary `dashboard/node_modules` symlink to the main checkout installation: 7 files, 101 tests passed.</li>
+        <li>`pnpm exec tsc --noEmit --pretty false` passes using the same temporary dependency symlink.</li>
+        <li>Completion audit found an `agent_sdk` pin guard blocker; upstream `origin/main` now provides `agent_sdk >= 0.195.0` / OAS `79262f37`, and the local opam switch was updated to match it.</li>
+        <li>Focused Dune build passes for `test_dashboard_k2_feeds`, `test_ci_hardening_source`, `test_dashboard_surface_readiness`, and `test_ide_annotations` executables.</li>
+        <li>Dashboard typed multimodal frontend files were not found under `dashboard/src`; Bonsai has multimodal files but it is a separate `/dashboard/b/*` surface.</li>
+        <li>No token values or credential secrets were opened or copied; runtime file existence was checked by path only.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Report Pages</h2>
+      <table>
+        <thead>
+          <tr><th>Page</th><th>Use</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><a href="./ia-map.html">IA Map</a></td><td>Current surface tree, hidden/duplicate branches, and top-down information architecture judgment.</td></tr>
+          <tr><td><a href="./feature-flows.html">Flows</a></td><td>Keeper/product workflows as sequence-level flowcharts.</td></tr>
+          <tr><td><a href="./code-wiring.html">Code Wiring</a></td><td>Frontend/server/runtime/API code evidence and wiring gaps.</td></tr>
+          <tr><td><a href="./gap-matrix.html">Gap Matrix</a></td><td>P0/P1/P2 risk register and must-have/nice-to-have/remove classification.</td></tr>
+          <tr><td><a href="./ux-review.html">UX Review</a></td><td>Research-backed UX rubric for autonomous agent dashboards.</td></tr>
+          <tr><td><a href="./roadmap.html">Roadmap</a></td><td>Implementation plan, validation commands, and splitable work packages.</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+  <footer>
+    Generated from local code audit plus parallel read-only lanes. See sibling pages for source links and file-level evidence.
+  </footer>
+</body>
+</html>

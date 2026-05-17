@@ -1851,6 +1851,37 @@ let test_transport_route_contracts () =
     (file_contains_pattern "lib/server/server_h2_gateway.ml"
        {|Server_webrtc_transport.is_enabled ()|})
 
+let test_h2_dashboard_config_mutation_auth_contracts () =
+  let route = {|`POST, "/api/v1/dashboard/config/excuse-patterns" ->|} in
+  let auth_pos =
+    file_pattern_position_after
+      "lib/server/server_h2_gateway.ml"
+      ~anchor:route
+      "with_h2_token_permission_auth h2_reqd"
+  in
+  let read_pos =
+    file_pattern_position_after
+      "lib/server/server_h2_gateway.ml"
+      ~anchor:route
+      "h2_read_body h2_reqd"
+  in
+  check bool "h2 token permission auth helper exists" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       "let with_h2_token_permission_auth h2_reqd ~permission f =");
+  check bool "h2 helper uses token-bound permission authorization" true
+    (file_contains_pattern "lib/server/server_h2_gateway.ml"
+       "authorize_token_bound_permission_request");
+  check bool "h2 excuse-patterns POST requires CanAdmin" true
+    (file_contains_nearby_line_with_patterns
+       "lib/server/server_h2_gateway.ml"
+       ~anchor:route
+       ~patterns:[ "with_h2_token_permission_auth h2_reqd"; "Masc_domain.CanAdmin" ]
+       ~max_lines:4);
+  check bool "h2 auth happens before body read" true
+    (match auth_pos, read_pos with
+     | Some auth_pos, Some read_pos -> auth_pos < read_pos
+     | _ -> false)
+
 let test_transport_health_contracts () =
   check bool "standalone ws updates transport metrics on connect" true
     (file_contains_pattern "lib/server/server_ws_standalone.ml"
@@ -2435,6 +2466,8 @@ let () =
              test_dashboard_executor_pool_contracts;
            test_case "transport route contracts" `Quick
              test_transport_route_contracts;
+           test_case "h2 dashboard config mutation auth contracts" `Quick
+             test_h2_dashboard_config_mutation_auth_contracts;
            test_case "transport health contracts" `Quick
              test_transport_health_contracts;
            test_case "http cancel response contracts (#13059)" `Quick

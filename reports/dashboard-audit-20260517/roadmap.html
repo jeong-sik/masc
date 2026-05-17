@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard Roadmap</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <header>
+    <div class="topbar">
+      <div>
+        <h1>Implementation Roadmap</h1>
+        <p>Splitable work packages and validation commands for large-scale execution.</p>
+      </div>
+      <nav>
+        <a href="./index.html">Index</a>
+        <a href="./ia-map.html">IA Map</a>
+        <a href="./feature-flows.html">Flows</a>
+        <a href="./code-wiring.html">Code Wiring</a>
+        <a href="./gap-matrix.html">Gap Matrix</a>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <section>
+      <h2>Execution Strategy</h2>
+      <p>
+        Work in independent worktrees and keep write scopes disjoint. Cap practical parallelism at 4-6 lanes:
+        IA/readiness, Code IDE metadata, server auth/parity, board/API parity, Overview UX, accessibility/testing.
+      </p>
+    </section>
+
+    <section>
+      <h2>Phase 0: Make Current Truth Testable</h2>
+      <table>
+        <thead>
+          <tr><th>Task</th><th>Owner Scope</th><th>Acceptance</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Fix readiness/nav parity</td>
+            <td>`lib/dashboard/dashboard_surface_readiness.ml`, readiness tests, parity script</td>
+            <td>`scripts/check-dashboard-surface-parity.sh` passes.</td>
+          </tr>
+          <tr>
+            <td>Document current IA SSOT</td>
+            <td>`dashboard/docs/consolidation/route-inventory.md` or replacement</td>
+            <td>Docs match current visible/hidden nav and redirects.</td>
+          </tr>
+          <tr>
+            <td>Route normalization repair</td>
+            <td>`dashboard/src/router.ts`, `navigation.ts`, router tests</td>
+            <td>Query and slash legacy routes canonicalize identically.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Phase 1: Code IDE Metadata End-To-End</h2>
+      <table>
+        <thead>
+          <tr><th>Task</th><th>Owner Scope</th><th>Acceptance</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Pass selected `repoId` through IDE APIs</td>
+            <td>`dashboard/src/api/ide.ts`, `code-document-store.ts`, `ide-data-coordinator.ts`, API tests</td>
+            <td>Fixed locally: annotation and region GET/write/delete URLs include `repo_id` after repo selection.</td>
+          </tr>
+          <tr>
+            <td>Unify region storage layout</td>
+            <td>`lib/ide/ide_region_tracker.ml`, `ide_meta_sync.ml`, `server_ide_http.ml`, tests</td>
+            <td>Fixed locally: region producers append to the fixed `.masc-ide/regions.jsonl` file read by `/api/v1/ide/regions`.</td>
+          </tr>
+          <tr>
+            <td>Carry decision context into IDE trace</td>
+            <td>Keeper decision feed, TS schemas, `decision-log-trace-bridge.ts`, IDE chips</td>
+            <td>Fixed locally: line-level trace carries decision choice/reason plus file/line, goal/task, board, PR, git, log, session, operation, worker IDs.</td>
+          </tr>
+          <tr>
+            <td>Review annotation mutation auth</td>
+            <td>`server_ide_http.ml`, auth tests</td>
+            <td>POST/DELETE policy is explicit: admin/keeper-owned or documented loopback-only.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Phase 2: Server/API Parity And Safety</h2>
+      <table>
+        <thead>
+          <tr><th>Task</th><th>Owner Scope</th><th>Acceptance</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>H2 auth parity</td>
+            <td>`server_h2_gateway.ml`, strict auth tests</td>
+            <td>Code-level auth guard fixed locally; live unauthenticated/admin H2 probe remains a validation follow-up.</td>
+          </tr>
+          <tr>
+            <td>Board route parity</td>
+            <td>`dashboard/src/api/board.ts`, activity routes, board tests</td>
+            <td>Every frontend board URL has a registered server route or is rewritten to a registered tool endpoint.</td>
+          </tr>
+          <tr>
+            <td>SubBoard auth-name parity</td>
+            <td>`server_routes_http_routes_activity.ml`, `tool_board_schemas.ml`, `tool_board.ml`, board auth tests</td>
+            <td>SubBoard HTTP routes use canonical `masc_board_sub_board_*` tool names and permission tests pass.</td>
+          </tr>
+          <tr>
+            <td>Credential/repo least-privilege visibility</td>
+            <td>repository/credential/keeper-repos panels and server policy</td>
+            <td>Wildcard repo mappings are visible as risk, not silent compatibility.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Phase 3: Operator UX</h2>
+      <table>
+        <thead>
+          <tr><th>Task</th><th>Owner Scope</th><th>Acceptance</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Overview as action queue</td>
+            <td>Overview components, mission briefing, health strip</td>
+            <td>First viewport shows stale keepers, active tasks, approvals, blockers, proof gaps, last refresh/source.</td>
+          </tr>
+          <tr>
+            <td>Monitor regrouping</td>
+            <td>Navigation, status surface, docs/tests</td>
+            <td>Core operator sections are first-level; diagnostics are grouped or intentionally visible with readiness proof.</td>
+          </tr>
+          <tr>
+            <td>Mutation UX hardening</td>
+            <td>Command, board, repositories, credentials, IDE annotation writes</td>
+            <td>Every mutation has preview-confirm-recheck or copy/run command fallback.</td>
+          </tr>
+          <tr>
+            <td>Accessibility pass</td>
+            <td>All visible surfaces, keyboard flows, status messages</td>
+            <td>Keyboard-only path works for nav, filters, dialogs, IDE panes; status changes are announced.</td>
+          </tr>
+          <tr>
+            <td>Unified human-decision queue</td>
+            <td>Governance, verification, goal detail, CDAL, Overview</td>
+            <td>One queue shows all pending approvals/rejections/verifications with evidence and source links.</td>
+          </tr>
+          <tr>
+            <td>Voice/multimodal scope decision</td>
+            <td>Voice tools, multimodal routes, main dashboard or Bonsai</td>
+            <td>Either implement read-only sessions/gallery in main dashboard or document them as out-of-scope diagnostics.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Focused Validation Commands</h2>
+      <pre>scripts/check-dashboard-surface-parity.sh
+
+rg -n 'masc_board_comment_vote|/api/v1/board/reactions' dashboard/src lib/server lib/tool_board.ml lib/tool_name.ml
+
+rg -n 'board_sub_board_|masc_board_sub_board_' lib/server lib/tool_board.ml lib/tool_board_schemas.ml dashboard/src
+
+scripts/dune-local.sh build \
+  test/test_auth_strict_mode.exe \
+  test/test_dashboard_http_core.exe \
+  test/test_dashboard_keeper_routes.exe \
+  test/test_dashboard_surface_readiness.exe
+
+scripts/dune-local.sh build \
+  test/test_ide_annotations.exe \
+  test/test_dashboard_surface_readiness.exe \
+  test/test_keeper_repo_mapping.exe \
+  test/test_repo_store.exe
+
+cd dashboard
+pnpm exec vitest run --config vitest.config.ts \
+  src/api/dashboard.test.ts src/api/ide.test.ts \
+  src/components/ide/code-document-store.test.ts \
+  src/components/ide/decision-log-trace-bridge.test.ts \
+  src/components/ide/overlay-keeper-trace.test.ts \
+  src/components/ide/ide-editor-extensions.test.ts \
+  src/components/ide/ide-conversation-rail.test.ts
+
+pnpm exec tsc --noEmit --pretty false</pre>
+      <p class="warn">
+        Note: frontend focused Vitest and `tsc` passed using a temporary `dashboard/node_modules` symlink to the main checkout installation. Focused Dune build now passes after aligning the local opam switch to the repo OAS pin.
+      </p>
+    </section>
+
+    <section>
+      <h2>Live Probe Checklist</h2>
+      <pre>curl -fsS http://127.0.0.1:8935/health | jq '{status, transport, paths, startup, subsystems}'
+
+curl -fsS -H "Authorization: Bearer $MASC_MCP_TOKEN" -H "X-MASC-Agent: dashboard" \
+  'http://127.0.0.1:8935/api/v1/dashboard/shell?light=true' \
+  | jq '{counts, auth, configured_keepers, projection_diagnostics}'
+
+curl -fsS -H "Authorization: Bearer $MASC_MCP_TOKEN" -H "X-MASC-Agent: dashboard" \
+  'http://127.0.0.1:8935/api/v1/ide/annotations?repo_id=masc-mcp&amp;file_path=README.md' \
+  | jq '{ok, count: (.data | length)}'</pre>
+    </section>
+  </main>
+  <footer>Use target repo `.worktrees/` for each implementation lane.</footer>
+</body>
+</html>

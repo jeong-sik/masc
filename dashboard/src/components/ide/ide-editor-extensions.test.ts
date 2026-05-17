@@ -207,13 +207,41 @@ describe('keeperTraceLinesForFile + keeper trace gutter', () => {
         line: 2,
         surface: 'Goal',
       },
+      {
+        id: 'decision-1',
+        tsMs: 6000,
+        keeperName: 'scholar',
+        count: 1,
+        source: 'decision-log',
+        decisionId: 'decision:scholar:6000:tool_use',
+        semanticOutcome: 'ok',
+        decisionChoice: 'use_shell',
+        decisionReason: 'verify touched test target',
+        filePath: 'runtime.ts',
+        line: 2,
+        goalId: 'goal-decision',
+        taskId: 'task-decision',
+      },
     ]
 
     const traceLines = keeperTraceLinesForFile('runtime.ts', events)
     expect(traceLines).toHaveLength(1)
     expect(traceLines[0]?.line).toBe(2)
-    expect(traceLines[0]?.events).toHaveLength(2)
+    expect(traceLines[0]?.events).toHaveLength(3)
     expect(traceLines[0]?.events[0]).toMatchObject({
+      id: 'decision-1',
+      source: 'decision-log',
+      keeperName: 'scholar',
+      count: 1,
+      tsMs: 6000,
+      filePath: 'runtime.ts',
+      line: 2,
+      goalId: 'goal-decision',
+      taskId: 'task-decision',
+      decisionChoice: 'use_shell',
+      decisionReason: 'verify touched test target',
+    })
+    expect(traceLines[0]?.events[1]).toMatchObject({
       id: 'activity-1',
       source: 'activity-event',
       keeperName: 'sangsu',
@@ -224,7 +252,7 @@ describe('keeperTraceLinesForFile + keeper trace gutter', () => {
       eventId: 'evt-1',
       surface: 'Goal',
     })
-    expect(traceLines[0]?.events[1]).toMatchObject({
+    expect(traceLines[0]?.events[2]).toMatchObject({
       id: 'thread-1',
       source: 'anchored-thread',
       keeperName: 'scholar',

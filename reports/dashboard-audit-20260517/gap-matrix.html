@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard Gap Matrix</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <header>
+    <div class="topbar">
+      <div>
+        <h1>Gap Matrix</h1>
+        <p>Missing pieces, weak wiring, and keep / hide / remove decisions.</p>
+      </div>
+      <nav>
+        <a href="./index.html">Index</a>
+        <a href="./ia-map.html">IA Map</a>
+        <a href="./feature-flows.html">Flows</a>
+        <a href="./ux-review.html">UX Review</a>
+        <a href="./roadmap.html">Roadmap</a>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <section>
+      <h2>P0: Fix Before Calling Dashboard Complete</h2>
+      <table>
+        <thead>
+          <tr><th>Status</th><th>Gap</th><th>Impact</th><th>Evidence</th><th>Acceptance Criteria</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="ok">Fixed locally</td>
+            <td>Surface readiness parity failure</td>
+            <td>Operators see promoted surfaces whose readiness registry says hidden/missing.</td>
+            <td>`dashboard_surface_readiness.ml` now matches `navigation.ts` for `cascade-config`, `doctor`, `transport-health`, `feature-health`, `observatory`, `cognition`.</td>
+            <td>`scripts/check-dashboard-surface-parity.sh` passes.</td>
+          </tr>
+          <tr>
+            <td class="ok">Fixed locally</td>
+            <td>Selected repo `.masc-ide` not passed through IDE API</td>
+            <td>Keeper code metadata can appear missing when user selects a repo.</td>
+            <td>`api/ide.ts` accepts `repoId`; annotation/region fetch, create, and delete append `repo_id`.</td>
+            <td>Focused Vitest API/store tests pass.</td>
+          </tr>
+          <tr>
+            <td class="ok">Fixed locally</td>
+            <td>Region writer/reader layout mismatch</td>
+            <td>Generated code-region metadata is not naturally visible.</td>
+            <td>Region tracker and meta sync now append to fixed `.masc-ide/regions.jsonl`.</td>
+            <td>OCaml regression tests added; focused build still needs a free Dune lock.</td>
+          </tr>
+          <tr>
+            <td class="ok">Fixed locally</td>
+            <td>H2 dashboard mutation auth parity</td>
+            <td>If H2 is exposed, admin config mutation may be unauthenticated.</td>
+            <td>H2 POST now uses token-bound `CanAdmin` auth before reading the request body.</td>
+            <td>Source guard verifies helper use, `CanAdmin`, and auth-before-body-read order; runtime H2 live probe still pending.</td>
+          </tr>
+          <tr>
+            <td class="ok">Fixed locally</td>
+            <td>SubBoard route auth tool-name mismatch</td>
+            <td>SubBoard create/update/delete may bypass intended policy lookup or fail unexpectedly, depending on auth implementation.</td>
+            <td>HTTP routes now use `masc_board_sub_board_*` canonical auth names.</td>
+            <td>Route source sweep confirms no legacy `board_sub_board_*` route auth strings remain.</td>
+          </tr>
+          <tr>
+            <td class="ok">Fixed locally</td>
+            <td>Decision/choice/reason missing from line-level IDE context</td>
+            <td>Product promise says Keeper choices and reasons should be displayed at IDE line level.</td>
+            <td>Keeper decision feed now emits `choice`, `reason`, and normalized `context`; dashboard decode, trace bridge, overlay focus, and editor line chips preserve them.</td>
+            <td>Decision records include file, line, choice, reason, trace/task IDs; IDE trace chips display them. Focused Vitest and `tsc` pass.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>P1: Repair Soon</h2>
+      <table>
+        <thead>
+          <tr><th>Gap</th><th>Impact</th><th>Fix</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Monitor top-level sprawl</td>
+            <td>Operator cannot instantly distinguish core state from diagnostics.</td>
+            <td>Group config/doctor/transport/feature under Diagnostics until usage and readiness justify promotion.</td>
+          </tr>
+          <tr>
+            <td>Slash-style legacy route normalization</td>
+            <td>Some old deep links silently land on default Actions.</td>
+            <td>Apply redirect table before command slash validation or add explicit slash redirects.</td>
+          </tr>
+          <tr>
+            <td>Unrouteable `workspace/moderation` branch</td>
+            <td>Dead code or hidden feature; audits and operators disagree.</td>
+            <td>Decide: add nav/redirect, hide intentionally with route exception, or delete renderer branch.</td>
+          </tr>
+          <tr>
+            <td>Board frontend/server endpoint mismatch</td>
+            <td>Comment vote/reaction flows may fail at runtime despite frontend tests.</td>
+            <td>Register missing HTTP routes or point frontend at existing tool endpoints.</td>
+          </tr>
+          <tr>
+            <td>Keeper repo mapping wildcard fallback</td>
+            <td>Old keepers get broad repo scope unless mapping exists.</td>
+            <td>Surface wildcard as explicit risk in UI; require migration plan for least-privilege default.</td>
+          </tr>
+          <tr>
+            <td>Approval/CDAL fragmentation</td>
+            <td>Governance approvals, verification requests, goal verification, and CDAL verdicts live across multiple planes.</td>
+            <td>Build one pending-human-decision queue with links back to source surfaces.</td>
+          </tr>
+          <tr>
+            <td>Voice and multimodal first-class observability</td>
+            <td>Runtime/server paths exist, but the operator cannot review sessions/artifacts as a coherent dashboard flow.</td>
+            <td>Add thin read-only voice session and multimodal artifact gallery, or explicitly mark them out of Dashboard scope.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Must-Have / Nice-To-Have / Hide</h2>
+      <div class="grid">
+        <article class="card">
+          <h3>Must-Have</h3>
+          <ul>
+            <li>Operator Overview with live-vs-fallback state, stale keepers, blockers, approvals, proof gaps.</li>
+            <li>Keeper Detail with lifecycle, heartbeat, goal/task, repo/worktree, latest terminal reason, trace IDs.</li>
+            <li>Intervention Queue with pause/resume/recover/message/approve-deny preview-confirm-recheck flow.</li>
+            <li>Evidence Panel where deterministic proof dominates generated advice.</li>
+            <li>Audit Search across keeper, task, trace, tool, model/provider, approval actor, failure class, timestamp.</li>
+            <li>Code IDE selected-repo `.masc-ide` annotations/regions and decision context.</li>
+            <li>Risk boundaries: capability/tool shard, credential/caller identity, least privilege, high-risk tool state.</li>
+            <li>Unified pending-human-decision queue spanning HITL, verification, goal review, and CDAL.</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>Nice-To-Have</h3>
+          <ul>
+            <li>Replay/waterfall trace for a Keeper turn.</li>
+            <li>Topology/causal graph for multi-agent handoffs.</li>
+            <li>Saved operator filters.</li>
+            <li>Benchmark/readiness trends.</li>
+            <li>Autonomy-level history and rollback recommendations.</li>
+            <li>AI-generated summaries below deterministic evidence.</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>Hide / Remove Candidates</h3>
+          <ul>
+            <li>Duplicate first-level diagnostic names competing with Monitor's operator story.</li>
+            <li>`Journey Map` unless it becomes the canonical trace replay drilldown.</li>
+            <li>Lab/harness/autoresearch/voice internals from first-screen IA.</li>
+            <li>Typed multimodal internals unless a real artifact gallery and provenance workflow is present.</li>
+            <li>Raw high-volume logs from landing screen.</li>
+            <li>Any green/pass styling for inconclusive proof.</li>
+            <li>Any mutation button without preview-confirm-recheck or copy/run command fallback.</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+  </main>
+  <footer>Priorities are code-evidence based and biased toward operator safety.</footer>
+</body>
+</html>

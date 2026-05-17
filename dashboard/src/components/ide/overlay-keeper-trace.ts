@@ -435,7 +435,7 @@ function traceRouteContext(event: KeeperTraceEvent): IdeContextRouteContext {
       filePath: event.filePath,
       line: event.line,
       surface: 'Decision',
-      label: event.semanticOutcome ?? '(unknown outcome)',
+      label: decisionTraceLabel(event),
       sourceId: `trace:${event.id}`,
       goalId: event.goalId,
       taskId: event.taskId,
@@ -473,4 +473,15 @@ function traceRouteContext(event: KeeperTraceEvent): IdeContextRouteContext {
     telemetryQuery: event.logId ?? event.hopId,
     telemetry: true,
   }
+}
+
+function decisionTraceLabel(event: Extract<KeeperTraceEvent, { source: 'decision-log' }>): string {
+  const choice = event.decisionChoice?.trim()
+  const reason = event.decisionReason?.trim()
+  const outcome = event.semanticOutcome?.trim()
+  if (choice && reason) return `${choice}: ${reason}`
+  if (choice) return choice
+  if (reason) return reason
+  if (outcome) return outcome
+  return '(unknown outcome)'
 }

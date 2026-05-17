@@ -207,6 +207,20 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           | Error err -> h2_respond_auth_error h2_reqd err)
       else with_initialized_state f
     in
+    let with_h2_token_permission_auth h2_reqd ~permission f =
+      with_server_state h2_reqd (fun state ->
+        match
+          authorize_token_bound_permission_request
+            ~base_path:state.Mcp_server.room_config.base_path
+            ~permission
+            httpun_request
+        with
+        | Ok agent_name ->
+            (match h2_check_agent_rate_limit h2_reqd with
+             | Ok () -> f state agent_name
+             | Error () -> ())
+        | Error err -> h2_respond_auth_error h2_reqd err)
+    in
     let session_id_opt = get_session_id_any httpun_request in
     let h2_respond_dashboard_index () =
       let index_path = dashboard_index_path () in
@@ -696,27 +710,46 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
 
       | `POST, "/api/v1/dashboard/config/excuse-patterns" ->
-          h2_read_body h2_reqd (fun body_str ->
-            try
-               let json = Yojson.Safe.from_string body_str in
-               match Anti_rationalization.parse_excuse_patterns_json json with
-               | Error msg ->
-                   let err_json = Yojson.Safe.to_string (`Assoc [("ok", `Bool false); ("error", `String msg)]) in
-                   h2_respond_json h2_reqd err_json ~status:`Bad_request ~extra_headers:cors
-               | Ok patterns ->
-                   (match Anti_rationalization.save_excuse_patterns patterns with
-                   | Ok () ->
-                       h2_respond_json h2_reqd {|{"ok":true}|} ~extra_headers:cors
-                   | Error msg ->
-                       let err_json = Yojson.Safe.to_string (`Assoc [("ok", `Bool false); ("error", `String msg)]) in
-                       h2_respond_json h2_reqd err_json ~status:`Internal_server_error ~extra_headers:cors)
-             with
-             | Eio.Cancel.Cancelled _ as exn -> raise exn
-             | _exn ->
-               h2_respond_json h2_reqd
-                 {|{"ok":false,"error":"Invalid JSON body"}|}
-                 ~status:`Bad_request ~extra_headers:cors
-          )
+          with_h2_token_permission_auth h2_reqd ~permission:Masc_domain.CanAdmin
+            (fun _state _agent_name ->
+              h2_read_body h2_reqd (fun body_str ->
+                try
+                  let json = Yojson.Safe.from_string body_str in
+                  match Anti_rationalization.parse_excuse_patterns_json json with
+                  | Error msg ->
+                      let err_json =
+                        Yojson.Safe.to_string
+                          (`Assoc [ ("ok", `Bool false); ("error", `String msg) ])
+                      in
+                      h2_respond_json
+                        h2_reqd
+                        err_json
+                        ~status:`Bad_request
+                        ~extra_headers:cors
+                  | Ok patterns ->
+                      (match Anti_rationalization.save_excuse_patterns patterns with
+                       | Ok () ->
+                           h2_respond_json h2_reqd {|{"ok":true}|}
+                             ~extra_headers:cors
+                       | Error msg ->
+                           let err_json =
+                             Yojson.Safe.to_string
+                               (`Assoc
+                                  [ ("ok", `Bool false); ("error", `String msg) ])
+                           in
+                           h2_respond_json
+                             h2_reqd
+                             err_json
+                             ~status:`Internal_server_error
+                             ~extra_headers:cors)
+                with
+                | Eio.Cancel.Cancelled _ as exn -> raise exn
+                | _exn ->
+                    h2_respond_json
+                      h2_reqd
+                      {|{"ok":false,"error":"Invalid JSON body"}|}
+                      ~status:`Bad_request
+                      ~extra_headers:cors))
 
       | `GET, "/api/v1/dashboard/project-snapshot"
       | `GET, "/api/v1/dashboard/namespace-truth"

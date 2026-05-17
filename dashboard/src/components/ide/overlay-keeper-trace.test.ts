@@ -417,6 +417,8 @@ describe('OverlayKeeperTrace — bucket render (RFC-0028 §5)', () => {
       source: 'decision-log',
       decisionId: 'decision:scholar:2000:tool_use',
       semanticOutcome: 'error_retryable',
+      decisionChoice: 'use_shell',
+      decisionReason: 'verify touched test target',
       filePath: 'runtime.ts',
       line: 19,
       goalId: 'goal-decision',
@@ -458,7 +460,7 @@ describe('OverlayKeeperTrace — bucket render (RFC-0028 §5)', () => {
       file_path: 'runtime.ts',
       line: 19,
       surface: 'Decision',
-      label: 'error_retryable',
+      label: 'use_shell: verify touched test target',
       source_id: 'trace:decision-context',
       keeper_id: 'scholar',
     })

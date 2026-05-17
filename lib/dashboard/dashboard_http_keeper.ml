@@ -1889,8 +1889,17 @@ let keeper_decisions_json
   let items =
     List.map (fun (_ts, json, event_type, keeper_name) ->
       let m = Yojson.Safe.Util.member in
+      let string_member_opt key source =
+        match m key source with
+        | `String s ->
+          let trimmed = String.trim s in
+          if String.equal trimmed "" then None else Some trimmed
+        | _ -> None
+      in
       let string_or_null key =
-        match m key json with `String s -> `String s | _ -> `Null
+        match string_member_opt key json with
+        | Some value -> `String value
+        | None -> `Null
       in
       let float_or_null key =
         match m key json with
@@ -1903,6 +1912,52 @@ let keeper_decisions_json
         | `Int i -> `Int i
         | `Float f -> `Int (int_of_float f)
         | _ -> `Null
+      in
+      let int_member_opt key source =
+        match m key source with
+        | `Int value -> Some value
+        | `Float value when Float.is_finite value -> Some (int_of_float value)
+        | _ -> None
+      in
+      let first_string_or_null keys =
+        match List.find_map (fun key -> string_member_opt key json) keys with
+        | Some value -> `String value
+        | None -> `Null
+      in
+      let context_json =
+        let source =
+          match m "context" json with
+          | `Assoc _ as context -> context
+          | _ -> json
+        in
+        let add_string key acc =
+          match string_member_opt key source with
+          | Some value -> (key, `String value) :: acc
+          | None -> acc
+        in
+        let fields =
+          []
+          |> add_string "file_path"
+          |> add_string "goal_id"
+          |> add_string "task_id"
+          |> add_string "board_post_id"
+          |> add_string "comment_id"
+          |> add_string "pr_id"
+          |> add_string "git_ref"
+          |> add_string "log_id"
+          |> add_string "session_id"
+          |> add_string "operation_id"
+          |> add_string "worker_run_id"
+        in
+        let fields =
+          match int_member_opt "line" source, int_member_opt "line_start" source with
+          | Some line, _ -> ("line", `Int line) :: fields
+          | None, Some line -> ("line", `Int line) :: fields
+          | None, None -> fields
+        in
+        match List.rev fields with
+        | [] -> `Null
+        | fields -> `Assoc fields
       in
       let duration_ms =
         match float_or_null "duration_ms" with
@@ -1920,6 +1975,9 @@ let keeper_decisions_json
         ("event_type", `String event_type);
         ("outcome", string_or_null "outcome");
         ("terminal_reason_code", terminal_reason_code);
+        ("choice", first_string_or_null [ "choice"; "decision"; "selected"; "selected_tool"; "action" ]);
+        ("reason", first_string_or_null [ "reason"; "rationale"; "why" ]);
+        ("context", context_json);
         ("model_used", `Null);
         ("latency_ms", float_or_null "latency_ms");
         ("cost_usd", float_or_null "cost_usd");

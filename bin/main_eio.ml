@@ -262,7 +262,7 @@ let dispatch_route ~routes ~request ~path reqd =
         Http.Response.json ~status:`Internal_server_error
           ~extra_headers:(cors_headers origin)
           (Server_openai_compat.error_response
-             ~status:"server_error" ~message:"Server not initialized")
+             ~status:"server_error" ~message:"Server not initialized" ())
           reqd
       | Some state ->
         let config = state.Mcp_server.room_config in
@@ -282,7 +282,7 @@ let dispatch_route ~routes ~request ~path reqd =
               ~extra_headers:(cors_headers origin)
               (Server_openai_compat.error_response
                  ~status:"server_error"
-                 ~message:"Server runtime not fully initialized")
+                 ~message:"Server runtime not fully initialized" ())
               reqd))
   | `DELETE, "/mcp" -> handle_delete_mcp request reqd
   | `DELETE, "/mcp/managed" ->

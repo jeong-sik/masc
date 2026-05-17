@@ -16,8 +16,8 @@ val is_enabled : unit -> bool
     on this predicate before parsing the request body. *)
 
 val error_response :
-  status:string -> message:string -> string
-(** [error_response ~status ~message] returns the JSON-string
+  status:string -> ?code:string -> message:string -> unit -> string
+(** [error_response ~status ?code ~message ()] returns the JSON-string
     error envelope:
     {[
       `Assoc [
@@ -25,16 +25,17 @@ val error_response :
           ("message", `String message);
           ("type", `String status);
           ("param", `Null);
-          ("code", `Null);
+          ("code", match code with None -> `Null | Some c -> `String c);
         ])
       ]
     ]}
     The wire shape matches OpenAI's [errors.error] field structure
-    so OpenAI SDK clients parse it correctly.  The four-key
-    [error] sub-object is pinned at the contract seam — the
-    [param] / [code] fields are always [`Null] in our compat
-    layer (we do not yet differentiate per-field validation
-    errors). *)
+    so OpenAI SDK clients parse it correctly. RFC-0105: [code] is now
+    populated from [Openai_compat_error_map.t] when the upstream is a
+    typed [Agent_sdk.Error.sdk_error]; the legacy callers that omit
+    [code] continue to emit [`Null] for that field. The [param] field
+    remains pinned at [`Null] — per-field validation is not yet
+    differentiated. *)
 
 val handle_chat_completions :
   config:Coord.config ->

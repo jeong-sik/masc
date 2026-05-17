@@ -28,6 +28,7 @@
  (names test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_dashboard_oas_bridge test_masc_runtime_events test_room test_room_state_recovery test_types test_exec_tap test_auth test_auth_doctor test_auth_error_kind test_mcp_error_code test_error_body_delegation test_session_lifecycle_event test_fd_accountant test_auth_login test_audit_log test_governance_anomaly test_http_negotiation
         test_keeper_turn_terminal_code_byte_compat
         test_keeper_sdk_error_typed_bridge
+        test_openai_compat_error_map
         test_read_drop_reason
         test_log_ring_encoder
         test_keeper_turn_disposition
@@ -279,6 +280,7 @@
  (modules test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_dashboard_oas_bridge test_masc_runtime_events test_room test_room_state_recovery test_types test_exec_tap test_auth test_auth_doctor test_auth_error_kind test_mcp_error_code test_error_body_delegation test_session_lifecycle_event test_fd_accountant test_auth_login test_audit_log test_governance_anomaly test_http_negotiation
           test_keeper_turn_terminal_code_byte_compat
           test_keeper_sdk_error_typed_bridge
+          test_openai_compat_error_map
           test_read_drop_reason
           test_log_ring_encoder
           test_keeper_turn_disposition

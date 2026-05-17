@@ -6,6 +6,13 @@
     JSON-RPC 2.0 §5.1, where the legacy hand-rolled bodies omitted
     the field. *)
 
+(* RFC-0098 PR-3: this test file is the SOLE remaining caller of the
+   deprecated legacy [mcp_internal_error_json] (asserts parity with
+   the SSOT [error_body]). Suppress the deprecation alert here only
+   — production code may not. PR-4 will remove both the legacy
+   function and this suppression. *)
+[@@@alert "-deprecated"]
+
 open Alcotest
 module R = Masc_mcp.Server_mcp_transport_http_respond
 module C = Masc_mcp.Mcp_error_code

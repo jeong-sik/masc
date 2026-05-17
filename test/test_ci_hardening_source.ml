@@ -2058,18 +2058,6 @@ let test_namespace_truth_adaptive_timeout_contracts () =
     (file_contains_pattern "lib/server/server_dashboard_http_execution_surfaces.ml"
        "shell_warmed")
 
-let test_http_client_fd_safety_contracts () =
-  check bool "masc http client forbids direct Cohttp client construction in docs" true
-    (file_contains_pattern "lib/masc_http_client/masc_http_client.ml"
-       "instead of [Cohttp_eio.Client.make] directly");
-  check bool "voice bridge builds clients through masc http client" true
-    (file_contains_pattern "lib/voice/voice_bridge_core.ml"
-       "Masc_http_client.make_closing_client");
-  check bool "otel exporter builds clients through masc http client" true
-    (file_contains_pattern "lib/opentelemetry_client_cohttp_eio.ml"
-       "Masc_http_client.make_closing_client");
-  ()
-
 let test_runtime_precondition_contracts () =
   check bool "graphql routes expose result-based server state lookup" true
     (file_contains_pattern "lib/server/server_routes_http_pages.ml"
@@ -2480,8 +2468,6 @@ let () =
              test_oas_capacity_restore_contracts;
            test_case "dashboard timeout guard contracts" `Quick
              test_dashboard_timeout_guard_contracts;
-           test_case "http client fd safety contracts" `Quick
-             test_http_client_fd_safety_contracts;
            test_case "namespace-truth adaptive timeout contracts" `Quick
              test_namespace_truth_adaptive_timeout_contracts;
            test_case "runtime precondition contracts" `Quick

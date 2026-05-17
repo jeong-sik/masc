@@ -927,7 +927,7 @@ describe('dashboard goals decoding', () => {
           latest_execution_at: '2026-04-23T00:10:00Z',
           latest_receipt: { outcome: 'completed' },
           runtime_trust: {
-            disposition: 'Pause',
+            disposition: 'Blocked',
             disposition_reason: 'approval_waiting',
             needs_attention: true,
             attention_reason: 'approval_pending',
@@ -1007,7 +1007,7 @@ describe('dashboard goals decoding', () => {
 
     expect(result.linked_keepers[0]).toMatchObject({
       runtime_trust: {
-        disposition: 'Pause',
+        disposition: 'Blocked',
         disposition_reason: 'approval_waiting',
         needs_attention: true,
         attention_reason: 'approval_pending',

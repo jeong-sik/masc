@@ -857,7 +857,7 @@ let test_goal_detail_uses_receipt_disposition_for_required_tool_failure () =
         | [] -> fail "expected linked keeper detail"
       in
       let runtime_trust = linked_keeper |> member "runtime_trust" in
-      check string "receipt-derived disposition pauses" "Pause"
+      check string "receipt-derived disposition blocks" "Blocked"
         (runtime_trust |> member "disposition" |> to_string);
       check string "receipt-derived reason surfaced"
         "tool_required_unsatisfied"
@@ -1096,7 +1096,7 @@ let test_goal_detail_derives_attention_from_receipt_disposition () =
       let terminal_reason =
         runtime_trust |> member "latest_terminal_reason"
       in
-      check string "receipt disposition pauses" "Pause"
+      check string "receipt disposition blocks" "Blocked"
         (runtime_trust |> member "disposition" |> to_string);
       check string "receipt disposition fills attention reason"
         "tool_required_unsatisfied"
@@ -1158,7 +1158,7 @@ let () =
           test_case "goal detail surfaces keeper runtime trust and blockers"
             `Quick
             test_goal_detail_surfaces_keeper_runtime_trust_and_blockers;
-          test_case "goal detail pauses on required tool receipt failure"
+          test_case "goal detail blocks on required tool receipt failure"
             `Quick
             test_goal_detail_uses_receipt_disposition_for_required_tool_failure;
           test_case "goal tree tolerates null decision telemetry" `Quick

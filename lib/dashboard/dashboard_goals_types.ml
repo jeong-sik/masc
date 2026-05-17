@@ -686,15 +686,23 @@ let display_disposition_of_receipt_json receipt =
       ("Pass", "phase_skipped", operator_disposition, operator_disposition_reason)
   | "pass_next_model" ->
       ("Pass", "cascade_fallback", operator_disposition, operator_disposition_reason)
+  | "blocked" | "blocked_runtime" ->
+      ( "Blocked",
+        reason "runtime_blocked",
+        operator_disposition,
+        operator_disposition_reason )
   | "pause_human" ->
-      ( "Pause",
+      ( "Blocked",
         reason "needs_human_attention",
         operator_disposition,
         operator_disposition_reason )
   | "fail_open_next_cascade" ->
-      ("Pause", reason "degraded_retry", operator_disposition, operator_disposition_reason)
+      ( "Blocked",
+        reason "degraded_retry",
+        operator_disposition,
+        operator_disposition_reason )
   | "user_cancelled" ->
-      ("Pause", reason "cancelled", operator_disposition, operator_disposition_reason)
+      ("Blocked", reason "cancelled", operator_disposition, operator_disposition_reason)
   | "alert_exhausted" ->
       ("Alert", reason "cascade_exhausted", operator_disposition, operator_disposition_reason)
   | "unknown" ->
@@ -1054,6 +1062,7 @@ let runtime_trust_from_receipt_fallback ~config ~(meta : Keeper_types.keeper_met
   let severity =
     match disposition with
     | "Pass" -> "ok"
+    | "Blocked" -> "warn"
     | "Pause" -> "warn"
     | _ -> "bad"
   in
@@ -1358,7 +1367,7 @@ let rec build_tree context goals goal =
                  (match trust_attention_reason trust with
                   | Some _ as reason -> reason
                   | None -> trust_disposition_reason trust)
-             | Some "Pause" when trust_needs_attention trust ->
+             | Some ("Blocked" | "Pause") when trust_needs_attention trust ->
                  (match trust_attention_reason trust with
                   | Some _ as reason -> reason
                   | None -> trust_disposition_reason trust)
@@ -1464,7 +1473,7 @@ let rec build_tree context goals goal =
              else
                match trust_disposition trust with
                | Some "Alert" -> true
-               | Some "Pause" -> trust_needs_attention trust
+               | Some ("Blocked" | "Pause") -> trust_needs_attention trust
                | _ -> false)
            direct_runtime_trusts)
   in

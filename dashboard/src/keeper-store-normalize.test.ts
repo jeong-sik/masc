@@ -318,7 +318,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
         name: 'trust-keeper',
         status: 'active',
         trust: {
-          disposition: 'Pause',
+          disposition: 'Blocked',
           disposition_reason: 'approval_waiting',
           needs_attention: true,
           attention_reason: 'approval_pending',
@@ -351,7 +351,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
     ])
 
     expect(keeper?.trust).toMatchObject({
-      disposition: 'Pause',
+      disposition: 'Blocked',
       disposition_reason: 'approval_waiting',
       needs_attention: true,
       attention_reason: 'approval_pending',
@@ -465,7 +465,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
         name: 'runtime-trust-keeper',
         status: 'active',
         runtime_trust: {
-          disposition: 'Pause',
+          disposition: 'Blocked',
           operator_disposition: 'pause_human',
           operator_disposition_reason: 'required_tool_use_unsatisfied',
           needs_attention: true,
@@ -497,7 +497,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
     ])
 
     expect(keeper?.trust).toMatchObject({
-      disposition: 'Pause',
+      disposition: 'Blocked',
       operator_disposition: 'pause_human',
       operator_disposition_reason: 'required_tool_use_unsatisfied',
       needs_attention: true,

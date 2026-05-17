@@ -470,7 +470,7 @@ describe('fleetCellPresentation', () => {
     expect(cell.className).toContain('var(--bad-light)')
     expect(cell.title).toContain('KSM Running')
     expect(cell.title).toContain('runtime 정체')
-    expect(cell.title).toContain('operator pause: tool_required_unsatisfied')
+    expect(cell.title).toContain('blocked: tool_required_unsatisfied')
   })
 
   it('keeps non-KSM lanes tied to their raw FSM state', () => {
@@ -517,7 +517,7 @@ describe('buildRuntimeAssistPrompt', () => {
 
     expect(prompt).toContain('감독형 런타임 진단 요청: blocked')
     expect(prompt).toContain('cause=')
-    expect(prompt).toContain('operator pause: tool_required_unsatisfied')
+    expect(prompt).toContain('blocked: tool_required_unsatisfied')
     expect(prompt).toContain('evidence=')
     expect(prompt).toContain('"turn_lane":"tool_required"')
     expect(prompt).toContain('"visible_tool_count":0')

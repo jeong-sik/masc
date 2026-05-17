@@ -161,13 +161,13 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const trustToneClass =
     trustDisposition === 'Alert'
       ? 'bg-[var(--bad-soft)] text-[var(--color-status-err)]'
-      : trustDisposition === 'Pause' || keeper.trust?.needs_attention
+      : trustDisposition === 'Blocked' || trustDisposition === 'Pause' || keeper.trust?.needs_attention
         ? 'bg-[var(--warn-14)] text-[var(--color-status-warn)]'
         : trustDisposition === 'Pass'
           ? 'bg-[var(--ok-10)] text-[var(--color-status-ok)]'
           : 'bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)]'
   const trustDispositionLabel = trustDisposition
-    ? ({ Alert: '경보', Pause: '정지', Pass: '통과' } as Record<string, string>)[
+    ? ({ Alert: '경보', Blocked: '차단', Pause: '정지', Pass: '통과' } as Record<string, string>)[
         trustDisposition
       ] ?? trustDisposition
     : null

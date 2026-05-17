@@ -141,7 +141,7 @@ let degraded_trust_json ?now () =
   `Assoc
     [ "disposition", `String "Degraded"
     ; "disposition_reason", `String "fd_pressure"
-    ; "operator_disposition", `String "Pause"
+    ; "operator_disposition", `String "blocked_runtime"
     ; "operator_disposition_reason", `String "fd_pressure"
     ; "needs_attention", `Bool true
     ; "attention_reason", `String "fd_pressure"

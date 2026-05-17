@@ -109,6 +109,7 @@
         test_keeper_generation_lineage
         test_keeper_deliberation
         test_keeper_registry
+        test_docker_spawn_throttle
         test_keeper_supervisor
         test_keeper_alerting_path
         test_coord_eio_pure
@@ -351,6 +352,7 @@
           test_keeper_generation_lineage
           test_keeper_deliberation
           test_keeper_registry
+          test_docker_spawn_throttle
           test_keeper_supervisor
           test_keeper_alerting_path
           test_coord_eio_pure

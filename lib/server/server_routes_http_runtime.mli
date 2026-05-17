@@ -107,9 +107,11 @@ val health_path_diagnostics :
 
 val make_health_json :
   ?listener:string -> Httpun.Request.t -> Yojson.Safe.t
-(** [make_health_json ?listener request] builds the full
-    [/health] JSON body.  [listener] defaults to ["http/1.1"]
-    and is overridden to ["h2"] by the H2 gateway.
+(** [make_health_json ?listener request] builds the full health diagnostics
+    JSON body.  [listener] defaults to ["http/1.1"] and is overridden to
+    ["h2"] by the H2 gateway.  The public [/health] route uses
+    {!make_health_response_json}; callers request this full body with
+    [/health?full=1].
 
     {2 Top-level keys (operator-visible contract)}
 
@@ -177,6 +179,21 @@ val make_health_json :
     at the contract seam: a future "drop unused metric" PR
     must touch this. *)
 
+val make_health_probe_json :
+  ?listener:string -> Httpun.Request.t -> Yojson.Safe.t
+(** [make_health_probe_json ?listener request] builds the cheap default
+    [/health] probe body.  It keeps liveness/readiness-facing fields such as
+    [startup], [paths], [transport], [logs], and quick GC counters, but skips
+    durable keeper scans, reaction-ledger JSONL reads, config TOML scans, and
+    CDAL ledger inspection. *)
+
+val make_health_response_json :
+  ?listener:string -> Httpun.Request.t -> Yojson.Safe.t
+(** [make_health_response_json ?listener request] is the public [/health]
+    renderer.  It returns {!make_health_probe_json} by default and upgrades to
+    {!make_health_json} only when the request query contains [full=1] /
+    [full=true]. *)
+
 val keeper_fleet_runtime_resolution_fields : unit -> (string * Yojson.Safe.t) list
 (** [keeper_fleet_runtime_resolution_fields ()] returns the health/fleet
     safety subset projected into [/api/v1/dashboard/shell]'s
@@ -190,8 +207,8 @@ val keeper_fleet_runtime_resolution_fields : unit -> (string * Yojson.Safe.t) li
     Prometheus. *)
 
 val health_handler : Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** [health_handler request reqd] writes
-    {!make_health_json} as the response body. *)
+(** [health_handler request reqd] writes {!make_health_response_json} as the
+    response body. *)
 
 val liveness_handler : Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** [liveness_handler request reqd] always responds [200] as

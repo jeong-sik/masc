@@ -256,7 +256,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
          ───────────────────────────────────────────────────────────────────── *)
       | `GET, "/health" ->
           let body =
-            Server_routes_http_runtime.make_health_json ~listener:"h2" httpun_request
+            Server_routes_http_runtime.make_health_response_json ~listener:"h2" httpun_request
             |> Yojson.Safe.to_string
           in
           h2_respond_json h2_reqd body ~extra_headers:cors

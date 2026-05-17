@@ -228,6 +228,97 @@ let git_rev_parse_short path =
           else git_rev_parse_short_cached_any dir |> Option.value ~default:None))
 ;;
 
+let opt_string_json = function
+  | None -> `Null
+  | Some value -> `String value
+;;
+
+let opt_bool_json = function
+  | None -> `Null
+  | Some value -> `Bool value
+;;
+
+let opt_commit_equal left right =
+  match left, right with
+  | Some left, Some right -> Some (String.equal left right)
+  | _ -> None
+;;
+
+let deployment_state_json
+      ~(build : Build_identity.t)
+      ~server_repo_commit
+      ~workspace_commit
+      ~resolved_base_commit
+      ~source_mismatch
+  =
+  let binary_commit_known = Option.is_some build.binary_commit in
+  let deployed_matches_server_repo =
+    opt_commit_equal build.commit server_repo_commit
+  in
+  let deployed_matches_runtime_repo =
+    opt_commit_equal build.commit build.repo_head_commit
+  in
+  let built_matches_runtime_repo =
+    opt_commit_equal build.binary_commit build.repo_head_commit
+  in
+  let status =
+    if source_mismatch
+    then "diverged"
+    else if not binary_commit_known
+    then "unproven"
+    else (
+      match built_matches_runtime_repo with
+      | Some true -> "current"
+      | Some false -> "diverged"
+      | None -> "unknown")
+  in
+  `Assoc
+    [ "schema", `String "masc.runtime_deployment_state.v1"
+    ; "status", `String status
+    ; "operator_action_required", `Bool (String.equal status "diverged")
+    ; "binary_commit_known", `Bool binary_commit_known
+    ; ( "merged"
+      , `Assoc
+          [ "commit", opt_string_json server_repo_commit
+          ; "source", `String "server_repo_head"
+          ] )
+    ; ( "built"
+      , `Assoc
+          [ "commit", opt_string_json build.binary_commit
+          ; "source", opt_string_json build.binary_commit_source
+          ; ( "proof"
+            , `String
+                (if binary_commit_known
+                 then "build_env_commit"
+                 else "missing_build_env_commit") )
+          ] )
+    ; ( "deployed"
+      , `Assoc
+          [ "commit", opt_string_json build.commit
+          ; "source", opt_string_json build.commit_source
+          ; "started_at", `String build.started_at
+          ; "executable_path", `String build.executable_path
+          ] )
+    ; ( "runtime_repo"
+      , `Assoc
+          [ "head_commit", opt_string_json build.repo_head_commit
+          ; "head_commit_source", opt_string_json build.repo_head_commit_source
+          ] )
+    ; ( "workspace"
+      , `Assoc
+          [ "head_commit", opt_string_json workspace_commit
+          ; "resolved_base_head_commit", opt_string_json resolved_base_commit
+          ] )
+    ; ( "checks"
+      , `Assoc
+          [ "deployed_matches_merged", opt_bool_json deployed_matches_server_repo
+          ; "deployed_matches_runtime_repo", opt_bool_json deployed_matches_runtime_repo
+          ; "built_matches_runtime_repo", opt_bool_json built_matches_runtime_repo
+          ; "source_mismatch", `Bool source_mismatch
+          ] )
+    ]
+;;
+
 let clear_git_rev_parse_short_cache_for_tests () =
   Stdlib.Mutex.lock git_rev_parse_short_mu;
   Fun.protect
@@ -574,6 +665,9 @@ let runtime_resolution_json (config : Coord.config) =
       ; "diagnostics", diagnostics
       ; ("keeper_runtime", Keeper_runtime_resolved.(current () |> to_yojson))
       ; "build", Build_identity.to_yojson build
+      ; ( "deployment_state"
+        , deployment_state_json ~build ~server_repo_commit ~workspace_commit
+            ~resolved_base_commit ~source_mismatch )
       ]
       @ Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields () )
 ;;

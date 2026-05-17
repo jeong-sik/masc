@@ -176,6 +176,31 @@ let test_dashboard_tools_projection () =
         (match runtime_resolution |> member "build" |> member "started_at" with
          | `String value -> String.length value > 0
          | _ -> false);
+      let deployment_state = runtime_resolution |> member "deployment_state" in
+      check string "deployment state schema" "masc.runtime_deployment_state.v1"
+        (deployment_state |> member "schema" |> to_string);
+      check bool "deployment state status surfaced" true
+        (match deployment_state |> member "status" with
+         | `String value -> String.length value > 0
+         | _ -> false);
+      check bool "deployment state merged commit surfaced" true
+        (match deployment_state |> member "merged" |> member "commit" with
+         | `Null | `String _ -> true
+         | _ -> false);
+      check bool "deployment state built proof surfaced" true
+        (match deployment_state |> member "built" |> member "proof" with
+         | `String value -> String.length value > 0
+         | _ -> false);
+      check bool "deployment state deployed path surfaced" true
+        (match deployment_state |> member "deployed" |> member "executable_path" with
+         | `String value -> String.length value > 0
+         | _ -> false);
+      check bool "deployment state match checks surfaced" true
+        (match
+           deployment_state |> member "checks" |> member "deployed_matches_merged"
+         with
+         | `Null | `Bool _ -> true
+         | _ -> false);
       let stub_probe () =
         Atomic.set runtime_probe_calls (Atomic.get runtime_probe_calls + 1);
         `Assoc

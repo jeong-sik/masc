@@ -149,7 +149,7 @@ export interface IdeRunProgressGoal {
 }
 
 export interface IdeActivityPanelProps {
-  readonly activeFile?: string
+  readonly activeFile?: string | null
   readonly annotations?: ReadonlyArray<IdeAnnotation>
   readonly diffRows?: ReadonlyArray<UnifiedDiffRow>
   readonly pollMs?: number
@@ -339,11 +339,12 @@ function normalizedPollMs(value: number | undefined): number | null {
 
 export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
   const {
-    activeFile = '',
+    activeFile: rawActiveFile = '',
     annotations = EMPTY_ANNOTATIONS,
     diffRows = EMPTY_DIFF_ROWS,
     pollMs = 0,
   } = props
+  const activeFile = rawActiveFile ?? ''
   const store = useMemo(() => {
     const store = createRunActivityStore(DEFAULT_ROOM_ID)
     store.seed(EMPTY_ACTIVITY)

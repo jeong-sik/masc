@@ -37,6 +37,9 @@ vi.mock('./goals', () => ({
 vi.mock('./goals/goal-tree', () => ({
   GoalTree: () => html`<div data-testid="goal-tree">GoalTree</div>`,
 }))
+vi.mock('./goal-loop-panel', () => ({
+  GoalLoopPanel: () => html`<div data-testid="goal-loop-panel">GoalLoopPanel</div>`,
+}))
 vi.mock('./goals/task-detail-state', () => ({
   openTaskDetail: openTaskDetailMock,
 }))
@@ -73,10 +76,19 @@ describe('PlanningPanel', () => {
     expect(screen.queryByTestId('goal-tree')).toBeNull()
   })
 
-  it('renders FilterChips with 2 options', () => {
+  it('renders FilterChips with 3 planning options', () => {
     render(html`<${PlanningPanel} />`)
+    expect(screen.getByText('목표 루프')).toBeTruthy()
     expect(screen.getByText('목표 관리자')).toBeTruthy()
     expect(screen.getByText('백로그')).toBeTruthy()
+  })
+
+  it('renders GoalLoopPanel when view=goal-loop', () => {
+    setRoute('goal-loop')
+    render(html`<${PlanningPanel} />`)
+    expect(screen.getByTestId('goal-loop-panel')).toBeTruthy()
+    expect(screen.queryByTestId('goal-tree')).toBeNull()
+    expect(screen.queryByTestId('planning')).toBeNull()
   })
 
   it('falls back to goal-tree for unknown view', () => {

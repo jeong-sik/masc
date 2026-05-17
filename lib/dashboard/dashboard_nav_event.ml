@@ -32,7 +32,6 @@ let valid_sections =
       ; "cognition"
       ; "runtime"
       ; "cascade-config"
-      ; "goal-loop"
       ; "fleet-health"
       ; "doctor"
       ; "transport-health"
@@ -40,7 +39,7 @@ let valid_sections =
       ] )
   ; "command", [ "operations" ]
   ; "connectors", [ "connector-status" ]
-  ; "workspace", [ "board"; "sub-boards"; "planning"; "repositories"; "verification" ]
+  ; "workspace", [ "board"; "sub-boards"; "moderation"; "planning"; "repositories"; "verification" ]
   ; "lab", [ "tools"; "autoresearch"; "harness" ]
   ; "code", [ "ide-shell" ]
   ]

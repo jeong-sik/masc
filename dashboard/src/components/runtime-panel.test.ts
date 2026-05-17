@@ -21,9 +21,6 @@ async function loadRuntimePanel() {
   vi.doMock('./prometheus-metrics', () => ({
     PrometheusMetrics: () => html`<div data-testid="prometheus">PrometheusMetrics</div>`,
   }))
-  vi.doMock('./cascade-config-panel', () => ({
-    CascadeConfigPanel: () => html`<div data-testid="cascade-config">CascadeConfigPanel</div>`,
-  }))
   vi.doMock('./verification-specs-panel', () => ({
     VerificationSpecsPanel: () => html`<div data-testid="verification-specs">VerificationSpecsPanel</div>`,
   }))
@@ -40,6 +37,11 @@ async function loadRuntimePanel() {
           html`<span data-testid="chip" data-key=${c.key}>${c.label}</span>`,
         )}
       </div>
+    `,
+  }))
+  vi.doMock('./common/route-link', () => ({
+    RouteLink: ({ children, params }: { children?: unknown; params?: Record<string, string> }) => html`
+      <a data-testid="route-link" data-section=${params?.section ?? ''}>${children}</a>
     `,
   }))
   return import('./runtime-panel')
@@ -64,21 +66,23 @@ describe('RuntimePanel', () => {
     vi.doUnmock('./oas-health-chip')
     vi.doUnmock('./runtime-monitor')
     vi.doUnmock('./prometheus-metrics')
-    vi.doUnmock('./cascade-config-panel')
     vi.doUnmock('./verification-specs-panel')
     vi.doUnmock('./cost-dashboard')
     vi.doUnmock('./cascade-inspector')
     vi.doUnmock('./common/filter-chips')
+    vi.doUnmock('./common/route-link')
   })
 
-  it('renders all 5 panels by default (Signal + collapsed Diagnostic/Raw)', async () => {
+  it('renders runtime panels by default and links cascade config to its canonical surface', async () => {
     route.value.params = {}
     const { RuntimePanel } = await loadRuntimePanel()
     render(html`<${RuntimePanel} />`, container)
     await flushUi()
 
     expect(container.textContent).toContain('OasHealthChip')
-    expect(container.textContent).toContain('CascadeConfigPanel')
+    expect(container.textContent).toContain('Open Cascade Config')
+    expect(container.querySelector('[data-testid="route-link"]')?.getAttribute('data-section')).toBe('cascade-config')
+    expect(container.textContent).not.toContain('CascadeConfigPanel')
     expect(container.textContent).toContain('RuntimeMonitor')
     expect(container.textContent).toContain('PrometheusMetrics')
     expect(container.textContent).toContain('VerificationSpecsPanel')
@@ -95,7 +99,6 @@ describe('RuntimePanel', () => {
     expect(oas?.closest('details')).toBeNull()
 
     const detailIds = [
-      'runtime-details-cascade',
       'runtime-details-providers',
       'runtime-details-prometheus',
       'runtime-details-verification',
@@ -109,14 +112,14 @@ describe('RuntimePanel', () => {
   })
 
   it('explicit drill-down views bypass progressive disclosure', async () => {
-    route.value.params = { view: 'cascade' }
+    route.value.params = { view: 'inspector' }
     const { RuntimePanel } = await loadRuntimePanel()
     render(html`<${RuntimePanel} />`, container)
     await flushUi()
 
-    const cascade = container.querySelector('[data-testid="cascade-config"]')
-    expect(cascade).not.toBeNull()
-    expect(cascade?.closest('details')).toBeNull()
+    const inspector = container.querySelector('[data-testid="cascade-inspector"]')
+    expect(inspector).not.toBeNull()
+    expect(inspector?.closest('details')).toBeNull()
   })
 
   it('renders only OasHealthChip and RuntimeMonitor for providers view', async () => {
@@ -148,17 +151,16 @@ describe('RuntimePanel', () => {
     await flushUi()
 
     const chips = container.querySelectorAll('[data-testid="chip"]')
-    expect(chips.length).toBe(10)
+    expect(chips.length).toBe(9)
     expect(chips[0]?.textContent).toBe('전체')
-    expect(chips[1]?.textContent).toBe('Cascade')
-    expect(chips[2]?.textContent).toBe('런타임')
-    expect(chips[3]?.textContent).toBe('비용 / 지연')
-    expect(chips[4]?.textContent).toBe('감사')
-    expect(chips[5]?.textContent).toBe('휴리스틱')
-    expect(chips[6]?.textContent).toBe('스트레스')
-    expect(chips[7]?.textContent).toBe('검사기')
-    expect(chips[8]?.textContent).toBe('메트릭')
-    expect(chips[9]?.textContent).toBe('형식검증')
+    expect(chips[1]?.textContent).toBe('런타임')
+    expect(chips[2]?.textContent).toBe('비용 / 지연')
+    expect(chips[3]?.textContent).toBe('감사')
+    expect(chips[4]?.textContent).toBe('휴리스틱')
+    expect(chips[5]?.textContent).toBe('스트레스')
+    expect(chips[6]?.textContent).toBe('검사기')
+    expect(chips[7]?.textContent).toBe('메트릭')
+    expect(chips[8]?.textContent).toBe('형식검증')
   })
 
   it('routes runtime diagnostic views through CostDashboard', async () => {

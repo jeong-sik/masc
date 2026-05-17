@@ -1,12 +1,12 @@
 import { html } from 'htm/preact'
 import { navigate, route } from '../router'
-import { AgentsUnified } from './agents-unified'
 import { Autoresearch } from './autoresearch'
 import { FilterChips } from './common/filter-chips'
 import { KeeperDecisionsStream } from './keeper-decisions-stream'
 import { KeeperCognitionInspector } from './keeper-cognition-inspector'
 import { KeeperTokenStats } from './keeper-token-stats'
 import { MemorySubsystems } from './memory-subsystems'
+import { RouteLink } from './common/route-link'
 
 type CognitionView =
   | 'overview'
@@ -56,6 +56,69 @@ function updateViewParam(view: CognitionView): void {
   navigate('monitoring', next)
 }
 
+const OVERVIEW_LINKS: Array<{
+  label: string
+  detail: string
+  params: Record<string, string>
+}> = [
+  {
+    label: 'Keeper',
+    detail: 'BDI, goals, and cognition focus',
+    params: { section: 'cognition', view: 'keeper' },
+  },
+  {
+    label: 'Token Stats',
+    detail: 'Keeper token budget and spend',
+    params: { section: 'cognition', view: 'token-stats' },
+  },
+  {
+    label: 'Decisions',
+    detail: 'Decision stream and rationale',
+    params: { section: 'cognition', view: 'decisions' },
+  },
+  {
+    label: 'Memory',
+    detail: 'Memory subsystem entries',
+    params: { section: 'cognition', view: 'memory' },
+  },
+  {
+    label: 'Episodes',
+    detail: 'Episode-focused memory view',
+    params: { section: 'cognition', view: 'episodes' },
+  },
+  {
+    label: 'Autoresearch',
+    detail: 'Research loop diagnostics',
+    params: { section: 'cognition', view: 'autoresearch' },
+  },
+]
+
+function CognitionOverview() {
+  return html`
+    <section class="grid gap-3 md:grid-cols-2" aria-label="Cognition overview">
+      ${OVERVIEW_LINKS.map(item => html`
+        <${RouteLink}
+          key=${item.label}
+          tab="monitoring"
+          params=${item.params}
+          class="min-w-0 rounded-[var(--r-1)] border border-card-border/70 bg-[var(--color-bg-surface)] p-3 transition-colors hover:border-[var(--color-border-strong)] hover:bg-[var(--color-bg-elevated)]"
+        >
+          <div class="text-sm font-semibold text-text-strong">${item.label}</div>
+          <div class="mt-1 text-xs text-text-muted">${item.detail}</div>
+        <//>
+      `)}
+      <${RouteLink}
+        tab="monitoring"
+        params=${{ section: 'agents' }}
+        class="min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] p-3 transition-colors hover:border-[var(--color-border-strong)] hover:bg-[var(--color-bg-elevated)] md:col-span-2"
+      >
+        <div class="text-sm font-semibold text-text-strong">Agent Observatory</div>
+        <div class="mt-1 text-xs text-text-muted">Roster, keepers, and FSM views live in one agent surface.</div>
+      <//>
+    </section>
+  `
+}
+
 export function CognitionPlane() {
   const view = currentView()
 
@@ -82,8 +145,7 @@ export function CognitionPlane() {
       ` : view === 'autoresearch' ? html`
         <${Autoresearch} />
       ` : html`
-        <${AgentsUnified} />
-        <${KeeperTokenStats} />
+        <${CognitionOverview} />
       `}
     </div>
   `

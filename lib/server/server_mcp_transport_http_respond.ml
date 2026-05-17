@@ -144,7 +144,7 @@ let mcp_internal_error_json ?id msg =
       ("error", `Assoc [ ("code", `Int (-32603)); ("message", `String msg) ]);
     ]
 
-(* RFC-0097 — typed SSOT for transport-boundary error envelopes. The
+(* RFC-0098 — typed SSOT for transport-boundary error envelopes. The
    legacy factories above are intentionally untouched in PR-1 to
    guarantee byte-exact wire on existing call paths; PR-2 migrates
    them to delegations and documents the wire change (adding id:null

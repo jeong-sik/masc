@@ -1,4 +1,4 @@
-# RFC-0097 — Silent-skip grandfather inventory (lib/).
+# RFC-0098 — Silent-skip grandfather inventory (lib/).
 #
 # Format: <relative-path>:<line>:<pattern-kind>
 # Updated: 2026-05-17 (HEAD ccf0d9d3f0)
@@ -8,11 +8,11 @@
 #   E2  =  | Ok _ | Error _ -> ()      (bivalent silent-skip)
 #   T1  =  try ... with _ -> ()        (untyped catch-all silent-skip)
 #
-# This list is the BASELINE accepted at RFC-0097 PR-1 merge time. Any
+# This list is the BASELINE accepted at RFC-0098 PR-1 merge time. Any
 # new occurrence in lib/ outside this list fails the
 # `--production-scan` gate. PRs that ADD to this list must include a
 # `Quiet { reason ; recovered }` justification comment at the call site
-# (per RFC-0097 §3.4).
+# (per RFC-0098 §3.4).
 #
 # When a grandfathered site moves due to refactor, this file must be
 # updated in the same PR — the line-stability check fails otherwise.

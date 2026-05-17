@@ -30,14 +30,24 @@ fi
 pr_is_draft="${PR_LIVE_IS_DRAFT:-${PR_IS_DRAFT:-false}}"
 pr_title="${PR_TITLE:-}"
 pr_head_ref="${PR_HEAD_REF:-}"
-pr_labels_csv="${PR_LIVE_LABELS:-${PR_LABELS:-}}"
 pr_live_state="${PR_LIVE_STATE:-}"
+if [[ "${PR_LIVE_LABELS+x}" == "x" ]]; then
+  pr_labels_csv="${PR_LIVE_LABELS}"
+  pr_live_labels_lookup=1
+else
+  pr_labels_csv="${PR_LABELS:-}"
+  pr_live_labels_lookup=0
+fi
 
 if [[ -n "${PR_LIVE_IS_DRAFT:-}" ]]; then
   echo "agent draft policy: using live PR draft state ${PR_LIVE_IS_DRAFT}"
 fi
-if [[ -n "${PR_LIVE_LABELS:-}" ]]; then
-  echo "agent draft policy: using live PR labels ${PR_LIVE_LABELS}"
+if [[ "$pr_live_labels_lookup" -eq 1 ]]; then
+  if [[ -n "$PR_LIVE_LABELS" ]]; then
+    echo "agent draft policy: using live PR labels ${PR_LIVE_LABELS}"
+  else
+    echo "agent draft policy: using live PR labels (none)"
+  fi
 fi
 
 lower() {
@@ -62,9 +72,11 @@ esac
 
 csv_has_label() {
   local csv="$1"
+  [[ -n "$csv" ]] || return 1
   local wanted
   wanted="$(lower "$2")"
   local item
+  local -a items=()
   IFS=',' read -r -a items <<<"$csv"
   for item in "${items[@]}"; do
     item="$(lower "$(printf '%s' "$item" | xargs)")"

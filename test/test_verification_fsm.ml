@@ -475,7 +475,7 @@ let test_claim_next_skips_pending_verification_tasks () =
     Coord.claim_next_r config ~agent_name:"other" ()
     |> expect_claim_next_no_unclaimed)
 
-let test_claim_next_skips_rejected_verification_tasks () =
+let test_claim_next_preserves_rejected_verification_tasks () =
   with_temp_config ~fsm_enabled:true (fun config ->
     let task_1 = add_strict_task config in
     let task_2 = add_strict_task config in
@@ -499,9 +499,9 @@ let test_claim_next_skips_rejected_verification_tasks () =
      | Ok _ -> ()
      | Error e -> Alcotest.fail ("submit_verdict failed: " ^ e));
     Coord.claim_next_r config ~agent_name:"worker" ()
-    |> expect_claim_next_claimed ~task_id:task_2 ~released_task_id:(Some task_1);
+    |> expect_claim_next_claimed ~task_id:task_1 ~released_task_id:None;
     Coord.claim_next_r config ~agent_name:"other" ()
-    |> expect_claim_next_no_eligible)
+    |> expect_claim_next_claimed ~task_id:task_2 ~released_task_id:None)
 
 let test_claim_next_blocks_pending_requests_stored_only_under_masc_root () =
   with_temp_config ~fsm_enabled:true (fun config ->
@@ -711,8 +711,8 @@ let () =
         test_reject_prepare_failure_keeps_task_awaiting;
       Alcotest.test_case "claim_next skips pending verification tasks" `Quick
         test_claim_next_skips_pending_verification_tasks;
-      Alcotest.test_case "claim_next skips rejected verification tasks" `Quick
-        test_claim_next_skips_rejected_verification_tasks;
+      Alcotest.test_case "claim_next preserves rejected verification tasks" `Quick
+        test_claim_next_preserves_rejected_verification_tasks;
       Alcotest.test_case ".masc pending verification blocks claim_next" `Quick
         test_claim_next_blocks_pending_requests_stored_only_under_masc_root;
       Alcotest.test_case "self-approval blocked" `Quick

@@ -868,7 +868,7 @@ let () = test "handle_transition_verifier_allows_verdict_actions" (fun () ->
           [
             ("task_id", `String "task-001");
             ("action", `String "submit_for_verification");
-            ("notes", `String "ready for verifier");
+            ("notes", `String "ready for verifier; path:test/test_tool_task_coverage.ml");
           ])
     in
     if not submit_result.Tool_result.success then

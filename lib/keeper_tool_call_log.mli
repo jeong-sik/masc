@@ -49,7 +49,6 @@ val set_turn_context :
   ?tool_surface_class:string ->
   ?visible_tool_count:int ->
   ?required_tools:string list ->
-  ?required_tool_candidates:string list ->
   ?missing_required_tools:string list ->
   ?cascade_profile:string ->
   unit ->
@@ -98,7 +97,9 @@ val route_evidence_json_of_tool_io :
 
 val init : ?cluster_name:string -> base_path:string -> unit -> unit
 (** [init ?cluster_name ~base_path ()] creates the cluster-aware Dated_jsonl
-    store. Call once at startup. *)
+    store. Call once at startup. [MASC_TOOL_CALL_LOG_RETENTION_DAYS] controls
+    opportunistic retention; default is 30 days, and values <= 0 disable
+    pruning. *)
 
 val store_dir : unit -> string option
 (** [store_dir ()] returns the initialized durable store directory, if any. *)
@@ -142,7 +143,6 @@ val log_call :
   ?tool_surface_class:string ->
   ?visible_tool_count:int ->
   ?required_tools:string list ->
-  ?required_tool_candidates:string list ->
   ?missing_required_tools:string list ->
   ?cascade_profile:string ->
   ?result_bytes:int ->

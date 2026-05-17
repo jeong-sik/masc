@@ -11,6 +11,8 @@
     ([MASC_OAS_SSE_DRAIN_INTERVAL_SEC], default 0.25s),
     broadcasts each as an SSE event, and appends each serializable event to
     the cluster-aware [.masc/oas-events/] store for offline/debug replay.
+    The durable store prunes old date-split files on append using
+    [MASC_OAS_EVENTS_RETENTION_DAYS] (default 30; non-positive disables).
     Runs as a background Eio fiber under [sw]. *)
 val start :
   sw:Eio.Switch.t ->

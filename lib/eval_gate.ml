@@ -116,32 +116,85 @@ let normalize_command (cmd : string) : string =
   ) cmd;
   String.trim (Buffer.contents buf)
 
-(** Suspicious shell meta-patterns that indicate possible evasion attempts.
-    These don't match specific destructive commands but flag constructs
-    that could hide destructive intent from substring matching.
+(** Closed taxonomy of shell-evasion meta-patterns.  Each kind names a
+    construct that could hide destructive intent from
+    {!detect_destructive}'s substring matching; the regex + description
+    live together in {!evasion_indicators} so a new entry forces the
+    type + the list to update in lockstep (compiler-enforced, not
+    runtime-test-enforced).
 
-    Each entry is (regex_pattern, description). Checked on the raw
-    (un-normalized) command to catch patterns that normalization would strip. *)
-let evasion_indicators : (string * string) list = [
-  ({|\$[({]|}, "variable expansion or command substitution");
-  ({|\\x[0-9a-fA-F]|}, "hex escape sequence");
-  ({|\\[0-7][0-7]|}, "octal escape sequence");
-  ({|base64.*-d|}, "base64 decode pipe (possible payload obfuscation)");
-  ({|eval |}, "eval invocation (arbitrary code execution)");
-  ({|xargs.*rm|xargs.*kill|}, "xargs with destructive command");
+    Drift surface previously: a [(string * string) list] of (regex,
+    desc) with no compile-time guarantee that every kind documented
+    in the function comment had a corresponding entry. *)
+type evasion_kind =
+  | Variable_expansion
+  | Hex_escape
+  | Octal_escape
+  | Base64_decode_pipe
+  | Eval_invocation
+  | Xargs_destructive
+
+let evasion_kind_to_string = function
+  | Variable_expansion -> "variable_expansion"
+  | Hex_escape -> "hex_escape"
+  | Octal_escape -> "octal_escape"
+  | Base64_decode_pipe -> "base64_decode_pipe"
+  | Eval_invocation -> "eval_invocation"
+  | Xargs_destructive -> "xargs_destructive"
+
+type evasion_indicator = {
+  kind : evasion_kind;
+  pattern : string;
+  description : string;
+}
+
+(** Suspicious shell meta-patterns that indicate possible evasion
+    attempts.  Each entry binds a typed {!evasion_kind} to its regex
+    + operator-visible description.  Checked on the raw
+    (un-normalized) command to catch patterns that normalization
+    would strip. *)
+let evasion_indicators : evasion_indicator list = [
+  { kind = Variable_expansion;
+    pattern = {|\$[({]|};
+    description = "variable expansion or command substitution" };
+  { kind = Hex_escape;
+    pattern = {|\\x[0-9a-fA-F]|};
+    description = "hex escape sequence" };
+  { kind = Octal_escape;
+    pattern = {|\\[0-7][0-7]|};
+    description = "octal escape sequence" };
+  { kind = Base64_decode_pipe;
+    pattern = {|base64.*-d|};
+    description = "base64 decode pipe (possible payload obfuscation)" };
+  { kind = Eval_invocation;
+    pattern = {|eval |};
+    description = "eval invocation (arbitrary code execution)" };
+  { kind = Xargs_destructive;
+    pattern = {|xargs.*rm|xargs.*kill|};
+    description = "xargs with destructive command" };
 ]
 
 (** Check for shell evasion indicators in the raw (un-normalized) command.
     Returns Some(pattern, description) if a suspicious construct is found.
     This supplements [detect_destructive] by catching meta-patterns that
-    normalization-based substring matching cannot handle. *)
-let detect_evasion (command : string) : (string * string) option =
+    normalization-based substring matching cannot handle.
+
+    Preserves the legacy [(pattern, description)] return shape for
+    callers that pattern-match on the substring (e.g. classify_legacy
+    in worker_dev_tools); the typed kind is available via
+    {!detect_evasion_typed} for new callers that need to discriminate. *)
+let detect_evasion_typed (command : string) : evasion_indicator option =
   let cmd_lower = String.lowercase_ascii command in
-  List.find_opt (fun (pattern, _desc) ->
+  List.find_opt (fun { pattern; _ } ->
     Safe_ops.protect ~default:false (fun () ->
       let re = Re.Pcre.re pattern |> Re.compile in
       Re.execp re cmd_lower)
   ) evasion_indicators
+
+let detect_evasion (command : string) : (string * string) option =
+  match detect_evasion_typed command with
+  | None -> None
+  | Some { pattern; description; _ } -> Some (pattern, description)
 
 (** Check if a bash command contains destructive patterns.
     Returns None if safe, Some(pattern, description) if dangerous.

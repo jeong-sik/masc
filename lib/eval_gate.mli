@@ -37,8 +37,38 @@ val destructive_patterns : (string * string) list
 val detect_destructive : string -> (string * string) option
 (** Returns [(pattern, description)] if command matches a destructive pattern. *)
 
+(** Closed taxonomy of shell-evasion meta-patterns detected by
+    {!detect_evasion_typed} / {!detect_evasion}.  New entries force the
+    type + the [evasion_indicators] catalogue to update in lockstep —
+    no runtime drift surface. *)
+type evasion_kind =
+  | Variable_expansion
+  | Hex_escape
+  | Octal_escape
+  | Base64_decode_pipe
+  | Eval_invocation
+  | Xargs_destructive
+
+val evasion_kind_to_string : evasion_kind -> string
+(** Snake_case rendering for log / metric emission.  Pinned wording —
+    do not change without coordinating with any future telemetry. *)
+
+type evasion_indicator = {
+  kind : evasion_kind;
+  pattern : string;
+  description : string;
+}
+
+val detect_evasion_typed : string -> evasion_indicator option
+(** Returns the full typed indicator (kind + regex + description) for
+    the first match.  Use this when the caller needs to discriminate
+    by kind; {!detect_evasion} drops the kind for backward-compatible
+    string-tuple returns. *)
+
 val detect_evasion : string -> (string * string) option
-(** Returns [(indicator, description)] if command shows evasion attempt. *)
+(** Returns [(pattern, description)] if command shows evasion attempt.
+    Thin wrapper over {!detect_evasion_typed} that drops the typed
+    kind — preserved for callers that consume the string-tuple shape. *)
 
 (** {1 Pre-execution gate} *)
 

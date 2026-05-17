@@ -97,8 +97,10 @@ let identity_passwd_content ~uid ~gid =
 
 let identity_group_content ~gid = Printf.sprintf "root:x:0:\nkeeper:x:%d:\n" gid
 
-let docker_env_overrides ~extra_env =
-  [ "HOME", "/tmp"; "USER", "keeper"; "LOGNAME", "keeper"; "SHELL", "/bin/sh" ] @ extra_env
+let docker_env_overrides ~container_root ~extra_env =
+  [ "HOME", "/tmp"; "USER", "keeper"; "LOGNAME", "keeper"; "SHELL", "/bin/sh" ]
+  @ Keeper_sandbox_runtime.docker_masc_runtime_env_pairs ~container_root
+  @ extra_env
 ;;
 
 let of_request
@@ -130,6 +132,9 @@ let of_request
     in
     let passwd_path, group_path = identity_paths ~host_root in
     let workspace_mount = host_root ^ ":" ^ container_root ^ ":rw" in
+    let masc_config_mount =
+      Keeper_sandbox_runtime.docker_masc_config_mount_spec ~base_path ~container_root
+    in
     let identity_mounts =
       [ passwd_path ^ ":" ^ identity_passwd_target ^ ":ro"
       ; group_path ^ ":" ^ identity_group_target ^ ":ro"
@@ -140,12 +145,12 @@ let of_request
       { container_name
       ; image
       ; container_root
-      ; mounts = workspace_mount :: identity_mounts
+      ; mounts = workspace_mount :: masc_config_mount :: identity_mounts
       ; identity_files =
           [ passwd_path, identity_passwd_content ~uid ~gid
           ; group_path, identity_group_content ~gid
           ]
-      ; env_overrides = docker_env_overrides ~extra_env
+      ; env_overrides = docker_env_overrides ~container_root ~extra_env
       ; network_mode
       ; user = Some (uid, gid)
       ; ulimits = [ { name = nofile_ulimit_name; soft = nofile; hard = nofile } ]

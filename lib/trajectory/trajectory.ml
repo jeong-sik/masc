@@ -226,6 +226,67 @@ let trajectory_path (masc_root : string) (keeper_name : string) (trace_id : stri
 let ensure_dir path =
   Fs_compat.mkdir_p path
 
+(* RFC-0108: per-path Stdlib.Mutex + fresh-fd open/close on every
+   append.  Replaces the prior [Fs_compat.append_file] path whose LRU
+   [Append_fd_cache] shared one [out_channel] across domains; observed
+   2026-05-17 ~89 utf-8 multibyte-tear lines across the
+   trajectories/{analyst,imseonghan,sangsu,ramarama,issue_king,…}
+   files (e.g. analyst/trace-1778241201559-69ff8.jsonl:161 cut on byte
+   0x97 in mid-record).  The shared-channel hypothesis: OCaml's
+   [out_channel] buffer state is not domain-safe, so two domains both
+   write-through the cached channel can interleave bytes within a
+   record even with the Append_fd_cache mutex held.
+
+   Fix shape: a per-path Stdlib.Mutex (registry lives in the trajectory
+   module so it doesn't share state with Fs_compat) covers the entire
+   [open + output_string + close] sequence.  Fresh fd per call means no
+   shared OCaml buffer ever sees concurrent writers.  Stdlib.Mutex is
+   used (not Eio.Mutex) because the call sites
+   [record_runtime_mcp_keeper_trajectory] in
+   lib/mcp_server_eio_call_tool.ml:357 and the persist paths in
+   lib/keeper/keeper_agent_run.ml do not thread [~sw ~fs] down to here.
+   Threading sw/fs through to use the Eio-based [Jsonl_atomic.append]
+   SSOT (lib/jsonl_atomic/) is a follow-up refactor — it would touch
+   3+ caller signatures and is independent of the race-cancel guarantee.
+
+   The payload is built as [json + "\n"] before the syscall so a single
+   [output_string] reaches the channel buffer at record granularity.
+   File mode [Open_append] makes the kernel place the bytes at end-of-
+   file atomically up to PIPE_BUF; with the per-path mutex held no
+   other writer of the same path can interleave even for larger
+   records, because every other call is blocked at the mutex before
+   it opens the fd. *)
+let path_mutex_registry : (string, Stdlib.Mutex.t) Hashtbl.t = Hashtbl.create 16
+let path_mutex_registry_mu = Stdlib.Mutex.create ()
+
+let get_path_mutex path =
+  Stdlib.Mutex.lock path_mutex_registry_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock path_mutex_registry_mu)
+    (fun () ->
+      match Hashtbl.find_opt path_mutex_registry path with
+      | Some m -> m
+      | None ->
+        let m = Stdlib.Mutex.create () in
+        Hashtbl.add path_mutex_registry path m;
+        m)
+
+let atomic_append_line path line =
+  let mu = get_path_mutex path in
+  Stdlib.Mutex.lock mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock mu)
+    (fun () ->
+      let oc =
+        Stdlib.open_out_gen
+          [ Stdlib.Open_append; Stdlib.Open_creat; Stdlib.Open_wronly ]
+          0o644
+          path
+      in
+      Fun.protect
+        ~finally:(fun () -> Stdlib.close_out_noerr oc)
+        (fun () -> Stdlib.output_string oc line))
+
 let append_entry ?runtime_contract ?action_radius ~(masc_root : string)
     ~(keeper_name : string) ~(trace_id : string) (entry : tool_call_entry) :
     unit =
@@ -234,7 +295,7 @@ let append_entry ?runtime_contract ?action_radius ~(masc_root : string)
   let path = trajectory_path masc_root keeper_name trace_id in
   let json = entry_to_json ?runtime_contract ?action_radius entry in
   let line = Yojson.Safe.to_string json ^ "\n" in
-  Fs_compat.append_file path line
+  atomic_append_line path line
 
 (** Append a thinking block entry to the JSONL trajectory file. *)
 let append_thinking ~(masc_root : string) ~(keeper_name : string) ~(trace_id : string)
@@ -244,7 +305,7 @@ let append_thinking ~(masc_root : string) ~(keeper_name : string) ~(trace_id : s
   let path = trajectory_path masc_root keeper_name trace_id in
   let json = thinking_entry_to_json entry in
   let line = Yojson.Safe.to_string json ^ "\n" in
-  Fs_compat.append_file path line
+  atomic_append_line path line
 
 (** Write a trajectory summary line (appended after session ends). *)
 let append_summary ~(masc_root : string) ~(keeper_name : string) ~(trace_id : string)
@@ -266,7 +327,7 @@ let append_summary ~(masc_root : string) ~(keeper_name : string) ~(trace_id : st
     ("ended_at", `Float traj.ended_at);
   ] in
   let line = Yojson.Safe.to_string summary ^ "\n" in
-  Fs_compat.append_file path line
+  atomic_append_line path line
 
 (* ================================================================ *)
 (* Trajectory accumulator (mutable, per-session)                    *)

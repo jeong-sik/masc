@@ -1378,6 +1378,7 @@
 (include stanzas/test_tool_inline_dispatch.inc)
 (include stanzas/test_tool_name.inc)
 (include stanzas/test_tool_task_completion_example.inc)
+(include stanzas/test_trajectory_atomicity.inc)
 (include stanzas/test_transport_bridge_seal.inc)
 (include stanzas/test_work_as_heartbeat.inc)
 (include stanzas/test_worker_safety_gates.inc)

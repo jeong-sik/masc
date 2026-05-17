@@ -519,6 +519,23 @@ describe('RuntimeLensSection', () => {
             active_config_root_source: null,
             default_manifest_path: null,
           },
+          runtime_proof: {
+            source: 'keeper_tool_call_log',
+            status: 'pass',
+            matched_tool_call_count: 2,
+            successful_tool_call_count: 2,
+            failed_tool_call_count: 0,
+            tools: ['keeper_bash', 'keeper_pr_create'],
+            successful_tools: ['keeper_bash', 'keeper_pr_create'],
+            failed_tools: [],
+            sandbox_profiles: ['docker'],
+            network_modes: ['inherit'],
+            docker_visible: true,
+            git_credentials_enabled: true,
+            github_identity_materialized: true,
+            pr_create_observed: true,
+            latest_at: '2026-05-13T00:00:01Z',
+          },
           context: {
             context_injected_count: 1,
             context_compacted_event_count: 1,
@@ -695,6 +712,16 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByText('tool log artifacts')).toBeInTheDocument()
     expect(screen.getAllByText('1/1').length).toBeGreaterThan(1)
     expect(screen.getByText('0/1')).toBeInTheDocument()
+    expect(screen.getByText('runtime proof')).toBeInTheDocument()
+    expect(screen.getByText('pass / 2 calls')).toBeInTheDocument()
+    expect(screen.getByText('sandbox proof')).toBeInTheDocument()
+    expect(screen.getByText('docker')).toBeInTheDocument()
+    expect(screen.getByText('GitHub proof')).toBeInTheDocument()
+    expect(screen.getByText('git creds / identity materialized')).toBeInTheDocument()
+    expect(screen.getByText('proof tools')).toBeInTheDocument()
+    expect(screen.getByText('keeper_bash, keeper_pr_create')).toBeInTheDocument()
+    expect(screen.getByText('network proof')).toBeInTheDocument()
+    expect(screen.getByText('inherit')).toBeInTheDocument()
     expect(screen.getByText('provider attempts')).toBeInTheDocument()
     expect(screen.getAllByText('1/1').length).toBeGreaterThan(0)
     expect(screen.getByText('provider terminal')).toBeInTheDocument()

@@ -1048,6 +1048,109 @@ let test_runtime_trace_lens_summarizes_tool_axis () =
         [ "required_tool_not_materialized"; "context_delta_missing" ]
         gaps)
 
+let test_runtime_trace_lens_surfaces_docker_github_sandbox_proof () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_tool_call_log.reset_for_testing ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let keeper_name = "runtime-lens-proof" in
+      let trace_id = "trace-runtime-lens-proof" in
+      let keeper_turn_id = 12 in
+      Masc_mcp.Keeper_tool_call_log.reset_for_testing ();
+      Masc_mcp.Keeper_tool_call_log.init ~base_path:base_dir ();
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:00Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Turn_started ~status:"started" ());
+      append_manifest_or_fail config
+        (M.make ~ts:"2026-05-13T00:00:01Z" ~keeper_name
+           ~trace_id ~keeper_turn_id ~event:M.Turn_finished ~status:"finished" ());
+      Masc_mcp.Keeper_tool_call_log.log_call
+        ~keeper_name
+        ~tool_name:"keeper_bash"
+        ~input:
+          (`Assoc
+            [
+              ( "cmd",
+                `String
+                  "git clone https://github.com/jeong-sik/masc-mcp.git /workspace/masc-mcp"
+              );
+              ("git_creds_enabled", `Bool true);
+            ])
+        ~output_text:
+          {|{"ok":true,"sandbox_profile":"docker","via":"docker","git_creds_enabled":true}|}
+        ~success:true
+        ~duration_ms:1.0
+        ~trace_id
+        ~keeper_turn_id
+        ~sandbox_profile:"docker"
+        ~network_mode:"inherit"
+        ();
+      Masc_mcp.Keeper_tool_call_log.log_call
+        ~keeper_name
+        ~tool_name:"keeper_pr_create"
+        ~input:(`Assoc [ ("draft", `Bool true) ])
+        ~output_text:
+          {|{"ok":true,"sandbox_profile":"docker","via":"docker","credential":{"credential_scope":"keeper_identity","git_identity_mode":"github_identity","credential_state":{"state":"materialized"}},"url":"https://github.com/jeong-sik/masc-mcp/pull/1"}|}
+        ~success:true
+        ~duration_ms:1.0
+        ~trace_id
+        ~keeper_turn_id
+        ~sandbox_profile:"docker"
+        ~network_mode:"inherit"
+        ();
+      let status, json =
+        Masc_mcp.Server_dashboard_http_keeper_api.keeper_runtime_trace_json
+          config keeper_name ~trace_id ~turn_id:keeper_turn_id ()
+      in
+      Alcotest.(check string)
+        "runtime proof status"
+        "ok"
+        (match status with `OK -> "ok" | `Not_found -> "not_found");
+      let proof =
+        Yojson.Safe.Util.(
+          json |> member "runtime_lens" |> member "axes"
+          |> member "runtime_proof")
+      in
+      Alcotest.(check string)
+        "proof passes"
+        "pass"
+        Yojson.Safe.Util.(proof |> member "status" |> to_string);
+      Alcotest.(check int)
+        "proof matched tool calls"
+        2
+        (json_int_member "matched_tool_call_count" proof);
+      Alcotest.(check bool)
+        "proof sees docker"
+        true
+        (json_bool_member "docker_visible" proof);
+      Alcotest.(check bool)
+        "proof sees git credentials"
+        true
+        (json_bool_member "git_credentials_enabled" proof);
+      Alcotest.(check bool)
+        "proof sees github identity"
+        true
+        (json_bool_member "github_identity_materialized" proof);
+      Alcotest.(check bool)
+        "proof sees pr create"
+        true
+        (json_bool_member "pr_create_observed" proof);
+      Alcotest.(check (list string))
+        "proof sandbox profiles"
+        [ "docker" ]
+        (json_string_list_member "sandbox_profiles" proof);
+      Alcotest.(check (list string))
+        "proof network modes"
+        [ "inherit" ]
+        (json_string_list_member "network_modes" proof);
+      Alcotest.(check (list string))
+        "proof tools"
+        [ "keeper_bash"; "keeper_pr_create" ]
+        (json_string_list_member "tools" proof))
+
 let test_runtime_trace_lens_terminal_uses_latest_turn_without_turn_filter () =
   let base_dir = temp_dir () in
   Fun.protect
@@ -2542,6 +2645,10 @@ let () =
             `Quick test_runtime_trace_api_bounds_rows_but_counts_full_manifest;
           Alcotest.test_case "runtime trace lens summarizes tool axis" `Quick
             test_runtime_trace_lens_summarizes_tool_axis;
+          Alcotest.test_case
+            "runtime trace lens surfaces Docker GitHub sandbox proof"
+            `Quick
+            test_runtime_trace_lens_surfaces_docker_github_sandbox_proof;
           Alcotest.test_case
             "runtime trace lens terminal follows latest turn"
             `Quick

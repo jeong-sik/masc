@@ -1007,6 +1007,7 @@ export function RuntimeLensSection({
   const lane = lens.axes.provider_lane
   const claim = lens.axes.claim_scope
   const drift = lens.axes.config_drift
+  const proof = lens.axes.runtime_proof
   const context = lens.axes.context
   const memory = lens.axes.memory
   const clock = lens.turn_clock
@@ -1034,6 +1035,14 @@ export function RuntimeLensSection({
         <${SignalRow} label="claim goals" value=${formatLensList(claim.effective_goal_ids)} />
         <${SignalRow} label="cascade drift" value=${drift.cascade_override ? `${drift.default_cascade_name ?? '-'} -> ${drift.live_cascade_name ?? '-'}` : drift.status} />
         <${SignalRow} label="override fields" value=${formatLensList(drift.override_fields)} />
+        <${SignalRow} label="runtime proof" value=${`${proof.status} / ${proof.matched_tool_call_count} calls`} />
+        <${SignalRow} label="sandbox proof" value=${proof.docker_visible ? formatLensList(proof.sandbox_profiles, 'docker') : 'not observed'} />
+        <${SignalRow}
+          label="GitHub proof"
+          value=${`${proof.git_credentials_enabled ? 'git creds' : 'no git creds'} / ${proof.github_identity_materialized ? 'identity materialized' : 'identity missing'}`}
+        />
+        <${SignalRow} label="proof tools" value=${formatLensList(proof.tools)} />
+        <${SignalRow} label="network proof" value=${formatLensList(proof.network_modes)} />
         <${SignalRow} label="context compaction" value=${`${context.context_compacted_count}/${context.context_compact_started_count}`} />
         <${SignalRow} label="memory flush" value=${`${memory.memory_flush_success_count}/${memory.memory_flush_error_count}`} />
         <${SignalRow} label="trace id" value=${compactToken(trace.trace_id)} />

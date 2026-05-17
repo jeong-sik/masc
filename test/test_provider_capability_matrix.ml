@@ -182,6 +182,30 @@ let test_catalog_capabilities_drive_masc_projection () =
         "catalog disables inline tool choice"
         false caps.supports_inline_tool_choice)
 
+let test_cascade_filter_uses_provider_config_binding () =
+  with_provider_catalog catalog_disables_inline_tools_json (fun () ->
+      let disabled_by_catalog =
+        PC.make ~kind:PC.OpenAI_compat ~model_id:"unlisted-catalog-model"
+          ~base_url:"http://127.0.0.1:8123" ~request_path:"/v1/chat/completions" ()
+      in
+      let default_tool_capable =
+        PC.make ~kind:PC.OpenAI_compat ~model_id:"another-unlisted-model"
+          ~base_url:"http://127.0.0.1:9999" ~request_path:"/v1/chat/completions" ()
+      in
+      let filtered =
+        Cascade_config.filter_by_capabilities
+          ~pred:(fun caps -> caps.Llm_provider.Capabilities.supports_tools)
+          [ disabled_by_catalog; default_tool_capable ]
+      in
+      Alcotest.(check int)
+        "catalog-disabled provider is filtered"
+        1
+        (List.length filtered);
+      Alcotest.(check string)
+        "remaining provider"
+        default_tool_capable.PC.base_url
+        (List.hd filtered).PC.base_url)
+
 let () =
   Alcotest.run "provider_capability_matrix"
     [
@@ -205,5 +229,8 @@ let () =
           Alcotest.test_case
             "catalog capabilities drive MASC projection"
             `Quick test_catalog_capabilities_drive_masc_projection;
+          Alcotest.test_case
+            "cascade filter uses provider config binding"
+            `Quick test_cascade_filter_uses_provider_config_binding;
         ] );
     ]

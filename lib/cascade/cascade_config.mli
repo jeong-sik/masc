@@ -437,10 +437,11 @@ val resolve_label_context : string -> int option
 
 (** Filter providers by a capability predicate.
 
-    Resolves capabilities per-model (via {!Llm_provider.Capabilities.for_model_id})
-    with registry-level fallback. Removes providers that do not satisfy
-    [pred]. If all providers would be removed, returns the original list
-    unchanged (let the provider return an API error).
+    Resolves capabilities from OAS runtime provider bindings for bound
+    provider configs. Truly unbound configs keep the legacy per-model
+    lookup with registry/default fallback. Removes providers that do not
+    satisfy [pred]. If all providers would be removed, returns the original
+    list unchanged (let the provider return an API error).
 
     Example: filter to providers supporting tools:
     {[ filter_by_capabilities ~pred:(fun c -> c.supports_tools) providers ]}

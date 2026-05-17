@@ -1,4 +1,4 @@
-(** test_cascade_capability_gate — Provider ceiling validation.
+(** test_cascade_capability_gate — Provider ceiling validation/clamping.
 
     Verifies TLA+ KeeperCoreTriad.CapabilityGate (S3 invariant):
     requested_max_tokens never exceeds provider ceiling before dispatch. *)
@@ -38,9 +38,9 @@ let check_ok label expected = function
   | Ok actual -> check int label expected actual
   | Error _ -> failf "expected Ok %d" expected
 
-let test_reject_above_ceiling () =
+let test_clamp_above_ceiling () =
   validate 65536
-  |> check_violation "requested_exceeds_provider_ceiling" 65536 40960
+  |> check_ok "above ceiling clamped to provider ceiling" 40960
 
 let test_allow_below_ceiling () =
   let result = validate ~provider_ceiling:(Some 131072) 32768 in
@@ -62,7 +62,7 @@ let test_reject_nonpositive_max_tokens () =
   validate 0 |> check_violation "max_tokens_not_positive" 0 40960
 
 let test_sdk_error_round_trip_preserves_structured_violation () =
-  match validate 65536 with
+  match validate 0 with
   | Ok _ -> fail "expected validation error"
   | Error internal_error ->
     let err = CE.sdk_error_of_masc_internal_error internal_error in
@@ -70,9 +70,9 @@ let test_sdk_error_round_trip_preserves_structured_violation () =
      | Some
          (CE.Max_tokens_ceiling_violation
             { requested_max_tokens; provider_ceiling; reason; _ }) ->
-       check int "requested round trip" 65536 requested_max_tokens;
+       check int "requested round trip" 0 requested_max_tokens;
        check int "ceiling round trip" 40960 provider_ceiling;
-       check string "reason round trip" "requested_exceeds_provider_ceiling" reason
+       check string "reason round trip" "max_tokens_not_positive" reason
      | _ -> fail "expected structured violation round trip")
 
 let write_file path body =
@@ -134,7 +134,7 @@ target = "tier.primary"
       check (option int) "output ceiling" (Some 8192) ceiling;
       CI.validate_max_tokens_within_ceiling ~cascade_name
         ~provider_ceiling:ceiling 65536
-      |> check_violation "requested_exceeds_provider_ceiling" 65536 8192)
+      |> check_ok "above output ceiling clamped" 8192)
 
 let test_public_cap_helper_clamps_caller_override_to_cascade_ceiling () =
   with_temp_cascade_toml
@@ -214,7 +214,7 @@ max-output = 64000
 temperature = 0.2
 
 [kimi_cli.kimi-cli-coding.tool_candidate]
-max-output = 16384
+max-output = 64000
 temperature = 0.2
 
 [tier.strict_tool_candidates]
@@ -443,7 +443,7 @@ target = "tier-group.strict_tool_candidates"
 let () =
   run "cascade_capability_gate" [
     "max_tokens_ceiling_validation", [
-      test_case "above ceiling -> rejected" `Quick test_reject_above_ceiling;
+      test_case "above ceiling -> clamped" `Quick test_clamp_above_ceiling;
       test_case "below ceiling -> accepted" `Quick test_allow_below_ceiling;
       test_case "equal ceiling -> accepted" `Quick test_allow_equal_ceiling;
       test_case "no ceiling -> accepted" `Quick test_allow_no_ceiling;

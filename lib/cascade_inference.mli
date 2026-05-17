@@ -9,6 +9,9 @@
     2. cascade.toml "default_temperature" / "default_max_tokens"
     3. Caller-provided fallback
 
+    max_tokens values above the resolved cascade output ceiling are reduced to
+    that ceiling with a WARN.
+
     @since v2.128.0
     @since v2.149.0 — delegated to MASC Cascade_config *)
 
@@ -65,9 +68,9 @@ val cap_max_tokens_to_cascade_ceiling :
 (** Validate max_tokens against the provider ceiling before dispatch.
 
     If [provider_ceiling] is [Some ceiling] and [max_tokens > ceiling],
-    returns [Error _] instead of silently reducing the operator-supplied
-    budget. Also rejects non-positive [max_tokens] and non-positive
-    provider ceilings.
+    returns [Ok ceiling] and emits the same WARN/metric as resolution-time
+    clamping. Still rejects non-positive [max_tokens] and non-positive provider
+    ceilings.
 
     Cascade-config, fallback, and keeper runtime override values are clamped
     upstream by {!resolve_max_tokens} or

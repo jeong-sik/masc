@@ -274,18 +274,17 @@ let run_turn
   in
   let meta = ctx.meta in
   let temperature = ctx.temperature in
-  let max_tokens = ctx.max_tokens in
   let max_output_ceiling =
     Cascade_runtime.max_output_tokens_ceiling_of_cascade_name cascade_name
   in
-  let pre_dispatch_max_tokens_error =
+  let max_tokens, pre_dispatch_max_tokens_error =
     match
       Cascade_inference.validate_max_tokens_within_ceiling
         ~cascade_name
         ~provider_ceiling:max_output_ceiling
-        max_tokens
+        ctx.max_tokens
     with
-    | Ok _ -> None
+    | Ok max_tokens -> max_tokens, None
     | Error internal_error ->
       let detail =
         Option.value
@@ -293,7 +292,8 @@ let run_turn
           (Cascade_error_classify.summary_of_masc_internal_error internal_error)
       in
       Log.Keeper.error "%s: %s" meta.name detail;
-      Some (Cascade_error_classify.sdk_error_of_masc_internal_error internal_error)
+      ( ctx.max_tokens,
+        Some (Cascade_error_classify.sdk_error_of_masc_internal_error internal_error) )
   in
   let context_injector = ctx.context_injector in
   let shared_context = ctx.shared_context in

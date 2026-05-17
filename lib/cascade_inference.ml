@@ -121,12 +121,14 @@ let should_log_auto_max_tokens_clamp ~cascade_name ~source ~max_tokens ~ceiling 
 
     The narrowest ceiling is a property of cascade-internal fallback
     structure (multilane tier-groups can union members of differing output
-    budgets), so callers cannot infer it. The pre-dispatch validator
-    remains as a hard guard for non-positive budgets, invalid ceilings,
-    and stale values after a cascade reload. *)
-let cap_max_tokens_to_cascade_ceiling ~cascade_name ~source max_tokens =
-  match Cascade_runtime.max_output_tokens_ceiling_of_cascade_name cascade_name with
-  | Some ceiling when ceiling > 0 && max_tokens > ceiling ->
+    budgets), so callers cannot infer it.
+
+    Runtime overrides supplied by internal keeper callers should also flow
+    through this helper before the final pre-dispatch validator. The validator
+    remains as a hard guard for non-positive budgets and invalid ceilings. *)
+let cap_max_tokens_to_ceiling ~cascade_name ~source ~ceiling max_tokens =
+  if ceiling > 0 && max_tokens > ceiling
+  then (
     Cascade_metrics.on_max_tokens_clamped ();
     if should_log_auto_max_tokens_clamp ~cascade_name ~source ~max_tokens ~ceiling
     then
@@ -135,7 +137,13 @@ let cap_max_tokens_to_cascade_ceiling ~cascade_name ~source max_tokens =
          using ceiling; suppressing repeats for this tuple"
         (Keeper_cascade_profile.runtime_name_to_string cascade_name)
         max_tokens source ceiling;
-    ceiling
+    ceiling)
+  else max_tokens
+
+let cap_max_tokens_to_cascade_ceiling ~cascade_name ~source max_tokens =
+  match Cascade_runtime.max_output_tokens_ceiling_of_cascade_name cascade_name with
+  | Some ceiling ->
+    cap_max_tokens_to_ceiling ~cascade_name ~source ~ceiling max_tokens
   | _ -> max_tokens
 
 (** Resolve a max_tokens value: cascade config (capped) -> capped fallback. *)
@@ -151,7 +159,7 @@ let resolve_max_tokens
   | None ->
     cap_max_tokens_to_cascade_ceiling ~cascade_name ~source:"fallback" (fallback ())
 
-(** Validate max_tokens against provider ceilings before dispatch. *)
+(** Validate and clamp max_tokens against provider ceilings before dispatch. *)
 let validate_max_tokens_within_ceiling
     ~(cascade_name : Keeper_cascade_profile.runtime_name)
     ~(provider_ceiling : int option)
@@ -179,9 +187,12 @@ let validate_max_tokens_within_ceiling
     then violation ~reason:"provider_ceiling_not_positive" ~provider_ceiling:ceiling
     else if max_tokens > ceiling
     then
-      violation
-        ~reason:"requested_exceeds_provider_ceiling"
-        ~provider_ceiling:ceiling
+      Ok
+        (cap_max_tokens_to_ceiling
+           ~cascade_name
+           ~source:"pre_dispatch"
+           ~ceiling
+           max_tokens)
     else Ok max_tokens
 
 module For_testing = struct

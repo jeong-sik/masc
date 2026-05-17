@@ -1,6 +1,7 @@
 open Alcotest
 
 module CB = Masc_mcp.Keeper_failure_circuit_breaker
+module PCE = Masc_mcp.Keeper_path_check_error
 
 let contains haystack needle =
   let nl = String.length needle and hl = String.length haystack in
@@ -21,6 +22,26 @@ let test_classify_path_not_found () =
 let test_classify_path_not_allowed () =
   check bool "path_not_allowed" true
     (CB.classify_error "path_not_in_allowed_paths: /x" = CB.Path_not_allowed)
+
+let test_classify_typed_path_check_prefixes () =
+  let cwd_msg =
+    PCE.to_message (PCE.Cwd_not_directory { path = ".worktrees/missing"; hint = None })
+  in
+  check bool "typed cwd_not_directory prefix" true
+    (CB.classify_error cwd_msg = CB.Cwd_not_directory);
+  let blocked_msg =
+    PCE.to_message
+      (PCE.Path_outside_whitelist
+         { path = "/etc/passwd"; for_keeper_command = true })
+  in
+  check bool "typed path blocked prefix" true
+    (CB.classify_error blocked_msg = CB.Path_not_allowed);
+  let syntax_msg =
+    PCE.to_message
+      (PCE.Path_syntax_blocked { token = "'quoted'"; hint = None })
+  in
+  check bool "typed syntax prefix keeps existing coarse class" true
+    (CB.classify_error syntax_msg = CB.Other)
 
 let test_classify_other () =
   check bool "other" true
@@ -312,6 +333,8 @@ let () =
     "classify", [
       test_case "path_not_found" `Quick test_classify_path_not_found;
       test_case "path_not_allowed" `Quick test_classify_path_not_allowed;
+      test_case "typed path-check prefixes" `Quick
+        test_classify_typed_path_check_prefixes;
       test_case "other" `Quick test_classify_other;
     ];
     "signatures", [

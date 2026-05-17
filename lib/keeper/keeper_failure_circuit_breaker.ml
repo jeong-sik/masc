@@ -51,16 +51,29 @@ type error_class =
   | Shell_exit_nonzero
   | Other
 
+module Path_check_error = Keeper_path_check_error
+
+let classify_path_check_prefix (error_msg : string) : error_class option =
+  match Path_check_error.parse_prefix error_msg with
+  | Some (Path_check_error.Cwd_not_directory _) -> Some Cwd_not_directory
+  | Some (Path_check_error.Path_outside_whitelist _) -> Some Path_not_allowed
+  | Some (Path_check_error.Path_syntax_blocked _) -> Some Other
+  | None -> None
+;;
+
 let classify_error (error_msg : string) : error_class =
   if String.length error_msg = 0 then Other
   else
-    let contains sub = String_util.contains_substring error_msg sub in
-    if contains "path_not_found" then Path_not_found
-    else if contains "path_not_in_allowed" || contains "path_outside_sandbox" then Path_not_allowed
-    else if contains "cwd_not_directory" then Cwd_not_directory
-    else if contains "No such file or directory" then Path_not_found
-    else if contains "exit" && contains "code" then Shell_exit_nonzero
-    else Other
+    match classify_path_check_prefix error_msg with
+    | Some cls -> cls
+    | None ->
+      let contains sub = String_util.contains_substring error_msg sub in
+      if contains "path_not_found" then Path_not_found
+      else if contains "path_not_in_allowed" || contains "path_outside_sandbox" then Path_not_allowed
+      else if contains "cwd_not_directory" then Cwd_not_directory
+      else if contains "No such file or directory" then Path_not_found
+      else if contains "exit" && contains "code" then Shell_exit_nonzero
+      else Other
 
 let error_class_to_string = function
   | Path_not_found -> "path_not_found"

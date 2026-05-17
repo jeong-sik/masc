@@ -2514,6 +2514,38 @@ let require_fd_leak_delta_at_most ~label ~maximum actual =
   then Alcotest.failf "%s: expected fd delta <= %d, got %d" label maximum actual
 ;;
 
+let provider_http_in_flight () =
+  let snapshot = Fd_accountant.fd_snapshot () in
+  List.assoc Fd_accountant.Provider_http snapshot.per_kind
+;;
+
+let test_provider_http_transport_uses_fd_accountant_slot () =
+  Eio_main.run @@ fun _env ->
+  let request = mock_completion_request () in
+  let response = Ok (mock_api_response ()) in
+  let sync_observed_slot = ref false in
+  let stream_observed_slot = ref false in
+  let transport =
+    { Llm_provider.Llm_transport.complete_sync =
+        (fun _req ->
+          sync_observed_slot := provider_http_in_flight () > 0;
+          { Llm_provider.Llm_transport.response; latency_ms = Some 0 })
+    ; complete_stream =
+        (fun ?on_telemetry:_ ~on_event:_ _req ->
+          stream_observed_slot := provider_http_in_flight () > 0;
+          response)
+    }
+  in
+  let wrapped = Cascade_runner.For_testing.provider_http_slot_transport transport in
+  Alcotest.(check int) "provider http starts idle" 0 (provider_http_in_flight ());
+  ignore (wrapped.complete_sync request);
+  Alcotest.(check bool) "sync call ran under provider http slot" true !sync_observed_slot;
+  Alcotest.(check int) "provider http sync slot released" 0 (provider_http_in_flight ());
+  ignore (wrapped.complete_stream ~on_event:(fun _ -> ()) request);
+  Alcotest.(check bool) "stream call ran under provider http slot" true !stream_observed_slot;
+  Alcotest.(check int) "provider http stream slot released" 0 (provider_http_in_flight ())
+;;
+
 let test_make_per_call_switch_transport_releases_cli_fd_resources () =
   let request = mock_completion_request () in
   let leaking_delta =
@@ -6657,6 +6689,10 @@ let () =
             "CLI transports release fd resources per call"
             `Quick
             test_make_per_call_switch_transport_releases_cli_fd_resources
+        ; Alcotest.test_case
+            "HTTP transports use provider FD slot"
+            `Quick
+            test_provider_http_transport_uses_fd_accountant_slot
         ; Alcotest.test_case
             "invalid explicit model label is rejected"
             `Quick

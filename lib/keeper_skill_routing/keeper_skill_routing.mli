@@ -41,6 +41,15 @@ val format_skill_route_reason : keeper_skill_route -> string
 (** Drop SKILL: / SKILL_REASON: lines from a model response. *)
 val strip_skill_route_lines : string -> string
 
+(** [count_skill_route_lines s] returns the number of lines in [s]
+    whose trimmed lowercased prefix is "skill:" or "skill_reason:".
+    Pure, no side effects.  Main-library callers use this alongside
+    {!strip_skill_route_lines} to emit a Prometheus counter for
+    resonance-loop input detection without violating the
+    dependency-leaf boundary of this sub-library (RFC-0056 Phase
+    1B). *)
+val count_skill_route_lines : string -> int
+
 (** Parse a model response's SKILL: / SKILL_REASON: header into a
     route. Falls back to [fallback_route] (with adjusted
     [selection_mode]) if the header is missing or invalid. *)

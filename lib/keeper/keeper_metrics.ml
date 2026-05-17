@@ -691,6 +691,14 @@ let metric_keeper_decision_audit_ring_overflows =
   "masc_keeper_decision_audit_ring_overflows_total"
 ;;
 
+let metric_keeper_reply_skill_route_strips =
+  "masc_keeper_reply_skill_route_strips_total"
+;;
+
+let metric_keeper_reply_skill_route_lines_removed =
+  "masc_keeper_reply_skill_route_lines_removed_total"
+;;
+
 let metric_keeper_memory_llm_summary_outcomes =
   "masc_keeper_memory_llm_summary_outcomes_total"
 ;;

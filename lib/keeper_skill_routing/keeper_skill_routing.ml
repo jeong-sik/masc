@@ -127,18 +127,30 @@ let format_skill_route_reason (route : keeper_skill_route) : string =
   | Model_selected r -> Printf.sprintf "SKILL_REASON: %s" r
   | Model_rejected r -> Printf.sprintf "SKILL_REASON: %s (heuristic fallback)" r
 
+(* Shared classifier: a "skill route" line is a non-blank line whose
+   trimmed lowercased prefix is "skill:" or "skill_reason:".  Blank
+   lines are not route lines (they pass through the strip).  Used by
+   both [strip_skill_route_lines] and [count_skill_route_lines] so
+   the count semantics stay in sync with the strip semantics. *)
+let is_skill_route_line (line : string) : bool =
+  let trimmed = String.trim line in
+  if trimmed = "" then false
+  else
+    let lc = String.lowercase_ascii trimmed in
+    String.starts_with ~prefix:"skill:" lc
+    || String.starts_with ~prefix:"skill_reason:" lc
+
 let strip_skill_route_lines (raw : string) : string =
   let lines = String.split_on_char '\n' raw in
-  let keep line =
-    let trimmed = String.trim line in
-    if trimmed = "" then true
-    else
-      let lc = String.lowercase_ascii trimmed in
-      if String.starts_with ~prefix:"skill:" lc then false
-      else if String.starts_with ~prefix:"skill_reason:" lc then false
-      else true
-  in
-  lines |> List.filter keep |> String.concat "\n"
+  lines
+  |> List.filter (fun line -> not (is_skill_route_line line))
+  |> String.concat "\n"
+
+let count_skill_route_lines (raw : string) : int =
+  String.split_on_char '\n' raw
+  |> List.fold_left
+       (fun acc line -> if is_skill_route_line line then acc + 1 else acc)
+       0
 
 let parse_skill_route_response (text : string)
     ~(fallback_route : keeper_skill_route) : keeper_skill_route =

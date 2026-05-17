@@ -352,6 +352,22 @@ val metric_keeper_decision_audit_ring_overflows : string
     decision-emission rate and forensics data is being silently
     dropped. *)
 
+val metric_keeper_reply_skill_route_strips : string
+(** Counter for [Keeper_text_processing.strip_internal_reply_markup]
+    invocations that found and stripped at least one
+    [SKILL:] / [SKILL_REASON:] line from the raw reply.  Each
+    increment is one invocation; pair with
+    [metric_keeper_reply_skill_route_lines_removed] for the total
+    line count.  Rising rate is the resonance-loop input indicator
+    for the *skill* marker (sibling of
+    [metric_keeper_summarizer_state_scrubs] for the [STATE] marker
+    in PR #15676). *)
+
+val metric_keeper_reply_skill_route_lines_removed : string
+(** Counter for the total number of SKILL: / SKILL_REASON: lines
+    stripped from raw replies.  Divide by
+    [_reply_skill_route_strips] for lines-per-invocation. *)
+
 val metric_keeper_memory_llm_summary_outcomes : string
 (** Counter for [Keeper_memory_llm_summary.summarize_with_provider]
     attempts, classified by label [outcome] (ok_summary | timed_out |

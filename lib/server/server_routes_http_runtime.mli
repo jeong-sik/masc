@@ -118,7 +118,7 @@ val make_health_json :
     [transport] / [paths] / [uptime] / [sse_clients] /
     [startup] / [subsystems] / [feature_flags] / [gc] /
     [keeper_fibers] / [keeper_fd_pressure] / [keeper_fleet_safety] /
-    [paused_keepers] /
+    [keeper_reaction_ledger] / [paused_keepers] /
     [keeper_config_parse_error_count] / [keeper_config_parse_errors] /
     [keeper_config_unknown_key_count] / [keeper_config_unknown_keys] /
     [keeper_config_schema_status] / [keeper_config_schema_blocking] /
@@ -149,6 +149,11 @@ val make_health_json :
     exist but no fiber is running, and [degraded] when multiple bootable
     keepers exist but the running fiber count is below the safety margin.
 
+    [keeper_reaction_ledger] summarizes recent durable stimulus -> reaction
+    rows per keeper.  It reports [degraded] when a persisted stimulus has no
+    later reaction/cursor/receipt row in the scanned window, making a stopped
+    reaction chain visible without scraping keeper-local JSONL files.
+
     {2 lazy_task_boot_guard_fires_total contract (P2 silent-
     failure fix)}
 
@@ -164,7 +169,10 @@ val keeper_fleet_runtime_resolution_fields : unit -> (string * Yojson.Safe.t) li
     safety subset projected into [/api/v1/dashboard/shell]'s
     [runtime_resolution].  It intentionally flattens
     [paused_keepers] to a count for the dashboard shell health chip while
-    [/health] keeps the richer paused keeper object. *)
+    [/health] keeps the richer paused keeper object.  The
+    [keeper_reaction_ledger] field keeps the same summary object as
+    [/health] so the dashboard can render pending durable stimuli without a
+    second endpoint. *)
 
 val health_handler : Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** [health_handler request reqd] writes

@@ -239,6 +239,50 @@ let keeper_fleet_safety_health_json ~keeper_fibers ~paused_keepers_json =
       , `Bool (no_running_fibers || low_running_fiber_margin) )
     ]
 
+let take limit values =
+  let rec loop remaining acc = function
+    | [] -> List.rev acc
+    | _ when remaining <= 0 -> List.rev acc
+    | value :: rest -> loop (remaining - 1) (value :: acc) rest
+  in
+  loop limit [] values
+;;
+
+let keeper_reaction_ledger_health_json () =
+  match current_server_state_opt () with
+  | None ->
+    `Assoc
+      [ "schema", `String "keeper.reaction_ledger.fleet_summary.v1"
+      ; "status", `String "unavailable"
+      ; "operator_action_required", `Bool false
+      ; "keeper_count", `Int 0
+      ; "keeper_names", `List []
+      ; "scanned_row_limit_per_keeper", `Int 20
+      ; "row_count", `Int 0
+      ; "stimulus_count", `Int 0
+      ; "reaction_count", `Int 0
+      ; "pending_stimulus_count", `Int 0
+      ; "pending_by_keeper", `List []
+      ; "read_error_count", `Int 0
+      ; "keepers", `List []
+      ]
+  | Some state ->
+    let config = state.Mcp_server.room_config in
+    let keeper_names =
+      try Keeper_types.keeper_names config |> sorted_unique_strings |> take 64 with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        Log.Keeper.warn
+          "health: failed to compute keeper reaction ledger names: %s"
+          (Printexc.to_string exn);
+        []
+    in
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path:config.base_path
+      ~keeper_names
+      ~limit_per_keeper:20
+;;
+
 let paused_keeper_count = function
   | `Assoc fields ->
       (match List.assoc_opt "count" fields with
@@ -268,6 +312,7 @@ let keeper_fleet_runtime_resolution_fields () =
   let base_path = current_room_base_path_opt () in
   let keeper_fibers = Keeper_registry.count_running ?base_path () in
   let paused_keepers_json = paused_keepers_health_json () in
+  let reaction_ledger_json = keeper_reaction_ledger_health_json () in
   let fleet_safety =
     keeper_fleet_safety_health_json ~keeper_fibers ~paused_keepers_json
   in
@@ -278,6 +323,7 @@ let keeper_fleet_runtime_resolution_fields () =
     , Keeper_fd_pressure.runtime_state_json ~active_keepers:keeper_fibers
         ~starting_keepers:0 ~requested_keepers:24 () )
   ; "keeper_fleet_safety", fleet_safety
+  ; "keeper_reaction_ledger", reaction_ledger_json
   ]
 ;;
 
@@ -334,6 +380,7 @@ let make_health_json ?(listener = "http/1.1") request =
   let base_path = current_room_base_path_opt () in
   let keeper_fibers = Keeper_registry.count_running ?base_path () in
   let paused_keepers_json = paused_keepers_health_json () in
+  let reaction_ledger_json = keeper_reaction_ledger_health_json () in
   Tool_args.ok_assoc [
     ("server", `String "masc-mcp");
     ("version", `String build.release_version);
@@ -379,6 +426,7 @@ let make_health_json ?(listener = "http/1.1") request =
     ( "keeper_fleet_safety"
     , keeper_fleet_safety_health_json ~keeper_fibers
         ~paused_keepers_json );
+    ("keeper_reaction_ledger", reaction_ledger_json);
     (* Paused-keeper visibility: a keeper with [meta.paused = true] does not
        run turns, and auto-paused keepers may no longer have a live registry
        entry. The dashboard "깨우기" button now auto-resumes paused keepers,

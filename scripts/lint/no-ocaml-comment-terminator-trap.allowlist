@@ -7,5 +7,5 @@
 #
 # Audited 2026-05-17 (PR adding scripts/lint/no-ocaml-comment-terminator-trap.sh).
 
-lib/server/server_runtime_bootstrap.ml:1398
+lib/server/server_runtime_bootstrap.ml:1461
 lib/keeper/keeper_types_profile.ml:647

@@ -78,7 +78,7 @@ type http_method = [ `GET | `POST | `PUT | `DELETE | `HEAD | `PATCH ]
 
 val request :
   t ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?timeout_seconds:float ->
   method_:http_method ->
   url:string ->

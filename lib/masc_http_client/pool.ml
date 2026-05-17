@@ -321,7 +321,9 @@ let do_request t ?headers ?body ~method_ uri : (response, string) result =
          Ok { status; headers = headers_list; body = body_str })
 
 (* Optional wall-clock timeout race; mirrors masc_http_client pattern. *)
-let with_optional_timeout ?clock ?timeout_seconds f =
+let with_optional_timeout
+    (type a) ?clock ?timeout_seconds (f : unit -> (a, string) result) :
+  (a, string) result =
   match clock, timeout_seconds with
   | Some clock, Some t when t > 0.0 ->
     Eio.Fiber.first
@@ -331,7 +333,8 @@ let with_optional_timeout ?clock ?timeout_seconds f =
          Error (Printf.sprintf "Pool.request: timeout after %.1fs" t))
   | _ -> f ()
 
-let request t ?clock ?timeout_seconds ~method_ ~url ?headers ?body () =
+let request t ?(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t option)
+    ?timeout_seconds ~method_ ~url ?headers ?body () =
   with_optional_timeout ?clock ?timeout_seconds @@ fun () ->
   let uri = Uri.of_string url in
   do_request t ?headers ?body ~method_ uri

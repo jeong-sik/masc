@@ -1570,7 +1570,7 @@ let test_create_server_state_records_runtime_resolution () =
       Server_startup_state.reset ~backend_mode:"filesystem" ();
       ignore
         (Server_runtime_bootstrap.create_server_state ~sw ~base_path:dir ~clock
-           ~mono_clock ~net ~proc_mgr ~fs);
+           ~mono_clock ~net ~proc_mgr ~fs ());
       let json = Server_startup_state.to_yojson () in
       let open Yojson.Safe.Util in
       Alcotest.(check string) "create_server_state records config root"
@@ -1607,7 +1607,7 @@ let test_create_server_state_preserves_raw_input_base_path () =
       Server_startup_state.reset ~backend_mode:"filesystem" ();
       ignore
         (Server_runtime_bootstrap.create_server_state ~sw ~base_path:raw_input
-           ~clock ~mono_clock ~net ~proc_mgr ~fs);
+           ~clock ~mono_clock ~net ~proc_mgr ~fs ());
       let json = Server_startup_state.to_yojson () in
       let open Yojson.Safe.Util in
       Alcotest.(check string) "raw input base path preserved in diagnostics"
@@ -2156,7 +2156,7 @@ let test_sync_bootable_keeper_credentials_mints_keeper_alias_token () =
       Eio.Switch.run @@ fun sw ->
       let state =
         Server_runtime_bootstrap.create_server_state ~sw ~base_path:dir ~clock
-          ~mono_clock ~net ~proc_mgr ~fs
+          ~mono_clock ~net ~proc_mgr ~fs ()
       in
       Server_runtime_bootstrap.bootstrap_server_state_blocking state;
       Server_runtime_bootstrap.sync_bootable_keeper_credentials state;
@@ -2227,7 +2227,7 @@ let test_sync_bootable_keeper_credentials_rotates_shared_keeper_tokens () =
       Eio.Switch.run @@ fun sw ->
       let state =
         Server_runtime_bootstrap.create_server_state ~sw ~base_path:dir ~clock
-          ~mono_clock ~net ~proc_mgr ~fs
+          ~mono_clock ~net ~proc_mgr ~fs ()
       in
       Server_runtime_bootstrap.bootstrap_server_state_blocking state;
       Server_runtime_bootstrap.sync_bootable_keeper_credentials state;

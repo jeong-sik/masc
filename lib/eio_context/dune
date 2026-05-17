@@ -6,4 +6,4 @@
  (modules eio_context)
  ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 enabled. Leaf util sublib.
  (flags (:standard -w +4))
- (libraries eio uri masc_log ca-certs tls tls-eio domain-name))
+ (libraries eio eio.unix uri masc_log ca-certs tls tls-eio domain-name))

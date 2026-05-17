@@ -249,6 +249,7 @@ let record_tool_policy_init_failure ~base_path msg =
   Log.Server.error "Fatal tool policy config load failure: %s" msg
 
 let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
+    ?env ()
     : Mcp_server.server_state =
   let input_base_path =
     match String.trim base_path with
@@ -263,6 +264,11 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   Eio_context.set_net net;
   Eio_context.set_clock clock;
   Eio_context.set_mono_clock mono_clock;
+  (* RFC-0107 Phase D.2c — record full Eio.Stdenv for piaf-backed
+     Pool in Masc_http_client.  Optional: tests / pre-bootstrap
+     callers may omit [env], in which case Pool falls back to a
+     stub (request returns Error). *)
+  Option.iter Eio_context.set_env env;
   force_jsonl_fallback_env ();
   ensure_default_oas_cascade_timeout_env ();
   Process_eio.init ~cwd_default:Eio.Path.(fs / base_path) ~proc_mgr ~clock;
@@ -1468,7 +1474,8 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Agent_sdk_log_bridge.install ();
       Log.Server.info "Agent_sdk_log_bridge installed (agent_sdk.Log -> masc structured log)";
       let state =
-        create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
+        create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr
+          ~fs ~env ()
       in
       let format_catalog_validation_error label rejection =
         Printf.sprintf

@@ -24,6 +24,19 @@ val set_switch : Eio.Switch.t -> unit
 (** Set the global Eio switch (server root_sw). Written once at server
     bootstrap; survives until process exit. *)
 
+val set_env : Eio_unix.Stdenv.base -> unit
+(** Set the global Eio standard environment.  Required by long-lived
+    consumers that need more than [net]/[clock] (e.g. piaf
+    [Client.create] in [Masc_http_client.Pool]).  Written once at
+    server bootstrap. *)
+
+val get_env_opt : unit -> Eio_unix.Stdenv.base option
+(** Get the Eio standard environment if available.  Returns [None]
+    before [set_env] is called (test setup before [Eio_main.run] or
+    pre-bootstrap helper code).  Callers that need [env] must handle
+    this gracefully — see [Masc_http_client] for the lazy-init
+    pattern. *)
+
 val with_turn_switch : Eio.Switch.t -> (unit -> 'a) -> 'a
 (** [with_turn_switch sw f] binds [sw] as the turn-scoped switch on the
     *current fiber* and any fibers forked from inside [f]. Reads of

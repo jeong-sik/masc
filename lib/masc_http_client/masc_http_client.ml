@@ -104,87 +104,63 @@ let with_optional_timeout ?clock ?timeout_sec f =
           Error (Printf.sprintf "timeout after %.1fs" timeout_sec))
   | _ -> f ()
 
-let post_sync ?clock ?timeout_sec ~net ?(https = None) ~url ~headers ~body () =
+(* ── Pool singleton ─────────────────────────────────────────────────
+
+   RFC-0107 Phase D.2c — the per-process [Pool.t] is lazy-initialized
+   on first use, reading [sw] and [env] from [Eio_context].  This
+   keeps the existing [post_sync] / [get_sync] / [get_response_sync]
+   signatures stable: 13 callsites in lib/ continue to pass [~net]
+   and optionally [?https], but those are now ignored (pool owns the
+   transport).  Once D.2c bis migrates [voice_bridge_core] +
+   [opentelemetry_client_cohttp_eio] off [make_closing_client],
+   [~net] and [~https] can be dropped from the public mli (planned
+   for D.2c.2 follow-up). *)
+let pool_ref : Pool.t option ref = ref None
+let pool_mu = Eio.Mutex.create ()
+
+let pool_init_error () =
+  Error
+    "masc_http_client: Eio_context.set_env not called — \
+     RFC-0107 Phase D pool cannot be initialized.  This indicates a \
+     bootstrap-order bug (Pool.request from before \
+     Server_runtime_bootstrap.create_server_state)."
+
+let with_pool f =
+  match !pool_ref with
+  | Some p -> f p
+  | None ->
+    Eio.Mutex.use_rw ~protect:false pool_mu (fun () ->
+      match !pool_ref with
+      | Some p -> f p
+      | None ->
+        (match Eio_context.get_switch_opt (), Eio_context.get_env_opt () with
+         | Some sw, Some env ->
+           let p = Pool.create ~sw ~env () in
+           pool_ref := Some p;
+           f p
+         | _ -> pool_init_error ()))
+
+let post_sync ?clock ?timeout_sec ~net:_ ?https:_ ~url ~headers ~body () =
   with_optional_timeout ?clock ?timeout_sec @@ fun () ->
-  try
-    Eio.Switch.run @@ fun sw ->
-    let client = make_closing_client ~sw ~net ~https in
-    let uri = Uri.of_string url in
-    let hdr =
-      Cohttp.Header.of_list (("connection", "close") :: headers)
-    in
-    let body_content = Eio.Flow.string_source body in
-    let resp, resp_body =
-      Cohttp_eio.Client.post client ~sw uri ~headers:hdr ~body:body_content
-    in
-    let code =
-      Cohttp.Response.status resp |> Cohttp.Code.code_of_status
-    in
-    let body_str =
-      let max_size = 8 * 1024 * 1024 in
-      let buf = Buffer.create 4096 in
-      let chunk = Cstruct.create 4096 in
-      let rec read_chunks () =
-        if Buffer.length buf > max_size then
-          raise (Failure (Printf.sprintf "masc_http_client: body size exceeds %d MB" (max_size / 1024 / 1024)))
-        else
-          match Eio.Flow.single_read resp_body chunk with
-          | n ->
-            Buffer.add_string buf (Cstruct.to_string ~off:0 ~len:n chunk);
-            Eio.Fiber.yield ();
-            read_chunks ()
-          | exception End_of_file -> Buffer.contents buf
-      in
-      read_chunks ()
-    in
-    Ok (code, body_str)
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn -> Error (Printexc.to_string exn)
+  with_pool @@ fun pool ->
+  match Pool.request pool ?clock ?timeout_seconds:timeout_sec
+          ~method_:`POST ~url ~headers ~body () with
+  | Ok { Pool.status; body; _ } -> Ok (status, body)
+  | Error e -> Error e
 
 (** GET with structured error handling. *)
-let get_response_sync ?clock ?timeout_sec ~net ?(https = None) ~url ~headers () =
+let get_response_sync ?clock ?timeout_sec ~net:_ ?https:_ ~url ~headers () =
   with_optional_timeout ?clock ?timeout_sec @@ fun () ->
-  try
-    Eio.Switch.run @@ fun sw ->
-    let client = make_closing_client ~sw ~net ~https in
-    let uri = Uri.of_string url in
-    let hdr =
-      Cohttp.Header.of_list (("connection", "close") :: headers)
-    in
-    let resp, resp_body =
-      Cohttp_eio.Client.get client ~sw ~headers:hdr uri
-    in
-    let code =
-      Cohttp.Response.status resp |> Cohttp.Code.code_of_status
-    in
-    let response_headers =
-      Cohttp.Response.headers resp |> Cohttp.Header.to_list
-    in
-    let body_str =
-      let max_size = 8 * 1024 * 1024 in
-      let buf = Buffer.create 4096 in
-      let chunk = Cstruct.create 4096 in
-      let rec read_chunks () =
-        if Buffer.length buf > max_size then
-          raise (Failure (Printf.sprintf "masc_http_client: body size exceeds %d MB" (max_size / 1024 / 1024)))
-        else
-          match Eio.Flow.single_read resp_body chunk with
-          | n ->
-            Buffer.add_string buf (Cstruct.to_string ~off:0 ~len:n chunk);
-            Eio.Fiber.yield ();
-            read_chunks ()
-          | exception End_of_file -> Buffer.contents buf
-      in
-      read_chunks ()
-    in
-    Ok { status = code; headers = response_headers; body = body_str }
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn -> Error (Printexc.to_string exn)
+  with_pool @@ fun pool ->
+  match Pool.request pool ?clock ?timeout_seconds:timeout_sec
+          ~method_:`GET ~url ~headers () with
+  | Ok { Pool.status; headers; body } ->
+    Ok { status; headers; body }
+  | Error e -> Error e
 
 (** GET with structured error handling. *)
-let get_sync ?clock ?timeout_sec ~net ?(https = None) ~url ~headers () =
-  match get_response_sync ?clock ?timeout_sec ~net ~https ~url ~headers () with
+let get_sync ?clock ?timeout_sec ~net ?https ~url ~headers () =
+  match get_response_sync ?clock ?timeout_sec ~net ?https ~url ~headers ()
+  with
   | Ok response -> Ok (response.status, response.body)
   | Error _ as error -> error

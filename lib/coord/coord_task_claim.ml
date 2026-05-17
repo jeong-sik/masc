@@ -73,6 +73,43 @@ let clear_stale_worktree_binding (task : Masc_domain.task) =
   | Some _ -> { task with worktree = None }
 ;;
 
+let active_owned_task_ids_for_agent config ~agent_name (backlog : Masc_domain.backlog)
+  =
+  backlog.tasks
+  |> List.filter_map (fun (task : Masc_domain.task) ->
+         match task.task_status with
+         | Claimed { assignee; _ } | InProgress { assignee; _ }
+           when Coord_task_classify.same_task_actor config assignee agent_name ->
+           Some task.id
+         | Todo
+         | Claimed _
+         | InProgress _
+         | AwaitingVerification _
+         | Done _
+         | Cancelled _ -> None)
+  |> List.sort_uniq String.compare
+;;
+
+let active_ownership_conflict_message ~agent_name ~requested_task_id task_ids =
+  Printf.sprintf
+    "Agent %s already owns active task(s): %s. Finish, release, or cancel them \
+     before claiming %s."
+    agent_name
+    (String.concat ", " task_ids)
+    requested_task_id
+;;
+
+let active_ownership_conflict_for_claim config ~agent_name ~requested_task_id
+    (backlog : Masc_domain.backlog) =
+  match
+    active_owned_task_ids_for_agent config ~agent_name backlog
+    |> List.filter (fun task_id -> not (String.equal task_id requested_task_id))
+  with
+  | [] -> None
+  | task_ids ->
+    Some (active_ownership_conflict_message ~agent_name ~requested_task_id task_ids)
+;;
+
 (** Claim task with file locking (TOCTOU prevention) *)
 let claim_task config ~agent_name ~task_id =
   ensure_initialized config;
@@ -90,6 +127,14 @@ let claim_task config ~agent_name ~task_id =
            let found = ref false in
            let already_claimed = ref None in
            let blocked_reason = ref None in
+           let ownership_conflict = ref None in
+           let active_conflict =
+             active_ownership_conflict_for_claim
+               config
+               ~agent_name
+               ~requested_task_id:task_id
+               backlog
+           in
            let new_tasks =
              List.map
                (fun (task : task) ->
@@ -102,6 +147,9 @@ let claim_task config ~agent_name ~task_id =
                      | None -> ());
                     match task.task_status with
                     | _ when !blocked_reason <> None -> task
+                    | Todo when Option.is_some active_conflict ->
+                      ownership_conflict := active_conflict;
+                      task
                     | Todo ->
                       let task =
                         task
@@ -128,6 +176,9 @@ let claim_task config ~agent_name ~task_id =
              match !blocked_reason with
              | Some r -> Printf.sprintf "Task %s blocked from re-claim: %s" task_id r
              | None ->
+               (match !ownership_conflict with
+                | Some msg -> msg
+                | None ->
                (match !already_claimed with
                 | Some other ->
                   Printf.sprintf "Task %s is already claimed by %s" task_id other
@@ -174,7 +225,7 @@ let claim_task config ~agent_name ~task_id =
                            (Masc_domain.Claimed
                               { assignee = agent_name; claimed_at = now_iso () })
                          ());
-                  Printf.sprintf "%s claimed %s" agent_name task_id))
+                  Printf.sprintf "%s claimed %s" agent_name task_id)))
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | e -> Printf.sprintf "Error: %s" (Printexc.to_string e)))
@@ -226,6 +277,26 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
              Error
                (Masc_domain.Task (Masc_domain.Task_error.InvalidState
                   (Printf.sprintf "Task %s is blocked from re-claim: %s" task_id r)))
+         in
+         let* () =
+           match task.task_status with
+           | Todo ->
+             (match
+                active_ownership_conflict_for_claim
+                  config
+                  ~agent_name
+                  ~requested_task_id:task_id
+                  backlog
+              with
+              | None -> Ok ()
+              | Some msg ->
+                Error
+                  (Masc_domain.Task (Masc_domain.Task_error.InvalidState msg)))
+           | Claimed _
+           | InProgress _
+           | AwaitingVerification _
+           | Done _
+           | Cancelled _ -> Ok ()
          in
          (* fold_left to find+transform in a single pass without mutable refs.
          Uses polymorphic variants for inline state tracking. *)

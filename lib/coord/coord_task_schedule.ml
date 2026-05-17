@@ -504,13 +504,13 @@ let claim_next_r
          it before the original owner had a chance to finish.  AwaitingVerification
          is still excluded: it is no longer active implementation work for
          the claimant. *)
+        let active_owned_task_ids =
+          Coord_task.active_owned_task_ids_for_agent config ~agent_name backlog
+        in
         let previous_claim =
           List.find_opt
             (fun (t : Masc_domain.task) ->
-               match t.task_status with
-               | Claimed { assignee; _ } | InProgress { assignee; _ } ->
-                 String.equal assignee agent_name
-               | Todo | AwaitingVerification _ | Done _ | Cancelled _ -> false)
+               List.mem t.id active_owned_task_ids)
             backlog.tasks
         in
         (match previous_claim with

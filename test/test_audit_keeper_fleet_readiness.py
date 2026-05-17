@@ -1,11 +1,13 @@
 import importlib.util
 import json
+import os
 import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 
 SCRIPT_PATH = (
@@ -26,6 +28,24 @@ def load_audit_module():
 
 
 audit = load_audit_module()
+
+
+class AuditKeeperFleetReadinessPathDefaultsTest(unittest.TestCase):
+    def test_default_base_path_uses_explicit_runtime_roots(self):
+        with (
+            tempfile.TemporaryDirectory() as masc_base,
+            tempfile.TemporaryDirectory() as me_root,
+        ):
+            with patch.dict(
+                os.environ,
+                {"MASC_BASE_PATH": masc_base, "ME_ROOT": me_root},
+                clear=True,
+            ):
+                self.assertEqual(audit.default_base_path(), masc_base)
+            with patch.dict(os.environ, {"ME_ROOT": me_root}, clear=True):
+                self.assertEqual(audit.default_base_path(), me_root)
+            with patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(audit.default_base_path(), str(Path.cwd()))
 
 
 def audit_args(base_path: Path, expected_keepers: int):
@@ -170,7 +190,9 @@ def write_persistent_work_evidence(
 ) -> None:
     trace = f"trace-{keeper}"
     manifest_dir = root / ".masc" / "keepers" / keeper / "runtime-manifests"
-    checkpoint_path = root / ".masc" / "keepers" / keeper / "checkpoints" / "turn-1.json"
+    checkpoint_path = (
+        root / ".masc" / "keepers" / keeper / "checkpoints" / "turn-1.json"
+    )
     tool_log_path = root / ".masc" / "tool_calls" / "2026-05" / "15.jsonl"
     history_path = root / ".masc" / "traces" / trace / "history.jsonl"
     for path in (

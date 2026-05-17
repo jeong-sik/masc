@@ -176,16 +176,13 @@ val get_protocol_version_for_session :
 
 val default_base_path : unit -> string
 (** Resolves the launcher-guard-aware default base path.
-    When the [MASC_BASE_PATH] env var is set, returns
-    [Sys.getcwd ()] (operator opted into project-local
-    artifacts).  Otherwise prefers [HOME] (then [Sys.getcwd ()]
-    fallback) and routes through
+    The server default starts from [Sys.getcwd ()] and routes through
     {!Coord_utils_backend_setup.resolve_server_default_base_path}.
 
-    The HOME-preference is intentional: a direct binary launch
-    from a checkout with its own [.masc] must NOT silently
-    inherit a stale parent [MASC_BASE_PATH].  Pinning at the
-    contract seam. *)
+    This intentionally avoids deriving the base path from [HOME]: a direct
+    binary launch from a checkout should keep artifacts under the visible
+    launch root unless the operator passes [--base-path] or [MASC_BASE_PATH].
+*)
 
 val query_param :
   Httpun.Request.t -> string -> string option

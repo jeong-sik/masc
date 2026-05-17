@@ -1,9 +1,11 @@
 import importlib.util
 import json
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 SCRIPT_PATH = (
@@ -29,6 +31,22 @@ gate = load_gate_module()
 
 
 class KeeperProductionReadinessGateTest(unittest.TestCase):
+    def test_default_base_path_uses_explicit_runtime_roots(self):
+        with (
+            tempfile.TemporaryDirectory() as masc_base,
+            tempfile.TemporaryDirectory() as me_root,
+        ):
+            with patch.dict(
+                os.environ,
+                {"MASC_BASE_PATH": masc_base, "ME_ROOT": me_root},
+                clear=True,
+            ):
+                self.assertEqual(gate.default_base_path(), masc_base)
+            with patch.dict(os.environ, {"ME_ROOT": me_root}, clear=True):
+                self.assertEqual(gate.default_base_path(), me_root)
+            with patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(gate.default_base_path(), str(Path.cwd()))
+
     def make_fixture(self):
         tmp = tempfile.TemporaryDirectory()
         root = Path(tmp.name)

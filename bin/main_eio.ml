@@ -71,20 +71,7 @@ let mcp_protocol_version_default =
 
 let default_base_path = Server_mcp_transport_http.default_base_path
 
-let implicit_base_path_resolution_source () =
-  match (Host_config.from_env ()).home with
-  | Some home ->
-      let normalized_home =
-        Env_config.normalize_masc_base_path_input home
-      in
-      let normalized_default =
-        Env_config.normalize_masc_base_path_input (default_base_path ())
-      in
-      if String.equal normalized_home normalized_default then
-        "implicit_home"
-      else
-        "implicit_repo_root"
-  | None -> "implicit_repo_root"
+let implicit_base_path_resolution_source () = "implicit_base_path"
 
 let is_valid_protocol_version =
   Server_mcp_transport_http.is_valid_protocol_version
@@ -649,9 +636,7 @@ let run_cmd host port base_path =
     Env_config.strip_path_trailing_slashes (String.trim base_path)
   in
   guard_self_repo_base_path normalized_base_path;
-  if String.equal resolution_source "implicit_home"
-     || String.equal resolution_source "implicit_repo_root"
-  then begin
+  if String.equal resolution_source "implicit_base_path" then begin
     Printf.eprintf
       "[FATAL] Server refused to start with an implicit base path.\n\
        Resolution source: %s\n\

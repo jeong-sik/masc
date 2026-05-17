@@ -12,8 +12,11 @@ Output:
     Markdown formatted PR comment with risk score and affected BDDs.
 
 Environment:
-    NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD (from ~/.zshenv via sb)
+    NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD (from shell env via sb)
+    Optional: MASC_SB_SCRIPT or SB_SCRIPT, otherwise ME_ROOT/scripts/sb,
+    MASC_WORKSPACE_ROOT/scripts/sb, or sb from PATH.
 """
+
 import os
 import sys
 import json
@@ -21,9 +24,18 @@ import subprocess
 from typing import List, Dict, Any
 from pathlib import Path
 
-# Neo4j client configuration
-NEO4J_CLIENT = Path.home() / "me" / "lib" / "ocaml" / "neo4j_client" / "_build" / "default" / "bin" / "main.exe"
-SB_SCRIPT = Path.home() / "me" / "scripts" / "sb"
+
+def resolve_sb_script() -> str:
+    explicit = os.environ.get("MASC_SB_SCRIPT") or os.environ.get("SB_SCRIPT")
+    if explicit:
+        return explicit
+    root = os.environ.get("ME_ROOT") or os.environ.get("MASC_WORKSPACE_ROOT")
+    if root:
+        return str(Path(root) / "scripts" / "sb")
+    return "sb"
+
+
+SB_SCRIPT = resolve_sb_script()
 
 # Risk weights by category
 CATEGORY_WEIGHTS = {
@@ -107,12 +119,14 @@ ORDER BY b.category DESC"""
     bdds = []
     for row in rows:
         if len(row) >= 4:
-            bdds.append({
-                "id": row[0],
-                "title": row[1] if row[1] else "",
-                "category": row[2] if row[2] else "UNKNOWN",
-                "quality": row[3] if row[3] else 0,
-            })
+            bdds.append(
+                {
+                    "id": row[0],
+                    "title": row[1] if row[1] else "",
+                    "category": row[2] if row[2] else "UNKNOWN",
+                    "quality": row[3] if row[3] else 0,
+                }
+            )
     return bdds
 
 
@@ -164,9 +178,7 @@ def get_risk_level(risk_score: int) -> tuple[str, str]:
 
 
 def format_pr_comment(
-    changed_files: List[str],
-    bdds: List[Dict[str, Any]],
-    risk: Dict[str, Any]
+    changed_files: List[str], bdds: List[Dict[str, Any]], risk: Dict[str, Any]
 ) -> str:
     """
     Format analysis as PR comment in markdown.
@@ -197,7 +209,7 @@ def format_pr_comment(
         for cat, count in sorted(
             risk["category_breakdown"].items(),
             key=lambda x: CATEGORY_WEIGHTS.get(x[0], 0),
-            reverse=True
+            reverse=True,
         ):
             emoji = ""
             if cat == "CRITICAL":
@@ -230,8 +242,7 @@ def format_pr_comment(
 
         quality = bdd.get("quality", 0)
         lines.append(
-            f"- {emoji} **{bdd['id']}**: {bdd['title']} "
-            f"({cat}, quality: {quality})"
+            f"- {emoji} **{bdd['id']}**: {bdd['title']} ({cat}, quality: {quality})"
         )
 
     if len(bdds) > 15:

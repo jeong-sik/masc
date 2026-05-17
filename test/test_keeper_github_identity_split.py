@@ -1,20 +1,22 @@
 import importlib.util
 import json
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 SCRIPT_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "scripts"
-    / "keeper-github-identity-split.py"
+    Path(__file__).resolve().parents[1] / "scripts" / "keeper-github-identity-split.py"
 )
 
 
 def load_split_module():
-    spec = importlib.util.spec_from_file_location("keeper_github_identity_split", SCRIPT_PATH)
+    spec = importlib.util.spec_from_file_location(
+        "keeper_github_identity_split", SCRIPT_PATH
+    )
     if spec is None or spec.loader is None:
         raise RuntimeError(f"failed to load {SCRIPT_PATH}")
     module = importlib.util.module_from_spec(spec)
@@ -46,6 +48,22 @@ def write_keeper(root: Path, name: str, identity: str = "anyang-keepers") -> Pat
 
 
 class KeeperGithubIdentitySplitTest(unittest.TestCase):
+    def test_default_base_path_uses_explicit_runtime_roots(self):
+        with (
+            tempfile.TemporaryDirectory() as masc_base,
+            tempfile.TemporaryDirectory() as me_root,
+        ):
+            with patch.dict(
+                os.environ,
+                {"MASC_BASE_PATH": masc_base, "ME_ROOT": me_root},
+                clear=True,
+            ):
+                self.assertEqual(split.default_base_path(), masc_base)
+            with patch.dict(os.environ, {"ME_ROOT": me_root}, clear=True):
+                self.assertEqual(split.default_base_path(), me_root)
+            with patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(split.default_base_path(), str(Path.cwd()))
+
     def test_build_plan_distributes_identities(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -72,7 +90,9 @@ class KeeperGithubIdentitySplitTest(unittest.TestCase):
             alpha = write_keeper(root, "alpha")
             bundle = root / ".masc" / "github-identities" / "reviewer-keepers" / "gh"
             bundle.mkdir(parents=True)
-            plan = split.build_plan(root, ["reviewer-keepers", "anyang-keepers"], [alpha])
+            plan = split.build_plan(
+                root, ["reviewer-keepers", "anyang-keepers"], [alpha]
+            )
 
             backup_dir = split.apply_plan(
                 root, plan, backup_dir="", allow_missing=False

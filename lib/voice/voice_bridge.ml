@@ -571,6 +571,27 @@ let attempt_tts_endpoint
                 ; "agent_id", `String agent_id
                 ; "reason", `String "identical message was played recently (mutex)"
                 ])
+        | (`Failed reason | `Skipped reason) as playback_status ->
+          let local_playback_status =
+            match playback_status with
+            | `Failed _ -> "failed"
+            | `Skipped _ -> "skipped"
+          in
+          Ok
+            (append_provider_metadata
+               (`Assoc
+                   [ "status", `String "spoken"
+                   ; "agent_id", `String agent_id
+                   ; "voice", `String voice
+                   ; "audio_file", `String audio_file
+                   ; "audio_size", `Int file_size
+                   ; ( "message_preview"
+                     , `String
+                         (String.sub message 0 (min 50 (String.length message))) )
+                   ; "local_playback_status", `String local_playback_status
+                   ; "local_playback_reason", `String reason
+                   ])
+               endpoint)
         | `Played played_seconds ->
           Ok
             (append_provider_metadata
@@ -584,10 +605,9 @@ let attempt_tts_endpoint
                         ; ( "message_preview"
                           , `String
                               (String.sub message 0 (min 50 (String.length message))) )
+                        ; "local_playback_status", `String "played"
+                        ; "played_seconds", `Float played_seconds
                         ]
-                      ; (match played_seconds with
-                         | Some s -> [ "played_seconds", `Float s ]
-                         | None -> [])
                       ]))
                endpoint))
      | Error error ->

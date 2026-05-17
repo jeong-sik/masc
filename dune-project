@@ -86,9 +86,11 @@
   (bisect_ppx (and :with-test (>= 2.8)))
   (mtime (>= 2.0))
   (uuidm (>= 0.9))
-  ; RFC-0004 Phase A0.1 PoC (sse_event_poc sublib).  atdgen runs at
-  ; build-time (codegen for sse_event.atd → sse_event_{t,j}.{ml,mli});
-  ; atdgen-runtime is linked into the generated _j module.
+  ; RFC-0004 Phase A0.1 typed SSE event library (lib/sse_event/).
+  ; atdgen runs at build-time (codegen for sse_event.atd →
+  ; sse_event_{t,j}.{ml,mli}); atdgen-runtime is linked into the
+  ; generated _j module.  Promoted from sse_event_poc :with-test
+  ; gating once the typed lib became production-required (PR-1).
   (atdgen (and :build (>= 4.2.0)))
   (atdgen-runtime (>= 4.2.0))
   ; [neo4j_bolt_eio] removed: no caller in lib/ bin/ test/ since

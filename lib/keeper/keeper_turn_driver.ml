@@ -573,7 +573,9 @@ let run_named
                   { provider_id = Cascade_runtime_candidate.provider_label candidate
                   ; http_status
                   ; outcome
-                  ; timestamp = Unix.gettimeofday ()
+                  ; timestamp =
+                      Unix.gettimeofday ()
+                      (* NDT-OK: external provider observation timestamp only. *)
                   }
                 in
                 Keeper_registry.record_cascade_attempt ~base_path ~keeper_name record

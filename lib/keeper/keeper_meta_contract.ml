@@ -311,6 +311,8 @@ let cascade_attempt_outcome_of_json = function
      | Some (`String "failure") ->
        (match List.assoc_opt "message" fields with
         | Some (`String message) -> Some (`Failure message)
+        (* DET-OK: legacy attempt rows encoded failure without a message;
+           keep the lossy historical record instead of dropping it. *)
         | _ -> Some (`Failure ""))
      | _ -> None)
   | `String "success" -> Some `Success

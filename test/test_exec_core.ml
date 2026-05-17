@@ -610,12 +610,14 @@ let with_p11_base_path f =
 let test_history_append_and_read () =
   with_p11_base_path @@ fun base_path ->
   let module H = Masc_exec.Bash_history in
-  H.append ~base_path ~keeper_name:"test-keeper"
-    { ts = 1000.0; cmd_hash = "abc123"; cmd_prefix = "git status";
-      semantic_kind = "Read"; duration_ms = 50; success = true };
-  H.append ~base_path ~keeper_name:"test-keeper"
-    { ts = 2000.0; cmd_hash = "def456"; cmd_prefix = "dune build";
-      semantic_kind = "Build"; duration_ms = 5000; success = false };
+  Result.get_ok
+    (H.append ~base_path ~keeper_name:"test-keeper"
+       { ts = 1000.0; cmd_hash = "abc123"; cmd_prefix = "git status";
+         semantic_kind = "Read"; duration_ms = 50; success = true });
+  Result.get_ok
+    (H.append ~base_path ~keeper_name:"test-keeper"
+       { ts = 2000.0; cmd_hash = "def456"; cmd_prefix = "dune build";
+         semantic_kind = "Build"; duration_ms = 5000; success = false });
   let results =
     H.suggest ~base_path ~keeper_name:"test-keeper" ~pattern:"git" ~limit:10
   in
@@ -641,10 +643,11 @@ let test_history_compaction () =
   with_p11_base_path @@ fun base_path ->
   let module H = Masc_exec.Bash_history in
   for i = 1 to 15 do
-    H.append ~base_path ~keeper_name:"compact-test"
-      { ts = float_of_int i; cmd_hash = string_of_int i;
-        cmd_prefix = "cmd" ^ string_of_int i;
-        semantic_kind = "Unknown"; duration_ms = 10; success = true }
+    Result.get_ok
+      (H.append ~base_path ~keeper_name:"compact-test"
+         { ts = float_of_int i; cmd_hash = string_of_int i;
+           cmd_prefix = "cmd" ^ string_of_int i;
+           semantic_kind = "Unknown"; duration_ms = 10; success = true })
   done;
   (* 15 entries is below max_entries (10000), so compact is a no-op *)
   H.compact ~base_path ~keeper_name:"compact-test";

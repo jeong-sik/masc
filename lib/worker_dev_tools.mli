@@ -79,11 +79,18 @@ val validate_command_coding_with_allowlist
   -> (unit, block_reason) result
 
 (** When [workdir] is supplied, gate every path-bearing token in [cmd]
-    against {!Path_compat.validate_path}.  Returns [Error msg] with the
-    rejected token (or a path-rewrite-syntax reminder) when a token
-    escapes [workdir].  Returns [Ok ()] unconditionally when
-    [workdir = None]. *)
-val validate_command_paths : ?workdir:string -> string -> (unit, string) result
+    against the shell path allowlist. Tokens may stay under [workdir],
+    [/tmp], the owning worktree repo root, or a registered repository path
+    allowed by {!Keeper_repo_mapping} when both [keeper_id] and [base_path]
+    are supplied. Returns [Error msg] with the rejected token (or a
+    path-rewrite-syntax reminder) when a token escapes the allowlist.
+    Returns [Ok ()] unconditionally when [workdir = None]. *)
+val validate_command_paths
+  :  ?keeper_id:string
+  -> ?base_path:string
+  -> ?workdir:string
+  -> string
+  -> (unit, string) result
 
 (** Return path values in [cmd] that the shell validator treats as
     existing-directory requirements (for example [git -C <dir>] and

@@ -139,39 +139,43 @@ end = struct
     { net :> [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t; https = Some https }
   ;;
 
+  (* RFC-0107 Phase D.2c bis — migrated off [make_closing_client] to
+     the pooled [Pool.request] surface.  The OTLP exporter is the
+     prototypical *one-shot* HTTP caller (single POST per signal
+     batch); a connection pool with keep-alive trims a TCP handshake
+     per export tick and lets the [Eio.Switch.run] / on_release
+     scaffolding of the legacy [make_closing_client] go away.
+
+     The [client.net] / [client.https] fields of [t] are kept on the
+     record so the public [create] signature stays stable (existing
+     callers in [Opentelemetry_client] still build), but the pool
+     owns the transport — those fields are unused on this path. *)
   let send (client : t) ~url ~decode (body : string) : ('a, error) result =
-    Switch.run
-    @@ fun sw ->
-    let uri = Uri.of_string url in
-    let client =
-      Masc_http_client.make_closing_client ~sw ~net:client.net ~https:client.https
+    let headers =
+      ("Content-Type", "application/x-protobuf") :: Config.Env.get_headers ()
     in
-    let open Cohttp in
-    let headers = Header.(add_list (init ()) (Config.Env.get_headers ())) in
-    let headers = Header.(add headers "Content-Type" "application/x-protobuf") in
-    let body = Cohttp_eio.Body.of_string body in
-    let r =
-      try
-        let r = Httpc.post client ~sw ~headers ~body uri in
-        Ok r
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | e -> Error e
-    in
-    match r with
-    | Error e ->
-      let err =
-        `Failure
-          (spf
-             "sending signals via http POST to %S\nfailed with:\n%s"
-             url
-             (Printexc.to_string e))
-      in
-      Error err
-    | Ok (resp, body) ->
-      let body = Eio.Buf_read.(parse_exn take_all) body ~max_size:max_int in
-      let code = Response.status resp |> Code.code_of_status in
-      if not (Code.is_error code)
+    (* [~net] is kept in the signature for ABI stability; the pool
+       owns the actual transport since Phase D.2c, but [Masc_http_client]
+       still accepts it for backwards compatibility. *)
+    match
+      Masc_http_client.post_sync ~net:client.net ~url ~headers ~body ()
+    with
+    | Error err_msg ->
+      (* RFC-0106: re-raise Eio.Cancel.Cancelled when the exporter fiber
+         was cancelled. Masc_http_client.post_sync's piaf pool catches
+         all exceptions (including Cancelled) and reports them as Error
+         strings; without this check the exporter would log a spurious
+         "export failed" instead of unwinding cancellation. *)
+      Eio.Cancel.check ();
+      Error
+        (`Failure
+           (spf
+              "sending signals via http POST to %S\nfailed with:\n%s"
+              url
+              err_msg))
+    | Ok (code, body) ->
+      (* HTTP error if status >= 400 (Cohttp.Code.is_error equivalent). *)
+      if code < 400
       then (
         match decode with
         | `Ret x -> Ok x

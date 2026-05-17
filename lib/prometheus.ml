@@ -356,6 +356,13 @@ let metric_tool_metrics_persist_dropped =
 let metric_tool_keeper_cache_cas_conflicts =
   "masc_tool_keeper_cache_cas_conflicts_total"
 
+(* File_lock_eio lock-table CAS retries (single shared atomic).
+   Bumped from [atomic_update] / [atomic_update_with_result] retry
+   branches via [on_cas_retry_fn] callback wired in coord.ml — the
+   masc_process sub-library cannot depend on Prometheus directly. *)
+let metric_file_lock_table_cas_retries =
+  "masc_file_lock_table_cas_retries_total"
+
 (* tool_keeper.cache_ttl_seconds env-var parse fallback observability.
    Operator-supplied env var (e.g. MASC_KEEPER_LIST_CACHE_TTL_S) is
    present but the value cannot be parsed as a non-negative float; the
@@ -1355,6 +1362,11 @@ let init () =
     metric_tool_keeper_cache_cas_conflicts
     "Total tool_keeper.cached_text_by_key Atomic CAS retry events. Each \
      increment corresponds to one extra compute() call. No labels."
+    Counter;
+  add
+    metric_file_lock_table_cas_retries
+    "Total File_lock_eio lock-table CAS retries across \
+     prune_stale_entries and get_entry. No labels."
     Counter;
   add
     metric_tool_keeper_cache_ttl_parse_failures

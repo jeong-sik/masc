@@ -466,6 +466,14 @@ let record_file_lock_attempt ~caller ~retries ~elapsed_s ~outcome =
 
 let () = Atomic.set File_lock_eio.on_lock_attempt_fn record_file_lock_attempt
 
+let record_file_lock_table_cas_retry () =
+  Prometheus.inc_counter
+    Prometheus.metric_file_lock_table_cas_retries
+    ()
+;;
+
+let () = Atomic.set File_lock_eio.on_cas_retry_fn record_file_lock_table_cas_retry
+
 let clear_agent_current_task_cache config ~task_id =
   let agents_path = agents_dir config in
   if path_exists config agents_path

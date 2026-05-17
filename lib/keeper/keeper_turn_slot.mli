@@ -150,10 +150,10 @@ val fairness_delay_sec_at : now:float -> keeper_name:string -> float
 
     See [keeper_turn_slot.ml] doc for full design rationale.
 
-    {b WORKAROUND (RFC-0109)}: This function only releases the semaphore
+    {b WORKAROUND (RFC-0125)}: This function only releases the semaphore
     permit. The underlying stuck OS subprocess (LLM HTTPS read,
     [docker exec]) keeps running until process restart. The structural
-    fix is RFC-0109 P4 [keeper-level max-turn watchdog]
+    fix is RFC-0125 P4 [keeper-level max-turn watchdog]
     (PR #15964), which cancels the keepalive fiber at a typed wall-clock
     boundary BEFORE the slot is leaked, so this rescue path stops being
     reached. Removal target: 30-day soak on

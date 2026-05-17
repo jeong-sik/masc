@@ -235,7 +235,7 @@ let launch_supervised_fiber
       Eio_guard.protect
         (fun () ->
            try
-             (* RFC-0109 P4: opt-in keeper-level max-turn watchdog.
+             (* RFC-0125 P4: opt-in keeper-level max-turn watchdog.
                 When [MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC] is set
                 to a positive float, race the keepalive loop against
                 [Eio.Time.sleep ctx.clock t] via [Eio.Fiber.first].
@@ -270,7 +270,7 @@ let launch_supervised_fiber
                                ; timeout_threshold = timeout_s
                                })));
                     Log.Keeper.warn
-                      "%s: max-turn watchdog fired after %.1fs (RFC-0109 P4)"
+                      "%s: max-turn watchdog fired after %.1fs (RFC-0125 P4)"
                       meta.name
                       timeout_s)
                   (fun () ->
@@ -1597,9 +1597,9 @@ let sweep_and_recover (ctx : _ context) =
        Bounded over-release is documented in
        [Keeper_turn_slot.force_release_holder_for].
 
-       WORKAROUND (RFC-0109 P5 removal target): this rescue path only
+       WORKAROUND (RFC-0125 P5 removal target): this rescue path only
        releases the semaphore permit; the underlying stuck subprocess
-       lives until process restart. The structural fix is RFC-0109 P4
+       lives until process restart. The structural fix is RFC-0125 P4
        [keeper-level max-turn watchdog] (PR #15964) which cancels the
        keepalive fiber at a typed wall-clock boundary BEFORE the slot
        leaks. Removal target: 30-day soak on

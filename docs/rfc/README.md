@@ -98,7 +98,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0055 | Cascade Fallback Chain Capability-Tier Routing | Superseded | 340008ed7 2026-05-11 | superseded_by 0058 (per #14559 sweep) |
 | 0056 | Incremental Sub-Library Extraction from Flat masc_mcp Library | Active | f003c7421 2026-05-09 | Phase 0 머지 #14384 |
 | 0057 | Tool Descriptor Codegen — `[@@deriving tool]` via Build-Time Generation | Active | 6d11d2a67 2026-05-12 | Phase 0 머지 #14396 |
-| 0058 | Declarative Cascade Configuration (v2) | Active | (this PR) 2026-05-17 | RFC-0058-declarative-cascade-config.md (main) + RFC-0058-phase-5-erase-provider-variant.md + RFC-0058-terminal-fallback-capability-exemption.md (amendment) + RFC-0058-phase-8-cascade-catalog-partial-parse.md (catalog partial parse) — Phase 0/1/4/5.2a/9.1 머지 |
+| 0058 | Declarative Cascade Configuration (v2) | Active | (this PR) 2026-05-17 | RFC-0058-declarative-cascade-config.md (main) + RFC-0058-phase-5-erase-provider-variant.md + RFC-0058-terminal-fallback-capability-exemption.md (amendment) + RFC-0058-phase-8-cascade-catalog-partial-parse.md (catalog partial parse; phase 8.1/8.2 merged #15733/#15737; phase 8.1.5/8.3/8.4 pending per post-merge self-review) — Phase 0/1/4/5.2a/8.1/8.2/9.1 머지 |
 | 0059 | IDE LSP Integration + Eio Domain/Actor Parallelism | Active | 340008ed7 2026-05-11 | Phase 2 PR-5/PR-6 closeout per #14559 |
 | 0061 | Cache-invalidation broadcast envelope | Implemented | 2699965d1 2026-05-10 | #14424 |
 | 0062 | Typed `Tool_result.t` + Typed `Sdk_*` Blocker Class | Active | 340008ed7 2026-05-11 | backfill per #14559 |

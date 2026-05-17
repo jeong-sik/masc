@@ -1186,6 +1186,7 @@ let spawn_slots_available () =
   let max_keepers = Keeper_runtime_resolved.bootstrap_max_active_keepers () in
   let running_count = Atomic.get running_count_atomic in
   (not (Keeper_fd_pressure.active ()))
+  && not (Keeper_disk_pressure.active ())
   && Keeper_fd_pressure.admit_start
        ~active_keepers:running_count
        ~starting_keepers:1
@@ -1962,20 +1963,7 @@ let enqueue_event ~base_path name stimulus =
       let next = Keeper_event_queue.enqueue cur stimulus in
       if not (Atomic.compare_and_set entry.event_queue cur next) then loop ()
     in
-    loop ();
-    (try
-       Keeper_reaction_ledger.record_event_queue_stimulus
-         ~base_path
-         ~keeper_name:name
-         stimulus
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-       Log.Keeper.warn
-         "registry: reaction ledger stimulus append failed name=%s post_id=%s: %s"
-         name
-         stimulus.Keeper_event_queue.post_id
-         (Printexc.to_string exn))
+    loop ()
 ;;
 
 let event_queue_snapshot ~base_path name =
@@ -1993,24 +1981,7 @@ let dequeue_event ~base_path name =
       match Keeper_event_queue.dequeue cur with
       | None -> None
       | Some (stim, rest) ->
-        if Atomic.compare_and_set entry.event_queue cur rest
-        then (
-          (try
-             Keeper_reaction_ledger.record_event_queue_reaction
-               ~base_path
-               ~keeper_name:name
-               ~reaction_kind:Keeper_reaction_ledger.Turn_started
-               stim
-           with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | exn ->
-             Log.Keeper.warn
-               "registry: reaction ledger dequeue append failed name=%s post_id=%s: %s"
-               name
-               stim.Keeper_event_queue.post_id
-               (Printexc.to_string exn));
-          Some stim)
-        else loop ()
+        if Atomic.compare_and_set entry.event_queue cur rest then Some stim else loop ()
     in
     loop ()
 ;;
@@ -2022,27 +1993,7 @@ let drain_board_events ?window_sec ~base_path name =
     let rec loop () =
       let cur = Atomic.get entry.event_queue in
       let board, rest = Keeper_event_queue.drain_board_window ?window_sec cur in
-      if Atomic.compare_and_set entry.event_queue cur rest
-      then (
-        List.iter
-          (fun stim ->
-             try
-               Keeper_reaction_ledger.record_event_queue_reaction
-                 ~base_path
-                 ~keeper_name:name
-                 ~reaction_kind:Keeper_reaction_ledger.Turn_started
-                 stim
-             with
-             | Eio.Cancel.Cancelled _ as e -> raise e
-             | exn ->
-               Log.Keeper.warn
-                 "registry: reaction ledger board drain append failed name=%s post_id=%s: %s"
-                 name
-                 stim.Keeper_event_queue.post_id
-                 (Printexc.to_string exn))
-          board;
-        board)
-      else loop ()
+      if Atomic.compare_and_set entry.event_queue cur rest then board else loop ()
     in
     loop ()
 ;;

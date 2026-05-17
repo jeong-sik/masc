@@ -2000,7 +2000,23 @@ let test_required_tool_lane_missing_names () =
       ~required_tool_names:[ "keeper_task_done" ]
       ~materialized_tool_names:[ "keeper_task_done"; "read_file" ]
   in
-  Alcotest.(check (list string)) "all required tools materialized" [] satisfied
+  Alcotest.(check (list string)) "all required tools materialized" [] satisfied;
+  let public_alias_satisfied =
+    FT.missing_required_tool_names_after_lane_by_name
+      ~required_tool_names:[ "keeper_bash"; "keeper_shell"; "keeper_board_post" ]
+      ~materialized_tool_names:[ "Bash"; "Grep"; "masc_board_post" ]
+  in
+  Alcotest.(check (list string))
+    "public aliases satisfy internal required tools"
+    [] public_alias_satisfied;
+  let internal_satisfied =
+    FT.missing_required_tool_names_after_lane_by_name
+      ~required_tool_names:[ "Bash"; "Grep" ]
+      ~materialized_tool_names:[ "keeper_bash"; "keeper_shell" ]
+  in
+  Alcotest.(check (list string))
+    "internal tools satisfy public required aliases"
+    [] internal_satisfied
 
 let test_required_tool_lane_matrix_materialization () =
   let module FT = Masc_mcp.Keeper_turn_driver_helpers in

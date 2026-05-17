@@ -107,7 +107,7 @@ let note_turn_failures_preserved_after_heartbeat ~(ctx : _ context) ~(meta : kee
   in
   if turn_failures > 0
   then
-    Log.Keeper.info
+    Log.Keeper.debug
       "heartbeat healthy for %s; preserving %d turn failure(s) until a real \
        turn succeeds"
       meta.name
@@ -1058,10 +1058,8 @@ let run_keepalive_unified_turn
           else ""
         in
         let log_not_scheduled =
-          match turn_decision.verdict with
-          | Keeper_world_observation.Skip
-              { reasons = Keeper_world_observation.Scheduled_autonomous_disabled, [] } ->
-            Log.Keeper.debug
+          match cascade_backpressure, turn_decision.verdict with
+          | Cascade_admitted, Keeper_world_observation.Skip _ -> Log.Keeper.debug
           | _ -> Log.Keeper.info
         in
         log_not_scheduled

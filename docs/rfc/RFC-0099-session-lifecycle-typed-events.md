@@ -1,19 +1,19 @@
 ---
 rfc: "0099"
 title: "Session lifecycle — typed events, explicit eviction, resume backpressure"
-status: Draft
+status: Active
 created: 2026-05-17
 updated: 2026-05-17
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0098"]
-implementation_prs: []
+implementation_prs: [15810, 15853]
 ---
 
 # RFC-0099 — Session lifecycle: typed events, explicit eviction, resume backpressure
 
-Status: Draft
+Status: Active (PR-2 #15810 & PR-3 #15853 merged; PR-4/5/6 pending)
 Author: jeong-sik (vincent)
 Date: 2026-05-17
 Scope: SSE / WS / gRPC / WebRTC session lifecycle uniformity at the transport layer
@@ -181,13 +181,14 @@ PR-2 is **wire-inert** (Event_bus only). PR-3 introduces the first client-visibl
 
 ## 8. Acceptance
 
-- [ ] PR-1 (this RFC body): review + merge.
-- [ ] PR-2: typed event + bus publish — dashboard surface receives lifecycle events.
-- [ ] PR-3: SSE close frames + mailbox backpressure semantics.
-- [ ] PR-4: WS / gRPC / WebRTC close frame fan-out.
-- [ ] PR-5: keep-alive SSOT + CI hard-coded constant ban.
-- [ ] PR-6 (optional): Last-Event-ID resume.
-- [ ] RFC promoted to `Active` at PR-3 merge; `Implemented` after PR-5.
+- [x] **PR-1** (#15795): RFC body merged.
+- [x] **PR-2** (#15810): typed `Session_lifecycle_event.t` module landed inert (5-variant closed sum + yojson round-trip + 7 tests).
+- [x] **PR-3** (#15853): SSE `event: evicted` close frame + `stop_sse_session_evict ~reason` + publisher injection hook (`set_publisher` / `is_publisher_installed`) — 3 cap-exceeded eviction sites migrated; 5 new publisher-hook tests. **Mailbox backpressure semantics deferred to PR-3.5** (separate from close frame work — current per-session SSE mailbox is `Eio.Stream.t` with no overflow path yet wired to typed `Backpressure` eviction).
+- [ ] **PR-3.5** (planned): mailbox backpressure semantics — drain-grace timeout → `Evict { reason = Backpressure }` publish + close frame.
+- [ ] **PR-4**: WS / gRPC / WebRTC close frame fan-out.
+- [ ] **PR-5**: keep-alive SSOT (`MASC_TRANSPORT_KEEPALIVE_SEC` / `MASC_TRANSPORT_IDLE_EVICT_SEC` / `MASC_TRANSPORT_RESUME_WINDOW_SEC` / `MASC_TRANSPORT_MAX_CLIENTS`) + CI hard-coded constant ban.
+- [ ] **PR-6** (optional): Last-Event-ID resume.
+- [x] **Status promoted to `Active`** at PR-3 merge (this closeout commit). `Implemented` promotion deferred until PR-5 (keep-alive SSOT) at minimum.
 
 ## 9. References
 

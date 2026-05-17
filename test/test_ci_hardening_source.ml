@@ -358,6 +358,18 @@ let test_pr_automation_draft_guard_contracts () =
   check bool "draft PRs always require verified approval" true
     (file_contains_pattern ".github/workflows/pr-automation.yml"
        "const approvalRequired =\n              current.isDraft ||\n              looksAgentAuthored ||\n              unsafeDraftBoundaryAction ||\n              hasAutoMergeRequest ||");
+  check bool "human-approved bypass waits for current-head CI Gate" true
+    (file_contains_pattern ".github/workflows/pr-automation.yml"
+       "const ciGateRequiredForBypass =\n              verifiedBypassLabels.length > 0 ||\n              unsafeDraftBoundaryAction ||\n              hasAutoMergeRequest");
+  check bool "pr automation polls CI Gate before allowing bypass" true
+    (file_contains_pattern ".github/workflows/pr-automation.yml"
+       "const latestCiGate = await waitForCiGate()");
+  check bool "pr automation rejects missing or pending CI Gate" true
+    (file_contains_pattern ".github/workflows/pr-automation.yml"
+       "CI Gate is not completed successfully for head");
+  check bool "pr automation no longer skips CI Gate startup race" true
+    (file_not_contains_pattern ".github/workflows/pr-automation.yml"
+       "skipping block on ${action} event");
   check bool "pr automation has hard-stop label policy" true
     (file_contains_pattern ".github/workflows/pr-automation.yml"
        "hard-stop label present");

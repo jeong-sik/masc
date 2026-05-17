@@ -306,22 +306,9 @@ let set_deliverable (config : Coord.config) ~task_id ~content : (planning_contex
 let current_task_file (config : Coord.config) =
   Filename.concat (Coord_utils.masc_dir config) "current_task"
 
-(* Issue #16010: the planning [current_task] file has been observed as a
-   directory at runtime, after which every keeper claim path fails with
-   [Sys_error "Is a directory"]. Whatever process originally produced the
-   directory shape, this module owns the helper API and must remain
-   resilient: a single corrupt path on disk cannot wedge the entire
-   keeper fleet's claim/set/clear path.
-
-   The recovery contract here is small and local:
-   - reads return [None] (i.e. "no current task") and warn — never raise;
-   - writes quarantine the offending directory to [.masc/_trash/] with an
-     ISO-millisecond suffix so an operator can forensically inspect it,
-     then proceed to write the fresh file;
-   - clears prefer [Sys.rmdir] when the path is an empty directory and
-     fall back to logging a warn for non-empty corruption (the writer
-     path will quarantine it on the next [set_current_task]).
-*)
+(* The planning [current_task] path must be a file, but runtime state can be
+   corrupted by external writers. Keep these helpers total for directory-shaped
+   corruption so one bad path cannot wedge keeper claim/transition flows. *)
 
 let is_directory_path path =
   try Sys.is_directory path with Sys_error _ -> false
@@ -339,7 +326,7 @@ let quarantine_dir_under_trash (config : Coord.config) ~path ~op =
   in
   let dest =
     Filename.concat trash_dir
-      (Printf.sprintf "current_task.%s" stamp)
+      (Printf.sprintf "current_task.%s.%d" stamp (Unix.getpid ()))
   in
   try
     Sys.rename path dest;
@@ -354,6 +341,31 @@ let quarantine_dir_under_trash (config : Coord.config) ~path ~op =
       op path msg;
     Error msg
 
+let remove_empty_current_task_dir ~path ~op =
+  try
+    match Sys.readdir path with
+    | [||] ->
+      (try
+         Unix.rmdir path;
+         true
+       with
+       | Unix.Unix_error _ as e ->
+         Log.Keeper.warn
+           "planning_eio.%s: rmdir %s failed: %s"
+           op path (Printexc.to_string e);
+         false)
+    | _ ->
+      Log.Keeper.warn
+        "planning_eio.%s: %s is a non-empty directory; leaving it in place"
+        op path;
+      false
+  with
+  | Sys_error msg ->
+    Log.Keeper.warn
+      "planning_eio.%s: failed to inspect directory at %s: %s"
+      op path msg;
+    false
+
 (** Get current task_id for session *)
 let get_current_task (config : Coord.config) : string option =
   let path = current_task_file config in
@@ -364,50 +376,63 @@ let get_current_task (config : Coord.config) : string option =
       path;
     None
   end
-  else Some (String.trim (read_file_content path))
+  else
+    try Some (String.trim (read_file_content path)) with
+    | Sys_error msg when is_directory_path path ->
+      Log.Keeper.warn
+        "planning_eio.get_current_task: %s became a directory during read: %s"
+        path msg;
+      None
 
 (** Set current task_id for session *)
 let set_current_task (config : Coord.config) ~task_id : (unit, string) result =
   let path = current_task_file config in
   ensure_dir (Filename.dirname path);
-  if is_directory_path path then
-    match quarantine_dir_under_trash config ~path ~op:"set_current_task" with
-    | Ok _ ->
+  let write_current_task () =
+    try
       write_file_content path task_id;
       Ok ()
-    | Error msg ->
+    with
+    | Sys_error msg when is_directory_path path ->
       Log.Keeper.warn
-        "planning_eio.set_current_task: leaving directory in place after \
-         quarantine failure: %s"
-        msg;
+        "planning_eio.set_current_task: %s became a directory during write: %s"
+        path msg;
       Error
         (Printf.sprintf
-           "failed to quarantine existing current_task directory at %s: %s"
+           "current_task became a directory during write at %s: %s"
            path msg)
-  else begin
-    write_file_content path task_id;
-    Ok ()
-  end
+  in
+  if is_directory_path path then
+    match quarantine_dir_under_trash config ~path ~op:"set_current_task" with
+    | Ok _ -> write_current_task ()
+    | Error msg ->
+      if remove_empty_current_task_dir ~path ~op:"set_current_task" then
+        write_current_task ()
+      else begin
+        Log.Keeper.warn
+          "planning_eio.set_current_task: leaving directory in place after \
+           quarantine failure: %s"
+          msg;
+        Error
+          (Printf.sprintf
+             "failed to quarantine existing current_task directory at %s: %s"
+             path msg)
+      end
+  else write_current_task ()
 
 (** Clear current task *)
 let clear_current_task (config : Coord.config) : unit =
   let path = current_task_file config in
   if not (Sys.file_exists path) then ()
-  else if is_directory_path path then begin
-    match Sys.readdir path with
-    | [||] ->
-      (try Unix.rmdir path with
-       | Unix.Unix_error _ as e ->
-         Log.Keeper.warn
-           "planning_eio.clear_current_task: rmdir %s failed: %s"
-           path (Printexc.to_string e))
-    | _ ->
+  else if is_directory_path path then
+    ignore
+      (remove_empty_current_task_dir ~path ~op:"clear_current_task" : bool)
+  else
+    try Sys.remove path with
+    | Sys_error msg when is_directory_path path ->
       Log.Keeper.warn
-        "planning_eio.clear_current_task: %s is a non-empty directory; \
-         leaving for set_current_task to quarantine"
-        path
-  end
-  else Sys.remove path
+        "planning_eio.clear_current_task: %s became a directory during remove: %s"
+        path msg
 
 (** Resolve task_id - use provided or fall back to current *)
 let resolve_task_id (config : Coord.config) ~task_id : (string, string) result =

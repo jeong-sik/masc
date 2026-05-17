@@ -32,6 +32,10 @@ let make_config () : Coord.config =
 let current_task_path config =
   Filename.concat (Coord_utils.masc_dir config) "current_task"
 
+let ensure_masc_dir config =
+  let dir = Coord_utils.masc_dir config in
+  if not (Sys.file_exists dir) then Unix.mkdir dir 0o755
+
 let trash_dir config =
   Filename.concat (Coord_utils.masc_dir config) "_trash"
 
@@ -385,6 +389,7 @@ let test_current_task_dir_read_is_cleared () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = make_config () in
   let path = current_task_path config in
+  ensure_masc_dir config;
   Unix.mkdir path 0o755;
   check (option string) "directory current_task reads as none" None
     (Planning_eio.get_current_task config);
@@ -397,6 +402,7 @@ let test_set_current_task_quarantines_dir () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = make_config () in
   let path = current_task_path config in
+  ensure_masc_dir config;
   Unix.mkdir path 0o755;
   Fs_compat.save_file (Filename.concat path "forensics.txt") "kept";
   set_current_task_ok config ~task_id:"recovered-task";
@@ -441,6 +447,7 @@ let test_clear_current_task_removes_empty_dir () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = make_config () in
   let path = current_task_path config in
+  ensure_masc_dir config;
   Unix.mkdir path 0o755;
   Planning_eio.clear_current_task config;
   check bool "empty directory removed" false (Sys.file_exists path)

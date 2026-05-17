@@ -131,3 +131,45 @@ val mcp_internal_error_json : ?id:Yojson.Safe.t -> string -> Yojson.Safe.t
     array.  When [id] is omitted, the field is set to [`Null] (per
     JSON-RPC 2.0 §5.1 — error responses must echo back the request id
     or [null] when it cannot be parsed). *)
+
+val respond_mcp_error :
+  ?extra_headers:(string * string) list ->
+  ?data:Yojson.Safe.t ->
+  ?id:Yojson.Safe.t ->
+  deps:Server_mcp_transport_http_types.deps ->
+  Httpun.Request.t ->
+  Httpun.Reqd.t ->
+  session_id:string ->
+  protocol_version:string ->
+  code:Mcp_error_code.t ->
+  string ->
+  unit
+(** [respond_mcp_error ?extra_headers ?data ?id ~deps request reqd
+    ~session_id ~protocol_version ~code msg] writes a single JSON-RPC
+    2.0 error response derived from a typed {!Mcp_error_code.t}. This
+    is the {b RFC-0097 SSOT} for transport-boundary error envelopes;
+    new call sites SHOULD use this in preference to the per-code
+    factories below.
+
+    Wire shape: [{"jsonrpc":"2.0","id":<id|null>,"error":{
+      "code":Mcp_error_code.to_wire_code code,
+      "message":msg,
+      "data":<data when supplied>}}]
+
+    HTTP status comes from {!Mcp_error_code.to_http_status}; the
+    transport cannot drift from envelope semantics. Per-code header
+    fixups apply automatically:
+
+    - [Auth_error] adds [www-authenticate: Bearer] (pinned for MCP
+      client SDKs that key off the literal challenge string).
+    - [Not_ready] adds [retry-after: 2] (pinned for startup probes).
+    - [Backpressure_shed] adds [retry-after: 1].
+
+    [extra_headers] are prepended; {!json_headers} append.  The
+    function never raises (uses the same safe_respond_with_string
+    helper as the legacy factories).
+
+    PR-1 (RFC-0097) introduces this SSOT in parallel with the legacy
+    four factories. PR-2 migrates the legacy factories to thin
+    delegations and marks them [@@deprecated]. *)
+

@@ -143,3 +143,56 @@ let mcp_internal_error_json ?id msg =
       ("id", Option.value ~default:`Null id);
       ("error", `Assoc [ ("code", `Int (-32603)); ("message", `String msg) ]);
     ]
+
+(* RFC-0097 — typed SSOT for transport-boundary error envelopes. The
+   legacy factories above are intentionally untouched in PR-1 to
+   guarantee byte-exact wire on existing call paths; PR-2 migrates
+   them to delegations and documents the wire change (adding id:null
+   per JSON-RPC 2.0 §5.1). *)
+let respond_mcp_error ?(extra_headers = []) ?data ?id
+    ~(deps : Server_mcp_transport_http_types.deps) request reqd ~session_id
+    ~protocol_version ~(code : Mcp_error_code.t) msg =
+  let origin = deps.get_origin request in
+  let error_fields =
+    let base =
+      [
+        ("code", `Int (Mcp_error_code.to_wire_code code));
+        ("message", `String msg);
+      ]
+    in
+    match data with Some d -> base @ [ ("data", d) ] | None -> base
+  in
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          (* DET-OK: JSON-RPC response id is request-bound wire data; absent id maps to protocol null at this HTTP boundary. *)
+          ("id", Option.value ~default:`Null id);
+          ("error", `Assoc error_fields);
+        ])
+  in
+  (* Constructors qualified explicitly (Mcp_error_code.Auth_error rather
+     than bare Auth_error) so the match is robust to future loss of the
+     [~(code : Mcp_error_code.t)] type annotation or to relocation of
+     the function. Bare constructors would compile today via OCaml's
+     type-directed disambiguation but the reviewer's defence-in-depth
+     concern (PR #15759 codex P1) is well-taken. *)
+  let per_code_headers : (string * string) list =
+    match code with
+    | Mcp_error_code.Auth_error -> [ ("www-authenticate", "Bearer") ]
+    | Mcp_error_code.Not_ready -> [ ("retry-after", "2") ]
+    | Mcp_error_code.Backpressure_shed -> [ ("retry-after", "1") ]
+    | _ -> []
+  in
+  let headers =
+    Httpun.Headers.of_list
+      ((("content-length", string_of_int (String.length body))
+       :: per_code_headers)
+      @ extra_headers
+      @ json_headers ~deps session_id protocol_version origin)
+  in
+  let response =
+    Httpun.Response.create ~headers (Mcp_error_code.to_http_status code)
+  in
+  safe_respond_with_string reqd response body

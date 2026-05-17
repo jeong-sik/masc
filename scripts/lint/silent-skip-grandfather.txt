@@ -1,0 +1,43 @@
+# RFC-0097 — Silent-skip grandfather inventory (lib/).
+#
+# Format: <relative-path>:<line>:<pattern-kind>
+# Updated: 2026-05-17 (HEAD ccf0d9d3f0)
+#
+# pattern-kind:
+#   E1  =  | Error _ -> ()             (typed silent-skip)
+#   E2  =  | Ok _ | Error _ -> ()      (bivalent silent-skip)
+#   T1  =  try ... with _ -> ()        (untyped catch-all silent-skip)
+#
+# This list is the BASELINE accepted at RFC-0097 PR-1 merge time. Any
+# new occurrence in lib/ outside this list fails the
+# `--production-scan` gate. PRs that ADD to this list must include a
+# `Quiet { reason ; recovered }` justification comment at the call site
+# (per RFC-0097 §3.4).
+#
+# When a grandfathered site moves due to refactor, this file must be
+# updated in the same PR — the line-stability check fails otherwise.
+# When a site is migrated to typed propagation, REMOVE its line.
+
+# E1 + E2 sites (| Error _ -> ()) — 13 baseline
+lib/goal/goal_janitor.ml:194:E2
+lib/coord/coord_agent.ml:184:E2
+lib/mcp_server_eio_resource.ml:46:E2
+lib/cascade/cascade_event_bridge.ml:573:E1
+lib/auth.ml:1291:E1
+lib/board_core.ml:1370:E1
+lib/board_core.ml:1595:E1
+lib/server/server_dashboard_http_keeper_api.ml:487:E2
+lib/tool_task.ml:736:E1
+lib/tool_task.ml:1160:E1
+lib/keeper/keeper_tool_emission_hook.ml:80:E1
+lib/shared_audit/store.ml:40:E1
+lib/keeper/keeper_shell_bash.ml:634:E2
+
+# T1 sites (try ... with _ -> ()) — 3 baseline in code
+# (note: many doc comments mention this pattern; lint excludes
+#  comment-only lines via tree-sitter-OCaml in a future iteration.
+#  For PR-1 we accept regex-based grep with `# noqa` suppression
+#  inline where comments quote the pattern.)
+lib/exec/test/test_exec_run_json.ml:34:T1
+lib/exec/test/test_exec_run.ml:39:T1
+lib/keeper/keeper_memory_recall.ml:23:T1

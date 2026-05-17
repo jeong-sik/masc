@@ -1,14 +1,14 @@
 ---
 rfc: "0105"
 title: "OpenAI-compat boundary: Agent_sdk.Error.t → HTTP status + typed envelope"
-status: Draft
+status: Active
 created: 2026-05-17
 updated: 2026-05-17
 author: jeong-sik
 supersedes: []
 superseded_by: null
 related: ["0098", "0095"]
-implementation_prs: []
+implementation_prs: [15899]
 ---
 
 # RFC-0105 — OpenAI-compat boundary typed error mapping
@@ -244,7 +244,7 @@ let error_response ~(status : string) ?(code : string option) ~(message : string
       (no `\`Internal_server_error` hardcode for cascade errors).
 - [ ] `error_response` envelope populates `code` field with `openai_code`
       when present (no permanent `\`Null`).
-- [ ] `rg -n "Agent_sdk.Error.to_string" lib/server/` returns 0 matches.
+- [ ] `rg -n "Agent_sdk.Error.to_string" lib/server/server_openai_compat.ml` returns 0 matches. *Scope clarification (added in implementation PR #15899)*: the lossful boundary this RFC targets is the typed→string collapse at the caller site. The mapping module `lib/server/openai_compat_error_map.ml` legitimately uses `Agent_sdk.Error.to_string` to populate the structured `message` field — that is a typed→structured projection that preserves the typed `http_status`/`kind`/`code` alongside the human-readable message, not the collapse this RFC eliminates. The acceptance check therefore narrows to the caller file.
 - [ ] Unit test: every `Agent_sdk.Error.sdk_error` variant has a
       deterministic `(http_status, openai_kind)` row, verified by
       table-driven Alcotest. No mocks; map function is pure.

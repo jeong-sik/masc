@@ -21,8 +21,8 @@
       unqualified.
 
     Internal helpers stay private at this boundary
-    ([log_mcp_exn] re-export, [is_ephemeral_agent_name],
-    [is_transient_agent_name],
+    ([log_mcp_exn] re-export,
+    {!Agent_name_kind.is_ephemeral}, {!Agent_name_kind.is_transient},
     [silent_auth_token_error_kind],
     [direct_call_block_message]).  The [execute_tool_eio]
     body itself contains many internal sub-helpers
@@ -46,7 +46,7 @@ val resolve_join_state :
       → [false] (no join check needed).
     - [agent_name = "unknown"] → [false] (sentinel name).
     - Otherwise probes [check_join agent_name]; on miss,
-      tries an alias chain via [is_ephemeral_agent_name]
+      tries an alias chain via {!Agent_name_kind.is_ephemeral}
       and the [base_path]-derived persisted name lookup.
 
     [check_join] is injected so tests can drive the

@@ -118,6 +118,70 @@ let append_region ~base_dir ?(partition = Ide_paths.Legacy) region =
   ensure_dir (Filename.dirname path);
   Fs_compat.append_jsonl path (region_to_json region)
 
+(* RFC-0128 §5 — read-side helpers. Regions are append-only; reads do
+   not mutate. The structural dedup key avoids treating a Legacy
+   record and its By_url cousin as two separate entries when both
+   files have the same write. *)
+
+let load_regions_from_path ?file_path path =
+  if not (Sys.file_exists path) then []
+  else
+    Fs_compat.fold_jsonl_lines
+      ~init:[]
+      ~f:(fun acc ~line_no:_ json ->
+        match region_of_json json with
+        | Ok (r : code_region) ->
+          (match file_path with
+           | None -> r :: acc
+           | Some fp -> if r.file_path = fp then r :: acc else acc)
+        | Error _ -> acc)
+      path
+    |> List.rev
+
+let region_key (r : code_region) =
+  let src_tag =
+    match r.source with
+    | Tool_call { tool_name; turn } ->
+      Printf.sprintf "tc:%s:%d" tool_name turn
+    | Manual { note } ->
+      Printf.sprintf "manual:%s" note
+  in
+  Printf.sprintf
+    "%s|%s|%d|%d|%Ld|%s"
+    r.keeper_id
+    r.file_path
+    r.line_start
+    r.line_end
+    r.timestamp_ms
+    src_tag
+
+let dedup_regions_keeping_primary ~primary ~legacy =
+  let seen = Hashtbl.create 64 in
+  List.iter (fun r -> Hashtbl.replace seen (region_key r) ()) primary;
+  let extra =
+    List.filter (fun r -> not (Hashtbl.mem seen (region_key r))) legacy
+  in
+  primary @ extra
+
+let read_regions
+      ~base_dir
+      ?(partition = Ide_paths.Legacy)
+      ?(merge_legacy = false)
+      ?file_path
+      ()
+  =
+  let primary =
+    load_regions_from_path ?file_path (regions_file ~base_dir ~partition ())
+  in
+  if merge_legacy && partition <> Ide_paths.Legacy then
+    let legacy =
+      load_regions_from_path
+        ?file_path
+        (regions_file ~base_dir ~partition:Ide_paths.Legacy ())
+    in
+    dedup_regions_keeping_primary ~primary ~legacy
+  else primary
+
 let json_string_field key json =
   match json with
   | `Assoc fields -> (

@@ -61,3 +61,24 @@ val ingest_tool_call
     extract regions and append them to the chosen partition's
     [regions.jsonl]. Non-matching tool_calls are silently ignored.
     Default [partition] is {!Ide_paths.Legacy}. *)
+
+val read_regions
+  :  base_dir:string
+  -> ?partition:Ide_paths.partition
+  -> ?merge_legacy:bool
+  -> ?file_path:string
+  -> unit
+  -> code_region list
+(** Read regions from the chosen partition.
+
+    [?file_path] filters by [file_path] field; when omitted every
+    region is returned. Streaming-friendly: lines whose JSON does not
+    parse as a {!code_region} are silently skipped (matches the
+    forgiving semantics of the existing HTTP route).
+
+    RFC-0128 §5 — when [?merge_legacy = true] (default [false]) the
+    Legacy flat [regions.jsonl] is also read and deduplicated against
+    the primary partition. Regions have no identity column, so dedup
+    keys on the structural tuple
+    [(keeper_id, file_path, line_start, line_end, timestamp_ms, source)];
+    when all fields match the primary copy wins. *)

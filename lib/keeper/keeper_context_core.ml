@@ -499,6 +499,31 @@ let add_tool_pair_repair_stats left right =
 let tool_pair_repair_stats_changed stats =
   stats.downgraded_tool_uses > 0 || stats.downgraded_tool_results > 0
 
+let pair_repair_metadata_key = "masc.tool_pair_repair"
+
+let pair_repair_metadata_keys =
+  [ "was_fabricated"; "fabrication_source"; pair_repair_metadata_key ]
+
+let with_pair_repair_metadata ~kind ~count (msg : Agent_sdk.Types.message) =
+  let metadata =
+    List.filter
+      (fun (key, _) -> not (List.mem key pair_repair_metadata_keys))
+      msg.metadata
+  in
+  { msg with
+    metadata =
+      [ "was_fabricated", `Bool true
+      ; "fabrication_source", `String "tool_pair_repair"
+      ; ( pair_repair_metadata_key
+        , `Assoc
+            [ "version", `Int 1
+            ; "kind", `String kind
+            ; "count", `Int count
+            ] )
+      ]
+      @ metadata
+  }
+
 let repair_dangling_tool_use_messages_with_stats
     (messages : Agent_sdk.Types.message list)
     : Agent_sdk.Types.message list * tool_pair_repair_stats =
@@ -541,6 +566,9 @@ let repair_dangling_tool_use_messages_with_stats
           current.content
       in
       ( { current with content }
+        |> with_pair_repair_metadata
+             ~kind:"downgraded_tool_use"
+             ~count:!downgraded_tool_uses
       , { empty_tool_pair_repair_stats with
           downgraded_tool_uses = !downgraded_tool_uses
         } )
@@ -609,6 +637,9 @@ let repair_orphan_tool_result_messages_with_stats
                   msg.content
               in
               ( { msg with content }
+                |> with_pair_repair_metadata
+                     ~kind:"downgraded_tool_result"
+                     ~count:!downgraded_tool_results
               , { empty_tool_pair_repair_stats with
                   downgraded_tool_results = !downgraded_tool_results
                 } )

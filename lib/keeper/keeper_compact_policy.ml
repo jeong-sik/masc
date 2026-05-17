@@ -331,8 +331,8 @@ let compact_if_needed_typed
        so the counter reflects fabrication volume rather than call
        frequency. Kind label is a closed 2-value vocabulary (no Printexc-
        style unbounded label) — see iter 21 / PR #15788 for the same
-       pattern. The was_fabricated:true message-metadata half is
-       RFC-scope (touches MASC + OAS message-record shape) and deferred. *)
+       pattern. The repaired messages also carry [was_fabricated=true] plus
+       bounded provenance under [Keeper_context_core.pair_repair_metadata_key]. *)
     let bump_pair_repair kind count =
       if count > 0
       then

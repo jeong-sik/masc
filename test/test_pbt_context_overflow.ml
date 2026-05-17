@@ -293,6 +293,24 @@ let test_pair_repair_stats_count_downgrades () =
     (KC.tool_pair_repair_stats_changed stats);
   Alcotest.(check int) "dangling tool use downgraded" 1 stats.downgraded_tool_uses;
   Alcotest.(check int) "orphan tool result downgraded" 1 stats.downgraded_tool_results;
+  let repair_metadata =
+    List.filter_map
+      (fun (msg : Agent_sdk.Types.message) ->
+         match
+           ( List.assoc_opt "was_fabricated" msg.metadata
+           , List.assoc_opt KC.pair_repair_metadata_key msg.metadata )
+         with
+         | Some (`Bool true), Some (`Assoc fields) ->
+           (match List.assoc_opt "kind" fields, List.assoc_opt "count" fields with
+            | Some (`String kind), Some (`Int count) -> Some (kind, count)
+            | _ -> None)
+         | _ -> None)
+      repaired
+  in
+  Alcotest.(check (list (pair string int)))
+    "repaired messages carry fabrication metadata"
+    [ "downgraded_tool_use", 1; "downgraded_tool_result", 1 ]
+    repair_metadata;
   let has_structured_tool_block =
     List.exists
       (fun (msg : Agent_sdk.Types.message) ->

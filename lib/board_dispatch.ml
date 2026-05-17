@@ -86,6 +86,7 @@ type keeper_board_signal = {
   title : string;
   content : string;
   hearth : string option;
+  updated_at : float option;
 }
 
 type board_sse_event =
@@ -369,6 +370,7 @@ let create_post ~author ~content ?title ?body ~post_kind ?meta_json
               title = post.title;
               content = post.content;
               hearth = post.hearth;
+              updated_at = Some post.updated_at;
             };
           emit_board_sse_event
             (Post_created
@@ -480,6 +482,7 @@ let add_comment ~post_id ~author ~content ?parent_id
                   title = post.title;
                   content;
                   hearth = post.hearth;
+                  updated_at = Some post.updated_at;
                 }
           | Error e ->
               Log.BoardLog.warn "board signal skipped: get_post failed for %s: %s"

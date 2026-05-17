@@ -731,6 +731,14 @@ let json_string_null_member name fields =
   | _ -> None
 ;;
 
+let json_float_null_member name fields =
+  match List.assoc_opt name fields with
+  | Some (`Float value) -> Some value
+  | Some (`Int value) -> Some (float_of_int value)
+  | Some `Null | None -> None
+  | _ -> None
+;;
+
 let board_signal_kind_of_string = function
   | "post_created" | "post" -> Some Board_dispatch.Board_post_created
   | "comment_added" | "comment" -> Some Board_dispatch.Board_comment_added
@@ -761,6 +769,7 @@ let board_signal_of_stimulus_payload payload =
               ; title
               ; content
               ; hearth = json_string_null_member "hearth" fields
+              ; updated_at = json_float_null_member "updated_at_unix" fields
               })
            (board_signal_kind_of_string kind)
        | _ -> None)
@@ -912,6 +921,7 @@ let collect_board_events_with_cursor_policy
              ; title = p.title
              ; content = p.content
              ; hearth = p.hearth
+             ; updated_at = Some p.updated_at
              }
            in
            let matched = board_signal_match ~continuity_summary ~meta ~signal in
@@ -955,6 +965,7 @@ let collect_board_events_with_cursor_policy
                ; title = p.title
                ; content = p.content
                ; hearth = p.hearth
+               ; updated_at = Some p.updated_at
                }
              in
              let matched = board_signal_match ~continuity_summary ~meta ~signal in

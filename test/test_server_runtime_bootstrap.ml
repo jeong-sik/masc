@@ -1029,6 +1029,59 @@ let test_health_json_surfaces_durable_paused_keepers () =
             true
             (reaction_ledger |> member "operator_action_required" |> to_bool)))
 
+let test_health_json_reaction_ledger_cursor_sweep_clears_pending () =
+  with_temp_dir "health-reaction-ledger-cursor-sweep" (fun dir ->
+    with_env "MASC_BASE_PATH" (Some dir) (fun () ->
+      Fun.protect
+        ~finally:(fun () ->
+          Server_auth.server_state := None;
+          Config_dir_resolver.reset ())
+        (fun () ->
+        Config_dir_resolver.reset ();
+        let state = Mcp_server.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let config = state.Mcp_server.room_config in
+        write_keeper_meta_exn config
+          (make_keeper_meta ~name:"cursor-swept" ~trace_id:"trace-cursor" ());
+        let stimulus post_id updated_at : Keeper_event_queue.stimulus =
+          { post_id
+          ; urgency = Immediate
+          ; arrived_at = updated_at +. 10.0
+          ; payload =
+              Yojson.Safe.to_string
+                (`Assoc
+                   [ "source", `String "board_signal"
+                   ; "kind", `String "post_created"
+                   ; "post_id", `String post_id
+                   ; "updated_at_unix", `Float updated_at
+                   ])
+          }
+        in
+        List.iter
+          (Keeper_reaction_ledger.record_event_queue_stimulus
+             ~base_path:dir
+             ~keeper_name:"cursor-swept")
+          [ stimulus "health-post-1" 10.0; stimulus "health-post-2" 20.0 ];
+        Keeper_reaction_ledger.record_board_cursor_ack
+          ~base_path:dir
+          ~keeper_name:"cursor-swept"
+          ~cursor_ts:20.0
+          ~post_id:(Some "health-post-2")
+          ();
+        let request = Httpun.Request.create `GET "/health" in
+        let json = Server_routes_http_runtime.make_health_json request in
+        let open Yojson.Safe.Util in
+        let reaction_ledger = json |> member "keeper_reaction_ledger" in
+        Alcotest.(check string) "health cursor-swept reaction ledger ok"
+          "ok"
+          (reaction_ledger |> member "status" |> to_string);
+        Alcotest.(check int) "health cursor-swept pending stimuli" 0
+          (reaction_ledger |> member "pending_stimulus_count" |> to_int);
+        Alcotest.(check bool)
+          "health cursor-swept reaction ledger clears operator action"
+          false
+          (reaction_ledger |> member "operator_action_required" |> to_bool))))
+
 let test_health_json_surfaces_log_ring_summary () =
   Log.set_level Log.Info;
   Log.emit Log.Warn ~module_name:"HealthTest"
@@ -2590,6 +2643,9 @@ let () =
           Alcotest.test_case
             "health json surfaces durable paused keepers"
             `Quick test_health_json_surfaces_durable_paused_keepers;
+          Alcotest.test_case
+            "health json reaction ledger cursor sweep clears pending"
+            `Quick test_health_json_reaction_ledger_cursor_sweep_clears_pending;
           Alcotest.test_case "health json surfaces log ring summary" `Quick
             test_health_json_surfaces_log_ring_summary;
           Alcotest.test_case "readiness false before init" `Quick

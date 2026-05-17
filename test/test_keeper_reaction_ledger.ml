@@ -9,23 +9,29 @@ let with_temp_base f =
   f base_path
 ;;
 
-let board_payload ~post_id =
+let board_payload ?updated_at ~post_id () =
   `Assoc
-    [ "source", `String "board_signal"
-    ; "kind", `String "post_created"
-    ; "post_id", `String post_id
-    ; "author", `String "operator"
-    ; "title", `String "Ship reaction ledger"
-    ; "content", `String "Please react"
-    ]
+    ([ "source", `String "board_signal"
+     ; "kind", `String "post_created"
+     ; "post_id", `String post_id
+     ; "author", `String "operator"
+     ; "title", `String "Ship reaction ledger"
+     ; "content", `String "Please react"
+     ]
+     @
+     match updated_at with
+     | Some value -> [ "updated_at_unix", `Float value ]
+     | None -> [])
   |> Yojson.Safe.to_string
 ;;
 
-let board_stimulus ?(post_id = "post-42") () : Keeper_event_queue.stimulus =
+let board_stimulus ?(post_id = "post-42") ?updated_at () :
+  Keeper_event_queue.stimulus
+  =
   { post_id
   ; urgency = Immediate
   ; arrived_at = 1234.5
-  ; payload = board_payload ~post_id
+  ; payload = board_payload ?updated_at ~post_id ()
   }
 ;;
 
@@ -179,6 +185,84 @@ let test_summary_marks_unreacted_and_reacted_stimuli () =
     (reacted_summary |> member "turn_started_count" |> to_int)
 ;;
 
+let test_summary_cursor_ack_sweeps_covered_board_stimuli () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "cursor-sweep-keeper" in
+  let first = board_stimulus ~post_id:"post-1" ~updated_at:10.0 () in
+  let second = board_stimulus ~post_id:"post-2" ~updated_at:20.0 () in
+  let third = board_stimulus ~post_id:"post-3" ~updated_at:30.0 () in
+  List.iter
+    (Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name)
+    [ first; second ];
+  Keeper_reaction_ledger.record_board_cursor_ack
+    ~base_path
+    ~keeper_name
+    ~cursor_ts:20.0
+    ~post_id:(Some "post-2")
+    ();
+  let swept_summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check_member_string "cursor-swept summary status" "ok" "status" swept_summary;
+  check int "cursor-swept pending count" 0
+    (swept_summary |> member "pending_stimulus_count" |> to_int);
+  check int "cursor sweep count" 1
+    (swept_summary |> member "cursor_swept_stimulus_count" |> to_int);
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name third;
+  let future_summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check_member_string "future stimulus remains degraded" "degraded" "status" future_summary;
+  check int "future pending count" 1
+    (future_summary |> member "pending_stimulus_count" |> to_int);
+  check string "future pending stimulus id" "board:post-3"
+    (future_summary
+     |> member "pending_stimulus_ids"
+     |> to_list
+     |> List.hd
+     |> to_string)
+;;
+
+let test_summary_cursor_ack_respects_post_id_tiebreaker () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "cursor-tiebreaker-keeper" in
+  let first = board_stimulus ~post_id:"post-1" ~updated_at:50.0 () in
+  let second = board_stimulus ~post_id:"post-2" ~updated_at:50.0 () in
+  List.iter
+    (Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name)
+    [ first; second ];
+  Keeper_reaction_ledger.record_board_cursor_ack
+    ~base_path
+    ~keeper_name
+    ~cursor_ts:50.0
+    ~post_id:(Some "post-1")
+    ();
+  let partial_summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check_member_string "partial cursor summary status" "degraded" "status" partial_summary;
+  check int "one post remains pending" 1
+    (partial_summary |> member "pending_stimulus_count" |> to_int);
+  check string "later same-timestamp post remains pending" "board:post-2"
+    (partial_summary
+     |> member "pending_stimulus_ids"
+     |> to_list
+     |> List.hd
+     |> to_string);
+  Keeper_reaction_ledger.record_board_cursor_ack
+    ~base_path
+    ~keeper_name
+    ~cursor_ts:50.0
+    ~post_id:(Some "post-2")
+    ();
+  let complete_summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check_member_string "complete cursor summary status" "ok" "status" complete_summary;
+  check int "same timestamp posts cleared" 0
+    (complete_summary |> member "pending_stimulus_count" |> to_int)
+;;
+
 let () =
   run
     "keeper_reaction_ledger"
@@ -199,6 +283,14 @@ let () =
             "summary marks unreacted and reacted stimuli"
             `Quick
             test_summary_marks_unreacted_and_reacted_stimuli
+        ; test_case
+            "summary cursor ack sweeps covered board stimuli"
+            `Quick
+            test_summary_cursor_ack_sweeps_covered_board_stimuli
+        ; test_case
+            "summary cursor ack respects board post id tiebreaker"
+            `Quick
+            test_summary_cursor_ack_respects_post_id_tiebreaker
         ] )
     ]
 ;;

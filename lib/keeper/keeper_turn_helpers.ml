@@ -219,6 +219,7 @@ let pre_dispatch_tool_surface : Keeper_execution_receipt.tool_surface =
   ; tool_gate_enabled = false
   ; tool_surface_fallback_used = false
   ; required_tools = []
+  ; required_tool_candidates = []
   ; missing_required_tools = []
   }
 ;;

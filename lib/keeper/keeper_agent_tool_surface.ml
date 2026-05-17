@@ -130,6 +130,7 @@ type tool_surface_metrics =
   ; tool_gate_enabled : bool
   ; tool_surface_fallback_used : bool
   ; required_tool_names : string list
+  ; required_tool_candidate_names : string list
   ; missing_required_tool_names : string list
   ; config_root : string
   ; cascade_config_path : string option
@@ -156,6 +157,7 @@ type computed_tool_surface =
   ; tool_gate_requested : bool
   ; tool_surface_fallback_used : bool
   ; required_tool_names : string list
+  ; required_tool_candidate_names : string list
   ; missing_required_tool_names : string list
   ; lane : turn_lane
   ; query_text : string
@@ -452,7 +454,7 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
     task_update, task_done, etc.). *)
     Agent_sdk.Types.Any
 
-let generic_required_tool_gate_guidance ~(has_current_task : bool)
+let generic_required_tool_candidate_names ~(has_current_task : bool)
     ~(turn_affordances : string list) ~(allowed_tool_names : string list) =
   let is_stay_silent name =
     String.equal
@@ -478,6 +480,17 @@ let generic_required_tool_gate_guidance ~(has_current_task : bool)
         |> List.filter can_recommend_tool
         |> Keeper_types.dedupe_keep_order
     | tools -> tools
+  in
+  actionable_tools
+;;
+
+let generic_required_tool_gate_guidance ~(has_current_task : bool)
+    ~(turn_affordances : string list) ~(allowed_tool_names : string list) =
+  let actionable_tools =
+    generic_required_tool_candidate_names
+      ~has_current_task
+      ~turn_affordances
+      ~allowed_tool_names
   in
   let preview =
     actionable_tools

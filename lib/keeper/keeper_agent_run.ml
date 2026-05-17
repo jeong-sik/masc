@@ -519,6 +519,11 @@ let run_turn
                 (List.map
                    (fun name -> `String name)
                    acc.tool_surface.required_tool_names) );
+            ( "required_tool_candidate_names",
+              `List
+                (List.map
+                   (fun name -> `String name)
+                   acc.tool_surface.required_tool_candidate_names) );
             ( "missing_required_tool_names",
               `List
                 (List.map
@@ -1903,6 +1908,8 @@ let run_turn
              ; tool_gate_enabled = acc.tool_surface.tool_gate_enabled
              ; tool_surface_fallback_used = acc.tool_surface.tool_surface_fallback_used
              ; required_tools = acc.tool_surface.required_tool_names
+             ; required_tool_candidates =
+                 acc.tool_surface.required_tool_candidate_names
              ; missing_required_tools = acc.tool_surface.missing_required_tool_names
              }
          ; sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta

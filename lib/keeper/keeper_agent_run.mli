@@ -58,6 +58,7 @@ type tool_surface_metrics =
   ; tool_gate_enabled : bool
   ; tool_surface_fallback_used : bool
   ; required_tool_names : string list
+  ; required_tool_candidate_names : string list
   ; missing_required_tool_names : string list
   ; config_root : string
   ; cascade_config_path : string option

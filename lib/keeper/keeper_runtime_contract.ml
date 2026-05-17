@@ -220,7 +220,7 @@ let runtime_lane_opt = function
 let runtime_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
     ?session_id ?generation ?keeper_turn_id ?task_id ?goal_ids
     ?sandbox_profile ?sandbox_root ?allowed_paths ?network_mode ?approval_mode ?tool_surface_class
-    ?visible_tool_count ?required_tools ?missing_required_tools ?provider ?model
+    ?visible_tool_count ?required_tools ?required_tool_candidates ?missing_required_tools ?provider ?model
     ?cascade_profile () : Yojson.Safe.t =
   let provider = runtime_lane_opt provider in
   let model = runtime_lane_opt model in
@@ -242,6 +242,8 @@ let runtime_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
       ("tool_surface_class", string_opt_json tool_surface_class);
       ("visible_tool_count", int_opt_json visible_tool_count);
       ("required_tools", string_list_json (nonempty_list required_tools));
+      ( "required_tool_candidates",
+        string_list_json (nonempty_list required_tool_candidates) );
       ( "missing_required_tools",
         string_list_json (nonempty_list missing_required_tools) );
       ("provider", string_opt_json provider);

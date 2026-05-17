@@ -461,6 +461,7 @@ let append_execution_receipt
     ?(tool_contract_result : Lib.Keeper_execution_receipt.tool_contract_result =
       Contract_satisfied_completion)
     ?(stop_reason = Some Lib.Cascade_runner.Completed)
+    ?(required_tool_candidates = [])
     config ~keeper_name =
   let meta =
     match Lib.Keeper_types.read_meta config keeper_name with
@@ -499,6 +500,7 @@ let append_execution_receipt
           tool_gate_enabled = true;
           tool_surface_fallback_used = false;
           required_tools = [];
+          required_tool_candidates;
           missing_required_tools = [];
         };
       sandbox_kind =
@@ -778,7 +780,10 @@ let test_execution_trust_surfaces_latest_receipt () =
             Masc_mcp.Keeper_keepalive.stop_keepalive "sangsu")
           (fun () ->
             create_keeper env sw config "sangsu";
-            append_execution_receipt config ~keeper_name:"sangsu";
+            append_execution_receipt
+              ~required_tool_candidates:
+                [ "keeper_board_comment"; "keeper_board_post" ]
+              config ~keeper_name:"sangsu";
             let compact_json =
               Lib.Dashboard_http_keeper.keepers_dashboard_json
                 ~compact:true config
@@ -818,6 +823,10 @@ let test_execution_trust_surfaces_latest_receipt () =
               "satisfied_completion"
               (compact_row |> member "trust" |> member "tool_contract_result"
              |> to_string);
+            check (list string) "compact row exposes required tool candidates"
+              [ "keeper_board_comment"; "keeper_board_post" ]
+              (compact_row |> member "trust" |> member "required_tool_candidates"
+             |> to_list |> List.map to_string);
             check string "execution trust row preserves sandbox kind"
               "local"
               (trust_row |> member "trust" |> member "sandbox"
@@ -867,6 +876,10 @@ let test_execution_trust_surfaces_latest_receipt () =
             check int "execution trust row preserves unexpected tool count" 1
               (trust_row |> member "trust" |> member "unexpected_tool_count"
              |> to_int);
+            check (list string) "execution trust row preserves required candidates"
+              [ "keeper_board_comment"; "keeper_board_post" ]
+              (trust_row |> member "trust" |> member "required_tool_candidates"
+             |> to_list |> List.map to_string);
             let execution_json =
               Lib.Dashboard_execution.json
                 ~config
@@ -899,7 +912,12 @@ let test_execution_trust_surfaces_latest_receipt () =
              |> member "unexpected_tools" |> to_list |> List.map to_string);
             check int "execution row exposes unexpected tool count" 1
               (execution_row |> member "trust" |> member "execution_summary"
-             |> member "unexpected_tool_count" |> to_int))))
+             |> member "unexpected_tool_count" |> to_int);
+            check (list string) "execution row exposes required candidates"
+              [ "keeper_board_comment"; "keeper_board_post" ]
+              (execution_row |> member "trust" |> member "execution_summary"
+             |> member "required_tool_candidates" |> to_list
+             |> List.map to_string))))
 
 let test_dashboard_execution_queue_surfaces_keeper_runtime_trust () =
   let dir = test_dir () in

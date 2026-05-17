@@ -53,6 +53,7 @@ val runtime_contract_json_from_fields :
   ?tool_surface_class:string ->
   ?visible_tool_count:int ->
   ?required_tools:string list ->
+  ?required_tool_candidates:string list ->
   ?missing_required_tools:string list ->
   ?provider:string ->
   ?model:string ->

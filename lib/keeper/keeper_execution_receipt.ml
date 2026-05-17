@@ -83,6 +83,7 @@ type tool_surface =
   ; tool_gate_enabled : bool
   ; tool_surface_fallback_used : bool
   ; required_tools : string list
+  ; required_tool_candidates : string list
   ; missing_required_tools : string list
   }
 
@@ -663,6 +664,7 @@ let to_json (receipt : t) =
            receipt.tool_surface.tool_surface_class)
       ~visible_tool_count:receipt.tool_surface.visible_tool_count
       ~required_tools:receipt.tool_surface.required_tools
+      ~required_tool_candidates:receipt.tool_surface.required_tool_candidates
       ~missing_required_tools:receipt.tool_surface.missing_required_tools
       ~cascade_profile:(cascade_name_to_string receipt.cascade_name)
       ()
@@ -730,6 +732,8 @@ let to_json (receipt : t) =
           ; ( "tool_surface_fallback_used"
             , `Bool receipt.tool_surface.tool_surface_fallback_used )
           ; "required_tools", list_json receipt.tool_surface.required_tools
+          ; ( "required_tool_candidates"
+            , list_json receipt.tool_surface.required_tool_candidates )
           ; ( "missing_required_tools"
             , list_json receipt.tool_surface.missing_required_tools )
           ] )
@@ -874,6 +878,8 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
           [ ( "result"
             , `String (tool_contract_result_to_string receipt.tool_contract_result) )
           ; "required_tools", list_json receipt.tool_surface.required_tools
+          ; ( "required_tool_candidates"
+            , list_json receipt.tool_surface.required_tool_candidates )
           ; ( "missing_required_tools"
             , list_json receipt.tool_surface.missing_required_tools )
           ; "visible_tool_count", `Int receipt.tool_surface.visible_tool_count

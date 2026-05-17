@@ -124,6 +124,36 @@ let test_default_has_no_legacy_governance_tools () =
   check bool "case brief submit removed" false (has_tool "masc_case_brief_submit" tools)
 ;;
 
+let voice_tools =
+  [ "keeper_voice_speak"
+  ; "keeper_voice_listen"
+  ; "keeper_voice_agent"
+  ; "keeper_voice_sessions"
+  ; "keeper_voice_session_start"
+  ; "keeper_voice_session_end"
+  ]
+;;
+
+let test_voice_policy_enabled_exposes_voice_tools () =
+  let meta =
+    make_meta ~policy_voice_enabled:true ~preset:Keeper_types.Coding ()
+  in
+  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  List.iter
+    (fun name -> check bool (name ^ " exposed") true (has_tool name tools))
+    voice_tools
+;;
+
+let test_voice_policy_disabled_hides_voice_tools () =
+  let meta =
+    make_meta ~policy_voice_enabled:false ~preset:Keeper_types.Social ()
+  in
+  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  List.iter
+    (fun name -> check bool (name ^ " hidden") false (has_tool name tools))
+    voice_tools
+;;
+
 let test_coding_preset_hides_autoresearch_tools () =
   let meta = make_meta ~preset:Keeper_types.Coding () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
@@ -1196,6 +1226,14 @@ let () =
             "legacy governance tools removed"
             `Quick
             test_default_has_no_legacy_governance_tools
+        ; test_case
+            "voice policy enabled exposes voice tools"
+            `Quick
+            test_voice_policy_enabled_exposes_voice_tools
+        ; test_case
+            "voice policy disabled hides voice tools"
+            `Quick
+            test_voice_policy_disabled_hides_voice_tools
         ; test_case
             "coding preset hides autoresearch tools"
             `Quick

@@ -338,6 +338,21 @@ let resolve_policy_group ~(fallback : string list) (group_name : string) : strin
           group_name (List.length fallback);
         fallback)
 
+let keeper_voice_tool_names () =
+  resolve_policy_group
+    ~fallback:
+      [ "keeper_voice_speak"
+      ; "keeper_voice_listen"
+      ; "keeper_voice_agent"
+      ; "keeper_voice_sessions"
+      ; "keeper_voice_session_start"
+      ; "keeper_voice_session_end"
+      ]
+    "voice"
+
+let voice_tools_allowed_by_policy (meta : keeper_meta) =
+  if meta.policy_voice_enabled then keeper_voice_tool_names () else []
+
 (** Optional tools that require explicit opt-in via also_allow.
     Reads [groups.optional] from tool_policy.toml; falls back to
     hardcoded list when config is absent. *)
@@ -394,17 +409,25 @@ let preset_allowlist preset =
         [])
 
 let tool_policy_of_meta (meta : keeper_meta) =
+  let voice_tools = keeper_voice_tool_names () in
+  let policy_voice_allow =
+    if meta.policy_voice_enabled then voice_tools else []
+  in
+  let policy_voice_deny =
+    if meta.policy_voice_enabled then [] else voice_tools
+  in
   let allow =
     match meta.tool_access with
     | Preset { preset; also_allow } ->
         Tool_access_policy.Names
-          (preset_allowlist preset @ keeper_safe_inline_tools @ also_allow)
+          (preset_allowlist preset @ keeper_safe_inline_tools @ also_allow
+           @ policy_voice_allow)
     | Custom allowlist ->
-        Tool_access_policy.Names allowlist
+        Tool_access_policy.Names (allowlist @ policy_voice_allow)
   in
   {
     Tool_access_policy.allow;
-    deny = Tool_access_policy.Names meta.tool_denylist;
+    deny = Tool_access_policy.Names (meta.tool_denylist @ policy_voice_deny);
   }
 
 module StringSet = Set.Make (String)
@@ -424,7 +447,9 @@ let tool_name_set names =
 let tool_access_lookup_of_meta (meta : keeper_meta) =
   let candidate_names =
     dedupe_tool_names
-      (keeper_base_candidate_tool_names () @ explicit_optional_candidate_tool_names meta)
+      (keeper_base_candidate_tool_names ()
+       @ explicit_optional_candidate_tool_names meta
+       @ voice_tools_allowed_by_policy meta)
   in
   let candidate_set = tool_name_set candidate_names in
   let allow_names =

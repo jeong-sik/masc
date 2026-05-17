@@ -252,6 +252,9 @@ let init_git_repo dir url =
           (Filename.quote dir)
           (Filename.quote url)))
 
+let canonical_path path =
+  try Unix.realpath path with Unix.Unix_error _ | Sys_error _ -> path
+
 let test_discover_finds_git_repos () =
   if not (git_available ()) then Alcotest.skip ()
   else
@@ -266,7 +269,7 @@ let test_discover_finds_git_repos () =
             let repo = List.hd repos in
             Alcotest.(check string) "id" "project-a" repo.id;
             Alcotest.(check string) "url" "https://github.com/test/project-a" repo.url;
-            Alcotest.(check string) "local_path" repo_a repo.local_path)
+            Alcotest.(check string) "local_path" (canonical_path repo_a) repo.local_path)
 
 let test_discover_ignores_masc_dir () =
   if not (git_available ()) then Alcotest.skip ()
@@ -300,7 +303,7 @@ let test_discover_finds_grouped_workspace_repos () =
               (List.length repos);
             let repo = List.hd repos in
             Alcotest.(check string) "id" "oas" repo.id;
-            Alcotest.(check string) "local_path" repo_dir repo.local_path)
+            Alcotest.(check string) "local_path" (canonical_path repo_dir) repo.local_path)
 
 let test_discover_ignores_hidden_dirs () =
   if not (git_available ()) then Alcotest.skip ()
@@ -430,7 +433,8 @@ let test_register_discovered_includes_legacy_root_repo () =
             let ids = List.map (fun (r : repository) -> r.id) registered in
             let has_root =
               List.exists
-                (fun (r : repository) -> String.equal r.local_path base_path)
+                (fun (r : repository) ->
+                  String.equal r.local_path (canonical_path base_path))
                 registered
             in
             Alcotest.(check bool) "has root repo at base_path" true has_root;
@@ -440,7 +444,8 @@ let test_register_discovered_includes_legacy_root_repo () =
             | Ok loaded ->
                 let persisted_root =
                   List.exists
-                    (fun (r : repository) -> String.equal r.local_path base_path)
+                    (fun (r : repository) ->
+                      String.equal r.local_path (canonical_path base_path))
                     loaded
                 in
                 Alcotest.(check int) "persisted 2 repos" 2 (List.length loaded);

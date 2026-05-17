@@ -186,6 +186,7 @@ let provider_config_from_declared_provider
   in
   match provider.transport with
   | Http base_url ->
+    let base_url = Masc_network_defaults.normalize_loopback_base_url base_url in
     (match provider_kind_for_http_provider ?registry_entry provider with
      | Some kind ->
        let request_path =

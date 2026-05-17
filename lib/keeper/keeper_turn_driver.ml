@@ -288,8 +288,31 @@ let run_named
   let tool_filtered_candidates =
     Cascade_runtime_candidate.of_provider_configs tool_filtered_candidate_cfgs
   in
+  let local_endpoint_health =
+    match Cascade_runtime_candidate.local_runtime_urls tool_filtered_candidates with
+    | [] -> []
+    | endpoints ->
+      Llm_provider.Discovery.refresh_and_sync ~sw ~net ~endpoints
+      |> List.map (fun (status : Llm_provider.Discovery.endpoint_status) ->
+             status.url, status.healthy)
+  in
+  let local_prefiltered_candidates, unhealthy_local_endpoints =
+    Cascade_runtime_candidate.filter_unhealthy_local_runtime_urls
+      ~endpoint_health:local_endpoint_health
+      tool_filtered_candidates
+  in
+  let local_prefiltered_candidate_count =
+    List.length local_prefiltered_candidates
+  in
+  if unhealthy_local_endpoints <> [] then
+    Log.Misc.warn
+      "cascade %s: preflight skipped %d unhealthy local endpoint(s) before \
+       provider dispatch: [%s]"
+      cascade_name
+      (List.length unhealthy_local_endpoints)
+      (String.concat ", " unhealthy_local_endpoints);
   let health_filtered_candidates =
-    tool_filtered_candidates
+    local_prefiltered_candidates
     |> List.filter
          (fun candidate ->
             match Cascade_runtime_candidate.first_health_cooldown candidate with
@@ -303,7 +326,7 @@ let run_named
   let health_filtered_candidate_count = List.length health_filtered_candidates in
   let candidates, health_cooldown_fail_open =
     fail_open_health_filtered_candidates
-      ~tool_filtered_candidates
+      ~tool_filtered_candidates:local_prefiltered_candidates
       ~health_filtered_candidates
   in
   if health_cooldown_fail_open then
@@ -311,11 +334,12 @@ let run_named
       "cascade %s: all tool-capable candidates are in health/cooldown; \
        fail-open to surface provider result instead of no_providers_available \
        configured_label_count=%d original_candidate_count=%d \
-       tool_filtered_candidate_count=%d"
+       tool_filtered_candidate_count=%d local_prefiltered_candidate_count=%d"
       cascade_name
       configured_label_count
       original_candidate_count
-      tool_filtered_candidate_count;
+      tool_filtered_candidate_count
+      local_prefiltered_candidate_count;
   let provider_attempt_provenance = base_provider_attempt_provenance in
   match candidates with
   | [] ->
@@ -343,19 +367,20 @@ let run_named
         | Tool_capability_empty ->
           "no tool-capable providers after capability filter"
         | Provider_unavailable ->
-          "providers unavailable after health/cooldown filter"
+          "providers unavailable after local preflight/health/cooldown filter"
       in
       Log.Misc.error
         "cascade %s: %s; classification=%s configured_label_count=%d \
          original_candidate_count=%d tool_filtered_candidate_count=%d \
-         health_filtered_candidate_count=%d require_tool_choice_support=%b \
-         require_tool_support=%b"
+         local_prefiltered_candidate_count=%d health_filtered_candidate_count=%d \
+         require_tool_choice_support=%b require_tool_support=%b"
         cascade_name
         exhaustion_summary
         classification_code
         configured_label_count
         original_candidate_count
         tool_filtered_candidate_count
+        local_prefiltered_candidate_count
         health_filtered_candidate_count
         require_tool_choice_support
         require_tool_support;
@@ -404,6 +429,15 @@ let run_named
                     ("candidate_count", `Int original_candidate_count);
                     ( "tool_filtered_candidate_count",
                       `Int tool_filtered_candidate_count );
+                    ( "local_prefiltered_candidate_count",
+                      `Int local_prefiltered_candidate_count );
+                    ( "unhealthy_local_endpoint_count",
+                      `Int (List.length unhealthy_local_endpoints) );
+                    ( "unhealthy_local_endpoints",
+                      `List
+                        (List.map
+                           (fun endpoint -> `String endpoint)
+                           unhealthy_local_endpoints) );
                     ( "health_filtered_candidate_count",
                       `Int health_filtered_candidate_count );
                     ( "rejected_candidate_count",

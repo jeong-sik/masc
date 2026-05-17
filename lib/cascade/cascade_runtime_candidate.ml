@@ -399,6 +399,42 @@ let runtime_urls candidates =
          let base_url = candidate.provider_cfg.base_url in
          if base_url = "" then None else Some base_url)
 
+let local_runtime_url candidate =
+  if not (Llm_provider.Provider_config.is_local candidate.provider_cfg)
+  then None
+  else
+    candidate.provider_cfg.base_url
+    |> trim_nonempty
+    |> Option.map Masc_network_defaults.normalize_loopback_base_url
+
+let local_runtime_urls candidates =
+  candidates
+  |> List.filter_map local_runtime_url
+  |> Json_util.dedupe_keep_order
+
+let endpoint_health_lookup endpoint_health url =
+  let normalized_url = Masc_network_defaults.normalize_loopback_base_url url in
+  List.find_map
+    (fun (endpoint_url, healthy) ->
+      let endpoint_url =
+        Masc_network_defaults.normalize_loopback_base_url endpoint_url
+      in
+      if String.equal endpoint_url normalized_url then Some healthy else None)
+    endpoint_health
+
+let filter_unhealthy_local_runtime_urls ~endpoint_health candidates =
+  let kept_rev, dropped =
+    List.fold_left
+      (fun (kept, dropped) candidate ->
+        match local_runtime_url candidate with
+        | Some url when endpoint_health_lookup endpoint_health url = Some false ->
+            kept, url :: dropped
+        | _ -> candidate :: kept, dropped)
+      ([], [])
+      candidates
+  in
+  List.rev kept_rev, dropped |> List.rev |> Json_util.dedupe_keep_order
+
 let http_probe_urls candidates =
   candidates |> List.filter_map (fun candidate -> candidate.http_probe_url)
 

@@ -120,6 +120,42 @@ let is_loopback_host_opt = function
   | Some host -> is_loopback_host host
   | None -> false
 
+let trim_trailing_slashes value =
+  let len = String.length value in
+  let rec last_non_slash i =
+    if i < 0 || value.[i] <> '/' then i else last_non_slash (i - 1)
+  in
+  let last = last_non_slash (len - 1) in
+  if last = len - 1 then value else String.sub value 0 (last + 1)
+
+let normalize_loopback_host host =
+  let trimmed = String.trim host in
+  let normalized = String.lowercase_ascii trimmed in
+  match normalized with
+  | "localhost" -> masc_http_default_host
+  | _ -> (
+      match Ipaddr.of_string normalized with
+      | Ok ip -> (
+          match ip with
+          | Ipaddr.V6 addr ->
+              if Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0 then
+                masc_http_default_host
+              else trimmed
+          | Ipaddr.V4 _ -> trimmed)
+      | Error _ -> trimmed)
+
+let normalize_loopback_base_url base_url =
+  let trimmed = String.trim base_url |> trim_trailing_slashes in
+  let uri = Uri.of_string trimmed in
+  match Uri.host uri with
+  | Some host ->
+      let normalized_host = normalize_loopback_host host in
+      if String.equal normalized_host host then trimmed
+      else
+        Uri.with_host uri (Some normalized_host)
+        |> Uri.to_string |> trim_trailing_slashes
+  | None -> trimmed
+
 (** Default port for the dashboard's Vite dev server.  Used by
     [Server_auth.default_loopback_dev_mutation_origins] to whitelist
     the frontend dev origin on each loopback variant. *)

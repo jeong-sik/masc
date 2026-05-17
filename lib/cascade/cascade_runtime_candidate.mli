@@ -103,6 +103,17 @@ val capacity_key : t -> string
 val capacity_keys : t list -> string list
 
 val runtime_urls : t list -> string list
+val local_runtime_urls : t list -> string list
+(** Normalized, de-duplicated loopback-aware URLs for local HTTP runtime
+    candidates only. *)
+
+val filter_unhealthy_local_runtime_urls :
+  endpoint_health:(string * bool) list -> t list -> t list * string list
+(** Drop local runtime candidates whose normalized endpoint appears in
+    [endpoint_health] with [false]. Unknown endpoints are kept so a
+    partial discovery result does not become a hard config failure.
+    Returns the filtered candidates and the de-duplicated dropped URLs. *)
+
 val http_probe_urls : t list -> string list
 val register_http_probe_capable : max_concurrent:int -> t -> unit
 

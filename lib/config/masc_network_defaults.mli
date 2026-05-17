@@ -78,6 +78,12 @@ val is_loopback_host : string -> bool
 (** Convenience for [Uri.host]-style inputs. [None] → [false]. *)
 val is_loopback_host_opt : string option -> bool
 
+val normalize_loopback_base_url : string -> string
+(** Strip trailing slashes from [base_url] and canonicalize loopback
+    aliases that can resolve to IPv6-only sockets in client libraries:
+    ["localhost"] and [[::1]] become {!masc_http_default_host}. Remote
+    hosts and IPv4 literals are preserved. *)
+
 (** {1 Vite dev frontend} *)
 
 val vite_dev_default_port : int

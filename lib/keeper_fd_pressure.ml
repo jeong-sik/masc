@@ -27,6 +27,7 @@ type nofile_cache =
   | Resolved of int option
 
 let nofile_soft_limit_cache : nofile_cache Atomic.t = Atomic.make Uninitialized
+let nofile_soft_limit_mutex = Stdlib.Mutex.create ()
 
 type admission_block =
   | Fd_pressure_cooldown of float
@@ -164,12 +165,11 @@ let reset_for_tests () =
 (* Detect the host's nofile soft limit by spawning [sh -c 'ulimit -n']. The
    subprocess itself consumes pipes/FDs, so under fleet startup we must run
    it at most once. Single-flight protocol:
-   - Uninitialized → CAS to In_flight. Winner runs detection, stores Resolved.
-   - In_flight → loser waits with a short bounded busy-yield until Resolved.
+   - Uninitialized → In_flight while holding the process-local mutex.
+     The holder runs detection, stores Resolved, and releases waiters.
    - Resolved cached → return immediately.
-   Bounded wait (~1s) is a safety net for the pathological case where the
-   detector subprocess hangs; falling back to [None] keeps admission permissive
-   rather than blocking the fleet on a stuck probe. *)
+   Stdlib.Mutex is intentional here: this helper can run before an Eio context
+   exists, and the protected section is a one-shot host-limit probe. *)
 let detect_nofile_soft_limit_now () =
   try
     let lines, status =
@@ -190,30 +190,22 @@ let process_nofile_soft_limit () =
   match Atomic.get nofile_soft_limit_cache with
   | Resolved cached -> cached
   | _ ->
-    if Atomic.compare_and_set nofile_soft_limit_cache Uninitialized In_flight
-    then (
-      try
-        let detected = detect_nofile_soft_limit_now () in
-        Atomic.set nofile_soft_limit_cache (Resolved detected);
-        detected
-      with
-      | Eio.Cancel.Cancelled _ as exn ->
-        Atomic.set nofile_soft_limit_cache Uninitialized;
-        raise exn)
-    else (
-      (* Lost race or already In_flight. Wait until the winner publishes.
-         1ms × 1000 attempts = ~1s bounded; longer than any sane [ulimit -n]
-         runtime. Past the bound, return [None] (permissive admission) rather
-         than blocking the caller. *)
-      let rec wait remaining =
+    Stdlib.Mutex.lock nofile_soft_limit_mutex;
+    Fun.protect
+      ~finally:(fun () -> Stdlib.Mutex.unlock nofile_soft_limit_mutex)
+      (fun () ->
         match Atomic.get nofile_soft_limit_cache with
         | Resolved cached -> cached
-        | _ when remaining <= 0 -> None
-        | _ ->
-          Unix.sleepf 0.001;
-          wait (remaining - 1)
-      in
-      wait 1000)
+        | Uninitialized | In_flight ->
+          Atomic.set nofile_soft_limit_cache In_flight;
+          (try
+             let detected = detect_nofile_soft_limit_now () in
+             Atomic.set nofile_soft_limit_cache (Resolved detected);
+             detected
+           with
+           | Eio.Cancel.Cancelled _ as exn ->
+             Atomic.set nofile_soft_limit_cache Uninitialized;
+             raise exn))
 ;;
 
 let process_open_fd_count () =

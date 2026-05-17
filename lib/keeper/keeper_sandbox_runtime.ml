@@ -314,6 +314,68 @@ let docker_config_mount_args ~base_path ~container_root =
     ]
 ;;
 
+type room_state_mount_kind =
+  | Room_state_file
+  | Room_state_dir
+
+let docker_room_state_mounts =
+  [ Room_state_dir, "tasks"
+  ; Room_state_file, "tasks.json"
+  ; Room_state_file, "backlog.json"
+  ; Room_state_file, "board_posts.jsonl"
+  ; Room_state_file, "board_comments.jsonl"
+  ; Room_state_file, "board_votes.jsonl"
+  ; Room_state_file, "board_reactions.jsonl"
+  ; Room_state_file, "current_task"
+  ; Room_state_file, "goals.json"
+  ; Room_state_file, "goal_events.jsonl"
+  ; Room_state_file, "goal_verifications.json"
+  ]
+;;
+
+let room_state_path_available kind path =
+  try
+    match kind with
+    | Room_state_file -> Sys.file_exists path && not (Sys.is_directory path)
+    | Room_state_dir -> Sys.file_exists path && Sys.is_directory path
+  with
+  | Sys_error _ -> false
+;;
+
+let unique_preserving_order values =
+  let rec loop seen acc = function
+    | [] -> List.rev acc
+    | value :: rest ->
+      if List.mem value seen
+      then loop seen acc rest
+      else loop (value :: seen) (value :: acc) rest
+  in
+  loop [] [] values
+;;
+
+let docker_room_state_mount_specs ~base_path ~container_root =
+  let host_masc_root = Common.masc_dir_from_base_path ~base_path in
+  let container_masc_root = Filename.concat container_root Common.masc_dirname in
+  docker_room_state_mounts
+  |> List.concat_map (fun (kind, rel_path) ->
+    let host_path = Filename.concat host_masc_root rel_path in
+    if not (room_state_path_available kind host_path)
+    then []
+    else
+      [ Printf.sprintf
+          "%s:%s:ro"
+          host_path
+          (Filename.concat container_masc_root rel_path)
+      ; Printf.sprintf "%s:%s:ro" host_path host_path
+      ])
+  |> unique_preserving_order
+;;
+
+let docker_room_state_mount_args ~base_path ~container_root =
+  docker_room_state_mount_specs ~base_path ~container_root
+  |> List.concat_map (fun spec -> [ "-v"; spec ])
+;;
+
 let docker_config_env_args ~base_path ~container_root =
   let host_config_root = docker_config_host_root ~base_path in
   if not (docker_config_available host_config_root)

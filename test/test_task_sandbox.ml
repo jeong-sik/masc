@@ -355,6 +355,24 @@ let test_command_path_lazy_creates_current_task_worktree () =
        | Error msg -> fail ("validator should pass after lazy repair: " ^ msg)
        | Ok () -> ())
 
+let test_command_descendant_path_lazy_creates_current_task_worktree () =
+  with_lazy_worktree_fixture
+    (fun ~config ~meta ~clone_path ~task_id:_ ~worktree_name ~worktree_path ->
+       check bool "worktree initially missing" false (Sys.file_exists worktree_path);
+       let cmd = Printf.sprintf "cat .worktrees/%s/README.md" worktree_name in
+       (match
+          Keeper_task_worktree_lazy.ensure_command_existing_dirs
+            ~config
+            ~meta
+            ~cwd:clone_path
+            ~cmd
+        with
+        | Error msg -> fail ("expected lazy descendant repair, got: " ^ msg)
+        | Ok () -> ());
+       check bool "worktree created" true (Sys.is_directory worktree_path);
+       check bool "descendant file materialized" true
+         (Sys.file_exists (Filename.concat worktree_path "README.md")))
+
 let test_full_lifecycle () =
   let base = make_temp_dir () in
   let dir = base in
@@ -929,6 +947,8 @@ let () =
         test_resolve_write_cwd_lazy_creates_current_task_worktree;
       test_case "lazy_command_path_creates_current_task_worktree" `Quick
         test_command_path_lazy_creates_current_task_worktree;
+      test_case "lazy_command_descendant_path_creates_current_task_worktree" `Quick
+        test_command_descendant_path_lazy_creates_current_task_worktree;
       test_case "ambiguous_multi_repo_without_evidence" `Quick
         test_create_fails_ambiguous_multi_repo_without_evidence;
       test_case "infer_repo_from_task_repo_mentions" `Quick

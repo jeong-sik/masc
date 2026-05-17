@@ -922,6 +922,13 @@ let test_docker_shell_mounts_masc_config_runtime_paths () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
+  let masc_root =
+    Filename.concat config.Coord.base_path Common.masc_dirname
+  in
+  let tasks_host = Filename.concat masc_root "tasks" in
+  ensure_dir tasks_host;
+  write_file (Filename.concat tasks_host "backlog.json") "{}";
+  write_file (Filename.concat masc_root "board_posts.jsonl") "";
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
@@ -961,7 +968,17 @@ let test_docker_shell_mounts_masc_config_runtime_paths () =
     Alcotest.(check bool) "container MASC_BASE_PATH pinned" true
       (contains_substring line ("MASC_BASE_PATH=" ^ container_root));
     Alcotest.(check bool) "container MASC_CONFIG_DIR pinned" true
-      (contains_substring line ("MASC_CONFIG_DIR=" ^ container_config_dir))
+      (contains_substring line ("MASC_CONFIG_DIR=" ^ container_config_dir));
+    Alcotest.(check bool) "room tasks mounted under container root" true
+      (contains_substring
+         line
+         (tasks_host ^ ":" ^ container_root ^ "/.masc/tasks:ro"));
+    Alcotest.(check bool) "room tasks mounted for worktree symlink target" true
+      (contains_substring
+         line
+         (tasks_host ^ ":" ^ tasks_host ^ ":ro"));
+    Alcotest.(check bool) "auth state not mounted" false
+      (contains_substring line "/.masc/auth/")
 
 let run_git_creds_docker_shell ~config ~meta ~playground ~log_path =
   ensure_github_identity_bundle ~config Masc_mcp.Keeper_gh_env.root_github_identity;

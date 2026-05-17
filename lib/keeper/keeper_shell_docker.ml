@@ -1012,6 +1012,9 @@ let run_docker_shell_command_with_status_internal
                        @ Keeper_sandbox_runtime.docker_config_mount_args
                            ~base_path:config.base_path
                            ~container_root
+                       @ Keeper_sandbox_runtime.docker_room_state_mount_args
+                           ~base_path:config.base_path
+                           ~container_root
                        @ network_args
                        @ cred_mounts
                        @ cred_envs

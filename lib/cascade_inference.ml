@@ -130,7 +130,36 @@ let cap_auto_resolved_max_tokens ~cascade_name ~source max_tokens =
     ceiling
   | _ -> max_tokens
 
-(** Resolve a max_tokens value: cascade config -> capped fallback. *)
+let explicit_max_tokens_exceeds_seen : (string, unit) Hashtbl.t =
+  Hashtbl.create 16
+let explicit_max_tokens_exceeds_mutex = Mutex.create ()
+
+let explicit_max_tokens_exceeds_key ~cascade_name ~max_tokens ~ceiling =
+  Printf.sprintf
+    "%s\x1f%d\x1f%d"
+    (Keeper_cascade_profile.runtime_name_to_string cascade_name)
+    max_tokens
+    ceiling
+
+let should_log_explicit_max_tokens_exceeds ~cascade_name ~max_tokens ~ceiling =
+  let key = explicit_max_tokens_exceeds_key ~cascade_name ~max_tokens ~ceiling in
+  Mutex.protect explicit_max_tokens_exceeds_mutex (fun () ->
+    if Hashtbl.mem explicit_max_tokens_exceeds_seen key
+    then false
+    else (
+      Hashtbl.replace explicit_max_tokens_exceeds_seen key ();
+      true))
+
+(** Resolve a max_tokens value: cascade config -> capped fallback.
+
+    Source diagnosis (2026-05-17): when the cascade catalog returns an
+    explicit [max_tokens] that exceeds the narrowest member ceiling, the
+    downstream [validate_max_tokens_within_ceiling] hard-rejects with
+    [Max_tokens_ceiling_violation] *before* any tier failover runs. Earlier
+    revisions had no log between the explicit value and the hard-fail, so
+    operators saw the typed error but not which cascade catalog entry
+    produced the over-ceiling value. The dedup'd warn below makes that
+    source visible without changing behavior; the validator still hard-fails. *)
 let resolve_max_tokens
     ~(cascade_name : Keeper_cascade_profile.runtime_name)
     ~(fallback : unit -> int) : int =
@@ -138,7 +167,24 @@ let resolve_max_tokens
     Keeper_cascade_profile.runtime_name_to_string cascade_name
   in
   match (for_cascade ~name:cascade_name_string).max_tokens with
-  | Some t -> t
+  | Some t ->
+    (match
+       Cascade_runtime.max_output_tokens_ceiling_of_cascade_name cascade_name
+     with
+     | Some ceiling when ceiling > 0 && t > ceiling ->
+       if should_log_explicit_max_tokens_exceeds
+            ~cascade_name ~max_tokens:t ~ceiling
+       then
+         Log.warn ~ctx:"cascade"
+           "%s: explicit max_tokens=%d from cascade catalog inference_params \
+            exceeds narrowest member ceiling=%d; pre-dispatch validator will \
+            hard-fail (Max_tokens_ceiling_violation); fix by lowering the \
+            cascade catalog max_tokens or by splitting the tier so that the \
+            narrowest member matches the request; suppressing repeats for \
+            this tuple"
+           cascade_name_string t ceiling
+     | _ -> ());
+    t
   | None ->
     cap_auto_resolved_max_tokens ~cascade_name ~source:"fallback" (fallback ())
 
@@ -182,4 +228,11 @@ module For_testing = struct
 
   let should_log_auto_max_tokens_clamp =
     should_log_auto_max_tokens_clamp
+
+  let reset_explicit_max_tokens_exceeds_warnings () =
+    Mutex.protect explicit_max_tokens_exceeds_mutex (fun () ->
+      Hashtbl.clear explicit_max_tokens_exceeds_seen)
+
+  let should_log_explicit_max_tokens_exceeds =
+    should_log_explicit_max_tokens_exceeds
 end

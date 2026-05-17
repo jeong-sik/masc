@@ -243,6 +243,41 @@ let test_auto_max_tokens_clamp_warning_dedupes_by_tuple () =
        ~max_tokens:65536
        ~ceiling:8192)
 
+let test_explicit_max_tokens_exceeds_warning_dedupes_by_tuple () =
+  CI.For_testing.reset_explicit_max_tokens_exceeds_warnings ();
+  check
+    bool
+    "first tuple logs"
+    true
+    (CI.For_testing.should_log_explicit_max_tokens_exceeds
+       ~cascade_name
+       ~max_tokens:16384
+       ~ceiling:8192);
+  check
+    bool
+    "same tuple suppressed"
+    false
+    (CI.For_testing.should_log_explicit_max_tokens_exceeds
+       ~cascade_name
+       ~max_tokens:16384
+       ~ceiling:8192);
+  check
+    bool
+    "different ceiling logs"
+    true
+    (CI.For_testing.should_log_explicit_max_tokens_exceeds
+       ~cascade_name
+       ~max_tokens:16384
+       ~ceiling:4096);
+  check
+    bool
+    "different max_tokens logs"
+    true
+    (CI.For_testing.should_log_explicit_max_tokens_exceeds
+       ~cascade_name
+       ~max_tokens:32768
+       ~ceiling:8192)
+
 let test_resolve_provider_derived_max_tokens_matches_failover_ceiling () =
   with_temp_cascade_toml
     {|
@@ -358,6 +393,10 @@ let () =
         "automatic max_tokens clamp warning dedupes by tuple"
         `Quick
         test_auto_max_tokens_clamp_warning_dedupes_by_tuple;
+      test_case
+        "explicit max_tokens exceeds ceiling warning dedupes by tuple"
+        `Quick
+        test_explicit_max_tokens_exceeds_warning_dedupes_by_tuple;
       test_case
         "provider-derived max_tokens matches failover ceiling"
         `Quick

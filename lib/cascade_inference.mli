@@ -72,4 +72,12 @@ module For_testing : sig
     max_tokens:int ->
     ceiling:int ->
     bool
+
+  val reset_explicit_max_tokens_exceeds_warnings : unit -> unit
+
+  val should_log_explicit_max_tokens_exceeds :
+    cascade_name:Keeper_cascade_profile.runtime_name ->
+    max_tokens:int ->
+    ceiling:int ->
+    bool
 end

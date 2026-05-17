@@ -97,11 +97,19 @@ let declarative_autoboot_enabled_by_default name =
   | Some true | None -> true
 ;;
 
+let effective_autoboot_enabled name meta =
+  match (load_keeper_profile_defaults name).autoboot_enabled with
+  | Some value -> value
+  | None -> meta.autoboot_enabled
+;;
+
 let keepalive_keeper_names config =
   configured_keeper_names config
   |> List.filter_map (fun name ->
     match read_meta_file_path (keeper_meta_path config name) with
-    | Ok (Some meta) when (not meta.paused) && meta.autoboot_enabled -> Some meta.name
+    | Ok (Some meta)
+      when (not meta.paused) && effective_autoboot_enabled name meta ->
+        Some meta.name
     | Ok (Some _) -> None
     | Ok None -> if declarative_autoboot_enabled_by_default name then Some name else None
     | Error msg ->
@@ -132,7 +140,9 @@ let persistent_agent_names config =
   configured_keeper_names config
   |> List.filter_map (fun name ->
     match read_meta_file_path (keeper_meta_path config name) with
-    | Ok (Some meta) when (not meta.paused) && meta.autoboot_enabled -> Some meta.name
+    | Ok (Some meta)
+      when (not meta.paused) && effective_autoboot_enabled name meta ->
+        Some meta.name
     | Ok (Some _) -> None
     | Ok None -> None
     | Error msg ->

@@ -361,6 +361,44 @@ let test_bootable_keeper_names_skip_autoboot_disabled_meta () =
       check bool "autoboot disabled sangsu excluded from bootable list" false
         (List.mem "sangsu" names))
 
+let test_bootable_keeper_names_use_declarative_autoboot_true_over_stale_meta () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  with_clean_base_path_env @@ fun () ->
+  Eio.Switch.run @@ fun _sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Config_dir_resolver.reset ();
+      Keeper_registry.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      write_keeper_toml_exn ~autoboot_enabled:true config ~name:"verifier";
+      let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+      write_minimal_cascade_toml config_root;
+      Unix.putenv "MASC_CONFIG_DIR" config_root;
+      Config_dir_resolver.reset ();
+      write_keeper_meta_exn
+        ~autoboot_enabled:false config ~name:"verifier" ~trace_id:"trace-verifier";
+      let bootable_names = Keeper_runtime.bootable_keeper_names config in
+      check bool "declarative autoboot true restores bootable keeper" true
+        (List.mem "verifier" bootable_names);
+      let keepalive_names = Keeper_types.keepalive_keeper_names config in
+      check bool "declarative autoboot true restores keepalive keeper" true
+        (List.mem "verifier" keepalive_names);
+      let exclusions =
+        Keeper_runtime.autoboot_excluded_keeper_reasons config
+        |> List.map (fun Keeper_runtime.{ keeper_name; reason } ->
+          keeper_name, reason)
+      in
+      check (list (pair string string))
+        "declarative autoboot true clears stale disabled exclusion"
+        []
+        exclusions)
+
 let test_autoboot_exclusion_reasons_explain_skipped_keepers () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -1117,6 +1155,10 @@ let () =
             test_keeper_listing_ignores_sidecar_json_files;
           test_case "bootable list skips autoboot-disabled meta" `Quick
             test_bootable_keeper_names_skip_autoboot_disabled_meta;
+          test_case
+            "bootable list uses declarative autoboot true over stale meta"
+            `Quick
+            test_bootable_keeper_names_use_declarative_autoboot_true_over_stale_meta;
           test_case "autoboot exclusion reasons explain skipped keepers" `Quick
             test_autoboot_exclusion_reasons_explain_skipped_keepers;
           test_case "declarative autoboot-disabled keeper skips boot without meta"

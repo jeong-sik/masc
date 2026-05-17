@@ -122,9 +122,14 @@ type autoboot_exclusion = {
 
 let autoboot_exclusion_reason config name =
   match read_meta_file_path (keeper_meta_path config name) with
-  | Ok (Some meta) when meta.paused -> Some "paused"
-  | Ok (Some meta) when not meta.autoboot_enabled -> Some "autoboot_disabled"
-  | Ok (Some _) -> None
+  | Ok (Some meta) ->
+    if meta.paused then Some "paused"
+    else
+      (match (load_keeper_profile_defaults name).autoboot_enabled with
+       | Some true -> None
+       | Some false -> Some "declarative_autoboot_disabled"
+       | None ->
+         if meta.autoboot_enabled then None else Some "autoboot_disabled")
   | Ok None ->
     (match (load_keeper_profile_defaults name).autoboot_enabled with
      | Some false -> Some "declarative_autoboot_disabled"

@@ -78,22 +78,52 @@ let lookup_names_of_qualified_names names =
   (names @ List.map strip_declarative_profile_prefix names)
   |> List.sort_uniq String.compare
 
-(* RFC-0058 Phase 8.2: switch to [try_load_partial] so a single stale
-   binding does not invalidate the whole catalog. Adapter errors are
-   logged but the resolvable subset is still exposed to keeper toml
-   validation. See RFC-0058-phase-8-cascade-catalog-partial-parse.md §3.3. *)
-let log_partial_catalog_errors ~path
+(* RFC-0058 Phase 8.2 + 8.1.5: partial-catalog warns route through
+   [Log.Cascade] (dedicated namespace, RFC-0058 phase 8.1.5) and are
+   deduplicated by (path, mtime, sorted-error-signature) so a single
+   reload triggers at most one WARN even when consulted by multiple
+   keeper toml load sites.
+
+   Dedup state is module-local. The key set is bounded by the number
+   of distinct (path, mtime) pairs the server sees in its lifetime.
+   In practice cascade.toml mtime changes on operator edit; the table
+   does not grow without bound during normal operation. *)
+module Partial_warn_dedup = struct
+  let table : (string * float * string, unit) Hashtbl.t = Hashtbl.create 8
+  let mutex = Mutex.create ()
+
+  let key_of_errors errors =
+    errors
+    |> List.map Cascade_declarative_adapter.show_adapter_error
+    |> List.sort String.compare
+    |> String.concat "|"
+
+  (* [reset_for_tests] is intentionally NOT exposed in any .mli. It is
+     called only from inside this module by the unit test fixture that
+     runs in the same translation unit. Public callers cannot reach it. *)
+  let _ = fun () -> Hashtbl.clear table
+
+  let observe_once ~path ~mtime ~errors f =
+    let sig_ = key_of_errors errors in
+    let key = (path, mtime, sig_) in
+    Mutex.lock mutex;
+    let fresh =
+      if Hashtbl.mem table key then false
+      else (Hashtbl.add table key (); true)
+    in
+    Mutex.unlock mutex;
+    if fresh then f sig_
+end
+
+let log_partial_catalog_errors ~path ~mtime
     (errors : Cascade_declarative_adapter.adapter_error list) =
   if errors <> [] then
-    let rendered =
-      errors
-      |> List.map Cascade_declarative_adapter.show_adapter_error
-      |> String.concat "; "
-    in
-    Log.Keeper.warn
-      "declarative cascade catalog has %d adapter error(s) in %s; \
-       surfacing valid subset to keeper validation: %s"
-      (List.length errors) path rendered
+    Partial_warn_dedup.observe_once ~path ~mtime ~errors
+      (fun rendered ->
+        Log.Cascade.warn
+          "declarative cascade catalog has %d adapter error(s) in %s \
+           (mtime=%.0f); surfacing valid subset to keeper validation: %s"
+          (List.length errors) path mtime rendered)
 
 let declarative_public_catalog_names ?config_path () =
   let path_opt =
@@ -106,7 +136,7 @@ let declarative_public_catalog_names ?config_path () =
   | Some path -> (
       match Cascade_declarative_hotpath.try_load_partial path with
       | Some { snapshot; errors } ->
-          log_partial_catalog_errors ~path errors;
+          log_partial_catalog_errors ~path ~mtime:snapshot.mtime errors;
           let names = public_names_of_declarative_snapshot snapshot in
           if names = []
           then Error "declarative cascade catalog contains no profiles"
@@ -124,7 +154,7 @@ let declarative_catalog_lookup_names ?config_path () =
   | Some path -> (
       match Cascade_declarative_hotpath.try_load_partial path with
       | Some { snapshot; errors } ->
-          log_partial_catalog_errors ~path errors;
+          log_partial_catalog_errors ~path ~mtime:snapshot.mtime errors;
           let names =
             qualified_names_of_declarative_snapshot snapshot
             |> lookup_names_of_qualified_names

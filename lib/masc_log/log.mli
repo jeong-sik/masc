@@ -200,6 +200,11 @@ module Transport : LOGGER
 module Gc : LOGGER
 module Reputation : LOGGER
 module Keeper : LOGGER
+module Cascade : LOGGER
+(** RFC-0058 Phase 8.1.5: cascade-domain namespace for catalog,
+    routing, and partial-parse events. Separated from {!Keeper} so
+    alerting/dashboard filters can target cascade subsystem without
+    keeper-domain false positives. *)
 module Memory : LOGGER
 module Mention : LOGGER
 module Misc : LOGGER

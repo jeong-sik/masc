@@ -96,6 +96,22 @@ let run_process_with_timeout
   { exit_code = exit_code_of_status status; stdout; stderr }
 ;;
 
+(* All worker-runtime Docker subprocesses, including best-effort cleanup, must
+   share the global docker spawn throttle. The cleanup path used to bypass it,
+   which meant a 64-worker cancellation/completion wave could still fan out
+   [docker rm -f] even after the main [docker run] path was gated. *)
+let run_docker_process_with_throttle ?stdin_content ~clock_opt ~timeout_sec ~argv ~env () =
+  Docker_spawn_throttle.with_slot (fun () ->
+    run_process_with_timeout
+      ?stdin_content
+      ~clock_opt
+      ~timeout_sec
+      ~prog:"docker"
+      ~argv
+      ~env
+      ())
+;;
+
 let helper_binary = "masc-worker-run"
 let docker_host_alias = "host.docker.internal"
 let container_counter = Atomic.make 0
@@ -237,10 +253,9 @@ let persist_stderr_artifact (spec : Worker_execution_spec.t) stderr =
 
 let best_effort_remove_container ?clock_opt name =
   ignore
-    (run_process_with_timeout
+    (run_docker_process_with_throttle
        ~clock_opt
        ~timeout_sec:(Env_config_exec_timeout.timeout_sec_int ~caller:Sandbox ())
-       ~prog:"docker"
        ~argv:[ "docker"; "rm"; "-f"; name ]
        ~env:(Unix.environment ())
        ())
@@ -304,10 +319,9 @@ let preflight_batch ?clock_opt (subjects : preflight_subject list) =
   then Error "worker runtime Docker image is not configured"
   else (
     let info_result =
-      run_process_with_timeout
+      run_docker_process_with_throttle
         ~clock_opt
         ~timeout_sec:(Env_config_exec_timeout.timeout_sec_int ~caller:Sandbox ())
-        ~prog:"docker"
         ~argv:[ "docker"; "info" ]
         ~env:(Unix.environment ())
         ()
@@ -316,10 +330,9 @@ let preflight_batch ?clock_opt (subjects : preflight_subject list) =
     then Error (Printf.sprintf "docker info failed: %s" (tail_text info_result.stderr))
     else (
       let image_result =
-        run_process_with_timeout
+        run_docker_process_with_throttle
           ~clock_opt
           ~timeout_sec:(Env_config_exec_timeout.timeout_sec_int ~caller:Sandbox ())
-          ~prog:"docker"
           ~argv:[ "docker"; "image"; "inspect"; image ]
           ~env:(Unix.environment ())
           ()
@@ -403,15 +416,13 @@ let run_worker_spec ?clock_opt (spec : Worker_execution_spec.t)
          Worker_execution_spec.to_yojson spec |> Yojson.Safe.to_string
        in
        let result =
-         Docker_spawn_throttle.with_slot (fun () ->
-           run_process_with_timeout
-             ~clock_opt
-             ~stdin_content
-             ~timeout_sec:effective_timeout_sec
-             ~prog:"docker"
-             ~argv:(docker_argv ~container_name:name spec)
-             ~env:(Unix.environment ())
-             ())
+         run_docker_process_with_throttle
+           ~clock_opt
+           ~stdin_content
+           ~timeout_sec:effective_timeout_sec
+           ~argv:(docker_argv ~container_name:name spec)
+           ~env:(Unix.environment ())
+           ()
        in
        persist_stderr_artifact spec result.stderr;
        match result.exit_code with

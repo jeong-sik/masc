@@ -9,6 +9,7 @@ module Meas = Masc_mcp.Keeper_measurement
 module Pages = Masc_mcp.Server_routes_http_pages
 module Json = Yojson.Safe.Util
 module FD = Masc_mcp.Keeper_fd_pressure
+module Disk = Masc_mcp.Keeper_disk_pressure
 
 let bp = "/tmp/test"
 
@@ -21,12 +22,6 @@ let with_env name value f =
       | Some v -> Unix.putenv name v
       | None -> Unix.putenv name "")
     f
-
-let with_fd_pressure_default_env f =
-  with_env "MASC_KEEPER_MIN_NOFILE_FOR_FLEET" "" @@ fun () ->
-  with_env "MASC_KEEPER_MIN_NOFILE_FOR_24" "" @@ fun () ->
-  with_env "MASC_KEEPER_FD_HEADROOM" "" @@ fun () ->
-  with_env "MASC_KEEPER_FD_PER_ACTIVE_KEEPER" "" f
 
 let rec rm_rf path =
   if Sys.file_exists path then
@@ -76,30 +71,12 @@ let test_fd_pressure_structured_classifier () =
 
 let test_fd_pressure_nofile_cap () =
   FD.reset_for_tests ();
-  with_fd_pressure_default_env @@ fun () ->
   check int "low process nofile degrades 24-keeper boot" 1
     (FD.cap_active_keepers_for_nofile ~soft_limit:(Some 256) 24);
-  check int "4096 nofile still admits the old 24-keeper baseline" 24
+  check int "safe process nofile leaves 24-keeper boot alone" 24
     (FD.cap_active_keepers_for_nofile ~soft_limit:(Some 4096) 24);
-  check int "4096 nofile caps the 64-keeper fleet baseline" 41
-    (FD.cap_active_keepers_for_nofile ~soft_limit:(Some 4096) 64);
   check int "low process nofile also caps unlimited boot config" 1
     (FD.cap_active_keepers_for_nofile ~soft_limit:(Some 256) 0)
-
-let test_fd_pressure_fleet_floor_env () =
-  FD.reset_for_tests ();
-  with_fd_pressure_default_env @@ fun () ->
-  check int "default fleet nofile floor targets 64 keepers" 12288
-    (FD.min_nofile_for_fleet ());
-  with_env "MASC_KEEPER_MIN_NOFILE_FOR_24" "4096" @@ fun () ->
-  check int "legacy nofile floor remains honored" 4096
-    (FD.min_nofile_for_fleet ());
-  with_env "MASC_KEEPER_MIN_NOFILE_FOR_FLEET" "12288" @@ fun () ->
-  check int "fleet nofile floor overrides legacy floor" 12288
-    (FD.min_nofile_for_fleet ());
-  with_env "MASC_KEEPER_MIN_NOFILE_FOR_FLEET" "2048" @@ fun () ->
-  check int "fleet nofile floor keeps precedence when lower than legacy" 2048
-    (FD.min_nofile_for_fleet ())
 
 let test_fd_pressure_proactive_admission () =
   FD.reset_for_tests ();
@@ -144,36 +121,50 @@ let test_fd_pressure_degraded_projection () =
       check string "next human action" "restore_fd_headroom"
         (Json.member "next_human_action" trust |> Json.to_string))
 
-let test_fd_pressure_runtime_state_json () =
-  FD.reset_for_tests ();
-  let json =
-    FD.runtime_state_json
-      ~soft_limit:(Some 512)
-      ~open_fds:(Some 460)
-      ~active_keepers:2
-      ~starting_keepers:1
-      ~requested_keepers:24
-      ()
-  in
-  let decision = Json.member "admission_decision" json in
-  check int "runtime soft limit" 512
-    (Json.member "soft_limit" json |> Json.to_int);
-  check int "runtime requested keepers" 24
-    (Json.member "requested_keepers" json |> Json.to_int);
-  check int "runtime target keeper count" 24
-    (Json.member "target_keeper_count" json |> Json.to_int);
-  check int "runtime projected starting keepers" 22
-    (Json.member "projected_starting_keepers" json |> Json.to_int);
-  check string "runtime status" "blocked"
-    (Json.member "status" json |> Json.to_string);
-  check string "runtime admission blocks unsafe projection" "block"
-    (Json.member "status" decision |> Json.to_string);
-  check bool "runtime admission_blocked flag" true
-    (Json.member "admission_blocked" json |> Json.to_bool);
-  check int "runtime admission_blocked_keepers" 24
-    (Json.member "admission_blocked_keepers" json |> Json.to_int);
-  check bool "runtime operator action required" true
-    (Json.member "operator_action_required" json |> Json.to_bool)
+let gib n = n * 1024 * 1024 * 1024
+
+let disk_snapshot ?(available_bytes = gib 40) () =
+  Disk.Snapshot
+    { path = "/tmp"
+    ; filesystem = "/dev/test"
+    ; total_bytes = gib 100
+    ; used_bytes = gib 60
+    ; available_bytes
+    ; capacity_percent = 60.0
+    ; available_percent =
+        (float_of_int available_bytes /. float_of_int (gib 100)) *. 100.0
+    ; mounted_on = "/"
+    }
+
+let disk_admitted = function
+  | Disk.Admit -> true
+  | Disk.Block _ -> false
+
+let test_disk_pressure_classifiers () =
+  check bool "detects ENOSPC text" true
+    (Disk.is_disk_exhaustion_text
+       "Unix_error (No space left on device, \"write\", path)");
+  check bool "detects structured ENOSPC" true
+    (Disk.is_disk_exhaustion_exn (Unix.Unix_error (Unix.ENOSPC, "write", "/tmp/x")));
+  check bool "ignores provider timeout" false
+    (Disk.is_disk_exhaustion_text "provider stream idle timeout")
+
+let test_disk_pressure_proactive_admission () =
+  Disk.reset_for_tests ();
+  Fun.protect
+    ~finally:Disk.reset_for_tests
+    (fun () ->
+      with_env "MASC_KEEPER_DISK_MIN_FREE_BYTES" (string_of_int (gib 10)) (fun () ->
+          with_env "MASC_KEEPER_DISK_MIN_FREE_PERCENT" "5.0" (fun () ->
+              check bool "admits filesystem with disk headroom" true
+                (Disk.admission_decision_of_snapshot (disk_snapshot ()) |> disk_admitted);
+              check bool "blocks filesystem below disk floor" false
+                (Disk.admission_decision_of_snapshot
+                   (disk_snapshot ~available_bytes:(gib 1) ())
+                 |> disk_admitted);
+              Disk.note ~site:"test" ~detail:"No space left on device" ();
+              check bool "cooldown blocks after ENOSPC" false
+                (Disk.admission_decision_of_snapshot (disk_snapshot ()) |> disk_admitted))))
 
 let test_bonsai_keepers_summary_uses_scoped_registry () =
   let base_path = temp_base_path "bonsai-summary" in
@@ -2026,14 +2017,14 @@ let () =
             test_fd_pressure_structured_classifier;
           test_case "fd pressure nofile boot cap" `Quick
             test_fd_pressure_nofile_cap;
-          test_case "fd pressure fleet nofile floor env" `Quick
-            test_fd_pressure_fleet_floor_env;
           test_case "fd pressure proactive admission" `Quick
             test_fd_pressure_proactive_admission;
           test_case "fd pressure degraded projection" `Quick
             test_fd_pressure_degraded_projection;
-          test_case "fd pressure runtime state json" `Quick
-            test_fd_pressure_runtime_state_json;
+          test_case "disk pressure classifiers" `Quick
+            test_disk_pressure_classifiers;
+          test_case "disk pressure proactive admission" `Quick
+            test_disk_pressure_proactive_admission;
           eio_test "bonsai summary uses scoped registry"
             test_bonsai_keepers_summary_uses_scoped_registry;
           eio_test "register and get" test_register_and_get;

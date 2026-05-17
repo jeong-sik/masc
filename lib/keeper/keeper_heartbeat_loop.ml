@@ -1135,6 +1135,14 @@ let run_keepalive_unified_turn
           meta_after_triage.name
           (Keeper_fd_pressure.remaining_sec ());
         meta_after_cursor_persist)
+      else if should_run_turn && Keeper_disk_pressure.active ()
+      then (
+        Log.Keeper.debug
+          "%s: skipping turn while disk-pressure circuit breaker is active \
+           (remaining=%.0fs)"
+          meta_after_triage.name
+          (Keeper_disk_pressure.remaining_sec ());
+        meta_after_cursor_persist)
       else if
         should_run_turn
         && not
@@ -1144,6 +1152,17 @@ let run_keepalive_unified_turn
       then (
         Log.Keeper.debug
           "%s: skipping turn because projected FD budget is exhausted before pressure"
+          meta_after_triage.name;
+        meta_after_cursor_persist)
+      else if
+        should_run_turn
+        && not
+             (Keeper_disk_pressure.admit_turn
+                ~masc_root:(Coord.masc_root_dir ctx.config)
+                ())
+      then (
+        Log.Keeper.debug
+          "%s: skipping turn because disk free-space budget is below fleet floor"
           meta_after_triage.name;
         meta_after_cursor_persist)
       else if should_run_turn

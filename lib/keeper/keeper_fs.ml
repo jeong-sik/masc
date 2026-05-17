@@ -41,6 +41,9 @@ let ensure_dir (path : string) : string =
             Keeper_fd_pressure.note_exception
               ~site:"keeper_fs.ensure_dir"
               exn;
+            Keeper_disk_pressure.note_exception
+              ~site:"keeper_fs.ensure_dir"
+              exn;
             Prometheus.inc_counter
               Keeper_metrics.metric_keeper_fs_failures
               ~labels:[("path", path); ("site", Keeper_fs_failure_site.(to_label Ensure_dir_failed))]
@@ -83,6 +86,9 @@ let save_atomic (path : string) (content : string) : (unit, string) result =
         Keeper_fd_pressure.note_if_fd_exhaustion
           ~site:"keeper_fs.save_atomic"
           msg;
+        Keeper_disk_pressure.note_if_disk_exhaustion
+          ~site:"keeper_fs.save_atomic"
+          msg;
         Prometheus.inc_counter
           Keeper_metrics.metric_keeper_fs_failures
           ~labels:[("path", path); ("site", Keeper_fs_failure_site.(to_label Save_atomic_failed))]
@@ -94,6 +100,9 @@ let save_atomic (path : string) (content : string) : (unit, string) result =
   | exn ->
       let msg = Printexc.to_string exn in
       Keeper_fd_pressure.note_exception
+        ~site:"keeper_fs.save_atomic"
+        exn;
+      Keeper_disk_pressure.note_exception
         ~site:"keeper_fs.save_atomic"
         exn;
       Prometheus.inc_counter

@@ -17,6 +17,8 @@
 type t = {
   base_dir : string;
   mutex : Eio.Mutex.t Atomic.t;
+  retention_days : int option;
+  last_prune_day : string option Atomic.t;
 }
 
 let mutex_registry : (string, Eio.Mutex.t Atomic.t) Hashtbl.t = Hashtbl.create 16
@@ -49,13 +51,18 @@ let mutex_for_base_dir ~base_dir =
         Hashtbl.add mutex_registry key cell;
         cell)
 
-let create ~base_dir ?mutex () =
+let create ~base_dir ?mutex ?retention_days () =
   let mutex =
     match mutex with
     | Some mutex -> Atomic.make mutex
     | None -> mutex_for_base_dir ~base_dir
   in
-  { base_dir; mutex }
+  let retention_days =
+    match retention_days with
+    | Some days when days > 0 -> Some days
+    | _ -> None
+  in
+  { base_dir; mutex; retention_days; last_prune_day = Atomic.make None }
 
 let base_dir t = t.base_dir
 
@@ -68,6 +75,10 @@ let today_parts () =
   let month = Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1) in
   let day = Printf.sprintf "%02d.jsonl" tm.tm_mday in
   (month, day)
+
+let today_key () =
+  let month, day = today_parts () in
+  month ^ "/" ^ day
 
 (** Full path for today's JSONL file, creating dirs as needed. *)
 let today_path t =
@@ -198,6 +209,44 @@ let load_tail_lines path ~max_lines =
           List.filteri (fun i _ -> i >= total - max_lines) all_lines
     )
 
+let prune_unlocked t ~days =
+  if days <= 0 then 0
+  else begin
+    let now = Unix.gettimeofday () in
+    let cutoff = now -. (float_of_int days *. 86400.0) in
+    let cutoff_tm = Unix.gmtime cutoff in
+    let cutoff_month =
+      Printf.sprintf "%04d-%02d"
+        (cutoff_tm.Unix.tm_year + 1900)
+        (cutoff_tm.Unix.tm_mon + 1)
+    in
+    let cutoff_day = Printf.sprintf "%02d" cutoff_tm.Unix.tm_mday in
+    let deleted = ref 0 in
+    let months = list_month_dirs t.base_dir in
+    List.iter (fun m ->
+      let month_path = Filename.concat t.base_dir m in
+      if String.compare m cutoff_month < 0 then begin
+        (* Entire month is before cutoff — remove all files *)
+        let day_files = list_day_files month_path in
+        List.iter (fun d ->
+          (try Sys.remove (Filename.concat month_path d) with Sys_error _ -> ());
+          incr deleted
+        ) day_files;
+        (try Unix.rmdir month_path with Unix.Unix_error _ -> ())
+      end else if m = cutoff_month then begin
+        let day_files = list_day_files month_path in
+        List.iter (fun d ->
+          let day_num = Filename.remove_extension d in
+          if String.compare day_num cutoff_day < 0 then begin
+            (try Sys.remove (Filename.concat month_path d) with Sys_error _ -> ());
+            incr deleted
+          end
+        ) day_files
+      end
+    ) months;
+    !deleted
+  end
+
 (* ── Public API ───────────────────────────────────────── *)
 
 let append t json =
@@ -207,7 +256,16 @@ let append t json =
      [use_rw] would poison on any exception regardless of [~protect]. *)
   Eio.Mutex.use_ro mutex (fun () ->
     let path = today_path t in
-    Fs_compat.append_jsonl path json)
+    Fs_compat.append_jsonl path json;
+    match t.retention_days with
+    | None -> ()
+    | Some days ->
+      let today = today_key () in
+      if not (Option.equal String.equal (Atomic.get t.last_prune_day) (Some today))
+      then begin
+        ignore (prune_unlocked t ~days : int);
+        Atomic.set t.last_prune_day (Some today)
+      end)
 
 let read_recent t n =
   if n <= 0 then []
@@ -314,42 +372,8 @@ let read_range t ~since ~until =
     List.rev !collected
 
 let prune t ~days =
-  if days <= 0 then 0
-  else begin
-    let now = Unix.gettimeofday () in
-    let cutoff = now -. (float_of_int days *. 86400.0) in
-    let cutoff_tm = Unix.gmtime cutoff in
-    let cutoff_month =
-      Printf.sprintf "%04d-%02d"
-        (cutoff_tm.Unix.tm_year + 1900)
-        (cutoff_tm.Unix.tm_mon + 1)
-    in
-    let cutoff_day = Printf.sprintf "%02d" cutoff_tm.Unix.tm_mday in
-    let deleted = ref 0 in
-    let months = list_month_dirs t.base_dir in
-    List.iter (fun m ->
-      let month_path = Filename.concat t.base_dir m in
-      if String.compare m cutoff_month < 0 then begin
-        (* Entire month is before cutoff — remove all files *)
-        let day_files = list_day_files month_path in
-        List.iter (fun d ->
-          (try Sys.remove (Filename.concat month_path d) with Sys_error _ -> ());
-          incr deleted
-        ) day_files;
-        (try Unix.rmdir month_path with Unix.Unix_error _ -> ())
-      end else if m = cutoff_month then begin
-        let day_files = list_day_files month_path in
-        List.iter (fun d ->
-          let day_num = Filename.remove_extension d in
-          if String.compare day_num cutoff_day < 0 then begin
-            (try Sys.remove (Filename.concat month_path d) with Sys_error _ -> ());
-            incr deleted
-          end
-        ) day_files
-      end
-    ) months;
-    !deleted
-  end
+  let mutex = Atomic.get t.mutex in
+  Eio.Mutex.use_ro mutex (fun () -> prune_unlocked t ~days)
 
 (* Test hooks declared in the .mli — implementation lives in this
    module so tests can verify mutex-registry sharing without

@@ -1,19 +1,19 @@
 ---
 rfc: "0098"
 title: "Typed JSON-RPC error envelope & production-code silent-failure lint"
-status: Draft
+status: Implemented
 created: 2026-05-17
 updated: 2026-05-17
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0077", "0088", "0089", "0090"]
-implementation_prs: []
+implementation_prs: [15759, 15776, 15784, 15789, 15793, 15826]
 ---
 
 # RFC-0098 — Typed JSON-RPC error envelope & production-code silent-failure lint
 
-Status: Draft
+Status: Implemented (PR-1 #15759 · PR-2 #15776 · PR-2/PR-3 sync #15784 #15789 · PR-3 #15793 · PR-4 #15826)
 Author: jeong-sik (vincent)
 Date: 2026-05-17
 Scope: transport boundary (server response envelope) + lib/-wide silent-failure lint
@@ -216,12 +216,12 @@ PR-3 onward introduces *new* wire codes (`-32003`, `-32004`, …). Clients that 
 
 ## 8. Acceptance
 
-- [ ] PR-1 (this RFC + module): `Mcp_error_code` variant introduced; `respond_mcp_error` SSOT; existing four respond functions delegate; tests show wire-byte equivalence; `--production-scan` lint mode added with grandfather inventory.
-- [ ] PR-2: four existing call sites migrated to `~code:` form; old functions `[@deprecated]`; `git grep "(-326[0-9][0-9])" lib/server/` returns 0 outside `mcp_error_code.ml`.
-- [ ] PR-3: `Provider_timeout` (`-32003`) wired at `keeper_exec_proactive.ml:185` (cites [[RFC-0077]]).
-- [ ] PR-4: `Tool_dispatch_failure` (`-32004`) wired at tool dispatch boundary.
-- [ ] PR-5: `Backpressure_shed` (`-32005`) wired after WS-C FD/pool work (coordinate with in-flight #15727).
-- [ ] Status promoted to `Active` at PR-2 merge; `Implemented` after PR-3+4+5.
+- [x] **PR-1** (#15759): `Mcp_error_code` variant + `respond_mcp_error` SSOT introduced; legacy four respond functions kept; `error_body` extracted for SSE batch reuse; `--production-scan` lint mode added with 13 E1/E2 + 3 T1 grandfather sites.
+- [x] **PR-2** (#15776 + #15784 + #15789 sync): legacy `respond_mcp_auth_error` / `respond_mcp_internal_error` / `mcp_internal_error_json` migrated to thin delegations of the SSOT; functions marked `[@@deprecated]` in `.mli`. JSON-RPC 2.0 §5.1 `id:null` regression guard test pinned.
+- [x] **PR-3** (#15793): 10 transport call sites migrated to `~code:Mcp_error_code.<variant>` form; `git grep "(-326[0-9][0-9])" lib/server/` returns 0 outside `mcp_error_code.ml`.
+- [x] **PR-4** (#15826): legacy three delegations + `[@@@alert "-deprecated"]` test suppression removed (−160 LoC); `error_body` SSOT shape contract is the sole surface remaining.
+- [~] **Originally-planned PR-3/4/5 wirings** (`Provider_timeout` at `keeper_exec_proactive.ml:185`, `Tool_dispatch_failure` at tool dispatch boundary, `Backpressure_shed` after WS-C) — **reframed**: original cite sites no longer exist in `main` (callee `keeper_agent_run.ml` already returns typed `Agent_sdk.Error.t`; `Llm_orchestration.run_prompt_cascade` was removed); see `project_rfc_0097_pr3_audit_findings.md` memory. The typed-envelope half is complete (PR-3 #15793 migrates the *response surface*); the typed-Error-source half is now an `Agent_sdk.Error.t → Mcp_error_code.t` mapping decision at the HTTP transport boundary (`server_mcp_transport_http.ml`). Tracked as a follow-up audit (low priority — no current call site emits a literal numeric code).
+- [x] **Status promotion**: `Implemented` at PR-4 merge (this closeout commit).
 
 ## 9. Related RFCs, prior art, and in-flight coordination
 

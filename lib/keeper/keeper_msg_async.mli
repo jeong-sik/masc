@@ -31,8 +31,9 @@ type entry =
 
 (** [submit ~sw ~f ~keeper_name] forks a background daemon fiber on
     [sw] that runs [f] and stores the result. Returns the fresh
-    [request_id] synchronously. Cancellation of [sw] cancels the
-    fiber. *)
+    [request_id] synchronously. Cancellation of [sw] interrupts the
+    worker and records a terminal [Lost] state before stopping, so
+    pollers do not observe an indefinite [Running] request. *)
 val submit
   :  sw:Eio.Switch.t
   -> base_path:string

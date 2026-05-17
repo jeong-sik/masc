@@ -27,6 +27,37 @@ let wait_for_running request_id =
   loop 200
 ;;
 
+let wait_for_lost request_id =
+  let rec loop remaining =
+    match Keeper_msg_async.poll request_id with
+    | Some ({ status = Lost _; _ } as entry) -> entry
+    | _ when remaining <= 0 ->
+      failwith (Printf.sprintf "request %s did not become lost" request_id)
+    | _ ->
+      Eio.Fiber.yield ();
+      loop (remaining - 1)
+  in
+  loop 200
+;;
+
+let contains_substring ~needle value =
+  let needle_len = String.length needle in
+  let value_len = String.length value in
+  if needle_len = 0
+  then true
+  else if needle_len > value_len
+  then false
+  else (
+    let rec loop i =
+      if i + needle_len > value_len
+      then false
+      else if String.equal (String.sub value i needle_len) needle
+      then true
+      else loop (i + 1)
+    in
+    loop 0)
+;;
+
 let temp_dir prefix =
   let path = Filename.temp_file prefix "" in
   Sys.remove path;
@@ -141,6 +172,34 @@ let test_keeper_msg_async_marks_recovered_inflight_lost () =
   | None -> Alcotest.fail "expected persisted request"
 ;;
 
+let test_keeper_msg_async_marks_cancelled_worker_lost () =
+  with_eio_env
+  @@ fun _env ->
+  let request_id =
+    Eio.Switch.run
+    @@ fun sw ->
+    let never, _resolver = Eio.Promise.create () in
+    let request_id =
+      Keeper_msg_async.submit ~sw ~base_path:(temp_dir "keeper-msg-async-cancel-")
+        ~keeper_name:"cancelled" ~f:(fun () ->
+          Eio.Promise.await never;
+          true, "{}")
+    in
+    ignore (wait_for_running request_id : Keeper_msg_async.entry);
+    request_id
+  in
+  match wait_for_lost request_id with
+  | { Keeper_msg_async.status = Lost { reason }; completed_at = Some _; _ } ->
+    Alcotest.(check bool) "lost reason mentions cancellation" true
+      (contains_substring ~needle:"cancelled" (String.lowercase_ascii reason))
+  | { Keeper_msg_async.status = Lost _; completed_at = None; _ } ->
+    Alcotest.fail "expected cancelled request to have completed_at"
+  | entry ->
+    Alcotest.failf
+      "expected cancelled request to be lost, got %s"
+      (Keeper_msg_async.status_to_string entry.Keeper_msg_async.status)
+;;
+
 let test_keeper_msg_async_gc_removes_stale_terminal_disk_record () =
   with_eio_env
   @@ fun _env ->
@@ -239,6 +298,10 @@ let () =
             "recover in-flight request as lost"
             `Quick
             test_keeper_msg_async_marks_recovered_inflight_lost
+        ; test_case
+            "cancelled worker is terminal lost"
+            `Quick
+            test_keeper_msg_async_marks_cancelled_worker_lost
         ; test_case
             "gc removes stale terminal disk record"
             `Quick

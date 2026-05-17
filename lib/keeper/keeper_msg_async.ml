@@ -309,6 +309,19 @@ let set_status request_id status =
     | None -> ())
 ;;
 
+let set_status_protected request_id status =
+  Eio.Cancel.protect (fun () -> set_status request_id status)
+;;
+
+let cancelled_lost_status exn =
+  Lost
+    { reason =
+        Printf.sprintf
+          "keeper_msg worker cancelled before terminal result: %s"
+          (Printexc.to_string exn)
+    }
+;;
+
 (** Submit a keeper_msg turn for async execution.
     Forks a background fiber on [sw], returns the request_id immediately. *)
 let submit ~sw ~base_path ~(f : unit -> tool_result) ~keeper_name : string =
@@ -328,20 +341,20 @@ let submit ~sw ~base_path ~(f : unit -> tool_result) ~keeper_name : string =
     Hashtbl.replace pending request_id entry;
     persist_entry entry);
   Eio.Fiber.fork_daemon ~sw (fun () ->
-    set_status request_id Running;
+    set_status_protected request_id Running;
     let result =
       try
         let ok, body = f () in
         Done { ok; body }
       with
-      | Eio.Cancel.Cancelled _ as e -> raise e
+      | Eio.Cancel.Cancelled _ as e -> cancelled_lost_status e
       | exn ->
         Done
           { ok = false
           ; body = Printf.sprintf "keeper_msg failed: %s" (Printexc.to_string exn)
           }
     in
-    set_status request_id result;
+    set_status_protected request_id result;
     `Stop_daemon);
   request_id
 ;;

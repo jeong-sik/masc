@@ -7,9 +7,15 @@ module KE = Masc_mcp.Keeper_exec_tools
 module Types = Masc_domain
 
 (** Helper: create a minimal tool_schema for registration. *)
-let make_schema name =
+let make_schema ?(props = []) name =
+  let prop_entries =
+    List.map
+      (fun (field, type_name) -> field, `Assoc [ "type", `String type_name ])
+      props
+  in
   { Masc_domain.name; description = "test tool " ^ name;
-    input_schema = `Assoc [("type", `String "object")] }
+    input_schema =
+      `Assoc [ "type", `String "object"; "properties", `Assoc prop_entries ] }
 
 (** Helper: a handler that returns a successful result with "ok:<name>". *)
 let echo_handler ~name ~args:_ = Some (Tool_result.quick_ok ~tool_name:name ("ok:" ^ name))
@@ -17,12 +23,16 @@ let echo_handler ~name ~args:_ = Some (Tool_result.quick_ok ~tool_name:name ("ok
 (** Helper: a handler that returns (false, "fail"). *)
 let fail_handler ~name:_ ~args:_ = Some (Tool_result.quick_error "fail")
 
-(** Helper: register a tool in both handler and tag registries.
-    mint_token validates against tag_registry, so tests that mint
-    must register in both. *)
-let register_full ~tool_name ~handler =
+(** Helper: register a tool in handler, tag, and schema registries.
+    The validation pre-hook is fail-closed for schema-less tools. *)
+let register_full ?schema ~tool_name ~handler () =
+  let schema =
+    match schema with
+    | Some schema -> schema
+    | None -> make_schema tool_name
+  in
   Tool_dispatch.register ~tool_name ~handler;
-  Tool_dispatch.register_name_tag ~tool_name ~tag:Mod_misc
+  Tool_dispatch.register_module_tag ~schemas:[schema] ~tag:Mod_misc
 
 let () =
   let open Alcotest in
@@ -32,7 +42,7 @@ let () =
         [
           test_case "register single tool and dispatch" `Quick (fun () ->
               let tool = "__test_dispatch_single" in
-              register_full ~tool_name:tool ~handler:echo_handler;
+              register_full ~tool_name:tool ~handler:echo_handler ();
               let token = match Tool_dispatch.mint_token ~name:tool with Ok t -> t | Error e -> Alcotest.fail e in
               let result = Tool_dispatch.guarded_dispatch ~token ~args:`Null () in
               check bool "found" true (Option.is_some result);
@@ -53,7 +63,7 @@ let () =
                   [ "__test_bulk_a"; "__test_bulk_b"; "__test_bulk_c" ]
               in
               Tool_dispatch.register_module ~schemas ~handler:echo_handler;
-              List.iter (fun s -> Tool_dispatch.register_name_tag ~tool_name:s.Masc_domain.name ~tag:Mod_misc) schemas;
+              Tool_dispatch.register_module_tag ~schemas ~tag:Mod_misc;
               List.iter
                 (fun name ->
                   check bool (name ^ " registered") true
@@ -74,12 +84,12 @@ let () =
         [
           test_case "re-register replaces handler" `Quick (fun () ->
               let tool = "__test_dispatch_replace" in
-              register_full ~tool_name:tool ~handler:echo_handler;
+              register_full ~tool_name:tool ~handler:echo_handler ();
               let token1 = match Tool_dispatch.mint_token ~name:tool with Ok t -> t | Error e -> Alcotest.fail e in
               let result1 = Option.get (Tool_dispatch.guarded_dispatch ~token:token1 ~args:`Null ()) in
               let ok1 = result1.success in
               check bool "first ok" true ok1;
-              register_full ~tool_name:tool ~handler:fail_handler;
+              register_full ~tool_name:tool ~handler:fail_handler ();
               let token2 = match Tool_dispatch.mint_token ~name:tool with Ok t -> t | Error e -> Alcotest.fail e in
               let result2 = Option.get (Tool_dispatch.guarded_dispatch ~token:token2 ~args:`Null ()) in
               let ok2 = result2.success in
@@ -204,7 +214,11 @@ let () =
                 received_args := args;
                 Some (Tool_result.quick_ok "captured")
               in
-              register_full ~tool_name:tool ~handler:capture_handler;
+              register_full
+                ~tool_name:tool
+                ~schema:(make_schema ~props:[ "key", "string" ] tool)
+                ~handler:capture_handler
+                ();
               let test_args = `Assoc [("key", `String "value")] in
               let token = match Tool_dispatch.mint_token ~name:tool with Ok t -> t | Error e -> Alcotest.fail e in
               let _ = Tool_dispatch.guarded_dispatch ~token ~args:test_args () in
@@ -212,12 +226,12 @@ let () =
         ] );
       ( "handler_exception_safety",
         [
-          test_case "throwing handler returns error tuple" `Quick (fun () ->
+          test_case "throwing handler returns typed error" `Quick (fun () ->
               let tool = "__test_dispatch_throw" in
               let throwing_handler ~name:_ ~args:_ =
                 failwith "boom"
               in
-              register_full ~tool_name:tool ~handler:throwing_handler;
+              register_full ~tool_name:tool ~handler:throwing_handler ();
               let token = match Tool_dispatch.mint_token ~name:tool with Ok t -> t | Error e -> Alcotest.fail e in
               let result = Tool_dispatch.guarded_dispatch ~token ~args:`Null () in
               check bool "still returns Some" true (Option.is_some result);
@@ -231,9 +245,9 @@ let () =
       ( "did_you_mean_9784",
         [
           test_case "find_similar_names returns close match" `Quick (fun () ->
-              register_full ~tool_name:"__sim_masc_claim_next" ~handler:echo_handler;
-              register_full ~tool_name:"__sim_masc_add_task" ~handler:echo_handler;
-              register_full ~tool_name:"__sim_masc_join" ~handler:echo_handler;
+              register_full ~tool_name:"__sim_masc_claim_next" ~handler:echo_handler ();
+              register_full ~tool_name:"__sim_masc_add_task" ~handler:echo_handler ();
+              register_full ~tool_name:"__sim_masc_join" ~handler:echo_handler ();
               let suggestions =
                 Tool_dispatch.find_similar_names
                   ~query:"__sim_masc_claim_task" ()
@@ -253,6 +267,7 @@ let () =
                 register_full
                   ~tool_name:(Printf.sprintf "__limit_test_tool_%d" i)
                   ~handler:echo_handler
+                  ()
               done;
               let suggestions =
                 Tool_dispatch.find_similar_names ~limit:2
@@ -261,7 +276,7 @@ let () =
               check bool "at most 2 returned" true
                 (List.length suggestions <= 2));
           test_case "all_registered_names enumerates registry" `Quick (fun () ->
-              register_full ~tool_name:"__enum_check_xyz" ~handler:echo_handler;
+              register_full ~tool_name:"__enum_check_xyz" ~handler:echo_handler ();
               let all = Tool_dispatch.all_registered_names () in
               check bool "contains registered name" true
                 (List.mem "__enum_check_xyz" all));

@@ -356,22 +356,27 @@ Result alias: `type 'a masc_result = ('a, masc_error) result`
 ### 4.1 Handler
 
 ```ocaml
-type handler = name:string -> args:Yojson.Safe.t -> (bool * string) option
+type handler = name:string -> args:Yojson.Safe.t -> Tool_result.t option
 ```
 
-모든 MCP 도구 호출은 이 시그니처로 통일된다. `None`을 반환하면 "이 핸들러가 해당 도구를 모른다"는 의미다.
+모든 MCP 도구 호출은 typed `Tool_result.t` 시그니처로 통일된다. `None`을 반환하면 "이 핸들러가 해당 도구를 모른다"는 의미다.
 
 ### 4.2 Hooks
 
 ```ocaml
-type pre_hook = name:string -> args:Yojson.Safe.t -> Tool_result.t option
-(* None -> 진행, Some result -> 핸들러를 건너뛰고 즉시 반환 *)
+type pre_hook_action =
+  | Pass
+  | Proceed of Yojson.Safe.t
+  | Reject of Tool_result.t
 
-type post_hook = Tool_result.t -> Tool_result.t
-(* 핸들러 결과를 변환하거나 관찰 *)
+type pre_hook = name:string -> args:Yojson.Safe.t -> pre_hook_action
+(* Pass -> 진행, Proceed -> args 교체 후 진행, Reject -> 즉시 반환 *)
+
+type post_hook_typed = Dispatch_outcome.t -> Tool_result.t option -> unit
+(* typed outcome 관찰 전용. 결과 변환은 result_transformer가 담당한다. *)
 ```
 
-실행 순서: pre_hooks -> handler -> post_hooks.
+실행 순서: telemetry span -> pre_hooks -> handler -> result_transformer -> typed_post_hooks.
 
 ### 4.3 Module Tag (2-level dispatch)
 
@@ -407,7 +412,7 @@ type t = {
 }
 ```
 
-레거시 `(bool * string)` 튜플은 `wrap ~tool_name ~start_time`으로 변환된다. `to_legacy`로 역변환이 가능하다.
+도구 핸들러는 `Tool_result.t`를 직접 반환한다. 기존 `(bool * string)` 튜플 기반 dispatch 계약은 제거됐고, 문자열 메시지는 호환 필드 `legacy_message`에만 남는다.
 
 ---
 

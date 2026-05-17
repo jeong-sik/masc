@@ -41,22 +41,41 @@ val destructive_class_to_string : destructive_class -> string
     alerts grep on these literals.  Do not change without a
     coordinated metric-rename PR. *)
 
-val classify_destructive : string -> (destructive_class * string) option
-(** [classify_destructive cmd] returns the first matching
-    [(class, substring)] pair in declaration order, or [None] when
-    no destructive pattern matches.
+(** Single source of truth for one destructive shell pattern.  Carries
+    its substring (matched case-insensitively), its operator-visible
+    description, and its typed {!destructive_class}.  Replaces the
+    previously parallel [Eval_gate.destructive_patterns]
+    [(pattern, desc)] list and [destructive_class_substrings]
+    [(pattern, class)] list — both derive from this catalogue, so
+    drift between the legacy gate and the shadow classifier is
+    impossible by construction. *)
+type destructive_pattern = {
+  class_ : destructive_class;
+  pattern : string;
+  description : string;
+}
+
+val destructive_patterns : destructive_pattern list
+(** The canonical destructive-pattern catalogue.
 
     Order matters: longer substrings come first so [rm -rf] matches
     before [rm -r] (both classify as {!Recursive_delete} but the
-    returned substring differs).  The returned substring is suitable
-    for inclusion in an audit-log diagnostic — it is the literal
-    that triggered classification, not a description.
+    returned substring differs).
 
-    The substring set mirrors one row per pattern in
-    {!Eval_gate.destructive_patterns}.  Drift between the two lists
-    means the legacy gate and the shadow gate disagree by
-    construction — pinning the order at the contract seam keeps the
-    drift detectable.  Case-insensitive substring matching via
+    Length is pinned at 19 by [test_destructive_class.test_coverage_count]
+    — a new entry must update that count.  The list is the only
+    SSOT; [Eval_gate.destructive_patterns] and {!classify_destructive}
+    both walk this list, eliminating the previous drift surface
+    enforced only at runtime test time. *)
+
+val classify_destructive : string -> (destructive_class * string) option
+(** [classify_destructive cmd] returns the first matching
+    [(class, substring)] pair in declaration order over
+    {!destructive_patterns}, or [None] when no pattern matches.
+
+    The returned substring is suitable for inclusion in an audit-log
+    diagnostic — it is the literal that triggered classification,
+    not a description.  Case-insensitive substring matching via
     {!String_util.contains_substring_ci}. *)
 
 (** {1 Legacy and shadow verdicts} *)

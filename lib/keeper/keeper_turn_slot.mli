@@ -159,8 +159,12 @@ val fairness_delay_sec_at : now:float -> keeper_name:string -> float
     reached. Removal target: 30-day soak on
     [metric_keeper_oas_timeout_budget_watchdog_termination] reaching
     zero after `MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC` is enabled
-    fleet-wide. Do not invoke from new call sites — the supervisor
-    [force_unresolved_watchdog_crash] is the only legitimate caller. *)
+    fleet-wide. Do not invoke from new call sites. Existing legitimate
+    callers (slated to be unwound under removal target above):
+    - [Keeper_supervisor.force_unresolved_watchdog_crash] — primary
+      watchdog rescue.
+    - [Keeper_keepalive.stop_keepalive] — manual stop path
+      (`lib/keeper/keeper_keepalive.ml`). *)
 val force_release_holder_for : keeper_name:string -> (string * float) list
 
 (** Test-only: stamp a completion time directly (bypasses [Time_compat.now]). *)

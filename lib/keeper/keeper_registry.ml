@@ -387,14 +387,29 @@ let unregister ~base_path name =
     let updated = StringMap.remove key current in
     if not (Atomic.compare_and_set registry current updated) then loop () else before
   in
+  let signal_fibers_to_stop entry =
+    (* The watchdog and heartbeat fibers hold their own reference to
+       [entry] via the closure they were forked with, so removing the
+       entry from the registry map does not stop them. Without an
+       explicit fiber_stop signal they continue to tick, observing
+       [Keeper_registry.get = None] on every subsequent poll, and
+       either spam "registry entry NOT FOUND" warnings (242+ events
+       observed in prod, 2026-05-17) or rely on the heartbeat-paused
+       latch to self-stop. Make unregister authoritative: when the
+       entry leaves the registry, the fibers that watched it stop. *)
+    Atomic.set entry.fiber_stop true;
+    Atomic.set entry.fiber_wakeup true
+  in
   match loop () with
   | Some entry when entry.phase = Running ->
+    signal_fibers_to_stop entry;
     decr_running_count_clamped ();
     Log.Keeper.debug
       "registry: unregistered running keeper name=%s running_count=%d"
       name
       (Atomic.get running_count_atomic)
   | Some entry ->
+    signal_fibers_to_stop entry;
     Log.Keeper.debug
       "registry: unregistered non-running keeper name=%s state=%s"
       name

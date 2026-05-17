@@ -537,6 +537,26 @@ let test_unregister () =
   R.unregister ~base_path:bp "k2";
   check bool "gone after" true (Option.is_none (R.get ~base_path:bp "k2"))
 
+(* Regression: unregister must signal the watchdog/heartbeat fibers
+   forked alongside the entry to exit, otherwise they keep polling
+   the now-absent entry and either spam
+   "registry entry NOT FOUND" warnings or rely on the paused latch
+   to self-stop (242+ events observed in prod, 2026-05-17). *)
+let test_unregister_signals_fiber_stop () =
+  R.clear ();
+  let _registered = R.register ~base_path:bp "k-fiber-stop" (make_meta "k-fiber-stop") in
+  let entry =
+    match R.get ~base_path:bp "k-fiber-stop" with
+    | Some e -> e
+    | None -> fail "expected entry to exist after register"
+  in
+  check bool "fiber_stop initially false"   false (Atomic.get entry.fiber_stop);
+  check bool "fiber_wakeup initially false" false (Atomic.get entry.fiber_wakeup);
+  R.unregister ~base_path:bp "k-fiber-stop";
+  check bool "fiber_stop set after unregister"   true (Atomic.get entry.fiber_stop);
+  check bool "fiber_wakeup set after unregister" true (Atomic.get entry.fiber_wakeup);
+  check bool "entry gone from registry" true (Option.is_none (R.get ~base_path:bp "k-fiber-stop"))
+
 let test_all () =
   R.clear ();
   let _e1 = R.register ~base_path:bp "a" (make_meta "a") in
@@ -2045,6 +2065,7 @@ let () =
           eio_test "completed turns replay from default store"
             test_completed_turns_replay_from_default_store;
           eio_test "unregister" test_unregister;
+          eio_test "unregister signals fiber stop" test_unregister_signals_fiber_stop;
           eio_test "all" test_all;
           eio_test "update meta" test_update_meta;
           eio_test "set state" test_set_state;

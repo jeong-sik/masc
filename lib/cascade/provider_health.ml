@@ -140,15 +140,25 @@ let transition provider ~success =
     end else begin
       provider.consecutive_successes <- 0;
       provider.consecutive_failures <- provider.consecutive_failures + 1;
-      if provider.consecutive_failures >= provider.unhealthy_threshold then
+      if provider.consecutive_failures >= provider.unhealthy_threshold then begin
+        (* P2 review finding: preserve first-failure timestamp across
+           repeated failures so outage age (snapshot.since) measures the
+           true Healthy→Unhealthy transition instant, not the most recent
+           failure. Without this, dashboards and time-based thresholds
+           reset on every failure and never reach their cutoff. *)
+        let since =
+          match provider.state with
+          | Unhealthy { since; _ } -> since
+          | Healthy ->
+            (* NDT-OK: external probe observation time stamps the first
+               Healthy→Unhealthy transition; deterministic logic depends
+               on counters. *)
+            Unix.gettimeofday ()
+        in
         provider.state
         <- Unhealthy
-             {
-               (* NDT-OK: provider health transitions stamp the external probe
-                  observation time; deterministic logic depends on counters. *)
-               since = Unix.gettimeofday ();
-               consecutive_failures = provider.consecutive_failures;
-             }
+             { since; consecutive_failures = provider.consecutive_failures }
+      end
     end)
 ;;
 

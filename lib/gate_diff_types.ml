@@ -138,3 +138,11 @@ let shadow_diff_log_enabled () =
   match Sys.getenv_opt "MASC_BASH_AST_SHADOW_LOG" with
   | Some ("1" | "true" | "TRUE" | "yes" | "on" | "log") -> true
   | _ -> false
+
+(* RFC-0092 Phase A advisor — typed parallel-validation log gate.
+   Default off; operator opt-in for the parity-measurement window
+   before the authority flip in Phase C. *)
+let typed_advisor_log_enabled () =
+  match Sys.getenv_opt "MASC_BASH_TYPED_ADVISOR" with
+  | Some ("1" | "true" | "TRUE" | "yes" | "on" | "log") -> true
+  | _ -> false

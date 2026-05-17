@@ -29,6 +29,15 @@ let too_complex_parse_error = Atomic.make 0
 let too_complex_parse_aborted = Atomic.make 0
 let too_complex_other = Atomic.make 0
 
+(* RFC-0092 Phase A typed-advisor parity counters.  Increment only
+   while [Gate_diff_types.typed_advisor_log_enabled ()] is true.
+   Three buckets mirror the [Shell_ir_validator.advisory] sum
+   exhaustively so a future variant is a compile error in
+   [incr_typed_advisor]. *)
+let typed_advisor_allow = Atomic.make 0
+let typed_advisor_reject = Atomic.make 0
+let typed_advisor_cannot_parse = Atomic.make 0
+
 let incr a = ignore (Atomic.fetch_and_add a 1)
 
 let incr_gate_diff (diff : Gate_diff_types.gate_diff) =
@@ -84,6 +93,15 @@ let incr_too_complex_by_tag tag =
   | "__parse_aborted__" -> incr too_complex_parse_aborted
   | _ -> incr too_complex_other
 
+(* RFC-0092 Phase A typed-advisor parity dispatch.  Exhaustive over
+   [Shell_ir_validator.advisory]; a new variant in the validator
+   forces an update here at compile time. *)
+let incr_typed_advisor (a : Shell_ir_validator.advisory) =
+  match a with
+  | Shell_ir_validator.Allow -> incr typed_advisor_allow
+  | Shell_ir_validator.Reject _ -> incr typed_advisor_reject
+  | Shell_ir_validator.Cannot_parse _ -> incr typed_advisor_cannot_parse
+
 let reset () =
   Atomic.set gate_diff_total 0;
   Atomic.set gate_diff_agree 0;
@@ -112,7 +130,10 @@ let reset () =
   Atomic.set gh_exit_type_mismatch 0;
   Atomic.set gh_exit_auth_failed 0;
   Atomic.set gh_exit_network 0;
-  Atomic.set gh_exit_unknown 0
+  Atomic.set gh_exit_unknown 0;
+  Atomic.set typed_advisor_allow 0;
+  Atomic.set typed_advisor_reject 0;
+  Atomic.set typed_advisor_cannot_parse 0
 
 type snapshot = {
   gate_diff_total : int;
@@ -143,6 +164,11 @@ type snapshot = {
   gh_exit_auth_failed : int;
   gh_exit_network : int;
   gh_exit_unknown : int;
+  (* RFC-0092 Phase A typed-advisor parity counters.  Increment only
+     while [Gate_diff_types.typed_advisor_log_enabled ()] is true. *)
+  typed_advisor_allow : int;
+  typed_advisor_reject : int;
+  typed_advisor_cannot_parse : int;
 }
 
 let snapshot () =
@@ -178,6 +204,9 @@ let snapshot () =
     gh_exit_auth_failed = Atomic.get gh_exit_auth_failed;
     gh_exit_network = Atomic.get gh_exit_network;
     gh_exit_unknown = Atomic.get gh_exit_unknown;
+    typed_advisor_allow = Atomic.get typed_advisor_allow;
+    typed_advisor_reject = Atomic.get typed_advisor_reject;
+    typed_advisor_cannot_parse = Atomic.get typed_advisor_cannot_parse;
   }
 
 let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
@@ -213,6 +242,9 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
     ("gh_exit_auth_failed", `Int s.gh_exit_auth_failed);
     ("gh_exit_network", `Int s.gh_exit_network);
     ("gh_exit_unknown", `Int s.gh_exit_unknown);
+    ("typed_advisor_allow", `Int s.typed_advisor_allow);
+    ("typed_advisor_reject", `Int s.typed_advisor_reject);
+    ("typed_advisor_cannot_parse", `Int s.typed_advisor_cannot_parse);
   ]
 
 let safe_ratio ~num ~den =

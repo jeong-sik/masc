@@ -42,6 +42,14 @@ type block_reason =
     {!Chain_or_redirect}, {!Injection}, etc.). *)
 val block_reason_to_string : block_reason -> string
 
+(** The default dev allowlist (cat, cargo, dune, git, rg, …).  Used by
+    {!validate_command} internally; exposed so RFC-0092 Phase A's
+    typed advisor ({!Shell_ir_validator.advise}) can mirror the legacy
+    gate's allowlist for parity measurement.  Order is the source of
+    truth; do not re-sort without confirming the typed advisor
+    consumers are tolerant. *)
+val dev_allowed_commands : string list
+
 (** Strict (allowlist + no shell metacharacters) validator used by the
     default [shell_exec] tool.  Rejects empty input, chaining, and any
     command outside the dev allowlist (rg / grep / dune / git / ...). *)

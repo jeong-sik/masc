@@ -44,6 +44,15 @@ val incr_too_complex_by_tag : string -> unit
     `Shadow_cannot_parse] — the per-reason buckets are a histogram
     refinement of that single bucket, not a replacement. *)
 
+val incr_typed_advisor : Shell_ir_validator.advisory -> unit
+(** RFC-0092 Phase A — record one typed-advisor outcome under its
+    bucket ([typed_advisor_allow] / [typed_advisor_reject] /
+    [typed_advisor_cannot_parse]).  Exhaustive over
+    [Shell_ir_validator.advisory]; a new variant in the validator
+    forces an update here at compile time.  Increment only while
+    [Gate_diff_types.typed_advisor_log_enabled ()] is true so an
+    operator running with the flag off pays zero cost. *)
+
 val reset : unit -> unit
 (** Zero every counter.  Used by tests; operators should not rely on
     this surface. *)
@@ -87,6 +96,11 @@ type snapshot = {
   gh_exit_auth_failed : int;
   gh_exit_network : int;
   gh_exit_unknown : int;
+  (* RFC-0092 Phase A typed-advisor parity counters.  Increment only
+     while [Gate_diff_types.typed_advisor_log_enabled ()] is true. *)
+  typed_advisor_allow : int;
+  typed_advisor_reject : int;
+  typed_advisor_cannot_parse : int;
 }
 
 val snapshot : unit -> snapshot

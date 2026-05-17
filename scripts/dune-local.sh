@@ -156,10 +156,11 @@ _print_lock_holders() {
 if _needs_dune_lock; then
   printf '[dune-local] waiting for lock %s\n' "$lock_path" >&2
   _print_lock_holders "$lock_path" "Dune"
+  env_cmd="${ENV_CMD:-/usr/bin/env}"
   if command -v lockf >/dev/null 2>&1; then
-    exec lockf -k "$lock_path" env MASC_DUNE_LOCK_HELD=1 "$script_path" "$@"
+    exec lockf -k "$lock_path" "$env_cmd" MASC_DUNE_LOCK_HELD=1 "$script_path" "$@"
   elif command -v flock >/dev/null 2>&1; then
-    exec flock "$lock_path" env MASC_DUNE_LOCK_HELD=1 "$script_path" "$@"
+    exec flock "$lock_path" "$env_cmd" MASC_DUNE_LOCK_HELD=1 "$script_path" "$@"
   else
     printf '[dune-local] warning: neither lockf nor flock found; running unlocked\n' >&2
     dune_lock_warning_emitted=1
@@ -204,8 +205,9 @@ if _needs_opam_lock; then
   if command -v lockf >/dev/null 2>&1; then
     if [[ "$opam_bounded_wait" = "1" ]]; then
       set +e
+      env_cmd="${ENV_CMD:-/usr/bin/env}"
       lockf -k -t "$opam_lock_timeout" "$opam_lock_path" \
-        env MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
+        "$env_cmd" MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
       status=$?
       set -e
       if [[ "$status" -eq 0 ]]; then
@@ -218,15 +220,17 @@ if _needs_opam_lock; then
       fi
       exit "$status"
     fi
-    exec lockf -k "$opam_lock_path" env MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
+    env_cmd="${ENV_CMD:-/usr/bin/env}"
+    exec lockf -k "$opam_lock_path" "$env_cmd" MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
   elif command -v flock >/dev/null 2>&1; then
     if [[ "$opam_bounded_wait" = "1" ]]; then
       # flock(1) honors -w/--timeout to bound the wait; without it the
       # mixed-lock-order deadlock the lockf branch above already handles
       # would resurface on flock-only hosts (Linux without lockf).
       set +e
+      env_cmd="${ENV_CMD:-/usr/bin/env}"
       flock -w "$opam_lock_timeout" "$opam_lock_path" \
-        env MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
+        "$env_cmd" MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
       status=$?
       set -e
       if [[ "$status" -eq 0 ]]; then
@@ -242,7 +246,8 @@ if _needs_opam_lock; then
       fi
       exit "$status"
     fi
-    exec flock "$opam_lock_path" env MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
+    env_cmd="${ENV_CMD:-/usr/bin/env}"
+    exec flock "$opam_lock_path" "$env_cmd" MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
   elif [[ "$dune_lock_warning_emitted" != "1" ]]; then
     # Skip the warning when the Dune-lock branch above already printed
     # an equivalent "neither lockf nor flock found" message in this

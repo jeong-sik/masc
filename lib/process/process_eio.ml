@@ -732,11 +732,36 @@ let spawn_detached ~argv ~env ~cwd =
   match argv with
   | [] -> Error "spawn_detached: empty argv"
   | bin :: _ ->
+      let out_r_ref = ref None in
+      let out_w_ref = ref None in
+      let err_r_ref = ref None in
+      let err_w_ref = ref None in
+      let devnull_ref = ref None in
+      let remember slot fd =
+        slot := Some fd;
+        fd
+      in
+      let close_registered slot =
+        match !slot with
+        | None -> ()
+        | Some fd ->
+            close_quietly fd;
+            slot := None
+      in
+      let cleanup_setup_fds () =
+        List.iter close_registered
+          [ out_r_ref; out_w_ref; err_r_ref; err_w_ref; devnull_ref ]
+      in
       (try
          let out_r, out_w = Unix.pipe ~cloexec:true () in
+         let out_r = remember out_r_ref out_r in
+         let out_w = remember out_w_ref out_w in
          let err_r, err_w = Unix.pipe ~cloexec:true () in
+         let err_r = remember err_r_ref err_r in
+         let err_w = remember err_w_ref err_w in
          let devnull =
-           Unix.openfile "/dev/null" [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0
+           remember devnull_ref
+             (Unix.openfile "/dev/null" [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0)
          in
          (* Use fork/exec instead of create_process_env so the child
             can [setpgrp] before [execvpe].  OCaml's Unix module does
@@ -774,9 +799,11 @@ let spawn_detached ~argv ~env ~cwd =
             | _ -> Unix._exit 127)
          end else begin
            (* --- PARENT --- *)
-           Unix.close out_w;
-           Unix.close err_w;
-           Unix.close devnull;
+           close_registered out_w_ref;
+           close_registered err_w_ref;
+           close_registered devnull_ref;
+           out_r_ref := None;
+           err_r_ref := None;
            Ok
              {
                pid;
@@ -788,10 +815,12 @@ let spawn_detached ~argv ~env ~cwd =
          end
        with
        | Unix.Unix_error (err, fn, arg) ->
+           cleanup_setup_fds ();
            Error
              (Printf.sprintf "spawn_detached %s: %s (%s %s)"
                 bin (Unix.error_message err) fn arg)
        | exn ->
+           cleanup_setup_fds ();
            Error
              (Printf.sprintf "spawn_detached %s: %s" bin
                 (Printexc.to_string exn)))

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Phase 1a-2: toggle sangsu's cascade between live mode and ollama_bench.
 #
-# Mutates ~/me/.masc/config/keepers/sangsu.toml in place. Backup written
-# alongside as sangsu.toml.bench-bak. Hot-reload is mtime-based so no
+# Mutates <base-path>/.masc/config/keepers/sangsu.toml in place. Backup
+# written alongside as sangsu.toml.bench-bak. Hot-reload is mtime-based so no
 # server restart needed.
 #
 # Usage:
@@ -18,7 +18,17 @@
 
 set -euo pipefail
 
-BASE_PATH="${MASC_BASE_PATH:-$HOME/me}"
+default_base_path() {
+  if [ -n "${MASC_BASE_PATH:-}" ]; then
+    printf '%s\n' "$MASC_BASE_PATH"
+  elif [ -n "${ME_ROOT:-}" ]; then
+    printf '%s\n' "$ME_ROOT"
+  else
+    pwd
+  fi
+}
+
+BASE_PATH="$(default_base_path)"
 SANGSU_TOML="${BASE_PATH}/.masc/config/keepers/sangsu.toml"
 SANGSU_BAK="${SANGSU_TOML}.bench-bak"
 CASCADE_TOML="${BASE_PATH}/.masc/config/cascade.toml"

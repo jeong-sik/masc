@@ -524,7 +524,7 @@ masc_set_param(key, value)
 |------|--------|------|
 | `-p`, `--port` | 8935 | HTTP 리스닝 포트 |
 | `--host` | `127.0.0.1` | 바인드 주소 |
-| `--base-path` | `MASC_BASE_PATH` 또는 `HOME` 기반 (`HOME` 없을 때만 `cwd`) | `.masc` 폴더 위치 |
+| `--base-path` | `MASC_BASE_PATH` 또는 `cwd` | `.masc` 폴더 위치 |
 
 ---
 

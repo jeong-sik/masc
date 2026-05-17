@@ -20,7 +20,19 @@ SUMMARY_FILE="$RUN_DIR/summary.json"
 AUDIT_FILE="$RUN_DIR/audit-product-design.json"
 AUDIT_STATUS_RESULT=0
 
-BASE_PATH="${BASE_PATH:-${MASC_BASE_PATH:-$HOME/me}}"
+default_base_path() {
+  if [ -n "${BASE_PATH:-}" ]; then
+    printf '%s\n' "$BASE_PATH"
+  elif [ -n "${MASC_BASE_PATH:-}" ]; then
+    printf '%s\n' "$MASC_BASE_PATH"
+  elif [ -n "${ME_ROOT:-}" ]; then
+    printf '%s\n' "$ME_ROOT"
+  else
+    printf '%s\n' "$REPO_ROOT"
+  fi
+}
+
+BASE_PATH="$(default_base_path)"
 EXPECTED_KEEPERS="${EXPECTED_KEEPERS:-14}"
 KEEPER_NAMES="${KEEPER_NAMES:-}"
 MAX_KEEPERS="${MAX_KEEPERS:-0}"

@@ -4,8 +4,9 @@
     for 5 tools: masc_library_list, masc_library_read, masc_library_add,
     masc_library_promote, masc_library_search
 
-    Note: Tool_library uses HOME env var for library_root(), so tests
-    override HOME to a temp directory with the expected structure.
+    Note: Tool_library uses MASC_BASE_PATH first, then ME_ROOT, for
+    library_root(). Tests scrub ME_ROOT and override MASC_BASE_PATH to a
+    temp directory with the expected structure.
 *)
 
 module Tool_library = Masc_mcp.Tool_library
@@ -36,31 +37,38 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
-(** Create the expected library directory structure under a temp HOME *)
-let setup_library_dirs home =
-  let me_dir = Filename.concat home "me" in
-  let docs_dir = Filename.concat me_dir "docs" in
+(** Create the expected library directory structure under a temp base path. *)
+let setup_library_dirs base_path =
+  let docs_dir = Filename.concat base_path "docs" in
   let lib_dir = Filename.concat docs_dir "library" in
   let cand_dir = Filename.concat lib_dir "candidates" in
-  Unix.mkdir me_dir 0o755;
   Unix.mkdir docs_dir 0o755;
   Unix.mkdir lib_dir 0o755;
   Unix.mkdir cand_dir 0o755;
   (lib_dir, cand_dir)
 
 let original_home = Sys.getenv_opt "HOME"
+let original_me_root = Sys.getenv_opt "ME_ROOT"
+let original_masc_base_path = Sys.getenv_opt "MASC_BASE_PATH"
 
-(** Run a test function with a temporary HOME containing library dirs *)
-let with_temp_home f =
-  let home = temp_dir () in
-  Unix.putenv "HOME" home;
-  let _ = setup_library_dirs home in
+(** Run a test function with a temporary MASC_BASE_PATH containing library dirs. *)
+let with_temp_base_path f =
+  let base_path = temp_dir () in
+  Unix.putenv "MASC_BASE_PATH" base_path;
+  Unix.putenv "ME_ROOT" "";
+  let _ = setup_library_dirs base_path in
   let ctx : Tool_library.context = { agent_name = "test-agent" } in
   Fun.protect ~finally:(fun () ->
+    (match original_masc_base_path with
+     | Some root -> Unix.putenv "MASC_BASE_PATH" root
+     | None -> Unix.putenv "MASC_BASE_PATH" "");
+    (match original_me_root with
+     | Some root -> Unix.putenv "ME_ROOT" root
+     | None -> Unix.putenv "ME_ROOT" "");
     (match original_home with
      | Some h -> Unix.putenv "HOME" h
-     | None -> ());
-    cleanup_dir home
+     | None -> Unix.putenv "HOME" "");
+    cleanup_dir base_path
   ) (fun () -> f ctx)
 
 let dispatch_exn ctx ~name ~args =
@@ -73,13 +81,13 @@ let dispatch_exn ctx ~name ~args =
    ============================================================ *)
 
 let test_dispatch_unknown () =
-  with_temp_home (fun ctx ->
+  with_temp_base_path (fun ctx ->
     let result = Tool_library.dispatch ctx ~name:"unknown_tool" ~args:(`Assoc []) in
     Alcotest.(check bool) "unknown returns None" true (result = None)
   )
 
 let test_dispatch_all_known () =
-  with_temp_home (fun ctx ->
+  with_temp_base_path (fun ctx ->
     let tools = [
       "masc_library_list"; "masc_library_read"; "masc_library_add";
       "masc_library_promote"; "masc_library_search";
@@ -95,14 +103,14 @@ let test_dispatch_all_known () =
    ============================================================ *)
 
 let test_list_empty () =
-  with_temp_home (fun ctx ->
+  with_temp_base_path (fun ctx ->
     let (ok, msg) = dispatch_exn ctx ~name:"masc_library_list" ~args:(`Assoc []) in
     Alcotest.(check bool) "list ok" true ok;
     Alcotest.(check bool) "response mentions library" true (msg_contains ~needle:"librar" msg)
   )
 
 let test_list_with_candidates () =
-  with_temp_home (fun ctx ->
+  with_temp_base_path (fun ctx ->
     let args = `Assoc [("include_candidates", `Bool true)] in
     let (ok, msg) = dispatch_exn ctx ~name:"masc_library_list" ~args in
     Alcotest.(check bool) "list with candidates ok" true ok;
@@ -114,14 +122,14 @@ let test_list_with_candidates () =
    ============================================================ *)
 
 let test_read_empty_topic () =
-  with_temp_home (fun ctx ->
+  with_temp_base_path (fun ctx ->
     let (ok, msg) = dispatch_exn ctx ~name:"masc_library_read" ~args:(`Assoc []) in
     Alcotest.(check bool) "empty topic fails" false ok;
     Alcotest.(check bool) "error mentions topic" true (msg_contains ~needle:"topic" msg)
   )
 
 let test_read_nonexistent_topic () =
-  with_temp_home (fun ctx ->
+  with_temp_base_path (fun ctx ->
     let args = `Assoc [("topic", `String "nonexistent_topic")] in
     let (ok, msg) = dispatch_exn ctx ~name:"masc_library_read" ~args in
     Alcotest.(check bool) "nonexistent fails" false ok;
@@ -134,7 +142,7 @@ let test_read_nonexistent_topic () =
    ============================================================ *)
 
 let test_add_missing_title () =
-  with_temp_home (fun ctx ->
+  with_temp_base_path (fun ctx ->
     let args = `Assoc [("content", `String "some content")] in
     let (ok, msg) = dispatch_exn ctx ~name:"masc_library_add" ~args in
     Alcotest.(check bool) "missing title fails" false ok;
@@ -142,7 +150,7 @@ let test_add_missing_title () =
   )
 
 let test_add_missing_content () =
-  with_temp_home (fun ctx ->
+  with_temp_base_path (fun ctx ->
     let args = `Assoc [("title", `String "test doc")] in
     let (ok, msg) = dispatch_exn ctx ~name:"masc_library_add" ~args in
     Alcotest.(check bool) "missing content fails" false ok;
@@ -150,7 +158,7 @@ let test_add_missing_content () =
   )
 
 let test_add_invalid_source () =
-  with_temp_home (fun ctx ->
+  with_temp_base_path (fun ctx ->
     let args = `Assoc [
       ("title", `String "test doc");
       ("content", `String "some content");
@@ -162,7 +170,7 @@ let test_add_invalid_source () =
   )
 
 let test_add_success () =
-  with_temp_home (fun ctx ->
+  with_temp_base_path (fun ctx ->
     let args = `Assoc [
       ("title", `String "test knowledge");
       ("content", `String "This is test content for library.");
@@ -175,7 +183,7 @@ let test_add_success () =
   )
 
 let test_add_low_confidence () =
-  with_temp_home (fun ctx ->
+  with_temp_base_path (fun ctx ->
     let args = `Assoc [
       ("title", `String "uncertain knowledge");
       ("content", `String "This might be useful.");
@@ -187,7 +195,7 @@ let test_add_low_confidence () =
   )
 
 let test_add_with_tags () =
-  with_temp_home (fun ctx ->
+  with_temp_base_path (fun ctx ->
     let args = `Assoc [
       ("title", `String "tagged knowledge");
       ("content", `String "Content with tags.");
@@ -203,14 +211,14 @@ let test_add_with_tags () =
    ============================================================ *)
 
 let test_search_empty_query () =
-  with_temp_home (fun ctx ->
+  with_temp_base_path (fun ctx ->
     let (ok, msg) = dispatch_exn ctx ~name:"masc_library_search" ~args:(`Assoc []) in
     Alcotest.(check bool) "empty query fails" false ok;
     Alcotest.(check bool) "error mentions query" true (msg_contains ~needle:"query" msg)
   )
 
 let test_search_with_query () =
-  with_temp_home (fun ctx ->
+  with_temp_base_path (fun ctx ->
     let args = `Assoc [("query", `String "test")] in
     let (ok, msg) = dispatch_exn ctx ~name:"masc_library_search" ~args in
     (* Succeeds even with no results *)
@@ -223,14 +231,14 @@ let test_search_with_query () =
    ============================================================ *)
 
 let test_promote_empty_topic () =
-  with_temp_home (fun ctx ->
+  with_temp_base_path (fun ctx ->
     let (ok, msg) = dispatch_exn ctx ~name:"masc_library_promote" ~args:(`Assoc []) in
     Alcotest.(check bool) "empty topic fails" false ok;
     Alcotest.(check bool) "error mentions topic" true (msg_contains ~needle:"topic" msg)
   )
 
 let test_promote_nonexistent () =
-  with_temp_home (fun ctx ->
+  with_temp_base_path (fun ctx ->
     let args = `Assoc [
       ("topic", `String "nonexistent");
       ("confidence", `Float 0.9);
@@ -242,7 +250,7 @@ let test_promote_nonexistent () =
   )
 
 let test_promote_updates_frontmatter () =
-  with_temp_home (fun ctx ->
+  with_temp_base_path (fun ctx ->
     let candidate_path =
       Filename.concat (Tool_library.candidates_dir ()) "regex-topic-20260425.md"
     in
@@ -291,7 +299,7 @@ Promotion should preserve the body.
    ============================================================ *)
 
 let test_full_workflow () =
-  with_temp_home (fun ctx ->
+  with_temp_base_path (fun ctx ->
     (* Step 1: Add a document *)
     let add_args = `Assoc [
       ("title", `String "workflow test");

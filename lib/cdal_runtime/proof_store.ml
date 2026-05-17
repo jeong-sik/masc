@@ -8,12 +8,28 @@ type resolved_ref =
 
 open Result_syntax
 
-let default_config =
-  let home =
-    try Sys.getenv "HOME" with
-    | Not_found -> Filename.get_temp_dir_name ()
+let env_non_empty key =
+  match Sys.getenv_opt key with
+  | Some value ->
+    let value = String.trim value in
+    if value = "" then None else Some value
+  | None -> None
+;;
+
+let default_root () =
+  let base_path =
+    match env_non_empty "MASC_BASE_PATH" with
+    | Some path -> path
+    | None ->
+      (match env_non_empty "ME_ROOT" with
+       | Some path -> path
+       | None -> Sys.getcwd ())
   in
-  { root = Filename.concat home ".oas" }
+  Filename.concat base_path ".oas"
+;;
+
+let default_config =
+  { root = default_root () }
 ;;
 
 let proofs_dir config = Filename.concat config.root "proofs"

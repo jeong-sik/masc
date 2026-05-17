@@ -26,7 +26,7 @@ masc-tui
 
 If the server is using a different base path, pass `--base <path>` or export
 `MASC_BASE_PATH` before launching the TUI. The fallback order is
-`MASC_BASE_PATH` -> `HOME` -> `cwd`.
+`MASC_BASE_PATH` -> `cwd`.
 
 ## Modes
 

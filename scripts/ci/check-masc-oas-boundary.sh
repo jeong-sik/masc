@@ -35,7 +35,7 @@ resolve_oas_repo() {
   repo_parent="$(dirname "$(pwd)")"
   local candidates=(
     "${repo_parent}/oas"
-    "${HOME:-}/me/workspace/yousleepwhen/oas"
+    "${ME_ROOT:-}/workspace/yousleepwhen/oas"
   )
 
   local candidate

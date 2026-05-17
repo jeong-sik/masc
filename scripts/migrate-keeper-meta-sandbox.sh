@@ -11,12 +11,13 @@
 #
 # Scope (filesystem locations searched)
 #   1. <repo>/.masc/keepers/*.json          (worktree-local persistence)
-#   2. ~/.masc/keepers/*.json               (per-user persistence)
+#   2. <base-path>/.masc/keepers/*.json     (operator runtime persistence)
 #
 # Usage
 #   bash scripts/migrate-keeper-meta-sandbox.sh             # --dry-run (default)
 #   bash scripts/migrate-keeper-meta-sandbox.sh --apply     # write .bak + edit
 #   bash scripts/migrate-keeper-meta-sandbox.sh --apply --quiet
+#   bash scripts/migrate-keeper-meta-sandbox.sh --base-path ~/me --apply
 #
 # Exit codes
 #   0   normalized 0 or more files cleanly
@@ -28,20 +29,27 @@ set -euo pipefail
 
 MODE="dry-run"
 QUIET=0
-for arg in "$@"; do
-  case "$arg" in
+BASE_PATH_OVERRIDE=""
+while [ $# -gt 0 ]; do
+  case "$1" in
     --apply)   MODE="apply" ;;
     --dry-run) MODE="dry-run" ;;
     --quiet)   QUIET=1 ;;
+    --base-path)
+      shift
+      [ $# -gt 0 ] || { echo "--base-path requires a path" >&2; exit 2; }
+      BASE_PATH_OVERRIDE="$1"
+      ;;
     -h|--help)
-      sed -n '1,30p' "$0"
+      sed -n '1,31p' "$0"
       exit 0
       ;;
     *)
-      echo "Unknown argument: $arg" >&2
+      echo "Unknown argument: $1" >&2
       exit 2
       ;;
   esac
+  shift
 done
 
 if ! command -v jq >/dev/null 2>&1; then
@@ -53,6 +61,18 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$(cd "$(dirname 
 TOML_DIR="${REPO_ROOT}/config/keepers"
 
 log() { [ "$QUIET" -eq 1 ] || echo "$@"; }
+
+default_base_path() {
+  if [ -n "$BASE_PATH_OVERRIDE" ]; then
+    printf '%s\n' "$BASE_PATH_OVERRIDE"
+  elif [ -n "${MASC_BASE_PATH:-}" ]; then
+    printf '%s\n' "$MASC_BASE_PATH"
+  elif [ -n "${ME_ROOT:-}" ]; then
+    printf '%s\n' "$ME_ROOT"
+  else
+    printf '%s\n' "$REPO_ROOT"
+  fi
+}
 
 # Read a TOML scalar like `sandbox_profile = "docker"`. Returns empty string
 # when the key is absent. Comments after the value are stripped.
@@ -150,6 +170,9 @@ scan_dir() {
 }
 
 log "mode: $MODE"
+BASE_PATH="$(default_base_path)"
 scan_dir "${REPO_ROOT}/.masc/keepers"
-scan_dir "${HOME}/.masc/keepers"
+if [ "$BASE_PATH" != "$REPO_ROOT" ]; then
+  scan_dir "${BASE_PATH}/.masc/keepers"
+fi
 log "done."

@@ -17,7 +17,16 @@ set -euo pipefail
 
 ITERATION="${1:-1}"
 : "${MCP_URL:=http://127.0.0.1:8935/mcp}"
-RESULTS_DIR="${MASC_BASE_PATH:-${HOME:-$PWD}}/.masc/eval_results"
+default_base_path() {
+  if [ -n "${MASC_BASE_PATH:-}" ]; then
+    printf '%s\n' "$MASC_BASE_PATH"
+  elif [ -n "${ME_ROOT:-}" ]; then
+    printf '%s\n' "$ME_ROOT"
+  else
+    printf '%s\n' "$PWD"
+  fi
+}
+RESULTS_DIR="$(default_base_path)/.masc/eval_results"
 RESULT_FILE="${RESULTS_DIR}/iteration_${ITERATION}.json"
 
 mkdir -p "$RESULTS_DIR"

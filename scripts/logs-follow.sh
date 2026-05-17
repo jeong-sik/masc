@@ -23,7 +23,7 @@ If you pass a repo or worktree path, the script resolves it to the owning repo r
 Options:
   --base-path <path>    Override MASC base path (default: detected via lsof
                         from the running server; falls back to MASC_BASE_PATH
-                        or $HOME/me when no server is running)
+                        or ME_ROOT, then cwd when no server is running)
   --date <YYYY-MM-DD>   Read a specific log file instead of today's rotating file
   --lines <n>           Tail last N lines before following (default: 40, use 0 for only new lines)
   --level <level>       Minimum level: debug|info|warn|error (default: debug)
@@ -190,7 +190,8 @@ validate_args
 # Resolution order for the log directory (deterministic-first):
 #   1. --base-path override          (user-provided path, run through worktree-aware resolver)
 #   2. helper masc_log_dir           (detects via lsof on the running server when available;
-#                                     falls back to MASC_BASE_PATH or $HOME/me)
+#                                     falls back to MASC_BASE_PATH, ME_ROOT,
+#                                     ME_ROOT, or cwd)
 # This avoids the historical drift where logs-follow defaulted to $HOME
 # while the server actually wrote under <base>/.masc/logs/, leaving
 # operators staring at an empty directory.

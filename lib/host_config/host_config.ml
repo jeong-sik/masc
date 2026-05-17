@@ -64,16 +64,21 @@ let host () =
     | None -> None
     | Some s -> if String.trim s = "" then None else Some s
   in
+  let default_workspace_root fallback =
+    match get_opt "MASC_BASE_PATH" with
+    | Some root -> Env_config_core.normalize_masc_base_path_input root
+    | None ->
+      (match get_opt "ME_ROOT" with
+       | Some root -> root
+       | None -> fallback)
+  in
   { cred_root = Filename.concat tmp "keeper-creds"
   ; host_bash = "/bin/bash"
   ; host_zsh = "/bin/zsh"
   ; host_sh = "/bin/sh"
   ; coreutils = coreutils_defaults
   ; agent_runtime_root = tmp
-  ; sandbox_workspace_root =
-      (match Sys.getenv_opt "HOME" with
-       | Some home -> Filename.concat home "me"
-       | None -> Filename.concat tmp "masc-fleet")
+  ; sandbox_workspace_root = default_workspace_root (Filename.concat tmp "masc-fleet")
   ; test_mode =
       (let exec = Filename.basename Sys.executable_name in
        if String.length exec >= 5 && String.sub exec 0 5 = "test_"
@@ -158,26 +163,31 @@ let resolve_coreutils () =
 let resolve ?base_path () =
   let tmp = Filename.get_temp_dir_name () in
   let base = Option.value base_path ~default:tmp in
+  let get_opt key =
+    match Sys.getenv_opt key with
+    | None -> None
+    | Some s -> if String.trim s = "" then None else Some s
+  in
+  let default_workspace_root fallback =
+    match get_opt "MASC_BASE_PATH" with
+    | Some root -> Env_config_core.normalize_masc_base_path_input root
+    | None ->
+      (match get_opt "ME_ROOT" with
+       | Some root -> root
+       | None -> fallback)
+  in
   let agent_runtime_root = Filename.concat base ".masc/runtime/agent" in
   let cred_root = Filename.concat base ".masc/credentials" in
   let sandbox_workspace_root =
     match Sys.getenv_opt "MASC_SANDBOX_ROOT" with
     | Some s -> s
-    | None ->
-      (match Sys.getenv_opt "HOME" with
-       | Some home -> Filename.concat home "me"
-       | None -> Filename.concat base "fleet")
+    | None -> default_workspace_root (Filename.concat base "fleet")
   in
   let test_mode =
     let exec = Filename.basename Sys.executable_name in
     if String.length exec >= 5 && String.sub exec 0 5 = "test_"
     then Test
     else Production
-  in
-  let get_opt key =
-    match Sys.getenv_opt key with
-    | None -> None
-    | Some s -> if String.trim s = "" then None else Some s
   in
   Ok
     { cred_root

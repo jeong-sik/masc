@@ -7,7 +7,11 @@
     @stability Evolving
     @since 0.93.1 *)
 
-type config = { root : string (** Default: [~/.oas] *) }
+type config = {
+  root : string
+      (** Default: [<MASC_BASE_PATH>/.oas], then [<ME_ROOT>/.oas], then
+          [<cwd>/.oas]. *)
+}
 
 type resolved_ref =
   { run_id : string

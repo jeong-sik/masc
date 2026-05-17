@@ -335,6 +335,6 @@ Regenerate-before-fix is an anti-pattern: the fingerprint must always describe a
 
 1. `$AGENT_SDK_LOCAL_REPO` (explicit override)
 2. `<masc-mcp-parent>/oas` (sibling checkout)
-3. `$HOME/me/workspace/yousleepwhen/oas` (workspace convention)
+3. `$ME_ROOT/workspace/yousleepwhen/oas` (explicit workspace root)
 
 Each candidate must be a git checkout at the pinned SHA. If none qualifies, the script falls back to `git fetch` into a temp bare clone from the upstream URL. Network is required only for that fallback.

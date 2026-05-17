@@ -162,8 +162,8 @@ resolve_llama_server_bin() {
     printf '%s\n' "${SEED_BINARY}"
     return 0
   fi
-  if [ -x "$HOME/me/.local/bin/llama-server" ]; then
-    printf '%s\n' "$HOME/me/.local/bin/llama-server"
+  if [ -n "${ME_ROOT:-}" ] && [ -x "$ME_ROOT/.local/bin/llama-server" ]; then
+    printf '%s\n' "$ME_ROOT/.local/bin/llama-server"
     return 0
   fi
   if [ -x "$HOME/.local/bin/llama-server" ]; then

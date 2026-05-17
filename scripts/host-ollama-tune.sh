@@ -20,7 +20,7 @@
 # What it does NOT do:
 #   - install ollama (assumed already present at /Applications/Ollama.app)
 #   - touch cascade.toml (provider weights are an operator decision; see
-#     ~/me/.masc/config/cascade.toml [keeper_unified] keep_alive setting)
+#     <base-path>/.masc/config/cascade.toml [keeper_unified] keep_alive setting)
 #   - persist across macOS reboots beyond launchctl scope (login-session
 #     env survives until reboot; for permanent set add to ~/.zshenv too)
 #

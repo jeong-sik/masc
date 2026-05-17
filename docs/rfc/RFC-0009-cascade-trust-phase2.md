@@ -19,7 +19,7 @@ Phase 2 closes both gaps without giving the trust loop authority to silently rew
 
 | Principle | Application |
 |---|---|
-| Live-only persist | Only `~/.masc/config/cascade.toml` is touched; `config/cascade.toml` (repo seed) is never written to by the trust loop. |
+| Live-only persist | Only `<base-path>/.masc/config/cascade.toml` is touched; `config/cascade.toml` (repo seed) is never written to by the trust loop. |
 | Opt-in by default | `MASC_CASCADE_TRUST_PERSIST=1` (or `=dry`) gates everything in this RFC. Default-off for the first release. |
 | Observation over action | Phase 2a (operator recommendation) is observation-only. Phase 2b (persist) is a separate feature flag and a separate PR. |
 | No self-reload loops | Hot-reload must skip files the trust loop just wrote; otherwise each persist triggers a reload triggers a re-emit. |
@@ -81,7 +81,7 @@ Rendered on the dashboard as a card with a copy-friendly JSON snippet showing th
 |---|---|
 | unset (default) | No persist. Trust is in-memory only, reset on restart. |
 | `dry` | Compute the would-be diff every hour, append to `cascade_trust/applied/<date>.jsonl` with `mode=dry`, no file write. |
-| `1` | Same diff, plus atomic write to `~/.masc/config/cascade.toml`. |
+| `1` | Same diff, plus atomic write to `<base-path>/.masc/config/cascade.toml`. |
 
 ### Persist algorithm
 
@@ -89,11 +89,11 @@ Every `MASC_CASCADE_TRUST_PERSIST_INTERVAL_SEC` (default 3600s):
 
 1. Snapshot `Cascade_health_tracker.global` providers with `events_in_window > 0` AND age of `last_failure_at` < 24h (skip stale).
 2. For each provider, compute target weight: `round(trust_score * 2) / 2` (0.5-step granularity, range [0.5, ceiling × current_weight]).
-3. Diff against current `~/.masc/config/cascade.toml` weights.
+3. Diff against current `<base-path>/.masc/config/cascade.toml` weights.
 4. If diff is empty → emit `mode=skip_no_change` audit event; return.
 5. Atomic write via `lib/atomic_write.ml`:
    - `cascade.toml.tmp` → fsync → rename
-   - Backup previous: `~/.masc/config/.backup/cascade.toml.YYYYMMDD-HHMMSS`
+   - Backup previous: `<base-path>/.masc/config/.backup/cascade.toml.YYYYMMDD-HHMMSS`
    - Top-of-file marker comment: `# auto-tuned by trust_persist at <timestamp>; do not edit by hand within 5s`
 
 ### Hot-reload loop guard

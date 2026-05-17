@@ -33,25 +33,47 @@ let emergency_compact_ratio_threshold : float =
   let default_value = 0.8 in
   let min_valid = 0.5 in
   let max_valid = 0.99 in
-  let raw = Env_config_core.get_float ~default:default_value env_var in
+  (* Read raw env directly (not Env_config_core.get_float ~default) so we can
+     distinguish three observable cases:
+       1. env unset           → silent default
+       2. env set & parses    → validate range; warn on out-of-range
+       3. env set & malformed → warn explicitly with distinct message
+     get_float ~default collapses (1) and (3) into the same float value,
+     making operator typos (e.g. "foo" or "0,9" with comma) indistinguishable
+     from the unset case. The subsequent Float.equal raw default_value check
+     then suppresses the warn path entirely. (Codex P2 review of PR #15782.) *)
   let effective =
-    if (not (Float.is_finite raw)) || raw < min_valid || raw > max_valid
-    then (
-      (* Only warn when an explicit override was supplied and out of range;
-         silently accept the default fall-through case (raw = default_value
-         and default is in-range). *)
-      if not (Float.equal raw default_value)
-      then
-        Log.Harness.warn
-          "[compact_policy] %s=%f out of range [%.2f, %.2f]; falling back to default \
-           %.2f"
-          env_var
-          raw
-          min_valid
-          max_valid
-          default_value;
-      default_value)
-    else raw
+    match Sys.getenv_opt env_var with
+    | None -> default_value
+    | Some raw ->
+      (match Float.of_string_opt (String.trim raw) with
+       | None ->
+         Log.Harness.warn
+           "[compact_policy] %s=%S is not a parseable float; falling back to default \
+            %.2f"
+           env_var
+           raw
+           default_value;
+         default_value
+       | Some parsed when not (Float.is_finite parsed) ->
+         Log.Harness.warn
+           "[compact_policy] %s=%s parsed to non-finite %f; falling back to default %.2f"
+           env_var
+           raw
+           parsed
+           default_value;
+         default_value
+       | Some parsed when parsed < min_valid || parsed > max_valid ->
+         Log.Harness.warn
+           "[compact_policy] %s=%f out of range [%.2f, %.2f]; falling back to default \
+            %.2f"
+           env_var
+           parsed
+           min_valid
+           max_valid
+           default_value;
+         default_value
+       | Some parsed -> parsed)
   in
   (* Surface the effective value for operators via /metrics. Registered
      here so the gauge exists from module init regardless of whether any

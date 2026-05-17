@@ -2177,11 +2177,6 @@ let init () =
     "Total keepers auto-paused due to stale termination storms. Labeled by keeper."
     Counter;
   add
-    Keeper_metrics.metric_keeper_stale_fleet_batch_paused
-    "Total keepers auto-paused due to fleet-wide stale termination batches. Labeled by \
-     keeper."
-    Counter;
-  add
     Keeper_metrics.metric_keeper_oas_timeout_budget_loop_paused
     "Total keepers auto-paused due to repeated OAS timeout budget exhaustion. Labeled by \
      keeper."
@@ -2565,9 +2560,9 @@ let init () =
      rate indicates the previous silent-EOF fallback would have hidden a \
      real read error and lost output between the error and process exit."
     Counter;
-  Bg_task.set_drain_failure_observer (fun ~fd_kind ~error_kind ->
+  Bg_task.set_drain_failure_observer (fun ~fd_kind ~err_kind ->
     inc_counter metric_bg_task_drain_unexpected_errors
-      ~labels:[ "fd_kind", fd_kind; "error_kind", error_kind ] ());
+      ~labels:[ "fd_kind", fd_kind; "error_kind", err_kind ] ());
   add
     metric_build_identity_probe_failures
     "Total build identity git probe failures. Labeled by \

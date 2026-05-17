@@ -308,6 +308,12 @@
    ;; lib/dashboard_eval_feed/. 178+59 LoC, deps: stdlib + Yojson +
    ;; agent_sdk + masc_core (Json_util/Safe_ops).
    masc_mcp.dashboard_eval_feed
+   ;; RFC-0004 Phase A0.1 PR-1 — Typed SSE event lib (lib/sse_event/).
+   ;; atdgen-generated payload types + hand-rolled envelope wrap that
+   ;; mirrors cascade_event_bridge.wrap_event/json_string_opt
+   ;; semantics.  PR-2 onwards: cascade_event_bridge arms call into
+   ;; Sse_event.<event>_constructor instead of inline `Assoc.
+   masc_mcp.sse_event
    ;; RFC-0056 Phase 1F — Memory_jsonl leaf module extracted to
    ;; lib/memory_jsonl/. 219+22 LoC, deps: stdlib + Yojson + Eio +
    ;; agent_sdk + fs_compat + time_compat + masc_log. OAS Memory

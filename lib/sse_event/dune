@@ -7,6 +7,7 @@
 ; constructors in PR-2 (agent_started/completed/failed migration).
 (library
  (name sse_event)
+ (public_name masc_mcp.sse_event)
  (libraries yojson atdgen-runtime))
 
 (rule

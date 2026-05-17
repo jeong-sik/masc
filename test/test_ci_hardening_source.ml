@@ -355,9 +355,9 @@ let test_pr_automation_draft_guard_contracts () =
   check bool "draft-only state does not suppress missing approval" true
     (file_not_contains_pattern ".github/workflows/pr-automation.yml"
        "(!safeDraftOnlyState &&");
-  check bool "agent-like PRs always require verified approval" true
+  check bool "draft PRs always require verified approval" true
     (file_contains_pattern ".github/workflows/pr-automation.yml"
-       "const approvalRequired =\n              looksAgentAuthored ||\n              unsafeDraftBoundaryAction ||\n              hasAutoMergeRequest ||");
+       "const approvalRequired =\n              current.isDraft ||\n              looksAgentAuthored ||\n              unsafeDraftBoundaryAction ||\n              hasAutoMergeRequest ||");
   check bool "pr automation has hard-stop label policy" true
     (file_contains_pattern ".github/workflows/pr-automation.yml"
        "hard-stop label present");

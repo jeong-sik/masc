@@ -1,22 +1,55 @@
 ---
 rfc: "0097"
 title: "Keeper sandbox container reuse (long-running sandbox per keeper)"
-status: Draft
+status: In-progress
 created: 2026-05-17
 updated: 2026-05-17
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0042"]
-implementation_prs: []
+related: ["0042", "0107"]
+implementation_prs: ["#15991"]
 ---
 
 # RFC-0097 — Keeper sandbox container reuse
 
-Status: Draft
+Status: In-progress (Phase E step 1 landed — skeleton + transport decision)
 Author: jeong-sik (vincent)
 Date: 2026-05-17
-Related: PR #15678 (autonomy_exec pipe FD root fix), PR #15722 (docker spawn throttle — adjacent backpressure).
+Related: PR #15678 (autonomy_exec pipe FD root fix), PR #15722 (docker spawn throttle — adjacent backpressure), RFC-0107 §3.4 (outbound HTTP stack — Docker UDS transport).
+
+## Phase E step 1 — landing note (2026-05-17)
+
+The first implementation increment landed alongside RFC-0107 Phase E step 1:
+
+- `lib/sandbox/docker_api.{mli,ml}` — interface for the UDS HTTP client
+  (`create`, `ping`, `container_create`, `container_start`,
+  `container_exec`, `container_remove`). All function bodies currently
+  `raise Failure` — type-correct skeleton, no production callers.
+- `lib/worker_runtime_docker.ml` and `lib/keeper/keeper_sandbox_runtime.ml`
+  carry an `(* RFC-0107 Phase E step 2 — branch on MASC_DOCKER_TRANSPORT
+  env flag here *)` marker at the docker-spawn dispatch site. The
+  legacy `docker run` / `docker exec` subprocess path stays as the
+  default.
+
+Step 2 (next) replaces the `Failure` stubs with an Eio + cohttp-eio
+implementation over `/var/run/docker.sock` and flips this RFC to
+`Active`. Open items deferred to step 2 (or follow-up RFC) below.
+
+### Step 1 decisions recorded
+
+- **Transport library**: `opam show docker-api` returns
+  `ocaml-docker 0.2.2` with `ocaml < 5` — *incompatible* with our 5.4
+  toolchain. We will not adopt it. The thin self-built wrapper above
+  is the path.
+- **HTTP framing**: `piaf` (the rest of RFC-0107's pool layer) has
+  `Scheme.t = HTTP | HTTPS` only — no `Unix` scheme. UDS therefore
+  stays *outside* `masc_http_pool`; step 2 layers HTTP/1.1 directly on
+  `Eio.Net.connect`'d flow, using `cohttp-eio`'s parser where
+  practical.
+- **Scope**: only the five endpoints above. Image pull / build, volume
+  mount surface, network management are *out of scope* and require an
+  explicit follow-up RFC before they enter the interface.
 
 ## Summary
 

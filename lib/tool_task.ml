@@ -328,13 +328,41 @@ let notes_have_verification_artifact_ref notes =
   in
   has_github_pull || has_pr_shorthand || has_explicit_artifact
 
-let verification_submission_evidence_error ~notes =
-  if notes_have_verification_artifact_ref notes then None
+let non_empty_trimmed_strings values =
+  values
+  |> List.filter_map (fun value ->
+         let value = String.trim value in
+         if String.equal value "" then None else Some value)
+  |> List.sort_uniq String.compare
+
+let handoff_context_has_verification_artifact_ref = function
+  | Some (handoff_context : Masc_domain.task_handoff_context) ->
+      handoff_context.evidence_refs |> non_empty_trimmed_strings |> fun refs ->
+      refs <> []
+  | None -> false
+
+let verification_submission_evidence_error ~notes ~handoff_context =
+  if notes_have_verification_artifact_ref notes
+     || handoff_context_has_verification_artifact_ref handoff_context
+  then None
   else
     Some
       "submit_for_verification requires verification evidence: include pr_url \
        for the draft PR, a PR # reference, or an explicit \
        artifact/file/path/commit/branch reference in notes."
+
+let verification_evidence_refs_for_task (task : Masc_domain.task) =
+  let contract_refs =
+    match task.contract with
+    | Some contract -> contract.verify_gate_evidence
+    | None -> []
+  in
+  let handoff_refs =
+    match task.handoff_context with
+    | Some handoff_context -> handoff_context.evidence_refs
+    | None -> []
+  in
+  non_empty_trimmed_strings (contract_refs @ handoff_refs)
 
 let parse_task_contract args =
   match args |> member "contract" with
@@ -468,7 +496,7 @@ let parse_handoff_context ~(agent_name : string)
                    handoff_context with
                    summary;
                    evidence_refs =
-                     List.sort_uniq String.compare handoff_context.evidence_refs;
+                     non_empty_trimmed_strings handoff_context.evidence_refs;
                    updated_at = Some (Masc_domain.now_iso ());
                    updated_by = Some agent_name;
                  }))
@@ -1119,7 +1147,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
   let submit_evidence_error =
     match requested_action with
     | Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence ->
-      verification_submission_evidence_error ~notes
+      verification_submission_evidence_error ~notes ~handoff_context
     | Masc_domain.Claim
     | Masc_domain.Start
     | Masc_domain.Done_action
@@ -1257,9 +1285,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
           let tasks = Coord.get_tasks_raw ctx.config in
           (match List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks with
            | Some task ->
-             let evidence_refs = match task.contract with
-               | Some c -> c.verify_gate_evidence
-               | None -> [] in
+             let evidence_refs = verification_evidence_refs_for_task task in
              (match task.task_status with
               | Masc_domain.AwaitingVerification { verification_id; assignee; _ } ->
                 Verification_protocol.notify_submit_for_verification

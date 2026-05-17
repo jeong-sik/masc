@@ -190,14 +190,39 @@ let prune_best_effort base_path ~retention_days =
       (Printexc.to_string e)
 
 (* Resolve effective retention from env (override) falling back to default.
-   Env var [MASC_COMPACTION_AUDIT_RETENTION_DAYS] is clamped to [1, 365]. *)
-let resolve_retention_days ~default =
+   Env var [MASC_COMPACTION_AUDIT_RETENTION_DAYS] is accepted iff parsed
+   as integer in [1, 3650] (1 day .. ~10 years). The returned variant
+   discriminates between the four resolution outcomes so the caller can
+   emit a Prometheus counter + warn log on operator misconfiguration.
+   See {!Keeper_compact_audit_retention_outcome}. *)
+let retention_min_days = 1
+let retention_max_days = 3650
+
+let resolve_retention_outcome ~default :
+  Keeper_compact_audit_retention_outcome.t =
+  let open Keeper_compact_audit_retention_outcome in
   match Sys.getenv_opt "MASC_COMPACTION_AUDIT_RETENTION_DAYS" with
-  | Some s ->
-    (match int_of_string_opt s with
-     | Some n when n >= 1 && n <= 365 -> n
-     | _ -> default)
-  | None -> default
+  | None -> Unset_default default
+  | Some raw ->
+    (match int_of_string_opt (String.trim raw) with
+     | None -> Parse_error { raw; default_used = default }
+     | Some n when n >= retention_min_days && n <= retention_max_days ->
+       Parsed_ok n
+     | Some n -> Out_of_range { raw; parsed = n; default_used = default })
+;;
+
+(* Extract the effective retention day count from an outcome — the
+   default is substituted on every non-[Parsed_ok] variant, so the
+   runtime behaviour matches the legacy [resolve_retention_days]. *)
+let effective_days_of_outcome
+    (outcome : Keeper_compact_audit_retention_outcome.t) =
+  let open Keeper_compact_audit_retention_outcome in
+  match outcome with
+  | Parsed_ok n -> n
+  | Unset_default n -> n
+  | Parse_error { default_used; _ } -> default_used
+  | Out_of_range { default_used; _ } -> default_used
+;;
 
 let persist_start ~base_path ~retention_days (r : start_record) :
   (unit, write_error) result =
@@ -441,6 +466,8 @@ module For_testing = struct
   let handle_event_at ~received_ts ~base_path ~retention_days event =
     handle_event ~received_ts ~base_path ~retention_days event
   ;;
+
+  let resolve_retention_outcome = resolve_retention_outcome
 end
 
 (* Filter: accept only the two compaction payload variants. Keeps
@@ -455,9 +482,34 @@ let spawn_subscriber
     ~sw ~clock ~base_path ~retention_days
     ?(drain_interval_s = 0.25)
     (bus : Agent_sdk.Event_bus.t) : unit =
-  (* Env override of retention_days; default is the caller-supplied value. *)
-  let effective_retention =
-    resolve_retention_days ~default:retention_days
+  (* Env override of retention_days; default is the caller-supplied value.
+     Classify the resolution outcome so operator misconfiguration becomes
+     visible via Prometheus + log instead of silently using the default. *)
+  let retention_outcome =
+    resolve_retention_outcome ~default:retention_days
+  in
+  let effective_retention = effective_days_of_outcome retention_outcome in
+  let outcome_label =
+    Keeper_compact_audit_retention_outcome.to_label retention_outcome
+  in
+  Prometheus.inc_counter
+    Keeper_metrics.metric_keeper_compact_audit_retention_parse
+    ~labels:[("outcome", outcome_label)]
+    ();
+  let () =
+    let open Keeper_compact_audit_retention_outcome in
+    match retention_outcome with
+    | Parsed_ok _ | Unset_default _ -> ()
+    | Parse_error { raw; default_used } ->
+      Log.Keeper.warn
+        "keeper_compact_audit: MASC_COMPACTION_AUDIT_RETENTION_DAYS=%S not \
+         parseable as integer; using default %d days"
+        raw default_used
+    | Out_of_range { raw; parsed; default_used } ->
+      Log.Keeper.warn
+        "keeper_compact_audit: MASC_COMPACTION_AUDIT_RETENTION_DAYS=%S \
+         parsed as %d, outside [%d, %d]; using default %d days"
+        raw parsed retention_min_days retention_max_days default_used
   in
   let sub =
     Agent_sdk_metrics_bridge.subscribe

@@ -134,6 +134,12 @@ module For_testing : sig
     -> retention_days:int
     -> Agent_sdk.Event_bus.event
     -> unit
+
+  (** Resolve [MASC_COMPACTION_AUDIT_RETENTION_DAYS] without side effects,
+      returning the typed outcome. Reads from process env at call time. *)
+  val resolve_retention_outcome
+    :  default:int
+    -> Keeper_compact_audit_retention_outcome.t
 end
 
 (** {1 Subscriber wireup} *)

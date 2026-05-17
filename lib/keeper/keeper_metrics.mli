@@ -64,6 +64,7 @@ type t =
   | GuardsFailures
   | ProfileLoadFailures
   | CompactAuditFailures
+  | CompactAuditRetentionParse
   | FsFailures
   | CrashPersistenceFailures
   | GenerationLineageFailures
@@ -274,6 +275,13 @@ val metric_keeper_approval_queue_failures : string
 val metric_keeper_guards_failures : string
 val metric_keeper_profile_load_failures : string
 val metric_keeper_compact_audit_failures : string
+
+val metric_keeper_compact_audit_retention_parse : string
+(** Counter incremented once per subscriber start, labelled [outcome] with
+    one of [parsed_ok | unset_default | parse_error | out_of_range]
+    (see {!Keeper_compact_audit_retention_outcome}). Surfaces operator
+    misconfiguration of [MASC_COMPACTION_AUDIT_RETENTION_DAYS]. *)
+
 val metric_keeper_fs_failures : string
 val metric_keeper_crash_persistence_failures : string
 val metric_keeper_generation_lineage_failures : string

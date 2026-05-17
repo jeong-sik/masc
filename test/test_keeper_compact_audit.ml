@@ -217,10 +217,105 @@ let test_pending_ttl_uses_receive_time () =
     in
     check int "entry expires by receive timestamp" 1 (List.length expired))
 
+(* ── Retention parse outcome ───────────────────────────────────── *)
+
+module KCARO = Masc_mcp.Keeper_compact_audit_retention_outcome
+
+let env_var = "MASC_COMPACTION_AUDIT_RETENTION_DAYS"
+
+(* OCaml's Unix module lacks portable unsetenv in older stdlib; we test
+   the "unset" path by skipping when the env var leaks in from CI and
+   otherwise pre-asserting None. *)
+let with_env_unset f =
+  match Sys.getenv_opt env_var with
+  | Some _ ->
+    (* Inherited from CI; cannot portably unset. Skip rather than miss the
+       boundary, but record it visibly. *)
+    Printf.printf
+      "[test_keeper_compact_audit] WARN: env %s inherited; skipping \
+       Unset_default check\n" env_var
+  | None -> f ()
+
+let with_env_set v f =
+  let prev = Sys.getenv_opt env_var in
+  Unix.putenv env_var v;
+  let restore () =
+    match prev with
+    | None ->
+      (* Best-effort: stdlib has no portable unset; set to a sentinel that
+         the resolver itself treats as Parse_error, then leave it. Other
+         tests in this binary do not depend on the env being absent. *)
+      Unix.putenv env_var ""
+    | Some s -> Unix.putenv env_var s
+  in
+  Fun.protect ~finally:restore f
+
+let label_of = KCARO.to_label
+
+let test_retention_unset_default () =
+  with_env_unset (fun () ->
+    let o = KCA.For_testing.resolve_retention_outcome ~default:14 in
+    check string "unset_default" "unset_default" (label_of o);
+    match o with
+    | KCARO.Unset_default 14 -> ()
+    | _ -> fail "expected Unset_default 14")
+
+let test_retention_parsed_ok () =
+  with_env_set "30" (fun () ->
+    let o = KCA.For_testing.resolve_retention_outcome ~default:14 in
+    check string "parsed_ok" "parsed_ok" (label_of o);
+    match o with
+    | KCARO.Parsed_ok 30 -> ()
+    | _ -> fail "expected Parsed_ok 30")
+
+let test_retention_parse_error () =
+  with_env_set "30d" (fun () ->
+    let o = KCA.For_testing.resolve_retention_outcome ~default:14 in
+    check string "parse_error" "parse_error" (label_of o);
+    match o with
+    | KCARO.Parse_error { raw = "30d"; default_used = 14 } -> ()
+    | _ -> fail "expected Parse_error { raw=30d; default_used=14 }")
+
+let test_retention_out_of_range_low () =
+  with_env_set "0" (fun () ->
+    let o = KCA.For_testing.resolve_retention_outcome ~default:14 in
+    check string "out_of_range (0)" "out_of_range" (label_of o);
+    match o with
+    | KCARO.Out_of_range { raw = "0"; parsed = 0; default_used = 14 } -> ()
+    | _ -> fail "expected Out_of_range parsed=0")
+
+let test_retention_out_of_range_high () =
+  with_env_set "999999" (fun () ->
+    let o = KCA.For_testing.resolve_retention_outcome ~default:14 in
+    check string "out_of_range (high)" "out_of_range" (label_of o);
+    match o with
+    | KCARO.Out_of_range { parsed = 999999; default_used = 14; _ } -> ()
+    | _ -> fail "expected Out_of_range parsed=999999")
+
+let test_retention_boundary_upper () =
+  with_env_set "3650" (fun () ->
+    let o = KCA.For_testing.resolve_retention_outcome ~default:14 in
+    match o with
+    | KCARO.Parsed_ok 3650 -> ()
+    | _ -> fail "3650 should be in-range");
+  with_env_set "3651" (fun () ->
+    let o = KCA.For_testing.resolve_retention_outcome ~default:14 in
+    match o with
+    | KCARO.Out_of_range { parsed = 3651; _ } -> ()
+    | _ -> fail "3651 should be out-of-range")
+
 let () =
   run "Keeper_compact_audit" [
     ("trigger", [
       test_case "round-trip parse/to_string"     `Quick test_trigger_roundtrip;
+    ]);
+    ("retention_parse", [
+      test_case "unset uses default"             `Quick test_retention_unset_default;
+      test_case "parsed_ok in range"             `Quick test_retention_parsed_ok;
+      test_case "parse_error on non-integer"     `Quick test_retention_parse_error;
+      test_case "out_of_range below 1"           `Quick test_retention_out_of_range_low;
+      test_case "out_of_range above 3650"        `Quick test_retention_out_of_range_high;
+      test_case "boundary 3650/3651"             `Quick test_retention_boundary_upper;
     ]);
     ("pair_events", [
       test_case "matched pair"                   `Quick test_pair_matching_pair;

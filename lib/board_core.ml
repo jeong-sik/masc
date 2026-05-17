@@ -1084,6 +1084,25 @@ let add_comment_with_status
                        (Comment_id.to_string existing.id);
                      Ok (`Dedup_hit existing)
                    | None ->
+                     (* PR #13490 enforced sub-board post policy for
+                        [create_post] but left [add_comment] unguarded —
+                        non-members could comment on [Members_only] /
+                        [Owner_only] sub-boards through any parent post in
+                        that sub-board. The author allowed predicate is
+                        the same one [create_post] uses, applied to the
+                        target post's [hearth].  We run this after the
+                        dedup check (mirroring [create_post]) so an
+                        author whose earlier comment is already on the
+                        post stays idempotent — only fresh attempts hit
+                        the policy gate. *)
+                     (match
+                        validate_sub_board_post_policy_unlocked
+                          store
+                          ~author_id
+                          ~hearth:post.hearth
+                      with
+                      | Error e -> Error e
+                      | Ok () ->
                      (* Check comment count using index after duplicate
                         detection so a retry of an existing comment remains
                         idempotent even on a full thread. *)
@@ -1138,7 +1157,7 @@ let add_comment_with_status
                       { post with reply_count = post.reply_count + 1; updated_at = now };
                     invalidate_post_caches store;
                     invalidate_comment_caches store;
-                    Ok (`Fresh comment))))
+                    Ok (`Fresh comment)))))
             in
             match board_result with
             | Ok (`Fresh comment) ->

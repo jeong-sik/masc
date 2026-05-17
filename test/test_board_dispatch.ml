@@ -1047,6 +1047,95 @@ let test_sub_board_owner_only_post_policy () =
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok _ -> ())
 
+(* Issue #16024 / task-314: PR #13490 enforced sub-board policy for
+   [create_post] but the matching gate in [add_comment] was missing,
+   so a non-member could comment on a Members_only sub-board through
+   any post that already lived in that sub-board.  These tests pin the
+   contract: comment policy mirrors post policy on the parent post's
+   hearth. *)
+
+let post_in_sub_board ~author ~slug ~content =
+  match
+    Board_dispatch.create_post ~author ~content
+      ~post_kind:Board.Human_post ~hearth:slug ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post -> Board.Post_id.to_string post.id
+
+let test_sub_board_members_only_comment_policy () =
+  ignore
+    (Board_dispatch.create_sub_board ~slug:"comment-policy-team"
+       ~name:"CommentPolicy" ~description:"" ~owner:"agent-owner"
+       ~members:["agent-member"] ~access:Board.Members_only ());
+  let post_id =
+    post_in_sub_board ~author:"agent-owner"
+      ~slug:"comment-policy-team" ~content:"seed post"
+  in
+  (match
+     Board_dispatch.add_comment ~post_id ~author:"agent-outsider"
+       ~content:"outsider reply" ()
+   with
+   | Error (Board.Validation_error _) -> ()
+   | Error e ->
+     Alcotest.fail ("unexpected error: " ^ Board.show_board_error e)
+   | Ok _ ->
+     Alcotest.fail
+       "expected members-only sub-board to reject outsider comment");
+  (match
+     Board_dispatch.add_comment ~post_id ~author:"agent-member"
+       ~content:"member reply" ()
+   with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok _ -> ());
+  (match
+     Board_dispatch.add_comment ~post_id ~author:"agent-owner"
+       ~content:"owner reply" ()
+   with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok _ -> ())
+
+let test_sub_board_owner_only_comment_policy () =
+  ignore
+    (Board_dispatch.create_sub_board ~slug:"comment-owner-space"
+       ~name:"CommentOwner" ~description:"" ~owner:"agent-owner"
+       ~members:["agent-member"] ~access:Board.Owner_only ());
+  let post_id =
+    post_in_sub_board ~author:"agent-owner"
+      ~slug:"comment-owner-space" ~content:"seed"
+  in
+  (match
+     Board_dispatch.add_comment ~post_id ~author:"agent-member"
+       ~content:"member reply" ()
+   with
+   | Error (Board.Validation_error _) -> ()
+   | Error e ->
+     Alcotest.fail ("unexpected error: " ^ Board.show_board_error e)
+   | Ok _ ->
+     Alcotest.fail
+       "expected owner-only sub-board to reject member comment");
+  (match
+     Board_dispatch.add_comment ~post_id ~author:"agent-owner"
+       ~content:"owner reply" ()
+   with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok _ -> ())
+
+let test_sub_board_open_comment_policy_allows_anyone () =
+  ignore
+    (Board_dispatch.create_sub_board ~slug:"comment-open"
+       ~name:"CommentOpen" ~description:"" ~owner:"agent-owner"
+       ~access:Board.Open ());
+  let post_id =
+    post_in_sub_board ~author:"agent-owner"
+      ~slug:"comment-open" ~content:"seed"
+  in
+  (match
+     Board_dispatch.add_comment ~post_id ~author:"agent-random"
+       ~content:"random reply" ()
+   with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok _ -> ())
+
 let test_sub_board_update () =
   let id =
     match Board_dispatch.create_sub_board ~slug:"update-target" ~name:"Before"
@@ -1216,6 +1305,9 @@ let () =
       Alcotest.test_case "members include owner" `Quick (with_eio test_sub_board_members_include_owner);
       Alcotest.test_case "members-only post policy" `Quick (with_eio test_sub_board_members_only_post_policy);
       Alcotest.test_case "owner-only post policy" `Quick (with_eio test_sub_board_owner_only_post_policy);
+      Alcotest.test_case "members-only comment policy" `Quick (with_eio test_sub_board_members_only_comment_policy);
+      Alcotest.test_case "owner-only comment policy" `Quick (with_eio test_sub_board_owner_only_comment_policy);
+      Alcotest.test_case "open sub-board allows non-member comment" `Quick (with_eio test_sub_board_open_comment_policy_allows_anyone);
       Alcotest.test_case "derived post count" `Quick (with_eio test_sub_board_post_count_projection);
       Alcotest.test_case "update" `Quick (with_eio test_sub_board_update);
       Alcotest.test_case "delete clears orphan hearth" `Quick (with_eio test_sub_board_delete_clears_orphan_hearth);

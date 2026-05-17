@@ -234,9 +234,18 @@ let provider_config_preserving_http_transport
     }
   in
   { complete_sync =
-      (fun req -> http_transport.complete_sync (patch_request req));
+      (fun req ->
+        (* RFC-0095 Phase 0 diagnostic trace — verify which transport path is invoked
+           per turn for each provider. Removed at Phase 0 closeout. *)
+        Log.Misc.debug
+          "rfc0095-trace: cascade_runner http_transport.complete_sync invoked";
+        http_transport.complete_sync (patch_request req));
     complete_stream =
       (fun ?on_telemetry ~on_event req ->
+        (* RFC-0095 Phase 0 diagnostic trace — verify which transport path is invoked
+           per turn for each provider. Removed at Phase 0 closeout. *)
+        Log.Misc.debug
+          "rfc0095-trace: cascade_runner http_transport.complete_stream invoked";
         http_transport.complete_stream ?on_telemetry ~on_event
           (patch_request req));
   }

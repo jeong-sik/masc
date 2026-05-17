@@ -393,6 +393,14 @@ let parse_model (id : string) (tbl : Otoml.t)
                path);
            [])
     in
+    (* RFC-0095 Phase 0 diagnostic trace — capture model streaming flag at parse time
+       (boot-once per model). Removed at Phase 0 closeout. *)
+    Logs.debug (fun m ->
+      m
+        "rfc0095-trace: parsed model id=%s api_name=%s streaming=%b"
+        id
+        api_name
+        streaming);
     Ok
       { id
       ; api_name

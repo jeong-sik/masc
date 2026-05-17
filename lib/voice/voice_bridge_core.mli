@@ -87,6 +87,11 @@ val client_for_uri_result :
 
 (** {1 Local playback} *)
 
+val with_voice_output_turn : agent_id:string -> (unit -> 'a) -> 'a
+(** Serialize a speaking turn for transports whose call includes audible output.
+    Direct TTS generation should stay outside this helper; local playback is
+    already serialized by {!run_local_playback}. *)
+
 val is_dedup_hit : agent_id:string -> message:string -> bool
 (** [true] iff [(agent_id, hash message)] matches the most recent
     playback within {!playback_dedup_window_sec}. Exposed so

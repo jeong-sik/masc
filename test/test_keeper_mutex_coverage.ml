@@ -285,6 +285,39 @@ let test_yield_meter_can_be_shared_across_fibers () =
   done
 ;;
 
+let test_voice_output_turn_serializes_speakers () =
+  with_eio_env
+  @@ fun _env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let first_entered, notify_first_entered = Eio.Promise.create () in
+  let release_first, notify_release_first = Eio.Promise.create () in
+  let second_done, notify_second_done = Eio.Promise.create () in
+  let second_entered = Atomic.make false in
+  Eio.Fiber.fork ~sw (fun () ->
+    Voice_bridge_core.with_voice_output_turn ~agent_id:"first" (fun () ->
+      Eio.Promise.resolve notify_first_entered ();
+      Eio.Promise.await release_first));
+  Eio.Promise.await first_entered;
+  Eio.Fiber.fork ~sw (fun () ->
+    Voice_bridge_core.with_voice_output_turn ~agent_id:"second" (fun () ->
+      Atomic.set second_entered true;
+      Eio.Promise.resolve notify_second_done ()));
+  for _ = 1 to 10 do
+    Eio.Fiber.yield ()
+  done;
+  Alcotest.(check bool)
+    "second speaker waits while first holds the output turn"
+    false
+    (Atomic.get second_entered);
+  Eio.Promise.resolve notify_release_first ();
+  Eio.Promise.await second_done;
+  Alcotest.(check bool)
+    "second speaker enters after first releases"
+    true
+    (Atomic.get second_entered)
+;;
+
 let () =
   run
     "keeper_mutex_coverage"
@@ -320,6 +353,12 @@ let () =
             "yield meter can be shared across fibers"
             `Quick
             test_yield_meter_can_be_shared_across_fibers
+        ] )
+    ; ( "voice_bridge"
+      , [ test_case
+            "output turn serializes speakers"
+            `Quick
+            test_voice_output_turn_serializes_speakers
         ] )
     ]
 ;;

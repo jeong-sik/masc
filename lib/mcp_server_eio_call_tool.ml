@@ -683,7 +683,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   let timeout_hit = ref false in
   let execute_with_timeout () =
     let local_timeout_hit = ref false in
-    let result =
+    let execute_core () =
       try
         match tool_timeout ~tool_name:name ~_arguments:arguments with
         | None ->
@@ -729,6 +729,15 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
          (Log.Mcp.error "tools/call crashed: %s" err_detail;
           Tool_result.error ~tool_name:name ~start_time
             (Printf.sprintf "Internal error: %s" err_detail))
+    in
+    let result =
+      Tool_resource_gate.with_permit
+        ~clock
+        ~tool_name:name
+        ~arguments
+        ~is_read_only
+        ~start_time
+        execute_core
     in
     if !local_timeout_hit then timeout_hit := true;
     result

@@ -143,6 +143,16 @@ let inc_ws_parse_cache_miss () =
   Prometheus.inc_counter Prometheus.metric_ws_parse_cache_misses ()
 ;;
 
+(** Iter 28 visibility fix — counter for previously-silent JSON parse
+    drops in parse_sse_dashboard_event. Closed 2-value error_kind
+    vocab keeps Prometheus label cardinality bounded. *)
+let inc_ws_frame_json_parse_failure ~error_kind =
+  Prometheus.inc_counter
+    Prometheus.metric_server_mcp_ws_frame_json_parse_failures
+    ~labels:[ "error_kind", error_kind ]
+    ()
+;;
+
 let inc_ws_bytes_cache_hit () =
   Prometheus.inc_counter Prometheus.metric_ws_bytes_cache_hits ()
 ;;

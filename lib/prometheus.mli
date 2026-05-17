@@ -987,6 +987,12 @@ val metric_ws_parse_cache_misses : string
 val metric_ws_bytes_cache_hits : string
 val metric_ws_bytes_cache_misses : string
 
+(** Counter of WebSocket transport incoming-frame JSON parse failures.
+    Frame is dropped (parse_sse_dashboard_event returns None) but
+    operators now have a counter + warn log.
+    Labels: [error_kind = yojson_parse_error | other]. Iter 28. *)
+val metric_server_mcp_ws_frame_json_parse_failures : string
+
 (** Histogram of dashboard/hello JSON-RPC processing latency in seconds.
     Labels: [outcome = success | error]. *)
 val metric_ws_dashboard_hello_latency_seconds : string

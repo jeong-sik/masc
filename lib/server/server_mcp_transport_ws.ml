@@ -550,7 +550,30 @@ let parse_sse_dashboard_event sse_event =
       | None -> None
       | Some json_body ->
         match Yojson.Safe.from_string json_body with
-        | exception _ -> None
+        | exception (Yojson.Json_error msg) ->
+            (* Iter 28: previously silently dropped — now emit a counter
+               and a warn with a size-bounded body preview so operators
+               can detect malformed frames from clients. Behavior is
+               preserved (still returns None). *)
+            let preview_len = min 200 (String.length json_body) in
+            Log.Server.warn
+              "[mcp-ws] dropping incoming frame: malformed JSON (%s); \
+               body_preview=%s"
+              msg
+              (String.sub json_body 0 preview_len);
+            Transport_metrics.inc_ws_frame_json_parse_failure
+              ~error_kind:"yojson_parse_error";
+            None
+        | exception Eio.Cancel.Cancelled e -> raise (Eio.Cancel.Cancelled e)
+        | exception exn ->
+            let preview_len = min 200 (String.length json_body) in
+            Log.Server.warn
+              "[mcp-ws] dropping incoming frame: %s; body_preview=%s"
+              (Printexc.to_string exn)
+              (String.sub json_body 0 preview_len);
+            Transport_metrics.inc_ws_frame_json_parse_failure
+              ~error_kind:"other";
+            None
         | `Assoc fields as event_json -> (
             match List.assoc_opt "type" fields with
             | Some (`String event_type) ->

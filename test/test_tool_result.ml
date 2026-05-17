@@ -41,6 +41,39 @@ let test_error_plain_string () =
   | _ -> Alcotest.fail "expected String for non-JSON input"
 ;;
 
+let test_distributed_lock_dispatch_failure_is_transient () =
+  let r =
+    Tool_result.error
+      ~tool_name:"masc_transition"
+      ~start_time:0.0
+      "[SystemError] IO error: Failed to acquire distributed lock for key: tasks:.backlog (50 attempts exhausted)"
+  in
+  Alcotest.(check bool) "failure" false r.success;
+  Alcotest.(check string)
+    "failure class"
+    "transient_error"
+    (match Tool_result.failure_class r with
+     | Some cls -> Tool_result.tool_failure_class_to_string cls
+     | None -> "none")
+;;
+
+let test_distributed_lock_exception_is_transient () =
+  let r =
+    Tool_result.of_exn
+      ~tool_name:"masc_transition"
+      ~start_time:0.0
+      (Invalid_argument
+         "Failed to acquire distributed lock for key: tasks:.backlog (50 attempts exhausted)")
+  in
+  Alcotest.(check bool) "failure" false r.success;
+  Alcotest.(check string)
+    "failure class"
+    "transient_error"
+    (match Tool_result.failure_class r with
+     | Some cls -> Tool_result.tool_failure_class_to_string cls
+     | None -> "none")
+;;
+
 let test_ok_prefixed_json_response () =
   let start = 1000.0 in
   let r =
@@ -127,6 +160,14 @@ let () =
     [ ( "ok/error"
       , [ Alcotest.test_case "json response" `Quick test_ok_json_response
         ; Alcotest.test_case "plain string" `Quick test_error_plain_string
+        ; Alcotest.test_case
+            "distributed lock dispatch failure is transient"
+            `Quick
+            test_distributed_lock_dispatch_failure_is_transient
+        ; Alcotest.test_case
+            "distributed lock exception is transient"
+            `Quick
+            test_distributed_lock_exception_is_transient
         ; Alcotest.test_case
             "prefixed json response"
             `Quick

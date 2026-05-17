@@ -54,7 +54,11 @@ let classify_from_exception (exn : exn) : tool_failure_class =
   match exn with
   | Eio.Time.Timeout -> Transient_error
   | Eio.Cancel.Cancelled _ -> Transient_error
-  | Invalid_argument _ -> Policy_rejection
+  | Invalid_argument msg ->
+    if contains_casefold msg "Failed to acquire distributed lock"
+       || contains_casefold msg "distributed lock"
+    then Transient_error
+    else Policy_rejection
   | Failure msg ->
     if
       (* Some Failure messages carry diagnostic content worth classifying.
@@ -103,6 +107,9 @@ let classify_from_dispatch_failure (message : string) : tool_failure_class =
     || contains_casefold message "connection"
     || contains_casefold message "unavailable"
     || contains_casefold message "rate limit"
+    || contains_casefold message "Failed to acquire distributed lock"
+    || contains_casefold message "distributed lock"
+    || contains_casefold message "lock contention"
     || contains_casefold message "502"
     || contains_casefold message "503"
   then Transient_error

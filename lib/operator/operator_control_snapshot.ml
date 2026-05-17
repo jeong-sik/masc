@@ -1454,7 +1454,7 @@ let _maybe_evict_snapshot () =
             64-keeper load, replacing a [Computing] slot starts duplicate
             dashboard snapshots while the old one is still doing filesystem
             work.  Temporary cache growth is cheaper than a compute stampede. *)
-         ignore !any_key)
+         ignore !any_key))
 ;;
 
 let invalidate_snapshot_cache () =

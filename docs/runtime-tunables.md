@@ -22,36 +22,36 @@ the categorization roadmap. Newly-added typed getters in
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
-| `MASC_ADMIN_TOKEN` | string_literal | n/a | n/a | 453 | SSOT for auth env-var names (issue 8352). |
-| `MASC_AUTO_RESPOND` | string_literal | n/a | n/a | 521 | Raw MASC_AUTO_RESPOND value for mode parsing. |
+| `MASC_ADMIN_TOKEN` | string_literal | n/a | n/a | 450 | SSOT for auth env-var names (issue 8352). |
+| `MASC_AUTO_RESPOND` | string_literal | n/a | n/a | 518 | Raw MASC_AUTO_RESPOND value for mode parsing. |
 | `MASC_BASE_PATH` | string_literal | n/a | n/a | 282 | Env var names exposed as SSOT constants so out-of-process callers that read/write the variable by name (docker worker... |
 | `MASC_BASE_PATH_INPUT` | string_literal | n/a | n/a | 283 | Env var names exposed as SSOT constants so out-of-process callers that read/write the variable by name (docker worker... |
-| `MASC_BUILD_GIT_COMMIT` | string_literal | n/a | n/a | 515 | Git commit hash override for build identity. |
+| `MASC_BUILD_GIT_COMMIT` | string_literal | n/a | n/a | 512 | Git commit hash override for build identity. |
 | `MASC_CLUSTER_NAME` | string_literal | n/a | n/a | 228 |  |
-| `MASC_CONFIG_DIR` | string_literal | n/a | n/a | 425 | SSOT for MASC_CONFIG_DIR / MASC_PERSONAS_DIR env-var names (issue 8352). Shared by snapshot catalog and docker worker... |
-| `MASC_DATA_DIR` | string_literal | n/a | n/a | 438 | SSOT for the MASC_DATA_DIR env-var name (issue 8352). Overrides [<base_path>/data] as the root for CDAL verdicts and ... |
-| `MASC_GIT_FETCH_TIMEOUT_SEC` | string_literal | n/a | n/a | 478 | [git fetch origin] before worktree creation is network-bound and can stall behind a slow Docker bridge or a large rem... |
-| `MASC_GOVERNANCE_LEVEL` | string_literal | n/a | n/a | 491 | SSOT for logging / observability env-var names (issue 8352). |
+| `MASC_CONFIG_DIR` | string_literal | n/a | n/a | 422 | SSOT for MASC_CONFIG_DIR / MASC_PERSONAS_DIR env-var names (issue 8352). Shared by snapshot catalog and docker worker... |
+| `MASC_DATA_DIR` | string_literal | n/a | n/a | 435 | SSOT for the MASC_DATA_DIR env-var name (issue 8352). Overrides [<base_path>/data] as the root for CDAL verdicts and ... |
+| `MASC_GIT_FETCH_TIMEOUT_SEC` | string_literal | n/a | n/a | 475 | [git fetch origin] before worktree creation is network-bound and can stall behind a slow Docker bridge or a large rem... |
+| `MASC_GOVERNANCE_LEVEL` | string_literal | n/a | n/a | 488 | SSOT for logging / observability env-var names (issue 8352). |
 | `MASC_HOST` | string_literal | n/a | n/a | 199 | SSOT for MASC_HOST / MASC_HTTP_PORT env-var names (issue 8352). Defined here so in-process readers and out-of-process... |
 | `MASC_HTTP_BASE_URL` | string_literal | n/a | n/a | 241 | SSOT for the MASC_HTTP_BASE_URL env-var name (issue 8352). Defined here (above [masc_http_base_url]) so the constant ... |
 | `MASC_HTTP_PORT` | string_literal | n/a | n/a | 200 | SSOT for MASC_HOST / MASC_HTTP_PORT env-var names (issue 8352). Defined here so in-process readers and out-of-process... |
-| `MASC_KEEPER_DEFAULT_SANDBOX_PROFILE` | typed:string | unclassified | unclassified | 548 | Default sandbox profile for keepers. Default: "local". Set to "docker" to default all keepers to containerized execut... |
-| `MASC_KEEPER_DESIRES` | typed:string | unclassified | unclassified | 543 | Default keeper desires (drive statement). Default: "". |
-| `MASC_KEEPER_NEEDS` | typed:string | unclassified | unclassified | 539 | Default keeper needs (operational requirements). Default: "". |
-| `MASC_KEEPER_SOCIAL_MODEL` | typed:string | unclassified | unclassified | 531 | Default social model for keepers. Default: "bdi_speech_v1". |
-| `MASC_KEEPER_WILL` | typed:string | unclassified | unclassified | 535 | Default keeper will (long-term intent). Default: "". |
-| `MASC_LOG_LEVEL` | string_literal | n/a | n/a | 487 | SSOT for logging / observability env-var names (issue 8352). |
-| `MASC_LOG_ROUTINE_LEVEL` | string_literal | n/a | n/a | 488 | SSOT for logging / observability env-var names (issue 8352). |
+| `MASC_KEEPER_DEFAULT_SANDBOX_PROFILE` | typed:string | unclassified | unclassified | 545 | Default sandbox profile for keepers. Default: "local". Set to "docker" to default all keepers to containerized execut... |
+| `MASC_KEEPER_DESIRES` | typed:string | unclassified | unclassified | 540 | Default keeper desires (drive statement). Default: "". |
+| `MASC_KEEPER_NEEDS` | typed:string | unclassified | unclassified | 536 | Default keeper needs (operational requirements). Default: "". |
+| `MASC_KEEPER_SOCIAL_MODEL` | typed:string | unclassified | unclassified | 528 | Default social model for keepers. Default: "bdi_speech_v1". |
+| `MASC_KEEPER_WILL` | typed:string | unclassified | unclassified | 532 | Default keeper will (long-term intent). Default: "". |
+| `MASC_LOG_LEVEL` | string_literal | n/a | n/a | 484 | SSOT for logging / observability env-var names (issue 8352). |
+| `MASC_LOG_ROUTINE_LEVEL` | string_literal | n/a | n/a | 485 | SSOT for logging / observability env-var names (issue 8352). |
 | `MASC_MCP_URL` | string_literal | n/a | n/a | 242 | SSOT for the MASC_HTTP_BASE_URL env-var name (issue 8352). Defined here (above [masc_http_base_url]) so the constant ... |
-| `MASC_ORCHESTRATOR_ENABLED` | string_literal | n/a | n/a | 410 | SSOT for the MASC_ORCHESTRATOR_ENABLED env-var name (issue 8352). Referenced by feature_flag_registry catalog, env_co... |
-| `MASC_PARSE_WARN` | string_literal | n/a | n/a | 490 | SSOT for logging / observability env-var names (issue 8352). |
-| `MASC_PERSONAS_DIR` | string_literal | n/a | n/a | 426 | SSOT for MASC_CONFIG_DIR / MASC_PERSONAS_DIR env-var names (issue 8352). Shared by snapshot catalog and docker worker... |
-| `MASC_PUBSUB_MAX_MESSAGES` | typed:int | unclassified | unclassified | 525 | PubSub max messages per read. Default: 1000. |
-| `MASC_RELAY_CALIBRATION_ENABLED` | typed:bool | unclassified | unclassified | 448 | Whether relay token calibration is enabled. Default: true. |
-| `MASC_STORAGE_TYPE` | string_literal | n/a | n/a | 405 | SSOT for the MASC_STORAGE_TYPE env-var name (issue 8352). |
-| `MASC_TELEMETRY_ENABLED` | string_literal | n/a | n/a | 489 | SSOT for logging / observability env-var names (issue 8352). |
+| `MASC_ORCHESTRATOR_ENABLED` | string_literal | n/a | n/a | 407 | SSOT for the MASC_ORCHESTRATOR_ENABLED env-var name (issue 8352). Referenced by feature_flag_registry catalog, env_co... |
+| `MASC_PARSE_WARN` | string_literal | n/a | n/a | 487 | SSOT for logging / observability env-var names (issue 8352). |
+| `MASC_PERSONAS_DIR` | string_literal | n/a | n/a | 423 | SSOT for MASC_CONFIG_DIR / MASC_PERSONAS_DIR env-var names (issue 8352). Shared by snapshot catalog and docker worker... |
+| `MASC_PUBSUB_MAX_MESSAGES` | typed:int | unclassified | unclassified | 522 | PubSub max messages per read. Default: 1000. |
+| `MASC_RELAY_CALIBRATION_ENABLED` | typed:bool | unclassified | unclassified | 445 | Whether relay token calibration is enabled. Default: true. |
+| `MASC_STORAGE_TYPE` | string_literal | n/a | n/a | 402 | SSOT for the MASC_STORAGE_TYPE env-var name (issue 8352). |
+| `MASC_TELEMETRY_ENABLED` | string_literal | n/a | n/a | 486 | SSOT for logging / observability env-var names (issue 8352). |
 | `MASC_TEST_ALLOW_HOME_BASE_PATH` | string_literal | n/a | n/a | 341 | #9903: production base-path safeguard for test executables. Without this, a test whose [MASC_BASE_PATH] override fail... |
-| `MASC_TOOL_AUTH_STRICT` | string_literal | n/a | n/a | 454 | SSOT for auth env-var names (issue 8352). |
+| `MASC_TOOL_AUTH_STRICT` | string_literal | n/a | n/a | 451 | SSOT for auth env-var names (issue 8352). |
 
 ## Env_config_exec_timeout (1 knobs; typed classification 0/0)
 

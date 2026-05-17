@@ -225,6 +225,80 @@ let split_shell_tokens cmd =
   |> List.filter (fun token -> token <> "")
 ;;
 
+let strip_wrapping_quotes token =
+  let len = String.length token in
+  if len >= 2
+  then (
+    let first = token.[0]
+    and last = token.[len - 1] in
+    if (first = '"' && last = '"') || (first = '\'' && last = '\'')
+    then String.sub token 1 (len - 2)
+    else token)
+  else token
+;;
+
+let basename_token token = Filename.basename (strip_wrapping_quotes token)
+
+let is_env_assignment token =
+  let token = strip_wrapping_quotes token in
+  match String.index_opt token '=' with
+  | Some idx ->
+    idx > 0
+    && not (String.contains (String.sub token 0 idx) '/')
+    && not (String.starts_with ~prefix:"-" token)
+  | None -> false
+;;
+
+let rec command_after_env_prefix = function
+  | [] -> None
+  | token :: rest ->
+    let token = strip_wrapping_quotes token in
+    if is_env_assignment token || token = "-" || token = "-i"
+    then command_after_env_prefix rest
+    else if token = "-u" || token = "--unset"
+    then (
+      match rest with
+      | _ :: rest -> command_after_env_prefix rest
+      | [] -> None)
+    else if String.starts_with ~prefix:"-u" token
+    then command_after_env_prefix rest
+    else Some (basename_token token)
+;;
+
+let opam_exec_command_name rest =
+  match rest with
+  | sub :: rest when String.equal (basename_token sub) "exec" ->
+    let rec find_command = function
+      | [] -> None
+      | "--" :: token :: _ -> Some (basename_token token)
+      | "--" :: [] -> None
+      | token :: rest ->
+        let token = strip_wrapping_quotes token in
+        if String.starts_with ~prefix:"-" token || is_env_assignment token
+        then find_command rest
+        else Some (basename_token token)
+    in
+    find_command rest
+  | [] -> Some "opam"
+  | _non_exec_subcommand :: _rest -> Some "opam"
+;;
+
+let segment_command_name segment =
+  match split_shell_tokens segment with
+  | [] -> None
+  | token :: rest -> (
+    match basename_token token with
+    | "env" -> command_after_env_prefix rest
+    | "opam" -> opam_exec_command_name rest
+    | name -> Some name)
+;;
+
+let invokes_direct_dune segment =
+  match segment_command_name segment with
+  | Some "dune" -> true
+  | _ -> false
+;;
+
 let is_digits_only s start stop =
   let rec loop i =
     if i >= stop
@@ -284,7 +358,7 @@ let extract_command_name cmd =
 
 (** Error hint for a blocked command.
 
-    A terse "'foo' is not allowed, allowed: dune, git..." drives the LLM
+    A terse "'foo' is not allowed, allowed: git, rg..." drives the LLM
     to retry variants of foo, including OCaml/Python syntax fragments
     ('let', 'sort', 'Keeper_agent_run.build_ctx_composition', etc.) —
     live log 2026-04-16 shows 12+ retries per ~3MB.
@@ -298,7 +372,7 @@ let extract_command_name cmd =
     The helper is a pure function of the tried command name and the
     optional caller-specific allowlist. *)
 let default_common_allowed_commands_hint =
-  "dune, git, rg, ls, cat, head, tail, grep, find, make, node, npm, \
+  "scripts/dune-local.sh, git, rg, ls, cat, head, tail, grep, find, make, node, npm, \
    python3, pytest, cargo, go"
 ;;
 
@@ -392,6 +466,7 @@ type block_reason =
   | Process_substitution
   | Unsafe_redirect
   | Pipes_not_allowed
+  | Direct_dune_invocation
   | Command_not_allowed of string
 
 let block_reason_to_string = function
@@ -399,23 +474,29 @@ let block_reason_to_string = function
   | Chain_or_redirect ->
     "Blocked: chaining (&&/||/;) and redirects (|/>) are not allowed. Run ONE command \
      per call. To change directory, use the `cwd` argument instead of `cd` — Good: \
-     cwd='repos/masc-mcp', cmd='dune build'. Bad:  cmd='cd repos/masc-mcp && dune \
+     cwd='repos/masc-mcp', cmd='scripts/dune-local.sh build'. Bad:  cmd='cd repos/masc-mcp && dune \
      build'. For pipelines like `rg foo | wc -l`, run the primary command and process \
      output at the LLM layer. To write files, use keeper_fs_edit."
   | Injection ->
     "Shell injection syntax (;, &&, standalone &, `, $) not allowed. Run ONE command per \
      call. To change directory, use the `cwd` argument — Good: cwd='repos/masc-mcp', \
-     cmd='dune build'. Bad:  cmd='cd repos/masc-mcp && dune build' or cmd='cmd1 ; cmd2'. \
+     cmd='scripts/dune-local.sh build'. Bad:  cmd='cd repos/masc-mcp && dune build' or cmd='cmd1 ; cmd2'. \
      Relative paths resolve from `cwd` (defaults to playground root). For file writes, \
      use keeper_fs_edit."
   | Process_substitution -> "Process substitution (<(...) or >(...)) is not allowed."
   | Unsafe_redirect ->
     "File redirects are not allowed. Only fd redirects like 2>&1 are permitted."
   | Pipes_not_allowed -> "Pipes are not allowed. Run one command per call."
+  | Direct_dune_invocation ->
+    "Direct `dune` is blocked in local agent shells because it bypasses \
+     scripts/dune-local.sh's machine-wide build lock and can trigger \
+     host-wide ENFILE/EMFILE pressure. Use `scripts/dune-local.sh build ...` \
+     from the repo root instead."
   | Command_not_allowed name -> command_blocked_hint name
 ;;
 
 let block_reason_to_string_with_allowlist ~allowed_commands = function
+  | Direct_dune_invocation -> block_reason_to_string Direct_dune_invocation
   | Command_not_allowed name -> command_blocked_hint ~allowed_commands name
   | reason -> block_reason_to_string reason
 ;;
@@ -426,6 +507,8 @@ let validate_command_with_allowlist ~allowed_commands cmd =
   then Error Empty_command
   else if contains_forbidden_shell_chars trimmed
   then Error Chain_or_redirect
+  else if invokes_direct_dune trimmed
+  then Error Direct_dune_invocation
   else (
     match extract_command_name trimmed with
     | None -> Error Empty_command
@@ -457,6 +540,8 @@ let validate_command_coding_with_allowlist
     | Ok segments ->
       if (not allow_pipes) && List.length segments > 1
       then Error Pipes_not_allowed
+      else if List.exists invokes_direct_dune segments
+      then Error Direct_dune_invocation
       else (
         let rec validate_segments = function
           | [] -> Ok ()
@@ -477,18 +562,6 @@ let validate_command_coding cmd =
     ~allow_pipes:true
     ~allowed_commands:dev_allowed_commands
     cmd
-;;
-
-let strip_wrapping_quotes token =
-  let len = String.length token in
-  if len >= 2
-  then (
-    let first = token.[0]
-    and last = token.[len - 1] in
-    if (first = '"' && last = '"') || (first = '\'' && last = '\'')
-    then String.sub token 1 (len - 2)
-    else token)
-  else token
 ;;
 
 let looks_like_url token =
@@ -1101,7 +1174,7 @@ let validate_command_paths ?keeper_id ?base_path ?workdir cmd =
 (** Check if a command performs write/mutating operations.
     Returns [true] for commands like [git push], [git commit],
     [make deploy], [npm publish], [mv], [cp], etc.
-    Read-only commands (git status, dune build, rg) return [false]. *)
+    Read-only commands (git status, rg) return [false]. *)
 let is_write_operation cmd =
   let parts = String.split_on_char ' ' (String.trim cmd) in
   match parts with
@@ -1570,7 +1643,7 @@ let make_file_write ?workdir ?on_exec () =
 ;;
 
 (* --- Attribution envelope conversion (Layer 1) ---
-   Shell command validation is a Det policy gate. The 7 block_reason
+   Shell command validation is a Det policy gate. The 8 block_reason
    variants map uniformly to Policy_failed (no transition involved —
    this is a pre-execution allow/deny check).
 
@@ -1585,6 +1658,7 @@ let block_reason_tag = function
   | Process_substitution -> "process_substitution"
   | Unsafe_redirect -> "unsafe_redirect"
   | Pipes_not_allowed -> "pipes_not_allowed"
+  | Direct_dune_invocation -> "direct_dune_invocation"
   | Command_not_allowed _ -> "command_not_allowed"
 ;;
 
@@ -1597,6 +1671,7 @@ let attribution_of_validation ~cmd (result : (unit, block_reason) result) : Attr
     let command_name =
       match br with
       | Command_not_allowed name -> Some name
+      | Direct_dune_invocation -> Some "dune"
       | _ -> None
     in
     let evidence : Yojson.Safe.t =

@@ -1,7 +1,7 @@
 (** Tests that keeper_bash blocks dangerous commands via allowlist.
 
     Validates:
-    1. Allowed commands (dune, git, rg, etc.) pass validation
+    1. Allowed commands (scripts/dune-local.sh, git, rg, etc.) pass validation
     2. Dangerous commands (rm, curl, kill, etc.) are blocked
     3. Shell metacharacters (;, |, &, etc.) are rejected
     4. Empty commands are rejected *)
@@ -23,7 +23,7 @@ let error_msg = function Error m -> Masc_mcp.Worker_dev_tools.block_reason_to_st
 
 let test_allowed_commands () =
   let allowed = [
-    "dune build";
+    "scripts/dune-local.sh build";
     "git status";
     "git log --oneline -5";
     "rg 'pattern' lib/";
@@ -43,6 +43,8 @@ let test_allowed_commands () =
 
 let test_blocked_commands () =
   let blocked = [
+    "dune build";
+    "opam exec -- dune build";
     "rm -rf /";
     "rm file.txt";
     "curl https://evil.com";
@@ -122,8 +124,8 @@ let test_read_ops_pass () =
     "git status";
     "git log --oneline -5";
     "git diff HEAD";
-    "dune build";
-    "dune exec test.exe";
+    "scripts/dune-local.sh build";
+    "scripts/dune-local.sh exec test.exe";
     "make test";
     "npm run build";
     "npm run dev";

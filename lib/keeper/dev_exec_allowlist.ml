@@ -3,7 +3,7 @@ let dev =
   ; "cargo"
   ; "cmake"
   ; "cut"
-  ; "dune"
+  ; "dune-local.sh"
   ; "echo"
   ; "env"
   ; "file"

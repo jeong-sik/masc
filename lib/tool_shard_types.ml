@@ -865,7 +865,7 @@ let coding_keeper_bridge_tools : Masc_domain.tool_schema list =
         "Execute ONE shell command through the keeper_bash safety gates. No \
          chaining/control syntax (&&, ||, ;), command substitution, background \
          operators, or file redirects. Pipelines and fd-only redirects are accepted only \
-         when the active preset validator allows every segment. Good: cmd='dune build', \
+         when the active preset validator allows every segment. Good: cmd='scripts/dune-local.sh build', \
          cmd='ls -la lib/'. Bad: cmd='cd x && dune build', cmd='echo hi > out.txt'. Runs \
          in the keeper sandbox by default; use cwd to target an explicit allowed \
          directory. Paths resolve automatically — never include host storage prefixes \
@@ -887,7 +887,7 @@ let coding_keeper_bridge_tools : Masc_domain.tool_schema list =
                       ; ( "description"
                         , `String
                             "Single command only. No chaining/control syntax or file \
-                             redirects. Example: 'dune build', 'rg pattern lib/'" )
+                             redirects. Example: 'scripts/dune-local.sh build', 'rg pattern lib/'" )
                       ] )
                 ; ( "cwd"
                   , `Assoc

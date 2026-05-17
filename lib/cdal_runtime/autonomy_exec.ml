@@ -185,17 +185,44 @@ let close_quietly fd =
 ;;
 
 let spawn_child ~sw config effective =
-  let stdin_fd = Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0 in
-  let stdout_r, stdout_w = Unix.pipe ~cloexec:true () in
-  let stderr_r, stderr_w = Unix.pipe ~cloexec:true () in
-  (* Switch.on_release guarantees pipe close on cancellation or unexpected
-     raise. The previous Fun.protect + reader_started flag scheme had a
-     race: setting the flag preceded Eio.Fiber.fork, so a cancellation
-     between them orphaned the read end. close_quietly is idempotent with
-     drain_fd's own Fun.protect close — safe even when both fire. *)
-  Eio.Switch.on_release sw (fun () -> close_quietly stdout_r);
-  Eio.Switch.on_release sw (fun () -> close_quietly stderr_r);
+  let stdin_fd_ref = ref None in
+  let stdout_r_ref = ref None in
+  let stdout_w_ref = ref None in
+  let stderr_r_ref = ref None in
+  let stderr_w_ref = ref None in
+  let remember slot fd =
+    slot := Some fd;
+    fd
+  in
+  let close_registered slot =
+    match !slot with
+    | None -> ()
+    | Some fd ->
+      close_quietly fd;
+      slot := None
+  in
+  let cleanup_setup_fds () =
+    List.iter
+      close_registered
+      [ stdin_fd_ref; stdout_r_ref; stdout_w_ref; stderr_r_ref; stderr_w_ref ]
+  in
   try
+    let stdin_fd =
+      remember stdin_fd_ref (Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0)
+    in
+    let stdout_r, stdout_w = Unix.pipe ~cloexec:true () in
+    let stdout_r = remember stdout_r_ref stdout_r in
+    let stdout_w = remember stdout_w_ref stdout_w in
+    let stderr_r, stderr_w = Unix.pipe ~cloexec:true () in
+    let stderr_r = remember stderr_r_ref stderr_r in
+    let stderr_w = remember stderr_w_ref stderr_w in
+    (* Switch.on_release guarantees pipe close on cancellation or unexpected
+       raise. The previous Fun.protect + reader_started flag scheme had a
+       race: setting the flag preceded Eio.Fiber.fork, so a cancellation
+       between them orphaned the read end. close_quietly is idempotent with
+       drain_fd's own Fun.protect close — safe even when both fire. *)
+    Eio.Switch.on_release sw (fun () -> close_quietly stdout_r);
+    Eio.Switch.on_release sw (fun () -> close_quietly stderr_r);
     Unix.set_nonblock stdout_r;
     Unix.set_nonblock stderr_r;
     let env = build_env ~config in
@@ -209,20 +236,23 @@ let spawn_child ~sw config effective =
         stdout_w
         stderr_w
     in
-    close_quietly stdin_fd;
-    close_quietly stdout_w;
-    close_quietly stderr_w;
+    close_registered stdin_fd_ref;
+    close_registered stdout_w_ref;
+    close_registered stderr_w_ref;
+    stdout_r_ref := None;
+    stderr_r_ref := None;
     Ok (pid, stdout_r, stderr_r)
   with
   | Unix.Unix_error (err, fn, arg) ->
-    close_quietly stdin_fd;
-    close_quietly stdout_w;
-    close_quietly stderr_w;
+    cleanup_setup_fds ();
     Error
       (file_op_error
          ~op:"spawn"
          ~path:(argv_to_string effective)
          ~detail:(Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message err)))
+  | exn ->
+    cleanup_setup_fds ();
+    raise exn
 ;;
 
 let spawn_result_promise ~sw fn =

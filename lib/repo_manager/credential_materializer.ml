@@ -29,6 +29,17 @@ let gh_hosts_yml = "hosts.yml"
 let close_fd_noerr fd =
   try Unix.close fd with Unix.Unix_error _ -> ()
 
+let remember_fd slot fd =
+  slot := Some fd;
+  fd
+
+let close_registered_fd slot =
+  match !slot with
+  | None -> ()
+  | Some fd ->
+      close_fd_noerr fd;
+      slot := None
+
 let rec waitpid_no_intr flags pid =
   try Unix.waitpid flags pid
   with Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_no_intr flags pid
@@ -70,24 +81,39 @@ let gh_bundle_env ~gh_config_dir =
     environment only, so ambient GH_TOKEN/GITHUB_TOKEN values cannot
     make a stale bundle look materialized. *)
 let gh_command_ok ~gh_config_dir argv =
-  let devnull_in = Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0 in
-  let devnull_out = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0o644 in
-  let pid =
-    try
-      Some
-        (Unix.create_process_env "gh" (Array.of_list ("gh" :: argv))
-           (gh_bundle_env ~gh_config_dir)
-           devnull_in devnull_out devnull_out)
-    with Unix.Unix_error _ -> None
+  let devnull_in_ref = ref None in
+  let devnull_out_ref = ref None in
+  let cleanup () =
+    close_registered_fd devnull_in_ref;
+    close_registered_fd devnull_out_ref
   in
-  close_fd_noerr devnull_in;
-  close_fd_noerr devnull_out;
-  match pid with
-  | None -> false
-  | Some pid -> (
-      match snd (waitpid_no_intr [] pid) with
-      | Unix.WEXITED 0 -> true
-      | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false)
+  try
+    let devnull_in =
+      remember_fd devnull_in_ref
+        (Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0)
+    in
+    let devnull_out =
+      remember_fd devnull_out_ref
+        (Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0o644)
+    in
+    let pid =
+      try
+        Some
+          (Unix.create_process_env "gh" (Array.of_list ("gh" :: argv))
+             (gh_bundle_env ~gh_config_dir)
+             devnull_in devnull_out devnull_out)
+      with Unix.Unix_error _ -> None
+    in
+    cleanup ();
+    match pid with
+    | None -> false
+    | Some pid -> (
+        match snd (waitpid_no_intr [] pid) with
+        | Unix.WEXITED 0 -> true
+        | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false)
+  with Unix.Unix_error _ ->
+    cleanup ();
+    false
 
 let hosts_yml_has_oauth_token ~gh_config_dir =
   let path = Filename.concat gh_config_dir gh_hosts_yml in
@@ -420,15 +446,27 @@ let provision_via_with_token ?credential_id ?identity_label
             (Printf.sprintf
                "could not create gh_config_dir %S" gh_config_dir)
         else
-          let read_fd, write_fd = Unix.pipe ~cloexec:false () in
-          (* The pipe's read end will be passed to the child; the write
-             end stays in the parent.  cloexec on read_fd would close it
-             before exec; we set cloexec=false then explicitly close
-             read_fd in the parent after fork. *)
-          let devnull_out =
-            Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0o644
-	          in
-	          let env = gh_bundle_env ~gh_config_dir in
+          let read_fd_ref = ref None in
+          let write_fd_ref = ref None in
+          let devnull_out_ref = ref None in
+          let cleanup_setup_fds () =
+            close_registered_fd read_fd_ref;
+            close_registered_fd write_fd_ref;
+            close_registered_fd devnull_out_ref
+          in
+          try
+            let read_fd, write_fd = Unix.pipe ~cloexec:false () in
+            let read_fd = remember_fd read_fd_ref read_fd in
+            let write_fd = remember_fd write_fd_ref write_fd in
+            (* The pipe's read end will be passed to the child; the write
+               end stays in the parent.  cloexec on read_fd would close it
+               before exec; we set cloexec=false then explicitly close
+               read_fd in the parent after fork. *)
+            let devnull_out =
+              remember_fd devnull_out_ref
+                (Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0o644)
+            in
+            let env = gh_bundle_env ~gh_config_dir in
           let argv =
             [|
               "gh"; "auth"; "login";
@@ -446,11 +484,11 @@ let provision_via_with_token ?credential_id ?identity_label
             with Unix.Unix_error _ -> None
           in
           (* Parent: close child's stdin read end *)
-          (try Unix.close read_fd with Unix.Unix_error _ -> ());
-          (try Unix.close devnull_out with Unix.Unix_error _ -> ());
+          close_registered_fd read_fd_ref;
+          close_registered_fd devnull_out_ref;
           match pid with
           | None ->
-              (try Unix.close write_fd with Unix.Unix_error _ -> ());
+              close_registered_fd write_fd_ref;
               Error
                 "failed to spawn `gh auth login --with-token` subprocess; \
                  is gh installed and on PATH?"
@@ -461,10 +499,12 @@ let provision_via_with_token ?credential_id ?identity_label
               (try
                  output_string oc token;
                  output_char oc '\n';
-                 close_out oc
+                 close_out oc;
+                 write_fd_ref := None
                with
                | Sys_error _ ->
-                   close_out_noerr oc);
+                   close_out_noerr oc;
+                   write_fd_ref := None);
               let status = snd (waitpid_no_intr [] pid) in
               (match status with
                | Unix.WEXITED 0 ->
@@ -499,4 +539,13 @@ let provision_via_with_token ?credential_id ?identity_label
                    Error
                      (Printf.sprintf
                         "gh auth login --with-token stopped by signal %d"
-                        n)))
+                        n))
+          with Unix.Unix_error (err, fn, arg) ->
+            cleanup_setup_fds ();
+            Error
+              (Printf.sprintf
+                 "failed to spawn `gh auth login --with-token`: %s(%s): %s"
+                 fn arg (Unix.error_message err))
+          | exn ->
+              cleanup_setup_fds ();
+              raise exn)

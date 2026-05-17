@@ -551,6 +551,7 @@ let bash_shape_block_result ~cmd ~cmd_for_log ~env_snapshot block =
                 (match block with
                  | Gh_pr_checks -> Some "keeper_pr_status"
                  | Pipe_or_redirect -> Some "keeper_shell"
+                 | Repo_wide_scan -> Some "keeper_shell"
                  | Chaining | Substitution -> None);
             })
        ~extra:

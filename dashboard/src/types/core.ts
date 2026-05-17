@@ -422,6 +422,22 @@ export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
 
 export type KeeperRuntimeBlockerClass = (typeof KEEPER_RUNTIME_BLOCKER_CLASSES)[number]
 
+export type StopCauseSource =
+  | 'runtime_blocker_class'
+  | 'terminal_reason_code'
+  | 'stop_reason'
+  | 'error_kind'
+  | 'attention_reason'
+
+export interface StopCause {
+  code: string
+  source: StopCauseSource
+  label: string
+  summary?: string | null
+  severity?: string | null
+  next_action?: string | null
+}
+
 export interface KeeperTrustLatestEvent {
   kind: string
   ts: string
@@ -884,6 +900,7 @@ export interface Keeper {
   runtime_blocker_class?: KeeperRuntimeBlockerClass | null
   runtime_blocker_summary?: string | null
   runtime_blocker_continue_gate?: boolean | null
+  stop_cause?: StopCause | null
   needs_attention?: boolean | null
   attention_reason?: string | null
   next_human_action?: string | null

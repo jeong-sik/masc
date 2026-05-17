@@ -94,12 +94,37 @@ describe('normalizeExecutionQueueItem', () => {
       id: 'keeper-sangsu',
       kind: 'keeper',
       terminal_reason_code: 'required_tool_use_unsatisfied',
+      stop_cause: {
+        code: 'required_tool_use_unsatisfied',
+        source: 'terminal_reason_code',
+      },
       runtime_trust: {
         needs_attention: true,
         latest_terminal_reason: {
           code: 'required_tool_use_unsatisfied',
           severity: 'bad',
         },
+      },
+    })
+  })
+
+  it('normalizes runtime blockers into execution row stop_cause before attention fallback', () => {
+    expect(normalizeExecutionQueueItem({
+      id: 'keeper-sangsu',
+      kind: 'keeper',
+      severity: 'bad',
+      status: 'blocked',
+      summary: 'keeper turn is blocked',
+      target_type: 'keeper',
+      target_id: 'sangsu',
+      runtime_blocker_class: 'no_tool_capable_provider',
+      runtime_blocker_summary: 'no provider can satisfy required tools',
+      attention_reason: 'tool_contract_failed',
+    })).toMatchObject({
+      stop_cause: {
+        code: 'no_tool_capable_provider',
+        source: 'runtime_blocker_class',
+        summary: 'no provider can satisfy required tools',
       },
     })
   })

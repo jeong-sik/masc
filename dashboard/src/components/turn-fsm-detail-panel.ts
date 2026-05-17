@@ -9,6 +9,7 @@ import {
   buildTurnFsmSpec,
   normalizeTurnFsmState,
 } from './keeper-fsm-specs'
+import { normalizeStopCause } from '../lib/stop-cause'
 
 type TurnChipTone = 'accent' | 'neutral' | 'warn' | 'err' | 'ok'
 
@@ -50,11 +51,13 @@ export function TurnFsmDetailPanel({ snapshot }: { snapshot: KeeperCompositeSnap
   )
   const projectedState = normalizeTurnFsmState(snapshot.turn_phase)
   const execution = snapshot.execution
-  const terminalReason =
-    execution?.terminal_reason_code
-    ?? execution?.stop_reason
-    ?? execution?.error?.kind
-    ?? null
+  const stopCause = execution
+    ? normalizeStopCause({
+        terminal_reason_code: execution.terminal_reason_code,
+        stop_reason: execution.stop_reason,
+        error_kind: execution.error?.kind,
+      })
+    : null
 
   return html`
     <section
@@ -81,8 +84,8 @@ export function TurnFsmDetailPanel({ snapshot }: { snapshot: KeeperCompositeSnap
       ${execution ? html`
         <div class="flex flex-wrap items-center gap-1.5 text-3xs" aria-label="latest turn receipt summary">
           <${StatusChip} tone=${turnFsmChipTone(terminalTone(execution.outcome))} uppercase=${false}>receipt ${execution.outcome ?? 'unknown'}</${StatusChip}>
-          ${terminalReason ? html`
-            <${StatusChip} tone=${turnFsmChipTone(terminalTone(execution.outcome))} uppercase=${false} class="font-mono">reason ${terminalReason}</${StatusChip}>
+          ${stopCause ? html`
+            <${StatusChip} tone=${turnFsmChipTone(terminalTone(execution.outcome))} uppercase=${false} class="font-mono" title=${stopCause.source}>reason ${stopCause.code}</${StatusChip}>
           ` : null}
           ${execution.tool_contract_result ? html`
             <${StatusChip} tone=${turnFsmChipTone(execution.tool_contract_result === 'violated' ? 'err' : 'neutral')} uppercase=${false} class="font-mono">tool ${execution.tool_contract_result}</${StatusChip}>

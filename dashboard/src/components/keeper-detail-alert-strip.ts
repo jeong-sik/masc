@@ -38,6 +38,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
     || keeper.trust?.disposition_reason?.trim()
     || keeper.trust?.execution_summary?.mutation_guard_summary?.trim()
     || null
+  const stopCause = keeper.stop_cause ?? null
   const latestTerminalReason = keeper.trust?.latest_terminal_reason ?? null
   const latestTerminalCode = latestTerminalReason?.code?.trim() || null
   const latestTerminalSummary = latestTerminalReason?.summary?.trim() || null
@@ -115,6 +116,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
     || unexpectedTools.length > 0
     || missingRequiredTools.length > 0
     || Boolean(trustSummary)
+    || Boolean(stopCause)
     || Boolean(latestTerminalCode)
     || Boolean(latestNextAction)
     || shouldShowOperatorDispositionReason
@@ -257,7 +259,10 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         ${nextHumanAction
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">다음 액션</strong> · ${nextHumanAction}</span>`
           : null}
-        ${latestTerminalCode
+        ${stopCause
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">정지 원인</strong> · ${stopCause.code}${stopCause.summary ? html` · ${stopCause.summary}` : null}</span>`
+          : null}
+        ${latestTerminalCode && latestTerminalCode !== stopCause?.code
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">종료 코드</strong> · ${latestTerminalCode}${latestTerminalSummary ? html` · ${latestTerminalSummary}` : null}</span>`
           : null}
         ${latestNextAction

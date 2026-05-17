@@ -30,6 +30,7 @@ import {
   buildToolQualityMap,
   buildFleetRows,
   buildRuntimeWarnings,
+  EMPTY_TOOL_QUALITY,
   emptyState,
   type FleetRow,
 } from './fleet-telemetry-utils'
@@ -224,6 +225,30 @@ describe('buildFleetRows runtime labels', () => {
       cascade_label: 'oas-keeper_unified -> primary',
       provider_label: 'passed_to_next_model · 2 attempts · fallback',
       fallback_label: 'fallback · turn_timeout · 1 hops',
+    })
+  })
+
+  it('projects the keeper stop_cause into fleet rows', () => {
+    const [row] = buildFleetRows([
+      {
+        name: 'blocked-keeper',
+        status: 'active',
+        keepalive_running: true,
+        stop_cause: {
+          code: 'no_tool_capable_provider',
+          source: 'runtime_blocker_class',
+          label: 'no tool capable provider',
+          summary: 'no provider can satisfy required tools',
+          severity: 'warn',
+          next_action: 'inspect_provider_tool_contract',
+        },
+      },
+    ], EMPTY_TOOL_QUALITY)
+
+    expect(row?.stop_cause).toMatchObject({
+      code: 'no_tool_capable_provider',
+      source: 'runtime_blocker_class',
+      summary: 'no provider can satisfy required tools',
     })
   })
 })

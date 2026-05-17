@@ -83,6 +83,8 @@ function filterFleetRows(
     if (row.provider_label && row.provider_label.toLowerCase().includes(needle)) return true
     if (row.fallback_label && row.fallback_label.toLowerCase().includes(needle)) return true
     if (row.runtime_blocker_class && row.runtime_blocker_class.toLowerCase().includes(needle)) return true
+    if (row.stop_cause?.code.toLowerCase().includes(needle)) return true
+    if (row.stop_cause?.summary?.toLowerCase().includes(needle)) return true
     return false
   })
 }
@@ -445,15 +447,15 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                   ${row.decision_required
                     ? html`<span class="rounded-[var(--r-1)] bg-[var(--bad-10)] px-1.5 py-0.5 text-3xs text-[var(--bad-light)]">decision</span>`
                     : null}
-                  ${row.terminal_reason_code
+                  ${row.stop_cause
                     ? html`
                       <span
-                        class=${row.terminal_reason_severity === 'bad'
+                        class=${row.stop_cause.severity === 'bad'
                           ? 'rounded bg-[var(--bad-10)] px-1.5 py-0.5 text-3xs text-[var(--bad-light)]'
                           : 'rounded bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs text-[var(--color-status-warn)]'}
-                        title=${row.runtime_trust_next_action ?? row.runtime_trust_reason ?? row.terminal_reason_code}
+                        title=${row.stop_cause.next_action ?? row.stop_cause.summary ?? row.runtime_trust_next_action ?? row.runtime_trust_reason ?? row.stop_cause.code}
                       >
-                        ${row.terminal_reason_code}
+                        ${row.stop_cause.code}
                       </span>
                     `
                     : null}

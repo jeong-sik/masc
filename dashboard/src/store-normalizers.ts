@@ -1,5 +1,6 @@
 import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp } from './components/common/normalize'
 import { normalizeKeeperTrust } from './keeper-store-normalize'
+import { normalizeStopCause } from './lib/stop-cause'
 import type {
   Agent, Task, Message, ServerStatus,
   DashboardExecutionSummary, DashboardExecutionHandoff,
@@ -219,6 +220,10 @@ export function normalizeExecutionQueueItem(raw: unknown): DashboardExecutionQue
   if (!id || !summary || !targetType || !targetId || (kind !== 'session' && kind !== 'operation' && kind !== 'keeper')) {
     return null
   }
+  const runtimeTrust = normalizeKeeperTrust(raw.runtime_trust ?? raw.trust)
+  const terminalReason = runtimeTrust?.latest_terminal_reason ?? null
+  const terminalReasonCode =
+    asString(raw.terminal_reason_code) ?? terminalReason?.code ?? null
   return {
     id,
     kind,
@@ -232,8 +237,19 @@ export function normalizeExecutionQueueItem(raw: unknown): DashboardExecutionQue
     last_seen_at: asString(raw.last_seen_at) ?? null,
     attention_reason: asString(raw.attention_reason) ?? null,
     next_human_action: asString(raw.next_human_action) ?? null,
-    terminal_reason_code: asString(raw.terminal_reason_code) ?? null,
-    runtime_trust: normalizeKeeperTrust(raw.runtime_trust ?? raw.trust),
+    terminal_reason_code: terminalReasonCode,
+    stop_cause: normalizeStopCause({
+      stop_cause: raw.stop_cause,
+      runtime_blocker_class: asString(raw.runtime_blocker_class) ?? asString(raw.runtime_blocker) ?? null,
+      runtime_blocker_summary: asString(raw.runtime_blocker_summary) ?? null,
+      terminal_reason_code: terminalReasonCode,
+      terminal_reason_summary: terminalReason?.summary ?? null,
+      terminal_reason_severity: terminalReason?.severity ?? null,
+      terminal_reason_next_action: terminalReason?.next_action ?? null,
+      attention_reason: asString(raw.attention_reason) ?? null,
+      next_action: asString(raw.next_human_action) ?? runtimeTrust?.latest_next_action ?? null,
+    }),
+    runtime_trust: runtimeTrust,
     top_handoff: normalizeExecutionHandoff(raw.top_handoff),
     intervene_handoff: normalizeExecutionHandoff(raw.intervene_handoff),
     command_handoff: normalizeExecutionHandoff(raw.command_handoff),

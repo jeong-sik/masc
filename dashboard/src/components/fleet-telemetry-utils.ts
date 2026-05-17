@@ -1,8 +1,9 @@
 import type { DashboardExecutionTrustResponse, TelemetrySourceSummary, ToolQualityResponse } from '../api/dashboard'
 import type { DashboardNamespaceTruthResponse } from '../types'
 import { telemetrySourceLabel } from '../config/telemetry-sources'
-import type { Keeper } from '../types'
+import type { Keeper, StopCause } from '../types'
 import { formatElapsedCompact } from '../lib/format-time'
+import { normalizeStopCause } from '../lib/stop-cause'
 import {
   keeperActivityDisplay,
   type KeeperActivitySource,
@@ -40,6 +41,7 @@ export interface FleetRow {
   runtime_trust_attention?: boolean
   runtime_trust_reason?: string | null
   runtime_trust_next_action?: string | null
+  stop_cause?: StopCause | null
   terminal_reason_code?: string | null
   terminal_reason_severity?: string | null
   tool_audit_at: string | null
@@ -398,6 +400,16 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
           const recentTools = keeperRecentTools(keeper)
           const toolCalls = keeperToolCallCount(keeper, toolQualityForKeeper?.calls)
           const activity = keeperActivityDisplay(keeper, keeper.agent?.last_seen)
+          const stopCause = keeper.stop_cause ?? normalizeStopCause({
+            runtime_blocker_class: keeper.runtime_blocker_class ?? null,
+            runtime_blocker_summary: keeper.runtime_blocker_summary ?? keeper.last_blocker ?? null,
+            terminal_reason_code: keeper.trust?.latest_terminal_reason?.code ?? null,
+            terminal_reason_summary: keeper.trust?.latest_terminal_reason?.summary ?? null,
+            terminal_reason_severity: keeper.trust?.latest_terminal_reason?.severity ?? null,
+            terminal_reason_next_action: keeper.trust?.latest_terminal_reason?.next_action ?? null,
+            attention_reason: keeper.attention_reason ?? keeper.trust?.attention_reason ?? null,
+            next_action: keeper.next_human_action ?? keeper.trust?.latest_next_action ?? null,
+          })
           return {
             name: keeper.name,
             status: keeper.status ?? (keeper.keepalive_running ? 'active' : 'offline'),
@@ -436,6 +448,7 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
                 keeper.trust?.latest_next_action,
                 keeper.trust?.latest_terminal_reason?.next_action,
               ) ?? null,
+            stop_cause: stopCause,
             terminal_reason_code: keeper.trust?.latest_terminal_reason?.code ?? null,
             terminal_reason_severity: keeper.trust?.latest_terminal_reason?.severity ?? null,
             tool_audit_at: keeper.tool_audit_at ?? null,

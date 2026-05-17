@@ -1753,6 +1753,111 @@ let test_submit_for_verification_transitions_task () =
         | _ -> fail "expected keeper_task_submit_for_verification to succeed")))
 ;;
 
+(* Regression: keeper_task_done must map [result] onto the typed
+   [handoff_context.summary] domain field, not just dump it into [notes]
+   as an untyped blob. Previously a [result] sent by a keeper would be
+   forwarded as [notes] only, and strict-contract callers had to rely on
+   the [parse_handoff_context] sibling-synthesis fallback to recover a
+   summary — keeping the vocabulary translation implicit and causing
+   keeper-facing error messages to surface as "handoff_context.summary
+   is required" even though the keeper had supplied [result]. *)
+let test_done_maps_result_to_typed_handoff_summary () =
+  with_room (fun config ->
+    let meta = make_test_meta () in
+    let _ =
+      Coord.add_task
+        config
+        ~title:"Vocab translation task"
+        ~priority:1
+        ~description:"verify result -> handoff_context.summary"
+    in
+    let task_id = (only_task config).id in
+    ignore (call_tool config meta "keeper_task_claim" (`Assoc []));
+    let result =
+      call_tool
+        config
+        meta
+        "keeper_task_done"
+        (`Assoc
+            [ "task_id", `String task_id
+            ; "result", `String "refactored module, all tests green"
+            ])
+    in
+    let json = parse_json result in
+    match Yojson.Safe.Util.member "ok" json with
+    | `Bool true ->
+      let task = only_task config in
+      (match task.handoff_context with
+       | Some hc ->
+         check
+           string
+           "result mapped to typed handoff_context.summary"
+           "refactored module, all tests green"
+           hc.summary
+       | None ->
+         fail "expected handoff_context to be populated after keeper_task_done")
+    | _ -> fail "expected keeper_task_done to succeed for non-strict contract")
+;;
+
+(* Regression: keeper_task_submit_for_verification must map [notes] +
+   [pr_url] onto the typed handoff_context fields [summary] and
+   [evidence_refs], not concatenate them into a single [notes] string
+   blob. The previous shape ("notes\nPR: pr_url") lost the structural
+   separation and left downstream consumers without a typed
+   evidence_refs list. *)
+let test_submit_for_verification_maps_to_typed_handoff_evidence_refs () =
+  ensure_rng ();
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    with_env "MASC_CDAL_GATE_ENABLED" (Some "false") (fun () ->
+      with_room (fun config ->
+        let meta = make_test_meta () in
+        let contract = strict_contract ~verify_gate_evidence:[ "pr_url" ] () in
+        let _ =
+          Coord.add_task
+            ~contract
+            config
+            ~title:"Vocab translation submit task"
+            ~priority:1
+            ~description:"verify notes/pr_url -> typed handoff_context"
+        in
+        let task_id = (only_task config).id in
+        ignore (call_tool config meta "keeper_task_claim" (`Assoc []));
+        let pr_url = "https://github.com/jeong-sik/masc-mcp/pull/12345" in
+        let result =
+          call_tool
+            config
+            meta
+            "keeper_task_submit_for_verification"
+            (`Assoc
+                [ "task_id", `String task_id
+                ; "notes", `String "tests pass locally"
+                ; "pr_url", `String pr_url
+                ])
+        in
+        let json = parse_json result in
+        match Yojson.Safe.Util.member "ok" json with
+        | `Bool true ->
+          let task = only_task config in
+          (match task.handoff_context with
+           | Some hc ->
+             check
+               string
+               "notes mapped to typed handoff_context.summary"
+               "tests pass locally"
+               hc.summary;
+             check
+               (list string)
+               "pr_url mapped to typed handoff_context.evidence_refs"
+               [ pr_url ]
+               hc.evidence_refs
+           | None ->
+             fail
+               "expected handoff_context to be populated after \
+                keeper_task_submit_for_verification")
+        | _ ->
+          fail "expected keeper_task_submit_for_verification to succeed")))
+;;
+
 (* --- keeper_tool_search tests --- *)
 
 let test_tool_search_empty_query_returns_error () =
@@ -2005,6 +2110,10 @@ let () =
             "default contract redirects to verification FSM"
             `Quick
             test_done_redirects_default_contract_task_to_verification_fsm
+        ; test_case
+            "result maps to typed handoff_context.summary"
+            `Quick
+            test_done_maps_result_to_typed_handoff_summary
         ] )
     ; ( "submit_for_verification"
       , [ test_case "requires pr_url" `Quick test_submit_for_verification_requires_pr_url
@@ -2012,6 +2121,10 @@ let () =
             "transitions task"
             `Quick
             test_submit_for_verification_transitions_task
+        ; test_case
+            "notes/pr_url map to typed handoff_context fields"
+            `Quick
+            test_submit_for_verification_maps_to_typed_handoff_evidence_refs
         ] )
     ; ( "keeper_tool_search"
       , [ test_case

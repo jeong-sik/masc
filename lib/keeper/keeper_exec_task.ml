@@ -403,6 +403,28 @@ let handle_keeper_task_tool
     if task_id = ""
     then error_json "task_id is required. Use the task_id you got from keeper_task_claim."
     else (
+      (* Map keeper vocabulary (`result`) onto MASC domain typed
+         handoff_context.summary so that the action=done strict-contract
+         path can read the completion summary directly from a typed field
+         instead of relying on string-blob siblings. When [result] is
+         empty we omit handoff_context entirely; the downstream contract
+         check decides whether a summary is mandatory for this task. *)
+      let base_args =
+        [
+          "task_id", `String task_id;
+          "action", `String "done";
+          "notes", `String result_text;
+        ]
+      in
+      let args_for_transition =
+        if String.equal result_text "" then base_args
+        else
+          base_args
+          @ [
+              ( "handoff_context",
+                `Assoc [ "summary", `String result_text ] );
+            ]
+      in
       let transition_result =
         Tool_task.handle_transition
           ~tool_name:"keeper_task_done"
@@ -412,12 +434,7 @@ let handle_keeper_task_tool
             agent_name = keeper_agent_sender ~meta;
             sw = Eio_context.get_switch_opt ();
           }
-          (`Assoc
-             [
-               "task_id", `String task_id;
-               "action", `String "done";
-               "notes", `String result_text;
-             ])
+          (`Assoc args_for_transition)
       in
       keeper_tool_result_json ~ok:transition_result.Tool_result.success ~message:transition_result.Tool_result.legacy_message)
   | "keeper_task_submit_for_verification" ->
@@ -431,6 +448,22 @@ let handle_keeper_task_tool
     else if pr_url = ""
     then error_json "pr_url is required. Include the PR opened for this task."
     else (
+      (* Map keeper vocabulary (notes + pr_url) onto MASC domain typed
+         handoff_context fields: notes -> summary, [pr_url] -> evidence_refs.
+         Previously these were concatenated into a single [notes] blob
+         ("notes\nPR: pr_url") which lost the structural separation and
+         left strict-contract callers without a typed evidence_refs list
+         to inspect. We continue to send the legacy concatenated [notes]
+         too for backward compatibility with any downstream reader that
+         still expects it, but the canonical signal is now the typed
+         handoff_context. *)
+      let handoff_context =
+        `Assoc
+          [
+            "summary", `String notes;
+            "evidence_refs", `List [ `String pr_url ];
+          ]
+      in
       let transition_result =
         Tool_task.handle_transition
           ~tool_name:"keeper_task_submit_for_verification"
@@ -445,6 +478,7 @@ let handle_keeper_task_tool
                "task_id", `String task_id;
                "action", `String "submit_for_verification";
                "notes", `String (notes ^ "\nPR: " ^ pr_url);
+               "handoff_context", handoff_context;
              ])
       in
       keeper_tool_result_json ~ok:transition_result.Tool_result.success ~message:transition_result.Tool_result.legacy_message)

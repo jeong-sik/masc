@@ -21,6 +21,14 @@
 - Track A 와 Track B 는 독립 PR 로 진행
 - Track B 의 Phase B0 는 **인프라 결정 사전 RFC** 로 별도 투표
 
+### Resume note (2026-05-17)
+
+본 RFC 작성 (2026-04-17) 후 약 1 개월 (2026-04-17 → 2026-05-17) Draft 상태로 묵힘. 2026-05-17 dashboard IDE crash 사고 (`.trim() on null` at `ide-context-lens-...js`, schema drift event drop 다수) 가 **본 RFC §Phase A0 미구현의 누적 발현** 으로 진단됨. Track A 재개. Track B 는 여전히 별 트랙.
+
+- Research synthesis: `~/me/knowledge/research/2026-05-17-dashboard-sse-ssot-state.md`
+- Quick win PR (workaround, 본 RFC 대체 트랙 X — 사용자 crash 차단 only): `fix/ide-context-lens-null-guard` 의 `ide-context-lens.ts:304/325` null guard
+- Track A 의 sprint 분할은 §Phase A0 끝 부분의 **A0.1~A0.5 표** 참조 (resume update 로 추가)
+
 ## Design Anchors
 
 이 RFC 는 아래 앵커를 "직접 구현 명령"이 아니라 설계 방향을 정하는 참고 축으로 사용한다.
@@ -48,9 +56,21 @@ masc-mcp contract 표면은 두 갈래:
 
 현재 `lib/sse.ml` 은 `Yojson.Safe.t` 를 ad-hoc 조립한다. 정형 타입이 없으므로 codegen 을 붙일 수 없다.
 
-**범위 실측** — dashboard 가 소비하는 60+ `SSEEventType` 리터럴 중:
+**범위 실측 (2026-04-17 작성 시점)** — dashboard 가 소비하는 60+ `SSEEventType` 리터럴 중:
 - masc-mcp 자체 emit: 약 **40개** (`agent_*`, `keeper_*`, `board_*`, `approval_*`, `room_*`, `transport_*`, `execution_*` 등)
 - **OAS bridge relay**: **21개** (`oas:*` 접두어) — `agent_sdk` 라이브러리의 `Event_bus.payload` variant 를 `lib/oas_event_bridge.ml` 이 릴레이
+
+**Resume 시점 재실측 (2026-05-17, HEAD `ccf0d9d3f0`)**:
+
+| 측정 | 2026-04-17 | 2026-05-17 | Δ |
+|---|---|---|---|
+| `SSEEventType` literal union | "60+" | **68** | +13% |
+| `dashboard/src/types/sse.ts` LOC | (미실측) | 354 | — |
+| `dashboard/src/schemas/sse.ts` LOC | (미실측) | 310 | — |
+| `lib/sse.ml` LOC | (미실측) | 1005 | — |
+| Drift 발현 사고 | 0 | **1** (2026-05-17 dashboard IDE crash) | +1 |
+
+`schemas/sse.ts:248` 의 `SSEMessageSchema` 는 표준 `z.discriminatedUnion` 이 아닌 **hand-coded `schema<SSEMessage>` 함수** — `type` field 와 top-level `STRING_FIELDS` (50+) / `NUMBER_FIELDS` / `BOOLEAN_FIELDS` (2) 만 검증, **payload 내부 nested object 무검증**. 사용자 사고 (`link.label.trim() on null`) 는 이 검증 공백의 직접 발현. 자세한 drift surface 분류는 research synthesis 문서 §3 참조.
 
 **OAS 21 이벤트 처리 — Opaque passthrough 채택**:
 
@@ -84,6 +104,18 @@ type sse_event = [
 - Phase A0 은 도메인별 sub-PR (agent_*, keeper_*, oas_*, board_*) 분할 가능 — 각 sub-PR 은 **byte-equal golden test** 로 기존 emit 동일성 보장
 - 기존 `lib/sse.ml` 의 ad-hoc ``Yojson.Safe.t`` 조립 사이트는 `grep -c "` + `\`Assoc"` `lib/sse.ml` 로 추적. 각 site 별 `Sse_event.to_yojson` 호출로 교체
 - **실질 작업량의 70% 차지**. 결과적으로 OCaml 쪽도 타입 안전 (오타 event name, 필드 누락이 컴파일 타임에 잡힘)
+
+**Sprint 분할 (resume update 2026-05-17 추가)**:
+
+| Sprint | 산출물 | 측정 가능 완료 기준 | 의존 |
+|---|---|---|---|
+| **A0.1** | `lib/sse.ml` 의 ad-hoc Yojson 조립을 typed variant `Sse_event.t` 로 마이그레이션 (10-15 event 우선) | `entry_to_json` 패턴이 exhaustive `match` 로 변환, 새 variant 추가 시 컴파일러 catch. Golden test: 기존 emit 과 byte-equal | — |
+| **A0.2** | `.atd` schema 도입 (Phase A1 본문 참조) — `.atd` 파일에서 typed variant 생성 | `atdgen -t -j` 통과, OCaml type 변경 시 atdgen 재실행으로 sync. `schemas/sse_event.atd` 신규 | A0.1 |
+| **A0.3** | atdts (또는 fallback codegen) 로 TS 타입 생성 → `dashboard/src/types/sse_generated.ts` | manual `types/sse.ts` 의 hand-maintained 68개 literal 을 generated import 로 교체. Hand-maintained 0건 | A0.2 |
+| **A0.4** | `schemas/sse.ts` 의 hand-coded `SSEMessageSchema` 를 generated Zod (예: `zod-from-json-schema`) 로 교체 | `STRING_FIELDS` / `NUMBER_FIELDS` / `BOOLEAN_FIELDS` 수동 set 삭제, payload nested 검증 자동 도입. 사용자 사고 (`.trim() on null`) root-fix | A0.3 |
+| **A0.5** | drift test — backend emit 한 sample event 가 frontend Zod 통과 (round-trip) | `test/test_sse_contract_round_trip.ml` + dashboard `vitest` 양측 동일 fixture 사용. CI 게이트 | A0.4 |
+
+A0.4 완료 시 본 RFC resume note 의 sucessor PR (`fix/ide-context-lens-null-guard`) workaround 주석 제거 + null guard 자체 제거.
 
 ### Phase A1 — atd SSOT 도입 + schema gen
 

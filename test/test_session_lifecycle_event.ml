@@ -133,6 +133,66 @@ let test_close_reason_kind_labels () =
     (fun (r, expected) -> check string expected expected (E.close_reason_kind r))
     cases
 
+(* RFC-0099 PR-3 publisher injection tests *)
+
+let test_publisher_default_is_noop () =
+  E.reset_publisher () ;
+  check bool "default not installed" false (E.is_publisher_installed ()) ;
+  (* No-op default should not raise even if there is no subscriber. *)
+  E.publish (Evict { transport = SSE ; session_id = "s" ; reason = Cap_exceeded })
+
+let test_publisher_set_marks_installed () =
+  E.reset_publisher () ;
+  E.set_publisher (fun _ -> ()) ;
+  check bool "installed after set" true (E.is_publisher_installed ()) ;
+  E.reset_publisher () ;
+  check bool "not installed after reset" false (E.is_publisher_installed ())
+
+let test_publisher_receives_events () =
+  E.reset_publisher () ;
+  let inbox : E.t list ref = ref [] in
+  E.set_publisher (fun e -> inbox := e :: !inbox) ;
+  let e1 =
+    E.Evict { transport = SSE ; session_id = "s1" ; reason = Cap_exceeded }
+  in
+  let e2 =
+    E.Close
+      { transport = SSE
+      ; session_id = "s1"
+      ; reason = Evicted Cap_exceeded
+      }
+  in
+  E.publish e1 ;
+  E.publish e2 ;
+  let actual = List.rev !inbox in
+  check int "received both events" 2 (List.length actual) ;
+  (match actual with
+   | [ a ; b ] ->
+       check evt "first is Evict" e1 a ;
+       check evt "second is Close" e2 b
+   | _ -> Alcotest.fail "unexpected inbox shape") ;
+  E.reset_publisher ()
+
+let test_publisher_exception_swallowed () =
+  E.reset_publisher () ;
+  E.set_publisher (fun _ -> raise (Failure "subscriber blew up")) ;
+  (* A failing publisher must NOT abort the transport eviction path. *)
+  (try
+     E.publish (Evict { transport = SSE ; session_id = "s" ; reason = Cap_exceeded })
+   with
+   | _ ->
+     Alcotest.fail
+       "publish must not propagate subscriber exceptions — \
+        eviction path correctness depends on this") ;
+  E.reset_publisher ()
+
+let test_publisher_swap_is_atomic () =
+  E.reset_publisher () ;
+  E.set_publisher (fun _ -> ()) ;
+  E.set_publisher (fun _ -> ()) ;
+  check bool "still installed after swap" true (E.is_publisher_installed ()) ;
+  E.reset_publisher ()
+
 let () =
   Alcotest.run "Session_lifecycle_event"
     [
@@ -148,5 +208,13 @@ let () =
         [
           test_case "unknown kind" `Quick test_unknown_kind_rejected ;
           test_case "unknown transport" `Quick test_unknown_transport_rejected ;
+        ] ) ;
+      ( "publisher injection (PR-3)",
+        [
+          test_case "default is noop" `Quick test_publisher_default_is_noop ;
+          test_case "set marks installed" `Quick test_publisher_set_marks_installed ;
+          test_case "subscriber receives events" `Quick test_publisher_receives_events ;
+          test_case "subscriber exception swallowed" `Quick test_publisher_exception_swallowed ;
+          test_case "swap is atomic" `Quick test_publisher_swap_is_atomic ;
         ] ) ;
     ]

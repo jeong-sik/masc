@@ -601,7 +601,11 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
               ~on_disconnect:(fun () -> stop_sse_session session_id)
           in
           (match evicted with
-          | Some evicted_sid -> stop_sse_session evicted_sid
+          | Some evicted_sid ->
+              (* RFC-0099 PR-3: cap-exceeded eviction publishes typed
+                 close frame + Evict/Close event pair. *)
+              stop_sse_session_evict evicted_sid
+                ~reason:Session_lifecycle_event.Cap_exceeded
           | None -> ());
           let info =
             {

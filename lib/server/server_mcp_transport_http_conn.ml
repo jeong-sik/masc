@@ -109,6 +109,55 @@ let stop_sse_session session_id =
 let stop_sse_session_preserve_guard session_id =
   stop_sse_session_impl ~clear_guard:false session_id
 
+(* RFC-0099 PR-3: evicting variant. Writes an SSE [event: evicted]
+   close frame to the client (best-effort) BEFORE the writer is
+   closed, then publishes a typed Evict + Close event pair on the
+   bus topic. Frame write failure is logged-and-swallowed; the
+   eviction proceeds regardless. *)
+let stop_sse_session_evict session_id
+    ~(reason : Session_lifecycle_event.evict_reason) =
+  let info_opt = ref None in
+  atomic_update sse_conn_by_session (fun map ->
+    match SMap.find_opt session_id map with
+    | None -> map
+    | Some info ->
+        info_opt := Some info;
+        SMap.remove session_id map);
+  atomic_update sse_connect_guard_by_session (fun map ->
+    SMap.remove session_id map);
+  (match !info_opt with
+   | None -> ()
+   | Some info ->
+       let frame_data =
+         `Assoc
+           [ ("type", `String "evicted");
+             ( "reason",
+               `String
+                 (Session_lifecycle_event.evict_reason_to_string reason) );
+           ]
+         |> Yojson.Safe.to_string
+       in
+       let frame = Sse.format_event ~event_type:"evicted" frame_data in
+       (try
+          Eio.Mutex.use_rw ~protect:true info.mutex (fun () ->
+            if (not info.closed) && not !(info.stop) then
+              Httpun.Body.Writer.write_string info.writer frame)
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+            Log.Misc.debug
+              "stop_sse_session_evict: frame write failed for %s: %s"
+              session_id (Printexc.to_string exn));
+       close_sse_conn info);
+  Session_lifecycle_event.publish
+    (Session_lifecycle_event.Evict
+       { transport = Session_lifecycle_event.SSE; session_id; reason });
+  Session_lifecycle_event.publish
+    (Session_lifecycle_event.Close
+       { transport = Session_lifecycle_event.SSE;
+         session_id;
+         reason = Session_lifecycle_event.Evicted reason })
+
 let is_active_sse_session session_id =
   SMap.mem session_id (Atomic.get sse_conn_by_session)
 

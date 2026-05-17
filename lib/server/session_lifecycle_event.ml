@@ -204,3 +204,31 @@ let of_yojson (j : Yojson.Safe.t) : (t, string) result =
   with Type_error (msg, _) -> Error msg
 
 let pp fmt t = Format.pp_print_string fmt (Yojson.Safe.to_string (to_yojson t))
+
+(* PR-3: publisher injection. Default is no-op; embedder installs a
+   real publisher at bootstrap. Atomic so swap is observable to
+   concurrent callers consistently. *)
+
+let _noop_publisher : t -> unit = fun _ -> ()
+let _publisher : (t -> unit) Atomic.t = Atomic.make _noop_publisher
+let _installed : bool Atomic.t = Atomic.make false
+
+let publish evt =
+  let p = Atomic.get _publisher in
+  try p evt
+  with exn ->
+    (* Swallow + log: a failing observer must not break the eviction
+       path. The whole point of PR-3 is that transport teardown
+       remains predictable regardless of subscriber state. *)
+    Log.Misc.debug "Session_lifecycle_event.publish: %s"
+      (Printexc.to_string exn)
+
+let set_publisher p =
+  Atomic.set _publisher p ;
+  Atomic.set _installed true
+
+let reset_publisher () =
+  Atomic.set _publisher _noop_publisher ;
+  Atomic.set _installed false
+
+let is_publisher_installed () = Atomic.get _installed

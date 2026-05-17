@@ -403,14 +403,15 @@ let run_worker_spec ?clock_opt (spec : Worker_execution_spec.t)
          Worker_execution_spec.to_yojson spec |> Yojson.Safe.to_string
        in
        let result =
-         run_process_with_timeout
-           ~clock_opt
-           ~stdin_content
-           ~timeout_sec:effective_timeout_sec
-           ~prog:"docker"
-           ~argv:(docker_argv ~container_name:name spec)
-           ~env:(Unix.environment ())
-           ()
+         Docker_spawn_throttle.with_slot (fun () ->
+           run_process_with_timeout
+             ~clock_opt
+             ~stdin_content
+             ~timeout_sec:effective_timeout_sec
+             ~prog:"docker"
+             ~argv:(docker_argv ~container_name:name spec)
+             ~env:(Unix.environment ())
+             ())
        in
        persist_stderr_artifact spec result.stderr;
        match result.exit_code with

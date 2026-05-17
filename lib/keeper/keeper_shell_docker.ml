@@ -1017,14 +1017,15 @@ let run_docker_shell_command_with_status_internal
                         let status, output =
                           Eio_guard.protect ~finally:restore_gitdirs
                           @@ fun () ->
-                          Masc_exec.Exec_gate.run_argv_with_status
-                            ~actor:`Keeper_shell
-                            ~raw_source:(String.concat " " argv)
-                            ~summary:"keeper docker command"
-                            ~env:(Unix.environment ())
-                            ~cwd:(Sys.getcwd ())
-                            ~timeout_sec
-                            argv
+                          Docker_spawn_throttle.with_slot (fun () ->
+                            Masc_exec.Exec_gate.run_argv_with_status
+                              ~actor:`Keeper_shell
+                              ~raw_source:(String.concat " " argv)
+                              ~summary:"keeper docker command"
+                              ~env:(Unix.environment ())
+                              ~cwd:(Sys.getcwd ())
+                              ~timeout_sec
+                              argv)
                         in
                         if status <> Unix.WEXITED 0
                         then

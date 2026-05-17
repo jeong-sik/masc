@@ -54,14 +54,30 @@ let state_of kind = List.assoc kind _state_for_kind
    pattern from Docker_spawn_throttle (PR #15727). *)
 let _shared_pressure_mutex = Eio.Mutex.create ()
 
+let held_kinds_key : kind list Eio.Fiber.key = Eio.Fiber.create_key ()
+
+let held_kinds () =
+  try Option.value ~default:[] (Eio.Fiber.get held_kinds_key)
+  with _ -> []
+
+let holds_kind kind = List.exists (( = ) kind) (held_kinds ())
+
+let with_held_kind kind f =
+  Eio.Fiber.with_binding held_kinds_key (kind :: held_kinds ()) f
+
 let with_slot ~kind f =
-  let { sem ; _ } = state_of kind in
-  Eio.Semaphore.acquire sem ;
-  Eio.Switch.run @@ fun sw ->
-  Eio.Switch.on_release sw (fun () -> Eio.Semaphore.release sem) ;
-  if Keeper_fd_pressure.active () then
-    Eio.Mutex.use_rw ~protect:true _shared_pressure_mutex f
-  else f ()
+  if holds_kind kind then
+    f ()
+  else
+    let { sem ; _ } = state_of kind in
+    Eio.Semaphore.acquire sem ;
+    Eio.Switch.run @@ fun sw ->
+    Eio.Switch.on_release sw (fun () -> Eio.Semaphore.release sem) ;
+    let run () = with_held_kind kind f in
+    if Keeper_fd_pressure.active () then
+      Eio.Mutex.use_rw ~protect:true _shared_pressure_mutex run
+    else
+      run ()
 
 let configured_concurrency ~kind = (state_of kind).cap
 
@@ -76,7 +92,19 @@ let install_dated_jsonl_log_writer_guard () =
     else
       f ())
 
-let () = install_dated_jsonl_log_writer_guard ()
+let install_process_eio_sandbox_exec_guard () =
+  Process_eio.set_spawn_guard
+    { Process_eio.run =
+        (fun f ->
+          if Eio_guard.is_ready () then
+            with_slot ~kind:Sandbox_exec f
+          else
+            f ())
+    }
+
+let () =
+  install_dated_jsonl_log_writer_guard ();
+  install_process_eio_sandbox_exec_guard ()
 
 (* In-flight count = configured cap minus current semaphore credits.
    Eio.Semaphore exposes [get_value] which returns the available credit

@@ -45,6 +45,11 @@ val with_slot : kind:kind -> (unit -> 'a) -> 'a
     additionally serialized against all in-flight callers across all
     kinds.
 
+    Nested calls for the same [kind] on the same Eio fiber are reentrant:
+    the inner call runs under the outer slot instead of consuming a second
+    semaphore credit. This lets low-level process guards and explicit
+    high-level wrappers coexist during migration.
+
     Exceptions from [f] propagate; the slot is always released
     (via [Eio.Switch.on_release]). *)
 
@@ -65,6 +70,14 @@ val install_dated_jsonl_log_writer_guard : unit -> unit
     runs the append directly so module-load and pure test paths stay safe. The
     module installs it at load time; the explicit function exists for tests and
     future bootstrap code that resets storage hooks. *)
+
+val install_process_eio_sandbox_exec_guard : unit -> unit
+(** [install_process_eio_sandbox_exec_guard ()] installs the process-wide
+    {!Process_eio} foreground spawn guard that accounts [run_argv*] calls as
+    {!Sandbox_exec} while {!Eio_guard} is ready. Before Eio startup, the guard
+    runs directly so module-load and pure fallback paths stay safe. The module
+    installs it at load time; the explicit function exists for tests and future
+    bootstrap code that resets process hooks. *)
 
 type snapshot = {
   per_kind : (kind * int) list ;

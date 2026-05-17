@@ -203,15 +203,22 @@ let start_managed_container
                         (Env_config_sandbox.Cleanup.managed_sleep_sec ());
                     ]
                   in
+                  (* Throttle the managed-container [docker run -d] just like
+                     the per-call sandbox spawns (PR #15727). RFC-0097 calls
+                     out the "24+ keepers starting simultaneously after a
+                     server restart" scenario explicitly — without this wrap
+                     it was the only first-class start path bypassing the
+                     fleet-wide spawn semaphore. *)
                   let st, out =
-                    Masc_exec.Exec_gate.run_argv_with_status
-                      ~actor:`System_task_sandbox
-                      ~raw_source:(String.concat " " argv)
-                      ~summary:"keeper sandbox control exec"
-                      ~env:(Unix.environment ())
-                      ~cwd:(Sys.getcwd ())
-                      ~timeout_sec
-                      argv
+                    Docker_spawn_throttle.with_slot (fun () ->
+                      Masc_exec.Exec_gate.run_argv_with_status
+                        ~actor:`System_task_sandbox
+                        ~raw_source:(String.concat " " argv)
+                        ~summary:"keeper sandbox control exec"
+                        ~env:(Unix.environment ())
+                        ~cwd:(Sys.getcwd ())
+                        ~timeout_sec
+                        argv)
                   in
                   if st = Unix.WEXITED 0 then (
                     Keeper_registry.clear_error

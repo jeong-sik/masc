@@ -222,12 +222,19 @@ val cleanup_stale_containers
   -> unit
   -> cleanup_result
 
-(** Throttled wrapper used before launching keeper Docker containers. *)
+(** Interval-throttled wrapper used before launching keeper Docker
+    containers. Concurrent fibers entering the same interval window are
+    serialized by a CAS gate on the internal [last_cleanup_at] timestamp;
+    losers receive [None] and skip the sweep. See {!reset_last_cleanup_for_tests}. *)
 val maybe_cleanup_stale_containers
   :  base_path:string
   -> timeout_sec:float
   -> unit
   -> cleanup_result option
+
+(** Reset the [last_cleanup_at] gate so the next call always runs a sweep.
+    Test-only. *)
+val reset_last_cleanup_for_tests : unit -> unit
 
 (** Global keeper sandbox preflight used by [doctor] and diagnostics.
     Returns [None] when

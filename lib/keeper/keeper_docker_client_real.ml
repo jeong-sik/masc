@@ -116,20 +116,21 @@ let gated_argv_with_status ?timeout_sec ~(summary : string) argv =
     | Some t -> t
     | None -> default_timeout_sec ()
   in
-  let rec loop attempts_left =
-    let status, out =
-      Masc_exec.Exec_gate.run_argv_with_status
-        ~actor:`System_task_sandbox
-        ~raw_source:(String.concat " " argv)
-        ~summary
-        ~timeout_sec
-        argv
+  Docker_spawn_throttle.with_slot (fun () ->
+    let rec loop attempts_left =
+      let status, out =
+        Masc_exec.Exec_gate.run_argv_with_status
+          ~actor:`System_task_sandbox
+          ~raw_source:(String.concat " " argv)
+          ~summary
+          ~timeout_sec
+          argv
+      in
+      if attempts_left > 0 && is_eintr_127 status out
+      then loop (attempts_left - 1)
+      else status, out
     in
-    if attempts_left > 0 && is_eintr_127 status out
-    then loop (attempts_left - 1)
-    else status, out
-  in
-  loop max_eintr_retries
+    loop max_eintr_retries)
 ;;
 
 let gated_argv_with_status_split ?timeout_sec ~(summary : string) argv =
@@ -138,23 +139,24 @@ let gated_argv_with_status_split ?timeout_sec ~(summary : string) argv =
     | Some t -> t
     | None -> default_timeout_sec ()
   in
-  let rec loop attempts_left =
-    let status, stdout, stderr =
-      Masc_exec.Exec_gate.run_argv_with_status_split
-        ~actor:`System_task_sandbox
-        ~raw_source:(String.concat " " argv)
-        ~summary
-        ~timeout_sec
-        argv
+  Docker_spawn_throttle.with_slot (fun () ->
+    let rec loop attempts_left =
+      let status, stdout, stderr =
+        Masc_exec.Exec_gate.run_argv_with_status_split
+          ~actor:`System_task_sandbox
+          ~raw_source:(String.concat " " argv)
+          ~summary
+          ~timeout_sec
+          argv
+      in
+      (* Join with a newline so a marker spanning the stream boundary
+         (stdout ends with "interrupted", stderr begins with "system
+         call") still matches [is_eintr_127]. *)
+      if attempts_left > 0 && is_eintr_127 status (stdout ^ "\n" ^ stderr)
+      then loop (attempts_left - 1)
+      else status, stdout, stderr
     in
-    (* Join with a newline so a marker spanning the stream boundary
-       (stdout ends with "interrupted", stderr begins with "system
-       call") still matches [is_eintr_127]. *)
-    if attempts_left > 0 && is_eintr_127 status (stdout ^ "\n" ^ stderr)
-    then loop (attempts_left - 1)
-    else status, stdout, stderr
-  in
-  loop max_eintr_retries
+    loop max_eintr_retries)
 ;;
 
 (* Mirror of {!gated_argv_with_status_split} for the stdin-piped case
@@ -175,21 +177,22 @@ let gated_argv_with_stdin_and_status_split
     | Some t -> t
     | None -> default_timeout_sec ()
   in
-  let rec loop attempts_left =
-    let status, stdout, stderr =
-      Masc_exec.Exec_gate.run_argv_with_stdin_and_status_split
-        ~actor:`System_task_sandbox
-        ~raw_source:(String.concat " " argv)
-        ~summary
-        ~timeout_sec
-        ~stdin_content
-        argv
+  Docker_spawn_throttle.with_slot (fun () ->
+    let rec loop attempts_left =
+      let status, stdout, stderr =
+        Masc_exec.Exec_gate.run_argv_with_stdin_and_status_split
+          ~actor:`System_task_sandbox
+          ~raw_source:(String.concat " " argv)
+          ~summary
+          ~timeout_sec
+          ~stdin_content
+          argv
+      in
+      if attempts_left > 0 && is_eintr_127 status (stdout ^ "\n" ^ stderr)
+      then loop (attempts_left - 1)
+      else status, stdout, stderr
     in
-    if attempts_left > 0 && is_eintr_127 status (stdout ^ "\n" ^ stderr)
-    then loop (attempts_left - 1)
-    else status, stdout, stderr
-  in
-  loop max_eintr_retries
+    loop max_eintr_retries)
 ;;
 
 (* ── Functions ───────────────────────────────────────────────── *)
@@ -449,9 +452,9 @@ let run_detached (plan : Keeper_sandbox_session_plan.t) =
        in
        (match
          gated_argv_with_status_split
-            ~timeout_sec:start_timeout
-            ~summary:"keeper docker run -d (session)"
-            argv
+           ~timeout_sec:start_timeout
+           ~summary:"keeper docker run -d (session)"
+           argv
         with
         | Unix.WEXITED 0, _, _ -> Ok (Keeper_sandbox_session_plan.container_name plan)
         | Unix.WEXITED 125, _, _ ->

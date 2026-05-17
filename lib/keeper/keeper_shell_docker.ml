@@ -1057,7 +1057,18 @@ let run_docker_shell_command_with_status_internal
                             meta.name);
                         Ok { status; output; image; network_label }
                       with
-                      | Failure err -> sandbox_error err)))))
+                      | Eio.Cancel.Cancelled _ as exn -> raise exn
+                      | Failure err -> sandbox_error err
+                      | Sys_error err ->
+                        sandbox_error
+                          (Printf.sprintf "docker_shell_failed: sys_error: %s" err)
+                      | Unix.Unix_error (code, fn, arg) ->
+                        sandbox_error
+                          (Printf.sprintf
+                             "docker_shell_failed: unix_error: %s: %s(%s)"
+                             (Unix.error_message code)
+                             fn
+                             arg))))))
 ;;
 
 let run_docker_shell_command_with_status =

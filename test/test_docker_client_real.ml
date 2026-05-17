@@ -20,6 +20,9 @@ let (_ : (module Keeper_docker_client.S)) = (module Keeper_docker_client_real)
    Phase 3b-iv.1b). *)
 module Real_executor = Keeper_sandbox_executor.Make (Keeper_docker_client_real)
 
+let eio_test_case name speed f =
+  test_case name speed (fun () -> Eio_main.run @@ fun _env -> f ())
+
 let sample_plan () =
   match
     Keeper_sandbox_oneshot_plan.of_request ~turn_id:1 ~attempt:0 ~meta_name:"alice" ~cmd:"echo hi"
@@ -574,16 +577,16 @@ let () =
   run
     "Keeper_docker_client_real (Phase 3b-iv.2.3)"
     [ ( "S placeholder"
-      , [ test_case
+      , [ eio_test_case
             "run → Ok exec_result | Error Daemon_unreachable"
             `Quick
             test_run_returns_typed_result
-        ; test_case
+        ; eio_test_case
             "exec → Ok exec_result | Error Daemon_unreachable"
             `Quick
             test_exec_returns_typed_result
         ; test_case "ps_query → Cleanup_failed" `Quick test_ps_query_placeholder
-        ; test_case
+        ; eio_test_case
             "rm → typed error (Daemon_unreachable | Cleanup_failed)"
             `Quick
             test_rm_returns_typed_error
@@ -626,26 +629,26 @@ let () =
             "object (not array/null) → Probe_format_drift"
             `Quick
             test_parse_security_options_object
-        ; test_case
+        ; eio_test_case
             "info_security_options → Ok | Daemon_unreachable | Probe_format_drift"
             `Quick
             test_info_security_options_returns_typed
         ] )
     ; ( "image_present (Phase 3e d)"
-      , [ test_case
+      , [ eio_test_case
             "image_present → Ok | Image_pull_failed | Daemon_unreachable"
             `Quick
             test_image_present_returns_typed
         ] )
     ; ( "run_detached (Phase 3e a)"
       , [ test_case "run_detached_argv: structural shape" `Quick test_run_detached_argv_shape
-        ; test_case
+        ; eio_test_case
             "run_detached → Ok <name> | Daemon_unreachable"
             `Quick
             test_run_detached_returns_typed
         ] )
     ; ( "Functor composition"
-      , [ test_case
+      , [ eio_test_case
             "Keeper_sandbox_executor.Make (Real) instantiates + forwards placeholder"
             `Quick
             test_executor_with_real_returns_typed_result

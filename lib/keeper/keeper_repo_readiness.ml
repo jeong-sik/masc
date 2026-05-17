@@ -145,7 +145,7 @@ let inspect
   else if not (safe_is_dir clone_path) then
     let workspace_matches =
       Coord_worktree.workspace_repo_matches ~search_root:project_root
-        ~repo_name:derived_repo_name
+        ~repo_name:derived_repo_name ()
     in
     (match workspace_matches with
      | [ source_root ] ->

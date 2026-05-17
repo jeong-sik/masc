@@ -130,6 +130,10 @@ let create_wide_workspace_storm ~base_path ~count =
     Unix.mkdir (Filename.concat root (Printf.sprintf "aa-%04d" i)) 0o755
   done
 
+let init_git_repo path =
+  mkdir_p path;
+  run_ok ~cwd:path "git init -q --initial-branch=main"
+
 let set_workspace_origin_to_github ~repo =
   run_ok ~cwd:repo
     "git remote set-url origin https://github.com/jeong-sik/masc-mcp.git"
@@ -312,6 +316,20 @@ let test_auto_provisionable_workspace_repo_before_wide_workspace_storm () =
   check string "workspace repo match" repo
     Yojson.Safe.Util.(json |> member "workspace_repo_match" |> to_string)
 
+let test_workspace_repo_matches_skips_git_clone_internals () =
+  let base_path = temp_dir "masc-repo-match-budget" in
+  let adjacent_repo = Filename.concat base_path "workspace/aaa-repo" in
+  let target_repo = Filename.concat base_path "workspace/z-team/target" in
+  init_git_repo adjacent_repo;
+  for i = 0 to 20 do
+    Unix.mkdir (Filename.concat adjacent_repo (Printf.sprintf "aa-%02d" i)) 0o755
+  done;
+  init_git_repo target_repo;
+  check (list string) "matches target without scanning adjacent repo internals"
+    [ target_repo ]
+    (Coord_worktree.workspace_repo_matches ~max_entries:8
+       ~search_root:base_path ~repo_name:"target" ())
+
 let () =
   Random.self_init ();
   run "Keeper_repo_readiness"
@@ -331,5 +349,7 @@ let () =
           `Quick test_auto_provisionable_workspace_repo_before_hidden_dir_storm;
         test_case "auto provisionable workspace repo before wide workspace storm"
           `Quick test_auto_provisionable_workspace_repo_before_wide_workspace_storm;
+        test_case "workspace repo scan skips git clone internals" `Quick
+          test_workspace_repo_matches_skips_git_clone_internals;
       ];
     ]

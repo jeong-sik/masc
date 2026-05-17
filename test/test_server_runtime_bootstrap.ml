@@ -1163,6 +1163,34 @@ let test_health_json_surfaces_log_ring_summary () =
     (latest |> member "details" = `Null);
   ignore (logs |> member "file_sink" |> member "enabled" |> to_bool)
 
+let test_health_response_default_is_light_probe () =
+  let request = Httpun.Request.create `GET "/health" in
+  let json = Server_routes_http_runtime.make_health_response_json request in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string) "default health detail" "probe"
+    (json |> member "health_detail" |> to_string);
+  Alcotest.(check string) "full health pointer" "/health?full=1"
+    (json |> member "full_health_url" |> to_string);
+  Alcotest.(check bool) "startup stays on default health" true
+    (match json |> member "startup" with `Assoc _ -> true | _ -> false);
+  Alcotest.(check bool) "paths stay on default health" true
+    (match json |> member "paths" with `Assoc _ -> true | _ -> false);
+  Alcotest.(check bool) "default health skips reaction ledger" true
+    (json |> member "keeper_reaction_ledger" = `Null);
+  Alcotest.(check bool) "default health skips cdal snapshot" true
+    (json |> member "cdal" = `Null)
+
+let test_health_response_full_query_keeps_diagnostics () =
+  let request = Httpun.Request.create `GET "/health?full=1" in
+  let json = Server_routes_http_runtime.make_health_response_json request in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string) "full health detail" "full"
+    (json |> member "health_detail" |> to_string);
+  Alcotest.(check bool) "full health keeps reaction ledger" true
+    (match json |> member "keeper_reaction_ledger" with `Assoc _ -> true | _ -> false);
+  Alcotest.(check bool) "full health keeps cdal snapshot" true
+    (match json |> member "cdal" with `Assoc _ -> true | _ -> false)
+
 let test_migrate_resident_keeper_dirs_promotes_valid_meta () =
   with_temp_dir "startup-legacy-keepers" (fun dir ->
       let state = Mcp_server.create_state ~base_path:dir in
@@ -2791,6 +2819,10 @@ let () =
             `Quick test_health_json_reaction_ledger_cursor_sweep_clears_pending;
           Alcotest.test_case "health json surfaces log ring summary" `Quick
             test_health_json_surfaces_log_ring_summary;
+          Alcotest.test_case "default health response is light probe" `Quick
+            test_health_response_default_is_light_probe;
+          Alcotest.test_case "full health query keeps diagnostics" `Quick
+            test_health_response_full_query_keeps_diagnostics;
           Alcotest.test_case "readiness false before init" `Quick
             test_startup_state_readiness_before_init;
           Alcotest.test_case "readiness true after init" `Quick

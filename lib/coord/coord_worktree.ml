@@ -341,8 +341,8 @@ let safe_file_exists path =
   | Sys_error _ -> false
 
 let safe_is_dir path =
-  try Sys.file_exists path && Sys.is_directory path with
-  | Sys_error _ -> false
+  try (Unix.stat path).st_kind = Unix.S_DIR with
+  | Unix.Unix_error _ | Sys_error _ -> false
 
 let safe_repo_name name =
   name <> "" && name <> "." && name <> ".."
@@ -370,6 +370,11 @@ let is_git_clone candidate =
   safe_is_dir candidate
   &&
   match git_marker_kind (Filename.concat candidate ".git") with
+  | `Directory | `File -> true
+  | `Missing -> false
+
+let has_git_marker root =
+  match git_marker_kind (Filename.concat root ".git") with
   | `Directory | `File -> true
   | `Missing -> false
 
@@ -867,8 +872,10 @@ let score_repo_candidate config ~(task : task) ~tokens ~path_hints candidate =
    ([workspace_repo_not_found_error] / [workspace_repo_ambiguous_error]
    / [partial_clone_error]) stay near [auto_provision_sandbox_clone]
    since [infer_task_repo_name] does not produce them. *)
-let workspace_repo_matches ~search_root ~repo_name =
-  let max_dirs = 4000 in
+let workspace_repo_matches ~search_root ~repo_name ?(max_dirs = 4000)
+    ?(max_entries = 20000) () =
+  let max_dirs = max 0 max_dirs in
+  let max_entries = max 0 max_entries in
   let max_matches = 8 in
   let preferred_dir_name = function
     | "workspace" | "workspaces" | "repos" | "projects" | "src" -> true
@@ -893,8 +900,10 @@ let workspace_repo_matches ~search_root ~repo_name =
   let queue = Queue.create () in
   Queue.add search_root queue;
   let dirs_seen = ref 0 in
+  let entries_seen = ref 0 in
   while
     !dirs_seen < max_dirs
+    && !entries_seen < max_entries
     && Queue.length queue > 0
     && List.length !matches < max_matches
   do
@@ -911,12 +920,20 @@ let workspace_repo_matches ~search_root ~repo_name =
       entries;
     Array.iter
       (fun entry ->
-         if List.length !matches < max_matches then
+         if
+           !entries_seen < max_entries
+           && List.length !matches < max_matches
+           && not (skip_dir_name entry)
+         then begin
+           incr entries_seen;
            let path = Filename.concat dir entry in
-           if entry = repo_name && is_git_clone path then
-             matches := path :: !matches;
-           if safe_is_dir path && not (skip_dir_name entry) then
-             Queue.add path queue)
+           if safe_is_dir path then begin
+             let is_git_repo_dir = has_git_marker path in
+             if entry = repo_name && is_git_repo_dir then
+               matches := path :: !matches;
+             if not is_git_repo_dir then Queue.add path queue
+           end
+         end)
       entries
   done;
   List.sort_uniq String.compare !matches
@@ -969,6 +986,7 @@ let infer_task_repo_name config ~agent_name ~task_id =
                 |> List.filter_map (fun name ->
                        match
                          workspace_repo_matches ~search_root ~repo_name:name
+                           ()
                        with
                        | [ _ ] -> Some name
                        | _ -> None)
@@ -1097,7 +1115,7 @@ let normalize_origin_remote_to_https root =
 
 let auto_provision_sandbox_clone ~config ~agent_name ~repos_dir ~repo_name =
   let search_root = project_root config in
-  match workspace_repo_matches ~search_root ~repo_name with
+  match workspace_repo_matches ~search_root ~repo_name () with
   | [] ->
       Error
         (workspace_repo_not_found_error ~agent_name ~repos_dir ~repo_name

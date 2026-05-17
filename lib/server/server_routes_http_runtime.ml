@@ -146,6 +146,64 @@ let health_path_diagnostics () =
         ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
         ~effective_base_path ~effective_masc_root ()
 
+let health_uptime_secs () =
+  (* NDT-OK: /health exposes wall-clock process uptime for operators; no
+     persisted state transition or scheduler decision depends on this value. *)
+  int_of_float (Unix.gettimeofday () -. server_start_time)
+
+let health_uptime_string uptime_secs =
+  if uptime_secs < 60 then Printf.sprintf "%ds" uptime_secs
+  else if uptime_secs < 3600 then
+    Printf.sprintf "%dm %ds" (uptime_secs / 60) (uptime_secs mod 60)
+  else Printf.sprintf "%dh %dm" (uptime_secs / 3600) ((uptime_secs mod 3600) / 60)
+
+let protocol_json ~listener =
+  `Assoc
+    [
+      ("default", `String mcp_protocol_version_default);
+      ("listener", `String listener);
+      ( "supported",
+        `List (List.map (fun v -> `String v) mcp_protocol_versions) );
+    ]
+
+let quick_gc_json () =
+  (* Keep health probes cheap under live keeper load. [Gc.stat] can force a
+     full major-cycle sync across domains; [Gc.quick_stat] exposes the same
+     operator-facing counters without walking the heap. *)
+  let s = Gc.quick_stat () in
+  `Assoc
+    [
+      ("minor_collections", `Int s.minor_collections);
+      ("major_collections", `Int s.major_collections);
+      ("compactions", `Int s.compactions);
+      ("heap_words", `Int s.heap_words);
+      ("live_words", `Int s.live_words);
+      ("minor_heap_size", `Int (let c = Gc.get () in c.minor_heap_size));
+    ]
+
+let make_health_probe_json ?(listener = "http/1.1") request =
+  let uptime_secs = health_uptime_secs () in
+  let build = Build_identity.current () in
+  Tool_args.ok_assoc
+    [
+      ("server", `String "masc-mcp");
+      ("version", `String build.release_version);
+      ("release_version", `String build.release_version);
+      ("build", Build_identity.to_yojson build);
+      ("health_detail", `String "probe");
+      ("full_health_url", `String "/health?full=1");
+      ("protocol", protocol_json ~listener);
+      ("transport", transport_json request);
+      ("http_listener", Transport_metrics.http_listener_json ());
+      ("paths", Server_base_path_diagnostics.to_yojson (health_path_diagnostics ()));
+      ("uptime", `String (health_uptime_string uptime_secs));
+      ("sse_clients", `Int (Sse.client_count ()));
+      ("startup", Server_startup_state.to_yojson ());
+      ("subsystems", Subsystem_health.to_yojson ());
+      ("logs", Log.Ring.summary_json ());
+      ("gc", quick_gc_json ());
+    ]
+
 type paused_keeper_scan = {
   names : string list;
   autoboot_enabled_names : string list;
@@ -524,13 +582,18 @@ let keeper_fleet_runtime_resolution_fields () =
   @ [ "fd_accountant", fd_accountant_snapshot_json () ]
 ;;
 
+let cdal_health_json () =
+  try Cdal_runtime_health.snapshot_json () with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+      Tool_args.error_assoc
+        [
+          ("component", `String "cdal");
+          ("error", `String (Printexc.to_string exn));
+        ]
+
 let make_health_json ?(listener = "http/1.1") request =
-  let uptime_secs = int_of_float (Unix.gettimeofday () -. server_start_time) in
-  let uptime_str =
-    if uptime_secs < 60 then Printf.sprintf "%ds" uptime_secs
-    else if uptime_secs < 3600 then Printf.sprintf "%dm %ds" (uptime_secs / 60) (uptime_secs mod 60)
-    else Printf.sprintf "%dh %dm" (uptime_secs / 3600) ((uptime_secs mod 3600) / 60)
-  in
+  let uptime_secs = health_uptime_secs () in
   let build = Build_identity.current () in
   let keeper_config_parse_errors =
     try Keeper_types_profile.keeper_toml_config_errors () with
@@ -583,18 +646,12 @@ let make_health_json ?(listener = "http/1.1") request =
     ("version", `String build.release_version);
     ("release_version", `String build.release_version);
     ("build", Build_identity.to_yojson build);
-    ( "protocol",
-      `Assoc
-        [
-          ("default", `String mcp_protocol_version_default);
-          ("listener", `String listener);
-          ( "supported",
-            `List (List.map (fun v -> `String v) mcp_protocol_versions) );
-        ] );
+    ("health_detail", `String "full");
+    ("protocol", protocol_json ~listener);
     ("transport", transport_json request);
     ("http_listener", Transport_metrics.http_listener_json ());
     ("paths", Server_base_path_diagnostics.to_yojson (health_path_diagnostics ()));
-    ("uptime", `String uptime_str);
+    ("uptime", `String (health_uptime_string uptime_secs));
     ("sse_clients", `Int (Sse.client_count ()));
     ("startup", Server_startup_state.to_yojson ());
     ("subsystems", Subsystem_health.to_yojson ());
@@ -605,17 +662,7 @@ let make_health_json ?(listener = "http/1.1") request =
     ("logs", Log.Ring.summary_json ());
     ("feature_flags", let features = Dashboard_feature_health.get_all_features () in
       Dashboard_feature_health.overview_json features);
-    (* Keep /health cheap under live keeper load. [Gc.stat] can force a
-       full major-cycle sync across domains; [Gc.quick_stat] exposes the
-       same operator-facing counters without walking the heap. *)
-    ("gc", let s = Gc.quick_stat () in `Assoc [
-      ("minor_collections", `Int s.minor_collections);
-      ("major_collections", `Int s.major_collections);
-      ("compactions", `Int s.compactions);
-      ("heap_words", `Int s.heap_words);
-      ("live_words", `Int s.live_words);
-      ("minor_heap_size", `Int (let c = Gc.get () in c.minor_heap_size));
-    ]);
+    ("gc", quick_gc_json ());
     ("keeper_fibers", `Int keeper_fibers);
     ( "keeper_fd_pressure"
     , Keeper_fd_pressure.runtime_state_json ~active_keepers:keeper_fibers
@@ -632,7 +679,7 @@ let make_health_json ?(listener = "http/1.1") request =
        so an operator can correlate with the cause encoded in their
        last_blocker_class. *)
     (key_paused_keepers, paused_keepers_json);
-    ("cdal", Cdal_runtime_health.snapshot_json ());
+    ("cdal", cdal_health_json ());
     ("keeper_config_parse_error_count",
      `Int keeper_config_parse_error_count);
     ( "keeper_config_parse_errors",
@@ -665,10 +712,17 @@ let make_health_json ?(listener = "http/1.1") request =
              (Prometheus.metric_total "masc_lazy_task_boot_guard_fired_total")));
   ]
 
+let full_health_requested request =
+  Server_utils.bool_query_param request "full" ~default:false
+
+let make_health_response_json ?(listener = "http/1.1") request =
+  if full_health_requested request then make_health_json ~listener request
+  else make_health_probe_json ~listener request
+
 (** Health check handler *)
 let health_handler request reqd =
   Http.Response.json
-    (Yojson.Safe.to_string (make_health_json request))
+    (Yojson.Safe.to_string (make_health_response_json request))
     reqd
 
 (** Liveness probe: responds 200 as soon as the HTTP accept loop is running.

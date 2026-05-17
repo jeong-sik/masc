@@ -317,6 +317,26 @@ let compact_if_needed_typed
       ~labels:[ "keeper", meta.name ]
       ~delta:(float_of_int saved_tokens)
       ();
+    (* C1 (CRIT) from oas-internal-audit.html §6: surface pair-repair
+       fabrication counts via /metrics so operators can alert on rising
+       fabrication rate without grepping the JSONL [tool_pair_repair]
+       structured log block emitted below. Increment by *count*, not by 1,
+       so the counter reflects fabrication volume rather than call
+       frequency. Kind label is a closed 2-value vocabulary (no Printexc-
+       style unbounded label) — see iter 21 / PR #15788 for the same
+       pattern. The was_fabricated:true message-metadata half is
+       RFC-scope (touches MASC + OAS message-record shape) and deferred. *)
+    let bump_pair_repair kind count =
+      if count > 0
+      then
+        Prometheus.inc_counter
+          Keeper_metrics.metric_keeper_compaction_pair_repair_fabrications
+          ~labels:[ "keeper", meta.name; "kind", kind ]
+          ~delta:(float_of_int count)
+          ()
+    in
+    bump_pair_repair "downgraded_tool_use" pair_repair_stats.downgraded_tool_uses;
+    bump_pair_repair "downgraded_tool_result" pair_repair_stats.downgraded_tool_results;
     Log.emit
       Log.Info
       ~module_name:"Harness"

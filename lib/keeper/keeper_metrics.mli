@@ -254,6 +254,39 @@ val metric_keeper_compactions : string
 val metric_keeper_compaction_ratio_change : string
 val metric_keeper_compaction_saved_tokens : string
 
+(** Total tool-call pair-repair downgrades observed at the compaction call
+    site (post-compact, after [Context_compact_oas.compact] +
+    [Agent_sdk.Context_reducer.reduce fold_reducer]) inside
+    {!Keeper_compact_policy}. Incremented by
+    [pair_repair_stats.downgraded_tool_uses] /
+    [.downgraded_tool_results] returned from
+    [Keeper_context_core.repair_broken_tool_call_pairs_with_stats].
+
+    Closes the Prometheus-counter half of C1 (CRIT) from
+    [oas-internal-audit.html §6]: the JSONL [tool_pair_repair] structured
+    log alone gave operators no [/metrics] view, so fabrication-rate
+    alerts required JSONL grep. This counter exposes the same numbers via
+    the standard Prometheus surface.
+
+    Labels:
+    - [keeper]: keeper name.
+    - [kind]: closed 2-value vocabulary —
+      {ul {- [downgraded_tool_use]: a [tool_use] block whose paired
+            [tool_result] was lost during compaction was rewritten to
+            plain text instead of fabricating a synthetic result.}
+          {- [downgraded_tool_result]: an orphan [tool_result] block was
+            rewritten to plain text instead of fabricating its parent
+            [tool_use].}}
+
+    Related: {!metric_keeper_tool_pair_repair} covers the keeper-reducer
+    site (pre-compact, inside [Keeper_run_tools]) with the same downgrade
+    semantics but a different label vocabulary
+    ([dangling_tool_use|orphan_tool_result]) tied to that site's
+    before/after diff. The [was_fabricated:true] message-record metadata
+    half of C1 is RFC-scope (touches message shape across MASC + OAS) and
+    deferred. *)
+val metric_keeper_compaction_pair_repair_fabrications : string
+
 (** Effective emergency compaction ratio threshold, set once at module
     init in {!Keeper_compact_policy} from the env override
     [MASC_KEEPER_EMERGENCY_COMPACT_RATIO_THRESHOLD] (default 0.8,

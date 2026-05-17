@@ -504,6 +504,10 @@ let metric_keeper_compactions = "masc_keeper_compactions_total"
 let metric_keeper_compaction_ratio_change = "masc_keeper_compaction_ratio_change"
 let metric_keeper_compaction_saved_tokens = "masc_keeper_compaction_saved_tokens_total"
 
+let metric_keeper_compaction_pair_repair_fabrications =
+  "masc_keeper_compaction_pair_repair_fabrications_total"
+;;
+
 (* Effective emergency compaction ratio threshold (set once at module init
    from [MASC_KEEPER_EMERGENCY_COMPACT_RATIO_THRESHOLD], clamped [0.5,0.99]).
    Gauge so operators can confirm the live value via /metrics without

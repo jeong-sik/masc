@@ -107,6 +107,7 @@ describe('monitoring navigation labels', () => {
     expect(labelFor('agents')).toBe('Agent Observatory')
     expect(labelFor('goal-loop')).toBe('Goal Navigator')
     expect(labelFor('fleet-health')).toBe('System Telemetry')
+    expect(labelFor('observatory')).toBe('Activity Timeline')
     expect(labelFor('journey')).toBeUndefined()
     expect(labelFor('cognition')).toBeUndefined()
   })
@@ -141,18 +142,21 @@ describe('monitoring navigation labels', () => {
     const ids = sections.map(item => item.id)
 
     expect(defaultParamsForTab('monitoring')).toEqual({ section: 'runtime' })
-    expect(ids).toEqual(['runtime', 'cascade-config', 'agents', 'goal-loop', 'fleet-health', 'doctor'])
+    expect(ids).toEqual([
+      'runtime', 'cascade-config', 'agents', 'goal-loop', 'fleet-health',
+      'doctor', 'observatory',
+    ])
     expect(ids).toContain('fleet-health')
     expect(ids).toContain('runtime')
     expect(ids).toContain('cascade-config')
     expect(ids).toContain('agents')
     expect(ids).toContain('goal-loop')
     expect(ids).toContain('doctor')
+    expect(ids).toContain('observatory')
     expect(ids).not.toContain('journey')
     expect(ids).not.toContain('cognition')
     // Legacy sections removed in Phase 1
     expect(ids).not.toContain('live')
-    expect(ids).not.toContain('observatory')
     expect(ids).not.toContain('git-graph')
     expect(ids).not.toContain('safe-autonomy')
     expect(ids).not.toContain('cost')
@@ -174,13 +178,14 @@ describe('monitoring navigation labels', () => {
     expect(sections[3]?.id).toBe('goal-loop')
     expect(sections[4]?.id).toBe('fleet-health')
     expect(sections[5]?.id).toBe('doctor')
+    expect(sections[6]?.id).toBe('observatory')
   })
 
   it('keeps diagnostic monitoring routes available but hidden from the sidebar', () => {
     const sections = sectionItemsForTab('monitoring')
     const hiddenIds = sections.filter(item => item.hidden).map(item => item.id)
 
-    expect(hiddenIds).toEqual(['journey', 'observatory', 'cognition'])
+    expect(hiddenIds).toEqual(['journey', 'cognition'])
   })
 
   it('monitoring sidebar labels are unique (no overloaded term like "런타임")', () => {

@@ -378,6 +378,9 @@ let masc_goal_list_schema =
 let keeper_fs_edit_schema =
   find_schema_exn "keeper_fs_edit" Config.raw_all_tool_schemas
 
+let keeper_board_post_schema =
+  find_schema_exn "keeper_board_post" Config.raw_all_tool_schemas
+
 let assoc_string key json =
   match Yojson.Safe.Util.member key json with
   | `String value -> value
@@ -403,6 +406,59 @@ let test_registered_hook_keeper_fs_edit_patch_args () =
   Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
   Alcotest.(check bool) "args unchanged" true
     (Yojson.Safe.equal forwarded args)
+
+let keeper_board_post_sources_args =
+  `Assoc
+    [ "content", `String "Keeper board post validation regression"
+    ; "hearth", `String "ops"
+    ; ( "sources"
+      , `List
+          [ `Assoc
+              [ "url", `String "https://example.com/evidence"
+              ; "quote", `String "short supporting snippet"
+              ]
+          ] )
+    ; "judgment", `Assoc [ "summary", `String "sources array should pass" ]
+    ]
+
+let check_keeper_board_post_sources_preserved forwarded =
+  match Yojson.Safe.Util.member "sources" forwarded with
+  | `List [ `Assoc source_fields ] ->
+    Alcotest.(check (option string))
+      "source url preserved"
+      (Some "https://example.com/evidence")
+      (match List.assoc_opt "url" source_fields with
+       | Some (`String value) -> Some value
+       | _ -> None)
+  | other ->
+    Alcotest.failf
+      "expected sources array to be preserved, got %s"
+      (Yojson.Safe.to_string other)
+
+let test_validate_args_keeper_board_post_accepts_sources_array () =
+  match
+    Tool_input_validation.validate_args
+      ~schema:keeper_board_post_schema
+      ~name:"keeper_board_post"
+      ~args:keeper_board_post_sources_args
+      ()
+  with
+  | Ok forwarded -> check_keeper_board_post_sources_preserved forwarded
+  | Error result ->
+    Alcotest.failf
+      "expected keeper_board_post sources array to pass validation, got %s"
+      (Yojson.Safe.to_string result.Tool_result.data)
+
+let test_registered_hook_keeper_board_post_accepts_sources_array () =
+  let blocked, forwarded =
+    run_registered_hook
+      ~schema:keeper_board_post_schema
+      ~tool_name:"keeper_board_post"
+      ~args:keeper_board_post_sources_args
+      ()
+  in
+  Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
+  check_keeper_board_post_sources_preserved forwarded
 
 let validation_labels ~tool ~result ~reason =
   [ "tool", tool; "result", result; "reason", reason ]
@@ -784,8 +840,12 @@ let () =
         test_registered_hook_bypasses_empty_schema;
       Alcotest.test_case "keeper_fs_edit accepts patch args" `Quick
         test_registered_hook_keeper_fs_edit_patch_args;
+      Alcotest.test_case "keeper_board_post accepts sources array" `Quick
+        test_registered_hook_keeper_board_post_accepts_sources_array;
       Alcotest.test_case "direct validation uses explicit schema" `Quick
         test_validate_args_uses_explicit_schema_without_registry;
+      Alcotest.test_case "direct keeper_board_post accepts sources array" `Quick
+        test_validate_args_keeper_board_post_accepts_sources_array;
       Alcotest.test_case "masc_transition compat: to/note keys" `Quick
         test_registered_hook_transition_compat_to_and_note;
       Alcotest.test_case "masc_transition compat: status-like action value" `Quick

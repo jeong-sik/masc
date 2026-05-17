@@ -76,6 +76,10 @@ let compact_session_json session_json =
             ("task_title", string_json ~default:"not_recorded" (member_assoc "task_title" detail));
             ("result", string_json ~default:"not_recorded" ~max_len:160 (member_assoc "result" detail));
             ("reason", string_json ~default:"not_recorded" ~max_len:160 (member_assoc "reason" detail));
+            ("source",
+             `String
+               (Briefing_session_last_event_source.to_label
+                  Briefing_session_last_event_source.Recent_event_latest));
           ]
     | [] ->
         `Assoc
@@ -86,6 +90,10 @@ let compact_session_json session_json =
             ("task_title", `String "no recent session events");
             ("result", `String "not_recorded");
             ("reason", `String "not_recorded");
+            ("source",
+             `String
+               (Briefing_session_last_event_source.to_label
+                  Briefing_session_last_event_source.Fabricated_no_recent_events));
           ]
   in
   let communication_mode =

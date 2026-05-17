@@ -313,9 +313,37 @@ let test_compact_session_last_event_empty_uses_sentinel () =
           assert (get "actor" = "unknown");
           assert (get "task_title" = "no recent session events");
           assert (get "result" = "not_recorded");
-          assert (get "reason" = "not_recorded")
+          assert (get "reason" = "not_recorded");
+          assert (get "source" = "fabricated_no_recent_events")
       | _ -> assert false)
   | _ -> assert false
+
+let test_compact_session_last_event_source_marker () =
+  (* Provenance marker: empty -> fabricated, non-empty -> recent_event_latest.
+     Downstream dashboards / handoff consumers depend on this discriminator
+     to skip sentinel records that look like real observations. *)
+  let s_empty = session_fixture ~recent:[] () in
+  let out_empty = C.compact_session_json s_empty in
+  let source_of out =
+    match out with
+    | `Assoc kv -> (
+        match List.assoc_opt "last_event" kv with
+        | Some (`Assoc le) -> (
+            match List.assoc_opt "source" le with
+            | Some (`String s) -> s
+            | _ -> "<missing>")
+        | _ -> "<no-last-event>")
+    | _ -> "<not-assoc>"
+  in
+  assert (source_of out_empty = "fabricated_no_recent_events");
+  let s_one =
+    session_fixture
+      ~recent:[ recent_event ~event_type:"observed" ~actor:"alice"
+                  ~task_title:"observed task" () ]
+      ()
+  in
+  let out_one = C.compact_session_json s_one in
+  assert (source_of out_one = "recent_event_latest")
 
 let test_compact_session_last_event_uses_latest () =
   (* When multiple recent_events present, last_event mirrors the
@@ -545,6 +573,7 @@ let () =
   test_compact_session_communication_summary_format ();
   test_compact_session_last_event_empty_uses_sentinel ();
   test_compact_session_last_event_uses_latest ();
+  test_compact_session_last_event_source_marker ();
   test_compact_session_goal_default_when_blank ();
   test_compact_keeper_strict_keys ();
   test_compact_keeper_max_len_truncation ();

@@ -744,6 +744,24 @@ export interface KeeperRuntimeLensConfigDriftAxis {
   default_manifest_path: string | null
 }
 
+export interface KeeperRuntimeLensRuntimeProofAxis {
+  source: string
+  status: string
+  matched_tool_call_count: number
+  successful_tool_call_count: number
+  failed_tool_call_count: number
+  tools: string[]
+  successful_tools: string[]
+  failed_tools: string[]
+  sandbox_profiles: string[]
+  network_modes: string[]
+  docker_visible: boolean
+  git_credentials_enabled: boolean
+  github_identity_materialized: boolean
+  pr_create_observed: boolean
+  latest_at: string | null
+}
+
 export interface KeeperRuntimeLensContextAxis {
   context_injected_count: number
   context_compacted_event_count: number
@@ -765,6 +783,7 @@ export interface KeeperRuntimeLensAxes {
   provider_attempt: KeeperRuntimeLensProviderAttemptAxis
   claim_scope: KeeperRuntimeLensClaimScopeAxis
   config_drift: KeeperRuntimeLensConfigDriftAxis
+  runtime_proof: KeeperRuntimeLensRuntimeProofAxis
   context: KeeperRuntimeLensContextAxis
   memory: KeeperRuntimeLensMemoryAxis
 }
@@ -1078,6 +1097,27 @@ function parseRuntimeLensConfigDriftAxis(raw: unknown): KeeperRuntimeLensConfigD
   }
 }
 
+function parseRuntimeLensRuntimeProofAxis(raw: unknown): KeeperRuntimeLensRuntimeProofAxis {
+  const obj = isRecord(raw) ? raw : {}
+  return {
+    source: stringField(obj, 'source') || 'keeper_tool_call_log',
+    status: stringField(obj, 'status') || 'missing',
+    matched_tool_call_count: numberField(obj, 'matched_tool_call_count'),
+    successful_tool_call_count: numberField(obj, 'successful_tool_call_count'),
+    failed_tool_call_count: numberField(obj, 'failed_tool_call_count'),
+    tools: stringListField(obj, 'tools'),
+    successful_tools: stringListField(obj, 'successful_tools'),
+    failed_tools: stringListField(obj, 'failed_tools'),
+    sandbox_profiles: stringListField(obj, 'sandbox_profiles'),
+    network_modes: stringListField(obj, 'network_modes'),
+    docker_visible: obj.docker_visible === true,
+    git_credentials_enabled: obj.git_credentials_enabled === true,
+    github_identity_materialized: obj.github_identity_materialized === true,
+    pr_create_observed: obj.pr_create_observed === true,
+    latest_at: nullableStringField(obj, 'latest_at'),
+  }
+}
+
 function parseRuntimeLensContextAxis(raw: unknown): KeeperRuntimeLensContextAxis {
   const obj = isRecord(raw) ? raw : {}
   return {
@@ -1102,6 +1142,7 @@ function parseRuntimeLensAxes(raw: unknown): KeeperRuntimeLensAxes {
     provider_attempt: parseRuntimeLensProviderAttemptAxis(obj.provider_attempt),
     claim_scope: parseRuntimeLensClaimScopeAxis(obj.claim_scope),
     config_drift: parseRuntimeLensConfigDriftAxis(obj.config_drift),
+    runtime_proof: parseRuntimeLensRuntimeProofAxis(obj.runtime_proof),
     context: parseRuntimeLensContextAxis(obj.context),
     memory: parseRuntimeTraceMemory(obj.memory),
   }

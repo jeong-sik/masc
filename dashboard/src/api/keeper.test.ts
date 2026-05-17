@@ -226,6 +226,23 @@ describe('keeper runtime trace', () => {
             finished_count: 1,
             terminal_status: 'timeout',
           },
+          runtime_proof: {
+            source: 'keeper_tool_call_log',
+            status: 'pass',
+            matched_tool_call_count: 2,
+            successful_tool_call_count: 2,
+            failed_tool_call_count: 0,
+            tools: ['keeper_bash', 'keeper_pr_create'],
+            successful_tools: ['keeper_bash', 'keeper_pr_create'],
+            failed_tools: [],
+            sandbox_profiles: ['docker'],
+            network_modes: ['inherit'],
+            docker_visible: true,
+            git_credentials_enabled: true,
+            github_identity_materialized: true,
+            pr_create_observed: true,
+            latest_at: '2026-05-13T00:00:01Z',
+          },
         },
         swimlanes: {
           provider: {
@@ -262,6 +279,10 @@ describe('keeper runtime trace', () => {
     expect(result.runtime_lens.axes.tool_surface.visible_tool_count).toBeNull()
     expect(result.runtime_lens.axes.provider_lane.resolved).toBe(false)
     expect(result.runtime_lens.axes.provider_attempt.terminal_status).toBe('timeout')
+    expect(result.runtime_lens.axes.runtime_proof.status).toBe('pass')
+    expect(result.runtime_lens.axes.runtime_proof.docker_visible).toBe(true)
+    expect(result.runtime_lens.axes.runtime_proof.github_identity_materialized).toBe(true)
+    expect(result.runtime_lens.axes.runtime_proof.tools).toEqual(['keeper_bash', 'keeper_pr_create'])
     expect(result.runtime_lens.swimlanes.provider.terminal_status).toBe('timeout')
     expect(result.runtime_lens.swimlanes.memory_context.terminal_status).toBe('unknown')
     expect(result.runtime_lens.gaps.map(gap => gap.code)).toEqual(['required_tool_not_materialized'])

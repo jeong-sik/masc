@@ -73,6 +73,8 @@ type t =
   | ProfileLoadFailures
   | CompactAuditFailures
   | CompactAuditRetentionParse
+  | CompactAuditDrainBatches
+  | CompactAuditDrainBatchSizeBucket
   | FsFailures
   | CrashPersistenceFailures
   | GenerationLineageFailures
@@ -273,6 +275,9 @@ let to_string = function
   | ProfileLoadFailures -> "masc_keeper_profile_load_failures_total"
   | CompactAuditFailures -> "masc_keeper_compact_audit_failures_total"
   | CompactAuditRetentionParse -> "masc_keeper_compact_audit_retention_parse_total"
+  | CompactAuditDrainBatches -> "masc_keeper_compact_audit_drain_batches_total"
+  | CompactAuditDrainBatchSizeBucket ->
+    "masc_keeper_compact_audit_drain_batch_size_bucket_total"
   | FsFailures -> "masc_keeper_fs_failures_total"
   | CrashPersistenceFailures -> "masc_keeper_crash_persistence_failures_total"
   | GenerationLineageFailures -> "masc_keeper_generation_lineage_failures_total"
@@ -553,6 +558,18 @@ let metric_keeper_compact_audit_failures = "masc_keeper_compact_audit_failures_t
 
 let metric_keeper_compact_audit_retention_parse =
   "masc_keeper_compact_audit_retention_parse_total"
+;;
+
+(* V17 burst visibility: per-drain-call counter and bucketed batch-size
+   counter for [keeper_compact_audit] subscriber. Labels for bucket are
+   closed-vocab {"0"|"1_9"|"10_49"|"50_99"|"100_499"|"500_plus"} to
+   avoid cardinality explosion. *)
+let metric_keeper_compact_audit_drain_batches =
+  "masc_keeper_compact_audit_drain_batches_total"
+;;
+
+let metric_keeper_compact_audit_drain_batch_size_bucket =
+  "masc_keeper_compact_audit_drain_batch_size_bucket_total"
 ;;
 
 let metric_keeper_fs_failures = "masc_keeper_fs_failures_total"

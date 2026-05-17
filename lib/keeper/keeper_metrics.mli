@@ -65,6 +65,8 @@ type t =
   | ProfileLoadFailures
   | CompactAuditFailures
   | CompactAuditRetentionParse
+  | CompactAuditDrainBatches
+  | CompactAuditDrainBatchSizeBucket
   | FsFailures
   | CrashPersistenceFailures
   | GenerationLineageFailures
@@ -323,6 +325,21 @@ val metric_keeper_compact_audit_retention_parse : string
     one of [parsed_ok | unset_default | parse_error | out_of_range]
     (see {!Keeper_compact_audit_retention_outcome}). Surfaces operator
     misconfiguration of [MASC_COMPACTION_AUDIT_RETENTION_DAYS]. *)
+
+val metric_keeper_compact_audit_drain_batches : string
+(** V17 burst visibility: incremented once per drain-loop iteration of the
+    [keeper_compact_audit] subscriber fiber. Combined with
+    {!metric_keeper_compact_audit_drain_batch_size_bucket}, operators can
+    compute mean batch size and bucket distribution to detect
+    9-keeper compaction storms before JSONL writes fall behind. *)
+
+val metric_keeper_compact_audit_drain_batch_size_bucket : string
+(** V17 burst visibility: bucketed counter labelled [bucket] with a
+    closed vocabulary of [0 | 1_9 | 10_49 | 50_99 | 100_499 | 500_plus].
+    Each drain-loop iteration bumps exactly one bucket label so operators
+    can detect lag building via
+    [rate(masc_keeper_compact_audit_drain_batch_size_bucket_total{bucket="100_499"}[5m])].
+    Closed vocab avoids cardinality explosion. *)
 
 val metric_keeper_fs_failures : string
 val metric_keeper_crash_persistence_failures : string

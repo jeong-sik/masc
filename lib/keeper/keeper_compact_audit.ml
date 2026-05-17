@@ -520,6 +520,23 @@ let spawn_subscriber
   Eio.Switch.on_release sw (fun () ->
     Agent_sdk_metrics_bridge.unsubscribe bus sub);
   Eio.Fiber.fork ~sw (fun () ->
+    (* V17 (INFO) burst visibility: drain runs every [drain_interval_s]
+       (default 0.25s) and emits a per-call counter + bucketed batch-size
+       counter so operators can see lag building during 9-keeper
+       compaction storms before JSONL writes fall behind. The streak ref
+       is scoped to this fiber closure (per-subscription isolation) so
+       different subscribers don't share spike-dedup state. *)
+    let over_threshold_streak = ref 0 in
+    let batch_size_bucket_label size =
+      (* Closed-vocabulary bucket vocabulary. Boundaries reflect the
+         normal-load (~5-10/batch) → burst (100+/batch) transition. *)
+      if size = 0 then "0"
+      else if size < 10 then "1_9"
+      else if size < 50 then "10_49"
+      else if size < 100 then "50_99"
+      else if size < 500 then "100_499"
+      else "500_plus"
+    in
     let rec loop () =
       let batch = Agent_sdk_metrics_bridge.drain sub in
       List.iter
@@ -538,6 +555,31 @@ let spawn_subscriber
                Log.Keeper.warn "keeper_compact_audit: handle_event failed: %s"
                  (Printexc.to_string exn))
         batch;
+      (* V17 visibility: emit batch-size signal AFTER List.iter so the
+         counter reflects events processed (not pending), giving the
+         operator a true lag indicator. *)
+      let batch_size = List.length batch in
+      Prometheus.inc_counter
+        Keeper_metrics.metric_keeper_compact_audit_drain_batches
+        ();
+      Prometheus.inc_counter
+        Keeper_metrics.metric_keeper_compact_audit_drain_batch_size_bucket
+        ~labels:[("bucket", batch_size_bucket_label batch_size)]
+        ();
+      (* Streak-deduped WARN: log-spam protection during sustained burst.
+         Counter still fires every batch — only the WARN line is deduped.
+         This is observability shaping, not symptom suppression: cap /
+         back-pressure decisions remain operator policy. *)
+      if batch_size >= 100 then begin
+        incr over_threshold_streak;
+        if !over_threshold_streak = 1 || !over_threshold_streak mod 10 = 0
+        then
+          Log.Keeper.warn
+            "keeper_compact_audit: drain batch_size=%d (streak=%d) — burst, \
+             check 9-keeper compaction or JSONL writer lag"
+            batch_size !over_threshold_streak
+      end
+      else over_threshold_streak := 0;
       Eio.Time.sleep clock drain_interval_s;
       loop ()
     in

@@ -364,6 +364,32 @@ let has_turn_affordance expected turn_affordances =
 
 let has_task_claim_affordance = has_turn_affordance Task_claim
 
+let generic_required_actionable_tool_names ~(has_current_task : bool)
+    ~(turn_affordances : string list) ~(allowed_tool_names : string list) =
+  let is_stay_silent name =
+    String.equal
+      (Keeper_tool_disclosure.canonical_tool_name name)
+      "keeper_stay_silent"
+  in
+  let can_recommend_tool name =
+    List.mem name allowed_tool_names
+    && Keeper_tool_disclosure.tool_name_can_satisfy_required_contract name
+    && not (is_stay_silent name)
+    && ((not has_current_task)
+        || not (Keeper_tool_disclosure.is_claim_context_tool_name name))
+  in
+  let preferred =
+    preferred_tool_names_for_turn_affordances turn_affordances
+    |> List.filter can_recommend_tool
+    |> Keeper_types.dedupe_keep_order
+  in
+  match preferred with
+  | _ :: _ -> preferred
+  | [] ->
+    allowed_tool_names
+    |> List.filter can_recommend_tool
+    |> Keeper_types.dedupe_keep_order
+
 let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
     ~(turn_affordances : string list) ~(allowed_tool_names : string list) =
   let is_stay_silent name =
@@ -383,6 +409,17 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
          && ((not has_current_task)
              || not (Keeper_tool_disclosure.is_claim_context_tool_name name)))
       allowed_tool_names
+  in
+  let actionable_tool_names =
+    generic_required_actionable_tool_names ~has_current_task ~turn_affordances
+      ~allowed_tool_names
+  in
+  let exact_tool_choice_if_public = function
+    | [ name ] ->
+      (match Keeper_tool_alias.route name with
+       | Some _ -> Some (Agent_sdk.Types.Tool name)
+       | None -> None)
+    | [] | _ :: _ :: _ -> None
   in
   if has_turn_affordance Board_curation turn_affordances
      && List.exists
@@ -448,38 +485,20 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
        tools cannot advance an already-owned task, so forcing [Any] here
        creates an impossible contract and burns a retry. *)
     Agent_sdk.Types.Auto
-  else
-    (* Active task in progress: keep the strict gate.  The keeper is
-    expected to make progress via some tool call (board update,
-    task_update, task_done, etc.). *)
-    Agent_sdk.Types.Any
+  else (
+    match exact_tool_choice_if_public actionable_tool_names with
+    | Some tool_choice -> tool_choice
+    | None ->
+      (* Active task in progress: keep the strict gate.  The keeper is
+         expected to make progress via some tool call (board update,
+         task_update, task_done, etc.). *)
+      Agent_sdk.Types.Any)
 
 let generic_required_tool_candidate_names ~(has_current_task : bool)
     ~(turn_affordances : string list) ~(allowed_tool_names : string list) =
-  let is_stay_silent name =
-    String.equal
-      (Keeper_tool_disclosure.canonical_tool_name name)
-      "keeper_stay_silent"
-  in
-  let can_recommend_tool name =
-    List.mem name allowed_tool_names
-    && Keeper_tool_disclosure.tool_name_can_satisfy_required_contract name
-    && not (is_stay_silent name)
-    && ((not has_current_task)
-        || not (Keeper_tool_disclosure.is_claim_context_tool_name name))
-  in
   let actionable_tools =
-    preferred_tool_names_for_turn_affordances turn_affordances
-    |> List.filter can_recommend_tool
-    |> Keeper_types.dedupe_keep_order
-  in
-  let actionable_tools =
-    match actionable_tools with
-    | [] ->
-        allowed_tool_names
-        |> List.filter can_recommend_tool
-        |> Keeper_types.dedupe_keep_order
-    | tools -> tools
+    generic_required_actionable_tool_names ~has_current_task ~turn_affordances
+      ~allowed_tool_names
   in
   actionable_tools
 ;;

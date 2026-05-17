@@ -125,6 +125,33 @@ export interface DashboardFleetSafetyHealth {
   keeper_fleet_no_fibers: boolean | null
   keeper_fd_pressure: DashboardFleetPressureHealth | null
   keeper_fleet_safety: DashboardFleetPressureHealth | null
+  keeper_reaction_ledger: DashboardKeeperReactionLedgerHealth | null
+}
+
+export interface DashboardKeeperReactionLedgerPendingKeeper {
+  keeper_name: string
+  pending_stimulus_count: number
+  pending_stimulus_ids: string[]
+}
+
+export interface DashboardKeeperReactionLedgerHealth {
+  status: string | null
+  operator_action_required: boolean | null
+  keeper_count: number | null
+  row_count: number | null
+  stimulus_count: number | null
+  reaction_count: number | null
+  turn_started_count: number | null
+  cursor_ack_count: number | null
+  execution_receipt_count: number | null
+  terminal_reason_count: number | null
+  operator_escalation_count: number | null
+  unknown_reaction_count: number | null
+  cursor_swept_stimulus_count: number | null
+  legacy_cursor_swept_stimulus_count: number | null
+  pending_stimulus_count: number | null
+  read_error_count: number | null
+  pending_by_keeper: DashboardKeeperReactionLedgerPendingKeeper[]
 }
 
 export interface DashboardFleetPressureHealth {

@@ -167,6 +167,20 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
       keeper_fleet_safety: {
         blocked_keepers: 24,
       },
+      keeper_reaction_ledger: {
+        status: 'ok',
+        operator_action_required: false,
+        keeper_count: 2,
+        row_count: 8,
+        stimulus_count: 4,
+        reaction_count: 4,
+        cursor_ack_count: 2,
+        cursor_swept_stimulus_count: 3,
+        legacy_cursor_swept_stimulus_count: 1,
+        pending_stimulus_count: 0,
+        read_error_count: 0,
+        pending_by_keeper: [],
+      },
     }))
 
     expect(result?.fleet_safety).toMatchObject({
@@ -181,6 +195,47 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
       },
       keeper_fleet_safety: {
         blocked_keepers: 24,
+      },
+      keeper_reaction_ledger: {
+        status: 'ok',
+        cursor_ack_count: 2,
+        cursor_swept_stimulus_count: 3,
+        legacy_cursor_swept_stimulus_count: 1,
+        pending_stimulus_count: 0,
+        read_error_count: 0,
+      },
+    })
+  })
+
+  it('keeps reaction-ledger health even when other fleet safety fields are absent', () => {
+    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
+      keeper_reaction_ledger: {
+        status: 'degraded',
+        operator_action_required: true,
+        pending_stimulus_count: 2,
+        cursor_swept_stimulus_count: 5,
+        legacy_cursor_swept_stimulus_count: 1,
+        pending_by_keeper: [{
+          keeper_name: 'keeper-a',
+          pending_stimulus_count: 2,
+          pending_stimulus_ids: ['p-1', 'p-2'],
+        }],
+      },
+    }))
+
+    expect(result?.fleet_safety).toMatchObject({
+      keeper_fibers: null,
+      keeper_reaction_ledger: {
+        status: 'degraded',
+        operator_action_required: true,
+        pending_stimulus_count: 2,
+        cursor_swept_stimulus_count: 5,
+        legacy_cursor_swept_stimulus_count: 1,
+        pending_by_keeper: [{
+          keeper_name: 'keeper-a',
+          pending_stimulus_count: 2,
+          pending_stimulus_ids: ['p-1', 'p-2'],
+        }],
       },
     })
   })

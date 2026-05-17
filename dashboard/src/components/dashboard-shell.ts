@@ -3,7 +3,7 @@ import { signal } from '@preact/signals'
 import { lazy, Suspense } from 'preact/compat'
 import { useEffect } from 'preact/hooks'
 import type { RouteState, TabId } from '../types'
-import type { DashboardFleetSafetyHealth, DashboardRuntimeResolution, Keeper } from '../types'
+import type { DashboardFleetSafetyHealth, DashboardKeeperReactionLedgerHealth, DashboardRuntimeResolution, Keeper } from '../types'
 import { hashForRoute, navigate, route } from '../router'
 import { connected, reconnectCount, lastDisconnectedAt } from '../sse'
 import { dashboardWsOnlyEnabled } from '../dashboard-ws-cutover'
@@ -208,6 +208,50 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
   return null
 }
 
+function ledgerCount(value: number | null | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
+function reactionLedgerHealthChip(
+  ledger: DashboardKeeperReactionLedgerHealth | null | undefined,
+): DashboardHealthChip | null {
+  if (!ledger) return null
+  const pending = ledgerCount(ledger.pending_stimulus_count)
+  const cursorSwept = ledgerCount(ledger.cursor_swept_stimulus_count)
+  const legacySwept = ledgerCount(ledger.legacy_cursor_swept_stimulus_count)
+  const readErrors = ledgerCount(ledger.read_error_count)
+  const cursorAck = ledgerCount(ledger.cursor_ack_count)
+  const status = ledger.status ?? 'unknown'
+  const requiresAction = ledger.operator_action_required === true
+  const totalSwept = cursorSwept + legacySwept
+  if (!requiresAction && pending === 0 && readErrors === 0 && totalSwept === 0 && status !== 'degraded') {
+    return null
+  }
+  const tone: DashboardHealthChipTone = readErrors > 0
+    ? 'bad'
+    : requiresAction || pending > 0 || status === 'degraded'
+      ? 'warn'
+      : 'ok'
+  const label = pending > 0
+    ? `Reaction ledger pending ${pending}`
+    : totalSwept > 0
+      ? `Reaction ledger swept ${totalSwept}`
+      : `Reaction ledger ${status}`
+  return {
+    key: 'reaction-ledger',
+    label,
+    detail: [
+      `status=${status}`,
+      `pending=${pending}`,
+      `cursor_swept=${cursorSwept}`,
+      `legacy_swept=${legacySwept}`,
+      `cursor_ack=${cursorAck}`,
+      `read_errors=${readErrors}`,
+    ].join(', '),
+    tone,
+  }
+}
+
 export function dashboardHealthChips(input: DashboardHealthInput): DashboardHealthChip[] {
   const chips: DashboardHealthChip[] = []
   if (!input.connected) {
@@ -249,6 +293,11 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
   const fleetChip = fleetSafetyHealthChip(runtime?.fleet_safety ?? null)
   if (fleetChip) {
     chips.push(fleetChip)
+  }
+
+  const reactionLedgerChip = reactionLedgerHealthChip(runtime?.fleet_safety?.keeper_reaction_ledger)
+  if (reactionLedgerChip) {
+    chips.push(reactionLedgerChip)
   }
 
   const configured = input.counts?.configured_keepers ?? 0

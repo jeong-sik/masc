@@ -197,19 +197,21 @@ let reset_for_tests () =
    Stdlib.Mutex is intentional here: this helper can run before an Eio context
    exists, and the protected section is a one-shot host-limit probe. *)
 let detect_nofile_soft_limit_now () =
-  try
-    let lines, status =
-      With_process.with_process_args_in
-        "/bin/sh"
-        [| "sh"; "-c"; "ulimit -n" |]
-        With_process.drain_lines
-    in
-    match status, lines with
-    | Unix.WEXITED 0, line :: _ -> int_of_string_opt (String.trim line)
-    | _ -> None
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | _ -> None
+  (* RFC-0106 P1: one-shot host-limit probe; silent _ -> None is the
+     pre-existing fallback when ulimit is unavailable.  Cancelled
+     re-raise centralised via Cancel_safe.protect. *)
+  Cancel_safe.protect
+    ~on_exn:(fun _ -> None)
+    (fun () ->
+      let lines, status =
+        With_process.with_process_args_in
+          "/bin/sh"
+          [| "sh"; "-c"; "ulimit -n" |]
+          With_process.drain_lines
+      in
+      match status, lines with
+      | Unix.WEXITED 0, line :: _ -> int_of_string_opt (String.trim line)
+      | _ -> None)
 ;;
 
 let process_nofile_soft_limit () =
@@ -283,19 +285,19 @@ let detect_darwin_system_fd_snapshot_now () =
   if not (Sys.file_exists "/System/Library/CoreServices/SystemVersion.plist")
   then None
   else
-    try
-      let lines, status =
-        With_process.with_process_args_in
-          "/usr/sbin/sysctl"
-          [| "sysctl"; "-n"; "kern.num_files"; "kern.maxfiles" |]
-          With_process.drain_lines
-      in
-      match status with
-      | Unix.WEXITED 0 -> parse_system_fd_snapshot lines
-      | _ -> None
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | _ -> None
+    (* RFC-0106 P1: darwin-only sysctl probe; silent _ -> None preserved. *)
+    Cancel_safe.protect
+      ~on_exn:(fun _ -> None)
+      (fun () ->
+        let lines, status =
+          With_process.with_process_args_in
+            "/usr/sbin/sysctl"
+            [| "sysctl"; "-n"; "kern.num_files"; "kern.maxfiles" |]
+            With_process.drain_lines
+        in
+        match status with
+        | Unix.WEXITED 0 -> parse_system_fd_snapshot lines
+        | _ -> None)
 ;;
 
 let detect_system_fd_snapshot_now () =

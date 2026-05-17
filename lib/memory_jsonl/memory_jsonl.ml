@@ -217,22 +217,31 @@ let parse_line (line : string) : (string * Yojson.Safe.t option * float) option 
         (snippet_of_line trimmed);
       None
 
-(** Read all lines from a session file.
-    Returns empty list if file does not exist.
-    Logs a warning if file exceeds [max_file_size]. *)
-let read_lines ~path : (string * Yojson.Safe.t option * float) list =
-  if not (Fs_compat.file_exists path) then []
-  else begin
-    (* Size guard *)
+(** Stream parsed rows from a session file.
+    Missing files produce zero rows. Logs a warning if the file exceeds
+    [max_file_size]. *)
+let warn_if_large_file path =
+  try
+    let stat = Unix.stat path in
+    let size = stat.Unix.st_size in
+    if size > max_file_size then
+      Log.Memory.warn "memory_jsonl: file %s is %d bytes (>50MB)" path size
+  with Unix.Unix_error _ -> ()
+
+let iter_lines ~path f =
+  if Fs_compat.file_exists path then begin
+    warn_if_large_file path;
     (try
-       let stat = Unix.stat path in
-       let size = stat.Unix.st_size in
-       if size > max_file_size then
-         Log.Memory.warn "memory_jsonl: file %s is %d bytes (>50MB)" path size
-     with Unix.Unix_error _ -> ());
-    let content = Fs_compat.load_file path in
-    let lines = String.split_on_char '\n' content in
-    List.filter_map parse_line lines
+       let ic = open_in_bin path in
+       Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+         try
+           while true do
+             match parse_line (input_line ic) with
+             | Some row -> f row
+             | None -> ()
+           done
+         with End_of_file -> ())
+     with Sys_error _ -> ())
   end
 
 (** Create a session-based JSONL [long_term_backend].
@@ -260,14 +269,11 @@ let make_backend_with_query_observer ~on_query_result ~base_dir ~agent_name
 
   let retrieve ~key =
     try
-      let entries = read_lines ~path in
-      (* Fold over all entries; last match wins (file is oldest-first) *)
-      let last_value = List.fold_left (fun acc (k, v, _ts) ->
-          if k = key then Some v else acc
-        ) None entries
-      in
+      let last_value = ref None in
+      iter_lines ~path (fun (k, v, _ts) ->
+        if k = key then last_value := Some v);
       (* Some (Some v) = value, Some None = tombstone, None = not found *)
-      match last_value with
+      match !last_value with
       | Some (Some v) -> Some v
       | Some None -> None  (* tombstone *)
       | None -> None       (* key never written *)
@@ -310,14 +316,13 @@ let make_backend_with_query_observer ~on_query_result ~base_dir ~agent_name
   let query ~prefix ~limit =
     let result =
       try
-        let entries = read_lines ~path in
         (* De-duplicate by key (latest wins), skip tombstones *)
         let tbl = Hashtbl.create 32 in
-        List.iter (fun (key, value, ts) ->
+        iter_lines ~path (fun (key, value, ts) ->
           if String.length key >= String.length prefix
              && String.sub key 0 (String.length prefix) = prefix then
             Hashtbl.replace tbl key (value, ts)
-        ) entries;
+        );
         (* Collect non-tombstone entries *)
         let results = Hashtbl.fold (fun key (value, ts) acc ->
           match value with

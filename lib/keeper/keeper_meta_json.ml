@@ -66,6 +66,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "compaction_token_gate", `Int m.compaction.token_gate
     ; "continuity_compaction_cooldown_sec", `Int m.compaction.cooldown_sec
     ; "max_checkpoint_messages", `Int m.compaction.max_checkpoint_messages
+    ; "keep_recent_tool_results", `Int m.compaction.keep_recent_tool_results
     ; "auto_handoff", `Bool m.auto_handoff
     ; "handoff_threshold", `Float m.handoff_threshold
     ; "handoff_cooldown_sec", `Int m.handoff_cooldown_sec

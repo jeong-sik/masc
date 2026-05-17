@@ -210,7 +210,14 @@ let compact_if_needed_typed
     in
     (* Use OAS stub_tool_results instead of MASC's FoldCompleted —
          OAS owns context reduction, MASC is a consumer. *)
-    let fold_reducer = Agent_sdk.Context_reducer.stub_tool_results ~keep_recent:2 in
+    (* V12: per-keeper config replaces the prior hardcoded
+         [~keep_recent:2].  Default preserved via
+         [Keeper_config.default_keep_recent_tool_results] = 2 so
+         existing configs see no behavior change. *)
+    let fold_reducer =
+      Agent_sdk.Context_reducer.stub_tool_results
+        ~keep_recent:meta.compaction.keep_recent_tool_results
+    in
     let strategy_names =
       List.map Context_compact_oas.strategy_name strategies @ [ "StubToolResults" ]
     in

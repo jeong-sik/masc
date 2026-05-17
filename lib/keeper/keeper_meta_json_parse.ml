@@ -340,6 +340,13 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
           ; cooldown_sec = continuity_compaction_cooldown_sec
           ; max_checkpoint_messages =
               Safe_ops.json_int ~default:120 "max_checkpoint_messages" json
+          ; keep_recent_tool_results =
+              Keeper_config.normalize_keep_recent_tool_results
+                ~keeper_name
+                (Safe_ops.json_int
+                   ~default:Keeper_config.default_keep_recent_tool_results
+                   "keep_recent_tool_results"
+                   json)
           }
       ; pp_auto_handoff
       ; pp_handoff_threshold

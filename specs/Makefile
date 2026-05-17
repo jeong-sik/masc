@@ -143,7 +143,7 @@ check-closure: check-all
 #   keeper-state-machine   ~4 min   (34 cfgs, dominated by KSM specs)
 #   masc-ecosystem         ~6 min   (MASCEcosystem 352s)
 #   social-and-state-prod  ~3 min   (SocialStateCap 180s top)
-#   others (14 dirs)       ~7 min   (incl. KeeperStaleKilled 182s + MemoryCompaction 181s)
+#   others (15 dirs)       ~7 min   (incl. KeeperStaleKilled 182s + MemoryCompaction 181s)
 #
 # Wall-clock fan-out reduces TLA+ Main from ~22 min monolithic to ~7-8 min.
 
@@ -153,8 +153,8 @@ check-social: BUGGY_CFGS := $(foreach d,$(SOCIAL_DIRS),$(call buggy_cfgs_in,$(d)
 check-social: check-all
 
 OTHER_DIRS := admission-queue auth autonomous boundary bug-models cascade \
-              checkpoint-trim closure keeper-turn-fsm multimodal resilience \
-              server-state shared task-lifecycle
+              checkpoint-trim closure keeper-switch-hierarchy keeper-turn-fsm \
+              multimodal resilience server-state shared task-lifecycle
 check-others: CLEAN_CFGS := $(foreach d,$(OTHER_DIRS),$(call clean_cfgs_in,$(d)/))
 check-others: BUGGY_CFGS := $(foreach d,$(OTHER_DIRS),$(call buggy_cfgs_in,$(d)/))
 check-others: check-all
@@ -165,7 +165,7 @@ SHARD_DIRS_ALL := keeper-state-machine masc-ecosystem $(SOCIAL_DIRS) $(OTHER_DIR
 check-matrix-coverage: SHELL := /bin/bash
 check-matrix-coverage:
 	@set -euo pipefail; \
-	all_sorted=$$(find . -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort -u); \
+	all_sorted=$$(find . -mindepth 1 -maxdepth 1 -type d ! -name states -exec basename {} \; | sort -u); \
 	dups=$$(printf '%s\n' $(SHARD_DIRS_ALL) | sort | uniq -d); \
 	if [ -n "$$dups" ]; then echo "::error::Dirs listed in more than one shard:"; echo "$$dups"; exit 1; fi; \
 	shard_sorted=$$(printf '%s\n' $(SHARD_DIRS_ALL) | sort -u); \

@@ -56,6 +56,13 @@ type capture =
   ; truncated : bool
   }
 
+type run_guard = { run : 'a. (unit -> 'a) -> 'a }
+
+let run_guard : run_guard Atomic.t = Atomic.make { run = (fun f -> f ()) }
+let set_run_guard guard = Atomic.set run_guard guard
+let reset_run_guard_for_testing () = Atomic.set run_guard { run = (fun f -> f ()) }
+let with_run_guard f = (Atomic.get run_guard).run f
+
 open Result_syntax
 
 let argv_to_string argv = String.concat " " (List.map Filename.quote argv)
@@ -276,76 +283,78 @@ let await_result promise map_exn =
 let run ~sw ~clock ~config ~argv ~timeout_s =
   let t0 = Unix.gettimeofday () in
   let* effective = effective_argv ~config ~argv in
-  let* pid, stdout_r, stderr_r = spawn_child ~sw config effective in
-  (* Pipe FDs are owned by [sw] via Switch.on_release in spawn_child.
-     Only the child lifecycle remains as a manual cleanup concern here.
-     [reaped] tracks whether waitpid has consumed the child, so the
-     finally clause only kills (and avoids a SIGKILL race) when needed. *)
-  let reaped = ref false in
-  Fun.protect
-    ~finally:(fun () -> if not !reaped then kill_child config pid)
-    (fun () ->
-       let wait_promise =
-         spawn_result_promise ~sw (fun () ->
-           Eio_unix.run_in_systhread ~label:"autonomy-exec-waitpid" (fun () ->
-             snd (Unix.waitpid [] pid)))
-       in
-       let stdout_promise =
-         spawn_result_promise ~sw (fun () ->
-           drain_fd ~limit:config.stdout_limit_bytes stdout_r)
-       in
-       let stderr_promise =
-         spawn_result_promise ~sw (fun () ->
-           drain_fd ~limit:config.stderr_limit_bytes stderr_r)
-       in
-       let capture_and_finish status =
-         let* stdout_capture =
-           await_result stdout_promise (fun exn ->
-             file_op_error ~op:"read" ~path:"stdout" ~detail:(Printexc.to_string exn))
+  with_run_guard (fun () ->
+    let* pid, stdout_r, stderr_r = spawn_child ~sw config effective in
+    (* Pipe FDs are owned by [sw] via Switch.on_release in spawn_child.
+       Only the child lifecycle remains as a manual cleanup concern here.
+       [reaped] tracks whether waitpid has consumed the child, so the
+       finally clause only kills (and avoids a SIGKILL race) when needed. *)
+    let reaped = ref false in
+    Fun.protect
+      ~finally:(fun () -> if not !reaped then kill_child config pid)
+      (fun () ->
+         let wait_promise =
+           spawn_result_promise ~sw (fun () ->
+             Eio_unix.run_in_systhread ~label:"autonomy-exec-waitpid" (fun () ->
+               snd (Unix.waitpid [] pid)))
          in
-         let* stderr_capture =
-           await_result stderr_promise (fun exn ->
-             file_op_error ~op:"read" ~path:"stderr" ~detail:(Printexc.to_string exn))
+         let stdout_promise =
+           spawn_result_promise ~sw (fun () ->
+             drain_fd ~limit:config.stdout_limit_bytes stdout_r)
          in
-         Ok
-           { effective_argv = effective
-           ; status
-           ; stdout = stdout_capture.text
-           ; stderr = stderr_capture.text
-           ; stdout_truncated = stdout_capture.truncated
-           ; stderr_truncated = stderr_capture.truncated
-           ; elapsed_s = Unix.gettimeofday () -. t0
-           }
-       in
-       try
-         let* unix_status =
-           Eio.Time.with_timeout_exn clock timeout_s (fun () ->
-             await_result wait_promise (fun exn ->
-               file_op_error
-                 ~op:"waitpid"
-                 ~path:(string_of_int pid)
-                 ~detail:(Printexc.to_string exn)))
+         let stderr_promise =
+           spawn_result_promise ~sw (fun () ->
+             drain_fd ~limit:config.stderr_limit_bytes stderr_r)
          in
-         reaped := true;
-         capture_and_finish (status_of_unix_status unix_status)
-       with
-       | Eio.Time.Timeout ->
-         kill_child config pid;
-         let timed_out_signal =
-           match
-             await_result wait_promise (fun exn ->
-               file_op_error
-                 ~op:"waitpid"
-                 ~path:(string_of_int pid)
-                 ~detail:(Printexc.to_string exn))
-           with
-           | Ok (Unix.WSIGNALED signal | Unix.WSTOPPED signal) -> Some signal
-           | Ok (Unix.WEXITED _) -> None
-           | Error _ -> None
+         let capture_and_finish status =
+           let* stdout_capture =
+             await_result stdout_promise (fun exn ->
+               file_op_error ~op:"read" ~path:"stdout" ~detail:(Printexc.to_string exn))
+           in
+           let* stderr_capture =
+             await_result stderr_promise (fun exn ->
+               file_op_error ~op:"read" ~path:"stderr" ~detail:(Printexc.to_string exn))
+           in
+           Ok
+             { effective_argv = effective
+             ; status
+             ; stdout = stdout_capture.text
+             ; stderr = stderr_capture.text
+             ; stdout_truncated = stdout_capture.truncated
+             ; stderr_truncated = stderr_capture.truncated
+             (* NDT-OK: boundary telemetry only; policy uses status and bounded captures. *)
+             ; elapsed_s = Unix.gettimeofday () -. t0
+             }
          in
-         reaped := true;
-         capture_and_finish (Timed_out timed_out_signal)
-       | Eio.Cancel.Cancelled _ as exn -> raise exn)
+         try
+           let* unix_status =
+             Eio.Time.with_timeout_exn clock timeout_s (fun () ->
+               await_result wait_promise (fun exn ->
+                 file_op_error
+                   ~op:"waitpid"
+                   ~path:(string_of_int pid)
+                   ~detail:(Printexc.to_string exn)))
+           in
+           reaped := true;
+           capture_and_finish (status_of_unix_status unix_status)
+         with
+         | Eio.Time.Timeout ->
+           kill_child config pid;
+           let timed_out_signal =
+             match
+               await_result wait_promise (fun exn ->
+                 file_op_error
+                   ~op:"waitpid"
+                   ~path:(string_of_int pid)
+                   ~detail:(Printexc.to_string exn))
+             with
+             | Ok (Unix.WSIGNALED signal | Unix.WSTOPPED signal) -> Some signal
+             | Ok (Unix.WEXITED _) -> None
+             | Error _ -> None
+           in
+           reaped := true;
+           capture_and_finish (Timed_out timed_out_signal)
+         | Eio.Cancel.Cancelled _ as exn -> raise exn))
 ;;
 
 [@@@coverage off]

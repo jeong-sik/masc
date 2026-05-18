@@ -86,6 +86,13 @@ val install_with_process_sandbox_exec_guard : unit -> unit
     subprocess lifetime: open, caller drain, and close. Before Eio startup, the
     guard runs directly so pure test/module paths stay safe. *)
 
+val install_autonomy_exec_sandbox_exec_guard : unit -> unit
+(** [install_autonomy_exec_sandbox_exec_guard ()] installs the process-wide
+    {!Masc_mcp_cdal_runtime.Autonomy_exec} guard that accounts autonomy-loop
+    child execution as {!Sandbox_exec} while {!Eio_guard} is ready. The slot
+    covers the whole child lifetime, including waitpid, timeout handling, and
+    stdout/stderr drain. *)
+
 type snapshot = {
   per_kind : (kind * int) list ;
       (** in-flight count per class (cap − available semaphore slots). *)

@@ -48,6 +48,14 @@ type output =
   ; elapsed_s : float
   }
 
+type run_guard = { run : 'a. (unit -> 'a) -> 'a }
+(** Process-wide wrapper around {!run}'s child lifetime. The guard is
+    entered after argv/config validation and released only after spawn,
+    waitpid, timeout handling, and stdout/stderr drain complete. *)
+
+val set_run_guard : run_guard -> unit
+val reset_run_guard_for_testing : unit -> unit
+
 (** Shell-quoted rendering for logs and diagnostics. *)
 val argv_to_string : string list -> string
 

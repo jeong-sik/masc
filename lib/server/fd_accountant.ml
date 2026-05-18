@@ -114,10 +114,21 @@ let install_with_process_sandbox_exec_guard () =
             f ())
     }
 
+let install_autonomy_exec_sandbox_exec_guard () =
+  Masc_mcp_cdal_runtime.Autonomy_exec.set_run_guard
+    { Masc_mcp_cdal_runtime.Autonomy_exec.run =
+        (fun f ->
+          if Eio_guard.is_ready () then
+            with_slot ~kind:Sandbox_exec f
+          else
+            f ())
+    }
+
 let () =
   install_dated_jsonl_log_writer_guard ();
   install_process_eio_sandbox_exec_guard ();
-  install_with_process_sandbox_exec_guard ()
+  install_with_process_sandbox_exec_guard ();
+  install_autonomy_exec_sandbox_exec_guard ()
 
 (* In-flight count = configured cap minus current semaphore credits.
    Eio.Semaphore exposes [get_value] which returns the available credit
@@ -150,15 +161,9 @@ let read_fd_limit () =
   | Some value -> value
   | None ->
     let value =
-      try
-        let chan = Unix.open_process_in "ulimit -n" in
-        let line = input_line chan in
-        let _ = Unix.close_process_in chan in
-        match int_of_string_opt (String.trim line) with
-        | Some n -> n
-        | None -> -1
-      with
-      | _ -> -1
+      match Keeper_fd_pressure.process_nofile_soft_limit () with
+      | Some n -> n
+      | None -> -1
     in
     Atomic.set fd_limit_cache (Some value);
     value

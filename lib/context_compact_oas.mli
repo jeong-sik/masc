@@ -8,12 +8,12 @@
     {!observation_context}.
 
     Internal: 5 \[*_prefix\] string constants (memory summary /
-    goal markers + legacy variants), 9 scoring weights cached
-    from env at module init ([w_recency], [w_role], [w_tool],
-    role weights, tool-presence weights, [anchor_boost],
-    [drop_importance_threshold], [summarize_keep_recent]),
-    \[tool_output_prune_limit\] env constant, 4 dynamic-context
-    thresholds, [first_sentence] / [summarize_chunk] /
+    goal markers + legacy variants), scoring constants sourced
+    from [Env_config.ContextCompact] at module init ([w_recency],
+    [w_role], [w_tool], role weights, tool-presence weights,
+    [anchor_boost], [drop_importance_threshold],
+    [summarize_keep_recent], [tool_output_prune_limit]), 4
+    dynamic-context thresholds, [first_sentence] / [summarize_chunk] /
     [extractive_summarizer] / [score_message] / [score_messages] /
     [oas_strategy_of] helpers — all consumed only inside
     {!compact}'s pipeline. *)
@@ -115,7 +115,7 @@ val score_messages :
     (system / user / assistant / tool weights), tool-call
     presence, and an anchor boost for messages prefixed with
     \[MEMORY_SUMMARY\] / \[GOAL\] (current + legacy markers).
-    Pure — reads only the cached env-derived weights. *)
+    Pure — reads only cached code-reviewed scoring constants. *)
 
 val small_local_ctx_floor : int
 (** Context-window threshold below which {!default_dynamic_selector}
@@ -123,7 +123,7 @@ val small_local_ctx_floor : int
     lightweight strategy set. Mirrors
     [Env_config.ContextCompact.small_local_floor]; exposed so
     boundary tests can pin the threshold without duplicating the
-    env lookup. *)
+    constant. *)
 
 val default_dynamic_selector :
   observation_context -> strategy list

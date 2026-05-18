@@ -401,6 +401,29 @@ let test_set_current_task_quarantines_dir () =
     (has_current_task_quarantine config);
   Planning_eio.clear_current_task config
 
+let test_set_current_task_stops_when_quarantine_fails () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let config = make_config () in
+  let path = current_task_path config in
+  let trash = trash_dir config in
+  if Sys.file_exists trash then rm_rf trash;
+  Unix.mkdir path 0o755;
+  Fs_compat.save_file (Filename.concat path "forensics.txt") "kept";
+  Unix.mkdir trash 0o555;
+  Fun.protect
+    ~finally:(fun () ->
+      if Sys.file_exists trash && Sys.is_directory trash then
+        Unix.chmod trash 0o755;
+      rm_rf path;
+      rm_rf trash)
+    (fun () ->
+      Planning_eio.set_current_task config ~task_id:"blocked-task";
+      check bool "current_task remains a directory" true
+        (Sys.file_exists path && Sys.is_directory path);
+      check (option string) "failed quarantine does not write over directory" None
+        (Planning_eio.get_current_task config))
+
 let test_clear_current_task_removes_empty_dir () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -485,6 +508,8 @@ let () =
         test_current_task_dir_read_is_cleared;
       test_case "set_current_task quarantines dir" `Quick
         test_set_current_task_quarantines_dir;
+      test_case "set_current_task stops when quarantine fails" `Quick
+        test_set_current_task_stops_when_quarantine_fails;
       test_case "clear_current_task removes empty dir" `Quick
         test_clear_current_task_removes_empty_dir;
       test_case "resolve_task_id" `Quick test_resolve_task_id;

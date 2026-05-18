@@ -1,6 +1,7 @@
 module Types = Masc_domain
 open Alcotest
 module WO = Masc_mcp.Keeper_world_observation
+module KHL = Masc_mcp.Keeper_heartbeat_loop
 module UP = Masc_mcp.Keeper_unified_prompt
 module UT = Masc_mcp.Keeper_unified_turn
 module EC = Masc_mcp.Keeper_error_classify
@@ -1305,6 +1306,102 @@ let test_provider_cooldown_keeps_scheduled_turn_open_when_fail_open_exists () =
            | _ -> false)
          (first :: rest)
      | WO.Run _ -> false)
+;;
+
+let healthy_cascade_resilience cascade_name
+  : Masc_mcp.Keeper_exec_preflight.cascade_resilience
+  =
+  { ok = true
+  ; cascade_name
+  ; model_labels = []
+  ; pure_local = false
+  ; fallback_cascade = None
+  ; blocker = None
+  ; error = None
+  ; hint = None
+  }
+;;
+
+let blocked_cascade_resilience cascade_name =
+  { (healthy_cascade_resilience cascade_name) with
+    ok = false
+  ; blocker = Some "test_blocker"
+  ; error = Some "blocked"
+  }
+;;
+
+let healthy_cascade_status ~cascade_name:_ = Masc_mcp.Keeper_health_probe.Healthy
+
+let test_keepalive_scheduling_seam_preserves_reactive_run () =
+  let meta = make_meta "heartbeat-scheduling-reactive" in
+  let obs = { base_observation with pending_mentions = [ "operator", "@keeper wake" ] } in
+  let decision =
+    KHL.decide_keepalive_scheduling
+      ~cascade_resilience_of_name:healthy_cascade_resilience
+      ~cascade_status_of_name:healthy_cascade_status
+      ~stop:(Atomic.make false)
+      ~meta
+      obs
+  in
+  check bool "turn decision runs" true decision.turn_decision.should_run;
+  check bool "requested run remains open" true decision.requested_should_run_turn;
+  check bool "admitted run remains open" true decision.should_run_turn;
+  check string "channel" "reactive" decision.channel;
+  check (list string) "verdict reasons" [ "mention_pending" ] decision.verdict_reasons;
+  check
+    (list string)
+    "admission reasons mirror verdict"
+    [ "mention_pending" ]
+    decision.admission_reasons
+;;
+
+let test_keepalive_scheduling_seam_records_backpressure_reasons () =
+  let meta = make_meta "heartbeat-scheduling-backpressure" in
+  let obs = { base_observation with pending_mentions = [ "operator", "@keeper wake" ] } in
+  let decision =
+    KHL.decide_keepalive_scheduling
+      ~cascade_resilience_of_name:blocked_cascade_resilience
+      ~cascade_status_of_name:healthy_cascade_status
+      ~stop:(Atomic.make false)
+      ~meta
+      obs
+  in
+  check bool "raw requested run stays visible" true decision.requested_should_run_turn;
+  check bool "backpressure blocks admitted run" false decision.should_run_turn;
+  begin match decision.cascade_backpressure with
+  | KHL.Cascade_backpressured { reason; _ } ->
+    check string "backpressure reason" "cascade_resilience_test_blocker" reason
+  | KHL.Cascade_admitted -> fail "expected cascade backpressure"
+  end;
+  check
+    (list string)
+    "admission reasons explain backpressure"
+    [ "cascade_backpressure"
+    ; "cascade_resilience"
+    ; "reason_cascade_resilience_test_blocker"
+    ]
+    decision.admission_reasons
+;;
+
+let test_keepalive_scheduling_seam_gates_requested_run_on_stop () =
+  let meta = make_meta "heartbeat-scheduling-stop" in
+  let obs = { base_observation with pending_mentions = [ "operator", "@keeper wake" ] } in
+  let decision =
+    KHL.decide_keepalive_scheduling
+      ~cascade_resilience_of_name:healthy_cascade_resilience
+      ~cascade_status_of_name:healthy_cascade_status
+      ~stop:(Atomic.make true)
+      ~meta
+      obs
+  in
+  check bool "raw turn decision still sees reactive work" true decision.turn_decision.should_run;
+  check bool "stop gates requested run" false decision.requested_should_run_turn;
+  check bool "stop gates admitted run" false decision.should_run_turn;
+  check
+    (list string)
+    "admission reasons still expose trigger"
+    [ "mention_pending" ]
+    decision.admission_reasons
 ;;
 
 let test_effective_cooldown_no_decay_within_base () =
@@ -11924,6 +12021,18 @@ let () =
             "provider cooldown keeps scheduled turn open when fail-open exists"
             `Quick
             test_provider_cooldown_keeps_scheduled_turn_open_when_fail_open_exists
+        ; test_case
+            "keepalive scheduling seam preserves reactive run"
+            `Quick
+            test_keepalive_scheduling_seam_preserves_reactive_run
+        ; test_case
+            "keepalive scheduling seam records backpressure reasons"
+            `Quick
+            test_keepalive_scheduling_seam_records_backpressure_reasons
+        ; test_case
+            "keepalive scheduling seam gates requested run on stop"
+            `Quick
+            test_keepalive_scheduling_seam_gates_requested_run_on_stop
         ; test_case
             "idle decay: no decay within base"
             `Quick

@@ -76,6 +76,36 @@ type cascade_backpressure_decision =
       reason : string;
     }
 
+type heartbeat_event_intake = {
+  pending_board_events : Keeper_world_observation.pending_board_event list;
+  consumed_stimulus_count : int;
+}
+
+val heartbeat_event_intake :
+  ctx:'a context ->
+  meta_after_triage:keeper_meta ->
+  pending_board_events:Keeper_world_observation.pending_board_event list ->
+  heartbeat_event_intake
+
+type keepalive_scheduling_decision = {
+  turn_decision : Keeper_world_observation.keeper_cycle_decision;
+  requested_should_run_turn : bool;
+  cascade_backpressure : cascade_backpressure_decision;
+  should_run_turn : bool;
+  verdict_reasons : string list;
+  admission_reasons : string list;
+  channel : string;
+}
+
+val decide_keepalive_scheduling :
+  ?cascade_resilience_of_name:(string -> Keeper_exec_preflight.cascade_resilience) ->
+  ?cascade_status_of_name:
+    (cascade_name:string -> Keeper_health_probe.health_status) ->
+  stop:bool Atomic.t ->
+  meta:keeper_meta ->
+  Keeper_world_observation.world_observation ->
+  keepalive_scheduling_decision
+
 val cascade_backpressure_decision :
   cascade_resilience:Keeper_exec_preflight.cascade_resilience option ->
   should_run_turn:bool ->

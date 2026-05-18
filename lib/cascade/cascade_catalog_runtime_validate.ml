@@ -319,6 +319,19 @@ let validate_path_result ?sw ?net ~config_path () =
            ]
          ~profiles:[])
   else
+    match attempted_mtime with
+    | None ->
+        Error
+          (rejection_of_path ~config_path:source_path ~attempted_mtime
+             ~checked_at
+             ~errors:
+               [
+                 Printf.sprintf
+                   "active cascade source mtime is unavailable: %s"
+                   source_path;
+               ]
+             ~profiles:[])
+    | Some source_mtime -> (
     match Cascade_config_loader.load_catalog_source config_path with
     | Error msg ->
         Error
@@ -477,7 +490,7 @@ let validate_path_result ?sw ?net ~config_path () =
               let snapshot =
                 {
                   source_path;
-                  mtime = Option.value attempted_mtime ~default:0.0;
+                  mtime = source_mtime;
                   validated_at = checked_at;
                   profiles = profile_snapshots;
                   default_profile_name = required_default_profile;
@@ -579,7 +592,7 @@ let validate_path_result ?sw ?net ~config_path () =
                 in
                 if profile_snapshots = [] || not default_profile_validated
                 then Error rejection
-                else Ok { snapshot; rejected_update = Some rejection }
+                else Ok { snapshot; rejected_update = Some rejection })
 
 let validate_path ?sw ?net ?clock ~config_path () =
   let (_ : float Eio.Time.clock_ty Eio.Resource.t option) = clock in

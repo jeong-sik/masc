@@ -201,7 +201,7 @@ let filter_healthy t ~provider_id candidates =
   | _ -> filtered
 ;;
 
-let probe_once ~clock ~net provider =
+let probe_once ~clock ~net:_ provider =
   match provider.endpoint with
   | None -> ()
   | Some endpoint ->
@@ -209,7 +209,6 @@ let probe_once ~clock ~net provider =
        Masc_http_client.get_response_sync
          ~clock
          ~timeout_sec:5.0
-         ~net
          ~url:endpoint
          ~headers:[ "accept", "application/json" ]
          ()

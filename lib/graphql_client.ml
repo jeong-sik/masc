@@ -152,49 +152,33 @@ let request ?(timeout_sec = 10.0) ?(fallback = true) body : (string, string) res
   let url = graphql_url () in
   let key = api_key () in
   let cohttp_result =
-    match Eio_context.get_net_opt () with
-    | None -> Error "Eio net not initialized"
-    | Some net ->
-      let headers =
-        if key = ""
-        then Cohttp.Header.of_list [ "Content-Type", "application/json" ]
-        else
-          Cohttp.Header.of_list
-            [ "Content-Type", "application/json"; "Authorization", "Bearer " ^ key ]
-      in
-      let uri = Uri.of_string url in
-      let is_https = Uri.scheme uri = Some "https" in
-      let run () =
-        let https_result =
-          if not is_https
-          then Ok None
-          else (
-            match Eio_context.get_https_connector_result () with
-            | Ok connector -> Ok (Some connector)
-            | Error message -> Error message)
-        in
-        match https_result with
-        | Error _ as error -> error
-        | Ok https ->
-          let header_list = Cohttp.Header.to_list headers in
-          (match
-             Masc_http_client.post_sync ~net ~https ~url ~headers:header_list ~body ()
-           with
-           | Error e -> Error (Printf.sprintf "HTTP request failed: %s" e)
-           | Ok (code, body_str) ->
-             if not (Cohttp.Code.is_success code)
-             then Error (Printf.sprintf "HTTP %d" code)
-             else ensure_json_response body_str)
-      in
-      (match Eio_context.get_clock_opt () with
-       | Some clock ->
-         (try Eio.Time.with_timeout_exn clock timeout_sec run with
-          | Eio.Cancel.Cancelled _ as e -> raise e
-          | exn -> Error (Printexc.to_string exn))
-       | None ->
-         (try run () with
-          | Eio.Cancel.Cancelled _ as e -> raise e
-          | exn -> Error (Printexc.to_string exn)))
+    let headers =
+      if key = ""
+      then Cohttp.Header.of_list [ "Content-Type", "application/json" ]
+      else
+        Cohttp.Header.of_list
+          [ "Content-Type", "application/json"; "Authorization", "Bearer " ^ key ]
+    in
+    let run () =
+      let header_list = Cohttp.Header.to_list headers in
+      match
+        Masc_http_client.post_sync ~url ~headers:header_list ~body ()
+      with
+      | Error e -> Error (Printf.sprintf "HTTP request failed: %s" e)
+      | Ok (code, body_str) ->
+        if not (Cohttp.Code.is_success code)
+        then Error (Printf.sprintf "HTTP %d" code)
+        else ensure_json_response body_str
+    in
+    (match Eio_context.get_clock_opt () with
+     | Some clock ->
+       (try Eio.Time.with_timeout_exn clock timeout_sec run with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn -> Error (Printexc.to_string exn))
+     | None ->
+       (try run () with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn -> Error (Printexc.to_string exn)))
   in
   match cohttp_result with
   | Ok _ as success -> success

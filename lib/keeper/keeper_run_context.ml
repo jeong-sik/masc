@@ -44,6 +44,7 @@ let prepare_run_context
   =
   let receipt_started_at = Masc_domain.now_iso () in
   let meta = Keeper_agent_tool_surface.sync_current_task_id_from_backlog ~config meta in
+  let profile_defaults = Keeper_types_profile.load_keeper_profile_defaults meta.name in
   (* 0. Resolve inference parameters via Cascade_inference *)
   let temperature =
     match temperature with
@@ -65,7 +66,14 @@ let prepare_run_context
           (* 8192 allows complex multi-tool reasoning per turn.
            Cloudflare tunnel 100s is no longer a constraint with
            streaming responses. *)
-        ~fallback:(fun () -> 8192)
+        ~fallback:(fun () ->
+          match
+            Keeper_types_profile.unified_max_tokens_override_of_oas_env
+              ~keeper_name:meta.name
+              profile_defaults.oas_env
+          with
+          | Some value -> value
+          | None -> 8192)
   in
   (* 0b. Create context injector for temporal awareness *)
   let injector_config = Masc_context_injector.default_config () in
@@ -90,7 +98,6 @@ let prepare_run_context
   in
   let loaded_checkpoint_present = Option.is_some ctx_opt in
   (* 3. Build base system prompt from meta *)
-  let profile_defaults = Keeper_types_profile.load_keeper_profile_defaults meta.name in
   let keeper_oas_context =
     Keeper_types_profile.keeper_oas_context_of_defaults profile_defaults
   in

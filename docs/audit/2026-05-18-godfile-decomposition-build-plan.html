@@ -295,11 +295,11 @@
             <td><code>lib/prometheus.ml</code> 3082 LOC</td>
           </tr>
           <tr>
-            <td>Stack after #16218</td>
-            <td><code>4370a648ae</code></td>
+            <td>Stack after #16221</td>
+            <td><code>fe420836ac</code></td>
             <td class="num">53</td>
-            <td class="num">88,895</td>
-            <td class="num">9</td>
+            <td class="num">88,704</td>
+            <td class="num">8</td>
             <td class="num">0</td>
             <td><code>lib/keeper/keeper_unified_turn.ml</code> 2890 LOC</td>
           </tr>
@@ -307,14 +307,14 @@
       </table>
       <div class="panel ok">
         <span class="tag green">-22 files from initial audit</span>
-        <span class="tag green">-25,308 LOC from initial audit</span>
-        <span class="tag blue">2000+ bucket down to 9</span>
+        <span class="tag green">-25,499 LOC from initial audit</span>
+        <span class="tag blue">2000+ bucket down to 8</span>
         <span class="tag blue">3000+ eliminated in stack</span>
         <span class="tag violet">53 files remain</span>
         <p>
           Progress 기준은 이 문서의 원래 범위와 동일하게 <code>lib/**/*.ml</code> 중 1000+ LOC만 센다.
           현재 열린 stack 기준으로는 초기 75개에서 53개까지 내려왔고,
-          3000+ LOC 파일은 남지 않았으며 2000+ LOC 파일도 9개로 줄었다.
+          3000+ LOC 파일은 남지 않았으며 2000+ LOC 파일도 8개로 줄었다.
         </p>
       </div>
     </section>
@@ -327,28 +327,16 @@
         </thead>
         <tbody>
           <tr>
-            <td class="rank-p0">P0</td><td class="num">3082</td>
-            <td><a href="../../lib/prometheus.ml">lib/prometheus.ml</a></td>
-            <td><code>Prometheus_store</code>, <code>Prometheus_registry</code>, <code>Prometheus_render</code>, domain-owned metric names</td>
-            <td>Most-imported hub. Stop metric-name growth and module-init side effects before other lanes add counters.</td>
-          </tr>
-          <tr>
-            <td class="rank-p0">P0</td><td class="num">3022</td>
-            <td><a href="../../lib/server/server_dashboard_http_keeper_api.ml">lib/server/server_dashboard_http_keeper_api.ml</a></td>
-            <td><code>*_runtime_manifest_scan</code>, <code>*_runtime_lens</code>, checkpoints/actions/get-routes</td>
-            <td>Large HTTP keeper API with coherent internal seams; current public facade can stay stable.</td>
-          </tr>
-          <tr>
-            <td class="rank-p1">P1</td><td class="num">2890</td>
+            <td class="rank-p0">P0</td><td class="num">2890</td>
             <td><a href="../../lib/keeper/keeper_unified_turn.ml">lib/keeper/keeper_unified_turn.ml</a></td>
-            <td>Facade shrink after registry/supervisor/agent-run lanes</td>
-            <td>Largest keeper coordinator, but too coupled to split first without creating churn.</td>
+            <td>Turn-state projection, prompt assembly, run envelope, receipt/finalization seams</td>
+            <td>Current largest file. Keep behavior stable while cutting pure helpers and typed summaries first.</td>
           </tr>
           <tr>
-            <td class="rank-p1">P1</td><td class="num">2496</td>
-            <td><a href="../../lib/keeper/keeper_hooks_oas.ml">lib/keeper/keeper_hooks_oas.ml</a></td>
-            <td>JSON extraction, PR action metrics, cost ledger, idle policy, factory</td>
-            <td>Best keeper starting point: already has <code>Keeper_hooks_oas_types</code> seam.</td>
+            <td class="rank-p0">P0</td><td class="num">2640</td>
+            <td><a href="../../lib/prometheus.ml">lib/prometheus.ml</a></td>
+            <td>Finish remaining registry/render/store split after metric-name modules</td>
+            <td>Still a central hub, but prior stack removed the domain metric-name growth from the facade.</td>
           </tr>
           <tr>
             <td class="rank-p1">P1</td><td class="num">2490</td>
@@ -363,28 +351,40 @@
             <td>Key keeper hub. Registry model split unlocks later sub-library boundaries.</td>
           </tr>
           <tr>
-            <td class="rank-p2">P2</td><td class="num">2191</td>
+            <td class="rank-p1">P1</td><td class="num">2191</td>
             <td><a href="../../lib/keeper/keeper_agent_run.ml">lib/keeper/keeper_agent_run.ml</a></td>
             <td>Dispatch, tool observation, contract gate, finalize, receipt commit</td>
             <td>Turn execution pipeline can be segmented behind current <code>run_turn</code>.</td>
           </tr>
           <tr>
-            <td class="rank-p2">P2</td><td class="num">2187</td>
+            <td class="rank-p1">P1</td><td class="num">2187</td>
             <td><a href="../../lib/dashboard/dashboard_http_keeper.ml">lib/dashboard/dashboard_http_keeper.ml</a></td>
             <td>Overview rows, trust/config projections, BDI, cost, K2 feeds</td>
             <td>Dashboard projection weight is separable if compact/full behavior is pinned first.</td>
           </tr>
           <tr>
-            <td class="rank-p2">P2</td><td class="num">2007</td>
-            <td><a href="../../lib/server/server_runtime_bootstrap.ml">lib/server/server_runtime_bootstrap.ml</a></td>
-            <td>Config-root, credentials/token sync, migrations, lazy startup, transports</td>
-            <td>Build and boot clarity win, but order-sensitive; needs guard tests first.</td>
+            <td class="rank-p2">P2</td><td class="num">2142</td>
+            <td><a href="../../lib/keeper/keeper_hooks_oas.ml">lib/keeper/keeper_hooks_oas.ml</a></td>
+            <td>JSON extraction, PR action metrics, cost ledger, idle policy, factory</td>
+            <td>Already has <code>Keeper_hooks_oas_types</code> seam; continue extracting behavior-owned helpers.</td>
           </tr>
           <tr>
-            <td class="rank-p3">P3</td><td class="num">1999</td>
+            <td class="rank-p2">P2</td><td class="num">2047</td>
             <td><a href="../../lib/worker_dev_tools.ml">lib/worker_dev_tools.ml</a></td>
             <td>Path, shell, gh, and destructive-operation gates</td>
-            <td>Almost 2000 lines in a safety-critical tool surface; gate splits reduce review and build blast radius quickly.</td>
+            <td>Only non-keeper file still above 2000 besides metrics/dashboard; gate splits reduce review blast radius quickly.</td>
+          </tr>
+          <tr>
+            <td class="rank-p2">P2</td><td class="num">1990</td>
+            <td><a href="../../lib/keeper/keeper_types_profile.ml">lib/keeper/keeper_types_profile.ml</a></td>
+            <td>Profile JSON helpers, validation, and small typed modules</td>
+            <td>Close to the threshold and type-heavy; good low-risk keeper slice after the top operational hubs.</td>
+          </tr>
+          <tr>
+            <td class="rank-p3">P3</td><td class="num">1988</td>
+            <td><a href="../../lib/server/server_dashboard_http_keeper_api.ml">lib/server/server_dashboard_http_keeper_api.ml</a></td>
+            <td>Remaining runtime lens/action/get-route seams after prior stack splits</td>
+            <td>Now below 2000, but still in the 1000+ set and has coherent helper seams left.</td>
           </tr>
         </tbody>
       </table>
@@ -397,14 +397,13 @@
           <tr><th>Lane</th><th>Files</th><th>LOC</th><th>Primary targets</th><th>Decomposition stance</th></tr>
         </thead>
         <tbody>
-          <tr><td>Keeper</td><td class="num">29</td><td class="num">45,899</td><td><code>keeper_unified_turn</code>, <code>keeper_hooks_oas</code>, <code>keeper_supervisor</code>, <code>keeper_registry</code></td><td>Split internal seams first; promote only leaf closures after registry/type cycles are cut.</td></tr>
-          <tr><td>Root tools/metrics</td><td class="num">20</td><td class="num">29,566</td><td><code>prometheus</code>, <code>model_inference_metrics</code>, <code>worker_dev_tools</code>, <code>tool_board</code>, <code>tool_keeper</code></td><td>Facade-compatible private modules, then low-dependency sub-libraries for metrics/schema/tool gates.</td></tr>
-          <tr><td>Server</td><td class="num">9</td><td class="num">15,372</td><td><code>server_dashboard_http_keeper_api</code>, <code>server_runtime_bootstrap</code>, <code>server_dashboard_http_core</code></td><td>Handler seams first; route parity after handlers stabilize.</td></tr>
-          <tr><td>Cascade</td><td class="num">6</td><td class="num">8,431</td><td><code>cascade_transport</code>, <code>cascade_catalog_runtime</code>, <code>cascade_config</code></td><td>Cut <code>Cascade_runner</code> ownership leak; extract refs/names before transport.</td></tr>
-          <tr><td>Dashboard</td><td class="num">3</td><td class="num">5,093</td><td><code>dashboard_http_keeper</code>, <code>dashboard_goals_types</code>, <code>dashboard_safe_autonomy</code></td><td>Projection helpers and JSON builders; preserve compact mode.</td></tr>
-          <tr><td>Coord</td><td class="num">3</td><td class="num">3,766</td><td><code>coord_worktree</code>, <code>coord_task</code>, <code>coord_task_schedule</code></td><td>Already sub-library; narrow public API and split dangerous filesystem/git helpers.</td></tr>
-          <tr><td>Config</td><td class="num">2</td><td class="num">2,220</td><td><code>env_config_snapshot</code>, <code>env_config_keeper</code></td><td>Keep in <code>masc_mcp.config</code>; extract typed buckets, not root flat modules.</td></tr>
-          <tr><td>Operator / voice / backend</td><td class="num">3</td><td class="num">3,856</td><td><code>operator_control_snapshot</code>, <code>voice_bridge</code>, <code>backend</code></td><td>Lower priority; split after higher fan-in surfaces stop moving.</td></tr>
+          <tr><td>Keeper</td><td class="num">24</td><td class="num">40,308</td><td><code>keeper_unified_turn</code>, <code>keeper_supervisor</code>, <code>keeper_registry</code>, <code>keeper_agent_run</code></td><td>Split internal seams first; promote only leaf closures after registry/type cycles are cut.</td></tr>
+          <tr><td>Root tools/metrics</td><td class="num">9</td><td class="num">16,292</td><td><code>prometheus</code>, <code>model_inference_metrics</code>, <code>worker_dev_tools</code>, <code>tool_board</code>, <code>tool_keeper</code></td><td>Facade-compatible private modules, then low-dependency sub-libraries for metrics/schema/tool gates.</td></tr>
+          <tr><td>Server</td><td class="num">7</td><td class="num">11,982</td><td><code>server_dashboard_http_keeper_api</code>, <code>server_dashboard_http_core</code>, <code>server_runtime_bootstrap</code></td><td>Handler seams first; route parity after handlers stabilize.</td></tr>
+          <tr><td>Dashboard</td><td class="num">4</td><td class="num">6,488</td><td><code>dashboard_http_keeper</code>, <code>dashboard_goals_types</code>, <code>dashboard_cascade</code></td><td>Projection helpers and JSON builders; preserve compact mode.</td></tr>
+          <tr><td>Cascade</td><td class="num">4</td><td class="num">6,247</td><td><code>cascade_transport</code>, <code>cascade_catalog_runtime</code>, <code>cascade_config</code></td><td>Cut <code>Cascade_runner</code> ownership leak; extract refs/names before transport.</td></tr>
+          <tr><td>Coord</td><td class="num">2</td><td class="num">2,765</td><td><code>coord_worktree</code>, <code>coord_task</code></td><td>Already sub-library; narrow public API and split dangerous filesystem/git helpers.</td></tr>
+          <tr><td>Auth / operator / telemetry</td><td class="num">3</td><td class="num">4,622</td><td><code>auth</code>, <code>operator_control_snapshot</code>, <code>telemetry_unified</code></td><td>Lower priority; split after higher fan-in surfaces stop moving.</td></tr>
         </tbody>
       </table>
     </section>
@@ -562,17 +561,16 @@ ocamlformat --check &lt;touched .ml/.mli files&gt;</code></pre>
           <tr><th>LOC</th><th>File</th><th>Lane</th></tr>
         </thead>
         <tbody>
-          <tr><td class="num">3082</td><td><a href="../../lib/prometheus.ml">lib/prometheus.ml</a></td><td>metrics</td></tr>
-          <tr><td class="num">3022</td><td><a href="../../lib/server/server_dashboard_http_keeper_api.ml">lib/server/server_dashboard_http_keeper_api.ml</a></td><td>server</td></tr>
           <tr><td class="num">2890</td><td><a href="../../lib/keeper/keeper_unified_turn.ml">lib/keeper/keeper_unified_turn.ml</a></td><td>keeper</td></tr>
-          <tr><td class="num">2496</td><td><a href="../../lib/keeper/keeper_hooks_oas.ml">lib/keeper/keeper_hooks_oas.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">2640</td><td><a href="../../lib/prometheus.ml">lib/prometheus.ml</a></td><td>metrics</td></tr>
           <tr><td class="num">2490</td><td><a href="../../lib/keeper/keeper_supervisor.ml">lib/keeper/keeper_supervisor.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">2192</td><td><a href="../../lib/keeper/keeper_registry.ml">lib/keeper/keeper_registry.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">2191</td><td><a href="../../lib/keeper/keeper_agent_run.ml">lib/keeper/keeper_agent_run.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">2187</td><td><a href="../../lib/dashboard/dashboard_http_keeper.ml">lib/dashboard/dashboard_http_keeper.ml</a></td><td>dashboard</td></tr>
-          <tr><td class="num">2007</td><td><a href="../../lib/server/server_runtime_bootstrap.ml">lib/server/server_runtime_bootstrap.ml</a></td><td>server</td></tr>
-          <tr><td class="num">1999</td><td><a href="../../lib/worker_dev_tools.ml">lib/worker_dev_tools.ml</a></td><td>tools</td></tr>
+          <tr><td class="num">2142</td><td><a href="../../lib/keeper/keeper_hooks_oas.ml">lib/keeper/keeper_hooks_oas.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">2047</td><td><a href="../../lib/worker_dev_tools.ml">lib/worker_dev_tools.ml</a></td><td>tools</td></tr>
           <tr><td class="num">1990</td><td><a href="../../lib/keeper/keeper_types_profile.ml">lib/keeper/keeper_types_profile.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">1988</td><td><a href="../../lib/server/server_dashboard_http_keeper_api.ml">lib/server/server_dashboard_http_keeper_api.ml</a></td><td>server</td></tr>
           <tr><td class="num">1979</td><td><a href="../../lib/server/server_dashboard_http_core.ml">lib/server/server_dashboard_http_core.ml</a></td><td>server</td></tr>
           <tr><td class="num">1958</td><td><a href="../../lib/model_inference_metrics.ml">lib/model_inference_metrics.ml</a></td><td>metrics</td></tr>
           <tr><td class="num">1944</td><td><a href="../../lib/keeper/keeper_run_tools.ml">lib/keeper/keeper_run_tools.ml</a></td><td>keeper</td></tr>
@@ -582,6 +580,7 @@ ocamlformat --check &lt;touched .ml/.mli files&gt;</code></pre>
           <tr><td class="num">1868</td><td><a href="../../lib/keeper/keeper_unified_metrics.ml">lib/keeper/keeper_unified_metrics.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">1856</td><td><a href="../../lib/tool_board.ml">lib/tool_board.ml</a></td><td>tools</td></tr>
           <tr><td class="num">1821</td><td><a href="../../lib/tool_keeper.ml">lib/tool_keeper.ml</a></td><td>tools</td></tr>
+          <tr><td class="num">1816</td><td><a href="../../lib/server/server_runtime_bootstrap.ml">lib/server/server_runtime_bootstrap.ml</a></td><td>server</td></tr>
           <tr><td class="num">1808</td><td><a href="../../lib/keeper/keeper_context_core.ml">lib/keeper/keeper_context_core.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">1768</td><td><a href="../../lib/operator/operator_control_snapshot.ml">lib/operator/operator_control_snapshot.ml</a></td><td>operator</td></tr>
           <tr><td class="num">1750</td><td><a href="../../lib/tool_shard_types.ml">lib/tool_shard_types.ml</a></td><td>tools</td></tr>
@@ -592,51 +591,29 @@ ocamlformat --check &lt;touched .ml/.mli files&gt;</code></pre>
           <tr><td class="num">1608</td><td><a href="../../lib/dashboard/dashboard_goals_types.ml">lib/dashboard/dashboard_goals_types.ml</a></td><td>dashboard</td></tr>
           <tr><td class="num">1589</td><td><a href="../../lib/keeper/keeper_world_observation.ml">lib/keeper/keeper_world_observation.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">1551</td><td><a href="../../lib/coord/coord_worktree.ml">lib/coord/coord_worktree.ml</a></td><td>coord</td></tr>
-          <tr><td class="num">1496</td><td><a href="../../lib/tool_task.ml">lib/tool_task.ml</a></td><td>tools</td></tr>
+          <tr><td class="num">1511</td><td><a href="../../lib/tool_task.ml">lib/tool_task.ml</a></td><td>tools</td></tr>
+          <tr><td class="num">1487</td><td><a href="../../lib/server/server_routes_http_routes_sidecar.ml">lib/server/server_routes_http_routes_sidecar.ml</a></td><td>server</td></tr>
           <tr><td class="num">1482</td><td><a href="../../lib/cascade/cascade_config.ml">lib/cascade/cascade_config.ml</a></td><td>cascade</td></tr>
-          <tr><td class="num">1474</td><td><a href="../../lib/server/server_routes_http_routes_sidecar.ml">lib/server/server_routes_http_routes_sidecar.ml</a></td><td>server</td></tr>
           <tr><td class="num">1470</td><td><a href="../../lib/keeper/keeper_approval_queue.ml">lib/keeper/keeper_approval_queue.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">1461</td><td><a href="../../lib/keeper/keeper_state_machine.ml">lib/keeper/keeper_state_machine.ml</a></td><td>keeper</td></tr>
-          <tr><td class="num">1450</td><td><a href="../../lib/keeper/keeper_shell_bash.ml">lib/keeper/keeper_shell_bash.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">1456</td><td><a href="../../lib/keeper/keeper_shell_bash.ml">lib/keeper/keeper_shell_bash.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">1440</td><td><a href="../../lib/keeper/keeper_shell_ops.ml">lib/keeper/keeper_shell_ops.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">1418</td><td><a href="../../lib/keeper/keeper_runtime_trust_snapshot.ml">lib/keeper/keeper_runtime_trust_snapshot.ml</a></td><td>keeper</td></tr>
-          <tr><td class="num">1406</td><td><a href="../../lib/keeper/keeper_turn_driver.ml">lib/keeper/keeper_turn_driver.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">1407</td><td><a href="../../lib/keeper/keeper_turn_driver.ml">lib/keeper/keeper_turn_driver.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">1395</td><td><a href="../../lib/dashboard_cascade.ml">lib/dashboard_cascade.ml</a></td><td>dashboard</td></tr>
           <tr><td class="num">1380</td><td><a href="../../lib/keeper/keeper_shell_docker.ml">lib/keeper/keeper_shell_docker.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">1378</td><td><a href="../../lib/keeper/keeper_turn_slot.ml">lib/keeper/keeper_turn_slot.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">1298</td><td><a href="../../lib/dashboard/dashboard_safe_autonomy.ml">lib/dashboard/dashboard_safe_autonomy.ml</a></td><td>dashboard</td></tr>
           <tr><td class="num">1247</td><td><a href="../../lib/keeper/keeper_sandbox_runtime.ml">lib/keeper/keeper_sandbox_runtime.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">1214</td><td><a href="../../lib/coord/coord_task.ml">lib/coord/coord_task.ml</a></td><td>coord</td></tr>
-          <tr><td class="num">1206</td><td><a href="../../lib/server/server_bootstrap_loops.ml">lib/server/server_bootstrap_loops.ml</a></td><td>server</td></tr>
+          <tr><td class="num">1207</td><td><a href="../../lib/server/server_bootstrap_loops.ml">lib/server/server_bootstrap_loops.ml</a></td><td>server</td></tr>
           <tr><td class="num">1204</td><td><a href="../../lib/keeper/keeper_memory_bank.ml">lib/keeper/keeper_memory_bank.ml</a></td><td>keeper</td></tr>
-          <tr><td class="num">1203</td><td><a href="../../lib/telemetry_unified.ml">lib/telemetry_unified.ml</a></td><td>metrics</td></tr>
+          <tr><td class="num">1203</td><td><a href="../../lib/telemetry_unified.ml">lib/telemetry_unified.ml</a></td><td>telemetry</td></tr>
           <tr><td class="num">1187</td><td><a href="../../lib/cascade/cascade_event_bridge.ml">lib/cascade/cascade_event_bridge.ml</a></td><td>cascade</td></tr>
           <tr><td class="num">1161</td><td><a href="../../lib/keeper/keeper_accountability.ml">lib/keeper/keeper_accountability.ml</a></td><td>keeper</td></tr>
-          <tr><td class="num">1152</td><td><a href="../../lib/board_votes.ml">lib/board_votes.ml</a></td><td>board</td></tr>
-          <tr><td class="num">1144</td><td><a href="../../lib/mcp_server_eio_execute.ml">lib/mcp_server_eio_execute.ml</a></td><td>mcp</td></tr>
           <tr><td class="num">1139</td><td><a href="../../lib/keeper/keeper_registry_types.ml">lib/keeper/keeper_registry_types.ml</a></td><td>keeper</td></tr>
-          <tr><td class="num">1132</td><td><a href="../../lib/config/env_config_snapshot.ml">lib/config/env_config_snapshot.ml</a></td><td>config</td></tr>
           <tr><td class="num">1128</td><td><a href="../../lib/keeper/keeper_execution_receipt.ml">lib/keeper/keeper_execution_receipt.ml</a></td><td>keeper</td></tr>
-          <tr><td class="num">1108</td><td><a href="../../lib/server/server_dashboard_http_runtime_info.ml">lib/server/server_dashboard_http_runtime_info.ml</a></td><td>server</td></tr>
-          <tr><td class="num">1099</td><td><a href="../../lib/keeper/keeper_status_detail.ml">lib/keeper/keeper_status_detail.ml</a></td><td>keeper</td></tr>
-          <tr><td class="num">1095</td><td><a href="../../lib/coord_goals.ml">lib/coord_goals.ml</a></td><td>coord</td></tr>
-          <tr><td class="num">1094</td><td><a href="../../lib/cascade/cascade_metrics.ml">lib/cascade/cascade_metrics.ml</a></td><td>cascade</td></tr>
-          <tr><td class="num">1090</td><td><a href="../../lib/cascade/cascade_health_tracker.ml">lib/cascade/cascade_health_tracker.ml</a></td><td>cascade</td></tr>
-          <tr><td class="num">1088</td><td><a href="../../lib/voice/voice_bridge.ml">lib/voice/voice_bridge.ml</a></td><td>voice</td></tr>
-          <tr><td class="num">1088</td><td><a href="../../lib/config/env_config_keeper.ml">lib/config/env_config_keeper.ml</a></td><td>config</td></tr>
-          <tr><td class="num">1081</td><td><a href="../../lib/keeper_tool_call_log.ml">lib/keeper_tool_call_log.ml</a></td><td>tools</td></tr>
-          <tr><td class="num">1075</td><td><a href="../../lib/tool_code_write.ml">lib/tool_code_write.ml</a></td><td>tools</td></tr>
-          <tr><td class="num">1075</td><td><a href="../../lib/mcp_server_eio_call_tool.ml">lib/mcp_server_eio_call_tool.ml</a></td><td>mcp</td></tr>
-          <tr><td class="num">1072</td><td><a href="../../lib/keeper/keeper_tools_oas.ml">lib/keeper/keeper_tools_oas.ml</a></td><td>keeper</td></tr>
-          <tr><td class="num">1071</td><td><a href="../../lib/server/server_h2_gateway.ml">lib/server/server_h2_gateway.ml</a></td><td>server</td></tr>
-          <tr><td class="num">1030</td><td><a href="../../lib/keeper/keeper_memory_policy.ml">lib/keeper/keeper_memory_policy.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">1022</td><td><a href="../../lib/tool_catalog.ml">lib/tool_catalog.ml</a></td><td>tools</td></tr>
-          <tr><td class="num">1020</td><td><a href="../../lib/keeper/keeper_turn_cascade_budget.ml">lib/keeper/keeper_turn_cascade_budget.ml</a></td><td>keeper</td></tr>
-          <tr><td class="num">1019</td><td><a href="../../lib/memory_oas_bridge.ml">lib/memory_oas_bridge.ml</a></td><td>memory</td></tr>
-          <tr><td class="num">1017</td><td><a href="../../lib/keeper/keeper_persona_authoring.ml">lib/keeper/keeper_persona_authoring.ml</a></td><td>keeper</td></tr>
-          <tr><td class="num">1005</td><td><a href="../../lib/sse.ml">lib/sse.ml</a></td><td>sse</td></tr>
-          <tr><td class="num">1001</td><td><a href="../../lib/coord/coord_task_schedule.ml">lib/coord/coord_task_schedule.ml</a></td><td>coord</td></tr>
-          <tr><td class="num">1000</td><td><a href="../../lib/backend/backend.ml">lib/backend/backend.ml</a></td><td>backend</td></tr>
         </tbody>
       </table>
     </section>

@@ -89,18 +89,28 @@ is_stale_dune_artifact_log() {
         "$log_file"
 }
 
+run_dune_local() {
+    local wrapper="$SCRIPT_DIR/scripts/dune-local.sh"
+    if [ ! -x "$wrapper" ]; then
+        echo "Error: local Dune wrapper missing or not executable: $wrapper" >&2
+        echo "Run builds through scripts/dune-local.sh so local agents share the machine-wide Dune lock." >&2
+        return 127
+    fi
+    env DUNE_LOCAL_JOBS="$DUNE_JOBS" "$wrapper" "$@"
+}
+
 dune_build_with_stale_retry() {
     local target="$1"
     local label="$2"
     local log_file=""
 
     if ! log_file="$(make_startup_temp_log 2>/dev/null)"; then
-        dune build -j "$DUNE_JOBS" --root "$SCRIPT_DIR" "$target" 1>&2
+        run_dune_local build "$target" 1>&2
         return $?
     fi
 
     local first_status=0
-    if dune build -j "$DUNE_JOBS" --root "$SCRIPT_DIR" "$target" >"$log_file" 2>&1; then
+    if run_dune_local build "$target" >"$log_file" 2>&1; then
         cat "$log_file" >&2
         rm -f "$log_file"
         return 0
@@ -116,13 +126,13 @@ dune_build_with_stale_retry() {
 
     cat "$log_file" >&2
     echo "[startup] Stale Dune artifacts detected while building $label; running dune clean and retrying once." >&2
-    if ! dune clean --root "$SCRIPT_DIR" 1>&2; then
+    if ! run_dune_local clean 1>&2; then
         echo "[startup] Dune clean failed after stale artifact detection; run: dune clean --root $SCRIPT_DIR" >&2
         rm -f "$log_file"
         return "$first_status"
     fi
 
-    if dune build -j "$DUNE_JOBS" --root "$SCRIPT_DIR" "$target" >"$log_file" 2>&1; then
+    if run_dune_local build "$target" >"$log_file" 2>&1; then
         cat "$log_file" >&2
         rm -f "$log_file"
         return 0

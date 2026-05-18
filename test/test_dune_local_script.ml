@@ -397,6 +397,56 @@ exit 1
         (contains_substring stderr "bare `dune` process");
       check bool "dune was not invoked" false (Sys.file_exists dune_log))
 
+let write_bare_dune_ps bin_dir =
+  write_executable
+    (Filename.concat bin_dir "ps")
+    {|#!/bin/sh
+if [ "${1:-}" = "ax" ]; then
+  cat <<'PS'
+ 111 1 dune exec --root . test/test_config_dir_resolver.exe
+ 222 333 dune build --root wrapped-worktree
+ 333 1 lockf -k /tmp/me-dune-local.lock /usr/bin/env MASC_DUNE_LOCK_HELD=1 scripts/dune-local.sh build
+PS
+  exit 0
+fi
+exit 1
+|}
+
+let test_bare_dune_bypass_aborts_before_dune () =
+  with_temp_dir "dune-local-bare-dune-bypass" (fun dir ->
+      let bin_dir, dune_log =
+        setup_fake_repo dir ~pin_check_exit_code:0
+          ~pin_check_stderr_msg:"pin ok"
+      in
+      write_bare_dune_ps bin_dir;
+      let code, _stdout, stderr =
+        run_dune_local dir bin_dir ~unset_env:[ "GITHUB_ACTIONS" ] "build"
+      in
+      check int "exits tempfail on bare dune bypass" 75 code;
+      check bool "reports unwrapped Dune" true
+        (contains_substring stderr "outside scripts/dune-local.sh");
+      check bool "reports bare dune command" true
+        (contains_substring stderr
+           "dune exec --root . test/test_config_dir_resolver.exe");
+      check bool "does not report wrapped child" false
+        (contains_substring stderr "wrapped-worktree");
+      check bool "dune was not invoked" false (Sys.file_exists dune_log))
+
+let test_bare_dune_bypass_can_be_overridden () =
+  with_temp_dir "dune-local-bare-dune-override" (fun dir ->
+      let bin_dir, dune_log =
+        setup_fake_repo dir ~pin_check_exit_code:0
+          ~pin_check_stderr_msg:"pin ok"
+      in
+      write_bare_dune_ps bin_dir;
+      let code, _stdout, _stderr =
+        run_dune_local dir bin_dir
+          ~env:[ ("MASC_DUNE_ALLOW_BARE_DUNE", "1") ]
+          ~unset_env:[ "GITHUB_ACTIONS" ] "build"
+      in
+      check int "exits zero when bare dune guard is overridden" 0 code;
+      check bool "dune was invoked" true (Sys.file_exists dune_log))
+
 let test_opam_lockf_reexec_env_passthrough () =
   with_temp_dir "dune-local-opam-lockf" (fun dir ->
       let bin_dir, dune_log =
@@ -1110,6 +1160,10 @@ let () =
             test_dune_lock_wait_reports_holder;
           test_case "live build-dir lock aborts before Dune" `Quick
             test_live_build_lock_aborts_before_dune;
+          test_case "bare Dune bypass aborts before Dune" `Quick
+            test_bare_dune_bypass_aborts_before_dune;
+          test_case "MASC_DUNE_ALLOW_BARE_DUNE=1 bypasses bare Dune guard"
+            `Quick test_bare_dune_bypass_can_be_overridden;
           test_case "opam lockf reexec propagates env" `Quick
             test_opam_lockf_reexec_env_passthrough;
           test_case "opam lock timeout releases Dune lock" `Quick

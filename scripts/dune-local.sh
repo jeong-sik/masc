@@ -25,6 +25,7 @@ Set MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT=seconds to bound opam-lock wait after the 
 Set MASC_DUNE_LOCK_DIAG=0 to suppress best-effort lock holder diagnostics.
 Set MASC_DUNE_DRY_RUN=1 to print the command without running it.
 Set MASC_DUNE_ALLOW_LIVE_BUILD_LOCK=1 to wait behind a live _build/.lock holder.
+Set MASC_DUNE_ALLOW_BARE_DUNE=1 to run despite a live Dune process outside this wrapper.
 Set MASC_SKIP_PIN_CHECK=1 to skip the agent_sdk pin guard.
 Set MASC_SKIP_DEPS_CHECK=1 to skip the core-deps installed guard.
 Set MASC_SKIP_OCAML_VERSION_CHECK=1 to skip the OCaml minimum version guard.
@@ -150,6 +151,69 @@ _print_lock_holders() {
   done <<< "$pids"
 }
 
+_list_unwrapped_dune_processes() {
+  command -v ps >/dev/null 2>&1 || return 0
+
+  ps ax -o pid=,ppid=,command= 2>/dev/null \
+    | awk '
+        /^[[:space:]]*[0-9]+[[:space:]]+[0-9]+[[:space:]]+/ {
+          pid = $1
+          ppid = $2
+          $1 = ""
+          $2 = ""
+          sub(/^[[:space:]]+/, "", $0)
+          parent[pid] = ppid
+          cmd[pid] = $0
+        }
+
+        function has_wrapper_ancestor(pid, cur, depth) {
+          cur = pid
+          depth = 0
+          while ((cur in cmd) && depth < 64) {
+            if (cmd[cur] ~ /dune-local[.]sh/ ||
+                cmd[cur] ~ /me-dune-local[.]lock/ ||
+                cmd[cur] ~ /MASC_DUNE_LOCK_HELD=1/) {
+              return 1
+            }
+            cur = parent[cur]
+            depth++
+          }
+          return 0
+        }
+
+        function is_dune_command(text) {
+          return text ~ /^([^[:space:]]*\/)?dune[[:space:]]+(build|test|exec|runtest)([[:space:]]|$)/ ||
+                 text ~ /^([^[:space:]]*\/)?opam[[:space:]]+exec[[:space:]].*[[:space:]]dune[[:space:]]+(build|test|exec|runtest)([[:space:]]|$)/
+        }
+
+        END {
+          for (pid in cmd) {
+            if (is_dune_command(cmd[pid]) && !has_wrapper_ancestor(pid)) {
+              printf "%s %s %s\n", pid, parent[pid], cmd[pid]
+            }
+          }
+        }'
+}
+
+_check_unwrapped_dune_processes() {
+  [[ "${GITHUB_ACTIONS:-}" != "true" ]] || return 0
+  [[ "${MASC_DUNE_DRY_RUN:-0}" != "1" ]] || return 0
+  [[ "${MASC_DUNE_ALLOW_BARE_DUNE:-0}" != "1" ]] || return 0
+  [[ "${_subcommand}" != "clean" ]] || return 0
+
+  local rows
+  rows="$(_list_unwrapped_dune_processes || true)"
+  [[ -n "$rows" ]] || return 0
+
+  printf '[dune-local] live Dune process outside scripts/dune-local.sh detected:\n' >&2
+  printf '%s\n' "$rows" | sed 's/^/[dune-local]   /' >&2
+  printf '[dune-local] refusing to start another local build while the machine-wide Dune lock is bypassed\n' >&2
+  printf '[dune-local] stop the bare Dune process, rerun it via scripts/dune-local.sh, or set MASC_DUNE_ALLOW_BARE_DUNE=1 to proceed anyway\n' >&2
+  exit 75
+}
+
+_check_unwrapped_dune_processes
+
 # Acquire the build throttle before the opam-switch lock.  The opam lock is
 # intentionally held while the active build uses the shared switch, but queued
 # builds must not hold it while waiting for the Dune throttle; otherwise stale
@@ -167,6 +231,8 @@ if _needs_dune_lock; then
     dune_lock_warning_emitted=1
   fi
 fi
+
+_check_unwrapped_dune_processes
 
 _needs_opam_lock() {
   [[ "${GITHUB_ACTIONS:-}" != "true" ]] || return 1

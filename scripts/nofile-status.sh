@@ -75,6 +75,27 @@ else
   printf 'dune/local-build processes: unavailable (pgrep and ps failed)\n'
 fi
 
+printf 'orphaned dune-local lock waiters:\n'
+if [[ "${ps_available}" -eq 1 ]]; then
+  orphan_waiters="$(
+    ps ax -o pid=,ppid=,stat=,etime=,command= 2>/dev/null \
+      | awk '
+          $2 == 1 &&
+          /dune-local[.]sh/ &&
+          /me-dune-local[.]lock/ &&
+          /(^|[[:space:]\/])(lockf|flock)([[:space:]]|$)/ {
+            print
+          }' || true
+  )"
+  if [[ -n "${orphan_waiters}" ]]; then
+    printf '%s\n' "${orphan_waiters}"
+  else
+    printf 'none\n'
+  fi
+else
+  printf 'orphaned dune-local lock waiters: unavailable (ps failed)\n'
+fi
+
 printf 'repo-wide scan processes:\n'
 if [[ "${ps_available}" -eq 1 ]]; then
   ps ax -o pid=,ppid=,stat=,etime=,command= 2>/dev/null \
@@ -90,14 +111,58 @@ fi
 
 printf 'potential bare dune bypasses:\n'
 if [[ "${ps_available}" -eq 1 ]]; then
-  ps ax -o pid=,ppid=,stat=,etime=,command= 2>/dev/null \
-    | awk '
-        /dune (build|test|exec)/ &&
-        $0 !~ /dune-local\.sh/ &&
-        $0 !~ /me-dune-local\.lock/ &&
-        $0 !~ /MASC_DUNE_LOCK_HELD=1/ {
-          print
-        }' || true
+  bare_dune_rows="$(
+    ps ax -o pid=,ppid=,stat=,etime=,command= 2>/dev/null \
+      | awk '
+          /^[[:space:]]*[0-9]+[[:space:]]+[0-9]+[[:space:]]+/ {
+            pid = $1
+            ppid = $2
+            stat = $3
+            etime = $4
+            $1 = ""
+            $2 = ""
+            $3 = ""
+            $4 = ""
+            sub(/^[[:space:]]+/, "", $0)
+            parent[pid] = ppid
+            state[pid] = stat
+            elapsed[pid] = etime
+            cmd[pid] = $0
+          }
+
+          function has_wrapper_ancestor(pid, cur, depth) {
+            cur = pid
+            depth = 0
+            while ((cur in cmd) && depth < 64) {
+              if (cmd[cur] ~ /dune-local[.]sh/ ||
+                  cmd[cur] ~ /me-dune-local[.]lock/ ||
+                  cmd[cur] ~ /MASC_DUNE_LOCK_HELD=1/) {
+                return 1
+              }
+              cur = parent[cur]
+              depth++
+            }
+            return 0
+          }
+
+          function is_dune_command(text) {
+            return text ~ /^([^[:space:]]*\/)?dune[[:space:]]+(build|test|exec|runtest)([[:space:]]|$)/ ||
+                   text ~ /^([^[:space:]]*\/)?opam[[:space:]]+exec[[:space:]].*[[:space:]]dune[[:space:]]+(build|test|exec|runtest)([[:space:]]|$)/
+          }
+
+          END {
+            for (pid in cmd) {
+              if (is_dune_command(cmd[pid]) && !has_wrapper_ancestor(pid)) {
+                printf "%s %s %s %s %s\n", pid, parent[pid], state[pid], elapsed[pid], cmd[pid]
+              }
+            }
+          }' || true
+  )"
+  if [[ -n "${bare_dune_rows}" ]]; then
+    printf '%s\n' "${bare_dune_rows}"
+  else
+    printf 'none\n'
+  fi
 else
   printf 'potential bare dune bypasses: unavailable (ps failed)\n'
 fi

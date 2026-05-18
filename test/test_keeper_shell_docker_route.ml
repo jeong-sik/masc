@@ -1513,7 +1513,11 @@ let test_docker_mount_failure_structured_details () =
 
 let test_docker_mount_failure_path_is_bounded () =
   let mount_path = "/host_mnt/" ^ String.make 5000 'x' in
-  let output = "OCI runtime create failed: error mounting \"" ^ mount_path ^ "\"" in
+  let output =
+    "OCI runtime create failed: error during container init: error mounting \""
+    ^ mount_path
+    ^ "\""
+  in
   match Keeper_sandbox_runtime.docker_mount_failure_path output with
   | None -> Alcotest.fail "expected bounded mount path"
   | Some path ->
@@ -1522,7 +1526,9 @@ let test_docker_mount_failure_path_is_bounded () =
       (String.starts_with ~prefix:path mount_path)
 
 let test_docker_mount_failure_requires_path () =
-  let output = "OCI runtime create failed: error mounting without quoted path" in
+  let output =
+    "OCI runtime create failed: error during container init: error mounting without quoted path"
+  in
   Alcotest.(check (option string)) "missing path is not a mount diagnostic" None
     (Keeper_sandbox_runtime.docker_mount_failure_path output);
   Alcotest.(check string) "missing path has no mount context" ""
@@ -1537,6 +1543,12 @@ let test_docker_mount_failure_requires_daemon_origin () =
   let marker_output = {|mount_path="/tmp/user-output"|} in
   Alcotest.(check (option string)) "marker-only output is not daemon-originated" None
     (Keeper_sandbox_runtime.docker_mount_failure_path marker_output)
+  ;
+  let app_oci_output =
+    {|application stderr: OCI runtime create failed: error mounting "./fixtures"|}
+  in
+  Alcotest.(check (option string)) "runtime-like app output lacks init origin" None
+    (Keeper_sandbox_runtime.docker_mount_failure_path app_oci_output)
 
 let () =
   Alcotest.run "Keeper_shell_docker_route"

@@ -25,7 +25,7 @@ fresh 240h sample, the same script should report `failure_pct < 10.00`.
 | Leak class | Baseline count | Code boundary | Current fix path |
 |---|---:|---|---|
 | `shape_block:unknown` / chaining | 3,224 | `lib/keeper/keeper_shell_bash.ml` | Normalize safe read-only fallbacks. `cd repos/... && <read-only>` is treated like a cwd-scoped read instead of a hard shape failure. |
-| Missing path or wrong cwd | 1,548 | `lib/worker_dev_tools.ml`, `lib/keeper/keeper_shell_docker.ml` | Preserve path validation, but make public `Bash` expose `cwd` and make retry hints use the public `Bash { command, cwd }` shape. |
+| Missing path or wrong cwd | 1,548 | `lib/worker_dev_tools.ml`, `lib/keeper/keeper_shell_docker.ml` | Preserve path validation, but make public `Bash` expose `cwd`, make retry hints use the public `Bash { command, cwd }` shape, and allow the safe `/dev/null` sentinel instead of treating `cat /dev/null` as an out-of-whitelist path. |
 | Non-zero command exits | 831 | `lib/exec_core.ml`, `lib/keeper_tool_call_log.ml` | Treat structured `ok=true` and `semantic_status=no_match` as semantic success even when the transport-level call was marked failed. |
 | `shape_block:pipe_or_redirect` | 681 | `lib/keeper/keeper_shell_bash.ml` | Keep unsafe pipelines blocked, but split safe read-only `|| echo` and stderr-dev-null fallbacks into deterministic primary commands. |
 | `other` / unclassified failures | 543 | `lib/keeper_tool_call_log.ml`, `lib/dashboard/dashboard_http_tool_quality.ml` | Promote structured `semantic_status`, `shape_block`, and diagnosis fields into stable failure categories. |

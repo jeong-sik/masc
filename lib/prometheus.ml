@@ -252,37 +252,9 @@ let metric_coord_claim_post_provision_failures =
    [auto_responder] / [dashboard_provider_runs] no longer
    silently masquerade as the same class of event as
    intentional 120s/180s budgets in autoresearch / deep_review. *)
-let metric_oas_bridge_timeout = "masc_oas_bridge_timeout_total"
-
-(* #10942 mirror for masc_oas_bridge cancel branch.  Same bucket
-   semantics as [masc_keeper_oas_cancel_total] (fast/short_tail/
-   mid_tail/long_mid/long_tail) so PromQL can union the two
-   sources by [bucket] for a fleet-wide bimodal view of cancels.
-   [caller] preserves the timeout-counter pairing so each caller's
-   timeout vs cancel populations stay separable. *)
-let metric_oas_bridge_cancel = "masc_oas_bridge_cancel_total"
-
-(* OAS event relay (oas_event_bridge.ml).  Metric strings keep the
-   historical [oas_sse_*] prefix for Grafana/alert continuity; renaming
-   the operational contract is deferred to a separate PR with a
-   dashboard migration plan. *)
-let metric_oas_sse_relay_retries = "masc_oas_sse_relay_retries_total"
-let metric_oas_sse_relay_drops = "masc_oas_sse_relay_drops_total"
-let metric_oas_sse_relay_queue_depth = "masc_oas_sse_relay_queue_depth"
-let metric_oas_inference_telemetry_tokens = "masc_oas_inference_telemetry_tokens"
-let metric_oas_inference_prompt_tok_per_sec = "masc_oas_inference_prompt_tok_per_sec"
-let metric_oas_inference_decode_tok_per_sec = "masc_oas_inference_decode_tok_per_sec"
-let metric_oas_inference_cost_usd = "masc_oas_inference_cost_usd"
+include Prometheus_oas_metric_names
 
 include Prometheus_cascade_metric_names
-
-(* Context overflow ratio — set each time ContextOverflowImminent fires.
-   Ratio is estimated_tokens / limit_tokens in [0.0, 1.0+]. *)
-let metric_oas_context_overflow_ratio = "masc_oas_context_overflow_ratio"
-
-(* OAS-level context compaction counter — incremented each time
-   ContextCompactStarted fires from the event bus. *)
-let metric_oas_context_compaction_total = "masc_oas_context_compaction_total"
 
 (* MCP tool schema budget (set once at boot from mcp_server_eio.ml
    via [set_tool_schema_stats]). *)

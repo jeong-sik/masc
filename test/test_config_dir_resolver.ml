@@ -206,6 +206,33 @@ let test_inputs_from_env_honors_base_path_override_opt_in () =
   check string "root source" "local_masc"
     (Config_dir_resolver.source_to_string resolution.config_root.source)
 
+let test_inputs_from_env_survives_deleted_cwd () =
+  with_temp_dir "config-dir-deleted-cwd" @@ fun root ->
+  let parent = Filename.concat root "parent" in
+  let doomed = Filename.concat parent "doomed" in
+  let base = Filename.concat root "base" in
+  Unix.mkdir parent 0o755;
+  Unix.mkdir doomed 0o755;
+  let _config = make_config_root (Filename.concat base Common.masc_dirname) in
+  with_env "MASC_TEST_ALLOW_BASE_PATH_OVERRIDE" (Some "true") @@ fun () ->
+  with_env "MASC_CONFIG_DIR" None @@ fun () ->
+  with_env "MASC_PERSONAS_DIR" None @@ fun () ->
+  with_env "MASC_BASE_PATH" (Some base) @@ fun () ->
+  with_env "MASC_BASE_PATH_INPUT" (Some base) @@ fun () ->
+  let saved_cwd = Sys.getcwd () in
+  Unix.chdir doomed;
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.chdir saved_cwd;
+      Config_dir_resolver.reset ())
+    (fun () ->
+      Unix.rmdir doomed;
+      let inputs = Config_dir_resolver.inputs_from_env () in
+      check string "deleted cwd falls back to base path" base inputs.cwd;
+      let resolution = Config_dir_resolver.resolve_with inputs in
+      check string "root source" "local_masc"
+        (Config_dir_resolver.source_to_string resolution.config_root.source))
+
 let test_normalize_masc_base_path_input_canonicalizes_explicit_path () =
   let actual =
     Env_config_core.normalize_masc_base_path_input
@@ -561,6 +588,8 @@ let () =
             test_inputs_from_env_honors_config_path_override_opt_in;
           test_case "inputs_from_env honors base-path override opt-in" `Quick
             test_inputs_from_env_honors_base_path_override_opt_in;
+          test_case "inputs_from_env survives deleted cwd" `Quick
+            test_inputs_from_env_survives_deleted_cwd;
           test_case "canonicalizes explicit base path" `Quick
             test_normalize_masc_base_path_input_canonicalizes_explicit_path;
         ] );

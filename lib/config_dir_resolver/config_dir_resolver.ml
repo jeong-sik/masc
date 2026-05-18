@@ -135,14 +135,21 @@ let current_env_personas_dir_opt () =
     ~initial:initial_env_personas_dir
     ~current:((Host_config.from_env ()).personas_dir)
 
+let absolute_dir_opt path =
+  let path = Env_config_core.normalize_masc_base_path_input path in
+  if path = "" || Filename.is_relative path then None else Some path
+
 let fallback_cwd_from_env () =
   let host = Host_config.from_env () in
-  match host.base_path with
-  | Some base_path when not (Filename.is_relative base_path) -> base_path
+  match Option.bind host.base_path absolute_dir_opt with
+  | Some base_path -> base_path
   | _ ->
-    (match host.home with
-     | Some home when not (Filename.is_relative home) -> home
-     | _ -> Filename.get_temp_dir_name ())
+    (match Option.bind host.home absolute_dir_opt with
+     | Some home -> home
+     | _ ->
+       let exe = Sys.executable_name in
+       if Filename.is_relative exe then Filename.get_temp_dir_name ()
+       else Filename.dirname exe)
 
 let current_working_dir () =
   try Sys.getcwd () with

@@ -228,6 +228,10 @@
   keeper_status_bridge
   keeper_hooks_oas_gate_attempt
   keeper_hooks_oas_output_json
+  keeper_hooks_oas_response_metrics
+  keeper_hooks_oas_cost_events
+  keeper_hooks_oas_idle
+  keeper_hooks_oas_pr_metrics
   keeper_tools_oas_markers
   autoresearch_codegen
   autoresearch_knowledge

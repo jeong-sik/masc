@@ -1,0 +1,259 @@
+(** Response, usage-trust, and inference metric helpers for [Keeper_hooks_oas]. *)
+
+open Keeper_hooks_oas_types
+
+(* #9919: counter for post_tool_use_failure events.
+
+   Replaces an earlier [Heuristic_metrics.record] emit that produced
+   degenerate 1-bit records (51 identical rows in 48h of production,
+   [threshold=0.0, raw=1.0, triggered=true]).  Per keeper + per tool
+   labels let dashboards and #9880 governance judgments distinguish
+   which keeper-tool pairs are actually failing instead of reading a
+   single undifferentiated marker. *)
+let tool_use_failure_metric = Keeper_metrics.metric_keeper_tool_use_failure
+
+let record_tool_use_failure ~keeper_name ~tool_name =
+  Prometheus.inc_counter tool_use_failure_metric
+    ~labels:[ (label_keeper, keeper_name); (label_tool, tool_name) ] ()
+
+(* #10083 originally patched empty [response.model] leaks by recovering a
+   canonical model id inside MASC.  The ownership boundary has since moved:
+   OAS owns concrete provider/model identity, while keeper-facing telemetry
+   records only a neutral runtime lane.  These counters remain as quality
+   signals for missing or selector-like response.model values, but their
+   labels never carry the concrete model id. *)
+let empty_response_model_metric =
+  Prometheus.metric_after_turn_response_model_empty
+
+let alias_response_model_metric =
+  Prometheus.metric_after_turn_response_model_alias
+
+let empty_response_content_metric =
+  Prometheus.metric_after_turn_response_content_empty
+
+(* zero_usage moved to Keeper_hooks_oas_types (intra-library file split). *)
+
+(* telemetry_has_canonical_model_id / is_runtime_selector_alias / ms_per_second
+   moved to Keeper_hooks_oas_types (intra-library file split, 2026-05-16). *)
+
+(* #10083: keep the missing/alias observability, but return the keeper-facing
+   runtime lane instead of reconstructing OAS-owned model identity. *)
+let resolve_after_turn_model ~keeper_name
+    ~(response : Agent_sdk.Types.api_response) =
+  let raw_model = String.trim response.model in
+  if String.equal raw_model "" then begin
+    let source =
+      let source_telemetry_resolved = "telemetry_resolved" in
+      let source_unknown_sentinel = "unknown_sentinel" in
+      if telemetry_has_canonical_model_id response.telemetry then
+        source_telemetry_resolved
+      else source_unknown_sentinel
+    in
+    Prometheus.inc_counter empty_response_model_metric
+      ~labels:[ (label_keeper, keeper_name); (label_source, source) ] ();
+    Log.Keeper.warn
+      "keeper:%s after_turn response.model empty -> runtime_lane source=%s"
+      keeper_name source;
+    runtime_lane_label
+  end else begin
+    if is_runtime_selector_alias raw_model then (
+      let source_telemetry_canonical = "telemetry_canonical" in
+      Prometheus.inc_counter alias_response_model_metric
+        ~labels:
+          [
+            (label_keeper, keeper_name);
+            (label_alias, runtime_lane_label);
+            (label_source, source_telemetry_canonical);
+          ]
+        ();
+      Log.Keeper.warn
+        "keeper:%s after_turn response.model selector -> runtime_lane source=%s"
+        keeper_name "telemetry_canonical");
+    runtime_lane_label
+  end
+
+let stop_reason_metric_label = function
+  | Agent_sdk.Types.EndTurn -> "end_turn"
+  | Agent_sdk.Types.StopToolUse -> "tool_use"
+  | Agent_sdk.Types.MaxTokens -> "max_tokens"
+  | Agent_sdk.Types.StopSequence -> "stop_sequence"
+  | Agent_sdk.Types.Unknown _ -> "unknown"
+
+let content_block_has_visible_or_tool_progress = function
+  | Agent_sdk.Types.Text text -> String.trim text <> ""
+  | Agent_sdk.Types.ToolResult { content; json; _ } ->
+      String.trim content <> "" || Option.is_some json
+  | Agent_sdk.Types.ToolUse _
+  | Agent_sdk.Types.Image _
+  | Agent_sdk.Types.Document _
+  | Agent_sdk.Types.Audio _ -> true
+  | Agent_sdk.Types.Thinking _ | Agent_sdk.Types.RedactedThinking _ -> false
+
+let shape_empty = "empty"
+let shape_thinking_only = "thinking_only"
+let shape_blank_text = "blank_text"
+
+let response_content_empty_shape content =
+  if content = [] then shape_empty
+  else if
+    List.exists
+      (function
+        | Agent_sdk.Types.Thinking _ | Agent_sdk.Types.RedactedThinking _ -> true
+        | _ -> false)
+      content
+  then shape_thinking_only
+  else shape_blank_text
+
+let record_response_content_quality_metric ~keeper_name
+    (response : Agent_sdk.Types.api_response) =
+  if not (List.exists content_block_has_visible_or_tool_progress response.content)
+  then
+    Prometheus.inc_counter empty_response_content_metric
+      ~labels:
+        [
+          (label_keeper, keeper_name);
+          (label_stop_reason, stop_reason_metric_label response.stop_reason);
+          (label_shape, response_content_empty_shape response.content);
+        ]
+      ()
+
+(* default_context_max + context_max_of_telemetry moved to
+   Keeper_hooks_oas_types (intra-library file split, 2026-05-16). *)
+
+let classify_usage_trust ?usage ~model ~telemetry () =
+  let _ = model in
+  let usage_reported, usage =
+    match usage with
+    | Some usage -> true, usage
+    | None -> false, zero_usage
+  in
+  Keeper_usage_trust.classify
+    ~usage_reported ~usage ~model_used:runtime_lane_label
+    ~resolved_model_id:runtime_lane_label
+    ~context_max:(context_max_of_telemetry telemetry)
+
+let record_usage_anomaly_metrics ~keeper_name ~model usage_trust =
+  if not (Keeper_usage_trust.is_trusted usage_trust) then
+    let reasons =
+      match Keeper_usage_trust.reasons usage_trust with
+      | [] -> [Keeper_usage_trust.to_string usage_trust]
+      | reasons -> reasons
+    in
+    List.iter
+      (fun reason ->
+         Prometheus.inc_counter
+           Keeper_metrics.metric_keeper_usage_anomalies
+	           ~labels:
+	             [
+	               (label_keeper_name, keeper_name);
+	               (label_model, runtime_lane_label);
+	               (label_reason, reason);
+	             ]
+           ())
+      reasons
+
+let record_keeper_tool_duration_metric
+    ~(keeper_name : string)
+    (summary : tool_execution_summary)
+  : unit =
+  Prometheus.observe_histogram
+    Keeper_metrics.metric_keeper_tool_call_duration
+    ~labels:
+      [label_keeper, keeper_name
+      ; "provider", summary.provider
+      ; "tool", summary.tool_name
+      ; "outcome", summary.outcome
+      ]
+    (summary.duration_ms /. ms_per_second)
+
+(** Emit prompt/decode tokens-per-second histograms from an OAS turn
+    response.  Safe to call with [telemetry = None] (no-op) and with
+    positive [None] timing fields (per-metric no-op).  The histograms are
+    labelled by [model], the coarse [provider] string derived from the
+    model id, and the finer [provider_kind] reported by OAS.  Split from
+    [masc_llm_inference_duration_seconds] because wall-clock latency
+    mixes prefill and decode phases.
+
+    Extracted so the after_turn hook is unit-testable without
+    constructing a full [Agent_sdk.Hooks.AfterTurn] event. *)
+let record_llm_tok_s_metrics
+    ~(model : string)
+    ~(telemetry : Agent_sdk.Types.inference_telemetry option)
+  : unit =
+  let prompt_tok_s_opt, decode_tok_s_opt =
+    match telemetry with
+    | Some { timings = Some t; _ } ->
+      t.prompt_per_second, t.predicted_per_second
+    | _ -> None, None
+  in
+  let provider_kind_label = runtime_lane_label in
+  let _ = model in
+  let provider = runtime_lane_label in
+  let labels =
+    [ "model", runtime_lane_label
+    ; "provider", provider
+    ; "provider_kind", provider_kind_label
+    ]
+  in
+  (match prompt_tok_s_opt with
+   | Some v when v > 0.0 ->
+     Prometheus.observe_histogram
+       Prometheus.metric_llm_prompt_tok_per_sec ~labels v
+   | _ -> ());
+  (match decode_tok_s_opt with
+   | Some v when v > 0.0 ->
+     Prometheus.observe_histogram
+       Prometheus.metric_llm_decode_tok_per_sec ~labels v
+   | _ -> ())
+
+(** Emit the after-turn wall-clock latency histogram.  A zero/negative
+    [request_latency_ms] is still a telemetry quality problem, so the
+    zero-latency counter remains the alertable signal; the histogram receives
+    a 1ms floor to avoid "hook ran but latency count stayed zero" dashboards. *)
+let record_llm_inference_latency_metric
+    ~(model : string)
+    ~(telemetry : Agent_sdk.Types.inference_telemetry option)
+  : unit =
+  let _ = model in
+  let labels = [("model", runtime_lane_label)] in
+  Prometheus.inc_counter Prometheus.metric_after_turn_hook ~labels ();
+  match telemetry with
+  | Some t ->
+    let observed_latency_ms =
+      match t.request_latency_ms with
+      | Some latency_ms when latency_ms > 0 -> latency_ms
+      | _ ->
+          Prometheus.inc_counter
+            Prometheus.metric_after_turn_telemetry_zero_latency
+            ~labels ();
+          1
+    in
+    Prometheus.observe_histogram
+      Prometheus.metric_llm_inference_duration
+      ~labels
+      (Float.of_int observed_latency_ms /. ms_per_second)
+  | None ->
+    Prometheus.inc_counter
+      Prometheus.metric_after_turn_telemetry_missing
+      ~labels ()
+
+let wall_tokens_per_second
+    ~(usage_missing : bool)
+    ~(output_tokens : int)
+    ~(telemetry : Agent_sdk.Types.inference_telemetry option)
+  : float option =
+  match telemetry with
+  | Some t when not usage_missing && output_tokens > 0 -> (
+      match t.request_latency_ms with
+      | Some request_latency_ms when request_latency_ms > 0 ->
+        let request_latency_ms = Float.of_int request_latency_ms in
+        let latency_ms =
+          match t.ttfrc_ms with
+          | Some ttfrc_ms when ttfrc_ms > 0.0 && ttfrc_ms < request_latency_ms ->
+            request_latency_ms -. ttfrc_ms
+          | _ -> request_latency_ms
+        in
+        Some (Float.of_int output_tokens /. (latency_ms /. ms_per_second))
+      | _ -> None)
+  | _ -> None
+

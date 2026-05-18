@@ -326,6 +326,8 @@ let quarantine_dir_under_trash (config : Coord.config) ~path ~op =
   in
   let dest =
     Filename.concat trash_dir
+      (* NDT-OK: quarantine filenames only need per-process uniqueness for
+         external filesystem recovery; planning state remains ledger-driven. *)
       (Printf.sprintf "current_task.%s.%d" stamp (Unix.getpid ()))
   in
   try

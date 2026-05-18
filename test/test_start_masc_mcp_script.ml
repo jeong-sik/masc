@@ -199,6 +199,17 @@ esac
 |}
        (quote state_file) (quote clean_marker))
 
+let write_fake_dune_local ~path ~log_file =
+  write_executable path
+    (Printf.sprintf
+       {|
+#!/bin/sh
+set -eu
+printf 'dune-local %%s DUNE_JOBS=%%s DUNE_LOCAL_JOBS=%%s\n' "$*" "${DUNE_JOBS:-}" "${DUNE_LOCAL_JOBS:-}" >> %s
+exec dune "$@"
+|}
+       (quote log_file))
+
 let make_fake_stdio_eio_exe repo_root =
   let exe_path =
     Filename.concat repo_root "_build/default/bin/main_stdio_eio.exe"
@@ -716,23 +727,30 @@ let test_stale_dune_artifacts_are_cleaned_and_retried () =
   with_temp_dir "start-masc-script-stale-dune" (fun dir ->
       with_temp_dir "start-masc-stale-dune-fake-bin" (fun fake_bin ->
           let script = Filename.concat dir "start-masc-mcp.sh" in
+          let scripts_dir = Filename.concat dir "scripts" in
           let dune_state = Filename.concat dir "dune-build-count.txt" in
           let clean_marker = Filename.concat dir "dune-clean-ran.txt" in
+          let dune_local_log = Filename.concat dir "dune-local-calls.txt" in
           let capture = Filename.concat dir "captured-stale-dune.txt" in
           copy_script (script_path ()) script;
           ignore (make_config_root dir);
+          mkdir_p scripts_dir;
           mkdir_p fake_bin;
           write_executable (Filename.concat fake_bin "opam")
             "#!/bin/sh\nexit 0\n";
           write_fake_dune_stale_then_success
             ~path:(Filename.concat fake_bin "dune")
             ~state_file:dune_state ~clean_marker;
+          write_fake_dune_local
+            ~path:(Filename.concat scripts_dir "dune-local.sh")
+            ~log_file:dune_local_log;
           let code, stdout, stderr =
             run_shell ~cwd:dir
               ~env:
                 [
                   ("FAKE_CAPTURE_FILE", capture);
                   ("MASC_BASE_PATH", dir);
+                  ("MASC_DUNE_JOBS", "2");
                   ("PATH", fake_bin ^ ":" ^ Sys.getenv "PATH");
                 ]
               (Printf.sprintf "%s --http --port 9971 --base-path %s"
@@ -747,6 +765,15 @@ let test_stale_dune_artifacts_are_cleaned_and_retried () =
                "FAKE_EXE_MARKER=eio-after-stale-retry");
           check bool "dune clean ran before retry" true
             (Sys.file_exists clean_marker);
+          let dune_local_calls = read_file dune_local_log in
+          check bool "startup build uses dune-local wrapper" true
+            (contains_substring dune_local_calls
+               "dune-local build bin/main_eio.exe");
+          check bool "startup forwards DUNE_JOBS into wrapper under CI" true
+            (contains_substring dune_local_calls
+               "DUNE_JOBS=2 DUNE_LOCAL_JOBS=2");
+          check bool "stale cleanup uses dune-local wrapper" true
+            (contains_substring dune_local_calls "dune-local clean");
           check bool "original stale artifact error preserved" true
             (contains_substring stderr
                "make inconsistent assumptions over implementation Agent_sdk__Context_reducer");

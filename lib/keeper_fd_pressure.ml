@@ -390,8 +390,10 @@ let system_fd_headroom () =
 ;;
 
 let host_fd_hotspot_headroom () =
-  Env_config_core.get_int ~default:49152 "MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM"
-  |> max (system_fd_headroom ())
+  Env_config_core.get_int ~default:0 "MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM" |> max 0
+;;
+
+let host_fd_hotspot_blocking_enabled () = host_fd_hotspot_headroom () > 0
 ;;
 
 let active_keeper_cap_for_soft_limit soft =
@@ -438,7 +440,7 @@ let system_fd_budget_block system_fds ~projected_fds ~active_keepers ~starting_k
       | Some max_files_per_process when max_files_per_process > 0 ->
         let remaining_files = max 0 (max_files_per_process - open_files) in
         let required_headroom = host_fd_hotspot_headroom () in
-        if remaining_files < required_headroom + projected_fds
+        if required_headroom > 0 && remaining_files < required_headroom + projected_fds
         then
           Some
             (Host_fd_hotspot_budget_exhausted
@@ -674,6 +676,7 @@ let runtime_state_json ?(soft_limit = process_nofile_soft_limit ())
     ; "system_max_files_per_process", system_max_files_per_process
     ; "host_fd_hotspot_remaining", host_fd_hotspot_remaining
     ; "host_fd_hotspot_headroom", `Int (host_fd_hotspot_headroom ())
+    ; "host_fd_hotspot_blocking_enabled", `Bool (host_fd_hotspot_blocking_enabled ())
     ; "host_fd_hotspot_probe_supported", host_fd_hotspot_probe_supported
     ; "headroom", `Int (fd_headroom ())
     ; "fd_per_active_keeper", `Int (fd_per_active_keeper ())

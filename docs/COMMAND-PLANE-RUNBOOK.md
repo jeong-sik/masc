@@ -197,6 +197,15 @@ inside it:
 scripts/docker-playground-fd-status.sh --root "$MASC_BASE_PATH/.masc/playground/docker"
 ```
 
+The runtime admission guard keeps Docker playground hotspot blocking disabled by
+default (`MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM=0`). The macOS system probe
+reports `kern.num_files`, which is host-wide, not a per-process Docker Desktop
+FD count; using it as a hard per-process hotspot proxy can false-block normal
+runtime when `kern.maxfilesperproc` is merely near the current host-wide file
+count. Keep the script above as the default visibility path. Set a positive
+`MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM` only for a deliberately conservative
+operator session.
+
 Review stale clean worktree candidates first:
 
 ```bash
@@ -233,6 +242,49 @@ scripts/cleanup-docker-playground-worktrees.sh \
 
 Then apply with both `--include-broken` and `--apply` only after confirming the
 `BROKEN_CANDID` paths are stale orphan directories.
+
+### Local Dune FD Containment
+
+Local OCaml verification must go through the repo wrapper:
+
+```bash
+scripts/dune-local.sh build <target>
+```
+
+The wrapper serializes local Dune builds across worktrees. Shared server
+startup (`start-masc-mcp.sh`), local production deploys, and the contract
+harness bootstrap also route rebuilds through this wrapper. A direct `dune
+build`, `dune test`, `dune exec`, or `dune clean` bypasses that machine-wide
+lock and can recreate host-wide FD pressure or mutate `_build` outside the
+shared lock even when every cooperative build uses `DUNE_JOBS=1`.
+
+Inspect live pressure and bypasses:
+
+```bash
+scripts/nofile-status.sh
+```
+
+`potential bare dune bypasses` should be `none`. If a row appears, stop that
+process and rerun the command via `scripts/dune-local.sh`. New wrapper
+invocations fail fast while a live unwrapped Dune process exists, unless the
+operator explicitly sets `MASC_DUNE_ALLOW_BARE_DUNE=1` for a one-off emergency.
+
+When a misbehaving session is repeatedly spawning unwrapped local builds, use an
+explicit remediation mode instead of running full `lsof` dumps:
+
+```bash
+scripts/nofile-status.sh --kill-bare-dune
+scripts/nofile-status.sh --watch 2 --kill-bare-dune --kill-repo-scans
+```
+
+The kill flags only target rows already classified by the status script:
+unwrapped Dune bypasses and broad `find`/`bfs` scans over `~/me` or `masc-mcp`.
+Wrapped `scripts/dune-local.sh` builds remain visible but are not terminated.
+
+`orphaned dune-local lock waiters` should also be `none`. A PPID 1 `lockf` or
+`flock` row is no longer attached to the agent session that started it; after
+confirming it is not the current lock holder, terminate the orphaned waiter so it
+does not take the Dune lock later and extend the local build queue.
 
 대표 failure class:
 

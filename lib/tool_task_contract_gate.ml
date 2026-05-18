@@ -93,7 +93,11 @@ let persisted_contract_rejection ~(agent_name : string)
           "[cdal-gate] checking verdict for task=%s agent=%s strict=%b gate=%s"
           task.id agent_name contract.strict gate_label;
         let rejection =
-          Cdal_verdict_gate.gate_check ~gate_label ~task_id:task.id ()
+          Cdal_verdict_gate.gate_check
+            ~gate_label
+            ~warn_on_missing:contract.strict
+            ~task_id:task.id
+            ()
         in
         if contract.strict then rejection
         else begin

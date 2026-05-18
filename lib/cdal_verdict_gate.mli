@@ -39,7 +39,7 @@ val advisory_gate_label : string
 
 (** {1 Task completion gate} *)
 
-(** [gate_check ?base_dir ?gate_label ~task_id ()] looks up the latest
+(** [gate_check ?base_dir ?gate_label ?warn_on_missing ~task_id ()] looks up the latest
     verdict for [task_id] under [base_dir] (default: CDAL verdict
     directory resolved from MASC base path) and returns:
 
@@ -50,15 +50,21 @@ val advisory_gate_label : string
     {!strict_gate_label}). Callers operating on advisory contracts
     should pass [~gate_label:advisory_gate_label] so the dashboard can
     distinguish the two buckets. The return value is unaffected by
-    the label. *)
+    the label.
+
+    [warn_on_missing] controls operator-visible missing-verdict WARNs.
+    Strict gates should keep the default [true]. Advisory or
+    attribution-only callers may pass [false] to record attribution
+    without repeating a non-blocking warning. *)
 val gate_check :
   ?base_dir:string ->
   ?gate_label:string ->
+  ?warn_on_missing:bool ->
   task_id:string ->
   unit ->
   string option
 
-(** [lookup_latest_verdict ?base_dir ?limit ~task_id ()] — the
+(** [lookup_latest_verdict ?base_dir ?warn_on_missing ?limit ~task_id ()] — the
     primitive that {!gate_check} composes with attribution recording.
     Exposed so diagnostic tools and tests can call it without
     importing the attribution side effect.
@@ -69,6 +75,7 @@ val gate_check :
     cases (#10731). *)
 val lookup_latest_verdict :
   ?base_dir:string ->
+  ?warn_on_missing:bool ->
   ?limit:int ->
   task_id:string ->
   unit ->

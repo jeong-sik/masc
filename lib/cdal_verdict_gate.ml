@@ -86,7 +86,20 @@ let scan_for_task_id ~task_id recent =
     | _ -> acc
   ) None recent
 
+let verdict_scope_counts recent =
+  List.fold_left
+    (fun (task_scoped, unscoped) json ->
+       match json with
+       | `Assoc fields ->
+         (match List.assoc_opt "_task_id" fields with
+          | Some (`String _) -> task_scoped + 1, unscoped
+          | _ -> task_scoped, unscoped + 1)
+       | _ -> task_scoped, unscoped)
+    (0, 0)
+    recent
+
 let lookup_latest_verdict ?base_dir
+    ?(warn_on_missing = true)
     ?(limit = Env_config_runtime.Cdal.verdict_lookup_limit ())
     ~task_id () : Cdal_types.contract_verdict option =
   let base_dir =
@@ -109,10 +122,12 @@ let lookup_latest_verdict ?base_dir
     | Some _ -> result, recent, limit
     | None when List.length recent >= limit && auto_widen_factor > 1 ->
       let widened = limit * auto_widen_factor in
-      Log.Task.info
-        "[cdal-gate] task_id=%s: starting window saturated (%d entries) \
-         without match; widening to %d and re-scanning"
-        task_id limit widened;
+      if warn_on_missing
+      then
+        Log.Task.info
+          "[cdal-gate] task_id=%s: starting window saturated (%d entries) \
+           without match; widening to %d and re-scanning"
+          task_id limit widened;
       let recent2 = Dated_jsonl.read_recent store widened in
       let result2 = scan_for_task_id ~task_id recent2 in
       result2, recent2, widened
@@ -124,32 +139,37 @@ let lookup_latest_verdict ?base_dir
        - scanned everything available, no match (verdict was never written)
        - saturated even at the widened ceiling (unusually large ledger or
          very old verdict — operator may need to raise the env knob).  *)
-  (match result, recent with
-   | Some _, _ -> ()
-   | None, [] ->
-     Log.Task.warn
-       "[cdal-gate] task_id=%s: cdal_verdicts ledger is EMPTY at %s. \
-        Writer pipeline likely dormant — check that OAS Agent.run \
-        emits result.proof and Cdal_eval_v1.persist is reached. (#10115)"
-       task_id base_dir
-   | None, _ when List.length recent >= used_limit ->
-     if not (Hashtbl.mem saturation_warn_emitted task_id) then begin
-       Hashtbl.add saturation_warn_emitted task_id ();
+  if warn_on_missing
+  then (
+    let task_scoped, unscoped = verdict_scope_counts recent in
+    match result, recent with
+    | Some _, _ -> ()
+    | None, [] ->
        Log.Task.warn
-         "[cdal-gate] task_id=%s: scanned newest %d entries (auto-widened \
-          %dx from MASC_CDAL_VERDICT_LOOKUP_LIMIT=%d) without match; older \
-          verdicts beyond this ceiling are silently skipped. Raise \
-          MASC_CDAL_VERDICT_LOOKUP_LIMIT only if the verdict is known to \
-          exist farther back. (#10115 #10731)"
-         task_id used_limit auto_widen_factor limit
-     end
-   | None, _ ->
-     Log.Task.warn
-       "[cdal-gate] task_id=%s: no verdict in current ledger window \
-        (%d entries scanned, below limit=%d).  Either the task has \
-        never been verified, or the writer pipeline is dormant — \
-        bumping MASC_CDAL_VERDICT_LOOKUP_LIMIT will not help. (#10115)"
-       task_id (List.length recent) used_limit);
+         "[cdal-gate] task_id=%s: cdal_verdicts ledger is EMPTY at %s. \
+          Writer pipeline likely dormant — check that OAS Agent.run \
+          emits result.proof and Cdal_eval_v1.persist is reached. (#10115)"
+         task_id base_dir
+    | None, _ when List.length recent >= used_limit ->
+      if not (Hashtbl.mem saturation_warn_emitted task_id) then begin
+        Hashtbl.add saturation_warn_emitted task_id ();
+        Log.Task.warn
+          "[cdal-gate] task_id=%s: scanned newest %d entries (auto-widened \
+           %dx from MASC_CDAL_VERDICT_LOOKUP_LIMIT=%d) without match \
+           (task_scoped=%d unscoped=%d). Older verdicts beyond this ceiling \
+           are silently skipped. Raise MASC_CDAL_VERDICT_LOOKUP_LIMIT only \
+           if the verdict is known to exist farther back. (#10115 #10731)"
+          task_id used_limit auto_widen_factor limit task_scoped unscoped
+      end
+    | None, _ ->
+      Log.Task.warn
+        "[cdal-gate] task_id=%s: no task-scoped verdict in current ledger \
+         window (%d entries scanned, task_scoped=%d, unscoped=%d, below \
+         limit=%d). CDAL writer is active; this task either has never \
+         produced a scoped verifier proof, or the verifier turn persisted \
+         proof without task_id/current_task_id. Bumping \
+         MASC_CDAL_VERDICT_LOOKUP_LIMIT will not help. (#10115)"
+        task_id (List.length recent) task_scoped unscoped used_limit);
   result
 
 (* #10115: ledger health introspection.  Walks [base_dir/YYYY-MM/]
@@ -287,8 +307,10 @@ let attribution_for_missing_verdict ?(gate_label = strict_gate_label)
          task_id)
 
 let gate_check ?base_dir
-    ?(gate_label = strict_gate_label) ~task_id () : string option =
-  match lookup_latest_verdict ?base_dir ~task_id () with
+    ?(gate_label = strict_gate_label)
+    ?(warn_on_missing = true)
+    ~task_id () : string option =
+  match lookup_latest_verdict ?base_dir ~warn_on_missing ~task_id () with
   | None ->
     Dashboard_attribution.record
       (attribution_for_missing_verdict ~gate_label ~task_id ());

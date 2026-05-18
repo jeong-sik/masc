@@ -621,6 +621,28 @@ let test_code_shell_rg_exit_one_no_matches_is_success () =
   check string "exit_semantics" "no_matches"
     (json_string_field "exit_semantics" msg)
 
+let test_code_shell_rg_quoted_regex_pipe_no_match_is_success () =
+  with_temp_dir "tool-code-shell-rg-regex-pipe" @@ fun dir ->
+  let fixture = Filename.concat dir "sample.ml" in
+  write_file fixture "let present = 1\n";
+  let ctx = make_ctx () in
+  let args =
+    `Assoc
+      [
+        ( "command",
+          `String
+            (Printf.sprintf "rg \"missing_one\\|missing_two\" %s -l"
+               (Filename.quote fixture)) );
+        ("timeout", `Int 5);
+      ]
+  in
+  let ok, msg = dispatch_exn ctx ~name:"masc_code_shell" ~args in
+  check bool "quoted regex pipe remains an rg no-match" true ok;
+  check string "status" "ok" (json_string_field "status" msg);
+  check int "exit_code" 1 (json_int_field "exit_code" msg);
+  check string "exit_semantics" "no_matches"
+    (json_string_field "exit_semantics" msg)
+
 let test_code_shell_grep_exit_one_no_matches_is_success () =
   with_temp_dir "tool-code-shell-grep" @@ fun dir ->
   let fixture = Filename.concat dir "sample.txt" in
@@ -904,6 +926,8 @@ let () =
         test_code_shell_missing_docker_cwd_reports_worktree_hint;
       test_case "rg exit 1 no-match is success" `Quick
         test_code_shell_rg_exit_one_no_matches_is_success;
+      test_case "rg quoted regex pipe no-match is success" `Quick
+        test_code_shell_rg_quoted_regex_pipe_no_match_is_success;
       test_case "grep exit 1 no-match is success" `Quick
         test_code_shell_grep_exit_one_no_matches_is_success;
       test_case "pipeline grep exit 1 no-match is success" `Quick

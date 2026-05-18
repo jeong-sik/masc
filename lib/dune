@@ -81,6 +81,7 @@
  server_dashboard_http_keeper_runtime_manifest_scan
  server_dashboard_http_keeper_runtime_lens_proof
  server_dashboard_http_keeper_runtime_lens_swimlane
+ server_dashboard_http_keeper_runtime_lens_summaries
  dashboard_goal_loop
  dashboard_http_autoresearch
  dashboard_harness_health

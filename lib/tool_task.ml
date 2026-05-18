@@ -173,18 +173,20 @@ let is_keeper_agent_alias_name agent_name =
   || has_wrapped_name ~prefix:"keeper_" ~suffix:"-agent"
 
 let sync_planning_current_task_with_owned_task (ctx : context) =
-  if is_keeper_agent_alias_name ctx.agent_name
+  let actual_name =
+    try Coord.resolve_agent_name ctx.config ctx.agent_name
+    with
+    | Sys_error _ | Yojson.Json_error _ -> ctx.agent_name
+    | exn ->
+        Log.Task.warn "resolve_agent_name failed for %s: %s" ctx.agent_name
+          (Stdlib.Printexc.to_string exn);
+        ctx.agent_name
+  in
+  if
+    is_keeper_agent_alias_name ctx.agent_name
+    || is_keeper_agent_alias_name actual_name
   then ()
   else
-    let actual_name =
-      try Coord.resolve_agent_name ctx.config ctx.agent_name
-      with
-      | Sys_error _ | Yojson.Json_error _ -> ctx.agent_name
-      | exn ->
-          Log.Task.warn "resolve_agent_name failed for %s: %s" ctx.agent_name
-            (Stdlib.Printexc.to_string exn);
-          ctx.agent_name
-    in
     let matches_you assignee =
       String.equal assignee ctx.agent_name || String.equal assignee actual_name
     in

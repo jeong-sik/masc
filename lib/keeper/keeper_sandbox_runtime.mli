@@ -109,7 +109,9 @@ val sanitize_label_value : string -> string
 
 (** Extract the failing host-side source path from Docker Desktop / OCI
     mount errors such as [error mounting "/host_mnt/..."].  Also accepts
-    the [mount_path="..."] field emitted by MASC diagnostics. *)
+    the [mount_path="..."] field emitted by MASC diagnostics.  Returned
+    paths are bounded before they are logged or emitted as structured
+    diagnostics. *)
 val docker_mount_failure_path : string -> string option
 
 (** Truncate Docker output for log storage.  Generic output keeps the

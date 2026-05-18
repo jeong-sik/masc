@@ -211,6 +211,8 @@ let find_char_from s ch pos =
   loop pos
 ;;
 
+let max_docker_mount_path_log_len = 4096
+
 let extract_quoted_value_after output marker =
   match String_util.find_substring output marker with
   | None -> None
@@ -227,7 +229,10 @@ let extract_quoted_value_after output marker =
       in
       if value_end <= value_start
       then None
-      else Some (String.sub output value_start (value_end - value_start)))
+      else
+        let value_len = value_end - value_start in
+        let bounded_len = min value_len max_docker_mount_path_log_len in
+        Some (String.sub output value_start bounded_len))
 ;;
 
 let docker_mount_failure_path output =
@@ -237,8 +242,7 @@ let docker_mount_failure_path output =
 ;;
 
 let docker_output_mentions_mount_failure output =
-  String_util.contains_substring_ci output "error mounting"
-  || Option.is_some (docker_mount_failure_path output)
+  Option.is_some (docker_mount_failure_path output)
 ;;
 
 let docker_failure_output_for_log output =

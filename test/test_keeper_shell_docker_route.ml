@@ -1511,6 +1511,23 @@ let test_docker_mount_failure_structured_details () =
     Alcotest.(check string) "container_kind" "turn" (field "container_kind");
     Alcotest.(check string) "network" "none" (field "network")
 
+let test_docker_mount_failure_path_is_bounded () =
+  let mount_path = "/host_mnt/" ^ String.make 5000 'x' in
+  let output = "OCI runtime create failed: error mounting \"" ^ mount_path ^ "\"" in
+  match Keeper_sandbox_runtime.docker_mount_failure_path output with
+  | None -> Alcotest.fail "expected bounded mount path"
+  | Some path ->
+    Alcotest.(check int) "bounded mount path length" 4096 (String.length path);
+    Alcotest.(check bool) "bounded path remains prefix" true
+      (String.starts_with ~prefix:path mount_path)
+
+let test_docker_mount_failure_requires_path () =
+  let output = "OCI runtime create failed: error mounting without quoted path" in
+  Alcotest.(check (option string)) "missing path is not a mount diagnostic" None
+    (Keeper_sandbox_runtime.docker_mount_failure_path output);
+  Alcotest.(check string) "missing path has no mount context" ""
+    (Keeper_sandbox_runtime.docker_mount_failure_context_suffix output)
+
 let () =
   Alcotest.run "Keeper_shell_docker_route"
     [
@@ -1567,6 +1584,12 @@ let () =
           Alcotest.test_case
             "docker mount failure emits structured details"
             `Quick test_docker_mount_failure_structured_details;
+          Alcotest.test_case
+            "docker mount failure path is bounded"
+            `Quick test_docker_mount_failure_path_is_bounded;
+          Alcotest.test_case
+            "docker mount failure requires extracted path"
+            `Quick test_docker_mount_failure_requires_path;
         ] );
       ( "docker_route_skipped",
         [

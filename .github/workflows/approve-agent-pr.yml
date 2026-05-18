@@ -144,19 +144,20 @@ jobs:
               'This approval was gated through the `human-approval` GitHub Environment, which requires',
               'an interactive reviewer approval that cannot be automated with a shared owner credential.',
             ].join('\n');
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: prNumber,
-              body,
-            });
-            core.info(`Posted approval marker for PR #${prNumber}; applying bypass label '${targetLabel}'.`);
+            core.info(`Applying bypass label '${targetLabel}' to PR #${prNumber}.`);
             await github.rest.issues.addLabels({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: prNumber,
               labels: [targetLabel],
             });
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body,
+            });
+            core.info(`Posted approval marker for PR #${prNumber} after applying bypass label '${targetLabel}'.`);
             const removedHardStopLabels = [];
             for (const label of hardStopLabels) {
               try {

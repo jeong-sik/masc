@@ -135,7 +135,8 @@ let run_all () =
        "[Shutdown] tmp cleanup skipped: MASC_BASE_PATH=%s is not absolute"
        base_path
    | Some base_path ->
-     let tmp_dir = Filename.concat base_path ".masc/tmp" in
+     (* RFC-0121: layout SSOT via [Config_dir_resolver]. *)
+     let tmp_dir = Config_dir_resolver.tmp_dir ~base_path in
      (match Unix.lstat tmp_dir with
       | exception Unix.Unix_error _ -> ()
       | st when st.Unix.st_kind = Unix.S_DIR -> cleanup_dir tmp_dir

@@ -25,4 +25,8 @@
   ; Host_config a true leaf below masc_coord.  Reverse migration of
   ; coord_utils_backend_setup callers becomes possible because
   ; masc_coord can now depend on masc_mcp.host_config without cycling.
-  masc_mcp.config))
+  masc_mcp.config
+  ; RFC-0121: derive .masc/<sub> paths via Common helpers. We cannot
+  ; depend on masc_mcp.config_dir_resolver here because the resolver
+  ; itself depends on host_config for test-mode + env reads.
+  masc_core))

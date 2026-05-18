@@ -135,8 +135,22 @@ let current_env_personas_dir_opt () =
     ~initial:initial_env_personas_dir
     ~current:((Host_config.from_env ()).personas_dir)
 
+let fallback_cwd_from_env () =
+  let host = Host_config.from_env () in
+  match host.base_path with
+  | Some base_path when not (Filename.is_relative base_path) -> base_path
+  | _ ->
+    (match host.home with
+     | Some home when not (Filename.is_relative home) -> home
+     | _ -> Filename.get_temp_dir_name ())
+
+let current_working_dir () =
+  try Sys.getcwd () with
+  | Sys_error _ -> fallback_cwd_from_env ()
+
 let absolute_path path =
-  if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path
+  if Filename.is_relative path then Filename.concat (current_working_dir ()) path
+  else path
 
 let absolute_path_from ~cwd path =
   if Filename.is_relative path then Filename.concat cwd path else path
@@ -277,7 +291,7 @@ let personas_item (inputs : inputs) root =
 
 let inputs_from_env () =
   {
-    cwd = Sys.getcwd ();
+    cwd = current_working_dir ();
     executable_name = Sys.executable_name;
     env_base_path = current_env_base_path_opt ();
     env_config_dir = current_env_config_dir_opt ();

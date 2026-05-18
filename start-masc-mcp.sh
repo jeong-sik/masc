@@ -37,7 +37,7 @@ DUNE_JOBS="${MASC_DUNE_JOBS:-8}"
 # mkdir-based build mutex (atomic on POSIX, works on macOS without flock).
 # Prevents multiple start-masc-mcp.sh instances from building concurrently.
 # Stores owner PID to detect and recover from stale locks left by crashed processes.
-MASC_BUILD_LOCK="/tmp/masc-mcp-build.lock"
+MASC_BUILD_LOCK="${MASC_BUILD_LOCK_PATH:-/tmp/masc-mcp-build.lock}"
 _MASC_LOCK_HELD=""
 _masc_cleanup_lock() {
     if [ -n "$_MASC_LOCK_HELD" ] && [ -d "$MASC_BUILD_LOCK" ]; then
@@ -147,13 +147,19 @@ dune_build_with_stale_retry() {
 build_dune_target_with_lock() {
     local target="$1"
     local label="$2"
-    if acquire_build_lock; then
-        if ! dune_build_with_stale_retry "$target" "$label"; then
-            release_build_lock
-            return 1
+    if ! acquire_build_lock; then
+        if is_truthy "${MASC_ALLOW_STALE_EXE_ON_BUILD_LOCK:-0}"; then
+            echo "Warning: proceeding without rebuilding $label because MASC_ALLOW_STALE_EXE_ON_BUILD_LOCK=1." >&2
+            return 0
         fi
-        release_build_lock
+        echo "Error: unable to acquire build lock for $label; refusing to continue with a stale or missing executable." >&2
+        return 1
     fi
+    if ! dune_build_with_stale_retry "$target" "$label"; then
+        release_build_lock
+        return 1
+    fi
+    release_build_lock
     return 0
 }
 
@@ -604,6 +610,13 @@ fi
 # with the bearer token minted during server bootstrap. Set to 0 to opt out.
 if [ -z "${MASC_SYNC_CODEX_MCP_CONFIG+x}" ]; then
     export MASC_SYNC_CODEX_MCP_CONFIG=1
+fi
+
+# macOS Docker Desktop hotspot detection is visibility-first by default.
+# Export the safe default from the launcher too, so a stale OCaml executable
+# compiled with an older nonzero default cannot re-enable false blocking.
+if [ -z "${MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM+x}" ]; then
+    export MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM=0
 fi
 
 # Default arguments

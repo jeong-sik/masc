@@ -11,6 +11,7 @@ val keeper_git_email : keeper_name:string -> string
 val git_env_for_keeper : keeper_name:string -> string array
 
 val keeper_name_from_agent_name : string -> string option
+val is_keeper_agent_alias : string -> bool
 val canonical_keeper_name_from_agent_name : string -> string option
 val canonical_keeper_name : string -> string option
 

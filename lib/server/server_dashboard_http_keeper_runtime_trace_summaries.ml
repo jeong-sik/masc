@@ -11,6 +11,11 @@ let unique_ints values =
 
 let json_int_list values = `List (List.map (fun value -> `Int value) values)
 
+let json_int_opt = function
+  | Some value -> `Int value
+  | None -> `Null
+;;
+
 let provider_attempts_summary_json scan =
   let attempt_rows = queue_to_list scan.provider_attempt_rows in
   let terminal = scan.provider_terminal_row in

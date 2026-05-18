@@ -309,7 +309,8 @@
           <ul>
             <li><span class="done">Done / PR</span> <code>#16154</code>: deterministic <code>keeper_bash</code> guard rejection을 <code>workflow_rejection</code>으로 분류해 circuit breaker에서 제외.</li>
             <li><span class="done">Done / PR</span> <code>#16159</code>: repeated <code>oas_timeout_budget</code> strike가 <code>Keeper_fiber_crash</code>로 승격되는 직접 경로 제거.</li>
-            <li><span class="doing">Started / OAS PR</span> <code>oas#1632</code>: provider timeout을 <code>stream_idle:streaming_thinking</code>, <code>stream_body</code>, <code>provider_step</code> 같은 typed evidence로 보존.</li>
+            <li><span class="done">Done / OAS PR</span> <code>oas#1632</code>: provider timeout을 <code>stream_idle:streaming_thinking</code>, <code>stream_body</code>, <code>provider_step</code> 같은 typed evidence로 보존.</li>
+            <li><span class="doing">Started / MASC PR</span> <code>#16191</code>: downstream OAS pin을 <code>main@308152ee</code> (<code>v0.196.1</code>)로 올리고 API surface fingerprint를 갱신.</li>
             <li><span class="doing">Started / MASC PR</span> <code>#16178</code>: <code>Keeper_failure_policy.decide</code> pure matrix로 Streaming/Thinking timeout과 keeper liveness 결정을 분리.</li>
             <li><span class="warn">Remaining</span>: watchdog/supervisor/dashboard가 같은 policy vocabulary를 쓰도록 통합 필요.</li>
           </ul>
@@ -502,10 +503,17 @@ type decision = {
         <tbody>
           <tr>
             <td>P0-OAS</td>
-            <td><span class="status doing">draft PR</span></td>
+            <td><span class="status done">merged</span></td>
             <td>Expose generic provider timeout/failure evidence before MASC policy consumes it.</td>
             <td><code>oas#1632</code>: <code>Http_client.TimeoutError</code>, <code>Error.Provider</code>, stream idle state</td>
             <td>MASC can distinguish <code>stream_idle:streaming_thinking</code>, <code>stream_body</code>, <code>provider_step</code>, hard quota, capacity, and provider terminal without string parsing.</td>
+          </tr>
+          <tr>
+            <td>P0-PIN</td>
+            <td><span class="status doing">draft PR</span></td>
+            <td>Consume the OAS provider-timeout evidence release in MASC's downstream dependency pin.</td>
+            <td><code>#16191</code>: <code>scripts/oas-agent-sdk-pin.sh</code>, <code>dune-project</code>, <code>masc_mcp.opam</code>, generated docs and fingerprint</td>
+            <td><code>check-oas-pin</code>, <code>oas-drift-check</code>, and generated doc checks pass against OAS <code>main@308152ee</code> (<code>v0.196.1</code>).</td>
           </tr>
           <tr>
             <td>P0-A</td>
@@ -655,6 +663,11 @@ type decision = {
           </tr>
         </thead>
         <tbody>
+          <tr>
+            <td>2026-05-18</td>
+            <td>Recorded OAS merge and downstream MASC pin draft.</td>
+            <td><code>oas#1632</code> merged; <code>#16191</code> bumps <code>agent_sdk</code> to <code>v0.196.1</code> and refreshes timeout evidence fingerprint.</td>
+          </tr>
           <tr>
             <td>2026-05-18</td>
             <td>Added P0-B implementation draft.</td>

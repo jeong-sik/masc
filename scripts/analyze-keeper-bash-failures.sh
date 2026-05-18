@@ -66,9 +66,9 @@ def output_text:
 def combined: output_text + " " + (.action_radius.error // "") + " " + cmd;
 def failed: (.success == false or .semantic_success == false);
 def inferred_shape:
-  if (combined | test("gh pr checks"; "i")) then "gh_pr_checks"
-  elif (combined | test("&&|\\|\\||;|\\n|\\r"; "i")) then "chaining"
-  elif (combined | test("2>/dev/null|2> /dev/null|2>>/dev/null|2>&1|\\| head|\\| grep|\\| sed|\\| python|>|<"; "i")) then "pipe_or_redirect"
+  if (cmd | test("gh pr checks"; "i")) then "gh_pr_checks"
+  elif (cmd | test("&&|\\|\\||;|\\n|\\r"; "i")) then "chaining"
+  elif (cmd | test("2>/dev/null|2> /dev/null|2>>/dev/null|2>&1|\\| head|\\| grep|\\| sed|\\| python|>|<"; "i")) then "pipe_or_redirect"
   else "unknown" end;
 def category:
   if (output_text | test("\"shape_block\""; "i")) then
@@ -107,9 +107,9 @@ def output_text:
 def combined: output_text + " " + (.action_radius.error // "") + " " + cmd;
 def failed: (.success == false or .semantic_success == false);
 def inferred_shape:
-  if (combined | test("gh pr checks"; "i")) then "gh_pr_checks"
-  elif (combined | test("&&|\\|\\||;|\\n|\\r"; "i")) then "chaining"
-  elif (combined | test("2>/dev/null|2> /dev/null|2>>/dev/null|2>&1|\\| head|\\| grep|\\| sed|\\| python|>|<"; "i")) then "pipe_or_redirect"
+  if (cmd | test("gh pr checks"; "i")) then "gh_pr_checks"
+  elif (cmd | test("&&|\\|\\||;|\\n|\\r"; "i")) then "chaining"
+  elif (cmd | test("2>/dev/null|2> /dev/null|2>>/dev/null|2>&1|\\| head|\\| grep|\\| sed|\\| python|>|<"; "i")) then "pipe_or_redirect"
   else "unknown" end;
 def category:
   if (output_text | test("\"shape_block\""; "i")) then

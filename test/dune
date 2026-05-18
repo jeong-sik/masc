@@ -63,6 +63,7 @@
   test_pool_cascade_storm
   test_keeper_turn_disposition
   test_keeper_turn_terminal_disposition_field
+  test_keeper_reconcile_state
   test_attempt_state
   test_actor_mailbox
   test_domain_pool
@@ -360,6 +361,7 @@
   test_pool_cascade_storm
   test_keeper_turn_disposition
   test_keeper_turn_terminal_disposition_field
+  test_keeper_reconcile_state
   test_attempt_state
   test_actor_mailbox
   test_domain_pool

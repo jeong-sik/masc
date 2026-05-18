@@ -198,6 +198,22 @@ let test_gate_different_task_id_not_found () =
     | None ->
       Alcotest.fail "Different task_id should not match")
 
+let test_gate_missing_can_suppress_operator_warning () =
+  with_temp_dir (fun base_dir ->
+    let verdict = make_verdict ~status:CT.Satisfied () in
+    write_verdict_jsonl ~base_dir verdict;
+    match
+      CVG.gate_check ~base_dir ~warn_on_missing:false
+        ~task_id:"task-missing" ()
+    with
+    | Some msg ->
+      Alcotest.(check bool)
+        "still returns rejection reason"
+        true
+        (Astring.String.is_infix ~affix:"task-missing" msg)
+    | None ->
+      Alcotest.fail "No scoped verdict should still reject")
+
 let test_gate_latest_verdict_wins () =
   with_temp_dir (fun base_dir ->
     let v1 = make_verdict ~run_id:"run-old" ~status:CT.Violated () in
@@ -398,6 +414,8 @@ let () =
       Alcotest.test_case "satisfied verdict allows" `Quick test_gate_satisfied_verdict_allows;
       Alcotest.test_case "violated verdict rejects" `Quick test_gate_violated_verdict_rejects;
       Alcotest.test_case "different task_id not found" `Quick test_gate_different_task_id_not_found;
+      Alcotest.test_case "missing verdict warning can be suppressed" `Quick
+        test_gate_missing_can_suppress_operator_warning;
       Alcotest.test_case "latest verdict wins" `Quick test_gate_latest_verdict_wins;
       Alcotest.test_case "auto-widens past starting limit (#10731)" `Quick
         test_lookup_auto_widens_past_starting_limit;

@@ -955,6 +955,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
             ignore
               (Cdal_verdict_gate.gate_check
                  ~gate_label:(cdal_gate_label_for_task task_opt)
+                 ~warn_on_missing:false
                  ~task_id ())
         | Masc_domain.Reject_verification ->
           let reason = if not (String.equal notes "") then notes else reason in
@@ -965,6 +966,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
             ignore
               (Cdal_verdict_gate.gate_check
                  ~gate_label:(cdal_gate_label_for_task task_opt)
+                 ~warn_on_missing:false
                  ~task_id ())
         | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Done_action | Masc_domain.Cancel | Masc_domain.Release -> ())
    | Error err ->

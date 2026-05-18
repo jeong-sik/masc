@@ -116,7 +116,41 @@ jobs:
               .map((s) => s.trim())
               .filter(Boolean);
 
-            core.info(`Adding bypass label '${targetLabel}' to PR #${prNumber} after environment-gated human approval.`);
+            const { data: issue } = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+            const currentLabels = (issue.labels || [])
+              .map((label) => (typeof label === 'string' ? label : label.name || ''))
+              .map((label) => label.trim())
+              .filter(Boolean);
+            const currentLabelSet = new Set(currentLabels.map((label) => label.toLowerCase()));
+            const presentHardStopLabels = hardStopLabels
+              .filter((label) => currentLabelSet.has(label.toLowerCase()));
+            const actor = '${{ github.actor }}';
+            const reason = '${{ inputs.reason }}';
+            const runUrl = `${process.env.GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = [
+              '<!-- masc-human-approval-gate -->',
+              `Human approval granted by @${actor} via credential-separated environment gate.`,
+              '',
+              `Bypass label \`${targetLabel}\` authorized by approval workflow run: ${runUrl}`,
+              ...(presentHardStopLabels.length > 0
+                ? [`Hard-stop label(s) scheduled for removal: ${presentHardStopLabels.map((label) => `\`${label}\``).join(', ')}.`]
+                : ['No configured hard-stop labels were present.']),
+              ...(reason ? ['', `Reason: ${reason}`] : []),
+              '',
+              'This approval was gated through the `human-approval` GitHub Environment, which requires',
+              'an interactive reviewer approval that cannot be automated with a shared owner credential.',
+            ].join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body,
+            });
+            core.info(`Posted approval marker for PR #${prNumber}; applying bypass label '${targetLabel}'.`);
             await github.rest.issues.addLabels({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -142,26 +176,4 @@ jobs:
               }
             }
 
-            const actor = '${{ github.actor }}';
-            const reason = '${{ inputs.reason }}';
-            const runUrl = `${process.env.GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const body = [
-              '<!-- masc-human-approval-gate -->',
-              `Human approval granted by @${actor} via credential-separated environment gate.`,
-              '',
-              `Bypass label \`${targetLabel}\` applied. Approval workflow run: ${runUrl}`,
-              ...(removedHardStopLabels.length > 0
-                ? [`Hard-stop label(s) removed: ${removedHardStopLabels.map((label) => `\`${label}\``).join(', ')}.`]
-                : ['No configured hard-stop labels were present.']),
-              ...(reason ? ['', `Reason: ${reason}`] : []),
-              '',
-              'This approval was gated through the `human-approval` GitHub Environment, which requires',
-              'an interactive reviewer approval that cannot be automated with a shared owner credential.',
-            ].join('\n');
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: prNumber,
-              body,
-            });
             core.info(`Bypass label '${targetLabel}', hard-stop cleanup, and approval comment applied to PR #${prNumber}.`);

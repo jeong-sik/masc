@@ -146,17 +146,19 @@ jobs:
               });
               return issueCommentsCache;
             };
-            const findApprovalGateAfter = async (label, labeledAt) => {
+            const findApprovalGateNear = async (label, labeledAt) => {
               const labeledAtMs = Date.parse(labeledAt || "");
               if (!Number.isFinite(labeledAtMs)) return undefined;
               const labelLiteral = `\`${label}\``;
+              const approvalGateWindowMs = 5 * 60 * 1000;
               const comments = await loadIssueComments();
               return [...comments].reverse().find((comment) => {
                 const body = comment.body || "";
                 const commentAtMs = Date.parse(comment.created_at || "");
                 return comment.user?.type === "Bot" &&
                   Number.isFinite(commentAtMs) &&
-                  commentAtMs >= labeledAtMs &&
+                  commentAtMs >= labeledAtMs - approvalGateWindowMs &&
+                  commentAtMs <= labeledAtMs + approvalGateWindowMs &&
                   body.includes(approvalGateMarker) &&
                   body.toLowerCase().includes(labelLiteral) &&
                   body.includes("/actions/runs/");
@@ -181,9 +183,9 @@ jobs:
                   bypassPolicyFailures.push(`${label}: latest event is ${latest.event}`);
                   unverifiedBypassLabels.push(label);
                 } else {
-                  const approvalGate = await findApprovalGateAfter(label, latest.created_at);
+                  const approvalGate = await findApprovalGateNear(label, latest.created_at);
                   if (!approvalGate) {
-                    bypassPolicyFailures.push(`${label}: missing environment-gated approval after latest label event`);
+                    bypassPolicyFailures.push(`${label}: missing environment-gated approval for latest label event`);
                     unverifiedBypassLabels.push(label);
                   } else {
                     verifiedBypassLabels.push(`${label} via environment gate`);

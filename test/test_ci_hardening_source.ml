@@ -457,7 +457,13 @@ let test_pr_automation_draft_guard_contracts () =
        "<!-- masc-human-approval-gate -->");
   check bool "pr automation rejects direct approval label edits" true
     (file_contains_pattern ".github/workflows/pr-automation.yml"
-       "missing environment-gated approval after latest label event");
+       "missing environment-gated approval for latest label event");
+  check bool "pr automation accepts workflow marker near latest label event" true
+    (file_contains_pattern ".github/workflows/pr-automation.yml"
+       "approvalGateWindowMs");
+  check bool "ci gate binds approval marker to current label event" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "timelineItems(last: 100, itemTypes: [LABELED_EVENT, UNLABELED_EVENT])");
   check bool "pr automation tracks unverified bypass labels for cleanup" true
     (file_contains_pattern ".github/workflows/pr-automation.yml"
        "const unverifiedBypassLabels = []");
@@ -2326,9 +2332,9 @@ let test_human_approval_credential_boundary_contracts () =
   check bool "approve-agent-pr workflow gates on human-approval environment" true
     (file_contains_pattern ".github/workflows/approve-agent-pr.yml"
        "environment: human-approval");
-  check bool "approve-agent-pr workflow applies bypass label after gate" true
+  check bool "approve-agent-pr workflow posts approval marker before bypass label" true
     (file_contains_pattern ".github/workflows/approve-agent-pr.yml"
-       "addLabels");
+       "Posted approval marker");
   check bool "approve-agent-pr workflow posts credential-boundary comment" true
     (file_contains_pattern ".github/workflows/approve-agent-pr.yml"
        "masc-human-approval-gate");

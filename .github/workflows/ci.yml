@@ -1064,9 +1064,74 @@ jobs:
             if [ -n "$live_state" ]; then
               export PR_LIVE_STATE="$live_state"
             fi
+            export PR_EFFECTIVE_LABELS="${PR_LIVE_LABELS:-$PR_LABELS}"
             approval_gate_present="$(
-              gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments?per_page=100" --paginate \
-                --jq 'any(.[]; .user.type == "Bot" and ((.body // "") | contains("<!-- masc-human-approval-gate -->")) and ((.body // "") | contains("/actions/runs/")))' \
+              gh api graphql \
+                -f owner="${GITHUB_REPOSITORY%/*}" \
+                -f repo="${GITHUB_REPOSITORY#*/}" \
+                -F number="$PR_NUMBER" \
+                -f query='
+                  query($owner: String!, $repo: String!, $number: Int!) {
+                    repository(owner: $owner, name: $repo) {
+                      pullRequest(number: $number) {
+                        comments(last: 100) {
+                          nodes {
+                            body
+                            createdAt
+                            author { __typename login }
+                          }
+                        }
+                        timelineItems(last: 100, itemTypes: [LABELED_EVENT, UNLABELED_EVENT]) {
+                          nodes {
+                            __typename
+                            ... on LabeledEvent {
+                              createdAt
+                              label { name }
+                            }
+                            ... on UnlabeledEvent {
+                              createdAt
+                              label { name }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }' \
+                --jq '
+                  def csv($s):
+                    ($s // "")
+                    | split(",")
+                    | map(gsub("^\\s+|\\s+$"; "") | ascii_downcase | select(length > 0));
+                  def event_label:
+                    (.label.name // "" | ascii_downcase);
+                  def event_kind:
+                    if .__typename == "LabeledEvent" then "labeled"
+                    elif .__typename == "UnlabeledEvent" then "unlabeled"
+                    else ""
+                    end;
+                  def marker_for($root; $label; $label_ts):
+                    any($root.data.repository.pullRequest.comments.nodes[];
+                      (.author.__typename == "Bot") and
+                      ((.body // "") | contains("<!-- masc-human-approval-gate -->")) and
+                      (((.body // "") | ascii_downcase) | contains("`" + $label + "`")) and
+                      ((.body // "") | contains("/actions/runs/")) and
+                      ((.createdAt | fromdateiso8601) as $comment_ts |
+                        ($comment_ts >= ($label_ts - 300) and $comment_ts <= ($label_ts + 300)))
+                    );
+                  . as $root
+                  |
+                  (csv(env.PR_EFFECTIVE_LABELS)) as $present_labels
+                  | (csv(env.AGENT_DRAFT_GUARD_BYPASS_LABELS // "human-approved-ready")
+                     | map(select(. != "allow-auto-merge"))) as $bypass_labels
+                  | any($bypass_labels[]; . as $label |
+                      ($present_labels | index($label)) and
+                      (([$root.data.repository.pullRequest.timelineItems.nodes[]
+                         | select(event_label == $label)] | last) as $latest
+                       | ($latest != null)
+                         and (($latest | event_kind) == "labeled")
+                         and (($latest.createdAt | fromdateiso8601) as $label_ts |
+                           marker_for($root; $label; $label_ts))))
+                ' \
                 2>/dev/null || echo false
             )"
             if printf '%s\n' "$approval_gate_present" | grep -qx true; then

@@ -1335,6 +1335,38 @@ let test_health_response_full_query_keeps_diagnostics () =
   Alcotest.(check bool) "full health keeps cdal snapshot" true
     (match json |> member "cdal" with `Assoc _ -> true | _ -> false)
 
+let test_health_response_survives_deleted_cwd () =
+  with_temp_dir "health-deleted-cwd" (fun dir ->
+      let deleted_cwd = Filename.concat dir "deleted-cwd" in
+      Unix.mkdir deleted_cwd 0o755;
+      with_env "MASC_BASE_PATH" (Some dir) @@ fun () ->
+      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      let saved_cwd = Sys.getcwd () in
+      Config_dir_resolver.reset ();
+      Unix.chdir deleted_cwd;
+      Unix.rmdir deleted_cwd;
+      Fun.protect
+        ~finally:(fun () ->
+          Unix.chdir saved_cwd;
+          Config_dir_resolver.reset ())
+        (fun () ->
+          let request = Httpun.Request.create `GET "/health" in
+          let json =
+            Server_routes_http_runtime.make_health_response_json request
+          in
+          let open Yojson.Safe.Util in
+          Alcotest.(check string)
+            "deleted cwd health still returns probe"
+            "probe"
+            (json |> member "health_detail" |> to_string);
+          Alcotest.(check string)
+            "deleted cwd resolver falls back to base path"
+            dir
+            (json
+             |> member "paths"
+             |> member "effective_base_path"
+             |> to_string)))
+
 let test_migrate_resident_keeper_dirs_promotes_valid_meta () =
   with_temp_dir "startup-legacy-keepers" (fun dir ->
       let state = Mcp_server.create_state ~base_path:dir in
@@ -2973,6 +3005,8 @@ let () =
             test_health_response_default_is_light_probe;
           Alcotest.test_case "full health query keeps diagnostics" `Quick
             test_health_response_full_query_keeps_diagnostics;
+          Alcotest.test_case "health response survives deleted cwd" `Quick
+            test_health_response_survives_deleted_cwd;
           Alcotest.test_case "readiness false before init" `Quick
             test_startup_state_readiness_before_init;
           Alcotest.test_case "readiness true after init" `Quick

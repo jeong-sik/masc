@@ -46,6 +46,8 @@ val discover_repositories : base_path:string -> (repository list, string) result
 (** [discover_repositories ~base_path] scans [base_path] for git repositories
     (directories containing [.git] up to depth 4) and returns a list of
     candidate {!repository} records inferred from their [origin] remote URL.
+    Discovery walks the filesystem directly and resolves remotes through the
+    repository git runner, avoiding shell [find] fan-out.
 
     Directories under [.masc/] and repositories already registered in
     [repositories.toml] are excluded. This function is read-only and is

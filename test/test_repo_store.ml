@@ -305,6 +305,25 @@ let test_discover_finds_grouped_workspace_repos () =
             Alcotest.(check string) "id" "oas" repo.id;
             Alcotest.(check string) "local_path" (canonical_path repo_dir) repo.local_path)
 
+let test_discover_keeps_depth_cap () =
+  if not (git_available ()) then Alcotest.skip ()
+  else
+    with_temp_base_path (fun base_path ->
+        let a = Filename.concat base_path "a" in
+        let b = Filename.concat a "b" in
+        let c = Filename.concat b "c" in
+        let d = Filename.concat c "d" in
+        Unix.mkdir a 0o755;
+        Unix.mkdir b 0o755;
+        Unix.mkdir c 0o755;
+        Unix.mkdir d 0o755;
+        init_git_repo d "https://github.com/test/too-deep";
+        match Repo_store.discover_repositories ~base_path with
+        | Error e -> Alcotest.fail ("discover failed: " ^ e)
+        | Ok repos ->
+            Alcotest.(check int) "ignores repo beyond max depth" 0
+              (List.length repos))
+
 let test_discover_ignores_hidden_dirs () =
   if not (git_available ()) then Alcotest.skip ()
   else
@@ -623,6 +642,8 @@ let () =
           Alcotest.test_case "ignores .masc repos" `Quick test_discover_ignores_masc_dir;
           Alcotest.test_case "finds grouped workspace repos" `Quick
             test_discover_finds_grouped_workspace_repos;
+          Alcotest.test_case "keeps max depth cap" `Quick
+            test_discover_keeps_depth_cap;
           Alcotest.test_case "ignores hidden dirs" `Quick
             test_discover_ignores_hidden_dirs;
           Alcotest.test_case "relative base path keeps visible repos" `Quick

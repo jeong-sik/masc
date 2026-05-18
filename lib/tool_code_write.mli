@@ -31,9 +31,8 @@
     \[all_git_actions] (variant SSOT helpers — drift in any one
     forces compile error in the others, #8522), output truncation
     primitives (\[max_output_bytes], \[max_output_label],
-    \[truncate_output]), the [_policy_config_cache] mutable cell
-    + \[get_policy_config] / \[load_clone_allowed_orgs] /
-    \[load_clone_denied_repos] policy loaders, and 6 per-tool
+    \[truncate_output]), git clone policy/cache/parsing
+    delegated to [Tool_code_write_git_policy], and 6 per-tool
     handlers ([handle_code_write], [handle_code_edit],
     [handle_code_delete], [handle_code_shell],
     [handle_code_git], plus a clone-action sub-handler).  All

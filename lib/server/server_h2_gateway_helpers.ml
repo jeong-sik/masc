@@ -50,6 +50,21 @@ let h2_respond_empty ?(status = `No_content) ?(extra_headers = []) h2_reqd =
   let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
   H2.Body.Writer.close writer
 
+let h2_respond_removed_surface h2_reqd ~surface ~extra_headers =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc
+         [
+           ("error", `String "removed_surface");
+           ("surface", `String surface);
+           ( "message",
+             `String
+               "This compatibility surface was removed. Keepers and local clients should use the OAS-backed repo coordination front door."
+           );
+         ])
+  in
+  h2_respond_json ~status:`Gone h2_reqd body ~extra_headers
+
 let h2_read_body h2_reqd callback =
   let body = H2.Reqd.request_body h2_reqd in
   let buf = Buffer.create 4096 in

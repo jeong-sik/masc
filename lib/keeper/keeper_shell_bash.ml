@@ -638,7 +638,12 @@ let safe_read_fallback_of_command ~write_enabled:_ cmd =
           if Worker_dev_tools.is_write_operation primary_cmd
           then None
           else (
-            match Worker_dev_tools.validate_command primary_cmd with
+            match
+              Worker_dev_tools.validate_command_coding_with_allowlist
+                ~allow_pipes:false
+                ~allowed_commands:Worker_dev_tools.dev_allowed_commands
+                primary_cmd
+            with
             | Ok () -> Some { primary_cmd }
             | Error _ -> None))
      | _ -> None)
@@ -1451,6 +1456,10 @@ let handle_keeper_bash
       (* Local execution path: full validation applies *)
       let validate =
         if write_enabled then Worker_dev_tools.validate_command_coding
+        else if Option.is_some safe_read_fallback then
+          Worker_dev_tools.validate_command_coding_with_allowlist
+            ~allow_pipes:false
+            ~allowed_commands:Worker_dev_tools.dev_allowed_commands
         else Worker_dev_tools.validate_command
       in
       match validate validation_cmd with

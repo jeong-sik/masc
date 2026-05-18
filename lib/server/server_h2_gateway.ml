@@ -2,6 +2,7 @@
 open Masc_domain
 open Server_auth
 open Server_dashboard_http
+open Server_h2_gateway_helpers
 open Server_routes_http
 
 let make_error_handler () =
@@ -29,79 +30,8 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
     | Server_mcp_transport_http.Operator_remote -> Mcp_eio.Operator_remote
   in
   (* ═══════════════════════════════════════════════════════════════════════
-     HTTP/2 Response Helpers - Reduce duplication in handlers
+     Route-local query helpers
      ═══════════════════════════════════════════════════════════════════════ *)
-
-  let h2_respond_json ?(status = `OK) ?(extra_headers = []) h2_reqd body =
-    let headers = H2.Headers.of_list ([
-      ("content-type", "application/json; charset=utf-8");
-      ("content-length", string_of_int (String.length body));
-    ] @ extra_headers) in
-    let response = H2.Response.create ~headers status in
-    let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
-    H2.Body.Writer.write_string writer body;
-    H2.Body.Writer.close writer
-  in
-
-  let h2_respond_text ?(status = `OK) ?(extra_headers = []) h2_reqd body =
-    let headers = H2.Headers.of_list ([
-      ("content-type", "text/plain; charset=utf-8");
-      ("content-length", string_of_int (String.length body));
-    ] @ extra_headers) in
-    let response = H2.Response.create ~headers status in
-    let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
-    H2.Body.Writer.write_string writer body;
-    H2.Body.Writer.close writer
-  in
-
-  let h2_respond_html ?(status = `OK) ?(extra_headers = []) h2_reqd body =
-    let headers = H2.Headers.of_list ([
-      ("content-type", "text/html; charset=utf-8");
-      ("content-length", string_of_int (String.length body));
-    ] @ extra_headers) in
-    let response = H2.Response.create ~headers status in
-    let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
-    H2.Body.Writer.write_string writer body;
-    H2.Body.Writer.close writer
-  in
-
-  let h2_respond_removed_surface h2_reqd ~surface ~extra_headers =
-    let body =
-      Yojson.Safe.to_string
-        (`Assoc
-           [
-             ("error", `String "removed_surface");
-             ("surface", `String surface);
-             ("message",
-               `String
-                 "This compatibility surface was removed. Keepers and local clients should use the OAS-backed repo coordination front door.");
-           ])
-    in
-    h2_respond_json ~status:`Gone h2_reqd body ~extra_headers
-  in
-
-  let h2_respond_bytes
-      ?(status = `OK)
-      ?(extra_headers = [])
-      ~content_type
-      h2_reqd
-      body =
-    let headers = H2.Headers.of_list ([
-      ("content-type", content_type);
-      ("content-length", string_of_int (String.length body));
-    ] @ extra_headers) in
-    let response = H2.Response.create ~headers status in
-    let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
-    H2.Body.Writer.write_string writer body;
-    H2.Body.Writer.close writer
-  in
-
-  let h2_respond_empty ?(status = `No_content) ?(extra_headers = []) h2_reqd =
-    let headers = H2.Headers.of_list (("content-length", "0") :: extra_headers) in
-    let response = H2.Response.create ~headers status in
-    let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
-    H2.Body.Writer.close writer
-  in
 
   let trimmed_query_param req key =
     match Server_utils.query_param req key |> Option.map String.trim with
@@ -116,21 +46,6 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
 
   let oas_telemetry_provider_param req =
     trimmed_query_param req "provider"
-  in
-
-  (* Read H2 request body asynchronously *)
-  let h2_read_body h2_reqd callback =
-    let body = H2.Reqd.request_body h2_reqd in
-    let buf = Buffer.create 4096 in
-    let rec read_loop () =
-      H2.Body.Reader.schedule_read body
-        ~on_eof:(fun () -> callback (Buffer.contents buf))
-        ~on_read:(fun bigstring ~off ~len ->
-          let chunk = Bigstringaf.substring bigstring ~off ~len in
-          Buffer.add_string buf chunk;
-          read_loop ())
-    in
-    read_loop ()
   in
 
   (* ═══════════════════════════════════════════════════════════════════════

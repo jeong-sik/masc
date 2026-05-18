@@ -1,15 +1,36 @@
 ---
 rfc: "0127"
 title: "Cascade Fast-Fail (Provider Health Phase 3) + Fiber Termination Provenance"
-status: Draft
+status: Active
 created: 2026-05-17
-updated: 2026-05-17
+updated: 2026-05-18
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0009", "0022", "0024", "0025", "0027", "0038", "0041", "0058", "0088"]
-implementation_prs: []
+related: ["0009", "0022", "0024", "0025", "0027", "0038", "0041", "0058", "0088", "0126"]
+implementation_prs:
+  - "#16189"  # PR-1 — provenance threading (Gap B carrier widen)
 ---
+
+## Status
+
+- **PR-1 (Gap B carrier)** merged 2026-05-18 (#16189): typed
+  `provider_id : string option` + `http_status : int option` on
+  `Keeper_state_machine.Fiber_terminated` and
+  `Keeper_registry.Provider_runtime_error`, plus display surfaces
+  (`event_to_string`, JSON serializer, `failure_reason_to_string`) and
+  carrier-preservation tests.
+- **Gap A (probe loop)** implementation overlap with RFC-0126 PR-2
+  (#16024 `feat(rfc-0126): PR-2 — provider health probe loop`). The
+  `lib/cascade/provider_health.ml` module and `keeper_turn_driver.ml`
+  wiring (`filter_provider_health_fail_open`,
+  `record_provider_health_error`) ship via RFC-0126; RFC-0127's PR-2
+  scope reduces to **threading the captured `provider_id` and
+  `http_status` from the cascade attempt path into the now-typed
+  `Fiber_terminated` carrier** so the supervisor log gap from §1.1
+  ("zero hint that the upstream root was a 502 from one specific
+  provider") closes end-to-end.
+- **PR-3 (integration test + dashboard panel)** unchanged from §3.4.
 
 # RFC-0127: Cascade Fast-Fail (Provider Health Phase 3) + Fiber Termination Provenance
 

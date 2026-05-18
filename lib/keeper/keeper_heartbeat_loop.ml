@@ -416,6 +416,164 @@ let record_recovery_stimulus_turn_started
       (Printexc.to_string exn)
 ;;
 
+type heartbeat_event_intake = {
+  pending_board_events : Keeper_world_observation.pending_board_event list;
+  consumed_stimulus_count : int;
+}
+
+let stimulus_urgency_to_string = function
+  | Keeper_event_queue.Immediate -> "immediate"
+  | Keeper_event_queue.Normal -> "normal"
+  | Keeper_event_queue.Low -> "low"
+;;
+
+let stimulus_class_to_string = function
+  | Keeper_event_queue.Board_signal -> "board_signal"
+  | Bootstrap -> "bootstrap"
+  | Alive_but_stuck_recovery -> "alive_but_stuck_recovery"
+  | Stay_silent_recovery -> "stay_silent_recovery"
+  | Unsupported _ -> "unsupported"
+;;
+
+let pending_board_event_of_stimulus ~meta_after_triage stim =
+  Keeper_world_observation.pending_board_event_of_stimulus
+    ~continuity_summary:meta_after_triage.continuity_summary
+    ~meta:meta_after_triage
+    stim
+;;
+
+let consume_single_heartbeat_stimulus
+      ~(ctx : _ context)
+      ~meta_after_triage
+      (stim : Keeper_event_queue.stimulus)
+  =
+  let stimulus_class = Keeper_event_queue.classify stim in
+  let class_str = stimulus_class_to_string stimulus_class in
+  Prometheus.inc_counter
+    Keeper_metrics.metric_keeper_stimulus_consumed
+    ~labels:[ "keeper", meta_after_triage.name; "class", class_str ]
+    ();
+  Log.Keeper.info
+    "turn entry: consumed stimulus stimulus_id=%s urgency=%s class=%s \
+     payload_len=%d (keeper=%s)"
+    stim.post_id
+    (stimulus_urgency_to_string stim.urgency)
+    class_str
+    (String.length stim.payload)
+    meta_after_triage.name;
+  match stimulus_class with
+  | Board_signal -> pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
+  | Bootstrap ->
+    Log.Keeper.info
+      "turn entry: bootstrap stimulus consumed (keeper=%s)"
+      meta_after_triage.name;
+    []
+  | Alive_but_stuck_recovery ->
+    Log.Keeper.info
+      "turn entry: alive-but-stuck recovery stimulus consumed post_id=%s \
+       (keeper=%s)"
+      stim.post_id
+      meta_after_triage.name;
+    record_recovery_stimulus_turn_started
+      ~ctx
+      ~keeper_name:meta_after_triage.name
+      stim;
+    []
+  | Stay_silent_recovery ->
+    Log.Keeper.info
+      "turn entry: stay-silent recovery stimulus consumed post_id=%s \
+       (keeper=%s)"
+      stim.post_id
+      meta_after_triage.name;
+    record_recovery_stimulus_turn_started
+      ~ctx
+      ~keeper_name:meta_after_triage.name
+      stim;
+    []
+  | Unsupported prefix ->
+    Prometheus.inc_counter
+      Keeper_metrics.metric_keeper_unsupported_stimulus
+      ~labels:[ "keeper", meta_after_triage.name ]
+      ();
+    Log.Keeper.warn
+      "turn entry: unsupported stimulus consumed prefix=%S post_id=%s \
+       (keeper=%s) — wake→no_signal gap #12684"
+      prefix
+      stim.post_id
+      meta_after_triage.name;
+    []
+;;
+
+let consume_board_stimulus_batch ~meta_after_triage batch =
+  let batch_len = List.length batch in
+  if batch_len > 1 then
+    Log.Keeper.info
+      "debounce: coalesced %d board signals (keeper=%s)"
+      batch_len
+      meta_after_triage.name;
+  List.filter_map
+    (fun (stim : Keeper_event_queue.stimulus) ->
+       Prometheus.inc_counter
+         Keeper_metrics.metric_keeper_stimulus_consumed
+         ~labels:[ "keeper", meta_after_triage.name; "class", "board_signal" ]
+         ();
+       Log.Keeper.info
+         "turn entry: consumed stimulus stimulus_id=%s urgency=%s class=board_signal \
+          payload_len=%d (keeper=%s)"
+         stim.post_id
+         (stimulus_urgency_to_string stim.urgency)
+         (String.length stim.payload)
+         meta_after_triage.name;
+       pending_board_event_of_stimulus ~meta_after_triage stim)
+    batch
+;;
+
+let heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events =
+  (* RFC-0020 §3 Rule 4 — drain at most one Event Layer stimulus
+     per turn. Board signals are coalesced by a debounce window before
+     falling back to a single non-board queue dequeue. *)
+  let window = Keeper_config.keeper_board_debounce_window_sec () in
+  let board_batch =
+    Keeper_registry.drain_board_events
+      ~window_sec:window
+      ~base_path:ctx.config.base_path
+      meta_after_triage.name
+  in
+  let queued_observations, consumed_stimulus_count =
+    match board_batch with
+    | [] ->
+      (match
+         Keeper_registry.dequeue_event
+           ~base_path:ctx.config.base_path
+           meta_after_triage.name
+       with
+       | None -> [], 0
+       | Some stim -> consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stim, 1)
+    | batch -> consume_board_stimulus_batch ~meta_after_triage batch, List.length batch
+  in
+  let pending_board_events =
+    List.fold_left
+      (fun acc (event : Keeper_world_observation.pending_board_event) ->
+         if
+           List.exists
+             (fun existing ->
+                String.equal
+                  existing.Keeper_world_observation.post_id
+                  event.Keeper_world_observation.post_id)
+             acc
+         then acc
+         else (
+           Log.Keeper.info
+             "turn entry: promoted queued board stimulus post_id=%s keeper=%s"
+             event.Keeper_world_observation.post_id
+             meta_after_triage.name;
+           event :: acc))
+      pending_board_events
+      (List.rev queued_observations)
+  in
+  { pending_board_events; consumed_stimulus_count }
+;;
+
 type cascade_backpressure_decision =
   | Cascade_admitted
   | Cascade_backpressured of {
@@ -474,6 +632,63 @@ let cascade_backpressure_decision
   | false, _, _
   | true, Keeper_health_probe.Unknown, None
   | true, Keeper_health_probe.Healthy, None -> Cascade_admitted
+;;
+
+type keepalive_scheduling_decision = {
+  turn_decision : Keeper_world_observation.keeper_cycle_decision;
+  requested_should_run_turn : bool;
+  cascade_backpressure : cascade_backpressure_decision;
+  should_run_turn : bool;
+  verdict_reasons : string list;
+  admission_reasons : string list;
+  channel : string;
+}
+
+let decide_keepalive_scheduling
+      ?(cascade_resilience_of_name =
+        Keeper_exec_preflight.cascade_resilience_of_name)
+      ?(cascade_status_of_name =
+        fun ~cascade_name -> Keeper_health_probe.get_cascade_status ~cascade_name)
+      ~stop
+      ~meta
+      obs
+  =
+  let turn_decision = Keeper_world_observation.keeper_cycle_decision ~meta obs in
+  let requested_should_run_turn =
+    (not (Atomic.get stop)) && turn_decision.should_run
+  in
+  let cascade_name = cascade_name_of_meta meta in
+  let cascade_resilience = cascade_resilience_of_name cascade_name in
+  let cascade_backpressure =
+    cascade_backpressure_decision
+      ~cascade_resilience:(Some cascade_resilience)
+      ~should_run_turn:requested_should_run_turn
+      ~cascade_name
+      ~cascade_status:(cascade_status_of_name ~cascade_name)
+  in
+  let should_run_turn =
+    match cascade_backpressure with
+    | Cascade_admitted -> requested_should_run_turn
+    | Cascade_backpressured _ -> false
+  in
+  let verdict_reasons =
+    Keeper_world_observation.verdict_reasons_to_strings turn_decision.verdict
+  in
+  let admission_reasons =
+    match cascade_backpressure with
+    | Cascade_admitted -> verdict_reasons
+    | Cascade_backpressured { reason; _ } ->
+      cascade_backpressure_observation_reasons ~reason
+  in
+  let channel = Keeper_world_observation.channel_to_string turn_decision.channel in
+  { turn_decision
+  ; requested_should_run_turn
+  ; cascade_backpressure
+  ; should_run_turn
+  ; verdict_reasons
+  ; admission_reasons
+  ; channel
+  }
 ;;
 
 let record_cascade_backpressure_observation ~base_path ~keeper_name ~reason =
@@ -819,157 +1034,10 @@ let run_keepalive_unified_turn
   then meta_after_triage
   else (
     try
-      (* RFC-0020 §3 Rule 4 — drain at most one Event Layer stimulus
-         per turn. The stimulus payload is observed for telemetry
-         only (consumer-side wiring lives in a follow-up). The
-         dequeue itself pins the [Conservation] invariant from
-         [KeeperEventQueue.tla] (dequeued_total <= enqueued_total)
-         in production, and the [TickQueueOverride] action becomes
-         a real runtime transition: a stimulus that triggered the
-         heartbeat override (PR-C2 #12412) is now actually consumed
-         here. *)
-      let window = Keeper_config.keeper_board_debounce_window_sec () in
-      let board_batch =
-        Keeper_registry.drain_board_events
-          ~window_sec:window
-          ~base_path:ctx.config.base_path
-          meta_after_triage.name
+      let event_intake =
+        heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events
       in
-      let queued_observations =
-        begin match board_batch with
-        | [] ->
-          (* No board signals in window — fall back to single dequeue
-             for non-board stimuli (bootstrap, recovery, etc.). *)
-          begin match
-            Keeper_registry.dequeue_event
-              ~base_path:ctx.config.base_path
-              meta_after_triage.name
-          with
-          | None -> []
-          | Some stim ->
-            let urgency_str =
-              match stim.urgency with
-              | Keeper_event_queue.Immediate -> "immediate"
-              | Keeper_event_queue.Normal -> "normal"
-              | Keeper_event_queue.Low -> "low"
-            in
-            let class_str =
-              match Keeper_event_queue.classify stim with
-              | Board_signal -> "board_signal"
-              | Bootstrap -> "bootstrap"
-              | Alive_but_stuck_recovery -> "alive_but_stuck_recovery"
-              | Stay_silent_recovery -> "stay_silent_recovery"
-              | Unsupported _ -> "unsupported"
-            in
-            Prometheus.inc_counter
-              Keeper_metrics.metric_keeper_stimulus_consumed
-              ~labels:[ "keeper", meta_after_triage.name; "class", class_str ]
-              ();
-            Log.Keeper.info
-              "turn entry: consumed stimulus stimulus_id=%s urgency=%s class=%s \
-               payload_len=%d (keeper=%s)"
-              stim.post_id
-              urgency_str
-              class_str
-              (String.length stim.payload)
-              meta_after_triage.name;
-            begin match Keeper_event_queue.classify stim with
-            | Board_signal ->
-              begin match Keeper_world_observation.pending_board_event_of_stimulus
-                       ~continuity_summary:meta_after_triage.continuity_summary
-                       ~meta:meta_after_triage stim with
-              | Some event -> [ event ]
-              | None -> []
-              end
-            | Bootstrap ->
-              Log.Keeper.info
-                "turn entry: bootstrap stimulus consumed (keeper=%s)"
-                meta_after_triage.name;
-              []
-            | Alive_but_stuck_recovery ->
-              Log.Keeper.info
-                "turn entry: alive-but-stuck recovery stimulus consumed post_id=%s \
-                 (keeper=%s)"
-                stim.post_id
-                meta_after_triage.name;
-              record_recovery_stimulus_turn_started
-                ~ctx
-                ~keeper_name:meta_after_triage.name
-                stim;
-              []
-            | Stay_silent_recovery ->
-              Log.Keeper.info
-                "turn entry: stay-silent recovery stimulus consumed post_id=%s \
-                 (keeper=%s)"
-                stim.post_id
-                meta_after_triage.name;
-              record_recovery_stimulus_turn_started
-                ~ctx
-                ~keeper_name:meta_after_triage.name
-                stim;
-              []
-            | Unsupported prefix ->
-              Prometheus.inc_counter
-                Keeper_metrics.metric_keeper_unsupported_stimulus
-                ~labels:[ "keeper", meta_after_triage.name ]
-                ();
-              Log.Keeper.warn
-                "turn entry: unsupported stimulus consumed prefix=%S post_id=%s \
-                 (keeper=%s) — wake→no_signal gap #12684"
-                prefix
-                stim.post_id
-                meta_after_triage.name;
-              []
-            end
-          end
-        | batch ->
-          (* Board signal debounce: coalesce N signals into observations
-             within the configured window. *)
-          let batch_len = List.length batch in
-          if batch_len > 1 then
-            Log.Keeper.info
-              "debounce: coalesced %d board signals (keeper=%s)"
-              batch_len meta_after_triage.name;
-          List.filter_map (fun (stim : Keeper_event_queue.stimulus) ->
-            let urgency_str =
-              (match stim.urgency with
-              | Keeper_event_queue.Immediate -> "immediate"
-              | Keeper_event_queue.Normal -> "normal"
-              | Keeper_event_queue.Low -> "low")
-            in
-            Prometheus.inc_counter
-              Keeper_metrics.metric_keeper_stimulus_consumed
-              ~labels:[ "keeper", meta_after_triage.name; "class", "board_signal" ]
-              ();
-            Log.Keeper.info
-              "turn entry: consumed stimulus stimulus_id=%s urgency=%s class=board_signal \
-               payload_len=%d (keeper=%s)"
-              stim.post_id
-              urgency_str
-              (String.length stim.payload)
-              meta_after_triage.name;
-            Keeper_world_observation.pending_board_event_of_stimulus
-              ~continuity_summary:meta_after_triage.continuity_summary
-              ~meta:meta_after_triage stim
-          ) batch
-        end
-      in
-      let pending_board_events =
-        List.fold_left (fun acc (event : Keeper_world_observation.pending_board_event) ->
-          if List.exists
-               (fun existing ->
-                  String.equal existing.Keeper_world_observation.post_id
-                    event.Keeper_world_observation.post_id)
-               acc
-          then acc
-          else
-            (Log.Keeper.info
-               "turn entry: promoted queued board stimulus post_id=%s keeper=%s"
-               event.Keeper_world_observation.post_id
-               meta_after_triage.name;
-             event :: acc)
-        ) pending_board_events (List.rev queued_observations)
-      in
+      let pending_board_events = event_intake.pending_board_events in
       let obs =
         let allowed_tool_names =
           Keeper_tool_policy.keeper_allowed_tool_names meta_after_triage
@@ -980,32 +1048,16 @@ let run_keepalive_unified_turn
           ~config:ctx.config
           ~meta:meta_after_triage
       in
-      let turn_decision =
-        Keeper_world_observation.keeper_cycle_decision ~meta:meta_after_triage obs
+      let scheduling =
+        decide_keepalive_scheduling ~stop ~meta:meta_after_triage obs
       in
+      let turn_decision = scheduling.turn_decision in
       (* Manual reconcile blocker check removed — keepers no longer get
          stuck behind sticky blockers. Failed turns record evidence via
          Keeper_registry; recovery is autonomous (next turn's observation)
          or operator-driven (board/keeper_chat), not blocker-driven. *)
-      let requested_should_run_turn =
-        (not (Atomic.get stop)) && turn_decision.should_run
-      in
-      let cascade_name = cascade_name_of_meta meta_after_triage in
-      let cascade_resilience =
-        Keeper_exec_preflight.cascade_resilience_of_name cascade_name
-      in
-      let cascade_backpressure =
-        cascade_backpressure_decision
-          ~cascade_resilience:(Some cascade_resilience)
-          ~should_run_turn:requested_should_run_turn
-          ~cascade_name
-          ~cascade_status:(Keeper_health_probe.get_cascade_status ~cascade_name)
-      in
-      let should_run_turn =
-        match cascade_backpressure with
-        | Cascade_admitted -> requested_should_run_turn
-        | Cascade_backpressured _ -> false
-      in
+      let cascade_backpressure = scheduling.cascade_backpressure in
+      let should_run_turn = scheduling.should_run_turn in
       let meta_after_cursor_persist =
         persist_message_cursor_updates
           ~config:ctx.config
@@ -1016,18 +1068,9 @@ let run_keepalive_unified_turn
         | Some value -> string_of_int value
         | None -> "-"
       in
-      let verdict_strs =
-        Keeper_world_observation.verdict_reasons_to_strings turn_decision.verdict
-      in
-      let admission_reason_strs =
-        match cascade_backpressure with
-        | Cascade_admitted -> verdict_strs
-        | Cascade_backpressured { reason; _ } ->
-          cascade_backpressure_observation_reasons ~reason
-      in
-      let channel_str =
-        Keeper_world_observation.channel_to_string turn_decision.channel
-      in
+      let verdict_strs = scheduling.verdict_reasons in
+      let admission_reason_strs = scheduling.admission_reasons in
+      let channel_str = scheduling.channel in
       if not should_run_turn
       then (
         (* #10008 fm3: emit per-reason skip counter so operators can

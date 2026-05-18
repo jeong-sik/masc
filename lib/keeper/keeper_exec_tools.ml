@@ -347,8 +347,12 @@ let execute_keeper_tool_call_with_outcome
           Keeper_failure_circuit_breaker.maybe_enrich_error
             ~keeper_name:meta.name
             ~error_msg:result.raw_output
-        else
+        else (
+          Keeper_failure_circuit_breaker.record_observed_failure
+            ~keeper_name:meta.name
+            ~error_msg:result.raw_output;
           result.raw_output
+        )
       in
       { raw_output
       ; outcome = `Failure

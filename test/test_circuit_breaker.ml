@@ -328,6 +328,39 @@ let test_recent_failures_survive_trip () =
   let r = CB.recent_failures_of ~keeper_name:name in
   check int "3 signatures retained post-trip" 3 (List.length r)
 
+let test_observed_failure_records_memory_without_tripping () =
+  let name = "sig-observed-workflow" in
+  CB.record_success ~keeper_name:name;
+  CB.record_observed_failure ~keeper_name:name
+    ~error_msg:
+      "{\"failure_class\":\"workflow_rejection\",\"error\":\"keeper_bash_command_shape_blocked\"}";
+  CB.record_observed_failure ~keeper_name:name
+    ~error_msg:
+      "{\"failure_class\":\"workflow_rejection\",\"error\":\"keeper_bash_command_shape_blocked\",\"shape_block\":\"pipe_or_redirect\"}";
+  let recent = CB.recent_failures_of ~keeper_name:name in
+  check int "observed failures are retained" 2 (List.length recent);
+  check string "observed failure does not trip or warn" "clean"
+    (display_state_str (CB.display_state_of ~keeper_name:name))
+
+let test_prompt_failures_include_fleet_observed_failure () =
+  let source = "sig-fleet-source" in
+  let fresh = "sig-fleet-fresh" in
+  let fingerprint =
+    "{\"failure_class\":\"workflow_rejection\",\"error\":\"keeper_bash_command_shape_blocked\",\"shape_block\":\"chaining\"}"
+  in
+  CB.record_success ~keeper_name:source;
+  CB.record_success ~keeper_name:fresh;
+  CB.record_observed_failure ~keeper_name:source ~error_msg:fingerprint;
+  let recent = CB.recent_failures_for_prompt ~keeper_name:fresh in
+  check bool "fresh keeper sees fleet failure" true
+    (List.exists
+       (fun (sig_ : CB.failure_signature) ->
+          String_util.contains_substring sig_.fingerprint
+            "keeper_bash_command_shape_blocked")
+       recent);
+  check string "fresh keeper remains clean" "clean"
+    (display_state_str (CB.display_state_of ~keeper_name:fresh))
+
 let () =
   run "Circuit_breaker" [
     "classify", [
@@ -352,6 +385,10 @@ let () =
         `Quick test_snapshot_json_exposes_recent_failures;
       test_case "recent_failures survive trip"
         `Quick test_recent_failures_survive_trip;
+      test_case "observed failure records memory without tripping"
+        `Quick test_observed_failure_records_memory_without_tripping;
+      test_case "prompt failures include fleet observed failure"
+        `Quick test_prompt_failures_include_fleet_observed_failure;
     ];
     "threshold", [
       test_case "no hint under threshold" `Quick test_no_hint_under_threshold;

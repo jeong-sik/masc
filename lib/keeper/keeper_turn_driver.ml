@@ -65,6 +65,52 @@ let provider_attempt_provenance_fields p =
   | Some source_cascade ->
       ("provider_source_cascade", `String source_cascade) :: base
 
+type provider_attempt_started_record =
+  { started_provenance : provider_attempt_provenance
+  ; started_is_last : bool
+  ; started_per_provider_timeout_s : float option
+  }
+
+type provider_attempt_finished_record =
+  { finished_provenance : provider_attempt_provenance
+  ; finished_status : string
+  ; finished_latency_ms : float
+  ; finished_checkpoint_after_present : bool
+  ; finished_error : Yojson.Safe.t
+  ; finished_exception_kind : string option
+  }
+
+let provider_attempt_started_decision record =
+  `Assoc
+    (provider_attempt_provenance_fields record.started_provenance
+     @ [
+         ("is_last", `Bool record.started_is_last);
+         ( "per_provider_timeout_s",
+           match record.started_per_provider_timeout_s with
+           | None -> `Null
+           | Some timeout -> `Float timeout );
+       ])
+;;
+
+let provider_attempt_finished_decision record =
+  let decision_fields =
+    [
+      ("latency_ms", `Float record.finished_latency_ms);
+      ("checkpoint_after_present", `Bool record.finished_checkpoint_after_present);
+      ("error", record.finished_error);
+    ]
+  in
+  let decision_fields =
+    provider_attempt_provenance_fields record.finished_provenance @ decision_fields
+  in
+  let decision_fields =
+    match record.finished_exception_kind with
+    | None -> decision_fields
+    | Some kind -> ("exception_kind", `String kind) :: decision_fields
+  in
+  `Assoc decision_fields
+;;
+
 let success_selected_model_raw candidate =
   Some (Cascade_runtime_candidate.model_health_key candidate)
 
@@ -839,19 +885,15 @@ let run_named
           candidate
       in
       let attempt_started_at = Unix.gettimeofday () in
-      let started_decision_fields =
-        provider_attempt_provenance_fields provider_attempt_provenance
-        @ [
-            ("is_last", `Bool is_last);
-            ( "per_provider_timeout_s",
-              match pp_timeout with
-              | None -> `Null
-              | Some timeout -> `Float timeout );
-          ]
+      let started_record =
+        { started_provenance = provider_attempt_provenance
+        ; started_is_last = is_last
+        ; started_per_provider_timeout_s = pp_timeout
+        }
       in
       emit_runtime_manifest
         ~status:"started"
-        ~decision:(`Assoc started_decision_fields)
+        ~decision:(provider_attempt_started_decision started_record)
         Keeper_runtime_manifest.Provider_attempt_started;
       let provider_attempt_finished_emitted = ref false in
       let emit_provider_attempt_finished_once
@@ -865,26 +907,19 @@ let run_named
         =
         if not !provider_attempt_finished_emitted then (
           provider_attempt_finished_emitted := true;
-          let decision_fields =
-            [
-              ("latency_ms", `Float attempt_latency_ms);
-              ("checkpoint_after_present", `Bool checkpoint_after_present);
-              ("error", error);
-            ]
-          in
-          let decision_fields =
-            provider_attempt_provenance_fields provider_attempt_provenance
-            @ decision_fields
-          in
-          let decision_fields =
-            match exception_kind with
-            | None -> decision_fields
-            | Some kind -> ("exception_kind", `String kind) :: decision_fields
+          let finished_record =
+            { finished_provenance = provider_attempt_provenance
+            ; finished_status = status
+            ; finished_latency_ms = attempt_latency_ms
+            ; finished_checkpoint_after_present = checkpoint_after_present
+            ; finished_error = error
+            ; finished_exception_kind = exception_kind
+            }
           in
           emit_runtime_manifest
             ~status
             ?oas_turn_count
-            ~decision:(`Assoc decision_fields)
+            ~decision:(provider_attempt_finished_decision finished_record)
             Keeper_runtime_manifest.Provider_attempt_finished)
       in
       let record_attempt_terminal ~error attempt_latency_ms =

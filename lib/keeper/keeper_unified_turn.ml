@@ -17,6 +17,90 @@ include Keeper_unified_turn_types
 
 let runtime_lane_label = "runtime"
 
+type turn_plan_status =
+  | Turn_plan_dispatch
+  | Turn_plan_skipped
+  | Turn_plan_cancelled
+  | Turn_plan_error
+
+type turn_plan =
+  { turn_plan_keeper_turn_id : int
+  ; turn_plan_phase : string option
+  ; turn_plan_status : turn_plan_status
+  ; turn_plan_executable : bool
+  ; turn_plan_reason : string
+  ; turn_plan_terminal_reason_code : string option
+  }
+
+let decide_turn_plan_at_phase_gate
+      ~keeper_turn_id
+      ~supervisor_stop_at_entry
+      phase_opt
+  =
+  if supervisor_stop_at_entry
+  then
+    { turn_plan_keeper_turn_id = keeper_turn_id
+    ; turn_plan_phase = Option.map Keeper_state_machine.phase_to_string phase_opt
+    ; turn_plan_status = Turn_plan_cancelled
+    ; turn_plan_executable = false
+    ; turn_plan_reason = "supervisor_stop"
+    ; turn_plan_terminal_reason_code = Some "supervisor_stop"
+    }
+  else
+    match phase_opt with
+    | None ->
+      { turn_plan_keeper_turn_id = keeper_turn_id
+      ; turn_plan_phase = None
+      ; turn_plan_status = Turn_plan_error
+      ; turn_plan_executable = false
+      ; turn_plan_reason = "registry_phase_missing"
+      ; turn_plan_terminal_reason_code = Some "registry_phase_missing"
+      }
+    | Some phase ->
+      let phase_string = Keeper_state_machine.phase_to_string phase in
+      if Keeper_state_machine.can_execute_turn phase
+      then
+        { turn_plan_keeper_turn_id = keeper_turn_id
+        ; turn_plan_phase = Some phase_string
+        ; turn_plan_status = Turn_plan_dispatch
+        ; turn_plan_executable = true
+        ; turn_plan_reason = "executable_phase"
+        ; turn_plan_terminal_reason_code = None
+        }
+      else
+        { turn_plan_keeper_turn_id = keeper_turn_id
+        ; turn_plan_phase = Some phase_string
+        ; turn_plan_status = Turn_plan_skipped
+        ; turn_plan_executable = false
+        ; turn_plan_reason = "non_executable_phase"
+        ; turn_plan_terminal_reason_code =
+            Some (Printf.sprintf "non_executable_phase:%s" phase_string)
+        }
+;;
+
+let turn_plan_manifest_status plan =
+  match plan.turn_plan_status with
+  | Turn_plan_dispatch -> "ok"
+  | Turn_plan_skipped -> "skipped"
+  | Turn_plan_cancelled -> "cancelled"
+  | Turn_plan_error -> "error"
+;;
+
+let turn_plan_manifest_decision plan =
+  let phase_fields =
+    match plan.turn_plan_phase, plan.turn_plan_status with
+    | Some phase, _ -> [ ("phase", `String phase) ]
+    | None, Turn_plan_error -> [ ("phase", `Null) ]
+    | None, _ -> []
+  in
+  `Assoc
+    (phase_fields
+     @ [
+         ("reason", `String plan.turn_plan_reason);
+         ("executable", `Bool plan.turn_plan_executable);
+       ])
+;;
+
 let stay_silent_recovery_stimulus ~now ~keeper_name ~streak ~threshold =
   let payload =
     `Assoc
@@ -200,6 +284,12 @@ let run_keeper_cycle
       ?cascade_name ?status ?decision ()
     |> Keeper_runtime_manifest.append_best_effort ~site config
   in
+  let append_phase_gate_decision turn_plan =
+    append_manifest ~site:"phase_gate_decided"
+      ~status:(turn_plan_manifest_status turn_plan)
+      ~decision:(turn_plan_manifest_decision turn_plan)
+      Keeper_runtime_manifest.Phase_gate_decided
+  in
   append_manifest ~site:"turn_started"
     ~decision:
       (`Assoc
@@ -227,15 +317,11 @@ let run_keeper_cycle
   in
   if supervisor_stop_at_entry
   then (
-    append_manifest ~site:"phase_gate_decided"
-      ~status:"cancelled"
-      ~decision:
-        (`Assoc
-          [
-            ("reason", `String "supervisor_stop");
-            ("executable", `Bool false);
-          ])
-      Keeper_runtime_manifest.Phase_gate_decided;
+    let turn_plan =
+      decide_turn_plan_at_phase_gate ~keeper_turn_id
+        ~supervisor_stop_at_entry:true None
+    in
+    append_phase_gate_decision turn_plan;
     Log.Keeper.info
       ~keeper_name:meta.name
       ~turn_id:keeper_turn_id
@@ -269,17 +355,12 @@ let run_keeper_cycle
   else (
     match Keeper_registry.get_phase ~base_path:registry_base_path meta.name with
     | Some phase when not (Keeper_state_machine.can_execute_turn phase) ->
+      let turn_plan =
+        decide_turn_plan_at_phase_gate ~keeper_turn_id
+          ~supervisor_stop_at_entry:false (Some phase)
+      in
       let phase_string = Keeper_state_machine.phase_to_string phase in
-      append_manifest ~site:"phase_gate_decided"
-        ~status:"skipped"
-        ~decision:
-          (`Assoc
-            [
-              ("phase", `String phase_string);
-              ("reason", `String "non_executable_phase");
-              ("executable", `Bool false);
-            ])
-        Keeper_runtime_manifest.Phase_gate_decided;
+      append_phase_gate_decision turn_plan;
       Log.Keeper.info
         ~keeper_name:meta.name
         ~turn_id:keeper_turn_id
@@ -306,22 +387,17 @@ let run_keeper_cycle
         Keeper_turn_fsm.Done;
       Ok meta
     | None ->
+      let turn_plan =
+        decide_turn_plan_at_phase_gate ~keeper_turn_id
+          ~supervisor_stop_at_entry:false None
+      in
       let terminal_reason_code = "registry_phase_missing" in
       let error_message =
         Printf.sprintf
           "%s: keeper registry phase lookup returned None before dispatch"
           meta.name
       in
-      append_manifest ~site:"phase_gate_decided"
-        ~status:"error"
-        ~decision:
-          (`Assoc
-            [
-              ("phase", `Null);
-              ("reason", `String terminal_reason_code);
-              ("executable", `Bool false);
-            ])
-        Keeper_runtime_manifest.Phase_gate_decided;
+      append_phase_gate_decision turn_plan;
       Log.Keeper.error
         ~keeper_name:meta.name
         ~turn_id:keeper_turn_id
@@ -351,20 +427,11 @@ let run_keeper_cycle
     | phase_opt ->
       (* State-aware cascade routing (TLA+ KeeperCoreTriad.SelectCascade).
          At this point [phase] is executable; blocked phases returned above. *)
-      append_manifest ~site:"phase_gate_decided"
-        ~status:"ok"
-        ~decision:
-          (`Assoc
-            [
-              ( "phase",
-                `String
-                  (match phase_opt with
-                   | Some phase -> Keeper_state_machine.phase_to_string phase
-                   | None -> "missing_registry_phase_unreachable") );
-              ("reason", `String "executable_phase");
-              ("executable", `Bool true);
-            ])
-        Keeper_runtime_manifest.Phase_gate_decided;
+      let turn_plan =
+        decide_turn_plan_at_phase_gate ~keeper_turn_id
+          ~supervisor_stop_at_entry:false phase_opt
+      in
+      append_phase_gate_decision turn_plan;
       Keeper_turn_fsm.emit_transition
         ~keeper_name:meta.name
         ~turn_id:keeper_turn_id

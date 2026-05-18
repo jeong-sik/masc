@@ -87,6 +87,66 @@ val personas_dirs_with : inputs -> resolution -> string list
 val keeper_toml_path_opt : string -> string option
 (** [keeper_toml_path_opt name] checks for [keepers/<name>.toml]. *)
 
+(** {1 .masc/ root sub-directory accessors (RFC-0121)}
+
+    All non-config artifacts under [<base>/.masc/<sub>/] route through these
+    helpers instead of [Filename.concat base_path ".masc/..."] string-literal
+    direct construction. The path layout itself remains the single SSOT for
+    where each subsystem keeps state, but the layout decision lives in one
+    place (this module) rather than scattered across callers.
+
+    Each takes the caller's already-resolved [base_path] (the result of
+    server bootstrap resolution) and returns the canonical child path.
+    No filesystem access; directory creation is the caller's responsibility. *)
+
+val masc_root : base_path:string -> string
+(** [<base_path>/.masc/]. Equivalent to [Common.masc_dir_from_base_path] but
+    re-exported here so callers depend on the resolver SSOT, not on
+    [Common]. *)
+
+val auth_dir : base_path:string -> string
+(** [<base_path>/.masc/auth/]. Internal keeper token storage. *)
+
+val credentials_dir : base_path:string -> string
+(** [<base_path>/.masc/credentials/]. Per-credential file storage. *)
+
+val github_identities_dir : base_path:string -> string
+(** [<base_path>/.masc/github-identities/]. GitHub identity manifests. *)
+
+val agent_runtime_dir : base_path:string -> string
+(** [<base_path>/.masc/runtime/agent/]. Per-session agent runtime markers. *)
+
+val repos_dir : base_path:string -> string
+(** [<base_path>/.masc/repos/]. Managed repository checkouts. *)
+
+val tmp_dir : base_path:string -> string
+(** [<base_path>/.masc/tmp/]. Short-lived process artifacts. *)
+
+val locks_dir : base_path:string -> string
+(** [<base_path>/.masc/locks/]. Process and build lock files. *)
+
+val worktrees_dir : base_path:string -> string
+(** [<base_path>/.worktrees/]. NOTE: sibling of [.masc/], not a child —
+    git worktrees by convention live at the repo root, not under [.masc/].
+    Exposed here so callers stop computing this path themselves. *)
+
+val data_dir : base_path:string -> string
+(** [<base_path>/data/]. Bulk tool data (tool-events, tool-metrics).
+    Sibling of [.masc/]; callers historically wrote here without going
+    through [.masc/]. Layout preserved for backwards compatibility. *)
+
+(** {2 Config-rooted file accessors} *)
+
+val credentials_toml_path : base_path:string -> string
+(** [<base_path>/.masc/config/credentials.toml]. Backwards-compatible
+    direct derivation from [base_path]. A future RFC may extend this to
+    honour [MASC_CONFIG_DIR] override; until then the location matches
+    pre-RFC-0121 caller behaviour. *)
+
+val repositories_toml_path : base_path:string -> string
+(** [<base_path>/.masc/config/repositories.toml]. Same caveat as
+    [credentials_toml_path]. *)
+
 val config_signature_exists : string -> bool
 (** [config_signature_exists dir] checks whether [dir] looks like a valid
     MASC config directory (has cascade.toml, prompts/, keepers/, or personas/). *)

@@ -472,3 +472,46 @@ let log_resolution ?(context = "ConfigDir") () =
     Log.info ~ctx:context "resolved: %s" signature;
     last_logged_resolution_signature := Some signature
   end
+
+(* RFC-0121 — .masc/<sub> sub-directory accessors.
+
+   Layout SSOT: callers stop computing [Filename.concat base_path ".masc/X"]
+   and instead route through these helpers. The directory structure decision
+   ([auth], [credentials], [runtime/agent], etc.) lives in this single module
+   so that future relocations need a single edit + a CI gate to enforce. *)
+
+let masc_root ~base_path =
+  Common.masc_dir_from_base_path ~base_path
+
+let auth_dir ~base_path =
+  Common.auth_dir_from_base_path ~base_path
+
+let credentials_dir ~base_path =
+  Filename.concat (masc_root ~base_path) "credentials"
+
+let github_identities_dir ~base_path =
+  Filename.concat (masc_root ~base_path) "github-identities"
+
+let agent_runtime_dir ~base_path =
+  Filename.concat (masc_root ~base_path) "runtime/agent"
+
+let repos_dir ~base_path =
+  Filename.concat (masc_root ~base_path) "repos"
+
+let tmp_dir ~base_path =
+  Filename.concat (masc_root ~base_path) "tmp"
+
+let locks_dir ~base_path =
+  Filename.concat (masc_root ~base_path) "locks"
+
+let worktrees_dir ~base_path =
+  Filename.concat base_path ".worktrees"
+
+let data_dir ~base_path =
+  Filename.concat base_path "data"
+
+let credentials_toml_path ~base_path =
+  Filename.concat (masc_root ~base_path) "config/credentials.toml"
+
+let repositories_toml_path ~base_path =
+  Filename.concat (masc_root ~base_path) "config/repositories.toml"

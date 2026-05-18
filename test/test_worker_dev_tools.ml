@@ -18,6 +18,16 @@ let contains_substring s needle =
   in
   if n_len = 0 then true else loop 0
 
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some prior -> Unix.putenv name prior
+      | None -> Unix.putenv name "")
+    f
+
 let rec ensure_dir path =
   if path = "" || path = "." || path = "/" || Sys.file_exists path then ()
   else (
@@ -483,6 +493,61 @@ let test_readonly_shell_exec_blocks_git () =
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "readonly shell should block git"
 
+let test_shell_exec_respects_resource_gate () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  Fun.protect
+    ~finally:Tool_resource_gate.For_testing.reset
+    (fun () ->
+       Tool_resource_gate.For_testing.set_limits ~shell:1 ();
+       with_env "MASC_TOOL_GATE_WAIT_TIMEOUT_SEC" "0.05" (fun () ->
+         let blocker_started, unblock_blocker = Eio.Promise.create () in
+         let release_blocker, resolve_release = Eio.Promise.create () in
+         Eio.Fiber.both
+           (fun () ->
+              let result =
+                Tool_resource_gate.with_permit
+                  ~clock
+                  ~tool_name:"keeper_bash"
+                  ~arguments:(`Assoc [ "cmd", `String "sleep 1" ])
+                  ~is_read_only:false
+                  ~start_time:(Eio.Time.now clock)
+                  (fun () ->
+                     Eio.Promise.resolve unblock_blocker ();
+                     Eio.Promise.await release_blocker;
+                     Tool_result.quick_ok ~tool_name:"keeper_bash" "released")
+              in
+              Alcotest.(check bool) "blocker acquired shell lane" true result.success)
+           (fun () ->
+              Eio.Promise.await blocker_started;
+              Fun.protect
+                ~finally:(fun () -> Eio.Promise.resolve resolve_release ())
+                (fun () ->
+                   let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
+                   let tool = find_tool "shell_exec" tools in
+                   let result =
+                     Tool.execute tool
+                       (`Assoc [ "command", `String "echo gate-should-not-run" ])
+                   in
+                   match result with
+                   | Error { Agent_sdk.Types.message = msg; recoverable; _ } ->
+                     Alcotest.(check bool) "gate rejection is recoverable" true recoverable;
+                     Alcotest.(check bool)
+                       "message names resource gate saturation"
+                       true
+                       (contains_substring msg "tool_resource_gate_saturated");
+                     Alcotest.(check bool)
+                       "message names shell lane"
+                       true
+                       (contains_substring msg "class=shell")
+                   | Ok { Agent_sdk.Types.content = output } ->
+                     Alcotest.fail
+                       (Printf.sprintf
+                          "shell_exec bypassed saturated resource gate: %s"
+                          output)))))
+
 let test_workdir_enforcement () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -550,6 +615,8 @@ let () =
       Alcotest.test_case "missing param" `Quick test_shell_exec_missing_param;
       Alcotest.test_case "readonly shell blocks git" `Quick
         test_readonly_shell_exec_blocks_git;
+      Alcotest.test_case "resource gate saturation" `Quick
+        test_shell_exec_respects_resource_gate;
     ];
     "workdir", [
       Alcotest.test_case "workdir enforcement" `Quick test_workdir_enforcement;

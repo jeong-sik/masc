@@ -71,6 +71,7 @@ let test_classifies_host_local_bottlenecks () =
   check string "transition" "coordination_write" (classify "masc_transition");
   check string "bash output bypasses gate" "ungated" (classify "keeper_bash_output");
   check string "bash kill bypasses gate" "ungated" (classify "keeper_bash_kill");
+  check string "worker shell_exec" "shell" (classify "shell_exec");
   check string "status stays ungated" "ungated" (classify ~is_read_only:true "masc_status")
 ;;
 

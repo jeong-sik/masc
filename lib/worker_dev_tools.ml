@@ -1840,73 +1840,94 @@ let make_shell_exec_with_allowlist
             in
             (try
                let started = Time_compat.now () in
-               let buf = Buffer.create 1024 in
-               let wrapped_command =
-                 match workdir with
-                 | Some dir when String.trim dir <> "" ->
-                   Printf.sprintf "cd %s && %s" (Filename.quote dir) command
-                 | _ -> command
+               let record_result ?error_message result =
+                 let duration_ms =
+                   int_of_float ((Time_compat.now () -. started) *. 1000.0)
+                 in
+                 Option.iter
+                   (fun (f : tool_exec_observer) ->
+                      let success = Result.is_ok result in
+                      if success
+                      then f ~tool_name:"shell_exec" ~success:true ~duration_ms ()
+                      else
+                        f
+                          ~tool_name:"shell_exec"
+                          ~success:false
+                          ~duration_ms
+                          ~error_kind:Shell_error
+                          ?error_message
+                          ())
+                   on_exec;
+                 result
                in
-               let result =
-                 try
-                   let status, output =
-                     Fd_accountant.with_slot ~kind:Sandbox_exec (fun () ->
-                       Eio.Time.with_timeout_exn clock timeout (fun () ->
-                         Eio.Switch.run
-                         @@ fun sw ->
-                         let stdout_r, stdout_w = Eio.Process.pipe ~sw proc_mgr in
-                         let proc =
-                           Eio.Process.spawn
-                             ~sw
-                             proc_mgr
-                             ~stdout:stdout_w
-                             [ "sh"; "-c"; wrapped_command ^ " 2>&1" ]
-                         in
-                         Eio.Flow.close stdout_w;
-                         (try
-                            Eio.Flow.copy stdout_r (Eio.Flow.buffer_sink buf);
-                            Eio.Flow.close stdout_r
-                          with
-                          | Eio.Cancel.Cancelled _ as e ->
-                            (try Eio.Flow.close stdout_r with
-                             | Eio.Cancel.Cancelled _ as ce -> raise ce
-                             | _ -> ());
-                            raise e);
-                         let status = Eio.Process.await proc in
-                         status, Buffer.contents buf))
-                   in
-                   match status with
-                   | `Exited 0 -> Ok { Agent_sdk.Types.content = output }
-                   | `Exited code ->
-                     tool_error (Printf.sprintf "Exit code %d:\n%s" code output)
-                   | `Signaled sig_num ->
-                     tool_error
-                       ~recoverable:(sig_num = Sys.sigterm)
-                       (Printf.sprintf "Killed by signal %d:\n%s" sig_num output)
-                 with
-                 | Eio.Time.Timeout ->
-                   let output = Buffer.contents buf in
-                   tool_error
-                     ~recoverable:true
-                     (Printf.sprintf "Timeout after %.0fs: %s\n%s" timeout command output)
-               in
-               let duration_ms =
-                 int_of_float ((Time_compat.now () -. started) *. 1000.0)
-               in
-               Option.iter
-                 (fun (f : tool_exec_observer) ->
-                    let success = Result.is_ok result in
-                    if success
-                    then f ~tool_name:"shell_exec" ~success:true ~duration_ms ()
-                    else
-                      f
-                        ~tool_name:"shell_exec"
-                        ~success:false
-                        ~duration_ms
-                        ~error_kind:Shell_error
-                        ())
-                 on_exec;
-               result
+               Tool_resource_gate.with_permit_raw
+                 ~clock
+                 ~tool_name:"shell_exec"
+                 ~arguments:input
+                 ~is_read_only:false
+                 ~on_reject:(fun message ->
+                   let message = "tool_resource_gate_saturated: " ^ message in
+                   record_result
+                     ~error_message:message
+                     (tool_error ~recoverable:true message))
+                 (fun () ->
+                    let buf = Buffer.create 1024 in
+                    let wrapped_command =
+                      match workdir with
+                      | Some dir when String.trim dir <> "" ->
+                        Printf.sprintf "cd %s && %s" (Filename.quote dir) command
+                      | _ -> command
+                    in
+                    let result =
+                      try
+                        let status, output =
+                          Fd_accountant.with_slot ~kind:Sandbox_exec (fun () ->
+                            Eio.Time.with_timeout_exn clock timeout (fun () ->
+                              Eio.Switch.run
+                              @@ fun sw ->
+                              let stdout_r, stdout_w =
+                                Eio.Process.pipe ~sw proc_mgr
+                              in
+                              let proc =
+                                Eio.Process.spawn
+                                  ~sw
+                                  proc_mgr
+                                  ~stdout:stdout_w
+                                  [ "sh"; "-c"; wrapped_command ^ " 2>&1" ]
+                              in
+                              Eio.Flow.close stdout_w;
+                              (try
+                                 Eio.Flow.copy stdout_r (Eio.Flow.buffer_sink buf);
+                                 Eio.Flow.close stdout_r
+                               with
+                               | Eio.Cancel.Cancelled _ as e ->
+                                 (try Eio.Flow.close stdout_r with
+                                  | Eio.Cancel.Cancelled _ as ce -> raise ce
+                                  | _ -> ());
+                                 raise e);
+                              let status = Eio.Process.await proc in
+                              status, Buffer.contents buf))
+                        in
+                        match status with
+                        | `Exited 0 -> Ok { Agent_sdk.Types.content = output }
+                        | `Exited code ->
+                          tool_error (Printf.sprintf "Exit code %d:\n%s" code output)
+                        | `Signaled sig_num ->
+                          tool_error
+                            ~recoverable:(sig_num = Sys.sigterm)
+                            (Printf.sprintf "Killed by signal %d:\n%s" sig_num output)
+                      with
+                      | Eio.Time.Timeout ->
+                        let output = Buffer.contents buf in
+                        tool_error
+                          ~recoverable:true
+                          (Printf.sprintf
+                             "Timeout after %.0fs: %s\n%s"
+                             timeout
+                             command
+                             output)
+                    in
+                    record_result result)
              with
              | Eio.Cancel.Cancelled _ as e -> raise e
              | exn ->

@@ -363,9 +363,17 @@ let build_strategy (tier : cascade_tier) : Cascade_strategy.t =
 let build_tier_group_strategy (tg : cascade_tier_group)
     (tier_tiers : string list list) : Cascade_strategy.t =
   let kind = map_strategy_kind tg.strategy in
+  let cycle =
+    match kind with
+    | Cascade_strategy.Priority_tier ->
+      { Cascade_strategy.default_cycle_policy with
+        max_cycles = max 1 (List.length tier_tiers)
+      }
+    | Cascade_strategy.Failover -> Cascade_strategy.default_cycle_policy
+  in
   {
     Cascade_strategy.kind;
-    cycle = Cascade_strategy.default_cycle_policy;
+    cycle;
     tiers = tier_tiers;
   }
 

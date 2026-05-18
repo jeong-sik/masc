@@ -258,6 +258,27 @@ let test_client_capacity_release_idempotent () =
       check int "active = 0 not -1" 0 info.process_active
     | None -> fail "capacity disappeared"
 
+let test_declared_client_capacity_registers_generic_endpoint () =
+  C.unregister_all ();
+  let cfg =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"runpod-qwen"
+      ~base_url:"https://runpod.example/v1"
+      ~internal_model_rotation_count:2
+      ()
+  in
+  let candidate = Masc_mcp.Cascade_runtime_candidate.of_provider_config cfg in
+  check (option int) "declared capacity"
+    (Some 2)
+    (Masc_mcp.Cascade_runtime_candidate.declared_client_capacity candidate);
+  Masc_mcp.Cascade_runtime_candidate.register_declared_client_capacity candidate;
+  match C.capacity "https://runpod.example/v1" with
+  | None -> fail "declared endpoint capacity was not registered"
+  | Some info ->
+    check int "generic endpoint total" 2 info.total;
+    check int "generic endpoint available" 2 info.process_available
+
 let test_client_capacity_unregistered_url () =
   C.unregister_all ();
   check (option int) "capacity = None for unregistered URL"
@@ -852,6 +873,8 @@ let () =
         test_client_capacity_acquire_release;
       test_case "release is idempotent" `Quick
         test_client_capacity_release_idempotent;
+      test_case "declared generic endpoint capacity registers" `Quick
+        test_declared_client_capacity_registers_generic_endpoint;
       test_case "unregistered URL returns None" `Quick
         test_client_capacity_unregistered_url;
       test_case "max_concurrent <= 0 clamped to 1" `Quick

@@ -393,6 +393,17 @@ let tool_filter_rejection_label
 let capacity_key candidate = candidate.capacity_key
 let capacity_keys candidates = List.map capacity_key candidates
 
+let declared_client_capacity candidate =
+  match candidate.provider_cfg.internal_model_rotation_count with
+  | Some n when n > 0 -> Some n
+  | _ -> None
+
+let register_declared_client_capacity candidate =
+  match declared_client_capacity candidate, String.trim candidate.capacity_key with
+  | Some max_concurrent, capacity_key when not (String.equal capacity_key "") ->
+      Cascade_client_capacity.register ~url:capacity_key ~max_concurrent
+  | _ -> ()
+
 let runtime_urls candidates =
   candidates
   |> List.filter_map (fun candidate ->

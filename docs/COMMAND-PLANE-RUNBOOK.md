@@ -206,6 +206,17 @@ count. Keep the script above as the default visibility path. Set a positive
 `MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM` only for a deliberately conservative
 operator session.
 
+For a broader host check, `scripts/nofile-status.sh` includes this same Docker
+playground section when `MASC_BASE_PATH` or `MASC_DOCKER_PLAYGROUND_ROOT` is
+set. Its `hotspot_status=warning` output is advisory: review the printed
+cleanup dry-run command before removing anything.
+
+If `top_holder_fd_count` remains high after stale worktree cleanup, Docker
+Desktop's macOS file sharing layer may still be retaining already-removed
+shared-file FDs. In that case the status script prints
+`docker_desktop_restart_recommended=true`; verify no critical containers are
+running, restart Docker Desktop, then rerun the status check.
+
 Review stale clean worktree candidates first:
 
 ```bash

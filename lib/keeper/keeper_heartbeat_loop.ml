@@ -641,31 +641,29 @@ let run_keeper_cycle_with_slot
         keeper_name
         (Some (Keeper_registry.Oas_timeout_budget_loop { count = strikes }));
       record_oas_timeout_budget_observation ~base_path:ctx.config.base_path ~keeper_name;
-      if strikes >= Keeper_turn_slot.oas_timeout_budget_strike_limit
-      then (
-        Log.Keeper.error
-          "%s: %d consecutive oas_timeout_budget strikes (>= %d) — promoting to \
-           Keeper_fiber_crash for supervisor auto-pause"
+      match Keeper_turn_slot.classify_oas_timeout_budget_strike ~strikes with
+      | Keeper_turn_slot.Oas_timeout_budget_soft_backoff ->
+        Log.Keeper.warn
+          "%s: %d consecutive oas_timeout_budget strikes (>= %d) -- keeping keeper \
+           fiber alive; provider/cascade cooldown and retry backoff remain active"
           keeper_name
           strikes
           Keeper_turn_slot.oas_timeout_budget_strike_limit;
         Prometheus.inc_counter
           Keeper_metrics.metric_keeper_oas_timeout_budget_strike
-          ~labels:[ "keeper", keeper_name; "outcome", "promote" ]
-          ();
-        Keeper_turn_slot.reset_budget_exhaustion ~keeper_name;
-        raise Keeper_registry.Keeper_fiber_crash)
-      else (
+          ~labels:[ "keeper", keeper_name; "outcome", "soft_backoff" ]
+          ()
+      | Keeper_turn_slot.Oas_timeout_budget_warn ->
         Log.Keeper.warn
-          "%s: oas_timeout_budget strike %d/%d (next strike will trigger fiber crash + \
-           auto-pause)"
+          "%s: oas_timeout_budget strike %d/%d (keeper stays alive; repeated strikes \
+           escalate only to soft backoff)"
           keeper_name
           strikes
           Keeper_turn_slot.oas_timeout_budget_strike_limit;
         Prometheus.inc_counter
           Keeper_metrics.metric_keeper_oas_timeout_budget_strike
           ~labels:[ "keeper", keeper_name; "outcome", "warn" ]
-          ()));
+          ());
     (match read_meta ctx.config meta_after_cursor_persist.name with
      | Ok (Some latest) -> latest
      | Ok None ->

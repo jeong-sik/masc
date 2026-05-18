@@ -185,7 +185,12 @@ let resolve_masc_base_path path =
   | Some explicit ->
       log_once_info "MASC base: %s (explicit MASC_BASE_PATH)" explicit;
       explicit
-  | None -> requested
+  | None when running_under_test_executable () -> requested
+  | None ->
+      Log.Backend.error
+        "MASC_BASE_PATH is not set. Set MASC_BASE_PATH to the project root \
+         containing the .masc/ directory.";
+      exit 1
 
 let resolve_server_default_base_path path = resolve_masc_base_path path
 

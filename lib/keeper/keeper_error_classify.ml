@@ -62,6 +62,13 @@ let is_transient_network_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Api (NetworkError _) -> true
   | Agent_sdk.Error.Api (Timeout { message }) ->
       not (is_structural_oas_timeout_message message)
+  | Agent_sdk.Error.Provider (Llm_provider.Error.NetworkError
+      { kind = Llm_provider.Http_client.Tls_error
+             | Llm_provider.Http_client.Local_resource_exhaustion; _ }) ->
+      false
+  | Agent_sdk.Error.Provider (Llm_provider.Error.NetworkError _) -> true
+  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout { detail; _ }) ->
+      not (is_structural_oas_timeout_message detail)
   | Agent_sdk.Error.Api (Overloaded _) -> true
   | Agent_sdk.Error.Api (ServerError { status = 503; _ }) -> true
   (* Non-transient API errors. *)
@@ -72,6 +79,7 @@ let is_transient_network_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Api (NotFound _)
   | Agent_sdk.Error.Api (ContextOverflow _) -> false
   (* Non-API error families are by definition not transient network errors. *)
+  | Agent_sdk.Error.Provider _
   | Agent_sdk.Error.Agent _
   | Agent_sdk.Error.Mcp _
   | Agent_sdk.Error.Config _
@@ -92,6 +100,7 @@ let is_transient_network_error (err : Agent_sdk.Error.sdk_error) : bool =
     the keeper's next heartbeat cycle will build a fresh prompt. *)
 let is_server_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
+  | Agent_sdk.Error.Provider (Llm_provider.Error.ParseError _) -> true
   | Agent_sdk.Error.Api (InvalidRequest { message }) ->
       let lower = String.lowercase_ascii message in
       (* Compound patterns to avoid false positives on generic messages
@@ -112,6 +121,7 @@ let is_server_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Api (NetworkError _)
   | Agent_sdk.Error.Api (Timeout _) -> false
   (* Non-API error families. *)
+  | Agent_sdk.Error.Provider _
   | Agent_sdk.Error.Agent _
   | Agent_sdk.Error.Mcp _
   | Agent_sdk.Error.Config _
@@ -138,6 +148,7 @@ let is_required_tool_contract_violation (err : Agent_sdk.Error.sdk_error) : bool
   | Agent_sdk.Error.Agent (ExitConditionMet _) -> false
   (* Non-Agent error families. *)
   | Agent_sdk.Error.Api _
+  | Agent_sdk.Error.Provider _
   | Agent_sdk.Error.Mcp _
   | Agent_sdk.Error.Config _
   | Agent_sdk.Error.Serialization _
@@ -389,6 +400,13 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
              Some Server_error
          | Agent_sdk.Error.Api (Llm_provider.Retry.AuthError _) ->
              Some Auth_error
+         | Agent_sdk.Error.Provider (Llm_provider.Error.RateLimit _) ->
+             Some Rate_limit
+         | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { code; _ })
+           when code >= 500 ->
+             Some Server_error
+         | Agent_sdk.Error.Provider (Llm_provider.Error.AuthError _) ->
+             Some Auth_error
          (* Sub-500 server errors (4xx already handled above for AuthError /
             RateLimited) are not classified as recoverable cascade failures. *)
          | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _)
@@ -397,7 +415,8 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
          | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.ContextOverflow _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.NetworkError _)
-         | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _) -> None
+         | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _)
+         | Agent_sdk.Error.Provider _ -> None
          (* Non-API error families have no rotation reason here: structured
             MASC internal errors are handled by [classify_masc_internal_error]
             above; agent / mcp / config / etc. are not provider-level rotations. *)
@@ -606,6 +625,7 @@ let is_ambiguous_side_effect_error (err : Agent_sdk.Error.sdk_error) : bool =
          ambiguous-side-effect string prefix; the structured
          [Ambiguous_post_commit] arm above covers the new path. *)
       | Agent_sdk.Error.Api _
+      | Agent_sdk.Error.Provider _
       | Agent_sdk.Error.Agent _
       | Agent_sdk.Error.Mcp _
       | Agent_sdk.Error.Config _
@@ -635,6 +655,7 @@ let reclassify_error_after_side_effect
     let is_timeout =
       match err with
       | Agent_sdk.Error.Api (Timeout _) -> true
+      | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) -> true
       | Agent_sdk.Error.Api (RateLimited _)
       | Agent_sdk.Error.Api (Overloaded _)
       | Agent_sdk.Error.Api (ServerError _)
@@ -643,6 +664,7 @@ let reclassify_error_after_side_effect
       | Agent_sdk.Error.Api (NotFound _)
       | Agent_sdk.Error.Api (ContextOverflow _)
       | Agent_sdk.Error.Api (NetworkError _) -> false
+      | Agent_sdk.Error.Provider _
       | Agent_sdk.Error.Agent _
       | Agent_sdk.Error.Mcp _
       | Agent_sdk.Error.Config _
@@ -659,6 +681,8 @@ let reclassify_error_after_side_effect
 let post_commit_failure_kind_of_error (err : Agent_sdk.Error.sdk_error) =
   match err with
   | Agent_sdk.Error.Api (Timeout _) -> Keeper_registry.Post_commit_timeout
+  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) ->
+      Keeper_registry.Post_commit_timeout
   (* All non-Timeout failures classify as generic post-commit failure. *)
   | Agent_sdk.Error.Api (RateLimited _)
   | Agent_sdk.Error.Api (Overloaded _)
@@ -668,6 +692,7 @@ let post_commit_failure_kind_of_error (err : Agent_sdk.Error.sdk_error) =
   | Agent_sdk.Error.Api (NotFound _)
   | Agent_sdk.Error.Api (ContextOverflow _)
   | Agent_sdk.Error.Api (NetworkError _)
+  | Agent_sdk.Error.Provider _
   | Agent_sdk.Error.Agent _
   | Agent_sdk.Error.Mcp _
   | Agent_sdk.Error.Config _
@@ -766,6 +791,7 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Agent (TripwireViolation _)
   | Agent_sdk.Error.Agent (ExitConditionMet _) -> false
   (* Non-API / non-Agent error families. *)
+  | Agent_sdk.Error.Provider _
   | Agent_sdk.Error.Mcp _
   | Agent_sdk.Error.Config _
   | Agent_sdk.Error.Serialization _

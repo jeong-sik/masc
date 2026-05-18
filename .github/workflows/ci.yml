@@ -1174,13 +1174,14 @@ jobs:
                     elif .__typename == "UnlabeledEvent" then "unlabeled"
                     else ""
                     end;
-                  def marker_for($root; $label; $label_ts):
+                  def marker_for($root; $label; $label_ts; $previous_label_ts):
                     any($root.data.repository.pullRequest.comments.nodes[];
                       (.author.__typename == "Bot") and
                       ((.body // "") | contains("<!-- masc-human-approval-gate -->")) and
                       (((.body // "") | ascii_downcase) | contains("`" + $label + "`")) and
                       ((.body // "") | contains("/actions/runs/")) and
                       ((.createdAt | fromdateiso8601) as $comment_ts |
+                        (($previous_label_ts == null) or ($comment_ts > $previous_label_ts)) and
                         ($comment_ts >= $label_ts and $comment_ts <= ($label_ts + 300)))
                     );
                   . as $root
@@ -1191,11 +1192,16 @@ jobs:
                   | any($bypass_labels[]; . as $label |
                       ($present_labels | index($label)) and
                       (([$root.data.repository.pullRequest.timelineItems.nodes[]
-                         | select(event_label == $label)] | last) as $latest
+                         | select(event_label == $label)]) as $label_events
+                       | ($label_events | last) as $latest
                        | ($latest != null)
                          and (($latest | event_kind) == "labeled")
+                         and ((if ($label_events | length) > 1
+                               then ($label_events[($label_events | length) - 2].createdAt | fromdateiso8601)
+                               else null
+                               end) as $previous_label_ts
                          and (($latest.createdAt | fromdateiso8601) as $label_ts |
-                           marker_for($root; $label; $label_ts))))
+                           marker_for($root; $label; $label_ts; $previous_label_ts)))))
                 ' 2>/dev/null || echo false
               else
                 echo false

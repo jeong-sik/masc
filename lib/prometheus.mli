@@ -114,8 +114,7 @@ val metric_coord_claim_post_provision_failures : string
 
 include module type of Prometheus_oas_metric_names
 
-val metric_mcp_tool_schema_count : string
-val metric_mcp_tool_schema_tokens_approx : string
+include module type of Prometheus_runtime_metric_names
 
 (** {1 Core counters / gauges} *)
 
@@ -395,60 +394,6 @@ include module type of Prometheus_identity_metric_names
 (** {1 Transport metrics} *)
 
 include module type of Prometheus_transport_metric_names
-
-(** {1 Admission queue metrics} *)
-
-val metric_inference_queue_depth : string
-val metric_inference_queue_inflight : string
-val metric_inference_queue_acquired : string
-val metric_inference_queue_wait : string
-val metric_inference_queue_cancelled : string
-
-(** Total admission requests rejected before execution. Labels:
-    [surface=with_permit|try_with_permit] and
-    [reason=host_resource_saturated]. *)
-val metric_inference_queue_rejected : string
-
-(** Total admission requests rejected before execution. Labels:
-    [surface=with_permit|try_with_permit] and
-    [reason=host_resource_saturated]. *)
-val metric_inference_queue_max_concurrent : string
-
-(** {1 Agent health metrics} *)
-
-val metric_agent_heartbeat_age_seconds : string
-val metric_agent_stale_total : string
-
-(** {1 OCaml GC sampler gauges (PR-0.2.D)}
-
-    Populated by {!module:Gc_sampler} once per sampling interval from
-    [Gc.quick_stat]. The cumulative word counters are exposed as
-    [Gauge] (not [Counter]) because they are read from the OCaml
-    runtime as point-in-time snapshots; PromQL [rate()] still works on
-    monotonic-by-construction gauges. [heap_words] and [live_words]
-    are point-in-time heap structure values, naturally a gauge. *)
-
-(** Cumulative words allocated in the minor heap since program start. *)
-val metric_gc_minor_words : string
-
-(** Cumulative words allocated in the major heap since program start. *)
-val metric_gc_major_words : string
-
-(** Current size of the major heap, in words. *)
-val metric_gc_heap_words : string
-
-(** Number of live words in the major heap at last sample. *)
-val metric_gc_live_words : string
-
-(** Number of major-heap compactions since program start. *)
-val metric_gc_compactions : string
-
-(** Cumulative words promoted from minor to major heap since program start. *)
-val metric_gc_promoted_words : string
-
-(** Approximate live OCaml heap memory usage in bytes, derived from
-    [Gc.quick_stat.live_words] and [Sys.word_size]. *)
-val metric_memory_usage_bytes : string
 
 (** [masc_keeper_oas_run_timeout_total] counter incremented in the
     cascade FSM each time an [Agent.run] / [run_stream] returns

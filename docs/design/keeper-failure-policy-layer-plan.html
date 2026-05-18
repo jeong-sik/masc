@@ -309,6 +309,7 @@
           <ul>
             <li><span class="done">Done / PR</span> <code>#16154</code>: deterministic <code>keeper_bash</code> guard rejection을 <code>workflow_rejection</code>으로 분류해 circuit breaker에서 제외.</li>
             <li><span class="done">Done / PR</span> <code>#16159</code>: repeated <code>oas_timeout_budget</code> strike가 <code>Keeper_fiber_crash</code>로 승격되는 직접 경로 제거.</li>
+            <li><span class="doing">Started / OAS PR</span> <code>oas#1632</code>: provider timeout을 <code>stream_idle:streaming_thinking</code>, <code>stream_body</code>, <code>provider_step</code> 같은 typed evidence로 보존.</li>
             <li><span class="warn">Remaining</span>: watchdog/supervisor/dashboard가 같은 policy vocabulary를 쓰도록 통합 필요.</li>
           </ul>
         </div>
@@ -459,6 +460,7 @@ type decision = {
           <h3>Timeout, but not hopeless</h3>
           <ul>
             <li>single provider timed out while fallback providers remain callable</li>
+            <li>timeout phase is <code>stream_idle</code> with answer/thinking/tool-call progress already observed</li>
             <li>provider health has recent success or short cooldown only</li>
             <li>prompt/context was unusually large for this turn</li>
             <li>outer keeper turn remains cancellable and slots are released</li>
@@ -470,6 +472,7 @@ type decision = {
           <ul>
             <li>all cascade candidates are missing credentials, hard-quotaed, or model-not-found</li>
             <li>required tool contract cannot be satisfied by any selected provider</li>
+            <li>timeout phase is <code>provider_step</code> and all fallback candidates are exhausted or disabled</li>
             <li>same terminal fingerprint repeats after cooldown windows</li>
             <li>active child process or slot is wedged and force-release evidence exists</li>
             <li>the same keeper enters a stale termination storm after restart</li>
@@ -496,6 +499,13 @@ type decision = {
           </tr>
         </thead>
         <tbody>
+          <tr>
+            <td>P0-OAS</td>
+            <td><span class="status doing">draft PR</span></td>
+            <td>Expose generic provider timeout/failure evidence before MASC policy consumes it.</td>
+            <td><code>oas#1632</code>: <code>Http_client.TimeoutError</code>, <code>Error.Provider</code>, stream idle state</td>
+            <td>MASC can distinguish <code>stream_idle:streaming_thinking</code>, <code>stream_body</code>, <code>provider_step</code>, hard quota, capacity, and provider terminal without string parsing.</td>
+          </tr>
           <tr>
             <td>P0-A</td>
             <td><span class="status doing">in flight</span></td>

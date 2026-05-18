@@ -74,6 +74,10 @@ export function getStoredToken(): string | null {
   }
 }
 
+export function dashboardBearerToken(): string | null {
+  return getStoredToken()
+}
+
 export function getStoredTokenMeta(): StoredTokenMeta | null {
   try {
     const raw = sessionStorage.getItem(TOKEN_META_STORAGE_KEY)
@@ -134,7 +138,7 @@ type HeaderOptions = {
 
 export function authHeaders(options: HeaderOptions = {}): Record<string, string> {
   const headers: Record<string, string> = {}
-  const token = getStoredToken()
+  const token = dashboardBearerToken()
   const agent = options.actorName !== undefined
     ? sanitizeDashboardActorName(options.actorName)
     : currentDashboardActor()

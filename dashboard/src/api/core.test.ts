@@ -5,6 +5,7 @@ import {
   clearStoredToken,
   confirmOperatorAction,
   currentDashboardActor,
+  dashboardBearerToken,
   defaultBoardVoter,
   extractApiError,
   get,
@@ -59,6 +60,13 @@ describe('stored token metadata', () => {
 
     expect(getStoredToken()).toBeNull()
     expect(getStoredTokenMeta()).toBeNull()
+  })
+
+  it('normalizes blank raw storage for shared transport auth', () => {
+    sessionStorage.setItem('masc_bearer_token', '   ')
+
+    expect(dashboardBearerToken()).toBeNull()
+    expect(authHeaders()).not.toHaveProperty('Authorization')
   })
 })
 

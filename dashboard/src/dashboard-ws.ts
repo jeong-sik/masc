@@ -2,6 +2,7 @@ import type { RouteState, SSEEvent } from './types'
 import { parseSSEMessage } from './schemas/sse'
 import { hydrateDashboardSlice, routeServerPushEvent } from './sse-store'
 import { batch } from '@preact/signals'
+import { dashboardBearerToken } from './api/core'
 import { parseWebSocketSseFrames as parseWebSocketSseFramesImpl } from './dashboard-ws-parse'
 import {
   DASHBOARD_WS_HEARTBEAT_INTERVAL_MS,
@@ -676,7 +677,7 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
     if (socket !== ws) return
     dashboardWsConnected.value = true
     reconnectAttempts = 0
-    const token = sessionStorage.getItem('masc_bearer_token')
+    const token = dashboardBearerToken()
     void sendRpc('dashboard/hello', {
       protocol: 'dashboard-ws.v1',
       token: token ?? undefined,

@@ -401,7 +401,6 @@ let handle_code_edit ~tool_name ~start_time ctx args =
 
   if String.equal path "" then Tool_result.error ~tool_name ~start_time "path parameter required"
   else if String.equal old_string "" then Tool_result.error ~tool_name ~start_time "old_string parameter required"
-  else if String.equal old_string new_string then Tool_result.error ~tool_name ~start_time "old_string and new_string are identical"
   else begin
     match validate_writable_path ~agent_name:ctx.agent_name ctx.config path with
     | Error e -> Tool_result.error ~tool_name ~start_time (Masc_domain.masc_error_to_string e)
@@ -423,7 +422,19 @@ let handle_code_edit ~tool_name ~start_time ctx args =
               Stdlib.incr pos
           done;
 
-          if !count = 0 then
+          if String.equal old_string new_string then
+            if !count > 0 then
+              Tool_args.ok_result ~tool_name ~start_time [
+                ("path", `String path);
+                ("replacements", `Int 0);
+                ("noop", `Bool true);
+                ("reason", `String "old_string and new_string are identical");
+                ("agent", `String ctx.agent_name);
+              ]
+            else
+              Tool_result.error ~tool_name ~start_time
+                "old_string and new_string are identical, and old_string was not found in file"
+          else if !count = 0 then
             (* Exact match failed. Look for the first line of old_string
                (trimmed) inside the file and surface up to 3 matching
                lines — the LLM almost always got whitespace / indent /

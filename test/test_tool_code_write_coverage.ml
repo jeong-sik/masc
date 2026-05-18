@@ -35,6 +35,14 @@ let json_int_field key text =
      | _ -> fail ("missing JSON int field: " ^ key))
   | _ -> fail "expected JSON object"
 
+let json_bool_field key text =
+  match Yojson.Safe.from_string text with
+  | `Assoc fields ->
+    (match List.assoc_opt key fields with
+     | Some (`Bool value) -> value
+     | _ -> fail ("missing JSON bool field: " ^ key))
+  | _ -> fail "expected JSON object"
+
 let tool_code_write_policy_load_failure_metric () =
   Prometheus.metric_value_or_zero
     Masc_mcp.Keeper_metrics.metric_keeper_tool_policy_failures
@@ -577,6 +585,64 @@ let test_code_git_status_marks_docker_keeper_route () =
   check string "brokered via" "brokered" (json_string_field "via" msg);
   check string "brokered route" "brokered" (json_string_field "route_via" msg)
 
+let test_code_edit_identical_replacement_is_noop () =
+  let base_path = fresh_base_path () in
+  let config = make_config base_path in
+  let file_dir =
+    Filename.concat base_path
+      ".masc/playground/test-agent/repos/masc-mcp/lib"
+  in
+  mkdir_p file_dir;
+  let file = Filename.concat file_dir "demo.ml" in
+  let original = "let value = 1\n" in
+  write_file file original;
+  let ctx =
+    { Tool_code_write.config;
+      agent_name = "test-agent";
+    }
+  in
+  let args =
+    `Assoc
+      [
+        ("path", `String "repos/masc-mcp/lib/demo.ml");
+        ("old_string", `String "let value = 1");
+        ("new_string", `String "let value = 1");
+      ]
+  in
+  let ok, msg = dispatch_exn ctx ~name:"masc_code_edit" ~args in
+  check bool "identical replacement is successful noop" true ok;
+  check int "no replacements" 0 (json_int_field "replacements" msg);
+  check bool "noop field" true (json_bool_field "noop" msg);
+  check string "reason" "old_string and new_string are identical"
+    (json_string_field "reason" msg);
+  check string "file unchanged" original
+    (In_channel.with_open_bin file In_channel.input_all)
+
+let test_code_edit_identical_replacement_missing_file_still_fails () =
+  let base_path = fresh_base_path () in
+  let config = make_config base_path in
+  let file_dir =
+    Filename.concat base_path
+      ".masc/playground/test-agent/repos/masc-mcp/lib"
+  in
+  mkdir_p file_dir;
+  let ctx =
+    { Tool_code_write.config;
+      agent_name = "test-agent";
+    }
+  in
+  let args =
+    `Assoc
+      [
+        ("path", `String "repos/masc-mcp/lib/missing.ml");
+        ("old_string", `String "let value = 1");
+        ("new_string", `String "let value = 1");
+      ]
+  in
+  let ok, msg = dispatch_exn ctx ~name:"masc_code_edit" ~args in
+  check bool "missing file remains failed" false ok;
+  check bool "reports missing file" true (contains "File not found" msg)
+
 let test_code_shell_missing_docker_cwd_reports_worktree_hint () =
   let base_path = fresh_base_path () in
   let config = make_config base_path in
@@ -911,6 +977,12 @@ let () =
         test_code_git_status_marks_docker_keeper_route;
       test_case "missing docker cwd reports worktree hint" `Quick
         test_code_git_missing_docker_cwd_reports_worktree_hint;
+    ]);
+    ("masc_code_edit", [
+      test_case "identical replacement is noop" `Quick
+        test_code_edit_identical_replacement_is_noop;
+      test_case "identical replacement missing file still fails" `Quick
+        test_code_edit_identical_replacement_missing_file_still_fails;
     ]);
     ("validate_code_shell_command", [
       test_case "allows pipe with allowlisted segments" `Quick

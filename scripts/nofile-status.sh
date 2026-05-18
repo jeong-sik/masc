@@ -352,3 +352,24 @@ if [[ "${ps_available}" -eq 1 ]]; then
 else
   printf 'potential bare dune bypasses: unavailable (ps failed)\n'
 fi
+
+printf 'docker playground hotspot:\n'
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+docker_status_script="${script_dir}/docker-playground-fd-status.sh"
+docker_root="${MASC_DOCKER_PLAYGROUND_ROOT:-}"
+if [[ -z "${docker_root}" && -n "${MASC_BASE_PATH:-}" ]]; then
+  docker_root="${MASC_BASE_PATH%/}/.masc/playground/docker"
+fi
+if [[ -z "${docker_root}" && -d "$(pwd)/.masc/playground/docker" ]]; then
+  docker_root="$(pwd)/.masc/playground/docker"
+fi
+
+if [[ -z "${docker_root}" ]]; then
+  printf 'docker playground hotspot: skipped (set MASC_BASE_PATH or MASC_DOCKER_PLAYGROUND_ROOT)\n'
+elif [[ ! -d "${docker_root}" ]]; then
+  printf 'docker playground hotspot: skipped (root missing: %s)\n' "${docker_root}"
+elif [[ -x "${docker_status_script}" ]]; then
+  "${docker_status_script}" --root "${docker_root}" --limit 5 || true
+else
+  printf 'docker playground hotspot: unavailable (%s missing or not executable)\n' "${docker_status_script}"
+fi

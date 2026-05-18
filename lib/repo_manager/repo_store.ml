@@ -313,6 +313,12 @@ let slugify_id s =
     s
 
 let is_directory path = try Sys.is_directory path with Sys_error _ -> false
+
+let is_symlink path =
+  try (Unix.lstat path).st_kind = Unix.S_LNK
+  with Unix.Unix_error _ | Sys_error _ -> false
+
+let is_real_directory path = is_directory path && not (is_symlink path)
 let is_hidden_name name = String.length name > 0 && Char.equal name.[0] '.'
 
 let discover_git_dirs ~base_path =
@@ -320,7 +326,8 @@ let discover_git_dirs ~base_path =
   let rec scan_dir ~depth dir acc =
     let git_dir = Filename.concat dir ".git" in
     let acc =
-      if depth + 1 <= max_git_depth && is_directory git_dir then git_dir :: acc else acc
+      if depth + 1 <= max_git_depth && is_real_directory git_dir then git_dir :: acc
+      else acc
     in
     if depth >= max_git_depth - 1 then acc
     else
@@ -334,12 +341,12 @@ let discover_git_dirs ~base_path =
             acc
           else
             let child = Filename.concat dir name in
-            if is_directory child then scan_dir ~depth:(depth + 1) child acc
+            if is_real_directory child then scan_dir ~depth:(depth + 1) child acc
             else acc)
         acc
         entries
   in
-  if is_directory base_path then List.rev (scan_dir ~depth:0 base_path [])
+  if is_real_directory base_path then List.rev (scan_dir ~depth:0 base_path [])
   else []
 
 (* Pure path normalization fallback for environments where the path does

@@ -12,6 +12,19 @@ let contains_substring s needle =
   in
   if n_len = 0 then true else loop 0
 
+let is_symlink path =
+  try (Unix.lstat path).st_kind = Unix.S_LNK
+  with Unix.Unix_error _ | Sys_error _ -> false
+
+let rec rm_rf path =
+  if Sys.file_exists path || is_symlink path then
+    if is_symlink path then Unix.unlink path
+    else if Sys.is_directory path then begin
+      Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Sys.remove path
+
 let with_temp_base_path f =
   let dir = Filename.temp_file "repo_store_test" "" in
   Sys.remove dir;
@@ -20,18 +33,7 @@ let with_temp_base_path f =
   Unix.mkdir config_dir 0o755;
   let config_subdir = Filename.concat config_dir "config" in
   Unix.mkdir config_subdir 0o755;
-  Fun.protect
-    ~finally:(fun () ->
-      let rec rm_rf path =
-        if Sys.file_exists path then
-          if Sys.is_directory path then begin
-            Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
-            Unix.rmdir path
-          end else
-            Sys.remove path
-      in
-      rm_rf dir)
-    (fun () -> f dir)
+  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
 let sample_repo id =
   {
@@ -338,6 +340,26 @@ let test_discover_ignores_hidden_dirs () =
         | Ok repos ->
             Alcotest.(check int) "ignores hidden directory repo" 0
               (List.length repos))
+
+let test_discover_ignores_symlink_dirs () =
+  if not (git_available ()) then Alcotest.skip ()
+  else
+    with_temp_base_path (fun base_path ->
+        let outside = Filename.temp_file "repo_store_outside" "" in
+        Sys.remove outside;
+        Unix.mkdir outside 0o755;
+        Fun.protect
+          ~finally:(fun () -> rm_rf outside)
+          (fun () ->
+            init_git_repo outside "https://github.com/test/outside";
+            let link = Filename.concat base_path "linked-outside" in
+            (try Unix.symlink outside link
+             with Unix.Unix_error _ -> Alcotest.skip ());
+            match Repo_store.discover_repositories ~base_path with
+            | Error e -> Alcotest.fail ("discover failed: " ^ e)
+            | Ok repos ->
+                Alcotest.(check int) "ignores symlink directory repo" 0
+                  (List.length repos)))
 
 let test_discover_relative_base_path_keeps_visible_repos () =
   if not (git_available ()) then Alcotest.skip ()
@@ -646,6 +668,8 @@ let () =
             test_discover_keeps_depth_cap;
           Alcotest.test_case "ignores hidden dirs" `Quick
             test_discover_ignores_hidden_dirs;
+          Alcotest.test_case "ignores symlink dirs" `Quick
+            test_discover_ignores_symlink_dirs;
           Alcotest.test_case "relative base path keeps visible repos" `Quick
             test_discover_relative_base_path_keeps_visible_repos;
           Alcotest.test_case "skips registered repos" `Quick test_discover_skips_registered;

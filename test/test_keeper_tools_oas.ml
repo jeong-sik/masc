@@ -1042,6 +1042,7 @@ let test_library_read_missing_topic () =
 
 let parse json_str = Yojson.Safe.from_string json_str
 let json_bool key json = Yojson.Safe.Util.(member key json |> to_bool)
+let json_int key json = Yojson.Safe.Util.(member key json |> to_int)
 let json_string key json = Yojson.Safe.Util.(member key json |> to_string)
 
 let test_normalize_success_json () =
@@ -1113,6 +1114,57 @@ let test_normalize_failure_preserves_failure_class () =
     "deterministic"
     (json_string "error_class" json);
   check bool "recoverable preserved" false (json_bool "recoverable" json)
+;;
+
+let workflow_rejection_shape_block_raw =
+  {|{"ok":false,"error":"keeper_bash_command_shape_blocked","detail":{"ok":false,"error":"keeper_bash_command_shape_blocked","hint":"Do not inspect task state by guessing .masc/backlog.json. Use keeper_tasks_list.","diagnosis":{"rule_id":"keeper_bash_repo_wide_scan_blocked","tool_suggestion":"keeper_tasks_list"}},"failure_class":"workflow_rejection"}|}
+;;
+
+let test_workflow_rejection_recovery_fields_expose_next_tool () =
+  let recovery_fields =
+    Keeper_tools_oas.workflow_rejection_recovery_fields
+      ~tool_name:"keeper_bash"
+      ~count:1
+      workflow_rejection_shape_block_raw
+  in
+  let normalized =
+    Keeper_tools_oas.normalize_tool_result
+      ~workflow_rejection_recovery_fields:recovery_fields
+      ~success:false
+      workflow_rejection_shape_block_raw
+  in
+  let json = parse normalized in
+  check bool "ok is false" false (json_bool "ok" json);
+  check bool "self-correction required" true (json_bool "self_correction_required" json);
+  check string "do not retry tool" "keeper_bash" (json_string "do_not_retry_tool" json);
+  check string "required next tool" "keeper_tasks_list" (json_string "required_next_tool" json);
+  let recovery = Yojson.Safe.Util.member "workflow_rejection_recovery" json in
+  check int "workflow rejection count" 1 (json_int "count" recovery);
+  check
+    string
+    "rule id"
+    "keeper_bash_repo_wide_scan_blocked"
+    (json_string "rule_id" recovery);
+  check string "tool suggestion" "keeper_tasks_list" (json_string "tool_suggestion" recovery)
+;;
+
+let test_workflow_rejection_recovery_fields_mark_loop () =
+  let recovery_fields =
+    Keeper_tools_oas.workflow_rejection_recovery_fields
+      ~tool_name:"keeper_bash"
+      ~count:2
+      workflow_rejection_shape_block_raw
+  in
+  let normalized =
+    Keeper_tools_oas.normalize_tool_result
+      ~workflow_rejection_recovery_fields:recovery_fields
+      ~success:false
+      workflow_rejection_shape_block_raw
+  in
+  let json = parse normalized in
+  check bool "workflow rejection loop" true (json_bool "workflow_rejection_loop" json);
+  let recovery = Yojson.Safe.Util.member "workflow_rejection_recovery" json in
+  check int "workflow rejection count" 2 (json_int "count" recovery)
 ;;
 
 let test_normalize_failure_plain_text () =
@@ -1377,6 +1429,14 @@ let () =
             "failure preserves failure_class"
             `Quick
             test_normalize_failure_preserves_failure_class
+        ; test_case
+            "workflow rejection exposes next tool"
+            `Quick
+            test_workflow_rejection_recovery_fields_expose_next_tool
+        ; test_case
+            "workflow rejection marks repeated loop"
+            `Quick
+            test_workflow_rejection_recovery_fields_mark_loop
         ; test_case
             "failure plain text wraps as error"
             `Quick

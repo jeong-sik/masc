@@ -52,7 +52,20 @@ val create_failure_counts : unit -> failure_counts
     [{"ok":false,"error":...,"detail":...}], preserving structured
     [failure_class]/[recoverable]/[error_class] fields when present.
     Plain text is wrapped as a string under [result] / [error]. *)
-val normalize_tool_result : success:bool -> string -> string
+val normalize_tool_result
+  :  ?workflow_rejection_recovery_fields:(string * Yojson.Safe.t) list
+  -> success:bool
+  -> string
+  -> string
+
+(** Build top-level recovery hints for deterministic workflow rejections.
+    These fields are intentionally outside [detail] so the LLM sees the
+    required self-correction without parsing nested tool-specific payloads. *)
+val workflow_rejection_recovery_fields
+  :  tool_name:string
+  -> count:int
+  -> string
+  -> (string * Yojson.Safe.t) list
 
 (** Build the structured, recoverable envelope used when a keeper tool
     raises mutex EDEADLK / "Resource deadlock avoided". *)

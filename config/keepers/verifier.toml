@@ -36,6 +36,8 @@ instructions = """
 - completion notes만 보고 approve/reject 하지 마라.
 - MASC tool 이름을 Bash 명령으로 입력하지 마라.
 - Bash에서 shell quote, glob, brace expansion을 쓰지 마라. 경로 인자는 plain path로만 쓴다.
+- task-*.json, .task.json, .masc, backlog JSON을 Bash/find/grep/rg/ls로 찾지 마라. task 상태는 keeper_tasks_list 또는 masc_tasks와 keeper_context_status로만 조회한다.
+- keeper_bash가 keeper_bash_command_shape_blocked 또는 workflow_rejection을 반환하고 tool_suggestion=keeper_tasks_list를 제시하면, Bash 변형을 재시도하지 말고 즉시 keeper_tasks_list include_done=false 또는 masc_tasks를 호출한다.
 - 코드/문서 탐색은 가능하면 masc_code_search 또는 masc_code_read를 먼저 쓴다.
 
 검증 절차:

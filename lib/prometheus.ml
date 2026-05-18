@@ -301,14 +301,8 @@ let set_tool_schema_stats ~count ~approx_tokens =
   set_gauge metric_mcp_tool_schema_tokens_approx (float_of_int approx_tokens)
 ;;
 
-let text_metric_type = function
-  | Counter -> Prometheus_text.Counter
-  | Gauge -> Prometheus_text.Gauge
-  | Histogram -> Prometheus_text.Histogram
-;;
-
-let type_to_string metric_type = Prometheus_text.type_to_string (text_metric_type metric_type)
-let labels_to_string = Prometheus_format.labels_to_string
+let type_to_string = Prometheus_render.type_to_string
+let labels_to_string = Prometheus_render.labels_to_string
 
 (* Track host labels seen in previous scrapes so we can zero out gauges
    for hosts that disappeared from the pool. Without this, an evicted
@@ -356,15 +350,7 @@ let to_prometheus_text () =
   update_fd_gauges ();
   update_fd_accountant_gauges ();
   update_pool_metrics_gauges ();
-  Prometheus_store.snapshot ()
-  |> List.map (fun (m : metric) ->
-    Prometheus_text.metric
-      ~name:m.name
-      ~help:m.help
-      ~metric_type:(text_metric_type m.metric_type)
-      ~value:m.value
-      ~labels:m.labels)
-  |> Prometheus_text.render
+  Prometheus_store.snapshot () |> Prometheus_render.render_snapshot
 ;;
 
 (** {1 Convenience Functions} *)

@@ -38,6 +38,7 @@ let trim_dashes raw =
   if l > r then "" else String.sub raw l (r - l + 1)
 ;;
 
+(* TEL-OK: pure slug normalizer; persona authoring callers own action telemetry. *)
 let handle_from_concept concept =
   let b = Buffer.create (String.length concept) in
   String.iter

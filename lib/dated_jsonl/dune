@@ -7,4 +7,4 @@
  ; live in the single (flags ...) stanza so the effective warning mask is
  ; not split across (flags)/(ocamlc_flags)/(ocamlopt_flags).
  (flags (:standard -w -32 -w +4))
- (libraries fs_compat eio unix yojson))
+ (libraries fs_compat jsonl_writer eio unix yojson))

@@ -69,27 +69,6 @@ let create ~base_dir ?mutex ?retention_days () =
 
 let base_dir t = t.base_dir
 
-(* ── Date helpers ─────────────────────────────────────── *)
-
-(** Current UTC date decomposed into (month_dir, day_file). *)
-let today_parts () =
-  let open Unix in
-  let tm = gmtime (gettimeofday ()) in
-  let month = Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1) in
-  let day = Printf.sprintf "%02d.jsonl" tm.tm_mday in
-  (month, day)
-
-let today_key () =
-  let month, day = today_parts () in
-  month ^ "/" ^ day
-
-(** Full path for today's JSONL file, creating dirs as needed. *)
-let today_path t =
-  let month, day = today_parts () in
-  let dir = Filename.concat t.base_dir month in
-  Fs_compat.mkdir_p dir;
-  Filename.concat dir day
-
 (** Parse ["YYYY-MM-DD"] into [("YYYY-MM", "DD")].
     Returns [None] for malformed strings. *)
 let parse_date s =
@@ -267,12 +246,12 @@ let append_inner t json =
      and fresh-fd-per-call. The PR-5 (#15928) inline [atomic_append_jsonl]
      was a pre-emptive duplicate of that guarantee — removed here. *)
   Eio.Mutex.use_ro mutex (fun () ->
-    let path = today_path t in
-    Fs_compat.append_jsonl path json;
+    let dated = Jsonl_writer.dated_path_now ~base_dir:t.base_dir in
+    Jsonl_writer.append_jsonl ~path:dated.path json;
     match t.retention_days with
     | None -> ()
     | Some days ->
-      let today = today_key () in
+      let today = dated.month_dir ^ "/" ^ dated.day_file in
       if not (Option.equal String.equal (Atomic.get t.last_prune_day) (Some today))
       then begin
         ignore (prune_unlocked t ~days : int);

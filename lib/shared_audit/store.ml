@@ -3,24 +3,6 @@ type t = {
   mutable latest_hash : string option;
 }
 
-let format_path ~base_dir ~ts =
-  let tm = Unix.gmtime ts in
-  let yyyy_mm = Printf.sprintf "%04d-%02d" (tm.Unix.tm_year + 1900)
-                  (tm.Unix.tm_mon + 1)
-  in
-  let dd = Printf.sprintf "%02d" tm.Unix.tm_mday in
-  Filename.concat (Filename.concat base_dir yyyy_mm) (dd ^ ".jsonl")
-
-let rec mkdir_p dir =
-  if Sys.file_exists dir then ()
-  else begin
-    mkdir_p (Filename.dirname dir);
-    try Unix.mkdir dir 0o755
-    with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
-  end
-
-let ensure_dir_exists path = mkdir_p (Filename.dirname path)
-
 let parse_jsonl_line line =
   try Yojson.Safe.from_string line |> Envelope.of_json with
   | Yojson.Json_error msg -> Error msg
@@ -76,7 +58,7 @@ let load_latest_hash ~base_dir =
     find_in_months months
 
 let create ~base_dir =
-  if not (Sys.file_exists base_dir) then mkdir_p base_dir;
+  if not (Sys.file_exists base_dir) then Jsonl_writer.ensure_dir base_dir;
   let latest_hash = load_latest_hash ~base_dir in
   { base_dir; latest_hash }
 
@@ -84,12 +66,12 @@ let base_dir t = t.base_dir
 
 let append t ~category ~payload =
   let entry = Envelope.make ~category ~payload ~prev_hash:t.latest_hash in
-  let path = format_path ~base_dir:t.base_dir ~ts:entry.ts in
-  ensure_dir_exists path;
-  let oc = open_out_gen [Open_append; Open_creat; Open_wronly] 0o644 path in
-  output_string oc (Yojson.Safe.to_string (Envelope.to_json entry));
-  output_char oc '\n';
-  close_out oc;
+  ignore
+    (Jsonl_writer.append_dated_jsonl
+       ~base_dir:t.base_dir
+       ~ts:entry.ts
+       (Envelope.to_json entry)
+      : Jsonl_writer.dated_path);
   t.latest_hash <- Some (Envelope.hash_for_chain entry);
   entry
 

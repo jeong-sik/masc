@@ -93,6 +93,18 @@ let test_api_server_error () =
     ~expected_kind:"server_error"
     ~expected_code:(Some "upstream_502") ()
 
+let test_provider_timeout () =
+  check_mapping
+    ~label:"Provider Timeout"
+    ~input:
+      (E.Provider
+         (Llm_provider.Error.Timeout
+            { provider = "claude"; timeout_phase = None; detail = "provider timed out" }))
+    ~expected_status:`Gateway_timeout
+    ~expected_kind:"server_error"
+    ~expected_code:(Some "provider_timeout")
+    ()
+
 let test_agent_token_budget () =
   check_mapping
     ~label:"Agent TokenBudgetExceeded"
@@ -215,6 +227,9 @@ let test_internal () =
 let test_message_nonempty () =
   let samples : E.sdk_error list =
     [ E.Api (E.Retry.RateLimited { retry_after = None; message = "x" })
+    ; E.Provider
+        (Llm_provider.Error.ProviderUnavailable
+           { provider = "claude"; detail = "not available" })
     ; E.Agent (E.IdleDetected { consecutive_idle_turns = 3 })
     ; E.Mcp (E.InitializeFailed { detail = "boom" })
     ; E.Config (E.InvalidConfig { field = "f"; detail = "d" })
@@ -256,6 +271,9 @@ let () =
       , [ Alcotest.test_case "TokenBudgetExceeded → 400" `Quick test_agent_token_budget
         ; Alcotest.test_case "MaxTurnsExceeded → 500"    `Quick test_agent_max_turns
         ; Alcotest.test_case "GuardrailViolation → 400"  `Quick test_agent_guardrail
+        ] )
+    ; ( "provider"
+      , [ Alcotest.test_case "Provider Timeout → 504" `Quick test_provider_timeout
         ] )
     ; ( "mcp"
       , [ Alcotest.test_case "ServerStartFailed → 503" `Quick test_mcp_server_start

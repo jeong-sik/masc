@@ -1780,7 +1780,10 @@ let test_done_respects_persisted_cdal_gate () =
           config
           meta
           "keeper_task_done"
-          (`Assoc [ "task_id", `String task_id; "result", `String "tests pass" ])
+          (`Assoc
+             [ "task_id", `String task_id
+             ; "result", `String "tests pass; artifact:output.json"
+             ])
       in
       let json = parse_json result in
       match Yojson.Safe.Util.member "ok" json with
@@ -1816,7 +1819,10 @@ let test_done_redirects_to_verification_fsm () =
             config
             meta
             "keeper_task_done"
-            (`Assoc [ "task_id", `String task_id; "result", `String "tests pass" ])
+            (`Assoc
+               [ "task_id", `String task_id;
+                 "result", `String "tests pass; artifact:output.json";
+               ])
         in
         let json = parse_json result in
         match Yojson.Safe.Util.member "ok" json with
@@ -1866,9 +1872,9 @@ let test_done_redirects_default_contract_task_to_verification_fsm () =
           meta
           "keeper_task_done"
           (`Assoc
-              [ "task_id", `String task_id
-              ; "result", `String "Implemented change and ran focused checks."
-              ])
+             [ "task_id", `String task_id
+             ; "result", `String "Implemented change and ran focused checks. commit:abc123"
+             ])
       in
       let json = parse_json result in
       match Yojson.Safe.Util.member "ok" json with
@@ -1900,6 +1906,48 @@ let test_done_redirects_default_contract_task_to_verification_fsm () =
       | _ -> fail "expected keeper_task_done to redirect into verification FSM"))
 ;;
 
+let test_done_redirect_rejects_missing_verification_evidence () =
+  ensure_rng ();
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    with_room (fun config ->
+      let meta = make_test_meta () in
+      let _ =
+        Coord.add_task
+          config
+          ~title:"Default verification task without evidence"
+          ~priority:1
+          ~description:"done redirect must carry concrete evidence"
+      in
+      let task_id = (only_task config).id in
+      ignore (call_tool config meta "keeper_task_claim" (`Assoc []));
+      let result =
+        call_tool
+          config
+          meta
+          "keeper_task_done"
+          (`Assoc
+              [ "task_id", `String task_id
+              ; "result", `String "Implemented change and ran focused checks."
+              ])
+      in
+      let json = parse_json result in
+      match Yojson.Safe.Util.member "error" json with
+      | `String msg ->
+        check
+          bool
+          "requires evidence"
+          true
+          (contains_substring msg "requires verification evidence");
+        (match (only_task config).task_status with
+         | Masc_domain.InProgress _ | Masc_domain.Claimed _ -> ()
+         | status ->
+           fail
+             (Printf.sprintf
+                "expected task to stay owned, got %s"
+                (Masc_domain.string_of_task_status status)))
+      | _ -> fail "expected keeper_task_done to reject missing evidence"))
+;;
+
 let test_submit_for_verification_requires_pr_url () =
   with_room (fun config ->
     let meta = make_test_meta () in
@@ -1924,6 +1972,38 @@ let test_submit_for_verification_requires_pr_url () =
         "workflow_rejection"
         Yojson.Safe.Util.(member "failure_class" json |> to_string)
     | _ -> fail "expected error for empty pr_url")
+;;
+
+let test_submit_for_verification_rejects_placeholder_pr_url () =
+  ensure_rng ();
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    with_room (fun config ->
+      let meta = make_test_meta () in
+      let _ =
+        Coord.add_task
+          config
+          ~title:"Reject placeholder PR"
+          ~priority:1
+          ~description:"submit should require real PR evidence"
+      in
+      let task_id = (only_task config).id in
+      ignore (call_tool config meta "keeper_task_claim" (`Assoc []));
+      let result =
+        call_tool
+          config
+          meta
+          "keeper_task_submit_for_verification"
+          (`Assoc
+              [ "task_id", `String task_id
+              ; "notes", `String "work not actually submitted"
+              ; "pr_url", `String "draft"
+              ])
+      in
+      let json = parse_json result in
+      match Yojson.Safe.Util.member "error" json with
+      | `String msg ->
+        check bool "rejects placeholder" true (contains_substring msg "GitHub pull request")
+      | _ -> fail "expected error for placeholder pr_url"))
 ;;
 
 let test_submit_for_verification_transitions_task () =
@@ -2005,9 +2085,9 @@ let test_done_maps_result_to_typed_handoff_summary () =
         meta
         "keeper_task_done"
         (`Assoc
-            [ "task_id", `String task_id
-            ; "result", `String "refactored module, all tests green"
-            ])
+           [ "task_id", `String task_id
+           ; "result", `String "refactored module, all tests green, commit:abc123"
+           ])
     in
     let json = parse_json result in
     match Yojson.Safe.Util.member "ok" json with
@@ -2018,7 +2098,7 @@ let test_done_maps_result_to_typed_handoff_summary () =
          check
            string
            "result mapped to typed handoff_context.summary"
-           "refactored module, all tests green"
+           "refactored module, all tests green, commit:abc123"
            hc.summary
        | None ->
          fail "expected handoff_context to be populated after keeper_task_done")
@@ -2391,12 +2471,20 @@ let () =
             `Quick
             test_done_redirects_default_contract_task_to_verification_fsm
         ; test_case
+            "redirect requires concrete verification evidence"
+            `Quick
+            test_done_redirect_rejects_missing_verification_evidence
+        ; test_case
             "result maps to typed handoff_context.summary"
             `Quick
             test_done_maps_result_to_typed_handoff_summary
         ] )
     ; ( "submit_for_verification"
       , [ test_case "requires pr_url" `Quick test_submit_for_verification_requires_pr_url
+        ; test_case
+            "rejects placeholder pr_url"
+            `Quick
+            test_submit_for_verification_rejects_placeholder_pr_url
         ; test_case
             "transitions task"
             `Quick

@@ -673,19 +673,6 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
   match handoff_context with
   | Error error -> Tool_result.error ~tool_name ~start_time error
   | Ok handoff_context ->
-  let submit_evidence_error =
-    match requested_action with
-    | Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence ->
-      verification_submission_evidence_error ~notes ~handoff_context
-    | Masc_domain.Claim
-    | Masc_domain.Start
-    | Masc_domain.Done_action
-    | Masc_domain.Cancel
-    | Masc_domain.Release
-    | Masc_domain.Approve_verification
-    | Masc_domain.Reject_verification ->
-      None
-  in
   if (=) action Masc_domain.Release && strict_release_requires_handoff task_opt
      && Option.is_none handoff_context
   then
@@ -775,6 +762,21 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
          | _ -> action)
       | None -> action
     else action
+  in
+  let submit_evidence_error =
+    match requested_action with
+    | Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence ->
+      verification_submission_evidence_error ~notes ~handoff_context
+    | Masc_domain.Done_action when done_redirects_to_verification ->
+      verification_submission_evidence_error ~notes ~handoff_context
+    | Masc_domain.Claim
+    | Masc_domain.Start
+    | Masc_domain.Done_action
+    | Masc_domain.Cancel
+    | Masc_domain.Release
+    | Masc_domain.Approve_verification
+    | Masc_domain.Reject_verification ->
+      None
   in
   let action =
     match requested_action, task_opt, submit_evidence_error with

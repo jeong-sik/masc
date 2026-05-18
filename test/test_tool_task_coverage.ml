@@ -304,7 +304,7 @@ let () = test "handle_done_records_approved_calibration_verdict" (fun () ->
   let result = Tool_task.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx
     (`Assoc [
       ("task_id", `String "task-001");
-      ("notes", `String "Implemented the calibration coverage path, verified the JSONL verdict store, and completed the task cleanly.")
+      ("notes", `String "Implemented the calibration coverage path, verified the JSONL verdict store, and completed the task cleanly. commit:abc123")
     ]) in
   if not result.Tool_result.success then failwith result.Tool_result.legacy_message;
   let store = Eval_calibration.get_store () in
@@ -506,7 +506,7 @@ let () = test "handle_done_redirects_to_verification_before_cdal_gate" (fun () -
                 ("task_id", `String "task-001");
                 ( "notes",
                   `String
-                    "Implemented deliverable-ready output and captured run_deliverable evidence." );
+                    "Implemented deliverable-ready output and captured artifact:run_deliverable evidence." );
               ])
         in
         if not result_done.Tool_result.success then
@@ -1666,7 +1666,42 @@ let () = test "transition_submit_for_verification_requires_evidence_ref" (fun ()
       (str_contains submit_result.Tool_result.legacy_message
          "requires verification evidence");
     assert_task_claimed_by ctx ctx.agent_name)
-)
+  )
+
+let () = test "transition_submit_for_verification_rejects_placeholder_evidence_ref" (fun () ->
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    let ctx = make_test_ctx () in
+    let add_result =
+      Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+        (`Assoc [ ("title", `String "Reject placeholder evidence") ])
+    in
+    if not add_result.Tool_result.success then failwith add_result.Tool_result.legacy_message;
+    let claim_result =
+      Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+        (`Assoc [ ("task_id", `String "task-001"); ("action", `String "claim") ])
+    in
+    if not claim_result.Tool_result.success then failwith claim_result.Tool_result.legacy_message;
+    let submit_result =
+      Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+        (`Assoc
+          [
+            ("task_id", `String "task-001");
+            ("action", `String "submit_for_verification");
+            ("notes", `String "Implementation complete.");
+            ( "handoff_context",
+              `Assoc
+                [
+                  ("summary", `String "Implementation complete.");
+                  ("evidence_refs", `List [ `String "none" ]);
+                ] );
+          ])
+    in
+    assert (not submit_result.Tool_result.success);
+    assert
+      (str_contains submit_result.Tool_result.legacy_message
+         "requires verification evidence");
+    assert_task_claimed_by ctx ctx.agent_name)
+  )
 
 let () = test "transition_submit_for_verification_aliases_todo_pr_evidence" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
@@ -1928,7 +1963,7 @@ let () = test "transition_done_redirects_to_verification_and_clears_planning_cur
         [
           ("task_id", `String "task-001");
           ("action", `String "done");
-          ("notes", `String "Implemented the transport parity checks and verified the result.");
+          ("notes", `String "Implemented the transport parity checks and verified the result. commit:abc123");
         ])
   in
   assert done_result.Tool_result.success;

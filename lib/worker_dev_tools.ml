@@ -249,18 +249,47 @@ let is_env_assignment token =
   | None -> false
 ;;
 
+let rec skip_env_assignments = function
+  | [] -> None
+  | token :: rest ->
+    let token = strip_wrapping_quotes token in
+    if is_env_assignment token then skip_env_assignments rest
+    else Some (basename_token token)
+;;
+
 let rec command_after_env_prefix = function
   | [] -> None
   | token :: rest ->
     let token = strip_wrapping_quotes token in
     if is_env_assignment token || token = "-" || token = "-i"
+       || token = "--ignore-environment" || token = "-0" || token = "--null"
     then command_after_env_prefix rest
-    else if token = "-u" || token = "--unset"
+    else if token = "--" then skip_env_assignments rest
+    else if token = "-S" || token = "--split-string"
+    then (
+      match rest with
+      | arg :: rest -> (
+        match command_after_env_prefix (split_shell_tokens (strip_wrapping_quotes arg)) with
+        | Some _ as command -> command
+        | None -> command_after_env_prefix rest)
+      | [] -> None)
+    else if String.starts_with ~prefix:"--split-string=" token
+    then
+      let prefix = "--split-string=" in
+      let arg =
+        String.sub token (String.length prefix)
+          (String.length token - String.length prefix)
+      in
+      command_after_env_prefix (split_shell_tokens (strip_wrapping_quotes arg))
+    else if token = "-u" || token = "--unset" || token = "-C"
+            || token = "--chdir"
     then (
       match rest with
       | _ :: rest -> command_after_env_prefix rest
       | [] -> None)
     else if String.starts_with ~prefix:"-u" token
+            || String.starts_with ~prefix:"--unset=" token
+            || String.starts_with ~prefix:"--chdir=" token
     then command_after_env_prefix rest
     else Some (basename_token token)
 ;;
@@ -268,17 +297,34 @@ let rec command_after_env_prefix = function
 let opam_exec_command_name rest =
   match rest with
   | sub :: rest when String.equal (basename_token sub) "exec" ->
-    let rec find_command = function
+    let rec find_sentinel = function
       | [] -> None
       | "--" :: token :: _ -> Some (basename_token token)
       | "--" :: [] -> None
+      | _ :: rest -> find_sentinel rest
+    in
+    let rec find_command_without_sentinel = function
+      | [] -> None
       | token :: rest ->
         let token = strip_wrapping_quotes token in
-        if String.starts_with ~prefix:"-" token || is_env_assignment token
-        then find_command rest
+        if is_env_assignment token then find_command_without_sentinel rest
+        else if token = "--switch" || token = "--color" || token = "--root"
+                || token = "--cli"
+        then (
+          match rest with
+          | _ :: rest -> find_command_without_sentinel rest
+          | [] -> None)
+        else if String.starts_with ~prefix:"--switch=" token
+                || String.starts_with ~prefix:"--color=" token
+                || String.starts_with ~prefix:"--root=" token
+                || String.starts_with ~prefix:"--cli=" token
+                || String.starts_with ~prefix:"-" token
+        then find_command_without_sentinel rest
         else Some (basename_token token)
     in
-    find_command rest
+    (match find_sentinel rest with
+     | Some _ as command -> command
+     | None -> find_command_without_sentinel rest)
   | [] -> Some "opam"
   | _non_exec_subcommand :: _rest -> Some "opam"
 ;;

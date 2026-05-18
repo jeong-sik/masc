@@ -579,6 +579,22 @@ let () =
         | Error Worker_dev_tools.Direct_dune_invocation -> ()
         | Error e -> Alcotest.fail ("wrong rejection: " ^ Worker_dev_tools.block_reason_to_string e)
         | Ok () -> Alcotest.fail "should reject env-wrapped bare dune");
+      Alcotest.test_case "blocks env option wrapped direct dune" `Quick (fun () ->
+        List.iter
+          (fun cmd ->
+            match Worker_dev_tools.validate_command_coding cmd with
+            | Error Worker_dev_tools.Direct_dune_invocation -> ()
+            | Error e ->
+              Alcotest.fail
+                ("wrong rejection for " ^ cmd ^ ": "
+                 ^ Worker_dev_tools.block_reason_to_string e)
+            | Ok () -> Alcotest.fail ("should reject env-wrapped bare dune: " ^ cmd))
+          [
+            "env -- dune build";
+            "env -C repos/masc-mcp dune build";
+            "env --chdir repos/masc-mcp -- dune build";
+            "env -i -- DUNE_JOBS=1 dune build";
+          ]);
       Alcotest.test_case "blocks opam-exec direct dune" `Quick (fun () ->
         match
           Worker_dev_tools.validate_command_coding
@@ -587,6 +603,21 @@ let () =
         | Error Worker_dev_tools.Direct_dune_invocation -> ()
         | Error e -> Alcotest.fail ("wrong rejection: " ^ Worker_dev_tools.block_reason_to_string e)
         | Ok () -> Alcotest.fail "should reject opam-exec bare dune");
+      Alcotest.test_case "blocks opam exec option wrapped direct dune" `Quick (fun () ->
+        List.iter
+          (fun cmd ->
+            match Worker_dev_tools.validate_command_coding cmd with
+            | Error Worker_dev_tools.Direct_dune_invocation -> ()
+            | Error e ->
+              Alcotest.fail
+                ("wrong rejection for " ^ cmd ^ ": "
+                 ^ Worker_dev_tools.block_reason_to_string e)
+            | Ok () -> Alcotest.fail ("should reject opam-exec bare dune: " ^ cmd))
+          [
+            "opam exec --switch default -- dune build";
+            "opam exec --switch=default -- dune build";
+            "opam exec --color never -- dune build";
+          ]);
       Alcotest.test_case "blocks semicolon" `Quick (fun () ->
         match Worker_dev_tools.validate_command_coding "ls; rm -rf /" with
         | Error _ -> ()

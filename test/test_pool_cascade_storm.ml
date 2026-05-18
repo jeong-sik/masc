@@ -72,68 +72,71 @@ let test_keep_alive_dominates_create () =
   let port = find_free_port () in
   let stop_p, stop_r = Eio.Promise.create () in
   start_echo_server ~sw ~net:(Eio.Stdenv.net env) ~port ~stop:stop_p;
-  (* Brief grace to let the listen socket reach LISTEN before clients
-     dial — without this, the first few connect() calls race the
-     server's [Eio.Net.listen]. 50 ms is well under the test budget. *)
-  Eio.Time.sleep (Eio.Stdenv.clock env) 0.05;
-  let url = Printf.sprintf "http://127.0.0.1:%d/" port in
-  let pool = Masc_http_client.Pool.create ~sw ~env () in
-  (* Sanity: one request first to surface piaf/eio plumbing bugs
-     before scaling up. Failure here points at fixture (server start /
-     listen race / piaf init) rather than the reuse contract. *)
-  (match
-     Masc_http_client.Pool.request pool ~method_:`GET ~url
-       ~headers:[ "accept", "text/plain" ] ()
-   with
-   | Ok { Masc_http_client.Pool.status = 200; _ } -> ()
-   | Ok { status; _ } ->
-     Alcotest.failf "single-request sanity got HTTP %d (expected 200)" status
-   | Error msg -> Alcotest.failf "single-request sanity failed: %s" msg);
-  let fiber_count = 16 in
-  let per_fiber_requests = 5 in
-  (* Sanity request counts toward [total]; the pool's stats counters
-     are global to the pool instance. *)
-  let total = (fiber_count * per_fiber_requests) + 1 in
-  let work () =
-    for _ = 1 to per_fiber_requests do
-      match
-        Masc_http_client.Pool.request pool ~method_:`GET ~url
-          ~headers:[ "accept", "text/plain" ] ()
-      with
-      | Ok { Masc_http_client.Pool.status = 200; _ } -> ()
-      | Ok { status; _ } ->
-        Alcotest.failf "unexpected status %d from echo server" status
-      | Error msg -> Alcotest.failf "request failed: %s" msg
-    done
-  in
-  Eio.Fiber.all (List.init fiber_count (fun _ -> work));
-  let stats = Masc_http_client.Pool.stats pool in
-  (* Sanity: every request reached the server. *)
-  let observed = stats.reuse_count_total + stats.create_count_total in
-  Alcotest.(check int)
-    "every request accounted for (reuse + create == total)"
-    total observed;
-  (* The reuse contract. With single-host, single-port traffic the
-     pool should rarely create more than [max_idle_per_host = 8]
-     connections; the rest reuse. We assert the looser bound
-     [create_count_total <= fiber_count] to allow for the worst case
-     where the 16 fibers happen to interleave such that every fiber
-     misses the parked queue once. *)
-  Alcotest.(check bool)
-    (Printf.sprintf
-       "create_count_total bounded by fiber concurrency (got create=%d, \
-        reuse=%d, fibers=%d)"
-       stats.create_count_total stats.reuse_count_total fiber_count)
-    true
-    (stats.create_count_total <= fiber_count);
-  Alcotest.(check bool)
-    (Printf.sprintf "reuse_count_total dominates (got reuse=%d > %d)"
-       stats.reuse_count_total (total - fiber_count - 1))
-    true
-    (stats.reuse_count_total > total - fiber_count - 1);
-  (* Drive the server's accept loop to exit so the switch can
-     unwind cleanly. *)
-  Eio.Promise.resolve stop_r ()
+  Fun.protect
+    ~finally:(fun () ->
+      (* Drive the server's accept loop to exit so the switch can unwind
+         cleanly, even when an assertion above fails. *)
+      Eio.Promise.resolve stop_r ())
+    (fun () ->
+       (* Brief grace to let the listen socket reach LISTEN before clients
+          dial — without this, the first few connect() calls race the
+          server's [Eio.Net.listen]. 50 ms is well under the test budget. *)
+       Eio.Time.sleep (Eio.Stdenv.clock env) 0.05;
+       let url = Printf.sprintf "http://127.0.0.1:%d/" port in
+       let pool = Masc_http_client.Pool.create ~sw ~env () in
+       (* Sanity: one request first to surface piaf/eio plumbing bugs
+          before scaling up. Failure here points at fixture (server start /
+          listen race / piaf init) rather than the reuse contract. *)
+       (match
+          Masc_http_client.Pool.request pool ~method_:`GET ~url
+            ~headers:[ "accept", "text/plain" ] ()
+        with
+        | Ok { Masc_http_client.Pool.status = 200; _ } -> ()
+        | Ok { status; _ } ->
+          Alcotest.failf "single-request sanity got HTTP %d (expected 200)" status
+        | Error msg -> Alcotest.failf "single-request sanity failed: %s" msg);
+       let fiber_count = 16 in
+       let per_fiber_requests = 5 in
+       (* Sanity request counts toward [total]; the pool's stats counters
+          are global to the pool instance. *)
+       let total = (fiber_count * per_fiber_requests) + 1 in
+       let work () =
+         for _ = 1 to per_fiber_requests do
+           match
+             Masc_http_client.Pool.request pool ~method_:`GET ~url
+               ~headers:[ "accept", "text/plain" ] ()
+           with
+           | Ok { Masc_http_client.Pool.status = 200; _ } -> ()
+           | Ok { status; _ } ->
+             Alcotest.failf "unexpected status %d from echo server" status
+           | Error msg -> Alcotest.failf "request failed: %s" msg
+         done
+       in
+       Eio.Fiber.all (List.init fiber_count (fun _ -> work));
+       let stats = Masc_http_client.Pool.stats pool in
+       (* Sanity: every request reached the server. *)
+       let observed = stats.reuse_count_total + stats.create_count_total in
+       Alcotest.(check int)
+         "every request accounted for (reuse + create == total)"
+         total observed;
+       (* The reuse contract. With single-host, single-port traffic the
+          pool should rarely create more than [max_idle_per_host = 8]
+          connections; the rest reuse. We assert the looser bound
+          [create_count_total <= fiber_count] to allow for the worst case
+          where the 16 fibers happen to interleave such that every fiber
+          misses the parked queue once. *)
+       Alcotest.(check bool)
+         (Printf.sprintf
+            "create_count_total bounded by fiber concurrency (got create=%d, \
+             reuse=%d, fibers=%d)"
+            stats.create_count_total stats.reuse_count_total fiber_count)
+         true
+         (stats.create_count_total <= fiber_count);
+       Alcotest.(check bool)
+         (Printf.sprintf "reuse_count_total dominates (got reuse=%d > %d)"
+            stats.reuse_count_total (total - fiber_count - 1))
+         true
+         (stats.reuse_count_total > total - fiber_count - 1))
 ;;
 
 let () =

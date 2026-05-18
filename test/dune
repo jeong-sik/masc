@@ -1549,6 +1549,8 @@
 
 (include stanzas/test_keeper_error_classify_recoverable.inc)
 
+(include stanzas/test_keeper_failure_policy.inc)
+
 (include stanzas/test_keeper_exec_shell_cwd_response.inc)
 
 (include stanzas/test_keeper_exec_tools.inc)

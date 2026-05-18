@@ -72,6 +72,12 @@ include module type of Keeper_supervisor_types
 val cohort_key_of_reason : Keeper_registry.failure_reason option -> string
 (** Map a structured failure_reason to a cohort key for self-preservation grouping. *)
 
+val failure_reason_policy_decision_for_test :
+  Keeper_registry.failure_reason option -> Keeper_failure_policy.decision option
+(** Pure supervisor-side bridge from registry failure reasons into the
+    keeper failure policy matrix. Exposed for regression tests so pause-vs-restart
+    lifecycle ownership remains pinned to [Keeper_failure_policy]. *)
+
 val apply_self_preservation :
   keepers_dir:string ->
   total_keepers:int ->

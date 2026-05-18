@@ -366,15 +366,101 @@ let sdk_a2a_error_fields = function
   | Agent_sdk.Error.StoreCapacityExceeded { current; max } ->
     [ "variant", `String "store_capacity_exceeded"
     ; "current", `Int current
-    ; "max", `Int max
+      ; "max", `Int max
+      ]
+;;
+
+let timeout_phase_json = function
+  | Some phase -> `String (Llm_provider.Http_client.timeout_phase_to_label phase)
+  | None -> `Null
+;;
+
+let sdk_provider_error_fields = function
+  | Llm_provider.Error.MissingApiKey { var_name } ->
+    [ "variant", `String "missing_api_key"; "var_name", `String var_name ]
+  | Llm_provider.Error.InvalidConfig { field; detail } ->
+    [ "variant", `String "invalid_config"
+    ; "field", `String field
+    ; "detail", `String detail
+    ]
+  | Llm_provider.Error.ParseError { detail } ->
+    [ "variant", `String "parse_error"; "detail", `String detail ]
+  | Llm_provider.Error.UnknownVariant { type_name; value } ->
+    [ "variant", `String "unknown_variant"
+    ; "type_name", `String type_name
+    ; "value", `String value
+    ]
+  | Llm_provider.Error.ProviderUnavailable { provider; detail } ->
+    [ "variant", `String "provider_unavailable"
+    ; "provider", `String provider
+    ; "detail", `String detail
+    ]
+  | Llm_provider.Error.RateLimit { provider; retry_after; detail } ->
+    [ "variant", `String "rate_limit"
+    ; "provider", `String provider
+    ; "retry_after_s", json_float_opt retry_after
+    ; "detail", `String detail
+    ]
+  | Llm_provider.Error.HardQuota { provider; retry_after; detail } ->
+    [ "variant", `String "hard_quota"
+    ; "provider", `String provider
+    ; "retry_after_s", json_float_opt retry_after
+    ; "detail", `String detail
+    ]
+  | Llm_provider.Error.CapacityExhausted { scope; affected; retry_after; detail } ->
+    [ "variant", `String "capacity_exhausted"
+    ; "capacity_scope", `String (Llm_provider.Error.capacity_scope_to_string scope)
+    ; "affected", `List (List.map (fun value -> `String value) affected)
+    ; "retry_after_s", json_float_opt retry_after
+    ; "detail", `String detail
+    ]
+  | Llm_provider.Error.AuthError { provider; detail } ->
+    [ "variant", `String "auth_error"
+    ; "provider", `String provider
+    ; "detail", `String detail
+    ]
+  | Llm_provider.Error.ServerError { provider; code; transient; detail } ->
+    [ "variant", `String "server_error"
+    ; "provider", `String provider
+    ; "status", `Int code
+    ; "transient", `Bool transient
+    ; "detail", `String detail
+    ]
+  | Llm_provider.Error.NetworkError { provider; kind; timeout_phase; detail } ->
+    [ "variant", `String "network_error"
+    ; "provider", `String provider
+    ; "network_kind", `String (network_error_kind_to_wire kind)
+    ; "timeout_phase", timeout_phase_json timeout_phase
+    ; "detail", `String detail
+    ]
+  | Llm_provider.Error.Timeout { provider; timeout_phase; detail } ->
+    [ "variant", `String "timeout"
+    ; "provider", `String provider
+    ; "timeout_phase", timeout_phase_json timeout_phase
+    ; "detail", `String detail
+    ]
+  | Llm_provider.Error.InvalidRequest { provider; reason } ->
+    [ "variant", `String "invalid_request"
+    ; "provider", `String provider
+    ; "reason", `String reason
+    ]
+  | Llm_provider.Error.NotFound { provider; detail } ->
+    [ "variant", `String "not_found"
+    ; "provider", `String provider
+    ; "detail", `String detail
+    ]
+  | Llm_provider.Error.ProviderTerminal { provider; reason; detail } ->
+    [ "variant", `String "provider_terminal"
+    ; "provider", `String provider
+    ; "reason", `String reason
+    ; "detail", `String detail
     ]
 ;;
 
 let sdk_error_detail_fields (error : Agent_sdk.Error.sdk_error) =
   match error with
   | Agent_sdk.Error.Api error -> sdk_api_error_fields error
-  | Agent_sdk.Error.Provider error ->
-    [ "variant", `String "provider"; "message", `String (Llm_provider.Error.to_string error) ]
+  | Agent_sdk.Error.Provider error -> sdk_provider_error_fields error
   | Agent_sdk.Error.Agent error -> sdk_agent_error_fields error
   | Agent_sdk.Error.Mcp error -> sdk_mcp_error_fields error
   | Agent_sdk.Error.Config error -> sdk_config_error_fields error

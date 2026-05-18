@@ -872,8 +872,9 @@ let reset_autonomous_completion_for_test () : unit =
    Re-running on the same fiber gives the same context and the same
    shape of failure repeats, but provider/cascade budget pressure is not
    keeper fiber corruption. Crossing [oas_timeout_budget_strike_limit]
-   is therefore a soft-backoff signal, not a [Keeper_fiber_crash]
-   promotion: the keeper stays alive while provider cooldown, cascade
+   is therefore routed through [Keeper_failure_policy] before any
+   lifecycle effect is applied. Without independent keeper-liveness
+   loss, the keeper stays alive while provider cooldown, cascade
    backpressure, and turn retry policy do the actual throttling.
 
    Counter is in-memory for the common same-server case and is reset on

@@ -72,7 +72,9 @@ type sdk_termination_semantics =
 
 let sdk_termination_semantics = function
   | Agent_sdk.Error.Api (Agent_sdk.Retry.Timeout _) -> Provider_wall_clock_timeout
-  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) ->
+  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _)
+  | Agent_sdk.Error.Provider
+      (Llm_provider.Error.NetworkError { timeout_phase = Some _; _ }) ->
     Provider_wall_clock_timeout
   | Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded _) ->
     Oas_turn_budget_exhausted
@@ -182,10 +184,56 @@ let agent_error_terminal_reason_code = function
     Printf.sprintf "agent_error_tripwire_violation:tripwire=%s" tripwire
 ;;
 
+let network_error_kind_to_wire = function
+  | Llm_provider.Http_client.Connection_refused -> "connection_refused"
+  | Llm_provider.Http_client.Dns_failure -> "dns_failure"
+  | Llm_provider.Http_client.Tls_error -> "tls_error"
+  | Llm_provider.Http_client.Timeout -> "timeout"
+  | Llm_provider.Http_client.Local_resource_exhaustion -> "local_resource_exhaustion"
+  | Llm_provider.Http_client.End_of_file -> "end_of_file"
+  | Llm_provider.Http_client.Unknown -> "unknown"
+;;
+
+let provider_timeout_suffix = function
+  | None -> ""
+  | Some phase ->
+    ":" ^ Llm_provider.Http_client.timeout_phase_to_label phase
+;;
+
+let provider_error_terminal_reason_code = function
+  | Llm_provider.Error.MissingApiKey _ -> "provider_error_missing_api_key"
+  | Llm_provider.Error.InvalidConfig { field; _ } ->
+    Printf.sprintf "provider_error_invalid_config:%s" field
+  | Llm_provider.Error.ParseError _ -> "provider_error_parse"
+  | Llm_provider.Error.UnknownVariant { type_name; _ } ->
+    Printf.sprintf "provider_error_unknown_variant:%s" type_name
+  | Llm_provider.Error.ProviderUnavailable _ -> "provider_error_unavailable"
+  | Llm_provider.Error.RateLimit _ -> "provider_error_rate_limited"
+  | Llm_provider.Error.HardQuota _ -> "provider_error_hard_quota"
+  | Llm_provider.Error.CapacityExhausted { scope; _ } ->
+    Printf.sprintf
+      "provider_error_capacity_exhausted:%s"
+      (Llm_provider.Error.capacity_scope_to_string scope)
+  | Llm_provider.Error.AuthError _ -> "provider_error_auth"
+  | Llm_provider.Error.ServerError { code; _ } ->
+    Printf.sprintf "provider_error_server:%d" code
+  | Llm_provider.Error.NetworkError { kind; timeout_phase; _ } ->
+    Printf.sprintf
+      "provider_error_network:%s%s"
+      (network_error_kind_to_wire kind)
+      (provider_timeout_suffix timeout_phase)
+  | Llm_provider.Error.Timeout { timeout_phase; _ } ->
+    "provider_error_timeout" ^ provider_timeout_suffix timeout_phase
+  | Llm_provider.Error.InvalidRequest _ -> "provider_error_invalid_request"
+  | Llm_provider.Error.NotFound _ -> "provider_error_not_found"
+  | Llm_provider.Error.ProviderTerminal { reason; _ } ->
+    Printf.sprintf "provider_error_terminal:%s" reason
+;;
+
 let terminal_reason_code_of_sdk_error = function
   | Agent_sdk.Error.Agent err -> agent_error_terminal_reason_code err
   | Agent_sdk.Error.Api err -> api_error_terminal_reason_code err
-  | Agent_sdk.Error.Provider _ -> "provider_error"
+  | Agent_sdk.Error.Provider err -> provider_error_terminal_reason_code err
   | Agent_sdk.Error.Mcp _ -> "mcp_error"
   | Agent_sdk.Error.Config _ -> "config_error"
   | Agent_sdk.Error.Serialization _ -> "serialization_error"

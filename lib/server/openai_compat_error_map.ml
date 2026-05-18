@@ -78,6 +78,101 @@ let of_api_error (e : Agent_sdk.Error.Retry.api_error) : t =
     ; openai_code = Some "timeout"
     ; message }
 
+let provider_timeout_code = function
+  | None -> "provider_timeout"
+  | Some phase ->
+    Printf.sprintf
+      "provider_timeout:%s"
+      (Llm_provider.Http_client.timeout_phase_to_label phase)
+
+let provider_network_code = function
+  | None -> "provider_network"
+  | Some phase -> provider_timeout_code (Some phase)
+
+let of_provider_error (e : Agent_sdk.Error.provider_error) : t =
+  let message = Agent_sdk.Error.to_string (Agent_sdk.Error.Provider e) in
+  match e with
+  | Llm_provider.Error.MissingApiKey _ ->
+    { http_status = `Internal_server_error
+    ; openai_kind = kind_server
+    ; openai_code = Some "provider_missing_api_key"
+    ; message }
+  | InvalidConfig _ ->
+    { http_status = `Internal_server_error
+    ; openai_kind = kind_server
+    ; openai_code = Some "provider_invalid_config"
+    ; message }
+  | ParseError _ ->
+    { http_status = `Bad_gateway
+    ; openai_kind = kind_server
+    ; openai_code = Some "provider_parse_error"
+    ; message }
+  | UnknownVariant _ ->
+    { http_status = `Bad_gateway
+    ; openai_kind = kind_server
+    ; openai_code = Some "provider_unknown_variant"
+    ; message }
+  | ProviderUnavailable _ ->
+    { http_status = `Service_unavailable
+    ; openai_kind = kind_server
+    ; openai_code = Some "provider_unavailable"
+    ; message }
+  | RateLimit _ ->
+    { http_status = `Too_many_requests
+    ; openai_kind = kind_rate_limit
+    ; openai_code = Some "provider_rate_limited"
+    ; message }
+  | HardQuota _ ->
+    { http_status = `Too_many_requests
+    ; openai_kind = kind_rate_limit
+    ; openai_code = Some "provider_hard_quota"
+    ; message }
+  | CapacityExhausted r ->
+    { http_status = `Service_unavailable
+    ; openai_kind = kind_server
+    ; openai_code =
+        Some
+          (Printf.sprintf
+             "provider_capacity_exhausted:%s"
+             (Llm_provider.Error.capacity_scope_to_string r.scope))
+    ; message }
+  | AuthError _ ->
+    { http_status = `Unauthorized
+    ; openai_kind = kind_authentication
+    ; openai_code = Some "provider_auth"
+    ; message }
+  | ServerError r ->
+    { http_status =
+        (if r.transient then `Bad_gateway else `Internal_server_error)
+    ; openai_kind = kind_server
+    ; openai_code = Some (Printf.sprintf "provider_server:%d" r.code)
+    ; message }
+  | NetworkError r ->
+    { http_status = `Bad_gateway
+    ; openai_kind = kind_server
+    ; openai_code = Some (provider_network_code r.timeout_phase)
+    ; message }
+  | Timeout r ->
+    { http_status = `Gateway_timeout
+    ; openai_kind = kind_server
+    ; openai_code = Some (provider_timeout_code r.timeout_phase)
+    ; message }
+  | InvalidRequest _ ->
+    { http_status = `Bad_request
+    ; openai_kind = kind_invalid_request
+    ; openai_code = Some "provider_invalid_request"
+    ; message }
+  | NotFound _ ->
+    { http_status = `Not_found
+    ; openai_kind = kind_not_found
+    ; openai_code = Some "provider_not_found"
+    ; message }
+  | ProviderTerminal _ ->
+    { http_status = `Bad_gateway
+    ; openai_kind = kind_server
+    ; openai_code = Some "provider_terminal"
+    ; message }
+
 let of_agent_error (e : Agent_sdk.Error.agent_error) : t =
   let message = Agent_sdk.Error.to_string (Agent_sdk.Error.Agent e) in
   match e with
@@ -272,12 +367,7 @@ let of_a2a_error (e : Agent_sdk.Error.a2a_error) : t =
 let of_sdk_error (e : Agent_sdk.Error.sdk_error) : t =
   match e with
   | Agent_sdk.Error.Api ae -> of_api_error ae
-  | Provider pe ->
-    { http_status =
-        (if Llm_provider.Error.is_retryable pe then `Service_unavailable else `Bad_gateway)
-    ; openai_kind = kind_server
-    ; openai_code = Some "provider_error"
-    ; message = Llm_provider.Error.to_string pe }
+  | Provider pe -> of_provider_error pe
   | Agent ae -> of_agent_error ae
   | Mcp me -> of_mcp_error me
   | Config ce -> of_config_error ce

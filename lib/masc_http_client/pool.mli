@@ -195,6 +195,7 @@ module For_testing : sig
       mock [Piaf.Body.t] built from [Piaf_stream.create], without
       standing up a real HTTP server. *)
   val read_body_with_idle :
+    ?progress_ref:body_progress ref ->
     clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
     start_sec:float ->
     idle_timeout_sec:float ->

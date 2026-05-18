@@ -143,12 +143,13 @@ let run_command_in_container_with_status ?turn_sandbox_factory
             ~uid ~gid ~seccomp_args ~command_argv
         in
         let st, out =
-          Masc_exec.Exec_gate.run_argv_with_status
-            ~actor:`System_task_sandbox
-            ~raw_source:(String.concat " " argv)
-            ~summary:"keeper docker read sandboxed command"
-            ~env:(Unix.environment ())
-            ~cwd:(Sys.getcwd ()) ~timeout_sec argv
+          Docker_spawn_throttle.with_slot (fun () ->
+              Masc_exec.Exec_gate.run_argv_with_status
+                ~actor:`System_task_sandbox
+                ~raw_source:(String.concat " " argv)
+                ~summary:"keeper docker read sandboxed command"
+                ~env:(Unix.environment ())
+                ~cwd:(Sys.getcwd ()) ~timeout_sec argv)
         in
         let head_program =
           match command_argv with prog :: _ -> prog | [] -> "?"

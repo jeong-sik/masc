@@ -231,7 +231,7 @@ The same diagnostic that uncovered this RFC becomes the success
 metric. After PR-2 merges, run on a 24h window:
 
 ```
-rg 'oas_timeout_budget' ~/me/.masc/keepers/*/execution-receipts/2026-05/*.jsonl \
+rg 'oas_timeout_budget' "$MASC_BASE_PATH"/.masc/keepers/*/execution-receipts/2026-05/*.jsonl \
   | python3 .tmp/from_cascade.py
 ```
 

@@ -227,6 +227,14 @@
   meta_cognition_digest
   tool_task_schemas
   tool_board_schemas
+  tool_board_format
+  tool_board_cache
+  tool_board_handlers
+  tool_board_post
+  tool_board_sub_board
+  tool_board_curation
+  tool_board_registry
+  tool_board_dispatch
   tool_shard_schemas
   board_core_classify
   board_core_payload

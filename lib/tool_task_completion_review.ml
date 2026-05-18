@@ -65,23 +65,61 @@ let contains_substring_ci text needle =
   in
   loop 0
 
-let notes_have_verification_artifact_ref notes =
-  let notes = String.trim notes in
+let placeholder_evidence_refs =
+  [ "-"; "draft"; "n/a"; "na"; "none"; "null"; "pending"; "tbd"; "todo"; "unknown" ]
+
+let is_placeholder_evidence_ref value =
+  let value = value |> String.trim |> String.lowercase_ascii in
+  value = "" || List.mem value placeholder_evidence_refs
+
+let text_has_verification_artifact_ref text =
+  let text = String.trim text in
   let has_github_pull =
-    contains_substring_ci notes "github.com/"
-    && contains_substring_ci notes "/pull/"
+    contains_substring_ci text "github.com/"
+    && contains_substring_ci text "/pull/"
   in
   let has_pr_shorthand =
-    contains_substring_ci notes "#"
-    && (contains_substring_ci notes "pr "
-        || contains_substring_ci notes "pr:"
-        || contains_substring_ci notes "pull request")
+    contains_substring_ci text "#"
+    && (contains_substring_ci text "pr "
+        || contains_substring_ci text "pr:"
+        || contains_substring_ci text "pull request")
   in
   let has_explicit_artifact =
     [ "artifact:"; "artifact://"; "file:"; "path:"; "commit:"; "branch:" ]
-    |> List.exists (contains_substring_ci notes)
+    |> List.exists (contains_substring_ci text)
   in
   has_github_pull || has_pr_shorthand || has_explicit_artifact
+
+let pr_url_has_pull_ref pr_url =
+  let pr_url = String.trim pr_url in
+  (not (is_placeholder_evidence_ref pr_url))
+  && ((contains_substring_ci pr_url "github.com/"
+       && contains_substring_ci pr_url "/pull/")
+      || (contains_substring_ci pr_url "#"
+          && (contains_substring_ci pr_url "pr "
+              || contains_substring_ci pr_url "pr:"
+              || contains_substring_ci pr_url "pull request")))
+
+let artifact_like_ref value =
+  let value = String.trim value in
+  contains_substring_ci value "artifact://"
+  || contains_substring_ci value "file:"
+  || contains_substring_ci value "path:"
+  || contains_substring_ci value "commit:"
+  || contains_substring_ci value "branch:"
+  || contains_substring_ci value "github.com/"
+  || String.contains value '/'
+  || String.contains value '.'
+
+let evidence_ref_has_verification_artifact_ref value =
+  let value = String.trim value in
+  (not (is_placeholder_evidence_ref value))
+  && (text_has_verification_artifact_ref value || artifact_like_ref value)
+
+let notes_have_verification_artifact_ref notes =
+  let notes = String.trim notes in
+  (not (is_placeholder_evidence_ref notes))
+  && text_has_verification_artifact_ref notes
 
 let non_empty_trimmed_strings values =
   values
@@ -93,7 +131,7 @@ let non_empty_trimmed_strings values =
 let handoff_context_has_verification_artifact_ref = function
   | Some (handoff_context : Masc_domain.task_handoff_context) ->
       handoff_context.evidence_refs |> non_empty_trimmed_strings |> fun refs ->
-      refs <> []
+      List.exists evidence_ref_has_verification_artifact_ref refs
   | None -> false
 
 let verification_submission_evidence_error ~notes ~handoff_context =

@@ -506,6 +506,11 @@ let handle_keeper_task_tool
     then
       workflow_rejection_error_json
         "pr_url is required. Include the PR opened for this task."
+    else if not (Tool_task_completion_review.pr_url_has_pull_ref pr_url)
+    then
+      workflow_rejection_error_json
+        "pr_url must be a GitHub pull request URL or PR # reference. \
+         Do not submit placeholders like 'draft', 'none', or 'pending'."
     else (
       (* Map keeper vocabulary (notes + pr_url) onto MASC domain typed
          handoff_context fields: notes -> summary, [pr_url] ->

@@ -112,53 +112,7 @@ val metric_coord_claim_post_provision_failures : string
 (** Total best-effort claim post-provision hook failures. Labels: [site]
     and [agent_name]. *)
 
-(** #10094: labelled [caller, timeout_s] so operators can
-    distinguish fantasy 60s budgets from intentional 120/180s
-    budgets when both fire timeouts in the same session. *)
-val metric_oas_bridge_timeout : string
-
-(** #10094: labelled [caller, timeout_s] so operators can
-    distinguish fantasy 60s budgets from intentional 120/180s
-    budgets when both fire timeouts in the same session. *)
-val metric_oas_bridge_cancel : string
-(** #10942 mirror for [masc_oas_bridge].  Labelled [caller, bucket]
-    where bucket is wall-class (fast<60s, short_tail<300s,
-    mid_tail<600s, long_mid<1800s, long_tail>=1800s) — identical
-    boundaries to [masc_keeper_oas_cancel_total] so PromQL can
-    union the two sources for a fleet-wide bimodal view. *)
-
-(** #10942 mirror for [masc_oas_bridge].  Labelled [caller, bucket]
-    where bucket is wall-class (fast<60s, short_tail<300s,
-    mid_tail<600s, long_mid<1800s, long_tail>=1800s) — identical
-    boundaries to [masc_keeper_oas_cancel_total] so PromQL can
-    union the two sources for a fleet-wide bimodal view. *)
-val metric_oas_sse_relay_retries : string
-
-val metric_oas_sse_relay_drops : string
-
-(** Histogram populated from OAS [InferenceTelemetry] events that are
-    intentionally not relayed over SSE. Labels: [model_bucket], [phase],
-    and [token_bucket]. Cardinality bound: 8 model buckets * 2 phases *
-    5 token buckets = 80 labelled series. *)
-val metric_oas_sse_relay_queue_depth : string
-
-(** Histogram populated from OAS [InferenceTelemetry] events that are
-    intentionally not relayed over SSE. Labels: [model_bucket], [phase],
-    and [token_bucket]. Cardinality bound: 8 model buckets * 2 phases *
-    5 token buckets = 80 labelled series. *)
-val metric_oas_inference_telemetry_tokens : string
-
-(** Histogram populated from OAS [InferenceTelemetry.prompt_ms] and
-    [prompt_tokens]. Labels: [model_bucket] only. *)
-val metric_oas_inference_prompt_tok_per_sec : string
-
-(** Histogram populated from OAS [InferenceTelemetry.decode_tok_s] or
-    [decode_ms] plus [completion_tokens]. Labels: [model_bucket] only. *)
-val metric_oas_inference_decode_tok_per_sec : string
-
-(** Histogram populated from [AgentCompleted] [usage.cost_usd].
-    Labels: [provider] and [model_bucket]. *)
-val metric_oas_inference_cost_usd : string
+include module type of Prometheus_oas_metric_names
 
 val metric_mcp_tool_schema_count : string
 val metric_mcp_tool_schema_tokens_approx : string
@@ -192,14 +146,6 @@ val metric_anti_rationalization_excuse_pattern : string
     excuse substring detector.  Decision label is
     [advisory_to_llm | terminal_reject | advisory_safety_net_reject]. *)
 include module type of Prometheus_cascade_metric_names
-
-(** Gauge: context overflow ratio [estimated_tokens / limit_tokens] when
-    [ContextOverflowImminent] fires.  Labels: [agent_name]. *)
-val metric_oas_context_overflow_ratio : string
-
-(** Counter: total context compaction actions from OAS event bus.
-    Labels: [agent_name, trigger]. *)
-val metric_oas_context_compaction_total : string
 
 (** PR-I: cross-FSM edge transition counter. Labels: [edge] with values
     drawn from the static coupling graph documented in

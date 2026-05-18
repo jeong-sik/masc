@@ -7406,7 +7406,7 @@ let test_prompt_guides_bash_globs_to_structured_tools () =
     bool
     "bash globs use keeper_shell find"
     true
-    (contains_substring sys "keeper_shell op=find name=glob path=dir/path");
+    (contains_substring sys "keeper_shell op=find pattern=glob path=dir/path");
   check
     bool
     "bash globs can use masc code search"

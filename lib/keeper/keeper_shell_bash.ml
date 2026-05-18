@@ -740,6 +740,9 @@ let command_looks_like_search_pipeline cmd =
   (lowercase_contains cmd "grep " || lowercase_contains cmd "rg ")
   && lowercase_contains cmd "| head"
 
+let command_looks_like_find_pipeline cmd =
+  lowercase_contains cmd "find " && lowercase_contains cmd "| head"
+
 let command_looks_like_cd_chained_search cmd =
   lowercase_contains cmd "cd "
   && lowercase_contains cmd "&&"
@@ -781,6 +784,10 @@ let bash_shape_block_hint ~cmd = function
     "Do not pipe grep/rg through keeper_bash. Use keeper_shell op=rg with a \
      scoped path and pattern instead; if the command starts with cd, pass that \
      directory as cwd instead of using cd &&."
+  | Pipe_or_redirect when command_looks_like_find_pipeline cmd ->
+    "Do not pipe find through keeper_bash. Use keeper_shell op=find with path, \
+     pattern, and limit instead of | head; if the command needs multiple -name \
+     globs, run one keeper_shell op=find call per pattern."
   | Pipe_or_redirect ->
     "Remove the pipe or redirect. Run the primary command once and summarize \
      the returned output; use keeper_shell op=head/tail for file slices."
@@ -822,6 +829,13 @@ let bash_shape_block_alternatives ~cmd = function
         "keeper_shell op=rg pattern=search-term path=repos/REPO/lib glob=*.ml";
         "keeper_bash cmd='git status' cwd='repos/REPO'";
       ]
+    else if command_looks_like_find_pipeline cmd
+    then
+      [
+        "keeper_shell op=find path=repos/REPO/.worktrees/TASK pattern='*.ml' limit=30";
+        "keeper_shell op=find path=repos/REPO/.worktrees/TASK pattern='*.mli' limit=30";
+        "keeper_shell op=find path=lib pattern='*.ml' limit=30";
+      ]
     else
       [
         "keeper_bash cmd='ls lib/'";
@@ -857,12 +871,12 @@ let bash_shape_block_alternatives ~cmd = function
       [
         "keeper_shell op=rg pattern=search-term path=repos/masc-mcp/lib glob=*.ml";
         "keeper_shell op=rg pattern=search-term path=repos/oas/src glob=*.ml";
-        "keeper_shell op=find path=repos/REPO/lib name='*.ml'";
+        "keeper_shell op=find path=repos/REPO/lib pattern='*.ml'";
       ]
     else
       [
         "keeper_shell op=rg pattern=search-term path=lib";
-        "keeper_shell op=find path=lib name='*.ml'";
+        "keeper_shell op=find path=lib pattern='*.ml'";
         "keeper_bash cmd='git log --oneline -20'";
       ]
 

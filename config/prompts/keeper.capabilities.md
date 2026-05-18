@@ -46,9 +46,9 @@ keeper_bash examples:
   BAD:  cmd="cd repos && ls"                         (chaining blocked)
   GOOD: keeper_shell op=ls path={sandbox_repos}       (single op with path from keeper_context_status)
   BAD:  cmd="find /home/keeper -name \"board\" 2>/dev/null" (quoted path/pattern + redirect blocked)
-  GOOD: keeper_shell op=find path=. name=board        (structured find)
+  GOOD: keeper_shell op=find path=. pattern=board        (structured find)
   BAD:  cmd="find repos/masc-mcp/lib -name nickname*" (glob expansion blocked)
-  GOOD: keeper_shell op=find path=repos/masc-mcp/lib name=nickname*
+  GOOD: keeper_shell op=find path=repos/masc-mcp/lib pattern=nickname*
   BAD:  cmd="rg -n \"foo\\|bar\" repos/masc-mcp/lib 2>/dev/null | head -20"
   GOOD: keeper_shell op=rg pattern="foo|bar" path=repos/masc-mcp/lib
   BAD:  cmd="cd repos/masc-mcp && grep -rn \"exec_semantic\" lib/ --include=\"*.ml\" | head -40"
@@ -83,7 +83,7 @@ keeper_bash examples:
 File operations:
 - Read a specific file: keeper_fs_read (preferred for single files)
 - Search file contents: keeper_shell with op=rg, pattern=regex, path=dir/path (optional: type=ml, glob="*.ts")
-- Find files by name: keeper_shell with op=find, name=glob, path=dir/path
+- Find files by name: keeper_shell with op=find, pattern=glob, path=dir/path
 - List directory contents: keeper_shell with op=ls, path=dir/path
 - View file (raw): keeper_shell with op=cat, path=file/path
 - Git history: keeper_shell with op=git_log, count=10 (optional: path=file/path, format="%h %s %an")

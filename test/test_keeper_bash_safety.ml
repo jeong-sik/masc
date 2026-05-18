@@ -863,6 +863,11 @@ let parse_hint raw =
   |> Json.member "hint"
   |> Json.to_string_option
 
+let parse_alternatives raw =
+  match Yojson.Safe.from_string raw |> Json.member "alternatives" with
+  | `List xs -> List.filter_map Json.to_string_option xs
+  | _ -> []
+
 let parse_error_field raw =
   Yojson.Safe.from_string raw
   |> Json.member "error"
@@ -1167,6 +1172,80 @@ let test_keeper_bash_search_pipeline_hint_uses_structured_rg () =
      Alcotest.(check bool) "hint mentions cwd" true
        (String_util.contains_substring hint "cwd")
    | None -> Alcotest.fail ("expected hint, got: " ^ raw))
+
+let test_keeper_bash_find_pipeline_hint_uses_structured_find () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "find-pipeline" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  ensure_dir playground;
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:
+        (`Assoc
+           [ ( "cmd"
+             , `String
+                 "find repos/masc-mcp/.worktrees/keeper-umberto-agent-task-343 -name \"*.ml\" -o -name \"*.mli\" | head -30"
+             )
+           ; ("cwd", `String playground)
+           ])
+      ()
+  in
+  Alcotest.(check (option string)) "find pipeline is command-shape blocked"
+    (Some "keeper_bash_command_shape_blocked") (parse_error_field raw);
+  (match parse_hint raw with
+   | Some hint ->
+     Alcotest.(check bool) "hint points to structured find" true
+       (String_util.contains_substring hint "keeper_shell op=find");
+     Alcotest.(check bool) "hint names pattern" true
+       (String_util.contains_substring hint "pattern");
+     Alcotest.(check bool) "hint names limit" true
+       (String_util.contains_substring hint "limit")
+   | None -> Alcotest.fail ("expected hint, got: " ^ raw));
+  let alternatives = String.concat "\n" (parse_alternatives raw) in
+  Alcotest.(check bool) "alternatives include ml pattern" true
+    (String_util.contains_substring alternatives "pattern='*.ml'");
+  Alcotest.(check bool) "alternatives include mli pattern" true
+    (String_util.contains_substring alternatives "pattern='*.mli'");
+  Alcotest.(check bool) "alternatives carry head limit" true
+    (String_util.contains_substring alternatives "limit=30")
+
+let test_keeper_shell_find_accepts_name_alias () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "find-name-alias" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  ensure_dir playground;
+  let lib_dir = Filename.concat playground "lib" in
+  ensure_dir lib_dir;
+  ignore (Fs_compat.save_file_atomic (Filename.concat lib_dir "demo.ml") "let x = 1\n");
+  let raw =
+    Keeper_exec_shell.handle_keeper_shell
+      ~turn_sandbox_factory:None ~exec_cache:None
+      ~config ~meta
+      ~args:
+        (`Assoc
+           [
+             ("op", `String "find");
+             ("path", `String "lib");
+             ("name", `String "*.ml");
+             ("limit", `Int 5);
+           ])
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "name alias succeeds" true
+    (json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check string) "alias populates name field" "*.ml"
+    (json |> Json.member "name" |> Json.to_string);
+  Alcotest.(check bool) "find returns demo file" true
+    (String_util.contains_substring raw "demo.ml")
 
 let test_keeper_shell_ls_recovers_doubled_playground_prefix () =
   with_eio_fs @@ fun () ->
@@ -1550,6 +1629,10 @@ let () =
         test_keeper_bash_task_state_http_probe_uses_task_tools;
       Alcotest.test_case "search pipeline hint uses structured rg" `Quick
         test_keeper_bash_search_pipeline_hint_uses_structured_rg;
+      Alcotest.test_case "find pipeline hint uses structured find" `Quick
+        test_keeper_bash_find_pipeline_hint_uses_structured_find;
+      Alcotest.test_case "find accepts name alias" `Quick
+        test_keeper_shell_find_accepts_name_alias;
       Alcotest.test_case "doubled playground prefix auto-recovers" `Quick
         test_keeper_shell_ls_recovers_doubled_playground_prefix;
       Alcotest.test_case "op=bash is deprecated" `Quick

@@ -633,7 +633,12 @@ let handle_keeper_shell
                   ; "entries", lines_to_json ~limit:50 out
                   ])))
   | "find" ->
-    let name_pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in
+    let name_pattern =
+      let pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in
+      if pattern <> ""
+      then pattern
+      else Safe_ops.json_string ~default:"" "name" args |> String.trim
+    in
     if name_pattern = ""
     then error_json ~fields:[ "op", `String op ] "pattern is required for find. Good: pattern='*.ml'. Bad: pattern=''."
     else (

@@ -57,7 +57,7 @@ Your shell starts at the sandbox root, which is **not** a git repository.
 - For code search, do not run Bash pipelines like `cd repos/REPO && grep -rn "term" lib/ | head -40`. Use `keeper_shell op=rg pattern=term path=lib` with the repo/worktree passed as `cwd`.
 - Do not scan all clones from Bash. Replace `rg term repos/` with `keeper_shell op=rg path=repos/REPO/lib`, and replace `git log --all --grep=term | head` with `keeper_shell op=git_log cwd=repos/REPO count=5 grep=term`.
 - Do not use shell existence tests or shell control flow such as `ls path 2>/dev/null && echo EXISTS || echo NOT_FOUND`. Use `keeper_shell op=ls`/`keeper_shell op=cat`, `Read`, or one plain `keeper_bash` command and let the tool error explain missing paths.
-- Do not put glob patterns into Bash path arguments, such as `find repos/REPO/lib -name nickname*`. Use `keeper_shell op=find name=glob path=dir/path` or `masc_code_search file_pattern=glob` so the structured tool owns the pattern.
+- Do not put glob patterns into Bash path arguments, such as `find repos/REPO/lib -name nickname*`. Use `keeper_shell op=find pattern=glob path=dir/path` or `masc_code_search file_pattern=glob` so the structured tool owns the pattern.
 - `keeper_shell` is structured-only. Do not call `keeper_shell op=bash`; use `Bash`/`keeper_bash` for command execution.
 - Common error: a tool returns `not a git repository` or `path_outside_sandbox`. That is the sandbox root rejecting a git/gh call. Re-issue the call with the repo path in `cwd`.
 - Do not invent host paths like `/Users/...` or `/workspace/`; relative paths under the sandbox root are the only valid form.

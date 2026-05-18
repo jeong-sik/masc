@@ -18,7 +18,9 @@ concurrency:
 jobs:
   build:
     name: dune build @check
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    if: >-
+      vars.MASC_ENABLE_SELF_HOSTED_BUILD_CHECK == 'true' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 15
 

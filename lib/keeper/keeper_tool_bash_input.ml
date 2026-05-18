@@ -138,9 +138,9 @@ let optional_env ~path fields =
       (json_type_name value)
 ;;
 
-let parse_stage ~index (value : Yojson.Safe.t) =
+let parse_stage ~path_prefix ~index (value : Yojson.Safe.t) =
   let ( let* ) = Result.bind in
-  let path = Printf.sprintf "$.pipeline[%d]" index in
+  let path = Printf.sprintf "%s[%d]" path_prefix index in
   let* fields = assoc_fields ~path value in
   let* executable = required_string ~path fields "executable" in
   let* argv = optional_string_list ~path fields "argv" in
@@ -154,7 +154,7 @@ let parse_pipeline ~path (json : Yojson.Safe.t) =
     let rec loop index acc = function
       | [] -> Ok (List.rev acc)
       | value :: rest ->
-        let* stage = parse_stage ~index value in
+        let* stage = parse_stage ~path_prefix:path ~index value in
         loop (index + 1) (stage :: acc) rest
     in
     loop 0 [] values
@@ -193,7 +193,7 @@ let of_json (json : Yojson.Safe.t) =
       Error
         "legacy cmd string is not a typed keeper_bash input; provide \
          executable/argv or pipeline stages"
-    else Error "$.executable or $.pipeline is required"
+    else Error "$.executable or $.pipeline/$.stages is required"
 ;;
 
 (* Execve-style: argv tokens pass verbatim to the child process, so

@@ -76,6 +76,7 @@ val of_json : Yojson.Safe.t -> (bash_input, string) result
 (** Parse the typed keeper_bash JSON boundary.  Accepts either
     [{executable, argv?, cwd?, env?}] for [Exec] or
     [{pipeline = [{executable, argv?}, ...], cwd?, env?}] for [Pipeline].
+    [{stages = ...}] is accepted as an equivalent structured pipeline key.
     Legacy [{cmd: string}] input is intentionally rejected here. *)
 
 val validate : mode:allowlist_mode -> bash_input -> (unit, validation_error) result

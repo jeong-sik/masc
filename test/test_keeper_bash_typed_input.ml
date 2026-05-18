@@ -257,6 +257,17 @@ let test_of_json_rejects_mixed_exec_and_pipeline () =
     (String_util.contains_substring_ci msg "either executable or pipeline")
 ;;
 
+let test_of_json_stages_alias_reports_stages_path () =
+  let msg =
+    parse_json_error
+      (`Assoc [ "stages", `List [ `Assoc [ "argv", `List [] ] ] ])
+  in
+  Alcotest.(check bool)
+    "error mentions stages path"
+    true
+    (String_util.contains_substring_ci msg "$.stages[0].executable")
+;;
+
 let shell_arg_string = function
   | Masc_exec.Shell_ir.Lit s -> s
   | Masc_exec.Shell_ir.Var name -> "$" ^ name
@@ -385,6 +396,10 @@ let suite =
           "of_json_rejects_mixed_exec_and_pipeline"
           `Quick
           test_of_json_rejects_mixed_exec_and_pipeline
+      ; Alcotest.test_case
+          "of_json_stages_alias_reports_stages_path"
+          `Quick
+          test_of_json_stages_alias_reports_stages_path
       ; Alcotest.test_case
           "pipeline_lowers_to_shell_ir_pipeline"
           `Quick

@@ -224,6 +224,14 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
       tone: 'bad',
     }
   }
+  if (blocked >= 24) {
+    return {
+      key: 'fleet-liveness-risk',
+      label: 'Fleet liveness risk',
+      detail: `FD pressure admission is blocking ${blocked} keepers; keeper turns may not start.`,
+      tone: 'bad',
+    }
+  }
   if (fleetStatus === 'degraded' || (requiresAction && capacityBelowTarget)) {
     const capacityDetail = [
       `status=${fleetStatus ?? 'degraded'}`,
@@ -239,14 +247,6 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
       label: 'Fleet capacity degraded',
       detail: `${capacityDetail}; restore missing keeper fibers or confirm a reduced target capacity.`,
       tone: 'warn',
-    }
-  }
-  if (blocked >= 24) {
-    return {
-      key: 'fleet-liveness-risk',
-      label: 'Fleet liveness risk',
-      detail: `FD pressure admission is blocking ${blocked} keepers; keeper turns may not start.`,
-      tone: 'bad',
     }
   }
   if (fleetSafety.keeper_fleet_no_fibers === true || (fibers != null && fibers <= 1 && paused > 0)) {

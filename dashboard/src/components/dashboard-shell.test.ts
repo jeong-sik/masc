@@ -274,6 +274,69 @@ describe('dashboardHealthChips', () => {
     expect(chips[0]?.detail).toContain('blocking 24 keepers')
   })
 
+  it('prioritizes FD pressure over degraded capacity when both are present', () => {
+    const chips = dashboardHealthChips({
+      connected: true,
+      counts: { keepers: 24, configured_keepers: 24 },
+      keepers: [],
+      runtimeResolution: {
+        status: 'ready',
+        warnings: [],
+        fleet_safety: {
+          keeper_fibers: 8,
+          paused_keepers: 0,
+          keeper_fleet_no_fibers: false,
+          keeper_fd_pressure: {
+            status: 'blocked',
+            reason: 'fd_pressure',
+            admission_blocked: true,
+            admission_blocked_keepers: 24,
+            blocked_keepers: null,
+            blocked_count: null,
+          },
+          keeper_fleet_safety: {
+            status: 'degraded',
+            reason: null,
+            blocker: 'reaction_capacity_below_target',
+            admission_blocked: null,
+            admission_blocked_keepers: null,
+            blocked_keepers: null,
+            blocked_count: null,
+            bootable_keeper_count: 24,
+            running_keeper_fiber_count: 8,
+            healthy_running_keeper_fiber_count: 8,
+            failing_keeper_fiber_count: 0,
+            executable_keeper_fiber_count: 8,
+            minimum_running_fibers: 2,
+            no_running_fibers: false,
+            no_executable_keeper_fibers: false,
+            low_running_fiber_margin: false,
+            reaction_capacity_below_target: true,
+            reaction_capacity_shortfall_count: 16,
+            executable_reaction_capacity_below_target: true,
+            executable_reaction_capacity_shortfall_count: 16,
+            paused_keeper_count: 0,
+            autoboot_enabled_keeper_count: 24,
+            paused_autoboot_enabled_keeper_count: 0,
+            effective_reaction_capacity_count: 8,
+            executable_reaction_capacity_count: 8,
+            target_reaction_capacity_count: 24,
+            operator_action_required: true,
+          },
+        },
+      } as any,
+      executionError: null,
+      loading: false,
+    })
+
+    expect(chips).toEqual([expect.objectContaining({
+      key: 'fleet-liveness-risk',
+      label: 'Fleet liveness risk',
+      tone: 'bad',
+    })])
+    expect(chips[0]?.detail).toContain('blocking 24 keepers')
+  })
+
   it('surfaces reaction ledger cursor sweeps even when pending backlog is clear', () => {
     const chips = dashboardHealthChips({
       connected: true,

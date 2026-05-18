@@ -295,11 +295,11 @@
             <td><code>lib/prometheus.ml</code> 3082 LOC</td>
           </tr>
           <tr>
-            <td>Stack after #16221</td>
-            <td><code>fe420836ac</code></td>
+            <td>Stack after #16222</td>
+            <td><code>6e61ed4e27</code></td>
             <td class="num">53</td>
-            <td class="num">88,704</td>
-            <td class="num">8</td>
+            <td class="num">88,579</td>
+            <td class="num">7</td>
             <td class="num">0</td>
             <td><code>lib/keeper/keeper_unified_turn.ml</code> 2890 LOC</td>
           </tr>
@@ -307,14 +307,14 @@
       </table>
       <div class="panel ok">
         <span class="tag green">-22 files from initial audit</span>
-        <span class="tag green">-25,499 LOC from initial audit</span>
-        <span class="tag blue">2000+ bucket down to 8</span>
+        <span class="tag green">-25,624 LOC from initial audit</span>
+        <span class="tag blue">2000+ bucket down to 7</span>
         <span class="tag blue">3000+ eliminated in stack</span>
         <span class="tag violet">53 files remain</span>
         <p>
           Progress 기준은 이 문서의 원래 범위와 동일하게 <code>lib/**/*.ml</code> 중 1000+ LOC만 센다.
           현재 열린 stack 기준으로는 초기 75개에서 53개까지 내려왔고,
-          3000+ LOC 파일은 남지 않았으며 2000+ LOC 파일도 8개로 줄었다.
+          3000+ LOC 파일은 남지 않았으며 2000+ LOC 파일도 7개로 줄었다.
         </p>
       </div>
     </section>
@@ -369,12 +369,6 @@
             <td>Already has <code>Keeper_hooks_oas_types</code> seam; continue extracting behavior-owned helpers.</td>
           </tr>
           <tr>
-            <td class="rank-p2">P2</td><td class="num">2047</td>
-            <td><a href="../../lib/worker_dev_tools.ml">lib/worker_dev_tools.ml</a></td>
-            <td>Path, shell, gh, and destructive-operation gates</td>
-            <td>Only non-keeper file still above 2000 besides metrics/dashboard; gate splits reduce review blast radius quickly.</td>
-          </tr>
-          <tr>
             <td class="rank-p2">P2</td><td class="num">1990</td>
             <td><a href="../../lib/keeper/keeper_types_profile.ml">lib/keeper/keeper_types_profile.ml</a></td>
             <td>Profile JSON helpers, validation, and small typed modules</td>
@@ -385,6 +379,12 @@
             <td><a href="../../lib/server/server_dashboard_http_keeper_api.ml">lib/server/server_dashboard_http_keeper_api.ml</a></td>
             <td>Remaining runtime lens/action/get-route seams after prior stack splits</td>
             <td>Now below 2000, but still in the 1000+ set and has coherent helper seams left.</td>
+          </tr>
+          <tr>
+            <td class="rank-p3">P3</td><td class="num">1979</td>
+            <td><a href="../../lib/server/server_dashboard_http_core.ml">lib/server/server_dashboard_http_core.ml</a></td>
+            <td>Request helpers, page/render utilities, shared response builders</td>
+            <td>Close threshold file with server-wide fan-in; split only stable pure helpers first.</td>
           </tr>
         </tbody>
       </table>
@@ -398,7 +398,7 @@
         </thead>
         <tbody>
           <tr><td>Keeper</td><td class="num">24</td><td class="num">40,308</td><td><code>keeper_unified_turn</code>, <code>keeper_supervisor</code>, <code>keeper_registry</code>, <code>keeper_agent_run</code></td><td>Split internal seams first; promote only leaf closures after registry/type cycles are cut.</td></tr>
-          <tr><td>Root tools/metrics</td><td class="num">9</td><td class="num">16,292</td><td><code>prometheus</code>, <code>model_inference_metrics</code>, <code>worker_dev_tools</code>, <code>tool_board</code>, <code>tool_keeper</code></td><td>Facade-compatible private modules, then low-dependency sub-libraries for metrics/schema/tool gates.</td></tr>
+          <tr><td>Root tools/metrics</td><td class="num">9</td><td class="num">16,167</td><td><code>prometheus</code>, <code>model_inference_metrics</code>, <code>worker_dev_tools</code>, <code>tool_board</code>, <code>tool_keeper</code></td><td>Facade-compatible private modules, then low-dependency sub-libraries for metrics/schema/tool gates.</td></tr>
           <tr><td>Server</td><td class="num">7</td><td class="num">11,982</td><td><code>server_dashboard_http_keeper_api</code>, <code>server_dashboard_http_core</code>, <code>server_runtime_bootstrap</code></td><td>Handler seams first; route parity after handlers stabilize.</td></tr>
           <tr><td>Dashboard</td><td class="num">4</td><td class="num">6,488</td><td><code>dashboard_http_keeper</code>, <code>dashboard_goals_types</code>, <code>dashboard_cascade</code></td><td>Projection helpers and JSON builders; preserve compact mode.</td></tr>
           <tr><td>Cascade</td><td class="num">4</td><td class="num">6,247</td><td><code>cascade_transport</code>, <code>cascade_catalog_runtime</code>, <code>cascade_config</code></td><td>Cut <code>Cascade_runner</code> ownership leak; extract refs/names before transport.</td></tr>
@@ -568,12 +568,12 @@ ocamlformat --check &lt;touched .ml/.mli files&gt;</code></pre>
           <tr><td class="num">2191</td><td><a href="../../lib/keeper/keeper_agent_run.ml">lib/keeper/keeper_agent_run.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">2187</td><td><a href="../../lib/dashboard/dashboard_http_keeper.ml">lib/dashboard/dashboard_http_keeper.ml</a></td><td>dashboard</td></tr>
           <tr><td class="num">2142</td><td><a href="../../lib/keeper/keeper_hooks_oas.ml">lib/keeper/keeper_hooks_oas.ml</a></td><td>keeper</td></tr>
-          <tr><td class="num">2047</td><td><a href="../../lib/worker_dev_tools.ml">lib/worker_dev_tools.ml</a></td><td>tools</td></tr>
           <tr><td class="num">1990</td><td><a href="../../lib/keeper/keeper_types_profile.ml">lib/keeper/keeper_types_profile.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">1988</td><td><a href="../../lib/server/server_dashboard_http_keeper_api.ml">lib/server/server_dashboard_http_keeper_api.ml</a></td><td>server</td></tr>
           <tr><td class="num">1979</td><td><a href="../../lib/server/server_dashboard_http_core.ml">lib/server/server_dashboard_http_core.ml</a></td><td>server</td></tr>
           <tr><td class="num">1958</td><td><a href="../../lib/model_inference_metrics.ml">lib/model_inference_metrics.ml</a></td><td>metrics</td></tr>
           <tr><td class="num">1944</td><td><a href="../../lib/keeper/keeper_run_tools.ml">lib/keeper/keeper_run_tools.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">1922</td><td><a href="../../lib/worker_dev_tools.ml">lib/worker_dev_tools.ml</a></td><td>tools</td></tr>
           <tr><td class="num">1915</td><td><a href="../../lib/keeper/keeper_heartbeat_loop.ml">lib/keeper/keeper_heartbeat_loop.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">1904</td><td><a href="../../lib/cascade/cascade_transport.ml">lib/cascade/cascade_transport.ml</a></td><td>cascade</td></tr>
           <tr><td class="num">1869</td><td><a href="../../lib/server/server_routes_http_routes_dashboard.ml">lib/server/server_routes_http_routes_dashboard.ml</a></td><td>server</td></tr>

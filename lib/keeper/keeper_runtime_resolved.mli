@@ -28,6 +28,7 @@ type t = {
   admission_wait_timeout_sec : float field;
   oas_timeout_override_sec : float option field;
   stream_idle_timeout_sec : float field;
+  body_timeout_override_sec : float option field;
   oas_timeout_per_1k : float field;
   oas_timeout_per_turn : float field;
 }
@@ -51,6 +52,16 @@ val turn_timeout_sec : unit -> float
 val admission_wait_timeout_sec : unit -> float
 val stream_idle_timeout_sec : unit -> float
 val stream_idle_timeout_for_total_timeout : total_timeout_s:float -> float
+
+(** Total HTTP body-consumption deadline override.
+    [None] (env unset) lets the cascade attempt fall back to the per-
+    attempt [max_execution_time]. [Some s] is forwarded to
+    [Cascade_agent_context.body_timeout_s] -> [Builder.with_body_timeout],
+    surfacing [Retry.Timeout] before the turn cap so cascade falls
+    forward at the attempt boundary.
+
+    SSOT: {!Env_config_keeper.KeeperKeepalive.body_timeout_sec_override}. *)
+val body_timeout_override_sec : unit -> float option
 
 (** CLI subprocess stdout-idle timeout, read fresh per turn from
     [MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC] and clamped to [10, 600].

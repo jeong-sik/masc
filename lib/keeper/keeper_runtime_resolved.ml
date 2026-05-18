@@ -19,6 +19,7 @@ type t = {
   admission_wait_timeout_sec : float field;
   oas_timeout_override_sec : float option field;
   stream_idle_timeout_sec : float field;
+  body_timeout_override_sec : float option field;
   oas_timeout_per_1k : float field;
   oas_timeout_per_turn : float field;
 }
@@ -118,6 +119,19 @@ let oas_timeout_override_sec_live ~turn_timeout_sec =
                  (Float.of_string_opt (String.trim raw)))))
   | None -> None
 
+(* SSOT: Env_config_keeper.KeeperKeepalive.body_timeout_sec_override
+   (same env var, same clamp [10, 600]). Mirrors the
+   [oas_timeout_override_sec_live] / [stream_idle_timeout_sec_live]
+   idiom: read raw env, clamp, return option. Opt-in: unset → None
+   → cascade falls back to the per-attempt max_execution_time. *)
+let body_timeout_override_sec_live () =
+  match Env_config_core.raw_value_opt "MASC_KEEPER_BODY_TIMEOUT_SEC" with
+  | Some raw ->
+      (match Float.of_string_opt (String.trim raw) with
+       | Some v -> Some (Float.max 10.0 (Float.min 600.0 v))
+       | None -> None)
+  | None -> None
+
 let freeze_from_current () =
   let source_field name value =
     { value;
@@ -178,6 +192,14 @@ let freeze_from_current () =
       "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"
       (stream_idle_timeout_sec_live ())
   in
+  let body_timeout_override_sec =
+    {
+      value = body_timeout_override_sec_live ();
+      source =
+        Option.value ~default:Default
+          (source_of_env_name "MASC_KEEPER_BODY_TIMEOUT_SEC");
+    }
+  in
   let oas_timeout_per_1k =
     source_field
       "MASC_KEEPER_OAS_TIMEOUT_PER_1K"
@@ -198,6 +220,7 @@ let freeze_from_current () =
     admission_wait_timeout_sec;
     oas_timeout_override_sec;
     stream_idle_timeout_sec;
+    body_timeout_override_sec;
     oas_timeout_per_1k;
     oas_timeout_per_turn;
   }
@@ -240,6 +263,7 @@ let to_yojson (runtime : t) =
       ("admission_wait_timeout_sec", field_to_yojson (fun value -> `Float value) runtime.admission_wait_timeout_sec);
       ("oas_timeout_override_sec", field_to_yojson option_float_to_yojson runtime.oas_timeout_override_sec);
       ("stream_idle_timeout_sec", field_to_yojson (fun value -> `Float value) runtime.stream_idle_timeout_sec);
+      ("body_timeout_override_sec", field_to_yojson option_float_to_yojson runtime.body_timeout_override_sec);
       ("oas_timeout_per_1k", field_to_yojson (fun value -> `Float value) runtime.oas_timeout_per_1k);
       ("oas_timeout_per_turn", field_to_yojson (fun value -> `Float value) runtime.oas_timeout_per_turn);
     ]
@@ -270,6 +294,9 @@ let stream_idle_timeout_sec () =
 
 let stream_idle_timeout_for_total_timeout ~(total_timeout_s : float) =
   Float.min total_timeout_s (stream_idle_timeout_sec ())
+
+let body_timeout_override_sec () =
+  (current ()).body_timeout_override_sec.value
 
 let oas_timeout_for_estimated_input_tokens_with_turn_budget
     ~(estimated_input_tokens : int) ~(max_turns : int) : float =

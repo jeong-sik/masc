@@ -285,7 +285,16 @@ let run_try_provider
           ; max_execution_time_s =
               max_execution_time_for_attempt ?per_provider_timeout_s ()
           ; body_timeout_s =
-              max_execution_time_for_attempt ?per_provider_timeout_s ()
+              (* SSOT: Keeper_runtime_resolved.body_timeout_override_sec
+                 (driven by MASC_KEEPER_BODY_TIMEOUT_SEC). When unset
+                 (default), fall back to the per-attempt
+                 max_execution_time so this wire matches the PR #16071
+                 baseline. When set, the body-callback wall-clock fires
+                 before the turn cap, surfacing Retry.Timeout so cascade
+                 falls forward at the attempt boundary. *)
+              (match Keeper_runtime_resolved.body_timeout_override_sec () with
+               | Some _ as s -> s
+               | None -> max_execution_time_for_attempt ?per_provider_timeout_s ())
           ; temperature = ctx.temperature
           ; max_idle_turns = ctx.max_idle_turns
           ; guardrails = ctx.guardrails

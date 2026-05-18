@@ -762,6 +762,48 @@ describe('RuntimeLensSection', () => {
     expect(summary.rows.find(row => row.label === '차단')?.detail).toContain('needs_execution_progress')
   })
 
+  it('keeps previous receipt blockers out of the current live-turn summary', () => {
+    const summary = deriveKeeperLiveTruth({
+      keeper: {
+        name: 'sangsu',
+        status: 'active',
+        keepalive_running: true,
+        runtime_blocker_class: 'cascade_exhausted',
+        runtime_blocker_summary: 'previous turn exhausted cascade',
+      },
+      compositeSnapshot: compositeFixture({
+        is_live: true,
+        turn_phase: 'executing',
+        live_turn: {
+          turn_id: 8,
+          started_at: 1_778_688_690,
+          last_progress_at: 1_778_688_699,
+          last_progress_kind: 'provider_attempt_started',
+        },
+        runtime_attention: {
+          state: 'ok',
+          needs_attention: false,
+          blocked: false,
+          fiber_stop_requested: false,
+          reason: null,
+          raw_phase: 'running',
+          is_live: true,
+          source: 'live_turn',
+          execution_current: false,
+          stale_execution_receipt: true,
+          live_turn_started_at: 1_778_688_690,
+          live_turn_last_progress_at: 1_778_688_699,
+        },
+      }),
+      runtimeTrace: runtimeTraceFixture(),
+      runtimeResolution: null,
+    })
+
+    expect(summary.headline).toBe('턴 진행 중')
+    expect(summary.tone).toBe('ok')
+    expect(summary.rows.find(row => row.label === '차단')?.value).toBe('none')
+  })
+
   it('surfaces runtime resolution warnings in the live-truth summary', () => {
     const summary = deriveKeeperLiveTruth({
       keeper: {

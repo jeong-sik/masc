@@ -101,6 +101,23 @@ let test_http_429_cascades () =
     true
     (Oas_compat.Http_client.should_cascade err)
 
+let test_timeout_error_cascades () =
+  let err =
+    Http_client.TimeoutError
+      { phase = Http_client.Http_operation; message = "provider request timed out" }
+  in
+  Alcotest.(check bool)
+    "TimeoutError remains a provider-hop failure and should cascade"
+    true
+    (Oas_compat.Http_client.should_cascade err);
+  (match Oas_compat.Http_client.classify err with
+   | Network_error -> ()
+   | _ -> Alcotest.fail "TimeoutError must classify with network retry policy");
+  Alcotest.(check string)
+    "TimeoutError message is preserved"
+    "provider request timed out"
+    (Oas_compat.Http_client.error_message err)
+
 let test_tls_error_does_not_cascade () =
   let err =
     Http_client.NetworkError
@@ -414,6 +431,8 @@ let () =
       ( "Baseline: HTTP errors unaffected",
         [
           Alcotest.test_case "HTTP 429 cascades" `Quick test_http_429_cascades;
+          Alcotest.test_case "TimeoutError cascades"
+            `Quick test_timeout_error_cascades;
         ] );
       ( "Network terminal errors do not cascade",
         [

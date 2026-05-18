@@ -367,7 +367,7 @@ let of_a2a_error (e : Agent_sdk.Error.a2a_error) : t =
 let of_sdk_error (e : Agent_sdk.Error.sdk_error) : t =
   match e with
   | Agent_sdk.Error.Api ae -> of_api_error ae
-  | Provider pe -> of_provider_error pe
+  | Agent_sdk.Error.Provider pe -> of_provider_error pe
   | Agent ae -> of_agent_error ae
   | Mcp me -> of_mcp_error me
   | Config ce -> of_config_error ce

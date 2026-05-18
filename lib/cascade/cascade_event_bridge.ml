@@ -457,6 +457,120 @@ let sdk_provider_error_fields = function
     ]
 ;;
 
+let json_string_list values = `List (List.map (fun value -> `String value) values)
+;;
+
+let sdk_provider_error_fields error =
+  let message = Llm_provider.Error.to_string error in
+  match error with
+  | Llm_provider.Error.MissingApiKey { var_name } ->
+    [ "variant", `String "missing_api_key"
+    ; "message", `String message
+    ; "var_name", `String var_name
+    ]
+  | Llm_provider.Error.InvalidConfig { field; detail } ->
+    [ "variant", `String "invalid_config"
+    ; "message", `String message
+    ; "field", `String field
+    ; "detail", `String detail
+    ]
+  | Llm_provider.Error.ParseError { detail } ->
+    [ "variant", `String "parse_error"
+    ; "message", `String message
+    ; "detail", `String detail
+    ]
+  | Llm_provider.Error.UnknownVariant { type_name; value } ->
+    [ "variant", `String "unknown_variant"
+    ; "message", `String message
+    ; "type_name", `String type_name
+    ; "value", `String value
+    ]
+  | Llm_provider.Error.ProviderUnavailable { provider; detail } ->
+    [ "variant", `String "provider_unavailable"
+    ; "message", `String message
+    ; "provider", `String provider
+    ; "detail", `String detail
+    ]
+  | Llm_provider.Error.RateLimit { provider; retry_after; detail } ->
+    [ "variant", `String "rate_limited"
+    ; "message", `String message
+    ; "provider", `String provider
+    ; "retry_after_s", json_float_opt retry_after
+    ; "detail", `String detail
+    ]
+  | Llm_provider.Error.HardQuota { provider; retry_after; detail } ->
+    [ "variant", `String "hard_quota"
+    ; "message", `String message
+    ; "provider", `String provider
+    ; "retry_after_s", json_float_opt retry_after
+    ; "detail", `String detail
+    ]
+  | Llm_provider.Error.CapacityExhausted
+      { scope; affected; retry_after; detail } ->
+    [ "variant", `String "capacity_exhausted"
+    ; "message", `String message
+    ; "capacity_scope", `String (Llm_provider.Error.capacity_scope_to_string scope)
+    ; "affected", json_string_list affected
+    ; "retry_after_s", json_float_opt retry_after
+    ; "detail", `String detail
+    ]
+  | Llm_provider.Error.AuthError { provider; detail } ->
+    [ "variant", `String "auth_error"
+    ; "message", `String message
+    ; "provider", `String provider
+    ; "detail", `String detail
+    ]
+  | Llm_provider.Error.ServerError { provider; code; transient; detail } ->
+    [ "variant", `String "server_error"
+    ; "message", `String message
+    ; "provider", `String provider
+    ; "status", `Int code
+    ; "transient", `Bool transient
+    ; "detail", `String detail
+    ]
+  | Llm_provider.Error.NetworkError
+      { provider; kind; timeout_phase; detail } ->
+    [ "variant", `String "network_error"
+    ; "message", `String message
+    ; "provider", `String provider
+    ; "network_kind", `String (network_error_kind_to_wire kind)
+    ; ( "timeout_phase"
+      , match timeout_phase with
+        | Some phase -> `String (Llm_provider.Http_client.timeout_phase_to_label phase)
+        | None -> `Null )
+    ; "detail", `String detail
+    ]
+  | Llm_provider.Error.Timeout { provider; timeout_phase; detail } ->
+    [ "variant", `String "timeout"
+    ; "message", `String message
+    ; "provider", `String provider
+    ; ( "timeout_phase"
+      , match timeout_phase with
+        | Some phase -> `String (Llm_provider.Http_client.timeout_phase_to_label phase)
+        | None -> `Null )
+    ; "detail", `String detail
+    ]
+  | Llm_provider.Error.InvalidRequest { provider; reason } ->
+    [ "variant", `String "invalid_request"
+    ; "message", `String message
+    ; "provider", `String provider
+    ; "reason", `String reason
+    ]
+  | Llm_provider.Error.NotFound { provider; detail } ->
+    [ "variant", `String "not_found"
+    ; "message", `String message
+    ; "provider", `String provider
+    ; "detail", `String detail
+    ]
+  | Llm_provider.Error.ProviderTerminal { provider; reason; detail } ->
+    [ "variant", `String "provider_terminal"
+    ; "message", `String message
+    ; "provider", `String provider
+    ; "reason", `String reason
+    ; "detail", `String detail
+    ]
+;;
+
 let sdk_error_detail_fields (error : Agent_sdk.Error.sdk_error) =
   match error with
   | Agent_sdk.Error.Api error -> sdk_api_error_fields error

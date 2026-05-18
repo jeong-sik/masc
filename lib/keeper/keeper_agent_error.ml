@@ -97,8 +97,8 @@ let sdk_termination_semantics = function
   | Agent_sdk.Error.Agent (Agent_sdk.Error.TripwireViolation _) ->
     Oas_tripwire_violation
   | Agent_sdk.Error.Agent (Agent_sdk.Error.UnrecognizedStopReason _) -> Sdk_error_failure
-  | Agent_sdk.Error.Api _ -> Sdk_error_failure
   | Agent_sdk.Error.Provider _ -> Sdk_error_failure
+  | Agent_sdk.Error.Api _ -> Sdk_error_failure
   | Agent_sdk.Error.Mcp _ -> Sdk_error_failure
   | Agent_sdk.Error.Config _ -> Sdk_error_failure
   | Agent_sdk.Error.Serialization _ -> Sdk_error_failure
@@ -141,6 +141,54 @@ let api_error_terminal_reason_code (err : Agent_sdk.Error.api_error) : string =
   | Agent_sdk.Retry.ContextOverflow _ -> "api_error_context_overflow"
   | Agent_sdk.Retry.NetworkError _ -> "api_error_network"
   | Agent_sdk.Retry.Timeout _ -> "api_error_timeout"
+;;
+
+let provider_error_terminal_reason_code
+    (err : Agent_sdk.Error.provider_error)
+  : string
+  =
+  match err with
+  | Llm_provider.Error.MissingApiKey _ -> "provider_error_missing_api_key"
+  | Llm_provider.Error.InvalidConfig { field; _ } ->
+    Printf.sprintf "provider_error_invalid_config:%s" field
+  | Llm_provider.Error.ParseError _ -> "provider_error_parse"
+  | Llm_provider.Error.UnknownVariant { type_name; value } ->
+    Printf.sprintf "provider_error_unknown_variant:%s:%s" type_name value
+  | Llm_provider.Error.ProviderUnavailable { provider; _ } ->
+    Printf.sprintf "provider_error_unavailable:%s" provider
+  | Llm_provider.Error.RateLimit { provider; _ } ->
+    Printf.sprintf "provider_error_rate_limited:%s" provider
+  | Llm_provider.Error.HardQuota { provider; _ } ->
+    Printf.sprintf "provider_error_hard_quota:%s" provider
+  | Llm_provider.Error.CapacityExhausted { scope; _ } ->
+    Printf.sprintf
+      "provider_error_capacity_exhausted:%s"
+      (Llm_provider.Error.capacity_scope_to_string scope)
+  | Llm_provider.Error.AuthError { provider; _ } ->
+    Printf.sprintf "provider_error_auth:%s" provider
+  | Llm_provider.Error.ServerError { provider; code; _ } ->
+    Printf.sprintf "provider_error_server:%s:%d" provider code
+  | Llm_provider.Error.NetworkError { provider; kind; _ } ->
+    Printf.sprintf
+      "provider_error_network:%s:%s"
+      provider
+      (match kind with
+       | Llm_provider.Http_client.Connection_refused -> "connection_refused"
+       | Llm_provider.Http_client.Dns_failure -> "dns_failure"
+       | Llm_provider.Http_client.Tls_error -> "tls_error"
+       | Llm_provider.Http_client.Timeout -> "timeout"
+       | Llm_provider.Http_client.Local_resource_exhaustion ->
+         "local_resource_exhaustion"
+       | Llm_provider.Http_client.End_of_file -> "end_of_file"
+       | Llm_provider.Http_client.Unknown -> "unknown")
+  | Llm_provider.Error.Timeout { provider; _ } ->
+    Printf.sprintf "provider_error_timeout:%s" provider
+  | Llm_provider.Error.InvalidRequest { provider; _ } ->
+    Printf.sprintf "provider_error_invalid_request:%s" provider
+  | Llm_provider.Error.NotFound { provider; _ } ->
+    Printf.sprintf "provider_error_not_found:%s" provider
+  | Llm_provider.Error.ProviderTerminal { provider; reason; _ } ->
+    Printf.sprintf "provider_error_terminal:%s:%s" provider reason
 ;;
 
 (* Per-variant terminal_reason_code for Agent_sdk.Error.Agent.

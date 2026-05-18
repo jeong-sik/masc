@@ -79,7 +79,53 @@ let get_head_sha path =
 (** Try [gh pr list --head <branch> --json number,state --limit 1].
     Returns [(pr_number, pr_state)] on success; both [None] on failure
     (gh not installed, auth missing, not a GitHub repo). *)
-let query_pr_for_branch branch =
+let github_gate_tool_name = "dashboard_worktree_status.gh_pr_list"
+
+let query_pr_runner_for_tests : (string list -> string) option Atomic.t =
+  Atomic.make None
+;;
+
+let run_gh_pr_list_argv argv =
+  match Atomic.get query_pr_runner_for_tests with
+  | Some run -> run argv
+  | None ->
+    Masc_exec.Exec_gate.run_argv
+      ~actor:(Masc_exec.Agent_id.of_string "dashboard/worktree_status")
+      ~raw_source:(exec_gate_raw_source argv)
+      ~summary:"dashboard_worktree_status gh pr list"
+      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Gh_shared ())
+      argv
+;;
+
+let github_gate_clock = function
+  | Some clock -> Some clock
+  | None ->
+    (match Process_eio.get_clock () with
+     | Ok clock -> Some clock
+     | Error _ -> None)
+;;
+
+let run_gh_pr_list_with_gate ?clock ~branch argv =
+  let run () = run_gh_pr_list_argv argv in
+  match github_gate_clock clock with
+  | None -> run ()
+  | Some clock ->
+    Tool_resource_gate.with_permit_raw
+      ~clock
+      ~tool_name:github_gate_tool_name
+      ~arguments:(`Assoc [ "branch", `String branch ])
+      ~is_read_only:true
+      ~wait_timeout_override_sec:0.05
+      ~on_reject:(fun message ->
+        Log.Dashboard.warn
+          "dashboard_worktree_status.query_pr_for_branch: github lane saturated for %s: %s"
+          branch
+          message;
+        "[]")
+      run
+;;
+
+let query_pr_for_branch ?clock branch =
   if branch = ""
   then None, None
   else (
@@ -87,14 +133,7 @@ let query_pr_for_branch branch =
       let argv =
         [ "gh"; "pr"; "list"; "--head"; branch; "--json"; "number,state"; "--limit"; "1" ]
       in
-      let output =
-        Masc_exec.Exec_gate.run_argv
-          ~actor:(Masc_exec.Agent_id.of_string "dashboard/worktree_status")
-          ~raw_source:(exec_gate_raw_source argv)
-          ~summary:"dashboard_worktree_status gh pr list"
-          ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Gh_shared ())
-          argv
-      in
+      let output = run_gh_pr_list_with_gate ?clock ~branch argv in
       (* Output is a JSON array: [{"number":42,"state":"OPEN"}] or [] *)
       match Yojson.Safe.from_string (String.trim output) with
       | `List (`Assoc fields :: _) ->
@@ -119,6 +158,13 @@ let query_pr_for_branch branch =
         (Printexc.to_string exn);
       None, None)
 ;;
+
+module For_testing = struct
+  let query_pr_for_branch = query_pr_for_branch
+  let github_gate_tool_name = github_gate_tool_name
+  let set_query_pr_runner run = Atomic.set query_pr_runner_for_tests (Some run)
+  let clear_query_pr_runner () = Atomic.set query_pr_runner_for_tests None
+end
 
 (* ------------------------------------------------------------------ *)
 (* Keeper-attached detection                                            *)

@@ -45,3 +45,14 @@ val sse_events : base_path:string -> string list
     terminal [event: done\\ndata: {}\\n\\n] sentinel.  The caller
     writes these sequentially to the streaming response body and then
     closes the writer. *)
+
+module For_testing : sig
+  val query_pr_for_branch
+    :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+    -> string
+    -> int option * string option
+
+  val github_gate_tool_name : string
+  val set_query_pr_runner : (string list -> string) -> unit
+  val clear_query_pr_runner : unit -> unit
+end

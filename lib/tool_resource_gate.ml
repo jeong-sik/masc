@@ -380,6 +380,7 @@ let classify ~tool_name ~arguments ~is_read_only =
   | Some (Tool_name.Masc_keeper tool) -> classify_masc_keeper_tool tool
   | None ->
     if String.starts_with ~prefix:"keeper_pr_" tool_name then Github
+    else if String.equal tool_name "dashboard_worktree_status.gh_pr_list" then Github
     else if String.starts_with ~prefix:"keeper_bash" tool_name then Shell
     else if String.equal tool_name "shell_exec" then Shell
     else if string_contains tool_name "docker" || string_contains tool_name "sandbox"
@@ -403,7 +404,14 @@ let gate_timeout_message gate wait_timeout =
     gate.env_var
 ;;
 
-let with_permit_raw ~clock ~tool_name ~arguments ~is_read_only ~on_reject f =
+let with_permit_raw
+      ?wait_timeout_override_sec
+      ~clock
+      ~tool_name
+      ~arguments
+      ~is_read_only
+      ~on_reject
+      f =
   let resource_class = classify ~tool_name ~arguments ~is_read_only in
   if (not (enabled ())) || resource_class = Ungated
   then f ()
@@ -411,7 +419,11 @@ let with_permit_raw ~clock ~tool_name ~arguments ~is_read_only ~on_reject f =
     match gate_for_class resource_class with
     | None -> f ()
     | Some gate ->
-      let wait_timeout = wait_timeout_sec () in
+      let wait_timeout =
+        match wait_timeout_override_sec with
+        | Some seconds -> max 0.001 seconds
+        | None -> wait_timeout_sec ()
+      in
       Atomic.incr gate.waiting;
       let acquired =
         try

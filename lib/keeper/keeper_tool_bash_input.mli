@@ -69,12 +69,19 @@ type validation_error =
     }
   | Cwd_not_absolute of string
   | Pipeline_empty
+  | Pipeline_too_short
   | Env_key_invalid of string
 
 val validate : mode:allowlist_mode -> bash_input -> (unit, validation_error) result
 (** Run all structural checks against [input].  Returns [Ok ()] on
     success, or the first {!validation_error} encountered.  No side
     effects, no exceptions. *)
+
+val to_shell_ir :
+  mode:allowlist_mode -> bash_input -> (Masc_exec.Shell_ir.t, validation_error) result
+(** Validate and lower [input] into {!Masc_exec.Shell_ir.t}.  [Pipeline]
+    inputs become an explicit {!Masc_exec.Shell_ir.Pipeline}; literal ["|"]
+    argv tokens remain ordinary argument data and never create a pipeline. *)
 
 val pp_validation_error : Format.formatter -> validation_error -> unit
 (** Human-readable formatter for {!validation_error}.  Stable across

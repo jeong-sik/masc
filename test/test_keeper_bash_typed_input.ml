@@ -126,6 +126,20 @@ let test_pipeline_empty () =
     (typed_ok input)
 ;;
 
+let test_pipeline_single_stage_rejected () =
+  let input =
+    Bash_input.Pipeline
+      { stages = [ { executable = "rg"; argv = [ "pattern" ] } ]
+      ; cwd = None
+      ; env = []
+      }
+  in
+  Alcotest.(check bool)
+    "pipeline with one stage is rejected"
+    false
+    (typed_ok input)
+;;
+
 let test_pipeline_stage_executable_check () =
   let input =
     Bash_input.Pipeline
@@ -141,6 +155,80 @@ let test_pipeline_stage_executable_check () =
     "pipeline: non-allowlisted stage executable is rejected"
     false
     (typed_ok input)
+;;
+
+let shell_arg_string = function
+  | Masc_exec.Shell_ir.Lit s -> s
+  | Masc_exec.Shell_ir.Var name -> "$" ^ name
+  | Masc_exec.Shell_ir.Concat _ -> "<concat>"
+;;
+
+let shell_simple_tuple (simple : Masc_exec.Shell_ir.simple) =
+  ( Masc_exec.Bin.to_string simple.bin
+  , List.map shell_arg_string simple.args )
+;;
+
+let to_shell_ir_exn input =
+  match Bash_input.to_shell_ir ~mode:Bash_input.Dev_full input with
+  | Ok ir -> ir
+  | Error error ->
+    Alcotest.failf
+      "to_shell_ir failed: %a"
+      Bash_input.pp_validation_error
+      error
+;;
+
+let test_pipeline_lowers_to_shell_ir_pipeline () =
+  let input =
+    Bash_input.Pipeline
+      { stages =
+          [ { executable = "echo"; argv = [ "hello world" ] }
+          ; { executable = "tr"; argv = [ "a-z"; "A-Z" ] }
+          ]
+      ; cwd = Some "/tmp"
+      ; env = [ "LC_ALL", "C" ]
+      }
+  in
+  match to_shell_ir_exn input with
+  | Masc_exec.Shell_ir.Pipeline
+      [ Masc_exec.Shell_ir.Simple first; Masc_exec.Shell_ir.Simple second ] ->
+    Alcotest.(check (pair string (list string)))
+      "first stage"
+      ("echo", [ "hello world" ])
+      (shell_simple_tuple first);
+    Alcotest.(check (pair string (list string)))
+      "second stage"
+      ("tr", [ "a-z"; "A-Z" ])
+      (shell_simple_tuple second);
+    Alcotest.(check (option string))
+      "cwd copied to every stage"
+      (Some "/tmp")
+      (Option.map Masc_exec.Path_scope.raw second.cwd);
+    Alcotest.(check (list (pair string string)))
+      "env copied to every stage"
+      [ "LC_ALL", "C" ]
+      (List.map (fun (key, value) -> key, shell_arg_string value) second.env)
+  | other ->
+    Alcotest.failf "expected Shell_ir.Pipeline, got %a" Masc_exec.Shell_ir.pp other
+;;
+
+let test_pipe_character_in_exec_argv_is_literal () =
+  let input =
+    Bash_input.Exec
+      { executable = "echo"
+      ; argv = [ "foo|bar" ]
+      ; cwd = None
+      ; env = []
+      }
+  in
+  match to_shell_ir_exn input with
+  | Masc_exec.Shell_ir.Simple simple ->
+    Alcotest.(check (pair string (list string)))
+      "pipe char remains argv data"
+      ("echo", [ "foo|bar" ])
+      (shell_simple_tuple simple)
+  | Masc_exec.Shell_ir.Pipeline _ ->
+    Alcotest.fail "literal pipe argv token must not create Shell_ir.Pipeline"
 ;;
 
 let test_cwd_not_absolute () =
@@ -173,12 +261,24 @@ let suite =
   ("RFC-0091 PR-1 differential",
     List.map
       (fun c -> Alcotest.test_case c.name `Quick (test_case c))
-      cases
+    cases
     @ [ Alcotest.test_case "pipeline_empty" `Quick test_pipeline_empty
+      ; Alcotest.test_case
+          "pipeline_single_stage_rejected"
+          `Quick
+          test_pipeline_single_stage_rejected
       ; Alcotest.test_case
           "pipeline_stage_executable_check"
           `Quick
           test_pipeline_stage_executable_check
+      ; Alcotest.test_case
+          "pipeline_lowers_to_shell_ir_pipeline"
+          `Quick
+          test_pipeline_lowers_to_shell_ir_pipeline
+      ; Alcotest.test_case
+          "pipe_character_in_exec_argv_is_literal"
+          `Quick
+          test_pipe_character_in_exec_argv_is_literal
       ; Alcotest.test_case "cwd_not_absolute" `Quick test_cwd_not_absolute
       ; Alcotest.test_case "env_key_invalid" `Quick test_env_key_invalid
       ])

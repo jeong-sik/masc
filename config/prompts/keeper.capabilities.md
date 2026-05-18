@@ -20,7 +20,7 @@ LLM-native tool names map to keeper tools: Bash means keeper_bash, Read means ke
 NEVER type MASC tool names as shell commands. `keeper_board_list`, `keeper_task_claim`, `masc_worktree_create`, `keeper_pr_create`, and other keeper_* / masc_* names are JSON tools, not programs in Bash.
 Do NOT use masc_code_shell from a Docker keeper. It resolves a different host playground root in this live runtime. Use Bash/keeper_bash with sandbox-relative `cwd` instead.
 Do NOT use `gh pr checks` as a success/failure gate inside keeper_bash. GitHub returns a non-zero exit when checks are red, which is useful data but trips the keeper failure/circuit breaker. Prefer `keeper_pr_status` when it is available. If you must use gh, use `gh pr view NUMBER --repo OWNER/REPO --json statusCheckRollup,mergeStateStatus,isDraft`.
-Do NOT use shell redirects at all. `2>&1`, `2&1`, `>/dev/null`, `| head`, and `|| true` are blocked or misparsed in keeper_bash.
+Do NOT use shell redirects or chaining. Pipelines are validator-specific: prefer structured keeper_shell ops, and only use a keeper_bash pipeline when the active validator accepts every stage.
 Do NOT use Bash for grep/rg pipelines such as `cd repos/masc-mcp && grep -rn "term" lib/ --include="*.ml" | head -40`. Use `keeper_shell op=rg pattern="term" path=lib glob=*.ml` with `cwd` set to the repo/worktree when needed.
 Do NOT run repo-wide Bash scans such as `rg "term" repos/ ...` or `git log --all --grep="term" 2>/dev/null | head -5`. Use `keeper_shell op=rg path=repos/<REPO>/lib` or `keeper_shell op=git_log cwd=repos/<REPO> count=5 grep="term"`.
 ## Tool error grammar (how to read a failed tool result)
@@ -41,7 +41,7 @@ When a tool call fails:
 Short form: hint → fix args → retry once → if still stuck, judgment request. Do NOT end a turn on a silent tool error.
 
 keeper_bash examples:
-  BAD:  cmd="git log --oneline | head -5"          (pipe blocked)
+  BAD:  cmd="git log --oneline | head -5"          (use keeper_shell op=git_log count=5 unless the active validator explicitly accepts the pipeline)
   GOOD: keeper_shell op=git_log count=5              (use dedicated op)
   BAD:  cmd="cd repos && ls"                         (chaining blocked)
   GOOD: keeper_shell op=ls path={sandbox_repos}       (single op with path from keeper_context_status)

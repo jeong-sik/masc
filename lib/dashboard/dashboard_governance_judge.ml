@@ -636,6 +636,50 @@ let prompt_for_facts facts_json =
   | Ok value -> value
   | Error _ -> Prompt_registry.get_prompt "dashboard.governance_judge"
 
+let rec json_has_material_value = function
+  | `Null -> false
+  | `Bool value -> value
+  | `Int value -> value <> 0
+  | `Intlit value -> String.trim value <> "" && value <> "0"
+  | `Float value -> value <> 0.0
+  | `String value -> String.trim value <> ""
+  | `List values -> List.exists json_has_material_value values
+  | `Assoc fields -> List.exists (fun (_, value) -> json_has_material_value value) fields
+
+let list_field_nonempty name json =
+  match json |> member name with
+  | `List (_ :: _) -> true
+  | _ -> false
+
+let agents_facts_nonempty = function
+  | `Assoc fields ->
+      let count_nonzero =
+        match List.assoc_opt "count" fields with
+        | Some (`Int value) -> value > 0
+        | Some (`Intlit value) -> (
+            match int_of_string_opt value with
+            | Some parsed -> parsed > 0
+            | None -> false)
+        | _ -> false
+      in
+      count_nonzero || list_field_nonempty "agents" (`Assoc fields)
+  | `List (_ :: _) -> true
+  | _ -> false
+
+let governance_facts_need_judgment facts_json =
+  match facts_json with
+  | `Assoc fields ->
+      list_field_nonempty "items" facts_json
+      || list_field_nonempty "activity" facts_json
+      || agents_facts_nonempty (facts_json |> member "agents")
+      || List.exists
+           (fun (name, value) ->
+             (not
+                (List.mem name [ "generated_at"; "items"; "activity"; "agents" ]))
+             && json_has_material_value value)
+           fields
+  | _ -> json_has_material_value facts_json
+
 let compute_judgments
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.t)
@@ -654,16 +698,33 @@ let compute_judgments
     Masc_oas_bridge.run_with_caller
       ~caller:Env_config_oas_bridge.Governance_judge (fun () ->
       let factual_json = build_facts () in
-      let prompt = prompt_for_facts factual_json in
-      Keeper_turn_driver_wrappers.run_named_with_masc_tools ~cascade_name
-        ~goal:prompt ~masc_tools ~dispatch ~max_turns:3
-        ~accept:Keeper_tool_disclosure.response_has_text_or_tool_progress
-        ~approval:Approval_callbacks.auto_approve
-        ()
+      if not (governance_facts_need_judgment factual_json) then
+        Ok `No_governance_facts
+      else
+        let prompt = prompt_for_facts factual_json in
+        match
+          Keeper_turn_driver_wrappers.run_named_with_masc_tools
+            ~cascade_name
+            ~goal:prompt
+            ~masc_tools
+            ~dispatch
+            ~max_turns:3
+            ~accept:Keeper_tool_disclosure.response_has_text_or_tool_progress
+            ~approval:Approval_callbacks.auto_approve
+            ()
+        with
+        | Ok result -> Ok (`Judge_response result)
+        | Error err -> Error err
     )
   with
   | Error err -> Error (Agent_sdk.Error.to_string err)
-  | Ok result -> (
+  | Ok `No_governance_facts ->
+      let generated_at = now_iso () in
+      let expires_at = iso_of_unix (Unix.gettimeofday () +. cache_ttl_sec ()) in
+      Log.Governance.routine
+        "compute_judgments: no governance facts; skipping judge call";
+      Ok ("not_applicable", generated_at, expires_at, [])
+  | Ok (`Judge_response result) -> (
       let response = result.Cascade_runner.response in
       try
         let raw_text = Agent_sdk_response.text_of_response response in

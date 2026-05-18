@@ -685,6 +685,53 @@ let test_refresh_once_skips_fresh_cached_result () =
       check string "runtime status is online" "online" status.status;
       check (option string) "last_error stays clear" None status.last_error)
 
+let test_refresh_once_skips_empty_governance_facts () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      with_test_fs env @@ fun () ->
+      let build_called = ref false in
+      let dispatch_called = ref false in
+      Eio.Switch.run @@ fun sw ->
+      Lib.Dashboard_governance_judge.refresh_once ~sw
+        ~net:(Eio.Stdenv.net env)
+        ~masc_tools:[]
+        ~dispatch:(fun ~name ~args:_ ->
+          dispatch_called := true;
+          {
+            Tool_result.success = false;
+            data = `String "unused";
+            legacy_message = "unused";
+            tool_name = name;
+            duration_ms = 0.0;
+            failure_class = None;
+          })
+        ~base_path:dir
+        ~build_facts:(fun () ->
+          build_called := true;
+          `Assoc
+            [ ("generated_at", `String (Masc_domain.now_iso ()))
+            ; ("items", `List [])
+            ; ("activity", `List [])
+            ; ( "agents"
+              , `Assoc [ ("agents", `List []); ("count", `Int 0) ] )
+            ]);
+      check bool "empty facts still build facts" true !build_called;
+      check bool "empty facts skip judge dispatch" false !dispatch_called;
+      let status =
+        Lib.Dashboard_governance_judge.runtime_status_at
+          ~now_ts:(Unix.gettimeofday ()) dir
+      in
+      check bool "empty facts judge is healthy" true status.judge_online;
+      check string "empty facts status online" "online" status.status;
+      check (option string) "empty facts last_error clear" None status.last_error;
+      check (option string) "empty facts compute outcome ok" (Some "ok")
+        status.last_compute_outcome;
+      check (option string) "empty facts compute reason ok" (Some "ok")
+        status.last_compute_reason)
+
 let test_backoff_runtime_status_is_structured () =
   let dir = test_dir () in
   Fun.protect
@@ -1001,6 +1048,8 @@ let () =
             test_refresh_failure_marks_invalid_json_as_judge_output_invalid;
           test_case "refresh_once skips fresh cached result" `Quick
             test_refresh_once_skips_fresh_cached_result;
+          test_case "refresh_once skips empty governance facts" `Quick
+            test_refresh_once_skips_empty_governance_facts;
           test_case "backoff runtime status is structured" `Quick
             test_backoff_runtime_status_is_structured;
           test_case "monitoring uses live runtime" `Quick

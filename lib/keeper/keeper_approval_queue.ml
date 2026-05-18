@@ -500,17 +500,17 @@ let find_matching_rule
 
 (* ── Persistent audit log ────────────────────────────────── *)
 
-(* Stdlib.Mutex: the store registry critical section only mutates an in-memory
-   hashtable and creates a Dated_jsonl handle. It is also used by synchronous
-   tests outside an Eio context, so an Eio mutex would either raise Get_context
-   or poison the registry after a recoverable store-creation failure. *)
+(* Eio.Mutex: approval audit writes run from approval-flow Eio fibers. Using a
+   Stdlib.Mutex here can turn cooperative fiber contention on the same system
+   thread into EDEADLK. [Eio_guard] keeps pre-runtime synchronous callers
+   working by running the critical section directly until Eio is enabled. *)
 (** Dated JSONL audit trail for approval events.
     Stored at [<base_path>/.masc/audit-approvals/YYYY-MM/DD.jsonl].
     Dashboard and room-scoped keeper runs pass [base_path] explicitly so approval
     history stays with the room that made the decision. *)
-let audit_stores_mu = Stdlib.Mutex.create ()
+let audit_stores_mu = Eio.Mutex.create ()
 
-let audit_io_mu = Stdlib.Mutex.create ()
+let audit_io_mu = Eio.Mutex.create ()
 let audit_stores : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 4
 
 let keeper_audit_metric_label = function
@@ -550,7 +550,7 @@ let get_audit_store ?base_path () =
       | None -> Env_config_core.base_path ()
     in
     match
-      Stdlib.Mutex.protect audit_stores_mu (fun () ->
+      Eio_guard.with_mutex audit_stores_mu (fun () ->
         try
           Ok
             (match Hashtbl.find_opt audit_stores base with
@@ -633,7 +633,7 @@ let audit_approval_event
          | Some value -> [ "auto_approved", `Bool value ]
          | None -> [])
     in
-    Stdlib.Mutex.protect audit_io_mu (fun () ->
+    Eio_guard.with_mutex audit_io_mu (fun () ->
       try Fs_compat.append_jsonl (audit_today_path (Dated_jsonl.base_dir store)) json with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn -> record_queue_failure ~keeper_name ~site:"audit_append" ~id ~event_type exn)
@@ -697,7 +697,7 @@ let read_recent_audit ?base_path ?keeper_name ?(n = 20) () : Yojson.Safe.t list 
 
 module For_testing = struct
   let reset_audit_store () =
-    Stdlib.Mutex.protect audit_stores_mu (fun () -> Hashtbl.clear audit_stores)
+    Eio_guard.with_mutex audit_stores_mu (fun () -> Hashtbl.clear audit_stores)
   ;;
 end
 

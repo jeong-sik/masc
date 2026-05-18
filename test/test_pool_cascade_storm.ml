@@ -28,38 +28,34 @@
 
 open Masc_mcp
 
-let find_free_port () =
-  let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
-  Fun.protect
-    ~finally:(fun () -> Unix.close socket)
-    (fun () ->
-       Unix.setsockopt socket Unix.SO_REUSEADDR true;
-       (match Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback, 0)) with
-        | () -> ()
-        | exception Unix.Unix_error ((Unix.EPERM | Unix.EACCES), "bind", _) ->
-          Alcotest.skip ());
-       match Unix.getsockname socket with
-       | Unix.ADDR_INET (_, port) -> port
-       | _ -> failwith "unexpected socket family")
-;;
-
 (* The server is given an explicit [stop] promise so the test
    drives shutdown deterministically. [Eio.Fiber.fork_daemon] would
    cancel the accept loop at switch teardown, but cohttp-eio's
    accept loop can hold the switch alive on cancel as it drains
    in-flight connections; an explicit promise sidesteps that race. *)
-let start_echo_server ~sw ~net ~port ~stop =
+let start_echo_server ~sw ~net ~stop =
   let handler _conn _req body =
     let _ = Eio.Buf_read.(of_flow ~max_size:1024 body |> take_all) in
     Cohttp_eio.Server.respond_string ~status:`OK ~body:"ok" ()
   in
   let socket =
-    Eio.Net.listen net ~sw ~backlog:32 ~reuse_addr:true
-      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+    match
+      Eio.Net.listen net ~sw ~backlog:32 ~reuse_addr:true
+        (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+    with
+    | socket -> socket
+    | exception Unix.Unix_error ((Unix.EPERM | Unix.EACCES), "bind", _) ->
+      Alcotest.skip ()
+  in
+  let port =
+    match Eio.Net.listening_addr socket with
+    | `Tcp (_, port) -> port
+    | `Unix _ -> Alcotest.fail "unexpected Unix-domain echo server socket"
   in
   let server = Cohttp_eio.Server.make ~callback:handler () in
   Eio.Fiber.fork ~sw (fun () ->
-    Cohttp_eio.Server.run ~stop socket server ~on_error:(fun _ -> ()))
+    Cohttp_eio.Server.run ~stop socket server ~on_error:(fun _ -> ()));
+  port
 ;;
 
 (* 16 concurrent fibers × 5 sequential requests each = 80 total. The
@@ -69,19 +65,14 @@ let start_echo_server ~sw ~net ~port ~stop =
 let test_keep_alive_dominates_create () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let port = find_free_port () in
   let stop_p, stop_r = Eio.Promise.create () in
-  start_echo_server ~sw ~net:(Eio.Stdenv.net env) ~port ~stop:stop_p;
+  let port = start_echo_server ~sw ~net:(Eio.Stdenv.net env) ~stop:stop_p in
   Fun.protect
     ~finally:(fun () ->
       (* Drive the server's accept loop to exit so the switch can unwind
          cleanly, even when an assertion above fails. *)
       Eio.Promise.resolve stop_r ())
     (fun () ->
-       (* Brief grace to let the listen socket reach LISTEN before clients
-          dial — without this, the first few connect() calls race the
-          server's [Eio.Net.listen]. 50 ms is well under the test budget. *)
-       Eio.Time.sleep (Eio.Stdenv.clock env) 0.05;
        let url = Printf.sprintf "http://127.0.0.1:%d/" port in
        let pool = Masc_http_client.Pool.create ~sw ~env () in
        (* Sanity: one request first to surface piaf/eio plumbing bugs

@@ -95,6 +95,7 @@ let sdk_termination_semantics = function
   | Agent_sdk.Error.Agent (Agent_sdk.Error.TripwireViolation _) ->
     Oas_tripwire_violation
   | Agent_sdk.Error.Agent (Agent_sdk.Error.UnrecognizedStopReason _) -> Sdk_error_failure
+  | Agent_sdk.Error.Provider _ -> Sdk_error_failure
   | Agent_sdk.Error.Api _ -> Sdk_error_failure
   | Agent_sdk.Error.Provider _ -> Sdk_error_failure
   | Agent_sdk.Error.Mcp _ -> Sdk_error_failure

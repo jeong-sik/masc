@@ -65,6 +65,8 @@ let to_user_message last_err =
   | Some (Llm_provider.Http_client.CliTransportRequired { kind }) ->
       Printf.sprintf "%s provider requires a CLI transport" kind
   | Some (Llm_provider.Http_client.NetworkError { message; _ }) -> message
+  | Some (Llm_provider.Http_client.TimeoutError _ as err) ->
+      Oas_compat.Http_client.error_message err
   | Some
       ( (Llm_provider.Http_client.TimeoutError _
         | Llm_provider.Http_client.ProviderTerminal _

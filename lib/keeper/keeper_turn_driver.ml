@@ -748,6 +748,8 @@ let run_named
               Keeper_types.Other_detail (Cascade_fsm.to_user_message last_err)
         | Some (Llm_provider.Http_client.CliTransportRequired _) ->
             Keeper_types.Other_detail (Cascade_fsm.to_user_message last_err)
+        | Some (Llm_provider.Http_client.TimeoutError _ as err) ->
+            Keeper_types.Other_detail (Cascade_fsm.to_user_message (Some err))
         | Some (Llm_provider.Http_client.ProviderTerminal
             { kind = Llm_provider.Http_client.Max_turns _; _ }) ->
             Keeper_types.Max_turns_exceeded

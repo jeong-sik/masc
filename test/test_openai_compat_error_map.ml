@@ -3,7 +3,7 @@
 
     Each row asserts that a representative [sdk_error] variant produces
     the documented (http_status, openai_kind, openai_code) triple. The
-    table is intentionally exhaustive over the 9 top-level [sdk_error]
+    table is intentionally exhaustive over the 10 top-level [sdk_error]
     constructors — exhaustiveness over sub-variants is enforced by the
     OCaml compiler at the implementation site (no catch-all `_ ->`). *)
 
@@ -81,9 +81,9 @@ let test_api_timeout () =
   check_mapping
     ~label:"Api Timeout"
     ~input:(E.Api (E.Retry.Timeout { message = "took too long" }))
-    ~expected_status:`Gateway_timeout
+    ~expected_status:`Service_unavailable
     ~expected_kind:"server_error"
-    ~expected_code:(Some "timeout") ()
+    ~expected_code:(Some "provider_error") ()
 
 let test_api_server_error () =
   check_mapping
@@ -92,6 +92,19 @@ let test_api_server_error () =
     ~expected_status:`Bad_gateway
     ~expected_kind:"server_error"
     ~expected_code:(Some "upstream_502") ()
+
+let test_provider_timeout () =
+  check_mapping
+    ~label:"Provider Timeout"
+    ~input:
+      (E.Provider
+         (Llm_provider.Error.Timeout
+            { provider = "anthropic";
+              timeout_phase = Some Llm_provider.Http_client.Caller_budget;
+              detail = "provider step exceeded budget" }))
+    ~expected_status:`Gateway_timeout
+    ~expected_kind:"server_error"
+    ~expected_code:(Some "timeout") ()
 
 let test_agent_token_budget () =
   check_mapping
@@ -215,6 +228,8 @@ let test_internal () =
 let test_message_nonempty () =
   let samples : E.sdk_error list =
     [ E.Api (E.Retry.RateLimited { retry_after = None; message = "x" })
+    ; E.Provider
+        (Llm_provider.Error.InvalidRequest { provider = "p"; reason = "bad" })
     ; E.Agent (E.IdleDetected { consecutive_idle_turns = 3 })
     ; E.Mcp (E.InitializeFailed { detail = "boom" })
     ; E.Config (E.InvalidConfig { field = "f"; detail = "d" })
@@ -251,6 +266,9 @@ let () =
         ; Alcotest.test_case "ContextOverflow → 400" `Quick test_api_context_overflow
         ; Alcotest.test_case "Timeout → 504"       `Quick test_api_timeout
         ; Alcotest.test_case "ServerError 502 → 502" `Quick test_api_server_error
+        ] )
+    ; ( "provider"
+      , [ Alcotest.test_case "Timeout -> 503" `Quick test_provider_timeout
         ] )
     ; ( "agent"
       , [ Alcotest.test_case "TokenBudgetExceeded → 400" `Quick test_agent_token_budget

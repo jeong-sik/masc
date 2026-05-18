@@ -127,21 +127,22 @@ let test_local_resource_error_does_not_cascade () =
   | Local_resource_exhaustion -> ()
   | _ -> Alcotest.fail "local resource exhaustion must keep its typed class"
 
-let test_timeout_error_cascades () =
+let test_timeout_error_cascades_and_renders_phase () =
   let err =
     Http_client.TimeoutError
-      { phase = Provider_step; message = "provider step timed out" }
+      { message = "stream stalled waiting for provider output";
+        phase = Stream_idle Streaming_answer }
   in
   Alcotest.(check bool)
-    "typed timeout is provider-local and should cascade"
+    "typed timeout budget errors should cascade to the next provider"
     true
     (Oas_compat.Http_client.should_cascade err);
   (match Oas_compat.Http_client.classify err with
-   | Network_error -> ()
-   | _ -> Alcotest.fail "TimeoutError must classify as Network_error");
+   | Timeout_error -> ()
+   | _ -> Alcotest.fail "TimeoutError must classify as Timeout_error");
   Alcotest.(check string)
-    "TimeoutError -> message"
-    "provider step timed out"
+    "TimeoutError renders phase evidence"
+    "timeout[stream_idle:streaming_answer]: stream stalled waiting for provider output"
     (Oas_compat.Http_client.error_message err)
 
 (* --- ProviderTerminal: pin classify, should_cascade, and the new
@@ -398,10 +399,10 @@ let () =
           Alcotest.test_case "local resource error does not cascade"
             `Quick test_local_resource_error_does_not_cascade;
         ] );
-      ( "Typed timeout errors cascade",
+      ( "TimeoutError budget evidence cascades",
         [
           Alcotest.test_case "TimeoutError classify + cascade + message"
-            `Quick test_timeout_error_cascades;
+            `Quick test_timeout_error_cascades_and_renders_phase;
         ] );
       ( "ProviderTerminal — agent-level terminal does not cascade",
         [

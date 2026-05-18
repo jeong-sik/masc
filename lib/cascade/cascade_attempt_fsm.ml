@@ -41,6 +41,97 @@ let retry_message_looks_like_model_access_denied (message : string) : bool =
   || String_util.contains_substring_ci message "does not have access to"
   || String_util.contains_substring_ci message "not authorized to access"
 
+let provider_capacity_scope_of_oas = function
+  | Llm_provider.Error.CapacityModel -> `Model
+  | Llm_provider.Error.CapacityAccount
+  | Llm_provider.Error.CapacityRegion
+  | Llm_provider.Error.CapacityProvider
+  | Llm_provider.Error.CapacityUnknown ->
+    `Provider
+
+let http_error_of_provider_error (err : Agent_sdk.Error.provider_error) =
+  match err with
+  | Llm_provider.Error.MissingApiKey { var_name } ->
+    Llm_provider.Http_client.HttpError
+      { code = 401; body = Printf.sprintf "missing API key: %s" var_name }
+  | Llm_provider.Error.InvalidConfig { field; detail } ->
+    Llm_provider.Http_client.ProviderFailure
+      {
+        kind =
+          Llm_provider.Http_client.Unknown_provider_failure
+            { reason = Some (Printf.sprintf "invalid_config:%s" field) };
+        message = detail;
+      }
+  | Llm_provider.Error.ParseError { detail } ->
+    Llm_provider.Http_client.ProviderFailure
+      {
+        kind = Llm_provider.Http_client.Provider_parse_error { parser = None };
+        message = detail;
+      }
+  | Llm_provider.Error.UnknownVariant { type_name; value } ->
+    Llm_provider.Http_client.ProviderFailure
+      {
+        kind =
+          Llm_provider.Http_client.Unknown_provider_failure
+            { reason = Some (Printf.sprintf "unknown_variant:%s" type_name) };
+        message = value;
+      }
+  | Llm_provider.Error.ProviderUnavailable { provider; detail } ->
+    Llm_provider.Http_client.ProviderFailure
+      {
+        kind =
+          Llm_provider.Http_client.Unknown_provider_failure
+            { reason = Some (Printf.sprintf "provider_unavailable:%s" provider) };
+        message = detail;
+      }
+  | Llm_provider.Error.RateLimit { detail; _ } ->
+    Llm_provider.Http_client.HttpError { code = 429; body = detail }
+  | Llm_provider.Error.HardQuota { detail; retry_after } ->
+    Llm_provider.Http_client.ProviderFailure
+      { kind = Llm_provider.Http_client.Hard_quota { retry_after }; message = detail }
+  | Llm_provider.Error.CapacityExhausted
+      { scope; affected; retry_after; detail } ->
+    let model =
+      match affected with
+      | model :: _ -> Some model
+      | [] -> None
+    in
+    Llm_provider.Http_client.ProviderFailure
+      {
+        kind =
+          Llm_provider.Http_client.Capacity_exhausted
+            {
+              scope =
+                (match provider_capacity_scope_of_oas scope with
+                 | `Model -> Llm_provider.Http_client.Failure_scope_model
+                 | `Provider -> Llm_provider.Http_client.Failure_scope_provider);
+              retry_after;
+              model;
+            };
+        message = detail;
+      }
+  | Llm_provider.Error.AuthError { detail; _ } ->
+    Llm_provider.Http_client.HttpError { code = 401; body = detail }
+  | Llm_provider.Error.ServerError { code; detail; _ } ->
+    Llm_provider.Http_client.HttpError { code; body = detail }
+  | Llm_provider.Error.NetworkError { kind; detail; _ } ->
+    Llm_provider.Http_client.NetworkError { message = detail; kind }
+  | Llm_provider.Error.Timeout { timeout_phase; detail; _ } ->
+    Llm_provider.Http_client.TimeoutError
+      {
+        message = detail;
+        phase =
+          Option.value timeout_phase
+            ~default:Llm_provider.Http_client.Unknown_timeout;
+      }
+  | Llm_provider.Error.InvalidRequest { reason; _ } ->
+    Llm_provider.Http_client.HttpError { code = 400; body = reason }
+  | Llm_provider.Error.NotFound { detail; _ } ->
+    Llm_provider.Http_client.HttpError { code = 404; body = detail }
+  | Llm_provider.Error.ProviderTerminal { reason; detail; _ } ->
+    Llm_provider.Http_client.ProviderTerminal
+      { kind = Llm_provider.Http_client.Other reason; message = detail }
+
 (** Convert an OAS sdk_error into a Cascade_fsm provider_outcome.
     API-level errors and model-capability-dependent agent errors are
     cascadeable (a different provider may succeed).  Structural agent
@@ -103,25 +194,9 @@ let sdk_error_to_cascade_outcome (err : Agent_sdk.Error.sdk_error)
     in
     Some (Cascade_fsm.Call_err http_err)
   | Agent_sdk.Error.Provider provider_err ->
-    let should_cascade =
-      Llm_provider.Error.is_retryable provider_err
-      ||
-      match provider_err with
-      | Llm_provider.Error.HardQuota _
-      | Llm_provider.Error.CapacityExhausted _
-      | Llm_provider.Error.ProviderUnavailable _
-      | Llm_provider.Error.ParseError _ ->
-          true
-      | _ -> false
-    in
-    if should_cascade then
-      Some
-        (Cascade_fsm.Call_err
-           (Llm_provider.Http_client.NetworkError
-              {
-                message = Llm_provider.Error.to_string provider_err;
-                kind = Llm_provider.Http_client.Unknown;
-              }))
+    let http_err = http_error_of_provider_error provider_err in
+    if Cascade_health_filter.should_cascade_to_next http_err then
+      Some (Cascade_fsm.Call_err http_err)
     else
       None
   (* Model-capability errors: the next provider may handle these.
@@ -481,6 +556,8 @@ let sdk_error_is_hard_quota (err : Agent_sdk.Error.sdk_error) : bool =
      | Some message ->
        message_looks_like_cli_wrapped_hard_quota message
      | None -> false)
+  | Agent_sdk.Error.Provider (Llm_provider.Error.HardQuota _) -> true
+  | Agent_sdk.Error.Provider _ -> false
   (* Non-Api error families never carry provider-level hard-quota signals. *)
   | Agent_sdk.Error.Agent _
   | Agent_sdk.Error.Provider _
@@ -582,11 +659,13 @@ let sdk_provider_error_to_provider_error = function
       Some (Provider_error.InvalidRequest { reason = detail })
   | Llm_provider.Error.ProviderTerminal { detail; _ } ->
       Some (Provider_error.InvalidRequest { reason = detail })
-  | Llm_provider.Error.ProviderUnavailable _
-  | Llm_provider.Error.ParseError _
-  | Llm_provider.Error.UnknownVariant _
   | Llm_provider.Error.NetworkError _
   | Llm_provider.Error.Timeout _ ->
+      Some (Provider_error.ServerError { code = 503; transient = true })
+  | Llm_provider.Error.ProviderUnavailable _ ->
+      Some (Provider_error.ServerError { code = 503; transient = true })
+  | Llm_provider.Error.ParseError _
+  | Llm_provider.Error.UnknownVariant _ ->
       None
 
 let sdk_error_to_provider_error ~provider err =
@@ -597,7 +676,7 @@ let sdk_error_to_provider_error ~provider err =
         api_err
   | Agent_sdk.Error.Provider provider_err ->
       sdk_provider_error_to_provider_error provider_err
-  (* Non-Api families do not map to a provider-level error. *)
+  (* Non-Api / non-Provider families do not map to a provider-level error. *)
   | Agent_sdk.Error.Agent _
   | Agent_sdk.Error.Mcp _
   | Agent_sdk.Error.Config _
@@ -679,6 +758,7 @@ let timeout_source_label (err : Agent_sdk.Error.sdk_error) : string =
     | Agent_sdk.Error.Io _
     | Agent_sdk.Error.Orchestration _
     | Agent_sdk.Error.A2a _
+    | Agent_sdk.Error.Provider _
     | Agent_sdk.Error.Internal _ -> false
   in
   if is_max_execution_time then provider_label_max_execution_time else label_provider

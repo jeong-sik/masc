@@ -669,6 +669,15 @@ let sdk_error_is_server_rejected_parse_error (err : Agent_sdk.Error.sdk_error) =
     || string_contains_substring ~needle:"unexpected character in json" lower
     || string_contains_substring ~needle:"unterminated" lower
     || string_contains_substring ~needle:"parse error" lower
+  | Agent_sdk.Error.Provider
+      (Llm_provider.Error.InvalidRequest { reason = message; _ }
+      | Llm_provider.Error.ParseError { detail = message }) ->
+    let lower = String.lowercase_ascii message in
+    (string_contains_substring ~needle:"can't find closing" lower
+     || string_contains_substring ~needle:"find end of" lower)
+    || string_contains_substring ~needle:"unexpected character in json" lower
+    || string_contains_substring ~needle:"unterminated" lower
+    || string_contains_substring ~needle:"parse error" lower
   | Agent_sdk.Error.Api
       ( RateLimited _
       | Overloaded _
@@ -686,6 +695,7 @@ let sdk_error_is_server_rejected_parse_error (err : Agent_sdk.Error.sdk_error) =
   | Agent_sdk.Error.Io _
   | Agent_sdk.Error.Orchestration _
   | Agent_sdk.Error.A2a _
+  | Agent_sdk.Error.Provider _
   | Agent_sdk.Error.Internal _ -> false
 
 let config_for_label

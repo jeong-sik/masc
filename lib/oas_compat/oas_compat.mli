@@ -32,6 +32,7 @@ module Http_client : sig
     | Cli_transport_required
     | Tls_error
     | Network_error
+    | Timeout_error
     | Provider_terminal
         (** Provider-level terminal condition that should stop cascading. *)
     | Provider_capacity_exhausted

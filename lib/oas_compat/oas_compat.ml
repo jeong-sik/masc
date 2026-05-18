@@ -12,6 +12,7 @@ module Http_client = struct
     | Cli_transport_required
     | Tls_error
     | Network_error
+    | Timeout_error
     | Provider_terminal
         (** OAS [ProviderTerminal] — provider has signalled a terminal
             condition (e.g. claude_cli [error_max_turns]). Treat as
@@ -170,12 +171,12 @@ module Http_client = struct
           | None -> Accept_rejected_terminal)
       | Llm_provider.Http_client.CliTransportRequired _ ->
           Cli_transport_required
+      | Llm_provider.Http_client.TimeoutError _ ->
+          Timeout_error
       | Llm_provider.Http_client.ProviderTerminal _ ->
           Provider_terminal
       | Llm_provider.Http_client.ProviderFailure { kind; _ } ->
           classify_provider_failure_kind kind
-      | Llm_provider.Http_client.TimeoutError _ ->
-          Network_error
       | Llm_provider.Http_client.NetworkError { kind; _ } ->
           if kind = Llm_provider.Http_client.Tls_error then Tls_error else Network_error
 
@@ -193,6 +194,7 @@ module Http_client = struct
     | Accept_rejected_capability_mismatch
     | Cli_transport_required
     | Network_error
+    | Timeout_error
     | Provider_capacity_exhausted
     | Provider_hard_quota
     | Provider_capability_mismatch
@@ -205,7 +207,10 @@ module Http_client = struct
   let error_message (err : Llm_provider.Http_client.http_error) : string =
     match err with
     | Llm_provider.Http_client.NetworkError { message; _ } -> message
-    | Llm_provider.Http_client.TimeoutError { message; _ } -> message
+    | Llm_provider.Http_client.TimeoutError { message; phase } ->
+        Printf.sprintf "timeout[%s]: %s"
+          (Llm_provider.Http_client.timeout_phase_to_label phase)
+          message
     | Llm_provider.Http_client.AcceptRejected { reason } -> reason
     | Llm_provider.Http_client.CliTransportRequired { kind } ->
         Printf.sprintf "%s provider requires a CLI transport" kind

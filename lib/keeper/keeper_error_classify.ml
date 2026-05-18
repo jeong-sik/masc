@@ -111,6 +111,15 @@ let is_server_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
       || string_contains_substring ~needle:"unexpected character in json" lower
       || string_contains_substring ~needle:"unterminated" lower
       || string_contains_substring ~needle:"parse error" lower
+  | Agent_sdk.Error.Provider
+      (Llm_provider.Error.InvalidRequest { reason = message; _ }
+      | Llm_provider.Error.ParseError { detail = message }) ->
+      let lower = String.lowercase_ascii message in
+      (string_contains_substring ~needle:"can't find closing" lower
+       || string_contains_substring ~needle:"find end of" lower)
+      || string_contains_substring ~needle:"unexpected character in json" lower
+      || string_contains_substring ~needle:"unterminated" lower
+      || string_contains_substring ~needle:"parse error" lower
   (* All other API error variants do not represent server-side parse failures. *)
   | Agent_sdk.Error.Api (RateLimited _)
   | Agent_sdk.Error.Api (Overloaded _)
@@ -129,6 +138,7 @@ let is_server_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Io _
   | Agent_sdk.Error.Orchestration _
   | Agent_sdk.Error.A2a _
+  | Agent_sdk.Error.Provider _
   | Agent_sdk.Error.Internal _ -> false
 
 let is_required_tool_contract_violation (err : Agent_sdk.Error.sdk_error) : bool =
@@ -400,13 +410,24 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
              Some Server_error
          | Agent_sdk.Error.Api (Llm_provider.Retry.AuthError _) ->
              Some Auth_error
+         | Agent_sdk.Error.Provider (Llm_provider.Error.HardQuota _) ->
+             Some Hard_quota
+         | Agent_sdk.Error.Provider (Llm_provider.Error.CapacityExhausted _) ->
+             Some Rate_limit
          | Agent_sdk.Error.Provider (Llm_provider.Error.RateLimit _) ->
              Some Rate_limit
-         | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { code; _ })
+         | Agent_sdk.Error.Provider
+             (Llm_provider.Error.ServerError { code; _ })
            when code >= 500 ->
              Some Server_error
-         | Agent_sdk.Error.Provider (Llm_provider.Error.AuthError _) ->
+         | Agent_sdk.Error.Provider (Llm_provider.Error.AuthError _)
+         | Agent_sdk.Error.Provider (Llm_provider.Error.MissingApiKey _) ->
              Some Auth_error
+         | Agent_sdk.Error.Provider
+             (Llm_provider.Error.ProviderUnavailable _
+             | Llm_provider.Error.NetworkError _
+             | Llm_provider.Error.Timeout _) ->
+             Some Server_error
          (* Sub-500 server errors (4xx already handled above for AuthError /
             RateLimited) are not classified as recoverable cascade failures. *)
          | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _)
@@ -779,6 +800,7 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Api (NotFound _)
   | Agent_sdk.Error.Api (NetworkError _)
   | Agent_sdk.Error.Api (Timeout _) -> false
+  | Agent_sdk.Error.Provider _ -> false
   (* Other agent error variants. *)
   | Agent_sdk.Error.Agent (MaxTurnsExceeded _)
   | Agent_sdk.Error.Agent (CostBudgetExceeded _)

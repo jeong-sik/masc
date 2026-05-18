@@ -188,6 +188,7 @@
   keeper_memory_llm_summary
   keeper_memory_recall
   keeper_status_bridge
+  keeper_tools_oas_markers
   autoresearch_codegen
   autoresearch_knowledge
   autoresearch_lineage

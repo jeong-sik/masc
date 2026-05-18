@@ -71,6 +71,10 @@ let is_transient_network_error (err : Agent_sdk.Error.sdk_error) : bool =
       not (is_structural_oas_timeout_message detail)
   | Agent_sdk.Error.Api (Overloaded _) -> true
   | Agent_sdk.Error.Api (ServerError { status = 503; _ }) -> true
+  (* Cloudflare 524 "A timeout occurred" — origin server did not respond
+     in time.  Functionally identical to a gateway timeout: the LLM never
+     processed the request, so no side effects were committed. *)
+  | Agent_sdk.Error.Api (ServerError { status = 524; _ }) -> true
   | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { transient; _ }) ->
       transient
   (* Non-transient API errors. *)

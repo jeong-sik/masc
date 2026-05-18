@@ -12985,6 +12985,18 @@ let () =
               (EC.is_transient_network_error
                  (Agent_sdk.Error.Api
                     (ServerError { status = 503; message = "Service Unavailable" }))))
+        ; test_case "ServerError 524 (Cloudflare gateway timeout) detected" `Quick
+          (fun () ->
+            check
+              bool
+              "524 cloudflare timeout is transient"
+              true
+              (EC.is_transient_network_error
+                 (Agent_sdk.Error.Api
+                    (ServerError
+                       { status = 524
+                       ; message = "A timeout occurred"
+                       }))))
         ; test_case "ServerError 500 not transient" `Quick (fun () ->
             check
               bool

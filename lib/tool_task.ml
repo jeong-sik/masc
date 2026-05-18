@@ -157,38 +157,57 @@ let validate_task_id task_id =
   if String.equal task_id "" then Error (Masc_domain.Task (Masc_domain.Task_error.InvalidId "empty task ID"))
   else Ok task_id
 
+let is_keeper_agent_alias_name agent_name =
+  let trimmed = String.trim agent_name in
+  let has_wrapped_name ~prefix ~suffix =
+    let plen = String.length prefix in
+    let slen = String.length suffix in
+    let len = String.length trimmed in
+    len > plen + slen
+    && String.starts_with ~prefix trimmed
+    && String.ends_with ~suffix trimmed
+  in
+  has_wrapped_name ~prefix:"keeper-" ~suffix:"-agent"
+  || has_wrapped_name ~prefix:"keeper_" ~suffix:"_agent"
+  || has_wrapped_name ~prefix:"keeper-" ~suffix:"_agent"
+  || has_wrapped_name ~prefix:"keeper_" ~suffix:"-agent"
+
 let sync_planning_current_task_with_owned_task (ctx : context) =
-  let actual_name =
-    try Coord.resolve_agent_name ctx.config ctx.agent_name
-    with
-    | Sys_error _ | Yojson.Json_error _ -> ctx.agent_name
-    | exn ->
-        Log.Task.warn "resolve_agent_name failed for %s: %s" ctx.agent_name
-          (Stdlib.Printexc.to_string exn);
-        ctx.agent_name
-  in
-  let matches_you assignee =
-    String.equal assignee ctx.agent_name || String.equal assignee actual_name
-  in
-  let owned_task =
-    Coord.get_tasks_raw ctx.config
-    |> List.find_map (fun (task : Masc_domain.task) ->
-           match task.task_status with
-           | Masc_domain.Claimed { assignee; _ }
-           | Masc_domain.InProgress { assignee; _ } ->
-               if matches_you assignee then Some task.id else None
-           | Masc_domain.Todo
-           | Masc_domain.AwaitingVerification _
-           | Masc_domain.Done _
-           | Masc_domain.Cancelled _ -> None)
-  in
-  match owned_task with
-  | Some task_id ->
-      (match Planning_eio.set_current_task ctx.config ~task_id with
-       | Ok () -> ()
-       | Error msg ->
-           Log.Task.warn "failed to sync planning current_task to %s: %s" task_id msg)
-  | None -> Planning_eio.clear_current_task ctx.config
+  if is_keeper_agent_alias_name ctx.agent_name
+  then ()
+  else
+    let actual_name =
+      try Coord.resolve_agent_name ctx.config ctx.agent_name
+      with
+      | Sys_error _ | Yojson.Json_error _ -> ctx.agent_name
+      | exn ->
+          Log.Task.warn "resolve_agent_name failed for %s: %s" ctx.agent_name
+            (Stdlib.Printexc.to_string exn);
+          ctx.agent_name
+    in
+    let matches_you assignee =
+      String.equal assignee ctx.agent_name || String.equal assignee actual_name
+    in
+    let owned_task =
+      Coord.get_tasks_raw ctx.config
+      |> List.find_map (fun (task : Masc_domain.task) ->
+             match task.task_status with
+             | Masc_domain.Claimed { assignee; _ }
+             | Masc_domain.InProgress { assignee; _ } ->
+                 if matches_you assignee then Some task.id else None
+             | Masc_domain.Todo
+             | Masc_domain.AwaitingVerification _
+             | Masc_domain.Done _
+             | Masc_domain.Cancelled _ -> None)
+    in
+    match owned_task with
+    | Some task_id ->
+        (match Planning_eio.set_current_task ctx.config ~task_id with
+         | Ok () -> ()
+         | Error msg ->
+             Log.Task.warn "failed to sync planning current_task to %s: %s"
+               task_id msg)
+    | None -> Planning_eio.clear_current_task ctx.config
 
 let sync_keeper_current_task_binding (ctx : context) =
   Keeper_current_task_reconcile.sync_current_task_id_for_agent_name

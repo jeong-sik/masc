@@ -79,6 +79,21 @@ let test_read_recent_more_than_exists () =
   let result = Dated_jsonl.read_recent store 100 in
   check int "returns all 2" 2 (List.length result)
 
+let write_dated_file dir month day lines =
+  let month_dir = Filename.concat dir month in
+  Fs_compat.mkdir_p month_dir;
+  Fs_compat.append_file
+    (Filename.concat month_dir (day ^ ".jsonl"))
+    (String.concat "\n" lines ^ "\n")
+
+let test_read_recent_skips_malformed_lines () =
+  let dir = tmpdir "dated_jsonl_recent_malformed" in
+  write_dated_file dir "2026-01" "01"
+    [ {|{"i":1}|}; "not-json"; {|{"i":2}|} ];
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  let values = Dated_jsonl.read_recent store 10 |> List.map json_i in
+  check (list int) "read_recent skips malformed rows" [ 1; 2 ] values
+
 let test_load_tail_lines_drops_partial_chunk_prefix () =
   let dir = tmpdir "dated_jsonl_partial_tail" in
   let path = Filename.concat dir "tail.jsonl" in
@@ -180,13 +195,6 @@ let test_read_range_malformed () =
   let result = Dated_jsonl.read_range store ~since:"bad" ~until:"dates" in
   check int "malformed dates return empty" 0 (List.length result)
 
-let write_dated_file dir month day lines =
-  let month_dir = Filename.concat dir month in
-  Fs_compat.mkdir_p month_dir;
-  Fs_compat.append_file
-    (Filename.concat month_dir (day ^ ".jsonl"))
-    (String.concat "\n" lines ^ "\n")
-
 let test_iter_all_chronological_skips_malformed () =
   let dir = tmpdir "dated_jsonl_iter_all" in
   write_dated_file dir "2026-01" "01" [ {|{"i":1}|}; "not-json" ];
@@ -282,6 +290,8 @@ let () =
           test_case "returns newest N chronological" `Quick test_read_recent;
           test_case "returns 0 for n=0" `Quick test_read_recent_zero;
           test_case "returns all when n > count" `Quick test_read_recent_more_than_exists;
+          test_case "skips malformed rows" `Quick
+            test_read_recent_skips_malformed_lines;
           test_case "drops partial chunk prefix" `Quick test_load_tail_lines_drops_partial_chunk_prefix;
           test_case "keeps first data row after blank partial prefix" `Quick
             test_load_tail_lines_keeps_first_data_after_blank_prefix;

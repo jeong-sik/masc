@@ -103,9 +103,75 @@ let test_concurrent_threads () =
     (n_threads * n_records_per_thread)
     (Hashtbl.length seen)
 
+let test_mixed_append_file_and_jsonl_share_mutex () =
+  let dir = tmpdir "fs_compat_mixed_append" in
+  let path = Filename.concat dir "out.jsonl" in
+  let n_threads = 12 in
+  let n_records_per_thread = 80 in
+  let threads =
+    List.init n_threads (fun tid ->
+      Thread.create
+        (fun () ->
+          for seq = 0 to n_records_per_thread - 1 do
+            let payload =
+              String.concat "" (List.init (140 + (seq mod 37)) (fun _ -> "가"))
+            in
+            let json =
+              `Assoc
+                [
+                  ("tid", `Int tid);
+                  ("seq", `Int seq);
+                  ( "writer",
+                    `String (if tid mod 2 = 0 then "append_jsonl" else "append_file") );
+                  ("payload", `String payload);
+                ]
+            in
+            if tid mod 2 = 0 then Fs_compat.append_jsonl path json
+            else Fs_compat.append_file path (Yojson.Safe.to_string json ^ "\n")
+          done)
+        ())
+  in
+  List.iter Thread.join threads;
+  let lines = read_lines path in
+  check int "line count == mixed writers × records"
+    (n_threads * n_records_per_thread)
+    (List.length lines);
+  let seen = Hashtbl.create (n_threads * n_records_per_thread) in
+  List.iter
+    (fun line ->
+      let json =
+        try Yojson.Safe.from_string line
+        with e ->
+          failf "invalid mixed JSONL row (len=%d): %s\nfirst bytes: %S"
+            (String.length line)
+            (Printexc.to_string e)
+            (if String.length line > 60 then String.sub line 0 60 else line)
+      in
+      let open Yojson.Safe.Util in
+      let tid = json |> member "tid" |> to_int in
+      let seq = json |> member "seq" |> to_int in
+      let writer = json |> member "writer" |> to_string in
+      let expected_writer =
+        if tid mod 2 = 0 then "append_jsonl" else "append_file"
+      in
+      check string "writer tag matches tid parity" expected_writer writer;
+      let key = (tid, seq) in
+      if Hashtbl.mem seen key
+      then failf "duplicate mixed record: tid=%d seq=%d" tid seq;
+      Hashtbl.add seen key ())
+    lines;
+  check int "unique mixed (tid, seq) pairs"
+    (n_threads * n_records_per_thread)
+    (Hashtbl.length seen)
+
 let () =
   Alcotest.run
     "fs_compat_append_jsonl_atomicity"
     [ "atomicity",
-      [ test_case "16 threads × 100 multibyte records" `Quick test_concurrent_threads ]
+      [
+        test_case "16 threads × 100 multibyte records" `Quick
+          test_concurrent_threads;
+        test_case "append_file and append_jsonl share path mutex" `Quick
+          test_mixed_append_file_and_jsonl_share_mutex;
+      ]
     ]

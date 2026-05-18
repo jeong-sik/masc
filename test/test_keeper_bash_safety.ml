@@ -1013,6 +1013,38 @@ let test_keeper_bash_safe_dev_null_echo_fallback_executes_primary () =
      |> Json.to_string
      |> fun output -> String_util.contains_substring output "marker")
 
+let test_keeper_bash_safe_dev_null_redirect_executes_scoped_ls () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "dev-null-ls" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  let worktrees = Filename.concat playground "repos/masc-mcp/.worktrees" in
+  ensure_dir worktrees;
+  ignore (Fs_compat.save_file_atomic (Filename.concat worktrees "marker") "ok");
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:
+        (`Assoc
+           [ ( "cmd"
+             , `String "ls repos/masc-mcp/.worktrees/ 2>/dev/null" )
+           ; ("cwd", `String playground)
+           ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "direct dev-null ls succeeds" true
+    (json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check bool) "ls output is preserved" true
+    (json
+     |> Json.member "output"
+     |> Json.to_string
+     |> fun output -> String_util.contains_substring output "marker")
+
 let test_keeper_bash_safe_fallback_works_for_write_enabled_keeper () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
@@ -1146,6 +1178,43 @@ let test_keeper_bash_safe_dev_null_redirect_executes_scoped_grep () =
      |> Json.member "output"
      |> Json.to_string
      |> fun output -> String_util.contains_substring output "quoted_pipe.ml")
+
+let test_keeper_bash_safe_head_pipeline_executes_scoped_cat () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "head-cat" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  let repo_dir = Filename.concat playground "repos/masc-mcp/docs" in
+  ensure_dir repo_dir;
+  ignore
+    (Fs_compat.save_file_atomic
+       (Filename.concat repo_dir "notes.txt")
+       "first line\nsecond line\n");
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:
+        (`Assoc
+           [ ( "cmd"
+             , `String
+                 "cat repos/masc-mcp/docs/notes.txt 2>/dev/null | head -1"
+             )
+           ; ("cwd", `String playground)
+           ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "safe cat | head succeeds" true
+    (json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check bool) "cat output is preserved" true
+    (json
+     |> Json.member "output"
+     |> Json.to_string
+     |> fun output -> String_util.contains_substring output "first line")
 
 let test_keeper_bash_cat_dev_null_executes () =
   with_eio_fs @@ fun () ->
@@ -1848,6 +1917,8 @@ let () =
     ("readonly_hints", [
       Alcotest.test_case "safe dev-null echo fallback executes primary" `Quick
         test_keeper_bash_safe_dev_null_echo_fallback_executes_primary;
+      Alcotest.test_case "safe dev-null redirect executes scoped ls" `Quick
+        test_keeper_bash_safe_dev_null_redirect_executes_scoped_ls;
       Alcotest.test_case "safe fallback works for write-enabled keeper" `Quick
         test_keeper_bash_safe_fallback_works_for_write_enabled_keeper;
       Alcotest.test_case "safe cd fallback executes scoped read" `Quick
@@ -1856,6 +1927,8 @@ let () =
         test_keeper_bash_safe_rg_fallback_allows_escaped_regex_pipe;
       Alcotest.test_case "safe dev-null redirect executes scoped grep" `Quick
         test_keeper_bash_safe_dev_null_redirect_executes_scoped_grep;
+      Alcotest.test_case "safe head pipeline executes scoped cat" `Quick
+        test_keeper_bash_safe_head_pipeline_executes_scoped_cat;
       Alcotest.test_case "cat /dev/null executes" `Quick
         test_keeper_bash_cat_dev_null_executes;
       Alcotest.test_case "task-state file probe uses task tools" `Quick

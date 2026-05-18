@@ -301,6 +301,8 @@ let () =
       , [ test_case "syntax valid" `Quick test_scripts_are_syntax_valid
         ; test_case "status warns on fd hotspot" `Quick
             test_status_warns_on_fd_hotspot
+        ; test_case "status warns on worktree hotspot when lsof fails" `Quick
+            test_status_warns_on_worktree_hotspot_when_lsof_fails
         ; test_case "dry-run lists stale clean worktree" `Quick
             test_dry_run_lists_stale_clean_worktree
         ; test_case "recent checkout of old commit is not candidate" `Quick

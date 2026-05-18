@@ -259,6 +259,20 @@ module For_testing : sig
     -> tool_calls:tool_call_detail list
     -> string option
   (** Selects the task scope used for keeper-side CDAL verdict persistence. *)
+
+  val progress_keeper_tool_names_for_contract
+    :  allowed_tool_names:string list
+    -> actual_keeper_tool_names:string list
+    -> tool_calls:tool_call_detail list
+    -> string list
+  (** Tool names that may satisfy keeper execution-progress contracts. *)
+
+  val no_progress_success_tool_names_for_contract
+    :  allowed_tool_names:string list
+    -> tool_calls:tool_call_detail list
+    -> string list
+  (** Successful tool calls that were intentionally classified as
+      idempotent/no-progress. *)
 end
 
 (** {1 Turn execution} *)

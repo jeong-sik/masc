@@ -124,6 +124,14 @@ let is_usable_git_worktree path =
       | None -> false)
   | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> false
 
+let current_worktree_branch path =
+  match
+    Coord_worktree_exec.run_argv_with_status
+      [ "git"; "-C"; path; "rev-parse"; "--abbrev-ref"; "HEAD" ]
+  with
+  | Unix.WEXITED 0, output -> Coord_worktree_exec.first_nonempty_line output
+  | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> None
+
 let run_git_in_clone clone_path args =
   Coord_worktree_exec.run_argv_with_status
     ([ "git"; "-C"; clone_path; "--no-optional-locks" ] @ args)

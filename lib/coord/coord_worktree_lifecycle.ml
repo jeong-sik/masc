@@ -165,21 +165,45 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
                  keeper_path branch_name repo_name race_note link_note
                  (Coord_worktree_paths.worktree_next_step keeper_path))
           in
-
-          (* Create .worktrees directory if not exists *)
-          Fs_compat.mkdir_p worktrees_dir;
-
-          (* Check if worktree already exists *)
-          if Coord_worktree_paths.safe_file_exists worktree_path then begin
-            if Coord_worktree_paths.is_usable_git_worktree worktree_path then
-              existing_worktree_ok ()
-            else
+          let existing_worktree_branch_conflict ?actual_branch () =
+            let actual =
+              match actual_branch with
+              | Some branch -> branch
+              | None -> "(unresolved)"
+            in
+            Error
+              (System (System_error.IoError
+                 (Printf.sprintf
+                    "worktree_path_conflict: %s already exists as a git \
+                     worktree on branch %s, but task %s expects branch %s. \
+                     Use the matching task/branch worktree or remove/repair \
+                     this path before retrying."
+                    worktree_path actual task_id branch_name)))
+          in
+          let existing_worktree_result ?(created_concurrently=false) () =
+            if not (Coord_worktree_paths.is_usable_git_worktree worktree_path)
+            then
               Error
                 (System (System_error.IoError
                    (Printf.sprintf
                       "worktree_path_conflict: %s already exists but is not a \
                        usable git worktree. Remove or repair it before retrying."
                       worktree_path)))
+            else
+              match Coord_worktree_paths.current_worktree_branch worktree_path with
+              | Some actual_branch when String.equal actual_branch branch_name ->
+                existing_worktree_ok ~created_concurrently ()
+              | Some actual_branch ->
+                existing_worktree_branch_conflict ~actual_branch ()
+              | None -> existing_worktree_branch_conflict ()
+          in
+
+          (* Create .worktrees directory if not exists *)
+          Fs_compat.mkdir_p worktrees_dir;
+
+          (* Check if worktree already exists *)
+          if Coord_worktree_paths.safe_file_exists worktree_path then begin
+            existing_worktree_result ()
           end else begin
             (* Fetch origin first; stale remotes must be explicit, not hidden.
                Use the longer git_fetch_timeout_sec budget — the default
@@ -271,7 +295,7 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
                 end
                 else if Coord_worktree_paths.is_usable_git_worktree worktree_path
                 then
-                  existing_worktree_ok ~created_concurrently:true ()
+                  existing_worktree_result ~created_concurrently:true ()
                 else begin
                   Coord_worktree_destructive_ops.rm_rf worktree_path;
                   let detail = String.trim git_output in

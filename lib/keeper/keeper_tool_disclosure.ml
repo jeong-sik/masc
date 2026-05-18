@@ -172,6 +172,22 @@ let final_keeper_tool_names
   |> List.filter (fun tool_name -> Hashtbl.mem allowed tool_name)
 ;;
 
+let result_text_for_progress_check output_text =
+  match Tool_output.decode_from_oas output_text with
+  | Tool_output.Stored { preview; _ } -> preview
+  | Tool_output.Inline value -> value
+;;
+
+let tool_result_has_material_progress ~(tool_name : string) ~(output_text : string)
+  : bool
+  =
+  let tool_name = canonical_name tool_name in
+  let output_text = result_text_for_progress_check output_text |> String.trim in
+  not
+    (String.equal tool_name "masc_worktree_create"
+     && String.starts_with ~prefix:"Worktree already exists:" output_text)
+;;
+
 let unexpected_tool_names ~(allowed_tool_names : string list) ~(tool_names : string list)
   : string list
   =

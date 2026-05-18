@@ -9503,6 +9503,43 @@ let test_actionable_tool_contract_allows_execution_tools () =
        ~tool_names:[ "keeper_bash"; "masc_status" ]);
   check
     (option string)
+    "board coordination can satisfy non-owned board signal"
+    None
+    (KTD.actionable_tool_contract_violation_reason
+       ~claim_context_allowed:true
+       ~actionable_signal_context:true
+       ~tool_names:[ "keeper_board_comment" ]);
+  (match
+     KTD.actionable_tool_contract_violation_reason
+       ~claim_context_allowed:false
+       ~actionable_signal_context:true
+       ~tool_names:[ "keeper_board_post"; "keeper_tasks_list" ]
+   with
+   | Some reason ->
+     check
+       bool
+       "owned task board-only turn requires execution progress"
+       true
+       (contains_substring reason "without execution progress")
+   | None -> fail "expected owned task board-only turn to violate contract");
+  check
+    (option string)
+    "worktree creation satisfies owned task progress"
+    None
+    (KTD.actionable_tool_contract_violation_reason
+       ~claim_context_allowed:false
+       ~actionable_signal_context:true
+       ~tool_names:[ "masc_worktree_create" ]);
+  check
+    (option string)
+    "PR creation satisfies owned task progress"
+    None
+    (KTD.actionable_tool_contract_violation_reason
+       ~claim_context_allowed:false
+       ~actionable_signal_context:true
+       ~tool_names:[ "keeper_pr_create" ]);
+  check
+    (option string)
     "non-actionable no-op remains allowed"
     None
     (KTD.actionable_tool_contract_violation_reason

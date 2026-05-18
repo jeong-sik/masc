@@ -516,13 +516,34 @@ let classify_tool_progress name =
   else Passive_status
 ;;
 
+let is_owned_task_coordination_progress_tool_name name =
+  let name = canonical_tool_name name in
+  match Tool_name.of_string name with
+  | Some (Tool_name.Keeper Tool_name.Keeper.Handoff)
+  | Some (Tool_name.Keeper Tool_name.Keeper.Pr_create)
+  | Some (Tool_name.Keeper Tool_name.Keeper.Pr_review_comment)
+  | Some (Tool_name.Keeper Tool_name.Keeper.Pr_review_reply) -> true
+  | _ -> false
+;;
+
 let is_owned_task_progress_tool_name name =
   if is_stay_silent_tool_name name
   then false
-  else (
-    match classify_tool_progress name with
-    | Execution | Completion -> true
-    | Passive_status | Claim_context -> false)
+  else
+    let name = canonical_tool_name name in
+    if is_completion_tool_name name || is_owned_task_coordination_progress_tool_name name
+    then true
+    else (
+      match Tool_catalog.effect_domain name with
+      | Some (Tool_catalog.Playground_write | Tool_catalog.Main_worktree_write) ->
+        true
+      | Some Tool_catalog.Masc_coordination
+      | Some Tool_catalog.Read_only
+      | None -> false)
+;;
+
+let is_actionable_signal_progress_tool_name name =
+  (not (is_stay_silent_tool_name name)) && tool_name_can_satisfy_required_contract name
 ;;
 
 let is_passive_status_tool_name name =
@@ -574,7 +595,12 @@ let actionable_tool_contract_violation_reason
     match tool_names with
     | [] ->
       Some "actionable keeper signal was present, but the model called no keeper tools"
-    | names when List.exists is_owned_task_progress_tool_name names -> None
+    | names
+      when List.exists
+             (if claim_context_allowed
+              then is_actionable_signal_progress_tool_name
+              else is_owned_task_progress_tool_name)
+             names -> None
     | names
       when (not claim_context_allowed)
            && not (List.exists is_owned_task_progress_tool_name names) ->

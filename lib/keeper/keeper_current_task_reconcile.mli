@@ -1,9 +1,12 @@
 (** Reconcile keeper [current_task_id] with active backlog ownership. *)
 
-(** Find the single active task a keeper owns.
+(** Find the deterministic active task a keeper should treat as current.
 
     Only [Claimed] and [InProgress] tasks are active bindings. Tasks awaiting
-    verification have left the keeper's execution lane and clear the binding. *)
+    verification have left the keeper's execution lane and clear the binding.
+    If multiple active tasks remain, reconciliation keeps an existing active
+    [current_task_id], otherwise it chooses a stable task by status, priority,
+    creation time, and task id. *)
 val owned_active_task_id_for_meta :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->

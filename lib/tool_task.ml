@@ -158,19 +158,7 @@ let validate_task_id task_id =
   else Ok task_id
 
 let is_keeper_agent_alias_name agent_name =
-  let trimmed = String.trim agent_name in
-  let has_wrapped_name ~prefix ~suffix =
-    let plen = String.length prefix in
-    let slen = String.length suffix in
-    let len = String.length trimmed in
-    len > plen + slen
-    && String.starts_with ~prefix trimmed
-    && String.ends_with ~suffix trimmed
-  in
-  has_wrapped_name ~prefix:"keeper-" ~suffix:"-agent"
-  || has_wrapped_name ~prefix:"keeper_" ~suffix:"_agent"
-  || has_wrapped_name ~prefix:"keeper-" ~suffix:"_agent"
-  || has_wrapped_name ~prefix:"keeper_" ~suffix:"-agent"
+  Keeper_identity.is_keeper_agent_alias (String.trim agent_name)
 
 let sync_planning_current_task_with_owned_task (ctx : context) =
   let actual_name =

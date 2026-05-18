@@ -133,6 +133,7 @@ jobs:
             const presentBypassLabels = labels.filter((label) => bypassLabelSet.has(label));
             const bypassPolicyFailures = [];
             const verifiedBypassLabels = [];
+            const unverifiedBypassLabels = [];
             const approvalGateMarker = "<!-- masc-human-approval-gate -->";
             let issueCommentsCache = null;
             const loadIssueComments = async () => {
@@ -175,12 +176,15 @@ jobs:
                 );
                 if (!latest) {
                   bypassPolicyFailures.push(`${label}: no label event found`);
+                  unverifiedBypassLabels.push(label);
                 } else if (latest.event !== "labeled") {
                   bypassPolicyFailures.push(`${label}: latest event is ${latest.event}`);
+                  unverifiedBypassLabels.push(label);
                 } else {
                   const approvalGate = await findApprovalGateAfter(label, latest.created_at);
                   if (!approvalGate) {
                     bypassPolicyFailures.push(`${label}: missing environment-gated approval after latest label event`);
+                    unverifiedBypassLabels.push(label);
                   } else {
                     verifiedBypassLabels.push(`${label} via environment gate`);
                   }
@@ -312,6 +316,38 @@ jobs:
               softFailures.push(`${actionName}: ${summary}`);
               core.info(`Draft PR guard soft-failure (${actionName}): ${summary}`);
             };
+
+            for (const label of [...new Set(unverifiedBypassLabels)]) {
+              try {
+                await github.rest.issues.removeLabel({
+                  owner,
+                  repo,
+                  issue_number: pullNumber,
+                  name: label
+                });
+                actions.push(`removed unverified bypass label ${label}`);
+              } catch (error) {
+                if (error?.status === 404) {
+                  recordSoftFailure(`remove unverified bypass label ${label}`, error);
+                } else {
+                  recordFailure(`remove unverified bypass label ${label}`, error);
+                }
+              }
+            }
+
+            if (unverifiedBypassLabels.length > 0 && hardStopLabels.length > 0) {
+              try {
+                await github.rest.issues.addLabels({
+                  owner,
+                  repo,
+                  issue_number: pullNumber,
+                  labels: hardStopLabels
+                });
+                actions.push(`reapplied hard-stop labels: ${hardStopLabels.join(", ")}`);
+              } catch (error) {
+                recordFailure("reapply hard-stop labels", error);
+              }
+            }
 
             const latestCiGateForHead = async () => {
               const checks = await github.rest.checks.listForRef({

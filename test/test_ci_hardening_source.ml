@@ -455,6 +455,15 @@ let test_pr_automation_draft_guard_contracts () =
   check bool "pr automation rejects direct approval label edits" true
     (file_contains_pattern ".github/workflows/pr-automation.yml"
        "missing environment-gated approval after latest label event");
+  check bool "pr automation tracks unverified bypass labels for cleanup" true
+    (file_contains_pattern ".github/workflows/pr-automation.yml"
+       "const unverifiedBypassLabels = []");
+  check bool "pr automation removes unverified bypass labels" true
+    (file_contains_pattern ".github/workflows/pr-automation.yml"
+       "github.rest.issues.removeLabel");
+  check bool "pr automation reapplies hard-stop labels after bypass cleanup" true
+    (file_contains_pattern ".github/workflows/pr-automation.yml"
+       "reapplied hard-stop labels");
   check bool "pr-open defaults agent PRs to hard-stop label" true
     (file_contains_pattern "scripts/pr-open.sh"
        {|labels=("agent-pr" "do-not-merge")|});

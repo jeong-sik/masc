@@ -500,6 +500,10 @@
    ;; Bash subset parser (RFC v5 A1) — for shadow AST telemetry
    ;; in worker_dev_tools pending regex-to-AST migration.
    masc_mcp.masc_exec_bash_parser
+   ;; Phase 1 SSOT command gate facade (Shell IR Promotion Goal Plan
+   ;; 2026-05-18). Advisory-only in Phase 1; new callers target this
+   ;; module so Phase 2+ can retire lib-root duplicates.
+   masc_mcp.masc_exec_command_gate
    ;; Autoresearch leaf modules (types, serde, storage, metric, git, file)
    masc_autoresearch
    ;; Board types (extracted sub-library — first step toward board isolation)

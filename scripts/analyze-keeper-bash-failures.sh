@@ -3,7 +3,8 @@
 #
 # Reproducible census for the keeper Bash quality loop. Reads
 # <base-path>/.masc/tool_calls and buckets Bash failures by the same leak
-# classes used in the 240h runtime triage.
+# classes used in the 240h runtime triage. It also prints a compact summary
+# for the adjacent shell/code surfaces that share the same failure budget.
 #
 # Usage:
 #   scripts/analyze-keeper-bash-failures.sh [base_path] [window_hours]
@@ -73,7 +74,12 @@ def category:
   if (output_text | test("\"shape_block\""; "i")) then
     ((try (output_text | fromjson | .shape_block) catch null) // "unknown") as $shape
     | if ($shape|tostring) == "unknown" then "shape_block:" + inferred_shape else "shape_block:" + ($shape|tostring) end
+  elif (combined | test("old_string and new_string are identical"; "i")) then "edit_identical_noop_candidate"
+  elif (combined | test("old_string not found"; "i")) then "edit_old_string_not_found"
+  elif (combined | test("old_string found [0-9]+ times|Use replace_all=true"; "i")) then "edit_ambiguous_match"
+  elif (combined | test("path_outside_sandbox|Write restricted to allowed sandboxes|Cross-agent playground"; "i")) then "path_outside_sandbox"
   elif (combined | test("Path syntax blocked|shell quoting, globbing, brace expansion|Glob expansion|Brace expansion"; "i")) then "path_syntax_blocked"
+  elif (combined | test("command.*not.*allowed|not allowlisted|not in allowlist|not permitted by.*allowlist"; "i")) then "command_not_allowed"
   elif (combined | test("pipe_or_redirect|keeper_bash accepts one direct command|2>/dev/null|2> /dev/null|2>>/dev/null|2>&1|\\| head|\\| grep|\\| sed|\\| python|&&|\\|\\|"; "i")) then "shape_block:pipe_or_redirect"
   elif (combined | test("is a MASC tool, not a shell command|tool_invoked_as_shell_command"; "i")) then "wrong_tool_channel"
   elif (combined | test("keeper_bash cannot bypass the PR creation approval|gh_pr_create_requires_keeper_pr_create"; "i")) then "pr_create_policy_bypass"
@@ -87,6 +93,49 @@ def category:
   elif (combined | test("tool call failed|general_error|exit_code.*1|semantic_status\":\"runtime_error"; "i")) then "command_exit_nonzero"
   else "other" end;
 fromjson? | select(type == "object") | select((.ts // 0) >= $cutoff) | select(.tool == "Bash")
+'
+
+SURFACE_FILTER='
+def cmd:
+  if (.input|type) == "object" then (.input.command // .input.cmd // "")
+  elif (.input|type) == "string" then .input
+  else "" end;
+def output_text:
+  if (.output|type) == "string" then .output
+  elif (.output|type) == "object" and (.output._blob.preview? != null) then .output._blob.preview
+  else (.output|tostring) end;
+def combined: output_text + " " + (.action_radius.error // "") + " " + cmd;
+def failed: (.success == false or .semantic_success == false);
+def inferred_shape:
+  if (combined | test("gh pr checks"; "i")) then "gh_pr_checks"
+  elif (combined | test("&&|\\|\\||;|\\n|\\r"; "i")) then "chaining"
+  elif (combined | test("2>/dev/null|2> /dev/null|2>>/dev/null|2>&1|\\| head|\\| grep|\\| sed|\\| python|>|<"; "i")) then "pipe_or_redirect"
+  else "unknown" end;
+def category:
+  if (output_text | test("\"shape_block\""; "i")) then
+    ((try (output_text | fromjson | .shape_block) catch null) // "unknown") as $shape
+    | if ($shape|tostring) == "unknown" then "shape_block:" + inferred_shape else "shape_block:" + ($shape|tostring) end
+  elif (combined | test("old_string and new_string are identical"; "i")) then "edit_identical_noop_candidate"
+  elif (combined | test("old_string not found"; "i")) then "edit_old_string_not_found"
+  elif (combined | test("old_string found [0-9]+ times|Use replace_all=true"; "i")) then "edit_ambiguous_match"
+  elif (combined | test("path_outside_sandbox|Write restricted to allowed sandboxes|Cross-agent playground"; "i")) then "path_outside_sandbox"
+  elif (combined | test("Path syntax blocked|shell quoting, globbing, brace expansion|Glob expansion|Brace expansion"; "i")) then "path_syntax_blocked"
+  elif (combined | test("command.*not.*allowed|not allowlisted|not in allowlist|not permitted by.*allowlist"; "i")) then "command_not_allowed"
+  elif (combined | test("pipe_or_redirect|keeper_bash accepts one direct command|2>/dev/null|2> /dev/null|2>>/dev/null|2>&1|\\| head|\\| grep|\\| sed|\\| python|&&|\\|\\|"; "i")) then "shape_block:pipe_or_redirect"
+  elif (combined | test("is a MASC tool, not a shell command|tool_invoked_as_shell_command"; "i")) then "wrong_tool_channel"
+  elif (combined | test("keeper_bash cannot bypass the PR creation approval|gh_pr_create_requires_keeper_pr_create"; "i")) then "pr_create_policy_bypass"
+  elif (combined | test("tool_approval_required|destructive|blocked for all presets|operator_required|risk threshold"; "i")) then "approval_or_destructive_block"
+  elif (combined | test("sandbox root cannot run git/gh|multiple sandbox repos|Set cwd explicitly"; "i")) then "cwd_required_multi_repo"
+  elif (combined | test("No such file or directory|cannot access|cannot change to|cwd_not_directory|not a git repository|outside allowed directories|Path blocked"; "i")) then "missing_path_or_wrong_cwd"
+  elif (combined | test("sandbox_image_missing|Unable to find image.*masc-keeper-sandbox|pull access denied for masc-keeper-sandbox"; "i")) then "docker_image_missing"
+  elif (combined | test("timeout|timed out"; "i")) then "timeout"
+  elif (combined | test("streak_gate|called [0-9]+ times consecutively|failed 3 times in a row"; "i")) then "repeat_or_streak_gate"
+  elif (combined | test("regex parse error|usage_error|ambiguous argument|unknown revision|Wrong arguments or flags|command not found"; "i")) then "command_usage_or_regex_error"
+  elif (combined | test("tool call failed|general_error|exit_code.*1|semantic_status\":\"runtime_error"; "i")) then "command_exit_nonzero"
+  else "other" end;
+fromjson? | select(type == "object") | select((.ts // 0) >= $cutoff)
+| . as $row
+| select(["Bash", "keeper_bash", "keeper_shell", "masc_code_shell", "masc_code_edit", "Edit", "Write"] | index($row.tool))
 '
 
 echo "=== Keeper Bash Failure Census ==="
@@ -114,3 +163,37 @@ echo
 echo "[top failed commands]"
 jq -Rr --argjson cutoff "$CUTOFF" "$JQ_FILTER | select(failed) | [category, cmd] | @tsv" "${FILES[@]}" |
 sort | uniq -c | sort -nr | awk 'NR <= 40 { print }'
+
+echo
+echo "[surface summary]"
+jq -Rr --argjson cutoff "$CUTOFF" "$SURFACE_FILTER | [.tool, (if failed then \"failed\" else \"ok\" end)] | @tsv" "${FILES[@]}" |
+awk '
+  BEGIN {
+    split("Bash keeper_bash keeper_shell masc_code_shell masc_code_edit Edit Write", order, " ")
+    print "tool\tfailed\tok\tfailure_pct"
+  }
+  {
+    total[$1]++
+    if ($2 == "failed") fail[$1]++
+    else ok[$1]++
+  }
+  END {
+    for (i = 1; i <= length(order); i++) {
+      tool = order[i]
+      if (total[tool] > 0) {
+        pct = fail[tool] * 100.0 / total[tool]
+        printf "%s\t%d\t%d\t%.2f\n", tool, fail[tool] + 0, ok[tool] + 0, pct
+      }
+    }
+  }
+'
+
+echo
+echo "[surface failure categories]"
+jq -Rr --argjson cutoff "$CUTOFF" "$SURFACE_FILTER | select(failed) | [.tool, category] | @tsv" "${FILES[@]}" |
+sort | uniq -c | sort -nr | awk 'NR <= 80 { print }'
+
+echo
+echo "[top failed commands by surface]"
+jq -Rr --argjson cutoff "$CUTOFF" "$SURFACE_FILTER | select(failed) | [.tool, category, cmd] | @tsv" "${FILES[@]}" |
+sort | uniq -c | sort -nr | awk 'NR <= 80 { print }'

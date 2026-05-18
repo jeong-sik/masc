@@ -1,7 +1,7 @@
 # Keeper Shell Quality Leaks
 
 Runtime baseline: `/Users/dancer/me/.masc/tool_calls`, 240h window ending
-`2026-05-19T02:26:10+0900`.
+`2026-05-19T02:36:27+0900`.
 
 Baseline command:
 
@@ -13,9 +13,9 @@ Baseline result:
 
 | Metric | Count |
 |---|---:|
-| Bash calls | 20,561 |
-| Failed or semantic-failed Bash calls | 8,504 |
-| Failure rate | 41.36% |
+| Bash calls | 20,720 |
+| Failed or semantic-failed Bash calls | 8,524 |
+| Failure rate | 41.14% |
 
 Release target: after the improvement PR is merged and keepers have generated a
 fresh 240h sample, the same script should report `failure_pct < 10.00`.
@@ -24,10 +24,10 @@ Adjacent tool-surface sample from the same 240h window:
 
 | Tool | Failed | OK | Failure rate |
 |---|---:|---:|---:|
-| `masc_code_shell` | 1,567 | 5,693 | 21.58% |
+| `masc_code_shell` | 1,570 | 5,806 | 21.29% |
 | `masc_code_edit` | 114 | 51 | 69.09% |
-| `keeper_shell` | 191 | 552 | 25.71% |
-| `keeper_bash` | 175 | 1,125 | 13.46% |
+| `keeper_shell` | 190 | 539 | 26.06% |
+| `keeper_bash` | 175 | 1,120 | 13.51% |
 | public `Edit` | 38 | 12 | 76.00% |
 | public `Write` | 93 | 5 | 94.90% |
 
@@ -35,15 +35,16 @@ Adjacent tool-surface sample from the same 240h window:
 
 | Leak class | Baseline count | Code boundary | Current fix path |
 |---|---:|---|---|
-| `shape_block:unknown` / chaining | 3,264 | `lib/keeper/keeper_shell_bash.ml` | Normalize safe read-only fallbacks. `cd repos/... && <read-only>` is treated like a cwd-scoped read instead of a hard shape failure. |
-| Missing path or wrong cwd | 1,573 | `lib/worker_dev_tools.ml`, `lib/keeper/keeper_shell_docker.ml` | Preserve path validation, but make public `Bash` expose `cwd`, make retry hints use the public `Bash { command, cwd }` shape, and allow the safe `/dev/null` sentinel instead of treating `cat /dev/null` as an out-of-whitelist path. |
+| `shape_block:unknown` / chaining | 3,266 | `lib/keeper/keeper_shell_bash.ml` | Normalize safe read-only fallbacks. `cd repos/... && <read-only>` is treated like a cwd-scoped read instead of a hard shape failure. |
+| Missing path or wrong cwd | 1,574 | `lib/worker_dev_tools.ml`, `lib/keeper/keeper_shell_docker.ml` | Preserve path validation, but make public `Bash` expose `cwd`, make retry hints use the public `Bash { command, cwd }` shape, and allow the safe `/dev/null` sentinel instead of treating `cat /dev/null` as an out-of-whitelist path. |
 | Non-zero command exits | 835 | `lib/exec_core.ml`, `lib/keeper_tool_call_log.ml` | Treat structured `ok=true` and `semantic_status=no_match` as semantic success even when the transport-level call was marked failed. |
-| `shape_block:pipe_or_redirect` | 714 | `lib/keeper/keeper_shell_bash.ml` | Keep unsafe pipelines blocked, but split safe read-only `|| echo` and stderr-dev-null fallbacks into deterministic primary commands. |
-| `other` / unclassified failures | 549 | `lib/keeper_tool_call_log.ml`, `lib/dashboard/dashboard_http_tool_quality.ml` | Promote structured `semantic_status`, `shape_block`, and diagnosis fields into stable failure categories. |
+| `shape_block:pipe_or_redirect` | 719 | `lib/keeper/keeper_shell_bash.ml` | Keep unsafe pipelines blocked, but split safe read-only `|| echo` and stderr-dev-null fallbacks into deterministic primary commands. |
+| `other` / unclassified failures | 427 | `lib/keeper_tool_call_log.ml`, `lib/dashboard/dashboard_http_tool_quality.ml` | Promote structured `semantic_status`, `shape_block`, and diagnosis fields into stable failure categories. |
 | Path syntax blocked | 537 | `lib/worker_dev_tools.ml`, `lib/keeper/keeper_path_check_error.ml` | Keep the safety gate; measure it distinctly instead of collapsing it into generic structured errors. |
 | Multi-repo cwd required | 282 | `lib/keeper/keeper_shell_docker.ml`, `lib/keeper/keeper_tool_alias.ml` | Parse command tokens with the Bash parser and return a public `Bash` retry shape including `cwd`. |
-| Timeout | 278 | `lib/exec_core.ml`, Docker shell runtime | Classify as `semantic_status:timeout` for the quality loop; command scoping remains the caller-side correction. |
+| Timeout | 271 | `lib/exec_core.ml`, Docker shell runtime | Classify as `semantic_status:timeout` for the quality loop; command scoping remains the caller-side correction. |
 | Repeat/streak gates | 203 | OAS retry cache, keeper tool diversity gates | Measure separately as `repeat_or_streak_gate` so retries are not mistaken for new Bash defects. |
+| Command not allowed by validator | 141 | `lib/keeper/keeper_shell_bash.ml`, `lib/tool_code_write.ml` | Keep the explicit validator block, but measure it separately from path syntax and shell shape. |
 | Docker image missing | 108 | Docker sandbox runtime | Measure separately from command-shape failures; this is an infrastructure/runtime availability class. |
 | Wrong tool channel | 61 | `lib/keeper/keeper_shell_bash.ml` | Preserve the pre-exec block, expose it as `wrong_tool_channel`, and keep the tool suggestion visible. |
 | Command usage or regex errors | 58 | command-specific handlers | Keep as caller-command defects rather than path or sandbox defects. |
@@ -72,3 +73,9 @@ Runtime remeasure:
 ```bash
 scripts/analyze-keeper-bash-failures.sh /Users/dancer/me 240
 ```
+
+The same command now emits both the Bash-specific census and a
+`[surface summary]`/`[surface failure categories]` section for
+`keeper_bash`, `keeper_shell`, `masc_code_shell`, `masc_code_edit`, and public
+`Edit`/`Write`, so the `<10%` target can be checked across the related shell
+and code-edit surfaces after the PR is merged and a fresh runtime window exists.

@@ -641,6 +641,47 @@ let test_bash_git_c_option_missing_dir_blocks_before_docker () =
   Alcotest.(check bool) "docker was not invoked" false
     (Sys.file_exists log_path)
 
+let test_bash_missing_playground_blocks_before_docker () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  let mount_source =
+    Keeper_sandbox.host_root_abs_of_meta ~config meta
+    |> Keeper_alerting_path.normalize_path_for_check
+    |> Keeper_alerting_path.strip_trailing_slashes
+  in
+  cleanup_dir playground;
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  let err =
+    match
+      Keeper_shell_docker.run_trusted_docker_shell_command_with_status
+      ~config
+      ~meta
+      ~cwd:playground
+      ~timeout_sec:5.0
+      ~cmd:"pwd"
+      ~git_creds_enabled:false
+      ~network_mode:Keeper_types.Network_inherit
+    with
+    | Ok _ -> Alcotest.fail "expected missing playground to block before docker"
+    | Error err -> err
+  in
+  Alcotest.(check bool)
+    "missing bind source is typed"
+    true
+    (contains_substring err "mount_source_not_found");
+  Alcotest.(check bool)
+    "full mount path is surfaced"
+    true
+    (contains_substring err mount_source);
+  Alcotest.(check bool)
+    "base path hash is surfaced"
+    true
+    (contains_substring err "base_path_hash=");
+  Alcotest.(check bool) "docker was not invoked" false (Sys.file_exists log_path)
+
 let test_bash_git_c_bare_worktrees_from_root_uses_single_repo () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
@@ -1638,6 +1679,9 @@ let () =
           Alcotest.test_case
             "docker shell mounts MASC config runtime paths"
             `Quick test_docker_shell_mounts_masc_config_runtime_paths;
+          Alcotest.test_case
+            "missing playground bind source blocks before docker"
+            `Quick test_bash_missing_playground_blocks_before_docker;
           Alcotest.test_case
             "git-creds mounts passwd entry for numeric uid"
             `Quick test_git_creds_mounts_numeric_user_identity;

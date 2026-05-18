@@ -19,8 +19,17 @@ let docker_exec_status_label = function
   | Unix.WSTOPPED n -> Printf.sprintf "stopped=%d" n
 ;;
 
-let docker_exec_failure_message ~image ~status ~output =
-  let truncated = Worker_dev_tools.truncate_for_log output in
+let docker_exec_failure_message_internal
+      ?base_path_hash
+      ?keeper_name
+      ?container_kind
+      ?network_label
+      ~image
+      ~status
+      ~output
+      ()
+  =
+  let truncated = Keeper_sandbox_runtime.docker_failure_output_for_log output in
   let output_label = if String.trim truncated = "" then "<no output>" else truncated in
   let missing_cwd_hint =
     if
@@ -32,12 +41,82 @@ let docker_exec_failure_message ~image ~status ~output =
        repos/<repo>/.worktrees/<task>)."
     else ""
   in
+  let mount_failure_context =
+    Keeper_sandbox_runtime.docker_mount_failure_context_suffix
+      ?base_path_hash
+      ?keeper_name
+      ~image
+      ~status_label:(docker_exec_status_label status)
+      ?container_kind
+      ?network_label
+      output
+  in
   Printf.sprintf
-    "sandbox docker exec failed (%s, %s): %s%s"
+    "sandbox docker exec failed (%s, %s): %s%s%s"
     image
     (docker_exec_status_label status)
     output_label
     missing_cwd_hint
+    mount_failure_context
+;;
+
+let docker_exec_failure_message ~image ~status ~output =
+  docker_exec_failure_message_internal ~image ~status ~output ()
+;;
+
+let docker_exec_failure_message_with_context
+      ~base_path_hash
+      ~keeper_name
+      ~container_kind
+      ~network_label
+      ~image
+      ~status
+      ~output
+  =
+  docker_exec_failure_message_internal
+    ~base_path_hash
+    ~keeper_name
+    ~container_kind
+    ~network_label
+    ~image
+    ~status
+    ~output
+    ()
+;;
+
+let record_docker_exec_failure
+      ~(config : Coord.config)
+      ~(meta : keeper_meta)
+      ~image
+      ~container_kind
+      ~network_label
+      ~status
+      ~output
+  =
+  let base_path_hash = Keeper_sandbox_runtime.base_path_hash config.base_path in
+  let status_label = docker_exec_status_label status in
+  let message =
+    docker_exec_failure_message_with_context
+      ~base_path_hash
+      ~keeper_name:meta.name
+      ~container_kind
+      ~network_label
+      ~image
+      ~status
+      ~output
+  in
+  let details =
+    Keeper_sandbox_runtime.docker_mount_failure_details
+      ~base_path_hash
+      ~keeper_name:meta.name
+      ~image
+      ~status_label
+      ~container_kind
+      ~network_label
+      ~output
+      ()
+  in
+  Keeper_registry.record_error ?details ~base_path:config.base_path meta.name message
 ;;
 
 (* ── P12: Network egress policy ───────────────────────── *)
@@ -1094,10 +1173,14 @@ let run_docker_shell_command_with_status_internal
                         in
                         if status <> Unix.WEXITED 0
                         then
-                          Keeper_registry.record_error
-                            ~base_path:config.base_path
-                            meta.name
-                            (docker_exec_failure_message ~image ~status ~output)
+                          record_docker_exec_failure
+                            ~config
+                            ~meta
+                            ~image
+                            ~container_kind:"oneshot"
+                            ~network_label
+                            ~status
+                            ~output
                         else if
                           git_creds_enabled
                           && String_util.contains_substring_ci cmd "git worktree"
@@ -1305,10 +1388,14 @@ let run_docker_hardened_bash
           | Ok (st, out) ->
             if st <> Unix.WEXITED 0
             then
-              Keeper_registry.record_error
-                ~base_path:config.base_path
-                meta.name
-                (docker_exec_failure_message ~image ~status:st ~output:out)
+              record_docker_exec_failure
+                ~config
+                ~meta
+                ~image
+                ~container_kind:"turn"
+                ~network_label:(network_mode_to_string network_mode)
+                ~status:st
+                ~output:out
             else Keeper_registry.clear_error ~base_path:config.base_path meta.name;
             let cwd_response =
               Keeper_cwd_response.docker

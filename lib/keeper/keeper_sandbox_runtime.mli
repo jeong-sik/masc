@@ -107,6 +107,41 @@ val base_path_hash : string -> string
     [[A-Za-z0-9_.-]] to ['_']. Pure. *)
 val sanitize_label_value : string -> string
 
+(** Extract the failing host-side source path from Docker Desktop / OCI
+    mount errors such as [error mounting "/host_mnt/..."].  Also accepts
+    the [mount_path="..."] field emitted by MASC diagnostics. *)
+val docker_mount_failure_path : string -> string option
+
+(** Truncate Docker output for log storage.  Generic output keeps the
+    normal compact budget; OCI mount failures get a larger budget so the
+    mount source is not lost before [mount_path] is emitted. *)
+val docker_failure_output_for_log : string -> string
+
+(** Append stable key/value context for Docker mount failures.  Returns
+    [""] when [output] is not a mount failure. *)
+val docker_mount_failure_context_suffix :
+  ?base_path_hash:string ->
+  ?keeper_name:string ->
+  ?image:string ->
+  ?status_label:string ->
+  ?container_kind:string ->
+  ?network_label:string ->
+  string ->
+  string
+
+(** Structured log payload for Docker mount failures.  Returns [None]
+    when [output] is not a mount failure. *)
+val docker_mount_failure_details :
+  ?image:string ->
+  ?status_label:string ->
+  ?container_kind:string ->
+  ?network_label:string ->
+  base_path_hash:string ->
+  keeper_name:string ->
+  output:string ->
+  unit ->
+  Yojson.Safe.t option
+
 (** Docker network argv fragment and the MASC network label.  In
     particular, [Network_inherit] maps to [--network host] so the
     container shares the host network namespace (needed for

@@ -13,6 +13,7 @@ module Keeper_exec_shell = Masc_mcp.Keeper_exec_shell
 module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_sandbox_factory = Masc_mcp.Keeper_sandbox_factory
+module Keeper_sandbox_runtime = Masc_mcp.Keeper_sandbox_runtime
 module Keeper_shell_docker = Masc_mcp.Keeper_shell_docker
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_alerting_path = Masc_mcp.Keeper_alerting_path
@@ -1449,6 +1450,67 @@ let test_bash_rewrites_host_path_command_for_docker () =
   Alcotest.(check bool) "command no longer leaks host playground path" false
     (response_mentions raw "output" playground)
 
+let test_docker_mount_failure_message_preserves_path () =
+  let mount_path =
+    "/host_mnt/Users/dancer/me/.masc/playground/docker/repos/masc-mcp/.worktrees/"
+    ^ String.make 320 'a'
+    ^ "/repo"
+  in
+  let output =
+    "docker: Error response from daemon: failed to create task for container: "
+    ^ "failed to create shim task: OCI runtime create failed: "
+    ^ "runc create failed: unable to start container process: "
+    ^ "error during container init: error mounting \""
+    ^ mount_path
+    ^ "\" to rootfs at \"/workspace\": stat "
+    ^ mount_path
+    ^ ": no such file or directory"
+  in
+  let message =
+    Keeper_shell_docker.docker_exec_failure_message
+      ~image:"masc-keeper-sandbox:local"
+      ~status:(Unix.WEXITED 125)
+      ~output
+  in
+  Alcotest.(check bool) "full mount path preserved" true
+    (contains_substring message mount_path);
+  Alcotest.(check bool) "mount marker emitted" true
+    (contains_substring message "docker_mount_failure=true");
+  Alcotest.(check bool) "status emitted" true
+    (contains_substring message "status=\"exit=125\"")
+
+let test_docker_mount_failure_structured_details () =
+  let mount_path =
+    "/host_mnt/Users/dancer/me/.masc/playground/docker/repos/oas/.worktrees/"
+    ^ String.make 280 'b'
+  in
+  let output =
+    "OCI runtime create failed: runc create failed: error during container init: "
+    ^ "error mounting \""
+    ^ mount_path
+    ^ "\" to rootfs"
+  in
+  match
+    Keeper_sandbox_runtime.docker_mount_failure_details
+      ~base_path_hash:"hash456"
+      ~keeper_name:"ramarama"
+      ~image:"masc-keeper-sandbox:local"
+      ~status_label:"exit=125"
+      ~container_kind:"turn"
+      ~network_label:"none"
+      ~output
+      ()
+  with
+  | None -> Alcotest.fail "expected structured docker mount failure details"
+  | Some json ->
+    let field name = Json.member name json |> Json.to_string in
+    Alcotest.(check string) "event" "keeper_docker_mount_failure" (field "event");
+    Alcotest.(check string) "mount_path" mount_path (field "mount_path");
+    Alcotest.(check string) "base_path_hash" "hash456" (field "base_path_hash");
+    Alcotest.(check string) "keeper" "ramarama" (field "keeper");
+    Alcotest.(check string) "container_kind" "turn" (field "container_kind");
+    Alcotest.(check string) "network" "none" (field "network")
+
 let () =
   Alcotest.run "Keeper_shell_docker_route"
     [
@@ -1499,6 +1561,12 @@ let () =
           Alcotest.test_case
             "docker keeper bash rewrites host paths before exec"
             `Quick test_bash_rewrites_host_path_command_for_docker;
+          Alcotest.test_case
+            "docker mount failure preserves full path"
+            `Quick test_docker_mount_failure_message_preserves_path;
+          Alcotest.test_case
+            "docker mount failure emits structured details"
+            `Quick test_docker_mount_failure_structured_details;
         ] );
       ( "docker_route_skipped",
         [

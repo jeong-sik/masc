@@ -162,127 +162,9 @@ let handle_keeper_tools_post state req reqd =
    to Server_dashboard_http_keeper_api_types
    (intra-library file split, 2026-05-16). *)
 
-let stat_json_of_path (path : string) =
-  try
-    let stat = Unix.stat path in
-    `Assoc
-      [
-        ("size_bytes", `Int stat.st_size);
-        ("mtime", `Float stat.st_mtime);
-      ]
-  with
-  | Unix.Unix_error _ -> `Null
-
-let oas_checkpoint_summary_json
-    ~(source_kind : string)
-    ~(snapshot_id : string)
-    ~(path : string)
-    ~(is_current : bool)
-    ~(fallback_generation : int)
-    (checkpoint : Agent_sdk.Checkpoint.t) =
-  let generation =
-    Keeper_context_core.checkpoint_generation checkpoint
-      ~fallback:fallback_generation
-  in
-  let messages = checkpoint.messages in
-  let continuity_summary = continuity_summary_of_messages messages in
-  `Assoc
-    [
-      ("snapshot_id", `String snapshot_id);
-      ("source_kind", `String source_kind);
-      ("is_current", `Bool is_current);
-      ("path", `String path);
-      ("created_at", `Float checkpoint.created_at);
-      ("generation", `Int generation);
-      ("message_count", `Int (List.length messages));
-      ( "system_prompt_present",
-        `Bool
-          (match checkpoint.system_prompt with
-           | Some prompt -> String.trim prompt <> ""
-           | None -> false) );
-      ( "latest_preview",
-        match latest_preview_of_messages messages with
-        | Some preview -> `String preview
-        | None -> `Null );
-      ( "continuity_summary",
-        match continuity_summary with
-        | Some summary -> `String summary
-        | None -> `Null );
-      ("file_stat", stat_json_of_path path);
-    ]
-
-let keeper_checkpoint_inventory_json
-    (config : Coord.config)
-    (name : string) : [ `OK | `Not_found ] * Yojson.Safe.t =
-  match Keeper_types.read_meta_resolved config name with
-  | Error msg ->
-      (`Not_found, `Assoc [("error", `String msg)])
-  | Ok None ->
-      (`Not_found,
-       `Assoc [("error", `String (Printf.sprintf "keeper %S not found" name))])
-  | Ok (Some (_, meta)) ->
-      let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-      let session_dir = Keeper_types.keeper_session_dir config trace_id in
-      let current_path =
-        Keeper_checkpoint_store.oas_checkpoint_path
-          ~session_dir ~session_id:trace_id
-      in
-      let current_json =
-        match
-          Keeper_checkpoint_store.load_oas ~session_dir ~session_id:trace_id
-        with
-        | Ok checkpoint ->
-            let current_history_snapshot_id =
-              Keeper_checkpoint_store.oas_history_snapshot_id_of_checkpoint checkpoint
-            in
-            oas_checkpoint_summary_json
-              ~source_kind:"oas_current"
-              ~snapshot_id:(Filename.basename current_path)
-              ~path:current_path
-              ~is_current:true
-              ~fallback_generation:meta.runtime.generation
-              checkpoint
-            |> fun json -> Some (json, current_history_snapshot_id)
-        | Error _ -> None
-      in
-      let history_json =
-        Keeper_checkpoint_store.list_oas_history_files ~session_dir
-        |> List.filter (fun snapshot_id ->
-             match current_json with
-             | Some (_json, current_history_snapshot_id) ->
-                 snapshot_id <> current_history_snapshot_id
-             | None -> true)
-        |> List.filter_map (fun snapshot_id ->
-             match
-               Keeper_checkpoint_store.load_oas_history_file
-                 ~session_dir ~snapshot_id
-             with
-             | Ok checkpoint ->
-                 Some
-                   (oas_checkpoint_summary_json
-                      ~source_kind:"oas_history"
-                      ~snapshot_id
-                      ~path:
-                        (Keeper_checkpoint_store.oas_history_path
-                           ~session_dir ~snapshot_id)
-                      ~is_current:false
-                      ~fallback_generation:meta.runtime.generation
-                      checkpoint)
-             | Error _ -> None)
-      in
-      ( `OK,
-        `Assoc
-          [
-            ("keeper", `String name);
-            ("trace_id", `String trace_id);
-            ("session_dir", `String session_dir);
-            ("current", match current_json with Some (json, _snapshot_id) -> json | None -> `Null);
-            ("history", `List history_json);
-            ( "legacy_shadow_count",
-              `Int
-                (List.length
-                   (Keeper_checkpoint_store.list_checkpoints ~session_dir)) );
-          ] )
+(* Keeper checkpoint inventory helpers moved to
+   Server_dashboard_http_keeper_checkpoint_artifacts
+   (intra-library file split, 2026-05-18). *)
 
 (* Yojson member extractors + take_last list helper moved to
    Server_dashboard_http_keeper_api_types (intra-library file split,
@@ -291,14 +173,9 @@ let keeper_checkpoint_inventory_json
 (* unique_present_paths moved to Server_dashboard_http_keeper_api_types
    (intra-library file split, 2026-05-16). *)
 
-let linked_artifact_json ~kind path =
-  `Assoc
-    [
-      ("kind", `String kind);
-      ("path", `String path);
-      ("present", `Bool (Fs_compat.file_exists path));
-      ("file_stat", stat_json_of_path path);
-    ]
+(* linked_artifact_json moved to
+   Server_dashboard_http_keeper_checkpoint_artifacts
+   (intra-library file split, 2026-05-18). *)
 
 (* manifest_row_matches moved to Server_dashboard_http_keeper_api_types
    (intra-library file split, 2026-05-16). *)
@@ -873,17 +750,23 @@ let keeper_runtime_trace_json (config : Coord.config) (name : string)
                     ( "receipts",
                       `List
                         (List.map
-                           (linked_artifact_json ~kind:"execution_receipt")
+                           (Server_dashboard_http_keeper_checkpoint_artifacts
+                            .linked_artifact_json
+                              ~kind:"execution_receipt")
                            receipt_paths) );
                     ( "checkpoints",
                       `List
                         (List.map
-                           (linked_artifact_json ~kind:"oas_checkpoint")
+                           (Server_dashboard_http_keeper_checkpoint_artifacts
+                            .linked_artifact_json
+                              ~kind:"oas_checkpoint")
                            checkpoint_paths) );
                     ( "tool_call_logs",
                       `List
                         (List.map
-                           (linked_artifact_json ~kind:"tool_call_log")
+                           (Server_dashboard_http_keeper_checkpoint_artifacts
+                            .linked_artifact_json
+                              ~kind:"tool_call_log")
                            tool_call_log_paths) );
                   ] );
               ( "manifest_rows",
@@ -935,7 +818,10 @@ let handle_keeper_checkpoints_post state req reqd body_str =
                      ~session_dir ~snapshot_ids
                  in
                  let (_status, inventory) =
-                   keeper_checkpoint_inventory_json config name
+                   Server_dashboard_http_keeper_checkpoint_artifacts
+                   .keeper_checkpoint_inventory_json
+                     config
+                     name
                  in
                  Http.Response.json ~compress:true ~request:req
                    (Yojson.Safe.to_string
@@ -1472,7 +1358,12 @@ let handle_keeper_get_subroutes state req request reqd =
       Http.Response.json ~status:`Bad_request
         {|{"error":"keeper name is required"}|} reqd
     else
-      let (st, json) = keeper_checkpoint_inventory_json state.Mcp_server.room_config name in
+      let (st, json) =
+        Server_dashboard_http_keeper_checkpoint_artifacts
+        .keeper_checkpoint_inventory_json
+          state.Mcp_server.room_config
+          name
+      in
       let status : Httpun.Status.t =
         match st with `OK -> `OK | `Not_found -> `Not_found
       in

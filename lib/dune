@@ -28,6 +28,7 @@
  keeper_post_turn_wirein_failure_site
  atomic_orphan_size_class
  silent_dashboard_actor_outcome
+ sse_jsonrpc_filter
  prometheus_format
  prometheus_key
  prometheus_process

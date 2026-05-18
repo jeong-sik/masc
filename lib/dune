@@ -247,6 +247,14 @@
   lsp_overlay_provider
   server_ide_lsp_proxy
   cascade_declarative_hotpath
+  ;; Stage 04 (godfile decomposition build plan, Lane A) — internal
+  ;; facade-only siblings of Model_inference_metrics. The public
+  ;; surface lives in model_inference_metrics.mli.
+  model_inference_metrics_entry
+  model_inference_metrics_parser
+  model_inference_metrics_reader
+  model_inference_metrics_aggregate
+  model_inference_metrics_json
   )
  (libraries
    mcp_protocol

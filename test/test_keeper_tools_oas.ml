@@ -1095,6 +1095,26 @@ let test_normalize_failure_ok_false () =
   check string "error extracted" "command_blocked" (json_string "error" json)
 ;;
 
+let test_normalize_failure_preserves_failure_class () =
+  let raw =
+    {|{"ok":false,"error":"[TaskError] Invalid task state","failure_class":"workflow_rejection","error_class":"deterministic","recoverable":false}|}
+  in
+  let normalized = Keeper_tools_oas.normalize_tool_result ~success:false raw in
+  let json = parse normalized in
+  check bool "ok is false" false (json_bool "ok" json);
+  check
+    string
+    "failure class preserved"
+    "workflow_rejection"
+    (json_string "failure_class" json);
+  check
+    string
+    "error class preserved"
+    "deterministic"
+    (json_string "error_class" json);
+  check bool "recoverable preserved" false (json_bool "recoverable" json)
+;;
+
 let test_normalize_failure_plain_text () =
   let raw = "tool keeper_bash failed (3/5): Unix_error(ENOENT)" in
   let normalized = Keeper_tools_oas.normalize_tool_result ~success:false raw in
@@ -1119,6 +1139,11 @@ let test_transient_mutex_contention_envelope () =
     "error_class"
     "transient_mutex_contention"
     Yojson.Safe.Util.(member "error_class" json |> to_string);
+  check
+    string
+    "failure_class"
+    "transient_error"
+    Yojson.Safe.Util.(member "failure_class" json |> to_string);
   check
     bool
     "retry recommended"
@@ -1348,6 +1373,10 @@ let () =
             "failure handles ok:false hybrid"
             `Quick
             test_normalize_failure_ok_false
+        ; test_case
+            "failure preserves failure_class"
+            `Quick
+            test_normalize_failure_preserves_failure_class
         ; test_case
             "failure plain text wraps as error"
             `Quick

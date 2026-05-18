@@ -49,8 +49,9 @@ val create_failure_counts : unit -> failure_counts
 
 (** Normalize a raw tool result string into the canonical JSON
     envelope. Success → [{"ok":true,"result":...}]; failure →
-    [{"ok":false,"error":...,"detail":...}]. Plain text is wrapped
-    as a string under [result] / [error]. *)
+    [{"ok":false,"error":...,"detail":...}], preserving structured
+    [failure_class]/[recoverable]/[error_class] fields when present.
+    Plain text is wrapped as a string under [result] / [error]. *)
 val normalize_tool_result : success:bool -> string -> string
 
 (** Build the structured, recoverable envelope used when a keeper tool

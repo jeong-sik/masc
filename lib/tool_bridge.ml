@@ -146,6 +146,14 @@ let to_oas_tool_result ?(recoverable = false) (success, msg)
     let recoverable = recoverable || json_recoverable in
     make_tool_error ~recoverable ?error_class (maybe_externalize msg)
 
+let oas_error_class_of_tool_failure_class = function
+  | Tool_result.Transient_error -> Some Agent_sdk.Types.Transient
+  | Tool_result.Policy_rejection
+  | Tool_result.Workflow_rejection ->
+    Some Agent_sdk.Types.Deterministic
+  | Tool_result.Runtime_failure -> Some Agent_sdk.Types.Unknown
+;;
+
 let of_oas_tool_result : Agent_sdk.Types.tool_result -> bool * string = function
   | Ok { content } -> (true, content)
   | Error { message; _ } -> (false, message)
@@ -264,7 +272,20 @@ let oas_descriptor_of_masc_tool name =
   Option.map descriptor_of_permission (oas_permission_of_masc_tool name)
 
 let to_oas_typed_result (tr : Tool_result.t) : Agent_sdk.Types.tool_result =
-  to_oas_tool_result (tr.success, Tool_result.message tr)
+  if tr.success
+  then Ok { Agent_sdk.Types.content = maybe_externalize (Tool_result.message tr) }
+  else (
+    let msg = Tool_result.message tr in
+    let json_recoverable, json_error_class =
+      tool_error_metadata_from_json_message msg
+    in
+    let recoverable, error_class =
+      match Tool_result.failure_class tr with
+      | Some cls ->
+        (Tool_result.is_retryable cls, oas_error_class_of_tool_failure_class cls)
+      | None -> json_recoverable, json_error_class
+    in
+    make_tool_error ~recoverable ?error_class (maybe_externalize msg))
 
 (** Create an OAS [Tool.t] from a MASC tool schema and a typed handler.
 

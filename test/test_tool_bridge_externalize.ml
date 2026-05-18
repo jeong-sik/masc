@@ -119,6 +119,40 @@ let test_to_oas_error_uses_json_recoverable_flag () =
        | Some Agent_sdk.Types.Transient -> ()
        | _ -> Alcotest.fail "expected transient error_class from JSON")
 
+let test_to_oas_typed_result_preserves_workflow_rejection () =
+  Unix.putenv "MASC_TOOL_EXTERNALIZE" "0";
+  let tr =
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~tool_name:"masc_transition"
+      ~start_time:0.0
+      "Invalid task state: submit_for_verification requires verification evidence"
+  in
+  match B.to_oas_typed_result tr with
+  | Ok _ -> Alcotest.fail "expected Error"
+  | Error { recoverable; error_class; _ } ->
+    Alcotest.(check bool) "workflow rejection is non-recoverable" false recoverable;
+    (match error_class with
+     | Some Agent_sdk.Types.Deterministic -> ()
+     | _ -> Alcotest.fail "expected deterministic error_class")
+
+let test_to_oas_typed_result_preserves_transient_failure_class () =
+  Unix.putenv "MASC_TOOL_EXTERNALIZE" "0";
+  let tr =
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Transient_error)
+      ~tool_name:"keeper_shell"
+      ~start_time:0.0
+      {|{"ok":false,"error":"mutex contention","failure_class":"transient_error","recoverable":true,"error_class":"transient_mutex_contention"}|}
+  in
+  match B.to_oas_typed_result tr with
+  | Ok _ -> Alcotest.fail "expected Error"
+  | Error { recoverable; error_class; _ } ->
+    Alcotest.(check bool) "transient remains recoverable" true recoverable;
+    (match error_class with
+     | Some Agent_sdk.Types.Transient -> ()
+     | _ -> Alcotest.fail "expected transient error_class")
+
 (* --- Externalize round-trip needs an isolated test process due to the
        lazy singleton. We exercise it via the env-aware path. --- *)
 
@@ -181,6 +215,10 @@ let () =
           Alcotest.test_case "error inlined" `Quick test_to_oas_error_inlined;
           Alcotest.test_case "error recoverable from JSON" `Quick
             test_to_oas_error_uses_json_recoverable_flag;
+          Alcotest.test_case "typed workflow rejection is deterministic" `Quick
+            test_to_oas_typed_result_preserves_workflow_rejection;
+          Alcotest.test_case "typed transient remains recoverable" `Quick
+            test_to_oas_typed_result_preserves_transient_failure_class;
           Alcotest.test_case "round-trip through OAS" `Quick
             test_round_trip_through_oas;
         ] );

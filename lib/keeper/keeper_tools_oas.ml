@@ -147,8 +147,18 @@ let normalize_tool_result ~(success : bool) (raw : string) : string =
                    "tool returned error status"
                  | _ -> "tool call failed")))
       in
+      let preserved_fields =
+        [ "failure_class"; "recoverable"; "error_class" ]
+        |> List.filter_map (fun key ->
+          match Yojson.Safe.Util.member key json with
+          | `String _ as value -> Some (key, value)
+          | `Bool _ as value -> Some (key, value)
+          | _ -> None)
+      in
       Yojson.Safe.to_string
-        (`Assoc [ "ok", `Bool false; "error", `String error_msg; "detail", json ]))
+        (`Assoc
+          ([ "ok", `Bool false; "error", `String error_msg; "detail", json ]
+           @ preserved_fields)))
   with
   | Yojson.Json_error _ ->
     (* Raw is not JSON (e.g. plain text from keeper_tasks_list).
@@ -158,6 +168,16 @@ let normalize_tool_result ~(success : bool) (raw : string) : string =
     else
       Yojson.Safe.to_string
         (`Assoc [ "ok", `Bool false; "error", `String raw; "detail", `Null ])
+;;
+
+let tool_failure_class_of_wire_string = function
+  | Some "transient_error" -> Some Tool_result.Transient_error
+  | Some "policy_rejection" -> Some Tool_result.Policy_rejection
+  | Some "runtime_failure" -> Some Tool_result.Runtime_failure
+  | Some "workflow_rejection" -> Some Tool_result.Workflow_rejection
+  | Some _
+  | None ->
+    None
 ;;
 
 let transient_mutex_contention_error_class = "transient_mutex_contention"
@@ -181,6 +201,7 @@ let transient_mutex_contention_tool_error
         [ "ok", `Bool false
         ; "error", `String message
         ; "error_class", `String transient_mutex_contention_error_class
+        ; "failure_class", `String "transient_error"
         ; "recoverable", `Bool true
         ; "transient", `Bool true
         ; "retry_recommended", `Bool true
@@ -550,7 +571,22 @@ let make_keeper_tool_handler
           in
           if is_failure
           then (
-            let count = failure_count_record_failure failure_counts key in
+            let failure_class =
+              Keeper_exec_tools.failure_class_of_tool_result_payload raw_result
+              |> tool_failure_class_of_wire_string
+            in
+            let is_workflow_rejection =
+              match failure_class with
+              | Some Tool_result.Workflow_rejection -> true
+              | Some (Tool_result.Transient_error | Tool_result.Policy_rejection | Tool_result.Runtime_failure)
+              | None ->
+                false
+            in
+            let count =
+              if is_workflow_rejection
+              then 0
+              else failure_count_record_failure failure_counts key
+            in
             Keeper_registry.record_tool_use
               ~base_path:config.base_path
               meta.name
@@ -567,12 +603,9 @@ let make_keeper_tool_handler
                  ; duration_ms = Float.of_int duration_ms
                  ; data = `Null
                  ; legacy_message = raw_result
-                 ; (* The keeper-internal tool returned a non-throwing
-                      error result; classify as Runtime_failure so the
-                      dispatch metric label and downstream observers
-                      can distinguish it from transient / policy / workflow
-                      rejections. *)
-                   failure_class = Some Tool_result.Runtime_failure
+                 ; failure_class =
+                     Some
+                       (Option.value ~default:Tool_result.Runtime_failure failure_class)
                  }
              in
              (* RFC-0084 PR-I-3 — typed observers replace
@@ -601,12 +634,19 @@ let make_keeper_tool_handler
               Keeper_metrics.metric_keeper_tools_oas_failures
               ~labels:[ "tool", name; "site", "error_result" ]
               ();
-            Log.Keeper.error
-              "tool %s returned error result (%d/%d): %s"
-              name
-              count
-              max_consecutive_failures
-              detail;
+            if is_workflow_rejection
+            then
+              Log.Keeper.warn
+                "tool %s returned workflow rejection: %s"
+                name
+                detail
+            else
+              Log.Keeper.error
+                "tool %s returned error result (%d/%d): %s"
+                name
+                count
+                max_consecutive_failures
+                detail;
             let normalized_error = normalize_tool_result ~success:false raw_result in
             append_tool_exec_decision_log
               ~config

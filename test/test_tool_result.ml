@@ -74,6 +74,22 @@ let test_distributed_lock_exception_is_transient () =
      | None -> "none")
 ;;
 
+let test_error_uses_structured_failure_class () =
+  let r =
+    Tool_result.error
+      ~tool_name:"keeper_task_submit_for_verification"
+      ~start_time:0.0
+      {|{"ok":false,"error":"pr_url is required","failure_class":"workflow_rejection"}|}
+  in
+  Alcotest.(check bool) "failure" false r.success;
+  Alcotest.(check string)
+    "failure class"
+    "workflow_rejection"
+    (match Tool_result.failure_class r with
+     | Some cls -> Tool_result.tool_failure_class_to_string cls
+     | None -> "none")
+;;
+
 let test_ok_prefixed_json_response () =
   let start = 1000.0 in
   let r =
@@ -168,6 +184,10 @@ let () =
             "distributed lock exception is transient"
             `Quick
             test_distributed_lock_exception_is_transient
+        ; Alcotest.test_case
+            "structured failure_class is honored"
+            `Quick
+            test_error_uses_structured_failure_class
         ; Alcotest.test_case
             "prefixed json response"
             `Quick

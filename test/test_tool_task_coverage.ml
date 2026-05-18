@@ -1661,6 +1661,8 @@ let () = test "transition_submit_for_verification_requires_evidence_ref" (fun ()
     in
     assert (not submit_result.Tool_result.success);
     assert
+      (Tool_result.failure_class submit_result = Some Tool_result.Workflow_rejection);
+    assert
       (str_contains submit_result.Tool_result.legacy_message
          "requires verification evidence");
     assert_task_claimed_by ctx ctx.agent_name)
@@ -1710,6 +1712,7 @@ let () = test "transition_submit_for_verification_todo_still_requires_evidence" 
           ])
     in
     assert (not result.Tool_result.success);
+    assert (Tool_result.failure_class result = Some Tool_result.Workflow_rejection);
     assert (str_contains result.Tool_result.legacy_message "requires verification evidence");
     assert_task_todo ctx)
 )

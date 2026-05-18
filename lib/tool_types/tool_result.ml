@@ -30,6 +30,14 @@ let tool_failure_class_to_string = function
   | Workflow_rejection -> "workflow_rejection"
 ;;
 
+let tool_failure_class_of_string = function
+  | "transient_error" -> Some Transient_error
+  | "policy_rejection" -> Some Policy_rejection
+  | "runtime_failure" -> Some Runtime_failure
+  | "workflow_rejection" -> Some Workflow_rejection
+  | _ -> None
+;;
+
 let is_retryable = function
   | Transient_error -> true
   | Policy_rejection | Runtime_failure | Workflow_rejection -> false
@@ -114,6 +122,18 @@ let classify_from_dispatch_failure (message : string) : tool_failure_class =
     || contains_casefold message "503"
   then Transient_error
   else Runtime_failure
+;;
+
+let classify_from_structured_failure_message message =
+  try
+    match Yojson.Safe.from_string message with
+    | `Assoc fields ->
+      (match List.assoc_opt "failure_class" fields with
+       | Some (`String value) -> tool_failure_class_of_string value
+       | _ -> None)
+    | _ -> None
+  with
+  | Yojson.Json_error _ -> None
 ;;
 
 type t =
@@ -210,7 +230,11 @@ let error ?(failure_class = None) ~tool_name ~start_time message =
   let failure_class =
     match failure_class with
     | Some _ -> failure_class
-    | None -> Some (classify_from_dispatch_failure message)
+    | None ->
+      Some
+        (match classify_from_structured_failure_message message with
+         | Some cls -> cls
+         | None -> classify_from_dispatch_failure message)
   in
   { success = false
   ; data

@@ -571,12 +571,12 @@ let make_keeper_tool_handler
           in
           if is_failure
           then (
-            let failure_class =
+            let failure_class_opt =
               Keeper_exec_tools.failure_class_of_tool_result_payload raw_result
               |> tool_failure_class_of_wire_string
             in
             let is_workflow_rejection =
-              match failure_class with
+              match failure_class_opt with
               | Some Tool_result.Workflow_rejection -> true
               | Some (Tool_result.Transient_error | Tool_result.Policy_rejection | Tool_result.Runtime_failure)
               | None ->
@@ -605,7 +605,7 @@ let make_keeper_tool_handler
                  ; legacy_message = raw_result
                  ; failure_class =
                      Some
-                       (Option.value ~default:Tool_result.Runtime_failure failure_class)
+                       (Option.value ~default:Tool_result.Runtime_failure failure_class_opt)
                  }
              in
              (* RFC-0084 PR-I-3 — typed observers replace

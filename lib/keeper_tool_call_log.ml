@@ -402,6 +402,30 @@ let route_evidence_json_of_tool_io ~tool_name ~input ~output_text =
 let store_ref : Dated_jsonl.t option ref = ref None
 let configured_store_ref : (string * string) option ref = ref None
 
+type append_entry =
+  { store : Dated_jsonl.t
+  ; keeper_name : string
+  ; tool_name : string
+  ; trace_id : string option
+  ; json : Yojson.Safe.t
+  }
+
+let append_queue_capacity = 4096
+let append_flush_interval_s = 0.5
+let append_queue_mu = Stdlib.Mutex.create ()
+let append_queue : append_entry Stdlib.Queue.t = Stdlib.Queue.create ()
+let async_append_active = Atomic.make false
+let append_queue_dropped = Atomic.make 0
+
+let with_append_queue_lock f =
+  Stdlib.Mutex.lock append_queue_mu;
+  Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock append_queue_mu) f
+
+let queued_count_for_testing () =
+  with_append_queue_lock (fun () -> Stdlib.Queue.length append_queue)
+
+let dropped_count_for_testing () = Atomic.get append_queue_dropped
+
 let retention_days () =
   (* Opt-in: default disabled. Operators set MASC_TOOL_CALL_LOG_RETENTION_DAYS
      to a positive int to enable pruning. Default unset = unbounded growth,
@@ -451,6 +475,9 @@ let init ?cluster_name ~base_path () =
 let reset_for_testing () =
   store_ref := None;
   configured_store_ref := None;
+  Atomic.set async_append_active false;
+  Atomic.set append_queue_dropped 0;
+  with_append_queue_lock (fun () -> Stdlib.Queue.clear append_queue);
   Hashtbl.reset pending_truncation;
   Hashtbl.reset pending_turn_context
 ;;
@@ -525,6 +552,105 @@ let record_unavailable_coverage_gap ~keeper_name ~tool_name ?trace_id () =
          keeper_name
          tool_name
          (Printexc.to_string gap_exn))
+;;
+
+let append_to_store (entry : append_entry) =
+  try Dated_jsonl.append entry.store entry.json with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    let trace_id = entry.trace_id in
+    Keeper_fd_pressure.note_exception ~site:"keeper_tool_call_log.append" exn;
+    Keeper_disk_pressure.note_exception ~site:"keeper_tool_call_log.append" exn;
+    Log.Misc.warn
+      "keeper_tool_call_log: append failed for %s/%s: %s"
+      entry.keeper_name
+      entry.tool_name
+      (Printexc.to_string exn);
+    record_append_coverage_gap
+      ~store:entry.store
+      ~keeper_name:entry.keeper_name
+      ~tool_name:entry.tool_name
+      ?trace_id
+      exn
+;;
+
+let take_queued_append () =
+  with_append_queue_lock (fun () ->
+    if Stdlib.Queue.is_empty append_queue
+    then None
+    else Some (Stdlib.Queue.take append_queue))
+;;
+
+let drain_queued_appends () =
+  let count = ref 0 in
+  let rec loop () =
+    match take_queued_append () with
+    | None -> !count
+    | Some entry ->
+      append_to_store entry;
+      incr count;
+      loop ()
+  in
+  loop ()
+;;
+
+let flush_now () = ignore (drain_queued_appends () : int)
+
+let enqueue_append (entry : append_entry) =
+  let dropped =
+    with_append_queue_lock (fun () ->
+      if Stdlib.Queue.length append_queue >= append_queue_capacity
+      then true
+      else (
+        Stdlib.Queue.add entry append_queue;
+        false))
+  in
+  if dropped
+  then (
+    Prometheus.inc_counter Prometheus.metric_keeper_tool_call_log_queue_dropped ();
+    let dropped_count = Atomic.fetch_and_add append_queue_dropped 1 + 1 in
+    if dropped_count = 1 || dropped_count mod 1024 = 0
+    then
+      Log.Misc.warn
+        "keeper_tool_call_log: dropped %d record(s) because async append queue is full"
+        dropped_count)
+;;
+
+let append_or_enqueue entry =
+  if Atomic.get async_append_active then enqueue_append entry else append_to_store entry
+;;
+
+let start_flush_fiber ~sw ~clock =
+  Atomic.set async_append_active true;
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Log.Misc.info
+      "keeper_tool_call_log: async flush fiber started (interval=%.1fs, capacity=%d)"
+      append_flush_interval_s
+      append_queue_capacity;
+    let rec loop () =
+      match Eio.Time.sleep clock append_flush_interval_s with
+      | exception Eio.Cancel.Cancelled _ -> `Stop_daemon
+      | () ->
+        (try ignore (drain_queued_appends () : int) with
+         | Eio.Cancel.Cancelled _ -> ()
+         | exn ->
+           Log.Misc.warn
+             "keeper_tool_call_log: async flush iteration failed: %s"
+             (Printexc.to_string exn));
+        loop ()
+    in
+    loop ());
+  Shutdown.register ~name:"keeper_tool_call_log_flush" ~priority:24 (fun () ->
+    try
+      let n = drain_queued_appends () in
+      if n > 0
+      then Log.Misc.info "keeper_tool_call_log: shutdown flush wrote %d records" n
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+      Log.Misc.warn
+        "keeper_tool_call_log: shutdown flush failed: %s"
+        (Printexc.to_string exn))
 ;;
 
 (** [blob_aware_output_json safe_output] wraps a tool-output string for
@@ -949,17 +1075,7 @@ let log_call
          captures) that would corrupt the JSONL file and cause downstream
          readers — including the dashboard — to silently skip entire rows. *)
       let safe_json = Inference_utils.sanitize_json_utf8 json in
-      (try Dated_jsonl.append store safe_json with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-         Keeper_fd_pressure.note_exception ~site:"keeper_tool_call_log.append" exn;
-         Keeper_disk_pressure.note_exception ~site:"keeper_tool_call_log.append" exn;
-         Log.Misc.warn
-           "keeper_tool_call_log: append failed for %s/%s: %s"
-           keeper_name
-           tool_name
-           (Printexc.to_string exn);
-         record_append_coverage_gap ~store ~keeper_name ~tool_name ?trace_id exn))
+      append_or_enqueue { store; keeper_name; tool_name; trace_id; json = safe_json })
 ;;
 
 let read_recent ?keeper_name ?(n = 100) () : Yojson.Safe.t list =

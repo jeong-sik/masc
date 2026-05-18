@@ -22,6 +22,12 @@ val sanitize_user_message : string -> string
 (** Remove role/jailbreak prefixes from a turn user message before it is
     appended to the OAS context. *)
 
+val render_recent_failure_context :
+  Keeper_failure_circuit_breaker.failure_signature list -> string
+(** Render a bounded, non-authoritative dynamic-context block from the
+    keeper's recent tool failure signatures. Returns [""] when there is no
+    recent failure memory. *)
+
 val build_turn_context
   :  ctx:Keeper_run_context.run_context
   -> build_turn_prompt:(base_system_prompt:string -> messages:Agent_sdk.Types.message list -> Keeper_agent_prompt_metrics.turn_prompt)

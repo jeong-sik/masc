@@ -24,6 +24,12 @@ val classify_error : string -> error_class
 (** Record a successful tool call (resets consecutive counter). *)
 val record_success : keeper_name:string -> unit
 
+(** Record an observed failure signature without incrementing the
+    circuit-breaker streak or tripping the breaker. This keeps structural
+    workflow rejections visible to the next-turn prompt while preserving
+    their non-runtime-failure semantics. *)
+val record_observed_failure : keeper_name:string -> error_msg:string -> unit
+
 (** Enrich an error message with a corrective hint if the circuit
     breaker threshold has been reached. Returns the original message
     unchanged if under threshold, or message + hint if tripped. *)
@@ -58,6 +64,13 @@ val fingerprint_of_error : ?max_len:int -> string -> string
     [[]] for keepers that have never failed. N is bounded internally
     (currently 3, matching the trip threshold). *)
 val recent_failures_of : keeper_name:string -> failure_signature list
+
+(** Recent failure signatures to inject into the next turn prompt for
+    [keeper_name]. Includes the keeper's own recent failures plus bounded
+    fleet-level failures observed from other keepers, deduplicated by
+    class/fingerprint so a freshly-started keeper can avoid a live
+    fleet-wide tool-call trap before it repeats the same failure. *)
+val recent_failures_for_prompt : keeper_name:string -> failure_signature list
 
 (** JSON snapshot of all breaker states for diagnostics.
 

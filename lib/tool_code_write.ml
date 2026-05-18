@@ -83,38 +83,16 @@ let first_token_basename segment =
     in
     Some (Filename.basename (String.sub trimmed 0 (find_sep 0)))
 
-let split_pipeline_segments command =
-  let len = String.length command in
-  let push_segment start stop acc =
-    String.sub command start (stop - start) |> String.trim |> fun segment ->
-    segment :: acc
-  in
-  let rec loop i quote escaped start acc =
-    if i >= len
-    then List.rev (push_segment start len acc)
-    else (
-      let c = command.[i] in
-      match quote, escaped, c with
-      | Some '\'', _, '\'' -> loop (i + 1) None false start acc
-      | Some '\'', _, _ -> loop (i + 1) quote false start acc
-      | _, true, _ -> loop (i + 1) quote false start acc
-      | _, false, '\\' -> loop (i + 1) quote true start acc
-      | None, false, '\'' -> loop (i + 1) (Some '\'') false start acc
-      | None, false, '"' -> loop (i + 1) (Some '"') false start acc
-      | Some '"', false, '"' -> loop (i + 1) None false start acc
-      | None, false, '|' -> loop (i + 1) None false (i + 1) (push_segment start i acc)
-      | _ -> loop (i + 1) quote false start acc)
-  in
-  loop 0 None false 0 []
-
-let last_pipeline_command_name command =
-  command |> split_pipeline_segments |> List.rev |> List.find_map first_token_basename
+let exit_status_command_name command =
+  match Shell_command_gate.parse command with
+  | Ok context -> Shell_command_gate.last_stage_bin context
+  | Error _ -> first_token_basename command
 
 let classify_code_shell_exit ~command code =
   match code with
   | 0 -> Shell_ok
   | 1 -> (
-      match last_pipeline_command_name command with
+      match exit_status_command_name command with
       | Some ("rg" | "grep") -> Shell_ok_expected_nonzero "no_matches"
       | Some "diff" -> Shell_ok_expected_nonzero "differences"
       | _ -> Shell_error)

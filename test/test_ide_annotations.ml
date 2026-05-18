@@ -53,16 +53,18 @@ let with_temp_dir f =
   Fun.protect ~finally:(fun () -> rm_rf path) (fun () -> f path)
 ;;
 
-let load_regions base_dir =
+let load_regions_from path =
   Fs_compat.fold_jsonl_lines
     ~init:[]
     ~f:(fun acc ~line_no:_ json ->
       match Types.region_of_json json with
       | Ok region -> region :: acc
       | Error msg -> fail msg)
-    (Region.regions_file ~base_dir ())
+    path
   |> List.rev
 ;;
+
+let load_regions base_dir = load_regions_from (Region.regions_file ~base_dir ())
 
 let contains ~needle haystack =
   let needle_len = String.length needle in
@@ -484,7 +486,15 @@ let test_ingest_edit_file_content_fallback () =
     let by_url_path =
       Region.regions_file ~base_dir ~partition:(Ide_paths.By_url slug) ()
     in
-    check int "edit_file content fallback emits one region" 1 (count_lines by_url_path))
+    check int "edit_file content fallback emits one region" 1 (count_lines by_url_path);
+    match load_regions_from by_url_path with
+    | [ region ] -> (
+      match region.source with
+      | Types.Tool_call { tool_name; turn } ->
+        check string "fallback preserves tool name" "edit_file" tool_name;
+        check int "turn" 1 turn
+      | Types.Manual _ -> fail "expected tool-call source")
+    | rows -> failf "expected one region, got %d" (List.length rows))
 ;;
 
 (* RFC-0128 §5 PR-2 — read-side multi-source merge. *)

@@ -165,34 +165,27 @@ if [[ "${ps_available}" -eq 1 ]]; then
             return parts[n]
           }
 
-          function is_dune_global_option_with_value(token) {
-            return token == "--root" ||
-                   token == "--workspace" ||
-                   token == "--profile" ||
-                   token == "--build-dir" ||
-                   token == "--display" ||
-                   token == "--cache" ||
-                   token == "--sandbox" ||
-                   token == "--instrument-with" ||
-                   token == "-p" ||
-                   token == "-x" ||
-                   token == "-j"
+          function is_dune_subcommand(token) {
+            return token == "build" || token == "test" || token == "exec" || token == "runtest"
           }
 
-          function is_dune_global_option_eq(token) {
-            return token ~ /^--(root|workspace|profile|build-dir|display|cache|sandbox|instrument-with)=/
+          function is_dune_option(token) {
+            return token ~ /^--[[:alnum:]][[:alnum:]_-]*(=.*)?$/ ||
+                   token ~ /^-[[:alnum:]][[:alnum:]_-]*$/
           }
 
           function dune_subcommand_index(argc, argv, dune_index, i, token) {
             i = dune_index + 1
             while (i <= argc) {
               token = argv[i]
-              if (is_dune_global_option_eq(token)) {
-                i++
-              } else if (is_dune_global_option_with_value(token)) {
-                i += 2
-              } else if (token == "build" || token == "test" || token == "exec" || token == "runtest") {
+              if (is_dune_subcommand(token)) {
                 return i
+              } else if (token ~ /^--[[:alnum:]][[:alnum:]_-]*=/) {
+                i++
+              } else if (is_dune_option(token) && i + 1 <= argc && !is_dune_subcommand(argv[i + 1]) && argv[i + 1] !~ /^-/) {
+                i += 2
+              } else if (is_dune_option(token)) {
+                i++
               } else {
                 return 0
               }

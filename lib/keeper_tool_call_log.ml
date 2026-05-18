@@ -631,9 +631,10 @@ let start_flush_fiber ~sw ~clock =
       match Eio.Time.sleep clock append_flush_interval_s with
       | exception Eio.Cancel.Cancelled _ -> `Stop_daemon
       | () ->
-        (try ignore (drain_queued_appends () : int) with
-         | Eio.Cancel.Cancelled _ -> ()
-         | exn ->
+        (match drain_queued_appends () with
+         | _ -> ()
+         | exception Eio.Cancel.Cancelled _ -> ()
+         | exception exn ->
            Log.Misc.warn
              "keeper_tool_call_log: async flush iteration failed: %s"
              (Printexc.to_string exn));

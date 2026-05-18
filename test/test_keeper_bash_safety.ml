@@ -73,6 +73,7 @@ let test_shell_metachar_blocked () =
     "echo x && rm -rf /";
     "cat file > /etc/passwd";
     "cat < /etc/shadow";
+    "ls2>/dev/null";
     "echo `whoami`";
     "echo $HOME";
   ] in
@@ -335,6 +336,13 @@ let test_keeper_bash_shape_uses_shell_ir_for_quoted_literals () =
   Alcotest.(check (option string)) "real redirect blocks"
     (Some "pipe_or_redirect")
     (block_tag "cat < /tmp/x");
+  Alcotest.(check (option string)) "stderr dev-null redirect is normalized" None
+    (block_tag "ls repos/masc-mcp/.worktrees/ 2>/dev/null");
+  Alcotest.(check (option string)) "spaced stderr dev-null redirect is normalized" None
+    (block_tag "ls repos/masc-mcp/.worktrees/ 2> /dev/null");
+  Alcotest.(check (option string)) "stdout dev-null redirect still blocks"
+    (Some "pipe_or_redirect")
+    (block_tag "ls repos/masc-mcp/.worktrees/ >/dev/null");
   Alcotest.(check (option string)) "malformed stderr redirect token blocks"
     (Some "pipe_or_redirect")
     (block_tag "ls repos/masc-mcp/.worktrees/ 2/dev/null");
@@ -358,11 +366,29 @@ let test_keeper_bash_raw_shape_fallback_is_quote_aware () =
   Alcotest.(check (option string)) "real redirect still blocks"
     (Some "pipe_or_redirect")
     (block_tag "cat < /tmp/x");
+  Alcotest.(check (option string)) "stderr dev-null redirect is normalized" None
+    (block_tag "ls repos/masc-mcp/.worktrees/ 2>/dev/null");
+  Alcotest.(check (option string)) "stderr dev-null prefix is not stripped from longer target"
+    (Some "pipe_or_redirect")
+    (block_tag "ls repos/masc-mcp/.worktrees/ 2>/dev/nullfile");
   Alcotest.(check (option string)) "double-quoted substitution still blocks"
     (Some "substitution")
     (block_tag {|echo "$(date)"|});
   Alcotest.(check (option string)) "single-quoted substitution is data" None
     (block_tag {|echo '$(date) > out'|})
+
+let test_stderr_dev_null_strip_preserves_post_background_redirect () =
+  let strip =
+    Keeper_exec_shell.For_testing.strip_stderr_dev_null_redirects
+  in
+  Alcotest.(check (pair string bool))
+    "pre-background redirect is normalized"
+    ("sleep 1 &", true)
+    (strip "sleep 1 2>/dev/null &");
+  Alcotest.(check (pair string bool))
+    "post-background redirect is preserved"
+    ("sleep 1 & 2>/dev/null", false)
+    (strip "sleep 1 & 2>/dev/null")
 
 let test_keeper_bash_blocks_repo_wide_scans () =
   let block_tag = Keeper_exec_shell.For_testing.keeper_bash_shape_block_tag in
@@ -1089,6 +1115,9 @@ let () =
         test_keeper_bash_shape_uses_shell_ir_for_quoted_literals;
       Alcotest.test_case "raw shape fallback is quote-aware" `Quick
         test_keeper_bash_raw_shape_fallback_is_quote_aware;
+      Alcotest.test_case "stderr devnull strip preserves post-background redirect"
+        `Quick
+        test_stderr_dev_null_strip_preserves_post_background_redirect;
       Alcotest.test_case "repo-wide scans blocked" `Quick
         test_keeper_bash_blocks_repo_wide_scans;
       Alcotest.test_case "empty command blocked" `Quick test_empty_command;

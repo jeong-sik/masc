@@ -19,8 +19,17 @@ let docker_exec_status_label = function
   | Unix.WSTOPPED n -> Printf.sprintf "stopped=%d" n
 ;;
 
-let docker_exec_failure_message ~image ~status ~output =
-  let truncated = Worker_dev_tools.truncate_for_log output in
+let docker_exec_failure_message_internal
+      ?base_path_hash
+      ?keeper_name
+      ?container_kind
+      ?network_label
+      ~image
+      ~status
+      ~output
+      ()
+  =
+  let truncated = Keeper_sandbox_runtime.docker_failure_output_for_log output in
   let output_label = if String.trim truncated = "" then "<no output>" else truncated in
   let missing_cwd_hint =
     if
@@ -32,12 +41,113 @@ let docker_exec_failure_message ~image ~status ~output =
        repos/<repo>/.worktrees/<task>)."
     else ""
   in
+  let mount_failure_context =
+    Keeper_sandbox_runtime.docker_mount_failure_context_suffix
+      ?base_path_hash
+      ?keeper_name
+      ~image
+      ~status_label:(docker_exec_status_label status)
+      ?container_kind
+      ?network_label
+      output
+  in
   Printf.sprintf
-    "sandbox docker exec failed (%s, %s): %s%s"
+    "sandbox docker exec failed (%s, %s): %s%s%s"
     image
     (docker_exec_status_label status)
     output_label
     missing_cwd_hint
+    mount_failure_context
+;;
+
+let docker_exec_failure_message ~image ~status ~output =
+  docker_exec_failure_message_internal ~image ~status ~output ()
+;;
+
+let docker_exec_failure_message_with_context
+      ~base_path_hash
+      ~keeper_name
+      ~container_kind
+      ~network_label
+      ~image
+      ~status
+      ~output
+  =
+  docker_exec_failure_message_internal
+    ~base_path_hash
+    ~keeper_name
+    ~container_kind
+    ~network_label
+    ~image
+    ~status
+    ~output
+    ()
+;;
+
+let record_docker_exec_failure
+      ~(config : Coord.config)
+      ~(meta : keeper_meta)
+      ~image
+      ~container_kind
+      ~network_label
+      ~status
+      ~output
+  =
+  let base_path_hash = Keeper_sandbox_runtime.base_path_hash config.base_path in
+  let status_label = docker_exec_status_label status in
+  let message =
+    docker_exec_failure_message_with_context
+      ~base_path_hash
+      ~keeper_name:meta.name
+      ~container_kind
+      ~network_label
+      ~image
+      ~status
+      ~output
+  in
+  let details =
+    Keeper_sandbox_runtime.docker_mount_failure_details
+      ~base_path_hash
+      ~keeper_name:meta.name
+      ~image
+      ~status_label
+      ~container_kind
+      ~network_label
+      ~output
+      ()
+  in
+  Keeper_registry.record_error ?details ~base_path:config.base_path meta.name message
+;;
+
+let path_exists path =
+  try Sys.file_exists path with
+  | Sys_error _ -> false
+;;
+
+let path_is_directory path =
+  try Sys.is_directory path with
+  | Sys_error _ -> false
+;;
+
+let docker_mount_preflight_details
+      ~(config : Coord.config)
+      ~(meta : keeper_meta)
+      ~image
+      ~container_kind
+      ~network_label
+      ~mount_path
+      ~reason
+  =
+  `Assoc
+    [ "event", `String "keeper_docker_mount_preflight_failure"
+    ; "mount_path", `String mount_path
+    ; "base_path_hash", `String (Keeper_sandbox_runtime.base_path_hash config.base_path)
+    ; "keeper", `String meta.name
+    ; "image", `String image
+    ; "container_kind", `String container_kind
+    ; "network", `String network_label
+    ; "reason", `String reason
+    ]
 ;;
 
 (* ── P12: Network egress policy ───────────────────────── *)
@@ -500,7 +610,7 @@ let command_repos_path_hint cmd =
 
 let resolve_sandbox_root_git_cwd ~(config : Coord.config) ~(meta : keeper_meta) ~cwd ~cmd =
   let host_root =
-    keeper_playground_root ~config ~meta
+    Keeper_sandbox.host_root_abs_of_meta ~config meta
     |> Keeper_alerting_path.normalize_path_for_check
     |> Keeper_alerting_path.strip_trailing_slashes
   in
@@ -845,8 +955,8 @@ let run_docker_shell_command_with_status_internal
   let network_mode =
     if Env_config_keeper.KeeperSandbox.hard_mode () then Network_none else network_mode
   in
-  let sandbox_error message =
-    Keeper_registry.record_error ~base_path:config.base_path meta.name message;
+  let sandbox_error ?details message =
+    Keeper_registry.record_error ?details ~base_path:config.base_path meta.name message;
     Error message
   in
   if String.trim image = ""
@@ -903,17 +1013,8 @@ let run_docker_shell_command_with_status_internal
       (match fd_admission_error ~config with
        | Some err -> sandbox_error err
        | None ->
-      let _cleanup =
-        Keeper_sandbox_runtime.maybe_cleanup_stale_containers
-          ~base_path:config.base_path
-          ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Sandbox ())
-          ()
-      in
-      match ensure_keeper_sandbox_runtime ~timeout_sec with
-      | Error err -> sandbox_error err
-      | Ok seccomp_args ->
         let host_root =
-          keeper_playground_root ~config ~meta
+          Keeper_sandbox.host_root_abs_of_meta ~config meta
           |> Keeper_alerting_path.normalize_path_for_check
           |> Keeper_alerting_path.strip_trailing_slashes
         in
@@ -942,18 +1043,72 @@ let run_docker_shell_command_with_status_internal
               let container_name = keeper_sandbox_container_name meta in
               let container_root = keeper_private_container_root meta in
               let container_cwd = docker_private_workspace_cwd ~config ~meta cwd in
-              (* Pre-flight: verify the host cwd exists before spawning a container.
-                 This avoids wasteful docker runs that inevitably fail when bash
-                 starts in a non-existent directory. *)
-              if not (Sys.file_exists cwd)
+              let network_args, network_label =
+                if git_creds_enabled
+                then [ "--network"; "bridge" ], "bridge"
+                else Keeper_sandbox_runtime.docker_network_args network_mode
+              in
+              (* Pre-flight: verify the bind source and host cwd before spawning a
+                 container. Missing bind sources otherwise fail inside Docker
+                 Desktop as opaque OCI mount errors and can degrade the daemon. *)
+              if not (path_exists host_root)
+              then
+                let details =
+                  docker_mount_preflight_details
+                    ~config
+                    ~meta
+                    ~image
+                    ~container_kind:"oneshot"
+                    ~network_label
+                    ~mount_path:host_root
+                    ~reason:"mount_source_not_found"
+                in
+                sandbox_error
+                  ~details
+                  (Printf.sprintf
+                     "docker_shell_failed: mount_source_not_found: mount_path=%S \
+                      base_path_hash=%S keeper=%S image=%S container_kind=%S \
+                      network=%S (host bind mount source does not exist; repair \
+                      the sandbox playground before docker run)"
+                     host_root
+                     (Keeper_sandbox_runtime.base_path_hash config.base_path)
+                     meta.name
+                     image
+                     "oneshot"
+                     network_label)
+              else if not (path_is_directory host_root)
+              then
+                let details =
+                  docker_mount_preflight_details
+                    ~config
+                    ~meta
+                    ~image
+                    ~container_kind:"oneshot"
+                    ~network_label
+                    ~mount_path:host_root
+                    ~reason:"mount_source_not_directory"
+                in
+                sandbox_error
+                  ~details
+                  (Printf.sprintf
+                     "docker_shell_failed: mount_source_not_directory: mount_path=%S \
+                      base_path_hash=%S keeper=%S image=%S container_kind=%S \
+                      network=%S (host bind mount source must be a directory)"
+                     host_root
+                     (Keeper_sandbox_runtime.base_path_hash config.base_path)
+                     meta.name
+                     image
+                     "oneshot"
+                     network_label)
+              else if not (path_exists cwd)
               then
                 sandbox_error
                   (Printf.sprintf
                      "docker_shell_failed: cwd_not_found: %s (host working directory \
                       does not exist; verify the relative path under your playground \
-                      before calling keeper_shell)"
+                     before calling keeper_shell)"
                      cwd)
-              else if not (Sys.is_directory cwd)
+              else if not (path_is_directory cwd)
               then
                 sandbox_error
                   (Printf.sprintf
@@ -961,6 +1116,16 @@ let run_docker_shell_command_with_status_internal
                       be a directory, not a file)"
                      cwd)
               else (
+                let _cleanup =
+                  Keeper_sandbox_runtime.maybe_cleanup_stale_containers
+                    ~base_path:config.base_path
+                    ~timeout_sec:
+                      (Env_config_exec_timeout.timeout_sec ~caller:Sandbox ())
+                    ()
+                in
+                match ensure_keeper_sandbox_runtime ~timeout_sec with
+                | Error err -> sandbox_error err
+                | Ok seccomp_args ->
                 let prepared_gitdirs =
                   if git_creds_enabled && cmd_targets_git_or_gh cmd
                   then prepare_container_worktree_gitdirs ~host_root ~container_root
@@ -997,11 +1162,6 @@ let run_docker_shell_command_with_status_internal
                 with
                 | Error err -> sandbox_error err
                 | Ok identity_mounts ->
-                  let network_args, network_label =
-                    if git_creds_enabled
-                    then [ "--network"; "bridge" ], "bridge"
-                    else Keeper_sandbox_runtime.docker_network_args network_mode
-                  in
                   let cred_result =
                     if not git_creds_enabled
                     then Ok ([], [])
@@ -1094,10 +1254,14 @@ let run_docker_shell_command_with_status_internal
                         in
                         if status <> Unix.WEXITED 0
                         then
-                          Keeper_registry.record_error
-                            ~base_path:config.base_path
-                            meta.name
-                            (docker_exec_failure_message ~image ~status ~output)
+                          record_docker_exec_failure
+                            ~config
+                            ~meta
+                            ~image
+                            ~container_kind:"oneshot"
+                            ~network_label
+                            ~status
+                            ~output
                         else if
                           git_creds_enabled
                           && String_util.contains_substring_ci cmd "git worktree"
@@ -1305,10 +1469,14 @@ let run_docker_hardened_bash
           | Ok (st, out) ->
             if st <> Unix.WEXITED 0
             then
-              Keeper_registry.record_error
-                ~base_path:config.base_path
-                meta.name
-                (docker_exec_failure_message ~image ~status:st ~output:out)
+              record_docker_exec_failure
+                ~config
+                ~meta
+                ~image
+                ~container_kind:"turn"
+                ~network_label:(network_mode_to_string network_mode)
+                ~status:st
+                ~output:out
             else Keeper_registry.clear_error ~base_path:config.base_path meta.name;
             let cwd_response =
               Keeper_cwd_response.docker

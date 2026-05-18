@@ -2,7 +2,15 @@
 
 open Prometheus_builtin_metric_names
 
-let register ~add () =
+type metric_kind = [ `Counter | `Gauge | `Histogram ]
+
+type register_histogram =
+  name:string -> help:string -> ?labels:(string * string) list -> unit -> unit
+
+type inc_counter =
+  string -> ?labels:(string * string) list -> ?delta:float -> unit -> unit
+
+let register ~add ~register_histogram ~inc_counter:_ () =
   (* PR-0.2.C: pre-register cold/warm phase rows so /metrics shows a
      zero-value baseline before the first observation. The phase label
      is decided at observe-site in [Otel_dispatch_hook] based on a

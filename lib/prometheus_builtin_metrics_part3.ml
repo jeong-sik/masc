@@ -2,7 +2,15 @@
 
 open Prometheus_builtin_metric_names
 
-let register ~add () =
+type metric_kind = [ `Counter | `Gauge | `Histogram ]
+
+type register_histogram =
+  name:string -> help:string -> ?labels:(string * string) list -> unit -> unit
+
+type inc_counter =
+  string -> ?labels:(string * string) list -> ?delta:float -> unit -> unit
+
+let register ~add ~register_histogram:_ ~inc_counter () =
   add
     Keeper_metrics.metric_keeper_alive_but_stuck_recovery_requests
     "#12838 Total alive-but-stuck recovery requests. Each increment means the supervisor \

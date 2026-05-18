@@ -1,9 +1,17 @@
 (** Built-in Prometheus metric registration. *)
 
-let register ~add () =
-  Prometheus_builtin_metrics_part1.register ~add ();
-  Prometheus_builtin_metrics_part2.register ~add ();
-  Prometheus_builtin_metrics_part3.register ~add ();
-  Prometheus_builtin_metrics_part4.register ~add ();
-  Prometheus_builtin_metrics_part5.register ~add ();
+type metric_kind = [ `Counter | `Gauge | `Histogram ]
+
+type register_histogram =
+  name:string -> help:string -> ?labels:(string * string) list -> unit -> unit
+
+type inc_counter =
+  string -> ?labels:(string * string) list -> ?delta:float -> unit -> unit
+
+let register ~add ~register_histogram ~inc_counter () =
+  Prometheus_builtin_metrics_part1.register ~add ~register_histogram ~inc_counter ();
+  Prometheus_builtin_metrics_part2.register ~add ~register_histogram ~inc_counter ();
+  Prometheus_builtin_metrics_part3.register ~add ~register_histogram ~inc_counter ();
+  Prometheus_builtin_metrics_part4.register ~add ~register_histogram ~inc_counter ();
+  Prometheus_builtin_metrics_part5.register ~add ~register_histogram ~inc_counter ();
 ;;

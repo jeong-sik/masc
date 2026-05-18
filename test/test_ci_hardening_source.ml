@@ -461,9 +461,12 @@ let test_pr_automation_draft_guard_contracts () =
   check bool "pr automation accepts workflow marker near latest label event" true
     (file_contains_pattern ".github/workflows/pr-automation.yml"
        "approvalGateWindowMs");
-  check bool "ci gate binds approval marker to current label event" true
+  check bool "ci gate paginates approval label events" true
     (file_contains_pattern ".github/workflows/ci.yml"
-       "timelineItems(last: 100, itemTypes: [LABELED_EVENT, UNLABELED_EVENT])");
+       "timelineItems(first: 100, after: $after, itemTypes: [LABELED_EVENT, UNLABELED_EVENT])");
+  check bool "ci gate paginates approval marker comments" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "comments(first: 100, after: $after)");
   check bool "pr automation tracks unverified bypass labels for cleanup" true
     (file_contains_pattern ".github/workflows/pr-automation.yml"
        "const unverifiedBypassLabels = []");

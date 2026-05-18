@@ -1065,39 +1065,104 @@ jobs:
               export PR_LIVE_STATE="$live_state"
             fi
             export PR_EFFECTIVE_LABELS="${PR_LIVE_LABELS:-$PR_LABELS}"
+            fetch_approval_comments() {
+              local output_file="$1"
+              local after=""
+              local page=""
+              : > "$output_file"
+              while :; do
+                local args=(-f owner="${GITHUB_REPOSITORY%/*}" -f repo="${GITHUB_REPOSITORY#*/}" -F number="$PR_NUMBER")
+                if [ -n "$after" ]; then
+                  args+=(-f after="$after")
+                else
+                  args+=(-F after=null)
+                fi
+                page="$(
+                  gh api graphql "${args[@]}" \
+                    -f query='
+                      query($owner: String!, $repo: String!, $number: Int!, $after: String) {
+                        repository(owner: $owner, name: $repo) {
+                          pullRequest(number: $number) {
+                            comments(first: 100, after: $after) {
+                              pageInfo { hasNextPage endCursor }
+                              nodes {
+                                body
+                                createdAt
+                                author { __typename login }
+                              }
+                            }
+                          }
+                        }
+                      }'
+                )"
+                printf '%s\n' "$page" | jq -c '.data.repository.pullRequest.comments.nodes[]' >> "$output_file"
+                if [ "$(printf '%s\n' "$page" | jq -r '.data.repository.pullRequest.comments.pageInfo.hasNextPage')" != "true" ]; then
+                  break
+                fi
+                after="$(printf '%s\n' "$page" | jq -r '.data.repository.pullRequest.comments.pageInfo.endCursor // ""')"
+                if [ -z "$after" ]; then
+                  break
+                fi
+              done
+            }
+            fetch_approval_label_events() {
+              local output_file="$1"
+              local after=""
+              local page=""
+              : > "$output_file"
+              while :; do
+                local args=(-f owner="${GITHUB_REPOSITORY%/*}" -f repo="${GITHUB_REPOSITORY#*/}" -F number="$PR_NUMBER")
+                if [ -n "$after" ]; then
+                  args+=(-f after="$after")
+                else
+                  args+=(-F after=null)
+                fi
+                page="$(
+                  gh api graphql "${args[@]}" \
+                    -f query='
+                      query($owner: String!, $repo: String!, $number: Int!, $after: String) {
+                        repository(owner: $owner, name: $repo) {
+                          pullRequest(number: $number) {
+                            timelineItems(first: 100, after: $after, itemTypes: [LABELED_EVENT, UNLABELED_EVENT]) {
+                              pageInfo { hasNextPage endCursor }
+                              nodes {
+                                __typename
+                                ... on LabeledEvent {
+                                  createdAt
+                                  label { name }
+                                }
+                                ... on UnlabeledEvent {
+                                  createdAt
+                                  label { name }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }'
+                )"
+                printf '%s\n' "$page" | jq -c '.data.repository.pullRequest.timelineItems.nodes[]' >> "$output_file"
+                if [ "$(printf '%s\n' "$page" | jq -r '.data.repository.pullRequest.timelineItems.pageInfo.hasNextPage')" != "true" ]; then
+                  break
+                fi
+                after="$(printf '%s\n' "$page" | jq -r '.data.repository.pullRequest.timelineItems.pageInfo.endCursor // ""')"
+                if [ -z "$after" ]; then
+                  break
+                fi
+              done
+            }
+            approval_gate_payload="$(
+              comments_file="$(mktemp "${RUNNER_TEMP:-/tmp}/masc-approval-comments.XXXXXX")"
+              events_file="$(mktemp "${RUNNER_TEMP:-/tmp}/masc-approval-label-events.XXXXXX")"
+              trap 'rm -f "$comments_file" "$events_file"' EXIT
+              fetch_approval_comments "$comments_file"
+              fetch_approval_label_events "$events_file"
+              jq -n --slurpfile comments "$comments_file" --slurpfile timeline "$events_file" \
+                '{data:{repository:{pullRequest:{comments:{nodes:$comments}, timelineItems:{nodes:$timeline}}}}}'
+            )" || approval_gate_payload=""
             approval_gate_present="$(
-              gh api graphql \
-                -f owner="${GITHUB_REPOSITORY%/*}" \
-                -f repo="${GITHUB_REPOSITORY#*/}" \
-                -F number="$PR_NUMBER" \
-                -f query='
-                  query($owner: String!, $repo: String!, $number: Int!) {
-                    repository(owner: $owner, name: $repo) {
-                      pullRequest(number: $number) {
-                        comments(last: 100) {
-                          nodes {
-                            body
-                            createdAt
-                            author { __typename login }
-                          }
-                        }
-                        timelineItems(last: 100, itemTypes: [LABELED_EVENT, UNLABELED_EVENT]) {
-                          nodes {
-                            __typename
-                            ... on LabeledEvent {
-                              createdAt
-                              label { name }
-                            }
-                            ... on UnlabeledEvent {
-                              createdAt
-                              label { name }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }' \
-                --jq '
+              if [ -n "$approval_gate_payload" ]; then
+                printf '%s\n' "$approval_gate_payload" | jq -r '
                   def csv($s):
                     ($s // "")
                     | split(",")
@@ -1131,8 +1196,10 @@ jobs:
                          and (($latest | event_kind) == "labeled")
                          and (($latest.createdAt | fromdateiso8601) as $label_ts |
                            marker_for($root; $label; $label_ts))))
-                ' \
-                2>/dev/null || echo false
+                ' 2>/dev/null || echo false
+              else
+                echo false
+              fi
             )"
             if printf '%s\n' "$approval_gate_present" | grep -qx true; then
               export PR_HUMAN_APPROVAL_GATE_PRESENT=true

@@ -587,6 +587,11 @@ let degraded_rotation_candidates
   let candidates =
     match fallback_hint_candidate with
     | None -> raw_candidates
+    (* Required-tool retries must try the configured tool-required lane before
+       declarative fallback hints; otherwise a broad recovery chain can bypass
+       the runtime-MCP-capable lane and immediately land on a passive provider. *)
+    | Some hint when tool_requirement = Required ->
+        dedupe_keep_order (raw_candidates @ [ hint ])
     | Some hint -> dedupe_keep_order (hint :: raw_candidates)
   in
   candidates

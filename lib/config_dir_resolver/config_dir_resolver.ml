@@ -515,3 +515,6 @@ let credentials_toml_path ~base_path =
 
 let repositories_toml_path ~base_path =
   Filename.concat (masc_root ~base_path) "config/repositories.toml"
+
+let keeper_repo_mappings_toml_path ~base_path =
+  Filename.concat (masc_root ~base_path) "config/keeper_repo_mappings.toml"

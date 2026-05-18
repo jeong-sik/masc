@@ -3,7 +3,10 @@ open Repo_manager_types
 let ( let* ) = Result.bind
 
 let creds_toml_path base_path =
-  Filename.concat base_path ".masc/config/credentials.toml"
+  (* RFC-0121: layout SSOT via [Config_dir_resolver]. Resolver helper
+     returns the same byte-string as the previous direct concat (covered
+     by test_rfc0121_credentials_toml). *)
+  Config_dir_resolver.credentials_toml_path ~base_path
 
 let default_credential =
   {

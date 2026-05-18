@@ -494,6 +494,11 @@ let test_rfc0121_repositories_toml () =
     "/x/.masc/config/repositories.toml"
     (Config_dir_resolver.repositories_toml_path ~base_path:"/x")
 
+let test_rfc0121_keeper_repo_mappings_toml () =
+  check string "keeper_repo_mappings.toml under .masc/config"
+    "/x/.masc/config/keeper_repo_mappings.toml"
+    (Config_dir_resolver.keeper_repo_mappings_toml_path ~base_path:"/x")
+
 let test_rfc0121_masc_root_agrees_with_common () =
   (* SSOT bridge — resolver helper must produce the same path as the
      pre-existing [Common] helper that callers historically used. *)
@@ -577,6 +582,8 @@ let () =
             test_rfc0121_credentials_toml;
           test_case "repositories_toml under config" `Quick
             test_rfc0121_repositories_toml;
+          test_case "keeper_repo_mappings_toml under config" `Quick
+            test_rfc0121_keeper_repo_mappings_toml;
           test_case "masc_root agrees with Common" `Quick
             test_rfc0121_masc_root_agrees_with_common;
         ] );

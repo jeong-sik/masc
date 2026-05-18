@@ -180,6 +180,10 @@ let release_lifetime_guard st =
       st.release_lifetime_guard <- None;
       release ()
 
+let close_task_fds st =
+  Safe_ops.protect ~default:() (fun () -> Unix.close st.handle.stdout_fd);
+  Safe_ops.protect ~default:() (fun () -> Unix.close st.handle.stderr_fd)
+
 let mark_process_finished st status =
   if Option.is_none st.status then st.status <- Some status;
   release_lifetime_guard st
@@ -196,21 +200,26 @@ let with_reg f =
   | v -> Mutex.unlock registry_mu; v
   | exception e -> Mutex.unlock registry_mu; raise e
 
-let start_exit_watcher st =
-  let _watcher =
-    Thread.create
-      (let rec wait () =
-        match Unix.waitpid [] st.handle.pid with
-        | _, status -> with_reg (fun () -> mark_process_finished st status)
-        | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
-        | exception Unix.Unix_error (Unix.ECHILD, _, _) ->
-            with_reg (fun () -> release_lifetime_guard st)
-        | exception exn -> observe_sidecar_failure ~site:"waitpid" exn
-       in
-       wait)
-      ()
-  in
+let default_exit_watcher_thread_create f =
+  let _watcher = Thread.create f () in
   ()
+
+let exit_watcher_thread_create = Atomic.make default_exit_watcher_thread_create
+let set_exit_watcher_thread_create_for_testing f = Atomic.set exit_watcher_thread_create f
+let reset_exit_watcher_thread_create_for_testing () =
+  Atomic.set exit_watcher_thread_create default_exit_watcher_thread_create
+
+let start_exit_watcher st =
+  (Atomic.get exit_watcher_thread_create)
+    (let rec wait () =
+       match Unix.waitpid [] st.handle.pid with
+       | _, status -> with_reg (fun () -> mark_process_finished st status)
+       | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
+       | exception Unix.Unix_error (Unix.ECHILD, _, _) ->
+           with_reg (fun () -> release_lifetime_guard st)
+       | exception exn -> observe_sidecar_failure ~site:"waitpid" exn
+     in
+     wait)
 
 let fresh_id () =
   with_reg (fun () ->
@@ -381,13 +390,12 @@ let poll_state st =
 	       | _, s -> mark_process_finished st s
 	       | exception _ -> ())
     end;
-    if st.status <> None && st.stdout_eof && st.stderr_eof then begin
-	      st.closed <- true;
-	      Safe_ops.protect ~default:() (fun () -> Unix.close st.handle.stdout_fd);
-	      Safe_ops.protect ~default:() (fun () -> Unix.close st.handle.stderr_fd);
-	      try_delete_pid_file st.pid_file
-	    end
-  end
+	    if st.status <> None && st.stdout_eof && st.stderr_eof then begin
+		      st.closed <- true;
+		      close_task_fds st;
+		      try_delete_pid_file st.pid_file
+		    end
+	  end
 
 let poll_all_states () =
   Hashtbl.iter (fun _ st -> poll_state st) registry
@@ -431,6 +439,15 @@ let release_spawn_slot ~keeper =
     let next = max 0 (pending_keeper_count keeper - 1) in
     if next = 0 then Hashtbl.remove pending_spawn_by_keeper keeper
     else Hashtbl.replace pending_spawn_by_keeper keeper next)
+
+let cleanup_failed_registered_spawn ~tid st =
+  Safe_ops.protect ~default:() (fun () ->
+    Process_eio.tree_kill ~pgid:st.handle.pgid ~signal:Sys.sigterm ~grace_sec:0.2);
+  with_reg (fun () ->
+    Hashtbl.remove registry tid;
+    release_lifetime_guard st);
+  close_task_fds st;
+  try_delete_pid_file st.pid_file
 
 let spawn ?base_path ~keeper ~argv ~cwd ~envp ~timeout_sec () =
   match reserve_spawn_slot ~keeper with
@@ -496,8 +513,20 @@ let spawn ?base_path ~keeper ~argv ~cwd ~envp ~timeout_sec () =
 	                let next = max 0 (pending_keeper_count keeper - 1) in
 	                if next = 0 then Hashtbl.remove pending_spawn_by_keeper keeper
 	                else Hashtbl.replace pending_spawn_by_keeper keeper next);
-	            start_exit_watcher st;
-	            Ok tid)
+		            (try
+		               start_exit_watcher st;
+		               Ok tid
+		             with
+		             | Eio.Cancel.Cancelled _ as e ->
+		                 cleanup_failed_registered_spawn ~tid st;
+		                 raise e
+		             | exn ->
+		                 cleanup_failed_registered_spawn ~tid st;
+		                 Error
+		                   (Spawn_failed
+		                      (Printf.sprintf
+		                         "bg_task exit watcher start failed: %s"
+		                         (Printexc.to_string exn)))))
 
 let bufsub buf ~base_offset since =
   let len = Buffer.length buf in

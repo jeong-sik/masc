@@ -135,6 +135,14 @@ val set_lifetime_guard : lifetime_guard -> unit
 val reset_lifetime_guard_for_testing : unit -> unit
 (** Restore the default no-op guard. Intended for focused tests. *)
 
+val set_exit_watcher_thread_create_for_testing : ((unit -> unit) -> unit) -> unit
+(** Install a process-local exit watcher thread starter. Intended for focused
+    tests that simulate [Thread.create] failure after a detached process has
+    spawned. *)
+
+val reset_exit_watcher_thread_create_for_testing : unit -> unit
+(** Restore the default [Thread.create]-backed exit watcher starter. *)
+
 val set_sidecar_failure_observer : (site:string -> exn -> unit) -> unit
 (** Install the process-local observer for PID sidecar persistence
     failures.  The top-level Prometheus module wires this to

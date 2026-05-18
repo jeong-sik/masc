@@ -143,6 +143,7 @@
    keeper_shell_bash_words
    keeper_shell_bash_redirects
    keeper_shell_bash_task_probe
+   keeper_shell_bash_task_state
    keeper_shell_bash
    keeper_shell_ops
    keeper_exec_shell

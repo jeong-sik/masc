@@ -110,6 +110,23 @@ val sanitize_dashboard_actor_name : string -> string
 (** Strip non-printable characters and clamp length so the actor name
     is safe to log / render. *)
 
+val record_dashboard_actor_fallback :
+  Auth_error_kind.dashboard_actor_fallback -> unit
+(** Emit the [silent:dashboard_actor_fallback] warn log + increment
+    [metric_silent_dashboard_actor_fallback] for a typed fallback event.
+
+    Consolidates the two prior inline warn sites (Ok None / Error err
+    arms in [dashboard_actor_for_request]) onto a single helper. The
+    rendered log message is byte-equivalent to the prior format strings
+    — prometheus log alerts keyed on the literal
+    [silent:dashboard_actor_fallback] prefix continue to fire.
+
+    WORKAROUND-CARRYOVER: the fallback path itself remains (the
+    dashboard cannot go dark on token churn), but downstream reducers
+    now have a typed handle on *why* the fallback fired. Reference:
+    Reverse Engineering Design Map §개선 #2 (request identity state
+    machine). *)
+
 val dashboard_actor_for_request :
   base_path:string -> Httpun.Request.t -> string option
 (** Resolve the dashboard actor name from the request. *)

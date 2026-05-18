@@ -150,6 +150,30 @@ let docker_mount_preflight_details
     ]
 ;;
 
+let credential_preflight_failure_json ~keeper_name ~message =
+  Yojson.Safe.to_string
+    (`Assoc
+       [ "ok", `Bool false
+       ; "error", `String "keeper_github_credential_blocked"
+       ; "failure_class", `String "workflow_rejection"
+       ; "retryable", `Bool false
+       ; "semantic_status", `String "blocked"
+       ; "blocker", `String "keeper_github_credential"
+       ; "keeper", `String keeper_name
+       ; "detail", `String message
+       ; ( "recovery_hint"
+         , `String
+             "The keeper GitHub credential bundle is unavailable or stale. \
+              Re-materialize the selected bundle via dashboard or gh auth login \
+              into that bundle before retrying git/gh keeper_bash commands." )
+       ])
+;;
+
+let is_credential_preflight_failure message =
+  String_util.contains_substring message "Missing_bundle"
+  || String_util.contains_substring message "Invalid_token"
+;;
+
 (* ── P12: Network egress policy ───────────────────────── *)
 
 let egress_policy_path ~(config : Coord.config) ~(meta : keeper_meta) =
@@ -1419,6 +1443,8 @@ let run_docker_with_git_bash
                 ~git_creds_enabled:true
                 ~network_mode:Network_inherit
             with
+            | Error message when is_credential_preflight_failure message ->
+              credential_preflight_failure_json ~keeper_name:meta.name ~message
             | Error message -> error_json message
             | Ok result ->
               let cwd_response =

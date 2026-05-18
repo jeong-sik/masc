@@ -39,6 +39,13 @@
   coord_git
   playground_repo_cache
   coord_worktree
+  coord_worktree_exec
+  coord_worktree_policy
+  coord_worktree_paths
+  coord_worktree_repo_discovery
+  coord_worktree_sandbox_clone
+  coord_worktree_destructive_ops
+  coord_worktree_lifecycle
   mention
   mention_dedup
   coord_resilience

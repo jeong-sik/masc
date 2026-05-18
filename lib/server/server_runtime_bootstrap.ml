@@ -1541,6 +1541,13 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         runtime_path_diagnostics ~input_base_path:base_path state
       in
       Server_base_path_diagnostics.log_startup_warning path_diagnostics;
+      if Server_base_path_diagnostics.startup_should_abort path_diagnostics then begin
+        Log.Server.error "%s\nStartup guard rejected malformed runtime state."
+          (Option.value path_diagnostics.warning
+             ~default:
+               "startup guard triggered without a diagnostic warning");
+        exit 1
+      end;
       if Server_base_path_diagnostics.strict_violation path_diagnostics then begin
         Log.Server.error "%s\nBase-path strict mode rejected the resolved runtime path configuration."
           (Option.value path_diagnostics.warning

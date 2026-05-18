@@ -10,6 +10,9 @@ type t = {
   input_base_path : string option;
   effective_base_path : string;
   effective_masc_root : string;
+  current_task_path : string;
+  current_task_shape : string;
+  current_task_error : string option;
   env_masc_base_path : string option;
   resolution_source : string option;
   effective_has_masc_dir : bool;
@@ -73,6 +76,71 @@ let resolution_source_opt ?resolution_source () =
   | Some raw -> trim_opt (Some raw)
   | None -> trim_opt (Sys.getenv_opt "MASC_BASE_PATH_RESOLUTION_SOURCE")
 
+let unix_error_to_string err op arg =
+  let target =
+    match String.trim arg with
+    | "" -> ""
+    | value -> Printf.sprintf " %S" value
+  in
+  Printf.sprintf "%s%s: %s" op target (Unix.error_message err)
+
+let file_kind_to_shape = function
+  | Unix.S_REG -> "regular"
+  | Unix.S_DIR -> "directory"
+  | Unix.S_CHR -> "character_device"
+  | Unix.S_BLK -> "block_device"
+  | Unix.S_LNK -> "symlink"
+  | Unix.S_FIFO -> "fifo"
+  | Unix.S_SOCK -> "socket"
+
+let inspect_regular_current_task path =
+  try
+    let fd = Unix.openfile path [ Unix.O_RDWR ] 0 in
+    (try Unix.close fd with Unix.Unix_error _ -> ());
+    ("regular", None)
+  with
+  | Unix.Unix_error (err, op, arg) ->
+      ("regular_unusable", Some (unix_error_to_string err op arg))
+
+let inspect_current_task_path effective_masc_root =
+  let path = Filename.concat effective_masc_root "current_task" in
+  try
+    let stat = Unix.lstat path in
+    match stat.Unix.st_kind with
+    | Unix.S_REG ->
+        let shape, error = inspect_regular_current_task path in
+        (path, shape, error)
+    | kind ->
+        ( path,
+          file_kind_to_shape kind,
+          Some
+            (Printf.sprintf
+               "expected absent or a regular read/write file, got %s"
+               (file_kind_to_shape kind)) )
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> (path, "absent", None)
+  | Unix.Unix_error (err, op, arg) ->
+      (path, "inaccessible", Some (unix_error_to_string err op arg))
+
+let current_task_shape_ok = function
+  | "absent" | "regular" -> true
+  | _ -> false
+
+let current_task_warning ~path ~shape ~error =
+  if current_task_shape_ok shape then None
+  else
+    let detail =
+      match error with
+      | Some msg -> Printf.sprintf " (%s)" msg
+      | None -> ""
+    in
+    Some
+      (Printf.sprintf
+         "Invalid current_task startup state: %s is %s%s; expected absent or \
+          a regular read/write file. Repair by moving/removing the path \
+          before starting the server."
+         path shape detail)
+
 let detect ?cwd ?env_masc_base_path ?strict ?input_base_path ?resolution_source
     ~effective_base_path ~effective_masc_root () =
   let cwd =
@@ -83,6 +151,9 @@ let detect ?cwd ?env_masc_base_path ?strict ?input_base_path ?resolution_source
   let cwd_norm = normalize_path ~cwd cwd in
   let effective_base_norm = normalize_path ~cwd effective_base_path in
   let effective_masc_norm = normalize_path ~cwd effective_masc_root in
+  let current_task_path, current_task_shape, current_task_error =
+    inspect_current_task_path effective_masc_norm
+  in
   let effective_has_masc_dir = dir_exists effective_masc_norm in
   let effective_legacy_dirs = legacy_dirs_under effective_masc_norm in
   let roots_diverge = not (String.equal cwd_norm effective_base_norm) in
@@ -92,14 +163,20 @@ let detect ?cwd ?env_masc_base_path ?strict ?input_base_path ?resolution_source
     | Some enabled -> enabled
     | None -> strict_mode_env_enabled ()
   in
-  let startup_rejected = false in
-  let startup_abort_eligible = false in
-  let warning = None in
+  let warning =
+    current_task_warning ~path:current_task_path ~shape:current_task_shape
+      ~error:current_task_error
+  in
+  let startup_rejected = Option.is_some warning in
+  let startup_abort_eligible = startup_rejected in
   {
     process_cwd = cwd_norm;
     input_base_path;
     effective_base_path = effective_base_norm;
     effective_masc_root = effective_masc_norm;
+    current_task_path;
+    current_task_shape;
+    current_task_error;
     env_masc_base_path = trim_opt env_masc_base_path;
     resolution_source;
     effective_has_masc_dir;
@@ -114,6 +191,9 @@ let detect ?cwd ?env_masc_base_path ?strict ?input_base_path ?resolution_source
 let strict_violation (diag : t) =
   let _ = diag in
   false
+
+let startup_should_abort diag =
+  diag.startup_rejected || diag.startup_abort_eligible
 
 let startup_lines (diag : t) =
   let lines =
@@ -146,6 +226,12 @@ let startup_lines (diag : t) =
          Some "   Path startup rejection: enabled"
        else
          None);
+      (if startup_should_abort diag then
+         Some
+           (Printf.sprintf "   current_task path: %s (%s)"
+              diag.current_task_path diag.current_task_shape)
+       else
+         None);
     ]
   in
   List.filter_map (fun line -> line) lines
@@ -173,6 +259,8 @@ let to_yojson (diag : t) =
        ("cwd", `String diag.process_cwd);
        ("effective_base_path", `String diag.effective_base_path);
        ("effective_masc_root", `String diag.effective_masc_root);
+       ("current_task_path", `String diag.current_task_path);
+       ("current_task_shape", `String diag.current_task_shape);
        ("effective_has_masc_dir", `Bool diag.effective_has_masc_dir);
        ( "effective_legacy_dirs",
          `List (List.map (fun dir -> `String dir) diag.effective_legacy_dirs) );
@@ -187,5 +275,6 @@ let to_yojson (diag : t) =
           option_field "input_base_path" diag.input_base_path;
           option_field "env_masc_base_path" diag.env_masc_base_path;
           option_field "resolution_source" diag.resolution_source;
+          option_field "current_task_error" diag.current_task_error;
           option_field "warning" diag.warning;
         ])

@@ -452,6 +452,9 @@ let keeper_fs_edit_schema =
 let keeper_board_post_schema =
   find_schema_exn "keeper_board_post" Config.raw_all_tool_schemas
 
+let keeper_bash_schema =
+  find_schema_exn "keeper_bash" Config.raw_all_tool_schemas
+
 let assoc_string key json =
   match Yojson.Safe.Util.member key json with
   | `String value -> value
@@ -530,6 +533,128 @@ let test_registered_hook_keeper_board_post_accepts_sources_array () =
   in
   Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
   check_keeper_board_post_sources_preserved forwarded
+
+let param_by_name name params =
+  List.find_opt
+    (fun (param : Agent_sdk.Types.tool_param) -> String.equal param.name name)
+    params
+
+let check_param_type name expected params =
+  match param_by_name name params with
+  | Some (param : Agent_sdk.Types.tool_param) ->
+    Alcotest.(check bool)
+      (name ^ " is optional at OAS boundary")
+      false
+      param.required;
+    Alcotest.(check string)
+      (name ^ " param type")
+      expected
+      (match param.param_type with
+       | Agent_sdk.Types.String -> "string"
+       | Integer -> "integer"
+       | Number -> "number"
+       | Boolean -> "boolean"
+       | Array -> "array"
+       | Object -> "object")
+  | None -> Alcotest.failf "missing param: %s" name
+
+let test_keeper_bash_schema_exposes_typed_boundary () =
+  let params = Tool_bridge.params_of_json_schema keeper_bash_schema in
+  check_param_type "cmd" "string" params;
+  check_param_type "executable" "string" params;
+  check_param_type "argv" "array" params;
+  check_param_type "pipeline" "array" params;
+  check_param_type "stages" "array" params;
+  check_param_type "env" "object" params
+
+let test_validate_args_keeper_bash_accepts_legacy_cmd () =
+  let args = `Assoc [ "cmd", `String "pwd" ] in
+  match
+    Tool_input_validation.validate_args
+      ~schema:keeper_bash_schema
+      ~name:"keeper_bash"
+      ~args
+      ()
+  with
+  | Ok forwarded ->
+    Alcotest.(check bool) "args unchanged" true (Yojson.Safe.equal args forwarded)
+  | Error result ->
+    Alcotest.failf
+      "expected legacy keeper_bash cmd to pass validation, got %s"
+      (Yojson.Safe.to_string result.Tool_result.data)
+
+let test_validate_args_keeper_bash_accepts_typed_exec () =
+  let args =
+    `Assoc
+      [ "executable", `String "rg"
+      ; "argv", `List [ `String "--files"; `String "lib" ]
+      ; "cwd", `String "/tmp"
+      ; "env", `Assoc [ "NO_COLOR", `String "1" ]
+      ]
+  in
+  match
+    Tool_input_validation.validate_args
+      ~schema:keeper_bash_schema
+      ~name:"keeper_bash"
+      ~args
+      ()
+  with
+  | Ok forwarded ->
+    Alcotest.(check bool) "args unchanged" true (Yojson.Safe.equal args forwarded)
+  | Error result ->
+    Alcotest.failf
+      "expected typed keeper_bash exec to pass validation, got %s"
+      (Yojson.Safe.to_string result.Tool_result.data)
+
+let test_validate_args_keeper_bash_accepts_typed_pipeline () =
+  let args =
+    `Assoc
+      [ ( "pipeline"
+        , `List
+            [ `Assoc
+                [ "executable", `String "rg"
+                ; "argv", `List [ `String "--files"; `String "lib" ]
+                ]
+            ; `Assoc
+                [ "executable", `String "head"
+                ; "argv", `List [ `String "-20" ]
+                ]
+            ] )
+      ; "cwd", `String "/tmp"
+      ]
+  in
+  match
+    Tool_input_validation.validate_args
+      ~schema:keeper_bash_schema
+      ~name:"keeper_bash"
+      ~args
+      ()
+  with
+  | Ok forwarded ->
+    Alcotest.(check bool) "pipeline preserved" true (Yojson.Safe.equal args forwarded)
+  | Error result ->
+    Alcotest.failf
+      "expected typed keeper_bash pipeline to pass validation, got %s"
+      (Yojson.Safe.to_string result.Tool_result.data)
+
+let test_validate_args_keeper_bash_rejects_bad_argv_type () =
+  let args =
+    `Assoc [ "executable", `String "rg"; "argv", `String "--files lib" ]
+  in
+  match
+    Tool_input_validation.validate_args
+      ~schema:keeper_bash_schema
+      ~name:"keeper_bash"
+      ~args
+      ()
+  with
+  | Error result ->
+    let msg = Yojson.Safe.to_string result.Tool_result.data in
+    Alcotest.(check bool) "mentions argv" true (string_contains msg "argv")
+  | Ok forwarded ->
+    Alcotest.failf
+      "expected typed keeper_bash argv string to fail, got %s"
+      (Yojson.Safe.to_string forwarded)
 
 let validation_labels ~tool ~result ~reason =
   [ "tool", tool; "result", result; "reason", reason ]
@@ -920,6 +1045,16 @@ let () =
         test_registered_hook_keeper_fs_edit_patch_args;
       Alcotest.test_case "keeper_board_post accepts sources array" `Quick
         test_registered_hook_keeper_board_post_accepts_sources_array;
+      Alcotest.test_case "keeper_bash exposes typed boundary" `Quick
+        test_keeper_bash_schema_exposes_typed_boundary;
+      Alcotest.test_case "keeper_bash accepts legacy cmd" `Quick
+        test_validate_args_keeper_bash_accepts_legacy_cmd;
+      Alcotest.test_case "keeper_bash accepts typed exec" `Quick
+        test_validate_args_keeper_bash_accepts_typed_exec;
+      Alcotest.test_case "keeper_bash accepts typed pipeline" `Quick
+        test_validate_args_keeper_bash_accepts_typed_pipeline;
+      Alcotest.test_case "keeper_bash rejects bad typed argv" `Quick
+        test_validate_args_keeper_bash_rejects_bad_argv_type;
       Alcotest.test_case "direct validation uses explicit schema" `Quick
         test_validate_args_uses_explicit_schema_without_registry;
       Alcotest.test_case "direct keeper_board_post accepts sources array" `Quick

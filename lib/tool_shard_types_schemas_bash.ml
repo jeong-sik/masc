@@ -1,14 +1,41 @@
 (** Tool_shard_types_schemas_bash — [coding_keeper_bridge_tools] keeper_bash + keeper_bash_output + keeper_bash_kill schemas. *)
 
+let keeper_bash_exec_stage_schema =
+  `Assoc
+    [ "type", `String "object"
+    ; ( "properties"
+      , `Assoc
+          [ ( "executable"
+            , `Assoc
+                [ "type", `String "string"
+                ; ( "description"
+                  , `String "Allowlisted executable name, e.g. rg, sed, sort, head." )
+                ] )
+          ; ( "argv"
+            , `Assoc
+                [ "type", `String "array"
+                ; "items", `Assoc [ "type", `String "string" ]
+                ; ( "description"
+                  , `String
+                      "Arguments passed verbatim to executable. Shell metacharacters \
+                       are data; use pipeline/stages for pipes." )
+                ] )
+          ] )
+    ; "required", `List [ `String "executable" ]
+    ]
+;;
+
 let coding_keeper_bridge_tools : Masc_domain.tool_schema list =
   [ { name = "keeper_bash"
     ; description =
-        "Execute ONE shell command through the keeper_bash safety gates. No \
+        "Execute one command through the keeper_bash safety gates. Legacy cmd remains \
+         accepted during the typed-argv migration; prefer executable/argv for one \
+         process or pipeline/stages for explicit Shell IR pipelines. No \
          chaining/control syntax (&&, ||, ;), command substitution, background \
-         operators, or file redirects. Pipelines and fd-only redirects are accepted only \
-         when the active preset validator allows every segment. Good: cmd='scripts/dune-local.sh build', \
-         cmd='ls -la lib/'. Bad: cmd='cd x && dune build', cmd='echo hi > out.txt'. Runs \
-         in the keeper sandbox by default; use cwd to target an explicit allowed \
+         operators, or file redirects. Good: cmd='scripts/dune-local.sh build', \
+         executable='rg' argv=['pattern','lib/'], pipeline=[{executable='rg',...}, \
+         {executable='head',...}]. Bad: cmd='cd x && dune build', cmd='echo hi > \
+         out.txt'. Runs in the keeper sandbox by default; use cwd to target an explicit allowed \
          directory. Paths resolve automatically — never include host storage prefixes \
          such as '.masc/playground/your-name/' in cwd. Use 'repos/X' instead. Sandbox \
          root is NOT a git repository: git/gh calls require cwd='repos/<REPO_NAME>' (or \
@@ -29,6 +56,50 @@ let coding_keeper_bridge_tools : Masc_domain.tool_schema list =
                         , `String
                             "Single command only. No chaining/control syntax or file \
                              redirects. Example: 'scripts/dune-local.sh build', 'rg pattern lib/'" )
+                      ] )
+                ; ( "executable"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "Typed argv form: allowlisted executable name. Provide argv \
+                             separately; do not combine shell syntax into this field." )
+                      ] )
+                ; ( "argv"
+                  , `Assoc
+                      [ "type", `String "array"
+                      ; "items", `Assoc [ "type", `String "string" ]
+                      ; ( "description"
+                        , `String
+                            "Typed argv form: arguments passed verbatim to executable. \
+                             A literal '|' token is data, not a pipe." )
+                      ] )
+                ; ( "pipeline"
+                  , `Assoc
+                      [ "type", `String "array"
+                      ; "items", keeper_bash_exec_stage_schema
+                      ; ( "description"
+                        , `String
+                            "Typed pipeline form: ordered exec stages. Use this instead \
+                             of putting '|' in argv or cmd." )
+                      ] )
+                ; ( "stages"
+                  , `Assoc
+                      [ "type", `String "array"
+                      ; "items", keeper_bash_exec_stage_schema
+                      ; ( "description"
+                        , `String
+                            "Alias for pipeline. Each stage has executable and optional \
+                             argv." )
+                      ] )
+                ; ( "env"
+                  , `Assoc
+                      [ "type", `String "object"
+                      ; "additionalProperties", `Assoc [ "type", `String "string" ]
+                      ; ( "description"
+                        , `String
+                            "Optional typed environment bindings. Keys must be \
+                             [A-Za-z0-9_]+ and values are strings." )
                       ] )
                 ; ( "cwd"
                   , `Assoc
@@ -56,7 +127,13 @@ let coding_keeper_bridge_tools : Masc_domain.tool_schema list =
                              stop via keeper_bash_kill." )
                       ] )
                 ] )
-          ; "required", `List [ `String "cmd" ]
+          ; ( "oneOf"
+            , `List
+                [ `Assoc [ "required", `List [ `String "cmd" ] ]
+                ; `Assoc [ "required", `List [ `String "executable" ] ]
+                ; `Assoc [ "required", `List [ `String "pipeline" ] ]
+                ; `Assoc [ "required", `List [ `String "stages" ] ]
+                ] )
           ]
     }
   ; { name = "keeper_bash_output"

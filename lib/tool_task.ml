@@ -603,6 +603,11 @@ let persisted_contract_rejection ~(ctx : context)
           None
         end
 
+let cdal_gate_label_for_task = function
+  | Some ({ contract = Some { strict = false; _ }; _ } : Masc_domain.task) ->
+    Cdal_verdict_gate.advisory_gate_label
+  | _ -> Cdal_verdict_gate.strict_gate_label
+
 (* Handlers *)
 
 let handle_add_task ~tool_name ~start_time ctx args =
@@ -1347,14 +1352,20 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
              we only want the [Dashboard_attribution] side effect that
              [gate_check] performs internally. *)
           if Env_config_runtime.Cdal.gate_enabled () then
-            ignore (Cdal_verdict_gate.gate_check ~task_id ())
+            ignore
+              (Cdal_verdict_gate.gate_check
+                 ~gate_label:(cdal_gate_label_for_task task_opt)
+                 ~task_id ())
         | Masc_domain.Reject_verification ->
           let reason = if not (String.equal notes "") then notes else reason in
           let verification_id = Option.value ~default:"" verification_id_before in
           Verification_protocol.notify_reject_verification
             ~task_id ~verifier:ctx.agent_name ~verification_id ~reason;
           if Env_config_runtime.Cdal.gate_enabled () then
-            ignore (Cdal_verdict_gate.gate_check ~task_id ())
+            ignore
+              (Cdal_verdict_gate.gate_check
+                 ~gate_label:(cdal_gate_label_for_task task_opt)
+                 ~task_id ())
         | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Done_action | Masc_domain.Cancel | Masc_domain.Release -> ())
    | Error err ->
        Log.Task.error "task transition failed: %s" (Masc_domain.masc_error_to_string err));

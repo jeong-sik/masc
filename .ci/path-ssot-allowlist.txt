@@ -25,12 +25,15 @@ lib/keeper/keeper_egress_audit.ml:54
 
 # default_local_path / repositories.toml local_path TOML default value
 # is cwd/base-path-relative by on-disk design (RFC-0121 §6 deferred).
-lib/repo_manager/repo_store.ml:11
-lib/server/server_routes_http_routes_repositories.ml:195
+lib/repo_manager/repo_store.ml:17
+lib/server/server_routes_http_routes_repositories.ml:197
 
 # Self-reference inside the audit script and RFC text.
 scripts/audit-path-ssot.sh
 docs/rfc/RFC-0121-config-dir-resolution-single-active-root.md
+# Self-reference inside the layout-SSOT module documentation comments.
+lib/config_dir_resolver/config_dir_resolver.mli:93
+lib/config_dir_resolver/config_dir_resolver.ml:478
 
 # ============================================================
 # (B) Transitional baseline (in-flight RFC-0121 PRs)

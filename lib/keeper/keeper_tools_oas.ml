@@ -110,6 +110,17 @@ let failure_count_reset counts key =
   Mutex.protect counts.mutex (fun () -> Hashtbl.remove counts.table key)
 ;;
 
+(* MASC/OAS Error-Warn Reduction Goal 2026-05-18, P2 reducer:
+   force the per-(tool,args) counter up to [target] on the first
+   deterministic policy/shape block. Returns the new value so the
+   caller can use it in log lines (always [target]). Idempotent for
+   subsequent matching calls — [Hashtbl.replace] does not stack. *)
+let failure_count_jump_to counts key ~target =
+  Mutex.protect counts.mutex (fun () ->
+    Hashtbl.replace counts.table key target;
+    target)
+;;
+
 type workflow_rejection_info =
   { rule_id : string option
   ; tool_suggestion : string option
@@ -601,6 +612,14 @@ let make_keeper_tool_handler
               | None ->
                 false
             in
+            (* MASC/OAS Error-Warn Reduction Goal 2026-05-18, P2 reducer:
+               classify deterministic policy/shape blocks so the LLM-driven
+               1/3 -> 2/3 -> 3/3 retry loop short-circuits at the first
+               attempt. Transient errors and shell exit-nonzero results
+               are intentionally outside this surface (None branch). *)
+            let deterministic_reason =
+              Keeper_tool_deterministic_error.classify_raw raw_result
+            in
             let workflow_rejection_recovery_fields =
               if is_workflow_rejection
               then (
@@ -612,10 +631,44 @@ let make_keeper_tool_handler
                 | None -> [])
               else []
             in
+            let deterministic_recovery_fields =
+              match deterministic_reason with
+              | None -> []
+              | Some reason ->
+                let key_label =
+                  Keeper_tool_deterministic_error.to_telemetry_key reason
+                in
+                [ ( "do_not_retry_tool"
+                  , `String name )
+                ; ( "retry_skipped"
+                  , `Bool true )
+                ; ( "retry_skipped_reason"
+                  , `String key_label )
+                ; ( "retry_skipped_explanation"
+                  , `String
+                      (Keeper_tool_deterministic_error.to_string reason) )
+                ]
+            in
+            let recovery_fields =
+              workflow_rejection_recovery_fields @ deterministic_recovery_fields
+            in
+            (* Deterministic policy/shape blocks: jump the per-(tool,args)
+               failure counter to [max_consecutive_failures] on the first
+               occurrence so the next invocation with the same args lands
+               in the [prior_fails >= max_consecutive_failures] block branch
+               at the top of the handler instead of repeating the same
+               error log at 2/3 and 3/3. The current call still emits
+               once (with the [retry_skipped*] recovery fields above) so
+               the LLM receives a single, self-correcting response. *)
             let count =
-              if is_workflow_rejection
-              then 0
-              else failure_count_record_failure failure_counts key
+              match deterministic_reason, is_workflow_rejection with
+              | _, true -> 0
+              | Some _, _ ->
+                failure_count_jump_to
+                  failure_counts
+                  key
+                  ~target:max_consecutive_failures
+              | None, false -> failure_count_record_failure failure_counts key
             in
             Keeper_registry.record_tool_use
               ~base_path:config.base_path
@@ -664,31 +717,60 @@ let make_keeper_tool_handler
               Keeper_metrics.metric_keeper_tools_oas_failures
               ~labels:[ "tool", name; "site", "error_result" ]
               ();
-            if is_workflow_rejection
-            then
-              Log.Keeper.warn
-                "tool %s returned workflow rejection: %s"
-                name
-                detail
-            else
-              Log.Keeper.error
-                "tool %s returned error result (%d/%d): %s"
-                name
-                count
-                max_consecutive_failures
-                detail;
+            (match deterministic_reason, is_workflow_rejection with
+             | Some reason, _ ->
+               Log.Keeper.warn
+                 "tool %s deterministic error (retry skipped, reason=%s): %s"
+                 name
+                 (Keeper_tool_deterministic_error.to_telemetry_key reason)
+                 detail
+             | None, true ->
+               Log.Keeper.warn
+                 "tool %s returned workflow rejection: %s"
+                 name
+                 detail
+             | None, false ->
+               Log.Keeper.error
+                 "tool %s returned error result (%d/%d): %s"
+                 name
+                 count
+                 max_consecutive_failures
+                 detail);
+            (match deterministic_reason with
+             | Some reason ->
+               Prometheus.inc_counter
+                 Keeper_metrics.metric_keeper_tools_oas_failures
+                 ~labels:
+                   [ "tool", name
+                   ; "site"
+                   , "deterministic_retry_skipped:"
+                     ^ Keeper_tool_deterministic_error.to_telemetry_key reason
+                   ]
+                 ()
+             | None -> ());
             let normalized_error =
               normalize_tool_result
-                ~workflow_rejection_recovery_fields
+                ~workflow_rejection_recovery_fields:recovery_fields
                 ~success:false
                 raw_result
+            in
+            let deterministic_decision_log_fields =
+              match deterministic_reason with
+              | None -> []
+              | Some reason ->
+                [ ( "retry_skipped"
+                  , `Bool true )
+                ; ( "retry_skipped_reason"
+                  , `String
+                      (Keeper_tool_deterministic_error.to_telemetry_key reason) )
+                ]
             in
             append_tool_exec_decision_log
               ~config
               ~keeper_name:meta.name
               ~site:"error_result"
               (`Assoc
-                  [ "ts_unix", `Float ts
+                  ([ "ts_unix", `Float ts
                   ; "event", `String "tool_exec"
                   ; "keeper_name", `String meta.name
                   ; "tool", `String name
@@ -696,7 +778,8 @@ let make_keeper_tool_handler
                   ; "result_bytes", `Int (String.length normalized_error)
                   ; "ok", `Bool false
                   ; "error_preview", `String detail
-                  ]);
+                  ]
+                  @ deterministic_decision_log_fields));
             Keeper_tool_call_log.set_truncation_info
               ~keeper_name:meta.name
               ~original_bytes:(String.length normalized_error)

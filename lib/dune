@@ -195,6 +195,9 @@
   keeper_turn_lifecycle
   keeper_msg_async
   keeper_event_bus
+  keeper_supervisor_alive_but_stuck
+  keeper_supervisor_liveness_recovery
+  keeper_supervisor_restart_noop
   ;; keeper_event_queue: promoted to lib/keeper_event_queue/ sub-library
   ;; (RFC-0056 Phase 1I) — listed in (libraries) below.
   keeper_relevance_check

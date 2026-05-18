@@ -42,6 +42,162 @@ let is_allowed ~mode name =
   | Readonly -> Dev_exec_allowlist.is_readonly_allowed name
 ;;
 
+let json_type_name (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc _ -> "object"
+  | `Bool _ -> "boolean"
+  | `Float _ -> "number"
+  | `Int _ -> "integer"
+  | `Intlit _ -> "integer"
+  | `List _ -> "array"
+  | `Null -> "null"
+  | `String _ -> "string"
+;;
+
+let result_errorf fmt = Printf.ksprintf (fun msg -> Error msg) fmt
+
+let assoc_fields ~path (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields -> Ok fields
+  | value ->
+    result_errorf
+      "%s must be object, got %s"
+      path
+      (json_type_name value)
+;;
+
+let member fields key = List.assoc_opt key fields
+
+let required_string ~path fields key =
+  match member fields key with
+  | Some (`String value) -> Ok value
+  | Some value ->
+    result_errorf
+      "%s.%s must be string, got %s"
+      path
+      key
+      (json_type_name value)
+  | None -> result_errorf "%s.%s is required" path key
+;;
+
+let optional_string ~path fields key =
+  match member fields key with
+  | None | Some `Null -> Ok None
+  | Some (`String value) -> Ok (Some value)
+  | Some value ->
+    result_errorf
+      "%s.%s must be string, got %s"
+      path
+      key
+      (json_type_name value)
+;;
+
+let optional_string_list ~path fields key =
+  match member fields key with
+  | None | Some `Null -> Ok []
+  | Some (`List values) ->
+    let rec loop index acc = function
+      | [] -> Ok (List.rev acc)
+      | `String value :: rest -> loop (index + 1) (value :: acc) rest
+      | value :: _ ->
+        result_errorf
+          "%s.%s[%d] must be string, got %s"
+          path
+          key
+          index
+          (json_type_name value)
+    in
+    loop 0 [] values
+  | Some value ->
+    result_errorf
+      "%s.%s must be array, got %s"
+      path
+      key
+      (json_type_name value)
+;;
+
+let optional_env ~path fields =
+  match member fields "env" with
+  | None | Some `Null -> Ok []
+  | Some (`Assoc bindings) ->
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | (key, `String value) :: rest -> loop ((key, value) :: acc) rest
+      | (key, value) :: _ ->
+        result_errorf
+          "%s.env.%s must be string, got %s"
+          path
+          key
+          (json_type_name value)
+    in
+    loop [] bindings
+  | Some value ->
+    result_errorf
+      "%s.env must be object, got %s"
+      path
+      (json_type_name value)
+;;
+
+let parse_stage ~path_prefix ~index (value : Yojson.Safe.t) =
+  let ( let* ) = Result.bind in
+  let path = Printf.sprintf "%s[%d]" path_prefix index in
+  let* fields = assoc_fields ~path value in
+  let* executable = required_string ~path fields "executable" in
+  let* argv = optional_string_list ~path fields "argv" in
+  Ok { executable; argv }
+;;
+
+let parse_pipeline ~path (json : Yojson.Safe.t) =
+  match json with
+  | `List values ->
+    let ( let* ) = Result.bind in
+    let rec loop index acc = function
+      | [] -> Ok (List.rev acc)
+      | value :: rest ->
+        let* stage = parse_stage ~path_prefix:path ~index value in
+        loop (index + 1) (stage :: acc) rest
+    in
+    loop 0 [] values
+  | value ->
+    result_errorf "%s must be array, got %s" path (json_type_name value)
+;;
+
+let of_json (json : Yojson.Safe.t) =
+  let ( let* ) = Result.bind in
+  let* fields = assoc_fields ~path:"$" json in
+  let* () =
+    if Option.is_some (member fields "cmd")
+    then
+      Error
+        "legacy cmd string is not a typed keeper_bash input; provide \
+         executable/argv or pipeline stages"
+    else Ok ()
+  in
+  let executable_present = Option.is_some (member fields "executable") in
+  let pipeline_value =
+    match member fields "pipeline", member fields "stages" with
+    | Some _, Some _ ->
+      Error "$ must not provide both pipeline and stages"
+    | Some value, None -> Ok (Some ("$.pipeline", value))
+    | None, Some value -> Ok (Some ("$.stages", value))
+    | None, None -> Ok None
+  in
+  let* pipeline_value = pipeline_value in
+  let* cwd = optional_string ~path:"$" fields "cwd" in
+  let* env = optional_env ~path:"$" fields in
+  match executable_present, pipeline_value with
+  | true, Some _ ->
+    Error "$ must provide either executable or pipeline/stages, not both"
+  | true, None ->
+    let* executable = required_string ~path:"$" fields "executable" in
+    let* argv = optional_string_list ~path:"$" fields "argv" in
+    Ok (Exec { executable; argv; cwd; env })
+  | false, Some (path, value) ->
+    let* stages = parse_pipeline ~path value in
+    Ok (Pipeline { stages; cwd; env })
+  | false, None -> Error "$.executable or $.pipeline/$.stages is required"
+;;
+
 (* Execve-style: argv tokens pass verbatim to the child process, so
    shell metacharacters ([;|&><`$*?]) are literal data, not operators.
    Only control characters that cannot survive process-boundary

@@ -36,6 +36,18 @@ let mk_exec executable argv =
   Bash_input.Exec { executable; argv; cwd = None; env = [] }
 ;;
 
+let parse_json_exn json =
+  match Bash_input.of_json json with
+  | Ok input -> input
+  | Error msg -> Alcotest.failf "of_json failed: %s" msg
+;;
+
+let parse_json_error json =
+  match Bash_input.of_json json with
+  | Ok _ -> Alcotest.fail "of_json unexpectedly succeeded"
+  | Error msg -> msg
+;;
+
 type case = {
   name : string;
   legacy_cmd : string;
@@ -157,6 +169,116 @@ let test_pipeline_stage_executable_check () =
     (typed_ok input)
 ;;
 
+let test_of_json_exec () =
+  let input =
+    parse_json_exn
+      (`Assoc
+          [ "executable", `String "rg"
+          ; "argv", `List [ `String "pattern"; `String "lib/" ]
+          ; "cwd", `String "/tmp"
+          ; "env", `Assoc [ "LC_ALL", `String "C" ]
+          ])
+  in
+  match input with
+  | Bash_input.Exec { executable; argv; cwd; env } ->
+    Alcotest.(check string) "executable" "rg" executable;
+    Alcotest.(check (list string)) "argv" [ "pattern"; "lib/" ] argv;
+    Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd;
+    Alcotest.(check (list (pair string string))) "env" [ "LC_ALL", "C" ] env
+  | Bash_input.Pipeline _ -> Alcotest.fail "expected Exec"
+;;
+
+let test_of_json_pipeline () =
+  let input =
+    parse_json_exn
+      (`Assoc
+          [ ( "pipeline"
+            , `List
+                [ `Assoc
+                    [ "executable", `String "printf"
+                    ; "argv", `List [ `String "hello" ]
+                    ]
+                ; `Assoc
+                    [ "executable", `String "wc"
+                    ; "argv", `List [ `String "-c" ]
+                    ]
+                ] )
+          ; "cwd", `String "/tmp"
+          ])
+  in
+  match input with
+  | Bash_input.Pipeline { stages; cwd; env } ->
+    Alcotest.(check int) "stage count" 2 (List.length stages);
+    Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd;
+    Alcotest.(check (list (pair string string))) "env" [] env;
+    (match stages with
+     | [ first; second ] ->
+       Alcotest.(check string) "first executable" "printf" first.executable;
+       Alcotest.(check (list string)) "first argv" [ "hello" ] first.argv;
+       Alcotest.(check string) "second executable" "wc" second.executable;
+       Alcotest.(check (list string)) "second argv" [ "-c" ] second.argv
+     | _ -> Alcotest.fail "expected exactly two stages")
+  | Bash_input.Exec _ -> Alcotest.fail "expected Pipeline"
+;;
+
+let test_of_json_rejects_legacy_cmd_only () =
+  let msg =
+    parse_json_error (`Assoc [ "cmd", `String "rg pattern lib/" ])
+  in
+  Alcotest.(check bool)
+    "error mentions typed input"
+    true
+    (String_util.contains_substring_ci msg "typed keeper_bash input")
+;;
+
+let test_of_json_rejects_legacy_cmd_with_exec () =
+  let msg =
+    parse_json_error
+      (`Assoc [ "cmd", `String "rg pattern lib/"; "executable", `String "rg" ])
+  in
+  Alcotest.(check bool)
+    "error mentions typed input"
+    true
+    (String_util.contains_substring_ci msg "typed keeper_bash input")
+;;
+
+let test_of_json_rejects_non_string_argv () =
+  let msg =
+    parse_json_error
+      (`Assoc
+          [ "executable", `String "echo"; "argv", `List [ `Int 1 ] ])
+  in
+  Alcotest.(check bool)
+    "error mentions argv[0]"
+    true
+    (String_util.contains_substring_ci msg "$.argv[0]")
+;;
+
+let test_of_json_rejects_mixed_exec_and_pipeline () =
+  let msg =
+    parse_json_error
+      (`Assoc
+          [ "executable", `String "echo"
+          ; "pipeline", `List [ `Assoc [ "executable", `String "wc" ] ]
+          ])
+  in
+  Alcotest.(check bool)
+    "error mentions either executable or pipeline"
+    true
+    (String_util.contains_substring_ci msg "either executable or pipeline")
+;;
+
+let test_of_json_stages_alias_reports_stages_path () =
+  let msg =
+    parse_json_error
+      (`Assoc [ "stages", `List [ `Assoc [ "argv", `List [] ] ] ])
+  in
+  Alcotest.(check bool)
+    "error mentions stages path"
+    true
+    (String_util.contains_substring_ci msg "$.stages[0].executable")
+;;
+
 let shell_arg_string = function
   | Masc_exec.Shell_ir.Lit s -> s
   | Masc_exec.Shell_ir.Var name -> "$" ^ name
@@ -271,6 +393,28 @@ let suite =
           "pipeline_stage_executable_check"
           `Quick
           test_pipeline_stage_executable_check
+      ; Alcotest.test_case "of_json_exec" `Quick test_of_json_exec
+      ; Alcotest.test_case "of_json_pipeline" `Quick test_of_json_pipeline
+      ; Alcotest.test_case
+          "of_json_rejects_legacy_cmd_only"
+          `Quick
+          test_of_json_rejects_legacy_cmd_only
+      ; Alcotest.test_case
+          "of_json_rejects_legacy_cmd_with_exec"
+          `Quick
+          test_of_json_rejects_legacy_cmd_with_exec
+      ; Alcotest.test_case
+          "of_json_rejects_non_string_argv"
+          `Quick
+          test_of_json_rejects_non_string_argv
+      ; Alcotest.test_case
+          "of_json_rejects_mixed_exec_and_pipeline"
+          `Quick
+          test_of_json_rejects_mixed_exec_and_pipeline
+      ; Alcotest.test_case
+          "of_json_stages_alias_reports_stages_path"
+          `Quick
+          test_of_json_stages_alias_reports_stages_path
       ; Alcotest.test_case
           "pipeline_lowers_to_shell_ir_pipeline"
           `Quick

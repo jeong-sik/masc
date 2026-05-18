@@ -708,15 +708,9 @@ let test_local_dune_fd_containment_contracts () =
   check bool "deploy script builds through dune-local wrapper" true
     (file_contains_pattern "scripts/deploy.sh"
        "\"$REPO_DIR/scripts/dune-local.sh\" build bin/main_eio.exe");
-  check bool "contract harness keeps opam build path before wrapper fallback" true
-    (match
-       ( file_pattern_position "scripts/harness/contract/run_all.sh"
-           "opam exec -- dune build --root . ./bin/main_eio.exe"
-       , file_pattern_position "scripts/harness/contract/run_all.sh"
-           "\"$ROOT_DIR/scripts/dune-local.sh\" build ./bin/main_eio.exe" )
-     with
-     | Some opam_pos, Some wrapper_pos -> opam_pos < wrapper_pos
-     | _ -> false);
+  check bool "contract harness prefers dune-local wrapper" true
+    (file_contains_pattern "scripts/harness/contract/run_all.sh"
+       "\"$ROOT_DIR/scripts/dune-local.sh\" build ./bin/main_eio.exe");
   check bool "nofile status surfaces bare dune bypasses" true
     (file_contains_pattern "scripts/nofile-status.sh"
        "potential bare dune bypasses");

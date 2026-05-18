@@ -48,10 +48,10 @@ build_server_exe() {
   echo "[bootstrap] server executable missing; building"
   (
     cd "$ROOT_DIR"
-    if command -v opam >/dev/null 2>&1; then
-      opam exec -- dune build --root . ./bin/main_eio.exe
-    elif [[ -x "$ROOT_DIR/scripts/dune-local.sh" ]]; then
+    if [[ -x "$ROOT_DIR/scripts/dune-local.sh" ]]; then
       "$ROOT_DIR/scripts/dune-local.sh" build ./bin/main_eio.exe
+    elif command -v opam >/dev/null 2>&1; then
+      opam exec -- dune build --root . ./bin/main_eio.exe
     else
       dune build --root . ./bin/main_eio.exe
     fi

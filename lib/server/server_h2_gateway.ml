@@ -448,6 +448,25 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                                      @ mcp_headers session_id
                                          protocol_version)
                              | Ok () ->
+                             let is_known =
+                               session_was_provided
+                               && Server_mcp_transport_http.is_known_session
+                                    session_id
+                             in
+                             (match
+                                Server_mcp_transport_http.validate_session_known
+                                  ~session_was_provided ~is_known body_str
+                              with
+                              | Error msg ->
+                                  let new_session_id = Mcp_session.generate () in
+                                  let body = json_rpc_error (-32600) msg in
+                                  h2_respond_json h2_reqd body
+                                    ~status:`Not_found
+                                    ~extra_headers:
+                                      (cors
+                                      @ mcp_headers new_session_id
+                                          protocol_version)
+                              | Ok () ->
                              let accept_mode =
                                Server_mcp_transport_http_headers
                                .classify_mcp_accept_for_body httpun_request body_str
@@ -504,7 +523,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                                          ~extra_headers:mcp_hdrs
                                    | json ->
                                        let body = Yojson.Safe.to_string json in
-                                       h2_respond_json h2_reqd body ~extra_headers:mcp_hdrs)))))
+                                       h2_respond_json h2_reqd body ~extra_headers:mcp_hdrs))))))
 
       | `DELETE, "/mcp/operator" ->
           h2_respond_removed_surface h2_reqd ~surface:"operator_remote" ~extra_headers:cors

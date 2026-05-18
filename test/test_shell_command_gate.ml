@@ -119,6 +119,113 @@ let test_parse_with_caller_matches_without () =
     Alcotest.failf "without=Error %s but with_caller=Ok" (Gate.cannot_parse_kind_tag wk)
 ;;
 
+(* RFC-0131 PR-1c — ?redirect_allowed policy flag.
+
+   The bash_subset grammar classifies redirects as Too_complex `Redirect,
+   so [Gate.parse] cannot produce a parsed_context with redirects today.
+   Tests below use [Gate.validate_parsed_context] with a manually
+   constructed context to exercise the policy boundary directly. *)
+
+let mk_bin name =
+  match Masc_exec.Bin.of_string name with
+  | Error (`Unknown raw) -> Alcotest.failf "Bin.of_string rejected %S as %S" name raw
+  | Ok bin -> bin
+;;
+
+let mk_simple_with_file_write bin_name =
+  let bin = mk_bin bin_name in
+  let target = Masc_exec.Path_scope.classify ~raw:"out.txt" ~cwd:"/tmp" in
+  let redirect =
+    Masc_exec.Redirect_scope.File { fd = 1; target; mode = Masc_exec.Redirect_scope.Write }
+  in
+  { Masc_exec.Shell_ir.bin
+  ; args = []
+  ; env = []
+  ; cwd = None
+  ; redirects = [ redirect ]
+  ; sandbox = Masc_exec.Sandbox_target.host ()
+  }
+;;
+
+let mk_simple bin_name =
+  let bin = mk_bin bin_name in
+  { Masc_exec.Shell_ir.bin
+  ; args = []
+  ; env = []
+  ; cwd = None
+  ; redirects = []
+  ; sandbox = Masc_exec.Sandbox_target.host ()
+  }
+;;
+
+let mk_simple_context s =
+  { Gate.ast = Masc_exec.Shell_ir.Simple s
+  ; shape = Gate.Simple
+  ; stage_bins = [ Masc_exec.Bin.to_string s.Masc_exec.Shell_ir.bin ]
+  }
+;;
+
+let test_redirect_disallowed_rejects_file_redirect () =
+  let s = mk_simple_with_file_write "rg" in
+  let ctx = mk_simple_context s in
+  match
+    Gate.validate_parsed_context
+      ~redirect_allowed:false
+      ~allowed_commands:[ "rg" ]
+      ctx
+  with
+  | Gate.Reject { reason = Gate.Redirect_disallowed_in_caller { stage_index = 0 }; _ } -> ()
+  | other ->
+    Alcotest.failf
+      "expected Redirect_disallowed_in_caller, got %s"
+      (Gate.decision_tag other)
+;;
+
+let test_redirect_allowed_by_default_admits_file_redirect () =
+  let s = mk_simple_with_file_write "rg" in
+  let ctx = mk_simple_context s in
+  match Gate.validate_parsed_context ~allowed_commands:[ "rg" ] ctx with
+  | Gate.Allow _ -> ()
+  | other ->
+    Alcotest.failf
+      "expected Allow with default redirect_allowed=true, got %s"
+      (Gate.decision_tag other)
+;;
+
+let test_redirect_disallowed_admits_command_without_redirect () =
+  let s = mk_simple "rg" in
+  let ctx = mk_simple_context s in
+  match
+    Gate.validate_parsed_context
+      ~redirect_allowed:false
+      ~allowed_commands:[ "rg" ]
+      ctx
+  with
+  | Gate.Allow _ -> ()
+  | other ->
+    Alcotest.failf
+      "expected Allow when no redirects present, got %s"
+      (Gate.decision_tag other)
+;;
+
+let test_redirect_disallowed_tag_round_trip () =
+  Alcotest.(check string)
+    "tag"
+    "redirect_disallowed_in_caller"
+    (Gate.reject_reason_tag (Gate.Redirect_disallowed_in_caller { stage_index = 0 }))
+;;
+
+let test_validate_allowlist_default_unchanged_with_explicit_true () =
+  let without = Gate.validate_allowlist ~allowed_commands:allowed "rg foo lib | head -20" in
+  let with_explicit =
+    Gate.validate_allowlist ~redirect_allowed:true ~allowed_commands:allowed "rg foo lib | head -20"
+  in
+  Alcotest.(check string)
+    "decision tag identity"
+    (Gate.decision_tag without)
+    (Gate.decision_tag with_explicit)
+;;
+
 let () =
   Alcotest.run
     "shell_command_gate"
@@ -145,6 +252,28 @@ let () =
             "parse with caller matches without"
             `Quick
             test_parse_with_caller_matches_without
+        ] )
+    ; ( "redirect_policy"
+      , [ Alcotest.test_case
+            "file redirect rejected when ~redirect_allowed:false"
+            `Quick
+            test_redirect_disallowed_rejects_file_redirect
+        ; Alcotest.test_case
+            "file redirect admitted by default"
+            `Quick
+            test_redirect_allowed_by_default_admits_file_redirect
+        ; Alcotest.test_case
+            "no-redirect command admitted even with ~redirect_allowed:false"
+            `Quick
+            test_redirect_disallowed_admits_command_without_redirect
+        ; Alcotest.test_case
+            "tag round trip"
+            `Quick
+            test_redirect_disallowed_tag_round_trip
+        ; Alcotest.test_case
+            "default behavior unchanged with explicit ~redirect_allowed:true"
+            `Quick
+            test_validate_allowlist_default_unchanged_with_explicit_true
         ] )
     ]
 ;;

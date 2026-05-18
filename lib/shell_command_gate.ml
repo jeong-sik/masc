@@ -22,6 +22,14 @@ type reject_reason =
   | Command_not_in_allowlist of { bin : string }
   | Pipeline_segment_disallowed of { stage : int; bin : string }
   | Pipes_not_allowed of { stages : int }
+  | Redirect_disallowed_in_caller of { stage_index : int }
+      (* RFC-0131 PR-1c.  A stage carries a file redirect (>, >>, <) but
+         the caller passed [?redirect_allowed:false].  [stage_index] is
+         0-based; for a single-stage command the index is always 0.
+         The bash_subset grammar currently classifies redirects as
+         [Too_complex `Redirect], so this arm is only reachable via the
+         typed-IR entry [parsed_context_of_shell_ir] (RFC-0131 PR-1b)
+         until the grammar grows redirect support. *)
 
 type decision =
   | Allow of parsed_context
@@ -83,37 +91,94 @@ let first_disallowed_stage ~allowed_commands context =
   scan 1 context.stage_bins
 ;;
 
-let validate_allowlist ?caller ?(allow_pipes = true) ~allowed_commands cmd =
+(* Test whether a single [simple] stage carries any [File] redirect
+   (>, >>, <).  [Fd_to_fd] redirects (e.g. [2>&1]) are intentionally
+   excluded from the policy boundary — they do not touch the file
+   system and have no path-policy implication. *)
+let stage_has_file_redirect (s : Masc_exec.Shell_ir.simple) : bool =
+  List.exists
+    (function
+      | Masc_exec.Redirect_scope.File _ -> true
+      | Masc_exec.Redirect_scope.Fd_to_fd _ -> false)
+    s.Masc_exec.Shell_ir.redirects
+;;
+
+(* Walk a [Shell_ir.t] looking for the first stage that carries a
+   file redirect.  Returns the 0-based stage index, or [None] if no
+   file redirects are present.  Nested [Pipeline _] stages are
+   skipped here — RFC-0131 PR-1b's [Unsupported_nested_pipeline] is
+   the correct rejection point and runs before this scan. *)
+let first_file_redirect_stage : Masc_exec.Shell_ir.t -> int option = function
+  | Masc_exec.Shell_ir.Simple s -> if stage_has_file_redirect s then Some 0 else None
+  | Masc_exec.Shell_ir.Pipeline stages ->
+    let rec loop idx = function
+      | [] -> None
+      | Masc_exec.Shell_ir.Simple s :: rest ->
+        if stage_has_file_redirect s then Some idx else loop (idx + 1) rest
+      | Masc_exec.Shell_ir.Pipeline _ :: rest -> loop (idx + 1) rest
+    in
+    loop 0 stages
+;;
+
+let validate_parsed_context
+      ?(allow_pipes = true)
+      ?(redirect_allowed = true)
+      ~allowed_commands
+      context
+  =
+  let stages = stage_count context in
+  if (not allow_pipes) && stages > 1
+  then
+    Reject
+      { context
+      ; reason = Pipes_not_allowed { stages }
+      ; diagnostic = "pipelines are not allowed for this command surface"
+      }
+  else (
+    match first_disallowed_stage ~allowed_commands context with
+    | Some (stage, bin) ->
+      let reason =
+        match context.shape with
+        | Simple -> Command_not_in_allowlist { bin }
+        | Pipeline _ -> Pipeline_segment_disallowed { stage; bin }
+      in
+      let diagnostic =
+        match reason with
+        | Command_not_in_allowlist { bin } ->
+          Printf.sprintf "%s not in shell command allowlist" bin
+        | Pipeline_segment_disallowed { stage; bin } ->
+          Printf.sprintf "pipeline stage %d command %s not in shell command allowlist" stage bin
+        | Pipes_not_allowed { stages } ->
+          Printf.sprintf "pipeline with %d stages is not allowed" stages
+        | Redirect_disallowed_in_caller { stage_index } ->
+          Printf.sprintf "pipeline stage %d carries a file redirect" stage_index
+      in
+      Reject { context; reason; diagnostic }
+    | None when not redirect_allowed ->
+      (match first_file_redirect_stage context.ast with
+       | Some stage_index ->
+         Reject
+           { context
+           ; reason = Redirect_disallowed_in_caller { stage_index }
+           ; diagnostic =
+               Printf.sprintf
+                 "stage %d carries a file redirect; caller forbids redirects"
+                 stage_index
+           }
+       | None -> Allow context)
+    | None -> Allow context)
+;;
+
+let validate_allowlist
+      ?caller
+      ?(allow_pipes = true)
+      ?(redirect_allowed = true)
+      ~allowed_commands
+      cmd
+  =
   match parse ?caller cmd with
   | Error kind -> Cannot_parse { kind }
-  | Ok context ->
-    let stages = stage_count context in
-    if (not allow_pipes) && stages > 1
-    then
-      Reject
-        { context
-        ; reason = Pipes_not_allowed { stages }
-        ; diagnostic = "pipelines are not allowed for this command surface"
-        }
-    else (
-      match first_disallowed_stage ~allowed_commands context with
-      | None -> Allow context
-      | Some (stage, bin) ->
-        let reason =
-          match context.shape with
-          | Simple -> Command_not_in_allowlist { bin }
-          | Pipeline _ -> Pipeline_segment_disallowed { stage; bin }
-        in
-        let diagnostic =
-          match reason with
-          | Command_not_in_allowlist { bin } ->
-            Printf.sprintf "%s not in shell command allowlist" bin
-          | Pipeline_segment_disallowed { stage; bin } ->
-            Printf.sprintf "pipeline stage %d command %s not in shell command allowlist" stage bin
-          | Pipes_not_allowed { stages } ->
-            Printf.sprintf "pipeline with %d stages is not allowed" stages
-        in
-        Reject { context; reason; diagnostic })
+  | Ok context -> validate_parsed_context ~allow_pipes ~redirect_allowed ~allowed_commands context
 ;;
 
 let caller_tag = function
@@ -146,6 +211,7 @@ let reject_reason_tag = function
   | Command_not_in_allowlist _ -> "command"
   | Pipeline_segment_disallowed _ -> "pipeline_segment"
   | Pipes_not_allowed _ -> "pipes_not_allowed"
+  | Redirect_disallowed_in_caller _ -> "redirect_disallowed_in_caller"
 ;;
 
 let decision_tag = function

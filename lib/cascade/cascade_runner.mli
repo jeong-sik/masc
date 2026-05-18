@@ -212,6 +212,9 @@ module For_testing : sig
 
   val provider_http_slot_transport :
     Llm_provider.Llm_transport.t -> Llm_provider.Llm_transport.t
+
+  val provider_cli_slot_transport :
+    Llm_provider.Llm_transport.t -> Llm_provider.Llm_transport.t
 end
 
 (** {1 Lifecycle / checkpoint helpers (re-exported)} *)

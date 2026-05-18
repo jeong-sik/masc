@@ -16,7 +16,7 @@ implementation_prs: [15932, 15950, 15965, 15985, 15990, 16017, 15993, 15991]
 
 # RFC-0107 — Outbound HTTP stack consolidation
 
-본 RFC 는 2026-05-16 ENFILE storm 의 *진짜* 근본 원인 4개를 다룬다. RFC-0101 (Fd_accountant 4-kind throttle) 는 같은 사고에 대한 transitional defense 였으나, *증상 완화* 이지 *원인 치료* 가 아니다. RFC-0101 의 1 kind (Docker_spawn) 만 wired 됐고 나머지 3 kind 는 dead branch 로 남아 있어, 본 RFC 가 머지되면 RFC-0101 은 *transitional defense-in-depth* 로 redefine 되며 §5 retirement clock 으로 demote 된다.
+본 RFC 는 2026-05-16 ENFILE storm 의 *진짜* 근본 원인 4개를 다룬다. RFC-0101 (Fd_accountant multi-kind throttle) 는 같은 사고에 대한 transitional defense 였으나, *증상 완화* 이지 *원인 치료* 가 아니다. RFC-0101 이 Docker/Provider/exec/log 계열을 점진적으로 wire 하더라도, 본 RFC 가 머지되면 RFC-0101 은 *transitional defense-in-depth* 로 redefine 되며 §5 retirement clock 으로 demote 된다.
 
 Prior Art 는 `~/me/knowledge/research/2026-05-17-piaf-ocsigen-eio-fd-prior-art.md` 에서 사전 검토했다. piaf 가 *per-endpoint keep-alive* 의 검증된 구현체이고, multi-host pool 은 application 책임이라는 추상화 경계가 우리에게 그대로 적합하다. 본 RFC §3.2 의 L2 Pool 은 piaf 위에 올리는 `(host, port) → Client.t` thin wrapper 이지 자체 connection pool 의 재발명이 아니다.
 

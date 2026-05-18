@@ -68,7 +68,7 @@ type admission_block =
 ### Why this needs an RFC
 
 1. **5+ PR series 가 RFC 없이 진행** — CLAUDE.md `pre_workflow.md` §"진입 장벽" 위반 (`복잡한 비즈니스 로직: 상태 다이어그램/의사코드/테스트 케이스 먼저 작성`).
-2. **FD accountant (RFC-0101) 의 sibling** — 같은 *process-local resource exhaustion* family. RFC-0101 의 4-kind Eio.Pool 패턴 적용 가능.
+2. **FD accountant (RFC-0101) 의 sibling** — 같은 *process-local resource exhaustion* family. RFC-0101 의 multi-kind Eio.Pool 패턴 적용 가능.
 3. **Cooldown / cache 패턴 잠재 워크어라운드 시그니처**: CLAUDE.md §"Cap / Cooldown" — "force a turn after the cap", "saturation pre-skip cap". Disk cooldown 의 *근본* (왜 fleet 가 disk 압력 trigger? log retention RFC-0103 가 default disabled 이라서? Docker playground unbounded growth? JSONL unbounded growth?) 명시 부재.
 4. **`Probe_error` 의 silent drop 가능성**: snapshot probe 실패 시 cached 값 사용 — staleness 측정 없으면 RFC-0044 read-side fallback 시그니처.
 5. **`min_free_bytes` threshold tuning**: env knob 없음 또는 hardcoded — 운영자 tuning surface 미정의.
@@ -99,7 +99,7 @@ module Fd_pressure : Resource_pressure.S with type admission_block = ...  (* RFC
 (* future: Memory_pressure, IO_throughput_pressure, etc. *)
 ```
 
-각 pressure 가 *같은 admission interface* — caller 가 uniformly dispatch. RFC-0101 의 4-kind Eio.Pool 패턴 generalize.
+각 pressure 가 *같은 admission interface* — caller 가 uniformly dispatch. RFC-0101 의 multi-kind Eio.Pool 패턴 generalize.
 
 **Layer B — Probe staleness contract**
 

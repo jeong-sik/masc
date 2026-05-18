@@ -2519,6 +2519,11 @@ let provider_http_in_flight () =
   List.assoc Fd_accountant.Provider_http snapshot.per_kind
 ;;
 
+let provider_cli_in_flight () =
+  let snapshot = Fd_accountant.fd_snapshot () in
+  List.assoc Fd_accountant.Provider_cli snapshot.per_kind
+;;
+
 let test_provider_http_transport_uses_fd_accountant_slot () =
   Eio_main.run @@ fun _env ->
   let request = mock_completion_request () in
@@ -2544,6 +2549,33 @@ let test_provider_http_transport_uses_fd_accountant_slot () =
   ignore (wrapped.complete_stream ~on_event:(fun _ -> ()) request);
   Alcotest.(check bool) "stream call ran under provider http slot" true !stream_observed_slot;
   Alcotest.(check int) "provider http stream slot released" 0 (provider_http_in_flight ())
+;;
+
+let test_provider_cli_transport_uses_fd_accountant_slot () =
+  Eio_main.run @@ fun _env ->
+  let request = mock_completion_request () in
+  let response = Ok (mock_api_response ()) in
+  let sync_observed_slot = ref false in
+  let stream_observed_slot = ref false in
+  let transport =
+    { Llm_provider.Llm_transport.complete_sync =
+        (fun _req ->
+          sync_observed_slot := provider_cli_in_flight () > 0;
+          { Llm_provider.Llm_transport.response; latency_ms = Some 0 })
+    ; complete_stream =
+        (fun ?on_telemetry:_ ~on_event:_ _req ->
+          stream_observed_slot := provider_cli_in_flight () > 0;
+          response)
+    }
+  in
+  let wrapped = Cascade_runner.For_testing.provider_cli_slot_transport transport in
+  Alcotest.(check int) "provider cli starts idle" 0 (provider_cli_in_flight ());
+  ignore (wrapped.complete_sync request);
+  Alcotest.(check bool) "sync call ran under provider cli slot" true !sync_observed_slot;
+  Alcotest.(check int) "provider cli sync slot released" 0 (provider_cli_in_flight ());
+  ignore (wrapped.complete_stream ~on_event:(fun _ -> ()) request);
+  Alcotest.(check bool) "stream call ran under provider cli slot" true !stream_observed_slot;
+  Alcotest.(check int) "provider cli stream slot released" 0 (provider_cli_in_flight ())
 ;;
 
 let test_make_per_call_switch_transport_releases_cli_fd_resources () =
@@ -6693,6 +6725,10 @@ let () =
             "HTTP transports use provider FD slot"
             `Quick
             test_provider_http_transport_uses_fd_accountant_slot
+        ; Alcotest.test_case
+            "CLI transports use provider FD slot"
+            `Quick
+            test_provider_cli_transport_uses_fd_accountant_slot
         ; Alcotest.test_case
             "invalid explicit model label is rejected"
             `Quick

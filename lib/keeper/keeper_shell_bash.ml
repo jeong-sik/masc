@@ -891,12 +891,44 @@ let typed_input_command_text = function
       typed_stage_command_text ~executable:stage.executable ~argv:stage.argv)
     |> String.concat " | "
 
+let typed_input_has_env = function
+  | Keeper_tool_bash_input.Exec { env; _ }
+  | Keeper_tool_bash_input.Pipeline { env; _ } ->
+    env <> []
+
 let typed_validation_error_text error =
   Format.asprintf "%a" Keeper_tool_bash_input.pp_validation_error error
 
 let normalize_path_for_keeper_bash_containment path =
   Keeper_alerting_path.normalize_path_for_check path
   |> Keeper_alerting_path.strip_trailing_slashes
+
+let typed_docker_image (meta : keeper_meta) =
+  match meta.sandbox_image with
+  | Some img when String.trim img <> "" -> img
+  | _ -> Env_config_keeper.KeeperSandbox.docker_image ()
+
+let typed_docker_sandbox_target ~turn_sandbox_factory ~meta ~cwd =
+  match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
+  | None ->
+    Error
+      "typed keeper_bash Docker Shell IR dispatch requires a turn sandbox factory"
+  | Some runtime ->
+    let image = typed_docker_image meta in
+    let runner ~stdin_content ~argv ~env:_ ~cwd:stage_cwd ~timeout_sec =
+      let cwd = Option.value stage_cwd ~default:cwd in
+      match
+        Keeper_turn_sandbox_runtime.run_exec_with_status
+          ?stdin_content
+          runtime
+          ~timeout_sec
+          ~cwd
+          ~command_argv:argv
+      with
+      | Ok (status, output) -> status, output, ""
+      | Error err -> Unix.WEXITED 1, "", err
+    in
+    Ok (Masc_exec.Sandbox_target.docker ~image ~runner)
 
 let handle_keeper_bash_typed
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
@@ -908,18 +940,12 @@ let handle_keeper_bash_typed
       ~write_enabled
       ()
   =
-  ignore turn_sandbox_factory;
   let root = Keeper_alerting_path.project_root_of_config config in
   if run_in_background
   then
     error_json
       ~fields:[ "typed", `Bool true ]
       "typed keeper_bash does not support run_in_background yet; use legacy cmd or foreground typed exec"
-  else if meta.sandbox_profile = Docker
-  then
-    error_json
-      ~fields:[ "typed", `Bool true ]
-      "typed keeper_bash Shell IR dispatch for Docker is not enabled yet; use legacy cmd until the Docker runner carries stdin/cwd through pipeline stages"
   else
     match Keeper_shell_shared.resolve_keeper_shell_write_cwd ~config ~meta ~args with
     | Error e -> error_json e
@@ -955,12 +981,21 @@ let handle_keeper_bash_typed
         let sandbox_profile, _sandbox_network_mode =
           Keeper_shell_shared.effective_sandbox_profile ~meta ~in_playground
         in
-        if sandbox_profile = Docker
-        then
-          error_json
-            ~fields:[ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
-            "typed keeper_bash Shell IR dispatch for Docker is not enabled yet; use legacy cmd until the Docker runner carries stdin/cwd through pipeline stages"
-        else if Worker_dev_tools.is_destructive_bash_operation cmd
+        let dispatch_sandbox =
+          match sandbox_profile with
+          | Local -> Ok (Masc_exec.Sandbox_target.host ())
+          | Docker ->
+            if typed_input_has_env input
+            then Error "typed keeper_bash Docker Shell IR dispatch does not support env yet"
+            else typed_docker_sandbox_target ~turn_sandbox_factory ~meta ~cwd
+        in
+        (match dispatch_sandbox with
+         | Error e ->
+           error_json
+             ~fields:[ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
+             e
+         | Ok dispatch_sandbox ->
+        if Worker_dev_tools.is_destructive_bash_operation cmd
         then
           Yojson.Safe.to_string
             (Exec_core.blocked_result_json
@@ -988,7 +1023,7 @@ let handle_keeper_bash_typed
                ~extra:[ "cmd", `String cmd_for_log; "typed", `Bool true; "execution_time_ms", `Int 0 ]
                ())
         else
-          match Keeper_tool_bash_input.to_shell_ir ~mode input with
+          match Keeper_tool_bash_input.to_shell_ir ~mode ~sandbox:dispatch_sandbox input with
           | Error e ->
             error_json
               ~fields:[ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
@@ -1041,7 +1076,7 @@ let handle_keeper_bash_typed
                     ~status:result.status
                     ~output
                     ~env_snapshot:env_snap
-                    ()))
+                    ())))
 
 let handle_keeper_bash
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)

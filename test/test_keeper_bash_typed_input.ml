@@ -334,6 +334,50 @@ let test_pipeline_lowers_to_shell_ir_pipeline () =
     Alcotest.failf "expected Shell_ir.Pipeline, got %a" Masc_exec.Shell_ir.pp other
 ;;
 
+let docker_test_sandbox () =
+  Masc_exec.Sandbox_target.docker
+    ~image:"typed-docker"
+    ~runner:(fun ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ ~timeout_sec:_ ->
+      Unix.WEXITED 0, "", "")
+;;
+
+let check_docker_sandbox label simple =
+  match simple.Masc_exec.Shell_ir.sandbox with
+  | Masc_exec.Sandbox_target.Host -> Alcotest.fail (label ^ ": expected Docker sandbox")
+  | Docker { image; _ } -> Alcotest.(check string) (label ^ " image") "typed-docker" image
+;;
+
+let test_pipeline_lowers_with_injected_docker_sandbox () =
+  let input =
+    Bash_input.Pipeline
+      { stages =
+          [ { executable = "echo"; argv = [ "hello" ] }
+          ; { executable = "wc"; argv = [ "-c" ] }
+          ]
+      ; cwd = Some "/tmp"
+      ; env = []
+      }
+  in
+  match
+    Bash_input.to_shell_ir
+      ~mode:Bash_input.Dev_full
+      ~sandbox:(docker_test_sandbox ())
+      input
+  with
+  | Ok
+      (Masc_exec.Shell_ir.Pipeline
+        [ Masc_exec.Shell_ir.Simple first; Masc_exec.Shell_ir.Simple second ]) ->
+    check_docker_sandbox "first stage" first;
+    check_docker_sandbox "second stage" second
+  | Ok other ->
+    Alcotest.failf "expected Shell_ir.Pipeline, got %a" Masc_exec.Shell_ir.pp other
+  | Error error ->
+    Alcotest.failf
+      "to_shell_ir failed: %a"
+      Bash_input.pp_validation_error
+      error
+;;
+
 let test_pipe_character_in_exec_argv_is_literal () =
   let input =
     Bash_input.Exec
@@ -419,6 +463,10 @@ let suite =
           "pipeline_lowers_to_shell_ir_pipeline"
           `Quick
           test_pipeline_lowers_to_shell_ir_pipeline
+      ; Alcotest.test_case
+          "pipeline_lowers_with_injected_docker_sandbox"
+          `Quick
+          test_pipeline_lowers_with_injected_docker_sandbox
       ; Alcotest.test_case
           "pipe_character_in_exec_argv_is_literal"
           `Quick

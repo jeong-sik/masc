@@ -224,7 +224,6 @@ let test_fd_pressure_host_hotspot_admission () =
     ~finally:FD.reset_for_tests
     (fun () ->
       with_env "MASC_KEEPER_SYSTEM_FD_HEADROOM" "0" (fun () ->
-      with_env "MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM" "1024" (fun () ->
         let hotspot =
           FD.
             { open_files = 9_200
@@ -232,6 +231,34 @@ let test_fd_pressure_host_hotspot_admission () =
             ; max_files_per_process = Some 10_000
             }
         in
+        let default_decision =
+          FD.admission_decision
+            ~soft_limit:(Some 245_760)
+            ~open_fds:(Some 64)
+            ~system_fds:(Some hotspot)
+            ~active_keepers:2
+            ~starting_keepers:1
+            ()
+        in
+        check bool "default host hotspot signal is advisory" true
+          (FD.admitted default_decision);
+        let default_json =
+          FD.runtime_state_json
+            ~soft_limit:(Some 245_760)
+            ~open_fds:(Some 64)
+            ~system_fds:(Some hotspot)
+            ~active_keepers:2
+            ~starting_keepers:1
+            ~requested_keepers:24
+            ()
+        in
+        check string "default runtime still ok" "ok"
+          (Json.member "status" default_json |> Json.to_string);
+        check int "default hotspot headroom disabled" 0
+          (Json.member "host_fd_hotspot_headroom" default_json |> Json.to_int);
+        check bool "default hotspot blocking disabled" false
+          (Json.member "host_fd_hotspot_blocking_enabled" default_json |> Json.to_bool);
+        with_env "MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM" "1024" (fun () ->
         let decision =
           FD.admission_decision
             ~soft_limit:(Some 245_760)
@@ -263,7 +290,9 @@ let test_fd_pressure_host_hotspot_admission () =
         check int "hotspot remaining exposed" 800
           (Json.member "host_fd_hotspot_remaining" json |> Json.to_int);
         check int "hotspot headroom exposed" 1024
-          (Json.member "host_fd_hotspot_headroom" json |> Json.to_int))))
+          (Json.member "host_fd_hotspot_headroom" json |> Json.to_int);
+        check bool "hotspot blocking enabled" true
+          (Json.member "host_fd_hotspot_blocking_enabled" json |> Json.to_bool))))
 
 let test_fd_pressure_degraded_projection () =
   FD.reset_for_tests ();

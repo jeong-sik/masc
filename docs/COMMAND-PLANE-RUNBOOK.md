@@ -197,6 +197,15 @@ inside it:
 scripts/docker-playground-fd-status.sh --root "$MASC_BASE_PATH/.masc/playground/docker"
 ```
 
+The runtime admission guard keeps Docker playground hotspot blocking disabled by
+default (`MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM=0`). The macOS system probe
+reports `kern.num_files`, which is host-wide, not a per-process Docker Desktop
+FD count; using it as a hard per-process hotspot proxy can false-block normal
+runtime when `kern.maxfilesperproc` is merely near the current host-wide file
+count. Keep the script above as the default visibility path. Set a positive
+`MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM` only for a deliberately conservative
+operator session.
+
 Review stale clean worktree candidates first:
 
 ```bash

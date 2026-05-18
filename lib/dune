@@ -106,6 +106,7 @@
  server_routes_http_keeper_stream
  server_routes_http_routes_frontend
  server_routes_http_routes_room
+ server_routes_http_routes_dashboard_provider_logs
  server_routes_http_routes_dashboard
  server_routes_http_routes_activity
  server_mcp_transport_http_types

@@ -181,9 +181,62 @@ _list_unwrapped_dune_processes() {
           return 0
         }
 
-        function is_dune_command(text) {
-          return text ~ /^([^[:space:]]*\/)?dune[[:space:]]+(build|test|exec|runtest)([[:space:]]|$)/ ||
-                 text ~ /^([^[:space:]]*\/)?opam[[:space:]]+exec[[:space:]].*[[:space:]]dune[[:space:]]+(build|test|exec|runtest)([[:space:]]|$)/
+        function basename(token, parts, n) {
+          n = split(token, parts, "/")
+          return parts[n]
+        }
+
+        function is_dune_global_option_with_value(token) {
+          return token == "--root" ||
+                 token == "--workspace" ||
+                 token == "--profile" ||
+                 token == "--build-dir" ||
+                 token == "--display" ||
+                 token == "--cache" ||
+                 token == "--sandbox" ||
+                 token == "--instrument-with" ||
+                 token == "-p" ||
+                 token == "-x" ||
+                 token == "-j"
+        }
+
+        function is_dune_global_option_eq(token) {
+          return token ~ /^--(root|workspace|profile|build-dir|display|cache|sandbox|instrument-with)=/
+        }
+
+        function dune_subcommand_index(argc, argv, dune_index, i, token) {
+          i = dune_index + 1
+          while (i <= argc) {
+            token = argv[i]
+            if (is_dune_global_option_eq(token)) {
+              i++
+            } else if (is_dune_global_option_with_value(token)) {
+              i += 2
+            } else if (token == "build" || token == "test" || token == "exec" || token == "runtest") {
+              return i
+            } else {
+              return 0
+            }
+          }
+          return 0
+        }
+
+        function is_dune_command(text, argv, argc, i) {
+          argc = split(text, argv, /[[:space:]]+/)
+          if (argc < 2) {
+            return 0
+          }
+          if (basename(argv[1]) == "dune") {
+            return dune_subcommand_index(argc, argv, 1) > 0
+          }
+          if (basename(argv[1]) == "opam" && argv[2] == "exec") {
+            for (i = 3; i <= argc; i++) {
+              if (basename(argv[i]) == "dune") {
+                return dune_subcommand_index(argc, argv, i) > 0
+              }
+            }
+          }
+          return 0
         }
 
         END {

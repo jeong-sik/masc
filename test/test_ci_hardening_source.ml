@@ -704,6 +704,20 @@ let test_oas_pin_source_contracts () =
     (file_contains_pattern "scripts/opam-pin-external-deps.sh"
        "print_opam_lock_holder")
 
+let test_local_dune_fd_containment_contracts () =
+  check bool "deploy script builds through dune-local wrapper" true
+    (file_contains_pattern "scripts/deploy.sh"
+       "\"$REPO_DIR/scripts/dune-local.sh\" build bin/main_eio.exe");
+  check bool "contract harness prefers dune-local wrapper" true
+    (file_contains_pattern "scripts/harness/contract/run_all.sh"
+       "\"$ROOT_DIR/scripts/dune-local.sh\" build ./bin/main_eio.exe");
+  check bool "nofile status surfaces bare dune bypasses" true
+    (file_contains_pattern "scripts/nofile-status.sh"
+       "potential bare dune bypasses");
+  check bool "dune-local blocks live bare dune by default" true
+    (file_contains_pattern "scripts/dune-local.sh"
+       "MASC_DUNE_ALLOW_BARE_DUNE")
+
 let test_doc_truth_guard_contracts () =
   check bool "doc truth script protects spec index front door wording" true
     (file_contains_pattern "scripts/check-doc-truth.sh"
@@ -2476,6 +2490,8 @@ let () =
            test_case "health and ci diagnostics" `Quick test_health_and_ci_runner_diagnostics;
            test_case "release truth contracts" `Quick test_release_truth_contracts;
            test_case "oas pin source contracts" `Quick test_oas_pin_source_contracts;
+           test_case "local dune FD containment contracts" `Quick
+             test_local_dune_fd_containment_contracts;
            test_case "doc truth guard contracts" `Quick test_doc_truth_guard_contracts;
            test_case "storage truth guard contracts" `Quick
              test_storage_truth_guard_contracts;

@@ -56,12 +56,14 @@ let _state_for_kind : (kind * slot_state) list =
 let state_of kind = List.assoc kind _state_for_kind
 
 (* Shared FD-pressure gate — when Keeper_fd_pressure.active () is true,
-   all top-level kinds serialize through one global slot. A semaphore keeps
-   the long-lived Bg_task lifetime path on the same pressure gate as scoped
-   tool calls while still allowing explicit release when the process closes. *)
+   all top-level kinds serialize through one global slot. Nested cross-kind
+   acquisitions skip this gate only while the parent slot scope is still
+   active; forked children that outlive the parent must re-enter the gate. *)
 let _shared_pressure_gate = Eio.Semaphore.make 1
 
-let held_kinds_key : kind list Eio.Fiber.key = Eio.Fiber.create_key ()
+type held_kind = { kind : kind ; active : bool Atomic.t }
+
+let held_kinds_key : held_kind list Eio.Fiber.key = Eio.Fiber.create_key ()
 
 let held_kinds () =
   (* NDT-OK: fiber-local runtime state only prevents same-fiber slot
@@ -69,13 +71,14 @@ let held_kinds () =
   try Option.value ~default:[] (Eio.Fiber.get held_kinds_key)
   with _ -> []
 
-let holds_kind kind = List.exists (( = ) kind) (held_kinds ())
+let active_held_kinds () =
+  List.filter (fun held -> Atomic.get held.active) (held_kinds ())
 
-let with_held_kind kind f =
-  Eio.Fiber.with_binding held_kinds_key (kind :: held_kinds ()) f
+let holds_kind kind =
+  List.exists (fun held -> held.kind = kind) (active_held_kinds ())
 
 let pressure_gate_needed () =
-  Keeper_fd_pressure.active () && held_kinds () = []
+  Keeper_fd_pressure.active () && active_held_kinds () = []
 
 let acquire_pressure_gate_if_needed () =
   if not (pressure_gate_needed ())
@@ -97,7 +100,10 @@ let with_slot ~kind f =
     Eio.Switch.on_release sw release_pressure ;
     Eio.Semaphore.acquire sem ;
     Eio.Switch.on_release sw (fun () -> Eio.Semaphore.release sem) ;
-    with_held_kind kind f
+    let held = { kind ; active = Atomic.make true } in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set held.active false)
+      (fun () -> Eio.Fiber.with_binding held_kinds_key (held :: held_kinds ()) f)
 
 let acquire_lifetime_slot ~kind () =
   let release_pressure = acquire_pressure_gate_if_needed () in

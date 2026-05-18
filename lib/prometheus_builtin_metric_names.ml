@@ -1,32 +1,7 @@
-(** Prometheus-Compatible Metrics for masc-mcp
-
-    Provides lightweight metrics collection and Prometheus text format export.
-
-    Usage:
-    {[
-      let () = Prometheus.inc_counter "masc_tasks_total" ~labels:[("status", "completed")]
-      let () = Prometheus.set_gauge "masc_active_agents" 5.0
-      let text = Prometheus.to_prometheus_text ()
-    ]}
-
-    @since 0.4.0
-*)
-include Prometheus_store
+(** Metric names used by Prometheus built-in registration chunks. *)
 
 include Prometheus_metric_names
 
-let backend_mutex_observers_installed = ref false
-
-let install_backend_mutex_observers () =
-  if not !backend_mutex_observers_installed
-  then (
-    Backend.FileSystem.set_mutex_observers
-      ~acquire:(fun ~op ~seconds ->
-        observe_histogram metric_backend_mutex_acquire_sec ~labels:[ "op", op ] seconds)
-      ~held:(fun ~op ~seconds ->
-        observe_histogram metric_backend_mutex_held_sec ~labels:[ "op", op ] seconds);
-    backend_mutex_observers_installed := true)
-;;
 
 (* #10097: a provider cannot carry keeper-bound runtime MCP tools that
    need request-scoped auth headers.  Every time
@@ -174,10 +149,11 @@ include Prometheus_policy_metric_names
    can see "alive but unproductive" keepers in Grafana before the
    detection latch fires.  Labels: keeper. *)
 (* PR-M (Leak 9): consecutive [oas_timeout_budget] cycle FAILED strikes
-   per keeper. Counter increments on each strike. At the limit, the
-   heartbeat loop records [outcome=soft_backoff] unless
-   [Keeper_failure_policy] sees separate keeper-liveness loss and returns
-   a death-allowed decision. *)
+   per keeper. Counter increments on each strike; a strike at
+   [outcome=promote] means [Keeper_fiber_crash] was raised so
+   [Keeper_supervisor.sweep_and_recover] will respawn the fiber. Without
+   the strike→crash promotion these failures repeated silently for
+   hours (4h+ zombie keepers observed 2026-04-26). *)
 let metric_oas_bus_subscriber_stream_depth = "masc_oas_bus_subscriber_stream_depth"
 let metric_oas_bus_publish_block_seconds = "masc_oas_bus_publish_block_seconds_total"
 let metric_oas_bus_publish = "masc_oas_bus_publish_total"
@@ -246,173 +222,3 @@ let metric_cost_ledger_status = "masc_cost_ledger_status_total"
    [outcome] in [skipped|passed|no_target|bypassed].  Wired from
    [lib/coord.ml] via [Coord_hooks.mention_dedup_decision_fn]. *)
 let metric_mention_dedup_decisions_total = "masc_mention_dedup_decisions_total"
-
-(** {1 Built-in Metrics} *)
-
-let init () =
-  (* Module-level init runs before Eio context exists.
-     Single-threaded at load time — bypass mutex. *)
-  let add name help metric_kind =
-    let metric_type =
-      match metric_kind with
-      | `Counter -> Counter
-      | `Gauge -> Gauge
-      | `Histogram -> Histogram
-    in
-    let key = metric_key name [] in
-    if not (Hashtbl.mem metrics key)
-    then
-      Hashtbl.add metrics key { name; help; metric_type; value = 0.0; labels = [] }
-  in
-  Prometheus_builtin_metrics.register
-    ~add
-    ~register_histogram
-    ~register_gauge
-    ~inc_counter
-    ();
-  install_backend_mutex_observers ()
-;;
-
-let start_time = Time_compat.now ()
-let update_uptime () = set_gauge metric_uptime_seconds (Time_compat.now () -. start_time)
-
-let fd_warn_threshold = Prometheus_process.fd_warn_threshold
-let () = set_gauge metric_fd_warn_threshold (float_of_int fd_warn_threshold)
-
-(** Returns 0 on non-Unix hosts where [/dev/fd] is unavailable. *)
-let approximate_open_fd_count = Prometheus_process.approximate_open_fd_count
-
-let update_fd_gauges () =
-  Prometheus_process.update_fd_gauges
-    ~set_gauge:(fun name value -> set_gauge name value)
-    ~metric_open_fds
-;;
-
-let update_fd_accountant_gauges () =
-  let snapshot = Fd_accountant.fd_snapshot () in
-  set_gauge metric_fd_open (float_of_int snapshot.fd_open);
-  set_gauge metric_fd_limit (float_of_int snapshot.fd_limit);
-  set_gauge
-    metric_fd_pressure_active
-    (if snapshot.pressure_active then 1.0 else 0.0);
-  List.iter
-    (fun (kind, in_flight) ->
-      set_gauge
-        metric_fd_in_flight
-        ~labels:[ "kind", Fd_accountant.kind_to_string kind ]
-        (float_of_int in_flight))
-    snapshot.per_kind
-;;
-
-let set_tool_schema_stats ~count ~approx_tokens =
-  set_gauge metric_mcp_tool_schema_count (float_of_int count);
-  set_gauge metric_mcp_tool_schema_tokens_approx (float_of_int approx_tokens)
-;;
-
-let text_metric_type = function
-  | Counter -> Prometheus_text.Counter
-  | Gauge -> Prometheus_text.Gauge
-  | Histogram -> Prometheus_text.Histogram
-;;
-
-let type_to_string metric_type = Prometheus_text.type_to_string (text_metric_type metric_type)
-let labels_to_string = Prometheus_format.labels_to_string
-
-(* Track host labels seen in previous scrapes so we can zero out gauges
-   for hosts that disappeared from the pool. Without this, an evicted
-   host's last non-zero idle value would persist in the registry forever
-   and the metrics table would grow unboundedly with every unique host
-   seen. Set is module-local: only [update_pool_metrics_gauges] reads
-   or writes it, and [to_prometheus_text]'s mutex serialises calls. *)
-let pool_idle_seen_hosts : (string, unit) Hashtbl.t = Hashtbl.create 16
-
-let update_pool_metrics_gauges () =
-  match Pool_metrics.current_snapshot () with
-  | None -> ()
-  | Some stats ->
-    set_gauge metric_pool_inflight_total (float_of_int stats.total_inflight);
-    let current_hosts = List.map fst stats.idle_per_host in
-    let current_set = List.fold_left (fun acc h -> Hashtbl.replace acc h (); acc)
-                        (Hashtbl.create (List.length current_hosts)) current_hosts in
-    (* Zero out gauges for hosts that disappeared since the last scrape. *)
-    Hashtbl.iter
-      (fun host () ->
-        if not (Hashtbl.mem current_set host)
-        then set_gauge metric_pool_idle_total ~labels:[ "host", host ] 0.0)
-      pool_idle_seen_hosts;
-    (* Write current values + remember them for the next scrape. *)
-    List.iter
-      (fun (host, idle) ->
-        set_gauge
-          metric_pool_idle_total
-          ~labels:[ "host", host ]
-          (float_of_int idle);
-        Hashtbl.replace pool_idle_seen_hosts host ())
-      stats.idle_per_host;
-    (* Drop evicted hosts from the seen-set so we stop tracking them. *)
-    Hashtbl.filter_map_inplace
-      (fun host () -> if Hashtbl.mem current_set host then Some () else None)
-      pool_idle_seen_hosts;
-    set_gauge metric_pool_idle_total (float_of_int stats.total_idle);
-    set_gauge metric_pool_reuse_total (float_of_int stats.reuse_count_total);
-    set_gauge metric_pool_evict_total (float_of_int stats.evict_count_total);
-    set_gauge metric_pool_create_total (float_of_int stats.create_count_total)
-;;
-
-let to_prometheus_text () =
-  update_uptime ();
-  update_fd_gauges ();
-  update_fd_accountant_gauges ();
-  update_pool_metrics_gauges ();
-  (* Snapshot (name, help, metric_type, value, labels) under the mutex so
-     the render phase sees a consistent view even when concurrent fibers
-     are still updating [metrics].  [m.value] is mutable so we copy it
-     here rather than holding the lock for the full render. *)
-  let snapshot =
-    with_lock (fun () ->
-      Hashtbl.fold
-        (fun _ (m : metric) acc ->
-           Prometheus_text.metric
-             ~name:m.name
-             ~help:m.help
-             ~metric_type:(text_metric_type m.metric_type)
-             ~value:m.value
-             ~labels:m.labels
-           :: acc)
-        metrics
-        [])
-  in
-  Prometheus_text.render snapshot
-;;
-
-(** {1 Convenience Functions} *)
-let record_request () = inc_counter metric_mcp_requests ()
-
-let record_task_completed () =
-  inc_counter metric_tasks ~labels:[ "status", "completed" ] ()
-;;
-let record_task_failed () = inc_counter metric_tasks ~labels:[ "status", "failed" ] ()
-
-let record_error ?(error_type = "unknown") () =
-  inc_counter metric_errors ~labels:[ "type", error_type ] ()
-;;
-let set_active_agents count = set_gauge metric_active_agents (float_of_int count)
-let set_pending_tasks count = set_gauge "masc_pending_tasks" (float_of_int count)
-(** Reconcile active_agents gauge with existing agent files on disk.
-    Call after Coord/server initialization to sync Prometheus state. *)
-let reconcile_active_agents_gauge masc_dir =
-  let agents_dir = Filename.concat masc_dir "agents" in
-  if Sys.file_exists agents_dir && Sys.is_directory agents_dir
-  then (
-    let files = Sys.readdir agents_dir in
-    let count =
-      Array.fold_left
-        (fun acc f -> if Filename.check_suffix f ".json" then acc + 1 else acc)
-        0
-        files
-    in
-    set_active_agents count)
-;;
-
-(** Initialize on module load *)
-let () = init ()

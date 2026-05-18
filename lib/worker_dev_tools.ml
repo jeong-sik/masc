@@ -213,7 +213,28 @@ let has_process_substitution cmd =
 ;;
 
 let split_pipeline_segments cmd =
-  let segments = String.split_on_char '|' cmd |> List.map String.trim in
+  let len = String.length cmd in
+  let push_segment start stop acc =
+    String.sub cmd start (stop - start) |> String.trim |> fun segment ->
+    segment :: acc
+  in
+  let rec loop i quote escaped start acc =
+    if i >= len
+    then List.rev (push_segment start len acc)
+    else (
+      let c = cmd.[i] in
+      match quote, escaped, c with
+      | Some '\'', _, '\'' -> loop (i + 1) None false start acc
+      | Some '\'', _, _ -> loop (i + 1) quote false start acc
+      | _, true, _ -> loop (i + 1) quote false start acc
+      | _, false, '\\' -> loop (i + 1) quote true start acc
+      | None, false, '\'' -> loop (i + 1) (Some '\'') false start acc
+      | None, false, '"' -> loop (i + 1) (Some '"') false start acc
+      | Some '"', false, '"' -> loop (i + 1) None false start acc
+      | None, false, '|' -> loop (i + 1) None false (i + 1) (push_segment start i acc)
+      | _ -> loop (i + 1) quote false start acc)
+  in
+  let segments = loop 0 None false 0 [] in
   if List.exists (fun segment -> segment = "") segments
   then Error "Pipes must separate complete allowed commands."
   else Ok segments

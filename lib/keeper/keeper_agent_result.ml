@@ -8,6 +8,7 @@ type tool_call_detail =
   ; provider : string
   ; outcome : string
   ; latency_ms : float
+  ; task_id : string option
   ; route_evidence : Yojson.Safe.t option
   }
 
@@ -17,6 +18,11 @@ let tool_call_detail_to_json (detail : tool_call_detail) =
     | Some evidence -> [ ("route_evidence", evidence) ]
     | None -> []
   in
+  let task_id_field =
+    match detail.task_id with
+    | Some task_id -> [ ("task_id", `String task_id) ]
+    | None -> []
+  in
   `Assoc
     ([
        ("tool_name", `String detail.tool_name);
@@ -24,6 +30,7 @@ let tool_call_detail_to_json (detail : tool_call_detail) =
        ("outcome", `String detail.outcome);
        ("latency_ms", `Float detail.latency_ms);
      ]
+     @ task_id_field
      @ route_evidence_field)
 
 (** Result of a single Agent.run() keeper turn. *)

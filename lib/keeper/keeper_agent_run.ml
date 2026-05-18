@@ -104,10 +104,24 @@ let select_cdal_proof ~result_proof ~captured_proof =
   | None -> captured_proof
 ;;
 
+let cdal_task_id_for_verdict ~(current_task_id : string option)
+    ~(tool_calls : tool_call_detail list) =
+  match current_task_id with
+  | Some task_id -> Some task_id
+  | None ->
+    List.find_map
+      (fun (detail : tool_call_detail) ->
+         match detail.task_id with
+         | Some task_id when String.trim task_id <> "" -> Some task_id
+         | _ -> None)
+      tool_calls
+;;
+
 module For_testing = struct
   let sse_event_progress_kind = sse_event_progress_kind
   let registry_progress_on_event = registry_progress_on_event
   let select_cdal_proof = select_cdal_proof
+  let cdal_task_id_for_verdict = cdal_task_id_for_verdict
 end
 ;;
 
@@ -1510,14 +1524,21 @@ let run_turn
                           let store = Masc_mcp_cdal_runtime.Proof_store.default_config in
                           let outcome = Cdal_eval_v1.evaluate ~store p in
                           let verdict = Cdal_eval_v1.verdict_of_outcome outcome in
+                          let current_task_id =
+                            Option.map
+                              Keeper_id.Task_id.to_string
+                              acc.meta.current_task_id
+                          in
+                          let task_id =
+                            cdal_task_id_for_verdict
+                              ~current_task_id
+                              ~tool_calls:acc.tool_calls
+                          in
                           let task_subject =
                             Option.map
                               (fun task_id ->
-                                 Coord_hooks.
-                                   { kind = "task"
-                                   ; id = Keeper_id.Task_id.to_string task_id
-                                   })
-                              acc.meta.current_task_id
+                                 Coord_hooks.{ kind = "task"; id = task_id })
+                              task_id
                           in
                           let emit_keeper_activity ~kind ~payload ~tags =
                             try
@@ -1542,11 +1563,6 @@ let run_turn
                                 meta.name
                                 kind
                                 (Printexc.to_string exn)
-                          in
-                          let task_id =
-                            Option.map
-                              Keeper_id.Task_id.to_string
-                              acc.meta.current_task_id
                           in
                           Cdal_eval_v1.persist ?task_id verdict;
                           Keeper_turn_telemetry.log_keeper_contract_verdict

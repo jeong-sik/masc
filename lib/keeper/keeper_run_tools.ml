@@ -71,6 +71,33 @@ let record_requested_tool_names (acc : hook_accumulator) requested =
     merge_requested_tool_names_seen ~seen:acc.requested_tool_names_seen requested
 ;;
 
+let task_scope_tool_names =
+  [ "masc_transition"
+  ; "masc_claim_task"
+  ; "masc_complete_task"
+  ; "masc_release_task"
+  ; "masc_cancel_task"
+  ; "keeper_task_done"
+  ; "keeper_task_submit_for_verification"
+  ; "keeper_task_force_done"
+  ; "keeper_task_force_release"
+  ]
+;;
+
+let json_string_opt name = function
+  | `Assoc fields ->
+    (match List.assoc_opt name fields with
+     | Some (`String value) when String.trim value <> "" -> Some (String.trim value)
+     | _ -> None)
+  | _ -> None
+;;
+
+let task_id_scope_of_tool_input ~tool_name input =
+  if List.mem tool_name task_scope_tool_names
+  then json_string_opt "task_id" input
+  else None
+;;
+
 type tool_search_hit_partition =
   { visible_core_hits : (string * float) list
   ; discoverable_hits : (string * float) list
@@ -1357,6 +1384,7 @@ let prepare_agent_setup
               ~input
               ~output_text
           in
+          let task_id = task_id_scope_of_tool_input ~tool_name input in
           (match Keeper_registry.get ~base_path:config.base_path meta.name with
            | Some entry ->
              acc.meta <- entry.meta;
@@ -1367,6 +1395,7 @@ let prepare_agent_setup
              ; provider
              ; outcome = (if success then "ok" else "error")
              ; latency_ms = duration_ms
+             ; task_id
              ; route_evidence
              }
              :: acc.tool_calls)

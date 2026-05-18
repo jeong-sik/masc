@@ -5065,6 +5065,7 @@ let test_append_decision_record_persists_tool_calls () =
            ; provider = "codex_cli"
            ; outcome = "ok"
            ; latency_ms = 12.5
+           ; task_id = None
            ; route_evidence =
                Some
                  (`Assoc
@@ -5081,6 +5082,7 @@ let test_append_decision_record_persists_tool_calls () =
            ; provider = "codex_cli"
            ; outcome = "error"
            ; latency_ms = 3.0
+           ; task_id = None
            ; route_evidence = None
            }
          ]

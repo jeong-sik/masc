@@ -72,6 +72,7 @@ type tool_call_detail =
   ; provider : string
   ; outcome : string
   ; latency_ms : float
+  ; task_id : string option
   ; route_evidence : Yojson.Safe.t option
   }
 
@@ -252,6 +253,12 @@ module For_testing : sig
     -> captured_proof:Masc_mcp_cdal_runtime.Cdal_proof.t option
     -> Masc_mcp_cdal_runtime.Cdal_proof.t option
   (** Selects the proof used for keeper-side CDAL verdict persistence. *)
+
+  val cdal_task_id_for_verdict
+    :  current_task_id:string option
+    -> tool_calls:tool_call_detail list
+    -> string option
+  (** Selects the task scope used for keeper-side CDAL verdict persistence. *)
 end
 
 (** {1 Turn execution} *)

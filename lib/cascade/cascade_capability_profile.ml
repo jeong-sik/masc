@@ -148,15 +148,42 @@ let declared_profile_names () =
 let satisfies req has =
   match req with Optional -> true | Required -> has
 
-let provider_satisfies_named_profile name (caps : Provider_tool_support.capabilities) =
+type named_profile_lookup_error =
+  | Unknown_named_profile of
+      { name : string; builtin : string list; declared : string list }
+
+let named_profile_lookup_error_to_string = function
+  | Unknown_named_profile { name; builtin; declared } ->
+      let render = function
+        | [] -> "(none)"
+        | xs -> String.concat ", " xs
+      in
+      Printf.sprintf
+        "unknown profile %S (known built-in: %s; declared: %s)"
+        name
+        (render builtin)
+        (render declared)
+
+let provider_satisfies_named_profile
+    ~name
+    (caps : Provider_tool_support.capabilities) =
   match resolve_required_capabilities name with
-  | None -> false
+  | None ->
+      Error
+        (Unknown_named_profile
+           { name
+           ; builtin = Cascade_capability_schema.all_profile_names
+           ; declared = declared_profile_names ()
+           })
   | Some req ->
-      satisfies req.inline_tools caps.supports_inline_tools
-      && satisfies req.inline_tool_choice caps.supports_inline_tool_choice
-      && satisfies req.runtime_mcp_tools caps.supports_runtime_mcp_tools
-      && satisfies req.runtime_tool_events caps.supports_runtime_tool_events
-      && satisfies req.runtime_mcp_http_headers caps.supports_runtime_mcp_http_headers
+      Ok
+        (satisfies req.inline_tools caps.supports_inline_tools
+        && satisfies req.inline_tool_choice caps.supports_inline_tool_choice
+        && satisfies req.runtime_mcp_tools caps.supports_runtime_mcp_tools
+        && satisfies req.runtime_tool_events caps.supports_runtime_tool_events
+        && satisfies
+             req.runtime_mcp_http_headers
+             caps.supports_runtime_mcp_http_headers)
 
 let safe_lane_cascade_name = "__safe_lane"
 

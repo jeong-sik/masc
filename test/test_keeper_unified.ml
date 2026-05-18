@@ -9383,7 +9383,7 @@ let satisfies_explicit_required_tool ~required_tool_names name input =
        (required_tool_call name input))
 ;;
 
-let test_required_tool_satisfaction_handles_passive_tools () =
+let test_required_tool_satisfaction_rejects_passive_tools () =
   check
     bool
     "global masc_status remains passive"
@@ -9391,29 +9391,39 @@ let test_required_tool_satisfaction_handles_passive_tools () =
     (satisfies_required_tool "masc_status" (`Assoc []));
   check
     bool
-    "keeper_tasks_list satisfies tool-presence contract"
-    true
+    "keeper_tasks_list cannot satisfy required-action contract"
+    false
     (satisfies_required_tool "keeper_tasks_list" (`Assoc []));
   check
     bool
-    "keeper_context_status satisfies tool-presence contract"
-    true
+    "keeper_context_status cannot satisfy required-action contract"
+    false
     (satisfies_required_tool "keeper_context_status" (`Assoc []));
   check
     bool
-    "keeper_memory_search satisfies tool-presence contract"
-    true
+    "keeper_memory_search cannot satisfy required-action contract"
+    false
     (satisfies_required_tool "keeper_memory_search" (`Assoc []));
   check
     bool
-    "keeper_tool_search satisfies tool-presence contract"
-    true
+    "keeper_tool_search cannot satisfy required-action contract"
+    false
     (satisfies_required_tool "keeper_tool_search" (`Assoc []));
   check
     bool
-    "keeper_board_get satisfies tool-presence contract"
-    true
+    "keeper_board_get cannot satisfy required-action contract"
+    false
     (satisfies_required_tool "keeper_board_get" (`Assoc []));
+  check
+    bool
+    "keeper_board_list cannot satisfy required-action contract"
+    false
+    (satisfies_required_tool "keeper_board_list" (`Assoc []));
+  check
+    bool
+    "keeper_time_now cannot satisfy required-action contract"
+    false
+    (satisfies_required_tool "keeper_time_now" (`Assoc []));
   check
     bool
     "keeper_memory_search remains passive progress"
@@ -9434,13 +9444,13 @@ let test_required_tool_satisfaction_handles_passive_tools () =
     (satisfies_required_tool "keeper_stay_silent" (`Assoc []));
   check
     bool
-    "Read alias satisfies tool-presence contract"
-    true
+    "Read alias cannot satisfy required-action contract"
+    false
     (satisfies_required_tool "Read" (`Assoc []));
   check
     bool
-    "Grep alias satisfies tool-presence contract"
-    true
+    "Grep alias cannot satisfy required-action contract"
+    false
     (satisfies_required_tool "Grep" (`Assoc []));
   check
     bool
@@ -12403,7 +12413,7 @@ let () =
         ; test_case
             "required tool predicate handles passive tools"
             `Quick
-            test_required_tool_satisfaction_handles_passive_tools
+            test_required_tool_satisfaction_rejects_passive_tools
         ; test_case
             "required tool predicate accepts mutating tools"
             `Quick

@@ -85,6 +85,8 @@ type failure_reason =
   | Provider_runtime_error of
       { code : string
       ; detail : string
+      ; provider_id : string option
+      ; http_status : int option
       }
   | Tool_required_unsatisfied of
       { code : string

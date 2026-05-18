@@ -658,7 +658,9 @@ let make_post_turn_resilience_executor
     let detail = short_resilience_detail detail in
     let latest_meta = current_keeper_meta ~config ~fallback_meta:meta in
     Keeper_registry.set_failure_reason ~base_path:config.base_path meta.name
-      (Some (Keeper_registry.Provider_runtime_error { code; detail }));
+      (Some
+         (Keeper_registry.Provider_runtime_error
+            { code; detail; provider_id = None; http_status = None }));
     match sync_keeper_paused_state ~config ~meta:latest_meta ~paused:true with
     | Ok paused_meta ->
         on_paused paused_meta;

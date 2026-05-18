@@ -112,14 +112,23 @@ fi
 
 printf 'repo-wide scan processes:\n'
 if [[ "${ps_available}" -eq 1 ]]; then
-  ps ax -o pid=,ppid=,stat=,etime=,command= 2>/dev/null \
-    | awk '
-        /(^|[[:space:]])(bfs|find)[[:space:]]/ &&
-        /masc-mcp/ &&
-        /-exec/ {
-          print
-        }' \
-    | truncate_rows || true
+  scan_rows="$(
+    ps ax -o pid=,ppid=,stat=,etime=,command= 2>/dev/null \
+      | awk '
+          /(^|[[:space:]])(bfs|find)[[:space:]]/ &&
+          (/\/Users\/dancer([[:space:]]|\/|$)/ ||
+           /\/Users\/dancer\/me([[:space:]]|\/|$)/ ||
+           /masc-mcp/ ||
+           /~\/me/ ||
+           /[[:space:]]~([[:space:]]|\/|$)/) {
+            print
+          }' || true
+  )"
+  if [[ -n "${scan_rows}" ]]; then
+    printf '%s\n' "${scan_rows}" | truncate_rows
+  else
+    printf 'none\n'
+  fi
 else
   printf 'repo-wide scan processes: unavailable (ps failed)\n'
 fi

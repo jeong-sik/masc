@@ -717,6 +717,9 @@ let test_local_dune_fd_containment_contracts () =
   check bool "nofile status truncates long commands" true
     (file_contains_pattern "scripts/nofile-status.sh"
        "MASC_NOFILE_COMMAND_MAX");
+  check bool "nofile status surfaces broad repo scans" true
+    (file_contains_pattern "scripts/nofile-status.sh"
+       "/\\/Users\\/dancer");
   check bool "nofile bare detector handles dune global options" true
     (file_contains_pattern "scripts/nofile-status.sh" "dune_subcommand_index");
   check bool "dune-local blocks live bare dune by default" true

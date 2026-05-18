@@ -968,7 +968,9 @@ let test_stale_storm_pause_skips_restart () =
       (match KT.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused = true after storm pause"
-             true m.paused
+             true m.paused;
+           check bool "storm pause disables auto-resume"
+             true (Option.is_none m.auto_resume_after_sec)
        | Ok None -> fail "meta missing after storm pause"
        | Error err -> fail ("read_meta failed: " ^ err));
       (* In-memory registry entry is unregistered so subsequent sweeps do
@@ -1212,8 +1214,8 @@ let test_non_storm_crashed_restarts_normally () =
 
 (* ── Phase 3: self-healing circuit breaker ──────────────────── *)
 
-(* Test: storm pause sets [auto_resume_after_sec] in meta. *)
-let test_storm_pause_sets_auto_resume_after_sec () =
+(* Test: stale storm pause requires manual resume until root cause clears. *)
+let test_storm_pause_requires_manual_resume () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -1226,7 +1228,7 @@ let test_storm_pause_sets_auto_resume_after_sec () =
     (fun () ->
       let config = Masc_mcp.Coord.default_config base_dir in
       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
-      let name = "storm-auto-resume-setter" in
+      let name = "storm-manual-resume" in
       let meta = make_meta name in
       (* Ensure no prior auto_resume_after_sec. *)
       check bool "initial auto_resume_after_sec = None"
@@ -1251,13 +1253,13 @@ let test_storm_pause_sets_auto_resume_after_sec () =
         }
       in
       Sup.sweep_and_recover ctx;
-      (* After storm pause, meta must have auto_resume_after_sec set
-         (initial value: 3600s from env default or test env override). *)
+      (* Stale storms are operator-owned pauses: no timer should re-enter
+         the same failed cascade/tool loop automatically. *)
       (match KT.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused = true" true m.paused;
-           check bool "auto_resume_after_sec set (Some _)"
-             true (Option.is_some m.auto_resume_after_sec);
+           check bool "auto_resume_after_sec remains None"
+             true (Option.is_none m.auto_resume_after_sec);
            (* updated_at must be refreshed by the pause write so Phase 3.5
               timer (now - updated_at) is anchored to the pause time, not to
               some earlier heartbeat write. *)
@@ -1271,8 +1273,8 @@ let test_storm_pause_sets_auto_resume_after_sec () =
        | Ok None -> fail "meta missing after storm pause"
        | Error err -> fail ("read_meta failed: " ^ err)))
 
-(* Test: exponential back-off doubles on successive auto-pauses. *)
-let test_auto_resume_after_sec_doubles_on_repause () =
+(* Test: exponential back-off still doubles for OAS timeout budget auto-pauses. *)
+let test_oas_auto_resume_after_sec_doubles_on_repause () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -1296,11 +1298,11 @@ let test_auto_resume_after_sec_doubles_on_repause () =
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name initial_meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "storm");
+      Eio.Promise.resolve reg.done_r (`Crashed "oas timeout budget loop");
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
-        (Some (Reg.Stale_termination_storm { count = 5 }));
+        (Some (Reg.Oas_timeout_budget_loop { count = 3 }));
       let ctx : _ KT.context =
         {
           config;
@@ -1691,10 +1693,10 @@ let () =
         test_non_storm_crashed_restarts_normally;
     ];
     "self_healing_circuit_breaker", [
-      test_case "storm pause sets auto_resume_after_sec" `Quick
-        test_storm_pause_sets_auto_resume_after_sec;
-      test_case "auto_resume_after_sec doubles on successive auto-pauses" `Quick
-        test_auto_resume_after_sec_doubles_on_repause;
+      test_case "storm pause requires manual resume" `Quick
+        test_storm_pause_requires_manual_resume;
+      test_case "OAS auto_resume_after_sec doubles on successive auto-pauses" `Quick
+        test_oas_auto_resume_after_sec_doubles_on_repause;
       test_case "sweep auto-resumes keeper when timer elapsed" `Quick
         test_sweep_auto_resumes_after_backoff;
       test_case "operator pause (None) is NOT auto-resumed by sweep" `Quick

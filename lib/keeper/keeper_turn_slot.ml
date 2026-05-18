@@ -870,18 +870,11 @@ let reset_autonomous_completion_for_test () : unit =
    [oas_timeout_budget] means the keeper cycle hit its structural budget
    (see [Keeper_unified_turn.resolve_bounded_oas_timeout_budget_with_turn_budget]).
    Re-running on the same fiber gives the same context and the same
-   shape of failure repeats — the budget does not magically grow
-   between cycles. Pre-fix the only escape was
-   [Keeper_supervisor.sweep_and_recover], which only triggers on
-   [Keeper_fiber_crash]; with the fiber alive but cycle-failing, the
-   sweep reports ["Alive — skip"] (see [keeper_supervisor.ml:599-602])
-   and the keeper stays zombie for hours. Real evidence 2026-04-26:
-   5 keepers were 4h+ silent post-budget-exhaustion in a 15-minute
-   window with 0 restart.
-
-   Promote to [Keeper_fiber_crash] after [oas_timeout_budget_strike_limit]
-   consecutive strikes so the supervisor pauses the keeper instead of
-   restarting into the same budget loop.
+   shape of failure repeats, but provider/cascade budget pressure is not
+   keeper fiber corruption. Crossing [oas_timeout_budget_strike_limit]
+   is therefore a soft-backoff signal, not a [Keeper_fiber_crash]
+   promotion: the keeper stays alive while provider cooldown, cascade
+   backpressure, and turn retry policy do the actual throttling.
 
    Counter is in-memory for the common same-server case and is reset on
    any successful turn (see [Ok updated] branch). On first bump after a
@@ -889,6 +882,15 @@ let reset_autonomous_completion_for_test () : unit =
    [Oas_timeout_budget_loop] failure reason so restart cannot erase a
    partially observed loop. *)
 let oas_timeout_budget_strike_limit = 3
+
+type oas_timeout_budget_strike_outcome =
+  | Oas_timeout_budget_warn
+  | Oas_timeout_budget_soft_backoff
+
+let classify_oas_timeout_budget_strike ~strikes =
+  if strikes >= oas_timeout_budget_strike_limit
+  then Oas_timeout_budget_soft_backoff
+  else Oas_timeout_budget_warn
 
 module Budget_strike_map = Map.Make (String)
 

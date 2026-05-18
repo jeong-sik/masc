@@ -197,13 +197,21 @@ val set_after_acquire_flag_hook_for_test :
   (label:string -> keeper_name:string -> unit) option -> unit
 
 (** PR-M (Leak 9): consecutive [oas_timeout_budget] cycle FAILED strikes
-    per keeper. Promoted to [Keeper_fiber_crash] at
-    [oas_timeout_budget_strike_limit]; reset on any successful turn.
+    per keeper. Crossing [oas_timeout_budget_strike_limit] emits a
+    soft-backoff signal and must not kill the keeper fiber; reset on any
+    successful turn.
     The in-process CAS map survives within a server lifetime. After
     restart, callers may hydrate the first bump from persisted
     [Oas_timeout_budget_loop] state so multi-process loops still reach
-    the supervisor gate. *)
+    the same soft-backoff signal. *)
 val oas_timeout_budget_strike_limit : int
+
+type oas_timeout_budget_strike_outcome =
+  | Oas_timeout_budget_warn
+  | Oas_timeout_budget_soft_backoff
+
+val classify_oas_timeout_budget_strike :
+  strikes:int -> oas_timeout_budget_strike_outcome
 
 val bump_budget_exhaustion_seeded :
   keeper_name:string -> prior_strikes:int -> int

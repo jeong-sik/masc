@@ -42,6 +42,18 @@ let test_reset_clears () =
   Alcotest.(check int) "reset clears" 0
     (KK.peek_budget_exhaustion_for_test ~keeper_name:"reset")
 
+let test_strike_limit_is_soft_backoff () =
+  (match KK.classify_oas_timeout_budget_strike ~strikes:1 with
+   | KK.Oas_timeout_budget_warn -> ()
+   | KK.Oas_timeout_budget_soft_backoff -> failwith "strike 1 should warn");
+  (match
+     KK.classify_oas_timeout_budget_strike
+       ~strikes:KK.oas_timeout_budget_strike_limit
+   with
+   | KK.Oas_timeout_budget_soft_backoff -> ()
+   | KK.Oas_timeout_budget_warn ->
+     failwith "strike limit should soft-backoff, not crash")
+
 let test_concurrent_bumps_do_not_lose_updates () =
   let keeper = "parallel-bumps" in
   with_reset keeper (fun () ->
@@ -71,6 +83,8 @@ let () =
         Alcotest.test_case "seeded bump uses higher persisted count" `Quick
           test_seeded_bump_uses_higher_persisted_count;
         Alcotest.test_case "reset clears" `Quick test_reset_clears;
+        Alcotest.test_case "strike limit soft-backoffs without crash" `Quick
+          test_strike_limit_is_soft_backoff;
         Alcotest.test_case "concurrent bumps do not lose updates" `Quick
           test_concurrent_bumps_do_not_lose_updates;
       ] );

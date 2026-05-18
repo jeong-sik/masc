@@ -181,12 +181,20 @@ val set_after_acquire_flag_hook_for_test :
   (label:string -> keeper_name:string -> unit) option -> unit
 
 (** PR-M (Leak 9): consecutive [oas_timeout_budget] cycle FAILED strikes
-    per keeper. Promoted to [Keeper_fiber_crash] at this limit.
+    per keeper. Crossing this limit is a soft-backoff signal; it must not
+    promote to [Keeper_fiber_crash].
 
     Counts are stored in an in-process CAS map and can be seeded from the
     persisted [Oas_timeout_budget_loop] failure reason on the first bump after
     restart or another process update. *)
 val oas_timeout_budget_strike_limit : int
+
+type oas_timeout_budget_strike_outcome =
+  | Oas_timeout_budget_warn
+  | Oas_timeout_budget_soft_backoff
+
+val classify_oas_timeout_budget_strike :
+  strikes:int -> oas_timeout_budget_strike_outcome
 
 val bump_budget_exhaustion_seeded :
   keeper_name:string -> prior_strikes:int -> int

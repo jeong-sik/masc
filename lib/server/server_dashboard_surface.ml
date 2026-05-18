@@ -66,6 +66,7 @@ let generated_at_iso json =
     ; string_field "generated_at" json
     ; string_field "generated_at" diagnostics
     ]
+  (* NDT-OK: response metadata fallback only; source projections remain deterministic. *)
   |> Option.value ~default:(Masc_domain.now_iso ())
 ;;
 

@@ -13,40 +13,19 @@
 open Keeper_types
 open Keeper_execution
 module StringMap = Map.Make (String)
+module Startup_helpers = Keeper_supervisor_startup_helpers
 
 (* ── Pure helpers ────────────────────────────────────────── *)
 
-let backoff_delay attempt =
-  let base = Env_config.KeeperSupervisor.backoff_base_s in
-  let max_delay = Env_config.KeeperSupervisor.backoff_max_s in
-  Float.min max_delay (base *. Float.of_int (1 lsl min attempt 20))
-;;
-
-let keep_last_n n item lst =
-  let full = item :: lst in
-  if List.length full <= n then full else List.filteri (fun i _ -> i < n) full
-;;
+let backoff_delay = Startup_helpers.backoff_delay
+let keep_last_n = Startup_helpers.keep_last_n
 
 (** supervision_cohort cluster moved to Keeper_supervisor_types
     (intra-library file split, 2026-05-16). *)
 include Keeper_supervisor_types
 
-let committed_tools_of_ambiguous_blocker (blocker : string) =
-  let trimmed = String.trim blocker in
-  match Cascade_error_classify.classify_masc_internal_error_of_string trimmed with
-  | Some (Cascade_error_classify.Ambiguous_post_commit { tools; _ }) -> tools
-  | _ ->
-    (* Legacy: extract from bracket notation "prefix: [tool1, tool2]; ..." *)
-    (match String.index_opt trimmed '[' with
-     | None -> []
-     | Some open_idx ->
-       (match String.index_from_opt trimmed (open_idx + 1) ']' with
-        | Some close_idx when close_idx > open_idx + 1 ->
-          String.sub trimmed (open_idx + 1) (close_idx - open_idx - 1)
-          |> String.split_on_char ','
-          |> List.map String.trim
-          |> List.filter (fun tool -> tool <> "")
-        | _ -> []))
+let committed_tools_of_ambiguous_blocker =
+  Startup_helpers.committed_tools_of_ambiguous_blocker
 ;;
 
 (* ── Event publishing ────────────────────────────────────── *)
@@ -568,54 +547,12 @@ let launch_supervised_fiber
    The visibility ERROR is bounded by fleet size (~14 keepers) and
    only fires on first registration — the [is_registered] guard above
    skips repeat calls. *)
-let persona_name_for_drift_check (meta : keeper_meta) =
-  match Keeper_types_profile.load_keeper_profile_defaults_result meta.name with
-  | Ok defaults ->
-    Keeper_types_profile.resolved_persona_name ~keeper_name:meta.name defaults
-  | Error _ -> meta.name
+let persona_name_for_drift_check = Startup_helpers.persona_name_for_drift_check
+let persona_profile_path_for_drift_check =
+  Startup_helpers.persona_profile_path_for_drift_check
 ;;
 
-let persona_profile_path_for_drift_check ~base_path persona_name =
-  match Config_dir_resolver.personas_dir_opt () with
-  | Some dir ->
-    Filename.concat (Filename.concat dir persona_name) "profile.json"
-  | None ->
-    Filename.concat
-      (Filename.concat
-         (Filename.concat (Common.masc_dir_from_base_path ~base_path) "personas")
-         persona_name)
-      "profile.json"
-;;
-
-
-let log_persona_drift_if_missing ~base_path (meta : keeper_meta) =
-  let persona_name = persona_name_for_drift_check meta in
-  let searched = persona_profile_path_for_drift_check ~base_path persona_name in
-  if Sys.file_exists searched then ()
-  else (
-    Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_persona_drift_missing
-      ~labels:[ "keeper", meta.name ]
-      ();
-    let msg =
-      Printf.sprintf
-        "[#10993][persona_drift] keeper=%s resolved=%s persona profile missing at %s"
-        meta.name
-        persona_name
-        searched
-    in
-    match persona_drift_log_level_for_missing_profile meta with
-    | Persona_drift_warn ->
-      Log.Keeper.warn
-        "%s — using keeper TOML metadata; operator action: add persona profile if \
-         persona assets are required"
-        msg
-    | Persona_drift_error ->
-      Log.Keeper.error
-        "%s — runtime falls through to logging-only RFC P3-a path; operator action: \
-         create persona profile or remove keeper from registry"
-        msg)
-;;
+let log_persona_drift_if_missing = Startup_helpers.log_persona_drift_if_missing
 
 let supervise_keepalive ~proactive_warmup_sec (ctx : _ context) (meta : keeper_meta) =
   if Keeper_registry.is_registered ~base_path:ctx.config.base_path meta.name

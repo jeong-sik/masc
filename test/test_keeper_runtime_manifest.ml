@@ -655,14 +655,141 @@ let test_pre_dispatch_terminal_observation_emits_manifest_rows () =
             (Some receipt_path)
             row.M.links.receipt_path)
         rows;
-      match rows with
+      (match rows with
       | first :: _ ->
         Alcotest.(check string)
           "terminal reason recorded"
           "phase_not_executable"
           Yojson.Safe.Util.(
             first.M.decision |> member "terminal_reason_code" |> to_string)
-      | [] -> Alcotest.fail "expected manifest rows")
+      | [] -> Alcotest.fail "expected manifest rows");
+      let finished = require_manifest_event M.Turn_finished rows in
+      Alcotest.(check bool)
+        "turn finished records receipt append"
+        true
+        (json_bool_member "receipt_append_ok" finished.M.decision);
+      let receipt_rows = read_jsonl receipt_path in
+      let receipt_json =
+        match receipt_rows with
+        | [ receipt ] -> receipt
+        | rows ->
+          Alcotest.fail
+            (Printf.sprintf "expected one receipt row, got %d" (List.length rows))
+      in
+      Alcotest.(check (option string))
+        "receipt trace id"
+        (Some trace_id)
+        (json_string_member_opt "trace_id" receipt_json);
+      Alcotest.(check int)
+        "receipt turn count"
+        keeper_turn_id
+        (json_int_member "turn_count" receipt_json);
+      Alcotest.(check (option string))
+        "receipt outcome"
+        (Some "skipped")
+        (json_string_member_opt "outcome" receipt_json);
+      Alcotest.(check (option string))
+        "receipt terminal reason"
+        (Some "phase_not_executable")
+        (json_string_member_opt "terminal_reason_code" receipt_json))
+
+let test_pre_dispatch_receipt_failure_closes_manifest_with_gap () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let meta = make_meta ~name:"pre-dispatch-receipt-gap" () in
+      let keeper_dir =
+        Filename.concat
+          (Filename.concat (Filename.concat base_dir ".masc") "keepers")
+          meta.name
+      in
+      Fs_compat.mkdir_p keeper_dir;
+      let receipt_dir = Filename.concat keeper_dir "execution-receipts" in
+      Fs_compat.save_file receipt_dir "not-a-directory";
+      let keeper_turn_id = meta.runtime.usage.total_turns + 1 in
+      Masc_mcp.Keeper_turn_helpers.record_pre_dispatch_terminal_observation
+        ~config
+        ~meta
+        ~generation:meta.runtime.generation
+        ~cascade_name:
+          (Masc_mcp.Keeper_execution_receipt.cascade_name_of_string "default")
+        ~outcome:`Skipped
+        ~terminal_reason_code:"phase_not_executable"
+        ~activity_kind:"keeper.turn_skipped"
+        ~trajectory_outcome:(Trajectory.Gated "phase_not_executable")
+        ~keeper_turn_id
+        ();
+      let trace_id =
+        Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id
+      in
+      let manifest_path =
+        M.path_for_trace config ~keeper_name:meta.name ~trace_id
+      in
+      let receipt_path =
+        M.execution_receipt_path_for_today config ~keeper_name:meta.name
+      in
+      Alcotest.(check bool)
+        "receipt path absent after append failure"
+        false
+        (Sys.file_exists receipt_path);
+      let rows = parsed_manifest_rows manifest_path in
+      Alcotest.(check (list string))
+        "failed receipt manifest closeout events"
+        [
+          M.event_kind_to_string M.Pre_dispatch_blocked;
+          M.event_kind_to_string M.Turn_finished;
+        ]
+        (List.map (fun row -> M.event_kind_to_string row.M.event) rows);
+      List.iter
+        (fun row ->
+          Alcotest.(check (option int))
+            "failed receipt manifest keeps turn id"
+            (Some keeper_turn_id)
+            row.M.keeper_turn_id;
+          Alcotest.(check (option string))
+            "failed receipt manifest keeps receipt target"
+            (Some receipt_path)
+            row.M.links.receipt_path)
+        rows;
+      let finished = require_manifest_event M.Turn_finished rows in
+      Alcotest.(check bool)
+        "turn finished records missing receipt"
+        false
+        (json_bool_member "receipt_append_ok" finished.M.decision);
+      let gaps =
+        Masc_mcp.Telemetry_coverage_gap.read_recent
+          ~masc_root:(Filename.concat base_dir ".masc")
+          ~n:10
+      in
+      match gaps with
+      | [ gap ] ->
+        Alcotest.(check (option string))
+          "coverage source"
+          (Some "execution_receipt")
+          (json_string_member_opt "source" gap);
+        Alcotest.(check (option string))
+          "coverage producer"
+          (Some "keeper_unified_turn.pre_dispatch")
+          (json_string_member_opt "producer" gap);
+        Alcotest.(check (option string))
+          "coverage stale reason"
+          (Some "pre_dispatch_execution_receipt_append_failed")
+          (json_string_member_opt "stale_reason" gap);
+        Alcotest.(check (option string))
+          "coverage keeper"
+          (Some meta.name)
+          (json_string_member_opt "keeper_name" gap);
+        Alcotest.(check (option string))
+          "coverage trace"
+          (Some trace_id)
+          (json_string_member_opt "trace_id" gap)
+      | rows ->
+        Alcotest.fail
+          (Printf.sprintf
+             "expected one execution receipt coverage gap, got %d"
+             (List.length rows)))
 
 let test_pre_dispatch_terminal_observation_invalidates_keeper_status_cache () =
   with_eio
@@ -2633,6 +2760,10 @@ let () =
             test_append_best_effort_stays_best_effort_when_manifest_dir_unavailable;
           Alcotest.test_case "pre-dispatch emits manifest rows" `Quick
             test_pre_dispatch_terminal_observation_emits_manifest_rows;
+          Alcotest.test_case
+            "pre-dispatch receipt failure closes manifest with gap"
+            `Quick
+            test_pre_dispatch_receipt_failure_closes_manifest_with_gap;
           Alcotest.test_case
             "pre-dispatch receipt invalidates keeper status cache"
             `Quick

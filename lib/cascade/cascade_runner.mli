@@ -137,6 +137,15 @@ type run_result = {
   stop_reason : stop_reason;
 }
 
+type worker_lifecycle_classification =
+  { event : string
+  ; status : string
+  ; error : string option
+  }
+
+val worker_lifecycle_classification_of_result :
+  (run_result, Agent_sdk.Error.sdk_error) result -> worker_lifecycle_classification
+
 val proof_result_status_to_string :
   Masc_mcp_cdal_runtime.Cdal_proof.result_status -> string
 

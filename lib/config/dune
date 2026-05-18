@@ -14,6 +14,7 @@
    env_config_runtime
    env_config_sandbox
    env_config_snapshot
+   env_config_snapshot_core
    feature_flag_registry
    masc_network_defaults
    masc_time_constants

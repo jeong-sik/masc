@@ -82,10 +82,13 @@ let max_consecutive_failures = Env_config.KeeperToolExec.max_consecutive_tool_fa
 
 type failure_counts =
   { table : (string, int) Hashtbl.t
+  ; workflow_table : (string, int) Hashtbl.t
   ; mutex : Mutex.t
   }
 
-let create_failure_counts () = { table = Hashtbl.create 16; mutex = Mutex.create () }
+let create_failure_counts () =
+  { table = Hashtbl.create 16; workflow_table = Hashtbl.create 16; mutex = Mutex.create () }
+;;
 
 let failure_count_get counts key =
   Mutex.protect counts.mutex (fun () ->
@@ -107,6 +110,150 @@ let failure_count_reset counts key =
   Mutex.protect counts.mutex (fun () -> Hashtbl.remove counts.table key)
 ;;
 
+type workflow_rejection_info =
+  { rule_id : string option
+  ; tool_suggestion : string option
+  ; hint : string option
+  }
+
+let json_assoc_field_opt key = function
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
+;;
+
+let json_assoc_string_opt key json =
+  match json_assoc_field_opt key json with
+  | Some (`String value) -> Some value
+  | _ -> None
+;;
+
+let detail_json_opt json =
+  match json_assoc_field_opt "detail" json with
+  | Some (`Assoc _ as detail) -> Some detail
+  | _ -> None
+;;
+
+let json_or_detail_string_opt key json =
+  match json_assoc_string_opt key json with
+  | Some _ as value -> value
+  | None ->
+    (match detail_json_opt json with
+     | Some detail -> json_assoc_string_opt key detail
+     | None -> None)
+;;
+
+let diagnosis_json_opt json =
+  match json_assoc_field_opt "diagnosis" json with
+  | Some (`Assoc _ as diagnosis) -> Some diagnosis
+  | _ ->
+    (match detail_json_opt json with
+     | Some detail ->
+       (match json_assoc_field_opt "diagnosis" detail with
+        | Some (`Assoc _ as diagnosis) -> Some diagnosis
+        | _ -> None)
+     | None -> None)
+;;
+
+let workflow_rejection_info_of_raw raw =
+  try
+    let json = Yojson.Safe.from_string raw in
+    match json_or_detail_string_opt "failure_class" json with
+    | Some "workflow_rejection" ->
+      let diagnosis = diagnosis_json_opt json in
+      let rule_id =
+        match diagnosis with
+        | Some diagnosis -> json_assoc_string_opt "rule_id" diagnosis
+        | None -> None
+      in
+      let tool_suggestion =
+        match diagnosis with
+        | Some diagnosis -> json_assoc_string_opt "tool_suggestion" diagnosis
+        | None -> None
+      in
+      Some
+        { rule_id
+        ; tool_suggestion
+        ; hint = json_or_detail_string_opt "hint" json
+        }
+    | Some _
+    | None ->
+      None
+  with
+  | Yojson.Json_error _ -> None
+;;
+
+let workflow_rejection_family_key ~tool_name info =
+  Printf.sprintf
+    "%s:%s:%s"
+    tool_name
+    (Option.value ~default:"unknown_rule" info.rule_id)
+    (Option.value ~default:"unknown_tool" info.tool_suggestion)
+;;
+
+let workflow_rejection_count_record counts key =
+  Mutex.protect counts.mutex (fun () ->
+    let next =
+      match Hashtbl.find_opt counts.workflow_table key with
+      | Some n -> n + 1
+      | None -> 1
+    in
+    Hashtbl.replace counts.workflow_table key next;
+    next)
+;;
+
+let workflow_rejection_count_reset counts =
+  Mutex.protect counts.mutex (fun () -> Hashtbl.clear counts.workflow_table)
+;;
+
+let workflow_rejection_recovery_instruction ~tool_name ~count info =
+  match info.tool_suggestion with
+  | Some next_tool when count >= 2 ->
+    Printf.sprintf
+      "Stop retrying %s variants for this workflow rejection. Call %s next and \
+       follow the hint/alternatives in detail."
+      tool_name
+      next_tool
+  | Some next_tool ->
+    Printf.sprintf
+      "Do not retry this %s call. Call %s next and follow the hint/alternatives \
+       in detail."
+      tool_name
+      next_tool
+  | None when count >= 2 ->
+    Printf.sprintf
+      "Stop retrying %s variants for this workflow rejection. Use a different \
+       allowed workflow tool from the hint/alternatives in detail."
+      tool_name
+  | None ->
+    Printf.sprintf
+      "Do not retry this %s call. Use the hint/alternatives in detail."
+      tool_name
+;;
+
+let workflow_rejection_recovery_fields ~tool_name ~count raw =
+  match workflow_rejection_info_of_raw raw with
+  | None -> []
+  | Some info ->
+    let optional_string key = function
+      | Some value -> [ key, `String value ]
+      | None -> []
+    in
+    let recovery =
+      [ "count", `Int count
+      ; "instruction", `String (workflow_rejection_recovery_instruction ~tool_name ~count info)
+      ]
+      @ optional_string "rule_id" info.rule_id
+      @ optional_string "tool_suggestion" info.tool_suggestion
+      @ optional_string "hint" info.hint
+    in
+    [ "self_correction_required", `Bool true
+    ; "do_not_retry_tool", `String tool_name
+    ; "workflow_rejection_recovery", `Assoc recovery
+    ]
+    @ optional_string "required_next_tool" info.tool_suggestion
+    @ if count >= 2 then [ "workflow_rejection_loop", `Bool true ] else []
+;;
+
 (** Normalize a raw tool result string into a consistent JSON envelope.
 
     The LLM sees this output directly. Without normalization, tool results
@@ -120,7 +267,12 @@ let failure_count_reset counts key =
 
     The [success] flag comes from the typed outcome returned by
     [Keeper_exec_tools.execute_keeper_tool_call_with_outcome]. *)
-let normalize_tool_result ~(success : bool) (raw : string) : string =
+let normalize_tool_result
+      ?(workflow_rejection_recovery_fields = [])
+      ~(success : bool)
+      (raw : string)
+  : string
+  =
   try
     let json = Yojson.Safe.from_string raw in
     if success
@@ -158,7 +310,8 @@ let normalize_tool_result ~(success : bool) (raw : string) : string =
       Yojson.Safe.to_string
         (`Assoc
           ([ "ok", `Bool false; "error", `String error_msg; "detail", json ]
-           @ preserved_fields)))
+           @ preserved_fields
+           @ workflow_rejection_recovery_fields)))
   with
   | Yojson.Json_error _ ->
     (* Raw is not JSON (e.g. plain text from keeper_tasks_list).
@@ -582,6 +735,17 @@ let make_keeper_tool_handler
               | None ->
                 false
             in
+            let workflow_rejection_recovery_fields =
+              if is_workflow_rejection
+              then (
+                match workflow_rejection_info_of_raw raw_result with
+                | Some info ->
+                  let family_key = workflow_rejection_family_key ~tool_name:name info in
+                  let count = workflow_rejection_count_record failure_counts family_key in
+                  workflow_rejection_recovery_fields ~tool_name:name ~count raw_result
+                | None -> [])
+              else []
+            in
             let count =
               if is_workflow_rejection
               then 0
@@ -647,7 +811,12 @@ let make_keeper_tool_handler
                 count
                 max_consecutive_failures
                 detail;
-            let normalized_error = normalize_tool_result ~success:false raw_result in
+            let normalized_error =
+              normalize_tool_result
+                ~workflow_rejection_recovery_fields
+                ~success:false
+                raw_result
+            in
             append_tool_exec_decision_log
               ~config
               ~keeper_name:meta.name
@@ -670,6 +839,7 @@ let make_keeper_tool_handler
             Tool_result.error ~tool_name:name ~start_time:t0 output_text)
           else (
             failure_count_reset failure_counts key;
+            workflow_rejection_count_reset failure_counts;
             Keeper_registry.record_tool_use
               ~base_path:config.base_path
               meta.name

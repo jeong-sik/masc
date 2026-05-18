@@ -245,7 +245,7 @@ let strip_stderr_dev_null_redirects cmd =
     i = 0
     ||
     match cmd.[i - 1] with
-    | ' ' | '\t' | '\n' | '\r' | ';' | '&' | '|' -> true
+    | ' ' | '\t' | '\n' | '\r' | ';' | '|' -> true
     | _ -> false
   in
   let skip_dev_null_after op_end =
@@ -563,6 +563,8 @@ module For_testing = struct
 
   let raw_keeper_bash_shape_block_tag cmd =
     Option.map bash_shape_block_tag (raw_keeper_bash_shape_block cmd)
+
+  let strip_stderr_dev_null_redirects = strip_stderr_dev_null_redirects
 end
 
 let bash_shape_block_reason = function

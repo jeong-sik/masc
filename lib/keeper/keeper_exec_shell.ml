@@ -35,4 +35,7 @@ module For_testing = struct
 
   let raw_keeper_bash_shape_block_tag =
     Keeper_shell_bash.For_testing.raw_keeper_bash_shape_block_tag
+
+  let strip_stderr_dev_null_redirects =
+    Keeper_shell_bash.For_testing.strip_stderr_dev_null_redirects
 end

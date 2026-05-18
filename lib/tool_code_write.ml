@@ -157,6 +157,83 @@ let allowed_worktree_prefixes config =
   |> dedupe_keep_order
   |> List.map (fun root -> normalize_dir_prefix (Filename.concat root ".worktrees"))
 
+let repo_top_relative_write_path raw =
+  let rec strip_current_dir path =
+    if String.starts_with ~prefix:"./" path then
+      strip_current_dir (String.sub path 2 (String.length path - 2))
+    else
+      path
+  in
+  let path = raw |> String.trim |> strip_current_dir in
+  if String.equal path ""
+     || (not (Filename.is_relative path))
+     || String.equal path "."
+     || String.equal path ".."
+     || String.starts_with ~prefix:"../" path
+     || String.starts_with ~prefix:"repos/" path
+     || String.starts_with ~prefix:"mind/" path
+  then
+    None
+  else
+    let first_segment =
+      match String.split_on_char '/' path with
+      | segment :: _ -> segment
+      | [] -> path
+    in
+    if
+      List.mem first_segment
+        [
+          "bench";
+          "bin";
+          "docs";
+          "examples";
+          "lib";
+          "ops";
+          "scripts";
+          "src";
+          "test";
+          "tests";
+        ]
+    then
+      Some path
+    else
+      None
+
+let agent_repos_dir ~(agent_name : string) config =
+  Filename.concat config.Coord.base_path
+    (Filename.concat
+       (Tool_code.agent_playground_rel ~config ~agent_name)
+       "repos")
+
+let single_agent_repo_root ~(agent_name : string) config =
+  let repos_dir = agent_repos_dir ~agent_name config in
+  try
+    if Sys.file_exists repos_dir && Sys.is_directory repos_dir then
+      Sys.readdir repos_dir
+      |> Array.to_list
+      |> List.filter (fun name ->
+        not (String.equal name ".")
+        && not (String.equal name "..")
+        &&
+        let path = Filename.concat repos_dir name in
+        Sys.file_exists path && Sys.is_directory path)
+      |> function
+      | [ repo_name ] -> Some (Filename.concat repos_dir repo_name)
+      | [] | _ :: _ :: _ -> None
+    else
+      None
+  with
+  | Sys_error _ | Unix.Unix_error _ -> None
+
+let normalize_writable_path ~(agent_name : string) config path =
+  let path = Tool_code.normalize_agent_relative_path ~config ~agent_name path in
+  match repo_top_relative_write_path path with
+  | None -> path
+  | Some rel -> (
+      match single_agent_repo_root ~agent_name config with
+      | Some repo_root -> Filename.concat repo_root rel
+      | None -> path)
+
 (* Security: Validate path is within an allowed writable sandbox.
    Uses canonical paths from Tool_code.validate_path — already normalized.
    Worktree paths are anchored to actual git common roots so a nested
@@ -170,7 +247,7 @@ let allowed_worktree_prefixes config =
    so legacy server operations that need to touch repo worktrees
    continue to work. *)
 let validate_writable_path ~(agent_name : string) config path =
-  let path = Tool_code.normalize_agent_relative_path ~config ~agent_name path in
+  let path = normalize_writable_path ~agent_name config path in
   match Tool_code.validate_path config path with
   | Error e -> Error e
   | Ok canonical_path ->

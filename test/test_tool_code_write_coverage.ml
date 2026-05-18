@@ -825,6 +825,46 @@ let test_writable_path_maps_relative_repos_prefix () =
     (check string) "repos/ path resolves under own playground repos"
       expected resolved
 
+let test_writable_path_maps_single_repo_top_relative_path () =
+  let base_path = fresh_base_path () in
+  let config = make_config base_path in
+  let repo_lib =
+    Filename.concat base_path ".masc/playground/agent-a/repos/masc-mcp/lib"
+  in
+  mkdir_p repo_lib;
+  let raw = "lib/demo.ml" in
+  let expected =
+    Filename.concat repo_lib "demo.ml" |> Masc_mcp.Tool_code.normalize_path
+  in
+  let result =
+    Tool_code_write.validate_writable_path ~agent_name:"agent-a" config raw
+  in
+  match result with
+  | Error e ->
+    fail ("expected single repo top-relative path to map into own playground, got: "
+          ^ Masc_domain.masc_error_to_string e)
+  | Ok resolved ->
+    (check string) "top-relative lib path resolves under only repo"
+      expected resolved
+
+let test_writable_path_keeps_multi_repo_top_relative_path_blocked () =
+  let base_path = fresh_base_path () in
+  let config = make_config base_path in
+  mkdir_p
+    (Filename.concat base_path ".masc/playground/agent-a/repos/masc-mcp/lib");
+  mkdir_p
+    (Filename.concat base_path ".masc/playground/agent-a/repos/oas/lib");
+  let result =
+    Tool_code_write.validate_writable_path
+      ~agent_name:"agent-a"
+      config
+      "lib/demo.ml"
+  in
+  check bool "multi-repo top-relative path is not guessed" true
+    (is_error result);
+  check bool "multi-repo error remains sandbox block" true
+    (contains "Write restricted to allowed sandboxes" (error_msg result))
+
 let test_writable_path_maps_docker_relative_repos_prefix () =
   let base_path = fresh_base_path () in
   let config = make_config base_path in
@@ -1021,6 +1061,10 @@ let () =
         test_writable_path_allows_own_playground;
       test_case "writable_path maps relative repos prefix" `Quick
         test_writable_path_maps_relative_repos_prefix;
+      test_case "writable_path maps single repo top-relative path" `Quick
+        test_writable_path_maps_single_repo_top_relative_path;
+      test_case "writable_path blocks multi-repo top-relative path" `Quick
+        test_writable_path_keeps_multi_repo_top_relative_path_blocked;
       test_case "writable_path maps Docker relative repos prefix" `Quick
         test_writable_path_maps_docker_relative_repos_prefix;
       test_case "writable_path maps Docker container path" `Quick

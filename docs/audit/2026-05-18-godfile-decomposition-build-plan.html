@@ -295,11 +295,11 @@
             <td><code>lib/prometheus.ml</code> 3082 LOC</td>
           </tr>
           <tr>
-            <td>Stack after #16222</td>
-            <td><code>6e61ed4e27</code></td>
+            <td>Stack after #16224</td>
+            <td><code>74da952e8b</code></td>
             <td class="num">53</td>
-            <td class="num">88,579</td>
-            <td class="num">7</td>
+            <td class="num">88,436</td>
+            <td class="num">6</td>
             <td class="num">0</td>
             <td><code>lib/keeper/keeper_unified_turn.ml</code> 2890 LOC</td>
           </tr>
@@ -307,14 +307,14 @@
       </table>
       <div class="panel ok">
         <span class="tag green">-22 files from initial audit</span>
-        <span class="tag green">-25,624 LOC from initial audit</span>
-        <span class="tag blue">2000+ bucket down to 7</span>
+        <span class="tag green">-25,767 LOC from initial audit</span>
+        <span class="tag blue">2000+ bucket down to 6</span>
         <span class="tag blue">3000+ eliminated in stack</span>
         <span class="tag violet">53 files remain</span>
         <p>
           Progress 기준은 이 문서의 원래 범위와 동일하게 <code>lib/**/*.ml</code> 중 1000+ LOC만 센다.
           현재 열린 stack 기준으로는 초기 75개에서 53개까지 내려왔고,
-          3000+ LOC 파일은 남지 않았으며 2000+ LOC 파일도 7개로 줄었다.
+          3000+ LOC 파일은 남지 않았으며 2000+ LOC 파일도 6개로 줄었다.
         </p>
       </div>
     </section>
@@ -363,10 +363,10 @@
             <td>Dashboard projection weight is separable if compact/full behavior is pinned first.</td>
           </tr>
           <tr>
-            <td class="rank-p2">P2</td><td class="num">2142</td>
+            <td class="rank-p2">P2</td><td class="num">1999</td>
             <td><a href="../../lib/keeper/keeper_hooks_oas.ml">lib/keeper/keeper_hooks_oas.ml</a></td>
-            <td>JSON extraction, PR action metrics, cost ledger, idle policy, factory</td>
-            <td>Already has <code>Keeper_hooks_oas_types</code> seam; continue extracting behavior-owned helpers.</td>
+            <td>PR action metrics, cost ledger, idle policy, factory</td>
+            <td>Now below 2000 after gate-attempt split; continue extracting behavior-owned helpers.</td>
           </tr>
           <tr>
             <td class="rank-p2">P2</td><td class="num">1990</td>
@@ -397,7 +397,7 @@
           <tr><th>Lane</th><th>Files</th><th>LOC</th><th>Primary targets</th><th>Decomposition stance</th></tr>
         </thead>
         <tbody>
-          <tr><td>Keeper</td><td class="num">24</td><td class="num">40,308</td><td><code>keeper_unified_turn</code>, <code>keeper_supervisor</code>, <code>keeper_registry</code>, <code>keeper_agent_run</code></td><td>Split internal seams first; promote only leaf closures after registry/type cycles are cut.</td></tr>
+          <tr><td>Keeper</td><td class="num">24</td><td class="num">40,165</td><td><code>keeper_unified_turn</code>, <code>keeper_supervisor</code>, <code>keeper_registry</code>, <code>keeper_agent_run</code></td><td>Split internal seams first; promote only leaf closures after registry/type cycles are cut.</td></tr>
           <tr><td>Root tools/metrics</td><td class="num">9</td><td class="num">16,167</td><td><code>prometheus</code>, <code>model_inference_metrics</code>, <code>worker_dev_tools</code>, <code>tool_board</code>, <code>tool_keeper</code></td><td>Facade-compatible private modules, then low-dependency sub-libraries for metrics/schema/tool gates.</td></tr>
           <tr><td>Server</td><td class="num">7</td><td class="num">11,982</td><td><code>server_dashboard_http_keeper_api</code>, <code>server_dashboard_http_core</code>, <code>server_runtime_bootstrap</code></td><td>Handler seams first; route parity after handlers stabilize.</td></tr>
           <tr><td>Dashboard</td><td class="num">4</td><td class="num">6,488</td><td><code>dashboard_http_keeper</code>, <code>dashboard_goals_types</code>, <code>dashboard_cascade</code></td><td>Projection helpers and JSON builders; preserve compact mode.</td></tr>
@@ -567,7 +567,7 @@ ocamlformat --check &lt;touched .ml/.mli files&gt;</code></pre>
           <tr><td class="num">2192</td><td><a href="../../lib/keeper/keeper_registry.ml">lib/keeper/keeper_registry.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">2191</td><td><a href="../../lib/keeper/keeper_agent_run.ml">lib/keeper/keeper_agent_run.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">2187</td><td><a href="../../lib/dashboard/dashboard_http_keeper.ml">lib/dashboard/dashboard_http_keeper.ml</a></td><td>dashboard</td></tr>
-          <tr><td class="num">2142</td><td><a href="../../lib/keeper/keeper_hooks_oas.ml">lib/keeper/keeper_hooks_oas.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">1999</td><td><a href="../../lib/keeper/keeper_hooks_oas.ml">lib/keeper/keeper_hooks_oas.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">1990</td><td><a href="../../lib/keeper/keeper_types_profile.ml">lib/keeper/keeper_types_profile.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">1988</td><td><a href="../../lib/server/server_dashboard_http_keeper_api.ml">lib/server/server_dashboard_http_keeper_api.ml</a></td><td>server</td></tr>
           <tr><td class="num">1979</td><td><a href="../../lib/server/server_dashboard_http_core.ml">lib/server/server_dashboard_http_core.ml</a></td><td>server</td></tr>

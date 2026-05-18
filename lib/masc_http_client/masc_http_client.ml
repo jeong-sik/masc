@@ -2,13 +2,7 @@
 
     All callers go through the per-process [Pool.t] singleton via
     [post_sync] / [get_sync] / [get_response_sync]; the pool owns the
-    underlying piaf transport, keep-alive, and TLS context cache.
-
-    The [~net] and [?https] arguments are accepted for source-level
-    backwards compatibility with callers that still pass them, but are
-    ignored — the pool, not the caller, owns the network resource.
-    Those arguments will be dropped in a follow-up API cleanup once
-    every callsite has been audited. *)
+    underlying piaf transport, keep-alive, and TLS context cache. *)
 
 (** POST with structured error handling.
     DNS resolution, TLS, and I/O errors return Error instead of crashing the fiber. *)
@@ -67,7 +61,7 @@ let with_pool f =
            f p
          | _ -> pool_init_error ()))
 
-let post_sync ?clock ?timeout_sec ~net:_ ?https:_ ~url ~headers ~body () =
+let post_sync ?clock ?timeout_sec ~url ~headers ~body () =
   with_optional_timeout ?clock ?timeout_sec @@ fun () ->
   with_pool @@ fun pool ->
   match Pool.request pool ?clock ?timeout_seconds:timeout_sec
@@ -76,7 +70,7 @@ let post_sync ?clock ?timeout_sec ~net:_ ?https:_ ~url ~headers ~body () =
   | Error e -> Error e
 
 (** GET with structured error handling. *)
-let get_response_sync ?clock ?timeout_sec ~net:_ ?https:_ ~url ~headers () =
+let get_response_sync ?clock ?timeout_sec ~url ~headers () =
   with_optional_timeout ?clock ?timeout_sec @@ fun () ->
   with_pool @@ fun pool ->
   match Pool.request pool ?clock ?timeout_seconds:timeout_sec
@@ -86,9 +80,8 @@ let get_response_sync ?clock ?timeout_sec ~net:_ ?https:_ ~url ~headers () =
   | Error e -> Error e
 
 (** GET with structured error handling. *)
-let get_sync ?clock ?timeout_sec ~net ?https ~url ~headers () =
-  match get_response_sync ?clock ?timeout_sec ~net ?https ~url ~headers ()
-  with
+let get_sync ?clock ?timeout_sec ~url ~headers () =
+  match get_response_sync ?clock ?timeout_sec ~url ~headers () with
   | Ok response -> Ok (response.status, response.body)
   | Error _ as error -> error
 

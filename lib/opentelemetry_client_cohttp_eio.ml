@@ -142,16 +142,11 @@ end = struct
   (* [client.net] / [client.https] fields of [t] are kept on the
      record so the public [create] signature stays stable, but the
      pool owns the transport — those fields are unused on this path. *)
-  let send (client : t) ~url ~decode (body : string) : ('a, error) result =
+  let send (_client : t) ~url ~decode (body : string) : ('a, error) result =
     let headers =
       ("Content-Type", "application/x-protobuf") :: Config.Env.get_headers ()
     in
-    (* [~net] is kept in the signature for ABI stability; the pool
-       owns the actual transport since Phase D.2c, but [Masc_http_client]
-       still accepts it for backwards compatibility. *)
-    match
-      Masc_http_client.post_sync ~net:client.net ~url ~headers ~body ()
-    with
+    match Masc_http_client.post_sync ~url ~headers ~body () with
     | Error err_msg ->
       (* RFC-0106: re-raise Eio.Cancel.Cancelled when the exporter fiber
          was cancelled. Masc_http_client.post_sync's piaf pool catches

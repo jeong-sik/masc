@@ -181,7 +181,7 @@ let post_json_via_eio ~sw:_ ~(auth_token : string option) ~session_id
             | _ -> [])
         in
         let url = mcp_endpoint_url ~auth_token in
-        (match Masc_http_client.post_sync ~net ~url ~headers ~body:request_body () with
+        (match Masc_http_client.post_sync ~url ~headers ~body:request_body () with
         | Error e -> Error (sprintf "MASC HTTP request failed: %s" e)
         | Ok (status, raw_body) ->
             if Cohttp.Code.is_success status then Ok raw_body

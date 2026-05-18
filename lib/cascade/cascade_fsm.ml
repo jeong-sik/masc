@@ -66,7 +66,8 @@ let to_user_message last_err =
       Printf.sprintf "%s provider requires a CLI transport" kind
   | Some (Llm_provider.Http_client.NetworkError { message; _ }) -> message
   | Some
-      ( (Llm_provider.Http_client.ProviderTerminal _
+      ( (Llm_provider.Http_client.TimeoutError _
+        | Llm_provider.Http_client.ProviderTerminal _
         | Llm_provider.Http_client.ProviderFailure _) as err ) ->
       (* Mirror the rendering shape used elsewhere on main HEAD
          (tool_local_runtime_bench / verify): "provider terminal:
@@ -135,4 +136,3 @@ let decide_and_record ~cascade_name ~accept_on_exhaustion ~is_last outcome =
   decision
 
 (* ── Inline tests ───────────────────────────────── *)
-

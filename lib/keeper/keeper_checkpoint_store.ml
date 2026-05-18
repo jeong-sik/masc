@@ -384,7 +384,7 @@ let classify_sdk_error (e : Agent_sdk.Error.sdk_error) : checkpoint_load_error =
       Parse_error (sprintf "version mismatch: expected %d, got %d" r.expected r.got)
   | Serialization (UnknownVariant r) ->
       Parse_error (sprintf "unknown variant %s: %s" r.type_name r.value)
-  | Api _ | Agent _ | Mcp _ | Config _
+  | Api _ | Provider _ | Agent _ | Mcp _ | Config _
   | Orchestration _ | A2a _ | Internal _ ->
       Sdk_other_error (Agent_sdk.Error.to_string e)
 

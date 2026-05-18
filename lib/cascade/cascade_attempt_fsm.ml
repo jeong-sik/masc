@@ -102,6 +102,28 @@ let sdk_error_to_cascade_outcome (err : Agent_sdk.Error.sdk_error)
           { message; kind = Llm_provider.Http_client.Timeout }
     in
     Some (Cascade_fsm.Call_err http_err)
+  | Agent_sdk.Error.Provider provider_err ->
+    let should_cascade =
+      Llm_provider.Error.is_retryable provider_err
+      ||
+      match provider_err with
+      | Llm_provider.Error.HardQuota _
+      | Llm_provider.Error.CapacityExhausted _
+      | Llm_provider.Error.ProviderUnavailable _
+      | Llm_provider.Error.ParseError _ ->
+          true
+      | _ -> false
+    in
+    if should_cascade then
+      Some
+        (Cascade_fsm.Call_err
+           (Llm_provider.Http_client.NetworkError
+              {
+                message = Llm_provider.Error.to_string provider_err;
+                kind = Llm_provider.Http_client.Unknown;
+              }))
+    else
+      None
   (* Model-capability errors: the next provider may handle these.
      CompletionContractViolation: model returned text when tool_use was
      required — a different model with better tool calling may succeed.
@@ -445,6 +467,7 @@ let sdk_error_is_terminal_provider_runtime_failure
 
 let sdk_error_is_hard_quota (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
+  | Agent_sdk.Error.Provider (Llm_provider.Error.HardQuota _) -> true
   | Agent_sdk.Error.Api api_err ->
     (* Layer 1: structured variant check — [is_hard_quota] inspects the
        [RateLimited] variant for known hard-quota message patterns. *)
@@ -460,6 +483,7 @@ let sdk_error_is_hard_quota (err : Agent_sdk.Error.sdk_error) : bool =
      | None -> false)
   (* Non-Api error families never carry provider-level hard-quota signals. *)
   | Agent_sdk.Error.Agent _
+  | Agent_sdk.Error.Provider _
   | Agent_sdk.Error.Mcp _
   | Agent_sdk.Error.Config _
   | Agent_sdk.Error.Serialization _
@@ -474,6 +498,37 @@ let provider_label provider =
   | value -> value
 
 let public_runtime_provider_label = "runtime"
+
+let provider_error_capacity_scope = function
+  | Llm_provider.Error.CapacityModel -> `Model
+  | Llm_provider.Error.CapacityAccount
+  | Llm_provider.Error.CapacityRegion
+  | Llm_provider.Error.CapacityProvider
+  | Llm_provider.Error.CapacityUnknown ->
+      `Provider
+
+let provider_error_should_cascade = function
+  | Llm_provider.Error.RateLimit _
+  | Llm_provider.Error.HardQuota _
+  | Llm_provider.Error.CapacityExhausted _
+  | Llm_provider.Error.ProviderUnavailable _
+  | Llm_provider.Error.ParseError _
+  | Llm_provider.Error.Timeout _ ->
+      true
+  | Llm_provider.Error.ServerError { transient; _ } -> transient
+  | Llm_provider.Error.NetworkError
+      { kind = Llm_provider.Http_client.Tls_error
+             | Llm_provider.Http_client.Local_resource_exhaustion; _ } ->
+      false
+  | Llm_provider.Error.NetworkError _ -> true
+  | Llm_provider.Error.MissingApiKey _
+  | Llm_provider.Error.InvalidConfig _
+  | Llm_provider.Error.UnknownVariant _
+  | Llm_provider.Error.AuthError _
+  | Llm_provider.Error.InvalidRequest _
+  | Llm_provider.Error.NotFound _
+  | Llm_provider.Error.ProviderTerminal _ ->
+      false
 
 let transient_http_status code =
   code = 408 || code = 409 || code = 425 || code = 429 || code >= 500
@@ -506,12 +561,42 @@ let retry_api_error_to_provider_error ~provider ~capacity_exhausted api_error =
   | Llm_provider.Retry.Timeout _ ->
       if capacity_exhausted then provider_capacity provider else None
 
+let sdk_provider_error_to_provider_error = function
+  | Llm_provider.Error.RateLimit { retry_after; _ } ->
+      Some (Provider_error.RateLimit { retry_after })
+  | Llm_provider.Error.HardQuota { detail; _ } ->
+      Some (Provider_error.CliWrappedHardQuota { detail })
+  | Llm_provider.Error.CapacityExhausted { scope; _ } ->
+      Some
+        (Provider_error.CapacityExhausted
+           { scope = provider_error_capacity_scope scope })
+  | Llm_provider.Error.AuthError _
+  | Llm_provider.Error.MissingApiKey _ ->
+      Some Provider_error.AuthError
+  | Llm_provider.Error.ServerError { code; transient; _ } ->
+      Some (Provider_error.ServerError { code; transient })
+  | Llm_provider.Error.InvalidRequest { reason; _ } ->
+      Some (Provider_error.InvalidRequest { reason })
+  | Llm_provider.Error.NotFound _ -> Some Provider_error.ModelNotFound
+  | Llm_provider.Error.InvalidConfig { detail; _ } ->
+      Some (Provider_error.InvalidRequest { reason = detail })
+  | Llm_provider.Error.ProviderTerminal { detail; _ } ->
+      Some (Provider_error.InvalidRequest { reason = detail })
+  | Llm_provider.Error.ProviderUnavailable _
+  | Llm_provider.Error.ParseError _
+  | Llm_provider.Error.UnknownVariant _
+  | Llm_provider.Error.NetworkError _
+  | Llm_provider.Error.Timeout _ ->
+      None
+
 let sdk_error_to_provider_error ~provider err =
   match err with
   | Agent_sdk.Error.Api api_err ->
       retry_api_error_to_provider_error ~provider
         ~capacity_exhausted:(sdk_error_is_hard_quota err)
         api_err
+  | Agent_sdk.Error.Provider provider_err ->
+      sdk_provider_error_to_provider_error provider_err
   (* Non-Api families do not map to a provider-level error. *)
   | Agent_sdk.Error.Agent _
   | Agent_sdk.Error.Mcp _
@@ -576,6 +661,8 @@ let timeout_source_label (err : Agent_sdk.Error.sdk_error) : string =
     match err with
     | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout { message }) ->
         String_util.contains_substring_ci message "max_execution_time_s"
+    | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout { detail; _ }) ->
+        String_util.contains_substring_ci detail "max_execution_time_s"
     | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited _)
     | Agent_sdk.Error.Api (Llm_provider.Retry.Overloaded _)
     | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _)
@@ -584,6 +671,7 @@ let timeout_source_label (err : Agent_sdk.Error.sdk_error) : string =
     | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _)
     | Agent_sdk.Error.Api (Llm_provider.Retry.ContextOverflow _)
     | Agent_sdk.Error.Api (Llm_provider.Retry.NetworkError _)
+    | Agent_sdk.Error.Provider _
     | Agent_sdk.Error.Agent _
     | Agent_sdk.Error.Mcp _
     | Agent_sdk.Error.Config _
@@ -598,6 +686,16 @@ let timeout_source_label (err : Agent_sdk.Error.sdk_error) : string =
 let emit_oas_run_timeout_metric ~cascade_name ~provider:_ err =
   match err with
   | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _) ->
+      let cascade_name = provider_label (cascade_name_to_string cascade_name) in
+      Prometheus.inc_counter Keeper_metrics.metric_keeper_oas_run_timeout
+        ~labels:
+          [
+            (label_cascade, cascade_name);
+            (label_provider, public_runtime_provider_label);
+            (label_source, timeout_source_label err);
+          ]
+        ()
+  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) ->
       let cascade_name = provider_label (cascade_name_to_string cascade_name) in
       Prometheus.inc_counter Keeper_metrics.metric_keeper_oas_run_timeout
         ~labels:
@@ -635,6 +733,8 @@ let sdk_error_soft_rate_limited (err : Agent_sdk.Error.sdk_error)
   | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited { retry_after; _ } as api_err)
     when not (Llm_provider.Retry.is_hard_quota api_err) ->
     Some retry_after
+  | Agent_sdk.Error.Provider (Llm_provider.Error.RateLimit { retry_after; _ }) ->
+    Some retry_after
   (* Hard-quota RateLimited is handled separately and other Api / non-Api
      errors do not represent soft rate limiting. *)
   | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited _)
@@ -646,6 +746,7 @@ let sdk_error_soft_rate_limited (err : Agent_sdk.Error.sdk_error)
   | Agent_sdk.Error.Api (Llm_provider.Retry.ContextOverflow _)
   | Agent_sdk.Error.Api (Llm_provider.Retry.NetworkError _)
   | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _)
+  | Agent_sdk.Error.Provider _
   | Agent_sdk.Error.Agent _
   | Agent_sdk.Error.Mcp _
   | Agent_sdk.Error.Config _

@@ -661,6 +661,7 @@ let string_contains_substring ~(needle : string) (haystack : string) =
 
 let sdk_error_is_server_rejected_parse_error (err : Agent_sdk.Error.sdk_error) =
   match err with
+  | Agent_sdk.Error.Provider (Llm_provider.Error.ParseError _) -> true
   | Agent_sdk.Error.Api (InvalidRequest { message }) ->
     let lower = String.lowercase_ascii message in
     (string_contains_substring ~needle:"can't find closing" lower
@@ -677,6 +678,7 @@ let sdk_error_is_server_rejected_parse_error (err : Agent_sdk.Error.sdk_error) =
       | ContextOverflow _
       | NetworkError _
       | Timeout _ )
+  | Agent_sdk.Error.Provider _
   | Agent_sdk.Error.Agent _
   | Agent_sdk.Error.Mcp _
   | Agent_sdk.Error.Config _

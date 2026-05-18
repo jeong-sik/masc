@@ -373,6 +373,8 @@ let sdk_a2a_error_fields = function
 let sdk_error_detail_fields (error : Agent_sdk.Error.sdk_error) =
   match error with
   | Agent_sdk.Error.Api error -> sdk_api_error_fields error
+  | Agent_sdk.Error.Provider error ->
+    [ "variant", `String "provider"; "message", `String (Llm_provider.Error.to_string error) ]
   | Agent_sdk.Error.Agent error -> sdk_agent_error_fields error
   | Agent_sdk.Error.Mcp error -> sdk_mcp_error_fields error
   | Agent_sdk.Error.Config error -> sdk_config_error_fields error

@@ -548,6 +548,14 @@ let keeper_bash_shape_block cmd =
   | Masc_exec.Parsed.Too_complex _ ->
     raw_keeper_bash_shape_block cmd
 
+let shape_block_allowed_by_active_validator ~write_enabled cmd = function
+  | Pipe_or_redirect when write_enabled ->
+    (match Worker_dev_tools.validate_command_coding cmd with
+     | Ok () -> true
+     | Error _ -> false)
+  | Gh_pr_checks | Chaining | Substitution | Repo_wide_scan | Pipe_or_redirect ->
+    false
+
 let bash_shape_block_tag = function
   | Gh_pr_checks -> "gh_pr_checks"
   | Pipe_or_redirect -> "pipe_or_redirect"
@@ -961,7 +969,8 @@ let handle_keeper_bash
     in
     let sandbox_root = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
     match keeper_bash_shape_block cmd with
-    | Some block ->
+    | Some block when
+      not (shape_block_allowed_by_active_validator ~write_enabled cmd block) ->
       Prometheus.inc_counter
         Keeper_metrics.metric_keeper_shell_bash_failures
         ~labels:
@@ -974,7 +983,7 @@ let handle_keeper_bash
         "keeper_bash command-shape blocked: keeper=%s block=%s cmd=%s"
         meta.name (bash_shape_block_tag block) cmd_for_log;
       bash_shape_block_result ~cmd ~cmd_for_log ~env_snapshot:env_snap block
-    | None ->
+    | Some _ | None ->
       (* Destructive guard: always active regardless of Docker or preset *)
       if Worker_dev_tools.is_destructive_bash_operation cmd
     then (

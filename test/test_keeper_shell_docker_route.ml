@@ -1403,7 +1403,7 @@ let test_bash_fake_docker_executes () =
   Alcotest.(check bool) "bash output includes fake docker stdout" true
     (response_mentions raw "output" "stdout:")
 
-let test_bash_blocks_pipe_redirect_before_docker () =
+let test_bash_allows_validator_safe_pipe_redirect_for_coding_preset () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Coding
@@ -1417,6 +1417,33 @@ let test_bash_blocks_pipe_redirect_before_docker () =
         (`Assoc
           [
             ("cmd", `String "ls lib/ 2>&1 | head -20");
+            ("cwd", `String playground);
+          ])
+      ()
+  in
+  Alcotest.(check (option bool)) "safe pipeline executes" (Some true)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option string)) "bash via=docker" (Some "docker")
+    (parse_string_field raw "via");
+  Alcotest.(check bool) "bash output includes fake docker stdout" true
+    (response_mentions raw "output" "stdout:");
+  Alcotest.(check bool) "docker was invoked" true
+    (Sys.file_exists log_path)
+
+let test_bash_blocks_file_redirect_before_docker () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Coding
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+      ~args:
+        (`Assoc
+          [
+            ("cmd", `String "echo hello > out.txt");
             ("cwd", `String playground);
           ])
       ()
@@ -1633,8 +1660,11 @@ let () =
             "docker keeper bash executes through fake docker"
             `Quick test_bash_fake_docker_executes;
           Alcotest.test_case
-            "docker keeper bash blocks pipe redirects before docker"
-            `Quick test_bash_blocks_pipe_redirect_before_docker;
+            "docker keeper bash allows validator-safe pipe redirects"
+            `Quick test_bash_allows_validator_safe_pipe_redirect_for_coding_preset;
+          Alcotest.test_case
+            "docker keeper bash blocks file redirects before docker"
+            `Quick test_bash_blocks_file_redirect_before_docker;
           Alcotest.test_case
             "docker keeper bash blocks gh pr checks before docker"
             `Quick test_bash_blocks_gh_pr_checks_before_docker;

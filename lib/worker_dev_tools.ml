@@ -405,6 +405,21 @@ let is_digits_only s start stop =
 ;;
 
 let is_safe_fd_redirect_token token =
+  let lower = String.lowercase_ascii token in
+  if
+    List.mem
+      lower
+      [ ">/dev/null"
+      ; "1>/dev/null"
+      ; "2>/dev/null"
+      ; ">>/dev/null"
+      ; "1>>/dev/null"
+      ; "2>>/dev/null"
+      ; "</dev/null"
+      ; "0</dev/null"
+      ]
+  then true
+  else
   let len = String.length token in
   let check op_char =
     let rec find i =
@@ -579,7 +594,8 @@ let block_reason_to_string = function
      use keeper_fs_edit."
   | Process_substitution -> "Process substitution (<(...) or >(...)) is not allowed."
   | Unsafe_redirect ->
-    "File redirects are not allowed. Only fd redirects like 2>&1 are permitted."
+    "File redirects are not allowed. Only fd redirects like 2>&1 and \
+     /dev/null sinks like 2>/dev/null are permitted."
   | Pipes_not_allowed -> "Pipes are not allowed. Run one command per call."
   | Direct_dune_invocation ->
     "Direct `dune` is blocked in local agent shells because it bypasses \

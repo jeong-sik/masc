@@ -400,6 +400,10 @@ if [ \"$1\" = \"info\" ]; then\n\
   printf '[]\\n'\n\
   exit 0\n\
 fi\n\
+if [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
 if [ \"$1\" != \"run\" ]; then\n\
   printf 'unexpected docker invocation\\n' >&2\n\
   exit 2\n\
@@ -416,6 +420,40 @@ if [ \"$1\" = \"rg\" ]; then\n\
   exit 1\n\
 fi\n\
 printf '%s\\n' \"$*\"\n\
+exit 0\n"
+
+let fake_docker_bash_rg_no_match_script =
+  "#!/bin/sh\n\
+log_file=${KEEPER_DOCKER_LOG:-}\n\
+if [ -n \"$log_file\" ]; then\n\
+  printf '%s\\n' \"$*\" >> \"$log_file\"\n\
+fi\n\
+if [ \"$1\" = \"info\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" != \"run\" ]; then\n\
+  printf 'unexpected docker invocation\\n' >&2\n\
+  exit 2\n\
+fi\n\
+shift\n\
+while [ \"$#\" -gt 0 ]; do\n\
+  if [ \"$1\" = \"alpine:test\" ]; then\n\
+    shift\n\
+    break\n\
+  fi\n\
+  shift\n\
+done\n\
+if [ \"$1\" = \"bash\" ] && [ \"$2\" = \"-lc\" ]; then\n\
+  case \"$3\" in\n\
+    *rg*) exit 1 ;;\n\
+  esac\n\
+fi\n\
+printf 'stdout:%s\\n' \"$*\"\n\
 exit 0\n"
 
 let test_rg_no_match_remains_successful_in_docker_route () =
@@ -547,6 +585,10 @@ if [ \"$1\" = \"info\" ]; then\n\
   printf '[]\\n'\n\
   exit 0\n\
 fi\n\
+if [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
 if [ \"$1\" != \"run\" ]; then\n\
   printf 'unexpected docker invocation: %s\\n' \"$1\" >&2\n\
   exit 2\n\
@@ -561,6 +603,27 @@ while [ \"$#\" -gt 0 ]; do\n\
 done\n\
 printf 'stdout:%s\\n' \"$*\"\n\
 exit 0\n"
+
+let fake_docker_missing_image_script =
+  "#!/bin/sh\n\
+log_file=${KEEPER_DOCKER_LOG:-}\n\
+if [ -n \"$log_file\" ]; then\n\
+  printf '%s\\n' \"$*\" >> \"$log_file\"\n\
+fi\n\
+if [ \"$1\" = \"info\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ]; then\n\
+  printf 'Error: No such image: %s\\n' \"$3\" >&2\n\
+  exit 1\n\
+fi\n\
+if [ \"$1\" = \"run\" ]; then\n\
+  printf 'docker run should not execute when image inspect fails\\n' >&2\n\
+  exit 2\n\
+fi\n\
+printf 'unexpected docker invocation: %s\\n' \"$1\" >&2\n\
+exit 2\n"
 
 let test_bash_git_creds_routes_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
@@ -961,6 +1024,38 @@ let docker_run_line log_path =
   |> function
   | Some line -> line
   | None -> Alcotest.fail "expected docker run log line"
+
+let test_docker_shell_missing_image_fails_before_run () =
+  with_fake_docker fake_docker_missing_image_script @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "missing:test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  match
+    Keeper_shell_docker.run_docker_shell_command_with_status
+      ~config
+      ~meta
+      ~cwd:playground
+      ~timeout_sec:5.0
+      ~cmd:"pwd"
+      ~git_creds_enabled:false
+      ~network_mode:Keeper_types.Network_none
+  with
+  | Ok _ -> Alcotest.fail "expected missing image preflight error"
+  | Error msg ->
+    Alcotest.(check bool) "structured missing image error" true
+      (contains_substring msg "sandbox_image_missing");
+    Alcotest.(check bool) "next action mentions build script" true
+      (contains_substring msg "scripts/build-keeper-sandbox-image.sh");
+    let log = read_file log_path in
+    Alcotest.(check bool) "image inspect attempted" true
+      (contains_substring log "image inspect missing:test");
+    Alcotest.(check bool) "docker run skipped" false
+      (contains_substring log "\nrun ")
 
 let test_docker_shell_mounts_masc_config_runtime_paths () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
@@ -1403,7 +1498,7 @@ let test_bash_fake_docker_executes () =
   Alcotest.(check bool) "bash output includes fake docker stdout" true
     (response_mentions raw "output" "stdout:")
 
-let test_bash_blocks_pipe_redirect_before_docker () =
+let test_bash_allows_validator_safe_pipe_redirect_for_coding_preset () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Coding
@@ -1417,6 +1512,69 @@ let test_bash_blocks_pipe_redirect_before_docker () =
         (`Assoc
           [
             ("cmd", `String "ls lib/ 2>&1 | head -20");
+            ("cwd", `String playground);
+          ])
+      ()
+  in
+  Alcotest.(check (option bool)) "safe pipeline executes" (Some true)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option string)) "bash via=docker" (Some "docker")
+    (parse_string_field raw "via");
+  Alcotest.(check bool) "bash output includes fake docker stdout" true
+    (response_mentions raw "output" "stdout:");
+  Alcotest.(check bool) "docker was invoked" true
+    (Sys.file_exists log_path)
+
+let test_bash_rg_no_match_remains_successful_in_docker_route () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_bash_rg_no_match_script @@ fun () ->
+  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Coding
+  @@ fun ~config ~meta ~playground ->
+  let lib =
+    Filename.concat
+      (Filename.concat (Filename.concat playground "repos") "masc-mcp")
+      "lib"
+  in
+  ensure_dir lib;
+  ignore (Fs_compat.save_file_atomic (Filename.concat lib "sample.ml") "alpha\n");
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+      ~args:
+        (`Assoc
+          [
+            ("cmd", `String "rg \"missing_one\\|missing_two\" repos/masc-mcp/lib");
+            ("cwd", `String playground);
+          ])
+      ()
+  in
+  Alcotest.(check (option bool)) "rg no-match succeeds semantically"
+    (Some true)
+    (parse_bool_field raw "ok");
+  Alcotest.(check int) "rg keeps exit=1 status" 1
+    (parse_status_exit_code raw);
+  Alcotest.(check (option string)) "semantic_status=no_match"
+    (Some "no_match")
+    (parse_string_field raw "semantic_status");
+  Alcotest.(check bool) "docker was invoked" true
+    (Sys.file_exists log_path)
+
+let test_bash_blocks_file_redirect_before_docker () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Coding
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+      ~args:
+        (`Assoc
+          [
+            ("cmd", `String "echo hello > out.txt");
             ("cwd", `String playground);
           ])
       ()
@@ -1633,8 +1791,14 @@ let () =
             "docker keeper bash executes through fake docker"
             `Quick test_bash_fake_docker_executes;
           Alcotest.test_case
-            "docker keeper bash blocks pipe redirects before docker"
-            `Quick test_bash_blocks_pipe_redirect_before_docker;
+            "docker keeper bash allows validator-safe pipe redirects"
+            `Quick test_bash_allows_validator_safe_pipe_redirect_for_coding_preset;
+          Alcotest.test_case
+            "docker keeper bash rg no-match remains successful"
+            `Quick test_bash_rg_no_match_remains_successful_in_docker_route;
+          Alcotest.test_case
+            "docker keeper bash blocks file redirects before docker"
+            `Quick test_bash_blocks_file_redirect_before_docker;
           Alcotest.test_case
             "docker keeper bash blocks gh pr checks before docker"
             `Quick test_bash_blocks_gh_pr_checks_before_docker;
@@ -1679,6 +1843,8 @@ let () =
           Alcotest.test_case
             "docker shell mounts MASC config runtime paths"
             `Quick test_docker_shell_mounts_masc_config_runtime_paths;
+          Alcotest.test_case "docker shell missing image fails before run" `Quick
+            test_docker_shell_missing_image_fails_before_run;
           Alcotest.test_case
             "missing playground bind source blocks before docker"
             `Quick test_bash_missing_playground_blocks_before_docker;

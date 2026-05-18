@@ -451,6 +451,24 @@ let test_coding_preset_has_coordination_tools () =
   check bool "has keeper_broadcast" true (has_tool "keeper_broadcast" tools)
 ;;
 
+let test_verifier_identity_uses_verdict_only_task_surface () =
+  let assert_verifier_surface name =
+    let meta = make_meta ~name ~preset:Keeper_types.Full () in
+    let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+    check bool (name ^ " can list tasks") true (has_tool "keeper_tasks_list" tools);
+    check bool (name ^ " can transition verdicts") true (has_tool "masc_transition" tools);
+    check
+      bool
+      (name ^ " cannot submit worker verification")
+      false
+      (has_tool "keeper_task_submit_for_verification" tools);
+    check bool (name ^ " cannot mark done") false (has_tool "keeper_task_done" tools);
+    check bool (name ^ " cannot claim work") false (has_tool "keeper_task_claim" tools)
+  in
+  assert_verifier_surface "verifier";
+  assert_verifier_surface "keeper-verifier-agent"
+;;
+
 (* Governance tool schemas are no longer registered. *)
 let test_messaging_preset_has_no_legacy_governance_tools () =
   let meta = make_meta ~preset:Keeper_types.Messaging () in
@@ -1323,6 +1341,10 @@ let () =
             "coding has coordination tools"
             `Quick
             test_coding_preset_has_coordination_tools
+        ; test_case
+            "verifier identity uses verdict-only task surface"
+            `Quick
+            test_verifier_identity_uses_verdict_only_task_surface
         ; test_case
             "messaging legacy governance tools removed"
             `Quick

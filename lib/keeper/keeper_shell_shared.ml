@@ -72,6 +72,7 @@ let user_timeout_max_sec = env_float "MASC_KEEPER_USER_TIMEOUT_MAX_SEC" 180.0
    timeout_sec=5 (#8688). 15s keeps keepers from requesting a
    sub-network-latency timeout without masking genuine hangs. *)
 let gh_min_timeout_sec = 15.0
+let keeper_bash_min_timeout_sec = 5.0
 
 (* Public shell metadata timeout used by git-status helpers. The playground
    repo-cache writer keeps its own copy in the lower-level coord module so

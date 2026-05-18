@@ -539,6 +539,57 @@ let is_oas_timeout_budget_error (err : Agent_sdk.Error.sdk_error) =
     false
 ;;
 
+let timeout_phase_of_oas_timeout_budget_phase phase =
+  let phase = String.trim phase in
+  if String.equal phase ""
+  then None
+  else (
+    match Keeper_failure_policy.timeout_phase_of_label phase with
+    | Some phase -> Some phase
+    | None -> Some Keeper_failure_policy.Unknown_timeout)
+;;
+
+let oas_timeout_budget_policy_decision
+      ~(strikes : int)
+      (err : Agent_sdk.Error.sdk_error)
+  : Keeper_failure_policy.decision option
+  =
+  match Keeper_turn_driver.classify_masc_internal_error err with
+  | Some (Keeper_turn_driver.Oas_timeout_budget { phase; _ }) ->
+    Some
+      (Keeper_failure_policy.decide
+         (Keeper_failure_policy.Oas_timeout_budget
+            { phase = timeout_phase_of_oas_timeout_budget_phase phase
+            ; strikes = Some strikes
+            ; liveness = Keeper_failure_policy.Recent_heartbeat
+            }))
+  | Some
+      ( Keeper_turn_driver.Cascade_exhausted _
+      | Keeper_turn_driver.Resumable_cli_session _
+      | Keeper_turn_driver.No_tool_capable_provider _
+      | Keeper_turn_driver.Accept_rejected _
+      | Keeper_turn_driver.Admission_queue_timeout _
+      | Keeper_turn_driver.Admission_queue_rejected _
+      | Keeper_turn_driver.Turn_timeout _
+      | Keeper_turn_driver.Max_tokens_ceiling_violation _
+      | Keeper_turn_driver.Ambiguous_post_commit _ )
+  | None ->
+    None
+;;
+
+let oas_timeout_budget_metric_outcome
+      (decision : Keeper_failure_policy.decision)
+  =
+  match decision.lifecycle_effect with
+  | Keeper_failure_policy.Keep_running
+  | Keeper_failure_policy.Soft_fail_turn -> "warn"
+  | Keeper_failure_policy.Pause_current_work -> "soft_backoff"
+  | Keeper_failure_policy.Force_release_turn -> "force_release"
+  | Keeper_failure_policy.Pause_keeper -> "pause"
+  | Keeper_failure_policy.Restart_keeper ->
+    if Keeper_failure_policy.should_kill_keeper decision then "promote" else "restart"
+;;
+
 let persist_message_cursor_updates ~config (meta : keeper_meta) updates =
   let updated = Keeper_world_observation.apply_message_cursor_updates meta updates in
   if updates = []
@@ -641,28 +692,60 @@ let run_keeper_cycle_with_slot
         keeper_name
         (Some (Keeper_registry.Oas_timeout_budget_loop { count = strikes }));
       record_oas_timeout_budget_observation ~base_path:ctx.config.base_path ~keeper_name;
-      match Keeper_turn_slot.classify_oas_timeout_budget_strike ~strikes with
-      | Keeper_turn_slot.Oas_timeout_budget_soft_backoff ->
-        Log.Keeper.warn
-          "%s: %d consecutive oas_timeout_budget strikes (>= %d) -- keeping keeper \
-           fiber alive; provider/cascade cooldown and retry backoff remain active"
+      let decision =
+        match oas_timeout_budget_policy_decision ~strikes err with
+        | Some decision -> decision
+        | None ->
+          Keeper_failure_policy.decide
+            (Keeper_failure_policy.Oas_timeout_budget
+               { phase = None
+               ; strikes = Some strikes
+               ; liveness = Keeper_failure_policy.Recent_heartbeat
+               })
+      in
+      let metric_outcome = oas_timeout_budget_metric_outcome decision in
+      if Keeper_failure_policy.should_kill_keeper decision
+      then (
+        Log.Keeper.error
+          "%s: %d consecutive oas_timeout_budget strikes -- policy allows keeper \
+           death (lifecycle=%s circuit=%s reason=%s)"
           keeper_name
           strikes
-          Keeper_turn_slot.oas_timeout_budget_strike_limit;
+          (Keeper_failure_policy.lifecycle_effect_to_label decision.lifecycle_effect)
+          (Keeper_failure_policy.circuit_effect_to_label decision.circuit_effect)
+          decision.reason;
         Prometheus.inc_counter
           Keeper_metrics.metric_keeper_oas_timeout_budget_strike
-          ~labels:[ "keeper", keeper_name; "outcome", "soft_backoff" ]
-          ()
-      | Keeper_turn_slot.Oas_timeout_budget_warn ->
+          ~labels:[ "keeper", keeper_name; "outcome", metric_outcome ]
+          ();
+        Keeper_turn_slot.reset_budget_exhaustion ~keeper_name;
+        raise Keeper_registry.Keeper_fiber_crash)
+      else if strikes >= Keeper_turn_slot.oas_timeout_budget_strike_limit
+      then (
         Log.Keeper.warn
-          "%s: oas_timeout_budget strike %d/%d (keeper stays alive; repeated strikes \
-           escalate only to soft backoff)"
+          "%s: %d consecutive oas_timeout_budget strikes (>= %d) -- policy=%s \
+           lifecycle=%s circuit=%s; keeping keeper alive"
           keeper_name
           strikes
-          Keeper_turn_slot.oas_timeout_budget_strike_limit;
+          Keeper_turn_slot.oas_timeout_budget_strike_limit
+          decision.reason
+          (Keeper_failure_policy.lifecycle_effect_to_label decision.lifecycle_effect)
+          (Keeper_failure_policy.circuit_effect_to_label decision.circuit_effect);
         Prometheus.inc_counter
           Keeper_metrics.metric_keeper_oas_timeout_budget_strike
-          ~labels:[ "keeper", keeper_name; "outcome", "warn" ]
+          ~labels:[ "keeper", keeper_name; "outcome", metric_outcome ]
+          ())
+      else (
+        Log.Keeper.warn
+          "%s: oas_timeout_budget strike %d/%d (policy=%s lifecycle=%s)"
+          keeper_name
+          strikes
+          Keeper_turn_slot.oas_timeout_budget_strike_limit
+          decision.reason
+          (Keeper_failure_policy.lifecycle_effect_to_label decision.lifecycle_effect);
+        Prometheus.inc_counter
+          Keeper_metrics.metric_keeper_oas_timeout_budget_strike
+          ~labels:[ "keeper", keeper_name; "outcome", metric_outcome ]
           ());
     (match read_meta ctx.config meta_after_cursor_persist.name with
      | Ok (Some latest) -> latest

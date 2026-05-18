@@ -241,21 +241,6 @@ let contains needle haystack =
 let check_contains label needle haystack =
   check bool label true (contains needle haystack)
 
-let join_agent config ~agent_name =
-  let msg = Masc_mcp.Coord.join config ~agent_name ~capabilities:[] () in
-  let prefix = "  Nickname: " in
-  String.split_on_char '\n' msg
-  |> List.find_map (fun line ->
-    if String.starts_with ~prefix line
-    then
-      Some
-        (String.sub
-           line
-           (String.length prefix)
-           (String.length line - String.length prefix))
-    else None)
-  |> Option.value ~default:agent_name
-
 let playground_cache_repo ~base_path ~agent_name ~repo_name =
   let cache_path =
     Filename.concat base_path
@@ -395,7 +380,7 @@ let test_dispatch_worktree_create_auto_provisions_workspace_repo () =
        ~repo_rel:"workspace/yousleepwhen/masc-mcp");
   let config = Masc_mcp.Coord.default_config base_path in
   ignore (Masc_mcp.Coord.init config ~agent_name:(Some "test-agent"));
-  let agent_name = join_agent config ~agent_name:"test-agent" in
+  let agent_name = Masc_mcp.Coord.resolve_agent_name config "test-agent" in
   let ctx : Tool_worktree.context = { config; agent_name } in
   let task_id = "task-auto-clone" in
   let args = `Assoc [

@@ -62,7 +62,6 @@ import type {
   GoalVerificationSummary,
   GoalVerificationVote,
   DashboardNamespaceTruthResponse,
-  DashboardShellResponse,
   BoardSortMode,
   GovernanceCaseBundle,
   GovernanceDecisionItem,
@@ -121,7 +120,7 @@ export type {
   CascadeValidationStatus,
 } from './dashboard-cascade'
 export { reportToolHostFailure } from './tool-host-failure'
-export { fetchDashboardBootstrap } from './dashboard-hot'
+export { fetchDashboardBootstrap, fetchDashboardShell } from './dashboard-hot'
 
 // --- Dashboard projections ---
 
@@ -149,15 +148,6 @@ function decodeDashboardFeedMetadata(raw: Record<string, unknown>): DashboardFee
     source: asString(raw.source),
     retention: isRecord(raw.retention) ? raw.retention : undefined,
   }
-}
-
-type DashboardShellRequestOptions = AbortableRequestOptions & {
-  light?: boolean
-}
-
-export function fetchDashboardShell(opts?: DashboardShellRequestOptions): Promise<DashboardShellResponse> {
-  const qs = opts?.light ? '?light=true' : ''
-  return get(`/api/v1/dashboard/shell${qs}`, { signal: opts?.signal })
 }
 
 // --- System logs ---

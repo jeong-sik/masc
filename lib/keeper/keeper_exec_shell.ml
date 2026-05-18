@@ -38,4 +38,7 @@ module For_testing = struct
 
   let strip_stderr_dev_null_redirects =
     Keeper_shell_bash.For_testing.strip_stderr_dev_null_redirects
+
+  let keeper_bash_shape_block_hint =
+    Keeper_shell_bash.For_testing.keeper_bash_shape_block_hint
 end

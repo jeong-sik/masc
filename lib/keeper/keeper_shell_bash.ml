@@ -563,6 +563,44 @@ let bash_shape_block_tag = function
   | Substitution -> "substitution"
   | Repo_wide_scan -> "repo_wide_scan"
 
+let lowercase_contains haystack needle =
+  let haystack = String.lowercase_ascii haystack in
+  let needle = String.lowercase_ascii needle in
+  let h_len = String.length haystack in
+  let n_len = String.length needle in
+  let rec loop i =
+    if n_len = 0
+    then true
+    else if i + n_len > h_len
+    then false
+    else if String.sub haystack i n_len = needle
+    then true
+    else loop (i + 1)
+  in
+  loop 0
+
+let command_mentions_task_state_file cmd =
+  List.exists
+    (lowercase_contains cmd)
+    [ ".masc/backlog.json"
+    ; ".masc/state/backlog.json"
+    ; "repos/masc-mcp/.masc/backlog.json"
+    ; "repos/masc-mcp/.masc/tasks/backlog.json"
+    ; "repos/masc-mcp/backlog.json"
+    ; "tasks/backlog.json"
+    ]
+
+let task_state_shell_hint =
+  "Do not inspect task state by guessing .masc/backlog.json or repo-local \
+   backlog paths from keeper_bash. Use keeper_tasks_list for task/backlog \
+   state and keeper_context_status for current_task_id/sandbox paths."
+
+let task_state_shell_alternatives =
+  [ "keeper_tasks_list include_done=false"
+  ; "keeper_context_status"
+  ; "keeper_task_claim {}"
+  ]
+
 module For_testing = struct
   let elapsed_duration_ms = elapsed_duration_ms
 
@@ -573,6 +611,9 @@ module For_testing = struct
     Option.map bash_shape_block_tag (raw_keeper_bash_shape_block cmd)
 
   let strip_stderr_dev_null_redirects = strip_stderr_dev_null_redirects
+
+  let keeper_bash_shape_block_hint cmd =
+    if command_mentions_task_state_file cmd then Some task_state_shell_hint else None
 end
 
 let bash_shape_block_reason = function
@@ -593,7 +634,8 @@ let bash_shape_block_reason = function
      running Keeper fleets they can stampede Docker bind mounts and exhaust \
      host file descriptors."
 
-let bash_shape_block_hint = function
+let bash_shape_block_hint ~cmd = function
+  | _ when command_mentions_task_state_file cmd -> task_state_shell_hint
   | Gh_pr_checks ->
     "Use keeper_pr_status. If raw gh is the only visible status path, use gh \
      pr view NUMBER --repo OWNER/REPO --json \
@@ -612,7 +654,8 @@ let bash_shape_block_hint = function
      specific repos/REPO subdirectory; avoid scanning . or repos/ from raw \
      bash."
 
-let bash_shape_block_alternatives = function
+let bash_shape_block_alternatives ~cmd = function
+  | _ when command_mentions_task_state_file cmd -> task_state_shell_alternatives
   | Gh_pr_checks ->
     [
       "keeper_pr_status";
@@ -650,18 +693,19 @@ let bash_shape_block_result ~cmd ~cmd_for_log ~env_snapshot block =
        ~cmd
        ~error:"keeper_bash_command_shape_blocked"
        ~reason:(bash_shape_block_reason block)
-       ~hint:(bash_shape_block_hint block)
-       ~alternatives:(bash_shape_block_alternatives block)
+       ~hint:(bash_shape_block_hint ~cmd block)
+       ~alternatives:(bash_shape_block_alternatives ~cmd block)
        ~diag:
          (Some
             {
               Exec_core.rule_id =
                 "keeper_bash_" ^ bash_shape_block_tag block ^ "_blocked";
               explanation = bash_shape_block_reason block;
-              rewrite = Some (bash_shape_block_hint block);
+              rewrite = Some (bash_shape_block_hint ~cmd block);
               tool_suggestion =
                 (match block with
                  | Gh_pr_checks -> Some "keeper_pr_status"
+                 | _ when command_mentions_task_state_file cmd -> Some "keeper_tasks_list"
                  | Pipe_or_redirect -> Some "keeper_shell"
                  | Repo_wide_scan -> Some "keeper_shell"
                  | Chaining | Substitution -> None);

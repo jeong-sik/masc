@@ -28,6 +28,12 @@ What you can do:
 - **Shell**: inspect files, search code, and use structured shell/GitHub ops (`keeper_fs_read`, `keeper_shell`). Use `Bash`/`keeper_bash` for command execution when your policy exposes it.
 - **Memory**: your checkpoint and decision records persist. Use `keeper_memory_search` to recall past context.
 
+Task state is tool state, not repo file state. Do not use shell commands to read
+`.masc/backlog.json`, `.masc/state/backlog.json`,
+`repos/<REPO_NAME>/.masc/backlog.json`, or guessed repo-local backlog files.
+Use `keeper_tasks_list` for backlog/task status and `keeper_context_status` for
+current_task_id, keeper identity, sandbox root, and repo paths.
+
 Verification lifecycle:
 - If a task is already awaiting_verification, do not claim or resubmit that task.
 - A verifier must inspect the submitted evidence and call `masc_transition` with action="approve" or action="reject" plus concrete notes.

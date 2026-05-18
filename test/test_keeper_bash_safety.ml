@@ -390,6 +390,20 @@ let test_stderr_dev_null_strip_preserves_post_background_redirect () =
     ("sleep 1 & 2>/dev/null", false)
     (strip "sleep 1 & 2>/dev/null")
 
+let test_keeper_bash_task_state_hint_uses_task_tools () =
+  let hint = Keeper_exec_shell.For_testing.keeper_bash_shape_block_hint in
+  match hint {|cat .masc/backlog.json 2>/dev/null | head -20|} with
+  | Some msg ->
+    Alcotest.(check bool)
+      "hint points to keeper_tasks_list"
+      true
+      (String_util.contains_substring msg "keeper_tasks_list");
+    Alcotest.(check bool)
+      "hint names guessed backlog path"
+      true
+      (String_util.contains_substring msg ".masc/backlog.json")
+  | None -> Alcotest.fail "expected task-state shell hint"
+
 let test_keeper_bash_blocks_repo_wide_scans () =
   let block_tag = Keeper_exec_shell.For_testing.keeper_bash_shape_block_tag in
   List.iter
@@ -1122,6 +1136,8 @@ let () =
       Alcotest.test_case "stderr devnull strip preserves post-background redirect"
         `Quick
         test_stderr_dev_null_strip_preserves_post_background_redirect;
+      Alcotest.test_case "task-state shell paths get task-tool hint" `Quick
+        test_keeper_bash_task_state_hint_uses_task_tools;
       Alcotest.test_case "repo-wide scans blocked" `Quick
         test_keeper_bash_blocks_repo_wide_scans;
       Alcotest.test_case "empty command blocked" `Quick test_empty_command;

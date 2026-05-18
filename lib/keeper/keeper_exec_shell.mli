@@ -72,6 +72,7 @@ module For_testing : sig
   val keeper_bash_shape_block_tag : string -> string option
   val raw_keeper_bash_shape_block_tag : string -> string option
   val strip_stderr_dev_null_redirects : string -> string * bool
+  val keeper_bash_shape_block_hint : string -> string option
 end
 
 val handle_keeper_bash_output :

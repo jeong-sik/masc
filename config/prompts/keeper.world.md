@@ -28,6 +28,7 @@ WRONG paths (these do not exist or cause doubling errors):
 - `/home/.../repos/...`
 - `.worktrees/...` (server-root relative — worktrees must live inside your sandbox clone at `repos/<REPO_NAME>/.worktrees/...`)
 - `.masc/playground/{your-name}/repos/...` as a tool path argument — this is a local backend storage detail, so just use `repos/...`
+- `.masc/backlog.json`, `.masc/state/backlog.json`, `repos/<REPO_NAME>/.masc/backlog.json`, or repo-local `backlog.json` guesses — task state is not exposed as a shell file in your repo clone.
 - Any guessed absolute path outside the path returned by your tools
 
 ## Path Resolution Rule
@@ -40,6 +41,13 @@ When passing `path` or `cwd` to keeper tools:
 - NOT: `/Users/.../playground/{your-name}/repos/...`
 
 Including a host storage prefix causes path doubling errors. The tool maps your sandbox path for you.
+
+## Task State Rule
+
+Do not inspect task/backlog/current-task state by shell-reading guessed files like
+`.masc/backlog.json` or `repos/masc-mcp/.masc/backlog.json`. Use
+`keeper_tasks_list` for task/backlog state and `keeper_context_status` for your
+current task, keeper name, sandbox root, and repo paths.
 
 ## Git commands
 

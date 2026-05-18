@@ -643,6 +643,28 @@ let test_code_shell_grep_exit_one_no_matches_is_success () =
   check string "exit_semantics" "no_matches"
     (json_string_field "exit_semantics" msg)
 
+let test_code_shell_pipeline_grep_exit_one_no_matches_is_success () =
+  with_temp_dir "tool-code-shell-pipe-grep" @@ fun dir ->
+  let fixture = Filename.concat dir "sample.txt" in
+  write_file fixture "present\n";
+  let ctx = make_ctx () in
+  let args =
+    `Assoc
+      [
+        ( "command",
+          `String
+            (Printf.sprintf "cat %s 2>&1 | grep __masc_code_shell_no_match__"
+               (Filename.quote fixture)) );
+        ("timeout", `Int 5);
+      ]
+  in
+  let ok, msg = dispatch_exn ctx ~name:"masc_code_shell" ~args in
+  check bool "pipeline grep no-match exit 1 is successful" true ok;
+  check string "status" "ok" (json_string_field "status" msg);
+  check int "exit_code" 1 (json_int_field "exit_code" msg);
+  check string "exit_semantics" "no_matches"
+    (json_string_field "exit_semantics" msg)
+
 let test_code_shell_rg_exit_two_remains_error () =
   let ctx = make_ctx () in
   let args =
@@ -884,6 +906,8 @@ let () =
         test_code_shell_rg_exit_one_no_matches_is_success;
       test_case "grep exit 1 no-match is success" `Quick
         test_code_shell_grep_exit_one_no_matches_is_success;
+      test_case "pipeline grep exit 1 no-match is success" `Quick
+        test_code_shell_pipeline_grep_exit_one_no_matches_is_success;
       test_case "rg exit 2 remains error" `Quick
         test_code_shell_rg_exit_two_remains_error;
     ]);

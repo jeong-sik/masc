@@ -17,10 +17,13 @@ export function isObservedStall(
   observedForSec: number,
 ): boolean {
   if (key === 'phase') {
-    if (value === 'Failing') return observedForSec >= 90
-    if (value === 'Overflowed') return observedForSec >= 60
-    if (value === 'Compacting') return observedForSec >= 90
-    if (value === 'HandingOff' || value === 'Draining') return observedForSec >= 60
+    // Wire format from `phase_to_string` (lib/keeper/keeper_state_machine.ml:21-35)
+    // is lowercase + snake_case. Prior PascalCase compares never matched —
+    // KSM stalled detection silently disabled for every non-terminal phase.
+    if (value === 'failing') return observedForSec >= 90
+    if (value === 'overflowed') return observedForSec >= 60
+    if (value === 'compacting') return observedForSec >= 90
+    if (value === 'handing_off' || value === 'draining') return observedForSec >= 60
     return false
   }
   if (key === 'turn') {
@@ -50,23 +53,26 @@ function laneMeaning(
   const base: { tone: InsightTone; meaning: string } = (() => {
     switch (key) {
     case 'phase':
+      // Wire format from `phase_to_string` (lib/keeper/keeper_state_machine.ml:21-35)
+      // is lowercase + snake_case. PascalCase cases ('Stable' was the
+      // 7-phase composite projection per KeeperCompositeLifecycle.tla:143,
+      // never emitted by the backend; remove rather than carry the dead
+      // arm).
       switch (value) {
-        case 'Running':
+        case 'running':
           return snapshot.is_live
             ? { tone: 'info', meaning: 'parent lifecycle 정상 — live turn 진행 중' }
             : { tone: 'ok', meaning: 'live turn 없음 — 다음 observation cycle 대기' }
-        case 'Failing':
+        case 'failing':
           return { tone: 'error', meaning: 'parent lifecycle degraded — healthy turn 재개 전 해소 필요' }
-        case 'Overflowed':
+        case 'overflowed':
           return { tone: 'warn', meaning: 'context overflow latched — healthy turn 재개 전 해소 필요' }
-        case 'Compacting':
+        case 'compacting':
           return { tone: 'warn', meaning: 'post-turn compaction 이 lifecycle 점유 중' }
-        case 'HandingOff':
+        case 'handing_off':
           return { tone: 'warn', meaning: 'handoff 가 keeper 를 stop 방향으로 drain 중' }
-        case 'Draining':
+        case 'draining':
           return { tone: 'warn', meaning: 'keeper 가 in-flight work 를 drain 중 (stop 전)' }
-        case 'Stable':
-          return { tone: 'info', meaning: '현재 예상되는 lifecycle activity 없음' }
         default:
           return { tone: 'info', meaning: 'lifecycle state 관측됨' }
       }

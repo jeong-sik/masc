@@ -85,6 +85,8 @@
  server_mcp_transport_http_types
  server_mcp_transport_http_session
  server_mcp_transport_http_headers
+ server_mcp_request_context
+ server_mcp_actor_injection
  server_mcp_transport_http_sse
  server_mcp_transport_http_conn
  server_mcp_transport_http_respond

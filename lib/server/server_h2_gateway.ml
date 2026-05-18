@@ -390,13 +390,10 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           h2_respond_removed_surface h2_reqd ~surface:"operator_remote" ~extra_headers:cors
 
       | `POST, "/mcp" | `POST, "/" | `POST, "/mcp/managed" ->
-          let session_was_provided = Option.is_some session_id_opt in
           let session_id = match session_id_opt with
             | Some id -> id
             | None -> Mcp_session.generate ()
           in
-          let auth_token = auth_token_from_request httpun_request in
-          let protocol_version = get_protocol_version_for_session ~session_id httpun_request in
           let profile =
             if String.equal path "/mcp/managed"
             then Server_mcp_transport_http.Managed_agent
@@ -407,6 +404,17 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             | Some s -> s.Mcp_server.room_config.base_path
             | None -> default_base_path ()
           in
+          let context =
+            Server_mcp_request_context.make ~session_id_opt
+              ~generated_session_id:session_id
+              ~auth_token:(auth_token_from_request httpun_request)
+              ~protocol_version:
+                (get_protocol_version_for_session ~session_id httpun_request)
+              ~origin ~base_path
+          in
+          let session_id = context.session_id in
+          let auth_token = context.auth_token in
+          let protocol_version = context.protocol_version in
           let auth_result =
             match profile with
             | Server_mcp_transport_http.Full
@@ -435,11 +443,16 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                      | Ok _cred_opt ->
                          h2_read_body h2_reqd (fun body_str ->
                              match
-                               Server_mcp_transport_http
-                               .validate_session_requirement
-                                 ~session_was_provided body_str
+                               Server_mcp_request_context.decide_post_body
+                                 ~request:httpun_request ~context
+                                 ~session_is_known:
+                                   (Server_mcp_transport_http.is_known_session
+                                      session_id)
+                                 body_str
                              with
-                             | Error msg ->
+                             | Error
+                                 (Server_mcp_request_context.Session_required msg)
+                               ->
                                  let body = json_rpc_error (-32600) msg in
                                  h2_respond_json h2_reqd body
                                    ~status:`Bad_request
@@ -447,23 +460,26 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                                      (cors
                                      @ mcp_headers session_id
                                          protocol_version)
-                             | Ok () ->
-                             let accept_mode =
-                               Server_mcp_transport_http_headers
-                               .classify_mcp_accept_for_body httpun_request body_str
-                             in
-                             match accept_mode with
-                             | Http_negotiation.Rejected ->
-                                 let body =
-                                   json_rpc_error (-32600)
-                                     "Invalid Accept header: must include application/json and text/event-stream. \
-                                      Set MASC_ALLOW_LEGACY_ACCEPT=1 for temporary compatibility."
-                                 in
+                             | Error
+                                 (Server_mcp_request_context.Unknown_session msg)
+                               ->
+                                  let new_session_id = Mcp_session.generate () in
+                                  let body = json_rpc_error (-32600) msg in
+                                  h2_respond_json h2_reqd body
+                                    ~status:`Not_found
+                                    ~extra_headers:
+                                      (cors
+                                      @ mcp_headers new_session_id
+                                          protocol_version)
+                             | Error
+                                 (Server_mcp_request_context.Invalid_accept msg)
+                               ->
+                                 let body = json_rpc_error (-32600) msg in
                                  h2_respond_json h2_reqd body ~status:`Bad_request
                                    ~extra_headers:(cors @ mcp_headers session_id protocol_version)
-                             | accept_mode ->
+                             | Ok post_context ->
                                  let accept_warn_headers =
-                                   legacy_accept_warning_headers accept_mode
+                                   post_context.accept_warn_headers
                                  in
                                  with_server_state h2_reqd (fun state ->
                                    let profile =
@@ -471,7 +487,8 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                                    in
                                    let body_with_agent =
                                      Server_mcp_transport_http.body_with_canonical_http_actor
-                                       ~base_path ~auth_token httpun_request body_str
+                                       ~base_path ~auth_token httpun_request
+                                       post_context.body_str
                                    in
                                    let internal_keeper_runtime =
                                      Server_auth.is_verified_internal_keeper_request
@@ -483,7 +500,10 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                                        ~internal_keeper_runtime state
                                        body_with_agent
                                    in
-                                   (match protocol_version_from_body body_str with
+                                   (match
+                                      protocol_version_from_body
+                                        post_context.body_str
+                                    with
                                    | Some v -> remember_protocol_version session_id v
                                    | None -> ());
                                    let protocol_version =

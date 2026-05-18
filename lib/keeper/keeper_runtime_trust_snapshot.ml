@@ -396,10 +396,14 @@ let approval_event_timeline_event json =
               if is_worktree_tool tool_name then "retry_worktree_approval"
               else "retry_or_rerun"
             in
+            let decision_label =
+              match decision with
+              | Some value -> value
+              | None -> "approval expired"
+            in
             ( "approval_expired",
               Printf.sprintf "Approval · %s" tool_name,
-              approval_summary
-                ((Option.value ~default:"approval expired" decision) ^ blocker_note),
+              approval_summary (decision_label ^ blocker_note),
               Some next_action )
         | "approval_timeout" | "cancelled" ->
             let summary =

@@ -1134,6 +1134,40 @@ let test_dequeue_event_respects_base_path_and_missing_keeper () =
   | Some stim -> check string "scoped payload" "payload" stim.payload
   | None -> fail "expected scoped stimulus"
 
+let test_wakeup_hint_separate_from_event_payload () =
+  R.clear ();
+  let name = "wakeup-event-contract" in
+  let entry = R.register ~base_path:bp name (make_meta name) in
+  let queued_payload =
+    make_stimulus ~urgency:Keeper_event_queue.Immediate "queued-post" "queued-payload"
+  in
+  let later_payload = make_stimulus "later-post" "later-payload" in
+  check bool "initial wakeup false" false (Atomic.get entry.fiber_wakeup);
+  check int "initial queue empty" 0
+    (R.event_queue_snapshot ~base_path:bp name |> Keeper_event_queue.length);
+  R.wakeup ~base_path:bp name;
+  check bool "wakeup sets hint flag" true (Atomic.get entry.fiber_wakeup);
+  check int "wakeup does not synthesize payload" 0
+    (R.event_queue_snapshot ~base_path:bp name |> Keeper_event_queue.length);
+  check bool "wakeup-only dequeue has no payload" true
+    (Option.is_none (R.dequeue_event ~base_path:bp name));
+  R.enqueue_event ~base_path:bp name queued_payload;
+  check bool "enqueue does not clear wakeup hint" true (Atomic.get entry.fiber_wakeup);
+  Atomic.set entry.fiber_wakeup false;
+  check int "queued payload survives wakeup reset" 1
+    (R.event_queue_snapshot ~base_path:bp name |> Keeper_event_queue.length);
+  (match R.dequeue_event ~base_path:bp name with
+   | Some stim ->
+       check string "queued post preserved" "queued-post" stim.post_id;
+       check string "queued payload preserved" "queued-payload" stim.payload
+   | None -> fail "expected queued payload");
+  check bool "dequeue does not set wakeup hint" false (Atomic.get entry.fiber_wakeup);
+  R.enqueue_event ~base_path:bp name later_payload;
+  check bool "enqueue alone does not wake keeper" false (Atomic.get entry.fiber_wakeup);
+  (match R.dequeue_event ~base_path:bp name with
+   | Some stim -> check string "later payload preserved" "later-payload" stim.payload
+   | None -> fail "expected later payload")
+
 (* ── New fields: grpc_close, crash_log, wakeup, fiber_health ── *)
 
 let test_grpc_close () =
@@ -2362,6 +2396,8 @@ let () =
             test_dequeue_event_consumes_fifo;
           eio_test "dequeue event respects base path and missing keeper"
             test_dequeue_event_respects_base_path_and_missing_keeper;
+          eio_test "wakeup hint separate from event payload"
+            test_wakeup_hint_separate_from_event_payload;
         ] );
       ( "extended",
         [

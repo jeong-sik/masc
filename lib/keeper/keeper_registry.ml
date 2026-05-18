@@ -26,6 +26,7 @@ include Keeper_registry_types
 
 let registry : registry_entry StringMap.t Atomic.t = Atomic.make StringMap.empty
 let running_count_atomic = Atomic.make 0
+module Entry_builder = Keeper_registry_entry_builder
 module Orphan_drops = Keeper_registry_orphan_drops
 
 (** CAS loop for clamped decrement.  [Atomic.fetch_and_add _ (-1)] can
@@ -140,7 +141,6 @@ let register_with_state
     name
     base_path
     (Keeper_state_machine.phase_to_string phase);
-  let done_p, done_r = Eio.Promise.create () in
   let key = registry_key ~base_path name in
   (match StringMap.find_opt key (Atomic.get registry) with
    | Some entry when entry.phase = Running ->
@@ -151,42 +151,7 @@ let register_with_state
      Log.Keeper.warn "registry: overwriting running keeper during register name=%s" name;
      decr_running_count_clamped ()
    | _ -> ());
-  let entry =
-    { base_path
-    ; name
-    ; meta
-    ; phase
-    ; conditions
-    ; fiber_stop = Atomic.make false
-    ; fiber_wakeup = Atomic.make false
-    ; event_queue = Atomic.make Keeper_event_queue.empty
-    ; started_at = Time_compat.now ()
-    ; grpc_close = Atomic.make None
-    ; done_p
-    ; done_r
-    ; restart_count = 0
-    ; last_restart_ts = 0.0
-    ; dead_since_ts = None
-    ; crash_log = []
-    ; last_error = None
-    ; last_failure_reason = None
-    ; turn_consecutive_failures = 0
-    ; last_agent_count = 0
-    ; board_wakeups = StringMap.empty
-    ; board_cursor_ts = 0.0
-    ; board_cursor_post_id = None
-    ; tool_usage = StringMap.empty
-    ; transition_seq = 0
-    ; waiting_for_inference = Atomic.make false
-    ; last_auto_rules = None
-    ; last_event_bus_correlation = None
-    ; pending_turn_measurement = None
-    ; current_turn_observation = None
-    ; last_completed_turn = None
-    ; last_skip_observation = None
-    ; compaction_stage = Packed Compaction_accumulating
-    }
-  in
+  let entry = Entry_builder.create ~base_path name meta ~phase ~conditions in
   put_entry key entry;
   if phase = Running then Atomic.incr running_count_atomic;
   Log.Keeper.debug
@@ -246,43 +211,7 @@ let register_restarting ~base_path name meta
   (* Build fresh entry once — its per-fiber atomics (fiber_stop,
      event_queue, etc.) are independent of registry contents, so a
      CAS retry can re-use the same record without re-allocating. *)
-  let done_p, done_r = Eio.Promise.create () in
-  let new_entry =
-    { base_path
-    ; name
-    ; meta
-    ; phase
-    ; conditions
-    ; fiber_stop = Atomic.make false
-    ; fiber_wakeup = Atomic.make false
-    ; event_queue = Atomic.make Keeper_event_queue.empty
-    ; started_at = Time_compat.now ()
-    ; grpc_close = Atomic.make None
-    ; done_p
-    ; done_r
-    ; restart_count = 0
-    ; last_restart_ts = 0.0
-    ; dead_since_ts = None
-    ; crash_log = []
-    ; last_error = None
-    ; last_failure_reason = None
-    ; turn_consecutive_failures = 0
-    ; last_agent_count = 0
-    ; board_wakeups = StringMap.empty
-    ; board_cursor_ts = 0.0
-    ; board_cursor_post_id = None
-    ; tool_usage = StringMap.empty
-    ; transition_seq = 0
-    ; waiting_for_inference = Atomic.make false
-    ; last_auto_rules = None
-    ; last_event_bus_correlation = None
-    ; pending_turn_measurement = None
-    ; current_turn_observation = None
-    ; last_completed_turn = None
-    ; last_skip_observation = None
-    ; compaction_stage = Packed Compaction_accumulating
-    }
-  in
+  let new_entry = Entry_builder.create ~base_path name meta ~phase ~conditions in
   (* Guard + write in a single CAS loop so a concurrent budget-exhaust
      update between our read and write cannot be overwritten back to
      [restart_budget_remaining = true].  Without this loop, two threads

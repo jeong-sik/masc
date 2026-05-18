@@ -71,6 +71,12 @@ let is_transient_network_error (err : Agent_sdk.Error.sdk_error) : bool =
       not (is_structural_oas_timeout_message detail)
   | Agent_sdk.Error.Api (Overloaded _) -> true
   | Agent_sdk.Error.Api (ServerError { status = 503; _ }) -> true
+  (* Cloudflare 52x timeout family — origin server unreachable or
+     slow to respond.  No LLM request was processed, so safe to retry.
+     522 = Connection timed out (TCP handshake failed).
+     524 = A timeout occurred (origin responded too slowly). *)
+  | Agent_sdk.Error.Api (ServerError { status = 522; _ }) -> true
+  | Agent_sdk.Error.Api (ServerError { status = 524; _ }) -> true
   | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { transient; _ }) ->
       transient
   (* Non-transient API errors. *)

@@ -241,6 +241,21 @@ let contains needle haystack =
 let check_contains label needle haystack =
   check bool label true (contains needle haystack)
 
+let join_agent config ~agent_name =
+  let msg = Masc_mcp.Coord.join config ~agent_name ~capabilities:[] () in
+  let prefix = "  Nickname: " in
+  String.split_on_char '\n' msg
+  |> List.find_map (fun line ->
+    if String.starts_with ~prefix line
+    then
+      Some
+        (String.sub
+           line
+           (String.length prefix)
+           (String.length line - String.length prefix))
+    else None)
+  |> Option.value ~default:agent_name
+
 let playground_cache_repo ~base_path ~agent_name ~repo_name =
   let cache_path =
     Filename.concat base_path
@@ -380,7 +395,8 @@ let test_dispatch_worktree_create_auto_provisions_workspace_repo () =
        ~repo_rel:"workspace/yousleepwhen/masc-mcp");
   let config = Masc_mcp.Coord.default_config base_path in
   ignore (Masc_mcp.Coord.init config ~agent_name:(Some "test-agent"));
-  let ctx : Tool_worktree.context = { config; agent_name = "test-agent" } in
+  let agent_name = join_agent config ~agent_name:"test-agent" in
+  let ctx : Tool_worktree.context = { config; agent_name } in
   let task_id = "task-auto-clone" in
   let args = `Assoc [
     ("task_id", `String task_id);
@@ -388,12 +404,13 @@ let test_dispatch_worktree_create_auto_provisions_workspace_repo () =
     ("base_branch", `String "main");
   ] in
   let sandbox_clone =
-    Filename.concat base_path ".masc/playground/test-agent/repos/masc-mcp"
+    Filename.concat base_path
+      (Printf.sprintf ".masc/playground/%s/repos/masc-mcp" agent_name)
   in
   let worktree_path =
     Filename.concat sandbox_clone
       (Filename.concat ".worktrees"
-         (Playground_paths.worktree_dir_name "test-agent" task_id))
+         (Playground_paths.worktree_dir_name agent_name task_id))
   in
   match Tool_worktree.dispatch ctx ~name:"masc_worktree_create" ~args with
   | None -> fail "dispatch returned None for masc_worktree_create"
@@ -407,7 +424,7 @@ let test_dispatch_worktree_create_auto_provisions_workspace_repo () =
       check bool "worktree created" true (Sys.file_exists worktree_path);
       check (option string) "agent current_task stores task id"
         (Some task_id)
-        (agent_current_task ~config ~agent_name:"test-agent")
+        (agent_current_task ~config ~agent_name)
 
 let test_dispatch_worktree_create_refreshes_playground_repo_cache () =
   let base_path = temp_dir () in

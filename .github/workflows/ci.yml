@@ -1200,8 +1200,8 @@ jobs:
                                then ($label_events[($label_events | length) - 2].createdAt | fromdateiso8601)
                                else null
                                end) as $previous_label_ts
-                         and (($latest.createdAt | fromdateiso8601) as $label_ts |
-                           marker_for($root; $label; $label_ts; $previous_label_ts)))))
+                              | (($latest.createdAt | fromdateiso8601) as $label_ts |
+                                  marker_for($root; $label; $label_ts; $previous_label_ts)))))
                 ' 2>/dev/null || echo false
               else
                 echo false

@@ -31,6 +31,7 @@
    [runner]. *)
 
 type runner =
+  stdin_content:string option ->
   argv:string list ->
   env:string array ->
   cwd:string option ->

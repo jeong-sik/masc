@@ -31,7 +31,7 @@ let test_state_to_string_crashed () =
   R.clear ();
   let _entry = R.register ~base_path:bp "k1" (make_meta "k1") in
   ignore (R.dispatch_event ~base_path:bp "k1"
-    (KSM.Fiber_terminated { outcome = "test" }));
+    (KSM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }));
   match R.get ~base_path:bp "k1" with
   | None -> fail "expected k1"
   | Some e ->
@@ -52,7 +52,7 @@ let test_running_count_crashed () =
   let _e2 = R.register ~base_path:bp "b" (make_meta "b") in
   check int "2 running" 2 (R.count_running ());
   ignore (R.dispatch_event ~base_path:bp "a"
-    (KSM.Fiber_terminated { outcome = "test" }));
+    (KSM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }));
   check int "1 running after crash" 1 (R.count_running ());
   R.mark_dead ~base_path:bp "b" ~at:(Unix.gettimeofday ());
   check int "0 running after dead" 0 (R.count_running ())
@@ -68,7 +68,7 @@ let test_is_registered_crashed () =
   R.clear ();
   let _e = R.register ~base_path:bp "k1" (make_meta "k1") in
   ignore (R.dispatch_event ~base_path:bp "k1"
-    (KSM.Fiber_terminated { outcome = "test" }));
+    (KSM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }));
   check bool "crashed → still registered" true (R.is_registered ~base_path:bp "k1")
 
 let test_is_registered_dead () =
@@ -143,7 +143,7 @@ let test_state_transition_running_crashed_running () =
   let _e = R.register ~base_path:bp "k1" (make_meta "k1") in
   check int "1 running" 1 (R.count_running ());
   ignore (R.dispatch_event ~base_path:bp "k1"
-    (KSM.Fiber_terminated { outcome = "test" }));
+    (KSM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }));
   check int "0 running" 0 (R.count_running ());
   check bool "is_running false" false (R.is_running ~base_path:bp "k1");
   check bool "is_registered true" true (R.is_registered ~base_path:bp "k1");
@@ -228,7 +228,7 @@ let test_dead_tombstone_is_registered () =
   R.clear ();
   let _e = R.register ~base_path:bp "k1" (make_meta "k1") in
   ignore (R.dispatch_event ~base_path:bp "k1"
-    (KSM.Fiber_terminated { outcome = "test" }));
+    (KSM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }));
   R.mark_dead ~base_path:bp "k1" ~at:(Unix.gettimeofday ());
   (* Dead keeper is still registered — reconcile must skip *)
   check bool "Dead is registered" true (R.is_registered ~base_path:bp "k1");

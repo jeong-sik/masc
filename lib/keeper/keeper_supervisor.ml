@@ -328,7 +328,7 @@ let launch_supervised_fiber
 	                  Keeper_registry.dispatch_event
 	                    ~base_path
 	                    meta.name
-	                    (Keeper_state_machine.Fiber_terminated { outcome })
+	                    (Keeper_state_machine.Fiber_terminated { outcome; provider_id = None; http_status = None })
 	                with
                 | Ok _ -> ()
                 | Error e ->
@@ -415,7 +415,7 @@ let launch_supervised_fiber
 	                Keeper_registry.dispatch_event
 	                  ~base_path
 	                  meta.name
-	                  (Keeper_state_machine.Fiber_terminated { outcome })
+	                  (Keeper_state_machine.Fiber_terminated { outcome; provider_id = None; http_status = None })
 	              with
               | Ok _ -> ()
               | Error e ->
@@ -546,7 +546,7 @@ let launch_supervised_fiber
 	                Keeper_registry.dispatch_event_unit
 	                  ~base_path
 	                  meta.name
-	                  (Keeper_state_machine.Fiber_terminated { outcome });
+	                  (Keeper_state_machine.Fiber_terminated { outcome; provider_id = None; http_status = None });
                 if resolve_done (`Crashed reason)
                 then
                   publish_phase_lifecycle
@@ -1658,7 +1658,7 @@ let sweep_and_recover (ctx : _ context) =
 	        (Keeper_registry.dispatch_event_and_log
 	           ~base_path
 	           entry.name
-	           (Keeper_state_machine.Fiber_terminated { outcome }));
+	           (Keeper_state_machine.Fiber_terminated { outcome; provider_id = None; http_status = None }));
       let ts = Time_compat.now () in
       Keeper_registry.record_crash ~base_path entry.name ts msg;
       Keeper_registry.record_error ~base_path entry.name msg;

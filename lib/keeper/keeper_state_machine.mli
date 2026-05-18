@@ -190,7 +190,11 @@ type event =
   | Stop_requested
   | Drain_complete
   | Fiber_started
-  | Fiber_terminated of { outcome : string }
+  | Fiber_terminated of
+      { outcome : string
+      ; provider_id : string option
+      ; http_status : int option
+      }
   | Supervisor_restart_attempt of { attempt : int }
   | Restart_budget_exhausted
   | Credential_archived

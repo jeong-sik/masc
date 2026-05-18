@@ -89,6 +89,7 @@
  dashboard_http_monitoring
  dashboard_http_keeper_outcomes
  dashboard_http_keeper_trust
+ dashboard_http_keeper_bdi
  dashboard_http_keeper
  server_dashboard_http_keeper_runtime_manifest_scan
  server_dashboard_http_keeper_runtime_lens_proof

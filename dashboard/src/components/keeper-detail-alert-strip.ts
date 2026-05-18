@@ -15,6 +15,17 @@ import { keeperNeedsDiagnosticAttention, refreshAfterRuntimeAction } from './kee
 import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
 import { showToast } from './common/toast'
 
+// Backend `attention_reason` is set across three emit sites (verified by
+// `rg '"attention_reason".*\`String "' lib/`):
+//   - lib/keeper/keeper_status_bridge.ml:727-742 — six common reasons.
+//   - lib/keeper_fd_pressure.ml:190 — 'fd_pressure' when a keeper trips
+//     the fd-accountant watermark.
+//   - lib/dashboard/dashboard_goals.ml:44 —
+//     'runtime_trust_snapshot_unavailable' when the trust snapshot has
+//     not yet been computed.
+// The label map must cover every emit site; missing entries fall back to
+// the raw English token via `labels[reason] ?? reason`, leaving the
+// operator with no Korean label.
 function attentionReasonLabel(reason: string | null, paused: boolean): string | null {
   if (!reason) return null
   if ((reason === 'paused' || reason === 'paused_blocked') && paused) return null
@@ -26,10 +37,21 @@ function attentionReasonLabel(reason: string | null, paused: boolean): string | 
     runtime_blocked: '런타임 근거 확인 필요',
     timeout_budget_exhausted: '타임아웃 예산 소진',
     social_model_fallback: '소셜 모델 폴백',
+    fd_pressure: 'FD 임계치 초과',
+    runtime_trust_snapshot_unavailable: '런타임 신뢰 스냅샷 없음',
   }
   return labels[reason] ?? reason
 }
 
+// Backend `next_human_action` is set alongside `attention_reason` at the
+// same emit sites:
+//   - lib/keeper/keeper_status_bridge.ml:727-742 — seven common actions.
+//   - lib/keeper_fd_pressure.ml:191 — 'restore_fd_headroom' paired with
+//     the 'fd_pressure' attention_reason.
+//   - lib/dashboard/dashboard_goals.ml:45 — 'inspect_keeper_runtime_trust'
+//     paired with the 'runtime_trust_snapshot_unavailable' reason.
+// The label map below must cover every emit site so operators see a
+// Korean instruction instead of the raw English token.
 function nextHumanActionLabel(action: string | null): string | null {
   if (!action) return null
   const labels: Record<string, string> = {
@@ -40,6 +62,8 @@ function nextHumanActionLabel(action: string | null): string | null {
     resolve_approval: '승인 요청 처리',
     resume_or_review: '재개 또는 설정 검토',
     review_social_model: '소셜 모델 설정 검토',
+    restore_fd_headroom: 'FD 여유 확보',
+    inspect_keeper_runtime_trust: '런타임 신뢰 스냅샷 확인',
   }
   return labels[action] ?? action
 }

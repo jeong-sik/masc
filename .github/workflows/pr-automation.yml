@@ -146,17 +146,22 @@ jobs:
               });
               return issueCommentsCache;
             };
-            const findApprovalGateNear = async (label, labeledAt) => {
+            const findApprovalGateNear = async (label, labeledAt, previousLabelEventAt) => {
               const labeledAtMs = Date.parse(labeledAt || "");
               if (!Number.isFinite(labeledAtMs)) return undefined;
+              const previousLabelEventAtMs = Date.parse(previousLabelEventAt || "");
               const labelLiteral = `\`${label}\``;
               const approvalGateWindowMs = 5 * 60 * 1000;
               const comments = await loadIssueComments();
               return [...comments].reverse().find((comment) => {
                 const body = comment.body || "";
                 const commentAtMs = Date.parse(comment.created_at || "");
+                const afterPreviousLabelCycle =
+                  !Number.isFinite(previousLabelEventAtMs) ||
+                  commentAtMs > previousLabelEventAtMs;
                 return comment.user?.type === "Bot" &&
                   Number.isFinite(commentAtMs) &&
+                  afterPreviousLabelCycle &&
                   commentAtMs >= labeledAtMs - approvalGateWindowMs &&
                   commentAtMs <= labeledAtMs + approvalGateWindowMs &&
                   body.includes(approvalGateMarker) &&
@@ -172,10 +177,12 @@ jobs:
                 per_page: 100
               });
               for (const label of presentBypassLabels) {
-                const latest = [...events].reverse().find((event) =>
+                const matchingEvents = events.filter((event) =>
                   (event.event === "labeled" || event.event === "unlabeled") &&
                   event.label?.name?.toLowerCase() === label
                 );
+                const latestIndex = matchingEvents.length - 1;
+                const latest = latestIndex >= 0 ? matchingEvents[latestIndex] : undefined;
                 if (!latest) {
                   bypassPolicyFailures.push(`${label}: no label event found`);
                   unverifiedBypassLabels.push(label);
@@ -183,7 +190,13 @@ jobs:
                   bypassPolicyFailures.push(`${label}: latest event is ${latest.event}`);
                   unverifiedBypassLabels.push(label);
                 } else {
-                  const approvalGate = await findApprovalGateNear(label, latest.created_at);
+                  const previousLabelEvent =
+                    latestIndex > 0 ? matchingEvents[latestIndex - 1] : undefined;
+                  const approvalGate = await findApprovalGateNear(
+                    label,
+                    latest.created_at,
+                    previousLabelEvent?.created_at
+                  );
                   if (!approvalGate) {
                     bypassPolicyFailures.push(`${label}: missing environment-gated approval for latest label event`);
                     unverifiedBypassLabels.push(label);

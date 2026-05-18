@@ -32,6 +32,7 @@
  sse_jsonrpc_filter
  prometheus_format
  prometheus_key
+ prometheus_store
  prometheus_process
  prometheus_transport_metric_names
  prometheus_core_metric_names

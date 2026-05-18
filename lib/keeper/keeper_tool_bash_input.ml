@@ -165,6 +165,14 @@ let parse_pipeline ~path (json : Yojson.Safe.t) =
 let of_json (json : Yojson.Safe.t) =
   let ( let* ) = Result.bind in
   let* fields = assoc_fields ~path:"$" json in
+  let* () =
+    if Option.is_some (member fields "cmd")
+    then
+      Error
+        "legacy cmd string is not a typed keeper_bash input; provide \
+         executable/argv or pipeline stages"
+    else Ok ()
+  in
   let executable_present = Option.is_some (member fields "executable") in
   let pipeline_value =
     match member fields "pipeline", member fields "stages" with
@@ -187,13 +195,7 @@ let of_json (json : Yojson.Safe.t) =
   | false, Some (path, value) ->
     let* stages = parse_pipeline ~path value in
     Ok (Pipeline { stages; cwd; env })
-  | false, None ->
-    if Option.is_some (member fields "cmd")
-    then
-      Error
-        "legacy cmd string is not a typed keeper_bash input; provide \
-         executable/argv or pipeline stages"
-    else Error "$.executable or $.pipeline/$.stages is required"
+  | false, None -> Error "$.executable or $.pipeline/$.stages is required"
 ;;
 
 (* Execve-style: argv tokens pass verbatim to the child process, so

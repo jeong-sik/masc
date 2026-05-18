@@ -231,6 +231,17 @@ let test_of_json_rejects_legacy_cmd_only () =
     (String_util.contains_substring_ci msg "typed keeper_bash input")
 ;;
 
+let test_of_json_rejects_legacy_cmd_with_exec () =
+  let msg =
+    parse_json_error
+      (`Assoc [ "cmd", `String "rg pattern lib/"; "executable", `String "rg" ])
+  in
+  Alcotest.(check bool)
+    "error mentions typed input"
+    true
+    (String_util.contains_substring_ci msg "typed keeper_bash input")
+;;
+
 let test_of_json_rejects_non_string_argv () =
   let msg =
     parse_json_error
@@ -388,6 +399,10 @@ let suite =
           "of_json_rejects_legacy_cmd_only"
           `Quick
           test_of_json_rejects_legacy_cmd_only
+      ; Alcotest.test_case
+          "of_json_rejects_legacy_cmd_with_exec"
+          `Quick
+          test_of_json_rejects_legacy_cmd_with_exec
       ; Alcotest.test_case
           "of_json_rejects_non_string_argv"
           `Quick

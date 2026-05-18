@@ -12,8 +12,11 @@ val dispatch : Shell_ir.t -> dispatch_result
     going through /bin/bash.  Simple commands use argv-based spawn;
     pipelines chain stdout to stdin across stages. *)
 
-val dispatch_simple : Shell_ir.simple -> dispatch_result
-(** Execute a simple command via argv-based spawn. *)
+val dispatch_simple :
+  ?stdin_content:string -> Shell_ir.simple -> dispatch_result
+(** Execute a simple command via argv-based spawn.  [stdin_content] is
+    used by pipeline dispatch when a previous stage's stdout must be
+    forwarded without dropping the stage's sandbox target. *)
 
 val native_dispatch_enabled : unit -> bool
 (** Check [MASC_BASH_NATIVE_DISPATCH] env var.

@@ -15,6 +15,7 @@
     Exceptions are propagated; callers in [Exec_dispatch] catch and
     translate them into structured dispatch results. *)
 type runner =
+  stdin_content:string option ->
   argv:string list ->
   env:string array ->
   cwd:string option ->

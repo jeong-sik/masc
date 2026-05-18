@@ -135,7 +135,7 @@ let () =
   let runner_argv = ref [] in
   let runner_env = ref [||] in
   let runner_cwd = ref (Some "should_be_none") in
-  let mock_runner ~argv ~env ~cwd ~timeout_sec:_ =
+  let mock_runner ~stdin_content:_ ~argv ~env ~cwd ~timeout_sec:_ =
     runner_called := true;
     runner_argv := argv;
     runner_env := env;
@@ -169,13 +169,64 @@ let () =
    | Masc_exec.Sandbox_target.Docker { image; _ } ->
        assert (image = "test-image"))
 
+(* --- dispatch_pipeline propagates stdin and sandbox runner --- *)
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let printf_bin = Masc_exec.Bin.of_string "printf" |> Result.get_ok in
+  let wc_bin = Masc_exec.Bin.of_string "wc" |> Result.get_ok in
+  let runner_calls = ref [] in
+  let mock_runner ~stdin_content ~argv ~env:_ ~cwd ~timeout_sec:_ =
+    runner_calls := (argv, cwd, stdin_content) :: !runner_calls;
+    match argv, stdin_content with
+    | [ "printf"; "typed" ], None -> Unix.WEXITED 0, "typed", ""
+    | [ "wc"; "-c" ], Some "typed" -> Unix.WEXITED 0, "5\n", ""
+    | _ -> Unix.WEXITED 2, "", "unexpected mock runner call"
+  in
+  let docker_sandbox =
+    Masc_exec.Sandbox_target.docker ~image:"pipeline-image" ~runner:mock_runner
+  in
+  let cwd = Some (Masc_exec.Path_scope.classify ~raw:"/tmp/pipeline" ~cwd:"/tmp/pipeline") in
+  let stages =
+    [
+      Simple
+        {
+          bin = printf_bin;
+          args = [ Lit "typed" ];
+          env = [];
+          cwd;
+          redirects = [];
+          sandbox = docker_sandbox;
+        };
+      Simple
+        {
+          bin = wc_bin;
+          args = [ Lit "-c" ];
+          env = [];
+          cwd;
+          redirects = [];
+          sandbox = docker_sandbox;
+        };
+    ]
+  in
+  let result = Masc_exec.Exec_dispatch.dispatch (Pipeline stages) in
+  assert (result.status = Unix.WEXITED 0);
+  assert (String.trim result.stdout = "5");
+  match List.rev !runner_calls with
+  | [ ([ "printf"; "typed" ], Some first_cwd, None)
+    ; ([ "wc"; "-c" ], Some second_cwd, Some "typed") ] ->
+      assert (first_cwd = "/tmp/pipeline");
+      assert (second_cwd = "/tmp/pipeline")
+  | _ -> assert false
+
 (* --- dispatch_simple exception from runner is caught --- *)
 
 let () =
   with_eio @@ fun () ->
   let open Masc_exec.Shell_ir in
   let bin = Masc_exec.Bin.of_string "echo" |> Result.get_ok in
-  let mock_runner ~argv:_ ~env:_ ~cwd:_ ~timeout_sec:_ =
+  let mock_runner ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ ~timeout_sec:_ =
     failwith "mock docker failure"
   in
   let docker_sandbox =

@@ -44,7 +44,7 @@ let resolve_env env_bindings =
    [Exec_gate] (no behavior change for non-keeper callers); the Docker
    case is wired up by [lib/keeper] using a closure over
    [Keeper_turn_sandbox_runtime]. *)
-let dispatch_simple (s : Shell_ir.simple) =
+let dispatch_simple ?stdin_content (s : Shell_ir.simple) =
   let bin = Bin.to_string s.bin in
   let argv = bin :: List.map resolve_arg s.args in
   let env = resolve_env s.env in
@@ -58,11 +58,19 @@ let dispatch_simple (s : Shell_ir.simple) =
   | Host ->
       let raw_source = String.concat " " argv in
       (match
-         Exec_gate.run_argv_with_status_split
-           ~actor:`Tool_local_runtime
-           ~raw_source
-           ~summary:"exec dispatch simple"
-           ~timeout_sec ~env ?cwd argv
+         match stdin_content with
+         | None ->
+           Exec_gate.run_argv_with_status_split
+             ~actor:`Tool_local_runtime
+             ~raw_source
+             ~summary:"exec dispatch simple"
+             ~timeout_sec ~env ?cwd argv
+         | Some stdin_content ->
+           Exec_gate.run_argv_with_stdin_and_status_split
+             ~actor:`Tool_local_runtime
+             ~raw_source
+             ~summary:"exec dispatch simple stdin"
+             ~timeout_sec ~env ?cwd ~stdin_content argv
        with
        | exception exn ->
            { status = Unix.WEXITED 1;
@@ -71,7 +79,7 @@ let dispatch_simple (s : Shell_ir.simple) =
        | (status, stdout, stderr) ->
            { status; stdout; stderr })
   | Docker { runner; _ } ->
-      (match runner ~argv ~env ~cwd ~timeout_sec with
+      (match runner ~stdin_content ~argv ~env ~cwd ~timeout_sec with
        | exception exn ->
            { status = Unix.WEXITED 1;
              stdout = "";
@@ -90,52 +98,17 @@ let rec dispatch_pipeline stages =
       let rec chain prev_stdout = function
         | [] ->
             { status = Unix.WEXITED 0; stdout = prev_stdout; stderr = "" }
-        | [ Shell_ir.Simple s ] ->
-            let bin = Bin.to_string s.bin in
-            let argv = bin :: List.map resolve_arg s.args in
-            let env = resolve_env s.env in
-            (match
-               let raw_source = String.concat " " argv in
-               Exec_gate.run_argv_with_stdin_and_status_split
-                 ~actor:`Tool_local_runtime
-                 ~raw_source
-                 ~summary:"exec dispatch pipeline stage"
-                 ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Dispatch ()) ~env
-                 ~stdin_content:prev_stdout argv
-             with
-            | exception exn ->
-                { status = Unix.WEXITED 1;
-                  stdout = "";
-                  stderr = Printexc.to_string exn }
-            | (status, stdout, stderr) ->
-                { status; stdout; stderr })
+        | [ Shell_ir.Simple s ] -> dispatch_simple ~stdin_content:prev_stdout s
         | Shell_ir.Simple s :: rest ->
-            let bin = Bin.to_string s.bin in
-            let argv = bin :: List.map resolve_arg s.args in
-            let env = resolve_env s.env in
-            (match
-               let raw_source = String.concat " " argv in
-               Exec_gate.run_argv_with_stdin_and_status_split
-                 ~actor:`Tool_local_runtime
-                 ~raw_source
-                 ~summary:"exec dispatch pipeline stage"
-                 ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Dispatch ()) ~env
-                 ~stdin_content:prev_stdout argv
-             with
-            | exception exn ->
-                { status = Unix.WEXITED 1;
-                  stdout = "";
-                  stderr = Printexc.to_string exn }
-            | (status, stdout, stderr) ->
-                let last_status = status in
-                let result = chain stdout rest in
-                let final_status =
-                  match last_status with
-                  | Unix.WEXITED 0 -> result.status
-                  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
-                      last_status
-                in
-                { result with status = final_status })
+            let stage_result = dispatch_simple ~stdin_content:prev_stdout s in
+            let result = chain stage_result.stdout rest in
+            let final_status =
+              match stage_result.status with
+              | Unix.WEXITED 0 -> result.status
+              | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+                  stage_result.status
+            in
+            { result with status = final_status }
         | Pipeline _ :: _ ->
             { status = Unix.WEXITED 1;
               stdout = "";

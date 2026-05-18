@@ -602,6 +602,91 @@ let test_goal_transition_rejected_verification_retains_evidence () =
     (get_string_list_field vote "evidence_refs")
 ;;
 
+let test_goal_transition_manual_reject_blocks_and_cancels_request () =
+  with_room
+  @@ fun config ->
+  let verifier_policy =
+    { Goal_verification.inherit_mode = Goal_verification.Extend
+    ; principals =
+        [ { kind = Goal_verification.Keeper
+          ; id = "keeper-alpha"
+          ; display_name = Some "keeper-alpha"
+          }
+        ]
+    ; required_verdicts = Some 1
+    }
+  in
+  let goal, _kind =
+    match Goal_store.upsert_goal config ~title:"Manually reject me" ~verifier_policy () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  create_done_task config ~goal_id:goal.id ~title:"Manual reject done task";
+  let transitioned =
+    Tool_coord.dispatch
+      (coord_ctx config)
+      ~name:"masc_goal_transition"
+      ~args:
+        (`Assoc
+            [ "goal_id", `String goal.id
+            ; "action", `String "request_complete"
+            ; "actor", principal_json ~kind:"operator" ~id:"planner"
+            ])
+  in
+  let transitioned_json =
+    match transitioned with
+    | Some result -> parse_json_result result
+    | None -> fail "masc_goal_transition not handled"
+  in
+  let request_id =
+    transitioned_json
+    |> Yojson.Safe.Util.member "verification_request"
+    |> fun json -> get_string_field json "id"
+  in
+  let rejected =
+    Tool_coord.dispatch
+      (coord_ctx config)
+      ~name:"masc_goal_transition"
+      ~args:
+        (`Assoc
+            [ "goal_id", `String goal.id
+            ; "action", `String "reject_completion"
+            ; "actor", principal_json ~kind:"operator" ~id:"planner"
+            ; "note", `String "operator rejected the completion claim"
+            ])
+  in
+  let rejected_json =
+    match rejected with
+    | Some result -> parse_json_result result
+    | None -> fail "masc_goal_transition not handled"
+  in
+  let rejected_goal = Yojson.Safe.Util.member "goal" rejected_json in
+  check string "manual reject blocks goal" "blocked" (get_string_field rejected_goal "phase");
+  check
+    bool
+    "manual reject clears active request"
+    true
+    (rejected_goal |> Yojson.Safe.Util.member "active_verification_request_id" |> json_is_null);
+  check
+    bool
+    "manual reject has no open request"
+    true
+    (rejected_json
+     |> Yojson.Safe.Util.member "verification_summary"
+     |> Yojson.Safe.Util.member "open_request"
+     |> json_is_null);
+  let saved_request =
+    match Goal_verification.find_request config ~request_id with
+    | Some request -> request
+    | None -> fail "verification request missing after manual reject"
+  in
+  check
+    bool
+    "manual reject cancels, not quorum-rejects, request"
+    true
+    (saved_request.status = Goal_verification.Cancelled)
+;;
+
 let test_goal_transition_approval_gate () =
   with_room
   @@ fun config ->
@@ -946,6 +1031,10 @@ let () =
             "rejected verification retains evidence"
             `Quick
             test_goal_transition_rejected_verification_retains_evidence
+        ; test_case
+            "manual reject cancels verification"
+            `Quick
+            test_goal_transition_manual_reject_blocks_and_cancels_request
         ; test_case "approval gate" `Quick test_goal_transition_approval_gate
         ; test_case
             "review done compatibility"

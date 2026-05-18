@@ -679,9 +679,15 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
                       ])
                | Ok (Goal_phase.Move_to next_phase) ->
                  (match goal.active_verification_request_id, next_phase with
-                  | Some request_id, Goal_phase.Dropped
-                  | Some request_id, Goal_phase.Executing
+                  | ( Some request_id
+                    , ( Goal_phase.Blocked
+                      | Goal_phase.Dropped
+                      | Goal_phase.Executing ) )
                     when goal.phase = Goal_phase.Awaiting_verification ->
+                    (* Leaving verification through an operator transition is
+                       not a quorum verdict. Seal the open request as cancelled;
+                       quorum failure is handled in [handle_goal_verify] as
+                       [Rejected] and moves the goal back to [Executing]. *)
                     (match Goal_verification.cancel_request ctx.config ~request_id with
                      | Ok _ ->
                        emit_goal_event

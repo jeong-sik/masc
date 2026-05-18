@@ -404,6 +404,8 @@ let test_run_detached_argv_shape () =
     | [] -> false
   in
   check bool "argv has `run -d --rm --name <derived>`" true (has_run_prefix argv);
+  check bool "argv disables implicit image pulls" true
+    (List.mem "--pull" argv && List.mem "never" argv);
   check bool "owner_pid label = passed pid" true
     (List.mem "masc.mcp.owner_pid=424242" argv);
   check bool "started_at label = %.3f of passed clock" true
@@ -436,12 +438,12 @@ let test_run_detached_returns_typed () =
   match Keeper_docker_client_real.run_detached (sample_session_plan ()) with
   | Ok _ -> () (* daemon present + identity files written + spawn ok *)
   | Error Keeper_docker_client.Daemon_unreachable -> () (* identity-write failure / no daemon / spawn failure *)
-  | Error Keeper_docker_client.Image_pull_failed
+  | Error Keeper_docker_client.Image_pull_failed -> () (* image absent locally *)
   | Error Keeper_docker_client.Container_oom
   | Error Keeper_docker_client.Exec_timeout
   | Error Keeper_docker_client.Probe_format_drift
   | Error Keeper_docker_client.Cleanup_failed ->
-    fail "run_detached should only surface Ok <name> | Daemon_unreachable"
+    fail "run_detached should only surface Ok <name> | Daemon_unreachable | Image_pull_failed"
 ;;
 
 (* ── Functor instantiation works with Real ───────────────────── *)

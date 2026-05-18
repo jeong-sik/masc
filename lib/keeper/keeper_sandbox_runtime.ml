@@ -34,6 +34,12 @@ let docker_command_argv () =
   | _ -> [ docker_command () ]
 ;;
 
+let docker_run_pull_never_args () = [ "--pull"; "never" ]
+
+let docker_image_missing_next_action =
+  "Run scripts/build-keeper-sandbox-image.sh to build the default keeper sandbox image."
+;;
+
 (* RFC-0107 Phase E step 2 — branch on MASC_DOCKER_TRANSPORT env flag here.
    When set to "api", route through [Sandbox.Docker_api] (UDS HTTP) instead
    of forking a [docker] subprocess; the subprocess path stays as the
@@ -1100,6 +1106,17 @@ let docker_image_present ~image ~timeout_sec =
            (Worker_dev_tools.truncate_for_log out)))
 ;;
 
+let ensure_keeper_sandbox_image_present ~image ~timeout_sec =
+  match docker_image_present ~image ~timeout_sec with
+  | Ok () -> Ok ()
+  | Error message ->
+    Error
+      (Printf.sprintf
+         "%s. Next: %s"
+         message
+         docker_image_missing_next_action)
+;;
+
 let docker_image_required_commands ~image ~timeout_sec =
   let script =
     let quoted = List.map Filename.quote required_commands |> String.concat " " in
@@ -1110,7 +1127,9 @@ let docker_image_required_commands ~image ~timeout_sec =
   in
   let argv =
     docker_command_argv ()
-    @ [ "run"; "--rm"; "--network"; "none"; "--entrypoint"; "sh"; image; "-lc"; script ]
+    @ [ "run"; "--rm" ]
+    @ docker_run_pull_never_args ()
+    @ [ "--network"; "none"; "--entrypoint"; "sh"; image; "-lc"; script ]
   in
   let st, out =
     run_docker_argv_with_status
@@ -1283,10 +1302,7 @@ let docker_preflight ~timeout_sec () =
            Some "Ensure Docker is installed and the daemon is reachable from this shell."
          else None)
       ; (if (not image_present) || missing_commands <> []
-         then
-           Some
-             "Run scripts/build-keeper-sandbox-image.sh to build the default keeper \
-              sandbox image."
+         then Some docker_image_missing_next_action
          else None)
       ; (if not hardening_ok
          then
@@ -1347,14 +1363,12 @@ let ensure_keeper_startup_preflight ~timeout_sec ~sandbox_profile =
         Error
           (Printf.sprintf "Docker sandbox startup preflight failed: %s" message)
       | Ok _ ->
-        (match docker_image_present ~image ~timeout_sec with
+        (match ensure_keeper_sandbox_image_present ~image ~timeout_sec with
          | Ok () -> Ok ()
          | Error message ->
            Error
              (Printf.sprintf
-                "Docker sandbox startup preflight failed: %s. Next: Run \
-                 scripts/build-keeper-sandbox-image.sh to build the default keeper \
-                 sandbox image."
+                "Docker sandbox startup preflight failed: %s"
                 message)))
 ;;
 

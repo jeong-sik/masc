@@ -267,7 +267,9 @@ let run plan =
      so caller-passed [cmd] strings work identically across both
      functions. *)
   let argv =
-    [ "docker"; "run"; "--rm"; "--name"; container_name; image; "sh"; "-lc"; command ]
+    [ "docker"; "run"; "--rm"; "--name"; container_name ]
+    @ Keeper_sandbox_runtime.docker_run_pull_never_args ()
+    @ [ image; "sh"; "-lc"; command ]
   in
   map_status_to_exec_result
     (gated_argv_with_status_split ~timeout_sec ~summary:"keeper docker run (oneshot)" argv)
@@ -395,6 +397,7 @@ let run_detached_argv
   in
   Keeper_sandbox_runtime.docker_command_argv ()
   @ [ "run"; "-d"; "--rm"; "--name"; Keeper_container_name.to_string (P.container_name plan) ]
+  @ Keeper_sandbox_runtime.docker_run_pull_never_args ()
   @ List.concat_map label_arg (P.labels plan @ edge_labels)
   @ user_args (P.user plan)
   @ List.concat_map env_arg (P.env_overrides plan)
@@ -438,6 +441,9 @@ let run_detached (plan : Keeper_sandbox_session_plan.t) =
   | Ok () ->
     let ensure_timeout = session_preflight_timeout_sec () in
     let start_timeout = session_start_timeout_sec () in
+    (match image_present ~image:(Keeper_sandbox_session_plan.image plan) with
+     | Error _ as err -> err
+     | Ok () ->
     (match Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime ~timeout_sec:ensure_timeout with
      | Error _ ->
        (* docker runtime could not be ensured — daemon-level. *)
@@ -465,5 +471,5 @@ let run_detached (plan : Keeper_sandbox_session_plan.t) =
              class); a future RFC could distinguish. *)
           Error Keeper_docker_client.Daemon_unreachable
         | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _, _ ->
-          Error Keeper_docker_client.Daemon_unreachable))
+          Error Keeper_docker_client.Daemon_unreachable)))
 ;;

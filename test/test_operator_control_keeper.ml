@@ -158,12 +158,20 @@ fi\n\
 cmd=$1\n\
 shift\n\
 case \"$cmd\" in\n\
-  info)\n\
-    printf '[]\\n'\n\
-    exit 0\n\
-    ;;\n\
-  ps)\n\
-    want_kind=''\n\
+	  info)\n\
+	    printf '[]\\n'\n\
+	    exit 0\n\
+	    ;;\n\
+	  image)\n\
+	    if [ \"$1\" = \"inspect\" ] && [ \"$2\" = \"alpine:test\" ]; then\n\
+	      printf '[]\\n'\n\
+	      exit 0\n\
+	    fi\n\
+	    printf 'missing image\\n' >&2\n\
+	    exit 1\n\
+	    ;;\n\
+	  ps)\n\
+	    want_kind=''\n\
     while [ \"$#\" -gt 0 ]; do\n\
       case \"$1\" in\n\
         --filter)\n\
@@ -208,9 +216,9 @@ case \"$cmd\" in\n\
           esac\n\
           shift 2\n\
           ;;\n\
-        --user|--tmpfs|-v|--workdir|--pids-limit|--memory|--network|--security-opt)\n\
-          shift 2\n\
-          ;;\n\
+	        --user|--tmpfs|-v|--workdir|--pids-limit|--memory|--network|--security-opt|--pull)\n\
+	          shift 2\n\
+	          ;;\n\
         -d|--rm|--read-only|--cap-drop=ALL)\n\
           shift\n\
           ;;\n\

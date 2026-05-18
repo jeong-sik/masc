@@ -120,12 +120,16 @@ let fake_docker_echo_script =
    if [ -n \"$log_file\" ]; then\n\
    \  printf '%s\\n' \"$*\" >> \"$log_file\"\n\
    fi\n\
-   if [ \"$1\" = \"info\" ]; then\n\
-   \  printf '[]\\n'\n\
-   \  exit 0\n\
-   fi\n\
-   if [ \"$1\" != \"run\" ]; then\n\
-   \  printf 'unexpected docker invocation: %s\\n' \"$1\" >&2\n\
+	   if [ \"$1\" = \"info\" ]; then\n\
+	   \  printf '[]\\n'\n\
+	   \  exit 0\n\
+	   fi\n\
+	   if [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ] && [ \"$3\" = \"alpine:test\" ]; then\n\
+	   \  printf '[]\\n'\n\
+	   \  exit 0\n\
+	   fi\n\
+	   if [ \"$1\" != \"run\" ]; then\n\
+	   \  printf 'unexpected docker invocation: %s\\n' \"$1\" >&2\n\
    \  exit 2\n\
    fi\n\
    shift\n\

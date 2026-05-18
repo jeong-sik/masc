@@ -74,6 +74,19 @@ export function PhaseConditionsPanel({ diagnosis }: { diagnosis: PhaseDiagnosis 
       ? 'warn'
       : 'neutral'
 
+  // TLA invariant `phase_derivation_agreement` (KeeperCompositeLifecycle.tla;
+  // see lib/keeper/keeper_composite_observer.ml:599-602 phase_diagnosis_to_json):
+  // stored KSM phase must agree with `derive_phase(conditions)` for the
+  // recorded condition vector. When the two strings disagree on this
+  // panel the spec invariant is *currently violated* — surface that
+  // visually with warn/bad tones instead of leaving both chips in
+  // neutral/info (the prior layout required the operator to spot the
+  // disagreement by string comparison).
+  const driftDetected =
+    diagnosis.currentPhase !== null
+    && diagnosis.derivedPhase !== null
+    && diagnosis.currentPhase !== diagnosis.derivedPhase
+
   return html`
     <section
       class="grid gap-3"
@@ -91,10 +104,13 @@ export function PhaseConditionsPanel({ diagnosis }: { diagnosis: PhaseDiagnosis 
         </div>
         <div class="flex flex-wrap items-center gap-1.5 text-3xs">
           ${diagnosis.currentPhase ? html`
-            <${StatusChip} tone="neutral" uppercase=${false} class="font-mono">current ${diagnosis.currentPhase}</${StatusChip}>
+            <${StatusChip} tone=${driftDetected ? 'warn' : 'neutral'} uppercase=${false} class="font-mono">current ${diagnosis.currentPhase}</${StatusChip}>
           ` : null}
           ${diagnosis.derivedPhase ? html`
-            <${StatusChip} tone="info" uppercase=${false} class="font-mono">derived ${diagnosis.derivedPhase}</${StatusChip}>
+            <${StatusChip} tone=${driftDetected ? 'warn' : 'info'} uppercase=${false} class="font-mono">derived ${diagnosis.derivedPhase}</${StatusChip}>
+          ` : null}
+          ${driftDetected ? html`
+            <${StatusChip} tone="bad" uppercase=${false} title="phase_derivation_agreement (TLA): stored phase != derive_phase(conditions)">drift</${StatusChip}>
           ` : null}
           <${StatusChip} tone=${executableTone} uppercase=${false}>
             turn ${diagnosis.canExecuteTurn === null ? 'unknown' : diagnosis.canExecuteTurn ? 'executable' : 'blocked'}

@@ -7,12 +7,16 @@ type metric_kind = [ `Counter | `Gauge | `Histogram ]
 type register_histogram =
   name:string -> help:string -> ?labels:(string * string) list -> unit -> unit
 
+type register_gauge =
+  name:string -> help:string -> ?labels:(string * string) list -> unit -> unit
+
 type inc_counter =
   string -> ?labels:(string * string) list -> ?delta:float -> unit -> unit
 
 let register
       ~(add : string -> string -> metric_kind -> unit)
       ~(register_histogram : register_histogram)
+      ~(register_gauge : register_gauge)
       ~inc_counter:(_ : inc_counter)
       ()
   =
@@ -401,5 +405,5 @@ let register
     "Total context compaction actions triggered by OAS event bus. Labels: [agent_name, \
      trigger]."
     `Counter;
-  install_backend_mutex_observers ()
+  ()
 ;;

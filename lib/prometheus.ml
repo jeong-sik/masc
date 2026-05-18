@@ -264,7 +264,13 @@ let init () =
     then
       Hashtbl.add metrics key { name; help; metric_type; value = 0.0; labels = [] }
   in
-  Prometheus_builtin_metrics.register ~add ~register_histogram ~inc_counter ()
+  Prometheus_builtin_metrics.register
+    ~add
+    ~register_histogram
+    ~register_gauge
+    ~inc_counter
+    ();
+  install_backend_mutex_observers ()
 ;;
 
 let start_time = Time_compat.now ()

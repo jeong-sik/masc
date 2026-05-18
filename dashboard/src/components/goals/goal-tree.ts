@@ -15,12 +15,9 @@ import { EmptyState, ErrorState, LoadingState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
 import { FilterChips } from '../common/filter-chips'
 import { StatusBadge } from '../common/status-badge'
-<<<<<<< HEAD
 import { executionOutcomeLabel } from '../fsm-hub-types'
-||||||| parent of 4cc3b7dc43 (fix(dashboard): Korean labels for operator_disposition + operator_disposition_reason)
-=======
 import { operatorDispositionReasonLabel } from '../fsm-hub-types'
->>>>>>> 4cc3b7dc43 (fix(dashboard): Korean labels for operator_disposition + operator_disposition_reason)
+import { cascadeOutcomeLabel } from '../fsm-hub-types'
 import { ringFocusClasses } from '../common/ring'
 import { trustDispositionLabel } from '../fsm-hub-types'
 import { TimeAgo } from '../common/time-ago'
@@ -965,7 +962,7 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
         <div>캐스케이드</div>
         <div class="text-right text-text-body">${keeper.cascade_name ?? executionCascadeOutcome ?? '-'}</div>
         <div>결과</div>
-        <div class="text-right text-text-body">${keeper.cascade_outcome ?? executionCascadeOutcome ?? '-'}</div>
+        <div class="text-right text-text-body" title=${keeper.cascade_outcome ?? executionCascadeOutcome ?? ''}>${cascadeOutcomeLabel(keeper.cascade_outcome ?? executionCascadeOutcome) ?? '-'}</div>
       </div>
       ${shouldShowTrustSummary ? html`
         <div class="mt-3 rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] p-3">

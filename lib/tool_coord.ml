@@ -155,7 +155,10 @@ let credential_state (ctx : context) ~actual_name =
 ;;
 
 let status_worktree_active (ctx : context) =
-  let wt_dir = Filename.concat ctx.config.base_path ".worktrees" in
+  (* RFC-0121: layout SSOT via [Config_dir_resolver.worktrees_dir]. *)
+  let wt_dir =
+    Config_dir_resolver.worktrees_dir ~base_path:ctx.config.base_path
+  in
   try
     Sys.file_exists wt_dir
     && Sys.is_directory wt_dir

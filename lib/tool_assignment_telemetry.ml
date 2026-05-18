@@ -211,7 +211,12 @@ let get_or_create_store () : Dated_jsonl.t =
         | Some s -> s
         | None ->
             let base_path = Env_config.base_path () in
-            let dir = Filename.concat base_path "data/tool-events" in
+            (* RFC-0121: layout SSOT via [Config_dir_resolver.data_dir]. *)
+            let dir =
+              Filename.concat
+                (Config_dir_resolver.data_dir ~base_path)
+                "tool-events"
+            in
             Fs_compat.mkdir_p dir;
             let s = Dated_jsonl.create ~base_dir:dir () in
             store_ref := Some s;

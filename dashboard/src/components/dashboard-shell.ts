@@ -194,6 +194,7 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
     ?? fleet?.executable_reaction_capacity_count
     ?? runningFibers
   const pausedKeepers = fleet?.paused_keeper_count ?? paused
+  const pausedAutobootKeepers = fleet?.paused_autoboot_enabled_keeper_count ?? null
   const targetCapacity = fleet?.target_reaction_capacity_count ?? fleet?.autoboot_enabled_keeper_count ?? null
   const bootableKeepers = fleet?.bootable_keeper_count ?? null
   const minimumRunning = fleet?.minimum_running_fibers ?? null
@@ -206,15 +207,17 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
   const fdPressureBlocked = fdPressureBlockedKeepers(fleetSafety)
   const pausedOnlyNoExecutable =
     executableFibers === 0
-    && pausedKeepers > 0
+    && pausedAutobootKeepers != null
+    && pausedAutobootKeepers > 0
     && targetCapacity != null
-    && pausedKeepers >= targetCapacity
+    && pausedAutobootKeepers >= targetCapacity
   if (pausedOnlyNoExecutable) {
     const capacityDetail = [
       `status=${fleetStatus ?? 'paused'}`,
       `running_keeper_fiber_count=${runningFibers ?? 0}`,
       `executable_keeper_fiber_count=${executableFibers}`,
       `paused_keeper_count=${pausedKeepers}`,
+      `paused_autoboot_enabled_keeper_count=${pausedAutobootKeepers}`,
       targetCapacity != null ? `target_reaction_capacity_count=${targetCapacity}` : null,
       minimumRunning != null ? `minimum_running_fibers=${minimumRunning}` : null,
     ].filter((item): item is string => item != null).join(', ')
@@ -231,6 +234,7 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
       `running_keeper_fiber_count=${runningFibers ?? 0}`,
       executableFibers != null ? `executable_keeper_fiber_count=${executableFibers}` : null,
       `paused_keeper_count=${pausedKeepers}`,
+      pausedAutobootKeepers != null ? `paused_autoboot_enabled_keeper_count=${pausedAutobootKeepers}` : null,
       bootableKeepers != null ? `bootable_keeper_count=${bootableKeepers}` : null,
       targetCapacity != null ? `target_reaction_capacity_count=${targetCapacity}` : null,
       minimumRunning != null ? `minimum_running_fibers=${minimumRunning}` : null,

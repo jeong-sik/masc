@@ -278,7 +278,6 @@ jobs:
             );
             let shouldRestoreDraft = false;
             let shouldDisableAutoMerge = false;
-            let ciGatePolicyFailure = false;
             if (presentHardStopLabels.length > 0) {
               policyFailures.push(`hard-stop label present: ${presentHardStopLabels.join(", ")}`);
               shouldRestoreDraft = !current.isDraft;
@@ -366,69 +365,10 @@ jobs:
               }
             }
 
-            const latestCiGateForHead = async () => {
-              const checks = await github.rest.checks.listForRef({
-                owner,
-                repo,
-                ref: pr.head.sha,
-                check_name: "CI Gate",
-                per_page: 100
-              });
-              return [...(checks.data.check_runs || [])].sort((a, b) => {
-                const aTime = Date.parse(a.started_at || a.created_at || "") || 0;
-                const bTime = Date.parse(b.started_at || b.created_at || "") || 0;
-                return bTime - aTime;
-              })[0];
-            };
-
-            const waitForCiGate = async () => {
-              const waitSeconds = Number.parseInt(
-                process.env.AGENT_DRAFT_GUARD_CI_GATE_WAIT_SECONDS || "600",
-                10
-              );
-              const deadline = Date.now() + Math.max(0, waitSeconds) * 1000;
-              let latestCiGate = await latestCiGateForHead();
-              while (
-                (!latestCiGate || latestCiGate.status !== "completed") &&
-                Date.now() < deadline
-              ) {
-                const status = latestCiGate
-                  ? `${latestCiGate.status}/${latestCiGate.conclusion || "none"}`
-                  : "missing";
-                core.info(
-                  `Waiting for CI Gate on head ${pr.head.sha}: ${status}.`
-                );
-                await new Promise((resolve) => setTimeout(resolve, 15000));
-                latestCiGate = await latestCiGateForHead();
-              }
-              return latestCiGate;
-            };
-
-            // A verified human bypass label is an approval signal, not a CI
-            // completion signal. On synchronize/labeled events the CI Gate job
-            // may not exist until the long Build and Test dependency finishes;
-            // waiting here makes this required guard fail before CI can report.
-            // Branch protection still requires CI Gate separately, so only
-            // unsafe ready/auto-merge boundary events need this guard to wait.
-            const ciGateRequiredForUnsafeBoundary =
-              unsafeDraftBoundaryAction ||
-              hasAutoMergeRequest;
-            if (ciGateRequiredForUnsafeBoundary) {
-              const latestCiGate = await waitForCiGate();
-              if (
-                !latestCiGate ||
-                latestCiGate.status !== "completed" ||
-                latestCiGate.conclusion !== "success"
-              ) {
-                const ciGateStatus = latestCiGate
-                  ? `${latestCiGate.status}/${latestCiGate.conclusion || "none"} ${latestCiGate.html_url}`
-                  : "missing";
-                policyFailures.push(`CI Gate is not completed successfully for head ${pr.head.sha}: ${ciGateStatus}`);
-                shouldRestoreDraft = !current.isDraft;
-                shouldDisableAutoMerge = hasAutoMergeRequest;
-                ciGatePolicyFailure = true;
-              }
-            }
+            // This guard enforces approval and hard-stop policy only. CI Gate
+            // remains a separate branch-protection requirement for the same
+            // head SHA, so waiting here duplicates that gate and can deadlock
+            // ready/auto-merge events behind long Build/TLA jobs.
 
             if (current.autoMergeRequest && shouldDisableAutoMerge) {
               try {
@@ -507,9 +447,7 @@ jobs:
                 : policyFailures.length > 0
                 ? [
                     "",
-                    ciGatePolicyFailure
-                      ? "Manual action required: restore draft state if needed, add a bypass label only after explicit human approval, and wait for CI Gate success before re-enabling auto-merge."
-                      : "Manual action required: add a bypass label only after explicit human approval."
+                    "Manual action required: add a bypass label only after explicit human approval."
                   ]
                 : softFailures.length > 0
                 ? [

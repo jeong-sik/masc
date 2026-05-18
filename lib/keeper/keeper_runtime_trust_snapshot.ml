@@ -362,13 +362,21 @@ let approval_event_timeline_event json =
       let tool_name =
         json_string_opt_member "tool" json |> Option.value ~default:"tool"
       in
+      let keeper_name = json_string_opt_member "keeper" json in
+      let approval_summary text =
+        match keeper_name with
+        | Some keeper when String.trim keeper <> "" ->
+            Printf.sprintf "%s · keeper=%s" text keeper
+        | _ -> text
+      in
       let decision = json_string_opt_member "decision" json in
       let kind, title, summary, next_human_action =
         match event with
         | "pending" ->
             ( "approval_requested",
               Printf.sprintf "Approval · %s" tool_name,
-              "approval requested and waiting for operator decision",
+              approval_summary
+                "approval requested and waiting for operator decision",
               Some "resolve_approval" )
         | "resolved" ->
             let decision_label =
@@ -376,7 +384,7 @@ let approval_event_timeline_event json =
             in
             ( "approval_resolved",
               Printf.sprintf "Approval · %s" tool_name,
-              Printf.sprintf "approval %s" decision_label,
+              approval_summary (Printf.sprintf "approval %s" decision_label),
               None )
         | "expired" ->
             let blocker_note =
@@ -390,7 +398,8 @@ let approval_event_timeline_event json =
             in
             ( "approval_expired",
               Printf.sprintf "Approval · %s" tool_name,
-              (Option.value ~default:"approval expired" decision) ^ blocker_note,
+              approval_summary
+                ((Option.value ~default:"approval expired" decision) ^ blocker_note),
               Some next_action )
         | "approval_timeout" | "cancelled" ->
             let summary =
@@ -400,7 +409,7 @@ let approval_event_timeline_event json =
             in
             ( "approval_expired",
               Printf.sprintf "Approval · %s" tool_name,
-              summary,
+              approval_summary summary,
               Some "retry_or_rerun" )
         | "auto_approved_rule_match" ->
             let matched_by =
@@ -410,22 +419,22 @@ let approval_event_timeline_event json =
             in
             ( "approval_rule_match",
               Printf.sprintf "Approval Rule · %s" tool_name,
-              Printf.sprintf "auto-approved by %s" matched_by,
+              approval_summary (Printf.sprintf "auto-approved by %s" matched_by),
               None )
         | "auto_approved_always" ->
             ( "approval_always_flag",
               Printf.sprintf "Approval Always · %s" tool_name,
-              "auto-approved by keeper always_approve flag",
+              approval_summary "auto-approved by keeper always_approve flag",
               None )
         | "rule_created" ->
             ( "approval_rule_created",
               Printf.sprintf "Approval Rule · %s" tool_name,
-              "persistent approval rule recorded",
+              approval_summary "persistent approval rule recorded",
               None )
         | other ->
             ( "approval_event",
               Printf.sprintf "Approval · %s" tool_name,
-              other,
+              approval_summary other,
               None )
       in
       Some

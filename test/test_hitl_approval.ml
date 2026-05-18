@@ -1388,7 +1388,9 @@ let test_runtime_trust_approval_read_model_filters_after_wide_scan () =
       match approval_events with
       | [ event ] ->
         Alcotest.(check bool) "approval event title mentions tool" true
-          (contains_substring (event |> member "title" |> to_string) "keeper_shell")
+          (contains_substring (event |> member "title" |> to_string) "keeper_shell");
+        Alcotest.(check bool) "approval event summary mentions target keeper" true
+          (contains_substring (event |> member "summary" |> to_string) keeper_name)
       | _ -> Alcotest.fail "expected exactly one target approval event")
 
 (* ── Test runner ──────────────────────────────────────────── *)

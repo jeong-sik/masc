@@ -1334,7 +1334,7 @@ let run_docker_shell_command_with_status_internal
                                   "docker_shell_failed: unix_error: %s: %s(%s)"
                                   (Unix.error_message code)
                                   fn
-                                  arg)))))))))
+                                  arg))))))))
 ;;
 
 let run_docker_shell_command_with_status =

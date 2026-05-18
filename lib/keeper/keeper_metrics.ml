@@ -94,6 +94,7 @@ type t =
   | TraceEmitFailures
   | TransitionAuditFailures
   | ExecutionReceiptFailures
+  | OperatorBroadcastSuppressed
   | LlmBridgeFailures
   | SessionCleanupFailures
   | ShellBashFailures
@@ -298,6 +299,7 @@ let to_string = function
   | TraceEmitFailures -> "masc_keeper_trace_emit_failures_total"
   | TransitionAuditFailures -> "masc_keeper_transition_audit_failures_total"
   | ExecutionReceiptFailures -> "masc_keeper_execution_receipt_failures_total"
+  | OperatorBroadcastSuppressed -> "masc_keeper_operator_broadcast_suppressed_total"
   | LlmBridgeFailures -> "masc_keeper_llm_bridge_failures_total"
   | SessionCleanupFailures -> "masc_keeper_session_cleanup_failures_total"
   | ShellBashFailures -> "masc_keeper_shell_bash_failures_total"
@@ -622,6 +624,10 @@ let metric_keeper_transition_audit_failures =
 
 let metric_keeper_execution_receipt_failures =
   "masc_keeper_execution_receipt_failures_total"
+;;
+
+let metric_keeper_operator_broadcast_suppressed =
+  "masc_keeper_operator_broadcast_suppressed_total"
 ;;
 
 let metric_keeper_llm_bridge_failures = "masc_keeper_llm_bridge_failures_total"

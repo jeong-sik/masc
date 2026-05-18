@@ -459,6 +459,23 @@ let test_keeper_bash_blocks_repo_wide_scans () =
       {|git log --oneline -20|};
     ]
 
+let test_keeper_bash_repo_wide_scan_hints_use_structured_tools () =
+  let hint = Keeper_exec_shell.For_testing.keeper_bash_shape_block_hint in
+  (match hint {|git log --oneline --all --grep="15731" 2>/dev/null | head -5|} with
+   | Some msg ->
+     Alcotest.(check bool) "git history hint points to git_log" true
+       (String_util.contains_substring msg "keeper_shell op=git_log");
+     Alcotest.(check bool) "git history hint mentions grep" true
+       (String_util.contains_substring msg "grep=<term>")
+   | None -> Alcotest.fail "expected repo-wide git log hint");
+  (match hint {|rg "add_comment" repos/ --include '*.ml' --include '*.mli' -l|} with
+   | Some msg ->
+     Alcotest.(check bool) "rg hint points to structured rg" true
+       (String_util.contains_substring msg "keeper_shell op=rg");
+     Alcotest.(check bool) "rg hint discourages repos root" true
+       (String_util.contains_substring msg "Do not scan repos/")
+   | None -> Alcotest.fail "expected repo-wide rg hint")
+
 let test_docker_blocks_nested_docker_command () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
@@ -1418,6 +1435,8 @@ let () =
         test_keeper_bash_task_state_discovery_hint_uses_task_tools;
       Alcotest.test_case "repo-wide scans blocked" `Quick
         test_keeper_bash_blocks_repo_wide_scans;
+      Alcotest.test_case "repo-wide scan hints use structured tools" `Quick
+        test_keeper_bash_repo_wide_scan_hints_use_structured_tools;
       Alcotest.test_case "empty command blocked" `Quick test_empty_command;
       Alcotest.test_case "docker blocks nested docker command" `Quick
         test_docker_blocks_nested_docker_command;

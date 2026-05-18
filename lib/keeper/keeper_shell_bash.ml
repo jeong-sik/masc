@@ -729,22 +729,13 @@ let command_looks_like_cd_chained_search cmd =
   && lowercase_contains cmd "&&"
   && (lowercase_contains cmd "grep " || lowercase_contains cmd "rg ")
 
-module For_testing = struct
-  let elapsed_duration_ms = elapsed_duration_ms
+let command_looks_like_repo_wide_git_log_grep cmd =
+  lowercase_contains cmd "git log"
+  && lowercase_contains cmd "--all"
+  && lowercase_contains cmd "--grep"
 
-  let keeper_bash_shape_block_tag cmd =
-    Option.map bash_shape_block_tag (keeper_bash_shape_block cmd)
-
-  let raw_keeper_bash_shape_block_tag cmd =
-    Option.map bash_shape_block_tag (raw_keeper_bash_shape_block cmd)
-
-  let strip_stderr_dev_null_redirects = strip_stderr_dev_null_redirects
-
-  let keeper_bash_shape_block_hint cmd =
-    if command_looks_like_task_state_discovery cmd
-    then Some task_state_shell_hint
-    else None
-end
+let command_looks_like_repo_wide_rg cmd =
+  lowercase_contains cmd "rg " && lowercase_contains cmd " repos"
 
 let bash_shape_block_reason = function
   | Gh_pr_checks ->
@@ -787,6 +778,14 @@ let bash_shape_block_hint ~cmd = function
     "Run the discovery command first, then use its literal result in a second \
      keeper_bash call."
   | Repo_wide_scan ->
+    if command_looks_like_repo_wide_git_log_grep cmd then
+      "Do not use raw Bash for repo-wide git history grep. Use keeper_shell \
+       op=git_log with cwd set to the repo/worktree, count=5, and grep=<term>."
+    else if command_looks_like_repo_wide_rg cmd then
+      "Do not scan repos/ from raw keeper_bash. Use keeper_shell op=rg with a \
+       scoped path such as repos/masc-mcp/lib or repos/oas/src, plus type/glob \
+       filters."
+    else
     "Use keeper_shell op=rg/find with a scoped path such as lib/, test/, or a \
      specific repos/REPO subdirectory; avoid scanning . or repos/ from raw \
      bash."
@@ -831,11 +830,45 @@ let bash_shape_block_alternatives ~cmd = function
       "keeper_bash cmd='cat path/from/previous-step'";
     ]
   | Repo_wide_scan ->
-    [
-      "keeper_shell op=rg pattern=search-term path=lib";
-      "keeper_shell op=find path=lib name='*.ml'";
-      "keeper_bash cmd='git log --oneline -20'";
-    ]
+    if command_looks_like_repo_wide_git_log_grep cmd
+    then
+      [
+        "keeper_shell op=git_log cwd=repos/REPO count=5 grep=search-term";
+        "keeper_shell op=git_log cwd=repos/REPO/.worktrees/TASK count=5 grep=search-term";
+      ]
+    else if command_looks_like_repo_wide_rg cmd
+    then
+      [
+        "keeper_shell op=rg pattern=search-term path=repos/masc-mcp/lib glob=*.ml";
+        "keeper_shell op=rg pattern=search-term path=repos/oas/src glob=*.ml";
+        "keeper_shell op=find path=repos/REPO/lib name='*.ml'";
+      ]
+    else
+      [
+        "keeper_shell op=rg pattern=search-term path=lib";
+        "keeper_shell op=find path=lib name='*.ml'";
+        "keeper_bash cmd='git log --oneline -20'";
+      ]
+
+module For_testing = struct
+  let elapsed_duration_ms = elapsed_duration_ms
+
+  let keeper_bash_shape_block_tag cmd =
+    Option.map bash_shape_block_tag (keeper_bash_shape_block cmd)
+
+  let raw_keeper_bash_shape_block_tag cmd =
+    Option.map bash_shape_block_tag (raw_keeper_bash_shape_block cmd)
+
+  let strip_stderr_dev_null_redirects = strip_stderr_dev_null_redirects
+
+  let keeper_bash_shape_block_hint cmd =
+    match keeper_bash_shape_block cmd with
+    | Some block -> Some (bash_shape_block_hint ~cmd block)
+    | None ->
+      if command_looks_like_task_state_discovery cmd
+      then Some task_state_shell_hint
+      else None
+end
 
 let workflow_rejection_field = "failure_class", `String "workflow_rejection"
 

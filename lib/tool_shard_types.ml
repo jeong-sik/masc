@@ -833,6 +833,14 @@ let shell_tools : Masc_domain.tool_schema list =
                             "Result limit for ls/rg/find/tree, or line count for git_log"
                         )
                       ] )
+                ; ( "grep"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "Optional commit-message grep for git_log. Use this instead \
+                             of Bash commands like git log --all --grep ... | head." )
+                      ] )
                 ; ( "lines"
                   , `Assoc
                       [ "type", `String "integer"

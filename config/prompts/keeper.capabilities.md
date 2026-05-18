@@ -22,6 +22,7 @@ Do NOT use masc_code_shell from a Docker keeper. It resolves a different host pl
 Do NOT use `gh pr checks` as a success/failure gate inside keeper_bash. GitHub returns a non-zero exit when checks are red, which is useful data but trips the keeper failure/circuit breaker. Prefer `keeper_pr_status` when it is available. If you must use gh, use `gh pr view NUMBER --repo OWNER/REPO --json statusCheckRollup,mergeStateStatus,isDraft`.
 Do NOT use shell redirects at all. `2>&1`, `2&1`, `>/dev/null`, `| head`, and `|| true` are blocked or misparsed in keeper_bash.
 Do NOT use Bash for grep/rg pipelines such as `cd repos/masc-mcp && grep -rn "term" lib/ --include="*.ml" | head -40`. Use `keeper_shell op=rg pattern="term" path=lib glob=*.ml` with `cwd` set to the repo/worktree when needed.
+Do NOT run repo-wide Bash scans such as `rg "term" repos/ ...` or `git log --all --grep="term" 2>/dev/null | head -5`. Use `keeper_shell op=rg path=repos/<REPO>/lib` or `keeper_shell op=git_log cwd=repos/<REPO> count=5 grep="term"`.
 ## Tool error grammar (how to read a failed tool result)
 
 Every failed tool call returns a JSON envelope like:
@@ -52,6 +53,10 @@ keeper_bash examples:
   GOOD: keeper_shell op=rg pattern="foo|bar" path=repos/masc-mcp/lib
   BAD:  cmd="cd repos/masc-mcp && grep -rn \"exec_semantic\" lib/ --include=\"*.ml\" | head -40"
   GOOD: keeper_shell op=rg pattern="exec_semantic" path=lib glob=*.ml
+  BAD:  cmd="git log --oneline --all --grep=\"15731\" 2>/dev/null | head -5"
+  GOOD: keeper_shell op=git_log cwd=repos/masc-mcp count=5 grep="15731"
+  BAD:  cmd="rg \"add_comment\" repos/ --include '*.ml' --include '*.mli' -l"
+  GOOD: keeper_shell op=rg pattern="add_comment" path=repos/masc-mcp/lib glob=*.ml
   BAD:  cmd="cat file 2>/dev/null || echo missing"
   GOOD: keeper_shell op=cat path=file                 (let the tool error explain missing files)
   BAD:  cmd="ls path 2>/dev/null && echo EXISTS || echo NOT_FOUND"

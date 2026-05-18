@@ -218,44 +218,9 @@ let json_int_opt = function
 let json_string_list values =
   `List (List.map (fun value -> `String value) values)
 
-let event_bus_summary_json scan =
-  let correlation_ids =
-    scan.event_bus_correlation_ids
-    |> List.rev
-    |> Json_util.dedupe_keep_order
-  in
-  let run_ids =
-    scan.event_bus_run_ids |> List.rev |> Json_util.dedupe_keep_order
-  in
-  let last_compaction =
-    match scan.last_compaction with
-    | Some value -> value
-    | None -> `Null
-  in
-  `Assoc
-    [
-      ("event_bus_correlated_count", `Int scan.event_bus_count);
-      ("correlation_ids", json_string_list correlation_ids);
-      ("run_ids", json_string_list run_ids);
-      ( "context_compact_started_count",
-        `Int scan.context_compact_started_count );
-      ( "context_compacted_count",
-        `Int scan.context_compacted_count );
-      ("last_compaction", last_compaction);
-    ]
-
-let memory_summary_json scan =
-  `Assoc
-    [
-      ("memory_injected_count", `Int scan.memory_injected_count);
-      ( "memory_injected_present_count",
-        `Int scan.memory_injected_present_count );
-      ("memory_flushed_count", `Int scan.memory_flushed_count);
-      ("memory_flush_success_count", `Int scan.memory_flush_success_count);
-      ("memory_flush_error_count", `Int scan.memory_flush_error_count);
-      ("episodes_flushed", `Int scan.episodes_flushed);
-      ("procedures_flushed", `Int scan.procedures_flushed);
-    ]
+(* Runtime event-bus and memory summaries moved to
+   Server_dashboard_http_keeper_runtime_event_summaries
+   (intra-library file split, 2026-05-18). *)
 
 include Server_dashboard_http_keeper_runtime_lens_swimlane
 
@@ -525,7 +490,10 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                     | Some value -> value
                     | None -> `Null );
                 ] );
-            ("memory", memory_summary_json scan);
+            ( "memory",
+              Server_dashboard_http_keeper_runtime_event_summaries
+              .memory_summary_json
+                scan );
           ] );
       ( "swimlanes",
         `Assoc
@@ -734,8 +702,14 @@ let keeper_runtime_trace_json (config : Coord.config) (name : string)
                 Server_dashboard_http_keeper_runtime_trace_summaries
                 .provider_attempts_summary_json
                   manifest_scan );
-              ("event_bus", event_bus_summary_json manifest_scan);
-              ("memory", memory_summary_json manifest_scan);
+              ( "event_bus",
+                Server_dashboard_http_keeper_runtime_event_summaries
+                .event_bus_summary_json
+                  manifest_scan );
+              ( "memory",
+                Server_dashboard_http_keeper_runtime_event_summaries
+                .memory_summary_json
+                  manifest_scan );
               ( "runtime_lens",
                 runtime_lens_json ~config ~keeper_name:name ~trace_id ?turn_id
                   manifest_scan );

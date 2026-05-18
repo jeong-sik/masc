@@ -295,26 +295,26 @@
             <td><code>lib/prometheus.ml</code> 3082 LOC</td>
           </tr>
           <tr>
-            <td>Stack after #16247</td>
-            <td><code>fc550a4fe3</code></td>
-            <td class="num">53</td>
-            <td class="num">87,248</td>
-            <td class="num">2</td>
+            <td>Stack after prometheus split</td>
+            <td><code>13606780c2</code></td>
+            <td class="num">52</td>
+            <td class="num">84,608</td>
+            <td class="num">1</td>
             <td class="num">0</td>
             <td><code>lib/keeper/keeper_unified_turn.ml</code> 2890 LOC</td>
           </tr>
         </tbody>
       </table>
       <div class="panel ok">
-        <span class="tag green">-22 files from initial audit</span>
-        <span class="tag green">-26,955 LOC from initial audit</span>
-        <span class="tag blue">2000+ bucket down to 2</span>
+        <span class="tag green">-23 files from initial audit</span>
+        <span class="tag green">-29,595 LOC from initial audit</span>
+        <span class="tag blue">2000+ bucket down to 1</span>
         <span class="tag blue">3000+ eliminated in stack</span>
-        <span class="tag violet">53 files remain</span>
+        <span class="tag violet">52 files remain</span>
         <p>
           Progress 기준은 이 문서의 원래 범위와 동일하게 <code>lib/**/*.ml</code> 중 1000+ LOC만 센다.
-          현재 열린 stack 기준으로는 초기 75개에서 53개까지 내려왔고,
-          3000+ LOC 파일은 남지 않았으며 2000+ LOC 파일도 2개로 줄었다.
+          현재 열린 stack 기준으로는 초기 75개에서 52개까지 내려왔고,
+          3000+ LOC 파일은 남지 않았으며 2000+ LOC 파일도 1개로 줄었다.
         </p>
       </div>
     </section>
@@ -331,12 +331,6 @@
             <td><a href="../../lib/keeper/keeper_unified_turn.ml">lib/keeper/keeper_unified_turn.ml</a></td>
             <td>Turn-state projection, prompt assembly, run envelope, receipt/finalization seams</td>
             <td>Current largest file. Keep behavior stable while cutting pure helpers and typed summaries first.</td>
-          </tr>
-          <tr>
-            <td class="rank-p0">P0</td><td class="num">2640</td>
-            <td><a href="../../lib/prometheus.ml">lib/prometheus.ml</a></td>
-            <td>Finish remaining registry/render/store split after metric-name modules</td>
-            <td>Still a central hub, but prior stack removed the domain metric-name growth from the facade.</td>
           </tr>
           <tr>
             <td class="rank-p2">P2</td><td class="num">1999</td>
@@ -398,7 +392,7 @@
         </thead>
         <tbody>
           <tr><td>Keeper</td><td class="num">24</td><td class="num">39,266</td><td><code>keeper_unified_turn</code>, <code>keeper_supervisor</code>, <code>keeper_registry</code>, <code>keeper_agent_run</code></td><td>Split internal seams first; promote only leaf closures after registry/type cycles are cut.</td></tr>
-          <tr><td>Root tools/metrics</td><td class="num">9</td><td class="num">16,167</td><td><code>prometheus</code>, <code>model_inference_metrics</code>, <code>worker_dev_tools</code>, <code>tool_board</code>, <code>tool_keeper</code></td><td>Facade-compatible private modules, then low-dependency sub-libraries for metrics/schema/tool gates.</td></tr>
+          <tr><td>Root tools/metrics</td><td class="num">8</td><td class="num">13,527</td><td><code>model_inference_metrics</code>, <code>worker_dev_tools</code>, <code>tool_board</code>, <code>tool_keeper</code></td><td>Facade-compatible private modules, then low-dependency sub-libraries for metrics/schema/tool gates.</td></tr>
           <tr><td>Server</td><td class="num">7</td><td class="num">11,982</td><td><code>server_dashboard_http_keeper_api</code>, <code>server_dashboard_http_core</code>, <code>server_runtime_bootstrap</code></td><td>Handler seams first; route parity after handlers stabilize.</td></tr>
           <tr><td>Dashboard</td><td class="num">4</td><td class="num">6,199</td><td><code>dashboard_http_keeper</code>, <code>dashboard_goals_types</code>, <code>dashboard_cascade</code></td><td>Projection helpers and JSON builders; preserve compact mode.</td></tr>
           <tr><td>Cascade</td><td class="num">4</td><td class="num">6,247</td><td><code>cascade_transport</code>, <code>cascade_catalog_runtime</code>, <code>cascade_config</code></td><td>Cut <code>Cascade_runner</code> ownership leak; extract refs/names before transport.</td></tr>
@@ -562,7 +556,6 @@ ocamlformat --check &lt;touched .ml/.mli files&gt;</code></pre>
         </thead>
         <tbody>
           <tr><td class="num">2890</td><td><a href="../../lib/keeper/keeper_unified_turn.ml">lib/keeper/keeper_unified_turn.ml</a></td><td>keeper</td></tr>
-          <tr><td class="num">2640</td><td><a href="../../lib/prometheus.ml">lib/prometheus.ml</a></td><td>metrics</td></tr>
           <tr><td class="num">1999</td><td><a href="../../lib/keeper/keeper_hooks_oas.ml">lib/keeper/keeper_hooks_oas.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">1998</td><td><a href="../../lib/keeper/keeper_supervisor.ml">lib/keeper/keeper_supervisor.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">1996</td><td><a href="../../lib/keeper/keeper_agent_run.ml">lib/keeper/keeper_agent_run.ml</a></td><td>keeper</td></tr>

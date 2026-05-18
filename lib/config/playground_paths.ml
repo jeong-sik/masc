@@ -98,10 +98,9 @@ let bundle_paths (name : string) : string list =
      .masc/playground/<keeper>/repos/<repo_id>/<rel>           — Local
      .masc/playground/docker/<keeper>/repos/<repo_id>/<rel>    — Docker
 
-   The function is structural: it walks the segments to find the
-   ".../repos/<id>/..." anchor inside the [.masc/playground/] subtree.
-   Anything outside that subtree, or paths that stop before the
-   anchor, return [None]. *)
+   The function is structural: it only accepts paths anchored at the
+   [.masc/playground/] subtree root. Anything outside that subtree, or
+   paths that stop before the [repos/<id>/<rel>] anchor, return [None]. *)
 let parse_playground_repo_path ~base_path ~abs_path =
   if Filename.is_relative abs_path then None
   else
@@ -119,28 +118,24 @@ let parse_playground_repo_path ~base_path ~abs_path =
           (String.length abs_path - String.length base_with_slash)
       in
       let segs = String.split_on_char '/' rel in
-      (* Locate the ".masc" + "playground" prefix, then the *first*
-         "repos" segment after it. The segment immediately following
-         "repos" is the repo_id, and everything after that is the
-         repo-relative remainder.
+      (* Require the ".masc" + "playground" prefix at the base-relative
+         root, then parse the accepted layouts structurally. Do not scan
+         for a later "repos" segment: keeper names can themselves be
+         "repos", and repository working trees may legitimately contain
+         nested ".masc/playground" directories.
          Layouts accepted:
            .masc/playground/<keeper>/repos/<id>/<rel>          (Local)
            .masc/playground/docker/<keeper>/repos/<id>/<rel>   (Docker) *)
-      let rec after_playground = function
-        | ".masc" :: "playground" :: tl -> Some tl
-        | _ :: tl -> after_playground tl
-        | [] -> None
-      in
-      match after_playground segs with
-      | None -> None
-      | Some rest ->
-        let rec find_repos = function
-          | "repos" :: repo :: r when repo <> "" && r <> [] ->
-            Some (repo, String.concat "/" r)
-          | _ :: tl -> find_repos tl
-          | [] -> None
-        in
-        find_repos rest
+      match segs with
+      | ".masc" :: "playground" :: rest -> (
+        match rest with
+        | "docker" :: _keeper :: "repos" :: repo :: r
+          when repo <> "" && r <> [] ->
+          Some (repo, String.concat "/" r)
+        | _keeper :: "repos" :: repo :: r when repo <> "" && r <> [] ->
+          Some (repo, String.concat "/" r)
+        | _ -> None)
+      | _ -> None
 ;;
 
 (** {1 Worktree Naming}

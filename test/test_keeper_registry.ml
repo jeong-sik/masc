@@ -2,7 +2,9 @@ open Alcotest
 
 module R = Masc_mcp.Keeper_registry
 module Keeper_types = Masc_mcp.Keeper_types
+module Keepalive = Masc_mcp.Keeper_keepalive
 module KSM = Masc_mcp.Keeper_state_machine
+module Sup = Masc_mcp.Keeper_supervisor
 module Audit = Masc_mcp.Keeper_transition_audit
 module Hooks = Masc_mcp.Keeper_lifecycle_hooks
 module Meas = Masc_mcp.Keeper_measurement
@@ -25,6 +27,17 @@ let with_env name value f =
       | Some v -> Unix.putenv name v
       | None -> Unix.putenv name "")
     f
+
+let with_bootstrap_max_active_keepers max_keepers f =
+  Fun.protect
+    ~finally:Masc_mcp.Keeper_runtime_resolved.reset_for_tests
+    (fun () ->
+       with_env
+         "MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS"
+         (string_of_int max_keepers)
+         (fun () ->
+            Masc_mcp.Keeper_runtime_resolved.reset_for_tests ();
+            f ()))
 
 let rec rm_rf path =
   if Sys.file_exists path then
@@ -1338,6 +1351,60 @@ let test_record_spawn_slot_denied_emits_metric () =
   let after = Masc_mcp.Prometheus.metric_value_or_zero metric ~labels () in
   check (float 0.001) "spawn denial metric incremented" (before +. 1.0) after
 
+let make_eio_keeper_context env sw base_path =
+  let config = Masc_mcp.Coord.default_config base_path in
+  { Keeper_types.config
+  ; agent_name = "operator"
+  ; sw
+  ; clock = Eio.Stdenv.clock env
+  ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+  ; net = Some (Eio.Stdenv.net env)
+  }
+
+let seed_running_keeper ~base_path name =
+  ignore (R.register ~base_path name (make_meta name))
+
+let assert_spawn_denial_did_not_register ~base_path ~denied_name =
+  check bool "denied keeper not registered" false
+    (R.is_registered ~base_path denied_name);
+  check bool "denied keeper not running" false
+    (R.is_running ~base_path denied_name);
+  check int "running count unchanged" 1 (R.count_running ~base_path ());
+  check int "registry contains only seed keeper" 1
+    (List.length (R.all ~base_path ()))
+
+let test_start_keepalive_admission_denial_does_not_register_or_fork () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_base_path "start-keepalive-denied" in
+  Eio.Switch.on_release sw (fun () ->
+    R.clear ();
+    rm_rf base_path);
+  R.clear ();
+  with_bootstrap_max_active_keepers 1 @@ fun () ->
+  seed_running_keeper ~base_path "slot-holder";
+  check int "seed running count" 1 (R.count_running ~base_path ());
+  let ctx = make_eio_keeper_context env sw base_path in
+  let denied_name = "start-denied" in
+  Keepalive.start_keepalive ctx (make_meta denied_name);
+  assert_spawn_denial_did_not_register ~base_path ~denied_name
+
+let test_supervisor_admission_denial_does_not_register_or_fork () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_base_path "supervisor-keepalive-denied" in
+  Eio.Switch.on_release sw (fun () ->
+    R.clear ();
+    rm_rf base_path);
+  R.clear ();
+  with_bootstrap_max_active_keepers 1 @@ fun () ->
+  seed_running_keeper ~base_path "slot-holder";
+  check int "seed running count" 1 (R.count_running ~base_path ());
+  let ctx = make_eio_keeper_context env sw base_path in
+  let denied_name = "supervisor-denied" in
+  Sup.supervise_keepalive ~proactive_warmup_sec:0 ctx (make_meta denied_name);
+  assert_spawn_denial_did_not_register ~base_path ~denied_name
+
 (* ── Board tracking tests ─────────────────────────────── *)
 
 let test_last_agent_count_default () =
@@ -2419,6 +2486,14 @@ let () =
             test_spawn_slot_denial_reason_labels;
           eio_test "spawn slot denial emits metric"
             test_record_spawn_slot_denied_emits_metric;
+          test_case
+            "start_keepalive admission denial does not register or fork"
+            `Quick
+            test_start_keepalive_admission_denial_does_not_register_or_fork;
+          test_case
+            "supervisor admission denial does not register or fork"
+            `Quick
+            test_supervisor_admission_denial_does_not_register_or_fork;
         ] );
       ( "board_tracking",
         [

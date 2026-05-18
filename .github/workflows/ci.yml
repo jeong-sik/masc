@@ -5,7 +5,7 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch: {}
 
 permissions:
@@ -27,9 +27,10 @@ concurrency:
   # same branch also supersede older post-merge CI EXCEPT for main pushes —
   # main commits are independent state that must each be verified (background:
   # #14668 / #14670, 30+ main runs cancelled before TLA could complete on
-  # 2026-05-11). State-only readiness is enforced by PR Automation against the
-  # existing head CI Gate; it must not create a fresh required CI Gate context.
-  cancel-in-progress: ${{ (github.event_name == 'push' && github.ref_name != 'main') || (github.event_name == 'pull_request' && contains(fromJSON('["opened","synchronize","reopened"]'), github.event.action)) }}
+  # 2026-05-11). ready_for_review is kept so the CI Gate can recompute the
+  # agent draft policy after a human bypass label is added without requiring
+  # an otherwise empty follow-up commit.
+  cancel-in-progress: ${{ (github.event_name == 'push' && github.ref_name != 'main') || (github.event_name == 'pull_request' && contains(fromJSON('["opened","synchronize","reopened","ready_for_review"]'), github.event.action)) }}
 
 jobs:
   pr-sync-check:

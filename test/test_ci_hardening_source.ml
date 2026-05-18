@@ -179,11 +179,11 @@ let test_ci_sync_and_asset_contracts () =
     (file_contains_pattern ".github/workflows/ci.yml" "Verify PR sync");
   check bool "ci workflow passes pr number to sync check" true
     (file_contains_pattern ".github/workflows/ci.yml" "--pr-number \"$PR_NUMBER\"");
-  check bool "ci workflow does not create CI Gate on PR readiness state events" true
-    (file_not_contains_pattern ".github/workflows/ci.yml" "ready_for_review");
-  check bool "ci workflow does not cancel builds on readiness state events" true
+  check bool "ci workflow recomputes CI Gate on PR readiness state events" true
+    (file_contains_pattern ".github/workflows/ci.yml" "ready_for_review");
+  check bool "ci workflow cancels superseded readiness state runs" true
     (file_contains_pattern ".github/workflows/ci.yml"
-       {|contains(fromJSON('["opened","synchronize","reopened"]'), github.event.action)|});
+       {|contains(fromJSON('["opened","synchronize","reopened","ready_for_review"]'), github.event.action)|});
   check bool "pr automation owns PR readiness policy" true
     (file_contains_pattern ".github/workflows/pr-automation.yml"
        "ready_for_review");

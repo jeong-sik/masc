@@ -420,6 +420,14 @@ let test_validate_code_shell_command_allows_grep () =
   check (result unit string) "grep allowed" (Ok ())
     (Tool_code_write.validate_code_shell_command "grep -R -n TODO lib")
 
+let test_validate_code_shell_command_allows_quoted_regex_alternation () =
+  check (result unit string) "quoted rg alternation allowed" (Ok ())
+    (Tool_code_write.validate_code_shell_command
+       "rg \"tool_policy\\|tool_preset\\|preset_policy\\|toolset\" --type=ml -l");
+  check (result unit string) "quoted alternation before real pipe allowed" (Ok ())
+    (Tool_code_write.validate_code_shell_command
+       "rg 'keeper.*tool|tool.*keeper' --type=ml -l | head -20")
+
 let test_validate_code_shell_command_uses_code_shell_allowlist_hint () =
   match Tool_code_write.validate_code_shell_command "python3 --version" with
   | Error reason ->
@@ -630,6 +638,28 @@ let test_code_shell_grep_exit_one_no_matches_is_success () =
   in
   let ok, msg = dispatch_exn ctx ~name:"masc_code_shell" ~args in
   check bool "grep no-match exit 1 is a successful empty result" true ok;
+  check string "status" "ok" (json_string_field "status" msg);
+  check int "exit_code" 1 (json_int_field "exit_code" msg);
+  check string "exit_semantics" "no_matches"
+    (json_string_field "exit_semantics" msg)
+
+let test_code_shell_pipeline_grep_exit_one_no_matches_is_success () =
+  with_temp_dir "tool-code-shell-pipe-grep" @@ fun dir ->
+  let fixture = Filename.concat dir "sample.txt" in
+  write_file fixture "present\n";
+  let ctx = make_ctx () in
+  let args =
+    `Assoc
+      [
+        ( "command",
+          `String
+            (Printf.sprintf "cat %s 2>&1 | grep __masc_code_shell_no_match__"
+               (Filename.quote fixture)) );
+        ("timeout", `Int 5);
+      ]
+  in
+  let ok, msg = dispatch_exn ctx ~name:"masc_code_shell" ~args in
+  check bool "pipeline grep no-match exit 1 is successful" true ok;
   check string "status" "ok" (json_string_field "status" msg);
   check int "exit_code" 1 (json_int_field "exit_code" msg);
   check string "exit_semantics" "no_matches"
@@ -864,6 +894,8 @@ let () =
         test_validate_code_shell_command_rejects_direct_dune;
       test_case "allows grep" `Quick
         test_validate_code_shell_command_allows_grep;
+      test_case "allows quoted regex alternation" `Quick
+        test_validate_code_shell_command_allows_quoted_regex_alternation;
       test_case "uses code shell allowlist hint" `Quick
         test_validate_code_shell_command_uses_code_shell_allowlist_hint;
       test_case "rejects semicolon" `Quick
@@ -874,6 +906,8 @@ let () =
         test_code_shell_rg_exit_one_no_matches_is_success;
       test_case "grep exit 1 no-match is success" `Quick
         test_code_shell_grep_exit_one_no_matches_is_success;
+      test_case "pipeline grep exit 1 no-match is success" `Quick
+        test_code_shell_pipeline_grep_exit_one_no_matches_is_success;
       test_case "rg exit 2 remains error" `Quick
         test_code_shell_rg_exit_two_remains_error;
     ]);

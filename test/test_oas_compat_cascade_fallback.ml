@@ -127,6 +127,23 @@ let test_local_resource_error_does_not_cascade () =
   | Local_resource_exhaustion -> ()
   | _ -> Alcotest.fail "local resource exhaustion must keep its typed class"
 
+let test_timeout_error_cascades () =
+  let err =
+    Http_client.TimeoutError
+      { phase = Provider_step; message = "provider step timed out" }
+  in
+  Alcotest.(check bool)
+    "typed timeout is provider-local and should cascade"
+    true
+    (Oas_compat.Http_client.should_cascade err);
+  (match Oas_compat.Http_client.classify err with
+   | Network_error -> ()
+   | _ -> Alcotest.fail "TimeoutError must classify as Network_error");
+  Alcotest.(check string)
+    "TimeoutError -> message"
+    "provider step timed out"
+    (Oas_compat.Http_client.error_message err)
+
 (* --- ProviderTerminal: pin classify, should_cascade, and the new
        error_message helper. The variant arrived in agent_sdk without
        a sweep, so [warn-error +8] flipped 5 [partial-match] warnings
@@ -380,6 +397,11 @@ let () =
             `Quick test_tls_error_does_not_cascade;
           Alcotest.test_case "local resource error does not cascade"
             `Quick test_local_resource_error_does_not_cascade;
+        ] );
+      ( "Typed timeout errors cascade",
+        [
+          Alcotest.test_case "TimeoutError classify + cascade + message"
+            `Quick test_timeout_error_cascades;
         ] );
       ( "ProviderTerminal — agent-level terminal does not cascade",
         [

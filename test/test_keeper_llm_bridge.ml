@@ -153,7 +153,7 @@ let test_parent_timeout_cancel_logs_info () =
             (entry.Log.Ring.details |> member "log_class" |> to_string))))
 ;;
 
-let test_default_parent_timeout_cancel_stays_warn () =
+let test_default_timeout_inner_cancel_logs_info () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
       Masc_eio_env.reset_for_test ();
@@ -174,16 +174,16 @@ let test_default_parent_timeout_cancel_stays_warn () =
         | Some entry ->
           let open Yojson.Safe.Util in
           Alcotest.(check string)
-            "default parent timeout cancel stays warn"
-            "WARN"
+            "default timeout inner cancel is info"
+            "INFO"
             (Log.level_to_string entry.Log.Ring.level);
           Alcotest.(check string)
             "log class"
-            "warn_cancel"
+            "inner_timeout_cancel"
             (entry.Log.Ring.details |> member "log_class" |> to_string);
           Alcotest.(check string)
             "cancel classification"
-            "unknown_cancel"
+            "inner_timeout_cancel"
             (entry.Log.Ring.details |> member "cancel_classification" |> to_string))))
 ;;
 
@@ -277,9 +277,9 @@ let () =
             `Quick
             test_parent_timeout_cancel_logs_info
         ; Alcotest.test_case
-            "default timeout cancel stays warn"
+            "default timeout inner cancel logs info"
             `Quick
-            test_default_parent_timeout_cancel_stays_warn
+            test_default_timeout_inner_cancel_logs_info
         ; Alcotest.test_case
             "unknown cancel stays warn"
             `Quick

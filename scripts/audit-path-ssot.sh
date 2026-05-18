@@ -7,7 +7,7 @@
 #
 # The gate scans for four classes of regression:
 #   1. lib/ Filename.concat <x> ".masc/<sub>" inline construction
-#   2. shell $HOME/.masc / $HOME/me/.masc fallback
+#   2. shell home-anchored .masc fallback
 #   3. python Path(...).expanduser() on base_path arguments
 #   4. non-canonical MASC env vars: MASC_HOME, MASC_DIR, MASC_ROOT
 #
@@ -61,7 +61,7 @@ scan "lib resolver-bypass (inline .masc/<sub> concat)" \
   'Filename\.concat[^"]+"\.masc/' \
   lib/
 
-# 2. Shell: $HOME/.masc or $HOME/me/.masc fallback
+# 2. Shell: home-anchored .masc fallback
 scan "shell HOME-anchored .masc fallback" \
   '\$\{?HOME[}]?[^"]*\.masc|HOME/me/\.masc' \
   scripts/ start-masc-mcp.sh .githooks/ 2>/dev/null

@@ -126,6 +126,17 @@ let start_managed_container
             if String.trim image = "" then
               Error "keeper sandbox docker image is not configured"
             else
+              match
+                Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present
+                  ~image
+                  ~timeout_sec
+              with
+              | Error err ->
+                  Error
+                    (Printf.sprintf
+                       "docker_container_start_failed: sandbox_image_missing: %s"
+                       err)
+              | Ok () ->
               let _cleanup =
                 Keeper_sandbox_runtime.maybe_cleanup_stale_containers
                   ~base_path:config.base_path
@@ -161,6 +172,7 @@ let start_managed_container
                         "--name";
                         container_name;
                       ]
+                    @ Keeper_sandbox_runtime.docker_run_pull_never_args ()
                     @ Keeper_sandbox_runtime.docker_label_args
                         ~ttl_sec
                         ~base_path:config.base_path

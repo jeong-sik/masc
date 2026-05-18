@@ -69,6 +69,14 @@ val docker_command : unit -> string
     handling. *)
 val docker_command_argv : unit -> string list
 
+(** Docker [run] flag fragment that prevents implicit registry pulls. Keeper
+    sandbox images are a local runtime prerequisite and must be built before
+    execution. *)
+val docker_run_pull_never_args : unit -> string list
+
+(** Canonical operator action for a missing keeper sandbox image. *)
+val docker_image_missing_next_action : string
+
 (** Docker [--label] argv fragment for containers owned by the keeper
     sandbox runtime. *)
 val docker_label_args
@@ -310,6 +318,15 @@ val docker_preflight_failure_message : docker_preflight -> string
 val ensure_keeper_startup_preflight
   :  timeout_sec:float
   -> sandbox_profile:Keeper_types.sandbox_profile
+  -> (unit, string) result
+
+(** Lightweight image-presence gate for per-command execution paths. The
+    startup preflight can pass and the image can later be pruned, so docker
+    execution paths call this before [docker run] to fail locally rather than
+    falling through to a registry pull. *)
+val ensure_keeper_sandbox_image_present
+  :  image:string
+  -> timeout_sec:float
   -> (unit, string) result
 
 (** Returns the [--security-opt seccomp=...] argv fragment when the

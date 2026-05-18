@@ -160,15 +160,18 @@ let start_container (t : t) ~(timeout_sec : float) =
   if String.trim image = ""
   then Error "keeper sandbox docker image is not configured"
   else (
-    let _cleanup =
-      Keeper_sandbox_runtime.maybe_cleanup_stale_containers
-        ~base_path:t.config.base_path
-        ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Turn_sandbox ())
-        ()
-    in
-    match Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime ~timeout_sec with
-    | Error _ as err -> err
-    | Ok seccomp_args ->
+    match Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present ~image ~timeout_sec with
+    | Error err -> Error (Printf.sprintf "docker_container_start_failed: sandbox_image_missing: %s" err)
+    | Ok () ->
+      let _cleanup =
+        Keeper_sandbox_runtime.maybe_cleanup_stale_containers
+          ~base_path:t.config.base_path
+          ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Turn_sandbox ())
+          ()
+      in
+      match Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime ~timeout_sec with
+      | Error _ as err -> err
+      | Ok seccomp_args ->
       let container_name = container_name_of t in
       let network_args, network_label =
         Keeper_sandbox_runtime.docker_network_args t.network_mode
@@ -184,6 +187,7 @@ let start_container (t : t) ~(timeout_sec : float) =
          let argv =
            Keeper_sandbox_runtime.docker_command_argv ()
            @ [ "run"; "-d"; "--rm"; "--name"; container_name ]
+           @ Keeper_sandbox_runtime.docker_run_pull_never_args ()
            @ Keeper_sandbox_runtime.docker_label_args
                ~base_path:t.config.base_path
                ~keeper_name:t.meta.name

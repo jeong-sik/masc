@@ -69,6 +69,7 @@ let build_docker_argv ~image ~container_name ~base_path ~host_root ~croot
       "--user";
       Printf.sprintf "%d:%d" uid gid;
     ]
+  @ Keeper_sandbox_runtime.docker_run_pull_never_args ()
   @ Keeper_sandbox_runtime.docker_sandbox_env_args
       ~base_path
       ~container_root:croot
@@ -125,11 +126,22 @@ let run_command_in_container_with_status ?turn_sandbox_factory
   else if command_argv = [] then
     Error "run_command_in_container_with_status: command_argv is empty"
   else
+    let head_program =
+      match command_argv with prog :: _ -> prog | [] -> "?"
+    in
     match runtime_opt with
     | Some runtime ->
       Keeper_turn_sandbox_runtime.run_command_with_status
         ~ok_exit_codes runtime ~cwd ~command_argv ~max_bytes ~timeout_sec ()
     | None ->
+      match Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present ~image ~timeout_sec with
+      | Error err ->
+        Error
+          (Printf.sprintf
+             "docker_%s_failed: sandbox_image_missing: %s"
+             head_program
+             err)
+      | Ok () ->
       match Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime ~timeout_sec with
       | Error err -> Error err
       | Ok seccomp_args ->
@@ -150,9 +162,6 @@ let run_command_in_container_with_status ?turn_sandbox_factory
                 ~summary:"keeper docker read sandboxed command"
                 ~env:(Unix.environment ())
                 ~cwd:(Sys.getcwd ()) ~timeout_sec argv)
-        in
-        let head_program =
-          match command_argv with prog :: _ -> prog | [] -> "?"
         in
         (match st with
          | Unix.WEXITED code

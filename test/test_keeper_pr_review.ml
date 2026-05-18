@@ -133,6 +133,10 @@ if [ \"$1\" = \"info\" ]; then\n\
   printf '[]\\n'\n\
   exit 0\n\
 fi\n\
+if [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ] && [ \"$3\" = \"alpine:test\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
 if [ \"$1\" != \"run\" ]; then\n\
   printf 'unexpected docker invocation: %s\\n' \"$1\" >&2\n\
   exit 2\n\

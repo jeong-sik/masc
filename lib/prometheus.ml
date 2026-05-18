@@ -264,7 +264,7 @@ let init () =
     then
       Hashtbl.add metrics key { name; help; metric_type; value = 0.0; labels = [] }
   in
-  Prometheus_builtin_metrics.register ~add ()
+  Prometheus_builtin_metrics.register ~add ~register_histogram ~inc_counter ()
 ;;
 
 let start_time = Time_compat.now ()

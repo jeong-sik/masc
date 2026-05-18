@@ -76,6 +76,12 @@ include module type of Prometheus_runtime_metric_names
 
 include module type of Prometheus_core_metric_names
 
+val metric_pool_idle_total : string
+val metric_pool_inflight_total : string
+val metric_pool_reuse_total : string
+val metric_pool_evict_total : string
+val metric_pool_create_total : string
+
 include module type of Prometheus_policy_metric_names
 
 include module type of Prometheus_cascade_metric_names

@@ -672,6 +672,18 @@ let runtime_blocker_fields_json (config : Coord_utils.config) (meta : keeper_met
     ]
 ;;
 
+let runtime_state_fields_json (config : Coord_utils.config) (meta : keeper_meta) =
+  let runtime_blocker = runtime_blocker_surface_opt config meta in
+  let pause_state = if meta.paused then "paused" else "active" in
+  let blocker_state =
+    match runtime_blocker with
+    | Some blocker when blocker.continue_gate -> "continue_gate"
+    | Some _ -> "blocked"
+    | None -> "clear"
+  in
+  [ "pause_state", `String pause_state; "runtime_blocker_state", `String blocker_state ]
+;;
+
 let attention_fields_json (config : Coord_utils.config) (meta : keeper_meta) =
   let pending_approval_count =
     Keeper_approval_queue.pending_count_for_keeper ~keeper_name:meta.name
@@ -688,7 +700,7 @@ let attention_fields_json (config : Coord_utils.config) (meta : keeper_meta) =
       | Some blocker when blocker.continue_gate ->
         true, Some "continue_gate_required", Some "approve_or_reject_continue"
       | Some _ when meta.paused ->
-        true, Some "paused_blocked", Some "inspect_runtime_blocker"
+        true, Some "paused", Some "inspect_blocker_before_resume"
       | Some blocker when is_timeout_budget_blocker_class blocker.blocker_class ->
         true, Some "timeout_budget_exhausted", Some "inspect_timeout_budget"
       | Some _ -> true, Some "runtime_blocked", Some "inspect_runtime_blocker"
@@ -835,6 +847,7 @@ let runtime_surface_json config (meta : keeper_meta) =
      ; "fiber_health", `String (Keeper_exec_status.string_of_fiber_health fiber_health)
      ]
      @ social_runtime_fields_json meta
+     @ runtime_state_fields_json config meta
      @ runtime_blocker_fields_json config meta
      @ attention_fields_json config meta)
 ;;

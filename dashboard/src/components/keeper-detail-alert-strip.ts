@@ -14,6 +14,35 @@ import { keeperNeedsDiagnosticAttention, refreshAfterRuntimeAction } from './kee
 import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
 import { showToast } from './common/toast'
 
+function attentionReasonLabel(reason: string | null, paused: boolean): string | null {
+  if (!reason) return null
+  if ((reason === 'paused' || reason === 'paused_blocked') && paused) return null
+  const labels: Record<string, string> = {
+    approval_pending: '승인 대기',
+    continue_gate_required: '계속 진행 승인 필요',
+    paused: '일시정지',
+    paused_blocked: '일시정지 원인 확인 필요',
+    runtime_blocked: '런타임 근거 확인 필요',
+    timeout_budget_exhausted: '타임아웃 예산 소진',
+    social_model_fallback: '소셜 모델 폴백',
+  }
+  return labels[reason] ?? reason
+}
+
+function nextHumanActionLabel(action: string | null): string | null {
+  if (!action) return null
+  const labels: Record<string, string> = {
+    approve_or_reject_continue: '계속 진행 승인 또는 거절',
+    inspect_blocker_before_resume: '원인 확인 후 재개',
+    inspect_runtime_blocker: '런타임 근거 확인',
+    inspect_timeout_budget: '타임아웃 예산 확인',
+    resolve_approval: '승인 요청 처리',
+    resume_or_review: '재개 또는 설정 검토',
+    review_social_model: '소셜 모델 설정 검토',
+  }
+  return labels[action] ?? action
+}
+
 export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const runtimeBlockerClass = keeper.runtime_blocker_class
   const runtimeBlocker = keeperRuntimeBlockerHint(keeper)
@@ -21,6 +50,9 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const socialFallbackActive = keeper.social_model_recognized === false
   const attentionReason = keeper.attention_reason?.trim() || null
   const nextHumanAction = keeper.next_human_action?.trim() || null
+  const pausedRuntimeBlocker = keeper.paused === true && runtimeBlockerClass != null
+  const attentionReasonText = attentionReasonLabel(attentionReason, keeper.paused === true)
+  const nextHumanActionText = nextHumanActionLabel(nextHumanAction)
   const sandboxTarget = keeper.sandbox_target?.trim() || keeper.sandbox_profile?.trim() || null
   const persistedPolicyCount = keeper.approval_policy_effective?.persisted_rules
   const goalLinkedTasks = keeper.goal_progress?.linked_task_count
@@ -227,14 +259,16 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
             `
           : runtimeBlockerClass
           ? html`
-              <${RuntimeBadge} tone="bad">
-                ${runtimeBlockerLabelText ?? '런타임 차단'}
+              <${RuntimeBadge} tone=${pausedRuntimeBlocker ? 'warn' : 'bad'}>
+                ${pausedRuntimeBlocker
+                  ? `일시정지 원인 · ${runtimeBlockerLabelText ?? '런타임 근거'}`
+                  : runtimeBlockerLabelText ?? '런타임 차단'}
               </${RuntimeBadge}>
               ${hasActivitySignal ? html`<span class="text-[var(--color-fg-muted)]">${renderActivitySignal()}</span>` : null}
             `
           : null}
         ${runtimeBlocker
-          ? html`<span><strong class="text-[var(--color-fg-secondary)]">런타임 차단</strong> · ${runtimeBlocker}</span>`
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">${pausedRuntimeBlocker ? '일시정지 원인' : '런타임 차단'}</strong> · ${runtimeBlocker}</span>`
           : null}
         ${blocker
           ? html`<span><${StrongSecondary}>차단 요인</${StrongSecondary}> · ${blocker}</span>`
@@ -244,8 +278,8 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           : null}
         ${attentionReason === 'approval_pending' && isBlockedBeforeWorktree
           ? html`<${RuntimeBadge} tone="warn">워크트리 전 차단</${RuntimeBadge}>`
-          : attentionReason
-          ? html`<span><strong class="text-[var(--color-fg-secondary)]">주의 사유</strong> · ${attentionReason}</span>`
+          : attentionReasonText
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">주의 사유</strong> · ${attentionReasonText}</span>`
           : null}
         ${attentionReason === 'approval_pending' && pendingApprovalId
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">승인 ID</strong> · <code class="font-mono">${pendingApprovalId}</code></span>`
@@ -256,8 +290,8 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         ${attentionReason === 'approval_pending' && pendingApprovalTaskId
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">작업</strong> · ${pendingApprovalTaskId}</span>`
           : null}
-        ${nextHumanAction
-          ? html`<span><strong class="text-[var(--color-fg-secondary)]">다음 액션</strong> · ${nextHumanAction}</span>`
+        ${nextHumanActionText
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">다음 액션</strong> · ${nextHumanActionText}</span>`
           : null}
         ${stopCause
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">정지 원인</strong> · ${stopCause.code}${stopCause.summary ? html` · ${stopCause.summary}` : null}</span>`

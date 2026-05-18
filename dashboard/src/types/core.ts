@@ -421,6 +421,8 @@ export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
 ] as const
 
 export type KeeperRuntimeBlockerClass = (typeof KEEPER_RUNTIME_BLOCKER_CLASSES)[number]
+export type KeeperPauseState = 'active' | 'paused' | string
+export type KeeperRuntimeBlockerState = 'clear' | 'blocked' | 'continue_gate' | string
 
 export type StopCauseSource =
   | 'runtime_blocker_class'
@@ -897,6 +899,8 @@ export interface Keeper {
   proactive_enabled?: boolean
   proactive_idle_sec?: number
   proactive_cooldown_sec?: number
+  pause_state?: KeeperPauseState | null
+  runtime_blocker_state?: KeeperRuntimeBlockerState | null
   runtime_blocker_class?: KeeperRuntimeBlockerClass | null
   runtime_blocker_summary?: string | null
   runtime_blocker_continue_gate?: boolean | null

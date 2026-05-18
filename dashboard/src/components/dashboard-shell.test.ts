@@ -177,6 +177,64 @@ describe('dashboardHealthChips', () => {
     expect(chips[0]?.detail).toContain('resume selected paused keepers')
   })
 
+  it('labels an all-paused fleet as paused instead of blocked', () => {
+    const chips = dashboardHealthChips({
+      connected: true,
+      counts: { keepers: 3, configured_keepers: 3 },
+      keepers: [],
+      runtimeResolution: {
+        status: 'ready',
+        warnings: [],
+        fleet_safety: {
+          keeper_fibers: 0,
+          paused_keepers: 3,
+          keeper_fleet_no_fibers: true,
+          keeper_fd_pressure: null,
+          keeper_fleet_safety: {
+            status: 'blocked',
+            reason: null,
+            blocker: 'no_executable_keeper_fibers',
+            admission_blocked: null,
+            admission_blocked_keepers: null,
+            blocked_keepers: 3,
+            blocked_count: 3,
+            bootable_keeper_count: 3,
+            running_keeper_fiber_count: 0,
+            healthy_running_keeper_fiber_count: 0,
+            failing_keeper_fiber_count: 0,
+            executable_keeper_fiber_count: 0,
+            minimum_running_fibers: 2,
+            no_running_fibers: true,
+            no_executable_keeper_fibers: true,
+            low_running_fiber_margin: true,
+            reaction_capacity_below_target: true,
+            reaction_capacity_shortfall_count: 3,
+            executable_reaction_capacity_below_target: true,
+            executable_reaction_capacity_shortfall_count: 3,
+            paused_keeper_count: 3,
+            autoboot_enabled_keeper_count: 3,
+            paused_autoboot_enabled_keeper_count: 3,
+            effective_reaction_capacity_count: 0,
+            executable_reaction_capacity_count: 0,
+            target_reaction_capacity_count: 3,
+            operator_action_required: true,
+          },
+        },
+      } as any,
+      executionError: null,
+      loading: false,
+    })
+
+    expect(chips).toEqual([expect.objectContaining({
+      key: 'fleet-liveness-risk',
+      label: 'Fleet paused',
+      tone: 'warn',
+    })])
+    expect(chips[0]?.detail).toContain('paused_keeper_count=3')
+    expect(chips[0]?.detail).toContain('paused is lifecycle state')
+    expect(chips[0]?.detail).not.toContain('resume selected paused keepers')
+  })
+
   it('surfaces fleet capacity degradation when running fibers are below target', () => {
     const chips = dashboardHealthChips({
       connected: true,

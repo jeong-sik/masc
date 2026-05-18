@@ -70,7 +70,7 @@ describe('mission keeper runtime helpers', () => {
     } as Keeper
 
     expect(keeperRuntimeHint(keeper)).toBe(
-      'Mutating tools [keeper_fs_edit] committed before the turn timed out.',
+      '일시정지 원인 · Mutating tools [keeper_fs_edit] committed before the turn timed out.',
     )
   })
 
@@ -87,7 +87,7 @@ describe('mission keeper runtime helpers', () => {
     } as Keeper
 
     expect(keeperRuntimeHint(keeper)).toBe(
-      '계속 진행 승인 대기 · Mutating tools [keeper_fs_edit] committed before the turn timed out.',
+      '일시정지 원인 · 계속 진행 승인 대기 · Mutating tools [keeper_fs_edit] committed before the turn timed out.',
     )
   })
 

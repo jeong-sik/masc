@@ -31,23 +31,12 @@
       {!clear_git_rev_parse_short_cache_for_tests},
       {!seed_git_rev_parse_short_cache_for_tests}).
 
-    Internal helpers stay private at this boundary
-    (~57 internal lets — [contains_substring] / [take]
-    local helpers, [trim_to_option] / [list_hd_opt],
-    [path_descends_from] / [path_relative_to],
-    [dashboard_runtime_probe_*] cache state +
-    refresh-in-flight Atomic + runner hook ref +
-    [dashboard_runtime_probe_cache_ttl_sec] /
-    [dashboard_runtime_probe_force_min_refresh_sec] /
-    [dashboard_runtime_probe_timeout_sec] tuning,
-    [dashboard_runtime_probe_recent_value] /
-    [dashboard_runtime_probe_fresh_value] cache
-    accessors, [dashboard_runtime_probe_runner_hook] +
-    runner adapter, [git_rev_parse_short_*] cache state
-    (mutex, in-flight set, TTL, cached_lookup,
-    cached_any, try_begin_refresh), all the
-    [dashboard_*_json] sub-renderers consumed only
-    inside the surface entries above). *)
+    Internal helpers stay private at this boundary:
+    local string/list helpers, runtime probe cache state,
+    git rev-parse cache state, and JSON sub-renderers used
+    by the surface entries above.  The
+    {!dashboard_perf_http_json} implementation delegates to
+    [Server_dashboard_http_perf]. *)
 
 (** {1 Runtime resolution} *)
 

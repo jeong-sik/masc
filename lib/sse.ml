@@ -233,47 +233,10 @@ let buffer_event event_id event_str =
     in
     { next_state = trimmed; result = () })
 
-(** JSON-RPC payloads are the only durable events safe for MCP coordinator
-    clients. Dashboard/activity JSON may share this SSE hub, but it is not
-    JSON-RPC and causes strict MCP clients to raise parse errors. *)
-let jsonrpc_message_for_coordinator = function
-  | `Assoc fields -> (
-      match List.assoc_opt "jsonrpc" fields with
-      | Some (`String "2.0") ->
-          List.mem_assoc "method" fields
-          || List.mem_assoc "id" fields
-          || List.mem_assoc "result" fields
-          || List.mem_assoc "error" fields
-      | _ -> false)
-  | _ -> false
-
-let event_data_payload event =
-  let prefix = "data: " in
-  let prefix_len = String.length prefix in
-  let data_lines =
-    event
-    |> String.split_on_char '\n'
-    |> List.filter_map (fun line ->
-           if String.starts_with ~prefix line then
-             Some
-               (String.sub line prefix_len (String.length line - prefix_len))
-           else None)
-  in
-  match data_lines with
-  | [] -> None
-  | lines -> Some (String.concat "\n" lines)
-
-let event_string_jsonrpc_message_for_coordinator event =
-  match event_data_payload event with
-  | None -> false
-  | Some data -> (
-      try jsonrpc_message_for_coordinator (Yojson.Safe.from_string data) with
-      | Yojson.Json_error _ -> false)
-
 let event_matches_session_kind kind event =
   match kind with
   | Observer -> true
-  | Coordinator -> event_string_jsonrpc_message_for_coordinator event
+  | Coordinator -> Sse_jsonrpc_filter.event_string_jsonrpc_message_for_coordinator event
   | Presence -> false
 
 (** Get events after given ID for replay (MCP spec MUST) *)
@@ -806,7 +769,9 @@ let broadcast_impl ?(buffer = true) ?(notify_external = true)
     ?(event_type = "message") target json =
   let t0 = Time_compat.now () in
   let data = Yojson.Safe.to_string json in
-  let jsonrpc_payload = jsonrpc_message_for_coordinator json in
+  let jsonrpc_payload =
+    Sse_jsonrpc_filter.jsonrpc_message_for_coordinator json
+  in
   (* Atomically allocate the event id so two concurrent broadcasts
      cannot observe the same peeked counter value and emit duplicates. *)
   let current_event_id = next_id () in
@@ -902,7 +867,7 @@ let broadcast_presence json =
 (** Send a JSON-RPC message to a specific session.
     Enqueues the event in the session's stream for asynchronous delivery. *)
 let send_to session_id json =
-  if not (jsonrpc_message_for_coordinator json) then
+  if not (Sse_jsonrpc_filter.jsonrpc_message_for_coordinator json) then
     Log.Server.warn
       "Dropping non-JSON-RPC payload sent via Sse.send_to for session %s"
       session_id

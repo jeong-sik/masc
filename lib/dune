@@ -15,6 +15,8 @@
  keeper_bookkeeping_failure_kind
  keeper_checkpoint_failure_operation
  keeper_memory_llm_summary_outcome
+ keeper_tool_call_log_route_evidence
+ memory_oas_bridge_cache
  memory_oas_bridge_op_outcome
  keeper_user_visible_reply_source
  keeper_continuity_summary_source
@@ -27,6 +29,7 @@
  keeper_post_turn_wirein_failure_site
  atomic_orphan_size_class
  silent_dashboard_actor_outcome
+ sse_jsonrpc_filter
  prometheus_format
  prometheus_key
  prometheus_process
@@ -50,6 +53,7 @@
  dashboard_mission_agents
  dashboard_mission_assembly
  keeper_persona_authoring_contract
+ keeper_persona_authoring_slug
  keeper_types_profile
  keeper_meta_tool_access
  keeper_meta_contract
@@ -61,6 +65,7 @@
  keeper_meta_store
 
  server_dashboard_http_cache
+ server_dashboard_http_perf
  dashboard_http_helpers
  dashboard_http_monitoring
  dashboard_http_keeper
@@ -121,6 +126,7 @@
   keeper_exec_status
   provider_tool_support
   voice_runtime_overlay
+  keeper_status_detail_observability
   keeper_status_detail
   keeper_exec_persona
   keeper_model_labels
@@ -143,15 +149,19 @@
   keeper_agent_error
   keeper_agent_memory_episode
   provider_runtime_projection
+  voice_bridge_transport
   cascade_wire_overlay
   cascade_http_probe_url
   cascade_agent_context
+  cascade_health_tracker_config
+  cascade_metrics_registry
   keeper_oas_checkpoint
   keeper_cascade_engine
   keeper_turn_driver
   keeper_turn_driver_helpers
   keeper_turn_driver_try_provider
   keeper_turn_driver_wrappers
+  keeper_turn_cascade_budget_routing
   keeper_exec_context
   keeper_guards
   keeper_turn_setup
@@ -171,6 +181,7 @@
   worker_container
   worker_container_runners
   ;; keeper_memory sub-modules
+  keeper_memory_policy_summary_filter
   keeper_memory_policy
   keeper_memory_bank
   keeper_memory_llm_summary
@@ -200,6 +211,7 @@
   tool_inline_dispatch_types
   tool_inline_dispatch_coord
   tool_inline_dispatch_comm
+  coord_goals_verification
   ;; tool_schema_dsl — shared JSON Schema builder (added by #3640)
   tool_schema_dsl
   tool_misc_transport

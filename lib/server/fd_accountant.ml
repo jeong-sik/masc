@@ -1,5 +1,7 @@
 type kind = Docker_spawn | Provider_http | Provider_cli | Sandbox_exec | Log_writer
 
+(* TEL-OK: this low-level gate stays Prometheus-free; [fd_snapshot] is the
+   runtime telemetry surface exported by /metrics and dashboard health. *)
 let all_kinds = [ Docker_spawn; Provider_http; Provider_cli; Sandbox_exec; Log_writer ]
 
 let kind_to_string = function

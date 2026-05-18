@@ -26,6 +26,9 @@ let is_boundary_exempt ~tool_name ~input =
 let mk_cmd cmd =
   `Assoc [ ("op", `String "gh"); ("cmd", `String cmd) ]
 
+let mk_shell_op op fields =
+  `Assoc (("op", `String op) :: fields)
+
 (* Legacy helpers for backward compat with older tests (not exercised;
    keeper_shell op=gh only accepts cmd, not args). *)
 let mk_args args =
@@ -178,7 +181,18 @@ let with_repo_context_test_env f =
   let base = temp_dir () in
   let config = Coord.default_config base in
   ensure_dir (Filename.concat base Common.masc_dirname);
-  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  Keeper_tool_policy.reset_policy_config_for_test ();
+  (match
+     Keeper_tool_policy.init_policy_config
+       ~base_path:(Masc_test_deps.find_project_root ())
+   with
+   | Ok () -> ()
+   | Error err -> Alcotest.fail err);
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_tool_policy.reset_policy_config_for_test ();
+      cleanup_dir base)
+  @@ fun () ->
   ignore (Coord.init config ~agent_name:None);
   let repo_dir = Filename.concat base "repo" in
   ensure_dir repo_dir;
@@ -416,6 +430,22 @@ let test_input_aware_mutation_detection () =
   Alcotest.(check bool) "keeper_shell op=gh merge cmd is mutating"
     true
     (has_side_effect ~tool_name:"keeper_shell" ~input:(mk_cmd "pr merge 123"));
+  Alcotest.(check bool) "keeper_shell rg remains read-only"
+    true
+    (is_ro ~tool_name:"keeper_shell"
+       ~input:(mk_shell_op "rg" [ ("pattern", `String "TODO") ]));
+  Alcotest.(check bool) "keeper_shell git_clone mutates sandbox repos"
+    true
+    (has_side_effect ~tool_name:"keeper_shell"
+       ~input:(mk_shell_op "git_clone" [ ("url", `String "https://github.com/jeong-sik/masc-mcp") ]));
+  Alcotest.(check bool) "keeper_shell git_worktree list is read-only"
+    true
+    (is_ro ~tool_name:"keeper_shell"
+       ~input:(mk_shell_op "git_worktree" [ ("action", `String "list") ]));
+  Alcotest.(check bool) "keeper_shell git_worktree add mutates"
+    true
+    (has_side_effect ~tool_name:"keeper_shell"
+       ~input:(mk_shell_op "git_worktree" [ ("action", `String "add"); ("branch", `String "fix/test") ]));
   Alcotest.(check bool) "masc_code_git status is not mutating"
     false
     (has_side_effect ~tool_name:"masc_code_git" ~input:(mk_action "status"));

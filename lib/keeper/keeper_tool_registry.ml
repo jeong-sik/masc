@@ -280,13 +280,32 @@ let gh_effective_cmd (input : Yojson.Safe.t) : string =
   | _ -> ""
 ;;
 
-(** Check if keeper_shell input has op="gh". *)
-let is_shell_gh_op (input : Yojson.Safe.t) : bool =
+let normalize_keeper_shell_op raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "git status" | "status" -> "git_status"
+  | "git log" -> "git_log"
+  | "git diff" -> "git_diff"
+  | "git worktree" | "worktree" -> "git_worktree"
+  | "git clone" | "clone" -> "git_clone"
+  | "read" | "file" | "type" -> "cat"
+  | "grep" | "search" -> "rg"
+  | "dir" | "list" -> "ls"
+  | op -> op
+;;
+
+let keeper_shell_op_of_input (input : Yojson.Safe.t) : string =
   match input with
   | `Assoc fields ->
     (match List.assoc_opt "op" fields with
-     | Some (`String s) -> String.trim s = "gh"
-     | _ -> false)
+     | Some (`String s) -> normalize_keeper_shell_op s
+     | _ -> "")
+  | _ -> ""
+;;
+
+(** Check if keeper_shell input has op="gh". *)
+let is_shell_gh_op (input : Yojson.Safe.t) : bool =
+  match input with
+  | `Assoc _ -> keeper_shell_op_of_input input = "gh"
   | _ -> false
 ;;
 
@@ -303,19 +322,33 @@ let git_action_of_input (input : Yojson.Safe.t) : string =
 
 let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : bool =
   match Tool_name.of_string tool_name with
-  | Some (Keeper Shell) when is_shell_gh_op input ->
-    (* keeper_shell with op=gh is input-aware: gh commands can mutate state
-       even though the tool itself is marked read-only by default. *)
-    let cmd = gh_effective_cmd input in
-    let cmd_lower = String.lowercase_ascii cmd in
-    if cmd_lower = ""
-    then false
-    else if String.starts_with cmd_lower ~prefix:"api"
-    then is_gh_api_read_only cmd_lower
-    else
-      List.exists
-        (fun prefix -> String.starts_with cmd_lower ~prefix)
-        gh_read_only_prefixes
+  | Some (Keeper Shell) ->
+    (match keeper_shell_op_of_input input with
+     | "gh" ->
+       (* keeper_shell with op=gh is input-aware: gh commands can mutate state
+          even though the tool itself is marked read-only by default. *)
+       let cmd = gh_effective_cmd input in
+       let cmd_lower = String.lowercase_ascii cmd in
+       if cmd_lower = ""
+       then false
+       else if String.starts_with cmd_lower ~prefix:"api"
+       then is_gh_api_read_only cmd_lower
+       else
+         List.exists
+           (fun prefix -> String.starts_with cmd_lower ~prefix)
+           gh_read_only_prefixes
+     | "git_clone" -> false
+     | "git_worktree" ->
+       let action =
+         match input with
+         | `Assoc fields ->
+           (match List.assoc_opt "action" fields with
+            | Some (`String s) -> String.lowercase_ascii (String.trim s)
+            | _ -> "list")
+         | _ -> "list"
+       in
+       action <> "add"
+     | _ -> is_effectively_read_only_tool tool_name)
   | Some (Masc Code_git) ->
     if is_effectively_read_only_tool tool_name
     then true

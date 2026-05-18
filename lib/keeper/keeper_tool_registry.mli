@@ -86,9 +86,11 @@ val git_read_only_actions : string list
     lowercased ([""] when missing). *)
 val git_action_of_input : Yojson.Safe.t -> string
 
-(** Input-aware read-only check: [keeper_shell op=gh] and
-    [masc_code_git] mix read-only and mutating subcommands within
-    one tool name; the input JSON disambiguates. *)
+(** Input-aware read-only check: [keeper_shell] and [masc_code_git] mix
+    read-only and mutating subcommands within one tool name; the input JSON
+    disambiguates. For [keeper_shell], [op=gh] is command-aware,
+    [op=git_clone] mutates sandbox repo state, and [op=git_worktree] mutates
+    only when [action=add]. *)
 val is_read_only_with_input :
   tool_name:string -> input:Yojson.Safe.t -> bool
 

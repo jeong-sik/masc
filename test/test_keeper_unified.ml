@@ -9795,6 +9795,14 @@ let test_required_tool_satisfaction_rejects_passive_tools () =
     (satisfies_required_tool
        "keeper_shell"
        (`Assoc [ "op", `String "gh"; "cmd", `String "pr view 123" ]))
+  ;
+  check
+    bool
+    "read-only keeper_shell git_worktree list is passive"
+    false
+    (satisfies_required_tool
+       "keeper_shell"
+       (`Assoc [ "op", `String "git_worktree"; "action", `String "list" ]))
 ;;
 
 let test_required_tool_satisfaction_accepts_mutating_tools () =
@@ -9811,6 +9819,27 @@ let test_required_tool_satisfaction_accepts_mutating_tools () =
     (satisfies_required_tool
        "keeper_shell"
        (`Assoc [ "op", `String "gh"; "cmd", `String "pr comment 123 --body ok" ]));
+  check
+    bool
+    "keeper_shell git_clone satisfies as sandbox mutation"
+    true
+    (satisfies_required_tool
+       "keeper_shell"
+       (`Assoc
+          [ "op", `String "git_clone"
+          ; "url", `String "https://github.com/jeong-sik/masc-mcp"
+          ]));
+  check
+    bool
+    "keeper_shell git_worktree add satisfies as sandbox mutation"
+    true
+    (satisfies_required_tool
+       "keeper_shell"
+       (`Assoc
+          [ "op", `String "git_worktree"
+          ; "action", `String "add"
+          ; "branch", `String "fix/test"
+          ]));
   check
     bool
     "fresh worktree create result is material progress"

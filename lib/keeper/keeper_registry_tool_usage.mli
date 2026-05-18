@@ -1,6 +1,6 @@
 (** Keeper tool-usage map and persistence helpers. *)
 
-open Keeper_types
+open Keeper_registry_types
 
 val record
   :  tool_call_entry StringMap.t

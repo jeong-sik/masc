@@ -1,6 +1,6 @@
 (** Keeper tool-usage map and persistence helpers. *)
 
-open Keeper_types
+open Keeper_registry_types
 
 let record usage ~tool_name ~success ~now =
   let entry =

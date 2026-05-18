@@ -77,6 +77,7 @@ val turn_progress_callbacks :
   keeper_name:string ->
   downstream:(Agent_sdk.Types.sse_event -> unit) option ->
   (string -> unit)
+  * bool
   * (unit -> unit) option
   * (unit -> unit) option
   * (Agent_sdk.Types.sse_event -> unit) option

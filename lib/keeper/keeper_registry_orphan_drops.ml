@@ -4,7 +4,7 @@
     missing-entry updates are diagnostic state only, and clearing this tracker
     is best-effort after a successful registry update. *)
 
-open Keeper_types
+open Keeper_registry_types
 
 let threshold = 5
 let window_sec = 60.0

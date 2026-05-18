@@ -265,8 +265,8 @@
         <span>single typed policy layer: failure -> disposition</span>
       </div>
       <div class="tile">
-        <strong>4</strong>
-        <span>분리할 scope: provider, turn, keeper, fleet</span>
+        <strong>5</strong>
+        <span>분리할 scope: invocation, provider, turn, keeper, fleet</span>
       </div>
       <div class="tile">
         <strong>0</strong>
@@ -283,11 +283,11 @@
         operator에게는 모두 "keeper가 막힘/죽음"으로 보인다.
       </p>
       <p>
-        최종 상태는 모든 실패가 먼저 <code>Keeper_failure_policy.classify</code>를 거쳐
+        최종 상태는 모든 실패가 먼저 <code>Keeper_failure_policy.decide</code>를 거쳐
         <code>disposition</code>을 받고, heartbeat/supervisor/watchdog/dashboard는 그 결과만 소비하는 구조다.
       </p>
       <pre>failure evidence
-  -> Keeper_failure_policy.classify
+  -> Keeper_failure_policy.decide
   -> { failure_class; scope; disposition; lifecycle_effect; operator_action; evidence }
   -> runtime action + metrics/logs + dashboard status</pre>
     </section>
@@ -310,6 +310,7 @@
             <li><span class="done">Done / PR</span> <code>#16154</code>: deterministic <code>keeper_bash</code> guard rejection을 <code>workflow_rejection</code>으로 분류해 circuit breaker에서 제외.</li>
             <li><span class="done">Done / PR</span> <code>#16159</code>: repeated <code>oas_timeout_budget</code> strike가 <code>Keeper_fiber_crash</code>로 승격되는 직접 경로 제거.</li>
             <li><span class="doing">Started / OAS PR</span> <code>oas#1632</code>: provider timeout을 <code>stream_idle:streaming_thinking</code>, <code>stream_body</code>, <code>provider_step</code> 같은 typed evidence로 보존.</li>
+            <li><span class="doing">Started / MASC PR</span> <code>#16178</code>: <code>Keeper_failure_policy.decide</code> pure matrix로 Streaming/Thinking timeout과 keeper liveness 결정을 분리.</li>
             <li><span class="warn">Remaining</span>: watchdog/supervisor/dashboard가 같은 policy vocabulary를 쓰도록 통합 필요.</li>
           </ul>
         </div>
@@ -515,10 +516,10 @@ type decision = {
           </tr>
           <tr>
             <td>P0-B</td>
-            <td><span class="status todo">next</span></td>
+            <td><span class="status doing">draft PR</span></td>
             <td>Add <code>Keeper_failure_policy</code> pure module and decision type.</td>
-            <td><code>lib/keeper/keeper_failure_policy.ml</code>, <code>.mli</code>, unit tests</td>
-            <td>matrix test covers workflow, timeout, cascade exhausted, fatal env, stale classes.</td>
+            <td><code>#16178</code>: <code>lib/keeper/keeper_failure_policy.ml</code>, <code>.mli</code>, unit tests</td>
+            <td>matrix test covers <code>stream_idle:streaming_thinking</code>, workflow rejection, OAS budget loop liveness, fatal env, and stale classes.</td>
           </tr>
           <tr>
             <td>P0-C</td>
@@ -654,6 +655,11 @@ type decision = {
           </tr>
         </thead>
         <tbody>
+          <tr>
+            <td>2026-05-18</td>
+            <td>Added P0-B implementation draft.</td>
+            <td><code>#16178</code>: pure <code>Keeper_failure_policy</code> matrix and focused tests for Streaming/Thinking timeout separation.</td>
+          </tr>
           <tr>
             <td>2026-05-18</td>
             <td>Initial living plan created.</td>

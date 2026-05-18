@@ -162,7 +162,11 @@ type event =
   | Stop_requested
   | Drain_complete
   | Fiber_started
-  | Fiber_terminated of { outcome : string }
+  | Fiber_terminated of
+      { outcome : string
+      ; provider_id : string option
+      ; http_status : int option
+      }
   | Supervisor_restart_attempt of { attempt : int }
   | Restart_budget_exhausted
   | Credential_archived
@@ -215,7 +219,18 @@ let event_to_string = function
   | Stop_requested -> "stop_requested"
   | Drain_complete -> "drain_complete"
   | Fiber_started -> "fiber_started"
-  | Fiber_terminated r -> Printf.sprintf "fiber_terminated(%s)" r.outcome
+  | Fiber_terminated { outcome; provider_id = None; http_status = None } ->
+    Printf.sprintf "fiber_terminated(%s)" outcome
+  | Fiber_terminated { outcome; provider_id; http_status } ->
+    let prov =
+      Option.fold provider_id ~none:""
+        ~some:(Printf.sprintf " provider=%s")
+    in
+    let http =
+      Option.fold http_status ~none:""
+        ~some:(Printf.sprintf " http=%d")
+    in
+    Printf.sprintf "fiber_terminated(%s%s%s)" outcome prov http
   | Supervisor_restart_attempt r ->
     Printf.sprintf "supervisor_restart_attempt(%d)" r.attempt
   | Restart_budget_exhausted -> "restart_budget_exhausted"
@@ -1270,7 +1285,19 @@ let event_to_json (ev : event) : Yojson.Safe.t =
   | Stop_requested -> obj "stop_requested" []
   | Drain_complete -> obj "drain_complete" []
   | Fiber_started -> obj "fiber_started" []
-  | Fiber_terminated r -> obj "fiber_terminated" [ "outcome", `String r.outcome ]
+  | Fiber_terminated r ->
+    let base = [ "outcome", `String r.outcome ] in
+    let with_prov =
+      match r.provider_id with
+      | None -> base
+      | Some p -> base @ [ "provider_id", `String p ]
+    in
+    let with_http =
+      match r.http_status with
+      | None -> with_prov
+      | Some s -> with_prov @ [ "http_status", `Int s ]
+    in
+    obj "fiber_terminated" with_http
   | Supervisor_restart_attempt r ->
     obj "supervisor_restart_attempt" [ "attempt", `Int r.attempt ]
   | Restart_budget_exhausted -> obj "restart_budget_exhausted" []

@@ -927,7 +927,7 @@ let test_extended_states () =
   R.clear ();
   let _entry = R.register ~base_path:bp "k4x" (make_meta "k4x") in
   ignore (R.dispatch_event ~base_path:bp "k4x"
-    (KSM.Fiber_terminated { outcome = "test" }));
+    (KSM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }));
   (match R.get ~base_path:bp "k4x" with
    | None -> fail "expected k4x"
    | Some e -> check string "crashed string" "crashed" (KSM.phase_to_string e.phase));
@@ -1272,7 +1272,7 @@ let test_fiber_health_crashed_state_without_done_signal () =
   R.clear ();
   let _entry = R.register ~base_path:bp "fh3-state" (make_meta "fh3-state") in
   ignore (R.dispatch_event ~base_path:bp "fh3-state"
-    (KSM.Fiber_terminated { outcome = "test" }));
+    (KSM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }));
   match R.fiber_health_of ~base_path:bp "fh3-state" with
   | Keeper_types.Fiber_zombie -> ()
   | _ -> fail "expected Fiber_zombie for explicit crashed state"

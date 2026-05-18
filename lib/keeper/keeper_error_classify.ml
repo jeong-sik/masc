@@ -71,6 +71,8 @@ let is_transient_network_error (err : Agent_sdk.Error.sdk_error) : bool =
       not (is_structural_oas_timeout_message detail)
   | Agent_sdk.Error.Api (Overloaded _) -> true
   | Agent_sdk.Error.Api (ServerError { status = 503; _ }) -> true
+  | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { transient; _ }) ->
+      transient
   (* Non-transient API errors. *)
   | Agent_sdk.Error.Api (ServerError _)
   | Agent_sdk.Error.Api (RateLimited _)
@@ -402,10 +404,11 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
              Some Auth_error
          | Agent_sdk.Error.Provider (Llm_provider.Error.RateLimit _) ->
              Some Rate_limit
-         | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { code; _ })
-           when code >= 500 ->
+         | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { code; transient; _ })
+           when transient || code >= 500 ->
              Some Server_error
-         | Agent_sdk.Error.Provider (Llm_provider.Error.AuthError _) ->
+         | Agent_sdk.Error.Provider
+             (Llm_provider.Error.AuthError _ | Llm_provider.Error.MissingApiKey _) ->
              Some Auth_error
          (* Sub-500 server errors (4xx already handled above for AuthError /
             RateLimited) are not classified as recoverable cascade failures. *)
@@ -655,7 +658,10 @@ let reclassify_error_after_side_effect
     let is_timeout =
       match err with
       | Agent_sdk.Error.Api (Timeout _) -> true
-      | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) -> true
+      | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _)
+      | Agent_sdk.Error.Provider
+          (Llm_provider.Error.NetworkError { timeout_phase = Some _; _ }) ->
+          true
       | Agent_sdk.Error.Api (RateLimited _)
       | Agent_sdk.Error.Api (Overloaded _)
       | Agent_sdk.Error.Api (ServerError _)
@@ -681,7 +687,9 @@ let reclassify_error_after_side_effect
 let post_commit_failure_kind_of_error (err : Agent_sdk.Error.sdk_error) =
   match err with
   | Agent_sdk.Error.Api (Timeout _) -> Keeper_registry.Post_commit_timeout
-  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) ->
+  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _)
+  | Agent_sdk.Error.Provider
+      (Llm_provider.Error.NetworkError { timeout_phase = Some _; _ }) ->
       Keeper_registry.Post_commit_timeout
   (* All non-Timeout failures classify as generic post-commit failure. *)
   | Agent_sdk.Error.Api (RateLimited _)

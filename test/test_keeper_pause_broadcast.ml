@@ -591,7 +591,8 @@ let test_stale_broadcast_payload_uses_low_cardinality_stale_reason () =
 let test_stale_broadcast_payload_preserves_provider_failure_reason () =
   let failure_reason =
     Masc_mcp.Keeper_registry.Provider_runtime_error
-      { code = "api_error_timeout"; detail = "Timeout after 300.0s" }
+      { code = "api_error_timeout"; detail = "Timeout after 300.0s"
+      ; provider_id = None; http_status = None }
   in
   let payload =
     R.stale_broadcast_payload

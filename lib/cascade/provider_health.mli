@@ -38,5 +38,6 @@ module For_testing : sig
     }
 
   val create : provider list -> t
+  val probe_failure_should_warn : before:health_state -> after:health_state -> bool
   val clear_active : unit -> unit
 end

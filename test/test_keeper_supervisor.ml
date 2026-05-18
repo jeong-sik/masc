@@ -12,6 +12,7 @@ module KSM = Masc_mcp.Keeper_state_machine
 module KLH = Masc_mcp.Keeper_lifecycle_hooks
 module FD = Masc_mcp.Keeper_fd_pressure
 module KA = Masc_mcp.Keeper_keepalive
+module KFP = Masc_mcp.Keeper_failure_policy
 
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_supervisor_" "" in
@@ -79,6 +80,11 @@ goal = "test keeper"
 let with_restart_launch_noop f =
   Sup.with_restart_launch_noop_for_test f
 
+let policy_decision_exn reason =
+  match Sup.failure_reason_policy_decision_for_test reason with
+  | Some decision -> decision
+  | None -> fail "expected supervisor policy decision"
+
 (* ── Pure tests: backoff_delay ──────────────────────────── *)
 
 let test_backoff_delay_attempt_0 () =
@@ -116,6 +122,41 @@ let test_auto_resume_disabled () =
   in
   check (option (float 0.1)) "initial <= 0 disables auto-resume"
     None delay
+
+let test_supervisor_policy_pauses_watchdog_oas_budget_loop () =
+  let decision =
+    policy_decision_exn (Some (Reg.Oas_timeout_budget_loop { count = 3 }))
+  in
+  check string "scope" "turn" (KFP.failure_scope_to_label decision.failure_scope);
+  check string "lifecycle" "pause_keeper"
+    (KFP.lifecycle_effect_to_label decision.lifecycle_effect);
+  check string "circuit" "operator_breaker"
+    (KFP.circuit_effect_to_label decision.circuit_effect);
+  check bool "keeper death denied" false decision.keeper_death_allowed;
+  check string "reason" "oas_timeout_budget_liveness_lost" decision.reason
+
+let test_supervisor_policy_pauses_stale_storm () =
+  let decision =
+    policy_decision_exn (Some (Reg.Stale_termination_storm { count = 5 }))
+  in
+  check string "scope" "fleet" (KFP.failure_scope_to_label decision.failure_scope);
+  check string "lifecycle" "pause_keeper"
+    (KFP.lifecycle_effect_to_label decision.lifecycle_effect);
+  check bool "keeper death denied" false decision.keeper_death_allowed;
+  check string "reason" "stale_termination_storm:5" decision.reason
+
+let test_supervisor_policy_restarts_stale_turn () =
+  let decision =
+    policy_decision_exn
+      (Some
+         (Reg.Stale_turn_timeout
+            (Reg.In_turn_hung { active_seconds = 60.0; timeout_threshold = 30.0 })))
+  in
+  check string "scope" "keeper_liveness"
+    (KFP.failure_scope_to_label decision.failure_scope);
+  check string "lifecycle" "restart_keeper"
+    (KFP.lifecycle_effect_to_label decision.lifecycle_effect);
+  check bool "keeper death allowed" true decision.keeper_death_allowed
 
 (* ── Pure tests: keep_last_n ────────────────────────────── *)
 
@@ -496,7 +537,7 @@ let test_self_preservation_subset () =
   let entries = List.map (fun name ->
     let _reg = Reg.register ~base_path:bp name (make_meta name) in
     ignore (Reg.dispatch_event ~base_path:bp name
-      (Masc_mcp.Keeper_state_machine.Fiber_terminated { outcome = "test" }));
+      (Masc_mcp.Keeper_state_machine.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }));
     Reg.set_failure_reason ~base_path:bp name
       (Some (Reg.Heartbeat_consecutive_failures 3));
     match Reg.get ~base_path:bp name with
@@ -1695,6 +1736,14 @@ let () =
     "backoff_properties", [
       test_case "monotonic until cap" `Quick test_backoff_monotonic_until_cap;
       test_case "never negative" `Quick test_backoff_never_negative;
+    ];
+    "failure_policy_bridge", [
+      test_case "watchdog OAS budget loop pauses via policy" `Quick
+        test_supervisor_policy_pauses_watchdog_oas_budget_loop;
+      test_case "stale storm pauses via policy" `Quick
+        test_supervisor_policy_pauses_stale_storm;
+      test_case "stale turn restarts via policy" `Quick
+        test_supervisor_policy_restarts_stale_turn;
     ];
     "keep_last_n_properties", [
       test_case "never exceeds limit" `Quick test_keep_last_n_never_exceeds;

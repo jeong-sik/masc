@@ -129,6 +129,12 @@ val oas_timeout_budget_observation_reasons : string list
 val record_oas_timeout_budget_observation :
   base_path:string -> keeper_name:string -> unit
 
+val oas_timeout_budget_policy_decision :
+  strikes:int -> Agent_sdk.Error.sdk_error -> Keeper_failure_policy.decision option
+(** Return the policy decision for a structured [Oas_timeout_budget] error.
+    This heartbeat-loop path is reached after the keeper turn returned, so
+    timeout evidence is not liveness loss by itself. *)
+
 val persist_message_cursor_updates :
   config:Coord.config -> keeper_meta -> (string * int) list -> keeper_meta
 (** Persist room-message cursor updates immediately after observation.

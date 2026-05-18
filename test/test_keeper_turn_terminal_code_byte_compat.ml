@@ -60,7 +60,8 @@ let cases : (string * R.failure_reason option) list = [
     Some (R.Oas_timeout_budget_loop { count = 2 });
   "Provider_runtime_error",
     Some (R.Provider_runtime_error
-      { code = "provider_http_500"; detail = "upstream 500" });
+      { code = "provider_http_500"; detail = "upstream 500"
+      ; provider_id = None; http_status = None });
   "Tool_required_unsatisfied",
     Some (R.Tool_required_unsatisfied
       { code = "tool_unsat_no_call"; detail = "no tool" });

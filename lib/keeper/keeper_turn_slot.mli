@@ -181,8 +181,8 @@ val set_after_acquire_flag_hook_for_test :
   (label:string -> keeper_name:string -> unit) option -> unit
 
 (** PR-M (Leak 9): consecutive [oas_timeout_budget] cycle FAILED strikes
-    per keeper. Crossing this limit is a soft-backoff signal; it must not
-    promote to [Keeper_fiber_crash].
+    per keeper. The heartbeat loop feeds this count into
+    [Keeper_failure_policy] before choosing any lifecycle effect.
 
     Counts are stored in an in-process CAS map and can be seeded from the
     persisted [Oas_timeout_budget_loop] failure reason on the first bump after

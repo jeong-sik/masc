@@ -328,7 +328,7 @@ let launch_supervised_fiber
 	                  Keeper_registry.dispatch_event
 	                    ~base_path
 	                    meta.name
-	                    (Keeper_state_machine.Fiber_terminated { outcome })
+	                    (Keeper_state_machine.Fiber_terminated { outcome; provider_id = None; http_status = None })
 	                with
                 | Ok _ -> ()
                 | Error e ->
@@ -415,7 +415,7 @@ let launch_supervised_fiber
 	                Keeper_registry.dispatch_event
 	                  ~base_path
 	                  meta.name
-	                  (Keeper_state_machine.Fiber_terminated { outcome })
+	                  (Keeper_state_machine.Fiber_terminated { outcome; provider_id = None; http_status = None })
 	              with
               | Ok _ -> ()
               | Error e ->
@@ -546,7 +546,7 @@ let launch_supervised_fiber
 	                Keeper_registry.dispatch_event_unit
 	                  ~base_path
 	                  meta.name
-	                  (Keeper_state_machine.Fiber_terminated { outcome });
+	                  (Keeper_state_machine.Fiber_terminated { outcome; provider_id = None; http_status = None });
                 if resolve_done (`Crashed reason)
                 then
                   publish_phase_lifecycle
@@ -1433,6 +1433,46 @@ let handle_oas_timeout_budget_pause
          count)
 ;;
 
+let failure_reason_policy_decision
+      (reason : Keeper_registry.failure_reason option)
+  : Keeper_failure_policy.decision option
+  =
+  match reason with
+  | Some (Keeper_registry.Oas_timeout_budget_loop { count }) ->
+    Some
+      (Keeper_failure_policy.decide
+         (Keeper_failure_policy.Oas_timeout_budget
+            { phase = None
+            ; strikes = Some count
+            ; liveness = Keeper_failure_policy.Watchdog_stale
+            }))
+  | Some (Keeper_registry.Stale_termination_storm { count }) ->
+    Some
+      (Keeper_failure_policy.decide
+         (Keeper_failure_policy.Stale_termination_storm { count }))
+  | Some (Keeper_registry.Stale_turn_timeout _) ->
+    Some
+      (Keeper_failure_policy.decide
+         (Keeper_failure_policy.Stale_turn { progress_seen = false }))
+  | Some (Keeper_registry.Tool_required_unsatisfied _) ->
+    Some
+      (Keeper_failure_policy.decide
+         Keeper_failure_policy.Required_tool_contract_violation)
+  | Some (Keeper_registry.Ambiguous_partial_commit _) ->
+    Some (Keeper_failure_policy.decide Keeper_failure_policy.Ambiguous_partial_commit)
+  | Some
+      ( Keeper_registry.Heartbeat_consecutive_failures _
+      | Keeper_registry.Turn_consecutive_failures _
+      | Keeper_registry.Stale_fleet_batch _
+      | Keeper_registry.Provider_runtime_error _
+      | Keeper_registry.Fiber_unresolved
+      | Keeper_registry.Exception _ )
+  | None ->
+    None
+;;
+
+let failure_reason_policy_decision_for_test = failure_reason_policy_decision
+
 let sweep_and_recover (ctx : _ context) =
   let now = Time_compat.now () in
   let max_restarts =
@@ -1485,46 +1525,56 @@ let sweep_and_recover (ctx : _ context) =
   let to_mark_dead = ref [] in
   let to_cleanup_dead = ref [] in
   let queue_crashed_entry (entry : Keeper_registry.registry_entry) msg =
-    match entry.last_failure_reason with
-    | Some (Keeper_registry.Stale_termination_storm { count }) ->
-      (* #10765 Phase 2: skip [to_restart] AND in-memory unregister.
-           The watchdog detected a termination storm (>= escalation_
-           threshold within the 6h window).  [handle_stale_storm_pause]
-           persists [meta.paused = true] so reconcile + future sweeps
-           honor the pause across server restarts; we then add the
-           entry to [to_unregister] so the in-memory registry slot is
-           cleared and subsequent sweep ticks within the same server
-           do NOT re-fire the storm-pause path (counter must increment
-           once per storm, not once per sweep tick). *)
-      handle_stale_storm_pause ctx entry ~count;
-      to_unregister := entry :: !to_unregister
-    | Some (Keeper_registry.Oas_timeout_budget_loop { count }) ->
-      (* Repeated OAS budget exhaustion means the active
-           cascade/model is not producing within the turn budget.
-           Restarting the same keeper preserves that bad routing and
-           burns another multi-minute budget, so pause instead. *)
-      handle_oas_timeout_budget_pause ctx entry ~count;
-      to_unregister := entry :: !to_unregister
-    (* All other failure reasons (and missing reason) fall through to the
-       standard restart-budget path: restart up to [max_restarts], then mark
-       Dead.  Any new [failure_reason] variant that warrants pause-instead-of-
-       restart must be added explicitly; the compiler will enforce it. *)
-    | Some (Keeper_registry.Heartbeat_consecutive_failures _)
-    | Some (Keeper_registry.Turn_consecutive_failures _)
-    | Some (Keeper_registry.Stale_turn_timeout _)
-    | Some (Keeper_registry.Stale_fleet_batch _)
-    | Some (Keeper_registry.Provider_runtime_error _)
-    | Some (Keeper_registry.Tool_required_unsatisfied _)
-    | Some (Keeper_registry.Ambiguous_partial_commit _)
-    | Some Keeper_registry.Fiber_unresolved
-    | Some (Keeper_registry.Exception _)
-    | None ->
+    let queue_standard_restart () =
       if entry.restart_count >= max_restarts
       then to_mark_dead := (entry, msg) :: !to_mark_dead
       else (
         let delay = backoff_delay entry.restart_count in
         if now -. entry.last_restart_ts >= delay
         then to_restart := (entry, msg) :: !to_restart)
+    in
+    match failure_reason_policy_decision entry.last_failure_reason with
+    | Some
+        { Keeper_failure_policy.lifecycle_effect = Keeper_failure_policy.Pause_keeper
+        ; _
+        } ->
+      (match entry.last_failure_reason with
+       | Some (Keeper_registry.Stale_termination_storm { count }) ->
+         (* #10765 Phase 2: policy owns the pause-vs-restart lifecycle
+            decision; this branch only applies the stale-storm pause side
+            effect and clears the in-memory registry slot so the counter
+            increments once per storm. *)
+         handle_stale_storm_pause ctx entry ~count;
+         to_unregister := entry :: !to_unregister
+       | Some (Keeper_registry.Oas_timeout_budget_loop { count }) ->
+         (* Watchdog-preserved OAS budget loops include liveness evidence,
+            so policy allows keeper pause without treating timeout alone as
+            keeper death. *)
+         handle_oas_timeout_budget_pause ctx entry ~count;
+         to_unregister := entry :: !to_unregister
+       | Some
+           ( Keeper_registry.Heartbeat_consecutive_failures _
+           | Keeper_registry.Turn_consecutive_failures _
+           | Keeper_registry.Stale_turn_timeout _
+           | Keeper_registry.Stale_fleet_batch _
+           | Keeper_registry.Provider_runtime_error _
+           | Keeper_registry.Tool_required_unsatisfied _
+           | Keeper_registry.Ambiguous_partial_commit _
+           | Keeper_registry.Fiber_unresolved
+           | Keeper_registry.Exception _ )
+       | None ->
+         queue_standard_restart ())
+    | Some
+        { Keeper_failure_policy.lifecycle_effect =
+            ( Keeper_failure_policy.Keep_running
+            | Keeper_failure_policy.Soft_fail_turn
+            | Keeper_failure_policy.Pause_current_work
+            | Keeper_failure_policy.Force_release_turn
+            | Keeper_failure_policy.Restart_keeper )
+        ; _
+        }
+    | None ->
+      queue_standard_restart ()
   in
   let watchdog_stop_pending (entry : Keeper_registry.registry_entry) =
     Atomic.get entry.fiber_stop
@@ -1658,7 +1708,7 @@ let sweep_and_recover (ctx : _ context) =
 	        (Keeper_registry.dispatch_event_and_log
 	           ~base_path
 	           entry.name
-	           (Keeper_state_machine.Fiber_terminated { outcome }));
+	           (Keeper_state_machine.Fiber_terminated { outcome; provider_id = None; http_status = None }));
       let ts = Time_compat.now () in
       Keeper_registry.record_crash ~base_path entry.name ts msg;
       Keeper_registry.record_error ~base_path entry.name msg;

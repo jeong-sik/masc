@@ -550,7 +550,9 @@ val metric_memory_pipeline_flush_duration_seconds : string
       cycle continues.
     - [outcome=soft_backoff]: strike at or above limit; keeper fiber
       remains alive while provider/cascade cooldown and retry backoff
-      throttle later turns. Counter reset on any successful turn. *)
+      throttle later turns.
+    - [outcome=promote]: policy allowed keeper death because separate
+      liveness evidence exists. Counter reset on any successful turn. *)
 
 val metric_oas_bus_subscriber_stream_depth : string
 val metric_oas_bus_publish_block_seconds : string

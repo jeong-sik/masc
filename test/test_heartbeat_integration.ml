@@ -78,7 +78,7 @@ let test_crash_heartbeat_failure () =
   let reason_str = R.failure_reason_to_string reason in
   R.set_failure_reason ~base_path:bp "hb-crash" (Some reason);
   ignore (R.dispatch_event ~base_path:bp "hb-crash"
-    (KSM.Fiber_terminated { outcome = "heartbeat_failure" }));
+    (KSM.Fiber_terminated { outcome = "heartbeat_failure"; provider_id = None; http_status = None }));
   R.record_crash ~base_path:bp "hb-crash" 1000.0 reason_str;
   R.record_error ~base_path:bp "hb-crash" reason_str;
   Eio.Promise.resolve reg.done_r (`Crashed reason_str);
@@ -110,7 +110,7 @@ let test_crash_generic_exception () =
   let reason_str = R.failure_reason_to_string fr in
   R.set_failure_reason ~base_path:bp "exn-crash" (Some fr);
   ignore (R.dispatch_event ~base_path:bp "exn-crash"
-    (KSM.Fiber_terminated { outcome = "exception" }));
+    (KSM.Fiber_terminated { outcome = "exception"; provider_id = None; http_status = None }));
   R.record_crash ~base_path:bp "exn-crash" 1001.0 reason_str;
   R.record_error ~base_path:bp "exn-crash" reason_str;
   Eio.Promise.resolve reg.done_r (`Crashed reason_str);
@@ -135,7 +135,7 @@ let test_crash_fiber_unresolved () =
   R.record_crash ~base_path:bp "unresolved" 1002.0 reason_str;
   R.record_error ~base_path:bp "unresolved" reason_str;
   ignore (R.dispatch_event ~base_path:bp "unresolved"
-    (KSM.Fiber_terminated { outcome = "unresolved" }));
+    (KSM.Fiber_terminated { outcome = "unresolved"; provider_id = None; http_status = None }));
   Eio.Promise.resolve reg.done_r (`Crashed reason_str);
   match R.get ~base_path:bp "unresolved" with
   | None -> fail "expected unresolved"
@@ -161,7 +161,7 @@ let test_dead_tombstone_full_lifecycle () =
   (* Crash *)
   Eio.Promise.resolve reg.done_r (`Crashed "test");
   ignore (R.dispatch_event ~base_path:bp "mortal"
-    (KSM.Fiber_terminated { outcome = "test" }));
+    (KSM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }));
   (* Simulate budget exhaustion *)
   let max_restarts = Cfg.KeeperSupervisor.max_restarts in
   R.restore_supervisor_state ~base_path:bp "mortal"
@@ -183,7 +183,7 @@ let test_dead_tombstone_full_lifecycle () =
    | None -> fail "expected mortal");
   (* Dead → Crashed blocked *)
   ignore (R.dispatch_event ~base_path:bp "mortal"
-    (KSM.Fiber_terminated { outcome = "test" }));
+    (KSM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }));
   (match R.get ~base_path:bp "mortal" with
    | Some e -> check string "still dead after Crashed attempt" "dead"
        (KSM.phase_to_string e.phase)
@@ -207,7 +207,7 @@ let test_self_preservation_suppresses_dominant () =
   let entries = List.map (fun name ->
     let _reg = R.register ~base_path:bp name (make_meta name) in
     ignore (R.dispatch_event ~base_path:bp name
-      (KSM.Fiber_terminated { outcome = "test" }));
+      (KSM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }));
     let reason = if String.length name > 4 && String.sub name 3 2 = "hb"
       then Some (R.Heartbeat_consecutive_failures 5)
       else Some (R.Exception "timeout") in
@@ -237,7 +237,7 @@ let test_self_preservation_below_threshold () =
   R.clear ();
   let _reg = R.register ~base_path:bp "lone" (make_meta "lone") in
   ignore (R.dispatch_event ~base_path:bp "lone"
-    (KSM.Fiber_terminated { outcome = "test" }));
+    (KSM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }));
   R.set_failure_reason ~base_path:bp "lone"
     (Some (R.Heartbeat_consecutive_failures 3));
   let entry = match R.get ~base_path:bp "lone" with
@@ -252,7 +252,7 @@ let test_self_preservation_min_candidates_not_met () =
   R.clear ();
   let _reg = R.register ~base_path:bp "solo" (make_meta "solo") in
   ignore (R.dispatch_event ~base_path:bp "solo"
-    (KSM.Fiber_terminated { outcome = "test" }));
+    (KSM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }));
   R.set_failure_reason ~base_path:bp "solo"
     (Some (R.Heartbeat_consecutive_failures 3));
   let entry = match R.get ~base_path:bp "solo" with
@@ -283,7 +283,7 @@ let test_reconcile_predicate_sweep_owned () =
    | None -> fail "expected r1");
   (* Crashed = sweep-owned *)
   ignore (R.dispatch_event ~base_path:bp "r1"
-    (KSM.Fiber_terminated { outcome = "test" }));
+    (KSM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }));
   (match R.get ~base_path:bp "r1" with
    | Some e -> check bool "crashed is sweep-owned" true
        (e.phase = KSM.Crashed)
@@ -351,7 +351,7 @@ let test_restart_state_preservation () =
   let reg1 = R.register ~base_path:bp "restartable" meta in
   Eio.Promise.resolve reg1.done_r (`Crashed "first crash");
   ignore (R.dispatch_event ~base_path:bp "restartable"
-    (KSM.Fiber_terminated { outcome = "first crash" }));
+    (KSM.Fiber_terminated { outcome = "first crash"; provider_id = None; http_status = None }));
   R.record_crash ~base_path:bp "restartable" 100.0 "first crash";
   (* Simulate sweep restart: re-register then restore state *)
   let _reg2 = R.register ~base_path:bp "restartable" meta in
@@ -385,7 +385,7 @@ let test_crash_turn_failures () =
   let reason_str = R.failure_reason_to_string reason in
   R.set_failure_reason ~base_path:bp "turn-crash" (Some reason);
   ignore (R.dispatch_event ~base_path:bp "turn-crash"
-    (KSM.Fiber_terminated { outcome = "turn failure" }));
+    (KSM.Fiber_terminated { outcome = "turn failure"; provider_id = None; http_status = None }));
   R.record_crash ~base_path:bp "turn-crash" 2000.0 reason_str;
   R.record_error ~base_path:bp "turn-crash" reason_str;
   Eio.Promise.resolve reg.done_r (`Crashed reason_str);
@@ -562,7 +562,7 @@ let test_stop_keepalive_preserves_existing_crash_outcome () =
   let reg = R.register ~base_path:bp keeper_name (make_meta keeper_name) in
   let reason = "already crashed" in
   ignore (R.dispatch_event ~base_path:bp keeper_name
-    (KSM.Fiber_terminated { outcome = "already crashed" }));
+    (KSM.Fiber_terminated { outcome = "already crashed"; provider_id = None; http_status = None }));
   Eio.Promise.resolve reg.done_r (`Crashed reason);
   Masc_mcp.Keeper_keepalive.stop_keepalive keeper_name;
   match R.get ~base_path:bp keeper_name with
@@ -628,7 +628,7 @@ let test_pipeline_stage_unregistered_is_offline () =
    | None -> fail "registered keeper must have a phase");
   (* Crash the keeper and verify phase + stage update *)
   ignore (R.dispatch_event ~base_path:bp "alive"
-    (KSM.Fiber_terminated { outcome = "test" }));
+    (KSM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }));
   (match R.get_phase ~base_path:bp "alive" with
    | Some phase ->
      let stage = ES.pipeline_stage_of_phase phase in

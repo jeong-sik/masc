@@ -1,6 +1,9 @@
 open Masc_mcp
 
+module KH = Keeper_heartbeat_loop
+module KFP = Keeper_failure_policy
 module KK = Keeper_keepalive
+module KTD = Keeper_turn_driver
 
 let with_reset keeper f =
   KK.reset_budget_exhaustion ~keeper_name:keeper;
@@ -54,6 +57,41 @@ let test_strike_limit_is_soft_backoff () =
    | KK.Oas_timeout_budget_warn ->
      failwith "strike limit should soft-backoff, not crash")
 
+let oas_timeout_budget_error ~phase =
+  KTD.sdk_error_of_masc_internal_error
+    (KTD.Oas_timeout_budget
+       { budget_sec = 90.0
+       ; keeper_turn_timeout_sec = 1200.0
+       ; estimated_input_tokens = 10_000
+       ; source = "test"
+       ; remaining_turn_budget_sec = Some 42.0
+       ; min_required_sec = 15.0
+       ; phase
+       })
+
+let test_strike_limit_routes_through_policy_without_keeper_death () =
+  let err = oas_timeout_budget_error ~phase:"stream_idle:streaming_thinking" in
+  match
+    KH.oas_timeout_budget_policy_decision
+      ~strikes:KK.oas_timeout_budget_strike_limit
+      err
+  with
+  | None -> Alcotest.fail "expected OAS timeout budget policy decision"
+  | Some decision ->
+    Alcotest.(check bool) "keeper death denied" false decision.keeper_death_allowed;
+    Alcotest.(check string)
+      "lifecycle"
+      "pause_current_work"
+      (KFP.lifecycle_effect_to_label decision.lifecycle_effect);
+    Alcotest.(check string)
+      "circuit"
+      "provider_cooldown"
+      (KFP.circuit_effect_to_label decision.circuit_effect);
+    Alcotest.(check string)
+      "reason preserves streaming thinking"
+      "oas_timeout_budget_loop:stream_idle:streaming_thinking"
+      decision.reason
+
 let test_concurrent_bumps_do_not_lose_updates () =
   let keeper = "parallel-bumps" in
   with_reset keeper (fun () ->
@@ -85,6 +123,8 @@ let () =
         Alcotest.test_case "reset clears" `Quick test_reset_clears;
         Alcotest.test_case "strike limit soft-backoffs without crash" `Quick
           test_strike_limit_is_soft_backoff;
+        Alcotest.test_case "strike limit uses policy, not keeper death" `Quick
+          test_strike_limit_routes_through_policy_without_keeper_death;
         Alcotest.test_case "concurrent bumps do not lose updates" `Quick
           test_concurrent_bumps_do_not_lose_updates;
       ] );

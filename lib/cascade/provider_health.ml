@@ -19,6 +19,10 @@ type provider =
 
 type t = { providers : (string, provider) Hashtbl.t }
 
+type probe_failure_log_level =
+  | Probe_failure_warn
+  | Probe_failure_info
+
 let active_ref : t option Atomic.t = Atomic.make None
 let set_active t = Atomic.set active_ref (Some t)
 let active () = Atomic.get active_ref
@@ -126,8 +130,9 @@ let find_provider t provider_id =
   |> List.find_map (fun key -> Hashtbl.find_opt t.providers key)
 ;;
 
-let transition provider ~success =
+let transition_with_state provider ~success =
   Eio.Mutex.use_rw ~protect:true provider.mu (fun () ->
+    let before = provider.state in
     if success then begin
       provider.consecutive_failures <- 0;
       provider.consecutive_successes <- provider.consecutive_successes + 1;
@@ -157,9 +162,20 @@ let transition provider ~success =
         in
         provider.state
         <- Unhealthy
-             { since; consecutive_failures = provider.consecutive_failures }
+          { since; consecutive_failures = provider.consecutive_failures }
       end
-    end)
+    end;
+    before, provider.state)
+;;
+
+let transition provider ~success =
+  ignore (transition_with_state provider ~success : health_state * health_state)
+;;
+
+let probe_failure_log_level ~before ~after =
+  match before, after with
+  | Healthy, Unhealthy _ -> Probe_failure_warn
+  | _ -> Probe_failure_info
 ;;
 
 let is_healthy t ~provider_id =
@@ -217,12 +233,22 @@ let probe_once ~clock ~net:_ provider =
        transition provider ~success:(response.Masc_http_client.status >= 200
                                      && response.status < 300)
      | Error message ->
-       Log.Cascade.warn
-         "[provider-health] probe failed provider=%s endpoint=%s error=%s"
-         provider.provider_id
-         endpoint
-         message;
-       transition provider ~success:false)
+       let before, after = transition_with_state provider ~success:false in
+       (match probe_failure_log_level ~before ~after with
+        | Probe_failure_warn ->
+          Log.Cascade.warn
+            "[provider-health] provider marked unhealthy provider=%s endpoint=%s \
+             error=%s"
+            provider.provider_id
+            endpoint
+            message
+        | Probe_failure_info ->
+          Log.Cascade.info
+            "[provider-health] probe failed while unhealthy provider=%s endpoint=%s \
+             error=%s"
+            provider.provider_id
+            endpoint
+            message))
 ;;
 
 let start_probe_fiber ~sw ~env t =
@@ -277,6 +303,12 @@ module For_testing = struct
       }
     in
     providers |> List.map make_for_test |> create_from_providers
+  ;;
+
+  let probe_failure_should_warn ~before ~after =
+    match probe_failure_log_level ~before ~after with
+    | Probe_failure_warn -> true
+    | Probe_failure_info -> false
   ;;
 
   let clear_active () = Atomic.set active_ref None

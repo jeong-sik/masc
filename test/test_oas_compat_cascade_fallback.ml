@@ -137,12 +137,14 @@ let test_timeout_error_cascades () =
     true
     (Oas_compat.Http_client.should_cascade err);
   (match Oas_compat.Http_client.classify err with
-   | Network_error -> ()
-   | _ -> Alcotest.fail "TimeoutError must classify as Network_error");
-  Alcotest.(check string)
-    "TimeoutError -> message"
-    "provider step timed out"
-    (Oas_compat.Http_client.error_message err)
+   | Provider_timeout -> ()
+   | _ -> Alcotest.fail "TimeoutError must classify as Provider_timeout");
+  let rendered = Oas_compat.Http_client.error_message err in
+  Alcotest.(check bool)
+    "TimeoutError -> message preserves phase"
+    true
+    (Astring.String.is_infix ~affix:"provider_step" rendered
+     && Astring.String.is_infix ~affix:"provider step timed out" rendered)
 
 (* --- ProviderTerminal: pin classify, should_cascade, and the new
        error_message helper. The variant arrived in agent_sdk without
@@ -255,6 +257,28 @@ let test_provider_failure_capability_mismatch_cascades () =
    | _ ->
        Alcotest.fail
          "Capability_mismatch must classify as Provider_capability_mismatch")
+
+let test_timeout_error_cascades_with_phase_evidence () =
+  let err =
+    Http_client.TimeoutError
+      {
+        message = "stream idle after thinking";
+        phase = Stream_idle Streaming_thinking;
+      }
+  in
+  Alcotest.(check bool)
+    "TimeoutError cascades as provider-local timeout evidence"
+    true
+    (Oas_compat.Http_client.should_cascade err);
+  (match Oas_compat.Http_client.classify err with
+   | Provider_timeout -> ()
+   | _ -> Alcotest.fail "TimeoutError must classify as Provider_timeout");
+  let rendered = Oas_compat.Http_client.error_message err in
+  Alcotest.(check bool)
+    "error_message preserves timeout phase"
+    true
+    (Astring.String.is_infix ~affix:"stream_idle:streaming_thinking" rendered
+     && Astring.String.is_infix ~affix:"stream idle after thinking" rendered)
 
 let test_error_message_baseline () =
   (* Smoke check that the new helper preserves existing semantics for
@@ -418,6 +442,11 @@ let () =
             `Quick test_provider_failure_hard_quota_cascades;
           Alcotest.test_case "Capability_mismatch classify + cascade"
             `Quick test_provider_failure_capability_mismatch_cascades;
+        ] );
+      ( "TimeoutError — typed timeout phase cascades",
+        [
+          Alcotest.test_case "TimeoutError classify + cascade + message"
+            `Quick test_timeout_error_cascades_with_phase_evidence;
         ] );
       ( "error_message helper baseline",
         [

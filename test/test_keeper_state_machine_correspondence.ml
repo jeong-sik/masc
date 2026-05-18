@@ -288,7 +288,7 @@ let canonical_events : (string * SM.event) list =
     ("OperatorStop", SM.Operator_stop { remove_meta = false });
     ("DrainCompleteEv", SM.Drain_complete);
     ("FiberStarted", SM.Fiber_started);
-    ("FiberTerminated", SM.Fiber_terminated { outcome = "test" });
+    ("FiberTerminated", SM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None });
     ("SupervisorRestartAttempt", SM.Supervisor_restart_attempt { attempt = 1 });
     ("RestartBudgetExhausted", SM.Restart_budget_exhausted);
     ("GuardrailStop", SM.Guardrail_stop { reason = "test" });

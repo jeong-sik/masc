@@ -647,11 +647,10 @@ let metric_provider_health_probe_error = "masc_provider_health_probe_error_total
    can see "alive but unproductive" keepers in Grafana before the
    detection latch fires.  Labels: keeper. *)
 (* PR-M (Leak 9): consecutive [oas_timeout_budget] cycle FAILED strikes
-   per keeper. Counter increments on each strike; a strike at
-   [outcome=promote] means [Keeper_fiber_crash] was raised so
-   [Keeper_supervisor.sweep_and_recover] will respawn the fiber. Without
-   the strike→crash promotion these failures repeated silently for
-   hours (4h+ zombie keepers observed 2026-04-26). *)
+   per keeper. Counter increments on each strike. At the limit, the
+   heartbeat loop records [outcome=soft_backoff] unless
+   [Keeper_failure_policy] sees separate keeper-liveness loss and returns
+   a death-allowed decision. *)
 let metric_oas_bus_subscriber_stream_depth = "masc_oas_bus_subscriber_stream_depth"
 let metric_oas_bus_publish_block_seconds = "masc_oas_bus_publish_block_seconds_total"
 let metric_oas_bus_publish = "masc_oas_bus_publish_total"

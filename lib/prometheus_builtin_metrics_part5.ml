@@ -10,7 +10,12 @@ type register_histogram =
 type inc_counter =
   string -> ?labels:(string * string) list -> ?delta:float -> unit -> unit
 
-let register ~add:_ ~register_histogram ~inc_counter:_ () =
+let register
+      ~(add : string -> string -> metric_kind -> unit)
+      ~(register_histogram : register_histogram)
+      ~inc_counter:(_ : inc_counter)
+      ()
+  =
   register_histogram
     ~name:metric_file_lock_acquire_seconds
     ~help:

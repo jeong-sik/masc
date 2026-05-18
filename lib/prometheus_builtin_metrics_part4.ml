@@ -10,7 +10,12 @@ type register_histogram =
 type inc_counter =
   string -> ?labels:(string * string) list -> ?delta:float -> unit -> unit
 
-let register ~add ~register_histogram:_ ~inc_counter:_ () =
+let register
+      ~(add : string -> string -> metric_kind -> unit)
+      ~(register_histogram : register_histogram)
+      ~(inc_counter : inc_counter)
+      ()
+  =
   add
     metric_fd_open
     "Best-effort FD accountant observation of process-wide open file descriptors."

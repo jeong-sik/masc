@@ -769,7 +769,9 @@ let broadcast_impl ?(buffer = true) ?(notify_external = true)
     ?(event_type = "message") target json =
   let t0 = Time_compat.now () in
   let data = Yojson.Safe.to_string json in
-  let jsonrpc_payload = jsonrpc_message_for_coordinator json in
+  let jsonrpc_payload =
+    Sse_jsonrpc_filter.jsonrpc_message_for_coordinator json
+  in
   (* Atomically allocate the event id so two concurrent broadcasts
      cannot observe the same peeked counter value and emit duplicates. *)
   let current_event_id = next_id () in
@@ -865,7 +867,7 @@ let broadcast_presence json =
 (** Send a JSON-RPC message to a specific session.
     Enqueues the event in the session's stream for asynchronous delivery. *)
 let send_to session_id json =
-  if not (jsonrpc_message_for_coordinator json) then
+  if not (Sse_jsonrpc_filter.jsonrpc_message_for_coordinator json) then
     Log.Server.warn
       "Dropping non-JSON-RPC payload sent via Sse.send_to for session %s"
       session_id

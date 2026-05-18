@@ -139,12 +139,14 @@ let handle_start ~tool_name ~start_time (ctx : context) : tool_result option =
                   agent_name add_result))
         else begin
           let _claim_msg = Coord_task.claim_task active_config ~agent_name ~task_id in
-          Planning_eio.set_current_task active_config ~task_id;
-          Some
-            (Tool_result.ok ~tool_name ~start_time
-               (Printf.sprintf
-                  "masc_start complete: project scope set, joined as %s, task %s created+claimed+set as current."
-                  agent_name task_id))
+          match Planning_eio.set_current_task active_config ~task_id with
+          | Error msg -> Some (Tool_result.error ~tool_name ~start_time msg)
+          | Ok () ->
+              Some
+                (Tool_result.ok ~tool_name ~start_time
+                   (Printf.sprintf
+                      "masc_start complete: project scope set, joined as %s, task %s created+claimed+set as current."
+                      agent_name task_id))
         end
       end
 

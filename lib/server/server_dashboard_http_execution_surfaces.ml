@@ -746,6 +746,14 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
 ;;
 
 let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
+  let attach_surface_envelope json =
+    Server_dashboard_surface.attach
+      ~surface:"/api/v1/dashboard/execution-trust"
+      ~source:"execution_receipt"
+      ~cache_key:"execution-trust:default"
+      ~ttl_s:15.0
+      json
+  in
   let compute () =
     let started_at = Unix.gettimeofday () in
     run_dashboard_compute
@@ -759,7 +767,7 @@ let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
          Dashboard_http_keeper.execution_trust_dashboard_json config
          |> with_projection_diagnostics ~surface:"execution_trust" ~started_at ~extra:[])
   in
-  match state.Mcp_server.clock with
+  (match state.Mcp_server.clock with
   | Some clock ->
     Dashboard_cache.get_or_compute_with_timeout
       "execution-trust:default"
@@ -767,7 +775,8 @@ let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
       ~clock
       ~timeout_sec:Env_config_runtime.Dashboard.execution_trust_timeout_sec
       compute
-  | None -> Dashboard_cache.get_or_compute "execution-trust:default" ~ttl:15.0 compute
+  | None -> Dashboard_cache.get_or_compute "execution-trust:default" ~ttl:15.0 compute)
+  |> attach_surface_envelope
 ;;
 
 let transport_health_cache_diagnostics () =

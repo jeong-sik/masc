@@ -787,18 +787,19 @@ let handle_claim_next ?agent_tool_names ~tool_name ~start_time ctx _args =
   let result =
     Coord.claim_next_r ctx.config ~agent_name:ctx.agent_name ?agent_tool_names ()
   in
-  let message = match result with
-    | Coord.Claim_next_claimed { message; task_id; _ } ->
-        sync_keeper_current_task_binding ctx;
-        sync_planning_current_task_with_owned_task ctx;
-        append_claim_observation message ~now:(Time_compat.now ())
-          ~agent_name:ctx.agent_name ~task_id
-    | Coord.Claim_next_no_unclaimed -> "No unclaimed tasks available"
-    | Coord.Claim_next_no_eligible { excluded_count; _ } ->
-        format_no_eligible ctx excluded_count
-    | Coord.Claim_next_error e -> Printf.sprintf "Error: %s" e
-  in
-  Tool_result.ok ~tool_name ~start_time message
+  match result with
+  | Coord.Claim_next_claimed { message; task_id; _ } ->
+    sync_keeper_current_task_binding ctx;
+    sync_planning_current_task_with_owned_task ctx;
+    append_claim_observation message ~now:(Time_compat.now ())
+      ~agent_name:ctx.agent_name ~task_id
+    |> Tool_result.ok ~tool_name ~start_time
+  | Coord.Claim_next_no_unclaimed ->
+    Tool_result.ok ~tool_name ~start_time "No unclaimed tasks available"
+  | Coord.Claim_next_no_eligible { excluded_count; _ } ->
+    Tool_result.ok ~tool_name ~start_time (format_no_eligible ctx excluded_count)
+  | Coord.Claim_next_error e ->
+    Tool_result.error ~tool_name ~start_time (Printf.sprintf "Error: %s" e)
 
 let handle_release ~tool_name ~start_time ctx args =
   let task_id = get_string args "task_id" "" in

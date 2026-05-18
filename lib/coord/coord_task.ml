@@ -29,6 +29,10 @@ let action_persists_handoff_context = function
   | Masc_domain.Reject_verification ->
     false
 
+let flatten_lock_result = function
+  | Ok result -> result
+  | Error e -> Error e
+
 let verification_submission_evidence_refs task handoff_context =
   let contract_refs =
     match task.contract with
@@ -77,7 +81,7 @@ let transition_task_r
      prevent ambiguous identity mapping across keeper agent files. *)
   let agent_name = resolve_agent_name_strict config agent_name in
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
-  with_file_lock config backlog_path (fun () ->
+  with_file_lock_r config backlog_path (fun () ->
     try
       match read_backlog_r config with
       | Error msg -> Error (Masc_domain.System (Masc_domain.System_error.IoError msg))
@@ -846,6 +850,7 @@ let transition_task_r
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e ->
       Error (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e))))
+  |> flatten_lock_result
 ;;
 
 (** Release task back to backlog - transition wrapper *)
@@ -914,7 +919,8 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_
   else (
     let agent_name = resolve_agent_name_strict config agent_name in
     let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
-    with_file_lock config backlog_path (fun () ->
+    let result =
+      with_file_lock_r config backlog_path (fun () ->
       try
         match read_backlog_r config with
         | Error msg -> Error (Masc_domain.System (Masc_domain.System_error.IoError msg))
@@ -1059,7 +1065,9 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_
       | Eio.Cancel.Cancelled _ as e -> raise e
       | e ->
         Error
-          (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e)))))
+          (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e))))
+    in
+    flatten_lock_result result)
 ;;
 
 (* Scheduling functions are in Coord_task_schedule.
@@ -1089,7 +1097,8 @@ let link_task_execution_artifacts_r
   then Error (Masc_domain.System Masc_domain.System_error.NotInitialized)
   else (
     let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
-    with_file_lock config backlog_path (fun () ->
+    let result =
+      with_file_lock_r config backlog_path (fun () ->
       try
         match read_backlog_r config with
         | Error msg -> Error (Masc_domain.System (Masc_domain.System_error.IoError msg))
@@ -1175,5 +1184,7 @@ let link_task_execution_artifacts_r
       | Eio.Cancel.Cancelled _ as e -> raise e
       | e ->
         Error
-          (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e)))))
+          (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e))))
+    in
+    flatten_lock_result result)
 ;;

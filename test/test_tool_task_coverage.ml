@@ -1218,6 +1218,33 @@ let () =
     assert_task_claimed_by ctx ctx.agent_name;
     assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 
+let () =
+  test "handle_claim_next_reports_internal_errors_as_tool_failure" (fun () ->
+    let ctx = make_test_ctx () in
+    let add_result =
+      Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+        (`Assoc [ ("title", `String "Claim next internal error") ])
+    in
+    if not add_result.Tool_result.success then failwith add_result.Tool_result.legacy_message;
+    let corrupt path =
+      let oc = open_out path in
+      Fun.protect
+        ~finally:(fun () -> close_out_noerr oc)
+        (fun () -> output_string oc "{not valid json")
+    in
+    let backlog_path = Coord.backlog_path ctx.config in
+    corrupt backlog_path;
+    corrupt (backlog_path ^ ".last-good");
+    let result =
+      Tool_task.handle_claim_next
+        ~tool_name:"test_tool"
+        ~start_time:0.0
+        ctx
+        (`Assoc [])
+    in
+    assert (not result.Tool_result.success);
+    assert (str_contains result.Tool_result.legacy_message "Error:"))
+
 let () = test "handle_claim_next_ignores_keeper_preset_for_open_claims" (fun () ->
   let agent_name = "keeper-social-sync-agent" in
   let keeper_name = "social-sync" in

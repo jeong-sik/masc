@@ -537,7 +537,9 @@ let with_distributed_lock_r ?clock config path key f : ('a, masc_error) result =
       ~key ~attempts:50;
     Error
       (System (System_error.IoError
-         (Printf.sprintf "Failed to acquire distributed lock for %s"
+         (Printf.sprintf
+            "Failed to acquire distributed lock for key: %s (path=%s, 50 attempts exhausted; transient contention, retry later)"
+            key
             path)))
   end
 

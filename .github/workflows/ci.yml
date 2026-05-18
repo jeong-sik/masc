@@ -1181,7 +1181,7 @@ jobs:
                       (((.body // "") | ascii_downcase) | contains("`" + $label + "`")) and
                       ((.body // "") | contains("/actions/runs/")) and
                       ((.createdAt | fromdateiso8601) as $comment_ts |
-                        ($comment_ts >= ($label_ts - 300) and $comment_ts <= ($label_ts + 300)))
+                        ($comment_ts >= $label_ts and $comment_ts <= ($label_ts + 300)))
                     );
                   . as $root
                   |

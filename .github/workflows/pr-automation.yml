@@ -159,11 +159,13 @@ jobs:
                 const afterPreviousLabelCycle =
                   !Number.isFinite(previousLabelEventAtMs) ||
                   commentAtMs > previousLabelEventAtMs;
+                const withinCurrentLabelCycle =
+                  commentAtMs >= labeledAtMs &&
+                  commentAtMs <= labeledAtMs + approvalGateWindowMs;
                 return comment.user?.type === "Bot" &&
                   Number.isFinite(commentAtMs) &&
                   afterPreviousLabelCycle &&
-                  commentAtMs >= labeledAtMs - approvalGateWindowMs &&
-                  commentAtMs <= labeledAtMs + approvalGateWindowMs &&
+                  withinCurrentLabelCycle &&
                   body.includes(approvalGateMarker) &&
                   body.toLowerCase().includes(labelLiteral) &&
                   body.includes("/actions/runs/");

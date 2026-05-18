@@ -1,14 +1,14 @@
 ---
 rfc: "0128"
 title: "IDE store partitioning by canonical git URL — sandbox/working-tree write-read parity"
-status: Draft
+status: Active
 created: 2026-05-17
-updated: 2026-05-17
+updated: 2026-05-18
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0035", "0036", "0084"]
-implementation_prs: []
+implementation_prs: [16028, 16036, 16040, 16044, 16049, 16053, 16055, 16058, 16061, 16062, 16063]
 ---
 
 # RFC-0128 — IDE store partitioning by canonical git URL
@@ -285,3 +285,81 @@ test/test_ide_canonical_url_join.ml
 - `lib/server/server_ide_http.ml`, `lib/server/server_routes_http_routes_workspace.ml`.
 - `lib/keeper/keeper_exec_fs.ml:230` (write entry point), `lib/keeper/keeper_alerting_path.ml:69` (현재 base 해결).
 - `lib/repo_manager/repo_store.ml` — repository.toml 모델.
+
+## 10. Implementation summary (2026-05-18)
+
+본 spec 머지 (#16014) 후 11 PR 로 분할 구현. 각 PR 은 single-purpose 원칙 적용.
+
+| PR | 번호 | 역할 | 상태 |
+|----|------|------|------|
+| 1a + 1b | [#16028](https://github.com/jeong-sik/masc-mcp/pull/16028) | `canonical_url_of_remote`, `Repo_store.find_repo_by_path_prefix`, `Ide_paths.partition` 타입, `?partition` 옵셔널 인자 plumbing | **MERGED** |
+| 1c | [#16036](https://github.com/jeong-sik/masc-mcp/pull/16036) | keeper write + HTTP read cut-over to `By_url`, `_orphan` bucket + `masc_ide_orphan_writes_total` counter | Open |
+| 1d | [#16040](https://github.com/jeong-sik/masc-mcp/pull/16040) | `excluded_dirs` 에 `.masc-ide` 추가 (file-tree leak fix) | Open |
+| 1e | [#16044](https://github.com/jeong-sik/masc-mcp/pull/16044) | `Ide_meta_sync` 호출 사이트 제거 + `ingest_tool_call` 의 content fallback (double-write 해소) | Open |
+| 1f | [#16055](https://github.com/jeong-sik/masc-mcp/pull/16055) | `Ide_meta_sync` 모듈 자체 삭제 (caller 0 후 dead-code purge) | Open |
+| 2 | [#16049](https://github.com/jeong-sik/masc-mcp/pull/16049) | `?merge_legacy:bool` read-side merge — Legacy + By_url + structural dedup. UUID 충돌 버그도 함께 fix | Open |
+| 3 | [#16053](https://github.com/jeong-sik/masc-mcp/pull/16053) | `Ide_migration.migrate_flat_to_partitioned` — idempotent + dry_run + delete_legacy_after | Open |
+| 4 | [#16058](https://github.com/jeong-sik/masc-mcp/pull/16058) | `masc-ide-migrate` CLI — operator-facing | Open |
+| 6 | [#16061](https://github.com/jeong-sik/masc-mcp/pull/16061) | sandbox playground path → repo_id lookup (`Playground_paths.parse_playground_repo_path` + `find_url_by_id`) — §4.5 두 번째 chain | Open |
+| 8 | [#16062](https://github.com/jeong-sik/masc-mcp/pull/16062) | HTTP IDE routes 가 partition base 를 server `base_path` 로 통일 (workspace tree 가 아닌) | Open |
+| 9 | [#16063](https://github.com/jeong-sik/masc-mcp/pull/16063) | `docs/IDE-STORE-MIGRATION-RUNBOOK.md` operator-facing runbook | Open |
+
+### Critical merge atomicity
+
+PR-1c + **PR-6** + **PR-8** 셋이 *같은 sweep 에서* 머지돼야 사용자 환경에서 keeper write/read 가 join. 각각 단독은 silent failure:
+
+| 단독 머지 | 결과 |
+|----------|------|
+| PR-1c 만 | sandbox writes → `_orphan` (PR-6 의 두 번째 chain 부재). HTTP read base ≠ keeper write base (PR-8 의 base 통일 부재) |
+| PR-1c + PR-6 | write base ≠ read base 여전. HTTP read 0 건 |
+| PR-1c + PR-8 | sandbox writes → `_orphan` 여전 |
+| **PR-1c + PR-6 + PR-8** | write/read 일치 ✓ |
+
+### §4/§5 invariant 입증 단위 테스트 (총합 65+ cases)
+
+- `test_ide_paths` 18 cases (canonical URL 정규화 + join invariant)
+- `test_repo_store` reverse_lookup 6 cases (path_prefix sibling-safe + url-by-id)
+- `test_ide_annotations` 17 cases (partition routing + dedup + UUID + read-merge)
+- `test_ide_canonical_url_join` 5 cases (sandbox/working-tree 같은 slug join, sandbox playground path resolution, docker playground path)
+- `test_ide_migration` 5 cases (Phase 3 idempotency + dry_run + delete)
+- `test_workspace_tree_exclusions` 2 cases (.masc-ide leak guard)
+
+### Operator runbook
+
+상세 진단/migration 절차는 [`docs/IDE-STORE-MIGRATION-RUNBOOK.md`](../IDE-STORE-MIGRATION-RUNBOOK.md) 참조 (PR-9 가 추가).
+
+### Recommended merge sequence
+
+PR sweep 결정 시 다음 순서 권장. 각 그룹 안의 PR 들은 서로 독립이라 임의 순서 가능.
+
+**Phase A — Critical atomic group** (셋 같이, 사용자 환경에서 keeper write/read join 의 필수조건):
+
+- [ ] #16036 PR-1c — write/read cut-over framework
+- [ ] #16061 PR-6 — sandbox playground path lookup (§4.5 두 번째 chain)
+- [ ] #16062 PR-8 — HTTP partition base 통일 (server base_path)
+
+**Phase B — Phase 1 polish** (독립, Phase A 후 또는 병행):
+
+- [ ] #16044 PR-1e — single-write 보강 (Ide_meta_sync 호출 제거)
+- [ ] #16055 PR-1f — Ide_meta_sync 모듈 dead-code purge (PR-1e 후)
+- [ ] #16040 PR-1d — `excluded_dirs` 에 `.masc-ide` 추가 (Phase A 와 무관)
+
+**Phase C — Phase 2 read merge** (Phase A 의 By_url cut-over 후 가치 발휘):
+
+- [ ] #16049 PR-2 — `?merge_legacy:bool` + structural dedup + UUID fix
+
+**Phase D — Phase 3 migration tooling** (Phase A + C 후):
+
+- [ ] #16053 PR-3 — `Ide_migration.migrate_flat_to_partitioned` 라이브러리
+- [ ] #16058 PR-4 — `masc-ide-migrate` CLI
+
+**Phase E — Documentation 동기화** (어디서나 가능):
+
+- [ ] #16060 PR-5 — RFC status Draft → Active + index row + implementation_prs
+- [ ] #16063 PR-9 — `docs/IDE-STORE-MIGRATION-RUNBOOK.md`
+
+**최소 가치 머지 set**: Phase A 만으로도 사용자 환경의 즉시 unblock 달성 (working tree IDE 가 keeper 활동 표시).
+
+### Implementation → Implemented status 조건
+
+Phase 3 migration 의 운영 적용 + `?merge_legacy` flag 제거가 끝나면 RFC status 를 `Implemented` 로 갱신. 본 cycle (2026-05-18) 까지의 status 는 `Active`.

@@ -991,6 +991,10 @@ let test_bash_blocks_direct_masc_tool_command () =
     (Some "tool_invoked_as_shell_command")
     (Json.member "error" json |> Json.to_string_option);
   Alcotest.(check (option string))
+    "failure class"
+    (Some "workflow_rejection")
+    (Json.member "failure_class" json |> Json.to_string_option);
+  Alcotest.(check (option string))
     "suggested tool"
     (Some "keeper_tasks_list")
     (Json.member "suggested_tool" json |> Json.to_string_option);

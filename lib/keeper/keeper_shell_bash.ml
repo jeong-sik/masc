@@ -532,6 +532,8 @@ let bash_shape_block_alternatives = function
       "keeper_bash cmd='git log --oneline -20'";
     ]
 
+let workflow_rejection_field = "failure_class", `String "workflow_rejection"
+
 let bash_shape_block_result ~cmd ~cmd_for_log ~env_snapshot block =
   Yojson.Safe.to_string
     (Exec_core.blocked_result_json
@@ -556,6 +558,7 @@ let bash_shape_block_result ~cmd ~cmd_for_log ~env_snapshot block =
             })
        ~extra:
          [
+           workflow_rejection_field;
            "cmd", `String cmd_for_log;
            "shape_block", `String (bash_shape_block_tag block);
            "execution_time_ms", `Int 0;
@@ -602,6 +605,7 @@ let handle_keeper_bash
       (`Assoc
          [ "ok", `Bool false
          ; "error", `String "gh_pr_create_requires_keeper_pr_create"
+         ; workflow_rejection_field
          ; "reason", `String
              "keeper_bash cannot bypass the PR creation approval and audit policy"
          ; "hint", `String
@@ -621,6 +625,7 @@ let handle_keeper_bash
       (`Assoc
          [ "ok", `Bool false
          ; "error", `String "tool_invoked_as_shell_command"
+         ; workflow_rejection_field
          ; "tool", `String tool_name
          ; "cmd", `String cmd_for_log
          ; "hint",

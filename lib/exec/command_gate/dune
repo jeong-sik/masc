@@ -1,0 +1,12 @@
+; Phase 1 SSOT facade for shell command validation. Sub-library so it
+; can depend on both masc_exec (Shell_ir/Parsed/Bin/Sandbox_target)
+; and masc_exec_bash_parser (Bash.parse_string) without introducing a
+; cycle through masc_exec.
+;
+; SSOT: Shell IR Promotion Goal Plan - 2026-05-18, Phase 1 PR-1.
+
+(library
+ (name masc_exec_command_gate)
+ (public_name masc_mcp.masc_exec_command_gate)
+ (wrapped true)
+ (libraries masc_exec masc_exec_bash_parser))

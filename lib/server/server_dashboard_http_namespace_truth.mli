@@ -19,7 +19,7 @@
 
 val dashboard_namespace_truth_http_json :
   state:Mcp_server.server_state ->
-  sw:'a ->
+  sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   'b ->
   Yojson.Safe.t
@@ -43,8 +43,16 @@ val dashboard_namespace_truth_http_json :
       \{"status": "initializing", "generated_at": ..., "message": ...\}
     ]}
 
-    Warm path: composes shell + execution + command summaries with
-    per-fiber timeouts:
+    Warm path: once {!Server_dashboard_http_core.last_good_shell}
+    exists, composes the HTTP response from cached shell + proactive
+    execution state immediately and forks a bounded shell refresh in
+    the request switch (stale-while-revalidate).  The refresh timeout
+    is controlled by [MASC_NAMESPACE_TRUTH_SHELL_REFRESH_TIMEOUT_S]
+    (default 5.0s).
+
+    First seed: when no last-good shell exists yet, does one bounded
+    synchronous shell attempt before composing shell + execution +
+    command summaries with per-fiber timeouts:
 
     | Env var | Default | Used for |
     | --- | --- | --- |
@@ -57,7 +65,7 @@ val dashboard_namespace_truth_http_json :
     must exceed the inner cache timeout to avoid the double-timeout
     race that discards stale data (#5090).
 
-    Graceful degradation: shell falls back to
+    First-seed graceful degradation: shell falls back to
     {!Server_dashboard_http_core.last_good_shell} on timeout (61x/day
     zero-out under I/O contention before the fix). *)
 
@@ -69,12 +77,12 @@ val namespace_truth_snapshot_from_caches :
 
     Returns [None] iff the execution cache has not produced its
     first successful result (cold start).  Otherwise reads the
-    proactive execution cache + last-good shell + empty command
-    summary and composes via
+    proactive execution cache + last-good shell (or bootstrap shell
+    when no last-good shell exists yet) + empty command summary and
+    composes via
     {!Server_dashboard_http_namespace_truth_support.compose_namespace_truth_snapshot}.
 
-    Side effect: updates {!Server_dashboard_http_core.last_good_shell}
-    on a fresh shell read. *)
+    No shell refresh is performed on this path. *)
 
 val broadcast_namespace_truth_snapshot :
   Mcp_server.server_state -> unit

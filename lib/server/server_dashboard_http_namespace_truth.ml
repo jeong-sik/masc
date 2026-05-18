@@ -5,12 +5,91 @@ open Server_dashboard_http_core
 module Execution_surfaces = Server_dashboard_http_execution_surfaces
 module Namespace_truth_support = Server_dashboard_http_namespace_truth_support
 
+let namespace_truth_shell_refreshing : bool Atomic.t = Atomic.make false
+
 let float_of_env_default_with_legacy ~canonical ~legacy ~default ~min_v ~max_v =
   match Sys.getenv_opt canonical with
   | Some _ -> float_of_env_default canonical ~default ~min_v ~max_v
   | None -> float_of_env_default legacy ~default ~min_v ~max_v
 
-let dashboard_namespace_truth_http_json ~state ~sw:_ ~clock _request =
+let namespace_truth_shell_refresh_timeout_s () =
+  float_of_env_default "MASC_NAMESPACE_TRUTH_SHELL_REFRESH_TIMEOUT_S"
+    ~default:5.0 ~min_v:0.25 ~max_v:60.0
+
+let namespace_truth_bootstrap_shell_json () =
+  let generated_at = Masc_domain.now_iso () in
+  `Assoc
+    [
+      ( "status",
+        `Assoc
+          [
+            ("project", `String "initializing");
+            ("generated_at", `String generated_at);
+          ] );
+      ( "counts",
+        `Assoc
+          [
+            ("agents", `Int 0);
+            ("tasks", `Int 0);
+            ("keepers", `Int 0);
+            ("total_runtimes", `Int 0);
+          ] );
+      ("configured_keepers", `Int 0);
+      ("meta_cognition", `Null);
+    ]
+
+let shell_json_matches_config ~(config : Coord.config) json =
+  match json_assoc_field "paths" json |> json_string_field_opt "effective_base_path" with
+  | Some base_path -> String.equal base_path config.base_path
+  | None -> false
+
+let last_good_shell_for_config config =
+  match Atomic.get last_good_shell with
+  | `Assoc [] -> None
+  | json when shell_json_matches_config ~config json -> Some json
+  | _ -> None
+
+let cached_shell_json_for_namespace ~config =
+  match last_good_shell_for_config config with
+  | Some json -> json
+  | None -> namespace_truth_bootstrap_shell_json ()
+
+let schedule_namespace_truth_shell_refresh ~sw ~clock config =
+  if Atomic.compare_and_set namespace_truth_shell_refreshing false true then (
+    Eio.Fiber.fork ~sw (fun () ->
+        Eio_guard.protect
+          ~finally:(fun () -> Atomic.set namespace_truth_shell_refreshing false)
+          (fun () ->
+             let timeout_s = namespace_truth_shell_refresh_timeout_s () in
+             let t0 = Time_compat.now () in
+             try
+               let result =
+                 match
+                   Eio.Time.with_timeout clock timeout_s (fun () ->
+                       Ok (dashboard_shell_http_json ~clock config))
+                 with
+                 | Ok json -> json
+                 | Error `Timeout ->
+                     Log.Dashboard.warn
+                       "project-snapshot async shell refresh timed out (%.1fs)"
+                       timeout_s;
+                     `Assoc []
+               in
+               if result <> `Assoc [] && not (is_dashboard_cache_timeout_json result)
+               then (
+                 Atomic.set last_good_shell result;
+                 Atomic.set shell_warmed true;
+                 Log.Dashboard.debug
+                   "project-snapshot async shell refresh completed: %.0fms"
+                   ((Time_compat.now () -. t0) *. 1000.0))
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+                 Log.Dashboard.warn
+                   "project-snapshot async shell refresh failed: %s"
+                   (Printexc.to_string exn))))
+
+let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
   let config = state.Mcp_server.room_config in
   (* Fast-path: if the proactive execution refresh hasn't produced a result
      yet, return "initializing" immediately instead of blocking for 15-20s
@@ -37,7 +116,11 @@ let dashboard_namespace_truth_http_json ~state ~sw:_ ~clock _request =
       ~message:
         "Execution snapshot is still warming up. The dashboard will retry automatically."
   else
-    with_dashboard_timeout ~clock (fun () ->
+    match last_good_shell_for_config config with
+    | None ->
+        (* No shell seed exists yet, so do one bounded synchronous attempt. Later
+           requests use stale-while-revalidate and do not pay this cost. *)
+        with_dashboard_timeout ~clock (fun () ->
         let started_at = Unix.gettimeofday () in
         let t0 = Time_compat.now () in
         (* Staged fetch: shell may still need a guarded refresh, while execution
@@ -95,7 +178,7 @@ let dashboard_namespace_truth_http_json ~state ~sw:_ ~clock _request =
         (* Graceful degradation: on timeout fall back to the last successful
            shell result rather than empty JSON, which would zero out namespace
            counts and focus data (61x/day under I/O contention). *)
-        let shell_fallback = Atomic.get last_good_shell in
+        let shell_fallback = cached_shell_json_for_namespace ~config in
         (* Sequential fetch to avoid PG connection concurrent usage (#3305). *)
         shell_ref :=
           fiber_with_timeout ~timeout_s:shell_timeout_s "shell"
@@ -132,6 +215,33 @@ let dashboard_namespace_truth_http_json ~state ~sw:_ ~clock _request =
                    | Some value -> `String value
                    | None -> `Null );
                ])
+    | Some shell_json ->
+        schedule_namespace_truth_shell_refresh ~sw ~clock config;
+        (* NDT-OK: projection diagnostics timestamp only; snapshot content comes
+           from cached read models. *)
+        let started_at = Unix.gettimeofday () in
+        let execution_json = cached_surface_json Execution_surfaces.execution_cache in
+      let execution_cache_state =
+        json_assoc_field "projection_diagnostics" execution_json
+        |> json_string_field_opt "cache_state"
+      in
+      Namespace_truth_support.compose_namespace_truth_snapshot ~config
+        ~initialized:(Coord.is_initialized config)
+        ~shell_json ~execution_json
+        ~command_summary_json:(`Assoc [])
+      |> with_projection_diagnostics ~surface:"namespace_truth" ~started_at
+           ~extra:
+             [
+               ("parallel_ms", `Int 0);
+               ("cache_mode", `String "stale_while_revalidate");
+               ("shell_source", `String "last_good_shell");
+               ( "shell_refresh_inflight",
+                 `Bool (Atomic.get namespace_truth_shell_refreshing) );
+               ( "execution_cache_state",
+                 match execution_cache_state with
+                 | Some value -> `String value
+                 | None -> `Null );
+             ]
 
 (** Assemble a lightweight namespace-truth snapshot from cached refs only.
     No PG I/O — reads proactive caches for execution and command, and
@@ -143,16 +253,7 @@ let namespace_truth_snapshot_from_caches (state : Mcp_server.server_state) :
     None
   else
     let config = state.Mcp_server.room_config in
-    let shell_json =
-      if Atomic.get shell_warmed then
-        (try
-           let result = dashboard_shell_http_json ?clock:state.Mcp_server.clock config in
-           Atomic.set last_good_shell result;
-           result
-         with Eio.Cancel.Cancelled _ as e -> raise e
-            | _ -> Atomic.get last_good_shell)
-      else Atomic.get last_good_shell
-    in
+    let shell_json = cached_shell_json_for_namespace ~config in
     let execution_json =
       cached_surface_json Server_dashboard_http_execution_surfaces.execution_cache
     in

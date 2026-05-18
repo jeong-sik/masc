@@ -144,6 +144,7 @@
    keeper_shell_bash_safe_read
    keeper_shell_bash_typed
    keeper_shell_bash_shape_scan
+   keeper_shell_bash_block_json
    keeper_shell_bash
    keeper_shell_ops
    keeper_exec_shell

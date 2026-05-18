@@ -133,6 +133,7 @@
   test_keeper_chat_store
   test_keeper_runtime_trust_snapshot
   test_ide_annotations
+  test_server_ide_lsp_proxy
   test_ide_paths
   test_ide_canonical_url_join
   test_ide_migration
@@ -425,6 +426,7 @@
   test_keeper_chat_store
   test_keeper_runtime_trust_snapshot
   test_ide_annotations
+  test_server_ide_lsp_proxy
   test_ide_paths
   test_ide_canonical_url_join
   test_ide_migration

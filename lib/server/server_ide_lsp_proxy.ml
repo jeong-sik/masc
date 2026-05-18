@@ -148,28 +148,87 @@ let pct_decode s =
   done;
   Buffer.contents buf
 
+let strip_trailing_slash path =
+  let len = String.length path in
+  if len > 1 && String.get path (len - 1) = '/'
+  then String.sub path 0 (len - 1)
+  else path
+;;
+
+let path_of_file_uri uri =
+  let prefix = "file://" in
+  if String.starts_with ~prefix uri
+  then (
+    let raw =
+      String.sub uri (String.length prefix) (String.length uri - String.length prefix)
+    in
+    pct_decode raw)
+  else uri
+;;
+
+let path_within ~base path =
+  let base = strip_trailing_slash base in
+  let path = strip_trailing_slash path in
+  let base_len = String.length base in
+  String.equal path base
+  || (String.starts_with ~prefix:base path
+      && String.length path > base_len
+      && Char.equal (String.get path base_len) '/')
+;;
+
+let workspace_root_for_initialize ~base_path root_uri =
+  let candidate = root_uri |> path_of_file_uri |> strip_trailing_slash in
+  let base = strip_trailing_slash base_path in
+  if path_within ~base candidate then candidate else base
+;;
+
 (** Resolve file:// URI to relative path from base.
     Strips trailing slash from base and checks directory boundary. *)
 let resolve_relative ~base uri =
-  let prefix = "file://" in
-  if not (String.starts_with ~prefix uri) then Some uri
-  else
-    let raw = String.sub uri (String.length prefix) (String.length uri - String.length prefix) in
-    let full = pct_decode raw in
-    let base =
-      let len = String.length base in
-      if len > 1 && String.get base (len - 1) = '/'
-      then String.sub base 0 (len - 1)
-      else base
-    in
+  if not (String.starts_with ~prefix:"file://" uri)
+  then Some uri
+  else (
+    let full = path_of_file_uri uri |> strip_trailing_slash in
+    let base = strip_trailing_slash base in
     let base_len = String.length base in
     let full_len = String.length full in
-    if not (String.starts_with ~prefix:base full) then Some full
-    else if base_len = full_len then Some ""
-    else if full_len > base_len && String.get full base_len = '/' then
-      Some (String.sub full (base_len + 1) (full_len - base_len - 1))
-    else
-      Some full
+    if not (path_within ~base full)
+    then None
+    else if base_len = full_len
+    then Some ""
+    else Some (String.sub full (base_len + 1) (full_len - base_len - 1)))
+;;
+
+let initialize_capabilities_json () =
+  `Assoc
+    [ "textDocumentSync", `Int 2
+    ; "completionProvider", `Assoc [ "resolveProvider", `Bool true ]
+    ; "hoverProvider", `Bool true
+    ; "definitionProvider", `Bool true
+    ; "referencesProvider", `Bool true
+    ; "documentHighlightProvider", `Bool true
+    ; "documentSymbolProvider", `Bool true
+    ; "foldingRangeProvider", `Bool true
+    ; "selectionRangeProvider", `Bool true
+    ; "documentLinkProvider", `Bool true
+    ; "codeLensProvider", `Assoc [ "resolveProvider", `Bool false ]
+    ; "inlayHintProvider", `Bool true
+    ; ( "diagnosticProvider"
+      , `Assoc [ "interFileDependencies", `Bool false; "workspaceDiagnostics", `Bool false ]
+      )
+    ]
+;;
+
+let initialize_result_json () =
+  `Assoc [ "capabilities", initialize_capabilities_json () ]
+;;
+
+type route_admission =
+  | Upgrade_websocket
+  | Missing_process_manager
+
+let route_admission ~has_proc_mgr =
+  if has_proc_mgr then Upgrade_websocket else Missing_process_manager
 ;;
 
 (** Extract client request ID from JSON-RPC message fields. *)
@@ -458,33 +517,9 @@ let dispatch_message cs msg =
               | _ -> cs.base_path)
            | _ -> cs.base_path
          in
-         let root =
-           if String.starts_with ~prefix:"file://" root_uri
-           then String.sub root_uri 7 (String.length root_uri - 7)
-           else root_uri
-         in
+         let root = workspace_root_for_initialize ~base_path:cs.base_path root_uri in
          cs.workspace_root := root;
-         send_response
-           cs
-           n
-           (`Assoc
-               [ ( "capabilities"
-                 , `Assoc
-                     [ "textDocumentSync", `Int 2
-                     ; "completionProvider", `Assoc [ "resolveProvider", `Bool true ]
-                     ; "hoverProvider", `Bool true
-                     ; "definitionProvider", `Bool true
-                     ; "referencesProvider", `Bool true
-                     ; "documentHighlightProvider", `Bool true
-                     ; "documentSymbolProvider", `Bool true
-                     ; "foldingRangeProvider", `Bool true
-                     ; "selectionRangeProvider", `Bool true
-                     ; "documentLinkProvider", `Bool true
-                     ; "codeLensProvider", `Assoc [ "resolveProvider", `Bool false ]
-                     ; "inlayHintProvider", `Bool true
-                     ; "diagnosticProvider", `Assoc [ "interFileDependencies", `Bool false; "workspaceDiagnostics", `Bool false ]
-                     ] )
-               ])
+         send_response cs n (initialize_result_json ())
        | Some "initialized", _ -> ()
        | Some "shutdown", Some n -> send_response cs n `Null
        | Some "exit", _ -> disconnect cs
@@ -554,9 +589,11 @@ let add_routes ~sw ~clock router =
                 | Some o -> o
                 | None -> "localhost"
               in
-              (match state.Mcp_server.proc_mgr with
-               | None -> Log.Server.warn "LSP WebSocket: no proc_mgr available"
-               | Some proc_mgr ->
+              (match route_admission ~has_proc_mgr:(Option.is_some state.Mcp_server.proc_mgr) with
+               | Missing_process_manager ->
+                 Log.Server.warn "LSP WebSocket: no proc_mgr available"
+               | Upgrade_websocket ->
+               let proc_mgr = Option.get state.Mcp_server.proc_mgr in
                Ws.Handshake.respond_with_upgrade ~sha1 reqd (fun () ->
                  Eio.Switch.run (fun conn_sw ->
                    let done_promise, done_resolver = Eio.Promise.create () in
@@ -615,3 +652,15 @@ let add_routes ~sw ~clock router =
   in
   router
 ;;
+
+module For_testing = struct
+  type nonrec route_admission =
+    route_admission =
+    | Upgrade_websocket
+    | Missing_process_manager
+
+  let resolve_relative = resolve_relative
+  let workspace_root_for_initialize = workspace_root_for_initialize
+  let initialize_result_json = initialize_result_json
+  let route_admission = route_admission
+end

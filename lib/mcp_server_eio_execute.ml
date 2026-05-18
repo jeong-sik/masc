@@ -83,43 +83,13 @@ let resolve_join_state ~room_initialized ~join_required ~agent_name ~base_path ~
 ;;
 
 
-let silent_auth_token_error_kind err =
-  Auth_error_kind.to_string (Auth_error_kind.classify err)
-;;
-
 let should_read_legacy_persisted_agent_name ~has_explicit_agent_name ~agent_name =
-  (not has_explicit_agent_name) && Agent_name_kind.is_ephemeral agent_name
+  Mcp_server_eio_caller_identity.should_read_legacy_persisted_agent_name
+    ~has_explicit_agent_name ~agent_name
 ;;
 
 let caller_agent_name_from_arguments arguments =
-  let nonempty_nonunknown key =
-    match Safe_ops.json_string_opt key arguments with
-    | Some value ->
-      let value = String.trim value in
-      if value <> "" && value <> "unknown" then Some value else None
-    | None -> None
-  in
-  match nonempty_nonunknown "_agent_name" with
-  | Some _ as value -> value
-  | None -> nonempty_nonunknown "agent_name"
-;;
-
-let direct_call_block_message name =
-  if Tool_catalog.is_on_surface Tool_catalog.Keeper_internal name
-  then (
-    let replacement_hint =
-      match (Tool_catalog.metadata name).Tool_catalog.replacement with
-      | Some replacement -> Printf.sprintf " Try `%s` instead." replacement
-      | None -> ""
-    in
-    Printf.sprintf
-      "Tool '%s' is keeper-internal and not callable from external MCP clients.%s"
-      name
-      replacement_hint)
-  else
-    Printf.sprintf
-      "Tool '%s' is hidden from the default tool surface and not callable directly."
-      name
+  Mcp_server_eio_caller_identity.caller_agent_name_from_arguments arguments
 ;;
 
 let cleanup_internal_keeper_runtime_resource ~during_exception ~label cleanup =
@@ -216,114 +186,6 @@ let execute_tool_eio
        | Eio.Io _ as exn ->
          Log.Misc.warn "write_mcp_session_agent: %s" (Printexc.to_string exn))
   in
-  (* Helper to get values from JSON arguments - delegates to Safe_ops *)
-  let arg_get_string_opt key =
-    match Safe_ops.json_string_opt key arguments with
-    | Some "" -> None
-    | other -> other
-  in
-  (* Resolve caller identity.  HTTP auth injects [_agent_name] from the
-     bearer-token owner; legacy [agent_name] is still accepted for direct
-     callers and for older MCP clients that have not moved to the internal
-     marker yet. *)
-  let explicit_agent_name = caller_agent_name_from_arguments arguments in
-  let has_explicit_agent_name = Option.is_some explicit_agent_name in
-  let identity_session_prefix =
-    let len = min 8 (String.length identity.session_key) in
-    if len = 0 then "anon" else String.sub identity.session_key 0 len
-  in
-  let generated_fallback_agent_name = Printf.sprintf "agent-%s" identity_session_prefix in
-  let agent_name =
-    (* Fix 4: Use cached resolved name to skip legacy /tmp file reads *)
-    match explicit_agent_name with
-    | Some agent_name -> agent_name
-    | None ->
-      (match cached_resolved_agent with
-       | Some cached -> cached
-       | None ->
-         if identity.Agent_identity.agent_name <> ""
-         then identity.Agent_identity.agent_name
-         else (
-           match read_mcp_session_agent () with
-           | Some name -> name
-           | None ->
-             if Option.is_some mcp_session_id
-             then generated_fallback_agent_name
-             else (
-               let term_session_id =
-                 Option.value ~default:"" (Sys.getenv_opt "TERM_SESSION_ID")
-               in
-               let term_file = Filename.concat agent_runtime_root (Printf.sprintf ".masc_agent_%s" term_session_id) in
-               match
-                 Safe_ops.protect ~default:None (fun () ->
-                   let name = Fs_compat.load_file term_file |> String.trim in
-                   if name <> "" then Some name else None)
-               with
-               | Some name ->
-                 Log.Mcp.warn
-                   "[deprecated] agent name resolved via /tmp TERM file — migrate to \
-                    Agent_identity";
-                 name
-               | None -> generated_fallback_agent_name)))
-  in
-  let token =
-    match auth_token with
-    | Some _ as token -> token
-    | None -> arg_get_string_opt "token"
-  in
-  let verified_internal_keeper_runtime =
-    internal_keeper_runtime
-    &&
-    match token with
-    | Some raw -> Auth.verify_internal_keeper_token config.base_path ~token:raw
-    | None -> false
-  in
-  let internal_keeper_runtime_tool =
-    verified_internal_keeper_runtime
-    && Tool_catalog.is_on_surface Tool_catalog.Keeper_internal name
-  in
-  let resolve_owner_keeper_identity owner_name =
-    let candidates =
-      [ Keeper_types.canonical_keeper_name owner_name
-      ; Keeper_types.canonical_keeper_name_from_agent_name owner_name
-      ]
-      |> List.filter_map (function
-        | Some value ->
-          let trimmed = String.trim value in
-          if trimmed <> "" then Some trimmed else None
-        | None -> None)
-      |> List.sort_uniq String.compare
-    in
-    let rec loop = function
-      | [] -> None
-      | candidate :: rest ->
-        (match Keeper_types.read_meta_resolved config candidate with
-         | Ok (Some (resolved_name, meta)) ->
-           Some
-             ( resolved_name
-             , Option.map Keeper_id.Uid.to_string meta.Keeper_types.keeper_id )
-         | Ok None -> loop rest
-         | Error _ -> loop rest)
-    in
-    loop candidates
-  in
-  let owner_keeper_identity =
-    match token with
-    | None -> None
-    | Some raw ->
-      (match Auth.resolve_agent_from_token config.base_path ~token:raw with
-       | Ok owner_name -> resolve_owner_keeper_identity owner_name
-       | Error msg ->
-         Log.Auth.routine
-           "owner_keeper_identity: token resolve failed: %s"
-           (Masc_domain.masc_error_to_string msg);
-         None)
-  in
-  let mode_gate_error =
-    if (not internal_keeper_runtime_tool) && not (Tool_catalog.allow_direct_call name)
-    then Some (direct_call_block_message name)
-    else None
-  in
   let read_term_session_agent () =
     if Option.is_some mcp_session_id
     then None
@@ -338,101 +200,20 @@ let execute_tool_eio
          with
          | Sys_error _ -> None))
   in
-  let persisted_agent_name () =
-    if should_read_legacy_persisted_agent_name ~has_explicit_agent_name ~agent_name
-    then (
-      match read_mcp_session_agent () with
-      | Some n -> Some n
-      | None -> if Option.is_some mcp_session_id then None else read_term_session_agent ())
-    else None
+  let caller_identity =
+    Mcp_server_eio_caller_identity.resolve ~config ~tool_name:name ~arguments
+      ~identity ~cached_resolved_agent ~mcp_session_id ~auth_token
+      ~internal_keeper_runtime
+      ~room_initialized:(fun () -> !room_init_cached)
+      ~read_mcp_session_agent ~read_term_session_agent ~log_mcp_exn
   in
-  let agent_name =
-    match persisted_agent_name () with
-    | Some persisted
-      when Nickname.is_generated_nickname persisted
-           && (not has_explicit_agent_name)
-           && not (Nickname.is_generated_nickname agent_name) -> persisted
-    | _ -> agent_name
+  let agent_name = caller_identity.agent_name in
+  let token = caller_identity.token in
+  let internal_keeper_runtime_tool =
+    caller_identity.internal_keeper_runtime_tool
   in
-  let agent_name =
-    match token with
-    (* Explicit agent_name is the caller's SSOT for this request.
-       Rewriting an explicit generated alias to the bearer-token owner
-       makes mutation paths operate under a different identity than the
-       one shown in join/status/debug output, which is exactly the
-       #8892 joined/debug/credential-route drift. Keep the explicit
-       alias and let auth preflight reject it if the token does not
-       authorize that identity. We only fall back to token ownership
-       when the request did not explicitly name an agent. *)
-    | Some t when (not has_explicit_agent_name) && Agent_name_kind.is_transient agent_name ->
-      (match Auth.resolve_agent_from_token config.base_path ~token:t with
-       | Ok resolved -> resolved
-       | Error err ->
-         (* PR-I: surface the silent fallback. The pre-#9786 branch silently
-                kept the caller-supplied alias when the bearer token did not
-                resolve to any credential, masking identity drift in production.
-                Emit a warn + counter so operators can grep [silent:auth_token]. *)
-         let error_kind = silent_auth_token_error_kind err in
-         Log.Auth.warn
-           "[silent:auth_token_resolve_error] agent=%s error_kind=%s - token resolve \
-            failed, keeping caller alias"
-           agent_name
-           error_kind;
-         Prometheus.inc_counter
-           Prometheus.metric_silent_auth_token_resolve_error
-           ~labels:[ "error_kind", error_kind; "agent", agent_name ]
-           ();
-         (* Phase A F2 (2026-04-27): pair the silent counter with a
-                [would_reject] emission so operators can measure how many of
-                these fall-throughs would be rejected under MASC_AUTH_STRICT.
-                Behavior is unchanged: this PR only adds telemetry + a flag
-                surface so Phase B PR-2 can flip [Strict] safely. *)
-         let mode = Auth_strict_mode.current () in
-         let mode_label = Auth_strict_mode.to_label mode in
-         (match mode with
-          | Auth_strict_mode.Off -> ()
-          | Auth_strict_mode.Dry_run | Auth_strict_mode.Strict ->
-            Log.Auth.warn
-              "[would_reject:auth_token_resolve_error] mode=%s agent=%s error_kind=%s - \
-               Phase B PR-2 will reject this request"
-              mode_label
-              agent_name
-              error_kind;
-            Prometheus.inc_counter
-              Prometheus.metric_auth_strict_would_reject
-              ~labels:
-                [ "mode", mode_label; "error_kind", error_kind; "agent", agent_name ]
-              ());
-         agent_name)
-    | _ -> agent_name
-  in
-  let agent_name =
-    if has_explicit_agent_name && not (Nickname.is_generated_nickname agent_name)
-    then (
-      let resolved = Coord.resolve_agent_name config agent_name in
-      if resolved <> agent_name
-      then (
-        try
-          if !room_init_cached
-          then (
-            try
-              if Coord.is_agent_joined config ~agent_name:resolved
-              then resolved
-              else agent_name
-            with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | exn ->
-              log_mcp_exn ~label:"is_agent_joined" exn;
-              agent_name)
-          else agent_name
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          log_mcp_exn ~label:__FUNCTION__ exn;
-          agent_name)
-      else agent_name)
-    else agent_name
-  in
+  let owner_keeper_identity = caller_identity.owner_keeper_identity in
+  let mode_gate_error = caller_identity.mode_gate_error in
   (* Cache resolved agent_name for this session (Fix 4) *)
   (match mcp_session_id with
    | Some sid -> Agent_registry_eio.set_resolved_name sid agent_name

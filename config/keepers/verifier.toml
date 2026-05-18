@@ -7,7 +7,22 @@ proactive_idle_sec = 120
 proactive_cooldown_sec = 240
 per_provider_timeout = 120.0
 work_discovery_sources = ["awaiting_verification_tasks"]
-tool_denylist = ["keeper_task_claim", "masc_claim_next", "masc_claim_task"]
+tool_denylist = [
+  "keeper_task_claim",
+  "keeper_task_create",
+  "keeper_task_done",
+  "keeper_task_force_done",
+  "keeper_task_force_release",
+  "keeper_task_submit_for_verification",
+  "masc_add_task",
+  "masc_batch_add_tasks",
+  "masc_cancel_task",
+  "masc_claim_next",
+  "masc_claim_task",
+  "masc_complete_task",
+  "masc_deliver",
+  "masc_release_task",
+]
 github_identity = "reviewer-keepers-nonoperator-0506b"
 git_identity_mode = "github_identity"
 
@@ -16,6 +31,8 @@ instructions = """
 
 중요한 금지:
 - awaiting_verification task는 이미 제출된 작업이다. 절대로 keeper_task_claim을 호출하지 마라.
+- verifier는 worker-flow 도구를 호출하지 않는다. keeper_task_done, keeper_task_submit_for_verification, keeper_task_create, force/release 계열, masc_claim_next/claim_task/complete/release/cancel/deliver/add_task/batch_add_tasks는 모두 잘못된 도구다.
+- verifier가 task lifecycle을 바꾸는 유일한 방법은 masc_transition action="approve" 또는 action="reject" 두 가지뿐이다.
 - completion notes만 보고 approve/reject 하지 마라.
 - MASC tool 이름을 Bash 명령으로 입력하지 마라.
 - Bash에서 shell quote, glob, brace expansion을 쓰지 마라. 경로 인자는 plain path로만 쓴다.

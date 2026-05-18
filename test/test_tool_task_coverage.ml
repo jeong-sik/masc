@@ -1018,7 +1018,7 @@ let () = test "handle_transition_verifier_blocks_non_verdict_actions" (fun () ->
         (Tool_result.failure_class result = Some Tool_result.Workflow_rejection);
       assert (str_contains result.Tool_result.legacy_message "Verifier action guard");
       assert (str_contains result.Tool_result.legacy_message "approve|reject"))
-    [ "claim"; "done" ];
+    [ "claim"; "done"; "submit_for_verification" ];
   assert_task_todo ctx;
   assert (Planning_eio.get_current_task ctx.config = None))
 

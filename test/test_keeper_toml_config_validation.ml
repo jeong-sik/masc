@@ -144,6 +144,81 @@ let test_committed_keepers_are_pr_work_capable () =
              (KPR.pr_review_event_to_gh_flag KPR.Approve))
     files
 
+let test_verifier_config_hides_worker_lifecycle_tools () =
+  let project_root = Masc_test_deps.find_project_root () in
+  Masc_test_deps.init_keeper_tool_registry ();
+  (match KPolicy.init_policy_config ~base_path:project_root with
+   | Ok () -> ()
+   | Error e -> fail (Printf.sprintf "init_policy_config: %s" e));
+  let path = Filename.concat project_root "config/keepers/verifier.toml" in
+  match KTP.load_keeper_toml path with
+  | Error e -> fail (Printf.sprintf "verifier.toml: %s" e)
+  | Ok (_loaded_name, defaults) ->
+      let preset =
+        match defaults.tool_preset with
+        | Some raw -> (
+            match KT.tool_preset_of_string raw with
+            | Some preset -> preset
+            | None -> fail (Printf.sprintf "unknown verifier preset %S" raw))
+        | None -> fail "verifier tool_access.preset is required"
+      in
+      let also_allow = Option.value ~default:[] defaults.tool_also_allow in
+      let denylist = Option.value ~default:[] defaults.tool_denylist in
+      let meta =
+        match
+          Masc_test_deps.meta_of_json_fixture
+            (`Assoc
+               [
+                 ("name", `String "verifier");
+                 ("agent_name", `String "keeper-verifier-agent");
+                 ("trace_id", `String "verifier-tool-surface-test");
+                 ( "tool_access",
+                   `Assoc
+                     [
+                       ("kind", `String "preset");
+                       ("preset", `String (KT.tool_preset_to_string preset));
+                       ( "also_allow",
+                         `List (List.map (fun value -> `String value) also_allow) );
+                     ] );
+                 ( "tool_denylist",
+                   `List (List.map (fun value -> `String value) denylist) );
+               ])
+        with
+        | Ok meta -> meta
+        | Error e -> fail (Printf.sprintf "verifier meta fixture: %s" e)
+      in
+      let lookup = KPolicy.tool_access_lookup_of_meta meta in
+      List.iter
+        (fun tool_name ->
+          check bool ("verifier keeps " ^ tool_name) true
+            (KPolicy.can_execute ~lookup tool_name))
+        [
+          "keeper_tasks_list";
+          "masc_tasks";
+          "masc_task_history";
+          "masc_transition";
+        ];
+      List.iter
+        (fun tool_name ->
+          check bool ("verifier hides " ^ tool_name) false
+            (KPolicy.can_execute ~lookup tool_name))
+        [
+          "keeper_task_claim";
+          "keeper_task_create";
+          "keeper_task_done";
+          "keeper_task_force_done";
+          "keeper_task_force_release";
+          "keeper_task_submit_for_verification";
+          "masc_add_task";
+          "masc_batch_add_tasks";
+          "masc_cancel_task";
+          "masc_claim_next";
+          "masc_claim_task";
+          "masc_complete_task";
+          "masc_deliver";
+          "masc_release_task";
+        ]
+
 (** Write a temporary TOML file, run load_keeper_toml, clean up. *)
 let with_temp_toml content f =
   let path = Filename.temp_file "keeper_test_" ".toml" in
@@ -898,6 +973,10 @@ let () =
           test_case "committed keepers can do PR work" `Quick
             (fun () ->
               with_repo_config_dir test_committed_keepers_are_pr_work_capable);
+          test_case "verifier hides worker lifecycle tools" `Quick
+            (fun () ->
+              with_repo_config_dir
+                test_verifier_config_hides_worker_lifecycle_tools);
         ] );
       ( "cascade_name validation",
         [

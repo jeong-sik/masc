@@ -11,12 +11,19 @@ let cleanup_script_path () =
 let status_script_path () =
   Filename.concat (source_root ()) "scripts/docker-playground-fd-status.sh"
 
+let nofile_status_script_path () =
+  Filename.concat (source_root ()) "scripts/nofile-status.sh"
+
 let quote = Filename.quote
 
 let read_file path = In_channel.with_open_bin path In_channel.input_all
 
 let write_file path content =
   Out_channel.with_open_bin path (fun oc -> output_string oc content)
+
+let write_executable path content =
+  write_file path content;
+  Unix.chmod path 0o755
 
 let rec rm_rf path =
   if Sys.file_exists path then
@@ -98,10 +105,53 @@ let mark_path_old ~cwd path =
 
 let test_scripts_are_syntax_valid () =
   let cmd =
-    Printf.sprintf "bash -n %s && bash -n %s" (quote (cleanup_script_path ()))
+    Printf.sprintf "bash -n %s && bash -n %s && bash -n %s"
+      (quote (cleanup_script_path ()))
       (quote (status_script_path ()))
+      (quote (nofile_status_script_path ()))
   in
   ignore (run_shell_ok ~cwd:(source_root ()) cmd)
+
+let test_status_warns_on_fd_hotspot () =
+  with_temp_dir "docker-playground-status-hotspot" (fun dir ->
+    let root = Filename.concat dir ".masc/playground/docker" in
+    let repo_dir = Filename.concat root "keeper-a/repos/masc-mcp" in
+    let worktrees_dir = Filename.concat repo_dir ".worktrees" in
+    mkdir_p (Filename.concat worktrees_dir "task-a");
+    mkdir_p (Filename.concat worktrees_dir "task-b");
+    let fake_bin = Filename.concat dir "bin" in
+    mkdir_p fake_bin;
+    write_executable
+      (Filename.concat fake_bin "lsof")
+      (Printf.sprintf
+         {|#!/usr/bin/env bash
+cat <<'EOF'
+COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
+Docker 4242 dancer 10r REG 1,15 0 1 %s/keeper-a/repos/masc-mcp/lib/a.ml
+Docker 4242 dancer 11r DIR 1,15 0 2 %s/keeper-a/repos/masc-mcp/.worktrees/task-a
+EOF
+|}
+         root
+         root);
+    let path =
+      Printf.sprintf "%s:%s" fake_bin
+        (Option.value ~default:"" (Sys.getenv_opt "PATH"))
+    in
+    let stdout, _ =
+      run_shell_ok ~env:[ "PATH", path ] ~cwd:(source_root ())
+        (Printf.sprintf
+           "%s --root %s --limit 5 --worktree-warn 1 --fd-warn 2"
+           (quote (status_script_path ()))
+           (quote root))
+    in
+    check bool "worktree entries surfaced" true
+      (contains_substring stdout "worktree_entries=2");
+    check bool "top holder count surfaced" true
+      (contains_substring stdout "top_holder_fd_count=2");
+    check bool "warning surfaced" true
+      (contains_substring stdout "hotspot_status=warning");
+    check bool "cleanup dry-run surfaced" true
+      (contains_substring stdout "cleanup_dry_run_command="))
 
 let test_dry_run_lists_stale_clean_worktree () =
   with_temp_dir "docker-playground-gc-dry-run" (fun dir ->
@@ -219,6 +269,8 @@ let () =
   run "docker_playground_gc_script"
     [ ( "script"
       , [ test_case "syntax valid" `Quick test_scripts_are_syntax_valid
+        ; test_case "status warns on fd hotspot" `Quick
+            test_status_warns_on_fd_hotspot
         ; test_case "dry-run lists stale clean worktree" `Quick
             test_dry_run_lists_stale_clean_worktree
         ; test_case "recent checkout of old commit is not candidate" `Quick

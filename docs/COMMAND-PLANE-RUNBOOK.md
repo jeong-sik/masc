@@ -206,6 +206,11 @@ count. Keep the script above as the default visibility path. Set a positive
 `MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM` only for a deliberately conservative
 operator session.
 
+For a broader host check, `scripts/nofile-status.sh` includes this same Docker
+playground section when `MASC_BASE_PATH` or `MASC_DOCKER_PLAYGROUND_ROOT` is
+set. Its `hotspot_status=warning` output is advisory: review the printed
+cleanup dry-run command before removing anything.
+
 Review stale clean worktree candidates first:
 
 ```bash

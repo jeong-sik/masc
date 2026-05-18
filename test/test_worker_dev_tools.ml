@@ -648,6 +648,36 @@ let () =
             Alcotest.fail
               ("quoted regex pipe should not start a new command: "
                ^ Worker_dev_tools.block_reason_to_string e));
+      Alcotest.test_case "allows quoted regex alternation" `Quick (fun () ->
+        match
+          Worker_dev_tools.validate_command_coding
+            "rg \"tool_policy\\|tool_preset\\|preset_policy\\|toolset\" --type=ml -l"
+        with
+        | Ok () -> ()
+        | Error e ->
+          Alcotest.fail
+            ("should keep quoted regex alternation in the rg segment: "
+             ^ Worker_dev_tools.block_reason_to_string e));
+      Alcotest.test_case "allows quoted regex alternation before real pipe" `Quick (fun () ->
+        match
+          Worker_dev_tools.validate_command_coding
+            "rg 'keeper.*tool|tool.*keeper' --type=ml -l | head -20"
+        with
+        | Ok () -> ()
+        | Error e ->
+          Alcotest.fail
+            ("should split only the real pipeline: "
+             ^ Worker_dev_tools.block_reason_to_string e));
+      Alcotest.test_case "allows three-stage parsed pipeline" `Quick (fun () ->
+        match
+          Worker_dev_tools.validate_command_coding
+            "rg 'keeper.*tool|tool.*keeper' --type=ml -l | head -20 | wc -l"
+        with
+        | Ok () -> ()
+        | Error e ->
+          Alcotest.fail
+            ("should validate every parsed pipeline stage: "
+             ^ Worker_dev_tools.block_reason_to_string e));
       Alcotest.test_case "allows wrapper redirect" `Quick (fun () ->
         match
           Worker_dev_tools.validate_command_coding
@@ -655,6 +685,11 @@ let () =
         with
         | Ok () -> ()
         | Error e -> Alcotest.fail ("should allow redirect: " ^ Worker_dev_tools.block_reason_to_string e));
+      Alcotest.test_case "blocks parser-supported direct dune" `Quick (fun () ->
+        match Worker_dev_tools.validate_command_coding "dune build" with
+        | Error Worker_dev_tools.Direct_dune_invocation -> ()
+        | Error e -> Alcotest.fail ("wrong rejection: " ^ Worker_dev_tools.block_reason_to_string e)
+        | Ok () -> Alcotest.fail "should reject bare dune");
       Alcotest.test_case "blocks direct dune" `Quick (fun () ->
         match Worker_dev_tools.validate_command_coding "dune build 2>&1" with
         | Error Worker_dev_tools.Direct_dune_invocation -> ()

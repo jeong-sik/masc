@@ -475,7 +475,7 @@ let log_resolution ?(context = "ConfigDir") () =
 
 (* RFC-0121 — .masc/<sub> sub-directory accessors.
 
-   Layout SSOT: callers stop computing [Filename.concat base_path ".masc/X"]
+   Layout SSOT: callers stop computing base_path plus .masc child paths
    and instead route through these helpers. The directory structure decision
    ([auth], [credentials], [runtime/agent], etc.) lives in this single module
    so that future relocations need a single edit + a CI gate to enforce. *)

@@ -146,6 +146,37 @@ let create_pending_verification_request config ~task_id =
   | Error msg -> failwith (Printf.sprintf "create_request failed: %s" msg)
 ;;
 
+let verification_request_by_task_id config ~task_id =
+  Verification.list_requests config.Coord.base_path
+  |> List.find_opt (fun (req : Verification.verification_request) ->
+    String.equal req.task_id task_id)
+  |> function
+  | Some req -> req
+  | None -> fail (Printf.sprintf "expected verification request for task %s" task_id)
+;;
+
+let custom_criteria (req : Verification.verification_request) =
+  List.filter_map
+    (function
+      | Verification.Custom s -> Some s
+      | _ -> None)
+    req.criteria
+;;
+
+let evidence_refs_of_request (req : Verification.verification_request) =
+  match req.output with
+  | `Assoc fields ->
+    (match List.assoc_opt "evidence_refs" fields with
+     | Some (`List refs) ->
+       List.filter_map
+         (function
+           | `String s -> Some s
+           | _ -> None)
+         refs
+     | _ -> [])
+  | _ -> []
+;;
+
 (* Temp directory setup following test_keeper_tools_oas.ml pattern.
    Force filesystem backend by unsetting PG env vars. *)
 let with_room f =
@@ -1791,13 +1822,27 @@ let test_done_redirects_to_verification_fsm () =
         match Yojson.Safe.Util.member "ok" json with
         | `Bool true ->
           let task = only_task config in
-          (match task.task_status with
-           | Masc_domain.AwaitingVerification _ -> ()
+          let verification_id =
+            match task.task_status with
+            | Masc_domain.AwaitingVerification { verification_id; _ } -> verification_id
            | status ->
              fail
                (Printf.sprintf
                   "expected awaiting_verification, got %s"
-                  (Masc_domain.string_of_task_status status)))
+                  (Masc_domain.string_of_task_status status))
+          in
+          let req = verification_request_by_task_id config ~task_id in
+          check string "request id matches task verification_id" verification_id req.id;
+          check
+            (list string)
+            "criteria from completion contract"
+            [ "tests pass" ]
+            (custom_criteria req);
+          check
+            bool
+            "evidence refs include verify gate artifact"
+            true
+            (List.mem "output.json" (evidence_refs_of_request req))
         | _ -> fail "expected keeper_task_done to redirect into verification FSM")))
 ;;
 
@@ -1849,31 +1894,9 @@ let test_done_redirects_default_contract_task_to_verification_fsm () =
              true
              (contract.verify_gate_evidence <> [])
          | None -> fail "expected default verification contract");
-        let reqs = Verification.list_requests config.Coord.base_path in
-        let req =
-          List.find_opt
-            (fun (req : Verification.verification_request) ->
-               String.equal req.task_id task_id)
-            reqs
-        in
-        (match req with
-         | Some req ->
-           check bool "criteria populated" true (req.criteria <> []);
-           let evidence_refs =
-             match req.output with
-             | `Assoc fields ->
-               (match List.assoc_opt "evidence_refs" fields with
-                | Some (`List refs) ->
-                  List.filter_map
-                    (function
-                      | `String s -> Some s
-                      | _ -> None)
-                    refs
-                | _ -> [])
-             | _ -> []
-           in
-           check bool "evidence refs populated" true (evidence_refs <> [])
-         | None -> fail "expected verification request for default contract task")
+        let req = verification_request_by_task_id config ~task_id in
+        check bool "criteria populated" true (req.criteria <> []);
+        check bool "evidence refs populated" true (evidence_refs_of_request req <> [])
       | _ -> fail "expected keeper_task_done to redirect into verification FSM"))
 ;;
 

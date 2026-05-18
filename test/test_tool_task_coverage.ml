@@ -1666,7 +1666,34 @@ let () = test "transition_submit_for_verification_requires_evidence_ref" (fun ()
     assert_task_claimed_by ctx ctx.agent_name)
 )
 
-let () = test "transition_submit_for_verification_rejects_todo_pr_evidence" (fun () ->
+let () = test "transition_submit_for_verification_aliases_todo_pr_evidence" (fun () ->
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    let ctx = make_test_ctx_with_agent "codex-mcp-client" in
+    let pr_url = "https://github.com/jeong-sik/masc-mcp/pull/13169" in
+    add_task_requiring_tools ctx ~title:"Codex CLI approval follow-up" [ "keeper_bash" ];
+    let result =
+      Tool_task.handle_transition
+        ~agent_tool_names:[ "masc_status"; "masc_transition" ]
+        ~tool_name:"test_tool" ~start_time:0.0
+        ctx
+        (`Assoc
+          [
+            ("task_id", `String "task-001");
+            ("action", `String "submit_for_verification");
+            ("pr_url", `String pr_url);
+            ( "notes",
+              `String
+                "Implementation is already merged; submit PR evidence for independent verification." );
+          ])
+    in
+    if not result.Tool_result.success then failwith result.Tool_result.legacy_message;
+    assert_task_awaiting_verification_by ctx "codex-mcp-client";
+    match (only_task ctx).handoff_context with
+    | Some hc -> assert (List.mem pr_url hc.evidence_refs)
+    | None -> failwith "expected handoff_context to receive pr_url evidence")
+)
+
+let () = test "transition_submit_for_verification_todo_still_requires_evidence" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "codex-mcp-client" in
     add_task_requiring_tools ctx ~title:"Codex CLI approval follow-up" [ "keeper_bash" ];
@@ -1679,14 +1706,11 @@ let () = test "transition_submit_for_verification_rejects_todo_pr_evidence" (fun
           [
             ("task_id", `String "task-001");
             ("action", `String "submit_for_verification");
-            ("pr_url", `String "https://github.com/jeong-sik/masc-mcp/pull/13169");
-            ( "notes",
-              `String
-                "Implementation is already merged; submit PR evidence for independent verification." );
+            ("notes", `String "Implementation is complete.");
           ])
     in
     assert (not result.Tool_result.success);
-    assert (str_contains result.Tool_result.legacy_message "Invalid transition: todo -> submit_for_verification");
+    assert (str_contains result.Tool_result.legacy_message "requires verification evidence");
     assert_task_todo ctx)
 )
 

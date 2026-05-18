@@ -673,6 +673,19 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
   match handoff_context with
   | Error error -> Tool_result.error ~tool_name ~start_time error
   | Ok handoff_context ->
+  let submit_evidence_error =
+    match requested_action with
+    | Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence ->
+      verification_submission_evidence_error ~notes ~handoff_context
+    | Masc_domain.Claim
+    | Masc_domain.Start
+    | Masc_domain.Done_action
+    | Masc_domain.Cancel
+    | Masc_domain.Release
+    | Masc_domain.Approve_verification
+    | Masc_domain.Reject_verification ->
+      None
+  in
   if (=) action Masc_domain.Release && strict_release_requires_handoff task_opt
      && Option.is_none handoff_context
   then
@@ -763,19 +776,19 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
       | None -> action
     else action
   in
-  let submit_evidence_error =
-    match requested_action with
-    | Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence ->
-      verification_submission_evidence_error ~notes ~handoff_context
-    | Masc_domain.Claim
-    | Masc_domain.Start
-    | Masc_domain.Done_action
-    | Masc_domain.Cancel
-    | Masc_domain.Release
-    | Masc_domain.Approve_verification
-    | Masc_domain.Reject_verification ->
-      None
+  let action =
+    match requested_action, task_opt, submit_evidence_error with
+    | ( Masc_domain.Submit_for_verification
+      , Some ({ task_status = Masc_domain.Todo; _ } : Masc_domain.task)
+      , None ) ->
+      Log.Task.info
+        "[verification-alias] treating todo submit_for_verification with evidence as submit_pr_evidence task=%s agent=%s"
+        task_id
+        ctx.agent_name;
+      Masc_domain.Submit_pr_evidence
+    | _ -> action
   in
+  let action_s = Masc_domain.task_action_to_string action in
   let default_time = Time_compat.now () -. 60.0 in
   let (started_at_actual, collaborators_from_task) = match task_opt with
     | Some t -> (match t.task_status with

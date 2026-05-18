@@ -130,28 +130,28 @@ let summarize_chunk (msgs : Agent_sdk.Types.message list) : Agent_sdk.Types.mess
     Memory summaries and goal messages use MASC-specific prefix matching. *)
 
 (** Importance scoring weights. See rationale in comment block above. *)
-let w_recency = Env_config_core.get_float ~default:0.50 "MASC_COMPACT_W_RECENCY"
-let w_role    = Env_config_core.get_float ~default:0.35 "MASC_COMPACT_W_ROLE"
-let w_tool    = Env_config_core.get_float ~default:0.15 "MASC_COMPACT_W_TOOL"
+let w_recency = Env_config.ContextCompact.w_recency
+let w_role = Env_config.ContextCompact.w_role
+let w_tool = Env_config.ContextCompact.w_tool
 
 (** Role importance values. *)
-let role_system    = Env_config_core.get_float ~default:1.0 "MASC_COMPACT_ROLE_SYSTEM"
-let role_tool      = Env_config_core.get_float ~default:0.7 "MASC_COMPACT_ROLE_TOOL"
-let role_user      = Env_config_core.get_float ~default:0.6 "MASC_COMPACT_ROLE_USER"
-let role_assistant = Env_config_core.get_float ~default:0.4 "MASC_COMPACT_ROLE_ASSISTANT"
+let role_system = Env_config.ContextCompact.role_system
+let role_tool = Env_config.ContextCompact.role_tool
+let role_user = Env_config.ContextCompact.role_user
+let role_assistant = Env_config.ContextCompact.role_assistant
 
 (** Tool content presence weight. *)
-let tool_present = Env_config_core.get_float ~default:0.8 "MASC_COMPACT_TOOL_PRESENT"
-let tool_absent  = Env_config_core.get_float ~default:0.5 "MASC_COMPACT_TOOL_ABSENT"
+let tool_present = Env_config.ContextCompact.tool_present
+let tool_absent = Env_config.ContextCompact.tool_absent
 
 (** Minimum score for memory/goal anchor messages. *)
-let anchor_boost = Env_config_core.get_float ~default:0.95 "MASC_COMPACT_ANCHOR_BOOST"
+let anchor_boost = Env_config.ContextCompact.anchor_boost
 
 (** Score threshold below which messages are dropped by [DropLowImportance]. *)
-let drop_importance_threshold = Env_config_core.get_float ~default:0.3 "MASC_COMPACT_DROP_THRESHOLD"
+let drop_importance_threshold = Env_config.ContextCompact.drop_importance_threshold
 
 (** Number of recent messages to keep in [SummarizeOld] strategy. *)
-let summarize_keep_recent = Env_config_core.get_int ~default:5 "MASC_COMPACT_KEEP_RECENT"
+let summarize_keep_recent = Env_config.ContextCompact.summarize_keep_recent
 
 let score_message ~index ~total (m : Agent_sdk.Types.message) : float =
   let recency = if total <= 1 then 1.0
@@ -326,7 +326,8 @@ let observation_summary = function
     @boundary-contract
     - MASC owns: world-aware strategy resolution (which strategies to apply
       based on agent count, task focus, model class, context ratio).
-      All thresholds are env-configurable, not hardcoded.
+      Algorithm thresholds are code-reviewed constants exposed through
+      [Env_config.ContextCompact], not runtime env knobs.
     - OAS owns: strategy execution (PruneToolOutputs, MergeContiguous are
       OAS built-ins), context_reducer pipeline, compaction algorithm.
     - Neither may: MASC must not execute compaction directly (only select

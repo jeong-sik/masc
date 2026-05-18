@@ -335,6 +335,13 @@ let test_keeper_bash_shape_uses_shell_ir_for_quoted_literals () =
   Alcotest.(check (option string)) "real redirect blocks"
     (Some "pipe_or_redirect")
     (block_tag "cat < /tmp/x");
+  Alcotest.(check (option string)) "stderr dev-null redirect is normalized" None
+    (block_tag "ls repos/masc-mcp/.worktrees/ 2>/dev/null");
+  Alcotest.(check (option string)) "spaced stderr dev-null redirect is normalized" None
+    (block_tag "ls repos/masc-mcp/.worktrees/ 2> /dev/null");
+  Alcotest.(check (option string)) "stdout dev-null redirect still blocks"
+    (Some "pipe_or_redirect")
+    (block_tag "ls repos/masc-mcp/.worktrees/ >/dev/null");
   Alcotest.(check (option string)) "malformed stderr redirect token blocks"
     (Some "pipe_or_redirect")
     (block_tag "ls repos/masc-mcp/.worktrees/ 2/dev/null");
@@ -358,6 +365,11 @@ let test_keeper_bash_raw_shape_fallback_is_quote_aware () =
   Alcotest.(check (option string)) "real redirect still blocks"
     (Some "pipe_or_redirect")
     (block_tag "cat < /tmp/x");
+  Alcotest.(check (option string)) "stderr dev-null redirect is normalized" None
+    (block_tag "ls repos/masc-mcp/.worktrees/ 2>/dev/null");
+  Alcotest.(check (option string)) "stderr dev-null prefix is not stripped from longer target"
+    (Some "pipe_or_redirect")
+    (block_tag "ls repos/masc-mcp/.worktrees/ 2>/dev/nullfile");
   Alcotest.(check (option string)) "double-quoted substitution still blocks"
     (Some "substitution")
     (block_tag {|echo "$(date)"|});

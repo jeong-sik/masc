@@ -218,6 +218,94 @@ let has_malformed_dev_null_redirect_token scan_text =
     | "0/dev/null" | "1/dev/null" | "2/dev/null" -> true
     | _ -> false)
 
+let starts_with_at text ~pos ~prefix =
+  let len = String.length prefix in
+  pos + len <= String.length text
+  && String.equal (String.sub text pos len) prefix
+
+let strip_stderr_dev_null_redirects cmd =
+  let len = String.length cmd in
+  let buf = Buffer.create len in
+  let skip_spaces i =
+    let rec loop j =
+      if j < len && (Char.equal cmd.[j] ' ' || Char.equal cmd.[j] '\t')
+      then loop (j + 1)
+      else j
+    in
+    loop i
+  in
+  let is_redirect_target_boundary i =
+    i >= len
+    ||
+    match cmd.[i] with
+    | ' ' | '\t' | '\n' | '\r' | ';' | '&' | '|' -> true
+    | _ -> false
+  in
+  let skip_dev_null_after op_end =
+    let target_start = skip_spaces op_end in
+    let target_end = target_start + String.length "/dev/null" in
+    if starts_with_at cmd ~pos:target_start ~prefix:"/dev/null"
+       && is_redirect_target_boundary target_end
+    then Some target_end
+    else None
+  in
+  let stderr_dev_null_redirect_end i =
+    let compact_append_end = i + String.length "2>>/dev/null" in
+    let compact_write_end = i + String.length "2>/dev/null" in
+    if starts_with_at cmd ~pos:i ~prefix:"2>>/dev/null"
+       && is_redirect_target_boundary compact_append_end
+    then Some compact_append_end
+    else if starts_with_at cmd ~pos:i ~prefix:"2>/dev/null"
+            && is_redirect_target_boundary compact_write_end
+    then Some compact_write_end
+    else if starts_with_at cmd ~pos:i ~prefix:"2>>"
+    then skip_dev_null_after (i + 3)
+    else if starts_with_at cmd ~pos:i ~prefix:"2>"
+    then skip_dev_null_after (i + 2)
+    else None
+  in
+  let rec loop quote_state escaped stripped i =
+    if i >= len
+    then String.trim (Buffer.contents buf), stripped
+    else if escaped
+    then (
+      Buffer.add_char buf cmd.[i];
+      loop quote_state false stripped (i + 1))
+    else (
+      match quote_state, cmd.[i] with
+      | Single_quote, '\'' ->
+        Buffer.add_char buf cmd.[i];
+        loop No_quote false stripped (i + 1)
+      | Single_quote, _ ->
+        Buffer.add_char buf cmd.[i];
+        loop Single_quote false stripped (i + 1)
+      | Double_quote, '"' ->
+        Buffer.add_char buf cmd.[i];
+        loop No_quote false stripped (i + 1)
+      | Double_quote, '\\' ->
+        Buffer.add_char buf cmd.[i];
+        loop Double_quote true stripped (i + 1)
+      | Double_quote, _ ->
+        Buffer.add_char buf cmd.[i];
+        loop Double_quote false stripped (i + 1)
+      | No_quote, '\'' ->
+        Buffer.add_char buf cmd.[i];
+        loop Single_quote false stripped (i + 1)
+      | No_quote, '"' ->
+        Buffer.add_char buf cmd.[i];
+        loop Double_quote false stripped (i + 1)
+      | No_quote, '\\' ->
+        Buffer.add_char buf cmd.[i];
+        loop No_quote true stripped (i + 1)
+      | No_quote, _ ->
+        match stderr_dev_null_redirect_end i with
+        | Some next -> loop No_quote false true next
+        | None ->
+          Buffer.add_char buf cmd.[i];
+          loop No_quote false stripped (i + 1))
+  in
+  loop No_quote false false 0
+
 let strip_trailing_slashes text =
   let rec loop i =
     if i > 0 && Char.equal text.[i - 1] '/' then loop (i - 1) else i
@@ -388,6 +476,7 @@ let quote_aware_shape_scan_text cmd =
   loop No_quote false 0
 
 let raw_keeper_bash_shape_block cmd =
+  let cmd, _ = strip_stderr_dev_null_redirects cmd in
   let scan_text = quote_aware_shape_scan_text cmd in
   let lower = String.lowercase_ascii scan_text in
   if string_contains_substring lower "gh pr checks"
@@ -435,6 +524,7 @@ let rec parsed_keeper_bash_shape_block = function
     else None
 
 let keeper_bash_shape_block cmd =
+  let cmd, _ = strip_stderr_dev_null_redirects cmd in
   let scan_text = quote_aware_shape_scan_text cmd in
   if command_has_repo_wide_scan cmd
   then Some Repo_wide_scan
@@ -572,7 +662,12 @@ let handle_keeper_bash
       ~(args : Yojson.Safe.t)
       ()
   =
-  let cmd = Safe_ops.json_string ~default:"" "cmd" args |> String.trim in
+  let original_cmd =
+    Safe_ops.json_string ~default:"" "cmd" args |> String.trim
+  in
+  let cmd, stripped_stderr_dev_null =
+    strip_stderr_dev_null_redirects original_cmd
+  in
   let root = Keeper_alerting_path.project_root_of_config config in
   let cmd_for_log =
     cmd
@@ -656,6 +751,10 @@ let handle_keeper_bash
       direct_tool_command_block ~tool_policy_visible tool_name
     | None when cmd_contains_gh_pr_create cmd -> gh_pr_create_block ()
     | None -> begin
+    (if stripped_stderr_dev_null then
+       Log.Keeper.info
+         "keeper_bash normalized stderr /dev/null redirect: keeper=%s cmd=%s"
+         meta.name cmd_for_log);
     (* Tick 22: dark-launch shadow logger.  Runs
        [Worker_dev_tools.diff_command] side-by-side with the
        live gate and emits a structured line for every non-[Agree]

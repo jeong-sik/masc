@@ -313,7 +313,7 @@ External 채널 어댑터의 경계는 Channel Gate:
 - context lens — keeper tool call 이 만진 코드 위치로 routing back
 - audit log / telemetry / planning / board / git graph route 가 같은 focus context 로 묶임
 
-핵심 모듈: `lib/ide/ide_meta_sync.ml`, `ide_region_tracker.ml`, `ide_annotations.ml`, `ide_annotation_types.ml`. backend 쪽 sync 진입점은 `lib/keeper/keeper_exec_fs.ml` 가 `Ide_meta_sync` 를 호출하는 지점.
+핵심 모듈: `lib/ide/ide_region_tracker.ml`, `ide_annotations.ml`, `ide_annotation_types.ml`, `ide_paths.ml`. backend 쪽 region write 진입점은 `lib/keeper/keeper_exec_fs.ml` 의 write 흐름이 `Ide_region_tracker.ingest_tool_call` 로 전달되는 지점.
 
 상태: 활발히 churn 중. RFC-0071 §3.4 의 fragile-match warning 4 가 이 sub-lib 에 켜져 있어서 (`dune` 의 `-w +4`) 새 코드는 exhaustive match 을 강제합니다.
 

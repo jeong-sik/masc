@@ -8,10 +8,11 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0097", "0100", "0101"]
-implementation_prs: [15932, 15950, 15965, 15985, 15990, 16017, 15993, 15991]
+implementation_prs: [15932, 15950, 15965, 15985, 15990, 16017, 15993, 15991, 16102, 16150]
 # Excluded from list (RFC body / design-spec merges, per README convention):
-#   #15912  Phase C.0 — Eio_context audit + RFC §3.3 amend
-#   #15941  Phase D.1  — Pool design (interface-first spec)
+#   #15912  Phase C.0   — Eio_context audit + RFC §3.3 amend
+#   #15941  Phase D.1   — Pool design (interface-first spec)
+#   #16039  Status sync — Draft→Active frontmatter only
 ---
 
 # RFC-0107 — Outbound HTTP stack consolidation
@@ -180,11 +181,20 @@ sandbox_exec
 
 ### 5.2 Retirement gate (production soak 기반)
 
-Phase D 머지 후 **30일 production sample**:
+Gate 입력은 두 개의 보완적 evidence — *결정론적 in-process witness* + *비결정론적 production 30일 sample*. 한 쪽만으로는 demotion 정당화 불충분.
+
+**Witness 1 — in-process (deterministic).** `test/test_pool_cascade_storm.ml` (Phase D.2e). cohttp-eio loopback echo server + 16 fiber × 5 sequential request 81-call burst. `Pool.stats` 가 keep-alive 계약을 만족해야 통과:
+- `create_count_total ≤ fiber_count` (worst case = 모든 fiber 가 첫 dial 에서 parked queue miss)
+- `reuse_count_total > total − fiber_count − 1` (reuse 가 우세)
+- `reuse + create == total` (accounting)
+
+실측: `create=16, reuse=65, fibers=16`. pre-D `make_closing_client` 시절이라면 `create=81, reuse=0` 이 됐을 cascade-fd-storm 패턴 (§1.1) 이 정확히 사라졌음을 입증.
+
+**Witness 2 — production (statistical).** Phase D 머지 후 **30일 production sample**:
 - peak `process_open_fds < RLIMIT_NOFILE_soft × 0.5`
 - ENFILE count = 0 (24h × 30일)
 
-Gate 통과 시:
+Gate 통과 = Witness 1 reproducer green AND Witness 2 두 임계 충족. 통과 시:
 - `Fd_accountant.with_slot` → `Fd_accountant.observe` (counter only, no blocking)
 - `_shared_pressure_mutex` 제거 (재진입 deadlock 위험 해소)
 - dead variant (`Provider_http`, `Sandbox_exec`, `Log_writer`) 삭제

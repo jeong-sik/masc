@@ -30,7 +30,6 @@ jobs:
   draft-automerge-guard:
     name: Draft Auto-Merge Guard
     runs-on: ubuntu-latest
-    if: ${{ false }}  # TEMP: disabled for batch PR ready conversion
     # Skip when the PR is already closed/merged. labeled/unlabeled
     # events on pull_request_target can fire after merge (post-merge
     # automation removing labels), causing wasted runs.

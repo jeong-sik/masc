@@ -118,6 +118,21 @@ let metric_total name =
       0.0)
 ;;
 
+let snapshot () =
+  with_lock (fun () ->
+    Hashtbl.fold
+      (fun _ (m : metric) acc ->
+         { name = m.name
+         ; help = m.help
+         ; metric_type = m.metric_type
+         ; value = m.value
+         ; labels = m.labels
+         }
+         :: acc)
+      metrics
+      [])
+;;
+
 let observe_histogram name ?(labels = []) value =
   let key = metric_key name labels in
   let count_key = metric_key (name ^ "_count") labels in

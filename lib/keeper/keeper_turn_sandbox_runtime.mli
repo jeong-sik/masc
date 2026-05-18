@@ -36,6 +36,17 @@ val run_command_with_status :
   unit ->
   (Unix.process_status * string, string) result
 
+val run_exec_with_status :
+  ?stdin_content:string ->
+  t ->
+  timeout_sec:float ->
+  cwd:string ->
+  command_argv:string list ->
+  (Unix.process_status * string, string) result
+(** Execute [command_argv] inside the turn-scoped container and return the raw
+    process status and merged output without applying success-code policy.
+    This is the argv-level entrypoint used by Shell IR dispatch. *)
+
 val run_command :
   ?ok_exit_codes:int list ->
   t ->

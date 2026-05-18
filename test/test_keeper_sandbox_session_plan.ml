@@ -81,7 +81,7 @@ let test_mounts_workspace_then_identity () =
     (list string)
     "workspace volume first, then config, passwd, group mounts"
     [ "/var/masc/alice:/keeper/alice:rw"
-    ; "/srv/masc/.masc/config:/keeper/alice/.masc/config:ro"
+    ; "/srv/masc/.masc/config:/tmp/masc-runtime/.masc/config:ro"
     ; "/var/masc/alice/.docker-identity/passwd:/etc/passwd:ro"
     ; "/var/masc/alice/.docker-identity/group:/etc/group:ro"
     ]
@@ -109,8 +109,8 @@ let test_env_overrides () =
     ; "USER", "keeper"
     ; "LOGNAME", "keeper"
     ; "SHELL", "/bin/sh"
-    ; "MASC_BASE_PATH", "/keeper/alice"
-    ; "MASC_CONFIG_DIR", "/keeper/alice/.masc/config"
+    ; "MASC_BASE_PATH", "/tmp/masc-runtime"
+    ; "MASC_CONFIG_DIR", "/tmp/masc-runtime/.masc/config"
     ]
     (Keeper_sandbox_session_plan.env_overrides p)
 ;;
@@ -140,8 +140,8 @@ let test_env_overrides_extra () =
       ; "USER", "keeper"
       ; "LOGNAME", "keeper"
       ; "SHELL", "/bin/sh"
-      ; "MASC_BASE_PATH", "/r"
-      ; "MASC_CONFIG_DIR", "/r/.masc/config"
+      ; "MASC_BASE_PATH", "/tmp/masc-runtime"
+      ; "MASC_CONFIG_DIR", "/tmp/masc-runtime/.masc/config"
       ; "FOO", "bar"
       ]
       (Keeper_sandbox_session_plan.env_overrides p)

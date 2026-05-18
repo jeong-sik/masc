@@ -118,14 +118,18 @@ val docker_network_args : Keeper_types.network_mode -> string list * string
     sandbox containers. *)
 val docker_nofile_args : unit -> string list
 
-(** Container-visible config root under the keeper playground. *)
+(** Container-visible MASC runtime base outside the keeper playground bind
+    mount. *)
+val container_masc_runtime_base : container_root:string -> string
+
+(** Container-visible config root under {!container_masc_runtime_base}. *)
 val container_masc_config_dir : container_root:string -> string
 
 (** Host-side config root for a MASC base path. *)
 val host_masc_config_dir : base_path:string -> string
 
 (** Docker [-v ...] spec that exposes [<base_path>/.masc/config] read-only
-    as [<container_root>/.masc/config]. *)
+    under {!container_masc_runtime_base}. *)
 val docker_masc_config_mount_spec : base_path:string -> container_root:string -> string
 
 (** Docker [-v ...] argv fragment for the MASC config bind mount. *)
@@ -147,23 +151,24 @@ val docker_user_env_args : unit -> string list
     [<base_path>/.masc/config]. *)
 val docker_config_host_root : base_path:string -> string
 
-(** Container-side config root under the keeper playground. *)
+(** Container-side config root under {!container_masc_runtime_base}. *)
 val docker_config_container_root : container_root:string -> string
 
 (** Docker [-v ...] argv fragment that exposes the active config root
-    read-only at [<container_root>/.masc/config]. Returns [[]] when the
-    host config root is absent. *)
+    read-only under {!container_masc_runtime_base}. Returns [[]] when the host
+    config root is absent. *)
 val docker_config_mount_args
   :  base_path:string
   -> container_root:string
   -> string list
 
 (** Docker [-v ...] specs for the read-only room-state subset that keeper
-    task worktrees may read through their container-side [.masc]
+    task worktrees may read through their container-side runtime [.masc]
     projection. This intentionally excludes auth, credentials, locks,
     logs, metrics, and keeper private state. Existing paths are mounted
-    only under [<container_root>/.masc]; host-absolute [.masc] targets
-    must never be used as Docker mount destinations. *)
+    outside [<container_root>] because that path is itself a bind-mounted
+    playground; host-absolute [.masc] targets must never be used as Docker
+    mount destinations. *)
 val docker_room_state_mount_specs
   :  base_path:string
   -> container_root:string

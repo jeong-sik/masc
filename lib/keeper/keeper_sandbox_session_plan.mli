@@ -89,7 +89,7 @@ type t
       ttl_sec-if-given); the edge adds [owner_pid] + [started_at].
     - [mounts] — the workspace volume ([host_root:container_root:rw]),
       the read-only MASC config mount
-      ([<base_path>/.masc/config:<container_root>/.masc/config:ro]),
+      ([<base_path>/.masc/config:<container-runtime-base>/.masc/config:ro]),
       followed by the two identity mounts
       ([<host_root>/.docker-identity/passwd:/etc/passwd:ro], [.../group:/etc/group:ro]).
     - [identity_files] — the [(passwd_path, passwd_content);

@@ -243,8 +243,14 @@ let docker_nofile_args () =
   [ "--ulimit"; Printf.sprintf "nofile=%d:%d" limit limit ]
 ;;
 
+let container_masc_runtime_base ~container_root:_ = "/tmp/masc-runtime"
+
+let container_masc_dir ~container_root =
+  Filename.concat (container_masc_runtime_base ~container_root) Common.masc_dirname
+;;
+
 let container_masc_config_dir ~container_root =
-  Filename.concat (Filename.concat container_root Common.masc_dirname) "config"
+  Filename.concat (container_masc_dir ~container_root) "config"
 ;;
 
 let host_masc_config_dir ~base_path =
@@ -263,7 +269,7 @@ let docker_masc_config_mount_args ~base_path ~container_root =
 ;;
 
 let docker_masc_runtime_env_pairs ~container_root =
-  [ Env_config_core.base_path_env_key, container_root
+  [ Env_config_core.base_path_env_key, container_masc_runtime_base ~container_root
   ; Env_config_core.config_dir_env_key, container_masc_config_dir ~container_root
   ]
 ;;
@@ -300,7 +306,7 @@ let docker_config_host_root ~base_path =
 ;;
 
 let docker_config_container_root ~container_root =
-  Filename.concat (Filename.concat container_root Common.masc_dirname) "config"
+  container_masc_config_dir ~container_root
 ;;
 
 let docker_config_available host_config_root =
@@ -359,7 +365,10 @@ let unique_preserving_order values =
 
 let docker_room_state_mount_specs ~base_path ~container_root =
   let host_masc_root = Common.masc_dir_from_base_path ~base_path in
-  let container_masc_root = Filename.concat container_root Common.masc_dirname in
+  (* [container_root] is itself a bind-mounted playground. Mounting room-state
+     files inside it creates nested bind targets that Docker Desktop can resolve
+     through /run/host_virtiofs and reject as outside the container rootfs. *)
+  let container_masc_root = container_masc_dir ~container_root in
   docker_room_state_mounts
   |> List.concat_map (fun (kind, rel_path) ->
     let host_path = Filename.concat host_masc_root rel_path in
@@ -382,10 +391,11 @@ let docker_config_env_args ~base_path ~container_root =
   then []
   else
     let container_config_root = docker_config_container_root ~container_root in
+    let container_base_path = container_masc_runtime_base ~container_root in
     [ "--env"
-    ; "MASC_BASE_PATH=" ^ container_root
+    ; "MASC_BASE_PATH=" ^ container_base_path
     ; "--env"
-    ; "MASC_BASE_PATH_INPUT=" ^ container_root
+    ; "MASC_BASE_PATH_INPUT=" ^ container_base_path
     ; "--env"
     ; "MASC_CONFIG_DIR=" ^ container_config_root
     ]

@@ -1340,6 +1340,57 @@ let test_read_recent_audit_filters_after_wide_scan () =
       Alcotest.fail
         (Printf.sprintf "expected one target audit, got %d" (List.length items))
 
+let test_runtime_trust_approval_read_model_filters_after_wide_scan () =
+  with_test_config @@ fun config ->
+  AQ.For_testing.reset_audit_store ();
+  Fun.protect
+    ~finally:AQ.For_testing.reset_audit_store
+    (fun () ->
+      let keeper_name = "runtime-trust-audit-target" in
+      let meta =
+        meta_from_json
+          (`Assoc [
+            ("name", `String keeper_name);
+            ("trace_id", `String "trace-runtime-trust-audit-target");
+            ("sandbox_profile", `String "docker");
+            ("network_mode", `String "inherit");
+          ])
+      in
+      AQ.audit_approval_event ~base_path:config.base_path
+        ~event_type:"resolved" ~id:"runtime-trust-target-audit"
+        ~keeper_name ~tool_name:"keeper_shell" ~risk_level:AQ.Medium
+        ~decision:(AQ.Approval_resolved Agent_sdk.Hooks.Approve) ();
+      for i = 1 to 64 do
+        AQ.audit_approval_event ~base_path:config.base_path
+          ~event_type:"resolved"
+          ~id:(Printf.sprintf "runtime-trust-other-audit-%02d" i)
+          ~keeper_name:(Printf.sprintf "busy-runtime-keeper-%02d" i)
+          ~tool_name:"keeper_shell" ~risk_level:AQ.Medium
+          ~decision:(AQ.Approval_resolved Agent_sdk.Hooks.Approve) ()
+      done;
+      let snapshot =
+        Masc_mcp.Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta
+      in
+      let open Yojson.Safe.Util in
+      let approval = snapshot |> member "approval" in
+      Alcotest.(check string) "runtime trust approval state" "resolved"
+        (approval |> member "state" |> to_string);
+      Alcotest.(check string) "runtime trust latest event kind" "resolved"
+        (approval |> member "latest_event_kind" |> to_string);
+      let approval_events =
+        snapshot |> member "causal_timeline" |> to_list
+        |> List.filter (fun event ->
+          String.equal "approval_resolved"
+            (event |> member "kind" |> to_string))
+      in
+      Alcotest.(check int) "one filtered approval event" 1
+        (List.length approval_events);
+      match approval_events with
+      | [ event ] ->
+        Alcotest.(check bool) "approval event title mentions tool" true
+          (contains_substring (event |> member "title" |> to_string) "keeper_shell")
+      | _ -> Alcotest.fail "expected exactly one target approval event")
+
 (* ── Test runner ──────────────────────────────────────────── *)
 
 let () =
@@ -1400,6 +1451,9 @@ let () =
         test_submit_pending_audit_uses_room_base_path;
       Alcotest.test_case "read_recent_audit scans before keeper filter" `Quick
         test_read_recent_audit_filters_after_wide_scan;
+      Alcotest.test_case
+        "runtime trust approval read model scans before keeper filter" `Quick
+        test_runtime_trust_approval_read_model_filters_after_wide_scan;
     ]);
     ("callback_integration", [
       Alcotest.test_case "low risk auto-approved" `Quick test_callback_approves_low_risk;

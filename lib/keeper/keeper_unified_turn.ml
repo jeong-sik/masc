@@ -1140,15 +1140,12 @@ let run_keeper_cycle
                                keeper_profile
                          in
                          let attempt_result =
-                           let reserve_degraded_retry_budget =
-                             match
-                               Keeper_cascade_profile.fallback_cascade_for
-                                 execution_cascade_name
-                             with
-                             | Some fallback_cascade ->
-                               not (String.equal fallback_cascade execution_cascade_name)
-                             | None -> false
-                           in
+                           (* RFC-0129 (2026-05-18): reserve_degraded_retry_budget
+                              flag removed. The first cascade attempt now
+                              receives the full usable budget; OAS 0.195.0+
+                              body_timeout_s + stream_idle_timeout_s bounds
+                              hangs without halving healthy slow streams.
+                              See keeper_turn_cascade_budget.ml header. *)
                            let allow_wall_clock_retry_budget =
                              allow_wall_clock_retry_budget_for_attempt
                                ~is_retry
@@ -1161,7 +1158,6 @@ let run_keeper_cycle
                              resolve_bounded_oas_timeout_budget_with_turn_budget
                                ~allow_wall_clock_retry_budget
                                ~is_retry
-                               ~reserve_degraded_retry_budget
                                ~max_turns
                                ~estimated_input_tokens:prompt_timeout_estimate_tokens
                                ~remaining_turn_budget_s:(remaining_turn_budget_s ())

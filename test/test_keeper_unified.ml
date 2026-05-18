@@ -8235,12 +8235,19 @@ let test_bounded_oas_timeout_uses_channel_turn_budget_override () =
   | None -> fail "expected bounded timeout"
 ;;
 
-let test_bounded_oas_timeout_reserves_degraded_retry_budget () =
+(* RFC-0129 (2026-05-18): renamed from
+   [test_bounded_oas_timeout_reserves_degraded_retry_budget]. The
+   reserve_fraction band-aid was halving the first-attempt budget
+   (effective_timeout_sec=242.5 from usable_budget=485 *. 0.5).
+   With the knob removed, the first attempt now receives the full
+   [Float.min adaptive_timeout_sec usable_budget]. OAS 0.195.0+
+   body_timeout_s + stream_idle_timeout_s bound hangs without
+   halving healthy slow streams. *)
+let test_bounded_oas_timeout_first_attempt_uses_full_usable_budget () =
   match
     UT.resolve_bounded_oas_timeout_budget_with_turn_budget
       ~allow_wall_clock_retry_budget:false
       ~is_retry:false
-      ~reserve_degraded_retry_budget:true
       ~estimated_input_tokens:2_000
       ~max_turns:4
       ~remaining_turn_budget_s:500.0
@@ -8248,8 +8255,8 @@ let test_bounded_oas_timeout_reserves_degraded_retry_budget () =
   | Some budget ->
     check
       (float 0.01)
-      "first attempt keeps half the usable turn budget for fallback"
-      242.5
+      "first attempt receives usable_budget = remaining - guard (no halving)"
+      485.0
       budget.effective_timeout_sec;
     check
       (float 0.01)
@@ -8258,18 +8265,21 @@ let test_bounded_oas_timeout_reserves_degraded_retry_budget () =
       budget.remaining_turn_budget_sec;
     check
       string
-      "source records retry reserve"
-      "adaptive_estimated_input_tokens_capped_by_degraded_retry_budget"
+      "source records adaptive capped by turn budget (no reserve)"
+      "adaptive_estimated_input_tokens_capped_by_turn_budget"
       budget.source
   | None -> fail "expected bounded timeout"
 ;;
 
-let test_attempt_watchdog_preserves_degraded_retry_reserve () =
+(* RFC-0129: renamed from [test_attempt_watchdog_preserves_degraded_retry_reserve].
+   With the reserve_fraction gone, the watchdog now bounds the full
+   usable budget — capped by remaining_turn_budget_s - 1s outer
+   reserve, not by the halved retry slice. *)
+let test_attempt_watchdog_uses_full_usable_budget () =
   match
     UT.resolve_bounded_oas_timeout_budget_with_turn_budget
       ~allow_wall_clock_retry_budget:false
       ~is_retry:false
-      ~reserve_degraded_retry_budget:true
       ~estimated_input_tokens:2_000
       ~max_turns:4
       ~remaining_turn_budget_s:500.0
@@ -8277,8 +8287,9 @@ let test_attempt_watchdog_preserves_degraded_retry_reserve () =
   | Some budget ->
     check
       (float 0.01)
-      "attempt watchdog includes OAS timeout plus finalization guard"
-      257.5
+      "attempt watchdog = min(effective+guard, remaining-outer_reserve) \
+       = min(500, 499) = 499"
+      499.0
       (UT.attempt_watchdog_timeout_sec ~remaining_turn_budget_s:500.0 budget)
   | None -> fail "expected bounded timeout"
 ;;
@@ -8319,7 +8330,6 @@ let test_oas_timeout_reclassifies_only_current_attempt_budget () =
     UT.resolve_bounded_oas_timeout_budget_with_turn_budget
       ~allow_wall_clock_retry_budget:false
       ~is_retry:false
-      ~reserve_degraded_retry_budget:false
       ~estimated_input_tokens:2_000
       ~max_turns:4
       ~remaining_turn_budget_s:1200.0
@@ -8526,7 +8536,6 @@ let test_per_attempt_retry_budget_with_near_zero_remaining () =
     UT.resolve_bounded_oas_timeout_budget_with_turn_budget
       ~allow_wall_clock_retry_budget:false
       ~is_retry:true
-      ~reserve_degraded_retry_budget:false
       ~estimated_input_tokens:2_000
       ~max_turns:4
       ~remaining_turn_budget_s:3.0
@@ -8543,7 +8552,6 @@ let test_per_attempt_retry_budget_capped_by_remaining_when_healthy () =
     UT.resolve_bounded_oas_timeout_budget_with_turn_budget
       ~allow_wall_clock_retry_budget:false
       ~is_retry:true
-      ~reserve_degraded_retry_budget:false
       ~estimated_input_tokens:2_000
       ~max_turns:4
       ~remaining_turn_budget_s:1200.0
@@ -8562,7 +8570,6 @@ let test_per_attempt_retry_blocks_after_adaptive_budget_spent () =
     UT.resolve_bounded_oas_timeout_budget_with_turn_budget
       ~allow_wall_clock_retry_budget:false
       ~is_retry:true
-      ~reserve_degraded_retry_budget:false
       ~estimated_input_tokens:2_000
       ~max_turns:4
       ~remaining_turn_budget_s:300.0
@@ -8576,7 +8583,6 @@ let test_degraded_retry_wall_clock_budget_allows_remaining_turn_time () =
     UT.resolve_bounded_oas_timeout_budget_with_turn_budget
       ~allow_wall_clock_retry_budget:true
       ~is_retry:true
-      ~reserve_degraded_retry_budget:false
       ~estimated_input_tokens:2_000
       ~max_turns:4
       ~remaining_turn_budget_s:300.0
@@ -8639,7 +8645,6 @@ let test_non_retry_still_refuses_tiny_budget () =
     UT.resolve_bounded_oas_timeout_budget_with_turn_budget
       ~allow_wall_clock_retry_budget:false
       ~is_retry:false
-      ~reserve_degraded_retry_budget:false
       ~estimated_input_tokens:2_000
       ~max_turns:4
       ~remaining_turn_budget_s:20.0
@@ -8655,7 +8660,6 @@ let test_per_attempt_retry_refuses_zero_remaining () =
     UT.resolve_bounded_oas_timeout_budget_with_turn_budget
       ~allow_wall_clock_retry_budget:false
       ~is_retry:true
-      ~reserve_degraded_retry_budget:false
       ~estimated_input_tokens:2_000
       ~max_turns:4
       ~remaining_turn_budget_s:0.0
@@ -12807,13 +12811,14 @@ let () =
             `Quick
             test_bounded_oas_timeout_uses_channel_turn_budget_override
         ; test_case
-            "bounded OAS timeout reserves degraded retry budget"
+            "bounded OAS timeout first attempt uses full usable budget \
+             (RFC-0129: no reserve_fraction)"
             `Quick
-            test_bounded_oas_timeout_reserves_degraded_retry_budget
+            test_bounded_oas_timeout_first_attempt_uses_full_usable_budget
         ; test_case
-            "attempt watchdog preserves degraded retry reserve"
+            "attempt watchdog uses full usable budget (RFC-0129)"
             `Quick
-            test_attempt_watchdog_preserves_degraded_retry_reserve
+            test_attempt_watchdog_uses_full_usable_budget
         ; test_case
             "attempt watchdog fires before outer turn timeout"
             `Quick

@@ -40,15 +40,22 @@ let record_turn_failure_stress =
    - cohttp connect 1s + first-token 2-5s = ~6s baseline
    - 30s leaves ~9-12s headroom for actual response
 
-   Root cause is OAS HTTP body lacking timeout (`http_client.ml take_all`);
-   this is a band-aid until that lands. *)
+   RFC-0129 (2026-05-18): the prior reserve_fraction band-aid below
+   was removed. End-to-end cap chain confirmed:
+     [effective_timeout_sec] ->
+       [Keeper_turn_driver_try_provider.per_provider_timeout_s] ->
+       [Cascade_agent_context.max_execution_time_s] ->
+       [Agent_sdk.Builder.with_max_execution_time]
+   plus OAS 0.195.0+ enforces a per-HTTP cap via [body_timeout_s]
+   (lib/llm_provider/complete.ml:656) and per-stream-line cap via
+   [stream_idle_timeout_s] ([read_sse]/[read_ndjson]). So the
+   original "OAS HTTP body lacking timeout" condition no longer
+   holds and the halving workaround was killing healthy slow
+   streams (14-event 307.5s cluster, 2026-05-17 fleet).
+*)
 let oas_timeout_guard_sec = 15.0
 
 let min_oas_timeout_budget_sec = 15.0
-
-(* Profiles with a declared fallback must not spend the whole turn on the
-   first provider. Keep half of the usable budget for the degraded retry. *)
-let degraded_retry_budget_reserve_fraction = 0.5
 
 type oas_timeout_budget_resolution = {
   effective_timeout_sec : float;
@@ -76,7 +83,6 @@ let oas_timeout_budget_resolution_to_yojson
 let resolve_bounded_oas_timeout_budget_with_turn_budget
     ~(allow_wall_clock_retry_budget : bool)
     ~(is_retry : bool)
-    ~(reserve_degraded_retry_budget : bool)
     ~(estimated_input_tokens : int) ~(max_turns : int)
     ~(remaining_turn_budget_s : float) : oas_timeout_budget_resolution option =
   let runtime = Keeper_runtime_resolved.current () in
@@ -135,43 +141,18 @@ let resolve_bounded_oas_timeout_budget_with_turn_budget
     if usable_budget < min_oas_timeout_budget_sec
     then None
     else
-      let turn_capped_timeout_sec =
+      let effective_timeout_sec =
         Float.min adaptive_timeout_sec usable_budget
       in
-      let retry_capped_timeout_sec =
-        if reserve_degraded_retry_budget then
-          let retry_reserved_cap =
-            usable_budget *. degraded_retry_budget_reserve_fraction
-          in
-          if retry_reserved_cap >= min_oas_timeout_budget_sec
-          then Float.min turn_capped_timeout_sec retry_reserved_cap
-          else turn_capped_timeout_sec
-        else turn_capped_timeout_sec
-      in
-      let effective_timeout_sec = retry_capped_timeout_sec in
       let capped_by_turn_budget =
-        turn_capped_timeout_sec < adaptive_timeout_sec
-      in
-      let capped_by_degraded_retry_budget =
-        retry_capped_timeout_sec < turn_capped_timeout_sec
+        effective_timeout_sec < adaptive_timeout_sec
       in
       let source =
-        match
-          ( runtime.oas_timeout_override_sec.value,
-            capped_by_turn_budget,
-            capped_by_degraded_retry_budget )
-        with
-        | Some _, _, true -> "override_capped_by_degraded_retry_budget"
-        | Some _, true, false ->
-            "override_capped_by_turn_budget"
-        | Some _, false, false -> "override"
-        | None, true, true ->
-            "adaptive_estimated_input_tokens_capped_by_turn_budget_and_degraded_retry_budget"
-        | None, false, true ->
-            "adaptive_estimated_input_tokens_capped_by_degraded_retry_budget"
-        | None, true, false ->
-            "adaptive_estimated_input_tokens_capped_by_turn_budget"
-        | None, false, false -> "adaptive_estimated_input_tokens"
+        match runtime.oas_timeout_override_sec.value, capped_by_turn_budget with
+        | Some _, true -> "override_capped_by_turn_budget"
+        | Some _, false -> "override"
+        | None, true -> "adaptive_estimated_input_tokens_capped_by_turn_budget"
+        | None, false -> "adaptive_estimated_input_tokens"
       in
       Some
         {
@@ -192,7 +173,7 @@ let bounded_oas_timeout_for_turn_budget_with_turn_budget
     (fun (budget : oas_timeout_budget_resolution) -> budget.effective_timeout_sec)
     (resolve_bounded_oas_timeout_budget_with_turn_budget
        ~allow_wall_clock_retry_budget:false
-       ~is_retry:false ~reserve_degraded_retry_budget:false
+       ~is_retry:false
        ~estimated_input_tokens ~max_turns ~remaining_turn_budget_s)
 
 let allow_wall_clock_retry_budget_for_attempt
@@ -218,7 +199,7 @@ let oas_retry_budget_available_for_turn
   Option.is_some
     (resolve_bounded_oas_timeout_budget_with_turn_budget
        ~allow_wall_clock_retry_budget
-       ~reserve_degraded_retry_budget:false ~is_retry ~estimated_input_tokens
+       ~is_retry ~estimated_input_tokens
        ~max_turns ~remaining_turn_budget_s)
 
 (* PR #13120 review: declared in [Env_config_keeper.KeeperRetryBackoff]

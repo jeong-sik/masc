@@ -21,11 +21,12 @@ type oas_timeout_budget_resolution =
 val resolve_bounded_oas_timeout_budget_with_turn_budget
   :  allow_wall_clock_retry_budget:bool
   -> is_retry:bool
-  -> reserve_degraded_retry_budget:bool
   -> estimated_input_tokens:int
   -> max_turns:int
   -> remaining_turn_budget_s:float
   -> oas_timeout_budget_resolution option
+(** RFC-0129: see [Keeper_turn_cascade_budget] for the rationale
+    behind removing the [reserve_degraded_retry_budget] knob. *)
 
 (** Per-attempt watchdog used around the OAS call. It fires before the
     enclosing keeper-turn wall-clock timeout so recoverable provider stalls can

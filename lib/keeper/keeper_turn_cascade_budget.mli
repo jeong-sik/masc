@@ -73,11 +73,16 @@ val oas_timeout_budget_resolution_to_yojson :
 val resolve_bounded_oas_timeout_budget_with_turn_budget :
   allow_wall_clock_retry_budget:bool ->
   is_retry:bool ->
-  reserve_degraded_retry_budget:bool ->
   estimated_input_tokens:int ->
   max_turns:int ->
   remaining_turn_budget_s:float ->
   oas_timeout_budget_resolution option
+(** RFC-0129: the [reserve_degraded_retry_budget] knob was removed
+    (2026-05-18). The first-attempt branch now hands the full usable
+    budget to [max_execution_time_s]; the keeper turn timeout still
+    bounds the outer loop, and OAS 0.195.0+ enforces a per-HTTP cap
+    via [body_timeout_s] / per-stream-line cap via
+    [stream_idle_timeout_s]. *)
 
 val allow_wall_clock_retry_budget_for_attempt :
   is_retry:bool ->

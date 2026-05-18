@@ -10,6 +10,8 @@ module KR = Masc_mcp.Keeper_runtime
 module AQ = Masc_mcp.Keeper_approval_queue
 module KSM = Masc_mcp.Keeper_state_machine
 module KLH = Masc_mcp.Keeper_lifecycle_hooks
+module FD = Masc_mcp.Keeper_fd_pressure
+module KA = Masc_mcp.Keeper_keepalive
 
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_supervisor_" "" in
@@ -411,6 +413,71 @@ let test_restart_launch_noop_scope_restores_nested_state () =
             (Sup.restart_launch_noop_enabled_for_test ()));
       check bool "restored prior true" true
         (Sup.restart_launch_noop_enabled_for_test ()))
+
+let test_spawn_admission_denial_does_not_register_or_fork () =
+  with_restart_launch_noop @@ fun () ->
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Eio.Switch.on_release sw (fun () ->
+    FD.reset_for_tests ();
+    Reg.clear ();
+    Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+    cleanup_dir base_dir);
+  let config = Masc_mcp.Coord.default_config base_dir in
+  ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+  let name = "spawn-denied-no-fork" in
+  let meta = make_meta name in
+  (match KT.write_meta config meta with
+   | Ok () -> ()
+   | Error err -> fail err);
+  let ctx : _ KT.context =
+    {
+      config;
+      agent_name = "supervisor";
+      sw;
+      clock = Eio.Stdenv.clock env;
+      proc_mgr = Some (Eio.Stdenv.process_mgr env);
+      net = Some (Eio.Stdenv.net env);
+    }
+  in
+  let denial_metric = Masc_mcp.Keeper_metrics.metric_keeper_spawn_slot_denied in
+  let denial_count surface =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      denial_metric
+      ~labels:
+        [
+          ("keeper", name);
+          ("surface", surface);
+          ("reason", "fd_pressure_active");
+        ]
+      ()
+  in
+  let fork_total () =
+    Masc_mcp.Prometheus.metric_total
+      Masc_mcp.Keeper_metrics.metric_keeper_domain_pool_fork
+  in
+  FD.note ~site:"test_spawn_admission_no_fork"
+    ~detail:"Too many open files in system"
+    ();
+  check bool "fd pressure active" true (FD.active ());
+  let fork_before = fork_total () in
+  let keepalive_denials_before = denial_count "keepalive" in
+  KA.start_keepalive ctx meta;
+  check bool "keepalive denial does not register keeper" false
+    (Reg.is_registered ~base_path:config.base_path name);
+  check (float 0.001) "keepalive denial metric increments"
+    (keepalive_denials_before +. 1.0)
+    (denial_count "keepalive");
+  let supervisor_denials_before = denial_count "supervisor" in
+  Sup.supervise_keepalive ~proactive_warmup_sec:0 ctx meta;
+  check bool "supervisor denial does not register keeper" false
+    (Reg.is_registered ~base_path:config.base_path name);
+  check (float 0.001) "supervisor denial metric increments"
+    (supervisor_denials_before +. 1.0)
+    (denial_count "supervisor");
+  check (float 0.001) "spawn denial does not fork heartbeat" fork_before (fork_total ())
 
 let test_active_supervision_keeper_count_uses_current_entries () =
   let entries = registered_entries [ "alpha"; "bravo" ] in
@@ -1643,6 +1710,8 @@ let () =
         test_fresh_supervision_cohort_keepers_rereads_registry;
       test_case "restart launch noop scoped restore" `Quick
         test_restart_launch_noop_scope_restores_nested_state;
+      test_case "spawn admission denial does not register or fork" `Quick
+        test_spawn_admission_denial_does_not_register_or_fork;
       test_case "active count uses current entries" `Quick
         test_active_supervision_keeper_count_uses_current_entries;
     ];

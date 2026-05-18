@@ -936,6 +936,52 @@ let test_runtime_surface_maps_registry_failure_reason_blockers () =
          (runtime |> member "needs_attention" |> to_bool))
     cases
 
+let test_runtime_surface_exposes_cascade_attempt_facts () =
+  KR.clear ();
+  let attempt : KT.cascade_attempt_record =
+    { provider_id = "runpod_mtp.qwen36-35b-a3b-mtp.keeper"
+    ; http_status = Some 524
+    ; outcome = `Failure "connection closed by peer"
+    ; timestamp = 1_768_600_000.25
+    }
+  in
+  let base =
+    make_meta ~name:"runtime-cascade-attempt-facts-test" ()
+    |> KT.set_cascade_name "tier-group.strict_tool_candidates"
+  in
+  let meta =
+    { base with
+      runtime = { base.runtime with last_cascade_attempt = Some attempt }
+    }
+  in
+  let config =
+    Coord.default_config "/tmp/test-keeper-exec-status-cascade-attempt-facts"
+  in
+  ignore (KR.register ~base_path:config.base_path meta.name meta);
+  KR.set_failure_reason ~base_path:config.base_path meta.name
+    (Some (KR.Turn_consecutive_failures 2));
+  let runtime = KSB.runtime_surface_json config meta in
+  let open Yojson.Safe.Util in
+  let facts = runtime |> member "runtime_blocker_facts" in
+  check string "facts source" "keeper_runtime.last_cascade_attempt"
+    (facts |> member "source" |> to_string);
+  check string "facts cascade" "tier-group.strict_tool_candidates"
+    (facts |> member "cascade_name" |> to_string);
+  let last_attempt = facts |> member "last_cascade_attempt" in
+  check string "attempt provider_id" attempt.provider_id
+    (last_attempt |> member "provider_id" |> to_string);
+  check int "attempt http_status" 524
+    (last_attempt |> member "http_status" |> to_int);
+  check string "attempt outcome kind" "failure"
+    (last_attempt |> member "outcome" |> member "kind" |> to_string);
+  check string "attempt outcome detail" "connection closed by peer"
+    (last_attempt |> member "outcome" |> member "detail" |> to_string);
+  check (float 0.000001) "attempt timestamp" attempt.timestamp
+    (last_attempt |> member "timestamp_unix" |> to_float);
+  let runtime_last_attempt = runtime |> member "last_cascade_attempt" in
+  check string "runtime carries same provider_id" attempt.provider_id
+    (runtime_last_attempt |> member "provider_id" |> to_string)
+
 let test_runtime_surface_classifies_progress_narrative_blockers () =
   let cases =
     [
@@ -1230,6 +1276,8 @@ let () =
             test_runtime_surface_maps_heartbeat_failure_reason;
           test_case "runtime surface maps registry failure blockers" `Quick
             test_runtime_surface_maps_registry_failure_reason_blockers;
+          test_case "runtime surface exposes cascade attempt facts" `Quick
+            test_runtime_surface_exposes_cascade_attempt_facts;
           test_case "runtime surface classifies progress narrative blockers"
             `Quick
             test_runtime_surface_classifies_progress_narrative_blockers;

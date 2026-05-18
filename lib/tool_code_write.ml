@@ -252,6 +252,23 @@ let code_shell_cwd_rejection_json ctx ~cwd ?command reason =
   in
   error_response_with (List.rev fields)
 
+let code_shell_command_rejection_json ctx ~command reason =
+  let hint =
+    "masc_code_shell only accepts allowlisted coding commands. Use an \
+     allowlisted command or a structured tool such as keeper_fs_read or \
+     keeper_fs_edit, and split shell pipelines into complete allowlisted \
+     command stages."
+  in
+  error_response_with
+    [
+      ("error", `String "code_shell_command_rejected");
+      ("reason", `String reason);
+      ("command", `String command);
+      ("agent", `String ctx.agent_name);
+      ("failure_class", `String "policy_rejection");
+      ("hint", `String hint);
+    ]
+
 (* Issue #8522: Variant SSOT for git action.  Adding a constructor
    forces compilation in [git_action_to_string] AND extends
    [valid_git_action_strings]; the schema enum below derives from
@@ -569,7 +586,12 @@ let handle_code_shell ~tool_name ~start_time ctx args =
   if String.equal command "" then Tool_result.error ~tool_name ~start_time "command parameter required"
   else
     match validate_code_shell_command command with
-    | Error reason -> Tool_result.error ~tool_name ~start_time reason
+    | Error reason ->
+        Tool_result.error
+          ~failure_class:(Some Tool_result.Policy_rejection)
+          ~tool_name
+          ~start_time
+          (code_shell_command_rejection_json ctx ~command reason)
     | Ok () ->
         (* Validate cwd if provided *)
         let cwd_result =

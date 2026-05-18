@@ -255,6 +255,20 @@ let playground_cache_repo ~base_path ~agent_name ~repo_name =
        | `String name -> String.equal name repo_name
        | _ -> false)
 
+let agent_current_task ~config ~agent_name =
+  let agent_file =
+    Filename.concat (Masc_mcp.Coord.agents_dir config)
+      (Masc_mcp.Coord.safe_filename agent_name ^ ".json")
+  in
+  let open Yojson.Safe.Util in
+  match Yojson.Safe.from_file agent_file |> member "current_task" with
+  | `String task_id -> Some task_id
+  | `Null -> None
+  | other ->
+      fail
+        (Printf.sprintf "unexpected current_task JSON: %s"
+           (Yojson.Safe.to_string other))
+
 let test_dispatch_worktree_create_spoofed_agent_blocked () =
   let ctx = make_ctx () in
   let args = `Assoc [
@@ -390,7 +404,10 @@ let test_dispatch_worktree_create_auto_provisions_workspace_repo () =
       check bool "message mentions auto-provision" true
         (contains "auto-provisioned" msg);
       check bool "sandbox clone created" true (Sys.file_exists sandbox_clone);
-      check bool "worktree created" true (Sys.file_exists worktree_path)
+      check bool "worktree created" true (Sys.file_exists worktree_path);
+      check (option string) "agent current_task stores task id"
+        (Some task_id)
+        (agent_current_task ~config ~agent_name:"test-agent")
 
 let test_dispatch_worktree_create_refreshes_playground_repo_cache () =
   let base_path = temp_dir () in

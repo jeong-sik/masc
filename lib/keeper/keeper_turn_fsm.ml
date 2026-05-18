@@ -272,18 +272,36 @@ let guard_transition ?ctx ~keeper_name ~turn_id ~from_state ~to_state () =
   match assert_transition_allowed ?ctx ~from_state ~to_state () with
   | Ok _ -> ()
   | Error violation ->
-      (* Log first: [wrap_unit] catches [Assert_failure] only to bump the
-         Prometheus counter, then re-raises. Anything sequenced after
-         [wrap_unit] would never run, so the diagnostic warn has to
-         precede it for operators to see *which* transition violated. *)
+      (* Log first: [wrap_unit] catches the raised exception only to
+         bump the Prometheus counter, then re-raises. Anything
+         sequenced after [wrap_unit] would never run, so the
+         diagnostic warn has to precede it for operators to see
+         *which* transition violated. *)
       Log.Keeper.warn ~keeper_name ~turn_id
         "[fsm:transition:violation] %s -> %s (%s)"
         violation.from_state violation.to_state violation.reason;
       let stage = violation.from_state ^ "->" ^ violation.to_state in
+      (* [Invalid_argument] (not [assert false]) carries an explicit
+         message into the re-raise backtrace.  Operators reading a
+         crash dump or test failure see the violating transition +
+         reason without having to cross-reference the WARN line by
+         keeper/turn id.  See [keeper_fsm_guard_runtime.mli] for the
+         "any escaping exception is the spec-violation channel"
+         contract that lets this be a plain exception rather than
+         the typed [Keeper_registry.Cascade_transition_violation]
+         (naming the typed exception here would form a module
+         dependency cycle). *)
+      let detail =
+        Printf.sprintf
+          "fsm:transition:violation keeper=%s turn=%s from=%s to=%s \
+           reason=%s"
+          keeper_name turn_id violation.from_state violation.to_state
+          violation.reason
+      in
       Keeper_fsm_guard_runtime.wrap_unit
         ~action:"KeeperTurnFSM.Next"
         ~stage
-        (fun () -> assert false)
+        (fun () -> invalid_arg detail)
 
 (* Per-keeper last-transition wallclock, used to record the dwell time
    spent in [prev] state when a transition fires. Single-domain Eio
@@ -328,10 +346,30 @@ let emit_transition ?ctx ~keeper_name ~turn_id ?prev state =
        guard_transition ?ctx ~keeper_name ~turn_id ~from_state ~to_state:state ()
    | None -> ());
   let state_label = turn_state_label state in
+  (* [action_label] used to be a single "unknown" sentinel for two
+     distinct cases:
+       1. [prev = None] — the first emit for a turn; there is no
+          [from_state] to classify against, so "initial" is the
+          accurate label.
+       2. [prev = Some _] with [classified = None] — the transition
+          is *allowed* (otherwise [guard_transition] would have
+          raised above) but {!classify_transition} has no arm for the
+          (from, to) pair, so the audit trail loses the action.
+          This is a *classifier gap* the operator can fix by adding
+          an arm; surface it as a separate label + WARN so it is
+          discoverable from the same log line as the transition. *)
   let action_label =
-    match classified with
-    | Some action -> transition_action_label action
-    | None -> "unknown"
+    match classified, prev with
+    | Some action, _ -> transition_action_label action
+    | None, None -> "initial"
+    | None, Some _ ->
+        Log.Keeper.warn ~keeper_name ~turn_id
+          "[fsm:transition:unclassified] %s -> %s — classify_transition \
+           has no arm for this (from, to) pair; add one in \
+           lib/keeper/keeper_turn_fsm.ml::classify_transition so the \
+           audit trail captures the action"
+          prev_label state_label;
+        "unclassified"
   in
   let stop_label =
     match ctx with

@@ -105,6 +105,26 @@ describe('fetchDashboardExecutionTrust', () => {
       producer: 'keeper_agent_run.execution_receipt',
       durable_store: '.masc/keepers/*/execution-receipts',
       dashboard_surface: '/api/v1/dashboard/execution-trust',
+      dashboard_surface_envelope: {
+        schema: 'masc.dashboard_surface.v1',
+        schema_version: 1,
+        surface: '/api/v1/dashboard/execution-trust',
+        source: 'execution_receipt',
+        generated_at_iso: '2026-05-14T00:00:00Z',
+        cache: {
+          state: 'request_cache',
+          key: 'execution-trust:default',
+          ttl_s: 15,
+          stale: true,
+          stale_reason: 'execution_receipt_append_failed',
+          latest_age_s: null,
+          health: 'coverage_gap',
+        },
+        migration: {
+          body_shape: 'root_fields_preserved',
+          rule: 'additive envelope first',
+        },
+      },
       freshness_slo_s: 900,
       entry_count: 0,
       total: 0,
@@ -138,6 +158,17 @@ describe('fetchDashboardExecutionTrust', () => {
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/execution-trust')
     expect(result.coverage_gap_count).toBe(1)
+    expect(result.dashboard_surface_envelope).toMatchObject({
+      schema: 'masc.dashboard_surface.v1',
+      surface: '/api/v1/dashboard/execution-trust',
+      source: 'execution_receipt',
+      cache: {
+        state: 'request_cache',
+        key: 'execution-trust:default',
+        stale_reason: 'execution_receipt_append_failed',
+      },
+      migration: { body_shape: 'root_fields_preserved' },
+    })
     expect(result.coverage_gaps?.[0]).toMatchObject({
       producer: 'keeper_agent_run.execution_receipt',
       durable_store: '.masc/keepers/*/execution-receipts',

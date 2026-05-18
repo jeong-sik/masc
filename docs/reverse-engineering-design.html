@@ -1288,6 +1288,7 @@
               <li>Shell, keeper, execution, OAS telemetry, config, LSP를 projection module로 분리</li>
               <li>목표: router module은 route wiring만 하고 JSON projection은 domain read model이 소유.</li>
               <li>추가 contract: <code>DashboardSurface</code> envelope로 cache state, stale fallback, source, broadcast hook을 통일.</li>
+              <li>Migration rule: 기존 root JSON field는 유지하고 <code>dashboard_surface_envelope</code>를 먼저 붙인다. 프론트가 envelope를 읽도록 옮긴 뒤에만 endpoint versioning 또는 root metadata 제거를 검토한다.</li>
               <li>보호 테스트: current endpoint JSON snapshots, frontend API contract tests, bootstrap initializing envelope, WS/SSE slice mapping parity.</li>
             </ul>
           </div>
@@ -1410,7 +1411,7 @@
               <td>Dashboard runtime truth를 read-model modules로 분리하고 transport parity를 고정한다.</td>
               <td><code>goal-refactor-dashboard-readmodel-20260518</code><br><a href="https://github.com/jeong-sik/masc-mcp/issues/16081">GitHub #16081</a></td>
               <td><code>task-377</code> auth material parity<br><code>task-378</code> shell fetch SSOT<br><code>task-379</code> WS/SSE slice parity<br><code>task-380</code> DashboardSurface</td>
-              <td>HTTP/SSE/WS token material, shell fetch duplication, backend slice와 frontend hydrator mapping을 고정한 뒤 surface envelope를 도입한다.</td>
+              <td>HTTP/SSE/WS token material, shell fetch duplication, backend slice와 frontend hydrator mapping을 고정한 뒤 기존 root JSON field를 보존하는 additive <code>dashboard_surface_envelope</code>부터 도입한다.</td>
             </tr>
             <tr>
               <td>JSONL writer contract를 하나로 수렴하되 파일 경로와 row schema는 보존한다.</td>

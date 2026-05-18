@@ -2459,6 +2459,7 @@ export type TelemetryFreshnessMetadata = {
   producer?: string
   durable_store?: string
   dashboard_surface?: string
+  dashboard_surface_envelope?: DashboardSurfaceEnvelope | null
   freshness_slo_s?: number | null
   latest_ts_unix?: number | null
   latest_ts_iso?: string | null
@@ -2469,6 +2470,27 @@ export type TelemetryFreshnessMetadata = {
   exists?: boolean
   coverage_gaps?: TelemetryCoverageGap[]
   coverage_gap_count?: number
+}
+
+export type DashboardSurfaceEnvelope = {
+  schema?: string
+  schema_version?: number
+  surface?: string
+  source?: string
+  generated_at_iso?: string
+  cache?: {
+    state?: string
+    key?: string | null
+    ttl_s?: number | null
+    stale?: boolean
+    stale_reason?: string | null
+    latest_age_s?: number | null
+    health?: string | null
+  }
+  migration?: {
+    body_shape?: string
+    rule?: string
+  }
 }
 
 export type TelemetryCoverageGap = {
@@ -2483,6 +2505,36 @@ export type TelemetryCoverageGap = {
   keeper_name?: string | null
   trace_id?: string | null
   error?: string | null
+}
+
+function decodeDashboardSurfaceEnvelope(raw: unknown): DashboardSurfaceEnvelope | null {
+  if (!isRecord(raw)) return null
+  const cache = isRecord(raw.cache)
+    ? {
+        state: asString(raw.cache.state),
+        key: asNullableString(raw.cache.key),
+        ttl_s: asNumber(raw.cache.ttl_s),
+        stale: asBoolean(raw.cache.stale),
+        stale_reason: asNullableString(raw.cache.stale_reason),
+        latest_age_s: asNumber(raw.cache.latest_age_s),
+        health: asNullableString(raw.cache.health),
+      }
+    : undefined
+  const migration = isRecord(raw.migration)
+    ? {
+        body_shape: asString(raw.migration.body_shape),
+        rule: asString(raw.migration.rule),
+      }
+    : undefined
+  return {
+    schema: asString(raw.schema),
+    schema_version: asNumber(raw.schema_version),
+    surface: asString(raw.surface),
+    source: asString(raw.source),
+    generated_at_iso: asString(raw.generated_at_iso),
+    cache,
+    migration,
+  }
 }
 
 function decodeTelemetryCoverageGap(raw: unknown): TelemetryCoverageGap | null {
@@ -2511,6 +2563,7 @@ function decodeTelemetryFreshnessMetadata(raw: Record<string, unknown>): Telemet
     producer: asString(raw.producer),
     durable_store: asString(raw.durable_store),
     dashboard_surface: asString(raw.dashboard_surface),
+    dashboard_surface_envelope: decodeDashboardSurfaceEnvelope(raw.dashboard_surface_envelope),
     freshness_slo_s: asNumber(raw.freshness_slo_s),
     latest_ts_unix: asNumber(raw.latest_ts_unix),
     latest_ts_iso: asNullableString(raw.latest_ts_iso),

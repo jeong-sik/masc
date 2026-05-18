@@ -1512,6 +1512,25 @@ let test_execution_trust_route_surfaces_trust_summary_fields () =
   check string "route surfaces execution trust dashboard surface"
     "/api/v1/dashboard/execution-trust"
     (json |> member "dashboard_surface" |> to_string);
+  let envelope = json |> member "dashboard_surface_envelope" in
+  check string "route attaches DashboardSurface schema"
+    "masc.dashboard_surface.v1"
+    (envelope |> member "schema" |> to_string);
+  check string "envelope preserves surface identity"
+    "/api/v1/dashboard/execution-trust"
+    (envelope |> member "surface" |> to_string);
+  check string "envelope preserves source identity"
+    "execution_receipt"
+    (envelope |> member "source" |> to_string);
+  check string "envelope marks request cache state"
+    "request_cache"
+    (envelope |> member "cache" |> member "state" |> to_string);
+  check string "envelope cache key names the surface cache"
+    "execution-trust:default"
+    (envelope |> member "cache" |> member "key" |> to_string);
+  check string "envelope migration keeps root fields"
+    "root_fields_preserved"
+    (envelope |> member "migration" |> member "body_shape" |> to_string);
   let row =
     match json |> member "keepers" |> to_list with
     | keeper :: _ -> keeper

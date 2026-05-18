@@ -64,6 +64,61 @@ let test_too_complex_shell_chain () =
     Alcotest.failf "expected Too_complex Logic_op, got %s" (Gate.decision_tag other)
 ;;
 
+(* RFC-0131 PR-1a — caller partition tag.  The optional [?caller] does
+   not affect the verdict; these tests pin (a) backward compatibility
+   when omitted, (b) every variant tags distinctly, (c) the parse and
+   validate paths both accept the new arg. *)
+
+let test_caller_tag_round_trip () =
+  Alcotest.(check string) "worker tag" "worker_dev_tools" (Gate.caller_tag Worker_dev_tools);
+  Alcotest.(check string) "code_write tag" "tool_code_write" (Gate.caller_tag Tool_code_write);
+  Alcotest.(check string)
+    "keeper tag"
+    "keeper_shell_bash"
+    (Gate.caller_tag Keeper_shell_bash)
+;;
+
+let test_validate_with_caller_matches_without () =
+  let cmd = "rg foo lib | head -20" in
+  let without = Gate.validate_allowlist ~allowed_commands:allowed cmd in
+  let with_caller =
+    Gate.validate_allowlist ~caller:Worker_dev_tools ~allowed_commands:allowed cmd
+  in
+  Alcotest.(check string)
+    "tag identity"
+    (Gate.decision_tag without)
+    (Gate.decision_tag with_caller);
+  match without, with_caller with
+  | Gate.Allow w, Gate.Allow c ->
+    Alcotest.(check (list string))
+      "stage_bins identity"
+      w.Gate.stage_bins
+      c.Gate.stage_bins
+  | _ ->
+    Alcotest.failf
+      "expected both decisions to be Allow; got %s vs %s"
+      (Gate.decision_tag without)
+      (Gate.decision_tag with_caller)
+;;
+
+let test_parse_with_caller_matches_without () =
+  let cmd = "rg foo lib" in
+  let without = Gate.parse cmd in
+  let with_caller = Gate.parse ~caller:Keeper_shell_bash cmd in
+  match without, with_caller with
+  | Ok w, Ok c ->
+    Alcotest.(check (list string)) "bins identity" w.Gate.stage_bins c.Gate.stage_bins
+  | Error wk, Error ck ->
+    Alcotest.(check string)
+      "kind identity"
+      (Gate.cannot_parse_kind_tag wk)
+      (Gate.cannot_parse_kind_tag ck)
+  | Ok _, Error ck ->
+    Alcotest.failf "without=Ok but with_caller=Error %s" (Gate.cannot_parse_kind_tag ck)
+  | Error wk, Ok _ ->
+    Alcotest.failf "without=Error %s but with_caller=Ok" (Gate.cannot_parse_kind_tag wk)
+;;
+
 let () =
   Alcotest.run
     "shell_command_gate"
@@ -79,6 +134,17 @@ let () =
             test_rejects_disallowed_pipeline_stage_with_index
         ; Alcotest.test_case "pipes disabled" `Quick test_rejects_pipes_when_disabled
         ; Alcotest.test_case "shell chain is too complex" `Quick test_too_complex_shell_chain
+        ] )
+    ; ( "caller_partition"
+      , [ Alcotest.test_case "caller_tag round trip" `Quick test_caller_tag_round_trip
+        ; Alcotest.test_case
+            "validate_allowlist with caller matches without"
+            `Quick
+            test_validate_with_caller_matches_without
+        ; Alcotest.test_case
+            "parse with caller matches without"
+            `Quick
+            test_parse_with_caller_matches_without
         ] )
     ]
 ;;

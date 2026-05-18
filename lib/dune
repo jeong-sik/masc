@@ -33,6 +33,13 @@
  prometheus_format
  prometheus_key
  prometheus_process
+ prometheus_builtin_metric_names
+ prometheus_builtin_metrics_part1
+ prometheus_builtin_metrics_part2
+ prometheus_builtin_metrics_part3
+ prometheus_builtin_metrics_part4
+ prometheus_builtin_metrics_part5
+ prometheus_builtin_metrics
  prometheus_identity_metric_names
  prometheus_transport_metric_names
  prometheus_core_metric_names

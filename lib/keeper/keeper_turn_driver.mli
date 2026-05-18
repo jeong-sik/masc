@@ -140,6 +140,37 @@ val sdk_error_cascade_fallback_class :
     stream. *)
 val apply_stream_idle_timeout_default : float option -> float option
 
+(** {1 Turn pipeline records} *)
+
+type provider_attempt_provenance =
+  { model_source : string
+  ; resolved_model_source : string
+  ; capability_source : string
+  ; fallback_authority : string
+  ; provider_source_cascade : string option
+  }
+
+type provider_attempt_started_record =
+  { started_provenance : provider_attempt_provenance
+  ; started_is_last : bool
+  ; started_per_provider_timeout_s : float option
+  }
+
+type provider_attempt_finished_record =
+  { finished_provenance : provider_attempt_provenance
+  ; finished_status : string
+  ; finished_latency_ms : float
+  ; finished_checkpoint_after_present : bool
+  ; finished_error : Yojson.Safe.t
+  ; finished_exception_kind : string option
+  }
+
+val provider_attempt_started_decision :
+  provider_attempt_started_record -> Yojson.Safe.t
+
+val provider_attempt_finished_decision :
+  provider_attempt_finished_record -> Yojson.Safe.t
+
 (** {1 Named cascade execution} *)
 
 val run_named :

@@ -30,6 +30,7 @@ val observe_histogram : string -> ?labels:label list -> float -> unit
 val get_metric_value : string -> ?labels:label list -> unit -> float option
 val metric_value_or_zero : string -> ?labels:label list -> unit -> float
 val metric_total : string -> float
+val snapshot : unit -> metric list
 
 (** The most recent EDEADLK backtrace captured by the store lock. [None]
     until the first re-entrant lock failure. *)

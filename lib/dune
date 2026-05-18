@@ -192,6 +192,10 @@
   keeper_turn_driver_try_provider
   keeper_turn_driver_wrappers
   keeper_turn_cascade_budget_routing
+  keeper_unified_turn_event_bus
+  keeper_unified_turn_stay_silent
+  keeper_unified_turn_success
+  keeper_unified_turn_failure
   keeper_exec_context
   keeper_guards
   keeper_agent_run_turn_helpers

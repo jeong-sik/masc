@@ -303,16 +303,28 @@
             <td class="num">0</td>
             <td><code>lib/keeper/keeper_unified_turn.ml</code> 2890 LOC</td>
           </tr>
+          <tr>
+            <td>After PR #TBD keeper unified-turn split</td>
+            <td><code>local #49</code></td>
+            <td class="num">52</td>
+            <td class="num">83,717</td>
+            <td class="num">0</td>
+            <td class="num">0</td>
+            <td><code>lib/keeper/keeper_unified_turn.ml</code> 1999 LOC</td>
+          </tr>
         </tbody>
       </table>
       <div class="panel ok">
-        <span class="tag green">-22 files from initial audit</span>
-        <span class="tag green">-24,457 LOC from initial audit</span>
+        <span class="tag green">-23 files from initial audit</span>
+        <span class="tag green">-30,486 LOC from initial audit</span>
+        <span class="tag blue">2000+ bucket eliminated</span>
         <span class="tag blue">3000+ eliminated in stack</span>
         <span class="tag violet">53 files remain</span>
         <p>
           Progress 기준은 이 문서의 원래 범위와 동일하게 <code>lib/**/*.ml</code> 중 1000+ LOC만 센다.
-          현재 열린 stack 기준으로는 초기 75개에서 53개까지 내려왔고, 3000+ LOC 파일은 남지 않았다.
+          현재 열린 stack 기준으로는 초기 75개에서 52개까지 내려왔고,
+          3000+ LOC 파일과 2000+ LOC 파일은 남지 않았다.  PR #49는 1000+ 파일 수를
+          줄인 단계가 아니라 마지막 2000+ 파일을 1999 LOC로 낮춘 단계다.
         </p>
       </div>
     </section>

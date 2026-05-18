@@ -83,17 +83,35 @@ let first_token_basename segment =
     in
     Some (Filename.basename (String.sub trimmed 0 (find_sep 0)))
 
-let last_pipeline_command_name command =
-  command
-  |> String.split_on_char '|'
-  |> List.rev
-  |> List.find_map first_token_basename
+let last_pipeline_segment command =
+  let len = String.length command in
+  let last_start = ref 0 in
+  let in_single = ref false in
+  let in_double = ref false in
+  let escaped = ref false in
+  for i = 0 to len - 1 do
+    let c = command.[i] in
+    if !escaped then escaped := false
+    else
+      match c with
+      | '\\' when not !in_single -> escaped := true
+      | '\'' when not !in_double -> in_single := not !in_single
+      | '"' when not !in_single -> in_double := not !in_double
+      | '|' when (not !in_single) && not !in_double -> last_start := i + 1
+      | _ -> ()
+  done;
+  String.sub command !last_start (len - !last_start)
+
+let exit_status_command_name command =
+  match Shell_command_gate.parse command with
+  | Ok context -> Shell_command_gate.last_stage_bin context
+  | Error _ -> first_token_basename (last_pipeline_segment command)
 
 let classify_code_shell_exit ~command code =
   match code with
   | 0 -> Shell_ok
   | 1 -> (
-      match last_pipeline_command_name command with
+      match exit_status_command_name command with
       | Some ("rg" | "grep") -> Shell_ok_expected_nonzero "no_matches"
       | Some "diff" -> Shell_ok_expected_nonzero "differences"
       | _ -> Shell_error)

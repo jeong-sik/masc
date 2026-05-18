@@ -8,10 +8,13 @@ val with_hitl_approval_headroom : float -> float
 
 type cancel_classification =
   | Unknown_cancel
+  | Inner_timeout_cancel
   | Routine_parent_cancel
 (** Caller-provided cancellation context.  [Routine_parent_cancel] is only for
     explicit parent/supervisor cancellation paths that are expected to re-raise;
-    provider or bridge timeouts must keep the default [Unknown_cancel]. *)
+    default [Unknown_cancel] cancellations carrying [Eio.Time.Timeout] are
+    classified as [Inner_timeout_cancel] so provider/runtime timeout noise stays
+    separate from unknown parent cancellation. *)
 
 (** Runs a generic Eio execution (usually an OAS Agent.run or Model.call) with a strict
     structural timeout.

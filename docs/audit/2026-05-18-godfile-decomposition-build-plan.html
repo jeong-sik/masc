@@ -321,20 +321,29 @@
             <td class="num">0</td>
             <td><code>lib/keeper/keeper_unified_turn.ml</code> 1999 LOC</td>
           </tr>
+          <tr>
+            <td>Current-main admin tranche</td>
+            <td><code>codex/godfile-zero-admin-main</code></td>
+            <td class="num">49</td>
+            <td class="num">77,798</td>
+            <td class="num">7</td>
+            <td class="num">0</td>
+            <td><code>lib/keeper/keeper_shell_bash.ml</code> 2213 LOC</td>
+          </tr>
         </tbody>
       </table>
       <div class="panel ok">
-        <span class="tag green">-24 files from initial audit</span>
-        <span class="tag green">-32,485 LOC from initial audit</span>
-        <span class="tag blue">2000+ bucket eliminated</span>
-        <span class="tag blue">3000+ eliminated in stack</span>
-        <span class="tag violet">51 files remain</span>
+        <span class="tag green">-26 files from initial audit</span>
+        <span class="tag green">-36,405 LOC from initial audit</span>
+        <span class="tag blue">3000+ eliminated on current main</span>
+        <span class="tag violet">49 files remain</span>
         <p>
           Progress 기준은 이 문서의 원래 범위와 동일하게 <code>lib/**/*.ml</code> 중 1000+ LOC만 센다.
-          현재 열린 stack 기준으로는 초기 75개에서 51개까지 내려왔고,
-          3000+ LOC 파일과 2000+ LOC 파일은 남지 않았다. PR #49는 마지막 2000+
-          파일을 1999 LOC로 낮춘 단계였고, PR #50은 <code>keeper_hooks_oas.ml</code>을
-          1999 LOC에서 948 LOC로 낮춰 1000+ bucket에서 제거한다.
+          admin tranche는 오래된 stack을 그대로 누르지 않고 현재 <code>origin/main</code> 위에
+          <code>prometheus</code>, <code>keeper_unified_turn</code>,
+          <code>keeper_hooks_oas</code> split을 재적용한 경로다.
+          stack 기준 수치는 51개까지 내려갔고, 최신 current-main 기준으로는 main에 이미
+          병합된 metric-store, dashboard, keeper-agent-run split까지 포함되어 49개가 남는다.
         </p>
       </div>
     </section>

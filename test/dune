@@ -157,6 +157,7 @@
   test_keeper_deliberation
   test_cascade_attempt_provenance
   test_keeper_registry
+  test_keeper_registry_provenance
   test_keeper_fd_pressure_fleet
   test_docker_spawn_throttle
   test_keeper_supervisor
@@ -451,6 +452,7 @@
   test_keeper_deliberation
   test_cascade_attempt_provenance
   test_keeper_registry
+  test_keeper_registry_provenance
   test_keeper_fd_pressure_fleet
   test_docker_spawn_throttle
   test_keeper_supervisor

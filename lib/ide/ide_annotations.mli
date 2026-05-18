@@ -49,12 +49,21 @@ val create
 val list
   :  base_dir:string
   -> ?partition:Ide_paths.partition
+  -> ?merge_legacy:bool
   -> filter:annotation_filter
   -> unit
   -> annotation list
 (** Read all annotations for the chosen partition. Tombstoned entries
     are excluded. Sorted by [created_at_ms] descending (newest first).
-    Default [partition] is {!Ide_paths.Legacy}. *)
+    Default [partition] is {!Ide_paths.Legacy}.
+
+    RFC-0128 §5 — when [merge_legacy = true] and [partition] is not
+    [Legacy], records from the Legacy flat store are merged into the
+    result. Conflicts on annotation [id] are resolved in favour of
+    the requested partition (the newer write wins). Default [false]
+    for forward compatibility; the HTTP read route opts in so the
+    cut-over to [By_url] does not appear to drop historical records.
+    No-op when [partition = Legacy]. *)
 
 val delete
   :  base_dir:string

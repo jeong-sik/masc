@@ -10,7 +10,12 @@ type register_histogram =
 type inc_counter =
   string -> ?labels:(string * string) list -> ?delta:float -> unit -> unit
 
-let register ~add ~register_histogram ~inc_counter:_ () =
+let register
+      ~(add : string -> string -> metric_kind -> unit)
+      ~(register_histogram : register_histogram)
+      ~inc_counter:(_ : inc_counter)
+      ()
+  =
   (* PR-0.2.C: pre-register cold/warm phase rows so /metrics shows a
      zero-value baseline before the first observation. The phase label
      is decided at observe-site in [Otel_dispatch_hook] based on a

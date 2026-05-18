@@ -10,7 +10,12 @@ type register_histogram =
 type inc_counter =
   string -> ?labels:(string * string) list -> ?delta:float -> unit -> unit
 
-let register ~add ~register_histogram:_ ~inc_counter () =
+let register
+      ~(add : string -> string -> metric_kind -> unit)
+      ~(register_histogram : register_histogram)
+      ~(inc_counter : inc_counter)
+      ()
+  =
   add
     Keeper_metrics.metric_keeper_alive_but_stuck_recovery_requests
     "#12838 Total alive-but-stuck recovery requests. Each increment means the supervisor \

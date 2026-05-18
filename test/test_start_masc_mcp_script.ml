@@ -139,6 +139,7 @@ capture="${FAKE_CAPTURE_FILE:?}"
   printf 'MASC_WS_PORT=%%s\n' "${MASC_WS_PORT:-}"
   printf 'MASC_WS_ENABLED=%%s\n' "${MASC_WS_ENABLED:-}"
   printf 'MASC_WEBRTC_ENABLED=%%s\n' "${MASC_WEBRTC_ENABLED:-}"
+  printf 'MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM=%%s\n' "${MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM:-}"
   printf 'ARGS=%%s\n' "$*"
 } >"$capture"
 exit 0
@@ -258,7 +259,33 @@ let test_explicit_env_overrides_repo_env_files () =
         (contains_substring captured
            ("MASC_BASE_PATH=" ^ canonical_path dir));
       check bool "explicit config dir preserved" true
-        (contains_substring captured ("MASC_CONFIG_DIR=" ^ Filename.concat dir "config")))
+        (contains_substring captured ("MASC_CONFIG_DIR=" ^ Filename.concat dir "config"));
+      check bool "Docker hotspot blocking default is exported as disabled" true
+        (contains_substring captured "MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM=0"))
+
+let test_fd_hotspot_headroom_override_is_preserved () =
+  with_temp_dir "start-masc-script" (fun dir ->
+      let script = Filename.concat dir "start-masc-mcp.sh" in
+      copy_script (script_path ()) script;
+      make_fake_eio_exe dir;
+      let capture = Filename.concat dir "captured-fd-hotspot.txt" in
+      let code, stdout, stderr =
+        run_shell ~cwd:dir
+          ~env:
+            [
+              ("FAKE_CAPTURE_FILE", capture);
+              ("MASC_BASE_PATH", dir);
+              ("MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM", "1024");
+            ]
+          (Printf.sprintf "%s --http --port 9973 --base-path %s"
+             (quote script) (quote dir))
+      in
+      if code <> 0 then
+        failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
+          stderr;
+      let captured = read_file capture in
+      check bool "explicit Docker hotspot headroom is preserved" true
+        (contains_substring captured "MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM=1024"))
 
 let test_realtime_transports_default_to_base_path_config_and_preserve_override ()
     =
@@ -783,6 +810,47 @@ let test_stale_dune_artifacts_are_cleaned_and_retried () =
           check bool "retry output preserved" true
             (contains_substring stderr "fake dune build recovered")))
 
+let test_stale_executable_requires_build_lock () =
+  with_temp_dir "start-masc-script-build-lock" (fun dir ->
+      with_temp_dir "start-masc-build-lock-fake-bin" (fun fake_bin ->
+          let script = Filename.concat dir "start-masc-mcp.sh" in
+          let lock_dir = Filename.concat dir "masc-build.lock" in
+          let capture = Filename.concat dir "captured-stale-lock.txt" in
+          let source = Filename.concat dir "bin/main_eio.ml" in
+          copy_script (script_path ()) script;
+          ignore (make_config_root dir);
+          make_fake_eio_exe dir;
+          mkdir_p (Filename.dirname source);
+          write_file source "let () = ()\n";
+          let future = Unix.time () +. 10.0 in
+          Unix.utimes source future future;
+          mkdir_p lock_dir;
+          write_file (Filename.concat lock_dir "pid") (string_of_int (Unix.getpid ()));
+          mkdir_p fake_bin;
+          write_executable (Filename.concat fake_bin "dune")
+            "#!/bin/sh\necho 'dune should not run while build lock is held' >&2\nexit 99\n";
+          let code, _stdout, stderr =
+            run_shell ~cwd:dir
+              ~env:
+                [
+                  ("FAKE_CAPTURE_FILE", capture);
+                  ("MASC_BASE_PATH", dir);
+                  ("MASC_BUILD_LOCK_PATH", lock_dir);
+                  ("PATH", fake_bin ^ ":" ^ Sys.getenv "PATH");
+                ]
+              (Printf.sprintf "%s --http --port 9972 --base-path %s"
+                 (quote script) (quote dir))
+          in
+          check bool "startup refuses stale executable when build lock is held" true
+            (code <> 0);
+          check bool "stale executable was not started" false
+            (Sys.file_exists capture);
+          check bool "lock holder is reported" true
+            (contains_substring stderr "Another MASC build in progress");
+          check bool "stale executable refusal is explicit" true
+            (contains_substring stderr
+               "refusing to continue with a stale or missing executable")))
+
 let test_stdio_skips_dashboard_build_and_http_preflight () =
   with_temp_dir "start-masc-script-stdio" (fun dir ->
       let script = Filename.concat dir "start-masc-mcp.sh" in
@@ -941,6 +1009,8 @@ let () =
         [
           test_case "explicit env overrides repo env files" `Quick
             test_explicit_env_overrides_repo_env_files;
+          test_case "FD hotspot headroom override is preserved" `Quick
+            test_fd_hotspot_headroom_override_is_preserved;
           test_case
             "realtime transports default to base path config and preserve override"
             `Quick
@@ -975,6 +1045,8 @@ let () =
             test_grpc_direct_banner_is_preserved_in_stderr;
           test_case "stale Dune artifacts are cleaned and retried" `Quick
             test_stale_dune_artifacts_are_cleaned_and_retried;
+          test_case "stale executable requires build lock" `Quick
+            test_stale_executable_requires_build_lock;
           test_case "stdio skips dashboard build and HTTP preflight" `Quick
             test_stdio_skips_dashboard_build_and_http_preflight;
           test_case "HTTP preflight waits for transient port conflict" `Quick

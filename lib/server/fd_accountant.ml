@@ -56,7 +56,9 @@ let _state_for_kind : (kind * slot_state) list =
 let state_of kind = List.assoc kind _state_for_kind
 
 (* Shared FD-pressure gate — when Keeper_fd_pressure.active () is true,
-   all top-level kinds serialize through one global slot. A semaphore keeps
+   all top-level kinds serialize through one global slot. Nested cross-kind
+   acquisitions skip this gate via [held_kinds] so a Docker-spawn path can
+   enter the sandbox-exec guard without deadlocking on itself. A semaphore keeps
    the long-lived Bg_task lifetime path on the same pressure gate as scoped
    tool calls while still allowing explicit release when the process closes. *)
 let _shared_pressure_gate = Eio.Semaphore.make 1

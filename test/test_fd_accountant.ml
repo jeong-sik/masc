@@ -152,7 +152,24 @@ let test_with_slot_reentrant_same_kind () =
       FA.with_slot ~kind:FA.Sandbox_exec (fun () ->
           check int "inner sandbox slot reuses outer slot" 1
             (kind_in_flight FA.Sandbox_exec))) ;
-  check int "sandbox slot released" 0 (kind_in_flight FA.Sandbox_exec)
+	  check int "sandbox slot released" 0 (kind_in_flight FA.Sandbox_exec)
+
+let test_with_slot_nested_cross_kind_under_fd_pressure () =
+  Eio_main.run @@ fun _env ->
+  Masc_mcp.Keeper_fd_pressure.reset_for_tests () ;
+  Fun.protect
+    ~finally:Masc_mcp.Keeper_fd_pressure.reset_for_tests
+    (fun () ->
+      Masc_mcp.Keeper_fd_pressure.note ~site:"fd_accountant_test"
+        ~detail:"too many open files" () ;
+      FA.with_slot ~kind:FA.Docker_spawn (fun () ->
+          check int "outer docker slot held" 1
+            (kind_in_flight FA.Docker_spawn) ;
+          FA.with_slot ~kind:FA.Sandbox_exec (fun () ->
+              check int "nested sandbox slot held" 1
+                (kind_in_flight FA.Sandbox_exec))) ;
+      check int "docker slot released" 0 (kind_in_flight FA.Docker_spawn) ;
+      check int "sandbox slot released" 0 (kind_in_flight FA.Sandbox_exec))
 
 let test_dated_jsonl_append_uses_log_writer_slot () =
   Eio_main.run @@ fun env ->
@@ -430,6 +447,8 @@ let () =
           test_case "cap bounds fan-in" `Quick test_cap_bounds_fan_in ;
           test_case "reentrant same-kind slot" `Quick
             test_with_slot_reentrant_same_kind ;
+          test_case "nested cross-kind slot under FD pressure" `Quick
+            test_with_slot_nested_cross_kind_under_fd_pressure ;
         ] ) ;
       ( "delegation",
         [

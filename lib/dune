@@ -191,6 +191,7 @@
   keeper_memory_llm_summary
   keeper_memory_recall
   keeper_status_bridge
+  keeper_hooks_oas_output_json
   keeper_tools_oas_markers
   autoresearch_codegen
   autoresearch_knowledge

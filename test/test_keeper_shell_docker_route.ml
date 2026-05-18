@@ -400,6 +400,10 @@ if [ \"$1\" = \"info\" ]; then\n\
   printf '[]\\n'\n\
   exit 0\n\
 fi\n\
+if [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
 if [ \"$1\" != \"run\" ]; then\n\
   printf 'unexpected docker invocation\\n' >&2\n\
   exit 2\n\
@@ -425,6 +429,10 @@ if [ -n \"$log_file\" ]; then\n\
   printf '%s\\n' \"$*\" >> \"$log_file\"\n\
 fi\n\
 if [ \"$1\" = \"info\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ]; then\n\
   printf '[]\\n'\n\
   exit 0\n\
 fi\n\
@@ -577,6 +585,10 @@ if [ \"$1\" = \"info\" ]; then\n\
   printf '[]\\n'\n\
   exit 0\n\
 fi\n\
+if [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
 if [ \"$1\" != \"run\" ]; then\n\
   printf 'unexpected docker invocation: %s\\n' \"$1\" >&2\n\
   exit 2\n\
@@ -591,6 +603,27 @@ while [ \"$#\" -gt 0 ]; do\n\
 done\n\
 printf 'stdout:%s\\n' \"$*\"\n\
 exit 0\n"
+
+let fake_docker_missing_image_script =
+  "#!/bin/sh\n\
+log_file=${KEEPER_DOCKER_LOG:-}\n\
+if [ -n \"$log_file\" ]; then\n\
+  printf '%s\\n' \"$*\" >> \"$log_file\"\n\
+fi\n\
+if [ \"$1\" = \"info\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ]; then\n\
+  printf 'Error: No such image: %s\\n' \"$3\" >&2\n\
+  exit 1\n\
+fi\n\
+if [ \"$1\" = \"run\" ]; then\n\
+  printf 'docker run should not execute when image inspect fails\\n' >&2\n\
+  exit 2\n\
+fi\n\
+printf 'unexpected docker invocation: %s\\n' \"$1\" >&2\n\
+exit 2\n"
 
 let test_bash_git_creds_routes_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
@@ -991,6 +1024,38 @@ let docker_run_line log_path =
   |> function
   | Some line -> line
   | None -> Alcotest.fail "expected docker run log line"
+
+let test_docker_shell_missing_image_fails_before_run () =
+  with_fake_docker fake_docker_missing_image_script @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "missing:test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  match
+    Keeper_shell_docker.run_docker_shell_command_with_status
+      ~config
+      ~meta
+      ~cwd:playground
+      ~timeout_sec:5.0
+      ~cmd:"pwd"
+      ~git_creds_enabled:false
+      ~network_mode:Keeper_types.Network_none
+  with
+  | Ok _ -> Alcotest.fail "expected missing image preflight error"
+  | Error msg ->
+    Alcotest.(check bool) "structured missing image error" true
+      (contains_substring msg "sandbox_image_missing");
+    Alcotest.(check bool) "next action mentions build script" true
+      (contains_substring msg "scripts/build-keeper-sandbox-image.sh");
+    let log = read_file log_path in
+    Alcotest.(check bool) "image inspect attempted" true
+      (contains_substring log "image inspect missing:test");
+    Alcotest.(check bool) "docker run skipped" false
+      (contains_substring log "\nrun ")
 
 let test_docker_shell_mounts_masc_config_runtime_paths () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
@@ -1778,6 +1843,8 @@ let () =
           Alcotest.test_case
             "docker shell mounts MASC config runtime paths"
             `Quick test_docker_shell_mounts_masc_config_runtime_paths;
+          Alcotest.test_case "docker shell missing image fails before run" `Quick
+            test_docker_shell_missing_image_fails_before_run;
           Alcotest.test_case
             "missing playground bind source blocks before docker"
             `Quick test_bash_missing_playground_blocks_before_docker;

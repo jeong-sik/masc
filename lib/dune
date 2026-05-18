@@ -35,6 +35,7 @@
  prometheus_process
  prometheus_identity_metric_names
  prometheus_transport_metric_names
+ prometheus_core_metric_names
  keeper_tool_call_log_context
  dashboard_http_keeper_metrics
  dashboard_http_keeper_detail

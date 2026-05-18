@@ -222,7 +222,10 @@ function PhaseSparkline({
 }
 
 /** Human-readable descriptions for sub-FSM states.
-    Shown as native title tooltips on hover. */
+ *  Keys match the wire format from `keeper_composite_observer.ml` exactly:
+ *    KSM phase via `phase_to_string` (lib/keeper/keeper_state_machine.ml:21-35) — lowercase + snake_case.
+ *    KTC/KDP/KCL/KMC via the per-axis to_string fns (lib/keeper/keeper_composite_observer.ml:141-201) — lowercase.
+ *  Shown as native title tooltips on hover. */
 const STATE_DESCRIPTIONS: Record<string, string> = {
   // KTC (Turn Cycle)
   idle: '다음 heartbeat cycle 까지 턴 시작 대기 중',
@@ -242,25 +245,20 @@ const STATE_DESCRIPTIONS: Record<string, string> = {
   exhausted: 'cascade 의 모든 provider 실패',
   // KMC (Compaction)
   accumulating: '메시지 수집 중; 컨텍스트 아직 가득 차지 않음',
-  // KSM (Phase) — used in Hero
-  Running: '키퍼가 활성 상태로 턴 실행 중',
-  Overflowed: '프롬프트가 provider 컨텍스트 윈도우 초과; 복구 대기',
-  Compacting: '토큰 예산 회수를 위해 컨텍스트 압축 중',
-  HandingOff: '다음 generation 으로 상태 이관 중',
-  Failing: '에러 발생, 재시도 또는 복구 진행',
-  Draining: '종료 전 현재 작업 마무리 중',
-  Stable: '활성 턴 사이클 밖; idle terminal 또는 비활성 parent phase 가 여기로 collapse',
-  running: '원시 키퍼 phase: runtime 이 활성 상태로 턴 실행 중',
-  failing: '원시 키퍼 phase: 복구 / 재시도 처리 중',
-  overflowed: '원시 키퍼 phase: provider 컨텍스트 overflow 압축 또는 clear 필요',
-  handing_off: '원시 키퍼 phase: 상태 handoff 진행 중',
-  draining: '원시 키퍼 phase: 종료 진행 중',
-  offline: '원시 키퍼 phase: 키퍼가 아직 시작되지 않음',
-  paused: '원시 키퍼 phase: 운영자 pause 또는 재시도 한계',
-  stopped: '원시 키퍼 phase: clean terminal stop',
-  crashed: '원시 키퍼 phase: crash, 재시작 또는 조사 필요',
-  restarting: '원시 키퍼 phase: supervisor 재시작 흐름 활성',
-  dead: '원시 키퍼 phase: 재시작 예산 소진',
+  // KSM (Phase) — wire format is lowercase per phase_to_string.
+  // 13-state set matches `Keeper_state_machine.phase` ctors.
+  offline: '키퍼가 아직 시작되지 않음',
+  running: '키퍼가 활성 상태로 턴 실행 중',
+  failing: '에러 발생, 재시도 또는 복구 진행',
+  overflowed: '프롬프트가 provider 컨텍스트 윈도우 초과; 복구 대기',
+  handing_off: '다음 generation 으로 상태 이관 중',
+  draining: '종료 전 현재 작업 마무리 중',
+  paused: '운영자 pause 또는 재시도 한계',
+  stopped: 'clean terminal stop',
+  crashed: 'crash 후 재시작 또는 조사 필요',
+  restarting: 'supervisor 재시작 흐름 활성',
+  dead: '재시작 예산 소진',
+  zombie: 'terminal failure latched — 운영자 개입 필요',
 }
 
 export function HeroPhase({
@@ -287,17 +285,33 @@ export function HeroPhase({
     return undefined
   }, [snapshot.phase])
 
+  // Wire format is lowercase (phase_to_string in keeper_state_machine.ml).
+  // 12 emitted phases get an explicit tone; unmapped falls through to neutral accent.
   const phaseColor: Record<string, string> = {
-    Running: 'text-[var(--color-status-ok)]',
-    Overflowed: 'text-[var(--color-status-warn)]',
-    Compacting: 'text-[var(--color-status-warn)]',
-    HandingOff: 'text-[var(--color-accent-fg)]',
-    Failing: 'text-[var(--bad-light)]',
-    Stable: 'text-[var(--color-fg-disabled)]',
+    running: 'text-[var(--color-status-ok)]',
+    offline: 'text-[var(--color-fg-disabled)]',
+    stopped: 'text-[var(--color-fg-disabled)]',
+    overflowed: 'text-[var(--color-status-warn)]',
+    compacting: 'text-[var(--color-status-warn)]',
+    handing_off: 'text-[var(--color-accent-fg)]',
+    failing: 'text-[var(--bad-light)]',
+    crashed: 'text-[var(--bad-light)]',
+    dead: 'text-[var(--bad-light)]',
+    zombie: 'text-[var(--bad-light)]',
+    draining: 'text-[var(--color-status-warn)]',
+    paused: 'text-[var(--color-status-warn)]',
+    restarting: 'text-[var(--color-status-warn)]',
   }
   const color = phaseColor[snapshot.phase] ?? 'text-[var(--color-accent-fg)]'
   const heldFor = phaseSince != null ? fmtDuration(Math.max(0, now - phaseSince)) : null
-  const collapsedSource = snapshot.phase === 'Stable' ? snapshot.collapsed_from : null
+  // `collapsed_from` is set by the backend only when phase has collapsed onto
+  // a parent projection (e.g. a 7-phase composite Stable). The backend
+  // currently emits the raw 13-state phase via `phase_to_string` and does
+  // not emit a 'Stable' carrier (see KeeperCompositeLifecycle.tla:143 spec
+  // vs lib/keeper/keeper_composite_observer.ml:628 emit). Surface
+  // `collapsed_from` whenever it is present rather than gating on a phase
+  // string that the backend never produces.
+  const collapsedSource = snapshot.collapsed_from ?? null
   const collapsedSourceLabel = collapsedSource
     ? `${displayState(collapsedSource)} (${collapsedSource})`
     : null

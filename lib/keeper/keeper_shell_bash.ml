@@ -759,19 +759,105 @@ let safe_cd_read_fallback_of_command cmd =
       | Some cwd_override, Some rewrite -> Some { rewrite with cwd_override = Some cwd_override }
       | _ -> None
 
+let split_unquoted_single_pipeline cmd =
+  let len = String.length cmd in
+  let rec loop quote_state escaped pipe_pos i =
+    if i >= len
+    then pipe_pos
+    else if escaped
+    then loop quote_state false pipe_pos (i + 1)
+    else (
+      match quote_state, cmd.[i] with
+      | Single_quote, '\'' -> loop No_quote false pipe_pos (i + 1)
+      | Single_quote, _ -> loop Single_quote false pipe_pos (i + 1)
+      | Double_quote, '"' -> loop No_quote false pipe_pos (i + 1)
+      | Double_quote, '\\' -> loop Double_quote true pipe_pos (i + 1)
+      | Double_quote, _ -> loop Double_quote false pipe_pos (i + 1)
+      | No_quote, '\'' -> loop Single_quote false pipe_pos (i + 1)
+      | No_quote, '"' -> loop Double_quote false pipe_pos (i + 1)
+      | No_quote, '\\' -> loop No_quote true pipe_pos (i + 1)
+      | No_quote, '|' when i + 1 < len && Char.equal cmd.[i + 1] '|' ->
+        None
+      | No_quote, '|' ->
+        (match pipe_pos with
+         | None -> loop No_quote false (Some i) (i + 1)
+         | Some _ -> None)
+      | No_quote, _ -> loop No_quote false pipe_pos (i + 1))
+  in
+  match loop No_quote false None 0 with
+  | None -> None
+  | Some split ->
+    let left = String.sub cmd 0 split |> String.trim in
+    let right =
+      String.sub cmd (split + 1) (String.length cmd - split - 1)
+      |> String.trim
+    in
+    if String.equal left "" || String.equal right "" then None else Some (left, right)
+
+let is_positive_digits text =
+  let len = String.length text in
+  len > 0
+  && String.for_all (function '0' .. '9' -> true | _ -> false) text
+  && not (String.for_all (Char.equal '0') text)
+
+let literal_head_limit_is_safe text =
+  match shell_words_with_boundaries text |> strip_command_wrappers with
+  | bin :: args when String.equal (command_name bin.text) "head" ->
+    let head_arg_is_safe = function
+      | [] -> true
+      | [ arg ]
+        when String.length arg.text > 1
+             && Char.equal arg.text.[0] '-'
+             && is_positive_digits
+                  (String.sub arg.text 1 (String.length arg.text - 1)) ->
+        true
+      | [ flag; n ]
+        when (String.equal flag.text "-n" || String.equal flag.text "--lines")
+             && is_positive_digits n.text ->
+        true
+      | [ arg ] when String.starts_with ~prefix:"--lines=" arg.text ->
+        let prefix = "--lines=" in
+        is_positive_digits
+          (String.sub arg.text (String.length prefix)
+             (String.length arg.text - String.length prefix))
+      | _ -> false
+    in
+    head_arg_is_safe args
+  | _ -> false
+
+let safe_read_head_pipeline_fallback_of_command cmd =
+  match split_unquoted_single_pipeline cmd with
+  | None -> None
+  | Some (primary, head_stage) ->
+    if not (literal_head_limit_is_safe head_stage)
+    then None
+    else
+      let primary_rewrite =
+        match safe_read_primary_rewrite primary with
+        | Some _ as rewrite -> rewrite
+        | None ->
+          (match strip_trailing_dev_null_redirect primary with
+           | Some stripped -> safe_read_primary_rewrite stripped
+           | None -> safe_cd_read_fallback_of_command primary)
+      in
+      primary_rewrite
+
 let safe_read_fallback_of_command ~write_enabled:_ ~stderr_dev_null_stripped cmd =
   match safe_read_or_echo_fallback_of_command cmd with
   | Some _ as rewrite -> rewrite
   | None ->
-    (match safe_cd_read_fallback_of_command cmd with
+    (match safe_read_head_pipeline_fallback_of_command cmd with
      | Some _ as rewrite -> rewrite
      | None ->
-       (match strip_trailing_dev_null_redirect cmd with
-        | Some primary_cmd -> safe_read_primary_rewrite primary_cmd
+       (match safe_cd_read_fallback_of_command cmd with
+        | Some _ as rewrite -> rewrite
         | None ->
-          if stderr_dev_null_stripped
-          then safe_read_primary_rewrite cmd
-          else None))
+          (match strip_trailing_dev_null_redirect cmd with
+           | Some primary_cmd -> safe_read_primary_rewrite primary_cmd
+           | None ->
+             if stderr_dev_null_stripped
+             then safe_read_primary_rewrite cmd
+             else None)))
 
 let shape_block_allowed_by_active_validator ~write_enabled cmd = function
   | Pipe_or_redirect when write_enabled ->

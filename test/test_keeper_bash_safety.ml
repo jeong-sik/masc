@@ -1363,14 +1363,19 @@ let test_keeper_bash_echo_task_api_url_is_not_http_probe () =
   Alcotest.(check (option string)) "not treated as task HTTP probe" None
     (parse_error_field raw)
 
-let test_keeper_bash_search_pipeline_hint_uses_structured_rg () =
+let test_keeper_bash_safe_head_pipeline_executes_cd_scoped_grep () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Keeper_registry.clear ();
   let meta = make_readonly_meta "search-pipeline" in
   let playground = Filename.concat base_path (playground_path_of meta.name) in
-  ensure_dir playground;
+  let lib_dir = Filename.concat playground "repos/masc-mcp/lib" in
+  ensure_dir lib_dir;
+  ignore
+    (Fs_compat.save_file_atomic
+       (Filename.concat lib_dir "exec_semantic.ml")
+       "let exec_semantic_marker = true\n");
   let raw =
     Keeper_exec_shell.handle_keeper_bash
       ~turn_sandbox_factory:None
@@ -1386,24 +1391,35 @@ let test_keeper_bash_search_pipeline_hint_uses_structured_rg () =
            ])
       ()
   in
-  Alcotest.(check (option string)) "search pipeline is command-shape blocked"
-    (Some "keeper_bash_command_shape_blocked") (parse_error_field raw);
-  (match parse_hint raw with
-   | Some hint ->
-     Alcotest.(check bool) "hint points to structured rg" true
-       (String_util.contains_substring hint "keeper_shell op=rg");
-     Alcotest.(check bool) "hint mentions cwd" true
-       (String_util.contains_substring hint "cwd")
-   | None -> Alcotest.fail ("expected hint, got: " ^ raw))
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "safe grep | head succeeds" true
+    (json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check bool) "grep output is preserved" true
+    (json
+     |> Json.member "output"
+     |> Json.to_string
+     |> fun output -> String_util.contains_substring output "exec_semantic_marker")
 
-let test_keeper_bash_find_pipeline_hint_uses_structured_find () =
+let test_keeper_bash_safe_head_pipeline_executes_scoped_find () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Keeper_registry.clear ();
   let meta = make_readonly_meta "find-pipeline" in
   let playground = Filename.concat base_path (playground_path_of meta.name) in
-  ensure_dir playground;
+  let worktree =
+    Filename.concat playground
+      "repos/masc-mcp/.worktrees/keeper-umberto-agent-task-343"
+  in
+  ensure_dir worktree;
+  ignore
+    (Fs_compat.save_file_atomic
+       (Filename.concat worktree "needle.ml")
+       "let needle = true\n");
+  ignore
+    (Fs_compat.save_file_atomic
+       (Filename.concat worktree "needle.mli")
+       "val needle : bool\n");
   let raw =
     Keeper_exec_shell.handle_keeper_bash
       ~turn_sandbox_factory:None
@@ -1419,24 +1435,14 @@ let test_keeper_bash_find_pipeline_hint_uses_structured_find () =
            ])
       ()
   in
-  Alcotest.(check (option string)) "find pipeline is command-shape blocked"
-    (Some "keeper_bash_command_shape_blocked") (parse_error_field raw);
-  (match parse_hint raw with
-   | Some hint ->
-     Alcotest.(check bool) "hint points to structured find" true
-       (String_util.contains_substring hint "keeper_shell op=find");
-     Alcotest.(check bool) "hint names pattern" true
-       (String_util.contains_substring hint "pattern");
-     Alcotest.(check bool) "hint names limit" true
-       (String_util.contains_substring hint "limit")
-   | None -> Alcotest.fail ("expected hint, got: " ^ raw));
-  let alternatives = String.concat "\n" (parse_alternatives raw) in
-  Alcotest.(check bool) "alternatives include ml pattern" true
-    (String_util.contains_substring alternatives "pattern='*.ml'");
-  Alcotest.(check bool) "alternatives include mli pattern" true
-    (String_util.contains_substring alternatives "pattern='*.mli'");
-  Alcotest.(check bool) "alternatives carry head limit" true
-    (String_util.contains_substring alternatives "limit=30")
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "safe find | head succeeds" true
+    (json |> Json.member "ok" |> Json.to_bool);
+  let output = json |> Json.member "output" |> Json.to_string in
+  Alcotest.(check bool) "find output includes ml file" true
+    (String_util.contains_substring output "needle.ml");
+  Alcotest.(check bool) "find output includes mli file" true
+    (String_util.contains_substring output "needle.mli")
 
 let test_keeper_shell_find_accepts_name_alias () =
   with_eio_fs @@ fun () ->
@@ -1864,10 +1870,10 @@ let () =
         test_keeper_bash_task_state_http_probe_uses_task_tools;
       Alcotest.test_case "echo task API URL is normal output" `Quick
         test_keeper_bash_echo_task_api_url_is_not_http_probe;
-      Alcotest.test_case "search pipeline hint uses structured rg" `Quick
-        test_keeper_bash_search_pipeline_hint_uses_structured_rg;
-      Alcotest.test_case "find pipeline hint uses structured find" `Quick
-        test_keeper_bash_find_pipeline_hint_uses_structured_find;
+      Alcotest.test_case "safe head pipeline executes cd-scoped grep" `Quick
+        test_keeper_bash_safe_head_pipeline_executes_cd_scoped_grep;
+      Alcotest.test_case "safe head pipeline executes scoped find" `Quick
+        test_keeper_bash_safe_head_pipeline_executes_scoped_find;
       Alcotest.test_case "find accepts name alias" `Quick
         test_keeper_shell_find_accepts_name_alias;
       Alcotest.test_case "doubled playground prefix auto-recovers" `Quick

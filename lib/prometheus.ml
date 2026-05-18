@@ -250,19 +250,11 @@ let metric_mention_dedup_decisions_total = "masc_mention_dedup_decisions_total"
 (** {1 Built-in Metrics} *)
 
 let init () =
-  (* Module-level init runs before Eio context exists.
-     Single-threaded at load time — bypass mutex. *)
   let add name help metric_kind =
-    let metric_type =
-      match metric_kind with
-      | `Counter -> Counter
-      | `Gauge -> Gauge
-      | `Histogram -> Histogram
-    in
-    let key = metric_key name [] in
-    if not (Hashtbl.mem metrics key)
-    then
-      Hashtbl.add metrics key { name; help; metric_type; value = 0.0; labels = [] }
+    match metric_kind with
+    | `Counter -> register_counter ~name ~help ()
+    | `Gauge -> register_gauge ~name ~help ()
+    | `Histogram -> register_histogram ~name ~help ()
   in
   Prometheus_builtin_metrics.register
     ~add
@@ -364,25 +356,15 @@ let to_prometheus_text () =
   update_fd_gauges ();
   update_fd_accountant_gauges ();
   update_pool_metrics_gauges ();
-  (* Snapshot (name, help, metric_type, value, labels) under the mutex so
-     the render phase sees a consistent view even when concurrent fibers
-     are still updating [metrics].  [m.value] is mutable so we copy it
-     here rather than holding the lock for the full render. *)
-  let snapshot =
-    with_lock (fun () ->
-      Hashtbl.fold
-        (fun _ (m : metric) acc ->
-           Prometheus_text.metric
-             ~name:m.name
-             ~help:m.help
-             ~metric_type:(text_metric_type m.metric_type)
-             ~value:m.value
-             ~labels:m.labels
-           :: acc)
-        metrics
-        [])
-  in
-  Prometheus_text.render snapshot
+  Prometheus_store.snapshot ()
+  |> List.map (fun (m : metric) ->
+    Prometheus_text.metric
+      ~name:m.name
+      ~help:m.help
+      ~metric_type:(text_metric_type m.metric_type)
+      ~value:m.value
+      ~labels:m.labels)
+  |> Prometheus_text.render
 ;;
 
 (** {1 Convenience Functions} *)

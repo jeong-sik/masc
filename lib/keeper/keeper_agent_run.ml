@@ -33,11 +33,54 @@ let cdal_task_id_for_verdict ~(current_task_id : string option)
       tool_calls
 ;;
 
+let keeper_tool_names_for_outcome
+      ~(allowed_tool_names : string list)
+      ~(tool_calls : tool_call_detail list)
+      ~(outcome : string)
+  : string list
+  =
+  let observed_tool_names =
+    tool_calls
+    |> List.rev
+    |> List.filter_map (fun (detail : tool_call_detail) ->
+      if String.equal detail.outcome outcome then Some detail.tool_name else None)
+  in
+  Keeper_tool_disclosure.final_keeper_tool_names
+    ~reported_tool_names:[]
+    ~observed_tool_names
+    ~allowed_tool_names
+;;
+
+let progress_keeper_tool_names_for_contract
+      ~(allowed_tool_names : string list)
+      ~(actual_keeper_tool_names : string list)
+      ~(tool_calls : tool_call_detail list)
+  : string list
+  =
+  match tool_calls with
+  | [] -> actual_keeper_tool_names
+  | _ :: _ -> keeper_tool_names_for_outcome ~allowed_tool_names ~tool_calls ~outcome:"ok"
+;;
+
+let no_progress_success_tool_names_for_contract
+      ~(allowed_tool_names : string list)
+      ~(tool_calls : tool_call_detail list)
+  : string list
+  =
+  keeper_tool_names_for_outcome ~allowed_tool_names ~tool_calls ~outcome:"ok_no_progress"
+;;
+
 module For_testing = struct
   let sse_event_progress_kind = sse_event_progress_kind
   let registry_progress_on_event = registry_progress_on_event
   let select_cdal_proof = select_cdal_proof
   let cdal_task_id_for_verdict = cdal_task_id_for_verdict
+  let progress_keeper_tool_names_for_contract =
+    progress_keeper_tool_names_for_contract
+  ;;
+  let no_progress_success_tool_names_for_contract =
+    no_progress_success_tool_names_for_contract
+  ;;
 end
 let should_require_provider_tool_choice_support =
   Turn_helpers.should_require_provider_tool_choice_support
@@ -931,6 +974,17 @@ let run_turn
                        ~allowed_tool_names:acc.requested_tool_names_seen
                    in
                    actual_keeper_tool_names_ref := actual_keeper_tool_names;
+                   let progress_keeper_tool_names =
+                     progress_keeper_tool_names_for_contract
+                       ~allowed_tool_names:acc.requested_tool_names_seen
+                       ~actual_keeper_tool_names
+                       ~tool_calls:acc.tool_calls
+                   in
+                   let no_progress_success_tool_names =
+                     no_progress_success_tool_names_for_contract
+                       ~allowed_tool_names:acc.requested_tool_names_seen
+                       ~tool_calls:acc.tool_calls
+                   in
                    let usage = Keeper_exec_context.usage_of_response result.response in
                    let ctx_composition =
                      build_ctx_composition_metrics
@@ -965,10 +1019,22 @@ let run_turn
                      || Keeper_contract_classifier.is_actionable actionable_signal_kind
                    in
                    let actionable_tool_contract_violation_reason =
-                     Keeper_tool_disclosure.actionable_tool_contract_violation_reason
-                       ~claim_context_allowed:(not had_owned_active_task_at_turn_start)
-                       ~actionable_signal_context
-                       ~tool_names:actual_keeper_tool_names
+                     if
+                       actionable_signal_context
+                       && progress_keeper_tool_names = []
+                       && no_progress_success_tool_names <> []
+                     then
+                       Some
+                         (Printf.sprintf
+                            "actionable keeper signal was present, but the model only \
+                             used idempotent setup tools that made no execution \
+                             progress: %s"
+                            (String.concat ", " no_progress_success_tool_names))
+                     else
+                       Keeper_tool_disclosure.actionable_tool_contract_violation_reason
+                         ~claim_context_allowed:(not had_owned_active_task_at_turn_start)
+                         ~actionable_signal_context
+                         ~tool_names:progress_keeper_tool_names
                    in
                    let contract_violation_error reason =
                      Agent_sdk.Error.Agent
@@ -984,7 +1050,7 @@ let run_turn
                        ~missing_visible_required:
                          acc.tool_surface.missing_required_tool_names
                        ~had_owned_active_task_at_turn_start
-                       ~actual_keeper_tool_names
+                       ~actual_keeper_tool_names:progress_keeper_tool_names
                    in
                    (* Required-tool turns are filtered onto providers that declare
             tool support plus tool_choice support. If a text-only response
@@ -1006,6 +1072,8 @@ let run_turn
                            : Keeper_execution_receipt.tool_contract_result =
                          if actual_keeper_tool_names = []
                          then Contract_missing_required_tool_use
+                         else if progress_keeper_tool_names = []
+                         then Contract_needs_execution_progress
                          else tool_contract_status ()
                        in
                        acc.receipt_tool_contract_result <- contract_status;

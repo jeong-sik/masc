@@ -34,6 +34,7 @@ val is_git_clone : string -> bool
 val has_git_marker : string -> bool
 val same_realpath : String.t -> String.t -> bool
 val is_usable_git_worktree : String.t -> bool
+val current_worktree_branch : String.t -> String.t option
 val run_git_in_clone :
   string -> string list -> Unix.process_status * string
 

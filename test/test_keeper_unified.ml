@@ -9492,6 +9492,49 @@ let test_claim_contract_result_counts_initial_claim_as_execution () =
     (result ~required:[ "keeper_task_done" ] [ "keeper_task_claim" ])
 ;;
 
+let tool_call_detail ?(outcome = "ok") tool_name : KAR.tool_call_detail =
+  { tool_name
+  ; provider = "test"
+  ; outcome
+  ; latency_ms = 1.0
+  ; task_id = None
+  ; route_evidence = None
+  }
+;;
+
+let test_contract_progress_filters_no_progress_tool_results () =
+  let allowed_tool_names = [ "masc_worktree_create"; "keeper_bash" ] in
+  let no_progress_only =
+    [ tool_call_detail ~outcome:"ok_no_progress" "masc_worktree_create" ]
+  in
+  check
+    (list string)
+    "already-existing worktree is not contract progress"
+    []
+    (KAR.For_testing.progress_keeper_tool_names_for_contract
+       ~allowed_tool_names
+       ~actual_keeper_tool_names:[ "masc_worktree_create" ]
+       ~tool_calls:no_progress_only);
+  check
+    (list string)
+    "already-existing worktree remains visible as no-progress success"
+    [ "masc_worktree_create" ]
+    (KAR.For_testing.no_progress_success_tool_names_for_contract
+       ~allowed_tool_names
+       ~tool_calls:no_progress_only);
+  check
+    (list string)
+    "follow-up shell keeps the turn as progress"
+    [ "keeper_bash" ]
+    (KAR.For_testing.progress_keeper_tool_names_for_contract
+       ~allowed_tool_names
+       ~actual_keeper_tool_names:[ "masc_worktree_create"; "keeper_bash" ]
+       ~tool_calls:
+         [ tool_call_detail ~outcome:"ok_no_progress" "masc_worktree_create"
+         ; tool_call_detail "keeper_bash"
+         ])
+;;
+
 let test_actionable_tool_contract_allows_execution_tools () =
   check
     (option string)
@@ -9501,6 +9544,43 @@ let test_actionable_tool_contract_allows_execution_tools () =
        ~claim_context_allowed:true
        ~actionable_signal_context:true
        ~tool_names:[ "keeper_bash"; "masc_status" ]);
+  check
+    (option string)
+    "board coordination can satisfy non-owned board signal"
+    None
+    (KTD.actionable_tool_contract_violation_reason
+       ~claim_context_allowed:true
+       ~actionable_signal_context:true
+       ~tool_names:[ "keeper_board_comment" ]);
+  (match
+     KTD.actionable_tool_contract_violation_reason
+       ~claim_context_allowed:false
+       ~actionable_signal_context:true
+       ~tool_names:[ "keeper_board_post"; "keeper_tasks_list" ]
+   with
+   | Some reason ->
+     check
+       bool
+       "owned task board-only turn requires execution progress"
+       true
+       (contains_substring reason "without execution progress")
+   | None -> fail "expected owned task board-only turn to violate contract");
+  check
+    (option string)
+    "worktree creation satisfies owned task progress"
+    None
+    (KTD.actionable_tool_contract_violation_reason
+       ~claim_context_allowed:false
+       ~actionable_signal_context:true
+       ~tool_names:[ "masc_worktree_create" ]);
+  check
+    (option string)
+    "PR creation satisfies owned task progress"
+    None
+    (KTD.actionable_tool_contract_violation_reason
+       ~claim_context_allowed:false
+       ~actionable_signal_context:true
+       ~tool_names:[ "keeper_pr_create" ]);
   check
     (option string)
     "non-actionable no-op remains allowed"
@@ -9730,7 +9810,21 @@ let test_required_tool_satisfaction_accepts_mutating_tools () =
     true
     (satisfies_required_tool
        "keeper_shell"
-       (`Assoc [ "op", `String "gh"; "cmd", `String "pr comment 123 --body ok" ]))
+       (`Assoc [ "op", `String "gh"; "cmd", `String "pr comment 123 --body ok" ]));
+  check
+    bool
+    "fresh worktree create result is material progress"
+    true
+    (KTD.tool_result_has_material_progress
+       ~tool_name:"masc_worktree_create"
+       ~output_text:"Worktree created:\n  Path: /tmp/wt");
+  check
+    bool
+    "already-existing worktree result is idempotent no-progress"
+    false
+    (KTD.tool_result_has_material_progress
+       ~tool_name:"masc_worktree_create"
+       ~output_text:"Worktree already exists:\n  Path: /tmp/wt")
 ;;
 
 let test_explicit_required_tool_satisfaction_accepts_named_passive_tool () =
@@ -11546,6 +11640,15 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
        ~satisfied_tool_names:
          (Surface.satisfied_required_tool_names_of_outcomes
             [ "keeper_pr_review_comment", "ok" ]));
+  check
+    (list string)
+    "idempotent no-progress success stays outstanding"
+    [ "masc_worktree_create" ]
+    (Surface.outstanding_required_tool_names
+       ~required_tool_names:[ "masc_worktree_create" ]
+       ~satisfied_tool_names:
+         (Surface.satisfied_required_tool_names_of_outcomes
+            [ "masc_worktree_create", "ok_no_progress" ]));
   (match
      Surface.preferred_tool_choice_for_required_tool_names
        ~required_tool_names:[ "keeper_board_post" ]
@@ -12656,6 +12759,10 @@ let () =
             "initial claim counts as contract progress"
             `Quick
             test_claim_contract_result_counts_initial_claim_as_execution
+        ; test_case
+            "contract progress filters no-progress tool results"
+            `Quick
+            test_contract_progress_filters_no_progress_tool_results
         ; test_case
             "actionable signal allows execution tools"
             `Quick

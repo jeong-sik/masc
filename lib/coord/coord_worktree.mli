@@ -125,6 +125,9 @@ val same_realpath : String.t -> String.t -> bool
 val is_usable_git_worktree : String.t -> bool
 (** [true] when [path] is a linked git worktree whose checkout is intact. *)
 
+val current_worktree_branch : String.t -> String.t option
+(** Current branch of [path], or [None] when it cannot be resolved. *)
+
 val run_git_in_clone :
   string -> string list -> Unix.process_status * string
 (** Run [git <args>] inside the clone at [path] (no [-C] when path is the

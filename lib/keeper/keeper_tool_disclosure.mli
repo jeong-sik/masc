@@ -49,6 +49,15 @@ val final_keeper_tool_names
   -> allowed_tool_names:string list
   -> string list
 
+(** [true] when a successful tool result should count as material keeper
+    progress. Idempotent setup confirmations such as an already-existing task
+    worktree remain successful tool calls, but they do not satisfy execution
+    progress contracts by themselves. *)
+val tool_result_has_material_progress
+  :  tool_name:string
+  -> output_text:string
+  -> bool
+
 (** Names called by the model that are NOT on the keeper's allowed
     surface (deduped, order preserving). [allowed_tool_names] is
     canonicalized before comparison so runtime-reported internal

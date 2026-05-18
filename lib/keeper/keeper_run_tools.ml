@@ -1384,6 +1384,16 @@ let prepare_agent_setup
               ~input
               ~output_text
           in
+          let outcome =
+            if not success
+            then "error"
+            else if
+              Keeper_tool_disclosure.tool_result_has_material_progress
+                ~tool_name
+                ~output_text
+            then "ok"
+            else "ok_no_progress"
+          in
           let task_id = task_id_scope_of_tool_input ~tool_name input in
           (match Keeper_registry.get ~base_path:config.base_path meta.name with
            | Some entry ->
@@ -1393,7 +1403,7 @@ let prepare_agent_setup
           acc.tool_calls
           <- { tool_name
              ; provider
-             ; outcome = (if success then "ok" else "error")
+             ; outcome
              ; latency_ms = duration_ms
              ; task_id
              ; route_evidence

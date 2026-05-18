@@ -45,4 +45,25 @@ describe('KeeperRuntimeAlertStrip', () => {
     expect(container.textContent).toContain('keeper_task_done')
     expect(container.textContent).toContain('누락')
   })
+
+  it('separates paused state from runtime blocker evidence', () => {
+    const { container } = render(h(KeeperRuntimeAlertStrip, {
+      keeper: keeper({
+        paused: true,
+        keepalive_running: true,
+        needs_attention: true,
+        attention_reason: 'paused',
+        next_human_action: 'inspect_blocker_before_resume',
+        runtime_blocker_class: 'oas_timeout_budget',
+        runtime_blocker_summary: 'OAS budget timeout fired before the keeper hard timeout.',
+      }),
+    }))
+
+    expect(container.textContent).toContain('일시정지')
+    expect(container.textContent).toContain('일시정지 원인')
+    expect(container.textContent).toContain('OAS budget timeout fired before the keeper hard timeout.')
+    expect(container.textContent).toContain('원인 확인 후 재개')
+    expect(container.textContent).not.toContain('런타임 차단')
+    expect(container.textContent).not.toContain('주의 사유 · paused')
+  })
 })

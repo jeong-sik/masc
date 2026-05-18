@@ -560,6 +560,8 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
           typeof row.proactive_enabled === 'boolean' ? row.proactive_enabled : undefined,
         proactive_idle_sec: asNumber(row.proactive_idle_sec),
         proactive_cooldown_sec: asNumber(row.proactive_cooldown_sec),
+        pause_state: asString(row.pause_state) ?? null,
+        runtime_blocker_state: asString(row.runtime_blocker_state) ?? null,
         runtime_blocker_class: runtimeBlockerClass,
         runtime_blocker_summary: runtimeBlockerSummary,
         runtime_blocker_continue_gate:

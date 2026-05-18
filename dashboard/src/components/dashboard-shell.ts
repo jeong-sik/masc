@@ -194,6 +194,7 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
     ?? fleet?.executable_reaction_capacity_count
     ?? runningFibers
   const pausedKeepers = fleet?.paused_keeper_count ?? paused
+  const pausedAutobootKeepers = fleet?.paused_autoboot_enabled_keeper_count ?? null
   const targetCapacity = fleet?.target_reaction_capacity_count ?? fleet?.autoboot_enabled_keeper_count ?? null
   const bootableKeepers = fleet?.bootable_keeper_count ?? null
   const minimumRunning = fleet?.minimum_running_fibers ?? null
@@ -204,12 +205,36 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
     targetCapacity != null && runningFibers != null ? Math.max(0, targetCapacity - runningFibers) : null
   )
   const fdPressureBlocked = fdPressureBlockedKeepers(fleetSafety)
+  const pausedOnlyNoExecutable =
+    executableFibers === 0
+    && pausedAutobootKeepers != null
+    && pausedAutobootKeepers > 0
+    && targetCapacity != null
+    && pausedAutobootKeepers >= targetCapacity
+  if (pausedOnlyNoExecutable) {
+    const capacityDetail = [
+      `status=${fleetStatus ?? 'paused'}`,
+      `running_keeper_fiber_count=${runningFibers ?? 0}`,
+      `executable_keeper_fiber_count=${executableFibers}`,
+      `paused_keeper_count=${pausedKeepers}`,
+      `paused_autoboot_enabled_keeper_count=${pausedAutobootKeepers}`,
+      targetCapacity != null ? `target_reaction_capacity_count=${targetCapacity}` : null,
+      minimumRunning != null ? `minimum_running_fibers=${minimumRunning}` : null,
+    ].filter((item): item is string => item != null).join(', ')
+    return {
+      key: 'fleet-liveness-risk',
+      label: 'Fleet paused',
+      detail: `${capacityDetail}; paused is lifecycle state. Inspect row-level runtime blocker evidence before treating it as a blocker.`,
+      tone: 'warn',
+    }
+  }
   if (fleetStatus === 'blocked' || (requiresAction && (runningFibers === 0 || noFibers === true))) {
     const capacityDetail = [
       `status=${fleetStatus ?? 'blocked'}`,
       `running_keeper_fiber_count=${runningFibers ?? 0}`,
       executableFibers != null ? `executable_keeper_fiber_count=${executableFibers}` : null,
       `paused_keeper_count=${pausedKeepers}`,
+      pausedAutobootKeepers != null ? `paused_autoboot_enabled_keeper_count=${pausedAutobootKeepers}` : null,
       bootableKeepers != null ? `bootable_keeper_count=${bootableKeepers}` : null,
       targetCapacity != null ? `target_reaction_capacity_count=${targetCapacity}` : null,
       minimumRunning != null ? `minimum_running_fibers=${minimumRunning}` : null,

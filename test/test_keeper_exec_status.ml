@@ -660,13 +660,19 @@ let test_runtime_surface_routes_paused_timeout_to_paused_action () =
       check string "runtime blocker class"
         "oas_timeout_budget"
         (runtime |> member "runtime_blocker_class" |> to_string);
+      check string "pause state"
+        "paused"
+        (runtime |> member "pause_state" |> to_string);
+      check string "runtime blocker state"
+        "blocked"
+        (runtime |> member "runtime_blocker_state" |> to_string);
       check bool "needs attention" true
         (runtime |> member "needs_attention" |> to_bool);
       check string "attention reason"
-        "paused_blocked"
+        "paused"
         (runtime |> member "attention_reason" |> to_string);
       check string "next human action"
-        "inspect_runtime_blocker"
+        "inspect_blocker_before_resume"
         (runtime |> member "next_human_action" |> to_string))
 
 let test_runtime_surface_exposes_redacted_resumable_cli_session_blocker () =

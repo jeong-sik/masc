@@ -334,7 +334,7 @@ export function keeperRecentActionLabel(
 export function keeperRuntimeHint(keeper: Keeper | null | undefined): string | null {
   if (!keeper) return null
   const runtimeBlocker = keeperRuntimeBlockerHint(keeper)
-  if (runtimeBlocker) return runtimeBlocker
+  if (runtimeBlocker) return keeper.paused ? `일시정지 원인 · ${runtimeBlocker}` : runtimeBlocker
   const socialFallback = socialModelFallbackHint(keeper)
   if (socialFallback) return socialFallback
   const blocker = keeper.last_blocker?.trim()

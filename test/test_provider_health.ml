@@ -134,6 +134,26 @@ let test_filter_healthy_skips_unhealthy_candidate () =
   check (list string) "unhealthy A removed" [ "B"; "C" ] filtered
 ;;
 
+let test_probe_failure_warns_only_on_unhealthy_transition () =
+  let unhealthy =
+    Provider_health.Unhealthy { since = 1.0; consecutive_failures = 1 }
+  in
+  check bool "healthy to unhealthy warns" true
+    (Provider_health.For_testing.probe_failure_should_warn
+       ~before:Provider_health.Healthy
+       ~after:unhealthy);
+  check bool "repeated unhealthy probe does not warn" false
+    (Provider_health.For_testing.probe_failure_should_warn
+       ~before:unhealthy
+       ~after:
+         (Provider_health.Unhealthy
+            { since = 1.0; consecutive_failures = 2 }));
+  check bool "below-threshold healthy failure does not warn" false
+    (Provider_health.For_testing.probe_failure_should_warn
+       ~before:Provider_health.Healthy
+       ~after:Provider_health.Healthy)
+;;
+
 let test_parser_clamps_probe_interval_to_minimum () =
   let toml =
     {|
@@ -180,6 +200,8 @@ let () =
             test_in_band_recovery_threshold_marks_healthy
         ; test_case "candidate filter skips unhealthy provider" `Quick
             test_filter_healthy_skips_unhealthy_candidate
+        ; test_case "probe failure warning only on unhealthy transition" `Quick
+            test_probe_failure_warns_only_on_unhealthy_transition
         ; test_case "parser clamps probe interval" `Quick
             test_parser_clamps_probe_interval_to_minimum
         ] )

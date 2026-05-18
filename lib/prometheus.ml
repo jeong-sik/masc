@@ -275,49 +275,7 @@ let metric_pool_reuse_total = Pool_metrics.metric_reuse_total
 let metric_pool_evict_total = Pool_metrics.metric_evict_total
 let metric_pool_create_total = Pool_metrics.metric_create_total
 
-(* Domain-specific counters not yet constant-ised. *)
-let metric_anti_rationalization_fallback = "masc_anti_rationalization_fallback_total"
-
-(* #10113: per-pattern + per-decision counter for the gate 2
-   excuse substring detector.  [decision] distinguishes the
-   three reachable outcomes:
-   - [advisory_to_llm]: pattern detected, default mode → LLM evaluates
-     with the pattern as a heuristic hint;
-   - [terminal_reject]: pattern detected,
-     [MASC_ANTI_RATIONALIZATION_GATE2_FAIL_CLOSED=true] →
-     historical local reject (operator opt-in);
-   - [advisory_safety_net_reject]: pattern detected, advisory
-     mode, but the LLM evaluator was unavailable so the
-     pattern was upgraded to a Reject (LLM-down safety net).
-   Lets the operator measure false-positive vs true-positive
-   ratio per pattern across deployments without grepping logs. *)
-let metric_anti_rationalization_excuse_pattern =
-  "masc_anti_rationalization_excuse_pattern_total"
-;;
-
-let metric_board_truncated_posts = "masc_board_truncated_posts_total"
-
-(* Board flusher actor startup outcome.
-   Closed-vocab label [outcome]:
-     [switch_finished] — start_flusher_actor raised
-       Invalid_argument "Switch finished!"; the warn at the swallow
-       site has no Prometheus signal otherwise.
-     [cas_exhausted] — flusher_start_cas_retries exhausted under
-       contention; current state stays Active(_, false), next backend
-       access retries.
-   Cardinality: 2 series.  No success label — a non-event would imply
-   either steady-state idle or in-flight start, neither of which is a
-   useful counter increment. *)
-let metric_board_dispatch_flusher_start_outcomes =
-  "masc_board_dispatch_flusher_start_outcomes_total"
-
-let metric_fsm_guard_violation = "masc_fsm_guard_violation_total"
-let metric_memory_pipeline_flushes = "masc_memory_pipeline_flushes_total"
-let metric_memory_pipeline_flush_records = "masc_memory_pipeline_flush_records_total"
-
-let metric_memory_pipeline_flush_duration_seconds =
-  "masc_memory_pipeline_flush_duration_seconds"
-;;
+include Prometheus_policy_metric_names
 
 (* Increments each time [Keeper_turn_slot.force_release_holder_for] frees
    a slot held by a zombie fiber (typically because the fiber is stuck

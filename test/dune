@@ -760,6 +760,7 @@
   ; test_cp_cleanup, test_cp_search_fabric, test_cp_section_cache, test_cp_jsonl_tail removed (CP purge)
   test_local_runtime_pool
   test_keeper_tools_oas
+  test_keeper_bash_retry_deterministic_close
   test_keeper_tool_exposure
   test_keeper_runtime_denylist
   test_keeper_runtime_config_ssot
@@ -981,6 +982,7 @@
   ; test_cp_cleanup, test_cp_search_fabric, test_cp_section_cache, test_cp_jsonl_tail removed (CP purge)
   test_local_runtime_pool
   test_keeper_tools_oas
+  test_keeper_bash_retry_deterministic_close
   test_keeper_tool_exposure
   test_keeper_runtime_denylist
   test_keeper_runtime_config_ssot

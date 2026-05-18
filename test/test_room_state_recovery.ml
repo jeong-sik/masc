@@ -232,6 +232,47 @@ let test_agent_of_yojson_missing_last_seen_falls_back_to_now () =
   | Error msg ->
       fail ("missing last_seen+joined_at should fall back, not error: " ^ msg)
 
+let test_read_agent_with_repair_rewrites_missing_last_seen () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:None);
+      let legacy_agent_json =
+        `Assoc
+          [
+            ("name", `String "keeper-orphan");
+            ("agent_type", `String "keeper");
+            ("status", `String "active");
+            ("capabilities", `List []);
+            ("current_task", `Null);
+            ("joined_at", `String "2026-03-26T00:00:00Z");
+          ]
+      in
+      write_text_file (agent_path config "keeper-orphan")
+        (Yojson.Safe.to_string legacy_agent_json);
+
+      match Coord.read_agent_with_repair config (agent_path config "keeper-orphan") with
+      | Error msg -> fail ("missing last_seen should repair: " ^ msg)
+      | Ok agent ->
+          check string "last_seen bootstrapped from joined_at"
+            "2026-03-26T00:00:00Z" agent.last_seen;
+          let repaired_json =
+            match Safe_ops.read_file_safe (agent_path config "keeper-orphan") with
+            | Error error -> fail error
+            | Ok raw ->
+                raw
+                |> Backend.Compression.decompress_auto
+                |> Yojson.Safe.from_string
+          in
+          check bool "last_seen rewritten as canonical string" true
+            (match Yojson.Safe.Util.member "last_seen" repaired_json with
+             | `String "2026-03-26T00:00:00Z" -> true
+             | _ -> false))
+
 let test_heartbeat_repairs_legacy_agent_last_seen () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -290,6 +331,8 @@ let () =
             test_agent_of_yojson_annotates_invalid_last_seen;
           test_case "agent parser falls back when both last_seen and joined_at missing (#9751)" `Quick
             test_agent_of_yojson_missing_last_seen_falls_back_to_now;
+          test_case "read_agent_with_repair rewrites missing last_seen" `Quick
+            test_read_agent_with_repair_rewrites_missing_last_seen;
           test_case "heartbeat repairs legacy agent last_seen" `Quick
             test_heartbeat_repairs_legacy_agent_last_seen;
         ] );

@@ -398,8 +398,9 @@ let read_json_opt config path =
 let agent_json_needs_repair = function
   | `Assoc fields -> (
       match List.assoc_opt "last_seen" fields with
-      | Some (`Int _ | `Float _) -> true
-      | _ -> false)
+      | Some (`String _) -> false
+      | Some (`Int _ | `Float _ | `Null) | None -> true
+      | Some _ -> false)
   | _ -> false
 
 let is_fd_pressure_text detail =

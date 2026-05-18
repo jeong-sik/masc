@@ -10,6 +10,8 @@ type t = {
 let make ~session_id_opt ~generated_session_id ~auth_token ~protocol_version
     ~origin ~base_path =
   let session_was_provided = Option.is_some session_id_opt in
+  (* NDT-OK: HTTP ingress supplies [generated_session_id] only when the client
+     omitted Mcp-Session-Id; persisted state still records the resolved value. *)
   let session_id = Option.value ~default:generated_session_id session_id_opt in
   { session_id; session_was_provided; auth_token; protocol_version; origin; base_path }
 

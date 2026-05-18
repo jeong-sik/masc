@@ -289,31 +289,8 @@ let run_named
   let tool_filtered_candidates =
     Cascade_runtime_candidate.of_provider_configs tool_filtered_candidate_cfgs
   in
-  let local_endpoint_health =
-    match Cascade_runtime_candidate.local_runtime_urls tool_filtered_candidates with
-    | [] -> []
-    | endpoints ->
-      Llm_provider.Discovery.refresh_and_sync ~sw ~net ~endpoints
-      |> List.map (fun (status : Llm_provider.Discovery.endpoint_status) ->
-             status.url, status.healthy)
-  in
-  let local_prefiltered_candidates, unhealthy_local_endpoints =
-    Cascade_runtime_candidate.filter_unhealthy_local_runtime_urls
-      ~endpoint_health:local_endpoint_health
-      tool_filtered_candidates
-  in
-  let local_prefiltered_candidate_count =
-    List.length local_prefiltered_candidates
-  in
-  if unhealthy_local_endpoints <> [] then
-    Log.Misc.warn
-      "cascade %s: preflight skipped %d unhealthy local endpoint(s) before \
-       provider dispatch: [%s]"
-      cascade_name
-      (List.length unhealthy_local_endpoints)
-      (String.concat ", " unhealthy_local_endpoints);
   let health_filtered_candidates =
-    local_prefiltered_candidates
+    tool_filtered_candidates
     |> List.filter
          (fun candidate ->
             match Cascade_runtime_candidate.first_health_cooldown candidate with
@@ -325,11 +302,35 @@ let run_named
                 false)
   in
   let health_filtered_candidate_count = List.length health_filtered_candidates in
-  let candidates, health_cooldown_fail_open =
+  let dispatch_seed_candidates, health_cooldown_fail_open =
     fail_open_health_filtered_candidates
-      ~tool_filtered_candidates:local_prefiltered_candidates
+      ~tool_filtered_candidates
       ~health_filtered_candidates
   in
+  let local_endpoint_health =
+    match Cascade_runtime_candidate.local_runtime_urls dispatch_seed_candidates with
+    | [] -> []
+    | endpoints ->
+      Llm_provider.Discovery.refresh_and_sync ~sw ~net ~endpoints
+      |> List.map (fun (status : Llm_provider.Discovery.endpoint_status) ->
+             status.url, status.healthy)
+  in
+  let local_prefiltered_candidates, unhealthy_local_endpoints =
+    Cascade_runtime_candidate.filter_unhealthy_local_runtime_urls
+      ~endpoint_health:local_endpoint_health
+      dispatch_seed_candidates
+  in
+  let local_prefiltered_candidate_count =
+    List.length local_prefiltered_candidates
+  in
+  if unhealthy_local_endpoints <> [] then
+    Log.Misc.warn
+      "cascade %s: preflight skipped %d unhealthy local endpoint(s) before \
+       provider dispatch: [%s]"
+      cascade_name
+      (List.length unhealthy_local_endpoints)
+      (String.concat ", " unhealthy_local_endpoints);
+  let candidates = local_prefiltered_candidates in
   if health_cooldown_fail_open then
     Log.Misc.warn
       "cascade %s: all tool-capable candidates are in health/cooldown; \

@@ -133,6 +133,10 @@ val metric_tool_join_required_guard : string
 (** Counter for [tool_metrics_persist] write-queue overflow drops. No labels. *)
 val metric_tool_metrics_persist_dropped : string
 
+(** Counter for [Keeper_tool_call_log] async write-queue overflow drops.
+    No labels. *)
+val metric_keeper_tool_call_log_queue_dropped : string
+
 (** Counter for [tool_keeper.cached_text_by_key] Atomic CAS retry events.
     Each increment corresponds to one extra [compute ()] call. No labels. *)
 val metric_tool_keeper_cache_cas_conflicts : string

@@ -2,6 +2,9 @@
 (library
  (name masc_mcp)
  (public_name masc_mcp)
+ (foreign_stubs
+  (language c)
+  (names nofile_stubs))
 (private_modules
  plan_action_outcome
  prometheus_text
@@ -12,6 +15,7 @@
  keeper_bookkeeping_failure_kind
  keeper_checkpoint_failure_operation
  keeper_memory_llm_summary_outcome
+ keeper_tool_call_log_route_evidence
  memory_oas_bridge_cache
  memory_oas_bridge_op_outcome
  keeper_user_visible_reply_source
@@ -61,6 +65,7 @@
  keeper_meta_store
 
  server_dashboard_http_cache
+ server_dashboard_http_perf
  dashboard_http_helpers
  dashboard_http_monitoring
  dashboard_http_keeper
@@ -206,6 +211,7 @@
   tool_inline_dispatch_types
   tool_inline_dispatch_coord
   tool_inline_dispatch_comm
+  coord_goals_verification
   ;; tool_schema_dsl — shared JSON Schema builder (added by #3640)
   tool_schema_dsl
   tool_misc_transport

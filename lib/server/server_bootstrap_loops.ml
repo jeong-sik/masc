@@ -1035,6 +1035,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     ~base_path:state.room_config.base_path
     ~cluster_name:state.room_config.backend_config.Backend_types.cluster_name
     ();
+  Keeper_tool_call_log.start_flush_fiber ~sw ~clock;
   Otel_dispatch_hook.install ();
   Otel_spans.setup_exporter ~sw env;
   Shutdown.register ~name:"otel_exporter" ~priority:20 Otel_spans.shutdown;

@@ -1,14 +1,20 @@
 ---
 rfc: "0121"
 title: "Config-dir resolution — single active root, no implicit fallback"
-status: Draft
+status: Active
 created: 2026-05-17
-updated: 2026-05-17
+updated: 2026-05-18
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0077", "0088", "0098", "0103"]
-implementation_prs: []
+implementation_prs:
+  - "16084"  # PR-1: Config_dir_resolver named accessors (SSOT prereq)
+  - "16092"  # PR-5: scripts purge ME_ROOT/cwd silent fallback (merged)
+  - "16096"  # PR-2: repo_manager + auth_resolve to resolver
+  - "16097"  # PR-3: host_config + server routes + shutdown to resolver
+  - "16099"  # PR-4: tool dispatch + telemetry to resolver
+  # PR-6 (current): docs sweep + audit-path-ssot.sh CI gate
 ---
 
 # RFC-0121: Config-dir resolution — single active root, no implicit fallback

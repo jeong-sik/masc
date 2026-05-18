@@ -1,9 +1,9 @@
 (** Negative-path tests for /api/v1/sidecar/* routes.
 
-    The HTTP layer is a thin wrapper around [validate_name] + a shell-out
-    to the sidecar [run.sh]. The thing worth pinning is that any
+    The HTTP layer is a thin wrapper around [validate_name] + a detached
+    argv dispatch to the sidecar [run.sh]. The thing worth pinning is that any
     not-whitelisted [name=] short-circuits at [validate_name] BEFORE the
-    code reaches [Sys.command] or [Process_eio.run_argv_with_status].
+    code reaches [Process_eio].
 
     Source of truth for endpoint design: docs/SIDECAR-LIFECYCLE-API-RFC.md.
 *)
@@ -53,6 +53,21 @@ let write_file path content =
   Out_channel.with_open_text path (fun oc -> output_string oc content)
 ;;
 
+let env_values key env =
+  let prefix = key ^ "=" in
+  env
+  |> Array.to_list
+  |> List.filter_map (fun entry ->
+    if String.starts_with ~prefix entry
+    then
+      Some
+        (String.sub
+           entry
+           (String.length prefix)
+           (String.length entry - String.length prefix))
+    else None)
+;;
+
 let with_temp_dir prefix f =
   let dir = Filename.temp_file prefix "" in
   Sys.remove dir;
@@ -88,9 +103,9 @@ let test_validate_rejects_unknown_id () =
 ;;
 
 (* ---- Injection attempts: the only thing that matters is that an attacker-
-       controlled string never falls through to Sys.command. The error message
-       carries the raw input back, but the Result is Error, so handle_start /
-       handle_stop short-circuit before any subprocess. ---- *)
+       controlled string never falls through to process dispatch. The error
+       message carries the raw input back, but the Result is Error, so
+       handle_start / handle_stop short-circuit before any subprocess. ---- *)
 
 let test_validate_rejects_shell_meta () =
   let payloads =
@@ -256,30 +271,36 @@ let test_today_log_file_falls_back_to_project_root_log () =
       (Routes.today_log_file ~base_path ~project_root "discord"))
 ;;
 
-let test_start_shell_command_matches_detached_contract () =
+let test_start_plan_matches_detached_contract () =
   let base_path = "/tmp/masc runtime root" in
   let script = "/tmp/masc runtime root/sidecars/discord-bot/run.sh" in
+  let plan = Routes.sidecar_start_plan ~base_path ~script in
   check
-    string
-    "detached start command"
-    (Printf.sprintf
-       "MASC_BASE_PATH=%s setsid nohup %s start </dev/null >/dev/null 2>&1 &"
-       (Filename.quote base_path)
-       (Filename.quote script))
-    (Routes.sidecar_start_shell_command ~base_path ~script)
+    (list string)
+    "detached start argv"
+    [ script; "start" ]
+    plan.Routes.argv;
+  check
+    (list string)
+    "base path exported once"
+    [ base_path ]
+    (env_values "MASC_BASE_PATH" plan.env)
 ;;
 
-let test_start_shell_command_quotes_shell_meta () =
+let test_start_plan_preserves_shell_meta_as_argv_values () =
   let base_path = "/tmp/runtime;touch /tmp/pwned" in
   let script = "/tmp/sidecars/discord-bot/run.sh && id" in
+  let plan = Routes.sidecar_start_plan ~base_path ~script in
   check
-    string
-    "shell metacharacters are quoted, not escaped ad hoc"
-    (Printf.sprintf
-       "MASC_BASE_PATH=%s setsid nohup %s start </dev/null >/dev/null 2>&1 &"
-       (Filename.quote base_path)
-       (Filename.quote script))
-    (Routes.sidecar_start_shell_command ~base_path ~script)
+    (list string)
+    "metacharacters stay inside argv atoms"
+    [ script; "start" ]
+    plan.Routes.argv;
+  check
+    (list string)
+    "metacharacters stay inside env value"
+    [ base_path ]
+    (env_values "MASC_BASE_PATH" plan.env)
 ;;
 
 let test_desired_store_increments_generation () =
@@ -314,7 +335,7 @@ let test_desired_store_increments_generation () =
 ;;
 
 let test_reconcile_stale_generation_does_not_start () =
-  let shell_called = ref false in
+  let process_called = ref false in
   let delayed : Routes.desired_record =
     { Routes.connector_id = "discord"
     ; desired_state = Routes.Desired_running
@@ -327,10 +348,10 @@ let test_reconcile_stale_generation_does_not_start () =
     Routes.reconcile_desired_once
       ~current_generation:2
       ~observed_state:Routes.Observed_unavailable
-      ~start_shell:(fun () -> shell_called := true)
+      ~start_process:(fun () -> process_called := true)
       delayed
   in
-  check bool "stale reconcile must not shell start" false !shell_called;
+  check bool "stale reconcile must not process start" false !process_called;
   check
     string
     "stale generation result"
@@ -339,7 +360,7 @@ let test_reconcile_stale_generation_does_not_start () =
 ;;
 
 let test_reconcile_running_unavailable_starts_once () =
-  let shell_calls = ref 0 in
+  let process_calls = ref 0 in
   let written_attempt = ref None in
   let desired : Routes.desired_record =
     { Routes.connector_id = "discord"
@@ -358,10 +379,10 @@ let test_reconcile_running_unavailable_starts_once () =
       ~write_attempt:(fun attempt ->
         written_attempt := Some attempt;
         Ok ())
-      ~start_shell:(fun () -> incr shell_calls)
+      ~start_process:(fun () -> incr process_calls)
       desired
   in
-  check int "current running reconcile shells once" 1 !shell_calls;
+  check int "current running reconcile starts once" 1 !process_calls;
   check string "started result" "started" (Routes.reconcile_result_to_string result);
   match !written_attempt with
   | Some attempt ->
@@ -385,7 +406,7 @@ let test_reconcile_running_unavailable_starts_once () =
 ;;
 
 let test_reconcile_attempt_write_failure_does_not_start () =
-  let shell_calls = ref 0 in
+  let process_calls = ref 0 in
   let desired : Routes.desired_record =
     { Routes.connector_id = "discord"
     ; desired_state = Routes.Desired_running
@@ -401,10 +422,10 @@ let test_reconcile_attempt_write_failure_does_not_start () =
       ~current_generation:3
       ~observed_state:Routes.Observed_unavailable
       ~write_attempt:(fun _ -> Error "disk full")
-      ~start_shell:(fun () -> incr shell_calls)
+      ~start_process:(fun () -> incr process_calls)
       desired
   in
-  check int "attempt write failure suppresses shell start" 0 !shell_calls;
+  check int "attempt write failure suppresses process start" 0 !process_calls;
   check
     string
     "attempt write failure result"
@@ -413,7 +434,7 @@ let test_reconcile_attempt_write_failure_does_not_start () =
 ;;
 
 let test_reconcile_running_unavailable_backoff_noops () =
-  let shell_calls = ref 0 in
+  let process_calls = ref 0 in
   let desired : Routes.desired_record =
     { Routes.connector_id = "discord"
     ; desired_state = Routes.Desired_running
@@ -441,10 +462,10 @@ let test_reconcile_running_unavailable_backoff_noops () =
       ~previous_attempt
       ~current_generation:3
       ~observed_state:Routes.Observed_unavailable
-      ~start_shell:(fun () -> incr shell_calls)
+      ~start_process:(fun () -> incr process_calls)
       desired
   in
-  check int "backoff suppresses duplicate shell start" 0 !shell_calls;
+  check int "backoff suppresses duplicate process start" 0 !process_calls;
   check
     string
     "backoff result"
@@ -453,7 +474,7 @@ let test_reconcile_running_unavailable_backoff_noops () =
 ;;
 
 let test_reconcile_stopped_noops () =
-  let shell_called = ref false in
+  let process_called = ref false in
   let desired : Routes.desired_record =
     { Routes.connector_id = "discord"
     ; desired_state = Routes.Desired_stopped
@@ -466,10 +487,10 @@ let test_reconcile_stopped_noops () =
     Routes.reconcile_desired_once
       ~current_generation:4
       ~observed_state:Routes.Observed_unavailable
-      ~start_shell:(fun () -> shell_called := true)
+      ~start_process:(fun () -> process_called := true)
       desired
   in
-  check bool "stopped reconcile must not shell start" false !shell_called;
+  check bool "stopped reconcile must not process start" false !process_called;
   check
     string
     "stopped result"
@@ -859,7 +880,7 @@ let test_retry_backoff_fail_closed_on_malformed_now () =
    - handle_stop ignores run_argv_with_status exit code
    - handle_logs ignores run_argv_with_status exit code *)
 
-let test_reconcile_start_shell_exception_propagates () =
+let test_reconcile_start_process_exception_propagates () =
   let desired : Routes.desired_record =
     { Routes.connector_id = "discord"
     ; desired_state = Routes.Desired_running
@@ -876,11 +897,11 @@ let test_reconcile_start_shell_exception_propagates () =
          ~current_generation:1
          ~observed_state:Routes.Observed_unavailable
          ~write_attempt:(fun _ -> Ok ())
-         ~start_shell:(fun () -> raise (Failure "shell failed"))
+         ~start_process:(fun () -> raise (Failure "process failed"))
          desired);
-    failf "expected exception from start_shell to propagate"
+    failf "expected exception from start_process to propagate"
   with
-  | Failure msg -> check string "exception propagates unchanged" "shell failed" msg
+  | Failure msg -> check string "exception propagates unchanged" "process failed" msg
 ;;
 
 let test_fetch_schema_error_on_nonzero_exit () =
@@ -946,15 +967,15 @@ let () =
         ] )
     ; ( "invariants"
       , [ test_case "known_ids size = 4" `Quick test_known_ids_size_matches_dashboard ] )
-    ; ( "start_command"
+    ; ( "start_plan"
       , [ test_case
-            "detached command contract"
+            "detached argv contract"
             `Quick
-            test_start_shell_command_matches_detached_contract
+            test_start_plan_matches_detached_contract
         ; test_case
-            "quotes shell metacharacters"
+            "preserves shell metacharacters as argv values"
             `Quick
-            test_start_shell_command_quotes_shell_meta
+            test_start_plan_preserves_shell_meta_as_argv_values
         ] )
     ; ( "desired_state"
       , [ test_case
@@ -1061,9 +1082,9 @@ let () =
         ] )
     ; ( "fault_recovery_gaps"
       , [ test_case
-            "start_shell exception propagates through reconcile"
+            "start_process exception propagates through reconcile"
             `Quick
-            test_reconcile_start_shell_exception_propagates
+            test_reconcile_start_process_exception_propagates
         ; test_case
             "fetch_schema returns Error on non-zero python exit"
             `Quick

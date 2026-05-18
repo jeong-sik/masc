@@ -334,27 +334,15 @@ let is_success_status code = code >= 200 && code < 300
 let is_redirect_status code =
   code = 301 || code = 302 || code = 303 || code = 307 || code = 308
 
-let https_connector_result () =
-  match Eio_context.get_https_connector_result () with
-  | Ok connector -> Ok (Some connector)
-  | Error message -> Error message
-
-let fetch_response ~net ~url =
-  let uri = Uri.of_string url in
-  let https_result =
-    if Uri.scheme uri = Some "https" then https_connector_result () else Ok None
-  in
-  match https_result with
-  | Error _ as error -> error
-  | Ok https ->
-      Masc_http_client.get_response_sync ~net ~https ~url
-        ~headers:
-          [
-            ("Accept", "text/html,application/xhtml+xml,image/*;q=0.9,*/*;q=0.1");
-            ("Accept-Encoding", "identity");
-            ("User-Agent", "MASC-Dashboard-LinkPreview/1.0");
-          ]
-        ()
+let fetch_response ~net:_ ~url =
+  Masc_http_client.get_response_sync ~url
+    ~headers:
+      [
+        ("Accept", "text/html,application/xhtml+xml,image/*;q=0.9,*/*;q=0.1");
+        ("Accept-Encoding", "identity");
+        ("User-Agent", "MASC-Dashboard-LinkPreview/1.0");
+      ]
+    ()
 
 let rec fetch_response_following_redirects ~net ~url ~remaining_redirects =
   match fetch_response ~net ~url with

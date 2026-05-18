@@ -630,8 +630,22 @@ def fixture_ts(turn: int, offset: int) -> str:
     return f"2026-05-13T00:{turn:02d}:{offset:02d}Z"
 
 
+def fixture_tools(tools: bool | list[str]) -> list[str]:
+    if isinstance(tools, bool):
+        return ["keeper_tool_search"] if tools else []
+    return tools
+
+
 def write_fixture_turn(
-    base_path: Path, keeper: str, trace: str, turn: int, *, tools: bool = False
+    base_path: Path,
+    keeper: str,
+    trace: str,
+    turn: int,
+    *,
+    tools: bool | list[str] = False,
+    provider_finished: bool = True,
+    tool_log: bool = True,
+    status: str = "success",
 ) -> None:
     keeper_dir = base_path / ".masc" / "keepers" / keeper
     manifest_path = keeper_dir / "runtime-manifests" / f"{trace}.jsonl"
@@ -640,7 +654,7 @@ def write_fixture_turn(
     tool_log_path = base_path / ".masc" / "tool_calls" / "2026-05" / f"{turn:02d}.jsonl"
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     checkpoint_path.write_text('{"ok":true}\n', encoding="utf-8")
-    tools_used = ["keeper_tool_search"] if tools else []
+    tools_used = fixture_tools(tools)
     write_jsonl(
         receipt_path,
         [
@@ -654,7 +668,7 @@ def write_fixture_turn(
             }
         ],
     )
-    if tools:
+    if tools_used and tool_log:
         append_jsonl(
             tool_log_path,
             [
@@ -664,9 +678,10 @@ def write_fixture_turn(
                     "generation": 1,
                     "turn": turn,
                     "keeper_turn_id": turn,
-                    "tool": "keeper_tool_search",
+                    "tool": tool,
                     "success": True,
                 }
+                for tool in tools_used
             ],
         )
 
@@ -687,19 +702,22 @@ def write_fixture_turn(
         },
     }
     rows = []
-    for offset, event in enumerate(
+    events = [
+        "provider_lane_resolved",
+        "provider_attempt_started",
+    ]
+    if provider_finished:
+        events.append("provider_attempt_finished")
+    events.extend(
         [
-            "provider_lane_resolved",
-            "provider_attempt_started",
-            "provider_attempt_finished",
             "event_bus_correlated",
             "memory_injected",
             "checkpoint_saved",
             "receipt_appended",
             "turn_finished",
-        ],
-        start=1,
-    ):
+        ]
+    )
+    for offset, event in enumerate(events, start=1):
         row = dict(base_row)
         row["ts"] = fixture_ts(turn, offset)
         row["event"] = event
@@ -716,11 +734,11 @@ def write_fixture_turn(
                 "tool_call_log_path": None,
             }
         elif event == "turn_finished":
-            row["status"] = "success"
+            row["status"] = status
             row["links"] = {
                 "receipt_path": None,
                 "checkpoint_path": None,
-                "tool_call_log_path": str(tool_log_path) if tools else None,
+                "tool_call_log_path": str(tool_log_path) if tools_used else None,
             }
         rows.append(row)
     manifest_path.parent.mkdir(parents=True, exist_ok=True)

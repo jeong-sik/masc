@@ -183,7 +183,11 @@ let sync_planning_current_task_with_owned_task (ctx : context) =
            | Masc_domain.Cancelled _ -> None)
   in
   match owned_task with
-  | Some task_id -> Planning_eio.set_current_task ctx.config ~task_id
+  | Some task_id ->
+      (match Planning_eio.set_current_task ctx.config ~task_id with
+       | Ok () -> ()
+       | Error msg ->
+           Log.Task.warn "failed to sync planning current_task to %s: %s" task_id msg)
   | None -> Planning_eio.clear_current_task ctx.config
 
 let sync_keeper_current_task_binding (ctx : context) =
@@ -598,6 +602,11 @@ let persisted_contract_rejection ~(ctx : context)
            | None -> ());
           None
         end
+
+let cdal_gate_label_for_task = function
+  | Some ({ contract = Some { strict = false; _ }; _ } : Masc_domain.task) ->
+    Cdal_verdict_gate.advisory_gate_label
+  | _ -> Cdal_verdict_gate.strict_gate_label
 
 (* Handlers *)
 
@@ -1343,14 +1352,20 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
              we only want the [Dashboard_attribution] side effect that
              [gate_check] performs internally. *)
           if Env_config_runtime.Cdal.gate_enabled () then
-            ignore (Cdal_verdict_gate.gate_check ~task_id ())
+            ignore
+              (Cdal_verdict_gate.gate_check
+                 ~gate_label:(cdal_gate_label_for_task task_opt)
+                 ~task_id ())
         | Masc_domain.Reject_verification ->
           let reason = if not (String.equal notes "") then notes else reason in
           let verification_id = Option.value ~default:"" verification_id_before in
           Verification_protocol.notify_reject_verification
             ~task_id ~verifier:ctx.agent_name ~verification_id ~reason;
           if Env_config_runtime.Cdal.gate_enabled () then
-            ignore (Cdal_verdict_gate.gate_check ~task_id ())
+            ignore
+              (Cdal_verdict_gate.gate_check
+                 ~gate_label:(cdal_gate_label_for_task task_opt)
+                 ~task_id ())
         | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Done_action | Masc_domain.Cancel | Masc_domain.Release -> ())
    | Error err ->
        Log.Task.error "task transition failed: %s" (Masc_domain.masc_error_to_string err));

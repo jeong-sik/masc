@@ -559,6 +559,28 @@ let () =
         match Worker_dev_tools.validate_command_coding "git log | head -5" with
         | Ok () -> ()
         | Error e -> Alcotest.fail ("should allow pipe: " ^ Worker_dev_tools.block_reason_to_string e));
+      Alcotest.test_case "keeps escaped pipe inside quoted rg pattern" `Quick (fun () ->
+        match
+          Worker_dev_tools.validate_command_coding
+            {|rg -n "task-259\|task-270\|task-272" repos/masc-mcp/.masc/backlog.json|}
+        with
+        | Ok () -> ()
+        | Error e ->
+          Alcotest.fail
+            ("escaped regex pipe should not start a new command: "
+             ^ Worker_dev_tools.block_reason_to_string e));
+      Alcotest.test_case "keeps literal pipe inside single-quoted grep pattern"
+        `Quick
+        (fun () ->
+          match
+            Worker_dev_tools.validate_command_coding
+              {|grep -E 'task-259|task-270' repos/masc-mcp/.masc/backlog.json|}
+          with
+          | Ok () -> ()
+          | Error e ->
+            Alcotest.fail
+              ("quoted regex pipe should not start a new command: "
+               ^ Worker_dev_tools.block_reason_to_string e));
       Alcotest.test_case "allows wrapper redirect" `Quick (fun () ->
         match
           Worker_dev_tools.validate_command_coding

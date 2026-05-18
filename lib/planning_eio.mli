@@ -118,9 +118,10 @@ val get_current_task : Coord.config -> string option
 (** [get_current_task config] returns the persisted current task
     id, or [None] when no current task is set. *)
 
-val set_current_task : Coord.config -> task_id:string -> unit
+val set_current_task : Coord.config -> task_id:string -> (unit, string) result
 (** [set_current_task config ~task_id] persists the current task
-    id.  Side effect only — no return value. *)
+    id, returning [Error _] when an existing directory cannot be
+    quarantined before the file write. *)
 
 val clear_current_task : Coord.config -> unit
 (** [clear_current_task config] removes the persisted current task

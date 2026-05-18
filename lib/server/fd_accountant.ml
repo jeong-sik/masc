@@ -1,16 +1,20 @@
-type kind = Docker_spawn | Provider_http | Sandbox_exec | Log_writer
+type kind = Docker_spawn | Provider_http | Provider_cli | Sandbox_exec | Log_writer
 
-let all_kinds = [ Docker_spawn; Provider_http; Sandbox_exec; Log_writer ]
+(* TEL-OK: this low-level gate stays Prometheus-free; [fd_snapshot] is the
+   runtime telemetry surface exported by /metrics and dashboard health. *)
+let all_kinds = [ Docker_spawn; Provider_http; Provider_cli; Sandbox_exec; Log_writer ]
 
 let kind_to_string = function
   | Docker_spawn -> "docker_spawn"
   | Provider_http -> "provider_http"
+  | Provider_cli -> "provider_cli"
   | Sandbox_exec -> "sandbox_exec"
   | Log_writer -> "log_writer"
 
 let kind_of_string = function
   | "docker_spawn" -> Some Docker_spawn
   | "provider_http" -> Some Provider_http
+  | "provider_cli" -> Some Provider_cli
   | "sandbox_exec" -> Some Sandbox_exec
   | "log_writer" -> Some Log_writer
   | _ -> None
@@ -18,12 +22,14 @@ let kind_of_string = function
 let env_var = function
   | Docker_spawn -> "MASC_DOCKER_SPAWN_CONCURRENCY"
   | Provider_http -> "MASC_PROVIDER_HTTP_CONCURRENCY"
+  | Provider_cli -> "MASC_PROVIDER_CLI_CONCURRENCY"
   | Sandbox_exec -> "MASC_SANDBOX_EXEC_CONCURRENCY"
   | Log_writer -> "MASC_LOG_WRITER_CONCURRENCY"
 
 let default_cap = function
   | Docker_spawn -> 8
   | Provider_http -> 16
+  | Provider_cli -> 8
   | Sandbox_exec -> 32
   | Log_writer -> 64
 
@@ -114,10 +120,21 @@ let install_with_process_sandbox_exec_guard () =
             f ())
     }
 
+let install_autonomy_exec_sandbox_exec_guard () =
+  Masc_mcp_cdal_runtime.Autonomy_exec.set_run_guard
+    { Masc_mcp_cdal_runtime.Autonomy_exec.run =
+        (fun f ->
+          if Eio_guard.is_ready () then
+            with_slot ~kind:Sandbox_exec f
+          else
+            f ())
+    }
+
 let () =
   install_dated_jsonl_log_writer_guard ();
   install_process_eio_sandbox_exec_guard ();
-  install_with_process_sandbox_exec_guard ()
+  install_with_process_sandbox_exec_guard ();
+  install_autonomy_exec_sandbox_exec_guard ()
 
 (* In-flight count = configured cap minus current semaphore credits.
    Eio.Semaphore exposes [get_value] which returns the available credit
@@ -150,15 +167,9 @@ let read_fd_limit () =
   | Some value -> value
   | None ->
     let value =
-      try
-        let chan = Unix.open_process_in "ulimit -n" in
-        let line = input_line chan in
-        let _ = Unix.close_process_in chan in
-        match int_of_string_opt (String.trim line) with
-        | Some n -> n
-        | None -> -1
-      with
-      | _ -> -1
+      match Keeper_fd_pressure.process_nofile_soft_limit () with
+      | Some n -> n
+      | None -> -1
     in
     Atomic.set fd_limit_cache (Some value);
     value

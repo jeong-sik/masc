@@ -137,7 +137,7 @@ let probe_endpoint_of base_url =
    when a longer ceiling is needed. *)
 let probe_timeout_default_s = 0.5
 
-let try_probe ~sw ~net ?clock ?timeout_s ?now url =
+let try_probe ~sw ~net:_ ?clock ?timeout_s ?now url =
   let timeout_s =
     match timeout_s with
     | Some v -> v
@@ -154,7 +154,6 @@ let try_probe ~sw ~net ?clock ?timeout_s ?now url =
     Masc_http_client.get_sync
       ?clock
       ~timeout_sec:timeout_s
-      ~net
       ~url:endpoint
       ~headers:[ "accept", "application/json" ]
       ()

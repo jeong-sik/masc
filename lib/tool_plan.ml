@@ -118,14 +118,14 @@ let handle_plan_set_task ~tool_name ~start_time ctx args =
   let task_id = get_string args "task_id" "" in
   if String.equal task_id "" then
     Tool_result.error ~tool_name ~start_time "task_id is required"
-  else begin
-    Planning_eio.set_current_task ctx.config ~task_id;
+  else match Planning_eio.set_current_task ctx.config ~task_id with
+  | Error e -> Tool_result.error ~tool_name ~start_time e
+  | Ok () ->
     let response = `Assoc [
       Plan_action_outcome.(status_field Set);
       ("current_task", `String task_id);
     ] in
     Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string response)
-  end
 
 let handle_plan_get_task ~tool_name ~start_time ctx _args =
   match Planning_eio.get_current_task ctx.config with

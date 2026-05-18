@@ -18,19 +18,22 @@ val extract_regions_from_diff :
   keeper_id:string ->
   file_path:string ->
   turn:int ->
+  tool_name:string ->
   diff_text:string ->
   code_region list
 (** Parse unified diff text into one [code_region] per hunk.
-    [turn] is the keeper turn number for provenance. *)
+    [turn] and [tool_name] preserve the tool-call provenance. *)
 
 val extract_region_from_full_file :
   keeper_id:string ->
   file_path:string ->
   turn:int ->
+  tool_name:string ->
   content:string ->
   code_region
-(** When a Keeper uses [write_file] with full content, the region is
-    the entire file (lines 1 to line count of [content]). *)
+(** When a Keeper provides full content, the region is the entire file
+    (lines 1 to line count of [content]) while preserving the original
+    tool-call provenance. *)
 
 val regions_file
   :  base_dir:string

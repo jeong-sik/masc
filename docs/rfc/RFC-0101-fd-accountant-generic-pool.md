@@ -56,6 +56,7 @@ New module `lib/server/fd_accountant.ml(i)`. Key signature:
 type kind =
   | Docker_spawn
   | Provider_http
+  | Provider_cli
   | Sandbox_exec
   | Log_writer
 
@@ -89,10 +90,11 @@ Caps per kind (env-overridable):
 |---|---|---|
 | `Docker_spawn` | 8 | `MASC_DOCKER_SPAWN_CONCURRENCY` (existing, preserved) |
 | `Provider_http` | 16 | `MASC_PROVIDER_HTTP_CONCURRENCY` |
+| `Provider_cli` | 8 | `MASC_PROVIDER_CLI_CONCURRENCY` |
 | `Sandbox_exec` | 32 | `MASC_SANDBOX_EXEC_CONCURRENCY` |
 | `Log_writer` | 64 | `MASC_LOG_WRITER_CONCURRENCY` |
 
-Defaults sum (8+16+32+64 = 120) is intentionally well below the assumed `kern.maxfiles=491_520` ceiling and below the per-process soft cap (typically 10_240). Pressure breaker kicks in earlier than ceiling exhaustion.
+Defaults sum (8+16+8+32+64 = 128) is intentionally well below the assumed `kern.maxfiles=491_520` ceiling and below the per-process soft cap (typically 10_240). Pressure breaker kicks in earlier than ceiling exhaustion.
 
 ### 3.2 `Docker_spawn_throttle` delegation
 
@@ -128,6 +130,7 @@ masc_fd_open                                          gauge
 masc_fd_limit                                         gauge
 masc_fd_in_flight{kind="docker_spawn"}                gauge
 masc_fd_in_flight{kind="provider_http"}               gauge
+masc_fd_in_flight{kind="provider_cli"}                gauge
 masc_fd_in_flight{kind="sandbox_exec"}                gauge
 masc_fd_in_flight{kind="log_writer"}                  gauge
 masc_fd_pressure_active                               gauge (0/1)
@@ -142,7 +145,7 @@ Dashboard `System Health` panel consumes. Operator sees per-kind cost without in
 
 ```
 fd-accountant: rlimit_nofile soft=10240 hard=10240 (launchd raise: success/fail)
-fd-accountant: configured caps docker=8 provider_http=16 sandbox_exec=32 log_writer=64 (sum=120)
+fd-accountant: configured caps docker=8 provider_http=16 provider_cli=8 sandbox_exec=32 log_writer=64 (sum=128)
 ```
 
 If sum-of-caps approaches the soft limit (within 50 % headroom), startup logs a WARN. Operator can either raise the limit (`launchd` path) or lower the caps (env vars).
@@ -162,7 +165,7 @@ This couples FD pressure → session shedding. The 5-second debounce avoids flap
 | PR | Scope | Acceptance |
 |----|-------|-----------|
 | PR-1 (this) | RFC body | review + merge |
-| PR-2 | `lib/server/fd_accountant.ml(i)` + 4-kind Eio.Pool + `Docker_spawn_throttle` delegation. Inert: docker behavior unchanged. | `test_fd_accountant.ml` 256-connection round-trip; existing docker spawn tests unchanged |
+| PR-2 | `lib/server/fd_accountant.ml(i)` + multi-kind Eio.Pool + `Docker_spawn_throttle` delegation. Inert: docker behavior unchanged. | `test_fd_accountant.ml` 256-connection round-trip; existing docker spawn tests unchanged |
 | PR-3 | Provider HTTP wrap in `oas/lib/llm_provider/backend_*.ml` (small cross-repo PR pair) | benchmark: pressure-during-cascade-storm holds `Provider_http` count ≤ 16 |
 | PR-4 | Sandbox exec wrap (`keeper_shell_*.ml`) + log writer wrap (largest writers only). | `Sandbox_exec` and `Log_writer` series visible in Prometheus dashboard |
 | PR-5 | `/metrics` exposure + dashboard panel + startup nofile log | operator can see snapshot via `curl /metrics \| grep masc_fd_` |
@@ -172,11 +175,11 @@ PR-2 is **wire-inert** (docker behavior preserved via delegation). PR-3 onward o
 
 ## 5. Verification
 
-- `test/test_fd_accountant.ml`: 4-kind pool unit tests — uniqueness of slots, exception-release, FD-pressure serialization.
+- `test/test_fd_accountant.ml`: multi-kind pool unit tests — uniqueness of slots, exception-release, FD-pressure serialization.
 - `scripts/harness/fd_saturation.sh` (new): drive 64 concurrent provider HTTP calls; assert `Provider_http` count never exceeds configured cap.
 - `scripts/harness/fd_regression_issue_13642.sh` (new): reproduce the symptom shape of past issue #13642 ("runtime refuses new loopback connections while listen socket remains open under keeper saturation") and assert that the typed FD pressure signal fires *before* connection refusal.
 - Soak (6-hour): `masc_fd_open` series + per-kind series stay within configured caps; no `pressure_active` flap (transitions < 10).
-- `bash scripts/check-doc-truth.sh`: 4 env vars match `Env_config_*` exports.
+- `bash scripts/check-doc-truth.sh`: FD accountant env vars match the exported operator docs.
 
 ## 6. Trade-offs
 
@@ -198,7 +201,7 @@ PR-2 is **wire-inert** (docker behavior preserved via delegation). PR-3 onward o
 
 - [x] **Prereq** (#15727): `Docker_spawn_throttle` Layer A (per-class semaphore) + Layer B (`Keeper_fd_pressure`-aware mutex) — the docker-only ancestor this RFC extends.
 - [x] **PR-1** (#15803): RFC body merged.
-- [x] **PR-2** (#15816): `lib/server/fd_accountant.ml(i)` 4-kind generic pool (`Docker_spawn` / `Provider_http` / `Sandbox_exec` / `Log_writer`) + `Docker_spawn_throttle.with_slot` delegation (public API preserved, wire-inert) — 8 tests including cap-bounds fan-in.
+- [x] **PR-2** (#15816): `lib/server/fd_accountant.ml(i)` multi-kind generic pool (`Docker_spawn` / `Provider_http` / `Provider_cli` / `Sandbox_exec` / `Log_writer`) + `Docker_spawn_throttle.with_slot` delegation (public API preserved, wire-inert) — tests include cap-bounds fan-in and provider transport wrapping.
 - [x] **PR-3** (oas #1618): provider HTTP wrap via dependency-injection hook (`Fd_throttle_hook` in oas + `Provider_throttle.with_permit_priority` composes), since oas cannot depend on masc-mcp directly. RFC §3.3 originally specified direct `Fd_accountant` call from `backend_*.ml`; DI pattern replaces that. Embedder (masc-mcp) wires `Fd_throttle_hook.set_handler (fun thunk -> Fd_accountant.with_slot ~kind:Provider_http thunk)` at bootstrap (follow-up commit, not in PR-3 itself).
 - [ ] **PR-4**: sandbox exec wrap (`keeper_shell_*.ml`) + log writer wrap (largest writers only).
 - [ ] **PR-5**: `Fd_accountant.fd_snapshot` → Prometheus `/metrics` + dashboard `System Health` panel + startup nofile-limit log.

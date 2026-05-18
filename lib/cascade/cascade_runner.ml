@@ -221,18 +221,25 @@ let request_runtime_fields_on_base_config
     seed = req_config.seed;
   }
 
-let provider_http_slot_transport
+let provider_resource_slot_transport
+    ~(kind : Fd_accountant.kind)
     (transport : Llm_provider.Llm_transport.t)
   : Llm_provider.Llm_transport.t =
   { complete_sync =
       (fun req ->
-        Fd_accountant.with_slot ~kind:Provider_http (fun () ->
+        Fd_accountant.with_slot ~kind (fun () ->
           transport.complete_sync req));
     complete_stream =
       (fun ?on_telemetry ~on_event req ->
-        Fd_accountant.with_slot ~kind:Provider_http (fun () ->
+        Fd_accountant.with_slot ~kind (fun () ->
           transport.complete_stream ?on_telemetry ~on_event req));
   }
+
+let provider_http_slot_transport transport =
+  provider_resource_slot_transport ~kind:Provider_http transport
+
+let provider_cli_slot_transport transport =
+  provider_resource_slot_transport ~kind:Provider_cli transport
 
 let provider_config_preserving_http_transport
     ~sw
@@ -270,8 +277,13 @@ let transport_for_provider ~sw ~net ~provider_cfg ?runtime_mcp_policy
     Llm_provider.Provider_config.is_subprocess_cli
       provider_cfg.Llm_provider.Provider_config.kind
   then
+    match
       non_http_transport_of_provider ~sw ~provider_cfg ?runtime_mcp_policy
         ?cli_transport_overrides ()
+    with
+    | Ok (Some transport) -> Ok (Some (provider_cli_slot_transport transport))
+    | Ok None -> Ok None
+    | Error _ as err -> err
   else
     Ok
       (Some
@@ -282,6 +294,7 @@ module For_testing = struct
     request_runtime_fields_on_base_config
 
   let provider_http_slot_transport = provider_http_slot_transport
+  let provider_cli_slot_transport = provider_cli_slot_transport
 end
 
 (* ================================================================ *)

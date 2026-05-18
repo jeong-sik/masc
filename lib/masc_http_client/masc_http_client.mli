@@ -6,12 +6,7 @@
     Callers should reach for [post_sync] / [get_sync] /
     [get_response_sync] for plain status+body access, or import
     {!Pool} directly when they need typed response headers or
-    non-default pool configuration.
-
-    The [~net] / [?https] arguments on the sync helpers are
-    accepted (and ignored) for source-level backwards compatibility
-    with callers that still thread an [Eio.Net] handle; they will be
-    dropped in a follow-up API cleanup. *)
+    non-default pool configuration. *)
 
 (** {1 Response payload} *)
 
@@ -43,50 +38,32 @@ type response = {
 val post_sync :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?timeout_sec:float ->
-  net:[> `Network | `Platform of [> `Generic ] ] Eio.Resource.t ->
-  ?https:
-    (Uri.t ->
-     [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t ->
-     [> `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t)
-    option ->
   url:string ->
   headers:(string * string) list ->
   body:string ->
   unit ->
   ((int * string), string) result
-(** [post_sync ?clock ?timeout_sec ~net ?https ~url ~headers ~body
-      ()] performs a [POST url] with [Content-Type] honored from
-    [headers].  Returns [Ok (status_code, body_string)] on success.
+(** [post_sync ?clock ?timeout_sec ~url ~headers ~body ()] performs
+    a [POST url] with [Content-Type] honored from [headers].
+    Returns [Ok (status_code, body_string)] on success.
     Connection-level errors (DNS, TLS, I/O) are caught and surfaced
     as [Error _] rather than propagating as exceptions. *)
 
 val get_response_sync :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?timeout_sec:float ->
-  net:[> `Network | `Platform of [> `Generic ] ] Eio.Resource.t ->
-  ?https:
-    (Uri.t ->
-     [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t ->
-     [> `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t)
-    option ->
   url:string ->
   headers:(string * string) list ->
   unit ->
   (response, string) result
-(** [get_response_sync ?clock ?timeout_sec ~net ?https ~url
-      ~headers ()] performs a [GET url].  Returns [Ok response] with
-    full status / headers / body for callers that need to inspect
-    response headers (e.g. link-preview redirect handling). *)
+(** [get_response_sync ?clock ?timeout_sec ~url ~headers ()] performs
+    a [GET url].  Returns [Ok response] with full status / headers /
+    body for callers that need to inspect response headers (e.g.
+    link-preview redirect handling). *)
 
 val get_sync :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?timeout_sec:float ->
-  net:[> `Network | `Platform of [> `Generic ] ] Eio.Resource.t ->
-  ?https:
-    (Uri.t ->
-     [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t ->
-     [> `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t)
-    option ->
   url:string ->
   headers:(string * string) list ->
   unit ->

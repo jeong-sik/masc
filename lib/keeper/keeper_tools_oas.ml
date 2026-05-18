@@ -441,6 +441,7 @@ let make_keeper_tool_handler
       ~(exec_cache : Masc_exec.Exec_cache.t option)
       ?search_fn
       ?on_tool_called
+      ?clock
       ?(translate_input = fun j -> j)
       ~(failure_counts : failure_counts)
       ()
@@ -524,8 +525,9 @@ let make_keeper_tool_handler
         let output_text = normalize_tool_result ~success:false msg in
         Tool_result.error ~tool_name:name ~start_time:t0 output_text)
       else (
-        let t0 = Time_compat.now () in
-        try
+        let execute_with_observers () =
+          let t0 = Time_compat.now () in
+          try
           let result, duration_ms =
             Inference_utils.timed (fun () ->
               Keeper_exec_tools.execute_keeper_tool_call_with_outcome
@@ -858,7 +860,46 @@ let make_keeper_tool_handler
             ~original_bytes:(String.length normalized_exn)
             ();
           let output_text = Tool_output_validation.cap normalized_exn in
-          Tool_result.error ~tool_name:name ~start_time:t0 output_text)
+          Tool_result.error ~tool_name:name ~start_time:t0 output_text
+        in
+        let gate_clock =
+          match clock with
+          | Some clock -> Some clock
+          | None -> Eio_context.get_clock_opt ()
+        in
+        match gate_clock with
+        | None -> execute_with_observers ()
+        | Some clock ->
+          let start_time = Time_compat.now () in
+          let is_read_only =
+            not
+              (Keeper_exec_tools.has_mutating_side_effect_with_input
+                 ~tool_name:name
+                 ~input)
+          in
+          Tool_resource_gate.with_permit_raw
+            ~clock
+            ~tool_name:name
+            ~arguments:input
+            ~is_read_only
+            ~on_reject:(fun message ->
+              let payload =
+                Yojson.Safe.to_string
+                  (`Assoc
+                     [ "ok", `Bool false
+                     ; "error", `String "tool_resource_gate_saturated"
+                     ; "message", `String message
+                     ; "recoverable", `Bool true
+                     ; "error_class", `String "transient"
+                     ; "failure_class", `String "transient_error"
+                     ])
+              in
+              Tool_result.error
+                ~failure_class:(Some Tool_result.Transient_error)
+                ~tool_name:name
+                ~start_time
+                payload)
+            execute_with_observers)
 ;;
 
 let make_tool_bundle
@@ -867,6 +908,7 @@ let make_tool_bundle
       ~(ctx_snapshot : Keeper_types.working_context)
       ?search_fn
       ?on_tool_called
+      ?clock
       ()
   : tool_bundle
   =
@@ -970,6 +1012,7 @@ let make_tool_bundle
                ~exec_cache
                ?search_fn
                ?on_tool_called
+               ?clock
                ~failure_counts
                ()
            in
@@ -1033,6 +1076,7 @@ let make_tool_bundle
                    ~exec_cache
                    ?search_fn
                    ?on_tool_called
+                   ?clock
                    ~translate_input:r.translate
                    ~failure_counts
                    ()
@@ -1065,8 +1109,10 @@ let make_tools
       ~(ctx_snapshot : Keeper_types.working_context)
       ?search_fn
       ?on_tool_called
+      ?clock
       ()
   : Agent_sdk.Tool.t list
   =
-  (make_tool_bundle ~config ~meta ~ctx_snapshot ?search_fn ?on_tool_called ()).tools
+  (make_tool_bundle ~config ~meta ~ctx_snapshot ?search_fn ?on_tool_called ?clock ())
+    .tools
 ;;

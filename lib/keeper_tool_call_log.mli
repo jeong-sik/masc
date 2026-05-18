@@ -102,6 +102,15 @@ val init : ?cluster_name:string -> base_path:string -> unit -> unit
     opportunistic retention; default is 30 days, and values <= 0 disable
     pruning. *)
 
+val start_flush_fiber : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> unit
+(** [start_flush_fiber ~sw ~clock] enables bounded asynchronous appends and
+    starts a background drain fiber. Callers that only invoke [init] keep the
+    legacy synchronous append behavior, which is useful for CLI and tests. *)
+
+val flush_now : unit -> unit
+(** Drain queued asynchronous appends immediately. Intended for shutdown and
+    focused tests. *)
+
 val store_dir : unit -> string option
 (** [store_dir ()] returns the initialized durable store directory, if any. *)
 
@@ -186,3 +195,10 @@ val read_latest :
 
 val reset_for_testing : unit -> unit
 (** Resets the in-memory store reference. For unit tests only. *)
+
+val queued_count_for_testing : unit -> int
+(** Number of queued asynchronous append records. For unit tests only. *)
+
+val dropped_count_for_testing : unit -> int
+(** Number of records dropped because the asynchronous append queue was full.
+    For unit tests only. *)

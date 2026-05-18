@@ -151,6 +151,37 @@ let test_empty_argv_rejected () =
           with Not_found -> false))
   | Ok _ -> fail "empty argv must not spawn"
 
+let test_devnull_spawn_exits_without_pipe_handles () =
+  match
+    P.spawn_detached_devnull
+      ~argv:[ "/bin/sh"; "-c"; "printf stdout-noise; printf stderr-noise >&2" ]
+      ~env:(env_of_current ())
+      ~cwd:""
+  with
+  | Error e -> failf "spawn_detached_devnull failed: %s" e
+  | Ok h ->
+    check int "pgid equals pid" h.devnull_pid h.devnull_pgid;
+    let exited =
+      wait_until ~timeout_s:2.0 (fun () ->
+        match waitpid_nohang h.devnull_pid with
+        | Some _ -> true
+        | None -> false)
+    in
+    check bool "child exited" true exited
+
+let test_devnull_empty_argv_rejected () =
+  match P.spawn_detached_devnull ~argv:[] ~env:(env_of_current ()) ~cwd:"" with
+  | Error msg ->
+    check bool "error mentions empty" true
+      (let lower = String.lowercase_ascii msg in
+       let re = Str.regexp_string "empty" in
+       try
+         let _ = Str.search_forward re lower 0 in
+         true
+       with
+       | Not_found -> false)
+  | Ok _ -> fail "empty argv must not spawn"
+
 let test_missing_binary_reports_error () =
   (* We can't easily distinguish "fork failed" vs "child exec failed"
      here because exec errors manifest as exit 127 inside the child.
@@ -178,6 +209,10 @@ let () =
           test_case "echo roundtrip" `Quick test_echo_roundtrip;
           test_case "pgid equals pid" `Quick test_pgid_equals_pid;
           test_case "empty argv rejected" `Quick test_empty_argv_rejected;
+          test_case "devnull spawn exits" `Quick
+            test_devnull_spawn_exits_without_pipe_handles;
+          test_case "devnull empty argv rejected" `Quick
+            test_devnull_empty_argv_rejected;
           test_case "missing binary handled" `Quick
             test_missing_binary_reports_error;
         ] );

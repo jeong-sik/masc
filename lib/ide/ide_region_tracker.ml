@@ -55,7 +55,7 @@ let line_range_of_hunk ~start ~lines =
   in
   (start, start + count - 1)
 
-let extract_regions_from_diff ~keeper_id ~file_path ~turn ~diff_text =
+let extract_regions_from_diff ~keeper_id ~file_path ~turn ~tool_name ~diff_text =
   let lines = String.split_on_char '\n' diff_text in
   let rec collect start_line acc remaining =
     match remaining with
@@ -79,7 +79,7 @@ let extract_regions_from_diff ~keeper_id ~file_path ~turn ~diff_text =
                 line_start = s;
                 line_end = e;
                 keeper_id;
-                source = Tool_call { tool_name = "edit_file"; turn };
+                source = Tool_call { tool_name; turn };
                 timestamp_ms = Int64.of_float (Unix.gettimeofday () *. 1000.0);
               }
             in
@@ -88,14 +88,14 @@ let extract_regions_from_diff ~keeper_id ~file_path ~turn ~diff_text =
   in
   collect 1 [] lines
 
-let extract_region_from_full_file ~keeper_id ~file_path ~turn ~content =
+let extract_region_from_full_file ~keeper_id ~file_path ~turn ~tool_name ~content =
   let n = count_lines content in
   {
     file_path;
     line_start = 1;
     line_end = max 1 n;
     keeper_id;
-    source = Tool_call { tool_name = "write_file"; turn };
+    source = Tool_call { tool_name; turn };
     timestamp_ms = Int64.of_float (Unix.gettimeofday () *. 1000.0);
   }
 
@@ -236,7 +236,7 @@ let ingest_tool_call ~base_dir ?(partition = Ide_paths.Legacy) ~keeper_id ~turn 
         let extract_full_file () =
           match List.assoc_opt "content" arguments with
           | Some (`String content) ->
-            [ extract_region_from_full_file ~keeper_id ~file_path:fp ~turn ~content ]
+            [ extract_region_from_full_file ~keeper_id ~file_path:fp ~turn ~tool_name ~content ]
           | _ -> []
         in
         let regions =
@@ -244,7 +244,7 @@ let ingest_tool_call ~base_dir ?(partition = Ide_paths.Legacy) ~keeper_id ~turn 
           else
             match List.assoc_opt "diff" arguments with
             | Some (`String diff_text) ->
-              extract_regions_from_diff ~keeper_id ~file_path:fp ~turn ~diff_text
+              extract_regions_from_diff ~keeper_id ~file_path:fp ~turn ~tool_name ~diff_text
             | _ ->
               (match List.assoc_opt "patch" arguments with
                | Some (`String patch_text) ->
@@ -252,6 +252,7 @@ let ingest_tool_call ~base_dir ?(partition = Ide_paths.Legacy) ~keeper_id ~turn 
                    ~keeper_id
                    ~file_path:fp
                    ~turn
+                   ~tool_name
                    ~diff_text:patch_text
                | _ -> extract_full_file ())
         in

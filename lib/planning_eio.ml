@@ -367,12 +367,27 @@ let get_current_task (config : Coord.config) : string option =
   else Some (String.trim (read_file_content path))
 
 (** Set current task_id for session *)
-let set_current_task (config : Coord.config) ~task_id : unit =
+let set_current_task (config : Coord.config) ~task_id : (unit, string) result =
   let path = current_task_file config in
   ensure_dir (Filename.dirname path);
   if is_directory_path path then
-    ignore (quarantine_dir_under_trash config ~path ~op:"set_current_task" : (string, string) result);
-  write_file_content path task_id
+    match quarantine_dir_under_trash config ~path ~op:"set_current_task" with
+    | Ok _ ->
+      write_file_content path task_id;
+      Ok ()
+    | Error msg ->
+      Log.Keeper.warn
+        "planning_eio.set_current_task: leaving directory in place after \
+         quarantine failure: %s"
+        msg;
+      Error
+        (Printf.sprintf
+           "failed to quarantine existing current_task directory at %s: %s"
+           path msg)
+  else begin
+    write_file_content path task_id;
+    Ok ()
+  end
 
 (** Clear current task *)
 let clear_current_task (config : Coord.config) : unit =

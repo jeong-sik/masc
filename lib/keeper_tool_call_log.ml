@@ -225,182 +225,44 @@ let action_radius_json_for_call
     ()
 ;;
 
-let assoc_opt = function
-  | `Assoc fields -> Some fields
-  | _ -> None
-;;
-
-let assoc_member_opt name = function
-  | `Assoc fields -> List.assoc_opt name fields
-  | _ -> None
-;;
-
-let assoc_string_opt name json =
-  match assoc_member_opt name json with
-  | Some (`String value) when String.trim value <> "" -> Some value
-  | _ -> None
-;;
-
-let assoc_bool_opt name json =
-  match assoc_member_opt name json with
-  | Some (`Bool value) -> Some value
-  | _ -> None
-;;
-
-let route_candidate_has_fields json =
-  match assoc_opt json with
-  | None -> false
-  | Some fields ->
-    List.exists
-      (fun (name, _) ->
-         List.mem
-           name
-           [ "via"
-           ; "sandbox_profile"
-           ; "git_creds_enabled"
-           ; "network_mode"
-           ; "status"
-           ; "effective_sandbox_image"
-           ])
-      fields
-;;
-
-let route_candidate_of_output json =
-  if route_candidate_has_fields json
-  then Some json
-  else (
-    match assoc_member_opt "result" json with
-    | Some result when route_candidate_has_fields result -> Some result
-    | _ ->
-      (match assoc_member_opt "detail" json with
-       | Some detail when route_candidate_has_fields detail -> Some detail
-       | _ -> None))
-;;
-
-let find_substring ~needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  if needle_len = 0
-  then Some 0
-  else (
-    let rec loop idx =
-      if idx + needle_len > haystack_len
-      then None
-      else if String.sub haystack idx needle_len = needle
-      then Some idx
-      else loop (idx + 1)
-    in
-    loop 0)
-;;
-
-let github_pull_url_of_text text =
-  match find_substring ~needle:"https://github.com/" text with
-  | None -> None
-  | Some start ->
-    let len = String.length text in
-    let rec stop idx =
-      if idx >= len
-      then idx
-      else (
-        match text.[idx] with
-        | ' ' | '\n' | '\r' | '\t' | '"' | '\'' | ')' | ']' -> idx
-        | _ -> stop (idx + 1))
-    in
-    let finish = stop start in
-    let url = String.sub text start (finish - start) in
-    if find_substring ~needle:"/pull/" url |> Option.is_some then Some url else None
-;;
-
-let route_output_url output_json output_text =
-  match assoc_string_opt "url" output_json with
-  | Some url when find_substring ~needle:"/pull/" url |> Option.is_some -> Some url
-  | _ -> github_pull_url_of_text output_text
-;;
-
-let route_safe_input_string value =
-  Option.map (Observability_redact.redact_preview ~max_len:max_output_len) value
-;;
-
-let route_text_for_evidence output_text =
-  match Tool_output.decode_from_oas output_text with
-  | Tool_output.Stored { preview; _ } -> preview
-  | Tool_output.Inline value -> value
-;;
-
-let parse_tool_output_json_sanitized text =
-  let text = Safe_ops.sanitize_text_utf8 text in
-  try Ok (Yojson.Safe.from_string text) with
-  | Yojson.Json_error msg -> Error msg
+let parse_tool_output_json_sanitized =
+  Keeper_tool_call_log_route_evidence.parse_tool_output_json_sanitized
 ;;
 
 let route_evidence_json_of_tool_io ~tool_name ~input ~output_text =
-  let route_text = route_text_for_evidence output_text in
-  let parsed_output =
-    match parse_tool_output_json_sanitized route_text with
-    | Ok json -> Some json
-    | Error _ -> None
-  in
-  let route_json =
-    match parsed_output with
-    | Some json -> route_candidate_of_output json
-    | None -> None
-  in
-  let command =
-    match assoc_string_opt "cmd" input with
-    | Some cmd -> Some cmd
-    | None -> assoc_string_opt "op" input
-  in
-  let add_string name value fields =
-    match value with
-    | Some value -> (name, `String value) :: fields
-    | None -> fields
-  in
-  let add_bool name value fields =
-    match value with
-    | Some value -> (name, `Bool value) :: fields
-    | None -> fields
-  in
-  let add_json name value fields =
-    match value with
-    | Some value -> (name, value) :: fields
-    | None -> fields
-  in
-  let output_json = Option.value ~default:(`Assoc []) route_json in
-  let pr_url =
-    match parsed_output with
-    | Some json -> route_output_url json route_text
-    | None -> github_pull_url_of_text route_text
-  in
-  if Option.is_none route_json && Option.is_none pr_url
-  then None
-  else (
-    let fields =
-      []
-      |> add_string "pr_url" pr_url
-      |> add_json
-           "status"
-           (Option.map
-              (Observability_redact.preview_json_strings ~max_len:max_output_len)
-              (assoc_member_opt "status" output_json))
-      |> add_string
-           "effective_sandbox_image"
-           (assoc_string_opt "effective_sandbox_image" output_json)
-      |> add_string "network_mode" (assoc_string_opt "network_mode" output_json)
-      |> add_bool "git_creds_enabled" (assoc_bool_opt "git_creds_enabled" output_json)
-      |> add_string "sandbox_profile" (assoc_string_opt "sandbox_profile" output_json)
-      |> add_string "via" (assoc_string_opt "via" output_json)
-      |> add_string "path" (route_safe_input_string (assoc_string_opt "path" input))
-      |> add_string "cwd" (route_safe_input_string (assoc_string_opt "cwd" input))
-      |> add_string "command" (route_safe_input_string command)
-      |> add_string "tool_name" (Some tool_name)
-    in
-    match fields with
-    | [ ("tool_name", _) ] -> None
-    | _ -> Some (`Assoc (List.rev fields)))
+  Keeper_tool_call_log_route_evidence.route_evidence_json_of_tool_io
+    ~max_output_len
+    ~tool_name
+    ~input
+    ~output_text
 ;;
 
 let store_ref : Dated_jsonl.t option ref = ref None
 let configured_store_ref : (string * string) option ref = ref None
+
+type append_entry =
+  { store : Dated_jsonl.t
+  ; keeper_name : string
+  ; tool_name : string
+  ; trace_id : string option
+  ; json : Yojson.Safe.t
+  }
+
+let append_queue_capacity = 4096
+let append_flush_interval_s = 0.5
+let append_queue_mu = Stdlib.Mutex.create ()
+let append_queue : append_entry Stdlib.Queue.t = Stdlib.Queue.create ()
+let async_append_active = Atomic.make false
+let append_queue_dropped = Atomic.make 0
+
+let with_append_queue_lock f =
+  Stdlib.Mutex.lock append_queue_mu;
+  Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock append_queue_mu) f
+
+let queued_count_for_testing () =
+  with_append_queue_lock (fun () -> Stdlib.Queue.length append_queue)
+
+let dropped_count_for_testing () = Atomic.get append_queue_dropped
 
 let retention_days () =
   (* Opt-in: default disabled. Operators set MASC_TOOL_CALL_LOG_RETENTION_DAYS
@@ -451,6 +313,9 @@ let init ?cluster_name ~base_path () =
 let reset_for_testing () =
   store_ref := None;
   configured_store_ref := None;
+  Atomic.set async_append_active false;
+  Atomic.set append_queue_dropped 0;
+  with_append_queue_lock (fun () -> Stdlib.Queue.clear append_queue);
   Hashtbl.reset pending_truncation;
   Hashtbl.reset pending_turn_context
 ;;
@@ -525,6 +390,106 @@ let record_unavailable_coverage_gap ~keeper_name ~tool_name ?trace_id () =
          keeper_name
          tool_name
          (Printexc.to_string gap_exn))
+;;
+
+let append_to_store (entry : append_entry) =
+  try Dated_jsonl.append entry.store entry.json with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    let trace_id = entry.trace_id in
+    Keeper_fd_pressure.note_exception ~site:"keeper_tool_call_log.append" exn;
+    Keeper_disk_pressure.note_exception ~site:"keeper_tool_call_log.append" exn;
+    Log.Misc.warn
+      "keeper_tool_call_log: append failed for %s/%s: %s"
+      entry.keeper_name
+      entry.tool_name
+      (Printexc.to_string exn);
+    record_append_coverage_gap
+      ~store:entry.store
+      ~keeper_name:entry.keeper_name
+      ~tool_name:entry.tool_name
+      ?trace_id
+      exn
+;;
+
+let take_queued_append () =
+  with_append_queue_lock (fun () ->
+    if Stdlib.Queue.is_empty append_queue
+    then None
+    else Some (Stdlib.Queue.take append_queue))
+;;
+
+let drain_queued_appends () =
+  let count = ref 0 in
+  let rec loop () =
+    match take_queued_append () with
+    | None -> !count
+    | Some entry ->
+      append_to_store entry;
+      incr count;
+      loop ()
+  in
+  loop ()
+;;
+
+let flush_now () = ignore (drain_queued_appends () : int)
+
+let enqueue_append (entry : append_entry) =
+  let dropped =
+    with_append_queue_lock (fun () ->
+      if Stdlib.Queue.length append_queue >= append_queue_capacity
+      then true
+      else (
+        Stdlib.Queue.add entry append_queue;
+        false))
+  in
+  if dropped
+  then (
+    Prometheus.inc_counter Prometheus.metric_keeper_tool_call_log_queue_dropped ();
+    let dropped_count = Atomic.fetch_and_add append_queue_dropped 1 + 1 in
+    if dropped_count = 1 || dropped_count mod 1024 = 0
+    then
+      Log.Misc.warn
+        "keeper_tool_call_log: dropped %d record(s) because async append queue is full"
+        dropped_count)
+;;
+
+let append_or_enqueue entry =
+  if Atomic.get async_append_active then enqueue_append entry else append_to_store entry
+;;
+
+let start_flush_fiber ~sw ~clock =
+  Atomic.set async_append_active true;
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Log.Misc.info
+      "keeper_tool_call_log: async flush fiber started (interval=%.1fs, capacity=%d)"
+      append_flush_interval_s
+      append_queue_capacity;
+    let rec loop () =
+      match Eio.Time.sleep clock append_flush_interval_s with
+      | exception Eio.Cancel.Cancelled _ -> `Stop_daemon
+      | () ->
+        (match drain_queued_appends () with
+         | _ -> ()
+         | exception Eio.Cancel.Cancelled _ -> ()
+         | exception exn ->
+           Log.Misc.warn
+             "keeper_tool_call_log: async flush iteration failed: %s"
+             (Printexc.to_string exn));
+        loop ()
+    in
+    loop ());
+  Shutdown.register ~name:"keeper_tool_call_log_flush" ~priority:24 (fun () ->
+    try
+      let n = drain_queued_appends () in
+      if n > 0
+      then Log.Misc.info "keeper_tool_call_log: shutdown flush wrote %d records" n
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+      Log.Misc.warn
+        "keeper_tool_call_log: shutdown flush failed: %s"
+        (Printexc.to_string exn))
 ;;
 
 (** [blob_aware_output_json safe_output] wraps a tool-output string for
@@ -949,17 +914,7 @@ let log_call
          captures) that would corrupt the JSONL file and cause downstream
          readers — including the dashboard — to silently skip entire rows. *)
       let safe_json = Inference_utils.sanitize_json_utf8 json in
-      (try Dated_jsonl.append store safe_json with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-         Keeper_fd_pressure.note_exception ~site:"keeper_tool_call_log.append" exn;
-         Keeper_disk_pressure.note_exception ~site:"keeper_tool_call_log.append" exn;
-         Log.Misc.warn
-           "keeper_tool_call_log: append failed for %s/%s: %s"
-           keeper_name
-           tool_name
-           (Printexc.to_string exn);
-         record_append_coverage_gap ~store ~keeper_name ~tool_name ?trace_id exn))
+      append_or_enqueue { store; keeper_name; tool_name; trace_id; json = safe_json })
 ;;
 
 let read_recent ?keeper_name ?(n = 100) () : Yojson.Safe.t list =

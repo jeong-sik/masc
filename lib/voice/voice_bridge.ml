@@ -275,9 +275,9 @@ let rec retry_with_backoff ~clock ~attempt ~max_attempts ~backoff_sec operation 
 ;;
 
 (** Make a single HTTP POST request to the Voice MCP server. *)
-let single_voice_mcp_call ~net ~uri ~headers_list ~body_str =
+let single_voice_mcp_call ~net:_ ~uri ~headers_list ~body_str =
   match
-    Masc_http_client.post_sync ~net ~url:(Uri.to_string uri)
+    Masc_http_client.post_sync ~url:(Uri.to_string uri)
       ~headers:headers_list ~body:body_str ()
   with
   | Ok (code, body) when code >= 200 && code < 300 ->
@@ -517,8 +517,7 @@ let is_voice_server_available ~sw:_ ~clock ~net =
           | Error _ -> voice_health_uri ()
         in
         match
-          Masc_http_client.get_sync ~net ~url:(Uri.to_string uri)
-            ~headers:[] ()
+          Masc_http_client.get_sync ~url:(Uri.to_string uri) ~headers:[] ()
         with
         | Ok (code, _) ->
           let available = code >= 200 && code < 300 in
@@ -806,8 +805,7 @@ let health_check ~sw:_ ~clock:_ ~net () =
       | Error _ -> voice_health_uri ()
     in
     match
-      Masc_http_client.get_response_sync ~net ~url:(Uri.to_string uri)
-        ~headers:[] ()
+      Masc_http_client.get_response_sync ~url:(Uri.to_string uri) ~headers:[] ()
     with
     | Error msg ->
       (* RFC-0106: re-raise Eio.Cancel.Cancelled when the health-check

@@ -208,6 +208,7 @@
   keeper_turn_lifecycle
   keeper_msg_async
   keeper_event_bus
+  keeper_heartbeat_liveness_pulse
   keeper_supervisor_alive_but_stuck
   keeper_supervisor_liveness_recovery
   keeper_supervisor_restart_noop

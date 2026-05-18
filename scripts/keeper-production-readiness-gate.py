@@ -23,10 +23,12 @@ from typing import Any
 ERROR_STATUSES = {"error", "failed", "failure", "timeout", "cancelled", "canceled"}
 
 
-def default_base_path() -> str:
-    return (
-        os.environ.get("MASC_BASE_PATH") or os.environ.get("ME_ROOT") or str(Path.cwd())
-    )
+def default_base_path() -> str | None:
+    # RFC-0121: MASC_BASE_PATH is the sole canonical source. No ME_ROOT
+    # alias, no cwd fallback. Argparse handles the None case by surfacing
+    # an explicit error rather than silently writing to the wrong root.
+    value = os.environ.get("MASC_BASE_PATH", "").strip()
+    return value or None
 
 
 @dataclass
@@ -822,7 +824,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--base-path",
         default=default_base_path(),
-        help="MASC base path containing .masc (default: MASC_BASE_PATH, then ME_ROOT, then cwd).",
+        help="MASC base path containing .masc (required; reads MASC_BASE_PATH).",
     )
     parser.add_argument(
         "--keeper", action="append", default=[], help="Keeper name to scan. Repeatable."
@@ -870,6 +872,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     thresholds = thresholds_from_args(args)
+    if args.base_path is None:
+        raise SystemExit(
+            "Error: MASC_BASE_PATH is required (or pass --base-path PATH). "
+            "RFC-0121 forbids ME_ROOT/cwd fallback."
+        )
     summary = evaluate(
         base_path=Path(args.base_path).expanduser(),
         keepers=args.keeper,

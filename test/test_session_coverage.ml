@@ -376,6 +376,13 @@ let test_connected_agents_empty () =
   let agents = Session.connected_agents registry in
   check (list string) "empty" [] agents
 
+let test_registry_works_before_actor_loop_starts () =
+  Eio_main.run @@ fun _env ->
+  let registry = Session.create () in
+  let (_ : Session.session) = Session.register registry ~agent_name:"alice" in
+  let agents = Session.connected_agents registry |> List.sort String.compare in
+  check (list string) "registered before start_loop" [ "alice" ] agents
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -447,5 +454,7 @@ let () =
     ];
     "connected_agents", [
       test_case "empty" `Quick test_connected_agents_empty;
+      test_case "pre-loop registry calls do not hang" `Quick
+        test_registry_works_before_actor_loop_starts;
     ];
   ]

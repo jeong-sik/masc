@@ -83,8 +83,9 @@ let dedupe_keep_order items =
     items
 
 let versioned_config_root_candidates () =
-  let cwd_candidate = Filename.concat (Sys.getcwd ()) "config" in
-  let cwd_ancestor_candidate = config_root_from_ancestor (Sys.getcwd ()) in
+  let cwd = Config_dir_resolver.current_working_dir () in
+  let cwd_candidate = Filename.concat cwd "config" in
+  let cwd_ancestor_candidate = config_root_from_ancestor cwd in
   let exe_candidate =
     match project_root_from_executable () with
     | Some root -> Some (Filename.concat root "config")
@@ -203,7 +204,7 @@ let startup_config_resolution ~base_path =
   Config_dir_resolver.resolve_with
     Config_dir_resolver.
       {
-        cwd = Sys.getcwd ();
+        cwd = Config_dir_resolver.current_working_dir ();
         executable_name = Sys.executable_name;
         env_base_path = Some base_path;
         env_config_dir = Config_dir_resolver.current_env_config_dir_opt ();

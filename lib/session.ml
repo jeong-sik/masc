@@ -34,15 +34,24 @@ type msg =
   | Get_sessions of session AgentMap.t Eio.Promise.u
   | Restore_from_disk_req of string * float * unit Eio.Promise.u
 
-(** Session registry - manages all connected agents *)
-type registry = {
-  config: rate_limit_config;
-  mailbox: msg Eio.Stream.t;
-}
-
 type registry_state = {
   sessions: session AgentMap.t;
   rate_trackers: rate_tracker AgentMap.t;
+}
+
+(** Session registry - manages all connected agents.
+
+    Most server paths call [start_loop] and serialize updates through
+    [mailbox]. A few pure constructors and unit tests intentionally create a
+    registry without an Eio switch; those calls use [state] synchronously via
+    the same [process_msg] transition function instead of parking forever on a
+    promise with no actor consumer. *)
+type registry = {
+  config: rate_limit_config;
+  mailbox: msg Eio.Stream.t;
+  state: registry_state ref;
+  state_mutex: Mutex.t;
+  loop_started: bool Atomic.t;
 }
 
 (* Bound: 10x the per-session [max_notification_queue] (1000), sized to
@@ -51,9 +60,17 @@ type registry_state = {
    heap exhaustion when the consumer fiber stalled. *)
 let max_registry_mailbox = 10_000
 
+let empty_registry_state () = {
+  sessions = AgentMap.empty;
+  rate_trackers = AgentMap.empty;
+}
+
 let create ?(config = default_rate_limit) () = {
   config;
   mailbox = Eio.Stream.create max_registry_mailbox;
+  state = ref (empty_registry_state ());
+  state_mutex = Mutex.create ();
+  loop_started = Atomic.make false;
 }
 
 let create_tracker now = {
@@ -268,61 +285,80 @@ let process_msg config state msg =
       Eio.Promise.resolve p ();
       !state'
 
+let process_registry_msg registry msg =
+  Stdlib.Mutex.protect registry.state_mutex (fun () ->
+    registry.state := process_msg registry.config !(registry.state) msg)
+
+let dispatch registry msg =
+  if Atomic.get registry.loop_started then Eio.Stream.add registry.mailbox msg
+  else process_registry_msg registry msg
+
+let await_if_needed promise =
+  match Eio.Promise.peek promise with
+  | Some value -> value
+  | None -> Eio.Promise.await promise
+
 let start_loop registry ~sw =
+  if Atomic.compare_and_set registry.loop_started false true then
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop state =
       let msg = Eio.Stream.take registry.mailbox in
-      let state' = process_msg registry.config state msg in
+      let state' =
+        Stdlib.Mutex.protect registry.state_mutex (fun () ->
+          let state' = process_msg registry.config state msg in
+          registry.state := state';
+          state')
+      in
       loop state'
     in
-    loop { sessions = AgentMap.empty; rate_trackers = AgentMap.empty }
+    loop !(registry.state)
   )
 
 (** Helpers to send messages to the registry *)
 
 let register registry ~agent_name =
   let p, r = Eio.Promise.create () in
-  Eio.Stream.add registry.mailbox (Register (agent_name, Time_compat.now (), r));
-  Eio.Promise.await p
+  dispatch registry (Register (agent_name, Time_compat.now (), r));
+  await_if_needed p
 
 let unregister registry ~agent_name =
-  Eio.Stream.add registry.mailbox (Unregister agent_name)
+  dispatch registry (Unregister agent_name)
 
 let update_activity registry ~agent_name ?is_listening () =
-  Eio.Stream.add registry.mailbox (Update_activity (agent_name, is_listening, Time_compat.now ()))
+  dispatch registry (Update_activity (agent_name, is_listening, Time_compat.now ()))
 
 let check_rate_limit_ex registry ~agent_name ~category ~role =
   let p, r = Eio.Promise.create () in
-  Eio.Stream.add registry.mailbox (Check_rate_limit_req (agent_name, category, role, Time_compat.now (), r));
-  Eio.Promise.await p
+  dispatch registry (Check_rate_limit_req (agent_name, category, role, Time_compat.now (), r));
+  await_if_needed p
 
 let check_rate_limit registry ~agent_name =
   check_rate_limit_ex registry ~agent_name ~category:GeneralLimit ~role:Worker
 
 let get_rate_limit_status registry ~agent_name ~role =
   let p, r = Eio.Promise.create () in
-  Eio.Stream.add registry.mailbox (Get_rate_limit_status_req (agent_name, role, Time_compat.now (), r));
-  Eio.Promise.await p
+  dispatch registry (Get_rate_limit_status_req (agent_name, role, Time_compat.now (), r));
+  await_if_needed p
 
 let push_message registry ~from_agent ~content ~mention =
   let p, r = Eio.Promise.create () in
-  Eio.Stream.add registry.mailbox (Push_message { from_agent; content; mention; timestamp = now_iso (); reply = r });
-  Eio.Promise.await p
+  dispatch registry (Push_message { from_agent; content; mention; timestamp = now_iso (); reply = r });
+  await_if_needed p
 
 let push_notification_to_active_agents registry ~(event : Yojson.Safe.t) =
   let p, r = Eio.Promise.create () in
-  Eio.Stream.add registry.mailbox (Push_notification (event, r));
-  Eio.Promise.await p
+  dispatch registry (Push_notification (event, r));
+  await_if_needed p
 
 let get_session registry ~agent_name =
   let p, r = Eio.Promise.create () in
-  Eio.Stream.add registry.mailbox (Get_session (agent_name, r));
-  Eio.Promise.await p
+  dispatch registry (Get_session (agent_name, r));
+  await_if_needed p
 
 let get_sessions registry =
   let p, r = Eio.Promise.create () in
-  Eio.Stream.add registry.mailbox (Get_sessions r);
-  Eio.Promise.await p
+  dispatch registry (Get_sessions r);
+  await_if_needed p
 
 let pop_message registry ~agent_name =
   match get_session registry ~agent_name with
@@ -423,8 +459,8 @@ let connected_agents registry =
 
 let restore_from_disk registry ~agents_path =
   let p, r = Eio.Promise.create () in
-  Eio.Stream.add registry.mailbox (Restore_from_disk_req (agents_path, Time_compat.now (), r));
-  Eio.Promise.await p
+  dispatch registry (Restore_from_disk_req (agents_path, Time_compat.now (), r));
+  await_if_needed p
 
 (* ============================================ *)
 (* MCP 2025-11-25 Spec: Mcp-Session-Id          *)
@@ -455,6 +491,9 @@ module McpSessionStore = struct
   let max_mcp_session_mailbox = 10_000
 
   let mailbox = Eio.Stream.create max_mcp_session_mailbox
+  let state = ref AgentMap.empty
+  let state_mutex = Mutex.create ()
+  let loop_started = Atomic.make false
 
   let max_age = ref Env_config.Session.max_age_seconds
 
@@ -520,34 +559,49 @@ module McpSessionStore = struct
         Eio.Promise.resolve p mem;
         if mem then AgentMap.remove id state else state
 
+  let process_store_msg msg =
+    Stdlib.Mutex.protect state_mutex (fun () ->
+      state := process_msg !state msg)
+
+  let dispatch msg =
+    if Atomic.get loop_started then Eio.Stream.add mailbox msg
+    else process_store_msg msg
+
   let start_loop ~sw =
+    if Atomic.compare_and_set loop_started false true then
     Eio.Fiber.fork ~sw (fun () ->
-      let rec loop state =
+      let rec loop store_state =
         let msg = Eio.Stream.take mailbox in
-        loop (process_msg state msg)
+        let state' =
+          Stdlib.Mutex.protect state_mutex (fun () ->
+            let state' = process_msg store_state msg in
+            state := state';
+            state')
+        in
+        loop state'
       in
-      loop AgentMap.empty
+      loop !state
     )
 
   let generate_id () =
     let p, r = Eio.Promise.create () in
-    Eio.Stream.add mailbox (Generate_id r);
-    Eio.Promise.await p
+    dispatch (Generate_id r);
+    await_if_needed p
 
   let create ?agent_name () =
     let p, r = Eio.Promise.create () in
-    Eio.Stream.add mailbox (Create (agent_name, Time_compat.now (), r));
-    Eio.Promise.await p
+    dispatch (Create (agent_name, Time_compat.now (), r));
+    await_if_needed p
 
   let get session_id =
     let p, r = Eio.Promise.create () in
-    Eio.Stream.add mailbox (Get (session_id, Time_compat.now (), r));
-    Eio.Promise.await p
+    dispatch (Get (session_id, Time_compat.now (), r));
+    await_if_needed p
 
   let cleanup_stale () =
     let p, r = Eio.Promise.create () in
-    Eio.Stream.add mailbox (Cleanup_stale (Time_compat.now (), !max_age, r));
-    Eio.Promise.await p
+    dispatch (Cleanup_stale (Time_compat.now (), !max_age, r));
+    await_if_needed p
 
   let to_json (s : mcp_session) : Yojson.Safe.t =
     `Assoc [
@@ -561,13 +615,13 @@ module McpSessionStore = struct
 
   let list_all () =
     let p, r = Eio.Promise.create () in
-    Eio.Stream.add mailbox (List_all r);
-    Eio.Promise.await p
+    dispatch (List_all r);
+    await_if_needed p
 
   let remove id =
     let p, r = Eio.Promise.create () in
-    Eio.Stream.add mailbox (Remove (id, r));
-    Eio.Promise.await p
+    dispatch (Remove (id, r));
+    await_if_needed p
 end
 
 let start_mcp_session_cleanup_loop ~sw ~clock ?(interval=Env_config.Session.max_age_seconds /. 10.0) () =

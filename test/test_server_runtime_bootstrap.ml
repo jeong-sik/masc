@@ -1342,6 +1342,10 @@ let test_health_response_survives_deleted_cwd () =
       with_env "MASC_BASE_PATH" (Some dir) @@ fun () ->
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       let saved_cwd = Sys.getcwd () in
+      let expected_base_path =
+        try Unix.realpath dir with
+        | Unix.Unix_error _ -> dir
+      in
       Config_dir_resolver.reset ();
       Unix.chdir deleted_cwd;
       Unix.rmdir deleted_cwd;
@@ -1361,7 +1365,7 @@ let test_health_response_survives_deleted_cwd () =
             (json |> member "health_detail" |> to_string);
           Alcotest.(check string)
             "deleted cwd resolver falls back to base path"
-            dir
+            expected_base_path
             (json
              |> member "paths"
              |> member "effective_base_path"

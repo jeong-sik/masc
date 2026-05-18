@@ -78,7 +78,7 @@ let detect ?cwd ?env_masc_base_path ?strict ?input_base_path ?resolution_source
   let cwd =
     match cwd with
     | Some path -> path
-    | None -> Sys.getcwd ()
+    | None -> Config_dir_resolver.current_working_dir ()
   in
   let cwd_norm = normalize_path ~cwd cwd in
   let effective_base_norm = normalize_path ~cwd effective_base_path in

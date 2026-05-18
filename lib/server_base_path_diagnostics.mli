@@ -34,7 +34,8 @@ type t = {
     ?resolution_source ~effective_base_path ~effective_masc_root ()]
     observes paths from disk + env and returns a populated {!t}.
 
-    - [cwd] defaults to [Sys.getcwd ()].
+    - [cwd] defaults to the current working directory, with the same deleted-cwd
+      fallback used by {!Config_dir_resolver.current_working_dir}.
     - [strict] defaults to the [MASC_BASE_PATH_STRICT] env flag
       (accepts [1|true|yes]).
     - [resolution_source] falls back to

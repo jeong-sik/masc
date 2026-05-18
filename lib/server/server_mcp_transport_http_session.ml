@@ -21,11 +21,7 @@ let default_base_path () =
      own .masc must not silently inherit a stale parent MASC_BASE_PATH.
      When no explicit base path is set, use the current checkout/cwd rather
      than HOME so runtime artifacts stay under a visible base path. *)
-  let requested_path =
-    match (Host_config.from_env ()).base_path with
-    | Some _ -> Sys.getcwd ()
-    | None -> Sys.getcwd ()
-  in
+  let requested_path = Config_dir_resolver.current_working_dir () in
   Coord_utils_backend_setup.resolve_server_default_base_path requested_path
 
 let is_valid_protocol_version version =

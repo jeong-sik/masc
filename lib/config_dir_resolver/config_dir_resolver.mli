@@ -56,6 +56,10 @@ val keeper_runtime_toml_filename : string
 val inputs_from_env : unit -> inputs
 (** Snapshot current environment (cwd, executable, env vars). *)
 
+val current_working_dir : unit -> string
+(** Current working directory, falling back to an absolute host root when the
+    process cwd has been deleted. *)
+
 val resolve : unit -> resolution
 (** Cached resolution. First call evaluates, subsequent calls return the cache. *)
 

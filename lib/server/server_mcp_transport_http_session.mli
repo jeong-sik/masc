@@ -184,7 +184,8 @@ val get_protocol_version_for_session :
 
 val default_base_path : unit -> string
 (** Resolves the launcher-guard-aware default base path.
-    The server default starts from [Sys.getcwd ()] and routes through
+    The server default starts from the deleted-cwd-safe current working
+    directory and routes through
     {!Coord_utils_backend_setup.resolve_server_default_base_path}.
 
     This intentionally avoids deriving the base path from [HOME]: a direct

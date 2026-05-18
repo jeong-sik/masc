@@ -948,6 +948,34 @@ let write_keeper_meta_exn config meta =
   | Ok () -> ()
   | Error err -> Alcotest.fail ("keeper meta write failed: " ^ err)
 
+let with_running_keeper_metas config metas f =
+  let base_path = config.Coord.base_path in
+  List.iter
+    (fun (meta : Keeper_types.keeper_meta) ->
+      Keeper_registry.unregister ~base_path meta.name;
+      ignore (Keeper_registry.register ~base_path meta.name meta))
+    metas;
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter
+        (fun (meta : Keeper_types.keeper_meta) ->
+          Keeper_registry.unregister ~base_path meta.name)
+        metas)
+    f
+
+let mark_keeper_failing config (meta : Keeper_types.keeper_meta) =
+  match
+    Keeper_registry.dispatch_event
+      ~base_path:config.Coord.base_path
+      meta.name
+      (Keeper_state_machine.Turn_failed { consecutive = 1; max_allowed = 10 })
+  with
+  | Ok _ -> ()
+  | Error err ->
+    Alcotest.fail
+      ("keeper failing transition failed: "
+       ^ Keeper_state_machine.transition_error_to_string err)
+
 let test_health_json_surfaces_durable_paused_keepers () =
   with_temp_dir "health-durable-paused-keepers" (fun dir ->
       let config_root = make_config_root dir in
@@ -1070,8 +1098,15 @@ let test_health_json_surfaces_durable_paused_keepers () =
             (fleet_safety |> member "minimum_running_fibers" |> to_int);
           Alcotest.(check string) "health marks fleet blocked" "blocked"
             (fleet_safety |> member "status" |> to_string);
-          Alcotest.(check string) "health marks fleet blocker" "no_running_fibers"
+          Alcotest.(check string) "health marks fleet blocker"
+            "no_executable_keeper_fibers"
             (fleet_safety |> member "blocker" |> to_string);
+          Alcotest.(check bool) "health marks no executable fibers" true
+            (fleet_safety |> member "no_executable_keeper_fibers" |> to_bool);
+          Alcotest.(check bool) "health marks capacity below target" true
+            (fleet_safety |> member "reaction_capacity_below_target" |> to_bool);
+          Alcotest.(check int) "health exposes capacity shortfall" 3
+            (fleet_safety |> member "reaction_capacity_shortfall_count" |> to_int);
           Alcotest.(check bool) "health fleet asks for operator action" true
             (fleet_safety |> member "operator_action_required" |> to_bool);
           Alcotest.(check string) "health reaction ledger degraded"
@@ -1082,6 +1117,115 @@ let test_health_json_surfaces_durable_paused_keepers () =
           Alcotest.(check bool) "health reaction ledger asks for operator action"
             true
             (reaction_ledger |> member "operator_action_required" |> to_bool)))
+
+let test_health_json_degrades_when_reaction_capacity_below_target () =
+  with_temp_dir "health-reaction-capacity-below-target" (fun dir ->
+    let config_root = make_config_root dir in
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let config = state.Mcp_server.room_config in
+        let paused =
+          make_keeper_meta ~name:"capacity-paused" ~trace_id:"trace-capacity-paused"
+            ~paused:true ()
+        in
+        let running_a =
+          make_keeper_meta ~name:"capacity-running-a"
+            ~trace_id:"trace-capacity-running-a" ()
+        in
+        let running_b =
+          make_keeper_meta ~name:"capacity-running-b"
+            ~trace_id:"trace-capacity-running-b" ()
+        in
+        List.iter (write_keeper_meta_exn config) [ paused; running_a; running_b ];
+        with_running_keeper_metas config [ running_a; running_b ] (fun () ->
+          let request = Httpun.Request.create `GET "/health" in
+          let json = Server_routes_http_runtime.make_health_json request in
+          let open Yojson.Safe.Util in
+          let fleet_safety = json |> member "keeper_fleet_safety" in
+          Alcotest.(check int) "health exposes running reaction capacity" 2
+            (fleet_safety |> member "effective_reaction_capacity_count" |> to_int);
+          Alcotest.(check int) "health exposes executable reaction capacity" 2
+            (fleet_safety |> member "executable_reaction_capacity_count" |> to_int);
+          Alcotest.(check int) "health exposes failing keeper count" 0
+            (fleet_safety |> member "failing_keeper_fiber_count" |> to_int);
+          Alcotest.(check int) "health exposes target reaction capacity" 4
+            (fleet_safety |> member "target_reaction_capacity_count" |> to_int);
+          Alcotest.(check int) "health exposes minimum running fibers" 2
+            (fleet_safety |> member "minimum_running_fibers" |> to_int);
+          Alcotest.(check bool) "health is not below minimum margin" false
+            (fleet_safety |> member "low_running_fiber_margin" |> to_bool);
+          Alcotest.(check bool) "health marks capacity below target" true
+            (fleet_safety |> member "reaction_capacity_below_target" |> to_bool);
+          Alcotest.(check int) "health exposes capacity shortfall" 2
+            (fleet_safety |> member "reaction_capacity_shortfall_count" |> to_int);
+          Alcotest.(check int) "health exposes executable capacity shortfall" 2
+            (fleet_safety
+             |> member "executable_reaction_capacity_shortfall_count"
+             |> to_int);
+          Alcotest.(check int) "health exposes blocked shortfall" 2
+            (fleet_safety |> member "blocked_count" |> to_int);
+          Alcotest.(check string) "health marks fleet degraded" "degraded"
+            (fleet_safety |> member "status" |> to_string);
+          Alcotest.(check string) "health marks target-capacity blocker"
+            "reaction_capacity_below_target"
+            (fleet_safety |> member "blocker" |> to_string);
+          Alcotest.(check bool) "health fleet asks for operator action" true
+            (fleet_safety |> member "operator_action_required" |> to_bool))))
+
+let test_health_json_distinguishes_failing_executable_keepers () =
+  with_temp_dir "health-failing-executable-keepers" (fun dir ->
+    let config_root = make_config_root dir in
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let config = state.Mcp_server.room_config in
+        let paused =
+          make_keeper_meta ~name:"capacity-paused" ~trace_id:"trace-capacity-paused"
+            ~paused:true ()
+        in
+        let failing =
+          make_keeper_meta ~name:"capacity-failing"
+            ~trace_id:"trace-capacity-failing" ()
+        in
+        List.iter (write_keeper_meta_exn config) [ paused; failing ];
+        with_running_keeper_metas config [ failing ] (fun () ->
+          mark_keeper_failing config failing;
+          let request = Httpun.Request.create `GET "/health" in
+          let json = Server_routes_http_runtime.make_health_json request in
+          let open Yojson.Safe.Util in
+          let fleet_safety = json |> member "keeper_fleet_safety" in
+          Alcotest.(check int) "health exposes no healthy running fibers" 0
+            (fleet_safety |> member "healthy_running_keeper_fiber_count" |> to_int);
+          Alcotest.(check int) "health exposes failing keeper fibers" 1
+            (fleet_safety |> member "failing_keeper_fiber_count" |> to_int);
+          Alcotest.(check int) "health exposes executable keeper fibers" 1
+            (fleet_safety |> member "executable_keeper_fiber_count" |> to_int);
+          Alcotest.(check bool) "health marks no running fibers" true
+            (fleet_safety |> member "no_running_fibers" |> to_bool);
+          Alcotest.(check bool) "health does not mark no executable fibers" false
+            (fleet_safety |> member "no_executable_keeper_fibers" |> to_bool);
+          Alcotest.(check string) "health marks degraded not blocked" "degraded"
+            (fleet_safety |> member "status" |> to_string);
+          Alcotest.(check string) "health marks healthy-running blocker"
+            "no_healthy_running_keeper_fibers"
+            (fleet_safety |> member "blocker" |> to_string);
+          Alcotest.(check bool) "health still asks for operator action" true
+            (fleet_safety |> member "operator_action_required" |> to_bool))))
 
 let test_health_json_reaction_ledger_cursor_sweep_clears_pending () =
   with_temp_dir "health-reaction-ledger-cursor-sweep" (fun dir ->
@@ -2814,6 +2958,12 @@ let () =
           Alcotest.test_case
             "health json surfaces durable paused keepers"
             `Quick test_health_json_surfaces_durable_paused_keepers;
+          Alcotest.test_case
+            "health json degrades when reaction capacity is below target"
+            `Quick test_health_json_degrades_when_reaction_capacity_below_target;
+          Alcotest.test_case
+            "health json distinguishes failing executable keepers"
+            `Quick test_health_json_distinguishes_failing_executable_keepers;
           Alcotest.test_case
             "health json reaction ledger cursor sweep clears pending"
             `Quick test_health_json_reaction_ledger_cursor_sweep_clears_pending;

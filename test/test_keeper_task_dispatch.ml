@@ -81,6 +81,23 @@ let set_task_created_at_by_title config ~title ~created_at =
   Coord.write_backlog config { backlog with tasks; version = backlog.version + 1 }
 ;;
 
+let set_task_status_by_title config ~title ~task_status =
+  let backlog = Coord.read_backlog config in
+  let seen = ref false in
+  let tasks =
+    List.map
+      (fun (task : Masc_domain.task) ->
+         if String.equal task.title title
+         then (
+           seen := true;
+           { task with task_status })
+         else task)
+      backlog.tasks
+  in
+  if not !seen then failwith (Printf.sprintf "task not found: %s" title);
+  Coord.write_backlog config { backlog with tasks; version = backlog.version + 1 }
+;;
+
 let transition_task_exn ?notes config ~agent_name ~task_id ~action () =
   match Coord.transition_task_r config ~agent_name ~task_id ~action ?notes () with
   | Ok _ -> ()
@@ -636,6 +653,108 @@ let test_run_context_uses_reconciled_current_task_id () =
         "run context exposes reconciled current_task_id"
         None
         (current_task_id_string ctx.Keeper_run_context.meta)))
+;;
+
+let test_multiple_active_tasks_selects_deterministic_current_task () =
+  with_room (fun config ->
+    let meta = make_test_meta ~name:"multi-task-keeper" () in
+    with_registered_keeper config meta (fun () ->
+      ignore
+        (Coord.add_task
+           config
+           ~title:"Older low priority"
+           ~priority:4
+           ~description:"older active work");
+      ignore
+        (Coord.add_task
+           config
+           ~title:"Newer high priority"
+           ~priority:1
+           ~description:"newer active work");
+      set_task_created_at_by_title
+        config
+        ~title:"Older low priority"
+        ~created_at:"2026-05-01T00:00:00Z";
+      set_task_created_at_by_title
+        config
+        ~title:"Newer high priority"
+        ~created_at:"2026-05-02T00:00:00Z";
+      set_task_status_by_title
+        config
+        ~title:"Older low priority"
+        ~task_status:
+          (Masc_domain.Claimed
+             { assignee = meta.agent_name; claimed_at = "2026-05-01T00:01:00Z" });
+      set_task_status_by_title
+        config
+        ~title:"Newer high priority"
+        ~task_status:
+          (Masc_domain.Claimed
+             { assignee = meta.agent_name; claimed_at = "2026-05-02T00:01:00Z" });
+      (match Keeper_types.write_meta config meta with
+       | Ok () -> ()
+       | Error msg -> fail msg);
+      let high_priority_task = task_by_title config "Newer high priority" in
+      let synced =
+        Keeper_agent_tool_surface.sync_current_task_id_from_backlog ~config meta
+      in
+      check
+        (option string)
+        "highest priority active task selected"
+        (Some high_priority_task.id)
+        (current_task_id_string synced)))
+;;
+
+let test_multiple_active_tasks_preserves_existing_current_task () =
+  with_room (fun config ->
+    let base_meta = make_test_meta ~name:"sticky-task-keeper" () in
+    with_registered_keeper config base_meta (fun () ->
+      ignore
+        (Coord.add_task
+           config
+           ~title:"Sticky current"
+           ~priority:5
+           ~description:"active current work");
+      ignore
+        (Coord.add_task
+           config
+           ~title:"Competing current"
+           ~priority:1
+           ~description:"active competing work");
+      let sticky = task_by_title config "Sticky current" in
+      let sticky_task_id =
+        match Keeper_id.Task_id.of_string sticky.id with
+        | Ok task_id -> task_id
+        | Error msg -> fail msg
+      in
+      set_task_status_by_title
+        config
+        ~title:"Sticky current"
+        ~task_status:
+          (Masc_domain.InProgress
+             { assignee = base_meta.agent_name
+             ; started_at = "2026-05-01T00:01:00Z"
+             });
+      set_task_status_by_title
+        config
+        ~title:"Competing current"
+        ~task_status:
+          (Masc_domain.Claimed
+             { assignee = base_meta.agent_name
+             ; claimed_at = "2026-05-02T00:01:00Z"
+             });
+      let meta = { base_meta with current_task_id = Some sticky_task_id } in
+      (match Keeper_types.write_meta config meta with
+       | Ok () -> ()
+       | Error msg -> fail msg);
+      let synced =
+        Keeper_agent_tool_surface.sync_current_task_id_from_backlog ~config meta
+      in
+      check
+        (option string)
+        "existing active current task preserved"
+        (Some sticky.id)
+        (current_task_id_string synced)))
 ;;
 
 let test_heartbeat_current_task_id_reconciles_terminal_backlog () =
@@ -2135,6 +2254,14 @@ let () =
             "run context uses reconciled current_task_id"
             `Quick
             test_run_context_uses_reconciled_current_task_id
+        ; test_case
+            "multiple active tasks select deterministic current_task_id"
+            `Quick
+            test_multiple_active_tasks_selects_deterministic_current_task
+        ; test_case
+            "multiple active tasks preserve existing current_task_id"
+            `Quick
+            test_multiple_active_tasks_preserves_existing_current_task
         ; test_case
             "heartbeat current_task_id reconciles terminal backlog"
             `Quick

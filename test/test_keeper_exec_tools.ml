@@ -21,7 +21,7 @@ let cleanup_dir path =
   in
   try rm path with _ -> ()
 
-let make_meta ?(name = "keeper-exec-tools") ?tool_access () =
+let make_meta ?(name = "keeper-exec-tools") ?(policy_voice_enabled = false) ?tool_access () =
   let tool_access =
     match tool_access with
     | Some value -> value
@@ -37,6 +37,7 @@ let make_meta ?(name = "keeper-exec-tools") ?tool_access () =
           ("agent_name", `String name);
           ("trace_id", `String "keeper-exec-tools-trace");
           ("allowed_paths", `List [ `String "*" ]);
+          ("policy_voice_enabled", `Bool policy_voice_enabled);
           ( "tool_access",
             Masc_mcp.Keeper_types.tool_access_to_json tool_access );
         ])
@@ -257,6 +258,7 @@ let test_tool_not_allowed_reason_label_is_bounded () =
 let test_keeper_tools_list_json_uses_typed_groups () =
   let meta =
     make_meta
+      ~policy_voice_enabled:true
       ~tool_access:
         (Masc_mcp.Keeper_types.Custom
            [ "keeper_board_post";
@@ -584,10 +586,24 @@ let test_keeper_bash_task_state_probe_is_workflow_rejection () =
 
 let registered_dispatch_probe_tool = "test_keeper_registered_dispatch_probe"
 
+let register_test_schema tool_name =
+  let schema : Masc_domain.tool_schema =
+    {
+      name = tool_name;
+      description = "test tool " ^ tool_name;
+      input_schema =
+        `Assoc
+          [ ("type", `String "object")
+          ; ("properties", `Assoc [])
+          ];
+    }
+  in
+  Masc_mcp.Tool_dispatch.register_module_tag
+    ~schemas:[ schema ]
+    ~tag:Masc_mcp.Tool_dispatch.Mod_misc
+
 let register_registered_dispatch_probe () =
-  Masc_mcp.Tool_dispatch.register_name_tag
-    ~tool_name:registered_dispatch_probe_tool
-    ~tag:Masc_mcp.Tool_dispatch.Mod_misc;
+  register_test_schema registered_dispatch_probe_tool;
   Masc_mcp.Tool_dispatch.register
     ~tool_name:registered_dispatch_probe_tool
     ~handler:(fun ~name ~args:_ ->
@@ -603,9 +619,7 @@ let register_registered_dispatch_probe () =
 let workflow_rejection_probe_tool = "test_keeper_workflow_rejection_probe"
 
 let register_workflow_rejection_probe () =
-  Masc_mcp.Tool_dispatch.register_name_tag
-    ~tool_name:workflow_rejection_probe_tool
-    ~tag:Masc_mcp.Tool_dispatch.Mod_misc;
+  register_test_schema workflow_rejection_probe_tool;
   Masc_mcp.Tool_dispatch.register
     ~tool_name:workflow_rejection_probe_tool
     ~handler:(fun ~name ~args:_ ->

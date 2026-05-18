@@ -10,6 +10,7 @@
 
 ### Changed
 - Migrated additional cancel-safe shell, sandbox, response, and host-FD probe paths onto `Cancel_safe` helpers.
+- Bumped the downstream OAS `agent_sdk` pin to `main@308152ee` (`v0.196.1`) and raised the dependency floor to `agent_sdk >= 0.196.1`, covering the provider-timeout evidence release wave.
 
 ### Fixed
 - Blocked Docker keeper shell runs during host FD hotspot pressure and added Darwin maxfilesperproc visibility plus best-effort Docker one-shot cleanup.

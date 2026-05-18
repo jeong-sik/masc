@@ -548,6 +548,101 @@ let keeper_bash_shape_block cmd =
   | Masc_exec.Parsed.Too_complex _ ->
     raw_keeper_bash_shape_block cmd
 
+type safe_read_fallback = {
+  primary_cmd : string;
+}
+
+let find_unquoted_logic_or cmd =
+  let len = String.length cmd in
+  let rec loop quote_state escaped i =
+    if i + 1 >= len
+    then None
+    else if escaped
+    then loop quote_state false (i + 1)
+    else (
+      match quote_state, cmd.[i] with
+      | Single_quote, '\'' -> loop No_quote false (i + 1)
+      | Single_quote, _ -> loop Single_quote false (i + 1)
+      | Double_quote, '"' -> loop No_quote false (i + 1)
+      | Double_quote, '\\' -> loop Double_quote true (i + 1)
+      | Double_quote, _ -> loop Double_quote false (i + 1)
+      | No_quote, '\'' -> loop Single_quote false (i + 1)
+      | No_quote, '"' -> loop Double_quote false (i + 1)
+      | No_quote, '\\' -> loop No_quote true (i + 1)
+      | No_quote, '|' when Char.equal cmd.[i + 1] '|' -> Some i
+      | No_quote, _ -> loop No_quote false (i + 1))
+  in
+  loop No_quote false 0
+
+let strip_suffix_ci text suffix =
+  let text_len = String.length text in
+  let suffix_len = String.length suffix in
+  if suffix_len > text_len
+  then None
+  else (
+    let tail = String.sub text (text_len - suffix_len) suffix_len in
+    if String.equal (String.lowercase_ascii tail) suffix
+    then Some (String.sub text 0 (text_len - suffix_len) |> String.trim)
+    else None)
+
+let strip_trailing_dev_null_redirect cmd =
+  let cmd = String.trim cmd in
+  [
+    "2>/dev/null";
+    "1>/dev/null";
+    ">/dev/null";
+    "2>>/dev/null";
+    "1>>/dev/null";
+    ">>/dev/null";
+    "2> /dev/null";
+    "1> /dev/null";
+    "> /dev/null";
+    "2>> /dev/null";
+    "1>> /dev/null";
+    ">> /dev/null";
+  ]
+  |> List.find_map (strip_suffix_ci cmd)
+  |> function
+  | Some primary when not (String.equal primary "") -> Some primary
+  | Some _ | None -> None
+
+let literal_echo_is_safe text =
+  match Masc_exec_bash_parser.Bash.parse_string text with
+  | Masc_exec.Parsed.Parsed (Masc_exec.Shell_ir.Simple simple)
+    when simple.env = []
+         && simple.redirects = []
+         && Option.is_none simple.cwd
+         && String.equal (Masc_exec.Bin.to_string simple.bin) "echo" ->
+    let rec loop = function
+      | [] -> true
+      | Masc_exec.Shell_ir.Lit arg :: rest ->
+        (not (String.starts_with ~prefix:"-" arg)) && loop rest
+      | Masc_exec.Shell_ir.Concat _ :: _ | Masc_exec.Shell_ir.Var _ :: _ -> false
+    in
+    loop simple.args
+  | _ -> false
+
+let safe_read_fallback_of_command ~write_enabled:_ cmd =
+  match find_unquoted_logic_or cmd with
+  | None -> None
+  | Some split ->
+    let left = String.sub cmd 0 split in
+    let right =
+      String.sub cmd (split + 2) (String.length cmd - split - 2) |> String.trim
+    in
+    (match strip_trailing_dev_null_redirect left, literal_echo_is_safe right with
+     | Some primary_cmd, true ->
+       (match keeper_bash_shape_block primary_cmd with
+        | Some _ -> None
+        | None ->
+          if Worker_dev_tools.is_write_operation primary_cmd
+          then None
+          else (
+            match Worker_dev_tools.validate_command primary_cmd with
+            | Ok () -> Some { primary_cmd }
+            | Error _ -> None))
+     | _ -> None)
+
 let shape_block_allowed_by_active_validator ~write_enabled cmd = function
   | Pipe_or_redirect when write_enabled ->
     (match Worker_dev_tools.validate_command_coding cmd with
@@ -584,16 +679,30 @@ let command_mentions_task_state_file cmd =
     (lowercase_contains cmd)
     [ ".masc/backlog.json"
     ; ".masc/state/backlog.json"
+    ; ".masc/tasks"
+    ; "current_task.json"
     ; "repos/masc-mcp/.masc/backlog.json"
     ; "repos/masc-mcp/.masc/tasks/backlog.json"
+    ; ".task.json"
     ; "repos/masc-mcp/backlog.json"
     ; "tasks/backlog.json"
     ]
 
+let command_looks_like_task_state_discovery cmd =
+  command_mentions_task_state_file cmd
+  ||
+  ((lowercase_contains cmd "find repos" || lowercase_contains cmd "find .")
+   && (lowercase_contains cmd "task" || lowercase_contains cmd "backlog"))
+  ||
+  (lowercase_contains cmd "rg "
+   && lowercase_contains cmd "repos"
+   && (lowercase_contains cmd "task" || lowercase_contains cmd "backlog"))
+
 let task_state_shell_hint =
   "Do not inspect task state by guessing .masc/backlog.json or repo-local \
-   backlog paths from keeper_bash. Use keeper_tasks_list for task/backlog \
-   state and keeper_context_status for current_task_id/sandbox paths."
+   backlog/task files from keeper_bash. Use keeper_tasks_list for \
+   task/backlog state and keeper_context_status for current_task_id/sandbox \
+   paths."
 
 let task_state_shell_alternatives =
   [ "keeper_tasks_list include_done=false"
@@ -613,7 +722,9 @@ module For_testing = struct
   let strip_stderr_dev_null_redirects = strip_stderr_dev_null_redirects
 
   let keeper_bash_shape_block_hint cmd =
-    if command_mentions_task_state_file cmd then Some task_state_shell_hint else None
+    if command_looks_like_task_state_discovery cmd
+    then Some task_state_shell_hint
+    else None
 end
 
 let bash_shape_block_reason = function
@@ -635,7 +746,7 @@ let bash_shape_block_reason = function
      host file descriptors."
 
 let bash_shape_block_hint ~cmd = function
-  | _ when command_mentions_task_state_file cmd -> task_state_shell_hint
+  | _ when command_looks_like_task_state_discovery cmd -> task_state_shell_hint
   | Gh_pr_checks ->
     "Use keeper_pr_status. If raw gh is the only visible status path, use gh \
      pr view NUMBER --repo OWNER/REPO --json \
@@ -655,7 +766,7 @@ let bash_shape_block_hint ~cmd = function
      bash."
 
 let bash_shape_block_alternatives ~cmd = function
-  | _ when command_mentions_task_state_file cmd -> task_state_shell_alternatives
+  | _ when command_looks_like_task_state_discovery cmd -> task_state_shell_alternatives
   | Gh_pr_checks ->
     [
       "keeper_pr_status";
@@ -705,7 +816,8 @@ let bash_shape_block_result ~cmd ~cmd_for_log ~env_snapshot block =
               tool_suggestion =
                 (match block with
                  | Gh_pr_checks -> Some "keeper_pr_status"
-                 | _ when command_mentions_task_state_file cmd -> Some "keeper_tasks_list"
+                 | _ when command_looks_like_task_state_discovery cmd ->
+                   Some "keeper_tasks_list"
                  | Pipe_or_redirect -> Some "keeper_shell"
                  | Repo_wide_scan -> Some "keeper_shell"
                  | Chaining | Substitution -> None);
@@ -949,6 +1061,12 @@ let handle_keeper_bash
     let command_cacheable () =
       Masc_exec.Risk_classifier.(is_cacheable (classify cmd))
     in
+    let safe_read_fallback = safe_read_fallback_of_command ~write_enabled cmd in
+    let validation_cmd =
+      match safe_read_fallback with
+      | Some rewrite -> rewrite.primary_cmd
+      | None -> cmd
+    in
     let with_raw_json_exec_cache run =
       let cacheable = command_cacheable () in
       if not cacheable then run ()
@@ -1014,7 +1132,8 @@ let handle_keeper_bash
     let sandbox_root = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
     match keeper_bash_shape_block cmd with
     | Some block when
-      not (shape_block_allowed_by_active_validator ~write_enabled cmd block) ->
+      Option.is_none safe_read_fallback
+      && not (shape_block_allowed_by_active_validator ~write_enabled cmd block) ->
       Prometheus.inc_counter
         Keeper_metrics.metric_keeper_shell_bash_failures
         ~labels:
@@ -1243,7 +1362,7 @@ let handle_keeper_bash
         if write_enabled then Worker_dev_tools.validate_command_coding
         else Worker_dev_tools.validate_command
       in
-      match validate cmd with
+      match validate validation_cmd with
       | Error reason ->
         let reason_str = Worker_dev_tools.block_reason_to_string reason in
         Prometheus.inc_counter
@@ -1311,7 +1430,8 @@ let handle_keeper_bash
         begin
           let path_validation =
            match
-             Keeper_task_worktree_lazy.ensure_command_existing_dirs ~config ~meta ~cwd ~cmd
+             Keeper_task_worktree_lazy.ensure_command_existing_dirs
+               ~config ~meta ~cwd ~cmd:validation_cmd
            with
            | Error e -> Error e
            | Ok () ->
@@ -1319,13 +1439,13 @@ let handle_keeper_bash
                ~keeper_id:meta.name
                ~base_path:root
                ~workdir:cwd
-               cmd
+               validation_cmd
           in
           match path_validation with
           | Error e -> error_json ~fields:["blocked_cmd", `String cmd_for_log] e
           | Ok () ->
                if write_enabled
-                  && Worker_dev_tools.is_write_operation cmd then
+                  && Worker_dev_tools.is_write_operation validation_cmd then
                  Log.Keeper.info "WRITE_AUDIT: keeper=%s cwd=%s cmd=%s playground=%b"
                    meta.name cwd cmd_for_log in_playground;
                (* Tick 7: background mode keeps stdout/stderr separate

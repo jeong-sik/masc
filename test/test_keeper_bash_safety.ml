@@ -404,6 +404,20 @@ let test_keeper_bash_task_state_hint_uses_task_tools () =
       (String_util.contains_substring msg ".masc/backlog.json")
   | None -> Alcotest.fail "expected task-state shell hint"
 
+let test_keeper_bash_task_state_discovery_hint_uses_task_tools () =
+  let hint = Keeper_exec_shell.For_testing.keeper_bash_shape_block_hint in
+  match hint {|find repos -name "*.json" -path "*/task*" 2>/dev/null | head -20|} with
+  | Some msg ->
+    Alcotest.(check bool)
+      "hint points to keeper_tasks_list"
+      true
+      (String_util.contains_substring msg "keeper_tasks_list");
+    Alcotest.(check bool)
+      "hint rejects task files"
+      true
+      (String_util.contains_substring msg "backlog/task files")
+  | None -> Alcotest.fail "expected task-state discovery hint"
+
 let test_keeper_bash_blocks_repo_wide_scans () =
   let block_tag = Keeper_exec_shell.For_testing.keeper_bash_shape_block_tag in
   List.iter
@@ -799,6 +813,24 @@ let make_readonly_meta name =
   | Ok meta -> meta
   | Error err -> Alcotest.fail ("make_readonly_meta failed: " ^ err)
 
+let make_write_enabled_meta name =
+  let json =
+    `Assoc
+      [
+        ("name", `String name);
+        ("agent_name", `String ("agent-" ^ name));
+        ("trace_id", `String ("trace-" ^ name));
+        ("goal", `String "safe fallback write-enabled test");
+        ( "tool_access",
+          Keeper_types.tool_access_to_json
+            (Keeper_types.Preset
+               { preset = Keeper_types.Coding; also_allow = [] }) );
+      ]
+  in
+  match Masc_test_deps.meta_of_json_fixture json with
+  | Ok meta -> meta
+  | Error err -> Alcotest.fail ("make_write_enabled_meta failed: " ^ err)
+
 let parse_hint raw =
   Yojson.Safe.from_string raw
   |> Json.member "hint"
@@ -808,6 +840,104 @@ let parse_error_field raw =
   Yojson.Safe.from_string raw
   |> Json.member "error"
   |> Json.to_string_option
+
+let test_keeper_bash_safe_dev_null_echo_fallback_executes_primary () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "fallback-ls" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  let worktrees = Filename.concat playground "repos/masc-mcp/.worktrees" in
+  ensure_dir worktrees;
+  ignore (Fs_compat.save_file_atomic (Filename.concat worktrees "marker") "ok");
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:
+        (`Assoc
+           [ ( "cmd"
+             , `String
+                 "ls repos/masc-mcp/.worktrees/ 2>/dev/null || echo \"no worktrees\""
+             )
+           ; ("cwd", `String playground)
+           ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "fallback command succeeds" true
+    (json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check bool) "primary command ran" true
+    (json
+     |> Json.member "output"
+     |> Json.to_string
+     |> fun output -> String_util.contains_substring output "marker")
+
+let test_keeper_bash_safe_fallback_works_for_write_enabled_keeper () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_write_enabled_meta "fallback-coding" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  let worktree = Filename.concat playground "repos/masc-mcp/.worktrees/task-362" in
+  ensure_dir worktree;
+  ignore (Fs_compat.save_file_atomic (Filename.concat worktree ".task.json") "{}");
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:
+        (`Assoc
+           [ ( "cmd"
+             , `String
+                 "cat repos/masc-mcp/.worktrees/task-362/.task.json 2>/dev/null || echo \"NOT_FOUND\""
+             )
+           ; ("cwd", `String playground)
+           ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "write-enabled fallback command succeeds" true
+    (json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check bool) "primary cat ran" true
+    (json
+     |> Json.member "output"
+     |> Json.to_string
+     |> fun output -> String_util.contains_substring output "{}")
+
+let test_keeper_bash_safe_fallback_does_not_unblock_repo_scan () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "fallback-repo-scan" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  ensure_dir (Filename.concat playground "repos");
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:
+        (`Assoc
+           [ ( "cmd"
+             , `String
+                 "find repos/ -maxdepth 3 -name .worktrees 2>/dev/null || echo none"
+             )
+           ; ("cwd", `String playground)
+           ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check (option string)) "repo scan remains blocked"
+    (Some "keeper_bash_command_shape_blocked") (parse_error_field raw);
+  Alcotest.(check string) "shape block"
+    "repo_wide_scan"
+    (json |> Json.member "shape_block" |> Json.to_string)
 
 let test_keeper_shell_ls_recovers_doubled_playground_prefix () =
   with_eio_fs @@ fun () ->
@@ -1138,6 +1268,8 @@ let () =
         test_stderr_dev_null_strip_preserves_post_background_redirect;
       Alcotest.test_case "task-state shell paths get task-tool hint" `Quick
         test_keeper_bash_task_state_hint_uses_task_tools;
+      Alcotest.test_case "task-state discovery gets task-tool hint" `Quick
+        test_keeper_bash_task_state_discovery_hint_uses_task_tools;
       Alcotest.test_case "repo-wide scans blocked" `Quick
         test_keeper_bash_blocks_repo_wide_scans;
       Alcotest.test_case "empty command blocked" `Quick test_empty_command;
@@ -1167,6 +1299,12 @@ let () =
         test_docker_missing_seccomp_profile_fails_closed;
     ]);
     ("readonly_hints", [
+      Alcotest.test_case "safe dev-null echo fallback executes primary" `Quick
+        test_keeper_bash_safe_dev_null_echo_fallback_executes_primary;
+      Alcotest.test_case "safe fallback works for write-enabled keeper" `Quick
+        test_keeper_bash_safe_fallback_works_for_write_enabled_keeper;
+      Alcotest.test_case "safe fallback does not unblock repo scan" `Quick
+        test_keeper_bash_safe_fallback_does_not_unblock_repo_scan;
       Alcotest.test_case "doubled playground prefix auto-recovers" `Quick
         test_keeper_shell_ls_recovers_doubled_playground_prefix;
       Alcotest.test_case "op=bash is deprecated" `Quick

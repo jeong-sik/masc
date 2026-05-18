@@ -3,6 +3,17 @@ set -euo pipefail
 
 printf 'soft open files: %s\n' "$(ulimit -n 2>/dev/null || printf '?')"
 
+truncate_rows() {
+  local max="${MASC_NOFILE_COMMAND_MAX:-240}"
+  awk -v max="${max}" '{
+    if (max > 0 && length($0) > max) {
+      print substr($0, 1, max) "..."
+    } else {
+      print
+    }
+  }'
+}
+
 if command -v launchctl >/dev/null 2>&1; then
   printf 'launchctl maxfiles: '
   launchctl limit maxfiles 2>/dev/null | awk 'NR == 1 {print $2, $3}' || true
@@ -43,7 +54,8 @@ if command -v lsof >/dev/null 2>&1; then
         | sort -nr \
         | head -10 \
         | while read -r _count pid; do
-          ps -p "${pid}" -o pid=,ppid=,stat=,etime=,command= 2>/dev/null || true
+          ps -p "${pid}" -o pid=,ppid=,stat=,etime=,command= 2>/dev/null \
+            | truncate_rows || true
         done
     else
       printf 'top fd holder commands: unavailable (ps failed)\n'
@@ -57,20 +69,22 @@ else
 fi
 
 printf 'dune/local-build processes:\n'
-if command -v pgrep >/dev/null 2>&1; then
-  if ! pgrep -fl 'dune build|dune test|dune exec|dune-local.sh|me-dune-local.lock'; then
-    if [[ "${ps_available}" -eq 1 ]]; then
-      ps ax -o pid=,command= 2>/dev/null \
-        | grep -E 'dune build|dune test|dune exec|dune-local.sh|me-dune-local.lock' \
-        | grep -v grep || true
-    else
-      printf 'dune/local-build processes: unavailable (pgrep and ps failed)\n'
-    fi
+if [[ "${ps_available}" -eq 1 ]]; then
+  dune_rows="$(
+    ps ax -o pid=,ppid=,stat=,etime=,command= 2>/dev/null \
+      | awk '
+          /dune-local[.]sh/ ||
+          /me-dune-local[.]lock/ ||
+          /(^|[[:space:]\/])dune([[:space:]]|$)/ ||
+          /(^|[[:space:]\/])opam[[:space:]]+exec[[:space:]].*([[:space:]\/])dune([[:space:]]|$)/ {
+            print
+          }' || true
+  )"
+  if [[ -n "${dune_rows}" ]]; then
+    printf '%s\n' "${dune_rows}" | truncate_rows
+  else
+    printf 'none\n'
   fi
-elif [[ "${ps_available}" -eq 1 ]]; then
-  ps ax -o pid=,command= 2>/dev/null \
-    | grep -E 'dune build|dune test|dune exec|dune-local.sh|me-dune-local.lock' \
-    | grep -v grep || true
 else
   printf 'dune/local-build processes: unavailable (pgrep and ps failed)\n'
 fi
@@ -88,7 +102,7 @@ if [[ "${ps_available}" -eq 1 ]]; then
           }' || true
   )"
   if [[ -n "${orphan_waiters}" ]]; then
-    printf '%s\n' "${orphan_waiters}"
+    printf '%s\n' "${orphan_waiters}" | truncate_rows
   else
     printf 'none\n'
   fi
@@ -104,7 +118,8 @@ if [[ "${ps_available}" -eq 1 ]]; then
         /masc-mcp/ &&
         /-exec/ {
           print
-        }' || true
+        }' \
+    | truncate_rows || true
 else
   printf 'repo-wide scan processes: unavailable (ps failed)\n'
 fi
@@ -145,9 +160,62 @@ if [[ "${ps_available}" -eq 1 ]]; then
             return 0
           }
 
-          function is_dune_command(text) {
-            return text ~ /^([^[:space:]]*\/)?dune[[:space:]]+(build|test|exec|runtest)([[:space:]]|$)/ ||
-                   text ~ /^([^[:space:]]*\/)?opam[[:space:]]+exec[[:space:]].*[[:space:]]dune[[:space:]]+(build|test|exec|runtest)([[:space:]]|$)/
+          function basename(token, parts, n) {
+            n = split(token, parts, "/")
+            return parts[n]
+          }
+
+          function is_dune_global_option_with_value(token) {
+            return token == "--root" ||
+                   token == "--workspace" ||
+                   token == "--profile" ||
+                   token == "--build-dir" ||
+                   token == "--display" ||
+                   token == "--cache" ||
+                   token == "--sandbox" ||
+                   token == "--instrument-with" ||
+                   token == "-p" ||
+                   token == "-x" ||
+                   token == "-j"
+          }
+
+          function is_dune_global_option_eq(token) {
+            return token ~ /^--(root|workspace|profile|build-dir|display|cache|sandbox|instrument-with)=/
+          }
+
+          function dune_subcommand_index(argc, argv, dune_index, i, token) {
+            i = dune_index + 1
+            while (i <= argc) {
+              token = argv[i]
+              if (is_dune_global_option_eq(token)) {
+                i++
+              } else if (is_dune_global_option_with_value(token)) {
+                i += 2
+              } else if (token == "build" || token == "test" || token == "exec" || token == "runtest") {
+                return i
+              } else {
+                return 0
+              }
+            }
+            return 0
+          }
+
+          function is_dune_command(text, argv, argc, i) {
+            argc = split(text, argv, /[[:space:]]+/)
+            if (argc < 2) {
+              return 0
+            }
+            if (basename(argv[1]) == "dune") {
+              return dune_subcommand_index(argc, argv, 1) > 0
+            }
+            if (basename(argv[1]) == "opam" && argv[2] == "exec") {
+              for (i = 3; i <= argc; i++) {
+                if (basename(argv[i]) == "dune") {
+                  return dune_subcommand_index(argc, argv, i) > 0
+                }
+              }
+            }
+            return 0
           }
 
           END {
@@ -159,7 +227,7 @@ if [[ "${ps_available}" -eq 1 ]]; then
           }' || true
   )"
   if [[ -n "${bare_dune_rows}" ]]; then
-    printf '%s\n' "${bare_dune_rows}"
+    printf '%s\n' "${bare_dune_rows}" | truncate_rows
   else
     printf 'none\n'
   fi

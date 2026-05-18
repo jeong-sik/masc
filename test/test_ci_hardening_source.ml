@@ -708,12 +708,23 @@ let test_local_dune_fd_containment_contracts () =
   check bool "deploy script builds through dune-local wrapper" true
     (file_contains_pattern "scripts/deploy.sh"
        "\"$REPO_DIR/scripts/dune-local.sh\" build bin/main_eio.exe");
-  check bool "contract harness prefers dune-local wrapper" true
-    (file_contains_pattern "scripts/harness/contract/run_all.sh"
-       "\"$ROOT_DIR/scripts/dune-local.sh\" build ./bin/main_eio.exe");
+  check bool "contract harness keeps opam build path before wrapper fallback" true
+    (match
+       ( file_pattern_position "scripts/harness/contract/run_all.sh"
+           "opam exec -- dune build --root . ./bin/main_eio.exe"
+       , file_pattern_position "scripts/harness/contract/run_all.sh"
+           "\"$ROOT_DIR/scripts/dune-local.sh\" build ./bin/main_eio.exe" )
+     with
+     | Some opam_pos, Some wrapper_pos -> opam_pos < wrapper_pos
+     | _ -> false);
   check bool "nofile status surfaces bare dune bypasses" true
     (file_contains_pattern "scripts/nofile-status.sh"
        "potential bare dune bypasses");
+  check bool "nofile status truncates long commands" true
+    (file_contains_pattern "scripts/nofile-status.sh"
+       "MASC_NOFILE_COMMAND_MAX");
+  check bool "nofile bare detector handles dune global options" true
+    (file_contains_pattern "scripts/nofile-status.sh" "dune_subcommand_index");
   check bool "dune-local blocks live bare dune by default" true
     (file_contains_pattern "scripts/dune-local.sh"
        "MASC_DUNE_ALLOW_BARE_DUNE")

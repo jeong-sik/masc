@@ -20,10 +20,13 @@ include Keeper_turn_driver_helpers
 let provider_attempt_status_of_result = function
   | Ok _ -> "provider_returned"
   | Error (Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _)) -> "timeout"
+  | Error (Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _)) -> "timeout"
   | Error _ -> "error"
 
 let provider_attempt_exception_kind_of_result = function
   | Error (Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _)) ->
+    Some "outer_oas_timeout"
+  | Error (Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _)) ->
     Some "outer_oas_timeout"
   | Ok _ | Error _ -> None
 

@@ -3,7 +3,7 @@
 
     Each row asserts that a representative [sdk_error] variant produces
     the documented (http_status, openai_kind, openai_code) triple. The
-    table is intentionally exhaustive over the 9 top-level [sdk_error]
+    table is intentionally exhaustive over the 10 top-level [sdk_error]
     constructors — exhaustiveness over sub-variants is enforced by the
     OCaml compiler at the implementation site (no catch-all `_ ->`). *)
 
@@ -103,6 +103,30 @@ let test_provider_timeout () =
     ~expected_status:`Gateway_timeout
     ~expected_kind:"server_error"
     ~expected_code:(Some "provider_timeout")
+    ()
+
+let test_provider_hard_quota () =
+  check_mapping
+    ~label:"Provider HardQuota"
+    ~input:
+      (E.Provider
+         (Llm_provider.Error.HardQuota
+            { provider = "claude"; retry_after = None; detail = "quota exhausted" }))
+    ~expected_status:`Too_many_requests
+    ~expected_kind:"rate_limit_error"
+    ~expected_code:(Some "provider_hard_quota")
+    ()
+
+let test_provider_invalid_request () =
+  check_mapping
+    ~label:"Provider InvalidRequest"
+    ~input:
+      (E.Provider
+         (Llm_provider.Error.InvalidRequest
+            { provider = "claude"; reason = "bad request" }))
+    ~expected_status:`Bad_request
+    ~expected_kind:"invalid_request_error"
+    ~expected_code:(Some "provider_invalid_request")
     ()
 
 let test_agent_token_budget () =
@@ -273,7 +297,9 @@ let () =
         ; Alcotest.test_case "GuardrailViolation → 400"  `Quick test_agent_guardrail
         ] )
     ; ( "provider"
-      , [ Alcotest.test_case "Provider Timeout → 504" `Quick test_provider_timeout
+      , [ Alcotest.test_case "Timeout → 504" `Quick test_provider_timeout
+        ; Alcotest.test_case "HardQuota → 429" `Quick test_provider_hard_quota
+        ; Alcotest.test_case "InvalidRequest → 400" `Quick test_provider_invalid_request
         ] )
     ; ( "mcp"
       , [ Alcotest.test_case "ServerStartFailed → 503" `Quick test_mcp_server_start

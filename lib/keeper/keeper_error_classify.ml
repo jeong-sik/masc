@@ -113,6 +113,14 @@ let is_server_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
       || string_contains_substring ~needle:"unexpected character in json" lower
       || string_contains_substring ~needle:"unterminated" lower
       || string_contains_substring ~needle:"parse error" lower
+  | Agent_sdk.Error.Provider
+      (Llm_provider.Error.InvalidRequest { reason; _ }) ->
+      let lower = String.lowercase_ascii reason in
+      (string_contains_substring ~needle:"can't find closing" lower
+       || string_contains_substring ~needle:"find end of" lower)
+      || string_contains_substring ~needle:"unexpected character in json" lower
+      || string_contains_substring ~needle:"unterminated" lower
+      || string_contains_substring ~needle:"parse error" lower
   (* All other API error variants do not represent server-side parse failures. *)
   | Agent_sdk.Error.Api (RateLimited _)
   | Agent_sdk.Error.Api (Overloaded _)
@@ -402,14 +410,31 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
              Some Server_error
          | Agent_sdk.Error.Api (Llm_provider.Retry.AuthError _) ->
              Some Auth_error
-         | Agent_sdk.Error.Provider (Llm_provider.Error.RateLimit _) ->
+         | Agent_sdk.Error.Provider
+             (Llm_provider.Error.RateLimit _
+             | Llm_provider.Error.CapacityExhausted _) ->
              Some Rate_limit
+         | Agent_sdk.Error.Provider (Llm_provider.Error.HardQuota _) ->
+             Some Hard_quota
          | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { code; transient; _ })
            when transient || code >= 500 ->
+             Some Server_error
+         | Agent_sdk.Error.Provider (Llm_provider.Error.ProviderUnavailable _) ->
              Some Server_error
          | Agent_sdk.Error.Provider
              (Llm_provider.Error.AuthError _ | Llm_provider.Error.MissingApiKey _) ->
              Some Auth_error
+         | Agent_sdk.Error.Provider
+             (Llm_provider.Error.ServerError _
+             | Llm_provider.Error.InvalidConfig _
+             | Llm_provider.Error.InvalidRequest _
+             | Llm_provider.Error.NotFound _
+             | Llm_provider.Error.NetworkError _
+             | Llm_provider.Error.Timeout _
+             | Llm_provider.Error.ParseError _
+             | Llm_provider.Error.UnknownVariant _
+             | Llm_provider.Error.ProviderTerminal _) ->
+             None
          (* Sub-500 server errors (4xx already handled above for AuthError /
             RateLimited) are not classified as recoverable cascade failures. *)
          | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _)
@@ -418,8 +443,7 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
          | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.ContextOverflow _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.NetworkError _)
-         | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _)
-         | Agent_sdk.Error.Provider _ -> None
+         | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _) -> None
          (* Non-API error families have no rotation reason here: structured
             MASC internal errors are handled by [classify_masc_internal_error]
             above; agent / mcp / config / etc. are not provider-level rotations. *)
@@ -787,6 +811,7 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Api (NotFound _)
   | Agent_sdk.Error.Api (NetworkError _)
   | Agent_sdk.Error.Api (Timeout _) -> false
+  | Agent_sdk.Error.Provider _ -> false
   (* Other agent error variants. *)
   | Agent_sdk.Error.Agent (MaxTurnsExceeded _)
   | Agent_sdk.Error.Agent (CostBudgetExceeded _)
@@ -799,7 +824,6 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Agent (TripwireViolation _)
   | Agent_sdk.Error.Agent (ExitConditionMet _) -> false
   (* Non-API / non-Agent error families. *)
-  | Agent_sdk.Error.Provider _
   | Agent_sdk.Error.Mcp _
   | Agent_sdk.Error.Config _
   | Agent_sdk.Error.Serialization _

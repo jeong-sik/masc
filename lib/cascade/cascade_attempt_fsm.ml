@@ -638,7 +638,8 @@ let sdk_provider_error_to_provider_error = function
       Some (Provider_error.InvalidRequest { reason = detail })
   | Llm_provider.Error.ProviderTerminal { detail; _ } ->
       Some (Provider_error.InvalidRequest { reason = detail })
-  | Llm_provider.Error.ProviderUnavailable _
+  | Llm_provider.Error.ProviderUnavailable _ ->
+      Some (Provider_error.ServerError { code = 503; transient = false })
   | Llm_provider.Error.ParseError _
   | Llm_provider.Error.UnknownVariant _
   | Llm_provider.Error.NetworkError _
@@ -862,6 +863,11 @@ let sdk_error_is_max_turns_exceeded (err : Agent_sdk.Error.sdk_error) : bool =
           | Llm_provider.Retry.NotFound _
           | Llm_provider.Retry.ContextOverflow _) ->
           false
+      | Agent_sdk.Error.Provider
+          (Llm_provider.Error.ProviderTerminal { reason; detail; _ }) ->
+          message_looks_like_cli_wrapped_max_turns reason
+          || message_looks_like_cli_wrapped_max_turns detail
+      | Agent_sdk.Error.Provider _ -> false
       | Agent_sdk.Error.Internal message ->
           message_looks_like_cli_wrapped_max_turns message
       | _ -> false)

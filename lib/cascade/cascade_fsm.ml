@@ -65,9 +65,9 @@ let to_user_message last_err =
   | Some (Llm_provider.Http_client.CliTransportRequired { kind }) ->
       Printf.sprintf "%s provider requires a CLI transport" kind
   | Some (Llm_provider.Http_client.NetworkError { message; _ }) -> message
+  | Some (Llm_provider.Http_client.TimeoutError { message; _ }) -> message
   | Some
-      ( (Llm_provider.Http_client.TimeoutError _
-        | Llm_provider.Http_client.ProviderTerminal _
+      ( (Llm_provider.Http_client.ProviderTerminal _
         | Llm_provider.Http_client.ProviderFailure _) as err ) ->
       (* Mirror the rendering shape used elsewhere on main HEAD
          (tool_local_runtime_bench / verify): "provider terminal:
@@ -82,6 +82,7 @@ let format_exhausted_error last_err =
   let network_error_kind =
     match last_err with
     | Some (Llm_provider.Http_client.NetworkError { kind; _ }) -> kind
+    | Some (Llm_provider.Http_client.TimeoutError _) -> Timeout
     | _ -> Unknown
   in
   match last_err with

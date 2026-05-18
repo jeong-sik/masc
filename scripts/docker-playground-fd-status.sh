@@ -62,6 +62,7 @@ ROOT="${ROOT%/}"
 
 worktrees_dirs=0
 worktree_entries=0
+top_holder_fd_count=0
 
 if [ -d "$ROOT" ]; then
   for keeper_dir in "$ROOT"/*; do
@@ -87,8 +88,37 @@ echo "worktree_entries=$worktree_entries"
 echo "worktree_warn_threshold=$WORKTREE_WARN"
 echo "fd_warn_threshold=$FD_WARN"
 
+emit_hotspot_status() {
+  local hotspot_status="ok"
+  local hotspot_reasons=""
+  if [ "$WORKTREE_WARN" -gt 0 ] && [ "$worktree_entries" -ge "$WORKTREE_WARN" ]; then
+    hotspot_status="warning"
+    hotspot_reasons="${hotspot_reasons}worktree_entries,"
+  fi
+  if [ "$FD_WARN" -gt 0 ] && [ "$top_holder_fd_count" -ge "$FD_WARN" ]; then
+    hotspot_status="warning"
+    hotspot_reasons="${hotspot_reasons}top_holder_fd_count,"
+  fi
+  hotspot_reasons="${hotspot_reasons%,}"
+  if [ -z "$hotspot_reasons" ]; then
+    hotspot_reasons="none"
+  fi
+  echo "hotspot_status=$hotspot_status"
+  echo "hotspot_reasons=$hotspot_reasons"
+  if [ "$hotspot_status" = "warning" ]; then
+    quoted_root="$(printf '%q' "$ROOT")"
+    echo "cleanup_dry_run_command=scripts/cleanup-docker-playground-worktrees.sh --root $quoted_root --days 7"
+    echo "cleanup_broken_dry_run_command=scripts/cleanup-docker-playground-worktrees.sh --root $quoted_root --days 7 --include-broken"
+    if [ "$FD_WARN" -gt 0 ] && [ "$top_holder_fd_count" -ge "$FD_WARN" ]; then
+      echo "docker_desktop_restart_recommended=true"
+      echo "docker_desktop_restart_reason=macOS Docker Desktop may retain shared-file FDs until the VM restarts"
+    fi
+  fi
+}
+
 if ! command -v lsof >/dev/null 2>&1; then
   echo "fd_holders=unavailable (lsof not found)"
+  emit_hotspot_status
   exit 0
 fi
 
@@ -125,31 +155,8 @@ if lsof -n -P +c 64 2>/dev/null \
   top_holder_fd_count="$(awk 'NR == 1 {print $1 + 0; found = 1} END {if (!found) print 0}' "$holders_tmp")"
   head -n "$LIMIT" "$holders_tmp"
   echo "top_holder_fd_count=$top_holder_fd_count"
-  hotspot_status="ok"
-  hotspot_reasons=""
-  if [ "$WORKTREE_WARN" -gt 0 ] && [ "$worktree_entries" -ge "$WORKTREE_WARN" ]; then
-    hotspot_status="warning"
-    hotspot_reasons="${hotspot_reasons}worktree_entries,"
-  fi
-  if [ "$FD_WARN" -gt 0 ] && [ "$top_holder_fd_count" -ge "$FD_WARN" ]; then
-    hotspot_status="warning"
-    hotspot_reasons="${hotspot_reasons}top_holder_fd_count,"
-  fi
-  hotspot_reasons="${hotspot_reasons%,}"
-  if [ -z "$hotspot_reasons" ]; then
-    hotspot_reasons="none"
-  fi
-  echo "hotspot_status=$hotspot_status"
-  echo "hotspot_reasons=$hotspot_reasons"
-  if [ "$hotspot_status" = "warning" ]; then
-    quoted_root="$(printf '%q' "$ROOT")"
-    echo "cleanup_dry_run_command=scripts/cleanup-docker-playground-worktrees.sh --root $quoted_root --days 7"
-    echo "cleanup_broken_dry_run_command=scripts/cleanup-docker-playground-worktrees.sh --root $quoted_root --days 7 --include-broken"
-    if [ "$FD_WARN" -gt 0 ] && [ "$top_holder_fd_count" -ge "$FD_WARN" ]; then
-      echo "docker_desktop_restart_recommended=true"
-      echo "docker_desktop_restart_reason=macOS Docker Desktop may retain shared-file FDs until the VM restarts"
-    fi
-  fi
+  emit_hotspot_status
 else
   echo "fd_holders=unavailable (lsof failed)"
+  emit_hotspot_status
 fi

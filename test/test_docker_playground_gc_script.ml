@@ -155,6 +155,34 @@ EOF
     check bool "restart recommendation surfaced" true
       (contains_substring stdout "docker_desktop_restart_recommended=true"))
 
+let test_status_warns_on_worktree_hotspot_when_lsof_fails () =
+  with_temp_dir "docker-playground-status-no-lsof" (fun dir ->
+    let root = Filename.concat dir ".masc/playground/docker" in
+    let repo_dir = Filename.concat root "keeper-a/repos/masc-mcp" in
+    let worktrees_dir = Filename.concat repo_dir ".worktrees" in
+    mkdir_p (Filename.concat worktrees_dir "task-a");
+    mkdir_p (Filename.concat worktrees_dir "task-b");
+    let fake_bin = Filename.concat dir "bin" in
+    mkdir_p fake_bin;
+    write_executable (Filename.concat fake_bin "lsof") "#!/bin/sh\nexit 1\n";
+    let path =
+      Printf.sprintf "%s:%s" fake_bin
+        (Option.value ~default:"" (Sys.getenv_opt "PATH"))
+    in
+    let stdout, _ =
+      run_shell_ok ~env:[ "PATH", path ] ~cwd:(source_root ())
+        (Printf.sprintf
+           "%s --root %s --limit 5 --worktree-warn 1 --fd-warn 2"
+           (quote (status_script_path ()))
+           (quote root))
+    in
+    check bool "lsof failure surfaced" true
+      (contains_substring stdout "fd_holders=unavailable (lsof failed)");
+    check bool "worktree-only warning surfaced" true
+      (contains_substring stdout "hotspot_status=warning");
+    check bool "worktree reason surfaced" true
+      (contains_substring stdout "hotspot_reasons=worktree_entries"))
+
 let test_dry_run_lists_stale_clean_worktree () =
   with_temp_dir "docker-playground-gc-dry-run" (fun dir ->
     let root = Filename.concat dir ".masc/playground/docker" in

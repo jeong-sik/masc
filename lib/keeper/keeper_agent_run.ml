@@ -410,7 +410,7 @@ let run_turn
       then Keeper_cdal_contract.of_keeper_meta meta
       else None
     in
-    let record_turn_progress, on_yield, on_resume, on_event =
+    let record_turn_progress, yield_on_tool, on_yield, on_resume, on_event =
       Turn_helpers.turn_progress_callbacks
         ~config
         ~keeper_name:meta.name

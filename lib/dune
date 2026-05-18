@@ -44,6 +44,7 @@
  dashboard_keeper_tool_failure_proof
  board_core
  board_curation
+ board_votes_json
  board_votes
  dashboard_execution_helpers
  dashboard_execution_fixture

@@ -381,6 +381,7 @@ let classify ~tool_name ~arguments ~is_read_only =
   | None ->
     if String.starts_with ~prefix:"keeper_pr_" tool_name then Github
     else if String.starts_with ~prefix:"keeper_bash" tool_name then Shell
+    else if String.equal tool_name "shell_exec" then Shell
     else if string_contains tool_name "docker" || string_contains tool_name "sandbox"
     then Docker
     else if string_contains tool_name "web_" then Web

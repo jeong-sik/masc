@@ -243,22 +243,49 @@ let resolve_partition_for_write ~base_dir ~kind ~file_path =
       ~labels:[ "kind", kind; "reason", reason ]
       ()
   in
-  match Repo_store.find_repo_by_path_prefix ~base_path:base_dir abs with
-  | None ->
-    bump_orphan ~reason:"unregistered_repo";
-    (Ide_paths.Orphan, file_path)
-  | Some (repo, rel) ->
-    let url = String.trim repo.url in
+  let resolve_by_url ~rel ~repo_url ~orphan_reasons =
+    let url = String.trim repo_url in
     if url = "" then begin
-      bump_orphan ~reason:"blank_url";
+      bump_orphan ~reason:(snd orphan_reasons);
       (Ide_paths.Orphan, file_path)
     end
     else
       match Ide_paths.canonical_url_of_remote url with
       | None ->
-        bump_orphan ~reason:"url_unparseable";
+        bump_orphan ~reason:(fst orphan_reasons);
         (Ide_paths.Orphan, file_path)
       | Some slug -> (Ide_paths.By_url slug, rel)
+  in
+  (* RFC-0128 §4.5 PR-6: keeper writes inside the sandbox playground
+     never appear under a registered repo's [local_path] (the playground
+     clone path is opaque to [repositories.toml]). Use the SSOT
+     {!Playground_paths.parse_playground_repo_path} to recover the
+     [(repo_id, rel)] pair, then look up the repository's URL by id.
+     This makes the sandbox/working-tree join work without forcing the
+     operator to also register every playground clone path. *)
+  match
+    Playground_paths.parse_playground_repo_path ~base_path:base_dir ~abs_path:abs
+  with
+  | Some (repo_id, rel) ->
+    (match Repo_store.find_url_by_id ~base_path:base_dir repo_id with
+     | Some url ->
+       resolve_by_url
+         ~rel
+         ~repo_url:url
+         ~orphan_reasons:("sandbox_url_unparseable", "sandbox_blank_url")
+     | None ->
+       bump_orphan ~reason:"sandbox_unregistered_repo";
+       (Ide_paths.Orphan, file_path))
+  | None ->
+    (match Repo_store.find_repo_by_path_prefix ~base_path:base_dir abs with
+     | None ->
+       bump_orphan ~reason:"unregistered_repo";
+       (Ide_paths.Orphan, file_path)
+     | Some (repo, rel) ->
+       resolve_by_url
+         ~rel
+         ~repo_url:repo.url
+         ~orphan_reasons:("url_unparseable", "blank_url"))
 ;;
 
 (** After a successful file write, record the code region in [.masc-ide/].

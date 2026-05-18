@@ -40,6 +40,23 @@ val bundle_paths : string -> string list
 (** All three bundle subdirs in canonical order:
     [\[bundle_root; mind_path; repos_path\]]. *)
 
+val parse_playground_repo_path
+  :  base_path:string
+  -> abs_path:string
+  -> (string * string) option
+(** RFC-0128 §4.5. Parse a sandbox playground absolute file path back
+    into [(repo_id, rel_path)].
+
+    Layouts accepted (relative to [base_path]):
+    - [.masc/playground/<keeper>/repos/<repo_id>/<rel>]          (Local)
+    - [.masc/playground/docker/<keeper>/repos/<repo_id>/<rel>]   (Docker)
+
+    Used by the keeper write path so files keepers edit inside their
+    per-keeper repo clones map to the same canonical-URL bucket as
+    files in the user's working tree. Returns [None] when [abs_path]
+    is not absolute, not under [base_path], or does not contain a
+    [repos/<id>/...] anchor inside the [.masc/playground/] subtree. *)
+
 (** {1 Worktree Naming}
 
     Worktree directory names and git branch names for keeper task

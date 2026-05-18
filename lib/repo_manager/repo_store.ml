@@ -312,14 +312,42 @@ let slugify_id s =
       | _ -> '-')
     s
 
-let run_read_line cmd =
-  try
-    let ic = Unix.open_process_in cmd in
-    Fun.protect
-      ~finally:(fun () -> ignore (Unix.close_process_in ic))
-      (fun () ->
-        try Ok (input_line ic) with End_of_file -> Error "no output")
-  with Sys_error msg -> Error msg
+let is_directory path = try Sys.is_directory path with Sys_error _ -> false
+
+let is_symlink path =
+  try (Unix.lstat path).st_kind = Unix.S_LNK
+  with Unix.Unix_error _ | Sys_error _ -> false
+
+let is_real_directory path = is_directory path && not (is_symlink path)
+let is_hidden_name name = String.length name > 0 && Char.equal name.[0] '.'
+
+let discover_git_dirs ~base_path =
+  let max_git_depth = 4 in
+  let rec scan_dir ~depth dir acc =
+    let git_dir = Filename.concat dir ".git" in
+    let acc =
+      if depth + 1 <= max_git_depth && is_real_directory git_dir then git_dir :: acc
+      else acc
+    in
+    if depth >= max_git_depth - 1 then acc
+    else
+      let entries =
+        try Sys.readdir dir with Sys_error _ | Unix.Unix_error _ -> [||]
+      in
+      Array.fold_left
+        (fun acc name ->
+          if String.equal name "." || String.equal name ".." || is_hidden_name name
+          then
+            acc
+          else
+            let child = Filename.concat dir name in
+            if is_real_directory child then scan_dir ~depth:(depth + 1) child acc
+            else acc)
+        acc
+        entries
+  in
+  if is_real_directory base_path then List.rev (scan_dir ~depth:0 base_path [])
+  else []
 
 (* Pure path normalization fallback for environments where the path does
    not exist on disk yet (Unix.realpath would raise) or Unix is
@@ -384,25 +412,7 @@ let discover_repositories ~base_path =
             canonical_path (local_path ~base_path:abs_base_path r))
     | Error _ -> []
   in
-  let git_dirs =
-    try
-      let cmd =
-        Printf.sprintf "find %s -maxdepth 4 -name \".git\" -type d 2>/dev/null"
-          (Filename.quote abs_base_path)
-      in
-      let ic = Unix.open_process_in cmd in
-      Fun.protect
-        ~finally:(fun () -> ignore (Unix.close_process_in ic))
-        (fun () ->
-          let rec read_lines acc =
-            match input_line ic with
-            | line -> read_lines (line :: acc)
-            | exception End_of_file -> List.rev acc
-          in
-          read_lines [])
-    with
-    | Sys_error _ | Unix.Unix_error _ | Failure _ -> []
-  in
+  let git_dirs = discover_git_dirs ~base_path:abs_base_path in
   let has_hidden_segment_under_base path =
     if String.equal path abs_base_path then false
     else
@@ -438,11 +448,7 @@ let discover_repositories ~base_path =
         if has_hidden_segment_under_base abs_repo_dir then None
         else if List.exists (String.equal abs_repo_dir) existing_paths then None
         else
-          let url_cmd =
-            Printf.sprintf "git -C %s remote get-url origin 2>/dev/null"
-              (Filename.quote abs_repo_dir)
-          in
-          match run_read_line url_cmd with
+          match Repo_git.get_origin_url ~local_path:abs_repo_dir with
           | Ok url ->
               let name = Filename.basename abs_repo_dir in
               let id = slugify_id name in

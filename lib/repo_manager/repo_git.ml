@@ -128,6 +128,12 @@ let get_branches ~repository =
   | Ok lines -> Ok lines
   | Error msg -> Error msg
 
+let get_origin_url ~local_path =
+  match run_git ~cwd:local_path [ "remote"; "get-url"; "origin" ] with
+  | Ok (url :: _) -> Ok url
+  | Ok [] -> Error "git remote get-url origin returned no output"
+  | Error msg -> Error msg
+
 let get_recent_commits ~repository ~branch ~limit =
   match
     run_git ~cwd:repository.local_path

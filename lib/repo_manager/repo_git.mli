@@ -19,6 +19,10 @@ val get_branches :
   repository:repository -> (string list, string) result
 (** [get_branches ~repository] returns all local and remote branch names. *)
 
+val get_origin_url : local_path:string -> (string, string) result
+(** [get_origin_url ~local_path] returns the configured [origin] remote URL
+    for the repository at [local_path]. *)
+
 val get_recent_commits :
   repository:repository -> branch:string -> limit:int -> (string list, string) result
 (** [get_recent_commits ~repository ~branch ~limit] returns the most recent

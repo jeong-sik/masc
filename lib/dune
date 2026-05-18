@@ -49,6 +49,7 @@
  dashboard_mission_agents
  dashboard_mission_assembly
  keeper_persona_authoring_contract
+ keeper_persona_authoring_slug
  keeper_types_profile
  keeper_meta_tool_access
  keeper_meta_contract
@@ -120,6 +121,7 @@
   keeper_exec_status
   provider_tool_support
   voice_runtime_overlay
+  keeper_status_detail_observability
   keeper_status_detail
   keeper_exec_persona
   keeper_model_labels
@@ -142,9 +144,12 @@
   keeper_agent_error
   keeper_agent_memory_episode
   provider_runtime_projection
+  voice_bridge_transport
   cascade_wire_overlay
   cascade_http_probe_url
   cascade_agent_context
+  cascade_health_tracker_config
+  cascade_metrics_registry
   keeper_oas_checkpoint
   keeper_cascade_engine
   keeper_turn_driver

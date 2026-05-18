@@ -492,86 +492,8 @@ let cap_continuity_summary_text
    near-identical one. Strip backward-looking fields at prompt assembly so the
    LLM sees only forward-looking context (Goal, Next plan, Next, OpenQuestions,
    Constraints). Persistence still retains the full summary. *)
-let filter_forward_looking_summary (summary : string) : string =
-  let backward_labels = [ "Done"; "Progress"; "Decisions" ] in
-  let inert_next_markers =
-    [
-      "stay_silent";
-      "stay silent";
-      "wait for new actionable work";
-      "nothing to do";
-      "no actionable work";
-      "do nothing";
-      "all non-destructive actions exhausted";
-      "대기 유지";
-      "침묵";
-      "할 일 없음";
-      "아무것도 하지";
-    ]
-  in
-  let stale_tool_surface_markers =
-    [
-      "masc_* only";
-      "mcp__masc__ only";
-      "no keeper_* tools";
-      "no keeper tools";
-      "tool surface: masc";
-      "tool-surface: masc";
-    ]
-  in
-  let strip_labeled_value ~prefixes line =
-    let trimmed = String.trim line in
-    let rec loop = function
-      | [] -> None
-      | prefix :: rest -> (
-          match strip_prefix_ci ~prefix trimmed with
-          | Some value -> Some value
-          | None -> loop rest)
-    in
-    loop prefixes
-  in
-  let is_backward_line line =
-    let trimmed = String.trim line in
-    List.exists
-      (fun label ->
-        let prefix = label ^ ":" in
-        String.starts_with trimmed ~prefix)
-      backward_labels
-  in
-  let is_inert_next_line line =
-    match strip_labeled_value ~prefixes:[ "Next plan:"; "Next:" ] line with
-    | None -> false
-    | Some value ->
-        let payload = String.trim value in
-        payload <> ""
-        && List.exists
-             (fun marker -> String_util.contains_substring_ci payload marker)
-             inert_next_markers
-  in
-  let is_stale_tool_surface_line line =
-    let payload = String.trim line in
-    String_util.contains_substring_ci payload "tool"
-    && (List.exists
-          (fun marker -> String_util.contains_substring_ci payload marker)
-          stale_tool_surface_markers
-        || (String_util.contains_substring_ci payload "only"
-            && (String_util.contains_substring_ci payload "allowed tool"
-                || String_util.contains_substring_ci payload "available tool"
-                || String_util.contains_substring_ci payload "visible tool"
-                || String_util.contains_substring_ci payload "tool surface"
-                || String_util.contains_substring_ci payload "tool-surface")))
-  in
-  let kept =
-    summary
-    |> String.split_on_char '\n'
-    |> List.filter (fun line -> not (is_backward_line line))
-    |> List.filter (fun line -> not (is_inert_next_line line))
-    |> List.filter (fun line -> not (is_stale_tool_surface_line line))
-    |> List.filter (fun line -> String.trim line <> "")
-  in
-  match kept with
-  | [] -> ""
-  | _ -> String.concat "\n" kept
+let filter_forward_looking_summary =
+  Keeper_memory_policy_summary_filter.filter_forward_looking_summary
 
 let progress_markdown_of_snapshot
     ?generation

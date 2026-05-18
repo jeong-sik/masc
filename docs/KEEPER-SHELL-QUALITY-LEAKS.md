@@ -1,7 +1,7 @@
 # Keeper Shell Quality Leaks
 
 Runtime baseline: `/Users/dancer/me/.masc/tool_calls`, 240h window ending
-`2026-05-19T03:11:58+0900`.
+`2026-05-19T03:31:14+0900`.
 
 Baseline command:
 
@@ -13,9 +13,9 @@ Baseline result:
 
 | Metric | Count |
 |---|---:|
-| Bash calls | 21,079 |
-| Failed or semantic-failed Bash calls | 8,573 |
-| Failure rate | 40.67% |
+| Bash calls | 21,259 |
+| Failed or semantic-failed Bash calls | 8,594 |
+| Failure rate | 40.43% |
 
 Release target: after the improvement PR is merged and keepers have generated a
 fresh 240h sample, the same script should report `failure_pct < 10.00`.
@@ -24,11 +24,13 @@ Adjacent tool-surface sample from the same 240h window:
 
 | Tool | Failed | OK | Failure rate |
 |---|---:|---:|---:|
-| `masc_code_shell` | 1,621 | 6,087 | 21.03% |
-| `masc_code_edit` | 115 | 51 | 69.28% |
+| `masc_code_shell` | 1,628 | 6,208 | 20.78% |
+| `masc_code_edit` | 119 | 51 | 70.00% |
 | `keeper_shell` | 186 | 509 | 26.76% |
 | `keeper_bash` | 198 | 1,111 | 15.13% |
-| public `Edit` | 38 | 13 | 74.51% |
+| `keeper_pr_review_read` | 17 | 23 | 42.50% |
+| `keeper_pr_review_comment` | 50 | 47 | 51.55% |
+| public `Edit` | 38 | 15 | 71.70% |
 | public `Write` | 94 | 6 | 94.00% |
 
 ## Leak Map
@@ -39,7 +41,7 @@ Adjacent tool-surface sample from the same 240h window:
 | Missing path or wrong cwd | 1,585 | `lib/worker_dev_tools.ml`, `lib/keeper/keeper_shell_docker.ml` | Preserve path validation, but make public `Bash` expose `cwd`, make retry hints use the public `Bash { command, cwd }` shape, and allow the safe `/dev/null` sentinel instead of treating `cat /dev/null` as an out-of-whitelist path. |
 | `shape_block:chaining` | 1,262 | `lib/keeper/keeper_shell_bash.ml` | Normalize safe read-only fallbacks. `cd repos/... && <read-only>` is treated like a cwd-scoped read instead of a hard shape failure. |
 | Non-zero command exits | 836 | `lib/exec_core.ml`, `lib/keeper_tool_call_log.ml` | Treat structured `ok=true` and `semantic_status=no_match` as semantic success even when the transport-level call was marked failed. |
-| Path syntax blocked | 537 | `lib/worker_dev_tools.ml`, `lib/keeper/keeper_path_check_error.ml` | Keep the safety gate; measure it distinctly instead of collapsing it into generic structured errors. |
+| Path syntax blocked | 537 | `lib/worker_dev_tools.ml`, `lib/keeper/keeper_path_check_error.ml`, `lib/keeper/keeper_tool_pr_review.ml` | Keep the safety gate; measure it distinctly instead of collapsing it into generic structured errors. PR review mutation tools now write review bodies to temp files and pass `--body-file` / `-F body=@file`, so body prose is no longer parsed as path-bearing shell syntax. |
 | `other` / unclassified failures | 432 | `lib/keeper_tool_call_log.ml`, `lib/dashboard/dashboard_http_tool_quality.ml` | Promote structured `semantic_status`, `shape_block`, and diagnosis fields into stable failure categories. |
 | `shape_block:unknown` | 352 | `scripts/analyze-keeper-bash-failures.sh` | Leave true parser-unknown shape blocks separate from command-inferable pipe/chaining failures. |
 | Multi-repo cwd required | 282 | `lib/keeper/keeper_shell_docker.ml`, `lib/keeper/keeper_tool_alias.ml` | Parse command tokens with the Bash parser and return a public `Bash` retry shape including `cwd`. |
@@ -60,6 +62,12 @@ top observed class was `command_not_allowed`; safe inspection commands such as
 now matches the validator: allowlisted pipelines are supported, but shell
 chaining remains blocked.
 
+`keeper_pr_review_comment` and `keeper_pr_review_reply` also shared the path
+syntax leak indirectly: the handlers inlined review prose into a shell command,
+so markdown, globs, quotes, or code snippets could be classified as path syntax
+before `gh` ran. Review/comment bodies now travel through temp files instead of
+shell argv.
+
 ## Verification
 
 Focused tests:
@@ -67,6 +75,7 @@ Focused tests:
 ```bash
 scripts/dune-local.sh build test/test_keeper_bash_safety.exe
 scripts/dune-local.sh build test/test_keeper_tool_call_log.exe
+scripts/dune-local.sh build test/test_keeper_pr_review.exe
 ```
 
 Runtime remeasure:
@@ -78,5 +87,7 @@ scripts/analyze-keeper-bash-failures.sh /Users/dancer/me 240
 The same command now emits both the Bash-specific census and a
 `[surface summary]`/`[surface failure categories]` section for
 `keeper_bash`, `keeper_shell`, `masc_code_shell`, `masc_code_edit`, and public
-`Edit`/`Write`, so the `<10%` target can be checked across the related shell
-and code-edit surfaces after the PR is merged and a fresh runtime window exists.
+`Edit`/`Write`, plus the PR review read/comment/reply surfaces that showed the
+same path-syntax leak. This lets the `<10%` target be checked across the related
+shell, code-edit, and review surfaces after the PR is merged and a fresh runtime
+window exists.

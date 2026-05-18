@@ -1110,6 +1110,38 @@ let test_keeper_bash_safe_cd_fallback_executes_scoped_read () =
      |> Json.to_string
      |> fun output -> String_util.contains_substring output "marker.ml")
 
+let test_keeper_bash_single_repo_root_recovers_top_level_find () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "single-repo-find" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  let repo_root = Filename.concat playground "repos/masc-mcp" in
+  let lib_dir = Filename.concat repo_root "lib" in
+  ensure_dir (Filename.concat repo_root ".git");
+  ensure_dir lib_dir;
+  ignore (Fs_compat.save_file_atomic (Filename.concat lib_dir "marker.ml") "let x = 1");
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:(`Assoc [ "cmd", `String "find lib/ -name marker.ml" ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "sandbox-root find succeeds from the single repo" true
+    (json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check string) "execution cwd is the single repo root"
+    (Unix.realpath repo_root)
+    (json |> Json.member "cwd" |> Json.to_string |> Unix.realpath);
+  Alcotest.(check bool) "find output includes repo-local file" true
+    (json
+     |> Json.member "output"
+     |> Json.to_string
+     |> fun output -> String_util.contains_substring output "marker.ml")
+
 let test_keeper_bash_safe_rg_fallback_allows_escaped_regex_pipe () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
@@ -1923,6 +1955,8 @@ let () =
         test_keeper_bash_safe_fallback_works_for_write_enabled_keeper;
       Alcotest.test_case "safe cd fallback executes scoped read" `Quick
         test_keeper_bash_safe_cd_fallback_executes_scoped_read;
+      Alcotest.test_case "single repo root recovers top-level find" `Quick
+        test_keeper_bash_single_repo_root_recovers_top_level_find;
       Alcotest.test_case "safe rg fallback allows escaped regex pipe" `Quick
         test_keeper_bash_safe_rg_fallback_allows_escaped_regex_pipe;
       Alcotest.test_case "safe dev-null redirect executes scoped grep" `Quick

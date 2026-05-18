@@ -1229,6 +1229,83 @@ let normalize_path_for_keeper_bash_containment path =
   Keeper_alerting_path.normalize_path_for_check path
   |> Keeper_alerting_path.strip_trailing_slashes
 
+let repo_top_relative_read_path raw =
+  let rec strip_current_dir path =
+    if String.starts_with ~prefix:"./" path
+    then strip_current_dir (String.sub path 2 (String.length path - 2))
+    else path
+  in
+  let path = raw |> String.trim |> strip_current_dir in
+  if path = ""
+     || not (Filename.is_relative path)
+     || String.equal path "."
+     || String.equal path ".."
+     || String.starts_with ~prefix:"../" path
+     || String.starts_with ~prefix:"repos/" path
+     || is_playground_lane_relative_path path
+  then None
+  else
+    let first_segment =
+      match String.split_on_char '/' path with
+      | segment :: _ -> segment
+      | [] -> path
+    in
+    if
+      List.mem
+        first_segment
+        [ "bench"
+        ; "bin"
+        ; "docs"
+        ; "examples"
+        ; "lib"
+        ; "ops"
+        ; "scripts"
+        ; "src"
+        ; "test"
+        ; "tests"
+        ]
+    then Some path
+    else None
+
+let single_repo_cwd_for_top_relative_read
+      ~(config : Coord.config)
+      ~(meta : keeper_meta)
+      ~(cwd : string)
+      ~(cmd : string)
+  =
+  let sandbox_root =
+    keeper_playground_root ~config ~meta
+    |> normalize_path_for_keeper_bash_containment
+  in
+  let cwd_norm = normalize_path_for_keeper_bash_containment cwd in
+  if not (String.equal cwd_norm sandbox_root)
+  then None
+  else if Worker_dev_tools.is_write_operation cmd
+  then None
+  else
+    match
+      Worker_dev_tools.validate_command_coding_with_allowlist
+        ~allow_pipes:false
+        ~allowed_commands:Worker_dev_tools.dev_allowed_commands
+        cmd
+    with
+    | Error _ -> None
+    | Ok () ->
+      (match keeper_sandbox_repo_names ~config ~meta with
+       | [ repo_name ] ->
+         let repo_root = Filename.concat (Filename.concat sandbox_root "repos") repo_name in
+         let wants_repo_root =
+           Worker_dev_tools.existing_dir_path_values cmd
+           |> List.exists (fun raw_path ->
+             match repo_top_relative_read_path raw_path with
+             | None -> false
+             | Some rel ->
+               (not (safe_file_exists (Filename.concat sandbox_root rel)))
+               && safe_file_exists (Filename.concat repo_root rel))
+         in
+         if wants_repo_root then Some repo_root else None
+       | [] | _ :: _ :: _ -> None)
+
 let handle_keeper_bash_typed
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Coord.config)
@@ -1610,7 +1687,42 @@ let handle_keeper_bash
     (* Resolve cwd early — needed for playground detection before validation. *)
     match Keeper_shell_shared.resolve_keeper_shell_write_cwd ~config ~meta ~args with
     | Error e -> error_json e
-    | Ok cwd ->
+    | Ok requested_cwd ->
+    let command_cacheable () =
+      Masc_exec.Risk_classifier.(is_cacheable (classify cmd))
+    in
+    let safe_read_fallback =
+      safe_read_fallback_of_command ~write_enabled
+        ~stderr_dev_null_stripped:stripped_stderr_dev_null cmd
+    in
+    let validation_cmd =
+      match safe_read_fallback with
+      | Some rewrite -> rewrite.primary_cmd
+      | None -> cmd
+    in
+    let cwd =
+      match safe_read_fallback with
+      | Some { cwd_override = Some _; _ } -> requested_cwd
+      | Some { cwd_override = None; _ } | None ->
+        (match
+           single_repo_cwd_for_top_relative_read
+             ~config
+             ~meta
+             ~cwd:requested_cwd
+             ~cmd:validation_cmd
+         with
+         | Some repo_cwd ->
+           Log.Keeper.info
+             "keeper_bash auto-selected single sandbox repo cwd: keeper=%s cwd=%s cmd=%s"
+             meta.name repo_cwd cmd_for_log;
+           repo_cwd
+         | None -> requested_cwd)
+    in
+    let validation_cwd =
+      match safe_read_fallback with
+      | Some { cwd_override = Some rel; _ } -> Filename.concat requested_cwd rel
+      | Some { cwd_override = None; _ } | None -> cwd
+    in
     let env_snap =
       (* RFC-0106 P1: route Cancelled re-raise through Cancel_safe.protect.
          Silent [_ -> None] preserved verbatim — env snapshot is optional. *)
@@ -1665,23 +1777,6 @@ let handle_keeper_bash
                "execution_time_ms", `Int entry.duration_ms;
              ]))
       | Ok _ | Error _ -> cached_result_json entry
-    in
-    let command_cacheable () =
-      Masc_exec.Risk_classifier.(is_cacheable (classify cmd))
-    in
-    let safe_read_fallback =
-      safe_read_fallback_of_command ~write_enabled
-        ~stderr_dev_null_stripped:stripped_stderr_dev_null cmd
-    in
-    let validation_cmd =
-      match safe_read_fallback with
-      | Some rewrite -> rewrite.primary_cmd
-      | None -> cmd
-    in
-    let validation_cwd =
-      match safe_read_fallback with
-      | Some { cwd_override = Some rel; _ } -> Filename.concat cwd rel
-      | Some { cwd_override = None; _ } | None -> cwd
     in
     let with_raw_json_exec_cache run =
       let cacheable = command_cacheable () in

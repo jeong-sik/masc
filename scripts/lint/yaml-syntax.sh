@@ -38,6 +38,32 @@ fi
 python3 - "${files[@]}" <<'PY'
 import sys
 import yaml
+from yaml.constructor import ConstructorError
+
+
+class UniqueKeyLoader(yaml.SafeLoader):
+    pass
+
+
+def construct_unique_mapping(loader, node, deep=False):
+    seen = set()
+    for key_node, _ in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in seen:
+            raise ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                f"found duplicate key {key!r}",
+                key_node.start_mark,
+            )
+        seen.add(key)
+    return yaml.SafeLoader.construct_mapping(loader, node, deep=deep)
+
+
+UniqueKeyLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    construct_unique_mapping,
+)
 
 
 def gha_escape(s: str) -> str:
@@ -55,7 +81,7 @@ failed = 0
 for path in sys.argv[1:]:
     try:
         with open(path) as fh:
-            yaml.safe_load(fh)
+            yaml.load(fh, Loader=UniqueKeyLoader)
     except yaml.YAMLError as exc:
         failed += 1
         msg = gha_escape(f"YAML parse error: {exc}")

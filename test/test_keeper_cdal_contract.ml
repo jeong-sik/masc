@@ -143,6 +143,41 @@ let test_select_cdal_proof_falls_back_to_captured_proof () =
   |> check_selected_proof_run_id "selected proof" "captured-proof"
 ;;
 
+let tool_call ?task_id tool_name : Keeper_agent_run.tool_call_detail =
+  { tool_name
+  ; provider = "runtime"
+  ; outcome = "ok"
+  ; latency_ms = 1.0
+  ; task_id
+  ; route_evidence = None
+  }
+;;
+
+let test_cdal_task_id_prefers_current_task () =
+  let selected =
+    Keeper_agent_run.For_testing.cdal_task_id_for_verdict
+      ~current_task_id:(Some "task-current")
+      ~tool_calls:[ tool_call ~task_id:"task-tool" "masc_transition" ]
+  in
+  check (option string) "selected task id" (Some "task-current") selected
+;;
+
+let test_cdal_task_id_falls_back_to_tool_target () =
+  let selected =
+    Keeper_agent_run.For_testing.cdal_task_id_for_verdict
+      ~current_task_id:None
+      ~tool_calls:
+        [ tool_call "keeper_status"
+        ; tool_call ~task_id:"task-approve-target" "masc_transition"
+        ]
+  in
+  check
+    (option string)
+    "selected task id"
+    (Some "task-approve-target")
+    selected
+;;
+
 let () =
   Alcotest.run
     "keeper_cdal_contract"
@@ -165,6 +200,14 @@ let () =
             "falls back to captured proof"
             `Quick
             test_select_cdal_proof_falls_back_to_captured_proof
+        ; test_case
+            "prefers current task id for verdict scope"
+            `Quick
+            test_cdal_task_id_prefers_current_task
+        ; test_case
+            "falls back to lifecycle tool target for verdict scope"
+            `Quick
+            test_cdal_task_id_falls_back_to_tool_target
         ] )
     ]
 ;;

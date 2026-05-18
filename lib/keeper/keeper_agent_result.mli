@@ -5,6 +5,7 @@ type tool_call_detail =
   ; provider : string
   ; outcome : string
   ; latency_ms : float
+  ; task_id : string option
   ; route_evidence : Yojson.Safe.t option
   }
 

@@ -8,21 +8,26 @@ name: Approve Agent PR
 # real human from an agent that runs under the same owner credentials.
 #
 # THIS WORKFLOW introduces a hard credential boundary:
-#   • It runs only via workflow_dispatch (human clicks "Run workflow" in
+#   - It runs only via workflow_dispatch (human clicks "Run workflow" in
 #     the GitHub UI, or a human triggers it via `gh workflow run`).
-#   • The `await-human-approval` job requires the `human-approval`
+#   - The `await-human-approval` job requires the `human-approval`
 #     GitHub Environment.  Environment protection rules must be configured
-#     in Settings → Environments → human-approval with required reviewers.
+#     in Settings -> Environments -> human-approval with required reviewers.
 #     Even if an agent triggers the dispatch, a designated reviewer MUST
-#     click "Approve" in the GitHub UI before the job proceeds — this is
+#     click "Approve" in the GitHub UI before the job proceeds -- this is
 #     an interactive gesture that cannot be automated with a bearer token.
-#   • After the environment gate is passed the `apply-approval` job adds
+#   - After the environment gate is passed the `apply-approval` job adds
 #     the configured bypass label and removes configured hard-stop labels
 #     from the target PR using the Actions token, which records the
 #     Environment-approved deployment ID as part of the audit trail.
 #
+# BATCH MODE:
+#   Use `pr_numbers` (comma-separated) to approve multiple PRs with a
+#   single environment gate approval.  `convert_to_ready` will also mark
+#   each PR as Ready for Review after applying the bypass label.
+#
 # SETUP (one-time, done in GitHub Settings):
-#   1. Go to Settings → Environments → New environment → "human-approval"
+#   1. Go to Settings -> Environments -> New environment -> "human-approval"
 #   2. Under "Required reviewers" add the human approver(s).
 #   3. Optionally enable "Prevent self-review" so the PR author cannot
 #      self-approve.
@@ -31,9 +36,18 @@ on:
   workflow_dispatch:
     inputs:
       pr_number:
-        description: 'PR number to approve (e.g. 42)'
-        required: true
+        description: 'PR number to approve (e.g. 42). Ignored when pr_numbers is set.'
+        required: false
         type: string
+      pr_numbers:
+        description: 'Comma-separated PR numbers for batch approval (e.g. 42,43,44)'
+        required: false
+        type: string
+      convert_to_ready:
+        description: 'Convert approved PR(s) to Ready for Review'
+        required: false
+        type: boolean
+        default: false
       reason:
         description: 'Optional reason / context for approval'
         required: false
@@ -46,38 +60,54 @@ permissions:
   issues: write
 
 concurrency:
-  group: approve-agent-pr-${{ github.event.inputs.pr_number || github.run_id }}
+  group: approve-agent-pr-${{ github.run_id }}
   cancel-in-progress: true
 
 jobs:
   await-human-approval:
     name: Await Human Approval (Environment Gate)
     runs-on: ubuntu-latest
-    # The environment protection rule is the credential boundary.
-    # A required reviewer must approve this deployment in the GitHub UI
-    # before the job steps execute.  Agents cannot mint this approval
-    # even when sharing owner credentials.
     environment: human-approval
     outputs:
-      pr_number: ${{ steps.echo.outputs.pr_number }}
+      pr_numbers_json: ${{ steps.validate.outputs.pr_numbers_json }}
     steps:
-      - name: Record approval context
-        id: echo
+      - name: Validate and record approval context
+        id: validate
         env:
           PR_NUMBER: ${{ inputs.pr_number }}
+          PR_NUMBERS: ${{ inputs.pr_numbers }}
           REASON: ${{ inputs.reason }}
           ACTOR: ${{ github.actor }}
         run: |
-          # Validate pr_number is a positive integer before proceeding.
-          if ! [[ "${PR_NUMBER}" =~ ^[1-9][0-9]*$ ]]; then
-            echo "::error::Invalid pr_number '${PR_NUMBER}': must be a positive integer (e.g. 42)."
+          # Build PR number list from inputs.
+          if [[ -n "${PR_NUMBERS}" ]]; then
+            RAW="${PR_NUMBERS}"
+          elif [[ -n "${PR_NUMBER}" ]]; then
+            RAW="${PR_NUMBER}"
+          else
+            echo "::error::Either pr_number or pr_numbers must be provided."
             exit 1
           fi
-          echo "Human approval granted by ${ACTOR} for PR #${PR_NUMBER}."
+
+          PR_LIST=()
+          IFS=',' read -ra PARTS <<< "${RAW}"
+          for part in "${PARTS[@]}"; do
+            part=$(echo "$part" | xargs)
+            if ! [[ "${part}" =~ ^[1-9][0-9]*$ ]]; then
+              echo "::error::Invalid PR number '${part}': must be a positive integer."
+              exit 1
+            fi
+            PR_LIST+=("$part")
+          done
+
+          echo "Human approval granted by ${ACTOR} for PR(s): ${PR_LIST[*]}."
           if [[ -n "${REASON}" ]]; then
             echo "Reason: ${REASON}"
           fi
-          echo "pr_number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+
+          # Output as JSON array for downstream job.
+          JSON=$(printf '%s\n' "${PR_LIST[@]}" | jq -R . | jq -s -c .)
+          echo "pr_numbers_json=${JSON}" >> "$GITHUB_OUTPUT"
 
   apply-approval:
     name: Apply Bypass Label
@@ -94,87 +124,146 @@ jobs:
       - name: Apply human-approved-ready bypass
         uses: actions/github-script@v9
         env:
+          PR_NUMBERS_JSON: ${{ needs.await-human-approval.outputs.pr_numbers_json }}
+          CONVERT_TO_READY: ${{ inputs.convert_to_ready }}
           AGENT_DRAFT_GUARD_BYPASS_LABELS: ${{ vars.AGENT_DRAFT_GUARD_BYPASS_LABELS }}
           AGENT_DRAFT_GUARD_HARD_STOP_LABELS: ${{ vars.AGENT_DRAFT_GUARD_HARD_STOP_LABELS }}
         with:
           script: |
-            const prNumber = parseInt('${{ needs.await-human-approval.outputs.pr_number }}', 10);
-            if (!prNumber || isNaN(prNumber)) {
-              core.setFailed('Invalid pr_number input: ' + '${{ inputs.pr_number }}');
+            const prNumbers = JSON.parse(process.env.PR_NUMBERS_JSON);
+            if (!Array.isArray(prNumbers) || prNumbers.length === 0) {
+              core.setFailed('No valid PR numbers to process.');
               return;
             }
+
             // Resolve the configured bypass label; fall back to default.
             const bypassLabels = (process.env.AGENT_DRAFT_GUARD_BYPASS_LABELS || 'human-approved-ready')
               .split(',')
               .map((s) => s.trim())
               .filter(Boolean);
-            // Use the first non-automation-prone bypass label.
             const automationProne = new Set(['allow-auto-merge']);
             const targetLabel = bypassLabels.find((l) => !automationProne.has(l.toLowerCase())) || 'human-approved-ready';
             const hardStopLabels = (process.env.AGENT_DRAFT_GUARD_HARD_STOP_LABELS || 'do-not-merge')
               .split(',')
               .map((s) => s.trim())
               .filter(Boolean);
+            const convertToReady = process.env.CONVERT_TO_READY === 'true';
 
-            const { data: issue } = await github.rest.issues.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: prNumber,
-            });
-            const currentLabels = (issue.labels || [])
-              .map((label) => (typeof label === 'string' ? label : label.name || ''))
-              .map((label) => label.trim())
-              .filter(Boolean);
-            const currentLabelSet = new Set(currentLabels.map((label) => label.toLowerCase()));
-            const presentHardStopLabels = hardStopLabels
-              .filter((label) => currentLabelSet.has(label.toLowerCase()));
             const actor = '${{ github.actor }}';
             const reason = '${{ inputs.reason }}';
             const runUrl = `${process.env.GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const body = [
-              '<!-- masc-human-approval-gate -->',
-              `Human approval granted by @${actor} via credential-separated environment gate.`,
-              '',
-              `Bypass label \`${targetLabel}\` authorized by approval workflow run: ${runUrl}`,
-              ...(presentHardStopLabels.length > 0
-                ? [`Hard-stop label(s) scheduled for removal: ${presentHardStopLabels.map((label) => `\`${label}\``).join(', ')}.`]
-                : ['No configured hard-stop labels were present.']),
-              ...(reason ? ['', `Reason: ${reason}`] : []),
-              '',
-              'This approval was gated through the `human-approval` GitHub Environment, which requires',
-              'an interactive reviewer approval that cannot be automated with a shared owner credential.',
-            ].join('\n');
-            core.info(`Applying bypass label '${targetLabel}' to PR #${prNumber}.`);
-            await github.rest.issues.addLabels({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: prNumber,
-              labels: [targetLabel],
-            });
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: prNumber,
-              body,
-            });
-            core.info(`Posted approval marker for PR #${prNumber} after applying bypass label '${targetLabel}'.`);
-            const removedHardStopLabels = [];
-            for (const label of hardStopLabels) {
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const results = [];
+
+            for (const prNum of prNumbers) {
+              const prNumber = parseInt(prNum, 10);
               try {
-                await github.rest.issues.removeLabel({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
+                const { data: issue } = await github.rest.issues.get({
+                  owner,
+                  repo,
                   issue_number: prNumber,
-                  name: label,
                 });
-                removedHardStopLabels.push(label);
-              } catch (error) {
-                if (error.status === 404) {
-                  core.info(`Hard-stop label '${label}' was not present on PR #${prNumber}.`);
-                } else {
-                  throw error;
+                if (issue.state === 'closed' || issue.pull_request?.merged) {
+                  core.info(`PR #${prNumber} is closed/merged; skipping.`);
+                  results.push({ pr: prNumber, status: 'skipped', reason: 'closed/merged' });
+                  continue;
                 }
+
+                const currentLabels = (issue.labels || [])
+                  .map((label) => (typeof label === 'string' ? label : label.name || ''))
+                  .map((label) => label.trim())
+                  .filter(Boolean);
+                const currentLabelSet = new Set(currentLabels.map((l) => l.toLowerCase()));
+                const presentHardStopLabels = hardStopLabels
+                  .filter((label) => currentLabelSet.has(label.toLowerCase()));
+
+                const body = [
+                  '<!-- masc-human-approval-gate -->',
+                  `Human approval granted by @${actor} via credential-separated environment gate.`,
+                  '',
+                  `Bypass label \`${targetLabel}\` authorized by approval workflow run: ${runUrl}`,
+                  ...(presentHardStopLabels.length > 0
+                    ? [`Hard-stop label(s) scheduled for removal: ${presentHardStopLabels.map((l) => `\`${l}\``).join(', ')}.`]
+                    : ['No configured hard-stop labels were present.']),
+                  ...(reason ? ['', `Reason: ${reason}`] : []),
+                  '',
+                  'This approval was gated through the `human-approval` GitHub Environment, which requires',
+                  'an interactive reviewer approval that cannot be automated with a shared owner credential.',
+                ].join('\n');
+
+                core.info(`Applying bypass label '${targetLabel}' to PR #${prNumber}.`);
+                await github.rest.issues.addLabels({
+                  owner,
+                  repo,
+                  issue_number: prNumber,
+                  labels: [targetLabel],
+                });
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: prNumber,
+                  body,
+                });
+
+                // Remove hard-stop labels.
+                for (const label of hardStopLabels) {
+                  try {
+                    await github.rest.issues.removeLabel({
+                      owner,
+                      repo,
+                      issue_number: prNumber,
+                      name: label,
+                    });
+                  } catch (error) {
+                    if (error.status === 404) {
+                      core.info(`Hard-stop label '${label}' was not present on PR #${prNumber}.`);
+                    } else {
+                      throw error;
+                    }
+                  }
+                }
+
+                // Convert to Ready if requested and currently Draft.
+                if (convertToReady) {
+                  const { data: prData } = await github.rest.pulls.get({
+                    owner,
+                    repo,
+                    pull_number: prNumber,
+                  });
+                  if (prData.draft) {
+                    const gqlResult = await github.graphql(`
+                      query($owner: String!, $repo: String!, $number: Int!) {
+                        repository(owner: $owner, name: $repo) {
+                          pullRequest(number: $number) { id }
+                        }
+                      }
+                    `, { owner, repo, number: prNumber });
+                    await github.graphql(`
+                      mutation($pullRequestId: ID!) {
+                        markPullRequestReadyForReview(input: {pullRequestId: $pullRequestId}) {
+                          pullRequest { id }
+                        }
+                      }
+                    `, { pullRequestId: gqlResult.repository.pullRequest.id });
+                    core.info(`Converted PR #${prNumber} to Ready for Review.`);
+                  } else {
+                    core.info(`PR #${prNumber} is already Ready; skipping conversion.`);
+                  }
+                }
+
+                results.push({ pr: prNumber, status: 'approved' });
+                core.info(`Approval applied to PR #${prNumber}.`);
+              } catch (error) {
+                core.warning(`Failed to process PR #${prNumber}: ${error.message}`);
+                results.push({ pr: prNumber, status: 'failed', reason: error.message });
               }
             }
 
-            core.info(`Bypass label '${targetLabel}', hard-stop cleanup, and approval comment applied to PR #${prNumber}.`);
+            const summary = results.map((r) => `PR #${r.pr}: ${r.status}${r.reason ? ` (${r.reason})` : ''}`).join('\n');
+            core.info(`Batch approval summary:\n${summary}`);
+            const failedCount = results.filter((r) => r.status === 'failed').length;
+            if (failedCount > 0) {
+              core.setFailed(`${failedCount} of ${results.length} PRs failed.`);
+            }

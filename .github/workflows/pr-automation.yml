@@ -38,6 +38,7 @@ jobs:
       - name: Keep draft PRs draft-only unless explicitly approved
         uses: actions/github-script@v9
         env:
+          AGENT_DRAFT_GUARD_MAINTENANCE: ${{ vars.AGENT_DRAFT_GUARD_MAINTENANCE }}
           AGENT_DRAFT_GUARD_TITLE_RE: ${{ vars.AGENT_DRAFT_GUARD_TITLE_RE }}
           AGENT_DRAFT_GUARD_BRANCH_RE: ${{ vars.AGENT_DRAFT_GUARD_BRANCH_RE }}
           AGENT_DRAFT_GUARD_BYPASS_LABELS: ${{ vars.AGENT_DRAFT_GUARD_BYPASS_LABELS }}
@@ -45,6 +46,10 @@ jobs:
           AGENT_DRAFT_GUARD_HUMAN_ACTORS: ${{ vars.AGENT_DRAFT_GUARD_HUMAN_ACTORS }}
         with:
           script: |
+            if (process.env.AGENT_DRAFT_GUARD_MAINTENANCE === "true") {
+              core.info("Maintenance mode active (AGENT_DRAFT_GUARD_MAINTENANCE=true); skipping draft guard.");
+              return;
+            }
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const pr = context.payload.pull_request;

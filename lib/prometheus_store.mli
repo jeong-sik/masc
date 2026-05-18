@@ -19,6 +19,27 @@ type metric =
   ; labels : label list
   }
 
+(** Encode [(name, labels)] into the table key used by {!metrics}. Same
+    function as [Prometheus_key.metric_key]; re-exported here so
+    [Prometheus] can call the bare name after [include Prometheus_store].
+    Without this declaration the [.ml] re-export at line 5 is dropped by
+    the signature, and [prometheus.ml]'s [init] helper fails to compile
+    with [Unbound value metric_key] (CI: Lint Build with warnings as
+    errors). *)
+val metric_key : string -> label list -> string
+
+(** The shared metric table. Exposed so [Prometheus.init] can register
+    built-in metrics via [Hashtbl.add metrics key {...}]; downstream
+    consumers should prefer [register_counter] / [register_gauge] /
+    [register_histogram] over reaching into the table directly. *)
+val metrics : (string, metric) Hashtbl.t
+
+(** Acquire the store mutex around [f] with a deadlock-backtrace guard.
+    Exposed so [Prometheus.snapshot] (and any other compound operation
+    in the facade) can serialize multi-step access to {!metrics} the
+    same way [register_*] / [observe_histogram] do internally. *)
+val with_lock : (unit -> 'a) -> 'a
+
 val register_counter : name:string -> help:string -> ?labels:label list -> unit -> unit
 val register_gauge : name:string -> help:string -> ?labels:label list -> unit -> unit
 val register_histogram : name:string -> help:string -> ?labels:label list -> unit -> unit

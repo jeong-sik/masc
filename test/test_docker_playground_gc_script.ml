@@ -151,7 +151,9 @@ EOF
     check bool "warning surfaced" true
       (contains_substring stdout "hotspot_status=warning");
     check bool "cleanup dry-run surfaced" true
-      (contains_substring stdout "cleanup_dry_run_command="))
+      (contains_substring stdout "cleanup_dry_run_command=");
+    check bool "restart recommendation surfaced" true
+      (contains_substring stdout "docker_desktop_restart_recommended=true"))
 
 let test_dry_run_lists_stale_clean_worktree () =
   with_temp_dir "docker-playground-gc-dry-run" (fun dir ->

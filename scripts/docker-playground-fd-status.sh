@@ -145,6 +145,10 @@ if lsof -n -P +c 64 2>/dev/null \
     quoted_root="$(printf '%q' "$ROOT")"
     echo "cleanup_dry_run_command=scripts/cleanup-docker-playground-worktrees.sh --root $quoted_root --days 7"
     echo "cleanup_broken_dry_run_command=scripts/cleanup-docker-playground-worktrees.sh --root $quoted_root --days 7 --include-broken"
+    if [ "$FD_WARN" -gt 0 ] && [ "$top_holder_fd_count" -ge "$FD_WARN" ]; then
+      echo "docker_desktop_restart_recommended=true"
+      echo "docker_desktop_restart_reason=macOS Docker Desktop may retain shared-file FDs until the VM restarts"
+    fi
   fi
 else
   echo "fd_holders=unavailable (lsof failed)"

@@ -260,6 +260,18 @@ process and rerun the command via `scripts/dune-local.sh`. New wrapper
 invocations fail fast while a live unwrapped Dune process exists, unless the
 operator explicitly sets `MASC_DUNE_ALLOW_BARE_DUNE=1` for a one-off emergency.
 
+When a misbehaving session is repeatedly spawning unwrapped local builds, use an
+explicit remediation mode instead of running full `lsof` dumps:
+
+```bash
+scripts/nofile-status.sh --kill-bare-dune
+scripts/nofile-status.sh --watch 2 --kill-bare-dune --kill-repo-scans
+```
+
+The kill flags only target rows already classified by the status script:
+unwrapped Dune bypasses and broad `find`/`bfs` scans over `~/me` or `masc-mcp`.
+Wrapped `scripts/dune-local.sh` builds remain visible but are not terminated.
+
 `orphaned dune-local lock waiters` should also be `none`. A PPID 1 `lockf` or
 `flock` row is no longer attached to the agent session that started it; after
 confirming it is not the current lock holder, terminate the orphaned waiter so it

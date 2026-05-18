@@ -722,6 +722,14 @@ let test_local_dune_fd_containment_contracts () =
        "/\\/Users\\/dancer");
   check bool "nofile bare detector handles dune global options" true
     (file_contains_pattern "scripts/nofile-status.sh" "dune_subcommand_index");
+  check bool "nofile status can terminate bare dune bypasses" true
+    (file_contains_pattern "scripts/nofile-status.sh"
+       "MASC_NOFILE_KILL_BARE_DUNE");
+  check bool "nofile status can terminate broad repo scans" true
+    (file_contains_pattern "scripts/nofile-status.sh"
+       "MASC_NOFILE_KILL_REPO_SCANS");
+  check bool "nofile status has watch mode" true
+    (file_contains_pattern "scripts/nofile-status.sh" "--watch");
   check bool "dune-local blocks live bare dune by default" true
     (file_contains_pattern "scripts/dune-local.sh"
        "MASC_DUNE_ALLOW_BARE_DUNE")

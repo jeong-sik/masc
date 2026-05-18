@@ -324,11 +324,16 @@ jobs:
               return latestCiGate;
             };
 
-            const ciGateRequiredForBypass =
-              verifiedBypassLabels.length > 0 ||
+            // A verified human bypass label is an approval signal, not a CI
+            // completion signal. On synchronize/labeled events the CI Gate job
+            // may not exist until the long Build and Test dependency finishes;
+            // waiting here makes this required guard fail before CI can report.
+            // Branch protection still requires CI Gate separately, so only
+            // unsafe ready/auto-merge boundary events need this guard to wait.
+            const ciGateRequiredForUnsafeBoundary =
               unsafeDraftBoundaryAction ||
               hasAutoMergeRequest;
-            if (ciGateRequiredForBypass) {
+            if (ciGateRequiredForUnsafeBoundary) {
               const latestCiGate = await waitForCiGate();
               if (
                 !latestCiGate ||

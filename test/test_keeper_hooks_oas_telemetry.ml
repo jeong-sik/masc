@@ -1071,6 +1071,22 @@ let test_on_tool_error_hook_records_callback_failure_metric () =
   check (float 0.001) "on_tool_error counter increments" 1.0 (after -. before)
 ;;
 
+let test_on_tool_error_workflow_rejection_does_not_count_callback_failure () =
+  let keeper = "callback-on-tool-workflow-rejection-keeper" in
+  let hooks = make_test_hooks keeper in
+  let hook = require_hook "on_tool_error" hooks.on_tool_error in
+  let before = lifecycle_callback_failure_count ~keeper ~callback:"on_tool_error" in
+  let error =
+    {|{"ok":false,"error":"keeper_bash_command_shape_blocked","failure_class":"workflow_rejection"}|}
+  in
+  check_continue
+    "on_tool_error workflow rejection"
+    (hook (Agent_sdk.Hooks.OnToolError { tool_name = "keeper_bash"; error }));
+  let after = lifecycle_callback_failure_count ~keeper ~callback:"on_tool_error" in
+  check (float 0.001) "workflow rejection counter does not increment" 0.0
+    (after -. before)
+;;
+
 let test_on_stop_hook_records_stop_reason_metric () =
   let keeper = "callback-on-stop-keeper" in
   let hooks = make_test_hooks keeper in
@@ -1690,6 +1706,10 @@ let () =
             "on_tool_error records callback metric"
             `Quick
             test_on_tool_error_hook_records_callback_failure_metric
+        ; test_case
+            "on_tool_error workflow rejection is not callback failure"
+            `Quick
+            test_on_tool_error_workflow_rejection_does_not_count_callback_failure
         ; test_case
             "on_stop records stop reason metric"
             `Quick

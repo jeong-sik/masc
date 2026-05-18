@@ -545,7 +545,7 @@ let test_keeper_bash_shape_rejection_skips_circuit_breaker () =
       let input =
         `Assoc
           [ ( "cmd"
-            , `String "cat .masc/state/backlog.json 2>/dev/null | head -5" )
+            , `String "rg \"search-term\" repos/ --type ml -l" )
           ]
       in
       let run () =
@@ -565,6 +565,22 @@ let test_keeper_bash_shape_rejection_skips_circuit_breaker () =
         (KET.should_apply_circuit_breaker_to_failure_payload raw);
       check bool "no circuit breaker enrichment after repeated shape blocks" true
         Yojson.Safe.Util.(member "circuit_breaker" json = `Null))
+
+let test_keeper_bash_task_state_probe_is_workflow_rejection () =
+  with_exec_fixture "keeper_bash_task_state_probe_no_cb"
+    (fun ~config ~meta ~ctx_work ->
+      let input = `Assoc [ "cmd", `String "cat .masc/state/backlog.json" ] in
+      let raw =
+        KET.execute_keeper_tool_call
+          ~config ~meta ~ctx_work ~exec_cache:None ~name:"keeper_bash" ~input ()
+      in
+      let json = Yojson.Safe.from_string raw in
+      check string "task-state probe error" "task_state_file_probe_blocked"
+        Yojson.Safe.Util.(member "error" json |> to_string);
+      check string "failure class" "workflow_rejection"
+        Yojson.Safe.Util.(member "failure_class" json |> to_string);
+      check bool "workflow rejection skips circuit breaker accounting" false
+        (KET.should_apply_circuit_breaker_to_failure_payload raw))
 
 let registered_dispatch_probe_tool = "test_keeper_registered_dispatch_probe"
 
@@ -810,6 +826,8 @@ let () =
         test_workflow_rejection_payload_skips_circuit_breaker;
       test_case "keeper_bash shape rejection skips circuit breaker" `Quick
         test_keeper_bash_shape_rejection_skips_circuit_breaker;
+      test_case "keeper_bash task-state probe is workflow rejection" `Quick
+        test_keeper_bash_task_state_probe_is_workflow_rejection;
       test_case "registered dispatch does not require masc_ prefix" `Quick
         test_registered_tool_dispatch_without_masc_prefix;
       test_case "registered dispatch preserves workflow failure class" `Quick

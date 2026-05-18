@@ -1339,7 +1339,11 @@ let handle_keeper_bash
               ; rewrite = Some task_state_shell_hint
               ; tool_suggestion = Some "keeper_tasks_list"
               })
-         ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
+         ~extra:
+           [ workflow_rejection_field
+           ; "cmd", `String cmd_for_log
+           ; "execution_time_ms", `Int 0
+           ]
          ())
   in
   let task_state_file_probe_block () =
@@ -1362,7 +1366,11 @@ let handle_keeper_bash
               ; rewrite = Some task_state_shell_hint
               ; tool_suggestion = Some "keeper_tasks_list"
               })
-         ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
+         ~extra:
+           [ workflow_rejection_field
+           ; "cmd", `String cmd_for_log
+           ; "execution_time_ms", `Int 0
+           ]
          ())
   in
   if Env_config_keeper.KeeperSandbox.hard_mode ()

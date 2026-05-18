@@ -220,6 +220,7 @@
   worker_container
   worker_container_runners
   worker_dev_tools_paths
+  worker_dev_tools_log_sanitize
   ;; keeper_memory sub-modules
   keeper_memory_policy_summary_filter
   keeper_memory_policy

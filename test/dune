@@ -1481,6 +1481,8 @@
 
 (include stanzas/test_feature_flag_registry.inc)
 
+(include stanzas/test_fleet_capacity_supervisor.inc)
+
 (include stanzas/test_fs_atomic_orphan_sweep_10130.inc)
 
 (include stanzas/test_fs_compat_append_jsonl_atomicity.inc)

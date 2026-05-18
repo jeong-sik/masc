@@ -10,6 +10,28 @@
 
 module FD = Masc_mcp.Keeper_fd_pressure
 
+let source_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root -> root
+  | None -> Sys.getcwd ()
+;;
+
+let file_contains file_rel needle =
+  let path = Filename.concat (source_root ()) file_rel in
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () ->
+      let content = In_channel.input_all ic in
+      let needle_len = String.length needle in
+      let content_len = String.length content in
+      let rec loop i =
+        i + needle_len <= content_len
+        && (String.equal (String.sub content i needle_len) needle || loop (i + 1))
+      in
+      String.equal needle "" || loop 0)
+;;
+
 let test_fleet_default_at_or_above_12288 () =
   (* The rename ships with a 64-keeper-class default: 64 * 96 + 128 + margin.
      Floor of 256 only kicks in if an operator sets a tiny override; the
@@ -126,6 +148,23 @@ let test_nofile_cache_single_flight_resolves_once () =
      Alcotest.fail "cache must be Resolved after concurrent first-touch");
   FD.reset_for_tests ()
 
+let test_nofile_probe_is_native_not_shell () =
+  Alcotest.(check bool)
+    "native nofile stub is wired"
+    true
+    (file_contains "lib/keeper_fd_pressure.ml" "masc_mcp_nofile_soft_limit");
+  Alcotest.(check bool)
+    "nofile soft-limit probe does not spawn a shell"
+    false
+    (file_contains "lib/keeper_fd_pressure.ml" "ulimit -n");
+  if Sys.os_type = "Unix"
+  then (
+    FD.reset_for_tests ();
+    match FD.process_nofile_soft_limit () with
+    | Some limit when limit > 0 -> ()
+    | Some limit -> Alcotest.failf "expected positive native nofile limit, got %d" limit
+    | None -> Alcotest.fail "expected native nofile probe to resolve on Unix")
+
 let () =
   Alcotest.run
     "keeper_fd_pressure_fleet"
@@ -146,5 +185,7 @@ let () =
     ; ( "nofile-single-flight"
       , [ Alcotest.test_case "concurrent first-touch returns one answer" `Quick
             test_nofile_cache_single_flight_resolves_once
+        ; Alcotest.test_case "nofile probe is native" `Quick
+            test_nofile_probe_is_native_not_shell
         ] )
     ]

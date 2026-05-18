@@ -23,8 +23,8 @@ let nofile_guard_warned = Atomic.make false
 
 (** [nofile_cache] is a 3-state variant rather than [int option option] so
     concurrent first-call fibers can claim the slot via [In_flight] and avoid
-    spawning N parallel [/bin/sh -c "ulimit -n"] subprocesses (which would
-    themselves consume FDs precisely when we are trying to measure them).
+    repeatedly probing the host FD limit precisely when pressure is already
+    possible.
     See [process_nofile_soft_limit] for the single-flight protocol. *)
 type nofile_cache =
   | Uninitialized
@@ -206,30 +206,23 @@ let reset_for_tests () =
   Atomic.set system_fd_cache None
 ;;
 
-(* Detect the host's nofile soft limit by spawning [sh -c 'ulimit -n']. The
-   subprocess itself consumes pipes/FDs, so under fleet startup we must run
-   it at most once. Single-flight protocol:
+external native_nofile_soft_limit : unit -> int option = "masc_mcp_nofile_soft_limit"
+
+(* Detect the host's nofile soft limit with a direct [getrlimit(RLIMIT_NOFILE)]
+   stub. This is intentionally not a shell probe: spawning a process just to
+   measure FD headroom consumes the scarce resource that this guard protects.
+   Single-flight protocol:
    - Uninitialized → In_flight while holding the process-local mutex.
      The holder runs detection, stores Resolved, and releases waiters.
    - Resolved cached → return immediately.
    Stdlib.Mutex is intentional here: this helper can run before an Eio context
    exists, and the protected section is a one-shot host-limit probe. *)
 let detect_nofile_soft_limit_now () =
-  (* RFC-0106 P1: one-shot host-limit probe; silent _ -> None is the
-     pre-existing fallback when ulimit is unavailable.  Cancelled
-     re-raise centralised via Cancel_safe.protect. *)
+  (* Native probe failures remain telemetry-neutral. Sandboxed or unusual
+     hosts should fall back to the existing probe_unknown admission path. *)
   Cancel_safe.protect
     ~on_exn:(fun _ -> None)
-    (fun () ->
-      let lines, status =
-        With_process.with_process_args_in
-          "/bin/sh"
-          [| "sh"; "-c"; "ulimit -n" |]
-          With_process.drain_lines
-      in
-      match status, lines with
-      | Unix.WEXITED 0, line :: _ -> int_of_string_opt (String.trim line)
-      | _ -> None)
+    native_nofile_soft_limit
 ;;
 
 let process_nofile_soft_limit () =

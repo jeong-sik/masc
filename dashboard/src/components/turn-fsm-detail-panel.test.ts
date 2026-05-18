@@ -118,7 +118,7 @@ describe("TurnFsmDetailPanel", () => {
       "실행 중",
       "receipt failed",
       "reason tool_contract",
-      "tool violated",
+      "tool 도구 계약 위반",
     ]))
     expect(chips.map(chip => chip.getAttribute("data-status-chip-tone"))).toEqual(expect.arrayContaining([
       "info",

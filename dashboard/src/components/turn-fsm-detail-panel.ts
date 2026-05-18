@@ -4,7 +4,7 @@ import { useMemo } from 'preact/hooks'
 import type { KeeperCompositeSnapshot } from '../api/keeper'
 import { CytoscapeFsm } from './common/cytoscape-fsm'
 import { StatusChip, type StatusChipTone } from './common/status-chip'
-import { displayState } from './fsm-hub-types'
+import { displayState, toolContractLabel } from './fsm-hub-types'
 import {
   buildTurnFsmSpec,
   normalizeTurnFsmState,
@@ -88,7 +88,7 @@ export function TurnFsmDetailPanel({ snapshot }: { snapshot: KeeperCompositeSnap
             <${StatusChip} tone=${turnFsmChipTone(terminalTone(execution.outcome))} uppercase=${false} class="font-mono" title=${stopCause.source}>reason ${stopCause.code}</${StatusChip}>
           ` : null}
           ${execution.tool_contract_result ? html`
-            <${StatusChip} tone=${turnFsmChipTone(execution.tool_contract_result === 'violated' ? 'err' : 'neutral')} uppercase=${false} class="font-mono">tool ${execution.tool_contract_result}</${StatusChip}>
+            <${StatusChip} tone=${turnFsmChipTone(execution.tool_contract_result === 'violated' ? 'err' : 'neutral')} uppercase=${false} class="font-mono" title=${execution.tool_contract_result}>tool ${toolContractLabel(execution.tool_contract_result)}</${StatusChip}>
           ` : null}
         </div>
       ` : null}

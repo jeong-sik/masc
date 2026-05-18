@@ -310,8 +310,8 @@
             <li><span class="done">Done / PR</span> <code>#16154</code>: deterministic <code>keeper_bash</code> guard rejection을 <code>workflow_rejection</code>으로 분류해 circuit breaker에서 제외.</li>
             <li><span class="done">Done / PR</span> <code>#16159</code>: repeated <code>oas_timeout_budget</code> strike가 <code>Keeper_fiber_crash</code>로 승격되는 직접 경로 제거.</li>
             <li><span class="done">Done / OAS PR</span> <code>oas#1632</code>: provider timeout을 <code>stream_idle:streaming_thinking</code>, <code>stream_body</code>, <code>provider_step</code> 같은 typed evidence로 보존.</li>
-            <li><span class="doing">Started / MASC PR</span> <code>#16191</code>: downstream OAS pin을 <code>main@308152ee</code> (<code>v0.196.1</code>)로 올리고 API surface fingerprint를 갱신.</li>
-            <li><span class="doing">Started / MASC PR</span> <code>#16178</code>: <code>Keeper_failure_policy.decide</code> pure matrix로 Streaming/Thinking timeout과 keeper liveness 결정을 분리.</li>
+            <li><span class="done">Done / MASC PR</span> <code>#16191</code>: downstream OAS pin을 <code>main@308152ee</code> (<code>v0.196.1</code>)로 올리고 API surface fingerprint를 갱신.</li>
+            <li><span class="doing">Started / MASC PR</span> <code>#16178</code>: <code>Keeper_failure_policy.decide</code> pure matrix와 heartbeat OAS timeout strike callsite를 policy decision으로 연결.</li>
             <li><span class="warn">Remaining</span>: watchdog/supervisor/dashboard가 같은 policy vocabulary를 쓰도록 통합 필요.</li>
           </ul>
         </div>
@@ -510,14 +510,14 @@ type decision = {
           </tr>
           <tr>
             <td>P0-PIN</td>
-            <td><span class="status doing">draft PR</span></td>
+            <td><span class="status done">merged</span></td>
             <td>Consume the OAS provider-timeout evidence release in MASC's downstream dependency pin.</td>
             <td><code>#16191</code>: <code>scripts/oas-agent-sdk-pin.sh</code>, <code>dune-project</code>, <code>masc_mcp.opam</code>, generated docs and fingerprint</td>
             <td><code>check-oas-pin</code>, <code>oas-drift-check</code>, and generated doc checks pass against OAS <code>main@308152ee</code> (<code>v0.196.1</code>).</td>
           </tr>
           <tr>
             <td>P0-A</td>
-            <td><span class="status doing">in flight</span></td>
+            <td><span class="status done">merged</span></td>
             <td>Existing noisy paths stop killing keepers directly.</td>
             <td><code>keeper_shell_bash.ml</code>, <code>keeper_heartbeat_loop.ml</code>, <code>keeper_turn_slot.ml</code></td>
             <td>workflow rejection skips breaker; OAS timeout strike limit soft-backoffs without crash.</td>
@@ -531,10 +531,10 @@ type decision = {
           </tr>
           <tr>
             <td>P0-C</td>
-            <td><span class="status todo">next</span></td>
+            <td><span class="status doing">draft PR</span></td>
             <td>Migrate heartbeat OAS timeout and transient error paths to policy decisions.</td>
-            <td><code>keeper_heartbeat_loop.ml</code>, <code>keeper_error_classify.ml</code></td>
-            <td><code>oas_timeout_budget</code> cannot raise <code>Keeper_fiber_crash</code> without liveness evidence.</td>
+            <td><code>#16178</code>: <code>keeper_heartbeat_loop.ml</code>, <code>keeper_failure_policy.ml</code>, strike tests</td>
+            <td><code>oas_timeout_budget</code> strike limit routes through policy; <code>stream_idle:streaming_thinking</code> is preserved and cannot allow keeper death without liveness evidence.</td>
           </tr>
           <tr>
             <td>P0-D</td>
@@ -665,7 +665,12 @@ type decision = {
         <tbody>
           <tr>
             <td>2026-05-18</td>
-            <td>Recorded OAS merge and downstream MASC pin draft.</td>
+            <td>Added heartbeat OAS timeout callsite migration status.</td>
+            <td><code>#16178</code>: <code>keeper_heartbeat_loop</code> routes timeout strikes through <code>Keeper_failure_policy</code> and preserves <code>stream_idle:streaming_thinking</code> as non-death evidence.</td>
+          </tr>
+          <tr>
+            <td>2026-05-18</td>
+            <td>Recorded OAS merge and downstream MASC pin merge.</td>
             <td><code>oas#1632</code> merged; <code>#16191</code> bumps <code>agent_sdk</code> to <code>v0.196.1</code> and refreshes timeout evidence fingerprint.</td>
           </tr>
           <tr>

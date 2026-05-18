@@ -35,6 +35,7 @@
  prometheus_process
  prometheus_transport_metric_names
  prometheus_core_metric_names
+ prometheus_cascade_metric_names
  dashboard_http_keeper_metrics
  dashboard_http_keeper_detail
  dashboard_http_tool_quality

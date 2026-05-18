@@ -274,10 +274,7 @@ let metric_oas_inference_prompt_tok_per_sec = "masc_oas_inference_prompt_tok_per
 let metric_oas_inference_decode_tok_per_sec = "masc_oas_inference_decode_tok_per_sec"
 let metric_oas_inference_cost_usd = "masc_oas_inference_cost_usd"
 
-(* Cascade provider health score — composite of success_rate * speed_score *
-   cost_score.  Set (not observed) because it is a point-in-time snapshot,
-   not a distribution. *)
-let metric_cascade_provider_health_score = "masc_cascade_provider_health_score"
+include Prometheus_cascade_metric_names
 
 (* Context overflow ratio — set each time ContextOverflowImminent fires.
    Ratio is estimated_tokens / limit_tokens in [0.0, 1.0+]. *)
@@ -303,17 +300,6 @@ let metric_inference_queue_cancelled = "masc_inference_queue_cancelled_total"
 let metric_inference_queue_rejected = "masc_inference_queue_rejected_total"
 let metric_inference_queue_max_concurrent = "masc_inference_queue_max_concurrent"
 
-(* Cascade metrics — used in cascade_metrics.ml.
-   Labels: decision=accept|accept_on_exhaustion|try_next|exhausted *)
-let metric_cascade_decisions = "masc_cascade_decisions_total"
-
-(* Labels: reason=call_err|slot_full|accept_rejected|health_filter *)
-let metric_cascade_fallbacks = "masc_cascade_fallbacks_total"
-let metric_cascade_providers_exhausted = "masc_cascade_providers_exhausted_total"
-
-(* Labels: phase=<keeper_phase>, from_cascade=<name>, to_cascade=<name> *)
-let metric_cascade_routing_phase_overrides = "masc_cascade_routing_phase_overrides_total"
-
 (* Agent health metrics — used in transport_metrics.ml. *)
 let metric_agent_heartbeat_age_seconds = "masc_agent_heartbeat_age_seconds"
 let metric_agent_stale_total = "masc_agent_stale_total"
@@ -332,13 +318,6 @@ let metric_pool_inflight_total = Pool_metrics.metric_inflight_total
 let metric_pool_reuse_total = Pool_metrics.metric_reuse_total
 let metric_pool_evict_total = Pool_metrics.metric_evict_total
 let metric_pool_create_total = Pool_metrics.metric_create_total
-
-(* Cascade attempt-liveness streaming histograms.
-   Filled by cascade_attempt_liveness_observer via the recorder injected
-   into L.step.  TTFT = time from request start to first non-Done chunk;
-   TBT = inter-chunk gap during streaming. *)
-let metric_cascade_ttfb_seconds = "masc_cascade_ttfb_seconds"
-let metric_cascade_inter_chunk_seconds = "masc_cascade_inter_chunk_seconds"
 
 (* PR-0.2.D: OCaml GC quick_stat sampler gauges.  Populated by
    [Gc_sampler.run] from the runtime [Gc.quick_stat ()] once per
@@ -390,21 +369,6 @@ let metric_board_truncated_posts = "masc_board_truncated_posts_total"
    useful counter increment. *)
 let metric_board_dispatch_flusher_start_outcomes =
   "masc_board_dispatch_flusher_start_outcomes_total"
-let metric_cascade_strategy_decisions = "masc_cascade_strategy_decisions_total"
-let metric_cascade_capacity_events = "masc_cascade_capacity_events_total"
-
-(* RFC-0022 §9 attempt-liveness gate.  Counts would-be (Observe) and
-   actual (Enforce) liveness kills broken down by failure class.
-   Labels: [kind, mode, provider].
-
-   [observed_total] is the per-attempt finalizer counter regardless of
-   outcome (success | kill | wire_error). Useful for the kill-rate
-   ratio kill / observed. *)
-let metric_cascade_attempt_liveness_kill = "masc_cascade_attempt_liveness_kill_total"
-
-let metric_cascade_attempt_liveness_observed =
-  "masc_cascade_attempt_liveness_observed_total"
-;;
 
 let metric_fsm_guard_violation = "masc_fsm_guard_violation_total"
 let metric_memory_pipeline_flushes = "masc_memory_pipeline_flushes_total"
@@ -456,33 +420,6 @@ let metric_memory_pipeline_flush_duration_seconds =
    result by outcome label (started | not_running | meta_missing |
    meta_read_failed | meta_write_failed). Labels: keeper (for
    attempts) and keeper+outcome (for outcomes). *)
-(* #12797: Cascade server-error score decay — provider deprioritised
-   after recent 5xx events.  Increments each time a provider's server-
-   error score drops the effective weight below the skip threshold.
-   Labels: provider_key. *)
-let metric_cascade_server_error_skip_total = "masc_cascade_server_error_skip_total"
-
-(* 2026-05-05 fleet-stuck diagnosis: cascade A → B → A circular fallback
-   creates a silent 600s timeout chain when every model in both
-   cascades depends on the same provider that has stalled.  This
-   counter increments once per [load_catalog] call when any
-   fallback_cascade chain forms a cycle.  Labels: cascade (the entry
-   point of the cycle).  Operators alert on this counter; cycle
-   participants are listed in the WARN log. *)
-let metric_cascade_fallback_cycle_detected_total =
-  "masc_cascade_fallback_cycle_detected_total"
-;;
-
-let metric_provider_health_probe_skipped = "masc_provider_health_probe_skipped_total"
-let metric_provider_actual_health_status = "masc_provider_actual_health_status"
-
-(* Counter complement to [metric_provider_actual_health_status]: the
-   gauge only shows the LAST observed status, so a flapping or
-   sustained probe failure rate is invisible to operators.  This
-   counter ticks once per [Probe_error _] observation in
-   [Cascade_catalog_runtime.record_probe_metrics] so a [rate()] query
-   can quantify provider liveness churn over time. *)
-let metric_provider_health_probe_error = "masc_provider_health_probe_error_total"
 (* #12799: Passive loop detector — keeper emitting only read-only tool
    calls for N consecutive turns.  Labels: keeper. *)
 

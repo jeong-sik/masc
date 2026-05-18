@@ -239,6 +239,7 @@ export function KeeperStateDiagramPanel({ keeperName, snapshot: externalSnapshot
         <${PhaseBadge}>KDP ${displayState(snapshot.decision.stage)}<//>
         <${PhaseBadge}>KCL ${displayState(snapshot.cascade.state)}<//>
         <${PhaseBadge}>KMC ${displayState(snapshot.compaction.stage)}<//>
+        <${PhaseBadge}>KCB ${displayState(snapshot.circuit_breaker?.state ?? 'clean')}<//>
         ${transitions.length > 0 ? html`
           <${PhaseBadge}>observed ${transitions.length} transitions<//>
         ` : null}
@@ -247,7 +248,7 @@ export function KeeperStateDiagramPanel({ keeperName, snapshot: externalSnapshot
       <div>
         <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
           <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
-            통합 라이프사이클 (KSM · KTC · KDP · KCL · KMC)
+            통합 라이프사이클 (KSM · KTC · KDP · KCL · KMC · KCB)
           </div>
           <${FilterChips}
             chips=${DIAGRAM_VIEW_CHIPS}

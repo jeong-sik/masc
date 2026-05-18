@@ -45,6 +45,7 @@ let sdk_error_of_keeper_internal_error err =
 
 let sdk_error_kind = function
   | Agent_sdk.Error.Api _ -> "api"
+  | Agent_sdk.Error.Provider _ -> "provider"
   | Agent_sdk.Error.Agent _ -> "agent"
   | Agent_sdk.Error.Mcp _ -> "mcp"
   | Agent_sdk.Error.Config _ -> "config"
@@ -71,6 +72,8 @@ type sdk_termination_semantics =
 
 let sdk_termination_semantics = function
   | Agent_sdk.Error.Api (Agent_sdk.Retry.Timeout _) -> Provider_wall_clock_timeout
+  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) ->
+    Provider_wall_clock_timeout
   | Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded _) ->
     Oas_turn_budget_exhausted
   | Agent_sdk.Error.Agent (Agent_sdk.Error.IdleDetected _) ->
@@ -93,6 +96,7 @@ let sdk_termination_semantics = function
     Oas_tripwire_violation
   | Agent_sdk.Error.Agent (Agent_sdk.Error.UnrecognizedStopReason _) -> Sdk_error_failure
   | Agent_sdk.Error.Api _ -> Sdk_error_failure
+  | Agent_sdk.Error.Provider _ -> Sdk_error_failure
   | Agent_sdk.Error.Mcp _ -> Sdk_error_failure
   | Agent_sdk.Error.Config _ -> Sdk_error_failure
   | Agent_sdk.Error.Serialization _ -> Sdk_error_failure
@@ -181,6 +185,7 @@ let agent_error_terminal_reason_code = function
 let terminal_reason_code_of_sdk_error = function
   | Agent_sdk.Error.Agent err -> agent_error_terminal_reason_code err
   | Agent_sdk.Error.Api err -> api_error_terminal_reason_code err
+  | Agent_sdk.Error.Provider _ -> "provider_error"
   | Agent_sdk.Error.Mcp _ -> "mcp_error"
   | Agent_sdk.Error.Config _ -> "config_error"
   | Agent_sdk.Error.Serialization _ -> "serialization_error"

@@ -174,6 +174,8 @@ module Http_client = struct
           Provider_terminal
       | Llm_provider.Http_client.ProviderFailure { kind; _ } ->
           classify_provider_failure_kind kind
+      | Llm_provider.Http_client.TimeoutError _ ->
+          Network_error
       | Llm_provider.Http_client.NetworkError { kind; _ } ->
           if kind = Llm_provider.Http_client.Tls_error then Tls_error else Network_error
 
@@ -203,6 +205,7 @@ module Http_client = struct
   let error_message (err : Llm_provider.Http_client.http_error) : string =
     match err with
     | Llm_provider.Http_client.NetworkError { message; _ } -> message
+    | Llm_provider.Http_client.TimeoutError { message; _ } -> message
     | Llm_provider.Http_client.AcceptRejected { reason } -> reason
     | Llm_provider.Http_client.CliTransportRequired { kind } ->
         Printf.sprintf "%s provider requires a CLI transport" kind

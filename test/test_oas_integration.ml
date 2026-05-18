@@ -160,6 +160,33 @@ let test_oas_worker_failed_lifecycle_includes_error () =
         (payload |> member "endpoint" |> to_string)
   | _ -> Alcotest.fail "expected Custom masc.oas_worker.failed event"
 
+let test_oas_worker_max_turns_lifecycle_is_budget_exhausted_completion () =
+  let lifecycle =
+    Cascade_runner.worker_lifecycle_classification_of_result
+      (Error
+         (Agent_sdk.Error.Agent
+            (Agent_sdk.Error.MaxTurnsExceeded { turns = 8; limit = 8 })))
+  in
+  Alcotest.(check string) "event" "completed" lifecycle.event;
+  Alcotest.(check string) "status" "budget_exhausted" lifecycle.status;
+  Alcotest.(check (option string)) "error omitted" None lifecycle.error
+
+let test_oas_worker_non_budget_error_lifecycle_remains_failed () =
+  let lifecycle =
+    Cascade_runner.worker_lifecycle_classification_of_result
+      (Error
+         (Agent_sdk.Error.Config
+            (Agent_sdk.Error.InvalidConfig
+               { field = "provider"; detail = "bad config" })))
+  in
+  Alcotest.(check string) "event" "failed" lifecycle.event;
+  Alcotest.(check string) "status" "failed" lifecycle.status;
+  (match lifecycle.error with
+   | Some error ->
+     Alcotest.(check bool) "error includes detail" true
+       (contains_substring error "bad config")
+   | None -> Alcotest.fail "expected error")
+
 let test_event_bus_task_transition () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1138,6 +1165,10 @@ let () =
       Alcotest.test_case "heartbeat event" `Quick test_event_bus_heartbeat;
       Alcotest.test_case "oas worker failed lifecycle includes error" `Quick
         test_oas_worker_failed_lifecycle_includes_error;
+      Alcotest.test_case "oas worker max turns lifecycle is budget completion" `Quick
+        test_oas_worker_max_turns_lifecycle_is_budget_exhausted_completion;
+      Alcotest.test_case "oas worker non-budget lifecycle remains failed" `Quick
+        test_oas_worker_non_budget_error_lifecycle_remains_failed;
       Alcotest.test_case "task transition event" `Quick
         test_event_bus_task_transition;
       Alcotest.test_case "keeper lifecycle includes phase" `Quick

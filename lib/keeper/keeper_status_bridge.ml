@@ -248,6 +248,7 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
      (* Provider-level [Api] errors are surfaced via OAS retry / cascade
          layers and do not map to a typed blocker_class by themselves. *)
      | Agent_sdk.Error.Api _
+     | Agent_sdk.Error.Provider _
      | Agent_sdk.Error.Mcp _
      | Agent_sdk.Error.Config _
      | Agent_sdk.Error.Serialization _

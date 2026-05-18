@@ -21,6 +21,8 @@ NEVER type MASC tool names as shell commands. `keeper_board_list`, `keeper_task_
 Do NOT use masc_code_shell from a Docker keeper. It resolves a different host playground root in this live runtime. Use Bash/keeper_bash with sandbox-relative `cwd` instead.
 Do NOT use `gh pr checks` as a success/failure gate inside keeper_bash. GitHub returns a non-zero exit when checks are red, which is useful data but trips the keeper failure/circuit breaker. Prefer `keeper_pr_status` when it is available. If you must use gh, use `gh pr view NUMBER --repo OWNER/REPO --json statusCheckRollup,mergeStateStatus,isDraft`.
 Do NOT use shell redirects at all. `2>&1`, `2&1`, `>/dev/null`, `| head`, and `|| true` are blocked or misparsed in keeper_bash.
+Do NOT use Bash for grep/rg pipelines such as `cd repos/masc-mcp && grep -rn "term" lib/ --include="*.ml" | head -40`. Use `keeper_shell op=rg pattern="term" path=lib glob=*.ml` with `cwd` set to the repo/worktree when needed.
+Do NOT run repo-wide Bash scans such as `rg "term" repos/ ...` or `git log --all --grep="term" 2>/dev/null | head -5`. Use `keeper_shell op=rg path=repos/<REPO>/lib` or `keeper_shell op=git_log cwd=repos/<REPO> count=5 grep="term"`.
 ## Tool error grammar (how to read a failed tool result)
 
 Every failed tool call returns a JSON envelope like:
@@ -44,11 +46,17 @@ keeper_bash examples:
   BAD:  cmd="cd repos && ls"                         (chaining blocked)
   GOOD: keeper_shell op=ls path={sandbox_repos}       (single op with path from keeper_context_status)
   BAD:  cmd="find /home/keeper -name \"board\" 2>/dev/null" (quoted path/pattern + redirect blocked)
-  GOOD: keeper_shell op=find path=. name=board        (structured find)
+  GOOD: keeper_shell op=find path=. pattern=board        (structured find)
   BAD:  cmd="find repos/masc-mcp/lib -name nickname*" (glob expansion blocked)
-  GOOD: keeper_shell op=find path=repos/masc-mcp/lib name=nickname*
+  GOOD: keeper_shell op=find path=repos/masc-mcp/lib pattern=nickname*
   BAD:  cmd="rg -n \"foo\\|bar\" repos/masc-mcp/lib 2>/dev/null | head -20"
   GOOD: keeper_shell op=rg pattern="foo|bar" path=repos/masc-mcp/lib
+  BAD:  cmd="cd repos/masc-mcp && grep -rn \"exec_semantic\" lib/ --include=\"*.ml\" | head -40"
+  GOOD: keeper_shell op=rg pattern="exec_semantic" path=lib glob=*.ml
+  BAD:  cmd="git log --oneline --all --grep=\"15731\" 2>/dev/null | head -5"
+  GOOD: keeper_shell op=git_log cwd=repos/masc-mcp count=5 grep="15731"
+  BAD:  cmd="rg \"add_comment\" repos/ --include '*.ml' --include '*.mli' -l"
+  GOOD: keeper_shell op=rg pattern="add_comment" path=repos/masc-mcp/lib glob=*.ml
   BAD:  cmd="cat file 2>/dev/null || echo missing"
   GOOD: keeper_shell op=cat path=file                 (let the tool error explain missing files)
   BAD:  cmd="ls path 2>/dev/null && echo EXISTS || echo NOT_FOUND"
@@ -75,7 +83,7 @@ keeper_bash examples:
 File operations:
 - Read a specific file: keeper_fs_read (preferred for single files)
 - Search file contents: keeper_shell with op=rg, pattern=regex, path=dir/path (optional: type=ml, glob="*.ts")
-- Find files by name: keeper_shell with op=find, name=glob, path=dir/path
+- Find files by name: keeper_shell with op=find, pattern=glob, path=dir/path
 - List directory contents: keeper_shell with op=ls, path=dir/path
 - View file (raw): keeper_shell with op=cat, path=file/path
 - Git history: keeper_shell with op=git_log, count=10 (optional: path=file/path, format="%h %s %an")

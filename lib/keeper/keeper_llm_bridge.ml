@@ -114,19 +114,22 @@ let cancel_bucket_of_wall wall =
 
 type cancel_classification =
   | Unknown_cancel
+  | Inner_timeout_cancel
   | Routine_parent_cancel
 
 let string_of_cancel_classification = function
   | Unknown_cancel -> "unknown_cancel"
+  | Inner_timeout_cancel -> "inner_timeout_cancel"
   | Routine_parent_cancel -> "routine_parent_cancel"
 ;;
 
 let cancel_log_level = function
-  | Routine_parent_cancel -> Log.Info
+  | Inner_timeout_cancel | Routine_parent_cancel -> Log.Info
   | Unknown_cancel -> Log.Warn
 ;;
 
 let log_class_of_cancel_classification = function
+  | Inner_timeout_cancel -> "inner_timeout_cancel"
   | Routine_parent_cancel -> "routine_parent_cancel"
   | Unknown_cancel -> "warn_cancel"
 ;;
@@ -138,6 +141,13 @@ let is_eio_time_timeout = function
 
 let cancelled_timeout_exceeded ~timeout_s ~wall inner_exn =
   is_eio_time_timeout inner_exn && Float.compare wall timeout_s >= 0
+;;
+
+let classify_cancel ~cancel_classification inner_exn =
+  match cancel_classification with
+  | Unknown_cancel when is_eio_time_timeout inner_exn -> Inner_timeout_cancel
+  | Unknown_cancel | Inner_timeout_cancel | Routine_parent_cancel ->
+    cancel_classification
 ;;
 
 let run_with_timeout_and_fallback
@@ -304,6 +314,9 @@ let run_with_timeout_and_fallback
        if cancelled_timeout_exceeded ~timeout_s ~wall inner_exn
        then timeout_error ~wall
        else (
+         let cancel_classification =
+           classify_cancel ~cancel_classification inner_exn
+         in
          let log_level = cancel_log_level cancel_classification in
          let cancel_classification_label =
            string_of_cancel_classification cancel_classification

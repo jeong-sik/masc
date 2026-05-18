@@ -7406,7 +7406,7 @@ let test_prompt_guides_bash_globs_to_structured_tools () =
     bool
     "bash globs use keeper_shell find"
     true
-    (contains_substring sys "keeper_shell op=find name=glob path=dir/path");
+    (contains_substring sys "keeper_shell op=find pattern=glob path=dir/path");
   check
     bool
     "bash globs can use masc code search"
@@ -8478,7 +8478,7 @@ let test_degraded_retry_slot_phase_allows_max_execution_time_cascade_exhausted (
       (max_execution_time_cascade_exhausted_error ())
   with
   | UT.Degraded_retry_allowed retry ->
-    check string "retry cascade candidate" (phase_recovery_cascade_name ()) retry.next_cascade;
+    check string "retry cascade candidate" "keeper_diverse" retry.next_cascade;
     check
       string
       "fallback reason"

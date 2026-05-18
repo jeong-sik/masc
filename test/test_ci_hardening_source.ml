@@ -179,8 +179,8 @@ let test_ci_sync_and_asset_contracts () =
     (file_contains_pattern ".github/workflows/ci.yml" "Verify PR sync");
   check bool "ci workflow passes pr number to sync check" true
     (file_contains_pattern ".github/workflows/ci.yml" "--pr-number \"$PR_NUMBER\"");
-  check bool "ci workflow still listens for PR readiness state events" true
-    (file_contains_pattern ".github/workflows/ci.yml" "ready_for_review");
+  check bool "ci workflow does not create CI on PR readiness state events" true
+    (file_not_contains_pattern ".github/workflows/ci.yml" "ready_for_review");
   check bool "ci workflow does not cancel builds on readiness state events" true
     (file_contains_pattern ".github/workflows/ci.yml"
        {|contains(fromJSON('["opened","synchronize","reopened"]'), github.event.action)|});
@@ -215,12 +215,12 @@ let test_ci_sync_and_asset_contracts () =
   check bool "live PR gate defaults non-PR triggers to heavy CI" true
     (file_contains_pattern ".github/workflows/ci.yml"
        {|[ "${GITHUB_EVENT_NAME}" != "pull_request" ]|});
-  check bool "live PR gate waits for draft automation to settle" true
+  check bool "live PR gate retries draft automation state resolution" true
     (file_contains_pattern ".github/workflows/ci.yml"
-       "LIVE_PR_GATE_SETTLE_SEC");
+       "Retry-based PR state resolution");
   check bool "live PR gate annotates gh lookup failures" true
     (file_contains_pattern ".github/workflows/ci.yml"
-       {|if ! live_fields="$(gh pr view "$PR_NUMBER"|});
+       "Could not resolve live PR state for #${PR_NUMBER} after 3 attempts");
   check bool "heavy CI uses live PR gate output" true
     (file_contains_pattern ".github/workflows/ci.yml"
        "needs.pr-live-gate.outputs.run_heavy == 'true'");
@@ -434,17 +434,17 @@ let test_pr_automation_draft_guard_contracts () =
   check bool "draft PRs always require verified approval" true
     (file_contains_pattern ".github/workflows/pr-automation.yml"
        "const approvalRequired =\n              current.isDraft ||\n              looksAgentAuthored ||\n              unsafeDraftBoundaryAction ||\n              hasAutoMergeRequest ||");
-  check bool "human-approved bypass does not wait for sync CI Gate" true
-    (file_contains_pattern ".github/workflows/pr-automation.yml"
-       "const ciGateRequiredForUnsafeBoundary =\n              unsafeDraftBoundaryAction ||\n              hasAutoMergeRequest");
-  check bool "pr automation does not use verified bypass as CI wait condition" true
+  check bool "ready/auto-merge boundary does not duplicate CI Gate" true
+    (file_not_contains_pattern ".github/workflows/pr-automation.yml"
+       "const ciGateRequiredForUnsafeBoundary");
+  check bool "verified bypass label alone does not wait for CI Gate" true
     (file_not_contains_pattern ".github/workflows/pr-automation.yml"
        "verifiedBypassLabels.length > 0 ||\n              unsafeDraftBoundaryAction");
-  check bool "pr automation polls CI Gate before unsafe boundary" true
+  check bool "pr automation leaves CI Gate to branch protection" true
     (file_contains_pattern ".github/workflows/pr-automation.yml"
-       "const latestCiGate = await waitForCiGate()");
-  check bool "pr automation rejects missing or pending CI Gate" true
-    (file_contains_pattern ".github/workflows/pr-automation.yml"
+       "CI Gate\n            // remains a separate branch-protection requirement");
+  check bool "pr automation does not reject pending CI Gate" true
+    (file_not_contains_pattern ".github/workflows/pr-automation.yml"
        "CI Gate is not completed successfully for head");
   check bool "ci gate exports environment approval marker" true
     (file_contains_pattern ".github/workflows/ci.yml"

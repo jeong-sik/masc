@@ -50,6 +50,7 @@
   test_audit_log
   test_governance_anomaly
   test_http_negotiation
+  test_mcp_h1_h2_admission_parity
   test_streamable_http_upgrade
   test_mcp_session_id_header
   test_keeper_turn_terminal_code_byte_compat
@@ -297,6 +298,7 @@
   test_telemetry_observe
   test_keeper_typed_labels
   test_shell_ir_typed_review_followup
+  test_shell_command_gate
   test_shell_ir_validator
   test_typed_advisor_counters
   test_auth_resolve_labels
@@ -342,6 +344,7 @@
   test_audit_log
   test_governance_anomaly
   test_http_negotiation
+  test_mcp_h1_h2_admission_parity
   test_streamable_http_upgrade
   test_mcp_session_id_header
   test_keeper_turn_terminal_code_byte_compat
@@ -592,6 +595,7 @@
   test_telemetry_observe
   test_keeper_typed_labels
   test_shell_ir_typed_review_followup
+  test_shell_command_gate
   test_shell_ir_validator
   test_typed_advisor_counters
   test_auth_resolve_labels

@@ -600,8 +600,23 @@ let record_restart ~base_path name =
     { e with restart_count = e.restart_count + 1; last_restart_ts = Time_compat.now () })
 ;;
 
-let record_error ~base_path name err =
-  Log.Keeper.error "registry: recording error name=%s error=%s" name err;
+let record_error ~base_path ?details name err =
+  let details =
+    match details with
+    | Some _ as details -> details
+    | None ->
+      Keeper_sandbox_runtime.docker_mount_failure_details
+        ~base_path_hash:(Keeper_sandbox_runtime.base_path_hash base_path)
+        ~keeper_name:name
+        ~output:err
+        ()
+  in
+  (match details with
+   | Some details ->
+     Log.Keeper.emit Log.Error
+       ~details
+       (Printf.sprintf "registry: recording error name=%s error=%s" name err)
+   | None -> Log.Keeper.error "registry: recording error name=%s error=%s" name err);
   Keeper_fd_pressure.note_if_fd_exhaustion ~site:"keeper_registry.record_error" err;
   update_entry ~base_path name (fun e -> { e with last_error = Some err })
 ;;

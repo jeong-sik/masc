@@ -92,7 +92,7 @@ let format_docker_exec_error ~head_program ~st ~out =
       "docker_%s_failed: exit=%d output=%s"
       head_program
       code
-      (Worker_dev_tools.truncate_for_log out)
+      (Keeper_sandbox_runtime.docker_failure_output_for_log out)
   | Unix.WSIGNALED n -> Printf.sprintf "docker_%s_signaled: signal=%d" head_program n
   | Unix.WSTOPPED n -> Printf.sprintf "docker_%s_stopped: signal=%d" head_program n
 ;;
@@ -260,10 +260,31 @@ let start_container (t : t) ~(timeout_sec : float) =
                     "docker_container_inspect_failed (existence check): %s"
                     (Worker_dev_tools.truncate_for_log inspect_out)))
           | _ ->
+            let status_label =
+              match st with
+              | Unix.WEXITED code -> Printf.sprintf "exit=%d" code
+              | Unix.WSIGNALED signal -> Printf.sprintf "signal=%d" signal
+              | Unix.WSTOPPED signal -> Printf.sprintf "stopped=%d" signal
+            in
+            let base_path_hash =
+              Keeper_sandbox_runtime.base_path_hash t.config.base_path
+            in
+            let network_label = network_mode_to_string t.network_mode in
+            let mount_context =
+              Keeper_sandbox_runtime.docker_mount_failure_context_suffix
+                ~base_path_hash
+                ~keeper_name:t.meta.name
+                ~image
+                ~status_label
+                ~container_kind:"turn"
+                ~network_label
+                out
+            in
             Error
               (Printf.sprintf
-                 "docker_container_start_failed: %s"
-                 (Worker_dev_tools.truncate_for_log out)))))
+                 "docker_container_start_failed: %s%s"
+                 (Keeper_sandbox_runtime.docker_failure_output_for_log out)
+                 mount_context))))
 ;;
 
 let ensure_started (t : t) ~(timeout_sec : float) =

@@ -405,6 +405,21 @@ let is_digits_only s start stop =
 ;;
 
 let is_safe_fd_redirect_token token =
+  let lower = String.lowercase_ascii token in
+  if
+    List.mem
+      lower
+      [ ">/dev/null"
+      ; "1>/dev/null"
+      ; "2>/dev/null"
+      ; ">>/dev/null"
+      ; "1>>/dev/null"
+      ; "2>>/dev/null"
+      ; "</dev/null"
+      ; "0</dev/null"
+      ]
+  then true
+  else
   let len = String.length token in
   let check op_char =
     let rec find i =
@@ -579,7 +594,8 @@ let block_reason_to_string = function
      use keeper_fs_edit."
   | Process_substitution -> "Process substitution (<(...) or >(...)) is not allowed."
   | Unsafe_redirect ->
-    "File redirects are not allowed. Only fd redirects like 2>&1 are permitted."
+    "File redirects are not allowed. Only fd redirects like 2>&1 and \
+     /dev/null sinks like 2>/dev/null are permitted."
   | Pipes_not_allowed -> "Pipes are not allowed. Run one command per call."
   | Direct_dune_invocation ->
     "Direct `dune` is blocked in local agent shells because it bypasses \
@@ -614,6 +630,47 @@ let validate_command cmd =
   validate_command_with_allowlist ~allowed_commands:dev_allowed_commands cmd
 ;;
 
+let first_disallowed_stage_bin ~allowed_commands stage_bins =
+  List.find_opt
+    (fun name -> not (List.exists (String.equal name) allowed_commands))
+    stage_bins
+;;
+
+let validate_command_coding_legacy_segments ~allow_pipes ~allowed_commands trimmed =
+  match split_pipeline_segments trimmed with
+  | Error msg -> Error (Command_not_allowed msg)
+  | Ok segments ->
+    if (not allow_pipes) && List.length segments > 1
+    then Error Pipes_not_allowed
+    else if List.exists invokes_direct_dune segments
+    then Error Direct_dune_invocation
+    else (
+      let rec validate_segments = function
+        | [] -> Ok ()
+        | segment :: rest ->
+          (match extract_command_name segment with
+           | None -> Error Empty_command
+           | Some name when List.mem name allowed_commands ->
+             validate_segments rest
+           | Some name -> Error (Command_not_allowed name))
+      in
+      validate_segments segments)
+;;
+
+let validate_command_coding_parsed ~allow_pipes ~allowed_commands context =
+  let stage_bins = context.Shell_command_gate.stage_bins in
+  if (not allow_pipes) && Shell_command_gate.stage_count context > 1
+  then `Error Pipes_not_allowed
+  else if List.exists (String.equal "dune") stage_bins
+  then `Error Direct_dune_invocation
+  else if List.exists (fun name -> String.equal name "env" || String.equal name "opam") stage_bins
+  then `Use_legacy_segments
+  else (
+    match first_disallowed_stage_bin ~allowed_commands stage_bins with
+    | None -> `Ok
+    | Some name -> `Error (Command_not_allowed name))
+;;
+
 let validate_command_coding_with_allowlist
       ?(allow_pipes = true)
       ~(allowed_commands : string list)
@@ -629,23 +686,15 @@ let validate_command_coding_with_allowlist
   else if has_unsafe_redirection trimmed
   then Error Unsafe_redirect
   else (
-    match split_pipeline_segments trimmed with
-    | Error msg -> Error (Command_not_allowed msg)
-    | Ok segments ->
-      if (not allow_pipes) && List.length segments > 1
-      then Error Pipes_not_allowed
-      else if List.exists invokes_direct_dune segments
-      then Error Direct_dune_invocation
-      else (
-        let rec validate_segments = function
-          | [] -> Ok ()
-          | segment :: rest ->
-            (match extract_command_name segment with
-             | None -> Error Empty_command
-             | Some name when List.mem name allowed_commands -> validate_segments rest
-             | Some name -> Error (Command_not_allowed name))
-        in
-        validate_segments segments))
+    match Shell_command_gate.parse trimmed with
+    | Ok context -> (
+      match validate_command_coding_parsed ~allow_pipes ~allowed_commands context with
+      | `Use_legacy_segments ->
+        validate_command_coding_legacy_segments ~allow_pipes ~allowed_commands trimmed
+      | `Ok -> Ok ()
+      | `Error reason -> Error reason)
+    | Error _ ->
+      validate_command_coding_legacy_segments ~allow_pipes ~allowed_commands trimmed)
 ;;
 
 (** Relaxed command validation for Coding/Full preset keepers.

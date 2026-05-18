@@ -234,6 +234,18 @@ let strip_stderr_dev_null_redirects cmd =
     in
     loop i
   in
+  let trim_buffer_trailing_spaces () =
+    let rec loop () =
+      let len = Buffer.length buf in
+      if len > 0
+         && (Char.equal (Buffer.nth buf (len - 1)) ' '
+             || Char.equal (Buffer.nth buf (len - 1)) '\t')
+      then (
+        Buffer.truncate buf (len - 1);
+        loop ())
+    in
+    loop ()
+  in
   let is_redirect_target_boundary i =
     i >= len
     ||
@@ -245,7 +257,19 @@ let strip_stderr_dev_null_redirects cmd =
     i = 0
     ||
     match cmd.[i - 1] with
-    | ' ' | '\t' | '\n' | '\r' | ';' | '|' -> true
+    | ' ' | '\t' | '\n' | '\r' ->
+      let rec previous_non_space j =
+        if j < 0
+        then None
+        else
+          match cmd.[j] with
+          | ' ' | '\t' | '\n' | '\r' -> previous_non_space (j - 1)
+          | ch -> Some ch
+      in
+      (match previous_non_space (i - 1) with
+       | Some '&' -> false
+       | _ -> true)
+    | ';' | '|' -> true
     | _ -> false
   in
   let skip_dev_null_after op_end =
@@ -309,7 +333,12 @@ let strip_stderr_dev_null_redirects cmd =
         loop No_quote true stripped (i + 1)
       | No_quote, _ ->
         match stderr_dev_null_redirect_end i with
-        | Some next -> loop No_quote false true next
+        | Some next ->
+          let next = skip_spaces next in
+          (if next < len && Char.equal cmd.[next] '&' then (
+             trim_buffer_trailing_spaces ();
+             if Buffer.length buf > 0 then Buffer.add_char buf ' '));
+          loop No_quote false true next
         | None ->
           Buffer.add_char buf cmd.[i];
           loop No_quote false stripped (i + 1))
@@ -548,6 +577,149 @@ let keeper_bash_shape_block cmd =
   | Masc_exec.Parsed.Too_complex _ ->
     raw_keeper_bash_shape_block cmd
 
+type safe_read_fallback = {
+  primary_cmd : string;
+}
+
+let safe_read_primary_rewrite primary_cmd =
+  match keeper_bash_shape_block primary_cmd with
+  | Some _ -> None
+  | None ->
+    if Worker_dev_tools.is_write_operation primary_cmd
+    then None
+    else (
+      match
+        Worker_dev_tools.validate_command_coding_with_allowlist
+          ~allow_pipes:false
+          ~allowed_commands:Worker_dev_tools.dev_allowed_commands
+          primary_cmd
+      with
+      | Ok () -> Some { primary_cmd }
+      | Error _ -> None)
+
+let find_unquoted_logic_or cmd =
+  let len = String.length cmd in
+  let rec loop quote_state escaped i =
+    if i + 1 >= len
+    then None
+    else if escaped
+    then loop quote_state false (i + 1)
+    else (
+      match quote_state, cmd.[i] with
+      | Single_quote, '\'' -> loop No_quote false (i + 1)
+      | Single_quote, _ -> loop Single_quote false (i + 1)
+      | Double_quote, '"' -> loop No_quote false (i + 1)
+      | Double_quote, '\\' -> loop Double_quote true (i + 1)
+      | Double_quote, _ -> loop Double_quote false (i + 1)
+      | No_quote, '\'' -> loop Single_quote false (i + 1)
+      | No_quote, '"' -> loop Double_quote false (i + 1)
+      | No_quote, '\\' -> loop No_quote true (i + 1)
+      | No_quote, '|' when Char.equal cmd.[i + 1] '|' -> Some i
+      | No_quote, _ -> loop No_quote false (i + 1))
+  in
+  loop No_quote false 0
+
+let strip_suffix_ci text suffix =
+  let text_len = String.length text in
+  let suffix_len = String.length suffix in
+  if suffix_len > text_len
+  then None
+  else (
+    let tail = String.sub text (text_len - suffix_len) suffix_len in
+    if String.equal (String.lowercase_ascii tail) suffix
+    then Some (String.sub text 0 (text_len - suffix_len) |> String.trim)
+    else None)
+
+let strip_trailing_dev_null_redirect cmd =
+  let cmd = String.trim cmd in
+  [
+    "2>/dev/null";
+    "1>/dev/null";
+    ">/dev/null";
+    "2>>/dev/null";
+    "1>>/dev/null";
+    ">>/dev/null";
+    "2> /dev/null";
+    "1> /dev/null";
+    "> /dev/null";
+    "2>> /dev/null";
+    "1>> /dev/null";
+    ">> /dev/null";
+  ]
+  |> List.find_map (strip_suffix_ci cmd)
+  |> function
+  | Some primary when not (String.equal primary "") -> Some primary
+  | Some _ | None -> None
+
+let literal_echo_is_safe text =
+  match Masc_exec_bash_parser.Bash.parse_string text with
+  | Masc_exec.Parsed.Parsed (Masc_exec.Shell_ir.Simple simple)
+    when simple.env = []
+         && simple.redirects = []
+         && Option.is_none simple.cwd
+         && String.equal (Masc_exec.Bin.to_string simple.bin) "echo" ->
+    let rec literal_arg_text = function
+      | Masc_exec.Shell_ir.Lit arg -> Some arg
+      | Masc_exec.Shell_ir.Concat parts ->
+        let rec loop acc = function
+          | [] -> Some (String.concat "" (List.rev acc))
+          | part :: rest ->
+            (match literal_arg_text part with
+             | Some text -> loop (text :: acc) rest
+             | None -> None)
+        in
+        loop [] parts
+      | Masc_exec.Shell_ir.Var _ -> None
+    in
+    let rec loop = function
+      | [] -> true
+      | arg :: rest ->
+        (match literal_arg_text arg with
+         | Some text -> (not (String.starts_with ~prefix:"-" text)) && loop rest
+         | None -> false)
+    in
+    loop simple.args
+  | _ -> false
+
+let safe_read_or_echo_fallback_of_command cmd =
+  match find_unquoted_logic_or cmd with
+  | None -> None
+  | Some split ->
+    let left = String.sub cmd 0 split in
+    let right =
+      String.sub cmd (split + 2) (String.length cmd - split - 2) |> String.trim
+    in
+    if not (literal_echo_is_safe right)
+    then None
+    else
+      let primary_cmd =
+        match strip_trailing_dev_null_redirect left with
+        | Some primary -> Some primary
+        | None ->
+          let primary = String.trim left in
+          if String.equal primary "" then None else Some primary
+      in
+      Option.bind primary_cmd safe_read_primary_rewrite
+
+let safe_read_fallback_of_command ~write_enabled:_ ~stderr_dev_null_stripped cmd =
+  match safe_read_or_echo_fallback_of_command cmd with
+  | Some _ as rewrite -> rewrite
+  | None ->
+    (match strip_trailing_dev_null_redirect cmd with
+     | Some primary_cmd -> safe_read_primary_rewrite primary_cmd
+     | None ->
+       if stderr_dev_null_stripped
+       then safe_read_primary_rewrite cmd
+       else None)
+
+let shape_block_allowed_by_active_validator ~write_enabled cmd = function
+  | Pipe_or_redirect when write_enabled ->
+    (match Worker_dev_tools.validate_command_coding cmd with
+     | Ok () -> true
+     | Error _ -> false)
+  | Gh_pr_checks | Chaining | Substitution | Repo_wide_scan | Pipe_or_redirect ->
+    false
+
 let bash_shape_block_tag = function
   | Gh_pr_checks -> "gh_pr_checks"
   | Pipe_or_redirect -> "pipe_or_redirect"
@@ -555,17 +727,131 @@ let bash_shape_block_tag = function
   | Substitution -> "substitution"
   | Repo_wide_scan -> "repo_wide_scan"
 
-module For_testing = struct
-  let elapsed_duration_ms = elapsed_duration_ms
+let lowercase_contains haystack needle =
+  let haystack = String.lowercase_ascii haystack in
+  let needle = String.lowercase_ascii needle in
+  let h_len = String.length haystack in
+  let n_len = String.length needle in
+  let rec loop i =
+    if n_len = 0
+    then true
+    else if i + n_len > h_len
+    then false
+    else if String.sub haystack i n_len = needle
+    then true
+    else loop (i + 1)
+  in
+  loop 0
 
-  let keeper_bash_shape_block_tag cmd =
-    Option.map bash_shape_block_tag (keeper_bash_shape_block cmd)
+let task_state_file_probe_command_names =
+  [ "cat"; "head"; "tail"; "ls"; "find"; "rg"; "grep"; "test"; "[" ]
 
-  let raw_keeper_bash_shape_block_tag cmd =
-    Option.map bash_shape_block_tag (raw_keeper_bash_shape_block cmd)
+let looks_like_task_state_path_token text =
+  let text = String.lowercase_ascii text in
+  let scoped_masc = lowercase_contains text ".masc/" in
+  let scoped_worktree = lowercase_contains text ".worktrees/" in
+  (scoped_worktree && lowercase_contains text ".task.json")
+  ||
+  (scoped_masc
+   && (lowercase_contains text "backlog.json"
+       || lowercase_contains text "/tasks"
+       || lowercase_contains text "current_task.json"))
 
-  let strip_stderr_dev_null_redirects = strip_stderr_dev_null_redirects
-end
+let rec command_mentions_task_state_file cmd =
+  let words = shell_words_with_boundaries cmd in
+  let rec loop = function
+    | word :: rest when word.starts_command ->
+      let command_words = strip_command_wrappers (word :: rest) in
+      (match command_words with
+       | bin :: args
+         when List.mem (command_name bin.text) task_state_file_probe_command_names
+              && List.exists
+                   (fun arg -> looks_like_task_state_path_token arg.text)
+                   args ->
+         true
+       | _ -> loop rest)
+    | _ :: rest -> loop rest
+    | [] -> false
+  in
+  loop words
+  ||
+  match shell_c_payload words with
+  | Some payload -> command_mentions_task_state_file payload
+  | None -> false
+
+let rec command_looks_like_task_state_http_probe cmd =
+  let task_api_url text =
+    (lowercase_contains text "localhost"
+     || lowercase_contains text Masc_network_defaults.masc_http_default_host)
+    && (lowercase_contains text "/api/tasks" || lowercase_contains text "api/tasks")
+  in
+  let http_client_names = [ "curl"; "wget"; "http"; "https"; "xh" ] in
+  let words = shell_words_with_boundaries cmd in
+  let rec loop = function
+    | word :: rest when word.starts_command ->
+      let command_words = strip_command_wrappers (word :: rest) in
+      (match command_words with
+       | bin :: args
+         when List.mem (command_name bin.text) http_client_names
+              && List.exists (fun arg -> task_api_url arg.text) args ->
+         true
+       | _ -> loop rest)
+    | _ :: rest -> loop rest
+    | [] -> false
+  in
+  loop words
+  ||
+  match shell_c_payload words with
+  | Some payload -> command_looks_like_task_state_http_probe payload
+  | None -> false
+
+let command_looks_like_task_state_discovery cmd =
+  let task_state_marker =
+    lowercase_contains cmd "backlog"
+    || lowercase_contains cmd ".masc"
+    || (lowercase_contains cmd "task" && lowercase_contains cmd ".json")
+  in
+  command_mentions_task_state_file cmd
+  || command_looks_like_task_state_http_probe cmd
+  ||
+  ((lowercase_contains cmd "find repos" || lowercase_contains cmd "find .")
+   && task_state_marker)
+  ||
+  (lowercase_contains cmd "rg "
+   && lowercase_contains cmd "repos"
+   && task_state_marker)
+
+let task_state_shell_hint =
+  "Do not inspect task state by guessing .masc/backlog.json or repo-local \
+   backlog/task files from keeper_bash. Use keeper_tasks_list for \
+   task/backlog state and keeper_context_status for current_task_id/sandbox \
+   paths."
+
+let task_state_shell_alternatives =
+  [ "keeper_tasks_list include_done=false"
+  ; "keeper_context_status"
+  ; "keeper_task_claim {}"
+  ]
+
+let command_looks_like_search_pipeline cmd =
+  (lowercase_contains cmd "grep " || lowercase_contains cmd "rg ")
+  && lowercase_contains cmd "| head"
+
+let command_looks_like_find_pipeline cmd =
+  lowercase_contains cmd "find " && lowercase_contains cmd "| head"
+
+let command_looks_like_cd_chained_search cmd =
+  lowercase_contains cmd "cd "
+  && lowercase_contains cmd "&&"
+  && (lowercase_contains cmd "grep " || lowercase_contains cmd "rg ")
+
+let command_looks_like_repo_wide_git_log_grep cmd =
+  lowercase_contains cmd "git log"
+  && lowercase_contains cmd "--all"
+  && lowercase_contains cmd "--grep"
+
+let command_looks_like_repo_wide_rg cmd =
+  lowercase_contains cmd "rg " && lowercase_contains cmd " repos"
 
 let bash_shape_block_reason = function
   | Gh_pr_checks ->
@@ -585,14 +871,27 @@ let bash_shape_block_reason = function
      running Keeper fleets they can stampede Docker bind mounts and exhaust \
      host file descriptors."
 
-let bash_shape_block_hint = function
+let bash_shape_block_hint ~cmd = function
+  | _ when command_looks_like_task_state_discovery cmd -> task_state_shell_hint
   | Gh_pr_checks ->
     "Use keeper_pr_status. If raw gh is the only visible status path, use gh \
      pr view NUMBER --repo OWNER/REPO --json \
      statusCheckRollup,mergeStateStatus,isDraft."
+  | Pipe_or_redirect when command_looks_like_search_pipeline cmd ->
+    "Do not pipe grep/rg through keeper_bash. Use keeper_shell op=rg with a \
+     scoped path and pattern instead; if the command starts with cd, pass that \
+     directory as cwd instead of using cd &&."
+  | Pipe_or_redirect when
+      command_looks_like_find_pipeline cmd || lowercase_contains cmd "find " ->
+    "Do not pipe find through keeper_bash. Use keeper_shell op=find with path, \
+     pattern, and limit instead of | head; if the command needs multiple -name \
+     globs, run one keeper_shell op=find call per pattern."
   | Pipe_or_redirect ->
     "Remove the pipe or redirect. Run the primary command once and summarize \
      the returned output; use keeper_shell op=head/tail for file slices."
+  | Chaining when command_looks_like_cd_chained_search cmd ->
+    "Do not prepend cd ... && to search commands. Pass the target repo or \
+     worktree as cwd and use keeper_shell op=rg with a scoped path."
   | Chaining ->
     "Split the work into separate keeper_bash calls and use the cwd argument \
      instead of cd chaining."
@@ -600,11 +899,20 @@ let bash_shape_block_hint = function
     "Run the discovery command first, then use its literal result in a second \
      keeper_bash call."
   | Repo_wide_scan ->
+    if command_looks_like_repo_wide_git_log_grep cmd then
+      "Do not use raw Bash for repo-wide git history grep. Use keeper_shell \
+       op=git_log with cwd set to the repo/worktree, count=5, and grep=<term>."
+    else if command_looks_like_repo_wide_rg cmd then
+      "Do not scan repos/ from raw keeper_bash. Use keeper_shell op=rg with a \
+       scoped path such as repos/masc-mcp/lib or repos/oas/src, plus type/glob \
+       filters."
+    else
     "Use keeper_shell op=rg/find with a scoped path such as lib/, test/, or a \
      specific repos/REPO subdirectory; avoid scanning . or repos/ from raw \
      bash."
 
-let bash_shape_block_alternatives = function
+let bash_shape_block_alternatives ~cmd = function
+  | _ when command_looks_like_task_state_discovery cmd -> task_state_shell_alternatives
   | Gh_pr_checks ->
     [
       "keeper_pr_status";
@@ -612,27 +920,83 @@ let bash_shape_block_alternatives = function
        statusCheckRollup,mergeStateStatus,isDraft";
     ]
   | Pipe_or_redirect ->
-    [
-      "keeper_bash cmd='ls lib/'";
-      "keeper_shell op=head path=file/path lines=20";
-      "keeper_shell op=rg pattern=search-term path=dir/path";
-    ]
+    if command_looks_like_search_pipeline cmd
+    then
+      [
+        "keeper_shell op=rg pattern=search-term path=lib glob=*.ml";
+        "keeper_shell op=rg pattern=search-term path=repos/REPO/lib glob=*.ml";
+        "keeper_bash cmd='git status' cwd='repos/REPO'";
+      ]
+    else if command_looks_like_find_pipeline cmd || lowercase_contains cmd "find "
+    then
+      [
+        "keeper_shell op=find path=repos/REPO/.worktrees/TASK pattern='*.ml' limit=30";
+        "keeper_shell op=find path=repos/REPO/.worktrees/TASK pattern='*.mli' limit=30";
+        "keeper_shell op=find path=lib pattern='*.ml' limit=30";
+      ]
+    else
+      [
+        "keeper_bash cmd='ls lib/'";
+        "keeper_shell op=head path=file/path lines=20";
+        "keeper_shell op=rg pattern=search-term path=dir/path";
+      ]
   | Chaining ->
-    [
-      "keeper_bash cmd='git status' cwd='repos/REPO'";
-      "keeper_bash cmd='git log -1' cwd='repos/REPO'";
-    ]
+    if command_looks_like_cd_chained_search cmd
+    then
+      [
+        "keeper_shell op=rg pattern=search-term path=lib glob=*.ml";
+        "keeper_bash cmd='git status' cwd='repos/REPO'";
+      ]
+    else
+      [
+        "keeper_bash cmd='git status' cwd='repos/REPO'";
+        "keeper_bash cmd='git log -1' cwd='repos/REPO'";
+      ]
   | Substitution ->
     [
       "keeper_bash cmd='rg --files lib'";
       "keeper_bash cmd='cat path/from/previous-step'";
     ]
   | Repo_wide_scan ->
-    [
-      "keeper_shell op=rg pattern=search-term path=lib";
-      "keeper_shell op=find path=lib name='*.ml'";
-      "keeper_bash cmd='git log --oneline -20'";
-    ]
+    if command_looks_like_repo_wide_git_log_grep cmd
+    then
+      [
+        "keeper_shell op=git_log cwd=repos/REPO count=5 grep=search-term";
+        "keeper_shell op=git_log cwd=repos/REPO/.worktrees/TASK count=5 grep=search-term";
+      ]
+    else if command_looks_like_repo_wide_rg cmd
+    then
+      [
+        "keeper_shell op=rg pattern=search-term path=repos/masc-mcp/lib glob=*.ml";
+        "keeper_shell op=rg pattern=search-term path=repos/oas/src glob=*.ml";
+        "keeper_shell op=find path=repos/REPO/lib pattern='*.ml'";
+      ]
+    else
+      [
+        "keeper_shell op=rg pattern=search-term path=lib";
+        "keeper_shell op=find path=lib pattern='*.ml'";
+        "keeper_bash cmd='git log --oneline -20'";
+      ]
+
+module For_testing = struct
+  let elapsed_duration_ms = elapsed_duration_ms
+
+  let keeper_bash_shape_block_tag cmd =
+    Option.map bash_shape_block_tag (keeper_bash_shape_block cmd)
+
+  let raw_keeper_bash_shape_block_tag cmd =
+    Option.map bash_shape_block_tag (raw_keeper_bash_shape_block cmd)
+
+  let strip_stderr_dev_null_redirects = strip_stderr_dev_null_redirects
+
+  let keeper_bash_shape_block_hint cmd =
+    match keeper_bash_shape_block cmd with
+    | Some block -> Some (bash_shape_block_hint ~cmd block)
+    | None ->
+      if command_looks_like_task_state_discovery cmd
+      then Some task_state_shell_hint
+      else None
+end
 
 let workflow_rejection_field = "failure_class", `String "workflow_rejection"
 
@@ -642,18 +1006,20 @@ let bash_shape_block_result ~cmd ~cmd_for_log ~env_snapshot block =
        ~cmd
        ~error:"keeper_bash_command_shape_blocked"
        ~reason:(bash_shape_block_reason block)
-       ~hint:(bash_shape_block_hint block)
-       ~alternatives:(bash_shape_block_alternatives block)
+       ~hint:(bash_shape_block_hint ~cmd block)
+       ~alternatives:(bash_shape_block_alternatives ~cmd block)
        ~diag:
          (Some
             {
               Exec_core.rule_id =
                 "keeper_bash_" ^ bash_shape_block_tag block ^ "_blocked";
               explanation = bash_shape_block_reason block;
-              rewrite = Some (bash_shape_block_hint block);
+              rewrite = Some (bash_shape_block_hint ~cmd block);
               tool_suggestion =
                 (match block with
                  | Gh_pr_checks -> Some "keeper_pr_status"
+                 | _ when command_looks_like_task_state_discovery cmd ->
+                   Some "keeper_tasks_list"
                  | Pipe_or_redirect -> Some "keeper_shell"
                  | Repo_wide_scan -> Some "keeper_shell"
                  | Chaining | Substitution -> None);
@@ -689,7 +1055,12 @@ let handle_keeper_bash
     |> Worker_dev_tools.sanitize_command_for_log
     |> Worker_dev_tools.truncate_for_log
   in
-  let timeout_sec = Keeper_shell_shared.clamp_shell_timeout ~default:Keeper_shell_shared.io_timeout_sec args in
+  let timeout_sec =
+    Keeper_shell_shared.clamp_shell_timeout
+      ~min_sec:Keeper_shell_shared.keeper_bash_min_timeout_sec
+      ~default:Keeper_shell_shared.io_timeout_sec
+      args
+  in
   let run_in_background =
     Safe_ops.json_bool ~default:false "run_in_background" args
   in
@@ -755,6 +1126,52 @@ let handle_keeper_bash
          ; "retryable", `Bool true
          ])
   in
+  let task_state_http_probe_block () =
+    Yojson.Safe.to_string
+      (Exec_core.blocked_result_json
+         ~cmd
+         ~error:"task_state_http_probe_blocked"
+         ~reason:
+           "Task state is not exposed through guessed localhost HTTP APIs from \
+            keeper_bash."
+         ~hint:task_state_shell_hint
+         ~alternatives:task_state_shell_alternatives
+         ~retryability:Exec_core.Self_correct
+         ~diag:
+           (Some
+              { Exec_core.rule_id = "task_state_http_probe_blocked"
+              ; explanation =
+                  "Keepers must use task-state tools instead of probing \
+                   localhost task APIs from shell."
+              ; rewrite = Some task_state_shell_hint
+              ; tool_suggestion = Some "keeper_tasks_list"
+              })
+         ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
+         ())
+  in
+  let task_state_file_probe_block () =
+    Yojson.Safe.to_string
+      (Exec_core.blocked_result_json
+         ~cmd
+         ~error:"task_state_file_probe_blocked"
+         ~reason:
+           "Task state is owned by the MASC task tools, not by guessed \
+            backlog/current-task files in keeper sandboxes."
+         ~hint:task_state_shell_hint
+         ~alternatives:task_state_shell_alternatives
+         ~retryability:Exec_core.Self_correct
+         ~diag:
+           (Some
+              { Exec_core.rule_id = "task_state_file_probe_blocked"
+              ; explanation =
+                  "Keepers must use task-state tools instead of cat/find/rg \
+                   against .masc backlog files or worktree .task.json files."
+              ; rewrite = Some task_state_shell_hint
+              ; tool_suggestion = Some "keeper_tasks_list"
+              })
+         ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
+         ())
+  in
   if cmd = ""
   then error_json "cmd is required. Good: cmd='ls -la lib/'. Bad: cmd=''."
   else if Env_config_keeper.KeeperSandbox.hard_mode ()
@@ -767,6 +1184,10 @@ let handle_keeper_bash
     | Some (tool_name, tool_policy_visible) ->
       direct_tool_command_block ~tool_policy_visible tool_name
     | None when cmd_contains_gh_pr_create cmd -> gh_pr_create_block ()
+    | None when command_mentions_task_state_file cmd ->
+      task_state_file_probe_block ()
+    | None when command_looks_like_task_state_http_probe cmd ->
+      task_state_http_probe_block ()
     | None -> begin
     (if stripped_stderr_dev_null then
        Log.Keeper.info
@@ -897,6 +1318,15 @@ let handle_keeper_bash
     let command_cacheable () =
       Masc_exec.Risk_classifier.(is_cacheable (classify cmd))
     in
+    let safe_read_fallback =
+      safe_read_fallback_of_command ~write_enabled
+        ~stderr_dev_null_stripped:stripped_stderr_dev_null cmd
+    in
+    let validation_cmd =
+      match safe_read_fallback with
+      | Some rewrite -> rewrite.primary_cmd
+      | None -> cmd
+    in
     let with_raw_json_exec_cache run =
       let cacheable = command_cacheable () in
       if not cacheable then run ()
@@ -961,7 +1391,9 @@ let handle_keeper_bash
     in
     let sandbox_root = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
     match keeper_bash_shape_block cmd with
-    | Some block ->
+    | Some block when
+      Option.is_none safe_read_fallback
+      && not (shape_block_allowed_by_active_validator ~write_enabled cmd block) ->
       Prometheus.inc_counter
         Keeper_metrics.metric_keeper_shell_bash_failures
         ~labels:
@@ -974,7 +1406,7 @@ let handle_keeper_bash
         "keeper_bash command-shape blocked: keeper=%s block=%s cmd=%s"
         meta.name (bash_shape_block_tag block) cmd_for_log;
       bash_shape_block_result ~cmd ~cmd_for_log ~env_snapshot:env_snap block
-    | None ->
+    | Some _ | None ->
       (* Destructive guard: always active regardless of Docker or preset *)
       if Worker_dev_tools.is_destructive_bash_operation cmd
     then (
@@ -1188,9 +1620,13 @@ let handle_keeper_bash
       (* Local execution path: full validation applies *)
       let validate =
         if write_enabled then Worker_dev_tools.validate_command_coding
+        else if Option.is_some safe_read_fallback then
+          Worker_dev_tools.validate_command_coding_with_allowlist
+            ~allow_pipes:false
+            ~allowed_commands:Worker_dev_tools.dev_allowed_commands
         else Worker_dev_tools.validate_command
       in
-      match validate cmd with
+      match validate validation_cmd with
       | Error reason ->
         let reason_str = Worker_dev_tools.block_reason_to_string reason in
         Prometheus.inc_counter
@@ -1258,7 +1694,8 @@ let handle_keeper_bash
         begin
           let path_validation =
            match
-             Keeper_task_worktree_lazy.ensure_command_existing_dirs ~config ~meta ~cwd ~cmd
+             Keeper_task_worktree_lazy.ensure_command_existing_dirs
+               ~config ~meta ~cwd ~cmd:validation_cmd
            with
            | Error e -> Error e
            | Ok () ->
@@ -1266,13 +1703,13 @@ let handle_keeper_bash
                ~keeper_id:meta.name
                ~base_path:root
                ~workdir:cwd
-               cmd
+               validation_cmd
           in
           match path_validation with
           | Error e -> error_json ~fields:["blocked_cmd", `String cmd_for_log] e
           | Ok () ->
                if write_enabled
-                  && Worker_dev_tools.is_write_operation cmd then
+                  && Worker_dev_tools.is_write_operation validation_cmd then
                  Log.Keeper.info "WRITE_AUDIT: keeper=%s cwd=%s cmd=%s playground=%b"
                    meta.name cwd cmd_for_log in_playground;
                (* Tick 7: background mode keeps stdout/stderr separate

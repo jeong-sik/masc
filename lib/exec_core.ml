@@ -585,6 +585,45 @@ let default_recovery_hint classification semantic_status =
       "Revise the command or switch to the structured shell tool that matches the intent."
 ;;
 
+let lowercase_contains haystack needle =
+  let haystack = String.lowercase_ascii haystack in
+  let needle = String.lowercase_ascii needle in
+  let h_len = String.length haystack in
+  let n_len = String.length needle in
+  let rec loop i =
+    if n_len = 0
+    then true
+    else if i + n_len > h_len
+    then false
+    else if String.sub haystack i n_len = needle
+    then true
+    else loop (i + 1)
+  in
+  loop 0
+
+let mentions_task_state_file text =
+  List.exists
+    (lowercase_contains text)
+    [ ".masc/backlog.json"
+    ; ".masc/state/backlog.json"
+    ; "repos/masc-mcp/.masc/backlog.json"
+    ; "repos/masc-mcp/.masc/tasks/backlog.json"
+    ; "repos/masc-mcp/backlog.json"
+    ; "tasks/backlog.json"
+    ]
+
+let task_state_file_recovery_hint =
+  "This is not a keeper-visible task-state path. Do not read .masc/backlog.json \
+   or repo-local backlog files from shell. Use keeper_tasks_list for task/backlog \
+   state and keeper_context_status for current_task_id/sandbox paths."
+
+let recovery_hint_for_output ~cmd ~output classification semantic_status =
+  match semantic_status with
+  | Runtime_error
+    when mentions_task_state_file cmd || mentions_task_state_file output ->
+    Some task_state_file_recovery_hint
+  | _ -> default_recovery_hint classification semantic_status
+
 let ensure_exec_artifact_dir path =
   try Fs_compat.mkdir_p path with
   | Sys_error msg -> Logs.warn (fun f -> f "exec artifact mkdir failed: %s" msg)
@@ -654,7 +693,7 @@ let build_process_outcome ~artifact_policy ~base_path ~keeper_name ~cmd ~status 
   let artifact_refs =
     artifact_refs_of_output ~artifact_policy ~base_path ~keeper_name ~cmd ~output
   in
-  let recovery_hint = default_recovery_hint classification semantic_status in
+  let recovery_hint = recovery_hint_for_output ~cmd ~output classification semantic_status in
   Executed
     { command = cmd
     ; process_status = status

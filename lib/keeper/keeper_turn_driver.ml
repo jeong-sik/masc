@@ -731,6 +731,11 @@ let run_named
               Keeper_types.Max_turns_exceeded
             else
               Keeper_types.Other_detail (Cascade_fsm.to_user_message last_err)
+        | Some (Llm_provider.Http_client.TimeoutError { message; _ }) ->
+            if message_looks_like_cli_wrapped_max_turns message then
+              Keeper_types.Max_turns_exceeded
+            else
+              Keeper_types.Other_detail (Cascade_fsm.to_user_message last_err)
         | Some (Llm_provider.Http_client.HttpError { body; _ }) ->
             if message_looks_like_cli_wrapped_max_turns body then
               Keeper_types.Max_turns_exceeded

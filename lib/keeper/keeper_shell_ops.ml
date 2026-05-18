@@ -525,17 +525,20 @@ let handle_keeper_shell
        let count = max 1 (min 50 (Safe_ops.json_int ~default:10 "count" args)) in
        let format = Safe_ops.json_string ~default:"%h %s" "format" args in
        let file_path = Safe_ops.json_string ~default:"" "path" args |> String.trim in
+       let grep = Safe_ops.json_string ~default:"" "grep" args |> String.trim in
        if Keeper_docker_read.should_route_read ~meta then
          (match docker_git_log_path file_path with
           | Error err ->
             error_json
-              ~fields:[ "op", `String op; "cwd", `String cwd; "path", `String file_path ]
+              ~fields:
+                [ "op", `String op; "cwd", `String cwd; "path", `String file_path ]
               err
           | Ok docker_file_path ->
             let docker_cmd =
               let base =
-                Printf.sprintf "git --no-optional-locks log --format=%s -%d"
+                Printf.sprintf "git --no-optional-locks log --format=%s -%d%s"
                   (Filename.quote format) count
+                  (if grep = "" then "" else " --grep=" ^ Filename.quote grep)
               in
               if docker_file_path = "" then
                 base
@@ -551,6 +554,9 @@ let handle_keeper_shell
              Printf.sprintf "--format=%s" format;
              Printf.sprintf "-%d" count ]
          in
+         let base_argv =
+           if grep = "" then base_argv else base_argv @ [ "--grep=" ^ grep ]
+         in
          let argv = if file_path <> "" then base_argv @ [ "--"; file_path ] else base_argv in
          (match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
           | Some runtime ->
@@ -559,6 +565,9 @@ let handle_keeper_shell
                 [ "git"; "--no-optional-locks"; "log";
                   Printf.sprintf "--format=%s" format;
                   Printf.sprintf "-%d" count ]
+              in
+              let base_argv =
+                if grep = "" then base_argv else base_argv @ [ "--grep=" ^ grep ]
               in
               if file_path = "" then
                 base_argv
@@ -601,6 +610,7 @@ let handle_keeper_shell
                      ; "op", `String op
                      ; "cwd", Keeper_cwd_response.to_yojson_response cwd_response
                      ; "count", `Int count
+                     ; "grep", `String grep
                      ; "via", `String "docker"
                      ; "status", Keeper_alerting_path.process_status_to_json st
                      ; "entries", lines_to_json ~limit:50 out
@@ -618,11 +628,17 @@ let handle_keeper_shell
                   ; "op", `String op
                   ; "cwd", `String cwd
                   ; "count", `Int count
+                  ; "grep", `String grep
                   ; "status", Keeper_alerting_path.process_status_to_json st
                   ; "entries", lines_to_json ~limit:50 out
                   ])))
   | "find" ->
-    let name_pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in
+    let name_pattern =
+      let pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in
+      if pattern <> ""
+      then pattern
+      else Safe_ops.json_string ~default:"" "name" args |> String.trim
+    in
     if name_pattern = ""
     then error_json ~fields:[ "op", `String op ] "pattern is required for find. Good: pattern='*.ml'. Bad: pattern=''."
     else (

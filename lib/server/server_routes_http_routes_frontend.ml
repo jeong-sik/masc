@@ -246,6 +246,10 @@ let add_routes ~port ~host router =
   |> Http.Router.post "/mcp" handle_post_mcp
   |> Http.Router.post "/mcp/managed"
        (handle_post_mcp ~profile:Server_mcp_transport_http.Managed_agent)
+  |> Http.Router.add ~path:"/mcp" ~methods:[`DELETE]
+       ~handler:handle_delete_mcp
+  |> Http.Router.add ~path:"/mcp/managed" ~methods:[`DELETE]
+       ~handler:(handle_delete_mcp ~profile:Server_mcp_transport_http.Managed_agent)
   |> Http.Router.post "/webrtc/offer"
        (webrtc_signaling_handler
           ~tool_name:"masc_webrtc_offer"

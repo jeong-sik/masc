@@ -97,6 +97,19 @@ type run_result = {
   stop_reason : stop_reason;
 }
 
+type worker_lifecycle_classification =
+  { event : string
+  ; status : string
+  ; error : string option
+  }
+
+let worker_lifecycle_classification_of_result = function
+  | Ok _ -> { event = "completed"; status = "completed"; error = None }
+  | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded _)) ->
+    { event = "completed"; status = "budget_exhausted"; error = None }
+  | Error e ->
+    { event = "failed"; status = "failed"; error = Some (Agent_sdk.Error.to_string e) }
+
 (* Delegate to the canonical [Cdal_proof.result_status_to_string]
    (exposed in #14712 / T5).  Previously this re-implemented the same
    wire conversion via [show_result_status] + [String.rindex '.']
@@ -573,17 +586,12 @@ let run
       Some ckpt
     in
     Option.iter (fun bus ->
-      let status = match result with Ok _ -> "completed" | Error _ -> "failed" in
-      let error =
-        match result with
-        | Ok _ -> None
-        | Error e -> Some (Agent_sdk.Error.to_string e)
-      in
-      publish_lifecycle bus ~name:config.name ~event:status
+      let lifecycle = worker_lifecycle_classification_of_result result in
+      publish_lifecycle bus ~name:config.name ~event:lifecycle.event
         ~detail:(Printf.sprintf "session=%s" session_id)
-        ?error
+        ?error:lifecycle.error
         ~session_id
-        ~status
+        ~status:lifecycle.status
         ~attrs:(provider_lifecycle_attrs config)
         ()
     ) config.event_bus;

@@ -28,6 +28,10 @@ val gh_min_timeout_sec : float
     tests can lock the floor against drift back to sub-network-latency
     values. See #8688. *)
 
+val keeper_bash_min_timeout_sec : float
+(** Minimum timeout_sec floor applied to keeper_bash. Exposed so regression
+    tests can lock the floor against drift back to sub-I/O-latency values. *)
+
 val rewrite_turn_runtime_paths_to_host :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
@@ -72,6 +76,7 @@ module For_testing : sig
   val keeper_bash_shape_block_tag : string -> string option
   val raw_keeper_bash_shape_block_tag : string -> string option
   val strip_stderr_dev_null_redirects : string -> string * bool
+  val keeper_bash_shape_block_hint : string -> string option
 end
 
 val handle_keeper_bash_output :

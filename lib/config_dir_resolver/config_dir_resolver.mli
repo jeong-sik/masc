@@ -90,7 +90,7 @@ val keeper_toml_path_opt : string -> string option
 (** {1 .masc/ root sub-directory accessors (RFC-0121)}
 
     All non-config artifacts under [<base>/.masc/<sub>/] route through these
-    helpers instead of [Filename.concat base_path ".masc/..."] string-literal
+    helpers instead of hand-built base_path plus .masc child string-literals
     direct construction. The path layout itself remains the single SSOT for
     where each subsystem keeps state, but the layout decision lives in one
     place (this module) rather than scattered across callers.

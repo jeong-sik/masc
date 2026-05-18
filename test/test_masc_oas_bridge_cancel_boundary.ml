@@ -11,8 +11,9 @@
       it to an [Error _] result.  Swallowing breaks structured
       concurrency and can leave parent fibers waiting forever.
    2. Preserve the backtrace via [Printexc.raise_with_backtrace].
-   3. Emit observability (Prometheus counter + WARN log) before
-      re-raising so operators see the cancellation in dashboards.
+   3. Emit observability (Prometheus counter + WARN/INFO log) before
+      re-raising so operators see anomalous cancellations in dashboards
+      without turning routine fast [Not_first] races into WARN noise.
    4. Classify wall-time into buckets (fast/short_tail/mid_tail/
       long_mid/long_tail) for bimodal distribution analysis.
 
@@ -118,11 +119,19 @@ let () =
     src
     "metric_oas_bridge_cancel";
 
-  (* B7: WARN log emitted before reraise *)
+  (* B7: non-routine WARN log remains before reraise *)
   assert_contains
-    ~label:"B7: WARN log present"
+    ~label:"B7: WARN log present for anomalous cancel"
     src
     "Log.Misc.warn";
+  assert_contains
+    ~label:"B7: routine fast cancel INFO downgrade"
+    src
+    "Log.Misc.info";
+  assert_contains
+    ~label:"B7: routine Not_first classifier"
+    src
+    "Eio__core__Fiber.Not_first";
   assert_contains
     ~label:"B7-caller-label"
     src

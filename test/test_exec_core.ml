@@ -48,6 +48,25 @@ let test_find_missing_path_is_runtime_error () =
   check string "semantic_status" "runtime_error"
     (get_string_field json "semantic_status")
 
+let test_missing_task_state_path_points_to_task_tools () =
+  let json =
+    Masc_mcp.Exec_core.process_result_json
+      ~base_path:"/tmp"
+      ~keeper_name:"exec-core"
+      ~cmd:"cat .masc/backlog.json"
+      ~status:(Unix.WEXITED 1)
+      ~output:"cat: .masc/backlog.json: No such file or directory"
+      ()
+  in
+  check bool "ok" false (json |> member "ok" |> to_bool);
+  check string "semantic_status" "runtime_error"
+    (get_string_field json "semantic_status");
+  check string "task tool hint"
+    "This is not a keeper-visible task-state path. Do not read .masc/backlog.json \
+     or repo-local backlog files from shell. Use keeper_tasks_list for task/backlog \
+     state and keeper_context_status for current_task_id/sandbox paths."
+    (get_string_field json "recovery_hint")
+
 let test_blocked_json_adds_classification () =
   let json =
     Masc_mcp.Exec_core.blocked_result_json
@@ -668,6 +687,8 @@ let () =
             test_find_partial_is_semantic_success;
           test_case "find missing path is runtime error" `Quick
             test_find_missing_path_is_runtime_error;
+          test_case "missing task-state path points to task tools" `Quick
+            test_missing_task_state_path_points_to_task_tools;
           test_case "quoted regex pipe keeps no-match semantics" `Quick
             test_regex_pipe_inside_quotes_keeps_no_match_semantics;
           test_case "blocked json adds classification" `Quick

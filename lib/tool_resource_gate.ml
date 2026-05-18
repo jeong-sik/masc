@@ -380,6 +380,7 @@ let classify ~tool_name ~arguments ~is_read_only =
   | Some (Tool_name.Masc_keeper tool) -> classify_masc_keeper_tool tool
   | None ->
     if String.starts_with ~prefix:"keeper_pr_" tool_name then Github
+    else if String.equal tool_name "dashboard_worktree_status.gh_pr_list" then Github
     else if String.starts_with ~prefix:"keeper_bash" tool_name then Shell
     else if string_contains tool_name "docker" || string_contains tool_name "sandbox"
     then Docker

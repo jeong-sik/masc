@@ -120,7 +120,7 @@ docs/generated/reverse-engineering/symbol-graph.v1.json
 
 `docs/reverse-engineering-design.html` should link to the artifact and render only the curated summary. The exporter must not rewrite the HTML automatically; HTML updates stay in normal PR review.
 
-The first snapshot in this PR is a schema-compatible static seed. It records WBS lanes, source owners, guard tests, and curated flow edges, and it explicitly records `live_lsp_not_invoked_in_this_pr` in `omissions[]`. A later implementation PR should replace static ranges with live `documentSymbol` and `references` responses.
+The first snapshot in this PR is a schema-compatible static seed. It records WBS lanes, source owners, guard tests, and curated flow edges, and it explicitly records `live_lsp_not_invoked_in_this_pr` in `omissions[]`. Its `display_range` rows are bound to the JSON `base_commit`, so they are evidence for that commit only and must not be treated as current-main coordinates after main advances. A later implementation PR should replace static ranges with live `documentSymbol` and `references` responses.
 
 ## JSON Schema
 

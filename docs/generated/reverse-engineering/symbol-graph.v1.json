@@ -12,7 +12,7 @@
     ],
     "manifest": "docs/design/lsp-symbol-graph-exporter.md",
     "live_lsp_invoked": false,
-    "notes": "Initial task-387 snapshot seeded from current source line inventory. Later exporter PRs should replace static ranges with live LSP responses."
+    "notes": "Initial task-387 snapshot is a base-commit-bound static seed from base_commit. display_range values are not current-main coordinates. Later exporter PRs should replace static ranges with live LSP responses."
   },
   "limits": {
     "max_files": 80,
@@ -691,6 +691,11 @@
       "code": "live_lsp_not_invoked_in_this_pr",
       "reason": "The task-387 artifact is the first schema-compatible seed. It records current owners and guard tests, but does not yet invoke ocamllsp/typescript-language-server through /api/v1/ide/lsp.",
       "follow_up": "Replace static display ranges with live LSP documentSymbol/references responses in the exporter implementation PR."
+    },
+    {
+      "code": "base_commit_bound_static_ranges",
+      "reason": "Static display ranges are valid only for base_commit 22f3665e5218 and may drift as main changes; they must not be treated as current-main coordinates.",
+      "follow_up": "Refresh the artifact through the read-only exporter before using line ranges for refactor execution."
     },
     {
       "code": "call_edges_curated",

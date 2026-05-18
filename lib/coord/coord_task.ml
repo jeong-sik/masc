@@ -130,6 +130,30 @@ let transition_task_r
             | Masc_domain.Approve_verification | Masc_domain.Reject_verification
             | Masc_domain.Submit_pr_evidence ), _ -> Ok ()
         in
+        let* () =
+          (match action, task.task_status with
+          | Masc_domain.Claim, Masc_domain.Todo ->
+            (match
+               active_ownership_conflict_for_claim
+                 config
+                 ~agent_name
+                 ~requested_task_id:task_id
+                 backlog
+             with
+             | None -> Ok ()
+             | Some msg ->
+               Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState msg)))
+          | ( Masc_domain.Claim
+            | Masc_domain.Start
+            | Masc_domain.Done_action
+            | Masc_domain.Cancel
+            | Masc_domain.Release
+            | Masc_domain.Submit_for_verification
+            | Masc_domain.Submit_pr_evidence
+            | Masc_domain.Approve_verification
+            | Masc_domain.Reject_verification ), _ -> Ok ())
+          [@warning "-4"]
+        in
         let now = now_iso () in
         let now_ts = Time_compat.now () in
         let action_s = Masc_domain.task_action_to_string action in

@@ -24,6 +24,20 @@ val clear_stale_worktree_binding : Masc_domain.task -> Masc_domain.task
 (** Clears per-claim worktree metadata before a new owner claims a task or a
     released task returns to [Todo]. *)
 
+val active_owned_task_ids_for_agent :
+  config -> agent_name:string -> Masc_domain.backlog -> string list
+(** Active [Claimed] or [InProgress] tasks owned by [agent_name], using the
+    same canonical keeper/agent identity comparison as task transitions. *)
+
+val active_ownership_conflict_for_claim :
+  config ->
+  agent_name:string ->
+  requested_task_id:string ->
+  Masc_domain.backlog ->
+  string option
+(** Returns an operator-facing error when [agent_name] already owns a
+    different active task and tries to claim [requested_task_id]. *)
+
 (** {1 Task claiming} *)
 
 val claim_task :

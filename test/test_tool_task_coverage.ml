@@ -1073,6 +1073,49 @@ let () = test "handle_claim_sets_planning_current_task" (fun () ->
   assert (Planning_eio.get_current_task ctx.config = Some "task-001")
 )
 
+let () = test "handle_claim_rejects_second_active_owned_task" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ =
+    Tool_task.handle_add_task
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      (`Assoc [ ("title", `String "First active task") ])
+  in
+  let _ =
+    Tool_task.handle_add_task
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      (`Assoc [ ("title", `String "Second active task") ])
+  in
+  let first =
+    Tool_task.handle_claim
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      (`Assoc [ ("task_id", `String "task-001") ])
+  in
+  if not first.Tool_result.success then failwith first.Tool_result.legacy_message;
+  let second =
+    Tool_task.handle_claim
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      (`Assoc [ ("task_id", `String "task-002") ])
+  in
+  assert (not second.Tool_result.success);
+  assert (str_contains second.Tool_result.legacy_message "already owns active task(s)");
+  let task_002 =
+    Coord.get_tasks_raw ctx.config
+    |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id "task-002")
+  in
+  match task_002 with
+  | Some { task_status = Masc_domain.Todo; _ } -> ()
+  | Some _ -> failwith "task-002 should remain todo"
+  | None -> failwith "task-002 missing"
+)
+
 let () = test "handle_claim_blocks_required_tools_without_server_surface" (fun () ->
   let ctx = make_test_ctx () in
   add_task_requiring_tools ctx ~title:"Needs bash" [ "keeper_bash" ];

@@ -529,6 +529,58 @@ let test_claim_next_runs_post_provision_hook () =
              !observed)))
 ;;
 
+let test_claim_next_preserves_existing_alias_owned_task () =
+  with_room (fun config ->
+    let _ =
+      Coord.join
+        config
+        ~agent_name:"keeper-coder-agent"
+        ~capabilities:[ "keeper"; "code" ]
+        ()
+    in
+    let _ =
+      Coord.add_task
+        config
+        ~title:"Already owned"
+        ~priority:1
+        ~description:"desc"
+    in
+    let _ =
+      Coord.add_task
+        config
+        ~title:"Still todo"
+        ~priority:1
+        ~description:"desc"
+    in
+    (match
+       Coord.claim_task_r
+         config
+         ~agent_name:"keeper-coder-agent"
+         ~task_id:"task-001"
+         ()
+     with
+     | Ok _ -> ()
+     | Error err ->
+       fail (Masc_domain.masc_error_to_string err));
+    (match Coord.claim_next_r config ~agent_name:"keeper-coder" () with
+     | Coord.Claim_next_claimed { task_id; message; _ } ->
+       check string "returns existing active task" "task-001" task_id;
+       check bool "message says already holds" true
+         (contains_substring message "already holds")
+     | Coord.Claim_next_no_unclaimed ->
+       fail "expected existing claim, got no_unclaimed"
+     | Coord.Claim_next_no_eligible { excluded_count } ->
+       fail
+         (Printf.sprintf
+            "expected existing claim, got no_eligible excluded=%d"
+            excluded_count)
+     | Coord.Claim_next_error err ->
+       fail (Printf.sprintf "claim_next failed: %s" err));
+    match task_by_title config "Still todo" with
+    | { Masc_domain.task_status = Masc_domain.Todo; _ } -> ()
+    | _ -> fail "alias claim_next must not claim a second active task")
+;;
+
 let test_stale_current_task_id_is_cleared_from_backlog () =
   with_room (fun config ->
     let task_id =
@@ -972,10 +1024,14 @@ let test_claim_does_not_cross_goal_when_all_scoped_tasks_unavailable () =
         ~description:"terminal"
     in
     let done_task = task_by_title config "Scoped already done" in
-    ignore (Coord.claim_task config ~agent_name:"other-agent" ~task_id:done_task.id);
+    ignore
+      (Coord.claim_task
+         config
+         ~agent_name:"other-done-agent"
+         ~task_id:done_task.id);
     transition_task_exn
       config
-      ~agent_name:"other-agent"
+      ~agent_name:"other-done-agent"
       ~task_id:done_task.id
       ~action:Masc_domain.Done_action
       ~notes:"done"
@@ -2067,6 +2123,10 @@ let () =
             "claim-next runs post-provision hook"
             `Quick
             test_claim_next_runs_post_provision_hook
+        ; test_case
+            "claim-next preserves existing alias-owned task"
+            `Quick
+            test_claim_next_preserves_existing_alias_owned_task
         ; test_case
             "stale current_task_id clears from backlog"
             `Quick

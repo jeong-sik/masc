@@ -1,0 +1,610 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>masc-mcp Godfile Decomposition Build Plan - 2026-05-18</title>
+  <style>
+    :root {
+      --bg: #f6f7f7;
+      --surface: #ffffff;
+      --ink: #172026;
+      --muted: #5f6b75;
+      --line: #d9dee2;
+      --blue: #1d5d8f;
+      --green: #1e7a52;
+      --amber: #a85e00;
+      --red: #b42318;
+      --violet: #6143a6;
+      --code: #eef1f3;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
+      line-height: 1.55;
+    }
+
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--line);
+      padding: 38px 32px 26px;
+    }
+
+    main {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 26px 24px 64px;
+    }
+
+    h1, h2, h3 {
+      margin: 0;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    h1 { font-size: 34px; }
+    h2 { margin-top: 34px; font-size: 23px; }
+    h3 { margin-top: 18px; font-size: 17px; }
+
+    p { margin: 10px 0; }
+
+    a {
+      color: var(--blue);
+      text-decoration: none;
+    }
+
+    a:hover { text-decoration: underline; }
+
+    code {
+      padding: 2px 5px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: var(--code);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.92em;
+    }
+
+    .lede {
+      max-width: 920px;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .meta {
+      margin-top: 12px;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+    }
+
+    .grid {
+      display: grid;
+      gap: 12px;
+    }
+
+    .snapshot {
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      margin-top: 18px;
+    }
+
+    .two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+    .tile, .panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+    }
+
+    .tile { padding: 15px; }
+    .panel { margin-top: 14px; padding: 18px; }
+
+    .tile strong {
+      display: block;
+      font-size: 28px;
+      line-height: 1.1;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .tile span {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .tag {
+      display: inline-block;
+      margin: 2px 5px 2px 0;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: #e9ecef;
+      color: #27333b;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .tag.red { background: #f9dddd; color: var(--red); }
+    .tag.amber { background: #f8ead6; color: var(--amber); }
+    .tag.green { background: #ddf2e7; color: var(--green); }
+    .tag.blue { background: #dcecf8; color: var(--blue); }
+    .tag.violet { background: #e8e1f7; color: var(--violet); }
+
+    table {
+      width: 100%;
+      margin-top: 12px;
+      border-collapse: collapse;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--surface);
+      font-size: 13px;
+    }
+
+    th, td {
+      padding: 9px 11px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #edf0f2;
+      color: #3c4750;
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+
+    tr:last-child td { border-bottom: 0; }
+
+    .num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
+    .rank-p0 { color: var(--red); font-weight: 700; }
+    .rank-p1 { color: var(--amber); font-weight: 700; }
+    .rank-p2 { color: var(--violet); font-weight: 700; }
+    .rank-p3 { color: var(--blue); font-weight: 700; }
+    .rank-p4 { color: var(--green); font-weight: 700; }
+
+    .lane {
+      border-left: 4px solid var(--blue);
+      padding-left: 14px;
+    }
+
+    .lane.metrics { border-left-color: var(--red); }
+    .lane.keeper { border-left-color: var(--amber); }
+    .lane.server { border-left-color: var(--blue); }
+    .lane.cascade { border-left-color: var(--violet); }
+    .lane.coord { border-left-color: var(--green); }
+
+    .callout {
+      border: 1px solid #f2c79a;
+      border-left: 4px solid var(--amber);
+      border-radius: 8px;
+      background: #fff8ef;
+      padding: 14px 16px;
+    }
+
+    .ok {
+      border-color: #b8dfcc;
+      border-left-color: var(--green);
+      background: #f0fbf5;
+    }
+
+    .danger {
+      border-color: #f1b9b3;
+      border-left-color: var(--red);
+      background: #fff4f3;
+    }
+
+    ol, ul { margin: 10px 0 0 20px; padding: 0; }
+    li { margin: 6px 0; }
+
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+    }
+
+    pre {
+      margin: 12px 0 0;
+      padding: 13px 14px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #101820;
+      color: #e8eef2;
+      font-size: 12px;
+    }
+
+    @media (max-width: 920px) {
+      .snapshot, .two, .three { grid-template-columns: 1fr; }
+      header { padding: 28px 20px 20px; }
+      main { padding: 20px 14px 44px; }
+      h1 { font-size: 28px; }
+      table { display: block; overflow-x: auto; white-space: nowrap; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Godfile Decomposition Build Plan</h1>
+    <p class="lede">
+      현재 <code>masc-mcp</code>의 1000+ LOC OCaml 파일 전체를 병렬 lane으로 분류하고,
+      단순 파일 쪼개기가 아니라 Dune 라이브러리 DAG를 만드는 순서로 정리한 실행 계획.
+    </p>
+    <div class="meta">
+      기준: main @ 0251536624 · 확인일시: 2026-05-18 KST · 대상: <code>lib/**/*.ml</code> 중 1000+ LOC, test 제외
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <div class="grid snapshot">
+        <div class="tile"><strong>75</strong><span>1000+ LOC .ml files</span></div>
+        <div class="tile"><strong>114,203</strong><span>1000+ LOC total .ml lines</span></div>
+        <div class="tile"><strong>9</strong><span>2000+ LOC files</span></div>
+        <div class="tile"><strong>2</strong><span>3000+ LOC files</span></div>
+        <div class="tile"><strong>3350</strong><span>current absolute cap</span></div>
+      </div>
+      <div class="panel">
+        <span class="tag green">gate clean</span>
+        <span class="tag amber">flat namespace still central</span>
+        <span class="tag red">205-module SCC</span>
+        <span class="tag blue">74/75 have .mli</span>
+        <span class="tag violet">62 extracted sub-libraries exist</span>
+        <p>
+          <code>scripts/lint/godfile-size-regression.sh</code>는 현재 통과한다. 그러나
+          <code>lib/dune</code>가 여전히 <code>(include_subdirs unqualified)</code>로 거대한
+          <code>masc_mcp</code> flat library를 만들기 때문에, 같은 라이브러리 안의
+          <code>include</code> 기반 split은 빌드 경계를 거의 개선하지 못한다.
+        </p>
+      </div>
+    </section>
+
+    <section>
+      <h2>Top 10 Priority</h2>
+      <table>
+        <thead>
+          <tr><th>Rank</th><th>LOC</th><th>File</th><th>First move</th><th>Why first</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="rank-p0">P0</td><td class="num">3082</td>
+            <td><a href="../../lib/prometheus.ml">lib/prometheus.ml</a></td>
+            <td><code>Prometheus_store</code>, <code>Prometheus_registry</code>, <code>Prometheus_render</code>, domain-owned metric names</td>
+            <td>Most-imported hub. Stop metric-name growth and module-init side effects before other lanes add counters.</td>
+          </tr>
+          <tr>
+            <td class="rank-p0">P0</td><td class="num">3022</td>
+            <td><a href="../../lib/server/server_dashboard_http_keeper_api.ml">lib/server/server_dashboard_http_keeper_api.ml</a></td>
+            <td><code>*_runtime_manifest_scan</code>, <code>*_runtime_lens</code>, checkpoints/actions/get-routes</td>
+            <td>Large HTTP keeper API with coherent internal seams; current public facade can stay stable.</td>
+          </tr>
+          <tr>
+            <td class="rank-p1">P1</td><td class="num">2890</td>
+            <td><a href="../../lib/keeper/keeper_unified_turn.ml">lib/keeper/keeper_unified_turn.ml</a></td>
+            <td>Facade shrink after registry/supervisor/agent-run lanes</td>
+            <td>Largest keeper coordinator, but too coupled to split first without creating churn.</td>
+          </tr>
+          <tr>
+            <td class="rank-p1">P1</td><td class="num">2496</td>
+            <td><a href="../../lib/keeper/keeper_hooks_oas.ml">lib/keeper/keeper_hooks_oas.ml</a></td>
+            <td>JSON extraction, PR action metrics, cost ledger, idle policy, factory</td>
+            <td>Best keeper starting point: already has <code>Keeper_hooks_oas_types</code> seam.</td>
+          </tr>
+          <tr>
+            <td class="rank-p1">P1</td><td class="num">2490</td>
+            <td><a href="../../lib/keeper/keeper_supervisor.ml">lib/keeper/keeper_supervisor.ml</a></td>
+            <td>Launch, reconcile, self-preservation, sweep, liveness recovery</td>
+            <td>High operational risk, but clean phase seams and clear test targets.</td>
+          </tr>
+          <tr>
+            <td class="rank-p1">P1</td><td class="num">2192</td>
+            <td><a href="../../lib/keeper/keeper_registry.ml">lib/keeper/keeper_registry.ml</a></td>
+            <td>Pure model types, store, lifecycle dispatch, tool usage</td>
+            <td>Key keeper hub. Registry model split unlocks later sub-library boundaries.</td>
+          </tr>
+          <tr>
+            <td class="rank-p2">P2</td><td class="num">2191</td>
+            <td><a href="../../lib/keeper/keeper_agent_run.ml">lib/keeper/keeper_agent_run.ml</a></td>
+            <td>Dispatch, tool observation, contract gate, finalize, receipt commit</td>
+            <td>Turn execution pipeline can be segmented behind current <code>run_turn</code>.</td>
+          </tr>
+          <tr>
+            <td class="rank-p2">P2</td><td class="num">2187</td>
+            <td><a href="../../lib/dashboard/dashboard_http_keeper.ml">lib/dashboard/dashboard_http_keeper.ml</a></td>
+            <td>Overview rows, trust/config projections, BDI, cost, K2 feeds</td>
+            <td>Dashboard projection weight is separable if compact/full behavior is pinned first.</td>
+          </tr>
+          <tr>
+            <td class="rank-p2">P2</td><td class="num">2007</td>
+            <td><a href="../../lib/server/server_runtime_bootstrap.ml">lib/server/server_runtime_bootstrap.ml</a></td>
+            <td>Config-root, credentials/token sync, migrations, lazy startup, transports</td>
+            <td>Build and boot clarity win, but order-sensitive; needs guard tests first.</td>
+          </tr>
+          <tr>
+            <td class="rank-p3">P3</td><td class="num">1999</td>
+            <td><a href="../../lib/worker_dev_tools.ml">lib/worker_dev_tools.ml</a></td>
+            <td>Path, shell, gh, and destructive-operation gates</td>
+            <td>Almost 2000 lines in a safety-critical tool surface; gate splits reduce review and build blast radius quickly.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Current 1000+ Surface</h2>
+      <table>
+        <thead>
+          <tr><th>Lane</th><th>Files</th><th>LOC</th><th>Primary targets</th><th>Decomposition stance</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Keeper</td><td class="num">29</td><td class="num">45,899</td><td><code>keeper_unified_turn</code>, <code>keeper_hooks_oas</code>, <code>keeper_supervisor</code>, <code>keeper_registry</code></td><td>Split internal seams first; promote only leaf closures after registry/type cycles are cut.</td></tr>
+          <tr><td>Root tools/metrics</td><td class="num">20</td><td class="num">29,566</td><td><code>prometheus</code>, <code>model_inference_metrics</code>, <code>worker_dev_tools</code>, <code>tool_board</code>, <code>tool_keeper</code></td><td>Facade-compatible private modules, then low-dependency sub-libraries for metrics/schema/tool gates.</td></tr>
+          <tr><td>Server</td><td class="num">9</td><td class="num">15,372</td><td><code>server_dashboard_http_keeper_api</code>, <code>server_runtime_bootstrap</code>, <code>server_dashboard_http_core</code></td><td>Handler seams first; route parity after handlers stabilize.</td></tr>
+          <tr><td>Cascade</td><td class="num">6</td><td class="num">8,431</td><td><code>cascade_transport</code>, <code>cascade_catalog_runtime</code>, <code>cascade_config</code></td><td>Cut <code>Cascade_runner</code> ownership leak; extract refs/names before transport.</td></tr>
+          <tr><td>Dashboard</td><td class="num">3</td><td class="num">5,093</td><td><code>dashboard_http_keeper</code>, <code>dashboard_goals_types</code>, <code>dashboard_safe_autonomy</code></td><td>Projection helpers and JSON builders; preserve compact mode.</td></tr>
+          <tr><td>Coord</td><td class="num">3</td><td class="num">3,766</td><td><code>coord_worktree</code>, <code>coord_task</code>, <code>coord_task_schedule</code></td><td>Already sub-library; narrow public API and split dangerous filesystem/git helpers.</td></tr>
+          <tr><td>Config</td><td class="num">2</td><td class="num">2,220</td><td><code>env_config_snapshot</code>, <code>env_config_keeper</code></td><td>Keep in <code>masc_mcp.config</code>; extract typed buckets, not root flat modules.</td></tr>
+          <tr><td>Operator / voice / backend</td><td class="num">3</td><td class="num">3,856</td><td><code>operator_control_snapshot</code>, <code>voice_bridge</code>, <code>backend</code></td><td>Lower priority; split after higher fan-in surfaces stop moving.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Modularization Rules</h2>
+      <div class="grid two">
+        <div class="panel ok">
+          <h3>Do</h3>
+          <ul>
+            <li>Use `.mli` as the contract first; keep facade signatures stable for each PR.</li>
+            <li>For existing public module names, split inside the same library first and add helpers to <code>private_modules</code>.</li>
+            <li>Promote only closed leaves or closed clusters to a Dune library with <code>(include_subdirs no)</code>.</li>
+            <li>Use <code>(wrapped false)</code> only for legacy no-caller-churn migration with domain-prefixed filenames.</li>
+            <li>Use <code>(wrapped true)</code> for new isolated APIs where caller rewrite is intentionally budgeted.</li>
+            <li>Keep tests compatible with <code>test/deps/dune</code> re-exports, but make production deps explicit.</li>
+          </ul>
+        </div>
+        <div class="panel danger">
+          <h3>Do Not</h3>
+          <ul>
+            <li>Do not split <code>foo.ml</code> into <code>foo_part1.ml</code> under the same flat namespace and call it done.</li>
+            <li>Do not create sub-libraries that depend back on <code>masc_mcp</code>; that launders the cycle.</li>
+            <li>Do not add generic names like <code>Types</code>, <code>Utils</code>, <code>Config</code>, <code>Error</code> to <code>(wrapped false)</code> libraries.</li>
+            <li>Do not bulk-promote <code>lib/server</code>, <code>lib/dashboard</code>, or <code>lib/cascade</code> before refs/types/config leaves are extracted.</li>
+            <li>Do not mix bulk promotion with a global <code>(wrapped true) + -open</code> migration.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>Dune template for legacy leaf promotion</h3>
+        <pre><code>(include_subdirs no)
+
+(library
+ (name masc_mcp_keeper_hooks_oas)
+ (public_name masc_mcp.keeper_hooks_oas)
+ (wrapped false)
+ (modules
+  keeper_hooks_oas_types
+  keeper_hooks_oas_json_extract
+  keeper_hooks_oas_pr_action_metrics)
+ (libraries
+  yojson
+  masc_core
+  masc_log))</code></pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>Parallel Analysis Lanes</h2>
+      <div class="grid three">
+        <div class="panel lane metrics">
+          <h3>A. Metrics / Telemetry</h3>
+          <p><code>prometheus</code>, <code>model_inference_metrics</code>, <code>cascade_metrics</code>, <code>telemetry_unified</code>.</p>
+          <p>Goal: metric name ownership, store/registry/render split, reader/aggregate/json split.</p>
+        </div>
+        <div class="panel lane keeper">
+          <h3>B. Keeper Runtime</h3>
+          <p>Hooks, registry, supervisor, agent-run, unified-turn.</p>
+          <p>Goal: registry model first, coordinator facades last, no premature sub-library cycles.</p>
+        </div>
+        <div class="panel lane server">
+          <h3>C. Server / Dashboard</h3>
+          <p>Keeper API, dashboard core, runtime bootstrap, projections, routes.</p>
+          <p>Goal: handler modules with stable route contracts, then H1/H2 parity cleanup.</p>
+        </div>
+        <div class="panel lane cascade">
+          <h3>D. Cascade / Tools</h3>
+          <p>Transport, catalog, worker gates, board/keeper tools, shard schema.</p>
+          <p>Goal: cut ownership leaks, type schema ownership, CLI/runtime MCP split.</p>
+        </div>
+        <div class="panel lane coord">
+          <h3>E. Coord / Worktree</h3>
+          <p>Worktree policy, sandbox clone repair, lifecycle, task transitions.</p>
+          <p>Goal: narrow broad includes and contain destructive filesystem/git helpers.</p>
+        </div>
+        <div class="panel lane">
+          <h3>F. Long Tail</h3>
+          <p>Config, operator, voice, backend and remaining 1000+ files.</p>
+          <p>Goal: opportunistic splits only after high-fan-in surfaces stop churning.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Sequential PR Operation</h2>
+      <table>
+        <thead>
+          <tr><th>Step</th><th>PR slice</th><th>Files first touched</th><th>Exit criteria</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="rank-p0">00</td><td>Freeze measurement and guardrails</td><td><code>docs/audit/*</code>, optional inventory script</td><td>1000+ LOC list, fan-in/out, SCC, and godfile gate numbers are reproducible.</td></tr>
+          <tr><td class="rank-p0">01</td><td>Add behavior guard tests for high-risk split points</td><td>dashboard keeper routes, runtime manifest, registry lifecycle, Prometheus output</td><td>Focused tests fail on contract drift before refactors begin.</td></tr>
+          <tr><td class="rank-p0">02</td><td>Prometheus store/registry/render split</td><td><code>prometheus.ml</code>, <code>prometheus_store.ml</code>, <code>prometheus_registry.ml</code>, <code>prometheus_render.ml</code></td><td><code>Prometheus</code> facade unchanged; output text byte-equivalent.</td></tr>
+          <tr><td class="rank-p0">03</td><td>Metric-name ownership split</td><td><code>prometheus_metric_names</code>, <code>cascade_metrics</code>, keeper metric constants</td><td>New metric names land in domain modules; no duplicate cascade constants.</td></tr>
+          <tr><td class="rank-p1">04</td><td>Model inference telemetry split</td><td><code>model_inference_metrics.ml</code></td><td><code>Model_inference_entry</code>, reader, aggregate, JSON render separated behind current API.</td></tr>
+          <tr><td class="rank-p1">05</td><td>Worker command gate split</td><td><code>worker_dev_tools.ml</code></td><td>Path/shell/gh/destructive-op gates are individual modules; facade dispatch unchanged.</td></tr>
+          <tr><td class="rank-p1">06</td><td>Coord worktree safety split</td><td><code>coord_worktree.ml</code>, <code>coord_task*.ml</code></td><td>Policy, repo discovery, sandbox clone, lifecycle, task receipts have narrow interfaces.</td></tr>
+          <tr><td class="rank-p1">07</td><td>Cascade ownership leak cleanup</td><td><code>cascade_runner.mli</code>, <code>cascade_transport.ml</code></td><td>Runner no longer re-exports transport internals; callers use owning module.</td></tr>
+          <tr><td class="rank-p2">08</td><td>Cascade catalog split</td><td><code>cascade_catalog_runtime.ml</code></td><td>Cache, validate, probe, resolve, JSON modules split with stable catalog API.</td></tr>
+          <tr><td class="rank-p2">09</td><td>Cascade transport split</td><td><code>cascade_transport.ml</code></td><td>Runtime MCP policy, CLI config, JSON-stream CLI, tool lane separated.</td></tr>
+          <tr><td class="rank-p2">10</td><td>Tool board / keeper facade split</td><td><code>tool_board.ml</code>, <code>tool_keeper.ml</code></td><td>Format/cache/handlers/registry/dispatch split; tool schema output unchanged.</td></tr>
+          <tr><td class="rank-p2">11</td><td>Tool shard schema ownership</td><td><code>tool_shard_types.ml</code></td><td>Manual enum mirrors moved to schema owner or generated SSOT; no duplicate strings.</td></tr>
+          <tr><td class="rank-p1">12</td><td>Keeper hooks split</td><td><code>keeper_hooks_oas.ml</code></td><td>JSON extract, PR metrics, cost ledger, idle policy, factory modules; hook factory unchanged.</td></tr>
+          <tr><td class="rank-p1">13</td><td>Keeper registry pure model split</td><td><code>keeper_registry.ml</code>, <code>keeper_registry_types.ml</code></td><td>Failure/phase/decision/cascade/compaction models extracted without store mutation changes.</td></tr>
+          <tr><td class="rank-p1">14</td><td>Keeper registry mutation split</td><td><code>keeper_registry.ml</code></td><td>Store, lifecycle dispatch, admission, turn observation, tool usage separated; CAS owner singular.</td></tr>
+          <tr><td class="rank-p1">15</td><td>Keeper supervisor split</td><td><code>keeper_supervisor.ml</code></td><td>Launch/reconcile/self-preservation/sweep/liveness recovery modules; restart order preserved.</td></tr>
+          <tr><td class="rank-p2">16</td><td>Keeper agent-run split</td><td><code>keeper_agent_run.ml</code></td><td>Dispatch, tool observation, contract gate, finalize, receipt commit, memory post-turn split.</td></tr>
+          <tr><td class="rank-p2">17</td><td>Keeper unified-turn facade shrink</td><td><code>keeper_unified_turn.ml</code></td><td>Phase gate, cascade selection, event bus, retry loop, outcome, meta commit modules; source-sentinel tests updated.</td></tr>
+          <tr><td class="rank-p0">18</td><td>Server keeper runtime lens split</td><td><code>server_dashboard_http_keeper_api.ml</code></td><td>Runtime manifest scan and runtime lens modules; public <code>Keeper_api</code> entrypoints unchanged.</td></tr>
+          <tr><td class="rank-p1">19</td><td>Server keeper actions/routes split</td><td><code>server_dashboard_http_keeper_api.ml</code></td><td>Checkpoints, config action, lifecycle action, directive, GET subroutes separated.</td></tr>
+          <tr><td class="rank-p1">20</td><td>Dashboard core surface split</td><td><code>server_dashboard_http_core.ml</code></td><td>Operator, mission, shell, projection trace modules; cache keys and timeout fallback identical.</td></tr>
+          <tr><td class="rank-p2">21</td><td>Dashboard keeper projection split</td><td><code>dashboard_http_keeper.ml</code></td><td>Overview, trust, config, BDI, cost, K2 feeds; compact mode remains cheap.</td></tr>
+          <tr><td class="rank-p2">22</td><td>Dashboard goals helper split</td><td><code>dashboard_goals_types.ml</code></td><td>Accessors, attainment, health badges, timeline, builders split behind same JSON contract.</td></tr>
+          <tr><td class="rank-p2">23</td><td>Runtime bootstrap phase split</td><td><code>server_runtime_bootstrap.ml</code></td><td>Config-root, auth/token, migrations, lazy startup, transports are ordered explicitly.</td></tr>
+          <tr><td class="rank-p3">24</td><td>Route parity cleanup</td><td><code>server_routes_http_routes_dashboard.ml</code>, <code>server_h2_gateway.ml</code></td><td>H1/H2 routes share handler modules; no duplicate route behavior.</td></tr>
+          <tr><td class="rank-p3">25</td><td>First Dune promotions</td><td>metrics names, keeper hook pure helpers, cascade refs, tool schema helpers</td><td>Each promoted lib has no dependency back to <code>masc_mcp</code>; <code>test/deps/dune</code> re-export added.</td></tr>
+          <tr><td class="rank-p4">26</td><td>Directory shell promotions</td><td><code>lib/keeper/dune</code>, later server/dashboard/cascade if closure permits</td><td>Only after collision audit and cycle gate pass; no broad caller churn.</td></tr>
+          <tr><td class="rank-p4">27</td><td>Ratchet update</td><td><code>scripts/ocaml-structure-baseline.json</code>, godfile inventory</td><td>Caps and baselines only move downward or with explicit RFC reference.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Verification Matrix</h2>
+      <table>
+        <thead>
+          <tr><th>Lane</th><th>Focused checks</th><th>Always run</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Metrics</td><td><code>test_prometheus*</code>, text export snapshots, metric-name duplicate grep</td><td><code>scripts/dune-local.sh build lib/masc_mcp.cmxa</code></td></tr>
+          <tr><td>Keeper</td><td><code>test_keeper_registry</code>, <code>test_keeper_state_machine*</code>, <code>test_keeper_supervisor</code>, runtime manifest/receipt tests</td><td><code>scripts/dune-local.sh build test/test_rfc_0086_keeper_namespace_invariant.exe</code></td></tr>
+          <tr><td>Server/Dashboard</td><td><code>test_dashboard_http_core</code>, <code>test_dashboard_keeper_routes</code>, <code>test_dashboard_goals</code>, bootstrap tests</td><td><code>scripts/dune-local.sh build @lib/check</code></td></tr>
+          <tr><td>Cascade/Tools</td><td>Cascade catalog/transport tests, worker gate tests, tool schema snapshots</td><td><code>bash scripts/lint/godfile-size-regression.sh</code></td></tr>
+          <tr><td>Coord</td><td>worktree policy/lifecycle/task transition tests</td><td><code>scripts/ocaml-structure-ratchet.sh --print</code></td></tr>
+        </tbody>
+      </table>
+      <div class="panel">
+        <h3>Focused command set</h3>
+        <pre><code>scripts/dune-local.sh build lib/masc_mcp.cmxa
+scripts/dune-local.sh build @lib/check
+scripts/dune-local.sh build test/test_rfc_0086_keeper_namespace_invariant.exe
+./_build/default/test/test_rfc_0086_keeper_namespace_invariant.exe
+bash scripts/lint/godfile-size-regression.sh
+scripts/ocaml-structure-ratchet.sh --print
+git diff --check
+ocamlformat --check &lt;touched .ml/.mli files&gt;</code></pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>Full 1000+ Inventory</h2>
+      <table>
+        <thead>
+          <tr><th>LOC</th><th>File</th><th>Lane</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="num">3082</td><td><a href="../../lib/prometheus.ml">lib/prometheus.ml</a></td><td>metrics</td></tr>
+          <tr><td class="num">3022</td><td><a href="../../lib/server/server_dashboard_http_keeper_api.ml">lib/server/server_dashboard_http_keeper_api.ml</a></td><td>server</td></tr>
+          <tr><td class="num">2890</td><td><a href="../../lib/keeper/keeper_unified_turn.ml">lib/keeper/keeper_unified_turn.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">2496</td><td><a href="../../lib/keeper/keeper_hooks_oas.ml">lib/keeper/keeper_hooks_oas.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">2490</td><td><a href="../../lib/keeper/keeper_supervisor.ml">lib/keeper/keeper_supervisor.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">2192</td><td><a href="../../lib/keeper/keeper_registry.ml">lib/keeper/keeper_registry.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">2191</td><td><a href="../../lib/keeper/keeper_agent_run.ml">lib/keeper/keeper_agent_run.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">2187</td><td><a href="../../lib/dashboard/dashboard_http_keeper.ml">lib/dashboard/dashboard_http_keeper.ml</a></td><td>dashboard</td></tr>
+          <tr><td class="num">2007</td><td><a href="../../lib/server/server_runtime_bootstrap.ml">lib/server/server_runtime_bootstrap.ml</a></td><td>server</td></tr>
+          <tr><td class="num">1999</td><td><a href="../../lib/worker_dev_tools.ml">lib/worker_dev_tools.ml</a></td><td>tools</td></tr>
+          <tr><td class="num">1990</td><td><a href="../../lib/keeper/keeper_types_profile.ml">lib/keeper/keeper_types_profile.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">1979</td><td><a href="../../lib/server/server_dashboard_http_core.ml">lib/server/server_dashboard_http_core.ml</a></td><td>server</td></tr>
+          <tr><td class="num">1958</td><td><a href="../../lib/model_inference_metrics.ml">lib/model_inference_metrics.ml</a></td><td>metrics</td></tr>
+          <tr><td class="num">1944</td><td><a href="../../lib/keeper/keeper_run_tools.ml">lib/keeper/keeper_run_tools.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">1915</td><td><a href="../../lib/keeper/keeper_heartbeat_loop.ml">lib/keeper/keeper_heartbeat_loop.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">1904</td><td><a href="../../lib/cascade/cascade_transport.ml">lib/cascade/cascade_transport.ml</a></td><td>cascade</td></tr>
+          <tr><td class="num">1869</td><td><a href="../../lib/server/server_routes_http_routes_dashboard.ml">lib/server/server_routes_http_routes_dashboard.ml</a></td><td>server</td></tr>
+          <tr><td class="num">1868</td><td><a href="../../lib/keeper/keeper_unified_metrics.ml">lib/keeper/keeper_unified_metrics.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">1856</td><td><a href="../../lib/tool_board.ml">lib/tool_board.ml</a></td><td>tools</td></tr>
+          <tr><td class="num">1821</td><td><a href="../../lib/tool_keeper.ml">lib/tool_keeper.ml</a></td><td>tools</td></tr>
+          <tr><td class="num">1808</td><td><a href="../../lib/keeper/keeper_context_core.ml">lib/keeper/keeper_context_core.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">1768</td><td><a href="../../lib/operator/operator_control_snapshot.ml">lib/operator/operator_control_snapshot.ml</a></td><td>operator</td></tr>
+          <tr><td class="num">1750</td><td><a href="../../lib/tool_shard_types.ml">lib/tool_shard_types.ml</a></td><td>tools</td></tr>
+          <tr><td class="num">1687</td><td><a href="../../lib/board_core.ml">lib/board_core.ml</a></td><td>board</td></tr>
+          <tr><td class="num">1674</td><td><a href="../../lib/cascade/cascade_catalog_runtime.ml">lib/cascade/cascade_catalog_runtime.ml</a></td><td>cascade</td></tr>
+          <tr><td class="num">1651</td><td><a href="../../lib/auth.ml">lib/auth.ml</a></td><td>auth</td></tr>
+          <tr><td class="num">1636</td><td><a href="../../lib/server/server_dashboard_http.ml">lib/server/server_dashboard_http.ml</a></td><td>server</td></tr>
+          <tr><td class="num">1608</td><td><a href="../../lib/dashboard/dashboard_goals_types.ml">lib/dashboard/dashboard_goals_types.ml</a></td><td>dashboard</td></tr>
+          <tr><td class="num">1589</td><td><a href="../../lib/keeper/keeper_world_observation.ml">lib/keeper/keeper_world_observation.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">1551</td><td><a href="../../lib/coord/coord_worktree.ml">lib/coord/coord_worktree.ml</a></td><td>coord</td></tr>
+          <tr><td class="num">1496</td><td><a href="../../lib/tool_task.ml">lib/tool_task.ml</a></td><td>tools</td></tr>
+          <tr><td class="num">1482</td><td><a href="../../lib/cascade/cascade_config.ml">lib/cascade/cascade_config.ml</a></td><td>cascade</td></tr>
+          <tr><td class="num">1474</td><td><a href="../../lib/server/server_routes_http_routes_sidecar.ml">lib/server/server_routes_http_routes_sidecar.ml</a></td><td>server</td></tr>
+          <tr><td class="num">1470</td><td><a href="../../lib/keeper/keeper_approval_queue.ml">lib/keeper/keeper_approval_queue.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">1461</td><td><a href="../../lib/keeper/keeper_state_machine.ml">lib/keeper/keeper_state_machine.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">1450</td><td><a href="../../lib/keeper/keeper_shell_bash.ml">lib/keeper/keeper_shell_bash.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">1440</td><td><a href="../../lib/keeper/keeper_shell_ops.ml">lib/keeper/keeper_shell_ops.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">1418</td><td><a href="../../lib/keeper/keeper_runtime_trust_snapshot.ml">lib/keeper/keeper_runtime_trust_snapshot.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">1406</td><td><a href="../../lib/keeper/keeper_turn_driver.ml">lib/keeper/keeper_turn_driver.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">1395</td><td><a href="../../lib/dashboard_cascade.ml">lib/dashboard_cascade.ml</a></td><td>dashboard</td></tr>
+          <tr><td class="num">1380</td><td><a href="../../lib/keeper/keeper_shell_docker.ml">lib/keeper/keeper_shell_docker.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">1378</td><td><a href="../../lib/keeper/keeper_turn_slot.ml">lib/keeper/keeper_turn_slot.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">1298</td><td><a href="../../lib/dashboard/dashboard_safe_autonomy.ml">lib/dashboard/dashboard_safe_autonomy.ml</a></td><td>dashboard</td></tr>
+          <tr><td class="num">1247</td><td><a href="../../lib/keeper/keeper_sandbox_runtime.ml">lib/keeper/keeper_sandbox_runtime.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">1214</td><td><a href="../../lib/coord/coord_task.ml">lib/coord/coord_task.ml</a></td><td>coord</td></tr>
+          <tr><td class="num">1206</td><td><a href="../../lib/server/server_bootstrap_loops.ml">lib/server/server_bootstrap_loops.ml</a></td><td>server</td></tr>
+          <tr><td class="num">1204</td><td><a href="../../lib/keeper/keeper_memory_bank.ml">lib/keeper/keeper_memory_bank.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">1203</td><td><a href="../../lib/telemetry_unified.ml">lib/telemetry_unified.ml</a></td><td>metrics</td></tr>
+          <tr><td class="num">1187</td><td><a href="../../lib/cascade/cascade_event_bridge.ml">lib/cascade/cascade_event_bridge.ml</a></td><td>cascade</td></tr>
+          <tr><td class="num">1161</td><td><a href="../../lib/keeper/keeper_accountability.ml">lib/keeper/keeper_accountability.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">1152</td><td><a href="../../lib/board_votes.ml">lib/board_votes.ml</a></td><td>board</td></tr>
+          <tr><td class="num">1144</td><td><a href="../../lib/mcp_server_eio_execute.ml">lib/mcp_server_eio_execute.ml</a></td><td>mcp</td></tr>
+          <tr><td class="num">1139</td><td><a href="../../lib/keeper/keeper_registry_types.ml">lib/keeper/keeper_registry_types.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">1132</td><td><a href="../../lib/config/env_config_snapshot.ml">lib/config/env_config_snapshot.ml</a></td><td>config</td></tr>
+          <tr><td class="num">1128</td><td><a href="../../lib/keeper/keeper_execution_receipt.ml">lib/keeper/keeper_execution_receipt.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">1108</td><td><a href="../../lib/server/server_dashboard_http_runtime_info.ml">lib/server/server_dashboard_http_runtime_info.ml</a></td><td>server</td></tr>
+          <tr><td class="num">1099</td><td><a href="../../lib/keeper/keeper_status_detail.ml">lib/keeper/keeper_status_detail.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">1095</td><td><a href="../../lib/coord_goals.ml">lib/coord_goals.ml</a></td><td>coord</td></tr>
+          <tr><td class="num">1094</td><td><a href="../../lib/cascade/cascade_metrics.ml">lib/cascade/cascade_metrics.ml</a></td><td>cascade</td></tr>
+          <tr><td class="num">1090</td><td><a href="../../lib/cascade/cascade_health_tracker.ml">lib/cascade/cascade_health_tracker.ml</a></td><td>cascade</td></tr>
+          <tr><td class="num">1088</td><td><a href="../../lib/voice/voice_bridge.ml">lib/voice/voice_bridge.ml</a></td><td>voice</td></tr>
+          <tr><td class="num">1088</td><td><a href="../../lib/config/env_config_keeper.ml">lib/config/env_config_keeper.ml</a></td><td>config</td></tr>
+          <tr><td class="num">1081</td><td><a href="../../lib/keeper_tool_call_log.ml">lib/keeper_tool_call_log.ml</a></td><td>tools</td></tr>
+          <tr><td class="num">1075</td><td><a href="../../lib/tool_code_write.ml">lib/tool_code_write.ml</a></td><td>tools</td></tr>
+          <tr><td class="num">1075</td><td><a href="../../lib/mcp_server_eio_call_tool.ml">lib/mcp_server_eio_call_tool.ml</a></td><td>mcp</td></tr>
+          <tr><td class="num">1072</td><td><a href="../../lib/keeper/keeper_tools_oas.ml">lib/keeper/keeper_tools_oas.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">1071</td><td><a href="../../lib/server/server_h2_gateway.ml">lib/server/server_h2_gateway.ml</a></td><td>server</td></tr>
+          <tr><td class="num">1030</td><td><a href="../../lib/keeper/keeper_memory_policy.ml">lib/keeper/keeper_memory_policy.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">1022</td><td><a href="../../lib/tool_catalog.ml">lib/tool_catalog.ml</a></td><td>tools</td></tr>
+          <tr><td class="num">1020</td><td><a href="../../lib/keeper/keeper_turn_cascade_budget.ml">lib/keeper/keeper_turn_cascade_budget.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">1019</td><td><a href="../../lib/memory_oas_bridge.ml">lib/memory_oas_bridge.ml</a></td><td>memory</td></tr>
+          <tr><td class="num">1017</td><td><a href="../../lib/keeper/keeper_persona_authoring.ml">lib/keeper/keeper_persona_authoring.ml</a></td><td>keeper</td></tr>
+          <tr><td class="num">1005</td><td><a href="../../lib/sse.ml">lib/sse.ml</a></td><td>sse</td></tr>
+          <tr><td class="num">1001</td><td><a href="../../lib/coord/coord_task_schedule.ml">lib/coord/coord_task_schedule.ml</a></td><td>coord</td></tr>
+          <tr><td class="num">1000</td><td><a href="../../lib/backend/backend.ml">lib/backend/backend.ml</a></td><td>backend</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Evidence</h2>
+      <div class="panel">
+        <p>
+          [근거] 로컬 명령:
+          <code>find lib ... wc -l</code>,
+          <code>python3 scripts/analyze_lib_deps.py</code>,
+          <code>bash scripts/lint/godfile-size-regression.sh</code>,
+          <code>scripts/ocaml-structure-ratchet.sh --print</code>,
+          <code>git status --short</code>.
+          확인일시: 2026-05-18 KST. 신뢰도: High.
+        </p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

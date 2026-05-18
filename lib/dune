@@ -91,6 +91,7 @@
  dashboard_http_keeper_trust
  dashboard_http_keeper
  server_dashboard_http_keeper_api_checkpoints
+ server_dashboard_http_keeper_api_runtime_summaries
  server_dashboard_http_keeper_runtime_manifest_scan
  server_dashboard_http_keeper_runtime_lens_proof
  server_dashboard_http_keeper_runtime_lens_swimlane

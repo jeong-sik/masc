@@ -14,8 +14,8 @@ module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_alerting_path = Masc_mcp.Keeper_alerting_path
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_sandbox_runtime = Masc_mcp.Keeper_sandbox_runtime
-module Env_config_keeper = Env_config_keeper
 module Fd_accountant = Masc_mcp.Fd_accountant
+module Env_config_keeper = Env_config_keeper
 
 (* ── Helpers ─────────────────────────────────────────────────────── *)
 
@@ -71,18 +71,15 @@ let docker_spawn_in_flight () =
   let snapshot = Fd_accountant.fd_snapshot () in
   List.assoc Fd_accountant.Docker_spawn snapshot.per_kind
 
-let wait_until ~attempts predicate =
-  match Process_eio.get_clock () with
-  | Error msg -> Alcotest.fail msg
-  | Ok clock ->
-      let rec loop remaining =
-        if predicate () then true
-        else if remaining <= 0 then false
-        else (
-          Eio.Time.sleep clock 0.005;
-          loop (remaining - 1))
-      in
-      loop attempts
+let wait_until ~clock ~attempts predicate =
+  let rec loop remaining =
+    if predicate () then true
+    else if remaining <= 0 then false
+    else (
+      Eio.Time.sleep clock 0.001;
+      loop (remaining - 1))
+  in
+  loop attempts
 
 let rec ensure_dir path =
   if path = "" || path = "." || path = "/" then ()
@@ -325,20 +322,21 @@ exit 0\n"
 
 let fake_docker_slow_run_script =
   "#!/bin/sh\n\
+log_file=${KEEPER_DOCKER_LOG:-}\n\
 if [ \"$1\" = \"info\" ]; then\n\
   printf '[]\\n'\n\
   exit 0\n\
 fi\n\
-if [ \"$1\" != \"run\" ]; then\n\
-  printf 'unexpected docker invocation\\n' >&2\n\
-  exit 2\n\
+if [ \"$1\" = \"run\" ]; then\n\
+  if [ -n \"$log_file\" ]; then\n\
+    printf 'run-started\\n' >> \"$log_file\"\n\
+  fi\n\
+  sleep 0.2\n\
+  printf 'slow ok\\n'\n\
+  exit 0\n\
 fi\n\
-if [ -n \"${KEEPER_DOCKER_RUN_MARK:-}\" ]; then\n\
-  printf 'run-started\\n' > \"$KEEPER_DOCKER_RUN_MARK\"\n\
-fi\n\
-sleep 0.2\n\
-printf 'slow run ok\\n'\n\
-exit 0\n"
+printf 'unexpected docker invocation\\n' >&2\n\
+exit 2\n"
 
 let fake_docker_turn_runtime_script =
   "#!/bin/sh\n\
@@ -871,47 +869,49 @@ let test_run_command_preserves_bare_command_argv () =
       Alcotest.(check string) "preserves bare head argv"
         "head -n 1 /home/keeper/playground/minjae/mind/demo.txt\n" out
 
-let test_run_command_holds_docker_spawn_slot () =
+let test_run_command_fallback_uses_docker_spawn_slot ~clock () =
   with_fake_docker fake_docker_slow_run_script @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   let base, config, meta = setup_config "minjae" in
-  let run_mark = Filename.concat base "docker-run-started" in
+  let log_path = Filename.concat base "docker.log" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
-  with_env "KEEPER_DOCKER_RUN_MARK" run_mark @@ fun () ->
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   let result = ref None in
-  Eio.Switch.run @@ fun sw ->
-  Eio.Fiber.fork ~sw (fun () ->
-      result :=
-        Some
-          (Keeper_docker_read.run_command_in_container_with_status
-             ~config ~meta
-             ~command_argv:[ "cat"; "/home/keeper/playground/demo.txt" ]
-             ~max_bytes:4096 ~timeout_sec:5.0 ())) ;
-  Alcotest.(check bool) "fake docker run started" true
-    (wait_until ~attempts:100 (fun () -> Sys.file_exists run_mark)) ;
-  Alcotest.(check int) "docker spawn slot held by fallback run" 1
-    (docker_spawn_in_flight ()) ;
-  Alcotest.(check bool) "docker run finished" true
-    (wait_until ~attempts:200 (fun () ->
-         match !result with Some _ -> true | None -> false)) ;
+  Eio.Switch.run (fun sw ->
+      Eio.Fiber.fork ~sw (fun () ->
+          result :=
+            Some
+              (Keeper_docker_read.run_command_in_container_with_status
+                 ~config ~meta
+                 ~command_argv:
+                   [ "cat"; "/home/keeper/playground/minjae/mind/demo.txt" ]
+                 ~max_bytes:4096 ~timeout_sec:5.0 ()));
+      let run_started () =
+        Sys.file_exists log_path
+        && contains_substring (read_file log_path) "run-started"
+      in
+      Alcotest.(check bool)
+        "fallback docker run holds Docker_spawn slot after run starts"
+        true
+        (wait_until ~clock ~attempts:300 (fun () ->
+             run_started () && docker_spawn_in_flight () > 0)));
   (match !result with
-   | Some (Ok (Unix.WEXITED 0, out)) ->
-       Alcotest.(check string) "slow run output" "slow run ok\n" out
-   | Some (Ok (status, out)) ->
-       Alcotest.failf "unexpected status %s output=%s"
-         (match status with
-          | Unix.WEXITED code -> Printf.sprintf "exit=%d" code
-          | Unix.WSIGNALED n -> Printf.sprintf "signal=%d" n
-          | Unix.WSTOPPED n -> Printf.sprintf "stopped=%d" n)
-         out
+   | None -> Alcotest.fail "expected docker read command result"
    | Some (Error msg) ->
-       Alcotest.failf "expected slow docker run success, got %s" msg
-   | None -> Alcotest.fail "docker run fiber did not record result") ;
-  Alcotest.(check int) "docker spawn slot released" 0
-    (docker_spawn_in_flight ())
+       Alcotest.failf "expected docker read command success, got %s" msg
+   | Some (Ok (st, out)) ->
+       Alcotest.(check (pair string int)) "slow docker exits cleanly"
+         ("exit", 0)
+         (match st with
+          | Unix.WEXITED code -> ("exit", code)
+          | Unix.WSIGNALED code -> ("signaled", code)
+          | Unix.WSTOPPED code -> ("stopped", code));
+       Alcotest.(check string) "slow docker stdout" "slow ok\n" out);
+   Alcotest.(check int) "Docker_spawn slot released" 0
+     (docker_spawn_in_flight ())
 
 let test_turn_runtime_reuses_single_container () =
   with_fake_docker fake_docker_turn_runtime_script @@ fun () ->
@@ -1077,7 +1077,7 @@ let test_turn_runtime_relaxed_fs_omits_readonly_and_noexec () =
       Alcotest.(check bool) "relaxed runtime keeps tmpfs mount" true
         (contains_substring line "/tmp:rw,nosuid,nodev,size=")
 
-let run_tests () =
+let run_tests ~clock () =
   Alcotest.run "Keeper_docker_read"
     [
       ( "should_route_read",
@@ -1131,8 +1131,8 @@ let run_tests () =
             test_run_command_allows_configured_nonzero_exit;
           Alcotest.test_case "preserves bare command argv" `Quick
             test_run_command_preserves_bare_command_argv;
-          Alcotest.test_case "fallback run holds docker spawn slot"
-            `Quick test_run_command_holds_docker_spawn_slot;
+          Alcotest.test_case "fallback uses Docker_spawn slot" `Quick
+            (test_run_command_fallback_uses_docker_spawn_slot ~clock);
           Alcotest.test_case "default fs hardening helpers" `Quick
             test_default_fs_hardening_helpers;
           Alcotest.test_case "relaxed fs helpers" `Quick
@@ -1173,4 +1173,4 @@ let () =
     ~cwd_default:Eio.Path.(Eio.Stdenv.fs env / Sys.getcwd ())
     ~proc_mgr:(Eio.Stdenv.process_mgr env)
     ~clock:(Eio.Stdenv.clock env);
-  run_tests ()
+  run_tests ~clock:(Eio.Stdenv.clock env) ()

@@ -43,9 +43,9 @@ class KeeperProductionReadinessGateTest(unittest.TestCase):
             ):
                 self.assertEqual(gate.default_base_path(), masc_base)
             with patch.dict(os.environ, {"ME_ROOT": me_root}, clear=True):
-                self.assertEqual(gate.default_base_path(), me_root)
+                self.assertIsNone(gate.default_base_path())
             with patch.dict(os.environ, {}, clear=True):
-                self.assertEqual(gate.default_base_path(), str(Path.cwd()))
+                self.assertIsNone(gate.default_base_path())
 
     def make_fixture(self):
         tmp = tempfile.TemporaryDirectory()
@@ -252,6 +252,115 @@ class KeeperProductionReadinessGateTest(unittest.TestCase):
             self.assertLess(summary.derived["timestamp_coverage_pct"], 100.0)
             self.assertTrue(
                 any("timestamp_coverage_pct" in failure for failure in summary.failures)
+            )
+
+    def test_synthetic_24_keeper_fixture_passes_per_keeper_gate(self):
+        with tempfile.TemporaryDirectory() as tmp_name:
+            root = Path(tmp_name)
+            for i in range(24):
+                keeper = f"synthetic-{i:02d}"
+                tools = (
+                    ["keeper_shell_gh", "keeper_shell_docker"]
+                    if i % 2 == 0
+                    else ["keeper_tool_search"]
+                )
+                gate.write_fixture_turn(
+                    root,
+                    keeper,
+                    f"trace-{keeper}",
+                    1,
+                    tools=tools,
+                )
+
+            summary = gate.evaluate(
+                base_path=root,
+                keepers=[],
+                trace_ids=[],
+                max_traces_per_keeper=2,
+                max_turns_per_keeper=1,
+                thresholds=gate.Thresholds(
+                    expected_keepers=24,
+                    min_terminal_turns=24,
+                    min_success_turns=24,
+                    min_terminal_turns_per_keeper=1,
+                    min_success_turns_per_keeper=1,
+                    min_provider_turns_per_keeper=1,
+                    min_success_provider_turns_per_keeper=1,
+                ),
+            )
+
+            self.assertEqual(summary.status, "PASS", summary.failures)
+            self.assertEqual(summary.metrics["terminal_turns"], 24)
+            self.assertEqual(summary.derived["provider_closure_pct"], 100.0)
+            self.assertEqual(summary.derived["tool_log_coverage_pct"], 100.0)
+
+    def test_slow_provider_fixture_fails_dangling_attempt_gate(self):
+        with tempfile.TemporaryDirectory() as tmp_name:
+            root = Path(tmp_name)
+            gate.write_fixture_turn(
+                root,
+                "slow-provider",
+                "trace-slow-provider",
+                1,
+                provider_finished=False,
+                status="timeout",
+            )
+
+            summary = gate.evaluate(
+                base_path=root,
+                keepers=["slow-provider"],
+                trace_ids=["trace-slow-provider"],
+                max_traces_per_keeper=2,
+                max_turns_per_keeper=0,
+                thresholds=gate.Thresholds(
+                    min_terminal_turns=1,
+                    min_success_turns=0,
+                    min_terminal_turns_per_keeper=1,
+                    min_provider_turns_per_keeper=1,
+                    min_success_provider_turns_per_keeper=0,
+                ),
+            )
+
+            self.assertEqual(summary.status, "FAIL")
+            self.assertEqual(summary.metrics["dangling_provider_attempts"], 1)
+            self.assertLess(summary.derived["provider_closure_pct"], 100.0)
+            self.assertTrue(
+                any("provider_closure_pct" in failure for failure in summary.failures)
+            )
+
+    def test_slow_tool_log_sink_fixture_fails_tool_log_gate(self):
+        with tempfile.TemporaryDirectory() as tmp_name:
+            root = Path(tmp_name)
+            gate.write_fixture_turn(
+                root,
+                "slow-tool-log",
+                "trace-slow-tool-log",
+                1,
+                tools=["keeper_shell_gh", "keeper_shell_docker"],
+                tool_log=False,
+            )
+
+            summary = gate.evaluate(
+                base_path=root,
+                keepers=["slow-tool-log"],
+                trace_ids=["trace-slow-tool-log"],
+                max_traces_per_keeper=2,
+                max_turns_per_keeper=0,
+                thresholds=gate.Thresholds(
+                    min_terminal_turns=1,
+                    min_success_turns=1,
+                    min_terminal_turns_per_keeper=1,
+                    min_success_turns_per_keeper=1,
+                    min_provider_turns_per_keeper=1,
+                    min_success_provider_turns_per_keeper=1,
+                ),
+            )
+
+            self.assertEqual(summary.status, "FAIL")
+            self.assertEqual(summary.metrics["tool_used_turns"], 1)
+            self.assertEqual(summary.derived["tool_log_coverage_pct"], 0.0)
+            self.assertTrue(
+                any("tool_log_coverage_pct" in failure for failure in summary.failures)
             )
 
 

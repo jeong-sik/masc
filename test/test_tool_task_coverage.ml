@@ -552,6 +552,73 @@ let () = test "handle_done_advisory_contract_records_attribution" (fun () ->
        bucket"
 ))
 
+let () = test "approve_verification_advisory_contract_records_advisory_attribution" (fun () ->
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    with_env "MASC_CDAL_GATE_ENABLED" (Some "true") (fun () ->
+      with_env "MASC_DATA_DIR" (Some (make_temp_dir "masc-cdal-approve-empty")) (fun () ->
+        Dashboard_attribution.reset ();
+        let ctx = make_test_ctx_with_agent "advisory-agent" in
+        let _ =
+          Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+            (`Assoc
+              [
+                ("title", `String "Advisory verifier task");
+                ( "contract",
+                  `Assoc
+                    [
+                      ("strict", `Bool false);
+                      ( "completion_contract",
+                        `List [ `String "deliverable-ready" ] );
+                    ] );
+              ])
+        in
+        let _ =
+          Tool_task.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx
+            (`Assoc [ ("task_id", `String "task-001") ])
+        in
+        let result_done =
+          Tool_task.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx
+            (`Assoc
+              [
+                ("task_id", `String "task-001");
+                ("notes", `String "deliverable-ready with artifact:local");
+              ])
+        in
+        if not result_done.Tool_result.success then
+          failwith result_done.Tool_result.legacy_message;
+        assert_task_awaiting_verification_by ctx "advisory-agent";
+        let verifier_ctx = { ctx with Tool_task.agent_name = "verifier" } in
+        let result_approve =
+          Tool_task.handle_transition
+            ~tool_name:"test_tool"
+            ~start_time:0.0
+            verifier_ctx
+            (`Assoc
+              [
+                ("task_id", `String "task-001");
+                ("action", `String "approve");
+                ("notes", `String "reviewed evidence and approved");
+              ])
+        in
+        if not result_approve.Tool_result.success then
+          failwith result_approve.Tool_result.legacy_message;
+        let advisory_recent =
+          Dashboard_attribution.recent
+            ~gate:Cdal_verdict_gate.advisory_gate_label ~limit:20 ()
+        in
+        if advisory_recent = [] then
+          failwith
+            "expected approve_verification to record advisory CDAL \
+             attribution for strict=false task";
+        let strict_recent =
+          Dashboard_attribution.recent
+            ~gate:Cdal_verdict_gate.strict_gate_label ~limit:20 ()
+        in
+        if strict_recent <> [] then
+          failwith
+            "approve_verification for strict=false task must not record \
+             under strict cdal_verdict bucket"))))
+
 let () = test "handle_transition_release_requires_handoff_for_strict_task" (fun () ->
   let ctx = make_test_ctx () in
   let _ =

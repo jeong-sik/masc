@@ -55,10 +55,11 @@ let _state_for_kind : (kind * slot_state) list =
 
 let state_of kind = List.assoc kind _state_for_kind
 
-(* Shared FD-pressure mutex — when Keeper_fd_pressure.active () is
-   true, all kinds serialize through one global gate. Reuses the
-   pattern from Docker_spawn_throttle (PR #15727). *)
-let _shared_pressure_mutex = Eio.Mutex.create ()
+(* Shared FD-pressure gate — when Keeper_fd_pressure.active () is true,
+   all top-level kinds serialize through one global slot. A semaphore keeps
+   the long-lived Bg_task lifetime path on the same pressure gate as scoped
+   tool calls while still allowing explicit release when the process closes. *)
+let _shared_pressure_gate = Eio.Semaphore.make 1
 
 let held_kinds_key : kind list Eio.Fiber.key = Eio.Fiber.create_key ()
 
@@ -73,19 +74,43 @@ let holds_kind kind = List.exists (( = ) kind) (held_kinds ())
 let with_held_kind kind f =
   Eio.Fiber.with_binding held_kinds_key (kind :: held_kinds ()) f
 
+let pressure_gate_needed () =
+  Keeper_fd_pressure.active () && held_kinds () = []
+
+let acquire_pressure_gate_if_needed () =
+  if not (pressure_gate_needed ())
+  then fun () -> ()
+  else (
+    Eio.Semaphore.acquire _shared_pressure_gate;
+    let released = Atomic.make false in
+    fun () ->
+      if Atomic.compare_and_set released false true then
+        Eio.Semaphore.release _shared_pressure_gate)
+
 let with_slot ~kind f =
   if holds_kind kind then
     f ()
   else
+    let release_pressure = acquire_pressure_gate_if_needed () in
     let { sem ; _ } = state_of kind in
-    Eio.Semaphore.acquire sem ;
     Eio.Switch.run @@ fun sw ->
+    Eio.Switch.on_release sw release_pressure ;
+    Eio.Semaphore.acquire sem ;
     Eio.Switch.on_release sw (fun () -> Eio.Semaphore.release sem) ;
-    let run () = with_held_kind kind f in
-    if Keeper_fd_pressure.active () then
-      Eio.Mutex.use_rw ~protect:true _shared_pressure_mutex run
-    else
-      run ()
+    with_held_kind kind f
+
+let acquire_lifetime_slot ~kind () =
+  let release_pressure = acquire_pressure_gate_if_needed () in
+  let { sem ; _ } = state_of kind in
+  (try Eio.Semaphore.acquire sem with
+   | exn ->
+     release_pressure ();
+     raise exn);
+  let released = Atomic.make false in
+  fun () ->
+    if Atomic.compare_and_set released false true then (
+      Eio.Semaphore.release sem;
+      release_pressure ())
 
 let configured_concurrency ~kind = (state_of kind).cap
 
@@ -130,11 +155,22 @@ let install_autonomy_exec_sandbox_exec_guard () =
             f ())
     }
 
+let install_bg_task_sandbox_exec_guard () =
+  Bg_task.set_lifetime_guard
+    { Bg_task.acquire =
+        (fun () ->
+          if Eio_guard.is_ready () then
+            acquire_lifetime_slot ~kind:Sandbox_exec ()
+          else
+            fun () -> ())
+    }
+
 let () =
   install_dated_jsonl_log_writer_guard ();
   install_process_eio_sandbox_exec_guard ();
   install_with_process_sandbox_exec_guard ();
-  install_autonomy_exec_sandbox_exec_guard ()
+  install_autonomy_exec_sandbox_exec_guard ();
+  install_bg_task_sandbox_exec_guard ()
 
 (* In-flight count = configured cap minus current semaphore credits.
    Eio.Semaphore exposes [get_value] which returns the available credit

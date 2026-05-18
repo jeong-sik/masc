@@ -58,6 +58,13 @@ val with_slot : kind:kind -> (unit -> 'a) -> 'a
     Exceptions from [f] propagate; the slot is always released
     (via [Eio.Switch.on_release]). *)
 
+val acquire_lifetime_slot : kind:kind -> unit -> (unit -> unit)
+(** [acquire_lifetime_slot ~kind ()] acquires a [kind]-typed slot and
+    returns an idempotent release callback. This is for resources whose FD
+    lifetime intentionally outlives the spawning call, such as background
+    shell tasks. The release callback must be invoked exactly when the
+    underlying FDs are closed; double invocation is ignored. *)
+
 val effective_concurrency : kind:kind -> int
 (** [effective_concurrency ~kind] returns the current cap.
     Returns [1] while [Keeper_fd_pressure.active ()] is true
@@ -97,6 +104,12 @@ val install_autonomy_exec_sandbox_exec_guard : unit -> unit
     child execution as {!Sandbox_exec} while {!Eio_guard} is ready. The slot
     covers the whole child lifetime, including waitpid, timeout handling, and
     stdout/stderr drain. *)
+
+val install_bg_task_sandbox_exec_guard : unit -> unit
+(** [install_bg_task_sandbox_exec_guard ()] installs the process-wide
+    {!Bg_task} lifetime guard that accounts detached background shell tasks as
+    {!Sandbox_exec} while {!Eio_guard} is ready. The slot is held until
+    [Bg_task] observes task closure and closes stdout/stderr FDs. *)
 
 type snapshot = {
   per_kind : (kind * int) list ;

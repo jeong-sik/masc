@@ -274,6 +274,62 @@ let test_timeout_enforced () =
   in
   check bool "closed via timeout" true closed
 
+let test_lifetime_guard_released_on_close () =
+  let acquired = ref 0 in
+  let released = ref 0 in
+  Bg_task.set_lifetime_guard
+    { Bg_task.acquire =
+        (fun () ->
+          incr acquired;
+          fun () -> incr released)
+    };
+  Fun.protect ~finally:Bg_task.reset_lifetime_guard_for_testing (fun () ->
+      let tid =
+        sp ~keeper:"kp-lifetime-guard" [ "/bin/sleep"; "1" ]
+      in
+      check int "guard acquired at spawn" 1 !acquired;
+      check int "guard not released before close" 0 !released;
+      ignore (Bg_task.kill tid ~signal:Sys.sigterm ~grace_sec:0.2);
+      check bool "task closed" true (poll_for_closed tid);
+      check int "guard released on close" 1 !released)
+
+let test_exit_watcher_failure_rolls_back_spawn () =
+  let acquired = ref 0 in
+  let released = ref 0 in
+  Bg_task.set_lifetime_guard
+    { Bg_task.acquire =
+        (fun () ->
+          incr acquired;
+          fun () -> incr released)
+    };
+  Bg_task.set_exit_watcher_thread_create_for_testing (fun _ ->
+      raise (Failure "thread budget exhausted"));
+  Fun.protect
+    ~finally:(fun () ->
+      Bg_task.reset_exit_watcher_thread_create_for_testing ();
+      Bg_task.reset_lifetime_guard_for_testing ())
+    (fun () ->
+      match
+        Bg_task.spawn ~keeper:"kp-exit-watch-fail"
+          ~argv:[ "/bin/sleep"; "10" ]
+          ~cwd:"" ~envp:(env_of_current ()) ~timeout_sec:0.0 ()
+      with
+      | Error (Bg_task.Spawn_failed msg) ->
+          check bool "spawn reports exit watcher failure" true
+            (String_util.contains_substring msg "exit watcher start failed");
+          check int "guard acquired" 1 !acquired;
+          check int "guard released on rollback" 1 !released;
+          check (list string) "registry rollback removes task" []
+            (List.map Bg_task.task_id_to_string
+               (Bg_task.list ~keeper:"kp-exit-watch-fail"))
+      | Error (Bg_task.Too_many_tasks _) ->
+          fail "unexpected capacity failure"
+      | Error (Bg_task.Invalid_cwd msg) ->
+          failf "unexpected invalid cwd: %s" msg
+      | Ok tid ->
+          ignore (Bg_task.kill tid ~signal:Sys.sigterm ~grace_sec:0.2);
+          fail "spawn succeeded despite exit watcher failure")
+
 let test_global_capacity_blocks_detached_stampede () =
   with_bg_task_limits ~global:"1" ~per_keeper:"4" (fun () ->
       let first = sp ~keeper:"kp-cap-a" [ "/bin/sleep"; "30" ] in
@@ -518,6 +574,10 @@ let () =
             test_list_tracks_keeper;
           test_case "timeout enforcement fires tree_kill" `Quick
             test_timeout_enforced;
+          test_case "lifetime guard releases on task close" `Quick
+            test_lifetime_guard_released_on_close;
+          test_case "exit watcher failure rolls back spawn" `Quick
+            test_exit_watcher_failure_rolls_back_spawn;
           test_case "global capacity blocks detached stampede" `Quick
             test_global_capacity_blocks_detached_stampede;
         ] );

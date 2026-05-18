@@ -68,7 +68,16 @@ type state = {
   pid_file : string option;
       (** Full path to the persistence sidecar when
           [~base_path] was supplied at spawn. Deleted on close/kill. *)
+  mutable release_lifetime_guard : (unit -> unit) option;
 }
+
+type lifetime_guard = { acquire : unit -> (unit -> unit) }
+
+let default_lifetime_guard = { acquire = (fun () -> fun () -> ()) }
+let lifetime_guard : lifetime_guard Atomic.t = Atomic.make default_lifetime_guard
+let set_lifetime_guard guard = Atomic.set lifetime_guard guard
+let reset_lifetime_guard_for_testing () = Atomic.set lifetime_guard default_lifetime_guard
+let acquire_lifetime_guard () = (Atomic.get lifetime_guard).acquire ()
 
 (* Tick 7: PID-file helpers. Path convention:
      <base_path>/.masc/keeper/<keeper>/bg/<task_id>.pid
@@ -164,6 +173,21 @@ let try_delete_pid_file = function
   | None -> ()
   | Some path -> ignore (delete_pid_file path : bool)
 
+let release_lifetime_guard st =
+  match st.release_lifetime_guard with
+  | None -> ()
+  | Some release ->
+      st.release_lifetime_guard <- None;
+      release ()
+
+let close_task_fds st =
+  Safe_ops.protect ~default:() (fun () -> Unix.close st.handle.stdout_fd);
+  Safe_ops.protect ~default:() (fun () -> Unix.close st.handle.stderr_fd)
+
+let mark_process_finished st status =
+  if Option.is_none st.status then st.status <- Some status;
+  release_lifetime_guard st
+
 let registry : (string, state) Hashtbl.t = Hashtbl.create 16
 let registry_mu = Mutex.create ()
 let id_counter = ref 0
@@ -175,6 +199,27 @@ let with_reg f =
   match f () with
   | v -> Mutex.unlock registry_mu; v
   | exception e -> Mutex.unlock registry_mu; raise e
+
+let default_exit_watcher_thread_create f =
+  let _watcher = Thread.create f () in
+  ()
+
+let exit_watcher_thread_create = Atomic.make default_exit_watcher_thread_create
+let set_exit_watcher_thread_create_for_testing f = Atomic.set exit_watcher_thread_create f
+let reset_exit_watcher_thread_create_for_testing () =
+  Atomic.set exit_watcher_thread_create default_exit_watcher_thread_create
+
+let start_exit_watcher st =
+  (Atomic.get exit_watcher_thread_create)
+    (let rec wait () =
+       match Unix.waitpid [] st.handle.pid with
+       | _, status -> with_reg (fun () -> mark_process_finished st status)
+       | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
+       | exception Unix.Unix_error (Unix.ECHILD, _, _) ->
+           with_reg (fun () -> release_lifetime_guard st)
+       | exception exn -> observe_sidecar_failure ~site:"waitpid" exn
+     in
+     wait)
 
 let fresh_id () =
   with_reg (fun () ->
@@ -328,30 +373,29 @@ let poll_state st =
     (match st.status with
      | Some _ -> ()
      | None ->
-         (match Unix.waitpid [ Unix.WNOHANG ] st.handle.pid with
-          | 0, _ -> ()
-          | _, s -> st.status <- Some s
-          | exception Unix.Unix_error (Unix.ECHILD, _, _) ->
-              st.status <- Some (Unix.WEXITED 0)
-          | exception _ -> ()));
+	         (match Unix.waitpid [ Unix.WNOHANG ] st.handle.pid with
+	          | 0, _ -> ()
+	          | _, s -> mark_process_finished st s
+	          | exception Unix.Unix_error (Unix.ECHILD, _, _) ->
+	              mark_process_finished st (Unix.WEXITED 0)
+	          | exception _ -> ()));
     if st.status = None
        && st.timeout_sec > 0.0
        && Unix.gettimeofday () -. st.handle.started_at > st.timeout_sec
     then begin
       Process_eio.tree_kill ~pgid:st.handle.pgid
         ~signal:Sys.sigterm ~grace_sec:2.0;
-      (match Unix.waitpid [ Unix.WNOHANG ] st.handle.pid with
-       | 0, _ -> ()
-       | _, s -> st.status <- Some s
-       | exception _ -> ())
+	      (match Unix.waitpid [ Unix.WNOHANG ] st.handle.pid with
+	       | 0, _ -> ()
+	       | _, s -> mark_process_finished st s
+	       | exception _ -> ())
     end;
-    if st.status <> None && st.stdout_eof && st.stderr_eof then begin
-      st.closed <- true;
-      Safe_ops.protect ~default:() (fun () -> Unix.close st.handle.stdout_fd);
-      Safe_ops.protect ~default:() (fun () -> Unix.close st.handle.stderr_fd);
-      try_delete_pid_file st.pid_file
-    end
-  end
+	    if st.status <> None && st.stdout_eof && st.stderr_eof then begin
+		      st.closed <- true;
+		      close_task_fds st;
+		      try_delete_pid_file st.pid_file
+		    end
+	  end
 
 let poll_all_states () =
   Hashtbl.iter (fun _ st -> poll_state st) registry
@@ -396,52 +440,93 @@ let release_spawn_slot ~keeper =
     if next = 0 then Hashtbl.remove pending_spawn_by_keeper keeper
     else Hashtbl.replace pending_spawn_by_keeper keeper next)
 
+let cleanup_failed_registered_spawn ~tid st =
+  Safe_ops.protect ~default:() (fun () ->
+    Process_eio.tree_kill ~pgid:st.handle.pgid ~signal:Sys.sigterm ~grace_sec:0.2);
+  with_reg (fun () ->
+    Hashtbl.remove registry tid;
+    release_lifetime_guard st);
+  close_task_fds st;
+  try_delete_pid_file st.pid_file
+
 let spawn ?base_path ~keeper ~argv ~cwd ~envp ~timeout_sec () =
   match reserve_spawn_slot ~keeper with
   | Error err -> Error err
   | Ok () ->
-    match Process_eio.spawn_detached ~argv ~env:envp ~cwd with
-    | Error e ->
-      release_spawn_slot ~keeper;
-      Error (Spawn_failed e)
-    | Ok handle ->
-      try_set_nonblock handle.stdout_fd;
-      try_set_nonblock handle.stderr_fd;
-      let tid = fresh_id () in
-      let pid_file =
-        match base_path with
-        | None | Some "" -> None
-        | Some bp ->
-            let path = pid_file_of ~base_path:bp ~keeper ~task_id:tid in
-            try_write_pid_file path
-              ~pid:handle.pid
-              ~pgid:handle.pgid
-              ~started_at:handle.started_at;
-            Some path
-      in
-      let st =
-        {
-          handle;
-          keeper;
-          timeout_sec;
-          stdout_buf = Buffer.create 4096;
-          stderr_buf = Buffer.create 4096;
-          stdout_base_offset = 0;
-          stderr_base_offset = 0;
-          status = None;
-          closed = false;
-          stdout_eof = false;
-          stderr_eof = false;
-          pid_file;
-        }
-      in
-      with_reg (fun () ->
-        Hashtbl.replace registry tid st;
-        pending_spawn_global := max 0 (!pending_spawn_global - 1);
-        let next = max 0 (pending_keeper_count keeper - 1) in
-        if next = 0 then Hashtbl.remove pending_spawn_by_keeper keeper
-        else Hashtbl.replace pending_spawn_by_keeper keeper next);
-      Ok tid
+	    let release_lifetime_guard =
+	      try Ok (acquire_lifetime_guard ()) with
+	      | Eio.Cancel.Cancelled _ as e ->
+	          release_spawn_slot ~keeper;
+	          raise e
+	      | exn ->
+	          release_spawn_slot ~keeper;
+          Error
+            (Spawn_failed
+               (Printf.sprintf "bg_task lifetime guard acquire failed: %s"
+                  (Printexc.to_string exn)))
+    in
+    (match release_lifetime_guard with
+    | Error err -> Error err
+    | Ok release_lifetime_guard ->
+        match Process_eio.spawn_detached ~argv ~env:envp ~cwd with
+        | Error e ->
+            release_lifetime_guard ();
+            release_spawn_slot ~keeper;
+            Error (Spawn_failed e)
+        | Ok handle ->
+            try_set_nonblock handle.stdout_fd;
+            try_set_nonblock handle.stderr_fd;
+            let tid = fresh_id () in
+            let pid_file =
+              match base_path with
+              | None | Some "" -> None
+              | Some bp ->
+                  let path =
+                    pid_file_of ~base_path:bp ~keeper ~task_id:tid
+                  in
+                  try_write_pid_file path
+                    ~pid:handle.pid
+                    ~pgid:handle.pgid
+                    ~started_at:handle.started_at;
+                  Some path
+            in
+            let st =
+              {
+                handle;
+                keeper;
+                timeout_sec;
+                stdout_buf = Buffer.create 4096;
+                stderr_buf = Buffer.create 4096;
+                stdout_base_offset = 0;
+                stderr_base_offset = 0;
+                status = None;
+                closed = false;
+                stdout_eof = false;
+                stderr_eof = false;
+                pid_file;
+                release_lifetime_guard = Some release_lifetime_guard;
+              }
+            in
+            with_reg (fun () ->
+                Hashtbl.replace registry tid st;
+                pending_spawn_global := max 0 (!pending_spawn_global - 1);
+	                let next = max 0 (pending_keeper_count keeper - 1) in
+	                if next = 0 then Hashtbl.remove pending_spawn_by_keeper keeper
+	                else Hashtbl.replace pending_spawn_by_keeper keeper next);
+		            (try
+		               start_exit_watcher st;
+		               Ok tid
+		             with
+		             | Eio.Cancel.Cancelled _ as e ->
+		                 cleanup_failed_registered_spawn ~tid st;
+		                 raise e
+		             | exn ->
+		                 cleanup_failed_registered_spawn ~tid st;
+		                 Error
+		                   (Spawn_failed
+		                      (Printf.sprintf
+		                         "bg_task exit watcher start failed: %s"
+		                         (Printexc.to_string exn)))))
 
 let bufsub buf ~base_offset since =
   let len = Buffer.length buf in

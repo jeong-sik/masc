@@ -16,6 +16,8 @@ PROMPT_DIR="$RUN_DIR/prompts"
 REQUESTS_FILE="$RUN_DIR/requests.jsonl"
 RESULTS_FILE="$RUN_DIR/results.jsonl"
 POLL_ERRORS_FILE="$RUN_DIR/poll_errors.jsonl"
+MCP_SESSION_REFRESHES_FILE="$RUN_DIR/mcp-session-refreshes.jsonl"
+MCP_SESSION_STATE_FILE="$RUN_DIR/mcp-session-current.json"
 REVIEW_TARGETS_FILE="$RUN_DIR/review-targets.jsonl"
 GITHUB_IDENTITY_COUNTS_FILE="$RUN_DIR/github-identity-counts.json"
 PROOF_BRANCH_COLLISIONS_FILE="$RUN_DIR/proof-branch-collisions.jsonl"
@@ -207,6 +209,8 @@ while [[ $# -gt 0 ]]; do
         REQUESTS_FILE="$RUN_DIR/requests.jsonl"
         RESULTS_FILE="$RUN_DIR/results.jsonl"
         POLL_ERRORS_FILE="$RUN_DIR/poll_errors.jsonl"
+        MCP_SESSION_REFRESHES_FILE="$RUN_DIR/mcp-session-refreshes.jsonl"
+        MCP_SESSION_STATE_FILE="$RUN_DIR/mcp-session-current.json"
         REVIEW_TARGETS_FILE="$RUN_DIR/review-targets.jsonl"
         GITHUB_IDENTITY_COUNTS_FILE="$RUN_DIR/github-identity-counts.json"
         PROOF_BRANCH_COLLISIONS_FILE="$RUN_DIR/proof-branch-collisions.jsonl"
@@ -225,6 +229,8 @@ while [[ $# -gt 0 ]]; do
       REQUESTS_FILE="$RUN_DIR/requests.jsonl"
       RESULTS_FILE="$RUN_DIR/results.jsonl"
       POLL_ERRORS_FILE="$RUN_DIR/poll_errors.jsonl"
+      MCP_SESSION_REFRESHES_FILE="$RUN_DIR/mcp-session-refreshes.jsonl"
+      MCP_SESSION_STATE_FILE="$RUN_DIR/mcp-session-current.json"
       REVIEW_TARGETS_FILE="$RUN_DIR/review-targets.jsonl"
       GITHUB_IDENTITY_COUNTS_FILE="$RUN_DIR/github-identity-counts.json"
       PROOF_BRANCH_COLLISIONS_FILE="$RUN_DIR/proof-branch-collisions.jsonl"
@@ -262,6 +268,8 @@ mkdir -p "$RUN_DIR" "$RAW_DIR" "$PROMPT_DIR"
 : >"$REQUESTS_FILE"
 : >"$RESULTS_FILE"
 : >"$POLL_ERRORS_FILE"
+: >"$MCP_SESSION_REFRESHES_FILE"
+rm -f "$MCP_SESSION_STATE_FILE"
 : >"$REVIEW_TARGETS_FILE"
 : >"$PROOF_BRANCH_COLLISIONS_FILE"
 : >"$CREATE_READINESS_FAILURES_FILE"
@@ -540,6 +548,71 @@ tool_text_or_empty() {
   printf '%s' "$payload" | mcp_extract_text
 }
 
+payload_is_unknown_mcp_session() {
+  local payload="$1"
+  printf '%s' "$payload" | jq -e '
+    (((.error.message? // "") | test("Unknown Mcp-Session-Id"))
+     or ((._harness_error.message? // "") | test("Unknown Mcp-Session-Id")))
+  ' >/dev/null 2>&1
+}
+
+refresh_mcp_session() {
+  local reason="$1"
+  local tool_name="${2:-}"
+  local call_id="${3:-}"
+  local old_session="${MCP_SESSION_ID:-}"
+
+  unset MCP_SESSION_ID
+  unset MCP_PROTOCOL_VERSION
+  log "MCP session refresh: reason=$reason tool=${tool_name:-unknown} id=${call_id:-unknown} old_session=${old_session:-none}"
+  init_mcp_session
+  jq -nc \
+    --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --arg reason "$reason" \
+    --arg tool_name "$tool_name" \
+    --arg call_id "$call_id" \
+    --arg old_session "$old_session" \
+    --arg new_session "${MCP_SESSION_ID:-}" \
+    '{ts:$ts, reason:$reason, tool_name:$tool_name, call_id:$call_id, old_session:$old_session, new_session:$new_session}' \
+    >>"$MCP_SESSION_REFRESHES_FILE"
+  jq -nc \
+    --arg session_id "${MCP_SESSION_ID:-}" \
+    --arg protocol_version "${MCP_PROTOCOL_VERSION:-}" \
+    '{session_id:$session_id, protocol_version:$protocol_version}' \
+    >"$MCP_SESSION_STATE_FILE"
+}
+
+load_refreshed_mcp_session_if_present() {
+  [[ -f "$MCP_SESSION_STATE_FILE" ]] || return 0
+  local session_id protocol_version
+  session_id="$(jq -r '.session_id // empty' "$MCP_SESSION_STATE_FILE" 2>/dev/null || true)"
+  protocol_version="$(jq -r '.protocol_version // empty' "$MCP_SESSION_STATE_FILE" 2>/dev/null || true)"
+  if [[ -n "$session_id" ]]; then
+    MCP_SESSION_ID="$session_id"
+    export MCP_SESSION_ID
+  fi
+  if [[ -n "$protocol_version" ]]; then
+    MCP_PROTOCOL_VERSION="$protocol_version"
+    export MCP_PROTOCOL_VERSION
+  fi
+}
+
+tool_call_retry_unknown_session() {
+  local id="$1"
+  local tool_name="$2"
+  local args_json="$3"
+  local timeout_sec="${4:-$MSG_TIMEOUT_SEC}"
+  local payload
+
+  load_refreshed_mcp_session_if_present
+  payload="$(tool_call "$id" "$tool_name" "$args_json" "$timeout_sec")"
+  if payload_is_unknown_mcp_session "$payload"; then
+    refresh_mcp_session "unknown_mcp_session" "$tool_name" "$id"
+    payload="$(tool_call "$id" "$tool_name" "$args_json" "$timeout_sec")"
+  fi
+  printf '%s' "$payload"
+}
+
 discover_keepers() {
   local keeper_file="$RUN_DIR/keepers.txt"
   if [[ -n "$KEEPER_NAMES" ]]; then
@@ -554,7 +627,7 @@ discover_keepers() {
     runtime_docker="$RUN_DIR/keepers.runtime-docker.txt"
     config_docker="$RUN_DIR/keepers.config-docker.txt"
     config_dir="$BASE_PATH/.masc/config/keepers"
-    payload="$(tool_call "keeper-list-$RUN_ID" "masc_keeper_list" '{"detailed":true,"limit":100}' 30)"
+    payload="$(tool_call_retry_unknown_session "keeper-list-$RUN_ID" "masc_keeper_list" '{"detailed":true,"limit":100}' 30)"
     printf '%s' "$payload" >"$RAW_DIR/keeper-list.jsonrpc.json"
     mcp_require_tool_ok "$payload" "masc_keeper_list"
     text="$(tool_text_or_empty "$payload")"
@@ -1491,7 +1564,7 @@ send_phase_prompts() {
         }'
     )"
     log "sending $phase proof prompt to $keeper"
-    payload="$(tool_call "keeper-msg-$phase-$keeper-$RUN_ID" "masc_keeper_msg" "$args" "$MSG_TIMEOUT_SEC")"
+    payload="$(tool_call_retry_unknown_session "keeper-msg-$phase-$keeper-$RUN_ID" "masc_keeper_msg" "$args" "$MSG_TIMEOUT_SEC")"
     printf '%s' "$payload" >"$RAW_DIR/msg-$phase-$keeper.jsonrpc.json"
     mcp_require_tool_ok "$payload" "masc_keeper_msg:$keeper"
     text="$(tool_text_or_empty "$payload")"
@@ -1567,7 +1640,7 @@ poll_results() {
       [[ -n "$request_id" ]] || continue
       local args payload text status
       args="$(jq -cn --arg request_id "$request_id" '{request_id:$request_id}')"
-      payload="$(tool_call "keeper-msg-result-$request_id" "masc_keeper_msg_result" "$args" 30)"
+      payload="$(tool_call_retry_unknown_session "keeper-msg-result-$request_id" "masc_keeper_msg_result" "$args" 30)"
       printf '%s' "$payload" >"$RAW_DIR/result-$phase-$keeper-$request_id.jsonrpc.json"
       if ! mcp_require_tool_ok "$payload" "masc_keeper_msg_result:$keeper" >/dev/null 2>&1; then
         jq -nc --arg keeper "$keeper" --arg phase "$phase" --arg request_id "$request_id" \
@@ -1629,6 +1702,66 @@ create_result_has_success_markers() {
     && printf '%s' "$reply" | grep -Eq 'https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[0-9]+'
 }
 
+create_result_has_tool_evidence() {
+  local keeper="$1"
+  local text_file="$2"
+  local branch pr_url pr_info_file head_ref is_draft
+  branch="$(proof_branch_for_keeper "$keeper")"
+
+  if ! jq -e '
+      any(.result.tool_call_evidence[]?;
+        (.tool_name == "keeper_pr_create")
+        and ((.outcome // "") == "ok")
+        and (((.route_evidence.via // "") == "docker")
+             or ((.route_evidence.via // "") == "brokered")
+             or ((.route_evidence.route_via // "") == "docker")
+             or ((.route_evidence.route_via // "") == "brokered")
+             or ((.route_evidence.execution_via // "") == "docker")
+             or ((.route_evidence.execution_via // "") == "brokered"))
+        and ((.route_evidence.pr_url // "") | test("^https://github[.]com/[^/]+/[^/]+/pull/[0-9]+"))
+      )
+    ' "$text_file" >/dev/null; then
+    return 1
+  fi
+
+  if ! jq -e '
+      any(.result.tool_call_evidence[]?;
+        ((.tool_name == "Bash") or (.tool_name == "keeper_bash"))
+        and ((.outcome // "") == "ok")
+        and (((.route_evidence.via // "") == "docker")
+             or ((.route_evidence.via // "") == "brokered")
+             or ((.route_evidence.route_via // "") == "docker")
+             or ((.route_evidence.route_via // "") == "brokered")
+             or ((.route_evidence.execution_via // "") == "docker")
+             or ((.route_evidence.execution_via // "") == "brokered"))
+        and ((.route_evidence.git_creds_enabled // false) == true)
+      )
+    ' "$text_file" >/dev/null; then
+    return 1
+  fi
+
+  pr_url="$(
+    jq -r '
+      [
+        .result.tool_call_evidence[]?
+        | select(.tool_name == "keeper_pr_create" and ((.outcome // "") == "ok"))
+        | .route_evidence.pr_url // empty
+      ]
+      | last // empty
+    ' "$text_file" | tr -d '\r\n'
+  )"
+  [[ -n "$pr_url" ]] || return 1
+
+  pr_info_file="$RUN_DIR/create-pr-$keeper.json"
+  if ! gh pr view "$pr_url" -R "$REPO_SLUG" \
+      --json url,isDraft,headRefName,headRepositoryOwner >"$pr_info_file"; then
+    return 1
+  fi
+  head_ref="$(jq -r '.headRefName // empty' "$pr_info_file")"
+  is_draft="$(jq -r '.isDraft // false' "$pr_info_file")"
+  [[ "$head_ref" == "$branch" && "$is_draft" == "true" ]]
+}
+
 all_create_results_ready_for_review() {
   : >"$CREATE_READINESS_FAILURES_FILE"
 
@@ -1660,7 +1793,8 @@ all_create_results_ready_for_review() {
         >>"$CREATE_READINESS_FAILURES_FILE"
       continue
     fi
-    if ! create_result_has_success_markers "$keeper" "$text_file"; then
+    if ! create_result_has_success_markers "$keeper" "$text_file" \
+        && ! create_result_has_tool_evidence "$keeper" "$text_file"; then
       jq -nc --arg keeper "$keeper" --arg status "$status" --arg text_file "$text_file" \
         '{keeper:$keeper, status:$status, text_file:$text_file, blocker:"create_success_markers_missing"}' \
         >>"$CREATE_READINESS_FAILURES_FILE"
@@ -1733,6 +1867,7 @@ write_summary() {
     --arg proof_branch_collisions_file "$PROOF_BRANCH_COLLISIONS_FILE" \
     --arg create_readiness_failures_file "$CREATE_READINESS_FAILURES_FILE" \
     --arg github_egress_preflight_file "$GITHUB_EGRESS_PREFLIGHT_FILE" \
+    --arg mcp_session_refreshes_file "$MCP_SESSION_REFRESHES_FILE" \
     --argjson mutate "$MUTATE" \
     --argjson keeper_count "$keeper_count" \
     --argjson request_count "$request_count" \
@@ -1762,6 +1897,7 @@ write_summary() {
       proof_branch_collisions_file:$proof_branch_collisions_file,
       create_readiness_failures_file:$create_readiness_failures_file,
       github_egress_preflight_file:$github_egress_preflight_file,
+      mcp_session_refreshes_file:$mcp_session_refreshes_file,
       mutate:$mutate,
       keeper_count:$keeper_count,
       request_count:$request_count,
@@ -1791,7 +1927,7 @@ post_board_summary() {
   )"
   args="$(jq -cn --arg post_id "$BOARD_POST_ID" --arg content "$content" \
     '{post_id:$post_id, author:"keeper-docker-pr-lifecycle-reprobe", content:$content, ttl_hours:168}')"
-  payload="$(tool_call "board-comment-$RUN_ID" "masc_board_comment" "$args" 30)"
+  payload="$(tool_call_retry_unknown_session "board-comment-$RUN_ID" "masc_board_comment" "$args" 30)"
   printf '%s' "$payload" >"$RAW_DIR/board-comment.jsonrpc.json"
 }
 

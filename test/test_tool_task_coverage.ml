@@ -89,6 +89,22 @@ let add_task_requiring_tools ctx ~title tools =
   in
   if not result.Tool_result.success then failwith result.Tool_result.legacy_message
 
+let register_test_keeper ctx ~keeper_name ~agent_name =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [
+          ("name", `String keeper_name);
+          ("agent_name", `String agent_name);
+          ("trace_id", `String ("test-trace-" ^ keeper_name));
+        ])
+  with
+  | Ok meta ->
+      ignore
+        (Keeper_registry.register_offline ~base_path:ctx.Tool_task.config.Coord.base_path
+           keeper_name meta)
+  | Error e -> failwith ("failed to build keeper meta: " ^ e)
+
 let set_only_task_do_not_reclaim_reason ctx reason =
   let config = ctx.Tool_task.config in
   let backlog = Coord.read_backlog config in
@@ -1139,6 +1155,195 @@ let () = test "handle_claim_sets_planning_current_task" (fun () ->
   assert result.Tool_result.success;
   assert (Planning_eio.get_current_task ctx.config = Some "task-001")
 )
+
+let () = test "keeper_claim_does_not_clobber_planning_current_task" (fun () ->
+  let ctx = make_test_ctx_with_agent "codex-mcp-client" in
+  let _ =
+    Tool_task.handle_add_task
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      (`Assoc [ ("title", `String "Operator task") ])
+  in
+  let _ =
+    Tool_task.handle_add_task
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      (`Assoc [ ("title", `String "Keeper task") ])
+  in
+  (match Planning_eio.set_current_task ctx.config ~task_id:"task-001" with
+   | Ok () -> ()
+   | Error msg -> failwith ("failed to seed current_task: " ^ msg));
+  ignore
+    (Coord.join ctx.config ~agent_name:"keeper-executor-agent"
+       ~capabilities:[] ());
+  register_test_keeper ctx ~keeper_name:"executor"
+    ~agent_name:"keeper-executor-agent";
+  let keeper_ctx =
+    { ctx with Tool_task.agent_name = "keeper-executor-agent" }
+  in
+  let result =
+    Tool_task.handle_claim
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      keeper_ctx
+      (`Assoc [ ("task_id", `String "task-002") ])
+  in
+  assert result.Tool_result.success;
+  assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
+
+let () = test "keeper_alias_claim_does_not_clobber_planning_current_task" (fun () ->
+  let ctx = make_test_ctx_with_agent "codex-mcp-client" in
+  let _ =
+    Tool_task.handle_add_task
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      (`Assoc [ ("title", `String "Operator task") ])
+  in
+  let _ =
+    Tool_task.handle_add_task
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      (`Assoc [ ("title", `String "Keeper task") ])
+  in
+  (match Planning_eio.set_current_task ctx.config ~task_id:"task-001" with
+   | Ok () -> ()
+   | Error msg -> failwith ("failed to seed current_task: " ^ msg));
+  ignore
+    (Coord.join ctx.config ~agent_name:"keeper-executor-agent"
+       ~capabilities:[] ());
+  register_test_keeper ctx ~keeper_name:"executor"
+    ~agent_name:"keeper-executor-agent";
+  let keeper_ctx =
+    { ctx with Tool_task.agent_name = "keeper-executor" }
+  in
+  let result =
+    Tool_task.handle_claim
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      keeper_ctx
+      (`Assoc [ ("task_id", `String "task-002") ])
+  in
+  assert result.Tool_result.success;
+  assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
+
+let () = test "keeper_generated_alias_claim_does_not_clobber_planning_current_task" (fun () ->
+  let ctx = make_test_ctx_with_agent "codex-mcp-client" in
+  let _ =
+    Tool_task.handle_add_task
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      (`Assoc [ ("title", `String "Operator task") ])
+  in
+  let _ =
+    Tool_task.handle_add_task
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      (`Assoc [ ("title", `String "Keeper task") ])
+  in
+  (match Planning_eio.set_current_task ctx.config ~task_id:"task-001" with
+   | Ok () -> ()
+   | Error msg -> failwith ("failed to seed current_task: " ^ msg));
+  ignore
+    (Coord.join ctx.config ~agent_name:"keeper-executor-agent"
+       ~capabilities:[] ());
+  ignore
+    (Coord.join ctx.config ~agent_name:"keeper-executor-warm-raven-agent"
+       ~capabilities:[] ());
+  register_test_keeper ctx ~keeper_name:"executor"
+    ~agent_name:"keeper-executor-agent";
+  let keeper_ctx =
+    { ctx with Tool_task.agent_name = "keeper-executor-warm-raven-agent" }
+  in
+  let result =
+    Tool_task.handle_claim
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      keeper_ctx
+      (`Assoc [ ("task_id", `String "task-002") ])
+  in
+  assert result.Tool_result.success;
+  assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
+
+let () = test "keeper_separator_alias_claim_does_not_clobber_planning_current_task" (fun () ->
+  let ctx = make_test_ctx_with_agent "codex-mcp-client" in
+  let _ =
+    Tool_task.handle_add_task
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      (`Assoc [ ("title", `String "Operator task") ])
+  in
+  let _ =
+    Tool_task.handle_add_task
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      (`Assoc [ ("title", `String "Keeper task") ])
+  in
+  (match Planning_eio.set_current_task ctx.config ~task_id:"task-001" with
+   | Ok () -> ()
+   | Error msg -> failwith ("failed to seed current_task: " ^ msg));
+  ignore
+    (Coord.join ctx.config ~agent_name:"keeper-tech-glutton-agent"
+       ~capabilities:[] ());
+  ignore
+    (Coord.join ctx.config ~agent_name:"keeper-tech_glutton-agent"
+       ~capabilities:[] ());
+  register_test_keeper ctx ~keeper_name:"tech-glutton"
+    ~agent_name:"keeper-tech-glutton-agent";
+  let keeper_ctx =
+    { ctx with Tool_task.agent_name = "keeper-tech_glutton-agent" }
+  in
+  let result =
+    Tool_task.handle_claim
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      keeper_ctx
+      (`Assoc [ ("task_id", `String "task-002") ])
+  in
+  assert result.Tool_result.success;
+  assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
+
+let () = test "keeper_shaped_non_keeper_claim_updates_planning_current_task" (fun () ->
+  let ctx = make_test_ctx_with_agent "codex-mcp-client" in
+  let _ =
+    Tool_task.handle_add_task
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      (`Assoc [ ("title", `String "Operator task") ])
+  in
+  let _ =
+    Tool_task.handle_add_task
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      (`Assoc [ ("title", `String "Spoofed keeper task") ])
+  in
+  (match Planning_eio.set_current_task ctx.config ~task_id:"task-001" with
+   | Ok () -> ()
+   | Error msg -> failwith ("failed to seed current_task: " ^ msg));
+  ignore
+    (Coord.join ctx.config ~agent_name:"keeper-spoof-agent"
+       ~capabilities:[] ());
+  let spoof_ctx =
+    { ctx with Tool_task.agent_name = "keeper-spoof-agent" }
+  in
+  let result =
+    Tool_task.handle_claim
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      spoof_ctx
+      (`Assoc [ ("task_id", `String "task-002") ])
+  in
+  assert result.Tool_result.success;
+  assert (Planning_eio.get_current_task ctx.config = Some "task-002"))
 
 let () = test "handle_claim_rejects_second_active_owned_task" (fun () ->
   let ctx = make_test_ctx () in

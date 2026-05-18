@@ -113,8 +113,16 @@ let failure_reason_to_string = function
     Printf.sprintf "stale_fleet_batch(distinct_count=%d)" distinct_count
   | Oas_timeout_budget_loop { count } ->
     Printf.sprintf "oas_timeout_budget_loop(count=%d)" count
-  | Provider_runtime_error { code; detail } ->
-    Printf.sprintf "provider_runtime_error(%s:%s)" code detail
+  | Provider_runtime_error { code; detail; provider_id; http_status } ->
+    let prov =
+      Option.fold provider_id ~none:""
+        ~some:(Printf.sprintf " provider=%s")
+    in
+    let http =
+      Option.fold http_status ~none:""
+        ~some:(Printf.sprintf " http=%d")
+    in
+    Printf.sprintf "provider_runtime_error(%s:%s%s%s)" code detail prov http
   | Tool_required_unsatisfied { code; detail } ->
     Printf.sprintf "tool_required_unsatisfied(%s:%s)" code detail
   | Ambiguous_partial_commit { kind; detail } ->

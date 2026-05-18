@@ -462,8 +462,10 @@ function blockingNextStep(snapshot: KeeperCompositeSnapshot): string {
 
 function staleCause(snapshot: KeeperCompositeSnapshot, ageText: string): string {
   const receiptReason = snapshot.execution?.operator_disposition_reason
-  const base = snapshot.phase === 'Running'
-    ? 'KSM=Running이지만 live turn 없음'
+  // `snapshot.phase` wire format is lowercase (phase_to_string in
+  // keeper_state_machine.ml:21-35); the prior PascalCase compare was dead.
+  const base = snapshot.phase === 'running'
+    ? 'KSM=running이지만 live turn 없음'
     : `live turn 없음 · KSM=${snapshot.phase}`
   const receipt = receiptReason ? ` · last receipt: ${receiptReason}` : ''
   return `${base} · latest ${ageText}${receipt}`
@@ -473,7 +475,7 @@ function staleNextStep(snapshot: KeeperCompositeSnapshot, latest: number | null)
   if (latest == null) {
     return 'turn 시작/keepalive 이벤트가 composite로 들어오는지 확인'
   }
-  if (snapshot.phase === 'Running') {
+  if (snapshot.phase === 'running') {
     return 'keeper keepalive와 turn 시작 이벤트 경로 확인'
   }
   return `phase=${snapshot.phase} 전환 또는 재시작 경로 확인`

@@ -1036,8 +1036,39 @@ let test_keeper_bash_task_state_file_probe_uses_task_tools () =
   (match parse_hint raw with
    | Some hint ->
      Alcotest.(check bool) "hint points to keeper_tasks_list" true
-       (String_util.contains_substring hint "keeper_tasks_list")
-   | None -> Alcotest.fail ("expected hint, got: " ^ raw))
+	       (String_util.contains_substring hint "keeper_tasks_list")
+	   | None -> Alcotest.fail ("expected hint, got: " ^ raw))
+
+let test_keeper_bash_unrelated_task_json_is_not_task_state_probe () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "repo-task-json" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  let src_dir = Filename.concat playground "src" in
+  ensure_dir src_dir;
+  let oc = open_out (Filename.concat src_dir ".task.json") in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc "{\"local\":true}\n");
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:
+        (`Assoc
+           [ ("cmd", `String "cat src/.task.json")
+           ; ("cwd", `String playground)
+           ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "unrelated .task.json read succeeds" true
+    (json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check (option string)) "not treated as task-state probe" None
+    (parse_error_field raw)
 
 let test_keeper_bash_safe_fallback_does_not_unblock_repo_scan () =
   with_eio_fs @@ fun () ->
@@ -1511,6 +1542,8 @@ let () =
         test_keeper_bash_safe_dev_null_redirect_executes_scoped_grep;
       Alcotest.test_case "task-state file probe uses task tools" `Quick
         test_keeper_bash_task_state_file_probe_uses_task_tools;
+      Alcotest.test_case "unrelated .task.json is normal file" `Quick
+        test_keeper_bash_unrelated_task_json_is_not_task_state_probe;
       Alcotest.test_case "safe fallback does not unblock repo scan" `Quick
         test_keeper_bash_safe_fallback_does_not_unblock_repo_scan;
       Alcotest.test_case "task-state localhost probe uses task tools" `Quick

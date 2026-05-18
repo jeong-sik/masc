@@ -691,21 +691,26 @@ let lowercase_contains haystack needle =
   loop 0
 
 let command_mentions_task_state_file cmd =
-  List.exists
-    (lowercase_contains cmd)
-    [ ".masc/backlog.json"
-    ; ".masc/state/backlog.json"
-    ; ".masc/tasks"
-    ; "current_task.json"
-    ; "repos/masc-mcp/.masc/backlog.json"
-    ; "repos/masc-mcp/.masc/tasks/backlog.json"
-    ; ".task.json"
-    ; "repos/masc-mcp/backlog.json"
-    ; "tasks/backlog.json"
-    ]
+  let task_json_probe =
+    lowercase_contains cmd ".task.json"
+    && (lowercase_contains cmd ".worktrees/" || lowercase_contains cmd ".masc/")
+  in
+  task_json_probe
+  || List.exists
+       (lowercase_contains cmd)
+       [ ".masc/backlog.json"
+       ; ".masc/state/backlog.json"
+       ; ".masc/tasks"
+       ; "current_task.json"
+       ; "repos/masc-mcp/.masc/backlog.json"
+       ; "repos/masc-mcp/.masc/tasks/backlog.json"
+       ; "repos/masc-mcp/backlog.json"
+       ; "tasks/backlog.json"
+       ]
 
 let command_looks_like_task_state_http_probe cmd =
-  ((lowercase_contains cmd "localhost" || lowercase_contains cmd "127.0.0.1")
+  ((lowercase_contains cmd "localhost"
+    || lowercase_contains cmd Masc_network_defaults.masc_http_default_host)
    && (lowercase_contains cmd "/api/tasks" || lowercase_contains cmd "api/tasks"))
 
 let command_looks_like_task_state_discovery cmd =

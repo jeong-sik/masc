@@ -226,4 +226,4 @@ let turn_progress_callbacks ~config ~keeper_name ~downstream =
     else None
   in
   let on_event = Some (registry_progress_on_event ~record_turn_progress downstream) in
-  (record_turn_progress, on_yield, on_resume, on_event)
+  (record_turn_progress, yield_on_tool, on_yield, on_resume, on_event)

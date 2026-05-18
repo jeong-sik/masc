@@ -29,7 +29,7 @@
     [record_runtime_mcp_keeper_trajectory],
     [read_only_retry_limit], [is_retryable_message],
     [read_only_retry_wait], [call_tool_with_readonly_retry],
-    [coerce_tool_timeout_sec],
+    timeout policy delegated to [Mcp_server_eio_tool_timeout],
     [resolve_managed_agent_call]).
 
     [tool_profile] is referenced by {!handle_call_tool_eio}

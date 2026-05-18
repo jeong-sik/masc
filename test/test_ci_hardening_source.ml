@@ -434,10 +434,13 @@ let test_pr_automation_draft_guard_contracts () =
   check bool "draft PRs always require verified approval" true
     (file_contains_pattern ".github/workflows/pr-automation.yml"
        "const approvalRequired =\n              current.isDraft ||\n              looksAgentAuthored ||\n              unsafeDraftBoundaryAction ||\n              hasAutoMergeRequest ||");
-  check bool "human-approved bypass waits for current-head CI Gate" true
+  check bool "human-approved bypass does not wait for sync CI Gate" true
     (file_contains_pattern ".github/workflows/pr-automation.yml"
-       "const ciGateRequiredForBypass =\n              verifiedBypassLabels.length > 0 ||\n              unsafeDraftBoundaryAction ||\n              hasAutoMergeRequest");
-  check bool "pr automation polls CI Gate before allowing bypass" true
+       "const ciGateRequiredForUnsafeBoundary =\n              unsafeDraftBoundaryAction ||\n              hasAutoMergeRequest");
+  check bool "pr automation does not use verified bypass as CI wait condition" true
+    (file_not_contains_pattern ".github/workflows/pr-automation.yml"
+       "verifiedBypassLabels.length > 0 ||\n              unsafeDraftBoundaryAction");
+  check bool "pr automation polls CI Gate before unsafe boundary" true
     (file_contains_pattern ".github/workflows/pr-automation.yml"
        "const latestCiGate = await waitForCiGate()");
   check bool "pr automation rejects missing or pending CI Gate" true

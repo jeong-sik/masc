@@ -448,6 +448,93 @@ let test_region_append_by_url_isolates_from_legacy () =
     check bool "legacy regions absent" false (Sys.file_exists legacy_path))
 ;;
 
+(* RFC-0128 PR-1e — content fallback + single-write invariant.
+
+   Before PR-1e, edit_file tool_calls with no diff/patch argument
+   produced zero regions in Ide_region_tracker.ingest_tool_call. The
+   missing record was previously synthesised by Ide_meta_sync.flush_regions,
+   which wrote to the Legacy partition while ingest_tool_call (post
+   PR-1c) wrote to the resolved partition — a double-write of the
+   same region across two buckets. PR-1e moves the content fallback
+   into ingest_tool_call itself and removes the meta_sync call site
+   from track_write_region, restoring a single source of truth. *)
+
+let count_lines path =
+  if not (Sys.file_exists path) then 0
+  else (
+    let ic = open_in path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+        let n = ref 0 in
+        try
+          while true do
+            ignore (input_line ic);
+            incr n
+          done;
+          !n
+        with End_of_file -> !n))
+;;
+
+let test_ingest_edit_file_content_fallback () =
+  with_temp_dir (fun base_dir ->
+    let slug = "github.com_owner_repo" in
+    (* edit_file with only path + content (no diff, no patch). Before
+       PR-1e this dropped regions silently. *)
+    let json =
+      `Assoc
+        [ "name", `String "edit_file"
+        ; "arguments"
+        , `Assoc
+            [ "path", `String "lib/foo.ml"
+            ; "content", `String "line one\nline two\nline three\n"
+            ; "old_string", `String "line one"
+            ; "new_string", `String "LINE ONE"
+            ]
+        ]
+    in
+    Region.ingest_tool_call
+      ~base_dir
+      ~partition:(Ide_paths.By_url slug)
+      ~keeper_id:"sangsu"
+      ~turn:1
+      json;
+    let by_url_path =
+      Region.regions_file ~base_dir ~partition:(Ide_paths.By_url slug) ()
+    in
+    check int "edit_file content fallback emits one region" 1 (count_lines by_url_path))
+;;
+
+let test_ingest_no_double_write () =
+  with_temp_dir (fun base_dir ->
+    let slug = "github.com_owner_repo" in
+    (* The same tool_call must produce exactly one region in the chosen
+       partition and zero in Legacy. Regression guard for the
+       meta_sync/ingest double-write that PR-1e closed. *)
+    let json =
+      `Assoc
+        [ "name", `String "write_file"
+        ; "arguments"
+        , `Assoc
+            [ "path", `String "lib/foo.ml"
+            ; "content", `String "alpha\nbeta\ngamma\n"
+            ]
+        ]
+    in
+    Region.ingest_tool_call
+      ~base_dir
+      ~partition:(Ide_paths.By_url slug)
+      ~keeper_id:"sangsu"
+      ~turn:0
+      json;
+    let by_url_path =
+      Region.regions_file ~base_dir ~partition:(Ide_paths.By_url slug) ()
+    in
+    let legacy_path = Region.regions_file ~base_dir () in
+    check int "by-url has one region" 1 (count_lines by_url_path);
+    check int "legacy has zero regions" 0 (count_lines legacy_path))
+;;
+
 let () =
   run
     "ide_annotations"
@@ -491,6 +578,14 @@ let () =
             "append_region By_url isolates from Legacy"
             `Quick
             test_region_append_by_url_isolates_from_legacy
+        ; test_case
+            "edit_file ingest content fallback emits one region (PR-1e)"
+            `Quick
+            test_ingest_edit_file_content_fallback
+        ; test_case
+            "ingest no double-write across partitions (PR-1e)"
+            `Quick
+            test_ingest_no_double_write
         ] )
     ]
 ;;

@@ -715,6 +715,15 @@ let task_state_shell_alternatives =
   ; "keeper_task_claim {}"
   ]
 
+let command_looks_like_search_pipeline cmd =
+  (lowercase_contains cmd "grep " || lowercase_contains cmd "rg ")
+  && lowercase_contains cmd "| head"
+
+let command_looks_like_cd_chained_search cmd =
+  lowercase_contains cmd "cd "
+  && lowercase_contains cmd "&&"
+  && (lowercase_contains cmd "grep " || lowercase_contains cmd "rg ")
+
 module For_testing = struct
   let elapsed_duration_ms = elapsed_duration_ms
 
@@ -756,9 +765,16 @@ let bash_shape_block_hint ~cmd = function
     "Use keeper_pr_status. If raw gh is the only visible status path, use gh \
      pr view NUMBER --repo OWNER/REPO --json \
      statusCheckRollup,mergeStateStatus,isDraft."
+  | Pipe_or_redirect when command_looks_like_search_pipeline cmd ->
+    "Do not pipe grep/rg through keeper_bash. Use keeper_shell op=rg with a \
+     scoped path and pattern instead; if the command starts with cd, pass that \
+     directory as cwd instead of using cd &&."
   | Pipe_or_redirect ->
     "Remove the pipe or redirect. Run the primary command once and summarize \
      the returned output; use keeper_shell op=head/tail for file slices."
+  | Chaining when command_looks_like_cd_chained_search cmd ->
+    "Do not prepend cd ... && to search commands. Pass the target repo or \
+     worktree as cwd and use keeper_shell op=rg with a scoped path."
   | Chaining ->
     "Split the work into separate keeper_bash calls and use the cwd argument \
      instead of cd chaining."
@@ -779,16 +795,31 @@ let bash_shape_block_alternatives ~cmd = function
        statusCheckRollup,mergeStateStatus,isDraft";
     ]
   | Pipe_or_redirect ->
-    [
-      "keeper_bash cmd='ls lib/'";
-      "keeper_shell op=head path=file/path lines=20";
-      "keeper_shell op=rg pattern=search-term path=dir/path";
-    ]
+    if command_looks_like_search_pipeline cmd
+    then
+      [
+        "keeper_shell op=rg pattern=search-term path=lib glob=*.ml";
+        "keeper_shell op=rg pattern=search-term path=repos/REPO/lib glob=*.ml";
+        "keeper_bash cmd='git status' cwd='repos/REPO'";
+      ]
+    else
+      [
+        "keeper_bash cmd='ls lib/'";
+        "keeper_shell op=head path=file/path lines=20";
+        "keeper_shell op=rg pattern=search-term path=dir/path";
+      ]
   | Chaining ->
-    [
-      "keeper_bash cmd='git status' cwd='repos/REPO'";
-      "keeper_bash cmd='git log -1' cwd='repos/REPO'";
-    ]
+    if command_looks_like_cd_chained_search cmd
+    then
+      [
+        "keeper_shell op=rg pattern=search-term path=lib glob=*.ml";
+        "keeper_bash cmd='git status' cwd='repos/REPO'";
+      ]
+    else
+      [
+        "keeper_bash cmd='git status' cwd='repos/REPO'";
+        "keeper_bash cmd='git log -1' cwd='repos/REPO'";
+      ]
   | Substitution ->
     [
       "keeper_bash cmd='rg --files lib'";
@@ -952,6 +983,29 @@ let handle_keeper_bash
          ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
          ())
   in
+  let task_state_file_probe_block () =
+    Yojson.Safe.to_string
+      (Exec_core.blocked_result_json
+         ~cmd
+         ~error:"task_state_file_probe_blocked"
+         ~reason:
+           "Task state is owned by the MASC task tools, not by guessed \
+            backlog/current-task files in keeper sandboxes."
+         ~hint:task_state_shell_hint
+         ~alternatives:task_state_shell_alternatives
+         ~retryability:Exec_core.Self_correct
+         ~diag:
+           (Some
+              { Exec_core.rule_id = "task_state_file_probe_blocked"
+              ; explanation =
+                  "Keepers must use task-state tools instead of cat/find/rg \
+                   against .masc backlog files or worktree .task.json files."
+              ; rewrite = Some task_state_shell_hint
+              ; tool_suggestion = Some "keeper_tasks_list"
+              })
+         ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
+         ())
+  in
   if cmd = ""
   then error_json "cmd is required. Good: cmd='ls -la lib/'. Bad: cmd=''."
   else if Env_config_keeper.KeeperSandbox.hard_mode ()
@@ -964,6 +1018,8 @@ let handle_keeper_bash
     | Some (tool_name, tool_policy_visible) ->
       direct_tool_command_block ~tool_policy_visible tool_name
     | None when cmd_contains_gh_pr_create cmd -> gh_pr_create_block ()
+    | None when command_mentions_task_state_file cmd ->
+      task_state_file_probe_block ()
     | None when command_looks_like_task_state_http_probe cmd ->
       task_state_http_probe_block ()
     | None -> begin

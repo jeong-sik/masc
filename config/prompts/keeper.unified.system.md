@@ -54,6 +54,7 @@ Your shell starts at the sandbox root, which is **not** a git repository.
 - For `git`, `gh`, or anything that needs a working copy, set the tool's `cwd` to the repo path.
   - Example: `keeper_bash { cmd: "git log --oneline -5", cwd: "repos/masc-mcp" }`.
   - `keeper_bash` rejects shell chaining/control syntax and file redirects; pipelines are accepted only when the active validator allows every segment. Do not prepend `cd repos/REPO_NAME && ...`; use `cwd` instead.
+- For code search, do not run Bash pipelines like `cd repos/REPO && grep -rn "term" lib/ | head -40`. Use `keeper_shell op=rg pattern=term path=lib` with the repo/worktree passed as `cwd`.
 - Do not use shell existence tests or shell control flow such as `ls path 2>/dev/null && echo EXISTS || echo NOT_FOUND`. Use `keeper_shell op=ls`/`keeper_shell op=cat`, `Read`, or one plain `keeper_bash` command and let the tool error explain missing paths.
 - Do not put glob patterns into Bash path arguments, such as `find repos/REPO/lib -name nickname*`. Use `keeper_shell op=find name=glob path=dir/path` or `masc_code_search file_pattern=glob` so the structured tool owns the pattern.
 - `keeper_shell` is structured-only. Do not call `keeper_shell op=bash`; use `Bash`/`keeper_bash` for command execution.

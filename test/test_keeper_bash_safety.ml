@@ -894,7 +894,7 @@ let test_keeper_bash_safe_fallback_works_for_write_enabled_keeper () =
   let playground = Filename.concat base_path (playground_path_of meta.name) in
   let worktree = Filename.concat playground "repos/masc-mcp/.worktrees/task-362" in
   ensure_dir worktree;
-  ignore (Fs_compat.save_file_atomic (Filename.concat worktree ".task.json") "{}");
+  ignore (Fs_compat.save_file_atomic (Filename.concat worktree "status.json") "{}");
   let raw =
     Keeper_exec_shell.handle_keeper_bash
       ~turn_sandbox_factory:None
@@ -904,7 +904,7 @@ let test_keeper_bash_safe_fallback_works_for_write_enabled_keeper () =
         (`Assoc
            [ ( "cmd"
              , `String
-                 "cat repos/masc-mcp/.worktrees/task-362/.task.json 2>/dev/null || echo \"NOT_FOUND\""
+                 "cat repos/masc-mcp/.worktrees/task-362/status.json 2>/dev/null || echo \"NOT_FOUND\""
              )
            ; ("cwd", `String playground)
            ])
@@ -918,6 +918,40 @@ let test_keeper_bash_safe_fallback_works_for_write_enabled_keeper () =
      |> Json.member "output"
      |> Json.to_string
      |> fun output -> String_util.contains_substring output "{}")
+
+let test_keeper_bash_task_state_file_probe_uses_task_tools () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "task-file-probe" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  ensure_dir playground;
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:
+        (`Assoc
+           [ ( "cmd"
+             , `String "cat repos/masc-mcp/.worktrees/task-362/.task.json"
+             )
+           ; ("cwd", `String playground)
+           ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check (option string)) "task file probe is blocked"
+    (Some "task_state_file_probe_blocked") (parse_error_field raw);
+  Alcotest.(check string) "suggested tool"
+    "keeper_tasks_list"
+    (json |> Json.member "diagnosis" |> Json.member "tool_suggestion" |> Json.to_string);
+  (match parse_hint raw with
+   | Some hint ->
+     Alcotest.(check bool) "hint points to keeper_tasks_list" true
+       (String_util.contains_substring hint "keeper_tasks_list")
+   | None -> Alcotest.fail ("expected hint, got: " ^ raw))
 
 let test_keeper_bash_safe_fallback_does_not_unblock_repo_scan () =
   with_eio_fs @@ fun () ->
@@ -982,6 +1016,39 @@ let test_keeper_bash_task_state_http_probe_uses_task_tools () =
    | Some hint ->
      Alcotest.(check bool) "hint points to keeper_tasks_list" true
        (String_util.contains_substring hint "keeper_tasks_list")
+   | None -> Alcotest.fail ("expected hint, got: " ^ raw))
+
+let test_keeper_bash_search_pipeline_hint_uses_structured_rg () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "search-pipeline" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  ensure_dir playground;
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:
+        (`Assoc
+           [ ( "cmd"
+             , `String
+                 "cd repos/masc-mcp && grep -rn \"exec_semantic\" lib/ --include=\"*.ml\" | head -40"
+             )
+           ; ("cwd", `String playground)
+           ])
+      ()
+  in
+  Alcotest.(check (option string)) "search pipeline is command-shape blocked"
+    (Some "keeper_bash_command_shape_blocked") (parse_error_field raw);
+  (match parse_hint raw with
+   | Some hint ->
+     Alcotest.(check bool) "hint points to structured rg" true
+       (String_util.contains_substring hint "keeper_shell op=rg");
+     Alcotest.(check bool) "hint mentions cwd" true
+       (String_util.contains_substring hint "cwd")
    | None -> Alcotest.fail ("expected hint, got: " ^ raw))
 
 let test_keeper_shell_ls_recovers_doubled_playground_prefix () =
@@ -1350,10 +1417,14 @@ let () =
         test_keeper_bash_safe_dev_null_echo_fallback_executes_primary;
       Alcotest.test_case "safe fallback works for write-enabled keeper" `Quick
         test_keeper_bash_safe_fallback_works_for_write_enabled_keeper;
+      Alcotest.test_case "task-state file probe uses task tools" `Quick
+        test_keeper_bash_task_state_file_probe_uses_task_tools;
       Alcotest.test_case "safe fallback does not unblock repo scan" `Quick
         test_keeper_bash_safe_fallback_does_not_unblock_repo_scan;
       Alcotest.test_case "task-state localhost probe uses task tools" `Quick
         test_keeper_bash_task_state_http_probe_uses_task_tools;
+      Alcotest.test_case "search pipeline hint uses structured rg" `Quick
+        test_keeper_bash_search_pipeline_hint_uses_structured_rg;
       Alcotest.test_case "doubled playground prefix auto-recovers" `Quick
         test_keeper_shell_ls_recovers_doubled_playground_prefix;
       Alcotest.test_case "op=bash is deprecated" `Quick

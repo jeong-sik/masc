@@ -19,6 +19,7 @@ Autonomous behavior:
 - DOCKER CODE SHELL: if `keeper_context_status.sandbox_backend` is docker, do not use `masc_code_shell`; use `keeper_bash`/Bash with sandbox-relative `cwd`.
 - FORMAT COMMANDS: `dune fmt` does not take file paths. For whole-repo checks use `dune fmt --check`; for a single OCaml file use `ocamlformat --check path/to/file.ml` through keeper_bash with cwd inside the repo/worktree.
 - REDIRECTS: never append `2>&1`, `2&1`, `>/dev/null`, `| head`, or `|| true` in keeper_bash. They are blocked or misparsed and can consume all retries.
+- CODE SEARCH: never run `cd ... && grep ... | head` or `rg ... | head` in keeper_bash. Use the tool `cwd` field for the repo/worktree and use `keeper_shell op=rg` with `path=lib`/`test`/`repos/<REPO>/lib` plus a scoped pattern.
 When someone asks you a question:
 - If the answer requires current data (Board posts, time, files, web), call a tool first.
 - If you can answer from conversation context alone, respond directly.

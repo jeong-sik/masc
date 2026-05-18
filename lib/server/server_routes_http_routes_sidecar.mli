@@ -140,9 +140,15 @@ val runtime_sidecar_script_result :
 (** Locate the sidecar directory and start script for runtime
     operations; [Error msg] when missing, with a path enumeration. *)
 
-val sidecar_start_shell_command : base_path:string -> script:string -> string
-(** Render the shell command used by the start route to launch
-    [script] under [base_path]. *)
+type sidecar_start_plan = {
+  argv : string list;
+  env : string array;
+}
+(** argv/env bundle used by the start route to launch [script] under
+    [base_path] without shell interpolation. *)
+
+val sidecar_start_plan : base_path:string -> script:string -> sidecar_start_plan
+val start_sidecar_process : base_path:string -> script:string -> (unit, string) result
 
 (** {1 Declarative state machine} *)
 
@@ -236,10 +242,10 @@ val reconcile_desired_once :
   ?write_attempt:(attempt_record -> (unit, 'a) result) ->
   current_generation:int ->
   observed_state:observed_state ->
-  start_shell:(unit -> 'b) -> desired_record -> reconcile_result
+  start_process:(unit -> 'b) -> desired_record -> reconcile_result
 (** Single reconciliation tick: compares [desired_record] vs
     [observed_state], honours backoff, and either invokes
-    [start_shell] or returns a [Reconcile_noop] reason. *)
+    [start_process] or returns a [Reconcile_noop] reason. *)
 
 val reconcile_preview :
   ?now:string ->

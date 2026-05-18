@@ -3,3 +3,9 @@ lib/masc_pb.ml
 # Cross-cascade fallback logic (provider selection, health-aware routing).
 # Targeted extraction to a dedicated module is tracked in TODO_TECH_DEBT.md.
 lib/oas_worker_named.ml
+# Legacy process/sidecar godfiles touched by the shell-free sidecar start fix.
+# Follow-up: extract detached process spawn and sidecar lifecycle routing into
+# focused modules so these no longer need changed-file line-cap exceptions.
+lib/process/process_eio.ml
+lib/server/server_routes_http_routes_sidecar.ml
+test/test_sidecar_lifecycle_routes.ml

@@ -749,6 +749,12 @@ type detached_handle = {
   started_at : float;
 }
 
+type detached_devnull_handle = {
+  devnull_pid : int;
+  devnull_pgid : int;
+  devnull_started_at : float;
+}
+
 let spawn_detached ~argv ~env ~cwd =
   match argv with
   | [] -> Error "spawn_detached: empty argv"
@@ -844,6 +850,60 @@ let spawn_detached ~argv ~env ~cwd =
            cleanup_setup_fds ();
            Error
              (Printf.sprintf "spawn_detached %s: %s" bin
+                (Printexc.to_string exn)))
+
+let spawn_detached_devnull ~argv ~env ~cwd =
+  match argv with
+  | [] -> Error "spawn_detached_devnull: empty argv"
+  | bin :: _ ->
+      let devnull_ref = ref None in
+      let cleanup_setup_fds () =
+        match !devnull_ref with
+        | None -> ()
+        | Some fd ->
+            close_quietly fd;
+            devnull_ref := None
+      in
+      (try
+         let devnull =
+           Unix.openfile "/dev/null" [ Unix.O_RDWR; Unix.O_CLOEXEC ] 0
+         in
+         devnull_ref := Some devnull;
+         let pid = Unix.fork () in
+         if pid = 0 then begin
+           Safe_ops.protect ~default:() (fun () -> ignore (Unix.setsid ()));
+           (try
+              if cwd <> "" then Unix.chdir cwd
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | _ -> Unix._exit 126);
+           Unix.dup2 devnull Unix.stdin;
+           Unix.dup2 devnull Unix.stdout;
+           Unix.dup2 devnull Unix.stderr;
+           Unix.close devnull;
+           (try Unix.execvpe bin (Array.of_list argv) env
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | _ -> Unix._exit 127)
+         end else begin
+           cleanup_setup_fds ();
+           Ok
+             {
+               devnull_pid = pid;
+               devnull_pgid = pid;
+               devnull_started_at = Unix.gettimeofday ();
+             }
+         end
+       with
+       | Unix.Unix_error (err, fn, arg) ->
+           cleanup_setup_fds ();
+           Error
+             (Printf.sprintf "spawn_detached_devnull %s: %s (%s %s)"
+                bin (Unix.error_message err) fn arg)
+       | exn ->
+           cleanup_setup_fds ();
+           Error
+             (Printf.sprintf "spawn_detached_devnull %s: %s" bin
                 (Printexc.to_string exn)))
 
 let is_pgid_alive ~pgid =

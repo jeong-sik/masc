@@ -891,6 +891,8 @@ let spawn_detached_devnull ~argv ~env ~cwd =
              {
                devnull_pid = pid;
                devnull_pgid = pid;
+               (* NDT-OK: detached process lifecycle telemetry records wall-clock
+                  start time; command behavior remains process-boundary driven. *)
                devnull_started_at = Unix.gettimeofday ();
              }
          end

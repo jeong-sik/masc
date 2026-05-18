@@ -192,6 +192,8 @@ let parse_repository_json body_str =
                 name = inferred_name;
                 url;
                 local_path =
+                  (* RFC-0121 §6 deferred: same TOML-default cwd-relative
+                     semantics as Repo_store.default_local_path. *)
                   Option.value ~default:(Filename.concat ".masc/repos" id)
                     raw_local_path;
                 aliases;

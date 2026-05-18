@@ -107,8 +107,9 @@ let credential_of_json (json : Yojson.Safe.t) :
   | _ -> Error "expected JSON object body"
 
 let default_github_gh_config_dir ~base_path ~credential_id =
+  (* RFC-0121: layout SSOT via [Config_dir_resolver]. *)
   Filename.concat
-    (Filename.concat base_path ".masc/github-identities")
+    (Config_dir_resolver.github_identities_dir ~base_path)
     (Filename.concat credential_id "gh")
 
 let apply_base_path_defaults ~base_path

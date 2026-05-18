@@ -3,11 +3,17 @@ open Repo_manager_types
 let ( let* ) = Result.bind
 
 let repos_toml_path base_path =
-  Filename.concat base_path ".masc/config/repositories.toml"
+  (* RFC-0121: layout SSOT via [Config_dir_resolver]. Byte-equal to the
+     previous direct concat (test_rfc0121_repositories_toml). *)
+  Config_dir_resolver.repositories_toml_path ~base_path
 
 let repositories_toml_exists base_path =
   Sys.file_exists (repos_toml_path base_path)
 
+(* NB: [default_local_path] returns a cwd-relative path because it is the
+   default value for the [local_path] field in repositories.toml; the
+   on-disk TOML representation is cwd/base-path-relative by design.
+   Resolver routing for this default is deferred — see RFC-0121 §6. *)
 let default_local_path id = Filename.concat ".masc/repos" id
 
 let now_unix_seconds () = Int64.of_float (Unix.time ())

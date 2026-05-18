@@ -5,7 +5,8 @@ let ( let* ) = Result.bind
 let logged_mapping_errors : (string, unit) Hashtbl.t = Hashtbl.create 4
 
 let mappings_toml_path base_path =
-  Filename.concat base_path ".masc/config/keeper_repo_mappings.toml"
+  (* RFC-0121: layout SSOT via [Config_dir_resolver]. *)
+  Config_dir_resolver.keeper_repo_mappings_toml_path ~base_path
 
 let ensure_dir path =
   let rec loop dir =

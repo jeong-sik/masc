@@ -420,6 +420,14 @@ let test_validate_code_shell_command_allows_grep () =
   check (result unit string) "grep allowed" (Ok ())
     (Tool_code_write.validate_code_shell_command "grep -R -n TODO lib")
 
+let test_validate_code_shell_command_allows_quoted_regex_alternation () =
+  check (result unit string) "quoted rg alternation allowed" (Ok ())
+    (Tool_code_write.validate_code_shell_command
+       "rg \"tool_policy\\|tool_preset\\|preset_policy\\|toolset\" --type=ml -l");
+  check (result unit string) "quoted alternation before real pipe allowed" (Ok ())
+    (Tool_code_write.validate_code_shell_command
+       "rg 'keeper.*tool|tool.*keeper' --type=ml -l | head -20")
+
 let test_validate_code_shell_command_uses_code_shell_allowlist_hint () =
   match Tool_code_write.validate_code_shell_command "python3 --version" with
   | Error reason ->
@@ -864,6 +872,8 @@ let () =
         test_validate_code_shell_command_rejects_direct_dune;
       test_case "allows grep" `Quick
         test_validate_code_shell_command_allows_grep;
+      test_case "allows quoted regex alternation" `Quick
+        test_validate_code_shell_command_allows_quoted_regex_alternation;
       test_case "uses code shell allowlist hint" `Quick
         test_validate_code_shell_command_uses_code_shell_allowlist_hint;
       test_case "rejects semicolon" `Quick

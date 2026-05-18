@@ -133,6 +133,44 @@ jobs:
             const presentBypassLabels = labels.filter((label) => bypassLabelSet.has(label));
             const bypassPolicyFailures = [];
             const verifiedBypassLabels = [];
+            const unverifiedBypassLabels = [];
+            const approvalGateMarker = "<!-- masc-human-approval-gate -->";
+            let issueCommentsCache = null;
+            const loadIssueComments = async () => {
+              if (issueCommentsCache !== null) return issueCommentsCache;
+              issueCommentsCache = await github.paginate(github.rest.issues.listComments, {
+                owner,
+                repo,
+                issue_number: pullNumber,
+                per_page: 100
+              });
+              return issueCommentsCache;
+            };
+            const findApprovalGateNear = async (label, labeledAt, previousLabelEventAt) => {
+              const labeledAtMs = Date.parse(labeledAt || "");
+              if (!Number.isFinite(labeledAtMs)) return undefined;
+              const previousLabelEventAtMs = Date.parse(previousLabelEventAt || "");
+              const labelLiteral = `\`${label}\``;
+              const approvalGateWindowMs = 5 * 60 * 1000;
+              const comments = await loadIssueComments();
+              return [...comments].reverse().find((comment) => {
+                const body = comment.body || "";
+                const commentAtMs = Date.parse(comment.created_at || "");
+                const afterPreviousLabelCycle =
+                  !Number.isFinite(previousLabelEventAtMs) ||
+                  commentAtMs > previousLabelEventAtMs;
+                const withinCurrentLabelCycle =
+                  commentAtMs >= labeledAtMs &&
+                  commentAtMs <= labeledAtMs + approvalGateWindowMs;
+                return comment.user?.type === "Bot" &&
+                  Number.isFinite(commentAtMs) &&
+                  afterPreviousLabelCycle &&
+                  withinCurrentLabelCycle &&
+                  body.includes(approvalGateMarker) &&
+                  body.toLowerCase().includes(labelLiteral) &&
+                  body.includes("/actions/runs/");
+              });
+            };
             if (presentBypassLabels.length > 0) {
               const events = await github.paginate(github.rest.issues.listEvents, {
                 owner,
@@ -141,22 +179,32 @@ jobs:
                 per_page: 100
               });
               for (const label of presentBypassLabels) {
-                const latest = [...events].reverse().find((event) =>
+                const matchingEvents = events.filter((event) =>
                   (event.event === "labeled" || event.event === "unlabeled") &&
                   event.label?.name?.toLowerCase() === label
                 );
-                const actor = latest?.actor;
-                const actorName = actor?.login?.toLowerCase();
+                const latestIndex = matchingEvents.length - 1;
+                const latest = latestIndex >= 0 ? matchingEvents[latestIndex] : undefined;
                 if (!latest) {
                   bypassPolicyFailures.push(`${label}: no label event found`);
+                  unverifiedBypassLabels.push(label);
                 } else if (latest.event !== "labeled") {
                   bypassPolicyFailures.push(`${label}: latest event is ${latest.event}`);
-                } else if (actor?.type !== "User") {
-                  bypassPolicyFailures.push(`${label}: actor ${actor?.login || "(unknown)"} is ${actor?.type || "unknown"}, not User`);
-                } else if (!humanActors.includes(actorName)) {
-                  bypassPolicyFailures.push(`${label}: actor ${actor.login} is not in AGENT_DRAFT_GUARD_HUMAN_ACTORS`);
+                  unverifiedBypassLabels.push(label);
                 } else {
-                  verifiedBypassLabels.push(`${label} by ${actor.login}`);
+                  const previousLabelEvent =
+                    latestIndex > 0 ? matchingEvents[latestIndex - 1] : undefined;
+                  const approvalGate = await findApprovalGateNear(
+                    label,
+                    latest.created_at,
+                    previousLabelEvent?.created_at
+                  );
+                  if (!approvalGate) {
+                    bypassPolicyFailures.push(`${label}: missing environment-gated approval for latest label event`);
+                    unverifiedBypassLabels.push(label);
+                  } else {
+                    verifiedBypassLabels.push(`${label} via environment gate`);
+                  }
                 }
               }
             }
@@ -285,6 +333,38 @@ jobs:
               softFailures.push(`${actionName}: ${summary}`);
               core.info(`Draft PR guard soft-failure (${actionName}): ${summary}`);
             };
+
+            for (const label of [...new Set(unverifiedBypassLabels)]) {
+              try {
+                await github.rest.issues.removeLabel({
+                  owner,
+                  repo,
+                  issue_number: pullNumber,
+                  name: label
+                });
+                actions.push(`removed unverified bypass label ${label}`);
+              } catch (error) {
+                if (error?.status === 404) {
+                  recordSoftFailure(`remove unverified bypass label ${label}`, error);
+                } else {
+                  recordFailure(`remove unverified bypass label ${label}`, error);
+                }
+              }
+            }
+
+            if (unverifiedBypassLabels.length > 0 && hardStopLabels.length > 0) {
+              try {
+                await github.rest.issues.addLabels({
+                  owner,
+                  repo,
+                  issue_number: pullNumber,
+                  labels: hardStopLabels
+                });
+                actions.push(`reapplied hard-stop labels: ${hardStopLabels.join(", ")}`);
+              } catch (error) {
+                recordFailure("reapply hard-stop labels", error);
+              }
+            }
 
             const latestCiGateForHead = async () => {
               const checks = await github.rest.checks.listForRef({
@@ -438,12 +518,7 @@ jobs:
                   ]
                 : [])
             ].join("\n");
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              owner,
-              repo,
-              issue_number: pullNumber,
-              per_page: 100
-            });
+            const comments = await loadIssueComments();
             const existing = comments.find((comment) =>
               comment.user?.type === "Bot" && comment.body?.includes(marker)
             );

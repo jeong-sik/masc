@@ -1064,6 +1064,152 @@ jobs:
             if [ -n "$live_state" ]; then
               export PR_LIVE_STATE="$live_state"
             fi
+            export PR_EFFECTIVE_LABELS="${PR_LIVE_LABELS:-$PR_LABELS}"
+            fetch_approval_comments() {
+              local output_file="$1"
+              local after=""
+              local page=""
+              : > "$output_file"
+              while :; do
+                local args=(-f owner="${GITHUB_REPOSITORY%/*}" -f repo="${GITHUB_REPOSITORY#*/}" -F number="$PR_NUMBER")
+                if [ -n "$after" ]; then
+                  args+=(-f after="$after")
+                else
+                  args+=(-F after=null)
+                fi
+                page="$(
+                  gh api graphql "${args[@]}" \
+                    -f query='
+                      query($owner: String!, $repo: String!, $number: Int!, $after: String) {
+                        repository(owner: $owner, name: $repo) {
+                          pullRequest(number: $number) {
+                            comments(first: 100, after: $after) {
+                              pageInfo { hasNextPage endCursor }
+                              nodes {
+                                body
+                                createdAt
+                                author { __typename login }
+                              }
+                            }
+                          }
+                        }
+                      }'
+                )"
+                printf '%s\n' "$page" | jq -c '.data.repository.pullRequest.comments.nodes[]' >> "$output_file"
+                if [ "$(printf '%s\n' "$page" | jq -r '.data.repository.pullRequest.comments.pageInfo.hasNextPage')" != "true" ]; then
+                  break
+                fi
+                after="$(printf '%s\n' "$page" | jq -r '.data.repository.pullRequest.comments.pageInfo.endCursor // ""')"
+                if [ -z "$after" ]; then
+                  break
+                fi
+              done
+            }
+            fetch_approval_label_events() {
+              local output_file="$1"
+              local after=""
+              local page=""
+              : > "$output_file"
+              while :; do
+                local args=(-f owner="${GITHUB_REPOSITORY%/*}" -f repo="${GITHUB_REPOSITORY#*/}" -F number="$PR_NUMBER")
+                if [ -n "$after" ]; then
+                  args+=(-f after="$after")
+                else
+                  args+=(-F after=null)
+                fi
+                page="$(
+                  gh api graphql "${args[@]}" \
+                    -f query='
+                      query($owner: String!, $repo: String!, $number: Int!, $after: String) {
+                        repository(owner: $owner, name: $repo) {
+                          pullRequest(number: $number) {
+                            timelineItems(first: 100, after: $after, itemTypes: [LABELED_EVENT, UNLABELED_EVENT]) {
+                              pageInfo { hasNextPage endCursor }
+                              nodes {
+                                __typename
+                                ... on LabeledEvent {
+                                  createdAt
+                                  label { name }
+                                }
+                                ... on UnlabeledEvent {
+                                  createdAt
+                                  label { name }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }'
+                )"
+                printf '%s\n' "$page" | jq -c '.data.repository.pullRequest.timelineItems.nodes[]' >> "$output_file"
+                if [ "$(printf '%s\n' "$page" | jq -r '.data.repository.pullRequest.timelineItems.pageInfo.hasNextPage')" != "true" ]; then
+                  break
+                fi
+                after="$(printf '%s\n' "$page" | jq -r '.data.repository.pullRequest.timelineItems.pageInfo.endCursor // ""')"
+                if [ -z "$after" ]; then
+                  break
+                fi
+              done
+            }
+            approval_gate_payload="$(
+              comments_file="$(mktemp "${RUNNER_TEMP:-/tmp}/masc-approval-comments.XXXXXX")"
+              events_file="$(mktemp "${RUNNER_TEMP:-/tmp}/masc-approval-label-events.XXXXXX")"
+              trap 'rm -f "$comments_file" "$events_file"' EXIT
+              fetch_approval_comments "$comments_file"
+              fetch_approval_label_events "$events_file"
+              jq -n --slurpfile comments "$comments_file" --slurpfile timeline "$events_file" \
+                '{data:{repository:{pullRequest:{comments:{nodes:$comments}, timelineItems:{nodes:$timeline}}}}}'
+            )" || approval_gate_payload=""
+            approval_gate_present="$(
+              if [ -n "$approval_gate_payload" ]; then
+                printf '%s\n' "$approval_gate_payload" | jq -r '
+                  def csv($s):
+                    ($s // "")
+                    | split(",")
+                    | map(gsub("^\\s+|\\s+$"; "") | ascii_downcase | select(length > 0));
+                  def event_label:
+                    (.label.name // "" | ascii_downcase);
+                  def event_kind:
+                    if .__typename == "LabeledEvent" then "labeled"
+                    elif .__typename == "UnlabeledEvent" then "unlabeled"
+                    else ""
+                    end;
+                  def marker_for($root; $label; $label_ts; $previous_label_ts):
+                    any($root.data.repository.pullRequest.comments.nodes[];
+                      (.author.__typename == "Bot") and
+                      ((.body // "") | contains("<!-- masc-human-approval-gate -->")) and
+                      (((.body // "") | ascii_downcase) | contains("`" + $label + "`")) and
+                      ((.body // "") | contains("/actions/runs/")) and
+                      ((.createdAt | fromdateiso8601) as $comment_ts |
+                        (($previous_label_ts == null) or ($comment_ts > $previous_label_ts)) and
+                        ($comment_ts >= $label_ts and $comment_ts <= ($label_ts + 300)))
+                    );
+                  . as $root
+                  |
+                  (csv(env.PR_EFFECTIVE_LABELS)) as $present_labels
+                  | (csv(env.AGENT_DRAFT_GUARD_BYPASS_LABELS // "human-approved-ready")
+                     | map(select(. != "allow-auto-merge"))) as $bypass_labels
+                  | any($bypass_labels[]; . as $label |
+                      ($present_labels | index($label)) and
+                      (([$root.data.repository.pullRequest.timelineItems.nodes[]
+                         | select(event_label == $label)]) as $label_events
+                       | ($label_events | last) as $latest
+                       | ($latest != null)
+                         and (($latest | event_kind) == "labeled")
+                         and ((if ($label_events | length) > 1
+                               then ($label_events[($label_events | length) - 2].createdAt | fromdateiso8601)
+                               else null
+                               end) as $previous_label_ts
+                              | (($latest.createdAt | fromdateiso8601) as $label_ts |
+                                  marker_for($root; $label; $label_ts; $previous_label_ts)))))
+                ' 2>/dev/null || echo false
+              else
+                echo false
+              fi
+            )"
+            if printf '%s\n' "$approval_gate_present" | grep -qx true; then
+              export PR_HUMAN_APPROVAL_GATE_PRESENT=true
+            fi
           fi
           scripts/ci/check-agent-draft-policy.sh
 

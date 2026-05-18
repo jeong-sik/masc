@@ -123,6 +123,7 @@ let next_fail_open_cascade_for_turn
 
 let sdk_error_kind = function
   | Agent_sdk.Error.Api _ -> "api"
+  | Agent_sdk.Error.Provider _ -> "provider"
   | Agent_sdk.Error.Agent _ -> "agent"
   | Agent_sdk.Error.Mcp _ -> "mcp"
   | Agent_sdk.Error.Config _ -> "config"

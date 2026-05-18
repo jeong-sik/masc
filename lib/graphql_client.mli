@@ -8,6 +8,10 @@ val graphql_url : unit -> string
 
 val request : ?timeout_sec:float -> ?fallback:bool -> string -> (string, string) result
 
+module For_testing : sig
+  val is_transport_error : string -> bool
+end
+
 (** {1 GraphQL Response Parsing} *)
 
 (** Validate that the HTTP body is non-empty and looks like JSON.

@@ -136,6 +136,7 @@ let is_transport_error msg =
   List.exists
     has
     [ "eio net not initialized"
+    ; "switch accessed from wrong domain"
     ; "connection refused"
     ; "name resolution"
     ; "dns"
@@ -186,6 +187,10 @@ let request ?(timeout_sec = 10.0) ?(fallback = true) body : (string, string) res
     request_curl ~timeout_sec body
   | Error _ as err -> err
 ;;
+
+module For_testing = struct
+  let is_transport_error = is_transport_error
+end
 
 (** {1 GraphQL Response Parsing} *)
 

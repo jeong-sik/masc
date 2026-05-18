@@ -115,6 +115,7 @@ let run_gh_pr_list_with_gate ?clock ~branch argv =
       ~tool_name:github_gate_tool_name
       ~arguments:(`Assoc [ "branch", `String branch ])
       ~is_read_only:true
+      ~wait_timeout_override_sec:0.05
       ~on_reject:(fun message ->
         Log.Dashboard.warn
           "dashboard_worktree_status.query_pr_for_branch: github lane saturated for %s: %s"

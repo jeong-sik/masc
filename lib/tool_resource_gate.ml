@@ -403,7 +403,14 @@ let gate_timeout_message gate wait_timeout =
     gate.env_var
 ;;
 
-let with_permit_raw ~clock ~tool_name ~arguments ~is_read_only ~on_reject f =
+let with_permit_raw
+      ?wait_timeout_override_sec
+      ~clock
+      ~tool_name
+      ~arguments
+      ~is_read_only
+      ~on_reject
+      f =
   let resource_class = classify ~tool_name ~arguments ~is_read_only in
   if (not (enabled ())) || resource_class = Ungated
   then f ()
@@ -411,7 +418,11 @@ let with_permit_raw ~clock ~tool_name ~arguments ~is_read_only ~on_reject f =
     match gate_for_class resource_class with
     | None -> f ()
     | Some gate ->
-      let wait_timeout = wait_timeout_sec () in
+      let wait_timeout =
+        match wait_timeout_override_sec with
+        | Some seconds -> max 0.001 seconds
+        | None -> wait_timeout_sec ()
+      in
       Atomic.incr gate.waiting;
       let acquired =
         try

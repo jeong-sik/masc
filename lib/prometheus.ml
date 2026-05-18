@@ -1060,6 +1060,11 @@ let init () =
      write queue is full. No labels."
     Counter;
   add
+    metric_keeper_tool_call_log_queue_dropped
+    "Total full-I/O keeper tool-call log records dropped because the bounded \
+     async write queue is full. No labels."
+    Counter;
+  add
     metric_tool_keeper_cache_cas_conflicts
     "Total tool_keeper.cached_text_by_key Atomic CAS retry events. Each \
      increment corresponds to one extra compute() call. No labels."

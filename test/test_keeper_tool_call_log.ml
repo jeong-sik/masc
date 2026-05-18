@@ -8,6 +8,12 @@ let eio_test name fn =
     Fs_compat.set_fs (Eio.Stdenv.fs env);
     fn ())
 
+let eio_env_test name fn =
+  Alcotest.test_case name `Quick (fun () ->
+    Eio_main.run @@ fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    fn env)
+
 let counter = ref 0
 
 let with_tmp_log f =
@@ -883,6 +889,43 @@ let test_string_input_keeps_action_radius () =
       Alcotest.(check string) "non-object input has tool target" "tool" target_kind
     | _ -> Alcotest.fail "expected exactly one entry")
 
+let test_async_append_defers_until_flush env =
+  with_tmp_log_dir (fun _dir ->
+    Eio.Switch.run (fun sw ->
+      Keeper_tool_call_log.start_flush_fiber
+        ~sw
+        ~clock:(Eio.Stdenv.clock env);
+      Keeper_tool_call_log.log_call
+        ~keeper_name:"async-k"
+        ~tool_name:"masc_status"
+        ~input:(`Assoc [])
+        ~output_text:"ok"
+        ~success:true
+        ~duration_ms:1.0
+        ();
+      Alcotest.(check int)
+        "record queued before background flush"
+        1
+        (Keeper_tool_call_log.queued_count_for_testing ());
+      Alcotest.(check int)
+        "queued record not visible before explicit flush"
+        0
+        (List.length (Keeper_tool_call_log.read_recent ~n:1 ()));
+      Keeper_tool_call_log.flush_now ();
+      Alcotest.(check int)
+        "queue drained by explicit flush"
+        0
+        (Keeper_tool_call_log.queued_count_for_testing ());
+      let entries = Keeper_tool_call_log.read_recent ~n:1 () in
+      Alcotest.(check int) "record persisted after flush" 1 (List.length entries);
+      match entries with
+      | [ entry ] ->
+        Alcotest.(check (option string))
+          "keeper persisted"
+          (Some "async-k")
+          (Safe_ops.json_string_opt "keeper" entry)
+      | _ -> Alcotest.fail "expected exactly one entry"))
+
 let () =
   Alcotest.run "keeper_tool_call_log"
     [ ( "read_recent",
@@ -935,5 +978,9 @@ let () =
     ; ( "action_radius",
         [ eio_test "string input does not break action radius"
             test_string_input_keeps_action_radius
+        ] )
+    ; ( "async_append",
+        [ eio_env_test "append queues until flush when async fiber is active"
+            test_async_append_defers_until_flush
         ] )
     ]

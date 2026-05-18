@@ -174,6 +174,12 @@ let metric_tool_join_required_guard = "masc_tool_join_required_guard_total"
 let metric_tool_metrics_persist_dropped =
   "masc_tool_metrics_persist_dropped_total"
 
+(* keeper_tool_call_log async append queue overflow.
+   Counts full-I/O tool-call records dropped because the bounded
+   best-effort queue is full. No labels (single source). *)
+let metric_keeper_tool_call_log_queue_dropped =
+  "masc_keeper_tool_call_log_queue_dropped_total"
+
 (* tool_keeper.cached_text_by_key CAS conflicts.
    Incremented once per recursive retry caused by an
    [Atomic.compare_and_set cache_ref] failure in the helper.  Each

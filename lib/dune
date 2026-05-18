@@ -150,6 +150,8 @@
   cascade_wire_overlay
   cascade_http_probe_url
   cascade_agent_context
+  cascade_health_tracker_config
+  cascade_metrics_registry
   keeper_oas_checkpoint
   keeper_cascade_engine
   keeper_turn_driver

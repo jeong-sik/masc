@@ -185,10 +185,13 @@ export function deriveKeeperLiveTruth({
     ?? keeper.presence_keepalive
     ?? (linkedState !== 'offline')
   const activeTurn = compositeSnapshot?.is_live === true || !isIdleTurnPhase(compositeSnapshot?.turn_phase)
+  const previousExecutionReceipt =
+    compositeSnapshot?.runtime_attention?.stale_execution_receipt === true
+    || compositeSnapshot?.runtime_attention?.execution_current === false
   const blocked =
     compositeSnapshot?.runtime_attention?.blocked === true
     || compositeSnapshot?.runtime_attention?.needs_attention === true
-    || Boolean(keeper.runtime_blocker_class)
+    || (!previousExecutionReceipt && Boolean(keeper.runtime_blocker_class))
   const stopRequested =
     compositeSnapshot?.runtime_attention?.fiber_stop_requested === true
     || compositeSnapshot?.phase_diagnosis?.conditions.stop_requested === true

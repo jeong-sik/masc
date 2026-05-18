@@ -162,11 +162,7 @@ is_absolute_path() {
 }
 
 default_base_path() {
-    if [ -n "${HOME:-}" ] && [ -d "$HOME/me" ]; then
-        printf '%s\n' "$HOME/me"
-    else
-        printf '%s\n' "$SCRIPT_DIR"
-    fi
+    printf ''
 }
 
 # Resolve a path to its git-root equivalent (worktree-aware).
@@ -674,8 +670,12 @@ if [ "$BASE_PATH_EXPLICIT" = "1" ]; then
     BASE_PATH_RESOLUTION_SOURCE="explicit_cli"
 elif [ "$MASC_BASE_PATH_WAS_SET" = "1" ] && is_absolute_path "$BASE_PATH"; then
     BASE_PATH_RESOLUTION_SOURCE="explicit_env"
-elif [ -z "${MASC_BASE_PATH:-}" ] && [ -n "${HOME:-}" ] && [ "$BASE_PATH" = "$HOME/me" ]; then
-    BASE_PATH_RESOLUTION_SOURCE="implicit_home_me"
+fi
+
+if [ -z "$BASE_PATH" ]; then
+    echo "Error: MASC base path is required; pass --base-path PATH or set MASC_BASE_PATH." >&2
+    echo "Refusing to infer a runtime root from HOME; runtime data must live under <base-path>/.masc." >&2
+    exit 2
 fi
 
 if [ "$PORT_EXPLICIT" != "1" ]; then

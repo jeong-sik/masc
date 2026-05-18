@@ -312,7 +312,7 @@ No operator action required. cascade.toml schema unchanged. Existing keepers tha
 - `lib/keeper/keeper_cascade_profile.ml:81-130` — current binary consumers
 - `lib/keeper/keeper_types_profile.ml:47-50, 803-844` — `reserved_cascade_names` site
 - `lib/keeper/keeper_config.ml:35-43` — phase routing cascade names (legitimate internal use)
-- `~/me/.masc/logs/masc-mcp-8935.log:562-686` — incident trace 2026-05-17 12:29:43
+- `<base-path>/.masc/logs/masc-mcp-8935.log:562-686` — incident trace 2026-05-17 12:29:43
 - RFC-0058 §2.1, §2.4 — *Code never knows provider names*, *Cross-reference validation at load time*
 - CLAUDE.md §워크어라운드 거부 기준 §3 — N-of-M abstraction absence (basis for rejecting reserved-list expansion)
 

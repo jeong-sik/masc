@@ -27,7 +27,7 @@ Usage:
 Options:
   --root PATH     Docker playground root. Defaults to
                   $MASC_BASE_PATH/.masc/playground/docker, then
-                  $HOME/me/.masc/playground/docker.
+                  $PWD/.masc/playground/docker.
   --days N        Candidate age threshold from last git commit. Default: 7.
   --keeper NAME   Limit to one keeper directory under the Docker playground.
   --repo NAME     Limit to one repo under <keeper>/repos/. Example: masc-mcp.
@@ -75,14 +75,7 @@ else
 fi
 
 if [ -z "$ROOT" ]; then
-  BASE="${MASC_BASE_PATH:-}"
-  if [ -z "$BASE" ] && [ -d "${HOME:-}/me/.masc" ]; then
-    BASE="${HOME}/me"
-  fi
-  if [ -z "$BASE" ]; then
-    echo "cannot infer playground root; pass --root PATH" >&2
-    exit 2
-  fi
+  BASE="${MASC_BASE_PATH:-$(pwd)}"
   ROOT="$BASE/.masc/playground/docker"
 fi
 

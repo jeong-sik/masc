@@ -10,7 +10,7 @@ let keeper_debug = Env_config.KeeperRuntime.debug
 type sandbox_profile =
   | Local
     (** Host-process execution. Filesystem scope is bound to
-        [~/me/.masc/playground/<keeper>/] (see [Playground_paths]).
+        [<base-path>/.masc/playground/<keeper>/] (see [Playground_paths]).
         Network inherits the server's namespace. Intended for keepers
         whose work stays on local files and does not need container-grade
         isolation. *)

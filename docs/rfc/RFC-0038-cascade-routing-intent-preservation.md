@@ -22,7 +22,7 @@ L2 (transport keeper-identity gap) 와 L3 (permission-aware filtering) 는 본 R
 
 ### 2.1 사고 정량 (2026-05-01 ~ 2026-05-06)
 
-데이터 소스: `~/me/.masc/cascade_audit/2026-05/0[1-6].jsonl`
+데이터 소스: `<base-path>/.masc/cascade_audit/2026-05/0[1-6].jsonl`
 
 | 측정 | 값 |
 |------|----|
@@ -368,7 +368,7 @@ and capability_filter_summary = {
 - RFC-0026: work-conserving keeper admission — admission layer 와 분리
 - RFC-0027: capability-typed cascade catalog — capability profile registry, §3.4 후속 PR 표
 - Anchor commit: `065e568be1` (PR #11210, 2026-04-27)
-- Audit data: `~/me/.masc/cascade_audit/2026-05/0[1-6].jsonl` (2,620 turns)
+- Audit data: `<base-path>/.masc/cascade_audit/2026-05/0[1-6].jsonl` (2,620 turns)
 - 분석 노트: 2026-05-07 5-track parallel investigation (cross-cascade intent, tool-support filter, keeper-internal requirement, audit log triage, RFC + git history)
 - 외부 분석 (Kimi Agent, 2026-04-28): `~/Downloads/Kimi_Agent_Keeper FSM 고정/`
   - `plan.md` — 5-stage analysis plan

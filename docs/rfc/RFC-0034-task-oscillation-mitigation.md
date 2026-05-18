@@ -7,7 +7,7 @@
 
 ## Problem
 
-Boot-time observation (2026-05-06, `~/me/.masc/playground` server, port 8935) shows
+Boot-time observation (2026-05-06, `<base-path>/.masc/playground` server, port 8935) shows
 sustained claim/release loops on multiple tasks within ~90 seconds:
 
 ```

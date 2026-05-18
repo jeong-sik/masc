@@ -346,8 +346,8 @@ let test_bootstraps_base_path_config_from_repo_when_unset () =
       check bool "repo config copied to base path config" true
         (Sys.file_exists (Filename.concat bootstrapped_config "cascade.toml")))
 
-let test_default_base_path_uses_home_me_when_unset () =
-  with_temp_dir "start-masc-script-home-me-default" (fun dir ->
+let test_default_base_path_requires_explicit_base_path () =
+  with_temp_dir "start-masc-script-no-home-default" (fun dir ->
       let script = Filename.concat dir "start-masc-mcp.sh" in
       copy_script (script_path ()) script;
       ignore (make_config_root dir);
@@ -355,7 +355,7 @@ let test_default_base_path_uses_home_me_when_unset () =
       let home_dir = Filename.concat dir "home" in
       let me_root = Filename.concat home_dir "me" in
       mkdir_p me_root;
-      let capture = Filename.concat dir "captured-home-me-default.txt" in
+      let capture = Filename.concat dir "captured-no-home-default.txt" in
       let code, stdout, stderr =
         run_shell ~cwd:dir
           ~env:
@@ -367,16 +367,14 @@ let test_default_base_path_uses_home_me_when_unset () =
             ]
           (Printf.sprintf "%s --http --port 9969" (quote script))
       in
-      if code <> 0 then
-        failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s"
-          code stdout stderr;
-      let captured = read_file capture in
-      let expected_root = canonical_path me_root in
-      check bool "default base path uses home me root" true
-        (contains_substring captured ("MASC_BASE_PATH=" ^ expected_root));
-      check bool "default config root follows base path" true
-        (contains_substring captured
-           ("MASC_CONFIG_DIR=" ^ Filename.concat expected_root ".masc/config")))
+      check int "start script fails without explicit base path" 2 code;
+      check bool "does not invoke server executable" false
+        (Sys.file_exists capture);
+      check bool "stderr names required base path" true
+        (contains_substring stderr "MASC base path is required");
+      check bool "stderr rejects HOME inference" true
+        (contains_substring stderr "Refusing to infer a runtime root from HOME");
+      ignore stdout)
 
 let test_absolute_env_base_path_is_preserved () =
   with_temp_dir "start-masc-script" (fun dir ->
@@ -922,8 +920,8 @@ let () =
             test_realtime_transports_default_to_base_path_config_and_preserve_override;
           test_case "bootstraps base path config from repo when unset" `Quick
             test_bootstraps_base_path_config_from_repo_when_unset;
-          test_case "default base path uses home me when unset" `Quick
-            test_default_base_path_uses_home_me_when_unset;
+          test_case "default base path requires explicit base path" `Quick
+            test_default_base_path_requires_explicit_base_path;
           test_case
             "absolute env base path is preserved"
             `Quick

@@ -312,7 +312,7 @@ the trade-off does not invert in our favor.
 
 ## Evidence
 
-- Incident: `~/me/.masc/logs/system_log_2026-05-16.jsonl` 18:08-18:15Z
+- Incident: `<base-path>/.masc/logs/system_log_2026-05-16.jsonl` 18:08-18:15Z
   (53 ENFILE entries, 12+ affected keepers).
 - Detection module: `lib/keeper_fd_pressure.ml:36-46 is_fd_exhaustion_text`.
 - Throttle (Layer A/B): `lib/docker_spawn_throttle.ml` (PR #15722).

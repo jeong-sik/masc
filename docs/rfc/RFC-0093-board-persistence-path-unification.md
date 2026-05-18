@@ -24,8 +24,8 @@ This RFC closes the **A1+D1 P0** that the 2026-05-16 board-repetition taxonomy l
 
 Production measurement that triggered this RFC (2026-05-17):
 
-- `~/me/.masc/board_posts.jsonl`: most-recent 100 posts contain 13 unique ids with duplication counts up to 5× (5/5/4/3/3/3/2/2/2/2).
-- `~/me/.masc/board_comments.jsonl`: 1844 lines (+355 over 24 h).
+- `<base-path>/.masc/board_posts.jsonl`: most-recent 100 posts contain 13 unique ids with duplication counts up to 5× (5/5/4/3/3/3/2/2/2/2).
+- `<base-path>/.masc/board_comments.jsonl`: 1844 lines (+355 over 24 h).
 - Repetition pattern persists despite content-dedup logic at `board_core.ml:640-714` (`Dedup_hit` path).
 
 ## 1. Problem
@@ -62,7 +62,7 @@ P1 becomes canonical; readers fold by id taking the latest line. **Rejected**: f
 
 ### Option C — Split into `posts.jsonl` (create-only) + `post_mutations.jsonl` (event log)
 
-Event sourcing proper. Cleanest semantically. **Rejected for scope reasons**: requires reader-side merge, schema migration of `~/me/.masc/`, and contracts for every existing tool that reads the file. Outside what a single architectural-decision RFC should ship.
+Event sourcing proper. Cleanest semantically. **Rejected for scope reasons**: requires reader-side merge, schema migration of `<base-path>/.masc/`, and contracts for every existing tool that reads the file. Outside what a single architectural-decision RFC should ship.
 
 ### Option D — Snapshot rewrite is canonical; `append_post` becomes internal-only
 
@@ -92,7 +92,7 @@ Single PR, no schema change to existing JSONL files (readers tolerant of duplica
 | 1 | Replace `List.iter append_post posts` with `save_jsonl_snapshot ~where:"flush_posts" ~path:(persist_path ()) (posts_jsonl_snapshot store)` | `board_votes.ml:923-925` |
 | 2 | Mirror for `comments` if same pattern exists (verify; current grep shows `append_comment` once, same line) | `board_votes.ml:925` |
 | 3 | Add doc comment on `append_post` (`board_core.ml:488`) stating *"create-only fast path; vote/mutation flushes MUST use `save_jsonl_snapshot`"* | `board_core.ml` |
-| 4 | One-shot cleanup: rewrite existing `~/me/.masc/board_posts.jsonl` once via the same snapshot path at server startup if duplicate ids detected. Behind a flag `MASC_BOARD_DEDUP_ON_LOAD=1`. | `board_votes.ml` `load_persisted_posts` |
+| 4 | One-shot cleanup: rewrite existing `<base-path>/.masc/board_posts.jsonl` once via the same snapshot path at server startup if duplicate ids detected. Behind a flag `MASC_BOARD_DEDUP_ON_LOAD=1`. | `board_votes.ml` `load_persisted_posts` |
 
 Test plan:
 - Inline: vote-storm scenario — N votes on one post → assert `wc -l board_posts.jsonl` does not grow.
@@ -109,7 +109,7 @@ Test plan:
   - `lib/board_votes.ml:840-848` — `save_jsonl_snapshot ~where:"rewrite_posts"` (Path P2 already implemented)
   - `lib/board_votes.ml:923-925` — **dirty-flush dup vector (Path P1)**
 - Data:
-  - `~/me/.masc/board_posts.jsonl` 2026-05-17 04:23 measurement (13 unique ids in last 100 posts, max 5×)
+  - `<base-path>/.masc/board_posts.jsonl` 2026-05-17 04:23 measurement (13 unique ids in last 100 posts, max 5×)
 - Prior analysis: `~/me/knowledge/research/2026-05-16-masc-board-repetition-taxonomy.md` (worktree `~/me/.worktrees/masc-board-taxonomy`, 9 iter, A1+D1 marked "RFC 필요" — this RFC).
 
 ## 7. Risks

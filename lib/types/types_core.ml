@@ -775,7 +775,7 @@ let backlog_of_yojson json =
       match task_of_yojson j with Ok t -> Some t | Error _ -> None
     ) tasks_json in
     (* [last_updated] and [version] are display metadata; writers may
-       omit them (observed in live basepath [~/me/.masc/tasks/backlog.json]
+       omit them (observed in live basepath [<base-path>/.masc/tasks/backlog.json]
        where the top-level is just [{"tasks": [...]}]).  Strict
        [to_string]/[to_int] decoders rejected such payloads as
        [Type_error("Expected string, got null")], forcing every reader

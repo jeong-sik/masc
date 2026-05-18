@@ -21,7 +21,7 @@ implementation_prs: []
 
 ## §1 컨텍스트
 
-2026-05-17 24h log audit (`~/me/.masc/logs/`, 7 file)이 keeper_bash 경로에서 *단일 dominant ERROR 패턴* 을 식별:
+2026-05-17 24h log audit (`<base-path>/.masc/logs/`, 7 file)이 keeper_bash 경로에서 *단일 dominant ERROR 패턴* 을 식별:
 
 - `keeper_bash returned error result (1/3): "Path syntax blocked: shell quoting, globbing, brace expansion, and backslash escapes are not allowed for path-bearing keeper commands"` — **90 raw site emission + 60 caller-side mirror + 59 retry log + 44 registry recording = 253 ERROR (24h Top 20 ERROR의 ~40%)**
 
@@ -232,13 +232,13 @@ acceptance: 단일 파일 LOC > 500 인 신규 파일 없음. `software-developm
 
 ## §8 Evidence record
 
-- **Source**: `~/me/.masc/logs/` 7 file, 2026-05-16 03:46 ~ 2026-05-17 03:46.
+- **Source**: `<base-path>/.masc/logs/` 7 file, 2026-05-16 03:46 ~ 2026-05-17 03:46.
 - **Method**: `rg --no-filename "^\[20[0-9-]+ [0-9:]+\] \[(WARN|ERROR)\]"` + pattern
   categorization (`watchdog` / `current_task` / `cascade_exhausted` / etc.). raw
   log lines 2,292 → 20 카테고리 + Other.
 - **Top 1 ERROR pattern**: `Path syntax blocked` 90 raw + 60 caller mirror + 59
   retry + 44 registry = 253 (24h Top 20 ERROR 의 ~40%).
-- **Reproducer**: `cd ~/me/.masc/logs && rg "Path syntax blocked" *.log | wc -l`
+- **Reproducer**: `cd "$MASC_BASE_PATH/.masc/logs" && rg "Path syntax blocked" *.log | wc -l`
   (single command, deterministic).
 - **Confidence**: High (코드 단일 emission point `worker_dev_tools.ml:613` 그
   message 한 줄, 4-layer 증폭 경로도 grep 검증됨).

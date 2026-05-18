@@ -166,7 +166,7 @@ rg -n 'cascade_model_attribution_of_fields' lib/
 
 ```bash
 # parse drop count (production log)
-grep -c "missing_success_model" ~/me/.masc/logs/system_log_$(date +%Y-%m-%d).jsonl
+grep -c "missing_success_model" "$MASC_BASE_PATH/.masc/logs/system_log_$(date +%Y-%m-%d).jsonl"
 # PR-1 후 신규 row: 0 (legacy row 의 parse drop 은 history 에 남을 수 있음)
 ```
 

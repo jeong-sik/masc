@@ -19,7 +19,7 @@ In:
 - Collection pipeline (which logs / which fields / which filters)
 - Three classification tracks aligned to existing sub-issues
 - Reporting surface (cli tool + dashboard panel)
-- Replay invariant — proof must be reconstructible from `~/me/.masc/logs/` alone
+- Replay invariant — proof must be reconstructible from `<base-path>/.masc/logs/` alone
 
 Out:
 - Fixing the feature gaps themselves (that's per-feature follow-up)
@@ -52,7 +52,7 @@ The outcome variants are intentionally aligned to the three sub-issue tracks:
 
 ## Collection pipeline
 
-Source: `~/me/.masc/logs/system_log_<date>.jsonl` (authoritative) + `decisions.jsonl` (turn boundary).
+Source: `<base-path>/.masc/logs/system_log_<date>.jsonl` (authoritative) + `decisions.jsonl` (turn boundary).
 
 Step 1 — filter tool-call events with `attribution=autonomous` (already tagged by `Keeper_attribution.classify` in current code).
 
@@ -63,7 +63,7 @@ Step 3 — map raw error message to typed outcome using:
 - `Keeper_failure_circuit_breaker.classify_error` for policy / approval / shell-exit class (substring grep — separate cleanup once that module's TLA+ mirror is updated)
 - explicit `[approval-required]` / `[policy-denied]` log markers for #13567 class
 
-Step 4 — emit `proof_receipt` JSON to `~/me/.masc/proof/<date>.jsonl`. Append-only, never edited.
+Step 4 — emit `proof_receipt` JSON to `<base-path>/.masc/proof/<date>.jsonl`. Append-only, never edited.
 
 Step 5 — index by `(keeper_id, tool_name)` for the reporting surface.
 
@@ -90,7 +90,7 @@ Dashboard panel: same three sections rendered as Solid components on `/dashboard
 
 ## Replay invariant
 
-> A `proof_receipt` set built from `~/me/.masc/logs/` of date D, on any machine, by any operator, must produce the same SHA-256 as the canonical set checked into `tests/proof_replay/expected/<date>.sha256`.
+> A `proof_receipt` set built from `<base-path>/.masc/logs/` of date D, on any machine, by any operator, must produce the same SHA-256 as the canonical set checked into `tests/proof_replay/expected/<date>.sha256`.
 
 This invariant is what turns "I checked yesterday and we had coverage" into a falsifiable artifact. Without it, #13534 closes on vibes.
 
@@ -102,7 +102,7 @@ This invariant is what turns "I checked yesterday and we had coverage" into a fa
 
 ## Implementation phases
 
-1. Outcome variants + parse from existing logs (pure read-side, no new emit). Pin replay SHA against current `~/me/.masc/logs/2026-05-17.jsonl` to baseline.
+1. Outcome variants + parse from existing logs (pure read-side, no new emit). Pin replay SHA against current `<base-path>/.masc/logs/2026-05-17.jsonl` to baseline.
 2. CLI `sb keeper proof status` against the receipt store.
 3. Dashboard panel (consumes existing `dashboard_http_keeper_*` types).
 4. Close-condition sweep on #13567, #13568, #13569 each in its own follow-up PR with the harness output as evidence.
@@ -110,6 +110,6 @@ This invariant is what turns "I checked yesterday and we had coverage" into a fa
 
 ## Open questions
 
-- `~/me/.masc/proof/` location vs `~/me/.masc/logs/`: keep separate (append-only proof artifact) or unified (one log surface). Separate is the default in this draft.
+- `<base-path>/.masc/proof/` location vs `<base-path>/.masc/logs/`: keep separate (append-only proof artifact) or unified (one log surface). Separate is the default in this draft.
 - Cross-keeper attribution drift over a long horizon — is a 7-day window enough or do we need rolling-30? Bench data needed.
 - Approval-required is a *valid* gate, not a failure. The current draft counts it as non-Success but excludes it from blocker totals. Confirm with operator.

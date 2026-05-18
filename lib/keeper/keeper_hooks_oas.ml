@@ -726,7 +726,7 @@ let emit_cost_event
     ?(telemetry : Agent_sdk.Types.inference_telemetry option)
     () : unit =
   (* Tier-A perf change: previously appended to a single unbounded
-     [masc_root/costs.jsonl] (14k lines, 7.5MB observed in [~/me/.masc]),
+     [masc_root/costs.jsonl] (14k lines, 7.5MB observed in [<base-path>/.masc]),
      so every emit grew a hot single-writer file and the reader scanned
      the entire blob.  Migrated to [Dated_jsonl] under
      [masc_root/costs/YYYY-MM/DD.jsonl] — same per-day mutex registry

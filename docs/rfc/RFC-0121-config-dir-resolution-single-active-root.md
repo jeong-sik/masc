@@ -58,7 +58,7 @@ implementation_prs: []
 4. **Surface 의 의미적 단일화**:
    - `MASC_CONFIG_DIR` env (explicit)
    - `<base-path>/.masc/config` (implicit but well-defined)
-   - 그 외 fallback **모두 제거** (home, ${HOME}/.masc, operator home personas, base-path-root personas, etc.)
+   - 그 외 fallback **모두 제거** (home, home-root .masc, operator home personas, base-path-root personas, etc.)
 
 근본 원인: **resolver function 가 *list of candidates* 가 아닌 *typed Result* 가 되어야**. 명시적 priority chain 으로.
 
@@ -87,7 +87,7 @@ closed sum 가 *forbidden by design*: 새 fallback 추가 시 variant 정의 필
 
 **Layer B — Adoption gate**
 
-`scripts/lint-config-fallback.sh`: `lib/` 안 `home_dir`, `Sys.getenv "HOME"`, `Filename.concat home`, `home_base`, `${HOME}/.masc`, `operator_home_personas`, `base_path_root_personas` 같은 token grep. *grandfather list* (baseline = 현재 잔존 site) 에 등록된 site 만 허용. 새 호출은 build fail.
+`scripts/lint-config-fallback.sh`: `lib/` 안 `home_dir`, `Sys.getenv "HOME"`, `Filename.concat home`, `home_base`, `home-root .masc`, `operator_home_personas`, `base_path_root_personas` 같은 token grep. *grandfather list* (baseline = 현재 잔존 site) 에 등록된 site 만 허용. 새 호출은 build fail.
 
 RFC-0112 (typed JSON parse boundary, iter-4) 의 `lint-json-parse-raw.sh` 패턴 재사용.
 
@@ -112,7 +112,7 @@ P3 가 핵심 — grandfather list 가 더 이상 늘어나지 않음을 enforce
 
 1. **Q1**: `Base_path_masc` 의 *base_path 결정* — env (`MASC_BASE_PATH`)? CLI flag? 작업 디렉토리? **잠정**: 별도 결정자 (`Base_path_resolver`) — 본 RFC 는 `Config_root_source` 만, base_path 자체 결정은 별도 surface.
 
-2. **Q2**: legacy disk state 가 home `~/.masc/config` 에 있는 사용자 — migration path? **잠정**: P5 의 첫 commit 가 *migration helper script* (`scripts/migrate-home-masc-to-base-path.sh`) 제공, 사용자 명시적 실행.
+2. **Q2**: legacy disk state 가 home-root config 에 있는 사용자 — migration path? **결정**: runtime fallback 은 제공하지 않는다. operator 가 명시적으로 `<base-path>/.masc/config` 로 옮기고, server 는 `MASC_BASE_PATH` 또는 `--base-path` 로만 active root 를 결정한다.
 
 3. **Q3**: `MASC_CONFIG_DIR` 가 *empty string* 또는 *invalid path* 시 행동? **잠정**: P2 의 `resolve` 가 `Error \`Invalid_explicit_env_value` 추가 — 명시적 error.
 
@@ -126,7 +126,7 @@ P3 가 핵심 — grandfather list 가 더 이상 늘어나지 않음을 enforce
 
 ## §6 Risk & rollback
 
-- **Risk 1**: 기존 production user 가 `~/.masc/config` 에 데이터 보유 — P5 의 lint 통과 후 *runtime fallback 0* 가 그 user 의 config 잃음. → P5 의 첫 commit 가 *startup warning* — `~/.masc/config` 존재 감지 + migration helper 안내. 4 주 grace period.
+- **Risk 1**: 기존 production user 가 home-root config 에 데이터 보유 — P5 의 lint 통과 후 *runtime fallback 0* 가 그 user 의 config 잃음. → startup 은 home-root 를 추론하지 않고, operator 는 명시적으로 `<base-path>/.masc/config` 를 지정하거나 이전 데이터를 수동 이전한다.
 - **Risk 2**: `Config_root_source.t` 가 *future fallback* 강제 reject — 의도된 fallback (예: 새 hosted scenario) 추가 시 architectural review 필요. *이게 정확히 원하는 행동* (closed sum 의 의도).
 - **Risk 3**: lint (P3) 가 *기존 4 PR 의 잔존 site* 표시 — P3 baseline 이 정확한 inventory. → P3 의 첫 commit 가 `rg` 로 실측 + 명시.
 - **Risk 4**: Doc-code gate (P6) 가 doc PR 와 code PR 동시 강제 — 두 PR 분리 시 *순간 drift*. → CI 가 *PR diff* 만 검사.

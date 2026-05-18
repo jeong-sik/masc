@@ -2048,6 +2048,28 @@ let test_oas_worker_exec_build_applies_stream_idle_timeout () =
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
 ;;
 
+let test_oas_worker_exec_build_applies_body_timeout () =
+  let base_config =
+    Cascade_runner.default_config
+      ~name:"oas-worker-body-timeout"
+      ~provider_cfg:(make_local_provider_cfg ())
+      ~system_prompt:"system"
+      ~tools:[ make_noop_tool () ]
+  in
+  let config = { base_config with body_timeout_s = Some 34.5 } in
+  Eio.Switch.run
+  @@ fun sw ->
+  match Cascade_runner.build ~sw ~net:(require_test_net ()) ~config with
+  | Ok agent ->
+    let timeout_s = (Agent_sdk.Agent.options agent).body_timeout_s in
+    Alcotest.(check (option (float 0.0001)))
+      "body timeout is propagated through build"
+      (Some 34.5)
+      timeout_s;
+    Agent_sdk.Agent.close agent
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
+;;
+
 let test_oas_worker_exec_build_installs_ollama_kind_preserving_transport () =
   let provider_cfg =
     Llm_provider.Provider_config.make
@@ -2392,6 +2414,35 @@ let test_resume_propagates_stream_idle_timeout () =
     Alcotest.(check (option (float 0.0001)))
       "stream idle timeout is propagated through resume"
       (Some 12.5)
+      timeout_s;
+    Agent_sdk.Agent.close agent
+  | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
+;;
+
+let test_resume_propagates_body_timeout () =
+  let base_config =
+    Cascade_runner.default_config
+      ~name:"resume-body-timeout"
+      ~provider_cfg:(make_local_provider_cfg ())
+      ~system_prompt:"system"
+      ~tools:[ make_noop_tool () ]
+  in
+  let config = { base_config with body_timeout_s = Some 34.5 } in
+  let checkpoint = make_checkpoint () in
+  Eio.Switch.run
+  @@ fun sw ->
+  match
+    Cascade_runner.resume_from_checkpoint
+      ~sw
+      ~net:(require_test_net ())
+      ~config
+      ~checkpoint
+  with
+  | Ok agent ->
+    let timeout_s = (Agent_sdk.Agent.options agent).body_timeout_s in
+    Alcotest.(check (option (float 0.0001)))
+      "body timeout is propagated through resume"
+      (Some 34.5)
       timeout_s;
     Agent_sdk.Agent.close agent
   | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
@@ -6662,6 +6713,10 @@ let () =
             `Quick
             test_oas_worker_exec_build_applies_stream_idle_timeout
         ; Alcotest.test_case
+            "oas_worker applies body timeout"
+            `Quick
+            test_oas_worker_exec_build_applies_body_timeout
+        ; Alcotest.test_case
             "oas_worker installs native Ollama HTTP transport"
             `Quick
             test_oas_worker_exec_build_installs_ollama_kind_preserving_transport
@@ -6713,6 +6768,10 @@ let () =
             "resume propagates stream idle timeout"
             `Quick
             test_resume_propagates_stream_idle_timeout
+        ; Alcotest.test_case
+            "resume propagates body timeout"
+            `Quick
+            test_resume_propagates_body_timeout
         ; Alcotest.test_case
             "resume propagates priority"
             `Quick

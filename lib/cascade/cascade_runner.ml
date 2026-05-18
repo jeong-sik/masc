@@ -42,6 +42,7 @@ type config =
   max_idle_turns : int;
   stream_idle_timeout_s : float option;
   max_execution_time_s : float option;
+  body_timeout_s : float option;
   max_tokens : int;
   max_input_tokens : int option;
   max_cost_usd : float option;

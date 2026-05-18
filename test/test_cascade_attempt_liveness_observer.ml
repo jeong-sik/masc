@@ -349,6 +349,44 @@ let test_tick_fiber_stops_without_terminal_event () =
   Alcotest.(check bool)
     "pending tick fiber stopped before bootstrap tick" true true
 
+let test_tick_fiber_enforce_wall_kills_blocked_attempt () =
+  (* The tick fiber is the only liveness signal while a provider attempt is
+     waiting for first byte. It must fail the attempt switch on wall expiry;
+     otherwise the outer keeper_llm_bridge timeout becomes the first visible
+     boundary and can overshoot by minutes. *)
+  let raised = ref None in
+  Eio_main.run (fun env ->
+      let clock = Eio.Stdenv.clock env in
+      try
+        Eio.Time.with_timeout_exn clock 1.5 (fun () ->
+            Eio.Switch.run (fun sw ->
+                let budget =
+                  { L.ttft_max = 1.0
+                  ; inter_chunk_max = 0.1
+                  ; attempt_wall_max = 0.05
+                  }
+                in
+                let obs =
+                  Obs.create
+                    ~mode:Cfg.Enforce
+                    ~budget
+                    ~cascade_label:"tick_wall_kill_cascade"
+                    ~started_at:(Time_compat.now ())
+                    ()
+                in
+                Obs.start_tick_fiber obs ~sw ~clock;
+                Eio.Time.sleep clock 10.0))
+      with
+      | Obs.Liveness_kill failure ->
+          raised := Some (L.failure_kind_label failure)
+      | Eio.Time.Timeout -> raised := Some "outer_timeout"
+      | exn ->
+          Alcotest.failf "unexpected exception: %s" (Printexc.to_string exn));
+  Alcotest.(check (option string))
+    "tick fiber wall expiry fails attempt switch"
+    (Some "wall_exceeded")
+    !raised
+
 let test_external_wait_heartbeat_prevents_idle_kill () =
   Eio_main.run (fun env ->
       let clock = Eio.Stdenv.clock env in
@@ -437,6 +475,10 @@ let () =
             "tick fiber stops without terminal stream event"
             `Quick
             test_tick_fiber_stops_without_terminal_event;
+          Alcotest.test_case
+            "tick fiber enforce wall kills blocked attempt"
+            `Quick
+            test_tick_fiber_enforce_wall_kills_blocked_attempt;
           Alcotest.test_case
             "external wait heartbeats prevent idle kill"
             `Quick

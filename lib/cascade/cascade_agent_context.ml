@@ -38,6 +38,11 @@ type config =
           when a provider closes the connection without [end_turn].
           Default [None] preserves the historical behaviour
           (block indefinitely on stream-parser hang). *)
+  ; body_timeout_s : float option
+    (** Total HTTP streaming body-consumption ceiling. This is forwarded to
+        OAS's [with_body_timeout] and complements [stream_idle_timeout_s]:
+        idle timeout catches inter-line silence, while body timeout bounds
+        the whole response body callback. Non-HTTP transports ignore it. *)
   ; max_tokens : int
   ; max_input_tokens : int option
   ; max_cost_usd : float option
@@ -100,6 +105,7 @@ let default_config
   ; max_idle_turns = 3
   ; stream_idle_timeout_s = None
   ; max_execution_time_s = None
+  ; body_timeout_s = None
   ; max_tokens = Llm_provider.Constants.Inference_profile.agent_default.max_tokens
   ; max_input_tokens = None
   ; max_cost_usd = None
@@ -177,6 +183,11 @@ let builder_without_approval
   let builder =
     match config.max_execution_time_s with
     | Some s -> Agent_sdk.Builder.with_max_execution_time s builder
+    | None -> builder
+  in
+  let builder =
+    match config.body_timeout_s with
+    | Some s -> Agent_sdk.Builder.with_body_timeout s builder
     | None -> builder
   in
   let builder =
@@ -355,6 +366,7 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; max_idle_turns = config.max_idle_turns
     ; stream_idle_timeout_s = config.stream_idle_timeout_s
     ; max_execution_time_s = config.max_execution_time_s
+    ; body_timeout_s = config.body_timeout_s
     ; guardrails = guardrails_of_config config
     ; context_reducer = config.context_reducer
     ; context_injector = config.context_injector

@@ -11596,7 +11596,12 @@ let test_try_provider_max_execution_time_uses_attempt_timeout () =
     "run_try_provider passes attempt timeout to OAS max_execution_time_s"
     true
     (source_file_contains "lib/keeper/keeper_turn_driver_try_provider.ml"
-       "max_execution_time_for_attempt ?per_provider_timeout_s ()")
+       "max_execution_time_for_attempt ?per_provider_timeout_s ()");
+  check bool
+    "run_try_provider also passes attempt timeout to OAS body_timeout_s"
+    true
+    (source_file_contains "lib/keeper/keeper_turn_driver_try_provider.ml"
+       "body_timeout_s =")
 ;;
 
 (* ---------- render_inline_skip_reason tests ---------- *)

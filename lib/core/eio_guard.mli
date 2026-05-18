@@ -40,6 +40,10 @@ val protect : finally:(unit -> unit) -> (unit -> 'a) -> 'a
     currently yield. *)
 val yield_if_ready : unit -> unit
 
+(** Check for cooperative cancellation if the Eio runtime is active.
+    No-op before {!enable} or when called from non-Eio initialization paths. *)
+val check_if_ready : unit -> unit
+
 (** Named cooperative yield for scheduler-fair keeper/cascade boundaries.
     Equivalent to {!yield_if_ready}. *)
 val fair_yield : unit -> unit

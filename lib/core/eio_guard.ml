@@ -71,6 +71,10 @@ let yield_if_ready () =
   if Atomic.get ready then Safe_ops.protect ~default:() (fun () -> Eio.Fiber.yield ())
 ;;
 
+let check_if_ready () =
+  if Atomic.get ready then Safe_ops.protect ~default:() (fun () -> Eio.Fiber.check ())
+;;
+
 let fair_yield = yield_if_ready
 let default_fair_yield_interval = 1000
 

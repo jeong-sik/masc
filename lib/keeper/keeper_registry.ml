@@ -62,76 +62,6 @@ let put_entry key entry =
   loop ()
 ;;
 
-(* P0-2 (2026-05-07): orphan turn-loop observability.
-
-   Background — [update_entry] returns silently when the key is absent
-   (the keeper was deregistered while a caller still held its name).
-   At fleet scale the WARN line is invisible: a single orphan keeper
-   emits 30+ drops per turn (each tool-dispatch + each phase setter).
-   See verifier-loop incident 2026-05-07.
-
-   Surgical observability fix:
-   - Track per-(name) drop count in a [(int * float) StringMap.t Atomic]
-     (count, first_drop_at) so we can detect "many drops in a short
-     window" without a wall-clock heuristic at every caller.
-   - Bump [metric_keeper_registry_update_dropped] every drop.
-   - Edge-trigger: when count crosses [orphan_drop_threshold] inside
-     [orphan_drop_window_sec], emit one WARN and bump
-     [metric_keeper_registry_orphan_threshold_breached] exactly once
-     per breach window.  Individual drops stay DEBUG; the metric is the
-     durable signal and the threshold log is the operator attention point.
-   - Reset state on the successful Some-entry path (orphan resolved)
-     and after the window expires.
-
-   Behavior is otherwise unchanged: the dropped update is still
-   silently absorbed (29 caller signatures preserved). Fiber
-   cancellation on orphan detection is intentionally out of scope —
-   that requires unregister-time fiber cancel and is RFC-level. *)
-let orphan_drop_threshold = 5
-let orphan_drop_window_sec = 60.0
-let orphan_drop_state : (int * float) StringMap.t Atomic.t = Atomic.make StringMap.empty
-
-(* Returns [(count, breached_now)]. [breached_now] is [true] exactly
-   on the transition from below-threshold to at-threshold within an
-   active window. *)
-let record_orphan_drop ~base_path name =
-  let key = registry_key ~base_path name in
-  let now = Time_compat.now () in
-  let rec loop () =
-    let current = Atomic.get orphan_drop_state in
-    let count, first_at, breached_now =
-      match StringMap.find_opt key current with
-      | Some (prev_count, prev_first_at)
-        when now -. prev_first_at <= orphan_drop_window_sec ->
-        let new_count = prev_count + 1 in
-        let breached =
-          prev_count < orphan_drop_threshold && new_count >= orphan_drop_threshold
-        in
-        new_count, prev_first_at, breached
-      | _ ->
-        (* Fresh window (no prior state, or prior window expired). *)
-        1, now, false
-    in
-    let updated = StringMap.add key (count, first_at) current in
-    if Atomic.compare_and_set orphan_drop_state current updated
-    then count, breached_now
-    else loop ()
-  in
-  loop ()
-;;
-
-let clear_orphan_drop ~base_path name =
-  let key = registry_key ~base_path name in
-  let rec loop () =
-    let current = Atomic.get orphan_drop_state in
-    if StringMap.mem key current
-    then (
-      let updated = StringMap.remove key current in
-      if not (Atomic.compare_and_set orphan_drop_state current updated) then loop ())
-  in
-  loop ()
-;;
-
 (** Apply [f entry] and write back.  No-op if key absent.
 
     The find + apply + write is serialised via CAS so that concurrent
@@ -143,7 +73,7 @@ let update_entry ~base_path name f =
     let current = Atomic.get registry in
     match StringMap.find_opt key current with
     | None ->
-      let count, breached = record_orphan_drop ~base_path name in
+      let count, breached = Keeper_registry_orphan_drops.record ~base_path name in
       Prometheus.inc_counter
         Keeper_metrics.metric_keeper_registry_update_dropped
         ~labels:[ "name", name ]
@@ -161,7 +91,7 @@ let update_entry ~base_path name f =
           name
           base_path
           count
-          orphan_drop_window_sec)
+          Keeper_registry_orphan_drops.window_sec)
       else
         Log.Keeper.debug
           "registry: update_entry name=%s base_path=%s: entry not found, update dropped \
@@ -173,7 +103,7 @@ let update_entry ~base_path name f =
       let updated = StringMap.add key (f entry) current in
       if not (Atomic.compare_and_set registry current updated)
       then loop ()
-      else clear_orphan_drop ~base_path name
+      else Keeper_registry_orphan_drops.clear ~base_path name
   in
   loop ()
 ;;
@@ -188,7 +118,7 @@ let update_entry_if_registered ~base_path name f =
       let updated = StringMap.add key (f entry) current in
       if Atomic.compare_and_set registry current updated
       then (
-        clear_orphan_drop ~base_path name;
+        Keeper_registry_orphan_drops.clear ~base_path name;
         true)
       else loop ()
   in
@@ -618,49 +548,8 @@ let set_last_correlation_id ~base_path name cid =
   update_entry ~base_path name (fun e -> { e with last_event_bus_correlation = Some cid })
 ;;
 
-let broadcast_composite_changed ~name ~ts_unix =
-  try
-    let json =
-      `Assoc
-        [ "type", `String "keeper_composite_changed"
-        ; "name", `String name
-        ; "ts_unix", `Float ts_unix
-        ]
-    in
-    Sse.broadcast json;
-    Sse.broadcast_presence json
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    (* P2 silent-failure fix: previously this discarded the exception
-         silently, hiding the case where the SSE broadcast pipe is dead
-         (subscriber cleanup race, transport tear-down).  Operators
-         investigating "dashboard stopped updating" had no signal that
-         the broadcast itself was failing.  PR-C (#11075) added a
-         counter on the SSE side, but only for per-client failures
-         inside broadcast_impl — exceptions thrown out of
-         Sse.broadcast itself bypass that counter.  Logging here
-         makes the exception visible at the call site. *)
-    Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
-      ~labels:[ "keeper", name; "event", "broadcast_composite_failed" ]
-      ();
-    Log.Keeper.warn
-      "registry: broadcast_composite_changed name=%s failed: %s"
-      name
-      (Printexc.to_string exn)
-;;
-
-let record_phase_broadcast_failure ~name exn =
-  Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_sse_broadcast_failures
-    ~labels:[ "keeper", name; "site", "phase_changed" ]
-    ();
-  Log.Keeper.warn
-    "registry: keeper_phase_changed broadcast failed name=%s err=%s"
-    name
-    (Printexc.to_string exn)
-;;
+let broadcast_composite_changed = Keeper_registry_broadcast.composite_changed
+let record_phase_broadcast_failure = Keeper_registry_broadcast.phase_failure
 
 let update_current_turn e f =
   let current_turn_observation =
@@ -1292,64 +1181,28 @@ let set_started_at_for_test ~base_path name started_at =
   update_entry ~base_path name (fun entry -> { entry with started_at })
 ;;
 
-type spawn_slot_denial_reason =
+type spawn_slot_denial_reason = Keeper_registry_spawn_slots.denial_reason =
   | Fd_pressure_active
   | Disk_pressure_active
   | Fd_admission_blocked
   | Disk_admission_blocked
   | Max_active_keepers of { running_count : int; max_keepers : int }
 
-let spawn_slot_denial_reason_to_label = function
-  | Fd_pressure_active -> "fd_pressure_active"
-  | Disk_pressure_active -> "disk_pressure_active"
-  | Fd_admission_blocked -> "fd_admission_blocked"
-  | Disk_admission_blocked -> "disk_admission_blocked"
-  | Max_active_keepers _ -> "max_active_keepers"
+let spawn_slot_denial_reason_to_label =
+  Keeper_registry_spawn_slots.denial_reason_to_label
 ;;
 
-let spawn_slot_denial_reason_to_detail = function
-  | Fd_pressure_active -> "spawn slot denied: fd pressure cooldown active"
-  | Disk_pressure_active -> "spawn slot denied: disk pressure cooldown active"
-  | Fd_admission_blocked -> "spawn slot denied: fd admission guard rejected launch"
-  | Disk_admission_blocked -> "spawn slot denied: disk admission guard rejected launch"
-  | Max_active_keepers { running_count; max_keepers } ->
-    Printf.sprintf
-      "spawn slot denied: max active keepers reached (running_count=%d max_keepers=%d)"
-      running_count
-      max_keepers
+let spawn_slot_denial_reason_to_detail =
+  Keeper_registry_spawn_slots.denial_reason_to_detail
 ;;
 
 let spawn_slots_decision_internal ?base_path ?fd_admitted ?disk_admitted () =
-  let max_keepers = Keeper_runtime_resolved.bootstrap_max_active_keepers () in
-  let running_count = Atomic.get running_count_atomic in
-  let fd_admitted () =
-    match fd_admitted with
-    | Some admitted -> admitted
-    | None ->
-      Keeper_fd_pressure.admit_start
-        ~active_keepers:running_count
-        ~starting_keepers:1
-        ()
-  in
-  let disk_admitted () =
-    match disk_admitted with
-    | Some admitted -> admitted
-    | None ->
-      (match base_path with
-       | None -> true
-       | Some masc_root -> Keeper_disk_pressure.admit_turn ~masc_root ())
-  in
-  if Keeper_fd_pressure.active ()
-  then Error Fd_pressure_active
-  else if Keeper_disk_pressure.active ()
-  then Error Disk_pressure_active
-  else if not (fd_admitted ())
-  then Error Fd_admission_blocked
-  else if not (disk_admitted ())
-  then Error Disk_admission_blocked
-  else if max_keepers > 0 && running_count >= max_keepers
-  then Error (Max_active_keepers { running_count; max_keepers })
-  else Ok ()
+  Keeper_registry_spawn_slots.decision
+    ~running_count:(Atomic.get running_count_atomic)
+    ?base_path
+    ?fd_admitted
+    ?disk_admitted
+    ()
 ;;
 
 let spawn_slots_decision ?base_path () = spawn_slots_decision_internal ?base_path ()
@@ -1526,27 +1379,20 @@ let set_board_cursor ~base_path name ts post_id =
    record usage for the same keeper without clobbering each other. *)
 let record_tool_use ~base_path name ~tool_name ~success =
   update_entry ~base_path name (fun entry ->
-    let e =
-      match StringMap.find_opt tool_name entry.tool_usage with
-      | Some e -> e
-      | None -> { count = 0; successes = 0; failures = 0; last_used_at = 0.0 }
-    in
-    let updated =
-      { count = e.count + 1
-      ; successes = (if success then e.successes + 1 else e.successes)
-      ; failures = (if success then e.failures else e.failures + 1)
-      ; last_used_at = Time_compat.now ()
-      }
-    in
-    { entry with tool_usage = StringMap.add tool_name updated entry.tool_usage })
+    { entry with
+      tool_usage =
+        Keeper_registry_tool_usage.record
+          entry.tool_usage
+          ~tool_name
+          ~success
+          ~now:(Time_compat.now ())
+    })
 ;;
 
 let tool_usage_of ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   | None -> []
-  | Some entry ->
-    StringMap.fold (fun n e acc -> (n, e) :: acc) entry.tool_usage []
-    |> List.sort (fun (_, a) (_, b) -> Int.compare b.count a.count)
+  | Some entry -> Keeper_registry_tool_usage.sorted entry.tool_usage
 ;;
 
 (** Look up a keeper by name across all base_paths (O(n) scan). *)
@@ -1586,9 +1432,7 @@ let find_by_id (uid : Keeper_id.Uid.t) =
 let tool_usage_of_by_name name =
   match find_by_name name with
   | None -> []
-  | Some entry ->
-    StringMap.fold (fun n e acc -> (n, e) :: acc) entry.tool_usage []
-    |> List.sort (fun (_, a) (_, b) -> Int.compare b.count a.count)
+  | Some entry -> Keeper_registry_tool_usage.sorted entry.tool_usage
 ;;
 
 (* -- Config resolution --------------------------------------------- *)
@@ -1605,44 +1449,16 @@ let resolve_config (config : Coord_utils_backend_setup.config) keeper_name
     | Some _ | None -> config)
 ;;
 
-(* -- Tool usage persistence ---------------------------------------- *)
-
-let tool_usage_path ~base_path name =
-  let dir =
-    Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers/tool_usage"
-  in
-  Filename.concat dir (name ^ ".json")
-;;
-
 let flush_tool_usage ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   | None -> ()
   | Some entry ->
-    let items =
-      StringMap.fold
-        (fun tool_name (e : tool_call_entry) acc ->
-           `Assoc
-             [ "tool", `String tool_name
-             ; "count", `Int e.count
-             ; "successes", `Int e.successes
-             ; "failures", `Int e.failures
-             ; "last_used_at", `Float e.last_used_at
-             ]
-           :: acc)
-        entry.tool_usage
-        []
-    in
-    let json =
-      `Assoc
-        [ "keeper", `String name
-        ; "flushed_at", `Float (Time_compat.now ())
-        ; "tools", `List items
-        ]
-    in
-    let path = tool_usage_path ~base_path name in
     (try
-       Fs_compat.mkdir_p (Filename.dirname path);
-       Fs_compat.save_file path (Yojson.Safe.to_string json ^ "\n")
+       Keeper_registry_tool_usage.save
+         ~base_path
+         ~name
+         ~flushed_at:(Time_compat.now ())
+         entry.tool_usage
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
@@ -1654,52 +1470,24 @@ let flush_tool_usage ~base_path name =
 ;;
 
 let restore_tool_usage ~base_path name =
-  let path = tool_usage_path ~base_path name in
-  if not (Fs_compat.file_exists path)
-  then ()
-  else (
-    match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
-    | None -> ()
-    | Some _entry ->
-      (try
-         let content = Fs_compat.load_file path in
-         let json = Yojson.Safe.from_string content in
-         let tools =
-           match json with
-           | `Assoc fields ->
-             (match List.assoc_opt "tools" fields with
-              | Some (`List items) -> items
-              | _ -> [])
-           | _ -> []
-         in
-         List.iter
-           (fun item ->
-              match
-                ( Safe_ops.json_string_opt "tool" item
-                , Safe_ops.json_int_opt "count" item
-                , Safe_ops.json_int_opt "successes" item
-                , Safe_ops.json_int_opt "failures" item
-                , Safe_ops.json_float_opt "last_used_at" item )
-              with
-              | ( Some tool_name
-                , Some count
-                , Some successes
-                , Some failures
-                , Some last_used_at )
-                when tool_name <> "" ->
-                let e = { count; successes; failures; last_used_at } in
-                update_entry ~base_path name (fun ent ->
-                  { ent with tool_usage = StringMap.add tool_name e ent.tool_usage })
-              | _ -> ())
-           tools
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-         Prometheus.inc_counter
-           Keeper_metrics.metric_keeper_checkpoint_failures
-           ~labels:[ "keeper", name; "site", "restore_tool_usage" ]
-           ();
-         Log.Keeper.warn "restore_tool_usage %s: %s" name (Printexc.to_string exn)))
+  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
+  | None -> ()
+  | Some _entry ->
+    (try
+       Keeper_registry_tool_usage.load ~base_path ~name
+       |> List.iter (fun (tool_name, entry) ->
+         update_entry ~base_path name (fun ent ->
+           { ent with
+             tool_usage = StringMap.add tool_name entry ent.tool_usage
+           }))
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+       Prometheus.inc_counter
+         Keeper_metrics.metric_keeper_checkpoint_failures
+         ~labels:[ "keeper", name; "site", "restore_tool_usage" ]
+         ();
+       Log.Keeper.warn "restore_tool_usage %s: %s" name (Printexc.to_string exn))
 ;;
 
 (* ── RFC-0002 Event Dispatch ───────────────────────────── *)

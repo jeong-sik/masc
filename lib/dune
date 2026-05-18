@@ -72,6 +72,10 @@
  keeper_meta_json
  keeper_types_support
  keeper_meta_store
+ keeper_registry_broadcast
+ keeper_registry_orphan_drops
+ keeper_registry_spawn_slots
+ keeper_registry_tool_usage
 
  server_dashboard_http_cache
  server_dashboard_http_perf

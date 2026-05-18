@@ -202,6 +202,7 @@
   keeper_memory_llm_summary
   keeper_memory_recall
   keeper_status_bridge
+  keeper_hooks_oas_gate_attempt
   autoresearch_codegen
   autoresearch_knowledge
   autoresearch_lineage

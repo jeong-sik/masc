@@ -746,7 +746,7 @@ let run_keeper_cycle_with_slot
         Prometheus.inc_counter
           Keeper_metrics.metric_keeper_oas_timeout_budget_strike
           ~labels:[ "keeper", keeper_name; "outcome", metric_outcome ]
-          ());
+          ()));
     (match read_meta ctx.config meta_after_cursor_persist.name with
      | Ok (Some latest) -> latest
      | Ok None ->

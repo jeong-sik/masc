@@ -41,6 +41,82 @@ let retry_message_looks_like_model_access_denied (message : string) : bool =
   || String_util.contains_substring_ci message "does not have access to"
   || String_util.contains_substring_ci message "not authorized to access"
 
+let provider_capacity_scope_to_http = function
+  | Llm_provider.Error.CapacityModel -> Llm_provider.Http_client.Failure_scope_model
+  | Llm_provider.Error.CapacityAccount ->
+    Llm_provider.Http_client.Failure_scope_account
+  | Llm_provider.Error.CapacityRegion ->
+    Llm_provider.Http_client.Failure_scope_region
+  | Llm_provider.Error.CapacityProvider ->
+    Llm_provider.Http_client.Failure_scope_provider
+  | Llm_provider.Error.CapacityUnknown ->
+    Llm_provider.Http_client.Failure_scope_unknown
+
+let provider_error_to_http_error (err : Agent_sdk.Error.provider_error)
+  : Llm_provider.Http_client.http_error =
+  let module E = Llm_provider.Error in
+  let message = E.to_string err in
+  match err with
+  | E.MissingApiKey _ | E.InvalidConfig _ ->
+    Llm_provider.Http_client.AcceptRejected { reason = message }
+  | E.ParseError { detail } ->
+    Llm_provider.Http_client.ProviderFailure
+      { kind = Llm_provider.Http_client.Provider_parse_error { parser = None }
+      ; message = detail
+      }
+  | E.UnknownVariant { type_name; value } ->
+    Llm_provider.Http_client.ProviderFailure
+      { kind =
+          Llm_provider.Http_client.Unknown_provider_failure
+            { reason = Some (Printf.sprintf "%s:%s" type_name value) }
+      ; message
+      }
+  | E.ProviderUnavailable { detail; _ } ->
+    Llm_provider.Http_client.HttpError { code = 503; body = detail }
+  | E.RateLimit { detail; _ } ->
+    Llm_provider.Http_client.HttpError { code = 429; body = detail }
+  | E.HardQuota { retry_after; detail; _ } ->
+    Llm_provider.Http_client.ProviderFailure
+      { kind = Llm_provider.Http_client.Hard_quota { retry_after }
+      ; message = detail
+      }
+  | E.CapacityExhausted { scope; affected; retry_after; detail } ->
+    Llm_provider.Http_client.ProviderFailure
+      { kind =
+          Llm_provider.Http_client.Capacity_exhausted
+            { scope = provider_capacity_scope_to_http scope
+            ; retry_after
+            ; model = List.find_opt (fun value -> String.trim value <> "") affected
+            }
+      ; message = detail
+      }
+  | E.AuthError { detail; _ } ->
+    Llm_provider.Http_client.HttpError { code = 401; body = detail }
+  | E.ServerError { code; detail; _ } ->
+    Llm_provider.Http_client.HttpError { code; body = detail }
+  | E.NetworkError { timeout_phase = Some phase; detail; _ } ->
+    Llm_provider.Http_client.TimeoutError { message = detail; phase }
+  | E.NetworkError { kind; timeout_phase = None; detail; _ } ->
+    Llm_provider.Http_client.NetworkError { message = detail; kind }
+  | E.Timeout { timeout_phase; detail; _ } ->
+    let phase =
+      match timeout_phase with
+      | Some phase -> phase
+      | None ->
+        (* DET-OK: OAS provider omitted timeout_phase; Unknown_timeout is an
+           explicit typed sentinel, not a permissive branch heuristic. *)
+        Llm_provider.Http_client.Unknown_timeout
+    in
+    Llm_provider.Http_client.TimeoutError
+      { message = detail; phase }
+  | E.InvalidRequest { reason; _ } ->
+    Llm_provider.Http_client.HttpError { code = 400; body = reason }
+  | E.NotFound { detail; _ } ->
+    Llm_provider.Http_client.HttpError { code = 404; body = detail }
+  | E.ProviderTerminal { reason; detail; _ } ->
+    Llm_provider.Http_client.ProviderTerminal
+      { kind = Llm_provider.Http_client.Other reason; message = detail }
+
 (** Convert an OAS sdk_error into a Cascade_fsm provider_outcome.
     API-level errors and model-capability-dependent agent errors are
     cascadeable (a different provider may succeed).  Structural agent
@@ -103,27 +179,7 @@ let sdk_error_to_cascade_outcome (err : Agent_sdk.Error.sdk_error)
     in
     Some (Cascade_fsm.Call_err http_err)
   | Agent_sdk.Error.Provider provider_err ->
-    let should_cascade =
-      Llm_provider.Error.is_retryable provider_err
-      ||
-      match provider_err with
-      | Llm_provider.Error.HardQuota _
-      | Llm_provider.Error.CapacityExhausted _
-      | Llm_provider.Error.ProviderUnavailable _
-      | Llm_provider.Error.ParseError _ ->
-          true
-      | _ -> false
-    in
-    if should_cascade then
-      Some
-        (Cascade_fsm.Call_err
-           (Llm_provider.Http_client.NetworkError
-              {
-                message = Llm_provider.Error.to_string provider_err;
-                kind = Llm_provider.Http_client.Unknown;
-              }))
-    else
-      None
+    Some (Cascade_fsm.Call_err (provider_error_to_http_error provider_err))
   (* Model-capability errors: the next provider may handle these.
      CompletionContractViolation: model returned text when tool_use was
      required — a different model with better tool calling may succeed.
@@ -482,8 +538,8 @@ let sdk_error_is_hard_quota (err : Agent_sdk.Error.sdk_error) : bool =
        message_looks_like_cli_wrapped_hard_quota message
      | None -> false)
   (* Non-Api error families never carry provider-level hard-quota signals. *)
-  | Agent_sdk.Error.Agent _
   | Agent_sdk.Error.Provider _
+  | Agent_sdk.Error.Agent _
   | Agent_sdk.Error.Mcp _
   | Agent_sdk.Error.Config _
   | Agent_sdk.Error.Serialization _
@@ -588,7 +644,6 @@ let sdk_provider_error_to_provider_error = function
   | Llm_provider.Error.NetworkError _
   | Llm_provider.Error.Timeout _ ->
       None
-
 let sdk_error_to_provider_error ~provider err =
   match err with
   | Agent_sdk.Error.Api api_err ->
@@ -663,6 +718,9 @@ let timeout_source_label (err : Agent_sdk.Error.sdk_error) : string =
         String_util.contains_substring_ci message "max_execution_time_s"
     | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout { detail; _ }) ->
         String_util.contains_substring_ci detail "max_execution_time_s"
+    | Agent_sdk.Error.Provider
+        (Llm_provider.Error.NetworkError { timeout_phase = Some _; _ }) ->
+        false
     | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited _)
     | Agent_sdk.Error.Api (Llm_provider.Retry.Overloaded _)
     | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _)
@@ -681,7 +739,16 @@ let timeout_source_label (err : Agent_sdk.Error.sdk_error) : string =
     | Agent_sdk.Error.A2a _
     | Agent_sdk.Error.Internal _ -> false
   in
-  if is_max_execution_time then provider_label_max_execution_time else label_provider
+  if is_max_execution_time
+  then provider_label_max_execution_time
+  else
+    match err with
+    | Agent_sdk.Error.Provider
+        (Llm_provider.Error.Timeout { timeout_phase = Some phase; _ })
+    | Agent_sdk.Error.Provider
+        (Llm_provider.Error.NetworkError { timeout_phase = Some phase; _ }) ->
+        Llm_provider.Http_client.timeout_phase_to_label phase
+    | _ -> label_provider
 
 let emit_oas_run_timeout_metric ~cascade_name ~provider:_ err =
   match err with
@@ -695,7 +762,9 @@ let emit_oas_run_timeout_metric ~cascade_name ~provider:_ err =
             (label_source, timeout_source_label err);
           ]
         ()
-  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) ->
+  | Agent_sdk.Error.Provider
+      (Llm_provider.Error.Timeout _
+      | Llm_provider.Error.NetworkError { timeout_phase = Some _; _ }) ->
       let cascade_name = provider_label (cascade_name_to_string cascade_name) in
       Prometheus.inc_counter Keeper_metrics.metric_keeper_oas_run_timeout
         ~labels:

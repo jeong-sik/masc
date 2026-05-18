@@ -40,6 +40,7 @@ type cascade_failure_class =
   | Cli_transport_required
   | Tls_error
   | Network_error
+  | Provider_timeout
   | Provider_terminal
   | Provider_capacity_exhausted
   | Provider_hard_quota

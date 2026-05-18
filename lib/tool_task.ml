@@ -157,8 +157,14 @@ let validate_task_id task_id =
   if String.equal task_id "" then Error (Masc_domain.Task (Masc_domain.Task_error.InvalidId "empty task ID"))
   else Ok task_id
 
-let is_keeper_agent_alias_name agent_name =
-  Keeper_identity.is_keeper_agent_alias (String.trim agent_name)
+let is_registered_keeper_agent_alias_name config agent_name =
+  let agent_name = String.trim agent_name in
+  match Keeper_identity.canonical_keeper_name_from_agent_name agent_name with
+  | Some keeper_name ->
+      Keeper_identity.is_keeper_agent_alias agent_name
+      && Option.is_some
+           (Keeper_registry.get ~base_path:config.Coord.base_path keeper_name)
+  | None -> false
 
 let sync_planning_current_task_with_owned_task (ctx : context) =
   let actual_name =
@@ -171,8 +177,8 @@ let sync_planning_current_task_with_owned_task (ctx : context) =
         ctx.agent_name
   in
   if
-    is_keeper_agent_alias_name ctx.agent_name
-    || is_keeper_agent_alias_name actual_name
+    is_registered_keeper_agent_alias_name ctx.config ctx.agent_name
+    || is_registered_keeper_agent_alias_name ctx.config actual_name
   then ()
   else
     let matches_you assignee =

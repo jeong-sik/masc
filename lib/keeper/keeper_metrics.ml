@@ -726,6 +726,20 @@ let metric_keeper_toml_reconcile_sweep_failures =
   "masc_keeper_toml_reconcile_sweep_failures_total"
 ;;
 
+(** Repeated TOML reconcile failures for a keeper (after the first
+    [`First] WARN). Labeled by keeper and outcome. Used as a back-off
+    observability surface for the [keeper_runtime] periodic beat. *)
+let metric_keeper_toml_reconcile_dedup =
+  "masc_keeper_toml_reconcile_dedup_total"
+;;
+
+(** Keepers whose TOML reconcile reached [default_disable_threshold]
+    consecutive failures and have been parked. Labeled by keeper. The
+    reconciler resumes when TOML mtime changes. *)
+let metric_keeper_reconcile_disabled =
+  "masc_keeper_reconcile_disabled_total"
+;;
+
 let metric_keeper_tool_usage_flush_failures =
   "masc_keeper_tool_usage_flush_failures_total"
 ;;

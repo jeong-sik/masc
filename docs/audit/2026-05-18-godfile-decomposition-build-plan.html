@@ -295,11 +295,11 @@
             <td><code>lib/prometheus.ml</code> 3082 LOC</td>
           </tr>
           <tr>
-            <td>Stack after #16224</td>
-            <td><code>74da952e8b</code></td>
+            <td>Stack after #16230</td>
+            <td><code>3baf6d35a5</code></td>
             <td class="num">53</td>
-            <td class="num">88,436</td>
-            <td class="num">6</td>
+            <td class="num">88,147</td>
+            <td class="num">5</td>
             <td class="num">0</td>
             <td><code>lib/keeper/keeper_unified_turn.ml</code> 2890 LOC</td>
           </tr>
@@ -307,14 +307,14 @@
       </table>
       <div class="panel ok">
         <span class="tag green">-22 files from initial audit</span>
-        <span class="tag green">-25,767 LOC from initial audit</span>
-        <span class="tag blue">2000+ bucket down to 6</span>
+        <span class="tag green">-26,056 LOC from initial audit</span>
+        <span class="tag blue">2000+ bucket down to 5</span>
         <span class="tag blue">3000+ eliminated in stack</span>
         <span class="tag violet">53 files remain</span>
         <p>
           Progress 기준은 이 문서의 원래 범위와 동일하게 <code>lib/**/*.ml</code> 중 1000+ LOC만 센다.
           현재 열린 stack 기준으로는 초기 75개에서 53개까지 내려왔고,
-          3000+ LOC 파일은 남지 않았으며 2000+ LOC 파일도 6개로 줄었다.
+          3000+ LOC 파일은 남지 않았으며 2000+ LOC 파일도 5개로 줄었다.
         </p>
       </div>
     </section>
@@ -357,12 +357,6 @@
             <td>Turn execution pipeline can be segmented behind current <code>run_turn</code>.</td>
           </tr>
           <tr>
-            <td class="rank-p1">P1</td><td class="num">2187</td>
-            <td><a href="../../lib/dashboard/dashboard_http_keeper.ml">lib/dashboard/dashboard_http_keeper.ml</a></td>
-            <td>Overview rows, trust/config projections, BDI, cost, K2 feeds</td>
-            <td>Dashboard projection weight is separable if compact/full behavior is pinned first.</td>
-          </tr>
-          <tr>
             <td class="rank-p2">P2</td><td class="num">1999</td>
             <td><a href="../../lib/keeper/keeper_hooks_oas.ml">lib/keeper/keeper_hooks_oas.ml</a></td>
             <td>PR action metrics, cost ledger, idle policy, factory</td>
@@ -386,6 +380,12 @@
             <td>Request helpers, page/render utilities, shared response builders</td>
             <td>Close threshold file with server-wide fan-in; split only stable pure helpers first.</td>
           </tr>
+          <tr>
+            <td class="rank-p3">P3</td><td class="num">1958</td>
+            <td><a href="../../lib/model_inference_metrics.ml">lib/model_inference_metrics.ml</a></td>
+            <td>Provider windows, derived summaries, and JSON serialization helpers</td>
+            <td>Near-threshold metrics surface; split pure projection helpers before changing storage paths.</td>
+          </tr>
         </tbody>
       </table>
     </section>
@@ -400,7 +400,7 @@
           <tr><td>Keeper</td><td class="num">24</td><td class="num">40,165</td><td><code>keeper_unified_turn</code>, <code>keeper_supervisor</code>, <code>keeper_registry</code>, <code>keeper_agent_run</code></td><td>Split internal seams first; promote only leaf closures after registry/type cycles are cut.</td></tr>
           <tr><td>Root tools/metrics</td><td class="num">9</td><td class="num">16,167</td><td><code>prometheus</code>, <code>model_inference_metrics</code>, <code>worker_dev_tools</code>, <code>tool_board</code>, <code>tool_keeper</code></td><td>Facade-compatible private modules, then low-dependency sub-libraries for metrics/schema/tool gates.</td></tr>
           <tr><td>Server</td><td class="num">7</td><td class="num">11,982</td><td><code>server_dashboard_http_keeper_api</code>, <code>server_dashboard_http_core</code>, <code>server_runtime_bootstrap</code></td><td>Handler seams first; route parity after handlers stabilize.</td></tr>
-          <tr><td>Dashboard</td><td class="num">4</td><td class="num">6,488</td><td><code>dashboard_http_keeper</code>, <code>dashboard_goals_types</code>, <code>dashboard_cascade</code></td><td>Projection helpers and JSON builders; preserve compact mode.</td></tr>
+          <tr><td>Dashboard</td><td class="num">4</td><td class="num">6,199</td><td><code>dashboard_http_keeper</code>, <code>dashboard_goals_types</code>, <code>dashboard_cascade</code></td><td>Projection helpers and JSON builders; preserve compact mode.</td></tr>
           <tr><td>Cascade</td><td class="num">4</td><td class="num">6,247</td><td><code>cascade_transport</code>, <code>cascade_catalog_runtime</code>, <code>cascade_config</code></td><td>Cut <code>Cascade_runner</code> ownership leak; extract refs/names before transport.</td></tr>
           <tr><td>Coord</td><td class="num">2</td><td class="num">2,765</td><td><code>coord_worktree</code>, <code>coord_task</code></td><td>Already sub-library; narrow public API and split dangerous filesystem/git helpers.</td></tr>
           <tr><td>Auth / operator / telemetry</td><td class="num">3</td><td class="num">4,622</td><td><code>auth</code>, <code>operator_control_snapshot</code>, <code>telemetry_unified</code></td><td>Lower priority; split after higher fan-in surfaces stop moving.</td></tr>
@@ -566,7 +566,6 @@ ocamlformat --check &lt;touched .ml/.mli files&gt;</code></pre>
           <tr><td class="num">2490</td><td><a href="../../lib/keeper/keeper_supervisor.ml">lib/keeper/keeper_supervisor.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">2192</td><td><a href="../../lib/keeper/keeper_registry.ml">lib/keeper/keeper_registry.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">2191</td><td><a href="../../lib/keeper/keeper_agent_run.ml">lib/keeper/keeper_agent_run.ml</a></td><td>keeper</td></tr>
-          <tr><td class="num">2187</td><td><a href="../../lib/dashboard/dashboard_http_keeper.ml">lib/dashboard/dashboard_http_keeper.ml</a></td><td>dashboard</td></tr>
           <tr><td class="num">1999</td><td><a href="../../lib/keeper/keeper_hooks_oas.ml">lib/keeper/keeper_hooks_oas.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">1990</td><td><a href="../../lib/keeper/keeper_types_profile.ml">lib/keeper/keeper_types_profile.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">1988</td><td><a href="../../lib/server/server_dashboard_http_keeper_api.ml">lib/server/server_dashboard_http_keeper_api.ml</a></td><td>server</td></tr>
@@ -576,6 +575,7 @@ ocamlformat --check &lt;touched .ml/.mli files&gt;</code></pre>
           <tr><td class="num">1922</td><td><a href="../../lib/worker_dev_tools.ml">lib/worker_dev_tools.ml</a></td><td>tools</td></tr>
           <tr><td class="num">1915</td><td><a href="../../lib/keeper/keeper_heartbeat_loop.ml">lib/keeper/keeper_heartbeat_loop.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">1904</td><td><a href="../../lib/cascade/cascade_transport.ml">lib/cascade/cascade_transport.ml</a></td><td>cascade</td></tr>
+          <tr><td class="num">1898</td><td><a href="../../lib/dashboard/dashboard_http_keeper.ml">lib/dashboard/dashboard_http_keeper.ml</a></td><td>dashboard</td></tr>
           <tr><td class="num">1869</td><td><a href="../../lib/server/server_routes_http_routes_dashboard.ml">lib/server/server_routes_http_routes_dashboard.ml</a></td><td>server</td></tr>
           <tr><td class="num">1868</td><td><a href="../../lib/keeper/keeper_unified_metrics.ml">lib/keeper/keeper_unified_metrics.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">1856</td><td><a href="../../lib/tool_board.ml">lib/tool_board.ml</a></td><td>tools</td></tr>

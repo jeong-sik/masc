@@ -28,11 +28,6 @@ lib/keeper/keeper_egress_audit.ml:54
 let default_local_path id = Filename.concat ".masc/repos" id
 Option.value ~default:(Filename.concat ".masc/repos" id)
 
-# Config_dir_resolver is the SSOT itself; these comment examples document the
-# bypass pattern the audit forbids outside this module.
-helpers instead of [Filename.concat base_path ".masc/..."] string-literal
-Layout SSOT: callers stop computing [Filename.concat base_path ".masc/X"]
-
 # Self-reference inside the audit script and RFC text.
 scripts/audit-path-ssot.sh
 docs/rfc/RFC-0121-config-dir-resolution-single-active-root.md

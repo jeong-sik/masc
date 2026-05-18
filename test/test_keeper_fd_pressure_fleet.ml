@@ -28,6 +28,33 @@ let test_legacy_alias_matches_fleet () =
     (FD.min_nofile_for_fleet ())
     (FD.min_nofile_for_24_keepers ())
 
+let test_low_nofile_blocks_synthetic_24_keeper_start () =
+  FD.reset_for_tests ();
+  let json =
+    FD.runtime_state_json
+      ~soft_limit:(Some 256)
+      ~open_fds:(Some 16)
+      ~system_fds:(Some { open_files = 1024; max_files = 1_000_000; max_files_per_process = None })
+      ~active_keepers:0
+      ~starting_keepers:0
+      ~requested_keepers:24
+      ()
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string) "status" "blocked" (json |> member "status" |> to_string);
+  Alcotest.(check string)
+    "reason"
+    "projected_fd_budget_exhausted"
+    (json |> member "reason" |> to_string);
+  Alcotest.(check int)
+    "projected 24-keeper start"
+    24
+    (json |> member "projected_starting_keepers" |> to_int);
+  Alcotest.(check bool)
+    "operator action required"
+    true
+    (json |> member "operator_action_required" |> to_bool)
+
 let test_cas_monotonic_max_advances () =
   let a = Atomic.make 0.0 in
   let advanced = FD.cas_monotonic_max ~atom:a 10.0 in
@@ -134,6 +161,8 @@ let () =
             test_fleet_default_at_or_above_12288
         ; Alcotest.test_case "legacy alias matches fleet" `Quick
             test_legacy_alias_matches_fleet
+        ; Alcotest.test_case "nofile=256 blocks synthetic 24-keeper start" `Quick
+            test_low_nofile_blocks_synthetic_24_keeper_start
         ] )
     ; ( "cas-monotonic"
       , [ Alcotest.test_case "advances and rejects smaller" `Quick

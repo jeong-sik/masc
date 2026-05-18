@@ -241,6 +241,13 @@ let strip_stderr_dev_null_redirects cmd =
     | ' ' | '\t' | '\n' | '\r' | ';' | '&' | '|' -> true
     | _ -> false
   in
+  let is_redirect_start_boundary i =
+    i = 0
+    ||
+    match cmd.[i - 1] with
+    | ' ' | '\t' | '\n' | '\r' | ';' | '&' | '|' -> true
+    | _ -> false
+  in
   let skip_dev_null_after op_end =
     let target_start = skip_spaces op_end in
     let target_end = target_start + String.length "/dev/null" in
@@ -250,6 +257,9 @@ let strip_stderr_dev_null_redirects cmd =
     else None
   in
   let stderr_dev_null_redirect_end i =
+    if not (is_redirect_start_boundary i)
+    then None
+    else
     let compact_append_end = i + String.length "2>>/dev/null" in
     let compact_write_end = i + String.length "2>/dev/null" in
     if starts_with_at cmd ~pos:i ~prefix:"2>>/dev/null"

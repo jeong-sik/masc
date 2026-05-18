@@ -73,6 +73,7 @@ let test_shell_metachar_blocked () =
     "echo x && rm -rf /";
     "cat file > /etc/passwd";
     "cat < /etc/shadow";
+    "ls2>/dev/null";
     "echo `whoami`";
     "echo $HOME";
   ] in

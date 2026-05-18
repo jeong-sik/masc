@@ -11,6 +11,8 @@
       "textDocument/references"
     ],
     "manifest": "docs/design/lsp-symbol-graph-exporter.md",
+    "check_command": "scripts/ide/export-symbol-graph --check",
+    "emit_command": "scripts/ide/export-symbol-graph --emit > docs/generated/reverse-engineering/symbol-graph.v1.json",
     "live_lsp_invoked": false,
     "notes": "Initial task-387 snapshot is a base-commit-bound static seed from base_commit. display_range values are not current-main coordinates. Later exporter PRs should replace static ranges with live LSP responses."
   },

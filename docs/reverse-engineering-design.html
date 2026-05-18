@@ -1387,6 +1387,12 @@
               <td><a href="generated/reverse-engineering/symbol-graph.v1.json"><code>docs/generated/reverse-engineering/symbol-graph.v1.json</code></a></td>
               <td>Every WBS slice names at least one guard test or an omission row. Current snapshot is a static seed; live LSP invocation is recorded as an omission. Snapshot ranges are bound to the JSON <code>base_commit</code>, not live current-main coordinates.</td>
             </tr>
+            <tr>
+              <td><code>task-411</code> landing gate</td>
+              <td>PR #16251, generated snapshot, and current repo files/tests</td>
+              <td><code>scripts/ide/export-symbol-graph --check</code></td>
+              <td>Classifies merge/readiness blockers and proves the atlas path is operator-only: no runtime write route, no cache write, no keeper/task/git mutation.</td>
+            </tr>
           </tbody>
         </table>
       </section>

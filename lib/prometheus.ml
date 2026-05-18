@@ -193,6 +193,15 @@ let metric_oas_bridge_unmigrated_payload_kind =
   "masc_oas_bridge_unmigrated_payload_kind_total"
 ;;
 
+(* [Cascade_attempt_fsm.provider_label] receives an empty/blank string
+   and falls back to the literal "unknown" so metric labels do not
+   carry an empty value.  A non-zero rate here means an upstream
+   call site is emitting metrics without a real provider name —
+   the helper paints over the symptom; the counter surfaces it so
+   the source can be found and fixed. *)
+let metric_cascade_attempt_empty_provider_label =
+  "masc_cascade_attempt_empty_provider_label_total"
+;;
 let metric_runtime_ollama_probe_generate_skips =
   "masc_runtime_ollama_probe_generate_skips_total"
 ;;

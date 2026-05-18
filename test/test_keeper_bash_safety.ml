@@ -873,6 +873,112 @@ let parse_error_field raw =
   |> Json.member "error"
   |> Json.to_string_option
 
+let test_keeper_bash_typed_exec_runs_via_shell_ir () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "typed-exec" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  ensure_dir playground;
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "printf"
+           ; "argv", `List [ `String "typed-ok" ]
+           ; "cwd", `String playground
+           ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "typed exec succeeds" true
+    (json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check bool) "typed flag" true
+    (json |> Json.member "typed" |> Json.to_bool);
+  Alcotest.(check bool) "output from native argv" true
+    (json
+     |> Json.member "output"
+     |> Json.to_string
+     |> fun output -> String_util.contains_substring output "typed-ok")
+
+let test_keeper_bash_typed_pipeline_runs_via_shell_ir () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "typed-pipeline" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  ensure_dir playground;
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ ( "pipeline"
+             , `List
+                 [ `Assoc
+                     [ "executable", `String "printf"
+                     ; "argv", `List [ `String "typed" ]
+                     ]
+                 ; `Assoc
+                     [ "executable", `String "wc"
+                     ; "argv", `List [ `String "-c" ]
+                     ]
+                 ] )
+           ; "cwd", `String playground
+           ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "typed pipeline succeeds" true
+    (json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check bool) "typed flag" true
+    (json |> Json.member "typed" |> Json.to_bool);
+  Alcotest.(check bool) "wc sees piped stdin" true
+    (json
+     |> Json.member "output"
+     |> Json.to_string
+     |> fun output -> String_util.contains_substring output "5")
+
+let test_keeper_bash_typed_docker_is_fail_closed () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_docker_meta "typed-docker" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  ensure_dir playground;
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "printf"
+           ; "argv", `List [ `String "typed-docker" ]
+           ; "cwd", `String playground
+           ])
+      ()
+  in
+  match parse_error_field raw with
+  | Some err ->
+    Alcotest.(check bool) "docker typed path is explicit" true
+      (String_util.contains_substring err "Docker is not enabled yet")
+  | None -> Alcotest.fail ("expected typed docker fail-closed error, got: " ^ raw)
+
 let test_keeper_bash_safe_dev_null_echo_fallback_executes_primary () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
@@ -1667,6 +1773,14 @@ let () =
         test_docker_allows_gh_pr_create_prose;
       Alcotest.test_case "docker missing seccomp fails closed" `Quick
         test_docker_missing_seccomp_profile_fails_closed;
+    ]);
+    ("typed_shell_ir", [
+      Alcotest.test_case "typed exec runs via Shell IR" `Quick
+        test_keeper_bash_typed_exec_runs_via_shell_ir;
+      Alcotest.test_case "typed pipeline runs via Shell IR" `Quick
+        test_keeper_bash_typed_pipeline_runs_via_shell_ir;
+      Alcotest.test_case "typed docker dispatch fails closed" `Quick
+        test_keeper_bash_typed_docker_is_fail_closed;
     ]);
     ("readonly_hints", [
       Alcotest.test_case "safe dev-null echo fallback executes primary" `Quick

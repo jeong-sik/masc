@@ -125,8 +125,9 @@ val list_with_started_at : keeper:string -> (task_id * float) list
 type lifetime_guard = { acquire : unit -> (unit -> unit) }
 (** Process-wide guard for long-lived background task resources.
     [acquire ()] runs before {!Process_eio.spawn_detached}; the returned
-    release callback is held until the task reaches [closed = true] and
-    stdout/stderr read FDs have been closed. *)
+    release callback is held until the task process exits or is reaped.
+    stdout/stderr read FDs may remain open until the next {!read} drains
+    and closes the final snapshot. *)
 
 val set_lifetime_guard : lifetime_guard -> unit
 (** Install a process-wide lifetime guard. The default guard is a no-op. *)

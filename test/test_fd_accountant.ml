@@ -346,6 +346,69 @@ let test_bg_task_lifetime_serializes_under_fd_pressure () =
         (wait_until ~clock ~attempts:200 (fun () ->
            kind_in_flight FA.Sandbox_exec = 0)))
 
+let test_bg_task_lifetime_releases_after_exit_without_read () =
+  Eio_main.run @@ fun env ->
+  Eio_guard.enable () ;
+  Fun.protect
+    ~finally:(fun () ->
+      Bg_task.reset_lifetime_guard_for_testing () ;
+      Eio_guard.disable ())
+    (fun () ->
+      Bg_task.reset_lifetime_guard_for_testing () ;
+      FA.install_bg_task_sandbox_exec_guard () ;
+      let tid =
+        match
+          Bg_task.spawn ~keeper:"fd-accountant-exit-watch"
+            ~argv:[ "/bin/sleep"; "0.01" ]
+            ~cwd:"" ~envp:(Unix.environment ()) ~timeout_sec:0.0 ()
+        with
+        | Ok tid -> tid
+        | Error _ -> Alcotest.fail "Bg_task spawn failed"
+      in
+      check int "Bg_task holds sandbox slot after spawn" 1
+        (kind_in_flight FA.Sandbox_exec) ;
+      let clock = Eio.Stdenv.clock env in
+      check bool "Bg_task sandbox slot releases after process exit" true
+        (wait_until ~clock ~attempts:500 (fun () ->
+           kind_in_flight FA.Sandbox_exec = 0)) ;
+      ignore (Bg_task.read tid ~since_stdout:0 ~since_stderr:0))
+
+let test_bg_task_cancelled_lifetime_acquire_releases_pending_slot () =
+  Eio_main.run @@ fun env ->
+  let keeper = "fd-accountant-cancelled-acquire" in
+  Fun.protect
+    ~finally:Bg_task.reset_lifetime_guard_for_testing
+    (fun () ->
+      Bg_task.set_lifetime_guard
+        { Bg_task.acquire =
+            (fun () -> raise (Eio.Cancel.Cancelled (Failure "synthetic")))
+        } ;
+      for _ = 1 to 2 do
+        try
+          ignore
+            (Bg_task.spawn ~keeper ~argv:[ "/bin/sleep"; "0.01" ]
+               ~cwd:"" ~envp:(Unix.environment ()) ~timeout_sec:0.0 ())
+        with
+        | Eio.Cancel.Cancelled _ -> ()
+      done ;
+      Bg_task.reset_lifetime_guard_for_testing () ;
+      let tid =
+        match
+          Bg_task.spawn ~keeper ~argv:[ "/bin/sleep"; "0.01" ]
+            ~cwd:"" ~envp:(Unix.environment ()) ~timeout_sec:0.0 ()
+        with
+        | Ok tid -> tid
+        | Error (Bg_task.Too_many_tasks _) ->
+            Alcotest.fail "cancelled lifetime acquire leaked pending slot"
+        | Error _ -> Alcotest.fail "Bg_task spawn failed"
+      in
+      let clock = Eio.Stdenv.clock env in
+      check bool "Bg_task closes after cancelled acquire recovery" true
+        (wait_until ~clock ~attempts:500 (fun () ->
+           match Bg_task.read tid ~since_stdout:0 ~since_stderr:0 with
+           | Ok snapshot -> snapshot.closed
+           | Error _ -> false)))
+
 let () =
   Alcotest.run "Fd_accountant"
     [
@@ -392,5 +455,9 @@ let () =
             test_bg_task_uses_sandbox_lifetime_slot ;
           test_case "Bg_task lifetime serializes under FD pressure" `Quick
             test_bg_task_lifetime_serializes_under_fd_pressure ;
+          test_case "Bg_task lifetime releases after process exit" `Quick
+            test_bg_task_lifetime_releases_after_exit_without_read ;
+          test_case "Bg_task cancelled lifetime acquire releases pending slot" `Quick
+            test_bg_task_cancelled_lifetime_acquire_releases_pending_slot ;
         ] ) ;
     ]

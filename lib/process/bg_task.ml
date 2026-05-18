@@ -180,6 +180,10 @@ let release_lifetime_guard st =
       st.release_lifetime_guard <- None;
       release ()
 
+let mark_process_finished st status =
+  if Option.is_none st.status then st.status <- Some status;
+  release_lifetime_guard st
+
 let registry : (string, state) Hashtbl.t = Hashtbl.create 16
 let registry_mu = Mutex.create ()
 let id_counter = ref 0
@@ -191,6 +195,19 @@ let with_reg f =
   match f () with
   | v -> Mutex.unlock registry_mu; v
   | exception e -> Mutex.unlock registry_mu; raise e
+
+let start_exit_watcher st =
+  let _watcher =
+    Thread.create
+      (fun () ->
+        match Unix.waitpid [] st.handle.pid with
+        | _, status -> with_reg (fun () -> mark_process_finished st status)
+        | exception Unix.Unix_error (Unix.ECHILD, _, _) ->
+            with_reg (fun () -> release_lifetime_guard st)
+        | exception exn -> observe_sidecar_failure ~site:"waitpid" exn)
+      ()
+  in
+  ()
 
 let fresh_id () =
   with_reg (fun () ->
@@ -344,30 +361,29 @@ let poll_state st =
     (match st.status with
      | Some _ -> ()
      | None ->
-         (match Unix.waitpid [ Unix.WNOHANG ] st.handle.pid with
-          | 0, _ -> ()
-          | _, s -> st.status <- Some s
-          | exception Unix.Unix_error (Unix.ECHILD, _, _) ->
-              st.status <- Some (Unix.WEXITED 0)
-          | exception _ -> ()));
+	         (match Unix.waitpid [ Unix.WNOHANG ] st.handle.pid with
+	          | 0, _ -> ()
+	          | _, s -> mark_process_finished st s
+	          | exception Unix.Unix_error (Unix.ECHILD, _, _) ->
+	              mark_process_finished st (Unix.WEXITED 0)
+	          | exception _ -> ()));
     if st.status = None
        && st.timeout_sec > 0.0
        && Unix.gettimeofday () -. st.handle.started_at > st.timeout_sec
     then begin
       Process_eio.tree_kill ~pgid:st.handle.pgid
         ~signal:Sys.sigterm ~grace_sec:2.0;
-      (match Unix.waitpid [ Unix.WNOHANG ] st.handle.pid with
-       | 0, _ -> ()
-       | _, s -> st.status <- Some s
-       | exception _ -> ())
+	      (match Unix.waitpid [ Unix.WNOHANG ] st.handle.pid with
+	       | 0, _ -> ()
+	       | _, s -> mark_process_finished st s
+	       | exception _ -> ())
     end;
     if st.status <> None && st.stdout_eof && st.stderr_eof then begin
-      st.closed <- true;
-      Safe_ops.protect ~default:() (fun () -> Unix.close st.handle.stdout_fd);
-      Safe_ops.protect ~default:() (fun () -> Unix.close st.handle.stderr_fd);
-      try_delete_pid_file st.pid_file;
-      release_lifetime_guard st
-    end
+	      st.closed <- true;
+	      Safe_ops.protect ~default:() (fun () -> Unix.close st.handle.stdout_fd);
+	      Safe_ops.protect ~default:() (fun () -> Unix.close st.handle.stderr_fd);
+	      try_delete_pid_file st.pid_file
+	    end
   end
 
 let poll_all_states () =
@@ -417,11 +433,13 @@ let spawn ?base_path ~keeper ~argv ~cwd ~envp ~timeout_sec () =
   match reserve_spawn_slot ~keeper with
   | Error err -> Error err
   | Ok () ->
-    let release_lifetime_guard =
-      try Ok (acquire_lifetime_guard ()) with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-          release_spawn_slot ~keeper;
+	    let release_lifetime_guard =
+	      try Ok (acquire_lifetime_guard ()) with
+	      | Eio.Cancel.Cancelled _ as e ->
+	          release_spawn_slot ~keeper;
+	          raise e
+	      | exn ->
+	          release_spawn_slot ~keeper;
           Error
             (Spawn_failed
                (Printf.sprintf "bg_task lifetime guard acquire failed: %s"
@@ -472,10 +490,11 @@ let spawn ?base_path ~keeper ~argv ~cwd ~envp ~timeout_sec () =
             with_reg (fun () ->
                 Hashtbl.replace registry tid st;
                 pending_spawn_global := max 0 (!pending_spawn_global - 1);
-                let next = max 0 (pending_keeper_count keeper - 1) in
-                if next = 0 then Hashtbl.remove pending_spawn_by_keeper keeper
-                else Hashtbl.replace pending_spawn_by_keeper keeper next);
-            Ok tid)
+	                let next = max 0 (pending_keeper_count keeper - 1) in
+	                if next = 0 then Hashtbl.remove pending_spawn_by_keeper keeper
+	                else Hashtbl.replace pending_spawn_by_keeper keeper next);
+	            start_exit_watcher st;
+	            Ok tid)
 
 let bufsub buf ~base_offset since =
   let len = Buffer.length buf in

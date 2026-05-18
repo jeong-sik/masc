@@ -1528,6 +1528,16 @@ let test_docker_mount_failure_requires_path () =
   Alcotest.(check string) "missing path has no mount context" ""
     (Keeper_sandbox_runtime.docker_mount_failure_context_suffix output)
 
+let test_docker_mount_failure_requires_daemon_origin () =
+  let app_output = {|application stderr: error mounting "./fixtures" failed|} in
+  Alcotest.(check (option string)) "app output is not a mount diagnostic" None
+    (Keeper_sandbox_runtime.docker_mount_failure_path app_output);
+  Alcotest.(check string) "app output has no mount context" ""
+    (Keeper_sandbox_runtime.docker_mount_failure_context_suffix app_output);
+  let marker_output = {|mount_path="/tmp/user-output"|} in
+  Alcotest.(check (option string)) "marker-only output is not daemon-originated" None
+    (Keeper_sandbox_runtime.docker_mount_failure_path marker_output)
+
 let () =
   Alcotest.run "Keeper_shell_docker_route"
     [
@@ -1590,6 +1600,9 @@ let () =
           Alcotest.test_case
             "docker mount failure requires extracted path"
             `Quick test_docker_mount_failure_requires_path;
+          Alcotest.test_case
+            "docker mount failure requires daemon origin"
+            `Quick test_docker_mount_failure_requires_daemon_origin;
         ] );
       ( "docker_route_skipped",
         [

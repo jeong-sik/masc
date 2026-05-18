@@ -213,6 +213,12 @@ let find_char_from s ch pos =
 
 let max_docker_mount_path_log_len = 4096
 
+let docker_mount_failure_looks_daemon_originated output =
+  String_util.contains_substring output "Error response from daemon"
+  || String_util.contains_substring output "OCI runtime create failed"
+  || String_util.contains_substring output "runc create failed"
+;;
+
 let extract_quoted_value_after output marker =
   match String_util.find_substring output marker with
   | None -> None
@@ -236,9 +242,12 @@ let extract_quoted_value_after output marker =
 ;;
 
 let docker_mount_failure_path output =
-  match extract_quoted_value_after output "error mounting " with
-  | Some _ as path -> path
-  | None -> extract_quoted_value_after output "mount_path="
+  if not (docker_mount_failure_looks_daemon_originated output)
+  then None
+  else (
+    match extract_quoted_value_after output "error mounting " with
+    | Some _ as path -> path
+    | None -> extract_quoted_value_after output "mount_path=")
 ;;
 
 let docker_output_mentions_mount_failure output =

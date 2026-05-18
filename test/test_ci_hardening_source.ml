@@ -434,17 +434,17 @@ let test_pr_automation_draft_guard_contracts () =
   check bool "draft PRs always require verified approval" true
     (file_contains_pattern ".github/workflows/pr-automation.yml"
        "const approvalRequired =\n              current.isDraft ||\n              looksAgentAuthored ||\n              unsafeDraftBoundaryAction ||\n              hasAutoMergeRequest ||");
-  check bool "unsafe ready/auto-merge boundary waits for current-head CI Gate" true
-    (file_contains_pattern ".github/workflows/pr-automation.yml"
-       "const ciGateRequiredForUnsafeBoundary =\n              unsafeDraftBoundaryAction ||\n              hasAutoMergeRequest");
+  check bool "ready/auto-merge boundary does not duplicate CI Gate" true
+    (file_not_contains_pattern ".github/workflows/pr-automation.yml"
+       "const ciGateRequiredForUnsafeBoundary");
   check bool "verified bypass label alone does not wait for CI Gate" true
     (file_not_contains_pattern ".github/workflows/pr-automation.yml"
        "verifiedBypassLabels.length > 0 ||\n              unsafeDraftBoundaryAction");
-  check bool "pr automation polls CI Gate before unsafe boundary" true
+  check bool "pr automation leaves CI Gate to branch protection" true
     (file_contains_pattern ".github/workflows/pr-automation.yml"
-       "const latestCiGate = await waitForCiGate()");
-  check bool "pr automation rejects missing or pending CI Gate" true
-    (file_contains_pattern ".github/workflows/pr-automation.yml"
+       "CI Gate\n            // remains a separate branch-protection requirement");
+  check bool "pr automation does not reject pending CI Gate" true
+    (file_not_contains_pattern ".github/workflows/pr-automation.yml"
        "CI Gate is not completed successfully for head");
   check bool "ci gate exports environment approval marker" true
     (file_contains_pattern ".github/workflows/ci.yml"

@@ -16,19 +16,6 @@ include Coord_task_classify
 include Coord_task_create
 include Coord_task_claim
 
-let action_persists_handoff_context = function
-  | Masc_domain.Release
-  | Masc_domain.Done_action
-  | Masc_domain.Submit_for_verification
-  | Masc_domain.Submit_pr_evidence ->
-    true
-  | Masc_domain.Claim
-  | Masc_domain.Start
-  | Masc_domain.Cancel
-  | Masc_domain.Approve_verification
-  | Masc_domain.Reject_verification ->
-    false
-
 let flatten_lock_result = function
   | Ok result -> result
   | Error e -> Error e
@@ -534,60 +521,15 @@ let transition_task_r
                task_id
                (task_status_to_string task.task_status))
         else (
-          let new_tasks =
-            List.map
-              (fun (t : task) ->
-                 if t.id = task_id
-                 then (
-                   let t =
-                     match action with
-                     | Masc_domain.Claim ->
-                       t
-                       |> clear_soft_do_not_reclaim_reason
-                       |> clear_stale_worktree_binding
-                     | Masc_domain.Release -> clear_stale_worktree_binding t
-                     | Masc_domain.Start
-                     | Masc_domain.Done_action
-                     | Masc_domain.Cancel
-                     | Masc_domain.Submit_for_verification
-                     | Masc_domain.Submit_pr_evidence
-                     | Masc_domain.Approve_verification
-                     | Masc_domain.Reject_verification -> t
-                   in
-                   let cycle_count, do_not_reclaim_reason =
-                     match action with
-                     | Masc_domain.Release ->
-                       ( t.cycle_count + 1
-                       , derive_release_do_not_reclaim_reason t handoff_context )
-                     | Masc_domain.Claim
-                     | Masc_domain.Start
-                     | Masc_domain.Done_action
-                     | Masc_domain.Cancel
-                     | Masc_domain.Submit_for_verification
-                     | Masc_domain.Submit_pr_evidence
-                     | Masc_domain.Approve_verification
-                     | Masc_domain.Reject_verification ->
-                       t.cycle_count, t.do_not_reclaim_reason
-                   in
-                   { t with
-                     task_status = new_status
-                   ; handoff_context =
-                       (if action_persists_handoff_context action
-                        then handoff_context
-                        else None)
-                   ; cycle_count
-                   ; do_not_reclaim_reason
-                   })
-                 else t)
-              backlog.tasks
+          let backlog_update =
+            Coord_task_transition_executor.build_backlog_update
+              ~backlog
+              ~task_id
+              ~action
+              ~new_status
+              ~handoff_context
           in
-          let new_backlog =
-            { tasks = new_tasks
-            ; last_updated = now_iso ()
-            ; version = backlog.version + 1
-            }
-          in
-          write_backlog config new_backlog;
+          write_backlog config backlog_update.backlog;
           update_local_agent_state config ~agent_name (fun agent ->
             match set_current with
             | Some _ -> { agent with status = Busy; current_task = Some task_id }
@@ -607,10 +549,7 @@ let transition_task_r
                ~forced:force
                ?notes:(trim_opt (Some notes))
                ?reason:(trim_opt (Some reason))
-               ?handoff_context:
-                 (if action_persists_handoff_context action
-                  then handoff_context
-                  else None)
+               ?handoff_context:backlog_update.persisted_handoff_context
                ());
           (match action with
            | Masc_domain.Claim ->

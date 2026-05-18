@@ -42,7 +42,7 @@
 \*   rollover_decision               | Keeper_rollover.maybe_rollover_oas_handoff outcome                      | lib/keeper/keeper_post_turn.ml:apply_post_turn_lifecycle_with_resilience_handles — the Keeper_rollover.maybe_rollover_oas_handoff call
 \*   wirein_order                    | Seq of atoms appended at each apply_*_wirein call                       | lib/keeper/keeper_post_turn.ml:apply_post_turn_lifecycle_with_resilience_handles — the apply_*_wirein chain (apply_autonomous_wirein → apply_resilience_wirein → apply_tool_emission_wirein → apply_multimodal_wirein) at the tail
 \*   lineage_appended_before_persist | structural — implied by the rollover-handoff handler ordering           | lib/keeper/keeper_rollover.ml:maybe_rollover_oas_handoff (handoff write path)
-\*   checkpoint_persisted            | downstream post-checkpoint write (in the autonomous-runner path)         | lib/keeper/keeper_unified_turn.ml:dispatch_post_turn_lifecycle_events — the post_turn_lifecycle consumer right after the apply_post_turn_lifecycle_with_resilience_handles call; the checkpoint write itself is further downstream (control-flow position, no single symbol)
+\*   checkpoint_persisted            | downstream post-checkpoint write (in the autonomous-runner path)         | lib/keeper/keeper_exec_context.ml:dispatch_post_turn_lifecycle_events — the post_turn_lifecycle consumer called from keeper_unified_turn right after apply_post_turn_lifecycle_with_resilience_handles; the checkpoint write itself is further downstream (control-flow position, no single symbol)
 \*
 \* Provider opacity (G3 acceptance gate):
 \*   blocker_klass is modeled as an abstract symbol set ({"none",

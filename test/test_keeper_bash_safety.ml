@@ -968,6 +968,43 @@ let test_keeper_bash_safe_rg_fallback_allows_escaped_regex_pipe () =
      |> Json.to_string
      |> fun output -> String_util.contains_substring output "no matches")
 
+let test_keeper_bash_safe_dev_null_redirect_executes_scoped_grep () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "dev-null-grep" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  let lib_dir = Filename.concat playground "repos/masc-mcp/lib" in
+  ensure_dir lib_dir;
+  ignore
+    (Fs_compat.save_file_atomic
+       (Filename.concat lib_dir "quoted_pipe.ml")
+       "let quoted_pipe = true\n");
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:
+        (`Assoc
+           [ ( "cmd"
+             , `String
+                 "grep -Erl \"quoted.pipe|quoted_pipe|shell.*pipe|pipe.*valid\" repos/masc-mcp/lib/ 2>/dev/null"
+             )
+           ; ("cwd", `String playground)
+           ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "direct dev-null grep succeeds" true
+    (json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check bool) "grep found scoped file" true
+    (json
+     |> Json.member "output"
+     |> Json.to_string
+     |> fun output -> String_util.contains_substring output "quoted_pipe.ml")
+
 let test_keeper_bash_task_state_file_probe_uses_task_tools () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
@@ -1470,6 +1507,8 @@ let () =
         test_keeper_bash_safe_fallback_works_for_write_enabled_keeper;
       Alcotest.test_case "safe rg fallback allows escaped regex pipe" `Quick
         test_keeper_bash_safe_rg_fallback_allows_escaped_regex_pipe;
+      Alcotest.test_case "safe dev-null redirect executes scoped grep" `Quick
+        test_keeper_bash_safe_dev_null_redirect_executes_scoped_grep;
       Alcotest.test_case "task-state file probe uses task tools" `Quick
         test_keeper_bash_task_state_file_probe_uses_task_tools;
       Alcotest.test_case "safe fallback does not unblock repo scan" `Quick

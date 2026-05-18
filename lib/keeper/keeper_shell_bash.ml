@@ -552,6 +552,22 @@ type safe_read_fallback = {
   primary_cmd : string;
 }
 
+let safe_read_primary_rewrite primary_cmd =
+  match keeper_bash_shape_block primary_cmd with
+  | Some _ -> None
+  | None ->
+    if Worker_dev_tools.is_write_operation primary_cmd
+    then None
+    else (
+      match
+        Worker_dev_tools.validate_command_coding_with_allowlist
+          ~allow_pipes:false
+          ~allowed_commands:Worker_dev_tools.dev_allowed_commands
+          primary_cmd
+      with
+      | Ok () -> Some { primary_cmd }
+      | Error _ -> None)
+
 let find_unquoted_logic_or cmd =
   let len = String.length cmd in
   let rec loop quote_state escaped i =
@@ -622,7 +638,7 @@ let literal_echo_is_safe text =
     loop simple.args
   | _ -> false
 
-let safe_read_fallback_of_command ~write_enabled:_ cmd =
+let safe_read_or_echo_fallback_of_command cmd =
   match find_unquoted_logic_or cmd with
   | None -> None
   | Some split ->
@@ -632,21 +648,16 @@ let safe_read_fallback_of_command ~write_enabled:_ cmd =
     in
     (match strip_trailing_dev_null_redirect left, literal_echo_is_safe right with
      | Some primary_cmd, true ->
-       (match keeper_bash_shape_block primary_cmd with
-        | Some _ -> None
-        | None ->
-          if Worker_dev_tools.is_write_operation primary_cmd
-          then None
-          else (
-            match
-              Worker_dev_tools.validate_command_coding_with_allowlist
-                ~allow_pipes:false
-                ~allowed_commands:Worker_dev_tools.dev_allowed_commands
-                primary_cmd
-            with
-            | Ok () -> Some { primary_cmd }
-            | Error _ -> None))
+       safe_read_primary_rewrite primary_cmd
      | _ -> None)
+
+let safe_read_fallback_of_command ~write_enabled:_ cmd =
+  match safe_read_or_echo_fallback_of_command cmd with
+  | Some _ as rewrite -> rewrite
+  | None ->
+    (match strip_trailing_dev_null_redirect cmd with
+     | Some primary_cmd -> safe_read_primary_rewrite primary_cmd
+     | None -> None)
 
 let shape_block_allowed_by_active_validator ~write_enabled cmd = function
   | Pipe_or_redirect when write_enabled ->

@@ -41,6 +41,11 @@ let has_current_task_quarantine config =
     Sys.readdir (trash_dir config)
     |> Array.exists (fun name -> String.starts_with ~prefix:"current_task." name)
 
+let set_current_task_ok config ~task_id =
+  match Planning_eio.set_current_task config ~task_id with
+  | Ok () -> ()
+  | Error msg -> fail msg
+
 (* ===== Type Tests ===== *)
 
 let test_create_context () =
@@ -369,7 +374,7 @@ let test_session_context () =
   (* Initially no current task *)
   check (option string) "no current task" None (Planning_eio.get_current_task config);
   (* Set current task *)
-  Planning_eio.set_current_task config ~task_id:"session-test-task";
+  set_current_task_ok config ~task_id:"session-test-task";
   check (option string) "current task set" (Some "session-test-task") (Planning_eio.get_current_task config);
   (* Clear current task *)
   Planning_eio.clear_current_task config;
@@ -394,7 +399,7 @@ let test_set_current_task_quarantines_dir () =
   let path = current_task_path config in
   Unix.mkdir path 0o755;
   Fs_compat.save_file (Filename.concat path "forensics.txt") "kept";
-  Planning_eio.set_current_task config ~task_id:"recovered-task";
+  set_current_task_ok config ~task_id:"recovered-task";
   check (option string) "recovered current task" (Some "recovered-task")
     (Planning_eio.get_current_task config);
   check bool "old directory quarantined" true
@@ -410,15 +415,22 @@ let test_set_current_task_stops_when_quarantine_fails () =
   if Sys.file_exists trash then rm_rf trash;
   Unix.mkdir path 0o755;
   Fs_compat.save_file (Filename.concat path "forensics.txt") "kept";
-  Unix.mkdir trash 0o555;
+  if not (Sys.file_exists trash) then Unix.mkdir trash 0o755;
+  Unix.chmod trash 0o555;
   Fun.protect
     ~finally:(fun () ->
       if Sys.file_exists trash && Sys.is_directory trash then
         Unix.chmod trash 0o755;
-      rm_rf path;
-      rm_rf trash)
+      if Sys.file_exists path then rm_rf path;
+      if Sys.file_exists trash then rm_rf trash)
     (fun () ->
-      Planning_eio.set_current_task config ~task_id:"blocked-task";
+      (match Planning_eio.set_current_task config ~task_id:"blocked-task" with
+       | Ok () -> fail "expected set_current_task to fail"
+       | Error msg ->
+         check bool "error mentions quarantine failure" true
+           (String.starts_with
+              ~prefix:"failed to quarantine existing current_task directory"
+              msg));
       check bool "current_task remains a directory" true
         (Sys.file_exists path && Sys.is_directory path);
       check (option string) "failed quarantine does not write over directory" None
@@ -446,7 +458,7 @@ let test_resolve_task_id () =
    | Ok _ -> fail "Expected error when no current task"
    | Error _ -> ());
   (* Set current task, then resolve empty *)
-  Planning_eio.set_current_task config ~task_id:"current-fallback";
+  set_current_task_ok config ~task_id:"current-fallback";
   match Planning_eio.resolve_task_id config ~task_id:"" with
   | Ok id -> check string "fallback to current" "current-fallback" id
   | Error e -> fail (Printf.sprintf "Fallback resolution failed: %s" e)

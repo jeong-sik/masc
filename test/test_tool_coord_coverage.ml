@@ -36,6 +36,12 @@ let assert_not_contains output unexpected =
     failwith (Printf.sprintf "unexpected substring %S in output:\n%s" unexpected output)
 ;;
 
+let set_current_task_ok config ~task_id =
+  match Planning_eio.set_current_task config ~task_id with
+  | Ok () -> ()
+  | Error msg -> failwith msg
+;;
+
 let with_env name value_opt f =
   let original = Sys.getenv_opt name in
   let restore () =
@@ -134,6 +140,22 @@ let write_agent_state config agent_name f =
 ;;
 
 let actual_test_agent_name config = Coord.resolve_agent_name config "test-agent"
+
+let force_claim_task config ~agent_name ~task_id =
+  let backlog = Coord.read_backlog config in
+  let tasks =
+    List.map
+      (fun (task : Types.task) ->
+        if String.equal task.id task_id
+        then
+          { task with
+            task_status = Types.Claimed { assignee = agent_name; claimed_at = "test" }
+          }
+        else task)
+      backlog.tasks
+  in
+  Coord.write_backlog config { backlog with tasks; version = backlog.version + 1 }
+;;
 
 (* Test dispatch returns None for unknown tool *)
 let () =
@@ -509,19 +531,20 @@ let () =
       Coord.add_task ctx.config ~title:"Secondary lane" ~priority:2 ~description:""
     in
     ignore (Coord.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
-    ignore (Coord.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-002");
-    Planning_eio.set_current_task ctx.config ~task_id:"task-002";
+    let actual_name = actual_test_agent_name ctx.config in
+    force_claim_task ctx.config ~agent_name:actual_name ~task_id:"task-002";
+    set_current_task_ok ctx.config ~task_id:"task-002";
     (match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
      | Some { success; legacy_message = result } ->
        assert success;
-       assert (str_contains result "owned=task-001 | current=task-002");
-       assert (str_contains result "assigned_set=[task-001,task-002]");
-       assert (str_contains result "primary_owned=task-001");
-       assert (str_contains result "planning_current=task-002");
-       assert (str_contains result "current_is_assigned=yes");
-       assert (str_contains result "effective_current=task-002");
-       assert (str_contains result "drift_reason=secondary_assignment");
-       assert (str_contains result "claim_first_suppressed=yes");
+       assert_contains result "owned=task-001 | current=task-002";
+       assert_contains result "assigned_set=[task-001,task-002]";
+       assert_contains result "primary_owned=task-001";
+       assert_contains result "planning_current=task-002";
+       assert_contains result "current_is_assigned=yes";
+       assert_contains result "effective_current=task-002";
+       assert_contains result "drift_reason=secondary_assignment";
+       assert_contains result "claim_first_suppressed=yes";
        assert (not (str_contains result "task-002 is stale focus"))
      | None -> failwith "dispatch returned None");
     match
@@ -559,7 +582,7 @@ let () =
     ignore
       (Coord.add_task ctx.config ~title:"Stale current task" ~priority:3 ~description:"");
     ignore (Coord.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
-    Planning_eio.set_current_task ctx.config ~task_id:"task-002";
+    set_current_task_ok ctx.config ~task_id:"task-002";
     match
       Tool_coord.dispatch
         ctx
@@ -595,7 +618,7 @@ let () =
     ignore
       (Coord.add_task ctx.config ~title:"Stale current task" ~priority:3 ~description:"");
     ignore (Coord.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
-    Planning_eio.set_current_task ctx.config ~task_id:"task-002";
+    set_current_task_ok ctx.config ~task_id:"task-002";
     match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
     | Some { success; legacy_message = result } ->
       assert success;
@@ -619,7 +642,7 @@ let () =
     ignore (Auth.enable_auth ctx.config.base_path ~require_token:true ~agent_name:"admin");
     ignore
       (Coord.add_task ctx.config ~title:"Credentialed work" ~priority:3 ~description:"");
-    Planning_eio.set_current_task ctx.config ~task_id:"task-001";
+    set_current_task_ok ctx.config ~task_id:"task-001";
     match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
     | Some { success; legacy_message = result } ->
       assert success;
@@ -646,7 +669,7 @@ let () =
     ignore (Auth.enable_auth ctx.config.base_path ~require_token:true ~agent_name:"admin");
     ignore (Auth.ensure_internal_keeper_token ctx.config.base_path);
     ignore (Coord.add_task ctx.config ~title:"Keeper work" ~priority:3 ~description:"");
-    Planning_eio.set_current_task ctx.config ~task_id:"task-001";
+    set_current_task_ok ctx.config ~task_id:"task-001";
     match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
     | Some { success; legacy_message = result } ->
       assert success;
@@ -675,7 +698,7 @@ let () =
     ignore
       (Auth.enable_auth ctx.config.base_path ~require_token:true ~agent_name:"test-agent");
     ignore (Coord.add_task ctx.config ~title:"Unclaimed task" ~priority:3 ~description:"");
-    Planning_eio.set_current_task ctx.config ~task_id:"task-001";
+    set_current_task_ok ctx.config ~task_id:"task-001";
     match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
     | Some { success; legacy_message = result } ->
       assert success;
@@ -703,7 +726,7 @@ let () =
          ~priority:3
          ~description:"");
     ignore (Coord.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
-    Planning_eio.set_current_task ctx.config ~task_id:"task-001";
+    set_current_task_ok ctx.config ~task_id:"task-001";
     match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
     | Some { success; legacy_message = result } ->
       assert success;
@@ -737,7 +760,7 @@ let () =
             ~priority:3
             ~description:"");
        ignore (Coord.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
-       Planning_eio.set_current_task ctx.config ~task_id:"task-001";
+       set_current_task_ok ctx.config ~task_id:"task-001";
        ignore
          (Planning_eio.set_deliverable
             ctx.config

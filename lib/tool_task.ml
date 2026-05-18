@@ -183,7 +183,11 @@ let sync_planning_current_task_with_owned_task (ctx : context) =
            | Masc_domain.Cancelled _ -> None)
   in
   match owned_task with
-  | Some task_id -> Planning_eio.set_current_task ctx.config ~task_id
+  | Some task_id ->
+      (match Planning_eio.set_current_task ctx.config ~task_id with
+       | Ok () -> ()
+       | Error msg ->
+           Log.Task.warn "failed to sync planning current_task to %s: %s" task_id msg)
   | None -> Planning_eio.clear_current_task ctx.config
 
 let sync_keeper_current_task_binding (ctx : context) =

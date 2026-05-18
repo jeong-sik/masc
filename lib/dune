@@ -268,6 +268,10 @@
   model_inference_metrics_reader
   model_inference_metrics_aggregate
   model_inference_metrics_json
+  ;; godfile decomposition Lane D — internal facade-only sibling of
+  ;; Tool_catalog. Owns effect_domain / tool_group types and typed-name
+  ;; inference tables. Public surface stays in tool_catalog.mli.
+  tool_catalog_inference
   )
  (libraries
    mcp_protocol

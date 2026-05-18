@@ -32,6 +32,7 @@
   coord_task_claim
   coord_task_create
   coord_task_lifecycle
+  coord_task_receipts
   coord_task_schedule
   coord_verification_store
   event_kind

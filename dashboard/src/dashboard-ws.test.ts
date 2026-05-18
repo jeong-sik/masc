@@ -21,6 +21,7 @@ import {
   DASHBOARD_WS_HEARTBEAT_INTERVAL_MS,
   DASHBOARD_WS_RPC_TIMEOUT_MS,
 } from './config/constants'
+import { DASHBOARD_PUSH_SLICES } from './dashboard-slices'
 import {
   dashboardWsConnected,
   dashboardWsLastError,
@@ -200,6 +201,24 @@ afterEach(() => {
 })
 
 describe('dashboardSlicesForRoute', () => {
+  it('only subscribes slices from the shared push vocabulary', () => {
+    const routes = [
+      { tab: 'overview', params: {} },
+      { tab: 'workspace', params: { section: 'planning' } },
+      { tab: 'workspace', params: { section: 'board' } },
+      { tab: 'monitoring', params: { section: 'agents' } },
+      { tab: 'monitoring', params: { section: 'cognition' } },
+      { tab: 'monitoring', params: { section: 'fleet-health', view: 'comparison' } },
+      { tab: 'command', params: {} },
+    ] as const
+
+    for (const route of routes) {
+      for (const slice of dashboardSlicesForRoute(route)) {
+        expect(DASHBOARD_PUSH_SLICES).toContain(slice)
+      }
+    }
+  })
+
   it('keeps global shell namespace and transport slices on every route', () => {
     expect(dashboardSlicesForRoute({ tab: 'overview', params: {} })).toEqual([
       'execution',

@@ -44,7 +44,15 @@ let test_dashboard_route_scoped_slices_are_valid () =
         (Printf.sprintf "%s is accepted" slice)
         true
         (Ws.valid_dashboard_slice slice))
-    [ "board"; "goals"; "composite" ]
+    [ "shell"
+    ; "namespace"
+    ; "transport"
+    ; "execution"
+    ; "goals"
+    ; "board"
+    ; "composite"
+    ; "operator"
+    ]
 
 (* ====== Parse cache for broadcast amplification ====== *)
 

@@ -5,6 +5,10 @@ import { batch } from '@preact/signals'
 import { dashboardBearerToken } from './api/core'
 import { parseWebSocketSseFrames as parseWebSocketSseFramesImpl } from './dashboard-ws-parse'
 import {
+  GLOBAL_DASHBOARD_PUSH_SLICES,
+  type DashboardPushSlice,
+} from './dashboard-slices'
+import {
   DASHBOARD_WS_HEARTBEAT_INTERVAL_MS,
   DASHBOARD_WS_RPC_TIMEOUT_MS,
   RECONNECT_JITTER_MS,
@@ -255,7 +259,7 @@ function routeKey(routeState: DashboardRouteState): string {
 }
 
 export function dashboardSlicesForRoute(routeState: DashboardRouteState): string[] {
-  const slices = new Set(['shell', 'namespace', 'transport'])
+  const slices = new Set<DashboardPushSlice>(GLOBAL_DASHBOARD_PUSH_SLICES)
 
   // Overview tab needs execution slice for World Visualizer keeper fleet data.
   if (routeState.tab === 'overview') {

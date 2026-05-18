@@ -44,6 +44,12 @@ type config = {
           When [Some] AND a clock is available, agent_sdk returns
           [Retry.Timeout] after [s] seconds. Default [None] preserves
           historical block-on-hang behaviour. *)
+  body_timeout_s : float option;
+      (** Total HTTP streaming body-consumption ceiling forwarded to
+          OAS [Builder.with_body_timeout]. Complements
+          [stream_idle_timeout_s]: idle timeout catches inter-line
+          silence, body timeout bounds the whole body callback.
+          Non-HTTP transports ignore it. *)
   max_tokens : int;
   max_input_tokens : int option;
   max_cost_usd : float option;
@@ -80,7 +86,7 @@ type config = {
   cli_transport_overrides :
     Cascade_transport.cli_transport_overrides option;
 }
-(** Per-worker configuration.  48 fields — concrete record because
+(** Per-worker configuration.  49 fields — concrete record because
     callers ({!Cascade_runner}, keeper workers) construct + tweak
     fields field-by-field at the dispatch site. *)
 

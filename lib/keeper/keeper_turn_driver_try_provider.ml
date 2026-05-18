@@ -284,6 +284,8 @@ let run_try_provider
                       ctx.stream_idle_timeout_s))
           ; max_execution_time_s =
               max_execution_time_for_attempt ?per_provider_timeout_s ()
+          ; body_timeout_s =
+              max_execution_time_for_attempt ?per_provider_timeout_s ()
           ; temperature = ctx.temperature
           ; max_idle_turns = ctx.max_idle_turns
           ; guardrails = ctx.guardrails
@@ -460,6 +462,7 @@ let run_try_provider
                   | None -> ctx.oas_checkpoint
                 in
                 let run_fn () =
+                  Eio_guard.check_if_ready ();
                   Cascade_runner.run
                     ~sw:attempt_sw
                     ~net:ctx.net

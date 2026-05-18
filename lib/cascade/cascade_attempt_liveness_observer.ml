@@ -270,6 +270,7 @@ let wrap_on_event (t : t)
         (* Run the original first so baseline semantics never lose an
            event even if the FSM step would raise (defensive — Observe
            must not raise; Enforce raises only via Switch.fail). *)
+        Eio_guard.check_if_ready ();
         (match original with
          | None -> ()
          | Some f -> (
@@ -281,6 +282,7 @@ let wrap_on_event (t : t)
                     (cascade=%s provider=runtime): %s"
                    t.cascade_label
                    (Printexc.to_string exn)));
+        Eio_guard.check_if_ready ();
         try step_with_event t evt with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | Liveness_kill _ as e -> raise e

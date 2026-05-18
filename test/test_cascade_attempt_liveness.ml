@@ -78,6 +78,24 @@ let test_awaiting_just_under_ttft_continues () =
   Alcotest.check check_state "still awaiting" s s';
   Alcotest.check check_output "continue" L.Continue o
 
+let test_awaiting_wall_kills_before_ttft_when_wall_is_shorter () =
+  let b = { budget with ttft_max = 10.0; attempt_wall_max = 0.05 } in
+  let s = L.initial ~started_at:0.0 in
+  let s', o = L.step b s (L.Tick 0.5) in
+  Alcotest.check check_state "Failed Wall_exceeded"
+    (L.Failed L.Wall_exceeded) s';
+  Alcotest.check check_output "Outcome Wall_exceeded"
+    (L.Outcome L.Wall_exceeded) o
+
+let test_awaiting_ttft_wins_when_ttft_and_wall_both_expire () =
+  let b = { budget with ttft_max = 10.0; attempt_wall_max = 5.0 } in
+  let s = L.initial ~started_at:0.0 in
+  let s', o = L.step b s (L.Tick 10.0) in
+  Alcotest.check check_state "Failed No_first_token"
+    (L.Failed L.No_first_token) s';
+  Alcotest.check check_output "Outcome No_first_token"
+    (L.Outcome L.No_first_token) o
+
 let test_awaiting_provider_error () =
   let s = L.initial ~started_at:0.0 in
   let s', o = L.step budget s (L.Provider_wire_error "HTTP 502") in
@@ -286,6 +304,10 @@ let () =
             test_awaiting_ttft_kills;
           case "Awaiting × Tick(t<ttft) → continue"
             test_awaiting_just_under_ttft_continues;
+          case "Awaiting × Tick(wall≥wall_max before ttft) → Failed Wall_exceeded"
+            test_awaiting_wall_kills_before_ttft_when_wall_is_shorter;
+          case "Awaiting × Tick (ttft and wall expire) → TTFT wins"
+            test_awaiting_ttft_wins_when_ttft_and_wall_both_expire;
           case "Awaiting × Provider_wire_error → Failed Provider_error"
             test_awaiting_provider_error;
           case "Streaming × chunk(any) advances last_chunk_at"

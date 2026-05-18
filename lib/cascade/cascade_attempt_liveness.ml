@@ -89,7 +89,9 @@ let null_recorder = {
    - T1: Heartbeat / Thinking_delta both count as motion.
    - L2: TTFT and inter-chunk checks fire before wall when both expire
          on the same tick (caller of cascade_fsm gets the most specific
-         kill class; matches §1 invariant L2 "no double kill"). *)
+         kill class; matches §1 invariant L2 "no double kill"). Wall still
+         applies in Awaiting, so a shorter attempt wall can kill a no-first-byte
+         attempt before the TTFT ceiling. *)
 
 let step ?(recorder = null_recorder) (b : budget) (s : state) (e : event)
   : state * output =
@@ -113,14 +115,20 @@ let step ?(recorder = null_recorder) (b : budget) (s : state) (e : event)
       ( Streaming { started_at; last_chunk_at = received_at }
       , Continue )
 
-  (* Awaiting × Tick: TTFT check.
-     [now - started_at >= ttft_max] kills the attempt. *)
-  | Awaiting { started_at }, Tick now
-    when now -. started_at >= b.ttft_max ->
-      recorder.record_liveness_outcome (Some No_first_token);
-      (Failed No_first_token, Outcome No_first_token)
-
-  | Awaiting _, Tick _ -> (s, Continue)
+  (* Awaiting × Tick: check TTFT first, wall second.
+     [now - started_at >= ttft_max] is the more specific no-first-token
+     failure. [attempt_wall_max] still applies while Awaiting so an attempt
+     with a shorter global wall cannot wait forever for a first chunk. *)
+  | Awaiting { started_at }, Tick now ->
+      let wall = now -. started_at in
+      if wall >= b.ttft_max then begin
+        recorder.record_liveness_outcome (Some No_first_token);
+        (Failed No_first_token, Outcome No_first_token)
+      end else if wall >= b.attempt_wall_max then begin
+        recorder.record_liveness_outcome (Some Wall_exceeded);
+        (Failed Wall_exceeded, Outcome Wall_exceeded)
+      end else
+        (s, Continue)
 
   (* Awaiting × Provider_wire_error: provider failed before any chunk;
      classify as wire error, not liveness — let cascade FSM decide. *)

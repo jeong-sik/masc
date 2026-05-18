@@ -2,7 +2,15 @@
 
 open Prometheus_builtin_metric_names
 
-let register ~add () =
+type metric_kind = [ `Counter | `Gauge | `Histogram ]
+
+type register_histogram =
+  name:string -> help:string -> ?labels:(string * string) list -> unit -> unit
+
+type inc_counter =
+  string -> ?labels:(string * string) list -> ?delta:float -> unit -> unit
+
+let register ~add:_ ~register_histogram ~inc_counter:_ () =
   register_histogram
     ~name:metric_file_lock_acquire_seconds
     ~help:

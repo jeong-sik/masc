@@ -420,6 +420,13 @@ let test_validate_code_shell_command_allows_grep () =
   check (result unit string) "grep allowed" (Ok ())
     (Tool_code_write.validate_code_shell_command "grep -R -n TODO lib")
 
+let test_validate_code_shell_command_allows_sed_and_pwd () =
+  check (result unit string) "sed read allowed" (Ok ())
+    (Tool_code_write.validate_code_shell_command
+       "sed -n '440,480p' lib/tool_code_write.ml");
+  check (result unit string) "pwd allowed" (Ok ())
+    (Tool_code_write.validate_code_shell_command "pwd")
+
 let test_validate_code_shell_command_allows_quoted_regex_alternation () =
   check (result unit string) "quoted rg alternation allowed" (Ok ())
     (Tool_code_write.validate_code_shell_command
@@ -916,6 +923,8 @@ let () =
         test_validate_code_shell_command_rejects_direct_dune;
       test_case "allows grep" `Quick
         test_validate_code_shell_command_allows_grep;
+      test_case "allows sed and pwd" `Quick
+        test_validate_code_shell_command_allows_sed_and_pwd;
       test_case "allows quoted regex alternation" `Quick
         test_validate_code_shell_command_allows_quoted_regex_alternation;
       test_case "uses code shell allowlist hint" `Quick

@@ -51,7 +51,7 @@ let first_nonempty_line output =
 let allowed_shell_commands = [
   "dune-local.sh"; "make"; "npm"; "npx"; "node";
   "git"; "ls"; "cat"; "head"; "tail"; "wc";
-  "rg"; "grep"; "find"; "diff"; "patch"; "mkdir";
+  "rg"; "grep"; "find"; "sed"; "pwd"; "diff"; "patch"; "mkdir";
   "opam"; "ocamlfind"; "tsc";
 ]
 
@@ -849,7 +849,7 @@ Use when removing generated, obsolete, or conflicting files during code work.";
     description = "Run an allowlisted command in an allowed coding sandbox \
 (.worktrees/ or .masc/playground/). \
 Allowed: scripts/dune-local.sh, make, npm, npx, node, git, ls, cat, head, tail, \
-wc, rg, find, diff, patch, mkdir, opam, ocamlfind, tsc. Use for building and \
+wc, rg, grep, find, sed, pwd, diff, patch, mkdir, opam, ocamlfind, tsc. Use for building and \
 testing code in isolated worktrees. For unrestricted shell at project root, use keeper_bash. \
 Returns exit_code and stdout (truncated at " ^ max_output_label ^ ").";
     input_schema = `Assoc [
@@ -857,7 +857,7 @@ Returns exit_code and stdout (truncated at " ^ max_output_label ^ ").";
       ("properties", `Assoc [
         ("command", `Assoc [
           ("type", `String "string");
-          ("description", `String "Single shell command to run (no pipes/chaining; first token must be in allowlist)");
+          ("description", `String "Single shell command to run. Pipes are allowed only when every segment starts with an allowlisted command; chaining with ; or && is blocked.");
         ]);
         ("cwd", `Assoc [
           ("type", `String "string");

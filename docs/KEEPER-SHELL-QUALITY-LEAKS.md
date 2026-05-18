@@ -20,6 +20,17 @@ Baseline result:
 Release target: after the improvement PR is merged and keepers have generated a
 fresh 240h sample, the same script should report `failure_pct < 10.00`.
 
+Adjacent tool-surface sample from the same 240h window:
+
+| Tool | Failed | OK | Failure rate |
+|---|---:|---:|---:|
+| `masc_code_shell` | 1,548 | 5,574 | 21.74% |
+| `masc_code_edit` | 114 | 51 | 69.09% |
+| `keeper_shell` | 192 | 579 | 24.90% |
+| `keeper_bash` | 174 | 1,133 | 13.31% |
+| public `Edit` | 38 | 10 | 79.17% |
+| public `Write` | 92 | 4 | 95.83% |
+
 ## Leak Map
 
 | Leak class | Baseline count | Code boundary | Current fix path |
@@ -37,6 +48,15 @@ fresh 240h sample, the same script should report `failure_pct < 10.00`.
 | Wrong tool channel | 59 | `lib/keeper/keeper_shell_bash.ml` | Preserve the pre-exec block, expose it as `wrong_tool_channel`, and keep the tool suggestion visible. |
 | Command usage or regex errors | 58 | command-specific handlers | Keep as caller-command defects rather than path or sandbox defects. |
 | Approval / PR policy bypass | 29 | `lib/keeper/keeper_shell_bash.ml` | Preserve the pre-exec policy block; classify separately from runtime shell failures. |
+
+## Adjacent Surface Fixes
+
+`masc_code_shell` had a separate allowlist from `keeper_bash`, so safe inspection
+commands could fail even when the same read shape was accepted elsewhere. The
+top observed class was `command_not_allowed`; safe inspection commands such as
+`sed -n ...` and `pwd` are now in the code-shell allowlist, and the tool schema
+now matches the validator: allowlisted pipelines are supported, but shell
+chaining remains blocked.
 
 ## Verification
 

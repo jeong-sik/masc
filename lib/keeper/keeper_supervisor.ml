@@ -1279,6 +1279,10 @@ let apply_self_preservation ~keepers_dir ~total_keepers to_restart =
     a CAS race.  The keeper would re-resume on a server restart in that
     edge case, but that is strictly less bad than the pre-Phase-2 baseline
     (continuous restart loop). *)
+type crash_pause_resume_policy =
+  | Manual_resume_required
+  | Auto_resume_with_backoff
+
 let handle_crash_auto_pause
       (ctx : _ context)
       (entry : Keeper_registry.registry_entry)
@@ -1287,13 +1291,17 @@ let handle_crash_auto_pause
       ~lifecycle_detail
       ~log_message
       ~blocker_class
+      ~resume_policy
   =
   (match read_meta ctx.config entry.name with
    | Ok (Some meta) ->
      let initial_sec = Env_config.KeeperSupervisor.auto_resume_initial_sec in
      let max_sec = Env_config.KeeperSupervisor.auto_resume_max_sec in
      let auto_resume_after_sec =
-       next_auto_resume_after_sec ~initial_sec ~max_sec meta.auto_resume_after_sec
+       match resume_policy with
+       | Manual_resume_required -> None
+       | Auto_resume_with_backoff ->
+         next_auto_resume_after_sec ~initial_sec ~max_sec meta.auto_resume_after_sec
      in
      let blocker_text =
        let existing =
@@ -1392,12 +1400,13 @@ let handle_stale_storm_pause
     ~metric_name:Keeper_metrics.metric_keeper_stale_storm_paused
     ~lifecycle_detail:(Printf.sprintf "stale_termination_storm count=%d" count)
     ~blocker_class:(Some Turn_timeout)
+    ~resume_policy:Manual_resume_required
     ~log_message:
       (Printf.sprintf
-         "STALE STORM AUTO-PAUSED (count=%d in 6h window). Supervisor will attempt \
-          self-healing auto-resume with exponential back-off (see \
-          MASC_KEEPER_AUTO_RESUME_INITIAL_SEC). Operator may also resume manually via \
-          masc_keeper_up or API. See issue #10765."
+         "STALE STORM AUTO-PAUSED (count=%d in 6h window). Auto-resume is disabled \
+          until the root cause clears; operator must resume manually via masc_keeper_up \
+          or API after investigating the underlying cascade/tool/runtime loop. See \
+          issue #10765."
          count)
 ;;
 
@@ -1413,6 +1422,7 @@ let handle_oas_timeout_budget_pause
     ~metric_name:Keeper_metrics.metric_keeper_oas_timeout_budget_loop_paused
     ~lifecycle_detail:(Printf.sprintf "oas_timeout_budget_loop count=%d" count)
     ~blocker_class:(Some Oas_timeout_budget)
+    ~resume_policy:Auto_resume_with_backoff
     ~log_message:
       (Printf.sprintf
          "OAS TIMEOUT BUDGET LOOP AUTO-PAUSED (count=%d). Supervisor will attempt \

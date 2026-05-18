@@ -234,6 +234,18 @@ let strip_stderr_dev_null_redirects cmd =
     in
     loop i
   in
+  let trim_buffer_trailing_spaces () =
+    let rec loop () =
+      let len = Buffer.length buf in
+      if len > 0
+         && (Char.equal (Buffer.nth buf (len - 1)) ' '
+             || Char.equal (Buffer.nth buf (len - 1)) '\t')
+      then (
+        Buffer.truncate buf (len - 1);
+        loop ())
+    in
+    loop ()
+  in
   let is_redirect_target_boundary i =
     i >= len
     ||
@@ -245,7 +257,19 @@ let strip_stderr_dev_null_redirects cmd =
     i = 0
     ||
     match cmd.[i - 1] with
-    | ' ' | '\t' | '\n' | '\r' | ';' | '|' -> true
+    | ' ' | '\t' | '\n' | '\r' ->
+      let rec previous_non_space j =
+        if j < 0
+        then None
+        else
+          match cmd.[j] with
+          | ' ' | '\t' | '\n' | '\r' -> previous_non_space (j - 1)
+          | ch -> Some ch
+      in
+      (match previous_non_space (i - 1) with
+       | Some '&' -> false
+       | _ -> true)
+    | ';' | '|' -> true
     | _ -> false
   in
   let skip_dev_null_after op_end =
@@ -309,7 +333,12 @@ let strip_stderr_dev_null_redirects cmd =
         loop No_quote true stripped (i + 1)
       | No_quote, _ ->
         match stderr_dev_null_redirect_end i with
-        | Some next -> loop No_quote false true next
+        | Some next ->
+          let next = skip_spaces next in
+          (if next < len && Char.equal cmd.[next] '&' then (
+             trim_buffer_trailing_spaces ();
+             if Buffer.length buf > 0 then Buffer.add_char buf ' '));
+          loop No_quote false true next
         | None ->
           Buffer.add_char buf cmd.[i];
           loop No_quote false stripped (i + 1))
@@ -629,11 +658,25 @@ let literal_echo_is_safe text =
          && simple.redirects = []
          && Option.is_none simple.cwd
          && String.equal (Masc_exec.Bin.to_string simple.bin) "echo" ->
+    let rec literal_arg_text = function
+      | Masc_exec.Shell_ir.Lit arg -> Some arg
+      | Masc_exec.Shell_ir.Concat parts ->
+        let rec loop acc = function
+          | [] -> Some (String.concat "" (List.rev acc))
+          | part :: rest ->
+            (match literal_arg_text part with
+             | Some text -> loop (text :: acc) rest
+             | None -> None)
+        in
+        loop [] parts
+      | Masc_exec.Shell_ir.Var _ -> None
+    in
     let rec loop = function
       | [] -> true
-      | Masc_exec.Shell_ir.Lit arg :: rest ->
-        (not (String.starts_with ~prefix:"-" arg)) && loop rest
-      | Masc_exec.Shell_ir.Concat _ :: _ | Masc_exec.Shell_ir.Var _ :: _ -> false
+      | arg :: rest ->
+        (match literal_arg_text arg with
+         | Some text -> (not (String.starts_with ~prefix:"-" text)) && loop rest
+         | None -> false)
     in
     loop simple.args
   | _ -> false
@@ -646,18 +689,28 @@ let safe_read_or_echo_fallback_of_command cmd =
     let right =
       String.sub cmd (split + 2) (String.length cmd - split - 2) |> String.trim
     in
-    (match strip_trailing_dev_null_redirect left, literal_echo_is_safe right with
-     | Some primary_cmd, true ->
-       safe_read_primary_rewrite primary_cmd
-     | _ -> None)
+    if not (literal_echo_is_safe right)
+    then None
+    else
+      let primary_cmd =
+        match strip_trailing_dev_null_redirect left with
+        | Some primary -> Some primary
+        | None ->
+          let primary = String.trim left in
+          if String.equal primary "" then None else Some primary
+      in
+      Option.bind primary_cmd safe_read_primary_rewrite
 
-let safe_read_fallback_of_command ~write_enabled:_ cmd =
+let safe_read_fallback_of_command ~write_enabled:_ ~stderr_dev_null_stripped cmd =
   match safe_read_or_echo_fallback_of_command cmd with
   | Some _ as rewrite -> rewrite
   | None ->
     (match strip_trailing_dev_null_redirect cmd with
      | Some primary_cmd -> safe_read_primary_rewrite primary_cmd
-     | None -> None)
+     | None ->
+       if stderr_dev_null_stripped
+       then safe_read_primary_rewrite cmd
+       else None)
 
 let shape_block_allowed_by_active_validator ~write_enabled cmd = function
   | Pipe_or_redirect when write_enabled ->
@@ -714,15 +767,20 @@ let command_looks_like_task_state_http_probe cmd =
    && (lowercase_contains cmd "/api/tasks" || lowercase_contains cmd "api/tasks"))
 
 let command_looks_like_task_state_discovery cmd =
+  let task_state_marker =
+    lowercase_contains cmd "backlog"
+    || lowercase_contains cmd ".masc"
+    || (lowercase_contains cmd "task" && lowercase_contains cmd ".json")
+  in
   command_mentions_task_state_file cmd
   || command_looks_like_task_state_http_probe cmd
   ||
   ((lowercase_contains cmd "find repos" || lowercase_contains cmd "find .")
-   && (lowercase_contains cmd "task" || lowercase_contains cmd "backlog"))
+   && task_state_marker)
   ||
   (lowercase_contains cmd "rg "
    && lowercase_contains cmd "repos"
-   && (lowercase_contains cmd "task" || lowercase_contains cmd "backlog"))
+   && task_state_marker)
 
 let task_state_shell_hint =
   "Do not inspect task state by guessing .masc/backlog.json or repo-local \
@@ -784,7 +842,8 @@ let bash_shape_block_hint ~cmd = function
     "Do not pipe grep/rg through keeper_bash. Use keeper_shell op=rg with a \
      scoped path and pattern instead; if the command starts with cd, pass that \
      directory as cwd instead of using cd &&."
-  | Pipe_or_redirect when command_looks_like_find_pipeline cmd ->
+  | Pipe_or_redirect when
+      command_looks_like_find_pipeline cmd || lowercase_contains cmd "find " ->
     "Do not pipe find through keeper_bash. Use keeper_shell op=find with path, \
      pattern, and limit instead of | head; if the command needs multiple -name \
      globs, run one keeper_shell op=find call per pattern."
@@ -829,7 +888,7 @@ let bash_shape_block_alternatives ~cmd = function
         "keeper_shell op=rg pattern=search-term path=repos/REPO/lib glob=*.ml";
         "keeper_bash cmd='git status' cwd='repos/REPO'";
       ]
-    else if command_looks_like_find_pipeline cmd
+    else if command_looks_like_find_pipeline cmd || lowercase_contains cmd "find "
     then
       [
         "keeper_shell op=find path=repos/REPO/.worktrees/TASK pattern='*.ml' limit=30";
@@ -1220,7 +1279,10 @@ let handle_keeper_bash
     let command_cacheable () =
       Masc_exec.Risk_classifier.(is_cacheable (classify cmd))
     in
-    let safe_read_fallback = safe_read_fallback_of_command ~write_enabled cmd in
+    let safe_read_fallback =
+      safe_read_fallback_of_command ~write_enabled
+        ~stderr_dev_null_stripped:stripped_stderr_dev_null cmd
+    in
     let validation_cmd =
       match safe_read_fallback with
       | Some rewrite -> rewrite.primary_cmd

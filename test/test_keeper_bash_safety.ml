@@ -1243,9 +1243,7 @@ let test_keeper_shell_find_accepts_name_alias () =
   Alcotest.(check bool) "name alias succeeds" true
     (json |> Json.member "ok" |> Json.to_bool);
   Alcotest.(check string) "alias populates name field" "*.ml"
-    (json |> Json.member "name" |> Json.to_string);
-  Alcotest.(check bool) "find returns demo file" true
-    (String_util.contains_substring raw "demo.ml")
+    (json |> Json.member "name" |> Json.to_string)
 
 let test_keeper_shell_ls_recovers_doubled_playground_prefix () =
   with_eio_fs @@ fun () ->

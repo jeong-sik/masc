@@ -256,25 +256,9 @@ include Prometheus_oas_metric_names
 
 include Prometheus_cascade_metric_names
 
-(* MCP tool schema budget (set once at boot from mcp_server_eio.ml
-   via [set_tool_schema_stats]). *)
-let metric_mcp_tool_schema_count = "masc_mcp_tool_schema_count"
-let metric_mcp_tool_schema_tokens_approx = "masc_mcp_tool_schema_tokens_approx"
+include Prometheus_runtime_metric_names
 
 include Prometheus_transport_metric_names
-
-(* Admission queue metrics — used in admission_queue_metrics.ml. *)
-let metric_inference_queue_depth = "masc_inference_queue_depth"
-let metric_inference_queue_inflight = "masc_inference_queue_inflight"
-let metric_inference_queue_acquired = "masc_inference_queue_acquired_total"
-let metric_inference_queue_wait = "masc_inference_queue_wait_seconds"
-let metric_inference_queue_cancelled = "masc_inference_queue_cancelled_total"
-let metric_inference_queue_rejected = "masc_inference_queue_rejected_total"
-let metric_inference_queue_max_concurrent = "masc_inference_queue_max_concurrent"
-
-(* Agent health metrics — used in transport_metrics.ml. *)
-let metric_agent_heartbeat_age_seconds = "masc_agent_heartbeat_age_seconds"
-let metric_agent_stale_total = "masc_agent_stale_total"
 
 (* Process-level FD gauges — used in init() and update_fd_gauges. *)
 let metric_open_fds = "masc_process_open_fds"
@@ -290,21 +274,6 @@ let metric_pool_inflight_total = Pool_metrics.metric_inflight_total
 let metric_pool_reuse_total = Pool_metrics.metric_reuse_total
 let metric_pool_evict_total = Pool_metrics.metric_evict_total
 let metric_pool_create_total = Pool_metrics.metric_create_total
-
-(* PR-0.2.D: OCaml GC quick_stat sampler gauges.  Populated by
-   [Gc_sampler.run] from the runtime [Gc.quick_stat ()] once per
-   sampling interval.  Names follow the [masc_gc_*_words] /
-   [masc_gc_*] convention so PromQL queries can group on the
-   [masc_gc_] prefix.  Cumulative counters are exposed as Gauge
-   because they are read as point-in-time runtime snapshots; PromQL
-   [rate()] still works on monotonic-by-construction gauges. *)
-let metric_gc_minor_words = "masc_gc_minor_words"
-let metric_gc_major_words = "masc_gc_major_words"
-let metric_gc_heap_words = "masc_gc_heap_words"
-let metric_gc_live_words = "masc_gc_live_words"
-let metric_gc_compactions = "masc_gc_compactions"
-let metric_gc_promoted_words = "masc_gc_promoted_words"
-let metric_memory_usage_bytes = "masc_memory_usage_bytes"
 
 (* Domain-specific counters not yet constant-ised. *)
 let metric_anti_rationalization_fallback = "masc_anti_rationalization_fallback_total"

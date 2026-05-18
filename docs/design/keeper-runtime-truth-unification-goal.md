@@ -723,7 +723,7 @@ replacing it.
 Path:
 
 ```
-$MASC_ROOT/keepers/<keeper>/runtime-manifests/<trace_id>.jsonl
+$MASC_BASE_PATH/.masc/keepers/<keeper>/runtime-manifests/<trace_id>.jsonl
 ```
 
 One JSONL row per decision event. The final row for a turn is terminal and

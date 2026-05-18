@@ -1,0 +1,51 @@
+# RFC-0121 path-SSOT allowlist.
+#
+# Each line is a substring matched against rg output ("path:lineno:...").
+# Lines starting with '#' are comments. Use the most specific substring
+# you can — overly broad entries mask real regressions.
+#
+# Two categories live here:
+#   (A) Intentional permanent exceptions  — documented in source.
+#   (B) Transitional baseline             — sites known to be touched by
+#       an in-flight RFC-0121 PR; remove each as the PR merges.
+# ---------------------------------------------------------------------
+
+# ============================================================
+# (A) Intentional permanent exceptions
+# ============================================================
+
+# IDE store kept deliberately under .masc-ide/ (RFC-0128 §4.6).
+# The audit gate does not match .masc-ide today, but a future scan
+# extension might. Anchor the carve-out here.
+lib/ide/ide_paths.ml
+
+# Audit-only Leak-11 detector for pre-fix orphan egress files
+# (keeper_egress_audit.ml, RFC commit 2026-04-27).
+lib/keeper/keeper_egress_audit.ml:54
+
+# default_local_path / repositories.toml local_path TOML default value
+# is cwd/base-path-relative by on-disk design (RFC-0121 §6 deferred).
+lib/repo_manager/repo_store.ml:11
+lib/server/server_routes_http_routes_repositories.ml:195
+
+# Self-reference inside the audit script and RFC text.
+scripts/audit-path-ssot.sh
+docs/rfc/RFC-0121-config-dir-resolution-single-active-root.md
+
+# ============================================================
+# (B) Transitional baseline (in-flight RFC-0121 PRs)
+# ============================================================
+# Remove an entry as soon as the listed PR merges. The set should
+# shrink to zero once #16084 .. #16099 are all in main.
+#
+# PR-2 #16096 (repo_manager triangle):
+lib/repo_manager/credential_store.ml:6
+lib/repo_manager/repo_store.ml:6
+lib/repo_manager/keeper_repo_mapping.ml:8
+lib/auth_resolve.ml:63
+#
+# PR-3 #16097 (host_config + server + shutdown):
+lib/host_config/host_config.ml:173
+lib/host_config/host_config.ml:174
+lib/server/server_routes_http_routes_credentials.ml:111
+lib/shutdown_hooks.ml:138

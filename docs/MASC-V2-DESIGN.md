@@ -123,7 +123,7 @@ MASC에서 가장 혼동하기 쉬운 개념이 **Cluster**와 **Room**입니다
 ```
 Cluster: me
 Room: default
-Path: /Users/dancer/me/.masc
+Path: <MASC_BASE_PATH>/.masc
 
 Active Agents (2)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

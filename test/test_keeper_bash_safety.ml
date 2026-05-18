@@ -327,6 +327,16 @@ let test_keeper_bash_elapsed_duration_preserves_positive_sub_ms () =
   Alcotest.(check int) "nan duration is zero" 0
     (elapsed ~start_time:Float.nan ~end_time:10.0)
 
+let test_keeper_bash_timeout_floor_is_not_sub_io_latency () =
+  let args = `Assoc [ "timeout_sec", `Float 1.0 ] in
+  Alcotest.(check (float 0.001))
+    "keeper_bash timeout floor"
+    Keeper_exec_shell.keeper_bash_min_timeout_sec
+    (Masc_mcp.Keeper_shell_shared.clamp_shell_timeout
+       ~min_sec:Keeper_exec_shell.keeper_bash_min_timeout_sec
+       ~default:Masc_mcp.Keeper_shell_shared.io_timeout_sec
+       args)
+
 let test_keeper_bash_shape_uses_shell_ir_for_quoted_literals () =
   let block_tag = Keeper_exec_shell.For_testing.keeper_bash_shape_block_tag in
   Alcotest.(check (option string)) "quoted angle brackets are data" None
@@ -1294,6 +1304,8 @@ let () =
     ("edge", [
       Alcotest.test_case "elapsed duration preserves positive sub-ms" `Quick
         test_keeper_bash_elapsed_duration_preserves_positive_sub_ms;
+      Alcotest.test_case "keeper_bash timeout floor avoids 1s I/O failures" `Quick
+        test_keeper_bash_timeout_floor_is_not_sub_io_latency;
       Alcotest.test_case "shape guard parses quoted metachar literals" `Quick
         test_keeper_bash_shape_uses_shell_ir_for_quoted_literals;
       Alcotest.test_case "raw shape fallback is quote-aware" `Quick

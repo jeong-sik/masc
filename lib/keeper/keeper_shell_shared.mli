@@ -72,6 +72,11 @@ val gh_min_timeout_sec : float
     cannot lower; sub-network-latency timeouts cause cascading 401
     retries (#8688). *)
 
+val keeper_bash_min_timeout_sec : float
+(** Floor for keeper_bash [timeout_sec] (5s).  Custom Bash commands often
+    touch disk, Docker, or git metadata; lower caller-supplied values produce
+    noisy partial-output timeout failures rather than useful latency bounds. *)
+
 val git_meta_timeout_sec : float
 (** Ceiling for lightweight git metadata commands (rev-parse,
     log --oneline).  Default 5s, env:

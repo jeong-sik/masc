@@ -858,7 +858,12 @@ let handle_keeper_bash
     |> Worker_dev_tools.sanitize_command_for_log
     |> Worker_dev_tools.truncate_for_log
   in
-  let timeout_sec = Keeper_shell_shared.clamp_shell_timeout ~default:Keeper_shell_shared.io_timeout_sec args in
+  let timeout_sec =
+    Keeper_shell_shared.clamp_shell_timeout
+      ~min_sec:Keeper_shell_shared.keeper_bash_min_timeout_sec
+      ~default:Keeper_shell_shared.io_timeout_sec
+      args
+  in
   let run_in_background =
     Safe_ops.json_bool ~default:false "run_in_background" args
   in

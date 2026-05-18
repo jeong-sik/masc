@@ -25,8 +25,13 @@ lib/keeper/keeper_egress_audit.ml:54
 
 # default_local_path / repositories.toml local_path TOML default value
 # is cwd/base-path-relative by on-disk design (RFC-0121 §6 deferred).
-lib/repo_manager/repo_store.ml:11
-lib/server/server_routes_http_routes_repositories.ml:195
+let default_local_path id = Filename.concat ".masc/repos" id
+Option.value ~default:(Filename.concat ".masc/repos" id)
+
+# Config_dir_resolver is the SSOT itself; these comment examples document the
+# bypass pattern the audit forbids outside this module.
+helpers instead of [Filename.concat base_path ".masc/..."] string-literal
+Layout SSOT: callers stop computing [Filename.concat base_path ".masc/X"]
 
 # Self-reference inside the audit script and RFC text.
 scripts/audit-path-ssot.sh

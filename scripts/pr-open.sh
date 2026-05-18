@@ -75,6 +75,13 @@ is_doc_path() {
   esac
 }
 
+is_agent_approval_label() {
+  case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+    human-approved-ready) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 ensure_agent_pr_label() {
   local exists
 
@@ -216,7 +223,7 @@ for f in "${changed_files[@]}"; do
   fi
 done
 
-labels=("agent-pr")
+labels=("agent-pr" "do-not-merge")
 if [[ $has_docs -eq 1 ]]; then
   labels+=("docs")
 fi
@@ -228,6 +235,10 @@ if [[ -n "$extra_labels" ]]; then
   IFS=',' read -r -a extra <<< "$extra_labels"
   for lb in "${extra[@]}"; do
     lb="$(echo "$lb" | xargs)"
+    if is_agent_approval_label "$lb"; then
+      echo "refusing to add '${lb}' from pr-open; use the Approve Agent PR workflow after human review" >&2
+      exit 1
+    fi
     [[ -n "$lb" ]] && labels+=("$lb")
   done
 fi

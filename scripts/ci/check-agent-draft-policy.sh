@@ -110,6 +110,7 @@ if [[ "$looks_agent_authored" -eq 0 ]]; then
 fi
 
 bypass_present=0
+approval_gate_present="$(lower "${PR_HUMAN_APPROVAL_GATE_PRESENT:-false}")"
 IFS=',' read -r -a bypass_labels <<<"$bypass_labels_csv"
 for label in "${bypass_labels[@]}"; do
   label="$(printf '%s' "$label" | xargs)"
@@ -120,8 +121,12 @@ for label in "${bypass_labels[@]}"; do
   fi
   if csv_has_label "$pr_labels_csv" "$label"; then
     bypass_present=1
-    echo "agent draft policy: pass, bypass label present: ${label}"
-    break
+    if [[ "$approval_gate_present" == "true" || "$approval_gate_present" == "1" || "$approval_gate_present" == "yes" ]]; then
+      echo "agent draft policy: pass, bypass label present with environment-gated approval: ${label}"
+      break
+    fi
+    echo "::error title=Agent draft policy violation::agent-like PR '${pr_head_ref}' has bypass label ${label}, but lacks the environment-gated human approval marker."
+    exit 1
   fi
 done
 

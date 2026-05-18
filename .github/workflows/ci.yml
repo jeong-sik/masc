@@ -1064,6 +1064,14 @@ jobs:
             if [ -n "$live_state" ]; then
               export PR_LIVE_STATE="$live_state"
             fi
+            approval_gate_present="$(
+              gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments?per_page=100" --paginate \
+                --jq 'any(.[]; .user.type == "Bot" and ((.body // "") | contains("<!-- masc-human-approval-gate -->")) and ((.body // "") | contains("/actions/runs/")))' \
+                2>/dev/null || echo false
+            )"
+            if printf '%s\n' "$approval_gate_present" | grep -qx true; then
+              export PR_HUMAN_APPROVAL_GATE_PRESENT=true
+            fi
           fi
           scripts/ci/check-agent-draft-policy.sh
 

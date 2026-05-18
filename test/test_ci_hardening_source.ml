@@ -301,9 +301,17 @@ let test_agent_draft_policy_script () =
   check int "live bypass label overrides stale event labels" 0
     (run_agent_draft_policy
        (("PR_LIVE_IS_DRAFT", "false")
+       :: ("PR_HUMAN_APPROVAL_GATE_PRESENT", "true")
        :: ("PR_LIVE_LABELS", "enhancement,human-approved-ready")
        :: ("PR_IS_DRAFT", "true")
        :: base));
+  check bool "live bypass label without environment gate fails" true
+    (run_agent_draft_policy
+       (("PR_LIVE_IS_DRAFT", "false")
+       :: ("PR_LIVE_LABELS", "enhancement,human-approved-ready")
+       :: ("PR_IS_DRAFT", "true")
+       :: base)
+    <> 0);
   check bool "live empty labels override stale event bypass" true
     (run_agent_draft_policy
        (("PR_LIVE_IS_DRAFT", "false")
@@ -337,6 +345,7 @@ let test_agent_draft_policy_script () =
   check int "ready agent PR with bypass label passes" 0
     (run_agent_draft_policy
        (("PR_IS_DRAFT", "false")
+       :: ("PR_HUMAN_APPROVAL_GATE_PRESENT", "true")
        :: ("PR_LABELS", "enhancement,human-approved-ready")
        :: List.remove_assoc "PR_LABELS" base));
   check bool "hard-stop label overrides bypass label" true
@@ -348,6 +357,7 @@ let test_agent_draft_policy_script () =
   check int "draft agent PR with bypass label passes" 0
     (run_agent_draft_policy
        (("PR_IS_DRAFT", "true")
+       :: ("PR_HUMAN_APPROVAL_GATE_PRESENT", "true")
        :: ("PR_LABELS", "enhancement,human-approved-ready")
        :: List.remove_assoc "PR_LABELS" base));
   check int "ready non-agent PR passes" 0
@@ -433,6 +443,30 @@ let test_pr_automation_draft_guard_contracts () =
   check bool "pr automation rejects missing or pending CI Gate" true
     (file_contains_pattern ".github/workflows/pr-automation.yml"
        "CI Gate is not completed successfully for head");
+  check bool "ci gate exports environment approval marker" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "PR_HUMAN_APPROVAL_GATE_PRESENT=true");
+  check bool "ci policy requires environment-gated approval marker" true
+    (file_contains_pattern "scripts/ci/check-agent-draft-policy.sh"
+       "bypass label present with environment-gated approval");
+  check bool "pr automation verifies approval workflow marker" true
+    (file_contains_pattern ".github/workflows/pr-automation.yml"
+       "<!-- masc-human-approval-gate -->");
+  check bool "pr automation rejects direct approval label edits" true
+    (file_contains_pattern ".github/workflows/pr-automation.yml"
+       "missing environment-gated approval after latest label event");
+  check bool "pr-open defaults agent PRs to hard-stop label" true
+    (file_contains_pattern "scripts/pr-open.sh"
+       {|labels=("agent-pr" "do-not-merge")|});
+  check bool "pr-open refuses direct approval labels" true
+    (file_contains_pattern "scripts/pr-open.sh"
+       "refusing to add");
+  check bool "approval workflow removes hard-stop labels after gate" true
+    (file_contains_pattern ".github/workflows/approve-agent-pr.yml"
+       "removedHardStopLabels.push");
+  check bool "approval workflow reads configured hard-stop labels" true
+    (file_contains_pattern ".github/workflows/approve-agent-pr.yml"
+       "AGENT_DRAFT_GUARD_HARD_STOP_LABELS");
   check bool "pr automation no longer skips CI Gate startup race" true
     (file_not_contains_pattern ".github/workflows/pr-automation.yml"
        "skipping block on ${action} event");

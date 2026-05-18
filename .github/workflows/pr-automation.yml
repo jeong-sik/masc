@@ -133,6 +133,34 @@ jobs:
             const presentBypassLabels = labels.filter((label) => bypassLabelSet.has(label));
             const bypassPolicyFailures = [];
             const verifiedBypassLabels = [];
+            const approvalGateMarker = "<!-- masc-human-approval-gate -->";
+            let issueCommentsCache = null;
+            const loadIssueComments = async () => {
+              if (issueCommentsCache !== null) return issueCommentsCache;
+              issueCommentsCache = await github.paginate(github.rest.issues.listComments, {
+                owner,
+                repo,
+                issue_number: pullNumber,
+                per_page: 100
+              });
+              return issueCommentsCache;
+            };
+            const findApprovalGateAfter = async (label, labeledAt) => {
+              const labeledAtMs = Date.parse(labeledAt || "");
+              if (!Number.isFinite(labeledAtMs)) return undefined;
+              const labelLiteral = `\`${label}\``;
+              const comments = await loadIssueComments();
+              return [...comments].reverse().find((comment) => {
+                const body = comment.body || "";
+                const commentAtMs = Date.parse(comment.created_at || "");
+                return comment.user?.type === "Bot" &&
+                  Number.isFinite(commentAtMs) &&
+                  commentAtMs >= labeledAtMs &&
+                  body.includes(approvalGateMarker) &&
+                  body.toLowerCase().includes(labelLiteral) &&
+                  body.includes("/actions/runs/");
+              });
+            };
             if (presentBypassLabels.length > 0) {
               const events = await github.paginate(github.rest.issues.listEvents, {
                 owner,
@@ -145,18 +173,17 @@ jobs:
                   (event.event === "labeled" || event.event === "unlabeled") &&
                   event.label?.name?.toLowerCase() === label
                 );
-                const actor = latest?.actor;
-                const actorName = actor?.login?.toLowerCase();
                 if (!latest) {
                   bypassPolicyFailures.push(`${label}: no label event found`);
                 } else if (latest.event !== "labeled") {
                   bypassPolicyFailures.push(`${label}: latest event is ${latest.event}`);
-                } else if (actor?.type !== "User") {
-                  bypassPolicyFailures.push(`${label}: actor ${actor?.login || "(unknown)"} is ${actor?.type || "unknown"}, not User`);
-                } else if (!humanActors.includes(actorName)) {
-                  bypassPolicyFailures.push(`${label}: actor ${actor.login} is not in AGENT_DRAFT_GUARD_HUMAN_ACTORS`);
                 } else {
-                  verifiedBypassLabels.push(`${label} by ${actor.login}`);
+                  const approvalGate = await findApprovalGateAfter(label, latest.created_at);
+                  if (!approvalGate) {
+                    bypassPolicyFailures.push(`${label}: missing environment-gated approval after latest label event`);
+                  } else {
+                    verifiedBypassLabels.push(`${label} via environment gate`);
+                  }
                 }
               }
             }
@@ -438,12 +465,7 @@ jobs:
                   ]
                 : [])
             ].join("\n");
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              owner,
-              repo,
-              issue_number: pullNumber,
-              per_page: 100
-            });
+            const comments = await loadIssueComments();
             const existing = comments.find((comment) =>
               comment.user?.type === "Bot" && comment.body?.includes(marker)
             );

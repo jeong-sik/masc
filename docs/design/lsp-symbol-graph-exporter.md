@@ -122,6 +122,35 @@ docs/generated/reverse-engineering/symbol-graph.v1.json
 
 The first snapshot in this PR is a schema-compatible static seed. It records WBS lanes, source owners, guard tests, and curated flow edges, and it explicitly records `live_lsp_not_invoked_in_this_pr` in `omissions[]`. Its `display_range` rows are bound to the JSON `base_commit`, so they are evidence for that commit only and must not be treated as current-main coordinates after main advances. A later implementation PR should replace static ranges with live `documentSymbol` and `references` responses.
 
+## Seed Export Command
+
+Current task-411 command:
+
+```bash
+scripts/ide/export-symbol-graph --check
+```
+
+This validates the checked-in seed deterministically: schema version, read-only
+method allowlist, absence of live LSP invocation, workspace-confined paths,
+guard test existence, and `display_range` bounds for the artifact's current
+worktree when the artifact `base_commit` matches `HEAD`. If `base_commit` is
+older than the current checkout, the command switches to `base_commit_bound`
+range mode: it still checks range shape and all file/test paths, but does not
+pretend stale static line numbers are current-main coordinates. It does not
+call `/api/v1/ide/lsp`, does not add a runtime route, and does not mutate task,
+keeper, git, dashboard, or cache state.
+
+To reproduce the seed payload as canonical JSON during a documentation PR:
+
+```bash
+scripts/ide/export-symbol-graph --emit > docs/generated/reverse-engineering/symbol-graph.v1.json
+```
+
+That write is an explicit operator shell redirection, not a runtime capability.
+Until the live LSP exporter lands, this command is a static seed reproducer and
+drift gate; it intentionally fails or emits omission rows instead of silently
+inventing refreshed symbol ranges.
+
 ## JSON Schema
 
 The first artifact uses `masc.symbol_graph.v1`:
@@ -135,7 +164,9 @@ The first artifact uses `masc.symbol_graph.v1`:
   "source": {
     "lsp_route": "/api/v1/ide/lsp",
     "methods": ["textDocument/documentSymbol", "textDocument/references"],
-    "manifest": "docs/design/lsp-symbol-graph-exporter.md"
+    "manifest": "docs/design/lsp-symbol-graph-exporter.md",
+    "check_command": "scripts/ide/export-symbol-graph --check",
+    "emit_command": "scripts/ide/export-symbol-graph --emit > docs/generated/reverse-engineering/symbol-graph.v1.json"
   },
   "limits": {
     "max_files": 80,
@@ -234,9 +265,11 @@ Done evidence:
 - Generated JSON validates against the schema fields above.
 - HTML contains the artifact link and generation commit.
 - The run command and omission count are posted to #16083.
+- `scripts/ide/export-symbol-graph --check` passes without introducing runtime write capability.
 
 ## Acceptance Checks
 
+- `scripts/ide/export-symbol-graph --check`
 - `rg "lsp-symbol-graph-exporter" docs/reverse-engineering-design.html docs/design/lsp-symbol-graph-exporter.md`
 - `rg "masc.symbol_graph.v1|task-386|task-387" docs/design/lsp-symbol-graph-exporter.md`
 - `xmllint --html --noout docs/reverse-engineering-design.html`

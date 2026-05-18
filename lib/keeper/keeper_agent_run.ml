@@ -10,6 +10,7 @@ include Keeper_agent_result
 include Keeper_agent_error
 include Keeper_agent_checkpoint_hygiene
 module Contract_helpers = Keeper_agent_run_contract_helpers
+module Manifest_helpers = Keeper_agent_run_manifest_helpers
 module Turn_helpers = Keeper_agent_run_turn_helpers
 
 (* Post-turn telemetry logging — extracted to Keeper_turn_telemetry (#5732) *)
@@ -227,38 +228,13 @@ let run_turn
       ~generation
       ~cascade_name:cascade_name_string
   in
-  let digest_text = Turn_helpers.digest_text in
-  let digest_message_texts_as_joined =
-    Turn_helpers.digest_message_texts_as_joined
-  in
-  append_manifest ~site:"checkpoint_loaded"
+  Manifest_helpers.append_checkpoint_start_events
+    ~append_manifest
     ~keeper_turn_id:manifest_keeper_turn_id
     ~checkpoint_path
-    ~decision:
-      (`Assoc
-        [
-          ("loaded_checkpoint_present", `Bool ctx.loaded_checkpoint_present);
-          ("pre_dispatch_compacted", `Bool pre_dispatch_compacted);
-          ( "pre_dispatch_checkpoint_error",
-            match pre_dispatch_checkpoint_error with
-            | None -> `Null
-            | Some err -> `String (Agent_sdk.Error.to_string err) );
-        ])
-    Keeper_runtime_manifest.Checkpoint_loaded;
-  append_manifest ~site:"context_compacted"
-    ~keeper_turn_id:manifest_keeper_turn_id
-    ~status:(if pre_dispatch_compacted then "compacted" else "skipped")
-    ~decision:
-      (`Assoc
-        [
-          ("pre_dispatch_compacted", `Bool pre_dispatch_compacted);
-          ( "pre_dispatch_checkpoint_error",
-            match pre_dispatch_checkpoint_error with
-            | None -> `Null
-            | Some err -> `String (Agent_sdk.Error.to_string err) );
-          ("checkpoint_path", `String checkpoint_path);
-        ])
-    Keeper_runtime_manifest.Context_compacted;
+    ~loaded_checkpoint_present:ctx.loaded_checkpoint_present
+    ~pre_dispatch_compacted
+    ~pre_dispatch_checkpoint_error;
   (* Steps 5-6: turn prompt, memory/temporal context, prompt metrics,
      user message append, token estimation — Keeper_run_prompt. *)
   let prompt_ctx =
@@ -280,23 +256,17 @@ let run_turn
   let history_messages = prompt_ctx.Keeper_run_prompt.history_messages in
   let estimated_input_tokens = prompt_ctx.Keeper_run_prompt.estimated_input_tokens in
   let ctx_work = prompt_ctx.Keeper_run_prompt.ctx_work in
-  let history_messages_digest = digest_message_texts_as_joined history_messages in
-  append_manifest ~site:"context_injected"
+  Manifest_helpers.append_context_injected
+    ~append_manifest
     ~keeper_turn_id:manifest_keeper_turn_id
-    ~decision:
-      (`Assoc
-        [
-          ("base_system_prompt_digest", `String (digest_text base_system_prompt));
-          ("turn_system_prompt_digest", `String (digest_text turn_system_prompt));
-          ("dynamic_context_digest", `String (digest_text dynamic_context));
-          ("memory_context_digest", `String (digest_text memory_context));
-          ("temporal_context_digest", `String (digest_text temporal_context));
-          ("user_message_digest", `String (digest_text user_message));
-          ("history_message_count", `Int (List.length history_messages));
-          ("history_messages_digest", `String history_messages_digest);
-          ("estimated_input_tokens", `Int estimated_input_tokens);
-        ])
-    Keeper_runtime_manifest.Context_injected;
+    ~base_system_prompt
+    ~turn_system_prompt
+    ~dynamic_context
+    ~memory_context
+    ~temporal_context
+    ~user_message
+    ~history_messages
+    ~estimated_input_tokens;
   let actionable_signal =
     match world_observation with
     | None -> false
@@ -357,42 +327,10 @@ let run_turn
     let reducer = s.Keeper_run_tools.reducer in
     let memory = s.Keeper_run_tools.memory in
     let acc = s.Keeper_run_tools.acc in
-    append_manifest ~site:"tool_surface_selected"
+    Manifest_helpers.append_tool_surface_selected
+      ~append_manifest
       ~keeper_turn_id:manifest_keeper_turn_id
-      ~decision:
-        (`Assoc
-          [
-            ("turn_lane", `String (turn_lane_to_string acc.tool_surface.turn_lane));
-            ( "tool_surface_class",
-              `String
-                (tool_surface_class_to_string
-                   acc.tool_surface.tool_surface_class) );
-            ( "tool_requirement",
-              `String
-                (tool_requirement_to_string acc.tool_surface.tool_requirement)
-            );
-            ("visible_tool_count", `Int acc.tool_surface.visible_tool_count);
-            ("tool_gate_enabled", `Bool acc.tool_surface.tool_gate_enabled);
-            ( "tool_surface_fallback_used",
-              `Bool acc.tool_surface.tool_surface_fallback_used );
-            ( "required_tool_names",
-              `List
-                (List.map
-                   (fun name -> `String name)
-                   acc.tool_surface.required_tool_names) );
-            ( "required_tool_candidate_names",
-              `List
-                (List.map
-                   (fun name -> `String name)
-                   acc.tool_surface.required_tool_candidate_names) );
-            ( "missing_required_tool_names",
-              `List
-                (List.map
-                   (fun name -> `String name)
-                   acc.tool_surface.missing_required_tool_names) );
-            ("config_root", `String acc.tool_surface.config_root);
-          ])
-      Keeper_runtime_manifest.Tool_surface_selected;
+      acc.tool_surface;
     let agent_ref : Agent_sdk.Agent.t option ref = ref None in
     let proof_ref : Masc_mcp_cdal_runtime.Cdal_proof.t option ref = ref None in
     let initial_tool_surface = s.Keeper_run_tools.initial_tool_surface in

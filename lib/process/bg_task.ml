@@ -199,12 +199,15 @@ let with_reg f =
 let start_exit_watcher st =
   let _watcher =
     Thread.create
-      (fun () ->
+      (let rec wait () =
         match Unix.waitpid [] st.handle.pid with
         | _, status -> with_reg (fun () -> mark_process_finished st status)
+        | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
         | exception Unix.Unix_error (Unix.ECHILD, _, _) ->
             with_reg (fun () -> release_lifetime_guard st)
-        | exception exn -> observe_sidecar_failure ~site:"waitpid" exn)
+        | exception exn -> observe_sidecar_failure ~site:"waitpid" exn
+       in
+       wait)
       ()
   in
   ()

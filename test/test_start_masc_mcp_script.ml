@@ -205,7 +205,7 @@ let write_fake_dune_local ~path ~log_file =
        {|
 #!/bin/sh
 set -eu
-printf 'dune-local %%s\n' "$*" >> %s
+printf 'dune-local %%s DUNE_JOBS=%%s DUNE_LOCAL_JOBS=%%s\n' "$*" "${DUNE_JOBS:-}" "${DUNE_LOCAL_JOBS:-}" >> %s
 exec dune "$@"
 |}
        (quote log_file))
@@ -750,6 +750,7 @@ let test_stale_dune_artifacts_are_cleaned_and_retried () =
                 [
                   ("FAKE_CAPTURE_FILE", capture);
                   ("MASC_BASE_PATH", dir);
+                  ("MASC_DUNE_JOBS", "2");
                   ("PATH", fake_bin ^ ":" ^ Sys.getenv "PATH");
                 ]
               (Printf.sprintf "%s --http --port 9971 --base-path %s"
@@ -768,6 +769,9 @@ let test_stale_dune_artifacts_are_cleaned_and_retried () =
           check bool "startup build uses dune-local wrapper" true
             (contains_substring dune_local_calls
                "dune-local build bin/main_eio.exe");
+          check bool "startup forwards DUNE_JOBS into wrapper under CI" true
+            (contains_substring dune_local_calls
+               "DUNE_JOBS=2 DUNE_LOCAL_JOBS=2");
           check bool "stale cleanup uses dune-local wrapper" true
             (contains_substring dune_local_calls "dune-local clean");
           check bool "original stale artifact error preserved" true

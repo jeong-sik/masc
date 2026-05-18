@@ -96,7 +96,7 @@ run_dune_local() {
         echo "Run builds through scripts/dune-local.sh so local agents share the machine-wide Dune lock." >&2
         return 127
     fi
-    env DUNE_LOCAL_JOBS="$DUNE_JOBS" "$wrapper" "$@"
+    env DUNE_LOCAL_JOBS="$DUNE_JOBS" DUNE_JOBS="$DUNE_JOBS" "$wrapper" "$@"
 }
 
 dune_build_with_stale_retry() {

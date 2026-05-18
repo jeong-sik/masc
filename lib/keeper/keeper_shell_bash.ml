@@ -579,6 +579,7 @@ let keeper_bash_shape_block cmd =
 
 type safe_read_fallback = {
   primary_cmd : string;
+  cwd_override : string option;
 }
 
 let safe_read_primary_rewrite primary_cmd =
@@ -594,10 +595,19 @@ let safe_read_primary_rewrite primary_cmd =
           ~allowed_commands:Worker_dev_tools.dev_allowed_commands
           primary_cmd
       with
-      | Ok () -> Some { primary_cmd }
+      | Ok () -> Some { primary_cmd; cwd_override = None }
       | Error _ -> None)
 
-let find_unquoted_logic_or cmd =
+type shell_logic_op =
+  | Logic_and
+  | Logic_or
+
+let find_unquoted_logic_op op cmd =
+  let first, second =
+    match op with
+    | Logic_and -> '&', '&'
+    | Logic_or -> '|', '|'
+  in
   let len = String.length cmd in
   let rec loop quote_state escaped i =
     if i + 1 >= len
@@ -614,7 +624,8 @@ let find_unquoted_logic_or cmd =
       | No_quote, '\'' -> loop Single_quote false (i + 1)
       | No_quote, '"' -> loop Double_quote false (i + 1)
       | No_quote, '\\' -> loop No_quote true (i + 1)
-      | No_quote, '|' when Char.equal cmd.[i + 1] '|' -> Some i
+      | No_quote, ch when Char.equal ch first && Char.equal cmd.[i + 1] second ->
+        Some i
       | No_quote, _ -> loop No_quote false (i + 1))
   in
   loop No_quote false 0
@@ -681,8 +692,36 @@ let literal_echo_is_safe text =
     loop simple.args
   | _ -> false
 
+let safe_relative_repos_cd_path text =
+  let strip_simple_quotes s =
+    let len = String.length s in
+    if len >= 2
+       && ((Char.equal s.[0] '\'' && Char.equal s.[len - 1] '\'')
+           || (Char.equal s.[0] '"' && Char.equal s.[len - 1] '"'))
+    then String.sub s 1 (len - 2)
+    else s
+  in
+  let path = text |> String.trim |> strip_simple_quotes in
+  let path =
+    if String.starts_with ~prefix:"./" path
+    then String.sub path 2 (String.length path - 2)
+    else path
+  in
+  let unsafe =
+    List.exists
+      (String.contains path)
+      [ ';'; '&'; '|'; '<'; '>'; '$'; '`'; '\n'; '\r' ]
+  in
+  if unsafe || not (String.starts_with ~prefix:"repos/" path)
+  then None
+  else (
+    let segments = String.split_on_char '/' path in
+    if List.exists (fun s -> s = "" || s = "." || s = "..") segments
+    then None
+    else Some path)
+
 let safe_read_or_echo_fallback_of_command cmd =
-  match find_unquoted_logic_or cmd with
+  match find_unquoted_logic_op Logic_or cmd with
   | None -> None
   | Some split ->
     let left = String.sub cmd 0 split in
@@ -701,16 +740,38 @@ let safe_read_or_echo_fallback_of_command cmd =
       in
       Option.bind primary_cmd safe_read_primary_rewrite
 
+let safe_cd_read_fallback_of_command cmd =
+  match find_unquoted_logic_op Logic_and cmd with
+  | None -> None
+  | Some split ->
+    let left = String.sub cmd 0 split |> String.trim in
+    let right =
+      String.sub cmd (split + 2) (String.length cmd - split - 2) |> String.trim
+    in
+    if not (String.starts_with ~prefix:"cd " left)
+    then None
+    else
+      let path =
+        String.sub left 3 (String.length left - 3)
+        |> safe_relative_repos_cd_path
+      in
+      match path, safe_read_primary_rewrite right with
+      | Some cwd_override, Some rewrite -> Some { rewrite with cwd_override = Some cwd_override }
+      | _ -> None
+
 let safe_read_fallback_of_command ~write_enabled:_ ~stderr_dev_null_stripped cmd =
   match safe_read_or_echo_fallback_of_command cmd with
   | Some _ as rewrite -> rewrite
   | None ->
-    (match strip_trailing_dev_null_redirect cmd with
-     | Some primary_cmd -> safe_read_primary_rewrite primary_cmd
+    (match safe_cd_read_fallback_of_command cmd with
+     | Some _ as rewrite -> rewrite
      | None ->
-       if stderr_dev_null_stripped
-       then safe_read_primary_rewrite cmd
-       else None)
+       (match strip_trailing_dev_null_redirect cmd with
+        | Some primary_cmd -> safe_read_primary_rewrite primary_cmd
+        | None ->
+          if stderr_dev_null_stripped
+          then safe_read_primary_rewrite cmd
+          else None))
 
 let shape_block_allowed_by_active_validator ~write_enabled cmd = function
   | Pipe_or_redirect when write_enabled ->
@@ -1531,6 +1592,11 @@ let handle_keeper_bash
       | Some rewrite -> rewrite.primary_cmd
       | None -> cmd
     in
+    let validation_cwd =
+      match safe_read_fallback with
+      | Some { cwd_override = Some rel; _ } -> Filename.concat cwd rel
+      | Some { cwd_override = None; _ } | None -> cwd
+    in
     let with_raw_json_exec_cache run =
       let cacheable = command_cacheable () in
       if not cacheable then run ()
@@ -1899,14 +1965,14 @@ let handle_keeper_bash
           let path_validation =
            match
              Keeper_task_worktree_lazy.ensure_command_existing_dirs
-               ~config ~meta ~cwd ~cmd:validation_cmd
+               ~config ~meta ~cwd:validation_cwd ~cmd:validation_cmd
            with
            | Error e -> Error e
            | Ok () ->
              Worker_dev_tools.validate_command_paths
                ~keeper_id:meta.name
                ~base_path:root
-               ~workdir:cwd
+               ~workdir:validation_cwd
                validation_cmd
           in
           match path_validation with

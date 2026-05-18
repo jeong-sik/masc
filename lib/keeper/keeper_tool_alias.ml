@@ -198,6 +198,12 @@ let bash_public_schema =
         "The shell command to execute. Single command only. No chaining (&&, ||, ;), \
          pipes (|), or redirects (>, >>). Example: 'scripts/dune-local.sh build', 'rg pattern lib/'."
     ; property
+        "cwd"
+        "string"
+        "Optional working directory. Use a playground-relative path such as \
+         'repos/<repo>' or 'repos/<repo>/.worktrees/<task>' when a sandbox \
+         contains multiple repositories."
+    ; property
         "description"
         "string"
         "Optional short description of what the command does. Logged for observability."

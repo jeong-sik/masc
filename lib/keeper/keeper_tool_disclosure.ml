@@ -467,15 +467,10 @@ let required_tool_satisfaction (call : Agent_sdk.Completion_contract.tool_call)
   : (unit, string) result
   =
   let tool_name = canonical_tool_name call.name in
-  (* Generic Require_tool_use is a tool-presence contract, not proof of
-     execution progress. Keeper-local read/status/discovery tools and their
-     LLM-native read/search aliases satisfy the SDK contract so a valid
-     observation turn does not explode into cascade retries;
-     classify_tool_progress still records them as Passive_status. *)
-  if
-    is_completion_tool_name tool_name
-    || is_keeper_observation_tool_name tool_name
-    || is_keeper_observation_alias call.name
+  (* Generic Require_tool_use is a required-action contract at the keeper
+     boundary. Passive read/status/search tools can support a later action,
+     but they must not satisfy the action predicate by themselves. *)
+  if is_completion_tool_name tool_name
   then Ok ()
   else (
     let mutates =

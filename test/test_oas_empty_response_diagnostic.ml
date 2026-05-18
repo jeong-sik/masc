@@ -40,6 +40,17 @@ let test_ensure_json_response_whitespace_html () =
     actual
 ;;
 
+let test_switch_wrong_domain_is_transport_error () =
+  let msg = "Invalid_argument(\"Switch accessed from wrong domain!\")" in
+  check bool "switch wrong-domain fallback" true
+    (Graphql_client.For_testing.is_transport_error msg)
+;;
+
+let test_http_status_is_not_transport_error () =
+  check bool "http status is application response" false
+    (Graphql_client.For_testing.is_transport_error "HTTP 500")
+;;
+
 let () =
   run
     "OAS_empty_response_diagnostic"
@@ -49,6 +60,10 @@ let () =
         ; test_case "json body" `Quick test_ensure_json_response_json
         ; test_case "whitespace json" `Quick test_ensure_json_response_whitespace_json
         ; test_case "whitespace html" `Quick test_ensure_json_response_whitespace_html
+        ] )
+    ; ( "transport_error"
+      , [ test_case "switch wrong-domain" `Quick test_switch_wrong_domain_is_transport_error
+        ; test_case "http status" `Quick test_http_status_is_not_transport_error
         ] )
     ]
 ;;

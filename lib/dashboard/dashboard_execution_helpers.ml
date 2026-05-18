@@ -329,11 +329,16 @@ let neo4j_identity_cache : (string, agent_profile) Hashtbl.t = Hashtbl.create 32
 let neo4j_cache_loaded = ref false
 let neo4j_cache_mu = Eio.Mutex.create ()
 
+let is_neo4j_identity_context_error message =
+  String_util.contains_substring message "Switch accessed from wrong domain"
+
 let populate_neo4j_identity_cache_locked () =
   let body =
     {|{"query":"{ agents(first: 50) { edges { node { name emoji koreanName model traits interests activityLevel primaryValue } } } }"}|}
   in
   match Graphql_client.request ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Graphql ()) body with
+  | Error e when is_neo4j_identity_context_error e ->
+      Log.Dashboard.info "neo4j identity cache skipped: %s" e
   | Error e -> Log.Dashboard.warn "neo4j identity cache load failed: %s" e
   | Ok output -> (
       try

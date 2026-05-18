@@ -50,6 +50,7 @@
   test_audit_log
   test_governance_anomaly
   test_http_negotiation
+  test_mcp_h1_h2_admission_parity
   test_streamable_http_upgrade
   test_mcp_session_id_header
   test_keeper_turn_terminal_code_byte_compat
@@ -59,6 +60,7 @@
   test_log_ring_encoder
   test_eio_context_fiber_local
   test_pool
+  test_pool_cascade_storm
   test_keeper_turn_disposition
   test_keeper_turn_terminal_disposition_field
   test_attempt_state
@@ -343,6 +345,7 @@
   test_audit_log
   test_governance_anomaly
   test_http_negotiation
+  test_mcp_h1_h2_admission_parity
   test_streamable_http_upgrade
   test_mcp_session_id_header
   test_keeper_turn_terminal_code_byte_compat
@@ -352,6 +355,7 @@
   test_log_ring_encoder
   test_eio_context_fiber_local
   test_pool
+  test_pool_cascade_storm
   test_keeper_turn_disposition
   test_keeper_turn_terminal_disposition_field
   test_attempt_state

@@ -102,6 +102,51 @@ val request :
     whether to retry — N-of-M silent retry is an
     RFC-0107 §"Workaround Rejection Bar" anti-pattern. *)
 
+(** {2 RFC-0129 — idle-timeout request with streaming progress}
+
+    Replaces the wall-clock total-timeout pattern used by [request].
+    Chunk arrival on the response body resets the idle timer; a stream
+    that keeps delivering bytes is never cancelled, regardless of total
+    elapsed time. A stream that stops producing bytes for longer than
+    [idle_timeout_sec] is cancelled.
+
+    Progress fields are returned on both the [Ok] and [Error] branches
+    so cascade rotation receipts can attach them without a side-channel.
+
+    Design rationale: docs/rfc/RFC-0129-http-idle-timeout-and-streaming-progress.md *)
+
+(** Body streaming progress observed during a single request. All
+    timestamps are seconds since request start (monotonic). *)
+type body_progress = {
+  first_byte_at_sec : float option;
+  last_chunk_at_sec : float option;
+  bytes_received    : int;
+}
+
+val empty_body_progress : body_progress
+
+val request_with_idle_timeout :
+  t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  idle_timeout_sec:float ->
+  ?total_timeout_sec:float ->
+  method_:http_method ->
+  url:string ->
+  ?headers:(string * string) list ->
+  ?body:string ->
+  unit ->
+  (response * body_progress, string * body_progress) result
+(** Issue a request with body-idle cancellation. Chunk delivery resets
+    the idle timer; absence of bytes for [idle_timeout_sec] cancels the
+    fiber. [total_timeout_sec] is an optional hard cap that bounds the
+    request regardless of streaming activity (default: no hard cap;
+    keeper turn budget bounds the outer loop).
+
+    Progress is observed even on failure. Error string carries one of:
+    - ["idle timeout after %.1fs"]      (body silent past idle_timeout_sec)
+    - ["total timeout after %.1fs"]     (total_timeout_sec elapsed)
+    - any Piaf error message. *)
+
 val with_connection :
   t ->
   url:string ->
@@ -145,4 +190,15 @@ module For_testing : sig
     val to_string : t -> string
     val compare : t -> t -> int
   end
+
+  (** Exposed so unit tests can drive idle-timeout logic against a
+      mock [Piaf.Body.t] built from [Piaf_stream.create], without
+      standing up a real HTTP server. *)
+  val read_body_with_idle :
+    ?progress_ref:body_progress ref ->
+    clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+    start_sec:float ->
+    idle_timeout_sec:float ->
+    Piaf.Body.t ->
+    (string * body_progress, string * body_progress) result
 end

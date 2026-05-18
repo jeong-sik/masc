@@ -567,6 +567,32 @@ let failing_minimum_tool_names () : string list =
   shard_floor @ essential_masc_minimum_names
   |> List.sort_uniq String.compare
 
+let is_verifier_identity raw =
+  let normalized = String.trim raw |> String.lowercase_ascii in
+  String.equal normalized "verifier"
+  || String.equal normalized "keeper-verifier-agent"
+
+let is_verifier_meta (meta : keeper_meta) =
+  is_verifier_identity meta.name || is_verifier_identity meta.agent_name
+
+let verifier_disallowed_task_mutation_tools =
+  [ "keeper_task_claim"
+  ; "masc_claim_next"
+  ; "masc_claim_task"
+  ; "keeper_task_done"
+  ; "keeper_task_submit_for_verification"
+  ; "keeper_task_force_release"
+  ; "keeper_task_force_done"
+  ]
+
+let filter_verifier_tool_surface (meta : keeper_meta) names =
+  if not (is_verifier_meta meta)
+  then names
+  else
+    List.filter
+      (fun name -> not (List.mem name verifier_disallowed_task_mutation_tools))
+      names
+
 let keeper_allowed_tool_names ?(write_done = false)
     ?(phase = Keeper_state_machine.Running) (meta : keeper_meta) :
     string list =
@@ -580,6 +606,7 @@ let keeper_allowed_tool_names ?(write_done = false)
     let lookup = tool_access_lookup_of_meta meta in
     lookup.candidate_names
     |> List.filter (fun name -> filter_by_access ~lookup name)
+    |> filter_verifier_tool_surface meta
     |> dedupe_tool_names
 
 (** Universe tool names: candidates minus denied, no policy filter.

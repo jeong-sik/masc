@@ -10,6 +10,8 @@ module KR = Masc_mcp.Keeper_runtime
 module AQ = Masc_mcp.Keeper_approval_queue
 module KSM = Masc_mcp.Keeper_state_machine
 module KLH = Masc_mcp.Keeper_lifecycle_hooks
+module FD = Masc_mcp.Keeper_fd_pressure
+module KA = Masc_mcp.Keeper_keepalive
 
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_supervisor_" "" in
@@ -411,6 +413,71 @@ let test_restart_launch_noop_scope_restores_nested_state () =
             (Sup.restart_launch_noop_enabled_for_test ()));
       check bool "restored prior true" true
         (Sup.restart_launch_noop_enabled_for_test ()))
+
+let test_spawn_admission_denial_does_not_register_or_fork () =
+  with_restart_launch_noop @@ fun () ->
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Eio.Switch.on_release sw (fun () ->
+    FD.reset_for_tests ();
+    Reg.clear ();
+    Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+    cleanup_dir base_dir);
+  let config = Masc_mcp.Coord.default_config base_dir in
+  ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+  let name = "spawn-denied-no-fork" in
+  let meta = make_meta name in
+  (match KT.write_meta config meta with
+   | Ok () -> ()
+   | Error err -> fail err);
+  let ctx : _ KT.context =
+    {
+      config;
+      agent_name = "supervisor";
+      sw;
+      clock = Eio.Stdenv.clock env;
+      proc_mgr = Some (Eio.Stdenv.process_mgr env);
+      net = Some (Eio.Stdenv.net env);
+    }
+  in
+  let denial_metric = Masc_mcp.Keeper_metrics.metric_keeper_spawn_slot_denied in
+  let denial_count surface =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      denial_metric
+      ~labels:
+        [
+          ("keeper", name);
+          ("surface", surface);
+          ("reason", "fd_pressure_active");
+        ]
+      ()
+  in
+  let fork_total () =
+    Masc_mcp.Prometheus.metric_total
+      Masc_mcp.Keeper_metrics.metric_keeper_domain_pool_fork
+  in
+  FD.note ~site:"test_spawn_admission_no_fork"
+    ~detail:"Too many open files in system"
+    ();
+  check bool "fd pressure active" true (FD.active ());
+  let fork_before = fork_total () in
+  let keepalive_denials_before = denial_count "keepalive" in
+  KA.start_keepalive ctx meta;
+  check bool "keepalive denial does not register keeper" false
+    (Reg.is_registered ~base_path:config.base_path name);
+  check (float 0.001) "keepalive denial metric increments"
+    (keepalive_denials_before +. 1.0)
+    (denial_count "keepalive");
+  let supervisor_denials_before = denial_count "supervisor" in
+  Sup.supervise_keepalive ~proactive_warmup_sec:0 ctx meta;
+  check bool "supervisor denial does not register keeper" false
+    (Reg.is_registered ~base_path:config.base_path name);
+  check (float 0.001) "supervisor denial metric increments"
+    (supervisor_denials_before +. 1.0)
+    (denial_count "supervisor");
+  check (float 0.001) "spawn denial does not fork heartbeat" fork_before (fork_total ())
 
 let test_active_supervision_keeper_count_uses_current_entries () =
   let entries = registered_entries [ "alpha"; "bravo" ] in
@@ -968,7 +1035,9 @@ let test_stale_storm_pause_skips_restart () =
       (match KT.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused = true after storm pause"
-             true m.paused
+             true m.paused;
+           check bool "storm pause disables auto-resume"
+             true (Option.is_none m.auto_resume_after_sec)
        | Ok None -> fail "meta missing after storm pause"
        | Error err -> fail ("read_meta failed: " ^ err));
       (* In-memory registry entry is unregistered so subsequent sweeps do
@@ -1212,8 +1281,8 @@ let test_non_storm_crashed_restarts_normally () =
 
 (* ── Phase 3: self-healing circuit breaker ──────────────────── *)
 
-(* Test: storm pause sets [auto_resume_after_sec] in meta. *)
-let test_storm_pause_sets_auto_resume_after_sec () =
+(* Test: stale storm pause requires manual resume until root cause clears. *)
+let test_storm_pause_requires_manual_resume () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -1226,7 +1295,7 @@ let test_storm_pause_sets_auto_resume_after_sec () =
     (fun () ->
       let config = Masc_mcp.Coord.default_config base_dir in
       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
-      let name = "storm-auto-resume-setter" in
+      let name = "storm-manual-resume" in
       let meta = make_meta name in
       (* Ensure no prior auto_resume_after_sec. *)
       check bool "initial auto_resume_after_sec = None"
@@ -1251,13 +1320,13 @@ let test_storm_pause_sets_auto_resume_after_sec () =
         }
       in
       Sup.sweep_and_recover ctx;
-      (* After storm pause, meta must have auto_resume_after_sec set
-         (initial value: 3600s from env default or test env override). *)
+      (* Stale storms are operator-owned pauses: no timer should re-enter
+         the same failed cascade/tool loop automatically. *)
       (match KT.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused = true" true m.paused;
-           check bool "auto_resume_after_sec set (Some _)"
-             true (Option.is_some m.auto_resume_after_sec);
+           check bool "auto_resume_after_sec remains None"
+             true (Option.is_none m.auto_resume_after_sec);
            (* updated_at must be refreshed by the pause write so Phase 3.5
               timer (now - updated_at) is anchored to the pause time, not to
               some earlier heartbeat write. *)
@@ -1271,8 +1340,8 @@ let test_storm_pause_sets_auto_resume_after_sec () =
        | Ok None -> fail "meta missing after storm pause"
        | Error err -> fail ("read_meta failed: " ^ err)))
 
-(* Test: exponential back-off doubles on successive auto-pauses. *)
-let test_auto_resume_after_sec_doubles_on_repause () =
+(* Test: exponential back-off still doubles for OAS timeout budget auto-pauses. *)
+let test_oas_auto_resume_after_sec_doubles_on_repause () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -1296,11 +1365,11 @@ let test_auto_resume_after_sec_doubles_on_repause () =
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name initial_meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "storm");
+      Eio.Promise.resolve reg.done_r (`Crashed "oas timeout budget loop");
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
-        (Some (Reg.Stale_termination_storm { count = 5 }));
+        (Some (Reg.Oas_timeout_budget_loop { count = 3 }));
       let ctx : _ KT.context =
         {
           config;
@@ -1641,6 +1710,8 @@ let () =
         test_fresh_supervision_cohort_keepers_rereads_registry;
       test_case "restart launch noop scoped restore" `Quick
         test_restart_launch_noop_scope_restores_nested_state;
+      test_case "spawn admission denial does not register or fork" `Quick
+        test_spawn_admission_denial_does_not_register_or_fork;
       test_case "active count uses current entries" `Quick
         test_active_supervision_keeper_count_uses_current_entries;
     ];
@@ -1691,10 +1762,10 @@ let () =
         test_non_storm_crashed_restarts_normally;
     ];
     "self_healing_circuit_breaker", [
-      test_case "storm pause sets auto_resume_after_sec" `Quick
-        test_storm_pause_sets_auto_resume_after_sec;
-      test_case "auto_resume_after_sec doubles on successive auto-pauses" `Quick
-        test_auto_resume_after_sec_doubles_on_repause;
+      test_case "storm pause requires manual resume" `Quick
+        test_storm_pause_requires_manual_resume;
+      test_case "OAS auto_resume_after_sec doubles on successive auto-pauses" `Quick
+        test_oas_auto_resume_after_sec_doubles_on_repause;
       test_case "sweep auto-resumes keeper when timer elapsed" `Quick
         test_sweep_auto_resumes_after_backoff;
       test_case "operator pause (None) is NOT auto-resumed by sweep" `Quick

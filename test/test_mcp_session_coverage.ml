@@ -13,6 +13,7 @@ module Types = Masc_domain
 open Alcotest
 
 module Http_transport = Masc_mcp.Server_mcp_transport_http
+module Actor_injection = Masc_mcp.Server_mcp_actor_injection
 module Auth = Masc_mcp.Auth
 
 let setup_test_room () =
@@ -206,6 +207,29 @@ let test_inject_agent_name_rewrites_internal_actor_only () =
   check (option string) "preserves target agent_name" (Some "target-keeper")
     (member "agent_name" args |> to_string_option)
 
+let test_actor_injection_reducer_skips_absent_actor () =
+  let body =
+    {|{"jsonrpc":"2.0","method":"tools/call","params":{"name":"masc_status","arguments":{"days":7}},"id":1}|}
+  in
+  check string "body unchanged without actor" body
+    (Actor_injection.reduce ~actor:None ~auth_token:(Some "token") body)
+
+let test_actor_injection_reducer_rewrites_with_http_auth () =
+  let body =
+    {|{"jsonrpc":"2.0","method":"tools/call","params":{"name":"masc_keeper_status","arguments":{"_agent_name":"dashboard","token":"stale-token","name":"sangsu"}},"id":1}|}
+  in
+  let args =
+    Actor_injection.reduce ~actor:(Some "codex") ~auth_token:(Some "token") body
+    |> tool_arguments_of_body
+  in
+  let open Yojson.Safe.Util in
+  check (option string) "actor reducer rewrites _agent_name" (Some "codex")
+    (member "_agent_name" args |> to_string_option);
+  check (option string) "actor reducer strips stale token" None
+    (member "token" args |> to_string_option);
+  check (option string) "actor reducer preserves target name" (Some "sangsu")
+    (member "name" args |> to_string_option)
+
 let test_body_with_canonical_http_actor_uses_token_owner () =
   let dir = setup_test_room () in
   Fun.protect
@@ -366,6 +390,10 @@ let () =
         test_inject_agent_name_preserves_legacy_target_by_default;
       test_case "rewrite_existing only rewrites _agent_name" `Quick
         test_inject_agent_name_rewrites_internal_actor_only;
+      test_case "reducer skips absent actor" `Quick
+        test_actor_injection_reducer_skips_absent_actor;
+      test_case "reducer rewrites actor and strips token with http auth" `Quick
+        test_actor_injection_reducer_rewrites_with_http_auth;
       test_case "canonical http actor uses token owner" `Quick
         test_body_with_canonical_http_actor_uses_token_owner;
     ];

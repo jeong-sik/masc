@@ -17,6 +17,12 @@
     [Env_config_oas_bridge]. *)
 let default_caller = "unknown"
 let min_timeout_s = 0.0
+let routine_cancel_inner_substring = "Eio__core__Fiber.Not_first"
+
+let is_routine_fast_cancel ~bucket ~inner_str =
+  String.equal bucket "fast"
+  && String_util.contains_substring inner_str routine_cancel_inner_substring
+
 let run_safe ?(caller = default_caller) ~timeout_s fn =
   if not (Float.is_finite timeout_s) || Float.compare timeout_s min_timeout_s <= 0 then
     invalid_arg
@@ -91,9 +97,14 @@ let run_safe ?(caller = default_caller) ~timeout_s fn =
         ("caller", caller);
         ("bucket", bucket);
       ] ();
-    Log.Misc.warn
-      "masc_oas_bridge: OAS execution cancelled caller=%s wall=%.1fs bucket=%s inner=%s (re-raising)"
-      caller wall bucket inner_str;
+    if is_routine_fast_cancel ~bucket ~inner_str then
+      Log.Misc.info
+        "masc_oas_bridge: OAS execution cancelled caller=%s wall=%.1fs bucket=%s inner=%s (re-raising)"
+        caller wall bucket inner_str
+    else
+      Log.Misc.warn
+        "masc_oas_bridge: OAS execution cancelled caller=%s wall=%.1fs bucket=%s inner=%s (re-raising)"
+        caller wall bucket inner_str;
     Printexc.raise_with_backtrace exn bt
   | exn ->
     let bt = Printexc.get_backtrace () in

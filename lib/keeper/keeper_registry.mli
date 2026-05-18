@@ -93,7 +93,12 @@ val enrich_fiber_unresolved_outcome :
 val record_restart : base_path:string -> string -> unit
 
 (** Record an error message. *)
-val record_error : base_path:string -> string -> string -> unit
+val record_error :
+  base_path:string ->
+  ?details:Yojson.Safe.t ->
+  string ->
+  string ->
+  unit
 
 (** Clear the last recorded error for a keeper. *)
 val clear_error : base_path:string -> string -> unit

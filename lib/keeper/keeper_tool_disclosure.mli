@@ -159,10 +159,9 @@ val is_completion_tool_name : string -> bool
 val tool_name_can_satisfy_required_contract : string -> bool
 
 (** Validate an observed generic [Require_tool_use] call. This accepts mutating
-    tools, completion tools, keeper-local observation/discovery tools, and
-    LLM-native read/search aliases that route to keeper observation. The latter
-    still classify as [Passive_status]; accepting them here prevents a valid
-    read/status turn from turning into provider cascade churn. *)
+    tools and completion tools. Keeper-local observation/discovery tools and
+    LLM-native read/search aliases remain passive: they can inform a later
+    action, but cannot satisfy a required-action contract by themselves. *)
 val required_tool_satisfaction
   :  Agent_sdk.Completion_contract.tool_call
   -> (unit, string) result

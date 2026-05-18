@@ -199,7 +199,66 @@ let test_to_yojson_exposes_gate_fields () =
   Alcotest.(check bool) "startup_rejected field" false
     (json |> member "startup_rejected" |> to_bool);
   Alcotest.(check bool) "startup_abort_eligible field" false
-    (json |> member "startup_abort_eligible" |> to_bool)
+    (json |> member "startup_abort_eligible" |> to_bool);
+  Alcotest.(check string) "current_task_shape absent" "absent"
+    (json |> member "current_task_shape" |> to_string)
+
+let test_current_task_regular_allows_startup () =
+  with_temp_dir "base-path-current-task-file" @@ fun root ->
+  let workspace = Filename.concat root "workspace" in
+  let masc_root = Filename.concat workspace Common.masc_dirname in
+  mkdir_p masc_root;
+  let current_task = Filename.concat masc_root "current_task" in
+  let oc = open_out current_task in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc "task-123\n");
+  let diag =
+    Server_base_path_diagnostics.detect ~cwd:workspace
+      ~effective_base_path:workspace ~effective_masc_root:masc_root ()
+  in
+  Alcotest.(check string) "current_task shape" "regular"
+    diag.current_task_shape;
+  Alcotest.(check bool) "startup_rejected false" false
+    diag.startup_rejected;
+  Alcotest.(check bool) "startup abort false" false
+    (Server_base_path_diagnostics.startup_should_abort diag);
+  Alcotest.(check (option string)) "no warning" None diag.warning
+
+let test_current_task_directory_rejects_startup () =
+  with_temp_dir "base-path-current-task-dir" @@ fun root ->
+  let workspace = Filename.concat root "workspace" in
+  let masc_root = Filename.concat workspace Common.masc_dirname in
+  mkdir_p masc_root;
+  let current_task = Filename.concat masc_root "current_task" in
+  Unix.mkdir current_task 0o755;
+  let diag =
+    Server_base_path_diagnostics.detect ~cwd:workspace
+      ~effective_base_path:workspace ~effective_masc_root:masc_root ()
+  in
+  Alcotest.(check string) "current_task shape" "directory"
+    diag.current_task_shape;
+  Alcotest.(check bool) "startup_rejected true" true diag.startup_rejected;
+  Alcotest.(check bool) "startup_abort_eligible true" true
+    diag.startup_abort_eligible;
+  Alcotest.(check bool) "startup abort true" true
+    (Server_base_path_diagnostics.startup_should_abort diag);
+  let expected_warning =
+    Printf.sprintf
+      "Invalid current_task startup state: %s is directory (expected absent \
+       or a regular read/write file, got directory); expected absent or a \
+       regular read/write file. Repair by moving/removing the path before \
+       starting the server."
+      diag.current_task_path
+  in
+  Alcotest.(check (option string)) "warning" (Some expected_warning)
+    diag.warning;
+  let open Yojson.Safe.Util in
+  let json = Server_base_path_diagnostics.to_yojson diag in
+  Alcotest.(check string) "json current_task_shape" "directory"
+    (json |> member "current_task_shape" |> to_string);
+  Alcotest.(check bool) "json startup_rejected" true
+    (json |> member "startup_rejected" |> to_bool)
 
 let test_default_base_path_ignores_parent_base_path_override_in_tests () =
   with_temp_dir "base-path-default" @@ fun root ->
@@ -285,6 +344,10 @@ let () =
             test_to_yojson_exposes_resolution_source;
           Alcotest.test_case "json exposes gate fields" `Quick
             test_to_yojson_exposes_gate_fields;
+          Alcotest.test_case "current_task regular allows startup" `Quick
+            test_current_task_regular_allows_startup;
+          Alcotest.test_case "current_task directory rejects startup" `Quick
+            test_current_task_directory_rejects_startup;
           Alcotest.test_case
             "default base path ignores parent base path override in tests"
             `Quick test_default_base_path_ignores_parent_base_path_override_in_tests;

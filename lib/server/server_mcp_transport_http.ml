@@ -191,91 +191,14 @@ let should_stream_post_tools_call request body_str accept_mode =
       | None -> false)
   | _ -> false
 
-(** Inject or replace [_agent_name] in MCP [tools/call] arguments.
-    For authenticated dashboard sessions, the HTTP-layer token owner is the
-    canonical caller identity, so a stale browser-supplied [_agent_name]
-    must be overwritten. The legacy argument-scoped [token] is also removed
-    when HTTP auth is present so stale MCP bodies cannot override the
-    transport token. Legacy [agent_name] is left untouched because some tools
-    use it as a domain argument rather than caller identity. *)
 let inject_agent_name_into_body ?(rewrite_existing = false) ?(strip_token = false)
     ~agent_name body_str =
-  try
-    let json = Yojson.Safe.from_string body_str in
-    let open Yojson.Safe.Util in
-    let method_name = member "method" json |> to_string_option in
-    match method_name with
-    | Some "tools/call" ->
-        let params = member "params" json in
-        let args = member "arguments" params in
-        let existing_agent =
-          Option.bind
-            (member "_agent_name" args |> to_string_option)
-            (fun value ->
-               let trimmed = String.trim value in
-               if String.equal trimmed "" then None else Some trimmed)
-        in
-        let existing_legacy_agent =
-          Option.bind
-            (member "agent_name" args |> to_string_option)
-            (fun value ->
-               let trimmed = String.trim value in
-               if String.equal trimmed "" then None else Some trimmed)
-        in
-        let new_args =
-          match args with
-          | `Assoc fields ->
-              let normalized_fields =
-                let fields =
-                  if rewrite_existing then
-                    List.filter
-                      (fun (key, _) -> not (String.equal key "_agent_name"))
-                      fields
-                  else
-                    fields
-                in
-                if strip_token then
-                  List.filter (fun (key, _) -> not (String.equal key "token"))
-                    fields
-                else
-                  fields
-              in
-              let should_inject =
-                rewrite_existing
-                || (Option.is_none existing_agent
-                    && Option.is_none existing_legacy_agent)
-              in
-              if should_inject then
-                `Assoc (("_agent_name", `String agent_name) :: normalized_fields)
-              else
-                args
-          | _ -> args
-        in
-        if new_args = args then body_str else
-          let new_params = match params with
-            | `Assoc fields ->
-                `Assoc (List.map (fun (k, v) ->
-                  if k = "arguments" then (k, new_args) else (k, v)) fields)
-            | _ -> params
-          in
-          let new_json = match json with
-            | `Assoc fields ->
-                `Assoc (List.map (fun (k, v) ->
-                  if k = "params" then (k, new_params) else (k, v)) fields)
-            | _ -> json
-          in
-          Yojson.Safe.to_string new_json
-    | _ -> body_str
-  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> body_str
+  Server_mcp_actor_injection.inject_agent_name_into_body ~rewrite_existing
+    ~strip_token ~agent_name body_str
 
 let body_with_canonical_http_actor ~base_path ~auth_token request body_str =
-  match Server_auth.dashboard_actor_for_request ~base_path request with
-  | None -> body_str
-  | Some agent ->
-      inject_agent_name_into_body
-        ~rewrite_existing:(Option.is_some auth_token)
-        ~strip_token:(Option.is_some auth_token)
-        ~agent_name:agent body_str
+  let actor = Server_auth.dashboard_actor_for_request ~base_path request in
+  Server_mcp_actor_injection.reduce ~actor ~auth_token body_str
 
 let handle_post_mcp ~deps ?(profile = Full) request reqd =
   (* Readiness gate: reject before session/auth if server state is not ready *)
@@ -283,16 +206,23 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
     respond_not_ready ~deps request reqd
   else
   let session_id_opt = get_session_id_any request in
-  let session_was_provided = Option.is_some session_id_opt in
   let session_id =
     match session_id_opt with
     | Some sid -> sid
     | None -> Mcp_session.generate ()
   in
-  let auth_token = deps.auth_token_from_request request in
-  let protocol_version = get_protocol_version_for_session ~session_id request in
-  let origin = deps.get_origin request in
-  let base_path = deps.get_base_path () in
+  let context =
+    Server_mcp_request_context.make ~session_id_opt
+      ~generated_session_id:session_id
+      ~auth_token:(deps.auth_token_from_request request)
+      ~protocol_version:(get_protocol_version_for_session ~session_id request)
+      ~origin:(deps.get_origin request) ~base_path:(deps.get_base_path ())
+  in
+  let session_id = context.session_id in
+  let auth_token = context.auth_token in
+  let protocol_version = context.protocol_version in
+  let origin = context.origin in
+  let base_path = context.base_path in
   let auth_result =
     match profile with
     | Full | Managed_agent ->
@@ -349,12 +279,14 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
     in
     Ok (Http.Request.read_body_async reqd (fun body_str ->
       ignore (
-        let* () =
+      let* post_context =
         match
-          validate_session_requirement ~session_was_provided body_str
+          Server_mcp_request_context.decide_post_body ~request ~context
+            ~session_is_known:(is_known_session session_id)
+            body_str
         with
-        | Ok () -> Ok ()
-        | Error msg ->
+        | Ok decision -> Ok decision
+        | Error (Server_mcp_request_context.Session_required msg) ->
             let body =
               Printf.sprintf
                 {|{"jsonrpc":"2.0","error":{"code":-32600,"message":%s},"id":null}|}
@@ -370,25 +302,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
               (Httpun.Response.create ~headers `Bad_request)
               body;
             Error ()
-      in
-      let* () =
-        (* RFC-0100 PR-3 — Q3 default. If the client echoed an
-           [Mcp-Session-Id] the server has no protocol-version state
-           for, respond [404 Not Found] with a freshly minted
-           [Mcp-Session-Id] header so the client re-handshakes via
-           [initialize] instead of silently riding on a phantom
-           session. The handshake methods are exempt: [initialize]
-           legitimately mints the state we are about to check for,
-           and [ping] / [notifications/initialized] are allowed
-           without a known session per the existing contract. *)
-        let is_known =
-          session_was_provided && is_known_session session_id
-        in
-        match
-          validate_session_known ~session_was_provided ~is_known body_str
-        with
-        | Ok () -> Ok ()
-        | Error msg ->
+        | Error (Server_mcp_request_context.Unknown_session msg) ->
             let new_session_id = Mcp_session.generate () in
             let body =
               Printf.sprintf
@@ -405,14 +319,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
               (Httpun.Response.create ~headers `Not_found)
               body;
             Error ()
-      in
-      let accept_mode =
-        Server_mcp_transport_http_headers.classify_mcp_accept_for_body
-          request body_str
-      in
-      let* accept_mode =
-        match accept_mode with
-        | Http_negotiation.Rejected ->
+        | Error (Server_mcp_request_context.Invalid_accept msg) ->
             let body =
               Yojson.Safe.to_string
                 (`Assoc
@@ -422,9 +329,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                       `Assoc
                         [
                           ("code", `Int (-32600));
-                          ( "message",
-                            `String
-                              "Invalid Accept header: must include application/json and text/event-stream. Set MASC_ALLOW_LEGACY_ACCEPT=1 for temporary compatibility." );
+                          ("message", `String msg);
                         ] );
                   ])
             in
@@ -436,11 +341,9 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
             let response = Httpun.Response.create ~headers `Bad_request in
             safe_respond_with_string reqd response body;
             Error ()
-        | _ -> Ok accept_mode
       in
-      let accept_warn_headers =
-        legacy_accept_warning_headers accept_mode
-      in
+      let accept_mode = post_context.accept_mode in
+      let accept_warn_headers = post_context.accept_warn_headers in
       let* runtime =
         match request_runtime_result deps with
         | Ok r -> Ok r

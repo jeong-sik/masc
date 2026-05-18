@@ -110,6 +110,10 @@
    (re_export multimodal)
    (re_export ocaml-protoc-plugin)
    (re_export ocaml-webrtc)
+   ; RFC-0129 — Pool.For_testing.read_body_with_idle tests build a mock
+   ; Piaf.Body via Piaf.Stream.create + Piaf.Body.of_string_stream.
+   (re_export piaf)
+   (re_export piaf.stream)
    (re_export qcheck-alcotest)
    (re_export qcheck-core)
    (re_export re)

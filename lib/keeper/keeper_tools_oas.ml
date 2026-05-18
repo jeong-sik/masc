@@ -597,8 +597,17 @@ let make_keeper_tool_handler
             let is_workflow_rejection =
               match failure_class_opt with
               | Some Tool_result.Workflow_rejection -> true
-              | Some (Tool_result.Transient_error | Tool_result.Policy_rejection | Tool_result.Runtime_failure)
+              | Some
+                  ( Tool_result.Transient_error
+                  | Tool_result.Policy_rejection
+                  | Tool_result.Runtime_failure )
               | None ->
+                false
+            in
+            let is_self_correcting_rejection =
+              match failure_class_opt with
+              | Some (Tool_result.Workflow_rejection | Tool_result.Policy_rejection) -> true
+              | Some (Tool_result.Transient_error | Tool_result.Runtime_failure) | None ->
                 false
             in
             let workflow_rejection_recovery_fields =
@@ -613,7 +622,7 @@ let make_keeper_tool_handler
               else []
             in
             let count =
-              if is_workflow_rejection
+              if is_self_correcting_rejection
               then 0
               else failure_count_record_failure failure_counts key
             in
@@ -664,19 +673,24 @@ let make_keeper_tool_handler
               Keeper_metrics.metric_keeper_tools_oas_failures
               ~labels:[ "tool", name; "site", "error_result" ]
               ();
-            if is_workflow_rejection
-            then
-              Log.Keeper.warn
-                "tool %s returned workflow rejection: %s"
-                name
-                detail
-            else
-              Log.Keeper.error
-                "tool %s returned error result (%d/%d): %s"
-                name
-                count
-                max_consecutive_failures
-                detail;
+            (match failure_class_opt with
+             | Some Tool_result.Workflow_rejection ->
+               Log.Keeper.warn
+                 "tool %s returned workflow rejection: %s"
+                 name
+                 detail
+             | Some Tool_result.Policy_rejection ->
+               Log.Keeper.warn
+                 "tool %s returned policy rejection: %s"
+                 name
+                 detail
+             | Some Tool_result.Transient_error | Some Tool_result.Runtime_failure | None ->
+               Log.Keeper.error
+                 "tool %s returned error result (%d/%d): %s"
+                 name
+                 count
+                 max_consecutive_failures
+                 detail);
             let normalized_error =
               normalize_tool_result
                 ~workflow_rejection_recovery_fields

@@ -645,6 +645,48 @@ let test_error_result_logs_at_error_level () =
            (Mlog.level_to_string entry.level))
 ;;
 
+let test_policy_rejection_logs_at_warn_level () =
+  let meta =
+    make_test_meta ~name:"test-keeper-policy-log-level" ~allowed_paths:[ "repos" ] ()
+  in
+  let ctx_snapshot = make_test_ctx () in
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "test_keeper_tools_policy_log_level_%d" (Random.int 100000))
+  in
+  (try Unix.mkdir dir 0o755 with
+   | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Fun.protect
+    ~finally:(fun () ->
+      try
+        Sys.readdir dir |> Array.iter (fun f -> Sys.remove (Filename.concat dir f));
+        Unix.rmdir dir
+      with
+      | _ -> ())
+    (fun () ->
+       Eio_main.run
+       @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       let config = Coord.default_config dir in
+       let tools = make_registered_tools ~config ~meta ~ctx_snapshot () in
+       let tool = find_tool "masc_code_shell" tools in
+       let baseline = latest_log_seq () in
+       (match Tool.execute tool (`Assoc [ "command", `String "python3 --version" ]) with
+        | Error _ -> ()
+        | Ok _ -> fail "disallowed code shell command should be rejected");
+       let entry =
+         Mlog.Ring.recent ~limit:50 ~module_filter:"Keeper" ~since_seq:baseline ()
+         |> List.find_opt (fun (entry : Mlog.Ring.entry) ->
+           string_contains ~sub:"returned policy rejection" entry.message)
+       in
+       match entry with
+       | None -> fail "expected keeper warn log for policy rejection"
+       | Some (entry : Mlog.Ring.entry) ->
+         check string "policy rejection logs at WARN" "WARN"
+           (Mlog.level_to_string entry.level))
+;;
+
 let test_missing_file_error_redacts_directory_suggestions () =
   let meta =
     make_test_meta ~name:"test-keeper-suggestions" ~allowed_paths:[ "repos" ] ()
@@ -1370,6 +1412,10 @@ let () =
             "error result logs at error level"
             `Quick
             test_error_result_logs_at_error_level
+        ; test_case
+            "policy rejection logs at warn level"
+            `Quick
+            test_policy_rejection_logs_at_warn_level
         ; test_case
             "missing file error redacts suggestions"
             `Quick

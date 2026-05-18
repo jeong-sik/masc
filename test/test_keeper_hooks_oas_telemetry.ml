@@ -80,6 +80,12 @@ let make_test_hooks keeper_name =
   Hooks.make_hooks ~config ~meta_ref ~generation:1 ()
 ;;
 
+let make_test_hooks_at_root keeper_name root =
+  let config = Masc_mcp.Coord.default_config root in
+  let meta_ref = ref (make_meta keeper_name) in
+  Hooks.make_hooks ~config ~meta_ref ~generation:1 ()
+;;
+
 let lifecycle_callback_failure_count ~keeper ~callback =
   Masc_mcp.Prometheus.metric_value_or_zero
     Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
@@ -1087,6 +1093,29 @@ let test_on_tool_error_workflow_rejection_does_not_count_callback_failure () =
     (after -. before)
 ;;
 
+let test_on_tool_error_blob_workflow_rejection_does_not_count_callback_failure () =
+  let keeper = "callback-on-tool-blob-workflow-rejection-keeper" in
+  let root = temp_dir () in
+  let hooks = make_test_hooks_at_root keeper root in
+  let hook = require_hook "on_tool_error" hooks.on_tool_error in
+  let before = lifecycle_callback_failure_count ~keeper ~callback:"on_tool_error" in
+  let payload =
+    {|{"ok":false,"error":"task_state_file_probe_blocked","detail":{"ok":false,"error":"task_state_file_probe_blocked","reason":"Task state is owned by the MASC task tools, not guessed files."},"failure_class":"workflow_rejection"}|}
+  in
+  let store = Tool_blob_store.create ~base_path:root in
+  let error = Tool_blob_store.put store ~bytes:payload ~mime:"text/plain" in
+  let error = Tool_output.encode_for_oas error in
+  check_continue
+    "on_tool_error blob workflow rejection"
+    (hook (Agent_sdk.Hooks.OnToolError { tool_name = "Bash"; error }));
+  let after = lifecycle_callback_failure_count ~keeper ~callback:"on_tool_error" in
+  check
+    (float 0.001)
+    "blob workflow rejection counter does not increment"
+    0.0
+    (after -. before)
+;;
+
 let test_on_tool_error_policy_rejection_does_not_count_callback_failure () =
   let keeper = "callback-on-tool-policy-rejection-keeper" in
   let hooks = make_test_hooks keeper in
@@ -1726,6 +1755,10 @@ let () =
             "on_tool_error workflow rejection is not callback failure"
             `Quick
             test_on_tool_error_workflow_rejection_does_not_count_callback_failure
+        ; test_case
+            "on_tool_error blob workflow rejection is not callback failure"
+            `Quick
+            test_on_tool_error_blob_workflow_rejection_does_not_count_callback_failure
         ; test_case
             "on_tool_error policy rejection is not callback failure"
             `Quick

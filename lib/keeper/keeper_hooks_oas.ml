@@ -77,23 +77,44 @@ let idle_decision_to_label = function
   | Agent_sdk.Hooks.AdjustParams _ -> "adjust_params"
   | Agent_sdk.Hooks.ElicitInput _ -> "elicit_input"
 
-let tool_error_failure_class error =
+let failure_class_of_tool_error_json json =
+  let direct = Safe_ops.json_string_opt "failure_class" json in
+  let nested =
+    match Yojson.Safe.Util.member "detail" json with
+    | `Assoc _ as detail -> Safe_ops.json_string_opt "failure_class" detail
+    | _ -> None
+  in
+  match direct with
+  | Some _ -> direct
+  | None -> nested
+
+let failure_class_of_tool_error_text error =
   try
     let json = Yojson.Safe.from_string error in
-    let direct = Safe_ops.json_string_opt "failure_class" json in
-    let nested =
-      match Yojson.Safe.Util.member "detail" json with
-      | `Assoc _ as detail -> Safe_ops.json_string_opt "failure_class" detail
-      | _ -> None
-    in
-    match direct with
-    | Some _ -> direct
-    | None -> nested
+    failure_class_of_tool_error_json json
   with
   | _ -> None
 
-let tool_error_is_self_correcting_rejection error =
-  match tool_error_failure_class error with
+let tool_error_failure_class ?base_path error =
+  match Tool_output.decode_from_oas error with
+  | Tool_output.Inline inline -> failure_class_of_tool_error_text inline
+  | Tool_output.Stored { sha256; preview; _ } ->
+    let from_store =
+      match base_path with
+      | None -> None
+      | Some base_path ->
+        Safe_ops.protect ~default:None (fun () ->
+            let store = Tool_blob_store.create ~base_path in
+            match Tool_blob_store.fetch store ~sha256 with
+            | Some payload -> failure_class_of_tool_error_text payload
+            | None -> None)
+    in
+    (match from_store with
+     | Some _ -> from_store
+     | None -> failure_class_of_tool_error_text preview)
+
+let tool_error_is_self_correcting_rejection ?base_path error =
+  match tool_error_failure_class ?base_path error with
   | Some ("workflow_rejection" | "policy_rejection") -> true
   | _ -> false
 
@@ -733,10 +754,12 @@ let make_hooks
 
     on_tool_error = Some (function
       | Agent_sdk.Hooks.OnToolError { tool_name; error } ->
-        if tool_error_is_self_correcting_rejection error
+        if tool_error_is_self_correcting_rejection ~base_path:config.base_path error
         then
           let failure_class =
-            Option.value (tool_error_failure_class error) ~default:"tool_rejection"
+            Option.value
+              (tool_error_failure_class ~base_path:config.base_path error)
+              ~default:"tool_rejection"
           in
           Log.Keeper.warn "keeper:%s tool_%s: %s — %s"
             (!meta_ref).name failure_class tool_name error

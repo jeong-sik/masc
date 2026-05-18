@@ -40,7 +40,7 @@ filter_allowed() {
   if [ "$ALLOWLIST" = "/dev/null" ]; then
     cat
   else
-    grep -vFf "$ALLOWLIST" || true
+    grep -vFf <(grep -vE '^[[:space:]]*(#|$)' "$ALLOWLIST") || true
   fi
 }
 

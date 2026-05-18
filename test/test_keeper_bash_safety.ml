@@ -939,6 +939,41 @@ let test_keeper_bash_safe_fallback_does_not_unblock_repo_scan () =
     "repo_wide_scan"
     (json |> Json.member "shape_block" |> Json.to_string)
 
+let test_keeper_bash_task_state_http_probe_uses_task_tools () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_write_enabled_meta "task-http-probe" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  ensure_dir playground;
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:
+        (`Assoc
+           [ ( "cmd"
+             , `String
+                 "curl -s http://localhost:8080/api/tasks?status=awaiting_verification"
+             )
+           ; ("cwd", `String playground)
+           ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check (option string)) "localhost task probe is blocked"
+    (Some "task_state_http_probe_blocked") (parse_error_field raw);
+  Alcotest.(check string) "suggested tool"
+    "keeper_tasks_list"
+    (json |> Json.member "diagnosis" |> Json.member "tool_suggestion" |> Json.to_string);
+  (match parse_hint raw with
+   | Some hint ->
+     Alcotest.(check bool) "hint points to keeper_tasks_list" true
+       (String_util.contains_substring hint "keeper_tasks_list")
+   | None -> Alcotest.fail ("expected hint, got: " ^ raw))
+
 let test_keeper_shell_ls_recovers_doubled_playground_prefix () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
@@ -1305,6 +1340,8 @@ let () =
         test_keeper_bash_safe_fallback_works_for_write_enabled_keeper;
       Alcotest.test_case "safe fallback does not unblock repo scan" `Quick
         test_keeper_bash_safe_fallback_does_not_unblock_repo_scan;
+      Alcotest.test_case "task-state localhost probe uses task tools" `Quick
+        test_keeper_bash_task_state_http_probe_uses_task_tools;
       Alcotest.test_case "doubled playground prefix auto-recovers" `Quick
         test_keeper_shell_ls_recovers_doubled_playground_prefix;
       Alcotest.test_case "op=bash is deprecated" `Quick

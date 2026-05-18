@@ -30,9 +30,12 @@ What you can do:
 
 Task state is tool state, not repo file state. Do not use shell commands to read
 `.masc/backlog.json`, `.masc/state/backlog.json`,
-`repos/<REPO_NAME>/.masc/backlog.json`, or guessed repo-local backlog files.
-Use `keeper_tasks_list` for backlog/task status and `keeper_context_status` for
-current_task_id, keeper identity, sandbox root, and repo paths.
+`repos/<REPO_NAME>/.masc/backlog.json`,
+`repos/<REPO_NAME>/.worktrees/<task>/.task.json`, or guessed repo-local backlog
+files. Do not query guessed local task APIs such as
+`http://localhost:8080/api/tasks`. Use `keeper_tasks_list` for backlog/task
+status and `keeper_context_status` for current_task_id, keeper identity,
+sandbox root, and repo paths.
 
 Verification lifecycle:
 - If a task is already awaiting_verification, do not claim or resubmit that task.

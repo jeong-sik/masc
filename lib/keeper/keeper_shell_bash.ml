@@ -688,8 +688,13 @@ let command_mentions_task_state_file cmd =
     ; "tasks/backlog.json"
     ]
 
+let command_looks_like_task_state_http_probe cmd =
+  ((lowercase_contains cmd "localhost" || lowercase_contains cmd "127.0.0.1")
+   && (lowercase_contains cmd "/api/tasks" || lowercase_contains cmd "api/tasks"))
+
 let command_looks_like_task_state_discovery cmd =
   command_mentions_task_state_file cmd
+  || command_looks_like_task_state_http_probe cmd
   ||
   ((lowercase_contains cmd "find repos" || lowercase_contains cmd "find .")
    && (lowercase_contains cmd "task" || lowercase_contains cmd "backlog"))
@@ -919,6 +924,29 @@ let handle_keeper_bash
          ; "retryable", `Bool true
          ])
   in
+  let task_state_http_probe_block () =
+    Yojson.Safe.to_string
+      (Exec_core.blocked_result_json
+         ~cmd
+         ~error:"task_state_http_probe_blocked"
+         ~reason:
+           "Task state is not exposed through guessed localhost HTTP APIs from \
+            keeper_bash."
+         ~hint:task_state_shell_hint
+         ~alternatives:task_state_shell_alternatives
+         ~retryability:Exec_core.Self_correct
+         ~diag:
+           (Some
+              { Exec_core.rule_id = "task_state_http_probe_blocked"
+              ; explanation =
+                  "Keepers must use task-state tools instead of probing \
+                   localhost task APIs from shell."
+              ; rewrite = Some task_state_shell_hint
+              ; tool_suggestion = Some "keeper_tasks_list"
+              })
+         ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
+         ())
+  in
   if cmd = ""
   then error_json "cmd is required. Good: cmd='ls -la lib/'. Bad: cmd=''."
   else if Env_config_keeper.KeeperSandbox.hard_mode ()
@@ -931,6 +959,8 @@ let handle_keeper_bash
     | Some (tool_name, tool_policy_visible) ->
       direct_tool_command_block ~tool_policy_visible tool_name
     | None when cmd_contains_gh_pr_create cmd -> gh_pr_create_block ()
+    | None when command_looks_like_task_state_http_probe cmd ->
+      task_state_http_probe_block ()
     | None -> begin
     (if stripped_stderr_dev_null then
        Log.Keeper.info

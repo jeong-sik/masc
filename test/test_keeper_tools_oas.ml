@@ -209,6 +209,17 @@ let rec rm_rf path =
      | _ -> Sys.remove path)
 ;;
 
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some prior -> Unix.putenv name prior
+      | None -> Unix.putenv name "")
+    f
+;;
+
 let test_tool_side_effect_failures_are_observed () =
   let meta =
     make_test_meta ~name:"test-keeper-side-effects" ~allowed_paths:[ "repos" ] ()
@@ -405,6 +416,81 @@ let test_oas_wrapper_records_keeper_internal_tool_call () =
               check int "call_count" 1 (Atomic.get entry.call_count);
               check int "success_count" 1 (Atomic.get entry.success_count);
               check int "keeper_internal_count" 1 (Atomic.get entry.keeper_internal_count)))
+;;
+
+let test_oas_tool_callbacks_respect_resource_gate () =
+  let meta =
+    make_test_meta ~name:"test-keeper-oas-tool-gate" ~allowed_paths:[ "*" ] ()
+  in
+  let ctx_snapshot = make_test_ctx () in
+  let dir = Filename.temp_file "test_keeper_tools_gate_" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  let run env =
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let clock = Eio.Stdenv.clock env in
+    let config = Coord.default_config dir in
+    ignore (Keeper_registry.register ~base_path:config.Coord.base_path meta.name meta);
+    Tool_resource_gate.For_testing.set_limits ~shell:1 ();
+    with_env "MASC_TOOL_GATE_WAIT_TIMEOUT_SEC" "0.05" (fun () ->
+      let bundle =
+        Keeper_tools_oas.make_tool_bundle ~config ~meta ~ctx_snapshot ~clock ()
+      in
+      Fun.protect
+        ~finally:bundle.cleanup
+        (fun () ->
+           let bash = find_tool "Bash" bundle.tools in
+           let blocker_started, unblock_blocker = Eio.Promise.create () in
+           let release_blocker, resolve_release = Eio.Promise.create () in
+           let run_blocker () =
+             let result =
+               Tool_resource_gate.with_permit
+                 ~clock
+                 ~tool_name:"keeper_bash"
+                 ~arguments:(`Assoc [ "cmd", `String "sleep 1" ])
+                 ~is_read_only:false
+                 ~start_time:(Eio.Time.now clock)
+                 (fun () ->
+                    Eio.Promise.resolve unblock_blocker ();
+                    Eio.Promise.await release_blocker;
+                    Tool_result.quick_ok ~tool_name:"keeper_bash" "done")
+             in
+             check bool "blocking shell gate call completed" true result.success
+           in
+           let run_rejected_callback () =
+             Eio.Promise.await blocker_started;
+             let result =
+               Fun.protect
+                 ~finally:(fun () -> Eio.Promise.resolve resolve_release ())
+                 (fun () ->
+                    Tool.execute
+                      bash
+                      (`Assoc [ "command", `String "echo should-not-spawn" ]))
+             in
+             match result with
+             | Ok _ -> fail "expected saturated OAS callback to be rejected"
+             | Error { Agent_sdk.Types.message; recoverable; error_class } ->
+               check
+                 bool
+                 "resource gate error surfaced"
+                 true
+                 (string_contains ~sub:"tool_resource_gate_saturated" message);
+               check bool "recoverable transient" true recoverable;
+               check
+                 bool
+                 "typed transient"
+                 true
+                 (match error_class with
+                  | Some Agent_sdk.Types.Transient -> true
+                  | _ -> false)
+           in
+           Eio.Fiber.both run_blocker run_rejected_callback))
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Tool_resource_gate.For_testing.reset ();
+      rm_rf dir)
+    (fun () -> Eio_main.run run)
 ;;
 
 let is_guardrail_message message =
@@ -863,7 +949,8 @@ let test_library_search_returns_results () =
       (Filename.get_temp_dir_name ())
       (Printf.sprintf "test_lib_home_%d" (Random.int 100000))
   in
-  let lib_path = List.fold_left Filename.concat fake_home [ "me"; "docs"; "library" ] in
+  let base_path = Filename.concat fake_home "me" in
+  let lib_path = List.fold_left Filename.concat base_path [ "docs"; "library" ] in
   let rec mkdir_p path =
     if not (Sys.file_exists path)
     then (
@@ -886,49 +973,45 @@ let test_library_search_returns_results () =
      ---\n\n\
      Multi-Level Feedback Queue scheduler for LLM request priority.\n";
   close_out oc;
-  let orig_home = Sys.getenv_opt "HOME" in
-  Unix.putenv "HOME" fake_home;
   Fun.protect
     ~finally:(fun () ->
-      (match orig_home with
-       | Some h -> Unix.putenv "HOME" h
-       | None -> ());
       try Sys.remove doc_path with
       | _ -> ())
     (fun () ->
-       let ctx = Tool_library.{ agent_name = "test-keeper" } in
-       (* Search *)
-       let search_result =
-         Tool_library.handle_search
-           ~tool_name:"test_tool"
-           ~start_time:0.0
-           ctx
-           (`Assoc [ "query", `String "mlfq" ])
-       in
-       check bool "search succeeds" true search_result.Tool_result.success;
-       check
-         bool
-         "search finds mlfq doc"
-         true
-         (let low = String.lowercase_ascii search_result.Tool_result.legacy_message in
-          String.length low > 0
-          && not (Tool_library.string_contains ~sub:"no documents" low));
-       (* Read *)
-       let read_result =
-         Tool_library.handle_read
-           ~tool_name:"test_tool"
-           ~start_time:0.0
-           ctx
-           (`Assoc [ "topic", `String "test-mlfq" ])
-       in
-       check bool "read succeeds" true read_result.Tool_result.success;
-       check
-         bool
-         "read contains MLFQ content"
-         true
-         (Tool_library.string_contains
-            ~sub:"Multi-Level Feedback Queue"
-            read_result.Tool_result.legacy_message))
+       with_env "MASC_BASE_PATH" base_path (fun () ->
+         let ctx = Tool_library.{ agent_name = "test-keeper" } in
+         (* Search *)
+         let search_result =
+           Tool_library.handle_search
+             ~tool_name:"test_tool"
+             ~start_time:0.0
+             ctx
+             (`Assoc [ "query", `String "mlfq" ])
+         in
+         check bool "search succeeds" true search_result.Tool_result.success;
+         check
+           bool
+           "search finds mlfq doc"
+           true
+           (let low = String.lowercase_ascii search_result.Tool_result.legacy_message in
+            String.length low > 0
+            && not (Tool_library.string_contains ~sub:"no documents" low));
+         (* Read *)
+         let read_result =
+           Tool_library.handle_read
+             ~tool_name:"test_tool"
+             ~start_time:0.0
+             ctx
+             (`Assoc [ "topic", `String "test-mlfq" ])
+         in
+         check bool "read succeeds" true read_result.Tool_result.success;
+         check
+           bool
+           "read contains MLFQ content"
+           true
+           (Tool_library.string_contains
+              ~sub:"Multi-Level Feedback Queue"
+              read_result.Tool_result.legacy_message)))
 ;;
 
 let test_library_search_empty_query () =
@@ -1242,6 +1325,10 @@ let () =
             "wrapper records keeper-internal calls"
             `Quick
             test_oas_wrapper_records_keeper_internal_tool_call
+        ; test_case
+            "OAS callbacks respect resource gate"
+            `Quick
+            test_oas_tool_callbacks_respect_resource_gate
         ] )
     ; ( "normalize_tool_result"
       , [ test_case "success JSON wraps under result" `Quick test_normalize_success_json

@@ -91,6 +91,7 @@ val make_keeper_tool_handler
   -> exec_cache:Masc_exec.Exec_cache.t option
   -> ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
   -> ?on_tool_called:(string -> unit)
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?translate_input:(Yojson.Safe.t -> Yojson.Safe.t)
   -> failure_counts:failure_counts
   -> unit
@@ -107,6 +108,7 @@ val make_tool_bundle
   -> ctx_snapshot:Keeper_types.working_context
   -> ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
   -> ?on_tool_called:(string -> unit)
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> unit
   -> tool_bundle
 
@@ -117,5 +119,6 @@ val make_tools
   -> ctx_snapshot:Keeper_types.working_context
   -> ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
   -> ?on_tool_called:(string -> unit)
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> unit
   -> Agent_sdk.Tool.t list

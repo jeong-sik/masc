@@ -402,7 +402,7 @@ let gate_timeout_message gate wait_timeout =
     gate.env_var
 ;;
 
-let with_permit ~clock ~tool_name ~arguments ~is_read_only ~start_time f =
+let with_permit_raw ~clock ~tool_name ~arguments ~is_read_only ~on_reject f =
   let resource_class = classify ~tool_name ~arguments ~is_read_only in
   if (not (enabled ())) || resource_class = Ungated
   then f ()
@@ -429,14 +429,25 @@ let with_permit ~clock ~tool_name ~arguments ~is_read_only ~start_time f =
         Atomic.incr gate.rejected_total;
         let message = gate_timeout_message gate wait_timeout in
         Log.Mcp.warn "tool resource gate rejected: tool=%s %s" tool_name message;
-        Tool_result.error
-          ~failure_class:(Some Tool_result.Transient_error)
-          ~tool_name
-          ~start_time
-          message)
+        on_reject message)
       else (
         Atomic.incr gate.acquired_total;
         Eio_guard.protect ~finally:(fun () -> Eio.Semaphore.release gate.semaphore) f))
+;;
+
+let with_permit ~clock ~tool_name ~arguments ~is_read_only ~start_time f =
+  with_permit_raw
+    ~clock
+    ~tool_name
+    ~arguments
+    ~is_read_only
+    ~on_reject:(fun message ->
+      Tool_result.error
+        ~failure_class:(Some Tool_result.Transient_error)
+        ~tool_name
+        ~start_time
+        message)
+    f
 ;;
 
 let gate_json gate =

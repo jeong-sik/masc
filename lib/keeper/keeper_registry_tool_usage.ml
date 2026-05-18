@@ -6,21 +6,28 @@ let record usage ~tool_name ~success ~now =
   let entry =
     match StringMap.find_opt tool_name usage with
     | Some entry -> entry
-    | None -> { count = 0; successes = 0; failures = 0; last_used_at = 0.0 }
+    | None ->
+      ({ count = 0; successes = 0; failures = 0; last_used_at = 0.0 }
+       : Keeper_types.tool_call_entry)
   in
   let updated =
-    { count = entry.count + 1
-    ; successes = (if success then entry.successes + 1 else entry.successes)
-    ; failures = (if success then entry.failures else entry.failures + 1)
-    ; last_used_at = now
-    }
+    ({ count = entry.count + 1
+     ; successes = (if success then entry.successes + 1 else entry.successes)
+     ; failures = (if success then entry.failures else entry.failures + 1)
+     ; last_used_at = now
+     }
+     : Keeper_types.tool_call_entry)
   in
   StringMap.add tool_name updated usage
 ;;
 
 let sorted usage =
-  StringMap.fold (fun name entry acc -> (name, entry) :: acc) usage []
-  |> List.sort (fun (_, left) (_, right) -> Int.compare right.count left.count)
+  StringMap.fold
+    (fun name (entry : Keeper_types.tool_call_entry) acc -> (name, entry) :: acc)
+    usage
+    []
+  |> List.sort (fun (_, (left : Keeper_types.tool_call_entry)) (_, right) ->
+    Int.compare right.count left.count)
 ;;
 
 let path ~base_path name =
@@ -76,7 +83,9 @@ let entry_of_json item =
   with
   | Some tool_name, Some count, Some successes, Some failures, Some last_used_at
     when tool_name <> "" ->
-    Some (tool_name, { count; successes; failures; last_used_at })
+    Some
+      ( tool_name
+      , ({ count; successes; failures; last_used_at } : Keeper_types.tool_call_entry) )
   | _ -> None
 ;;
 

@@ -76,6 +76,8 @@ include module type of Prometheus_runtime_metric_names
 
 include module type of Prometheus_core_metric_names
 
+val metric_open_fds : string
+val metric_fd_warn_threshold : string
 val metric_pool_idle_total : string
 val metric_pool_inflight_total : string
 val metric_pool_reuse_total : string

@@ -187,7 +187,7 @@ _list_unwrapped_dune_processes() {
         }
 
         function is_dune_subcommand(token) {
-          return token == "build" || token == "test" || token == "exec" || token == "runtest"
+          return token == "build" || token == "test" || token == "exec" || token == "runtest" || token == "clean"
         }
 
         function is_dune_option(token) {

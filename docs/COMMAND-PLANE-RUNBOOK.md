@@ -245,9 +245,9 @@ scripts/dune-local.sh build <target>
 The wrapper serializes local Dune builds across worktrees. Shared server
 startup (`start-masc-mcp.sh`), local production deploys, and the contract
 harness bootstrap also route rebuilds through this wrapper. A direct `dune
-build`, `dune test`, or `dune exec` bypasses that machine-wide lock and can
-recreate host-wide FD pressure even when every cooperative build uses
-`DUNE_JOBS=1`.
+build`, `dune test`, `dune exec`, or `dune clean` bypasses that machine-wide
+lock and can recreate host-wide FD pressure or mutate `_build` outside the
+shared lock even when every cooperative build uses `DUNE_JOBS=1`.
 
 Inspect live pressure and bypasses:
 

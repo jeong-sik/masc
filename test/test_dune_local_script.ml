@@ -406,6 +406,7 @@ if [ "${1:-}" = "ax" ]; then
  111 1 dune exec --root . test/test_config_dir_resolver.exe
  112 1 dune --root . build
  113 1 opam exec -- dune --build-dir _build test
+ 114 1 dune clean --root .
  222 333 dune build --root wrapped-worktree
  333 1 lockf -k /tmp/me-dune-local.lock /usr/bin/env MASC_DUNE_LOCK_HELD=1 scripts/dune-local.sh build
 PS
@@ -434,6 +435,8 @@ let test_bare_dune_bypass_aborts_before_dune () =
         (contains_substring stderr "dune --root . build");
       check bool "reports opam exec dune with leading global option" true
         (contains_substring stderr "opam exec -- dune --build-dir _build test");
+      check bool "reports bare dune clean" true
+        (contains_substring stderr "dune clean --root .");
       check bool "does not report wrapped child" false
         (contains_substring stderr "wrapped-worktree");
       check bool "dune was not invoked" false (Sys.file_exists dune_log))

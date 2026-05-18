@@ -34,6 +34,7 @@ type block_reason =
   | Process_substitution
   | Unsafe_redirect
   | Pipes_not_allowed
+  | Direct_dune_invocation
   | Command_not_allowed of string
 
 (** Render a {!block_reason} as the operator-visible error string
@@ -49,7 +50,7 @@ val block_reason_to_string_with_allowlist :
     passes a narrower allowlist than {!validate_command_coding}; otherwise
     the generic hint can name commands that the caller still rejects. *)
 
-(** The default dev allowlist (cat, cargo, dune, git, rg, …).  Used by
+(** The default dev allowlist (cat, cargo, dune-local.sh, git, rg, …).  Used by
     {!validate_command} internally; exposed so RFC-0092 Phase A's
     typed advisor ({!Shell_ir_validator.advise}) can mirror the legacy
     gate's allowlist for parity measurement.  Order is the source of
@@ -59,7 +60,9 @@ val dev_allowed_commands : string list
 
 (** Strict (allowlist + no shell metacharacters) validator used by the
     default [shell_exec] tool.  Rejects empty input, chaining, and any
-    command outside the dev allowlist (rg / grep / dune / git / ...). *)
+    command outside the dev allowlist (rg / grep / dune-local.sh / git / ...).
+    Bare [dune] is intentionally rejected; local agents must use
+    [scripts/dune-local.sh] so builds share the host-wide lock. *)
 val validate_command : string -> (unit, block_reason) result
 
 (** Relaxed validator for Coding/Full preset keepers.  Allows pipes
@@ -105,7 +108,7 @@ val existing_dir_path_values : string -> string list
 
 (** [true] iff the command performs a write/mutating operation
     (git push/commit, dune clean, npm publish, mv, cp, mkdir,
-    chmod, ...).  Read-only commands (git status, dune build, rg)
+    chmod, ...).  Read-only commands (git status, rg)
     return [false]. *)
 val is_write_operation : string -> bool
 

@@ -1090,6 +1090,8 @@ let handle_keeper_bash
              op=\"gh\" (e.g. keeper_shell op=gh cmd=\"pr list --state open\")."
           | Chain_or_redirect | Pipes_not_allowed | Unsafe_redirect ->
             "Use separate tool calls instead of chaining. Call keeper_bash once per command."
+          | Direct_dune_invocation ->
+            "Use scripts/dune-local.sh instead of bare dune so local builds share the machine-wide lock."
           | Injection | Process_substitution ->
             "Avoid shell metacharacters. Use keeper_shell with a specific op (rg, find, ls) instead."
           | Command_not_allowed _ ->
@@ -1107,6 +1109,10 @@ let handle_keeper_bash
           | Chain_or_redirect | Pipes_not_allowed | Unsafe_redirect ->
             [ "Break the pipeline into separate keeper_bash calls."
             ; "Save intermediate output to a file, then process it in the next call."
+            ]
+          | Direct_dune_invocation ->
+            [ "Run scripts/dune-local.sh build <target> from the repo root."
+            ; "Do not run bare dune build/test/exec in local agent shells."
             ]
           | Injection | Process_substitution ->
             [ "Use keeper_shell with a specific op (rg, find, ls) for structured queries."

@@ -196,7 +196,7 @@ let bash_public_schema =
         "command"
         "string"
         "The shell command to execute. Single command only. No chaining (&&, ||, ;), \
-         pipes (|), or redirects (>, >>). Example: 'dune build', 'rg pattern lib/'."
+         pipes (|), or redirects (>, >>). Example: 'scripts/dune-local.sh build', 'rg pattern lib/'."
     ; property
         "description"
         "string"

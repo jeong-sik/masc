@@ -240,6 +240,14 @@ let diagnosis_of_block_reason reason =
                 Some "Run the first command, then pipe the output into \
                       the second keeper_bash call."
             ; tool_suggestion = None }
+  | Worker_dev_tools.Direct_dune_invocation ->
+      Some { Exec_core.rule_id = "direct_dune_blocked"
+            ; explanation =
+                "Bare dune bypasses scripts/dune-local.sh and can create \
+                 concurrent local builds that exhaust host file descriptors."
+            ; rewrite =
+                Some "Run scripts/dune-local.sh build <target> from the repo root."
+            ; tool_suggestion = Some "keeper_bash" }
   | Worker_dev_tools.Unsafe_redirect ->
       Some { Exec_core.rule_id = "command_redirect_blocked"
             ; explanation =

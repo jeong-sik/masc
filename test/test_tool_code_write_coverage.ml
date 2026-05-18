@@ -393,7 +393,8 @@ let test_validate_code_shell_command_allows_pipe () =
      against the allowlist; dangerous metacharacters remain blocked. *)
   check (result unit string) "piped allowlisted commands accepted"
     (Ok ())
-    (Tool_code_write.validate_code_shell_command "dune build 2>&1 | tail -5")
+    (Tool_code_write.validate_code_shell_command
+       "scripts/dune-local.sh build 2>&1 | tail -5")
 
 let test_validate_code_shell_command_rejects_pipe_to_disallowed () =
   match
@@ -403,9 +404,17 @@ let test_validate_code_shell_command_rejects_pipe_to_disallowed () =
   | Ok () ->
       fail "expected pipe-to-disallowed-command to be rejected by allowlist"
 
-let test_validate_code_shell_command_allows_direct_build () =
-  check (result unit string) "direct build allowed" (Ok ())
-    (Tool_code_write.validate_code_shell_command "dune build 2>&1")
+let test_validate_code_shell_command_allows_dune_local_build () =
+  check (result unit string) "dune-local build allowed" (Ok ())
+    (Tool_code_write.validate_code_shell_command
+       "scripts/dune-local.sh build 2>&1")
+
+let test_validate_code_shell_command_rejects_direct_dune () =
+  match Tool_code_write.validate_code_shell_command "dune build 2>&1" with
+  | Error reason ->
+      check bool "reason mentions dune-local" true
+        (msg_contains ~needle:"scripts/dune-local.sh" reason)
+  | Ok () -> fail "expected bare dune to be rejected"
 
 let test_validate_code_shell_command_allows_grep () =
   check (result unit string) "grep allowed" (Ok ())
@@ -849,8 +858,10 @@ let () =
         test_validate_code_shell_command_allows_pipe;
       test_case "rejects pipe to disallowed command" `Quick
         test_validate_code_shell_command_rejects_pipe_to_disallowed;
-      test_case "allows direct build" `Quick
-        test_validate_code_shell_command_allows_direct_build;
+      test_case "allows dune-local build" `Quick
+        test_validate_code_shell_command_allows_dune_local_build;
+      Alcotest.test_case "rejects direct dune" `Quick
+        test_validate_code_shell_command_rejects_direct_dune;
       test_case "allows grep" `Quick
         test_validate_code_shell_command_allows_grep;
       test_case "uses code shell allowlist hint" `Quick

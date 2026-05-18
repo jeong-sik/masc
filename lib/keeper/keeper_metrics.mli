@@ -86,6 +86,7 @@ type t =
   | TraceEmitFailures
   | TransitionAuditFailures
   | ExecutionReceiptFailures
+  | OperatorBroadcastSuppressed
   | LlmBridgeFailures
   | SessionCleanupFailures
   | ShellBashFailures
@@ -367,6 +368,7 @@ val metric_keeper_tag_dispatch_failures : string
 val metric_keeper_trace_emit_failures : string
 val metric_keeper_transition_audit_failures : string
 val metric_keeper_execution_receipt_failures : string
+val metric_keeper_operator_broadcast_suppressed : string
 val metric_keeper_llm_bridge_failures : string
 val metric_keeper_shell_bash_failures : string
 val metric_keeper_rollover_failures : string

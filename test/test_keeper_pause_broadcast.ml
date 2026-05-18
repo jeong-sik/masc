@@ -441,6 +441,37 @@ let string_list_member name json =
   json |> U.member name |> U.to_list |> List.map U.to_string
 ;;
 
+let temp_dir prefix =
+  let dir = Filename.temp_file (prefix ^ "-") "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+;;
+
+let cleanup_dir dir =
+  let rec rm path =
+    if Sys.file_exists path
+    then
+      if Sys.is_directory path
+      then (
+        Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
+        Unix.rmdir path)
+      else Unix.unlink path
+  in
+  try rm dir with
+  | _ -> ()
+;;
+
+let operator_broadcast_event_count config =
+  Activity_graph.list_events
+    config
+    ~kinds:[ "keeper.operator_broadcast_required" ]
+    ~after_seq:0
+    ~limit:20
+    ()
+  |> List.length
+;;
+
 let test_receipt_json_redacts_provider_model_identity () =
   let receipt =
     { (mk_receipt ())
@@ -466,6 +497,61 @@ let test_receipt_json_redacts_provider_model_identity () =
     "runtime contract model redacted"
     true
     (json |> U.member "runtime_contract" |> U.member "model" = `Null)
+;;
+
+let test_turn_livelock_broadcast_suppresses_duplicate_turn () =
+  Eio_main.run
+  @@ fun _env ->
+  let base_dir = temp_dir "masc-test-livelock-broadcast-dedupe" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+       let config = Masc_mcp.Coord.default_config base_dir in
+       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "test-operator"));
+       let keeper_name = "test-livelock-broadcast-dedupe-keeper" in
+       let suppression_before =
+         Masc_mcp.Prometheus.metric_value_or_zero
+           Masc_mcp.Keeper_metrics.metric_keeper_operator_broadcast_suppressed
+           ~labels:[ "keeper", keeper_name; "reason", "turn_livelock_blocked" ]
+           ()
+       in
+       let receipt =
+         { (mk_receipt
+              ~terminal_reason_code:
+                "turn_livelock:attempts_exhausted attempts=3 max_attempts=3"
+              ~tool_contract_result:Contract_satisfied_completion
+              ~tools_used:[ "keeper_task_submit_for_verification" ]
+              ~error_kind:(Some (R.error_kind_of_string "turn_livelock_blocked"))
+              ())
+           with
+           keeper_name
+         ; agent_name = "test-livelock-broadcast-dedupe-agent"
+         ; trace_id = "trace-livelock-dedupe-1"
+         ; generation = 7
+         ; turn_count = Some 605
+         ; current_task_id = Some "task-livelock-dedupe"
+         }
+       in
+       R.append config receipt;
+       check int "first livelock receipt emits" 1 (operator_broadcast_event_count config);
+       R.append config { receipt with trace_id = "trace-livelock-dedupe-2" };
+       check
+         int
+         "duplicate livelock receipt is suppressed"
+         1
+         (operator_broadcast_event_count config);
+       check
+         (float 0.0001)
+         "suppression metric increments"
+         (suppression_before +. 1.0)
+         (Masc_mcp.Prometheus.metric_value_or_zero
+            Masc_mcp.Keeper_metrics.metric_keeper_operator_broadcast_suppressed
+            ~labels:[ "keeper", keeper_name; "reason", "turn_livelock_blocked" ]
+            ());
+       R.append
+         config
+         { receipt with trace_id = "trace-livelock-dedupe-3"; turn_count = Some 606 };
+       check int "new turn emits again" 2 (operator_broadcast_event_count config))
 ;;
 
 let test_broadcast_payload_carries_turn_diagnostics () =
@@ -793,6 +879,10 @@ let () =
             "all 3 broadcast paths reachable"
             `Quick
             test_each_broadcast_disp_is_reachable
+        ; test_case
+            "turn livelock duplicate broadcast is coalesced"
+            `Quick
+            test_turn_livelock_broadcast_suppresses_duplicate_turn
         ; test_case
             "receipt JSON redacts provider/model identity"
             `Quick

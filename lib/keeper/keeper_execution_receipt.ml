@@ -816,22 +816,27 @@ let to_json (receipt : t) =
      PauseHuman / StaleRunning  -> [needs_operator_broadcast]
                                   returns [true] for "pause_human",
                                   "alert_exhausted", "unknown".
-     OperatorBroadcast event    -> [emit_operator_broadcast]
-                                  emits "keeper.operator_broadcast_required.v1"
-                                  with structured payload.
-     Eventually-emit liveness   -> [append] calls the emit
-                                  unconditionally when
-                                  [needs_operator_broadcast] is true,
-                                  inside a [try] so a single failure
-                                  does not cascade — the spec's clean
-                                  model.
+     OperatorBroadcast event    -> [append] emits
+                                  "keeper.operator_broadcast_required.v1"
+                                  with structured payload. Repeated
+                                  turn-livelock receipts for the same
+                                  keeper/turn/reason are coalesced after
+                                  the first event; the receipt itself is
+                                  still persisted.
+     Eventually-emit liveness   -> [append] calls the emit when
+                                  [needs_operator_broadcast] is true and
+                                  the receipt is not a duplicate livelock
+                                  notification, inside a [try] so a single
+                                  failure does not cascade — the spec's
+                                  clean model.
 
-   Bug model (would be violated if a future refactor wrapped emit
-   in a conditional that could silently skip): an OperatorBroadcast
-   path that requires manual operator dispatch instead of automatic
-   emit would re-create the original #fleet-stall bug.  Sibling
-   anchor in [keeper_supervisor.ml] (StaleRunning watchdog +
-   emit_stale_keeper_broadcast) is deferred to a separate cycle. *)
+   Bug model (would be violated if a future refactor dropped the first
+   emit for a broadcast-worthy state, or skipped without the suppression
+   metric): an OperatorBroadcast path that requires manual operator
+   dispatch instead of automatic emit would re-create the original
+   #fleet-stall bug.  Sibling anchor in [keeper_supervisor.ml]
+   (StaleRunning watchdog + emit_stale_keeper_broadcast) is deferred to
+   a separate cycle. *)
 let needs_operator_broadcast = function
   | Disp_pause_human | Disp_alert_exhausted | Disp_unknown -> true
   | Disp_pass
@@ -839,6 +844,48 @@ let needs_operator_broadcast = function
   | Disp_pass_next_model
   | Disp_user_cancelled
   | Disp_skipped -> false
+;;
+
+let operator_broadcast_dedupe_mu = Eio.Mutex.create ()
+let operator_broadcast_dedupe_by_keeper : (string, string) Hashtbl.t =
+  Hashtbl.create 16
+;;
+
+let operator_broadcast_key_part = function
+  | Some value -> value
+  | None -> "-"
+;;
+
+let operator_broadcast_turn_key = function
+  | Some value -> string_of_int value
+  | None -> "-"
+;;
+
+let operator_broadcast_dedupe_key receipt ~disposition ~reason =
+  String.concat
+    "\000"
+    [ receipt.keeper_name
+    ; receipt.agent_name
+    ; string_of_int receipt.generation
+    ; operator_broadcast_turn_key receipt.turn_count
+    ; operator_broadcast_key_part receipt.current_task_id
+    ; operator_disposition_kind_to_string disposition
+    ; operator_disposition_reason_to_string reason
+    ; receipt.terminal_reason_code
+    ]
+;;
+
+let should_emit_operator_broadcast receipt ~disposition ~reason =
+  match reason with
+  | Reason_turn_livelock_blocked ->
+    let key = operator_broadcast_dedupe_key receipt ~disposition ~reason in
+    Eio.Mutex.use_rw ~protect:true operator_broadcast_dedupe_mu (fun () ->
+      match Hashtbl.find_opt operator_broadcast_dedupe_by_keeper receipt.keeper_name with
+      | Some previous_key when String.equal previous_key key -> false
+      | _ ->
+        Hashtbl.replace operator_broadcast_dedupe_by_keeper receipt.keeper_name key;
+        true)
+  | _ -> true
 ;;
 
 let operator_broadcast_payload (receipt : t) ~disposition ~reason =
@@ -967,22 +1014,37 @@ let append (config : Coord.config) (receipt : t) =
   let disposition, reason = operator_disposition receipt in
   if needs_operator_broadcast disposition
   then (
-    try emit_operator_broadcast config receipt ~disposition ~reason with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      (* fail-closed: log loud, do not silently swallow. The append itself
-         has already persisted the receipt; the broadcast failure is its
-         own diagnostic that watchdogs/log alerts will pick up. *)
+    let disposition_s = operator_disposition_kind_to_string disposition in
+    let reason_s = operator_disposition_reason_to_string reason in
+    if should_emit_operator_broadcast receipt ~disposition ~reason
+    then (
+      try emit_operator_broadcast config receipt ~disposition ~reason with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        (* fail-closed: log loud, do not silently swallow. The append itself
+           has already persisted the receipt; the broadcast failure is its
+           own diagnostic that watchdogs/log alerts will pick up. *)
+        Prometheus.inc_counter
+          Keeper_metrics.metric_keeper_execution_receipt_failures
+          ~labels:[ "keeper", receipt.keeper_name; "site", Keeper_execution_receipt_failure_site.(to_label Emit_failed) ]
+          ();
+        Log.Keeper.error
+          "%s: operator_broadcast_required EMIT FAILED disposition=%s reason=%s exn=%s"
+          receipt.keeper_name
+          disposition_s
+          reason_s
+          (Printexc.to_string exn))
+    else (
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_execution_receipt_failures
-        ~labels:[ "keeper", receipt.keeper_name; "site", Keeper_execution_receipt_failure_site.(to_label Emit_failed) ]
+        Keeper_metrics.metric_keeper_operator_broadcast_suppressed
+        ~labels:[ "keeper", receipt.keeper_name; "reason", reason_s ]
         ();
-      Log.Keeper.error
-        "%s: operator_broadcast_required EMIT FAILED disposition=%s reason=%s exn=%s"
+      Log.Keeper.info
+        "%s: operator_broadcast_required suppressed duplicate disposition=%s reason=%s turn=%s"
         receipt.keeper_name
-        (operator_disposition_kind_to_string disposition)
-        (operator_disposition_reason_to_string reason)
-        (Printexc.to_string exn))
+        disposition_s
+        reason_s
+        (operator_broadcast_turn_key receipt.turn_count)))
 ;;
 
 (* Watchdog-driven broadcast (#fleet-stall 2026-04-26 Step 3): emitted by a

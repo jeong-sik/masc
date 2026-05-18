@@ -1,6 +1,10 @@
 import { signal } from '@preact/signals'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BoardPost, BoardSortMode, RouteState } from './types'
+import {
+  DASHBOARD_PUSH_SLICES,
+  type DashboardPushSlice,
+} from './dashboard-slices'
 
 void vi
 
@@ -470,6 +474,35 @@ describe('setupSSEReaction reconnect hydration', () => {
       count: 0,
       snapshots: [],
     })
+  })
+
+  it('handles every dashboard push slice advertised to route subscriptions', async () => {
+    const { sseStore } = await loadSseStore()
+    const payloads: Record<DashboardPushSlice, unknown> = {
+      shell: { counts: { agents: 1, tasks: 2, keepers: 3 } },
+      namespace: { root: { status: { project: 'default' } } },
+      transport: { transports: [] },
+      execution: { agents: [], tasks: [], messages: [], keepers: [] },
+      goals: {
+        planning: { goals: [], generated_at: 'now' },
+        tree: { tree: [], summary: { total_goals: 0 } },
+      },
+      board: { posts: [], generated_at: 'now' },
+      composite: { generated_at: 1, count: 0, snapshots: [] },
+      operator: { snapshot: { keepers: [] }, digest: { target_type: 'namespace' } },
+    }
+
+    for (const slice of DASHBOARD_PUSH_SLICES) {
+      expect(() => sseStore.hydrateDashboardSlice(slice, payloads[slice])).not.toThrow()
+    }
+
+    expect(hydrateShellSnapshot).toHaveBeenCalledWith(
+      payloads.shell,
+      { light: true },
+    )
+    expect(hydrateExecutionSnapshot).toHaveBeenCalledWith(payloads.execution)
+    expect(hydrateBoardSnapshot).toHaveBeenCalledWith(payloads.board)
+    expect(hydrateFleetCompositeSnapshot).toHaveBeenCalledWith(payloads.composite)
   })
 
   it('routes websocket dashboard delta event types without treating payloads as snapshots', async () => {

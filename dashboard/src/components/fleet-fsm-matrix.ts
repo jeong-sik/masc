@@ -309,12 +309,17 @@ function executionEvidence(snapshot: KeeperCompositeSnapshot): string[] {
   return parts
 }
 
+// `execution.outcome` wire format is the TLA-prefix form
+// ('receipt_done' / 'receipt_skipped' / 'receipt_failed' /
+//  'receipt_cancelled') emitted by `outcome_kind_to_tla_receipt`
+// (lib/keeper/keeper_execution_receipt.ml:24-29). Prior short-form
+// compares ('error' / 'ok') were dead in production.
 function hasBlockingExecutionEvidence(snapshot: KeeperCompositeSnapshot): boolean {
   const execution = snapshot.execution
   if (!execution) return false
   if (hasPreviousTurnExecutionReceipt(snapshot)) return false
   if (execution.operator_disposition === 'pause_human') return true
-  if (execution.outcome === 'error') return true
+  if (execution.outcome === 'receipt_failed') return true
   if (execution.terminal_reason_code && execution.terminal_reason_code !== 'completed') return true
   if (execution.tool_contract_result === 'missing_required_tool_use') return true
   if (execution.tool_contract_result === 'unknown' && execution.error != null) return true
@@ -393,7 +398,8 @@ function hasHealthyExecutionEvidence(snapshot: KeeperCompositeSnapshot): boolean
   const execution = snapshot.execution
   if (!execution || hasBlockingExecutionEvidence(snapshot)) return false
   if (execution.latest_receipt_present !== true) return false
-  if (execution.outcome === 'ok') return true
+  // TLA-prefix wire format — see `hasBlockingExecutionEvidence` comment above.
+  if (execution.outcome === 'receipt_done' || execution.outcome === 'receipt_skipped') return true
   if (execution.terminal_reason_code === 'completed') return true
   if (execution.tool_contract_result?.startsWith('satisfied')) return true
   return false
@@ -437,8 +443,8 @@ function blockingCause(snapshot: KeeperCompositeSnapshot): string {
   if (execution.error?.kind) {
     parts.push(`error: ${execution.error.kind}`)
   }
-  if (execution.outcome === 'error' && parts.length === 0) {
-    parts.push('execution outcome: error')
+  if (execution.outcome === 'receipt_failed' && parts.length === 0) {
+    parts.push('execution outcome: receipt_failed')
   }
   return parts.length > 0 ? parts.join(' · ') : 'blocking execution evidence present'
 }

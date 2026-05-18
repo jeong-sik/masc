@@ -29,15 +29,25 @@ export function turnFsmChipTone(tone: TurnChipTone): StatusChipTone {
   }
 }
 
+// `execution.outcome` wire format on the composite snapshot is the
+// TLA-prefix form emitted by `outcome_kind_to_tla_receipt`
+// (lib/keeper/keeper_execution_receipt.ml:24-29):
+//   `Ok        -> "receipt_done"
+//   `Skipped   -> "receipt_skipped"
+//   `Error     -> "receipt_failed"
+//   `Cancelled -> "receipt_cancelled"
+// The TLA ReceiptIsAuthoritative invariant fixes this canonical form
+// (keeper_execution_receipt.ml:54-58). The prior branches used short
+// forms the backend never emits on this field, so every receipt tone
+// fell through to 'neutral' regardless of actual outcome.
 export function terminalTone(outcome: string | null | undefined): 'neutral' | 'ok' | 'warn' | 'err' {
   switch (outcome) {
-    case 'done':
-    case 'skipped':
+    case 'receipt_done':
+    case 'receipt_skipped':
       return 'ok'
-    case 'cancelled':
+    case 'receipt_cancelled':
       return 'warn'
-    case 'failed':
-    case 'error':
+    case 'receipt_failed':
       return 'err'
     default:
       return 'neutral'

@@ -10,6 +10,7 @@
 
 module Coord = Masc_mcp.Coord
 module Keeper_exec_shell = Masc_mcp.Keeper_exec_shell
+module Keeper_exec_tools = Masc_mcp.Keeper_exec_tools
 module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_sandbox_factory = Masc_mcp.Keeper_sandbox_factory
@@ -678,6 +679,48 @@ let test_bash_git_creds_uses_oneshot_with_turn_runtime () =
   in
   check_line_contains "one-shot run mounted GH identity bundle" log
     (gh_config_mount_spec root_gh_dir)
+
+let test_bash_git_creds_missing_bundle_is_structured_blocker () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  ensure_dir repo;
+  run_ok ~cwd:repo "git init -q";
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:(`Assoc [ ("cmd", `String "git status"); ("cwd", `String playground) ])
+      ()
+  in
+  Alcotest.(check (option bool)) "credential blocker is not ok" (Some false)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option string)) "typed credential blocker"
+    (Some "keeper_github_credential_blocked")
+    (parse_string_field raw "error");
+  Alcotest.(check (option string)) "workflow rejection skips breaker"
+    (Some "workflow_rejection")
+    (parse_string_field raw "failure_class");
+  Alcotest.(check (option bool)) "not retryable" (Some false)
+    (parse_bool_field raw "retryable");
+  Alcotest.(check bool) "detail carries credential provider error" true
+    (response_mentions raw "detail" "Missing_bundle");
+  Alcotest.(check bool) "keeper circuit breaker does not own this blocker" false
+    (Keeper_exec_tools.should_apply_circuit_breaker_to_failure_payload raw);
+  let log = if Sys.file_exists log_path then read_file log_path else "" in
+  Alcotest.(check bool) "credential blocker avoids docker run" false
+    (contains_substring log "run --rm")
 
 let test_bash_git_c_option_missing_dir_blocks_before_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
@@ -1766,6 +1809,9 @@ let () =
           Alcotest.test_case
             "docker keeper bash git creds bypass warm turn runtime"
             `Quick test_bash_git_creds_uses_oneshot_with_turn_runtime;
+          Alcotest.test_case
+            "docker keeper bash git creds missing bundle is structured blocker"
+            `Quick test_bash_git_creds_missing_bundle_is_structured_blocker;
           Alcotest.test_case
             "docker keeper git -C missing dir blocks before docker"
             `Quick test_bash_git_c_option_missing_dir_blocks_before_docker;

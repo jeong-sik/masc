@@ -54,8 +54,9 @@ val parse_playground_repo_path
     Used by the keeper write path so files keepers edit inside their
     per-keeper repo clones map to the same canonical-URL bucket as
     files in the user's working tree. Returns [None] when [abs_path]
-    is not absolute, not under [base_path], or does not contain a
-    [repos/<id>/...] anchor inside the [.masc/playground/] subtree. *)
+    is not absolute, not under [base_path], not anchored at the
+    base-relative [.masc/playground/] root, or does not match one of
+    the accepted structural layouts. *)
 
 (** {1 Worktree Naming}
 

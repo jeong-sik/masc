@@ -141,6 +141,29 @@ let test_strip_no_traversal () =
   check bool "no backslash in result" true
     (not (String.contains result '\\'))
 
+let test_parse_playground_repo_path () =
+  let base_path = "/tmp/masc-base" in
+  let parse rel =
+    PP.parse_playground_repo_path
+      ~base_path
+      ~abs_path:(Filename.concat base_path rel)
+  in
+  check (option (pair string string)) "local sandbox path"
+    (Some ("masc-mcp", "lib/foo.ml"))
+    (parse ".masc/playground/sangsu/repos/masc-mcp/lib/foo.ml");
+  check (option (pair string string)) "docker sandbox path"
+    (Some ("masc-mcp", "lib/foo.ml"))
+    (parse ".masc/playground/docker/sangsu/repos/masc-mcp/lib/foo.ml");
+  check (option (pair string string)) "keeper named repos"
+    (Some ("masc-mcp", "lib/foo.ml"))
+    (parse ".masc/playground/repos/repos/masc-mcp/lib/foo.ml");
+  check (option (pair string string)) "docker keeper named repos"
+    (Some ("masc-mcp", "lib/foo.ml"))
+    (parse ".masc/playground/docker/repos/repos/masc-mcp/lib/foo.ml");
+  check (option (pair string string)) "nested repo-local pattern is not sandbox"
+    None
+    (parse "workspace/repo/.masc/playground/sangsu/repos/masc-mcp/lib/foo.ml")
+
 let test_worktree_dir_name () =
   check string "basic worktree dir"
     "sangsu-fix-bug"
@@ -180,6 +203,9 @@ let () =
         test_case "both forms produce identical paths" `Quick test_canonical_short_path_identity;
         test_case "edge cases" `Quick test_strip_edge_cases;
         test_case "strip does not create traversal" `Quick test_strip_no_traversal;
+      ]);
+      ("parse", [
+        test_case "parse playground repo path" `Quick test_parse_playground_repo_path;
       ]);
       ("worktree_naming", [
         test_case "worktree_dir_name" `Quick test_worktree_dir_name;

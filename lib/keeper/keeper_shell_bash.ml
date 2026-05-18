@@ -1053,6 +1053,7 @@ let handle_keeper_bash
     else
       let local_reason =
         if Env_config_keeper.KeeperSandbox.hard_mode () then "hard_mode_local"
+        else if meta.sandbox_profile = Local then "declared_local_profile"
         else if not (Env_config_keeper.DockerPlayground.enabled) then
           "playground_disabled"
         else "outside_playground"

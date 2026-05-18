@@ -629,8 +629,6 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
           in
           let effective_sandbox_image =
             if m.sandbox_profile = Keeper_types.Docker
-               || (m.sandbox_profile = Keeper_types.Local
-                   && Env_config_keeper.DockerPlayground.enabled)
             then
               Some (
                 match m.sandbox_image with
@@ -1599,8 +1597,6 @@ let keeper_config_json (config : Coord.config) (name : string)
       in
       let effective_sandbox_image =
         if m.sandbox_profile = Keeper_types.Docker
-           || (m.sandbox_profile = Keeper_types.Local
-               && Env_config_keeper.DockerPlayground.enabled)
         then Some (Env_config_keeper.KeeperSandbox.docker_image ())
         else None
       in

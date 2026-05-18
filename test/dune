@@ -13,8 +13,9 @@
    (GRAPHQL_API_KEY "")
    (ZAI_API_KEY "")
    (MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED false)
-   ; Docker playground upgrades Local→Docker in effective_sandbox_profile.
-   ; Disable to ensure keeper_bash tests run through the local path.
+   ; Standard tests keep the Docker playground disabled. A dedicated
+   ; regression test below pins that sandbox_profile=local still resolves
+   ; to local even when MASC_KEEPER_DOCKER_PLAYGROUND=true.
    (MASC_KEEPER_DOCKER_PLAYGROUND false))))
 
 ; All standard tests share the masc_test_deps wrapper library
@@ -2246,6 +2247,16 @@
 (test
  (name test_success_model_attribution)
  (modules test_success_model_attribution)
+ (libraries masc_test_deps))
+
+; Regression for local-overrotation: public Bash / keeper_bash must not route
+; sandbox_profile=local through Docker merely because DockerPlayground is on.
+(test
+ (name test_keeper_local_profile_docker_playground)
+ (modules test_keeper_local_profile_docker_playground)
+ (action
+  (setenv MASC_KEEPER_DOCKER_PLAYGROUND true
+   (run %{test})))
  (libraries masc_test_deps))
 
 (include stanzas/test_tool_resource_gate.inc)

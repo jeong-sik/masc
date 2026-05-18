@@ -491,6 +491,31 @@ module KeeperKeepalive = struct
       (Float.min 600.0 (get_float ~default:120.0 "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"))
   ;;
 
+  (** Total HTTP body-consumption deadline for one OAS streaming call.
+      Wraps the body callback in [Eio.Time.with_timeout_exn] in agent_sdk;
+      on expiry [Retry.Timeout] surfaces and cascade falls forward to the
+      next provider at the attempt boundary. Complements
+      [stream_idle_timeout_sec] (which only caps inter-line silence):
+      this catches the case where a single bulk read hangs without
+      producing line breaks.
+
+      Opt-in: unset env leaves [None] so {!Cascade_agent_context} skips
+      the builder wiring. Set to a value strictly less than the per-call
+      turn cap (e.g. 240–540s when [oas_timeout_sec] is 300–600s) for
+      attempt-level fall-forward; set [<= stream_idle_timeout_sec] for a
+      strict overall cap.
+
+      Env: [MASC_KEEPER_BODY_TIMEOUT_SEC]. Default: unset → [None].
+      Range when set: [10, 600]. *)
+  let body_timeout_sec_override =
+    match Env_config_core.raw_value_opt "MASC_KEEPER_BODY_TIMEOUT_SEC" with
+    | Some raw ->
+      (match Float.of_string_opt (String.trim raw) with
+       | Some v -> Some (Float.max 10.0 (Float.min 600.0 v))
+       | None -> None)
+    | None -> None
+  ;;
+
   (** Stdout-idle timeout for CLI subprocess transports (Kimi CLI today;
       Claude Code / Gemini CLI / Codex CLI need an OAS upstream change to
       expose [stdout_idle_timeout_s] in their transport configs).

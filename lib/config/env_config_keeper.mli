@@ -185,6 +185,17 @@ module KeeperKeepalive : sig
   val oas_timeout_for_estimated_input_tokens : estimated_input_tokens:int -> float
   val oas_timeout_sec : float
   val stream_idle_timeout_sec : float
+
+  val body_timeout_sec_override : float option
+  (** Total HTTP body-consumption deadline for one OAS streaming call.
+      [None] (env unset) leaves the cascade builder wire untouched.
+      [Some s] forwards to [Builder.with_body_timeout]; on expiry
+      [Retry.Timeout] surfaces at the attempt boundary so cascade falls
+      forward to the next provider. Complements {!stream_idle_timeout_sec}
+      (inter-line silence cap) and [max_execution_time_s] (turn-total cap).
+
+      Env: [MASC_KEEPER_BODY_TIMEOUT_SEC]. Clamp range: [10, 600] s. *)
+
   val idle_skip_threshold : int
 end
 

@@ -288,7 +288,7 @@ let test_apply_drain_fiber_death () =
     apply_ok
       ~current_phase:SM.Draining
       ~conditions:draining_conds
-      ~event:(SM.Fiber_terminated { outcome = "exception during drain" })
+      ~event:(SM.Fiber_terminated { outcome = "exception during drain"; provider_id = None; http_status = None })
   in
   check phase_t "Draining + fiber death -> Crashed" SM.Crashed tr.new_phase
 ;;
@@ -302,7 +302,7 @@ let test_apply_drain_complete_then_fiber_exit () =
     apply_ok
       ~current_phase:SM.Draining
       ~conditions:drain_done_conds
-      ~event:(SM.Fiber_terminated { outcome = "clean exit" })
+      ~event:(SM.Fiber_terminated { outcome = "clean exit"; provider_id = None; http_status = None })
   in
   check phase_t "drain complete + fiber exit -> Stopped" SM.Stopped tr.new_phase
 ;;
@@ -314,7 +314,7 @@ let test_apply_failing_to_crashed () =
     apply_ok
       ~current_phase:SM.Failing
       ~conditions:failing_conds
-      ~event:(SM.Fiber_terminated { outcome = "fatal" })
+      ~event:(SM.Fiber_terminated { outcome = "fatal"; provider_id = None; http_status = None })
   in
   check phase_t "Failing + fiber death -> Crashed" SM.Crashed tr.new_phase
 ;;
@@ -336,7 +336,7 @@ let test_apply_fiber_terminated_crash () =
     apply_ok
       ~current_phase:SM.Running
       ~conditions:running_conditions
-      ~event:(SM.Fiber_terminated { outcome = "exception" })
+      ~event:(SM.Fiber_terminated { outcome = "exception"; provider_id = None; http_status = None })
   in
   (* fiber_alive=false + budget_remaining=true + backoff not elapsed = Crashed *)
   check phase_t "-> Crashed" SM.Crashed tr.new_phase;
@@ -412,7 +412,7 @@ let test_apply_compacting_to_crashed () =
     apply_ok
       ~current_phase:SM.Compacting
       ~conditions:compacting_conds
-      ~event:(SM.Fiber_terminated { outcome = "crash during compaction" })
+      ~event:(SM.Fiber_terminated { outcome = "crash during compaction"; provider_id = None; http_status = None })
   in
   check phase_t "Compacting + fiber death -> Crashed" SM.Crashed tr.new_phase
 ;;
@@ -424,7 +424,7 @@ let test_apply_handingoff_to_crashed () =
     apply_ok
       ~current_phase:SM.HandingOff
       ~conditions:handoff_conds
-      ~event:(SM.Fiber_terminated { outcome = "crash during handoff" })
+      ~event:(SM.Fiber_terminated { outcome = "crash during handoff"; provider_id = None; http_status = None })
   in
   check phase_t "HandingOff + fiber death -> Crashed" SM.Crashed tr.new_phase
 ;;
@@ -451,7 +451,7 @@ let test_apply_restarting_to_crashed () =
     apply_ok
       ~current_phase:SM.Restarting
       ~conditions:restarting_conds
-      ~event:(SM.Fiber_terminated { outcome = "restart failed" })
+      ~event:(SM.Fiber_terminated { outcome = "restart failed"; provider_id = None; http_status = None })
   in
   check phase_t "Restarting + fiber death -> Crashed" SM.Crashed tr.new_phase
 ;;
@@ -1076,7 +1076,7 @@ let test_chain_crash_recovery () =
       ~init_conditions:running_conditions
       [ SM.Heartbeat_failed { consecutive = 3; max_allowed = 5 }, SM.Failing
       ; SM.Heartbeat_failed { consecutive = 5; max_allowed = 5 }, SM.Failing
-      ; SM.Fiber_terminated { outcome = "hb threshold exceeded" }, SM.Crashed
+      ; SM.Fiber_terminated { outcome = "hb threshold exceeded"; provider_id = None; http_status = None }, SM.Crashed
       ; SM.Supervisor_restart_attempt { attempt = 1 }, SM.Restarting
       ; SM.Fiber_started, SM.Running
       ; SM.Heartbeat_ok, SM.Running
@@ -1093,13 +1093,13 @@ let test_chain_death_spiral () =
     chain_apply
       ~init_phase:SM.Running
       ~init_conditions:running_conditions
-      [ SM.Fiber_terminated { outcome = "OOM" }, SM.Crashed
+      [ SM.Fiber_terminated { outcome = "OOM"; provider_id = None; http_status = None }, SM.Crashed
       ; SM.Supervisor_restart_attempt { attempt = 1 }, SM.Restarting
       ; SM.Fiber_started, SM.Running
-      ; SM.Fiber_terminated { outcome = "OOM again" }, SM.Crashed
+      ; SM.Fiber_terminated { outcome = "OOM again"; provider_id = None; http_status = None }, SM.Crashed
       ; SM.Supervisor_restart_attempt { attempt = 2 }, SM.Restarting
       ; SM.Fiber_started, SM.Running
-      ; SM.Fiber_terminated { outcome = "OOM third time" }, SM.Crashed
+      ; SM.Fiber_terminated { outcome = "OOM third time"; provider_id = None; http_status = None }, SM.Crashed
       ; SM.Restart_budget_exhausted, SM.Dead
       ]
   in
@@ -1223,7 +1223,7 @@ let test_chain_crash_during_compaction_recovery () =
       ~init_phase:SM.Running
       ~init_conditions:running_conditions
       [ SM.Compaction_started, SM.Compacting
-      ; SM.Fiber_terminated { outcome = "segfault in compactor" }, SM.Crashed
+      ; SM.Fiber_terminated { outcome = "segfault in compactor"; provider_id = None; http_status = None }, SM.Crashed
       ; SM.Supervisor_restart_attempt { attempt = 1 }, SM.Restarting
       ; SM.Fiber_started, SM.Running
       ; SM.Heartbeat_ok, SM.Running
@@ -1324,7 +1324,7 @@ let test_chain_restart_inherits_paused () =
       ~init_phase:SM.Running
       ~init_conditions:running_conditions
       [ SM.Operator_pause, SM.Paused
-      ; SM.Fiber_terminated { outcome = "OOM while paused" }, SM.Crashed
+      ; SM.Fiber_terminated { outcome = "OOM while paused"; provider_id = None; http_status = None }, SM.Crashed
       ; SM.Supervisor_restart_attempt { attempt = 1 }, SM.Restarting
       ; SM.Fiber_started, SM.Paused
       ]
@@ -1348,7 +1348,7 @@ let test_chain_restart_clears_stop () =
       ~init_phase:SM.Running
       ~init_conditions:running_conditions
       [ SM.Stop_requested, SM.Draining
-      ; SM.Fiber_terminated { outcome = "crash during drain" }, SM.Crashed
+      ; SM.Fiber_terminated { outcome = "crash during drain"; provider_id = None; http_status = None }, SM.Crashed
       ; SM.Supervisor_restart_attempt { attempt = 1 }, SM.Restarting
       ; (* Fiber starts: stop_requested is reset → Running, not Draining *)
         SM.Fiber_started, SM.Running
@@ -1472,7 +1472,7 @@ let test_chain_no_phoenix () =
     chain_apply
       ~init_phase:SM.Running
       ~init_conditions:running_conditions
-      [ SM.Fiber_terminated { outcome = "fatal" }, SM.Crashed
+      [ SM.Fiber_terminated { outcome = "fatal"; provider_id = None; http_status = None }, SM.Crashed
       ; SM.Restart_budget_exhausted, SM.Dead
       ]
   in
@@ -1508,7 +1508,7 @@ let test_chain_no_phoenix () =
     ; SM.Stop_requested
     ; SM.Drain_complete
     ; SM.Fiber_started
-    ; SM.Fiber_terminated { outcome = "test" }
+    ; SM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }
     ; SM.Supervisor_restart_attempt { attempt = 99 }
     ; SM.Restart_budget_exhausted
     ; SM.Guardrail_stop { reason = "test" }
@@ -1548,15 +1548,15 @@ let test_chain_triple_restart_survives () =
       ~init_phase:SM.Running
       ~init_conditions:running_conditions
       [ (* Crash 1 *)
-        SM.Fiber_terminated { outcome = "crash 1" }, SM.Crashed
+        SM.Fiber_terminated { outcome = "crash 1"; provider_id = None; http_status = None }, SM.Crashed
       ; SM.Supervisor_restart_attempt { attempt = 1 }, SM.Restarting
       ; SM.Fiber_started, SM.Running
       ; (* Crash 2 *)
-        SM.Fiber_terminated { outcome = "crash 2" }, SM.Crashed
+        SM.Fiber_terminated { outcome = "crash 2"; provider_id = None; http_status = None }, SM.Crashed
       ; SM.Supervisor_restart_attempt { attempt = 2 }, SM.Restarting
       ; SM.Fiber_started, SM.Running
       ; (* Crash 3 *)
-        SM.Fiber_terminated { outcome = "crash 3" }, SM.Crashed
+        SM.Fiber_terminated { outcome = "crash 3"; provider_id = None; http_status = None }, SM.Crashed
       ; SM.Supervisor_restart_attempt { attempt = 3 }, SM.Restarting
       ; SM.Fiber_started, SM.Running
       ; (* Finally stabilizes *)
@@ -1644,7 +1644,7 @@ let test_chain_condition_snapshot_audit () =
     apply_ok
       ~current_phase:SM.Running
       ~conditions:tr1.updated_conditions
-      ~event:(SM.Fiber_terminated { outcome = "crash" })
+      ~event:(SM.Fiber_terminated { outcome = "crash"; provider_id = None; http_status = None })
   in
   check phase_t "step 2" SM.Crashed tr2.new_phase;
   check bool "fiber dead" false tr2.updated_conditions.fiber_alive;
@@ -1855,7 +1855,7 @@ let test_invariant_no_cross_life_hb_leakage () =
     apply_ok
       ~current_phase:SM.Failing
       ~conditions:life1_conds
-      ~event:(SM.Fiber_terminated { outcome = "too many hb failures" })
+      ~event:(SM.Fiber_terminated { outcome = "too many hb failures"; provider_id = None; http_status = None })
   in
   check
     bool
@@ -1893,7 +1893,7 @@ let test_invariant_no_cross_life_backoff_leakage () =
     chain_apply
       ~init_phase:SM.Running
       ~init_conditions:running_conditions
-      [ SM.Fiber_terminated { outcome = "crash 1" }, SM.Crashed
+      [ SM.Fiber_terminated { outcome = "crash 1"; provider_id = None; http_status = None }, SM.Crashed
       ; SM.Supervisor_restart_attempt { attempt = 1 }, SM.Restarting
       ; SM.Fiber_started, SM.Running
       ]
@@ -1905,7 +1905,7 @@ let test_invariant_no_cross_life_backoff_leakage () =
     apply_ok
       ~current_phase:SM.Running
       ~conditions:post_restart
-      ~event:(SM.Fiber_terminated { outcome = "crash 2" })
+      ~event:(SM.Fiber_terminated { outcome = "crash 2"; provider_id = None; http_status = None })
   in
   check phase_t "second crash -> Crashed (not Restarting)" SM.Crashed tr.new_phase;
   check bool "backoff_elapsed still false" false tr.updated_conditions.backoff_elapsed
@@ -1919,7 +1919,7 @@ let test_invariant_no_cross_life_buffer_leakage () =
       ~init_phase:SM.Running
       ~init_conditions:running_conditions
       [ SM.Compaction_started, SM.Compacting
-      ; SM.Fiber_terminated { outcome = "crash during compaction" }, SM.Crashed
+      ; SM.Fiber_terminated { outcome = "crash during compaction"; provider_id = None; http_status = None }, SM.Crashed
       ; SM.Supervisor_restart_attempt { attempt = 1 }, SM.Restarting
       ; SM.Fiber_started, SM.Running
       ]
@@ -1949,7 +1949,7 @@ let test_invariant_stop_requested_monotonic () =
     ; SM.Operator_resume
     ; SM.Guardrail_stop { reason = "test" }
     ; (* Fiber_started intentionally OMITTED — it resets stop *)
-      SM.Fiber_terminated { outcome = "test" }
+      SM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }
     ; SM.Supervisor_restart_attempt { attempt = 1 }
     ; SM.Drain_complete
     ; SM.Context_measured
@@ -2083,7 +2083,7 @@ let test_invariant_derive_matches_matrix () =
     ; SM.Stop_requested
     ; SM.Drain_complete
     ; SM.Fiber_started
-    ; SM.Fiber_terminated { outcome = "test" }
+    ; SM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }
     ; SM.Supervisor_restart_attempt { attempt = 1 }
     ; SM.Restart_budget_exhausted
     ; SM.Credential_archived
@@ -2458,7 +2458,7 @@ let test_setclear_coverage () =
     ; "Stop_requested", SM.Stop_requested
     ; "Drain_complete", SM.Drain_complete
     ; "Fiber_started", SM.Fiber_started
-    ; "Fiber_terminated", SM.Fiber_terminated { outcome = "test" }
+    ; "Fiber_terminated", SM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }
     ; "Supervisor_restart_attempt", SM.Supervisor_restart_attempt { attempt = 1 }
     ; "Restart_budget_exhausted", SM.Restart_budget_exhausted
     ; "Credential_archived", SM.Credential_archived

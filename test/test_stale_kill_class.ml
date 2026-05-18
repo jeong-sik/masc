@@ -89,7 +89,8 @@ let test_failure_reason_to_string_provider_runtime_error () =
     "provider_runtime_error(provider_error:kimi unicode crash)"
     (failure_reason_to_string
        (Provider_runtime_error
-          { code = "provider_error"; detail = "kimi unicode crash" }))
+          { code = "provider_error"; detail = "kimi unicode crash"
+          ; provider_id = None; http_status = None }))
 
 let test_failure_reason_to_string_tool_required_unsatisfied () =
   r "Tool_required_unsatisfied includes terminal code"
@@ -167,7 +168,8 @@ let test_terminal_failure_cohort_keys () =
     (failure_reason_cohort_key
        (Some
           (Provider_runtime_error
-             { code = "provider_error"; detail = "x" })));
+             { code = "provider_error"; detail = "x"
+             ; provider_id = None; http_status = None })));
   r "Tool_required_unsatisfied cohort_key" "tool_required_unsatisfied"
     (failure_reason_cohort_key
        (Some
@@ -176,7 +178,8 @@ let test_terminal_failure_cohort_keys () =
 
 let test_stale_watchdog_preserves_terminal_failure_reason () =
   let prior =
-    Provider_runtime_error { code = "provider_error"; detail = "kimi" }
+    Provider_runtime_error { code = "provider_error"; detail = "kimi"
+                           ; provider_id = None; http_status = None }
   in
   let kill_class = Idle_turn { stall_seconds = 305.0 } in
   match stale_watchdog_failure_reason ~prior:(Some prior) ~kill_class with
@@ -291,7 +294,8 @@ let test_batch_root_cause_provider_auth () =
     (root_cause_label
        [
          Provider_runtime_error
-           { code = "auth_error"; detail = "bad key rejected" };
+           { code = "auth_error"; detail = "bad key rejected"
+           ; provider_id = None; http_status = None };
        ])
 
 let test_batch_root_cause_fd_exhaustion () =
@@ -307,7 +311,8 @@ let test_batch_root_cause_mixed () =
     (root_cause_label
        [
          Provider_runtime_error
-           { code = "auth_error"; detail = "bad key rejected" };
+           { code = "auth_error"; detail = "bad key rejected"
+           ; provider_id = None; http_status = None };
          Exception "too many open files";
        ])
 

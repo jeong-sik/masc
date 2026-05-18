@@ -84,7 +84,12 @@ type failure_reason =
           consecutive cycles. This is a provider/cascade/runtime throughput
           failure, so the supervisor pauses instead of restarting into the
           same slow model and burning another multi-minute budget. *)
-  | Provider_runtime_error of { code : string; detail : string }
+  | Provider_runtime_error of
+      { code : string
+      ; detail : string
+      ; provider_id : string option
+      ; http_status : int option
+      }
       (** Latched from the keeper turn terminal reason when the provider,
           adapter, or cascade fails before useful keeper progress. A later
           idle watchdog should preserve this root cause instead of recasting

@@ -117,7 +117,11 @@ let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
   | Some (Cascade_error_classify.Cascade_exhausted { reason; _ }) ->
     Some
       (Keeper_registry.Provider_runtime_error
-         { code = cascade_exhaustion_reason_code reason; detail })
+         { code = cascade_exhaustion_reason_code reason
+         ; detail
+         ; provider_id = None
+         ; http_status = None
+         })
   | Some
       ( Cascade_error_classify.Resumable_cli_session _
       | Cascade_error_classify.No_tool_capable_provider _
@@ -160,7 +164,11 @@ let registry_failure_reason_of_terminal_reason
   | Keeper_turn_disposition.Provider_error c ->
     Some
       (Keeper_registry.Provider_runtime_error
-         { code = Keeper_turn_terminal_code.to_wire c; detail })
+         { code = Keeper_turn_terminal_code.to_wire c
+         ; detail
+         ; provider_id = None
+         ; http_status = None
+         })
   | Keeper_turn_disposition.Success
   | Keeper_turn_disposition.External_cancel
   | Keeper_turn_disposition.Turn_wall_clock_timeout

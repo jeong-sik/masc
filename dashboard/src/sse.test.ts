@@ -1,16 +1,25 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { buildDashboardSseUrl, normalizeSSEDispatchType } from './sse'
+import { clearStoredToken, setStoredToken } from './api/core'
 
 describe('buildDashboardSseUrl', () => {
   afterEach(() => {
-    sessionStorage.removeItem('masc_bearer_token')
+    clearStoredToken()
   })
 
   it('includes token from sessionStorage and agent from query params', () => {
-    sessionStorage.setItem('masc_bearer_token', 'secret')
+    setStoredToken('secret')
     expect(
       buildDashboardSseUrl('dash_test', '?agent=keeper-a'),
     ).toBe('/mcp?agent=keeper-a&token=secret&session_id=dash_test&sse_kind=observer')
+  })
+
+  it('omits blank raw stored tokens through the shared auth reader', () => {
+    sessionStorage.setItem('masc_bearer_token', '   ')
+
+    expect(buildDashboardSseUrl('dash_test', '?agent=keeper-a')).toBe(
+      '/mcp?agent=keeper-a&session_id=dash_test&sse_kind=observer',
+    )
   })
 
   it('omits token when sessionStorage is empty', () => {

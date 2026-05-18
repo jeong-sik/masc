@@ -16,6 +16,7 @@ import {
   parseWebSocketSseFrames,
   subscribeDashboardRoute,
 } from './dashboard-ws'
+import { clearStoredToken, setStoredToken } from './api/core'
 import {
   DASHBOARD_WS_HEARTBEAT_INTERVAL_MS,
   DASHBOARD_WS_RPC_TIMEOUT_MS,
@@ -190,6 +191,7 @@ afterEach(() => {
   dashboardWsLastPongLatencyMs.value = null
   dashboardWsLastSeq.value = 0
   dashboardWsReady.value = false
+  clearStoredToken()
   vi.useRealTimers()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
@@ -257,6 +259,32 @@ describe('parseWebSocketSseFrames', () => {
 })
 
 describe('dashboard websocket route subscriptions', () => {
+  it('sends hello token from the shared dashboard auth reader', async () => {
+    installWebSocketMocks()
+    setStoredToken('  ws-token  ')
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const socket = mockSockets[0]!
+    socket.open()
+
+    const hello = parseRpc(socket, 0)
+    expect(hello.method).toBe('dashboard/hello')
+    expect(hello.params.token).toBe('ws-token')
+  })
+
+  it('omits blank raw stored tokens from websocket hello', async () => {
+    installWebSocketMocks()
+    sessionStorage.setItem('masc_bearer_token', '   ')
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const socket = mockSockets[0]!
+    socket.open()
+
+    const hello = parseRpc(socket, 0)
+    expect(hello.method).toBe('dashboard/hello')
+    expect(hello.params).not.toHaveProperty('token')
+  })
+
   it('does not open a socket when discovery resolves after disconnect', async () => {
     const discoveries = installControlledDiscovery()
 

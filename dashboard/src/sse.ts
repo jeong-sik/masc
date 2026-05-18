@@ -15,6 +15,7 @@ import {
 } from './journal-entry'
 import { appendLiveToolCall } from './components/session-trace/session-trace-live-store'
 import { appendAuditEntry } from './live-store'
+import { dashboardBearerToken } from './api/core'
 import { parseSSEMessage } from './schemas/sse'
 import { RingBuffer } from './lib/ring-buffer'
 import { createSseTransport } from './transports/sse-transport'
@@ -200,7 +201,7 @@ export function buildDashboardSseUrl(sessionId: string, locationSearch = window.
   // Token from sessionStorage (moved from URL on init) — EventSource does not
   // support custom headers, so query param is the only option.  The token is
   // no longer visible in the browser address bar or shareable links.
-  const token = sessionStorage.getItem('masc_bearer_token')
+  const token = dashboardBearerToken()
   if (agent) sseParams.set('agent', agent)
   if (token) sseParams.set('token', token)
   sseParams.set('session_id', sessionId)

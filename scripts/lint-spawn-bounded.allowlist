@@ -31,7 +31,7 @@ lib/process/process_eio.ml:493
 # manager itself. Bounded by session scope, not by per-call timeout.
 lib/server/lsp_process_manager.ml:178
 
-# lib/worker_dev_tools.ml:1892 — dev-tools worker spawn. Wrapped by
+# lib/worker_dev_tools.ml:1925 — dev-tools worker spawn. Wrapped by
 # Tool_resource_gate, Fd_accountant, Eio.Time.with_timeout_exn, and a fresh
 # Eio.Switch.run at the call boundary.
-lib/worker_dev_tools.ml:1892
+lib/worker_dev_tools.ml:1925

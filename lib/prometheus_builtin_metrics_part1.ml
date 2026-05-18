@@ -10,7 +10,12 @@ type register_histogram =
 type inc_counter =
   string -> ?labels:(string * string) list -> ?delta:float -> unit -> unit
 
-let register ~add ~register_histogram ~inc_counter:_ () =
+let register
+      ~(add : string -> string -> metric_kind -> unit)
+      ~(register_histogram : register_histogram)
+      ~inc_counter:(_ : inc_counter)
+      ()
+  =
   add metric_mcp_requests "Total MCP requests received" `Counter;
   add metric_llm_inference_duration "LLM inference request duration in seconds" `Histogram;
   add

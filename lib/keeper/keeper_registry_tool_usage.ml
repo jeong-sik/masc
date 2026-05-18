@@ -33,7 +33,7 @@ let path ~base_path name =
 let json_of_snapshot ~name ~flushed_at usage =
   let items =
     StringMap.fold
-      (fun tool_name (entry : tool_call_entry) acc ->
+      (fun tool_name (entry : Keeper_types.tool_call_entry) acc ->
          `Assoc
            [ "tool", `String tool_name
            ; "count", `Int entry.count

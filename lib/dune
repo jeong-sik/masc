@@ -62,6 +62,7 @@
  keeper_meta_store
 
  server_dashboard_http_cache
+ server_dashboard_http_perf
  dashboard_http_helpers
  dashboard_http_monitoring
  dashboard_http_keeper

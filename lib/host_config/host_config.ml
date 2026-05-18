@@ -170,8 +170,15 @@ let resolve ?base_path () =
     | Some root -> Env_config_core.normalize_masc_base_path_input root
     | None -> fallback
   in
-  let agent_runtime_root = Filename.concat base ".masc/runtime/agent" in
-  let cred_root = Filename.concat base ".masc/credentials" in
+  (* RFC-0121: layout derives from [Common.masc_dir_from_base_path].
+     Cannot use [Config_dir_resolver] here — that module depends on us
+     for test-mode + env reads, so the reverse dep would cycle. Layout
+     remains single-sourced from [Common], and the resolver helpers
+     [agent_runtime_dir] / [credentials_dir] are kept byte-equal so
+     external callers route through the resolver SSOT. *)
+  let masc_root = Common.masc_dir_from_base_path ~base_path:base in
+  let agent_runtime_root = Filename.concat masc_root "runtime/agent" in
+  let cred_root = Filename.concat masc_root "credentials" in
   let sandbox_workspace_root =
     match Sys.getenv_opt "MASC_SANDBOX_ROOT" with
     | Some s -> s

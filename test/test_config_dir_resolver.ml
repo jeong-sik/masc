@@ -430,6 +430,83 @@ let test_personas_dirs_ignores_base_path_fallback () =
   check (list string) "base path fallback ignored"
     [ config_personas ] dirs
 
+(* RFC-0121 — .masc/<sub> sub-directory accessors. The accessors derive
+   layout from [base_path] without filesystem access, so we only check
+   the constructed paths. *)
+
+let test_rfc0121_masc_root () =
+  check string "masc_root concats .masc"
+    "/x/.masc"
+    (Config_dir_resolver.masc_root ~base_path:"/x")
+
+let test_rfc0121_auth_dir () =
+  check string "auth_dir under .masc"
+    "/x/.masc/auth"
+    (Config_dir_resolver.auth_dir ~base_path:"/x")
+
+let test_rfc0121_credentials_dir () =
+  check string "credentials_dir under .masc"
+    "/x/.masc/credentials"
+    (Config_dir_resolver.credentials_dir ~base_path:"/x")
+
+let test_rfc0121_github_identities_dir () =
+  check string "github-identities under .masc"
+    "/x/.masc/github-identities"
+    (Config_dir_resolver.github_identities_dir ~base_path:"/x")
+
+let test_rfc0121_agent_runtime_dir () =
+  check string "agent_runtime under .masc/runtime/agent"
+    "/x/.masc/runtime/agent"
+    (Config_dir_resolver.agent_runtime_dir ~base_path:"/x")
+
+let test_rfc0121_repos_dir () =
+  check string "repos under .masc"
+    "/x/.masc/repos"
+    (Config_dir_resolver.repos_dir ~base_path:"/x")
+
+let test_rfc0121_tmp_dir () =
+  check string "tmp under .masc"
+    "/x/.masc/tmp"
+    (Config_dir_resolver.tmp_dir ~base_path:"/x")
+
+let test_rfc0121_locks_dir () =
+  check string "locks under .masc"
+    "/x/.masc/locks"
+    (Config_dir_resolver.locks_dir ~base_path:"/x")
+
+let test_rfc0121_worktrees_dir () =
+  check string "worktrees is sibling of .masc"
+    "/x/.worktrees"
+    (Config_dir_resolver.worktrees_dir ~base_path:"/x")
+
+let test_rfc0121_data_dir () =
+  check string "data is sibling of .masc"
+    "/x/data"
+    (Config_dir_resolver.data_dir ~base_path:"/x")
+
+let test_rfc0121_credentials_toml () =
+  check string "credentials.toml under .masc/config"
+    "/x/.masc/config/credentials.toml"
+    (Config_dir_resolver.credentials_toml_path ~base_path:"/x")
+
+let test_rfc0121_repositories_toml () =
+  check string "repositories.toml under .masc/config"
+    "/x/.masc/config/repositories.toml"
+    (Config_dir_resolver.repositories_toml_path ~base_path:"/x")
+
+let test_rfc0121_keeper_repo_mappings_toml () =
+  check string "keeper_repo_mappings.toml under .masc/config"
+    "/x/.masc/config/keeper_repo_mappings.toml"
+    (Config_dir_resolver.keeper_repo_mappings_toml_path ~base_path:"/x")
+
+let test_rfc0121_masc_root_agrees_with_common () =
+  (* SSOT bridge — resolver helper must produce the same path as the
+     pre-existing [Common] helper that callers historically used. *)
+  let bp = "/some/where" in
+  check string "resolver == Common"
+    (Common.masc_dir_from_base_path ~base_path:bp)
+    (Config_dir_resolver.masc_root ~base_path:bp)
+
 let () =
   run "config_dir_resolver"
     [
@@ -486,5 +563,28 @@ let () =
             test_inputs_from_env_honors_base_path_override_opt_in;
           test_case "canonicalizes explicit base path" `Quick
             test_normalize_masc_base_path_input_canonicalizes_explicit_path;
+        ] );
+      ( "rfc_0121_accessors",
+        [
+          test_case "masc_root" `Quick test_rfc0121_masc_root;
+          test_case "auth_dir" `Quick test_rfc0121_auth_dir;
+          test_case "credentials_dir" `Quick test_rfc0121_credentials_dir;
+          test_case "github_identities_dir" `Quick
+            test_rfc0121_github_identities_dir;
+          test_case "agent_runtime_dir" `Quick test_rfc0121_agent_runtime_dir;
+          test_case "repos_dir" `Quick test_rfc0121_repos_dir;
+          test_case "tmp_dir" `Quick test_rfc0121_tmp_dir;
+          test_case "locks_dir" `Quick test_rfc0121_locks_dir;
+          test_case "worktrees_dir sibling of .masc" `Quick
+            test_rfc0121_worktrees_dir;
+          test_case "data_dir sibling of .masc" `Quick test_rfc0121_data_dir;
+          test_case "credentials_toml under config" `Quick
+            test_rfc0121_credentials_toml;
+          test_case "repositories_toml under config" `Quick
+            test_rfc0121_repositories_toml;
+          test_case "keeper_repo_mappings_toml under config" `Quick
+            test_rfc0121_keeper_repo_mappings_toml;
+          test_case "masc_root agrees with Common" `Quick
+            test_rfc0121_masc_root_agrees_with_common;
         ] );
     ]

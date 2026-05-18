@@ -60,7 +60,11 @@ let first_nonempty_env keys =
     keys
 
 let internal_keeper_token_hash_file ~base_path =
-  Filename.concat base_path ".masc/auth/internal_keeper.token.hash"
+  (* RFC-0121: layout SSOT via [Config_dir_resolver.auth_dir]; only the
+     filename portion stays here. *)
+  Filename.concat
+    (Config_dir_resolver.auth_dir ~base_path)
+    "internal_keeper.token.hash"
 
 let resolve ~base_path ~keeper_id ~provider_kind
     ~policy_requires_runtime_mcp =

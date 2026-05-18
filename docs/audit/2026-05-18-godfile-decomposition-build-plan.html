@@ -312,19 +312,29 @@
             <td class="num">0</td>
             <td><code>lib/keeper/keeper_unified_turn.ml</code> 1999 LOC</td>
           </tr>
+          <tr>
+            <td>After PR #TBD keeper hooks OAS split</td>
+            <td><code>local #50</code></td>
+            <td class="num">51</td>
+            <td class="num">81,718</td>
+            <td class="num">0</td>
+            <td class="num">0</td>
+            <td><code>lib/keeper/keeper_unified_turn.ml</code> 1999 LOC</td>
+          </tr>
         </tbody>
       </table>
       <div class="panel ok">
-        <span class="tag green">-23 files from initial audit</span>
-        <span class="tag green">-30,486 LOC from initial audit</span>
+        <span class="tag green">-24 files from initial audit</span>
+        <span class="tag green">-32,485 LOC from initial audit</span>
         <span class="tag blue">2000+ bucket eliminated</span>
         <span class="tag blue">3000+ eliminated in stack</span>
-        <span class="tag violet">52 files remain</span>
+        <span class="tag violet">51 files remain</span>
         <p>
           Progress 기준은 이 문서의 원래 범위와 동일하게 <code>lib/**/*.ml</code> 중 1000+ LOC만 센다.
-          현재 열린 stack 기준으로는 초기 75개에서 52개까지 내려왔고,
-          3000+ LOC 파일과 2000+ LOC 파일은 남지 않았다.  PR #49는 1000+ 파일 수를
-          줄인 단계가 아니라 마지막 2000+ 파일을 1999 LOC로 낮춘 단계다.
+          현재 열린 stack 기준으로는 초기 75개에서 51개까지 내려왔고,
+          3000+ LOC 파일과 2000+ LOC 파일은 남지 않았다. PR #49는 마지막 2000+
+          파일을 1999 LOC로 낮춘 단계였고, PR #50은 <code>keeper_hooks_oas.ml</code>을
+          1999 LOC에서 948 LOC로 낮춰 1000+ bucket에서 제거한다.
         </p>
       </div>
     </section>

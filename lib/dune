@@ -121,6 +121,7 @@
   keeper_exec_status
   provider_tool_support
   voice_runtime_overlay
+  keeper_status_detail_observability
   keeper_status_detail
   keeper_exec_persona
   keeper_model_labels

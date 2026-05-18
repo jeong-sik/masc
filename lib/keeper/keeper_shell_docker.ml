@@ -742,6 +742,15 @@ let gh_exit_class_field ~cmd ~status ~output : (string * Yojson.Safe.t) list =
     [ "gh_exit_class", `String (Gh_exit_class.to_string class_) ])
 ;;
 
+let docker_command_semantic_status ~cmd ~status ~output =
+  Exec_core.semantic_status_of_process ~cmd ~output status
+
+let docker_command_semantic_success ~cmd ~status ~output =
+  match docker_command_semantic_status ~cmd ~status ~output with
+  | Exec_core.Ok | Exec_core.No_match -> true
+  | Exec_core.Partial | Exec_core.Blocked | Exec_core.Timeout | Exec_core.Runtime_error ->
+    false
+
 let optional_ro_mount ~host ~container =
   if host = ""
   then []
@@ -1252,7 +1261,7 @@ let run_docker_shell_command_with_status_internal
                               ~timeout_sec
                               argv)
                         in
-                        if status <> Unix.WEXITED 0
+                        if not (docker_command_semantic_success ~cmd ~status ~output)
                         then
                           record_docker_exec_failure
                             ~config
@@ -1467,7 +1476,11 @@ let run_docker_hardened_bash
           with
           | Error message -> sandbox_error_json message
           | Ok (st, out) ->
-            if st <> Unix.WEXITED 0
+            let semantic_status = docker_command_semantic_status ~cmd ~status:st ~output:out in
+            let semantic_ok =
+              docker_command_semantic_success ~cmd ~status:st ~output:out
+            in
+            if not semantic_ok
             then
               record_docker_exec_failure
                 ~config
@@ -1488,7 +1501,7 @@ let run_docker_hardened_bash
             in
             Yojson.Safe.to_string
               (`Assoc
-                  ([ "ok", `Bool (st = Unix.WEXITED 0)
+                  ([ "ok", `Bool semantic_ok
                    ; "via", `String "docker"
                    ; "cwd", Keeper_cwd_response.to_yojson_response cwd_response
                    ; "sandbox_profile", `String "docker"
@@ -1496,6 +1509,8 @@ let run_docker_hardened_bash
                    ; "network_mode", `String (network_mode_to_string network_mode)
                    ; "effective_sandbox_image", `String image
                    ; "status", Keeper_alerting_path.process_status_to_json st
+                   ; "semantic_status"
+                     , `String (Exec_core.string_of_semantic_status semantic_status)
                    ; "output", `String out
                    ]
                    @ gh_exit_class_field ~cmd ~status:st ~output:out)))
@@ -1523,6 +1538,18 @@ let run_docker_hardened_bash
              with
              | Error message -> error_json message
              | Ok result ->
+               let semantic_status =
+                 docker_command_semantic_status
+                   ~cmd
+                   ~status:result.status
+                   ~output:result.output
+               in
+               let semantic_ok =
+                 docker_command_semantic_success
+                   ~cmd
+                   ~status:result.status
+                   ~output:result.output
+               in
                let cwd_response =
                  Keeper_cwd_response.docker
                    ~host_cwd:cwd
@@ -1530,7 +1557,7 @@ let run_docker_hardened_bash
                in
                Yojson.Safe.to_string
                  (`Assoc
-                     ([ "ok", `Bool (result.status = Unix.WEXITED 0)
+                     ([ "ok", `Bool semantic_ok
                       ; "via", `String "docker"
                       ; "cwd", Keeper_cwd_response.to_yojson_response cwd_response
                       ; "sandbox_profile", `String "docker"
@@ -1539,6 +1566,9 @@ let run_docker_hardened_bash
                       ; "effective_sandbox_image", `String result.image
                       ; ( "status"
                         , Keeper_alerting_path.process_status_to_json result.status )
+                      ; ( "semantic_status"
+                        , `String
+                            (Exec_core.string_of_semantic_status semantic_status) )
                       ; "output", `String result.output
                       ]
                       @ gh_exit_class_field

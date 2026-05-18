@@ -418,6 +418,36 @@ fi\n\
 printf '%s\\n' \"$*\"\n\
 exit 0\n"
 
+let fake_docker_bash_rg_no_match_script =
+  "#!/bin/sh\n\
+log_file=${KEEPER_DOCKER_LOG:-}\n\
+if [ -n \"$log_file\" ]; then\n\
+  printf '%s\\n' \"$*\" >> \"$log_file\"\n\
+fi\n\
+if [ \"$1\" = \"info\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" != \"run\" ]; then\n\
+  printf 'unexpected docker invocation\\n' >&2\n\
+  exit 2\n\
+fi\n\
+shift\n\
+while [ \"$#\" -gt 0 ]; do\n\
+  if [ \"$1\" = \"alpine:test\" ]; then\n\
+    shift\n\
+    break\n\
+  fi\n\
+  shift\n\
+done\n\
+if [ \"$1\" = \"bash\" ] && [ \"$2\" = \"-lc\" ]; then\n\
+  case \"$3\" in\n\
+    *rg*) exit 1 ;;\n\
+  esac\n\
+fi\n\
+printf 'stdout:%s\\n' \"$*\"\n\
+exit 0\n"
+
 let test_rg_no_match_remains_successful_in_docker_route () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_rg_no_match_script @@ fun () ->
@@ -1430,6 +1460,42 @@ let test_bash_allows_validator_safe_pipe_redirect_for_coding_preset () =
   Alcotest.(check bool) "docker was invoked" true
     (Sys.file_exists log_path)
 
+let test_bash_rg_no_match_remains_successful_in_docker_route () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_bash_rg_no_match_script @@ fun () ->
+  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Coding
+  @@ fun ~config ~meta ~playground ->
+  let lib =
+    Filename.concat
+      (Filename.concat (Filename.concat playground "repos") "masc-mcp")
+      "lib"
+  in
+  ensure_dir lib;
+  ignore (Fs_compat.save_file_atomic (Filename.concat lib "sample.ml") "alpha\n");
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+      ~args:
+        (`Assoc
+          [
+            ("cmd", `String "rg \"missing_one\\|missing_two\" repos/masc-mcp/lib");
+            ("cwd", `String playground);
+          ])
+      ()
+  in
+  Alcotest.(check (option bool)) "rg no-match succeeds semantically"
+    (Some true)
+    (parse_bool_field raw "ok");
+  Alcotest.(check int) "rg keeps exit=1 status" 1
+    (parse_status_exit_code raw);
+  Alcotest.(check (option string)) "semantic_status=no_match"
+    (Some "no_match")
+    (parse_string_field raw "semantic_status");
+  Alcotest.(check bool) "docker was invoked" true
+    (Sys.file_exists log_path)
+
 let test_bash_blocks_file_redirect_before_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
@@ -1662,6 +1728,9 @@ let () =
           Alcotest.test_case
             "docker keeper bash allows validator-safe pipe redirects"
             `Quick test_bash_allows_validator_safe_pipe_redirect_for_coding_preset;
+          Alcotest.test_case
+            "docker keeper bash rg no-match remains successful"
+            `Quick test_bash_rg_no_match_remains_successful_in_docker_route;
           Alcotest.test_case
             "docker keeper bash blocks file redirects before docker"
             `Quick test_bash_blocks_file_redirect_before_docker;

@@ -1087,6 +1087,22 @@ let test_on_tool_error_workflow_rejection_does_not_count_callback_failure () =
     (after -. before)
 ;;
 
+let test_on_tool_error_policy_rejection_does_not_count_callback_failure () =
+  let keeper = "callback-on-tool-policy-rejection-keeper" in
+  let hooks = make_test_hooks keeper in
+  let hook = require_hook "on_tool_error" hooks.on_tool_error in
+  let before = lifecycle_callback_failure_count ~keeper ~callback:"on_tool_error" in
+  let error =
+    {|{"ok":false,"error":"code_shell_cwd_rejected","detail":{"failure_class":"policy_rejection"}}|}
+  in
+  check_continue
+    "on_tool_error policy rejection"
+    (hook (Agent_sdk.Hooks.OnToolError { tool_name = "masc_code_shell"; error }));
+  let after = lifecycle_callback_failure_count ~keeper ~callback:"on_tool_error" in
+  check (float 0.001) "policy rejection counter does not increment" 0.0
+    (after -. before)
+;;
+
 let test_on_stop_hook_records_stop_reason_metric () =
   let keeper = "callback-on-stop-keeper" in
   let hooks = make_test_hooks keeper in
@@ -1710,6 +1726,10 @@ let () =
             "on_tool_error workflow rejection is not callback failure"
             `Quick
             test_on_tool_error_workflow_rejection_does_not_count_callback_failure
+        ; test_case
+            "on_tool_error policy rejection is not callback failure"
+            `Quick
+            test_on_tool_error_policy_rejection_does_not_count_callback_failure
         ; test_case
             "on_stop records stop reason metric"
             `Quick

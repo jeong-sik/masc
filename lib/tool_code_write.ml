@@ -229,6 +229,29 @@ let missing_cwd_error_json ctx ~cwd ~resolved_cwd ?command ?action () =
   in
   error_response_with (List.rev fields)
 
+let code_shell_cwd_rejection_json ctx ~cwd ?command reason =
+  let hint =
+    "masc_code_shell cwd must resolve inside an allowed worktree or this \
+     keeper's own playground. Docker keepers should prefer keeper_bash/Bash \
+     with sandbox-relative cwd, or call masc_worktree_create before retrying."
+  in
+  let fields =
+    [
+      ("error", `String "code_shell_cwd_rejected");
+      ("reason", `String reason);
+      ("cwd", `String cwd);
+      ("agent", `String ctx.agent_name);
+      ("failure_class", `String "policy_rejection");
+      ("hint", `String hint);
+    ]
+  in
+  let fields =
+    match command with
+    | Some command -> ("command", `String command) :: fields
+    | None -> fields
+  in
+  error_response_with (List.rev fields)
+
 (* Issue #8522: Variant SSOT for git action.  Adding a constructor
    forces compilation in [git_action_to_string] AND extends
    [valid_git_action_strings]; the schema enum below derives from
@@ -557,7 +580,13 @@ let handle_code_shell ~tool_name ~start_time ctx args =
             | Error e -> Error e
         in
         (match cwd_result with
-         | Error e -> Tool_result.error ~tool_name ~start_time (Masc_domain.masc_error_to_string e)
+         | Error e ->
+             let reason = Masc_domain.masc_error_to_string e in
+             Tool_result.error
+               ~failure_class:(Some Tool_result.Policy_rejection)
+               ~tool_name
+               ~start_time
+               (code_shell_cwd_rejection_json ctx ~cwd ~command reason)
          | Ok (Some dir) when not (path_is_directory dir) ->
              Tool_result.error ~tool_name ~start_time
                (missing_cwd_error_json ctx ~cwd ~resolved_cwd:dir

@@ -599,6 +599,31 @@ let test_code_shell_missing_docker_cwd_reports_worktree_hint () =
   check bool "error suggests worktree creation" true
     (contains "masc_worktree_create" msg)
 
+let test_code_shell_cwd_boundary_is_policy_rejection () =
+  let base_path = fresh_base_path () in
+  let config = make_config base_path in
+  let ctx =
+    { Tool_code_write.config;
+      agent_name = "keeper-sangsu-agent";
+    }
+  in
+  let args =
+    `Assoc
+      [
+        ("command", `String "ls");
+        ("cwd", `String "/etc");
+        ("timeout", `Int 5);
+      ]
+  in
+  let ok, msg = dispatch_exn ctx ~name:"masc_code_shell" ~args in
+  check bool "outside cwd rejected before shell execution" false ok;
+  check string "policy failure class" "policy_rejection"
+    (json_string_field "failure_class" msg);
+  check string "cwd rejection error" "code_shell_cwd_rejected"
+    (json_string_field "error" msg);
+  check bool "error preserves traversal reason" true
+    (contains "Path traversal detected" msg)
+
 let test_code_shell_rg_exit_one_no_matches_is_success () =
   with_temp_dir "tool-code-shell-rg" @@ fun dir ->
   let fixture = Filename.concat dir "sample.ml" in
@@ -924,6 +949,8 @@ let () =
         test_validate_code_shell_command_rejects_semicolon;
       test_case "missing docker cwd reports worktree hint" `Quick
         test_code_shell_missing_docker_cwd_reports_worktree_hint;
+      test_case "cwd boundary is policy rejection" `Quick
+        test_code_shell_cwd_boundary_is_policy_rejection;
       test_case "rg exit 1 no-match is success" `Quick
         test_code_shell_rg_exit_one_no_matches_is_success;
       test_case "rg quoted regex pipe no-match is success" `Quick

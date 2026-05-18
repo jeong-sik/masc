@@ -77,7 +77,7 @@ let idle_decision_to_label = function
   | Agent_sdk.Hooks.AdjustParams _ -> "adjust_params"
   | Agent_sdk.Hooks.ElicitInput _ -> "elicit_input"
 
-let tool_error_is_workflow_rejection error =
+let tool_error_failure_class error =
   try
     let json = Yojson.Safe.from_string error in
     let direct = Safe_ops.json_string_opt "failure_class" json in
@@ -86,10 +86,15 @@ let tool_error_is_workflow_rejection error =
       | `Assoc _ as detail -> Safe_ops.json_string_opt "failure_class" detail
       | _ -> None
     in
-    match Option.value direct ~default:(Option.value nested ~default:"") with
-    | "workflow_rejection" -> true
-    | _ -> false
+    match direct with
+    | Some _ -> direct
+    | None -> nested
   with
+  | _ -> None
+
+let tool_error_is_self_correcting_rejection error =
+  match tool_error_failure_class error with
+  | Some ("workflow_rejection" | "policy_rejection") -> true
   | _ -> false
 
 module Gate_attempt = Keeper_hooks_oas_gate_attempt
@@ -728,10 +733,13 @@ let make_hooks
 
     on_tool_error = Some (function
       | Agent_sdk.Hooks.OnToolError { tool_name; error } ->
-        if tool_error_is_workflow_rejection error
+        if tool_error_is_self_correcting_rejection error
         then
-          Log.Keeper.warn "keeper:%s tool_workflow_rejection: %s — %s"
-            (!meta_ref).name tool_name error
+          let failure_class =
+            Option.value (tool_error_failure_class error) ~default:"tool_rejection"
+          in
+          Log.Keeper.warn "keeper:%s tool_%s: %s — %s"
+            (!meta_ref).name failure_class tool_name error
         else (
           Prometheus.inc_counter
             Keeper_metrics.metric_keeper_lifecycle_callback_failures

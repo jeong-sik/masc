@@ -132,6 +132,114 @@ let test_stats_zero_state_shape () =
   Alcotest.(check (list (pair string int))) "empty idle_per_host"
     [] zero.idle_per_host
 
+(* ── RFC-0129 — read_body_with_idle ─────────────────────────── *)
+
+(* Build a mock [Piaf.Body.t] that the test fiber can feed chunks into
+   on its own schedule. The producer fiber pushes [Some chunk] for each
+   chunk and [None] to close; this matches the real Piaf body shape but
+   is driven by simulated time so the test runs deterministically. *)
+let mock_body_with_producer ~clock ~chunks =
+  let (stream, push) = Piaf.Stream.create 16 in
+  let body = Piaf.Body.of_string_stream stream in
+  let producer () =
+    List.iter
+      (fun (delay_sec, payload) ->
+         if delay_sec > 0.0 then Eio.Time.sleep clock delay_sec;
+         push (Some payload))
+      chunks;
+    push None
+  in
+  body, producer
+
+(* Tests use the real clock with sub-second delays so the suite stays
+   under ~1s wall-clock total. mock_clock isn't available in this Eio
+   version; idle timer logic is generic over [clock] so real time is a
+   faithful test fixture. *)
+
+let test_idle_steady_stream_completes () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let body, producer =
+    mock_body_with_producer ~clock
+      ~chunks:[
+        (0.02, "first");
+        (0.05, " second");
+        (0.05, " third");
+      ]
+  in
+  Eio.Switch.run @@ fun sw ->
+  Eio.Fiber.fork ~sw producer;
+  let result =
+    Masc_http_client.Pool.For_testing.read_body_with_idle
+      ~clock ~start_sec:(Eio.Time.now clock)
+      ~idle_timeout_sec:0.5
+      body
+  in
+  match result with
+  | Ok (body_str, p) ->
+    Alcotest.(check string) "body assembled" "first second third" body_str;
+    Alcotest.(check int) "bytes_received counted" 18 p.bytes_received;
+    (match p.first_byte_at_sec with
+     | Some _ -> ()
+     | None -> Alcotest.fail "expected first_byte_at_sec set")
+  | Error (msg, _) ->
+    Alcotest.fail (Printf.sprintf "expected Ok, got Error %s" msg)
+
+let test_idle_silent_from_start_cancels () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let body, producer =
+    (* Producer delays first chunk well past the idle window. *)
+    mock_body_with_producer ~clock
+      ~chunks:[ (1.0, "late") ]
+  in
+  Eio.Switch.run @@ fun sw ->
+  Eio.Fiber.fork ~sw producer;
+  let result =
+    Masc_http_client.Pool.For_testing.read_body_with_idle
+      ~clock ~start_sec:(Eio.Time.now clock)
+      ~idle_timeout_sec:0.2
+      body
+  in
+  match result with
+  | Error (msg, p) ->
+    Alcotest.(check bool) "idle-timeout message present"
+      true (Astring.String.is_prefix ~affix:"idle timeout" msg);
+    Alcotest.(check int) "zero bytes received" 0 p.bytes_received;
+    Alcotest.(check (option (float 0.001))) "no first_byte_at_sec"
+      None p.first_byte_at_sec
+  | Ok (_, _) ->
+    Alcotest.fail "expected idle timeout, got Ok"
+
+let test_idle_mid_stream_silence_cancels () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let body, producer =
+    mock_body_with_producer ~clock
+      ~chunks:[
+        (0.02, "early");
+        (1.0, "very-late");
+      ]
+  in
+  Eio.Switch.run @@ fun sw ->
+  Eio.Fiber.fork ~sw producer;
+  let result =
+    Masc_http_client.Pool.For_testing.read_body_with_idle
+      ~clock ~start_sec:(Eio.Time.now clock)
+      ~idle_timeout_sec:0.2
+      body
+  in
+  match result with
+  | Error (msg, p) ->
+    Alcotest.(check bool) "idle-timeout message present"
+      true (Astring.String.is_prefix ~affix:"idle timeout" msg);
+    Alcotest.(check int) "early chunk bytes counted" 5 p.bytes_received;
+    (match p.first_byte_at_sec with
+     | Some _ -> ()
+     | None -> Alcotest.fail "expected first_byte_at_sec for early chunk")
+  | Ok (_, _) ->
+    Alcotest.fail "expected mid-stream idle timeout, got Ok"
+
 (* ── Runner ──────────────────────────────────────────────────── *)
 
 let () =
@@ -180,5 +288,14 @@ let () =
       ( "stats type shape",
         [
           Alcotest.test_case "zero state" `Quick test_stats_zero_state_shape;
+        ] );
+      ( "RFC-0129 read_body_with_idle",
+        [
+          Alcotest.test_case "steady stream completes" `Quick
+            test_idle_steady_stream_completes;
+          Alcotest.test_case "silent-from-start cancels" `Quick
+            test_idle_silent_from_start_cancels;
+          Alcotest.test_case "mid-stream silence cancels" `Quick
+            test_idle_mid_stream_silence_cancels;
         ] );
     ]

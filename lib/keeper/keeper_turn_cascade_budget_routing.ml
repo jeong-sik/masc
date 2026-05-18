@@ -156,5 +156,7 @@ let record_turn_failure_stress
           ; recoverable = is_auto_recoverable
           ; error_kind = Some (Agent_stress.error_kind_of_string (sdk_error_kind err))
           }
-    ; timestamp = Unix.gettimeofday ()
+    ; (* NDT-OK: stress telemetry records wall-clock observation time only;
+         failure classification is derived above. *)
+      timestamp = Unix.gettimeofday ()
     }

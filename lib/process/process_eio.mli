@@ -134,6 +134,15 @@ type detached_handle = {
       (** [Unix.gettimeofday ()] at spawn time. *)
 }
 
+type detached_devnull_handle = {
+  devnull_pid : int;
+      (** Child process PID (also the process-group leader). *)
+  devnull_pgid : int;
+      (** Process group ID; always equal to [pid] for tree-kill. *)
+  devnull_started_at : float;
+      (** [Unix.gettimeofday ()] at spawn time. *)
+}
+
 val spawn_detached :
   argv:string list ->
   env:string array ->
@@ -154,6 +163,16 @@ val spawn_detached :
 
     The argv-only API is intentional: no shell interpolation,
     matching the rest of this module. *)
+
+val spawn_detached_devnull :
+  argv:string list ->
+  env:string array ->
+  cwd:string ->
+  (detached_devnull_handle, string) result
+(** Like {!spawn_detached}, but redirects stdin/stdout/stderr to [/dev/null]
+    and returns no pipe FDs. Use this for fire-and-forget process starts where
+    retaining stdout/stderr pipes would either leak descriptors or backpressure
+    the child. *)
 
 val tree_kill :
   pgid:int ->

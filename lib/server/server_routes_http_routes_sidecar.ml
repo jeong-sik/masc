@@ -1,10 +1,10 @@
 (** HTTP routes for sidecar lifecycle.
 
-    Provides [/api/v1/sidecar/{start,stop,status}] endpoints that shell
-    out to [sidecars/<id>-bot/run.sh]. The wrapper is the single source
-    of truth for how a sidecar is started, signalled, and inspected —
-    this module only thin-wraps it for HTTP consumers (i.e. the
-    dashboard's connectors surface).
+    Provides [/api/v1/sidecar/{start,stop,status}] endpoints that dispatch
+    [sidecars/<id>-bot/run.sh]. The wrapper is the single source of truth for
+    how a sidecar is started, signalled, and inspected — this module only
+    thin-wraps it for HTTP consumers (i.e. the dashboard's connectors
+    surface).
 
     Design baseline: docs/SIDECAR-LIFECYCLE-API-RFC.md.
 
@@ -19,13 +19,13 @@ open Server_auth
 module Http = Http_server_eio
 
 (** Whitelist of sidecars the backend will spawn or signal. Anything else
-    short-circuits at the request boundary so [Sys.command] is never reached
-    for an attacker-controlled id. *)
+    short-circuits at the request boundary before any process dispatch can see
+    an attacker-controlled id. *)
 let known_ids = [ "discord"; "imessage"; "slack"; "telegram" ]
 
 (** Pure whitelist check; exposed so unit tests can confirm shell-meta and
-    path traversal in [name=] are rejected before any [Sys.command] /
-    [Process_eio] is reached. *)
+    path traversal in [name=] are rejected before any process dispatch is
+    reached. *)
 let validate_name = function
   | None -> Error "missing 'name' query parameter"
   | Some n when List.mem n known_ids -> Ok n
@@ -341,11 +341,29 @@ let runtime_sidecar_script_result ?base_path id =
            script)
 ;;
 
-let sidecar_start_shell_command ~base_path ~script =
-  Printf.sprintf
-    "MASC_BASE_PATH=%s setsid nohup %s start </dev/null >/dev/null 2>&1 &"
-    (Filename.quote base_path)
-    (Filename.quote script)
+type sidecar_start_plan =
+  { argv : string list
+  ; env : string array
+  }
+
+let env_with_base_path ~base_path =
+  let key = Env_config_core.base_path_env_key in
+  let prefix = key ^ "=" in
+  Unix.environment ()
+  |> Array.to_list
+  |> List.filter (fun entry -> not (starts_with ~prefix entry))
+  |> fun rest -> Array.of_list ((prefix ^ base_path) :: rest)
+;;
+
+let sidecar_start_plan ~base_path ~script =
+  { argv = [ script; "start" ]; env = env_with_base_path ~base_path }
+;;
+
+let start_sidecar_process ~base_path ~script =
+  let plan = sidecar_start_plan ~base_path ~script in
+  match Process_eio.spawn_detached_devnull ~argv:plan.argv ~env:plan.env ~cwd:"" with
+  | Ok _ -> Ok ()
+  | Error msg -> Error msg
 ;;
 
 type desired_state =
@@ -665,7 +683,7 @@ let reconcile_desired_once
       ?(write_attempt = fun (_ : attempt_record) -> Ok ())
       ~current_generation
       ~observed_state
-      ~start_shell
+      ~start_process
       (record : desired_record)
   =
   if record.generation <> current_generation
@@ -681,7 +699,7 @@ let reconcile_desired_once
          let attempt = next_attempt_record ~now ~next_retry_at previous_attempt record in
          (match write_attempt attempt with
           | Ok () ->
-            start_shell ();
+            start_process ();
             Reconcile_started
           | Error _ -> Reconcile_noop "attempt_write_failed"))
     | Desired_running, Observed_available -> Reconcile_noop "already_available"
@@ -1377,11 +1395,9 @@ let handle_start state request reqd =
             ~status:`Internal_server_error
             (`Assoc [ "ok", `Bool false; "error", `String msg ])
         | Ok desired ->
-          (* Detach: run via setsid + nohup so the sidecar survives backend
-                   restart. Only [script] is interpolated, and the path comes from
-                   a resolved directory + fixed filename, so [Filename.quote] gives
-                   a closed-shell injection surface. *)
-          let cmd = sidecar_start_shell_command ~base_path ~script in
+          (* Detach without a shell: [Process_eio] gives the child its own
+             session and redirects stdio to [/dev/null], so the sidecar
+             survives backend restart without retaining server FDs. *)
           let status_json = read_status_json ~base_path id in
           let observed_state = observed_state_of_status_json status_json in
           let previous_attempt = read_attempt_record ~base_path id in
@@ -1391,14 +1407,11 @@ let handle_start state request reqd =
               ?previous_attempt
               ~observed_state
               ~write_attempt:(write_attempt_record ~base_path ~id)
-              ~start_shell:(fun () ->
-                let exit_code = Sys.command cmd in
-                if exit_code <> 0
-                then
-                  Log.Misc.warn
-                    "[Sidecar] shell start failed with exit=%d (cmd=%s)"
-                    exit_code
-                    cmd)
+              ~start_process:(fun () ->
+                match start_sidecar_process ~base_path ~script with
+                | Ok () -> ()
+                | Error msg ->
+                  Log.Misc.warn "[Sidecar] detached start failed: %s" msg)
               desired
           in
           respond_json

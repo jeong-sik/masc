@@ -1,4 +1,4 @@
-(** Unit tests for [Fd_accountant] (RFC-0101 PR-2).
+(** Unit tests for [Fd_accountant] (RFC-0101).
 
     Pins down:
     - Per-kind cap enforcement under concurrent fan-in.

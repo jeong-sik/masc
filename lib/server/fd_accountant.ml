@@ -1,16 +1,18 @@
-type kind = Docker_spawn | Provider_http | Sandbox_exec | Log_writer
+type kind = Docker_spawn | Provider_http | Provider_cli | Sandbox_exec | Log_writer
 
-let all_kinds = [ Docker_spawn; Provider_http; Sandbox_exec; Log_writer ]
+let all_kinds = [ Docker_spawn; Provider_http; Provider_cli; Sandbox_exec; Log_writer ]
 
 let kind_to_string = function
   | Docker_spawn -> "docker_spawn"
   | Provider_http -> "provider_http"
+  | Provider_cli -> "provider_cli"
   | Sandbox_exec -> "sandbox_exec"
   | Log_writer -> "log_writer"
 
 let kind_of_string = function
   | "docker_spawn" -> Some Docker_spawn
   | "provider_http" -> Some Provider_http
+  | "provider_cli" -> Some Provider_cli
   | "sandbox_exec" -> Some Sandbox_exec
   | "log_writer" -> Some Log_writer
   | _ -> None
@@ -18,12 +20,14 @@ let kind_of_string = function
 let env_var = function
   | Docker_spawn -> "MASC_DOCKER_SPAWN_CONCURRENCY"
   | Provider_http -> "MASC_PROVIDER_HTTP_CONCURRENCY"
+  | Provider_cli -> "MASC_PROVIDER_CLI_CONCURRENCY"
   | Sandbox_exec -> "MASC_SANDBOX_EXEC_CONCURRENCY"
   | Log_writer -> "MASC_LOG_WRITER_CONCURRENCY"
 
 let default_cap = function
   | Docker_spawn -> 8
   | Provider_http -> 16
+  | Provider_cli -> 8
   | Sandbox_exec -> 32
   | Log_writer -> 64
 

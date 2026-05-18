@@ -1,4 +1,4 @@
-(** Generic 4-kind FD accountant (RFC-0101).
+(** Generic 5-kind FD accountant (RFC-0101 + provider CLI extension).
 
     Extends {!Docker_spawn_throttle}'s 2-layer cap (semaphore + FD-pressure
     serialization) into a multi-class pool covering every spawn class
@@ -7,7 +7,7 @@
     Reference incident: 2026-05-16 18:08-18:15 ENFILE storm — 12+
     keepers concurrently retried cascade tiers, each retry spawned a
     fresh [docker run --rm], no backpressure existed at the host
-    layer. PR #15727 closed docker; this RFC closes the other three
+    layer. PR #15727 closed docker; this module closes the other
     classes against the same ceiling.
 
     Layer A (per-kind): bounded concurrency via [Eio.Semaphore]. Each
@@ -28,6 +28,11 @@ type kind =
       (** Outbound LLM/tool HTTP connection
           ([Eio.Net.with_tcp_connect] + TLS state). One slot per
           in-flight call. *)
+  | Provider_cli
+      (** Outbound LLM provider subprocess attempt (Claude Code,
+          Gemini CLI, Codex CLI, Kimi CLI). OAS owns the subprocess
+          implementation; MASC accounts the call at the transport
+          boundary so CLI fan-out shares FD-pressure backpressure. *)
   | Sandbox_exec
       (** Inner shell exec inside a sandbox container (popen pipes
           stdin/out/err + cgroup FD). Distinct from [Docker_spawn]

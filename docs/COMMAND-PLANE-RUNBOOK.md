@@ -194,14 +194,14 @@ Inspect the current Docker playground fanout and any host process with open FDs
 inside it:
 
 ```bash
-scripts/docker-playground-fd-status.sh --root ~/me/.masc/playground/docker
+scripts/docker-playground-fd-status.sh --root "$MASC_BASE_PATH/.masc/playground/docker"
 ```
 
 Review stale clean worktree candidates first:
 
 ```bash
 scripts/cleanup-docker-playground-worktrees.sh \
-  --root ~/me/.masc/playground/docker \
+  --root "$MASC_BASE_PATH/.masc/playground/docker" \
   --repo masc-mcp \
   --days 7
 ```
@@ -210,7 +210,7 @@ Apply only after reviewing the `CANDID` lines:
 
 ```bash
 scripts/cleanup-docker-playground-worktrees.sh \
-  --root ~/me/.masc/playground/docker \
+  --root "$MASC_BASE_PATH/.masc/playground/docker" \
   --repo masc-mcp \
   --days 7 \
   --apply
@@ -225,7 +225,7 @@ removed unless the operator explicitly opts in:
 
 ```bash
 scripts/cleanup-docker-playground-worktrees.sh \
-  --root ~/me/.masc/playground/docker \
+  --root "$MASC_BASE_PATH/.masc/playground/docker" \
   --repo masc-mcp \
   --days 7 \
   --include-broken

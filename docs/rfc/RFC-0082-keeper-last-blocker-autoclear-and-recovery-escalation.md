@@ -35,7 +35,7 @@ A new TLA+ spec `tla+/KeeperLastBlockerLatch.tla` accompanies this RFC and prove
 
 ### §1.1 Production state, masc-improver, 2026-05-14
 
-`~/me/.masc/keepers/masc-improver.json`:
+`<base-path>/.masc/keepers/masc-improver.json`:
 
 ```json
 {
@@ -111,7 +111,7 @@ The decision-grade block is **`last_blocker`**, not `paused`. The stamp path:
 
 ### §1.3 Why this matters
 
-In a fleet of 18 keepers, 6 became stuck (`distinct_count=6` in `stale_fleet_batch`) on the same cascade exhaustion. The 6-count threshold escalates from per-keeper to fleet-level pause, multiplying the operational impact. Manual recovery — `~/me/.masc/keepers/<keeper>.json` direct edit, server restart — is the only current mechanism, and it's not scriptable through the documented surface.
+In a fleet of 18 keepers, 6 became stuck (`distinct_count=6` in `stale_fleet_batch`) on the same cascade exhaustion. The 6-count threshold escalates from per-keeper to fleet-level pause, multiplying the operational impact. Manual recovery — `<base-path>/.masc/keepers/<keeper>.json` direct edit, server restart — is the only current mechanism, and it's not scriptable through the documented surface.
 
 ## §2 Goals / Non-goals
 
@@ -284,10 +284,10 @@ Phase 1 was originally framed as the load-bearing change. The 2026-05-15 measure
    # Stop server (SIGTERM)
    kill $(lsof -nP -i :8935 | rg LISTEN | awk '{print $2}')
    # Backup + clear blocker
-   cp ~/me/.masc/keepers/masc-improver.json ~/me/.masc/_backups/masc-improver-$(date +%Y%m%d-%H%M%S).json
+   cp "$MASC_BASE_PATH/.masc/keepers/masc-improver.json" "$MASC_BASE_PATH/.masc/_backups/masc-improver-$(date +%Y%m%d-%H%M%S).json"
    jq '.last_blocker = null | .last_proactive_preview = ""' \
-     ~/me/.masc/keepers/masc-improver.json > ~/me/.masc/keepers/masc-improver.json.tmp
-   mv ~/me/.masc/keepers/masc-improver.json.tmp ~/me/.masc/keepers/masc-improver.json
+     "$MASC_BASE_PATH/.masc/keepers/masc-improver.json" > "$MASC_BASE_PATH/.masc/keepers/masc-improver.json.tmp"
+   mv "$MASC_BASE_PATH/.masc/keepers/masc-improver.json.tmp" "$MASC_BASE_PATH/.masc/keepers/masc-improver.json"
    # Restart server (operator-specific command)
    ```
    Direct JSON edits while the server is running race with `main_eio` meta writes — only safe with server stopped.
@@ -324,7 +324,7 @@ Phase 1 was originally framed as the load-bearing change. The 2026-05-15 measure
 
 ## §11 References
 
-- Production state evidence: `~/me/.masc/keepers/masc-improver.json` + `~/me/.masc/keepers/masc-improver/execution-receipts/2026-05/14.jsonl` (2026-05-14)
+- Production state evidence: `<base-path>/.masc/keepers/masc-improver.json` + `<base-path>/.masc/keepers/masc-improver/execution-receipts/2026-05/14.jsonl` (2026-05-14)
 - Dashboard screenshots, masc-improver detail panel, 2026-05-14
 - 3-axis code-path investigation, sub-agent transcripts at `/private/tmp/claude-502/-Users-dancer-me/<session>/tasks/{ad8ec8979cef72647,a2b20180f03ae2f55,a8c42e55f427f68da}.output`
 - `MEMORY.md` `project_masc_mcp_fleet_idle_quartet` — 4-axis configured-but-idle pattern; this RFC addresses a 2-axis tight variant (latch + dead UI)

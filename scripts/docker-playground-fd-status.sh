@@ -16,7 +16,7 @@ Usage:
 Options:
   --root PATH   Docker playground root. Defaults to
                 $MASC_BASE_PATH/.masc/playground/docker, then
-                $HOME/me/.masc/playground/docker.
+                $PWD/.masc/playground/docker.
   --limit N     Number of FD holder rows to print. Default: 20.
 EOF
 }
@@ -36,14 +36,7 @@ if ! [[ "$LIMIT" =~ ^[0-9]+$ ]]; then
 fi
 
 if [ -z "$ROOT" ]; then
-  BASE="${MASC_BASE_PATH:-}"
-  if [ -z "$BASE" ] && [ -d "${HOME:-}/me/.masc" ]; then
-    BASE="${HOME}/me"
-  fi
-  if [ -z "$BASE" ]; then
-    echo "cannot infer playground root; pass --root PATH" >&2
-    exit 2
-  fi
+  BASE="${MASC_BASE_PATH:-$(pwd)}"
   ROOT="$BASE/.masc/playground/docker"
 fi
 

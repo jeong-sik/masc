@@ -23,7 +23,7 @@
 
 ### 1.1 Symptom — recurring fix on the same axis
 
-A 24-hour log sample (2026-05-08, basepath `~/me/.masc/logs/system_log_2026-05-08.jsonl`)
+A 24-hour log sample (2026-05-08, basepath `<base-path>/.masc/logs/system_log_2026-05-08.jsonl`)
 contains 42 WARN of the form:
 
 ```

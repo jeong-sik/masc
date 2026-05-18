@@ -193,7 +193,7 @@ To be filled at closeout. Each phase PR appends to this section.
 
 ### 7.1 Production log evidence (2026-05-13)
 
-Source: `~/me/.masc/logs/masc-mcp-8935.log`. 2 boot sessions, 540 `is not registered` lines, 88 distinct tool names.
+Source: `<base-path>/.masc/logs/masc-mcp-8935.log`. 2 boot sessions, 540 `is not registered` lines, 88 distinct tool names.
 
 Sample (full list in PR body of Phase 1):
 

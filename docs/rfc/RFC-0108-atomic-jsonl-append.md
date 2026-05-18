@@ -22,7 +22,7 @@ implementation_prs: [15906, 15922, 15926, 15928, 15936, 15949]
 
 ## 1. Context & Evidence
 
-2026-05-17 `~/me/.masc/` 스캐너로 라이브 JSONL 출력을 전수 검증한 결과 **43 파일 / 379 라인 malformed**가 발견되었다. 손상 데이터는 raw_decode + utf-8 replace 로 수리되어 `~/me/.masc/_repair_backup/20260517/` 에 백업되어 있고, 잔해 38건은 `*.quarantine` sidecar 로 격리되어 있다.
+2026-05-17 `<base-path>/.masc/` 스캐너로 라이브 JSONL 출력을 전수 검증한 결과 **43 파일 / 379 라인 malformed**가 발견되었다. 손상 데이터는 raw_decode + utf-8 replace 로 수리되어 `<base-path>/.masc/_repair_backup/20260517/` 에 백업되어 있고, 잔해 38건은 `*.quarantine` sidecar 로 격리되어 있다.
 
 손상은 4 카테고리에 분포한다:
 
@@ -190,15 +190,15 @@ val close : t -> unit
 
 각 마이그레이션 PR 머지 후 24시간 운영 → 해당 카테고리 경로 재스캔. malformed 0 확인.
 
-- PR-3 머지 후: `~/me/.masc/logs/system_log_*.jsonl`
-- PR-4 머지 후: `~/me/.masc/trajectories/`
-- PR-5 머지 후: `~/me/.masc/oas-events/` + `~/me/.masc/keepers/*/reaction-ledger/`
+- PR-3 머지 후: `<base-path>/.masc/logs/system_log_*.jsonl`
+- PR-4 머지 후: `<base-path>/.masc/trajectories/`
+- PR-5 머지 후: `<base-path>/.masc/oas-events/` + `<base-path>/.masc/keepers/*/reaction-ledger/`
 
 한 번이라도 malformed ≥ 1 재발견 시 즉시 §3.2 보장 모델 회귀.
 
 ### 5.3 Stress reproduce
 
-수리 백업 (`~/me/.masc/_repair_backup/20260517/`) 의 손상 라인 패턴을 unit test 골든으로 복제. 같은 동시성 조건을 `Jsonl_atomic` 위에서 재현 시 malformed 0 이어야 한다.
+수리 백업 (`<base-path>/.masc/_repair_backup/20260517/`) 의 손상 라인 패턴을 unit test 골든으로 복제. 같은 동시성 조건을 `Jsonl_atomic` 위에서 재현 시 malformed 0 이어야 한다.
 
 ## 6. Non-Goals (명시)
 
@@ -220,6 +220,6 @@ val close : t -> unit
 ## 8. References
 
 - 이번 스캔 결과: `~/me/planning/claude-plans/fluffy-stargazing-eclipse.md`
-- 수리 백업: `~/me/.masc/_repair_backup/20260517/`
+- 수리 백업: `<base-path>/.masc/_repair_backup/20260517/`
 - RFC-0079: structured log source decoder (system_log writer 가 따르는 schema)
 - RFC-0088: Counter-as-Fix umbrella (이 RFC 의 진단 §2 가 같은 패턴 분석에 닿음)

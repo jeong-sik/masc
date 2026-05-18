@@ -1,6 +1,6 @@
 (** Ratchet for [Keeper_exec_shell.gh_min_timeout_sec].
 
-    2026-04-17/18 logs (~/me/.masc/tool_calls) showed 41
+    2026-04-17/18 logs (<base-path>/.masc/tool_calls) showed 41
     gh_command_timed_out rejections in 2 days, every one at
     timeout_sec=5. gh round-trip + auth handshake is usually 3-10s,
     so any floor under ~15s lets the LLM request a

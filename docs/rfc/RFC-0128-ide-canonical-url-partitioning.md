@@ -35,7 +35,7 @@ implementation_prs: [16028, 16036, 16040, 16044, 16049, 16053, 16055, 16058, 160
 Keeper 는 docker / playground sandbox 안에서 일한다. 같은 upstream 의 *별개 clone* 두 개가 동시에 존재한다:
 
 ```
-~/me/.masc/playground/docker/tech_glutton/repos/masc-mcp/    ← keeper sandbox clone
+<base-path>/.masc/playground/docker/tech_glutton/repos/masc-mcp/    ← keeper sandbox clone
 ~/me/workspace/yousleepwhen/masc-mcp/                        ← 사용자 working tree
 ```
 
@@ -45,7 +45,7 @@ Keeper 는 docker / playground sandbox 안에서 일한다. 같은 upstream 의 
 
 ### 1.3 유령 데이터 (제거 완료)
 
-진단 중 `~/me/.masc-ide/2026-05/16.jsonl`, `17.jsonl` 발견. `code_region` 모양인데 현재 코드 (`Ide_region_tracker.append_region` → `regions.jsonl` 평면) 가 만들 수 없는 date-partitioned 포맷.
+진단 중 `<base-path>/.masc-ide/2026-05/16.jsonl`, `17.jsonl` 발견. `code_region` 모양인데 현재 코드 (`Ide_region_tracker.append_region` → `regions.jsonl` 평면) 가 만들 수 없는 date-partitioned 포맷.
 
 - `lib/ide/dune:22` 가 `dated_jsonl` lib 의존을 가지지만 lib/ide 안 `Dated_jsonl.` caller 0.
 - 5월 이전 dated writer 가 있었다가 제거됐고, 디스크에 잔재만 남음.
@@ -141,7 +141,7 @@ val create
 
 | 입력 | canonical_url | 정규화 |
 |------|--------------|--------|
-| `~/me/.masc/playground/docker/tech_glutton/repos/masc-mcp/lib/foo.ml` | `github.com_jeong-sik_masc-mcp` | `lib/foo.ml` |
+| `<base-path>/.masc/playground/docker/tech_glutton/repos/masc-mcp/lib/foo.ml` | `github.com_jeong-sik_masc-mcp` | `lib/foo.ml` |
 | `~/me/workspace/yousleepwhen/masc-mcp/lib/foo.ml` | `github.com_jeong-sik_masc-mcp` | `lib/foo.ml` |
 | `lib/foo.ml` | `github.com_jeong-sik_masc-mcp` | `lib/foo.ml` (그대로) |
 | `/tmp/scratch.ml` | (resolve 실패) | `None` → `_orphan/` (절대경로 그대로 기록) |
@@ -215,7 +215,7 @@ Phase 3 는 lazy 가능. 평면 파일이 비어있거나 사용자가 동의하
 
 ### 유령 데이터
 
-`~/me/.masc-ide/2026-05/{16,17}.jsonl` 는 본 RFC 작성 직전 사용자 동의로 삭제됨. Phase 1 acceptance test 에서 동일 포맷의 잔재가 다시 생기는지 검사 (`find <base>/.masc-ide -name '*-*.jsonl' | wc -l == 0`).
+`<base-path>/.masc-ide/2026-05/{16,17}.jsonl` 는 본 RFC 작성 직전 사용자 동의로 삭제됨. Phase 1 acceptance test 에서 동일 포맷의 잔재가 다시 생기는지 검사 (`find <base>/.masc-ide -name '*-*.jsonl' | wc -l == 0`).
 
 ## 6. Test plan
 
@@ -263,7 +263,7 @@ test/test_ide_canonical_url_join.ml
 
 ## 7. Open questions
 
-1. **`.masc-ide` 위치 — server base anchored 유지 vs. `~/.masc-ide/` (XDG-style)**: 현재 안 = server base anchored. 두 서버 인스턴스가 같은 host 에서 돌면 store 가 분리됨. XDG-style 이면 통합. 사용자 의견 필요. (본 RFC default: server base anchored 유지.)
+1. **`.masc-ide` 위치 — server base anchored 유지 vs. user-home XDG-style**: 현재 안 = server base anchored. 두 서버 인스턴스가 같은 host 에서 돌면 store 가 분리됨. XDG-style 이면 통합. 사용자 의견 필요. (본 RFC default: server base anchored 유지.)
 
 2. **유사 캐노니컬 URL의 prefix 충돌**: `github.com/foo/bar` 와 `github.com/foo/bar-mirror` 의 slug 는 `_` 로 구분되지만 `find_canonical_url_by_path_prefix` 가 path 기반이라 두 repo 가 nested 면 longest-match 만으로 충분한지 검토 필요.
 

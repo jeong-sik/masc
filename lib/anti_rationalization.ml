@@ -674,7 +674,7 @@ let review
                  evaluator. Approve by liveness — same policy as the
                  [Error err] branch below — instead of blaming the
                  completing keeper for an evaluator-side gap. Observed
-                 35 rejects in 2 days (#8688, ~/me/.masc/tool_calls). *)
+                 35 rejects in 2 days (#8688, <base-path>/.masc/tool_calls). *)
                    Log.Task.warn
                      "[anti-rationalization] evaluator returned empty text (approving by \
                       liveness)";

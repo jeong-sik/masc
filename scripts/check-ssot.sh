@@ -98,6 +98,14 @@ check_rule "R5-health-path" 0 \
   'server_health_paths' \
   lib
 
+# SSOT-R6 — no home-anchored MASC runtime root. Runtime state must resolve
+# from an explicit base path and then append .masc.
+check_rule "R6-home-masc-root" 0 \
+  "<base-path>/.masc with explicit MASC_BASE_PATH or --base-path" \
+  '(\$HOME|\$\{HOME[^}]*\}|~)/[^[:space:]`'\''"]*\.masc([/[:space:]`'\''".,)]|$)' \
+  '' \
+  bin lib scripts docs
+
 # SSOT-R3 (tool-name literal) is intentionally deferred to #8448's landing:
 # the raw `"masc_..."` match is too noisy without the Tool_name.Keeper variant
 # refactor in place. Add to this script once #8448 introduces a narrow dispatch

@@ -1,6 +1,6 @@
 (** Regression guard for [Tool_task.completion_rejection_message].
 
-    2026-04-17/18 ~/me/.masc/tool_calls showed 37 completion rejects
+    2026-04-17/18 <base-path>/.masc/tool_calls showed 37 completion rejects
     where the keeper retried the same perfunctory notes because the
     rejection text said only "describe actual work". The message must
     now always embed [completion_notes_example] so small-LLM keepers

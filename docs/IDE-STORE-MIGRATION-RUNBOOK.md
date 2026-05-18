@@ -10,7 +10,7 @@ migration.
 
 If your IDE looks empty after pulling the RFC-0128 PRs:
 
-1. Verify `~/.masc/config/repositories.toml` has an entry whose
+1. Verify `<base-path>/.masc/config/repositories.toml` has an entry whose
    `local_path` points at the working tree you opened in the IDE.
 2. Restart `main_eio` so the new entry is read.
 3. Open the IDE with `?repo_id=<that-id>`.

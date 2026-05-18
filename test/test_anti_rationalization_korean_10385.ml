@@ -10,7 +10,7 @@
 
     The keeper fleet runs Korean LLM output as the dominant
     surface (Kidsnote, Korean commit messages, Korean broadcast).
-    [~/me/.masc/institution_episodes.jsonl] holds entries with
+    [<base-path>/.masc/institution_episodes.jsonl] holds entries with
     "나중에", "범위 밖", "재현 안됨" that the pre-fix detector
     silently ignored — 0% recall on Korean rationalization while
     the dashboard counter showed nominal English hits.

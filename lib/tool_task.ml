@@ -276,7 +276,7 @@ let persisted_completion_contract ~(task_opt : Masc_domain.task option) =
    gate rejects a completion. Prior form said only "describe actual
    work"; small-LLM keepers retried the same perfunctory notes
    (37 Tool_task completion rejects observed on 2026-04-17/18 in
-   ~/me/.masc/tool_calls). The example shows the expected density:
+   <base-path>/.masc/tool_calls). The example shows the expected density:
    what changed, which files, what verification ran. See #8688. *)
 let completion_notes_example =
   "Example of accepted notes: 'Added Event_kind.Board variant to \

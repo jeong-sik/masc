@@ -293,7 +293,7 @@ let save_file_atomic (path : string) (content : string) : (unit, string) Result.
    that accumulated because the owning process was SIGKILL'd or
    [Stdlib.Filename.temp_file] raised ENFILE/EMFILE (so the with-handler
    never ran).  The 2026-04-24 audit found 33 orphans in
-   [~/me/.masc/] with 6 non-zero files carrying real keeper-meta
+   [<base-path>/.masc/] with 6 non-zero files carrying real keeper-meta
    JSON — evidence of 6 silent atomic-save failures that
    dropped data.
 

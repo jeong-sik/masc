@@ -3,7 +3,7 @@
     than rejecting the completing keeper.
 
     35 rejections in 2 days on 2026-04-17/18 (#8688,
-    ~/me/.masc/tool_calls) surfaced where the evaluator returned an
+    <base-path>/.masc/tool_calls) surfaced where the evaluator returned an
     empty text block; the gate rejected the keeper with
     "review format unrecognized: empty review output" even though
     the keeper had no role in the evaluator's failure.

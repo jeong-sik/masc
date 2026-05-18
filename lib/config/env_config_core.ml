@@ -323,7 +323,7 @@ let running_under_test_executable () =
     module init-time caching, or Eio.Path absolute-path
     interpretation) silently falls through to the operator's HOME
     and appends fixture data to the live ledger — the exact
-    failure mode diagnosed on [~/me/.masc/board_votes.jsonl]
+    failure mode diagnosed on [<base-path>/.masc/board_votes.jsonl]
     (112 hot-voter-* rows overwrote real keeper votes).
 
     The safeguard is lossy by design: a test that resolves

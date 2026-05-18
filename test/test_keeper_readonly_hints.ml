@@ -2,7 +2,7 @@
 
     The prior form only named the blocked category; small-LLM keepers
     then retried the same chaining/redirect command. 2026-04-17/18 logs
-    in ~/me/.masc/tool_calls showed 57 command_blocked_readonly
+    in <base-path>/.masc/tool_calls showed 57 command_blocked_readonly
     rejections with no wire-level rewrite. Each active category now
     carries an explicit Good:/Bad: example; this test locks that in. *)
 

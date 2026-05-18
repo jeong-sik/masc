@@ -202,6 +202,19 @@ let metric_oas_bridge_unmigrated_payload_kind =
 let metric_cascade_attempt_empty_provider_label =
   "masc_cascade_attempt_empty_provider_label_total"
 ;;
+
+(* Per-tool-result compaction events emitted by
+   [Keeper_context_core.sanitize_checkpoint_message] when a tool
+   result exceeds the per-message count cap, the aggregate byte
+   budget, or its own single-result byte cap.  Labels are
+   closed-vocabulary so cardinality is bounded:
+     action  = stubbed | truncated
+     reason  = over_count | over_aggregate_bytes | over_single_byte
+   The [stubbed] action replaces the content entirely with a marker
+   string; [truncated] caps the content and appends a marker. *)
+let metric_keeper_context_tool_result_compacted =
+  "masc_keeper_context_tool_result_compacted_total"
+;;
 let metric_runtime_ollama_probe_generate_skips =
   "masc_runtime_ollama_probe_generate_skips_total"
 ;;

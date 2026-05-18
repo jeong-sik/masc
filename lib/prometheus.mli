@@ -228,6 +228,27 @@ val metric_oas_bridge_unmigrated_payload_kind : string
     call site and pass a real provider through. *)
 val metric_cascade_attempt_empty_provider_label : string
 
+(** Counter: tool-result blocks compacted by
+    [Keeper_context_core.sanitize_checkpoint_message] because the
+    raw content would have exceeded a budget.  Labels are
+    closed-vocabulary (cardinality 6):
+
+    - [action] = [stubbed | truncated].
+      [stubbed] replaces the content with a marker string so the
+      block contributes essentially zero bytes; [truncated] keeps a
+      prefix and appends a cap marker.
+    - [reason] = [over_count | over_aggregate_bytes | over_single_byte].
+      [over_count] = per-message tool-result count cap reached.
+      [over_aggregate_bytes] = adding this result would exceed the
+      cumulative tool-result byte budget for the message.
+      [over_single_byte] = this single result exceeds the per-result
+      byte cap.
+
+    A persistent non-zero rate means operators are losing tool-result
+    payload at checkpoint time; the [reason] label tells them which
+    cap to revisit (per-result vs aggregate vs count). *)
+val metric_keeper_context_tool_result_compacted : string
+
 val metric_runtime_ollama_probe_generate_skips : string
 
 (** #9632: subprocess executions that exceeded their configured

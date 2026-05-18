@@ -88,6 +88,61 @@ let repos_path (name : string) : string =
 let bundle_paths (name : string) : string list =
   [ bundle_root name; mind_path name; repos_path name ]
 
+(* RFC-0128 §4.5 — parse a sandbox playground absolute file path back
+   into [(repo_id, rel_path)]. Used by the keeper write path so that
+   files keepers edit inside their per-keeper repo clones map to the
+   same canonical-URL bucket as files in the user's working tree.
+
+   Layout matched (relative to [base_path]):
+
+     .masc/playground/<keeper>/repos/<repo_id>/<rel>           — Local
+     .masc/playground/docker/<keeper>/repos/<repo_id>/<rel>    — Docker
+
+   The function is structural: it walks the segments to find the
+   ".../repos/<id>/..." anchor inside the [.masc/playground/] subtree.
+   Anything outside that subtree, or paths that stop before the
+   anchor, return [None]. *)
+let parse_playground_repo_path ~base_path ~abs_path =
+  if Filename.is_relative abs_path then None
+  else
+    let base =
+      let n = String.length base_path in
+      if n > 0 && base_path.[n - 1] = '/'
+      then String.sub base_path 0 (n - 1)
+      else base_path
+    in
+    let base_with_slash = base ^ "/" in
+    if not (String.starts_with ~prefix:base_with_slash abs_path) then None
+    else
+      let rel =
+        String.sub abs_path (String.length base_with_slash)
+          (String.length abs_path - String.length base_with_slash)
+      in
+      let segs = String.split_on_char '/' rel in
+      (* Locate the ".masc" + "playground" prefix, then the *first*
+         "repos" segment after it. The segment immediately following
+         "repos" is the repo_id, and everything after that is the
+         repo-relative remainder.
+         Layouts accepted:
+           .masc/playground/<keeper>/repos/<id>/<rel>          (Local)
+           .masc/playground/docker/<keeper>/repos/<id>/<rel>   (Docker) *)
+      let rec after_playground = function
+        | ".masc" :: "playground" :: tl -> Some tl
+        | _ :: tl -> after_playground tl
+        | [] -> None
+      in
+      match after_playground segs with
+      | None -> None
+      | Some rest ->
+        let rec find_repos = function
+          | "repos" :: repo :: r when repo <> "" && r <> [] ->
+            Some (repo, String.concat "/" r)
+          | _ :: tl -> find_repos tl
+          | [] -> None
+        in
+        find_repos rest
+;;
+
 (** {1 Worktree Naming}
 
     Worktree directory names and git branch names for keeper task

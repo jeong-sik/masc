@@ -608,6 +608,10 @@ jobs:
       - name: Run tests (quick suite)
         id: quick_suite
         continue-on-error: true
+        # scripts/ci-run-tests.sh has its own 1200s timeout and diagnostics,
+        # but this step-level bound keeps a stuck timeout/diagnostic path from
+        # holding the shared runner for the full Build and Test job budget.
+        timeout-minutes: 25
         env:
           ME_ROOT: /tmp/me
           ALCOTEST_QUICK_TESTS: "1"

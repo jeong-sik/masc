@@ -95,10 +95,10 @@ GH_HOSTS_USER_RE = re.compile(r"^\s*user:\s*['\"]?([^'\"\s#]+)")
 ERROR_STATUSES = {"error", "failed", "failure", "timeout", "cancelled", "canceled"}
 
 
-def default_base_path() -> str:
-    return (
-        os.environ.get("MASC_BASE_PATH") or os.environ.get("ME_ROOT") or str(Path.cwd())
-    )
+def default_base_path() -> str | None:
+    # RFC-0121: MASC_BASE_PATH is the sole canonical source.
+    value = os.environ.get("MASC_BASE_PATH", "").strip()
+    return value or None
 
 
 @dataclass
@@ -2051,6 +2051,11 @@ def audit_keeper(
 
 
 def build_report(args: argparse.Namespace) -> dict[str, Any]:
+    if args.base_path is None:
+        raise SystemExit(
+            "Error: MASC_BASE_PATH is required (or pass --base-path PATH). "
+            "RFC-0121 forbids ME_ROOT/cwd fallback."
+        )
     base_path = Path(args.base_path).expanduser().resolve()
     config_dir = base_path / ".masc" / "config" / "keepers"
     if not config_dir.is_dir():
@@ -2298,7 +2303,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--base-path",
         default=default_base_path(),
-        help="MASC base path containing .masc (default: MASC_BASE_PATH, then ME_ROOT, then cwd)",
+        help="MASC base path containing .masc (required; reads MASC_BASE_PATH)",
     )
     parser.add_argument(
         "--expected-keepers",

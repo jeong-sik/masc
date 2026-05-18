@@ -1,14 +1,17 @@
 ---
 rfc: "0107"
 title: "Outbound HTTP stack consolidation — pooled keep-alive, scoped Switch, Docker socket transport"
-status: Draft
+status: Active
 created: 2026-05-17
-updated: 2026-05-17
+updated: 2026-05-18
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0097", "0100", "0101"]
-implementation_prs: []
+implementation_prs: [15932, 15950, 15965, 15985, 15990, 16017, 15993, 15991]
+# Excluded from list (RFC body / design-spec merges, per README convention):
+#   #15912  Phase C.0 — Eio_context audit + RFC §3.3 amend
+#   #15941  Phase D.1  — Pool design (interface-first spec)
 ---
 
 # RFC-0107 — Outbound HTTP stack consolidation

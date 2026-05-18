@@ -10,11 +10,10 @@ import os
 from typing import Dict, Iterable, List, Tuple
 
 
-def default_base_path() -> str:
+def default_base_path() -> str | None:
+    # RFC-0121: MASC_BASE_PATH is the sole canonical source.
     masc_base = os.environ.get("MASC_BASE_PATH", "").strip()
-    if masc_base:
-        return masc_base
-    return os.getcwd()
+    return masc_base or None
 
 
 def parse_date(s: str) -> dt.datetime:
@@ -123,6 +122,11 @@ def main() -> int:
     args = parser.parse_args()
 
     base_path = default_base_path()
+    if base_path is None:
+        raise SystemExit(
+            "Error: MASC_BASE_PATH is required. RFC-0121 forbids ME_ROOT/cwd "
+            "fallback; export MASC_BASE_PATH explicitly."
+        )
     traces_dir = os.path.join(base_path, ".masc", "traces")
 
     start_ts, end_ts = ts_range_from_args(args.days, args.since, args.until)

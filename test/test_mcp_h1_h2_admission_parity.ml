@@ -1,6 +1,7 @@
 open Alcotest
 
 module Transport = Masc_mcp.Server_mcp_transport_http
+module Request_context = Masc_mcp.Server_mcp_request_context
 module Headers = Masc_mcp.Server_mcp_transport_http_headers
 module Negotiation = Mcp_transport_protocol.Http_negotiation
 
@@ -46,6 +47,83 @@ let assert_accept_mode label expected actual =
     | _ -> false
   in
   check bool label true same
+
+let context ?(session_id = "ctx-session") ?(session_was_provided = true) () =
+  Request_context.make
+    ~session_id_opt:(if session_was_provided then Some session_id else None)
+    ~generated_session_id:session_id ~auth_token:None
+    ~protocol_version:"2025-11-25" ~origin:"*" ~base_path:"/tmp/masc-test"
+
+let test_request_context_make_records_session_source () =
+  let supplied =
+    Request_context.make ~session_id_opt:(Some "supplied-session")
+      ~generated_session_id:"generated-session" ~auth_token:(Some "token")
+      ~protocol_version:"2025-11-25" ~origin:"https://example.test"
+      ~base_path:"/tmp/base"
+  in
+  check string "supplied session wins" "supplied-session" supplied.session_id;
+  check bool "supplied flag" true supplied.session_was_provided;
+  check (option string) "auth token" (Some "token") supplied.auth_token;
+  check string "protocol version" "2025-11-25" supplied.protocol_version;
+  check string "origin" "https://example.test" supplied.origin;
+  check string "base path" "/tmp/base" supplied.base_path;
+  let generated =
+    Request_context.make ~session_id_opt:None
+      ~generated_session_id:"generated-session" ~auth_token:None
+      ~protocol_version:"2025-11-25" ~origin:"*" ~base_path:"/tmp/base"
+  in
+  check string "generated fallback" "generated-session" generated.session_id;
+  check bool "generated flag" false generated.session_was_provided
+
+let test_request_context_decides_post_body () =
+  let streamable_request =
+    request ~headers:[ ("accept", "application/json, text/event-stream") ] "/mcp"
+  in
+  let json_only_request =
+    request ~headers:[ ("accept", "application/json") ] "/mcp"
+  in
+  (match
+     Request_context.decide_post_body ~request:streamable_request
+       ~context:(context ()) ~session_is_known:true (body "tools/call")
+   with
+  | Ok decision ->
+      assert_accept_mode "streamable decision" Negotiation.Streamable
+        decision.accept_mode;
+      check (list (pair string string)) "no warning headers" []
+        decision.accept_warn_headers
+  | Error _ -> fail "streamable known session should pass");
+  (match
+     Request_context.decide_post_body ~request:streamable_request
+       ~context:(context ~session_was_provided:false ()) ~session_is_known:false
+       (body "tools/call")
+   with
+  | Error (Request_context.Session_required msg) ->
+      check bool "session required message" true (String.length msg > 0)
+  | Ok _ -> fail "missing session should reject tools/call"
+  | Error _ -> fail "missing session should use Session_required");
+  (match
+     Request_context.decide_post_body ~request:streamable_request
+       ~context:(context ()) ~session_is_known:false (body "tools/call")
+   with
+  | Error (Request_context.Unknown_session msg) ->
+      check bool "unknown session message" true (String.length msg > 0)
+  | Ok _ -> fail "unknown session should reject tools/call"
+  | Error _ -> fail "unknown session should use Unknown_session");
+  (match
+     Request_context.decide_post_body ~request:json_only_request
+       ~context:(context ()) ~session_is_known:true (body "tools/call")
+   with
+  | Error (Request_context.Invalid_accept msg) ->
+      check string "invalid accept message" Request_context.invalid_accept_message
+        msg
+  | Ok _ -> fail "json-only request should reject tools/call"
+  | Error _ -> fail "json-only request should use Invalid_accept");
+  (match
+     Request_context.decide_post_body ~request:streamable_request
+       ~context:(context ()) ~session_is_known:false initialize_body
+   with
+  | Ok _ -> ()
+  | Error _ -> fail "unknown session should still permit initialize")
 
 let test_shared_post_admission_matrix () =
   assert_result_ok "initialize may mint a fresh session"
@@ -114,9 +192,7 @@ let test_h1_h2_post_route_wiring_parity () =
       assert_contains ("H1 " ^ label) ~needle h1;
       assert_contains ("H2 " ^ label) ~needle h2)
     [
-      ("checks session requirement", "validate_session_requirement");
-      ("checks unknown supplied session", "validate_session_known");
-      ("classifies body-aware Accept", "classify_mcp_accept_for_body");
+      ("uses shared POST request context", "Server_mcp_request_context.decide_post_body");
       ("injects canonical HTTP actor", "body_with_canonical_http_actor");
       ("forwards internal keeper runtime", "is_verified_internal_keeper_request");
     ];
@@ -156,6 +232,10 @@ let () =
     [
       ( "shared-admission-matrix",
         [
+          test_case "request context records pre-body state" `Quick
+            test_request_context_make_records_session_source;
+          test_case "request context decides POST body admission" `Quick
+            test_request_context_decides_post_body;
           test_case "POST shared predicate matrix" `Quick
             test_shared_post_admission_matrix;
           test_case "protocol and DELETE predicate matrix" `Quick

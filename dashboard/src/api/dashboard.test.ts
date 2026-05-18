@@ -20,6 +20,7 @@ import {
   fetchTlcResults,
   fetchToolQuality,
 } from './dashboard'
+import { fetchDashboardShell as fetchDashboardShellHot } from './dashboard-hot'
 import { keeperRuntimeBlockerLabel } from '../lib/keeper-runtime-display'
 
 afterEach(() => {
@@ -72,6 +73,10 @@ function makeRawGoalNode(overrides: Record<string, unknown> = {}) {
 }
 
 describe('fetchDashboardShell', () => {
+  it('uses the hot-path shell fetcher as the API SSOT', () => {
+    expect(fetchDashboardShell).toBe(fetchDashboardShellHot)
+  })
+
   it('uses the light shell query when requested', async () => {
     const rawResponse = {
       status: { project: 'default' },

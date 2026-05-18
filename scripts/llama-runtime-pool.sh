@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-STATE_DIR="${MASC_LOCAL_RUNTIME_POOL_STATE_DIR:-${MASC_LLAMA_RUNTIME_POOL_STATE_DIR:-${TMPDIR:-/tmp}/masc-local-runtime-pool}}"
+STATE_DIR="${MASC_LOCAL_RUNTIME_POOL_STATE_DIR:-${TMPDIR:-/tmp}/masc-local-runtime-pool}"
 TARGET_SHARDS="${LLAMA_POOL_TARGET_SHARDS:-6}"
 BASE_HOST="${LLAMA_POOL_HOST:-127.0.0.1}"
 DEFAULT_PARALLEL="${LLAMA_POOL_PARALLEL:-12}"
@@ -160,10 +160,6 @@ resolve_llama_server_bin() {
   fi
   if [ -n "${SEED_BINARY:-}" ] && [ -x "${SEED_BINARY}" ]; then
     printf '%s\n' "${SEED_BINARY}"
-    return 0
-  fi
-  if [ -x "$HOME/.local/bin/llama-server" ]; then
-    printf '%s\n' "$HOME/.local/bin/llama-server"
     return 0
   fi
   discovered="$(type -P llama-server 2>/dev/null || true)"

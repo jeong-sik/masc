@@ -135,8 +135,15 @@ let create
   then Error "content is required"
   else (
     let ts = now_ms () in
+    (* RFC-0128 PR-2: UUID minting is the non-determinism boundary.
+       Previous code captured a copy of the global RNG state without
+       advancing it, so consecutive uuid generations collided. Each
+       call now self-initialises a fresh state. Downstream consumers
+       treat the id as an opaque string identifier and never branch on
+       its value, so the non-determinism is contained at this site. *)
     let annotation =
-      { id = Uuidm.to_string (Uuidm.v4_gen (Random.get_state ()) ())
+      (* NDT-OK: see comment block above — uuid minting boundary. *)
+      { id = Uuidm.to_string (Uuidm.v4_gen (Random.State.make_self_init ()) ())
       ; file_path
       ; line_start
       ; line_end
@@ -163,9 +170,36 @@ let create
     Ok annotation)
 ;;
 
-let list ~base_dir ?(partition = Ide_paths.Legacy) ~filter () =
+(* RFC-0128 §5 — read-side de-duplication by annotation [id] (UUID).
+   When [merge_legacy = true], records living under the requested
+   partition take priority over Legacy ones with the same id. This
+   preserves the latest write while still surfacing pre-RFC-0128
+   data so the IDE does not appear to lose history at cut-over. *)
+let dedup_by_id_keeping_primary ~primary ~legacy =
+  let seen = Hashtbl.create 64 in
+  List.iter (fun (a : annotation) -> Hashtbl.replace seen a.id ()) primary;
+  let filtered_legacy =
+    List.filter (fun (a : annotation) -> not (Hashtbl.mem seen a.id)) legacy
+  in
+  primary @ filtered_legacy
+;;
+
+let list
+      ~base_dir
+      ?(partition = Ide_paths.Legacy)
+      ?(merge_legacy = false)
+      ~filter
+      ()
+  =
   ensure_store ~base_dir ~partition ();
-  let all : annotation list = load_all_partition ~base_dir partition in
+  let primary : annotation list = load_all_partition ~base_dir partition in
+  let all =
+    if merge_legacy && partition <> Ide_paths.Legacy
+    then
+      let legacy = load_all_partition ~base_dir Ide_paths.Legacy in
+      dedup_by_id_keeping_primary ~primary ~legacy
+    else primary
+  in
   let by_file =
     match filter.file_path with
     | Some fp -> List.filter (fun (a : annotation) -> a.file_path = fp) all

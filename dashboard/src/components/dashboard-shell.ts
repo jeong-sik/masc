@@ -172,14 +172,11 @@ function keeperLooksPaused(keeper: Keeper): boolean {
   return keeper.paused === true || phase === 'paused' || stage === 'paused' || status === 'paused'
 }
 
-function fleetPressureBlockedKeepers(fleetSafety: DashboardFleetSafetyHealth): number {
+function fdPressureBlockedKeepers(fleetSafety: DashboardFleetSafetyHealth): number {
   const candidates = [
     fleetSafety.keeper_fd_pressure?.admission_blocked_keepers,
     fleetSafety.keeper_fd_pressure?.blocked_keepers,
     fleetSafety.keeper_fd_pressure?.blocked_count,
-    fleetSafety.keeper_fleet_safety?.admission_blocked_keepers,
-    fleetSafety.keeper_fleet_safety?.blocked_keepers,
-    fleetSafety.keeper_fleet_safety?.blocked_count,
   ].filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
   return candidates.length > 0 ? Math.max(...candidates) : 0
 }
@@ -206,7 +203,7 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
   const capacityShortfall = fleet?.reaction_capacity_shortfall_count ?? (
     targetCapacity != null && runningFibers != null ? Math.max(0, targetCapacity - runningFibers) : null
   )
-  const blocked = fleetPressureBlockedKeepers(fleetSafety)
+  const fdPressureBlocked = fdPressureBlockedKeepers(fleetSafety)
   if (fleetStatus === 'blocked' || (requiresAction && (runningFibers === 0 || noFibers === true))) {
     const capacityDetail = [
       `status=${fleetStatus ?? 'blocked'}`,
@@ -221,6 +218,14 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
       key: 'fleet-liveness-risk',
       label: 'P0 fleet blocked',
       detail: `${capacityDetail}; resume selected paused keepers or confirm an intentional operator pause policy.`,
+      tone: 'bad',
+    }
+  }
+  if (fdPressureBlocked >= 24) {
+    return {
+      key: 'fleet-liveness-risk',
+      label: 'Fleet liveness risk',
+      detail: `FD pressure admission is blocking ${fdPressureBlocked} keepers; keeper turns may not start.`,
       tone: 'bad',
     }
   }
@@ -239,14 +244,6 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
       label: 'Fleet capacity degraded',
       detail: `${capacityDetail}; restore missing keeper fibers or confirm a reduced target capacity.`,
       tone: 'warn',
-    }
-  }
-  if (blocked >= 24) {
-    return {
-      key: 'fleet-liveness-risk',
-      label: 'Fleet liveness risk',
-      detail: `FD pressure admission is blocking ${blocked} keepers; keeper turns may not start.`,
-      tone: 'bad',
     }
   }
   if (fleetSafety.keeper_fleet_no_fibers === true || (fibers != null && fibers <= 1 && paused > 0)) {

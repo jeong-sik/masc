@@ -146,8 +146,18 @@ let add_routes router =
          in
          let filter = { Ide_annotation_types.file_path; keeper_id; goal_id; task_id } in
          let partition = resolve_partition_for_query ~state ~uri in
+         (* RFC-0128 §5 — the HTTP read route is the natural cut-over
+            point: the IDE has no way to ask for two stores explicitly,
+            so the server merges Legacy on its behalf. Once Phase 3
+            migrates the flat store into [by-url]/[_orphan], this flag
+            becomes a no-op. *)
          let annotations =
-           Ide_annotations.list ~base_dir:base ~partition ~filter ()
+           Ide_annotations.list
+             ~base_dir:base
+             ~partition
+             ~merge_legacy:true
+             ~filter
+             ()
          in
          let json =
            `List (List.map Ide_annotation_types.annotation_to_json annotations)
@@ -300,23 +310,20 @@ let add_routes router =
          let base, _source = resolve_workspace_base ~state ~uri in
          let file_path =
            match Uri.get_query_param uri "file_path" with
-           | Some p when p <> "" -> p
-           | _ -> ""
+           | Some p when p <> "" -> Some p
+           | _ -> None
          in
-         let store_dir = Ide_paths.store_path ~base_dir:base in
-         let path = Filename.concat store_dir "regions.jsonl" in
-         (* Streaming filter — file_path filter usually drops most lines,
-            and regions.jsonl grows append-only. fold_jsonl_lines avoids
-            the full-list materialisation that List.filter_map needed. *)
+         let partition = resolve_partition_for_query ~state ~uri in
+         (* RFC-0128 §5 — same cut-over rationale as the annotations
+            route: merge Legacy so pre-RFC-0128 regions stay visible
+            after the by-url migration. *)
          let regions =
-           Fs_compat.fold_jsonl_lines
-             ~init:[]
-             ~f:(fun acc ~line_no:_ j ->
-               match Ide_annotation_types.region_of_json j with
-               | Ok r when file_path = "" || r.file_path = file_path -> r :: acc
-               | _ -> acc)
-             path
-           |> List.rev
+           Ide_region_tracker.read_regions
+             ~base_dir:base
+             ~partition
+             ~merge_legacy:true
+             ?file_path
+             ()
          in
          let json = `List (List.map Ide_annotation_types.region_to_json regions) in
          Http.Response.json

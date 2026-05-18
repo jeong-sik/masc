@@ -88,8 +88,7 @@ let load_agents_from_dir config dir ~include_inactive =
   |> List.filter_map (fun name ->
          safe_yield ();
          let path = Filename.concat dir name in
-         let json = read_json config path in
-         match agent_of_yojson json with
+         match read_agent_with_repair config path with
          | Ok agent when include_inactive || agent.status <> Masc_domain.Inactive ->
              Some agent
          | Ok _ | Error _ -> None)

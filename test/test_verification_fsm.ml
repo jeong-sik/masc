@@ -509,7 +509,148 @@ let test_reject_prepare_failure_keeps_task_awaiting () =
        | Error err -> Alcotest.fail ("load_request failed: " ^ err)
        | Ok updated ->
          Alcotest.(check bool) "request remains pending" true
-           (match updated.status with Pending -> true | _ -> false)))
+         (match updated.status with Pending -> true | _ -> false)))
+
+let test_approve_retry_recovers_completed_verdict_orphan () =
+  with_temp_config ~fsm_enabled:true (fun config ->
+    let task_id = add_strict_task config in
+    claim_and_start config "worker" task_id;
+    (match
+       Coord.transition_task_r
+         config
+         ~agent_name:"worker"
+         ~task_id
+         ~action:Masc_domain.Submit_for_verification
+         ()
+     with
+     | Ok _ -> ()
+     | Error e -> Alcotest.fail ("submit failed: " ^ Masc_domain.show_masc_error e));
+    let verification_id = verification_id_of_task config task_id in
+    ignore (create_pending_request config ~task_id ~worker:"worker" ~request_id:verification_id);
+    (* Simulates the observable orphan left when the verifier callback
+       persisted its verdict, then the subsequent backlog status write
+       failed or was lost before the task left AwaitingVerification. *)
+    (match
+       Verification_protocol.record_approve_verification
+         ~config
+         ~task_id
+         ~verifier:"verifier"
+         ~verification_id
+         ~notes:"verified"
+     with
+     | Ok () -> ()
+     | Error e -> Alcotest.fail ("record approve failed: " ^ e));
+    Alcotest.(check string)
+      "orphan status remains awaiting"
+      "awaiting_verification"
+      (status_string config task_id);
+    (match
+       Coord.transition_task_r
+         config
+         ~agent_name:"verifier"
+         ~task_id
+         ~action:Masc_domain.Approve_verification
+         ~notes:"retry after orphan"
+         ~prepare_verification_verdict:
+           (fun ~task:_ ~verifier ~verification_id ~decision ->
+              match decision with
+              | `Approve notes ->
+                Verification_protocol.record_approve_verification
+                  ~config
+                  ~task_id
+                  ~verifier
+                  ~verification_id
+                  ~notes
+              | `Reject _ ->
+                Error "unexpected reject decision in approve recovery")
+         ()
+     with
+     | Ok _ -> ()
+     | Error e -> Alcotest.fail ("approve retry failed: " ^ Masc_domain.show_masc_error e));
+    Alcotest.(check string)
+      "retry moves task done"
+      "done"
+      (status_string config task_id);
+    match Verification.load_request config.Coord.base_path verification_id with
+    | Error e -> Alcotest.fail ("load_request failed: " ^ e)
+    | Ok updated ->
+      Alcotest.(check bool)
+        "request remains completed pass"
+        true
+        (match updated.status, updated.verifier with
+         | Completed Pass, Some "verifier" -> true
+         | _ -> false))
+
+let test_reject_retry_recovers_completed_verdict_orphan () =
+  with_temp_config ~fsm_enabled:true (fun config ->
+    let task_id = add_strict_task config in
+    claim_and_start config "worker" task_id;
+    (match
+       Coord.transition_task_r
+         config
+         ~agent_name:"worker"
+         ~task_id
+         ~action:Masc_domain.Submit_for_verification
+         ()
+     with
+     | Ok _ -> ()
+     | Error e -> Alcotest.fail ("submit failed: " ^ Masc_domain.show_masc_error e));
+    let verification_id = verification_id_of_task config task_id in
+    ignore (create_pending_request config ~task_id ~worker:"worker" ~request_id:verification_id);
+    (* Same orphan shape as the approve case, but the persisted verdict
+       is a rejection and the backlog retry should return ownership to
+       the worker's in-progress task. *)
+    (match
+       Verification_protocol.record_reject_verification
+         ~config
+         ~task_id
+         ~verifier:"verifier"
+         ~verification_id
+         ~reason:"missing evidence"
+     with
+     | Ok () -> ()
+     | Error e -> Alcotest.fail ("record reject failed: " ^ e));
+    Alcotest.(check string)
+      "orphan status remains awaiting"
+      "awaiting_verification"
+      (status_string config task_id);
+    (match
+       Coord.transition_task_r
+         config
+         ~agent_name:"verifier"
+         ~task_id
+         ~action:Masc_domain.Reject_verification
+         ~reason:"retry after orphan"
+         ~prepare_verification_verdict:
+           (fun ~task:_ ~verifier ~verification_id ~decision ->
+              match decision with
+              | `Reject reason ->
+                Verification_protocol.record_reject_verification
+                  ~config
+                  ~task_id
+                  ~verifier
+                  ~verification_id
+                  ~reason
+              | `Approve _ ->
+                Error "unexpected approve decision in reject recovery")
+         ()
+     with
+     | Ok _ -> ()
+     | Error e -> Alcotest.fail ("reject retry failed: " ^ Masc_domain.show_masc_error e));
+    Alcotest.(check string)
+      "retry moves task in_progress"
+      "in_progress"
+      (status_string config task_id);
+    match Verification.load_request config.Coord.base_path verification_id with
+    | Error e -> Alcotest.fail ("load_request failed: " ^ e)
+    | Ok updated ->
+      Alcotest.(check bool)
+        "request remains completed fail"
+        true
+        (match updated.status, updated.verifier with
+         | Completed (Fail reason), Some "verifier" ->
+           Astring.String.is_infix ~affix:"retry after orphan" reason
+         | _ -> false))
 
 let test_claim_next_skips_pending_verification_tasks () =
   with_temp_config ~fsm_enabled:true (fun config ->
@@ -766,6 +907,14 @@ let () =
         test_approve_prepare_failure_keeps_task_awaiting;
       Alcotest.test_case "reject prepare failure keeps task awaiting" `Quick
         test_reject_prepare_failure_keeps_task_awaiting;
+      Alcotest.test_case
+        "approve retry recovers completed verdict orphan"
+        `Quick
+        test_approve_retry_recovers_completed_verdict_orphan;
+      Alcotest.test_case
+        "reject retry recovers completed verdict orphan"
+        `Quick
+        test_reject_retry_recovers_completed_verdict_orphan;
       Alcotest.test_case "claim_next skips pending verification tasks" `Quick
         test_claim_next_skips_pending_verification_tasks;
       Alcotest.test_case "claim_next preserves rejected owner task" `Quick

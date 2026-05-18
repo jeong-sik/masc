@@ -240,6 +240,37 @@ let test_idle_mid_stream_silence_cancels () =
   | Ok (_, _) ->
     Alcotest.fail "expected mid-stream idle timeout, got Ok"
 
+let test_total_timeout_reports_progress_snapshot () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let stream, push = Piaf.Stream.create 16 in
+  let body = Piaf.Body.of_string_stream stream in
+  push (Some "early");
+  let progress_ref = ref Masc_http_client.Pool.empty_body_progress in
+  let result =
+    Eio.Fiber.first
+      (fun () ->
+         Masc_http_client.Pool.For_testing.read_body_with_idle
+           ~progress_ref
+           ~clock
+           ~start_sec:(Eio.Time.now clock)
+           ~idle_timeout_sec:5.0
+           body)
+      (fun () ->
+         Eio.Time.sleep clock 0.05;
+         Error ("total timeout after 0.1s", !progress_ref))
+  in
+  match result with
+  | Error (msg, p) ->
+    Alcotest.(check bool) "total-timeout message present"
+      true (Astring.String.is_prefix ~affix:"total timeout" msg);
+    Alcotest.(check int) "early bytes preserved" 5 p.bytes_received;
+    (match p.first_byte_at_sec with
+     | Some _ -> ()
+     | None -> Alcotest.fail "expected first_byte_at_sec for early chunk")
+  | Ok (_, _) ->
+    Alcotest.fail "expected total timeout, got Ok"
+
 (* ── Runner ──────────────────────────────────────────────────── *)
 
 let () =
@@ -295,7 +326,9 @@ let () =
             test_idle_steady_stream_completes;
           Alcotest.test_case "silent-from-start cancels" `Quick
             test_idle_silent_from_start_cancels;
-          Alcotest.test_case "mid-stream silence cancels" `Quick
-            test_idle_mid_stream_silence_cancels;
-        ] );
-    ]
+	          Alcotest.test_case "mid-stream silence cancels" `Quick
+	            test_idle_mid_stream_silence_cancels;
+	          Alcotest.test_case "total timeout reports progress snapshot" `Quick
+	            test_total_timeout_reports_progress_snapshot;
+	        ] );
+	    ]

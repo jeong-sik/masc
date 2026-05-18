@@ -368,13 +368,18 @@ let empty_body_progress = {
    [progress] ref is shared between fibers but only the body fiber
    writes it (Eio is single-domain, no atomic needed). *)
 let read_body_with_idle
+    ?progress_ref
     ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t)
     ~(start_sec : float)
     ~(idle_timeout_sec : float)
     (body : Piaf.Body.t)
   : (string * body_progress, string * body_progress) result =
   let buf = Buffer.create 16384 in
-  let progress = ref empty_body_progress in
+  let progress =
+    match progress_ref with
+    | Some progress -> progress
+    | None -> ref empty_body_progress
+  in
   let now () = Eio.Time.now clock in
   let on_chunk chunk =
     Buffer.add_string buf chunk;
@@ -419,6 +424,7 @@ let read_body_with_idle
 let do_request_with_idle_timeout t
     ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t)
     ~(idle_timeout_sec : float)
+    ?progress_ref
     ?headers ?body ~method_ uri
   : (response * body_progress, string * body_progress) result =
   let key = Host_key.of_uri uri in
@@ -434,46 +440,64 @@ let do_request_with_idle_timeout t
   match acquired with
   | Error e -> Error (e, empty_body_progress)
   | Ok client ->
+    let released = ref false in
+    let release_once ~close_only =
+      if not !released then begin
+        released := true;
+        release t key client ~close_only
+      end
+    in
     let path = path_and_query uri in
     let body_piaf = Option.map Piaf.Body.of_string body in
     let start_sec = Eio.Time.now clock in
-    t.counters.inflight <- t.counters.inflight + 1;
-    let result =
-      try
-        Piaf.Client.request client ?headers ?body:body_piaf
-          ~meth:(method_to_piaf method_) path
-      with exn -> Error (`Msg (Printexc.to_string exn))
-    in
-    t.counters.inflight <- t.counters.inflight - 1;
-    match result with
-    | Error err ->
-      release t key client ~close_only:true;
-      Error (Piaf.Error.to_string (err :> Piaf.Error.t), empty_body_progress)
-    | Ok resp ->
-      let status = Piaf.Status.to_code (Piaf.Response.status resp) in
-      let headers_list =
-        Piaf.Response.headers resp |> Piaf.Headers.to_list
-      in
-      (match
-         read_body_with_idle ~clock ~start_sec ~idle_timeout_sec
-           (Piaf.Response.body resp)
-       with
-       | Error (err, p) ->
-         (* Idle-cancelled or piaf error: connection is suspect. *)
-         release t key client ~close_only:true;
-         Error (err, p)
-       | Ok (body_str, p) ->
-         release t key client ~close_only:false;
-         Ok ({ status; headers = headers_list; body = body_str }, p))
+    Fun.protect
+      ~finally:(fun () ->
+        if not !released then
+          release_once ~close_only:true)
+      (fun () ->
+         t.counters.inflight <- t.counters.inflight + 1;
+         let result =
+           Fun.protect
+             ~finally:(fun () ->
+               t.counters.inflight <- t.counters.inflight - 1)
+             (fun () ->
+                try
+                  Piaf.Client.request client ?headers ?body:body_piaf
+                    ~meth:(method_to_piaf method_) path
+                with
+                | Eio.Cancel.Cancelled _ as e -> raise e
+                | exn -> Error (`Msg (Printexc.to_string exn)))
+         in
+         match result with
+         | Error err ->
+           release_once ~close_only:true;
+           Error (Piaf.Error.to_string (err :> Piaf.Error.t), empty_body_progress)
+         | Ok resp ->
+           let status = Piaf.Status.to_code (Piaf.Response.status resp) in
+           let headers_list =
+             Piaf.Response.headers resp |> Piaf.Headers.to_list
+           in
+           (match
+              read_body_with_idle ?progress_ref ~clock ~start_sec ~idle_timeout_sec
+                (Piaf.Response.body resp)
+            with
+            | Error (err, p) ->
+              (* Idle-cancelled or piaf error: connection is suspect. *)
+              release_once ~close_only:true;
+              Error (err, p)
+            | Ok (body_str, p) ->
+              release_once ~close_only:false;
+              Ok ({ status; headers = headers_list; body = body_str }, p)))
 
 let request_with_idle_timeout t
     ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t)
     ~idle_timeout_sec
     ?total_timeout_sec
     ~method_ ~url ?headers ?body () =
+  let progress_ref = ref empty_body_progress in
   let run () =
     let uri = Uri.of_string url in
-    do_request_with_idle_timeout t ~clock ~idle_timeout_sec
+    do_request_with_idle_timeout t ~clock ~idle_timeout_sec ~progress_ref
       ?headers ?body ~method_ uri
   in
   match total_timeout_sec with
@@ -482,10 +506,10 @@ let request_with_idle_timeout t
     Eio.Fiber.first
       (fun () -> run ())
       (fun () ->
-         Eio.Time.sleep clock t_total;
-         Error
-           (Printf.sprintf "total timeout after %.1fs" t_total,
-            empty_body_progress))
+	       Eio.Time.sleep clock t_total;
+	       Error
+	         (Printf.sprintf "total timeout after %.1fs" t_total,
+	          !progress_ref))
   | Some _ -> run ()
 
 let with_connection _t ~url:_ _f =

@@ -8,13 +8,31 @@ let keeper_task_result_json = function
       (`Assoc [ "ok", `Bool false; "error", `String (Masc_domain.masc_error_to_string e) ])
 ;;
 
-let keeper_tool_result_json ~(ok : bool) ~(message : string) =
+let workflow_rejection_error_json message =
+  error_json
+    ~fields:[ "failure_class", `String "workflow_rejection" ]
+    message
+;;
+
+let keeper_tool_result_json ~failure_class ~(ok : bool) ~(message : string) =
+  let failure_class_fields =
+    match failure_class with
+    | Some cls when not ok ->
+      [
+        ( "failure_class"
+        , `String (Tool_result.tool_failure_class_to_string cls) );
+      ]
+    | Some _
+    | None ->
+      []
+  in
   Yojson.Safe.to_string
     (`Assoc
-       [
+       ([
          "ok", `Bool ok;
          ((if ok then "result" else "error"), `String message);
-       ])
+       ]
+        @ failure_class_fields))
 ;;
 
 let validate_goal_id config goal_id =
@@ -425,7 +443,9 @@ let handle_keeper_task_tool
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let result_text = Safe_ops.json_string ~default:"" "result" args |> String.trim in
     if task_id = ""
-    then error_json "task_id is required. Use the task_id you got from keeper_task_claim."
+    then
+      workflow_rejection_error_json
+        "task_id is required. Use the task_id you got from keeper_task_claim."
     else if result_text = ""
     then
       (* Schema (tool_shard_types.ml:1447) declares [result] as a
@@ -438,7 +458,7 @@ let handle_keeper_task_tool
          "handoff_context.summary is required" message instead of a
          keeper-vocabulary error). Enforce the schema here so the
          error names the field the keeper actually sent. *)
-      error_json
+      workflow_rejection_error_json
         "result is required. Audit trail: describe what you completed. \
          Example: result='Refactored module X, all tests green, no flake'."
     else (
@@ -466,17 +486,26 @@ let handle_keeper_task_tool
           }
           (`Assoc args_for_transition)
       in
-      keeper_tool_result_json ~ok:transition_result.Tool_result.success ~message:transition_result.Tool_result.legacy_message)
+      keeper_tool_result_json
+        ~failure_class:(Tool_result.failure_class transition_result)
+        ~ok:transition_result.Tool_result.success
+        ~message:transition_result.Tool_result.legacy_message)
   | "keeper_task_submit_for_verification" ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let notes = Safe_ops.json_string ~default:"" "notes" args |> String.trim in
     let pr_url = Safe_ops.json_string ~default:"" "pr_url" args |> String.trim in
     if task_id = ""
-    then error_json "task_id is required. Use the task_id you got from keeper_task_claim."
+    then
+      workflow_rejection_error_json
+        "task_id is required. Use the task_id you got from keeper_task_claim."
     else if notes = ""
-    then error_json "notes is required. Include verification evidence and test summary."
+    then
+      workflow_rejection_error_json
+        "notes is required. Include verification evidence and test summary."
     else if pr_url = ""
-    then error_json "pr_url is required. Include the PR opened for this task."
+    then
+      workflow_rejection_error_json
+        "pr_url is required. Include the PR opened for this task."
     else (
       (* Map keeper vocabulary (notes + pr_url) onto MASC domain typed
          handoff_context fields: notes -> summary, [pr_url] ->
@@ -506,6 +535,9 @@ let handle_keeper_task_tool
                "handoff_context", handoff_context;
              ])
       in
-      keeper_tool_result_json ~ok:transition_result.Tool_result.success ~message:transition_result.Tool_result.legacy_message)
+      keeper_tool_result_json
+        ~failure_class:(Tool_result.failure_class transition_result)
+        ~ok:transition_result.Tool_result.success
+        ~message:transition_result.Tool_result.legacy_message)
   | other -> error_json ~fields:[ "tool", `String other ] "unknown_task_tool"
 ;;

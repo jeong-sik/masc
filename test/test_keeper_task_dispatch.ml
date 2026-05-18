@@ -1893,7 +1893,13 @@ let test_submit_for_verification_requires_pr_url () =
     in
     let json = parse_json result in
     match Yojson.Safe.Util.member "error" json with
-    | `String msg -> check bool "mentions pr_url" true (contains_substring msg "pr_url")
+    | `String msg ->
+      check bool "mentions pr_url" true (contains_substring msg "pr_url");
+      check
+        string
+        "failure class"
+        "workflow_rejection"
+        Yojson.Safe.Util.(member "failure_class" json |> to_string)
     | _ -> fail "expected error for empty pr_url")
 ;;
 

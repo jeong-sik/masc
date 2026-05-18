@@ -45,7 +45,8 @@ val to_oas_tool_result :
 
 val to_oas_typed_result : Tool_result.t -> Agent_sdk.Types.tool_result
 (** Convert a {!Tool_result.t} to OAS [tool_result].
-    Preserves the structured payload and applies externalization. *)
+    Preserves the structured payload, maps [failure_class] to OAS
+    [recoverable]/[error_class], and applies externalization. *)
 
 val of_oas_tool_result : Agent_sdk.Types.tool_result -> bool * string
 (** Convert OAS [tool_result] back to MASC [(success, message)]. *)

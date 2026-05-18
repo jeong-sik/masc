@@ -3,7 +3,7 @@ rfc: "0131"
 title: "Shell Command Gate facade — multi-caller IR-first validation"
 status: Draft
 created: 2026-05-19
-updated: 2026-05-19
+updated: 2026-05-19 (status note + §10 revised PR slicing added)
 author: vincent
 supersedes: []
 superseded_by: null
@@ -22,6 +22,45 @@ Related:
 - RFC-0092 (Keeper shell-bash typed validation — Phase A advisor done; B/C/D pending)
 - RFC-0089 (string classifier → typed variant — general policy)
 - RFC-0126 (silent fallback discipline — workaround rejection bar)
+
+---
+
+## Status note — 2026-05-19 author correction
+
+The original §1 below claimed no facade existed.  That was wrong.  A
+companion audit of `origin/main` after RFC submission found that
+`lib/shell_command_gate.{ml,mli}` **already exists** and is wired into
+two of the three callers:
+
+```
+$ rg "Shell_command_gate" lib/
+lib/tool_code_write.ml:106-107   parse + last_stage_bin (exit classifier)
+lib/worker_dev_tools.ml:536-564  parse + stage_bins + stage_count + validate_allowlist
+lib/shell_command_gate.ml(.mli)  the facade itself
+```
+
+The facade exposes `parse`, `validate_allowlist ?allow_pipes`,
+`stage_count`, `last_stage_bin`, plus tag functions.  Test coverage
+exists at `test/test_shell_command_gate.ml`.
+
+So RFC-0131 is **not the first-mover for the facade**.  Its remaining
+contribution is the **extension** that promotes the existing facade to
+RFC-0131's full §4 contract:
+
+1. Add `caller` partition (currently unpartitioned) so telemetry can
+   per-caller measure parity against the legacy fallback.
+2. Add `redirect_allowed` policy flag (currently always-allow).
+3. Add explicit `Unsupported_nested_pipeline` reject (current code
+   silently flattens via `simples_of_ir`'s `List.concat_map`).
+4. Wire `keeper_shell_bash.ml` as the third caller directly (it
+   currently uses the facade transitively via
+   `Worker_dev_tools.validate_command_coding_with_allowlist`).
+5. Remove legacy fallback paths in `worker_dev_tools.ml`
+   (`validate_command_coding_legacy_segments`) and `tool_code_write.ml`
+   (`first_token_basename (last_pipeline_segment ...)`).
+
+§§1–7 below are kept verbatim for historical record; §10 below restates
+the revised PR slicing under this correction.
 
 ---
 
@@ -296,3 +335,24 @@ This RFC is **implemented** when:
   external goal-plan, reformatted from the Shell IR Promotion Goal Plan HTML).
 - Doc: `~/me/.tmp/plans-2026-05-18/00-synthesis.md` §R2 (root-fix selection).
 - Measurement: `MASC/OAS Error-Warn Reduction Goal — 2026-05-18` (P2 category).
+
+## 10. Revised PR slicing (2026-05-19 update)
+
+Given the facade already exists (status note above), §6 rollout's PR-1
+is replaced by the following micro-PRs, each independently mergeable and
+behavior-preserving for existing callers (`Error _` wildcard patterns in
+`tool_code_write` and `worker_dev_tools` absorb new arms):
+
+| PR | Scope | Lines | Risk |
+|---|---|---|---|
+| PR-1a | Add `caller` partition tag + optional `?caller` arg to `validate_allowlist`. Backwards-compatible default. | ~40 | Low |
+| PR-1b | Add `Unsupported_nested_pipeline` arm to `cannot_parse_kind`. Replace `simples_of_ir`'s `List.concat_map` with a fail-closed walker. | ~30 | Low |
+| PR-1c | Add `?redirect_allowed` flag to `validate_allowlist`. Default `true` preserves current behavior. | ~30 | Low |
+| PR-2 | Wire `keeper_shell_bash.ml` to call `Shell_command_gate` directly for the validation block currently funneled through `Worker_dev_tools.validate_command_coding_with_allowlist`. Telemetry uses `~caller:Keeper_shell_bash`. | ~80 | Medium |
+| PR-3 | Telemetry counter exposure (`Legendary_counters.incr_shell_gate ~caller ~verdict`) + dashboard read. | ~120 | Low |
+| PR-4 | Per-caller parity measurement window (PR-1a + PR-3 prereq). | observation-only | None |
+| PR-5 | Authority flip per-caller via `MASC_SHELL_GATE_AUTHORITY=worker,code_write,keeper_bash`. | ~40 | Medium |
+| PR-6 | Legacy purge: remove `validate_command_coding_legacy_segments`, `first_token_basename (last_pipeline_segment ...)` fallback, and remaining string scanners per §4.6. | ~200 net removal | Medium |
+
+PR-1a–c can land in any order; PR-2 depends on PR-1a (for the caller
+tag); PR-5/PR-6 depend on PR-4 parity evidence.

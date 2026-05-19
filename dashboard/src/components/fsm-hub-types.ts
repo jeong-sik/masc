@@ -441,6 +441,60 @@ export function cascadeOutcomeLabel(value: string | null | undefined): string | 
   return CASCADE_OUTCOME_LABELS[value] ?? value
 }
 
+/** Korean labels for `execution.terminal_reason_code`. Backend emits this
+ *  across multiple paths:
+ *  - `Keeper_turn_terminal_code.to_wire` (lib/keeper/keeper_turn_terminal_code.ml:28-50)
+ *    emits 10 fixed wire values + parameterized `Provider_runtime_error`,
+ *    `Tool_required_unsatisfied`, `Sdk_error` (which inject the raw `code`
+ *    string straight onto the wire).
+ *  - `Keeper_agent_error.to_terminal_reason_code` (lib/keeper/keeper_agent_error.ml:134-143)
+ *    maps Agent SDK Retry variants to `api_error_*` codes
+ *    (`api_error_server:<http_status>` is parameterized).
+ *  - `Keeper_agent_run` emits `"completed"` on Cascade_runner.Completed.
+ *  - `keeper_execution_receipt.ml:492` recognises the
+ *    `completion_contract_violation:<detail>` prefix.
+ *  Kept separate from `STATE_DISPLAY_NAMES` because generic tokens like
+ *  `completed` / `healthy` are also emitted by other axes (same isolation
+ *  pattern as TOOL_CONTRACT_LABELS in #16374). Parameterized codes fall
+ *  through to a prefix match below before the raw fallback. */
+const TERMINAL_REASON_CODE_LABELS: Record<string, string> = {
+  // Keeper_turn_terminal_code.to_wire
+  healthy: '정상',
+  stale_turn_timeout: '오래된 턴 시간 초과',
+  stale_termination_storm: 'Stale 종료 폭주',
+  stale_fleet_batch: 'Fleet stale 배치',
+  oas_timeout_budget: 'OAS 타임아웃 예산',
+  heartbeat_failures: '하트비트 실패',
+  turn_failures: '턴 실패 반복',
+  ambiguous_partial_commit: '부분 commit 모호',
+  fiber_unresolved: 'Fiber 미해결',
+  exception: '런타임 예외',
+  // Keeper_agent_run completion
+  completed: '완료',
+  // Keeper_agent_error Retry → api_error_*
+  api_error_rate_limited: 'API rate-limit',
+  api_error_overloaded: 'API 과부하',
+  api_error_auth: 'API 인증 오류',
+  api_error_invalid_request: 'API 잘못된 요청',
+  api_error_not_found: 'API 자원 없음',
+  api_error_context_overflow: 'API 컨텍스트 초과',
+  api_error_network: 'API 네트워크 오류',
+  api_error_timeout: 'API 타임아웃',
+  // keeper_unified_turn.ml:210
+  registry_phase_missing: '레지스트리 phase 누락',
+}
+
+export function terminalReasonCodeLabel(value: string | null | undefined): string | null {
+  if (!value) return null
+  const exact = TERMINAL_REASON_CODE_LABELS[value]
+  if (exact) return exact
+  // Parameterized prefixes: `api_error_server:<status>`,
+  // `completion_contract_violation:<detail>`.
+  if (value.startsWith('api_error_server:')) return 'API 서버 오류'
+  if (value.startsWith('completion_contract_violation:')) return '완료 계약 위반'
+  return value
+}
+
 export type StateEntries = {
   phase: number
   turn: number

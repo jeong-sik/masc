@@ -6,6 +6,19 @@
 
 open Keeper_types_profile
 
+let json_kind_name : Yojson.Safe.t -> string = function
+  | `Null -> "null"
+  | `Bool _ -> "bool"
+  | `Int _ -> "int"
+  | `Intlit _ -> "intlit"
+  | `Float _ -> "float"
+  | `String _ -> "string"
+  | `Assoc _ -> "object"
+  | `List _ -> "array"
+  | `Tuple _ -> "tuple"
+  | `Variant _ -> "variant"
+;;
+
 type tool_preset =
   | Minimal
   | Social
@@ -152,11 +165,17 @@ let string_list_field_result ?label ~field_name (json : Yojson.Safe.t) =
     let rec collect acc index = function
       | [] -> Ok (List.rev acc)
       | `String value :: rest -> collect (value :: acc) (index + 1) rest
-      | _ :: _ -> Error (Printf.sprintf "keeper %s[%d] must be a string" label index)
+      | bad :: _ ->
+        Error
+          (Printf.sprintf "keeper %s[%d] must be a string (received %s)" label
+             index (json_kind_name bad))
     in
     collect [] 0 items
   | `Null -> Error (Printf.sprintf "keeper %s must be an array of strings" label)
-  | _ -> Error (Printf.sprintf "keeper %s must be an array of strings" label)
+  | other ->
+    Error
+      (Printf.sprintf "keeper %s must be an array of strings (received %s)"
+         label (json_kind_name other))
 ;;
 
 let string_list_field_opt_result ?label ~field_name (json : Yojson.Safe.t) =

@@ -5,13 +5,26 @@
 import { html } from 'htm/preact'
 import type { PipelineStage } from '../types'
 
+// 10 values emitted by `Keeper_exec_status.pipeline_stage_of_phase`
+// (lib/keeper/keeper_exec_status.ml:537) post-RFC-0046 (#14707). The
+// legacy 6-entry list had `thinking` / `tool_use` /
+// `scheduled_autonomous` which the backend never emits as a
+// pipeline_stage value (they live in trajectory content_type / turn
+// channel respectively), and was missing `failing` / `overflowed` /
+// `draining` / `paused` / `crashed` / `restarting` / `offline` — so
+// 7 real backend values fell through to the raw-string fallback at
+// line 33. Labels are short forms suitable for the roster badge.
 const STAGES: { key: PipelineStage; label: string }[] = [
   { key: 'idle', label: 'idle' },
-  { key: 'thinking', label: 'think' },
-  { key: 'tool_use', label: 'tool' },
   { key: 'compacting', label: 'compact' },
   { key: 'handoff', label: 'handoff' },
-  { key: 'scheduled_autonomous', label: 'auto' },
+  { key: 'offline', label: 'offline' },
+  { key: 'failing', label: 'fail' },
+  { key: 'overflowed', label: 'overflow' },
+  { key: 'draining', label: 'drain' },
+  { key: 'paused', label: 'pause' },
+  { key: 'crashed', label: 'crash' },
+  { key: 'restarting', label: 'restart' },
 ]
 
 /**

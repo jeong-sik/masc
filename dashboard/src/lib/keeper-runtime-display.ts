@@ -142,9 +142,22 @@ function refineOfflineStatus(keeper: Keeper | null | undefined): string {
 
   // Heartbeat alive but agent offline — keepalive fiber is running.
   // Show actual phase instead of misleading "offline".
+  //
+  // `keeper.phase` carries the typed `KeeperPhase` PascalCase token
+  // (`dashboard/src/types/core.ts:879-892`), normalised by
+  // `toKeeperPhase` at the wire boundary. Lowercasing it here is for
+  // the display layer (`keeperDisplayStatus` callers expect lowercase
+  // status labels like `'idle' / 'unbooted' / 'stopped'`).
+  //
+  // Only `'offline'` is filtered — that is the `'Offline'.toLowerCase()`
+  // case we are refining away. The prior version also filtered
+  // `'inactive'`, but `KeeperPhase` does not contain that variant
+  // (audit: `keeper_state_machine.ml:21-34` `phase_to_string` emits
+  // only the 13 PascalCase phases, none of which lowercase to
+  // `'inactive'`), so the guard was dead defensive.
   if (keeper.last_heartbeat && isHeartbeatAlive(keeper.last_heartbeat)) {
     const phase = keeper.phase?.trim().toLowerCase()
-    if (phase && phase !== 'offline' && phase !== 'inactive') return phase
+    if (phase && phase !== 'offline') return phase
     return 'idle'
   }
 

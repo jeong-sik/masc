@@ -441,6 +441,85 @@ let test_too_complex_reason_tags_are_stable () =
     (Gate.too_complex_reason_tag (Gate.Unsupported_construct `Cmd_subst))
 ;;
 
+(* {1 Phase 0 PR-A2 corpus extension — three new fixtures}
+
+   The fixtures are also pinned by [test_corpus_pinned] above. These
+   dedicated tests exist so a regression on any of the three new
+   divergence/policy axes produces a focused failure label instead of
+   a generic "row N legacy/ir verdict mismatch". *)
+
+let test_backslash_pipe_in_double_quotes_diverges () =
+  (* Corpus fixture: rg "a\|b"
+     Legacy: ok (forbidden_shell_chars_coding excludes \ and the
+       quote-aware splitter does not see the inner |).
+     IR: Cannot_parse Parse_error (lexer rejects \ in dq_body and
+       classify_too_complex matches no single-char rule for this
+       input).
+     Phase 0 PR-A2: new divergence row. *)
+  match
+    Gate.gate
+      ~raw:"rg \"a\\|b\""
+      ~allowlist
+      ~path_policy:Gate.allow_all_paths
+      ~sandbox:Gate.host_sandbox
+  with
+  | Gate.Cannot_parse { reason = Gate.Parse_error } -> ()
+  | other ->
+    Alcotest.failf
+      "expected Cannot_parse parse_error for backslash-pipe in dq, got %s"
+      (Gate.verdict_tag other)
+;;
+
+let test_brace_expansion_is_too_complex_glob_brace () =
+  (* Corpus fixture: ls {a,b}.txt
+     Legacy: ok (brace not in forbidden_shell_chars_coding).
+     IR: Too_complex (Unsupported_construct `Glob_brace).
+     Phase 0 PR-A2: new fixture covering classify_too_complex's
+     [has "{" || has "}"] arm — previously no corpus row exercised
+     it. *)
+  match
+    Gate.gate
+      ~raw:"ls {a,b}.txt"
+      ~allowlist
+      ~path_policy:Gate.allow_all_paths
+      ~sandbox:Gate.host_sandbox
+  with
+  | Gate.Too_complex { reason = Gate.Unsupported_construct `Glob_brace } -> ()
+  | other ->
+    Alcotest.failf
+      "expected Too_complex glob_brace for brace expansion, got %s"
+      (Gate.verdict_tag other)
+;;
+
+let test_absolute_path_traversal_phase1_allows () =
+  (* Corpus fixture: cat /etc/passwd
+     Legacy: ok (no metachar trigger).
+     IR (Phase 1, allow_all_paths default): Allow with single Simple
+       stage [cat /etc/passwd]. Phase 5 will install a path policy
+       that flips this row to Reject Path_outside_policy — this
+       fixture exists so the flip is a visible, intentional corpus
+       diff and not a silent behavior change.
+     Phase 0 PR-A2: first absolute-path-outside-repo fixture. *)
+  match
+    Gate.gate
+      ~raw:"cat /etc/passwd"
+      ~allowlist
+      ~path_policy:Gate.allow_all_paths
+      ~sandbox:Gate.host_sandbox
+  with
+  | Gate.Allow context ->
+    Alcotest.(check int) "stage count" 1 (Gate.stage_count context);
+    Alcotest.(check (list string))
+      "stage bins"
+      [ "cat" ]
+      context.Gate.stage_bins;
+    Alcotest.(check bool) "is_pipeline" false (Gate.is_pipeline context)
+  | other ->
+    Alcotest.failf
+      "expected Allow for absolute path under Phase 1 default policy, got %s"
+      (Gate.verdict_tag other)
+;;
+
 let () =
   Alcotest.run
     "exec_shell_command_gate"
@@ -498,6 +577,20 @@ let () =
             "too_complex reason tags stable"
             `Quick
             test_too_complex_reason_tags_are_stable
+        ] )
+    ; ( "phase_0_pr_a2"
+      , [ Alcotest.test_case
+            "backslash pipe in double quotes diverges"
+            `Quick
+            test_backslash_pipe_in_double_quotes_diverges
+        ; Alcotest.test_case
+            "brace expansion classified as glob_brace"
+            `Quick
+            test_brace_expansion_is_too_complex_glob_brace
+        ; Alcotest.test_case
+            "absolute path traversal allows under Phase 1 default"
+            `Quick
+            test_absolute_path_traversal_phase1_allows
         ] )
     ]
 ;;

@@ -193,6 +193,28 @@ export function displayState(value: string): string {
   return STATE_DISPLAY_NAMES[value] ?? value
 }
 
+/** Korean labels for `trust.disposition`. Backend emits 4 closed-sum
+ *  values via `display_disposition_of_operator`
+ *  (lib/keeper/keeper_runtime_trust_snapshot.ml:687-697):
+ *  Alert / Blocked / Pause / Pass. Kept separate from
+ *  `STATE_DISPLAY_NAMES` to avoid collision on generic PascalCase
+ *  tokens that other axes also emit. Two prior inline copies of this
+ *  map (`keeper-detail-alert-strip.ts:201-205` and
+ *  `goals/goal-tree.ts:194-199`) were identical 4-entry literals —
+ *  consolidating here closes the duplicate-definition surface in the
+ *  same spirit as #16343 (5th invariant grid). */
+const TRUST_DISPOSITION_LABELS: Record<string, string> = {
+  Alert: '경보',
+  Blocked: '차단',
+  Pause: '정지',
+  Pass: '통과',
+}
+
+export function trustDispositionLabel(value: string | null | undefined): string | null {
+  if (!value) return null
+  return TRUST_DISPOSITION_LABELS[value] ?? value
+}
+
 export type StateEntries = {
   phase: number
   turn: number

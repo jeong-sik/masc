@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { statusLabel, displayStatus, prettyJson } from './status-label'
+import {
+  statusLabel,
+  displayStatus,
+  prettyJson,
+  actionLabel,
+  actionTooltip,
+  type KeeperActionVerb,
+} from './status-label'
 
 describe('statusLabel', () => {
   it('maps ok variants', () => {
@@ -83,6 +90,54 @@ describe('statusLabel collision fixes (Iter#36)', () => {
   })
   it('in_progress aliases active/running', () => {
     expect(statusLabel('in_progress')).toBe('진행 중')
+  })
+})
+
+describe('actionLabel (RFC-0135 PR-7 noun/verb 분리)', () => {
+  it('verb buttons carry 하기 suffix to distinguish from state nouns', () => {
+    // The state badge for a paused keeper reads "일시정지" (noun).
+    // The button to pause a running keeper must NOT read the same
+    // word, or RFC-0135 §1.2 collision returns. The fix is the 하기
+    // suffix for the verbs that have state-noun twins.
+    expect(actionLabel('pause').text).toBe('일시정지하기')
+    expect(actionLabel('resume').text).toBe('재개하기')
+    expect(actionLabel('boot').text).toBe('기동하기')
+    expect(actionLabel('shutdown').text).toBe('종료하기')
+  })
+
+  it('wakeup keeps the concise form because no state-noun collides', () => {
+    expect(actionLabel('wakeup').text).toBe('깨우기')
+  })
+
+  it('past-tense form drops the 하기 suffix and adds 됨 for toast confirmation', () => {
+    expect(actionLabel('pause').pastTense).toBe('일시정지됨')
+    expect(actionLabel('resume').pastTense).toBe('재개됨')
+    expect(actionLabel('boot').pastTense).toBe('기동됨')
+    expect(actionLabel('shutdown').pastTense).toBe('종료됨')
+    expect(actionLabel('wakeup').pastTense).toBe('깨워짐')
+  })
+
+  it('every verb declares precondition and effect tooltips', () => {
+    const verbs: KeeperActionVerb[] = [
+      'pause',
+      'resume',
+      'wakeup',
+      'boot',
+      'shutdown',
+    ]
+    for (const verb of verbs) {
+      const entry = actionLabel(verb)
+      expect(entry.precondition.length).toBeGreaterThan(0)
+      expect(entry.effect.length).toBeGreaterThan(0)
+      expect(entry.icon.length).toBeGreaterThan(0)
+    }
+  })
+
+  it('actionTooltip combines label + precondition + effect for the title attribute', () => {
+    const tip = actionTooltip('pause')
+    expect(tip).toContain('일시정지하기')
+    expect(tip).toContain('사전조건')
+    expect(tip).toContain('효과')
   })
 })
 

@@ -30,6 +30,11 @@ import {
 } from '../api/keeper'
 import { invalidateDashboardCache, refreshDashboard, keepers } from '../store'
 import type { Keeper } from '../types'
+import {
+  actionLabel,
+  actionTooltip,
+  type KeeperActionVerb,
+} from '../lib/status-label'
 
 // ── Shared helpers ────────────────────────────────────────────────────────
 
@@ -41,20 +46,17 @@ function afterAction(): void {
   })
 }
 
-type KeeperActionKey = 'pause' | 'resume' | 'wakeup' | 'boot' | 'shutdown'
+type KeeperActionKey = KeeperActionVerb
 
 /** Execute a lifecycle action for a single keeper with toast feedback. */
 async function runKeeperAction(
   name: string,
   action: KeeperActionKey,
 ): Promise<void> {
-  const labels: Record<KeeperActionKey, string> = {
-    pause: '일시정지',
-    resume: '재개',
-    wakeup: '깨우기',
-    boot: '기동',
-    shutdown: '종료',
-  }
+  // Past-tense for confirmation, action-noun-without-suffix for
+  // failure (the toast already reads as "<verb> 실패" rather than
+  // "<verb>하기 실패").
+  const entry = actionLabel(action)
 
   try {
     let res: { ok: boolean; error?: string }
@@ -66,13 +68,13 @@ async function runKeeperAction(
       case 'shutdown': res = await shutdownKeeper(name); break
     }
     if (res.ok) {
-      showToast(`${name} ${labels[action]}됨`, 'success')
+      showToast(`${name} ${entry.pastTense}`, 'success')
       afterAction()
     } else {
-      showToast(res.error ?? `${labels[action]} 실패`, 'error')
+      showToast(res.error ?? `${entry.text} 실패`, 'error')
     }
   } catch {
-    showToast(`${labels[action]} 실패`, 'error')
+    showToast(`${entry.text} 실패`, 'error')
   }
 }
 
@@ -160,9 +162,11 @@ function KeeperActionRow({ keeper }: { keeper: Keeper }) {
       <div class="flex items-center gap-2 min-w-0 flex-1">
         <span class="text-xs font-semibold text-[var(--color-fg-secondary)] truncate max-w-28">${keeper.name}</span>
         <${KeeperPhaseBadge} phase=${keeper.phase} compact />
-        ${keeper.paused
-          ? html`<span class="text-3xs font-semibold text-[var(--paused,var(--color-status-warn))]">일시정지</span>`
-          : null}
+        ${'' /* RFC-0135 §1.2 — the auxiliary `keeper.paused` span used
+                  to live here and re-emit '일시정지' next to the badge.
+                  The phase badge already renders the paused state, so
+                  the span was pure redundancy and the row-level noun
+                  was visually colliding with the verb button text. */}
       </div>
       <div class="flex items-center gap-1 shrink-0">
         ${vis.canBoot
@@ -171,8 +175,8 @@ function KeeperActionRow({ keeper }: { keeper: Keeper }) {
               size="sm"
               disabled=${busy.value}
               onClick=${() => handle('boot')}
-              title="기동"
-            >기동<//>`
+              title=${actionTooltip('boot')}
+            >${actionLabel('boot').text}<//>`
           : null}
         ${vis.canPause
           ? html`<${ActionButton}
@@ -180,8 +184,8 @@ function KeeperActionRow({ keeper }: { keeper: Keeper }) {
               size="sm"
               disabled=${busy.value}
               onClick=${() => handle('pause')}
-              title="일시정지"
-            >일시정지<//>`
+              title=${actionTooltip('pause')}
+            >${actionLabel('pause').text}<//>`
           : null}
         ${vis.canResume
           ? html`<${ActionButton}
@@ -189,8 +193,8 @@ function KeeperActionRow({ keeper }: { keeper: Keeper }) {
               size="sm"
               disabled=${busy.value}
               onClick=${() => handle('resume')}
-              title="재개"
-            >재개<//>`
+              title=${actionTooltip('resume')}
+            >${actionLabel('resume').text}<//>`
           : null}
         ${vis.canWake && !vis.canBoot
           ? html`<${ActionButton}
@@ -198,8 +202,8 @@ function KeeperActionRow({ keeper }: { keeper: Keeper }) {
               size="sm"
               disabled=${busy.value}
               onClick=${() => handle('wakeup')}
-              title="깨우기: sleep 중인 keeper를 즉시 깨워 다음 turn을 시도"
-            >깨우기<//>`
+              title=${actionTooltip('wakeup')}
+            >${actionLabel('wakeup').text}<//>`
           : null}
         ${vis.canShutdown
           ? html`<${ActionButton}
@@ -207,8 +211,8 @@ function KeeperActionRow({ keeper }: { keeper: Keeper }) {
               size="sm"
               disabled=${busy.value}
               onClick=${() => handle('shutdown')}
-              title="종료"
-            >종료<//>`
+              title=${actionTooltip('shutdown')}
+            >${actionLabel('shutdown').text}<//>`
           : null}
       </div>
     </article>

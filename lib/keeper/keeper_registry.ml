@@ -27,6 +27,7 @@ include Keeper_registry_types
 let registry : registry_entry StringMap.t Atomic.t = Atomic.make StringMap.empty
 let running_count_atomic = Atomic.make 0
 module Orphan_drops = Keeper_registry_orphan_drops
+module Spawn_slots = Keeper_registry_spawn_slots
 
 (** CAS loop for clamped decrement.  [Atomic.fetch_and_add _ (-1)] can
     leave the counter negative if increment/decrement paths interleave,
@@ -1269,64 +1270,23 @@ let set_started_at_for_test ~base_path name started_at =
   update_entry ~base_path name (fun entry -> { entry with started_at })
 ;;
 
-type spawn_slot_denial_reason =
+type spawn_slot_denial_reason = Spawn_slots.denial_reason =
   | Fd_pressure_active
   | Disk_pressure_active
   | Fd_admission_blocked
   | Disk_admission_blocked
   | Max_active_keepers of { running_count : int; max_keepers : int }
 
-let spawn_slot_denial_reason_to_label = function
-  | Fd_pressure_active -> "fd_pressure_active"
-  | Disk_pressure_active -> "disk_pressure_active"
-  | Fd_admission_blocked -> "fd_admission_blocked"
-  | Disk_admission_blocked -> "disk_admission_blocked"
-  | Max_active_keepers _ -> "max_active_keepers"
-;;
-
-let spawn_slot_denial_reason_to_detail = function
-  | Fd_pressure_active -> "spawn slot denied: fd pressure cooldown active"
-  | Disk_pressure_active -> "spawn slot denied: disk pressure cooldown active"
-  | Fd_admission_blocked -> "spawn slot denied: fd admission guard rejected launch"
-  | Disk_admission_blocked -> "spawn slot denied: disk admission guard rejected launch"
-  | Max_active_keepers { running_count; max_keepers } ->
-    Printf.sprintf
-      "spawn slot denied: max active keepers reached (running_count=%d max_keepers=%d)"
-      running_count
-      max_keepers
-;;
+let spawn_slot_denial_reason_to_label = Spawn_slots.to_label
+let spawn_slot_denial_reason_to_detail = Spawn_slots.to_detail
 
 let spawn_slots_decision_internal ?base_path ?fd_admitted ?disk_admitted () =
-  let max_keepers = Keeper_runtime_resolved.bootstrap_max_active_keepers () in
-  let running_count = Atomic.get running_count_atomic in
-  let fd_admitted () =
-    match fd_admitted with
-    | Some admitted -> admitted
-    | None ->
-      Keeper_fd_pressure.admit_start
-        ~active_keepers:running_count
-        ~starting_keepers:1
-        ()
-  in
-  let disk_admitted () =
-    match disk_admitted with
-    | Some admitted -> admitted
-    | None ->
-      (match base_path with
-       | None -> true
-       | Some masc_root -> Keeper_disk_pressure.admit_turn ~masc_root ())
-  in
-  if Keeper_fd_pressure.active ()
-  then Error Fd_pressure_active
-  else if Keeper_disk_pressure.active ()
-  then Error Disk_pressure_active
-  else if not (fd_admitted ())
-  then Error Fd_admission_blocked
-  else if not (disk_admitted ())
-  then Error Disk_admission_blocked
-  else if max_keepers > 0 && running_count >= max_keepers
-  then Error (Max_active_keepers { running_count; max_keepers })
-  else Ok ()
+  Spawn_slots.decision
+    ?base_path
+    ?fd_admitted
+    ?disk_admitted
+    ~running_count:(Atomic.get running_count_atomic)
+    ()
 ;;
 
 let spawn_slots_decision ?base_path () = spawn_slots_decision_internal ?base_path ()
@@ -1350,18 +1310,7 @@ module For_testing = struct
 end
 
 let record_spawn_slot_denied ~keeper_name ~surface reason =
-  let reason_label = spawn_slot_denial_reason_to_label reason in
-  let detail = spawn_slot_denial_reason_to_detail reason in
-  Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_spawn_slot_denied
-    ~labels:[ "keeper", keeper_name; "surface", surface; "reason", reason_label ]
-    ();
-  Log.Keeper.warn
-    "keeper spawn denied: keeper=%s surface=%s reason=%s detail=%s"
-    keeper_name
-    surface
-    reason_label
-    detail
+  Spawn_slots.record_denied ~keeper_name ~surface reason
 ;;
 
 let wakeup ~base_path name =

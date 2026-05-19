@@ -458,11 +458,19 @@ let test_keeper_bash_blocks_repo_wide_scans () =
       {|rg -l "board_post" lib --type ml|};
       {|rg --files lib|};
       {|git log --oneline -20|};
+      {|git log --oneline -30 --all|};
+      {|git log --all -n 5|};
+      {|git log --all --max-count=10|};
     ]
 
 let test_keeper_bash_repo_wide_scan_hints_use_structured_tools () =
   let hint = Keeper_exec_shell.For_testing.keeper_bash_shape_block_hint in
-  (match hint {|git log --oneline --all --grep="15731" 2>/dev/null | head -5|} with
+  let block_tag = Keeper_exec_shell.For_testing.keeper_bash_shape_block_tag in
+  let cmd = {|git log --oneline --all --grep="15731" 2>/dev/null | head -5|} in
+  let tag = block_tag cmd in
+  Alcotest.(check bool) "pipelined git log --all is repo_wide_scan" true
+    (match tag with Some "repo_wide_scan" -> true | _ -> false);
+  (match hint cmd with
    | Some msg ->
      Alcotest.(check bool) "git history hint points to git_log" true
        (String_util.contains_substring msg "keeper_shell op=git_log");

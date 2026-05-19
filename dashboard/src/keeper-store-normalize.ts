@@ -11,7 +11,7 @@ import type {
   ProviderHealth,
 } from './types'
 import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp } from './components/common/normalize'
-import { isOfflineStatus } from './lib/status-utils'
+import { isKeeperOffline } from './lib/keeper-predicates'
 import { keeperDisplayStatus } from './lib/keeper-runtime-display'
 import { asKeeperRuntimeBlockerClass } from './lib/runtime-blocker-class'
 import {
@@ -124,8 +124,11 @@ function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {
 }
 
 export function deriveLifecycleState(keeper: Keeper): KeeperLifecycleState {
-  const status = keeper.status?.trim().toLowerCase() ?? ''
-  if (isOfflineStatus(status)) return keeperDisplayStatus(keeper) as KeeperLifecycleState
+  // RFC-0139 PR-2: strict-superset migration off `isOfflineStatus`
+  // (status-only). `isKeeperOffline` adds the terminal-FSM-phase axis
+  // (Offline/Stopped/Dead/Crashed/Zombie) so a keeper crashed mid-tick
+  // is caught even when its wire-format status hasn't transitioned yet.
+  if (isKeeperOffline(keeper)) return keeperDisplayStatus(keeper) as KeeperLifecycleState
 
   const series = keeper.metrics_series
   if (!series || series.length === 0) {

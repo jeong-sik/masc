@@ -75,7 +75,7 @@ export interface KeeperOfflineInput {
 
 /** Operator considers the keeper offline / down on any of: terminal
  *  FSM phases (Offline/Stopped/Dead/Crashed/Zombie) or one of the
- *  three off-tokens emitted in `keeper.status`. */
+ *  off-tokens emitted in `keeper.status`. */
 export function isKeeperOffline(keeper: KeeperOfflineInput): boolean {
   switch (keeper.phase) {
     case 'Offline':
@@ -88,7 +88,17 @@ export function isKeeperOffline(keeper: KeeperOfflineInput): boolean {
       break
   }
   const status = (keeper.status ?? '').toLowerCase()
-  return status === 'offline' || status === 'inactive' || status === 'unbooted'
+  // RFC-0139 PR-2: the `'stopped'` status token is emitted from
+  // `Keeper_state_machine.phase_to_string`
+  // (lib/keeper/keeper_lifecycle_events.ml:74) when only the
+  // wire-format status string is in hand (no PascalCase phase yet).
+  // The legacy `lib/status-utils.isOfflineStatus` recognised it; folded
+  // in here so `isOfflineStatus` can be retired as strict-subset
+  // duplication.
+  return status === 'offline'
+    || status === 'inactive'
+    || status === 'unbooted'
+    || status === 'stopped'
 }
 
 /** Closed set of blocker classes that the wakeup action is intended

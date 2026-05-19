@@ -1,5 +1,5 @@
 import type { Keeper } from '../../types'
-import { isOfflineStatus } from '../../lib/status-utils'
+import { isKeeperOffline } from '../../lib/keeper-predicates'
 import { navigate } from '../../router'
 
 type ToolAuditEmptyState =
@@ -12,7 +12,9 @@ type ToolAuditEmptyState =
 export function linkedRuntimeState(keeper: Keeper | null | undefined): 'offline' | 'online' | 'unlinked' {
   if (!keeper) return 'unlinked'
   if (keeper.agent?.exists === false) return 'offline'
-  if (isOfflineStatus(keeper.status)) {
+  // RFC-0139 PR-2: SSOT-routed offline check — see
+  // keeper-store-normalize.ts for the parallel migration.
+  if (isKeeperOffline(keeper)) {
     return 'offline'
   }
   return 'online'

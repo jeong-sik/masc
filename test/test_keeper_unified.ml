@@ -3053,9 +3053,15 @@ let test_prompt_includes_claim_first_guidance () =
     (contains_substring user "### Immediate Task Move");
   check
     bool
-    "user prompt explains no task_id needed"
+    "user prompt keeps keeper_tasks_list as canonical backlog inspection"
     true
-    (contains_substring user "Do not wait for keeper_tasks_list");
+    (contains_substring user
+       "use keeper_tasks_list to inspect backlog state");
+  check
+    bool
+    "user prompt blocks Bash probes against task state files"
+    true
+    (contains_substring user "task_state_file_probe_blocked");
   check
     bool
     "user prompt prefers claim before browsing"

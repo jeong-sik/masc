@@ -3,6 +3,7 @@ import type { Keeper } from '../types/core'
 import {
   isKeeperPaused,
   isKeeperOffline,
+  isKeeperRunningExcludingRestarting,
   keeperIsStuckOnRecoverableBlocker,
   keeperCanWakeup,
 } from './keeper-predicates'
@@ -76,5 +77,26 @@ describe('keeperCanWakeup', () => {
   })
   it('offline keeper ⇒ cannot wake', () => {
     expect(keeperCanWakeup(k({ phase: 'Crashed' }))).toBe(false)
+  })
+})
+
+describe('isKeeperRunningExcludingRestarting — RFC-0135 PR-11', () => {
+  it.each([
+    ['active'], ['running'], ['idle'], ['busy'],
+  ])('status=%s ⇒ running', (status) => {
+    expect(isKeeperRunningExcludingRestarting(k({ status }))).toBe(true)
+  })
+  it.each([
+    ['Running'], ['Failing'], ['Overflowed'], ['Compacting'], ['HandingOff'], ['Draining'],
+  ])('phase=%s ⇒ running', (phase) => {
+    expect(isKeeperRunningExcludingRestarting(k({ status: 'unknown', phase: phase as Keeper['phase'] }))).toBe(true)
+  })
+  it('Restarting phase ⇒ NOT running (action panel treats as stuck)', () => {
+    expect(isKeeperRunningExcludingRestarting(k({ status: 'unknown', phase: 'Restarting' }))).toBe(false)
+  })
+  it.each([
+    ['Offline'], ['Stopped'], ['Crashed'], ['Dead'], ['Zombie'], ['Paused'],
+  ])('phase=%s ⇒ NOT running', (phase) => {
+    expect(isKeeperRunningExcludingRestarting(k({ status: 'unknown', phase: phase as Keeper['phase'] }))).toBe(false)
   })
 })

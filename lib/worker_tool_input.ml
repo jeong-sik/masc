@@ -3,14 +3,21 @@
 let json_to_string json =
   Yojson.Safe.pretty_to_string json
 
+let outer_kind_error other =
+  Printf.sprintf "input must be a JSON object, got %s: %s"
+    (Json_util.kind_name other) (Json_util.excerpt other)
+
 let extract_string key json =
   match json with
   | `Assoc pairs ->
     (match List.assoc_opt key pairs with
      | Some (`String s) -> Ok s
-     | Some _ -> Error (Printf.sprintf "%s must be a string" key)
+     | Some other ->
+       Error
+         (Printf.sprintf "%s must be a string, got %s: %s" key
+            (Json_util.kind_name other) (Json_util.excerpt other))
      | None -> Error (Printf.sprintf "missing required field: %s" key))
-  | _ -> Error "input must be a JSON object"
+  | other -> Error (outer_kind_error other)
 
 let extract_optional_string key json =
   match json with
@@ -18,8 +25,11 @@ let extract_optional_string key json =
     (match List.assoc_opt key pairs with
      | Some (`String s) -> Ok (Some s)
      | Some `Null | None -> Ok None
-     | Some _ -> Error (Printf.sprintf "%s must be a string" key))
-  | _ -> Error "input must be a JSON object"
+     | Some other ->
+       Error
+         (Printf.sprintf "%s must be a string, got %s: %s" key
+            (Json_util.kind_name other) (Json_util.excerpt other)))
+  | other -> Error (outer_kind_error other)
 
 let extract_tasks_array json =
   match json with
@@ -40,9 +50,12 @@ let extract_tasks_array json =
              | Error e -> Error e)
        in
        collect [] items
-     | Some _ -> Error "tasks must be a JSON array"
+     | Some other ->
+       Error
+         (Printf.sprintf "tasks must be a JSON array, got %s: %s"
+            (Json_util.kind_name other) (Json_util.excerpt other))
      | None -> Error "missing required field: tasks")
-  | _ -> Error "input must be a JSON object"
+  | other -> Error (outer_kind_error other)
 
 let extract_float key json =
   match json with

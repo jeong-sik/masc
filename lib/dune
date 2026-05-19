@@ -21,6 +21,10 @@
  memory_oas_bridge_op_outcome
  keeper_user_visible_reply_source
  keeper_continuity_summary_source
+ keeper_world_observation_board_signal
+ keeper_world_observation_continuity
+ keeper_world_observation_inputs
+ keeper_world_observation_message_scope
  keeper_profile_load_failure_site
  keeper_turn_cleanup_failure_site
  keeper_cascade_sync_failure_site

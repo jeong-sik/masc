@@ -383,6 +383,10 @@
    ;; leaf sub-library. The parent library still references those modules
    ;; unqualified, so it must depend on the leaf explicitly.
    masc_mcp.tool_types
+   ;; RFC-0132 PR-1 — Boundary_redaction SSOT for external-surface
+   ;; provider/model label redaction. Codemod in PR-2 routes "runtime"
+   ;; literals in lib/cascade and lib/keeper through this leaf.
+   masc_mcp.types_boundary
    masc_mcp.cdal_runtime
    ;; RFC-0056 Phase 0 — CDAL Phase 1A evaluator extracted to lib/cdal/
    ;; as its own sub-library. Hosts Cdal_types + Adversarial_eval +

@@ -202,7 +202,9 @@ let record_candidate_health_error candidate sdk_err =
           ~error_reason
           ())
 
-let runtime_candidate_label = "runtime"
+(* RFC-0132 PR-2: cascade candidate label = external boundary; redact via SSOT. *)
+let runtime_candidate_label =
+  Boundary_redaction.to_string Boundary_redaction.runtime_model_label
 (* ================================================================ *)
 (* Facade-only: run_named, run_model_by_label, and MASC tool bridges  *)
 (* ================================================================ *)

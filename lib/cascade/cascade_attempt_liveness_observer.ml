@@ -31,7 +31,9 @@ type t = {
 
 let mode (t : t) : Cfg.mode = t.mode
 
-let public_runtime_provider_label = "runtime"
+(* RFC-0132 PR-2: liveness observer public label = external boundary; redact via SSOT. *)
+let public_runtime_provider_label =
+  Boundary_redaction.to_string Boundary_redaction.runtime_provider_label
 let public_other_provider_label = "other"
 
 let normalize_provider_label label = String.trim label |> String.lowercase_ascii

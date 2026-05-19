@@ -723,9 +723,43 @@ let handle_keeper_repair ctx args : tool_result =
                           ("source_text", `String source_text) :: fields
                       | None -> fields
                     in
+                    (* Execution path is not yet implemented; the tool
+                       advertises its schema and validates inputs for a
+                       future migration. Return a typed [unsupported]
+                       envelope so callers can distinguish "tool exists
+                       but is dormant" from a generic error, and so the
+                       operator sees that every validated argument was
+                       accepted (preventing "did I send the args wrong?"
+                       debugging loops). Backward-compatible: the legacy
+                       ["error"] string field is preserved. *)
                     let ok, body =
-                      ignore (ctx.sw, ctx.clock, ctx.config, fields);
-                      (false, {|{"error":"keeper repair handler not implemented"}|})
+                      ignore (ctx.sw, ctx.clock, ctx.config);
+                      let body_json =
+                        `Assoc
+                          [ ( "error"
+                            , `String
+                                "masc_keeper_repair execution path is \
+                                 not yet implemented; the tool \
+                                 advertises its schema for future \
+                                 migration but currently returns this \
+                                 typed unsupported response." )
+                          ; ("unsupported", `Bool true)
+                          ; ("tool", `String "masc_keeper_repair")
+                          ; ("validated_fields", `Assoc fields)
+                          ; ( "operator_guidance"
+                            , `String
+                                "All input arguments were validated \
+                                 successfully (keeper identity, \
+                                 playground working_dir, validator \
+                                 profile, max_attempts, optional \
+                                 target_file / source_text). If this \
+                                 tool is critical for your workflow, \
+                                 please file a tracking issue \
+                                 requesting implementation rather than \
+                                 retrying." )
+                          ]
+                      in
+                      (false, Yojson.Safe.to_string body_json)
                     in
                     invalidate_status_cache meta.name;
                     ( ok,

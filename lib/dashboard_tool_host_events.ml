@@ -15,6 +15,18 @@ module Char = Stdlib.Char
 module Int = Stdlib.Int
 module Float = Stdlib.Float
 
+let json_kind_name : Yojson.Safe.t -> string = function
+  | `Null -> "null"
+  | `Bool _ -> "bool"
+  | `Int _ -> "int"
+  | `Intlit _ -> "intlit"
+  | `Float _ -> "float"
+  | `String _ -> "string"
+  | `Assoc _ -> "object"
+  | `List _ -> "array"
+  | `Tuple _ -> "tuple"
+  | `Variant _ -> "variant"
+
 type report = {
   agent_name : string;
   client_name : string;
@@ -97,7 +109,10 @@ let report_of_yojson ?fallback_agent (json : Yojson.Safe.t) :
               timeout_ms = parse_timeout_ms json;
             }
       | Error msg, _ | _, Error msg -> Error msg)
-  | _ -> Error "request body must be a JSON object"
+  | other ->
+      Error
+        (Printf.sprintf "request body must be a JSON object (received %s)"
+           (json_kind_name other))
 
 let details_json (report : report) =
   let envelope =

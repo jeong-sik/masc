@@ -23,6 +23,12 @@ import {
   normalizePhaseDiagnosis,
   PhaseConditionsPanel,
 } from './phase-conditions-panel'
+// RFC-0135 PR-2: phase casing SSOT — `toKeeperPhase` is the single
+// source. The local PHASE_ID_MAP (previously lines 42-69 of this file)
+// duplicated BACKEND_PHASE_MAP in keeper-store-normalize and drifted
+// independently; that map and the local `normalizePhase` export are
+// removed in favor of the canonical helper.
+import { toKeeperPhase } from '../keeper-store-normalize'
 
 interface KeeperStateDiagramProps {
   keeperName: string
@@ -39,35 +45,6 @@ function PhaseBadge({ accent, children }: { accent?: boolean; children: unknown 
   return html`<span class="${cls}">${children}</span>`
 }
 
-const PHASE_ID_MAP: Record<string, string> = {
-  Offline: 'Offline',
-  Running: 'Running',
-  Failing: 'Failing',
-  Overflowed: 'Overflowed',
-  Compacting: 'Compacting',
-  HandingOff: 'HandingOff',
-  Draining: 'Draining',
-  Paused: 'Paused',
-  Stopped: 'Stopped',
-  Crashed: 'Crashed',
-  Restarting: 'Restarting',
-  Dead: 'Dead',
-  Zombie: 'Zombie',
-  offline: 'Offline',
-  running: 'Running',
-  failing: 'Failing',
-  overflowed: 'Overflowed',
-  compacting: 'Compacting',
-  handing_off: 'HandingOff',
-  paused: 'Paused',
-  draining: 'Draining',
-  stopped: 'Stopped',
-  crashed: 'Crashed',
-  restarting: 'Restarting',
-  dead: 'Dead',
-  zombie: 'Zombie',
-}
-
 // INVARIANT_LABELS is the SSOT in `fsm-hub-types.ts:124` — same five TLA
 // joint observer invariants emitted by `keeper_composite_observer.ml`. A
 // prior local copy in this file enumerated only four (dropped
@@ -82,11 +59,6 @@ const DIAGRAM_VIEW_CHIPS: Array<{ key: DiagramView; label: string; title: string
   { key: 'cytoscape', label: 'Cytoscape', title: 'Composite lifecycle graph' },
   { key: 'mermaid', label: 'Mermaid', title: 'Backend-generated phase diagram' },
 ]
-
-export function normalizePhase(phase: string | null | undefined): string | null {
-  if (!phase) return null
-  return PHASE_ID_MAP[phase] ?? phase
-}
 
 export function transitionType(selectedEvent: unknown): string {
   if (selectedEvent && typeof selectedEvent === 'object' && 'type' in selectedEvent) {
@@ -315,9 +287,9 @@ export function KeeperStateDiagramPanel({ keeperName, snapshot: externalSnapshot
           ${transitions.map(transition => html`
             <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-2xs leading-normal text-[var(--color-fg-primary)]">
               <div class="flex flex-wrap items-center gap-2">
-                <span class="font-mono text-[var(--color-fg-secondary)]">${normalizePhase(transition.prev_phase) ?? transition.prev_phase}</span>
+                <span class="font-mono text-[var(--color-fg-secondary)]">${toKeeperPhase(transition.prev_phase) ?? transition.prev_phase}</span>
                 <span class="text-[var(--color-fg-disabled)]">→</span>
-                <span class="font-mono text-[var(--color-accent-fg)]">${normalizePhase(transition.new_phase) ?? transition.new_phase}</span>
+                <span class="font-mono text-[var(--color-accent-fg)]">${toKeeperPhase(transition.new_phase) ?? transition.new_phase}</span>
                 <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">
                   ${transition.event_type ?? transitionType(transition.selected_event)}
                 </span>

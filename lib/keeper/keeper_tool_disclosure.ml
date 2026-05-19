@@ -479,7 +479,8 @@ let is_keeper_observation_tool_name name =
   | _ -> false
 ;;
 
-let required_tool_satisfaction (call : Agent_sdk.Completion_contract.tool_call)
+let required_tool_satisfaction ?(satisfying_tools : string list = [])
+  (call : Agent_sdk.Completion_contract.tool_call)
   : (unit, string) result
   =
   let tool_name = canonical_tool_name call.name in
@@ -498,13 +499,23 @@ let required_tool_satisfaction (call : Agent_sdk.Completion_contract.tool_call)
     if mutates
     then Ok ()
     else
-      Error
-        (Printf.sprintf
-           "tool '%s' is read-only/passive and cannot satisfy a required-tool contract"
-           tool_name))
+      let base_msg =
+        Printf.sprintf
+          "tool '%s' is read-only/passive and cannot satisfy a required-tool contract"
+          tool_name
+      in
+      match satisfying_tools with
+      | [] -> Error base_msg
+      | _ ->
+        Error
+          (Printf.sprintf
+             "%s. Call one of these instead: [%s]"
+             base_msg
+             (String.concat "; " satisfying_tools)))
 ;;
 
 let required_tool_satisfaction_for_required_names
+      ?(satisfying_tools : string list = [])
       ~(required_tool_names : string list)
       (call : Agent_sdk.Completion_contract.tool_call)
   : (unit, string) result
@@ -515,17 +526,18 @@ let required_tool_satisfaction_for_required_names
   let tool_name = canonical_tool_name call.name in
   if List.mem tool_name required_tool_names
   then Ok ()
-  else required_tool_satisfaction call
+  else required_tool_satisfaction ~satisfying_tools call
 ;;
 
 let required_tool_satisfaction_for_turn
+      ?(satisfying_tools : string list = [])
       ~(required_tool_names : string list)
       (call : Agent_sdk.Completion_contract.tool_call)
   : (unit, string) result
   =
   match required_tool_names with
   | [] -> Ok ()
-  | _ -> required_tool_satisfaction_for_required_names ~required_tool_names call
+  | _ -> required_tool_satisfaction_for_required_names ~satisfying_tools ~required_tool_names call
 ;;
 
 let classify_tool_progress name =

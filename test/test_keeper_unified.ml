@@ -9833,6 +9833,109 @@ let test_turn_required_tool_satisfaction_keeps_generic_presence_separate () =
           (required_tool_call "keeper_board_get" (`Assoc []))))
 ;;
 
+let test_required_tool_satisfaction_includes_satisfying_tools_hint () =
+  (* Without satisfying_tools, the error is the base message *)
+  let base_error =
+    KTD.required_tool_satisfaction (required_tool_call "masc_status" (`Assoc []))
+  in
+  check
+    string
+    "base rejection has no suggestion suffix"
+    "tool 'masc_status' is read-only/passive and cannot satisfy a required-tool contract"
+    (Result.get_error base_error);
+  (* With satisfying_tools, the error includes actionable alternatives *)
+  let hinted_error =
+    KTD.required_tool_satisfaction
+      ~satisfying_tools:[ "keeper_board_post"; "keeper_board_comment" ]
+      (required_tool_call "masc_status" (`Assoc []))
+  in
+  check
+    string
+    "hinted rejection includes satisfying tools"
+    "tool 'masc_status' is read-only/passive and cannot satisfy a required-tool \
+     contract. Call one of these instead: [keeper_board_post; keeper_board_comment]"
+    (Result.get_error hinted_error);
+  (* Mutating tool still passes even when satisfying_tools is given *)
+  check
+    bool
+    "mutating tool still satisfies regardless of satisfying_tools"
+    true
+    (Result.is_ok
+       (KTD.required_tool_satisfaction
+          ~satisfying_tools:[ "keeper_board_post" ]
+          (required_tool_call "keeper_bash"
+             (`Assoc [ "op", `String "echo"; "cmd", `String "hello" ]))));
+  (* Empty satisfying_tools list falls back to base message *)
+  let empty_hint_error =
+    KTD.required_tool_satisfaction
+      ~satisfying_tools:[]
+      (required_tool_call "keeper_tasks_list" (`Assoc []))
+  in
+  check
+    string
+    "empty satisfying_tools uses base message"
+    "tool 'keeper_tasks_list' is read-only/passive and cannot satisfy a required-tool \
+     contract"
+    (Result.get_error empty_hint_error);
+  (* Through required_tool_satisfaction_for_turn *)
+  let turn_hinted =
+    KTD.required_tool_satisfaction_for_turn
+      ~satisfying_tools:[ "keeper_task_claim" ]
+      ~required_tool_names:[ "keeper_bash" ]
+      (required_tool_call "masc_status" (`Assoc []))
+  in
+  check
+    string
+    "turn-level rejection forwards satisfying_tools hint"
+    "tool 'masc_status' is read-only/passive and cannot satisfy a required-tool \
+     contract. Call one of these instead: [keeper_task_claim]"
+    (Result.get_error turn_hinted)
+;;
+
+let test_satisfying_tools_for_turn_computes_from_affordances () =
+  let module Surface = Masc_mcp.Keeper_agent_tool_surface in
+  (* Board_post_or_comment affordance with board tools allowed *)
+  let tools =
+    Surface.satisfying_tools_for_turn
+      ~turn_affordances:[ "board_post_or_comment" ]
+      ~allowed_tool_names:
+        [ "keeper_board_post"; "keeper_board_comment"; "masc_broadcast"; "masc_status" ]
+  in
+  check
+    (list string)
+    "board_post_or_comment returns satisfying tools from allowed surface"
+    [ "keeper_board_post"; "keeper_board_comment"; "masc_broadcast" ]
+    tools;
+  (* Affordance with only partial tools allowed *)
+  let partial =
+    Surface.satisfying_tools_for_turn
+      ~turn_affordances:[ "task_claim" ]
+      ~allowed_tool_names:[ "masc_claim_next"; "masc_status" ]
+  in
+  check
+    (list string)
+    "task_claim returns only allowed subset"
+    [ "masc_claim_next" ]
+    partial;
+  (* Multiple affordances deduplicate *)
+  let multi =
+    Surface.satisfying_tools_for_turn
+      ~turn_affordances:[ "reply_in_room"; "board_post_or_comment" ]
+      ~allowed_tool_names:
+        [ "keeper_board_post"; "keeper_board_comment"; "masc_broadcast"; "masc_keeper_msg" ]
+  in
+  List.iter (fun t ->
+    check bool ("tool in multi-affordance result: " ^ t) true (List.mem t multi))
+    [ "keeper_board_post"; "keeper_board_comment"; "masc_keeper_msg"; "masc_broadcast" ];
+  (* No matching affordance -> empty *)
+  let empty =
+    Surface.satisfying_tools_for_turn
+      ~turn_affordances:[ "unknown_affordance" ]
+      ~allowed_tool_names:[ "keeper_board_post" ]
+  in
+  check (list string) "unknown affordance yields empty" [] empty
+;;
+
 let test_tool_usage_delta_uses_registry_counts () =
   let before = [ "keeper_board_post", 1; "keeper_fs_read", 0; "keeper_voice_agent", 2 ] in
   let after = [ "keeper_board_post", 1; "keeper_fs_read", 1; "keeper_voice_agent", 4 ] in
@@ -12613,6 +12716,14 @@ let () =
             "turn required tool predicate separates presence from progress"
             `Quick
             test_turn_required_tool_satisfaction_keeps_generic_presence_separate
+        ; test_case
+            "required tool satisfaction includes satisfying tools hint"
+            `Quick
+            test_required_tool_satisfaction_includes_satisfying_tools_hint
+        ; test_case
+            "satisfying_tools_for_turn computes from affordances"
+            `Quick
+            test_satisfying_tools_for_turn_computes_from_affordances
         ; test_case
             "tool usage delta uses registry counts"
             `Quick

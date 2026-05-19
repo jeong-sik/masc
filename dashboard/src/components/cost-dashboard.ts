@@ -40,6 +40,7 @@ import { StatTile } from './common/stat-tile'
 import { FilterChips } from './common/filter-chips'
 import { formatCost, formatPct1 } from '../lib/format-number'
 import { unixSecondsToDate } from '../lib/format-time'
+import { DEFAULT_WINDOW_MINUTES_24H } from '../config/constants'
 import { replaceRoute, route } from '../router'
 import {
   type ViewMode,
@@ -150,7 +151,7 @@ const WINDOW_OPTIONS: Array<{ key: number; label: string }> = [
   { key: 30, label: '30분' },
   { key: 60, label: '1시간' },
   { key: 360, label: '6시간' },
-  { key: 1440, label: '24시간' },
+  { key: DEFAULT_WINDOW_MINUTES_24H, label: '24시간' },
 ]
 
 const windowMinutes = signal<number>(60)

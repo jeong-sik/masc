@@ -12,6 +12,7 @@ import {
 import { normalizePendingConfirmation } from '../pending-confirm'
 import { normalizeKeeperTrustTerminalReason } from '../keeper-store-normalize'
 import { currentDashboardActor, get, post, withRetries, NAMESPACE_TRUTH_GET_TIMEOUT_MS } from './core'
+import { DEFAULT_WINDOW_MINUTES_24H } from '../config/constants'
 import {
   parseAgentRelationsResponse,
   type AgentRelationsResponse,
@@ -960,7 +961,7 @@ function decodeKeeperCostMetricsResponse(raw: unknown): KeeperCostMetricsRespons
 }
 
 export async function fetchKeeperCostMetrics(
-  windowMinutes = 1440,
+  windowMinutes = DEFAULT_WINDOW_MINUTES_24H,
   opts?: AbortableRequestOptions,
 ): Promise<KeeperCostMetricsResponse> {
   const raw = await get<Record<string, unknown>>(`/api/v1/dashboard/keeper-costs?window=${windowMinutes}`, { signal: opts?.signal })
@@ -3311,13 +3312,13 @@ function decodeCostLatencyResponse(raw: unknown): CostLatencyResponse | null {
     p50: asNumber(raw.p50) ?? null,
     p95: asNumber(raw.p95) ?? null,
     total_cost_usd: asNumber(raw.total_cost_usd) ?? 0,
-    window_minutes: asNumber(raw.window_minutes) ?? 1440,
+    window_minutes: asNumber(raw.window_minutes) ?? DEFAULT_WINDOW_MINUTES_24H,
     generated_at: asNumber(raw.generated_at) ?? 0,
   }
 }
 
 export async function fetchCostLatency(
-  windowMinutes = 1440,
+  windowMinutes = DEFAULT_WINDOW_MINUTES_24H,
   opts?: AbortableRequestOptions,
 ): Promise<CostLatencyResponse> {
   const raw = await get<Record<string, unknown>>(

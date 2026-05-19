@@ -63,11 +63,40 @@ let write_ledger_row ~base_dir ?mtime row =
   path
 ;;
 
+let write_file path content =
+  let oc = open_out_gen [ Open_wronly; Open_creat; Open_text; Open_trunc ] 0o644 path in
+  output_string oc content;
+  close_out oc
+;;
+
 let make_proof_root ?mtime root =
   let proofs_dir = Filename.concat root "proofs" in
   mkdir_p proofs_dir;
   Option.iter (fun ts -> Unix.utimes proofs_dir ts ts) mtime;
   proofs_dir
+;;
+
+let make_proof_run ?mtime ?(manifest = false) ?(contract = false) root run_id =
+  let proofs_dir = make_proof_root root in
+  let run_dir = Filename.concat proofs_dir run_id in
+  let traces_dir = Filename.concat run_dir "tool_traces" in
+  let evidence_dir = Filename.concat run_dir "evidence" in
+  mkdir_p traces_dir;
+  mkdir_p evidence_dir;
+  if manifest then write_file (Filename.concat run_dir "manifest.json") "{}\n";
+  if contract then write_file (Filename.concat run_dir "contract.json") "{}\n";
+  Option.iter
+    (fun ts ->
+       List.iter
+         (fun path -> if Sys.file_exists path then Unix.utimes path ts ts)
+         [ run_dir
+         ; traces_dir
+         ; evidence_dir
+         ; Filename.concat run_dir "manifest.json"
+         ; Filename.concat run_dir "contract.json"
+         ];
+       Unix.utimes proofs_dir ts ts)
+    mtime
 ;;
 
 let member_string key json =
@@ -81,6 +110,13 @@ let member_string key json =
 ;;
 
 let nested key json = Yojson.Safe.Util.member key json
+
+let member_int key json =
+  match Yojson.Safe.Util.member key json with
+  | `Int value -> value
+  | other ->
+    Alcotest.failf "expected int field %s, got %s" key (Yojson.Safe.to_string other)
+;;
 
 let list_field key json =
   match Yojson.Safe.Util.member key json with
@@ -138,6 +174,40 @@ let test_missing_task_scope_status () =
     (member_string "status" (nested "task_scope" json))
 ;;
 
+let test_partial_task_scope_status () =
+  with_temp_dir @@ fun dir ->
+  let base_dir = Filename.concat dir "cdal_verdicts" in
+  let proof_root = Filename.concat dir ".oas" in
+  ignore
+    (write_ledger_row
+       ~base_dir
+       (`Assoc [ "_task_id", `String "task-15748"; "run_id", `String "run-task" ]));
+  ignore (write_ledger_row ~base_dir (`Assoc [ "run_id", `String "run-no-task" ]));
+  ignore (make_proof_root proof_root);
+  let json =
+    H.snapshot_json
+      ~base_dir
+      ~proof_root
+      ~now:(Time_compat.now ())
+      ~stale_age_seconds:60.0
+      ~recent_limit:20
+      ()
+  in
+  Alcotest.(check string)
+    "writer_status"
+    "partial_task_scope"
+    (member_string "writer_status" json);
+  let task_scope = nested "task_scope" json in
+  Alcotest.(check string)
+    "task scope status"
+    "partial_task_scope"
+    (member_string "status" task_scope);
+  Alcotest.(check int)
+    "missing task rows"
+    1
+    (member_int "missing_task_scope_rows" task_scope)
+;;
+
 let test_active_writer_status () =
   with_temp_dir @@ fun dir ->
   let base_dir = Filename.concat dir "cdal_verdicts" in
@@ -161,6 +231,83 @@ let test_active_writer_status () =
     "task scope status"
     "present"
     (member_string "status" (nested "task_scope" json))
+;;
+
+let test_stale_incomplete_proof_store_status () =
+  with_temp_dir @@ fun dir ->
+  let base_dir = Filename.concat dir "cdal_verdicts" in
+  let proof_root = Filename.concat dir ".oas" in
+  let now = Time_compat.now () in
+  ignore
+    (write_ledger_row
+       ~base_dir
+       ~mtime:now
+       (`Assoc [ "_task_id", `String "task-15748"; "run_id", `String "run-task" ]));
+  make_proof_run
+    ~mtime:(now -. 100.0)
+    ~manifest:true
+    ~contract:true
+    proof_root
+    "cdal-complete";
+  make_proof_run ~mtime:(now -. 1000.0) proof_root "cdal-stale-incomplete";
+  let json =
+    H.snapshot_json
+      ~base_dir
+      ~proof_root
+      ~now
+      ~stale_age_seconds:600.0
+      ~recent_limit:20
+      ~proof_scan_limit:20
+      ~stale_incomplete_run_seconds:300.0
+      ()
+  in
+  Alcotest.(check string)
+    "writer_status"
+    "proof_store_incomplete"
+    (member_string "writer_status" json);
+  let proof_store = nested "proof_store" json in
+  Alcotest.(check string)
+    "proof store status"
+    "stale_incomplete_runs"
+    (member_string "status" proof_store);
+  Alcotest.(check int)
+    "stale incomplete run count"
+    1
+    (member_int "stale_incomplete_run_dirs" (nested "completeness" proof_store))
+;;
+
+let test_recent_incomplete_proof_store_is_in_flight () =
+  with_temp_dir @@ fun dir ->
+  let base_dir = Filename.concat dir "cdal_verdicts" in
+  let proof_root = Filename.concat dir ".oas" in
+  let now = Time_compat.now () in
+  ignore
+    (write_ledger_row
+       ~base_dir
+       ~mtime:now
+       (`Assoc [ "_task_id", `String "task-15748"; "run_id", `String "run-task" ]));
+  make_proof_run ~mtime:(now -. 10.0) proof_root "cdal-recent-incomplete";
+  let json =
+    H.snapshot_json
+      ~base_dir
+      ~proof_root
+      ~now
+      ~stale_age_seconds:600.0
+      ~recent_limit:20
+      ~proof_scan_limit:20
+      ~stale_incomplete_run_seconds:300.0
+      ()
+  in
+  Alcotest.(check string) "writer_status" "active" (member_string "writer_status" json);
+  let proof_store = nested "proof_store" json in
+  Alcotest.(check string)
+    "proof store status"
+    "active"
+    (member_string "status" proof_store);
+  Alcotest.(check int)
+    "stale incomplete run count"
+    0
+    (member_int "stale_incomplete_run_dirs" (nested "completeness" proof_store))
 ;;
 
 let test_dormant_writer_status () =
@@ -250,7 +397,16 @@ let () =
     [ ( "writer_status"
       , [ Alcotest.test_case "missing" `Quick test_missing_writer_status
         ; Alcotest.test_case "missing task scope" `Quick test_missing_task_scope_status
+        ; Alcotest.test_case "partial task scope" `Quick test_partial_task_scope_status
         ; Alcotest.test_case "active" `Quick test_active_writer_status
+        ; Alcotest.test_case
+            "stale incomplete proof store"
+            `Quick
+            test_stale_incomplete_proof_store_status
+        ; Alcotest.test_case
+            "recent incomplete proof store is in flight"
+            `Quick
+            test_recent_incomplete_proof_store_is_in_flight
         ; Alcotest.test_case "dormant" `Quick test_dormant_writer_status
         ; Alcotest.test_case
             "alternate proof stores ignore home .oas"

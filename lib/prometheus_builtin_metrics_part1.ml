@@ -180,6 +180,16 @@ let register
     "Total keeper turn dispatches blocked by the stuck-turn livelock guard (labels: \
      keeper, reason=attempts_exhausted|stuck_age_exceeded)"
     `Counter;
+  add
+    Keeper_metrics.metric_keeper_turn_livelock_blocks_repeated
+    "Total repeated keeper turn livelock blocks demoted to DEBUG (labels: keeper, \
+     gate_kind)"
+    `Counter;
+  add
+    Keeper_metrics.metric_keeper_turn_livelock_blocks_threshold_park
+    "Total keeper turn livelock block streams that crossed the threshold-park boundary \
+     (labels: keeper, gate_kind)"
+    `Counter;
   (* #9943: per-keeper turn latency bucket distribution.  Each
      completed turn increments exactly one bucket.  Bucket vocabulary
      [under_60s | 60-300s | 300-600s | 600-1200s | over_1200s]. *)

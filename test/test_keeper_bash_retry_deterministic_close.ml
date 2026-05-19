@@ -26,6 +26,16 @@ let check_classify ~name ~expected raw =
 
 (* ── Deterministic — error code path ──────────────────────────── *)
 
+let test_command_blocked () =
+  let raw =
+    {|{"ok":false,"error":"command_blocked","reason":"Shell injection syntax blocked"}|}
+  in
+  check_classify
+    ~name:"command_blocked"
+    ~expected:(Some D.Command_blocked)
+    raw
+;;
+
 let test_command_shape_blocked () =
   let raw =
     {|{"ok":false,"error":"keeper_bash_command_shape_blocked","reason":"pipes blocked"}|}
@@ -33,6 +43,16 @@ let test_command_shape_blocked () =
   check_classify
     ~name:"keeper_bash_command_shape_blocked"
     ~expected:(Some D.Command_shape_blocked)
+    raw
+;;
+
+let test_task_state_file_probe_blocked () =
+  let raw =
+    {|{"ok":false,"error":"task_state_file_probe_blocked","reason":"Do not inspect task files"}|}
+  in
+  check_classify
+    ~name:"task_state_file_probe_blocked"
+    ~expected:(Some D.Task_state_probe_blocked)
     raw
 ;;
 
@@ -190,7 +210,9 @@ let test_telemetry_key_format () =
 
 let test_to_string_non_empty_for_every_variant () =
   let variants =
-    [ D.Command_shape_blocked
+    [ D.Command_blocked
+    ; D.Command_shape_blocked
+    ; D.Task_state_probe_blocked
     ; D.Destructive_operation_blocked
     ; D.Path_syntax_blocked
     ; D.Path_outside_sandbox
@@ -215,10 +237,15 @@ let () =
   Alcotest.run
     "keeper_bash_retry_deterministic_close"
     [ ( "classify_error_code"
-      , [ Alcotest.test_case
+      , [ Alcotest.test_case "command_blocked" `Quick test_command_blocked
+        ; Alcotest.test_case
             "command_shape_blocked"
             `Quick
             test_command_shape_blocked
+        ; Alcotest.test_case
+            "task_state_file_probe_blocked"
+            `Quick
+            test_task_state_file_probe_blocked
         ; Alcotest.test_case
             "destructive_operation_blocked"
             `Quick

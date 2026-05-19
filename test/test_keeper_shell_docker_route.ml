@@ -1497,7 +1497,8 @@ let test_bash_fake_docker_executes () =
   Alcotest.(check bool) "bash output includes fake docker stdout" true
     (response_mentions raw "output" "stdout:")
 
-let test_bash_allows_validator_safe_pipe_redirect_for_coding_preset () =
+let test_bash_blocks_validator_safe_pipe_redirect_with_recovery_plan () =
+  with_tool_policy_config @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Coding
@@ -1515,13 +1516,23 @@ let test_bash_allows_validator_safe_pipe_redirect_for_coding_preset () =
           ])
       ()
   in
-  Alcotest.(check (option bool)) "safe pipeline executes" (Some true)
+  let json = Yojson.Safe.from_string raw in
+  let recovery_plan = Json.member "recovery_plan" json in
+  Alcotest.(check (option bool)) "safe pipeline is blocked" (Some false)
     (parse_bool_field raw "ok");
-  Alcotest.(check (option string)) "bash via=docker" (Some "docker")
-    (parse_string_field raw "via");
-  Alcotest.(check bool) "bash output includes fake docker stdout" true
-    (response_mentions raw "output" "stdout:");
-  Alcotest.(check bool) "docker was invoked" true
+  Alcotest.(check (option string))
+    "shape-block error"
+    (Some "keeper_bash_command_shape_blocked")
+    (parse_string_field raw "error");
+  Alcotest.(check string)
+    "required next tool"
+    "keeper_shell"
+    (Json.member "required_next_tool" json |> Json.to_string);
+  Alcotest.(check string)
+    "recovery op"
+    "head"
+    Yojson.Safe.Util.(recovery_plan |> member "next_args" |> member "op" |> to_string);
+  Alcotest.(check bool) "docker was not invoked" false
     (Sys.file_exists log_path)
 
 let test_bash_rg_no_match_remains_successful_in_docker_route () =
@@ -1612,11 +1623,59 @@ let test_bash_blocks_gh_pr_checks_before_docker () =
   Alcotest.(check (option bool)) "blocked before docker" (Some false)
     (parse_bool_field raw "ok");
   Alcotest.(check (option string))
+    "native PR shell block"
+    (Some "command_blocked")
+    (parse_string_field raw "error");
+  Alcotest.(check (option string))
+    "required next tool"
+    (Some "keeper_pr_status")
+    (parse_string_field raw "required_next_tool");
+  Alcotest.(check bool) "docker was not invoked" false
+    (Sys.file_exists log_path)
+
+let test_bash_search_pipeline_exposes_structured_recovery_plan () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Coding
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+      ~args:
+        (`Assoc
+          [
+            ("cmd", `String "rg TODO repos | head -20");
+            ("cwd", `String playground);
+          ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  let recovery_plan = Json.member "recovery_plan" json in
+  let next_args = Json.member "next_args" recovery_plan in
+  Alcotest.(check (option bool)) "blocked before docker" (Some false)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option string))
     "shape_block"
-    (Some "gh_pr_checks")
+    (Some "repo_wide_scan")
     (parse_string_field raw "shape_block");
-  Alcotest.(check bool) "hint points to PR status tool" true
-    (response_mentions raw "hint" "keeper_pr_status");
+  Alcotest.(check string)
+    "required_next_tool"
+    "keeper_shell"
+    (Json.member "required_next_tool" json |> Json.to_string);
+  Alcotest.(check string)
+    "recovery next tool"
+    "keeper_shell"
+    (Json.member "next_tool" recovery_plan |> Json.to_string);
+  Alcotest.(check string)
+    "recovery op"
+    "rg"
+    (Json.member "op" next_args |> Json.to_string);
+  Alcotest.(check bool)
+    "same args retry forbidden"
+    true
+    (Json.member "do_not_retry_same_args" recovery_plan |> Json.to_bool);
   Alcotest.(check bool) "docker was not invoked" false
     (Sys.file_exists log_path)
 
@@ -1790,8 +1849,8 @@ let () =
             "docker keeper bash executes through fake docker"
             `Quick test_bash_fake_docker_executes;
           Alcotest.test_case
-            "docker keeper bash allows validator-safe pipe redirects"
-            `Quick test_bash_allows_validator_safe_pipe_redirect_for_coding_preset;
+            "docker keeper bash pipe redirects expose structured recovery"
+            `Quick test_bash_blocks_validator_safe_pipe_redirect_with_recovery_plan;
           Alcotest.test_case
             "docker keeper bash rg no-match remains successful"
             `Quick test_bash_rg_no_match_remains_successful_in_docker_route;
@@ -1801,6 +1860,9 @@ let () =
           Alcotest.test_case
             "docker keeper bash blocks gh pr checks before docker"
             `Quick test_bash_blocks_gh_pr_checks_before_docker;
+          Alcotest.test_case
+            "docker keeper bash shape block exposes structured recovery plan"
+            `Quick test_bash_search_pipeline_exposes_structured_recovery_plan;
           Alcotest.test_case
             "docker keeper bash rewrites host paths before exec"
             `Quick test_bash_rewrites_host_path_command_for_docker;

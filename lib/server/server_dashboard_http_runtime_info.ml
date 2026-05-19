@@ -530,15 +530,40 @@ let runtime_resolution_json (config : Coord.config) =
   let add_source_mismatch_warning acc =
     if source_mismatch
     then (
-      let runtime = Option.value ~default:"unknown" runtime_commit in
+      (* When [runtime_commit] is [None] the warning previously
+         rendered as "Runtime build commit (unknown) differs from ...".
+         The *reason* the binary commit is unknown was emitted as a
+         separate [add_binary_commit_unknown_warning] further down,
+         forcing the dashboard reader to cross-reference two warnings
+         to understand a single mismatch.  Inline the reason in the
+         sentinel itself so the warning is self-contained. *)
+      let runtime =
+        match runtime_commit with
+        | Some commit -> commit
+        | None ->
+            "<unknown — Build_identity.binary_commit not populated by build \
+             pipeline>"
+      in
       let source_label, source_commit =
         match server_repo_commit with
         | Some commit -> "server repo HEAD", commit
-        | None -> "workspace HEAD", Option.value ~default:"unknown" workspace_commit
+        | None ->
+            (* [workspace_commit] is [git_rev_parse_short config.workspace_path].
+               [None] means [git rev-parse] failed at that path; naming the
+               path gives the operator the worktree to check. *)
+            let commit =
+              match workspace_commit with
+              | Some c -> c
+              | None ->
+                  Printf.sprintf
+                    "<unknown — git rev-parse failed at workspace_path=%s>"
+                    config.workspace_path
+            in
+            "workspace HEAD", commit
       in
       Printf.sprintf
-        "Runtime build commit (%s) differs from %s (%s). Rebuild/restart from the \
-         intended server worktree."
+        "Runtime build commit (%s) differs from %s (%s). Rebuild/restart from \
+         the intended server worktree."
         runtime
         source_label
         source_commit
@@ -556,13 +581,25 @@ let runtime_resolution_json (config : Coord.config) =
   let add_server_workspace_mismatch_warning acc =
     if server_workspace_mismatch
     then (
+      (* [server_workspace_mismatch] is only true when [server_repo_path] is
+         [Some _] (see the [Option.bind] guard above), so the [None] branch is
+         dead at runtime — but [Option.value ~default:"unknown server repo"]
+         silently buried that invariant.  Use the structured form instead:
+         the dead branch documents *why* it cannot fire. *)
       let server_repo =
-        server_repo_path |> Option.value ~default:"unknown server repo"
+        match server_repo_path with
+        | Some repo -> repo
+        | None ->
+            (* Unreachable: [server_workspace_mismatch] requires
+               [Option.bind server_repo_path normalized_path_opt = Some _],
+               which in turn requires [server_repo_path = Some _]. *)
+            "<unreachable — server_workspace_mismatch implies server_repo_path \
+             = Some _>"
       in
       Printf.sprintf
-        "Server binary checkout (%s) differs from dashboard workspace/base path (%s / \
-         %s). This can be intentional; verify the running worktree when dashboard \
-         data looks stale."
+        "Server binary checkout (%s) differs from dashboard workspace/base \
+         path (%s / %s). This can be intentional; verify the running worktree \
+         when dashboard data looks stale."
         server_repo
         config.workspace_path
         config.base_path

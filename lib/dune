@@ -231,6 +231,7 @@
   worker_container_runners
   worker_dev_tools_paths
   worker_dev_tools_log_sanitize
+  worker_dev_tools_command_syntax
   ;; keeper_memory sub-modules
   keeper_memory_policy_summary_filter
   keeper_memory_policy

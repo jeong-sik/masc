@@ -7,6 +7,7 @@ import { keeperDisplayStatus, keeperRuntimeBlockerHint } from './keeper-runtime-
 // PHASE_ID_MAP elsewhere; the three maps drifted independently.
 import { toKeeperPhase } from '../keeper-store-normalize'
 import { isKeeperPaused } from './keeper-predicates'
+import { parseAgentStatus } from './agent-status'
 // RFC-0135 PR-12 + PR-14d: route blocker visibility through the typed
 // SSOT (stale vs live distinction) and consume composite-preferred
 // phase via `derivePreferredPhase`. Previously
@@ -290,11 +291,19 @@ export function summarizeMonitoringEvidence(summary: KeeperMonitoringSummary): M
 }
 
 function agentBand(status: string | undefined | null): RuntimeBand {
-  const normalized = (status ?? '').trim().toLowerCase()
-  if (!normalized) return 'attention'
-  if (normalized === 'inactive' || normalized === 'offline' || normalized === 'dead' || normalized === 'left') {
-    return 'offline'
-  }
+  if (status == null || status.trim() === '') return 'attention'
+  const parsed = parseAgentStatus(status)
+  if (parsed === 'inactive' || parsed === 'offline') return 'offline'
+  if (parsed != null) return 'active'
+  // Wire-format tokens outside the declared AgentStatus union. The
+  // OCaml backend agent_status sum (lib/types/types_core.ml:42) emits
+  // only Active|Busy|Listening|Inactive; 'dead' and 'left' here are
+  // legacy defensive arms from before the typed union was defined
+  // (predates RFC-0139). Kept as documented compat until a wire-format
+  // audit confirms zero emission, then collapse into the parsed-null
+  // branch below.
+  const lower = status.trim().toLowerCase()
+  if (lower === 'dead' || lower === 'left') return 'offline'
   return 'active'
 }
 

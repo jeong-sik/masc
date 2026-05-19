@@ -431,8 +431,16 @@ export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
 ] as const
 
 export type KeeperRuntimeBlockerClass = (typeof KEEPER_RUNTIME_BLOCKER_CLASSES)[number]
-export type KeeperPauseState = 'active' | 'paused' | string
-export type KeeperRuntimeBlockerState = 'clear' | 'blocked' | 'continue_gate' | string
+// Wire emit: `lib/keeper/keeper_status_bridge.ml:720` —
+//   `pause_state = if meta.paused then "paused" else "active"`.
+// Closed 2-arm; the previous `| string` catch-all hid the fact that
+// the wire vocabulary is exhaustive and let unmapped values flow
+// silently through narrowing.
+export type KeeperPauseState = 'active' | 'paused'
+
+// Wire emit: `lib/keeper/keeper_status_bridge.ml:721–724` — derived
+// from `runtime_blocker_surface_opt` + `continue_gate`. Closed 3-arm.
+export type KeeperRuntimeBlockerState = 'clear' | 'blocked' | 'continue_gate'
 
 export type StopCauseSource =
   | 'runtime_blocker_class'

@@ -405,6 +405,13 @@ let launch_supervised_fiber
              per-keeper livelock bookkeeping during cleanup so the next
              restart starts with a fresh counter. *)
             Keeper_turn_livelock.reset_keeper_livelock ~keeper:meta.name;
+            (* ETA-LIVELOCK: keep the typed-escalation classifier in
+               lock-step with the upstream livelock bookkeeping so a
+               restarted keeper sees the first block at ERROR again.
+               Without this reset the [Threshold_park] state from a
+               previous lifetime would silently demote the new
+               keeper's First block to DEBUG. *)
+            Keeper_livelock_state.reset_for_keeper ~keeper:meta.name;
             if not !resolved
             then
               if Shutdown.is_shutting_down_global ()
@@ -684,6 +691,10 @@ let resume_keeper_after_reconcile_gate (ctx : _ context) (meta : keeper_meta) =
     None;
   Keeper_registry.reset_turn_failures ~base_path:ctx.config.base_path resumed_meta.name;
   Keeper_turn_livelock.reset_keeper_livelock ~keeper:resumed_meta.name;
+  (* ETA-LIVELOCK: keep typed-escalation classifier aligned with the
+     resume path so the resumed keeper's first livelock block emits at
+     ERROR (not silently demoted to DEBUG from a previous lifetime). *)
+  Keeper_livelock_state.reset_for_keeper ~keeper:resumed_meta.name;
   Keeper_registry.dispatch_event_unit
     ~base_path:ctx.config.base_path
     resumed_meta.name

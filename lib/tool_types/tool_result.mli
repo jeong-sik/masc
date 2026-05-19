@@ -22,6 +22,12 @@ val tool_failure_class_to_yojson : tool_failure_class -> Yojson.Safe.t
 val tool_failure_class_of_yojson :
   Yojson.Safe.t -> (tool_failure_class, string) result
 
+val pp_tool_failure_class : Format.formatter -> tool_failure_class -> unit
+(** Pretty-printer mirroring the [@@deriving show] convention so
+    callers using [Tool_result.pp_tool_failure_class] (PPX-expanded
+    elsewhere, or hand-written debug) keep compiling. Falls through
+    to [tool_failure_class_to_string]. *)
+
 val tool_failure_class_to_string : tool_failure_class -> string
 
 (** [Transient_error] is the only retryable class. *)

@@ -22,7 +22,6 @@ type tool_failure_class =
   | Policy_rejection (** Auth/permission/boundary — permanent *)
   | Runtime_failure (** Internal error/bug — non-retryable *)
   | Workflow_rejection (** Business rule violation — non-retryable *)
-[@@deriving yojson]
 
 let tool_failure_class_to_string = function
   | Transient_error -> "transient_error"
@@ -37,6 +36,35 @@ let tool_failure_class_of_string = function
   | "runtime_failure" -> Some Runtime_failure
   | "workflow_rejection" -> Some Workflow_rejection
   | _ -> None
+;;
+
+(* PR #16671 added [@@deriving yojson] (and was relied on for an
+   implicit show-derived [pp_*] by downstream PPX users), but
+   lib/tool_types/dune has no `(preprocess (pps ...))` stanza, so
+   neither *_to_yojson / *_of_yojson nor pp_* were ever synthesized.
+   The .mli advertised the yojson pair and downstream code called
+   pp_tool_failure_class, breaking the build with:
+     "value is required but not provided"
+     "Unbound value Tool_result.pp_tool_failure_class"
+   Manual wrappers via *_to_string keep the sub-library PPX-free
+   (matching the rest of leaf tool_types) and recover the surface. *)
+let pp_tool_failure_class ppf c =
+  Format.fprintf ppf "%s" (tool_failure_class_to_string c)
+;;
+
+let tool_failure_class_to_yojson (c : tool_failure_class) : Yojson.Safe.t =
+  `String (tool_failure_class_to_string c)
+;;
+
+let tool_failure_class_of_yojson (json : Yojson.Safe.t)
+  : (tool_failure_class, string) result
+  =
+  match json with
+  | `String s ->
+    (match tool_failure_class_of_string s with
+     | Some c -> Ok c
+     | None -> Error ("tool_failure_class_of_yojson: unknown value " ^ s))
+  | _ -> Error "tool_failure_class_of_yojson: expected JSON string"
 ;;
 
 let is_retryable = function

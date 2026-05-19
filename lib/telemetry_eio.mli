@@ -59,6 +59,10 @@ type event =
       error_message : string option; [@default None]
       exit_code : int option; [@default None]
       stderr_excerpt : string option; [@default None]
+      failure_class : Tool_result.tool_failure_class option; [@default None]
+          (** PR #16671 typed failure classification — added to .ml but
+              the .mli declaration was not updated, breaking the
+              interface match. *)
     }
   | Tool_assigned of {
       agent_id : string;

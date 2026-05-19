@@ -473,6 +473,12 @@ let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id
          error_message;
          exit_code;
          stderr_excerpt;
+         (* PR #16671 (#16671) added typed [failure_class] to Tool_called
+            but did not backfill this caller. The default is [None] —
+            this site is the legacy untyped path, so no failure-class
+            classification is available at the call site. Future
+            classification belongs at the dispatcher level, not here. *)
+         failure_class = None;
        });
   if not success then
     match error_kind with

@@ -83,12 +83,26 @@ let max_consecutive_failures = Env_config.KeeperToolExec.max_consecutive_tool_fa
 type failure_counts =
   { table : (string, int) Hashtbl.t
   ; workflow_table : (string, int) Hashtbl.t
+  ; workflow_block_table : (string, workflow_rejection_block) Hashtbl.t
   ; mutex : Mutex.t
   }
 
+and workflow_rejection_block =
+  { count : int
+  ; rule_id : string option
+  ; tool_suggestion : string option
+  ; hint : string option
+  }
+
 let create_failure_counts () =
-  { table = Hashtbl.create 16; workflow_table = Hashtbl.create 16; mutex = Mutex.create () }
+  { table = Hashtbl.create 16
+  ; workflow_table = Hashtbl.create 16
+  ; workflow_block_table = Hashtbl.create 16
+  ; mutex = Mutex.create ()
+  }
 ;;
+
+let reset_tool_retry_dedupe_for_testing = Keeper_tool_retry_state.reset_for_test
 
 let failure_count_get counts key =
   Mutex.protect counts.mutex (fun () ->
@@ -216,6 +230,29 @@ let workflow_rejection_count_reset counts =
   Mutex.protect counts.mutex (fun () -> Hashtbl.clear counts.workflow_table)
 ;;
 
+let workflow_rejection_scope_block_get counts key =
+  Mutex.protect counts.mutex (fun () ->
+    Hashtbl.find_opt counts.workflow_block_table key)
+;;
+
+let workflow_rejection_scope_block_record counts key info =
+  Mutex.protect counts.mutex (fun () ->
+    let previous_count =
+      match Hashtbl.find_opt counts.workflow_block_table key with
+      | Some block -> block.count
+      | None -> 0
+    in
+    let block =
+      { count = previous_count + 1
+      ; rule_id = info.rule_id
+      ; tool_suggestion = info.tool_suggestion
+      ; hint = info.hint
+      }
+    in
+    Hashtbl.replace counts.workflow_block_table key block;
+    block.count)
+;;
+
 let workflow_rejection_recovery_instruction ~tool_name ~count info =
   match info.tool_suggestion with
   | Some next_tool when count >= 2 ->
@@ -263,6 +300,105 @@ let workflow_rejection_recovery_fields ~tool_name ~count raw =
     ]
     @ optional_string "required_next_tool" info.tool_suggestion
     @ if count >= 2 then [ "workflow_rejection_loop", `Bool true ] else []
+;;
+
+let json_nonempty_string_opt key json =
+  match json_assoc_field_opt key json with
+  | Some (`String value) ->
+    let value = String.trim value in
+    if String.equal value "" then None else Some value
+  | _ -> None
+;;
+
+let json_has_nonempty_evidence_refs json =
+  let nonempty_string = function
+    | `String value -> not (String.equal (String.trim value) "")
+    | _ -> false
+  in
+  match json_assoc_field_opt "handoff_context" json with
+  | Some (`Assoc fields) ->
+    (match List.assoc_opt "evidence_refs" fields with
+     | Some (`List refs) -> List.exists nonempty_string refs
+     | _ -> false)
+  | _ -> false
+;;
+
+let workflow_submit_evidence_marker json =
+  if Option.is_some (json_nonempty_string_opt "pr_url" json)
+     || json_has_nonempty_evidence_refs json
+  then "has_evidence"
+  else "missing_evidence"
+;;
+
+let workflow_scope_key_of_input ~tool_name input =
+  let task_id_part json = json_nonempty_string_opt "task_id" json in
+  match input with
+  | `Assoc _ as json ->
+    (match tool_name with
+     | "masc_transition" ->
+       (match json_nonempty_string_opt "action" json, task_id_part json with
+        | None, _ | _, None -> None
+        | Some action, Some task_id ->
+          let correction_marker =
+            if String.equal action "submit_for_verification"
+            then ":" ^ workflow_submit_evidence_marker json
+            else ""
+          in
+          Some
+            (Printf.sprintf
+               "%s:action=%s:task=%s%s"
+               tool_name
+               action
+               task_id
+               correction_marker))
+     | "keeper_task_done"
+     | "keeper_task_submit_for_verification" ->
+       (match task_id_part json with
+        | None -> None
+        | Some task_id ->
+          let correction_marker =
+            if String.equal tool_name "keeper_task_submit_for_verification"
+            then ":" ^ workflow_submit_evidence_marker json
+            else ""
+          in
+          Some (Printf.sprintf "%s:task=%s%s" tool_name task_id correction_marker))
+     | "keeper_task_claim" -> Some "keeper_task_claim"
+     | _ -> None)
+  | _ -> None
+;;
+
+let workflow_rejection_scope_block_fields ~tool_name block =
+  let optional_string key = function
+    | Some value -> [ key, `String value ]
+    | None -> []
+  in
+  let recovery =
+    [ "count", `Int (block.count + 1)
+    ; "instruction"
+      , `String
+          (workflow_rejection_recovery_instruction
+             ~tool_name
+             ~count:(block.count + 1)
+             { rule_id = block.rule_id
+             ; tool_suggestion = block.tool_suggestion
+             ; hint = block.hint
+             })
+    ]
+    @ optional_string "rule_id" block.rule_id
+    @ optional_string "tool_suggestion" block.tool_suggestion
+    @ optional_string "hint" block.hint
+  in
+  [ "self_correction_required", `Bool true
+  ; "do_not_retry_tool", `String tool_name
+  ; "workflow_rejection_recovery", `Assoc recovery
+  ; "workflow_rejection_loop", `Bool true
+  ; "retry_skipped", `Bool true
+  ; "retry_skipped_reason", `String "deterministic_workflow_scope_blocked"
+  ; ( "retry_skipped_explanation"
+    , `String
+        "previous workflow_rejection for this task/action scope requires a different next step" )
+  ]
+  @ optional_string "required_next_tool" block.tool_suggestion
 ;;
 
 let recovery_plan_json_opt json =
@@ -604,7 +740,43 @@ let make_keeper_tool_handler
         let output_text = normalize_tool_result ~success:false msg in
         Tool_result.error ~tool_name:name ~start_time:t0 output_text)
       else (
-        let execute_with_observers () =
+        match
+          Option.bind
+            (workflow_scope_key_of_input ~tool_name:name input)
+            (workflow_rejection_scope_block_get failure_counts)
+        with
+        | Some block ->
+          Prometheus.inc_counter
+            Keeper_metrics.metric_keeper_tools_oas_failures
+            ~labels:[ "tool", name; "site", "workflow_scope_blocked" ]
+            ();
+          Log.Keeper.warn
+            "tool %s workflow rejection retry skipped for same task/action scope"
+            name;
+          let raw_result =
+            Yojson.Safe.to_string
+              (`Assoc
+                  [ "ok", `Bool false
+                  ; "error", `String "workflow_rejection_open_loop_blocked"
+                  ; "failure_class", `String "workflow_rejection"
+                  ; "recoverable", `Bool false
+                  ; "error_class", `String "deterministic"
+                  ])
+          in
+          let output_text =
+            normalize_tool_result
+              ~workflow_rejection_recovery_fields:
+                (workflow_rejection_scope_block_fields ~tool_name:name block)
+              ~success:false
+              raw_result
+          in
+          Tool_result.error
+            ~failure_class:(Some Tool_result.Workflow_rejection)
+            ~tool_name:name
+            ~start_time:t0
+            output_text
+        | None ->
+          let execute_with_observers () =
           let t0 = Time_compat.now () in
           try
           let result, duration_ms =
@@ -655,6 +827,14 @@ let make_keeper_tool_handler
                 | Some info ->
                   let family_key = workflow_rejection_family_key ~tool_name:name info in
                   let count = workflow_rejection_count_record failure_counts family_key in
+                  (match workflow_scope_key_of_input ~tool_name:name input with
+                   | Some scope_key ->
+                     ignore
+                       (workflow_rejection_scope_block_record
+                          failure_counts
+                          scope_key
+                          info)
+                   | None -> ());
                   workflow_rejection_recovery_fields ~tool_name:name ~count raw_result
                 | None -> [])
               else []

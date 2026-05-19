@@ -47,6 +47,11 @@ type failure_counts
 
 val create_failure_counts : unit -> failure_counts
 
+(** Reset process-global retry-log dedupe state. Test-only entry point
+    for suites that assert the first occurrence of a tool failure emits
+    at ERROR. *)
+val reset_tool_retry_dedupe_for_testing : unit -> unit
+
 (** Normalize a raw tool result string into the canonical JSON
     envelope. Success → [{"ok":true,"result":...}]; failure →
     [{"ok":false,"error":...,"detail":...}], preserving structured

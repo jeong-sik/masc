@@ -65,7 +65,10 @@ let parse_belief_summary = function
   | `Null -> Ok { id = None; claim = None; status = None; confidence = None;
                   support_agent_count = None; challenge_agent_count = None;
                   evidence_refs = []; challenge_refs = [] }
-  | _ -> Error "dominant_belief must be an object"
+  | other ->
+      Error
+        (Printf.sprintf "dominant_belief must be an object, got %s: %s"
+           (Json_util.kind_name other) (Json_util.excerpt other))
 
 let parse_tension_summary = function
   | `Assoc _ as json ->
@@ -95,7 +98,10 @@ let parse_tension_summary = function
           needs_operator = false;
           evidence_refs = [];
         }
-  | _ -> Error "top_tension must be an object"
+  | other ->
+      Error
+        (Printf.sprintf "top_tension must be an object, got %s: %s"
+           (Json_util.kind_name other) (Json_util.excerpt other))
 
 let parse_desire_summary = function
   | `Assoc _ as json ->
@@ -120,7 +126,10 @@ let parse_desire_summary = function
           strength = None;
           evidence_refs = [];
         }
-  | _ -> Error "top_desire must be an object"
+  | other ->
+      Error
+        (Printf.sprintf "top_desire must be an object, got %s: %s"
+           (Json_util.kind_name other) (Json_util.excerpt other))
 
 let parse_optional_summary parse value =
   match value with

@@ -173,6 +173,14 @@ let is_required_tool_contract_violation (err : Agent_sdk.Error.sdk_error) : bool
   | Agent_sdk.Error.A2a _
   | Agent_sdk.Error.Internal _ -> false
 
+let message_looks_like_capacity_backpressure detail =
+  let lower = String.lowercase_ascii detail in
+  string_contains_substring ~needle:"slot full" lower
+  || string_contains_substring ~needle:"client capacity" lower
+  || string_contains_substring ~needle:"capacity_exhausted" lower
+  || string_contains_substring ~needle:"capacity exhausted" lower
+  || string_contains_substring ~needle:"local_resource_exhaustion" lower
+
 let is_auto_recoverable_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some
@@ -188,6 +196,7 @@ let is_auto_recoverable_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error
          { reason = Keeper_types.Other_detail detail; _ }) ->
       Keeper_turn_driver.message_looks_like_cli_wrapped_hard_quota detail
       || Keeper_turn_driver.message_looks_like_cli_wrapped_max_turns detail
+      || message_looks_like_capacity_backpressure detail
   | Some (Keeper_turn_driver.Cascade_exhausted _) ->
       false
   | Some (Keeper_turn_driver.No_tool_capable_provider _)
@@ -239,6 +248,7 @@ type degraded_retry_reason =
   | Cascade_candidates_filtered
   | Required_tool_contract_violation
   | Cascade_exhausted
+  | Capacity_exhausted
   | Rate_limit
   | Server_error
   | Auth_error
@@ -253,6 +263,7 @@ let degraded_retry_reason_to_string = function
   | Cascade_candidates_filtered -> "cascade_candidates_filtered"
   | Required_tool_contract_violation -> "required_tool_contract_violation"
   | Cascade_exhausted -> "cascade_exhausted"
+  | Capacity_exhausted -> "capacity_exhausted"
   | Rate_limit -> "rate_limit"
   | Server_error -> "server_error"
   | Auth_error -> "auth_error"
@@ -337,6 +348,11 @@ let degraded_retry_after_recoverable_error
            { reason = Keeper_types.Other_detail detail; _ })
       when Keeper_turn_driver.message_looks_like_cli_wrapped_hard_quota detail ->
         local_recovery_retry Hard_quota
+    | Some
+        (Keeper_turn_driver.Cascade_exhausted
+           { reason = Keeper_types.Other_detail detail; _ })
+      when message_looks_like_capacity_backpressure detail ->
+        local_recovery_retry Capacity_exhausted
     | Some (Keeper_turn_driver.Cascade_exhausted _)
     | Some (Keeper_turn_driver.No_tool_capable_provider _)
     | Some (Keeper_turn_driver.Accept_rejected _)
@@ -376,6 +392,11 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
            { reason = Keeper_types.Other_detail detail; _ })
       when Keeper_turn_driver.message_looks_like_cli_wrapped_hard_quota detail ->
         Some Hard_quota
+    | Some
+        (Keeper_turn_driver.Cascade_exhausted
+           { reason = Keeper_types.Other_detail detail; _ })
+      when message_looks_like_capacity_backpressure detail ->
+        Some Capacity_exhausted
     | Some (Keeper_turn_driver.Cascade_exhausted _) ->
         (* Generic cascade exhaustion: all candidates failed without a more
            specific reason. Treat as recoverable so declarative
@@ -417,9 +438,10 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
          | Agent_sdk.Error.Api (Llm_provider.Retry.AuthError _) ->
              Some Auth_error
          | Agent_sdk.Error.Provider
-             (Llm_provider.Error.RateLimit _
-             | Llm_provider.Error.CapacityExhausted _) ->
+             (Llm_provider.Error.RateLimit _) ->
              Some Rate_limit
+         | Agent_sdk.Error.Provider (Llm_provider.Error.CapacityExhausted _) ->
+             Some Capacity_exhausted
          | Agent_sdk.Error.Provider (Llm_provider.Error.HardQuota _) ->
              Some Hard_quota
          | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { code; transient; _ })

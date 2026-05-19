@@ -502,26 +502,38 @@ let build_timeline (config : Coord.config) ~agent_name ~since_hours ~limit
     List.filter (fun e -> String.equal e.event_type "turn_completed") events
   in
   let turns_completed = List.length turn_events in
+  (* Aggregation fold-semantic decision (Task #28):
+     Silent-zero on missing/malformed field is intentional and acceptable
+     because (a) per-event detail is rendered separately in the
+     ["events"] array below, so operators can drill down to find the
+     event with the malformed payload, (b) under-reporting is honest —
+     a sum of "what we could parse" beats inventing values, (c) using
+     [Safe_ops.json_int_opt] / [json_float_opt] removes the implicit
+     try/catch that previously could absorb non-Cancelled exceptions
+     (Yojson.Safe.Util.Type_error etc.) without distinguishing them
+     from a legitimately missing field. The new shape uses pure
+     pattern-matching accessors and no try/catch on the hot path. *)
   let total_input_tokens =
-    List.fold_left (fun acc e ->
-      let open Yojson.Safe.Util in
-      acc + (try e.detail |> member "input_tokens" |> to_int
-             with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> 0))
-      0 turn_events
+    List.fold_left
+      (fun acc e ->
+        acc + Option.value (Safe_ops.json_int_opt "input_tokens" e.detail) ~default:0)
+      0
+      turn_events
   in
   let total_output_tokens =
-    List.fold_left (fun acc e ->
-      let open Yojson.Safe.Util in
-      acc + (try e.detail |> member "output_tokens" |> to_int
-             with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> 0))
-      0 turn_events
+    List.fold_left
+      (fun acc e ->
+        acc + Option.value (Safe_ops.json_int_opt "output_tokens" e.detail) ~default:0)
+      0
+      turn_events
   in
   let total_cost_usd =
-    List.fold_left (fun acc e ->
-      let open Yojson.Safe.Util in
-      acc +. (try e.detail |> member "cost_usd" |> to_float
-              with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> 0.0))
-      0.0 turn_events
+    List.fold_left
+      (fun acc e ->
+        acc
+        +. Option.value (Safe_ops.json_float_opt "cost_usd" e.detail) ~default:0.0)
+      0.0
+      turn_events
   in
   (* Active duration: time between first and last event *)
   let active_duration_minutes =

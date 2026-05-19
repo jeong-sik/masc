@@ -38,6 +38,7 @@
 import type {
   Keeper,
   KeeperRuntimeBlockerClass,
+  PipelineStage,
 } from '../types/core'
 import type {
   KeeperCompositeSnapshot,
@@ -297,4 +298,36 @@ export function deriveKeeperDisplayReason(
     ?? trim(keeper.attention_reason)
     ?? null
   )
+}
+
+// RFC-0135 PR-14b — turn-phase SSOT (Goal-2b typed-state expansion).
+//
+// `keeper-detail-runtime.ts:194-195` (and one earlier 3-way fallback
+// removed by PR-5) read turn phase via composite-or-flat fallback:
+//   `compositeSnapshot?.turn_phase ?? keeper.pipeline_stage`
+// The two sources have different semantics (composite is the *live*
+// KTC turn cycle from backend; pipeline_stage is the flat-record
+// snapshot of the prior turn) but downstream consumers treat them as
+// interchangeable strings. Centralizing the fallback policy here lets
+// future consumers (Goal-2c displaySummary, Goal-2d phase) reuse the
+// same precedence without re-reading raw composite fields.
+//
+// Precedence (composite preferred):
+//   1. composite.turn_phase if composite present
+//   2. keeper.pipeline_stage (flat record fallback)
+//   3. null (no signal available)
+
+/** Live turn phase, preferring composite SSE stream over flat record.
+ *  Returns `null` when no source has a value. Caller-side `??` against
+ *  a literal default (e.g. `'idle'`) is the supported fallback shape
+ *  — do not embed display defaults here. */
+export function deriveKeeperTurnPhase(
+  keeper: Pick<Keeper, 'pipeline_stage'>,
+  composite: KeeperCompositeSnapshot | null,
+): string | null {
+  const compositeTurn = composite?.turn_phase
+  if (typeof compositeTurn === 'string' && compositeTurn.length > 0) return compositeTurn
+  const flatStage: PipelineStage | undefined = keeper.pipeline_stage
+  if (typeof flatStage === 'string' && flatStage.length > 0) return flatStage
+  return null
 }

@@ -86,6 +86,7 @@ type cascade_exhaustion_reason =
   | All_providers_failed
   | Candidates_filtered_after_cycles
   | Max_turns_exceeded
+  | Structural_attempt_timeout of { detail : string }
   | Other_detail of string
 
 type blocker_class =
@@ -197,6 +198,8 @@ let cascade_exhaustion_summary = function
   | Candidates_filtered_after_cycles -> "Cascade exhausted after provider failures."
   | Max_turns_exceeded ->
     "Cascade exhausted after a provider hit its per-call turn budget."
+  | Structural_attempt_timeout _ ->
+    "Cascade exhausted after the per-OAS-call ceiling (max_execution_time_s) fired."
   | Other_detail _ -> "Cascade exhausted after provider failures."
 ;;
 
@@ -233,6 +236,8 @@ let cascade_exhaustion_reason_to_json = function
   | All_providers_failed -> `String "all_providers_failed"
   | Candidates_filtered_after_cycles -> `String "candidates_filtered_after_cycles"
   | Max_turns_exceeded -> `String "max_turns_exceeded"
+  | Structural_attempt_timeout { detail } ->
+    `Assoc [ "tag", `String "structural_attempt_timeout"; "detail", `String detail ]
   | Other_detail msg -> `Assoc [ "tag", `String "other_detail"; "message", `String msg ]
 ;;
 
@@ -244,12 +249,29 @@ let cascade_exhaustion_reason_of_json = function
   | `String "max_turns_exceeded" -> Some Max_turns_exceeded
   | `Assoc fields ->
     (match List.assoc_opt "tag" fields with
+     | Some (`String "structural_attempt_timeout") ->
+       (match List.assoc_opt "detail" fields with
+        | Some (`String detail) -> Some (Structural_attempt_timeout { detail })
+        | _ -> None)
      | Some (`String "other_detail") ->
        (match List.assoc_opt "message" fields with
         | Some (`String msg) -> Some (Other_detail msg)
         | _ -> None)
      | _ -> None)
   | _ -> None
+;;
+
+let cascade_exhaustion_reason_from_message msg =
+  (* SSOT: the only place that decides whether a free-form cascade-exhaustion
+     message names a structural per-OAS-call ceiling.  Producers call this
+     instead of writing [Other_detail msg] directly so downstream consumers
+     can pattern-match the typed [Structural_attempt_timeout] case.
+     Substring is unavoidable here (the upstream message is a raw SDK
+     string), but it is contained to a single function — replacing the
+     prior N-of-M classifier with one source of truth. *)
+  if String_util.contains_substring_ci msg "max_execution_time_s"
+  then Structural_attempt_timeout { detail = msg }
+  else Other_detail msg
 ;;
 
 (* ── Unified blocker_info: typed klass + free-form detail ───────

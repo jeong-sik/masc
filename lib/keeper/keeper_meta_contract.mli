@@ -138,6 +138,13 @@ type cascade_exhaustion_reason =
   | All_providers_failed
   | Candidates_filtered_after_cycles
   | Max_turns_exceeded
+  | Structural_attempt_timeout of { detail : string }
+      (** Agent SDK [with_optional_timeout] wrapper fired its per-OAS-call
+          ceiling ([max_execution_time_s]). Distinct from transport-level
+          provider timeouts. [detail] preserves the upstream message for
+          diagnostics. Replaces substring-tagged [Other_detail] payloads
+          that downstream consumers had to re-parse with
+          [contains_substring_ci ... "max_execution_time_s"]. *)
   | Other_detail of string
 
 type blocker_class =
@@ -188,6 +195,18 @@ val cascade_exhaustion_reason_to_json :
 
 val cascade_exhaustion_reason_of_json :
   Yojson.Safe.t -> cascade_exhaustion_reason option
+
+val cascade_exhaustion_reason_from_message :
+  string -> cascade_exhaustion_reason
+(** SSOT for the {b only} substring-based classification of cascade
+    exhaustion messages. Returns
+    [Structural_attempt_timeout { detail = msg }] when [msg] contains
+    "max_execution_time_s" (case-insensitive), otherwise
+    [Other_detail msg]. Producers that previously wrote
+    [Other_detail (Cascade_fsm.to_user_message err)] should call this
+    so downstream consumers can [match] typed cases instead of
+    re-parsing the string. Removes the N-of-M substring classifier
+    pattern (RFC-0088 §1) that previously lived in three call sites. *)
 
 val blocker_class_of_serialized_string :
   string -> blocker_class option

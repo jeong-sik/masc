@@ -254,10 +254,10 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
        auto_resume_after_sec=%s last_blocker.klass=%s last_blocker.detail=%S"
       old.name auto_resume_after_sec blocker_class blocker_detail);
   (* Clear any persisted livelock attempt counter on every update_keeper run,
-     not only the resume-paused branch.  Turn-livelock guards record a
-     `pause_human` receipt without setting [meta.paused], so a follow-up
-     `masc_keeper_up` for that keeper would otherwise leave the stale
-     counter in memory and the next dispatch would still be blocked. *)
+     not only the resume-paused branch.  Older turn-livelock guards only
+     recorded a `pause_human` receipt, while current guards may persist
+     [meta.paused = true].  A follow-up `masc_keeper_up` should clear the
+     stale in-memory counter in both cases. *)
   Keeper_turn_livelock.reset_keeper_livelock ~keeper:old.name;
   (* ETA-LIVELOCK: align typed-escalation classifier with the
      livelock counter reset so an operator-triggered keeper_up

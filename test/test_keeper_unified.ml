@@ -3172,7 +3172,7 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
     "keeper_shell schema documents gh claim prerequisite"
     true
     (source_file_contains
-       "lib/tool_shard_types.ml"
+       "lib/tool_shard_types_schemas_shell.ml"
        "Requires an active claimed task/current_task_id");
   check
     bool
@@ -5839,7 +5839,34 @@ let test_run_keeper_cycle_livelock_block_returns_error () =
               true
               (contains_substring
                  Yojson.Safe.Util.(receipt |> member "terminal_reason_code" |> to_string)
-                 "turn_livelock:attempts_exhausted")))
+                 "turn_livelock:attempts_exhausted"));
+         (match Masc_mcp.Keeper_types.read_meta config meta.name with
+          | Ok (Some persisted) ->
+            check bool "livelock persists paused keeper" true persisted.paused;
+            (match persisted.runtime.last_blocker with
+             | Some blocker ->
+               check
+                 string
+                 "livelock blocker class"
+                 "turn_livelock_blocked"
+                 (Masc_mcp.Keeper_types.blocker_class_to_string blocker.klass);
+               check
+                 bool
+                 "livelock blocker detail"
+                 true
+                 (contains_substring blocker.detail "keeper turn livelock blocked")
+             | None -> fail "expected livelock blocker");
+            let decision =
+              WO.keeper_cycle_decision ~meta:persisted base_observation
+            in
+            check bool "paused livelock keeper does not reschedule" false decision.should_run;
+            check
+              (list string)
+              "paused livelock skip reason"
+              [ "keeper_paused" ]
+              (WO.verdict_reasons_to_strings decision.verdict)
+          | Ok None -> fail "expected persisted livelock meta"
+          | Error err -> fail ("read_meta failed: " ^ err)))
 ;;
 
 let test_streaming_cancel_records_supervisor_stop_when_fiber_stop_set () =
@@ -8394,12 +8421,11 @@ let test_bounded_oas_timeout_uses_channel_turn_budget_override () =
 
 (* RFC-0129 (2026-05-18): renamed from
    [test_bounded_oas_timeout_reserves_degraded_retry_budget]. The
-   reserve_fraction band-aid was halving the first-attempt budget
-   (effective_timeout_sec=242.5 from usable_budget=485 *. 0.5).
+   reserve_fraction band-aid was halving the first-attempt budget.
    With the knob removed, the first attempt now receives the full
-   [Float.min adaptive_timeout_sec usable_budget]. OAS 0.195.0+
-   body_timeout_s + stream_idle_timeout_s bound hangs without
-   halving healthy slow streams. *)
+   [Float.min adaptive_timeout_sec usable_budget]. The default adaptive
+   cap is 300s inside the 600s keeper turn envelope so cascade fallback
+   still has headroom. *)
 let test_bounded_oas_timeout_first_attempt_uses_full_usable_budget () =
   match
     UT.resolve_bounded_oas_timeout_budget_with_turn_budget
@@ -8412,8 +8438,8 @@ let test_bounded_oas_timeout_first_attempt_uses_full_usable_budget () =
   | Some budget ->
     check
       (float 0.01)
-      "first attempt receives usable_budget = remaining - guard (no halving)"
-      485.0
+      "first attempt receives adaptive default cap (no halving)"
+      300.0
       budget.effective_timeout_sec;
     check
       (float 0.01)
@@ -8422,16 +8448,17 @@ let test_bounded_oas_timeout_first_attempt_uses_full_usable_budget () =
       budget.remaining_turn_budget_sec;
     check
       string
-      "source records adaptive capped by turn budget (no reserve)"
-      "adaptive_estimated_input_tokens_capped_by_turn_budget"
+      "source records adaptive default cap"
+      "adaptive_estimated_input_tokens"
       budget.source
   | None -> fail "expected bounded timeout"
 ;;
 
 (* RFC-0129: renamed from [test_attempt_watchdog_preserves_degraded_retry_reserve].
    With the reserve_fraction gone, the watchdog now bounds the full
-   usable budget — capped by remaining_turn_budget_s - 1s outer
-   reserve, not by the halved retry slice. *)
+   effective attempt timeout plus the OAS guard — capped by
+   remaining_turn_budget_s - 1s outer reserve, not by a halved retry
+   slice. *)
 let test_attempt_watchdog_uses_full_usable_budget () =
   match
     UT.resolve_bounded_oas_timeout_budget_with_turn_budget
@@ -8445,8 +8472,8 @@ let test_attempt_watchdog_uses_full_usable_budget () =
     check
       (float 0.01)
       "attempt watchdog = min(effective+guard, remaining-outer_reserve) \
-       = min(500, 499) = 499"
-      499.0
+       = min(315, 499) = 315"
+      315.0
       (UT.attempt_watchdog_timeout_sec ~remaining_turn_budget_s:500.0 budget)
   | None -> fail "expected bounded timeout"
 ;;
@@ -8645,7 +8672,11 @@ let test_degraded_retry_slot_phase_allows_max_execution_time_cascade_exhausted (
       (max_execution_time_cascade_exhausted_error ())
   with
   | UT.Degraded_retry_allowed retry ->
-    check string "retry cascade candidate" "keeper_diverse" retry.next_cascade;
+    check
+      string
+      "retry cascade candidate"
+      (tool_required_cascade_name ())
+      retry.next_cascade;
     check
       string
       "fallback reason"

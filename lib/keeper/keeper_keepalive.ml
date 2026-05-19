@@ -184,10 +184,10 @@ let process_directive ~agent_name directive =
        "깨우기" with no observable effect. Treat wakeup as a superset of
        resume so paused keepers re-enter the run loop.
        Also clear any persisted livelock attempt counter regardless of which
-       branch runs: turn-livelock blocks record only a `pause_human` receipt
-       and do not persist [meta.paused], so the wakeup directive on those
-       keepers takes the non-paused branch and the stale attempt counter
-       would otherwise survive into the next dispatch. *)
+       branch runs: older turn-livelock blocks only recorded a `pause_human`
+       receipt, and current blocks may persist [meta.paused = true] after the
+       guard fires.  In both cases a wakeup should start from a fresh counter
+       instead of immediately re-blocking the same turn. *)
     let entry_paused =
       match Keeper_registry.find_by_agent_name agent_name with
       | Some e -> e.meta.paused

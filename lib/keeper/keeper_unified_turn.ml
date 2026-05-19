@@ -433,17 +433,17 @@ let run_keeper_cycle
                  ~max_attempts:(turn_livelock_max_attempts ())
                  ~stuck_after_sec:(turn_livelock_stuck_after_sec ())
                  ()
-	             with
-	             | Keeper_turn_livelock.Blocked reason ->
-	               Keeper_unified_turn_livelock_block.handle
-	                 ~config
-	                 ~meta
-	                 ~generation
-	                 ~keeper_turn_id
-	                 ~turn_id
-	                 ~initial_execution
-	                 ~reason
-	             | Keeper_turn_livelock.Started _ ->
+             with
+             | Keeper_turn_livelock.Blocked reason ->
+               Keeper_unified_turn_livelock_block.handle
+                 ~config
+                 ~meta
+                 ~generation
+                 ~keeper_turn_id
+                 ~turn_id
+                 ~initial_execution
+                 ~reason
+             | Keeper_turn_livelock.Started _ ->
                Keeper_turn_fsm.emit_transition
                  ~keeper_name:meta.name
                  ~turn_id:keeper_turn_id

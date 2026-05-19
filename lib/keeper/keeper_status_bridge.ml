@@ -192,6 +192,10 @@ let blocker_class_of_string (reason : string) : blocker_class option =
   else if String_util.contains_substring_ci trimmed "turn wall-clock timeout"
   then Some Turn_timeout
   else if
+    String_util.contains_substring_ci trimmed "turn_livelock"
+    || String_util.contains_substring_ci trimmed "livelock blocked"
+  then Some Turn_livelock_blocked
+  else if
     (* 2026-05-05: Completion contract violations (e.g. require_tool_use)
        were text-stamped to runtime.last_blocker but left
        runtime.last_blocker_class null because [blocker_class_of_sdk_error]
@@ -294,6 +298,10 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
       if summary = ""
       then "OAS budget timeout fired before the keeper hard timeout."
       else summary
+    | Turn_livelock_blocked ->
+      if summary = ""
+      then "Keeper turn livelock guard blocked repeated dispatch of the same turn."
+      else summary
     | No_tool_capable_provider ->
       (match
          Keeper_turn_driver.classify_masc_internal_error
@@ -342,6 +350,7 @@ let runtime_blocker_surface_of_legacy_string reason cls =
   | Turn_timeout_after_queue_wait
   | Oas_timeout_budget
   | Turn_timeout
+  | Turn_livelock_blocked
   | Completion_contract_violation
   | No_tool_capable_provider
   | Stay_silent_loop

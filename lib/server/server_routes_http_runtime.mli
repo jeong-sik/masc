@@ -219,6 +219,9 @@ module For_testing : sig
     ?listener:string -> Httpun.Request.t -> unit
   (** Synchronously recomputes and stores the cached full-health snapshot. *)
 
+  val mark_full_health_snapshot_error : exn -> unit
+  (** Records a failed background refresh without recomputing the snapshot. *)
+
   val full_health_refresh_timing : unit -> float * float
   (** Returns [(interval_sec, timeout_sec)] for the full-health refresh loop. *)
 end

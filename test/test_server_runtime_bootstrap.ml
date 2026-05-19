@@ -1370,6 +1370,35 @@ let test_full_health_refresh_budget_tracks_shell_budget () =
   Alcotest.(check bool) "full health interval exceeds timeout" true
     (interval_sec > timeout_sec)
 
+let test_full_health_refresh_timeout_preserves_last_snapshot () =
+  Server_routes_http_runtime.For_testing.reset_full_health_snapshot ();
+  let request = Httpun.Request.create `GET "/health?full=1" in
+  Server_routes_http_runtime.For_testing.refresh_full_health_snapshot_now request;
+  let before = Server_routes_http_runtime.make_health_response_json request in
+  let open Yojson.Safe.Util in
+  let before_reaction_ledger = before |> member "keeper_reaction_ledger" in
+  let timeout_error =
+    Failure
+      "refresh_timeout label=full_health_snapshot phase=refresh timeout_s=16.0 \
+       elapsed_s=17.0"
+  in
+  Server_routes_http_runtime.For_testing.mark_full_health_snapshot_error timeout_error;
+  let after = Server_routes_http_runtime.make_health_response_json request in
+  Alcotest.(check string) "timeout marks snapshot error" "error"
+    (after |> member "full_health_snapshot" |> member "status" |> to_string);
+  Alcotest.(check bool) "timeout marks timed out component" true
+    (after |> member "full_health_snapshot" |> member "component_timed_out"
+     |> to_bool);
+  Alcotest.(check string) "timeout error is surfaced" (Printexc.to_string timeout_error)
+    (after |> member "full_health_snapshot" |> member "error" |> to_string);
+  Alcotest.(check bool) "timeout records stale-since timestamp" true
+    (match after |> member "full_health_snapshot" |> member "stale_since_ts" with
+     | `Float _ | `Int _ -> true
+     | _ -> false);
+  Alcotest.(check string) "timeout preserves previous heavy fields"
+    (Yojson.Safe.to_string before_reaction_ledger)
+    (after |> member "keeper_reaction_ledger" |> Yojson.Safe.to_string)
+
 let test_health_response_survives_deleted_cwd () =
   with_temp_dir "health-deleted-cwd" (fun dir ->
       let deleted_cwd = Filename.concat dir "deleted-cwd" in
@@ -2927,6 +2956,9 @@ let () =
             test_health_response_full_query_uses_snapshot_cache;
           Alcotest.test_case "full health refresh budget tracks shell budget"
             `Quick test_full_health_refresh_budget_tracks_shell_budget;
+          Alcotest.test_case
+            "full health refresh timeout preserves last snapshot" `Quick
+            test_full_health_refresh_timeout_preserves_last_snapshot;
           Alcotest.test_case "health response survives deleted cwd" `Quick
             test_health_response_survives_deleted_cwd;
           Alcotest.test_case "readiness false before init" `Quick

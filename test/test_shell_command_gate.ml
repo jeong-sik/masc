@@ -119,6 +119,74 @@ let test_parse_with_caller_matches_without () =
     Alcotest.failf "without=Error %s but with_caller=Ok" (Gate.cannot_parse_kind_tag wk)
 ;;
 
+(* RFC-0131 PR-1b — fail-closed boundary for nested pipelines.
+
+   The current bash_subset grammar (see lib/exec/parser/bash.ml's
+   [to_shell_ir]) only emits non-nested pipelines, so [Gate.parse] can
+   never reach the new arm via a string input.  The tests below
+   exercise the {!Gate.parsed_context_of_shell_ir} typed-IR entry,
+   which mirrors the eventual RFC-0091 typed-argv lowering path. *)
+
+let mk_simple_bin name : Masc_exec.Shell_ir.simple =
+  match Masc_exec.Bin.of_string name with
+  | Error (`Unknown raw) ->
+    Alcotest.failf "Bin.of_string rejected %S as %S" name raw
+  | Ok bin ->
+    { Masc_exec.Shell_ir.bin
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Masc_exec.Sandbox_target.host ()
+    }
+;;
+
+let test_typed_input_flat_pipeline_round_trips () =
+  let ast =
+    Masc_exec.Shell_ir.Pipeline
+      [ Masc_exec.Shell_ir.Simple (mk_simple_bin "rg")
+      ; Masc_exec.Shell_ir.Simple (mk_simple_bin "head")
+      ]
+  in
+  match Gate.parsed_context_of_shell_ir ast with
+  | Ok context ->
+    Alcotest.(check int) "stage count" 2 (Gate.stage_count context);
+    check_stage_bins "stage bins" [ "rg"; "head" ] context
+  | Error kind ->
+    Alcotest.failf
+      "expected Ok for flat pipeline, got Error %s"
+      (Gate.cannot_parse_kind_tag kind)
+;;
+
+let test_typed_input_nested_pipeline_rejected () =
+  let inner =
+    Masc_exec.Shell_ir.Pipeline
+      [ Masc_exec.Shell_ir.Simple (mk_simple_bin "sort")
+      ; Masc_exec.Shell_ir.Simple (mk_simple_bin "head")
+      ]
+  in
+  let outer = Masc_exec.Shell_ir.Pipeline
+    [ Masc_exec.Shell_ir.Simple (mk_simple_bin "rg"); inner ]
+  in
+  match Gate.parsed_context_of_shell_ir outer with
+  | Error (Gate.Unsupported_nested_pipeline { stage_index = 1 }) -> ()
+  | Error other ->
+    Alcotest.failf
+      "expected Unsupported_nested_pipeline at index 1, got %s"
+      (Gate.cannot_parse_kind_tag other)
+  | Ok context ->
+    Alcotest.failf
+      "expected Error, got Ok with stage_bins=[%s]"
+      (String.concat "; " context.Gate.stage_bins)
+;;
+
+let test_unsupported_nested_pipeline_tag () =
+  Alcotest.(check string)
+    "tag"
+    "unsupported_nested_pipeline"
+    (Gate.cannot_parse_kind_tag (Gate.Unsupported_nested_pipeline { stage_index = 0 }))
+;;
+
 let () =
   Alcotest.run
     "shell_command_gate"
@@ -145,6 +213,20 @@ let () =
             "parse with caller matches without"
             `Quick
             test_parse_with_caller_matches_without
+        ] )
+    ; ( "typed_input"
+      , [ Alcotest.test_case
+            "flat pipeline round trips"
+            `Quick
+            test_typed_input_flat_pipeline_round_trips
+        ; Alcotest.test_case
+            "nested pipeline rejected with stage index"
+            `Quick
+            test_typed_input_nested_pipeline_rejected
+        ; Alcotest.test_case
+            "unsupported_nested_pipeline tag"
+            `Quick
+            test_unsupported_nested_pipeline_tag
         ] )
     ]
 ;;

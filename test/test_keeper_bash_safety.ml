@@ -950,13 +950,13 @@ let test_keeper_bash_typed_pipeline_runs_via_shell_ir () =
      |> Json.to_string
      |> fun output -> String_util.contains_substring output "5")
 
-let test_keeper_bash_typed_docker_is_fail_closed () =
+let test_keeper_bash_typed_docker_requires_factory () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Keeper_registry.clear ();
   let meta = make_docker_meta "typed-docker" in
-  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir playground;
   let raw =
     Keeper_exec_shell.handle_keeper_bash
@@ -975,9 +975,9 @@ let test_keeper_bash_typed_docker_is_fail_closed () =
   in
   match parse_error_field raw with
   | Some err ->
-    Alcotest.(check bool) "docker typed path is explicit" true
-      (String_util.contains_substring err "Docker is not enabled yet")
-  | None -> Alcotest.fail ("expected typed docker fail-closed error, got: " ^ raw)
+    if not (String_util.contains_substring err "turn sandbox factory")
+    then Alcotest.fail ("unexpected typed docker error: " ^ err)
+  | None -> Alcotest.fail ("expected typed docker factory error, got: " ^ raw)
 
 let test_keeper_bash_safe_dev_null_echo_fallback_executes_primary () =
   with_eio_fs @@ fun () ->
@@ -1943,8 +1943,8 @@ let () =
         test_keeper_bash_typed_exec_runs_via_shell_ir;
       Alcotest.test_case "typed pipeline runs via Shell IR" `Quick
         test_keeper_bash_typed_pipeline_runs_via_shell_ir;
-      Alcotest.test_case "typed docker dispatch fails closed" `Quick
-        test_keeper_bash_typed_docker_is_fail_closed;
+      Alcotest.test_case "typed docker dispatch requires factory" `Quick
+        test_keeper_bash_typed_docker_requires_factory;
     ]);
     ("readonly_hints", [
       Alcotest.test_case "safe dev-null echo fallback executes primary" `Quick

@@ -227,6 +227,11 @@ function parseEpochSeconds(value: string | null | undefined): number | null {
 
 export function latestRuntimeActivityEpoch(snapshot: KeeperCompositeSnapshot): number | null {
   const candidates: number[] = []
+  if (snapshot.live_turn?.last_progress_at != null) {
+    candidates.push(snapshot.live_turn.last_progress_at)
+  } else if (snapshot.live_turn?.started_at != null) {
+    candidates.push(snapshot.live_turn.started_at)
+  }
   if (snapshot.last_outcome?.ended_at != null) {
     candidates.push(snapshot.last_outcome.ended_at)
   }
@@ -236,6 +241,11 @@ export function latestRuntimeActivityEpoch(snapshot: KeeperCompositeSnapshot): n
   }
   if (candidates.length === 0) return null
   return Math.max(...candidates)
+}
+
+function hasPreviousTurnExecutionReceipt(snapshot: KeeperCompositeSnapshot): boolean {
+  return snapshot.runtime_attention?.stale_execution_receipt === true
+    || snapshot.runtime_attention?.execution_current === false
 }
 
 function formatAge(seconds: number | null): string {
@@ -260,18 +270,20 @@ function executionEvidence(snapshot: KeeperCompositeSnapshot): string[] {
   const execution = snapshot.execution
   const surface = execution?.tool_surface
   const parts: string[] = []
+  const previousReceipt = hasPreviousTurnExecutionReceipt(snapshot)
   if (!snapshot.is_live) parts.push('is_live=false')
+  if (previousReceipt) parts.push('receipt=previous_turn')
   if (execution?.operator_disposition) {
-    parts.push(`operator=${execution.operator_disposition}`)
+    parts.push(`${previousReceipt ? 'previous_' : ''}operator=${execution.operator_disposition}`)
   }
   if (execution?.operator_disposition_reason) {
-    parts.push(`reason=${execution.operator_disposition_reason}`)
+    parts.push(`${previousReceipt ? 'previous_' : ''}reason=${execution.operator_disposition_reason}`)
   }
   if (execution?.terminal_reason_code) {
-    parts.push(`terminal=${execution.terminal_reason_code}`)
+    parts.push(`${previousReceipt ? 'previous_' : ''}terminal=${execution.terminal_reason_code}`)
   }
   if (execution?.tool_contract_result) {
-    parts.push(`tool=${execution.tool_contract_result}`)
+    parts.push(`${previousReceipt ? 'previous_' : ''}tool=${execution.tool_contract_result}`)
   }
   if (surface?.tool_requirement) {
     parts.push(`tool_requirement=${surface.tool_requirement}`)
@@ -300,6 +312,7 @@ function executionEvidence(snapshot: KeeperCompositeSnapshot): string[] {
 function hasBlockingExecutionEvidence(snapshot: KeeperCompositeSnapshot): boolean {
   const execution = snapshot.execution
   if (!execution) return false
+  if (hasPreviousTurnExecutionReceipt(snapshot)) return false
   if (execution.operator_disposition === 'pause_human') return true
   if (execution.outcome === 'error') return true
   if (execution.terminal_reason_code && execution.terminal_reason_code !== 'completed') return true
@@ -462,8 +475,10 @@ function blockingNextStep(snapshot: KeeperCompositeSnapshot): string {
 
 function staleCause(snapshot: KeeperCompositeSnapshot, ageText: string): string {
   const receiptReason = snapshot.execution?.operator_disposition_reason
-  const base = snapshot.phase === 'Running'
-    ? 'KSM=Running이지만 live turn 없음'
+  // `snapshot.phase` wire format is lowercase (phase_to_string in
+  // keeper_state_machine.ml:21-35); the prior PascalCase compare was dead.
+  const base = snapshot.phase === 'running'
+    ? 'KSM=running이지만 live turn 없음'
     : `live turn 없음 · KSM=${snapshot.phase}`
   const receipt = receiptReason ? ` · last receipt: ${receiptReason}` : ''
   return `${base} · latest ${ageText}${receipt}`
@@ -473,7 +488,7 @@ function staleNextStep(snapshot: KeeperCompositeSnapshot, latest: number | null)
   if (latest == null) {
     return 'turn 시작/keepalive 이벤트가 composite로 들어오는지 확인'
   }
-  if (snapshot.phase === 'Running') {
+  if (snapshot.phase === 'running') {
     return 'keeper keepalive와 turn 시작 이벤트 경로 확인'
   }
   return `phase=${snapshot.phase} 전환 또는 재시작 경로 확인`

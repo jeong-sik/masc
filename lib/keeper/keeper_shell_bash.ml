@@ -1,5 +1,6 @@
 open Keeper_types
 open Keeper_exec_shared
+open Keeper_shell_bash_words
 
 (* RFC-0084 host-config-cleanup-B — bash binary path migration.
    Resolves the host bash binary once at module-init from the typed
@@ -14,191 +15,6 @@ let elapsed_duration_ms ~start_time ~end_time =
   | _ when elapsed_ms <= 0. -> 0
   | _ when elapsed_ms < 1. -> 1
   | _ -> int_of_float elapsed_ms
-
-type shell_quote_state = No_quote | Single_quote | Double_quote
-
-type shell_word = {
-  text : string;
-  starts_command : bool;
-}
-
-let shell_words_with_boundaries cmd =
-  let len = String.length cmd in
-  let buf = Buffer.create len in
-  let quote_state = ref No_quote in
-  let escaped = ref false in
-  let at_command_start = ref true in
-  let word_started_at_command_start = ref true in
-  let push_word acc =
-    if Buffer.length buf = 0 then acc
-    else
-      let text =
-        Buffer.contents buf
-        |> String.trim
-        |> String.lowercase_ascii
-      in
-      Buffer.clear buf;
-      at_command_start := false;
-      { text; starts_command = !word_started_at_command_start } :: acc
-  in
-  let start_word_if_needed () =
-    if Buffer.length buf = 0 then
-      word_started_at_command_start := !at_command_start
-  in
-  let rec loop i acc =
-    if i >= len then List.rev (push_word acc)
-    else if !escaped then (
-      start_word_if_needed ();
-      Buffer.add_char buf cmd.[i];
-      escaped := false;
-      loop (i + 1) acc)
-    else
-      match !quote_state, cmd.[i] with
-      | Single_quote, '\'' ->
-        quote_state := No_quote;
-        loop (i + 1) acc
-      | Single_quote, ch ->
-        start_word_if_needed ();
-        Buffer.add_char buf ch;
-        loop (i + 1) acc
-      | Double_quote, '"' ->
-        quote_state := No_quote;
-        loop (i + 1) acc
-      | Double_quote, '\\' ->
-        escaped := true;
-        loop (i + 1) acc
-      | Double_quote, ch ->
-        start_word_if_needed ();
-        Buffer.add_char buf ch;
-        loop (i + 1) acc
-      | No_quote, '\\' ->
-        escaped := true;
-        loop (i + 1) acc
-      | No_quote, '\'' ->
-        start_word_if_needed ();
-        quote_state := Single_quote;
-        loop (i + 1) acc
-      | No_quote, '"' ->
-        start_word_if_needed ();
-        quote_state := Double_quote;
-        loop (i + 1) acc
-      | No_quote, (' ' | '\t') ->
-        loop (i + 1) (push_word acc)
-      | No_quote, ('\n' | '\r' | ';' | '&' | '|') ->
-        let acc = push_word acc in
-        at_command_start := true;
-        loop (i + 1) acc
-      | No_quote, ch ->
-        start_word_if_needed ();
-        Buffer.add_char buf ch;
-        loop (i + 1) acc
-  in
-  loop 0 []
-
-let shell_interpreter_names = [ "bash"; "sh"; "zsh" ]
-
-let command_name text = Filename.basename text
-
-let is_direct_masc_tool_command_name name =
-  String.starts_with ~prefix:"keeper_" name
-  || String.starts_with ~prefix:"masc_" name
-  || String.equal name "extend_turns"
-
-let shell_c_payload words =
-  match words with
-  | shell :: rest when
-    shell.starts_command
-    && List.mem (command_name shell.text) shell_interpreter_names ->
-    let rec loop = function
-      | [] -> None
-      | flag :: payload :: _ when
-        String.length flag.text > 1
-        && flag.text.[0] = '-'
-        && String.contains flag.text 'c' ->
-        Some payload.text
-      | flag :: rest when String.length flag.text > 0 && flag.text.[0] = '-' ->
-        loop rest
-      | _ -> None
-    in
-    loop rest
-  | _ -> None
-
-let is_env_assignment text =
-  match String.index_opt text '=' with
-  | Some i when i > 0 ->
-    let lhs = String.sub text 0 i in
-    not (String.contains lhs '/')
-  | _ -> false
-
-let rec strip_command_wrappers = function
-  | [] -> []
-  | word :: rest when is_env_assignment word.text ->
-    strip_command_wrappers rest
-  | word :: rest when
-    let name = command_name word.text in
-    String.equal name "command" || String.equal name "exec" ->
-    strip_command_wrappers rest
-  | word :: rest when String.equal (command_name word.text) "env" ->
-    strip_env_args rest
-  | words -> words
-
-and strip_env_args = function
-  | word :: rest when String.starts_with ~prefix:"-" word.text ->
-    strip_env_args rest
-  | word :: rest when is_env_assignment word.text ->
-    strip_env_args rest
-  | words -> strip_command_wrappers words
-
-let direct_tool_command_name ~meta cmd =
-  let allowed =
-    Keeper_tool_policy.keeper_universe_tool_names meta
-    |> List.map String.lowercase_ascii
-  in
-  let rec first_command_name cmd =
-    let words = shell_words_with_boundaries cmd in
-    let first_from_words =
-      let rec loop = function
-        | word :: rest when word.starts_command ->
-          (match strip_command_wrappers (word :: rest) with
-           | first :: _ -> Some (command_name first.text)
-           | [] -> None)
-        | _ :: rest -> loop rest
-        | [] -> None
-      in
-      loop words
-    in
-    match shell_c_payload words with
-    | Some payload -> first_command_name payload
-    | None -> first_from_words
-  in
-  match first_command_name cmd with
-  | Some name when is_direct_masc_tool_command_name name ->
-    let normalized = String.lowercase_ascii name in
-    Some (name, List.mem normalized allowed)
-  | _ -> None
-
-let gh_pr_create_sequence = function
-  | gh :: pr :: create :: _ ->
-    String.equal (command_name gh.text) "gh"
-    && String.equal pr.text "pr"
-    && String.equal create.text "create"
-  | _ -> false
-
-let rec cmd_contains_gh_pr_create cmd =
-  let words = shell_words_with_boundaries cmd in
-  let rec loop = function
-    | word :: rest when
-      word.starts_command
-      && gh_pr_create_sequence (strip_command_wrappers (word :: rest)) ->
-      true
-    | _ :: rest -> loop rest
-    | [] -> false
-  in
-  loop words
-  ||
-  match shell_c_payload words with
-  | Some payload -> cmd_contains_gh_pr_create payload
-  | None -> false
 
 type bash_shape_block =
   | Gh_pr_checks
@@ -1222,6 +1038,11 @@ let typed_input_command_text = function
       typed_stage_command_text ~executable:stage.executable ~argv:stage.argv)
     |> String.concat " | "
 
+let typed_input_has_env = function
+  | Keeper_tool_bash_input.Exec { env; _ }
+  | Keeper_tool_bash_input.Pipeline { env; _ } ->
+    env <> []
+
 let typed_validation_error_text error =
   Format.asprintf "%a" Keeper_tool_bash_input.pp_validation_error error
 
@@ -1306,6 +1127,33 @@ let single_repo_cwd_for_top_relative_read
          if wants_repo_root then Some repo_root else None
        | [] | _ :: _ :: _ -> None)
 
+let typed_docker_image (meta : keeper_meta) =
+  match meta.sandbox_image with
+  | Some img when String.trim img <> "" -> img
+  | _ -> Env_config_keeper.KeeperSandbox.docker_image ()
+
+let typed_docker_sandbox_target ~turn_sandbox_factory ~meta ~cwd =
+  match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
+  | None ->
+    Error
+      "typed keeper_bash Docker Shell IR dispatch requires a turn sandbox factory"
+  | Some runtime ->
+    let image = typed_docker_image meta in
+    let runner ~stdin_content ~argv ~env:_ ~cwd:stage_cwd ~timeout_sec =
+      let cwd = Option.value stage_cwd ~default:cwd in
+      match
+        Keeper_turn_sandbox_runtime.run_exec_with_status
+          ?stdin_content
+          runtime
+          ~timeout_sec
+          ~cwd
+          ~command_argv:argv
+      with
+      | Ok (status, output) -> status, output, ""
+      | Error err -> Unix.WEXITED 1, "", err
+    in
+    Ok (Masc_exec.Sandbox_target.docker ~image ~runner)
+
 let handle_keeper_bash_typed
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Coord.config)
@@ -1316,18 +1164,12 @@ let handle_keeper_bash_typed
       ~write_enabled
       ()
   =
-  ignore turn_sandbox_factory;
   let root = Keeper_alerting_path.project_root_of_config config in
   if run_in_background
   then
     error_json
       ~fields:[ "typed", `Bool true ]
       "typed keeper_bash does not support run_in_background yet; use legacy cmd or foreground typed exec"
-  else if meta.sandbox_profile = Docker
-  then
-    error_json
-      ~fields:[ "typed", `Bool true ]
-      "typed keeper_bash Shell IR dispatch for Docker is not enabled yet; use legacy cmd until the Docker runner carries stdin/cwd through pipeline stages"
   else
     match Keeper_shell_shared.resolve_keeper_shell_write_cwd ~config ~meta ~args with
     | Error e -> error_json e
@@ -1363,12 +1205,21 @@ let handle_keeper_bash_typed
         let sandbox_profile, _sandbox_network_mode =
           Keeper_shell_shared.effective_sandbox_profile ~meta ~in_playground
         in
-        if sandbox_profile = Docker
-        then
-          error_json
-            ~fields:[ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
-            "typed keeper_bash Shell IR dispatch for Docker is not enabled yet; use legacy cmd until the Docker runner carries stdin/cwd through pipeline stages"
-        else if Worker_dev_tools.is_destructive_bash_operation cmd
+        let dispatch_sandbox =
+          match sandbox_profile with
+          | Local -> Ok (Masc_exec.Sandbox_target.host ())
+          | Docker ->
+            if typed_input_has_env input
+            then Error "typed keeper_bash Docker Shell IR dispatch does not support env yet"
+            else typed_docker_sandbox_target ~turn_sandbox_factory ~meta ~cwd
+        in
+        (match dispatch_sandbox with
+         | Error e ->
+           error_json
+             ~fields:[ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
+             e
+         | Ok dispatch_sandbox ->
+        if Worker_dev_tools.is_destructive_bash_operation cmd
         then
           Yojson.Safe.to_string
             (Exec_core.blocked_result_json
@@ -1396,7 +1247,7 @@ let handle_keeper_bash_typed
                ~extra:[ "cmd", `String cmd_for_log; "typed", `Bool true; "execution_time_ms", `Int 0 ]
                ())
         else
-          match Keeper_tool_bash_input.to_shell_ir ~mode input with
+          match Keeper_tool_bash_input.to_shell_ir ~mode ~sandbox:dispatch_sandbox input with
           | Error e ->
             error_json
               ~fields:[ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
@@ -1449,7 +1300,7 @@ let handle_keeper_bash_typed
                     ~status:result.status
                     ~output
                     ~env_snapshot:env_snap
-                    ()))
+                    ())))
 
 let handle_keeper_bash
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)

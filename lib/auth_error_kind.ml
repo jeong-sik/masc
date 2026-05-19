@@ -62,3 +62,80 @@ let all =
   ; Invalid_json
   ; Other
   ]
+
+(* ----- Dashboard actor fallback typed surface ------------------------ *)
+(* See .mli for rationale. The two warn-message templates below are
+   byte-equivalent to the prior inline format strings in
+   [lib/server/server_auth.ml:298-302] (Outcome_none) and
+   [lib/server/server_auth.ml:340-344] (Outcome_error). The
+   token_mismatch remediation tail is reproduced verbatim because
+   operators key alerts on the literal "Remediation:" substring
+   (server_auth.ml:332-339 inline rationale). *)
+
+type dashboard_actor_fallback_outcome =
+  | Outcome_none
+  | Outcome_error of
+      { err : Masc_domain.t
+      ; err_kind : t
+      ; actor_hint : string option
+      }
+
+type dashboard_actor_fallback =
+  { outcome : dashboard_actor_fallback_outcome
+  ; token_hash_prefix : string
+  }
+
+let dashboard_actor_fallback_log_message fb =
+  match fb.outcome with
+  | Outcome_none ->
+      (* Byte-equivalent to the prior inline Printf format. The continuation
+         lines were OCaml string-literal continuations (backslash-newline +
+         leading whitespace), which the compiler concatenates into a single
+         space-joined sentence — preserved here without leading whitespace. *)
+      Printf.sprintf
+        "[silent:dashboard_actor_fallback] outcome=none token_hash_prefix=%s \
+         \xe2\x80\x94 bearer token resolved to no agent, falling back to \
+         request actor hint"
+        fb.token_hash_prefix
+  | Outcome_error { err; err_kind; actor_hint } ->
+      let err_str = Masc_domain.masc_error_to_string err in
+      let hint =
+        match actor_hint with
+        | Some s -> s
+        | None -> "<none>"
+      in
+      let err_kind_label = to_string err_kind in
+      let extra_hint =
+        match err_kind with
+        | Token_mismatch ->
+            " Remediation: clear the browser's stored dashboard token \
+             (localStorage masc_dashboard_token) or delete \
+             .masc/auth/dashboard.token so a fresh token is minted on \
+             the next dashboard load."
+        | Token_expired
+        | Unauthorized
+        | Forbidden
+        | Agent_not_found
+        | Io_error
+        | Invalid_json
+        | Other -> ""
+      in
+      Printf.sprintf
+        "[silent:dashboard_actor_fallback] outcome=error \
+         token_hash_prefix=%s err_kind=%s actor_hint=%s err=%s \xe2\x80\x94 \
+         falling back to request actor hint.%s"
+        fb.token_hash_prefix err_kind_label hint err_str extra_hint
+
+let dashboard_actor_fallback_prometheus_labels fb =
+  match fb.outcome with
+  | Outcome_none ->
+      [ ( "outcome"
+        , Silent_dashboard_actor_outcome.to_label
+            Silent_dashboard_actor_outcome.None_resolved )
+      ]
+  | Outcome_error { err_kind; _ } ->
+      [ ( "outcome"
+        , Silent_dashboard_actor_outcome.to_label
+            Silent_dashboard_actor_outcome.Error_classified )
+      ; ("err_kind", to_string err_kind)
+      ]

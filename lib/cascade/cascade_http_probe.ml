@@ -158,7 +158,24 @@ let try_probe ~sw ~net:_ ?clock ?timeout_s ?now url =
       ~headers:[ "accept", "application/json" ]
       ()
   with
-  | Error _ -> None
+  | Error message ->
+    (* Distinguish HTTP-side failure modes (timeout / connection refused /
+       DNS / TLS) at the probe boundary. Previously [Error _ -> None]
+       collapsed every transport failure into "endpoint down", and the
+       0.5s [probe_timeout_default_s] hit was indistinguishable from an
+       actual unreachable host. Operators tuning the timeout ceiling or
+       restarting the box need this signal.
+
+       Log-only for now — the existing
+       [metric_cascade_http_probe_json_parse_failures] counter is
+       semantically scoped to body-parse failures, so mixing transport
+       errors there would dirty its label cardinality. A dedicated
+       [cascade_http_probe_transport_failures] metric is a follow-up
+       once the structural fix lands. *)
+    Log.Cascade.warn
+      "[cascade-http-probe] probe transport failure at %s: %s"
+      endpoint message;
+    None
   | Ok (status, body) when status = 200 ->
     (* Iter 29 (V07 follow-up): make malformed JSON probe responses
        visible. Previously the [exception _ -> None] catch-all returned

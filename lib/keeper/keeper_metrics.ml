@@ -210,6 +210,7 @@ type t =
   | TurnCleanupFailures
   | MemoryBankLoadHistorySwallowedExceptions
   | MemoryRecallReadErrors
+  | CompactionNegativeSavings
   | CascadeHttpProbeJsonParseFailures
 
 (** String conversion
@@ -425,6 +426,8 @@ let to_string = function
       "masc_keeper_memory_bank_load_history_swallowed_exceptions_total"
   | MemoryRecallReadErrors ->
       "masc_keeper_memory_recall_read_errors_total"
+  | CompactionNegativeSavings ->
+      "masc_keeper_compaction_negative_savings_total"
   | CascadeHttpProbeJsonParseFailures ->
       "masc_cascade_http_probe_json_parse_failures_total"
 ;;
@@ -998,6 +1001,9 @@ let metric_keeper_memory_recall_read_errors =
   to_string MemoryRecallReadErrors
 ;;
 
+let metric_keeper_compaction_negative_savings =
+  to_string CompactionNegativeSavings
+;;
 let metric_cascade_http_probe_json_parse_failures =
   to_string CascadeHttpProbeJsonParseFailures
 ;;

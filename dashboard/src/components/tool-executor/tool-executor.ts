@@ -16,7 +16,7 @@ function ConfirmDialog({ toolName, onConfirm, onCancel }: { toolName: string; on
     <div class="rounded-[var(--r-1)] border border-[var(--err-border)] bg-[var(--bad-10)] p-3">
       <p class="text-xs text-[var(--bad-light)] mb-2"><strong>${toolName}</strong> 은 파괴적(destructive) 도구입니다. 실행하시겠습니까?</p>
       <div class="flex gap-2">
-        <${ActionButton} variant="danger" size="sm" onClick=${onConfirm}>실행<//>
+        <${ActionButton} variant="danger" size="sm" onClick=${onConfirm} title="실행: 파괴적 도구를 그대로 실행합니다">실행하기<//>
         <${ActionButton} variant="ghost" size="sm" onClick=${onCancel}>취소<//>
       </div>
     </div>
@@ -55,9 +55,9 @@ function ToolDetail() {
         ? html`<${ConfirmDialog} toolName=${tool.name} onConfirm=${handleConfirmedExecute} onCancel=${() => { showConfirm.value = false }} />`
         : html`
           <div class="flex gap-2">
-            <${ActionButton} variant=${isDestructive ? 'danger' : 'primary'} size="md" disabled=${executing.value || !toolAccess.allowed} onClick=${handleExecute}>
-              ${executing.value ? '실행 중...' : '실행'}<//>
-            <${ActionButton} variant="ghost" size="md" onClick=${() => { clearSelection(); showConfirm.value = false }}>초기화<//>
+            <${ActionButton} variant=${isDestructive ? 'danger' : 'primary'} size="md" disabled=${executing.value || !toolAccess.allowed} onClick=${handleExecute} title="실행: 입력값으로 도구를 호출합니다">
+              ${executing.value ? '실행 중...' : '실행하기'}<//>
+            <${ActionButton} variant="ghost" size="md" onClick=${() => { clearSelection(); showConfirm.value = false }} title="초기화: 선택과 입력값을 비웁니다">초기화하기<//>
           </div>`}
       ${lastResult.value ? html`<${ToolResultDisplay} key=${lastResult.value.timestamp} ...${lastResult.value} />` : null}
     </div>

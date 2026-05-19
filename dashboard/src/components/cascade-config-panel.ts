@@ -1045,7 +1045,7 @@ function ClientCapacityHistoryTable({
           <th scope="col" class="text-left py-1 w-20">시간</th>
           <th scope="col" class="text-left py-1">종류</th>
           <th scope="col" class="text-left py-1">키</th>
-          <th scope="col" class="text-right py-1">활성</th>
+          <th scope="col" class="text-right py-1">활성 수</th>
         </tr>
       </thead>
       <tbody>
@@ -1075,7 +1075,7 @@ function ClientCapacityTable({ capacity }: { capacity: CascadeClientCapacityResp
           <th scope="col" class="text-left py-1 w-4"></th>
           <th scope="col" class="text-left py-1">종류</th>
           <th scope="col" class="text-left py-1">키</th>
-          <th scope="col" class="text-right py-1">활성</th>
+          <th scope="col" class="text-right py-1">활성 수</th>
           <th scope="col" class="text-right py-1">가용</th>
           <th scope="col" class="text-right py-1">전체</th>
         </tr>

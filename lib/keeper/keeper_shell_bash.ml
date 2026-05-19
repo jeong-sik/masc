@@ -980,7 +980,7 @@ let handle_keeper_bash
   in
   let timeout_sec =
     Keeper_shell_shared.clamp_shell_timeout
-      ~min_sec:Keeper_shell_shared.keeper_bash_min_timeout_sec
+      ~min_sec:Keeper_shell_shared.keeper_bash_native_min_timeout_sec
       ~default:Keeper_shell_shared.io_timeout_sec
       args
   in

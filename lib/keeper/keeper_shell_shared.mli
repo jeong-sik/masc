@@ -72,10 +72,18 @@ val gh_min_timeout_sec : float
     cannot lower; sub-network-latency timeouts cause cascading 401
     retries (#8688). *)
 
-val keeper_bash_min_timeout_sec : float
-(** Floor for keeper_bash [timeout_sec] (5s).  Custom Bash commands often
-    touch disk, Docker, or git metadata; lower caller-supplied values produce
-    noisy partial-output timeout failures rather than useful latency bounds. *)
+val keeper_bash_native_min_timeout_sec : float
+(** Floor for keeper_bash [timeout_sec] when the command runs through the
+    *native* (non-Docker) executor (5s).  Custom Bash commands often touch
+    disk or git metadata; lower caller-supplied values produce noisy
+    partial-output timeout failures rather than useful latency bounds.
+
+    The Docker dispatch path re-clamps to
+    {!Keeper_shell_docker.docker_run_min_timeout_sec} inside
+    [run_docker_shell_command_with_status_internal] because container
+    cold start adds 10-60s on top of the actual command (runtime log
+    issue #5, 2026-05-20).  Keeping a separate native floor avoids
+    penalising the host-side fast path for the Docker path's overhead. *)
 
 val git_meta_timeout_sec : float
 (** Ceiling for lightweight git metadata commands (rev-parse,

@@ -18,12 +18,13 @@
    directly for counter mechanics, and [Process_eio.argv_program]
    for the cardinality-bounding helper. *)
 
-let counter_for ~program ~timeout_sec =
+let counter_for ?(stage = Process_eio.Command) ~program ~timeout_sec () =
   Masc_mcp.Prometheus.metric_value_or_zero
     Masc_mcp.Coord.process_timeout_metric
     ~labels:
       [ "program", program
       ; ("timeout_bucket", Masc_mcp.Timeout_bucket.(to_label (of_seconds timeout_sec)))
+      ; ("stage", Process_eio.timeout_stage_to_string stage)
       ]
     ()
 ;;
@@ -72,17 +73,18 @@ let test_argv_program_empty () =
 let test_record_increments () =
   let program = "test_program_9632" in
   let timeout_sec = 15.0 in
-  let before = counter_for ~program ~timeout_sec in
-  Masc_mcp.Coord.record_process_timeout ~program ~timeout_sec;
+  let stage = Process_eio.Command in
+  let before = counter_for ~program ~timeout_sec ~stage () in
+  Masc_mcp.Coord.record_process_timeout ~program ~timeout_sec ~stage;
   Alcotest.(check (float 0.0001))
     "+1 on call"
     (before +. 1.0)
-    (counter_for ~program ~timeout_sec);
-  Masc_mcp.Coord.record_process_timeout ~program ~timeout_sec;
+    (counter_for ~program ~timeout_sec ~stage ());
+  Masc_mcp.Coord.record_process_timeout ~program ~timeout_sec ~stage;
   Alcotest.(check (float 0.0001))
     "+1 again"
     (before +. 2.0)
-    (counter_for ~program ~timeout_sec)
+    (counter_for ~program ~timeout_sec ~stage ())
 ;;
 
 let test_program_isolation () =
@@ -90,28 +92,65 @@ let test_program_isolation () =
   let timeout_sec = 60.0 in
   let prog_a = "isolation_a_9632" in
   let prog_b = "isolation_b_9632" in
-  let before_a = counter_for ~program:prog_a ~timeout_sec in
-  Masc_mcp.Coord.record_process_timeout ~program:prog_b ~timeout_sec;
+  let stage = Process_eio.Command in
+  let before_a = counter_for ~program:prog_a ~timeout_sec ~stage () in
+  Masc_mcp.Coord.record_process_timeout ~program:prog_b ~timeout_sec ~stage;
   Alcotest.(check (float 0.0001))
     "program A unchanged"
     before_a
-    (counter_for ~program:prog_a ~timeout_sec)
+    (counter_for ~program:prog_a ~timeout_sec ~stage ())
 ;;
 
 let test_timeout_sec_isolation () =
   (* Same program with two budgets must split into separate series. *)
   let program = "budget_split_9632" in
-  let before_15 = counter_for ~program ~timeout_sec:15.0 in
-  let before_60 = counter_for ~program ~timeout_sec:60.0 in
-  Masc_mcp.Coord.record_process_timeout ~program ~timeout_sec:15.0;
+  let stage = Process_eio.Command in
+  let before_15 = counter_for ~program ~timeout_sec:15.0 ~stage () in
+  let before_60 = counter_for ~program ~timeout_sec:60.0 ~stage () in
+  Masc_mcp.Coord.record_process_timeout ~program ~timeout_sec:15.0 ~stage;
   Alcotest.(check (float 0.0001))
     "15s budget +1"
     (before_15 +. 1.0)
-    (counter_for ~program ~timeout_sec:15.0);
+    (counter_for ~program ~timeout_sec:15.0 ~stage ());
   Alcotest.(check (float 0.0001))
     "60s budget unchanged"
     before_60
-    (counter_for ~program ~timeout_sec:60.0)
+    (counter_for ~program ~timeout_sec:60.0 ~stage ())
+;;
+
+let test_stage_isolation () =
+  (* Same program + budget with different stages must split. *)
+  let program = "stage_split_9632" in
+  let timeout_sec = 15.0 in
+  let before_cmd =
+    counter_for ~program ~timeout_sec ~stage:Process_eio.Command ()
+  in
+  let before_spawn =
+    counter_for ~program ~timeout_sec ~stage:Process_eio.Spawn ()
+  in
+  Masc_mcp.Coord.record_process_timeout
+    ~program
+    ~timeout_sec
+    ~stage:Process_eio.Spawn;
+  Alcotest.(check (float 0.0001))
+    "spawn stage +1"
+    (before_spawn +. 1.0)
+    (counter_for ~program ~timeout_sec ~stage:Process_eio.Spawn ());
+  Alcotest.(check (float 0.0001))
+    "command stage unchanged"
+    before_cmd
+    (counter_for ~program ~timeout_sec ~stage:Process_eio.Command ())
+;;
+
+let test_stage_label_vocabulary () =
+  (* Pin the wire-format label strings so a future rename surfaces here
+     and not as a silent dashboard regression. *)
+  Alcotest.(check string) "slot_wait label" "slot_wait"
+    (Process_eio.timeout_stage_to_string Process_eio.Slot_wait);
+  Alcotest.(check string) "spawn label" "spawn"
+    (Process_eio.timeout_stage_to_string Process_eio.Spawn);
+  Alcotest.(check string) "command label" "command"
+    (Process_eio.timeout_stage_to_string Process_eio.Command)
 ;;
 
 (* Pin the boundary semantics + label vocabulary so a future refactor
@@ -160,6 +199,13 @@ let () =
     ; ( "isolation"
       , [ Alcotest.test_case "programs isolated" `Quick test_program_isolation
         ; Alcotest.test_case "timeout_sec isolated" `Quick test_timeout_sec_isolation
+        ; Alcotest.test_case "stages isolated" `Quick test_stage_isolation
+        ] )
+    ; ( "stage_labels"
+      , [ Alcotest.test_case
+            "stage label vocabulary stable"
+            `Quick
+            test_stage_label_vocabulary
         ] )
     ; ( "bucket_matrix"
       , [ Alcotest.test_case

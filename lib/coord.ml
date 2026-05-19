@@ -557,18 +557,23 @@ let () = Atomic.set Coord_hooks.cache_desync_cleared_fn record_cache_desync_clea
    the small set of commands MASC actually invokes (~10-20 series). *)
 let process_timeout_metric = Prometheus.metric_process_timeout
 
-let record_process_timeout ~program ~timeout_sec =
+let record_process_timeout ~program ~timeout_sec ~stage =
   (* Bucket the raw float to keep Prometheus cardinality bounded — a
      [Printf.sprintf "%.0f"] of caller-supplied seconds would mint a
      new series per distinct value.  Five closed buckets preserve the
      operator question "is 15s/60s the right budget?" while
      guaranteeing the label set never grows beyond
-     [Timeout_bucket]'s variant arity. *)
+     [Timeout_bucket]'s variant arity.
+
+     [stage] is a closed 3-variant label (slot_wait | spawn | command)
+     so the total cardinality stays bounded by
+     [program × bucket × stage] (~10-20 × 5 × 3 ≈ 300 series). *)
   Prometheus.inc_counter
     process_timeout_metric
     ~labels:
       [ "program", program
       ; ("timeout_bucket", Timeout_bucket.(to_label (of_seconds timeout_sec)))
+      ; ("stage", Process_eio.timeout_stage_to_string stage)
       ]
     ()
 ;;

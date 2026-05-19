@@ -132,7 +132,13 @@ type docker_shell_result =
   ; network_label : string
   }
 
-(** Cold-start floor (seconds) for [docker run --rm]. *)
+(** Cold-start floor (seconds) for [docker run --rm].  The wall-clock
+    budget covers slot_wait + spawn + container cold start + actual
+    cmd + drain; the default ([20.0]) matches the [gh] CLI floor
+    ([gh_min_timeout_sec = 15s], #8688) plus 5s headroom for image
+    pull and container creation.  Operators can override via
+    [MASC_KEEPER_DOCKER_RUN_MIN_TIMEOUT_SEC] (read once at module
+    load, floor 1s). *)
 val docker_run_min_timeout_sec : float
 
 (** Run [cmd] inside the keeper Docker sandbox; clamps

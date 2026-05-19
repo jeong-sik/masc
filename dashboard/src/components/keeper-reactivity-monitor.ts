@@ -21,6 +21,7 @@ import { KeeperPhaseTimeline, refreshKeeperPhaseTimeline } from './keeper-phase-
 import { KeeperLifecycleTimeline, refreshKeeperLifecycleTimeline } from './keeper-lifecycle-timeline'
 import { TurnBudgetGaugePanel } from './turn-budget-gauge'
 import { parsePrometheusText, type ParsedMetric } from './prometheus-metrics'
+import { isKeeperPaused } from '../lib/keeper-predicates'
 import { fetchWithTimeout, authHeaders } from '../api/core'
 import { TimeAgo } from './common/time-ago'
 import { LoadingState, ErrorRecoverable } from './common/feedback-state'
@@ -188,9 +189,10 @@ async function fetchMetricsText(): Promise<string> {
  * resume heartbeat arrives) they can briefly disagree.  The OR ensures that any
  * signal of pause is reflected in the UI immediately, matching operator intent.
  */
-export function isKeeperPaused(k: Keeper): boolean {
-  return k.paused === true || k.phase === 'Paused' || k.pipeline_stage === 'paused'
-}
+// RFC-0135 PR-3: `isKeeperPaused` lives in the canonical SSOT
+// `../lib/keeper-predicates.ts`. The old definition here checked only
+// three axes (paused, phase, pipeline_stage); the SSOT folds in the
+// `status` axis too and is reused by all four pre-RFC sites.
 
 // ── Sub-components ─────────────────────────────────────────────────────────
 

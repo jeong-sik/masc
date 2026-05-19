@@ -5,6 +5,7 @@ import { keeperDisplayStatus, keeperRuntimeBlockerHint } from './keeper-runtime-
 // (previously lines 39-55, 159-180) duplicated BACKEND_PHASE_MAP +
 // PHASE_ID_MAP elsewhere; the three maps drifted independently.
 import { toKeeperPhase } from '../keeper-store-normalize'
+import { isKeeperPaused } from './keeper-predicates'
 
 export type RuntimeBand = 'active' | 'attention' | 'paused' | 'offline'
 
@@ -179,7 +180,10 @@ function contextAttentionRatio(keeper: Keeper): number {
 }
 
 function keeperBand(keeper: Keeper, phaseKey: string, lifecycleKey: string): RuntimeBand {
-  if (keeper.paused || phaseKey === 'Paused' || lifecycleKey === 'paused') return 'paused'
+  // RFC-0135 PR-3: canonical paused predicate. The previous local OR
+  // chain (`paused || phaseKey === 'Paused' || lifecycleKey === 'paused'`)
+  // was one of four parallel paused checks that drifted independently.
+  if (isKeeperPaused(keeper)) return 'paused'
   if (
     lifecycleKey === 'offline'
     || lifecycleKey === 'inactive'

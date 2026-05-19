@@ -30,6 +30,11 @@ import {
 } from '../api/keeper'
 import { invalidateDashboardCache, refreshDashboard, keepers } from '../store'
 import type { Keeper } from '../types'
+import {
+  isKeeperOffline,
+  isKeeperPaused,
+  keeperIsStuckOnRecoverableBlocker,
+} from '../lib/keeper-predicates'
 
 // ── Shared helpers ────────────────────────────────────────────────────────
 
@@ -86,17 +91,13 @@ export function keeperActionVisibility(keeper: Keeper): {
   canBoot: boolean
   canShutdown: boolean
 } {
+  // RFC-0135 PR-3: paused / offline / stuck-on-recoverable predicates
+  // come from the canonical SSOT (`lib/keeper-predicates.ts`). Only the
+  // "running" axis stays inline — it is action-panel-specific (a strict
+  // subset of typed-state `running` that explicitly excludes
+  // `restarting`, which the `canWake` branch treats as stuck).
   const status = (keeper.status ?? '').toLowerCase()
   const phase = (keeper.phase ?? '').toString().toLowerCase()
-
-  const isOffline =
-    status === 'offline' ||
-    status === 'inactive' ||
-    phase === 'offline' ||
-    phase === 'stopped' ||
-    phase === 'dead' ||
-    phase === 'crashed'
-
   const isRunning =
     status === 'active' ||
     status === 'running' ||
@@ -109,14 +110,11 @@ export function keeperActionVisibility(keeper: Keeper): {
     phase === 'handing_off' ||
     phase === 'draining'
 
-  const isPaused =
-    keeper.paused === true || status === 'paused' || phase === 'paused'
-
-  const isStuck =
-    phase === 'restarting' ||
-    keeper.runtime_blocker_class === 'cascade_exhausted' ||
-    keeper.runtime_blocker_class === 'oas_timeout_budget' ||
-    keeper.runtime_blocker_class === 'turn_timeout'
+  const isPaused = isKeeperPaused(keeper)
+  const isOffline = isKeeperOffline(keeper)
+  // `restarting` is a kicked-but-not-yet-running state — treat as stuck
+  // so the wakeup action stays visible until the keeper resumes ticks.
+  const isStuck = phase === 'restarting' || keeperIsStuckOnRecoverableBlocker(keeper)
 
   return {
     canPause:    isRunning && !isPaused,

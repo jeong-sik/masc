@@ -684,15 +684,22 @@ export interface KeeperStatusDetail {
   loadedAt: string
 }
 
+// Backend SSOT: `Keeper_exec_status.pipeline_stage_of_phase`
+// (lib/keeper/keeper_exec_status.ml:537) deterministic mapping from
+// the 13-state KeeperPhase, post-RFC-0046 (#14707). Emits 10 distinct
+// values; `unknown` is a dashboard-side sentinel for missing data
+// (`asString(row.pipeline_stage) ?? 'unknown'`). Removed legacy
+// `thinking` / `tool_use` (= trajectory content_type, never
+// pipeline_stage) and `scheduled_autonomous` (= turn channel, never
+// pipeline_stage). Added `overflowed` which the backend emits but
+// the type previously rejected.
 export type PipelineStage =
   | 'idle'
-  | 'thinking'
-  | 'tool_use'
   | 'compacting'
   | 'handoff'
-  | 'scheduled_autonomous'
   | 'offline'
   | 'failing'
+  | 'overflowed'
   | 'draining'
   | 'paused'
   | 'crashed'

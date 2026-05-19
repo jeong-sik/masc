@@ -288,7 +288,7 @@ describe('isKeeperPaused', () => {
   })
 
   it('returns false when paused is false and phase is Running', () => {
-    expect(isKeeperPaused(keeper({ paused: false, phase: 'Running', pipeline_stage: 'thinking' }))).toBe(false)
+    expect(isKeeperPaused(keeper({ paused: false, phase: 'Running', pipeline_stage: 'idle' }))).toBe(false)
   })
 
   it('returns false when paused is undefined (unset)', () => {

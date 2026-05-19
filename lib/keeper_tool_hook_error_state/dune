@@ -1,0 +1,39 @@
+; Keeper_tool_hook_error_state — typed dedupe state for the
+; Keeper_hooks_oas on_tool_error hook ERROR log noise.
+;
+; MASC/OAS Error-Warn Reduction Goal §P3 adjacency (tool error hook
+; noise): system_log 1000-line sample (2026-05-19) shows the single
+; emit site at lib/keeper/keeper_hooks_oas.ml:720 emitting
+;     "keeper:%s tool_error: %s — %s"
+; at ERROR level on every keeper-tool failure. The same
+; (keeper, tool, normalized error) triple recurs across time as the
+; same keeper hits the same tool error repeatedly, so a single keeper
+; failure family produces N ERROR lines.
+; Observed in the sample: keeper:verifier × Bash × 2,
+; keeper:lifecycle-worker-fast-1 × masc_worktree_create × 2,
+; keeper:lifecycle-reviewer-fast-1 × keeper_pr_review_comment × 2,
+; keeper:analyst × masc_transition × 2 — 4 distinct triples × 2 = 8
+; events in 1000 lines.
+;
+; Sibling of [Keeper_tool_retry_state] (lib/keeper_tool_retry_state/).
+; Same shape, deliberately separate: the retry module keys on
+; (tool, signature) for the per-cycle 1→2→3 retry ladder, while this
+; module keys on (keeper, tool, signature) for the cross-time
+; per-keeper hook firings. Composition would force the smaller key
+; shape on the hook site — wrong direction.
+;
+; Pure stdlib (Hashtbl + Mutex + String); no Eio link so the
+; standalone test executable builds in seconds without dragging the
+; main masc_mcp library.
+;
+; (include_subdirs no) opts out of the parent (include_subdirs
+; unqualified). (wrapped false) keeps the bare identifier
+; [Keeper_tool_hook_error_state] to match the existing lib/keeper/*
+; flat namespace at call sites.
+(include_subdirs no)
+
+(library
+ (name masc_mcp_keeper_tool_hook_error_state)
+ (public_name masc_mcp.keeper_tool_hook_error_state)
+ (wrapped false)
+ (libraries))

@@ -24,6 +24,83 @@ let elapsed_duration_ms ~start_time ~end_time =
 let string_contains_char s ch = String.exists (Char.equal ch) s
 let string_contains_substring s needle = String_util.contains_substring s needle
 
+type native_tool_hint = {
+  rule_id : string;
+  tool_suggestion : string;
+  rewrite : string;
+  hint : string;
+  alternatives : string list;
+}
+
+let gh_pr_native_tool_hint cmd =
+  let make ~rule_id ~tool_suggestion ~rewrite ~hint ~alternatives =
+    Some { rule_id; tool_suggestion; rewrite; hint; alternatives }
+  in
+  match cmd_gh_pr_native_subcommand cmd with
+  | Some Gh_pr_list ->
+    make
+      ~rule_id:"gh_pr_list_requires_keeper_pr_list"
+      ~tool_suggestion:"keeper_pr_list"
+      ~rewrite:"Use keeper_pr_list with the same repo/state/search intent."
+      ~hint:
+        "Do not call gh pr list through keeper_bash. Use keeper_pr_list so PR \
+         reads are routed through the native PR tool surface."
+      ~alternatives:
+        [ "keeper_pr_list repo=OWNER/REPO state=open"
+        ; "keeper_pr_list repo=OWNER/REPO search=term"
+        ]
+  | Some Gh_pr_status ->
+    make
+      ~rule_id:"gh_pr_status_requires_keeper_pr_status"
+      ~tool_suggestion:"keeper_pr_status"
+      ~rewrite:"Use keeper_pr_status for PR state, checks, draft state, and mergeability."
+      ~hint:
+        "Do not call gh pr view/status/checks through keeper_bash. Use \
+         keeper_pr_status so PR status reads are captured by the native PR \
+         receipt path."
+      ~alternatives:
+        [ "keeper_pr_status pr=NUMBER repo=OWNER/REPO"
+        ; "keeper_pr_status head=BRANCH repo=OWNER/REPO"
+        ]
+  | Some Gh_pr_diff ->
+    make
+      ~rule_id:"gh_pr_diff_requires_keeper_pr_review_read"
+      ~tool_suggestion:"keeper_pr_review_read"
+      ~rewrite:"Use keeper_pr_review_read for PR diff/review context reads."
+      ~hint:
+        "Do not call gh pr diff through keeper_bash. Use \
+         keeper_pr_review_read so review context is read through the PR review \
+         tool surface."
+      ~alternatives:
+        [ "keeper_pr_review_read pr=NUMBER repo=OWNER/REPO"
+        ; "keeper_pr_status pr=NUMBER repo=OWNER/REPO"
+        ]
+  | Some Gh_pr_review ->
+    make
+      ~rule_id:"gh_pr_review_requires_keeper_pr_review_comment"
+      ~tool_suggestion:"keeper_pr_review_comment"
+      ~rewrite:"Use keeper_pr_review_comment for PR review comments or review actions."
+      ~hint:
+        "Do not call gh pr review/comment through keeper_bash. Use \
+         keeper_pr_review_comment so review actions keep approval and audit \
+         receipts."
+      ~alternatives:
+        [ "keeper_pr_review_comment pr=NUMBER repo=OWNER/REPO body=..."
+        ; "keeper_pr_review_read pr=NUMBER repo=OWNER/REPO"
+        ]
+  | None -> None
+;;
+
+let native_tool_diagnosis hint =
+  { Exec_core.rule_id = hint.rule_id
+  ; explanation =
+      "Raw GitHub PR commands are blocked in keeper_bash; the native PR tool \
+       surface preserves routing, audit, and retry receipts."
+  ; rewrite = Some hint.rewrite
+  ; tool_suggestion = Some hint.tool_suggestion
+  }
+;;
+
 let has_malformed_dev_null_redirect_token scan_text =
   scan_text
   |> String.split_on_char ' '
@@ -957,6 +1034,25 @@ let handle_keeper_bash
          ; "cmd", `String cmd_for_log
          ])
   in
+  let native_pr_command_block hint =
+    Prometheus.inc_counter
+      Keeper_metrics.metric_keeper_shell_bash_failures
+      ~labels:[("keeper", meta.name); ("site", "gh_pr_native_tool")]
+      ();
+    Log.Keeper.warn
+      "keeper_bash gh pr command routed to native tool: keeper=%s rule=%s cmd=%s"
+      meta.name hint.rule_id cmd_for_log;
+    Yojson.Safe.to_string
+      (Exec_core.blocked_result_json
+         ~cmd
+         ~error:"command_blocked"
+         ~reason:"Raw GitHub PR commands must use the native PR tool surface."
+         ~hint:hint.hint
+         ~alternatives:hint.alternatives
+         ~diag:(Some (native_tool_diagnosis hint))
+         ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
+         ())
+  in
   let direct_tool_command_block ~tool_policy_visible tool_name =
     Prometheus.inc_counter
       Keeper_metrics.metric_keeper_shell_bash_failures
@@ -1061,6 +1157,10 @@ let handle_keeper_bash
     | Some (tool_name, tool_policy_visible) ->
       direct_tool_command_block ~tool_policy_visible tool_name
     | None when cmd_contains_gh_pr_create cmd -> gh_pr_create_block ()
+    | None when Option.is_some (gh_pr_native_tool_hint cmd) ->
+      (match gh_pr_native_tool_hint cmd with
+       | Some hint -> native_pr_command_block hint
+       | None -> error_json "internal native PR command hint mismatch")
     | None when Task_probe.mentions_task_state_file cmd ->
       task_state_file_probe_block ()
     | None when Task_probe.looks_like_http_probe cmd ->
@@ -1536,12 +1636,19 @@ let handle_keeper_bash
       match validate validation_cmd with
       | Error reason ->
         let reason_str = Worker_dev_tools.block_reason_to_string reason in
+        let native_tool_hint =
+          match reason with
+          | Worker_dev_tools.Command_not_allowed name
+            when String_util.equals_ci name "gh" ->
+            gh_pr_native_tool_hint cmd
+          | _ -> None
+        in
         Prometheus.inc_counter
           Keeper_metrics.metric_keeper_shell_bash_failures
           ~labels:[("site", "generic_blocked")]
           ();
         Log.Keeper.warn "keeper_bash blocked: %s (cmd=%s)" reason_str cmd_for_log;
-        let hint =
+        let default_hint =
           match reason with
           | Worker_dev_tools.Command_not_allowed name
             when String_util.equals_ci name "gh" ->
@@ -1555,10 +1662,14 @@ let handle_keeper_bash
             "Avoid shell metacharacters. Use keeper_shell with a specific op (rg, find, ls) instead."
           | Command_not_allowed _ ->
             "Check the command for blocked patterns. Use keeper_shell for structured ops (rg, ls, find)."
-          | Empty_command ->
-            "Provide a non-empty command string."
+          | Empty_command -> "Provide a non-empty command string."
         in
-        let alternatives =
+        let hint =
+          match native_tool_hint with
+          | Some hint -> hint.hint
+          | None -> default_hint
+        in
+        let default_alternatives =
           match reason with
           | Worker_dev_tools.Command_not_allowed name
             when String_util.equals_ci name "gh" ->
@@ -1586,6 +1697,16 @@ let handle_keeper_bash
             ; "Example: keeper_bash cmd='ls -la lib/'."
             ]
         in
+        let alternatives =
+          match native_tool_hint with
+          | Some hint -> hint.alternatives
+          | None -> default_alternatives
+        in
+        let diag =
+          match native_tool_hint with
+          | Some hint -> Some (native_tool_diagnosis hint)
+          | None -> Keeper_shell_shared.diagnosis_of_block_reason reason
+        in
         Yojson.Safe.to_string
           (Exec_core.blocked_result_json
              ~cmd
@@ -1593,7 +1714,7 @@ let handle_keeper_bash
              ~reason:reason_str
              ~hint
              ~alternatives
-             ~diag:(Keeper_shell_shared.diagnosis_of_block_reason reason)
+             ~diag
              ~extra:[ "execution_time_ms", `Int 0 ]
              ~env_snapshot:env_snap
              ())

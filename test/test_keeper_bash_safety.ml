@@ -12,6 +12,7 @@ module Keeper_exec_shell = Masc_mcp.Keeper_exec_shell
 module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_shell_docker = Masc_mcp.Keeper_shell_docker
+module Keeper_shell_words = Masc_mcp.Keeper_shell_bash_words
 module Keeper_types = Masc_mcp.Keeper_types
 module Json = Yojson.Safe.Util
 
@@ -1827,6 +1828,52 @@ let test_bash_blocks_direct_masc_tool_command () =
     false
     (Json.member "tool_policy_visible" json |> Json.to_bool)
 
+let test_bash_blocks_gh_pr_list_with_native_pr_hint () =
+  with_eio_fs @@ fun () ->
+  Alcotest.(check bool)
+    "prose is not a native PR command"
+    true
+    (Option.is_none
+       (Keeper_shell_words.cmd_gh_pr_native_subcommand "echo gh pr list"));
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_docker_meta "gh-pr-list-native-hint" in
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~config ~meta
+      ~args:
+        (`Assoc
+           [ ( "cmd"
+             , `String
+                 "gh pr list --repo jeong-sik/masc-mcp --state open --limit 10"
+             )
+           ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  let diagnosis = Json.member "diagnosis" json in
+  Alcotest.(check (option string))
+    "error"
+    (Some "command_blocked")
+    (Json.member "error" json |> Json.to_string_option);
+  Alcotest.(check (option string))
+    "rule id"
+    (Some "gh_pr_list_requires_keeper_pr_list")
+    (Json.member "rule_id" diagnosis |> Json.to_string_option);
+  Alcotest.(check (option string))
+    "tool suggestion"
+    (Some "keeper_pr_list")
+    (Json.member "tool_suggestion" diagnosis |> Json.to_string_option);
+  Alcotest.(check bool)
+    "hint names native PR list tool"
+    true
+    (String_util.contains_substring
+       (Json.member "hint" json |> Json.to_string)
+       "keeper_pr_list")
+
 let test_shell_missing_op_field () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
@@ -2011,6 +2058,8 @@ let () =
       Alcotest.test_case "missing cmd field" `Quick test_bash_missing_cmd_field;
       Alcotest.test_case "direct MASC tool command blocked" `Quick
         test_bash_blocks_direct_masc_tool_command;
+      Alcotest.test_case "raw gh pr list suggests keeper_pr_list" `Quick
+        test_bash_blocks_gh_pr_list_with_native_pr_hint;
       Alcotest.test_case "missing op field" `Quick test_shell_missing_op_field;
       Alcotest.test_case "unsupported op" `Quick test_shell_unsupported_op;
     ]);

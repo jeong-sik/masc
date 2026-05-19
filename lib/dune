@@ -33,6 +33,7 @@
  prometheus_format
  prometheus_key
  prometheus_store
+ prometheus_render
  prometheus_process
  prometheus_builtin_metric_names
  prometheus_builtin_metrics_part1

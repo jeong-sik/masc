@@ -6,7 +6,6 @@ import { keeperDisplayStatus, keeperRuntimeBlockerHint } from './keeper-runtime-
 // (previously lines 39-55, 159-180) duplicated BACKEND_PHASE_MAP +
 // PHASE_ID_MAP elsewhere; the three maps drifted independently.
 import { toKeeperPhase } from '../keeper-store-normalize'
-import { isKeeperPaused } from './keeper-predicates'
 import { parseAgentStatus } from './agent-status'
 // RFC-0135 PR-12 + PR-14d: route blocker visibility through the typed
 // SSOT (stale vs live distinction) and consume composite-preferred
@@ -50,7 +49,6 @@ interface MonitoringEvidence {
 const HEARTBEAT_STALE_MS = 5 * 60 * 1000
 const DEFAULT_CONTEXT_ATTENTION_RATIO = 0.95
 
-const OFFLINE_PHASES = new Set<string>(['Offline', 'Stopped', 'Dead'])
 const ATTENTION_PHASES = new Set<string>(['Failing', 'Overflowed', 'Compacting', 'HandingOff', 'Draining', 'Crashed', 'Restarting'])
 
 const UNKNOWN_PHASE_META: PhaseMeta = {
@@ -200,47 +198,42 @@ function keeperBand(
   keeper: Keeper,
   composite: KeeperCompositeSnapshot | null,
   phaseKey: string,
-  lifecycleKey: string,
 ): RuntimeBand {
-  // RFC-0135 PR-3: canonical paused predicate. The previous local OR
-  // chain (`paused || phaseKey === 'Paused' || lifecycleKey === 'paused'`)
-  // was one of four parallel paused checks that drifted independently.
-  if (isKeeperPaused(keeper)) return 'paused'
-  // `lifecycleKey` is the return value of `keeperDisplayStatus`. Its
-  // reachable vocabulary is `'paused' | 'offline' | 'unbooted' | 'stopped'
-  // | 'idle' | 'busy' | 'active' | 'listening' | <lowercased phase>
-  // | 'unknown'` (see `keeper-runtime-display.ts:124-135` +
-  // `refineOfflineStatus:140-166`). `'inactive'` is never produced —
-  // when the wire-level `keeper.status` is `'inactive'`,
-  // `keeperDisplayStatus` routes through `refineOfflineStatus` which
-  // returns `'offline' | 'unbooted' | 'stopped' | 'idle' | <phase>`
-  // instead. Dead defensive arm removed accordingly. (The matching
-  // `'inactive'` arm in `keeperDisplayStatus`'s own match was also
-  // examined in PR #16728 — kept there as the entry guard since it
-  // gates the input-side normalization.)
-  if (
-    lifecycleKey === 'offline'
-    || lifecycleKey === 'unbooted'
-    || lifecycleKey === 'stopped'
-    || OFFLINE_PHASES.has(phaseKey)
-  ) {
-    return 'offline'
-  }
-  // RFC-0135 PR-12: live blocker — typed state's `stuck` variant. When
-  // composite is null (caller has no snapshot in hand) SSOT cannot
-  // confirm staleness, so it falls back to the previous behavior of
-  // treating any blocker class as live. When composite is present and
-  // marks `execution_current=false` or `stale_execution_receipt=true`,
-  // the blocker is demoted to `running.staleBlocker` and does NOT trip
-  // attention — this closes audit finding B2 (visibility miscount).
-  const liveBlocker = deriveKeeperOperationalState({ keeper, composite }).kind === 'stuck'
-  if (
-    ATTENTION_PHASES.has(phaseKey)
-    || liveBlocker
-    || keeper.social_model_recognized === false
+  // RFC-0135 §13 Goal-1 (audit B1, 2026-05-20): paused / offline / stuck
+  // routing collapsed into the typed sum SSOT. The two prior local
+  // checks
+  //   - `isKeeperPaused(keeper)` (PR-3 canonical predicate)
+  //   - `lifecycleKey === 'offline' | 'unbooted' | 'stopped'
+  //      || OFFLINE_PHASES.has(phaseKey)` (string-set lifecycle/phase
+  //      bypass)
+  // were strict subsets of `opState.kind === 'paused'` and
+  // `opState.kind === 'offline'`; routing via `deriveKeeperOperational
+  // State` removes the parallel derivation entirely.
+  const opState = deriveKeeperOperationalState({ keeper, composite })
+  if (opState.kind === 'paused') return 'paused'
+  if (opState.kind === 'offline') return 'offline'
+  // RFC-0135 PR-12: live blocker → typed state's `stuck` variant.
+  // RFC-0135 §13 Goal-2: `opState.attention !== 'clean'` is the
+  // typed-axis form of the previously-external `runtime_attention`
+  // OR-合流 (composite.runtime_attention.{blocked, needs_attention}).
+  // Both are SSOT-internal axes — `keeperBand` no longer derives them.
+  const blockerOrBackendAttention =
+    opState.kind === 'stuck' || opState.attention !== 'clean'
+  // The remaining axes (KSM phase `ATTENTION_PHASES`, heartbeat
+  // staleness, context-ratio breach, social model recognition) are
+  // **external** to the typed SSOT today — RFC-0135 §13 lists them as
+  // axis-extension candidates (`phase`, `heartbeatStale`,
+  // `contextBreach`, `socialModelRecognized`). Until those land, this
+  // OR remains, but each axis is now an explicit standalone gate so a
+  // future PR can lift them one-by-one without touching the typed-sum
+  // arms.
+  const ksmPhaseAttention = ATTENTION_PHASES.has(phaseKey)
+  const externalSignal =
+    keeper.social_model_recognized === false
     || isHeartbeatStale(keeper)
-    || (typeof keeper.context_ratio === 'number' && keeper.context_ratio >= contextAttentionRatio(keeper))
-  ) {
+    || (typeof keeper.context_ratio === 'number'
+        && keeper.context_ratio >= contextAttentionRatio(keeper))
+  if (blockerOrBackendAttention || ksmPhaseAttention || externalSignal) {
     return 'attention'
   }
   return 'active'
@@ -269,10 +262,9 @@ export function summarizeKeeperMonitoring(
   keeper: Keeper,
   composite: KeeperCompositeSnapshot | null = null,
 ): KeeperMonitoringSummary {
-  const lifecycleKey = keeperDisplayStatus(keeper)
   const phaseKey = keeperPhaseForDisplay(keeper, composite) ?? 'unknown'
   const stage = stageMeta(normalizeStage(keeper.pipeline_stage))
-  const band = BAND_META[keeperBand(keeper, composite, phaseKey, lifecycleKey)]
+  const band = BAND_META[keeperBand(keeper, composite, phaseKey)]
 
   return {
     band,

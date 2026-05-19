@@ -419,6 +419,13 @@ let system_catalog_names ?config_path () =
 let logged_invalid_fallback : (string * string, unit) Hashtbl.t =
   Hashtbl.create 4
 
+(** Track raw cascade names that did not resolve to any live catalog
+    member so the resolve-live silent-fallback WARN fires once per
+    distinct unresolved name. Bounded by the number of distinct typo /
+    stale-reference names seen during the process lifetime — typical
+    operator workloads keep this in the low single digits. *)
+let logged_unresolved_raw : (string, unit) Hashtbl.t = Hashtbl.create 4
+
 let fallback_cascade_for ?config_path name =
   let public_name = normalized_query_name ?config_path name in
   if String.equal public_name "" then None
@@ -520,8 +527,23 @@ let resolve_live_with_catalog ~catalog raw =
        member.  Silently falls back to [Keeper_turn] default —
        operator's intended cascade is invalidated.  Distinct from
        iter-30 [route_resolve_fallback] which catches the
-       route-table path; this is the direct-raw-name path. *)
+       route-table path; this is the direct-raw-name path.
+
+       2026-05-20: counter alone was not enough — operators were
+       reading Prometheus but the cascade name that failed to
+       resolve was not in the metric (cardinality bound).  Surface
+       the unresolved name in a WARN line that fires once per
+       distinct raw value so operators can fix the typo / stale
+       cascade.toml entry without grepping the audit JSONL. *)
     Cascade_metrics.on_resolve_live_fallback ();
+    if not (Hashtbl.mem logged_unresolved_raw trimmed) then begin
+      Hashtbl.add logged_unresolved_raw trimmed ();
+      Log.Misc.warn
+        "[CascadeConfig] cascade name %S did not resolve to any catalog \
+         member; falling back to [Keeper_turn] default — check cascade.toml \
+         for typo or stale reference"
+        trimmed
+    end;
     Cascade_routes.fallback_name_for_catalog Keeper_turn ~catalog
   end
 

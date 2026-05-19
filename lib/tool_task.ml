@@ -35,6 +35,13 @@ let result_to_response ~tool_name ~start_time = function
   | Ok msg -> Tool_result.ok ~tool_name ~start_time msg
   | Error e -> Tool_result.error ~tool_name ~start_time (Masc_domain.masc_error_to_string e)
 
+let log_task_transition_failed err =
+  let message = Masc_domain.masc_error_to_string err in
+  match err with
+  | Masc_domain.Task (Masc_domain.Task_error.InvalidState _) ->
+      Log.Task.warn "task transition failed: %s" message
+  | _ -> Log.Task.error "task transition failed: %s" message
+
 include Tool_task_payloads
 
 let is_registered_keeper_agent_alias_name config agent_name =
@@ -690,7 +697,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
   in
   match completion_state_error with
   | Some err ->
-    Log.Task.error "task transition failed: %s" (Masc_domain.masc_error_to_string err);
+    log_task_transition_failed err;
     result_to_response ~tool_name ~start_time (Error err)
   | None ->
   let completion_owned_by_caller =
@@ -995,7 +1002,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
                  ~task_id ())
         | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Done_action | Masc_domain.Cancel | Masc_domain.Release -> ())
    | Error err ->
-       Log.Task.error "task transition failed: %s" (Masc_domain.masc_error_to_string err));
+       log_task_transition_failed err);
   (* Record metrics *)
   (match result, action with
    | Ok _, Masc_domain.Done_action ->

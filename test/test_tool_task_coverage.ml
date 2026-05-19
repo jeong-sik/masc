@@ -691,6 +691,11 @@ let () = test "handle_transition_start_on_todo_points_at_claim_first" (fun () ->
      fallthrough branch. The enriched error must name masc_transition
      action=claim as the next concrete call. *)
   let ctx = make_test_ctx () in
+  let before_seq =
+    match Log.Ring.recent ~limit:1 () with
+    | entry :: _ -> entry.Log.Ring.seq
+    | [] -> -1
+  in
   let _ =
     Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc [ ("title", `String "Start-without-claim") ])
@@ -707,7 +712,21 @@ let () = test "handle_transition_start_on_todo_points_at_claim_first" (fun () ->
   assert (str_contains result.Tool_result.legacy_message "Invalid transition");
   assert (str_contains result.Tool_result.legacy_message "todo");
   assert (str_contains result.Tool_result.legacy_message "Remediation");
-  assert (str_contains result.Tool_result.legacy_message "action=claim")
+  assert (str_contains result.Tool_result.legacy_message "action=claim");
+  let task_entries =
+    Log.Ring.recent ~limit:50 ~module_filter:"Task" ~since_seq:before_seq ()
+  in
+  match
+    List.find_opt
+      (fun (entry : Log.Ring.entry) ->
+         str_contains entry.message "task transition failed:"
+         && str_contains entry.message "Invalid transition: todo -> start")
+      task_entries
+  with
+  | Some entry ->
+      assert (Log.level_to_string entry.level = "WARN")
+  | None ->
+      failwith "expected invalid transition to be logged through Task ring"
 )
 
 let () = test "handle_transition_release_by_nonowner_redirects_to_board_post"

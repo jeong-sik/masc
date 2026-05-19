@@ -1,0 +1,9 @@
+# RFC-0135 §9 dashboard-ssot-keeper-state.sh allowlist.
+#
+# Format: path:line — line-anchored debt entry. Add a comment above
+# any entry explaining why the violation is approved despite RFC-0135
+# §9. Stale entries (no longer matching a real violation) are reported
+# as exit code 2 so this file stays accurate over time.
+#
+# Empty allowlist at PR-9 merge. Future approved exceptions should be
+# rare and accompanied by a memory note.

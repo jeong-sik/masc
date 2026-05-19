@@ -440,6 +440,11 @@
    ;; extracted to lib/compaction_trigger/. 94+45 LoC, deps: stdlib +
    ;; Yojson + masc_log. Compaction trigger heuristic + JSON serializer.
    masc_mcp.compaction_trigger
+   ;; Keeper_recording_error_state — typed dedupe state for
+   ;; Keeper_registry.record_error log noise (MASC/OAS Error-Warn
+   ;; Reduction Goal §P6). Stdlib-only leaf so the standalone test
+   ;; executable can link in seconds without the main library.
+   masc_mcp.keeper_recording_error_state
    ;; RFC-0086 Phase 2.B prereq — Tool_catalog_surfaces (lib/ root, 554+103 LoC)
    ;; extracted to lib/tool_catalog_surfaces/. deps: Agent_sdk + stdlib only.
    ;; Unblocks one of 6 cycle modules identified in plan §8.14 iter-2.

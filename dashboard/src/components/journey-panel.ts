@@ -21,6 +21,7 @@ import { EmptyState, ErrorState, LoadingState } from './common/feedback-state'
 import { Select } from './common/select'
 import { StatusChip, keeperStateTone } from './common/status-chip'
 import { TimeAgo } from './common/time-ago'
+import { formatIndependentCounters } from './counter-format'
 import {
   buildJourneyWaterfall,
   selectDefaultJourneyKeeper,
@@ -235,7 +236,12 @@ function RuntimeEvidenceStrip({
         ctx ${evidence.contextCompactedCount}/${evidence.contextCompactStartedCount}
       </span>
       <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 py-0.5 font-mono text-[var(--color-fg-muted)]">
-        mem ${evidence.memoryInjectedCount}/${evidence.memoryFlushedCount}
+        mem ${formatIndependentCounters({
+          leftLabel: 'inj',
+          leftValue: evidence.memoryInjectedCount,
+          rightLabel: 'flush',
+          rightValue: evidence.memoryFlushedCount,
+        })}
       </span>
     </div>
   `

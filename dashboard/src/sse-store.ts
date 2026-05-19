@@ -220,7 +220,10 @@ function handleNamespaceTruthSnapshot(payload: unknown): void {
       normalized.root.status ?? null,
     )
   } catch (err) {
-    console.debug('[SSE] project-snapshot hydration failed, will fallback to HTTP', err instanceof Error ? err.message : '')
+    // Mirrors the transport-health P2 fix below: hydration failures are
+    // operator-actionable (UI shows stale data + falls back to HTTP), not
+    // background-debug, so they get console.warn instead of console.debug.
+    console.warn('[SSE] project-snapshot hydration failed, will fallback to HTTP', err instanceof Error ? err.message : '')
   }
 }
 
@@ -229,7 +232,7 @@ function handleExecutionSnapshot(payload: unknown): void {
   try {
     hydrateExecutionSnapshot(payload as DashboardExecutionResponse)
   } catch (err) {
-    console.debug('[SSE] execution snapshot hydration failed, will fallback to HTTP', err instanceof Error ? err.message : '')
+    console.warn('[SSE] execution snapshot hydration failed, will fallback to HTTP', err instanceof Error ? err.message : '')
   }
 }
 
@@ -237,7 +240,7 @@ function handleOperatorSnapshot(payload: unknown): void {
   try {
     operatorSnapshot.value = normalizeOperatorSnapshot(payload)
   } catch (err) {
-    console.debug('[SSE] operator snapshot hydration failed', err instanceof Error ? err.message : '')
+    console.warn('[SSE] operator snapshot hydration failed', err instanceof Error ? err.message : '')
   }
 }
 
@@ -245,7 +248,7 @@ function handleOperatorDigest(payload: unknown): void {
   try {
     operatorRoomDigest.value = normalizeOperatorDigest(payload)
   } catch (err) {
-    console.debug('[SSE] operator digest hydration failed', err instanceof Error ? err.message : '')
+    console.warn('[SSE] operator digest hydration failed', err instanceof Error ? err.message : '')
   }
 }
 

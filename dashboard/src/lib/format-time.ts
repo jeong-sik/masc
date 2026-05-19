@@ -103,6 +103,25 @@ export function formatTimeAgo(ts: string | number): string {
   return formatRelativeSec(Math.max(0, Math.floor((now - then) / 1000)))
 }
 
+/** Format any date value (ISO string, unix seconds, or null) as Korean localized datetime.
+ *  Returns '--' for null/empty, raw value for invalid dates. */
+export function formatDateTimeKo(value: string | number | null): string {
+  if (value === null || value === '') return '--'
+  try {
+    const d = typeof value === 'number' ? unixSecondsToDate(value) : new Date(value)
+    if (Number.isNaN(d.getTime())) return String(value)
+    return d.toLocaleString('ko-KR', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  } catch {
+    return String(value)
+  }
+}
+
 /** Format unix timestamp (seconds) as "MM. DD. HH:MM" in ko-KR locale. */
 export function formatTimestampKo(ts: number): string {
   return unixSecondsToDate(ts).toLocaleString('ko-KR', {

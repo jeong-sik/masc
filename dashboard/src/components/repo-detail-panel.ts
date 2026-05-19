@@ -9,7 +9,9 @@ import { LoadingState, ErrorState, EmptyState } from './common/feedback-state'
 import { selectedRepoId, syncRepository, deleteRepository, normalizeRepoStatus, type Repository, type RepoStatus } from './repo-sidebar'
 import { requestConfirm } from './common/confirm-dialog'
 import { StatusBadge as CommonStatusBadge } from './common/status-badge'
-import { unixSecondsToDate } from '../lib/format-time'
+import { formatDateTimeKo as formatDate } from '../lib/format-time'
+// Re-export for backward-compatible test imports
+export { formatDateTimeKo as formatDate } from '../lib/format-time'
 import { Trash2, GitBranch, Clock, Calendar, Folder, Link, Shield, RefreshCw } from 'lucide-preact'
 
 // ── Branch type ──────────────────────────────────────────
@@ -103,23 +105,6 @@ const REPO_STATUS_LABEL: Record<RepoStatus, string> = {
   active: '활성',
   paused: '일시정지',
   error: '오류',
-}
-
-export function formatDate(value: string | number | null): string {
-  if (value === null || value === '') return '--'
-  try {
-    const d = typeof value === 'number' ? unixSecondsToDate(value) : new Date(value)
-    if (Number.isNaN(d.getTime())) return String(value)
-    return d.toLocaleString('ko-KR', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    })
-  } catch {
-    return String(value)
-  }
 }
 
 function InfoRow({

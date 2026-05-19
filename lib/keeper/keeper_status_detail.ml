@@ -27,6 +27,19 @@ type cache_entry = {
 
 let _cache : (string, cache_entry) Hashtbl.t = Hashtbl.create 8
 
+type docker_preflight_status_cache_entry = {
+  key : string;
+  observed_at : float;
+  value : Yojson.Safe.t option;
+}
+
+let docker_preflight_status_cache :
+    docker_preflight_status_cache_entry option ref =
+  ref None
+
+let docker_preflight_status_cache_mu = Eio.Mutex.create ()
+let docker_preflight_status_cache_ttl_sec = 60.0
+
 (** Mutex protecting [_cache].  [handle_keeper_status] runs from an MCP
     tool-dispatch fiber, one per concurrent [masc_keeper_status]
     request, and [invalidate_status_cache_{for,all}] is called from
@@ -53,11 +66,43 @@ let invalidate_status_cache_for name =
 
 let invalidate_status_cache_all () =
   Eio_guard.with_mutex cache_mu (fun () ->
-    Hashtbl.clear _cache)
+    Hashtbl.clear _cache);
+  Eio_guard.with_mutex docker_preflight_status_cache_mu (fun () ->
+    docker_preflight_status_cache := None)
 
 let status_cache_key ~base_path ~name = base_path ^ ":" ^ name
 
 let normalize_status_name = String.trim
+
+let docker_preflight_status_cache_key ~timeout_sec =
+  String.concat "|"
+    [
+      string_of_bool (Env_config_keeper.KeeperSandbox.preflight_enabled ());
+      Env_config_keeper.KeeperSandbox.docker_image ();
+      Env_config_keeper.KeeperSandbox.seccomp_profile ();
+      string_of_bool (Env_config_keeper.KeeperSandbox.require_rootless ());
+      string_of_bool (Env_config_keeper.KeeperSandbox.require_userns ());
+      string_of_bool
+        (Env_config_keeper.KeeperSandbox.with_git_dispatch_enabled ());
+      Printf.sprintf "%.3f" timeout_sec;
+    ]
+
+let cached_docker_preflight_status_json ~timeout_sec =
+  if not (Env_config_keeper.KeeperSandbox.preflight_enabled ()) then
+    None
+  else
+    let key = docker_preflight_status_cache_key ~timeout_sec in
+    Eio_guard.with_mutex docker_preflight_status_cache_mu (fun () ->
+      let now = Time_compat.now () in
+      match !docker_preflight_status_cache with
+      | Some entry
+        when String.equal entry.key key
+             && now -. entry.observed_at < docker_preflight_status_cache_ttl_sec ->
+          entry.value
+      | _ ->
+          let value = Keeper_sandbox_control.preflight_status_json ~timeout_sec in
+          docker_preflight_status_cache := Some { key; observed_at = now; value };
+          value)
 
 let effective_status_name (ctx : _ context) args =
   match normalize_status_name (get_string args "name" "") with
@@ -572,13 +617,11 @@ let handle_keeper_status ctx args : tool_result =
            else None
          in
          let sandbox_preflight =
-           match
-             effective_sandbox_image,
-             Keeper_sandbox_runtime.docker_preflight ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Sandbox ()) ()
-             |> Option.map Keeper_sandbox_runtime.docker_preflight_to_yojson
-           with
-           | Some _, Some preflight -> Some preflight
-           | _ -> None
+           match effective_sandbox_image with
+           | Some _ ->
+               cached_docker_preflight_status_json
+                 ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Sandbox ())
+           | None -> None
          in
          let sandbox_live =
            Keeper_sandbox_control.live_status_json

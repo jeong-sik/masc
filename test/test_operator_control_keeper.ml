@@ -811,6 +811,89 @@ let test_keeper_sandbox_status_fleet_reuses_docker_preflight () =
       Alcotest.(check int) "docker preflight info once" 1
         (count_log_lines_with_prefix log "info "))
 
+let test_keeper_status_detail_reuses_docker_preflight_cache () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_names = [ "status-docker-a"; "status-docker-b" ] in
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter Keeper_keepalive.stop_keepalive keeper_names;
+      Keeper_registry.clear ();
+      Keeper_status_detail.invalidate_status_cache_all ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      Keeper_status_detail.invalidate_status_cache_all ();
+      let config = Coord.default_config base_dir in
+      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      List.iter
+        (fun keeper_name ->
+          let ok, _ =
+            dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+              ~args:
+                (`Assoc
+                  [
+                    ("name", `String keeper_name);
+                    ("goal", `String "Inspect cached status preflight");
+                    ("proactive_enabled", `Bool false);
+                    ("autoboot_enabled", `Bool false);
+                  ])
+          in
+          Alcotest.(check bool) ("keeper up ok: " ^ keeper_name) true ok;
+          update_keeper_sandbox_mode config keeper_name
+            ~sandbox_profile:Keeper_types.Docker
+            ~network_mode:Keeper_types.Network_none)
+        keeper_names;
+      let state_dir = Filename.concat base_dir "fake-docker" in
+      let state_file = Filename.concat state_dir "containers.tsv" in
+      let log_path = Filename.concat state_dir "docker.log" in
+      ensure_dir state_dir;
+      with_fake_docker fake_docker_managed_sandbox_script @@ fun () ->
+      with_env "KEEPER_DOCKER_STATE_FILE" state_file @@ fun () ->
+      with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+      with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "true" @@ fun () ->
+      with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+      with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+      with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+      with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+      List.iter
+        (fun keeper_name ->
+          let ok, body =
+            dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_status"
+              ~args:
+                (`Assoc
+                  [
+                    ("name", `String keeper_name);
+                    ("fast", `Bool true);
+                    ("include_context", `Bool false);
+                    ("include_metrics_overview", `Bool false);
+                    ("include_memory_bank", `Bool false);
+                    ("include_history_tail", `Bool false);
+                    ("include_compaction_history", `Bool false);
+                  ])
+          in
+          Alcotest.(check bool) ("status ok: " ^ keeper_name) true ok;
+          let open Yojson.Safe.Util in
+          let json = parse_json_exn body in
+          Alcotest.(check bool) ("status preflight present: " ^ keeper_name) true
+            (json |> member "sandbox_preflight" <> `Null))
+        keeper_names;
+      let log = read_file log_path in
+      Alcotest.(check int) "status detail docker preflight info once" 1
+        (count_log_lines_with_prefix log "info "))
+
 let test_keeper_sandbox_start_status_stop_with_fake_docker () =
   Eio_main.run @@ fun env ->
   ensure_fs env;

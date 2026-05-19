@@ -1,7 +1,7 @@
 ---
 rfc: "0136"
 title: "Keeper Unified Turn — Phase 4: Retry Loop Body Decomposition"
-status: Draft
+status: Active
 created: 2026-05-19
 updated: 2026-05-19
 author: vincent
@@ -9,7 +9,7 @@ supersedes: []
 superseded_by: null
 related: ["0051", "0056", "0085"]
 extends: "0136"
-implementation_prs: []
+implementation_prs: [16701, 16709, 16751]
 ---
 
 # RFC-0136 Phase 4 — Retry Loop Body Decomposition
@@ -147,6 +147,8 @@ caller (retry_loop) 가 *exhausted vs single-error* 구분을 *typed* 로 dispat
 
 ## 3. 누적 효과
 
+### 3.1 원안 추정 (작성 시점, 부정확)
+
 | Sub-PR | 시작 → 끝 | delta |
 |--------|----------|-------|
 | PR-4-a | 1742 → 1575 | -167 |
@@ -155,9 +157,36 @@ caller (retry_loop) 가 *exhausted vs single-error* 구분을 *typed* 로 dispat
 | PR-4-d | ~1100 → ~800 | -300 |
 | PR-4-e | ~800 → ~620 | -180 |
 
-**예상 최종 `keeper_unified_turn.ml`**: ~620 LOC. 1943 → ~620 = **-1320 LOC (-68%)**. Phase 5 godfile target 6개 중 keeper_unified_turn 사실상 *closure*.
+**원안 예상 최종**: ~620 LOC. 1943 → ~620 = **-1320 LOC (-68%)**.
 
-본 예상은 *추정* — boundary 측정이 정확하지 않음 + nested helper 의 *실제 outer scope 영향*은 *각 sub-PR impl 시점*에 *재측정*.
+### 3.2 실측 결과 (2026-05-19)
+
+| Sub-PR | # | 시작 → 끝 | delta | 원안 대비 |
+|--------|---|----------|-------|----------|
+| PR-4-a Retry Setup | #16701 | 1742 → 1687 | **-55** | 33% (167 의 1/3) |
+| PR-4-b Terminal Error | #16709 | 1687 → 1675 | **-25** | 47% (53 의 1/2) |
+| PR-4-c Dispatch Watchdog | #16751 | 1675 → 1641 | **-33** | **8% (400 의 1/12)** |
+| **누적 실측** | | 1742 → 1641 | **-101** | 22% (167+53+400 의 1/5) |
+
+**실측 최종 (PR-4-c 머지 후)**: 1641 LOC. PR-1/2/3 기여 -201 LoC 포함 시 1943 → 1641 = **-302 LoC (-15.5%)**.
+
+### 3.3 원안 오차 정량
+
+PR-4-c 추정 -400 LoC 가 가장 큰 오차 (실측 -33, 12배 over-estimate). 원인:
+
+- 원안은 `retry_loop` *전체 body* (~1100 LOC) 의 *recursive core* 추출 가정.
+- 실측 PR-4-c 는 *dispatch_with_watchdog* (88 LoC subset) 만 추출 — `try ... Eio.Time.with_timeout_exn ... with Cancelled/Timeout` 부분.
+- `attempt_result` (75 LoC) + `do_run` 통째 (122 LoC) 추출은 *closure capture 16-20+ deps 폭증*으로 *typed boundary 어려움* 확인.
+- `match attempt_result with` dispatch (L688-L1191, 503 LoC) 는 *retry_loop self-reference + 큰 분기 매트릭스* 로 외부 추출 비용 큼.
+
+### 3.4 PR-4-d / PR-4-e 보류 결정
+
+다음 두 가지 path 중 하나로 진행:
+
+- (a) 별도 측정 RFC sub-doc 작성 + retry_loop body 의 *typed-wrapper-가능 영역* 만 fine-grained 분할.
+- (b) `run_keeper_cycle` mega-function 분해를 *다른 접근* (context record 도입, monomorphization, state-machine refactor) 으로 *별도 후속 RFC* 에서.
+
+본 sub-doc 의 PR-4-c/d/e 원안 추정값은 *historical reference* 로 보존하되 *retry_loop body internal cohesion*에 의해 *원안 그대로 적용 불가* 가 확정.
 
 ---
 

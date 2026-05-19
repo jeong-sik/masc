@@ -126,7 +126,17 @@ let run
     let context = Agent.context agent in
     let net = Agent.net agent in
     let new_agent = Agent.create ~net ~config ~tools ~context ~options:new_opts () in
-    let response = Agent.run ~sw ?clock new_agent prompt in
+    let response =
+      try Agent.run ~sw ?clock new_agent prompt with
+      | Eio.Cancel.Cancelled _ as exn ->
+        (try ignore (Proof_capture.finalize capture_state ~result_status:Cancelled) with
+         | _ -> ());
+        raise exn
+      | exn ->
+        (try ignore (Proof_capture.finalize capture_state ~result_status:Errored) with
+         | _ -> ());
+        raise exn
+    in
     (* Sync execution state back to the original agent so that
        downstream checkpoint capture sees the post-run messages,
        turn_count, and usage — not the pre-run empty state. *)

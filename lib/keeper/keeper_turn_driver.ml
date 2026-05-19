@@ -707,7 +707,19 @@ let run_named
         ~error_reason
         ()
     else
-      match sdk_error_soft_rate_limited sdk_err with
+      (* Capacity_exhausted shares the immediate-cooldown semantics of a
+         soft rate limit: one event is sufficient evidence that the
+         provider cannot serve, so we reuse [record_soft_rate_limited]
+         rather than counting toward the 3-failure threshold of
+         [record_failure]. The retry_after hint, when present, drives
+         cooldown duration (clamped by
+         [Cascade_health_tracker.soft_rate_limit_max_clamp_sec]). *)
+      let immediate_cooldown_retry_after =
+        match sdk_error_capacity_exhausted_retry_after_s sdk_err with
+        | Some retry_after -> Some retry_after
+        | None -> sdk_error_soft_rate_limited sdk_err
+      in
+      match immediate_cooldown_retry_after with
       | Some retry_after_s ->
         Cascade_health_tracker.record_soft_rate_limited
           Cascade_health_tracker.global

@@ -30,7 +30,7 @@ import { ringFocusClasses } from './common/ring'
 import { StatTile } from './common/stat-tile'
 import { coverageGapDisplay } from './common/source-health'
 import { TimeAgo } from './common/time-ago'
-import { asNullableString, asRecord } from './common/normalize'
+import { asNullableString, asRecord, asStringArray } from './common/normalize'
 
 interface StoreSnapshot {
   keepers: number
@@ -143,10 +143,6 @@ function formatTs(ts: number): string {
   })
 }
 
-function normalizeStringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.trim() !== '') : []
-}
-
 function recordField(value: unknown, key: string): unknown {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
   return (value as Record<string, unknown>)[key]
@@ -239,7 +235,7 @@ function telemetryToolName(entry: TelemetryEntry): string | null {
       ?? asNullableString(recordField(entry.action_radius, 'tool_name'))
   }
   if (entry.source === 'execution_receipt') {
-    return normalizeStringArray(entry.canonical_tools)[0]
+    return asStringArray(entry.canonical_tools)[0]
       ?? asNullableString(recordField(entry.action_radius, 'tool_name'))
   }
   return null
@@ -427,7 +423,7 @@ function entryPreview(e: TelemetryEntry): string {
     case 'keeper_metric': {
       const name = asNullableString(e.name) ?? '-'
       const channel = asNullableString(e.channel) ?? '-'
-      const tools = normalizeStringArray(e.tools_used)
+      const tools = asStringArray(e.tools_used)
       const toolCount = typeof e.tool_call_count === 'number' ? e.tool_call_count : tools.length
       return `${name} [${channel}] tools=${toolCount}`
     }

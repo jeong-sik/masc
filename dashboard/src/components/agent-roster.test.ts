@@ -2,8 +2,9 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { act } from 'preact/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { AgentRoster, countRuntimeKinds } from './agent-roster'
+import { AgentRoster, countRuntimeKinds, rosterStateNote } from './agent-roster'
 import type { Agent, Keeper } from '../types'
+import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
 import {
   agents,
   keepers,
@@ -30,6 +31,171 @@ async function flushUi(): Promise<void> {
     await Promise.resolve()
   })
 }
+
+describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
+  function k(overrides: Partial<Keeper> = {}): Keeper {
+    return {
+      name: 'lifecycle-worker',
+      status: 'active',
+      ...overrides,
+    } as Keeper
+  }
+
+  function compositeWith(
+    runtimeAttention: NonNullable<KeeperCompositeSnapshot['runtime_attention']>,
+    extras: Partial<KeeperCompositeSnapshot> = {},
+  ): KeeperCompositeSnapshot {
+    return {
+      correlation_id: 'c',
+      run_id: 'r',
+      ts: 0,
+      phase: 'Stable',
+      turn_phase: 'idle',
+      decision: { stage: 'idle' },
+      cascade: { state: 'idle' },
+      compaction: { stage: 'idle' },
+      measurement: {} as KeeperCompositeSnapshot['measurement'],
+      invariants: {} as KeeperCompositeSnapshot['invariants'],
+      fsm_guard_violations: 0,
+      is_live: false,
+      last_outcome: null,
+      recommended_actions: [],
+      runtime_attention: runtimeAttention,
+      ...extras,
+    } as KeeperCompositeSnapshot
+  }
+
+  function attention(
+    partial: Partial<NonNullable<KeeperCompositeSnapshot['runtime_attention']>> = {},
+  ): NonNullable<KeeperCompositeSnapshot['runtime_attention']> {
+    return {
+      state: 'active',
+      needs_attention: false,
+      blocked: false,
+      reason: null,
+      raw_phase: null,
+      is_live: true,
+      source: 'test',
+      ...partial,
+    }
+  }
+
+  it('returns "현재 차단" when blocker is set and no composite is available', () => {
+    const note = rosterStateNote(
+      k({ runtime_blocker_class: 'synthetic_stall', runtime_blocker_summary: '실제 막힘' }),
+      null,
+      null,
+    )
+    expect(note).toEqual({
+      label: '현재 차단',
+      text: '실제 막힘',
+      kind: 'synthetic_stall',
+    })
+  })
+
+  it('RFC §1.1 EXACT — blocker_class=synthetic_stall + execution_current=true must NOT surface as 현재 차단', () => {
+    // The exact 2026-05-19 lifecycle-worker scenario the user reported:
+    // list card said "현재 차단 · synthetic_stall" while the detail panel
+    // showed "턴 진행 중 · executing live". The fix routes the roster
+    // through the same typed conditioning the detail panel uses, so the
+    // blocker_class is recognized as stale and demoted to "이전 차단".
+    const note = rosterStateNote(
+      k({
+        phase: 'Running',
+        runtime_blocker_class: 'synthetic_stall',
+        runtime_blocker_summary: '잔여 marker',
+      }),
+      compositeWith(attention({ execution_current: true, blocked: false }), {
+        turn_phase: 'executing',
+        is_live: true,
+      }),
+      null,
+    )
+    expect(note).toEqual({
+      label: '이전 차단',
+      text: '이전 턴 차단 (synthetic_stall) — 현재는 실행 중',
+      kind: 'synthetic_stall',
+    })
+  })
+
+  it('genuine stuck — blocker_class set + execution_current=false → 현재 차단', () => {
+    const note = rosterStateNote(
+      k({
+        phase: 'Running',
+        runtime_blocker_class: 'cascade_exhausted',
+        runtime_blocker_summary: 'cascade list 소진',
+      }),
+      compositeWith(attention({ execution_current: false, blocked: true })),
+      null,
+    )
+    expect(note).toEqual({
+      label: '현재 차단',
+      text: 'cascade list 소진',
+      kind: 'cascade_exhausted',
+    })
+  })
+
+  it('class without summary surfaces typed reason in fallback message', () => {
+    const note = rosterStateNote(
+      k({ runtime_blocker_class: 'heartbeat_failures' }),
+      null,
+      null,
+    )
+    expect(note).toEqual({
+      label: '현재 차단',
+      text: '차단 종류: heartbeat_failures (요약 메시지 없음)',
+      kind: 'heartbeat_failures',
+    })
+  })
+
+  it('falls through to diagnostic error when no blocker and no stale blocker', () => {
+    const note = rosterStateNote(
+      k({
+        phase: 'Running',
+        diagnostic: {
+          last_error: 'tool call failed',
+          health_state: 'degraded',
+          next_action_path: 'recover',
+          last_reply_status: 'error',
+        },
+      }),
+      compositeWith(attention({ execution_current: true })),
+      null,
+    )
+    expect(note).toEqual({ label: '최근 오류', text: 'tool call failed' })
+  })
+
+  it('falls through to monitoring hint when nothing else applies', () => {
+    const note = rosterStateNote(
+      k({ phase: 'Running' }),
+      null,
+      '관찰 메모',
+    )
+    expect(note).toEqual({ label: '상태 메모', text: '관찰 메모' })
+  })
+
+  it('paused keeper produces no state note (signaled by badge elsewhere)', () => {
+    const note = rosterStateNote(
+      k({ paused: true, runtime_blocker_class: 'supervisor_paused' }),
+      null,
+      null,
+    )
+    expect(note).toBeNull()
+  })
+
+  it('offline keeper produces no state note', () => {
+    const note = rosterStateNote(
+      k({ phase: 'Crashed', status: 'offline' }),
+      null,
+      null,
+    )
+    expect(note).toBeNull()
+  })
+
+  it('null keeper returns null', () => {
+    expect(rosterStateNote(null, null, null)).toBeNull()
+  })
+})
 
 describe('countRuntimeKinds', () => {
   it('excludes configured-only paused keepers from live runtime counts', () => {

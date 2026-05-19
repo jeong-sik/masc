@@ -3,12 +3,12 @@ rfc: "0097"
 title: "Keeper sandbox container reuse (long-running sandbox per keeper)"
 status: In-progress
 created: 2026-05-17
-updated: 2026-05-17
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0107"]
-implementation_prs: ["#15991"]
+implementation_prs: [15991]
 ---
 
 # RFC-0097 — Keeper sandbox container reuse

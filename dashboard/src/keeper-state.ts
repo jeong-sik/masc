@@ -106,17 +106,74 @@ export function isVisibleDirectConversationEntry(entry: KeeperConversationEntry)
 
 // --- Normalizers ---
 
+// Closed runtime mirrors of the 5 narrow string unions inside
+// KeeperDiagnostic. The previous 5 `as KeeperDiagnostic['<field>']` casts
+// trusted whatever backend string arrived; these sets enforce the
+// boundary so an unrecognized value returns null (caller decides
+// fallback). Same shape as toKeeperPhase / toKeeperLifecycleState /
+// toPipelineStage (PRs #16745, #16788, #16791).
+//
+// Each set is typed as `KeeperDiagnostic['<field>']` (indexed access)
+// so drift between the set and the underlying private union in
+// types/core.ts surfaces as a tsc error here — no separate type
+// export needed.
+const KEEPER_HEALTH_STATES: ReadonlySet<NonNullable<KeeperDiagnostic['health_state']>> =
+  new Set<NonNullable<KeeperDiagnostic['health_state']>>([
+    'healthy', 'idle', 'stale', 'degraded', 'offline',
+  ])
+
+const KEEPER_QUIET_REASONS: ReadonlySet<NonNullable<KeeperDiagnostic['quiet_reason']>> =
+  new Set<NonNullable<KeeperDiagnostic['quiet_reason']>>([
+    'quiet_hours', 'min_gap', 'no_recent_activity', 'disabled',
+    'startup', 'model_error', 'graphql_error', 'never_started', 'unknown',
+  ])
+
+const KEEPER_NEXT_ACTION_PATHS: ReadonlySet<NonNullable<KeeperDiagnostic['next_action_path']>> =
+  new Set<NonNullable<KeeperDiagnostic['next_action_path']>>([
+    'direct_message', 'manual_social_sweep', 'probe', 'recover',
+  ])
+
+const KEEPER_REPLY_STATUSES: ReadonlySet<NonNullable<KeeperDiagnostic['last_reply_status']>> =
+  new Set<NonNullable<KeeperDiagnostic['last_reply_status']>>([
+    'never', 'awaiting_reply', 'delivered', 'fresh', 'stale', 'error', 'unknown',
+  ])
+
+const KEEPER_CONTINUITY_STATES: ReadonlySet<NonNullable<KeeperDiagnostic['continuity_state']>> =
+  new Set<NonNullable<KeeperDiagnostic['continuity_state']>>([
+    'not_running', 'recovering', 'healthy', 'disabled', 'offline',
+  ])
+
+// Generic typed-parse helper. Returns the input value typed as `T` if
+// `set` accepts it, else `null`. Callers compose with `?? <default>`
+// for the fallback. This pattern is repeated 3 times in other dashboard
+// modules (toKeeperPhase / toKeeperLifecycleState / toPipelineStage) —
+// a future refactor could extract it to a shared module if it appears
+// at a 4th boundary.
+function membershipParse<T extends string>(
+  set: ReadonlySet<T>,
+  raw: string | null | undefined,
+): T | null {
+  if (!raw) return null
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  return set.has(trimmed as T) ? (trimmed as T) : null
+}
+
 export function normalizeKeeperDiagnostic(raw: unknown): KeeperDiagnostic | null {
   if (!isRecord(raw)) return null
-  const healthState = asString(raw.health_state)
-  const nextActionPath = asString(raw.next_action_path)
-  const lastReplyStatus = asString(raw.last_reply_status)
+  const healthState = membershipParse(KEEPER_HEALTH_STATES, asString(raw.health_state))
+  const nextActionPath = membershipParse(KEEPER_NEXT_ACTION_PATHS, asString(raw.next_action_path))
+  const lastReplyStatus = membershipParse(KEEPER_REPLY_STATUSES, asString(raw.last_reply_status))
+  // Reject the diagnostic entirely if any required field is invalid;
+  // the previous behaviour rejected when these were empty strings, so
+  // we preserve "reject on bad input" semantics while strengthening
+  // from "non-empty string" to "valid union member".
   if (!healthState || !nextActionPath || !lastReplyStatus) return null
   return {
-    health_state: healthState as KeeperDiagnostic['health_state'],
-    quiet_reason: (asString(raw.quiet_reason) ?? null) as KeeperDiagnostic['quiet_reason'],
-    next_action_path: nextActionPath as KeeperDiagnostic['next_action_path'],
-    last_reply_status: lastReplyStatus as KeeperDiagnostic['last_reply_status'],
+    health_state: healthState,
+    quiet_reason: membershipParse(KEEPER_QUIET_REASONS, asString(raw.quiet_reason)),
+    next_action_path: nextActionPath,
+    last_reply_status: lastReplyStatus,
     last_reply_at: toIsoTimestamp(raw.last_reply_at) ?? null, // undefined->null: field is string|null
     last_reply_preview: asString(raw.last_reply_preview) ?? null,
     last_error: asString(raw.last_error) ?? null,
@@ -124,8 +181,7 @@ export function normalizeKeeperDiagnostic(raw: unknown): KeeperDiagnostic | null
     recoverable: typeof raw.recoverable === 'boolean' ? raw.recoverable : undefined,
     summary: asString(raw.summary),
     keepalive_running: typeof raw.keepalive_running === 'boolean' ? raw.keepalive_running : undefined,
-    continuity_state:
-      (asString(raw.continuity_state) ?? null) as KeeperDiagnostic['continuity_state'],
+    continuity_state: membershipParse(KEEPER_CONTINUITY_STATES, asString(raw.continuity_state)),
     continuity_summary: asString(raw.continuity_summary) ?? null,
   }
 }

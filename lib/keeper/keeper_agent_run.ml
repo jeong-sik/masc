@@ -9,6 +9,7 @@ include Keeper_agent_tool_surface
 include Keeper_agent_result
 include Keeper_agent_error
 include Keeper_agent_checkpoint_hygiene
+module Contract_helpers = Keeper_agent_run_contract_helpers
 module Turn_helpers = Keeper_agent_run_turn_helpers
 
 (* Post-turn telemetry logging — extracted to Keeper_turn_telemetry (#5732) *)
@@ -20,54 +21,13 @@ let sse_event_progress_kind = Turn_helpers.sse_event_progress_kind
 let registry_progress_on_event = Turn_helpers.registry_progress_on_event
 let select_cdal_proof = Turn_helpers.select_cdal_proof
 
-let cdal_task_id_for_verdict ~(current_task_id : string option)
-    ~(tool_calls : tool_call_detail list) =
-  match current_task_id with
-  | Some task_id -> Some task_id
-  | None ->
-    List.find_map
-      (fun (detail : tool_call_detail) ->
-         match detail.task_id with
-         | Some task_id when String.trim task_id <> "" -> Some task_id
-         | _ -> None)
-      tool_calls
+let cdal_task_id_for_verdict = Contract_helpers.cdal_task_id_for_verdict
+let progress_keeper_tool_names_for_contract =
+  Contract_helpers.progress_keeper_tool_names_for_contract
 ;;
 
-let keeper_tool_names_for_outcome
-      ~(allowed_tool_names : string list)
-      ~(tool_calls : tool_call_detail list)
-      ~(outcome : string)
-  : string list
-  =
-  let observed_tool_names =
-    tool_calls
-    |> List.rev
-    |> List.filter_map (fun (detail : tool_call_detail) ->
-      if String.equal detail.outcome outcome then Some detail.tool_name else None)
-  in
-  Keeper_tool_disclosure.final_keeper_tool_names
-    ~reported_tool_names:[]
-    ~observed_tool_names
-    ~allowed_tool_names
-;;
-
-let progress_keeper_tool_names_for_contract
-      ~(allowed_tool_names : string list)
-      ~(actual_keeper_tool_names : string list)
-      ~(tool_calls : tool_call_detail list)
-  : string list
-  =
-  match tool_calls with
-  | [] -> actual_keeper_tool_names
-  | _ :: _ -> keeper_tool_names_for_outcome ~allowed_tool_names ~tool_calls ~outcome:"ok"
-;;
-
-let no_progress_success_tool_names_for_contract
-      ~(allowed_tool_names : string list)
-      ~(tool_calls : tool_call_detail list)
-  : string list
-  =
-  keeper_tool_names_for_outcome ~allowed_tool_names ~tool_calls ~outcome:"ok_no_progress"
+let no_progress_success_tool_names_for_contract =
+  Contract_helpers.no_progress_success_tool_names_for_contract
 ;;
 
 module For_testing = struct

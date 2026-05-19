@@ -1,4 +1,4 @@
-import { isRecord, asString, asNumber, extractArray } from './components/common/normalize'
+import { isRecord, asString, asNumber, asStringArray, extractArray } from './components/common/normalize'
 import {
   normalizeAttentionItem,
   normalizeRecommendedAction,
@@ -31,15 +31,9 @@ export function normalizeAttentionQueueItem(raw: unknown): DashboardMissionAtten
     target_type: targetType,
     target_id: asString(raw.target_id) ?? null,
     top_action: normalizeRecommendedAction(raw.top_action),
-    related_session_ids: extractArray(raw.related_session_ids)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
-    related_agent_names: extractArray(raw.related_agent_names)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
-    evidence_preview: extractArray(raw.evidence_preview)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
+    related_session_ids: asStringArray(raw.related_session_ids),
+    related_agent_names: asStringArray(raw.related_agent_names),
+    evidence_preview: asStringArray(raw.evidence_preview),
     last_seen_at: asString(raw.last_seen_at) ?? null,
   }
 }
@@ -57,9 +51,7 @@ export function normalizeSessionBrief(raw: unknown): DashboardMissionSessionBrie
     namespace: asString(raw.namespace) ?? null,
     status: asString(raw.status),
     health: asString(raw.health),
-    member_names: extractArray(raw.member_names)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
+    member_names: asStringArray(raw.member_names),
     started_at: asString(raw.started_at) ?? null,
     elapsed_sec: asNumber(raw.elapsed_sec) ?? null,
     operation_id: asString(raw.operation_id) ?? null,
@@ -89,9 +81,7 @@ export function normalizeParticipantPreview(raw: unknown): DashboardMissionParti
     current_work: asString(raw.current_work) ?? null,
     recent_input_preview: asString(raw.recent_input_preview) ?? null,
     recent_output_preview: asString(raw.recent_output_preview) ?? null,
-    recent_tool_names: extractArray(raw.recent_tool_names)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
+    recent_tool_names: asStringArray(raw.recent_tool_names),
     last_activity_at: asString(raw.last_activity_at) ?? null,
   }
 }
@@ -153,9 +143,7 @@ export function normalizeAgentBrief(raw: unknown): DashboardMissionAgentBrief | 
     archived_reason: asString(raw.archived_reason) ?? null,
     status: asString(raw.status),
     where: asString(raw.where) ?? null,
-    with_whom: extractArray(raw.with_whom)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
+    with_whom: asStringArray(raw.with_whom),
     current_work: asString(raw.current_work) ?? null,
     related_session_id: asString(raw.related_session_id) ?? null,
     related_attention_count: asNumber(raw.related_attention_count) ?? 0,
@@ -177,9 +165,7 @@ export function normalizeAgentBrief(raw: unknown): DashboardMissionAgentBrief | 
         : undefined,
     recent_output_preview: asString(raw.recent_output_preview) ?? null,
     recent_input_preview: asString(raw.recent_input_preview) ?? null,
-    recent_tool_names: extractArray(raw.recent_tool_names)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
+    recent_tool_names: asStringArray(raw.recent_tool_names),
   }
 }
 
@@ -196,9 +182,7 @@ export function normalizeKeeperBrief(raw: unknown): DashboardMissionKeeperBrief 
     last_turn_ago_s: asNumber(raw.last_turn_ago_s) ?? null,
     current_work: asString(raw.current_work) ?? null,
     last_autonomous_action_at: asString(raw.last_autonomous_action_at) ?? null,
-    latest_tool_names: extractArray(raw.latest_tool_names)
-      .map(item => (typeof item === 'string' ? item.trim() : ''))
-      .filter(Boolean),
+    latest_tool_names: asStringArray(raw.latest_tool_names),
     latest_tool_call_count: asNumber(raw.latest_tool_call_count) ?? null,
     tool_audit_source: asString(raw.tool_audit_source) ?? null,
     tool_audit_at: asString(raw.tool_audit_at) ?? null,

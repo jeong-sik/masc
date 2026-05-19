@@ -120,6 +120,7 @@
   test_keeper_tool_selection_passive_streak
   test_keeper_health_probe
   test_oas_error_kind_counter
+  test_cascade_error_classify_decoder
   test_oas_empty_response_diagnostic
   test_board_author_identity_10297
   test_fsm_drift_counter
@@ -432,6 +433,7 @@
   test_keeper_tool_selection_passive_streak
   test_keeper_health_probe
   test_oas_error_kind_counter
+  test_cascade_error_classify_decoder
   test_oas_empty_response_diagnostic
   test_board_author_identity_10297
   test_fsm_drift_counter

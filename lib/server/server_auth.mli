@@ -182,8 +182,20 @@ val ensure_same_origin_browser_request :
 
 val http_status_of_auth_error :
   Masc_domain.masc_error ->
-  [> `Forbidden | `Internal_server_error | `Unauthorized ]
-(** HTTP status to return for a given auth-domain error. *)
+  [> `Bad_request
+  | `Forbidden
+  | `Internal_server_error
+  | `Not_found
+  | `Too_many_requests
+  | `Unauthorized ]
+(** HTTP status to return for a given masc_error.
+
+    The return type is an open polymorphic variant so the result is
+    assignable to both [Httpun.Status.t] and [H2.Status.t] (callers in
+    [server_h2_gateway] consume it as the latter). Variants widened
+    in PR #16690 (exhaustive mapping mirroring [Masc_error.code]);
+    the mli was not updated in that PR, leaving main with an
+    interface/implementation type mismatch — this is the hotfix. *)
 
 val server_state : Mcp_server.server_state option ref
 (** Process-wide server state handle used by auth helpers when no

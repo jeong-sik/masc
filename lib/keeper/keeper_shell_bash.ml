@@ -1,6 +1,7 @@
 open Keeper_types
 open Keeper_exec_shared
 open Keeper_shell_bash_redirects
+open Keeper_shell_bash_task_state
 open Keeper_shell_bash_words
 module Task_probe = Keeper_shell_bash_task_probe
 
@@ -564,42 +565,6 @@ let bash_shape_block_tag = function
   | Chaining -> "chaining"
   | Substitution -> "substitution"
   | Repo_wide_scan -> "repo_wide_scan"
-
-let lowercase_contains haystack needle =
-  let haystack = String.lowercase_ascii haystack in
-  let needle = String.lowercase_ascii needle in
-  let h_len = String.length haystack in
-  let n_len = String.length needle in
-  let rec loop i =
-    if n_len = 0
-    then true
-    else if i + n_len > h_len
-    then false
-    else if String.sub haystack i n_len = needle
-    then true
-    else loop (i + 1)
-  in
-  loop 0
-
-let command_looks_like_search_pipeline cmd =
-  (lowercase_contains cmd "grep " || lowercase_contains cmd "rg ")
-  && lowercase_contains cmd "| head"
-
-let command_looks_like_find_pipeline cmd =
-  lowercase_contains cmd "find " && lowercase_contains cmd "| head"
-
-let command_looks_like_cd_chained_search cmd =
-  lowercase_contains cmd "cd "
-  && lowercase_contains cmd "&&"
-  && (lowercase_contains cmd "grep " || lowercase_contains cmd "rg ")
-
-let command_looks_like_repo_wide_git_log_grep cmd =
-  lowercase_contains cmd "git log"
-  && lowercase_contains cmd "--all"
-  && lowercase_contains cmd "--grep"
-
-let command_looks_like_repo_wide_rg cmd =
-  lowercase_contains cmd "rg " && lowercase_contains cmd " repos"
 
 let bash_shape_block_reason = function
   | Gh_pr_checks ->

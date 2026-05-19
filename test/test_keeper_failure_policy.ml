@@ -42,6 +42,26 @@ let test_stream_idle_awaiting_delta_is_not_activity () =
     (Policy.timeout_phase_is_streaming_activity phase)
 ;;
 
+let test_operational_timeout_phase_aliases () =
+  let cases =
+    [
+      "admission", Policy.Admission;
+      "admission_queue_timeout", Policy.Queue;
+      "no_first_token", Policy.First_token;
+      "stream_idle", Policy.Stream_idle Policy.Streaming_unknown;
+      "max_execution_time", Policy.Wall_clock;
+      "capacity_exhausted", Policy.Capacity_backpressure;
+      "slot-full", Policy.Capacity_backpressure;
+    ]
+  in
+  List.iter
+    (fun (label, expected) ->
+       match Policy.timeout_phase_of_label label with
+       | Some actual -> check bool label true (actual = expected)
+       | None -> fail (label ^ " did not parse"))
+    cases
+;;
+
 let test_provider_streaming_thinking_timeout_does_not_kill_keeper () =
   let decision =
     Policy.decide
@@ -60,6 +80,39 @@ let test_provider_streaming_thinking_timeout_does_not_kill_keeper () =
     "reason"
     "provider_stream_idle_active:streaming_thinking"
     decision.reason
+;;
+
+let test_provider_capacity_backpressure_reroutes_provider () =
+  let decision =
+    Policy.decide
+      (Policy.Provider_timeout
+         {
+           phase = Some Policy.Capacity_backpressure;
+           liveness = Policy.Recent_heartbeat;
+         })
+  in
+  check_scope "scope" "provider" decision.failure_scope;
+  check_lifecycle "lifecycle" "soft_fail_turn" decision.lifecycle_effect;
+  check_circuit "circuit" "provider_cooldown" decision.circuit_effect;
+  check_action "action" "reroute_or_tune_provider" decision.operator_action;
+  check string "reason" "provider_timeout:capacity_backpressure" decision.reason
+;;
+
+let test_oas_capacity_backpressure_reroutes_before_loop_threshold () =
+  let decision =
+    Policy.decide
+      (Policy.Oas_timeout_budget
+         {
+           phase = Some Policy.Capacity_backpressure;
+           strikes = Some 1;
+           liveness = Policy.Recent_heartbeat;
+         })
+  in
+  check_scope "scope" "turn" decision.failure_scope;
+  check_lifecycle "lifecycle" "soft_fail_turn" decision.lifecycle_effect;
+  check_circuit "circuit" "provider_cooldown" decision.circuit_effect;
+  check_action "action" "reroute_or_tune_provider" decision.operator_action;
+  check string "reason" "oas_timeout_budget:capacity_backpressure" decision.reason
 ;;
 
 let test_oas_budget_loop_with_live_keeper_pauses_work_not_keeper () =
@@ -143,11 +196,17 @@ let () =
             test_stream_idle_thinking_label_round_trips;
           test_case "awaiting first delta is not activity" `Quick
             test_stream_idle_awaiting_delta_is_not_activity;
+          test_case "operational timeout phase aliases parse" `Quick
+            test_operational_timeout_phase_aliases;
         ] );
       ( "decision_matrix",
         [
           test_case "provider streaming thinking timeout stays provider-scoped" `Quick
             test_provider_streaming_thinking_timeout_does_not_kill_keeper;
+          test_case "provider capacity backpressure reroutes provider" `Quick
+            test_provider_capacity_backpressure_reroutes_provider;
+          test_case "OAS capacity backpressure reroutes before loop threshold" `Quick
+            test_oas_capacity_backpressure_reroutes_before_loop_threshold;
           test_case "live OAS budget loop pauses work, not keeper" `Quick
             test_oas_budget_loop_with_live_keeper_pauses_work_not_keeper;
           test_case "lost-liveness OAS budget loop pauses keeper without death" `Quick

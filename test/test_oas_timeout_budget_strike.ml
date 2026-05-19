@@ -92,6 +92,29 @@ let test_strike_limit_routes_through_policy_without_keeper_death () =
       "oas_timeout_budget_loop:stream_idle:streaming_thinking"
       decision.reason
 
+let test_capacity_phase_routes_to_provider_tuning () =
+  let err = oas_timeout_budget_error ~phase:"slot_full" in
+  match KH.oas_timeout_budget_policy_decision ~strikes:1 err with
+  | None -> Alcotest.fail "expected OAS timeout budget policy decision"
+  | Some decision ->
+    Alcotest.(check bool) "keeper death denied" false decision.keeper_death_allowed;
+    Alcotest.(check string)
+      "lifecycle"
+      "soft_fail_turn"
+      (KFP.lifecycle_effect_to_label decision.lifecycle_effect);
+    Alcotest.(check string)
+      "circuit"
+      "provider_cooldown"
+      (KFP.circuit_effect_to_label decision.circuit_effect);
+    Alcotest.(check string)
+      "operator action"
+      "reroute_or_tune_provider"
+      (KFP.operator_action_to_label decision.operator_action);
+    Alcotest.(check string)
+      "reason preserves capacity phase"
+      "oas_timeout_budget:capacity_backpressure"
+      decision.reason
+
 let test_concurrent_bumps_do_not_lose_updates () =
   let keeper = "parallel-bumps" in
   with_reset keeper (fun () ->
@@ -125,6 +148,8 @@ let () =
           test_strike_limit_is_soft_backoff;
         Alcotest.test_case "strike limit uses policy, not keeper death" `Quick
           test_strike_limit_routes_through_policy_without_keeper_death;
+        Alcotest.test_case "capacity phase routes to provider tuning" `Quick
+          test_capacity_phase_routes_to_provider_tuning;
         Alcotest.test_case "concurrent bumps do not lose updates" `Quick
           test_concurrent_bumps_do_not_lose_updates;
       ] );

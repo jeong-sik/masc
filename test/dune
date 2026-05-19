@@ -304,6 +304,7 @@
   test_keeper_typed_labels
   test_shell_ir_typed_review_followup
   test_shell_command_gate
+  test_shell_gate_authority
   test_exec_shell_command_gate
   test_shell_ir_validator
   test_typed_advisor_counters
@@ -607,6 +608,7 @@
   test_keeper_typed_labels
   test_shell_ir_typed_review_followup
   test_shell_command_gate
+  test_shell_gate_authority
   test_exec_shell_command_gate
   test_shell_ir_validator
   test_typed_advisor_counters

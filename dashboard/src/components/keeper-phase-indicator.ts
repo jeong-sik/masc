@@ -14,6 +14,7 @@
 
 import { html } from 'htm/preact'
 import type { KeeperPhase } from '../types'
+import { toKeeperPhase } from '../keeper-store-normalize'
 import { formatDuration } from '../lib/format-time'
 
 interface PhaseStyle {
@@ -65,7 +66,17 @@ const BUFFER_PHASES = new Set<string>(['Failing', 'Overflowed', 'Compacting', 'H
 
 function getPhaseStyle(phase: KeeperPhase | string | null | undefined): PhaseStyle {
   if (!phase) return PHASE_STYLES.Offline
-  return PHASE_STYLES[phase as KeeperPhase] ?? PHASE_STYLES.Offline
+  // Use the SSOT boundary parser (`toKeeperPhase`) instead of the raw
+  // `as KeeperPhase` assertion. `toKeeperPhase` accepts both PascalCase
+  // (canonical `Keeper.phase`) and lowercase backend tokens (the same
+  // shape `phase_to_string` emits in
+  // `lib/keeper/keeper_state_machine.ml:21-34`) and returns `null` on
+  // unknown input. This matches `software-development.md` §"Parse,
+  // don't validate": arbitrary strings should be narrowed through a
+  // total parser, not coerced through an unchecked cast that silently
+  // accesses an undefined record key.
+  const typed = toKeeperPhase(phase)
+  return typed != null ? PHASE_STYLES[typed] : PHASE_STYLES.Offline
 }
 
 /** Phase badge — color-coded pill showing the keeper lifecycle phase. */

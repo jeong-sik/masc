@@ -7,7 +7,7 @@ import { useRef, useState, useCallback } from 'preact/hooks'
 import { keepers, messages, tasks } from '../store'
 import { kSlot, kSigil } from './keeper-badge'
 import { getPhaseStyle } from './keeper-phase-indicator'
-import type { Keeper, KeeperPhase } from '../types'
+import type { Keeper } from '../types'
 
 // ── CSS custom property resolver for Canvas 2D ────────────────────
 // Canvas doesn't understand CSS var() — we resolve at paint time via
@@ -267,7 +267,11 @@ export function WorldVisualizer() {
     for (const k of fleet) {
       const p = positions[idx]!
       const color = keeperColor(k)
-      const phaseStyle = getPhaseStyle(k.phase as KeeperPhase | null)
+      // `k.phase` is already typed as `KeeperPhase | null | undefined`
+      // on the Keeper interface (`types/core.ts:898`). The previous
+      // `as KeeperPhase | null` assertion was a no-op cast; `getPhaseStyle`
+      // accepts `KeeperPhase | string | null | undefined` natively.
+      const phaseStyle = getPhaseStyle(k.phase)
 
       ctx.beginPath()
       ctx.arc(p.x, p.y, KEEPER_RADIUS + 2, 0, 2 * Math.PI)

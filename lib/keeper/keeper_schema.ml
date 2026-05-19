@@ -353,6 +353,22 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "boolean");
           ("description", `String "If true, keeper can send proactive check-ins after idle periods. Defaults to false unless explicitly enabled.");
         ]);
+        ("policy_voice_enabled", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Master switch for voice-bridge tool access. When false, the keeper cannot interact with the voice bridge regardless of the other voice_* fields. Defaults to keeper-profile setting.");
+        ]);
+        ("voice_enabled", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Per-keeper runtime voice-bridge participation. Requires policy_voice_enabled=true to take effect. Defaults to keeper-profile setting.");
+        ]);
+        ("voice_channel", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional: voice-bridge channel handle the keeper joins when voice_enabled is true. Defaults to the keeper-profile channel.");
+        ]);
+        ("voice_agent_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional: voice-bridge agent identifier presented on the channel. Defaults to the keeper name.");
+        ]);
         ("proactive_idle_sec", `Assoc [
           ("type", `String "integer");
           ("description", `String "Idle seconds before proactive check-in is allowed (default: 900).");

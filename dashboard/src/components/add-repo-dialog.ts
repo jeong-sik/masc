@@ -4,6 +4,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { get, post } from '../api/core'
+import { normalizeCredentialsResponse } from '../api/credentials'
 import { showToast } from './common/toast'
 import { fetchRepositories, showAddRepoDialog } from './repo-sidebar'
 import { X } from 'lucide-preact'
@@ -58,27 +59,10 @@ async function loadCredentials(): Promise<void> {
   credentialsLoading.value = true
   try {
     const raw = await get<unknown>('/api/v1/credentials')
-    const rows = Array.isArray(raw)
-      ? raw
-      : raw && typeof raw === 'object' && Array.isArray((raw as Record<string, unknown>).credentials)
-        ? (raw as Record<string, unknown>).credentials as unknown[]
-        : []
-    const options: CredentialOption[] = rows
-      .filter((item): item is Record<string, unknown> =>
-        item !== null && typeof item === 'object',
-      )
-      .map(item => ({
-        id: typeof item.id === 'string' ? item.id : '',
-        name: typeof item.name === 'string'
-          ? item.name
-          : typeof item.username === 'string'
-            ? item.username
-            : typeof item.id === 'string'
-              ? item.id
-              : '',
-      }))
+    const creds = normalizeCredentialsResponse(raw)
+    credentialsResource.value = creds
+      .map(c => ({ id: c.id, name: c.name || c.username }))
       .filter(opt => opt.id && opt.name)
-    credentialsResource.value = options
   } catch (err) {
     console.warn('[add-repo-dialog] credentials load failed', err)
     credentialsResource.value = []

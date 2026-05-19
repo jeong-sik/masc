@@ -23,6 +23,7 @@ import { TurnBudgetGaugePanel } from './turn-budget-gauge'
 import { parsePrometheusText, type ParsedMetric } from './prometheus-metrics'
 import { isKeeperCrashed, isKeeperPaused } from '../lib/keeper-predicates'
 import { fetchWithTimeout, authHeaders } from '../api/core'
+import { PROMETHEUS_FETCH_TIMEOUT_MS } from '../config/constants'
 import { TimeAgo } from './common/time-ago'
 import { LoadingState, ErrorRecoverable } from './common/feedback-state'
 import { EmptyState } from './common/empty-state'
@@ -172,7 +173,7 @@ export function extractBatchTerminations(
 // ── Prometheus fetch ───────────────────────────────────────────────────────
 
 async function fetchMetricsText(): Promise<string> {
-  const res = await fetchWithTimeout('/metrics', { headers: authHeaders() }, 10_000)
+  const res = await fetchWithTimeout('/metrics', { headers: authHeaders() }, PROMETHEUS_FETCH_TIMEOUT_MS)
   if (!res.ok) throw new Error(`/metrics returned ${res.status}`)
   return res.text()
 }

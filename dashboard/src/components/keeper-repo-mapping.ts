@@ -10,6 +10,7 @@ import {
   type CredentialState,
   type CredentialType,
 } from '../api/credentials'
+import { fetchRepositoriesList } from '../api/repositories'
 import { createAsyncResource } from '../lib/async-state'
 import { showToast } from './common/toast'
 import { ErrorState, LoadingState } from './common/feedback-state'
@@ -79,23 +80,12 @@ async function fetchKeepers(): Promise<Keeper[]> {
 }
 
 async function fetchRepositories(): Promise<RepositoryOption[]> {
-  const data = await get<unknown>('/api/v1/repositories')
-  const rows = Array.isArray(data)
-    ? data
-    : data && typeof data === 'object' && Array.isArray((data as Record<string, unknown>).repositories)
-      ? (data as Record<string, unknown>).repositories as unknown[]
-      : []
-  if (Array.isArray(rows)) {
-    return rows.map((row: unknown): RepositoryOption => {
-      const r = row as Record<string, unknown>
-      return {
-        id: String(r.id ?? ''),
-        name: String(r.name ?? r.id ?? ''),
-        url: r.url ? String(r.url) : undefined,
-      }
-    })
-  }
-  return []
+  const repos = await fetchRepositoriesList()
+  return repos.map(r => ({
+    id: r.id,
+    name: r.name,
+    url: r.url || undefined,
+  }))
 }
 
 async function fetchCredentials(): Promise<KeeperCredentialOption[]> {

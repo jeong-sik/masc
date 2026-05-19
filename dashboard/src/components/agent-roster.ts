@@ -722,7 +722,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               : null
           const keeperMonitoring = keeperRuntime ? summarizeKeeperMonitoring(keeperRuntime, compositeForMonitoring) : null
           const monitoringEvidence = keeperMonitoring ? summarizeMonitoringEvidence(keeperMonitoring) : null
-          const fsmPhase = keeperRuntime ? keeperPhaseForDisplay(keeperRuntime) : null
+          const fsmPhase = keeperRuntime ? keeperPhaseForDisplay(keeperRuntime, compositeForMonitoring) : null
           const isKeeper = keeperRuntime != null
           const goalSummary = keeperRuntime?.short_goal ?? keeperRuntime?.goal ?? agent.current_task ?? null
           const currentWork =

@@ -136,10 +136,12 @@ let run_command_in_container_with_status ?turn_sandbox_factory
     | None ->
       match Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present ~image ~timeout_sec with
       | Error err ->
+        let typed = Sandbox_error.Image_not_found { image } in
         Error
           (Printf.sprintf
-             "docker_%s_failed: sandbox_image_missing: %s"
+             "docker_%s_failed: %s: %s"
              head_program
+             (Sandbox_error.to_string typed)
              err)
       | Ok () ->
       match Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime ~timeout_sec with

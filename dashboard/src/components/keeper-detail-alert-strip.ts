@@ -10,9 +10,13 @@ import { TimeAgo } from './common/time-ago'
 import { formatDuration } from './mission-utils'
 import type { Keeper } from '../types'
 import { StrongSecondary, RuntimeBadge } from './keeper-detail-primitives'
-import { trustDispositionLabel as resolveTrustDispositionLabel } from './fsm-hub-types'
-import { operatorDispositionReasonLabel } from './fsm-hub-types'
-import { terminalReasonCodeLabel } from './fsm-hub-types'
+import {
+  trustDispositionLabel as resolveTrustDispositionLabel,
+  computeKeeperVerdict,
+  isTurnTerminalFailureCode,
+  type KeeperVerdict,
+  type CascadeAttemptObservation,
+} from './fsm-hub-types'
 import { keeperNeedsDiagnosticAttention, refreshAfterRuntimeAction } from './keeper-detail-helpers'
 import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
 import { showToast } from './common/toast'
@@ -70,6 +74,57 @@ function nextHumanActionLabel(action: string | null): string | null {
   return labels[action] ?? action
 }
 
+// Exhaustive render over `KeeperVerdict.kind`. Adding a new arm to
+// `KeeperVerdict` will fail typecheck on the unreachable assertion
+// rather than silently falling through to a default render. The tool
+// contract result, when present, is always shown as scope-tagged
+// evidence ("도구 계약") attached to the verdict rather than as a
+// sibling claim — this is what closes 모순 #2.
+function renderVerdict(verdict: KeeperVerdict) {
+  const toolContractEvidence = verdict.toolContract
+    ? html`<span><${StrongSecondary}>도구 계약</${StrongSecondary}> · ${verdict.toolContract.label}</span>`
+    : null
+  switch (verdict.kind) {
+    case 'failed':
+      return html`
+        <span><${StrongSecondary}>검증</${StrongSecondary}> · ${verdict.reasonLabel}</span>
+        ${toolContractEvidence}
+      `
+    case 'pending':
+      return html`
+        ${verdict.reasonLabel
+          ? html`<span><${StrongSecondary}>검증</${StrongSecondary}> · ${verdict.reasonLabel}</span>`
+          : null}
+        ${toolContractEvidence}
+      `
+    case 'verified':
+      return html`
+        ${verdict.reasonLabel
+          ? html`<span><${StrongSecondary}>검증</${StrongSecondary}> · ${verdict.reasonLabel}</span>`
+          : null}
+        ${toolContractEvidence}
+      `
+    case 'no_verdict':
+      return toolContractEvidence
+  }
+}
+
+// Render the cascade attempt observation with explicit scope label
+// ("마지막 시도") so an operator does not read a per-attempt success
+// as a per-turn success. The caller already gates rendering when the
+// per-turn stop_cause is a terminal failure — this is what closes 모순 #3.
+function renderCascadeAttemptObservation(observation: CascadeAttemptObservation) {
+  const scopeLabel = observation.scope === 'attempt' ? '마지막 시도' : '턴 결과'
+  return html`
+    <span>
+      <strong class="text-[var(--color-fg-secondary)]">${scopeLabel}</strong>
+      · ${observation.outcome ?? 'observed'}
+      ${observation.attempts !== null ? ` · ${observation.attempts}회 시도` : ''}
+      ${observation.fallbackApplied ? ' · 폴백' : ''}
+    </span>
+  `
+}
+
 export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const runtimeBlockerClass = keeper.runtime_blocker_class
   const runtimeBlocker = keeperRuntimeBlockerHint(keeper)
@@ -106,10 +161,22 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const shouldShowOperatorDispositionReason =
     operatorDispositionReason !== null && operatorDispositionReason !== trustSummary
   const executionSummary = keeper.trust?.execution_summary ?? null
-  const runtimeProofStatus =
+  // Backend emits `runtime_proof_status` as a copy of
+  // `tool_contract_result` (lib/keeper/keeper_runtime_trust_snapshot.ml:1063-1065).
+  // Reading either yields the same closed-sum tool contract code, so
+  // we collapse to a single canonical input for the verdict helper.
+  const toolContractResult =
     executionSummary?.runtime_proof_status?.trim()
     || executionSummary?.tool_contract_result?.trim()
     || null
+  // Single typed verdict replaces the prior sibling "검증" / "증명"
+  // spans. Exhaustive switch on `verdict.kind` below; new arms force
+  // a compile error rather than silently falling through.
+  const verdict: KeeperVerdict = computeKeeperVerdict({
+    trustDisposition,
+    trustSummary,
+    toolContractResult,
+  })
   const requiredTools = executionSummary?.required_tools ?? []
   const missingRequiredTools = executionSummary?.missing_required_tools ?? []
   const usedTools = executionSummary?.tools_used ?? []
@@ -169,17 +236,33 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
     || observedProviderFallback === true
     || (latestCascadeMetric?.fallback_applied === true && Boolean(fallbackReason || fallbackHops > 0))
   const hasExecutionEvidenceSignal =
-    Boolean(runtimeProofStatus)
+    verdict.kind !== 'no_verdict'
+    || verdict.toolContract !== null
     || requiredTools.length > 0
     || usedTools.length > 0
     || unexpectedTools.length > 0
     || missingRequiredTools.length > 0
-    || Boolean(trustSummary)
     || Boolean(stopCause)
     || Boolean(latestTerminalCode)
     || Boolean(latestNextAction)
     || shouldShowOperatorDispositionReason
     || Boolean(trustLatestEvent)
+  // Per-attempt cascade outcome is tagged with explicit scope so the
+  // render block does not present it as a co-equal "런타임 레인"
+  // badge when the per-turn stop_cause already declares a terminal
+  // failure. Operators still see the attempt code as auxiliary
+  // evidence ("마지막 시도") when the gate allows it.
+  const cascadeAttempt: CascadeAttemptObservation = {
+    scope: 'attempt',
+    outcome: observedCascadeOutcome,
+    attempts: typeof observedProviderAttempts === 'number' ? observedProviderAttempts : null,
+    fallbackApplied: observedProviderFallback === true,
+  }
+  const turnTerminallyFailed = isTurnTerminalFailureCode(stopCause?.code ?? null)
+    || isTurnTerminalFailureCode(latestTerminalCode)
+  const renderCascadeAttempt =
+    (cascadeAttempt.outcome !== null || cascadeAttempt.attempts !== null)
+    && !turnTerminallyFailed
   const renderActivitySignal = () => activity.timestamp
     ? html`${activity.label} <${TimeAgo} timestamp=${activity.timestamp} />`
     : activity.ageSeconds != null
@@ -322,13 +405,13 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">정지 원인</strong> · ${stopCause.code}${stopCause.summary ? html` · ${stopCause.summary}` : null}</span>`
           : null}
         ${latestTerminalCode && latestTerminalCode !== stopCause?.code
-          ? html`<span title=${latestTerminalCode}><strong class="text-[var(--color-fg-secondary)]">종료 코드</strong> · ${terminalReasonCodeLabel(latestTerminalCode)}${latestTerminalSummary ? html` · ${latestTerminalSummary}` : null}</span>`
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">종료 코드</strong> · ${latestTerminalCode}${latestTerminalSummary ? html` · ${latestTerminalSummary}` : null}</span>`
           : null}
         ${latestNextAction
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">권장 조치</strong> · ${latestNextAction}</span>`
           : null}
         ${shouldShowOperatorDispositionReason
-          ? html`<span title=${operatorDispositionReason ?? ''}><${StrongSecondary}>운영자 판단</${StrongSecondary}> · ${operatorDispositionReasonLabel(operatorDispositionReason)}</span>`
+          ? html`<span><${StrongSecondary}>운영자 판단</${StrongSecondary}> · ${operatorDispositionReason}</span>`
           : null}
         ${trustDisposition
           ? html`
@@ -337,12 +420,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
               </span>
             `
           : null}
-        ${trustSummary
-          ? html`<span><${StrongSecondary}>검증</${StrongSecondary}> · ${trustSummary}</span>`
-          : null}
-        ${runtimeProofStatus
-          ? html`<span><${StrongSecondary}>증명</${StrongSecondary}> · ${runtimeProofStatus}</span>`
-          : null}
+        ${renderVerdict(verdict)}
         ${requiredTools.length > 0
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">필요 도구</strong> · ${requiredTools.join(', ')}</span>`
           : null}
@@ -358,16 +436,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         ${cascadeLabel
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">캐스케이드</strong> · ${cascadeLabel}</span>`
           : null}
-        ${observedCascadeOutcome || typeof observedProviderAttempts === 'number'
-          ? html`
-              <span>
-                <strong class="text-[var(--color-fg-secondary)]">런타임 레인</strong>
-                · ${observedCascadeOutcome ?? 'observed'}
-                ${typeof observedProviderAttempts === 'number' ? ` · ${observedProviderAttempts}회 시도` : ''}
-                ${observedProviderFallback === true ? ' · 폴백' : ''}
-              </span>
-            `
-          : null}
+        ${renderCascadeAttempt ? renderCascadeAttemptObservation(cascadeAttempt) : null}
         ${latestCascadeMetric?.fallback_applied === true && (fallbackReason || fallbackHops > 0)
           ? html`
               <span class="text-[var(--color-status-warn)]">

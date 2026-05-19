@@ -94,7 +94,6 @@ export interface KeeperLiveTruthRow {
 
 export interface KeeperLiveTruthSummary {
   headline: string
-  headlineDetail: string
   tone: StatusChipTone
   rows: KeeperLiveTruthRow[]
   runtimeWarnings: string[]
@@ -178,7 +177,12 @@ export function deriveKeeperLiveTruth({
   runtimeResolution?: KeeperLiveTruthRuntimeInput | null
 }): KeeperLiveTruthSummary {
   const linkedState = linkedRuntimeState(keeper)
-  const phase = compactToken(compositeSnapshot?.phase ?? keeper.phase ?? keeper.status)
+  // Per-axis SSOT routing (RFC-0046 §4.3): the FSM hub below this panel is
+  // the canonical phase/turn surface, so this panel only needs `turnPhase`
+  // for the contextual "현재 턴" row detail. The old 3-way fallback
+  // `compositeSnapshot?.phase ?? keeper.phase ?? keeper.status` was the
+  // §AI코드생성 §2 Unknown-→-Permissive-Default anti-pattern that let stale
+  // flat-record fields silently feed status badges; removed here.
   const turnPhase = compactToken(compositeSnapshot?.turn_phase ?? keeper.pipeline_stage)
   const fiberAlive =
     compositeSnapshot?.phase_diagnosis?.conditions.fiber_alive
@@ -238,10 +242,9 @@ export function deriveKeeperLiveTruth({
       'no blocker reason',
     )
   const toolContract = compactToken(compositeSnapshot?.execution?.tool_contract_result ?? null, 'tool contract unknown')
-  const guardCount = compositeSnapshot?.fsm_guard_violations ?? 0
-  const invariantFailed = compositeSnapshot
-    ? Object.values(compositeSnapshot.invariants).some(value => value === false)
-    : false
+  // guardCount / invariantFailed have moved to FsmHub mode='detail' — they
+  // are rendered on the dedicated FSM lane strip directly under this panel
+  // and no longer need to be projected as a row here.
   const runtimeCommit =
     shortCommit(runtimeResolution?.server_repo_git_commit)
     ?? shortCommit(runtimeResolution?.build?.commit)
@@ -255,14 +258,16 @@ export function deriveKeeperLiveTruth({
     ? runtimeResolution.server_repo_path.path.split('/').slice(-2).join('/')
     : null
 
+  // RFC-0046 §4.3 partial closure (2026-05-19): the FSM row used to duplicate
+  // FsmHub mode='detail' (KSM/KTC/KDP/KCL/KMC/breaker lanes rendered directly
+  // below this panel). Dropping it here makes FsmHub the sole on-screen
+  // consumer of the composite invariant/guard axes. The remaining rows cover
+  // axes FsmHub does not (roster/linked runtime, idle-since label, terminal
+  // trace event, runtime_attention reason).
+  const fiberLabel = fiberAlive ? 'fiber alive' : 'fiber not proven'
+  const liveTurnLabel = activeTurn ? `${turnPhase} live` : 'no live turn'
   return {
     headline,
-    headlineDetail: [
-      `phase ${phase}`,
-      `turn ${turnPhase}`,
-      fiberAlive ? 'fiber alive' : 'fiber not proven',
-      activeTurn ? 'live turn' : 'no live turn',
-    ].join(' · '),
     tone,
     runtimeWarnings: warnings,
     runtimeBuildLabel,
@@ -270,13 +275,13 @@ export function deriveKeeperLiveTruth({
     rows: [
       {
         label: '런타임',
-        value: fiberAlive ? 'fiber alive' : 'fiber not proven',
+        value: fiberLabel,
         detail: `roster ${keeper.status} · linked ${linkedState}`,
         tone: fiberAlive ? 'ok' : 'warn',
       },
       {
         label: '현재 턴',
-        value: activeTurn ? `${turnPhase} live` : 'no live turn',
+        value: liveTurnLabel,
         detail: `${compositeSnapshot ? (compositeSnapshot.is_live === true ? 'is_live=true' : 'is_live=false') : 'is_live=unknown'} · ${turnPhase} · ${idleLabel}`,
         tone: activeTurn ? 'ok' : 'neutral',
       },
@@ -285,12 +290,6 @@ export function deriveKeeperLiveTruth({
         value: traceEvidence.value,
         detail: traceEvidence.detail,
         tone: traceEvidence.tone,
-      },
-      {
-        label: 'FSM',
-        value: `KSM ${phase} / KTC ${turnPhase}`,
-        detail: `${guardCount} guard violations · ${invariantFailed ? 'invariant fail' : 'invariants ok'}`,
-        tone: guardCount > 0 || invariantFailed ? 'bad' : 'ok',
       },
       {
         label: '차단',
@@ -369,7 +368,10 @@ export function KeeperLiveTruthPanel({
     runtimeTrace,
     runtimeResolution,
   })
-  const headlineParts = summary.headlineDetail.split(' · ').filter(Boolean)
+  // RFC-0046 §4.3 partial closure: the four inline detail badges that used
+  // to live next to the headline (`phase X · turn Y · fiber ... · live ...`)
+  // were a string-concat-then-split-back projection of the same fields the
+  // row grid below already shows. Dropped — single representation per axis.
   const firstWarning = summary.runtimeWarnings[0] ?? null
   const extraWarningCount = Math.max(0, summary.runtimeWarnings.length - 1)
 
@@ -383,11 +385,6 @@ export function KeeperLiveTruthPanel({
           <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Live truth</div>
           <div class="mt-1 flex flex-wrap items-center gap-2">
             <${StatusChip} tone=${summary.tone} uppercase=${false}>${summary.headline}<//>
-            ${headlineParts.map(part => html`
-              <span class="inline-flex max-w-full rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-3xs font-mono text-[var(--color-fg-secondary)]">
-                ${part}
-              </span>
-            `)}
           </div>
         </div>
         <div class="flex min-w-0 flex-wrap justify-start gap-2 sm:justify-end">

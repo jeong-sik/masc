@@ -161,12 +161,18 @@ let require_string ~ctx ~field json =
 let require_object ~ctx ~field json =
   match Yojson.Safe.Util.member field json with
   | `Assoc _ as obj -> Ok obj
-  | _ -> Error (Printf.sprintf "%s.%s must be object" ctx field)
+  | other ->
+      Error
+        (Printf.sprintf "%s.%s must be object, got %s: %s" ctx field
+           (Json_util.kind_name other) (Json_util.excerpt other))
 
 let require_list ~ctx ~field json =
   match Yojson.Safe.Util.member field json with
   | `List items -> Ok items
-  | _ -> Error (Printf.sprintf "%s.%s must be array" ctx field)
+  | other ->
+      Error
+        (Printf.sprintf "%s.%s must be array, got %s: %s" ctx field
+           (Json_util.kind_name other) (Json_util.excerpt other))
 
 let endpoint_kind_of_string = function
   | "openai_compat" -> Ok Openai_compat
@@ -252,7 +258,10 @@ let parse_agent_voices json =
       in
       loop [] pairs
   | `Null -> Ok []
-  | _ -> Error "tts.agent_voices must be an object"
+  | other ->
+      Error
+        (Printf.sprintf "tts.agent_voices must be an object, got %s: %s"
+           (Json_util.kind_name other) (Json_util.excerpt other))
 
 let parse_voice_tuning ~ctx json =
   match json with
@@ -268,7 +277,10 @@ let parse_voice_tuning ~ctx json =
         }
   | `Null ->
       Ok { stability = 0.5; similarity_boost = 0.75; style = 0.0 }
-  | _ -> Error (Printf.sprintf "%s must be an object" ctx)
+  | other ->
+      Error
+        (Printf.sprintf "%s must be an object, got %s: %s" ctx
+           (Json_util.kind_name other) (Json_util.excerpt other))
 
 let parse_agent_voice_settings json =
   match Yojson.Safe.Util.member "agent_voice_settings" json with
@@ -282,7 +294,10 @@ let parse_agent_voice_settings json =
       in
       loop [] pairs
   | `Null -> Ok []
-  | _ -> Error "tts.agent_voice_settings must be an object"
+  | other ->
+      Error
+        (Printf.sprintf "tts.agent_voice_settings must be an object, got %s: %s"
+           (Json_util.kind_name other) (Json_util.excerpt other))
 
 let parse_tts json =
   let open Result in
@@ -343,7 +358,10 @@ let parse_local_playback json =
       in
       Ok { enabled; agents }
   | `Null -> Ok { enabled = false; agents = [] }
-  | _ -> Error "root.local_playback must be an object"
+  | other ->
+      Error
+        (Printf.sprintf "root.local_playback must be an object, got %s: %s"
+           (Json_util.kind_name other) (Json_util.excerpt other))
 
 let parse_json json =
   let open Result in

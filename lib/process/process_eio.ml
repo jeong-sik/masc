@@ -31,8 +31,8 @@ let runtime_state : runtime option Atomic.t = Atomic.make None
     layer never emits it directly because [with_timeout_exn] starts the
     clock after slot acquisition.
 
-    [Spawn] fires if the timeout trips before
-    [Eio.Process.spawn] / [Unix.create_process_env] returns — i.e. the
+    [Spawn] fires if the timeout trips before the Eio process spawn call
+    or [Unix.create_process_env] returns — i.e. the
     process creation syscall itself stalled (docker daemon backpressure,
     container cold start during [docker run]).
 

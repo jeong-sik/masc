@@ -422,9 +422,8 @@ let handle ctx args : tool_result =
                  (Config_dir_resolver.personas_dirs ())) );
         ]
     in
-    let base_response =
+    let base_fields =
       [
-        ("status", `String "ok");
         ("tool", `String "masc_keeper_persona_audit");
         ("roots", roots);
         ("summary", summary audited_items);
@@ -432,11 +431,11 @@ let handle ctx args : tool_result =
         ("items", `List returned_items);
       ]
     in
-    let response_with_repair =
+    let response_fields =
       match repair_result with
       | Some r ->
           ("goal_repair", Keeper_goal_repair.repair_result_to_yojson r)
-          :: base_response
-      | None -> base_response
+          :: base_fields
+      | None -> base_fields
     in
-    (true, Yojson.Safe.pretty_to_string (`Assoc response_with_repair))
+    (true, ok_response response_fields)

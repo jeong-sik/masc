@@ -314,35 +314,78 @@ let capability_mismatch_issues ~profile ~required_profile model_specs =
   match capability_lint_severity () with
   | None -> []
   | Some severity ->
-      let mismatches =
-        model_specs
-        |> Cascade_config.expand_auto_models
-        |> List.filter_map (fun spec ->
-               match Cascade_config.parse_model_string_result spec with
-               | Ok cfg ->
-                   let caps = Provider_tool_support.capabilities_of_config cfg in
-                   if Cascade_capability_profile.provider_satisfies_named_profile
-                        required_profile caps
-                   then None
-                   else Some spec
-               | Error _ -> None)
+      (* An unknown [required_profile] is spec-independent (every model
+         would report the same Error), so check it once up front and emit
+         a single accurate diagnostic naming the profile and the known
+         pool, instead of looping over every spec and printing the
+         misleading "N model(s) do not satisfy profile X" message that
+         the previous silent-false collapse produced. *)
+      let dummy_caps : Provider_tool_support.capabilities =
+        { supports_inline_tools = true
+        ; supports_inline_tool_choice = true
+        ; supports_runtime_mcp_tools = true
+        ; supports_runtime_tool_events = true
+        ; supports_runtime_mcp_http_headers = true
+        }
       in
-      if mismatches = [] then []
-      else
-        [
-          {
-            profile = Some profile;
-            severity;
-            message =
-              Printf.sprintf
-                "Cascade preset %s declares required_capability_profile=%S \
-                 but %d model(s) do not satisfy it: %s"
-                profile
-                required_profile
-                (List.length mismatches)
-                (String.concat ", " mismatches);
-          };
-        ]
+      (match
+         Cascade_capability_profile.provider_satisfies_named_profile
+           ~name:required_profile
+           dummy_caps
+       with
+       | Error err ->
+           [ { profile = Some profile
+             ; severity
+             ; message =
+                 Printf.sprintf
+                   "Cascade preset %s declares required_capability_profile=%S \
+                    but the profile name is %s.  Fix the preset's \
+                    [required_capability_profile] or add the profile to \
+                    [profiles] in cascade.toml."
+                   profile
+                   required_profile
+                   (Cascade_capability_profile
+                    .named_profile_lookup_error_to_string err)
+             } ]
+       | Ok _ ->
+           let mismatches =
+             model_specs
+             |> Cascade_config.expand_auto_models
+             |> List.filter_map (fun spec ->
+                    match Cascade_config.parse_model_string_result spec with
+                    | Ok cfg ->
+                        let caps =
+                          Provider_tool_support.capabilities_of_config cfg
+                        in
+                        (match
+                           Cascade_capability_profile
+                           .provider_satisfies_named_profile
+                             ~name:required_profile
+                             caps
+                         with
+                         | Ok true -> None
+                         | Ok false -> Some spec
+                         | Error _ ->
+                             (* Impossible: the up-front check already
+                                returned Ok for this profile name. *)
+                             None)
+                    | Error _ -> None)
+           in
+           if mismatches = []
+           then []
+           else
+             [ { profile = Some profile
+               ; severity
+               ; message =
+                   Printf.sprintf
+                     "Cascade preset %s declares \
+                      required_capability_profile=%S but %d model(s) do not \
+                      satisfy it: %s"
+                     profile
+                     required_profile
+                     (List.length mismatches)
+                     (String.concat ", " mismatches)
+               } ])
 
 let snapshot_profile_for ~config_path ~profile =
   match Cascade_catalog_runtime.inspect_active () with

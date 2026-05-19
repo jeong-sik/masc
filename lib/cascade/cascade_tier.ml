@@ -10,8 +10,8 @@
 
 open Cascade_capability_profile
 
-let is_subset_profile src_name dst_name =
-  Cascade_capability_schema.is_subset_profile src_name dst_name
+let is_subset_profile ~src ~dst =
+  Cascade_capability_schema.is_subset_profile ~src ~dst
 
 (* Support for TOML-declared profiles (RFC-0058 Phase 1). *)
 let requirement_leq a b =
@@ -27,10 +27,25 @@ let is_subset_caps (s : required_capabilities) (d : required_capabilities) =
   && requirement_leq s.runtime_tool_events d.runtime_tool_events
   && requirement_leq s.runtime_mcp_http_headers d.runtime_mcp_http_headers
 
-let is_subset_named_profile src_name dst_name =
+let is_subset_named_profile ~src ~dst =
+  let known_pool =
+    Cascade_capability_schema.all_profile_names
+    @ Cascade_capability_profile.declared_profile_names ()
+  in
   match
-    ( resolve_required_capabilities src_name,
-      resolve_required_capabilities dst_name )
+    ( resolve_required_capabilities src,
+      resolve_required_capabilities dst )
   with
-  | Some s, Some d -> is_subset_caps s d
-  | _ -> false
+  | Some s, Some d -> Ok (is_subset_caps s d)
+  | None, None ->
+      Error
+        (Cascade_capability_schema.Unknown_both_profiles
+           { src; dst; known = known_pool })
+  | None, Some _ ->
+      Error
+        (Cascade_capability_schema.Unknown_source_profile
+           { name = src; known = known_pool })
+  | Some _, None ->
+      Error
+        (Cascade_capability_schema.Unknown_destination_profile
+           { name = dst; known = known_pool })

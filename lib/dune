@@ -92,6 +92,7 @@
  dashboard_http_monitoring
  dashboard_http_keeper_outcomes
  dashboard_http_keeper_trust
+ dashboard_http_keeper_feeds
  dashboard_http_keeper
  server_dashboard_http_keeper_api_checkpoints
  server_dashboard_http_keeper_runtime_manifest_scan

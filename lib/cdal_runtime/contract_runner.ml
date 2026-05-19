@@ -39,6 +39,16 @@ let map_result_status (response : (Types.api_response, Error.sdk_error) result)
      | Types.Unknown _ -> Cdal_proof.Errored)
 ;;
 
+let finalize_during_exception capture_state ~result_status =
+  match Proof_capture.finalize capture_state ~result_status with
+  | _ -> ()
+  | exception exn ->
+    Printf.eprintf
+      "cdal contract runner: proof finalize failed during %s exception path: %s\n%!"
+      (Cdal_proof.result_status_to_string result_status)
+      (Printexc.to_string exn)
+;;
+
 let run
       ~sw
       ?clock
@@ -129,12 +139,10 @@ let run
     let response =
       try Agent.run ~sw ?clock new_agent prompt with
       | Eio.Cancel.Cancelled _ as exn ->
-        (try ignore (Proof_capture.finalize capture_state ~result_status:Cancelled) with
-         | _ -> ());
+        finalize_during_exception capture_state ~result_status:Cancelled;
         raise exn
       | exn ->
-        (try ignore (Proof_capture.finalize capture_state ~result_status:Errored) with
-         | _ -> ());
+        finalize_during_exception capture_state ~result_status:Errored;
         raise exn
     in
     (* Sync execution state back to the original agent so that

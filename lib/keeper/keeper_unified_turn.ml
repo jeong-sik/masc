@@ -433,140 +433,17 @@ let run_keeper_cycle
                  ~max_attempts:(turn_livelock_max_attempts ())
                  ~stuck_after_sec:(turn_livelock_stuck_after_sec ())
                  ()
-             with
-             | Keeper_turn_livelock.Blocked reason ->
-               let reason_string = Keeper_turn_livelock.gate_reason_to_string reason in
-               let terminal_reason_code =
-                 Printf.sprintf "turn_livelock:%s" reason_string
-               in
-               let error_message =
-                 Printf.sprintf "keeper turn livelock blocked: %s" reason_string
-               in
-               (* ETA-LIVELOCK: typed escalation over the repeated
-                  block stream.  Production system_log_2026-05-19
-                  shows 4 keepers re-blocking the same (keeper,
-                  turn_id) ~30 s apart, fuelling ~15K ERROR/day on
-                  this exact log line.  The block itself is correct
-                  (turn cannot make progress, dispatch must not
-                  fire), but the operator sees the same fact
-                  restated every cycle.  Route the block through
-                  Keeper_livelock_state so the first occurrence
-                  keeps its ERROR (preserve operator-visible
-                  signal), intermediate occurrences demote to DEBUG
-                  and bump a counter, and the threshold crossing
-                  emits one durable ERROR plus a separate counter.
-                  Block semantics (Prometheus block counter,
-                  terminal observation, FSM transition,
-                  Internal-error return) are unchanged — only the
-                  human-readable log surface is escalated. *)
-               let gate_kind_kind = Keeper_turn_livelock.gate_reason_kind reason in
-               let gate_kind : Keeper_livelock_state.gate_kind =
-                 match Keeper_livelock_state.gate_kind_of_string gate_kind_kind with
-                 | Some k -> k
-                 | None ->
-                   (* Contract drift between Keeper_turn_livelock and
-                      Keeper_livelock_state.  Fail loud at the log
-                      surface (caller still bumps the existing
-                      counter and returns the same error) by
-                      degrading to Attempts_exhausted, which is the
-                      operator-visible-default kind.  A regression
-                      test in test/keeper_livelock_state pins the
-                      string roundtrip; if this branch fires,
-                      Keeper_turn_livelock.gate_reason_kind has
-                      grown a new constructor and the corresponding
-                      arm in Keeper_livelock_state.gate_kind is
-                      missing. *)
-                   Log.Keeper.warn
-                     ~keeper_name:meta.name
-                     "%s: livelock escalation contract drift — \
-                      unknown gate_kind=%s, defaulting to attempts_exhausted"
-                     meta.name
-                     gate_kind_kind;
-                   Keeper_livelock_state.Attempts_exhausted
-               in
-               let escalation =
-                 Keeper_livelock_state.record_block
-                   ~keeper:meta.name
-                   ~gate_kind
-                   ()
-               in
-               (match escalation with
-                | `First ->
-                  Log.Keeper.error
-                    ~keeper_name:meta.name
-                    ~turn_id:keeper_turn_id
-                    "%s: keeper turn livelock guard blocked dispatch turn=%d: %s"
-                    meta.name
-                    turn_id
-                    reason_string
-                | `Repeated count ->
-                  Log.Keeper.debug
-                    ~keeper_name:meta.name
-                    ~turn_id:keeper_turn_id
-                    "%s: keeper turn livelock guard blocked dispatch turn=%d: %s \
-                     (repeat #%d, demoted from ERROR)"
-                    meta.name
-                    turn_id
-                    reason_string
-                    count;
-                  Prometheus.inc_counter
-                    Keeper_metrics.metric_keeper_turn_livelock_blocks_repeated
-                    ~labels:
-                      [ "keeper", meta.name
-                      ; "gate_kind", Keeper_livelock_state.gate_kind_to_string gate_kind
-                      ]
-                    ()
-                | `Threshold_park { count; park_threshold } ->
-                  Log.Keeper.error
-                    ~keeper_name:meta.name
-                    ~turn_id:keeper_turn_id
-                    "%s: keeper turn livelock guard blocked dispatch turn=%d: %s \
-                     (threshold_park count=%d threshold=%d — further blocks on this \
-                     keeper+gate_kind demoted to DEBUG)"
-                    meta.name
-                    turn_id
-                    reason_string
-                    count
-                    park_threshold;
-                  Prometheus.inc_counter
-                    Keeper_metrics.metric_keeper_turn_livelock_blocks_threshold_park
-                    ~labels:
-                      [ "keeper", meta.name
-                      ; "gate_kind", Keeper_livelock_state.gate_kind_to_string gate_kind
-                      ]
-                    ());
-               Prometheus.inc_counter
-                 Keeper_metrics.metric_keeper_turn_livelock_blocks
-                 ~labels:[ "keeper", meta.name ]
-                 ();
-               record_pre_dispatch_terminal_observation
-                 ~config
-                 ~meta
-                 ~generation
-                 ~cascade_name:initial_execution.cascade_name
-                   (* β6: "blocked" was not in outcome_kind quad-state
-                (ok/skipped/error/cancelled), causing operator_disposition
-                to classify livelock-blocked turns as "unknown".  Map to
-                "error" — livelock IS a turn failure; the specific reason
-                is captured in terminal_reason_code. *)
-                 ~outcome:`Error
-                 ~terminal_reason_code
-                 ~activity_kind:"keeper.turn_blocked"
-                 ~trajectory_outcome:(Trajectory.Gated terminal_reason_code)
-                 ~error_kind:
-                   (Keeper_execution_receipt.error_kind_of_string "turn_livelock_blocked")
-                 ~error_message
-                 ~keeper_turn_id
-                 ();
-               Keeper_turn_fsm.emit_transition
-                 ~keeper_name:meta.name
-                 ~turn_id:keeper_turn_id
-                 ~prev:Keeper_turn_fsm.Cascade_routing
-                 (Keeper_turn_fsm.Failed
-                    (Keeper_turn_fsm.Failure_turn_livelock_blocked
-                       { reason = reason_string }));
-               Error (Agent_sdk.Error.Internal error_message)
-             | Keeper_turn_livelock.Started _ ->
+	             with
+	             | Keeper_turn_livelock.Blocked reason ->
+	               Keeper_unified_turn_livelock_block.handle
+	                 ~config
+	                 ~meta
+	                 ~generation
+	                 ~keeper_turn_id
+	                 ~turn_id
+	                 ~initial_execution
+	                 ~reason
+	             | Keeper_turn_livelock.Started _ ->
                Keeper_turn_fsm.emit_transition
                  ~keeper_name:meta.name
                  ~turn_id:keeper_turn_id

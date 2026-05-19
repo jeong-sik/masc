@@ -206,6 +206,7 @@
   keeper_unified_turn_success
   keeper_unified_turn_failure
   keeper_unified_turn_phase_plan
+  keeper_unified_turn_livelock_block
   keeper_exec_context
   keeper_guards
   keeper_agent_run_turn_helpers

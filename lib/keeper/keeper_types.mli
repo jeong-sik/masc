@@ -164,6 +164,7 @@ type cascade_exhaustion_reason = Keeper_meta_contract.cascade_exhaustion_reason 
   | All_providers_failed
   | Candidates_filtered_after_cycles
   | Max_turns_exceeded
+  | Structural_attempt_timeout of { detail : string }
   | Other_detail of string
 
 type blocker_class = Keeper_meta_contract.blocker_class =
@@ -197,6 +198,13 @@ val cascade_exhaustion_summary : cascade_exhaustion_reason -> string
 val blocker_class_continue_gate : blocker_class -> bool
 val cascade_exhaustion_reason_to_json : cascade_exhaustion_reason -> Yojson.Safe.t
 val cascade_exhaustion_reason_of_json : Yojson.Safe.t -> cascade_exhaustion_reason option
+
+val cascade_exhaustion_reason_from_message :
+  string -> cascade_exhaustion_reason
+(** SSOT helper for tagging free-form cascade-exhaustion messages with
+    [Structural_attempt_timeout] when the upstream SDK fired its
+    per-OAS-call ceiling ([max_execution_time_s]). See
+    [Keeper_meta_contract.cascade_exhaustion_reason_from_message]. *)
 
 (** Authoritative blocker representation: typed [klass] + free-form
     [detail].  Replaces the historic [last_blocker: string] +

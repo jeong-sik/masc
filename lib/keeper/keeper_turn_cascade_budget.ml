@@ -216,10 +216,19 @@ let degraded_retry_slot_phase_available ~(time_spent_in_turn_s : float) : bool =
 
 let cascade_reason_is_structural_attempt_timeout
     (reason : Keeper_types.cascade_exhaustion_reason) : bool =
+  (* Typed match — no substring re-parsing. Producers route structural
+     OAS-ceiling messages into [Structural_attempt_timeout] via
+     [cascade_exhaustion_reason_from_message] (SSOT). Enumerate every
+     constructor so a new reason variant fails to compile here rather
+     than silently falling through to [false]. *)
   match reason with
-  | Keeper_types.Other_detail detail ->
-      String_util.contains_substring_ci detail "max_execution_time_s"
-  | _ -> false
+  | Keeper_types.Structural_attempt_timeout _ -> true
+  | Keeper_types.Connection_refused
+  | Keeper_types.No_providers_available
+  | Keeper_types.All_providers_failed
+  | Keeper_types.Candidates_filtered_after_cycles
+  | Keeper_types.Max_turns_exceeded
+  | Keeper_types.Other_detail _ -> false
 
 let degraded_retry_bypasses_slot_phase_guard
     (err : Agent_sdk.Error.sdk_error) : bool =

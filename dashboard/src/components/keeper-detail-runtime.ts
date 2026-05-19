@@ -11,7 +11,7 @@ import { useEffect, useState } from 'preact/hooks'
 // represent *live-execution* attention (`execution_current && blocked`,
 // see `lib/server/server_dashboard_http.ml:1114`), which is orthogonal to
 // the blocker-class-vs-stale-execution axis and stays inline below.
-import { deriveKeeperAttention, deriveKeeperDisplayReason, deriveKeeperOperationalState } from '../lib/keeper-operational-state'
+import { deriveKeeperAttention, deriveKeeperDisplayReason, deriveKeeperOperationalState, deriveKeeperTurnPhase } from '../lib/keeper-operational-state'
 import { deriveFiberAlive } from '../lib/keeper-fiber-alive'
 import { formatPct1 } from '../lib/format-number'
 import { formatDuration } from '../lib/format-time'
@@ -186,13 +186,13 @@ export function deriveKeeperLiveTruth({
   runtimeResolution?: KeeperLiveTruthRuntimeInput | null
 }): KeeperLiveTruthSummary {
   const linkedState = linkedRuntimeState(keeper)
-  // Per-axis SSOT routing (RFC-0046 §4.3): the FSM hub below this panel is
-  // the canonical phase/turn surface, so this panel only needs `turnPhase`
-  // for the contextual "현재 턴" row detail. The old 3-way fallback
-  // `compositeSnapshot?.phase ?? keeper.phase ?? keeper.status` was the
-  // §AI코드생성 §2 Unknown-→-Permissive-Default anti-pattern that let stale
-  // flat-record fields silently feed status badges; removed here.
-  const turnPhase = compactToken(compositeSnapshot?.turn_phase ?? keeper.pipeline_stage)
+  // RFC-0135 PR-14b: turn-phase SSOT. The 2-way fallback
+  // `compositeSnapshot?.turn_phase ?? keeper.pipeline_stage` is owned
+  // by `deriveKeeperTurnPhase` so the composite-preferred precedence
+  // can be reused by other consumers (the prior 3-way fallback was
+  // removed by PR-5; this PR finishes the move by moving the 2-way
+  // fallback itself into SSOT).
+  const turnPhase = compactToken(deriveKeeperTurnPhase(keeper, compositeSnapshot ?? null))
   // Typed SSOT (lib/keeper-fiber-alive.ts) — preserves provenance instead of
   // collapsing four semantically distinct signals into one OR-chain.
   const fiberAlive = deriveFiberAlive({

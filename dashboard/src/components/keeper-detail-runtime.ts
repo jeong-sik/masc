@@ -11,8 +11,9 @@ import { useEffect, useState } from 'preact/hooks'
 // represent *live-execution* attention (`execution_current && blocked`,
 // see `lib/server/server_dashboard_http.ml:1114`), which is orthogonal to
 // the blocker-class-vs-stale-execution axis and stays inline below.
-import { deriveKeeperAttention, deriveKeeperDisplayReason, deriveKeeperOperationalState, deriveKeeperTurnPhase } from '../lib/keeper-operational-state'
+import { deriveKeeperAttention, deriveKeeperOperationalState, deriveKeeperTurnPhase } from '../lib/keeper-operational-state'
 import { deriveFiberAlive } from '../lib/keeper-fiber-alive'
+import { deriveBlockerReason } from '../lib/keeper-blocker-reason'
 import { formatPct1 } from '../lib/format-number'
 import { formatDuration } from '../lib/format-time'
 import { ActionButton } from './common/button'
@@ -254,14 +255,15 @@ export function deriveKeeperLiveTruth({
       : typeof keeper.last_turn_ago_s === 'number'
         ? `${formatDuration(keeper.last_turn_ago_s)} since turn`
         : 'idle age unknown'
-  // RFC-0135 PR-14c: display reason via composite-preferred SSOT.
-  // Inline 3-way fallback moved to `deriveKeeperDisplayReason` so
-  // future surfaces share the same precedence (live → flat summary →
-  // operator-pinned). Empty/whitespace strings are filtered by the
-  // helper, so the 'no blocker reason' fallback fires only when no
-  // source has a meaningful value.
+  // Typed SSOT (lib/keeper-blocker-reason.ts) — preserves provenance
+  // (composite_runtime_attention | flat_runtime_blocker_summary |
+  // flat_attention_reason | none) instead of collapsing three
+  // semantically distinct sources into one OR-chain. Supersedes the
+  // PR-14c string-only `deriveKeeperDisplayReason` at this callsite;
+  // that helper stays in keeper-operational-state.ts for surfaces
+  // that don't need provenance.
   const runtimeReason = compactToken(
-    deriveKeeperDisplayReason(keeper, compositeSnapshot ?? null),
+    deriveBlockerReason({ keeper, composite: compositeSnapshot }).reason,
     'no blocker reason',
   )
   const toolContract = compactToken(compositeSnapshot?.execution?.tool_contract_result ?? null, 'tool contract unknown')

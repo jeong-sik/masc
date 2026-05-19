@@ -140,15 +140,20 @@ let request_header_of_yojson = function
              | Some f -> f
              | None -> Time_compat.now ()
            in
-           let status =
+           let status_result =
              match List.assoc_opt "status" fields with
-             | Some json -> (
-                 match request_status_of_yojson json with
-                 | Ok s -> s
-                 | Error _ -> `Pending)
-             | None -> `Pending
+             | None -> Ok `Pending
+             | Some json -> request_status_of_yojson json
            in
-           Ok { id; task_id; worker; verifier; created_at; status }
+           (match status_result with
+            | Ok status ->
+                Ok { id; task_id; worker; verifier; created_at; status }
+            | Error err ->
+                Error
+                  (Printf.sprintf
+                     "verification request '%s' has invalid 'status' field: \
+                      %s"
+                     id err))
        | id_opt, task_opt, worker_opt ->
            let missing =
              List.filter_map

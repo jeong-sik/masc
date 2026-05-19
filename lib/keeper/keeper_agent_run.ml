@@ -500,52 +500,21 @@ let run_turn
             }
             : Cascade_runner.cli_transport_overrides)
        in
-       (* Phase 0: wake-time payload telemetry (Option C baseline).
-       Entire block is dead code when MASC_PAYLOAD_TELEMETRY is unset.
-       Compute logic lives in [Keeper_wake_telemetry] for unit tests;
-       exceptions from the telemetry path never abort the LLM call. *)
-       let () =
-         if Env_config_keeper.KeeperTelemetry.payload_telemetry_enabled ()
-         then (
-           try
-             let sizes =
-               Keeper_wake_telemetry.compute_sizes
-                 ~system_prompt:turn_system_prompt
-                 ~tools
-                 ~history_messages
-                 ~user_message
-             in
-             let model_id =
-               match Keeper_model_labels.configured_model_labels_of_meta meta with
-               | m :: _ -> m
-               | [] -> "auto"
-             in
-             let _event : Dashboard_harness_health.wake_payload_event =
-               Dashboard_harness_health.record_wake_payload
-                 ~keeper_name:meta.name
-                 ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                 ~turn_index:start_turn_count
-                 ~model_id
-                 ~context_window:max_context
-                 ~approx_body_bytes:sizes.approx_body_bytes
-                 ~system_prompt_bytes:sizes.system_prompt_bytes
-                 ~tool_defs_bytes:sizes.tool_defs_bytes
-                 ~messages_bytes:sizes.messages_bytes
-                 ~message_count:sizes.message_count
-                 ~role_counts:sizes.role_counts
-                 ~tool_count:sizes.tool_count
-                 ~has_compact_happened:pre_dispatch_compacted
-             in
-             ()
-           with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | exn ->
-             Log.Harness.warn
-               "[wake_payload] telemetry failed keeper=%s: %s"
-               meta.name
-               (Printexc.to_string exn))
-       in
-       let turn_result =
+	       (* Phase 0: wake-time payload telemetry (Option C baseline).
+	       Entire block is dead code when MASC_PAYLOAD_TELEMETRY is unset.
+	       Compute logic lives in [Keeper_wake_telemetry] for unit tests;
+	       exceptions from the telemetry path never abort the LLM call. *)
+	       Turn_helpers.record_wake_payload_if_enabled
+	         ~meta
+	         ~trace_id
+	         ~start_turn_count
+	         ~max_context
+	         ~pre_dispatch_compacted
+	         ~turn_system_prompt
+	         ~tools
+	         ~history_messages
+	         ~user_message;
+	       let turn_result =
          match pre_dispatch_checkpoint_error with
          | Some err -> Error err
          | None ->

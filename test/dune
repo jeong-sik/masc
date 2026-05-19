@@ -279,6 +279,7 @@
   test_keeper_prompt_metrics
   test_keeper_reaction_ledger
   test_cache_metrics_wiring
+  test_keeper_bash_descriptor_variant
   test_tool_surface_ssot
   test_keeper_retrieval_quality
   test_observability_redact
@@ -596,6 +597,7 @@
   test_keeper_prompt_metrics
   test_keeper_reaction_ledger
   test_cache_metrics_wiring
+  test_keeper_bash_descriptor_variant
   test_tool_surface_ssot
   test_keeper_retrieval_quality
   test_observability_redact

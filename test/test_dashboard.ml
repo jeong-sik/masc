@@ -295,7 +295,7 @@ let test_keepers_section_with_error_truncated () =
   let long_err =
     "this is a long error message that should exceed the default display length of 35 chars and therefore be truncated with an ellipsis"
   in
-  Lib.Keeper_registry.record_error ~base_path:dir "echo" long_err;
+  Lib.Keeper_registry_error_recording.record ~base_path:dir "echo" long_err;
   let now = Unix.gettimeofday () in
   let section = Lib.Dashboard.keepers_section now in
   let line = List.hd section.content in

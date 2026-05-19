@@ -80,7 +80,7 @@ let test_crash_heartbeat_failure () =
   ignore (R.dispatch_event ~base_path:bp "hb-crash"
     (KSM.Fiber_terminated { outcome = "heartbeat_failure"; provider_id = None; http_status = None }));
   R.record_crash ~base_path:bp "hb-crash" 1000.0 reason_str;
-  R.record_error ~base_path:bp "hb-crash" reason_str;
+  Masc_mcp.Keeper_registry_error_recording.record ~base_path:bp "hb-crash" reason_str;
   Eio.Promise.resolve reg.done_r (`Crashed reason_str);
   (* Assert: registry state *)
   (match R.get ~base_path:bp "hb-crash" with
@@ -112,7 +112,7 @@ let test_crash_generic_exception () =
   ignore (R.dispatch_event ~base_path:bp "exn-crash"
     (KSM.Fiber_terminated { outcome = "exception"; provider_id = None; http_status = None }));
   R.record_crash ~base_path:bp "exn-crash" 1001.0 reason_str;
-  R.record_error ~base_path:bp "exn-crash" reason_str;
+  Masc_mcp.Keeper_registry_error_recording.record ~base_path:bp "exn-crash" reason_str;
   Eio.Promise.resolve reg.done_r (`Crashed reason_str);
   match R.get ~base_path:bp "exn-crash" with
   | None -> fail "expected exn-crash"
@@ -133,7 +133,7 @@ let test_crash_fiber_unresolved () =
   let reason_str = R.failure_reason_to_string fr in
   R.set_failure_reason ~base_path:bp "unresolved" (Some fr);
   R.record_crash ~base_path:bp "unresolved" 1002.0 reason_str;
-  R.record_error ~base_path:bp "unresolved" reason_str;
+  Masc_mcp.Keeper_registry_error_recording.record ~base_path:bp "unresolved" reason_str;
   ignore (R.dispatch_event ~base_path:bp "unresolved"
     (KSM.Fiber_terminated { outcome = "unresolved"; provider_id = None; http_status = None }));
   Eio.Promise.resolve reg.done_r (`Crashed reason_str);
@@ -387,7 +387,7 @@ let test_crash_turn_failures () =
   ignore (R.dispatch_event ~base_path:bp "turn-crash"
     (KSM.Fiber_terminated { outcome = "turn failure"; provider_id = None; http_status = None }));
   R.record_crash ~base_path:bp "turn-crash" 2000.0 reason_str;
-  R.record_error ~base_path:bp "turn-crash" reason_str;
+  Masc_mcp.Keeper_registry_error_recording.record ~base_path:bp "turn-crash" reason_str;
   Eio.Promise.resolve reg.done_r (`Crashed reason_str);
   match R.get ~base_path:bp "turn-crash" with
   | None -> fail "expected turn-crash"

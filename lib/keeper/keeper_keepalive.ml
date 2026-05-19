@@ -630,7 +630,7 @@ let record_keeper_crashed
       keeper_name
       (Keeper_state_machine.Fiber_terminated { outcome; provider_id = None; http_status = None });
     Keeper_registry.record_crash ~base_path keeper_name (Time_compat.now ()) reason;
-    Keeper_registry.record_error ~base_path keeper_name reason;
+    Keeper_registry_error_recording.record ~base_path keeper_name reason;
     publish_keeper_phase_lifecycle
       ~phase:Keeper_state_machine.Crashed
       ~keeper_name

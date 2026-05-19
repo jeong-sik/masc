@@ -3,12 +3,12 @@ rfc: "0119"
 title: "Observer spec mapping table drift lint — sentinel-marker validator for OCaml↔TLA+ collapse projections"
 status: Draft
 created: 2026-05-17
-updated: 2026-05-17
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0072", "0113", "0114", "0115", "0116", "0117", "0118"]
-implementation_prs: []
+implementation_prs: [15967]
 ---
 
 # RFC-0119: Observer spec mapping table drift lint — sentinel-marker validator for OCaml↔TLA+ collapse projections

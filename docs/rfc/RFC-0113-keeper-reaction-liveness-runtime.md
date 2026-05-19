@@ -3,12 +3,12 @@ rfc: "0113"
 title: "KeeperReactionLiveness L1–L5 runtime — phased OCaml mirror of TLA+ design ground"
 status: Draft
 created: 2026-05-17
-updated: 2026-05-17
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0002", "0003", "0020", "0042", "0072"]
-implementation_prs: []
+implementation_prs: [15937]
 ---
 
 # RFC-0113: KeeperReactionLiveness L1–L5 runtime — phased OCaml mirror of TLA+ design ground

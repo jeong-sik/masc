@@ -3,12 +3,12 @@ rfc: "0072"
 title: "Type-encoded keeper sub-FSM transitions (cascade + turn_phase)"
 status: Draft
 created: 2026-05-12
-updated: 2026-05-12
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0002", "0039", "0042", "0046"]
-implementation_prs: []
+implementation_prs: [14880,14903,14908,14912,14918,14927,14938]
 ---
 
 # RFC-0072 — Type-encoded keeper sub-FSM transitions (cascade + turn_phase)

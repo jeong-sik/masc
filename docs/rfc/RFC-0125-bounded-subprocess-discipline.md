@@ -3,12 +3,12 @@ rfc: "0125"
 title: "Bounded subprocess discipline: per-call Switch scope + Fiber.first timeout race"
 status: Draft
 created: 2026-05-17
-updated: 2026-05-17
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0072", "0097", "0101", "0106"]
-implementation_prs: []
+implementation_prs: [15940,15973]
 ---
 
 # RFC-0125 — Bounded subprocess discipline

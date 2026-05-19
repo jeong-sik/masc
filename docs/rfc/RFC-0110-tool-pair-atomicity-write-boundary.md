@@ -3,12 +3,12 @@ rfc: "0110"
 title: "Tool-pair atomicity at write boundary — sunset compaction repair fabrication"
 status: Draft
 created: 2026-05-17
-updated: 2026-05-17
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0077", "0088"]
-implementation_prs: []
+implementation_prs: [15924]
 ---
 
 # RFC-0110: Tool-pair atomicity at write boundary — sunset compaction repair fabrication

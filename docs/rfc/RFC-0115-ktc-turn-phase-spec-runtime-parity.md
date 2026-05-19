@@ -3,12 +3,12 @@ rfc: "0115"
 title: "KTC turn_phase spec ← runtime parity — backfill spec for Turn_routing / Turn_exhausted"
 status: Draft
 created: 2026-05-17
-updated: 2026-05-17
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0002", "0042", "0072", "0113", "0114"]
-implementation_prs: []
+implementation_prs: [15944]
 ---
 
 # RFC-0115: KTC turn_phase spec ← runtime parity — backfill spec for Turn_routing / Turn_exhausted

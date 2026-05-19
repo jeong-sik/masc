@@ -3,12 +3,12 @@ rfc: "0080"
 title: "Tool registry SSOT — collapse 15-fold OR membership into typed Tool_name boundary"
 status: Draft
 created: 2026-05-14
-updated: 2026-05-14
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0070", "0072"]
-implementation_prs: []
+implementation_prs: [15207,15268,15271]
 ---
 
 # RFC-0080 — Tool registry SSOT

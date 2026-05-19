@@ -3,12 +3,12 @@ rfc: "0096"
 title: "Keeper Turn Contract — multi-turn reasoning + tier-group SPOF root-fix"
 status: Draft
 created: 2026-05-17
-updated: 2026-05-17
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0084", "0085", "0086", "0087", "0089"]
-implementation_prs: []
+implementation_prs: [15688]
 ---
 
 # RFC-0096 — Keeper Turn Contract: multi-turn reasoning + tier-group SPOF

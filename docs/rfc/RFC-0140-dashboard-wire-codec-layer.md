@@ -3,12 +3,12 @@ rfc: "0140"
 title: "Dashboard Wire-Format Codec Layer"
 status: Draft
 created: 2026-05-19
-updated: 2026-05-19
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0135", "0139"]
-implementation_prs: []
+implementation_prs: [16700]
 ---
 
 # RFC-0140: Dashboard Wire-Format Codec Layer

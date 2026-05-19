@@ -44,6 +44,16 @@ type event =
       error_message: string option [@default None];
       exit_code: int option [@default None];
       stderr_excerpt: string option [@default None];
+      (* Typed failure classification preserved alongside [success].
+         [success = false] without a [failure_class] is now an
+         observable gap — downstream consumers (telemetry_unified
+         dedupe, dashboard attribution) can stop reconstructing the
+         class from [error_message] substrings.  RFC-0088 §1 root-fix
+         seam for the "Tool_called row carries no typed failure_class"
+         finding (PR-6).  Producer migration that actually populates
+         this field for every error path is tracked separately so this
+         introduction PR keeps the record-shape change surgical. *)
+      failure_class: Tool_result.tool_failure_class option [@default None];
     }
   | Tool_assigned of {
       agent_id: string;

@@ -22,7 +22,11 @@ let required_trimmed_string field = function
   | `String value ->
       let trimmed = String.trim value in
       if trimmed = "" then Error (field ^ " must not be empty") else Ok trimmed
-  | _ -> Error (field ^ " must be a string")
+  | `Null -> Error (Printf.sprintf "%s is required (got null)" field)
+  | other ->
+      Error
+        (Printf.sprintf "%s must be a string, got %s: %s" field
+           (Json_util.kind_name other) (Json_util.excerpt other))
 
 let option_string json =
   match json with
@@ -125,4 +129,7 @@ let of_yojson (json : Yojson.Safe.t) =
        | Yojson.Json_error msg -> Error ("worker execution spec JSON error: " ^ msg)
        | Type_error (msg, _) -> Error ("worker execution spec type error: " ^ msg)
        | Failure msg -> Error msg)
-  | _ -> Error "worker execution spec must be a JSON object"
+  | other ->
+      Error
+        (Printf.sprintf "worker execution spec must be a JSON object, got %s: %s"
+           (Json_util.kind_name other) (Json_util.excerpt other))

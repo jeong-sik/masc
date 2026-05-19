@@ -64,6 +64,48 @@ let record_escalation_log ~keeper_name ~keeper_turn_id ~turn_id ~reason_string ~
       ()
 ;;
 
+let persist_turn_livelock_pause
+      ~(config : Coord.config)
+      ~(meta : Keeper_types.keeper_meta)
+      ~(detail : string)
+  : unit
+  =
+  let blocker =
+    Keeper_types.blocker_info_of_class
+      ~detail
+      Keeper_types.Turn_livelock_blocked
+  in
+  let updated =
+    { meta with
+      paused = true
+    ; updated_at = Keeper_types.now_iso ()
+    ; runtime = { meta.runtime with last_blocker = Some blocker }
+    }
+  in
+  match Keeper_types.write_meta ~force:true config updated with
+  | Ok () ->
+    Keeper_registry.update_meta ~base_path:config.base_path meta.name updated;
+    Keeper_registry.dispatch_event_unit
+      ~base_path:config.base_path
+      meta.name
+      Keeper_state_machine.Operator_pause;
+    Log.Keeper.warn
+      ~keeper_name:meta.name
+      "paused keeper %s after turn livelock block: %s"
+      meta.name
+      detail
+  | Error err ->
+    Prometheus.inc_counter
+      Keeper_metrics.metric_keeper_write_meta_failures
+      ~labels:[ "keeper", meta.name; "phase", "turn_livelock_pause" ]
+      ();
+    Log.Keeper.warn
+      ~keeper_name:meta.name
+      "failed to persist turn livelock pause for %s: %s"
+      meta.name
+      err
+;;
+
 let handle
       ~(config : Coord.config)
       ~(meta : Keeper_types.keeper_meta)
@@ -103,5 +145,10 @@ let handle
     ~prev:Keeper_turn_fsm.Cascade_routing
     (Keeper_turn_fsm.Failed
        (Keeper_turn_fsm.Failure_turn_livelock_blocked { reason = reason_string }));
+  (* Persist paused state + dispatch Operator_pause so the next heartbeat
+     does not re-enter the same livelock guard path.  Without this, the
+     scheduler observed total_turns+1 candidate turn and re-blocked the
+     same (keeper, turn_id), fuelling the repeated ERROR log surface. *)
+  persist_turn_livelock_pause ~config ~meta ~detail:error_message;
   Error (Agent_sdk.Error.Internal error_message)
 ;;

@@ -48,6 +48,7 @@ let non_overflow_classes_are_not_matched () =
     KT.Turn_timeout_after_queue_wait;
     KT.Oas_timeout_budget;
     KT.Turn_timeout;
+    KT.Turn_livelock_blocked;
     KT.Completion_contract_violation;
     KT.No_tool_capable_provider;
     KT.Fiber_unresolved;

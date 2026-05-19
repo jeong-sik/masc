@@ -28,6 +28,7 @@
  keeper_metric_emit_dropped_site
  keeper_post_turn_wirein_failure_site
  atomic_orphan_size_class
+ operator_control_context_snapshot
  silent_dashboard_actor_outcome
  sse_jsonrpc_filter
  prometheus_format

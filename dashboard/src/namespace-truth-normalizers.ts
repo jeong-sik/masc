@@ -17,7 +17,6 @@ import type {
   DashboardReadinessSummary,
   DashboardNamespaceTruthRecommendationSummary,
   DashboardNamespaceTruthResponse,
-  PendingConfirmSummary,
 } from './types'
 
 // normalizePendingConfirmSummary imported from pending-confirm.ts (SSOT)

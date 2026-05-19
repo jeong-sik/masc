@@ -12,7 +12,7 @@ import type {
   GovernanceDecisionItem, GovernanceExecutedRoute,
   GovernanceGuardrailState, GovernanceJudgeSummary, GovernanceJudgment,
   KeeperApprovalQueueItem,
-  GovernanceResolvedAction, GovernanceTimelineEvent, PendingConfirmation,
+  GovernanceResolvedAction, GovernanceTimelineEvent,
   SubBoard, SubBoardAccess,
 } from '../types'
 

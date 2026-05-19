@@ -179,7 +179,7 @@ function KeeperActionRow({ keeper }: { keeper: Keeper }) {
               disabled=${busy.value}
               onClick=${() => handle('boot')}
               title="기동: offline keeper 를 다시 시작합니다 (offline → running)"
-            >기동<//>`
+            >기동하기<//>`
           : null}
         ${vis.canPause
           ? html`<${ActionButton}
@@ -188,7 +188,7 @@ function KeeperActionRow({ keeper }: { keeper: Keeper }) {
               disabled=${busy.value}
               onClick=${() => handle('pause')}
               title="일시정지: 실행 중인 keeper 를 일시 멈춥니다 (running → paused, 현재 turn 은 정상 종료)"
-            >일시정지<//>`
+            >일시정지하기<//>`
           : null}
         ${vis.canResume
           ? html`<${ActionButton}
@@ -197,7 +197,7 @@ function KeeperActionRow({ keeper }: { keeper: Keeper }) {
               disabled=${busy.value}
               onClick=${() => handle('resume')}
               title="재개: 일시정지된 keeper 를 다시 실행합니다 (paused → running)"
-            >재개<//>`
+            >재개하기<//>`
           : null}
         ${vis.canWake && !vis.canBoot
           ? html`<${ActionButton}
@@ -215,7 +215,7 @@ function KeeperActionRow({ keeper }: { keeper: Keeper }) {
               disabled=${busy.value}
               onClick=${() => handle('shutdown')}
               title="종료: keeper 를 완전 종료합니다 (running/paused → offline, fiber + 리소스 정리)"
-            >종료<//>`
+            >종료하기<//>`
           : null}
       </div>
     </article>

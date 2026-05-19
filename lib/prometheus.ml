@@ -120,6 +120,7 @@ let metric_pool_idle_total = Pool_metrics.metric_idle_total
 let metric_pool_inflight_total = Pool_metrics.metric_inflight_total
 let metric_pool_reuse_total = Pool_metrics.metric_reuse_total
 let metric_pool_evict_total = Pool_metrics.metric_evict_total
+let metric_pool_evict_failure_total = Pool_metrics.metric_evict_failure_total
 let metric_pool_create_total = Pool_metrics.metric_create_total
 
 include Prometheus_policy_metric_names
@@ -374,6 +375,8 @@ let update_pool_metrics_gauges () =
     set_gauge metric_pool_idle_total (float_of_int stats.total_idle);
     set_gauge metric_pool_reuse_total (float_of_int stats.reuse_count_total);
     set_gauge metric_pool_evict_total (float_of_int stats.evict_count_total);
+    set_gauge metric_pool_evict_failure_total
+      (float_of_int stats.evict_failure_count_total);
     set_gauge metric_pool_create_total (float_of_int stats.create_count_total)
 ;;
 

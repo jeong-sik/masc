@@ -11,6 +11,7 @@
     - [masc_pool_inflight_total] (gauge)
     - [masc_pool_reuse_total] (counter)
     - [masc_pool_evict_total] (counter)
+    - [masc_pool_evict_failure_total] (counter)
     - [masc_pool_create_total] (counter)
 
     The cumulative counters use [Pool.stats.*_total] snapshot values
@@ -32,6 +33,13 @@ val metric_reuse_total : string
 
 val metric_evict_total : string
 (** [masc_pool_evict_total] — counter, single time series. *)
+
+val metric_evict_failure_total : string
+(** [masc_pool_evict_failure_total] — counter, single time series.
+    Increments when the periodic eviction fiber catches an exception
+    while sweeping idle entries. Operator-visible signal that the
+    pool's TTL cleanup is silently failing (previously swallowed by
+    [with _ -> ()]). *)
 
 val metric_create_total : string
 (** [masc_pool_create_total] — counter, single time series. *)

@@ -169,6 +169,11 @@ type stats = {
   total_inflight : int;
   reuse_count_total : int;
   evict_count_total : int;
+  (** Increments when the periodic eviction fiber catches an
+      exception while sweeping idle entries. Operator-visible signal
+      that the pool's TTL cleanup is silently failing. Surfaced as
+      [masc_pool_evict_failure_total] in Prometheus. *)
+  evict_failure_count_total : int;
   create_count_total : int;
 }
 

@@ -8,6 +8,18 @@
 
 open Yojson.Safe.Util
 
+let json_kind_name : Yojson.Safe.t -> string = function
+  | `Null -> "null"
+  | `Bool _ -> "bool"
+  | `Int _ -> "int"
+  | `Intlit _ -> "intlit"
+  | `Float _ -> "float"
+  | `String _ -> "string"
+  | `Assoc _ -> "object"
+  | `List _ -> "array"
+  | `Tuple _ -> "tuple"
+  | `Variant _ -> "variant"
+
 let parse_task_contract args =
   match args |> member "contract" with
   | `Null -> Ok None
@@ -17,7 +29,11 @@ let parse_task_contract args =
       | Error error ->
           Error
             (Printf.sprintf "Invalid contract payload: %s" error))
-  | _ -> Error "contract must be an object when provided"
+  | other ->
+      Error
+        (Printf.sprintf
+           "contract must be an object when provided (received %s)"
+           (json_kind_name other))
 
 let is_internal_marker key =
   String.length key > 0 && Char.equal key.[0] '_'
@@ -145,7 +161,11 @@ let parse_handoff_context ~(agent_name : string)
                    updated_at = Some (Masc_domain.now_iso ());
                    updated_by = Some agent_name;
                  }))
-  | _ -> Error "handoff_context must be an object when provided"
+  | other ->
+      Error
+        (Printf.sprintf
+           "handoff_context must be an object when provided (received %s)"
+           (json_kind_name other))
 
 let transition_known_args =
   [

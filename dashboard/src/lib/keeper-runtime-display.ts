@@ -196,6 +196,7 @@ const runtimeBlockerLabels = {
   turn_timeout_after_queue_wait: '대기 후 턴 만료',
   oas_timeout_budget: 'OAS 응답 만료',
   turn_timeout: '턴 응답 만료',
+  turn_livelock_blocked: '턴 livelock 차단',
   completion_contract_violation: '완료 계약 위반',
   cascade_exhausted: '캐스케이드 소진',
   no_tool_capable_provider: '도구 실행 Provider 없음',

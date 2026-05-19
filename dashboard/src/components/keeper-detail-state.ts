@@ -16,7 +16,10 @@ registerKeeperTurnRefresh((keeperName: string) => {
       void loadTrajectory(keeperName)
     })
     .catch(err => {
-      console.debug('[keeper] trajectory refresh unavailable', err instanceof Error ? err.message : '')
+      // Mirrors sse-store.ts §256: when the trajectory module fails to load,
+      // the keeper detail timeline goes stale silently. Promote to warn so
+      // operators see it without changing DevTools filter level.
+      console.warn('[keeper] trajectory refresh unavailable', err instanceof Error ? err.message : '')
     })
 })
 

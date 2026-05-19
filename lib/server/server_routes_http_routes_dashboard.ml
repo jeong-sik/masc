@@ -1246,14 +1246,37 @@ let rec add_routes ~sw ~clock router =
              ]
          in
          let timing = Server_timing.create () in
-         let result =
-           Server_timing.measure timing Telemetry_query (fun () ->
-             Telemetry_unified.read_unified_result ~base_path ~masc_root ~sources
-               ?keeper_name ?session_id ?operation_id ?worker_run_id
-               ?since_ts ?until_ts ~n ())
+         (* Phase 2 Action 5 — 1s TTL cache.  Telemetry callers (dashboard
+            polling, autonomous reload checks) frequently re-issue the same
+            (keeper, session_id, source, n) query within tight loops.  A 1s
+            TTL is short enough to keep "near-live" semantics while
+            deduplicating storms.  All query parameters participate in the
+            cache key so two different windows never collide. *)
+         let sources_key =
+           sources
+           |> List.map Telemetry_unified.source_to_string
+           |> List.sort String.compare
+           |> String.concat ","
          in
-         let generated_at = Masc_domain.now_iso () in
-         let json =
+         let opt_str = function None -> "" | Some s -> s in
+         let opt_ts = function None -> "" | Some f -> Printf.sprintf "%.3f" f in
+         let cache_key =
+           Printf.sprintf
+             "telemetry:%s:%s:src=%s:n=%d:k=%s:s=%s:o=%s:w=%s:since=%s:until=%s"
+             base_path masc_root sources_key n
+             (opt_str keeper_name) (opt_str session_id)
+             (opt_str operation_id) (opt_str worker_run_id)
+             (opt_ts since_ts) (opt_ts until_ts)
+         in
+         let dashboard_telemetry_cache_ttl_sec = 1.0 in
+         let compute () =
+           let result =
+             Server_timing.measure timing Telemetry_query (fun () ->
+               Telemetry_unified.read_unified_result ~base_path ~masc_root
+                 ~sources ?keeper_name ?session_id ?operation_id
+                 ?worker_run_id ?since_ts ?until_ts ~n ())
+           in
+           let generated_at = Masc_domain.now_iso () in
            Server_timing.measure timing Json_serialize (fun () ->
              `Assoc [
                ("generated_at", `String generated_at);
@@ -1269,6 +1292,11 @@ let rec add_routes ~sw ~clock router =
                ("truncated", `Bool result.truncated);
                ("entries", `List result.entries);
              ])
+         in
+         let json =
+           Server_timing.measure timing Cache_lookup (fun () ->
+             Dashboard_cache.get_or_compute cache_key
+               ~ttl:dashboard_telemetry_cache_ttl_sec compute)
          in
          Http.Response.json ~compress:true ~request:req
            ~extra_headers:(Server_timing.extra_header timing)

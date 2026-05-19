@@ -2285,3 +2285,4 @@
 
 (include stanzas/test_tool_resource_gate.inc)
 (include stanzas/test_dashboard_worktree_status.inc)
+(include stanzas/test_yojson_type_error.inc)

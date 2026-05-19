@@ -139,6 +139,30 @@ function nextHumanActionLabel(action: string | null): string | null {
   return action
 }
 
+// (attention_reason, next_human_action) pairs that surface the same
+// operator intent in two visually identical lines — e.g.
+//   주의 사유 · 런타임 근거 확인 필요
+//   다음 액션 · 런타임 근거 확인
+// Backend emits them as separate fields (lib/keeper/keeper_status_bridge.ml:727-742
+// and the fd_pressure / runtime_trust_snapshot peer sites), and we keep
+// the pairing here in dashboard so other consumers that *do* want both
+// (e.g. timeline reconstruction) are unaffected. Adding a new arm to
+// either union without considering the pair is safe — the predicate
+// just returns false and both lines render.
+const ATTENTION_PAIR_DUPLICATES: ReadonlyArray<readonly [AttentionReason, NextHumanAction]> = [
+  ['runtime_blocked', 'inspect_runtime_blocker'],
+  ['paused_blocked', 'inspect_blocker_before_resume'],
+  ['timeout_budget_exhausted', 'inspect_timeout_budget'],
+  ['runtime_trust_snapshot_unavailable', 'inspect_keeper_runtime_trust'],
+]
+const ATTENTION_PAIR_DUPLICATE_KEYS = new Set<string>(
+  ATTENTION_PAIR_DUPLICATES.map(([r, a]) => `${r}|${a}`),
+)
+function isAttentionPairDuplicate(reason: string | null, action: string | null): boolean {
+  if (!reason || !action) return false
+  return ATTENTION_PAIR_DUPLICATE_KEYS.has(`${reason}|${action}`)
+}
+
 // One-time warn per (kind, token) so dev consoles surface backend
 // variants that have no Korean label, without spamming on every render.
 const warnedAttentionTokens = new Set<string>()
@@ -217,6 +241,14 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const pausedRuntimeBlocker = isPaused && runtimeBlockerClass != null
   const attentionReasonText = attentionReasonLabel(attentionReason, isPaused)
   const nextHumanActionText = nextHumanActionLabel(nextHumanAction)
+  // Suppress "다음 액션" when it duplicates the visible "주의 사유" line
+  // above (e.g. runtime_blocked + inspect_runtime_blocker render as
+  // "런타임 근거 확인 필요" / "런타임 근거 확인"). If attentionReasonText
+  // is null (paused suppresses the reason line) we keep next_human_action
+  // visible so the operator still sees what to do.
+  const suppressDuplicateNextAction =
+    attentionReasonText !== null
+    && isAttentionPairDuplicate(attentionReason, nextHumanAction)
   const sandboxTarget = keeper.sandbox_target?.trim() || keeper.sandbox_profile?.trim() || null
   const persistedPolicyCount = keeper.approval_policy_effective?.persisted_rules
   const goalLinkedTasks = keeper.goal_progress?.linked_task_count
@@ -482,7 +514,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         ${attentionReason === 'approval_pending' && pendingApprovalTaskId
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">작업</strong> · ${pendingApprovalTaskId}</span>`
           : null}
-        ${nextHumanActionText
+        ${nextHumanActionText && !suppressDuplicateNextAction
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">다음 액션</strong> · ${nextHumanActionText}</span>`
           : null}
         ${stopCause

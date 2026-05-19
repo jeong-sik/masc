@@ -12,9 +12,19 @@ import {
   _testGetFieldHint,
 } from './connector-config-form'
 
+// Mock api/core — the component uses get/post instead of raw fetch,
+// so we intercept at the module boundary for reliable test control.
+vi.mock('../api/core', () => ({
+  get: vi.fn(),
+  post: vi.fn(),
+}))
+
+import { get, post } from '../api/core'
+
+const mockedGet = vi.mocked(get)
+const mockedPost = vi.mocked(post)
+
 const flushUi = async () => {
-  // Three Promise.resolve cycles cover: schema fetch → JSON parse →
-  // current-values fetch → JSON parse → setEntry → render.
   await Promise.resolve()
   await Promise.resolve()
   await Promise.resolve()
@@ -99,6 +109,8 @@ describe('ConnectorConfigToggle', () => {
   afterEach(() => {
     document.body.removeChild(container)
     vi.restoreAllMocks()
+    mockedGet.mockReset()
+    mockedPost.mockReset()
   })
 
   it('renders ⚙ Config button with aria-expanded=false initially', () => {
@@ -110,19 +122,14 @@ describe('ConnectorConfigToggle', () => {
   })
 
   it('flips aria-expanded to true when clicked', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ ok: true, id: 'discord', schema: { properties: {}, required: [] } }), {
-        status: 200,
-      }),
-    )
+    mockedGet.mockResolvedValue({ ok: true, id: 'discord', schema: { properties: {}, required: [] } })
     render(html`<${ConnectorConfigToggle} connectorId="discord" />`, container)
     const btn = container.querySelector('button')!
     btn.click()
     await flushUi()
     expect(btn.getAttribute('aria-expanded')).toBe('true')
-    expect(fetchSpy).toHaveBeenCalledWith(
+    expect(mockedGet).toHaveBeenCalledWith(
       expect.stringContaining('/api/v1/sidecar/schema?name=discord'),
-      expect.any(Object),
     )
   })
 })
@@ -137,6 +144,8 @@ describe('ConnectorConfigForm', () => {
   afterEach(() => {
     document.body.removeChild(container)
     vi.restoreAllMocks()
+    mockedGet.mockReset()
+    mockedPost.mockReset()
   })
 
   it('renders nothing while closed', () => {
@@ -145,21 +154,16 @@ describe('ConnectorConfigForm', () => {
   })
 
   it('Save button stays disabled while a required field is empty', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          ok: true,
-          id: 'discord',
-          schema: {
-            properties: {
-              DISCORD_BOT_TOKEN: { type: 'string' },
-            },
-            required: ['DISCORD_BOT_TOKEN'],
-          },
-        }),
-        { status: 200 },
-      ),
-    )
+    mockedGet.mockResolvedValue({
+      ok: true,
+      id: 'discord',
+      schema: {
+        properties: {
+          DISCORD_BOT_TOKEN: { type: 'string' },
+        },
+        required: ['DISCORD_BOT_TOKEN'],
+      },
+    })
     render(html`
       <div>
         <${ConnectorConfigToggle} connectorId="discord" />
@@ -179,31 +183,22 @@ describe('ConnectorConfigForm', () => {
   })
 
   it('Save button POSTs to /api/v1/sidecar/config when required field is filled', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    mockedGet
       // 1) schema GET
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            ok: true,
-            id: 'discord',
-            schema: {
-              properties: {
-                GATE_BASE_URL: { type: 'string', default: 'http://localhost:8935' },
-              },
-              required: [],
-            },
-          }),
-          { status: 200 },
-        ),
-      )
+      .mockResolvedValueOnce({
+        ok: true,
+        id: 'discord',
+        schema: {
+          properties: {
+            GATE_BASE_URL: { type: 'string', default: 'http://localhost:8935' },
+          },
+          required: [],
+        },
+      })
       // 2) current-values GET (no file yet)
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ ok: true, exists: false, values: {} }), { status: 200 }),
-      )
-      // 3) save POST
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ ok: true, id: 'discord', written_fields: 1 }), { status: 200 }),
-      )
+      .mockResolvedValueOnce({ ok: true, exists: false, values: {} })
+    // 3) save POST
+    mockedPost.mockResolvedValueOnce({ ok: true, id: 'discord', written_fields: 1 })
 
     render(html`
       <div>
@@ -222,37 +217,33 @@ describe('ConnectorConfigForm', () => {
     await flushUi()
     await flushUi()
 
-    expect(fetchSpy).toHaveBeenCalledTimes(3)
-    const saveCall = fetchSpy.mock.calls[2]
+    expect(mockedGet).toHaveBeenCalledTimes(2)
+    expect(mockedPost).toHaveBeenCalledTimes(1)
+    const saveCall = mockedPost.mock.calls[0]
     expect(saveCall?.[0]).toContain('/api/v1/sidecar/config?name=discord')
-    expect(saveCall?.[1]?.method).toBe('POST')
-    expect(saveCall?.[1]?.body).toContain('GATE_BASE_URL')
+    expect(JSON.stringify(saveCall?.[1])).toContain('GATE_BASE_URL')
   })
 
   it('after Save success, restart button POSTs stop then start in order', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    mockedGet
       // 1) schema GET
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            ok: true,
-            id: 'discord',
-            schema: {
-              properties: { GATE_BASE_URL: { type: 'string', default: 'http://localhost:8935' } },
-              required: [],
-            },
-          }),
-          { status: 200 },
-        ),
-      )
+      .mockResolvedValueOnce({
+        ok: true,
+        id: 'discord',
+        schema: {
+          properties: { GATE_BASE_URL: { type: 'string', default: 'http://localhost:8935' } },
+          required: [],
+        },
+      })
       // 2) current-values GET
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, exists: false, values: {} }), { status: 200 }))
+      .mockResolvedValueOnce({ ok: true, exists: false, values: {} })
+    mockedPost
       // 3) save POST
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }))
+      .mockResolvedValueOnce({ ok: true })
       // 4) stop POST
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, signaled: true }), { status: 200 }))
+      .mockResolvedValueOnce({ ok: true, signaled: true })
       // 5) start POST
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 202 }))
+      .mockResolvedValueOnce({ ok: true })
 
     render(html`
       <div>
@@ -278,28 +269,24 @@ describe('ConnectorConfigForm', () => {
     await new Promise(r => setTimeout(r, 1000))
     await flushUi()
 
-    expect(fetchSpy).toHaveBeenCalledTimes(5)
-    expect(fetchSpy.mock.calls[3]?.[0]).toContain('/api/v1/sidecar/stop?name=discord')
-    expect(fetchSpy.mock.calls[4]?.[0]).toContain('/api/v1/sidecar/start?name=discord')
+    expect(mockedGet).toHaveBeenCalledTimes(2)
+    expect(mockedPost).toHaveBeenCalledTimes(3)
+    expect(mockedPost.mock.calls[1]?.[0]).toContain('/api/v1/sidecar/stop?name=discord')
+    expect(mockedPost.mock.calls[2]?.[0]).toContain('/api/v1/sidecar/start?name=discord')
   })
 
   it('renders where-to-find hint block for DISCORD_BOT_TOKEN when schema contains it', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          ok: true,
-          id: 'discord',
-          schema: {
-            properties: {
-              DISCORD_BOT_TOKEN: { type: 'string' },
-              GATE_BASE_URL: { type: 'string', default: 'http://localhost:8935' },
-            },
-            required: ['DISCORD_BOT_TOKEN'],
-          },
-        }),
-        { status: 200 },
-      ),
-    )
+    mockedGet.mockResolvedValue({
+      ok: true,
+      id: 'discord',
+      schema: {
+        properties: {
+          DISCORD_BOT_TOKEN: { type: 'string' },
+          GATE_BASE_URL: { type: 'string', default: 'http://localhost:8935' },
+        },
+        required: ['DISCORD_BOT_TOKEN'],
+      },
+    })
     render(html`
       <div>
         <${ConnectorConfigToggle} connectorId="discord" />
@@ -319,19 +306,14 @@ describe('ConnectorConfigForm', () => {
 
 
   it('auto-restart OFF by default; Save button label stays "Save"; single POST on click', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            ok: true,
-            id: 'discord',
-            schema: { properties: { GATE_BASE_URL: { type: 'string', default: 'http://x' } }, required: [] },
-          }),
-          { status: 200 },
-        ),
-      )
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, exists: false, values: {} }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 })) // config POST
+    mockedGet
+      .mockResolvedValueOnce({
+        ok: true,
+        id: 'discord',
+        schema: { properties: { GATE_BASE_URL: { type: 'string', default: 'http://x' } }, required: [] },
+      })
+      .mockResolvedValueOnce({ ok: true, exists: false, values: {} })
+    mockedPost.mockResolvedValueOnce({ ok: true })
 
     render(html`
       <div>
@@ -353,26 +335,23 @@ describe('ConnectorConfigForm', () => {
     saveBtn.click()
     await flushUi()
     await flushUi()
-    // schema + values + config POST, no stop/start
-    expect(fetchSpy).toHaveBeenCalledTimes(3)
+    // schema + values GET + config POST, no stop/start
+    expect(mockedGet).toHaveBeenCalledTimes(2)
+    expect(mockedPost).toHaveBeenCalledTimes(1)
   })
 
   it('auto-restart ON: Save button becomes "Save & Apply" and chains config→stop→start', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            ok: true,
-            id: 'discord',
-            schema: { properties: { GATE_BASE_URL: { type: 'string', default: 'http://x' } }, required: [] },
-          }),
-          { status: 200 },
-        ),
-      )
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, exists: false, values: {} }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 })) // config
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, signaled: true }), { status: 200 })) // stop
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 202 })) // start
+    mockedGet
+      .mockResolvedValueOnce({
+        ok: true,
+        id: 'discord',
+        schema: { properties: { GATE_BASE_URL: { type: 'string', default: 'http://x' } }, required: [] },
+      })
+      .mockResolvedValueOnce({ ok: true, exists: false, values: {} })
+    mockedPost
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: true, signaled: true })
+      .mockResolvedValueOnce({ ok: true })
 
     render(html`
       <div>
@@ -395,29 +374,25 @@ describe('ConnectorConfigForm', () => {
     await new Promise(r => setTimeout(r, 1000))
     await flushUi()
 
-    expect(fetchSpy).toHaveBeenCalledTimes(5)
-    const urls = fetchSpy.mock.calls.slice(2).map(c => String(c[0]))
-    expect(urls[0]).toContain('/api/v1/sidecar/config?name=discord')
-    expect(urls[1]).toContain('/api/v1/sidecar/stop?name=discord')
-    expect(urls[2]).toContain('/api/v1/sidecar/start?name=discord')
+    expect(mockedGet).toHaveBeenCalledTimes(2)
+    expect(mockedPost).toHaveBeenCalledTimes(3)
+    expect(mockedPost.mock.calls[0]?.[0]).toContain('/api/v1/sidecar/config?name=discord')
+    expect(mockedPost.mock.calls[1]?.[0]).toContain('/api/v1/sidecar/stop?name=discord')
+    expect(mockedPost.mock.calls[2]?.[0]).toContain('/api/v1/sidecar/start?name=discord')
   })
 
   it('auto-restart soft-stop: if stop rejects, start still fires', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            ok: true,
-            id: 'discord',
-            schema: { properties: { GATE_BASE_URL: { type: 'string', default: 'http://x' } }, required: [] },
-          }),
-          { status: 200 },
-        ),
-      )
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, exists: false, values: {} }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 })) // config
-      .mockRejectedValueOnce(new Error('stop refused')) // stop rejects
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 202 })) // start still fires
+    mockedGet
+      .mockResolvedValueOnce({
+        ok: true,
+        id: 'discord',
+        schema: { properties: { GATE_BASE_URL: { type: 'string', default: 'http://x' } }, required: [] },
+      })
+      .mockResolvedValueOnce({ ok: true, exists: false, values: {} })
+    mockedPost
+      .mockResolvedValueOnce({ ok: true })
+      .mockRejectedValueOnce(new Error('stop refused'))
+      .mockResolvedValueOnce({ ok: true })
 
     render(html`
       <div>
@@ -437,29 +412,24 @@ describe('ConnectorConfigForm', () => {
     await new Promise(r => setTimeout(r, 1000))
     await flushUi()
 
-    expect(fetchSpy).toHaveBeenCalledTimes(5)
-    const last = fetchSpy.mock.calls.slice(-2).map(c => String(c[0]))
-    expect(last[0]).toContain('/sidecar/stop')
-    expect(last[1]).toContain('/sidecar/start')
+    expect(mockedGet).toHaveBeenCalledTimes(2)
+    expect(mockedPost).toHaveBeenCalledTimes(3)
+    expect(mockedPost.mock.calls[1]?.[0]).toContain('/sidecar/stop')
+    expect(mockedPost.mock.calls[2]?.[0]).toContain('/sidecar/start')
   })
 
   it('after toggle + fetch, renders required field marker and password input for token', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          ok: true,
-          id: 'discord',
-          schema: {
-            properties: {
-              DISCORD_BOT_TOKEN: { type: 'string', title: 'Discord Bot Token' },
-              GATE_BASE_URL: { type: 'string', default: 'http://localhost:8935' },
-            },
-            required: ['DISCORD_BOT_TOKEN'],
-          },
-        }),
-        { status: 200 },
-      ),
-    )
+    mockedGet.mockResolvedValue({
+      ok: true,
+      id: 'discord',
+      schema: {
+        properties: {
+          DISCORD_BOT_TOKEN: { type: 'string', title: 'Discord Bot Token' },
+          GATE_BASE_URL: { type: 'string', default: 'http://localhost:8935' },
+        },
+        required: ['DISCORD_BOT_TOKEN'],
+      },
+    })
 
     render(html`
       <div>

@@ -90,35 +90,67 @@ let to_yojson (t : t) : Yojson.Safe.t =
     "created_at", `Float t.created_at;
   ]
 
+let json_kind_name : Yojson.Safe.t -> string = function
+  | `Null -> "null"
+  | `Bool _ -> "bool"
+  | `Int _ -> "int"
+  | `Intlit _ -> "intlit"
+  | `Float _ -> "float"
+  | `String _ -> "string"
+  | `Assoc _ -> "object"
+  | `List _ -> "array"
+  | `Tuple _ -> "tuple"
+  | `Variant _ -> "variant"
+
 let opt_int_of_yojson = function
   | `Null -> Ok None
   | `Int i -> Ok (Some i)
-  | _ -> Error (Invalid_payload "expected null or int")
+  | other ->
+      Error
+        (Invalid_payload
+           (Printf.sprintf "expected null or int (received %s)"
+              (json_kind_name other)))
 
 let assoc_get key = function
   | `Assoc kvs -> (
       match List.assoc_opt key kvs with
       | Some v -> Ok v
       | None -> Error (Missing_field key))
-  | _ -> Error (Invalid_payload "expected JSON object")
+  | other ->
+      Error
+        (Invalid_payload
+           (Printf.sprintf "expected JSON object (received %s)"
+              (json_kind_name other)))
 
 let string_of_yojson key json =
   match assoc_get key json with
   | Ok (`String s) -> Ok s
-  | Ok _ -> Error (Invalid_payload (Printf.sprintf "%s: expected string" key))
+  | Ok other ->
+      Error
+        (Invalid_payload
+           (Printf.sprintf "%s: expected string (received %s)" key
+              (json_kind_name other)))
   | Error e -> Error e
 
 let int_of_yojson key json =
   match assoc_get key json with
   | Ok (`Int i) -> Ok i
-  | Ok _ -> Error (Invalid_payload (Printf.sprintf "%s: expected int" key))
+  | Ok other ->
+      Error
+        (Invalid_payload
+           (Printf.sprintf "%s: expected int (received %s)" key
+              (json_kind_name other)))
   | Error e -> Error e
 
 let float_of_yojson key json =
   match assoc_get key json with
   | Ok (`Float f) -> Ok f
   | Ok (`Int i) -> Ok (float_of_int i)
-  | Ok _ -> Error (Invalid_payload (Printf.sprintf "%s: expected float" key))
+  | Ok other ->
+      Error
+        (Invalid_payload
+           (Printf.sprintf "%s: expected float (received %s)" key
+              (json_kind_name other)))
   | Error e -> Error e
 
 let opt_int_field key json =

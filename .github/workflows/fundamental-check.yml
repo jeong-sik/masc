@@ -110,6 +110,14 @@ jobs:
       - name: Run lint
         run: bash scripts/lint/no-inline-error-envelope.sh
 
+  no-inline-json-kind-name:
+    name: No inline json_kind_name (use Json_util.kind_name)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run lint
+        run: bash scripts/lint/no-inline-json-kind-name.sh
+
   godfile-size-regression:
     name: Godfile size
     runs-on: ubuntu-latest

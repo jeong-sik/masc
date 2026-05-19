@@ -43,7 +43,7 @@ let mark_loop_detected ~(config : Coord.config) meta ~streak ~threshold =
       ~streak
       ~threshold
   in
-  Keeper_registry.enqueue_event
+  Keeper_registry_event_queue.enqueue
     ~base_path:config.base_path
     meta.Keeper_types.name
     stimulus;

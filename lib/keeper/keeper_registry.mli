@@ -441,41 +441,5 @@ val get_phase : base_path:string -> string -> Keeper_state_machine.phase option
 (** Get the observable conditions of a keeper. *)
 val get_conditions : base_path:string -> string -> Keeper_state_machine.conditions option
 
-(** Append a stimulus to the keeper's Event Layer queue.
-
-    Always succeeds when the keeper is registered. Lock-free CAS
-    loop on [entry.event_queue]; concurrent [enqueue_event] callers
-    do not block. Stimuli arrive in the order observed by the CAS
-    winner, which the Policy Layer respects via [Keeper_event_queue.dequeue].
-
-    Logs a warning when [name] is not in the registry — calling sites
-    should not depend on enqueue success for missing keepers. *)
-val enqueue_event :
-  base_path:string -> string -> Keeper_event_queue.stimulus -> unit
-
-(** Snapshot the keeper's Event Layer queue. Returns [Keeper_event_queue.empty]
-    when the keeper is missing. Read-only — does not consume stimuli. *)
-val event_queue_snapshot :
-  base_path:string -> string -> Keeper_event_queue.t
-
-(** Consume at most one stimulus from the keeper's Event Layer queue.
-
-    Returns [Some stim] when the queue had work (and the stimulus is
-    removed from the queue), [None] when the queue is empty or the
-    keeper is not registered. Lock-free CAS retry on
-    [entry.event_queue]; concurrent callers do not block.
-
-    The Policy Layer (turn entry) calls this once per [Emit] tick to
-    drain one stimulus per turn. See RFC-0020 §3 (Rule 4: per-turn
-    dequeue) and KeeperEventQueue.tla Conservation invariant
-    ([dequeued_total <= enqueued_total]). *)
-val dequeue_event :
-  base_path:string -> string -> Keeper_event_queue.stimulus option
-
-val drain_board_events :
-  ?window_sec:float ->
-  base_path:string -> string -> Keeper_event_queue.stimulus list
-(** Drain all board-signal stimuli within [window_sec] from the keeper's
-    event queue using a CAS loop.  Returns the coalesced board signals
-    (urgency-sorted) and updates the queue atomically.  Returns []
-    when the keeper is not found or the queue has no board signals. *)
+(* Event-queue access (enqueue_event / event_queue_snapshot / dequeue_event /
+   drain_board_events) moved to Keeper_registry_event_queue. *)

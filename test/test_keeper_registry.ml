@@ -1108,29 +1108,29 @@ let test_dequeue_event_consumes_fifo () =
     make_stimulus ~urgency:Keeper_event_queue.Immediate "post-2"
       "second"
   in
-  R.enqueue_event ~base_path:bp keeper_name s1;
-  R.enqueue_event ~base_path:bp keeper_name s2;
+  Masc_mcp.Keeper_registry_event_queue.enqueue ~base_path:bp keeper_name s1;
+  Masc_mcp.Keeper_registry_event_queue.enqueue ~base_path:bp keeper_name s2;
   check int "queued before dequeue" 2
     (Keeper_event_queue.length
-       (R.event_queue_snapshot ~base_path:bp keeper_name));
-  (match R.dequeue_event ~base_path:bp keeper_name with
+       (Masc_mcp.Keeper_registry_event_queue.snapshot ~base_path:bp keeper_name));
+  (match Masc_mcp.Keeper_registry_event_queue.dequeue ~base_path:bp keeper_name with
    | Some stim ->
        check string "first post id" "post-1" stim.post_id;
        check string "first payload" "first" stim.payload
    | None -> fail "expected first stimulus");
   check int "one queued after first dequeue" 1
     (Keeper_event_queue.length
-       (R.event_queue_snapshot ~base_path:bp keeper_name));
-  (match R.dequeue_event ~base_path:bp keeper_name with
+       (Masc_mcp.Keeper_registry_event_queue.snapshot ~base_path:bp keeper_name));
+  (match Masc_mcp.Keeper_registry_event_queue.dequeue ~base_path:bp keeper_name with
    | Some stim ->
        check string "second post id" "post-2" stim.post_id;
        check string "second payload" "second" stim.payload
    | None -> fail "expected second stimulus");
   check bool "empty after drain" true
     (Keeper_event_queue.is_empty
-       (R.event_queue_snapshot ~base_path:bp keeper_name));
+       (Masc_mcp.Keeper_registry_event_queue.snapshot ~base_path:bp keeper_name));
   check bool "dequeue empty returns None" true
-    (Option.is_none (R.dequeue_event ~base_path:bp keeper_name))
+    (Option.is_none (Masc_mcp.Keeper_registry_event_queue.dequeue ~base_path:bp keeper_name))
 
 let test_dequeue_event_respects_base_path_and_missing_keeper () =
   R.clear ();
@@ -1138,12 +1138,12 @@ let test_dequeue_event_respects_base_path_and_missing_keeper () =
   let other_bp = "/tmp/test-dequeue-scope-other" in
   ignore (R.register ~base_path:bp name (make_meta name));
   ignore (R.register ~base_path:other_bp name (make_meta name));
-  R.enqueue_event ~base_path:bp name (make_stimulus "scoped" "payload");
+  Masc_mcp.Keeper_registry_event_queue.enqueue ~base_path:bp name (make_stimulus "scoped" "payload");
   check bool "missing keeper returns None" true
-    (Option.is_none (R.dequeue_event ~base_path:bp "missing-dequeue"));
+    (Option.is_none (Masc_mcp.Keeper_registry_event_queue.dequeue ~base_path:bp "missing-dequeue"));
   check bool "other base path stays empty" true
-    (Option.is_none (R.dequeue_event ~base_path:other_bp name));
-  match R.dequeue_event ~base_path:bp name with
+    (Option.is_none (Masc_mcp.Keeper_registry_event_queue.dequeue ~base_path:other_bp name));
+  match Masc_mcp.Keeper_registry_event_queue.dequeue ~base_path:bp name with
   | Some stim -> check string "scoped payload" "payload" stim.payload
   | None -> fail "expected scoped stimulus"
 
@@ -1157,27 +1157,27 @@ let test_wakeup_hint_separate_from_event_payload () =
   let later_payload = make_stimulus "later-post" "later-payload" in
   check bool "initial wakeup false" false (Atomic.get entry.fiber_wakeup);
   check int "initial queue empty" 0
-    (R.event_queue_snapshot ~base_path:bp name |> Keeper_event_queue.length);
+    (Masc_mcp.Keeper_registry_event_queue.snapshot ~base_path:bp name |> Keeper_event_queue.length);
   R.wakeup ~base_path:bp name;
   check bool "wakeup sets hint flag" true (Atomic.get entry.fiber_wakeup);
   check int "wakeup does not synthesize payload" 0
-    (R.event_queue_snapshot ~base_path:bp name |> Keeper_event_queue.length);
+    (Masc_mcp.Keeper_registry_event_queue.snapshot ~base_path:bp name |> Keeper_event_queue.length);
   check bool "wakeup-only dequeue has no payload" true
-    (Option.is_none (R.dequeue_event ~base_path:bp name));
-  R.enqueue_event ~base_path:bp name queued_payload;
+    (Option.is_none (Masc_mcp.Keeper_registry_event_queue.dequeue ~base_path:bp name));
+  Masc_mcp.Keeper_registry_event_queue.enqueue ~base_path:bp name queued_payload;
   check bool "enqueue does not clear wakeup hint" true (Atomic.get entry.fiber_wakeup);
   Atomic.set entry.fiber_wakeup false;
   check int "queued payload survives wakeup reset" 1
-    (R.event_queue_snapshot ~base_path:bp name |> Keeper_event_queue.length);
-  (match R.dequeue_event ~base_path:bp name with
+    (Masc_mcp.Keeper_registry_event_queue.snapshot ~base_path:bp name |> Keeper_event_queue.length);
+  (match Masc_mcp.Keeper_registry_event_queue.dequeue ~base_path:bp name with
    | Some stim ->
        check string "queued post preserved" "queued-post" stim.post_id;
        check string "queued payload preserved" "queued-payload" stim.payload
    | None -> fail "expected queued payload");
   check bool "dequeue does not set wakeup hint" false (Atomic.get entry.fiber_wakeup);
-  R.enqueue_event ~base_path:bp name later_payload;
+  Masc_mcp.Keeper_registry_event_queue.enqueue ~base_path:bp name later_payload;
   check bool "enqueue alone does not wake keeper" false (Atomic.get entry.fiber_wakeup);
-  (match R.dequeue_event ~base_path:bp name with
+  (match Masc_mcp.Keeper_registry_event_queue.dequeue ~base_path:bp name with
    | Some stim -> check string "later payload preserved" "later-payload" stim.payload
    | None -> fail "expected later payload")
 
@@ -1901,12 +1901,12 @@ let test_board_signal_wakeup_only_wakes_opted_in_scope_keeper () =
         KK.wakeup_relevant_keeper_for_board_signal ~config signal;
         check bool "opted-in keeper woken" true (Atomic.get entry_a.fiber_wakeup);
         check int "opted-in keeper queued board stimulus" 1
-          (R.event_queue_snapshot ~base_path:base_dir "opted-in"
+          (Masc_mcp.Keeper_registry_event_queue.snapshot ~base_path:base_dir "opted-in"
            |> Keeper_event_queue.length);
         check bool "defaulted keeper stays asleep" false
           (Atomic.get entry_b.fiber_wakeup);
         check int "defaulted keeper has no stimulus" 0
-          (R.event_queue_snapshot ~base_path:base_dir "defaulted"
+          (Masc_mcp.Keeper_registry_event_queue.snapshot ~base_path:base_dir "defaulted"
            |> Keeper_event_queue.length)))
 
 let test_board_signal_wakeup_keeps_thread_reply_after_self_comment () =
@@ -1970,12 +1970,12 @@ let test_board_signal_wakeup_keeps_thread_reply_after_self_comment () =
         check bool "participant keeper woken" true
           (Atomic.get entry_a.fiber_wakeup);
         check int "participant keeper queued board stimulus" 1
-          (R.event_queue_snapshot ~base_path:base_dir "participant"
+          (Masc_mcp.Keeper_registry_event_queue.snapshot ~base_path:base_dir "participant"
            |> Keeper_event_queue.length);
         check bool "bystander keeper stays asleep" false
           (Atomic.get entry_b.fiber_wakeup);
         check int "bystander keeper has no stimulus" 0
-          (R.event_queue_snapshot ~base_path:base_dir "bystander"
+          (Masc_mcp.Keeper_registry_event_queue.snapshot ~base_path:base_dir "bystander"
            |> Keeper_event_queue.length)))
 
 let test_effective_keepalive_meta_prefers_registry_when_disk_unchanged () =

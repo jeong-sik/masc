@@ -70,6 +70,19 @@ val flush_interval_sec : float
     [flusher_inbox] capped at 1000 messages. *)
 val create_store : unit -> store
 
+(** Reset the per-author comment rate-limit tracker.  Test-only. *)
+val reset_comment_rate_tracker : unit -> unit
+
+(** Check whether [author] is currently rate-limited at time [now].
+    Returns [Some retry_after] if the author has reached the limit,
+    [None] otherwise. *)
+val check_comment_rate_limit : author:string -> now:float -> float option
+
+(** Record a comment timestamp for [author] at time [now].
+    Used internally by [add_comment_with_status]; exposed for test
+    manipulation of the sliding window. *)
+val record_comment_timestamp : author:string -> now:float -> unit
+
 (** {1 Locking + cache invalidation} *)
 
 (** [with_lock store f] runs [f ()] under

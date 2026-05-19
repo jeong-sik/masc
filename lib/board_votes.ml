@@ -696,6 +696,7 @@ let global () = Eio.Lazy.force !global_lazy
 (** Reset global store for test isolation. Next [global ()] call creates fresh store.
     Safe: only called from test setup before concurrent fibers exist. *)
 let reset_global_for_test () =
+  reset_comment_rate_tracker ();
   global_lazy := Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
     let store = create_store () in
     load_persisted_posts store;

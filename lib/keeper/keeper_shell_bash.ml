@@ -2,6 +2,7 @@ open Keeper_types
 open Keeper_exec_shared
 open Keeper_shell_bash_redirects
 open Keeper_shell_bash_words
+module Task_probe = Keeper_shell_bash_task_probe
 
 (* RFC-0084 host-config-cleanup-B — bash binary path migration.
    Resolves the host bash binary once at module-init from the typed
@@ -580,96 +581,6 @@ let lowercase_contains haystack needle =
   in
   loop 0
 
-let task_state_file_probe_command_names =
-  [ "cat"; "head"; "tail"; "ls"; "find"; "rg"; "grep"; "test"; "[" ]
-
-let looks_like_task_state_path_token text =
-  let text = String.lowercase_ascii text in
-  let scoped_masc = lowercase_contains text ".masc/" in
-  let scoped_worktree = lowercase_contains text ".worktrees/" in
-  (scoped_worktree && lowercase_contains text ".task.json")
-  ||
-  (scoped_masc
-   && (lowercase_contains text "backlog.json"
-       || lowercase_contains text "/tasks"
-       || lowercase_contains text "current_task.json"))
-
-let rec command_mentions_task_state_file cmd =
-  let words = shell_words_with_boundaries cmd in
-  let rec loop = function
-    | word :: rest when word.starts_command ->
-      let command_words = strip_command_wrappers (word :: rest) in
-      (match command_words with
-       | bin :: args
-         when List.mem (command_name bin.text) task_state_file_probe_command_names
-              && List.exists
-                   (fun arg -> looks_like_task_state_path_token arg.text)
-                   args ->
-         true
-       | _ -> loop rest)
-    | _ :: rest -> loop rest
-    | [] -> false
-  in
-  loop words
-  ||
-  match shell_c_payload words with
-  | Some payload -> command_mentions_task_state_file payload
-  | None -> false
-
-let rec command_looks_like_task_state_http_probe cmd =
-  let task_api_url text =
-    (lowercase_contains text "localhost"
-     || lowercase_contains text Masc_network_defaults.masc_http_default_host)
-    && (lowercase_contains text "/api/tasks" || lowercase_contains text "api/tasks")
-  in
-  let http_client_names = [ "curl"; "wget"; "http"; "https"; "xh" ] in
-  let words = shell_words_with_boundaries cmd in
-  let rec loop = function
-    | word :: rest when word.starts_command ->
-      let command_words = strip_command_wrappers (word :: rest) in
-      (match command_words with
-       | bin :: args
-         when List.mem (command_name bin.text) http_client_names
-              && List.exists (fun arg -> task_api_url arg.text) args ->
-         true
-       | _ -> loop rest)
-    | _ :: rest -> loop rest
-    | [] -> false
-  in
-  loop words
-  ||
-  match shell_c_payload words with
-  | Some payload -> command_looks_like_task_state_http_probe payload
-  | None -> false
-
-let command_looks_like_task_state_discovery cmd =
-  let task_state_marker =
-    lowercase_contains cmd "backlog"
-    || lowercase_contains cmd ".masc"
-    || (lowercase_contains cmd "task" && lowercase_contains cmd ".json")
-  in
-  command_mentions_task_state_file cmd
-  || command_looks_like_task_state_http_probe cmd
-  ||
-  ((lowercase_contains cmd "find repos" || lowercase_contains cmd "find .")
-   && task_state_marker)
-  ||
-  (lowercase_contains cmd "rg "
-   && lowercase_contains cmd "repos"
-   && task_state_marker)
-
-let task_state_shell_hint =
-  "Do not inspect task state by guessing .masc/backlog.json or repo-local \
-   backlog/task files from keeper_bash. Use keeper_tasks_list for \
-   task/backlog state and keeper_context_status for current_task_id/sandbox \
-   paths."
-
-let task_state_shell_alternatives =
-  [ "keeper_tasks_list include_done=false"
-  ; "keeper_context_status"
-  ; "keeper_task_claim {}"
-  ]
-
 let command_looks_like_search_pipeline cmd =
   (lowercase_contains cmd "grep " || lowercase_contains cmd "rg ")
   && lowercase_contains cmd "| head"
@@ -709,7 +620,7 @@ let bash_shape_block_reason = function
      host file descriptors."
 
 let bash_shape_block_hint ~cmd = function
-  | _ when command_looks_like_task_state_discovery cmd -> task_state_shell_hint
+  | _ when Task_probe.looks_like_discovery cmd -> Task_probe.hint
   | Gh_pr_checks ->
     "Use keeper_pr_status. If raw gh is the only visible status path, use gh \
      pr view NUMBER --repo OWNER/REPO --json \
@@ -749,7 +660,7 @@ let bash_shape_block_hint ~cmd = function
      bash."
 
 let bash_shape_block_alternatives ~cmd = function
-  | _ when command_looks_like_task_state_discovery cmd -> task_state_shell_alternatives
+  | _ when Task_probe.looks_like_discovery cmd -> Task_probe.alternatives
   | Gh_pr_checks ->
     [
       "keeper_pr_status";
@@ -830,8 +741,8 @@ module For_testing = struct
     match keeper_bash_shape_block cmd with
     | Some block -> Some (bash_shape_block_hint ~cmd block)
     | None ->
-      if command_looks_like_task_state_discovery cmd
-      then Some task_state_shell_hint
+      if Task_probe.looks_like_discovery cmd
+      then Some Task_probe.hint
       else None
 end
 
@@ -855,7 +766,7 @@ let bash_shape_block_result ~cmd ~cmd_for_log ~env_snapshot block =
               tool_suggestion =
                 (match block with
                  | Gh_pr_checks -> Some "keeper_pr_status"
-                 | _ when command_looks_like_task_state_discovery cmd ->
+                 | _ when Task_probe.looks_like_discovery cmd ->
                    Some "keeper_tasks_list"
                  | Pipe_or_redirect -> Some "keeper_shell"
                  | Repo_wide_scan -> Some "keeper_shell"
@@ -1276,8 +1187,8 @@ let handle_keeper_bash
          ~reason:
            "Task state is not exposed through guessed localhost HTTP APIs from \
             keeper_bash."
-         ~hint:task_state_shell_hint
-         ~alternatives:task_state_shell_alternatives
+         ~hint:Task_probe.hint
+         ~alternatives:Task_probe.alternatives
          ~retryability:Exec_core.Self_correct
          ~diag:
            (Some
@@ -1285,7 +1196,7 @@ let handle_keeper_bash
               ; explanation =
                   "Keepers must use task-state tools instead of probing \
                    localhost task APIs from shell."
-              ; rewrite = Some task_state_shell_hint
+              ; rewrite = Some Task_probe.hint
               ; tool_suggestion = Some "keeper_tasks_list"
               })
          ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
@@ -1299,8 +1210,8 @@ let handle_keeper_bash
          ~reason:
            "Task state is owned by the MASC task tools, not by guessed \
             backlog/current-task files in keeper sandboxes."
-         ~hint:task_state_shell_hint
-         ~alternatives:task_state_shell_alternatives
+         ~hint:Task_probe.hint
+         ~alternatives:Task_probe.alternatives
          ~retryability:Exec_core.Self_correct
          ~diag:
            (Some
@@ -1308,7 +1219,7 @@ let handle_keeper_bash
               ; explanation =
                   "Keepers must use task-state tools instead of cat/find/rg \
                    against .masc backlog files or worktree .task.json files."
-              ; rewrite = Some task_state_shell_hint
+              ; rewrite = Some Task_probe.hint
               ; tool_suggestion = Some "keeper_tasks_list"
               })
          ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
@@ -1337,9 +1248,9 @@ let handle_keeper_bash
     | Some (tool_name, tool_policy_visible) ->
       direct_tool_command_block ~tool_policy_visible tool_name
     | None when cmd_contains_gh_pr_create cmd -> gh_pr_create_block ()
-    | None when command_mentions_task_state_file cmd ->
+    | None when Task_probe.mentions_task_state_file cmd ->
       task_state_file_probe_block ()
-    | None when command_looks_like_task_state_http_probe cmd ->
+    | None when Task_probe.looks_like_http_probe cmd ->
       task_state_http_probe_block ()
     | None -> begin
     (if stripped_stderr_dev_null then

@@ -160,6 +160,17 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   compacting: '압축 중',
   // KMC
   accumulating: '수집 중',
+  // KCB (LT-16-KCB Phase 3) — circuit breaker display states emitted by
+  // `Keeper_failure_circuit_breaker.display_state_to_string`
+  // (lib/keeper/keeper_failure_circuit_breaker.ml:438):
+  // clean | warning | cooling. The lane is consumed via
+  // `extractLaneValue` (line 30) and the per-keeper KCB badge added in
+  // #16365. Without these entries the Korean facade falls through to
+  // raw English so operators see `KCB clean` while every other axis
+  // renders Korean.
+  clean: '정상',
+  warning: '경고',
+  cooling: '냉각 중',
   // KSM
   running: '가동 중',
   failing: '오류 발생',

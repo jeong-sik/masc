@@ -291,6 +291,18 @@ let label_or_default label fallback =
   | Some value when String.trim value <> "" -> value
   | _ -> fallback
 
+let json_kind_name : Yojson.Safe.t -> string = function
+  | `Null -> "null"
+  | `Bool _ -> "bool"
+  | `Int _ -> "int"
+  | `Intlit _ -> "intlit"
+  | `Float _ -> "float"
+  | `String _ -> "string"
+  | `Assoc _ -> "object"
+  | `List _ -> "array"
+  | `Tuple _ -> "tuple"
+  | `Variant _ -> "variant"
+
 let rec validate_json_value ?label schema value =
   let label = label_or_default label "input" in
   match schema_type schema with
@@ -319,7 +331,10 @@ let rec validate_json_value ?label schema value =
                         | Error _ as error -> error))
               in
               validate_props properties)
-      | _ -> Error (Printf.sprintf "%s must be a JSON object" label))
+      | other ->
+          Error
+            (Printf.sprintf "%s must be a JSON object (received %s)" label
+               (json_kind_name other)))
   | "array" -> (
       match value with
       | `List items ->
@@ -338,23 +353,38 @@ let rec validate_json_value ?label schema value =
                       | Error _ as error -> error)
                 in
                 validate_items items)
-      | _ -> Error (Printf.sprintf "%s must be a JSON array" label))
+      | other ->
+          Error
+            (Printf.sprintf "%s must be a JSON array (received %s)" label
+               (json_kind_name other)))
   | "string" -> (
       match value with
       | `String _ -> Ok ()
-      | _ -> Error (Printf.sprintf "%s must be a string" label))
+      | other ->
+          Error
+            (Printf.sprintf "%s must be a string (received %s)" label
+               (json_kind_name other)))
   | "integer" -> (
       match value with
       | `Int _ -> Ok ()
-      | _ -> Error (Printf.sprintf "%s must be an integer" label))
+      | other ->
+          Error
+            (Printf.sprintf "%s must be an integer (received %s)" label
+               (json_kind_name other)))
   | "number" -> (
       match value with
       | `Int _ | `Float _ -> Ok ()
-      | _ -> Error (Printf.sprintf "%s must be a number" label))
+      | other ->
+          Error
+            (Printf.sprintf "%s must be a number (received %s)" label
+               (json_kind_name other)))
   | "boolean" -> (
       match value with
       | `Bool _ -> Ok ()
-      | _ -> Error (Printf.sprintf "%s must be a boolean" label))
+      | other ->
+          Error
+            (Printf.sprintf "%s must be a boolean (received %s)" label
+               (json_kind_name other)))
   | _ -> Ok ()
 
 let validate_input_json schema json =
@@ -425,7 +455,10 @@ let build_operation_arguments ~agent_name binding json =
                     | None -> build acc rest))
           in
           build [] binding.arg_bindings
-      | _ -> Error "input must be a JSON object")
+      | other ->
+          Error
+            (Printf.sprintf "input must be a JSON object (received %s)"
+               (json_kind_name other)))
 
 let resolve_requested_tool_call ~agent_name ~requested_name ~arguments =
   match sdk_binding_by_name requested_name with

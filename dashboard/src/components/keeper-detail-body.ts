@@ -110,12 +110,14 @@ export function KeeperDetailBody({
       ${'' /* KeeperLiveTruthPanel (derived "Live truth / 런타임 / 현재 턴 / 최신 증거 / 차단" composite) moved to the 진단 / 운영 section as a default-closed CollapsibleSection — it is a heuristic synthesis on top of composite + keeper + runtime_trace + linked_state and lives below the raw-state alert-strip in information hierarchy. */}
       ${'' /* RFC-0046: 6-axis composite snapshot (KSM/KTC/KDP/KCL/KMC/breaker) — SSOT for keeper FSM state */}
       ${'' /* RFC-0046 §7 #2: share useKeeperComposite with FsmHub to dedup the /composite poll */}
-      <${FsmHub}
-        mode="detail"
-        selectedName=${keeper.name}
-        externalSnapshot=${compositeSnapshot}
-        runtimeTrace=${runtimeTrace}
-      />
+      <${CollapsibleSection} title="FSM Hub (6축 상태 머신)" open=${false}>
+        <${FsmHub}
+          mode="detail"
+          selectedName=${keeper.name}
+          externalSnapshot=${compositeSnapshot}
+          runtimeTrace=${runtimeTrace}
+        />
+      <//>
       <${CollapsibleSection} title="Phase State Machine">
         <${KeeperStateDiagramPanel} keeperName=${keeper.name} snapshot=${compositeSnapshot} />
       <//>

@@ -56,6 +56,9 @@ let get_or_create_mutex key =
         Hashtbl.add mutex_registry key m;
         m)
 
+let warn_io_failure ~op ~path exn =
+  Log.warn ~ctx:"jsonl_atomic" "%s failed for %s: %s" op path (Printexc.to_string exn)
+
 let open_writer ~sw ~fs ~path =
   (* Create parent directories *within the provided fs root* — using
      [Eio.Path.mkdirs] on the fs-scoped path matches how [open_out]
@@ -65,7 +68,9 @@ let open_writer ~sw ~fs ~path =
   let dir = Filename.dirname path in
   if dir <> "" && dir <> "." && dir <> "/" then begin
     let eio_dir = Eio.Path.(fs / dir) in
-    try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 eio_dir with _ -> ()
+    try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 eio_dir with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> warn_io_failure ~op:"mkdirs" ~path:dir exn
   end;
   let eio_path = Eio.Path.(fs / path) in
   let sink =
@@ -99,5 +104,7 @@ let close t =
     t.closed <- true;
     (* Eio.Resource.close releases the fd. Idempotent on the resource
        side too, but we guard with [t.closed] for cheap short-circuit. *)
-    try Eio.Resource.close t.sink with _ -> ()
+    try Eio.Resource.close t.sink with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> warn_io_failure ~op:"close" ~path:t.path exn
   end

@@ -185,6 +185,7 @@
   test_tool_exposure
   test_autonomy_liberation
   test_keeper_unified
+  test_keeper_unified_idle_cooldown
   test_decision_pipeline
   test_decision_pipeline_observer
   test_keeper_composite_observer
@@ -484,6 +485,7 @@
   test_tool_exposure
   test_autonomy_liberation
   test_keeper_unified
+  test_keeper_unified_idle_cooldown
   test_decision_pipeline
   test_decision_pipeline_observer
   test_keeper_composite_observer

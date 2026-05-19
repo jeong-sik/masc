@@ -27,7 +27,7 @@ import { LoadingState } from './common/feedback-state'
 import { TextInput } from './common/input'
 import { SurfaceCard } from './common/card'
 import { showToast } from './common/toast'
-import { authHeaders } from '../api/core'
+import { get, post } from '../api/core'
 
 type FieldType = 'string' | 'integer' | 'number' | 'boolean' | 'unknown'
 
@@ -176,15 +176,8 @@ interface ConfigReadResponse {
 }
 
 async function fetchCurrentValues(id: string): Promise<Record<string, string>> {
-  // 4xx is fine here — most likely cause is "config.toml never written" or
-  // tool_auth not configured for the read. Either way the form should fall
-  // back to schema defaults rather than block on the prefill.
   try {
-    const res = await fetch(`/api/v1/sidecar/config?name=${encodeURIComponent(id)}`, {
-      headers: { ...authHeaders(), Accept: 'application/json' },
-    })
-    if (!res.ok) return {}
-    const data = (await res.json()) as ConfigReadResponse
+    const data = await get<ConfigReadResponse>(`/api/v1/sidecar/config?name=${encodeURIComponent(id)}`)
     if (!data.ok || !data.exists) return {}
     return data.values ?? {}
   } catch {
@@ -195,18 +188,12 @@ async function fetchCurrentValues(id: string): Promise<Record<string, string>> {
 async function fetchSchema(id: string) {
   setEntry(id, { loading: true, error: null })
   try {
-    const res = await fetch(`/api/v1/sidecar/schema?name=${encodeURIComponent(id)}`, {
-      headers: { ...authHeaders(), Accept: 'application/json' },
-    })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = (await res.json()) as SchemaResponse
+    const data = await get<SchemaResponse>(`/api/v1/sidecar/schema?name=${encodeURIComponent(id)}`)
     if (!data.ok) throw new Error('schema response missing ok=true')
     const fields = parseSchema(data)
     const current = await fetchCurrentValues(id)
     const values: Record<string, string> = {}
     for (const f of fields) {
-      // Operator's saved value wins over schema default; we keep the
-      // empty string only when the operator has explicitly cleared it.
       values[f.name] = current[f.name] ?? defaultToString(f.default)
     }
     setEntry(id, { fields, values, loading: false })
@@ -233,24 +220,9 @@ async function saveConfig(id: string) {
   }
   setEntry(id, { saving: true })
   try {
-    const res = await fetch(`/api/v1/sidecar/config?name=${encodeURIComponent(id)}`, {
-      method: 'POST',
-      headers: {
-        ...authHeaders(),
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      body: JSON.stringify(entry.values),
-    })
-    if (!res.ok) {
-      const text = await res.text()
-      throw new Error(`HTTP ${res.status}${text ? `: ${text.slice(0, 200)}` : ''}`)
-    }
+    await post(`/api/v1/sidecar/config?name=${encodeURIComponent(id)}`, entry.values)
     setEntry(id, { saving: false, lastSavedAt: Date.now() })
     if (getEntry(id).autoRestart) {
-      // Auto-restart path: apply-config chains save → apply so the
-      // operator doesn't have to click 🔄. "apply" is a soft restart —
-      // stop is best-effort (sidecar may be down), start is strict.
       showToast(`${id} config 저장됨 — 자동 적용 중...`, 'success', 1500)
       await applyConfigChange(id)
     } else {
@@ -269,19 +241,12 @@ async function applyConfigChange(id: string) {
   setEntry(id, { restarting: true })
   try {
     try {
-      await fetch(`/api/v1/sidecar/stop?name=${encodeURIComponent(id)}`, {
-        method: 'POST',
-        headers: { ...authHeaders(), Accept: 'application/json' },
-      })
+      await post(`/api/v1/sidecar/stop?name=${encodeURIComponent(id)}`, {})
     } catch {
       // Stop failures are non-fatal here — target might not be running.
     }
     await new Promise(r => setTimeout(r, 800))
-    const startRes = await fetch(`/api/v1/sidecar/start?name=${encodeURIComponent(id)}`, {
-      method: 'POST',
-      headers: { ...authHeaders(), Accept: 'application/json' },
-    })
-    if (!startRes.ok) throw new Error(`start HTTP ${startRes.status}`)
+    await post(`/api/v1/sidecar/start?name=${encodeURIComponent(id)}`, {})
     showToast(`${id} 재시작 완료 — 새 config 적용됨`, 'success', 2400)
   } catch (err) {
     showToast(err instanceof Error ? err.message : 'apply failed', 'error')

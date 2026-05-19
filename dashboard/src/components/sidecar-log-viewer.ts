@@ -12,7 +12,7 @@ import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
-import { authHeaders } from '../api/core'
+import { get } from '../api/core'
 import { SurfaceCard } from './common/card'
 import { SkeletonText } from './common/skeleton'
 
@@ -95,11 +95,7 @@ function setEntry(id: string, patch: Partial<LogEntry>) {
 async function fetchLogs(id: string, lines: number) {
   setEntry(id, { loading: true, error: null, requestedLines: lines })
   try {
-    const res = await fetch(`/api/v1/sidecar/logs?name=${encodeURIComponent(id)}&lines=${lines}`, {
-      headers: { ...authHeaders(), Accept: 'application/json' },
-    })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = (await res.json()) as LogResponse
+    const data = await get<LogResponse>(`/api/v1/sidecar/logs?name=${encodeURIComponent(id)}&lines=${lines}`)
     setEntry(id, {
       lines: data.lines ?? [],
       logPath: data.log_path ?? '',

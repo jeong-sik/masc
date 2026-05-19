@@ -3,7 +3,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { authHeaders, post } from '../api/core'
+import { del, post } from '../api/core'
 import {
   discoverRepositories,
   fetchRepositoriesList,
@@ -52,14 +52,7 @@ export async function syncRepository(id: string): Promise<void> {
 
 export async function deleteRepository(id: string): Promise<void> {
   try {
-    const res = await fetch(`/api/v1/repositories/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-      headers: authHeaders(),
-    })
-    if (!res.ok) {
-      const text = await res.text().catch(() => '삭제 실패')
-      throw new Error(text || '삭제 실패')
-    }
+    await del(`/api/v1/repositories/${encodeURIComponent(id)}`)
     showToast('저장소 삭제 완료', 'success')
     await fetchRepositories()
     if (selectedRepoId.value === id) {

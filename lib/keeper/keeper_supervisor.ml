@@ -109,13 +109,14 @@ let launch_supervised_fiber
       }
     in
     Keeper_registry.enqueue_event ~base_path meta.name bootstrap_signal;
-    (* RFC-0059 PR-7-pilot: when [MASC_KEEPER_DOMAIN_POOL_ENABLED] is set
-       and the shared typed [Domain_pool] has been installed, route the
-       per-keeper heartbeat body through [Domain_pool.submit_io].  This keeps
-       the main Domain focused on HTTP/SSE/Eio scheduling while centralising
-       the worker weight policy in [Domain_pool]. *)
+    (* RFC-0059 PR-7-pilot originally routed the whole keepalive body through
+       a Domain_pool worker.  Live recovery proved that unsafe: the body is
+       an Eio fiber loop that uses the server switch, clock, turn timeouts, and
+       provider streaming.  Moving it to an Executor_pool domain can touch an
+       Eio switch from the wrong domain and tear down keepers at boot.  Keep
+       the flag observable, but run the supervisor fiber on the owning Eio
+       domain.  Only pure/blocking sub-work should use [Domain_pool]. *)
     let domain_pool_flag = Env_config.KeeperSupervisor.domain_pool_enabled in
-    let pool_for_keeper = if domain_pool_flag then Domain_pool_ref.get () else None in
     let bump_fork_outcome outcome =
       (* Label order mirrors the other [keeper_supervisor.ml] inc_counter
          call sites ([keeper] first, then the discriminator).  Prometheus
@@ -128,39 +129,15 @@ let launch_supervised_fiber
         ()
     in
     let fork_body body =
-      match pool_for_keeper with
-      | Some pool ->
-        bump_fork_outcome "pool";
-        Eio.Fiber.fork ~sw:ctx.sw (fun () ->
-          let run_body_as_result () =
-            try Ok (body ()) with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | exn -> Error (exn, Printexc.get_raw_backtrace ())
-          in
-          match
-            try Ok (Domain_pool.submit_io pool run_body_as_result) with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | exn -> Error exn
-          with
-          | Ok (Ok ()) -> ()
-          | Ok (Error (exn, bt)) ->
-            bump_fork_outcome "body_failed";
-            Log.Keeper.warn
-              "keeper supervise pool body failed: keeper=%s err=%s"
-              meta.name
-              (Printexc.to_string exn);
-            Printexc.raise_with_backtrace exn bt
-          | Error exn ->
-            bump_fork_outcome "submit_failed";
-            Log.Keeper.warn
-              "keeper supervise pool submit failed, running inline: keeper=%s err=%s"
-              meta.name
-              (Printexc.to_string exn);
-            body ())
-      | None ->
-        bump_fork_outcome
-          (if domain_pool_flag then "inline_no_pool" else "inline_disabled");
-        Eio.Fiber.fork ~sw:ctx.sw body
+      bump_fork_outcome
+        (if domain_pool_flag then "inline_eio_required" else "inline_disabled");
+      if domain_pool_flag
+      then
+        Log.Keeper.warn
+          "keeper supervise domain pool ignored for %s: keepalive body requires the \
+           owning Eio domain"
+          meta.name;
+      Eio.Fiber.fork ~sw:ctx.sw body
     in
     fork_body (fun () ->
       let resolved = ref false in

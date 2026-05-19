@@ -4,7 +4,20 @@ module StringMap = Map.Make (String)
 
 let count_context_tokens (ctx : working_context) = Keeper_exec_context.token_count ctx
 
+let has_json_field name fields =
+  List.exists (fun (field, _) -> String.equal field name) fields
+;;
+
+let inferred_failure_class_fields message fields =
+  if has_json_field "failure_class" fields
+  then []
+  else if String_util.contains_substring message "sandbox_image_missing"
+  then [ "failure_class", `String "policy_rejection" ]
+  else []
+;;
+
 let error_json ?(fields = []) (message : string) =
+  let fields = inferred_failure_class_fields message fields @ fields in
   Yojson.Safe.to_string (`Assoc (("error", `String message) :: fields))
 ;;
 

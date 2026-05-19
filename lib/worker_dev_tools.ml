@@ -1049,7 +1049,9 @@ let validate_command_paths ?keeper_id ?base_path ?workdir cmd =
   | None -> Ok ()
   | Some _ ->
       let validate_path_value ~requires_existing_dir token =
-        if not (validate_path ?keeper_id ?base_path ?workdir token.value)
+        if String.equal (strip_wrapping_quotes token.value) "/dev/null"
+        then Ok ()
+        else if not (validate_path ?keeper_id ?base_path ?workdir token.value)
         then
           Error
             (Keeper_path_check_error.(

@@ -166,6 +166,52 @@ let docker_pr_review_cwd ~(config : Coord.config) meta =
   ignore (Keeper_fs.ensure_dir cwd);
   cwd
 
+let pr_review_body_file_dir ~(config : Coord.config) (meta : keeper_meta) =
+  if meta.sandbox_profile = Docker
+  then docker_pr_review_cwd ~config meta
+  else (
+    let root = Keeper_alerting_path.project_root_of_config config in
+    let dir = Filename.concat (Filename.concat root Common.masc_dirname) "pr-review" in
+    ignore (Keeper_fs.ensure_dir dir);
+    dir)
+
+let with_pr_review_body_file ~(config : Coord.config) ~(meta : keeper_meta) ~body f =
+  let dir = pr_review_body_file_dir ~config meta in
+  let rec create_file attempts =
+    let stamp = int_of_float (Unix.gettimeofday () *. 1_000_000.) in
+    let path =
+      Filename.concat
+        dir
+        (Printf.sprintf
+           "body-%s-%d-%d-%d.md"
+           (Coord_utils.safe_filename meta.name)
+           (Unix.getpid ())
+           stamp
+           attempts)
+    in
+    try
+      let oc =
+        open_out_gen
+          [ Open_wronly; Open_creat; Open_excl; Open_binary ]
+          0o600
+          path
+      in
+      Fun.protect ~finally:(fun () -> close_out oc) @@ fun () ->
+      output_string oc body;
+      path
+    with
+    | Sys_error _ when attempts < 8 -> create_file (attempts + 1)
+  in
+  let host_path = create_file 0 in
+  let command_path =
+    if meta.sandbox_profile = Docker then Filename.basename host_path else host_path
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      try Sys.remove host_path with
+      | Sys_error _ -> ())
+    (fun () -> f command_path)
+
 let run_pr_review_shell ~(config : Coord.config) ~(meta : keeper_meta)
     ~timeout_sec ~cmd =
   if meta.sandbox_profile = Docker then
@@ -487,14 +533,17 @@ let handle_keeper_pr_review_comment
                       @ identity_attestation_fields ~config meta))
              | Ok approve_preflight_json ->
                  (* Use gh pr review to create a review *)
-                 let cmd =
-                   Printf.sprintf
-                     "gh pr review %d%s --body %s %s 2>&1"
-                     pr_number repo_flag_arg
-                     (Filename.quote body)
-                     (pr_review_event_to_gh_flag event)
-                 in
                  let result =
+                   with_pr_review_body_file ~config ~meta ~body
+                   @@ fun body_file ->
+                   let cmd =
+                     Printf.sprintf
+                       "gh pr review %d%s --body-file %s %s 2>&1"
+                       pr_number
+                       repo_flag_arg
+                       (Filename.quote body_file)
+                       (pr_review_event_to_gh_flag event)
+                   in
                    run_pr_review_shell
                      ~config
                      ~meta
@@ -557,14 +606,21 @@ let handle_keeper_pr_review_reply
       match effective_repo_slug ~config ~repo with
       | Error msg -> error_json msg
       | Ok owner_repo ->
-        let cmd = Printf.sprintf
-          "gh api repos/%s/pulls/%d/comments/%d/replies -f body=%s 2>&1"
-          owner_repo pr_number comment_id
-          (Filename.quote body) in
         let result =
+          with_pr_review_body_file ~config ~meta ~body
+          @@ fun body_file ->
+          let cmd =
+            Printf.sprintf
+              "gh api repos/%s/pulls/%d/comments/%d/replies -F body=@%s 2>&1"
+              owner_repo
+              pr_number
+              comment_id
+              (Filename.quote body_file)
+          in
           run_pr_review_shell ~config ~meta
             ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Pr_review_post ())
-            ~cmd in
+            ~cmd
+        in
         Log.Keeper.info "pr_review_reply: pr=%d comment=%d keeper=%s ok=%b"
           pr_number comment_id meta.name (status_ok result.status);
         Yojson.Safe.to_string

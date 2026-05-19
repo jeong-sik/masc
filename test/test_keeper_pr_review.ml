@@ -336,7 +336,7 @@ let test_comment_and_approve_route_through_docker () =
       ~args:
         (`Assoc
           [ ("pr_number", `Int 13510)
-          ; ("body", `String "docker comment evidence")
+          ; ("body", `String "docker comment evidence with * and [path] syntax")
           ; ("event", `String "COMMENT")
           ])
   in
@@ -370,6 +370,10 @@ let test_comment_and_approve_route_through_docker () =
   let log = read_file log_path in
   check bool "review comment used gh pr review" true
     (contains_substring log "gh pr review 13510");
+  check bool "review comment uses body-file" true
+    (contains_substring log "--body-file");
+  check bool "review body is not in shell command" false
+    (contains_substring log "docker comment evidence with *");
   check bool "comment event flag passed" true
     (contains_substring log "--comment");
   check bool "approve event flag passed" true
@@ -422,7 +426,7 @@ let test_reply_routes_through_docker_and_infers_repo () =
         (`Assoc
           [ ("pr_number", `Int 13510)
           ; ("comment_id", `Int 3192459689)
-          ; ("body", `String "docker reply evidence")
+          ; ("body", `String "docker reply evidence with * and [path] syntax")
           ])
   in
   check (option string) "reply via docker" (Some "docker")
@@ -444,8 +448,10 @@ let test_reply_routes_through_docker_and_infers_repo () =
   check bool "reply used gh api endpoint with inferred repo" true
     (contains_substring log
        "gh api repos/jeong-sik/masc-mcp/pulls/13510/comments/3192459689/replies");
-  check bool "reply body passed to gh api" true
-    (contains_substring log "docker reply evidence")
+  check bool "reply body uses gh api file field" true
+    (contains_substring log "-F" && contains_substring log "body=@");
+  check bool "reply body is not in shell command" false
+    (contains_substring log "docker reply evidence with *")
 
 let () =
   Alcotest.run "Keeper PR review error UX" [

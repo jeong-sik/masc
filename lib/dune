@@ -140,7 +140,6 @@
  server_mcp_transport_http_agui
  server_mcp_streaming_tools
  mcp_server_eio_tool_timeout
- mcp_server_eio_execute_helpers
   keeper_tool_registry
   keeper_tool_resolution
   keeper_tool_policy_config

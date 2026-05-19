@@ -1079,20 +1079,16 @@ let make_tool_bundle
      turn-start, so the factory defers
      [Keeper_shell_docker.effective_sandbox_profile] resolution until
      each tool call site that already knows its [cwd].  The git variant
-     stays gated by [hard_mode]; when off, it carries a
-     [default_network_override] so resolved runtimes always inherit the
-     host network. *)
+     carries a [default_network_override] so resolved runtimes always
+     inherit the host network. *)
   let turn_sandbox_factory = Some (Keeper_sandbox_factory.create ~config ~meta ()) in
   let turn_sandbox_factory_git =
-    if Env_config_keeper.KeeperSandbox.hard_mode ()
-    then None
-    else
-      Some
-        (Keeper_sandbox_factory.create
-           ~default_network_override:Network_inherit
-           ~config
-           ~meta
-           ())
+    Some
+      (Keeper_sandbox_factory.create
+         ~default_network_override:Network_inherit
+         ~config
+         ~meta
+         ())
   in
   let exec_cache = Some (Masc_exec.Exec_cache.create ()) in
   (* Build Tool.t for the full universe so BM25 and Tool_op can

@@ -201,8 +201,7 @@ let with_fake_docker f =
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_HARD_MODE" "false" f
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" f
 
 let setup_docker_pr_tool f =
   with_eio_fs @@ fun () ->
@@ -374,33 +373,8 @@ let test_pr_create_routes_through_docker () =
     (contains_substring raw "--head"
     && contains_substring raw "feature/docker-pr")
 
-let test_pr_create_hard_mode_routes_through_broker () =
-  with_fake_gh @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_HARD_MODE" "true" @@ fun () ->
-  setup_docker_pr_tool @@ fun ~config ~meta ->
-  let raw =
-    K.handle_keeper_pr_create ~config ~meta
-      ~args:
-        (`Assoc
-          [
-            ("repo", `String "jeong-sik/masc-mcp");
-            ("title", `String "brokered draft PR");
-            ("body", `String "brokered draft PR body");
-            ("base", `String "main");
-            ("head", `String "feature/brokered-pr");
-            ("cwd", `String "repos/masc-mcp");
-          ])
-  in
-  check (option string) "pr create via broker" (Some "brokered")
-    (parse_string_field raw "via");
-  check bool "uses host gh pr create" true
-    (contains_substring raw "gh:pr pr create"
-    || contains_substring raw "gh:pr create");
-  check bool "keeps draft flag" true (contains_substring raw "--draft")
-
 let test_pr_create_recovers_visible_pr_after_transient_504 () =
   with_fake_gh_script fake_gh_pr_create_504_then_view_script @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_HARD_MODE" "true" @@ fun () ->
   setup_docker_pr_tool @@ fun ~config ~meta ->
   let raw =
     K.handle_keeper_pr_create ~config ~meta
@@ -547,8 +521,6 @@ let () =
             test_pr_create_requires_repo_cwd_before_gh;
           test_case "pr create routes through docker" `Quick
             test_pr_create_routes_through_docker;
-          test_case "pr create hard mode routes through broker" `Quick
-            test_pr_create_hard_mode_routes_through_broker;
           test_case "pr create recovers visible PR after transient 504" `Quick
             test_pr_create_recovers_visible_pr_after_transient_504;
         ] );

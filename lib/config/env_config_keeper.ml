@@ -764,7 +764,6 @@ module KeeperSandbox = struct
       module; see {!Env_config_sandbox.Hardening} etc. for the full
       semantics, env var names, and defaults. *)
 
-  let hard_mode = Env_config_sandbox.Hardening.hard_mode
   let docker_image = Env_config_sandbox.Runtime.docker_image
   let preflight_enabled = Env_config_sandbox.Preflight.enabled
   let pids_limit = Env_config_sandbox.Hardening.pids_limit

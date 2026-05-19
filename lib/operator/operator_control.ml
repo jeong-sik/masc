@@ -522,7 +522,6 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
             , Keeper_gh_env.gh_config_dir_of_bundle bundle_root
             , Some err )
       in
-      let hard_mode = Env_config_keeper.KeeperSandbox.hard_mode () in
       let gh_config_dir_exists =
         Sys.file_exists gh_config_dir && Sys.is_directory gh_config_dir
       in
@@ -568,7 +567,6 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
                   ("root_fallback_available",
                     `Bool (Keeper_gh_env.root_gh_config_dir_exists ctx.config));
                   ("operator_fallback_allowed", `Bool false);
-                  ("hard_mode", `Bool hard_mode);
                   ("binding_error",
                     (match binding_error with Some err -> `String err | None -> `Null));
                   ("authenticated", `Bool authenticated);

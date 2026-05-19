@@ -168,60 +168,6 @@ let test_validate_docker_rejects_paths_outside_private_root () =
         check bool "error mentions rejected path" true
           (String.contains err 'w'))
 
-let test_hard_mode_requires_docker_none_identity () =
-  with_env "MASC_KEEPER_SANDBOX_HARD_MODE" "true" @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_RELAX_FS" "false" @@ fun () ->
-  with_temp_config (fun config ->
-    let validate ~github_identity ~sandbox_profile ~network_mode () =
-      KTU.validate_sandbox_settings
-        ~config
-        ~keeper_name:"keeper"
-        ~github_identity
-        ~sandbox_profile
-        ~network_mode
-        ~allowed_paths:[]
-    in
-    (match
-       validate ~github_identity:None
-         ~sandbox_profile:KT.Local ~network_mode:KT.Network_inherit ()
-     with
-     | Ok () -> fail "expected hard mode to reject local profile"
-     | Error err ->
-         check string "requires docker"
-           "MASC_KEEPER_SANDBOX_HARD_MODE requires sandbox_profile=docker"
-           err);
-    (match
-       validate ~github_identity:(Some "anyang-keepers")
-         ~sandbox_profile:KT.Docker ~network_mode:KT.Network_inherit ()
-     with
-     | Ok () -> fail "expected hard mode to reject network inherit"
-     | Error err ->
-         check string "requires network none"
-           "MASC_KEEPER_SANDBOX_HARD_MODE requires network_mode=none; git/gh egress is brokered by structured tools"
-           err);
-    (match
-       validate ~github_identity:None
-         ~sandbox_profile:KT.Docker ~network_mode:KT.Network_none ()
-     with
-     | Ok () -> fail "expected hard mode to reject missing github_identity"
-     | Error err ->
-         check bool "requires effective identity" true
-           (contains_substring err "effective GitHub identity");
-         check bool "points at root bundle" true
-           (contains_substring err "github-identities/root/gh"));
-    ensure_dir (KGH.root_gh_config_dir config);
-    (match
-       validate ~github_identity:None
-         ~sandbox_profile:KT.Docker ~network_mode:KT.Network_none ()
-     with
-     | Ok () -> ()
-     | Error err -> fail ("expected root fallback to validate: " ^ err));
-    (match
-       validate ~github_identity:(Some "anyang-keepers")
-         ~sandbox_profile:KT.Docker ~network_mode:KT.Network_none ()
-     with
-     | Ok () -> ()
-     | Error err -> fail ("expected hard mode settings to validate: " ^ err)))
 
 let () =
   run "Keeper_allowed_paths"
@@ -245,7 +191,5 @@ let () =
             test_validate_docker_allows_private_root_paths;
           test_case "docker rejects paths outside private root" `Quick
             test_validate_docker_rejects_paths_outside_private_root;
-          test_case "hard mode requires docker none identity" `Quick
-            test_hard_mode_requires_docker_none_identity;
         ] );
     ]

@@ -1314,12 +1314,7 @@ let handle_keeper_bash
          ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
          ())
   in
-  if Env_config_keeper.KeeperSandbox.hard_mode ()
-     && meta.sandbox_profile <> Docker
-  then
-    error_json
-      "MASC_KEEPER_SANDBOX_HARD_MODE requires sandbox_profile=docker"
-  else if cmd = "" && has_typed_bash_input_key args
+  if cmd = "" && has_typed_bash_input_key args
   then
     handle_keeper_bash_typed
       ~turn_sandbox_factory
@@ -1620,27 +1615,6 @@ let handle_keeper_bash
            ()))
     else if cmd_contains_gh_pr_create cmd
     then gh_pr_create_block ()
-    else if base_profile = Docker
-            && Env_config_keeper.KeeperSandbox.hard_mode ()
-            && Keeper_shell_shared.cmd_targets_gh cmd
-    then (
-      Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_shell_bash_failures
-        ~labels:[("keeper", meta.name); ("site", "hard_mode")]
-        ();
-      Log.Keeper.warn
-        "keeper_bash gh blocked by hard mode: keeper=%s cmd=%s"
-        meta.name cmd_for_log;
-      Yojson.Safe.to_string
-        (`Assoc
-           [ "ok", `Bool false
-           ; "error", `String "gh_requires_brokered_structured_tool"
-           ; "reason", `String
-               "MASC_KEEPER_SANDBOX_HARD_MODE keeps Docker containers on network=none and forbids host credential mounts"
-           ; "hint", `String
-               "Use keeper_shell op=gh cmd=\"...\"; hard mode runs validated gh commands through the host broker with keeper-scoped GH_CONFIG_DIR."
-           ; "cmd", `String cmd_for_log
-           ]))
     else if Worker_dev_tools.is_git_branch_switch cmd
             && not (write_enabled && in_playground)
     then (
@@ -1776,19 +1750,17 @@ let handle_keeper_bash
           ~network_mode:sandbox_network_mode))
     else
       let local_reason =
-        if Env_config_keeper.KeeperSandbox.hard_mode () then "hard_mode_local"
-        else if meta.sandbox_profile = Local then "declared_local_profile"
+        if meta.sandbox_profile = Local then "declared_local_profile"
         else if not (Env_config_keeper.DockerPlayground.enabled) then
           "playground_disabled"
         else "outside_playground"
       in
       Log.Keeper.info
         "LOCAL_EXEC: keeper=%s cwd=%s reason=%s sandbox_profile=%s \
-         playground=%b hard_mode=%b"
+         playground=%b"
         meta.name cwd local_reason
         (sandbox_profile_to_string meta.sandbox_profile)
-        in_playground
-        (Env_config_keeper.KeeperSandbox.hard_mode ());
+        in_playground;
       Prometheus.inc_counter
         Keeper_metrics.metric_keeper_bash_local_execution
         ~labels:[ ("keeper", meta.name); ("reason", local_reason) ]

@@ -289,16 +289,13 @@ let rewrite_docker_command_paths_for_host_validation
    must never silently upgrade to Docker.  DockerPlayground is a runtime
    capability switch, not permission to reinterpret sandbox_profile=local. *)
 let effective_sandbox_profile ~(meta : keeper_meta) ~in_playground =
-  if Env_config_keeper.KeeperSandbox.hard_mode ()
-  then meta.sandbox_profile, meta.network_mode
-  else (
-    match meta.sandbox_profile with
-    | Docker ->
-      (* Invariant: meta=Docker → effective=Docker. No silent host fallback. *)
-      Docker, meta.network_mode
-    | Local ->
-      let _ = in_playground in
-      Local, meta.network_mode)
+  match meta.sandbox_profile with
+  | Docker ->
+    (* Invariant: meta=Docker → effective=Docker. No silent host fallback. *)
+    Docker, meta.network_mode
+  | Local ->
+    let _ = in_playground in
+    Local, meta.network_mode
 ;;
 
 (* ── Nested runtime detection ──────────────────────────── *)
@@ -1031,20 +1028,12 @@ let run_docker_shell_command_with_status_internal
     | Some img when String.trim img <> "" -> img
     | _ -> Env_config_keeper.KeeperSandbox.docker_image ()
   in
-  let network_mode =
-    if Env_config_keeper.KeeperSandbox.hard_mode () then Network_none else network_mode
-  in
   let sandbox_error ?details message =
     Keeper_registry.record_error ?details ~base_path:config.base_path meta.name message;
     Error message
   in
   if String.trim image = ""
   then sandbox_error "keeper sandbox docker image is not configured"
-  else if git_creds_enabled && Env_config_keeper.KeeperSandbox.hard_mode ()
-  then
-    sandbox_error
-      "sandbox hard mode forbids Docker git credential dispatch; use keeper_shell \
-       op=git_clone or op=gh so git/gh egress is brokered outside the container"
   else (
     let cmd = rewrite_docker_command_paths ~config ~meta cmd in
     if command_uses_nested_container_runtime cmd
@@ -1409,11 +1398,6 @@ let run_docker_with_git_bash
   in
   if String.trim image = ""
   then sandbox_error_json "keeper sandbox docker image is not configured"
-  else if Env_config_keeper.KeeperSandbox.hard_mode ()
-  then
-    sandbox_error_json
-      "sandbox hard mode forbids Docker git credential dispatch; use keeper_shell \
-       op=git_clone or op=gh so git/gh egress is brokered outside the container"
   else if command_uses_nested_container_runtime cmd
   then
     sandbox_error_json

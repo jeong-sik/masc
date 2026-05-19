@@ -188,8 +188,7 @@ exit 0\n";
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_HARD_MODE" "false" f
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" f
 
 let setup_docker_review f =
   with_eio_fs @@ fun () ->

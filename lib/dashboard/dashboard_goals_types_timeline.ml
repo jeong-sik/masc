@@ -163,9 +163,20 @@ let goal_event_timeline_json event =
   let title, summary, severity =
     match event_type with
     | "goal_phase" ->
+        (* Each [Option.value ~default:"unknown"] in this match used to
+           render in the dashboard timeline as a verbatim value
+           (e.g. "phase=unknown by ...", "principal voted unknown",
+           "status=unknown", "decision=unknown") that the operator
+           reads when investigating a stuck goal.  "unknown" collides
+           with any legitimate value named "unknown" in the producer
+           event stream, so the operator cannot tell "the payload
+           field was missing" apart from "the producer sent the
+           string 'unknown'".  Bracketed sentinels are not emitted by
+           any producer, so a non-zero appearance is an unambiguous
+           producer-side fix signal. *)
         let phase =
           payload_field "phase" |> to_string_option
-          |> Option.value ~default:"unknown"
+          |> Option.value ~default:"<missing payload.phase>"
         in
         let actor =
           payload_field "actor" |> json_member_or_null "id" |> to_string_option
@@ -197,7 +208,7 @@ let goal_event_timeline_json event =
         let vote = payload_field "vote" in
         let decision =
           vote |> json_member_or_null "decision" |> to_string_option
-          |> Option.value ~default:"unknown"
+          |> Option.value ~default:"<missing payload.vote.decision>"
         in
         let principal =
           vote |> json_member_or_null "principal" |> json_member_or_null "id"
@@ -210,7 +221,7 @@ let goal_event_timeline_json event =
     | "goal_verification_resolved" ->
         let status =
           payload_field "status" |> to_string_option
-          |> Option.value ~default:"unknown"
+          |> Option.value ~default:"<missing payload.status>"
         in
         ( "Goal Verification Resolved",
           Printf.sprintf "status=%s" status,
@@ -228,7 +239,7 @@ let goal_event_timeline_json event =
     | "goal_approval_resolved" ->
         let decision =
           payload_field "decision" |> to_string_option
-          |> Option.value ~default:"unknown"
+          |> Option.value ~default:"<missing payload.decision>"
         in
         ( "Goal Approval Resolved",
           Printf.sprintf "decision=%s" decision,
@@ -312,7 +323,8 @@ let build_goal_timeline node linked_keepers approvals goal_events =
                    | None -> None
                    | Some ended_at ->
                        let outcome =
-                         receipt_outcome receipt |> Option.value ~default:"unknown"
+                         receipt_outcome receipt
+                         |> Option.value ~default:"<missing receipt.outcome>"
                        in
                        let severity =
                          if receipt_has_error receipt then "bad"

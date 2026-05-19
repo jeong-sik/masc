@@ -192,6 +192,7 @@
   test_keeper_unified_context_overflow
   test_keeper_unified_turn_pipeline_records
   test_keeper_unified_required_tools
+  test_keeper_unified_tool_observation
   test_keeper_unified_idle_cooldown
   test_keeper_unified_inline_skip
   test_keeper_unified_metacognition
@@ -503,6 +504,7 @@
   test_keeper_unified_context_overflow
   test_keeper_unified_turn_pipeline_records
   test_keeper_unified_required_tools
+  test_keeper_unified_tool_observation
   test_keeper_unified_idle_cooldown
   test_keeper_unified_inline_skip
   test_keeper_unified_metacognition

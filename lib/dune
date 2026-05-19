@@ -241,6 +241,7 @@
   keeper_unified_turn_pre_dispatch
   keeper_unified_turn_retry_setup
   keeper_unified_turn_terminal_error
+  keeper_unified_turn_attempt_watchdog
   keeper_unified_turn_livelock_block
   keeper_exec_context
   keeper_guards

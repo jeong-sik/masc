@@ -6,7 +6,7 @@ import { signal } from '@preact/signals'
 import { get } from '../api/core'
 import { createAsyncResource } from '../lib/async-state'
 import { LoadingState, ErrorState, EmptyState } from './common/feedback-state'
-import { selectedRepoId, syncRepository, deleteRepository, type Repository, type RepoStatus } from './repo-sidebar'
+import { selectedRepoId, syncRepository, deleteRepository, normalizeRepoStatus, type Repository, type RepoStatus } from './repo-sidebar'
 import { requestConfirm } from './common/confirm-dialog'
 import { StatusBadge as CommonStatusBadge } from './common/status-badge'
 import { unixSecondsToDate } from '../lib/format-time'
@@ -89,16 +89,6 @@ export async function loadRepoBranches(id: string): Promise<void> {
     const raw = await get<unknown>(`/api/v1/repositories/${encodeURIComponent(id)}/branches`)
     return branchRows(raw).map(normalizeBranch).filter((b): b is BranchInfo => b !== null)
   })
-}
-
-export function normalizeRepoStatus(raw: string | undefined): RepoStatus {
-  switch (raw?.toLowerCase()) {
-    case 'active': return 'active'
-    case 'paused': return 'paused'
-    case 'cloning': return 'active'
-    case 'error': return 'error'
-    default: return 'active'
-  }
 }
 
 export function resetRepoDetail(): void {

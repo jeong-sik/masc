@@ -1,5 +1,7 @@
 import type { PromptSegmentTelemetry } from '../types'
-import { SECONDS_PER_MINUTE, SECONDS_PER_HOUR } from '../lib/format-time'
+
+// Re-export formatDurationCompound from SSOT for backward-compatible consumers.
+export { formatDurationCompound as formatDuration } from '../lib/format-time'
 
 // ── Context pressure thresholds (shared across KPIs, charts) ─
 export const CTX_CRITICAL_PCT = 85
@@ -75,10 +77,4 @@ export function filterCtxCompositionEntries(
     if (key.toLowerCase().includes(needle)) return true
     return ctxSegmentLabel(key).toLowerCase().includes(needle)
   })
-}
-
-export function formatDuration(sec: number): string {
-  if (sec < SECONDS_PER_MINUTE) return `${sec}초`
-  if (sec < SECONDS_PER_HOUR) return `${Math.floor(sec / SECONDS_PER_MINUTE)}분`
-  return `${Math.floor(sec / SECONDS_PER_HOUR)}시간 ${Math.floor((sec % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE)}분`
 }

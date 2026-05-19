@@ -52,6 +52,21 @@ export function formatDuration(seconds?: number | null): string {
   return `${Math.round(seconds / SECONDS_PER_DAY)}일`
 }
 
+/** Format duration in seconds as Korean text with compound units — "2시간 30분", "1시간 0분".
+ *  Returns '확인 필요' for invalid. */
+export function formatDurationCompound(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return '확인 필요'
+  const totalMinutes = Math.floor(seconds / SECONDS_PER_MINUTE)
+  const totalHours = Math.floor(totalMinutes / 60)
+
+  if (totalHours >= 1) {
+    const remainMinutes = totalMinutes % 60
+    return `${totalHours}시간 ${remainMinutes}분`
+  }
+  if (totalMinutes >= 1) return `${totalMinutes}분`
+  return `${Math.round(seconds)}초`
+}
+
 /** Format duration in milliseconds as Korean text — "5분", "2시간 30분", "1일 3시간". */
 export function formatDurationMs(ms: number): string {
   if (ms < 0) ms = 0

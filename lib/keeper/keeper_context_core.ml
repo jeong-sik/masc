@@ -839,10 +839,12 @@ let sanitize_checkpoint_message
                    tool_use_id
                    tool_chars
                in
-               Prometheus.inc_counter
-                 Prometheus.metric_keeper_context_tool_result_compacted
-                 ~labels:[ "action", "stubbed"; "reason", stub_reason ]
-                 ();
+               let () =
+                 Prometheus.inc_counter
+                   Prometheus.metric_keeper_context_tool_result_compacted
+                   ~labels:[ "action", "stubbed"; "reason", stub_reason ]
+                   ()
+               in
                let stub =
                  Agent_sdk.Types.ToolResult
                    { tool_use_id;
@@ -864,11 +866,13 @@ let sanitize_checkpoint_message
                   marker already advertises truncation in the content
                   itself; the counter increment is what surfaces the
                   rate to operators without log scraping. *)
-               Prometheus.inc_counter
-                 Prometheus.metric_keeper_context_tool_result_compacted
-                 ~labels:
-                   [ "action", "truncated"; "reason", "over_single_byte" ]
-                 ();
+               let () =
+                 Prometheus.inc_counter
+                   Prometheus.metric_keeper_context_tool_result_compacted
+                   ~labels:
+                     [ "action", "truncated"; "reason", "over_single_byte" ]
+                   ()
+               in
                let capped =
                  String.sub content 0
                    default_max_checkpoint_tool_result_chars

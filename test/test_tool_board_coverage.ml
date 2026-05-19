@@ -1589,6 +1589,153 @@ let test_curation_health_score_schema_bounds () =
   check_bounds "keeper curation submit"
     (find_tool "keeper_board_curation_submit" Tool_shard.shard_board.tools)
 
+(** {1 Comment Rate Limiting Tests} *)
+
+(** Helper: create a post and return its id. *)
+let rate_test_post_id store =
+  match Board.create_post store
+    ~author:"tester" ~content:"rate limit test post"
+    ~post_kind:Human_post () with
+  | Ok p -> Board.Post_id.to_string p.id
+  | Error e -> Alcotest.failf "post create failed: %s" (Board.show_board_error e)
+
+(** Helper: add a comment via the core API and return Ok/Error. *)
+let rate_add_comment store post_id idx =
+  Board.add_comment_with_status store
+    ~post_id ~author:"tester"
+    ~content:(Printf.sprintf "comment #%d" idx) ()
+
+let test_rate_under_limit_succeeds () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let store = Board.create_store () in
+  let post_id = rate_test_post_id store in
+  for i = 1 to 28 do
+    match rate_add_comment store post_id i with
+    | Ok (_c, `Fresh) -> ()
+    | Ok (_c, `Dedup) -> Alcotest.failf "comment %d unexpectedly deduped" i
+    | Error e -> Alcotest.failf "comment %d rejected: %s" i (Board.show_board_error e)
+  done
+
+let test_rate_at_limit_rejects () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let store = Board.create_store () in
+  let post_id = rate_test_post_id store in
+  for i = 1 to 30 do
+    ignore (rate_add_comment store post_id i : (_, _) result)
+  done;
+  (match rate_add_comment store post_id 31 with
+   | Error (Board.Rate_limited _) -> ()
+   | Ok _ -> Alcotest.fail "31st comment should have been rate-limited"
+   | Error e -> Alcotest.failf "unexpected error: %s" (Board.show_board_error e))
+
+let test_rate_different_authors_independent () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let store = Board.create_store () in
+  let post_id = rate_test_post_id store in
+  for i = 1 to 30 do
+    ignore (Board.add_comment_with_status store
+      ~post_id ~author:"author-a" ~content:(Printf.sprintf "fill-%d" i) () : (_, _) result)
+  done;
+  (match Board.add_comment_with_status store
+    ~post_id ~author:"author-b" ~content:"b-comment" () with
+   | Ok _ -> ()
+   | Error e -> Alcotest.failf "author-b rejected: %s" (Board.show_board_error e))
+
+let test_rate_retry_after_positive () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let store = Board.create_store () in
+  let post_id = rate_test_post_id store in
+  for i = 1 to 30 do
+    ignore (rate_add_comment store post_id i)
+  done;
+  (match rate_add_comment store post_id 31 with
+   | Error (Board.Rate_limited { retry_after }) ->
+     Alcotest.(check bool) "retry_after > 0" true (retry_after > 0.0)
+   | _ -> Alcotest.fail "expected Rate_limited error")
+
+let test_rate_dedup_does_not_consume_quota () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let store = Board.create_store () in
+  let post_id = rate_test_post_id store in
+  for _i = 1 to 30 do
+    ignore (Board.add_comment_with_status store
+      ~post_id ~author:"tester" ~content:"identical" () : (_, _) result)
+  done;
+  (match Board.add_comment_with_status store
+    ~post_id ~author:"tester" ~content:"different" () with
+   | Ok _ -> ()
+   | Error e -> Alcotest.failf "dedup-consumed quota: %s" (Board.show_board_error e))
+
+let test_rate_window_expiry_allows_more () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let store = Board.create_store () in
+  let post_id = rate_test_post_id store in
+  let old = Unix.gettimeofday () -. 600.0 in
+  for i = 1 to 30 do
+    Board_core.record_comment_timestamp ~author:"tester" ~now:(old +. float_of_int i)
+  done;
+  (match rate_add_comment store post_id 1 with
+   | Ok _ -> ()
+   | Error e -> Alcotest.failf "window expiry rejected: %s" (Board.show_board_error e))
+
+let test_rate_disabled_when_limit_zero () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  ignore (Board.create_store ());
+  (match Board_core.check_comment_rate_limit ~author:"unknown-agent" ~now:(Unix.gettimeofday ()) with
+   | None -> ()
+   | Some _ -> Alcotest.fail "unknown author should not be rate-limited")
+
+let test_rate_dispatch_error_message () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  (* Use dispatch (Board.global) for everything so post exists in the right store *)
+  let (_ok, create_msg) = dispatch "masc_board_post" (make_args [
+    ("title", `String "rate-test"); ("content", `String "hello");
+    ("author", `String "tester")
+  ]) in
+  let json = parse_create_response_json create_msg in
+  let post_id = Yojson.Safe.Util.(json |> member "id" |> to_string) in
+  for i = 1 to 30 do
+    ignore (dispatch "masc_board_comment" (make_args [
+      ("post_id", `String post_id);
+      ("content", `String (Printf.sprintf "comment-%d" i));
+      ("author", `String "tester")
+    ]) : bool * string)
+  done;
+  let (ok, msg) = dispatch "masc_board_comment" (make_args [
+    ("post_id", `String post_id);
+    ("content", `String "overflow");
+    ("author", `String "tester")
+  ]) in
+  Alcotest.(check bool) "rate limited via dispatch" false ok;
+  Alcotest.(check bool) "error mentions rate/limit/retry" true
+    (let lower = String.lowercase_ascii msg in
+     let contains sub =
+       let sub_len = String.length sub in
+       let msg_len = String.length lower in
+       let rec loop i =
+         i + sub_len <= msg_len &&
+         (String.sub lower i sub_len = sub || loop (i + 1))
+       in
+       loop 0
+     in
+     contains "rate" || contains "limit" || contains "retry")
+
 (** {1 Test Runner} *)
 
 let () =
@@ -1923,5 +2070,19 @@ let () =
             let (_ok2, body2) = dispatch "masc_board_list" args in
             Alcotest.(check bool) "cache invalidated after vote" true
               (body1 <> body2));
+        ] );
+      ( "comment_rate_limit",
+        [
+          Alcotest.test_case "under limit succeeds" `Quick test_rate_under_limit_succeeds;
+          Alcotest.test_case "at limit rejects" `Quick test_rate_at_limit_rejects;
+          Alcotest.test_case "different authors independent" `Quick
+            test_rate_different_authors_independent;
+          Alcotest.test_case "retry_after positive" `Quick test_rate_retry_after_positive;
+          Alcotest.test_case "dedup does not consume quota" `Quick
+            test_rate_dedup_does_not_consume_quota;
+          Alcotest.test_case "window expiry allows more" `Quick
+            test_rate_window_expiry_allows_more;
+          Alcotest.test_case "disabled when limit zero" `Quick test_rate_disabled_when_limit_zero;
+          Alcotest.test_case "dispatch error message" `Quick test_rate_dispatch_error_message;
         ] );
     ]

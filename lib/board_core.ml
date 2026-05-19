@@ -51,6 +51,44 @@ let create_store () =
   }
 ;;
 
+(** {1 Comment Rate Limiting}
+
+    Per-author sliding window tracker.  Module-level Hashtbl avoids
+    changing the store type; all access is inside the existing
+    [with_lock store] in [add_comment_with_status]. *)
+
+let comment_timestamps : (string, float list ref) Hashtbl.t = Hashtbl.create 32
+
+let check_comment_rate_limit ~author ~now =
+  let limit = Limits.comment_rate_limit in
+  if limit <= 0 then None
+  else
+    let window = Float.of_int Limits.comment_rate_window_sec in
+    match Hashtbl.find_opt comment_timestamps author with
+    | None -> None
+    | Some ts_ref ->
+      let recent = List.filter (fun t -> now -. t < window) !ts_ref in
+      ts_ref := recent;
+      if List.length recent >= limit
+      then
+        let oldest = List.hd (List.sort Stdlib.compare recent) in
+        let retry_after = window -. (now -. oldest) +. 1.0 in
+        Some retry_after
+      else None
+
+let record_comment_timestamp ~author ~now =
+  let ts_ref =
+    match Hashtbl.find_opt comment_timestamps author with
+    | Some r -> r
+    | None ->
+      let r = ref [] in
+      Hashtbl.replace comment_timestamps author r;
+      r
+  in
+  ts_ref := now :: !ts_ref
+
+let reset_comment_rate_tracker () = Hashtbl.clear comment_timestamps
+
 (** Remove [value] from the string list stored at [key] in [tbl].
     Removes the key entirely when the list becomes empty. *)
 let remove_from_list_index tbl key value =
@@ -201,6 +239,16 @@ let sweep store =
                   Stdlib.incr cap_evicted)
                to_evict))
         author_posts);
+    (* Prune stale rate-limit entries *)
+    let window = Stdlib.Float.of_int Limits.comment_rate_window_sec in
+    let stale_authors = ref [] in
+    Hashtbl.iter
+      (fun author ts_ref ->
+         let recent = List.filter (fun t -> now -. t < window) !ts_ref in
+         if List.length recent = 0 then stale_authors := author :: !stale_authors
+         else ts_ref := recent)
+      comment_timestamps;
+    List.iter (Hashtbl.remove comment_timestamps) !stale_authors;
     (* Invalidate caches if anything was swept *)
     if !removed_posts > 0 || !cap_evicted > 0 then invalidate_post_caches store;
     if !removed_comments > 0 then invalidate_comment_caches store;
@@ -999,6 +1047,10 @@ let add_comment_with_status
                             })
                      else (
                     let now = Time_compat.now () in
+                    match check_comment_rate_limit ~author:author_str ~now with
+                    | Some retry_after ->
+                      Error (Rate_limited { retry_after })
+                    | None ->
                     let ttl =
                       match post.post_kind with
                       | Automation_post | System_post ->
@@ -1038,6 +1090,7 @@ let add_comment_with_status
                       store.posts
                       post_key
                       { post with reply_count = post.reply_count + 1; updated_at = now };
+                    record_comment_timestamp ~author:author_str ~now;
                     invalidate_post_caches store;
                     invalidate_comment_caches store;
                     Ok (`Fresh comment)))))

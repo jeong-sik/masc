@@ -178,7 +178,7 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   handing_off: '인수인계',
   draining: '종료 준비',
   offline: '오프라인',
-  paused: '일시 중지',
+  paused: '일시정지',
   stopped: '정지',
   crashed: '비정상 종료',
   restarting: '재시작 중',
@@ -191,7 +191,7 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   Failing: '오류 발생',
   Crashed: '비정상 종료',
   Offline: '오프라인',
-  Paused: '일시 중지',
+  Paused: '일시정지',
   Stopped: '정지',
   Draining: '종료 준비',
   Restarting: '재시작 중',
@@ -328,7 +328,7 @@ export function turnLaneLabel(value: string | null | undefined): string | null {
 const TRUST_DISPOSITION_LABELS: Record<string, string> = {
   Alert: '경보',
   Blocked: '차단',
-  Pause: '정지',
+  Pause: '일시정지',
   Pass: '통과',
 }
 

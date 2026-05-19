@@ -1,3 +1,15 @@
+let json_kind_name : Yojson.Safe.t -> string = function
+  | `Null -> "null"
+  | `Bool _ -> "bool"
+  | `Int _ -> "int"
+  | `Intlit _ -> "intlit"
+  | `Float _ -> "float"
+  | `String _ -> "string"
+  | `Assoc _ -> "object"
+  | `List _ -> "array"
+  | `Tuple _ -> "tuple"
+  | `Variant _ -> "variant"
+
 module Keeper_name = struct
   type t = string
   let is_valid s =
@@ -83,7 +95,10 @@ module Uid = struct
         (match of_string s with
          | Ok t -> Ok t
          | Error e -> Error e)
-    | _ -> Error "Expected string for Keeper_id.Uid"
+    | other ->
+        Error
+          (Printf.sprintf "Expected string for Keeper_id.Uid (received %s)"
+             (json_kind_name other))
 end
 
 (** Polymorphic variants for use in keeper_meta without depending on a
@@ -96,4 +111,4 @@ let uid_of_yojson : [ `String of string | `Null ] -> (Uid.t, string) result =
       (match Uid.of_string s with
        | Ok t -> Ok t
        | Error e -> Error e)
-  | `Null -> Error "Expected string for Keeper_id.Uid"
+  | `Null -> Error "Expected non-null string for Keeper_id.Uid (received null)"

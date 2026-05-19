@@ -159,6 +159,31 @@ val tool_contract_result_of_contract_status
   :  Keeper_contract_classifier.contract_status
   -> tool_contract_result
 
+(** {2 Structured contract-violation encoding} *)
+
+(** Encode a tool list into the wire bracket format.
+    [[] for empty, [t1,t2] for non-empty. *)
+val encode_tool_list : string list -> string
+
+(** Build an extended terminal_reason_code with called and satisfying
+    tool lists. Produces:
+    [completion_contract_violation:<contract_id>:called[...]:satisfying[...]]
+    The prefix [completion_contract_violation:] is preserved so existing
+    prefix-matching consumers remain backward-compatible. *)
+val encode_contract_violation_reason
+  :  called_tools:string list
+  -> satisfying_tools:string list
+  -> string
+  -> string
+
+(** Decode a terminal_reason_code back into its components.
+    Returns [Some (contract_id, called_tools, satisfying_tools)] for
+    both legacy and extended formats, [None] for non-violation codes.
+    Legacy format yields empty tool lists. *)
+val decode_contract_violation_reason
+  :  string
+  -> (string * string list * string list) option
+
 type cascade_rotation_attempt =
   { from_cascade : cascade_name
   ; to_cascade : cascade_name
@@ -216,6 +241,13 @@ type t =
 val stop_reason_to_string : Cascade_runner.stop_reason -> string
 val sandbox_kind_of_meta : Keeper_types.keeper_meta -> Keeper_types.sandbox_profile
 val to_json : t -> Yojson.Safe.t
+
+(** Enrich a receipt's terminal_reason_code from legacy to extended format.
+    Uses [canonical_tools + observed_tools + tools_used] as called and
+    [tool_surface.required_tools] as satisfying. Returns the original
+    code unchanged if it is not a contract-violation code or already
+    contains tool data. *)
+val enrich_contract_violation_reason : t -> string
 
 (** Operator-facing classification of a finished turn. Closed set.
 

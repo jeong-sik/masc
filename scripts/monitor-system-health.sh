@@ -151,13 +151,25 @@ docker_playground_summary() {
   "$helper" --limit 3 2>/dev/null | head -20 | tr '\n' ' ' || true
 }
 
+json_string_escape() {
+  local s="$1"
+  s=${s//\\/\\\\}
+  s=${s//\"/\\\"}
+  s=${s//$'\n'/ }
+  s=${s//$'\r'/ }
+  printf '%s' "$s"
+}
+
 write_pressure_state() {
   # Args: level (OK|WARN|CRIT), kinds_csv ("fd,swap,..."), summary
   local level="$1" kinds="$2" summary="$3"
   local ts=$(date '+%FT%T%z')
   local payload
   payload=$(printf '{"level":"%s","kinds":"%s","summary":"%s","ts":"%s","pid":%d}' \
-            "$level" "$kinds" "$summary" "$ts" "$$")
+            "$(json_string_escape "$level")" \
+            "$(json_string_escape "$kinds")" \
+            "$(json_string_escape "$summary")" \
+            "$(json_string_escape "$ts")" "$$")
   if [ "$level" = "OK" ]; then
     rm -f "$PRESSURE_STATE_FILE" 2>/dev/null || true
   else
@@ -219,6 +231,7 @@ iteration() {
     notify "fd_proc_${top_pid}" WARN "FD elevated ${top_cmd}" "pid=${top_pid} fds=${top_fd}"
     [ "$pressure_level" = "OK" ] && pressure_level="WARN"
     pressure_kinds="${pressure_kinds}fd_proc,"
+    pressure_summary="${pressure_summary}${top_cmd}[${top_pid}]=${top_fd}fds "
   fi
 
   if [ "$swap_gb" -ge "$SWAP_GB_CRIT" ]; then
@@ -231,6 +244,7 @@ iteration() {
     notify swap WARN "Swap ${swap_gb}GB" "memory growth"
     [ "$pressure_level" = "OK" ] && pressure_level="WARN"
     pressure_kinds="${pressure_kinds}swap,"
+    pressure_summary="${pressure_summary}swap=${swap_gb}G "
   fi
 
   if [ "$free_gb" -le "$FREE_GB_CRIT" ]; then
@@ -241,6 +255,7 @@ iteration() {
     notify free WARN "Free RAM ${free_gb}GB" "memory pressure approaching"
     [ "$pressure_level" = "OK" ] && pressure_level="WARN"
     pressure_kinds="${pressure_kinds}free,"
+    pressure_summary="${pressure_summary}free=${free_gb}G "
   fi
 
   if [ "$load" -ge "$LOAD_CRIT" ]; then
@@ -251,15 +266,18 @@ iteration() {
     notify load WARN "Load avg ${load}" "high parallelism"
     [ "$pressure_level" = "OK" ] && pressure_level="WARN"
     pressure_kinds="${pressure_kinds}load,"
+    pressure_summary="${pressure_summary}load=${load} "
   fi
 
   if [ "${root_pct:-0}" -ge "$DISK_PCT_CRIT" ]; then
     notify disk_root CRIT "/ at ${root_pct}%" "sealed system volume full"
     pressure_level="CRIT"; pressure_kinds="${pressure_kinds}disk_root,"
+    pressure_summary="${pressure_summary}/=${root_pct}% "
   elif [ "${root_pct:-0}" -ge "$DISK_PCT_WARN" ]; then
     notify disk_root WARN "/ at ${root_pct}%" ""
     [ "$pressure_level" = "OK" ] && pressure_level="WARN"
     pressure_kinds="${pressure_kinds}disk_root,"
+    pressure_summary="${pressure_summary}/=${root_pct}% "
   fi
   if [ "${data_pct:-0}" -ge "$DISK_PCT_CRIT" ]; then
     notify disk_data CRIT "/Data at ${data_pct}%" "user volume nearly full"
@@ -269,6 +287,7 @@ iteration() {
     notify disk_data WARN "/Data at ${data_pct}%" ""
     [ "$pressure_level" = "OK" ] && pressure_level="WARN"
     pressure_kinds="${pressure_kinds}disk_data,"
+    pressure_summary="${pressure_summary}/Data=${data_pct}% "
   fi
 
   pressure_kinds="${pressure_kinds%,}"

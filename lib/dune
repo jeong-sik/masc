@@ -116,6 +116,7 @@
  server_routes_http_sidecar_paths
  server_routes_http_routes_frontend
  server_routes_http_routes_room
+ server_routes_http_dashboard_provider_logs
  server_routes_http_routes_dashboard
  server_routes_http_routes_activity
  server_runtime_config_root_bootstrap

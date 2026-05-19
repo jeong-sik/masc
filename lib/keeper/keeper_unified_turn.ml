@@ -1368,7 +1368,12 @@ let run_keeper_cycle
                     (Keeper_turn_fsm.Failed
                        (Keeper_turn_fsm.Failure_provider_error
                           { kind = sdk_error_kind err; detail = short_preview e_str }));
-                  Log.Keeper.error
+                  let log_keeper_cycle_failed =
+                    if EC.should_warn_keeper_cycle_failed err
+                    then Log.Keeper.warn
+                    else Log.Keeper.error
+                  in
+                  log_keeper_cycle_failed
                     "%s: keeper cycle FAILED cascade=%s max_context=%d context_budget=%d \
                      primary_budget=%d requested_override=%s latency=%dms%s error=%s"
                     meta.name
@@ -1386,6 +1391,8 @@ let run_keeper_cycle
                      then " (server parse rejection, auto-recoverable)"
                      else if is_transient
                      then " (transient, cooldown preserved)"
+                     else if EC.should_warn_keeper_cycle_failed err
+                     then " (oas_timeout_budget, policy handled)"
                      else "")
                     (short_preview e_str);
                   Prometheus.inc_counter

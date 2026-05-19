@@ -32,6 +32,12 @@ val message_looks_like_capacity_backpressure : string -> bool
     failure counting, even if same-turn retry is still disabled. *)
 val is_auto_recoverable_turn_error : Agent_sdk.Error.sdk_error -> bool
 
+(** [true] when the turn runner should record the immediate
+    ["keeper cycle FAILED"] line as WARN instead of ERROR because the
+    heartbeat policy layer will handle the failure as a provider/OAS budget
+    strike with cooldown or work-level pause. *)
+val should_warn_keeper_cycle_failed : Agent_sdk.Error.sdk_error -> bool
+
 (** Reclassify any post-commit turn error as a persistent integrity error when
     mutating tool calls already committed in the same turn. *)
 val reclassify_error_after_side_effect :

@@ -265,6 +265,34 @@ let workflow_rejection_recovery_fields ~tool_name ~count raw =
     @ if count >= 2 then [ "workflow_rejection_loop", `Bool true ] else []
 ;;
 
+let recovery_plan_json_opt json =
+  match json_assoc_field_opt "recovery_plan" json with
+  | Some (`Assoc _ as plan) -> Some plan
+  | _ ->
+    (match detail_json_opt json with
+     | Some detail ->
+       (match json_assoc_field_opt "recovery_plan" detail with
+        | Some (`Assoc _ as plan) -> Some plan
+        | _ -> None)
+     | None -> None)
+;;
+
+let deterministic_recovery_plan_fields raw =
+  try
+    let json = Yojson.Safe.from_string raw in
+    match recovery_plan_json_opt json with
+    | None -> []
+    | Some plan ->
+      let next_tool =
+        match json_assoc_string_opt "next_tool" plan with
+        | Some next_tool -> [ "required_next_tool", `String next_tool ]
+        | None -> []
+      in
+      ("recovery_plan", plan) :: next_tool
+  with
+  | Yojson.Json_error _ -> []
+;;
+
 (** Normalize a raw tool result string into a consistent JSON envelope.
 
     The LLM sees this output directly. Without normalization, tool results
@@ -648,6 +676,7 @@ let make_keeper_tool_handler
                   , `String
                       (Keeper_tool_deterministic_error.to_string reason) )
                 ]
+                @ deterministic_recovery_plan_fields raw_result
             in
             let recovery_fields =
               workflow_rejection_recovery_fields @ deterministic_recovery_fields

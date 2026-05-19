@@ -23,9 +23,14 @@
     [to_string] (variant -> stable telemetry label). Exhaustive match
     is enforced by [-strict-sequence] in the [dune] config. *)
 type deterministic_reason =
+  | Command_blocked
+      (** keeper_bash/keeper_shell policy block with a structured
+          recovery_plan. *)
   | Command_shape_blocked
       (** keeper_bash policy block: pipes, redirects, chaining,
           substitution, repo-wide scans, gh pr checks. *)
+  | Task_state_probe_blocked
+      (** raw shell attempted to inspect task state files or guessed task APIs. *)
   | Destructive_operation_blocked
       (** force push / rm -rf / push to main detected. *)
   | Path_syntax_blocked

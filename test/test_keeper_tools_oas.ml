@@ -1217,6 +1217,28 @@ let test_workflow_rejection_recovery_fields_mark_loop () =
   check int "workflow rejection count" 2 (json_int "count" recovery)
 ;;
 
+let test_deterministic_recovery_plan_fields_promote_next_tool () =
+  let raw =
+    {|{"ok":false,"error":"command_blocked","recovery_plan":{"kind":"structured_tool_rewrite","next_tool":"keeper_shell","next_args":{"op":"rg","path":"lib"},"instruction":"Use keeper_shell op=rg.","reason":"shell_shape_requires_structured_op","confidence":"high","do_not_retry_same_args":true}}|}
+  in
+  let fields = Keeper_tools_oas.deterministic_recovery_plan_fields raw in
+  let normalized =
+    Keeper_tools_oas.normalize_tool_result
+      ~workflow_rejection_recovery_fields:fields
+      ~success:false
+      raw
+  in
+  let json = parse normalized in
+  check string "required next tool" "keeper_shell" (json_string "required_next_tool" json);
+  let plan = Yojson.Safe.Util.member "recovery_plan" json in
+  check string "plan next tool" "keeper_shell" (json_string "next_tool" plan);
+  check
+    string
+    "plan op"
+    "rg"
+    Yojson.Safe.Util.(member "next_args" plan |> member "op" |> to_string)
+;;
+
 let test_workflow_rejection_same_args_short_circuits_after_first_failure () =
   let meta =
     make_test_meta
@@ -1546,6 +1568,10 @@ let () =
             "workflow rejection marks repeated loop"
             `Quick
             test_workflow_rejection_recovery_fields_mark_loop
+        ; test_case
+            "deterministic recovery plan promotes next tool"
+            `Quick
+            test_deterministic_recovery_plan_fields_promote_next_tool
         ; test_case
             "workflow rejection same args stops after first failure"
             `Quick

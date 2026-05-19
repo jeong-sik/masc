@@ -1,4 +1,4 @@
-(** See [server_dashboard_shell_snapshot.mli] for the contract. *)
+(** See [server_dashboard_snapshot_select.mli] for the contract. *)
 
 let select_shell_json
       ?clock ?request ?timing ?(light = false) (config : Coord.config)
@@ -44,11 +44,6 @@ let select_tools_json
       ?actor ~timing:timing_obj config
 ;;
 
-let telemetry_summary_cache_key ~base_path ~masc_root =
-  let digest = Digest.string (base_path ^ "\000" ^ masc_root) |> Digest.to_hex in
-  "dashboard:telemetry_summary:" ^ digest
-;;
-
 let select_telemetry_summary_json
       ?timing (config : Coord.config)
   : Yojson.Safe.t
@@ -65,15 +60,17 @@ let select_telemetry_summary_json
       (Server_timing.Custom "snapshot_read")
       (fun () -> snap.telemetry_summary)
   | None ->
+    (* RFC-0138 Phase 3 Step 5 — Dashboard_cache retired from the
+       read path.  Cold-start fallback (snapshot=None) computes the
+       summary fresh; the refresh fiber takes ownership within ~2s.
+       The narrow window without dedup is acceptable for a per-process
+       once-only path. *)
     let base_path = config.base_path in
     let masc_root = Coord.masc_root_dir config in
-    let cache_key = telemetry_summary_cache_key ~base_path ~masc_root in
-    Server_timing.measure timing_obj Server_timing.Cache_lookup (fun () ->
-      Dashboard_cache.get_or_compute cache_key ~ttl:30.0 (fun () ->
-        Server_timing.measure
-          timing_obj
-          Server_timing.Telemetry_summary_aggregate
-          (fun () -> Telemetry_unified.summary_json ~base_path ~masc_root ())))
+    Server_timing.measure
+      timing_obj
+      Server_timing.Telemetry_summary_aggregate
+      (fun () -> Telemetry_unified.summary_json ~base_path ~masc_root ())
 ;;
 
 let select_project_snapshot_json ~state ~sw ~clock ?timing req

@@ -47,6 +47,24 @@ export type OfflineCause = 'unbooted' | 'shutdown' | 'crashed' | 'dead' | 'unkno
 export type PausedCause = 'operator' | 'supervisor' | 'auto_recover' | 'unknown'
 export type StuckReason = KeeperRuntimeBlockerClass | 'fiber_dead' | 'unknown'
 
+// RFC-0135 PR-14a — attention axis SSOT (Goal-2 typed-state expansion).
+//
+// `runtime_attention.{blocked,needs_attention}` was previously OR'd
+// against `state.kind === 'stuck'` inline at
+// `components/keeper-detail-runtime.ts:213-216`, leaving the typed
+// state and the attention axis as parallel inputs to the same
+// `blocked` decision. The two axes are *orthogonal* — a running keeper
+// can have `attention: 'needs_attention'` set by backend without any
+// blocker class, and a stuck keeper can have its attention cleared
+// after operator acknowledgement. Encoding attention as a sum next to
+// `KeeperOperationalState` keeps both signals explicit.
+//
+// Closed sum (no catch-all per RFC-0135 §9-4):
+//   blocked          — backend says live execution is held
+//   needs_attention  — backend flagged operator action required
+//   clean            — neither set, no orange edge on dashboard
+export type KeeperAttention = 'blocked' | 'needs_attention' | 'clean'
+
 export type KeeperOperationalState =
   | { readonly kind: 'offline'; readonly cause: OfflineCause }
   | { readonly kind: 'paused'; readonly cause: PausedCause }
@@ -143,6 +161,25 @@ function compositeFiberKnownDead(c: KeeperCompositeSnapshot): boolean {
   if (diag == null) return false
   const fiberAlive = diag.conditions.fiber_alive
   return fiberAlive === false
+}
+
+/** RFC-0135 PR-14a — orthogonal attention axis.
+ *
+ *  Maps `composite.runtime_attention.{blocked, needs_attention}` to a
+ *  closed sum. Priority: `blocked` over `needs_attention` (backend can
+ *  set both, in which case the operator-blocking case is louder).
+ *
+ *  When composite is null, returns `'clean'` — without backend
+ *  attestation the dashboard has no basis to claim attention is needed.
+ *  Callers may still combine this with `state.kind === 'stuck'` if
+ *  blocker-class evidence alone should surface an alert. */
+export function deriveKeeperAttention(
+  composite: KeeperCompositeSnapshot | null,
+): KeeperAttention {
+  const attention = composite?.runtime_attention
+  if (attention?.blocked === true) return 'blocked'
+  if (attention?.needs_attention === true) return 'needs_attention'
+  return 'clean'
 }
 
 // RFC-0135 PR-11 — Composite KSM phase SSOT helpers.

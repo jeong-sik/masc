@@ -10,14 +10,28 @@
 //                                            (status/phase/paused OR-chain)
 // will all call `deriveKeeperOperationalState` instead (PR-3 ~ PR-6).
 //
-// Discriminant invariants (RFC-0135 §2 conditioning matrix):
-//   paused      ⇐ keeper.paused | phase==='Paused' | pause_state==='paused'
-//   offline     ⇐ phase ∈ Offline/Stopped/Dead/Crashed/Zombie  OR
-//                 status ∈ offline/inactive/unbooted
-//   stuck       ⇐ runtime_blocker_class set AND execution_current !== true
-//                 OR composite reports fiber_alive === false
-//   running     ⇐ otherwise (turn_phase carried; lingering stale blocker is
-//                 recorded but does NOT drive the headline)
+// Discriminant invariants (RFC-0135 §2 conditioning matrix). The
+// `execution_current` semantics are anchored at
+// `lib/server/server_dashboard_http.ml:1061-1074`:
+//
+//   `execution_current = true`  — receipt either (a) does not exist, or
+//      (b) is not from a stale live turn (`receipt_at >= live_started_at`).
+//      The receipt's blocker, if any, reflects the *current* live turn.
+//   `execution_current = false` — receipt is from a *previous* live turn
+//      (`receipt_at < live_started_at` with a newer turn now live). The
+//      blocker class describes that prior turn and is stale.
+//   `stale_execution_receipt = receipt_present && !execution_current` is
+//      the same axis seen from the receipt side; either signal counts as
+//      an explicitly-stale marker.
+//
+//   paused   ⇐ keeper.paused | phase==='Paused' | pause_state==='paused'
+//   offline  ⇐ phase ∈ Offline/Stopped/Dead/Crashed/Zombie  OR
+//              status ∈ offline/inactive/unbooted
+//   stuck    ⇐ (runtime_blocker_class set AND NOT explicitlyStale)
+//              OR composite reports fiber_alive === false
+//   running  ⇐ otherwise. When the blocker_class is set but the receipt
+//              is explicitly stale, the blocker is recorded as
+//              `staleBlocker` for display but does NOT drive the headline.
 //
 // catch-all `default:` is forbidden — see RFC-0135 §9 (PR-9 CI guard).
 
@@ -60,10 +74,14 @@ export function deriveKeeperOperationalState(
 
   const blockerClass = keeper.runtime_blocker_class ?? null
   const attention = composite?.runtime_attention ?? null
-  const executionFresh = attention?.execution_current === true
-  const staleReceipt = attention?.stale_execution_receipt === true
+  // An explicit stale marker is required to demote a blocker. The absence
+  // of `runtime_attention` (older backend, missing composite) leaves the
+  // blocker meaningful — fail-closed default.
+  const explicitlyStale =
+    attention?.execution_current === false
+    || attention?.stale_execution_receipt === true
 
-  if (blockerClass !== null && !executionFresh) {
+  if (blockerClass !== null && !explicitlyStale) {
     return { kind: 'stuck', reason: blockerClass }
   }
 
@@ -72,10 +90,10 @@ export function deriveKeeperOperationalState(
   }
 
   const turnPhase = composite?.turn_phase ?? keeper.pipeline_stage ?? 'idle'
+  // A blocker that *was* recorded but is now explicitly stale gets
+  // surfaced as informational context, not a headline.
   const staleBlocker =
-    executionFresh && (blockerClass !== null || staleReceipt)
-      ? blockerClass
-      : null
+    explicitlyStale && blockerClass !== null ? blockerClass : null
   return { kind: 'running', turnPhase, staleBlocker }
 }
 

@@ -93,22 +93,32 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
     })
   })
 
-  it('RFC §1.1 EXACT — blocker_class=synthetic_stall + execution_current=true must NOT surface as 현재 차단', () => {
-    // The exact 2026-05-19 lifecycle-worker scenario the user reported:
-    // list card said "현재 차단 · synthetic_stall" while the detail panel
-    // showed "턴 진행 중 · executing live". The fix routes the roster
-    // through the same typed conditioning the detail panel uses, so the
-    // blocker_class is recognized as stale and demoted to "이전 차단".
+  it('RFC §1.1 EXACT — blocker set BUT receipt is stale (execution_current=false) → 이전 차단', () => {
+    // The exact 2026-05-19 lifecycle-worker scenario. Backend emits
+    // execution_current=false (`server_dashboard_http.ml:1061-1074`)
+    // when the latest receipt is from a prior turn while a newer live
+    // turn is in progress (`receipt_at < live_started_at`). The blocker
+    // class belongs to the prior turn — demoted to "이전 차단" so the
+    // headline matches what the detail panel shows ("턴 진행 중 ·
+    // executing live").
+    //
+    // PR-4 originally encoded this scenario with `execution_current=true`,
+    // which inverted the semantics; PR-5 fixes the typed SSOT axis and
+    // realigns this fixture with backend reality.
     const note = rosterStateNote(
       k({
         phase: 'Running',
         runtime_blocker_class: 'synthetic_stall',
         runtime_blocker_summary: '잔여 marker',
       }),
-      compositeWith(attention({ execution_current: true, blocked: false }), {
-        turn_phase: 'executing',
-        is_live: true,
-      }),
+      compositeWith(
+        attention({
+          execution_current: false,
+          stale_execution_receipt: true,
+          blocked: false,
+        }),
+        { turn_phase: 'executing', is_live: true },
+      ),
       null,
     )
     expect(note).toEqual({
@@ -118,14 +128,14 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
     })
   })
 
-  it('genuine stuck — blocker_class set + execution_current=false → 현재 차단', () => {
+  it('genuine stuck — blocker set AND receipt is current (execution_current=true) → 현재 차단', () => {
     const note = rosterStateNote(
       k({
         phase: 'Running',
         runtime_blocker_class: 'cascade_exhausted',
         runtime_blocker_summary: 'cascade list 소진',
       }),
-      compositeWith(attention({ execution_current: false, blocked: true })),
+      compositeWith(attention({ execution_current: true, blocked: true })),
       null,
     )
     expect(note).toEqual({

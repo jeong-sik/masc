@@ -175,8 +175,12 @@ function warnUnknownAttentionToken(kind: 'attention_reason' | 'next_human_action
   }
 }
 
+function assertNever(value: never): never {
+  throw new Error(`unreachable case: ${String(value)}`)
+}
+
 // Exhaustive render over `KeeperVerdict.kind`. Adding a new arm to
-// `KeeperVerdict` will fail typecheck on the unreachable assertion
+// `KeeperVerdict` will fail typecheck on the assertNever default
 // rather than silently falling through to a default render. The tool
 // contract result, when present, is always shown as scope-tagged
 // evidence ("도구 계약") attached to the verdict rather than as a
@@ -207,6 +211,8 @@ function renderVerdict(verdict: KeeperVerdict) {
       `
     case 'no_verdict':
       return toolContractEvidence
+    default:
+      return assertNever(verdict.kind)
   }
 }
 

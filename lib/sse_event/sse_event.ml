@@ -27,7 +27,7 @@ type envelope_meta =
   ; tool_name : string option
   }
 
-(** Replicates [cascade_event_bridge.json_string_opt]:
+(** Replicates [cascade_event_bridge_inference.json_string_opt]:
 
     - [Some "non-empty"] → [`String value]
     - [Some "" \| Some "<whitespace>"] → [`Null]

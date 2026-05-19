@@ -372,13 +372,81 @@ let run_named
   let local_prefiltered_candidate_count =
     List.length local_prefiltered_candidates
   in
-  if unhealthy_local_endpoints <> [] then
-    Log.Misc.warn
-      "cascade %s: preflight skipped %d unhealthy local endpoint(s) before \
-       provider dispatch: [%s]"
-      cascade_name
-      (List.length unhealthy_local_endpoints)
-      (String.concat ", " unhealthy_local_endpoints);
+  (* RFC: MASC/OAS Error-Warn Reduction Goal — 2026-05-18 §P3.
+     For each unhealthy endpoint, record the preflight-skip event in
+     [Cascade_preflight_state.global]. After N consecutive skips of
+     the same (cascade, endpoint, reason) fingerprint we escalate to
+     ERROR once and register the endpoint in the in-process disabled
+     list — subsequent identical skips return [`Already_disabled] and
+     are dropped to DEBUG, so the log volume drops from ~35-50/30min
+     to a small fixed number of transitions.
+     Routing semantics are preserved: the disabled list is advisory
+     for log-level cadence; the existing
+     [filter_unhealthy_local_runtime_urls] already removed these
+     endpoints from [candidates]. *)
+  List.iter
+    (fun endpoint ->
+      let outcome =
+        Cascade_preflight_state.record
+          Cascade_preflight_state.global
+          ~tier_group:cascade_name
+          ~provider:endpoint
+          ~reason:Cascade_preflight_state.Health_check_failed_repeatedly
+      in
+      match outcome with
+      | `First ->
+        Log.Misc.warn
+          "cascade %s: preflight skipped 1 unhealthy local endpoint(s) before \
+           provider dispatch: [%s] (reason=%s, first occurrence)"
+          cascade_name
+          endpoint
+          (Cascade_preflight_state.reason_slug
+             Cascade_preflight_state.Health_check_failed_repeatedly)
+      | `Repeated n ->
+        Log.Misc.warn
+          "cascade %s: preflight skipped 1 unhealthy local endpoint(s) before \
+           provider dispatch: [%s] (reason=%s, consecutive=%d)"
+          cascade_name
+          endpoint
+          (Cascade_preflight_state.reason_slug
+             Cascade_preflight_state.Health_check_failed_repeatedly)
+          n
+      | `Threshold_disable n ->
+        Log.Misc.error
+          "cascade %s: provider [%s] disabled after %d consecutive preflight \
+           unhealthy skips (reason=%s); subsequent skips silenced via \
+           disabled-list. Recovery requires successful health probe."
+          cascade_name
+          endpoint
+          n
+          (Cascade_preflight_state.reason_slug
+             Cascade_preflight_state.Health_check_failed_repeatedly)
+      | `Already_disabled ->
+        (* Drop noise: this endpoint is in the disabled list and has
+           already emitted its ERROR escalation. *)
+        Log.Misc.debug
+          "cascade %s: preflight skipped already-disabled endpoint [%s]"
+          cascade_name endpoint)
+    unhealthy_local_endpoints;
+  (* Recovery: for any endpoint that probed healthy this cycle, clear
+     fingerprints + emit one INFO if it had been disabled. *)
+  List.iter
+    (fun (url, healthy) ->
+      if healthy
+         && Cascade_preflight_state.is_disabled
+              Cascade_preflight_state.global ~provider:url
+      then
+        let recovered =
+          Cascade_preflight_state.reset_on_health_recovery
+            Cascade_preflight_state.global ~provider:url
+        in
+        if recovered
+        then
+          Log.Misc.info
+            "cascade %s: provider [%s] re-enabled after successful health \
+             probe; removed from disabled-list."
+            cascade_name url)
+    local_endpoint_health;
   let candidates = local_prefiltered_candidates in
   if health_cooldown_fail_open then
     Log.Misc.warn

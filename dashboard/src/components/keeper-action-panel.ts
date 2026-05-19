@@ -160,9 +160,16 @@ function KeeperActionRow({ keeper }: { keeper: Keeper }) {
       <div class="flex items-center gap-2 min-w-0 flex-1">
         <span class="text-xs font-semibold text-[var(--color-fg-secondary)] truncate max-w-28">${keeper.name}</span>
         <${KeeperPhaseBadge} phase=${keeper.phase} compact />
-        ${keeper.paused
-          ? html`<span class="text-3xs font-semibold text-[var(--paused,var(--color-status-warn))]">일시정지</span>`
-          : null}
+        <!--
+          RFC-0135 §1.2: the previous auxiliary "일시정지" <span> at this
+          position duplicated KeeperPhaseBadge's "⏸ 일시정지" output and
+          colocated the *state noun* "일시정지" with the *verb button*
+          "일시정지" later in the row — the user reported this as
+          confusing on 2026-05-19. The badge already renders the state;
+          this slot is intentionally empty so the action buttons own the
+          verb meaning. PR-7 will further disambiguate by appending "하기"
+          to verb-button labels.
+        -->
       </div>
       <div class="flex items-center gap-1 shrink-0">
         ${vis.canBoot
@@ -171,7 +178,7 @@ function KeeperActionRow({ keeper }: { keeper: Keeper }) {
               size="sm"
               disabled=${busy.value}
               onClick=${() => handle('boot')}
-              title="기동"
+              title="기동: offline keeper 를 다시 시작합니다 (offline → running)"
             >기동<//>`
           : null}
         ${vis.canPause
@@ -180,7 +187,7 @@ function KeeperActionRow({ keeper }: { keeper: Keeper }) {
               size="sm"
               disabled=${busy.value}
               onClick=${() => handle('pause')}
-              title="일시정지"
+              title="일시정지: 실행 중인 keeper 를 일시 멈춥니다 (running → paused, 현재 turn 은 정상 종료)"
             >일시정지<//>`
           : null}
         ${vis.canResume
@@ -189,7 +196,7 @@ function KeeperActionRow({ keeper }: { keeper: Keeper }) {
               size="sm"
               disabled=${busy.value}
               onClick=${() => handle('resume')}
-              title="재개"
+              title="재개: 일시정지된 keeper 를 다시 실행합니다 (paused → running)"
             >재개<//>`
           : null}
         ${vis.canWake && !vis.canBoot
@@ -198,7 +205,7 @@ function KeeperActionRow({ keeper }: { keeper: Keeper }) {
               size="sm"
               disabled=${busy.value}
               onClick=${() => handle('wakeup')}
-              title="깨우기: sleep 중인 keeper를 즉시 깨워 다음 turn을 시도"
+              title="깨우기: idle 또는 stuck 상태에서 다음 turn 을 즉시 시도합니다. 실행 중이어도 노출되는 이유는 cascade/oas/turn timeout 같은 stuck signal 이 backend 보다 먼저 frontend 에 보이는 케이스를 다루기 위함입니다."
             >깨우기<//>`
           : null}
         ${vis.canShutdown
@@ -207,7 +214,7 @@ function KeeperActionRow({ keeper }: { keeper: Keeper }) {
               size="sm"
               disabled=${busy.value}
               onClick=${() => handle('shutdown')}
-              title="종료"
+              title="종료: keeper 를 완전 종료합니다 (running/paused → offline, fiber + 리소스 정리)"
             >종료<//>`
           : null}
       </div>

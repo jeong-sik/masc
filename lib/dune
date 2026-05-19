@@ -232,6 +232,7 @@
   worker_dev_tools_paths
   worker_dev_tools_log_sanitize
   worker_dev_tools_command_syntax
+  worker_dev_tools_mutation_classifier
   ;; keeper_memory sub-modules
   keeper_memory_policy_summary_filter
   keeper_memory_policy

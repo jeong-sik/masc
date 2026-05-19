@@ -323,7 +323,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">종료 코드</strong> · ${latestTerminalCode}${latestTerminalSummary ? html` · ${latestTerminalSummary}` : null}</span>`
           : null}
         ${latestNextAction
-          ? html`<span><strong class="text-[var(--color-fg-secondary)]">권장 조치</strong> · ${latestNextAction}</span>`
+          ? html`<span title=${latestNextAction}><strong class="text-[var(--color-fg-secondary)]">권장 조치</strong> · ${nextHumanActionLabel(latestNextAction)}</span>`
           : null}
         ${shouldShowOperatorDispositionReason
           ? html`<span><${StrongSecondary}>운영자 판단</${StrongSecondary}> · ${operatorDispositionReason}</span>`

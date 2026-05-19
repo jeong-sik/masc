@@ -1,4 +1,4 @@
-(* Parse_outcome — see .mli for design contract. RFC-0144. *)
+(* Parse_outcome — see .mli for design contract. RFC-0145. *)
 
 type error =
   [ `Json_parse_error of string
@@ -23,7 +23,7 @@ let parse_safe (f : string -> 'a) (s : string) : 'a t =
   try Ok (f s)
   with
   | Eio.Cancel.Cancelled _ as e ->
-      (* RFC-0144 §Design — cancellation MUST re-raise per Eio rules.
+      (* RFC-0145 §Design — cancellation MUST re-raise per Eio rules.
          Anti-goal: do not classify Cancelled as a parse failure. *)
       raise e
   | exn -> Error (of_exn exn)

@@ -1,4 +1,4 @@
-(** RFC-0144 — Parse_outcome unit tests.
+(** RFC-0145 — Parse_outcome unit tests.
 
     Covers:
     1. Ok path (successful parse).
@@ -52,7 +52,7 @@ let test_to_option () =
   check (option int) "Error -> None"
     None (Parse_outcome.to_option (Error (`Other (Failure "x"))))
 
-(* RFC-0144 §Design — cancellation MUST re-raise. We drive an Eio
+(* RFC-0145 §Design — cancellation MUST re-raise. We drive an Eio
    fiber and cancel it from a sibling; inside the cancelled context
    the parser raises Cancelled which parse_safe must propagate. *)
 let test_cancellation_reraises () =

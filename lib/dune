@@ -645,7 +645,7 @@
    masc_mcp.multimodal
    ;; Repository manager sub-library (multi-repository feature)
    masc_mcp.repo_manager
-   ;; Parse_outcome — RFC-0144 canonical helper for parse-with-failure
+   ;; Parse_outcome — RFC-0145 canonical helper for parse-with-failure
    ;; boundaries (replaces silent [try ... with _ -> None] pattern).
    masc_mcp.parse_outcome
    )

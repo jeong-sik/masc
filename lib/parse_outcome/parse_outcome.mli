@@ -4,7 +4,7 @@
     as Cluster A "telemetry-as-fix" in
     [~/me/.tmp/pr-audit-2026-05-20/AUDIT-REPORT.md].
 
-    Design constraints (RFC-0144):
+    Design constraints (RFC-0145):
     - Cancellation [Eio.Cancel.Cancelled] is re-raised, never absorbed.
     - The base library has no Yojson dependency; callers that need
       Yojson-aware classification pass the exception to [of_exn].

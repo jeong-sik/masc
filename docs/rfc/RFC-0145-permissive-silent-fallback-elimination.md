@@ -1,5 +1,5 @@
 ---
-rfc: "0144"
+rfc: "0145"
 title: "Permissive-Silent-Fallback Elimination"
 status: Draft
 created: 2026-05-20
@@ -11,7 +11,7 @@ related: ["0088", "0109"]
 implementation_prs: []
 ---
 
-# RFC-0144 — Permissive-Silent-Fallback Elimination
+# RFC-0145 — Permissive-Silent-Fallback Elimination
 
 ## 1. Motivation
 

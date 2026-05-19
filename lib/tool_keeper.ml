@@ -56,12 +56,12 @@ let empty_text_cache ~generation =
 
 let keeper_list_cache = Atomic.make (empty_text_cache ~generation:0)
 
-(* Env-var parse fallback observability. RFC-0144 demonstration site:
+(* Env-var parse fallback observability. RFC-0145 demonstration site:
    replaces [Float.of_string_opt + wildcard fallback] with
    [Parse_outcome.parse_safe Float.of_string], which makes the failure
    branch a *typed* [`Other exn] payload rather than an opaque [None].
 
-   The Prometheus counter is retained per RFC-0144 §Override exemption:
+   The Prometheus counter is retained per RFC-0145 §Override exemption:
    the counter remains until the full 7-site migration is complete,
    after which the counter itself is removed in the closeout PR. *)
 let cache_ttl_seconds env_var ~default =

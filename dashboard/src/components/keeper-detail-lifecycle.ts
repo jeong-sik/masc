@@ -17,6 +17,7 @@ export function KeeperLifecycleButtons({ keeper, effectiveStatus }: { keeper: Ke
   if (isOffline) return html`
     <button type="button"
       class="py-1 px-3 rounded-[var(--r-1)] text-2xs font-semibold cursor-pointer border border-[var(--ok-border)] bg-[var(--ok-soft)] text-[var(--color-status-ok)] hover:bg-[var(--ok-soft)] transition-colors"
+      title="기동: offline keeper 를 다시 시작합니다 (offline → running)"
       onClick=${() => {
         void (async () => {
           try {
@@ -32,11 +33,12 @@ export function KeeperLifecycleButtons({ keeper, effectiveStatus }: { keeper: Ke
           }
         })()
       }}
-    >기동</button>`
+    >기동하기</button>`
 
   if (isRunning) return html`
     <button type="button"
       class="py-1 px-3 rounded-[var(--r-1)] text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition-colors"
+      title="종료: keeper 를 완전 종료합니다 (running/paused → offline, fiber + 리소스 정리)"
       onClick=${() => {
         void (async () => {
           const confirmed = await requestConfirm({
@@ -59,7 +61,7 @@ export function KeeperLifecycleButtons({ keeper, effectiveStatus }: { keeper: Ke
           }
         })()
       }}
-    >종료</button>`
+    >종료하기</button>`
 
   return null
 }

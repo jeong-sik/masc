@@ -727,8 +727,9 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       ` : html`
         <button type="button"
           class="${btnBase} bg-[var(--purple)] text-[var(--color-bg-0)]"
+          title="편집: 프롬프트 편집 모드로 진입합니다"
           onClick=${enterEditMode}
-        >편집</button>
+        >편집하기</button>
       `}
       ${saveError.value ? html`<span class="text-xs text-[var(--color-status-err)]" role="alert">${saveError.value}</span>` : null}
     </div>
@@ -1108,8 +1109,9 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           >${runtimeSaving.value ? '저장 중...' : '런타임 설정 저장'}</button>
           <button type="button"
             class="${btnBase} bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)]"
+            title="초기화: 변경한 런타임 설정 draft 를 서버 값으로 되돌립니다"
             onClick=${resetRuntimeDraft}
-          >초기화</button>
+          >초기화하기</button>
           <span class="text-3xs text-accent-fg">변경된 설정이 있습니다</span>
         </div>
       ` : null}

@@ -54,6 +54,13 @@ type event =
          this field for every error path is tracked separately so this
          introduction PR keeps the record-shape change surgical. *)
       failure_class: Tool_result.tool_failure_class option [@default None];
+      (** Post-execution semantic classification preserved for BOTH
+         success and failure. Unlike error_* fields which are cleared
+         when [success = true], this field survives so downstream
+         consumers can reason over the execution outcome without
+         reconstructing it from [error_message] substrings.
+         Encoded as [Exec_semantic.to_kind] string for wire compat. *)
+      exec_semantic: string option [@default None];
     }
   | Tool_assigned of {
       agent_id: string;
@@ -448,8 +455,8 @@ let nonempty_error_kind_opt value =
   | None -> None
 
 let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id
-    ?source ?session_id ?operation_id ?worker_run_id ?failure_class ?error_kind
-    ?error_message ?exit_code ?stderr_excerpt () =
+    ?source ?session_id ?operation_id ?worker_run_id ?failure_class ?exec_semantic
+    ?error_kind ?error_message ?exit_code ?stderr_excerpt () =
   let failure_class = if success then None else failure_class in
   let error_kind =
     if success then None else nonempty_error_kind_opt error_kind
@@ -459,6 +466,10 @@ let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id
   let stderr_excerpt =
     if success then None else nonempty_opt stderr_excerpt
   in
+  (* NOTE: exec_semantic is preserved regardless of [success].
+     Unlike error_* fields which are cleared on success, the semantic
+     classification is meaningful for both success and failure paths
+     (e.g. `Ok, `Timeout, `Signaled all carry diagnostic value). *)
   track ?fs config
     (Tool_called
        {
@@ -475,6 +486,7 @@ let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id
          exit_code;
          stderr_excerpt;
          failure_class;
+         exec_semantic;
        });
   if not success then
     match error_kind with

@@ -60,6 +60,7 @@ type event =
       exit_code : int option; [@default None]
       stderr_excerpt : string option; [@default None]
       failure_class : Tool_result.tool_failure_class option; [@default None]
+      exec_semantic : string option; [@default None]
     }
   | Tool_assigned of {
       agent_id : string;
@@ -196,6 +197,7 @@ val track_tool_called :
   ?operation_id:string ->
   ?worker_run_id:string ->
   ?failure_class:Tool_result.tool_failure_class ->
+  ?exec_semantic:string ->
   ?error_kind:error_kind ->
   ?error_message:string ->
   ?exit_code:int ->

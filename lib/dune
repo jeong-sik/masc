@@ -6,6 +6,7 @@
   (language c)
   (names nofile_stubs))
 (private_modules
+ auth_nickname
  plan_action_outcome
  prometheus_text
  error_event_type

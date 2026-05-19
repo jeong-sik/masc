@@ -115,6 +115,67 @@ export function extractCodeLocation(record: Record<string, unknown> | null): Cod
   }
 }
 
+export interface MutableRouteContext {
+  filePath?: string
+  line?: number
+  goalId?: string
+  taskId?: string
+  boardPostId?: string
+  commentId?: string
+  prId?: string
+  gitRef?: string
+  logId?: string
+  sessionId?: string
+  operationId?: string
+  workerRunId?: string
+}
+
+export function mergeRouteRecord(
+  context: MutableRouteContext,
+  record: Record<string, unknown> | null,
+  overwrite = false,
+): void {
+  if (!record) return
+  const location = extractCodeLocation(record)
+  if (location?.filePath && (overwrite || context.filePath === undefined)) context.filePath = location.filePath
+  if (location?.line !== undefined && (overwrite || context.line === undefined)) context.line = location.line
+
+  const goalId = idString(record.goal_id)
+  if (goalId && (overwrite || context.goalId === undefined)) context.goalId = goalId
+  const taskId = idString(record.task_id)
+  if (taskId && (overwrite || context.taskId === undefined)) context.taskId = taskId
+  const boardPostId = idString(record.board_post_id) ?? idString(record.post_id)
+  if (boardPostId && (overwrite || context.boardPostId === undefined)) context.boardPostId = boardPostId
+  const commentId = idString(record.comment_id) ?? idString(record.reply_id) ?? idString(record.comment_number)
+  if (commentId && (overwrite || context.commentId === undefined)) context.commentId = commentId
+  const prId = idString(record.pr_id) ?? idString(record.pull_request) ?? idString(record.pr_number)
+  if (prId && (overwrite || context.prId === undefined)) context.prId = prId
+  const gitRef = idString(record.git_ref) ?? idString(record.commit) ?? idString(record.branch)
+  if (gitRef && (overwrite || context.gitRef === undefined)) context.gitRef = gitRef
+  const logId = idString(record.log_id)
+  if (logId && (overwrite || context.logId === undefined)) context.logId = logId
+  const sessionId = idString(record.session_id)
+  if (sessionId && (overwrite || context.sessionId === undefined)) context.sessionId = sessionId
+  const operationId = idString(record.operation_id)
+  if (operationId && (overwrite || context.operationId === undefined)) context.operationId = operationId
+  const workerRunId = idString(record.worker_run_id)
+  if (workerRunId && (overwrite || context.workerRunId === undefined)) context.workerRunId = workerRunId
+}
+
+export function hasRouteContext(context: MutableRouteContext): boolean {
+  return context.filePath !== undefined
+    || context.goalId !== undefined
+    || context.taskId !== undefined
+    || context.boardPostId !== undefined
+    || context.commentId !== undefined
+    || context.prId !== undefined
+    || context.gitRef !== undefined
+    || context.logId !== undefined
+    || context.sessionId !== undefined
+    || context.operationId !== undefined
+    || context.workerRunId !== undefined
+}
+
 export function toIsoTimestamp(value: unknown): string | undefined {
   if (typeof value === 'string' && value.trim() !== '') return value
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return undefined

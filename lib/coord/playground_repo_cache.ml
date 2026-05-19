@@ -86,7 +86,14 @@ let update
           match Yojson.Safe.Util.member "repos" json with
           | `List repos -> repos
           | _ -> []
-        with Sys_error _ | Yojson.Json_error _ -> []
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | (Sys_error _ | Yojson.Json_error _) as exn ->
+          Log.Misc.warn
+            "[playground_repo_cache] existing cache read failed at %s: %s"
+            cache_path
+            (Printexc.to_string exn);
+          []
       in
       let updated =
         entry

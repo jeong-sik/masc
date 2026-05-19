@@ -69,6 +69,46 @@ val incr_typed_advisor : Shell_ir_validator.advisory -> unit
     [Gate_diff_types.typed_advisor_log_enabled ()] is true so an
     operator running with the flag off pays zero cost. *)
 
+(** RFC-0131 PR-3 — caller × verdict telemetry partition for the
+    Shell_command_gate facade.
+
+    Mirrors the [caller] tag defined in {!Shell_command_gate.caller}
+    on both the legacy and SSOT facades.  Increment from each
+    facade's verdict-producing public entry point ({!Shell_command_gate.gate},
+    {!Shell_command_gate.lower_typed_pipeline}, and
+    {!Shell_command_gate.validate_allowlist} on legacy) so a future
+    authority flip (RFC-0131 PR-5) automatically populates the
+    per-caller partition without further wiring.
+
+    Until PR-5 lands the production parse path goes through
+    [Worker_dev_tools.validate_command_coding_with_allowlist] which
+    consumes only [Shell_command_gate.parse] (a parser, not a
+    verdict producer), so emit volume is naturally 0 in production.
+    Tests covering the verdict surface exercise this counter
+    directly. *)
+type shell_gate_caller =
+  | Worker_dev_tools
+  | Tool_code_write
+  | Keeper_shell_bash
+
+type shell_gate_verdict_kind =
+  | Allow
+  | Reject
+  | Cannot_parse
+
+val incr_shell_gate
+  :  caller:shell_gate_caller
+  -> verdict:shell_gate_verdict_kind
+  -> unit
+(** Record one shell_command_gate verdict under the given
+    [caller × verdict] bucket.  Exhaustive over both sums; adding a
+    new caller or verdict variant forces an update here at compile
+    time.
+
+    [caller] is required because partition-less rows are useless for
+    the PR-5 authority-flip decision; legacy callers without a
+    caller tag simply do not increment. *)
+
 val reset : unit -> unit
 (** Zero every counter.  Used by tests; operators should not rely on
     this surface. *)
@@ -117,6 +157,19 @@ type snapshot = {
   typed_advisor_allow : int;
   typed_advisor_reject : int;
   typed_advisor_cannot_parse : int;
+  (* RFC-0131 PR-3 — caller × verdict partition for the
+     [Shell_command_gate] facade.  3 callers × 3 verdicts = 9
+     buckets.  Field order matches [shell_gate_caller × shell_gate_verdict_kind]
+     row-major.  See {!incr_shell_gate} for the increment surface. *)
+  shell_gate_worker_dev_tools_allow : int;
+  shell_gate_worker_dev_tools_reject : int;
+  shell_gate_worker_dev_tools_cannot_parse : int;
+  shell_gate_tool_code_write_allow : int;
+  shell_gate_tool_code_write_reject : int;
+  shell_gate_tool_code_write_cannot_parse : int;
+  shell_gate_keeper_shell_bash_allow : int;
+  shell_gate_keeper_shell_bash_reject : int;
+  shell_gate_keeper_shell_bash_cannot_parse : int;
 }
 
 val snapshot : unit -> snapshot

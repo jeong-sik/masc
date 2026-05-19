@@ -940,9 +940,22 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
               | Masc_domain.Done _ | Masc_domain.Cancelled _ -> ())
            | None -> ())
         | Masc_domain.Approve_verification ->
-          let verification_id = Option.value ~default:"" verification_id_before in
-          Verification_protocol.notify_approve_verification
-            ~task_id ~verifier:ctx.agent_name ~verification_id ~notes;
+          (* Previously this arm used [Option.value ~default:""
+             verification_id_before], which silently turned a missing
+             verification_id into the empty string and let
+             [notify_approve_verification] proceed against an invalid
+             id.  An Approve_verification action without a preceding
+             AwaitingVerification record is a logical invariant
+             violation — log it so dashboards surface the drift
+             instead of acting on empty strings. *)
+          (match verification_id_before with
+           | None ->
+             Log.Task.warn
+               "approve_verification action for task %s without verification_id_before (skipping notify)"
+               task_id
+           | Some verification_id ->
+             Verification_protocol.notify_approve_verification
+               ~task_id ~verifier:ctx.agent_name ~verification_id ~notes);
           (* Record a CDAL verdict attribution on the approval leg so the
              dashboard gets a complete audit line.  With the verification
              FSM enabled, tasks reach Done via approve_verification rather
@@ -952,7 +965,8 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
              contracts are present.  The rejection string is intentionally
              dropped — the verifier keeper has already judged the task,
              we only want the [Dashboard_attribution] side effect that
-             [gate_check] performs internally. *)
+             [gate_check] performs internally.  This runs independently
+             of verification_id presence. *)
           if Env_config_runtime.Cdal.gate_enabled () then
             ignore
               (Cdal_verdict_gate.gate_check
@@ -961,9 +975,14 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
                  ~task_id ())
         | Masc_domain.Reject_verification ->
           let reason = if not (String.equal notes "") then notes else reason in
-          let verification_id = Option.value ~default:"" verification_id_before in
-          Verification_protocol.notify_reject_verification
-            ~task_id ~verifier:ctx.agent_name ~verification_id ~reason;
+          (match verification_id_before with
+           | None ->
+             Log.Task.warn
+               "reject_verification action for task %s without verification_id_before (skipping notify)"
+               task_id
+           | Some verification_id ->
+             Verification_protocol.notify_reject_verification
+               ~task_id ~verifier:ctx.agent_name ~verification_id ~reason);
           if Env_config_runtime.Cdal.gate_enabled () then
             ignore
               (Cdal_verdict_gate.gate_check

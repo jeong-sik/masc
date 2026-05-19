@@ -465,11 +465,14 @@ let rec add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/dashboard/shell" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let light = Server_utils.bool_query_param req "light" ~default:false in
+         let timing = Server_timing.create () in
          let json =
-           dashboard_shell_http_json ?clock:state.Mcp_server.clock ~request:req ~light
-             state.Mcp_server.room_config
+           dashboard_shell_http_json ?clock:state.Mcp_server.clock ~request:req
+             ~timing ~light state.Mcp_server.room_config
          in
-         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+         Http.Response.json ~compress:true ~request:req
+           ~extra_headers:(Server_timing.extra_header timing)
+           (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/nudges" (fun request reqd ->
        with_public_read (fun state req reqd ->
@@ -675,18 +678,36 @@ let rec add_routes ~sw ~clock router =
          ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/project-snapshot" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let json = dashboard_namespace_truth_http_json ~state ~sw ~clock req in
-         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+         let timing = Server_timing.create () in
+         let json =
+           Server_timing.measure timing Project_snapshot_runtime (fun () ->
+             dashboard_namespace_truth_http_json ~state ~sw ~clock req)
+         in
+         Http.Response.json ~compress:true ~request:req
+           ~extra_headers:(Server_timing.extra_header timing)
+           (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/namespace-truth" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let json = dashboard_namespace_truth_http_json ~state ~sw ~clock req in
-         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+         let timing = Server_timing.create () in
+         let json =
+           Server_timing.measure timing Project_snapshot_runtime (fun () ->
+             dashboard_namespace_truth_http_json ~state ~sw ~clock req)
+         in
+         Http.Response.json ~compress:true ~request:req
+           ~extra_headers:(Server_timing.extra_header timing)
+           (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/room-truth" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let json = dashboard_namespace_truth_http_json ~state ~sw ~clock req in
-         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+         let timing = Server_timing.create () in
+         let json =
+           Server_timing.measure timing Project_snapshot_runtime (fun () ->
+             dashboard_namespace_truth_http_json ~state ~sw ~clock req)
+         in
+         Http.Response.json ~compress:true ~request:req
+           ~extra_headers:(Server_timing.extra_header timing)
+           (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/execution" (fun request reqd ->
        with_public_read (fun state req reqd ->
@@ -944,14 +965,18 @@ let rec add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/tools" (fun request reqd ->
        with_public_read (fun state req reqd ->
+           let timing = Server_timing.create () in
            let json =
              dashboard_tools_http_json
-             ?actor:
-               (dashboard_actor_for_request
-                  ~base_path:state.Mcp_server.room_config.base_path request)
-             state.Mcp_server.room_config
+               ~timing
+               ?actor:
+                 (dashboard_actor_for_request
+                    ~base_path:state.Mcp_server.room_config.base_path request)
+               state.Mcp_server.room_config
            in
-         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+         Http.Response.json ~compress:true ~request:req
+           ~extra_headers:(Server_timing.extra_header timing)
+           (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/mission/briefing" (fun request reqd ->
        with_public_read (fun state req reqd ->
@@ -1209,27 +1234,33 @@ let rec add_routes ~sw ~clock router =
                    until_ts );
              ]
          in
+         let timing = Server_timing.create () in
          let result =
-           Telemetry_unified.read_unified_result ~base_path ~masc_root ~sources
-             ?keeper_name ?session_id ?operation_id ?worker_run_id
-             ?since_ts ?until_ts ~n ()
+           Server_timing.measure timing Telemetry_query (fun () ->
+             Telemetry_unified.read_unified_result ~base_path ~masc_root ~sources
+               ?keeper_name ?session_id ?operation_id ?worker_run_id
+               ?since_ts ?until_ts ~n ())
          in
          let generated_at = Masc_domain.now_iso () in
-         let json = `Assoc [
-           ("generated_at", `String generated_at);
-           ("generated_at_iso", `String generated_at);
-           ("dashboard_surface", `String "/api/v1/dashboard/telemetry");
-           ("source", `String "telemetry_unified");
-           ( "retention",
-             Telemetry_unified.replay_retention_json ~base_path ~masc_root
-               ~sources );
-           ("query", query_json);
-           ("count", `Int (List.length result.entries));
-           ("total_matching_entries", `Int result.total_matching_entries);
-           ("truncated", `Bool result.truncated);
-           ("entries", `List result.entries);
-         ] in
+         let json =
+           Server_timing.measure timing Json_serialize (fun () ->
+             `Assoc [
+               ("generated_at", `String generated_at);
+               ("generated_at_iso", `String generated_at);
+               ("dashboard_surface", `String "/api/v1/dashboard/telemetry");
+               ("source", `String "telemetry_unified");
+               ( "retention",
+                 Telemetry_unified.replay_retention_json ~base_path ~masc_root
+                   ~sources );
+               ("query", query_json);
+               ("count", `Int (List.length result.entries));
+               ("total_matching_entries", `Int result.total_matching_entries);
+               ("truncated", `Bool result.truncated);
+               ("entries", `List result.entries);
+             ])
+         in
          Http.Response.json ~compress:true ~request:req
+           ~extra_headers:(Server_timing.extra_header timing)
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/telemetry/summary" (fun request reqd ->
@@ -1238,11 +1269,15 @@ let rec add_routes ~sw ~clock router =
          let base_path = config.base_path in
          let masc_root = Coord.masc_root_dir config in
          let cache_key = telemetry_summary_cache_key ~base_path ~masc_root in
+         let timing = Server_timing.create () in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:30.0 (fun () ->
-               Telemetry_unified.summary_json ~base_path ~masc_root ())
+           Server_timing.measure timing Cache_lookup (fun () ->
+             Dashboard_cache.get_or_compute cache_key ~ttl:30.0 (fun () ->
+               Server_timing.measure timing Telemetry_summary_aggregate (fun () ->
+                 Telemetry_unified.summary_json ~base_path ~masc_root ())))
          in
          Http.Response.json ~compress:true ~request:req
+           ~extra_headers:(Server_timing.extra_header timing)
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/oas/telemetry/recent" (fun request reqd ->

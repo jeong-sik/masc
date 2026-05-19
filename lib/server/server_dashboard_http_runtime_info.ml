@@ -687,19 +687,37 @@ let runtime_resolution_json (config : Coord.config) =
       @ Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields () )
 ;;
 
-let dashboard_tools_http_json ?actor (config : Coord.config) : Yojson.Safe.t =
+let dashboard_tools_http_json ?actor ?timing (config : Coord.config) : Yojson.Safe.t =
   let ctx : Tool_misc.context =
     { config; agent_name = Option.value ~default:"dashboard" actor }
   in
+  let run phase f =
+    match timing with
+    | None -> f ()
+    | Some t -> Server_timing.measure t phase f
+  in
+  let config_resolution =
+    run Projection_config_resolution (fun () ->
+      Config_dir_resolver.(resolve () |> to_json))
+  in
+  let runtime_resolution =
+    run Projection_runtime_resolution (fun () -> runtime_resolution_json config)
+  in
+  let inventory =
+    run Tools_compute (fun () ->
+      Tool_misc.tool_inventory_json ctx ~include_hidden:true ~include_deprecated:true)
+  in
+  let usage =
+    run Tools_compute (fun () ->
+      Tool_unified.summary_report ()
+      |> Tool_usage_log.attach_source_metadata ~masc_root:(Coord.masc_root_dir config))
+  in
   `Assoc
     [ "generated_at", `String (Masc_domain.now_iso ())
-    ; ("config_resolution", Config_dir_resolver.(resolve () |> to_json))
-    ; "runtime_resolution", runtime_resolution_json config
-    ; ( "tool_inventory"
-      , Tool_misc.tool_inventory_json ctx ~include_hidden:true ~include_deprecated:true )
-    ; ( "tool_usage"
-      , Tool_unified.summary_report ()
-        |> Tool_usage_log.attach_source_metadata ~masc_root:(Coord.masc_root_dir config) )
+    ; "config_resolution", config_resolution
+    ; "runtime_resolution", runtime_resolution
+    ; "tool_inventory", inventory
+    ; "tool_usage", usage
     ]
 ;;
 

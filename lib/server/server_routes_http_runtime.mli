@@ -198,9 +198,18 @@ val make_health_response_json :
 (** [make_health_response_json ?listener request] is the public [/health]
     renderer.  It returns {!make_health_probe_json} by default.  When the
     request query contains [full=1] / [full=true], it returns the latest cached
-    full-health snapshot plus cheap request-local fields and starts a
-    background refresh when the snapshot is missing or stale.  The HTTP handler
-    must not synchronously run durable keeper scans. *)
+    full-health snapshot plus cheap request-local fields and marks the snapshot
+    for refresh when it is missing or stale.  The HTTP handler must not
+    synchronously run durable keeper scans; the Eio refresh loop started by
+    {!start_full_health_snapshot_refresh_loop} performs those scans. *)
+
+val start_full_health_snapshot_refresh_loop :
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  unit
+(** Starts the Eio background refresh loop for cached [/health?full=1]
+    diagnostics.  The loop keeps heavy durable scans out of the HTTP request
+    path and stores stale/error metadata when refreshes fail or time out. *)
 
 module For_testing : sig
   val reset_full_health_snapshot : unit -> unit

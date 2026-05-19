@@ -196,13 +196,29 @@ let sidecar_attempt_path ~base_path id =
     (Printf.sprintf ".gate/runtime/%s/sidecar_lifecycle_attempt.json" id)
 ;;
 
+(* Silent [Sys_error _ | Yojson.Json_error _ -> None] previously
+   collapsed two distinct failure modes into "no record":
+   (1) file existed at [Sys.file_exists] check but read failed (TOCTOU
+       race, permission change, partial write mid-rename),
+   (2) file read OK but JSON was malformed.
+   Operators tracing why [/api/v1/sidecar/status] reports stale state
+   need to tell these apart from a genuinely absent record. Log-only —
+   [None] return preserved so caller contracts are unchanged. *)
 let read_desired_record ~base_path id =
   let path = sidecar_desired_path ~base_path id in
   if not (Sys.file_exists path)
   then None
   else (
     try read_file path |> Yojson.Safe.from_string |> desired_record_of_json with
-    | Sys_error _ | Yojson.Json_error _ -> None)
+    | Sys_error msg ->
+      Log.Server.warn
+        "[sidecar/desired] file_exists OK but read failed at %s: %s"
+        path
+        msg;
+      None
+    | Yojson.Json_error msg ->
+      Log.Server.warn "[sidecar/desired] malformed JSON at %s: %s" path msg;
+      None)
 ;;
 
 let read_attempt_record ~base_path id =
@@ -211,7 +227,15 @@ let read_attempt_record ~base_path id =
   then None
   else (
     try read_file path |> Yojson.Safe.from_string |> attempt_record_of_json with
-    | Sys_error _ | Yojson.Json_error _ -> None)
+    | Sys_error msg ->
+      Log.Server.warn
+        "[sidecar/attempt] file_exists OK but read failed at %s: %s"
+        path
+        msg;
+      None
+    | Yojson.Json_error msg ->
+      Log.Server.warn "[sidecar/attempt] malformed JSON at %s: %s" path msg;
+      None)
 ;;
 
 let isoish_now () =
@@ -522,8 +546,16 @@ let read_status_json ~base_path id =
     then (
       let body = read_file path in
       let parsed =
+        (* Mirror read_desired_record/read_attempt_record: surface
+           malformed JSON instead of silently collapsing to [`Null] in
+           the response payload. *)
         try Some (Yojson.Safe.from_string body) with
-        | Yojson.Json_error _ -> None
+        | Yojson.Json_error msg ->
+          Log.Server.warn
+            "[sidecar/status] malformed JSON at %s: %s"
+            path
+            msg;
+          None
       in
       `Assoc
         [ "ok", `Bool true

@@ -182,8 +182,16 @@ val ensure_same_origin_browser_request :
 
 val http_status_of_auth_error :
   Masc_domain.masc_error ->
-  [> `Forbidden | `Internal_server_error | `Unauthorized ]
-(** HTTP status to return for a given auth-domain error. *)
+  [> `Bad_request
+   | `Forbidden
+   | `Internal_server_error
+   | `Not_found
+   | `Too_many_requests
+   | `Unauthorized
+   ]
+(** HTTP status to return for a given auth-domain error. Returned as an
+    open polymorphic-variant subset so callers can pass the result to
+    either [Httpun.Status.t]- or [H2.Status.t]-typed sinks. *)
 
 val server_state : Mcp_server.server_state option ref
 (** Process-wide server state handle used by auth helpers when no

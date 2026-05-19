@@ -506,8 +506,7 @@ let ensure_same_origin_browser_request request :
    from a real server fault. The match is now exhaustive; adding a new
    [Masc_error.t] outer variant will trip Warning 8 here and force an
    explicit HTTP-status decision. *)
-let http_status_of_auth_error : Masc_domain.masc_error -> Httpun.Status.t =
-  function
+let http_status_of_auth_error = function
   | Masc_domain.Auth
       (Masc_domain.Auth_error.Unauthorized _
       | Masc_domain.Auth_error.InvalidToken _

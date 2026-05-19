@@ -22,7 +22,11 @@
 #   1 — new violations (not in allowlist)
 #   2 — stale allowlist entries (pattern no longer present at listed location)
 #
-# Reference: #8605 (family), #8832 (latest instance), event_kind.mli (fix template).
+# References:
+#   - RFC-0126 §4.1 (anti-pattern: wildcard fallback in option/result match).
+#     This script is the Phase 2 ratchet for the discipline; the allowlist
+#     is the baseline that must shrink monotonically (Phase 4 hard-fail).
+#   - #8605 (family), #8832 (latest instance), event_kind.mli (fix template).
 
 set -euo pipefail
 

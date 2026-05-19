@@ -3,12 +3,12 @@ rfc: "0135"
 title: "Dashboard Keeper Operational Surface — Typed SSOT"
 status: Draft
 created: 2026-05-19
-updated: 2026-05-19
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0004", "0029", "0088", "0133"]
-implementation_prs: []
+implementation_prs: [16573, 16576, 16593, 16600, 16606, 16611, 16615, 16619, 16623, 16626, 16632, 16638, 16662, 16663, 16672, 16680, 16683, 16685, 16687, 16689, 16691, 16695]
 ---
 
 # RFC-0135: Dashboard Keeper Operational Surface — Typed SSOT

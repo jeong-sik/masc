@@ -3,12 +3,12 @@ rfc: "0139"
 title: "Agent Status Vocabulary SSOT"
 status: Draft
 created: 2026-05-19
-updated: 2026-05-19
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0135"]
-implementation_prs: []
+implementation_prs: [16698, 16707, 16708, 16711, 16714]
 ---
 
 # RFC-0139 — Agent Status Vocabulary SSOT

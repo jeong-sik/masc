@@ -11,7 +11,7 @@ import { useEffect, useState } from 'preact/hooks'
 // represent *live-execution* attention (`execution_current && blocked`,
 // see `lib/server/server_dashboard_http.ml:1114`), which is orthogonal to
 // the blocker-class-vs-stale-execution axis and stays inline below.
-import { deriveKeeperOperationalState } from '../lib/keeper-operational-state'
+import { deriveKeeperAttention, deriveKeeperOperationalState } from '../lib/keeper-operational-state'
 import { deriveFiberAlive } from '../lib/keeper-fiber-alive'
 import { formatPct1 } from '../lib/format-number'
 import { formatDuration } from '../lib/format-time'
@@ -202,21 +202,22 @@ export function deriveKeeperLiveTruth({
   }).alive
   const activeTurn = compositeSnapshot?.is_live === true || !isIdleTurnPhase(compositeSnapshot?.turn_phase)
 
-  // RFC-0135 PR-5: route the blocker-class axis through the typed SSOT,
-  // matching the roster card (`agent-roster.ts:rosterStateNote`). The
-  // attention-level axis (live-execution blocked / needs_attention) is
-  // separate — backend sets it as `execution_current && blocked`, which
-  // typed state does not cover, so it stays inline.
+  // RFC-0135 PR-5 + PR-14a: blocker-class axis via typed
+  // `KeeperOperationalState` SSOT; orthogonal backend-attention axis
+  // via `deriveKeeperAttention`. Previously the attention OR was
+  // inlined (`composite.runtime_attention.blocked ||
+  // .needs_attention`), making the two axes a parallel input pair to
+  // the same `blocked` flag that downstream UI checked. The helper
+  // now owns the priority + null-fallback decision so a future axis
+  // (e.g. `acknowledged_at`) is added in one place.
   const opState = deriveKeeperOperationalState({
     keeper,
     composite: compositeSnapshot,
   })
   const stuckByBlockerClass = opState.kind === 'stuck'
   const staleBlocker = opState.kind === 'running' ? opState.staleBlocker : null
-  const attentionBlocked =
-    compositeSnapshot?.runtime_attention?.blocked === true
-    || compositeSnapshot?.runtime_attention?.needs_attention === true
-  const blocked = stuckByBlockerClass || attentionBlocked
+  const attention = deriveKeeperAttention(compositeSnapshot ?? null)
+  const blocked = stuckByBlockerClass || attention !== 'clean'
   const stopRequested =
     compositeSnapshot?.runtime_attention?.fiber_stop_requested === true
     || compositeSnapshot?.phase_diagnosis?.conditions.stop_requested === true
@@ -322,7 +323,7 @@ export function deriveKeeperLiveTruth({
         // operator mental model.
         value: stuckByBlockerClass
           ? opState.reason
-          : attentionBlocked
+          : attention !== 'clean'
             ? compactToken(compositeSnapshot?.runtime_attention?.state, 'blocked')
             : 'none',
         detail: staleBlocker !== null

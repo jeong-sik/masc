@@ -121,9 +121,21 @@ function shortCommit(value: string | null | undefined): string | null {
   return text ? text.slice(0, 10) : null
 }
 
+// Backend `turn_phase` SSOT = `Keeper_composite_observer.turn_phase_to_string`
+// (lib/keeper/keeper_composite_observer.ml:149-157), which emits exactly 7
+// strings: idle / prompting / routing / executing / compacting / finalizing
+// / exhausted. Only "idle" classifies as idle; the other 6 are active.
+// Empty/missing turn_phase also degrades to idle (no active turn signal).
+//
+// The previous version also matched `"stable"` and `"offline"` here.
+// Those are *different axis* vocabularies (`"stable"` belongs to
+// `KeeperCompositePhase`, `"offline"` belongs to keeper linked-state),
+// never emitted into the `turn_phase` slot. Removing them tightens this
+// classifier to the actual backend vocabulary and surfaces noun-collision
+// bugs instead of silently absorbing them.
 function isIdleTurnPhase(value: string | null | undefined): boolean {
   const normalized = value?.trim().toLowerCase()
-  return !normalized || normalized === 'idle' || normalized === 'stable' || normalized === 'offline'
+  return !normalized || normalized === 'idle'
 }
 
 function runtimeWarningList(runtimeResolution: KeeperLiveTruthRuntimeInput | null | undefined): string[] {

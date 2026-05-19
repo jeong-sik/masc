@@ -12,6 +12,7 @@ import {
 import { cursorOverlaySignal, type KeeperCursor } from './keeper-cursor-overlay'
 import { focusIdeContextAnchor, type IdeContextFocus } from './ide-state'
 import { routeLinksForContext } from './ide-context-lens'
+import { parseAgentStatus } from '../../lib/agent-status'
 
 export interface ApiAgent {
   readonly name: string
@@ -54,9 +55,8 @@ const CONTEXT_BADGE_STYLE = {
 }
 
 function mapAgentStatus(status: string): KeeperPresenceEntry['status'] {
-  if (status === 'active' || status === 'busy') return 'active'
-  if (status === 'listening') return 'idle'
-  return 'idle'
+  const parsed = parseAgentStatus(status)
+  return parsed === 'active' || parsed === 'busy' ? 'active' : 'idle'
 }
 
 /**

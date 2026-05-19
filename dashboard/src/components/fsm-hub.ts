@@ -21,6 +21,7 @@ import { Kbd } from './common/kbd'
 import {
   type HoveredSegment,
   type HubAction,
+  type HubFetchStatus,
   type HubState,
   initialHubState,
   fmtDuration,
@@ -320,12 +321,29 @@ function reduceHubState(state: HubState, action: HubAction): HubState {
         }
 
   switch (action.type) {
-    case 'fetch_started':
+    case 'fetch_started': {
+      // Preserve `'fresh'` payload across a refetch only as `'stale'`.
+      // The previous reducer kept `snapshot` populated and merely
+      // flipped `loading=true, error=null` — that is the Workaround
+      // Rejection Bar §2 surface (Unknown→Permissive Default).
+      const prev = current.status
+      const nextStatus: HubFetchStatus = ((): HubFetchStatus => {
+        switch (prev.kind) {
+          case 'idle':
+          case 'loading':
+          case 'error':
+            return { kind: 'loading' }
+          case 'fresh':
+          case 'stale':
+            return { kind: 'loading' }
+        }
+      })()
       return {
         ...current,
-        loading: true,
-        error: null,
+        keeperName: action.keeperName,
+        status: nextStatus,
       }
+    }
     case 'fetch_succeeded': {
       const observation = observeSnapshot(action.snapshot, action.fetchedAt)
       const inv = action.snapshot.invariants
@@ -335,21 +353,44 @@ function reduceHubState(state: HubState, action: HubAction): HubState {
       }
       return {
         keeperName: action.keeperName,
-        snapshot: action.snapshot,
-        loading: false,
-        error: null,
-        lastFetchAt: action.fetchedAt,
+        status: { kind: 'fresh', snapshot: action.snapshot, fetchedAt: action.fetchedAt },
         observations: appendCompositeObservation(current.observations, observation),
         invariantSampleCount: current.invariantSampleCount + 1,
         invariantViolations: violations,
       }
     }
-    case 'fetch_failed':
+    case 'fetch_failed': {
+      const prev = current.status
+      const nextStatus: HubFetchStatus = ((): HubFetchStatus => {
+        switch (prev.kind) {
+          case 'fresh':
+            return {
+              kind: 'stale',
+              snapshot: prev.snapshot,
+              fetchedAt: prev.fetchedAt,
+              stalenessMs: Math.max(0, action.failedAt - prev.fetchedAt),
+              error: action.error,
+            }
+          case 'stale':
+            return {
+              kind: 'stale',
+              snapshot: prev.snapshot,
+              fetchedAt: prev.fetchedAt,
+              stalenessMs: Math.max(0, action.failedAt - prev.fetchedAt),
+              error: action.error,
+            }
+          case 'idle':
+          case 'loading':
+          case 'error':
+            return { kind: 'error', error: action.error }
+        }
+      })()
       return {
         ...current,
-        loading: false,
-        error: action.error,
+        keeperName: action.keeperName,
+        status: nextStatus,
       }
+    }
   }
 }
 
@@ -616,6 +657,7 @@ export function FsmHub(props: FsmHubProps = {}) {
         })
       } catch (err) {
         if (requestIdRef.current !== requestId) return
+        const failedAt = Date.now() / 1000
         if (isCompositeFetchNotFound(err)) {
           setGateKeeperNames(prev => prev.filter(name => name !== activeSelected))
           setSelected(prev => (prev === activeSelected ? null : prev))
@@ -624,6 +666,7 @@ export function FsmHub(props: FsmHubProps = {}) {
             type: 'fetch_failed',
             keeperName: activeSelected,
             error: '선택한 keeper가 종료되었거나 등록 해제되었습니다',
+            failedAt,
           })
           return
         }
@@ -631,6 +674,7 @@ export function FsmHub(props: FsmHubProps = {}) {
           type: 'fetch_failed',
           keeperName: activeSelected,
           error: err instanceof Error ? err.message : 'composite fetch failed',
+          failedAt,
         })
       }
     })()
@@ -681,7 +725,36 @@ export function FsmHub(props: FsmHubProps = {}) {
   // owns its own 5 s clock subscription so this component stays stable
   // on ticks. (Previously this useMemo recomputed every 5 s because of
   // the `now` dep, dragging fsm-hub through the same render every time.)
-  const { snapshot, loading, error, lastFetchAt } = view
+  // Project the typed status onto the flat shape the JSX expects.
+  // `snapshot` is only non-null when the status is `'fresh'` — the
+  // prior reducer leaked stale snapshots through error paths (the
+  // bug this PR closes). `'stale'` is intentionally surfaced via
+  // `error` so the empty-state panel takes over and the operator
+  // sees the failure message instead of rendered cards backed by a
+  // last-known snapshot. Consumers that want explicit stale rendering
+  // can `switch` on `view.status.kind` directly. Exhaustive — no
+  // `default:` clause so a new arm is a compile error.
+  const projectedView = ((): {
+    snapshot: KeeperCompositeSnapshot | null
+    loading: boolean
+    error: string | null
+    lastFetchAt: number
+  } => {
+    const status: HubFetchStatus = view.status
+    switch (status.kind) {
+      case 'idle':
+        return { snapshot: null, loading: false, error: null, lastFetchAt: 0 }
+      case 'loading':
+        return { snapshot: null, loading: true, error: null, lastFetchAt: 0 }
+      case 'fresh':
+        return { snapshot: status.snapshot, loading: false, error: null, lastFetchAt: status.fetchedAt }
+      case 'stale':
+        return { snapshot: null, loading: false, error: status.error, lastFetchAt: status.fetchedAt }
+      case 'error':
+        return { snapshot: null, loading: false, error: status.error, lastFetchAt: 0 }
+    }
+  })()
+  const { snapshot, loading, error, lastFetchAt } = projectedView
 
   const rootGap = density === 'compact' ? 'gap-1.5' : 'gap-3'
   return html`

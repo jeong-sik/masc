@@ -2,23 +2,25 @@ import { useState, useEffect } from 'preact/hooks'
 import { fetchKeeperComposite, fetchKeeperRuntimeTrace } from '../api/keeper'
 import type { KeeperCompositeSnapshot, KeeperRuntimeTraceResponse } from '../api/keeper'
 import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
+import {
+  applyFetchFailed,
+  applyFetchSucceeded,
+  evidenceFreshData,
+  loadingEvidence,
+  type EvidenceState,
+} from './keeper-detail-evidence-state'
 
 const COMPOSITE_REFRESH_MS = 30_000
 const RUNTIME_TRACE_REFRESH_MS = 30_000
 
-export interface KeeperDetailEvidenceState<T> {
-  data: T | null
-  refreshedAtMs: number | null
-  error: string | null
-  loading: boolean
-}
-
-const emptyEvidence = <T,>(): KeeperDetailEvidenceState<T> => ({
-  data: null,
-  refreshedAtMs: null,
-  error: null,
-  loading: true,
-})
+/**
+ * Typed evidence state shared by the keeper detail surface. The union
+ * (`loading | fresh | stale | error`) closes the Unknown→Permissive
+ * Default workaround: a 404 on /composite no longer leaves rendered
+ * cards backed by the last successful payload. See
+ * [keeper-detail-evidence-state.ts] for the rationale.
+ */
+export type KeeperDetailEvidenceState<T> = EvidenceState<T>
 
 function errorMessage(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback
@@ -35,29 +37,21 @@ function errorMessage(err: unknown, fallback: string): string {
  * remaining dedup work. This hook handles only the two derived panels.
  */
 export function useKeeperCompositeEvidence(keeperName: string): KeeperDetailEvidenceState<KeeperCompositeSnapshot> {
-  const [evidence, setEvidence] = useState<KeeperDetailEvidenceState<KeeperCompositeSnapshot>>(() => emptyEvidence())
+  const [evidence, setEvidence] = useState<KeeperDetailEvidenceState<KeeperCompositeSnapshot>>(loadingEvidence)
   useEffect(() => {
     const controller = new AbortController()
     let cancelled = false
-    setEvidence(emptyEvidence())
+    setEvidence(loadingEvidence)
     const refresh = async () => {
       try {
         const result = await fetchKeeperComposite(keeperName, { signal: controller.signal })
         if (!cancelled && !controller.signal.aborted) {
-          setEvidence({
-            data: result,
-            refreshedAtMs: Date.now(),
-            error: null,
-            loading: false,
-          })
+          setEvidence(applyFetchSucceeded(result, Date.now()))
         }
       } catch (err) {
         if (!cancelled && !controller.signal.aborted) {
-          setEvidence((current) => ({
-            ...current,
-            error: errorMessage(err, 'composite fetch failed'),
-            loading: false,
-          }))
+          const message = errorMessage(err, 'composite fetch failed')
+          setEvidence((current) => applyFetchFailed(current, message, Date.now()))
         }
       }
     }
@@ -73,15 +67,15 @@ export function useKeeperCompositeEvidence(keeperName: string): KeeperDetailEvid
 }
 
 export function useKeeperComposite(keeperName: string): KeeperCompositeSnapshot | null {
-  return useKeeperCompositeEvidence(keeperName).data
+  return evidenceFreshData(useKeeperCompositeEvidence(keeperName))
 }
 
 export function useKeeperRuntimeTraceEvidence(keeperName: string): KeeperDetailEvidenceState<KeeperRuntimeTraceResponse> {
-  const [evidence, setEvidence] = useState<KeeperDetailEvidenceState<KeeperRuntimeTraceResponse>>(() => emptyEvidence())
+  const [evidence, setEvidence] = useState<KeeperDetailEvidenceState<KeeperRuntimeTraceResponse>>(loadingEvidence)
   useEffect(() => {
     const controller = new AbortController()
     let cancelled = false
-    setEvidence(emptyEvidence())
+    setEvidence(loadingEvidence)
     const refresh = async () => {
       try {
         const result = await fetchKeeperRuntimeTrace(keeperName, {
@@ -89,20 +83,12 @@ export function useKeeperRuntimeTraceEvidence(keeperName: string): KeeperDetailE
           signal: controller.signal,
         })
         if (!cancelled && !controller.signal.aborted) {
-          setEvidence({
-            data: result,
-            refreshedAtMs: Date.now(),
-            error: null,
-            loading: false,
-          })
+          setEvidence(applyFetchSucceeded(result, Date.now()))
         }
       } catch (err) {
         if (!cancelled && !controller.signal.aborted) {
-          setEvidence((current) => ({
-            ...current,
-            error: errorMessage(err, 'runtime trace fetch failed'),
-            loading: false,
-          }))
+          const message = errorMessage(err, 'runtime trace fetch failed')
+          setEvidence((current) => applyFetchFailed(current, message, Date.now()))
         }
       }
     }
@@ -118,5 +104,5 @@ export function useKeeperRuntimeTraceEvidence(keeperName: string): KeeperDetailE
 }
 
 export function useKeeperRuntimeTrace(keeperName: string): KeeperRuntimeTraceResponse | null {
-  return useKeeperRuntimeTraceEvidence(keeperName).data
+  return evidenceFreshData(useKeeperRuntimeTraceEvidence(keeperName))
 }

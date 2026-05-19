@@ -28,6 +28,7 @@ import {
   useKeeperCompositeEvidence,
   useKeeperRuntimeTraceEvidence,
 } from './keeper-detail-hooks'
+import { evidenceFreshData } from './keeper-detail-evidence-state'
 import { KeeperLifecycleButtons } from './keeper-detail-lifecycle'
 import {
   KeeperDetailHeaderInfo,
@@ -128,8 +129,13 @@ export function KeeperDetailPage() {
   // derived panels (state-diagram + memory-tier).
   const compositeEvidence = useKeeperCompositeEvidence(keeper.name)
   const runtimeTraceEvidence = useKeeperRuntimeTraceEvidence(keeper.name)
-  const compositeSnapshot = compositeEvidence.data
-  const runtimeTrace = runtimeTraceEvidence.data
+  // Surface only the `'fresh'` payload to cascading panels.
+  // `'stale'` evidence keeps `data` for explicit consumers (with a
+  // visible staleness banner via the typed union) but it must NOT
+  // silently feed phase/turn/fiber/FSM/mem cards — that is the
+  // Workaround Rejection Bar §2 anti-pattern this PR closes.
+  const compositeSnapshot = evidenceFreshData(compositeEvidence)
+  const runtimeTrace = evidenceFreshData(runtimeTraceEvidence)
   const prevKeeperRef = useRef(keeper.name)
   if (prevKeeperRef.current !== keeper.name) {
     prevKeeperRef.current = keeper.name

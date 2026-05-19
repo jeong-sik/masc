@@ -11,7 +11,7 @@ import { useEffect, useState } from 'preact/hooks'
 // represent *live-execution* attention (`execution_current && blocked`,
 // see `lib/server/server_dashboard_http.ml:1114`), which is orthogonal to
 // the blocker-class-vs-stale-execution axis and stays inline below.
-import { deriveKeeperAttention, deriveKeeperOperationalState } from '../lib/keeper-operational-state'
+import { deriveKeeperAttention, deriveKeeperDisplayReason, deriveKeeperOperationalState } from '../lib/keeper-operational-state'
 import { deriveFiberAlive } from '../lib/keeper-fiber-alive'
 import { formatPct1 } from '../lib/format-number'
 import { formatDuration } from '../lib/format-time'
@@ -254,14 +254,16 @@ export function deriveKeeperLiveTruth({
       : typeof keeper.last_turn_ago_s === 'number'
         ? `${formatDuration(keeper.last_turn_ago_s)} since turn`
         : 'idle age unknown'
-  const runtimeReason =
-    compactToken(
-      compositeSnapshot?.runtime_attention?.reason
-      ?? keeper.runtime_blocker_summary
-      ?? keeper.attention_reason
-      ?? null,
-      'no blocker reason',
-    )
+  // RFC-0135 PR-14c: display reason via composite-preferred SSOT.
+  // Inline 3-way fallback moved to `deriveKeeperDisplayReason` so
+  // future surfaces share the same precedence (live → flat summary →
+  // operator-pinned). Empty/whitespace strings are filtered by the
+  // helper, so the 'no blocker reason' fallback fires only when no
+  // source has a meaningful value.
+  const runtimeReason = compactToken(
+    deriveKeeperDisplayReason(keeper, compositeSnapshot ?? null),
+    'no blocker reason',
+  )
   const toolContract = compactToken(compositeSnapshot?.execution?.tool_contract_result ?? null, 'tool contract unknown')
   // guardCount / invariantFailed have moved to FsmHub mode='detail' — they
   // are rendered on the dedicated FSM lane strip directly under this panel

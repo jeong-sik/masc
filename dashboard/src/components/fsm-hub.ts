@@ -38,6 +38,7 @@ import { OperationalMeaningPanel, HeroPhase, TurnPipelineStrip, CompositeGraphPa
 import { DwellHistogramPanel, SwimlaneTimeline, TopTransitionsPanel, TransitionTrail } from './fsm-hub-timeline-panels'
 import { MeasurementCard, InvariantsPanel } from './fsm-hub-health-panels'
 import { ringFocusClasses } from './common/ring'
+import { formatIndependentCounters, formatRatioPair } from './counter-format'
 
 // ── Backward-compatible re-exports ─────────────────────
 // External consumers (agents-unified.ts, fsm-hub.test.ts)
@@ -262,20 +263,39 @@ function runtimeTraceTitle(trace: KeeperRuntimeTraceResponse): string {
     `trace_id: ${trace.trace_id || '(unknown)'}`,
     trace.stale_reason ? `stale_reason: ${trace.stale_reason}` : '',
     trace.manifest_path ? `manifest: ${trace.manifest_path}` : '',
-    `manifest rows: ${trace.manifest_returned_rows}/${trace.manifest_total_rows}`,
+    // manifest_returned_rows ≤ manifest_total_rows is a true invariant pair.
+    `manifest rows: ${formatRatioPair({ numerator: trace.manifest_returned_rows, denominator: trace.manifest_total_rows })}`,
     `receipt rows: ${trace.receipt_returned_rows}`,
 	    turn.manifest_keeper_turn_ids.length > 0 ? `keeper_turn_ids: ${turn.manifest_keeper_turn_ids.join(', ')}` : '',
 	    turn.receipt_turn_counts.length > 0 ? `receipt_turn_counts: ${turn.receipt_turn_counts.join(', ')}` : '',
-	    `provider attempts: ${turn.provider_attempt_started_count}/${turn.provider_attempt_finished_count}`,
+	    // provider_attempt_finished ≤ provider_attempt_started is a true invariant pair
+	    // (a finish is always preceded by a start). Started is the denominator.
+	    `provider attempts: ${formatRatioPair({ numerator: turn.provider_attempt_finished_count, denominator: turn.provider_attempt_started_count })}`,
 	    provider.terminal_status ? `provider terminal: ${provider.terminal_status}` : '',
 	    provider.terminal_exception_kind ? `provider exception: ${provider.terminal_exception_kind}` : '',
 	    provider.terminal_error ? `provider error: ${shortText(provider.terminal_error, 220)}` : '',
 	    eventBus.correlation_ids.length > 0 ? `correlation_ids: ${eventBus.correlation_ids.join(', ')}` : '',
     eventBus.run_ids.length > 0 ? `run_ids: ${eventBus.run_ids.join(', ')}` : '',
-    `context compaction: ${eventBus.context_compacted_count}/${eventBus.context_compact_started_count}`,
+    // context_compacted ≤ context_compact_started is a true invariant pair.
+    `context compaction: ${formatRatioPair({ numerator: eventBus.context_compacted_count, denominator: eventBus.context_compact_started_count })}`,
     formatRuntimeTraceUnknown(eventBus.last_compaction),
-    `memory injected/flushed: ${memory.memory_injected_count}/${memory.memory_flushed_count}`,
-    `memory flush ok/error: ${memory.memory_flush_success_count}/${memory.memory_flush_error_count}`,
+    // memory_injected_count and memory_flushed_count are independent monotonic
+    // lifetime counters — no invariant relation between them. Avoid slash UI
+    // (e.g. "909/722" would read as 126% ratio).
+    `memory: ${formatIndependentCounters({
+      leftLabel: 'injected',
+      leftValue: memory.memory_injected_count,
+      rightLabel: 'flushed',
+      rightValue: memory.memory_flushed_count,
+    })}`,
+    // memory_flush_success_count and memory_flush_error_count are independent
+    // outcome tallies (one or the other increments per flush), not a ratio.
+    `memory flush: ${formatIndependentCounters({
+      leftLabel: 'ok',
+      leftValue: memory.memory_flush_success_count,
+      rightLabel: 'error',
+      rightValue: memory.memory_flush_error_count,
+    })}`,
   ].filter(Boolean).join('\n')
 }
 
@@ -300,10 +320,10 @@ function RuntimeEvidenceSummary({
 	      ${runtimeProviderAttemptLabel(trace)}
 	    </span>
 	    <span class=${`${commonClass} border-[var(--info-border)] text-[var(--info-fg)]`} title=${title}>
-      evt ${eventBus.event_bus_correlated_count} · ctx ${eventBus.context_compacted_count}/${eventBus.context_compact_started_count}
+      evt ${eventBus.event_bus_correlated_count} · ctx ${formatRatioPair({ numerator: eventBus.context_compacted_count, denominator: eventBus.context_compact_started_count })}
     </span>
     <span class=${`${commonClass} border-[var(--color-border-default)] text-[var(--color-fg-muted)]`} title=${title}>
-      mem ${memory.memory_injected_count}/${memory.memory_flushed_count}
+      mem ${formatIndependentCounters({ leftLabel: 'inj', leftValue: memory.memory_injected_count, rightLabel: 'flush', rightValue: memory.memory_flushed_count })}
     </span>
   `
 }

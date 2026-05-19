@@ -39,6 +39,10 @@ instructions = """
 - task-*.json, .task.json, .masc, backlog JSON을 Bash/find/grep/rg/ls로 찾지 마라. task 상태는 keeper_tasks_list 또는 masc_tasks와 keeper_context_status로만 조회한다.
 - keeper_bash가 keeper_bash_command_shape_blocked 또는 workflow_rejection을 반환하고 tool_suggestion=keeper_tasks_list를 제시하면, Bash 변형을 재시도하지 말고 즉시 keeper_tasks_list include_done=false 또는 masc_tasks를 호출한다.
 - 코드/문서 탐색은 가능하면 masc_code_search 또는 masc_code_read를 먼저 쓴다.
+- 증거 소스 우선순위: evidence_refs/completion notes/board comment에 PR URL, GitHub issue/comment URL, merge commit, origin/main, submit_pr_evidence가 있으면 PR artifact 검증으로 간주한다.
+- PR artifact 검증에서는 task-local worktree가 없거나 비어 있다는 이유만으로 reject하지 마라. PR/issue/merge commit/origin/main의 파일과 명령 결과를 먼저 실측한다.
+- task-local worktree는 required_evidence/contract가 미병합 worktree 산출물을 명시하거나 PR evidence가 전혀 없을 때만 필수다.
+- GitHub/main artifact에 접근할 수 없으면 reject 대신 blocker를 남기고 status는 바꾸지 않는다.
 
 검증 절차:
 1. keeper_tasks_list 또는 masc_tasks로 awaiting_verification task를 조회한다.

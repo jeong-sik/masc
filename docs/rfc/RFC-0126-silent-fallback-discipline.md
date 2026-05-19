@@ -3,12 +3,12 @@ rfc: "0126"
 title: "Silent fallback discipline (typed split for option/result wildcard arms)"
 status: Draft
 created: 2026-05-17
-updated: 2026-05-17
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0106", "0042", "0088"]
-implementation_prs: []
+implementation_prs: [15959, 16000, 16019, 16024, 16189]
 ---
 
 # RFC-0126 — Silent fallback discipline
@@ -183,9 +183,18 @@ cluster G 는 본 RFC §6.1 클러스터 (A-F) 의 *외부* — 기존 silent pa
 
 iter 48 은 cluster A (typed split) + E (WARN+counter mirror) 조합이지만 §6.1.b 명시 backlog 의 *RFC 완수 의무* 이므로 spiral 외 분류.
 
-### Phase 2 — ppxlib AST lint
+### Phase 2 — Ratchet lint (Phase 2a: grep-based; Phase 2b: ppxlib AST)
 
-RFC-0106 §3.3 의 Phase 2 (`scripts/lint-cancel-guard.sh` ppxlib 확장) 와 sibling. AST visitor 가 다음을 검출:
+**Phase 2a (in place):** `scripts/lint/no-unknown-permissive-default.sh` is the
+grep-based ratchet that enforces §4.1 of this RFC. It detects
+`| "<literal>" -> ...` arms followed by `| _ -> <Capital_Constructor>` and
+fails CI on new violations. The current baseline (allowlist) is
+`scripts/lint/no-unknown-permissive-default.allowlist` — that file must
+shrink monotonically over Phase 3.
+
+**Phase 2b (planned):** RFC-0106 §3.3 의 Phase 2
+(`scripts/lint-cancel-guard.sh` ppxlib 확장) 와 sibling. AST visitor 가
+grep으로 보이지 않는 패턴까지 확장:
 
 - `Pexp_match` 내 `Ppat_construct (Some/None)` + `Ppat_any` 의 `_ -> <not-helper>` 패턴
 - `try` 의 `with _ ->` / `with exn ->` catch-all (`Cancel_safe.protect` 호출 아님)

@@ -3,12 +3,12 @@ rfc: "0092"
 title: "Keeper shell-bash typed validation via Shell_ir.parse"
 status: Draft
 created: 2026-05-17
-updated: 2026-05-17
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0054", "0070", "0084", "0087", "0089"]
-implementation_prs: []
+implementation_prs: [16721]
 ---
 
 # RFC-0092 — Keeper shell-bash typed validation via Shell_ir.parse

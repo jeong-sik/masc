@@ -400,9 +400,7 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
     || (raw.updated_at !== undefined ? toIsoTimestamp(raw.updated_at) : createdAt)
   const titleRaw = asString(raw.title, '').trim()
   const title = sanitizeBoardTitle(titleRaw, body)
-  const tags = Array.isArray(raw.tags)
-    ? raw.tags.filter((item): item is string => typeof item === 'string' && item.trim() !== '')
-    : []
+  const tags = asStringList(raw.tags)
   const reactions = Array.isArray(raw.reactions)
     ? raw.reactions
         .map(normalizeBoardReactionSummary)

@@ -202,6 +202,7 @@ type t =
   | TurnCleanupFailures
   | MemoryBankLoadHistorySwallowedExceptions
   | MemoryRecallReadErrors
+  | CompactionNegativeSavings
   | CascadeHttpProbeJsonParseFailures
 
 val to_string : t -> string
@@ -646,6 +647,20 @@ val metric_keeper_memory_bank_load_history_swallowed_exceptions : string
     as the load-history counter so cardinality is bounded. Behavior is
     unchanged (read still returns [[]] on failure). *)
 val metric_keeper_memory_recall_read_errors : string
+
+(** Counter for compactions where the post-compact recount exceeds the
+    pre-compact estimate, in which case [max 0 (pre - post)] silently
+    floors [saved_tokens] / [saved_messages] to zero. This used to mask
+    a divergence between the two count sources (the token / message
+    counter applied before and after compaction) — operators saw
+    [saved_tokens=0] without any signal that the post-count had grown.
+    The [kind] label is a closed 2-value vocabulary ([tokens] |
+    [messages]); the counter is incremented by one per affected
+    compaction, not by the negative delta, so a single divergent cycle
+    is visible without an unbounded magnitude term. Behavior is
+    unchanged (the floored value still propagates to the existing
+    [saved_tokens] / [saved_messages] gauges and the JSONL audit row). *)
+val metric_keeper_compaction_negative_savings : string
 
 (** Counter for probe responses dropped by the silent JSON parse catch-all
     in [Cascade_http_probe.try_probe]. Before this counter existed the

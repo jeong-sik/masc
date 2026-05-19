@@ -309,6 +309,22 @@ let compact_if_needed_typed
     let new_ratio = context_ratio compacted_ctx in
     let new_msg_count = message_count compacted_ctx in
     let new_tok_count = token_count compacted_ctx in
+    (* [max 0 (pre - post)] silently floors the negative-delta case to
+       zero. Surface that case as a counter so operators can detect
+       divergence between the pre/post token (or message) measurement
+       sources — without this signal, [saved_tokens=0] is ambiguous
+       between "no savings" and "post-recount exceeded pre-estimate".
+       The kind label is a closed 2-value vocabulary. *)
+    if tok_count < new_tok_count then
+      Prometheus.inc_counter
+        Keeper_metrics.metric_keeper_compaction_negative_savings
+        ~labels:[ ("keeper", meta.name); ("kind", "tokens") ]
+        ();
+    if msg_count < new_msg_count then
+      Prometheus.inc_counter
+        Keeper_metrics.metric_keeper_compaction_negative_savings
+        ~labels:[ ("keeper", meta.name); ("kind", "messages") ]
+        ();
     let saved_tokens = max 0 (tok_count - new_tok_count) in
     let saved_messages = max 0 (msg_count - new_msg_count) in
     Prometheus.inc_counter

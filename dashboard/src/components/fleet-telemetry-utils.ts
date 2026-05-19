@@ -12,6 +12,13 @@ import {
 export const PRESSURE_HOT_RATIO = 0.75
 export const PRESSURE_WARN_RATIO = 0.5
 export const STALE_ACTIVITY_SEC = 900
+// Tool-success percentage below this threshold trips the fleet
+// `attention` band and contributes to the row urgency score. Used by
+// both `fleetBand` (binary attention decision) and `rowUrgencyScore`
+// (continuous score) — extracted as a named constant per
+// `software-development.md` §"Magic Number 금지" (the same `90` literal
+// appeared at two sites with the same semantic meaning).
+export const TOOL_SUCCESS_WARN_PCT = 90
 const TELEMETRY_ACTIVITY_FRESH_SEC = 300
 const TELEMETRY_SOURCE_STALE_SEC = 900
 const OAS_EVENT_LAG_WARN_SEC = 600
@@ -328,7 +335,7 @@ export function fleetBand(row: FleetRow): FleetBand {
     || row.terminal_reason_severity === 'warn'
     || row.context_ratio >= PRESSURE_WARN_RATIO
     || (row.last_activity_ago_s != null && row.last_activity_ago_s >= STALE_ACTIVITY_SEC)
-    || (row.tool_success_pct != null && row.tool_success_pct < 90)
+    || (row.tool_success_pct != null && row.tool_success_pct < TOOL_SUCCESS_WARN_PCT)
   ) {
     return 'attention'
   }
@@ -353,7 +360,7 @@ export function rowUrgencyScore(row: FleetRow): number {
   if (row.last_activity_ago_s != null && row.last_activity_ago_s >= STALE_ACTIVITY_SEC) {
     score += Math.min(row.last_activity_ago_s / STALE_ACTIVITY_SEC, 5)
   }
-  if (typeof row.tool_success_pct === 'number' && row.tool_success_pct < 90) {
+  if (typeof row.tool_success_pct === 'number' && row.tool_success_pct < TOOL_SUCCESS_WARN_PCT) {
     score += (100 - row.tool_success_pct) / 5
   }
   return score

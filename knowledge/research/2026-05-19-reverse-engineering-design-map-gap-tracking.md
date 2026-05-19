@@ -23,7 +23,7 @@ Plan declares 3 "high-heat" gaps in the `#gaps` table and 1 additional HIGH (Aut
 |---|---|---|---|
 | 1. Keeper turn FSM vs run_turn mixed orchestration | HIGH | Partial — `turn_plan` typed at phase gate; SpawnAdmission/PostTurn/MetricsClose still untyped inside 2,066-LoC monolith | RFC required |
 | 2. OAS provider/model redaction broad + regression-prone | HIGH | Untreated — 11+ scattered `"runtime"` literals, no SSOT constant; `observability_redact` is secrets-only and orthogonal | RFC required |
-| 3. H1/H2 MCP route behavior drift | HIGH | Partial — `Server_mcp_request_context` shared for (session, accept, auth_token); but actor injection module only wired into H1, internal_keeper_runtime decision still duplicated, profile_conflict not extracted | PR-able + RFC for full identity FSM |
+| 3. H1/H2 MCP route behavior drift | HIGH | Partial — `Server_mcp_request_context` shared; **actor injection drift already closed by PR #16137** (see CORRECTION below); internal_keeper_runtime decision still duplicated; profile_conflict not extracted | PR-able + RFC for full identity FSM |
 | 3-bonus. Auth identity spread (token owner / request hints / dashboard actor / `_agent_name` / SSE query-token) | HIGH | Partial — caller identity extracted to `mcp_server_eio_caller_identity.ml` (PR #16163); transport-side still rewrites `_agent_name` inline | RFC required (request identity reducer) |
 
 LOC moves since plan (size monolith-reduction proxy):
@@ -215,7 +215,7 @@ LOC moves since plan (size monolith-reduction proxy):
 | A | Keeper Turn typed pipeline records (post-PhaseGate stages) | Extend `turn_plan`-style record contract to 7 remaining stages; preserve 8 listed turn invariants | RFC required |
 | B | OAS-MASC boundary redaction SSOT — closed public-label types | Replace 11+ `"runtime"` literals with `Boundary_redaction` module exposing private types | RFC required |
 | C | MCP request admission reducer + identity FSM (H1/H2 parity) | Expand `Server_mcp_request_context` to 6 outputs; consume from H1+H2 as adapters | RFC required (with 2 PR-able prereqs) |
-| C-pre1 | *PR-able*: Wire H2 to `Server_mcp_actor_injection` | Stop H1-only injection drift | PR |
+| C-pre1 | ~~*PR-able*: Wire H2 to `Server_mcp_actor_injection`~~ — **WITHDRAWN, already closed by PR #16137 (`33adab28fd`, "test: pin MCP H1/H2 admission parity")** | n/a | closed |
 | C-pre2 | *PR-able*: Hoist `internal_keeper_runtime` decision (3 sites) | Single helper inside `Server_mcp_request_context` | PR |
 | D | Request Identity reducer + Auth/credential store carve-out | `Request_identity.t` record; split `auth.ml` 1,651 LoC into `Credential_store` + `Request_identity` | RFC required |
 | E | Single JSONL substrate (sunset `Fs_compat.append_jsonl`) | Migrate 33 callers; converge on `Jsonl_writer` | PR-able (multi-PR) |
@@ -237,3 +237,37 @@ LOC moves since plan (size monolith-reduction proxy):
 - Code evidence: `git log --oneline 23a5dd1521..origin/main | wc -l = 205`; `wc -l` of 8 plan-tracked files; `rg` for `"runtime"`, `Server_mcp_actor_injection`, `turn_plan`, `Server_dashboard_surface`, `Jsonl_writer`, `internal_keeper_runtime`.
 - Cross-referenced MEMORY entries: `feedback_runtime_lens_boundary_carve_out.md`, `project_godfile_decomp_track_a_b_synthesis.md`, `feedback_fallback_constant_to_discriminated_union.md`.
 - Not committed — author review pending.
+
+---
+
+## CORRECTION (2026-05-19, post-dispatch verification)
+
+### Gap 3 C-pre1 lane was factually invalidated
+
+**Finding**: Sub-agent dispatched to implement C-pre1 (H2 actor injection wiring) discovered that the premise no longer holds at `origin/main` HEAD `e5b73669d8`.
+
+**Actual state**:
+
+- `lib/server/server_h2_gateway.ml:403-406` already calls `Server_mcp_transport_http.body_with_canonical_http_actor` in the `POST /mcp | /mcp/managed | /` dispatch path, immediately before `Mcp_eio.handle_request` at line 413. This is byte-equivalent to the H1 call site at `server_mcp_transport_http.ml:382`.
+- `body_with_canonical_http_actor` (defined at H1 lines 199-201) internally composes `Server_mcp_actor_injection.reduce` + `inject_agent_name_into_body`. One call = both steps. The original Gap 3 framing ("H2 calls them 0 times") was a misreading of the composed helper.
+- H1's second `inject_agent_name_into_body` site at `server_mcp_transport_http.ml:762` is inside `handle_post_messages` — the **legacy `POST /messages?session_id=...` SSE-fanout transport**, which H2 does not implement by design (`rg '/messages' lib/server/server_h2_gateway.ml` → 0 hits). There is no H2 counterpart.
+- Git provenance: H2's `body_with_canonical_http_actor` call was added in `f0075c3611` (initial introduction) and refined in `33adab28fd` (PR #16137, "test: pin MCP H1/H2 admission parity"). PR #16137 explicitly pinned H1/H2 admission parity, the exact gap surface described.
+
+### Implications for the rest of this document
+
+This finding implies other gap entries should also be **re-verified against `origin/main` after PR sweep**. The plan baseline `23a5dd1521` (2026-05-18) is 1 day old but 205 commits behind; multiple gaps may already be closed by intervening PRs that the original synthesis did not cross-check.
+
+**Recommended re-verification list** (status here is *unverified*, treat as candidates for re-check):
+
+- Gap 3 C-pre2 (internal_keeper_runtime hoist) — still 3 sites at HEAD? grep shows 17+ parameter references; *decision sites* count needs separate measurement.
+- Gap 1 (remaining 7 turn pipeline stages) — any landed since `23a5dd1521`?
+- E (JSONL substrate sunset) — 33 caller count needs refresh.
+- F (DashboardSurface adoption) — 1 consumer claim needs refresh.
+
+### Process correction
+
+Future research syntheses should:
+
+1. Run the dispatch ratchet *before* the synthesis is committed (each PR-able lane validated by a quick dispatch).
+2. Include `git log --oneline <baseline>..origin/main -- <gap-file-list>` per gap, not only aggregate count.
+3. Treat "1-day-old plan + 205 commits" as high-drift baseline requiring per-claim verification.

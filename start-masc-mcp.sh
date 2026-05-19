@@ -89,6 +89,13 @@ is_stale_dune_artifact_log() {
         "$log_file"
 }
 
+is_dune_cache_temp_log() {
+    local log_file="$1"
+    grep -Eiq \
+        'rmdir\(.*[.]cache/dune/db/temp/.*\): Directory not empty|[.]cache/dune/db/temp/.*Directory not empty' \
+        "$log_file"
+}
+
 run_dune_local() {
     local wrapper="$SCRIPT_DIR/scripts/dune-local.sh"
     if [ ! -x "$wrapper" ]; then
@@ -116,6 +123,20 @@ dune_build_with_stale_retry() {
         return 0
     else
         first_status=$?
+    fi
+
+    if is_dune_cache_temp_log "$log_file"; then
+        cat "$log_file" >&2
+        echo "[startup] Dune cache temp cleanup failed while building $label; retrying once with DUNE_CACHE=disabled." >&2
+        if DUNE_CACHE=disabled run_dune_local build "$target" >"$log_file" 2>&1; then
+            cat "$log_file" >&2
+            rm -f "$log_file"
+            return 0
+        fi
+        cat "$log_file" >&2
+        echo "[startup] Retry build failed after disabling Dune cache; preserved Dune output above." >&2
+        rm -f "$log_file"
+        return 1
     fi
 
     if ! is_stale_dune_artifact_log "$log_file"; then

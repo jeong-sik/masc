@@ -669,6 +669,12 @@ let test_release_truth_contracts () =
   check bool "release workflow ships evidence with artifacts" true
     (file_contains_pattern ".github/workflows/release.yml"
        "path: dist/*");
+  check bool "release evidence install smoke uses isolated base path" true
+    (file_contains_pattern "scripts/release-evidence.sh"
+       "MASC_BASE_PATH=\"$base_path\"");
+  check bool "release evidence install smoke fails loudly" true
+    (file_contains_pattern "scripts/release-evidence.sh"
+       "release-evidence: installed binary --version failed");
   check bool "make install deps skips with-doc" true
     (file_contains_pattern "mk/build.mk"
        "opam install . --deps-only --with-test -y");

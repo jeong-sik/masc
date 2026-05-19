@@ -200,13 +200,63 @@ esac
 |}
        (quote state_file) (quote clean_marker))
 
+let write_fake_dune_cache_temp_then_success ~path ~state_file ~clean_marker =
+  write_executable path
+    (Printf.sprintf
+       {|
+#!/bin/sh
+set -eu
+state=%s
+clean_marker=%s
+cmd="${1:-}"
+case "$cmd" in
+  build)
+    count=0
+    if [ -f "$state" ]; then
+      count="$(cat "$state")"
+    fi
+    if [ "$count" = "0" ]; then
+      echo 1 > "$state"
+      echo "Error:" >&2
+      echo "rmdir(/Users/test/.cache/dune/db/temp/dune_6eb519_artifacts): Directory not empty" >&2
+      exit 1
+    fi
+    if [ "${DUNE_CACHE:-}" != "disabled" ]; then
+      echo "expected DUNE_CACHE=disabled on cache-temp retry, got ${DUNE_CACHE:-<unset>}" >&2
+      exit 3
+    fi
+    mkdir -p _build/default/bin
+    cat > _build/default/bin/main_eio.exe <<'EXE'
+#!/bin/sh
+set -eu
+{
+  printf 'FAKE_EXE_MARKER=eio-after-cache-temp-retry\n'
+  printf 'PWD=%%s\n' "$(pwd)"
+  printf 'ARGS=%%s\n' "$*"
+} >"${FAKE_CAPTURE_FILE:?}"
+exit 0
+EXE
+    chmod +x _build/default/bin/main_eio.exe
+    echo "fake dune build recovered with cache disabled" >&2
+    ;;
+  clean)
+    echo clean > "$clean_marker"
+    ;;
+  *)
+    echo "unexpected dune command: $*" >&2
+    exit 2
+    ;;
+esac
+|}
+       (quote state_file) (quote clean_marker))
+
 let write_fake_dune_local ~path ~log_file =
   write_executable path
     (Printf.sprintf
        {|
 #!/bin/sh
 set -eu
-printf 'dune-local %%s DUNE_JOBS=%%s DUNE_LOCAL_JOBS=%%s\n' "$*" "${DUNE_JOBS:-}" "${DUNE_LOCAL_JOBS:-}" >> %s
+printf 'dune-local %%s DUNE_JOBS=%%s DUNE_LOCAL_JOBS=%%s DUNE_CACHE=%%s\n' "$*" "${DUNE_JOBS:-}" "${DUNE_LOCAL_JOBS:-}" "${DUNE_CACHE:-}" >> %s
 exec dune "$@"
 |}
        (quote log_file))
@@ -810,6 +860,65 @@ let test_stale_dune_artifacts_are_cleaned_and_retried () =
           check bool "retry output preserved" true
             (contains_substring stderr "fake dune build recovered")))
 
+let test_dune_cache_temp_error_retries_with_cache_disabled () =
+  with_temp_dir "start-masc-script-cache-temp-dune" (fun dir ->
+      with_temp_dir "start-masc-cache-temp-fake-bin" (fun fake_bin ->
+          let script = Filename.concat dir "start-masc-mcp.sh" in
+          let scripts_dir = Filename.concat dir "scripts" in
+          let dune_state = Filename.concat dir "dune-build-count.txt" in
+          let clean_marker = Filename.concat dir "dune-clean-ran.txt" in
+          let dune_local_log = Filename.concat dir "dune-local-calls.txt" in
+          let capture = Filename.concat dir "captured-cache-temp-dune.txt" in
+          copy_script (script_path ()) script;
+          ignore (make_config_root dir);
+          mkdir_p scripts_dir;
+          mkdir_p fake_bin;
+          write_executable (Filename.concat fake_bin "opam")
+            "#!/bin/sh\nexit 0\n";
+          write_fake_dune_cache_temp_then_success
+            ~path:(Filename.concat fake_bin "dune")
+            ~state_file:dune_state ~clean_marker;
+          write_fake_dune_local
+            ~path:(Filename.concat scripts_dir "dune-local.sh")
+            ~log_file:dune_local_log;
+          let code, stdout, stderr =
+            run_shell ~cwd:dir
+              ~env:
+                [
+                  ("FAKE_CAPTURE_FILE", capture);
+                  ("MASC_BASE_PATH", dir);
+                  ("MASC_DUNE_JOBS", "2");
+                  ("PATH", fake_bin ^ ":" ^ Sys.getenv "PATH");
+                ]
+              (Printf.sprintf "%s --http --port 9972 --base-path %s"
+                 (quote script) (quote dir))
+          in
+          if code <> 0 then
+            failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s"
+              code stdout stderr;
+          let captured = read_file capture in
+          check bool "server started from cache-disabled retry executable" true
+            (contains_substring captured
+               "FAKE_EXE_MARKER=eio-after-cache-temp-retry");
+          check bool "dune clean was not used for cache temp retry" false
+            (Sys.file_exists clean_marker);
+          let dune_local_calls = read_file dune_local_log in
+          check bool "initial startup build used cache default" true
+            (contains_substring dune_local_calls
+               "dune-local build bin/main_eio.exe DUNE_JOBS=2 DUNE_LOCAL_JOBS=2 DUNE_CACHE=");
+          check bool "retry disabled Dune cache" true
+            (contains_substring dune_local_calls
+               "dune-local build bin/main_eio.exe DUNE_JOBS=2 DUNE_LOCAL_JOBS=2 DUNE_CACHE=disabled");
+          check bool "original cache temp error preserved" true
+            (contains_substring stderr
+               "rmdir(/Users/test/.cache/dune/db/temp/dune_6eb519_artifacts): Directory not empty");
+          check bool "cache retry is explained" true
+            (contains_substring stderr
+               "Dune cache temp cleanup failed while building main_eio.exe");
+          check bool "cache retry output preserved" true
+            (contains_substring stderr
+               "fake dune build recovered with cache disabled")))
+
 let test_stale_executable_requires_build_lock () =
   with_temp_dir "start-masc-script-build-lock" (fun dir ->
       with_temp_dir "start-masc-build-lock-fake-bin" (fun fake_bin ->
@@ -1045,6 +1154,8 @@ let () =
             test_grpc_direct_banner_is_preserved_in_stderr;
           test_case "stale Dune artifacts are cleaned and retried" `Quick
             test_stale_dune_artifacts_are_cleaned_and_retried;
+          test_case "Dune cache temp errors retry with cache disabled" `Quick
+            test_dune_cache_temp_error_retries_with_cache_disabled;
           test_case "stale executable requires build lock" `Quick
             test_stale_executable_requires_build_lock;
           test_case "stdio skips dashboard build and HTTP preflight" `Quick

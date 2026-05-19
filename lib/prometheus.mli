@@ -120,7 +120,7 @@ include module type of Prometheus_cascade_metric_names
 (** RFC-0020 Rule 2 evidence — incremented every time
     [run_smart_heartbeat_gate] overrides a [Skip_busy] / [Skip_idle]
     decision because the Event Layer queue
-    ([Keeper_registry.event_queue_snapshot]) was non-empty. A zero
+    ([Keeper_registry_event_queue.snapshot]) was non-empty. A zero
     rate against ongoing keeper activity means either the queue
     write path (PR-C1 [wakeup_keeper ?stimulus]) is not firing or
     the smart heartbeat is already returning [Emit] on its own —

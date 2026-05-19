@@ -121,7 +121,7 @@ let interruptible_sleep ~clock ~stop ~wakeup duration : sleep_outcome =
     when a @mention targets a running keeper.
 
     When [?stimulus] is provided, the stimulus is appended to the keeper's
-    Event Layer queue ([Keeper_registry.enqueue_event]) before the wakeup
+    Event Layer queue ([Keeper_registry_event_queue.enqueue]) before the wakeup
     flag flips. This is RFC-0020 Rule 1 (enqueue is independent of policy)
     + the data-channel half of the layer split — [fiber_wakeup] remains the
     hint signal, the queue is the authoritative payload. *)
@@ -132,7 +132,7 @@ let wakeup_keeper ?base_path ?stimulus name =
     then begin
       Option.iter
         (fun s ->
-          Keeper_registry.enqueue_event ~base_path:entry.base_path name s)
+          Keeper_registry_event_queue.enqueue ~base_path:entry.base_path name s)
         stimulus;
       Keeper_registry.wakeup ~base_path:entry.base_path name
     end)

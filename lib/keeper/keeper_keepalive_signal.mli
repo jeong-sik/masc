@@ -40,7 +40,7 @@ val interruptible_sleep :
 (** Wake up a specific keeper immediately.
 
     When [?stimulus] is given, the stimulus is appended to the keeper's
-    Event Layer queue ([Keeper_registry.enqueue_event]) before the wakeup
+    Event Layer queue ([Keeper_registry_event_queue.enqueue]) before the wakeup
     flag flips. Callers that have a real payload (board post, mention,
     operator directive) should pass it; callers that only need to break
     the keeper out of [interruptible_sleep] may omit it and the call

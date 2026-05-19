@@ -7,10 +7,10 @@
     bookkeeping concerns that never delay an [enqueue].
 
     This module is data only. The enqueue side is wired:
-    [keeper_keepalive_signal.ml] calls [Keeper_registry.enqueue_event]
+    [keeper_keepalive_signal.ml] calls [Keeper_registry_event_queue.enqueue]
     before the wakeup flag flips (RFC-0020 Rule 1). On the dequeue side,
     [keeper_heartbeat_loop.ml] drains the board-signal batch within the
-    debounce window via [Keeper_registry.drain_board_events] (a CAS loop
+    debounce window via [Keeper_registry_event_queue.drain_board] (a CAS loop
     over [drain_board_window]) and falls back to a single non-board
     [dequeue_event] when that batch is empty — either path pins the
     [Conservation] invariant. [run_smart_heartbeat_gate] then snapshots

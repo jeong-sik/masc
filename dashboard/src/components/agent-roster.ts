@@ -87,12 +87,25 @@ function rosterContextMeta(
 function rosterStateNote(
   keeper: {
     runtime_blocker_summary?: string | null
+    runtime_blocker_class?: string | null
     diagnostic?: { last_error?: string | null } | null
   } | null | undefined,
   monitoringHint?: string | null,
-): { label: string; text: string } | null {
+): { label: string; text: string; kind?: string } | null {
   const runtimeBlocker = keeper?.runtime_blocker_summary?.trim()
-  if (runtimeBlocker) return { label: '현재 차단', text: runtimeBlocker }
+  const blockerClass = keeper?.runtime_blocker_class?.trim() || undefined
+  if (runtimeBlocker) {
+    return { label: '현재 차단', text: runtimeBlocker, kind: blockerClass }
+  }
+  // Class without summary: surface the typed kind so operators still see *why*
+  // (e.g. "heartbeat_failures") instead of an unlabelled '현재 차단' badge.
+  if (blockerClass) {
+    return {
+      label: '현재 차단',
+      text: `차단 종류: ${blockerClass} (요약 메시지 없음)`,
+      kind: blockerClass,
+    }
+  }
 
   const diagnosticError = keeper?.diagnostic?.last_error?.trim()
   if (diagnosticError) return { label: '최근 오류', text: diagnosticError }
@@ -720,16 +733,23 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               <p class="m-0 text-sm leading-paragraph text-[var(--color-fg-primary)] break-words line-clamp-2" title=${summaryText}>${summaryText}</p>
 
               ${stateNote ? html`
-                <div class="flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]">
-                  <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-0.5 text-3xs font-semibold text-[var(--color-status-warn)]">
-                    ${stateNote.label}
-                  </span>
-                  ${lastActivityAt
-                    ? html`<span class="text-3xs text-[var(--color-fg-muted)]">최근 신호 · ${lastActivityLabel} <${TimeAgo} timestamp=${lastActivityAt} /></span>`
-                    : lastActivityAge != null
-                      ? html`<span class="text-3xs text-[var(--color-fg-muted)]">최근 신호 · ${lastActivityLabel} ${formatDuration(lastActivityAge)} 전</span>`
-                    : null}
-                  <span class="min-w-0 flex-1 text-xs leading-relaxed text-[var(--color-fg-primary)] break-words line-clamp-2" title=${stateNote.text}>
+                <div class="flex flex-col gap-1 text-2xs text-[var(--color-fg-muted)]">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-0.5 text-3xs font-semibold text-[var(--color-status-warn)]">
+                      ${stateNote.label}
+                    </span>
+                    ${stateNote.kind
+                      ? html`<span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-divider)] bg-[var(--color-bg-page)] px-2 py-0.5 text-3xs font-mono text-[var(--color-fg-primary)]" title="runtime_blocker_class">
+                          ${stateNote.kind}
+                        </span>`
+                      : null}
+                    ${lastActivityAt
+                      ? html`<span class="text-3xs text-[var(--color-fg-muted)]">최근 신호 · ${lastActivityLabel} <${TimeAgo} timestamp=${lastActivityAt} /></span>`
+                      : lastActivityAge != null
+                        ? html`<span class="text-3xs text-[var(--color-fg-muted)]">최근 신호 · ${lastActivityLabel} ${formatDuration(lastActivityAge)} 전</span>`
+                        : null}
+                  </div>
+                  <span class="block text-xs leading-relaxed text-[var(--color-fg-primary)] break-words line-clamp-3" title=${stateNote.text}>
                     ${stateNote.text}
                   </span>
                 </div>

@@ -1,5 +1,7 @@
 (** Tool-surface gating, selection constants, and backlog task reconciliation. *)
 
+module String_set = Set.Make (String)
+
 let unexpected_tool_partial_warned : (string, unit) Hashtbl.t =
   Hashtbl.create 32
 
@@ -246,6 +248,25 @@ let tools_for_gated_affordance = function
   | Inspect_worktree_delta ->
     [ "keeper_shell"; "keeper_bash"; "masc_code_shell"; "keeper_fs_edit";
       "keeper_pr_create" ]
+
+let satisfying_tools_for_turn ~(turn_affordances : string list) ~(allowed_tool_names : string list)
+  : string list
+  =
+  let canonicalize = Keeper_tool_disclosure.canonical_tool_name in
+  let allowed_set =
+    List.fold_left
+      (fun s n -> String_set.add (canonicalize n) s)
+      String_set.empty
+      allowed_tool_names
+  in
+  turn_affordances
+  |> List.concat_map (fun aff ->
+    match turn_affordance_of_string aff with
+    | Some affordance ->
+      tools_for_gated_affordance affordance
+      |> List.filter (fun n -> String_set.mem (canonicalize n) allowed_set)
+    | None -> [])
+  |> Keeper_types.dedupe_keep_order
 
 let preferred_tool_names_for_turn_affordances turn_affordances =
   turn_affordances

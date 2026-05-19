@@ -98,8 +98,8 @@ let with_timeout_observer f =
   let previous = Atomic.get Process_eio.process_timeout_observer_fn in
   let seen = ref [] in
   Atomic.set Process_eio.process_timeout_observer_fn
-    (fun ~program ~timeout_sec ->
-       seen := (program, timeout_sec) :: !seen);
+    (fun ~program ~timeout_sec ~stage ->
+       seen := (program, timeout_sec, Process_eio.timeout_stage_to_string stage) :: !seen);
   Fun.protect
     ~finally:(fun () ->
       Atomic.set Process_eio.process_timeout_observer_fn previous)
@@ -113,10 +113,12 @@ let test_run_argv_with_status_fallback_observes_timeout () =
       in
       let code = match status with Unix.WEXITED c -> c | _ -> -1 in
       check int "fallback timeout exit code" 124 code;
+      (* Unix fallback runs after [create_process_env] returns, so the
+         stage is always [command]. *)
       check
-        (list (pair string (float 0.0001)))
+        (list (triple string (float 0.0001) string))
         "fallback timeout observer payload"
-        [ ("sleep", 0.02) ]
+        [ ("sleep", 0.02, "command") ]
         (List.rev !seen))
 
 let test_init_exposes_complete_runtime () =

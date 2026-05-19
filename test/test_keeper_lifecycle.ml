@@ -1838,8 +1838,17 @@ let test_sanitize_checkpoint_message_caps_tool_result_aggregate_budget () =
              (contains_substring first KCC.checkpoint_text_cap_marker);
            check bool "second tool result truncated" true
              (contains_substring second KCC.checkpoint_text_cap_marker);
-           check string "aggregate overflow gets stubbed"
-             "[tool result cleared]" third
+           (* The stubbed payload carries the compaction reason and
+              the originating [tool_use_id] so an LLM reading the
+              checkpoint later (and an operator scanning the log)
+              knows the placeholder is intentional and which cap
+              tripped it. *)
+           check bool "aggregate overflow gets stubbed" true
+             (contains_substring third "[tool result cleared:");
+           check bool "stub names the over-aggregate-bytes reason" true
+             (contains_substring third "reason=over_aggregate_bytes");
+           check bool "stub preserves tool_use_id for traceability" true
+             (contains_substring third "tool_use_id=tool-agg-3")
        | _ -> fail "expected three ToolResult blocks after aggregate cap");
       check int "aggregate cap records truncated blocks" 2
         stats.truncated_blocks;

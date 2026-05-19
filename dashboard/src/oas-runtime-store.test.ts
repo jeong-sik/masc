@@ -144,10 +144,12 @@ describe('oas-runtime-store', () => {
 
     expect(oasHealthSummary.value.totalEvents).toBe(1)
     expect(oasHealthSummary.value.agentEventsCount).toBe(1)
+    // Wire format is lowercase (backend `phase_to_string`); the factory
+    // normalizes to PascalCase `KeeperPhase` for frontend consistency.
     expect(oasAgentEvents.value[0]).toMatchObject({
       type: 'keeper_lifecycle',
       keeper_name: 'keeper-a',
-      phase: 'running',
+      phase: 'Running',
       event: 'started',
       detail: 'supervised',
     })

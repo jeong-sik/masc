@@ -1,7 +1,9 @@
 (** Keeper_tool_deterministic_error — see .mli for design notes. *)
 
 type deterministic_reason =
+  | Command_blocked
   | Command_shape_blocked
+  | Task_state_probe_blocked
   | Destructive_operation_blocked
   | Path_syntax_blocked
   | Path_outside_sandbox
@@ -12,7 +14,10 @@ type deterministic_reason =
   | Workflow_rejection_blocked
 
 let to_telemetry_key = function
+  | Command_blocked -> "deterministic_error_command_blocked"
   | Command_shape_blocked -> "deterministic_error_command_shape_blocked"
+  | Task_state_probe_blocked ->
+    "deterministic_error_task_state_probe_blocked"
   | Destructive_operation_blocked ->
     "deterministic_error_destructive_operation_blocked"
   | Path_syntax_blocked -> "deterministic_error_path_syntax_blocked"
@@ -26,8 +31,12 @@ let to_telemetry_key = function
 ;;
 
 let to_string = function
+  | Command_blocked ->
+    "keeper shell command blocked by policy; follow recovery_plan instead"
   | Command_shape_blocked ->
     "keeper_bash command-shape blocked (pipes/redirects/chaining/substitution/scan)"
+  | Task_state_probe_blocked ->
+    "raw shell task-state probe blocked; use keeper task/context tools"
   | Destructive_operation_blocked ->
     "destructive operation blocked (force push / rm -rf / push to main)"
   | Path_syntax_blocked -> "path argument failed syntax check before execution"
@@ -72,7 +81,10 @@ let error_or_detail_string key json =
    must be wired here explicitly; an unmapped value returns [None]
    so transient/runtime errors stay outside the short-circuit. *)
 let reason_of_error_code = function
+  | "command_blocked" -> Some Command_blocked
   | "keeper_bash_command_shape_blocked" -> Some Command_shape_blocked
+  | "task_state_file_probe_blocked" | "task_state_http_probe_blocked" ->
+    Some Task_state_probe_blocked
   | "destructive_operation_blocked" -> Some Destructive_operation_blocked
   | "policy_blocked" -> Some Policy_blocked
   | "policy_not_loaded" -> Some Policy_blocked

@@ -7,6 +7,14 @@ type bash_shape_block =
   | Substitution
   | Repo_wide_scan
 
+type recovery_plan = {
+  next_tool : string;
+  next_args : (string * Yojson.Safe.t) list;
+  instruction : string;
+  reason : string;
+  confidence : string;
+}
+
 let bash_shape_block_tag = function
   | Gh_pr_checks -> "gh_pr_checks"
   | Pipe_or_redirect -> "pipe_or_redirect"
@@ -138,3 +146,152 @@ let bash_shape_block_alternatives ~cmd = function
         "keeper_shell op=find path=lib pattern='*.ml'";
         "keeper_bash cmd='git log --oneline -20'";
       ]
+
+let recovery_plan_to_json plan =
+  `Assoc
+    [ "kind", `String "structured_tool_rewrite"
+    ; "next_tool", `String plan.next_tool
+    ; "next_args", `Assoc plan.next_args
+    ; "instruction", `String plan.instruction
+    ; "reason", `String plan.reason
+    ; "confidence", `String plan.confidence
+    ; "do_not_retry_same_args", `Bool true
+    ]
+
+let plan ?(confidence = "medium") ~next_tool ~next_args ~instruction ~reason () =
+  { next_tool; next_args; instruction; reason; confidence }
+
+let keeper_shell_args op fields =
+  ("op", `String op) :: fields
+
+let bash_shape_block_recovery_plan ~cmd = function
+  | _ when command_looks_like_task_state_discovery cmd ->
+    Some
+      (plan
+         ~confidence:"high"
+         ~next_tool:"keeper_tasks_list"
+         ~next_args:[ "include_done", `Bool false ]
+         ~instruction:task_state_shell_hint
+         ~reason:"task_state_tool_ssot"
+         ())
+  | Gh_pr_checks ->
+    Some
+      (plan
+         ~next_tool:"keeper_pr_status"
+         ~next_args:
+           [ "pr", `String "NUMBER_FROM_COMMAND"
+           ; "repo", `String "OWNER/REPO_FROM_COMMAND"
+           ]
+         ~instruction:(bash_shape_block_hint ~cmd Gh_pr_checks)
+         ~reason:"native_pr_status_tool_required"
+         ())
+  | Pipe_or_redirect when command_looks_like_search_pipeline cmd ->
+    Some
+      (plan
+         ~confidence:"high"
+         ~next_tool:"keeper_shell"
+         ~next_args:
+           (keeper_shell_args
+              "rg"
+              [ "pattern", `String "SEARCH_TERM"
+              ; "path", `String "SCOPED_PATH"
+              ; "glob", `String "*.ml"
+              ])
+         ~instruction:(bash_shape_block_hint ~cmd Pipe_or_redirect)
+         ~reason:"pipe_to_head_rewrite"
+         ())
+  | Pipe_or_redirect when
+      command_looks_like_find_pipeline cmd || lowercase_contains cmd "find " ->
+    Some
+      (plan
+         ~confidence:"high"
+         ~next_tool:"keeper_shell"
+         ~next_args:
+           (keeper_shell_args
+              "find"
+              [ "path", `String "SCOPED_PATH"
+              ; "pattern", `String "FILE_GLOB"
+              ; "limit", `Int 30
+              ])
+         ~instruction:(bash_shape_block_hint ~cmd Pipe_or_redirect)
+         ~reason:"find_head_rewrite"
+         ())
+  | Pipe_or_redirect ->
+    Some
+      (plan
+         ~next_tool:"keeper_shell"
+         ~next_args:
+           (keeper_shell_args
+              "head"
+              [ "path", `String "FILE_PATH"; "lines", `Int 80 ])
+         ~instruction:(bash_shape_block_hint ~cmd Pipe_or_redirect)
+         ~reason:"pipe_or_redirect_blocked"
+         ())
+  | Chaining when command_looks_like_cd_chained_search cmd ->
+    Some
+      (plan
+         ~confidence:"high"
+         ~next_tool:"keeper_shell"
+         ~next_args:
+           (keeper_shell_args
+              "rg"
+              [ "cwd", `String "REPO_OR_WORKTREE_CWD"
+              ; "pattern", `String "SEARCH_TERM"
+              ; "path", `String "SCOPED_PATH"
+              ])
+         ~instruction:(bash_shape_block_hint ~cmd Chaining)
+         ~reason:"cd_chained_search_rewrite"
+         ())
+  | Chaining ->
+    Some
+      (plan
+         ~next_tool:"keeper_shell"
+         ~next_args:
+           (keeper_shell_args
+              "rg"
+              [ "pattern", `String "SEARCH_TERM"; "path", `String "SCOPED_PATH" ])
+         ~instruction:(bash_shape_block_hint ~cmd Chaining)
+         ~reason:"command_chaining_blocked"
+         ())
+  | Substitution ->
+    Some
+      (plan
+         ~next_tool:"keeper_shell"
+         ~next_args:
+           (keeper_shell_args
+              "rg"
+              [ "pattern", `String "DISCOVERY_TERM"; "path", `String "SCOPED_PATH" ])
+         ~instruction:(bash_shape_block_hint ~cmd Substitution)
+         ~reason:"substitution_requires_discovery_first"
+         ())
+  | Repo_wide_scan ->
+    if command_looks_like_repo_wide_git_log_grep cmd then
+      Some
+        (plan
+           ~confidence:"high"
+           ~next_tool:"keeper_shell"
+           ~next_args:
+             (keeper_shell_args
+                "git_log"
+                [ "cwd", `String "REPO_OR_WORKTREE_CWD"
+                ; "count", `Int 5
+                ; "grep", `String "SEARCH_TERM"
+                ])
+           ~instruction:(bash_shape_block_hint ~cmd Repo_wide_scan)
+           ~reason:"repo_wide_git_history_scan_blocked"
+           ())
+    else
+      Some
+        (plan
+           ~confidence:"high"
+           ~next_tool:"keeper_shell"
+           ~next_args:
+             (keeper_shell_args
+                "rg"
+                [ "pattern", `String "SEARCH_TERM"
+                ; "path", `String "SCOPED_PATH"
+                ; "glob", `String "*.ml"
+                ])
+           ~instruction:(bash_shape_block_hint ~cmd Repo_wide_scan)
+           ~reason:"repo_wide_scan_blocked"
+           ())

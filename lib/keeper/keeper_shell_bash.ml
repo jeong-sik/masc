@@ -670,7 +670,105 @@ end
 
 let workflow_rejection_field = "failure_class", `String "workflow_rejection"
 
+let recovery_plan_extra ?rule_id ?(source_tool = "keeper_bash") plan =
+  let rule_fields =
+    match rule_id with
+    | None -> []
+    | Some id -> [ "recovery_rule_id", `String id ]
+  in
+  [
+    "recovery_plan", recovery_plan_to_json plan;
+    "required_next_tool", `String plan.next_tool;
+    "do_not_retry_tool", `String source_tool;
+    "do_not_retry_same_args", `Bool true;
+  ]
+  @ rule_fields
+
+let shell_rewrite_plan ?(confidence = "medium") ~next_tool ~next_args ~instruction ~reason
+    () =
+  { next_tool; next_args; instruction; reason; confidence }
+
+let keeper_shell_rewrite_args op fields = ("op", `String op) :: fields
+
+let command_block_recovery_plan ~cmd:_ reason hint =
+  match reason with
+  | Worker_dev_tools.Command_not_allowed name when String_util.equals_ci name "gh" ->
+    Some
+      (shell_rewrite_plan
+         ~confidence:"high"
+         ~next_tool:"keeper_shell"
+         ~next_args:
+           (keeper_shell_rewrite_args "gh" [ "cmd", `String "pr list --state open" ])
+         ~instruction:hint
+         ~reason:"gh_requires_structured_shell_op"
+         ())
+  | Worker_dev_tools.Command_not_allowed _ ->
+    Some
+      (shell_rewrite_plan
+         ~next_tool:"keeper_shell"
+         ~next_args:
+           (keeper_shell_rewrite_args
+              "rg"
+              [ "pattern", `String "SEARCH_TERM"; "path", `String "SCOPED_PATH" ])
+         ~instruction:hint
+         ~reason:"command_not_allowed_use_structured_op"
+         ())
+  | Chain_or_redirect | Pipes_not_allowed ->
+    Some
+      (shell_rewrite_plan
+         ~confidence:"high"
+         ~next_tool:"keeper_shell"
+         ~next_args:
+           (keeper_shell_rewrite_args
+              "rg"
+              [ "pattern", `String "SEARCH_TERM"; "path", `String "SCOPED_PATH" ])
+         ~instruction:hint
+         ~reason:"shell_shape_requires_structured_op"
+         ())
+  | Injection | Process_substitution ->
+    Some
+      (shell_rewrite_plan
+         ~next_tool:"keeper_shell"
+         ~next_args:
+           (keeper_shell_rewrite_args
+              "rg"
+              [ "pattern", `String "DISCOVERY_TERM"; "path", `String "SCOPED_PATH" ])
+         ~instruction:hint
+         ~reason:"shell_injection_requires_discovery_first"
+         ())
+  | Direct_dune_invocation ->
+    Some
+      (shell_rewrite_plan
+         ~confidence:"high"
+         ~next_tool:"keeper_bash"
+         ~next_args:[ "cmd", `String "scripts/dune-local.sh build <target>" ]
+         ~instruction:hint
+         ~reason:"dune_must_use_local_wrapper"
+         ())
+  | Unsafe_redirect ->
+    Some
+      (shell_rewrite_plan
+         ~next_tool:"keeper_fs_edit"
+         ~next_args:[ "path", `String "FILE_PATH"; "content", `String "CONTENT" ]
+         ~instruction:hint
+         ~reason:"redirect_requires_file_edit_tool"
+         ())
+  | Empty_command ->
+    Some
+      (shell_rewrite_plan
+         ~next_tool:"keeper_shell"
+         ~next_args:(keeper_shell_rewrite_args "ls" [ "path", `String "." ])
+         ~instruction:hint
+         ~reason:"empty_command_requires_explicit_op"
+         ())
+
 let bash_shape_block_result ~cmd ~cmd_for_log ~env_snapshot block =
+  let rule_id = "keeper_bash_" ^ bash_shape_block_tag block ^ "_blocked" in
+  let recovery_extra =
+    match bash_shape_block_recovery_plan ~cmd block with
+    | None -> []
+    | Some plan -> recovery_plan_extra ~rule_id plan
+  in
   Yojson.Safe.to_string
     (Exec_core.blocked_result_json
        ~cmd
@@ -681,8 +779,7 @@ let bash_shape_block_result ~cmd ~cmd_for_log ~env_snapshot block =
        ~diag:
          (Some
             {
-              Exec_core.rule_id =
-                "keeper_bash_" ^ bash_shape_block_tag block ^ "_blocked";
+              Exec_core.rule_id = rule_id;
               explanation = bash_shape_block_reason block;
               rewrite = Some (bash_shape_block_hint ~cmd block);
               tool_suggestion =
@@ -695,12 +792,13 @@ let bash_shape_block_result ~cmd ~cmd_for_log ~env_snapshot block =
                  | Chaining | Substitution -> None);
             })
        ~extra:
-         [
-           workflow_rejection_field;
-           "cmd", `String cmd_for_log;
-           "shape_block", `String (bash_shape_block_tag block);
-           "execution_time_ms", `Int 0;
-         ]
+         ([
+            workflow_rejection_field;
+            "cmd", `String cmd_for_log;
+            "shape_block", `String (bash_shape_block_tag block);
+            "execution_time_ms", `Int 0;
+          ]
+          @ recovery_extra)
        ~env_snapshot
        ())
 
@@ -1068,6 +1166,15 @@ let handle_keeper_bash
          ])
   in
   let native_pr_command_block hint =
+    let plan =
+      shell_rewrite_plan
+        ~confidence:"high"
+        ~next_tool:hint.tool_suggestion
+        ~next_args:[]
+        ~instruction:hint.hint
+        ~reason:hint.rule_id
+        ()
+    in
     Prometheus.inc_counter
       Keeper_metrics.metric_keeper_shell_bash_failures
       ~labels:[("keeper", meta.name); ("site", "gh_pr_native_tool")]
@@ -1083,7 +1190,9 @@ let handle_keeper_bash
          ~hint:hint.hint
          ~alternatives:hint.alternatives
          ~diag:(Some (native_tool_diagnosis hint))
-         ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
+         ~extra:
+           ([ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
+            @ recovery_plan_extra ~rule_id:hint.rule_id plan)
          ())
   in
   let direct_tool_command_block ~tool_policy_visible tool_name =
@@ -1127,6 +1236,15 @@ let handle_keeper_bash
     | exception Yojson.Json_error _ -> `String raw
   in
   let task_state_probe_blocked_json ~error ~reason =
+    let plan =
+      shell_rewrite_plan
+        ~confidence:"high"
+        ~next_tool:"keeper_tasks_list"
+        ~next_args:[ "include_done", `Bool false ]
+        ~instruction:Task_probe.hint
+        ~reason:"task_state_tool_ssot"
+        ()
+    in
     Exec_core.blocked_result_json
       ~cmd
       ~error
@@ -1143,7 +1261,9 @@ let handle_keeper_bash
            ; rewrite = Some Task_probe.hint
            ; tool_suggestion = Some "keeper_tasks_list"
            })
-      ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
+      ~extra:
+        ([ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
+         @ recovery_plan_extra ~rule_id:error plan)
       ()
   in
   let task_state_probe_autoroute ~original_error ~reason =
@@ -1740,6 +1860,17 @@ let handle_keeper_bash
           | Some hint -> Some (native_tool_diagnosis hint)
           | None -> Keeper_shell_shared.diagnosis_of_block_reason reason
         in
+        let recovery_extra =
+          match command_block_recovery_plan ~cmd reason hint with
+          | None -> []
+          | Some plan ->
+            let rule_id =
+              match diag with
+              | Some d -> Some d.Exec_core.rule_id
+              | None -> None
+            in
+            recovery_plan_extra ?rule_id plan
+        in
         Yojson.Safe.to_string
           (Exec_core.blocked_result_json
              ~cmd
@@ -1748,7 +1879,7 @@ let handle_keeper_bash
              ~hint
              ~alternatives
              ~diag
-             ~extra:[ "execution_time_ms", `Int 0 ]
+             ~extra:([ "execution_time_ms", `Int 0 ] @ recovery_extra)
              ~env_snapshot:env_snap
              ())
       | Ok () ->

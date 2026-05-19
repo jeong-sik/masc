@@ -1,15 +1,5 @@
 (** MASC MCP Types - Newtypes (Prevent string mixups) *)
 
-let json_kind_name : Yojson.Safe.t -> string = function
-  | `Null -> "null"
-  | `Bool _ -> "bool"
-  | `Int _ -> "int"
-  | `Intlit _ -> "intlit"
-  | `Float _ -> "float"
-  | `String _ -> "string"
-  | `Assoc _ -> "object"
-  | `List _ -> "array"
-
 (** Agent identifier - prevents mixing with task_id, file_path, etc. *)
 module Agent_id : sig
   type t
@@ -35,7 +25,7 @@ end = struct
     | other ->
         Error
           (Printf.sprintf "Expected string for Agent_id (received %s)"
-             (json_kind_name other))
+             (Json_util.kind_name other))
 end
 
 (** Task identifier - prevents mixing with agent_id, etc. *)
@@ -68,7 +58,7 @@ end = struct
     | other ->
         Error
           (Printf.sprintf "Expected string for Task_id (received %s)"
-             (json_kind_name other))
+             (Json_util.kind_name other))
 end
 
 (** Thread identifier - conversation thread ID *)
@@ -101,7 +91,7 @@ end = struct
     | other ->
         Error
           (Printf.sprintf "Expected string for Thread_id (received %s)"
-             (json_kind_name other))
+             (Json_util.kind_name other))
 end
 
 (** Turn identifier - individual turn within a thread *)
@@ -128,7 +118,7 @@ end = struct
     | other ->
         Error
           (Printf.sprintf "Expected string for Turn_id (received %s)"
-             (json_kind_name other))
+             (Json_util.kind_name other))
 end
 
 (** Keeper identifier - deterministic UUIDv5 from namespace + name + path *)
@@ -168,7 +158,7 @@ end = struct
     | other ->
         Error
           (Printf.sprintf "Expected string for Keeper_id (received %s)"
-             (json_kind_name other))
+             (Json_util.kind_name other))
   module Keeper_name = struct
     type t = string
     let is_valid s =
@@ -228,7 +218,7 @@ end = struct
     | other ->
         Error
           (Printf.sprintf "Expected string for Credential_id (received %s)"
-             (json_kind_name other))
+             (Json_util.kind_name other))
 end
 
 (** Relay GraphQL-style global ID: base64("type:uuid") *)

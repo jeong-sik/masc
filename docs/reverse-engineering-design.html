@@ -1454,6 +1454,175 @@
           </tbody>
         </table>
 
+        <h3>작은 Task별 초미니 실행 Matrix</h3>
+        <p>
+          이 표는 Keeper가 개별 Task를 claim했을 때 바로 실행 순서를 잡을 수 있도록 만든 최소 작업 단위입니다.
+          각 행은 작은 Task 하나를 초미니 Task, 완료 Goal, 증거 산출물로 쪼갭니다.
+        </p>
+        <table>
+          <thead>
+            <tr><th>Task</th><th>작은 Goal</th><th>초미니 Task</th><th>완료 증거</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>task-362</code></td>
+              <td>WBS issue/task index를 HTML에 고정한다.</td>
+              <td>root issue 링크 확인, lane issue 링크 확인, MASC goal/task ID 매핑 확인, anchor link 점검.</td>
+              <td><code>#keeper-wbs</code> section, #16077 audit comment, HTML link check.</td>
+            </tr>
+            <tr>
+              <td><code>task-363</code></td>
+              <td>refactor wave 순서를 test-first로 고정한다.</td>
+              <td>PR 0..4 wave 정의, 선행 조건 작성, 차단 조건 작성, 완료 증거 작성.</td>
+              <td>Sequencing Checklist table, #16077 status comment.</td>
+            </tr>
+            <tr>
+              <td><code>task-364</code></td>
+              <td>H1/H2 MCP admission parity를 고정한다.</td>
+              <td>initialize path, unknown session, protocol mismatch, bad Accept, DELETE, streaming branch fixture를 분리한다.</td>
+              <td>focused MCP parity tests and fixture paths.</td>
+            </tr>
+            <tr>
+              <td><code>task-365</code></td>
+              <td>MCP request context decision record를 만든다.</td>
+              <td>request inputs 나열, auth/session/profile fields 분리, reducer output record 명명, legacy warning header 보존.</td>
+              <td>pure reducer contract and behavior-preserving diff.</td>
+            </tr>
+            <tr>
+              <td><code>task-366</code></td>
+              <td>dashboard actor/token injection을 reducer로 접는다.</td>
+              <td>bearer owner precedence, stale <code>_agent_name</code>, generated alias, internal keeper flag cases를 고정한다.</td>
+              <td>auth material parity tests and dashboard API fixture.</td>
+            </tr>
+            <tr>
+              <td><code>task-367</code></td>
+              <td>tool caller identity FSM을 dispatch 앞에 둔다.</td>
+              <td>caller source enum, keeper/runtime/admin gates, tag dispatch preservation, denial reason mapping을 명명한다.</td>
+              <td>tool dispatch identity tests and no behavior-change note.</td>
+            </tr>
+            <tr>
+              <td><code>task-368</code></td>
+              <td>keeper spawn admission no-fork contract를 고정한다.</td>
+              <td>deny-before-register, deny-before-fork, heartbeat row absence, rejection receipt shape를 fixture화한다.</td>
+              <td>spawn admission tests and runtime row evidence.</td>
+            </tr>
+            <tr>
+              <td><code>task-369</code></td>
+              <td>wake hint와 event queue payload 의미를 분리한다.</td>
+              <td><code>fiber_wakeup</code> hint cases, queued payload ownership, duplicate wake handling, ordering assertions를 만든다.</td>
+              <td>event queue tests and ordering assertions.</td>
+            </tr>
+            <tr>
+              <td><code>task-370</code></td>
+              <td>receipt와 manifest close-out fixture를 만든다.</td>
+              <td>turn id assignment, skipped/terminal paths, manifest append order, evidence row fields를 고정한다.</td>
+              <td>receipt fixture and manifest append order test.</td>
+            </tr>
+            <tr>
+              <td><code>task-371</code></td>
+              <td>heartbeat event intake와 scheduling decision을 분리한다.</td>
+              <td>runtime event read, task selection, defer reason, scheduling decision record를 순수 함수 경계로 나눈다.</td>
+              <td>heartbeat scheduling tests and decision record snapshot.</td>
+            </tr>
+            <tr>
+              <td><code>task-372</code></td>
+              <td>TurnPlan, ProviderAttempt, PostTurn record를 도입한다.</td>
+              <td>pre-turn plan, provider attempt budget, retry suppression, post-turn metrics, receipt close-out를 별도 record로 둔다.</td>
+              <td>typed record diff, provider attempt tests, receipt invariants.</td>
+            </tr>
+            <tr>
+              <td><code>task-373</code></td>
+              <td>task transition과 Done-to-verification behavior를 고정한다.</td>
+              <td>claimed/done redirect, verification request creation, self-approval rejection, expected-version failure를 test로 잠근다.</td>
+              <td>verification FSM tests and transition snapshots.</td>
+            </tr>
+            <tr>
+              <td><code>task-374</code></td>
+              <td>verification orphan recovery를 증명한다.</td>
+              <td>callback success, backlog write failure, retry/idempotency, operator-visible recovery row를 재현한다.</td>
+              <td>orphan recovery regression test and audit row evidence.</td>
+            </tr>
+            <tr>
+              <td><code>task-375</code></td>
+              <td>task lifecycle transition executor를 추출한다.</td>
+              <td>parse, gate, decide, persist, emit 단계를 나누고 side effect order를 보존한다.</td>
+              <td>executor boundary diff and existing transition suite pass.</td>
+            </tr>
+            <tr>
+              <td><code>task-376</code></td>
+              <td>goal manual reject와 quorum-failed semantics를 고정한다.</td>
+              <td>manual operator reject, verifier quorum fail, legacy goal marker read, dashboard summary text를 분리한다.</td>
+              <td>goal verification tests and dashboard projection fixture.</td>
+            </tr>
+            <tr>
+              <td><code>task-377</code></td>
+              <td>dashboard HTTP/SSE/WS auth material consistency를 고정한다.</td>
+              <td>token source, actor source, shell bearer, websocket reconnect, SSE refresh cases를 비교한다.</td>
+              <td>backend route tests and frontend transport parity tests.</td>
+            </tr>
+            <tr>
+              <td><code>task-378</code></td>
+              <td>dashboard shell fetch SSOT를 하나로 줄인다.</td>
+              <td>duplicated fetch sites, response envelope, error handling, cache invalidation path를 한 helper로 접는다.</td>
+              <td>dashboard API tests and call-site diff summary.</td>
+            </tr>
+            <tr>
+              <td><code>task-379</code></td>
+              <td>backend/frontend WS-SSE slice mapping parity를 고정한다.</td>
+              <td>backend slice names, frontend hydrator keys, stale event handling, reconnect replay cases를 맞춘다.</td>
+              <td>WS/SSE parity test and hydrated state fixture.</td>
+            </tr>
+            <tr>
+              <td><code>task-380</code></td>
+              <td><code>DashboardSurface</code> read-model envelope를 도입한다.</td>
+              <td>root JSON compatibility, additive envelope field, per-surface module ownership, migration flag를 둔다.</td>
+              <td>read-model fixture and backwards-compatible API snapshot.</td>
+            </tr>
+            <tr>
+              <td><code>task-381</code></td>
+              <td>JSONL store shapes와 path contract를 inventory한다.</td>
+              <td>audit, telemetry, board, cascade, receipt, goal, trajectory paths와 row schema를 표로 만든다.</td>
+              <td>inventory table and path existence check.</td>
+            </tr>
+            <tr>
+              <td><code>task-382</code></td>
+              <td>JSONL writer contract fixtures를 만든다.</td>
+              <td>append atomicity, mutex poisoning, newline handling, malformed row rejection, fsync expectations을 fixture화한다.</td>
+              <td>writer regression tests and fixture files.</td>
+            </tr>
+            <tr>
+              <td><code>task-383</code></td>
+              <td>dated/audit telemetry stores를 shared writer adapter로 이동한다.</td>
+              <td>adapter interface, per-store path resolver, row encoder ownership, error envelope를 보존한다.</td>
+              <td>adapter diff, store-specific tests, no schema drift note.</td>
+            </tr>
+            <tr>
+              <td><code>task-384</code></td>
+              <td>dashboard audit/read-model filter fixture를 만든다.</td>
+              <td>time range, agent/task filter, malformed row skip, pagination, empty state를 고정한다.</td>
+              <td>dashboard route tests and read-model fixture snapshot.</td>
+            </tr>
+            <tr>
+              <td><code>task-385</code></td>
+              <td>LSP WebSocket handshake와 workspace scope를 고정한다.</td>
+              <td>initialize capabilities, rootUri confinement, file URI scoping, missing proc_mgr denial, no write capability를 test한다.</td>
+              <td>LSP proxy tests and route admission fixture.</td>
+            </tr>
+            <tr>
+              <td><code>task-386</code></td>
+              <td>read-only symbol graph exporter design을 고정한다.</td>
+              <td>artifact schema, method allowlist, mutation denylist, runtime budgets, test-owner metadata를 문서화한다.</td>
+              <td><code>docs/design/lsp-symbol-graph-exporter.md</code> and #16083 evidence.</td>
+            </tr>
+            <tr>
+              <td><code>task-387</code></td>
+              <td>첫 reverse-engineering symbol graph snapshot을 생성한다.</td>
+              <td>six lane manifest, file/symbol/range/test owner rows, curated edges, omission rows를 JSON에 기록한다.</td>
+              <td><code>docs/generated/reverse-engineering/symbol-graph.v1.json</code> and check command output.</td>
+            </tr>
+          </tbody>
+        </table>
+
         <h3>실행 순서</h3>
         <div class="sequence">
           <div class="step">

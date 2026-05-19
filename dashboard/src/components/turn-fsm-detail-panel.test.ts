@@ -62,13 +62,19 @@ describe("turnFsmChipTone", () => {
   })
 })
 
+// `execution.outcome` wire format is the TLA-prefix form
+// (`receipt_done` | `receipt_skipped` | `receipt_failed` |
+//  `receipt_cancelled`) emitted by `outcome_kind_to_tla_receipt`
+// (lib/keeper/keeper_execution_receipt.ml:24-29). Short forms
+// ('done' / 'skipped' / 'failed' / 'error') never appear here in
+// production — prior fixtures asserting them was a mock↔mock loophole
+// that hid five dead branches.
 describe("terminalTone", () => {
   it.each([
-    ["done", "ok"],
-    ["skipped", "ok"],
-    ["cancelled", "warn"],
-    ["failed", "err"],
-    ["error", "err"],
+    ["receipt_done", "ok"],
+    ["receipt_skipped", "ok"],
+    ["receipt_cancelled", "warn"],
+    ["receipt_failed", "err"],
     ["unknown", "neutral"],
     ["", "neutral"],
     [null, "neutral"],
@@ -118,7 +124,7 @@ describe("TurnFsmDetailPanel", () => {
       "실행 중",
       "receipt failed",
       "reason tool_contract",
-      "tool violated",
+      "tool 도구 계약 위반",
     ]))
     expect(chips.map(chip => chip.getAttribute("data-status-chip-tone"))).toEqual(expect.arrayContaining([
       "info",

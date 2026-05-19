@@ -114,6 +114,14 @@ let provider_attempt_finished_decision record =
   `Assoc decision_fields
 ;;
 
+let client_capacity_full_decision ~capacity_key =
+  `Assoc
+    [ "blocker", `String "client_capacity_full"
+    ; "capacity_key", `String capacity_key
+    ; "provider_attempt_started", `Bool false
+    ]
+;;
+
 let success_selected_model_raw candidate =
   Some (Cascade_runtime_candidate.model_health_key candidate)
 
@@ -372,14 +380,141 @@ let run_named
   let local_prefiltered_candidate_count =
     List.length local_prefiltered_candidates
   in
-  if unhealthy_local_endpoints <> [] then
-    Log.Misc.warn
-      "cascade %s: preflight skipped %d unhealthy local endpoint(s) before \
-       provider dispatch: [%s]"
-      cascade_name
-      (List.length unhealthy_local_endpoints)
-      (String.concat ", " unhealthy_local_endpoints);
+  (* RFC: MASC/OAS Error-Warn Reduction Goal — 2026-05-18 §P3.
+     For each unhealthy endpoint, record the preflight-skip event in
+     [Cascade_preflight_state.global]. After N consecutive skips of
+     the same (cascade, endpoint, reason) fingerprint we escalate to
+     ERROR once and register the endpoint in the in-process disabled
+     list — subsequent identical skips return [`Already_disabled] and
+     are dropped to DEBUG, so the log volume drops from ~35-50/30min
+     to a small fixed number of transitions.
+     Routing semantics are preserved: the disabled list is advisory
+     for log-level cadence; the existing
+     [filter_unhealthy_local_runtime_urls] already removed these
+     endpoints from [candidates]. *)
+  List.iter
+    (fun endpoint ->
+      let outcome =
+        Cascade_preflight_state.record
+          Cascade_preflight_state.global
+          ~tier_group:cascade_name
+          ~provider:endpoint
+          ~reason:Cascade_preflight_state.Health_check_failed_repeatedly
+      in
+      match outcome with
+      | `First ->
+        Log.Misc.warn
+          "cascade %s: preflight skipped 1 unhealthy local endpoint(s) before \
+           provider dispatch: [%s] (reason=%s, first occurrence)"
+          cascade_name
+          endpoint
+          (Cascade_preflight_state.reason_slug
+             Cascade_preflight_state.Health_check_failed_repeatedly)
+      | `Repeated n ->
+        Log.Misc.warn
+          "cascade %s: preflight skipped 1 unhealthy local endpoint(s) before \
+           provider dispatch: [%s] (reason=%s, consecutive=%d)"
+          cascade_name
+          endpoint
+          (Cascade_preflight_state.reason_slug
+             Cascade_preflight_state.Health_check_failed_repeatedly)
+          n
+      | `Threshold_disable n ->
+        Log.Misc.error
+          "cascade %s: provider [%s] disabled after %d consecutive preflight \
+           unhealthy skips (reason=%s); subsequent skips silenced via \
+           disabled-list. Recovery requires successful health probe."
+          cascade_name
+          endpoint
+          n
+          (Cascade_preflight_state.reason_slug
+             Cascade_preflight_state.Health_check_failed_repeatedly)
+      | `Already_disabled ->
+        (* Drop noise: this endpoint is in the disabled list and has
+           already emitted its ERROR escalation. *)
+        Log.Misc.debug
+          "cascade %s: preflight skipped already-disabled endpoint [%s]"
+          cascade_name endpoint)
+    unhealthy_local_endpoints;
+  (* Recovery: for any endpoint that probed healthy this cycle, clear
+     fingerprints + emit one INFO if it had been disabled. *)
+  List.iter
+    (fun (url, healthy) ->
+      if healthy
+         && Cascade_preflight_state.is_disabled
+              Cascade_preflight_state.global ~provider:url
+      then
+        let recovered =
+          Cascade_preflight_state.reset_on_health_recovery
+            Cascade_preflight_state.global ~provider:url
+        in
+        if recovered
+        then
+          Log.Misc.info
+            "cascade %s: provider [%s] re-enabled after successful health \
+             probe; removed from disabled-list."
+            cascade_name url)
+    local_endpoint_health;
   let candidates = local_prefiltered_candidates in
+  let optional_capacity_override ~knob resolve =
+    match resolve () with
+    | Ok value -> value
+    | Error detail ->
+      Log.Misc.warn
+        "cascade %s: failed to resolve %s capacity override: %s"
+        cascade_name
+        knob
+        detail;
+      None
+  in
+  let register_capacity_controls candidates =
+    List.iter
+      Cascade_runtime_candidate.register_declared_client_capacity
+      candidates;
+    let capacity_keys =
+      Cascade_runtime_candidate.capacity_keys candidates
+      |> List.map String.trim
+      |> List.filter (fun key -> not (String.equal key ""))
+      |> Json_util.dedupe_keep_order
+    in
+    let cli_max_concurrent =
+      optional_capacity_override ~knob:"cli_max_concurrent" (fun () ->
+        Cascade_catalog_runtime.resolve_cli_max_concurrent
+          ~sw
+          ~net
+          ~name:cascade_name
+          ())
+    in
+    (match cli_max_concurrent with
+     | Some max_concurrent ->
+       Cascade_client_capacity.auto_register_cli_with_override
+         ~capacity_keys
+         ~max_concurrent
+     | None ->
+       Cascade_client_capacity.auto_register_cli_for_candidates ~capacity_keys);
+    let http_probe_default_max_concurrent = 1 in
+    let http_probe_max_concurrent =
+      match
+        optional_capacity_override ~knob:"ollama_max_concurrent" (fun () ->
+          Cascade_catalog_runtime.resolve_ollama_max_concurrent
+            ~sw
+            ~net
+            ~name:cascade_name
+            ())
+      with
+      | Some max_concurrent -> max_concurrent
+      | None ->
+        (* DET-OK: absent or unresolved HTTP-probe capacity uses the stable
+           single-flight default at the runtime boundary; configured values are
+           still explicit [Some n] inputs from the cascade catalog. *)
+        http_probe_default_max_concurrent
+    in
+    List.iter
+      (Cascade_runtime_candidate.register_http_probe_capable
+         ~max_concurrent:http_probe_max_concurrent)
+      candidates
+  in
+  register_capacity_controls candidates;
   if health_cooldown_fail_open then
     Log.Misc.warn
       "cascade %s: all tool-capable candidates are in health/cooldown; \
@@ -766,6 +901,24 @@ let run_named
           ~error_reason
           ()
   in
+  let acquire_client_capacity_slot candidate =
+    let capacity_key =
+      Cascade_runtime_candidate.capacity_key candidate |> String.trim
+    in
+    if String.equal capacity_key ""
+       || not (Cascade_client_capacity.is_registered capacity_key)
+    then `No_client_capacity
+    else
+      match Cascade_client_capacity.try_acquire capacity_key with
+      | Some release -> `Acquired (capacity_key, release)
+      | None -> `Full capacity_key
+  in
+  let emit_capacity_blocked_manifest ~capacity_key =
+    emit_runtime_manifest
+      ~status:"blocked"
+      ~decision:(client_capacity_full_decision ~capacity_key)
+      Keeper_runtime_manifest.Pre_dispatch_blocked
+  in
   let rec try_cascade
       ?(on_success = fun ~provider_key:_ -> ())
       ?resume_checkpoint ?per_provider_timeout_s remaining last_err =
@@ -880,6 +1033,46 @@ let run_named
              cascade_name runtime_candidate_label runtime_candidate_label msg
        | None -> ());
       let is_last = rest = [] in
+      match acquire_client_capacity_slot candidate with
+      | `Full capacity_key ->
+        emit_capacity_blocked_manifest ~capacity_key;
+        record_cascade_attempt candidate ~outcome:(`Failure "slot_full") ();
+        Cascade_legacy_runner.record_fallback_event capture
+          ~from_model:runtime_candidate_label
+          ~to_model:runtime_candidate_label
+          ~reason:"client_capacity_full";
+        Log.Misc.info
+          "[cascade-fallback] cascade %s: %s skipped because client capacity \
+           key %s is full, trying next"
+          cascade_name
+          runtime_candidate_label
+          capacity_key;
+        let slot_last_err =
+          match
+            Cascade_fsm.decide
+              ~accept_on_exhaustion:false
+              ~is_last
+              Cascade_fsm.Slot_full
+          with
+          | Cascade_fsm.Try_next { last_err = Some err }
+          | Cascade_fsm.Exhausted { last_err = Some err } ->
+            Some err
+          | Cascade_fsm.Try_next { last_err = None }
+          | Cascade_fsm.Exhausted { last_err = None } ->
+            last_err
+          | Cascade_fsm.Accept _
+          | Cascade_fsm.Accept_on_exhaustion _ ->
+            last_err
+        in
+        try_cascade ~on_success ?resume_checkpoint ?per_provider_timeout_s
+          rest slot_last_err
+      | (`No_client_capacity | `Acquired _) as capacity_slot ->
+      let capacity_release =
+        match capacity_slot with
+        | `Acquired (_capacity_key, release) -> Some release
+        | `No_client_capacity -> None
+        | `Full _ -> None
+      in
       Log.Misc.debug "cascade %s: trying %s (is_last=%b)" cascade_name runtime_candidate_label is_last;
       let pp_timeout =
         Cascade_runtime_candidate.effective_attempt_timeout_s
@@ -894,10 +1087,6 @@ let run_named
         ; started_per_provider_timeout_s = pp_timeout
         }
       in
-      emit_runtime_manifest
-        ~status:"started"
-        ~decision:(provider_attempt_started_decision started_record)
-        Keeper_runtime_manifest.Provider_attempt_started;
       let provider_attempt_finished_emitted = ref false in
       let emit_provider_attempt_finished_once
             ~status
@@ -936,6 +1125,13 @@ let run_named
       in
       let (result, checkpoint_after, liveness_success_sample, attempt_latency_ms) =
         Eio.Switch.run (fun provider_attempt_sw ->
+          Option.iter
+            (fun release -> Eio.Switch.on_release provider_attempt_sw release)
+            capacity_release;
+          emit_runtime_manifest
+            ~status:"started"
+            ~decision:(provider_attempt_started_decision started_record)
+            Keeper_runtime_manifest.Provider_attempt_started;
           Eio.Switch.on_release provider_attempt_sw (fun () ->
             if not !provider_attempt_finished_emitted then
               let attempt_latency_ms =
@@ -1336,7 +1532,7 @@ let run_named
   let adapter = Cascade_runtime_candidate.strategy_adapter in
   let signal_ctx : Cascade_strategy.signal_ctx = {
     health = Cascade_health_tracker.global;
-    capacity = (fun _ -> None);
+    capacity = Cascade_capacity_probe.capacity;
     now = Unix.gettimeofday ();
     rand_int = Random.int;
     keeper_name;

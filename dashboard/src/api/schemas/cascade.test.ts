@@ -63,10 +63,36 @@ describe('cascade API schemas', () => {
       source_path: '/tmp/masc/cascade.toml',
       source_editable: true,
       source_text: '[profiles.keeper_unified]\n',
+      assist: {
+        parse_status: 'parsed',
+        providers: ['glm-coding'],
+        models: ['glm-auto'],
+        bindings: ['glm-coding.glm-auto'],
+        aliases: ['glm-coding.glm-auto.deep'],
+        tiers: ['primary'],
+        tier_groups: ['primary'],
+        routes: ['keeper_turn'],
+        feature_params: [
+          {
+            key: 'thinking-enabled',
+            scope: 'alias',
+            value_type: 'boolean',
+            example: 'thinking-enabled = true',
+          },
+          {
+            key: 'max-output',
+            scope: 'alias',
+            value_type: 'integer',
+            example: 'max-output = 8192',
+          },
+        ],
+        errors: [],
+      },
     })
 
     expect(parsed.source_editable).toBe(true)
     expect(parsed.source_text).toContain('keeper_unified')
+    expect(parsed.assist?.feature_params.map(param => param.key)).toContain('max-output')
   })
 
   it('parses valid cascade health payloads', () => {

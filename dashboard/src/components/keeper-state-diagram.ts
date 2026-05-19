@@ -17,7 +17,8 @@ import { MermaidGraph } from './common/mermaid-graph'
 import { FilterChips } from './common/filter-chips'
 import { buildCompositeFsmSpec } from './keeper-fsm-specs'
 import { TurnFsmDetailPanel } from './turn-fsm-detail-panel'
-import { displayState } from './fsm-hub-types'
+import { displayState, INVARIANT_LABELS } from './fsm-hub-types'
+import type { KeeperCompositeInvariants } from '../api/schemas/keeper-composite'
 import {
   normalizePhaseDiagnosis,
   PhaseConditionsPanel,
@@ -67,12 +68,13 @@ const PHASE_ID_MAP: Record<string, string> = {
   zombie: 'Zombie',
 }
 
-const INVARIANT_LABELS: Array<[keyof KeeperCompositeSnapshot['invariants'], string]> = [
-  ['phase_turn_alignment', '단계 ⇔ 턴'],
-  ['no_cascade_before_measurement', 'Cascade 순서'],
-  ['compaction_atomicity', '압축 원자성'],
-  ['event_priority_monotone', '이벤트 우선순위'],
-]
+// INVARIANT_LABELS is the SSOT in `fsm-hub-types.ts:124` — same five TLA
+// joint observer invariants emitted by `keeper_composite_observer.ml`. A
+// prior local copy in this file enumerated only four (dropped
+// `phase_derivation_agreement`), so the operator panel below silently
+// hid one of the five invariant rows — they would never see KSM phase
+// derivation drift (stored phase vs `derive_phase(conditions)` result,
+// the strictest TLA agreement check).
 
 type DiagramView = 'cytoscape' | 'mermaid'
 
@@ -239,6 +241,7 @@ export function KeeperStateDiagramPanel({ keeperName, snapshot: externalSnapshot
         <${PhaseBadge}>KDP ${displayState(snapshot.decision.stage)}<//>
         <${PhaseBadge}>KCL ${displayState(snapshot.cascade.state)}<//>
         <${PhaseBadge}>KMC ${displayState(snapshot.compaction.stage)}<//>
+        <${PhaseBadge}>KCB ${displayState(snapshot.circuit_breaker?.state ?? 'clean')}<//>
         ${transitions.length > 0 ? html`
           <${PhaseBadge}>observed ${transitions.length} transitions<//>
         ` : null}
@@ -247,7 +250,7 @@ export function KeeperStateDiagramPanel({ keeperName, snapshot: externalSnapshot
       <div>
         <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
           <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
-            통합 라이프사이클 (KSM · KTC · KDP · KCL · KMC)
+            통합 라이프사이클 (KSM · KTC · KDP · KCL · KMC · KCB)
           </div>
           <${FilterChips}
             chips=${DIAGRAM_VIEW_CHIPS}
@@ -295,7 +298,7 @@ export function KeeperStateDiagramPanel({ keeperName, snapshot: externalSnapshot
       ` : null}
 
       <div class="grid gap-2 md:grid-cols-2">
-        ${INVARIANT_LABELS.map(([key, label]) => {
+        ${(Object.entries(INVARIANT_LABELS) as Array<[keyof KeeperCompositeInvariants, string]>).map(([key, label]) => {
           const ok = snapshot.invariants[key]
           return html`
             <div class=${`rounded-[var(--r-1)] border px-3 py-2 text-2xs leading-normal ${badgeTone(ok)}`}>

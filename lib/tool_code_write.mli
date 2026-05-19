@@ -128,8 +128,8 @@ val validate_code_shell_command :
 (** [validate_code_shell_command command] delegates to
     {!Worker_dev_tools.validate_command_coding_with_allowlist}
     with [~allow_pipes:true] and the pinned
-    [allowed_shell_commands] list (dune, make, npm/npx/node,
-    git, ls, cat, head, tail, wc, rg, find, diff, patch, mkdir,
+    [allowed_shell_commands] list (dune-local, make, npm/npx/node,
+    git, ls, cat, head, tail, wc, rg, grep, find, sed, pwd, diff, patch, mkdir,
     opam, ocamlfind, tsc).  Drift in the allowlist changes the
     keeper sandbox surface — pinned at the contract seam. *)
 

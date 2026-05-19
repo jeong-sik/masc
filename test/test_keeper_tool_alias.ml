@@ -401,6 +401,10 @@ let test_bash_schema_uses_command_field () =
     true
     (Option.is_some (yojson_field "command" props));
   Alcotest.(check bool)
+    "Bash schema exposes cwd for sandbox repo disambiguation"
+    true
+    (Option.is_some (yojson_field "cwd" props));
+  Alcotest.(check bool)
     "Bash schema does not expose 'cmd' directly"
     true
     (Option.is_none (yojson_field "cmd" props));
@@ -434,6 +438,7 @@ let test_translate_bash_input () =
   let input =
     `Assoc
       [ "command", `String "ls -la"
+      ; "cwd", `String "repos/masc-mcp"
       ; "timeout", `Int 60
       ; "description", `String "list files"
       ; "run_in_background", `Bool false
@@ -442,6 +447,7 @@ let test_translate_bash_input () =
   let translated = Alias.translate_input ~public:"Bash" input in
   let cmd = yojson_field "cmd" translated in
   let timeout_sec = yojson_field "timeout_sec" translated in
+  let cwd = yojson_field "cwd" translated in
   let bg = yojson_field "run_in_background" translated in
   let desc = yojson_field "description" translated in
   Alcotest.(check (option string))
@@ -455,6 +461,12 @@ let test_translate_bash_input () =
     (Some 60)
     (Option.bind timeout_sec (function
        | `Int i -> Some i
+       | _ -> None));
+  Alcotest.(check (option string))
+    "cwd passes through"
+    (Some "repos/masc-mcp")
+    (Option.bind cwd (function
+       | `String s -> Some s
        | _ -> None));
   Alcotest.(check bool) "run_in_background passes through" true (Option.is_some bg);
   Alcotest.(check bool) "description is dropped" true (Option.is_none desc)

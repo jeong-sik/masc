@@ -4,7 +4,7 @@ import { useMemo } from 'preact/hooks'
 import type { KeeperCompositeSnapshot } from '../api/keeper'
 import { CytoscapeFsm } from './common/cytoscape-fsm'
 import { StatusChip, type StatusChipTone } from './common/status-chip'
-import { displayState } from './fsm-hub-types'
+import { displayState, toolContractLabel } from './fsm-hub-types'
 import {
   buildTurnFsmSpec,
   normalizeTurnFsmState,
@@ -29,15 +29,25 @@ export function turnFsmChipTone(tone: TurnChipTone): StatusChipTone {
   }
 }
 
+// `execution.outcome` wire format on the composite snapshot is the
+// TLA-prefix form emitted by `outcome_kind_to_tla_receipt`
+// (lib/keeper/keeper_execution_receipt.ml:24-29):
+//   `Ok        -> "receipt_done"
+//   `Skipped   -> "receipt_skipped"
+//   `Error     -> "receipt_failed"
+//   `Cancelled -> "receipt_cancelled"
+// The TLA ReceiptIsAuthoritative invariant fixes this canonical form
+// (keeper_execution_receipt.ml:54-58). The prior branches used short
+// forms the backend never emits on this field, so every receipt tone
+// fell through to 'neutral' regardless of actual outcome.
 export function terminalTone(outcome: string | null | undefined): 'neutral' | 'ok' | 'warn' | 'err' {
   switch (outcome) {
-    case 'done':
-    case 'skipped':
+    case 'receipt_done':
+    case 'receipt_skipped':
       return 'ok'
-    case 'cancelled':
+    case 'receipt_cancelled':
       return 'warn'
-    case 'failed':
-    case 'error':
+    case 'receipt_failed':
       return 'err'
     default:
       return 'neutral'
@@ -88,7 +98,7 @@ export function TurnFsmDetailPanel({ snapshot }: { snapshot: KeeperCompositeSnap
             <${StatusChip} tone=${turnFsmChipTone(terminalTone(execution.outcome))} uppercase=${false} class="font-mono" title=${stopCause.source}>reason ${stopCause.code}</${StatusChip}>
           ` : null}
           ${execution.tool_contract_result ? html`
-            <${StatusChip} tone=${turnFsmChipTone(execution.tool_contract_result === 'violated' ? 'err' : 'neutral')} uppercase=${false} class="font-mono">tool ${execution.tool_contract_result}</${StatusChip}>
+            <${StatusChip} tone=${turnFsmChipTone(execution.tool_contract_result === 'violated' ? 'err' : 'neutral')} uppercase=${false} class="font-mono" title=${execution.tool_contract_result}>tool ${toolContractLabel(execution.tool_contract_result)}</${StatusChip}>
           ` : null}
         </div>
       ` : null}

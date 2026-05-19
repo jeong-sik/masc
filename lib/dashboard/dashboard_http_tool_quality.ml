@@ -73,19 +73,41 @@ let classify_failure_output (output : string) : string =
     in
     match Yojson.Safe.from_string json_str with
     | j ->
-      (match Safe_ops.json_string_opt "error" j |> Option.map String.trim with
-       | Some "command_blocked_readonly" ->
-         let category =
-           Safe_ops.json_string_opt "category" j |> Option.value ~default:"unknown"
-         in
-         Printf.sprintf "command_blocked_readonly:%s" category
-       | Some error when error <> "" -> normalize_failure_text error
+      let semantic_status =
+        Safe_ops.json_string_opt "semantic_status" j |> Option.map String.trim
+      in
+      let failure_class =
+        Safe_ops.json_string_opt "failure_class" j |> Option.map String.trim
+      in
+      let diagnosis = Yojson.Safe.Util.member "diagnosis" j in
+      let diagnosis_rule =
+        Safe_ops.json_string_opt "rule_id" diagnosis |> Option.map String.trim
+      in
+      let fallback_category () =
+        match Safe_ops.json_string_opt "error" j |> Option.map String.trim with
+        | Some "command_blocked_readonly" ->
+          let category =
+            Safe_ops.json_string_opt "category" j |> Option.value ~default:"unknown"
+          in
+          Printf.sprintf "command_blocked_readonly:%s" category
+        | Some error when error <> "" -> normalize_failure_text error
+        | _ ->
+          (match Safe_ops.json_string_opt "message" j |> Option.map String.trim with
+           | Some message when message <> "" -> normalize_failure_text message
+           | _ ->
+             classify_process_status j |> Option.value ~default:"unknown_error")
+      in
+      (match Safe_ops.json_string_opt "shape_block" j |> Option.map String.trim with
+       | Some shape when shape <> "" -> "shape_block:" ^ shape
        | _ ->
-         match Safe_ops.json_string_opt "message" j |> Option.map String.trim with
-         | Some message when message <> "" -> normalize_failure_text message
-         | _ ->
-           classify_process_status j
-           |> Option.value ~default:"unknown_error")
+         (match diagnosis_rule with
+          | Some rule when rule <> "" -> normalize_failure_text rule
+          | _ ->
+            (match failure_class, semantic_status with
+             | Some "workflow_rejection", Some "blocked" -> "workflow_rejection:blocked"
+             | _, Some (("timeout" | "runtime_error" | "partial") as status) ->
+               "semantic_status:" ^ status
+             | _ -> fallback_category ())))
     | exception Yojson.Json_error _ -> "parse_error"
 
 let bucket_key record field ~default =

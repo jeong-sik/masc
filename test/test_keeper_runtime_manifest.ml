@@ -140,10 +140,10 @@ let openai_usage =
       ("total_tokens", `Int 13);
     ]
 
-let openai_tool_call_response ~tool_name ~arguments =
+let openai_probe_response =
   `Assoc
     [
-      ("id", `String "chatcmpl-tool");
+      ("id", `String "chatcmpl-probe");
       ("object", `String "chat.completion");
       ("model", `String "mock-runtime-manifest");
       ( "choices",
@@ -154,47 +154,8 @@ let openai_tool_call_response ~tool_name ~arguments =
                 ("index", `Int 0);
                 ( "message",
                   `Assoc
-                    [
-                      ("role", `String "assistant");
-                      ("content", `Null);
-                      ( "tool_calls",
-                        `List
-                          [
-                            `Assoc
-                              [
-                                ("id", `String "call_keeper_tool_search");
-                                ("type", `String "function");
-                                ( "function",
-                                  `Assoc
-                                    [
-                                      ("name", `String tool_name);
-                                      ("arguments", `String arguments);
-                                    ] );
-                              ];
-                          ] );
-                    ] );
-                ("finish_reason", `String "tool_calls");
-              ];
-          ] );
-      ("usage", openai_usage);
-    ]
-  |> Yojson.Safe.to_string
-
-let openai_text_response text =
-  `Assoc
-    [
-      ("id", `String "chatcmpl-final");
-      ("object", `String "chat.completion");
-      ("model", `String "mock-runtime-manifest");
-      ( "choices",
-        `List
-          [
-            `Assoc
-              [
-                ("index", `Int 0);
-                ( "message",
-                  `Assoc
-                    [ ("role", `String "assistant"); ("content", `String text) ] );
+                    [ ("role", `String "assistant"); ("content", `String "probe ok") ]
+                );
                 ("finish_reason", `String "stop");
               ];
           ] );
@@ -202,14 +163,118 @@ let openai_text_response text =
     ]
   |> Yojson.Safe.to_string
 
+let openai_sse chunks =
+  let data_lines =
+    chunks
+    |> List.map (fun json -> "data: " ^ Yojson.Safe.to_string json ^ "\n\n")
+  in
+  String.concat "" (data_lines @ [ "data: [DONE]\n\n" ])
+
+let openai_tool_call_response ~tool_name ~arguments =
+  openai_sse
+    [
+      `Assoc
+        [
+          ("id", `String "chatcmpl-tool");
+          ("object", `String "chat.completion.chunk");
+          ("model", `String "mock-runtime-manifest");
+          ( "choices",
+            `List
+              [
+                `Assoc
+                  [
+                    ("index", `Int 0);
+                    ( "delta",
+                      `Assoc
+                        [
+                          ( "tool_calls",
+                            `List
+                              [
+                                `Assoc
+                                  [
+                                    ("index", `Int 0);
+                                    ("id", `String "call_keeper_tool");
+                                    ("type", `String "function");
+                                    ( "function",
+                                      `Assoc
+                                        [
+                                          ("name", `String tool_name);
+                                          ("arguments", `String arguments);
+                                        ] );
+                                  ];
+                              ] );
+                        ] );
+                    ("finish_reason", `Null);
+                  ];
+              ] );
+        ];
+      `Assoc
+        [
+          ("id", `String "chatcmpl-tool");
+          ("object", `String "chat.completion.chunk");
+          ("model", `String "mock-runtime-manifest");
+          ( "choices",
+            `List
+              [
+                `Assoc
+                  [ ("index", `Int 0); ("delta", `Assoc []); ("finish_reason", `String "tool_calls") ];
+              ] );
+          ("usage", openai_usage);
+        ];
+    ]
+
+let openai_text_response text =
+  openai_sse
+    [
+      `Assoc
+        [
+          ("id", `String "chatcmpl-final");
+          ("object", `String "chat.completion.chunk");
+          ("model", `String "mock-runtime-manifest");
+          ( "choices",
+            `List
+              [
+                `Assoc
+                  [
+                    ("index", `Int 0);
+                    ("delta", `Assoc [ ("content", `String text) ]);
+                    ("finish_reason", `Null);
+                  ];
+              ] );
+        ];
+      `Assoc
+        [
+          ("id", `String "chatcmpl-final");
+          ("object", `String "chat.completion.chunk");
+          ("model", `String "mock-runtime-manifest");
+          ( "choices",
+            `List
+              [
+                `Assoc
+                  [ ("index", `Int 0); ("delta", `Assoc []); ("finish_reason", `String "stop") ];
+              ] );
+          ("usage", openai_usage);
+        ];
+    ]
+
 let start_multi_mock ~sw ~net ~port responses =
   let idx = Atomic.make 0 in
   let handler _conn _req body =
-    let _ = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    let request_body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
     let n = List.length responses in
-    let i = Atomic.fetch_and_add idx 1 in
-    let response = List.nth responses (i mod n) in
-    let headers = Cohttp.Header.init_with "content-type" "application/json" in
+    let is_probe = String.trim request_body = "" in
+    let response =
+      if is_probe
+      then openai_probe_response
+      else (
+        let i = Atomic.fetch_and_add idx 1 in
+        List.nth responses (i mod n))
+    in
+    let headers =
+      Cohttp.Header.init_with
+        "content-type"
+        (if is_probe then "application/json" else "text/event-stream")
+    in
     Cohttp_eio.Server.respond_string ~headers ~status:`OK ~body:response ()
   in
   let socket =
@@ -224,10 +289,21 @@ let start_multi_mock ~sw ~net ~port responses =
 let start_delayed_mock ~sw ~net ~clock ~port ~delay_s response =
   let calls = Atomic.make 0 in
   let handler _conn _req body =
-    ignore (Atomic.fetch_and_add calls 1);
-    let _ = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
-    Eio.Time.sleep clock delay_s;
-    let headers = Cohttp.Header.init_with "content-type" "application/json" in
+    let request_body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    let is_probe = String.trim request_body = "" in
+    let response =
+      if is_probe
+      then openai_probe_response
+      else (
+        ignore (Atomic.fetch_and_add calls 1);
+        Eio.Time.sleep clock delay_s;
+        response)
+    in
+    let headers =
+      Cohttp.Header.init_with
+        "content-type"
+        (if is_probe then "application/json" else "text/event-stream")
+    in
     Cohttp_eio.Server.respond_string ~headers ~status:`OK ~body:response ()
   in
   let socket =
@@ -237,7 +313,9 @@ let start_delayed_mock ~sw ~net ~clock ~port ~delay_s response =
   let server = Cohttp_eio.Server.make ~callback:handler () in
   Eio.Fiber.fork_daemon ~sw (fun () ->
     Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
-  Printf.sprintf "http://127.0.0.1:%d" port, fun () -> Atomic.get calls
+  (* Avoid the loopback timeout floor so this fixture exercises the explicit
+     per-provider timeout path. *)
+  Printf.sprintf "http://0.0.0.0:%d" port, fun () -> Atomic.get calls
 
 let rec find_repo_root dir =
   if Sys.file_exists (Filename.concat dir "dune-project") then
@@ -686,7 +764,7 @@ let test_pre_dispatch_terminal_observation_emits_manifest_rows () =
         (json_int_member "turn_count" receipt_json);
       Alcotest.(check (option string))
         "receipt outcome"
-        (Some "skipped")
+        (Some "receipt_skipped")
         (json_string_member_opt "outcome" receipt_json);
       Alcotest.(check (option string))
         "receipt terminal reason"
@@ -1504,9 +1582,9 @@ let test_successful_provider_turn_links_runtime_artifacts () =
       let base_url, request_count =
         start_multi_mock ~sw ~net ~port
           [
-            openai_tool_call_response ~tool_name:"keeper_tool_search"
+            openai_tool_call_response ~tool_name:"keeper_board_post"
               ~arguments:
-                {|{"query":"context","max_results":1}|};
+                {|{"content":"runtime manifest fixture progress","hearth":"test"}|};
             openai_text_response "context checked; runtime artifacts should persist.";
           ]
       in
@@ -1552,7 +1630,7 @@ let test_successful_provider_turn_links_runtime_artifacts () =
               ~base_dir:session_base_dir
               ~max_context:16_000
               ~build_turn_prompt
-              ~user_message:"Call keeper_tool_search once, then answer."
+              ~user_message:"Call keeper_board_post once, then answer."
               ~cascade_name:
                 (Masc_mcp.Keeper_cascade_profile.runtime_name_of_string
                    cascade_name)
@@ -1573,9 +1651,9 @@ let test_successful_provider_turn_links_runtime_artifacts () =
           in
           Alcotest.(check int) "provider calls" 2 (request_count ());
           Alcotest.(check bool)
-            "keeper_tool_search used"
+            "keeper_board_post used"
             true
-            (List.mem "keeper_tool_search" result.tools_used);
+            (List.mem "keeper_board_post" result.tools_used);
           let latest_tool =
             Masc_mcp.Keeper_tool_call_log.read_latest
               ~keeper_name:meta.name ()
@@ -1583,7 +1661,7 @@ let test_successful_provider_turn_links_runtime_artifacts () =
           let latest_tool = require_some "latest tool-call log" latest_tool in
           Alcotest.(check string)
             "latest tool name"
-            "keeper_tool_search"
+            "keeper_board_post"
             Yojson.Safe.Util.(latest_tool |> member "tool" |> to_string);
           Alcotest.(check int)
             "tool-call log uses keeper turn id"
@@ -2150,6 +2228,10 @@ let test_wired_manifest_sites () =
           "Keeper_cascade_engine.guard_keeper_hot_path";
           "cascade_engine;";
           "Keeper_cascade_engine.manifest_fields";
+          "client_capacity_full_decision";
+          "client_capacity_full";
+          "provider_attempt_started";
+          "Keeper_runtime_manifest.Pre_dispatch_blocked";
           "Keeper_runtime_manifest.Provider_attempt_started";
           "Keeper_runtime_manifest.Provider_attempt_finished";
         ] );
@@ -2174,7 +2256,7 @@ let test_wired_manifest_sites () =
         ]
       );
       ( "lib/server/server_dashboard_http_keeper_api.ml",
-        [ "keeper_runtime_trace_json"; "/runtime-trace" ] );
+        [ "keeper_runtime_trace_json"; "keeper_suffix_runtime_trace" ] );
       ( "bin/masc_trace.ml",
         [
           "runtime-manifests";

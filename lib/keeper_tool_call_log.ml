@@ -347,18 +347,36 @@ let blob_aware_output_json (output : string) : Yojson.Safe.t =
 ;;
 
 let semantic_outcome_of_output ~success output =
+  let semantic_status_outcome = function
+    | "ok" -> Some (true, "success")
+    | "no_match" -> Some (true, "no_match")
+    | "partial" -> Some (false, "partial")
+    | "blocked" -> Some (false, "blocked")
+    | "timeout" -> Some (false, "timeout")
+    | "runtime_error" -> Some (false, "runtime_error")
+    | _ -> None
+  in
   match parse_tool_output_json_sanitized output with
   | Ok json ->
     let ok_field = Safe_ops.json_bool_opt "ok" json in
     let error_field = Safe_ops.json_string_opt "error" json |> Option.map String.trim in
+    let semantic_status =
+      Safe_ops.json_string_opt "semantic_status" json
+      |> Option.map String.trim
+    in
     (match error_field with
      | Some "tool_not_allowed" -> false, "policy_denied"
-     | Some error when error <> "" -> false, "structured_error"
      | _ ->
-       (match ok_field with
-        | Some false -> false, "structured_error"
-        | Some true -> success, if success then "success" else "tool_failure"
-        | None -> if success then true, "success" else false, "tool_failure"))
+       (match Option.bind semantic_status semantic_status_outcome with
+        | Some outcome -> outcome
+        | None ->
+          (match error_field with
+           | Some error when error <> "" -> false, "structured_error"
+           | _ ->
+             (match ok_field with
+              | Some false -> false, "structured_error"
+              | Some true -> true, "success"
+              | None -> if success then true, "success" else false, "tool_failure"))))
   | Error _ -> if success then true, "success" else false, "tool_failure"
 ;;
 

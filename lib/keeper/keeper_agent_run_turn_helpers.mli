@@ -81,3 +81,15 @@ val turn_progress_callbacks :
   * (unit -> unit) option
   * (unit -> unit) option
   * (Agent_sdk.Types.sse_event -> unit) option
+
+val record_wake_payload_if_enabled :
+  meta:Keeper_types.keeper_meta ->
+  trace_id:string ->
+  start_turn_count:int ->
+  max_context:int ->
+  pre_dispatch_compacted:bool ->
+  turn_system_prompt:string ->
+  tools:Agent_sdk.Tool.t list ->
+  history_messages:Agent_sdk.Types.message list ->
+  user_message:string ->
+  unit

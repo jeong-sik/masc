@@ -108,7 +108,7 @@ let launch_supervised_fiber
       ; payload = "Keeper bootstrap signal"
       }
     in
-    Keeper_registry.enqueue_event ~base_path meta.name bootstrap_signal;
+    Keeper_registry_event_queue.enqueue ~base_path meta.name bootstrap_signal;
     (* RFC-0059 PR-7-pilot originally routed the whole keepalive body through
        a Domain_pool worker.  Live recovery proved that unsafe: the body is
        an Eio fiber loop that uses the server switch, clock, turn timeouts, and

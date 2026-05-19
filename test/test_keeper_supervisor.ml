@@ -2123,7 +2123,7 @@ let () =
                 check bool "alive-but-stuck threshold exported" true
                   (threshold_seconds > 0.0);
                 let queue =
-                  Reg.event_queue_snapshot ~base_path:config.base_path name
+                  Masc_mcp.Keeper_registry_event_queue.snapshot ~base_path:config.base_path name
                 in
                 check int "one recovery stimulus queued" 1
                   (Keeper_event_queue.length queue);
@@ -2202,7 +2202,7 @@ let () =
                 Sup.alive_but_stuck_scan ctx;
                 Sup.alive_but_stuck_scan ctx;
                 let queue =
-                  Reg.event_queue_snapshot ~base_path:config.base_path name
+                  Masc_mcp.Keeper_registry_event_queue.snapshot ~base_path:config.base_path name
                 in
                 check int
                   "dedup window holds queue length to 1 across 3 sweeps"
@@ -2212,7 +2212,7 @@ let () =
                 Sup.alive_but_stuck_reset_for_test ();
                 Sup.alive_but_stuck_scan ctx;
                 let queue2 =
-                  Reg.event_queue_snapshot ~base_path:config.base_path name
+                  Masc_mcp.Keeper_registry_event_queue.snapshot ~base_path:config.base_path name
                 in
                 check int
                   "after dedup reset, the next scan re-queues (now 2 total)"

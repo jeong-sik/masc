@@ -364,7 +364,7 @@ let register
     Keeper_metrics.metric_keeper_event_queue_override
     "RFC-0020 Rule 2 — total times run_smart_heartbeat_gate forced Keeper_heartbeat_smart.Emit. \
      The [reason] label disambiguates the two override paths: [event_queue] = the Event \
-     Layer queue (Keeper_registry.event_queue_snapshot) held an unprocessed stimulus; \
+     Layer queue (Keeper_registry_event_queue.snapshot) held an unprocessed stimulus; \
      [durable_state] = the queue was empty but a durable world-observation signal \
      (#13078) called for a cycle resume before the stale-watchdog deadline. Pairs with \
      masc_keeper_skip_idle_wake_resumed: skip-idle-resumed measures the fiber_wakeup \

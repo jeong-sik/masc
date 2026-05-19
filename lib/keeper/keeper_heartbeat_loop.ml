@@ -512,7 +512,7 @@ let heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events =
      falling back to a single non-board queue dequeue. *)
   let window = Keeper_config.keeper_board_debounce_window_sec () in
   let board_batch =
-    Keeper_registry.drain_board_events
+    Keeper_registry_event_queue.drain_board
       ~window_sec:window
       ~base_path:ctx.config.base_path
       meta_after_triage.name
@@ -521,7 +521,7 @@ let heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events =
     match board_batch with
     | [] ->
       (match
-         Keeper_registry.dequeue_event
+         Keeper_registry_event_queue.dequeue
            ~base_path:ctx.config.base_path
            meta_after_triage.name
        with
@@ -1398,7 +1398,7 @@ let run_smart_heartbeat_gate
   let pending_signal_present =
     lazy
       (let queue =
-         Keeper_registry.event_queue_snapshot
+         Keeper_registry_event_queue.snapshot
            ~base_path:config.base_path
            meta_current.name
        in

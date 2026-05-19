@@ -64,7 +64,7 @@ let queue_recovery ~base_path ~now ~elapsed ~threshold
   then "skipped_not_running"
   else (
     let stimulus = recovery_stimulus ~now ~elapsed ~threshold entry in
-    Keeper_registry.enqueue_event ~base_path entry.name stimulus;
+    Keeper_registry_event_queue.enqueue ~base_path entry.name stimulus;
     Keeper_registry.wakeup ~base_path entry.name;
     "queued")
 ;;

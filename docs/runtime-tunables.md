@@ -149,7 +149,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC` | typed:float | Timeouts | operator | 935 | Productive slot-phase budget (seconds).  PR #13120: when a cascade returns a recoverable error after the keeper has a... |
 | `MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD` | typed:float | unclassified | unclassified | 188 | Daily budget for keeper deliberation (USD). Default: 0.10. Re-readable within the process. Live operator control shou... |
 | `MASC_KEEPER_DOCKER_CONTAINER` | typed:string | unclassified | unclassified | 743 | Docker container name for keeper playground execution. Env: [MASC_KEEPER_DOCKER_CONTAINER]. Default: "keeper-playgrou... |
-| `MASC_KEEPER_DOCKER_PLAYGROUND_ROOT` | typed:string | unclassified | unclassified | 753 | Container-side root under which keeper playground bundles are mounted. Host [<base_path>/.masc/playground/<keeper>/â€... |
+| `MASC_KEEPER_DOCKER_PLAYGROUND_ROOT` | typed:string | unclassified | unclassified | 753 | Container-side root under which keeper playground bundles are mounted. Host [<base_path>/.masc/playground/<keeper>/ï¿½... |
 | `MASC_KEEPER_DOCKER_READ` | typed:bool | unclassified | unclassified | 799 | Legacy RFC-0006 Phase B-2 flag. Docker read routing now follows [sandbox_profile=docker] unconditionally. This getter... |
 | `MASC_KEEPER_ESCALATION_THRESHOLD` | typed:int | unclassified | unclassified | 626 | Number of stale terminations within [termination_window_sec] before escalating to [Stale_termination_storm]. Default: 5. |
 | `MASC_KEEPER_GRPC_MAX_RECONNECT` | typed:int | unclassified | unclassified | 645 | Maximum gRPC reconnect attempts before stopping the heartbeat fiber. Default: 5. Range: [1, 20]. |
@@ -443,10 +443,6 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_UNIFIED_TEMP` | string_literal | n/a | n/a | 165 |  |
 | `MASC_LOCK_WARN_MS` | string_literal | n/a | n/a | 225 |  |
 | `MASC_MAX_WRITE_SIZE_BYTES` | string_literal | n/a | n/a | 825 |  |
-| `MASC_NAMESPACE_TRUTH_COLD_SAFETY_MARGIN_S` | string_literal | n/a | n/a | 273 |  |
-| `MASC_NAMESPACE_TRUTH_COLD_TIMEOUT_S` | string_literal | n/a | n/a | 271 |  |
-| `MASC_NAMESPACE_TRUTH_SHELL_FIBER_TIMEOUT_S` | string_literal | n/a | n/a | 275 |  |
-| `MASC_NAMESPACE_TRUTH_WARM_TIMEOUT_S` | string_literal | n/a | n/a | 277 |  |
 | `MASC_OTEL_ENABLED` | string_literal | n/a | n/a | 785 |  |
 | `MASC_PLACEHOLDER_TOOLS_ENABLED` | string_literal | n/a | n/a | 827 |  |
 | `MASC_SEARXNG_URL` | string_literal | n/a | n/a | 839 |  |

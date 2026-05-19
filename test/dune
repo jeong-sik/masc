@@ -802,6 +802,7 @@
   test_autoresearch_knowledge
   test_mcp_server_eio
   test_mcp_server_eio_call_tool
+  test_mcp_server_eio_join_state
   test_code_navigation_eio
   test_backend
   test_room_eio
@@ -1025,6 +1026,7 @@
   test_autoresearch_knowledge
   test_mcp_server_eio
   test_mcp_server_eio_call_tool
+  test_mcp_server_eio_join_state
   test_code_navigation_eio
   test_backend
   test_room_eio

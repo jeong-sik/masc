@@ -705,7 +705,7 @@ let run_turn
                        }
                      ~required_tool_satisfaction:(fun call ->
                        Keeper_tool_disclosure
-                       .required_tool_satisfaction_for_required_names
+                       .required_tool_satisfaction_for_turn
                          ~required_tool_names:acc.tool_surface.required_tool_names
                          call)
                      ~max_turns

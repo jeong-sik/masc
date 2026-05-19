@@ -183,6 +183,18 @@ val required_tool_satisfaction_for_required_names
   -> Agent_sdk.Completion_contract.tool_call
   -> (unit, string) result
 
+(** OAS-level satisfaction callback for keeper turns.
+
+    Generic required-tool gates use OAS to enforce tool presence only; MASC
+    classifies passive-only / no-execution-progress calls after the run, where
+    it can emit a precise receipt without converting the turn into a provider
+    contract error that can durable-pause the keeper. Explicit
+    [required_tool_names] still require the named tool. *)
+val required_tool_satisfaction_for_turn
+  :  required_tool_names:string list
+  -> Agent_sdk.Completion_contract.tool_call
+  -> (unit, string) result
+
 (** Project a tool name to its [tool_progress_class]. *)
 val classify_tool_progress : string -> tool_progress_class
 

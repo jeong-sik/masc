@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { capitalize } from '../../lib/format-string'
 import { Activity, ArrowUpRight, Brain, Code2, GitBranch, MessageSquare } from 'lucide-preact'
 import type { ComponentChildren } from 'preact'
 import {
@@ -121,7 +122,7 @@ function displayLabel(entrypoint: CockpitEntrypoint): string {
   return source
     .split('-')
     .filter(Boolean)
-    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .map(part => capitalize(part))
     .join(' ')
 }
 

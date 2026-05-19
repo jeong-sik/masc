@@ -803,6 +803,8 @@ let full_health_snapshot_mu = Stdlib.Mutex.create ()
 let full_health_snapshot = ref None
 let full_health_refresh_in_flight = ref false
 let full_health_refresh_started_at = ref None
+let full_health_refresh_requested = ref false
+let full_health_refresh_interval_sec = 10.0
 let full_health_refresh_timeout_sec = 5.0
 
 let with_full_health_snapshot_lock f =
@@ -909,6 +911,7 @@ let compute_full_health_snapshot ?(listener = "http/1.1") request =
       error = None;
     }
   with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
       let finished_at = Unix.gettimeofday () in
       let error = Printexc.to_string exn in
@@ -923,16 +926,41 @@ let store_full_health_snapshot snapshot =
   with_full_health_snapshot_lock (fun () ->
       full_health_snapshot := Some snapshot;
       full_health_refresh_in_flight := false;
-      full_health_refresh_started_at := None)
+      full_health_refresh_started_at := None;
+      full_health_refresh_requested := false)
+
+let mark_full_health_snapshot_error exn =
+  let now = Unix.gettimeofday () in
+  let error = Printexc.to_string exn in
+  with_full_health_snapshot_lock (fun () ->
+      full_health_snapshot :=
+        Some
+          {
+            fields = full_health_placeholder_fields ~error ~status:"error" ();
+            computed_at = now;
+            duration_ms = 0;
+            error = Some error;
+          };
+      full_health_refresh_in_flight := false;
+      full_health_refresh_started_at := None;
+      full_health_refresh_requested := false)
+
+let compute_full_health_snapshot_for_refresh ?(listener = "http/1.1") request =
+  with_full_health_snapshot_lock (fun () ->
+      full_health_refresh_in_flight := true;
+      full_health_refresh_started_at := Some (Unix.gettimeofday ());
+      full_health_refresh_requested := false);
+  compute_full_health_snapshot ~listener request
 
 let refresh_full_health_snapshot_sync ?(listener = "http/1.1") request =
-  store_full_health_snapshot (compute_full_health_snapshot ~listener request)
+  compute_full_health_snapshot_for_refresh ~listener request
+  |> store_full_health_snapshot
 
 let snapshot_is_stale ~now snapshot =
   now -. snapshot.computed_at > full_health_snapshot_ttl_sec
 
 let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
-    snapshot =
+    ~refresh_requested snapshot =
   let component_timed_out =
     match (refresh_in_flight, refresh_started_at) with
     | true, Some started_at ->
@@ -963,6 +991,7 @@ let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
       ("duration_ms", duration_ms);
       ("ttl_ms", `Int (int_of_float (full_health_snapshot_ttl_sec *. 1000.)));
       ("refresh_in_flight", `Bool refresh_in_flight);
+      ("refresh_requested", `Bool refresh_requested);
       ( "refresh_started_at_unix",
         match refresh_started_at with
         | Some started_at -> `Float started_at
@@ -973,46 +1002,19 @@ let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
       ("error", error);
     ]
 
-let schedule_full_health_snapshot_refresh ?(listener = "http/1.1") request =
-  let should_start =
-    with_full_health_snapshot_lock (fun () ->
-        if !full_health_refresh_in_flight then false
-        else (
-          full_health_refresh_in_flight := true;
-          full_health_refresh_started_at := Some (Unix.gettimeofday ());
-          true))
-  in
-  if should_start then
-    try
-      ignore
-        (Thread.create
-           (fun () -> refresh_full_health_snapshot_sync ~listener request)
-           ())
-    with
-    | exn ->
-        let error = Printexc.to_string exn in
-        let now = Unix.gettimeofday () in
-        with_full_health_snapshot_lock (fun () ->
-            full_health_snapshot :=
-              Some
-                {
-                  fields = full_health_placeholder_fields ~error ~status:"error" ();
-                  computed_at = now;
-                  duration_ms = 0;
-                  error = Some error;
-                };
-            full_health_refresh_in_flight := false;
-            full_health_refresh_started_at := None)
+let mark_full_health_refresh_requested () =
+  with_full_health_snapshot_lock (fun () -> full_health_refresh_requested := true)
 
 let full_health_snapshot_state () =
   with_full_health_snapshot_lock (fun () ->
       ( !full_health_snapshot,
         !full_health_refresh_in_flight,
-        !full_health_refresh_started_at ))
+        !full_health_refresh_started_at,
+        !full_health_refresh_requested ))
 
 let make_cached_full_health_json ?(listener = "http/1.1") request =
   let now = Unix.gettimeofday () in
-  let snapshot, refresh_in_flight, _refresh_started_at =
+  let snapshot, _refresh_in_flight, _refresh_started_at, _refresh_requested =
     full_health_snapshot_state ()
   in
   let needs_refresh =
@@ -1020,9 +1022,8 @@ let make_cached_full_health_json ?(listener = "http/1.1") request =
     | None -> true
     | Some snapshot -> snapshot_is_stale ~now snapshot
   in
-  if needs_refresh && not refresh_in_flight then
-    schedule_full_health_snapshot_refresh ~listener request;
-  let snapshot, refresh_in_flight, refresh_started_at =
+  if needs_refresh then mark_full_health_refresh_requested ();
+  let snapshot, refresh_in_flight, refresh_started_at, refresh_requested =
     full_health_snapshot_state ()
   in
   let fields =
@@ -1036,15 +1037,34 @@ let make_cached_full_health_json ?(listener = "http/1.1") request =
      @ [
          ( "full_health_snapshot",
            full_health_snapshot_metadata ~now ~refresh_in_flight
-             ~refresh_started_at snapshot );
+             ~refresh_started_at ~refresh_requested snapshot );
        ])
+
+let start_full_health_snapshot_refresh_loop ~sw ~clock =
+  let request = Httpun.Request.create `GET "/health?full=1" in
+  Proactive_refresh.start
+    ~sw
+    ~clock
+    ~config:
+      {
+        (Proactive_refresh.default_config
+           ~label:"full_health_snapshot"
+           ~interval_s:full_health_refresh_interval_sec)
+        with
+        timeout_s = full_health_refresh_timeout_sec;
+        on_error = Some mark_full_health_snapshot_error;
+        warm_delay_s = 0.5;
+      }
+    ~compute:(fun () -> compute_full_health_snapshot_for_refresh request)
+    ~on_result:store_full_health_snapshot
 
 module For_testing = struct
   let reset_full_health_snapshot () =
     with_full_health_snapshot_lock (fun () ->
         full_health_snapshot := None;
         full_health_refresh_in_flight := false;
-        full_health_refresh_started_at := None)
+        full_health_refresh_started_at := None;
+        full_health_refresh_requested := false)
 
   let refresh_full_health_snapshot_now ?(listener = "http/1.1") request =
     refresh_full_health_snapshot_sync ~listener request

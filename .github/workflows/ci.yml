@@ -967,6 +967,9 @@ jobs:
       - name: Run OAS boundary ratchet
         run: scripts/oas-boundary-ratchet.sh
 
+      - name: Run silent-failure ratchet
+        run: scripts/silent-failure-ratchet.sh
+
   keeper-cwd-leak-gate:
     name: Keeper Cwd Leak Gate
     runs-on: ubuntu-latest

@@ -18,6 +18,28 @@ type parse_error =
 let error path message = [ { path; message } ]
 let add_errors acc more = acc @ more
 
+(* Partition a list of per-entry parse results into a single
+   collected result. Either every entry parsed (return [Ok all]),
+   or at least one entry failed (return [Error] with every error
+   concatenated). Removes the historical two-pass pattern where the
+   success branch carried a dead [Error _ -> None] arm guarded by a
+   prior [if errs <> []]: with this helper the dead arm cannot be
+   written, so a future caller cannot accidentally re-introduce a
+   silent drop. *)
+let partition_results
+  (results : ('a, parse_error list) result list)
+  : ('a list, parse_error list) result
+  =
+  let oks, errs =
+    List.partition_map
+      (function
+        | Ok x -> Either.Left x
+        | Error e -> Either.Right e)
+      results
+  in
+  if errs <> [] then Error (List.concat errs) else Ok oks
+;;
+
 (* --- Protocol string -> cascade_api_format --- *)
 
 let api_format_of_protocol (s : string) : (cascade_api_format, string) result =
@@ -328,23 +350,8 @@ let parse_providers (toml : Otoml.t) : (cascade_provider list, parse_error list)
   | None -> Ok []
   | Some providers_tbl ->
     let entries = Otoml.get_table providers_tbl in
-    let results = List.map (fun (id, tbl) -> parse_provider id tbl) entries in
-    let errs =
-      List.filter_map
-        (function
-          | Error e -> Some e
-          | Ok _ -> None)
-        results
-    in
-    if errs <> []
-    then Error (List.concat errs)
-    else
-      Ok
-        (List.filter_map
-           (function
-             | Ok p -> Some p
-             | Error _ -> None)
-           results)
+    partition_results
+      (List.map (fun (id, tbl) -> parse_provider id tbl) entries)
 ;;
 
 (* --- Layer 2: Models --- *)
@@ -495,23 +502,8 @@ let parse_models (toml : Otoml.t) : (cascade_model_spec list, parse_error list) 
   | None -> Ok []
   | Some models_tbl ->
     let entries = Otoml.get_table models_tbl in
-    let results = List.map (fun (id, tbl) -> parse_model id tbl) entries in
-    let errs =
-      List.filter_map
-        (function
-          | Error e -> Some e
-          | Ok _ -> None)
-        results
-    in
-    if errs <> []
-    then Error (List.concat errs)
-    else
-      Ok
-        (List.filter_map
-           (function
-             | Ok m -> Some m
-             | Error _ -> None)
-           results)
+    partition_results
+      (List.map (fun (id, tbl) -> parse_model id tbl) entries)
 ;;
 
 (* --- Reserved namespace detection --- *)
@@ -753,23 +745,8 @@ let parse_tiers (toml : Otoml.t) : (cascade_tier list, parse_error list) result 
   | None -> Ok []
   | Some tier_tbl ->
     let entries = Otoml.get_table tier_tbl in
-    let results = List.map (fun (name, tbl) -> parse_tier name tbl) entries in
-    let errs =
-      List.filter_map
-        (function
-          | Error e -> Some e
-          | Ok _ -> None)
-        results
-    in
-    if errs <> []
-    then Error (List.concat errs)
-    else
-      Ok
-        (List.filter_map
-           (function
-             | Ok t -> Some t
-             | Error _ -> None)
-           results)
+    partition_results
+      (List.map (fun (name, tbl) -> parse_tier name tbl) entries)
 ;;
 
 (* --- Layer 5b: Tier Groups --- *)
@@ -803,23 +780,8 @@ let parse_tier_groups (toml : Otoml.t)
   | None -> Ok []
   | Some tg_tbl ->
     let entries = Otoml.get_table tg_tbl in
-    let results = List.map (fun (name, tbl) -> parse_tier_group name tbl) entries in
-    let errs =
-      List.filter_map
-        (function
-          | Error e -> Some e
-          | Ok _ -> None)
-        results
-    in
-    if errs <> []
-    then Error (List.concat errs)
-    else
-      Ok
-        (List.filter_map
-           (function
-             | Ok g -> Some g
-             | Error _ -> None)
-           results)
+    partition_results
+      (List.map (fun (name, tbl) -> parse_tier_group name tbl) entries)
 ;;
 
 (* --- Layer 5c: Routes --- *)
@@ -861,9 +823,25 @@ let parse_system_targets (toml : Otoml.t) : cascade_route list =
 
 (* --- Top-level parse --- *)
 
+(* Extract the [Ok] payload from a parse result that the caller has
+   just proven via the [!all_errors = []] guard. The [Error _] branch
+   is statically unreachable; reaching it indicates a refactor has
+   desynchronized [collect ...] from the extraction site. Crash with
+   [invalid_arg] rather than silently substituting an empty list,
+   which would mask a corrupt cascade.toml. *)
+let extract_after_all_errors_guard ~label = function
+  | Ok x -> x
+  | Error _ ->
+    invalid_arg
+      (Printf.sprintf
+         "cascade_declarative_parser.parse_toml: %s — guarded \
+          extraction reached Error branch; collect/extract desync"
+         label)
+;;
+
 let parse_toml (toml : Otoml.t) : (cascade_config, parse_error list) result =
   let all_errors = ref [] in
-  let collect name = function
+  let collect = function
     | Ok _ -> ()
     | Error errs -> all_errors := !all_errors @ errs
   in
@@ -871,10 +849,10 @@ let parse_toml (toml : Otoml.t) : (cascade_config, parse_error list) result =
   let models_result = parse_models toml in
   let tiers_result = parse_tiers toml in
   let tier_groups_result = parse_tier_groups toml in
-  collect "providers" providers_result;
-  collect "models" models_result;
-  collect "tiers" tiers_result;
-  collect "tier_groups" tier_groups_result;
+  collect providers_result;
+  collect models_result;
+  collect tiers_result;
+  collect tier_groups_result;
   let bindings, aliases = parse_bindings_and_aliases toml in
   let routes = parse_routes toml in
   let system_targets = parse_system_targets toml in
@@ -882,24 +860,12 @@ let parse_toml (toml : Otoml.t) : (cascade_config, parse_error list) result =
   then Error !all_errors
   else (
     let providers =
-      match providers_result with
-      | Ok p -> p
-      | Error _ -> []
+      extract_after_all_errors_guard ~label:"providers" providers_result
     in
-    let models =
-      match models_result with
-      | Ok m -> m
-      | Error _ -> []
-    in
-    let tiers =
-      match tiers_result with
-      | Ok t -> t
-      | Error _ -> []
-    in
+    let models = extract_after_all_errors_guard ~label:"models" models_result in
+    let tiers = extract_after_all_errors_guard ~label:"tiers" tiers_result in
     let tier_groups =
-      match tier_groups_result with
-      | Ok g -> g
-      | Error _ -> []
+      extract_after_all_errors_guard ~label:"tier_groups" tier_groups_result
     in
     Ok
       { providers; models; bindings; aliases; tiers; tier_groups; routes; system_targets })

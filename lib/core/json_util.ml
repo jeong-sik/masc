@@ -155,8 +155,6 @@ let kind_name : Yojson.Safe.t -> string = function
   | `String _ -> "string"
   | `Assoc _ -> "object"
   | `List _ -> "array"
-  | `Tuple _ -> "tuple"
-  | `Variant _ -> "variant"
 
 (** Bounded stringification for diagnostic / log use.  Prefix-truncates
     to [max] characters (default 160) and appends ["..."] when the

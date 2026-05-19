@@ -39,6 +39,8 @@ framework — Docker Desktop's VM backend). Same-day reproduction at
 | 22:02 | ~368K | **75%** | (estimated 350K+) | **+51%p / 18min** |
 | 22:04 | — | — | — | `bash mkdir` returns ENFILE |
 | 22:05 (after user `killall -9 com.apple.Virtualization.VirtualMachine`) | 129,641 | 26% | XPC GONE | −239K recovered |
+| 22:10 (post Docker reboot baseline) | 75,875 | 15% | new XPC pid 37573, 2,778 fds | clean baseline |
+| 22:53 (43 min after baseline, under normal 16-keeper load) | 65,842 | 13% | XPC pid 89896, **55,545 fds** | **+20.5 fds/sec sustained** even with RFC-0097 (PR #15728) deployed |
 
 Single XPC process owned **>90%** of the system FD table immediately
 before the CRIT. FD type breakdown at 21:41:

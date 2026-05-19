@@ -149,6 +149,7 @@ type cascade_exhaustion_reason =
 
 type blocker_class =
   | Cascade_exhausted of cascade_exhaustion_reason
+  | Capacity_exhausted
   | Ambiguous_post_commit_timeout
   | Ambiguous_post_commit_failure
   | Autonomous_slot_wait_timeout

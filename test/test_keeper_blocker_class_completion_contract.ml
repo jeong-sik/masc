@@ -13,6 +13,7 @@
 open Alcotest
 module KT = Masc_mcp.Keeper_types
 module B = Masc_mcp.Keeper_status_bridge
+module Owne = Masc_mcp.Keeper_turn_driver
 
 let check_completion_contract_class label cls_opt =
   match cls_opt with
@@ -23,6 +24,19 @@ let check_completion_contract_class label cls_opt =
               label other_str)
   | None ->
       fail (Printf.sprintf "%s returned None, expected Completion_contract_violation" label)
+
+let check_capacity_class label cls_opt =
+  match cls_opt with
+  | Some KT.Capacity_exhausted -> ()
+  | Some other ->
+      let other_str = KT.blocker_class_to_string other in
+      fail
+        (Printf.sprintf
+           "%s mapped to %s, expected Capacity_exhausted"
+           label
+           other_str)
+  | None ->
+      fail (Printf.sprintf "%s returned None, expected Capacity_exhausted" label)
 
 let test_completion_contract_text_maps () =
   let msg = "Completion contract [require_tool_use] violated: actionable \
@@ -73,6 +87,35 @@ let test_turn_livelock_text_maps () =
       fail ("turn livelock mapped to " ^ KT.blocker_class_to_string other)
   | None -> fail "turn livelock returned None"
 
+let test_capacity_backpressure_text_maps () =
+  check_capacity_class
+    "slot-full text"
+    (B.blocker_class_of_string
+       "Internal error: [masc_oas_error] {\"kind\":\"cascade_exhausted\",\
+        \"reason\":{\"tag\":\"other_detail\",\"message\":\"slot full, cascading \
+        to next provider\"}}")
+
+let test_capacity_backpressure_sdk_error_maps () =
+  let err =
+    Owne.sdk_error_of_masc_internal_error
+      (Owne.Cascade_exhausted
+         {
+           cascade_name = Owne.cascade_name_of_string "strict_tool_candidates";
+           reason = KT.Other_detail "slot full, cascading to next provider";
+         })
+  in
+  check_capacity_class "slot-full structured SDK error"
+    (B.blocker_class_of_sdk_error err)
+
+let test_capacity_backpressure_runtime_surface_maps_legacy_cascade () =
+  let surface =
+    B.runtime_blocker_surface_of_typed_class
+      ~summary:"slot full, cascading to next provider"
+      (KT.Cascade_exhausted (KT.Other_detail "cascade_exhausted"))
+  in
+  check string "runtime blocker class" "capacity_exhausted"
+    surface.blocker_class
+
 let () =
   run "keeper_blocker_class_completion_contract"
     [
@@ -97,5 +140,11 @@ let () =
           test_case "existing turn-timeout mapping unchanged" `Quick
             test_existing_mappings_unchanged;
           test_case "turn livelock text maps" `Quick test_turn_livelock_text_maps;
+          test_case "capacity backpressure text maps" `Quick
+            test_capacity_backpressure_text_maps;
+          test_case "capacity backpressure SDK error maps" `Quick
+            test_capacity_backpressure_sdk_error_maps;
+          test_case "capacity backpressure runtime surface maps legacy cascade" `Quick
+            test_capacity_backpressure_runtime_surface_maps_legacy_cascade;
         ] );
     ]

@@ -240,7 +240,12 @@ let effective_autoboot_enabled name (meta : Keeper_types.keeper_meta) =
 
 let blocker_class_string (info : Keeper_types.blocker_info option) =
   match info with
-  | Some info -> Some (Keeper_types.blocker_class_to_string info.klass)
+  | Some info ->
+      let surface =
+        Keeper_status_bridge.runtime_blocker_surface_of_typed_class
+          ~summary:info.detail info.klass
+      in
+      Some surface.blocker_class
   | None -> None
 
 let blocker_detail (info : Keeper_types.blocker_info option) =

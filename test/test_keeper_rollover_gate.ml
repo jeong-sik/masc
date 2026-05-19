@@ -41,6 +41,7 @@ let non_overflow_classes_are_not_matched () =
     KT.Cascade_exhausted KT.No_providers_available;
     KT.Cascade_exhausted KT.All_providers_failed;
     KT.Cascade_exhausted KT.Max_turns_exceeded;
+    KT.Capacity_exhausted;
     KT.Ambiguous_post_commit_timeout;
     KT.Ambiguous_post_commit_failure;
     KT.Autonomous_slot_wait_timeout;

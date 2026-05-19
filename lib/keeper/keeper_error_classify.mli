@@ -24,6 +24,10 @@ val is_server_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
     by returning text/no-op where a ToolUse block was required. *)
 val is_required_tool_contract_violation : Agent_sdk.Error.sdk_error -> bool
 
+(** [true] when free-form provider/cascade detail text carries a capacity
+    backpressure signal such as provider slot exhaustion. *)
+val message_looks_like_capacity_backpressure : string -> bool
+
 (** [true] when the keeper should preserve liveness and skip consecutive
     failure counting, even if same-turn retry is still disabled. *)
 val is_auto_recoverable_turn_error : Agent_sdk.Error.sdk_error -> bool

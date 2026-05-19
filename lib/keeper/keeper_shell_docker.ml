@@ -116,7 +116,7 @@ let record_docker_exec_failure
       ~output
       ()
   in
-  Keeper_registry.record_error ?details ~base_path:config.base_path meta.name message
+  Keeper_registry_error_recording.record ?details ~base_path:config.base_path meta.name message
 ;;
 
 let path_exists path =
@@ -1029,7 +1029,7 @@ let run_docker_shell_command_with_status_internal
     | _ -> Env_config_keeper.KeeperSandbox.docker_image ()
   in
   let sandbox_error ?details message =
-    Keeper_registry.record_error ?details ~base_path:config.base_path meta.name message;
+    Keeper_registry_error_recording.record ?details ~base_path:config.base_path meta.name message;
     Error message
   in
   if String.trim image = ""
@@ -1393,7 +1393,7 @@ let run_docker_with_git_bash
     | _ -> Env_config_keeper.KeeperSandbox.docker_image ()
   in
   let sandbox_error_json message =
-    Keeper_registry.record_error ~base_path:config.base_path meta.name message;
+    Keeper_registry_error_recording.record ~base_path:config.base_path meta.name message;
     error_json message
   in
   if String.trim image = ""
@@ -1489,7 +1489,7 @@ let run_docker_hardened_bash
     | _ -> Env_config_keeper.KeeperSandbox.docker_image ()
   in
   let sandbox_error_json message =
-    Keeper_registry.record_error ~base_path:config.base_path meta.name message;
+    Keeper_registry_error_recording.record ~base_path:config.base_path meta.name message;
     error_json message
   in
   if String.trim image = ""

@@ -355,7 +355,7 @@ let launch_supervised_fiber
                ~ts
                ~reason
                ~restart_count:rc;
-             Keeper_registry.record_error ~base_path meta.name reason;
+             Keeper_registry_error_recording.record ~base_path meta.name reason;
              if resolve_done (`Crashed reason)
              then
                publish_phase_lifecycle
@@ -465,7 +465,7 @@ let launch_supervised_fiber
                   ~ts
                   ~reason
                   ~restart_count:rc;
-                Keeper_registry.record_error ~base_path meta.name reason;
+                Keeper_registry_error_recording.record ~base_path meta.name reason;
 	                Keeper_registry.dispatch_event_unit
 	                  ~base_path
 	                  meta.name
@@ -1416,7 +1416,7 @@ let sweep_and_recover (ctx : _ context) =
 	           (Keeper_state_machine.Fiber_terminated { outcome; provider_id = None; http_status = None }));
       let ts = Time_compat.now () in
       Keeper_registry.record_crash ~base_path entry.name ts msg;
-      Keeper_registry.record_error ~base_path entry.name msg;
+      Keeper_registry_error_recording.record ~base_path entry.name msg;
       match Keeper_registry.get ~base_path entry.name with
       | Some updated -> queue_crashed_entry updated msg
       | None -> ())

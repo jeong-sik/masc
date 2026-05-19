@@ -14,7 +14,7 @@ function makeEvent(
     attribution: {
       origin: overrides.origin ?? 'det',
       gate: overrides.gate ?? 'cdal_verdict',
-      evidence: null,
+      evidence: {},
       outcome: overrides.outcome ?? { kind: 'passed' },
     },
     recorded_at: overrides.recorded_at ?? 1_700_000_000,

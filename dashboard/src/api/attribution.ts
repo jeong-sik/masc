@@ -6,21 +6,14 @@
 // the dashboard is the only consumer.
 
 import { get, type GetOptions } from './core'
+import {
+  type AttributionOrigin,
+  type AttributionOutcome,
+  type Attribution as SseAttribution,
+} from '../types/sse'
 
-export type AttributionOrigin = 'det' | 'nondet'
-
-export type AttributionOutcome =
-  | { kind: 'passed' }
-  | { kind: 'policy_failed'; reason: string }
-  | { kind: 'transition_blocked'; from_state: string; to_state: string; reason: string }
-  | { kind: 'partial_pass'; score: number; rationale: string }
-
-export interface Attribution {
-  origin: AttributionOrigin
-  gate: string
-  evidence: unknown
-  outcome: AttributionOutcome
-}
+export type { AttributionOrigin, AttributionOutcome }
+export type Attribution = SseAttribution
 
 export interface AttributionEvent {
   attribution: Attribution

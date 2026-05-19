@@ -68,6 +68,46 @@ if [ -n "$stale" ]; then
   status=1
 fi
 
+# Line-drift suggestions.  When a file appears in BOTH new and stale with
+# matching counts (1:1 most often), the only thing that changed is line
+# numbers — usually caused by godfile splits shrinking a file with a
+# spawn site.  This is the recurring false-positive that blocks
+# unrelated PRs on the spawn-bounded ratchet.  Print a copy-pasteable
+# replacement so the next agent / human can refresh the allowlist
+# without re-reading every spawn site.
+if [ -n "$new" ] && [ -n "$stale" ]; then
+  drifted_paths=$(
+    comm -12 \
+      <(echo "$stale" | awk -F: '{print $1}' | sort -u) \
+      <(echo "$new"   | awk -F: '{print $1}' | sort -u)
+  )
+  if [ -n "$drifted_paths" ]; then
+    echo >&2
+    echo "lint-spawn-bounded: line-drift suggestions (same file, line moved):" >&2
+    while IFS= read -r drifted_path; do
+      [ -z "$drifted_path" ] && continue
+      stale_for_path=$(echo "$stale" | awk -F: -v p="$drifted_path" '$1==p {print}')
+      new_for_path=$(echo "$new"   | awk -F: -v p="$drifted_path" '$1==p {print}')
+      stale_count=$(printf '%s\n' "$stale_for_path" | grep -c .)
+      new_count=$(printf '%s\n' "$new_for_path" | grep -c .)
+      if [ "$stale_count" = "$new_count" ]; then
+        echo "  $drifted_path: $stale_count entry/entries moved" >&2
+        # Pair in input order — ratchet has no semantic info to do
+        # better, so 1:1 is the only safe inference.  When count > 1
+        # the operator should still review each pair.
+        paste <(printf '%s\n' "$stale_for_path") <(printf '%s\n' "$new_for_path") \
+          | while IFS=$'\t' read -r s n; do
+              echo "    replace  $s" >&2
+              echo "    with     $n" >&2
+              echo "    (also update the matching '# $s — ...' comment in scripts/lint-spawn-bounded.allowlist)" >&2
+            done
+      else
+        echo "  $drifted_path: $stale_count stale vs $new_count new — counts differ, review manually" >&2
+      fi
+    done <<< "$drifted_paths"
+  fi
+fi
+
 if [ $status -eq 0 ]; then
   count=$(echo "$discovered" | wc -l | tr -d ' ')
   echo "lint-spawn-bounded: PASS ($count spawn site(s), all in allowlist)"

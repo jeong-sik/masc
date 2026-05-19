@@ -360,6 +360,144 @@ export function trustDispositionLabel(value: string | null | undefined): string 
   return TRUST_DISPOSITION_LABELS[value] ?? value
 }
 
+/** Discriminated verdict for the keeper detail alert strip.
+ *
+ *  The strip previously rendered `trustSummary` (the disposition reason
+ *  / attention reason / mutation guard summary, joined via `||`) and
+ *  `runtime_proof_status` (the tool contract result) as two sibling
+ *  spans labelled "검증" and "증명". The two fields are independent on
+ *  the wire — a keeper can simultaneously surface
+ *  `attention_reason = timeout_budget_exhausted` (verdict failure) and
+ *  `tool_contract_result = satisfied_execution` (tools that *were*
+ *  called fulfilled their contract). With sibling rendering this
+ *  appeared as "검증 · timeout_budget_exhausted" *and* "증명 ·
+ *  satisfied_execution" at the same time, which an operator reads as
+ *  the surface contradicting itself.
+ *
+ *  This union collapses the two facets into a single typed verdict
+ *  with explicit kind precedence (`failed > pending > verified >
+ *  no_verdict`) and renders the tool contract as scope-tagged
+ *  evidence ("도구 계약") rather than a sibling "증명" claim. The
+ *  rendering site uses an exhaustive switch over `kind` so adding a
+ *  new arm in the future fails the build instead of silently
+ *  reintroducing the `||` fallthrough. */
+export type KeeperVerdict =
+  | {
+      kind: 'failed'
+      reasonLabel: string
+      toolContract: { code: string; label: string } | null
+    }
+  | {
+      kind: 'pending'
+      reasonLabel: string | null
+      toolContract: { code: string; label: string } | null
+    }
+  | {
+      kind: 'verified'
+      reasonLabel: string | null
+      toolContract: { code: string; label: string } | null
+    }
+  | {
+      kind: 'no_verdict'
+      toolContract: { code: string; label: string } | null
+    }
+
+/** Trust disposition values that imply a failed verdict. The backend
+ *  closed-sum is Alert | Blocked | Pause | Pass (see
+ *  `TRUST_DISPOSITION_LABELS`). Alert and Blocked are unambiguous
+ *  failures; Pause is treated as failure for verdict purposes because
+ *  the keeper has stopped pending operator action. Pass is the only
+ *  positive verdict. */
+const FAILED_TRUST_DISPOSITIONS = new Set<string>(['Alert', 'Blocked', 'Pause'])
+
+/** Compute the verdict from independent trust fields with explicit
+ *  precedence. Inputs intentionally mirror the call site so the
+ *  helper has no implicit dependency on the wider `Keeper` shape. */
+export function computeKeeperVerdict(input: {
+  trustDisposition: string | null
+  trustSummary: string | null
+  toolContractResult: string | null
+}): KeeperVerdict {
+  const toolContractCode = input.toolContractResult?.trim() || null
+  const toolContract = toolContractCode
+    ? {
+        code: toolContractCode,
+        label: toolContractLabel(toolContractCode) ?? toolContractCode,
+      }
+    : null
+  const trustDisposition = input.trustDisposition?.trim() || null
+  const trustSummary = input.trustSummary?.trim() || null
+
+  if (trustDisposition && FAILED_TRUST_DISPOSITIONS.has(trustDisposition)) {
+    return {
+      kind: 'failed',
+      reasonLabel: trustSummary ?? (trustDispositionLabel(trustDisposition) ?? trustDisposition),
+      toolContract,
+    }
+  }
+  if (trustDisposition === 'Pass') {
+    return { kind: 'verified', reasonLabel: trustSummary, toolContract }
+  }
+  if (trustSummary) {
+    // Disposition unknown, but the trust subsystem already surfaced a
+    // human-readable summary — treat as pending rather than verified
+    // so the operator does not see a green check while the FSM is
+    // still settling.
+    return { kind: 'pending', reasonLabel: trustSummary, toolContract }
+  }
+  return { kind: 'no_verdict', toolContract }
+}
+
+/** Scope tag for cascade-outcome rendering.
+ *
+ *  `cascade_outcome` is emitted per-provider-attempt (the last hop in
+ *  a cascade ladder), while `stop_cause` is emitted per-turn (the
+ *  terminal verdict for the whole turn budget). Rendering the
+ *  per-attempt success under the generic "런타임 레인" label next to
+ *  a per-turn failure such as `oas_timeout_budget` reads as a
+ *  contradiction.
+ *
+ *  We tag the observation with an explicit scope (`attempt`) and gate
+ *  the render when the per-turn stop cause classifies the turn as a
+ *  terminal failure — the attempt-level success is still preserved
+ *  inside the stop-cause line via the `code · summary` columns, just
+ *  not re-rendered as a competing top-level lane. */
+export type CascadeAttemptScope = 'attempt' | 'turn'
+
+export interface CascadeAttemptObservation {
+  scope: CascadeAttemptScope
+  outcome: string | null
+  attempts: number | null
+  fallbackApplied: boolean
+}
+
+/** Stop-cause codes that classify the turn as a terminal failure. When
+ *  the turn is terminal-failed at the per-turn scope, a per-attempt
+ *  `completed` outcome must not be rendered as a co-equal "런타임
+ *  레인" badge — that is the second contradiction the strip used to
+ *  surface. The list is derived from the runtime_blocker_class /
+ *  terminal_reason_code closed-sums actually observed in
+ *  `lib/keeper/keeper_status_bridge.ml` and
+ *  `lib/keeper/keeper_runtime_trust_snapshot.ml`. Unknown codes do
+ *  not gate (fail open: operator still sees the attempt outcome). */
+const TURN_TERMINAL_FAILURE_CODES = new Set<string>([
+  'oas_timeout_budget',
+  'oas_timeout_budget_loop',
+  'turn_timeout',
+  'cascade_exhausted',
+  'heartbeat_consecutive_failures',
+  'turn_consecutive_failures',
+  'tool_required_unsatisfied',
+  'provider_runtime_error',
+  'fiber_unresolved',
+  'stale_turn_timeout',
+])
+
+export function isTurnTerminalFailureCode(code: string | null | undefined): boolean {
+  if (!code) return false
+  return TURN_TERMINAL_FAILURE_CODES.has(code)
+}
+
 
 /** Korean labels for `execution.tool_contract_result`. Backend emits 11
  *  closed-sum values via `Keeper_execution_receipt.tool_contract_result_to_string`

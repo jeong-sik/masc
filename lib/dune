@@ -210,6 +210,7 @@
   cascade_agent_context
   cascade_health_tracker_config
   cascade_metrics_registry
+  cascade_transport_cli_config
   keeper_oas_checkpoint
   keeper_cascade_engine
   keeper_turn_driver

@@ -181,6 +181,10 @@ module Limits : sig
   val author_post_cap : int
   val max_sub_boards : int
   (** Maximum number of sub-boards. Default 256. *)
+  val comment_rate_limit : int
+  (** Max comments per author within [comment_rate_window_sec]. 0 = disabled. Default 30. *)
+  val comment_rate_window_sec : int
+  (** Sliding window duration in seconds. Default 300 (5 min). *)
 end
 
 (** {1 Vote Direction} *)

@@ -1,7 +1,7 @@
 // Live Monitor tab — derived signals and filter state
 
 import { signal, computed, type ReadonlySignal } from '@preact/signals'
-import { isOfflineStatus } from './lib/status-utils'
+import { isAgentActive, isAgentOffline, isAgentPresent } from './lib/agent-status'
 import type { JournalEntry } from './types'
 import type { PipelineStage } from './types/core'
 import type { AuditEntry } from './api/dashboard'
@@ -73,7 +73,7 @@ export const agentPulses: ReadonlySignal<AgentPulse[]> = computed(() => {
     const motion = motionMap.get(key) ?? null
 
     let state: PulseState = 'idle'
-    if (agent.status === 'active' || agent.status === 'busy') {
+    if (isAgentActive(agent)) {
       const lastAt = motion?.lastActivityAt
       if (lastAt) {
         const elapsed = now - new Date(lastAt).getTime()
@@ -81,7 +81,7 @@ export const agentPulses: ReadonlySignal<AgentPulse[]> = computed(() => {
       } else {
         state = 'working'
       }
-    } else if (isOfflineStatus(agent.status)) {
+    } else if (isAgentOffline(agent)) {
       state = 'stale'
     }
 
@@ -113,12 +113,7 @@ export const focusAgents: ReadonlySignal<FocusAgent[]> = computed(() => {
   const motionMap = agentMotionMap.value
 
   return agents.value
-    .filter(a =>
-      a.status === 'active'
-      || a.status === 'busy'
-      || a.status === 'listening'
-      || a.status === 'idle',
-    )
+    .filter(a => isAgentPresent(a))
     .map(agent => {
       const key = agent.name.trim().toLowerCase()
       const motion = motionMap.get(key)

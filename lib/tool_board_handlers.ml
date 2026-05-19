@@ -147,10 +147,7 @@ let handle_vote ~tool_name ~start_time args =
          ~start_time
          "Already voted (idempotent). Score unchanged.")
   | Error e ->
-    Tool_result.error
-      ~tool_name
-      ~start_time
-      (Printf.sprintf "%s" (Tool_board_format.board_error_to_string e))
+    Tool_board_format.error_of_board_error ~tool_name ~start_time e
 ;;
 
 let handle_stats ~tool_name ~start_time _args =
@@ -216,10 +213,7 @@ let handle_comment_vote ~tool_name ~start_time args =
            "%s Already voted (idempotent)."
            (if String.equal direction_str "down" then "👎" else "👍"))
     | Error e ->
-      Tool_result.error
-        ~tool_name
-        ~start_time
-        (Printf.sprintf "%s" (Tool_board_format.board_error_to_string e)))
+      Tool_board_format.error_of_board_error ~tool_name ~start_time e)
 ;;
 
 let handle_reaction ~tool_name ~start_time args =
@@ -244,10 +238,7 @@ let handle_reaction ~tool_name ~start_time args =
           ~start_time
           (Yojson.Safe.pretty_to_string (Board.reaction_toggle_result_to_yojson result))
       | Error e ->
-        Tool_result.error
-          ~tool_name
-          ~start_time
-          (Printf.sprintf "%s" (Tool_board_format.board_error_to_string e)))
+        Tool_board_format.error_of_board_error ~tool_name ~start_time e)
 ;;
 
 (** Agent profile. *)

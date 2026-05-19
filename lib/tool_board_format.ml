@@ -95,6 +95,20 @@ let board_error_to_string = function
   | Board.Already_exists s -> Printf.sprintf "Already exists: %s" s
 ;;
 
+let board_error_failure_class = function
+  | Board.Post_not_found _ | Board.Comment_not_found _ ->
+    Some Tool_result.Workflow_rejection
+  | _ -> None
+;;
+
+let error_of_board_error ~tool_name ~start_time e =
+  Tool_result.error
+    ~failure_class:(board_error_failure_class e)
+    ~tool_name
+    ~start_time
+    (board_error_to_string e)
+;;
+
 let visibility_of_string = Board.visibility_of_string
 
 (** {1 Formatters} *)

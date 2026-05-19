@@ -198,6 +198,7 @@
   provider_runtime_projection
   voice_bridge_transport
   cascade_wire_overlay
+  cascade_event_bridge_inference
   cascade_http_probe_url
   cascade_agent_context
   cascade_health_tracker_config
@@ -250,6 +251,7 @@
   keeper_memory_llm_summary
   keeper_memory_recall
   keeper_status_bridge
+  keeper_runtime_trust_timeline
   keeper_hooks_oas_gate_attempt
   keeper_hooks_oas_output_json
   keeper_hooks_oas_response_metrics
@@ -422,7 +424,8 @@
    masc_mcp.dashboard_eval_feed
    ;; RFC-0004 Phase A0.1 PR-1 — Typed SSE event lib (lib/sse_event/).
    ;; atdgen-generated payload types + hand-rolled envelope wrap that
-   ;; mirrors cascade_event_bridge.wrap_event/json_string_opt
+   ;; mirrors cascade_event_bridge.wrap_event and
+   ;; cascade_event_bridge_inference.json_string_opt
    ;; semantics.  PR-2 onwards: cascade_event_bridge arms call into
    ;; Sse_event.<event>_constructor instead of inline `Assoc.
    masc_mcp.sse_event

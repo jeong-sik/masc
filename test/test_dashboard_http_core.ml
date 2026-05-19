@@ -719,6 +719,83 @@ let test_dashboard_message_json_surfaces_temporal_decay_fields () =
   check string "relevance" "critical"
     (json |> member "relevance" |> to_string)
 
+(* RFC-0138 Phase 3 Step 1 — /shell snapshot wire tests.
+
+   These exercise [Server_dashboard_shell_snapshot.select_shell_json]
+   directly, which is what the /api/v1/dashboard/shell handler now
+   calls.  Three cases cover the full selector matrix:
+
+   1. snapshot published + light=false  -> return [snap.shell]
+   2. snapshot empty + light=false      -> fall back to compute path
+   3. snapshot published + light=true   -> ignore snapshot, fall back
+                                           (one-sprint compatibility) *)
+
+let test_shell_snapshot_wire_returns_snapshot_when_published () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  Lib.Dashboard_snapshot.reset_for_test ();
+  let sentinel = `Assoc [ "wire_sentinel", `String "snapshot-path" ] in
+  Lib.Dashboard_snapshot.publish_for_test
+    (Lib.Dashboard_snapshot.make_for_test
+       ~shell:sentinel ~tools:`Null
+       ~namespace_truth:`Null ~telemetry_summary:`Null);
+  let timing = Lib.Server_timing.create () in
+  let json =
+    Lib.Server_dashboard_shell_snapshot.select_shell_json
+      ~timing config
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string)
+    "snapshot path returns published sentinel"
+    "snapshot-path"
+    (json |> member "wire_sentinel" |> to_string);
+  let header = Lib.Server_timing.to_header_value timing in
+  Alcotest.(check bool)
+    "Server-Timing header records snapshot_read phase on hit"
+    true
+    (let re = Re.compile (Re.Perl.re "snapshot_read") in
+     Re.execp re header);
+  Lib.Dashboard_snapshot.reset_for_test ()
+
+let test_shell_snapshot_wire_falls_back_when_empty () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  Lib.Dashboard_snapshot.reset_for_test ();
+  let timing = Lib.Server_timing.create () in
+  let snapshot_json =
+    Lib.Server_dashboard_shell_snapshot.select_shell_json
+      ~timing config
+  in
+  let direct_json =
+    Lib.Server_dashboard_http_core.dashboard_shell_http_json
+      ~light:false config
+  in
+  let open Yojson.Safe.Util in
+  let paths_of j = j |> member "paths" in
+  Alcotest.(check bool)
+    "fallback path produces compute-equivalent paths key"
+    true
+    (paths_of snapshot_json <> `Null
+     && paths_of snapshot_json = paths_of direct_json)
+
+let test_shell_snapshot_wire_light_variant_bypasses_snapshot () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  Lib.Dashboard_snapshot.reset_for_test ();
+  let sentinel = `Assoc [ "wire_sentinel", `String "snapshot-path" ] in
+  Lib.Dashboard_snapshot.publish_for_test
+    (Lib.Dashboard_snapshot.make_for_test
+       ~shell:sentinel ~tools:`Null
+       ~namespace_truth:`Null ~telemetry_summary:`Null);
+  let timing = Lib.Server_timing.create () in
+  let json =
+    Lib.Server_dashboard_shell_snapshot.select_shell_json
+      ~timing ~light:true config
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check bool)
+    "light=true must NOT return the snapshot sentinel"
+    true
+    (json |> member "wire_sentinel" = `Null);
+  Lib.Dashboard_snapshot.reset_for_test ()
+
 let () =
   run "dashboard_http_core"
     [
@@ -766,5 +843,11 @@ let () =
             test_verifier_of_request_canonicalizes_token_owner;
           test_case "message JSON exposes temporal decay fields" `Quick
             test_dashboard_message_json_surfaces_temporal_decay_fields;
+          test_case "RFC-0138 shell wire returns snapshot when published" `Quick
+            test_shell_snapshot_wire_returns_snapshot_when_published;
+          test_case "RFC-0138 shell wire falls back when snapshot empty" `Quick
+            test_shell_snapshot_wire_falls_back_when_empty;
+          test_case "RFC-0138 shell wire light variant bypasses snapshot" `Quick
+            test_shell_snapshot_wire_light_variant_bypasses_snapshot;
         ] );
     ]

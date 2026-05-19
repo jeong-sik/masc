@@ -466,8 +466,13 @@ let rec add_routes ~sw ~clock router =
        with_public_read (fun state req reqd ->
          let light = Server_utils.bool_query_param req "light" ~default:false in
          let timing = Server_timing.create () in
+         (* RFC-0138 Phase 3 Step 1: wait-free read via
+            [Dashboard_snapshot.current ()] when the refresh fiber has
+            published; falls back to [dashboard_shell_http_json] for
+            light variant + first-request cold start. *)
          let json =
-           dashboard_shell_http_json ?clock:state.Mcp_server.clock ~request:req
+           Server_dashboard_shell_snapshot.select_shell_json
+             ?clock:state.Mcp_server.clock ~request:req
              ~timing ~light state.Mcp_server.room_config
          in
          Http.Response.json ~compress:true ~request:req

@@ -257,6 +257,7 @@ let safe_read_primary_rewrite primary_cmd =
     else (
       match
         Worker_dev_tools.validate_command_coding_with_allowlist
+          ~caller:Shell_command_gate.Keeper_shell_bash
           ~allow_pipes:false
           ~allowed_commands:Worker_dev_tools.dev_allowed_commands
           primary_cmd
@@ -527,7 +528,11 @@ let safe_read_fallback_of_command ~write_enabled:_ ~stderr_dev_null_stripped cmd
 
 let shape_block_allowed_by_active_validator ~write_enabled cmd = function
   | Pipe_or_redirect when write_enabled ->
-    (match Worker_dev_tools.validate_command_coding cmd with
+    (match
+       Worker_dev_tools.validate_command_coding
+         ~caller:Shell_command_gate.Keeper_shell_bash
+         cmd
+     with
      | Ok () -> true
      | Error _ -> false)
   | Gh_pr_checks | Chaining | Substitution | Repo_wide_scan | Pipe_or_redirect ->
@@ -698,6 +703,7 @@ let single_repo_cwd_for_top_relative_read
   else
     match
       Worker_dev_tools.validate_command_coding_with_allowlist
+        ~caller:Shell_command_gate.Keeper_shell_bash
         ~allow_pipes:false
         ~allowed_commands:Worker_dev_tools.dev_allowed_commands
         cmd
@@ -1513,12 +1519,19 @@ let handle_keeper_bash
         ();
       (* Local execution path: full validation applies *)
       let validate =
-        if write_enabled then Worker_dev_tools.validate_command_coding
-        else if Option.is_some safe_read_fallback then
+        if write_enabled
+        then
+          Worker_dev_tools.validate_command_coding
+            ~caller:Shell_command_gate.Keeper_shell_bash
+        else if Option.is_some safe_read_fallback
+        then
           Worker_dev_tools.validate_command_coding_with_allowlist
+            ~caller:Shell_command_gate.Keeper_shell_bash
             ~allow_pipes:false
             ~allowed_commands:Worker_dev_tools.dev_allowed_commands
-        else Worker_dev_tools.validate_command
+        else
+          Worker_dev_tools.validate_command
+            ~caller:Shell_command_gate.Keeper_shell_bash
       in
       match validate validation_cmd with
       | Error reason ->

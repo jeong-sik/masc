@@ -183,6 +183,7 @@
   keeper_agent_result
   keeper_agent_error
   keeper_agent_memory_episode
+  keeper_run_tools_search
   provider_runtime_projection
   voice_bridge_transport
   cascade_wire_overlay

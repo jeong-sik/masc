@@ -3,12 +3,12 @@ rfc: "0093"
 title: "Board persistence — path unification (snapshot vs append)"
 status: Draft
 created: 2026-05-17
-updated: 2026-05-17
+updated: 2026-05-20
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0077", "0042", "0062"]
-implementation_prs: []
+implementation_prs: [15711]
 ---
 
 # RFC-0093 — Board persistence: path unification

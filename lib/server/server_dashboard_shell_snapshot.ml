@@ -24,7 +24,6 @@ let select_shell_json
       Server_dashboard_http_core.dashboard_shell_http_json
         ?clock ?request ~timing:timing_obj ~light config)
 ;;
-
 let select_tools_json
       ?actor ?timing (config : Coord.config)
   : Yojson.Safe.t
@@ -41,18 +40,10 @@ let select_tools_json
       (Server_timing.Custom "snapshot_read")
       (fun () -> snap.tools)
   | _ ->
-    (* actor-filtered variant OR snapshot not yet published — fall
-       back to the synchronous compute path (per-actor cache lives
-       inside [dashboard_tools_http_json]). *)
     Server_dashboard_http_runtime_info.dashboard_tools_http_json
       ?actor ~timing:timing_obj config
 ;;
 
-(* Cache key shared with the legacy router-inline definition.  Kept
-   byte-identical so a cold start that hits the fallback path observes
-   the same cache slot the previous router code wrote into.  When Step
-   5 retires [Dashboard_cache] from this read path, the duplicate goes
-   away together. *)
 let telemetry_summary_cache_key ~base_path ~masc_root =
   let digest = Digest.string (base_path ^ "\000" ^ masc_root) |> Digest.to_hex in
   "dashboard:telemetry_summary:" ^ digest
@@ -82,5 +73,29 @@ let select_telemetry_summary_json
         Server_timing.measure
           timing_obj
           Server_timing.Telemetry_summary_aggregate
-          (fun () -> Telemetry_unified.summary_json ~base_path ~masc_root ())))
+          (fun () -> Telemetry_unified.summary_json ~base_path ~masc_root ()))
+;;
+
+let select_project_snapshot_json ~state ~sw ~clock ?timing req
+  : Yojson.Safe.t
+  =
+  let timing_obj =
+    match timing with
+    | Some t -> t
+    | None -> Server_timing.create ()
+  in
+  match Dashboard_snapshot.current () with
+  | Some snap when snap.namespace_truth <> `Null ->
+    Server_timing.measure
+      timing_obj
+      (Server_timing.Custom "snapshot_read")
+      (fun () -> snap.namespace_truth)
+  | _ ->
+    Server_timing.measure
+      timing_obj
+      Server_timing.Project_snapshot_runtime
+      (fun () ->
+        Server_dashboard_http_namespace_truth
+          .dashboard_namespace_truth_http_json
+          ~state ~sw ~clock req)
 ;;

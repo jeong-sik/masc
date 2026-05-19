@@ -1223,8 +1223,14 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      while leaving the compute path fully out of the request fiber. *)
   Eio.Fiber.fork ~sw (fun () ->
     try
+      (* RFC-0138 Phase 3 Step 3: pass [~state] so refresh_loop can
+         populate [namespace_truth] from the cached-refs path.
+         That moves the 6 MASC_NAMESPACE_TRUTH_*_TIMEOUT_S knobs out
+         of the request fiber for the canonical project-snapshot
+         response (Step 4 retires the env knobs themselves). *)
       Dashboard_snapshot.refresh_loop
-        ~sw ~clock ~config:state.room_config ~interval_sec:2.0
+        ~sw ~clock ~config:state.room_config ~state
+        ~interval_sec:2.0 ()
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->

@@ -77,9 +77,14 @@ let is_registered_keeper_agent_alias_name config agent_name =
 
 let sync_planning_current_task_with_owned_task (ctx : context) =
   let actual_name =
-    try Coord.resolve_agent_name ctx.config ctx.agent_name
-    with
-    | Sys_error _ | Yojson.Json_error _ -> ctx.agent_name
+    (* Asymmetric silent-failure unification: previously [Sys_error _ |
+       Yojson.Json_error _] (the *more common* read-side failure class —
+       missing agents file, malformed JSON) returned [ctx.agent_name]
+       silently while only the rare [exn] catch-all logged. Operators
+       saw the loud path but missed the common one. Single warn arm
+       mirrors [Tool_coord.safe_read_backlog]. *)
+    try Coord.resolve_agent_name ctx.config ctx.agent_name with
+    | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
         Log.Task.warn "resolve_agent_name failed for %s: %s" ctx.agent_name
           (Stdlib.Printexc.to_string exn);
@@ -120,9 +125,8 @@ let sync_keeper_current_task_binding (ctx : context) =
 
 let keeper_agent_tool_names (ctx : context) =
   let resolved =
-    try Coord.resolve_agent_name ctx.config ctx.agent_name
-    with
-    | Sys_error _ | Yojson.Json_error _ -> ctx.agent_name
+    try Coord.resolve_agent_name ctx.config ctx.agent_name with
+    | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
         Log.Task.warn "resolve_agent_name failed for keeper tool surface %s: %s"
           ctx.agent_name

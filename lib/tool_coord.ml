@@ -170,12 +170,20 @@ let status_worktree_active (ctx : context) =
     false
 ;;
 
+(* Asymmetric silent-failure unification: previously [Sys_error _ |
+   Yojson.Json_error _] (the *more common* read-side failure class —
+   missing file, malformed JSON) returned the default silently while
+   only the rare [exn] catch-all logged. Operators saw the loud path
+   but missed the common one. The five [safe_*] wrappers below now
+   share the single-warn-arm shape; [Eio.Cancel.Cancelled] is re-raised
+   explicitly so cancellation propagation is preserved across all of
+   them. *)
 let safe_resolve_agent_name (ctx : context) ~joined =
   if not joined
   then ctx.agent_name
   else (
     try Coord.resolve_agent_name ctx.config ctx.agent_name with
-    | Sys_error _ | Yojson.Json_error _ -> ctx.agent_name
+    | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
       Log.Coord.warn
         "resolve_agent_name failed for %s: %s"
@@ -189,7 +197,7 @@ let safe_current_task (ctx : context) ~joined =
   then None
   else (
     try Planning_eio.get_current_task ctx.config with
-    | Sys_error _ | Yojson.Json_error _ -> None
+    | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
       Log.Coord.warn
         "get_current_task failed for %s: %s"
@@ -200,7 +208,7 @@ let safe_current_task (ctx : context) ~joined =
 
 let safe_get_agents (ctx : context) =
   try Coord.get_agents_raw ctx.config with
-  | Sys_error _ | Yojson.Json_error _ -> []
+  | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Log.Coord.warn "get_agents_raw failed: %s" (Stdlib.Printexc.to_string exn);
     []
@@ -208,6 +216,7 @@ let safe_get_agents (ctx : context) =
 
 let safe_read_backlog (ctx : context) =
   try Coord.read_backlog ctx.config with
+  | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Log.Coord.warn "read_backlog failed: %s" (Stdlib.Printexc.to_string exn);
     { Masc_domain.tasks = []; last_updated = Masc_domain.now_iso (); version = 1 }
@@ -215,7 +224,7 @@ let safe_read_backlog (ctx : context) =
 
 let safe_is_zombie_agent ?agent_type ~agent_name last_seen =
   try Coord.is_zombie_agent ?agent_type ~agent_name last_seen with
-  | Sys_error _ | Yojson.Json_error _ -> false
+  | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Log.Coord.warn
       "is_zombie_agent failed for %s: %s"
@@ -349,8 +358,20 @@ let status_summary_string (ctx : context) =
   let state = Coord.read_state ctx.config in
   let backlog = safe_read_backlog ctx in
   let joined =
+    (* status_summary_string is read-only on the coord file; a missing
+       or malformed file is treated as "not joined" because that's the
+       most useful default for status rendering. But the silent path
+       hid an operationally meaningful failure (file missing post-join,
+       config corrupted) — surface it via warn while keeping the
+       [false] default. *)
     try Coord.is_agent_joined ctx.config ~agent_name:ctx.agent_name with
-    | Sys_error _ | Yojson.Json_error _ -> false
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+      Log.Coord.warn
+        "is_agent_joined failed for %s: %s"
+        ctx.agent_name
+        (Stdlib.Printexc.to_string exn);
+      false
   in
   let actual_name = safe_resolve_agent_name ctx ~joined in
   let credential_state = credential_state ctx ~actual_name in

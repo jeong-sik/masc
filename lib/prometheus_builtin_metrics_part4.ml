@@ -53,6 +53,13 @@ let register
     "Cumulative count of pooled connections evicted by idle-TTL or LRU cap."
     `Counter;
   add
+    metric_pool_evict_failure_total
+    "Cumulative count of exceptions caught by the eviction fiber while \
+     sweeping idle entries. Previously swallowed by [with _ -> ()]; \
+     a non-zero value indicates the periodic TTL cleanup is silently \
+     failing and the pool may leak idle connections."
+    `Counter;
+  add
     metric_pool_create_total
     "Cumulative count of fresh piaf [Client.t] connections created on pool miss."
     `Counter;

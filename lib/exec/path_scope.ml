@@ -21,17 +21,7 @@ let sandbox_prefixes =
     "/private/tmp/masc_";
   ]
 
-let contains_substring s sub =
-  let sub_len = String.length sub in
-  let s_len = String.length s in
-  if sub_len > s_len then false
-  else
-    let rec scan i =
-      if i + sub_len > s_len then false
-      else if String.sub s i sub_len = sub then true
-      else scan (i + 1)
-    in
-    scan 0
+let contains_substring s sub = String_util.contains_substring s sub
 
 let starts_with_any prefixes s =
   List.exists (fun p -> String.starts_with ~prefix:p s) prefixes

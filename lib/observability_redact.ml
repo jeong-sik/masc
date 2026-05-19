@@ -13,17 +13,7 @@ let default_max_len = 200
 let denied_tool_infixes =
   ["_auth"; "_encryption"; "_credential"; "_secret"]
 
-let contains_substring ~sub s =
-  let sub_len = String.length sub in
-  let s_len = String.length s in
-  if sub_len > s_len then false
-  else
-    let rec loop i =
-      if i > s_len - sub_len then false
-      else if String.sub s i sub_len = sub then true
-      else loop (i + 1)
-    in
-    loop 0
+let contains_substring ~sub s = String_util.contains_substring s sub
 
 let sensitive_key_markers =
   [ "token"; "secret"; "password"; "passwd"; "api_key"; "apikey"; "key" ]

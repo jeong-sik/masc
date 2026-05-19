@@ -203,16 +203,7 @@ let apply_default opt current = match opt with Some v -> v | None -> current
 (** Same as [apply_default] but both TOML and meta are option-typed. *)
 let apply_default_opt opt current = match opt with Some _ -> opt | None -> current
 
-let contains_substring haystack needle =
-  let haystack_len = String.length haystack in
-  let needle_len = String.length needle in
-  let rec loop idx =
-    if needle_len = 0 then true
-    else if idx + needle_len > haystack_len then false
-    else if String.sub haystack idx needle_len = needle then true
-    else loop (idx + 1)
-  in
-  loop 0
+let contains_substring haystack needle = String_util.contains_substring haystack needle
 
 let invalid_profile_defaults_error ~keeper_name detail =
   if contains_substring detail "cascade_name" then

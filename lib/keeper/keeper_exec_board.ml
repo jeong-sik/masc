@@ -94,17 +94,7 @@ let re_matches_compiled re text =
   | Not_found -> false
 ;;
 
-let contains_substring haystack needle =
-  let len_haystack = String.length haystack in
-  let len_needle = String.length needle in
-  len_needle = 0
-  ||
-  let rec loop idx =
-    idx + len_needle <= len_haystack
-    && (String.sub haystack idx len_needle = needle || loop (idx + 1))
-  in
-  loop 0
-;;
+let contains_substring haystack needle = String_util.contains_substring haystack needle
 
 let content_has_inline_quantitative_evidence content =
   let lower = String.lowercase_ascii content in

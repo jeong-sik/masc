@@ -10,6 +10,7 @@ import type { KeeperEvalResponse, EvalSnapshot, EvalLayerResult } from '../api/k
 import { ProgressBar } from './common/progress-bar'
 import { Eyebrow } from './common/eyebrow'
 import { StatusChip, type StatusChipTone } from './common/status-chip'
+import { SECONDS_PER_DAY } from '../lib/format-time'
 
 // ── Per-keeper cached state ─────────────────────────────
 
@@ -118,7 +119,7 @@ function LayerResultRow({ layer }: { layer: EvalLayerResult }) {
 function computeTrend(snapshots: EvalSnapshot[]): { oldCoverage: number; newCoverage: number; deltaPercent: number } | null {
   if (snapshots.length < 2) return null
   const now = Date.now() / 1000
-  const cutoff24h = now - 86400
+  const cutoff24h = now - SECONDS_PER_DAY
   const recent = snapshots.filter(s => s.timestamp >= cutoff24h)
   const older = snapshots.filter(s => s.timestamp < cutoff24h)
   if (recent.length === 0) return null

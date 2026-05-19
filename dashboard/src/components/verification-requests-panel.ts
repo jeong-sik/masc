@@ -27,6 +27,7 @@ import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { StatusChip } from './common/status-chip'
+import { SECONDS_PER_MINUTE, SECONDS_PER_HOUR, SECONDS_PER_DAY } from '../lib/format-time'
 import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
 import type { ManagedAsyncResource } from '../lib/async-state'
@@ -189,10 +190,10 @@ function relativeTime(ts: string): string {
   const ms = parseIso(ts)
   if (ms == null) return ts
   const delta = (Date.now() - ms) / 1000
-  if (delta < 60) return `${Math.floor(delta)}초 전`
-  if (delta < 3600) return `${Math.floor(delta / 60)}분 전`
-  if (delta < 86400) return `${Math.floor(delta / 3600)}시간 전`
-  return `${Math.floor(delta / 86400)}일 전`
+  if (delta < SECONDS_PER_MINUTE) return `${Math.floor(delta)}초 전`
+  if (delta < SECONDS_PER_HOUR) return `${Math.floor(delta / SECONDS_PER_MINUTE)}분 전`
+  if (delta < SECONDS_PER_DAY) return `${Math.floor(delta / SECONDS_PER_HOUR)}시간 전`
+  return `${Math.floor(delta / SECONDS_PER_DAY)}일 전`
 }
 
 // ── Action handler ────────────────────────────────────

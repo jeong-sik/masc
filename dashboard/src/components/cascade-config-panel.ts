@@ -11,6 +11,7 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { fetchGateKeepers, type GateKeeperInfo } from '../api/gate'
+import { SECONDS_PER_MINUTE, SECONDS_PER_HOUR, SECONDS_PER_DAY } from '../lib/format-time'
 import {
   fetchCascadeClientCapacity,
   fetchCascadeClientCapacityHistory,
@@ -873,10 +874,10 @@ function fmtRelativeTime(tsSec: number): string {
   const deltaSec = Date.now() / 1000 - tsSec
   if (!Number.isFinite(deltaSec) || deltaSec < 0) return '방금'
   if (deltaSec < 1) return '방금'
-  if (deltaSec < 60) return `${Math.floor(deltaSec)}초 전`
-  if (deltaSec < 3600) return `${Math.floor(deltaSec / 60)}분 전`
-  if (deltaSec < 86400) return `${Math.floor(deltaSec / 3600)}시간 전`
-  return `${Math.floor(deltaSec / 86400)}일 전`
+  if (deltaSec < SECONDS_PER_MINUTE) return `${Math.floor(deltaSec)}초 전`
+  if (deltaSec < SECONDS_PER_HOUR) return `${Math.floor(deltaSec / SECONDS_PER_MINUTE)}분 전`
+  if (deltaSec < SECONDS_PER_DAY) return `${Math.floor(deltaSec / SECONDS_PER_HOUR)}시간 전`
+  return `${Math.floor(deltaSec / SECONDS_PER_DAY)}일 전`
 }
 
 function eventKindTone(kind: CascadeCapacityEventKind): 'ok' | 'neutral' | 'bad' {

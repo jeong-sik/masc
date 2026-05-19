@@ -1,13 +1,17 @@
 // Unified time formatting utilities.
 
+export const SECONDS_PER_MINUTE = 60
+export const SECONDS_PER_HOUR = 3600
+export const SECONDS_PER_DAY = 86400
+
 const rtf = new Intl.RelativeTimeFormat('ko', { numeric: 'auto' })
 const UNIX_MS_THRESHOLD = 1_000_000_000_000
 
 export function formatRelativeSec(deltaSec: number): string {
-  if (deltaSec < 60) return rtf.format(-deltaSec, 'second')
-  if (deltaSec < 3600) return rtf.format(-Math.round(deltaSec / 60), 'minute')
-  if (deltaSec < 86400) return rtf.format(-Math.round(deltaSec / 3600), 'hour')
-  return rtf.format(-Math.round(deltaSec / 86400), 'day')
+  if (deltaSec < SECONDS_PER_MINUTE) return rtf.format(-deltaSec, 'second')
+  if (deltaSec < SECONDS_PER_HOUR) return rtf.format(-Math.round(deltaSec / SECONDS_PER_MINUTE), 'minute')
+  if (deltaSec < SECONDS_PER_DAY) return rtf.format(-Math.round(deltaSec / SECONDS_PER_HOUR), 'hour')
+  return rtf.format(-Math.round(deltaSec / SECONDS_PER_DAY), 'day')
 }
 
 export function normalizeTimestampMs(ts: number): number {
@@ -29,18 +33,18 @@ export function relativeTime(iso?: string | null, fallback = '정보 없음'): s
 /** Format elapsed seconds — "3초", "5분", "2시간". Returns '정보 없음' for invalid. */
 export function formatElapsed(value?: number | null): string {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '정보 없음'
-  if (value < 60) return `${Math.round(value)}초`
-  if (value < 3600) return `${Math.round(value / 60)}분`
-  return `${Math.round(value / 3600)}시간`
+  if (value < SECONDS_PER_MINUTE) return `${Math.round(value)}초`
+  if (value < SECONDS_PER_HOUR) return `${Math.round(value / SECONDS_PER_MINUTE)}분`
+  return `${Math.round(value / SECONDS_PER_HOUR)}시간`
 }
 
 /** Format duration in seconds as Korean text — includes days. Returns '확인 필요' for invalid. */
 export function formatDuration(seconds?: number | null): string {
   if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return '확인 필요'
-  if (seconds < 60) return `${Math.round(seconds)}초`
-  if (seconds < 3600) return `${Math.round(seconds / 60)}분`
-  if (seconds < 86400) return `${Math.round(seconds / 3600)}시간`
-  return `${Math.round(seconds / 86400)}일`
+  if (seconds < SECONDS_PER_MINUTE) return `${Math.round(seconds)}초`
+  if (seconds < SECONDS_PER_HOUR) return `${Math.round(seconds / SECONDS_PER_MINUTE)}분`
+  if (seconds < SECONDS_PER_DAY) return `${Math.round(seconds / SECONDS_PER_HOUR)}시간`
+  return `${Math.round(seconds / SECONDS_PER_DAY)}일`
 }
 
 /** Format duration in milliseconds as Korean text — "5분", "2시간 30분", "1일 3시간". */
@@ -64,9 +68,9 @@ export function formatDurationMs(ms: number): string {
 /** Format elapsed seconds in compact English — "3s", "5m", "2h 30m". */
 export function formatElapsedCompact(seconds?: number | null): string {
   if (seconds == null) return ''
-  if (seconds < 60) return `${Math.round(seconds)}s`
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`
-  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
+  if (seconds < SECONDS_PER_MINUTE) return `${Math.round(seconds)}s`
+  if (seconds < SECONDS_PER_HOUR) return `${Math.floor(seconds / SECONDS_PER_MINUTE)}m ${Math.round(seconds % SECONDS_PER_MINUTE)}s`
+  return `${Math.floor(seconds / SECONDS_PER_HOUR)}h ${Math.floor((seconds % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE)}m`
 }
 
 /** Format timestamp (string or number) as relative time. Handles unix seconds and ms. */
@@ -104,10 +108,10 @@ export function formatTimeAgoEn(iso: string): string {
   if (iso === 'never') return 'never'
   const diff = (Date.now() - new Date(iso).getTime()) / 1000
   if (Number.isNaN(diff)) return 'unknown'
-  if (diff < 60) return 'just now'
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
-  return `${Math.floor(diff / 86400)}d ago`
+  if (diff < SECONDS_PER_MINUTE) return 'just now'
+  if (diff < SECONDS_PER_HOUR) return `${Math.floor(diff / SECONDS_PER_MINUTE)}m ago`
+  if (diff < SECONDS_PER_DAY) return `${Math.floor(diff / SECONDS_PER_HOUR)}h ago`
+  return `${Math.floor(diff / SECONDS_PER_DAY)}d ago`
 }
 
 /** Format a numeric delta with sign prefix. */

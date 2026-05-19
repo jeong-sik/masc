@@ -13,6 +13,7 @@ import { computed } from '@preact/signals'
 import { tasks } from '../../store'
 import { navigate } from '../../router'
 import type { Task } from '../../types'
+import { SECONDS_PER_MINUTE, SECONDS_PER_HOUR, SECONDS_PER_DAY } from '../../lib/format-time'
 
 // 30 minutes in seconds. Matches the spec's "claim_age ends in `h` or
 // > 10 minutes" rule of thumb but lifted slightly to avoid noise on
@@ -34,10 +35,10 @@ function ageSeconds(task: Task, nowMs = Date.now()): number | null {
 }
 
 function ageLabel(s: number): string {
-  if (s < 60) return `${s}s`
-  if (s < 3600) return `${Math.floor(s / 60)}m`
-  if (s < 86400) return `${Math.floor(s / 3600)}h`
-  return `${Math.floor(s / 86400)}d`
+  if (s < SECONDS_PER_MINUTE) return `${s}s`
+  if (s < SECONDS_PER_HOUR) return `${Math.floor(s / SECONDS_PER_MINUTE)}m`
+  if (s < SECONDS_PER_DAY) return `${Math.floor(s / SECONDS_PER_HOUR)}h`
+  return `${Math.floor(s / SECONDS_PER_DAY)}d`
 }
 
 export function deriveStaleTaskEntries(taskList: Task[], nowMs = Date.now()): StaleEntry[] {

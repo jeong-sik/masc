@@ -201,8 +201,30 @@ let cascade_exhaustion_summary = function
 ;;
 
 let blocker_class_continue_gate = function
-  | Ambiguous_post_commit_timeout | Ambiguous_post_commit_failure -> true
-  | _ -> false
+  | Ambiguous_post_commit_timeout
+  | Ambiguous_post_commit_failure -> true
+  | Cascade_exhausted _
+  | Autonomous_slot_wait_timeout
+  | Admission_queue_wait_timeout
+  | Turn_timeout_after_queue_wait
+  | Oas_timeout_budget
+  | Turn_timeout
+  | Turn_livelock_blocked
+  | Completion_contract_violation
+  | No_tool_capable_provider
+  | Stay_silent_loop
+  | Fiber_unresolved
+  | Stale_turn_timeout
+  | Stale_fleet_batch
+  | Sdk_max_turns_exceeded
+  | Sdk_token_budget_exceeded
+  | Sdk_cost_budget_exceeded
+  | Sdk_unrecognized_stop_reason
+  | Sdk_idle_detected
+  | Sdk_tool_retry_exhausted
+  | Sdk_guardrail_violation
+  | Sdk_tripwire_violation
+  | Sdk_exit_condition_met -> false
 ;;
 
 let cascade_exhaustion_reason_to_json = function

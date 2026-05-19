@@ -157,8 +157,14 @@ export interface GovernanceJudgeSummary {
   last_error?: string | null
 }
 
+// Wire emit: `lib/dashboard/dashboard_http_monitoring.ml:143–149,170,
+//   195–199,226` — alert_level is computed as exactly one of
+//   {"ok","warn","bad"}. The previous `| string` catch-all hid this
+//   closed vocabulary and let unmapped values flow through.
+export type GovernanceAlertLevel = 'ok' | 'warn' | 'bad'
+
 export interface BoardMonitoring {
-  alert_level?: 'ok' | 'warn' | 'bad' | string
+  alert_level?: GovernanceAlertLevel
   posts_total?: number
   new_posts_24h?: number
   unanswered_posts?: number
@@ -168,7 +174,7 @@ export interface BoardMonitoring {
 }
 
 export interface GovernanceMonitoring {
-  alert_level?: 'ok' | 'warn' | 'bad' | string
+  alert_level?: GovernanceAlertLevel
   note?: string
   cases_open?: number
   pending_ruling?: number
@@ -196,13 +202,20 @@ export interface PendingConfirmation {
   preview?: unknown
 }
 
+// Wire emit: `lib/governance_pipeline_types.ml:1–18` —
+//   `type risk_level = Low | Medium | High | Critical`,
+//   `risk_level_to_string` produces exactly these four lowercase strings.
+//   Same vocabulary at `lib/keeper/keeper_approval_queue.ml:49–53` and
+//   serialized at `:814`. Frontend was untyped `string`.
+export type KeeperApprovalRiskLevel = 'low' | 'medium' | 'high' | 'critical'
+
 export interface KeeperApprovalQueueItem {
   id: string
   keeper_name: string
   tool_name: string
   action_key?: string | null
   sandbox_target?: string | null
-  risk_level: string
+  risk_level: KeeperApprovalRiskLevel
   requested_at?: string | null
   waiting_s?: number
   turn_id?: number | null
@@ -236,7 +249,9 @@ export interface KeeperApprovalRule {
   backend?: string | null
   request_fingerprint?: string
   request_fingerprint_preview?: string
-  max_risk?: string
+  /** Same vocabulary as `KeeperApprovalRiskLevel` (backend
+   *  `risk_level_to_string` ∈ {low, medium, high, critical}). */
+  max_risk?: KeeperApprovalRiskLevel
   created_at?: string | null
   created_by?: string | null
   last_matched_at?: string | null

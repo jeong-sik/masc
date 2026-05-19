@@ -35,6 +35,7 @@ import {
   type ProviderLogTailResponse,
 } from './schemas/provider-logs'
 import { asKeeperRuntimeBlockerClass } from '../lib/runtime-blocker-class'
+import { asKeeperApprovalRiskLevel } from '../lib/governance-risk-level'
 import type {
   KeeperConfig,
   KeeperFeatureStatus,
@@ -438,7 +439,7 @@ function normalizeKeeperApprovalRule(raw: unknown): KeeperApprovalRule | null {
     request_fingerprint: asNullableString(raw.request_fingerprint) ?? undefined,
     request_fingerprint_preview:
       asNullableString(raw.request_fingerprint_preview) ?? undefined,
-    max_risk: asNullableString(raw.max_risk) ?? undefined,
+    max_risk: asKeeperApprovalRiskLevel(raw.max_risk) ?? undefined,
     created_at: asNullableIsoTimestamp(raw.created_at_iso ?? raw.created_at),
     created_by: asNullableString(raw.created_by),
     last_matched_at:

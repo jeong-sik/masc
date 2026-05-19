@@ -10,12 +10,9 @@ import { TimeAgo } from './common/time-ago'
 import { formatDuration } from './mission-utils'
 import type { Keeper } from '../types'
 import { StrongSecondary, RuntimeBadge } from './keeper-detail-primitives'
-<<<<<<< HEAD
 import { trustDispositionLabel as resolveTrustDispositionLabel } from './fsm-hub-types'
-||||||| parent of 782f34b080 (fix(dashboard): Korean labels for operator_disposition + operator_disposition_reason)
-=======
 import { operatorDispositionReasonLabel } from './fsm-hub-types'
->>>>>>> 782f34b080 (fix(dashboard): Korean labels for operator_disposition + operator_disposition_reason)
+import { terminalReasonCodeLabel } from './fsm-hub-types'
 import { keeperNeedsDiagnosticAttention, refreshAfterRuntimeAction } from './keeper-detail-helpers'
 import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
 import { showToast } from './common/toast'
@@ -325,7 +322,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">정지 원인</strong> · ${stopCause.code}${stopCause.summary ? html` · ${stopCause.summary}` : null}</span>`
           : null}
         ${latestTerminalCode && latestTerminalCode !== stopCause?.code
-          ? html`<span><strong class="text-[var(--color-fg-secondary)]">종료 코드</strong> · ${latestTerminalCode}${latestTerminalSummary ? html` · ${latestTerminalSummary}` : null}</span>`
+          ? html`<span title=${latestTerminalCode}><strong class="text-[var(--color-fg-secondary)]">종료 코드</strong> · ${terminalReasonCodeLabel(latestTerminalCode)}${latestTerminalSummary ? html` · ${latestTerminalSummary}` : null}</span>`
           : null}
         ${latestNextAction
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">권장 조치</strong> · ${latestNextAction}</span>`

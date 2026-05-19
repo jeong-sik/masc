@@ -518,6 +518,16 @@ let required_tool_satisfaction_for_required_names
   else required_tool_satisfaction call
 ;;
 
+let required_tool_satisfaction_for_turn
+      ~(required_tool_names : string list)
+      (call : Agent_sdk.Completion_contract.tool_call)
+  : (unit, string) result
+  =
+  match required_tool_names with
+  | [] -> Ok ()
+  | _ -> required_tool_satisfaction_for_required_names ~required_tool_names call
+;;
+
 let classify_tool_progress name =
   if is_keeper_observation_alias name
   then Passive_status

@@ -9859,6 +9859,38 @@ let test_explicit_required_tool_satisfaction_accepts_named_passive_tool () =
        (`Assoc []))
 ;;
 
+let test_turn_required_tool_satisfaction_keeps_generic_presence_separate () =
+  check
+    bool
+    "generic required-action predicate still rejects passive board read"
+    false
+    (satisfies_required_tool "keeper_board_get" (`Assoc []));
+  check
+    bool
+    "turn-level generic gate accepts passive tool presence for post-run classification"
+    true
+    (Result.is_ok
+       (KTD.required_tool_satisfaction_for_turn
+          ~required_tool_names:[]
+          (required_tool_call "keeper_board_get" (`Assoc []))));
+  check
+    bool
+    "explicit required action still rejects unrelated passive tool"
+    false
+    (Result.is_ok
+       (KTD.required_tool_satisfaction_for_turn
+          ~required_tool_names:[ "keeper_bash" ]
+          (required_tool_call "keeper_board_get" (`Assoc []))));
+  check
+    bool
+    "explicit named passive tool remains allowed"
+    true
+    (Result.is_ok
+       (KTD.required_tool_satisfaction_for_turn
+          ~required_tool_names:[ "keeper_board_get" ]
+          (required_tool_call "keeper_board_get" (`Assoc []))))
+;;
+
 let test_tool_usage_delta_uses_registry_counts () =
   let before = [ "keeper_board_post", 1; "keeper_fs_read", 0; "keeper_voice_agent", 2 ] in
   let after = [ "keeper_board_post", 1; "keeper_fs_read", 1; "keeper_voice_agent", 4 ] in
@@ -12882,6 +12914,10 @@ let () =
             "explicit required tool predicate accepts named passive tool"
             `Quick
             test_explicit_required_tool_satisfaction_accepts_named_passive_tool
+        ; test_case
+            "turn required tool predicate separates presence from progress"
+            `Quick
+            test_turn_required_tool_satisfaction_keeps_generic_presence_separate
         ; test_case
             "tool usage delta uses registry counts"
             `Quick

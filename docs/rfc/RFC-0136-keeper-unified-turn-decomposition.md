@@ -1,14 +1,14 @@
 ---
 rfc: "0136"
 title: "Keeper Unified Turn — Stage Decomposition of run_keeper_cycle"
-status: Draft
+status: Active
 created: 2026-05-19
 updated: 2026-05-19
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0051", "0056", "0085"]
-implementation_prs: []
+implementation_prs: [16604, 16624, 16643, 16701, 16709, 16751]
 ---
 
 # RFC-0136 — Keeper Unified Turn Decomposition
@@ -278,3 +278,50 @@ PR-3 (retry loop body) 가 *전체 LOC delta 의 60%+ 차지* — 별도 RFC sub
 - `lib/keeper/keeper_unified_turn.mli` — 319 LOC, 30+ surface.
 - `scripts/lint/godfile-size-regression.sh` — cap 3350 LOC, decomposition mandate L22-26.
 - `~/me/planning/claude-plans/joyful-tumbling-dragon.md` — fundamental_roadmap.md Phase 5 godfile target (6 files including keeper_unified_turn).
+
+---
+
+## 8. Progress (2026-05-19)
+
+### 8.1 Merged sub-PRs
+
+| PR | # | LoC Δ | Pattern |
+|----|----|-------|---------|
+| RFC body | #16601 | docs | Initial Draft |
+| **PR-1** Phase Gate | #16604 | -130 | Typed outcome (Parse, don't validate) |
+| **PR-2** Cascade Resolution | #16624 | -50 | Sibling sub-module |
+| **PR-3** Pre-dispatch | #16643 | -33 | Sibling sub-module |
+| Phase 4 sub-doc | #16650 | docs | 5-PR plan |
+| **PR-4-a** Retry Setup | #16701 | -55 | Record destructuring (16 deps) |
+| **PR-4-b** Terminal Error | #16709 | -25 | Side-effects wrapper closure (9 callsites) |
+| **PR-4-c** Dispatch Watchdog | #16751 | -33 | Typed wrapper (row-polymorphic) |
+| **Cumulative** | | **-326** | (-15.5% of base 1943) |
+
+### 8.2 Current state
+
+- `lib/keeper/keeper_unified_turn.ml` = 1641 LOC (post-PR-4-c).
+- `run_keeper_cycle` body (L22-L1640) = 1618 LOC — still single mega-function.
+- Sibling sub-modules total: 1858 LOC across 13 files (`keeper_unified_turn_{phase_gate, cascade_resolution, pre_dispatch, retry_setup, terminal_error, attempt_watchdog, livelock_block, phase_plan, event_bus, failure, stay_silent, success, types}`).
+
+### 8.3 PR-4-d / PR-4-e 보류 결정
+
+Phase 4 sub-doc (#16650) 의 PR-4-c/d/e 추정값 `-400/-300/-180` 은 *PR-4-a/b 머지 *전* base 가정*. PR-4-c 실측 boundary 측정 (2026-05-19) 후 다음 어려움 발견:
+
+| 후보 | 측정 결과 | 결정 |
+|------|----------|------|
+| `attempt_result` 통째 추출 (L613-L687, 75 LoC) | 외부 deps 20+ (record 도입해도 폭증) | 보류 |
+| `do_run` 통째 추출 (L456-L578, 122 LoC) | closure deps 16+ + `run_turn` 47-arg signature | 보류 |
+| `dispatch_with_watchdog` (L490-L577, 88 LoC subset) | typed wrapper 4-5 args, generic | **PR-4-c MERGED** |
+| `match attempt_result with` dispatch (L688-L1191, 503 LoC) | recursive `retry_loop` self-reference + 큰 분기 매트릭스 | 보류 |
+
+retry_loop body (L582-L1191, 610 LoC) 의 *internal cohesion* — *state machine self-reference + closure captures* — 가 추가 분할 비용을 *typed-wrapper 추출이 가능한 작은 영역* 으로 제한. PR-4-d/e 는 *별도 측정 RFC sub-doc* 또는 *deferred* 로 둔다.
+
+### 8.4 Implemented criteria 진척
+
+| Criterion | Target | Current | Status |
+|-----------|--------|---------|--------|
+| `run_keeper_cycle` LOC | < 700 (orchestrator only) | 1618 | 미달 |
+| `keeper_unified_turn.ml` total LOC | (implicit cap) | 1641 | 진척 -15.5% |
+| 모든 sub-PR (PR-1/2/3/4) 머지 | required | PR-1~PR-4-c 머지, PR-4-d/e 보류 | 부분 충족 |
+
+본 RFC status `Active` 유지.  *Implemented* 전환은 (a) PR-4-d/e 측정 RFC sub-doc + 재시작, 또는 (b) 별도 후속 RFC 에서 `run_keeper_cycle` mega-function 분해를 다른 접근으로 닫은 후 가능.

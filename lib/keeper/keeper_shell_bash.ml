@@ -201,12 +201,45 @@ let rg_is_repo_wide args =
 let git_log_all_is_repo_wide args =
   match args with
   | subcmd :: rest when String.equal subcmd.text "log" ->
-    List.exists (fun arg -> String.equal arg.text "--all") rest
+    let has_all = List.exists (fun arg -> String.equal arg.text "--all") rest in
+    if not has_all then false
+    else
+      let has_output_limit arg =
+        let t = arg.text in
+        (* -N (bare number flag like -30) *)
+        (t <> "" && t.[0] = '-' && t <> "-" && t <> "--"
+         && let digits = String.sub t 1 (String.length t - 1) in
+            try let _ = int_of_string digits in true with _ -> false)
+        (* -n N handled below: "-n" followed by a number *)
+        || String.equal t "-n"
+        || String.starts_with ~prefix:"--max-count" t
+      in
+      let rec check_limit = function
+        | [] -> false
+        | arg :: rest ->
+          if String.equal arg.text "-n" then
+            match rest with
+            | n :: _ ->
+              (try let _ = int_of_string n.text in true
+               with _ -> check_limit rest)
+            | [] -> false
+          else if has_output_limit arg then true
+          else check_limit rest
+      in
+      not (check_limit rest)
   | _ -> false
 
 let simple_command_is_repo_wide_scan words =
   match strip_command_wrappers words with
   | bin :: args ->
+    let args =
+      let rec take = function
+        | [] -> []
+        | w :: _ when w.starts_command -> []
+        | w :: rest -> w :: take rest
+      in
+      take args
+    in
     (match command_name bin.text with
      | "grep" | "egrep" | "fgrep" -> grep_is_repo_wide args
      | "find" -> find_is_repo_wide args

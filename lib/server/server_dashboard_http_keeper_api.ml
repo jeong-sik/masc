@@ -6,6 +6,7 @@
 
 module Http = Http_server_eio
 module Checkpoints = Server_dashboard_http_keeper_api_checkpoints
+module Trace = Server_dashboard_http_keeper_api_trace
 
 (* Keeper route constants + classifier moved to
    Server_dashboard_http_keeper_api_types (intra-library file split,
@@ -16,59 +17,15 @@ let dedupe_tool_names names =
   Json_util.dedupe_keep_order
     (names |> List.map String.trim |> List.filter (fun name -> name <> ""))
 
-let trajectory_line_ts = function
-  | Trajectory.Tool_call entry -> entry.ts
-  | Trajectory.Thinking entry -> entry.ts
-
-let dedupe_thinking_lines (lines : Trajectory.trajectory_line list)
-    : Trajectory.trajectory_line list =
-  let seen = Hashtbl.create 32 in
-  List.filter
-    (function
-      | Trajectory.Tool_call _ -> true
-      | Trajectory.Thinking entry ->
-          let key =
-            Printf.sprintf "%.6f\x1f%b\x1f%s"
-              entry.ts entry.redacted entry.content
-          in
-          if Hashtbl.mem seen key then false
-          else (
-            Hashtbl.add seen key ();
-            true))
-    lines
+let trajectory_line_ts = Trace.line_ts
+let dedupe_thinking_lines = Trace.dedupe_thinking_lines
 
 (* internal_history_json_to_trajectory_line moved to
    Server_dashboard_http_keeper_api_types (intra-library file split,
    2026-05-16). *)
 
-let read_internal_history_lines ~(config : Coord.config) ~(trace_id : string)
-    : Trajectory.trajectory_line list =
-  let path = Keeper_types.keeper_internal_history_path config trace_id in
-  (* Streaming filter — avoid materialising the full JSONL list when
-     only a subset of lines decode to [trajectory_line]. Output is built
-     in reverse and reversed once, matching List.filter_map ordering. *)
-  Fs_compat.fold_jsonl_lines
-    ~init:[]
-    ~f:(fun acc ~line_no:_ json ->
-      match internal_history_json_to_trajectory_line json with
-      | Some line -> line :: acc
-      | None -> acc)
-    path
-  |> List.rev
-
-let merge_keeper_trace_lines ~(config : Coord.config) ~(trace_id : string)
-    (trajectory_lines : Trajectory.trajectory_line list)
-    : Trajectory.trajectory_line list =
-  let internal_lines = read_internal_history_lines ~config ~trace_id in
-  dedupe_thinking_lines (trajectory_lines @ internal_lines)
-  |> List.sort (fun left right ->
-         let cmp = Float.compare (trajectory_line_ts left) (trajectory_line_ts right) in
-         if cmp <> 0 then cmp
-         else
-           match left, right with
-           | Trajectory.Thinking _, Trajectory.Tool_call _ -> -1
-           | Trajectory.Tool_call _, Trajectory.Thinking _ -> 1
-           | _ -> 0)
+let read_internal_history_lines = Trace.read_internal_history_lines
+let merge_keeper_trace_lines = Trace.merge_keeper_trace_lines
 
 let keeper_tools_response_json (meta : Keeper_types.keeper_meta) =
   let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in

@@ -32,6 +32,9 @@ let label_source = "source"
 let fallback_class_hard_quota = "hard_quota"
 let fallback_class_max_turns = "max_turns"
 let fallback_class_resumable_cli_session = "resumable_cli_session"
+let fallback_class_required_tool_contract_violation =
+  "required_tool_contract_violation"
+
 let provider_label_max_execution_time = "max_execution_time"
 
 
@@ -521,6 +524,14 @@ let sdk_error_is_terminal_provider_runtime_failure
   || message_looks_like_terminal_provider_runtime_failure
        (Agent_sdk.Error.to_string err)
 
+let sdk_error_is_required_tool_contract_violation
+    (err : Agent_sdk.Error.sdk_error) : bool =
+  match err with
+  | Agent_sdk.Error.Agent
+      (Agent_sdk.Error.CompletionContractViolation { contract; _ }) ->
+    contract = Agent_sdk.Completion_contract_id.Require_tool_use
+  | _ -> false
+
 let sdk_error_is_hard_quota (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Provider (Llm_provider.Error.HardQuota _) -> true
@@ -902,4 +913,6 @@ let sdk_error_cascade_fallback_class (err : Agent_sdk.Error.sdk_error) :
   else if sdk_error_is_max_turns_exceeded err then Some fallback_class_max_turns
   else if sdk_error_is_resumable_cli_session err then
     Some fallback_class_resumable_cli_session
+  else if sdk_error_is_required_tool_contract_violation err then
+    Some fallback_class_required_tool_contract_violation
   else None

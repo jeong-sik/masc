@@ -122,6 +122,9 @@ val sdk_error_is_terminal_provider_runtime_failure :
 
 val sdk_error_is_model_access_denied : Agent_sdk.Error.sdk_error -> bool
 
+val sdk_error_is_required_tool_contract_violation :
+  Agent_sdk.Error.sdk_error -> bool
+
 val sdk_error_is_hard_quota : Agent_sdk.Error.sdk_error -> bool
 
 val sdk_error_soft_rate_limited :

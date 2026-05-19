@@ -12,6 +12,7 @@ import type {
   ServerStatus,
   BoardSortMode,
   Goal,
+  RefreshOptions,
   DashboardExecutionSessionBrief,
   DashboardExecutionQueueItem,
   DashboardExecutionWorkerSupportBrief,
@@ -509,10 +510,7 @@ export const staleKeepers: ReadonlySignal<Set<string>> = computed(() => {
 
 // --- Refresh orchestration ---
 
-interface RefreshOptions {
-  force?: boolean
-  light?: boolean
-}
+// RefreshOptions imported from types/core.ts (SSOT)
 
 // TTL values from config/constants.ts
 

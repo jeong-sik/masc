@@ -16,6 +16,7 @@ import {
 import { StateField, StateEffect, RangeSetBuilder, type Extension } from '@codemirror/state'
 import { signal } from '@preact/signals'
 import { normalizeIdeContextFilePath } from './ide-state'
+import { DEFAULT_MASC_ORIGIN } from '../../config/constants'
 
 const DEFAULT_LANGUAGE_ID = 'text' as const
 
@@ -373,7 +374,7 @@ class LspConnection {
 
   connect(): void {
     if (this.disposed) return
-    const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8935'
+    const origin = typeof window !== 'undefined' ? window.location.origin : DEFAULT_MASC_ORIGIN
     const wsUrl = origin.replace(/^http/, 'ws') + '/api/v1/ide/lsp'
     const ws = new WebSocket(wsUrl)
     this.ws = ws

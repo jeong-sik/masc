@@ -6,6 +6,7 @@ import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import type { ComponentChildren } from 'preact'
 import { post } from '../api/core'
+import { DEFAULT_MASC_ORIGIN } from '../config/constants'
 import {
   fetchGateConnectors,
   fetchGateKeepers,
@@ -685,7 +686,7 @@ function ConnectorLivePanel({
     label: 'Browser → Server',
     state: connectorError ? 'down' : 'ok',
     detail: connectorError ? 'gate fetch failed' : 'live',
-    hint: connectorError ? `${connector?.gate_base_url || 'localhost:8935'} 에서 서버 확인` : '',
+    hint: connectorError ? `${connector?.gate_base_url || DEFAULT_MASC_ORIGIN} 에서 서버 확인` : '',
   }
   const serverDot: LivenessDot = (() => {
     if (!connector?.available) {

@@ -26,9 +26,10 @@ import type {
   LspResponse,
 } from '../grpc/masc_coordination_pb'
 
-const DEFAULT_RETRY_BASE_MS = 1000
-/** Default retry ceiling.  Exported for callers that need it. */
-export const DEFAULT_RETRY_MAX_MS = 30000
+import { TRANSPORT_RETRY_BASE_MS, TRANSPORT_RETRY_MAX_MS } from '../config/constants'
+
+/** Re-export for callers that need the transport retry ceiling. */
+export const DEFAULT_RETRY_MAX_MS = TRANSPORT_RETRY_MAX_MS
 
 /** Encode a JSON payload into a gRPC-web binary frame.
  *  Frame: [flag:1][length:4][payload:N]
@@ -105,7 +106,7 @@ interface GrpcTransportState {
 function createState(): GrpcTransportState {
   return {
     listeners: [],
-    retryMs: DEFAULT_RETRY_BASE_MS,
+    retryMs: TRANSPORT_RETRY_BASE_MS,
     reconnectTimer: null,
     connected: false,
     abortController: null,

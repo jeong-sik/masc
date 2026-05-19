@@ -1,12 +1,10 @@
 import type { Transport, TransportEvent, TransportOptions } from './transport'
-
-const DEFAULT_RETRY_BASE_MS = 1000
-const DEFAULT_RETRY_MAX_MS = 30000
+import { TRANSPORT_RETRY_BASE_MS, TRANSPORT_RETRY_MAX_MS } from '../config/constants'
 
 export function createHttpStreamableTransport(url: string, opts: TransportOptions = {}): Transport {
   let abortController: AbortController | null = null
   let listeners: Array<(event: TransportEvent) => void> = []
-  let retryMs = opts.retryBaseMs ?? DEFAULT_RETRY_BASE_MS
+  let retryMs = opts.retryBaseMs ?? TRANSPORT_RETRY_BASE_MS
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let connected = false
 
@@ -32,7 +30,7 @@ export function createHttpStreamableTransport(url: string, opts: TransportOption
           throw new Error(`HTTP ${res.status}`)
         }
         connected = true
-        retryMs = opts.retryBaseMs ?? DEFAULT_RETRY_BASE_MS
+        retryMs = opts.retryBaseMs ?? TRANSPORT_RETRY_BASE_MS
         notify({ type: 'open' })
         const reader = res.body.getReader()
         const decoder = new TextDecoder()
@@ -61,7 +59,7 @@ export function createHttpStreamableTransport(url: string, opts: TransportOption
       .finally(() => {
         abortController = null
         if (!signal.aborted) {
-          const maxMs = opts.retryMaxMs ?? DEFAULT_RETRY_MAX_MS
+          const maxMs = opts.retryMaxMs ?? TRANSPORT_RETRY_MAX_MS
           reconnectTimer = setTimeout(connect, Math.min(retryMs, maxMs))
           retryMs = Math.min(retryMs * 2, maxMs)
         }

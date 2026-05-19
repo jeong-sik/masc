@@ -141,6 +141,7 @@
    keeper_shell_bg_task
    keeper_shell_shared
    keeper_shell_bash_words
+   keeper_shell_bash_redirects
    keeper_shell_bash
    keeper_shell_ops
    keeper_exec_shell

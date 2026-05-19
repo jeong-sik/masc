@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
-import { fetchWithTimeout, get } from '../../api/core'
+import { authHeaders, fetchWithTimeout, get } from '../../api/core'
 import { DEFAULT_GET_TIMEOUT_MS } from '../../config/constants'
 import { KeeperBadge } from '../keeper-badge'
 import {
@@ -153,7 +153,7 @@ async function fetchWorktreeEntries(): Promise<WorktreeEntry[]> {
   try {
     const res = await fetchWithTimeout(
       '/api/dashboard/worktree-status',
-      { headers: {} },
+      { headers: authHeaders() },
       DEFAULT_GET_TIMEOUT_MS,
     )
     if (!res.ok) return []

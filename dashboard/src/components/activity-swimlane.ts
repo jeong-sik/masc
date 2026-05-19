@@ -14,6 +14,7 @@ import { selectedNodeId, highlightedAgentId } from './activity-graph-selection'
 import { formatDurationMs } from '../lib/format-time'
 import { createManagedAsyncResource } from '../lib/async-state'
 import { escapeHtml, tooltipHtml } from '../lib/escape-html'
+import { truncate } from '../lib/truncate'
 import 'vis-timeline/styles/vis-timeline-graph2d.css'
 
 const swimlaneResource = createManagedAsyncResource<SwimlaneResponse | null>(null)
@@ -31,9 +32,6 @@ interface SwimlaneTimelineItem {
   style: string
 }
 
-function truncateLabel(value: string, max = 20): string {
-  return value.length > max ? `${value.slice(0, max - 2)}..` : value
-}
 
 function syncHighlightedGroups(
   container: HTMLDivElement,
@@ -127,7 +125,7 @@ export function ActivitySwimlane({ since }: { since?: string }) {
       const duration = formatDurationMs(span.end_ms - span.start_ms)
       const itemId = idCounter++
       const title = tooltipHtml([span.label || span.kind, `종류: ${span.kind}`, `지속: ${duration}`])
-      const content = span.label ? escapeHtml(truncateLabel(span.label)) : ''
+      const content = span.label ? escapeHtml(truncate(span.label, 20)) : ''
 
       const agentItemIds = itemIdsByAgent.get(span.agent) ?? []
       agentItemIds.push(itemId)

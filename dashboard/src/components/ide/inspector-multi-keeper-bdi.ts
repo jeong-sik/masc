@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
+import { get } from '../../api/core'
 import {
   BdiRouteLinks,
   InspectorKeeperBDI,
@@ -167,17 +168,12 @@ function useKeeperBdiSnapshot(keeperName: string, pollMs: number): KeeperBdiSlot
 
     const refresh = async () => {
       try {
-        const res = await fetch(
+        const raw = await get<unknown>(
           `/api/v1/keepers/${encodeURIComponent(name)}/bdi-snapshot`,
           { signal: controller.signal },
         )
         if (controller.signal.aborted) return
-        if (!res.ok) {
-          setError('snapshot unavailable')
-          setSnapshot(null)
-          return
-        }
-        const next = normalizeKeeperBdiSnapshot(await res.json())
+        const next = normalizeKeeperBdiSnapshot(raw)
         if (controller.signal.aborted) return
         setSnapshot(next)
         setError(next ? null : 'snapshot unavailable')

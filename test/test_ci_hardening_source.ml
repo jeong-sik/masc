@@ -1503,6 +1503,37 @@ let test_keeper_msg_timeout_contracts () =
     (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
        "`masc_keeper_msg.timeout_sec` through `KEEPER_TURN_TIMEOUT_SEC`")
 
+let test_keeper_supervisor_domain_pool_contracts () =
+  check bool "keeper supervisor never submits Eio loop body to domain pool" true
+    (file_not_contains_pattern "lib/keeper/keeper_supervisor.ml"
+       "Domain_pool.submit_io");
+  check bool "keeper supervisor records ignored domain-pool flag" true
+    (file_contains_pattern "lib/keeper/keeper_supervisor.ml"
+       "inline_eio_required"
+     && file_contains_pattern "lib/keeper/keeper_supervisor.ml"
+          "owning Eio domain");
+  check bool "keeper supervisor config documents domain-safety boundary" true
+    (file_contains_pattern "lib/config/env_config_keeper_supervisor.ml"
+       "not domain-safe")
+
+let test_keeper_boot_lifecycle_contracts () =
+  check bool "dashboard boot checks live keeper before masc_keeper_up dispatch" true
+    (file_contains_pattern "lib/server/server_dashboard_http_keeper_api.ml"
+       "let live_boot_entry ="
+     && file_contains_pattern "lib/server/server_dashboard_http_keeper_api.ml"
+          {|String.equal action "boot"|}
+     && file_contains_pattern "lib/server/server_dashboard_http_keeper_api.ml"
+          "Tool_keeper.dispatch");
+  check bool "dashboard boot live path resumes and wakes existing fiber" true
+    (file_contains_pattern "lib/server/server_dashboard_http_keeper_api.ml"
+       "already_live"
+     && file_contains_pattern "lib/server/server_dashboard_http_keeper_api.ml"
+          "Resume and wake the"
+     && file_contains_pattern "lib/server/server_dashboard_http_keeper_api.ml"
+          "Keeper_keepalive.process_directive"
+     && file_contains_pattern "lib/server/server_dashboard_http_keeper_api.ml"
+          {|"wakeup"|})
+
 let test_board_flusher_start_retry_contracts () =
   check bool "board flusher start has bounded CAS retry count" true
     (file_contains_pattern "lib/board_dispatch.ml"
@@ -2592,8 +2623,12 @@ let () =
              test_keeper_docker_multikeeper_isolation_contracts;
            test_case "keeper required tool contracts" `Quick
              test_keeper_required_tool_contracts;
-           test_case "keeper msg timeout contracts" `Quick
-             test_keeper_msg_timeout_contracts;
+          test_case "keeper msg timeout contracts" `Quick
+            test_keeper_msg_timeout_contracts;
+          test_case "keeper supervisor domain pool contracts" `Quick
+            test_keeper_supervisor_domain_pool_contracts;
+          test_case "keeper boot lifecycle contracts" `Quick
+            test_keeper_boot_lifecycle_contracts;
            test_case "board flusher start retry contracts" `Quick
              test_board_flusher_start_retry_contracts;
            test_case "docker config storage contracts" `Quick

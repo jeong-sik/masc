@@ -1088,51 +1088,79 @@ let handle_keeper_bash
          ; "retryable", `Bool true
          ])
   in
+  let json_of_raw raw =
+    match Yojson.Safe.from_string raw with
+    | json -> json
+    | exception Yojson.Json_error _ -> `String raw
+  in
+  let task_state_probe_blocked_json ~error ~reason =
+    Exec_core.blocked_result_json
+      ~cmd
+      ~error
+      ~reason
+      ~hint:Task_probe.hint
+      ~alternatives:Task_probe.alternatives
+      ~retryability:Exec_core.Self_correct
+      ~diag:
+        (Some
+           { Exec_core.rule_id = error
+           ; explanation =
+               "Keepers must use task-state tools instead of probing task \
+                state through shell."
+           ; rewrite = Some Task_probe.hint
+           ; tool_suggestion = Some "keeper_tasks_list"
+           })
+      ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
+      ()
+  in
+  let task_state_probe_autoroute ~original_error ~reason =
+    try
+      let task_result =
+        Keeper_exec_task.handle_keeper_task_tool
+          ~config
+          ~meta
+          ~name:"keeper_tasks_list"
+          ~args:(`Assoc [ "include_done", `Bool false; "limit", `Int 50 ])
+      in
+      Yojson.Safe.to_string
+        (`Assoc
+           [ "ok", `Bool true
+           ; "auto_routed", `Bool true
+           ; "auto_routed_from_tool", `String "keeper_bash"
+           ; "auto_routed_to_tool", `String "keeper_tasks_list"
+           ; "original_error", `String original_error
+           ; "cmd", `String cmd_for_log
+           ; "reason", `String reason
+           ; "instruction",
+             `String
+               "This Bash task-state probe was executed through \
+                keeper_tasks_list instead. Continue with keeper task tools; do \
+                not retry Bash, guessed task files, or localhost task APIs."
+           ; "result", json_of_raw task_result
+           ])
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      Log.Keeper.warn
+        "keeper_bash task-state autoroute failed: keeper=%s error=%s cmd=%s"
+        meta.name
+        (Printexc.to_string exn)
+        cmd_for_log;
+      Yojson.Safe.to_string (task_state_probe_blocked_json ~error:original_error ~reason)
+  in
   let task_state_http_probe_block () =
-    Yojson.Safe.to_string
-      (Exec_core.blocked_result_json
-         ~cmd
-         ~error:"task_state_http_probe_blocked"
-         ~reason:
-           "Task state is not exposed through guessed localhost HTTP APIs from \
-            keeper_bash."
-         ~hint:Task_probe.hint
-         ~alternatives:Task_probe.alternatives
-         ~retryability:Exec_core.Self_correct
-         ~diag:
-           (Some
-              { Exec_core.rule_id = "task_state_http_probe_blocked"
-              ; explanation =
-                  "Keepers must use task-state tools instead of probing \
-                   localhost task APIs from shell."
-              ; rewrite = Some Task_probe.hint
-              ; tool_suggestion = Some "keeper_tasks_list"
-              })
-         ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
-         ())
+    task_state_probe_autoroute
+      ~original_error:"task_state_http_probe_blocked"
+      ~reason:
+        "Task state is not exposed through guessed localhost HTTP APIs from \
+         keeper_bash."
   in
   let task_state_file_probe_block () =
-    Yojson.Safe.to_string
-      (Exec_core.blocked_result_json
-         ~cmd
-         ~error:"task_state_file_probe_blocked"
-         ~reason:
-           "Task state is owned by the MASC task tools, not by guessed \
-            backlog/current-task files in keeper sandboxes."
-         ~hint:Task_probe.hint
-         ~alternatives:Task_probe.alternatives
-         ~retryability:Exec_core.Self_correct
-         ~diag:
-           (Some
-              { Exec_core.rule_id = "task_state_file_probe_blocked"
-              ; explanation =
-                  "Keepers must use task-state tools instead of cat/find/rg \
-                   against .masc backlog files or worktree .task.json files."
-              ; rewrite = Some Task_probe.hint
-              ; tool_suggestion = Some "keeper_tasks_list"
-              })
-         ~extra:[ "cmd", `String cmd_for_log; "execution_time_ms", `Int 0 ]
-         ())
+    task_state_probe_autoroute
+      ~original_error:"task_state_file_probe_blocked"
+      ~reason:
+        "Task state is owned by the MASC task tools, not by guessed \
+         backlog/current-task files in keeper sandboxes."
   in
   if cmd = "" && has_typed_bash_input_key args
   then

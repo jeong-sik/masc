@@ -785,6 +785,9 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
            (if !timeout_hit then "timeout" else "tool_failure"))
     else None
   in
+  let telemetry_failure_class =
+    if success then None else Tool_result.failure_class result
+  in
   (* Track tool call in telemetry (controlled by MASC_TELEMETRY_ENABLED) *)
   let telemetry_enabled = Env_config_core.telemetry_enabled () in
   if telemetry_enabled then
@@ -796,6 +799,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
                 ?session_id:telemetry_session_id
                 ?operation_id:telemetry_operation_id
                 ?worker_run_id:telemetry_worker_run_id
+                ?failure_class:telemetry_failure_class
                 ?error_kind:telemetry_error_kind
                 ?error_message:error_detail
                 ()

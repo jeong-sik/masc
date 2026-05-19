@@ -448,8 +448,9 @@ let nonempty_error_kind_opt value =
   | None -> None
 
 let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id
-    ?source ?session_id ?operation_id ?worker_run_id ?error_kind
+    ?source ?session_id ?operation_id ?worker_run_id ?failure_class ?error_kind
     ?error_message ?exit_code ?stderr_excerpt () =
+  let failure_class = if success then None else failure_class in
   let error_kind =
     if success then None else nonempty_error_kind_opt error_kind
   in
@@ -473,7 +474,7 @@ let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id
          error_message;
          exit_code;
          stderr_excerpt;
-         failure_class = None;
+         failure_class;
        });
   if not success then
     match error_kind with

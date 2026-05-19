@@ -772,10 +772,14 @@ let make_keeper_tool_handler
                   counter when the silence threshold trips.
 
                   [WORKAROUND-CARRYOVER]: this is a noise-dedupe
-                  layer. The root fix is upstream (reduce the
-                  rate of tool-call failures themselves — args
-                  validation, container reuse RFC-0097, etc.).
-                  See the PR body. *)
+                  layer. Tracked by
+                  docs/rfc/RFC-0144-workaround-sunset-keeper-dedup-carryover.md.
+                  Removal: whole-layer sunset criteria (RFC §4):
+                  aggregate retry ERROR rate <10/day for 7 days
+                  rolling AND threshold_silence counter == 0.
+                  The root fix is upstream (reduce the rate of
+                  tool-call failures themselves — args validation,
+                  container reuse RFC-0097, etc.). *)
                let error_signature =
                  Keeper_tool_retry_state.normalize detail
                in

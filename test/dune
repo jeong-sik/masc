@@ -805,6 +805,7 @@
   test_mcp_server_eio
   test_mcp_server_eio_call_tool
   test_mcp_server_eio_join_state
+  test_mcp_server_eio_tool_dispatch
   test_code_navigation_eio
   test_backend
   test_room_eio
@@ -1029,6 +1030,7 @@
   test_mcp_server_eio
   test_mcp_server_eio_call_tool
   test_mcp_server_eio_join_state
+  test_mcp_server_eio_tool_dispatch
   test_code_navigation_eio
   test_backend
   test_room_eio

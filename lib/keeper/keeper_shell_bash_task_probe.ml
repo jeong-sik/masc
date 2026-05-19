@@ -1,23 +1,13 @@
-(** Task-state probing detection for keeper_bash command-shape guidance. *)
+(** Task-state probing detection for keeper_bash command-shape guidance.
+
+    [lowercase_contains] is sourced from [Keeper_shell_bash_task_state] so
+    the substring matcher has a single definition in the shell-policy
+    surface (the local copy was a byte-identical duplicate of the same
+    algorithm, matching RFC-0088 §1 N-of-M classifier pattern). *)
 
 open Keeper_shell_bash_words
 
-let lowercase_contains haystack needle =
-  let haystack = String.lowercase_ascii haystack in
-  let needle = String.lowercase_ascii needle in
-  let h_len = String.length haystack in
-  let n_len = String.length needle in
-  let rec loop i =
-    if n_len = 0
-    then true
-    else if i + n_len > h_len
-    then false
-    else if String.sub haystack i n_len = needle
-    then true
-    else loop (i + 1)
-  in
-  loop 0
-;;
+let lowercase_contains = Keeper_shell_bash_task_state.lowercase_contains
 
 let task_state_file_probe_command_names =
   [ "cat"; "head"; "tail"; "ls"; "find"; "rg"; "grep"; "test"; "[" ]

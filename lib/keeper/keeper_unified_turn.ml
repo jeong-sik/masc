@@ -163,71 +163,20 @@ let run_keeper_cycle
       (match None with
        | Some meta_after_skip -> Ok meta_after_skip
        | None ->
+         (* RFC-0136 PR-3: pre-dispatch validation extracted to
+            [Keeper_unified_turn_pre_dispatch].  profile_defaults stays
+            in scope so the retry-loop block below can also call the
+            extracted builder with the same defaults. *)
          let profile_defaults =
            Keeper_types_profile.load_keeper_profile_defaults meta.name
          in
-         let keeper_unified_max_tokens_fallback () =
-           match
-             Keeper_types_profile.unified_max_tokens_override_of_oas_env
-               ~keeper_name:meta.name
-               profile_defaults.oas_env
-           with
-           | Some value -> value
-           | None -> Keeper_config.keeper_unified_max_tokens ()
-         in
-         let build_cascade_execution ~(cascade_name : KCP.runtime_name)
-           : (cascade_execution, Agent_sdk.Error.sdk_error) result
-           =
-           let cascade_name_string = KCP.runtime_name_to_string cascade_name in
-           let meta_for_cascade = set_cascade_name cascade_name_string meta in
-           let model_labels =
-             Keeper_coordination.effective_model_labels_for_turn meta_for_cascade
-           in
-           match ensure_api_keys_for_labels model_labels with
-           | Error e -> Error (Agent_sdk.Error.Internal e)
-           | Ok () ->
-             (match ensure_local_discovery_ready model_labels with
-              | Error e -> Error (Agent_sdk.Error.Internal e)
-              | Ok () ->
-                let max_context_resolution =
-                  Keeper_exec_context.resolve_max_context_resolution
-                    ~requested_override:meta.max_context_override
-                    model_labels
-                in
-                let max_context = resolved_max_context_for_turn ~meta model_labels in
-                let temperature =
-                  Cascade_inference.resolve_temperature
-                    ~cascade_name
-                    ~fallback:Keeper_config.keeper_unified_temperature
-                in
-                let raw_max_tokens =
-                  Cascade_inference.resolve_max_tokens
-                    ~cascade_name
-                    ~fallback:keeper_unified_max_tokens_fallback
-                in
-                let max_output_ceiling =
-                  Cascade_runtime.max_output_tokens_ceiling_of_cascade_name
-                    cascade_name
-                in
-                (match
-                   Cascade_inference.validate_max_tokens_within_ceiling
-                     ~cascade_name
-                     ~provider_ceiling:max_output_ceiling
-                     raw_max_tokens
-                 with
-                 | Error err ->
-                   Error (Cascade_error_classify.sdk_error_of_masc_internal_error err)
-                 | Ok max_tokens ->
-                   Ok
-                     { cascade_name
-                     ; max_context_resolution
-                     ; max_context
-                     ; temperature
-                     ; max_tokens
-                     }))
-         in
          let effective_cascade_runtime_name = KCP.Runtime_name effective_cascade_name in
-         (match build_cascade_execution ~cascade_name:effective_cascade_runtime_name with
+         (match
+            Keeper_unified_turn_pre_dispatch.build_cascade_execution
+              ~meta
+              ~profile_defaults
+              ~cascade_name:effective_cascade_runtime_name
+          with
           | Error err ->
             let terminal_reason_code =
               Printf.sprintf
@@ -999,7 +948,10 @@ let run_keeper_cycle
                              with
                              | Degraded_retry_allowed degraded_retry ->
                                (match
-                                  build_cascade_execution
+                                  Keeper_unified_turn_pre_dispatch
+                                  .build_cascade_execution
+                                    ~meta
+                                    ~profile_defaults
                                     ~cascade_name:
                                       (KCP.Runtime_name degraded_retry.next_cascade)
                                 with

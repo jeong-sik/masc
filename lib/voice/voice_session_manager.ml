@@ -135,7 +135,14 @@ let load_session t agent_id =
       let content = Fs_compat.load_file filepath in
       let json = Yojson.Safe.from_string content in
       Some (session_of_json json)
-    with Sys_error _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | (Sys_error _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _) as exn ->
+      Log.Misc.warn
+        "[voice_session_manager.load_session] read failed for agent=%s: %s"
+        agent_id
+        (Printexc.to_string exn);
+      None
   end else
     None
 

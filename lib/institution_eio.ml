@@ -741,7 +741,12 @@ let load_and_format_for_welcome ~fs:_ (config : config) : string =
       let inst = institution_of_json json in
       format_for_welcome inst
     with
-    | Sys_error _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ""
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | (Sys_error _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _) as exn ->
+      Log.Institution.warn
+        "[load_and_format_for_welcome] institution read failed: %s"
+        (Printexc.to_string exn);
+      ""
     | exn ->
       Log.Misc.error "Unexpected institution load error: %s" (Printexc.to_string exn);
       "")

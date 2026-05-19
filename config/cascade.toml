@@ -763,6 +763,7 @@ fallback = true
 tiers = ["tier_medium", "primary", "__safe_lane"]
 strategy = "priority_tier"
 fallback = true
+keeper-assignable = false
 
 [tier-group.provider_benchmark]
 # Sweep lane for full provider inventory performance measurement

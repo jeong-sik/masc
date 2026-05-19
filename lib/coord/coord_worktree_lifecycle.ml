@@ -126,7 +126,7 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
             let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
             match read_agent_with_repair config agent_file with
             | Ok agent ->
-                let updated_agent = { agent with current_task = Some worktree_name } in
+                let updated_agent = { agent with current_task = Some task_id } in
                 write_json config agent_file (agent_to_yojson updated_agent)
             | Error msg -> Log.Misc.info "agent state read: %s" msg
           in

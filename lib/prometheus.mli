@@ -191,6 +191,28 @@ val metric_oas_bus_capacity : string
     Published once per bus at [Masc_event_bus_policy.create_bus] so
     operators can interpret [metric_oas_bus_subscriber_stream_depth]
     as a fraction of capacity. *)
+
+(** Counter: OAS [Agent_sdk.Event_bus.payload] variants that the
+    cascade event bridge did not have an explicit arm for and
+    degraded to a kind-only SSE payload via the catch-all in
+    [Cascade_event_bridge.native_event_to_json].  Labels: [kind]
+    carries [Agent_sdk.Event_bus.payload_kind other] (snake_case,
+    one-to-one with the upstream OAS payload constructor name —
+    cardinality is bounded by the OAS variant set and grows only
+    on upstream pin bumps).
+
+    A non-zero rate means an OAS pin bump shipped a new payload
+    variant before the masc-mcp consumer was migrated.  The catch-all
+    is deliberate (see [Cascade_event_bridge.native_event_to_json])
+    but degrades SSE subscribers to a kind-only payload, so this
+    counter is the per-process signal that an explicit arm needs
+    to be added.  Fix: extend the explicit match in
+    [lib/cascade/cascade_event_bridge.ml] for the offending [kind].
+
+    Pairs with the per-occurrence WARN log
+    ["oas_event_bridge: kind-only fallback ..."]. *)
+val metric_oas_bridge_unmigrated_payload_kind : string
+
 val metric_runtime_ollama_probe_generate_skips : string
 
 (** #9632: subprocess executions that exceeded their configured

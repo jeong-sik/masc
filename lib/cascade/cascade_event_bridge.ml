@@ -744,8 +744,17 @@ let wrap_event
     (#10490, #10574, #10584).  Without the catch-all, every new
     upstream variant breaks main with [-warn-error +8] until the
     consumer is migrated; with it, the relay degrades to a
-    kind-labelled placeholder + a warn log signal until an explicit
-    arm is added.
+    kind-labelled placeholder while emitting three operator signals:
+
+    - WARN log [oas_event_bridge: SSE-degraded ...] including the
+      offending [kind], correlation ids, timestamp, and the explicit
+      file:function where the migration arm should be added.
+    - Counter [masc_oas_bridge_unmigrated_payload_kind_total{kind}]
+      ({!Prometheus.metric_oas_bridge_unmigrated_payload_kind}) so the
+      degradation rate is visible to Prometheus without log scraping.
+    - SSE payload [note] + [migration_target] fields so dashboard code
+      can render the partial-data row distinctly and link the operator
+      back to the file that needs editing.
 
     Suppressing warning 11 ([@warning "-11"]) is therefore the entire
     point of this function's shape — do not remove it without also
@@ -980,23 +989,37 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
          see *something happened* (with stable [event_type] for
          filtering) instead of having the whole stream fail to parse.
 
-         [note] flags the partial-data shape so dashboards can render
-         it as a placeholder rather than treating it as a complete
-         payload.  The warn log gives operators a per-process signal
-         that an OAS variant has shipped without a masc-mcp consumer
-         migration; downstream PRs should then move the variant out
-         of this catch-all into an explicit arm. *)
+         [note] + [migration_target] flag the partial-data shape so
+         dashboards can render it as a placeholder rather than treating
+         it as a complete payload, and tell the operator *where* to add
+         the explicit arm.  The warn log gives operators a per-process
+         signal that an OAS variant has shipped without a masc-mcp
+         consumer migration; the
+         [masc_oas_bridge_unmigrated_payload_kind_total{kind}] counter
+         gives them the per-process *rate*, surfaced on the Prometheus
+         scrape so dashboards can alert without log scraping. *)
     let kind = Agent_sdk.Event_bus.payload_kind other in
+    Prometheus.inc_counter
+      Prometheus.metric_oas_bridge_unmigrated_payload_kind
+      ~labels:[ "kind", kind ]
+      ();
     Log.Misc.warn
-      "oas_event_bridge: kind-only fallback for unmigrated payload variant kind=%s \
-       correlation_id=%s run_id=%s"
+      "oas_event_bridge: SSE-degraded to kind-only payload for unmigrated OAS \
+       variant kind=%s correlation_id=%s run_id=%s ts=%f fix: add explicit arm in \
+       lib/cascade/cascade_event_bridge.ml::native_event_to_json for this kind"
       kind
       correlation_id
-      run_id;
+      run_id
+      ts;
     let payload =
       `Assoc
         [ "kind", `String kind
-        ; "note", `String "kind-only fallback; consumer not yet migrated"
+        ; ( "note"
+          , `String
+              "kind-only fallback; explicit arm not yet wired in \
+               cascade_event_bridge.native_event_to_json" )
+        ; ( "migration_target"
+          , `String "lib/cascade/cascade_event_bridge.ml::native_event_to_json" )
         ]
     in
     Some (wrap ~event_type:kind ~payload ())

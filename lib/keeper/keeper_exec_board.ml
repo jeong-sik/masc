@@ -284,7 +284,7 @@ let handle_keeper_board_tool
       "%s called by %s, raw args: %s"
       keeper_source
       author
-      (Yojson.Safe.to_string args);
+      (Yojson.Safe.pretty_to_string args);
     (match
        quantitative_claim_rejection_reason
          ~content:(post_content_arg args)
@@ -307,7 +307,7 @@ let handle_keeper_board_tool
            ~source:keeper_source
            (assoc_override_string "author" author args)
        in
-       Log.Keeper.debug "board_args: %s" (Yojson.Safe.to_string board_args);
+       Log.Keeper.debug "board_args: %s" (Yojson.Safe.pretty_to_string board_args);
        let result =
          Tool_board.handle_tool
            (Tool_name.Masc.to_string Tool_name.Masc.Board_post)

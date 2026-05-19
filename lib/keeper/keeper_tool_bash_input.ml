@@ -293,7 +293,7 @@ let shell_bin ~mode executable =
     Error (Executable_not_allowlisted { name; mode })
 ;;
 
-let shell_simple ~mode ?cwd ?(env = []) { executable; argv } =
+let shell_simple ~mode ?(sandbox = Masc_exec.Sandbox_target.host ()) ?cwd ?(env = []) { executable; argv } =
   let ( let* ) = Result.bind in
   let* bin = shell_bin ~mode executable in
   Ok
@@ -302,24 +302,24 @@ let shell_simple ~mode ?cwd ?(env = []) { executable; argv } =
     ; env = shell_env env
     ; cwd = shell_cwd cwd
     ; redirects = []
-    ; sandbox = Masc_exec.Sandbox_target.host ()
+    ; sandbox
     }
 ;;
 
-let to_shell_ir ~mode input =
+let to_shell_ir ?(sandbox = Masc_exec.Sandbox_target.host ()) ~mode input =
   let ( let* ) = Result.bind in
   let* () = validate ~mode input in
   match input with
   | Exec { executable; argv; cwd; env } ->
     let stage = { executable; argv } in
-    let* simple = shell_simple ~mode ?cwd ~env stage in
+    let* simple = shell_simple ~mode ~sandbox ?cwd ~env stage in
     Ok (Masc_exec.Shell_ir.Simple simple)
   | Pipeline { stages; cwd; env } ->
     let* simples =
       let rec loop acc = function
         | [] -> Ok (List.rev acc)
         | stage :: rest ->
-          let* simple = shell_simple ~mode ?cwd ~env stage in
+          let* simple = shell_simple ~mode ~sandbox ?cwd ~env stage in
           loop (Masc_exec.Shell_ir.Simple simple :: acc) rest
       in
       loop [] stages

@@ -8,7 +8,7 @@ function makeSnapshot(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperC
     correlation_id: 'corr-1',
     run_id: 'run-1',
     ts: 1000000,
-    phase: 'Running',
+    phase: 'running',
     turn_phase: 'idle',
     decision: { stage: 'undecided' },
     cascade: { state: 'idle' },
@@ -78,7 +78,7 @@ describe('invariantRows', () => {
 
   it('shows drift detail for broken compaction_atomicity', () => {
     const rows = invariantRows(makeSnapshot({
-      phase: 'Running',
+      phase: 'running',
       invariants: {
         phase_turn_alignment: true,
         no_cascade_before_measurement: true,
@@ -89,7 +89,7 @@ describe('invariantRows', () => {
     }))
     const row = rows.find(r => r.key === 'compaction_atomicity')!
     expect(row.ok).toBe(false)
-    expect(row.detail).toContain('KSM=Running')
+    expect(row.detail).toContain('KSM=running')
   })
 
   it('shows OK detail for valid phase_turn_alignment', () => {
@@ -129,7 +129,7 @@ describe('deriveOperationalInsight', () => {
   it('reports error when Failing and cascade exhausted', () => {
     const insight = deriveOperationalInsight(
       makeSnapshot({
-        phase: 'Failing',
+        phase: 'failing',
         cascade: { state: 'exhausted' },
       }),
       noObservations,
@@ -175,7 +175,7 @@ describe('deriveOperationalInsight', () => {
   it('reports info when Compacting', () => {
     const insight = deriveOperationalInsight(
       makeSnapshot({
-        phase: 'Compacting',
+        phase: 'compacting',
         compaction: { stage: 'compacting' },
       }),
       noObservations,
@@ -188,19 +188,19 @@ describe('deriveOperationalInsight', () => {
   it('reports warn for Overflowed phase', () => {
     const insight = deriveOperationalInsight(
       makeSnapshot({
-        phase: 'Overflowed',
+        phase: 'overflowed',
       }),
       noObservations,
       now,
     )
     expect(insight.tone).toBe('warn')
-    expect(insight.headline).toContain('Overflowed')
+    expect(insight.headline).toContain('overflowed')
   })
 
   it('reports warn for HandingOff phase', () => {
     const insight = deriveOperationalInsight(
       makeSnapshot({
-        phase: 'HandingOff',
+        phase: 'handing_off',
       }),
       noObservations,
       now,
@@ -211,7 +211,7 @@ describe('deriveOperationalInsight', () => {
   it('reports warn for Draining phase', () => {
     const insight = deriveOperationalInsight(
       makeSnapshot({
-        phase: 'Draining',
+        phase: 'draining',
       }),
       noObservations,
       now,
@@ -219,23 +219,16 @@ describe('deriveOperationalInsight', () => {
     expect(insight.tone).toBe('warn')
   })
 
-  it('reports warn for Stable phase', () => {
-    const insight = deriveOperationalInsight(
-      makeSnapshot({
-        phase: 'Stable',
-        is_live: false,
-      }),
-      noObservations,
-      now,
-    )
-    // Stable falls into the overflow/handoff/draining/stable block
-    expect(insight.tone).toBe('warn')
-  })
+  // Backend wire format (keeper_state_machine.ml:21-35) emits the 13 raw KSM
+  // phases lowercase. A 7-phase composite projection with a 'Stable' carrier
+  // is specced (KeeperCompositeLifecycle.tla:143) but not currently emitted,
+  // so the dashboard surfaces `collapsed_from` directly whenever the backend
+  // sets it — see deriveOperationalInsight + nextExpectedStep.
 
-  it('reports raw stable source in detail and evidence when collapsed_from is present', () => {
+  it('reports raw collapsed_from source in detail, evidence, and nextStep', () => {
     const insight = deriveOperationalInsight(
       makeSnapshot({
-        phase: 'Stable',
+        phase: 'overflowed',
         collapsed_from: 'paused',
       }),
       noObservations,
@@ -369,7 +362,7 @@ describe('deriveOperationalInsight', () => {
 
   it('gives correct nextStep for Failing+exhausted', () => {
     const insight = deriveOperationalInsight(
-      makeSnapshot({ phase: 'Failing', cascade: { state: 'exhausted' } }),
+      makeSnapshot({ phase: 'failing', cascade: { state: 'exhausted' } }),
       noObservations,
       now,
     )

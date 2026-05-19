@@ -305,6 +305,56 @@ describe('runtimeAttentionForSnapshot', () => {
     expect(attention.reason).toContain('healthy idle')
   })
 
+  it('does not revive a previous terminal receipt while a live turn is running', () => {
+    const snap = snapshot({
+      is_live: true,
+      turn_phase: 'executing',
+      decision: { stage: 'tool_policy_selected' },
+      cascade: { state: 'trying' },
+      live_turn: {
+        turn_id: 42,
+        started_at: generatedAt - 30,
+        last_progress_at: generatedAt - 5,
+        last_progress_kind: 'provider_attempt_started',
+      },
+      execution: execution({
+        recorded_at: '2026-04-25T07:30:00Z',
+        outcome: 'receipt_failed',
+        terminal_reason_code: 'cascade_exhausted',
+        operator_disposition: 'alert_exhausted',
+        operator_disposition_reason: 'cascade_exhausted',
+        tool_contract_result: 'unknown',
+        error: {
+          kind: 'internal',
+          message_preview: 'cascade exhausted',
+          message_truncated: false,
+        },
+      }),
+      runtime_attention: {
+        state: 'ok',
+        needs_attention: false,
+        blocked: false,
+        fiber_stop_requested: false,
+        reason: null,
+        raw_phase: 'running',
+        is_live: true,
+        source: 'live_turn',
+        execution_current: false,
+        stale_execution_receipt: true,
+        live_turn_started_at: generatedAt - 30,
+        live_turn_last_progress_at: generatedAt - 5,
+      },
+    })
+
+    expect(latestRuntimeActivityEpoch(snap)).toBe(generatedAt - 5)
+    const attention = runtimeAttentionForSnapshot(snap, generatedAt)
+    expect(attention.level).toBe('ok')
+    expect(attention.label).toBe('live')
+    expect(attention.cause).toContain('live turn 관측 중')
+    expect(attention.title).toContain('receipt=previous_turn')
+    expect(attention.title).toContain('previous_terminal=cascade_exhausted')
+  })
+
   it('keeps raw lifecycle separate by flagging stale liveness without changing phase', () => {
     const snap = snapshot({
       is_live: false,

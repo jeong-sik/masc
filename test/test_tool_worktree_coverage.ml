@@ -255,6 +255,20 @@ let playground_cache_repo ~base_path ~agent_name ~repo_name =
        | `String name -> String.equal name repo_name
        | _ -> false)
 
+let agent_current_task ~config ~agent_name =
+  let agent_file =
+    Filename.concat (Masc_mcp.Coord.agents_dir config)
+      (Masc_mcp.Coord.safe_filename agent_name ^ ".json")
+  in
+  let open Yojson.Safe.Util in
+  match Yojson.Safe.from_file agent_file |> member "current_task" with
+  | `String task_id -> Some task_id
+  | `Null -> None
+  | other ->
+      fail
+        (Printf.sprintf "unexpected current_task JSON: %s"
+           (Yojson.Safe.to_string other))
+
 let test_dispatch_worktree_create_spoofed_agent_blocked () =
   let ctx = make_ctx () in
   let args = `Assoc [
@@ -366,7 +380,8 @@ let test_dispatch_worktree_create_auto_provisions_workspace_repo () =
        ~repo_rel:"workspace/yousleepwhen/masc-mcp");
   let config = Masc_mcp.Coord.default_config base_path in
   ignore (Masc_mcp.Coord.init config ~agent_name:(Some "test-agent"));
-  let ctx : Tool_worktree.context = { config; agent_name = "test-agent" } in
+  let agent_name = Masc_mcp.Coord.resolve_agent_name config "test-agent" in
+  let ctx : Tool_worktree.context = { config; agent_name } in
   let task_id = "task-auto-clone" in
   let args = `Assoc [
     ("task_id", `String task_id);
@@ -374,12 +389,13 @@ let test_dispatch_worktree_create_auto_provisions_workspace_repo () =
     ("base_branch", `String "main");
   ] in
   let sandbox_clone =
-    Filename.concat base_path ".masc/playground/test-agent/repos/masc-mcp"
+    Filename.concat base_path
+      (Printf.sprintf ".masc/playground/%s/repos/masc-mcp" agent_name)
   in
   let worktree_path =
     Filename.concat sandbox_clone
       (Filename.concat ".worktrees"
-         (Playground_paths.worktree_dir_name "test-agent" task_id))
+         (Playground_paths.worktree_dir_name agent_name task_id))
   in
   match Tool_worktree.dispatch ctx ~name:"masc_worktree_create" ~args with
   | None -> fail "dispatch returned None for masc_worktree_create"
@@ -390,7 +406,10 @@ let test_dispatch_worktree_create_auto_provisions_workspace_repo () =
       check bool "message mentions auto-provision" true
         (contains "auto-provisioned" msg);
       check bool "sandbox clone created" true (Sys.file_exists sandbox_clone);
-      check bool "worktree created" true (Sys.file_exists worktree_path)
+      check bool "worktree created" true (Sys.file_exists worktree_path);
+      check (option string) "agent current_task stores task id"
+        (Some task_id)
+        (agent_current_task ~config ~agent_name)
 
 let test_dispatch_worktree_create_refreshes_playground_repo_cache () =
   let base_path = temp_dir () in

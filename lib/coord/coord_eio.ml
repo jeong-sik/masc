@@ -479,15 +479,35 @@ let lock_info_of_json json =
       | `String s -> Some s
       | _ -> None
     in
-    match
-      (parse_string (member "resource" json),
-       parse_string (member "owner" json),
-       parse_float (member "acquired_at" json),
-       parse_float (member "expires_at" json))
-    with
+    let resource_opt = parse_string (member "resource" json) in
+    let owner_opt = parse_string (member "owner" json) in
+    let acquired_at_opt = parse_float (member "acquired_at" json) in
+    let expires_at_opt = parse_float (member "expires_at" json) in
+    match resource_opt, owner_opt, acquired_at_opt, expires_at_opt with
     | Some resource, Some owner, Some acquired_at, Some expires_at ->
         Ok { resource; owner; acquired_at; expires_at }
-    | _ -> Error "Invalid lock metadata"
+    | _ ->
+        (* Previously collapsed to the bare "Invalid lock metadata".
+           Operators reading a recover/repair log line cannot tell
+           which of the four fields the lock JSON was missing; that
+           detail is what the producer-side fix needs.  Enumerate
+           which field(s) failed to parse so the message carries the
+           same information the parser already has in scope. *)
+        let missing =
+          List.filter_map (fun (name, opt) ->
+            if Option.is_none opt then Some name else None)
+            [ ("resource (string)", Option.map (fun _ -> ()) resource_opt);
+              ("owner (string)", Option.map (fun _ -> ()) owner_opt);
+              ("acquired_at (number)",
+               Option.map (fun _ -> ()) acquired_at_opt);
+              ("expires_at (number)",
+               Option.map (fun _ -> ()) expires_at_opt);
+            ]
+        in
+        Error
+          (Printf.sprintf
+             "Invalid lock metadata: missing or wrong-type field(s) [%s]"
+             (String.concat ", " missing))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Printexc.to_string e)

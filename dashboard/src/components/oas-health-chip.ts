@@ -7,17 +7,14 @@ import { oasHealthSummary, oasAgentEvents, oasKeeperSnapshots } from '../store'
 import { Card } from './common/card'
 import { StatTile } from './common/stat-tile'
 import { EmptyState } from './common/empty-state'
+import { formatRelativeAgeMs } from '../lib/format-time'
 import type { OasAgentEvent, OasHealthSummary, OasKeeperSnapshot } from '../types/oas'
 
 const STALE_MS = 60_000
 
 function formatLastTick(tick: number | null): string {
   if (tick == null) return '—'
-  const delta = Date.now() - tick
-  if (delta < 1000) return '방금'
-  if (delta < 60_000) return `${Math.floor(delta / 1000)}초 전`
-  if (delta < 3_600_000) return `${Math.floor(delta / 60_000)}분 전`
-  return `${Math.floor(delta / 3_600_000)}시간 전`
+  return formatRelativeAgeMs(Date.now() - tick)
 }
 
 const EVENT_TYPE_LABELS: Record<OasAgentEvent['type'], string> = {

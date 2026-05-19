@@ -5,6 +5,7 @@
 import { html } from 'htm/preact'
 import { useMemo } from 'preact/hooks'
 import { useId } from '../../../design-system/headless-preact/use-id'
+import { formatRelativeAgeMs } from '../../lib/format-time'
 
 export interface VersionSnapshot {
   id: string
@@ -92,17 +93,7 @@ export function summarizeVersionHistory(
   }
 }
 
-function formatRelativeTime(ts: number): string {
-  const diff = Date.now() - ts
-  const sec = Math.floor(diff / 1000)
-  if (sec < 60) return `${sec}초 전`
-  const min = Math.floor(sec / 60)
-  if (min < 60) return `${min}분 전`
-  const hr = Math.floor(min / 60)
-  if (hr < 24) return `${hr}시간 전`
-  const day = Math.floor(hr / 24)
-  return `${day}일 전`
-}
+
 
 function snapshotAriaLabel(snapshot: VersionSnapshot, state: VersionSnapshotState): string {
   const stateLabel = state === 'current' ? '현재 버전' : '이전 버전'
@@ -219,7 +210,7 @@ export function VersionHistory({
                       </div>
                       <div class="mt-0.5 text-3xs text-[var(--color-fg-secondary)]">
                         ${snap.author} ·
-                        <time datetime=${timestampIso}>${formatRelativeTime(snap.timestamp)}</time>
+                        <time datetime=${timestampIso}>${formatRelativeAgeMs(Date.now() - snap.timestamp)}</time>
                         <span class="ml-2 text-[var(--ok)]">+${snap.changes.added}</span>
                         <span class="ml-1 text-[var(--warn)]">~${snap.changes.modified}</span>
                         <span class="ml-1 text-[var(--err)]">-${snap.changes.deleted}</span>

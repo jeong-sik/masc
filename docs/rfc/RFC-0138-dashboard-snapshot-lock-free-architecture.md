@@ -1,8 +1,8 @@
 # RFC-0138 — Dashboard Snapshot: Lock-Free Immutable Architecture (Phase 3 Root Fix)
 
-**Status**: Draft
+**Status**: Phase 3 in progress (Steps 1-3 merged; Steps 4-5 Draft PR)
 **Author**: Vincent / Claude Opus 4.7
-**Date**: 2026-05-19
+**Date**: 2026-05-19 (last updated 2026-05-20)
 **Supersedes**: N/A
 **Related**:
 - Report: `vfile:///Users/dancer/me/.worktrees/dashboard-slow-endpoints-report-20260519/memory/masc-mcp-dashboard-slow-endpoints-report-2026-05-19.html` (jeong-sik/me#1144)
@@ -83,14 +83,23 @@ val publish_for_test : t -> unit
 
 ### 3.3 Migration sequence (do NOT batch)
 
-| Step | PR scope | Confidence required to proceed |
-|---|---|---|
-| **0. This RFC + prototype** | RFC-0138 + `Dashboard_snapshot` module + harness tests | Required before any handler wire |
-| **1. Wire /shell as read-only snapshot getter** | Replace `dashboard_shell_http_json` cache path with `Dashboard_snapshot.current_or_bootstrap` for the read; keep `Dashboard_cache` as fallback for one sprint | Must show Server-Timing `cache_lookup;dur~0ms` p99 for /shell |
-| **2. Wire /tools and /telemetry/summary** | Same pattern. /telemetry (query-keyed) stays cache-based as it is per-query. | p99 < 5ms on both warm |
-| **3. Wire /project-snapshot** | Highest-risk migration — uses Eio fiber timeouts. Move the fiber-with-timeout pattern to the refresh fiber, not the HTTP path. | All 6 timeout env vars (`MASC_NAMESPACE_TRUTH_*`) become dead code |
-| **4. Deprecate 14+ timeout env vars** | Move to `.env-deprecated` with sunset date; warn at server start if any are set. Remove in next major. | Operations sign-off |
-| **5. Retire `Dashboard_cache` for read paths** | Cache module remains for query-keyed `/telemetry` only. | Hit ratio data from `/cache-stats` (#16654) shows no other dependencies |
+| Step | PR scope | Confidence required to proceed | Status (2026-05-20) |
+|---|---|---|---|
+| **0. This RFC + prototype** | RFC-0138 + `Dashboard_snapshot` module + harness tests | Required before any handler wire | merged (prereq) |
+| **1. Wire /shell as read-only snapshot getter** | Replace `dashboard_shell_http_json` cache path with `Dashboard_snapshot.current_or_bootstrap` for the read; keep `Dashboard_cache` as fallback for one sprint | Must show Server-Timing `cache_lookup;dur~0ms` p99 for /shell | **MERGED** via PR #16694 |
+| **2. Wire /tools and /telemetry/summary** | Same pattern. /telemetry (query-keyed) stays cache-based as it is per-query. | p99 < 5ms on both warm | **MERGED** via PR #16730. Incidental: latent paren regression at `server_dashboard_shell_snapshot.ml` line ~76 was undetected by sandbox CI (see `reference_masc_mcp_ci_build_test_skips`); bundled hotfix carried into Step 4 / Step 5 PRs |
+| **3. Wire /project-snapshot** | Highest-risk migration — uses Eio fiber timeouts. Move the fiber-with-timeout pattern to the refresh fiber, not the HTTP path. | All 6 timeout env vars (`MASC_NAMESPACE_TRUTH_*`) become dead code | **MERGED** via PR #16738 (also wires `/namespace-truth` and `/room-truth` aliases) |
+| **4. Retire 4 `MASC_NAMESPACE_TRUTH_*_TIMEOUT_S` env knobs** | Remove env reads on the namespace-truth read path; emit one-shot WARN at server start if any are still set. | Originally gated on "Server-Timing `snapshot_read;dur~0ms` p99 on retired paths"; **per user override, advanced on code-fact (Step 3 wire merge) instead of p99 measurement**. | **Draft PR #16752** (build-passing). Caveat: `MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S` is **not** retired — it has a live consumer at `server_dashboard_http_execution_surfaces.ml:572` (proactive refresh loop); only its fallback-path lookup at `namespace_truth:100` was retired |
+| **5. Retire `Dashboard_cache` from read path + rename `Server_dashboard_shell_snapshot` → `Server_dashboard_snapshot_select`** | Cache module remains for query-keyed `/telemetry` only; module rename reflects post-Step 3 role (multi-endpoint select projection). | Hit ratio data from `/cache-stats` (#16654) shows no other dependencies | **Draft PR #16761** (build-passing). Fallback function `dashboard_namespace_truth_http_json` remains alive as cold-start safety net; its deletion is deferred to a future RFC gated on cold-start snapshot-hit observability |
+
+### 3.4 Phase 3 closeout notes (2026-05-20)
+
+- Steps 1-3 wired all five read endpoints (`/shell`, `/tools`, `/telemetry/summary`, `/project-snapshot`, `/namespace-truth` + `/room-truth` aliases) to `Dashboard_snapshot.current_or_bootstrap` and merged in three sequential PRs (#16694, #16730, #16738).
+- Step 4 (env-knob retirement) was advanced before the originally specified p99 measurement gate. The retire criterion in the table above was relaxed per user override: progression is keyed on the Step 3 wire merge (code-fact) rather than measured p99 latency on retired paths. Outstanding measurement work tracked separately.
+- Step 4 scope was narrowed at execution time: only the four `MASC_NAMESPACE_TRUTH_*_TIMEOUT_S` knobs are retired. `MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S` is retained — it is read by a live proactive refresh loop (`server_dashboard_http_execution_surfaces.ml:572`), not just by fallback lookup.
+- Step 5 retires `Dashboard_cache` from the read path and renames `Server_dashboard_shell_snapshot` → `Server_dashboard_snapshot_select` (the module now serves multiple endpoints, not just `/shell`). The fallback function `dashboard_namespace_truth_http_json` remains alive as a cold-start safety net; deletion is gated on a future RFC for cold-start snapshot-hit observability.
+- Step 2's incidental paren regression at `server_dashboard_shell_snapshot.ml` line ~76 went undetected by sandbox CI. The skip vector is tracked in memory file `reference_masc_mcp_ci_build_test_skips` and is a candidate for future CI remediation. The hotfix is carried inside the Step 4 and Step 5 PRs.
+- §4 trade-off claim "1 (`refresh_interval_sec`)" for tunable env vars is now closer to reality after Step 4 lands. §7 acceptance criteria items remain open pending the deferred p99 measurement pass.
 
 ## 4. Trade-offs
 

@@ -7,6 +7,7 @@
  */
 
 import { signal } from '@preact/signals'
+import { isRecord } from '../common/normalize'
 
 const DEFAULT_MAX_EVENTS = 200
 const RUN_ACTIVITY_VERBS = [
@@ -147,10 +148,6 @@ function validEventForRun(event: unknown, runId: string): event is RunActivityEv
   if (event.tags !== undefined && !isStringArray(event.tags)) return false
   if (event.context !== undefined && !isRunActivityContext(event.context)) return false
   return Number.isFinite(event.timestamp_ms)
-}
-
-function isRecord(value: unknown): value is UnknownRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function hasNonEmptyString(record: UnknownRecord, key: string): boolean {

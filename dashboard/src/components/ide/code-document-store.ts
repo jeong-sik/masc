@@ -1,5 +1,6 @@
 import { signal } from '@preact/signals'
 import { fetchIdeRegions, type IdeCodeRegion } from '../../api/ide'
+import { isRecord } from '../common/normalize'
 
 export interface CodeDocumentSource {
   readonly file_path: string | null
@@ -137,8 +138,4 @@ function normalizeMaxLines(value: number | undefined): number {
 
 function normalizeNonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

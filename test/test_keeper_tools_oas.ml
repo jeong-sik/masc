@@ -1217,6 +1217,61 @@ let test_workflow_rejection_recovery_fields_mark_loop () =
   check int "workflow rejection count" 2 (json_int "count" recovery)
 ;;
 
+let test_workflow_rejection_same_args_short_circuits_after_first_failure () =
+  let meta =
+    make_test_meta
+      ~name:"test-keeper-workflow-no-repeat"
+      ~allowed_paths:[ "*" ]
+      ()
+  in
+  let ctx_snapshot = make_test_ctx () in
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "test_keeper_tools_workflow_%d" (Random.int 100000))
+  in
+  (try Unix.mkdir dir 0o755 with
+   | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+       Eio_main.run
+       @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       let config = Coord.default_config dir in
+       let tools = make_registered_tools ~config ~meta ~ctx_snapshot () in
+       let bash = find_tool "Bash" tools in
+       let args = `Assoc [ "command", `String "keeper_tasks_list" ] in
+       (match Tool.execute bash args with
+        | Error { Agent_sdk.Types.message; _ } ->
+          let json = parse message in
+          check bool "first failure is not guardrail" false (is_guardrail_message message);
+          check
+            string
+            "failure class"
+            "workflow_rejection"
+            (json_string "failure_class" json);
+          check
+            bool
+            "self correction required"
+            true
+            (json_bool "self_correction_required" json);
+          check
+            string
+            "retry skipped reason"
+            "deterministic_error_workflow_rejection_blocked"
+            (json_string "retry_skipped_reason" json)
+        | Ok _ -> fail "direct tool command through Bash should be a workflow rejection");
+       match Tool.execute bash args with
+       | Error { Agent_sdk.Types.message; _ } ->
+         check
+           bool
+           "same deterministic workflow rejection is blocked"
+           true
+           (is_guardrail_message message)
+       | Ok _ -> fail "same workflow rejection should be blocked before execution")
+;;
+
 let test_normalize_failure_plain_text () =
   let raw = "tool keeper_bash failed (3/5): Unix_error(ENOENT)" in
   let normalized = Keeper_tools_oas.normalize_tool_result ~success:false raw in
@@ -1491,6 +1546,10 @@ let () =
             "workflow rejection marks repeated loop"
             `Quick
             test_workflow_rejection_recovery_fields_mark_loop
+        ; test_case
+            "workflow rejection same args stops after first failure"
+            `Quick
+            test_workflow_rejection_same_args_short_circuits_after_first_failure
         ; test_case
             "failure plain text wraps as error"
             `Quick

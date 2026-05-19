@@ -652,22 +652,23 @@ let make_keeper_tool_handler
             let recovery_fields =
               workflow_rejection_recovery_fields @ deterministic_recovery_fields
             in
-            (* Deterministic policy/shape blocks: jump the per-(tool,args)
-               failure counter to [max_consecutive_failures] on the first
-               occurrence so the next invocation with the same args lands
-               in the [prior_fails >= max_consecutive_failures] block branch
-               at the top of the handler instead of repeating the same
-               error log at 2/3 and 3/3. The current call still emits
-               once (with the [retry_skipped*] recovery fields above) so
-               the LLM receives a single, self-correcting response. *)
+            (* Deterministic policy/shape blocks, including typed workflow
+               rejections: jump the per-(tool,args) failure counter to
+               [max_consecutive_failures] on the first occurrence so the next
+               invocation with the same args lands in the
+               [prior_fails >= max_consecutive_failures] block branch at the
+               top of the handler instead of executing the same rejected tool
+               again. The current call still emits once (with the
+               [retry_skipped*] / workflow recovery fields above) so the LLM
+               receives a single, self-correcting response. *)
             let count =
               match deterministic_reason, is_workflow_rejection with
-              | _, true -> 0
               | Some _, _ ->
                 failure_count_jump_to
                   failure_counts
                   key
                   ~target:max_consecutive_failures
+              | None, true -> 0
               | None, false -> failure_count_record_failure failure_counts key
             in
             Keeper_registry.record_tool_use

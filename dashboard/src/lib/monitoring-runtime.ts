@@ -1,4 +1,5 @@
 import type { Agent, Keeper, PipelineStage } from '../types'
+import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
 import { keeperDisplayStatus, keeperRuntimeBlockerHint } from './keeper-runtime-display'
 // RFC-0135 PR-2: phase casing SSOT — single source `toKeeperPhase` in
 // keeper-store-normalize. Local CANONICAL_PHASE_KEYS + normalizePhase
@@ -6,6 +7,12 @@ import { keeperDisplayStatus, keeperRuntimeBlockerHint } from './keeper-runtime-
 // PHASE_ID_MAP elsewhere; the three maps drifted independently.
 import { toKeeperPhase } from '../keeper-store-normalize'
 import { isKeeperPaused } from './keeper-predicates'
+// RFC-0135 PR-12: route blocker visibility through the typed SSOT so
+// stale vs live blocker distinction (composite.execution_current /
+// stale_execution_receipt) is honored. Previously the inline
+// `Boolean(keeper.runtime_blocker_class)` flipped attention on stale
+// receipts that the typed state demoted to `running.staleBlocker`.
+import { deriveKeeperOperationalState } from './keeper-operational-state'
 
 export type RuntimeBand = 'active' | 'attention' | 'paused' | 'offline'
 
@@ -179,7 +186,12 @@ function contextAttentionRatio(keeper: Keeper): number {
     : DEFAULT_CONTEXT_ATTENTION_RATIO
 }
 
-function keeperBand(keeper: Keeper, phaseKey: string, lifecycleKey: string): RuntimeBand {
+function keeperBand(
+  keeper: Keeper,
+  composite: KeeperCompositeSnapshot | null,
+  phaseKey: string,
+  lifecycleKey: string,
+): RuntimeBand {
   // RFC-0135 PR-3: canonical paused predicate. The previous local OR
   // chain (`paused || phaseKey === 'Paused' || lifecycleKey === 'paused'`)
   // was one of four parallel paused checks that drifted independently.
@@ -193,9 +205,17 @@ function keeperBand(keeper: Keeper, phaseKey: string, lifecycleKey: string): Run
   ) {
     return 'offline'
   }
+  // RFC-0135 PR-12: live blocker — typed state's `stuck` variant. When
+  // composite is null (caller has no snapshot in hand) SSOT cannot
+  // confirm staleness, so it falls back to the previous behavior of
+  // treating any blocker class as live. When composite is present and
+  // marks `execution_current=false` or `stale_execution_receipt=true`,
+  // the blocker is demoted to `running.staleBlocker` and does NOT trip
+  // attention — this closes audit finding B2 (visibility miscount).
+  const liveBlocker = deriveKeeperOperationalState({ keeper, composite }).kind === 'stuck'
   if (
     ATTENTION_PHASES.has(phaseKey)
-    || Boolean(keeper.runtime_blocker_class)
+    || liveBlocker
     || keeper.social_model_recognized === false
     || isHeartbeatStale(keeper)
     || (typeof keeper.context_ratio === 'number' && keeper.context_ratio >= contextAttentionRatio(keeper))
@@ -224,11 +244,14 @@ function keeperHint(keeper: Keeper, band: RuntimeBand, stage: StageMeta): string
   return stage.description
 }
 
-export function summarizeKeeperMonitoring(keeper: Keeper): KeeperMonitoringSummary {
+export function summarizeKeeperMonitoring(
+  keeper: Keeper,
+  composite: KeeperCompositeSnapshot | null = null,
+): KeeperMonitoringSummary {
   const lifecycleKey = keeperDisplayStatus(keeper)
   const phaseKey = keeperPhaseForDisplay(keeper) ?? 'unknown'
   const stage = stageMeta(normalizeStage(keeper.pipeline_stage))
-  const band = BAND_META[keeperBand(keeper, phaseKey, lifecycleKey)]
+  const band = BAND_META[keeperBand(keeper, composite, phaseKey, lifecycleKey)]
 
   return {
     band,
@@ -266,13 +289,21 @@ function agentBand(status: string | undefined | null): RuntimeBand {
   return 'active'
 }
 
-function runtimeBandForAgent(agent: Agent, keeper?: Keeper | null): RuntimeBand {
-  if (keeper) return summarizeKeeperMonitoring(keeper).band.key
+function runtimeBandForAgent(
+  agent: Agent,
+  keeper?: Keeper | null,
+  composite?: KeeperCompositeSnapshot | null,
+): RuntimeBand {
+  if (keeper) return summarizeKeeperMonitoring(keeper, composite ?? null).band.key
   return agentBand(agent.status)
 }
 
-export function runtimeBandMetaForAgent(agent: Agent, keeper?: Keeper | null): RuntimeBandMeta {
-  return BAND_META[runtimeBandForAgent(agent, keeper)]
+export function runtimeBandMetaForAgent(
+  agent: Agent,
+  keeper?: Keeper | null,
+  composite?: KeeperCompositeSnapshot | null,
+): RuntimeBandMeta {
+  return BAND_META[runtimeBandForAgent(agent, keeper, composite)]
 }
 
 export function runtimeBandMeta(band: RuntimeBand): RuntimeBandMeta {

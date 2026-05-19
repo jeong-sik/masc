@@ -137,4 +137,63 @@ describe('summarizeKeeperMonitoring', () => {
     expect(summary.band.key).toBe('attention')
     expect(summary.hint).toBe('turn timed out after queue wait')
   })
+
+  // RFC-0135 PR-12 — stale-vs-live blocker via composite SSOT.
+  describe('composite stale-blocker conditioning', () => {
+    const keeper = {
+      name: 'keeper-stale',
+      status: 'idle',
+      phase: 'Running',
+      last_heartbeat: new Date().toISOString(),
+      runtime_blocker_class: 'turn_timeout',
+      runtime_blocker_summary: 'turn timed out after queue wait',
+    } as Keeper
+
+    it('without composite ⇒ blocker treated as live (attention)', () => {
+      const summary = summarizeKeeperMonitoring(keeper)
+      expect(summary.band.key).toBe('attention')
+    })
+
+    it('composite says execution_current=false ⇒ blocker demoted, band=active', () => {
+      const compositeStaleByExecutionCurrent = {
+        keeper: 'keeper-stale',
+        runtime_attention: {
+          execution_current: false,
+          stale_execution_receipt: false,
+          blocked: false,
+          needs_attention: false,
+        },
+      } as unknown as Parameters<typeof summarizeKeeperMonitoring>[1] extends infer C ? C : never
+      const summary = summarizeKeeperMonitoring(keeper, compositeStaleByExecutionCurrent)
+      expect(summary.band.key).toBe('active')
+    })
+
+    it('composite says stale_execution_receipt=true ⇒ blocker demoted, band=active', () => {
+      const compositeStaleByReceipt = {
+        keeper: 'keeper-stale',
+        runtime_attention: {
+          execution_current: true,
+          stale_execution_receipt: true,
+          blocked: false,
+          needs_attention: false,
+        },
+      } as unknown as Parameters<typeof summarizeKeeperMonitoring>[1] extends infer C ? C : never
+      const summary = summarizeKeeperMonitoring(keeper, compositeStaleByReceipt)
+      expect(summary.band.key).toBe('active')
+    })
+
+    it('composite with live execution ⇒ blocker stays attention', () => {
+      const compositeLive = {
+        keeper: 'keeper-stale',
+        runtime_attention: {
+          execution_current: true,
+          stale_execution_receipt: false,
+          blocked: false,
+          needs_attention: false,
+        },
+      } as unknown as Parameters<typeof summarizeKeeperMonitoring>[1] extends infer C ? C : never
+      const summary = summarizeKeeperMonitoring(keeper, compositeLive)
+      expect(summary.band.key).toBe('attention')
+    })
+  })
 })

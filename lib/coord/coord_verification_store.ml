@@ -17,6 +17,18 @@ type request_header = {
   status : request_status;
 }
 
+let json_kind_name : Yojson.Safe.t -> string = function
+  | `Null -> "null"
+  | `Bool _ -> "bool"
+  | `Int _ -> "int"
+  | `Intlit _ -> "intlit"
+  | `Float _ -> "float"
+  | `String _ -> "string"
+  | `Assoc _ -> "object"
+  | `List _ -> "array"
+  | `Tuple _ -> "tuple"
+  | `Variant _ -> "variant"
+
 let project_root_of_base_path base_path =
   if Filename.basename base_path = Common.masc_dirname then
     Filename.dirname base_path
@@ -58,7 +70,10 @@ let verdict_of_yojson = function
            in
            Ok (`Partial (score, reason))
        | _ -> Error "unknown or missing verdict")
-  | _ -> Error "verdict must be a JSON object"
+  | other ->
+      Error
+        (Printf.sprintf "verdict must be a JSON object (received %s)"
+           (json_kind_name other))
 
 let request_status_of_yojson = function
   | `Assoc fields ->
@@ -73,7 +88,10 @@ let request_status_of_yojson = function
             | Ok verdict -> Ok (`Completed verdict)
             | Error err -> Error err)
        | _ -> Error "unknown request status")
-  | _ -> Error "request status must be a JSON object"
+  | other ->
+      Error
+        (Printf.sprintf "request status must be a JSON object (received %s)"
+           (json_kind_name other))
 
 let request_header_of_yojson = function
   | `Assoc fields ->
@@ -110,7 +128,10 @@ let request_header_of_yojson = function
            in
            Ok { id; task_id; worker; verifier; created_at; status }
        | _ -> Error "verification request requires 'id', 'task_id', 'worker' fields")
-  | _ -> Error "verification request must be a JSON object"
+  | other ->
+      Error
+        (Printf.sprintf "verification request must be a JSON object (received %s)"
+           (json_kind_name other))
 
 let load_request_header base_path req_id =
   let path = request_path base_path req_id in

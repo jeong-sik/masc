@@ -29,16 +29,21 @@ type entry =
 
 (** {1 Submit and poll} *)
 
-(** [submit ~sw ~f ~keeper_name] forks a background daemon fiber on
+(** [submit ?clock ?timeout_sec ~sw ~f ~keeper_name] forks a background daemon fiber on
     [sw] that runs [f] and stores the result. Returns the fresh
-    [request_id] synchronously. Cancellation of [sw] interrupts the
-    worker and records a terminal [Lost] state before stopping, so
-    pollers do not observe an indefinite [Running] request. *)
+    [request_id] synchronously. When both [clock] and [timeout_sec] are
+    provided, the worker records a terminal timeout error if [f] does not
+    return before the deadline. Cancellation of [sw] interrupts the worker
+    and records a terminal [Lost] state before stopping, so pollers do not
+    observe an indefinite [Running] request. *)
 val submit
-  :  sw:Eio.Switch.t
+  :  ?clock:_ Eio.Time.clock
+  -> ?timeout_sec:float
+  -> sw:Eio.Switch.t
   -> base_path:string
   -> f:(unit -> Keeper_types.tool_result)
   -> keeper_name:string
+  -> unit
   -> string
 
 (** [poll ?base_path request_id] returns the current entry, or [None] when the

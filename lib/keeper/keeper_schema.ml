@@ -577,7 +577,7 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("timeout_sec", `Assoc [
           ("type", `String "number");
-          ("description", `String "Optional: overall cascade timeout (sec) for this keeper message call");
+          ("description", `String "Optional: overall timeout (sec) for this async keeper message request and its cascade turn");
         ]);
         ("required_tools", `Assoc [
           ("type", `String "array");

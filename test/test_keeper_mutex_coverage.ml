@@ -14,6 +14,19 @@ let wait_for_done request_id =
   loop 200
 ;;
 
+let wait_for_done_with_clock clock request_id =
+  let rec loop remaining =
+    match Keeper_msg_async.poll request_id with
+    | Some ({ status = Done _; _ } as entry) -> entry
+    | _ when remaining <= 0 ->
+      failwith (Printf.sprintf "request %s did not complete" request_id)
+    | _ ->
+      Eio.Time.sleep clock 0.01;
+      loop (remaining - 1)
+  in
+  loop 100
+;;
+
 let wait_for_running request_id =
   let rec loop remaining =
     match Keeper_msg_async.poll request_id with
@@ -94,9 +107,14 @@ let test_keeper_msg_async_roundtrip () =
   @@ fun sw ->
   let base_path = temp_dir "keeper-msg-async-roundtrip-" in
   let request_id =
-    Keeper_msg_async.submit ~sw ~base_path ~keeper_name:"alpha" ~f:(fun () ->
-      Eio.Fiber.yield ();
-      true, Yojson.Safe.to_string (`Assoc [ "kind", `String "done" ]))
+    Keeper_msg_async.submit
+      ~sw
+      ~base_path
+      ~keeper_name:"alpha"
+      ~f:(fun () ->
+        Eio.Fiber.yield ();
+        true, Yojson.Safe.to_string (`Assoc [ "kind", `String "done" ]))
+      ()
   in
   let entry = wait_for_done request_id in
   Alcotest.(check bool)
@@ -118,9 +136,14 @@ let test_keeper_msg_async_recovers_done_from_disk () =
   @@ fun sw ->
   let base_path = temp_dir "keeper-msg-async-done-" in
   let request_id =
-    Keeper_msg_async.submit ~sw ~base_path ~keeper_name:"beta" ~f:(fun () ->
-      Eio.Fiber.yield ();
-      true, Yojson.Safe.to_string (`Assoc [ "kind", `String "done" ]))
+    Keeper_msg_async.submit
+      ~sw
+      ~base_path
+      ~keeper_name:"beta"
+      ~f:(fun () ->
+        Eio.Fiber.yield ();
+        true, Yojson.Safe.to_string (`Assoc [ "kind", `String "done" ]))
+      ()
   in
   let entry = wait_for_done request_id in
   Alcotest.(check bool)
@@ -148,9 +171,14 @@ let test_keeper_msg_async_marks_recovered_inflight_lost () =
   let base_path = temp_dir "keeper-msg-async-lost-" in
   let promise, _resolver = Eio.Promise.create () in
   let request_id =
-    Keeper_msg_async.submit ~sw ~base_path ~keeper_name:"gamma" ~f:(fun () ->
-      Eio.Promise.await promise;
-      true, "{}")
+    Keeper_msg_async.submit
+      ~sw
+      ~base_path
+      ~keeper_name:"gamma"
+      ~f:(fun () ->
+        Eio.Promise.await promise;
+        true, "{}")
+      ()
   in
   ignore (wait_for_running request_id : Keeper_msg_async.entry);
   Keeper_msg_async.For_testing.forget request_id;
@@ -180,10 +208,14 @@ let test_keeper_msg_async_marks_cancelled_worker_lost () =
     @@ fun sw ->
     let never, _resolver = Eio.Promise.create () in
     let request_id =
-      Keeper_msg_async.submit ~sw ~base_path:(temp_dir "keeper-msg-async-cancel-")
-        ~keeper_name:"cancelled" ~f:(fun () ->
+      Keeper_msg_async.submit
+        ~sw
+        ~base_path:(temp_dir "keeper-msg-async-cancel-")
+        ~keeper_name:"cancelled"
+        ~f:(fun () ->
           Eio.Promise.await never;
           true, "{}")
+        ()
     in
     ignore (wait_for_running request_id : Keeper_msg_async.entry);
     request_id
@@ -200,6 +232,65 @@ let test_keeper_msg_async_marks_cancelled_worker_lost () =
       (Keeper_msg_async.status_to_string entry.Keeper_msg_async.status)
 ;;
 
+let test_keeper_msg_async_timeout_is_terminal_error () =
+  with_eio_env
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  let base_path = temp_dir "keeper-msg-async-timeout-" in
+  let release_late, notify_release_late = Eio.Promise.create () in
+  let request_id =
+    Keeper_msg_async.submit
+      ~clock
+      ~timeout_sec:0.02
+      ~sw
+      ~base_path
+      ~keeper_name:"timeout"
+      ~f:(fun () ->
+        Eio.Promise.await release_late;
+        true, Yojson.Safe.to_string (`Assoc [ "kind", `String "late" ]))
+      ()
+  in
+  let entry = wait_for_done_with_clock clock request_id in
+  let timeout_body =
+    match entry.Keeper_msg_async.status with
+    | Done { ok = false; body } ->
+      Alcotest.(check bool)
+        "timeout completion timestamp"
+        true
+        (Option.is_some entry.completed_at);
+      body
+    | Done { ok = true; body } ->
+      Alcotest.failf "expected timeout error, got ok body=%s" body
+    | status ->
+      Alcotest.failf
+        "expected timeout error, got %s"
+        (Keeper_msg_async.status_to_string status)
+  in
+  (match Yojson.Safe.from_string timeout_body with
+   | `Assoc fields ->
+     Alcotest.(check (option string))
+       "timeout error code"
+       (Some "keeper_msg_timeout")
+       (Option.bind
+          (List.assoc_opt "error" fields)
+          (function
+          | `String value -> Some value
+          | _ -> None))
+   | _ -> Alcotest.fail "expected timeout body JSON object");
+  Eio.Promise.resolve notify_release_late ();
+  Eio.Time.sleep clock 0.05;
+  match Keeper_msg_async.poll request_id with
+  | Some { Keeper_msg_async.status = Done { ok = false; body }; _ } ->
+    Alcotest.(check string) "late worker result cannot overwrite timeout" timeout_body body
+  | Some entry ->
+    Alcotest.failf
+      "expected timeout to remain terminal, got %s"
+      (Keeper_msg_async.status_to_string entry.Keeper_msg_async.status)
+  | None -> Alcotest.fail "expected timeout request to remain pollable"
+;;
+
 let test_keeper_msg_async_gc_removes_stale_terminal_disk_record () =
   with_eio_env
   @@ fun _env ->
@@ -207,9 +298,14 @@ let test_keeper_msg_async_gc_removes_stale_terminal_disk_record () =
   @@ fun sw ->
   let base_path = temp_dir "keeper-msg-async-gc-" in
   let request_id =
-    Keeper_msg_async.submit ~sw ~base_path ~keeper_name:"delta" ~f:(fun () ->
-      Eio.Fiber.yield ();
-      true, "{}")
+    Keeper_msg_async.submit
+      ~sw
+      ~base_path
+      ~keeper_name:"delta"
+      ~f:(fun () ->
+        Eio.Fiber.yield ();
+        true, "{}")
+      ()
   in
   let entry = wait_for_done request_id in
   let path =
@@ -335,6 +431,10 @@ let () =
             "cancelled worker is terminal lost"
             `Quick
             test_keeper_msg_async_marks_cancelled_worker_lost
+        ; test_case
+            "timeout is terminal error"
+            `Quick
+            test_keeper_msg_async_timeout_is_terminal_error
         ; test_case
             "gc removes stale terminal disk record"
             `Quick

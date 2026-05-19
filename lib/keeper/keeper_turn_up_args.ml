@@ -76,8 +76,6 @@ let json_kind_name : Yojson.Safe.t -> string = function
   | `String _ -> "string"
   | `Assoc _ -> "object"
   | `List _ -> "array"
-  | `Tuple _ -> "tuple"
-  | `Variant _ -> "variant"
 
 let parse_present_tool_name_list_opt args key =
   match json_assoc_member_opt key args with

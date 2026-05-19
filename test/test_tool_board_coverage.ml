@@ -625,6 +625,68 @@ let test_post_create_judgment_roundtrip () =
   Alcotest.(check string) "judgment summary kept in meta" summary
     Yojson.Safe.Util.(json |> member "meta" |> member "judgment" |> member "summary" |> to_string)
 
+(** Judgment as JSON List (e.g. [{summary: "...", confidence: 0.9}])
+    was silently dropped before the fix. Issue #16300. *)
+let test_post_create_judgment_list_roundtrip () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let ok, body =
+    dispatch "masc_board_post"
+      (make_args
+         [
+           ("content", `String "List-judged board post");
+           ("author", `String "tester");
+           ( "judgment",
+             `List [ `Assoc [ ("summary", `String "list-judged"); ("score", `Float 0.85) ] ] );
+         ])
+  in
+  Alcotest.(check bool) "create ok" true ok;
+  let json = parse_create_response_json body in
+  let judgment_json = Yojson.Safe.Util.(json |> member "meta" |> member "judgment") in
+  (* The List judgment must be preserved, not silently dropped. *)
+  Alcotest.(check bool) "list judgment is a non-null value" true
+    (judgment_json <> `Null);
+  let summary = Yojson.Safe.Util.(judgment_json |> index 0 |> member "summary" |> to_string) in
+  Alcotest.(check string) "list judgment summary preserved" "list-judged" summary
+
+(** Scalar JSON types (Bool, Int, Float, Intlit) for judgment must not
+    silently produce a valid post with judgment absent. They are
+    rejected or ignored — but the post itself succeeds (judgment is
+    optional). Issue #16300. *)
+let test_post_create_judgment_scalar_types_ignored () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let scalars =
+    [
+      ("Bool", `Bool true);
+      ("Int", `Int 42);
+      ("Float", `Float 3.14);
+      ("Intlit", `Intlit "999999999999999999999999");
+    ]
+  in
+  List.iter
+    (fun (label, scalar_value) ->
+       cleanup ();
+       let ok, body =
+         dispatch "masc_board_post"
+           (make_args
+              [
+                ("content", `String ("scalar-judgment-" ^ label));
+                ("author", `String "tester");
+                ("judgment", scalar_value);
+              ])
+       in
+       Alcotest.(check bool) (label ^ ": create ok") true ok;
+       let json = parse_create_response_json body in
+       let judgment_json =
+         try Yojson.Safe.Util.(json |> member "meta" |> member "judgment")
+         with _ -> `Null
+       in
+       Alcotest.(check bool) (label ^ ": scalar judgment ignored (null)") true
+         (judgment_json = `Null))
+    scalars
+
 let test_post_create_sources_footer_and_meta () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1570,6 +1632,10 @@ let () =
             test_post_create_structured_payload;
           Alcotest.test_case "create judgment roundtrip" `Quick
             test_post_create_judgment_roundtrip;
+          Alcotest.test_case "create judgment list roundtrip (#16300)" `Quick
+            test_post_create_judgment_list_roundtrip;
+          Alcotest.test_case "create judgment scalar types ignored (#16300)" `Quick
+            test_post_create_judgment_scalar_types_ignored;
           Alcotest.test_case "create sources footer and meta" `Quick
             test_post_create_sources_footer_and_meta;
           Alcotest.test_case "keeper board post preserves meta reason" `Quick

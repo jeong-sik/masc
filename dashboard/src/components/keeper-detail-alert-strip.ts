@@ -324,14 +324,16 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
               class="!py-0.5 !bg-[var(--color-bg-hover)] !text-[var(--color-fg-secondary)] inline-flex items-center"
               disabled=${directiveLoading.value}
               onClick=${() => handleDirective('resume')}
-            >재개<//>`
+              title="재개: 일시정지된 keeper 를 다시 실행합니다 (paused → running)"
+            >재개하기<//>`
           : html`<${ActionButton}
               variant="ghost"
               size="sm"
               class="!py-0.5 !bg-[var(--color-bg-hover)] !text-[var(--color-fg-secondary)] inline-flex items-center"
               disabled=${directiveLoading.value}
               onClick=${() => handleDirective('pause')}
-            >일시정지<//>
+              title="일시정지: 실행 중인 keeper 를 일시 멈춥니다 (running → paused, 현재 turn 은 정상 종료)"
+            >일시정지하기<//>
             ${(hbStale || runtimeBlockerClass === 'oas_timeout_budget' || runtimeBlockerClass === 'cascade_exhausted' || runtimeBlockerClass === 'turn_timeout')
               ? html`<${ActionButton}
                   variant="warn"

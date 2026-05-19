@@ -1,0 +1,7 @@
+(include_subdirs no)
+(library
+ (name masc_types_boundary)
+ (public_name masc_mcp.types_boundary)
+ (wrapped false)
+ (modules boundary_redaction)
+ (flags (:standard -w +4)))

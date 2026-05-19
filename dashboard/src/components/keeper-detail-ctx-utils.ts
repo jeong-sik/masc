@@ -1,4 +1,5 @@
 import type { PromptSegmentTelemetry } from '../types'
+import { SECONDS_PER_MINUTE, SECONDS_PER_HOUR } from '../lib/format-time'
 
 // ── Context pressure thresholds (shared across KPIs, charts) ─
 export const CTX_CRITICAL_PCT = 85
@@ -77,7 +78,7 @@ export function filterCtxCompositionEntries(
 }
 
 export function formatDuration(sec: number): string {
-  if (sec < 60) return `${sec}초`
-  if (sec < 3600) return `${Math.floor(sec / 60)}분`
-  return `${Math.floor(sec / 3600)}시간 ${Math.floor((sec % 3600) / 60)}분`
+  if (sec < SECONDS_PER_MINUTE) return `${sec}초`
+  if (sec < SECONDS_PER_HOUR) return `${Math.floor(sec / SECONDS_PER_MINUTE)}분`
+  return `${Math.floor(sec / SECONDS_PER_HOUR)}시간 ${Math.floor((sec % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE)}분`
 }

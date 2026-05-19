@@ -501,7 +501,18 @@ let runtime_resolution_json (config : Coord.config) =
   let workspace_commit = git_rev_parse_short config.workspace_path in
   let resolved_base_commit = git_rev_parse_short config.base_path in
   let base_path_input =
-    (Host_config.from_env ()).base_path_raw |> Option.value ~default:config.workspace_path
+    (* SSOT: Env_config_core.base_path_source_opt prefers
+       MASC_BASE_PATH_INPUT over MASC_BASE_PATH, preserving an
+       operator's raw "<base>/.masc" input.
+       Host_config.base_path_raw only reads MASC_BASE_PATH and strips
+       a preserved ".masc" suffix when both env vars are set.
+       RFC-0085 PR-9 keeps the raw helper private, so use
+       base_path_source_opt's value component.
+       Test: "runtime base_path preserves raw input"
+       (test/test_dashboard_http_core.ml:260). *)
+    Env_config_core.base_path_source_opt ()
+    |> Option.map snd
+    |> Option.value ~default:config.workspace_path
   in
   let prompt_markdown_dir =
     Prompt_registry.get_markdown_dir () |> Option.value ~default:""

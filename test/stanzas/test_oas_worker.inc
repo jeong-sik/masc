@@ -4,7 +4,11 @@
 
 (test
  (name test_oas_worker)
- (modules test_oas_worker test_oas_worker_provider_labels test_oas_worker_sdk_error)
+ (modules
+  test_oas_worker
+  test_oas_worker_idle_detail
+  test_oas_worker_provider_labels
+  test_oas_worker_sdk_error)
  (ocamlopt_flags (:standard -w -32))
  (action
   (setenv MASC_BASE_PATH /tmp/test-oas-worker

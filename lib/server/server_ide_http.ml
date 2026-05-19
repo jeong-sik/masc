@@ -79,17 +79,24 @@ let build_presence_snapshot state =
   in
   let branch =
     let head_path = Filename.concat base ".git/HEAD" in
-    if Sys.file_exists head_path
+    if Fs_compat.file_exists head_path
     then (
-      let ref_line =
-        let ic = open_in head_path in
-        let line = input_line ic in
-        close_in ic;
-        line
-      in
-      if String.starts_with ~prefix:"ref: refs/heads/" ref_line
-      then String.sub ref_line 16 (String.length ref_line - 16)
-      else ref_line)
+      match Fs_compat.load_file head_path with
+      | exception exn ->
+        Log.Server.warn
+          "build_presence_snapshot: read %s failed, defaulting branch to 'main': %s"
+          head_path
+          (Printexc.to_string exn);
+        "main"
+      | content ->
+        let ref_line =
+          match String.split_on_char '\n' content with
+          | first :: _ -> first
+          | [] -> ""
+        in
+        if String.starts_with ~prefix:"ref: refs/heads/" ref_line
+        then String.sub ref_line 16 (String.length ref_line - 16)
+        else ref_line)
     else "main"
   in
   let entries =

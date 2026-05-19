@@ -143,6 +143,29 @@ let bool_opt_to_json : bool option -> Yojson.Safe.t = function
   | Some b -> `Bool b
   | None -> `Null
 
+(** Short snake_case name for a top-level JSON shape, useful in
+    error messages that want to say *what was received* without
+    dumping the full payload. *)
+let kind_name : Yojson.Safe.t -> string = function
+  | `Null -> "null"
+  | `Bool _ -> "bool"
+  | `Int _ -> "int"
+  | `Intlit _ -> "int"
+  | `Float _ -> "float"
+  | `String _ -> "string"
+  | `Assoc _ -> "object"
+  | `List _ -> "array"
+  | `Tuple _ -> "tuple"
+  | `Variant _ -> "variant"
+
+(** Bounded stringification for diagnostic / log use.  Prefix-truncates
+    to [max] characters (default 160) and appends ["..."] when the
+    serialised form is longer, so a misshapen 5MB request body cannot
+    flood the log line. *)
+let excerpt ?(max = 160) (json : Yojson.Safe.t) : string =
+  let s = Yojson.Safe.to_string json in
+  if String.length s > max then String.sub s 0 max ^ "..." else s
+
 (** List utilities *)
 
 let dedupe_keep_order xs =

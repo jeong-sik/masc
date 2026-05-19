@@ -269,3 +269,32 @@ export function compositeIsRunning(snapshot: { phase: string }): boolean {
 export function compositeIsTurnIdle(snapshot: { turn_phase: string }): boolean {
   return snapshot.turn_phase === 'idle'
 }
+
+// RFC-0135 PR-14c — display reason SSOT (Goal-2c typed-state expansion).
+//
+// `keeper-detail-runtime.ts:257-264` inlined a 3-way fallback for the
+// "runtime reason" detail line:
+//   composite.runtime_attention.reason
+//   ?? keeper.runtime_blocker_summary
+//   ?? keeper.attention_reason
+//   ?? null
+// The same precedence is needed by the alert strip and the agent
+// roster, and inlining the chain at each callsite makes it easy for
+// a future field to be added in one place but missed in another.
+
+/** Live display reason string for the current attention/blocker state,
+ *  with composite-preferred precedence. Returns `null` when no source
+ *  has a non-empty trimmed value — caller supplies the display fallback. */
+export function deriveKeeperDisplayReason(
+  keeper: Pick<Keeper, 'runtime_blocker_summary' | 'attention_reason'>,
+  composite: KeeperCompositeSnapshot | null,
+): string | null {
+  const trim = (raw: unknown): string | null =>
+    typeof raw === 'string' && raw.trim().length > 0 ? raw : null
+  return (
+    trim(composite?.runtime_attention?.reason)
+    ?? trim(keeper.runtime_blocker_summary)
+    ?? trim(keeper.attention_reason)
+    ?? null
+  )
+}

@@ -7,6 +7,7 @@ import {
   compositeIsTurnIdle,
   compositePhaseTone,
   deriveKeeperAttention,
+  deriveKeeperDisplayReason,
   deriveKeeperOperationalState,
   toKsmPhase,
   type KeeperAttention,
@@ -469,5 +470,49 @@ describe('deriveKeeperAttention — RFC-0135 PR-14a', () => {
   })
   it('null composite ⇒ clean (no backend attestation)', () => {
     expect(deriveKeeperAttention(null)).toBe<KeeperAttention>('clean')
+  })
+})
+
+describe('deriveKeeperDisplayReason — RFC-0135 PR-14c', () => {
+  const composite = (reason: string | undefined): KeeperCompositeSnapshot =>
+    ({
+      keeper: 'test',
+      runtime_attention: reason !== undefined ? { reason } : {},
+    } as unknown as KeeperCompositeSnapshot)
+
+  it('composite reason wins over flat summary', () => {
+    expect(
+      deriveKeeperDisplayReason(
+        { runtime_blocker_summary: 'flat summary', attention_reason: 'pinned' } as Keeper,
+        composite('live reason'),
+      ),
+    ).toBe('live reason')
+  })
+  it('falls back to runtime_blocker_summary when composite empty', () => {
+    expect(
+      deriveKeeperDisplayReason(
+        { runtime_blocker_summary: 'flat summary', attention_reason: 'pinned' } as Keeper,
+        composite(undefined),
+      ),
+    ).toBe('flat summary')
+  })
+  it('falls back to attention_reason when summary missing', () => {
+    expect(
+      deriveKeeperDisplayReason(
+        { attention_reason: 'pinned' } as Keeper,
+        null,
+      ),
+    ).toBe('pinned')
+  })
+  it('filters whitespace-only reason', () => {
+    expect(
+      deriveKeeperDisplayReason(
+        { runtime_blocker_summary: 'real value' } as Keeper,
+        composite('   '),
+      ),
+    ).toBe('real value')
+  })
+  it('returns null when no source has a non-empty value', () => {
+    expect(deriveKeeperDisplayReason({} as Keeper, null)).toBeNull()
   })
 })

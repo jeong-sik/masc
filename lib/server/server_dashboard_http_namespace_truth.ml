@@ -12,9 +12,18 @@ let float_of_env_default_with_legacy ~canonical ~legacy ~default ~min_v ~max_v =
   | Some _ -> float_of_env_default canonical ~default ~min_v ~max_v
   | None -> float_of_env_default legacy ~default ~min_v ~max_v
 
-let namespace_truth_shell_refresh_timeout_s () =
-  float_of_env_default "MASC_NAMESPACE_TRUTH_SHELL_REFRESH_TIMEOUT_S"
-    ~default:5.0 ~min_v:0.25 ~max_v:60.0
+(* RFC-0138 Phase 3 Step 4 — fallback timeouts are now hard-coded
+   module constants.  Step 3 (#16738) wired /project-snapshot through
+   [Dashboard_snapshot], so this fallback path is taken at most once
+   per process lifetime (cold-start before the refresh fiber's first
+   publish).  The previous [MASC_NAMESPACE_TRUTH_*_TIMEOUT_S] env
+   knobs tuned a path that no longer carries steady-state load. *)
+let namespace_truth_shell_refresh_timeout_s = 5.0
+let namespace_truth_warm_escape_s = 90.0
+let namespace_truth_warm_timeout_s = 8.0
+let namespace_truth_cold_timeout_s = 15.0
+let namespace_truth_shell_fiber_timeout_s = 12.0
+let namespace_truth_cold_safety_margin_s = 4.0
 
 let namespace_truth_bootstrap_shell_json () =
   let generated_at = Masc_domain.now_iso () in
@@ -60,7 +69,7 @@ let schedule_namespace_truth_shell_refresh ~sw ~clock config =
         Eio_guard.protect
           ~finally:(fun () -> Atomic.set namespace_truth_shell_refreshing false)
           (fun () ->
-             let timeout_s = namespace_truth_shell_refresh_timeout_s () in
+             let timeout_s = namespace_truth_shell_refresh_timeout_s in
              let t0 = Time_compat.now () in
              try
                let result =
@@ -96,11 +105,7 @@ let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
      on cold-start on-demand compute. The frontend retries every 3s via
      scheduleWarmRetry; the proactive refresh loop populates execution_cache
      in background. *)
-  let warm_escape_s =
-    float_of_env_default "MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S"
-      ~default:75.0 ~min_v:30.0 ~max_v:300.0
-    +. 15.0
-  in
+  let warm_escape_s = namespace_truth_warm_escape_s in
   let proactive_first_cycle_pending =
     not (cached_surface_has_success Execution_surfaces.execution_cache)
     &&
@@ -129,17 +134,12 @@ let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
         let execution_ref = ref (`Assoc []) in
         let command_ref = ref (`Assoc []) in
         (* Namespace-truth fiber timeouts.  Cold start uses higher defaults to
-           allow shell/namespace reads to warm up.  Tunable via env for fleets
-           whose observed fetch latency drifts above the literal defaults (see
-           #7908 — fleet p50 ≈ 17s made the 12s shell cap misfire). *)
-        let warm_timeout_s =
-          float_of_env_default "MASC_NAMESPACE_TRUTH_WARM_TIMEOUT_S"
-            ~default:8.0 ~min_v:1.0 ~max_v:120.0
-        in
-        let cold_timeout_s =
-          float_of_env_default "MASC_NAMESPACE_TRUTH_COLD_TIMEOUT_S"
-            ~default:15.0 ~min_v:1.0 ~max_v:120.0
-        in
+           allow shell/namespace reads to warm up.  Constants used to be
+           tunable via [MASC_NAMESPACE_TRUTH_*_TIMEOUT_S] but Step 4 retires
+           those knobs — see module-level [namespace_truth_*_timeout_s]
+           bindings for the rationale. *)
+        let warm_timeout_s = namespace_truth_warm_timeout_s in
+        let cold_timeout_s = namespace_truth_cold_timeout_s in
         let is_cold =
           not (cached_surface_has_success Execution_surfaces.execution_cache)
         in
@@ -163,14 +163,8 @@ let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
            (dashboard_shell_timeout_s, default 8s) to avoid the double-timeout
            race where the inner cache returns timeout-error JSON while the outer
            fiber also fires, discarding even stale data.  Fixes #5090. *)
-        let shell_fiber_timeout_s =
-          float_of_env_default "MASC_NAMESPACE_TRUTH_SHELL_FIBER_TIMEOUT_S"
-            ~default:12.0 ~min_v:1.0 ~max_v:120.0
-        in
-        let cold_safety_margin_s =
-          float_of_env_default "MASC_NAMESPACE_TRUTH_COLD_SAFETY_MARGIN_S"
-            ~default:4.0 ~min_v:0.0 ~max_v:60.0
-        in
+        let shell_fiber_timeout_s = namespace_truth_shell_fiber_timeout_s in
+        let cold_safety_margin_s = namespace_truth_cold_safety_margin_s in
         let shell_timeout_s =
           if Atomic.get shell_warmed then shell_fiber_timeout_s
           else Float.max cold_timeout_s (shell_fiber_timeout_s +. cold_safety_margin_s)

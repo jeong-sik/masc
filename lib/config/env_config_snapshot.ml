@@ -268,14 +268,12 @@ let dashboard_entries =
       "Duration after which a signal is stale (seconds, 20 min)";
     entry ~default:"8" "MASC_DASHBOARD_TRANSPORT_HEALTH_TIMEOUT_S"
       "Transport health timeout";
-    entry ~default:"15.0" "MASC_NAMESPACE_TRUTH_COLD_TIMEOUT_S"
-      "Namespace-truth fiber base timeout on cold start (seconds, 1-120)";
-    entry ~default:"4.0" "MASC_NAMESPACE_TRUTH_COLD_SAFETY_MARGIN_S"
-      "Extra margin added to shell fiber timeout on cold start (seconds, 0-60)";
-    entry ~default:"12.0" "MASC_NAMESPACE_TRUTH_SHELL_FIBER_TIMEOUT_S"
-      "Namespace-truth shell fiber timeout after warm-up (seconds, 1-120)";
-    entry ~default:"8.0" "MASC_NAMESPACE_TRUTH_WARM_TIMEOUT_S"
-      "Namespace-truth fiber base timeout after warm-up (seconds, 1-120)";
+    (* RFC-0138 Phase 3 Step 4 — MASC_NAMESPACE_TRUTH_*_TIMEOUT_S env
+       knobs retired.  After Step 3 (#16738) wired /project-snapshot
+       through Dashboard_snapshot, the fallback path that consumed
+       those tunables runs at most once per process lifetime; values
+       are now module constants in
+       [Server_dashboard_http_namespace_truth]. *)
   ]
 
 (* --- New categories for the 229 missing env vars --- *)

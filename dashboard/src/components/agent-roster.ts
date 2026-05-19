@@ -49,6 +49,16 @@ import {
 import {
   keeperActivityDisplay,
 } from '../lib/keeper-runtime-display'
+// RFC-0135 PR-4: roster card derives its blocker note through the typed
+// KeeperOperationalState SSOT so the headline (`현재 차단` vs `이전 차단`
+// vs `실행중`) matches the detail panel for the same keeper. Previously
+// `rosterStateNote` read `keeper.runtime_blocker_*` flat and never saw
+// `composite.runtime_attention.execution_current`, producing the
+// 2026-05-19 lifecycle-worker symptom (`현재 차단 · synthetic_stall` in
+// the list while detail showed `턴 진행 중 · executing live`).
+import { deriveKeeperOperationalState } from '../lib/keeper-operational-state'
+import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
+import { fleetCompositeSnapshot } from '../composite-signals'
 
 type StatusFilter = 'all' | RuntimeBand
 
@@ -84,30 +94,50 @@ function rosterContextMeta(
   return { pct, detail }
 }
 
-function rosterStateNote(
-  keeper: {
-    runtime_blocker_summary?: string | null
-    runtime_blocker_class?: string | null
-    diagnostic?: { last_error?: string | null } | null
-  } | null | undefined,
+/**
+ * RFC-0135 §1.1 root fix. Decide the roster card state note from the
+ * typed `KeeperOperationalState` SSOT — the same function the detail
+ * panel calls — so the two surfaces cannot diverge.
+ *
+ * Display rules per typed state:
+ *  - stuck             → `현재 차단`  (text: backend summary or typed reason)
+ *  - running + staleBlocker → `이전 차단` (informational; not a headline)
+ *  - running           → fallback to diagnostic error / monitoring hint
+ *  - paused / offline  → null — these states are signaled by the row's
+ *                         phase badge and dedicated chips elsewhere; the
+ *                         state-note slot stays available for extra
+ *                         operational context only.
+ */
+export function rosterStateNote(
+  keeper: Keeper | null | undefined,
+  composite: KeeperCompositeSnapshot | null,
   monitoringHint?: string | null,
 ): { label: string; text: string; kind?: string } | null {
-  const runtimeBlocker = keeper?.runtime_blocker_summary?.trim()
-  const blockerClass = keeper?.runtime_blocker_class?.trim() || undefined
-  if (runtimeBlocker) {
-    return { label: '현재 차단', text: runtimeBlocker, kind: blockerClass }
-  }
-  // Class without summary: surface the typed kind so operators still see *why*
-  // (e.g. "heartbeat_failures") instead of an unlabelled '현재 차단' badge.
-  if (blockerClass) {
+  if (!keeper) return null
+
+  const state = deriveKeeperOperationalState({ keeper, composite })
+
+  if (state.kind === 'stuck') {
+    const summary = keeper.runtime_blocker_summary?.trim()
+    if (summary) {
+      return { label: '현재 차단', text: summary, kind: state.reason }
+    }
     return {
       label: '현재 차단',
-      text: `차단 종류: ${blockerClass} (요약 메시지 없음)`,
-      kind: blockerClass,
+      text: `차단 종류: ${state.reason} (요약 메시지 없음)`,
+      kind: state.reason,
     }
   }
 
-  const diagnosticError = keeper?.diagnostic?.last_error?.trim()
+  if (state.kind === 'running' && state.staleBlocker !== null) {
+    return {
+      label: '이전 차단',
+      text: `이전 턴 차단 (${state.staleBlocker}) — 현재는 실행 중`,
+      kind: state.staleBlocker,
+    }
+  }
+
+  const diagnosticError = keeper.diagnostic?.last_error?.trim()
   if (diagnosticError) return { label: '최근 오류', text: diagnosticError }
 
   const hint = monitoringHint?.trim()
@@ -425,6 +455,26 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     [runtimeKeeperList],
   )
 
+  // RFC-0135 PR-4: index the fleet-wide composite snapshot stream by
+  // keeper identity so each roster row can read the same conditioning
+  // signals (`runtime_attention.execution_current` etc.) the detail
+  // panel already uses. `.value` access here auto-subscribes the
+  // component to SSE-driven updates from `hydrateFleetCompositeSnapshot`.
+  const fleetSnapshot = fleetCompositeSnapshot.value
+  const compositeByKeeperKey = useMemo(() => {
+    const map = new Map<string, KeeperCompositeSnapshot>()
+    if (!fleetSnapshot) return map
+    for (const snap of fleetSnapshot.snapshots) {
+      const identityKeys = [snap.keeper, snap.correlation_id]
+      for (const candidate of identityKeys) {
+        if (typeof candidate === 'string' && candidate !== '' && !map.has(candidate)) {
+          map.set(candidate, snap)
+        }
+      }
+    }
+    return map
+  }, [fleetSnapshot])
+
   // Derive runtime kind counts from memoized roster (avoids duplicate buildAgentRoster call)
   const liveRuntimeCounts = useMemo(() => {
     const keeperCount = scopeAgentsByKeeperFilter(rosterAgents, runtimeKeeperList, 'keeper-only', keeperRuntimeLookup).length
@@ -659,9 +709,20 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             ?? trimText(goalSummary, 140)
             ?? '최근 활동 요약 없음'
           const summaryText = workPreview
+          const compositeForKeeper: KeeperCompositeSnapshot | null = keeperRuntime
+            ? compositeByKeeperKey.get(keeperRuntime.name)
+              ?? (keeperRuntime.keeper_id != null
+                ? compositeByKeeperKey.get(keeperRuntime.keeper_id)
+                : undefined)
+              ?? null
+            : null
           const stateNote =
             keeperRuntime
-              ? rosterStateNote(keeperRuntime, band.key === 'active' ? null : keeperMonitoring?.hint ?? null)
+              ? rosterStateNote(
+                  keeperRuntime,
+                  compositeForKeeper,
+                  band.key === 'active' ? null : keeperMonitoring?.hint ?? null,
+                )
               : null
           const recentTools = uniqueToolNames(
             keeperRuntime?.recent_tool_names,

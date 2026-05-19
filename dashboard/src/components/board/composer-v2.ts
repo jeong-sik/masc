@@ -17,6 +17,14 @@ import {
   STATE_BLOCK_TEMPLATE,
 } from '../ops/ops-state'
 import { isKeeperOffline } from '../../lib/keeper-predicates'
+import {
+  keeperNameFromTarget,
+  mentionQueryFromMessage,
+  trailingMentionNameFromMessage,
+  onlineKeeperNameForMention,
+  mentionCandidates,
+  replaceTrailingMentionDraft,
+} from '../../lib/mention-utils'
 
 export type ComposerV2Mode = 'broadcast' | 'dm' | 'state-block'
 
@@ -40,17 +48,6 @@ export interface ComposerV2Request {
   }
 }
 
-interface OnlineKeeper {
-  name: string
-  status?: string
-}
-
-interface MentionCandidate {
-  name: string
-  status?: string
-  selected: boolean
-}
-
 const MODE_OPTIONS: Array<{ value: ComposerV2Mode; label: string; description: string }> = [
   { value: 'broadcast', label: 'Broadcast', description: 'Room broadcast' },
   { value: 'dm', label: 'DM', description: 'Keeper DM' },
@@ -62,49 +59,6 @@ const MENTION_LISTBOX_ID = 'composer-v2-mention-listbox'
 function normalizeRoomId(roomId: string | null | undefined): string {
   const normalized = roomId?.trim().replace(/^#+/, '')
   return normalized || 'default'
-}
-
-function keeperNameFromTarget(value: string): string | null {
-  if (!value.startsWith('keeper:')) return null
-  const name = value.slice('keeper:'.length).trim()
-  return name || null
-}
-
-function mentionQueryFromMessage(message: string): string | null {
-  const match = message.match(/(?:^|\s)@([A-Za-z0-9_.-]*)$/)
-  return match?.[1] ?? null
-}
-
-function trailingMentionNameFromMessage(message: string): string | null {
-  const match = message.match(/(?:^|\s)@([A-Za-z0-9_.-]+)\s*$/)
-  return match?.[1] ?? null
-}
-
-function onlineKeeperNameForMention(onlineKeepers: OnlineKeeper[], mentionName: string | null): string | null {
-  if (!mentionName) return null
-  const normalized = mentionName.toLowerCase()
-  return onlineKeepers.find(keeper => keeper.name.toLowerCase() === normalized)?.name ?? null
-}
-
-function mentionCandidates(onlineKeepers: OnlineKeeper[], query: string | null, selectedKeeper: string | null): MentionCandidate[] {
-  const normalizedQuery = query?.toLowerCase() ?? ''
-  return onlineKeepers
-    .filter(keeper => normalizedQuery === '' || keeper.name.toLowerCase().includes(normalizedQuery))
-    .map(keeper => ({
-      name: keeper.name,
-      status: keeper.status,
-      selected: keeper.name === selectedKeeper,
-    }))
-    .sort((a, b) => Number(b.selected) - Number(a.selected) || a.name.localeCompare(b.name))
-    .slice(0, 5)
-}
-
-function replaceTrailingMentionDraft(message: string, keeperName: string): string {
-  if (/(?:^|\s)@[A-Za-z0-9_.-]*$/.test(message)) {
-    return message.replace(/(^|\s)@[A-Za-z0-9_.-]*$/, `$1@${keeperName} `)
-  }
-  const spacer = message.trimEnd().length > 0 ? ' ' : ''
-  return `${message.trimEnd()}${spacer}@${keeperName} `
 }
 
 function modeIcon(mode: ComposerV2Mode) {

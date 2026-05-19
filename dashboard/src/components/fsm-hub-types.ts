@@ -249,6 +249,36 @@ export function trustDispositionLabel(value: string | null | undefined): string 
   return TRUST_DISPOSITION_LABELS[value] ?? value
 }
 
+
+/** Korean labels for `execution.tool_contract_result`. Backend emits 11
+ *  closed-sum values via `Keeper_execution_receipt.tool_contract_result_to_string`
+ *  (lib/keeper/keeper_execution_receipt.ml:181-193). The labels are
+ *  intentionally NOT folded into `STATE_DISPLAY_NAMES` because that map
+ *  is the shared FSM-axis facade and accepting generic keys like
+ *  `unknown` / `violated` there would risk collisions with future axes
+ *  that emit the same English token. Consumers route through
+ *  {!toolContractLabel} instead so the chip surface (turn-fsm-detail-panel,
+ *  fleet-fsm-matrix) shows Korean for known wire values and the raw
+ *  token for unknown ones, matching the `displayState` fallback shape. */
+const TOOL_CONTRACT_LABELS: Record<string, string> = {
+  unknown: '도구 계약 미상',
+  not_dispatched: '도구 호출 미발생',
+  violated: '도구 계약 위반',
+  tool_surface_mismatch: '도구 표면 불일치',
+  no_tool_capable_provider: '도구 가능 provider 없음',
+  missing_required_tool_use: '필수 도구 호출 누락',
+  claim_only_after_owned_task: 'claim 전용 (소유 task 후)',
+  needs_execution_progress: '실행 진척 필요',
+  passive_only: 'passive 만 수행',
+  satisfied_completion: '계약 충족 (완료)',
+  satisfied_execution: '계약 충족 (실행)',
+}
+
+export function toolContractLabel(value: string | null | undefined): string | null {
+  if (!value) return null
+  return TOOL_CONTRACT_LABELS[value] ?? value
+}
+
 export type StateEntries = {
   phase: number
   turn: number

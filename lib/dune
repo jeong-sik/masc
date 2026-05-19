@@ -446,6 +446,22 @@
    ;; Reduction Goal §P6). Stdlib-only leaf so the standalone test
    ;; executable can link in seconds without the main library.
    masc_mcp.keeper_recording_error_state
+   ;; ETA-LIVELOCK (2026-05-19): typed escalation state for the
+   ;; Keeper_turn_livelock dispatch-guard log noise (~15K ERROR/day
+   ;; from 4 keepers re-blocking the same turn_id every ~30 s).
+   ;; Stdlib-only leaf; mirrors the keeper_recording_error_state
+   ;; pattern so the standalone alcotest builds without dragging
+   ;; the main library.
+   masc_mcp.keeper_livelock_state
+   ;; IOTA-RETRY (2026-05-19): typed dedupe state for the
+   ;; Keeper_tools_oas retry-loop ERROR log noise (12+ events from
+   ;; 5+ tools in a 1000-line system_log sample — keeper_bash x4,
+   ;; masc_worktree_create x2, keeper_pr_review_comment x2,
+   ;; masc_transition x2, Bash x2). Single emit site at
+   ;; lib/keeper/keeper_tools_oas.ml:733. Stdlib-only leaf;
+   ;; mirrors the keeper_livelock_state pattern so the standalone
+   ;; alcotest builds in seconds without dragging the main library.
+   masc_mcp.keeper_tool_retry_state
    ;; RFC-0086 Phase 2.B prereq — Tool_catalog_surfaces (lib/ root, 554+103 LoC)
    ;; extracted to lib/tool_catalog_surfaces/. deps: Agent_sdk + stdlib only.
    ;; Unblocks one of 6 cycle modules identified in plan §8.14 iter-2.

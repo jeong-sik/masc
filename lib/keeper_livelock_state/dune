@@ -1,0 +1,30 @@
+; Keeper_livelock_state — typed escalation state for the
+; Keeper_turn_livelock dispatch guard log noise.
+;
+; MASC/OAS Error-Warn Reduction Goal §P6 (retry-loop without dedupe):
+; system_log_2026-05-19 shows 4 keepers (sangsu turn=651, nick0cave
+; turn=766, echo turn=61, analyst turn=445) emitting the same
+; "keeper turn livelock guard blocked dispatch" ERROR ~107 times
+; per 10-minute slice — roughly 15K events/day at steady state. The
+; livelock guard itself is correct (the underlying turn cannot make
+; progress); what is missing is *escalation* — after N identical
+; blocks, demote the per-block ERROR to DEBUG and emit a single
+; explicit Threshold_park ERROR plus a Prometheus counter, so
+; operators see one durable signal instead of a flapping stream.
+;
+; This sub-library hosts the classifier (closed sum type) and the
+; in-memory state behind a Mutex. Pure stdlib (Hashtbl + Mutex);
+; no Eio link so the standalone test executable builds in seconds
+; without dragging the main library.
+;
+; (include_subdirs no) opts out of the parent (include_subdirs
+; unqualified). (wrapped false) keeps the bare identifier
+; [Keeper_livelock_state] to match the existing lib/keeper/*
+; flat namespace at call sites.
+(include_subdirs no)
+
+(library
+ (name masc_mcp_keeper_livelock_state)
+ (public_name masc_mcp.keeper_livelock_state)
+ (wrapped false)
+ (libraries))

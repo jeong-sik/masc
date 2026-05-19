@@ -220,6 +220,56 @@ let with_env name value f =
     f
 ;;
 
+let test_public_alias_descriptions_are_frontdoor_safe () =
+  let meta = make_test_meta () in
+  let ctx_snapshot = make_test_ctx () in
+  let dir = Filename.temp_file "test_keeper_tools_descriptions_" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+       Eio_main.run
+       @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       let config = Coord.default_config dir in
+       let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_snapshot () in
+       let bash = find_tool "Bash" tools in
+       let grep = find_tool "Grep" tools in
+       check bool
+         "Bash description names public front door"
+         true
+         (string_contains ~sub:"public Bash front door" bash.schema.description);
+       check bool
+         "Bash description routes file observation"
+         true
+         (string_contains ~sub:"Read/Grep" bash.schema.description);
+       check bool
+         "Bash description routes workflow tools"
+         true
+         (string_contains ~sub:"visible task/board/PR tools" bash.schema.description);
+       check bool
+         "Bash description hides internal keeper_bash"
+         false
+         (string_contains ~sub:"keeper_bash" bash.schema.description);
+       check bool
+         "Bash description drops Legendary wording"
+         false
+         (string_contains ~sub:"Legendary" bash.schema.description);
+       check bool
+         "Grep description names observation lane"
+         true
+         (string_contains ~sub:"code/file observation" grep.schema.description);
+       check bool
+         "Grep description keeps execution in Bash"
+         true
+         (string_contains ~sub:"Bash only for command execution" grep.schema.description);
+       check bool
+         "Grep description hides internal keeper_shell"
+         false
+         (string_contains ~sub:"keeper_shell" grep.schema.description))
+;;
+
 let test_tool_side_effect_failures_are_observed () =
   let meta =
     make_test_meta ~name:"test-keeper-side-effects" ~allowed_paths:[ "repos" ] ()
@@ -1357,6 +1407,10 @@ let () =
     [ ( "make_tools"
       , [ test_case "returns nonempty" `Quick test_make_tools_returns_nonempty
         ; test_case "valid schemas" `Quick test_tools_have_valid_schemas
+        ; test_case
+            "public alias descriptions are front-door safe"
+            `Quick
+            test_public_alias_descriptions_are_frontdoor_safe
         ; test_case "count matches allowed" `Quick test_tool_count_matches_allowed
         ; test_case
             "error json becomes tool error"

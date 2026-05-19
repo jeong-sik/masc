@@ -259,6 +259,11 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
      `masc_keeper_up` for that keeper would otherwise leave the stale
      counter in memory and the next dispatch would still be blocked. *)
   Keeper_turn_livelock.reset_keeper_livelock ~keeper:old.name;
+  (* ETA-LIVELOCK: align typed-escalation classifier with the
+     livelock counter reset so an operator-triggered keeper_up
+     restores the next block to ERROR (not silent DEBUG demotion
+     from a previous threshold_park). *)
+  Keeper_livelock_state.reset_for_keeper ~keeper:old.name;
   if old.paused && not resume_paused_keeper then
     Log.Keeper.warn
       "update_keeper kept %s paused because an approval/reconcile gate is pending"

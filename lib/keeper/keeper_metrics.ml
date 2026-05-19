@@ -456,6 +456,25 @@ let metric_keeper_turn_starts = "masc_keeper_turn_starts_total"
 let metric_keeper_turn_reattempts = "masc_keeper_turn_reattempts_total"
 let metric_keeper_turn_regressions = "masc_keeper_turn_regressions_total"
 let metric_keeper_turn_livelock_blocks = "masc_keeper_turn_livelock_blocks_total"
+
+(* Per-(keeper, gate_kind) repeat-block counter. Bumped on every
+   [`Repeated] outcome from [Keeper_livelock_state.record_block].
+   Used by the dashboard to surface how many DEBUG-demoted blocks
+   are being absorbed behind a single ERROR line — gives an upper
+   bound on "noise absorbed". See lib/keeper/keeper_unified_turn.ml
+   livelock branch + RFC-0088 (Counter-as-Fix policy). *)
+let metric_keeper_turn_livelock_blocks_repeated =
+  "masc_keeper_turn_livelock_blocks_repeated_total"
+;;
+
+(* Per-(keeper, gate_kind) threshold-park counter. Bumped exactly
+   once per [(keeper, gate_kind)] entry per process lifetime: when
+   [Keeper_livelock_state.record_block] crosses the configured
+   park threshold. Pair with the durable ERROR log line at the same
+   call site for dashboarding. *)
+let metric_keeper_turn_livelock_blocks_threshold_park =
+  "masc_keeper_turn_livelock_blocks_threshold_park_total"
+;;
 let metric_keeper_turn_latency_bucket = "masc_keeper_turn_latency_bucket_total"
 
 let metric_keeper_turn_latency_by_model_bucket =

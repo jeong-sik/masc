@@ -333,6 +333,20 @@ let transition_error_to_string = function
 
 (* ── Transition Matrix ─────────────────────────────────── *)
 
+(* Anti-pattern fix (software-development.md §"FSM Sparse Match"): replaces
+   per-from [| <from>, _ -> false] wildcards on the 10 non-terminal source
+   phases with explicit deny-lists. Adding a new variant to [phase] now
+   surfaces 10 compile errors (one per source group) instead of silently
+   routing through every wildcard as [false]. Mirrors the
+   compiler-checked-exhaustive pattern already established in
+   [can_execute_turn] below.
+
+   Terminal source phases (Stopped/Dead/Zombie) keep [_ -> false] because
+   the semantic IS "any phase, including future ones, is unreachable from a
+   terminal state" — the wildcard correctly captures the universal denial.
+   The universal arms [_, Zombie -> true] and [_, Dead -> true] are kept
+   for the same reason: terminal failure / external hard-stop can strike
+   any non-terminal phase, including future additions to the variant. *)
 let can_transition ~from_phase ~to_phase =
   match from_phase, to_phase with
   (* Terminal states accept nothing *)
@@ -346,7 +360,15 @@ let can_transition ~from_phase ~to_phase =
   | _, Dead -> true
   (* Offline -> Running | Stopped | Draining (stop while not yet started) *)
   | Offline, (Running | Stopped | Draining) -> true
-  | Offline, _ -> false
+  | ( Offline
+    , ( Offline
+      | Failing
+      | Overflowed
+      | Compacting
+      | HandingOff
+      | Paused
+      | Crashed
+      | Restarting ) ) -> false
   (* Running -> buffer states, Paused, Stopped, Crashed (fiber death),
      Overflowed (prompt exceeded provider budget) *)
   | ( Running
@@ -358,18 +380,22 @@ let can_transition ~from_phase ~to_phase =
       | Paused
       | Stopped
       | Crashed ) ) -> true
-  | Running, _ -> false
+  | Running, (Offline | Running | Restarting) -> false
   (* Failing -> Running (recovery) | Crashed (threshold) | Draining (stop)
      | Paused (operator can pause for investigation)
      | Overflowed (context overflow distinct from generic failure) *)
   | Failing, (Running | Overflowed | Crashed | Draining | Paused) -> true
-  | Failing, _ -> false
+  | ( Failing
+    , (Offline | Failing | Compacting | HandingOff | Stopped | Restarting) ) ->
+    false
   (* Overflowed -> Running (operator_clear resolves the overflow in-place)
      | Compacting (auto-recovery, the default next step)
      | Paused (compact retry budget exhausted — operator needed)
      | Draining (operator stop) | Crashed (fiber died). *)
   | Overflowed, (Running | Compacting | Paused | Draining | Crashed) -> true
-  | Overflowed, _ -> false
+  | ( Overflowed
+    , (Offline | Failing | Overflowed | HandingOff | Stopped | Restarting) ) ->
+    false
   (* Compacting -> Running (done, overflow cleared)
      | Overflowed (Compaction_failed leaves context_overflow=true; the keeper
      re-enters Overflowed so the retry loop can decide next step — if the
@@ -379,29 +405,53 @@ let can_transition ~from_phase ~to_phase =
      | Failing (hb fail / guardrail during)
      | Crashed (fatal) | Draining (operator stop during). *)
   | Compacting, (Running | Overflowed | Failing | Crashed | Draining | Paused) -> true
-  | Compacting, _ -> false
+  | Compacting, (Offline | Compacting | HandingOff | Stopped | Restarting) -> false
   (* HandingOff -> Running (done) | Failing | Crashed
      | Draining (operator stop during handoff)
      | Paused (operator pause during handoff) *)
   | HandingOff, (Running | Failing | Crashed | Draining | Paused) -> true
-  | HandingOff, _ -> false
+  | ( HandingOff
+    , (Offline | Overflowed | Compacting | HandingOff | Stopped | Restarting) )
+    -> false
   (* Draining -> Stopped (done) | Crashed (fatal during drain) *)
   | Draining, (Stopped | Crashed) -> true
-  | Draining, _ -> false
+  | ( Draining
+    , ( Offline
+      | Running
+      | Failing
+      | Overflowed
+      | Compacting
+      | HandingOff
+      | Draining
+      | Paused
+      | Restarting ) ) -> false
   (* Paused -> Running (resume) | Draining (stop) | Stopped (remove)
      | Crashed (fiber can die while keeper is paused)
      | Compacting (operator invoked masc_keeper_compact on paused keeper
      to clear an overflow-induced pause) *)
   | Paused, (Running | Compacting | Draining | Stopped | Crashed) -> true
-  | Paused, _ -> false
+  | Paused, (Offline | Failing | Overflowed | HandingOff | Paused | Restarting)
+    -> false
   (* Crashed -> Restarting (backoff done). Dead is covered by the global
      hard-stop/budget terminal transition above. *)
   | Crashed, Restarting -> true
-  | Crashed, _ -> false
+  | ( Crashed
+    , ( Offline
+      | Running
+      | Failing
+      | Overflowed
+      | Compacting
+      | HandingOff
+      | Draining
+      | Paused
+      | Stopped
+      | Crashed ) ) -> false
   (* Restarting -> Running (success) | Crashed (fail)
      | Draining (stop_requested persists) | Paused (operator_paused persists) *)
   | Restarting, (Running | Crashed | Draining | Paused) -> true
-  | Restarting, _ -> false
+  | ( Restarting
+    , (Offline | Failing | Overflowed | Compacting | HandingOff | Stopped | Restarting) )
+    -> false
 ;;
 
 let can_execute_turn = function

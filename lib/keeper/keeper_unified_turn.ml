@@ -126,133 +126,17 @@ let run_keeper_cycle
      Satisfies the FSM contract: active state observed → SupervisorRequestsStop
      (Phase_gating → Phase_gating, stop signal acknowledged) then HonorStopSignal
      (Phase_gating → Cancelled supervisor_stop). *)
-  let supervisor_stop_at_entry =
-    match Keeper_registry.get ~base_path:registry_base_path meta.name with
-    | Some entry -> Atomic.get entry.fiber_stop
-    | None -> false
-  in
-  if supervisor_stop_at_entry
-  then (
-    let turn_plan =
-      decide_turn_plan_at_phase_gate ~keeper_turn_id
-        ~supervisor_stop_at_entry:true None
-    in
-    append_phase_gate_decision turn_plan;
-    Log.Keeper.info
-      ~keeper_name:meta.name
-      ~turn_id:keeper_turn_id
-      "%s: supervisor stop signal observed at turn entry — honoring (phase_gating)"
-      meta.name;
-    (* FSM: SupervisorRequestsStop — stop signal raised while in active state *)
-    Keeper_turn_fsm.emit_transition
-      ~keeper_name:meta.name
-      ~turn_id:keeper_turn_id
-      ~prev:Keeper_turn_fsm.Phase_gating
-      Keeper_turn_fsm.Phase_gating;
-    record_pre_dispatch_terminal_observation
-      ~config
-      ~meta
-      ~generation
-      ~cascade_name:
-        (Keeper_execution_receipt.cascade_name_of_string (cascade_name_of_meta meta))
-      ~outcome:`Cancelled
-      ~terminal_reason_code:"supervisor_stop"
-      ~activity_kind:"keeper.turn_cancelled"
-      ~trajectory_outcome:(Trajectory.Gated "supervisor_stop")
-      ~keeper_turn_id
-      ();
-    (* FSM: HonorStopSignal — cooperative cancel at phase_gating *)
-    Keeper_turn_fsm.emit_transition
-      ~keeper_name:meta.name
-      ~turn_id:keeper_turn_id
-      ~prev:Keeper_turn_fsm.Phase_gating
-      (Keeper_turn_fsm.Cancelled Keeper_turn_fsm.Cancelled_supervisor_stop);
-    Ok meta)
-  else (
-    match Keeper_registry.get_phase ~base_path:registry_base_path meta.name with
-    | Some phase when not (Keeper_state_machine.can_execute_turn phase) ->
-      let turn_plan =
-        decide_turn_plan_at_phase_gate ~keeper_turn_id
-          ~supervisor_stop_at_entry:false (Some phase)
-      in
-      let phase_string = Keeper_state_machine.phase_to_string phase in
-      append_phase_gate_decision turn_plan;
-      Log.Keeper.info
-        ~keeper_name:meta.name
-        ~turn_id:keeper_turn_id
-        "%s: keeper cycle skipped in non-executable phase=%s"
-        meta.name
-        phase_string;
-      let terminal_reason_code = Printf.sprintf "non_executable_phase:%s" phase_string in
-      record_pre_dispatch_terminal_observation
-        ~config
-        ~meta
-        ~generation
-        ~cascade_name:
-          (Keeper_execution_receipt.cascade_name_of_string (cascade_name_of_meta meta))
-        ~outcome:`Skipped
-        ~terminal_reason_code
-        ~activity_kind:"keeper.turn_skipped"
-        ~trajectory_outcome:(Trajectory.Gated terminal_reason_code)
-        ~keeper_turn_id
-        ();
-      Keeper_turn_fsm.emit_transition
-        ~keeper_name:meta.name
-        ~turn_id:keeper_turn_id
-        ~prev:Keeper_turn_fsm.Phase_gating
-        Keeper_turn_fsm.Done;
-      Ok meta
-    | None ->
-      let turn_plan =
-        decide_turn_plan_at_phase_gate ~keeper_turn_id
-          ~supervisor_stop_at_entry:false None
-      in
-      let terminal_reason_code = "registry_phase_missing" in
-      let error_message =
-        Printf.sprintf
-          "%s: keeper registry phase lookup returned None before dispatch"
-          meta.name
-      in
-      append_phase_gate_decision turn_plan;
-      Log.Keeper.error
-        ~keeper_name:meta.name
-        ~turn_id:keeper_turn_id
-        "%s"
-        error_message;
-      record_pre_dispatch_terminal_observation
-        ~config
-        ~meta
-        ~generation
-        ~cascade_name:
-          (Keeper_execution_receipt.cascade_name_of_string (cascade_name_of_meta meta))
-        ~outcome:`Error
-        ~terminal_reason_code
-        ~activity_kind:"keeper.turn_blocked"
-        ~trajectory_outcome:(Trajectory.Failed terminal_reason_code)
-        ~error_kind:(Keeper_execution_receipt.error_kind_of_string terminal_reason_code)
-        ~error_message
-        ~keeper_turn_id
-        ();
-      Keeper_turn_fsm.emit_transition
-        ~keeper_name:meta.name
-        ~turn_id:keeper_turn_id
-        ~prev:Keeper_turn_fsm.Phase_gating
-        (Keeper_turn_fsm.Failed
-           (Keeper_turn_fsm.Failure_runtime_error terminal_reason_code));
-      Error (Agent_sdk.Error.Internal error_message)
-    | phase_opt ->
-      (* State-aware cascade routing (TLA+ KeeperCoreTriad.SelectCascade).
-         At this point [phase] is executable; blocked phases returned above. *)
-      let turn_plan =
-        decide_turn_plan_at_phase_gate ~keeper_turn_id
-          ~supervisor_stop_at_entry:false phase_opt
-      in
-      append_phase_gate_decision turn_plan;
-      Keeper_turn_fsm.emit_transition
-        ~keeper_name:meta.name
-        ~turn_id:keeper_turn_id
-        ~prev:Keeper_turn_fsm.Phase_gating
-        Keeper_turn_fsm.Cascade_routing;
+  (* RFC-0136 PR-1: phase gate stage extracted to
+     [Keeper_unified_turn_phase_gate].  The main turn body is wrapped
+     as a nested [main_path] function so the caller can match on a
+     typed [phase_gate_outcome] and dispatch each terminal outcome at
+     the top of the function body, rather than burying early-exits in
+     deeply nested match arms.
+
+     State-aware cascade routing (TLA+ KeeperCoreTriad.SelectCascade)
+     resumes inside [main_path]; at that point [phase_opt] is whatever
+     the registry returned for an executable phase. *)
+  let main_path phase_opt =
       (* RFC-0041 Phase B4: when a specific item was selected by the
          proactive router, override (cascade_name_of_meta meta) so downstream
          cascade resolution uses the item's group. *)
@@ -1937,7 +1821,21 @@ let run_keeper_cycle
                   (* Cycle 45: KeeperTaskAcquisition.tla TurnComplete post-action. *)
                   cycle_completed := true;
                   post_turn_complete_task ~cycle_completed;
-                  Ok updated_meta)))))
+                  Ok updated_meta))))
+  in
+  match
+    Keeper_unified_turn_phase_gate.decide_and_record
+      ~config
+      ~meta
+      ~generation
+      ~keeper_turn_id
+      ~append_phase_gate_decision
+      ~registry_base_path
+  with
+  | Keeper_unified_turn_phase_gate.Phase_gate_terminal_ok meta -> Ok meta
+  | Keeper_unified_turn_phase_gate.Phase_gate_terminal_error err -> Error err
+  | Keeper_unified_turn_phase_gate.Phase_gate_proceed phase_opt ->
+    main_path phase_opt
 ;;
 
 let run_unified_turn = run_keeper_cycle

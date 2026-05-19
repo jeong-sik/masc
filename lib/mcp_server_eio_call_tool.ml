@@ -770,7 +770,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
    | Some entry ->
        Keeper_registry.record_tool_use
          ~base_path:entry.base_path entry.name ~tool_name:name ~success;
-       Keeper_registry.flush_tool_usage ~base_path:entry.base_path entry.name
+       Keeper_registry_tool_usage_persistence.flush ~base_path:entry.base_path entry.name
    | None -> ());
 
   (* #10358: classify failure mode at the dispatch boundary so

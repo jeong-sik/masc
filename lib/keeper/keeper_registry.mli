@@ -380,11 +380,17 @@ val tool_usage_of : base_path:string -> string ->
    find_by_name / find_by_agent_name / find_by_id /
    tool_usage_of_by_name / resolve_config. *)
 
-(** Flush in-memory tool usage stats to disk for persistence across restarts. *)
-val flush_tool_usage : base_path:string -> string -> unit
+(* Tool usage persistence (flush_tool_usage / restore_tool_usage /
+   tool_usage_path) moved to Keeper_registry_tool_usage_persistence.
+   The CAS-bound write path is exposed below for that module's use. *)
 
-(** Restore tool usage stats from disk after keeper re-registration. *)
-val restore_tool_usage : base_path:string -> string -> unit
+(** Replace (or insert) a single per-tool usage entry on a registered keeper.
+    Goes through the registry's CAS retry loop. Used by
+    [Keeper_registry_tool_usage_persistence.restore] to replay persisted
+    counters on re-registration. *)
+val set_tool_usage_entry :
+  base_path:string -> name:string -> tool_name:string
+  -> Keeper_types.tool_call_entry -> unit
 
 (** {1 RFC-0002 Event Dispatch} *)
 

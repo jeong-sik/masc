@@ -477,7 +477,7 @@ let write_heartbeat_snapshot
          ~message_count:message_count_v
      | None -> ());
     (try
-       Keeper_registry.flush_tool_usage ~base_path:ctx.config.base_path meta_current.name
+       Keeper_registry_tool_usage_persistence.flush ~base_path:ctx.config.base_path meta_current.name
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->

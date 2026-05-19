@@ -58,6 +58,12 @@ export type {
 
 export { displayState } from './fsm-hub-types'
 
+import {
+  toolRequirementLabel,
+  toolSurfaceClassLabel,
+  turnLaneLabel,
+} from './fsm-hub-types'
+
 export {
   appendCompositeObservation,
   deriveLaneDwellHistograms,
@@ -161,9 +167,9 @@ function executionReceiptTitle(execution: KeeperCompositeExecution | undefined):
     execution.recorded_at ? `recorded_at: ${execution.recorded_at}` : '',
     execution.operator_disposition ? `operator: ${execution.operator_disposition}` : '',
     execution.operator_disposition_reason ? `reason: ${execution.operator_disposition_reason}` : '',
-    surface?.tool_requirement ? `tool_requirement: ${surface.tool_requirement}` : '',
-    surface?.turn_lane ? `turn_lane: ${surface.turn_lane}` : '',
-    surface?.tool_surface_class ? `tool_surface: ${surface.tool_surface_class}` : '',
+    surface?.tool_requirement ? `tool_requirement: ${toolRequirementLabel(surface.tool_requirement) ?? surface.tool_requirement}` : '',
+    surface?.turn_lane ? `turn_lane: ${turnLaneLabel(surface.turn_lane) ?? surface.turn_lane}` : '',
+    surface?.tool_surface_class ? `tool_surface: ${toolSurfaceClassLabel(surface.tool_surface_class) ?? surface.tool_surface_class}` : '',
     typeof surface?.visible_tool_count === 'number' ? `visible_tools: ${surface.visible_tool_count}` : '',
     surface?.tool_surface_fallback_used === true ? 'tool_surface_fallback: true' : '',
     execution.cascade?.fallback_reason ? `fallback: ${execution.cascade.fallback_reason}` : '',

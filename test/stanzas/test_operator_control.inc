@@ -8,6 +8,7 @@
           test_operator_control_actions
           test_operator_control_judgment
           test_operator_control_confirm
-          test_operator_control_keeper)
+          test_operator_control_keeper
+          test_operator_control_keeper_message)
  (libraries masc_test_deps)
  (enabled_if (= %{env:MASC_INCLUDE_OPERATOR_CONTROL=true} "true")))

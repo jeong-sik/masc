@@ -61,6 +61,8 @@ namespace_headers="$out_dir/namespace-truth.headers"
 namespace_body="$out_dir/namespace-truth.body"
 namespace_json="$out_dir/namespace-truth.json"
 dev_token_json="$out_dir/dashboard-dev-token.json"
+install_version_stdout="$out_dir/install-version.stdout"
+install_version_stderr="$out_dir/install-version.stderr"
 
 cleanup() {
   if [[ -n "${SERVER_PID:-}" ]]; then
@@ -205,14 +207,35 @@ copy_install_smoke() {
   cp config/tool_policy.toml "$base_path/.masc/config/tool_policy.toml"
 }
 
+capture_installed_version() {
+  : >"$install_version_stdout"
+  : >"$install_version_stderr"
+  if ! MASC_BASE_PATH="$base_path" \
+    "$installed_bin" --version >"$install_version_stdout" 2>"$install_version_stderr"; then
+    echo "release-evidence: installed binary --version failed" >&2
+    cat "$install_version_stderr" >&2 || true
+    exit 1
+  fi
+
+  local version
+  version="$(tail -n1 "$install_version_stdout")"
+  if [[ -z "$version" ]]; then
+    echo "release-evidence: installed binary --version produced no output" >&2
+    cat "$install_version_stderr" >&2 || true
+    exit 1
+  fi
+  printf '%s\n' "$version"
+}
+
 PORT="${SMOKE_PORT:-$(pick_free_port)}"
 BASE_URL="http://127.0.0.1:${PORT}"
 MCP_URL="${BASE_URL}/mcp"
 
 copy_install_smoke
-installed_version="$("$installed_bin" --version 2>/dev/null | tail -n1)"
+installed_version="$(capture_installed_version)"
 
 env \
+  MASC_BASE_PATH="$base_path" \
   MASC_ADMIN_TOKEN= \
   MASC_INTERNAL_MCP_TOKEN= \
   MASC_MCP_TOKEN= \
@@ -382,6 +405,8 @@ md = f"""# Release Evidence Bundle
 
 ## Raw Captures
 
+- `install-version.stdout`
+- `install-version.stderr`
 - `health.json`
 - `initialize.headers`
 - `initialize.json`

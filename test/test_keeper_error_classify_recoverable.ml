@@ -53,6 +53,41 @@ let test_other_detail_generic_recoverable () =
   | None ->
     fail "Generic Cascade_exhausted with Other_detail should be recoverable"
 
+let test_slot_full_other_detail_is_capacity_backpressure () =
+  let err =
+    make_cascade_exhausted
+      (KT.Other_detail "slot full, cascading to next provider")
+  in
+  check bool "slot full is auto-recoverable" true
+    (KEC.is_auto_recoverable_turn_error err);
+  check bool "slot full remains cascade_exhausted" true
+    (KEC.is_cascade_exhausted_error err);
+  match KEC.recoverable_cascade_failure_reason err with
+  | Some reason ->
+    check string "slot full -> capacity_exhausted" "capacity_exhausted"
+      (KEC.degraded_retry_reason_to_string reason)
+  | None ->
+    fail "slot full should be capacity-backpressure recoverable"
+
+let test_provider_capacity_exhausted_is_capacity_backpressure () =
+  let err =
+    Agent_sdk.Error.Provider
+      (Llm_provider.Error.CapacityExhausted
+         {
+           scope = Llm_provider.Error.CapacityProvider;
+           affected = [ "runtime" ];
+           retry_after = None;
+           detail = "capacity exhausted";
+         })
+  in
+  match KEC.recoverable_cascade_failure_reason err with
+  | Some reason ->
+    check string "Provider CapacityExhausted -> capacity_exhausted"
+      "capacity_exhausted"
+      (KEC.degraded_retry_reason_to_string reason)
+  | None ->
+    fail "Provider CapacityExhausted should be recoverable as capacity"
+
 let test_all_providers_failed_recoverable () =
   let err = make_cascade_exhausted KT.All_providers_failed in
   match KEC.recoverable_cascade_failure_reason err with
@@ -385,6 +420,10 @@ let () =
             test_auto_recoverable_cascade_exhausted_is_still_cascade_exhausted;
           test_case "Other_detail (non-quota) is recoverable" `Quick
             test_other_detail_generic_recoverable;
+          test_case "slot full Other_detail is capacity backpressure" `Quick
+            test_slot_full_other_detail_is_capacity_backpressure;
+          test_case "provider CapacityExhausted is capacity backpressure" `Quick
+            test_provider_capacity_exhausted_is_capacity_backpressure;
           test_case "All_providers_failed is recoverable" `Quick
             test_all_providers_failed_recoverable;
           test_case "No_providers_available is recoverable" `Quick

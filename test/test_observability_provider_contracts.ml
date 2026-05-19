@@ -275,6 +275,7 @@ let test_event_serialization_roundtrip () =
           error_message = None;
           exit_code = None;
           stderr_excerpt = None;
+          failure_class = None;
         };
       T.Error_occurred { code = "E001"; message = "test"; context = "test" } ]
   in

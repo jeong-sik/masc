@@ -118,6 +118,7 @@ let test_event_tool_called () =
     error_message = Some "timed out after 30s";
     exit_code = None;
     stderr_excerpt = None;
+    failure_class = None;
   } in
   match e with
   | Telemetry_eio.Tool_called r ->

@@ -473,6 +473,7 @@ let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id
          error_message;
          exit_code;
          stderr_excerpt;
+         failure_class = None;
        });
   if not success then
     match error_kind with

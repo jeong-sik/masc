@@ -1,5 +1,10 @@
-import type { Agent, Keeper, KeeperPhase, PipelineStage } from '../types'
+import type { Agent, Keeper, PipelineStage } from '../types'
 import { keeperDisplayStatus, keeperRuntimeBlockerHint } from './keeper-runtime-display'
+// RFC-0135 PR-2: phase casing SSOT — single source `toKeeperPhase` in
+// keeper-store-normalize. Local CANONICAL_PHASE_KEYS + normalizePhase
+// (previously lines 39-55, 159-180) duplicated BACKEND_PHASE_MAP +
+// PHASE_ID_MAP elsewhere; the three maps drifted independently.
+import { toKeeperPhase } from '../keeper-store-normalize'
 
 export type RuntimeBand = 'active' | 'attention' | 'paused' | 'offline'
 
@@ -35,21 +40,6 @@ interface MonitoringEvidence {
 
 const HEARTBEAT_STALE_MS = 5 * 60 * 1000
 const DEFAULT_CONTEXT_ATTENTION_RATIO = 0.95
-
-const CANONICAL_PHASE_KEYS = new Set([
-  'Offline',
-  'Running',
-  'Failing',
-  'Overflowed',
-  'Compacting',
-  'HandingOff',
-  'Draining',
-  'Paused',
-  'Stopped',
-  'Crashed',
-  'Restarting',
-  'Dead',
-])
 
 const OFFLINE_PHASES = new Set<string>(['Offline', 'Stopped', 'Dead'])
 const ATTENTION_PHASES = new Set<string>(['Failing', 'Overflowed', 'Compacting', 'HandingOff', 'Draining', 'Crashed', 'Restarting'])
@@ -156,36 +146,13 @@ function stageMeta(key: string | null | undefined): StageMeta {
   return meta ?? OFFLINE_STAGE_META
 }
 
-function normalizePhase(phase: KeeperPhase | string | null | undefined): string | null {
-  if (!phase) return null
-  if (CANONICAL_PHASE_KEYS.has(phase)) return phase
-  const normalized = String(phase).trim().toLowerCase()
-  if (!normalized) return null
-  const lookup: Record<string, string> = {
-    offline: 'Offline',
-    running: 'Running',
-    failing: 'Failing',
-    overflowed: 'Overflowed',
-    compacting: 'Compacting',
-    handing_off: 'HandingOff',
-    handingoff: 'HandingOff',
-    draining: 'Draining',
-    paused: 'Paused',
-    stopped: 'Stopped',
-    crashed: 'Crashed',
-    restarting: 'Restarting',
-    dead: 'Dead',
-  }
-  return lookup[normalized] ?? null
-}
-
 function normalizeStage(stage: PipelineStage | string | null | undefined): string {
   return stage ? String(stage) : 'offline'
 }
 
 export function keeperPhaseForDisplay(keeper: Keeper): string | null {
   const lifecycleKey = keeperDisplayStatus(keeper)
-  const lifecyclePhase = normalizePhase(lifecycleKey)
+  const lifecyclePhase = toKeeperPhase(lifecycleKey)
   if (
     lifecyclePhase === 'Paused'
     || lifecyclePhase === 'Stopped'
@@ -194,7 +161,7 @@ export function keeperPhaseForDisplay(keeper: Keeper): string | null {
   ) {
     return lifecyclePhase
   }
-  return normalizePhase(keeper.phase) ?? lifecyclePhase
+  return toKeeperPhase(keeper.phase) ?? lifecyclePhase
 }
 
 function isHeartbeatStale(keeper: Keeper): boolean {

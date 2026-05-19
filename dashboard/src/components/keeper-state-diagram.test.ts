@@ -1,32 +1,13 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from "vitest"
-import { normalizePhase, transitionType, signalTone, badgeTone } from "./keeper-state-diagram"
+import { transitionType, signalTone, badgeTone } from "./keeper-state-diagram"
 
-describe("normalizePhase", () => {
-  it.each([
-    ["Offline", "Offline"],
-    ["Running", "Running"],
-    ["Failing", "Failing"],
-    ["overflowed", "Overflowed"],
-    ["handing_off", "HandingOff"],
-    ["paused", "Paused"],
-    ["dead", "Dead"],
-  ])("maps %s to %s", (input, expected) => {
-    expect(normalizePhase(input)).toBe(expected)
-  })
-
-  it("returns unmapped phase as-is", () => {
-    expect(normalizePhase("custom_phase")).toBe("custom_phase")
-  })
-
-  it.each([
-    [null, null],
-    [undefined, null],
-    ["", null],
-  ])("returns null for %s", (input, expected) => {
-    expect(normalizePhase(input)).toBe(expected)
-  })
-})
+// RFC-0135 PR-2: the local `normalizePhase` export was removed; phase
+// normalization now flows through `toKeeperPhase` (keeper-store-normalize)
+// which is covered by `keeper-store-normalize.test.ts`. The two unmapped
+// cases this file previously asserted (passthrough of unknown phase, null
+// for falsy inputs) become the caller's fallback (`?? raw`) responsibility
+// at the two render sites (keeper-state-diagram.ts:290, 292).
 
 describe("transitionType", () => {
   it("extracts type from object", () => {

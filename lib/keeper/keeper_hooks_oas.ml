@@ -713,12 +713,49 @@ let make_hooks
 
     on_tool_error = Some (function
       | Agent_sdk.Hooks.OnToolError { tool_name; error } ->
+        (* Always increment the durable Prometheus signal: noise
+           dedupe is a log-surface concern only; the counter carries
+           the count for dashboards and alert rules. *)
         Prometheus.inc_counter
           Keeper_metrics.metric_keeper_lifecycle_callback_failures
           ~labels:[(label_keeper, (!meta_ref).name); (label_callback, callback_label_on_tool_error)]
           ();
-        Log.Keeper.error "keeper:%s tool_error: %s — %s"
-          (!meta_ref).name tool_name error;
+        (* λ-HOOK-ERROR (2026-05-19) — typed dedupe of repeated
+           [on_tool_error] hook ERROR lines. system_log 1000-line
+           sample (keeper:verifier × Bash × 2, lifecycle-worker-fast-1
+           × masc_worktree_create × 2, lifecycle-reviewer-fast-1 ×
+           keeper_pr_review_comment × 2, analyst × masc_transition ×
+           2) shows the same (keeper, tool, error) triple recurring
+           across time; only the first occurrence carries
+           operator-visible ERROR value. See
+           lib/keeper_tool_hook_error_state for rationale. *)
+        let keeper_name = (!meta_ref).name in
+        let error_signature = Keeper_tool_hook_error_state.normalize error in
+        (match
+           Keeper_tool_hook_error_state.record
+             ~keeper_name
+             ~tool_name
+             ~error_signature
+             ()
+         with
+         | `First ->
+           Log.Keeper.error "keeper:%s tool_error: %s — %s"
+             keeper_name tool_name error
+         | `Repeated n ->
+           Log.Keeper.debug
+             "keeper:%s tool_error repeated (total=%d, dedup): %s — %s"
+             keeper_name n tool_name error
+         | `Threshold_silence n ->
+           Log.Keeper.error
+             "keeper:%s tool_error threshold-silence after %d identical: %s — %s"
+             keeper_name n tool_name error;
+           Prometheus.inc_counter
+             Keeper_metrics.metric_keeper_lifecycle_callback_failures
+             ~labels:
+               [ (label_keeper, keeper_name)
+               ; (label_callback, "on_tool_error_threshold_silence")
+               ]
+             ());
         Agent_sdk.Hooks.Continue
       | _ -> Agent_sdk.Hooks.Continue);
 

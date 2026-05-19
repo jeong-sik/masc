@@ -1324,16 +1324,42 @@ let test_health_response_default_is_light_probe () =
   Alcotest.(check bool) "default health skips cdal snapshot" true
     (json |> member "cdal" = `Null)
 
-let test_health_response_full_query_keeps_diagnostics () =
+let test_health_response_full_query_uses_snapshot_cache () =
+  Server_routes_http_runtime.For_testing.reset_full_health_snapshot ();
   let request = Httpun.Request.create `GET "/health?full=1" in
-  let json = Server_routes_http_runtime.make_health_response_json request in
+  let first = Server_routes_http_runtime.make_health_response_json request in
   let open Yojson.Safe.Util in
   Alcotest.(check string) "full health detail" "full"
-    (json |> member "health_detail" |> to_string);
-  Alcotest.(check bool) "full health keeps reaction ledger" true
-    (match json |> member "keeper_reaction_ledger" with `Assoc _ -> true | _ -> false);
-  Alcotest.(check bool) "full health keeps cdal snapshot" true
-    (match json |> member "cdal" with `Assoc _ -> true | _ -> false)
+    (first |> member "health_detail" |> to_string);
+  Alcotest.(check bool) "full health includes snapshot metadata" true
+    (match first |> member "full_health_snapshot" with
+     | `Assoc _ -> true
+     | _ -> false);
+  let first_snapshot_status =
+    first |> member "full_health_snapshot" |> member "status" |> to_string
+  in
+  Alcotest.(check bool) "first full health status is bounded" true
+    (List.mem first_snapshot_status [ "warming"; "ready"; "stale"; "error" ]);
+  Alcotest.(check bool) "full health response keeps reaction ledger shape" true
+    (match first |> member "keeper_reaction_ledger" with
+     | `Assoc _ -> true
+     | _ -> false);
+  Alcotest.(check bool) "full health response keeps cdal shape" true
+    (match first |> member "cdal" with
+     | `Assoc _ -> true
+     | _ -> false);
+  Server_routes_http_runtime.For_testing.refresh_full_health_snapshot_now request;
+  let refreshed = Server_routes_http_runtime.make_health_response_json request in
+  Alcotest.(check string) "refreshed snapshot is ready" "ready"
+    (refreshed |> member "full_health_snapshot" |> member "status" |> to_string);
+  Alcotest.(check bool) "refreshed full health keeps reaction ledger" true
+    (match refreshed |> member "keeper_reaction_ledger" with
+     | `Assoc _ -> true
+     | _ -> false);
+  Alcotest.(check bool) "refreshed full health keeps cdal snapshot" true
+    (match refreshed |> member "cdal" with
+     | `Assoc _ -> true
+     | _ -> false)
 
 let test_health_response_survives_deleted_cwd () =
   with_temp_dir "health-deleted-cwd" (fun dir ->
@@ -3007,8 +3033,8 @@ let () =
             test_health_json_surfaces_log_ring_summary;
           Alcotest.test_case "default health response is light probe" `Quick
             test_health_response_default_is_light_probe;
-          Alcotest.test_case "full health query keeps diagnostics" `Quick
-            test_health_response_full_query_keeps_diagnostics;
+          Alcotest.test_case "full health query uses snapshot cache" `Quick
+            test_health_response_full_query_uses_snapshot_cache;
           Alcotest.test_case "health response survives deleted cwd" `Quick
             test_health_response_survives_deleted_cwd;
           Alcotest.test_case "readiness false before init" `Quick

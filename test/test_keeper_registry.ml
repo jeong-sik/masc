@@ -1604,11 +1604,11 @@ let test_find_by_agent_name () =
   R.clear ();
   let _entry = R.register ~base_path:bp "fn1" (make_meta "fn1") in
   let _entry2 = R.register ~base_path:bp "fn2" (make_meta "fn2") in
-  (match R.find_by_agent_name "agent-fn2" with
+  (match Masc_mcp.Keeper_registry_lookup.find_by_agent_name "agent-fn2" with
    | Some e -> check string "found by agent_name" "fn2" e.name
    | None -> fail "expected fn2 via agent_name");
   check bool "not found returns None" true
-    (Option.is_none (R.find_by_agent_name "agent-nonexistent"))
+    (Option.is_none (Masc_mcp.Keeper_registry_lookup.find_by_agent_name "agent-nonexistent"))
 
 (* ── resolve_config tests ────────────────────────────────── *)
 
@@ -1636,7 +1636,7 @@ let test_resolve_config_scoped_hit () =
   R.clear ();
   let _entry = R.register ~base_path:bp "rc1" (make_meta "rc1") in
   let config = make_test_config bp in
-  let resolved = R.resolve_config config "rc1" in
+  let resolved = Masc_mcp.Keeper_registry_lookup.resolve_config config "rc1" in
   check string "scoped hit keeps base_path" bp resolved.base_path
 
 let test_resolve_config_cross_base_path () =
@@ -1644,19 +1644,19 @@ let test_resolve_config_cross_base_path () =
   let bp2 = "/tmp/other" in
   let _entry = R.register ~base_path:bp2 "rc2" (make_meta "rc2") in
   let config = make_test_config bp in
-  let resolved = R.resolve_config config "rc2" in
+  let resolved = Masc_mcp.Keeper_registry_lookup.resolve_config config "rc2" in
   check string "cross-base_path keeps original scope" bp resolved.base_path
 
 let test_resolve_config_not_found () =
   R.clear ();
   let config = make_test_config bp in
-  let resolved = R.resolve_config config "nonexistent" in
+  let resolved = Masc_mcp.Keeper_registry_lookup.resolve_config config "nonexistent" in
   check string "unknown keeper keeps original" bp resolved.base_path
 
 let test_resolve_config_empty_name () =
   R.clear ();
   let config = make_test_config bp in
-  let resolved = R.resolve_config config "" in
+  let resolved = Masc_mcp.Keeper_registry_lookup.resolve_config config "" in
   check string "empty name keeps original" bp resolved.base_path
 
 (* ── Directive processing tests ─────────────────────────── *)

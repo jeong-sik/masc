@@ -41,10 +41,10 @@ let get_bus () = Keeper_event_bus.get ()
 (* ── gRPC directive processing ── *)
 
 let with_keeper_entry_by_identity ~identity ~on_missing f =
-  match Keeper_registry.find_by_agent_name identity with
+  match Keeper_registry_lookup.find_by_agent_name identity with
   | Some entry -> f entry
   | None ->
-    (match Keeper_registry.find_by_name identity with
+    (match Keeper_registry_lookup.find_by_name identity with
      | Some entry -> f entry
      | None -> on_missing ())
 ;;
@@ -189,7 +189,7 @@ let process_directive ~agent_name directive =
        guard fires.  In both cases a wakeup should start from a fresh counter
        instead of immediately re-blocking the same turn. *)
     let entry_paused =
-      match Keeper_registry.find_by_agent_name agent_name with
+      match Keeper_registry_lookup.find_by_agent_name agent_name with
       | Some e -> e.meta.paused
       | None ->
         (match Keeper_exec_shared.find_registry_meta
@@ -243,7 +243,7 @@ let reconcile_current_task_id_for_heartbeat ~config ~agent_name =
 ;;
 
 let registry_current_task_id agent_name =
-  match Keeper_registry.find_by_agent_name agent_name with
+  match Keeper_registry_lookup.find_by_agent_name agent_name with
   | Some e -> e.meta.current_task_id
   | None -> None
 ;;

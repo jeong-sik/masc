@@ -115,7 +115,7 @@ let missing_file_error_json
 let find_registry_meta ~(keeper_name : string) ~(source_layer : string)
   : Keeper_types.keeper_meta option
   =
-  match Keeper_registry.find_by_name keeper_name with
+  match Keeper_registry_lookup.find_by_name keeper_name with
   | None ->
     Prometheus.inc_counter
       Keeper_metrics.metric_keeper_path_resolver_identity_mismatch

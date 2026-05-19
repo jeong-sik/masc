@@ -750,7 +750,7 @@ let execute_tool_eio
                   reason
             in
             let internal_keeper_meta_of_agent () =
-              match Keeper_registry.find_by_agent_name agent_name with
+              match Keeper_registry_lookup.find_by_agent_name agent_name with
               | Some (entry : Keeper_registry.registry_entry)
                 when String.equal entry.base_path config.base_path -> Ok entry.meta
               | Some _ | None ->

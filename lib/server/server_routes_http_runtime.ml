@@ -181,17 +181,24 @@ let quick_gc_json () =
       ("minor_heap_size", `Int (let c = Gc.get () in c.minor_heap_size));
     ]
 
-let make_health_probe_json ?(listener = "http/1.1") request =
+let make_health_probe_fields ?(listener = "http/1.1") ?full_health_url
+    ?(health_detail = "probe") request =
   let uptime_secs = health_uptime_secs () in
   let build = Build_identity.current () in
-  Tool_args.ok_assoc
-    [
+  let full_health_url_fields =
+    match full_health_url with
+    | Some url -> [ ("full_health_url", `String url) ]
+    | None -> []
+  in
+  [
       ("server", `String "masc-mcp");
       ("version", `String build.release_version);
       ("release_version", `String build.release_version);
       ("build", Build_identity.to_yojson build);
-      ("health_detail", `String "probe");
-      ("full_health_url", `String "/health?full=1");
+      ("health_detail", `String health_detail);
+    ]
+  @ full_health_url_fields
+  @ [
       ("protocol", protocol_json ~listener);
       ("transport", transport_json request);
       ("http_listener", Transport_metrics.http_listener_json ());
@@ -203,6 +210,11 @@ let make_health_probe_json ?(listener = "http/1.1") request =
       ("logs", Log.Ring.summary_json ());
       ("gc", quick_gc_json ());
     ]
+
+let make_health_probe_json ?(listener = "http/1.1") request =
+  Tool_args.ok_assoc
+    (make_health_probe_fields ~listener ~health_detail:"probe"
+       ~full_health_url:"/health?full=1" request)
 
 type paused_keeper_scan = {
   names : string list;
@@ -778,11 +790,271 @@ let make_health_json ?(listener = "http/1.1") request =
              (Prometheus.metric_total "masc_lazy_task_boot_guard_fired_total")));
   ]
 
+type full_health_snapshot = {
+  fields : (string * Yojson.Safe.t) list;
+  computed_at : float;
+  duration_ms : int;
+  error : string option;
+}
+
+let full_health_snapshot_ttl_sec = 2.0
+
+let full_health_snapshot_mu = Stdlib.Mutex.create ()
+let full_health_snapshot = ref None
+let full_health_refresh_in_flight = ref false
+let full_health_refresh_started_at = ref None
+let full_health_refresh_timeout_sec = 5.0
+
+let with_full_health_snapshot_lock f =
+  Stdlib.Mutex.lock full_health_snapshot_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock full_health_snapshot_mu)
+    f
+
+let full_health_cached_field_names =
+  [
+    "feature_flags";
+    "keeper_fibers";
+    "keeper_fd_pressure";
+    "fd_accountant";
+    "keeper_fleet_safety";
+    "keeper_reaction_ledger";
+    "paused_keepers";
+    "cdal";
+    "keeper_config_parse_error_count";
+    "keeper_config_parse_errors";
+    "keeper_config_unknown_key_count";
+    "keeper_config_unknown_keys";
+    "keeper_config_schema_status";
+    "keeper_config_schema_blocking";
+    "keeper_config_schema_terminal_reason";
+    "keeper_config_operator_action_required";
+    "lazy_task_boot_guard_fires_total";
+  ]
+
+let full_health_field_is_cached name =
+  List.exists (String.equal name) full_health_cached_field_names
+
+let full_health_component_placeholder ?error ~status component =
+  let error_fields =
+    match error with
+    | Some error -> [ ("error", `String error) ]
+    | None -> []
+  in
+  `Assoc
+    ([
+       ("component", `String component);
+       ("status", `String status);
+       ("component_timed_out", `Bool false);
+     ]
+     @ error_fields)
+
+let full_health_placeholder_fields ?error ?(status = "warming") () =
+  [
+    ( "feature_flags",
+      full_health_component_placeholder ?error ~status "feature_flags" );
+    ("keeper_fibers", `Int 0);
+    ( "keeper_fd_pressure",
+      full_health_component_placeholder ?error ~status "keeper_fd_pressure" );
+    ( "fd_accountant",
+      full_health_component_placeholder ?error ~status "fd_accountant" );
+    ( "keeper_fleet_safety",
+      full_health_component_placeholder ?error ~status "keeper_fleet_safety" );
+    ( "keeper_reaction_ledger",
+      full_health_component_placeholder ?error ~status "keeper_reaction_ledger" );
+    ( "paused_keepers",
+      `Assoc
+        [
+          ("status", `String status);
+          ("count", `Int 0);
+          ("names", `List []);
+          ("component_timed_out", `Bool false);
+        ] );
+    ("cdal", full_health_component_placeholder ?error ~status "cdal");
+    ("keeper_config_parse_error_count", `Int 0);
+    ("keeper_config_parse_errors", `List []);
+    ("keeper_config_unknown_key_count", `Int 0);
+    ("keeper_config_unknown_keys", `List []);
+    ("keeper_config_schema_status", `String status);
+    ("keeper_config_schema_blocking", `Bool false);
+    ("keeper_config_schema_terminal_reason", `String "snapshot_not_ready");
+    ("keeper_config_operator_action_required", `Bool false);
+    ("lazy_task_boot_guard_fires_total", `Int 0);
+  ]
+
+let cached_full_health_fields = function
+  | `Assoc fields -> List.filter (fun (name, _) -> full_health_field_is_cached name) fields
+  | json ->
+      [
+        ( "full_health_payload",
+          `Assoc
+            [
+              ("status", `String "unexpected_payload");
+              ("payload", json);
+            ] );
+      ]
+
+let duration_ms ~started_at ~finished_at =
+  max 0 (int_of_float ((finished_at -. started_at) *. 1000.))
+
+let compute_full_health_snapshot ?(listener = "http/1.1") request =
+  let started_at = Unix.gettimeofday () in
+  try
+    let fields = cached_full_health_fields (make_health_json ~listener request) in
+    let finished_at = Unix.gettimeofday () in
+    {
+      fields;
+      computed_at = finished_at;
+      duration_ms = duration_ms ~started_at ~finished_at;
+      error = None;
+    }
+  with
+  | exn ->
+      let finished_at = Unix.gettimeofday () in
+      let error = Printexc.to_string exn in
+      {
+        fields = full_health_placeholder_fields ~error ~status:"error" ();
+        computed_at = finished_at;
+        duration_ms = duration_ms ~started_at ~finished_at;
+        error = Some error;
+      }
+
+let store_full_health_snapshot snapshot =
+  with_full_health_snapshot_lock (fun () ->
+      full_health_snapshot := Some snapshot;
+      full_health_refresh_in_flight := false;
+      full_health_refresh_started_at := None)
+
+let refresh_full_health_snapshot_sync ?(listener = "http/1.1") request =
+  store_full_health_snapshot (compute_full_health_snapshot ~listener request)
+
+let snapshot_is_stale ~now snapshot =
+  now -. snapshot.computed_at > full_health_snapshot_ttl_sec
+
+let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
+    snapshot =
+  let component_timed_out =
+    match (refresh_in_flight, refresh_started_at) with
+    | true, Some started_at ->
+        now -. started_at > full_health_refresh_timeout_sec
+    | _ -> false
+  in
+  let snapshot_age_ms, computed_at, duration_ms, error, status =
+    match snapshot with
+    | None -> (`Null, `Null, `Null, `Null, "warming")
+    | Some snapshot ->
+        let status =
+          match snapshot.error with
+          | Some _ -> "error"
+          | None when snapshot_is_stale ~now snapshot -> "stale"
+          | None -> "ready"
+        in
+        ( `Int (duration_ms ~started_at:snapshot.computed_at ~finished_at:now),
+          `Float snapshot.computed_at,
+          `Int snapshot.duration_ms,
+          (match snapshot.error with Some error -> `String error | None -> `Null),
+          status )
+  in
+  `Assoc
+    [
+      ("status", `String status);
+      ("snapshot_age_ms", snapshot_age_ms);
+      ("computed_at_unix", computed_at);
+      ("duration_ms", duration_ms);
+      ("ttl_ms", `Int (int_of_float (full_health_snapshot_ttl_sec *. 1000.)));
+      ("refresh_in_flight", `Bool refresh_in_flight);
+      ( "refresh_started_at_unix",
+        match refresh_started_at with
+        | Some started_at -> `Float started_at
+        | None -> `Null );
+      ( "refresh_timeout_ms",
+        `Int (int_of_float (full_health_refresh_timeout_sec *. 1000.)) );
+      ("component_timed_out", `Bool component_timed_out);
+      ("error", error);
+    ]
+
+let schedule_full_health_snapshot_refresh ?(listener = "http/1.1") request =
+  let should_start =
+    with_full_health_snapshot_lock (fun () ->
+        if !full_health_refresh_in_flight then false
+        else (
+          full_health_refresh_in_flight := true;
+          full_health_refresh_started_at := Some (Unix.gettimeofday ());
+          true))
+  in
+  if should_start then
+    try
+      ignore
+        (Thread.create
+           (fun () -> refresh_full_health_snapshot_sync ~listener request)
+           ())
+    with
+    | exn ->
+        let error = Printexc.to_string exn in
+        let now = Unix.gettimeofday () in
+        with_full_health_snapshot_lock (fun () ->
+            full_health_snapshot :=
+              Some
+                {
+                  fields = full_health_placeholder_fields ~error ~status:"error" ();
+                  computed_at = now;
+                  duration_ms = 0;
+                  error = Some error;
+                };
+            full_health_refresh_in_flight := false;
+            full_health_refresh_started_at := None)
+
+let full_health_snapshot_state () =
+  with_full_health_snapshot_lock (fun () ->
+      ( !full_health_snapshot,
+        !full_health_refresh_in_flight,
+        !full_health_refresh_started_at ))
+
+let make_cached_full_health_json ?(listener = "http/1.1") request =
+  let now = Unix.gettimeofday () in
+  let snapshot, refresh_in_flight, _refresh_started_at =
+    full_health_snapshot_state ()
+  in
+  let needs_refresh =
+    match snapshot with
+    | None -> true
+    | Some snapshot -> snapshot_is_stale ~now snapshot
+  in
+  if needs_refresh && not refresh_in_flight then
+    schedule_full_health_snapshot_refresh ~listener request;
+  let snapshot, refresh_in_flight, refresh_started_at =
+    full_health_snapshot_state ()
+  in
+  let fields =
+    match snapshot with
+    | Some snapshot -> snapshot.fields
+    | None -> full_health_placeholder_fields ()
+  in
+  Tool_args.ok_assoc
+    (make_health_probe_fields ~listener ~health_detail:"full" request
+     @ fields
+     @ [
+         ( "full_health_snapshot",
+           full_health_snapshot_metadata ~now ~refresh_in_flight
+             ~refresh_started_at snapshot );
+       ])
+
+module For_testing = struct
+  let reset_full_health_snapshot () =
+    with_full_health_snapshot_lock (fun () ->
+        full_health_snapshot := None;
+        full_health_refresh_in_flight := false;
+        full_health_refresh_started_at := None)
+
+  let refresh_full_health_snapshot_now ?(listener = "http/1.1") request =
+    refresh_full_health_snapshot_sync ~listener request
+end
+
 let full_health_requested request =
   Server_utils.bool_query_param request "full" ~default:false
 
 let make_health_response_json ?(listener = "http/1.1") request =
-  if full_health_requested request then make_health_json ~listener request
+  if full_health_requested request then make_cached_full_health_json ~listener request
   else make_health_probe_json ~listener request
 
 (** Health check handler *)

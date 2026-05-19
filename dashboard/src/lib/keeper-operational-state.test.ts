@@ -6,8 +6,10 @@ import {
   compositeIsRunning,
   compositeIsTurnIdle,
   compositePhaseTone,
+  deriveKeeperAttention,
   deriveKeeperOperationalState,
   toKsmPhase,
+  type KeeperAttention,
   type KeeperKsmPhase,
   type KeeperOperationalState,
 } from './keeper-operational-state'
@@ -435,5 +437,37 @@ describe('compositeIsRunning / compositeIsTurnIdle — wire-format helpers', () 
   })
   it('turn_phase=executing ⇒ false', () => {
     expect(compositeIsTurnIdle({ turn_phase: 'executing' })).toBe(false)
+  })
+})
+
+describe('deriveKeeperAttention — RFC-0135 PR-14a', () => {
+  const makeComposite = (
+    attentionOverrides: Partial<{ blocked: boolean; needs_attention: boolean }>,
+  ): KeeperCompositeSnapshot =>
+    ({
+      keeper: 'test',
+      runtime_attention: {
+        blocked: false,
+        needs_attention: false,
+        ...attentionOverrides,
+      },
+    } as unknown as KeeperCompositeSnapshot)
+
+  it('blocked=true ⇒ blocked', () => {
+    expect(deriveKeeperAttention(makeComposite({ blocked: true }))).toBe<KeeperAttention>('blocked')
+  })
+  it('needs_attention=true ⇒ needs_attention', () => {
+    expect(deriveKeeperAttention(makeComposite({ needs_attention: true }))).toBe<KeeperAttention>('needs_attention')
+  })
+  it('blocked beats needs_attention when both set', () => {
+    expect(
+      deriveKeeperAttention(makeComposite({ blocked: true, needs_attention: true })),
+    ).toBe<KeeperAttention>('blocked')
+  })
+  it('neither flag set ⇒ clean', () => {
+    expect(deriveKeeperAttention(makeComposite({}))).toBe<KeeperAttention>('clean')
+  })
+  it('null composite ⇒ clean (no backend attestation)', () => {
+    expect(deriveKeeperAttention(null)).toBe<KeeperAttention>('clean')
   })
 })

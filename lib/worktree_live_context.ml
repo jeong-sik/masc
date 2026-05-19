@@ -71,7 +71,22 @@ let nearest_git_root path =
       let parent = Filename.dirname dir in
       if String.equal parent dir then None else walk parent
   in
-  try walk path with Sys_error _ -> None
+  (* Silent [Sys_error _ -> None] previously hid two cases behind
+     "no git root found": (1) walked all the way to filesystem root
+     without finding [.git] (expected outcome), (2) Sys.file_exists
+     raised mid-walk due to permission denied or broken symlink. The
+     dashboard / keeper code paths that consume this value use None
+     as "not a git repo" — case (2) misleads them when the path *is*
+     a git repo but transiently unreadable. *)
+  try walk path with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Sys_error msg ->
+    Log.Coord.warn
+      "[worktree_live_context.nearest_git_root] walk failed at %s: %s; \
+       returning None"
+      path
+      msg;
+    None
 
 let repo_root_for ~base_path =
   if not (Coord_git.has_git_marker base_path) then None
@@ -180,12 +195,28 @@ let state_file ~repo_root ~actor_key =
     (Printf.sprintf "%s.git-status-hash" safe_key)
 
 let read_file_if_exists path =
+  (* Silent [Sys_error _ -> None] previously hid two cases behind
+     "file not present": (1) file_exists returned false (returns None
+     via the else branch — expected), (2) TOCTOU race between
+     file_exists and load_file, permission denied, or broken symlink
+     (Sys_error → silent None — surprise). The cached-hash consumers
+     of this helper interpret None as "no cached value" — case (2)
+     forces a cache miss + recompute on every call against an
+     unreadable path, silently. *)
   try
     if Fs_compat.file_exists path then
       Some (String.trim (Fs_compat.load_file path))
     else
       None
-  with Sys_error _ -> None
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Sys_error msg ->
+    Log.Coord.warn
+      "[worktree_live_context.read_file_if_exists] read failed at %s: %s; \
+       returning None"
+      path
+      msg;
+    None
 
 let write_text path content =
   Fs_compat.mkdir_p (Filename.dirname path);

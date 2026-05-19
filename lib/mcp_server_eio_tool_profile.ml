@@ -356,11 +356,26 @@ type tools_list_params = {
 
 open Result.Syntax
 
+let json_kind_name : Yojson.Safe.t -> string = function
+  | `Null -> "null"
+  | `Bool _ -> "bool"
+  | `Int _ -> "int"
+  | `Intlit _ -> "intlit"
+  | `Float _ -> "float"
+  | `String _ -> "string"
+  | `Assoc _ -> "object"
+  | `List _ -> "array"
+  | `Tuple _ -> "tuple"
+  | `Variant _ -> "variant"
+
 let strict_assoc_params params =
   match params with
   | None -> Ok []
   | Some (`Assoc fields) -> Ok fields
-  | Some _ -> Error "Invalid params: expected object"
+  | Some other ->
+      Error
+        (Printf.sprintf "Invalid params: expected object (received %s)"
+           (json_kind_name other))
 
 let cursor_param payload =
   let open Yojson.Safe.Util in
@@ -372,14 +387,20 @@ let cursor_param payload =
         Error "Invalid params: cursor must not be empty"
       else
         Ok (Some trimmed)
-  | _ -> Error "Invalid params: cursor must be a string"
+  | other ->
+      Error
+        (Printf.sprintf "Invalid params: cursor must be a string (received %s)"
+           (json_kind_name other))
 
 let bool_param payload key =
   let open Yojson.Safe.Util in
   match payload |> member key with
   | `Null -> Ok false
   | `Bool value -> Ok value
-  | _ -> Error (Printf.sprintf "Invalid params: %s must be a boolean" key)
+  | other ->
+      Error
+        (Printf.sprintf "Invalid params: %s must be a boolean (received %s)"
+           key (json_kind_name other))
 
 let decode_cursor_offset = function
   | None -> Ok 0
@@ -422,13 +443,19 @@ let cursor_only_params params =
   match params with
   | None -> Ok None
   | Some (`Assoc _ as payload) -> cursor_param payload
-  | Some _ -> Error "Invalid params: expected object"
+  | Some other ->
+      Error
+        (Printf.sprintf "Invalid params: expected object (received %s)"
+           (json_kind_name other))
 
 let validate_optional_meta payload =
   match Yojson.Safe.Util.member "_meta" payload with
   | `Null
   | `Assoc _ -> Ok ()
-  | _ -> Error "Invalid params: _meta must be an object"
+  | other ->
+      Error
+        (Printf.sprintf "Invalid params: _meta must be an object (received %s)"
+           (json_kind_name other))
 
 let requested_tool_list_params params =
   let open Yojson.Safe.Util in
@@ -459,11 +486,19 @@ let requested_tool_list_params params =
                  match (acc, item) with
                  | Error _ as err, _ -> err
                  | Ok names, `String value -> Ok (value :: names)
-                 | Ok _, _ ->
-                     Error "Invalid params: names must be an array of strings")
+                 | Ok _, bad ->
+                     Error
+                       (Printf.sprintf
+                          "Invalid params: names must be an array of strings \
+                           (received %s element)"
+                          (json_kind_name bad)))
                (Ok [])
           |> Result.map (fun names -> Some (List.rev names))
-      | _ -> Error "Invalid params: names must be an array of strings"
+      | other ->
+          Error
+            (Printf.sprintf
+               "Invalid params: names must be an array of strings (received %s)"
+               (json_kind_name other))
     in
     let* cursor = cursor_param payload in
     let* include_hidden = bool_param payload "include_hidden" in
@@ -497,7 +532,11 @@ let parse_cursor_only_params params =
     match payload |> member "cursor" with
     | `Null -> Ok { cursor = None }
     | `String cursor -> Ok { cursor = Some cursor }
-    | _ -> Error "Invalid params: cursor must be a string"
+    | other ->
+        Error
+          (Printf.sprintf
+             "Invalid params: cursor must be a string (received %s)"
+             (json_kind_name other))
 
 let list_page_size () = Env_config.Tools.list_page_size ()
 

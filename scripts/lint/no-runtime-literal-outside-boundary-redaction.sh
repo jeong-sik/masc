@@ -75,11 +75,6 @@ SCAN_FILES=(
 # Drift (line move) makes the entry stale and must be cleaned in the
 # same PR. The runtime check accepts any of the listed lines.
 PREAPPROVED=(
-  # Doc comment continuation line — comment body explaining the schema
-  # field below. Closing `*)` lives on this line.
-  "lib/cascade/cascade_event_bridge.ml:247"
-  # JSON schema field name — wire-format key, not a label.
-  "lib/cascade/cascade_event_bridge.ml:249"
   # Classification list — enumeration of category names, not a label.
   "lib/keeper/keeper_exec_status.ml:220"
   # Debug format string inside Printf.sprintf — internal observability

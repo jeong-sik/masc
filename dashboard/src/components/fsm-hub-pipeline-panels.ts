@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 
 import type { KeeperCompositeSnapshot } from '../api/keeper'
 import { nowSecondsSignal, useNowSecondsTicker } from '../lib/now-signal'
+import { getPhaseStyle } from './keeper-phase-indicator'
 
 import {
   type CompositeObservation,
@@ -285,24 +286,8 @@ export function HeroPhase({
     return undefined
   }, [snapshot.phase])
 
-  // Wire format is lowercase (phase_to_string in keeper_state_machine.ml).
-  // 12 emitted phases get an explicit tone; unmapped falls through to neutral accent.
-  const phaseColor: Record<string, string> = {
-    running: 'text-[var(--color-status-ok)]',
-    offline: 'text-[var(--color-fg-disabled)]',
-    stopped: 'text-[var(--color-fg-disabled)]',
-    overflowed: 'text-[var(--color-status-warn)]',
-    compacting: 'text-[var(--color-status-warn)]',
-    handing_off: 'text-[var(--color-accent-fg)]',
-    failing: 'text-[var(--bad-light)]',
-    crashed: 'text-[var(--bad-light)]',
-    dead: 'text-[var(--bad-light)]',
-    zombie: 'text-[var(--bad-light)]',
-    draining: 'text-[var(--color-status-warn)]',
-    paused: 'text-[var(--color-status-warn)]',
-    restarting: 'text-[var(--color-status-warn)]',
-  }
-  const color = phaseColor[snapshot.phase] ?? 'text-[var(--color-accent-fg)]'
+  const phaseStyle = getPhaseStyle(snapshot.phase)
+  const color = `text-[${phaseStyle.color}]`
   const heldFor = phaseSince != null ? fmtDuration(Math.max(0, now - phaseSince)) : null
   // `collapsed_from` is set by the backend only when phase has collapsed onto
   // a parent projection (e.g. a 7-phase composite Stable). The backend

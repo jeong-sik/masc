@@ -417,6 +417,7 @@ let test_sandbox_target_propagates_to_every_stage () =
       ~allowlist
       ~path_policy:Gate.allow_all_paths
       ~sandbox
+      ()
   with
   | Gate.Allow context ->
     List.iter
@@ -470,6 +471,7 @@ let test_backslash_pipe_in_double_quotes_diverges () =
       ~allowlist
       ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
+      ()
   with
   | Gate.Cannot_parse { reason = Gate.Parse_error } -> ()
   | other ->
@@ -491,6 +493,7 @@ let test_brace_expansion_is_too_complex_glob_brace () =
       ~allowlist
       ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
+      ()
   with
   | Gate.Too_complex { reason = Gate.Unsupported_construct `Glob_brace } -> ()
   | other ->
@@ -514,6 +517,7 @@ let test_absolute_path_traversal_phase1_allows () =
       ~allowlist
       ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
+      ()
   with
   | Gate.Allow context ->
     Alcotest.(check int) "stage count" 1 (Gate.stage_count context);

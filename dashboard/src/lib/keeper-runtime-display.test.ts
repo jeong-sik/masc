@@ -319,4 +319,31 @@ describe('keeperActivityDisplay', () => {
       ageSeconds: 75,
     })
   })
+
+  // SSOT regression guard: keeper detail에서 헤드라인(last_heartbeat raw),
+  // 사이드바(activityDisplay), 헤더(created_at raw)가 서로 다른 필드를 읽어
+  // "26초 전 / 18시간 전 / 27일 전"이 동시에 렌더링되던 문제.
+  // 동일 keeper 입력에 대해 helper가 단일 source/timestamp/ageSeconds를
+  // 반환해야 모든 surface가 동일 값을 표시할 수 있다.
+  it('picks a single freshest source when heartbeat, turn, and created_at all coexist', () => {
+    const result = keeperActivityDisplay({
+      // 26초 전 — freshest, 우승해야 함
+      last_heartbeat: '2026-04-24T17:59:34Z',
+      // 18시간 전
+      last_turn_ago_s: 18 * 3600,
+      // 27일 전 — 활동 후보가 있을 때는 절대 선택되면 안 됨
+      created_at: '2026-03-28T18:00:00Z',
+    })
+    expect(result.source).toBe('heartbeat')
+    expect(result.timestamp).toBe('2026-04-24T17:59:34Z')
+    expect(result.ageSeconds).toBe(26)
+  })
+
+  it('falls back to created_at only when every activity candidate is absent', () => {
+    const result = keeperActivityDisplay({
+      created_at: '2026-03-28T18:00:00Z',
+    })
+    expect(result.source).toBe('created')
+    expect(result.label).toBe('생성')
+  })
 })

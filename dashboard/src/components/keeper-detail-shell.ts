@@ -197,7 +197,8 @@ export function KeeperDetailHeaderInfo({
         ${keeper.koreanName || keeper.created_at ? html`
           <div class="flex flex-wrap items-center gap-2 text-xs text-[var(--color-fg-muted)]">
             ${keeper.koreanName ? html`<span>${keeper.koreanName}</span>` : null}
-            ${keeper.created_at ? html`<span class="font-mono tabular-nums opacity-60"><${TimeAgo} timestamp=${keeper.created_at} /></span>` : null}
+            ${'' /* 활동 시각은 사이드바의 keeperActivityDisplay()가 SSOT. 여기서는 keeper 생성 시각만 표시하며 라벨로 의미를 분리한다. */}
+            ${keeper.created_at ? html`<span class="font-mono tabular-nums opacity-60">생성 <${TimeAgo} timestamp=${keeper.created_at} /></span>` : null}
           </div>
         ` : null}
       </div>

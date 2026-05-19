@@ -1521,54 +1521,18 @@ let validate_paired_lifecycle_origin origin event =
          })
 ;;
 
-let execute_entry_action_observability
-      ~(name : string)
-      ~(phase : Keeper_state_machine.phase)
-      ~(ts_unix : float)
-      (action : Keeper_state_machine.entry_action)
-  : unit
-  =
-  match action with
-  | Keeper_state_machine.Publish_lifecycle { event_name; detail } ->
-    Log.Keeper.info
-      "registry: lifecycle name=%s phase=%s event=%s detail=%s"
-      name
-      (Keeper_state_machine.phase_to_string phase)
-      event_name
-      detail;
-    let (_ignore_ts : float) = ts_unix in
-    ()
-  | Start_compaction
-  | Start_handoff
-  | Start_drain
-  | Schedule_restart _
-  | Mark_dead_tombstone
-  | Mark_zombie_tombstone
-  | Cleanup_and_unregister
-  | Trigger_immediate_cleanup
-  | Cancel_pending_oas -> ()
+(* Entry-action dispatch observability helpers
+   (execute_entry_action_observability / followup_event_of_entry_action /
+   record_followup_dispatch_rejection) moved to
+   Keeper_registry_entry_action_dispatch. *)
+let execute_entry_action_observability =
+  Keeper_registry_entry_action_dispatch.execute_observability
 ;;
-
-let followup_event_of_entry_action
-      ~(phase : Keeper_state_machine.phase)
-      (action : Keeper_state_machine.entry_action)
-  : Keeper_state_machine.event option
-  =
-  match phase, action with
-  | Keeper_state_machine.Overflowed, Start_compaction ->
-    Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_fsm_edge_transitions
-      ~labels:[ "edge", "ksm_to_kmc_compact_trigger" ]
-      ();
-    Some Keeper_state_machine.Auto_compact_triggered
-  | _ -> None
+let followup_event_of_entry_action =
+  Keeper_registry_entry_action_dispatch.followup_event_of_action
 ;;
-
-let record_followup_dispatch_rejection event =
-  Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
-    ~labels:[ "event", Keeper_state_machine.event_to_string event ]
-    ()
+let record_followup_dispatch_rejection =
+  Keeper_registry_entry_action_dispatch.record_dispatch_rejection
 ;;
 
 (* RFC-0072 Phase 6: the 3×3 compaction matrix dispatched as an exhaustive

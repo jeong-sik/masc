@@ -498,10 +498,36 @@ let ensure_same_origin_browser_request request :
                { agent = "browser";
                  action = "cross-origin HTTP mutation" })))
 
-let http_status_of_auth_error = function
-  | Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized _ | Masc_domain.Auth_error.InvalidToken _ | Masc_domain.Auth_error.TokenExpired _) -> `Unauthorized
+(* Mirrors [Masc_error.code] (the typed SSOT in lib/types/masc_error.ml).
+   Previously the catch-all [_ -> `Internal_server_error] silently demoted
+   [RateLimitExceeded _] to 500 (should be 429), [Task/Agent (NotFound _)]
+   to 500 (should be 404), and the 400-class validation errors to 500.
+   Operators reading the access log could not distinguish rate limiting
+   from a real server fault. The match is now exhaustive; adding a new
+   [Masc_error.t] outer variant will trip Warning 8 here and force an
+   explicit HTTP-status decision. *)
+let http_status_of_auth_error : Masc_domain.masc_error -> Httpun.Status.t =
+  function
+  | Masc_domain.Auth
+      (Masc_domain.Auth_error.Unauthorized _
+      | Masc_domain.Auth_error.InvalidToken _
+      | Masc_domain.Auth_error.TokenExpired _) -> `Unauthorized
   | Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _) -> `Forbidden
-  | _ -> `Internal_server_error
+  | Masc_domain.Task (Masc_domain.Task_error.NotFound _) -> `Not_found
+  | Masc_domain.Agent (Masc_domain.Agent_error.NotFound _) -> `Not_found
+  | Masc_domain.Task
+      (Masc_domain.Task_error.AlreadyClaimed _
+      | Masc_domain.Task_error.NotClaimed _
+      | Masc_domain.Task_error.InvalidState _
+      | Masc_domain.Task_error.InvalidId _) -> `Bad_request
+  | Masc_domain.Agent
+      (Masc_domain.Agent_error.NotJoined _
+      | Masc_domain.Agent_error.AlreadyJoined _
+      | Masc_domain.Agent_error.InvalidName _) -> `Bad_request
+  | Masc_domain.Portal _ -> `Bad_request
+  | Masc_domain.System _ -> `Bad_request
+  | Masc_domain.RateLimitExceeded _ -> `Too_many_requests
+  | Masc_domain.CacheError _ -> `Internal_server_error
 
 (** Server state - initialized at startup *)
 let server_state : Mcp_server.server_state option ref = ref None

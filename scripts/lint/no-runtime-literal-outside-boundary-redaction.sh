@@ -70,16 +70,11 @@ SCAN_FILES=(
 )
 
 # Pre-approved exemptions from PR-2 audit. Each entry is `path:line:reason`.
-# These four sites carry a `"runtime"` literal that is NOT a redaction
-# target (schema field name, classification list, debug format string).
+# These two sites carry a `"runtime"` literal that is NOT a redaction
+# target (classification list, debug format string).
 # Drift (line move) makes the entry stale and must be cleaned in the
 # same PR. The runtime check accepts any of the listed lines.
 PREAPPROVED=(
-  # Doc comment continuation line — comment body explaining the schema
-  # field below. Closing `*)` lives on this line.
-  "lib/cascade/cascade_event_bridge.ml:247"
-  # JSON schema field name — wire-format key, not a label.
-  "lib/cascade/cascade_event_bridge.ml:249"
   # Classification list — enumeration of category names, not a label.
   "lib/keeper/keeper_exec_status.ml:220"
   # Debug format string inside Printf.sprintf — internal observability
